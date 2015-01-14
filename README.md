@@ -1,0 +1,2 @@
+# FiloDB
+Distributed.  Columnar.  Versioned.
