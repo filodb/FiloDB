@@ -1,0 +1,17 @@
+User->Coord: StartIngestion(partitionName)
+Ingester->DatasetMetadata: getLockOnPartition
+DatasetMetadata->Ingester: locked
+Coord->User: ack
+DataWriter->Ingester: Ready
+Ingester->DatasetMetadata: getPartitionShardInfo
+DatasetMetadata->Ingester: partitionShardInfo
+Ingester->Coord: Ready
+User->Coord: Seq[(rowNo, data)]
+Coord->Row2Column: rows
+Row2Column->Ingester: column bytes, row # range
+Ingester->DataWriter: (rowID, columns-bytes)
+DataWriter->Cass: async write bytes
+Cass->DataWriter: write done
+DataWriter->Ingester: Ack(seq #)
+Ingester->Coord: Ack(seq #)
+Coord->User: 200
