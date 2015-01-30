@@ -68,7 +68,7 @@ object Partition {
    */
   object Command {
     /**
-     * Creates a new partition in FiloDB.
+     * Creates a new partition in FiloDB.  Updates both partitions and datasets tables.
      * @param partition a Partition, with a name unique within the dataset.  It should be empty.
      * @returns PartitionCreated, or AlreadyExists, or NotEmpty if partition is not empty
      */
