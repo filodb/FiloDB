@@ -42,6 +42,11 @@ object DatasetTableOps extends DatasetTable with SimpleCassandraConnector {
   def createNewDataset(name: String): Future[Response] =
     insert.value(_.name, name).ifNotExists.future().toResponse(AlreadyExists)
 
+  def getDataset(name: String): Future[Response] =
+    select.where(_.name eqs name).one()
+      .map(opt => opt.map(Dataset.Result(_)).getOrElse(NotFound))
+      .handleErrors
+
   /**
    * Attempts to delete a dataset with the given name.  Will fail if the dataset still has
    * partitions inside. You need to delete the partitions first.
@@ -76,5 +81,6 @@ object DatasetTableOps extends DatasetTable with SimpleCassandraConnector {
   val commandMapper: PartialFunction[Command, Future[Response]] = {
     case Dataset.NewDataset(dataset) => createNewDataset(dataset)
     case Dataset.DeleteDataset(name) => deleteDataset(name)
+    case Dataset.GetDataset(name)    => getDataset(name)
   }
 }

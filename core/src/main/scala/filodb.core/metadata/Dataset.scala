@@ -1,6 +1,6 @@
 package filodb.core.metadata
 
-import filodb.core.messages.Command
+import filodb.core.messages.{Command, Response}
 
 /**
  * A dataset is a table with a schema.
@@ -28,6 +28,16 @@ object Dataset {
    * @returns Success if it succeeds, or AlreadyExists
    */
   case class NewDataset(dataset: String) extends Command
+
+  /**
+   * Returns all the information about a dataset, which right now is simply
+   * all the partitions.
+   * @param name Name of dataset to return
+   * @returns Result(dataset) if it succeeds, or NotFound
+   */
+  case class GetDataset(dataset: String) extends Command
+
+  case class Result(dataset: Dataset) extends Response
 
   /**
    * Removes a dataset and all its data.  This is a dangerous operation!

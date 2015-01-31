@@ -5,6 +5,7 @@ import org.scalatest.BeforeAndAfter
 import scala.concurrent.Await
 import scala.concurrent.duration._
 
+import filodb.core.metadata.Dataset
 import filodb.core.messages._
 
 class DatasetTableSpec extends CassandraFlatSpec with BeforeAndAfter {
@@ -58,6 +59,26 @@ class DatasetTableSpec extends CassandraFlatSpec with BeforeAndAfter {
 
     whenReady(DatasetTableOps.deleteDataset("bar")) { response =>
       response.getClass should be (classOf[MetadataException])
+    }
+  }
+
+  it should "return NotFound when trying to get nonexisting dataset" in {
+    whenReady(DatasetTableOps.getDataset("foo")) { response =>
+      response should equal (NotFound)
+    }
+  }
+
+  it should "return the Dataset if it exists" in {
+    val f = DatasetTableOps.insert
+              .value(_.name, "bar")
+              .value(_.partitions, Set("first"))
+              .future
+    whenReady(f) { result => result.wasApplied should equal (true) }
+
+    whenReady(DatasetTableOps.getDataset("bar")) { response =>
+      val Dataset.Result(dataset) = response
+      dataset.name should equal ("bar")
+      dataset.partitions should equal (Set("first"))
     }
   }
 }
