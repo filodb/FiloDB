@@ -34,9 +34,30 @@ class DatasetTableSpec extends CassandraFlatSpec with BeforeAndAfter {
     }
   }
 
-  "DatasetTableRecord" should "not delete a dataset if it is NotFound" in {
+  it should "not delete a dataset if it is NotFound" in {
     whenReady(DatasetTableOps.deleteDataset("foo")) { response =>
       response should equal (NotFound)
+    }
+  }
+
+  it should "delete an empty dataset" in {
+    whenReady(DatasetTableOps.createNewDataset("foo")) { response =>
+      response should equal (Success)
+    }
+    whenReady(DatasetTableOps.deleteDataset("foo")) { response =>
+      response should equal (Success)
+    }
+  }
+
+  it should "return StorageEngineException when trying to delete nonempty Dataset" in {
+    val f = DatasetTableOps.insert
+              .value(_.name, "bar")
+              .value(_.partitions, Set("first"))
+              .future
+    whenReady(f) { result => result.wasApplied should equal (true) }
+
+    whenReady(DatasetTableOps.deleteDataset("bar")) { response =>
+      response.getClass should be (classOf[MetadataException])
     }
   }
 }
