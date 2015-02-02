@@ -68,6 +68,7 @@ object DatasetTableOps extends DatasetTable with SimpleCassandraConnector {
           // the deletion is complete.
           delete.where(_.name eqs name).future().toResponse()
         case Some(partitions) =>
+        logger.warn(s"Someone tried to delete a non-empty dataset $name with $partitions !!")
           Future(MetadataException(new NonEmptyDataset(partitions)))
       }
     }
