@@ -21,6 +21,7 @@ lazy val coreDeps = Seq(
   "com.websudos"         %% "phantom-zookeeper" % phantomVersion,
   "com.typesafe.akka"    %% "akka-slf4j"        % akkaVersion,
   "com.typesafe.scala-logging" %% "scala-logging-slf4j" % "2.1.2",
+  "ch.qos.logback"        % "logback-classic"   % "1.0.7",
   "com.websudos"         %% "phantom-testing"   % phantomVersion % "test",
   "com.typesafe.akka"    %% "akka-testkit"      % akkaVersion % "test"
 )
