@@ -133,6 +133,6 @@ object Column extends StrictLogging {
   /**
    * Set of responses from dataset commands
    */
-  case class IllegalColumnChange(reason: String) extends Response
+  case class IllegalColumnChange(reasons: Seq[String]) extends Response
   case class TheSchema(schema: Schema) extends Response
 }
