@@ -33,15 +33,20 @@ class PartitionSpec extends FunSpec with ShouldMatchers {
   describe("ShardByNumRows.needNewShard") {
     it("should return true if Partition is empty") {
       val empty = Partition("foo", "first")
-      val strategy = Partition.ShardByNumRows(100)
+      val strategy = ShardByNumRows(100)
       strategy.needNewShard(empty, 0) should equal (true)
     }
 
     it("should return true if last row ID greater than shard start row ID by X") {
       val p = Partition("foo", "0", 19, firstRowId = Seq(0), firstVersion = Seq(0))
-      val strategy = Partition.ShardByNumRows(100)
+      val strategy = ShardByNumRows(100)
       strategy.needNewShard(p, 40) should equal (false)
       strategy.needNewShard(p, 100) should equal (true)
+    }
+
+    it("can serialize and deserialize") {
+      val strategy = ShardByNumRows(100)
+      ShardingStrategy.deserialize(strategy.serialize()) should equal (strategy)
     }
   }
 }

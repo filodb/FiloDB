@@ -29,7 +29,7 @@ package filodb.core.metadata
 case class Partition(dataset: String,
                      name: String,
                      lastRowId: Int = -1,
-                     shardingStrategy: Partition.ShardingStrategy = Partition.DefaultStrategy,
+                     shardingStrategy: ShardingStrategy = ShardingStrategy.DefaultStrategy,
                      firstRowId: Seq[Int] = Nil,
                      firstVersion: Seq[Int] = Nil,
                      chunkSize: Int = Partition.DefaultChunkSize) {
@@ -44,23 +44,6 @@ case class Partition(dataset: String,
 }
 
 object Partition {
-  sealed trait ShardingStrategy {
-    def needNewShard(partition: Partition, rowId: Int): Boolean
-  }
-
-  // Fixed number of rows per shard.  But how does one determine the # of rows?
-  // Also not very effective in terms of keeping the size the same.
-  case class ShardByNumRows(shardSize: Int) extends ShardingStrategy {
-    def needNewShard(partition: Partition, rowId: Int): Boolean = {
-      if (partition.isEmpty) { true }
-      else {    // if not empty, there should be a last shard
-        (rowId - partition.firstRowId.last) >= shardSize
-      }
-    }
-  }
-
-  val DefaultNumRowsPerShard = 100000
-  val DefaultStrategy = ShardByNumRows(DefaultNumRowsPerShard)
   val DefaultChunkSize = 1000
 
   /**
