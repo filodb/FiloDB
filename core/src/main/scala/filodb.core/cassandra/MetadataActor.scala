@@ -46,7 +46,9 @@ class MetadataActor(maxOutstandingFutures: Int) extends Actor {
   var outstandingFutures = 0
 
   // Chain all the partial functions together into one big mapper
-  val commandMapper = DatasetTableOps.commandMapper orElse DefaultMapper
+  val commandMapper = DatasetTableOps.commandMapper orElse
+                      ColumnTable.commandMapper orElse
+                      DefaultMapper
 
   def receive = {
     case FutureCompleted       => if (outstandingFutures > 0) outstandingFutures -= 1

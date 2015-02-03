@@ -14,8 +14,6 @@ class ColumnTableSpec extends CassandraFlatSpec with BeforeAndAfter {
   import Column.ColumnType
 
   val firstColumn = Column("first", "foo", 1, ColumnType.StringColumn)
-  val ageColumn = Column("age", "foo", 1, ColumnType.IntColumn)
-  val schema = Map("first" -> firstColumn, "age" -> ageColumn)
 
   // First create the columns table
   override def beforeAll() {

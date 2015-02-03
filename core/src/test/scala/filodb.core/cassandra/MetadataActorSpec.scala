@@ -8,7 +8,7 @@ import org.scalatest.FunSpecLike
 import scala.concurrent.Await
 import scala.concurrent.duration._
 
-import filodb.core.metadata.Dataset
+import filodb.core.metadata.{Column, Dataset}
 import filodb.core.messages._
 
 object MetadataActorSpec {
@@ -34,5 +34,13 @@ with FunSpecLike with ImplicitSender with SimpleCassandraTest {
     expectMsg(Success)
     actor ! Dataset.NewDataset("gdelt")
     expectMsg(AlreadyExists)
+  }
+
+  val monthYearCol = Column("monthYear", "gdelt", 1, Column.ColumnType.LongColumn)
+  it("should be able to create a Column and get the Schema") {
+    actor ! Column.NewColumn(monthYearCol)
+    expectMsg(Success)
+    actor ! Column.GetSchema("gdelt", 10)
+    expectMsg(Column.TheSchema(Map("monthYear" -> monthYearCol)))
   }
 }

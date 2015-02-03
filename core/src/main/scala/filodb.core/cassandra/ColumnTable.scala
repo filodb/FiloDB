@@ -95,4 +95,10 @@ object ColumnTable extends ColumnTable with SimpleCassandraConnector {
       else                         { newColumnPrettyPlease(column) }
     }.handleErrors
   }
+
+  // Partial function mapping commands to functions executing them
+  val commandMapper: PartialFunction[Command, Future[Response]] = {
+    case Column.NewColumn(column) => newColumn(column)
+    case Column.GetSchema(dataset, version) => getSchema(dataset, version)
+  }
 }

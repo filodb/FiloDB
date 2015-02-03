@@ -139,6 +139,9 @@ object Column extends StrictLogging {
    * rather it marks a column as deleted starting at version Y, and reads will no longer return data for that
    * column.
    * Also, this cannot be done to the current / latest version, it must be a new version.
+   *
+   * TODO: Maybe remove this command.  A delete is = reading previous column definition, and marking
+   * isDeleted = true, and calling NewColumn.
    */
   case class DeleteColumn(dataset: String, version: Int, name: String) extends Command
 
