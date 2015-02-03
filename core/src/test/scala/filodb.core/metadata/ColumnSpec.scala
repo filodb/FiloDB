@@ -4,13 +4,15 @@ import org.scalatest.FunSpec
 import org.scalatest.matchers.ShouldMatchers
 
 class ColumnSpec extends FunSpec with ShouldMatchers {
-  val firstColumn = Column("first", "foo", 1, Column.StringColumn)
-  val ageColumn = Column("age", "foo", 1, Column.IntColumn)
+  import Column.ColumnType
+
+  val firstColumn = Column("first", "foo", 1, ColumnType.StringColumn)
+  val ageColumn = Column("age", "foo", 1, ColumnType.IntColumn)
   val schema = Map("first" -> firstColumn, "age" -> ageColumn)
 
   describe("Column.schemaFold") {
     it("should add new columns to the schema") {
-      val deletedSysCol = Column(":deleted", "foo", 1, Column.BitmapColumn, isSystem = true)
+      val deletedSysCol = Column(":deleted", "foo", 1, ColumnType.BitmapColumn, isSystem = true)
       Column.schemaFold(schema, deletedSysCol) should equal (schema + (":deleted" -> deletedSysCol))
     }
 
@@ -20,7 +22,7 @@ class ColumnSpec extends FunSpec with ShouldMatchers {
     }
 
     it("should replace updated column defs in the schema") {
-      val newCol = ageColumn.copy(version = 3, columnType = Column.StringColumn)
+      val newCol = ageColumn.copy(version = 3, columnType = ColumnType.StringColumn)
       Column.schemaFold(schema, newCol) should equal (Map("first" -> firstColumn, "age" -> newCol))
     }
   }
@@ -34,7 +36,7 @@ class ColumnSpec extends FunSpec with ShouldMatchers {
     }
 
     it("should check that cannot add columns at lower versions") {
-      val newCol = ageColumn.copy(version = 0, columnType = Column.StringColumn)
+      val newCol = ageColumn.copy(version = 0, columnType = ColumnType.StringColumn)
       val reasons = Column.invalidateNewColumn("foo", schema, newCol)
       reasons should have length 1
       reasons.head should include ("at version lower")
@@ -55,7 +57,7 @@ class ColumnSpec extends FunSpec with ShouldMatchers {
     }
 
     it("should return no reasons for a valid new column") {
-      val newCol = ageColumn.copy(version = 4, columnType = Column.StringColumn)
+      val newCol = ageColumn.copy(version = 4, columnType = ColumnType.StringColumn)
       val reasons = Column.invalidateNewColumn("foo", schema, newCol)
       reasons should have length 0
     }

@@ -24,7 +24,7 @@ class DatasetTableSpec extends CassandraFlatSpec with BeforeAndAfter {
 
   import scala.concurrent.ExecutionContext.Implicits.global
 
-  "DatasetTableRecord" should "create a dataset successfully, then return AlreadyExists" in {
+  "DatasetTable" should "create a dataset successfully, then return AlreadyExists" in {
     whenReady(DatasetTableOps.createNewDataset("foo")) { response =>
       response should equal (Success)
     }

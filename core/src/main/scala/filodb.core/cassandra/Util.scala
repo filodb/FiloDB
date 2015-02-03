@@ -6,6 +6,9 @@ import scala.concurrent.Future
 
 import filodb.core.messages._
 
+/**
+ * Utilities for dealing with Cassandra I/O
+ */
 object Util {
   implicit class ResultSetToResponse(f: Future[ResultSet]) {
     def toResponse(notAppliedResponse: Response = NotApplied): Future[Response] = {
@@ -19,7 +22,9 @@ object Util {
 
   implicit class HandleErrors(f: Future[Response]) {
     def handleErrors: Future[Response] = f.recover {
-        case e: DriverException => StorageEngineException(e)
+      case e: DriverException => StorageEngineException(e)
+      // from invalid Enum strings, which should never happen, or some other parsing error
+      case e: IllegalArgumentException => MetadataException(e)
     }
   }
 }

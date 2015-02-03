@@ -1,6 +1,7 @@
 package filodb.core.metadata
 
 import com.typesafe.scalalogging.slf4j.StrictLogging
+import enumeratum.Enum
 
 import filodb.core.messages.{Command, Response}
 
@@ -27,7 +28,7 @@ case class Column(name: String,
                   dataset: String,
                   version: Int,
                   columnType: Column.ColumnType,
-                  serializer: Column.Serializer = Column.FiloSerializer,
+                  serializer: Column.Serializer = Column.Serializer.FiloSerializer,
                   isDeleted: Boolean = false,
                   isSystem: Boolean = false) {
   /**
@@ -43,16 +44,27 @@ case class Column(name: String,
 
 object Column extends StrictLogging {
   sealed trait ColumnType
-  case object IntColumn extends ColumnType
-  case object LongColumn extends ColumnType
-  case object DoubleColumn extends ColumnType
-  case object StringColumn extends ColumnType
-  case object BitmapColumn extends ColumnType
+
+  object ColumnType extends Enum[ColumnType] {
+    val values = findValues
+
+    case object IntColumn extends ColumnType
+    case object LongColumn extends ColumnType
+    case object DoubleColumn extends ColumnType
+    case object StringColumn extends ColumnType
+    case object BitmapColumn extends ColumnType
+  }
 
   sealed trait Serializer
-  case object FiloSerializer extends Serializer
+
+  object Serializer extends Enum[Serializer] {
+    val values = findValues
+
+    case object FiloSerializer extends Serializer
+  }
 
   type Schema = Map[String, Column]
+  val EmptySchema = Map.empty[String, Column]
 
   /**
    * Fold function used to compute a schema up from a list of Column instances.
