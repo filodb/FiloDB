@@ -49,69 +49,64 @@ object Partition {
   /**
    * Set of low-level partition commands to send to a datastore actor for I/O
    */
-  object Command {
-    /**
-     * Creates a new partition in FiloDB.  Updates both partitions and datasets tables.
-     * @param partition a Partition, with a name unique within the dataset.  It should be empty.
-     * @returns PartitionCreated, or AlreadyExists, or NotEmpty if partition is not empty
-     */
-    case class NewPartition(partition: Partition)
 
-    /**
-     * Attempts to get a lock on the partition for writing.  Uses Cassandra's LWT
-     * and if exists functionality.
-     * @param dataset the name of the dataset
-     * @param name the name of the partition
-     * @param owner a unique string identifying the owner
-     * @returns AlreadyLocked, or ObtainedLock
-     */
-    case class GetPartitionLock(dataset: String, partition: String, owner: String)
+  /**
+   * Creates a new partition in FiloDB.  Updates both partitions and datasets tables.
+   * @param partition a Partition, with a name unique within the dataset.  It should be empty.
+   * @returns Success, or AlreadyExists, or NotEmpty if partition is not empty
+   */
+  case class NewPartition(partition: Partition) extends Command
 
-    /**
-     * Release the lock on the partition explicitly (stream is done, shutting down, etc.)
-     * NOTE: there is a TTL on the partition lock, so this should not be needed every time
-     * (and in case of failure might not be called anyways), but releasing faster helps
-     * failure recovery and distributing work.
-     * @param dataset the name of the dataset
-     * @param name the name of the partition
-     */
-    case class ReleasePartitionLock(dataset: String, partition: String)
+  /**
+   * Attempts to get a lock on the partition for writing.  Uses Cassandra's LWT
+   * and if exists functionality.
+   * @param dataset the name of the dataset
+   * @param name the name of the partition
+   * @param owner a unique string identifying the owner
+   * @returns AlreadyLocked, or Success
+   */
+  case class GetPartitionLock(dataset: String, partition: String, owner: String) extends Command
 
-    /**
-     * Reads all of the current Partition state information, including existing shards.
-     * TODO: maybe when # of shards gets huge, this will be expensive, and we need a version
-     * that reads a subset.
-     * @param dataset the name of the dataset
-     * @param name the name of the partition
-     * @returns a Partition
-     */
-    case class GetPartition(dataset: String, partition: String)
+  /**
+   * Release the lock on the partition explicitly (stream is done, shutting down, etc.)
+   * NOTE: there is a TTL on the partition lock, so this should not be needed every time
+   * (and in case of failure might not be called anyways), but releasing faster helps
+   * failure recovery and distributing work.
+   * @param dataset the name of the dataset
+   * @param name the name of the partition
+   */
+  case class ReleasePartitionLock(dataset: String, partition: String) extends Command
 
-    /**
-     * Updates the partition state information.  Again, in the future might need partial update
-     * commands.
-     * @param partition the Partition object to write out
-     * @returns Updated
-     */
-    case class UpdatePartition(partition: Partition)
+  /**
+   * Reads all of the current Partition state information, including existing shards.
+   * TODO: maybe when # of shards gets huge, this will be expensive, and we need a version
+   * that reads a subset.
+   * @param dataset the name of the dataset
+   * @param name the name of the partition
+   * @returns a Partition
+   */
+  case class GetPartition(dataset: String, partition: String) extends Command
 
-    /**
-     * Deletes a partition.  NOTE: need to clarify exact behavior.  Is this permanent?
-     * @param dataset the name of the dataset
-     * @param name the name of the partition
-     * @returns Deleted
-     */
-    case class DeletePartition(dataset: String, partition: String)
-  }
+  /**
+   * Updates the partition state information.  Again, in the future might need partial update
+   * commands.
+   * @param partition the Partition object to write out
+   * @returns Success
+   */
+  case class UpdatePartition(partition: Partition) extends Command
 
-  object Response {
-    case object AlreadyExists
-    case object NotFound
-    case object NotEmpty
-    case object PartitionCreated
-    case object ObtainedLock
-    case class AlreadyLocked(owner: String)
-    case object Updated
-    case object Deleted
-  }
+  /**
+   * Deletes a partition.  NOTE: need to clarify exact behavior.  Is this permanent?
+   * @param dataset the name of the dataset
+   * @param name the name of the partition
+   * @returns Success
+   */
+  case class DeletePartition(dataset: String, partition: String) extends Command
+
+  /**
+   * Set of responses from partition commands
+   */
+  case object NotEmpty extends ErrorResponse
+  case class AlreadyLocked(owner: String) extends Response
+  case class ThePartition(partition: Partition) extends Response
 }
