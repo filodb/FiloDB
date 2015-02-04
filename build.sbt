@@ -1,5 +1,6 @@
 val mySettings = Seq(organization := "org.velvia",
                      scalaVersion := "2.10.4",
+                     parallelExecution in Test := false,
                      resolvers ++= extraRepos)
 
 lazy val core = (project in file("core"))

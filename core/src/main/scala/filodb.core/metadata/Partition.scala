@@ -32,7 +32,7 @@ import filodb.core.messages.{Command, ErrorResponse, Response}
  * Row #'s never change once a row is appended.
  */
 case class Partition(dataset: String,
-                     name: String,
+                     partition: String,
                      shardingStrategy: ShardingStrategy = ShardingStrategy.DefaultStrategy,
                      firstRowId: Seq[Int] = Nil,   // rowIDs must be monotonically increasing
                      versionRange: Seq[(Int, Int)] = Nil,
@@ -42,7 +42,20 @@ case class Partition(dataset: String,
   def isValid: Boolean =
     (firstRowId.length == versionRange.length) &&
     chunkSize > 0 &&
-    firstRowId.sliding(2).forall { case Seq(a, b) => a < b }
+    firstRowId.sliding(2).forall {
+      case Seq(a, b) => a < b
+      case Seq(a)    => true
+    }
+
+  /**
+   * Returns Some(newPartition) with a valid new shard added, and None if the new shard info is not valid.
+   * A valid new shard must have a firstRowId that is greater than the current firstRowId.last
+   */
+  def addShard(firstRowId: Int, versionRange: (Int, Int)): Option[Partition] = {
+    val newPart = this.copy(firstRowId = this.firstRowId :+ firstRowId,
+                            versionRange = this.versionRange :+ versionRange)
+    if (newPart.isValid) Some(newPart) else None
+  }
 }
 
 object Partition {
@@ -55,7 +68,7 @@ object Partition {
   /**
    * Creates a new partition in FiloDB.  Updates both partitions and datasets tables.
    * @param partition a Partition, with a name unique within the dataset.  It should be empty.
-   * @returns Success, or AlreadyExists, or NotEmpty if partition is not empty
+   * @returns Success, or AlreadyExists, or NotEmpty/NotValid
    */
   case class NewPartition(partition: Partition) extends Command
 
@@ -85,13 +98,27 @@ object Partition {
    * that reads a subset.
    * @param dataset the name of the dataset
    * @param name the name of the partition
-   * @returns a Partition
+   * @returns ThePartition
    */
   case class GetPartition(dataset: String, partition: String) extends Command
 
   /**
+   * Adds a shard to an existing partition.  Checks to see that the new shard results in a valid
+   * shard, and also updates using ONLY IF to ensure data on disk is consistent and we are really
+   * adding the shard to what we think.
+   * @param partition the existing Partition object before the shard was added
+   * @param firstRowId the first rowID of the new shard
+   * @param versionRange the range of version numbers for the new shard
+   * @return Success, NotValid, InconsistentState (hash mismatch - somebody else updated the partition!)
+   * Note that if partition/dataset is not found, InconsistentState will be returned.
+   */
+  case class AddShard(partition: Partition,
+                      firstRowId: Int,
+                      versionRange: (Int, Int)) extends Command
+
+  /**
    * Updates the partition state information.  Again, in the future might need partial update
-   * commands.
+   * commands.  NOTE: you CANNOT change the chunksize and shardingStrategy once you start!
    * @param partition the Partition object to write out
    * @returns Success
    */
@@ -109,6 +136,7 @@ object Partition {
    * Set of responses from partition commands
    */
   case object NotEmpty extends ErrorResponse
+  case object NotValid extends ErrorResponse
   case class AlreadyLocked(owner: String) extends Response
   case class ThePartition(partition: Partition) extends Response
 }

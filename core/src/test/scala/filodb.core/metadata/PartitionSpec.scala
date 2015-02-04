@@ -33,6 +33,17 @@ class PartitionSpec extends FunSpec with ShouldMatchers {
                          versionRange = Seq((0, 1), (1, 2)))
       p4 should not be ('valid)
     }
+
+    it("should addShard() and return None if new shard is invalid") {
+      val p = Partition("foo", "second", firstRowId = Seq(10), versionRange = Seq((0, 1)))
+      val pp = p.copy(firstRowId = p.firstRowId :+ 20,
+                      versionRange = p.versionRange :+ (1 -> 2))
+      p.addShard(20, 1 -> 2) should equal (Some(pp))
+
+      p.addShard(0, 1 -> 2) should equal (None)
+
+      Partition("foo", "second").addShard(10, 0 -> 1) should equal (Some(p))
+    }
   }
 
   describe("ShardByNumRows.needNewShard") {

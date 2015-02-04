@@ -17,6 +17,7 @@ package object messages {
   case class StorageEngineException(t: Throwable) extends ErrorResponse
   case class MetadataException(t: Throwable) extends ErrorResponse
   case object NoSuchCommand extends ErrorResponse
+  case object InconsistentState extends ErrorResponse  // for conditional updates - race condition detected!
 
   case object NotFound extends Response
   case object NotApplied extends Response
