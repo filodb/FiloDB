@@ -100,5 +100,6 @@ object ColumnTable extends ColumnTable with SimpleCassandraConnector {
   val commandMapper: PartialFunction[Command, Future[Response]] = {
     case Column.NewColumn(column) => newColumn(column)
     case Column.GetSchema(dataset, version) => getSchema(dataset, version)
+    // case Column.DeleteColumn(dataset, version, name) => ???
   }
 }

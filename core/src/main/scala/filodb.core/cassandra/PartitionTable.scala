@@ -18,6 +18,9 @@ sealed class PartitionTable extends CassandraTable[PartitionTable, Partition] {
   object partition extends StringColumn(this) with PartitionKey[String]
   object shardingStrategy extends StringColumn(this)
   object firstRowId extends ListColumn[PartitionTable, Partition, Int](this)
+  // NOTE: versionRange is for a _range_ of versions, from one Int to another Int.  It's just
+  // encoded as a Long so that we can easily query for a version range together and write it
+  // together.
   object versionRange extends ListColumn[PartitionTable, Partition, Long](this)
   object chunkSize extends IntColumn(this)
   object hash extends IntColumn(this)
@@ -104,5 +107,7 @@ object PartitionTable extends PartitionTable with SimpleCassandraConnector {
     case Partition.NewPartition(partition)          => newPartition(partition)
     case Partition.GetPartition(dataset, partition) => getPartition(dataset, partition)
     case Partition.AddShard(partition, firstRowId, versions) => addShard(partition, firstRowId, versions)
+    // case Partition.UpdatePartition(partition) => ???
+    // case Partition.DeletePartition(dataset, name) => ???
   }
 }
