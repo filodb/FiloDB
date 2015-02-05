@@ -17,7 +17,7 @@ sealed class PartitionTable extends CassandraTable[PartitionTable, Partition] {
   object dataset extends StringColumn(this) with PartitionKey[String]
   object partition extends StringColumn(this) with PartitionKey[String]
   object shardingStrategy extends StringColumn(this)
-  object firstRowId extends ListColumn[PartitionTable, Partition, Int](this)
+  object firstRowId extends ListColumn[PartitionTable, Partition, Long](this)
   // NOTE: versionRange is for a _range_ of versions, from one Int to another Int.  It's just
   // encoded as a Long so that we can easily query for a version range together and write it
   // together.
@@ -88,7 +88,7 @@ object PartitionTable extends PartitionTable with SimpleCassandraConnector {
    * @return Success, NotValid if the new shard is not valid, InconsistentState
    */
   def addShard(partition: Partition,
-               firstRowId: Int,
+               firstRowId: Long,
                versionRange: (Int, Int)): Future[Response] = {
     partition.addShard(firstRowId, versionRange) match {
       case None          => Future(Partition.NotValid)

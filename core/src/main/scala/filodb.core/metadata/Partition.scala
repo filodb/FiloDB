@@ -34,7 +34,7 @@ import filodb.core.messages.{Command, ErrorResponse, Response}
 case class Partition(dataset: String,
                      partition: String,
                      shardingStrategy: ShardingStrategy = ShardingStrategy.DefaultStrategy,
-                     firstRowId: Seq[Int] = Nil,   // rowIDs must be monotonically increasing
+                     firstRowId: Seq[Long] = Nil,   // rowIDs must be monotonically increasing
                      versionRange: Seq[(Int, Int)] = Nil,
                      chunkSize: Int = Partition.DefaultChunkSize) {
   def isEmpty: Boolean = firstRowId.isEmpty
@@ -51,7 +51,7 @@ case class Partition(dataset: String,
    * Returns Some(newPartition) with a valid new shard added, and None if the new shard info is not valid.
    * A valid new shard must have a firstRowId that is greater than the current firstRowId.last
    */
-  def addShard(firstRowId: Int, versionRange: (Int, Int)): Option[Partition] = {
+  def addShard(firstRowId: Long, versionRange: (Int, Int)): Option[Partition] = {
     val newPart = this.copy(firstRowId = this.firstRowId :+ firstRowId,
                             versionRange = this.versionRange :+ versionRange)
     if (newPart.isValid) Some(newPart) else None
@@ -113,7 +113,7 @@ object Partition {
    * Note that if partition/dataset is not found, InconsistentState will be returned.
    */
   case class AddShard(partition: Partition,
-                      firstRowId: Int,
+                      firstRowId: Long,
                       versionRange: (Int, Int)) extends Command
 
   /**

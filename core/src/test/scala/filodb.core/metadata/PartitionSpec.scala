@@ -9,7 +9,7 @@ class PartitionSpec extends FunSpec with Matchers {
       val p = Partition("foo", "first")
       p should be ('empty)
 
-      val p2 = Partition("foo", "second", firstRowId = Seq(0), versionRange = Seq((0, 1)))
+      val p2 = Partition("foo", "second", firstRowId = Seq(0L), versionRange = Seq((0, 1)))
       p2 should not be ('empty)
     }
 
@@ -17,26 +17,26 @@ class PartitionSpec extends FunSpec with Matchers {
       val p = Partition("foo", "first")
       p should be ('valid)
 
-      val pp = Partition("foo", "second", firstRowId = Seq(0), versionRange = Seq((0, 1)))
+      val pp = Partition("foo", "second", firstRowId = Seq(0L), versionRange = Seq((0, 1)))
       p should be ('valid)
 
       val p2 = Partition("foo", "negChunkSize", chunkSize = -5)
       p2 should not be ('valid)
 
       val p3 = Partition("foo", "notIncreasingRowIds",
-                         firstRowId = Seq(0, 100, 50),
+                         firstRowId = Seq(0L, 100L, 50L),
                          versionRange = Seq((0, 1), (0, 2), (1, 2)))
       p3 should not be ('valid)
 
       val p4 = Partition("foo", "shardListsUnEqual",
-                         firstRowId = Seq(0),
+                         firstRowId = Seq(0L),
                          versionRange = Seq((0, 1), (1, 2)))
       p4 should not be ('valid)
     }
 
     it("should addShard() and return None if new shard is invalid") {
-      val p = Partition("foo", "second", firstRowId = Seq(10), versionRange = Seq((0, 1)))
-      val pp = p.copy(firstRowId = p.firstRowId :+ 20,
+      val p = Partition("foo", "second", firstRowId = Seq(10L), versionRange = Seq((0, 1)))
+      val pp = p.copy(firstRowId = p.firstRowId :+ 20L,
                       versionRange = p.versionRange :+ (1 -> 2))
       p.addShard(20, 1 -> 2) should equal (Some(pp))
 

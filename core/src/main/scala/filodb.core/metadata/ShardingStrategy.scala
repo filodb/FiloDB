@@ -4,7 +4,7 @@ package filodb.core.metadata
  * A [[ShardingStrategy]] determines how a Partition will be sharded.
  */
 sealed trait ShardingStrategy {
-  def needNewShard(partition: Partition, rowId: Int): Boolean
+  def needNewShard(partition: Partition, rowId: Long): Boolean
   def serialize(): String
 }
 
@@ -35,10 +35,10 @@ object ShardingStrategy {
 // Fixed number of rows per shard.  But how does one determine the # of rows?
 // Also not very effective in terms of keeping the size the same.
 case class ShardByNumRows(shardSize: Int) extends ShardingStrategy {
-  def needNewShard(partition: Partition, rowId: Int): Boolean = {
+  def needNewShard(partition: Partition, rowId: Long): Boolean = {
     if (partition.isEmpty) { true }
     else {    // if not empty, there should be a last shard
-      (rowId - partition.firstRowId.last) >= shardSize
+      (rowId - partition.firstRowId.last) >= shardSize.toLong
     }
   }
 
