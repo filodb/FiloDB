@@ -8,7 +8,7 @@ import org.scalatest.FunSpecLike
 import scala.concurrent.Await
 import scala.concurrent.duration._
 
-import filodb.core.metadata.{Column, Dataset}
+import filodb.core.metadata.{Column, Dataset, Partition}
 import filodb.core.messages._
 
 object MetadataActorSpec {
@@ -21,12 +21,18 @@ with FunSpecLike with ImplicitSender with SimpleCassandraTest {
 
   lazy val actor = system.actorOf(MetadataActor.props())
 
+  import scala.concurrent.ExecutionContext.Implicits.global
+
   // First create the datasets table
   override def beforeAll() {
     super.beforeAll()
-    // Note: This is a CREATE TABLE IF NOT EXISTS
-    Await.result(DatasetTableOps.create.future(), 3 seconds)
-    Await.result(DatasetTableOps.truncate.future(), 3 seconds)
+    val f = for { _ <- DatasetTableOps.create.future()
+                  _ <- DatasetTableOps.truncate.future()
+                  _ <- ColumnTable.create.future()
+                  _ <- ColumnTable.truncate.future()
+                  _ <- PartitionTable.create.future()
+                  _ <- PartitionTable.truncate.future() } yield { 0 }
+    Await.result(f, 3 seconds)
   }
 
   it("should return AlreadyExists when sending NewDataset message") {
@@ -42,5 +48,16 @@ with FunSpecLike with ImplicitSender with SimpleCassandraTest {
     expectMsg(Success)
     actor ! Column.GetSchema("gdelt", 10)
     expectMsg(Column.TheSchema(Map("monthYear" -> monthYearCol)))
+  }
+
+  val p = Partition("gdelt", "1979-1984")
+  it("should be able to create a Partition, add a shard, then get everything") {
+    actor ! Partition.NewPartition(p)
+    expectMsg(Success)
+    actor ! Partition.AddShard(p, 0, 0 -> 1)
+    expectMsg(Success)
+    val p2 = p.addShard(0, 0 -> 1).get
+    actor ! Partition.GetPartition("gdelt", "1979-1984")
+    expectMsg(Partition.ThePartition(p2))
   }
 }

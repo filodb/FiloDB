@@ -48,6 +48,7 @@ class MetadataActor(maxOutstandingFutures: Int) extends Actor {
   // Chain all the partial functions together into one big mapper
   val commandMapper = DatasetTableOps.commandMapper orElse
                       ColumnTable.commandMapper orElse
+                      PartitionTable.commandMapper orElse
                       DefaultMapper
 
   def receive = {

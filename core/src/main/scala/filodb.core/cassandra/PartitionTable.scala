@@ -98,4 +98,11 @@ object PartitionTable extends PartitionTable with SimpleCassandraConnector {
               .future().toResponse(InconsistentState)
     }
   }
+
+  // Partial function mapping commands to functions executing them
+  val commandMapper: PartialFunction[Command, Future[Response]] = {
+    case Partition.NewPartition(partition)          => newPartition(partition)
+    case Partition.GetPartition(dataset, partition) => getPartition(dataset, partition)
+    case Partition.AddShard(partition, firstRowId, versions) => addShard(partition, firstRowId, versions)
+  }
 }
