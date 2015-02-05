@@ -1,9 +1,9 @@
 package filodb.core.metadata
 
 import org.scalatest.FunSpec
-import org.scalatest.matchers.ShouldMatchers
+import org.scalatest.Matchers
 
-class PartitionSpec extends FunSpec with ShouldMatchers {
+class PartitionSpec extends FunSpec with Matchers {
   describe("Partition") {
     it("should return empty when no shards") {
       val p = Partition("foo", "first")

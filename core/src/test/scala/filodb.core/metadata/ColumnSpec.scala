@@ -1,9 +1,9 @@
 package filodb.core.metadata
 
 import org.scalatest.FunSpec
-import org.scalatest.matchers.ShouldMatchers
+import org.scalatest.Matchers
 
-class ColumnSpec extends FunSpec with ShouldMatchers {
+class ColumnSpec extends FunSpec with Matchers {
   import Column.ColumnType
 
   val firstColumn = Column("first", "foo", 1, ColumnType.StringColumn)

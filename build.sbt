@@ -1,11 +1,13 @@
 val mySettings = Seq(organization := "org.velvia",
                      scalaVersion := "2.10.4",
                      parallelExecution in Test := false,
-                     resolvers ++= extraRepos)
+                     resolvers ++= extraRepos) ++
+                 universalSettings
 
 lazy val core = (project in file("core"))
                   .settings(mySettings:_*)
                   .settings(name := "filodb-core")
+                  .settings(scalacOptions += "-language:postfixOps")
                   .settings(libraryDependencies ++= coreDeps)
 
 val phantomVersion = "1.5.0"
@@ -27,3 +29,12 @@ lazy val coreDeps = Seq(
   "com.websudos"         %% "phantom-testing"   % phantomVersion % "test",
   "com.typesafe.akka"    %% "akka-testkit"      % akkaVersion % "test"
 )
+
+//////////////////////////
+///
+
+lazy val coreSettings = Seq(
+  scalacOptions ++= Seq("-Xlint", "-deprecation", "-Xfatal-warnings", "-feature")
+)
+
+lazy val universalSettings = coreSettings
