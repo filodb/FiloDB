@@ -2,6 +2,10 @@ package filodb.core.metadata
 
 /**
  * A [[ShardingStrategy]] determines how a Partition will be sharded.
+ * Shards are necessary to limit physical row length and distribute the data.
+ * Shards are an internal implementation detail.
+ *
+ * It maps a rowId to a shard, and determines if a new shard is needed.
  */
 sealed trait ShardingStrategy {
   def needNewShard(partition: Partition, rowId: Long): Boolean
@@ -32,8 +36,15 @@ object ShardingStrategy {
   }
 }
 
-// Fixed number of rows per shard.  But how does one determine the # of rows?
-// Also not very effective in terms of keeping the size the same.
+/**
+ * [[ShardByNumRows]] is super simple fixed hashing by number of rows.
+ * Each shard starts at a multiple of the shardSize.
+ * It works for both append and random writes, but determining the shard size
+ * is tricky.   Using the default will lead to widely varying shard sizes
+ * between different datasets, possibly leading to memory/latency issues.
+ *
+ * TODO: Estimating the shardSize based on a schema.
+ */
 case class ShardByNumRows(shardSize: Int) extends ShardingStrategy {
   def needNewShard(partition: Partition, rowId: Long): Boolean = {
     if (partition.isEmpty) { true }
