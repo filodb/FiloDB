@@ -1,15 +1,15 @@
 package filodb.core.metadata
 
 import org.scalatest.FunSpec
-import org.scalatest.matchers.ShouldMatchers
+import org.scalatest.Matchers
 
-class PartitionSpec extends FunSpec with ShouldMatchers {
+class PartitionSpec extends FunSpec with Matchers {
   describe("Partition") {
-    it("should return empty when last row is negative") {
+    it("should return empty when no shards") {
       val p = Partition("foo", "first")
       p should be ('empty)
 
-      val p2 = Partition("foo", "second", 100)
+      val p2 = Partition("foo", "second", firstRowId = Seq(0L), versionRange = Seq((0, 1)))
       p2 should not be ('empty)
     }
 
@@ -17,31 +17,52 @@ class PartitionSpec extends FunSpec with ShouldMatchers {
       val p = Partition("foo", "first")
       p should be ('valid)
 
-      val p2 = Partition("foo", "second", 100)
+      val pp = Partition("foo", "second", firstRowId = Seq(0L), versionRange = Seq((0, 1)))
+      p should be ('valid)
+
+      val p2 = Partition("foo", "negChunkSize", chunkSize = -5)
       p2 should not be ('valid)
 
-      val p3 = Partition("foo", "nonEmptyShards", firstRowId = Seq(0, 100))
+      val p3 = Partition("foo", "notIncreasingRowIds",
+                         firstRowId = Seq(0L, 100L, 50L),
+                         versionRange = Seq((0, 1), (0, 2), (1, 2)))
       p3 should not be ('valid)
 
-      val p4 = Partition("foo", "shardListsUnEqual", 100,
-                         firstRowId = Seq(0),
-                         firstVersion = Seq(0, 1))
+      val p4 = Partition("foo", "shardListsUnEqual",
+                         firstRowId = Seq(0L),
+                         versionRange = Seq((0, 1), (1, 2)))
       p4 should not be ('valid)
+    }
+
+    it("should addShard() and return None if new shard is invalid") {
+      val p = Partition("foo", "second", firstRowId = Seq(10L), versionRange = Seq((0, 1)))
+      val pp = p.copy(firstRowId = p.firstRowId :+ 20L,
+                      versionRange = p.versionRange :+ (1 -> 2))
+      p.addShard(20, 1 -> 2) should equal (Some(pp))
+
+      p.addShard(0, 1 -> 2) should equal (None)
+
+      Partition("foo", "second").addShard(10, 0 -> 1) should equal (Some(p))
     }
   }
 
   describe("ShardByNumRows.needNewShard") {
     it("should return true if Partition is empty") {
       val empty = Partition("foo", "first")
-      val strategy = Partition.ShardByNumRows(100)
+      val strategy = ShardByNumRows(100)
       strategy.needNewShard(empty, 0) should equal (true)
     }
 
     it("should return true if last row ID greater than shard start row ID by X") {
-      val p = Partition("foo", "0", 19, firstRowId = Seq(0), firstVersion = Seq(0))
-      val strategy = Partition.ShardByNumRows(100)
+      val p = Partition("foo", "0", firstRowId = Seq(0), versionRange = Seq((0, 1)))
+      val strategy = ShardByNumRows(100)
       strategy.needNewShard(p, 40) should equal (false)
       strategy.needNewShard(p, 100) should equal (true)
+    }
+
+    it("can serialize and deserialize") {
+      val strategy = ShardByNumRows(100)
+      ShardingStrategy.deserialize(strategy.serialize()) should equal (strategy)
     }
   }
 }

@@ -9,4 +9,6 @@ Distributed.  Columnar.  Versioned.
 /_/   /_/_/\____/_____/_____/  
 ```
 
+## Building and Testing
 
+Run the tests with `sbt test`, or for continuous development, `sbt ~test`.  Noisy cassandra logs can be seen in `filodb-test.log`.
