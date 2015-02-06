@@ -11,8 +11,10 @@ import filodb.core.metadata.Dataset
  * Represents the "dataset" Cassandra table tracking each dataset and its partitions
  */
 sealed class DatasetTable extends CassandraTable[DatasetTable, Dataset] {
+  // scalastyle:off
   object name extends StringColumn(this) with PartitionKey[String]
   object partitions extends SetColumn[DatasetTable, Dataset, String](this)
+  // scalastyle:on
 
   override def fromRow(row: Row): Dataset =
     Dataset(name(row), partitions(row))

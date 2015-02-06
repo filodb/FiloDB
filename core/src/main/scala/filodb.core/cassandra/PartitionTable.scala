@@ -14,6 +14,7 @@ import filodb.core.metadata.{Partition, ShardingStrategy}
  * the state of a Partition stays intact.
  */
 sealed class PartitionTable extends CassandraTable[PartitionTable, Partition] {
+  // scalastyle:off
   object dataset extends StringColumn(this) with PartitionKey[String]
   object partition extends StringColumn(this) with PartitionKey[String]
   object shardingStrategy extends StringColumn(this)
@@ -24,6 +25,7 @@ sealed class PartitionTable extends CassandraTable[PartitionTable, Partition] {
   object versionRange extends ListColumn[PartitionTable, Partition, Long](this)
   object chunkSize extends IntColumn(this)
   object hash extends IntColumn(this)
+  // scalastyle:on
 
   // May throw IllegalArgumentException if cannot deserialize shardingStrategy from string
   override def fromRow(row: Row): Partition =

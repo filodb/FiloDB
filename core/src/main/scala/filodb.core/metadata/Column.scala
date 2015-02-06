@@ -10,9 +10,9 @@ import filodb.core.messages.{Command, Response}
  *
  * ==Columns and versions==
  * It is uncommon for the schema to change much between versions.
- * A DDL might change the type of a column; a column might be deleted;
+ * A DDL might change the type of a column; a column might be deleted
  *
- * 1. A Column def remains in effect for subsequent versions unless;
+ * 1. A Column def remains in effect for subsequent versions unless
  * 2. It has been marked deleted in subsequent versions, or
  * 3. Its columnType or serializer has been changed, in which case data
  *    from previous versions are discarded (due to incompatibility)

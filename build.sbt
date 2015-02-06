@@ -37,4 +37,20 @@ lazy val coreSettings = Seq(
   scalacOptions ++= Seq("-Xlint", "-deprecation", "-Xfatal-warnings", "-feature")
 )
 
-lazy val universalSettings = coreSettings
+lazy val universalSettings = coreSettings ++ styleSettings
+
+// Create a default Scala style task to run with tests
+lazy val testScalastyle = taskKey[Unit]("testScalastyle")
+
+lazy val compileScalastyle = taskKey[Unit]("compileScalastyle")
+
+lazy val styleSettings = Seq(
+  testScalastyle := org.scalastyle.sbt.ScalastylePlugin.scalastyle.in(Test).toTask("").value,
+  // (scalastyleConfig in Test) := "scalastyle-test-config.xml",
+  // This is disabled for now, cannot get ScalaStyle to recognize the file above for some reason :/
+  // (test in Test) <<= (test in Test) dependsOn testScalastyle,
+  scalastyleFailOnError := true,
+  compileScalastyle := org.scalastyle.sbt.ScalastylePlugin.scalastyle.in(Compile).toTask("").value,
+  // Is running this on compile too much?
+  (compile in Compile) <<= (compile in Compile) dependsOn compileScalastyle
+)

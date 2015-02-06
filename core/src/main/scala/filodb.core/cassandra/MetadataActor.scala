@@ -24,7 +24,7 @@ object MetadataActor {
     Props(classOf[MetadataActor], maxOutstandingFutures)
 
   val DefaultMapper: PartialFunction[Command, Future[Response]] = {
-    case x => Future { NoSuchCommand }
+    case x: Any => Future { NoSuchCommand }
   }
 }
 
@@ -51,7 +51,7 @@ class MetadataActor(maxOutstandingFutures: Int) extends Actor {
                       PartitionTable.commandMapper orElse
                       DefaultMapper
 
-  def receive = {
+  def receive: Receive = {
     case FutureCompleted       => if (outstandingFutures > 0) outstandingFutures -= 1
     case c: Command            =>
       if (outstandingFutures >= maxOutstandingFutures) {
@@ -60,7 +60,7 @@ class MetadataActor(maxOutstandingFutures: Int) extends Actor {
       } else {
         outstandingFutures += 1
         val originator = sender   // sender is a function, don't call in the callback
-        commandMapper(c).onSuccess { case response =>
+        commandMapper(c).onSuccess { case response: Response =>
           self ! FutureCompleted
           originator ! response
         }
