@@ -32,6 +32,8 @@ object Shard {
   /**
    * Updates the columns written metadata in the shard.
    * @return ColumnsWrittenUpdated(newState), Nop if no change is required
+   * TODO: maybe get rid of this.  Have storage impl take care of updating columnswritten state.
+   *       Querying the currently written columns sounds like fair game though.
    */
   case class UpdateColumnsWritten(state: ShardState, writtenColumns: Set[String]) extends WriterCommand
 
