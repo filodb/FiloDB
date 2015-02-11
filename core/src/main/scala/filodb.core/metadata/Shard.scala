@@ -20,13 +20,14 @@ object Shard {
   /**
    * Writes a chunk of columnar data.  Only write it when the sender has received a Ready signal.
    * @param shard the Shard to write to
-   * @param rowIdRange the starting and ending RowId for the chunk. Must be aligned to chunkSize and be
-   *                   no more than chunkSize rows.
+   * @param rowId the starting rowId for the chunk. Must be aligned to chunkSize.
+   * @param lastSequenceNo the ending sequence # for the chunk, will be reported back in the Ack
    * @param columnsBytes the column name and bytes to be written for each column
    * @return Ack() for a successful write, or any number of errors
    */
   case class WriteColumnData(shard: Shard,
-                             rowIdRange: (Long, Long),
+                             rowId: Long,
+                             lastSequenceNo: Long,
                              columnsBytes: Map[String, ByteBuffer]) extends WriterCommand
 
   /**
@@ -39,7 +40,7 @@ object Shard {
 
   sealed trait WriterResponse extends Response
   case object Ready extends WriterResponse
-  case class Ack(firstRowId: Long, lastRowId: Long) extends WriterResponse
+  case class Ack(lastSequenceNo: Long) extends WriterResponse
   case object ChunkTooBig extends ErrorResponse with WriterResponse
   case object ChunkMisaligned extends ErrorResponse with WriterResponse
   case class ColumnsWrittenUpdated(newState: ShardState) extends WriterResponse

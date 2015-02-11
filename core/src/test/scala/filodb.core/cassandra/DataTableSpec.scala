@@ -32,20 +32,14 @@ class DataTableSpec extends CassandraFlatSpec with BeforeAndAfter {
   val columnBytes = Map("a" -> bb, "b" -> bb)
 
   "DataTable" should "return ChunkMisaligned if trying to write a chunk not on boundary" in {
-    whenReady(DataTable.insertOneChunk(shard, 5L -> 7L, columnBytes)) { response =>
+    whenReady(DataTable.insertOneChunk(shard, 5L, 7L, columnBytes)) { response =>
       response should equal (Shard.ChunkMisaligned)
     }
   }
 
-  it should "return ChunkTooBig if trying to write a chunk over chunkSize rows" in {
-    whenReady(DataTable.insertOneChunk(shard, 0L -> 200L, columnBytes)) { response =>
-      response should equal (Shard.ChunkTooBig)
-    }
-  }
-
   it should "write chunks successfully and return Ack()" in {
-    whenReady(DataTable.insertOneChunk(shard, 0L -> 50L, columnBytes)) { response =>
-      response should equal (Shard.Ack(0L, 50L))
+    whenReady(DataTable.insertOneChunk(shard, 0L, 49L, columnBytes)) { response =>
+      response should equal (Shard.Ack(49L))
     }
 
     val f = DataTable.select(_.columnName, _.rowId).fetch()

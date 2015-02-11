@@ -65,18 +65,18 @@ object DataTable extends DataTable with SimpleCassandraConnector {
 
   /**
    * Inserts one chunk of data from different columns.
-   * Checks that the rowIdRange is aligned with the chunkSize and does not exceed the chunkSize.
+   * Checks that the rowIdRange is aligned with the chunkSize.
    * @param shard the Shard to write to
-   * @param rowIdRange the starting and ending RowId for the chunk. Must be aligned to chunkSize and be
-   *                   no more than chunkSize rows.
+   * @param rowId the starting rowId for the chunk. Must be aligned to chunkSize.
+   * @param lastSequenceNo the ending sequence # for the chunk, will be reported back in the Ack
    * @param columnsBytes the column name and bytes to be written for each column
-   * @returns Ack(), or ChunkTooBig, ChunkMisaligned, or other ErrorResponse
+   * @returns Ack(), or ChunkMisaligned, or other ErrorResponse
    */
   def insertOneChunk(shard: Shard,
-                     rowIdRange: (Long, Long),
+                     rowId: Long,
+                     lastSequenceNo: Long,
                      columnsBytes: Map[String, ByteBuffer]): Future[Response] = {
-    if (rowIdRange._2 - rowIdRange._1 > shard.partition.chunkSize) return(Future(ChunkTooBig))
-    if (rowIdRange._1 % shard.partition.chunkSize != 0) return(Future(ChunkMisaligned))
+    if (rowId % shard.partition.chunkSize != 0) return(Future(ChunkMisaligned))
 
     // NOTE: This is actually a good use of Unlogged Batch, because all of the inserts
     // are to the same partition key, so they will get collapsed down into one insert
@@ -86,11 +86,11 @@ object DataTable extends DataTable with SimpleCassandraConnector {
       case (batch, (columnName, bytes)) =>
         // Sucks, it seems that reusing a partially prepared query doesn't work.
         // Issue filed: https://github.com/websudos/phantom/issues/166
-        batch.add(insertQuery(shard).value(_.rowId, rowIdRange._1)
+        batch.add(insertQuery(shard).value(_.rowId, rowId)
                                     .value(_.columnName, columnName)
                                     .value(_.data, bytes))
     }
     batch.future().toResponse()
-      .collect { case Success => Ack(rowIdRange._1, rowIdRange._2) }
+      .collect { case Success => Ack(lastSequenceNo) }
   }
 }

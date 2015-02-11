@@ -1,14 +1,14 @@
 User->Coord: StartIngestion(dataset, partition, columns)
 Coord->Ingester: start actor
-Coord->RowIngester: start actor
 Ingester->MetadataActor: GetPartitionLock
 MetadataActor->Ingester: Success
-Ingester->RowIngester: chunkSize
 Ingester->MetadataActor: GetSchema
 MetadataActor->Ingester: TheSchema
 Ingester->MetadataActor: GetPartition
 MetadataActor->Ingester: ThePartition
-Ingester->User: Ack or Failure
+Ingester->Coord: GoodToGo(partition)
+Coord->RowIngester: Start(chunkSize)
+Coord->User: Ack or Failure
 Ingester->DataWriterActor: RegisterMe
 DataWriterActor->Ingester: Ready
 Ingester->Coord: Ready

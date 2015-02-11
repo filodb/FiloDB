@@ -7,6 +7,11 @@
 4. Efficient ingest and efficient retries
 5. Should work for streaming data, including error recovery
 
+NOTE: The ingestion is designed for high-volume ingestion of fewer datasets at a
+time, due to the nature of bulk columnar chunk ingestion.  It is not designed
+for lots of tiny row ingestions across a huge number of datasets at once.  It is
+advised that for lots of datasets, they be ingested a few at a time.
+
 ## Use Case - Append-Only Writes
 
 - User divides dataset into independent partitions, sequences input rows
@@ -61,8 +66,8 @@ A middle ground is a EstimatingHashingSharder.  This uses info from the schema t
 **High-level Row API** - ingest individual rows with a sequence # and Row ID.  A RowIngester groups the rows into chunks aligned with the chunksize and translates into columnar format.
 - Also takes care of replaces by reading older chunks and doing operations on it
 
-**Low-level columnar API** - `Columns(startingRowId: Long, endingRowId: Long, columns: Map[String, ColumnBuilder[_]])`
-- Assumed that starting and ending row IDs are already chunk-aligned
+**Low-level columnar API** - `Columns(rowId: Long, endingSequenceNo: Long, columns: Map[String, ColumnBuilder[_]])`
+- Assumed that starting row IDs are already chunk-aligned
 - Only for append patterns, does not handle replacements
 
 ## Ingestion walk-through
