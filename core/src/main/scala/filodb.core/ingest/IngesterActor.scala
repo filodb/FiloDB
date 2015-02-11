@@ -5,6 +5,7 @@ import java.nio.ByteBuffer
 
 import filodb.core.BaseActor
 import filodb.core.messages._
+import filodb.core.metadata.{Column, Partition}
 
 /**
  * One IngesterActor instance is created for each dataset/partition ingestion pipeline.
@@ -22,6 +23,9 @@ object IngesterActor {
                             rowIdRange: (Long, Long),
                             lastSequenceNo: Long,
                             columnsBytes: Map[String, ByteBuffer])
+
+  // Sent from IngesterActor when start of ingestion can begin
+  case class GoodToGo(partition: Partition, schema: Column.Schema)
 
   def props(dataset: String,
             partition: String,

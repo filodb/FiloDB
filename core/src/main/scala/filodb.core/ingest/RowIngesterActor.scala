@@ -6,6 +6,7 @@ import org.velvia.filo.RowIngestSupport
 
 import filodb.core.BaseActor
 import filodb.core.messages._
+import filodb.core.metadata.Column
 
 /**
  * The RowIngesterActor provides a high-level row-based API on top of the chunked columnar low level API.
@@ -25,11 +26,14 @@ object RowIngesterActor {
    */
   case class Row[R](sequenceNo: Long, rowId: Long, row: R)
 
-  def props[R](ingesterActor: ActorRef, rowIngestSupport: RowIngestSupport[R]): Props =
+  def props[R](ingesterActor: ActorRef,
+               schema: Column.Schema,
+               rowIngestSupport: RowIngestSupport[R]): Props =
     Props(classOf[RowIngesterActor[R]], ingesterActor, rowIngestSupport)
 }
 
 class RowIngesterActor[R](ingesterActor: ActorRef,
+                          schema: Column.Schema,
                           rowIngestSupport: RowIngestSupport[R]) extends BaseActor {
   import RowIngesterActor._
 
