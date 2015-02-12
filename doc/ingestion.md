@@ -59,7 +59,30 @@ Sharding is basically a function.
 
 More complex sharding strategy can be based on the actual # of bytes written, and adjust subsequent shard size based on previous input.  This is very tricky to get right though, and makes managing shards esp for random writes very complex.
 
-A middle ground is a EstimatingHashingSharder.  This uses info from the schema to estimate the number of rows per shard to balance shard size and simplicity. However, since the sharding strategy has to be declared when a partition is created, there is potential for divergence if a lot of columns are added in later versions.
+A middle ground is an `EstimatingHashingSharder`.  This uses info from the schema to estimate the number of rows per shard to balance shard size and simplicity. However, since the sharding strategy has to be declared when a partition is created, there is potential for divergence if a lot of columns are added in later versions.
+
+It might be possible to have an adaptive sharder, which adapts the shard length based on the latest writes, but it would only work for appends, and cannot jump forwards or backwards.
+
+## Acking and Backpressure
+
+**Acking** is the ability to confirm that writes happened successfully.
+
+**Backpressure** is a system to slow down writes when the datastore cannot write as quickly as the input source.
+
+Both are needed to make sure every piece of data is ingested, and prevent the system from being flooded.
+
+Currently proposed system is this:
+- Source (Kafka or HTTP actor etc.) pulls and pushes data down to ingestion pipe, with a sequenceID
+- Ingestion pipe sends back Acks to the Source with the sequenceID of latest completed writes
+- Source only continues to pull if the latest sent sequenceID - completed sequenceID is below a certain watermark.
+
+The above pattern works well for our pattern where many IngesterActors (each
+representing a separate dataset/partition) are pushing to a common dataWriter
+and metadataActor, and may come and go dynamically.  Unlike the Akka streaming
+methodology, which requires separate channel for acks and for backpressure, and
+would require each writer to register with the downstream, we reuse the response
+stream for both acks and backpressure.  Unlike simply using rejection at the
+downstream writer, the client also has throttling, preventing flooding.
 
 ## Ingestion API
 
@@ -79,3 +102,22 @@ Prerequisites for ingestion:
 2. Columns/schema must be created
 3. At least one partition must be created
 4. Columns to be ingested must be defined in the schema already
+
+### Current Implementation
+
+Currently the ingestion flow is implemented as a set of actors sending messages to one another.  See the ingestion flow diagram above.
+
+### Akka Streams Implementation
+
+We could potentially implement the ingestion flow as a set of Akka Stream flows.  Akka Streams was at 1.0-M3 as of this writing, so not quite stable yet and still missing docs etc.
+
+```scala
+val lowLevelFlow: Flow[ChunkedColumns, Ack] = Source[ChunkedColumns] ~> ingester ~> dataWriter
+
+val httpFlow: Flow[HttpRequest, HttpResponse] = request ~> reqToRows ~> rowIngester ~> ingester ~> dataWriter ~> acksToResponse
+```
+
+Some open questions:
+1. We want one lowLevelFlow per dataset/partition, but one common dataWriter. How to do that?  Some kind of dynamic merging?
+2. Where would we put the ingestion setup (StartIngestion)?  Should the whole thing be modelled as a Flow[Command, Response] where the Command could be UpsertRows etc.? 
+3. How can the Acks be incorporated into the flow?

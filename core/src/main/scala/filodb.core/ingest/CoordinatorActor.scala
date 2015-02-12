@@ -18,6 +18,8 @@ import filodb.core.messages._
  * See doc/ingestion.md and the ingestion flow diagram for more details about the entire ingestion flow.
  */
 object CoordinatorActor {
+  // //////////// Commands
+
   /**
    * Tells the CoordinatorActor to spin up the actor pipeline for high volume ingestion of a
    * single dataset.
@@ -25,13 +27,16 @@ object CoordinatorActor {
    */
   case class StartIngestion(dataset: String, partition: String, columns: Seq[String])
 
-  case object CannotLockPartition extends ErrorResponse
-  case class UndefinedColumns(undefined: Seq[String]) extends ErrorResponse
 
   /**
    * Explicitly stop ingestion.  Always use this when possible to help keep resources low.
    */
   case class StopIngestion(dataset: String, partition: String)
+
+  // ////////// Responses
+
+  case object CannotLockPartition extends ErrorResponse
+  case class UndefinedColumns(undefined: Seq[String]) extends ErrorResponse
 
   /*
    * This may be sent back for several reasons:
