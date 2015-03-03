@@ -46,18 +46,20 @@ class PartitionSpec extends FunSpec with Matchers {
     }
   }
 
-  describe("ShardByNumRows.needNewShard") {
-    it("should return true if Partition is empty") {
+  describe("ShardByNumRows.getShard") {
+    it("should return None if rowId or version is invalid") {
       val empty = Partition("foo", "first")
       val strategy = ShardByNumRows(100)
-      strategy.needNewShard(empty, 0) should equal (true)
+      strategy.getShard(empty, -1L, 0) should equal (None)
+      strategy.getShard(empty, 100L, -1) should equal (None)
     }
 
-    it("should return true if last row ID greater than shard start row ID by X") {
+    it("should return shard firstRowId per shard size rounding") {
       val p = Partition("foo", "0", firstRowId = Seq(0), versionRange = Seq((0, 1)))
       val strategy = ShardByNumRows(100)
-      strategy.needNewShard(p, 40) should equal (false)
-      strategy.needNewShard(p, 100) should equal (true)
+      strategy.getShard(p, 40L, 0) should equal (Some(0L))
+      strategy.getShard(p, 103L, 0) should equal (Some(100L))
+      strategy.getShard(p, 10020L, 0) should equal (Some(10000L))
     }
 
     it("can serialize and deserialize") {

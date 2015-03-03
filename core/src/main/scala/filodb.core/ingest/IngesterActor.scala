@@ -72,6 +72,9 @@ import IngesterActor._
  * This is a state machine.  Upon init, not only do the actors get set but it starts to
  * verify the dataset state, schema, etc.
  *
+ * Normally the two states are Ready and Waiting.  If more than N unacked chunks are written out,
+ * then the actor goes into Waiting state.
+ *
  * Acks and failure handling:
  *
  * Every columnar chunk coming into IngesterActor has a sequence ID.  Both when writing to
@@ -83,6 +86,7 @@ import IngesterActor._
  * In the future we can keep some number of columns in memory and retry operations from the last successfully
  * acked point in time.
  * TODO: Retries
+ * TODO: handling acking
  */
 class IngesterActor(dataset: String,
                     partitionName: String,
@@ -115,17 +119,19 @@ class IngesterActor(dataset: String,
   when(GetPartition) {
     case Event(Partition.ThePartition(partObj), GotSchema(schema)) =>
       context.parent ! GoodToGo(partObj, schema)
-      // TODO: Register with the dataWriterActor
-      goto(Waiting) using GotData(partObj, schema)
+      goto(Ready) using GotData(partObj, schema)
   }
 
   when(Ready) {
     case Event(ChunkedColumns(version, (firstRowId, lastRowId), lastSequenceNo, columnsBytes),
                data: GotData) =>
+
       // 1. Figure out the shard
+      val shardStrategy = data.partition.shardingStrategy
       // 2. Update partition shard info if needed
       // 3. Forward to dataWriterActor
-      // stay at Ready or go to Waiting depending on how many chunks we have left to go before able to
+
+      // TODO: stay at Ready or go to Waiting depending on how many chunks we have left to go before able to
       // send again
       goto(Ready) using data
   }

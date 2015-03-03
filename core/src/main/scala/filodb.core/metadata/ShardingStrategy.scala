@@ -8,7 +8,16 @@ package filodb.core.metadata
  * It maps a rowId to a shard, and determines if a new shard is needed.
  */
 sealed trait ShardingStrategy {
-  def needNewShard(partition: Partition, rowId: Long): Boolean
+  /**
+   * Returns the shard information given the rowId and version information.
+   * @param partition the Partition object to write to
+   * @param rowId the starting row ID of the chunk to be written
+   * @param version the version to write to
+   * @return Some(firstRowId) of the shard to write to.  None if there was an issue, such as
+   *         an invalid rowId.
+   */
+  def getShard(partition: Partition, rowId: Long, version: Int): Option[Long]
+
   def serialize(): String
 }
 
@@ -46,11 +55,11 @@ object ShardingStrategy {
  * TODO: Estimating the shardSize based on a schema.
  */
 case class ShardByNumRows(shardSize: Int) extends ShardingStrategy {
-  def needNewShard(partition: Partition, rowId: Long): Boolean = {
-    if (partition.isEmpty) { true }
-    else {    // if not empty, there should be a last shard
-      (rowId - partition.firstRowId.last) >= shardSize.toLong
-    }
+  def getShard(partition: Partition, rowId: Long, version: Int): Option[Long] = {
+    if (rowId < 0) return None
+    if (version < 0) return None
+
+    Some(rowId / shardSize * shardSize)
   }
 
   def serialize(): String = s"${ShardByNumRows.tag}:$shardSize"
