@@ -25,7 +25,7 @@ class PartitionTableSpec extends CassandraFlatSpec with BeforeAndAfter {
   import scala.concurrent.ExecutionContext.Implicits.global
 
   val p = Partition("foo", "first")
-  val pp = p.copy(firstRowId = Seq(0), versionRange = Seq((0, 1)))
+  val pp = p.copy(shardVersions = Map(0L -> (0 -> 1)))
 
   "PartitionTable" should "create an empty Partition if not exists only" in {
     whenReady(PartitionTable.newPartition(p)) { response =>
@@ -68,18 +68,13 @@ class PartitionTableSpec extends CassandraFlatSpec with BeforeAndAfter {
       response should equal (Success)
     }
 
-    val f = PartitionTable.addShard(p, 0, 0 -> 1)
+    val f = PartitionTable.addShardVersion(p, 0, 0)
     whenReady(f) { response => response should equal (Success) }
   }
 
   it should "not add && return InconsistentState if the dataset and partition do not exist" in {
-    val f = PartitionTable.addShard(p.copy(partition = "nosuchPart"), 0, 0 -> 1)
+    val f = PartitionTable.addShardVersion(p.copy(partition = "nosuchPart"), 0, 1)
     whenReady(f) { response => response should equal (InconsistentState) }
-  }
-
-  it should "return NotValid if an invalid shard was added to a Partition" in {
-    val f = PartitionTable.addShard(pp, -1, 1 -> 2)
-    whenReady(f) { response => response should equal (Partition.NotValid) }
   }
 
   it should "return InconsistentState if partition state changed underneath" in {
@@ -91,10 +86,10 @@ class PartitionTableSpec extends CassandraFlatSpec with BeforeAndAfter {
     // still at partition state p.  Therefore, even tho adding a shard to p is valid from p's
     // perspective, it will no longer be valid from the perspective of what is actually on disk.
     // The hash would have changed on disk, so one can no longer add a shard to the original p.
-    val f = PartitionTable.addShard(p, 20, 0 -> 2)
+    val f = PartitionTable.addShardVersion(p, 20, 0)
     whenReady(f) { response => response should equal (Success) }
 
-    val f2 = PartitionTable.addShard(p, 10, 0 -> 1)
+    val f2 = PartitionTable.addShardVersion(p, 10, 1)
     whenReady(f2) { response => response should equal (InconsistentState) }
   }
 }

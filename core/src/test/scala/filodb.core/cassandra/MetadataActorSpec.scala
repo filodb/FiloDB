@@ -54,9 +54,9 @@ with FunSpecLike with ImplicitSender with SimpleCassandraTest {
   it("should be able to create a Partition, add a shard, then get everything") {
     actor ! Partition.NewPartition(p)
     expectMsg(Success)
-    actor ! Partition.AddShard(p, 0, 0 -> 1)
+    actor ! Partition.AddShardVersion(p, 0, 0)
     expectMsg(Success)
-    val p2 = p.addShard(0, 0 -> 1).get
+    val p2 = p.addShardVersion(0, 0)
     actor ! Partition.GetPartition("gdelt", "1979-1984")
     expectMsg(Partition.ThePartition(p2))
   }

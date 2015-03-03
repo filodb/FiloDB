@@ -7,6 +7,8 @@ import filodb.core.messages.{Command, ErrorResponse, Response}
  * and partitions are internally sharded as well by rowID.
  * Partitions keeps state about the shards, each of which should own a non-overlapping range of rowIDs.
  *
+ * ==Partition semantics==
+ *
  * Each partition and shard stores columns of data in chunks of rows.  The chunks
  * are kept in multiples of chunkSize, and the rowId is the first row number of the chunk.
  * For example, for columns First, Last, and Age, and chunksize of 100, chunks might be
@@ -30,31 +32,49 @@ import filodb.core.messages.{Command, ErrorResponse, Response}
  * a PK-to-row-# index.
  *
  * Row #'s never change once a row is appended.
+ *
+ * ==Partition objects==
+ *
+ * Partition objects should help answer the following questions:
+ * 1. If I'm writing, which shard should I write to?
+ * 2. For reading, given a set of versions, which shards should I read from? (or shard-version pairs)
+ *
+ * TODO: make Partition class only cache some shards in memory so it can scale to millions of shards.
+ * This current design will scale to a billion rows per partition, which is probably fine for a while.
+ * Amongst other changes: hash currently assumes knowledge of all shards; PartitionTable would need to
+ * load shard info not in memory back into memory; maybe shardVersions needs to be a cacheMap etc.
  */
 case class Partition(dataset: String,
                      partition: String,
                      shardingStrategy: ShardingStrategy = ShardingStrategy.DefaultStrategy,
-                     firstRowId: Seq[Long] = Nil,   // rowIDs must be monotonically increasing
-                     versionRange: Seq[(Int, Int)] = Nil,
+                     shardVersions: Map[Long, (Int, Int)] = Map.empty,
                      chunkSize: Int = Partition.DefaultChunkSize) {
-  def isEmpty: Boolean = firstRowId.isEmpty
+  def isEmpty: Boolean = shardVersions.isEmpty
 
-  def isValid: Boolean =
-    (firstRowId.length == versionRange.length) &&
-    chunkSize > 0 &&
-    firstRowId.sliding(2).forall {
-      case Seq(a, b) => a < b
-      case Seq(a)    => true
-    }
+  def isValid: Boolean = chunkSize > 0
 
   /**
-   * Returns Some(newPartition) with a valid new shard added, and None if the new shard info is not valid.
-   * A valid new shard must have a firstRowId that is greater than the current firstRowId.last
+   * Returns true if this Partition contains the shard starting at firstRowId and version.
    */
-  def addShard(firstRowId: Long, versionRange: (Int, Int)): Option[Partition] = {
-    val newPart = this.copy(firstRowId = this.firstRowId :+ firstRowId,
-                            versionRange = this.versionRange :+ versionRange)
-    if (newPart.isValid) Some(newPart) else None
+  def contains(firstRowId: Long, version: Int): Boolean =
+    (shardVersions contains firstRowId) &&
+    (version >= shardVersions(firstRowId)._1 && version <= shardVersions(firstRowId)._2)
+
+  /**
+   * Adds a shard and a version to the partition. Does no validation of shard and version -- that is
+   * the job of the shardingStrategy.
+   * NOTE: don't call this directly, instead send AddShardVersion message to MetadataActor, which takes
+   * care of scenarios where not all shards are in memory.
+   * @return a new Partition instance with the shard and version info added.
+   */
+  def addShardVersion(firstRowId: Long, version: Int): Partition = {
+    if (shardVersions contains firstRowId) {
+      val (minVersion, maxVersion) = shardVersions(firstRowId)
+      this.copy(shardVersions = this.shardVersions +
+                  (firstRowId -> (Math.min(version, minVersion) -> Math.max(version, maxVersion))))
+    } else {
+      this.copy(shardVersions = this.shardVersions + (firstRowId -> (version -> version)))
+    }
   }
 }
 
@@ -103,26 +123,18 @@ object Partition {
   case class GetPartition(dataset: String, partition: String) extends Command
 
   /**
-   * Adds a shard to an existing partition.  Checks to see that the new shard results in a valid
+   * Adds a shard and version to an existing partition.  Checks to see that the new shard results in a valid
    * shard, and also updates using ONLY IF to ensure data on disk is consistent and we are really
    * adding the shard to what we think.
    * @param partition the existing Partition object before the shard was added
    * @param firstRowId the first rowID of the new shard
-   * @param versionRange the range of version numbers for the new shard
-   * @return Success, NotValid, InconsistentState (hash mismatch - somebody else updated the partition!)
+   * @param version the version number to add
+   * @return Success, InconsistentState (hash mismatch - somebody else updated the partition!)
    * Note that if partition/dataset is not found, InconsistentState will be returned.
    */
-  case class AddShard(partition: Partition,
-                      firstRowId: Long,
-                      versionRange: (Int, Int)) extends Command
-
-  /**
-   * Updates the partition state information.  Again, in the future might need partial update
-   * commands.  NOTE: you CANNOT change the chunksize and shardingStrategy once you start!
-   * @param partition the Partition object to write out
-   * @returns Success
-   */
-  case class UpdatePartition(partition: Partition) extends Command
+  case class AddShardVersion(partition: Partition,
+                             firstRowId: Long,
+                             version: Int) extends Command
 
   /**
    * Deletes a partition.  NOTE: need to clarify exact behavior.  Is this permanent?

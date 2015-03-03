@@ -18,11 +18,9 @@ sealed class PartitionTable extends CassandraTable[PartitionTable, Partition] {
   object dataset extends StringColumn(this) with PartitionKey[String]
   object partition extends StringColumn(this) with PartitionKey[String]
   object shardingStrategy extends StringColumn(this)
-  object firstRowId extends ListColumn[PartitionTable, Partition, Long](this)
-  // NOTE: versionRange is for a _range_ of versions, from one Int to another Int.  It's just
-  // encoded as a Long so that we can easily query for a version range together and write it
-  // together.
-  object versionRange extends ListColumn[PartitionTable, Partition, Long](this)
+  // NOTE: the value of shardVersions is a _range_ of versions, from one Int to another Int.  It's just
+  // encoded as a Long so that we can easily query for a version range together and write it together.
+  object shardVersions extends MapColumn[PartitionTable, Partition, Long, Long](this)
   object chunkSize extends IntColumn(this)
   object hash extends IntColumn(this)
   // scalastyle:on
@@ -32,8 +30,7 @@ sealed class PartitionTable extends CassandraTable[PartitionTable, Partition] {
     Partition(dataset(row),
               partition(row),
               ShardingStrategy.deserialize(shardingStrategy(row)),
-              firstRowId(row),
-              versionRange(row).map(l => PartitionTable.long2ints(l)),
+              shardVersions(row).mapValues(l => PartitionTable.long2ints(l)),
               chunkSize(row))
 }
 
@@ -82,34 +79,32 @@ object PartitionTable extends PartitionTable with SimpleCassandraConnector {
       .handleErrors
 
   /**
-   * Adds a shard to an existing Partition, validating the updated partition and also
+   * Adds a shard and version to an existing Partition, validating the updated partition and also
    * doing a compare-and-write on the hashcode to ensure partition state is consistent
+   * NOTE: Suggest calling partition.contains() first to avoid unnecessary updates
    * @param partition the Partition object to update
    * @param firstRowId the first rowID of the new shard
-   * @param versionRange the range of version numbers for the new shard
-   * @return Success, NotValid if the new shard is not valid, InconsistentState
+   * @param version the version number to add
+   * @return Success, InconsistentState
    */
-  def addShard(partition: Partition,
-               firstRowId: Long,
-               versionRange: (Int, Int)): Future[Response] = {
-    partition.addShard(firstRowId, versionRange) match {
-      case None          => Future(Partition.NotValid)
-      case Some(newPart) =>
-        update.where(_.dataset eqs newPart.dataset).and(_.partition eqs newPart.partition)
-              .modify(_.firstRowId append firstRowId)
-              .and(_.versionRange append ints2long(versionRange._1, versionRange._2))
-              .and(_.hash setTo newPart.hashCode)
-              .onlyIf(_.hash eqs partition.hashCode)
-              .future().toResponse(InconsistentState)
-    }
+  def addShardVersion(partition: Partition,
+                      firstRowId: Long,
+                      version: Int): Future[Response] = {
+    val newPart = partition.addShardVersion(firstRowId, version)
+    val (minVer, maxVer) = newPart.shardVersions(firstRowId)
+    update.where(_.dataset eqs newPart.dataset).and(_.partition eqs newPart.partition)
+          .modify(_.shardVersions put (firstRowId -> ints2long(minVer, maxVer)))
+          .and(_.hash setTo newPart.hashCode)
+          .onlyIf(_.hash eqs partition.hashCode)
+          .future().toResponse(InconsistentState)
   }
 
   // Partial function mapping commands to functions executing them
   val commandMapper: PartialFunction[Command, Future[Response]] = {
     case Partition.NewPartition(partition)          => newPartition(partition)
     case Partition.GetPartition(dataset, partition) => getPartition(dataset, partition)
-    case Partition.AddShard(partition, firstRowId, versions) => addShard(partition, firstRowId, versions)
-    // case Partition.UpdatePartition(partition) => ???
+    case Partition.AddShardVersion(partition, firstRowId, version) =>
+      addShardVersion(partition, firstRowId, version)
     // case Partition.DeletePartition(dataset, name) => ???
   }
 }
