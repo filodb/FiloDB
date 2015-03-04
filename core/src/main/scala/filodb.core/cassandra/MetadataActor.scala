@@ -1,9 +1,8 @@
 package filodb.core.cassandra
 
-import akka.actor.{Actor, Props}
-import scala.concurrent.Future
+import akka.actor.Props
 
-import filodb.core.messages.{Command, Response, NoSuchCommand}
+import filodb.core.CommandThrottlingActor
 
 /**
  * The MetadataActor regulates all future/async operations on Cassandra
@@ -15,55 +14,12 @@ object MetadataActor {
 
   val DefaultMaxOutstandingFutures = 32
 
-  // Returned when the # of outstanding futures is too high
-  case object TooManyOutstandingFutures
-  case object FutureCompleted
+  val metadataMapper: CommandThrottlingActor.Mapper =
+    DatasetTableOps.commandMapper orElse
+    ColumnTable.commandMapper orElse
+    PartitionTable.commandMapper
 
   // Use this to create the class. Actors cannot be directly instantiated
   def props(maxOutstandingFutures: Int = DefaultMaxOutstandingFutures): Props =
-    Props(classOf[MetadataActor], maxOutstandingFutures)
-
-  val DefaultMapper: PartialFunction[Command, Future[Response]] = {
-    case x: Any => Future { NoSuchCommand }
-  }
-}
-
-/**
- * For now, just rejects commands if the # of outstanding futures is too high.
- * In the future, support cancelling individual futures?
- *
- * Note to those new to Actors:
- * 1. You cannot directly instantiate them, nor directly access even public variables.
- *    All access is via messages.
- * 2. No need to synchronize any vars, because actor code only runs on one thread at a time
- *
- * TODO: send metrics to a metrics collector actor
- */
-class MetadataActor(maxOutstandingFutures: Int) extends Actor {
-  import MetadataActor._
-  import context.dispatcher   // for future callbacks
-
-  var outstandingFutures = 0
-
-  // Chain all the partial functions together into one big mapper
-  val commandMapper = DatasetTableOps.commandMapper orElse
-                      ColumnTable.commandMapper orElse
-                      PartitionTable.commandMapper orElse
-                      DefaultMapper
-
-  def receive: Receive = {
-    case FutureCompleted       => if (outstandingFutures > 0) outstandingFutures -= 1
-    case c: Command            =>
-      if (outstandingFutures >= maxOutstandingFutures) {
-        // TODO: log/send rejection metrics
-        sender ! TooManyOutstandingFutures
-      } else {
-        outstandingFutures += 1
-        val originator = sender   // sender is a function, don't call in the callback
-        commandMapper(c).onSuccess { case response: Response =>
-          self ! FutureCompleted
-          originator ! response
-        }
-      }
-  }
+    Props(classOf[CommandThrottlingActor], metadataMapper, maxOutstandingFutures)
 }
