@@ -10,8 +10,6 @@ import filodb.core.CommandThrottlingActor
  * futures.
  */
 object MetadataActor {
-  import com.websudos.phantom.Implicits._
-
   val DefaultMaxOutstandingFutures = 32
 
   val metadataMapper: CommandThrottlingActor.Mapper =

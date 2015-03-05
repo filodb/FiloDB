@@ -1,11 +1,6 @@
 package filodb.core.cassandra
 
 import akka.actor.{ActorSystem, ActorRef}
-import akka.testkit.ImplicitSender
-import akka.testkit.TestKit
-import com.websudos.phantom.testing.SimpleCassandraTest
-import org.scalatest.FunSpecLike
-import scala.concurrent.Await
 import scala.concurrent.duration._
 
 import filodb.core.metadata.{Column, Dataset, Partition}
@@ -15,25 +10,15 @@ object MetadataActorSpec {
   def getNewSystem = ActorSystem("test")
 }
 
-class MetadataActorSpec extends TestKit(MetadataActorSpec.getNewSystem)
-with FunSpecLike with ImplicitSender with SimpleCassandraTest {
-  val keySpace = "test"
-
+class MetadataActorSpec extends AllTablesTest(MetadataActorSpec.getNewSystem) {
   lazy val actor = system.actorOf(MetadataActor.props())
 
-  import scala.concurrent.ExecutionContext.Implicits.global
-
-  // First create the datasets table
   override def beforeAll() {
     super.beforeAll()
-    val f = for { _ <- DatasetTableOps.create.future()
-                  _ <- DatasetTableOps.truncate.future()
-                  _ <- ColumnTable.create.future()
-                  _ <- ColumnTable.truncate.future()
-                  _ <- PartitionTable.create.future()
-                  _ <- PartitionTable.truncate.future() } yield { 0 }
-    Await.result(f, 3 seconds)
+    createAllTables()
   }
+
+  before { truncateAllTables() }
 
   it("should return AlreadyExists when sending NewDataset message") {
     actor ! Dataset.NewDataset("gdelt")

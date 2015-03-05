@@ -69,9 +69,9 @@
             <parameter name="ignore"><![CDATA[-1,0,1,2,3]]></parameter>
         </parameters>
     </check>
-    <check level="error" class="org.scalastyle.scalariform.MultipleStringLiteralsChecker" enabled="true">
+    <check level="error" class="org.scalastyle.scalariform.MultipleStringLiteralsChecker" enabled="false">
         <parameters>
-            <parameter name="allowed">1</parameter>
+            <parameter name="allowed">3</parameter>
             <parameter name="ignoreRegex">^\&quot;\&quot;$</parameter>
         </parameters>
     </check>

@@ -5,7 +5,7 @@ import java.nio.ByteBuffer
 
 import filodb.core.BaseActor
 import filodb.core.messages._
-import filodb.core.metadata.{Column, Partition}
+import filodb.core.metadata.{Column, Partition, Shard}
 
 /**
  * One IngesterActor instance is created for each dataset/partition ingestion pipeline.
@@ -29,13 +29,16 @@ object IngesterActor {
   // /////////// Responses
 
   case object CannotLockPartition extends ErrorResponse
-  case class UndefinedColumns(undefined: Seq[String]) extends ErrorResponse
+  case class NoDatasetColumns(dataset: String) extends ErrorResponse
+  case class UndefinedColumns(dataset: String, undefined: Seq[String]) extends ErrorResponse
 
   // Sent from IngesterActor when start of ingestion can begin
   case class GoodToGo(partition: Partition, schema: Column.Schema) extends Response
 
-  // Sent from IngesterActor when its ready for more chunks
-  case class Ready(dataset: String, partition: String)
+  case class Ack(dataset: String, partition: String, seqId: Long) extends Response
+  case class ShardingError(dataset: String, partition: String, seqId: Long) extends ErrorResponse
+  case class WriteError(dataset: String, partition: String, seqId: Long, resp: ErrorResponse)
+    extends ErrorResponse
 
   // /////////// States
 
@@ -77,6 +80,8 @@ import IngesterActor._
  *
  * Acks and failure handling:
  *
+ * Errors during the initial partition/schema verification phase will cause the actor to shut itself down.
+ *
  * Every columnar chunk coming into IngesterActor has a sequence ID.  Both when writing to
  * the dataWriterActor as well as the metadataActor if necessary, IngesterActor will get acks back
  * with the sequenceID.  IngesterActor keeps track of the un-acked sequenceIDs and only sends back
@@ -102,14 +107,21 @@ class IngesterActor(dataset: String,
   // TODO: what to do about versions?
   metadataActor ! Column.GetSchema(dataset, Integer.MAX_VALUE)
 
+  def killMyself(msg: Any): State = {
+    context.parent ! msg
+    self ! PoisonPill
+    stay using Uninitialized
+  }
+
   when(GetSchema) {
     case Event(Column.TheSchema(schema), Uninitialized) =>
       val undefinedCols = invalidColumns(columns, schema)
-      if (undefinedCols.nonEmpty) {
-        logger.info(s"Undefined columns $undefinedCols for dataset $dataset...")
-        context.parent ! UndefinedColumns(undefinedCols.toSeq)
-        self ! PoisonPill
-        stay using Uninitialized
+      if (schema.isEmpty) {
+        logger.info(s"Either no columns defined or no dataset $dataset")
+        killMyself(NoDatasetColumns(dataset))
+      } else if (undefinedCols.nonEmpty) {
+        logger.info(s"Undefined columns $undefinedCols for dataset $dataset with schema $schema")
+        killMyself(UndefinedColumns(dataset, undefinedCols.toSeq))
       } else {
         metadataActor ! Partition.GetPartition(dataset, partitionName)
         goto(GetPartition) using GotSchema(schema)
@@ -120,19 +132,42 @@ class IngesterActor(dataset: String,
     case Event(Partition.ThePartition(partObj), GotSchema(schema)) =>
       context.parent ! GoodToGo(partObj, schema)
       goto(Ready) using GotData(partObj, schema)
+    case Event(NotFound, GotSchema(schema)) =>
+      killMyself(NotFound)
   }
 
   when(Ready) {
     case Event(ChunkedColumns(version, (firstRowId, lastRowId), lastSequenceNo, columnsBytes),
                data: GotData) =>
+      val partObj = data.partition
+
+      // TODO: 0. Check the columns against the schema
 
       // 1. Figure out the shard
-      val shardStrategy = data.partition.shardingStrategy
-      // 2. Update partition shard info if needed
-      // 3. Forward to dataWriterActor
+      partObj.shardingStrategy.getShard(partObj, firstRowId, version) match {
+        case None =>
+          context.parent ! ShardingError(partObj.dataset, partObj.partition, lastSequenceNo)
+          goto(Ready) using data
+        case Some(shardRowId) =>
+          // 2. Update partition shard info if needed
+          if (!partObj.contains(shardRowId, version)) {
+            metadataActor ! Partition.AddShardVersion(partObj, shardRowId, version)
+            // track Ack from metadataActor
+          }
 
+          // 3. Forward to dataWriterActor
+          val shard = Shard(partObj, version, shardRowId)
+          val writeCmd = Shard.WriteColumnData(shard, firstRowId, lastSequenceNo, columnsBytes)
+          dataWriterActor ! writeCmd
+
+          goto(Ready) using data
+      }
       // TODO: stay at Ready or go to Waiting depending on how many chunks we have left to go before able to
       // send again
+
+    case Event(ack: Shard.Ack, data: GotData) =>
+      // For now, just pass the ack straight back.  In the future, we'll want to use this for throttling
+      context.parent ! Ack(data.partition.dataset, data.partition.partition, ack.lastSequenceNo)
       goto(Ready) using data
   }
 }

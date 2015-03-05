@@ -93,4 +93,11 @@ object DataTable extends DataTable with SimpleCassandraConnector {
     batch.future().toResponse()
       .collect { case Success => Ack(lastSequenceNo) }
   }
+
+  // Partial function mapping commands to functions executing them
+  // In this case only covers the writing commands, reads are different
+  val commandMapper: PartialFunction[Command, Future[Response]] = {
+    case WriteColumnData(shard, rowId, lastSeqNo, colBytes) =>
+      insertOneChunk(shard, rowId, lastSeqNo, colBytes)
+  }
 }
