@@ -1,0 +1,15 @@
+graph TB
+  RI1(RowIngester A/part1 JSON)
+  RI2(RowIngester A/part1 other)
+  RI3(RowIngester B/part0)
+  CI1(ColumnChunkIngester A/part1)
+  CI2(ColumnChunkIngester B/part0)
+  H(HTTP JSON) -->|Akka local| RI1
+  RI1 -->|Akka local| CI1
+  Spark(Spark GeoRegionCoding) -->|Akka remote| CI1
+  RI2 -->|Akka local| CI1
+  K(Kafka streaming) -->|Akka remote| RI3
+  RI3 -->|Akka local| CI2
+  Client -->|HTTP| H
+  CI1 --> C(Cassandra)
+  CI2 --> C
