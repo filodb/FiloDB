@@ -1,17 +1,23 @@
-User->Coord: StartIngestion(partitionName)
-Ingester->DatasetMetadata: getLockOnPartition
-DatasetMetadata->Ingester: locked
-Coord->User: ack
-DataWriter->Ingester: Ready
-Ingester->DatasetMetadata: getPartitionShardInfo
-DatasetMetadata->Ingester: partitionShardInfo
-Ingester->Coord: Ready
+User->Coord: StartIngestion(dataset, partition, columns)
+Coord->Ingester: start actor
+Ingester->MetadataActor: GetPartitionLock
+MetadataActor->Ingester: Success
+Ingester->MetadataActor: GetSchema
+MetadataActor->Ingester: TheSchema
+Ingester->MetadataActor: GetPartition
+MetadataActor->Ingester: ThePartition
+Ingester->Coord: GoodToGo(partition)
+Coord->RowIngester: Start(chunkSize)
+Coord->User: Ack or Failure
 User->Coord: Seq[(rowNo, data)]
-Coord->Row2Column: rows
-Row2Column->Ingester: column bytes, row # range
-Ingester->DataWriter: (rowID, columns-bytes)
-DataWriter->Cass: async write bytes
-Cass->DataWriter: write done
-DataWriter->Ingester: Ack(seq #)
+Coord->RowIngester: rows
+RowIngester->Ingester: ChunkedColumns(seq#, row#, columns)
+opt need new shard?
+    Ingester->MetadataActor: AddShardVersion
+end
+Ingester->DataWriterActor: WriteColumnData
+DataWriterActor->Cass: async write bytes
+Cass->DataWriterActor: write done
+DataWriterActor->Ingester: Ack(seq #)
 Ingester->Coord: Ack(seq #)
 Coord->User: 200

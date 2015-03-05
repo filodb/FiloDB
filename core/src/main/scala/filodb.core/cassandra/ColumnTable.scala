@@ -12,6 +12,7 @@ import filodb.core.metadata.Column
  * Represents the "columns" Cassandra table tracking column and schema changes for a dataset
  */
 sealed class ColumnTable extends CassandraTable[ColumnTable, Column] {
+  // scalastyle:off
   object dataset extends StringColumn(this) with PartitionKey[String]
   object version extends IntColumn(this) with PrimaryKey[Int]
   object name extends StringColumn(this) with PrimaryKey[String]
@@ -19,6 +20,7 @@ sealed class ColumnTable extends CassandraTable[ColumnTable, Column] {
   object serializer extends StringColumn(this)
   object isDeleted extends BooleanColumn(this)
   object isSystem extends BooleanColumn(this)
+  // scalastyle:on
 
   // May throw IllegalArgumentException if cannot convert one of the string types to one of the Enums
   override def fromRow(row: Row): Column =

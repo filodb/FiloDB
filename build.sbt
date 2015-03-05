@@ -16,7 +16,8 @@ val akkaVersion    = "2.3.7"
 lazy val extraRepos = Seq(
   "Typesafe repository releases" at "http://repo.typesafe.com/typesafe/releases/",
   "twitter-repo" at "http://maven.twttr.com",
-  "websudos-repo" at "http://maven.websudos.co.uk/ext-release-local"
+  "websudos-repo" at "http://maven.websudos.co.uk/ext-release-local",
+  "Velvia Bintray" at "https://dl.bintray.com/velvia/maven"
 )
 
 lazy val coreDeps = Seq(
@@ -26,6 +27,7 @@ lazy val coreDeps = Seq(
   "com.typesafe.scala-logging" %% "scala-logging-slf4j" % "2.1.2",
   "ch.qos.logback"        % "logback-classic"   % "1.0.7",
   "com.beachape"         %% "enumeratum"        % "0.0.4",
+  "org.velvia.filo"      %% "filo-scala"        % "0.0.2",
   "com.websudos"         %% "phantom-testing"   % phantomVersion % "test",
   "com.typesafe.akka"    %% "akka-testkit"      % akkaVersion % "test"
 )
@@ -37,4 +39,20 @@ lazy val coreSettings = Seq(
   scalacOptions ++= Seq("-Xlint", "-deprecation", "-Xfatal-warnings", "-feature")
 )
 
-lazy val universalSettings = coreSettings
+lazy val universalSettings = coreSettings ++ styleSettings
+
+// Create a default Scala style task to run with tests
+lazy val testScalastyle = taskKey[Unit]("testScalastyle")
+
+lazy val compileScalastyle = taskKey[Unit]("compileScalastyle")
+
+lazy val styleSettings = Seq(
+  testScalastyle := org.scalastyle.sbt.ScalastylePlugin.scalastyle.in(Test).toTask("").value,
+  // (scalastyleConfig in Test) := "scalastyle-test-config.xml",
+  // This is disabled for now, cannot get ScalaStyle to recognize the file above for some reason :/
+  // (test in Test) <<= (test in Test) dependsOn testScalastyle,
+  scalastyleFailOnError := true,
+  compileScalastyle := org.scalastyle.sbt.ScalastylePlugin.scalastyle.in(Compile).toTask("").value,
+  // Is running this on compile too much?
+  (compile in Compile) <<= (compile in Compile) dependsOn compileScalastyle
+)
