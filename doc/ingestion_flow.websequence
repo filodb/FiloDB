@@ -9,14 +9,11 @@ MetadataActor->Ingester: ThePartition
 Ingester->Coord: GoodToGo(partition)
 Coord->RowIngester: Start(chunkSize)
 Coord->User: Ack or Failure
-Ingester->DataWriterActor: RegisterMe
-DataWriterActor->Ingester: Ready
-Ingester->Coord: Ready
 User->Coord: Seq[(rowNo, data)]
 Coord->RowIngester: rows
 RowIngester->Ingester: ChunkedColumns(seq#, row#, columns)
 opt need new shard?
-    Ingester->MetadataActor: AddShard
+    Ingester->MetadataActor: AddShardVersion
 end
 Ingester->DataWriterActor: WriteColumnData
 DataWriterActor->Cass: async write bytes
