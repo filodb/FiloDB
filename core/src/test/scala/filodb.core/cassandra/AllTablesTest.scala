@@ -3,15 +3,22 @@ package filodb.core.cassandra
 import akka.actor.{ActorSystem, ActorRef}
 import akka.testkit.{ImplicitSender, TestKit}
 import com.websudos.phantom.testing.SimpleCassandraTest
-import org.scalatest.{FunSpecLike, Matchers, BeforeAndAfter}
+import org.scalatest.{FunSpecLike, Matchers, BeforeAndAfter, BeforeAndAfterAll}
 import scala.concurrent.Await
 import scala.concurrent.duration._
 
 import filodb.core.metadata.{Column, Dataset, Partition}
 import filodb.core.messages._
 
-abstract class AllTablesTest(system: ActorSystem) extends TestKit(system)
-with FunSpecLike with Matchers with BeforeAndAfter with ImplicitSender with SimpleCassandraTest {
+abstract class ActorTest(system: ActorSystem) extends TestKit(system)
+with FunSpecLike with Matchers with BeforeAndAfterAll with BeforeAndAfter with ImplicitSender {
+  override def afterAll() {
+    super.afterAll()
+    TestKit.shutdownActorSystem(system)
+  }
+}
+
+abstract class AllTablesTest(system: ActorSystem) extends ActorTest(system) with SimpleCassandraTest {
   val keySpace = "test"
 
   import scala.concurrent.ExecutionContext.Implicits.global
@@ -33,11 +40,6 @@ with FunSpecLike with Matchers with BeforeAndAfter with ImplicitSender with Simp
                   _ <- PartitionTable.truncate.future()
                   _ <- DataTable.truncate.future() } yield { 0 }
     Await.result(f, 3 seconds)
-  }
-
-  override def afterAll() {
-    super.afterAll()
-    TestKit.shutdownActorSystem(system)
   }
 
   val GdeltColumns = Seq("id" -> Column.ColumnType.LongColumn,
