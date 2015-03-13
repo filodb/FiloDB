@@ -37,6 +37,12 @@ object RowIngesterActor {
   case class Row[R](sequenceNo: Long, rowId: Long, version: Int, row: R)
 
   /**
+   * Flushes the currently cached rows as columnar chunks.
+   * TODO: call Flush periodically so rows don't sit and get stale in the cache.
+   */
+  case object Flush
+
+  /**
    * Creates a new RowIngesterActor (to be used in system.actorOf(....))
    * Note: partition does not need to include shard info, just chunkSize, dataset and partition name.
    */
@@ -76,6 +82,11 @@ class RowIngesterActor[R](ingesterActor: ActorRef,
 
   val chunkBuilder = new RowToColumnBuilder(schemaToFiloSchema(schema), rowIngestSupport)
 
+  // Called after termination and message queue shut down
+  override def postStop(): Unit = {
+    flush()
+  }
+
   def chunk(rowId: Long): Long = rowId / partition.chunkSize
 
   def createChunkFromRows(): Map[String, ByteBuffer] = {
@@ -111,5 +122,6 @@ class RowIngesterActor[R](ingesterActor: ActorRef,
       lastRowId = rowId
       lastChunk = chunk(rowId)
       rows += row.asInstanceOf[Row[R]]
+    case Flush => flush()
   }
 }

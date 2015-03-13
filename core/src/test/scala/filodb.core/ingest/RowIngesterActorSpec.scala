@@ -1,6 +1,6 @@
 package filodb.core.ingest
 
-import akka.actor.ActorSystem
+import akka.actor.{ActorSystem, PoisonPill}
 import akka.testkit.TestProbe
 import org.velvia.filo.{ColumnParser, TupleRowIngestSupport}
 import scala.concurrent.duration._
@@ -77,5 +77,26 @@ class RowIngesterActorSpec extends ActorTest(RowIngesterActorSpec.system) {
     chunk2.lastSequenceNo should equal (3L)
   }
 
-  it("should flush when Flush command issued, or actor is told to shut down") (pending)
+  it("should flush when Flush command issued, or actor is told to shut down") {
+    val probe = TestProbe()
+    lazy val rowIngestActor = system.actorOf(
+                                RowIngesterActor.props(probe.ref, schema, testPartition, support))
+
+    // Ingest 3 rows at version 0, flush, check
+    (0 until 3).foreach { i => rowIngestActor ! Row(i, i, 0, names(i)) }
+    rowIngestActor ! RowIngesterActor.Flush
+    val chunk = probe.expectMsgClass(classOf[IngesterActor.ChunkedColumns])
+    chunk.version should equal (0)
+    chunk.rowIdRange should equal ((0L, 2L))
+    chunk.lastSequenceNo should equal (2L)
+
+    // Ingest 2 more rows, shut down actor, check for chunk
+    (3 to 4).foreach { i => rowIngestActor ! Row(i, i, 0, names(i)) }
+    rowIngestActor ! PoisonPill
+    val chunk2 = probe.expectMsgClass(classOf[IngesterActor.ChunkedColumns])
+    chunk2.version should equal (0)
+    // TODO: if we start writing non-aligned chunks then change this
+    chunk2.rowIdRange should equal ((0L, 4L))
+    chunk2.lastSequenceNo should equal (4L)
+  }
 }
