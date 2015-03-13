@@ -53,7 +53,9 @@ Each request would include the following:
 
 Deletes should not be mixed with appends and replaces, and should go in a separate version, otherwise it would be difficult or impossible to reach the current state of a version without replaying every sequence.
 
-Sequence numbers would be generated for every incoming row starting at 0 for the first row received.  Perhaps one option (for implementing regular HTTP streaming ingestion) is to let the user specify the sequence number or a starting sequence number.
+Sequence numbers would be generated for every incoming row starting at 0 for the first row received.  Perhaps one option (for chunking long ingresses into multiple HTTP POSTs) is to let the user specify the sequence number or a starting sequence number.
+
+Concurrent HTTP POSTs to the same dataset and partition are not allowed.
 
 Responses:
 - 200, if every sequence number/row was acked
@@ -161,10 +163,12 @@ downstream writer, the client also has throttling, preventing flooding.
 
 ![](ingestion-architecture.mermaid.png)
 
+Note that there is only essentially one ingestion pipeline per dataset and partition, with the exception of computed columns and materialized view generation.
+
 **RowIngester** - ingest individual rows with a sequence # and Row ID.  A RowIngester groups the rows into chunks aligned with the chunksize and translates into columnar format.
 - Translates rows into columnar chunks
 - Does schema validation
-- One `RowIngester` per (dataset, partition, schema, rowType)
+- One `RowIngester` per (dataset, partition) at a time
 - Handles replaces and deletes by translating into columnChunk operations (stateful)
 - May verify that deletes don't happen mixed with appends in same version
 - May need to cache ingested rows for efficient writes (eg chunk is partially complete, store previous rows so they can be picked up in memory)
