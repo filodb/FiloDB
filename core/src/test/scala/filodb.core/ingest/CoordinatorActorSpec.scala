@@ -45,65 +45,56 @@ class CoordinatorActorSpec extends AllTablesTest(CoordinatorActorSpec.getNewSyst
     it("should return NoDatasetColumns when dataset missing or no columns defined") {
       createTable("noColumns", "first", Nil)
 
-      withCoordinatorActor("none", "first", GdeltColNames) { ingester =>
+      withCoordinatorActor("none", "first", GdeltColNames) { coordinator =>
         expectMsg(CoordinatorActor.NoDatasetColumns)
       }
 
-      withCoordinatorActor("noColumns", "first", GdeltColNames) { ingester =>
+      withCoordinatorActor("noColumns", "first", GdeltColNames) { coordinator =>
         expectMsg(CoordinatorActor.NoDatasetColumns)
       }
     }
 
     it("should return error when dataset present but partition not defined") {
       createTable("gdelt", "1979-1984", GdeltColumns)
-      withCoordinatorActor("gdelt", "2001", GdeltColNames) { ingester =>
+      withCoordinatorActor("gdelt", "2001", GdeltColNames) { coordinator =>
         expectMsg(NotFound)
       }
     }
 
     it("should return UndefinedColumns if trying to ingest undefined columns") {
       createTable("gdelt", "1979-1984", GdeltColumns)
-      withCoordinatorActor("gdelt", "1979-1984", Seq("monthYear", "last")) { ingester =>
+      withCoordinatorActor("gdelt", "1979-1984", Seq("monthYear", "last")) { coordinator =>
         expectMsg(CoordinatorActor.UndefinedColumns(Seq("last")))
       }
     }
 
     it("should return RowIngestionReady if dataset, partition, columns all validate") {
       createTable("gdelt", "1979-1984", GdeltColumns)
-      withCoordinatorActor("gdelt", "1979-1984", GdeltColNames) { ingester =>
+      withCoordinatorActor("gdelt", "1979-1984", GdeltColNames) { coordinator =>
         expectMsgType[CoordinatorActor.RowIngestionReady]
       }
     }
   }
 
-  // val dummyBytes = ByteBuffer.wrap(Array[Byte](0, 1, 2, 3, 4, 5))
-  // val columnsBytes = Map("id" -> dummyBytes,
-  //                        "sqlDate" -> dummyBytes)
-  // val columnsToWrite = columnsBytes.keys.toSeq
-  // val chunkCmd = CoordinatorActor.ChunkedColumns(0, 0L -> 5L, 5L, columnsBytes)
+  val rows = Seq(
+    (Some(0L), Some("2015/03/15T15:00Z"), Some(32015), Some(2015)),
+    (Some(1L), Some("2015/03/15T16:00Z"), Some(32015), Some(2015))
+  )
 
-  // describe("IngesterActor ingestion") {
-  //   it("should return Acks and update partition shards when ingesting column chunks") {
-  //     createTable("gdelt", "1979-1984", GdeltColumns)
-  //     withIngesterActor("gdelt", "1979-1984", columnsToWrite) { ingester =>
-  //       expectMsgType[IngesterActor.GoodToGo]
-  //       ingester ! chunkCmd
-  //       expectMsg(IngesterActor.Ack("gdelt", "1979-1984", 5L))
+  it("should be able to start ingestion, send rows, and get an ack back") {
+    createTable("gdelt", "1979-1984", GdeltColumns)
+    withCoordinatorActor("gdelt", "1979-1984", GdeltColNames) { coordinator =>
+      val ready = expectMsgType[CoordinatorActor.RowIngestionReady]
+      val rowIngester = ready.rowIngestActor
+      rows.zipWithIndex.foreach { case (row, i) =>
+        rowIngester ! RowIngesterActor.Row(i.toLong, i.toLong, 0, row)
+      }
+      rowIngester ! RowIngesterActor.Flush
 
-  //       metaActor ! Partition.GetPartition("gdelt", "1979-1984")
-  //       val Partition.ThePartition(p) = expectMsgType[Partition.ThePartition]
-  //       p.shardVersions.size should equal (1)
-  //     }
-  //   }
+      expectMsg(IngesterActor.Ack("gdelt", "1979-1984", 1L))
+    }
+  }
 
-  //   it("should return ShardingError if invalid version or rowId") {
-  //     createTable("gdelt", "1979-1984", GdeltColumns)
-  //     withIngesterActor("gdelt", "1979-1984", columnsToWrite) { ingester =>
-  //       expectMsgType[IngesterActor.GoodToGo]
-  //       ingester ! chunkCmd.copy(version = -1)
-  //       expectMsg(IngesterActor.ShardingError("gdelt", "1979-1984", 5L))
-  //     }
-  //   }
-  // }
+  it("should be able to stop ingestion stream") (pending)
 }
 
