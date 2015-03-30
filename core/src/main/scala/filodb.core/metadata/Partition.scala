@@ -76,6 +76,8 @@ case class Partition(dataset: String,
       this.copy(shardVersions = this.shardVersions + (firstRowId -> (version -> version)))
     }
   }
+
+  override def toString: String = s"$dataset-$partition"
 }
 
 object Partition {

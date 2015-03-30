@@ -54,5 +54,5 @@ lazy val styleSettings = Seq(
   scalastyleFailOnError := true,
   compileScalastyle := org.scalastyle.sbt.ScalastylePlugin.scalastyle.in(Compile).toTask("").value,
   // Is running this on compile too much?
-  (compile in Compile) <<= (compile in Compile) dependsOn compileScalastyle
+  (compile in Test) <<= (compile in Test) dependsOn compileScalastyle
 )

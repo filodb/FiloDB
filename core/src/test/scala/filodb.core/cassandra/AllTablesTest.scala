@@ -51,16 +51,20 @@ abstract class AllTablesTest(system: ActorSystem) extends ActorTest(system) with
 
   def createTable(datasetName: String,
                   partitionName: String,
-                  columns: Seq[(String, Column.ColumnType)]): Unit = {
+                  columns: Seq[(String, Column.ColumnType)]): (Partition, Seq[Column]) = {
     metaActor ! Dataset.NewDataset(datasetName)
     expectMsg(Success)
 
-    metaActor ! Partition.NewPartition(Partition(datasetName, partitionName))
+    val partObj = Partition(datasetName, partitionName)
+    metaActor ! Partition.NewPartition(partObj)
     expectMsg(Success)
 
-    columns.foreach { case (name, colType) =>
-      metaActor ! Column.NewColumn(Column(name, datasetName, 0, colType))
+    val columnSeq = columns.map { case (name, colType) => Column(name, datasetName, 0, colType) }
+    columnSeq.foreach { column =>
+      metaActor ! Column.NewColumn(column)
       expectMsg(Success)
     }
+
+    (partObj, columnSeq)
   }
 }

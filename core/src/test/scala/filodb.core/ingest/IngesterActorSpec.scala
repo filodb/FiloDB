@@ -27,12 +27,10 @@ class IngesterActorSpec extends AllTablesTest(IngesterActorSpec.getNewSystem) {
 
   before { truncateAllTables() }
 
-  def withIngesterActor(dataset: String, partition: String, columns: Seq[String])(f: ActorRef => Unit) {
-    // IngesterActor sends messages back to the parent who started it.  TestActorRef will cause
-    // the actor to think that testActor (which expectMsg uses) is the parent; otherwise expectMsg won't work!
-    val ingester = TestActorRef(IngesterActor.props(dataset, partition, columns,
-                                                    metaActor, writerActor),
-                                testActor, "testIngester")
+  def withIngesterActor(dataset: String, partition: String, columns: Seq[(String, Column.ColumnType)])
+                       (f: ActorRef => Unit) {
+    val (partObj, columnSeq) = createTable(dataset, partition, columns)
+    val ingester = system.actorOf(IngesterActor.props(partObj, columnSeq, metaActor, writerActor, testActor))
     try {
       f(ingester)
     } finally {
@@ -43,52 +41,15 @@ class IngesterActorSpec extends AllTablesTest(IngesterActorSpec.getNewSystem) {
     }
   }
 
-  describe("IngesterActor initialization") {
-    it("should return NoDatasetColumns when dataset missing or no columns defined") {
-      createTable("noColumns", "first", Nil)
-
-      withIngesterActor("none", "first", GdeltColNames) { ingester =>
-        expectMsg(IngesterActor.NoDatasetColumns("none"))
-      }
-
-      withIngesterActor("noColumns", "first", GdeltColNames) { ingester =>
-        expectMsg(IngesterActor.NoDatasetColumns("noColumns"))
-      }
-    }
-
-    it("should return error when dataset present but partition not defined") {
-      createTable("gdelt", "1979-1984", GdeltColumns)
-      withIngesterActor("gdelt", "2001", GdeltColNames) { ingester =>
-        expectMsg(NotFound)
-      }
-    }
-
-    it("should return UndefinedColumns if trying to ingest undefined columns") {
-      createTable("gdelt", "1979-1984", GdeltColumns)
-      withIngesterActor("gdelt", "1979-1984", Seq("monthYear", "last")) { ingester =>
-        expectMsg(IngesterActor.UndefinedColumns("gdelt", Seq("last")))
-      }
-    }
-
-    it("should return GoodToGo if dataset, partition, columns all validate") {
-      createTable("gdelt", "1979-1984", GdeltColumns)
-      withIngesterActor("gdelt", "1979-1984", GdeltColNames) { ingester =>
-        expectMsgType[IngesterActor.GoodToGo]
-      }
-    }
-  }
-
   val dummyBytes = ByteBuffer.wrap(Array[Byte](0, 1, 2, 3, 4, 5))
   val columnsBytes = Map("id" -> dummyBytes,
                          "sqlDate" -> dummyBytes)
-  val columnsToWrite = columnsBytes.keys.toSeq
+  val columnsToWrite = GdeltColumns.take(2)
   val chunkCmd = IngesterActor.ChunkedColumns(0, 0L -> 5L, 5L, columnsBytes)
 
   describe("IngesterActor ingestion") {
     it("should return Acks and update partition shards when ingesting column chunks") {
-      createTable("gdelt", "1979-1984", GdeltColumns)
       withIngesterActor("gdelt", "1979-1984", columnsToWrite) { ingester =>
-        expectMsgType[IngesterActor.GoodToGo]
         ingester ! chunkCmd
         expectMsg(IngesterActor.Ack("gdelt", "1979-1984", 5L))
 
@@ -99,9 +60,7 @@ class IngesterActorSpec extends AllTablesTest(IngesterActorSpec.getNewSystem) {
     }
 
     it("should return ShardingError if invalid version or rowId") {
-      createTable("gdelt", "1979-1984", GdeltColumns)
       withIngesterActor("gdelt", "1979-1984", columnsToWrite) { ingester =>
-        expectMsgType[IngesterActor.GoodToGo]
         ingester ! chunkCmd.copy(version = -1)
         expectMsg(IngesterActor.ShardingError("gdelt", "1979-1984", 5L))
       }
