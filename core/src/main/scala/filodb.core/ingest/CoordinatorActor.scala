@@ -44,7 +44,7 @@ object CoordinatorActor {
 
   // ////////// Responses
 
-  case class RowIngestionReady(streamId: Int, rowIngestActor: ActorRef)
+  case class RowIngestionReady(streamId: Int, rowIngestActor: ActorRef) extends Response
   case object CannotLockPartition extends ErrorResponse
   case object NoDatasetColumns extends ErrorResponse
   case class UndefinedColumns(undefined: Seq[String]) extends ErrorResponse
@@ -109,5 +109,10 @@ class CoordinatorActor(metadataActor: ActorRef, dataWriterActor: ActorRef) exten
 
     case StopIngestion(streamId) =>
       logger.error("Unimplemented!")
+      ???
+
+    // TODO: implement error recovery and watch actors for termination
+    // Consider restarting everything as a group?
+    // case Terminated(actorRef) =>
   }
 }
