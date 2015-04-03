@@ -1,16 +1,15 @@
-User->Coord: StartIngestion(dataset, partition, columns)
+User->HttpCsvActor: POST
+HttpCsvActor->Coord: StartRowIngestion
+Coord->MetadataActor: GetPartitionLock
+MetadataActor->Coord: Success
+Cooord->MetadataActor: GetSchema
+MetadataActor->Coord: TheSchema
+Coord->MetadataActor: GetPartition
+MetadataActor->Coord: ThePartition
+Coord->HttpCsvActor: RowIngestionReady
 Coord->Ingester: start actor
-Ingester->MetadataActor: GetPartitionLock
-MetadataActor->Ingester: Success
-Ingester->MetadataActor: GetSchema
-MetadataActor->Ingester: TheSchema
-Ingester->MetadataActor: GetPartition
-MetadataActor->Ingester: ThePartition
-Ingester->Coord: GoodToGo(partition)
 Coord->RowIngester: Start(chunkSize)
-Coord->User: Ack or Failure
-User->Coord: Seq[(rowNo, data)]
-Coord->RowIngester: rows
+HttpCsvActor->RowIngester: Seq[(rowNo, data)]
 RowIngester->Ingester: ChunkedColumns(seq#, row#, columns)
 opt need new shard?
     Ingester->MetadataActor: AddShardVersion
@@ -19,5 +18,5 @@ Ingester->DataWriterActor: WriteColumnData
 DataWriterActor->Cass: async write bytes
 Cass->DataWriterActor: write done
 DataWriterActor->Ingester: Ack(seq #)
-Ingester->Coord: Ack(seq #)
-Coord->User: 200
+Ingester->HttpCsvActor: Ack(seq #)
+HttpCsvActor->User: 200

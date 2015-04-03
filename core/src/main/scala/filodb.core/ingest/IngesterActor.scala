@@ -9,8 +9,7 @@ import filodb.core.metadata.{Column, Partition, Shard}
 
 /**
  * One IngesterActor instance is created for each dataset/partition ingestion pipeline.
- * It is responsible for managing the state of a single dataset/partition:
- * - Verifying the schema and metadata at the start of ingestion
+ * It is responsible for writing columnar chunks of a single dataset/partition:
  * - managing and adding shards as needed
  * - Sending data to DataWriterActor and managing backpressure
  *
@@ -28,59 +27,25 @@ object IngesterActor {
 
   // /////////// Responses
 
-  case object CannotLockPartition extends ErrorResponse
-  case class NoDatasetColumns(dataset: String) extends ErrorResponse
-  case class UndefinedColumns(dataset: String, undefined: Seq[String]) extends ErrorResponse
-
-  // Sent from IngesterActor when start of ingestion can begin
-  case class GoodToGo(partition: Partition, schema: Column.Schema) extends Response
-
   case class Ack(dataset: String, partition: String, seqId: Long) extends Response
   case class ShardingError(dataset: String, partition: String, seqId: Long) extends ErrorResponse
   case class WriteError(dataset: String, partition: String, seqId: Long, resp: ErrorResponse)
     extends ErrorResponse
 
-  // /////////// States
-
-  sealed trait IngestState
-  case object GetLock extends IngestState
-  case object GetSchema extends IngestState
-  case object GetPartition extends IngestState
-  case object Ready extends IngestState
-  case object Waiting extends IngestState
-
-  // /////////// Data
-  // /
-  sealed trait Data
-  case object Uninitialized extends Data
-  case class GotSchema(schema: Column.Schema) extends Data
-  case class GotData(partition: Partition, schema: Column.Schema) extends Data
-
-  // /////////// Core functions
-  //
-  def invalidColumns(columns: Seq[String], schema: Column.Schema): Seq[String] =
-    (columns.toSet -- schema.keys).toSeq
-
-  def props(dataset: String,
-            partition: String,
-            columns: Seq[String],
+  def props(partition: Partition,
+            schema: Seq[Column],
             metadataActor: ActorRef,
-            dataWriterActor: ActorRef): Props =
-    Props(classOf[IngesterActor], dataset, partition, columns, metadataActor, dataWriterActor)
+            dataWriterActor: ActorRef,
+            sourceActor: ActorRef): Props =
+    Props(classOf[IngesterActor], partition, schema, metadataActor, dataWriterActor, sourceActor)
 }
 
-import IngesterActor._
-
 /**
- * This is a state machine.  Upon init, not only do the actors get set but it starts to
- * verify the dataset state, schema, etc.
- *
- * Normally the two states are Ready and Waiting.  If more than N unacked chunks are written out,
- * then the actor goes into Waiting state.
+ * Constructor:
+ * @param sourceActor the Actor to whom Acks will flow back to. usually the one pushing new rows
+ *        to RowIngesterActor.
  *
  * Acks and failure handling:
- *
- * Errors during the initial partition/schema verification phase will cause the actor to shut itself down.
  *
  * Every columnar chunk coming into IngesterActor has a sequence ID.  Both when writing to
  * the dataWriterActor as well as the metadataActor if necessary, IngesterActor will get acks back
@@ -93,81 +58,36 @@ import IngesterActor._
  * TODO: Retries
  * TODO: handling acking
  */
-class IngesterActor(dataset: String,
-                    partitionName: String,
-                    columns: Seq[String],
+class IngesterActor(partition: Partition,
+                    schema: Seq[Column],
                     metadataActor: ActorRef,
-                    dataWriterActor: ActorRef) extends BaseActor with FSM[IngestState, Data] {
-  // If partition locking was implemented, we would do something like this:
-  // metadataActor ! GetPartitonLock(dataset, partitionName)
-  // startWith(GetLock, Uninitialized)
+                    dataWriterActor: ActorRef,
+                    sourceActor: ActorRef) extends BaseActor {
+  import IngesterActor._
 
-  startWith(GetSchema, Uninitialized)
-
-  // TODO: what to do about versions?
-  metadataActor ! Column.GetSchema(dataset, Integer.MAX_VALUE)
-
-  def killMyself(msg: Any): State = {
-    context.parent ! msg
-    self ! PoisonPill
-    stay using Uninitialized
-  }
-
-  when(GetSchema) {
-    case Event(Column.TheSchema(schema), Uninitialized) =>
-      val undefinedCols = invalidColumns(columns, schema)
-      if (schema.isEmpty) {
-        logger.info(s"Either no columns defined or no dataset $dataset")
-        killMyself(NoDatasetColumns(dataset))
-      } else if (undefinedCols.nonEmpty) {
-        logger.info(s"Undefined columns $undefinedCols for dataset $dataset with schema $schema")
-        killMyself(UndefinedColumns(dataset, undefinedCols.toSeq))
-      } else {
-        metadataActor ! Partition.GetPartition(dataset, partitionName)
-        goto(GetPartition) using GotSchema(schema)
-      }
-  }
-
-  when(GetPartition) {
-    case Event(Partition.ThePartition(partObj), GotSchema(schema)) =>
-      context.parent ! GoodToGo(partObj, schema)
-      goto(Ready) using GotData(partObj, schema)
-    case Event(NotFound, GotSchema(schema)) =>
-      killMyself(NotFound)
-  }
-
-  when(Ready) {
-    case Event(ChunkedColumns(version, (firstRowId, lastRowId), lastSequenceNo, columnsBytes),
-               data: GotData) =>
-      val partObj = data.partition
-
+  def receive: Receive = {
+    case ChunkedColumns(version, (firstRowId, lastRowId), lastSequenceNo, columnsBytes) =>
       // TODO: 0. Check the columns against the schema
 
       // 1. Figure out the shard
-      partObj.shardingStrategy.getShard(partObj, firstRowId, version) match {
+      partition.shardingStrategy.getShard(partition, firstRowId, version) match {
         case None =>
-          context.parent ! ShardingError(partObj.dataset, partObj.partition, lastSequenceNo)
-          goto(Ready) using data
+          sourceActor ! ShardingError(partition.dataset, partition.partition, lastSequenceNo)
         case Some(shardRowId) =>
           // 2. Update partition shard info if needed
-          if (!partObj.contains(shardRowId, version)) {
-            metadataActor ! Partition.AddShardVersion(partObj, shardRowId, version)
+          if (!partition.contains(shardRowId, version)) {
+            metadataActor ! Partition.AddShardVersion(partition, shardRowId, version)
             // track Ack from metadataActor
           }
 
           // 3. Forward to dataWriterActor
-          val shard = Shard(partObj, version, shardRowId)
+          val shard = Shard(partition, version, shardRowId)
           val writeCmd = Shard.WriteColumnData(shard, firstRowId, lastSequenceNo, columnsBytes)
           dataWriterActor ! writeCmd
-
-          goto(Ready) using data
       }
-      // TODO: stay at Ready or go to Waiting depending on how many chunks we have left to go before able to
-      // send again
 
-    case Event(ack: Shard.Ack, data: GotData) =>
+    case Shard.Ack(lastSeqNo: Long) =>
       // For now, just pass the ack straight back.  In the future, we'll want to use this for throttling
-      context.parent ! Ack(data.partition.dataset, data.partition.partition, ack.lastSequenceNo)
-      goto(Ready) using data
+      sourceActor ! Ack(partition.dataset, partition.partition, lastSeqNo)
   }
 }

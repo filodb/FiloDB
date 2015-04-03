@@ -12,7 +12,79 @@ time, due to the nature of bulk columnar chunk ingestion.  It is not designed
 for lots of tiny row ingestions across a huge number of datasets at once.  It is
 advised that for lots of datasets, they be ingested a few at a time.
 
-## Use Case - Append-Only Writes
+## Ingestion Interfaces and Use Cases
+
+### Akka
+
+The Akka API is the lowest-common-denominator ingestion API.  It is a
+bidirectional socket interface and used by every other interface (though some interfaces like HTTP will interface in the same JVM) It offers
+continuous ACKs to facilitate efficient, streaming at-least-once ingestion, as
+well as backpressure.
+
+Recommend using Kryo/Chill for efficient serialization over the wire.
+
+### Streaming ingestion - Kafka
+
+- Fixed schema agreed upon ahead of time per topic
+- Append only
+- One row per message (or maybe a grouped or chunked set of rows per message, aligned with the chunkSize)
+- One Kafka partition per FiloDB dataset partition -- this makes retries, at-least-once very easy
+    + Kafka sequence numbers == FiloDB sequence numbers
+    + RowID could be inferred from sequence # or separate
+- Version number embedded in message, should be monotonically increasing (except for replaying old messages)
+- Need to pick row format, could potentially use HTTP JSON row format
+
+KafkaConsumer --> AkkaIngestionAPI
+
+### Streaming use case - Spark Streaming, Samza etc.
+
+This is pretty similar to the Kafka case, but we have to be careful of partitions.  If the stream processor has a different mapping of partitions than Kafka, then it needs to regenerate the sequence IDs and think about how to make retries work well.
+
+Spark Streaming, since it's micro-batches, could possibly work with HTTP interface, or use the Akka interface for efficiency.
+
+### HTTP JSON
+
+Each request would include the following:
+- Schema - List of columns to write to
+- Name of dataset, partition, and version
+- Bool: include RowID in each row?
+- Rows, which are JSON arrays corresponding to the schema
+    + A RowID should be prepended.  If not prepended, then rows will be assumed to be append and a rowID generated that corresponds to an append
+
+Deletes should not be mixed with appends and replaces, and should go in a separate version, otherwise it would be difficult or impossible to reach the current state of a version without replaying every sequence.
+
+Sequence numbers would be generated for every incoming row starting at 0 for the first row received.  Perhaps one option (for chunking long ingresses into multiple HTTP POSTs) is to let the user specify the sequence number or a starting sequence number.
+
+Concurrent HTTP POSTs to the same dataset and partition are not allowed.
+
+Responses:
+- 200, if every sequence number/row was acked
+- If an error occurs, the response will include the last successfully acked sequence number
+- Timeout handling...
+
+The HTTP endpoint would be part of the FiloDB service and talk locally to the Akka ingestion API.
+
+### WebSockets / HTTP2?
+
+This would look much more like the Akka binary interface - designed for continuous acks and backpressure.
+
+### Computed columns / Spark
+
+Examples of computed columns:
+- Geo-region-coding (point data --> containing geometry ID)
+- DDLs
+
+The source columns would be read into Spark and the computed results written
+back.  While it is possible to use the row-based or HTTP interfaces for this,
+for efficiency reasons the best would be for the Spark compute layer to convert
+data to columnar chunks using the core FiloDB library, then write the chunks
+directly to the `ColumnChunkIngester` low level API over Akka remote socket
+connection.
+
+Spark --> columnar chunks -->|Akka| ColumnChunkIngester
+
+## Write Patterns
+### Pattern - Append-Only Writes
 
 - User divides dataset into independent partitions, sequences input rows
 - FiloDB internally shards partitions and tracks row IDs
@@ -22,7 +94,7 @@ advised that for lots of datasets, they be ingested a few at a time.
 - Append-only pattern: write to shard with highest starting row ID
 - Regular acks of incoming stream
 
-## Use Case - Random Writes
+### Pattern - Random Writes
 
 - Each row may have a different row ID
 - Inefficient - cannot easily group chunks of rows together
@@ -61,7 +133,9 @@ More complex sharding strategy can be based on the actual # of bytes written, an
 
 A middle ground is an `EstimatingHashingSharder`.  This uses info from the schema to estimate the number of rows per shard to balance shard size and simplicity. However, since the sharding strategy has to be declared when a partition is created, there is potential for divergence if a lot of columns are added in later versions.
 
-It might be possible to have an adaptive sharder, which adapts the shard length based on the latest writes, but it would only work for appends, and cannot jump forwards or backwards.
+### Using TOAST tables
+
+@rjmac suggested using PostGres-style TOAST tables.  In this scheme, variable-size columns would be stored in a different location (perhaps separate CF).  Primary candidates would be long strings and geometry objects like polygons. The column would then just consist of a pointer to the variable size stuff. This would allow for predictable sized columns and more manageable reads, making the sharding easier.
 
 ## Acking and Backpressure
 
@@ -75,6 +149,7 @@ Currently proposed system is this:
 - Source (Kafka or HTTP actor etc.) pulls and pushes data down to ingestion pipe, with a sequenceID
 - Ingestion pipe sends back Acks to the Source with the sequenceID of latest completed writes
 - Source only continues to pull if the latest sent sequenceID - completed sequenceID is below a certain watermark.
+- Ingester also has ability to reject writes if too many writes happen.
 
 The above pattern works well for our pattern where many IngesterActors (each
 representing a separate dataset/partition) are pushing to a common dataWriter
@@ -84,14 +159,28 @@ would require each writer to register with the downstream, we reuse the response
 stream for both acks and backpressure.  Unlike simply using rejection at the
 downstream writer, the client also has throttling, preventing flooding.
 
-## Ingestion API
+## Ingestion Architecture
 
-**High-level Row API** - ingest individual rows with a sequence # and Row ID.  A RowIngester groups the rows into chunks aligned with the chunksize and translates into columnar format.
-- Also takes care of replaces by reading older chunks and doing operations on it
+![](ingestion-architecture.mermaid.png)
 
-**Low-level columnar API** - `Columns(rowId: Long, endingSequenceNo: Long, columns: Map[String, ColumnBuilder[_]])`
-- Assumed that starting row IDs are already chunk-aligned
-- Only for append patterns, does not handle replacements
+Note that there is only essentially one ingestion pipeline per dataset and partition, with the exception of computed columns and materialized view generation.
+
+**RowIngester** - ingest individual rows with a sequence # and Row ID.  A RowIngester groups the rows into chunks aligned with the chunksize and translates into columnar format.
+- Translates rows into columnar chunks
+- Does schema validation
+- One `RowIngester` per (dataset, partition) at a time
+- Handles replaces and deletes by translating into columnChunk operations (stateful)
+- May verify that deletes don't happen mixed with appends in same version
+- May need to cache ingested rows for efficient writes (eg chunk is partially complete, store previous rows so they can be picked up in memory)
+- May rely on a schema-independent columnar chunk cache for fast updating or more efficient replace operations
+
+**ColumnChunkIngester** - `Columns(rowId: Long, endingSequenceNo: Long, columns: Map[String, ColumnBuilder[_]])`
+- Primary responsibility is writing columnar chunks, updating shard state, and tracking acks and handling errors and retries
+    + Has to ensure that acks come back IN ORDER of sequence number
+- State: Partition object / shard and version information
+    + Therefore, one ColumnChunkIngester writer per partition would be smart
+- Does not care about schemas
+- Does not care about replaces/deletes - everything is just a chunk write
 
 ## Ingestion walk-through
 
