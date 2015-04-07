@@ -6,6 +6,7 @@ import scala.collection.mutable.HashMap
 
 import filodb.core.BaseActor
 import filodb.core.messages._
+import filodb.core.datastore.Datastore
 
 /**
  * The CoordinatorActor is the common API entry point for all FiloDB ingestion operations.
@@ -60,11 +61,11 @@ object CoordinatorActor {
   case class IngestionStopped(streamId: Int) extends Response
 
 
-  def props(metadataActor: ActorRef, dataWriterActor: ActorRef): Props =
-    Props(classOf[CoordinatorActor], metadataActor, dataWriterActor)
+  def props(metadataActor: ActorRef, datastore: Datastore): Props =
+    Props(classOf[CoordinatorActor], metadataActor, datastore)
 }
 
-class CoordinatorActor(metadataActor: ActorRef, dataWriterActor: ActorRef) extends BaseActor {
+class CoordinatorActor(metadataActor: ActorRef, datastore: Datastore) extends BaseActor {
   import CoordinatorActor._
 
   val streamIds = new HashMap[Int, (String, String)]
@@ -86,7 +87,7 @@ class CoordinatorActor(metadataActor: ActorRef, dataWriterActor: ActorRef) exten
 
     case IngestVerifyActor.Verified(streamId, originator, partObj, schema, ingestSupport) =>
       val ingester = context.actorOf(
-        IngesterActor.props(partObj, schema, metadataActor, dataWriterActor, originator),
+        IngesterActor.props(partObj, schema, metadataActor, datastore, originator),
         s"ingester-$partObj")
       val rowIngester = context.actorOf(
         RowIngesterActor.props(ingester, schema, partObj, ingestSupport),

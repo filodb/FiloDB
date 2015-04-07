@@ -2,6 +2,7 @@ package filodb.core.cassandra
 
 import akka.actor.{ActorSystem, ActorRef}
 import akka.testkit.{ImplicitSender, TestKit}
+import com.typesafe.config.ConfigFactory
 import com.websudos.phantom.testing.SimpleCassandraTest
 import org.scalatest.{FunSpecLike, Matchers, BeforeAndAfter, BeforeAndAfterAll}
 import scala.concurrent.Await
@@ -24,7 +25,7 @@ abstract class AllTablesTest(system: ActorSystem) extends ActorTest(system) with
   import scala.concurrent.ExecutionContext.Implicits.global
 
   lazy val metaActor = system.actorOf(MetadataActor.props())
-  lazy val writerActor = system.actorOf(DataWriterActor.props())
+  lazy val datastore = new CassandraDatastore(ConfigFactory.empty)
 
   def createAllTables(): Unit = {
     val f = for { _ <- DatasetTableOps.create.future()

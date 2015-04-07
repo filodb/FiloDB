@@ -30,7 +30,7 @@ class IngesterActorSpec extends AllTablesTest(IngesterActorSpec.getNewSystem) {
   def withIngesterActor(dataset: String, partition: String, columns: Seq[(String, Column.ColumnType)])
                        (f: ActorRef => Unit) {
     val (partObj, columnSeq) = createTable(dataset, partition, columns)
-    val ingester = system.actorOf(IngesterActor.props(partObj, columnSeq, metaActor, writerActor, testActor))
+    val ingester = system.actorOf(IngesterActor.props(partObj, columnSeq, metaActor, datastore, testActor))
     try {
       f(ingester)
     } finally {

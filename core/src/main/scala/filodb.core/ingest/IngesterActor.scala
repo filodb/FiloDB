@@ -4,6 +4,7 @@ import akka.actor.{Actor, ActorRef, PoisonPill, Props, FSM}
 import java.nio.ByteBuffer
 
 import filodb.core.BaseActor
+import filodb.core.datastore.Datastore
 import filodb.core.messages._
 import filodb.core.metadata.{Column, Partition, Shard}
 
@@ -35,9 +36,9 @@ object IngesterActor {
   def props(partition: Partition,
             schema: Seq[Column],
             metadataActor: ActorRef,
-            dataWriterActor: ActorRef,
+            datastore: Datastore,
             sourceActor: ActorRef): Props =
-    Props(classOf[IngesterActor], partition, schema, metadataActor, dataWriterActor, sourceActor)
+    Props(classOf[IngesterActor], partition, schema, metadataActor, datastore, sourceActor)
 }
 
 /**
@@ -61,9 +62,11 @@ object IngesterActor {
 class IngesterActor(partition: Partition,
                     schema: Seq[Column],
                     metadataActor: ActorRef,
-                    dataWriterActor: ActorRef,
+                    datastore: Datastore,
                     sourceActor: ActorRef) extends BaseActor {
   import IngesterActor._
+
+  import context.dispatcher
 
   def receive: Receive = {
     case ChunkedColumns(version, (firstRowId, lastRowId), lastSequenceNo, columnsBytes) =>
@@ -82,8 +85,8 @@ class IngesterActor(partition: Partition,
 
           // 3. Forward to dataWriterActor
           val shard = Shard(partition, version, shardRowId)
-          val writeCmd = Shard.WriteColumnData(shard, firstRowId, lastSequenceNo, columnsBytes)
-          dataWriterActor ! writeCmd
+          datastore.insertOneChunk(shard, firstRowId, lastSequenceNo, columnsBytes)
+            .onSuccess { case response: Response => self ! response }
       }
 
     case Shard.Ack(lastSeqNo: Long) =>

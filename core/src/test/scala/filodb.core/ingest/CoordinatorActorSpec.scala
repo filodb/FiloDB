@@ -29,7 +29,7 @@ class CoordinatorActorSpec extends AllTablesTest(CoordinatorActorSpec.getNewSyst
   before { truncateAllTables() }
 
   def withCoordinatorActor(dataset: String, partition: String, columns: Seq[String])(f: ActorRef => Unit) {
-    val coordinator = system.actorOf(CoordinatorActor.props(metaActor, writerActor))
+    val coordinator = system.actorOf(CoordinatorActor.props(metaActor, datastore))
     coordinator ! CoordinatorActor.StartRowIngestion(dataset, partition, columns, 0, TupleRowIngestSupport)
     try {
       f(coordinator)

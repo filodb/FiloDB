@@ -11,32 +11,12 @@ case class ShardState(shard: Shard, columnsWritten: Set[String])
 
 object Shard {
   /**
-   * Commands for the DataWriterActor.  Note: these are distinct from the commands for the MetadataActor.
-   *
-   * Why are these not in some DataWriterActor file?  Because there could be multiple implementations.
-   */
-  sealed trait WriterCommand extends Command
-
-  /**
-   * Writes a chunk of columnar data.  Only write it when the sender has received a Ready signal.
-   * @param shard the Shard to write to
-   * @param rowId the starting rowId for the chunk. Must be aligned to chunkSize.
-   * @param lastSequenceNo the ending sequence # for the chunk, will be reported back in the Ack
-   * @param columnsBytes the column name and bytes to be written for each column
-   * @return Ack() for a successful write, or any number of errors
-   */
-  case class WriteColumnData(shard: Shard,
-                             rowId: Long,
-                             lastSequenceNo: Long,
-                             columnsBytes: Map[String, ByteBuffer]) extends WriterCommand
-
-  /**
    * Updates the columns written metadata in the shard.
    * @return ColumnsWrittenUpdated(newState), Nop if no change is required
    * TODO: maybe get rid of this.  Have storage impl take care of updating columnswritten state.
    *       Querying the currently written columns sounds like fair game though.
    */
-  case class UpdateColumnsWritten(state: ShardState, writtenColumns: Set[String]) extends WriterCommand
+  case class UpdateColumnsWritten(state: ShardState, writtenColumns: Set[String]) extends Command
 
   sealed trait WriterResponse extends Response
   case object Ready extends WriterResponse
