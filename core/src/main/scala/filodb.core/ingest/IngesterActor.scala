@@ -79,6 +79,7 @@ class IngesterActor(partition: Partition,
         case Some(shardRowId) =>
           // 2. Update partition shard info if needed
           if (!partition.contains(shardRowId, version)) {
+            logger.debug(s"Adding shardRowId $shardRowId to partition $partition...")
             metadataActor ! Partition.AddShardVersion(partition, shardRowId, version)
             // track Ack from metadataActor
           }
