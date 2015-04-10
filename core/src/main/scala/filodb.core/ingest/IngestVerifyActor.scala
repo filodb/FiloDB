@@ -4,6 +4,7 @@ import akka.actor.{Actor, ActorRef, PoisonPill, Props, FSM}
 import org.velvia.filo.RowIngestSupport
 
 import filodb.core.BaseActor
+import filodb.core.datastore.Datastore
 import filodb.core.messages._
 import filodb.core.metadata.{Partition, Column}
 
@@ -42,9 +43,10 @@ object IngestVerifyActor {
             columns: Seq[String],
             initVersion: Int,
             metadataActor: ActorRef,
+            datastore: Datastore,
             ingestSupport: RowIngestSupport[R]): Props =
     Props(classOf[IngestVerifyActor[_]], originator, streamId, dataset, partition, columns,
-          initVersion, metadataActor, ingestSupport)
+          initVersion, metadataActor, datastore, ingestSupport)
 }
 
 import IngestVerifyActor._
@@ -55,16 +57,19 @@ import IngestVerifyActor._
  * the CoordinatorActor itself.  Much less code I think.
  */
 class IngestVerifyActor[R](originator: ActorRef,
-                        streamId: Int,
-                        dataset: String,
-                        partitionName: String,
-                        columns: Seq[String],
-                        initVersion: Int,
-                        metadataActor: ActorRef,
-                        ingestSupport: RowIngestSupport[R]) extends BaseActor with FSM[VerifyState, Data] {
+                           streamId: Int,
+                           dataset: String,
+                           partitionName: String,
+                           columns: Seq[String],
+                           initVersion: Int,
+                           metadataActor: ActorRef,
+                           datastore: Datastore,
+                           ingestSupport: RowIngestSupport[R]) extends BaseActor with FSM[VerifyState, Data] {
   // If partition locking was implemented, we would do something like this:
   // metadataActor ! GetPartitonLock(dataset, partitionName)
   // startWith(GetLock, Uninitialized)
+
+  import context.dispatcher
 
   startWith(GetSchema, Uninitialized)
 
@@ -87,13 +92,14 @@ class IngestVerifyActor[R](originator: ActorRef,
         logger.info(s"Undefined columns $undefinedCols for dataset $dataset with schema $schema")
         killMyself(UndefinedColumns(originator, undefinedCols.toSeq))
       } else {
-        metadataActor ! Partition.GetPartition(dataset, partitionName)
+        datastore.getPartition(dataset, partitionName)
+          .foreach { resp => self ! resp}
         goto(GetPartition) using GotSchema(schema)
       }
   }
 
   when(GetPartition) {
-    case Event(Partition.ThePartition(partObj), GotSchema(schema)) =>
+    case Event(Datastore.ThePartition(partObj), GotSchema(schema)) =>
       // invalidColumns() above guarantees the schema will have all requested columns
       val columnSeq = columns.map(schema(_))
       killMyself(Verified(streamId, originator, partObj, columnSeq, ingestSupport))

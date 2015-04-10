@@ -5,6 +5,7 @@ import com.websudos.phantom.Implicits._
 import com.websudos.phantom.zookeeper.{SimpleCassandraConnector, DefaultCassandraManager}
 import scala.concurrent.Future
 
+import filodb.core.datastore.{Datastore, PartitionApi}
 import filodb.core.metadata.{Partition, ShardingStrategy}
 
 /**
@@ -38,7 +39,7 @@ sealed class PartitionTable extends CassandraTable[PartitionTable, Partition] {
  * Asynchronous methods to operate on partitions.  All normal errors and exceptions are returned
  * through ErrorResponse types.
  */
-object PartitionTable extends PartitionTable with SimpleCassandraConnector {
+object PartitionTable extends PartitionTable with SimpleCassandraConnector with PartitionApi {
   override val tableName = "partitions"
 
   // TODO: add in Config-based initialization code to find the keyspace, cluster, etc.
@@ -46,6 +47,7 @@ object PartitionTable extends PartitionTable with SimpleCassandraConnector {
 
   import Util._
   import filodb.core.messages._
+  import Datastore._
 
   def ints2long(x: Int, y: Int): Long = (x.toLong << 32) | (y & 0xffffffffL)
   def long2ints(l: Long): (Int, Int) = ((l >> 32).toInt, l.toInt)
@@ -56,8 +58,6 @@ object PartitionTable extends PartitionTable with SimpleCassandraConnector {
    * @return Success, or AlreadyExists, or NotEmpty/NotValid
    */
   def newPartition(partition: Partition): Future[Response] = {
-    if (!partition.isEmpty) return Future(Partition.NotEmpty)
-    if (!partition.isValid) return Future(Partition.NotValid)
     insert.value(_.dataset, partition.dataset)
           .value(_.partition, partition.partition)
           .value(_.shardingStrategy, partition.shardingStrategy.serialize())
@@ -75,7 +75,7 @@ object PartitionTable extends PartitionTable with SimpleCassandraConnector {
    */
   def getPartition(dataset: String, partition: String): Future[Response] =
     select.where(_.dataset eqs dataset).and(_.partition eqs partition).one()
-      .map(opt => opt.map(Partition.ThePartition(_)).getOrElse(NotFound))
+      .map(opt => opt.map(ThePartition(_)).getOrElse(NotFound))
       .handleErrors
 
   /**
@@ -99,12 +99,7 @@ object PartitionTable extends PartitionTable with SimpleCassandraConnector {
           .future().toResponse(InconsistentState)
   }
 
-  // Partial function mapping commands to functions executing them
-  val commandMapper: PartialFunction[Command, Future[Response]] = {
-    case Partition.NewPartition(partition)          => newPartition(partition)
-    case Partition.GetPartition(dataset, partition) => getPartition(dataset, partition)
-    case Partition.AddShardVersion(partition, firstRowId, version) =>
-      addShardVersion(partition, firstRowId, version)
-    // case Partition.DeletePartition(dataset, name) => ???
-  }
+  def getPartitionLock(dataset: String, partition: String, owner: String): Future[Response] = ???
+  def releasePartitionLock(dataset: String, partition: String): Future[Response] = ???
+  def deletePartition(dataset: String, partition: String): Future[Response] = ???
 }

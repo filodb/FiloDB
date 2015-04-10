@@ -34,15 +34,4 @@ class MetadataActorSpec extends AllTablesTest(MetadataActorSpec.getNewSystem) {
     actor ! Column.GetSchema("gdelt", 10)
     expectMsg(Column.TheSchema(Map("monthYear" -> monthYearCol)))
   }
-
-  val p = Partition("gdelt", "1979-1984")
-  it("should be able to create a Partition, add a shard, then get everything") {
-    actor ! Partition.NewPartition(p)
-    expectMsg(Success)
-    actor ! Partition.AddShardVersion(p, 0, 0)
-    expectMsg(Success)
-    val p2 = p.addShardVersion(0, 0)
-    actor ! Partition.GetPartition("gdelt", "1979-1984")
-    expectMsg(Partition.ThePartition(p2))
-  }
 }

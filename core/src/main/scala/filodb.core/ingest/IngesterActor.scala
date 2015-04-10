@@ -35,10 +35,9 @@ object IngesterActor {
 
   def props(partition: Partition,
             schema: Seq[Column],
-            metadataActor: ActorRef,
             datastore: Datastore,
             sourceActor: ActorRef): Props =
-    Props(classOf[IngesterActor], partition, schema, metadataActor, datastore, sourceActor)
+    Props(classOf[IngesterActor], partition, schema, datastore, sourceActor)
 }
 
 /**
@@ -61,7 +60,6 @@ object IngesterActor {
  */
 class IngesterActor(partition: Partition,
                     schema: Seq[Column],
-                    metadataActor: ActorRef,
                     datastore: Datastore,
                     sourceActor: ActorRef) extends BaseActor {
   import IngesterActor._
@@ -80,15 +78,19 @@ class IngesterActor(partition: Partition,
           // 2. Update partition shard info if needed
           if (!partition.contains(shardRowId, version)) {
             logger.debug(s"Adding shardRowId $shardRowId to partition $partition...")
-            metadataActor ! Partition.AddShardVersion(partition, shardRowId, version)
-            // track Ack from metadataActor
+            datastore.addShardVersion(partition, shardRowId, version)
+              .foreach { response => self ! response }
           }
 
           // 3. Forward to dataWriterActor
           val shard = Shard(partition, version, shardRowId)
           datastore.insertOneChunk(shard, firstRowId, lastSequenceNo, columnsBytes)
-            .onSuccess { case response: Response => self ! response }
+            .foreach { response => self ! response }
+            // TODO: handle exceptions
       }
+
+    case Success =>
+      logger.debug("Got success.  TODO: track stuff from addShardVersion correctly")
 
     case Datastore.Ack(lastSeqNo: Long) =>
       // For now, just pass the ack straight back.  In the future, we'll want to use this for throttling

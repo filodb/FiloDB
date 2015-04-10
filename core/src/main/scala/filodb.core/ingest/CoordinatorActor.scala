@@ -82,12 +82,12 @@ class CoordinatorActor(metadataActor: ActorRef, datastore: Datastore) extends Ba
       val originator = sender     // good practice, in case we use it in a future later
       val verifier = context.actorOf(IngestVerifyActor.props(
                        originator, nextStreamId, dataset, partition, columns,
-                       initVersion, metadataActor, rowIngestSupport))
+                       initVersion, metadataActor, datastore, rowIngestSupport))
       nextStreamId += 1
 
     case IngestVerifyActor.Verified(streamId, originator, partObj, schema, ingestSupport) =>
       val ingester = context.actorOf(
-        IngesterActor.props(partObj, schema, metadataActor, datastore, originator),
+        IngesterActor.props(partObj, schema, datastore, originator),
         s"ingester-$partObj")
       val rowIngester = context.actorOf(
         RowIngesterActor.props(ingester, schema, partObj, ingestSupport),
