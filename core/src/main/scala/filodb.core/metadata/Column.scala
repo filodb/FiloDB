@@ -110,44 +110,4 @@ object Column extends StrictLogging {
       check(alreadyHaveIt || (!alreadyHaveIt && !column.isDeleted), "New column cannot be deleted")
     ).flatten
   }
-
-  /**
-   * Set of column commands to send to a datastore actor for I/O
-   */
-
-  /**
-   * Creates a new column for a particular dataset and effective version.
-   * Can also be used to change the column type by "creating" the same column with changes for a higher
-   * version.  Note that changes for a column must have an effective version higher than the last change.
-   * See the notes above regarding columns and versioning.
-   * @param column the new Column to create.
-   * @return Created if succeeds, or AlreadyExists, or IllegalColumnChange
-   */
-  case class NewColumn(column: Column) extends Command
-
-  /**
-   * Get the schema for a version of a dataset.  This scans all defined columns from the first version
-   * on up to figure out the changes. Deleted columns are not returned.
-   * @param dataset the name of the dataset to return the schema for
-   * @param version the version of the dataset to return the schema for
-   * @return a Schema, column name -> Column definition
-   */
-  case class GetSchema(dataset: String, version: Int) extends Command
-
-  /**
-   * Marks a column as deleted.  This is more like "hiding" a column and does not actually delete the data --
-   * rather it marks a column as deleted starting at version Y, and reads will no longer return data for that
-   * column.
-   * Also, this cannot be done to the current / latest version, it must be a new version.
-   *
-   * TODO: Maybe remove this command.  A delete is = reading previous column definition, and marking
-   * isDeleted = true, and calling NewColumn.
-   */
-  case class DeleteColumn(dataset: String, version: Int, name: String) extends Command
-
-  /**
-   * Set of responses from dataset commands
-   */
-  case class IllegalColumnChange(reasons: Seq[String]) extends Response
-  case class TheSchema(schema: Schema) extends Response
 }

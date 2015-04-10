@@ -13,8 +13,7 @@ object MetadataActor {
   val DefaultMaxOutstandingFutures = 32
 
   val metadataMapper: CommandThrottlingActor.Mapper =
-    DatasetTableOps.commandMapper orElse
-    ColumnTable.commandMapper
+    DatasetTableOps.commandMapper
 
   // Use this to create the class. Actors cannot be directly instantiated
   def props(maxOutstandingFutures: Int = DefaultMaxOutstandingFutures): Props =

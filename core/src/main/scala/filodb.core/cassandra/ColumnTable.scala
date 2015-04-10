@@ -6,6 +6,7 @@ import com.websudos.phantom.zookeeper.{SimpleCassandraConnector, DefaultCassandr
 import play.api.libs.iteratee.Iteratee
 import scala.concurrent.Future
 
+import filodb.core.datastore.{ColumnApi, Datastore}
 import filodb.core.metadata.Column
 
 /**
@@ -37,7 +38,7 @@ sealed class ColumnTable extends CassandraTable[ColumnTable, Column] {
  * Asynchronous methods to operate on columns.  All normal errors and exceptions are returned
  * through ErrorResponse types.
  */
-object ColumnTable extends ColumnTable with SimpleCassandraConnector {
+object ColumnTable extends ColumnTable with SimpleCassandraConnector with ColumnApi {
   override val tableName = "columns"
 
   // TODO: add in Config-based initialization code to find the keyspace, cluster, etc.
@@ -45,6 +46,7 @@ object ColumnTable extends ColumnTable with SimpleCassandraConnector {
 
   import Util._
   import filodb.core.messages._
+  import Datastore.TheSchema
 
   private def getSchemaNoErrorHandling(dataset: String, version: Int): Future[Column.Schema] = {
     val enum = select.where(_.dataset eqs dataset).and(_.version lte version)
@@ -52,26 +54,13 @@ object ColumnTable extends ColumnTable with SimpleCassandraConnector {
     enum run Iteratee.fold(Column.EmptySchema)(Column.schemaFold)
   }
 
-  private def getSchemaAllVersions(dataset: String): Future[Column.Schema] =
-    getSchemaNoErrorHandling(dataset, Int.MaxValue)
-
-  /**
-   * Returns a schema of columns for a given dataset version.
-   * NOTE: If there is no dataset row found, it is returned as an empty schema ... C* cannot tell the
-   * difference.
-   * @return TheSchema(schema), or some ErrorResponse
-   */
   def getSchema(dataset: String, version: Int): Future[Response] = {
     getSchemaNoErrorHandling(dataset, version)
-      .map { schema => Column.TheSchema(schema) }
+      .map { schema => TheSchema(schema) }
       .handleErrors
   }
 
-  /**
-   * Creates a new column if a definition for that dataset, version, and name doesn't exist already.
-   * This does no validation, so please use it with care!  Should be used for testing only.
-   */
-  def newColumnPrettyPlease(column: Column): Future[Response] = {
+  def insertColumn(column: Column): Future[Response] = {
     insert.value(_.dataset, column.dataset)
           .value(_.name,    column.name)
           .value(_.version, column.version)
@@ -81,27 +70,5 @@ object ColumnTable extends ColumnTable with SimpleCassandraConnector {
           .value(_.isSystem, column.isSystem)
           .ifNotExists
           .future().toResponse(AlreadyExists)
-  }
-
-  /**
-   * Creates a new column definition (or updated column definition).
-   * First it retrieves the current schema and checks against the validator to make
-   * sure the change/addition is allowed.
-   * @param column the Column to add/update
-   * @return Success, or NotFound (dataset not found), or IllegalColumnChange, or ErrorResponse
-   */
-  def newColumn(column: Column): Future[Response] = {
-    getSchemaAllVersions(column.dataset).flatMap { schema =>
-      val invalidReasons = Column.invalidateNewColumn(column.dataset, schema, column)
-      if (invalidReasons.nonEmpty) { Future(Column.IllegalColumnChange(invalidReasons)) }
-      else                         { newColumnPrettyPlease(column) }
-    }.handleErrors
-  }
-
-  // Partial function mapping commands to functions executing them
-  val commandMapper: PartialFunction[Command, Future[Response]] = {
-    case Column.NewColumn(column) => newColumn(column)
-    case Column.GetSchema(dataset, version) => getSchema(dataset, version)
-    // case Column.DeleteColumn(dataset, version, name) => ???
   }
 }

@@ -67,26 +67,11 @@ object PartitionTable extends PartitionTable with SimpleCassandraConnector with 
           .future().toResponse(AlreadyExists)
   }
 
-  /**
-   * Reads the entire state including all shards of a Partition.
-   * @param dataset the name of the dataset
-   * @param name the name of the partition
-   * @return ThePartition, or NotFound
-   */
   def getPartition(dataset: String, partition: String): Future[Response] =
     select.where(_.dataset eqs dataset).and(_.partition eqs partition).one()
       .map(opt => opt.map(ThePartition(_)).getOrElse(NotFound))
       .handleErrors
 
-  /**
-   * Adds a shard and version to an existing Partition, validating the updated partition and also
-   * doing a compare-and-write on the hashcode to ensure partition state is consistent
-   * NOTE: Suggest calling partition.contains() first to avoid unnecessary updates
-   * @param partition the Partition object to update
-   * @param firstRowId the first rowID of the new shard
-   * @param version the version number to add
-   * @return Success, InconsistentState
-   */
   def addShardVersion(partition: Partition,
                       firstRowId: Long,
                       version: Int): Future[Response] = {
