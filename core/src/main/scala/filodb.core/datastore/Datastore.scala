@@ -6,6 +6,11 @@ import scala.concurrent.{Future, ExecutionContext}
 import filodb.core.metadata.Shard
 import filodb.core.messages._
 
+object Datastore {
+  case class Ack(lastSequenceNo: Long) extends Response
+  case object ChunkMisaligned extends ErrorResponse
+}
+
 /**
  * The Datastore trait is intended to be the higher level API abstraction
  * over the lower level storage specific APIs.  Most folks will want
@@ -15,6 +20,8 @@ import filodb.core.messages._
  * TODO: as well as throttling/backpressure.
  */
 trait Datastore {
+  import Datastore._
+
   def dataApi: DataApi
 
   import DataApi.ColRowBytes
@@ -34,7 +41,7 @@ trait Datastore {
                      columnsBytes: Map[String, ByteBuffer])
                     (implicit context: ExecutionContext): Future[Response]
     = dataApi.insertOneChunk(shard, rowId, columnsBytes)
-        .collect { case Success => Shard.Ack(lastSeqNo) }
+        .collect { case Success => Ack(lastSeqNo) }
 
   /**
    * Streams chunks from one column in, applying the folding function to chunks.

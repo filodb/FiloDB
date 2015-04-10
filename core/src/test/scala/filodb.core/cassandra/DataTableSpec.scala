@@ -8,6 +8,7 @@ import scala.concurrent.duration._
 
 import filodb.core.metadata.{Shard, Partition}
 import filodb.core.messages._
+import filodb.core.datastore.Datastore._
 
 class DataTableSpec extends CassandraFlatSpec with BeforeAndAfter {
   val keySpace = "test"
@@ -33,7 +34,7 @@ class DataTableSpec extends CassandraFlatSpec with BeforeAndAfter {
 
   "DataTable" should "return ChunkMisaligned if trying to write a chunk not on boundary" in {
     whenReady(DataTable.insertOneChunk(shard, 5L, columnBytes)) { response =>
-      response should equal (Shard.ChunkMisaligned)
+      response should equal (ChunkMisaligned)
     }
   }
 

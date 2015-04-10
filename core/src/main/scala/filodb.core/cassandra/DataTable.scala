@@ -52,7 +52,7 @@ object DataTable extends DataTable with SimpleCassandraConnector with DataApi {
   import Util._
   import filodb.core.messages._
   import filodb.core.metadata.Shard
-  import filodb.core.metadata.Shard._
+  import filodb.core.datastore.Datastore._
 
   def insertQuery(shard: Shard): InsertQuery[DataTable, ColRowBytes] =
     insert.value(_.dataset,    shard.partition.dataset)

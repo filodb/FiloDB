@@ -90,7 +90,7 @@ class IngesterActor(partition: Partition,
             .onSuccess { case response: Response => self ! response }
       }
 
-    case Shard.Ack(lastSeqNo: Long) =>
+    case Datastore.Ack(lastSeqNo: Long) =>
       // For now, just pass the ack straight back.  In the future, we'll want to use this for throttling
       sourceActor ! Ack(partition.dataset, partition.partition, lastSeqNo)
   }

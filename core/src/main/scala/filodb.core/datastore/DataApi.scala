@@ -6,8 +6,6 @@ import scala.concurrent.Future
 import filodb.core.messages._
 import filodb.core.metadata.Shard
 
-// case class ColRowBytes(column: String, rowId: Long, bytes: ByteBuffer)
-
 object DataApi {
   type ColRowBytes = (String, Long, ByteBuffer)
 }
