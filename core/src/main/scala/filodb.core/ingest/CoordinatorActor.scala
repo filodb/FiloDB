@@ -3,10 +3,12 @@ package filodb.core.ingest
 import akka.actor.{Actor, ActorRef, Props}
 import org.velvia.filo.RowIngestSupport
 import scala.collection.mutable.HashMap
+import scala.concurrent.Future
 
 import filodb.core.BaseActor
-import filodb.core.messages._
 import filodb.core.datastore.Datastore
+import filodb.core.messages._
+import filodb.core.metadata.{Partition, Column}
 
 /**
  * The CoordinatorActor is the common API entry point for all FiloDB ingestion operations.
@@ -60,53 +62,98 @@ object CoordinatorActor {
    */
   case class IngestionStopped(streamId: Int) extends Response
 
+  // /////////// Internal messaging
+  case class GoodToGo(originator: ActorRef, streamId: Int, ingester: ActorRef,
+                      rowIngester: ActorRef, partition: Partition)
 
-  def props(metadataActor: ActorRef, datastore: Datastore): Props =
-    Props(classOf[CoordinatorActor], metadataActor, datastore)
+  def invalidColumns(columns: Seq[String], schema: Column.Schema): Seq[String] =
+    (columns.toSet -- schema.keys).toSeq
+
+  def props(datastore: Datastore): Props =
+    Props(classOf[CoordinatorActor], datastore)
 }
 
-class CoordinatorActor(metadataActor: ActorRef, datastore: Datastore) extends BaseActor {
+class CoordinatorActor(datastore: Datastore) extends BaseActor {
   import CoordinatorActor._
+  import context.dispatcher
 
   val streamIds = new HashMap[Int, (String, String)]
   val ingesterActors = new HashMap[Int, ActorRef]
   val rowIngesterActors = new HashMap[Int, ActorRef]
   var nextStreamId = 0
 
+  private def verifySchema(originator: ActorRef, dataset: String, version: Int, columns: Seq[String]):
+      Future[Option[Column.Schema]] = {
+    datastore.getSchema(dataset, version).collect {
+      case Datastore.TheSchema(schema) =>
+        val undefinedCols = invalidColumns(columns, schema)
+        if (schema.isEmpty) {
+          logger.info(s"Either no columns defined or no dataset $dataset")
+          originator ! NoDatasetColumns
+          None
+        } else if (undefinedCols.nonEmpty) {
+          logger.info(s"Undefined columns $undefinedCols for dataset $dataset with schema $schema")
+          originator ! UndefinedColumns(undefinedCols.toSeq)
+          None
+        } else {
+          Some(schema)
+        }
+      case e: ErrorResponse =>
+        originator ! e
+        None
+    }.recover {
+      case t: Throwable =>
+        originator ! MetadataException(t)
+        None
+    }
+  }
+
+  private def getPartition(originator: ActorRef, dataset: String, partitionName: String):
+      Future[Option[Partition]] = {
+    datastore.getPartition(dataset, partitionName).collect {
+      case Datastore.ThePartition(partObj) =>
+        Some(partObj)
+      case e: ErrorResponse                =>
+        originator ! e
+        None
+    }.recover {
+      case t: Throwable =>
+        originator ! MetadataException(t)
+        None
+    }
+  }
+
   def receive: Receive = {
     case StartRowIngestion(dataset, partition, columns, initVersion, rowIngestSupport) =>
 
       // TODO: check that there aren't too many ingestion streams already
 
-      // Create a IngestVerifyActor to verify dataset, schema, partition lock, etc.
-      val originator = sender     // good practice, in case we use it in a future later
-      val verifier = context.actorOf(IngestVerifyActor.props(
-                       originator, nextStreamId, dataset, partition, columns,
-                       initVersion, metadataActor, datastore, rowIngestSupport))
+      val originator = sender     // capture mutable sender for async response
+      val streamId = nextStreamId
       nextStreamId += 1
+      for { schema <- verifySchema(originator, dataset, initVersion, columns) if schema.isDefined
+            partOpt <- getPartition(originator, dataset, partition) if partOpt.isDefined }
+      {
+        val columnSeq = columns.map(schema.get(_))
+        val partObj = partOpt.get
 
-    case IngestVerifyActor.Verified(streamId, originator, partObj, schema, ingestSupport) =>
-      val ingester = context.actorOf(
-        IngesterActor.props(partObj, schema, datastore, originator),
-        s"ingester-$partObj")
-      val rowIngester = context.actorOf(
-        RowIngesterActor.props(ingester, schema, partObj, ingestSupport),
-        s"rowIngester-$partObj-$ingestSupport")
+        val ingester = context.actorOf(
+          IngesterActor.props(partObj, columnSeq, datastore, originator),
+          s"ingester-$partObj")
+        val rowIngester = context.actorOf(
+          RowIngesterActor.props(ingester, columnSeq, partObj, rowIngestSupport),
+          s"rowIngester-$partObj-$rowIngestSupport")
 
-      streamIds += streamId -> (partObj.dataset -> partObj.partition)
+        // Send message to myself to modify state, don't do it in async future callback
+        self ! GoodToGo(originator, streamId, ingester, rowIngester, partObj)
+      }
+
+    case GoodToGo(originator, streamId, ingester, rowIngester, partition) =>
+      streamIds += streamId -> (partition.dataset -> partition.partition)
       ingesterActors += streamId -> ingester
       rowIngesterActors += streamId -> rowIngester
-      logger.info(s"Set up ingestion pipeline for $partObj, streamId=$streamId")
+      logger.info(s"Set up ingestion pipeline for $partition, streamId=$streamId")
       originator ! RowIngestionReady(streamId, rowIngester)
-
-    case IngestVerifyActor.NoDatasetColumns(originator) =>
-      originator ! NoDatasetColumns
-
-    case IngestVerifyActor.UndefinedColumns(originator, undefined) =>
-      originator ! UndefinedColumns(undefined)
-
-    case IngestVerifyActor.PartitionNotFound(originator) =>
-      originator ! NotFound
 
     case StopIngestion(streamId) =>
       logger.error("Unimplemented!")
