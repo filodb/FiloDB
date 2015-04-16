@@ -68,7 +68,7 @@ trait Datastore {
    * @param name Name of the dataset to create
    * @returns Success, or AlreadyExists, or StorageEngineException
    */
-  def createNewDataset(name: String)(implicit context: ExecutionContext): Future[Response] =
+  def newDataset(name: String)(implicit context: ExecutionContext): Future[Response] =
     datasetApi.createNewDataset(name)
 
   /**
