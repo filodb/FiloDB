@@ -3,10 +3,20 @@ package filodb.core.datastore
 import java.nio.ByteBuffer
 import scala.concurrent.{Future, ExecutionContext}
 
-import filodb.core.metadata.{Partition, Shard, Column}
+import filodb.core.metadata.{Dataset, Partition, Shard, Column}
 import filodb.core.messages._
 
 object Datastore {
+  // max # of partitions to retrieve
+  val MaxPartitionLimit = 10000
+
+  /**
+   * Set of responses from dataset commands
+   */
+  case class TheDataset(dataset: Dataset) extends Response
+  // This is really an exception - deleting a non-empty partition should be a bug
+  class NonEmptyDataset(partitions: Set[String]) extends Exception
+
   /**
    * Set of responses from column commands
    */
@@ -43,12 +53,47 @@ trait Datastore {
   import Datastore._
 
   def dataApi: DataApi
+  def datasetApi: DatasetApi
   def partitionApi: PartitionApi
   def columnApi: ColumnApi
 
   import DataApi.ColRowBytes
 
-  /**** Column API ****/
+  /**
+   * ** Dataset API ***
+   */
+
+  /**
+   * Creates a new dataset with the given name, if it doesn't already exist.
+   * @param name Name of the dataset to create
+   * @returns Success, or AlreadyExists, or StorageEngineException
+   */
+  def createNewDataset(name: String)(implicit context: ExecutionContext): Future[Response] =
+    datasetApi.createNewDataset(name)
+
+  /**
+   * Retrieves a Dataset object of the given name, including a list of partitions.
+   * TODO: implement limits.  # of partitions could get really long.
+   * @param name Name of the dataset to retrieve
+   * @param limit the max number of partitions to retrieve
+   * @param TheDataset
+   */
+  def getDataset(name: String, limit: Int = MaxPartitionLimit)
+                (implicit context: ExecutionContext): Future[Response] =
+    datasetApi.getDataset(name)
+
+  /**
+   * Attempts to delete a dataset with the given name.  Will fail if the dataset still has
+   * partitions inside. You need to delete the partitions first.
+   * @param name Name of the dataset to delete.
+   * @returns Success, or MetadataException, or StorageEngineException
+   */
+  def deleteDataset(name: String)(implicit context: ExecutionContext): Future[Response] =
+    datasetApi.deleteDataset(name)
+
+  /**
+   * ** Column API ***
+   */
 
   /**
    * Creates a new column for a particular dataset and effective version.
@@ -91,11 +136,14 @@ trait Datastore {
   def deleteColumn(dataset: String, version: Int, name: String)
                   (implicit context: ExecutionContext): Future[Response] = ???
 
-  /**** Partition API ****/
+  /**
+   * ** Partition API ***
+   */
 
   /**
    * Creates a new partition in FiloDB.  Updates both partitions and datasets tables.
    * The partition must be empty and valid.
+   * TODO: update the dataset table - where to do this?
    * @param partition a Partition, with a name unique within the dataset.  It should be empty.
    * @returns Success, or AlreadyExists, or NotEmpty/NotValid
    */
@@ -134,7 +182,9 @@ trait Datastore {
                      (implicit context: ExecutionContext): Future[Response] =
     partitionApi.addShardVersion(partition, firstRowId, version)
 
-  /**** Columnar chunk data API ****/
+  /**
+   * ** Columnar chunk data API ***
+   */
 
   /**
    * Inserts one chunk of data from different columns.
