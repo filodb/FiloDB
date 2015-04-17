@@ -5,6 +5,7 @@ import org.scalatest.BeforeAndAfter
 import scala.concurrent.Await
 import scala.concurrent.duration._
 
+import filodb.core.datastore.Datastore
 import filodb.core.metadata.Column
 import filodb.core.messages._
 
@@ -30,22 +31,22 @@ class ColumnTableSpec extends CassandraFlatSpec with BeforeAndAfter {
 
   "ColumnTable" should "return empty schema if a dataset does not exist in columns table" in {
     whenReady(ColumnTable.getSchema("foo", 1)) { response =>
-      response should equal (Column.TheSchema(Map()))
+      response should equal (Datastore.TheSchema(Map()))
     }
   }
 
   it should "add the first column and read it back as a schema" in {
-    whenReady(ColumnTable.newColumn(firstColumn)) { response =>
+    whenReady(ColumnTable.insertColumn(firstColumn)) { response =>
       response should equal (Success)
     }
 
     whenReady(ColumnTable.getSchema("foo", 2)) { response =>
-      response should equal (Column.TheSchema(Map("first" -> firstColumn)))
+      response should equal (Datastore.TheSchema(Map("first" -> firstColumn)))
     }
 
     // Check that limiting the getSchema query to version 0 does not return the version 1 column
     whenReady(ColumnTable.getSchema("foo", 0)) { response =>
-      response should equal (Column.TheSchema(Map()))
+      response should equal (Datastore.TheSchema(Map()))
     }
   }
 
@@ -59,16 +60,6 @@ class ColumnTableSpec extends CassandraFlatSpec with BeforeAndAfter {
 
     whenReady(ColumnTable.getSchema("bar", 7)) { response =>
       response.getClass should equal (classOf[MetadataException])
-    }
-  }
-
-  it should "return IllegalColumnChange if an invalid column addition submitted" in {
-    whenReady(ColumnTable.newColumn(firstColumn)) { response =>
-      response should equal (Success)
-    }
-
-    whenReady(ColumnTable.newColumn(firstColumn.copy(version = 0))) { response =>
-      response.getClass should equal (classOf[Column.IllegalColumnChange])
     }
   }
 }

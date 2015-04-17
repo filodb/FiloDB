@@ -5,6 +5,7 @@ import org.scalatest.BeforeAndAfter
 import scala.concurrent.Await
 import scala.concurrent.duration._
 
+import filodb.core.datastore.Datastore
 import filodb.core.metadata.Dataset
 import filodb.core.messages._
 
@@ -76,7 +77,7 @@ class DatasetTableSpec extends CassandraFlatSpec with BeforeAndAfter {
     whenReady(f) { result => result.wasApplied should equal (true) }
 
     whenReady(DatasetTableOps.getDataset("bar")) { response =>
-      val Dataset.Result(dataset) = response
+      val Datastore.TheDataset(dataset) = response
       dataset.name should equal ("bar")
       dataset.partitions should equal (Set("first"))
     }

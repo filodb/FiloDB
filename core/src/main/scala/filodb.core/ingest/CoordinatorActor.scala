@@ -98,8 +98,8 @@ class CoordinatorActor(datastore: Datastore) extends BaseActor {
         } else {
           Some(schema)
         }
-      case e: ErrorResponse =>
-        originator ! e
+      case r: Response =>
+        originator ! r
         None
     }.recover {
       case t: Throwable =>
@@ -113,8 +113,8 @@ class CoordinatorActor(datastore: Datastore) extends BaseActor {
     datastore.getPartition(dataset, partitionName).collect {
       case Datastore.ThePartition(partObj) =>
         Some(partObj)
-      case e: ErrorResponse                =>
-        originator ! e
+      case r: Response                =>
+        originator ! r
         None
     }.recover {
       case t: Throwable =>

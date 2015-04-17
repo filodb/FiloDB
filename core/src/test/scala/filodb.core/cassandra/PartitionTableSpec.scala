@@ -5,6 +5,7 @@ import org.scalatest.BeforeAndAfter
 import scala.concurrent.Await
 import scala.concurrent.duration._
 
+import filodb.core.datastore.Datastore
 import filodb.core.metadata.Partition
 import filodb.core.messages._
 
@@ -37,23 +38,13 @@ class PartitionTableSpec extends CassandraFlatSpec with BeforeAndAfter {
     }
   }
 
-  it should "not allow adding an invalid or not empty Partition" in {
-    whenReady(PartitionTable.newPartition(pp)) { response =>
-      response should equal (Partition.NotEmpty)
-    }
-
-    whenReady(PartitionTable.newPartition(p.copy(chunkSize = 0))) { response =>
-      response should equal (Partition.NotValid)
-    }
-  }
-
   it should "return full Partition information if found" in {
     whenReady(PartitionTable.newPartition(p)) { response =>
       response should equal (Success)
     }
 
     whenReady(PartitionTable.getPartition("foo", "first")) { response =>
-      response should equal (Partition.ThePartition(p))
+      response should equal (Datastore.ThePartition(p))
     }
   }
 

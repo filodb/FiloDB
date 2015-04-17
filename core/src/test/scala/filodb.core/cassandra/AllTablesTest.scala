@@ -5,6 +5,8 @@ import akka.testkit.{ImplicitSender, TestKit}
 import com.typesafe.config.ConfigFactory
 import com.websudos.phantom.testing.SimpleCassandraTest
 import org.scalatest.{FunSpecLike, Matchers, BeforeAndAfter, BeforeAndAfterAll}
+import org.scalatest.concurrent.Futures
+import org.scalatest.time.{Millis, Span, Seconds}
 import scala.concurrent.Await
 import scala.concurrent.duration._
 
@@ -19,12 +21,16 @@ with FunSpecLike with Matchers with BeforeAndAfterAll with BeforeAndAfter with I
   }
 }
 
-abstract class AllTablesTest(system: ActorSystem) extends ActorTest(system) with SimpleCassandraTest {
+abstract class AllTablesTest(system: ActorSystem) extends ActorTest(system)
+with SimpleCassandraTest
+with Futures {
+  implicit val defaultPatience =
+    PatienceConfig(timeout = Span(2, Seconds), interval = Span(10, Millis))
+
   val keySpace = "test"
 
-  import scala.concurrent.ExecutionContext.Implicits.global
+  implicit val context = scala.concurrent.ExecutionContext.Implicits.global
 
-  lazy val metaActor = system.actorOf(MetadataActor.props())
   lazy val datastore = new CassandraDatastore(ConfigFactory.empty)
 
   def createAllTables(): Unit = {
@@ -53,17 +59,14 @@ abstract class AllTablesTest(system: ActorSystem) extends ActorTest(system) with
   def createTable(datasetName: String,
                   partitionName: String,
                   columns: Seq[(String, Column.ColumnType)]): (Partition, Seq[Column]) = {
-    metaActor ! Dataset.NewDataset(datasetName)
-    expectMsg(Success)
+    datastore.newDataset(datasetName).futureValue should equal (Success)
 
     val partObj = Partition(datasetName, partitionName)
-    metaActor ! Partition.NewPartition(partObj)
-    expectMsg(Success)
+    datastore.newPartition(partObj).futureValue should equal (Success)
 
     val columnSeq = columns.map { case (name, colType) => Column(name, datasetName, 0, colType) }
     columnSeq.foreach { column =>
-      metaActor ! Column.NewColumn(column)
-      expectMsg(Success)
+      datastore.newColumn(column).futureValue should equal (Success)
     }
 
     (partObj, columnSeq)
