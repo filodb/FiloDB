@@ -69,7 +69,7 @@ object DataTable extends DataTable with SimpleCassandraConnector with DataApi {
   def insertOneChunk(shard: Shard,
                      rowId: Long,
                      columnsBytes: Map[String, ByteBuffer]): Future[Response] = {
-    if (rowId % shard.partition.chunkSize != 0) return(Future(ChunkMisaligned))
+    if (rowId % shard.partition.chunkSize != 0) return(Future.successful(ChunkMisaligned))
 
     // NOTE: This is actually a good use of Unlogged Batch, because all of the inserts
     // are to the same partition key, so they will get collapsed down into one insert

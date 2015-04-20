@@ -108,10 +108,10 @@ trait Datastore extends FutureUtils {
     columnApi.getSchema(column.dataset, Int.MaxValue).flatMap {
       case TheSchema(schema) =>
         val invalidReasons = Column.invalidateNewColumn(column.dataset, schema, column)
-        if (invalidReasons.nonEmpty) { Future(IllegalColumnChange(invalidReasons)) }
+        if (invalidReasons.nonEmpty) { Future.successful(IllegalColumnChange(invalidReasons)) }
         else                         { columnApi.insertColumn(column) }
       case other: ErrorResponse =>
-        Future(other)
+        Future.successful(other)
     }
   }
 
@@ -150,8 +150,8 @@ trait Datastore extends FutureUtils {
    */
   def newPartition(partition: Partition)
                   (implicit context: ExecutionContext): Future[Response] = {
-    if (!partition.isEmpty) return Future(NotEmpty)
-    if (!partition.isValid) return Future(NotValid)
+    if (!partition.isEmpty) return Future.successful(NotEmpty)
+    if (!partition.isValid) return Future.successful(NotValid)
     partitionApi.newPartition(partition)
   }
 

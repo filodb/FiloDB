@@ -54,7 +54,7 @@ object DatasetTableOps extends DatasetTable with DatasetApi with SimpleCassandra
     def checkEmptyPartitionsThenDelete(optPartitions: Option[Set[String]]): Future[Response] = {
       val emptySet = Set.empty[String]
       optPartitions match {
-        case None => Future(NotFound)
+        case None => Future.successful(NotFound)
         case Some(`emptySet`) =>
           // NOTE: There is a potential race condition if someone added a partition
           // while someone else deletes the dataset.  One possible protection is to
@@ -66,7 +66,7 @@ object DatasetTableOps extends DatasetTable with DatasetApi with SimpleCassandra
           delete.where(_.name eqs name).future().toResponse()
         case Some(partitions) =>
           logger.warn(s"Someone tried to delete a non-empty dataset $name with $partitions !!")
-          Future(MetadataException(new NonEmptyDataset(partitions)))
+          Future.successful(MetadataException(new NonEmptyDataset(partitions)))
       }
     }
 
