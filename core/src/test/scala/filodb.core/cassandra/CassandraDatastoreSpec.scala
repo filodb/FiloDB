@@ -1,9 +1,11 @@
 package filodb.core.cassandra
 
 import akka.actor.ActorSystem
+import java.nio.ByteBuffer
+import scala.concurrent.Future
 
 import filodb.core.datastore.Datastore
-import filodb.core.metadata.{Column, Dataset, Partition}
+import filodb.core.metadata.{Column, Dataset, Partition, Shard}
 import filodb.core.messages._
 
 object CassandraDatastoreSpec {
@@ -44,6 +46,23 @@ class CassandraDatastoreSpec extends AllTablesTest(CassandraDatastoreSpec.getNew
       whenReady(datastore.newPartition(p.copy(chunkSize = 0))) { response =>
         response should equal (NotValid)
       }
+    }
+  }
+
+  describe("data API and throttling") {
+    val bb = ByteBuffer.wrap(Array[Byte](1, 2, 3, 4))
+    val shard = Shard(Partition("dummy", "0", chunkSize = 100), 0, 0L)
+    val columnBytes = Map("a" -> bb, "b" -> bb)
+
+    it("lots of concurrent write requests should get mostly TooManyRequests, some Acks") {
+      // Cassandra is pretty fast, but with a default test max futures limit of 3, should not take
+      // too many tries to hit the limit.
+      val futures = (0 until 20).map(i => datastore.insertOneChunk(shard, 0L, 3L, columnBytes))
+      val responses = Future.sequence(futures).futureValue
+      val acks = responses.collect { case Datastore.Ack(num) => num }.length
+      val tooManyRequests = responses.collect { case TooManyRequests => 1 }.length
+      acks should be > 1
+      tooManyRequests should be > 10
     }
   }
 }

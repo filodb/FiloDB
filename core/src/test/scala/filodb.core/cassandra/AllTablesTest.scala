@@ -21,6 +21,13 @@ with FunSpecLike with Matchers with BeforeAndAfterAll with BeforeAndAfter with I
   }
 }
 
+object AllTablesTest {
+  val CassConfigStr = """
+                   | max-outstanding-futures = 2
+                   """.stripMargin
+  val CassConfig = ConfigFactory.parseString(CassConfigStr)
+}
+
 abstract class AllTablesTest(system: ActorSystem) extends ActorTest(system)
 with SimpleCassandraTest
 with Futures {
@@ -31,7 +38,7 @@ with Futures {
 
   implicit val context = scala.concurrent.ExecutionContext.Implicits.global
 
-  lazy val datastore = new CassandraDatastore(ConfigFactory.empty)
+  lazy val datastore = new CassandraDatastore(AllTablesTest.CassConfig)
 
   def createAllTables(): Unit = {
     val f = for { _ <- DatasetTableOps.create.future()

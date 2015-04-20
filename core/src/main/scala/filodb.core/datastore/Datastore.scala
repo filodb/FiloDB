@@ -3,6 +3,7 @@ package filodb.core.datastore
 import java.nio.ByteBuffer
 import scala.concurrent.{Future, ExecutionContext}
 
+import filodb.core.FutureUtils
 import filodb.core.metadata.{Dataset, Partition, Shard, Column}
 import filodb.core.messages._
 
@@ -49,7 +50,7 @@ object Datastore {
  * Each datastore implementation usually implements Datastore by implementing each lower-level
  * sub-API, such as DataApi.
  */
-trait Datastore {
+trait Datastore extends FutureUtils {
   import Datastore._
 
   def dataApi: DataApi
@@ -200,8 +201,10 @@ trait Datastore {
                      lastSeqNo: Long,
                      columnsBytes: Map[String, ByteBuffer])
                     (implicit context: ExecutionContext): Future[Response] =
-    dataApi.insertOneChunk(shard, rowId, columnsBytes)
-        .collect { case Success => Ack(lastSeqNo) }
+    rateLimit {
+      dataApi.insertOneChunk(shard, rowId, columnsBytes)
+          .collect { case Success => Ack(lastSeqNo) }
+    }
 
   /**
    * Streams chunks from one column in, applying the folding function to chunks.

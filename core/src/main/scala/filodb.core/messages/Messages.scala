@@ -18,6 +18,7 @@ case class StorageEngineException(t: Throwable) extends ErrorResponse
 case class MetadataException(t: Throwable) extends ErrorResponse
 case object NoSuchCommand extends ErrorResponse
 case object InconsistentState extends ErrorResponse  // for conditional updates - race condition detected!
+case object TooManyRequests extends ErrorResponse    // Need to retry later when limit dies down
 
 case object NotFound extends Response
 case object NotApplied extends Response
