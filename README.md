@@ -9,22 +9,21 @@ Distributed.  Columnar.  Versioned.
 /_/   /_/_/\____/_____/_____/  
 ```
 
-Folks implementing OLAP solutions for big data has had to choose between
-Parquet-based solutions and proprietary, third party solutions such as HP’s
-Vertica, Redshift, etc.  Parquet, being an HDFS file format, has drawbacks when
-it comes to easy data deduplication, concurrent workloads such as IoT, memory
-usage, and flexibility.  Cassandra and Spark is an interesting combination, but
-the performance isn’t quite there yet.
+Apache Parquet has proven that columnar storage layouts can minimize I/O and
+speed up scanning for large analytical queries.  Parquet forces developers to
+deal with its file-format abstraction, implementing deduplication, granular
+updates, indexing, and versioning themselves.  Meanwhile, Cassandra is rock-
+solid and has very promising Spark integration, but its storage layout prevents
+Spark queries from reaching Parquet levels of performance.  Can we use Cassandra
+with columnar storage to power fast queries using Spark?
 
-FiloDB is a new open-source OLAP database combining high performance Parquet-
-like columnar storage, the flexibility of a database, the familiarity of SQL
-queries, the operational ease and robustness of Apache Cassandra, and the power
-and integration of Apache Spark.   Highlights:
+FiloDB is a new open-source database based on Apache Cassandra and Spark SQL.  FiloDB brings breakthrough performance levels for analytical queries by using a columnar storage layout with compression techniques like dictionary compression.  At the same time, row-level, column-level operations and built in versioning gives FiloDB far more flexibility than can be achieved using Parquet.  
 
-* FiloDB aim to bring one to two orders of magnitude speedups over OLAP performance of Cassandra 2.x CQL tables + Spark.  For the POC performance comparison, please see [cassandra-gdelt](http://github.com/velvia/cassandra-gdelt) repo.
-* FiloDB has built-in versioning capabilities, bringing unprecedented flexibility to the world of OLAP analysis.
+* FiloDB aim's to bring one to two orders of magnitude speedups over OLAP performance of Cassandra 2.x CQL tables + Spark.  For the POC performance comparison, please see [cassandra-gdelt](http://github.com/velvia/cassandra-gdelt) repo.
 * Enable easy exactly-once ingestion from Kafka for streaming geospatial applications. 
-* Incremental computed columns and geospatial annotations
+* Incrementally computed columns and geospatial annotations
+
+FiloDB is a great fit for bulk analytical workloads, or streaming / append-only event data.  It is not optimized for heavily transactional, update-oriented workflows.
 
 [Overview presentation](http://velvia.github.io/presentations/2014-filodb/#/) -- see the docs folder for design docs.
 
