@@ -1,12 +1,16 @@
 package filodb.core.cassandra
 
 import com.datastax.driver.core.Row
+import com.datastax.driver.core.exceptions.DriverException
 import com.websudos.phantom.Implicits._
 import com.websudos.phantom.query.{InsertQuery, SelectQuery, SelectWhere}
 import com.websudos.phantom.zookeeper.{SimpleCassandraConnector, DefaultCassandraManager}
 import java.nio.ByteBuffer
 import play.api.libs.iteratee.Iteratee
 import scala.concurrent.Future
+
+import filodb.core.datastore.DataApi
+import filodb.core.messages._
 
 /**
  * Represents the "data" table which holds the actual columnar data for datasets.
@@ -29,7 +33,7 @@ sealed class DataTable extends CassandraTable[DataTable, (String, Long, ByteBuff
   object data extends BlobColumn(this)
   //scalastyle:on
 
-  override def fromRow(row: Row): DataTable.ColRowBytes =
+  override def fromRow(row: Row): (String, Long, ByteBuffer) =
     (columnName(row), rowId(row), data(row))
 }
 
@@ -37,11 +41,10 @@ sealed class DataTable extends CassandraTable[DataTable, (String, Long, ByteBuff
  * Asynchronous methods to operate on data table.  All normal errors and exceptions are returned
  * through ErrorResponse types.
  */
-object DataTable extends DataTable with SimpleCassandraConnector {
-  override val tableName = "data"
+object DataTable extends DataTable with SimpleCassandraConnector with DataApi {
+  import DataApi._
 
-  // The tuple type returned by the low level readColumns API in the Enumerator
-  type ColRowBytes = (String, Long, ByteBuffer)
+  override val tableName = "data"
 
   // TODO: add in Config-based initialization code to find the keyspace, cluster, etc.
   val keySpace = "test"
@@ -49,7 +52,7 @@ object DataTable extends DataTable with SimpleCassandraConnector {
   import Util._
   import filodb.core.messages._
   import filodb.core.metadata.Shard
-  import filodb.core.metadata.Shard._
+  import filodb.core.datastore.Datastore._
 
   def insertQuery(shard: Shard): InsertQuery[DataTable, ColRowBytes] =
     insert.value(_.dataset,    shard.partition.dataset)
@@ -63,20 +66,10 @@ object DataTable extends DataTable with SimpleCassandraConnector {
      .and(_.partition eqs shard.partition.partition)
      .and(_.firstRowId eqs shard.firstRowId)
 
-  /**
-   * Inserts one chunk of data from different columns.
-   * Checks that the rowIdRange is aligned with the chunkSize.
-   * @param shard the Shard to write to
-   * @param rowId the starting rowId for the chunk. Must be aligned to chunkSize.
-   * @param lastSequenceNo the ending sequence # for the chunk, will be reported back in the Ack
-   * @param columnsBytes the column name and bytes to be written for each column
-   * @returns Ack(), or ChunkMisaligned, or other ErrorResponse
-   */
   def insertOneChunk(shard: Shard,
                      rowId: Long,
-                     lastSequenceNo: Long,
                      columnsBytes: Map[String, ByteBuffer]): Future[Response] = {
-    if (rowId % shard.partition.chunkSize != 0) return(Future(ChunkMisaligned))
+    if (rowId % shard.partition.chunkSize != 0) return(Future.successful(ChunkMisaligned))
 
     // NOTE: This is actually a good use of Unlogged Batch, because all of the inserts
     // are to the same partition key, so they will get collapsed down into one insert
@@ -91,13 +84,24 @@ object DataTable extends DataTable with SimpleCassandraConnector {
                                     .value(_.data, bytes))
     }
     batch.future().toResponse()
-      .collect { case Success => Ack(lastSequenceNo) }
   }
 
-  // Partial function mapping commands to functions executing them
-  // In this case only covers the writing commands, reads are different
-  val commandMapper: PartialFunction[Command, Future[Response]] = {
-    case WriteColumnData(shard, rowId, lastSeqNo, colBytes) =>
-      insertOneChunk(shard, rowId, lastSeqNo, colBytes)
+  def scanOneColumn[T](shard: Shard,
+                    column: String,
+                    rowIdRange: Option[(Long, Long)] = None)
+                   (initValue: T)
+                   (foldFunc: (T, ColRowBytes) => T): Future[Either[T, ErrorResponse]] = {
+    // NOTE: Cassandra does not allow using IN operator on one part of the clustering key.
+    val selectCols = select(_.columnName, _.rowId, _.data)
+    val query = whereShard(selectCols, shard)
+                  .and(_.columnName eqs column)
+    val finalQuery = rowIdRange.map { case (startRow, endRow) =>
+                       query.and(_.rowId gte startRow).and(_.rowId lte endRow)
+                     }.getOrElse(query)
+    val f = finalQuery.fetchEnumerator run (Iteratee.fold(initValue)(foldFunc))
+    f.map { result => Left(result) }
+     .recover {
+       case e: DriverException => Right(StorageEngineException(e))
+     }
   }
 }

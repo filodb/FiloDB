@@ -5,6 +5,7 @@ import com.websudos.phantom.Implicits._
 import com.websudos.phantom.zookeeper.{SimpleCassandraConnector, DefaultCassandraManager}
 import scala.concurrent.Future
 
+import filodb.core.datastore.{Datastore, DatasetApi}
 import filodb.core.metadata.Dataset
 
 /**
@@ -24,7 +25,9 @@ sealed class DatasetTable extends CassandraTable[DatasetTable, Dataset] {
  * Asynchronous methods to operate on datasets.  All normal errors and exceptions are returned
  * through ErrorResponse types.
  */
-object DatasetTableOps extends DatasetTable with SimpleCassandraConnector {
+object DatasetTableOps extends DatasetTable with DatasetApi with SimpleCassandraConnector {
+  import Datastore._
+
   override val tableName = "datasets"
 
   // TODO: add in Config-based initialization code to find the keyspace, cluster, etc.
@@ -33,20 +36,12 @@ object DatasetTableOps extends DatasetTable with SimpleCassandraConnector {
   import Util._
   import filodb.core.messages._
 
-  // This is really an exception - deleting a non-empty partition should be a bug
-  class NonEmptyDataset(partitions: Set[String]) extends Exception
-
-  /**
-   * Creates a new dataset with the given name, if it doesn't already exist.
-   * @param name Name of the dataset to create
-   * @returns Success, or AlreadyExists, or StorageEngineException
-   */
   def createNewDataset(name: String): Future[Response] =
     insert.value(_.name, name).ifNotExists.future().toResponse(AlreadyExists)
 
   def getDataset(name: String): Future[Response] =
     select.where(_.name eqs name).one()
-      .map(opt => opt.map(Dataset.Result(_)).getOrElse(NotFound))
+      .map(opt => opt.map(TheDataset(_)).getOrElse(NotFound))
       .handleErrors
 
   /**
@@ -59,7 +54,7 @@ object DatasetTableOps extends DatasetTable with SimpleCassandraConnector {
     def checkEmptyPartitionsThenDelete(optPartitions: Option[Set[String]]): Future[Response] = {
       val emptySet = Set.empty[String]
       optPartitions match {
-        case None => Future(NotFound)
+        case None => Future.successful(NotFound)
         case Some(`emptySet`) =>
           // NOTE: There is a potential race condition if someone added a partition
           // while someone else deletes the dataset.  One possible protection is to
@@ -71,19 +66,12 @@ object DatasetTableOps extends DatasetTable with SimpleCassandraConnector {
           delete.where(_.name eqs name).future().toResponse()
         case Some(partitions) =>
           logger.warn(s"Someone tried to delete a non-empty dataset $name with $partitions !!")
-          Future(MetadataException(new NonEmptyDataset(partitions)))
+          Future.successful(MetadataException(new NonEmptyDataset(partitions)))
       }
     }
 
     val partitions = select(_.partitions).where(_.name eqs name).one()
     partitions.flatMap { optParts => checkEmptyPartitionsThenDelete(optParts) }
               .handleErrors
-  }
-
-  // Partial function mapping commands to functions executing them
-  val commandMapper: PartialFunction[Command, Future[Response]] = {
-    case Dataset.NewDataset(dataset) => createNewDataset(dataset)
-    case Dataset.DeleteDataset(name) => deleteDataset(name)
-    case Dataset.GetDataset(name)    => getDataset(name)
   }
 }

@@ -9,6 +9,7 @@ import scala.concurrent.Await
 import scala.concurrent.duration._
 
 import filodb.core.cassandra.AllTablesTest
+import filodb.core.datastore.Datastore
 import filodb.core.metadata.{Column, Dataset, Partition, Shard}
 import filodb.core.messages._
 
@@ -30,7 +31,7 @@ class IngesterActorSpec extends AllTablesTest(IngesterActorSpec.getNewSystem) {
   def withIngesterActor(dataset: String, partition: String, columns: Seq[(String, Column.ColumnType)])
                        (f: ActorRef => Unit) {
     val (partObj, columnSeq) = createTable(dataset, partition, columns)
-    val ingester = system.actorOf(IngesterActor.props(partObj, columnSeq, metaActor, writerActor, testActor))
+    val ingester = system.actorOf(IngesterActor.props(partObj, columnSeq, datastore, testActor))
     try {
       f(ingester)
     } finally {
@@ -53,9 +54,10 @@ class IngesterActorSpec extends AllTablesTest(IngesterActorSpec.getNewSystem) {
         ingester ! chunkCmd
         expectMsg(IngesterActor.Ack("gdelt", "1979-1984", 5L))
 
-        metaActor ! Partition.GetPartition("gdelt", "1979-1984")
-        val Partition.ThePartition(p) = expectMsgType[Partition.ThePartition]
-        p.shardVersions.size should equal (1)
+        whenReady(datastore.getPartition("gdelt", "1979-1984")) {
+          case Datastore.ThePartition(p) =>
+            p.shardVersions.size should equal (1)
+        }
       }
     }
 
