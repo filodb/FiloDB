@@ -24,6 +24,7 @@ object Util {
     def handleErrors: Future[Response] = f.recover {
       case e: DriverException => StorageEngineException(e)
       // from invalid Enum strings, which should never happen, or some other parsing error
+      case e: NoSuchElementException   => MetadataException(e)
       case e: IllegalArgumentException => MetadataException(e)
     }
   }
