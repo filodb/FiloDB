@@ -1,7 +1,7 @@
 package filodb.core.metadata
 
 import com.typesafe.scalalogging.slf4j.StrictLogging
-import enumeratum.Enum
+import enumeratum.{Enum, EnumEntry}
 
 import filodb.core.messages.{Command, Response}
 
@@ -43,7 +43,7 @@ case class Column(name: String,
 }
 
 object Column extends StrictLogging {
-  sealed trait ColumnType
+  sealed trait ColumnType extends EnumEntry
 
   object ColumnType extends Enum[ColumnType] {
     val values = findValues
@@ -55,7 +55,7 @@ object Column extends StrictLogging {
     case object BitmapColumn extends ColumnType
   }
 
-  sealed trait Serializer
+  sealed trait Serializer extends EnumEntry
 
   object Serializer extends Enum[Serializer] {
     val values = findValues

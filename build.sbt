@@ -26,7 +26,7 @@ lazy val coreDeps = Seq(
   "com.typesafe.akka"    %% "akka-slf4j"        % akkaVersion,
   "com.typesafe.scala-logging" %% "scala-logging-slf4j" % "2.1.2",
   "ch.qos.logback"        % "logback-classic"   % "1.0.7",
-  "com.beachape"         %% "enumeratum"        % "0.0.4",
+  "com.beachape"         %% "enumeratum"        % "1.2.1",
   "org.velvia.filo"      %% "filo-scala"        % "0.0.4",
   "com.opencsv"           % "opencsv"           % "3.3",
   "com.websudos"         %% "phantom-testing"   % phantomVersion % "test",
