@@ -61,6 +61,20 @@ case class Partition(dataset: String,
     (version >= shardVersions(firstRowId)._1 && version <= shardVersions(firstRowId)._2)
 
   /**
+   * Finds the firstRowIds (shards) for the given range of versions in this Partition.
+   * TODO: make this efficient.  This just searchs linearly, but a better design would be
+   * to have a bitmap of shards that could be quickly ORed together, for example (requires
+   * different storage metadata obviously)  OR to make shardVersions a sorted map, use bin search.
+   * @param versions a range of starting and ending version numbers to find shards for
+   * @returns the shards / firstRowIds in increasing rowId
+   */
+  def shardsForVersions(versions: (Int, Int)): Seq[Long] =
+    shardVersions.collect {
+      case (firstRowId, (firstVer, lastVer)) if versions._1 <= lastVer && versions._2 >= firstVer =>
+        firstRowId
+    }.toSeq.sortBy(x => x)
+
+  /**
    * Adds a shard and a version to the partition. Does no validation of shard and version -- that is
    * the job of the shardingStrategy.
    * NOTE: don't call this directly, instead send AddShardVersion message to MetadataActor, which takes
