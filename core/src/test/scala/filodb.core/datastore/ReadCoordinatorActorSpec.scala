@@ -8,7 +8,9 @@ import org.velvia.filo.{ColumnParser, TupleRowIngestSupport}
 import scala.concurrent.Await
 import scala.concurrent.duration._
 
-import filodb.core.cassandra.AllTablesTest
+import com.typesafe.scalalogging.slf4j.StrictLogging
+
+import filodb.core.cassandra.{AllTablesTest, DataTable}
 import filodb.core.metadata.{Column, Dataset, Partition, Shard}
 import filodb.core.messages._
 
@@ -20,7 +22,7 @@ object ReadCoordinatorActorSpec {
   def getNewSystem = ActorSystem("test", config)
 }
 
-class ReadCoordinatorActorSpec extends AllTablesTest(ReadCoordinatorActorSpec.getNewSystem) {
+class ReadCoordinatorActorSpec extends AllTablesTest(ReadCoordinatorActorSpec.getNewSystem) with StrictLogging {
   import ReadCoordinatorActor._
 
   override def beforeAll() {
@@ -47,14 +49,26 @@ class ReadCoordinatorActorSpec extends AllTablesTest(ReadCoordinatorActorSpec.ge
 
   // Creates two shards: one at 0L, another at 200L, first shard has two chunks
   private def writeDataChunks(): Partition = {
+    logger.info("About to writeDataChunks...")
     val (partObj, cols) = createTable("gdelt", "first", GdeltColumns take 2)
     val partition = partObj.copy(shardVersions = Map(0L -> (0 -> 1), 200L -> (0 -> 1)),
                                  chunkSize = 100)
     val shard1 = Shard(partition, 0, 0L)
-    datastore.insertOneChunk(shard1, 0L, 99L, Map("id" -> colABytes(0), "sqlDate" -> colBBytes(0))).futureValue
-    datastore.insertOneChunk(shard1, 100L, 199L, Map("id" -> colABytes(1), "sqlDate" -> colBBytes(1))).futureValue
+    whenReady(datastore.insertOneChunk(shard1, 0L, 99L, Map("id" -> colABytes(0),
+                                                            "sqlDate" -> colBBytes(0)))) { ack =>
+      ack should equal (Datastore.Ack(99L))
+    }
+    whenReady(datastore.insertOneChunk(shard1, 100L, 199L, Map("id" -> colABytes(1),
+                             "sqlDate" -> colBBytes(1)))) { ack =>
+      ack should equal (Datastore.Ack(199L))
+    }
+
     val shard2 = Shard(partition, 0, 200L)
-    datastore.insertOneChunk(shard2, 200L, 299L, Map("id" -> colABytes(2), "sqlDate" -> colBBytes(2))).futureValue
+    whenReady(datastore.insertOneChunk(shard2, 200L, 299L, Map("id" -> colABytes(2),
+                             "sqlDate" -> colBBytes(2)))) { ack =>
+      ack should equal (Datastore.Ack(299L))
+    }
+
     partition
   }
 

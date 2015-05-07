@@ -92,7 +92,7 @@ class ReadCoordinatorActor(datastore: Datastore,
     resetChunkBuffer()
     val endingRowId = startingRowId + maxRowChunks * partition.chunkSize
     val readFutures = columns.zipWithIndex.map { case (col, idx) =>
-      logger.info(s"Starting read of column $col, shard $shard from $startingRowId -> $endingRowId")
+      logger.debug(s"Starting read of column $col, shard $shard from $startingRowId -> $endingRowId")
       datastore.scanOneColumn(shard, col, Some(startingRowId -> endingRowId))(0) {
       case (acc, (_, rowId, bytes)) =>
         updateChunk(idx, rowId, bytes)
@@ -103,6 +103,7 @@ class ReadCoordinatorActor(datastore: Datastore,
     }
     Future.sequence(readFutures).onSuccess {
       case answers: Any => self ! FinishedReadingShard
+        logger.debug(s"Done reading all columns $columns")
     }
     // TODO: recover / error handling
   }
