@@ -4,6 +4,7 @@ import akka.actor.{ActorRef, PoisonPill, Props}
 import java.nio.ByteBuffer
 import scala.collection.mutable.{ArrayBuffer, HashMap}
 import scala.concurrent.Future
+import scala.util.Try
 
 import filodb.core.BaseActor
 import filodb.core.messages._
@@ -27,6 +28,7 @@ object ReadCoordinatorActor {
 
   // ////////// Responses
   // NOTE: chunks is ordered the same as columns
+  case object InvalidPartitionVersion extends ErrorResponse
   case class RowChunk(startRowId: Long, endRowId: Long, chunks: Array[ByteBuffer])
 
   // scalastyle:off
@@ -35,8 +37,12 @@ object ReadCoordinatorActor {
 
   val DefaultMaxRowChunks = 200
 
-  def props(datastore: Datastore, partition: Partition, version: Int, columns: Seq[String]): Props =
-    Props(classOf[ReadCoordinatorActor], datastore, partition, version, columns)
+  def props(datastore: Datastore,
+            partition: Partition,
+            version: Int,
+            columns: Seq[String],
+            maxRowChunks: Int = DefaultMaxRowChunks): Props =
+    Props(classOf[ReadCoordinatorActor], datastore, partition, version, columns, maxRowChunks)
 }
 
 /**
@@ -56,7 +62,7 @@ class ReadCoordinatorActor(datastore: Datastore,
   // Initialize variables
   val firstRowIds = partition.shardsForVersions(version -> version)
   var rowIdIndex = 0
-  var startingRowId: Long = firstRowIds(0)
+  var startingRowId: Long = Try(firstRowIds(0)).getOrElse(-1L)
 
   val chunks: Array[ByteBuffer] = Array.fill(maxRowChunks * columns.length)(NullBuffer)
   val rowIdWritten = new Array[Long](columns.length)
@@ -120,35 +126,38 @@ class ReadCoordinatorActor(datastore: Datastore,
 
   def receive: Receive = {
     case GetNextChunk =>
-      // Are we at the beginning of a shard?  Initiate reads; put request on stack
-      if (curChunkRowId < 0L) {
-        startReadShard()
-        requestor = Some(sender)
-        curChunkRowId = startingRowId
-      }
-      // Is there a next chunk to read?  If so, return with the chunk; update state
-      // Otherwise, set pending flag; send the chunk when it comes in.
+      if (firstRowIds.isEmpty) { sender ! InvalidPartitionVersion }
       else {
-        if (nextChunkAvailable) { returnChunk() }
-        else                    { requestor = Some(sender) }
-      }
+        // Are we at the beginning of a shard?  Initiate reads; put request on stack
+        if (curChunkRowId < 0L) {
+          startReadShard()
+          requestor = Some(sender)
+          curChunkRowId = startingRowId
+        }
+        // Is there a next chunk to read?  If so, return with the chunk; update state
+        // Otherwise, set pending flag; send the chunk when it comes in.
+        else {
+          if (nextChunkAvailable) { returnChunk() }
+          else                    { requestor = Some(sender) }
+        }
 
-      // If we've read past last available chunk, figure out next one to read from
-      if (doneReading && curChunkRowId > rowIdWritten.min) {
-        // Are we at end of all shards?
-        if (rowIdIndex >= firstRowIds.length - 1) {
-          logger.info("Read past last shard, quitting...")
-          self ! PoisonPill
-        } else {
-          // should we be reading next shard?
-          if (curChunkRowId >= firstRowIds(rowIdIndex + 1)) {
-            rowIdIndex += 1
-            startingRowId = firstRowIds(rowIdIndex)
-            logger.info(s"Advancing to next shard starting at $startingRowId...")
+        // If we've read past last available chunk, figure out next one to read from
+        if (doneReading && curChunkRowId > rowIdWritten.min) {
+          // Are we at end of all shards?
+          if (rowIdIndex >= firstRowIds.length - 1) {
+            logger.info("Read past last shard, quitting...")
+            self ! PoisonPill
           } else {
-            startingRowId = curChunkRowId
+            // should we be reading next shard?
+            if (curChunkRowId >= firstRowIds(rowIdIndex + 1)) {
+              rowIdIndex += 1
+              startingRowId = firstRowIds(rowIdIndex)
+              logger.info(s"Advancing to next shard starting at $startingRowId...")
+            } else {
+              startingRowId = curChunkRowId
+            }
+            curChunkRowId = -1
           }
-          curChunkRowId = -1
         }
       }
 
