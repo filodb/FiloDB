@@ -1,7 +1,7 @@
 package filodb.core
 
 import java.util.concurrent.atomic.AtomicInteger
-import scala.concurrent.Future
+import scala.concurrent.{ExecutionContext, Future}
 
 import filodb.core.messages.{Response, TooManyRequests}
 
@@ -12,9 +12,13 @@ trait FutureUtils {
    * Only executes f if the limiter value is below the limit, otherwise
    * fails fast and returns TooManyRequests
    */
-  def rateLimit(f: => Future[Response]): Future[Response] = {
+  def rateLimit(f: => Future[Response])(implicit ec: ExecutionContext): Future[Response] = {
     if (limiter.obtain()) {
-      f
+      val future = f
+      future.onComplete {
+        case x: Any => limiter.release()   // Must release when future is finished
+      }
+      future
     } else {
       Future.successful(TooManyRequests)
     }
