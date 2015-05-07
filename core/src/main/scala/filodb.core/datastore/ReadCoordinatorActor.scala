@@ -118,17 +118,38 @@ class ReadCoordinatorActor(datastore: Datastore,
       val endingRowId = curChunkRowId + partition.chunkSize - 1
       val base = baseIndex(curChunkRowId)
       val rowChunks = java.util.Arrays.copyOfRange(chunks.asInstanceOf[Array[AnyRef]],
-                                                   base, base + columns.length - 1)
+                                                   base, base + columns.length)
       requestorRef ! RowChunk(curChunkRowId, endingRowId, rowChunks.asInstanceOf[Array[ByteBuffer]])
     }
     requestor = None
     curChunkRowId += partition.chunkSize
   }
 
+  private def advanceToNextShard(): Unit = {
+    if (doneReading && curChunkRowId > rowIdWritten.min) {
+      // Are we at end of all shards?
+      if (rowIdIndex >= firstRowIds.length - 1) {
+        logger.info("Read past last shard, quitting...")
+        self ! PoisonPill
+      } else {
+        // should we be reading next shard?
+        if (curChunkRowId >= firstRowIds(rowIdIndex + 1)) {
+          rowIdIndex += 1
+          startingRowId = firstRowIds(rowIdIndex)
+          logger.info(s"Advancing to next shard starting at $startingRowId...")
+        } else {
+          startingRowId = curChunkRowId
+        }
+        curChunkRowId = -1
+      }
+    }
+  }
+
   def receive: Receive = {
     case GetNextChunk =>
       if (firstRowIds.isEmpty) { sender ! InvalidPartitionVersion }
       else {
+        advanceToNextShard()
         // Are we at the beginning of a shard?  Initiate reads; put request on stack
         if (curChunkRowId < 0L) {
           startReadShard()
@@ -138,27 +159,8 @@ class ReadCoordinatorActor(datastore: Datastore,
         // Is there a next chunk to read?  If so, return with the chunk; update state
         // Otherwise, set pending flag; send the chunk when it comes in.
         else {
+          requestor = Some(sender)
           if (nextChunkAvailable) { returnChunk() }
-          else                    { requestor = Some(sender) }
-        }
-
-        // If we've read past last available chunk, figure out next one to read from
-        if (doneReading && curChunkRowId > rowIdWritten.min) {
-          // Are we at end of all shards?
-          if (rowIdIndex >= firstRowIds.length - 1) {
-            logger.info("Read past last shard, quitting...")
-            self ! PoisonPill
-          } else {
-            // should we be reading next shard?
-            if (curChunkRowId >= firstRowIds(rowIdIndex + 1)) {
-              rowIdIndex += 1
-              startingRowId = firstRowIds(rowIdIndex)
-              logger.info(s"Advancing to next shard starting at $startingRowId...")
-            } else {
-              startingRowId = curChunkRowId
-            }
-            curChunkRowId = -1
-          }
         }
       }
 

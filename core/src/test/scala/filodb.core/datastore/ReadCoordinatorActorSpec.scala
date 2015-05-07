@@ -100,18 +100,44 @@ class ReadCoordinatorActorSpec extends AllTablesTest(ReadCoordinatorActorSpec.ge
   }
 
   describe("normal reads") {
-    it("can read all chunks of a shard, >= 2 columns") {
+    it("can read all chunks of multiple shards, 2 columns") {
       val partition = writeDataChunks()
       withCoordinatorActor(partition, 0, GdeltColNames take 2) { coord =>
         coord ! GetNextChunk
         val chunks1 = expectMsgClass(classOf[RowChunk])
         chunks1.startRowId should equal (0L)
-        chunks1.chunks(0) should equal (colABytes(0))
+        chunks1.chunks should equal (Array(colABytes(0), colBBytes(0)))
+
+        coord ! GetNextChunk
+        val chunks2 = expectMsgClass(classOf[RowChunk])
+        chunks2.startRowId should equal (100L)
+        chunks2.chunks should equal (Array(colABytes(1), colBBytes(1)))
+
+        coord ! GetNextChunk
+        val chunks3 = expectMsgClass(classOf[RowChunk])
+        chunks3.startRowId should equal (200L)
+        chunks3.chunks should equal (Array(colABytes(2), colBBytes(2)))
       }
     }
 
-    it("can read from multiple shards") (pending)
+    it("can read from 1 column, multiple shards") {
+      val partition = writeDataChunks()
+      withCoordinatorActor(partition, 0, GdeltColNames take 1) { coord =>
+        coord ! GetNextChunk
+        val chunks1 = expectMsgClass(classOf[RowChunk])
+        chunks1.startRowId should equal (0L)
+        chunks1.chunks should equal (Array(colABytes(0)))
 
-    it("can read from 1 column") (pending)
+        coord ! GetNextChunk
+        val chunks2 = expectMsgClass(classOf[RowChunk])
+        chunks2.startRowId should equal (100L)
+        chunks2.chunks should equal (Array(colABytes(1)))
+
+        coord ! GetNextChunk
+        val chunks3 = expectMsgClass(classOf[RowChunk])
+        chunks3.startRowId should equal (200L)
+        chunks3.chunks should equal (Array(colABytes(2)))
+      }
+    }
   }
 }
