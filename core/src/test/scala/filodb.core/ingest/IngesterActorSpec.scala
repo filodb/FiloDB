@@ -21,6 +21,8 @@ object IngesterActorSpec {
 }
 
 class IngesterActorSpec extends AllTablesTest(IngesterActorSpec.getNewSystem) {
+  import akka.testkit._
+
   override def beforeAll() {
     super.beforeAll()
     createAllTables()
@@ -37,8 +39,8 @@ class IngesterActorSpec extends AllTablesTest(IngesterActorSpec.getNewSystem) {
     } finally {
       // Stop the actor. This isn't strictly necessary, but prevents extraneous messages from spilling over
       // to the next test.  Also, you cannot create two actors with the same name.
-      val stopping = gracefulStop(ingester, 3 seconds, PoisonPill)
-      Await.result(stopping, 4 seconds)
+      val stopping = gracefulStop(ingester, 3.seconds.dilated, PoisonPill)
+      Await.result(stopping, 4.seconds.dilated)
     }
   }
 

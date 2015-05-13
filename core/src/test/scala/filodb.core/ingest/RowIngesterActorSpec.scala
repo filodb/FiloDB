@@ -13,6 +13,8 @@ object RowIngesterActorSpec {
 }
 
 class RowIngesterActorSpec extends ActorTest(RowIngesterActorSpec.system) {
+  import akka.testkit._
+
   val testPartition = Partition("dataset1", "part0", chunkSize = 10)
   val schema = Seq(Column("first", "dataset1", 0, Column.ColumnType.StringColumn),
                    Column("last", "dataset1", 0, Column.ColumnType.StringColumn),
@@ -50,7 +52,7 @@ class RowIngesterActorSpec extends ActorTest(RowIngesterActorSpec.system) {
     ageBinSeq(0) should equal (24)
     ageBinSeq.toList should equal (List(24, 28, 25, 24, 28, 25))
 
-    probe.expectNoMsg(1 seconds)
+    probe.expectNoMsg(1.second.dilated)
   }
 
   it("should flush when changing versions, or rowId goes backwards") {
