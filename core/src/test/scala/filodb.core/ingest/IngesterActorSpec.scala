@@ -8,17 +8,13 @@ import java.nio.ByteBuffer
 import scala.concurrent.Await
 import scala.concurrent.duration._
 
+import filodb.core.ActorSpecConfig
 import filodb.core.cassandra.AllTablesTest
 import filodb.core.datastore.Datastore
 import filodb.core.metadata.{Column, Dataset, Partition, Shard}
 import filodb.core.messages._
 
-object IngesterActorSpec {
-  val config = ConfigFactory.parseString("""
-                                           akka.log-dead-letters = 0
-                                         """)
-  def getNewSystem = ActorSystem("test", config)
-}
+object IngesterActorSpec extends ActorSpecConfig
 
 class IngesterActorSpec extends AllTablesTest(IngesterActorSpec.getNewSystem) {
   import akka.testkit._

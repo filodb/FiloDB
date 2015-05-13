@@ -10,16 +10,15 @@ import scala.concurrent.duration._
 
 import com.typesafe.scalalogging.slf4j.StrictLogging
 
+import filodb.core.ActorSpecConfig
 import filodb.core.cassandra.{AllTablesTest, DataTable}
 import filodb.core.metadata.{Column, Dataset, Partition, Shard}
 import filodb.core.messages._
 
-object ReadCoordinatorActorSpec {
-  val config = ConfigFactory.parseString("""
-                                           akka.log-dead-letters = 0
-                                           akka.loggers = ["akka.testkit.TestEventListener"]
-                                         """)
-  def getNewSystem = ActorSystem("test", config)
+object ReadCoordinatorActorSpec extends ActorSpecConfig {
+  override lazy val configString = defaultConfig + """
+    akka.loggers = ["akka.testkit.TestEventListener"]
+  """
 }
 
 class ReadCoordinatorActorSpec extends AllTablesTest(ReadCoordinatorActorSpec.getNewSystem) with StrictLogging {

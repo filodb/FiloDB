@@ -5,14 +5,13 @@ import akka.testkit.TestProbe
 import org.velvia.filo.{ColumnParser, TupleRowIngestSupport}
 import scala.concurrent.duration._
 
+import filodb.core.ActorSpecConfig
 import filodb.core.cassandra.ActorTest
 import filodb.core.metadata.{Column, Partition}
 
-object RowIngesterActorSpec {
-  val system = ActorSystem("test")
-}
+object RowIngesterActorSpec extends ActorSpecConfig
 
-class RowIngesterActorSpec extends ActorTest(RowIngesterActorSpec.system) {
+class RowIngesterActorSpec extends ActorTest(RowIngesterActorSpec.getNewSystem) {
   import akka.testkit._
 
   val testPartition = Partition("dataset1", "part0", chunkSize = 10)

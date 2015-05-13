@@ -9,16 +9,12 @@ import org.velvia.filo.{ColumnParser, TupleRowIngestSupport}
 import scala.concurrent.Await
 import scala.concurrent.duration._
 
+import filodb.core.ActorSpecConfig
 import filodb.core.cassandra.AllTablesTest
 import filodb.core.metadata.{Column, Dataset, Partition, Shard}
 import filodb.core.messages._
 
-object CoordinatorActorSpec {
-  val config = ConfigFactory.parseString("""
-                                           akka.log-dead-letters = 0
-                                         """)
-  def getNewSystem = ActorSystem("test", config)
-}
+object CoordinatorActorSpec extends ActorSpecConfig
 
 class CoordinatorActorSpec extends AllTablesTest(CoordinatorActorSpec.getNewSystem) {
   import akka.testkit._
