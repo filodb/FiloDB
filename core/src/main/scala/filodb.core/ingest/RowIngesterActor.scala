@@ -52,20 +52,12 @@ object RowIngesterActor {
                rowIngestSupport: RowIngestSupport[R]): Props =
     Props(classOf[RowIngesterActor[R]], ingesterActor, schema, partition, rowIngestSupport)
 
-  import org.velvia.filo._
+  import filodb.core.datastore.Serde._
 
   def schemaToFiloSchema(schema: Seq[Column]): Seq[IngestColumn] = schema.map {
     case Column(name, _, _, colType, serializer, false, false) =>
       require(serializer == Column.Serializer.FiloSerializer)
-      val builder = colType match {
-        case Column.ColumnType.IntColumn  => new IntColumnBuilder
-        case Column.ColumnType.LongColumn => new LongColumnBuilder
-        case Column.ColumnType.DoubleColumn => new DoubleColumnBuilder
-        case Column.ColumnType.StringColumn => new StringColumnBuilder
-        case x: Column.ColumnType =>
-          throw new IllegalArgumentException(s"Sorry, column type $x not supported!")
-      }
-      IngestColumn(name, builder)
+      IngestColumn(name, ColTypeToClazz(colType))
   }
 }
 

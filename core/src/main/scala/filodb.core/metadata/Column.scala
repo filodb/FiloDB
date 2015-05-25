@@ -2,8 +2,6 @@ package filodb.core.metadata
 
 import com.typesafe.scalalogging.slf4j.StrictLogging
 import enumeratum.{Enum, EnumEntry}
-import java.nio.ByteBuffer
-import org.velvia.filo.{ColumnParser, ColumnWrapper}
 
 import filodb.core.messages.{Command, Response}
 
@@ -47,21 +45,13 @@ case class Column(name: String,
 object Column extends StrictLogging {
   sealed trait ColumnType extends EnumEntry
 
-  import org.velvia.filo.VectorExtractor
-  import org.velvia.filo.VectorExtractor._
-
-  sealed trait FiloDeserializer[A] {
-    def deserialize[A: VectorExtractor](bytes: ByteBuffer): ColumnWrapper[A] =
-      ColumnParser.parseAsSimpleColumn[A](bytes)(implicitly[VectorExtractor[A]])
-  }
-
   object ColumnType extends Enum[ColumnType] {
     val values = findValues
 
-    case object IntColumn extends ColumnType with FiloDeserializer[Int]
-    case object LongColumn extends ColumnType with FiloDeserializer[Long]
-    case object DoubleColumn extends ColumnType with FiloDeserializer[Double]
-    case object StringColumn extends ColumnType with FiloDeserializer[String]
+    case object IntColumn extends ColumnType
+    case object LongColumn extends ColumnType
+    case object DoubleColumn extends ColumnType
+    case object StringColumn extends ColumnType
     case object BitmapColumn extends ColumnType
   }
 

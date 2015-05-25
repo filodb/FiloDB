@@ -29,6 +29,7 @@ class RowIngesterActorSpec extends ActorTest(RowIngesterActorSpec.getNewSystem) 
                   (Some("Terrance"), Some("Knighton"), Some(28)))
 
   import RowIngesterActor.Row
+  import ColumnParser._
 
   it("should flush when chunk gets full and one more line added") {
     val probe = TestProbe()
@@ -46,7 +47,7 @@ class RowIngesterActorSpec extends ActorTest(RowIngesterActorSpec.getNewSystem) 
     chunk.lastSequenceNo should equal (9L)
     chunk.columnsBytes.keys should equal (Set("first", "last", "age"))
 
-    val ageBinSeq = ColumnParser.parseAsSimpleColumn[Int](chunk.columnsBytes("age"))
+    val ageBinSeq = ColumnParser.parse[Int](chunk.columnsBytes("age"))
     ageBinSeq should have length (10)
     ageBinSeq(0) should equal (24)
     ageBinSeq.toList should equal (List(24, 28, 25, 24, 28, 25))
