@@ -10,6 +10,12 @@ lazy val core = (project in file("core"))
                   .settings(scalacOptions += "-language:postfixOps")
                   .settings(libraryDependencies ++= coreDeps)
 
+lazy val cli = (project in file("cli"))
+                 .settings(mySettings:_*)
+                 .settings(name := "filodb-cli")
+                 .settings(libraryDependencies ++= cliDeps)
+                 .dependsOn(core)
+
 val phantomVersion = "1.5.0"
 val akkaVersion    = "2.3.7"
 
@@ -31,6 +37,10 @@ lazy val coreDeps = Seq(
   "com.opencsv"           % "opencsv"           % "3.3",
   "com.websudos"         %% "phantom-testing"   % phantomVersion % "test",
   "com.typesafe.akka"    %% "akka-testkit"      % akkaVersion % "test"
+)
+
+lazy val cliDeps = Seq(
+  "com.quantifind"       %% "sumac"             % "0.3.0"
 )
 
 //////////////////////////
