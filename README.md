@@ -32,3 +32,13 @@ To compile the .mermaid source files to .png's, install the [Mermaid CLI](http:/
 ## Building and Testing
 
 Run the tests with `sbt test`, or for continuous development, `sbt ~test`.  Noisy cassandra logs can be seen in `filodb-test.log`.
+
+## Using the CLI
+
+Create a dataset with the first 20 columns from the GDELT public dataset:
+
+```
+sbt "cli/run --command create --dataset gdelt --columns globaleventid:string,year:int,sqldate:string,monthyear:int,fractiondate:double,actor1code:string,actor1countrycode:string,actor1ethniccode:string,actor1knowngroupcode:string,actor1name:string,actor1religion1code:string,actor1religion2code:string,actor1type1code:string,actor1type2code:string,actor1type3code:string,actor2code:string,actor2countrycode:string,actor2ethniccode:string,actor2knowngroupcode:string,actor2name:string"
+```
+
+You could also add columns later with the same syntax.

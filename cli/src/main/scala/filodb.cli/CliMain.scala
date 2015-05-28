@@ -11,12 +11,30 @@ import filodb.core.cassandra.CassandraDatastore
 import filodb.core.datastore.Datastore
 import filodb.core.ingest.CoordinatorActor
 import filodb.core.messages._
+import filodb.core.metadata.Column
 
 class Arguments extends FieldArgs {
   var dataset: Option[String] = None
   var partition: Option[String] = None
   var command: Option[String] = None
   var filename: Option[String] = None
+  var columns: Option[Map[String, String]] = None
+  var version: Option[Int] = None
+
+  import Column.ColumnType._
+
+  def toColumns(dataset: String, version: Int): Seq[Column] = {
+    columns.map { colStrStr =>
+      colStrStr.map { case (name, colType) =>
+        colType match {
+          case "int"    => Column(name, dataset, version, IntColumn)
+          case "long"   => Column(name, dataset, version, LongColumn)
+          case "double" => Column(name, dataset, version, DoubleColumn)
+          case "string" => Column(name, dataset, version, StringColumn)
+        }
+      }.toSeq
+    }.getOrElse(Nil)
+  }
 }
 
 object CliMain extends ArgMain[Arguments] {
@@ -46,8 +64,20 @@ object CliMain extends ArgMain[Arguments] {
       args.command match {
         case Some("list") =>
           args.dataset.map(dumpDataset).getOrElse(dumpAllDatasets())
+        case Some("create") =>
+          require(args.dataset.isDefined, "Need to specify a dataset")
+          require(args.partition.isDefined || args.columns.isDefined, "Need --partition or --columns")
+          args.columns.map { colmap =>
+            val version = args.version.getOrElse(0)
+            val datasetName = args.dataset.get
+            createDatasetAndColumns(datasetName, args.toColumns(datasetName, version))
+          }.getOrElse(println("Partition creation not supported yet!"))
         case x: Any => printHelp
       }
+    } catch {
+      case e: Throwable =>
+        println("Uncaught exception: " + e)
+        exitCode = 2
     } finally {
       system.shutdown()
       sys.exit(exitCode)
@@ -63,15 +93,38 @@ object CliMain extends ArgMain[Arguments] {
     }
   }
 
+  private def awaitSuccess(cmd: => Future[Response]) {
+    parseResponse(cmd) {
+      case Success =>   println("Succeeded.")
+    }
+  }
+
   def dumpDataset(dataset: String) {
-    parseResponse(datastore.getDataset(dataset)) {
+    parseResponse(datastore.getDataset(dataset, 200)) {
       case Datastore.TheDataset(datasetObj) =>
         println(s"Dataset name: ${datasetObj.name}")
         println("Partitions: " + datasetObj.partitions.mkString(", "))
       case NotFound =>
         println(s"Dataset $dataset not found!")
+        return
+    }
+    parseResponse(datastore.getSchema(dataset, Int.MaxValue)) {
+      case Datastore.TheSchema(schema) =>
+        println("Columns:")
+        schema.values.foreach { case Column(name, _, ver, colType, _, _, _) =>
+          println("  %-35.35s %5d %s".format(name, ver, colType))
+        }
     }
   }
 
   def dumpAllDatasets() { println("TODO") }
+
+  def createDatasetAndColumns(dataset: String, columns: Seq[Column]) {
+    println(s"Creating dataset $dataset...")
+    awaitSuccess(datastore.newDataset(dataset))
+    columns.foreach { col =>
+      println(s"Creating column $col...")
+      awaitSuccess(datastore.newColumn(col))
+    }
+  }
 }
