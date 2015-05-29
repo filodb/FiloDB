@@ -11,7 +11,7 @@ import filodb.core.cassandra.CassandraDatastore
 import filodb.core.datastore.Datastore
 import filodb.core.ingest.CoordinatorActor
 import filodb.core.messages._
-import filodb.core.metadata.Column
+import filodb.core.metadata.{Column, Partition}
 
 class Arguments extends FieldArgs {
   var dataset: Option[String] = None
@@ -67,11 +67,11 @@ object CliMain extends ArgMain[Arguments] {
         case Some("create") =>
           require(args.dataset.isDefined, "Need to specify a dataset")
           require(args.partition.isDefined || args.columns.isDefined, "Need --partition or --columns")
+          val datasetName = args.dataset.get
           args.columns.map { colmap =>
             val version = args.version.getOrElse(0)
-            val datasetName = args.dataset.get
             createDatasetAndColumns(datasetName, args.toColumns(datasetName, version))
-          }.getOrElse(println("Partition creation not supported yet!"))
+          }.getOrElse(createPartition(datasetName, args.partition.get))
         case x: Any => printHelp
       }
     } catch {
@@ -126,5 +126,10 @@ object CliMain extends ArgMain[Arguments] {
       println(s"Creating column $col...")
       awaitSuccess(datastore.newColumn(col))
     }
+  }
+
+  def createPartition(dataset: String, partitionName: String) {
+    println(s"Creating partition $partitionName for dataset $dataset...")
+    awaitSuccess(datastore.newPartition(Partition(dataset, partitionName)))
   }
 }
