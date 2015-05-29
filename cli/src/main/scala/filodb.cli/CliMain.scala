@@ -1,6 +1,8 @@
 package filodb.cli
 
 import akka.actor.ActorSystem
+import akka.pattern.ask
+import akka.util.Timeout
 import com.quantifind.sumac.{ArgMain, FieldArgs}
 import com.typesafe.config.ConfigFactory
 import scala.concurrent.{Await, Future}
@@ -9,10 +11,12 @@ import scala.language.postfixOps
 
 import filodb.core.cassandra.CassandraDatastore
 import filodb.core.datastore.Datastore
-import filodb.core.ingest.CoordinatorActor
+import filodb.core.ingest.{CoordinatorActor, RowSource}
+import filodb.core.ingest.sources.CsvSourceActor
 import filodb.core.messages._
 import filodb.core.metadata.{Column, Partition}
 
+//scalastyle:off
 class Arguments extends FieldArgs {
   var dataset: Option[String] = None
   var partition: Option[String] = None
@@ -54,13 +58,14 @@ object CliMain extends ArgMain[Arguments] {
 
   def printHelp() {
     println("filo-cli help:")
-    println("  commands: create import list")
+    println("  commands: create importcsv list")
     println("  columns: <colName1>:<type1>,<colName2>:<type2>,... ")
     println("  types:  int,long,double,string")
   }
 
   def main(args: Arguments) {
     try {
+      val version = args.version.getOrElse(0)
       args.command match {
         case Some("list") =>
           args.dataset.map(dumpDataset).getOrElse(dumpAllDatasets())
@@ -69,9 +74,13 @@ object CliMain extends ArgMain[Arguments] {
           require(args.partition.isDefined || args.columns.isDefined, "Need --partition or --columns")
           val datasetName = args.dataset.get
           args.columns.map { colmap =>
-            val version = args.version.getOrElse(0)
             createDatasetAndColumns(datasetName, args.toColumns(datasetName, version))
           }.getOrElse(createPartition(datasetName, args.partition.get))
+        case Some("importcsv") =>
+          ingestCSV(args.dataset.get,
+                    args.partition.get,
+                    version,
+                    args.filename.get)
         case x: Any => printHelp
       }
     } catch {
@@ -131,5 +140,13 @@ object CliMain extends ArgMain[Arguments] {
   def createPartition(dataset: String, partitionName: String) {
     println(s"Creating partition $partitionName for dataset $dataset...")
     awaitSuccess(datastore.newPartition(Partition(dataset, partitionName)))
+  }
+
+  def ingestCSV(dataset: String, partition: String, version: Int, csvPath: String) {
+    val fileReader = new java.io.FileReader(csvPath)
+    println("Ingesting CSV at " + csvPath)
+    val csvActor = system.actorOf(CsvSourceActor.props(fileReader, dataset, partition, version, coordinator))
+    implicit val timeout = Timeout(60 minutes)
+    Await.result(csvActor ? RowSource.Start, 61 minutes)
   }
 }

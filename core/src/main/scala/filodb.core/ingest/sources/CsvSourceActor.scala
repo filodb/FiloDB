@@ -1,12 +1,12 @@
 package filodb.core.ingest.sources
 
-import akka.actor.{Actor, ActorRef, PoisonPill}
+import akka.actor.{Actor, ActorRef, PoisonPill, Props}
 import com.opencsv.CSVReader
 import org.velvia.filo.RowIngestSupport
 import scala.util.Try
 
 import filodb.core.BaseActor
-import filodb.core.ingest.RowSource
+import filodb.core.ingest.{CoordinatorActor, RowSource}
 
 object CsvSourceActor {
   case object AllDone
@@ -14,25 +14,49 @@ object CsvSourceActor {
   // Needs to be a multiple of chunkSize. Not sure how to have a good default though.
   val DefaultMaxUnackedRows = 3000
   val DefaultRowsToRead = 10
+
+  def props(csvStream: java.io.Reader,
+            dataset: String,
+            partition: String,
+            version: Int,
+            coordinatorActor: ActorRef,
+            maxUnackedRows: Int = DefaultMaxUnackedRows,
+            rowsToRead: Int = DefaultRowsToRead,
+            separatorChar: Char = ',') =
+  Props(classOf[CsvSourceActor], csvStream, dataset, partition, version,
+        coordinatorActor, maxUnackedRows, rowsToRead, separatorChar)
 }
 
 /**
  * Created for each ingestion of a CSV file.
  * This shows how easy it is to create an ingestion source.
+ *
+ * The CSV file must have a header row and the reader wound to the beginning of the file.
+ * The header row is used to determine the column names to ingest.
+ *
+ * Non-actors can send RowSource.Start message and wait for the AllDone message.
  */
 class CsvSourceActor(csvStream: java.io.Reader,
+                     dataset: String,
+                     partition: String,
                      version: Int,
-                     val rowIngesterActor: ActorRef,
+                     val coordinatorActor: ActorRef,
                      val maxUnackedRows: Int = CsvSourceActor.DefaultMaxUnackedRows,
                      val rowsToRead: Int = CsvSourceActor.DefaultRowsToRead,
                      separatorChar: Char = ',') extends BaseActor with RowSource[Array[String]] {
   import CsvSourceActor._
+  import CoordinatorActor._
 
   val reader = new CSVReader(csvStream, separatorChar)
+  val columns = reader.readNext.toSeq
+  logger.info(s"Started CsvSourceActor, ingesting CSV with columns $columns...")
 
   // Assume for now rowIDs start from 0.
   var seqId: Long = 0
   var lastAckedSeqNo = seqId
+
+  def getStartMessage(): StartRowIngestion[Array[String]] =
+    StartRowIngestion(dataset, partition, columns, version, OpenCsvRowSupport)
 
   // Returns a new row from source => (seqID, rowID, version, row)
   // The seqIDs should be increasing.
@@ -41,12 +65,14 @@ class CsvSourceActor(csvStream: java.io.Reader,
     Option(reader.readNext()).map { rowValues =>
       val out = (seqId, seqId, version, rowValues)
       seqId += 1
+      if (seqId % 1000 == 0) logger.info(s"seqId = $seqId")
       out
     }
   }
 
   // What to do when we hit end of data and it's all acked. Typically, return OK and kill oneself.
   def allDoneAndGood(): Unit = {
+    logger.info("Finished with CSV ingestion")
     context.parent ! AllDone
     self ! PoisonPill
   }
