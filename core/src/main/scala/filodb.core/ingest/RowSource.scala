@@ -71,7 +71,8 @@ trait RowSource[R] extends Actor {
       lastAckedSeqNo = lastSequenceNo
       if (currentHiSeqNo - lastAckedSeqNo < maxUnackedRows) self ! GetMoreRows
       if (isDoneReading && currentHiSeqNo == lastAckedSeqNo) {
-        coordinatorActor ! CoordinatorActor.StopIngestion(streamId)
+        // NOTE: StopIngestion is not implemented right now  :(
+        // coordinatorActor ! CoordinatorActor.StopIngestion(streamId)
         allDoneAndGood()
       }
   }
