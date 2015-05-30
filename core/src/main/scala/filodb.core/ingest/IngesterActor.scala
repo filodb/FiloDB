@@ -58,7 +58,7 @@ object IngesterActor {
  * TODO: Retries
  * TODO: handling acking
  */
-class IngesterActor(partition: Partition,
+class IngesterActor(var partition: Partition,
                     schema: Seq[Column],
                     datastore: Datastore,
                     sourceActor: ActorRef) extends BaseActor {
@@ -80,6 +80,9 @@ class IngesterActor(partition: Partition,
             logger.debug(s"Adding shardRowId $shardRowId to partition $partition...")
             datastore.addShardVersion(partition, shardRowId, version)
               .foreach { response => self ! response }
+            // NOTE: this cannot be rolled back in case there is an error, but in that case the ingestion
+            // would terminate anyways
+            partition = partition.addShardVersion(shardRowId, version)
           }
 
           // 3. Forward to dataWriterActor
