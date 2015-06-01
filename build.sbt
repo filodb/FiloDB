@@ -35,6 +35,7 @@ lazy val coreDeps = Seq(
   "com.beachape"         %% "enumeratum"        % "1.2.1",
   "org.velvia.filo"      %% "filo-scala"        % "0.1.0",
   "com.opencsv"           % "opencsv"           % "3.3",
+  "com.nativelibs4java"  %% "scalaxy-loops"     % "0.3.3" % "provided",
   "com.websudos"         %% "phantom-testing"   % phantomVersion % "test",
   "com.typesafe.akka"    %% "akka-testkit"      % akkaVersion % "test"
 )

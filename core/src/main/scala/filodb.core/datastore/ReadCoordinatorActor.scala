@@ -29,7 +29,8 @@ object ReadCoordinatorActor {
   // ////////// Responses
   // NOTE: chunks is ordered the same as columns
   case object InvalidPartitionVersion extends ErrorResponse
-  case class RowChunk(startRowId: Long, endRowId: Long, chunks: Array[ByteBuffer])
+  case class RowChunk(startRowId: Long, endRowId: Long, chunks: Array[ByteBuffer]) extends Response
+  case object EndOfPartition extends Response
 
   // scalastyle:off
   val NullBuffer: ByteBuffer = null
@@ -130,6 +131,7 @@ class ReadCoordinatorActor(datastore: Datastore,
       // Are we at end of all shards?
       if (rowIdIndex >= firstRowIds.length - 1) {
         logger.info("Read past last shard, quitting...")
+        requestor.foreach(_ ! EndOfPartition)
         self ! PoisonPill
       } else {
         // should we be reading next shard?
