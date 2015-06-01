@@ -1,18 +1,15 @@
 package filodb.cli
 
 import akka.actor.ActorSystem
-import akka.pattern.ask
-import akka.util.Timeout
 import com.quantifind.sumac.{ArgMain, FieldArgs}
 import com.typesafe.config.ConfigFactory
-import scala.concurrent.{Await, Future}
+import scala.concurrent.Await
 import scala.concurrent.duration._
 import scala.language.postfixOps
 
 import filodb.core.cassandra.CassandraDatastore
 import filodb.core.datastore.Datastore
-import filodb.core.ingest.{CoordinatorActor, RowSource}
-import filodb.core.ingest.sources.CsvSourceActor
+import filodb.core.ingest.CoordinatorActor
 import filodb.core.messages._
 import filodb.core.metadata.{Column, Partition}
 
@@ -24,6 +21,8 @@ class Arguments extends FieldArgs {
   var filename: Option[String] = None
   var columns: Option[Map[String, String]] = None
   var version: Option[Int] = None
+  var select: Option[Seq[String]] = None
+  var limit: Option[Int] = None
 
   import Column.ColumnType._
 
@@ -41,7 +40,7 @@ class Arguments extends FieldArgs {
   }
 }
 
-object CliMain extends ArgMain[Arguments] {
+object CliMain extends ArgMain[Arguments] with CsvImportExport {
   // TODO: allow user to pass in config
   // TODO: get config from default reference/application.conf
   val CassConfigStr = """
@@ -51,10 +50,6 @@ object CliMain extends ArgMain[Arguments] {
   val system = ActorSystem("filo-cli")
   val datastore = new CassandraDatastore(ConfigFactory.parseString(CassConfigStr))
   val coordinator = system.actorOf(CoordinatorActor.props(datastore))
-
-  implicit val context = scala.concurrent.ExecutionContext.Implicits.global
-
-  var exitCode = 0
 
   def printHelp() {
     println("filo-cli help:")
@@ -81,30 +76,24 @@ object CliMain extends ArgMain[Arguments] {
                     args.partition.get,
                     version,
                     args.filename.get)
-        case x: Any => printHelp
+        case x: Any =>
+          args.select.map { selectCols =>
+            val limit = args.limit.getOrElse(1000)
+            exportCSV(args.dataset.get,
+                      args.partition.get,
+                      version,
+                      selectCols,
+                      limit)
+          }.getOrElse(printHelp)
       }
     } catch {
       case e: Throwable =>
-        println("Uncaught exception: " + e)
+        println("Uncaught exception:")
+        e.printStackTrace()
         exitCode = 2
     } finally {
       system.shutdown()
       sys.exit(exitCode)
-    }
-  }
-
-  private def parseResponse(cmd: => Future[Response])(handler: PartialFunction[Response, Unit]) {
-    Await.result(cmd, 5 seconds) match {
-      case e: ErrorResponse =>
-        println("ERROR: " + e)
-        exitCode = 1
-      case r: Response => handler(r)
-    }
-  }
-
-  private def awaitSuccess(cmd: => Future[Response]) {
-    parseResponse(cmd) {
-      case Success =>   println("Succeeded.")
     }
   }
 
@@ -140,13 +129,5 @@ object CliMain extends ArgMain[Arguments] {
   def createPartition(dataset: String, partitionName: String) {
     println(s"Creating partition $partitionName for dataset $dataset...")
     awaitSuccess(datastore.newPartition(Partition(dataset, partitionName)))
-  }
-
-  def ingestCSV(dataset: String, partition: String, version: Int, csvPath: String) {
-    val fileReader = new java.io.FileReader(csvPath)
-    println("Ingesting CSV at " + csvPath)
-    val csvActor = system.actorOf(CsvSourceActor.props(fileReader, dataset, partition, version, coordinator))
-    implicit val timeout = Timeout(60 minutes)
-    Await.result(csvActor ? RowSource.Start, 61 minutes)
   }
 }
