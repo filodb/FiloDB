@@ -21,14 +21,14 @@ object Serde {
 
   trait ColumnRowExtractor[CT, R] {
     val wrapper: ColumnWrapper[CT]
-    def extractToRow(rowNo: Int, row: R)
+    def extractToRow(rowNo: Int, row: R): Unit
   }
 
   // TODO: replace this with macros !!
   class IntColumnRowExtractor[R](bytes: ByteBuffer, colIndex: Int, setter: RowSetter[R])
   extends ColumnRowExtractor[Int, R] {
     val wrapper = ColumnParser.parse[Int](bytes)
-    def extractToRow(rowNo: Int, row: R) {
+    def extractToRow(rowNo: Int, row: R): Unit = {
       if (wrapper.isAvailable(rowNo)) setter.setInt(row, colIndex, wrapper(rowNo))
     }
   }
@@ -36,7 +36,7 @@ object Serde {
   class DoubleColumnRowExtractor[R](bytes: ByteBuffer, colIndex: Int, setter: RowSetter[R])
   extends ColumnRowExtractor[Double, R] {
     val wrapper = ColumnParser.parse[Double](bytes)
-    def extractToRow(rowNo: Int, row: R) {
+    def extractToRow(rowNo: Int, row: R): Unit = {
       if (wrapper.isAvailable(rowNo)) setter.setDouble(row, colIndex, wrapper(rowNo))
     }
   }
@@ -44,7 +44,7 @@ object Serde {
   class LongColumnRowExtractor[R](bytes: ByteBuffer, colIndex: Int, setter: RowSetter[R])
   extends ColumnRowExtractor[Long, R] {
     val wrapper = ColumnParser.parse[Long](bytes)
-    def extractToRow(rowNo: Int, row: R) {
+    def extractToRow(rowNo: Int, row: R): Unit = {
       if (wrapper.isAvailable(rowNo)) setter.setLong(row, colIndex, wrapper(rowNo))
     }
   }
@@ -52,7 +52,7 @@ object Serde {
   class StringColumnRowExtractor[R](bytes: ByteBuffer, colIndex: Int, setter: RowSetter[R])
   extends ColumnRowExtractor[String, R] {
     val wrapper = ColumnParser.parse[String](bytes)
-    def extractToRow(rowNo: Int, row: R) {
+    def extractToRow(rowNo: Int, row: R): Unit = {
       if (wrapper.isAvailable(rowNo)) setter.setString(row, colIndex, wrapper(rowNo))
     }
   }

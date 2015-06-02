@@ -55,8 +55,8 @@ class ReadRowExtractor[R](datastore: Datastore,
     true
   }
 
-  def next(row: R) {
-    for (i <- 0 until numColumns optimized) {
+  def next(row: R): Unit = {
+    for { i <- 0 until numColumns optimized } {
       extractors(i).extractToRow(rowNo, row)
     }
     rowNo += 1
@@ -70,8 +70,8 @@ class ReadRowExtractor[R](datastore: Datastore,
  * functional purity.  In fact it's designed with Spark's Row trait in mind.
  */
 trait RowSetter[R] {
-  def setInt(row: R, index: Int, data: Int)
-  def setLong(row: R, index: Int, data: Long)
-  def setDouble(row: R, index: Int, data: Double)
-  def setString(row: R, index: Int, data: String)
+  def setInt(row: R, index: Int, data: Int): Unit
+  def setLong(row: R, index: Int, data: Long): Unit
+  def setDouble(row: R, index: Int, data: Double): Unit
+  def setString(row: R, index: Int, data: String): Unit
 }

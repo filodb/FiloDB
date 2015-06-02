@@ -22,7 +22,7 @@ object CsvSourceActor {
             coordinatorActor: ActorRef,
             maxUnackedRows: Int = DefaultMaxUnackedRows,
             rowsToRead: Int = DefaultRowsToRead,
-            separatorChar: Char = ',') =
+            separatorChar: Char = ','): Props =
   Props(classOf[CsvSourceActor], csvStream, dataset, partition, version,
         coordinatorActor, maxUnackedRows, rowsToRead, separatorChar)
 }
