@@ -117,6 +117,9 @@ class ReadCoordinatorActorSpec extends AllTablesTest(ReadCoordinatorActorSpec.ge
         val chunks3 = expectMsgClass(classOf[RowChunk])
         chunks3.startRowId should equal (200L)
         chunks3.chunks should equal (Array(colABytes(2), colBBytes(2)))
+
+        coord ! GetNextChunk
+        expectMsg(EndOfPartition)
       }
     }
 

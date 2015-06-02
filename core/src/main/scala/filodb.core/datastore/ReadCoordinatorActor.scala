@@ -131,7 +131,7 @@ class ReadCoordinatorActor(datastore: Datastore,
       // Are we at end of all shards?
       if (rowIdIndex >= firstRowIds.length - 1) {
         logger.info("Read past last shard, quitting...")
-        requestor.foreach(_ ! EndOfPartition)
+        sender ! EndOfPartition
         self ! PoisonPill
       } else {
         // should we be reading next shard?
