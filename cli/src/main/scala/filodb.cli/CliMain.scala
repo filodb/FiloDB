@@ -22,7 +22,7 @@ class Arguments extends FieldArgs {
   var columns: Option[Map[String, String]] = None
   var version: Option[Int] = None
   var select: Option[Seq[String]] = None
-  var limit: Option[Int] = None
+  var limit: Int = 1000
 
   import Column.ColumnType._
 
@@ -78,12 +78,11 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport {
                     args.filename.get)
         case x: Any =>
           args.select.map { selectCols =>
-            val limit = args.limit.getOrElse(1000)
             exportCSV(args.dataset.get,
                       args.partition.get,
                       version,
                       selectCols,
-                      limit)
+                      args.limit)
           }.getOrElse(printHelp)
       }
     } catch {
