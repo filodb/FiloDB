@@ -58,9 +58,9 @@ trait CsvImportExport {
     writer.writeNext(columnNames.toArray)
 
     val extractor = new ReadRowExtractor(datastore, partObj, version, columns, ArrayStringRowSetter)(system)
+    val row = Array.fill(columns.length)("")
     var rowNo = 0
     while (rowNo < limit && extractor.hasNext) {
-      val row = Array.fill(columns.length)("")
       extractor.next(row)
       writer.writeNext(row)
       rowNo += 1
@@ -86,4 +86,6 @@ object ArrayStringRowSetter extends RowSetter[Array[String]] {
   def setString(row: Array[String], index: Int, data: String) {
     row(index) = data
   }
+
+  def setNA(row: Array[String], index: Int): Unit = { row(index) = "" }
 }

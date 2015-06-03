@@ -19,42 +19,37 @@ object Serde {
   import org.velvia.filo.ColumnMaker
   import org.velvia.filo.ColumnParser._
 
-  trait ColumnRowExtractor[CT, R] {
-    val wrapper: ColumnWrapper[CT]
-    def extractToRow(rowNo: Int, row: R): Unit
+  abstract class ColumnRowExtractor[CT: ColumnMaker, R] {
+    val bytes: ByteBuffer
+    val setter: RowSetter[R]
+    val colIndex: Int
+    val wrapper: ColumnWrapper[CT] = ColumnParser.parse[CT](bytes)(implicitly[ColumnMaker[CT]])
+    final def extractToRow(rowNo: Int, row: R): Unit =
+      if (wrapper.isAvailable(rowNo)) extract(rowNo, row) else setter.setNA(row, colIndex)
+
+    // Basically, set the row R from column rowNo assuming value is available
+    def extract(rowNo: Int, row: R): Unit
   }
 
   // TODO: replace this with macros !!
-  class IntColumnRowExtractor[R](bytes: ByteBuffer, colIndex: Int, setter: RowSetter[R])
+  class IntColumnRowExtractor[R](val bytes: ByteBuffer, val colIndex: Int, val setter: RowSetter[R])
   extends ColumnRowExtractor[Int, R] {
-    val wrapper = ColumnParser.parse[Int](bytes)
-    def extractToRow(rowNo: Int, row: R): Unit = {
-      if (wrapper.isAvailable(rowNo)) setter.setInt(row, colIndex, wrapper(rowNo))
-    }
+    final def extract(rowNo: Int, row: R): Unit = setter.setInt(row, colIndex, wrapper(rowNo))
   }
 
-  class DoubleColumnRowExtractor[R](bytes: ByteBuffer, colIndex: Int, setter: RowSetter[R])
+  class DoubleColumnRowExtractor[R](val bytes: ByteBuffer, val colIndex: Int, val setter: RowSetter[R])
   extends ColumnRowExtractor[Double, R] {
-    val wrapper = ColumnParser.parse[Double](bytes)
-    def extractToRow(rowNo: Int, row: R): Unit = {
-      if (wrapper.isAvailable(rowNo)) setter.setDouble(row, colIndex, wrapper(rowNo))
-    }
+    final def extract(rowNo: Int, row: R): Unit = setter.setDouble(row, colIndex, wrapper(rowNo))
   }
 
-  class LongColumnRowExtractor[R](bytes: ByteBuffer, colIndex: Int, setter: RowSetter[R])
+  class LongColumnRowExtractor[R](val bytes: ByteBuffer, val colIndex: Int, val setter: RowSetter[R])
   extends ColumnRowExtractor[Long, R] {
-    val wrapper = ColumnParser.parse[Long](bytes)
-    def extractToRow(rowNo: Int, row: R): Unit = {
-      if (wrapper.isAvailable(rowNo)) setter.setLong(row, colIndex, wrapper(rowNo))
-    }
+    final def extract(rowNo: Int, row: R): Unit = setter.setLong(row, colIndex, wrapper(rowNo))
   }
 
-  class StringColumnRowExtractor[R](bytes: ByteBuffer, colIndex: Int, setter: RowSetter[R])
+  class StringColumnRowExtractor[R](val bytes: ByteBuffer, val colIndex: Int, val setter: RowSetter[R])
   extends ColumnRowExtractor[String, R] {
-    val wrapper = ColumnParser.parse[String](bytes)
-    def extractToRow(rowNo: Int, row: R): Unit = {
-      if (wrapper.isAvailable(rowNo)) setter.setString(row, colIndex, wrapper(rowNo))
-    }
+    final def extract(rowNo: Int, row: R): Unit = setter.setString(row, colIndex, wrapper(rowNo))
   }
 
   def getRowExtractors[R](chunks: Array[ByteBuffer], columns: Seq[Column], setter: RowSetter[R]):

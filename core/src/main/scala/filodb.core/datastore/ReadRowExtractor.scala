@@ -74,4 +74,6 @@ trait RowSetter[R] {
   def setLong(row: R, index: Int, data: Long): Unit
   def setDouble(row: R, index: Int, data: Double): Unit
   def setString(row: R, index: Int, data: String): Unit
+
+  def setNA(row: R, index: Int): Unit
 }
