@@ -12,7 +12,7 @@ object CsvSourceActor {
   case object AllDone
 
   // Needs to be a multiple of chunkSize. Not sure how to have a good default though.
-  val DefaultMaxUnackedRows = 3000
+  val DefaultMaxUnackedRows = 5000
   val DefaultRowsToRead = 10
 
   def props(csvStream: java.io.Reader,
