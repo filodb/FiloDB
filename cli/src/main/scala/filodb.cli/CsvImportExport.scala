@@ -13,7 +13,7 @@ import filodb.core.ingest.RowSource
 import filodb.core.ingest.sources.CsvSourceActor
 import filodb.core.messages._
 
-// Turn off style rules for CLI classes - lots of printlns and things like that
+// Turn off style rules for CLI classes
 //scalastyle:off
 trait CsvImportExport {
   val system: ActorSystem
