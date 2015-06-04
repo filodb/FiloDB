@@ -13,6 +13,8 @@ import filodb.core.ingest.RowSource
 import filodb.core.ingest.sources.CsvSourceActor
 import filodb.core.messages._
 
+// Turn off style rules for CLI classes - lots of printlns and things like that
+//scalastyle:off
 trait CsvImportExport {
   val system: ActorSystem
   val coordinator: ActorRef
@@ -70,20 +72,20 @@ trait CsvImportExport {
 }
 
 object ArrayStringRowSetter extends RowSetter[Array[String]] {
-  def setInt(row: Array[String], index: Int, data: Int) {
+  def setInt(row: Array[String], index: Int, data: Int): Unit = {
     row(index) = data.toString
   }
 
-  def setLong(row: Array[String], index: Int, data: Long) {
+  def setLong(row: Array[String], index: Int, data: Long): Unit = {
     row(index) = data.toString
   }
 
-  def setDouble(row: Array[String], index: Int, data: Double) {
+  def setDouble(row: Array[String], index: Int, data: Double): Unit = {
     // If we really need performance here, use grisu.scala
     row(index) = data.toString
   }
 
-  def setString(row: Array[String], index: Int, data: String) {
+  def setString(row: Array[String], index: Int, data: String): Unit = {
     row(index) = data
   }
 
