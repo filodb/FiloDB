@@ -26,6 +26,13 @@ trait DatasetApi {
   def getDataset(name: String): Future[Response]
 
   /**
+   * Adds a partition to a dataset.
+   * @param name Name of the dataset
+   * @param partition Name of the partition to add to the dataset
+   */
+  def addDatasetPartition(name: String, partition: String): Future[Response]
+
+  /**
    * Attempts to delete a dataset with the given name.  Will fail if the dataset still has
    * partitions inside. You need to delete the partitions first.
    * @param name Name of the dataset to delete.

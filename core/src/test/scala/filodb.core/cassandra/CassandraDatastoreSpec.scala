@@ -47,6 +47,16 @@ class CassandraDatastoreSpec extends AllTablesTest(CassandraDatastoreSpec.getNew
         response should equal (NotValid)
       }
     }
+
+    it("should update both datasets and partitions table") {
+      whenReady(datastore.newPartition(p)) { response =>
+        response should equal (Success)
+      }
+
+      whenReady(datastore.getDataset(p.dataset)) { response =>
+        response should equal (TheDataset(Dataset("foo", Set("first"))))
+      }
+    }
   }
 
   describe("data API and throttling") {

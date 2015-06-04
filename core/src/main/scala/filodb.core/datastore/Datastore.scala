@@ -144,7 +144,6 @@ trait Datastore extends FutureUtils {
   /**
    * Creates a new partition in FiloDB.  Updates both partitions and datasets tables.
    * The partition must be empty and valid.
-   * TODO: update the dataset table - where to do this?
    * @param partition a Partition, with a name unique within the dataset.  It should be empty.
    * @returns Success, or AlreadyExists, or NotEmpty/NotValid
    */
@@ -152,7 +151,11 @@ trait Datastore extends FutureUtils {
                   (implicit context: ExecutionContext): Future[Response] = {
     if (!partition.isEmpty) return Future.successful(NotEmpty)
     if (!partition.isValid) return Future.successful(NotValid)
-    partitionApi.newPartition(partition)
+    for { resp <- partitionApi.newPartition(partition)
+          resp2 <- datasetApi.addDatasetPartition(partition.dataset, partition.partition)
+            if resp == Success } yield {
+      if (resp == Success) resp2 else resp
+    }
   }
 
   /**

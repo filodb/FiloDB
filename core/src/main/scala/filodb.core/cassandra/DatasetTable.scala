@@ -74,4 +74,10 @@ object DatasetTableOps extends DatasetTable with DatasetApi with SimpleCassandra
     partitions.flatMap { optParts => checkEmptyPartitionsThenDelete(optParts) }
               .handleErrors
   }
+
+  def addDatasetPartition(name: String, partition: String): Future[Response] = {
+    update.where(_.name eqs name)
+          .modify(_.partitions add partition)
+          .future().toResponse()
+  }
 }
