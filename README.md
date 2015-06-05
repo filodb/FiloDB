@@ -9,19 +9,12 @@ Distributed.  Columnar.  Versioned.
 /_/   /_/_/\____/_____/_____/  
 ```
 
-Apache Parquet has proven that columnar storage layouts can minimize I/O and
-speed up scanning for large analytical queries.  However, the parquet format
-requires developers to address issues such as file-format abstraction, de-
-duplication, granular updates, indexing, and versioning.  Meanwhile, Cassandra
-is rock-solid and has very promising Spark integration, but its storage layout
-prevents Spark queries from reaching Parquet levels of performance.  Can we use
-Cassandra with columnar storage to power fast queries using Spark?
-
-FiloDB is a new open-source database based on Apache Cassandra and Spark SQL.  FiloDB brings breakthrough performance levels for analytical queries by using a columnar storage layout with different space-saving techniques like dictionary compression.  At the same time, row-level, column-level operations and built in versioning gives FiloDB far more flexibility than can be achieved using Parquet alone.  
+FiloDB is a new open-source database based on Apache Cassandra and Spark SQL.  FiloDB brings breakthrough performance levels for analytical queries by using a columnar storage layout with different space-saving techniques like dictionary compression.  At the same time, row-level, column-level operations and built in versioning gives FiloDB far more flexibility than can be achieved using file-based technologies like Parquet alone.  
 
 * FiloDB aim's to bring one to two orders of magnitude speedups over OLAP performance of Cassandra 2.x CQL tables + Spark.  For the POC performance comparison, please see [cassandra-gdelt](http://github.com/velvia/cassandra-gdelt) repo.
 * Enable easy exactly-once ingestion from Kafka for streaming geospatial applications. 
 * Incrementally computed columns and geospatial annotations
+* MPP-like automatic caching of projections from popular queries for fast results
 
 FiloDB is a great fit for bulk analytical workloads, or streaming / append-only event data.  It is not optimized for heavily transactional, update-oriented workflows.
 
@@ -31,17 +24,15 @@ To compile the .mermaid source files to .png's, install the [Mermaid CLI](http:/
 
 ## Current Status
 
-Definitely alpha or pre-alpha.  What is here is more intended to show what is possible with columnar storage on Cassandra combined with Spark.
+Definitely alpha or pre-alpha.  What is here is more intended to show what is possible with columnar storage on Cassandra combined with Spark, and gather feedback.
 - Append-only
 - CSV ingest only, although adding additional ingestion types (like Kafa) is not hard - see `CsvSourceActor`.
-- Keyed by partition and row number
+- Keyed by partition and row number only
 - Only int, double, long, and string types
+- Localhost only
+- No locality in Spark input source
 
 Also, the design and architecture are heavily in flux.
-
-## Future work
-
-- Lots!  Flexible ingestion patterns, replaces and deletes; flexible primary keys; better integration with Cassandra;
 
 ## Building and Testing
 
@@ -57,20 +48,69 @@ sbt "cli/run --command create --dataset gdelt --columns GLOBALEVENTID:int,SQLDAT
 
 You could also add columns later with the same syntax.
 
-Verify the dataset metadata:
-
-```
-sbt "cli/run --command list --dataset gdelt"
-```
-
 Create a partition:
 
 ```
 sbt "cli/run --command create --dataset gdelt --partition first"
 ```
 
+Verify the dataset metadata:
+
+```
+sbt "cli/run --command list --dataset gdelt"
+```
+
 Import a CSV file:
 
 ```
 sbt "cli/run --command importcsv --dataset gdelt --partition first --filename GDELT_1979-1984.csv"
+```
+
+Query/export some columns:
+
+```
+sbt "cli/run --dataset gdelt --partition first --select MonthYear,Actor2Code"
+```
+
+## Using the Spark SQL query engine
+
+Build the spark input source module with `sbt spark/assembly`.  Then, CD into a Spark 1.3.1 distribution (1.3.0 and onwards should work), and start spark-shell with something like:
+
+```
+bin/spark-shell --jars ../FiloDB/spark/target/scala-2.10/filodb-spark-assembly-0.1-SNAPSHOT.jar
+```
+
+Create a config, then create a dataframe on the above dataset:
+
+```scala
+scala> val config = com.typesafe.config.ConfigFactory.parseString("max-outstanding-futures = 16")
+config: com.typesafe.config.Config = Config(SimpleConfigObject({"max-outstanding-futures":16}))
+
+scala> import filodb.spark._
+import filodb.spark._
+
+scala> val df = sqlContext.filoDataset(config, "gdelt")
+15/06/04 15:21:41 INFO DCAwareRoundRobinPolicy: Using data-center name 'datacenter1' for DCAwareRoundRobinPolicy (if this is incorrect, please provide the correct datacenter name with DCAwareRoundRobinPolicy constructor)
+15/06/04 15:21:41 INFO Cluster: New Cassandra host localhost/127.0.0.1:9042 added
+15/06/04 15:21:41 INFO FiloRelation: Read schema for dataset gdelt = Map(ActionGeo_CountryCode -> Column(ActionGeo_CountryCode,gdelt,0,StringColumn,FiloSerializer,false,false), Actor1Geo_FullName -> Column(Actor1Geo_FullName,gdelt,0,StringColumn,FiloSerializer,false,false), Actor2Name -> Column(Actor2Name,gdelt,0,StringColumn,FiloSerializer,false,false), ActionGeo_ADM1Code -> Column(ActionGeo_ADM1Code,gdelt,0,StringColumn,FiloSerializer,false,false), Actor2CountryCode -> Column(Actor2CountryCode,gdelt,0,StringColumn,FiloSerializer,fals...
+```
+
+You could also verify the schema via `df.printSchema`.
+
+Now do some queries, using the DataFrame DSL:
+
+```scala
+scala> df.select(count(df("MonthYear"))).show()
+...<skipping lots of logging>...
+COUNT(MonthYear)
+4037998
+```
+
+or SQL:
+
+```scala
+scala> df.registerTempTable("gdelt")
+
+scala> sqlContext.sql("SELECT avg(MonthYear) FROM gdelt").collect()
+res13: Array[org.apache.spark.sql.Row] = Array([208077.29634561483])
 ```
