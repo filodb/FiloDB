@@ -4,6 +4,8 @@ import akka.actor.ActorSystem
 import akka.pattern.ask
 import akka.util.Timeout
 import java.nio.ByteBuffer
+import org.velvia.filo.RowExtractors.ColumnRowExtractor
+import org.velvia.filo.RowSetter
 import scala.concurrent.Await
 import scala.concurrent.duration._
 import scala.language.postfixOps
@@ -61,19 +63,4 @@ class ReadRowExtractor[R](datastore: Datastore,
     }
     rowNo += 1
   }
-}
-
-/**
- * Sets the value in row of type R at position index (0=first column)
- * TODO: move RowSetter and company to Filo project.
- * NOTE: This is definitely designed for performance/mutation rather than
- * functional purity.  In fact it's designed with Spark's Row trait in mind.
- */
-trait RowSetter[R] {
-  def setInt(row: R, index: Int, data: Int): Unit
-  def setLong(row: R, index: Int, data: Long): Unit
-  def setDouble(row: R, index: Int, data: Double): Unit
-  def setString(row: R, index: Int, data: String): Unit
-
-  def setNA(row: R, index: Int): Unit
 }

@@ -22,7 +22,6 @@ val akkaVersion    = "2.3.7"
 lazy val extraRepos = Seq(
   "Typesafe repository releases" at "http://repo.typesafe.com/typesafe/releases/",
   "twitter-repo" at "http://maven.twttr.com",
-  "websudos-repo" at "http://maven.websudos.co.uk/ext-release-local",
   "Velvia Bintray" at "https://dl.bintray.com/velvia/maven"
 )
 
@@ -33,7 +32,7 @@ lazy val coreDeps = Seq(
   "com.typesafe.scala-logging" %% "scala-logging-slf4j" % "2.1.2",
   "ch.qos.logback"        % "logback-classic"   % "1.0.7",
   "com.beachape"         %% "enumeratum"        % "1.2.1",
-  "org.velvia.filo"      %% "filo-scala"        % "0.1.0",
+  "org.velvia.filo"      %% "filo-scala"        % "0.1.1",
   "com.opencsv"           % "opencsv"           % "3.3",
   "com.nativelibs4java"  %% "scalaxy-loops"     % "0.3.3" % "provided",
   "com.websudos"         %% "phantom-testing"   % phantomVersion % "test",

@@ -4,11 +4,12 @@ import akka.actor.{ActorRef, ActorSystem}
 import akka.pattern.ask
 import akka.util.Timeout
 import com.opencsv.CSVWriter
+import org.velvia.filo.{ArrayStringRowSetter, RowSetter}
 import scala.concurrent.{Await, Future}
 import scala.concurrent.duration._
 import scala.language.postfixOps
 
-import filodb.core.datastore.{Datastore, ReadRowExtractor, RowSetter}
+import filodb.core.datastore.{Datastore, ReadRowExtractor}
 import filodb.core.ingest.RowSource
 import filodb.core.ingest.sources.CsvSourceActor
 import filodb.core.messages._
@@ -69,25 +70,4 @@ trait CsvImportExport {
     }
     writer.flush()
   }
-}
-
-object ArrayStringRowSetter extends RowSetter[Array[String]] {
-  def setInt(row: Array[String], index: Int, data: Int): Unit = {
-    row(index) = data.toString
-  }
-
-  def setLong(row: Array[String], index: Int, data: Long): Unit = {
-    row(index) = data.toString
-  }
-
-  def setDouble(row: Array[String], index: Int, data: Double): Unit = {
-    // If we really need performance here, use grisu.scala
-    row(index) = data.toString
-  }
-
-  def setString(row: Array[String], index: Int, data: String): Unit = {
-    row(index) = data
-  }
-
-  def setNA(row: Array[String], index: Int): Unit = { row(index) = "" }
 }
