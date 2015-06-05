@@ -16,6 +16,14 @@ lazy val cli = (project in file("cli"))
                  .settings(libraryDependencies ++= cliDeps)
                  .dependsOn(core)
 
+lazy val spark = (project in file("spark"))
+                   .settings(mySettings:_*)
+                   .settings(name := "filodb-spark")
+                   .settings(libraryDependencies ++= sparkDeps)
+                   .settings(assemblySettings:_*)
+                   .settings(assemblyOption in assembly := (assemblyOption in assembly).value.copy(includeScala = false))
+                   .dependsOn(core)
+
 val phantomVersion = "1.5.0"
 val akkaVersion    = "2.3.7"
 
@@ -43,6 +51,10 @@ lazy val cliDeps = Seq(
   "com.quantifind"       %% "sumac"             % "0.3.0"
 )
 
+lazy val sparkDeps = Seq(
+  "org.apache.spark"     %% "spark-sql"         % "1.3.0" % "provided"
+)
+
 //////////////////////////
 ///
 
@@ -66,4 +78,14 @@ lazy val styleSettings = Seq(
   compileScalastyle := org.scalastyle.sbt.ScalastylePlugin.scalastyle.in(Compile).toTask("").value,
   // Is running this on compile too much?
   (compile in Test) <<= (compile in Test) dependsOn compileScalastyle
+)
+
+lazy val assemblySettings = Seq(
+  assemblyMergeStrategy in assembly := {
+    case PathList(ps @ _*) if ps.last endsWith ".txt.1" => MergeStrategy.first
+    case "application.conf"                            => MergeStrategy.concat
+    case x =>
+      val oldStrategy = (assemblyMergeStrategy in assembly).value
+      oldStrategy(x)
+  }
 )
