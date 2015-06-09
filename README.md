@@ -31,8 +31,7 @@ Definitely alpha or pre-alpha.  What is here is more intended to show what is po
 - CSV ingest only, although adding additional ingestion types (like Kafa) is not hard - see `CsvSourceActor`.
 - Keyed by partition and row number only
 - Only int, double, long, and string types
-- Localhost only
-- No locality in Spark input source
+- Localhost only - no locality in Spark input source
 
 Also, the design and architecture are heavily in flux.
 
