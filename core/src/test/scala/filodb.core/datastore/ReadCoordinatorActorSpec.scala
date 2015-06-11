@@ -4,7 +4,7 @@ import akka.actor.{ActorSystem, ActorRef, PoisonPill}
 import akka.pattern.gracefulStop
 import com.typesafe.config.ConfigFactory
 import java.nio.ByteBuffer
-import org.velvia.filo.{ColumnParser, TupleRowIngestSupport}
+import org.velvia.filo.{ArrayStringRowSetter, RowToColumnBuilder, TupleRowIngestSupport}
 import scala.concurrent.Await
 import scala.concurrent.duration._
 
@@ -15,6 +15,9 @@ import filodb.core.cassandra.{AllTablesTest, DataTable}
 import filodb.core.metadata.{Column, Dataset, Partition, Shard}
 import filodb.core.messages._
 
+/**
+ * NOTE: This also has one test for ReadRowExtractor, which uses ReadCoordinatorActor.
+ */
 object ReadCoordinatorActorSpec extends ActorSpecConfig {
   override lazy val configString = defaultConfig + """
     akka.loggers = ["akka.testkit.TestEventListener"]
@@ -44,20 +47,31 @@ class ReadCoordinatorActorSpec extends AllTablesTest(ReadCoordinatorActorSpec.ge
     }
   }
 
-  val colABytes = Seq("A-1", "A-2", "A-3").map(_.getBytes).map(ByteBuffer.wrap(_))
-  val colBBytes = Seq("B-1", "B-2", "B-3").map(_.getBytes).map(ByteBuffer.wrap(_))
+  val rows = Seq(
+    (Some(0L), Some("2015/03/15T15:00Z"), Some(32015), Some(2015)),
+    (Some(1L), Some("2015/03/15T16:00Z"), Some(32015), Some(2015))
+  )
+
+  val rowBytes = RowToColumnBuilder.buildFromRows(rows, GdeltIngestColumns,
+                                                  TupleRowIngestSupport)
+
+  val colABytes = Seq(rowBytes("id")) ++ Seq("A-1", "A-2").map(_.getBytes).map(ByteBuffer.wrap(_))
+  val colBBytes = Seq(rowBytes("sqlDate")) ++ Seq("B-1", "B-2").map(_.getBytes).map(ByteBuffer.wrap(_))
 
   // Creates two shards: one at 0L, another at 200L, first shard has two chunks
-  private def writeDataChunks(): Partition = {
+  private def writeDataChunks(writeOneChunk: Boolean = false): (Partition, Seq[Column]) = {
     logger.info("About to writeDataChunks...")
     val (partObj, cols) = createTable("gdelt", "first", GdeltColumns take 2)
-    val partition = partObj.copy(shardVersions = Map(0L -> (0 -> 1), 200L -> (0 -> 1)),
+    val extraShard = if (writeOneChunk) Map.empty else Map(200L -> (0 -> 1))
+    val partition = partObj.copy(shardVersions = Map(0L -> (0 -> 1)) ++ extraShard,
                                  chunkSize = 100)
     val shard1 = Shard(partition, 0, 0L)
     whenReady(datastore.insertOneChunk(shard1, 0L, 99L, Map("id" -> colABytes(0),
                                                             "sqlDate" -> colBBytes(0)))) { ack =>
       ack should equal (Datastore.Ack(99L))
     }
+    if (writeOneChunk) return (partition, cols)
+
     whenReady(datastore.insertOneChunk(shard1, 100L, 199L, Map("id" -> colABytes(1),
                              "sqlDate" -> colBBytes(1)))) { ack =>
       ack should equal (Datastore.Ack(199L))
@@ -69,7 +83,7 @@ class ReadCoordinatorActorSpec extends AllTablesTest(ReadCoordinatorActorSpec.ge
       ack should equal (Datastore.Ack(299L))
     }
 
-    partition
+    (partition, cols)
   }
 
   describe("error conditions") {
@@ -91,7 +105,7 @@ class ReadCoordinatorActorSpec extends AllTablesTest(ReadCoordinatorActorSpec.ge
     }
 
     it("times out on unknown columns") {
-      val partition = writeDataChunks()
+      val (partition, cols) = writeDataChunks()
       withCoordinatorActor(partition, 0, Seq("id", "bar")) { coord =>
         coord ! GetNextChunk
         expectNoMsg
@@ -101,7 +115,7 @@ class ReadCoordinatorActorSpec extends AllTablesTest(ReadCoordinatorActorSpec.ge
 
   describe("normal reads") {
     it("can read all chunks of multiple shards, 2 columns") {
-      val partition = writeDataChunks()
+      val (partition, cols) = writeDataChunks()
       withCoordinatorActor(partition, 0, GdeltColNames take 2) { coord =>
         coord ! GetNextChunk
         val chunks1 = expectMsgClass(classOf[RowChunk])
@@ -124,7 +138,7 @@ class ReadCoordinatorActorSpec extends AllTablesTest(ReadCoordinatorActorSpec.ge
     }
 
     it("can read from 1 column, multiple shards") {
-      val partition = writeDataChunks()
+      val (partition, cols) = writeDataChunks()
       withCoordinatorActor(partition, 0, GdeltColNames take 1) { coord =>
         coord ! GetNextChunk
         val chunks1 = expectMsgClass(classOf[RowChunk])
@@ -141,6 +155,23 @@ class ReadCoordinatorActorSpec extends AllTablesTest(ReadCoordinatorActorSpec.ge
         chunks3.startRowId should equal (200L)
         chunks3.chunks should equal (Array(colABytes(2)))
       }
+    }
+
+    it("can read correct # of rows using ReadRowExtractor") {
+      val (partition, cols) = writeDataChunks(writeOneChunk = true)
+      val extractor = new ReadRowExtractor(datastore, partition, 0, cols,
+                                           ArrayStringRowSetter)
+
+      val row = Array("", "")
+      extractor.hasNext should be (true)
+      extractor.next(row)
+      row should equal (Array("0", rows(0)._2.get))
+
+      extractor.hasNext should be (true)
+      extractor.next(row)
+      row should equal (Array("1", rows(1)._2.get))
+
+      extractor.hasNext should be (false)
     }
   }
 }

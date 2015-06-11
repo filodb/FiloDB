@@ -48,10 +48,10 @@ class ReadRowExtractor[R](datastore: Datastore,
     if (rowNo >= numRows) {
       Await.result((coordinator ? GetNextChunk).mapTo[Response], readTimeout) match {
         case EndOfPartition =>  return false
-        case RowChunk(startRowId, endRowId, chunks) =>
+        case RowChunk(startRowId, chunks) =>
           extractors = getRowExtractors(chunks, columns, rowSetter)
+          numRows = extractors.foldLeft(Int.MaxValue) { (acc, e) => Math.min(acc, e.wrapper.length) }
           rowNo = 0
-          numRows = (endRowId - startRowId).toInt + 1
       }
     }
     true

@@ -29,7 +29,7 @@ object ReadCoordinatorActor {
   // ////////// Responses
   // NOTE: chunks is ordered the same as columns
   case object InvalidPartitionVersion extends ErrorResponse
-  case class RowChunk(startRowId: Long, endRowId: Long, chunks: Array[ByteBuffer]) extends Response
+  case class RowChunk(startRowId: Long, chunks: Array[ByteBuffer]) extends Response
   case object EndOfPartition extends Response
 
   // scalastyle:off
@@ -115,25 +115,29 @@ class ReadCoordinatorActor(datastore: Datastore,
 
   private def returnChunk(): Unit = {
     requestor.foreach { requestorRef =>
-      // TODO: actually find real ending Id from columns?
-      val endingRowId = curChunkRowId + partition.chunkSize - 1
       val base = baseIndex(curChunkRowId)
       val rowChunks = java.util.Arrays.copyOfRange(chunks.asInstanceOf[Array[AnyRef]],
                                                    base, base + columns.length)
-      requestorRef ! RowChunk(curChunkRowId, endingRowId, rowChunks.asInstanceOf[Array[ByteBuffer]])
+      requestorRef ! RowChunk(curChunkRowId, rowChunks.asInstanceOf[Array[ByteBuffer]])
     }
     requestor = None
     curChunkRowId += partition.chunkSize
   }
 
+  private def checkAndEnd(requestor: ActorRef): Boolean = {
+    val atEnd = rowIdIndex >= firstRowIds.length - 1
+    if (atEnd) {
+        logger.info("Read past last shard, quitting...")
+        requestor ! EndOfPartition
+        self ! PoisonPill
+    }
+    atEnd
+  }
+
   private def advanceToNextShard(): Unit = {
     if (doneReading && curChunkRowId > rowIdWritten.min) {
       // Are we at end of all shards?
-      if (rowIdIndex >= firstRowIds.length - 1) {
-        logger.info("Read past last shard, quitting...")
-        sender ! EndOfPartition
-        self ! PoisonPill
-      } else {
+      if (!checkAndEnd(sender)) {
         // should we be reading next shard?
         if (curChunkRowId >= firstRowIds(rowIdIndex + 1)) {
           rowIdIndex += 1
@@ -152,16 +156,15 @@ class ReadCoordinatorActor(datastore: Datastore,
       if (firstRowIds.isEmpty) { sender ! InvalidPartitionVersion }
       else {
         advanceToNextShard()
+        requestor = Some(sender)
         // Are we at the beginning of a shard?  Initiate reads; put request on stack
         if (curChunkRowId < 0L) {
           startReadShard()
-          requestor = Some(sender)
           curChunkRowId = startingRowId
         }
         // Is there a next chunk to read?  If so, return with the chunk; update state
         // Otherwise, set pending flag; send the chunk when it comes in.
         else {
-          requestor = Some(sender)
           if (nextChunkAvailable) { returnChunk() }
         }
       }
@@ -172,6 +175,7 @@ class ReadCoordinatorActor(datastore: Datastore,
 
     case FinishedReadingShard =>
       doneReading = true
+      requestor.foreach(checkAndEnd(_))
   }
 
   // at GetNextChunk: figure out next shard to read from, read it async

@@ -7,6 +7,7 @@ import com.websudos.phantom.testing.SimpleCassandraTest
 import org.scalatest.{FunSpecLike, Matchers, BeforeAndAfter, BeforeAndAfterAll}
 import org.scalatest.concurrent.Futures
 import org.scalatest.time.{Millis, Span, Seconds}
+import org.velvia.filo.IngestColumn
 import scala.concurrent.Await
 import scala.concurrent.duration._
 
@@ -60,6 +61,11 @@ with Futures {
                          "sqlDate" -> Column.ColumnType.StringColumn,
                          "monthYear" -> Column.ColumnType.IntColumn,
                          "year" -> Column.ColumnType.IntColumn)
+
+  val GdeltIngestColumns = Seq(IngestColumn("id", classOf[Long]),
+                               IngestColumn("sqlDate", classOf[String]),
+                               IngestColumn("monthYear", classOf[Int]),
+                               IngestColumn("year", classOf[Int]))
 
   val GdeltColNames = GdeltColumns.map(_._1)
 
