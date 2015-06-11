@@ -58,14 +58,14 @@ trait CsvImportExport {
     }
 
     val writer = new CSVWriter(new java.io.OutputStreamWriter(System.out))
-    writer.writeNext(columnNames.toArray)
+    writer.writeNext(columnNames.toArray, false)
 
     val extractor = new ReadRowExtractor(datastore, partObj, version, columns, ArrayStringRowSetter)(system)
     val row = Array.fill(columns.length)("")
     var rowNo = 0
     while (rowNo < limit && extractor.hasNext) {
       extractor.next(row)
-      writer.writeNext(row)
+      writer.writeNext(row, false)
       rowNo += 1
     }
     writer.flush()
