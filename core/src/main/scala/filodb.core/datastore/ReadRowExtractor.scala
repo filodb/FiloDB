@@ -3,6 +3,7 @@ package filodb.core.datastore
 import akka.actor.ActorSystem
 import akka.pattern.ask
 import akka.util.Timeout
+import com.typesafe.scalalogging.slf4j.StrictLogging
 import java.nio.ByteBuffer
 import org.velvia.filo.RowExtractors.ColumnRowExtractor
 import org.velvia.filo.RowSetter
@@ -29,7 +30,7 @@ class ReadRowExtractor[R](datastore: Datastore,
                           columns: Seq[Column],
                           rowSetter: RowSetter[R],
                           readTimeout: FiniteDuration = ReadRowExtractor.DefaultTimeout)
-                         (implicit system: ActorSystem) {
+                         (implicit system: ActorSystem) extends StrictLogging {
   val columnNames = columns.map(_.name)
   val coordinator = system.actorOf(ReadCoordinatorActor.props(datastore, partition, version, columnNames))
   val numColumns = columns.length
@@ -49,6 +50,7 @@ class ReadRowExtractor[R](datastore: Datastore,
       Await.result((coordinator ? GetNextChunk).mapTo[Response], readTimeout) match {
         case EndOfPartition =>  return false
         case RowChunk(startRowId, chunks) =>
+          logger.trace(s"Got RowChunk($startRowId, ${chunks.length})")
           extractors = getRowExtractors(chunks, columns, rowSetter)
           numRows = extractors.foldLeft(Int.MaxValue) { (acc, e) => Math.min(acc, e.wrapper.length) }
           rowNo = 0
