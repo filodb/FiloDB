@@ -23,6 +23,7 @@ class Arguments extends FieldArgs {
   var version: Option[Int] = None
   var select: Option[Seq[String]] = None
   var limit: Int = 1000
+  var outfile: Option[String] = None
 
   import Column.ColumnType._
 
@@ -56,6 +57,7 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport {
     println("  commands: create importcsv list")
     println("  columns: <colName1>:<type1>,<colName2>:<type2>,... ")
     println("  types:  int,long,double,string")
+    println("  OR:  --select col1, col2  [--limit <n>]  [--outfile /tmp/out.csv]")
   }
 
   def main(args: Arguments) {
@@ -82,7 +84,8 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport {
                       args.partition.get,
                       version,
                       selectCols,
-                      args.limit)
+                      args.limit,
+                      args.outfile)
           }.getOrElse(printHelp)
       }
     } catch {

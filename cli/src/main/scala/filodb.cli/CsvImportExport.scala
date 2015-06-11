@@ -49,7 +49,8 @@ trait CsvImportExport {
   }
 
   def exportCSV(dataset: String, partition: String, version: Int,
-                columnNames: Seq[String], limit: Int) {
+                columnNames: Seq[String], limit: Int,
+                outFile: Option[String]) {
     val partObj = parseResponse(datastore.getPartition(dataset, partition)) {
       case Datastore.ThePartition(partObj) => partObj
     }
@@ -57,7 +58,8 @@ trait CsvImportExport {
       case Datastore.TheSchema(schema) => columnNames.map(schema)
     }
 
-    val writer = new CSVWriter(new java.io.OutputStreamWriter(System.out))
+    val outStream = outFile.map(new java.io.FileOutputStream(_)).getOrElse(System.out)
+    val writer = new CSVWriter(new java.io.OutputStreamWriter(outStream))
     writer.writeNext(columnNames.toArray, false)
 
     val extractor = new ReadRowExtractor(datastore, partObj, version, columns, ArrayStringRowSetter)(system)
