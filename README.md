@@ -41,6 +41,8 @@ Run the tests with `sbt test`, or for continuous development, `sbt ~test`.  Nois
 
 ## Using the CLI
 
+NOTE: due to an issue with the Phantom C* library, you have to Ctrl-C out of both the CLI and Spark Shell.  This will be fixed in the near future.
+
 Create a dataset with all the columns from the [GDELT public dataset](http://data.gdeltproject.org/documentation/GDELT-Data_Format_Codebook.pdf):
 
 ```
