@@ -33,7 +33,7 @@ Definitely alpha or pre-alpha.  What is here is more intended to show what is po
 - Only int, double, long, and string types
 - Localhost only - no locality in Spark input source
 
-Also, the design and architecture are heavily in flux.
+Also, the design and architecture are heavily in flux.  Currently this is designed as a layer on top of Cassandra, but may (probably will) evolve towards something that can integrate with existing C* tables.
 
 ## Building and Testing
 
