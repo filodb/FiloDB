@@ -3,7 +3,8 @@ package filodb.core.cassandra
 import akka.actor.{ActorSystem, ActorRef}
 import akka.testkit.{ImplicitSender, TestKit}
 import com.typesafe.config.ConfigFactory
-import com.websudos.phantom.testing.SimpleCassandraTest
+import com.websudos.phantom.dsl._
+import com.websudos.phantom.testkit._
 import org.scalatest.{FunSpecLike, Matchers, BeforeAndAfter, BeforeAndAfterAll}
 import org.scalatest.concurrent.Futures
 import org.scalatest.time.{Millis, Span, Seconds}
@@ -35,17 +36,17 @@ with Futures {
   implicit val defaultPatience =
     PatienceConfig(timeout = Span(2, Seconds), interval = Span(10, Millis))
 
-  val keySpace = "test"
+  implicit val keySpace = KeySpace("unittest")
 
   implicit val context = scala.concurrent.ExecutionContext.Implicits.global
 
   lazy val datastore = new CassandraDatastore(AllTablesTest.CassConfig)
 
   def createAllTables(): Unit = {
-    val f = for { _ <- DatasetTableOps.create.future()
-                  _ <- ColumnTable.create.future()
-                  _ <- PartitionTable.create.future()
-                  _ <- DataTable.create.future() } yield { 0 }
+    val f = for { _ <- DatasetTableOps.create.ifNotExists.future()
+                  _ <- ColumnTable.create.ifNotExists.future()
+                  _ <- PartitionTable.create.ifNotExists.future()
+                  _ <- DataTable.create.ifNotExists.future() } yield { 0 }
     Await.result(f, 3 seconds)
   }
 

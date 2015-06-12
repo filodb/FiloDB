@@ -1,6 +1,7 @@
 package filodb.core.cassandra
 
-import com.websudos.phantom.testing.CassandraFlatSpec
+import com.websudos.phantom.dsl._
+import com.websudos.phantom.testkit._
 import org.scalatest.BeforeAndAfter
 import scala.concurrent.Await
 import scala.concurrent.duration._
@@ -10,7 +11,7 @@ import filodb.core.metadata.Column
 import filodb.core.messages._
 
 class ColumnTableSpec extends CassandraFlatSpec with BeforeAndAfter {
-  val keySpace = "test"
+  implicit val keySpace = KeySpace("unittest")
 
   import Column.ColumnType
 
@@ -20,7 +21,7 @@ class ColumnTableSpec extends CassandraFlatSpec with BeforeAndAfter {
   override def beforeAll() {
     super.beforeAll()
     // Note: This is a CREATE TABLE IF NOT EXISTS
-    Await.result(ColumnTable.create.future(), 3 seconds)
+    Await.result(ColumnTable.create.ifNotExists.future(), 3 seconds)
   }
 
   before {

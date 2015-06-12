@@ -24,26 +24,29 @@ lazy val spark = (project in file("spark"))
                    .settings(assemblyOption in assembly := (assemblyOption in assembly).value.copy(includeScala = false))
                    .dependsOn(core)
 
-val phantomVersion = "1.5.0"
+val phantomVersion = "1.8.12"
 val akkaVersion    = "2.3.7"
 
 lazy val extraRepos = Seq(
   "Typesafe repository releases" at "http://repo.typesafe.com/typesafe/releases/",
   "twitter-repo" at "http://maven.twttr.com",
+  "Websudos releases" at "https://dl.bintray.com/websudos/oss-releases/",
   "Velvia Bintray" at "https://dl.bintray.com/velvia/maven"
 )
 
+val excludeShapeless = ExclusionRule(organization = "com.chuusai")
+
 lazy val coreDeps = Seq(
   "com.websudos"         %% "phantom-dsl"       % phantomVersion,
-  "com.websudos"         %% "phantom-zookeeper" % phantomVersion,
+  // "com.websudos"         %% "phantom-zookeeper" % phantomVersion,
   "com.typesafe.akka"    %% "akka-slf4j"        % akkaVersion,
   "com.typesafe.scala-logging" %% "scala-logging-slf4j" % "2.1.2",
   "ch.qos.logback"        % "logback-classic"   % "1.0.7",
   "com.beachape"         %% "enumeratum"        % "1.2.1",
-  "org.velvia.filo"      %% "filo-scala"        % "0.1.2",
+  "org.velvia.filo"      %% "filo-scala"        % "0.1.2" excludeAll(excludeShapeless),
   "com.opencsv"           % "opencsv"           % "3.3",
   "com.nativelibs4java"  %% "scalaxy-loops"     % "0.3.3" % "provided",
-  "com.websudos"         %% "phantom-testing"   % phantomVersion % "test",
+  "com.websudos"         %% "phantom-testkit"   % phantomVersion % "test",
   "com.typesafe.akka"    %% "akka-testkit"      % akkaVersion % "test"
 )
 

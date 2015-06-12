@@ -1,6 +1,7 @@
 package filodb.core.cassandra
 
-import com.websudos.phantom.testing.CassandraFlatSpec
+import com.websudos.phantom.dsl._
+import com.websudos.phantom.testkit._
 import org.scalatest.BeforeAndAfter
 import scala.concurrent.Await
 import scala.concurrent.duration._
@@ -10,13 +11,13 @@ import filodb.core.metadata.Partition
 import filodb.core.messages._
 
 class PartitionTableSpec extends CassandraFlatSpec with BeforeAndAfter {
-  val keySpace = "test"
+  implicit val keySpace = KeySpace("unittest")
 
   // First create the partitions table
   override def beforeAll() {
     super.beforeAll()
     // Note: This is a CREATE TABLE IF NOT EXISTS
-    Await.result(PartitionTable.create.future(), 3 seconds)
+    Await.result(PartitionTable.create.ifNotExists.future(), 3 seconds)
   }
 
   before {
