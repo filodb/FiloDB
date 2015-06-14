@@ -109,11 +109,25 @@ COUNT(MonthYear)
 4037998
 ```
 
-or SQL:
+or SQL, to find the top 15 events with the highest tone:
 
 ```scala
 scala> df.registerTempTable("gdelt")
 
-scala> sqlContext.sql("SELECT avg(MonthYear) FROM gdelt").collect()
+scala> sqlContext.sql("SELECT Actor1Name, Actor2Name, AvgTone FROM gdelt ORDER BY AvgTone DESC LIMIT 15").collect()
 res13: Array[org.apache.spark.sql.Row] = Array([208077.29634561483])
+```
+
+Now, how about something uniquely Spark .. feed SQL query results to MLLib to compute a correlation:
+
+```scala
+scala> import org.apache.spark.mllib.stat.Statistics
+
+scala> val numMentions = df.select("NumMentions").map(row => row.getInt(0).toDouble)
+numMentions: org.apache.spark.rdd.RDD[Double] = MapPartitionsRDD[100] at map at DataFrame.scala:848
+
+scala> val numArticles = df.select("NumArticles").map(row => row.getInt(0).toDouble)
+numArticles: org.apache.spark.rdd.RDD[Double] = MapPartitionsRDD[104] at map at DataFrame.scala:848
+
+scala> val correlation = Statistics.corr(numMentions, numArticles, "pearson")
 ```
