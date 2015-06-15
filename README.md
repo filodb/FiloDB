@@ -35,6 +35,16 @@ Definitely alpha or pre-alpha.  What is here is more intended to show what is po
 
 Also, the design and architecture are heavily in flux.  Currently this is designed as a layer on top of Cassandra, but may (probably will) evolve towards something that can integrate with existing C* tables.
 
+## You can help!
+
+- Send me your use cases for OLAP on Cassandra and Spark
+    + Especially IoT and Geospatial
+- Email if you want to contribute
+
+Your feedback will help decide the next batch of features, such as:
+    - which data types to add support for
+    - which input sources to add (Kafka?  Avro on Kafka?  Save to FiloDB from Spark DataFrames?  from existing C* tables?)
+
 ## Building and Testing
 
 Run the tests with `sbt test`, or for continuous development, `sbt ~test`.  Noisy cassandra logs can be seen in `filodb-test.log`.
