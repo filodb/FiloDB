@@ -12,7 +12,7 @@ import filodb.core.messages._
 import filodb.core.datastore.Datastore._
 
 class DataTableSpec extends CassandraFlatSpec with BeforeAndAfter {
-  implicit val keySpace = KeySpace("test")
+  implicit val keySpace = KeySpace("unittest")
 
   // First create the partitions table
   override def beforeAll() {

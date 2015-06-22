@@ -79,8 +79,7 @@ object PartitionTable extends PartitionTable with SimpleCassandraConnector with 
     update.where(_.dataset eqs newPart.dataset).and(_.partition eqs newPart.partition)
           .modify(_.shardVersions put (firstRowId -> ints2long(minVer, maxVer)))
           .and(_.hash setTo newPart.hashCode)
-          // There is a bug in Phantom 1.8.x that the onlyIf doesn't work
-          // .onlyIf(_.hash eqs partition.hashCode)
+          .onlyIf(_.hash is partition.hashCode)
           .future().toResponse(InconsistentState)
   }
 
