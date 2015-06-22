@@ -1,8 +1,7 @@
 package filodb.core.cassandra
 
 import com.datastax.driver.core.Row
-import com.websudos.phantom.Implicits._
-import com.websudos.phantom.zookeeper.{SimpleCassandraConnector, DefaultCassandraManager}
+import com.websudos.phantom.dsl._
 import scala.concurrent.Future
 
 import filodb.core.datastore.{Datastore, PartitionApi}
@@ -43,7 +42,7 @@ object PartitionTable extends PartitionTable with SimpleCassandraConnector with 
   override val tableName = "partitions"
 
   // TODO: add in Config-based initialization code to find the keyspace, cluster, etc.
-  val keySpace = "test"
+  implicit val keySpace = KeySpace("unittest")
 
   import Util._
   import filodb.core.messages._
@@ -80,7 +79,7 @@ object PartitionTable extends PartitionTable with SimpleCassandraConnector with 
     update.where(_.dataset eqs newPart.dataset).and(_.partition eqs newPart.partition)
           .modify(_.shardVersions put (firstRowId -> ints2long(minVer, maxVer)))
           .and(_.hash setTo newPart.hashCode)
-          .onlyIf(_.hash eqs partition.hashCode)
+          .onlyIf(_.hash is partition.hashCode)
           .future().toResponse(InconsistentState)
   }
 

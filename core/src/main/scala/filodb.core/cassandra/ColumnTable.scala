@@ -1,8 +1,7 @@
 package filodb.core.cassandra
 
 import com.datastax.driver.core.Row
-import com.websudos.phantom.Implicits._
-import com.websudos.phantom.zookeeper.{SimpleCassandraConnector, DefaultCassandraManager}
+import com.websudos.phantom.dsl._
 import play.api.libs.iteratee.Iteratee
 import scala.concurrent.Future
 
@@ -42,7 +41,7 @@ object ColumnTable extends ColumnTable with SimpleCassandraConnector with Column
   override val tableName = "columns"
 
   // TODO: add in Config-based initialization code to find the keyspace, cluster, etc.
-  val keySpace = "test"
+  implicit val keySpace = KeySpace("unittest")
 
   import Util._
   import filodb.core.messages._

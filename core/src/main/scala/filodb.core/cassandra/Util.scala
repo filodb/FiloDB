@@ -1,7 +1,7 @@
 package filodb.core.cassandra
 
 import com.datastax.driver.core.exceptions.DriverException
-import com.websudos.phantom.Implicits._
+import com.websudos.phantom.dsl._
 import scala.concurrent.Future
 
 import filodb.core.messages._

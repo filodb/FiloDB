@@ -1,6 +1,7 @@
 package filodb.core.cassandra
 
-import com.websudos.phantom.testing.CassandraFlatSpec
+import com.websudos.phantom.dsl._
+import com.websudos.phantom.testkit._
 import java.nio.ByteBuffer
 import org.scalatest.BeforeAndAfter
 import scala.concurrent.Await
@@ -11,13 +12,13 @@ import filodb.core.messages._
 import filodb.core.datastore.Datastore._
 
 class DataTableSpec extends CassandraFlatSpec with BeforeAndAfter {
-  val keySpace = "test"
+  implicit val keySpace = KeySpace("unittest")
 
   // First create the partitions table
   override def beforeAll() {
     super.beforeAll()
     // Note: This is a CREATE TABLE IF NOT EXISTS
-    Await.result(DataTable.create.future(), 3 seconds)
+    Await.result(DataTable.create.ifNotExists.future(), 3 seconds)
   }
 
   before {
@@ -25,7 +26,7 @@ class DataTableSpec extends CassandraFlatSpec with BeforeAndAfter {
   }
 
   import scala.concurrent.ExecutionContext.Implicits.global
-  import com.websudos.phantom.Implicits._
+  import com.websudos.phantom.dsl._
 
   // Just some dummy data, doesn't actually correspond to anything
   val bb = ByteBuffer.wrap(Array[Byte](1, 2, 3, 4))

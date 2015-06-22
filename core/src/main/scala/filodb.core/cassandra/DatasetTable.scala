@@ -1,8 +1,7 @@
 package filodb.core.cassandra
 
 import com.datastax.driver.core.Row
-import com.websudos.phantom.Implicits._
-import com.websudos.phantom.zookeeper.{SimpleCassandraConnector, DefaultCassandraManager}
+import com.websudos.phantom.dsl._
 import scala.concurrent.Future
 
 import filodb.core.datastore.{Datastore, DatasetApi}
@@ -31,7 +30,7 @@ object DatasetTableOps extends DatasetTable with DatasetApi with SimpleCassandra
   override val tableName = "datasets"
 
   // TODO: add in Config-based initialization code to find the keyspace, cluster, etc.
-  val keySpace = "test"
+  implicit val keySpace = KeySpace("unittest")
 
   import Util._
   import filodb.core.messages._
