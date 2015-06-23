@@ -95,6 +95,7 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport {
         exitCode = 2
     } finally {
       system.shutdown()
+      com.websudos.phantom.Manager.shutdown()
       sys.exit(exitCode)
     }
   }

@@ -14,6 +14,7 @@ lazy val cli = (project in file("cli"))
                  .settings(mySettings:_*)
                  .settings(name := "filodb-cli")
                  .settings(libraryDependencies ++= cliDeps)
+                 .settings(cliAssemblySettings:_*)
                  .dependsOn(core)
 
 lazy val spark = (project in file("spark"))
@@ -81,6 +82,17 @@ lazy val styleSettings = Seq(
   compileScalastyle := org.scalastyle.sbt.ScalastylePlugin.scalastyle.in(Compile).toTask("").value,
   // Is running this on compile too much?
   (compile in Test) <<= (compile in Test) dependsOn compileScalastyle
+)
+
+lazy val shellScript = """#!/usr/bin/env sh
+exec java -jar "$0" "$@"
+""".split("\n")
+
+// Builds cli as a standalone executable to make it easier to launch commands
+lazy val cliAssemblySettings = Seq(
+  assemblyOption in assembly := (assemblyOption in assembly).value.copy(
+                                  prependShellScript = Some(shellScript)),
+  assemblyJarName in assembly := s"filo-cli-${version.value}"
 )
 
 lazy val assemblySettings = Seq(
