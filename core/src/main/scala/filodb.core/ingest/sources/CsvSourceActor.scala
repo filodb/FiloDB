@@ -2,7 +2,7 @@ package filodb.core.ingest.sources
 
 import akka.actor.{Actor, ActorRef, PoisonPill, Props}
 import com.opencsv.CSVReader
-import org.velvia.filo.RowIngestSupport
+import org.velvia.filo.ArrayStringRowSupport
 import scala.util.Try
 
 import filodb.core.BaseActor
@@ -56,7 +56,7 @@ class CsvSourceActor(csvStream: java.io.Reader,
   var lastAckedSeqNo = seqId
 
   def getStartMessage(): StartRowIngestion[Array[String]] =
-    StartRowIngestion(dataset, partition, columns, version, OpenCsvRowSupport)
+    StartRowIngestion(dataset, partition, columns, version, ArrayStringRowSupport)
 
   // Returns a new row from source => (seqID, rowID, version, row)
   // The seqIDs should be increasing.
@@ -76,20 +76,4 @@ class CsvSourceActor(csvStream: java.io.Reader,
     context.parent ! AllDone
     self ! PoisonPill
   }
-}
-
-// Define a RowIngestSupport for CSV lines based on OpenCSV
-// Throws exceptions if value cannot parse - better to fail fast than silently create an NA value
-object OpenCsvRowSupport extends RowIngestSupport[Array[String]] {
-  private def maybeString(row: Array[String], index: Int): Option[String] =
-    Try(row(index)).toOption.filter(_.nonEmpty)
-
-  def getString(row: Array[String], columnNo: Int): Option[String] =
-    maybeString(row, columnNo)
-  def getInt(row: Array[String], columnNo: Int): Option[Int] =
-    maybeString(row, columnNo).map(_.toInt)
-  def getLong(row: Array[String], columnNo: Int): Option[Long] =
-    maybeString(row, columnNo).map(_.toLong)
-  def getDouble(row: Array[String], columnNo: Int): Option[Double] =
-    maybeString(row, columnNo).map(_.toDouble)
 }

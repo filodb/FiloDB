@@ -44,7 +44,7 @@ lazy val coreDeps = Seq(
   "com.typesafe.scala-logging" %% "scala-logging-slf4j" % "2.1.2",
   "ch.qos.logback"        % "logback-classic"   % "1.0.7",
   "com.beachape"         %% "enumeratum"        % "1.2.1",
-  "org.velvia.filo"      %% "filo-scala"        % "0.1.2" excludeAll(excludeShapeless),
+  "org.velvia.filo"      %% "filo-scala"        % "0.1.3" excludeAll(excludeShapeless),
   "com.opencsv"           % "opencsv"           % "3.3",
   "com.nativelibs4java"  %% "scalaxy-loops"     % "0.3.3" % "provided",
   "com.websudos"         %% "phantom-testkit"   % phantomVersion % "test",
