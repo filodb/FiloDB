@@ -73,7 +73,7 @@ Verify the dataset metadata:
 filo-cli --command list --dataset gdelt
 ```
 
-Import a CSV file:
+Import a CSV file (note: it must have a header row, the column names must match what was created before, and must be comma-delimited):
 
 ```
 filo-cli --command importcsv --dataset gdelt --partition first --filename GDELT_1979-1984.csv
