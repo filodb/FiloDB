@@ -87,7 +87,7 @@ filo-cli --dataset gdelt --partition first --select MonthYear,Actor2Code
 
 ## Using the Spark SQL query engine
 
-Build the spark input source module with `sbt spark/assembly`.  Then, CD into a Spark 1.3.1 distribution (1.3.0 and onwards should work), and start spark-shell with something like:
+Build the spark input source module with `sbt spark/assembly`.  Then, CD into a Spark 1.4.x distribution (1.4.0 and onwards should work), and start spark-shell with something like:
 
 ```
 bin/spark-shell --jars ../FiloDB/spark/target/scala-2.10/filodb-spark-assembly-0.1-SNAPSHOT.jar
