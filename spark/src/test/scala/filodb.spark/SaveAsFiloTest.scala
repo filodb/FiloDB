@@ -37,9 +37,10 @@ class SaveAsFiloTest extends AllTablesTest(SaveAsFiloTest.system) {
     """{"id":1,"sqlDate":"2015/03/15T16:00Z","monthYear":42015}""",
     """{"id":2,"sqlDate":"2015/03/15T17:00Z",                  "year":2015}"""
   )
-  val dataDF = sql.read.json(sc.parallelize(jsonRows))
+  val dataDF = sql.read.json(sc.parallelize(jsonRows, 1))
 
   import filodb.spark._
+  import org.apache.spark.sql.functions._
 
   it("should error out if dataset not created and createDataset=false") {
     intercept[DatasetNotFound] {
@@ -47,9 +48,12 @@ class SaveAsFiloTest extends AllTablesTest(SaveAsFiloTest.system) {
     }
   }
 
-  it("should create missing columns and partition and write table") {
+  it("should create missing columns and partitions and write table") {
     sql.saveAsFiloDataset(dataDF, AllTablesTest.CassConfig, "gdelt1", createDataset=true)
+
     // Now read stuff back and ensure it got written
-    // Also potentially check on columns, etc. make sure it all lines up
+    val df = sql.filoDataset(AllTablesTest.CassConfig, "gdelt1")
+    df.select(count("id")).collect().head(0) should equal (3)
+    df.agg(sum("year")).collect().head(0) should equal (4030)
   }
 }

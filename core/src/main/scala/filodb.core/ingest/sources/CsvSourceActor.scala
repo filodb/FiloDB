@@ -1,6 +1,6 @@
 package filodb.core.ingest.sources
 
-import akka.actor.{Actor, ActorRef, PoisonPill, Props}
+import akka.actor.{Actor, ActorRef, Props}
 import com.opencsv.CSVReader
 import org.velvia.filo.ArrayStringRowSupport
 import scala.util.Try
@@ -9,8 +9,6 @@ import filodb.core.BaseActor
 import filodb.core.ingest.{CoordinatorActor, RowSource}
 
 object CsvSourceActor {
-  case object AllDone
-
   // Needs to be a multiple of chunkSize. Not sure how to have a good default though.
   val DefaultMaxUnackedRows = 5000
   val DefaultRowsToRead = 10
@@ -68,12 +66,5 @@ class CsvSourceActor(csvStream: java.io.Reader,
       if (seqId % 10000 == 0) logger.debug(s"seqId = $seqId")
       out
     }
-  }
-
-  // What to do when we hit end of data and it's all acked. Typically, return OK and kill oneself.
-  def allDoneAndGood(): Unit = {
-    logger.info("Finished with CSV ingestion")
-    context.parent ! AllDone
-    self ! PoisonPill
   }
 }

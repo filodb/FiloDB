@@ -96,6 +96,7 @@ class RowIngesterActor[R](ingesterActor: ActorRef,
   }
 
   def flush(): Unit = if (rows.nonEmpty) {
+    logger.debug(s"Flushing chunked columns rowId=${rows.last.rowId} seqNo=${rows.last.sequenceNo}")
     val chunkCmd = IngesterActor.ChunkedColumns(currentVersion,
                                                 (lastChunk * partition.chunkSize, rows.last.rowId),
                                                 rows.last.sequenceNo,

@@ -127,16 +127,16 @@ package object spark extends StrictLogging {
       df.rdd.mapPartitionsWithIndex { case (index, rowIter) =>
         // Everything within this function runs on each partition/executor, so need a local datastore & system
         val _datastore = new CassandraDatastore(filoConfig)
-        val _system = ActorSystem(s"partition $index")
+        val _system = ActorSystem(s"partition_$index")
         val coordinator = _system.actorOf(CoordinatorActor.props(_datastore))
         logger.info(s"Starting ingestion of DataFrame for dataset $dataset, partition $index...")
         val ingestActor = _system.actorOf(RddRowSourceActor.props(rowIter, dfColumns,
                                           dataset, index.toString, version, coordinator))
         // TODO: make timeout variable
         implicit val timeout = Timeout(998 minutes)
-        Await.result(ingestActor ? RowSource.Start, 999 minutes)
+        val res = Await.result(ingestActor ? RowSource.Start, 999 minutes)
         Iterator.empty
-      }
+      }.count()
     }
   }
 }

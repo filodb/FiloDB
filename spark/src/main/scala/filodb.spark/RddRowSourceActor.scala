@@ -1,6 +1,6 @@
 package filodb.spark
 
-import akka.actor.{Actor, ActorRef, PoisonPill, Props}
+import akka.actor.{Actor, ActorRef, Props}
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.{SQLContext, DataFrame, Row}
 import org.apache.spark.sql.types._
@@ -10,8 +10,6 @@ import filodb.core.BaseActor
 import filodb.core.ingest.{CoordinatorActor, RowSource}
 
 object RddRowSourceActor {
-  case object AllDone
-
   // Needs to be a multiple of chunkSize. Not sure how to have a good default though.
   val DefaultMaxUnackedRows = 5000
   val DefaultRowsToRead = 100
@@ -65,14 +63,6 @@ extends BaseActor with RowSource[Row] {
       None
     }
   }
-
-  // What to do when we hit end of data and it's all acked. Typically, return OK and kill oneself.
-  def allDoneAndGood(): Unit = {
-    logger.info("Finished with Spark RDD partition ingestion")
-    context.parent ! AllDone
-    self ! PoisonPill
-  }
-
 }
 
 object SparkRowIngestSupport extends RowIngestSupport[Row] {
