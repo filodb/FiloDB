@@ -47,7 +47,7 @@ with Futures {
                   _ <- ColumnTable.create.ifNotExists.future()
                   _ <- PartitionTable.create.ifNotExists.future()
                   _ <- DataTable.create.ifNotExists.future() } yield { 0 }
-    Await.result(f, 3 seconds)
+    Await.result(f, 10 seconds)
   }
 
   def truncateAllTables(): Unit = {
@@ -55,7 +55,7 @@ with Futures {
                   _ <- ColumnTable.truncate.future()
                   _ <- PartitionTable.truncate.future()
                   _ <- DataTable.truncate.future() } yield { 0 }
-    Await.result(f, 3 seconds)
+    Await.result(f, 10 seconds)
   }
 
   val GdeltColumns = Seq("id" -> Column.ColumnType.LongColumn,
