@@ -23,7 +23,7 @@ lazy val spark = (project in file("spark"))
                    .settings(libraryDependencies ++= sparkDeps)
                    .settings(assemblySettings:_*)
                    .settings(assemblyOption in assembly := (assemblyOption in assembly).value.copy(includeScala = false))
-                   .dependsOn(core)
+                   .dependsOn(core % "compile->compile; test->test")
 
 val phantomVersion = "1.8.12"
 val akkaVersion    = "2.3.7"
