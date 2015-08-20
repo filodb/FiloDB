@@ -21,6 +21,8 @@ package spark {
 }
 
 package object spark extends StrictLogging {
+  val DefaultWriteTimeout = 999 minutes
+
   implicit class FiloContext(sqlContext: SQLContext) {
     implicit val context = scala.concurrent.ExecutionContext.Implicits.global
 
@@ -110,12 +112,14 @@ package object spark extends StrictLogging {
      * @param version the version number to read from
      * @param createDataset if true, then creates a Dataset if one doesn't exist.  Defaults to false to
      *                      prevent accidental table creation.
+     * @param writeTimeout Maximum time to wait for write of each partition to complete
      */
     def saveAsFiloDataset(df: DataFrame,
                           filoConfig: Config,
                           dataset: String,
                           version: Int = 0,
-                          createDataset: Boolean = false): Unit = {
+                          createDataset: Boolean = false,
+                          writeTimeout: FiniteDuration = DefaultWriteTimeout): Unit = {
 
       val datastore = new CassandraDatastore(filoConfig)
 
@@ -132,9 +136,8 @@ package object spark extends StrictLogging {
         logger.info(s"Starting ingestion of DataFrame for dataset $dataset, partition $index...")
         val ingestActor = _system.actorOf(RddRowSourceActor.props(rowIter, dfColumns,
                                           dataset, index.toString, version, coordinator))
-        // TODO: make timeout variable
-        implicit val timeout = Timeout(998 minutes)
-        val res = Await.result(ingestActor ? RowSource.Start, 999 minutes)
+        implicit val timeout = Timeout(writeTimeout)
+        val res = Await.result(ingestActor ? RowSource.Start, writeTimeout)
         Iterator.empty
       }.count()
     }

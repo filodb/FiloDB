@@ -3,6 +3,7 @@ package filodb.spark
 import akka.actor.ActorSystem
 import org.apache.spark.SparkContext
 import org.apache.spark.sql.SQLContext
+import scala.concurrent.duration._
 
 import filodb.core.cassandra.AllTablesTest
 
@@ -49,7 +50,9 @@ class SaveAsFiloTest extends AllTablesTest(SaveAsFiloTest.system) {
   }
 
   it("should create missing columns and partitions and write table") {
-    sql.saveAsFiloDataset(dataDF, AllTablesTest.CassConfig, "gdelt1", createDataset=true)
+    sql.saveAsFiloDataset(dataDF, AllTablesTest.CassConfig, "gdelt1",
+                          createDataset=true,
+                          writeTimeout = 2.minutes)
 
     // Now read stuff back and ensure it got written
     val df = sql.filoDataset(AllTablesTest.CassConfig, "gdelt1")
