@@ -7,3 +7,5 @@ scala:
   - 2.10.4
 services:
   - cassandra
+jdk:
+  - oraclejdk8
