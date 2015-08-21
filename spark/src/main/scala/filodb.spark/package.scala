@@ -23,6 +23,19 @@ package spark {
   case class ColumnTypeMismatch(mismatches: Set[(String, DataType, Column.ColumnType)]) extends Exception
 }
 
+/**
+ * Provides base methods for reading from and writing to FiloDB tables/datasets.
+ * Note that this is not the recommended DataFrame load/save API, please see DefaultSource.scala.
+ * Here is how you could use these APIs
+ *
+ * {{{
+ *   > import filodb.spark._
+ *   > val config = com.typesafe.config.ConfigFactory.parseString("max-outstanding-futures = 16")
+ *   > sqlContext.saveAsFiloDataset(myDF, config, "table1", createDataset=true)
+ *
+ *   > sqlContext.filoDataset(config, "table1")
+ * }}}
+ */
 package object spark extends StrictLogging {
   val DefaultWriteTimeout = 999 minutes
 
