@@ -28,7 +28,7 @@ To compile the .mermaid source files to .png's, install the [Mermaid CLI](http:/
 
 Definitely alpha or pre-alpha.  What is here is more intended to show what is possible with columnar storage on Cassandra combined with Spark, and gather feedback.
 - Append-only
-- CSV ingest only, although adding additional ingestion types (like Kafa) is not hard - see `CsvSourceActor`.
+- Ingestion and querying through Spark DataFrames
 - Keyed by partition and row number only
 - Only int, double, long, and string types
 - Localhost only - no locality in Spark input source
@@ -43,11 +43,83 @@ Also, the design and architecture are heavily in flux.  Currently this is design
 
 Your feedback will help decide the next batch of features, such as:
     - which data types to add support for
-    - which input sources to add (Kafka?  Avro on Kafka?  Save to FiloDB from Spark DataFrames?  from existing C* tables?)
+    - what architecture is best supported
 
 ## Building and Testing
 
 Run the tests with `sbt test`, or for continuous development, `sbt ~test`.  Noisy cassandra logs can be seen in `filodb-test.log`.
+
+## Using Spark to ingest and query data
+
+Build the spark data source module with `sbt spark/assembly`.  Then, CD into a Spark 1.4.x distribution (1.4.0 and onwards should work), and start spark-shell with something like:
+
+```
+bin/spark-shell --jars ../FiloDB/spark/target/scala-2.10/filodb-spark-assembly-0.1-SNAPSHOT.jar
+```
+
+Create a config, then create a dataframe on the above dataset:
+
+```scala
+scala> val config = com.typesafe.config.ConfigFactory.parseString("max-outstanding-futures = 16")
+config: com.typesafe.config.Config = Config(SimpleConfigObject({"max-outstanding-futures":16}))
+
+scala> import filodb.spark._
+import filodb.spark._
+```
+
+### Ingesting and Querying with DataFrames
+
+The easiest way to create a table, its columns, and ingest data is to use the implicit method `saveAsFiloDataset`:
+
+```scala
+scala> sqlContext.saveAsFiloDataset(myDF, config, "table1", createDataset=true)
+```
+
+Currently it does not append but rather overwrites, but this will be fixed.
+Reading is just as easy:
+
+```scala
+scala> val df = sqlContext.filoDataset(config, "gdelt")
+15/06/04 15:21:41 INFO DCAwareRoundRobinPolicy: Using data-center name 'datacenter1' for DCAwareRoundRobinPolicy (if this is incorrect, please provide the correct datacenter name with DCAwareRoundRobinPolicy constructor)
+15/06/04 15:21:41 INFO Cluster: New Cassandra host localhost/127.0.0.1:9042 added
+15/06/04 15:21:41 INFO FiloRelation: Read schema for dataset gdelt = Map(ActionGeo_CountryCode -> Column(ActionGeo_CountryCode,gdelt,0,StringColumn,FiloSerializer,false,false), Actor1Geo_FullName -> Column(Actor1Geo_FullName,gdelt,0,StringColumn,FiloSerializer,false,false), Actor2Name -> Column(Actor2Name,gdelt,0,StringColumn,FiloSerializer,false,false), ActionGeo_ADM1Code -> Column(ActionGeo_ADM1Code,gdelt,0,StringColumn,FiloSerializer,false,false), Actor2CountryCode -> Column(Actor2CountryCode,gdelt,0,StringColumn,FiloSerializer,fals...
+```
+
+You could also verify the schema via `df.printSchema`.
+
+### Querying Datasets
+
+Now do some queries, using the DataFrame DSL:
+
+```scala
+scala> df.select(count(df("MonthYear"))).show()
+...<skipping lots of logging>...
+COUNT(MonthYear)
+4037998
+```
+
+or SQL, to find the top 15 events with the highest tone:
+
+```scala
+scala> df.registerTempTable("gdelt")
+
+scala> sqlContext.sql("SELECT Actor1Name, Actor2Name, AvgTone FROM gdelt ORDER BY AvgTone DESC LIMIT 15").collect()
+res13: Array[org.apache.spark.sql.Row] = Array([208077.29634561483])
+```
+
+Now, how about something uniquely Spark .. feed SQL query results to MLLib to compute a correlation:
+
+```scala
+scala> import org.apache.spark.mllib.stat.Statistics
+
+scala> val numMentions = df.select("NumMentions").map(row => row.getInt(0).toDouble)
+numMentions: org.apache.spark.rdd.RDD[Double] = MapPartitionsRDD[100] at map at DataFrame.scala:848
+
+scala> val numArticles = df.select("NumArticles").map(row => row.getInt(0).toDouble)
+numArticles: org.apache.spark.rdd.RDD[Double] = MapPartitionsRDD[104] at map at DataFrame.scala:848
+
+scala> val correlation = Statistics.corr(numMentions, numArticles, "pearson")
+```
 
 ## Using the CLI
 
@@ -83,61 +155,4 @@ Query/export some columns:
 
 ```
 filo-cli --dataset gdelt --partition first --select MonthYear,Actor2Code
-```
-
-## Using the Spark SQL query engine
-
-Build the spark input source module with `sbt spark/assembly`.  Then, CD into a Spark 1.4.x distribution (1.4.0 and onwards should work), and start spark-shell with something like:
-
-```
-bin/spark-shell --jars ../FiloDB/spark/target/scala-2.10/filodb-spark-assembly-0.1-SNAPSHOT.jar
-```
-
-Create a config, then create a dataframe on the above dataset:
-
-```scala
-scala> val config = com.typesafe.config.ConfigFactory.parseString("max-outstanding-futures = 16")
-config: com.typesafe.config.Config = Config(SimpleConfigObject({"max-outstanding-futures":16}))
-
-scala> import filodb.spark._
-import filodb.spark._
-
-scala> val df = sqlContext.filoDataset(config, "gdelt")
-15/06/04 15:21:41 INFO DCAwareRoundRobinPolicy: Using data-center name 'datacenter1' for DCAwareRoundRobinPolicy (if this is incorrect, please provide the correct datacenter name with DCAwareRoundRobinPolicy constructor)
-15/06/04 15:21:41 INFO Cluster: New Cassandra host localhost/127.0.0.1:9042 added
-15/06/04 15:21:41 INFO FiloRelation: Read schema for dataset gdelt = Map(ActionGeo_CountryCode -> Column(ActionGeo_CountryCode,gdelt,0,StringColumn,FiloSerializer,false,false), Actor1Geo_FullName -> Column(Actor1Geo_FullName,gdelt,0,StringColumn,FiloSerializer,false,false), Actor2Name -> Column(Actor2Name,gdelt,0,StringColumn,FiloSerializer,false,false), ActionGeo_ADM1Code -> Column(ActionGeo_ADM1Code,gdelt,0,StringColumn,FiloSerializer,false,false), Actor2CountryCode -> Column(Actor2CountryCode,gdelt,0,StringColumn,FiloSerializer,fals...
-```
-
-You could also verify the schema via `df.printSchema`.
-
-Now do some queries, using the DataFrame DSL:
-
-```scala
-scala> df.select(count(df("MonthYear"))).show()
-...<skipping lots of logging>...
-COUNT(MonthYear)
-4037998
-```
-
-or SQL, to find the top 15 events with the highest tone:
-
-```scala
-scala> df.registerTempTable("gdelt")
-
-scala> sqlContext.sql("SELECT Actor1Name, Actor2Name, AvgTone FROM gdelt ORDER BY AvgTone DESC LIMIT 15").collect()
-res13: Array[org.apache.spark.sql.Row] = Array([208077.29634561483])
-```
-
-Now, how about something uniquely Spark .. feed SQL query results to MLLib to compute a correlation:
-
-```scala
-scala> import org.apache.spark.mllib.stat.Statistics
-
-scala> val numMentions = df.select("NumMentions").map(row => row.getInt(0).toDouble)
-numMentions: org.apache.spark.rdd.RDD[Double] = MapPartitionsRDD[100] at map at DataFrame.scala:848
-
-scala> val numArticles = df.select("NumArticles").map(row => row.getInt(0).toDouble)
-numArticles: org.apache.spark.rdd.RDD[Double] = MapPartitionsRDD[104] at map at DataFrame.scala:848
-
-scala> val correlation = Statistics.corr(numMentions, numArticles, "pearson")
 ```
