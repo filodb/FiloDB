@@ -6,6 +6,7 @@ import akka.util.Timeout
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.slf4j.StrictLogging
 import org.apache.spark.sql.{SQLContext, DataFrame}
+import org.apache.spark.sql.types.DataType
 import scala.concurrent.{Await, Future}
 import scala.concurrent.duration._
 import scala.language.postfixOps
@@ -18,6 +19,8 @@ import filodb.core.messages._
 
 package spark {
   case class DatasetNotFound(dataset: String) extends Exception
+  // For each mismatch: the column name, DataFrame type, and existing column type
+  case class ColumnTypeMismatch(mismatches: Set[(String, DataType, Column.ColumnType)]) extends Exception
 }
 
 package object spark extends StrictLogging {
@@ -64,7 +67,13 @@ package object spark extends StrictLogging {
       val missingCols = namesTypes.keySet -- schema.keySet
       logger.info(s"Matching columns - $matchingCols\nMissing columns - $missingCols")
 
-      // TODO: type check matching cols
+      // Type-check matching columns
+      val matchingTypeErrs = matchingCols.collect {
+        case colName: String if sqlTypeToColType(namesTypes(colName)) != schema(colName).columnType =>
+          (colName, namesTypes(colName), schema(colName).columnType)
+      }
+      if (matchingTypeErrs.nonEmpty) throw ColumnTypeMismatch(matchingTypeErrs)
+
       if (missingCols.nonEmpty) {
         val addMissingCols = missingCols.map { colName =>
           val newCol = Column(colName, dataset, version, sqlTypeToColType(namesTypes(colName)))

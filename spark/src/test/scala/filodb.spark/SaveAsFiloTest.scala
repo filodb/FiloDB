@@ -6,6 +6,8 @@ import org.apache.spark.sql.SQLContext
 import scala.concurrent.duration._
 
 import filodb.core.cassandra.AllTablesTest
+import filodb.core.metadata.Column
+import filodb.core.messages._
 
 object SaveAsFiloTest {
   val system = ActorSystem("test")
@@ -58,5 +60,15 @@ class SaveAsFiloTest extends AllTablesTest(SaveAsFiloTest.system) {
     val df = sql.filoDataset(AllTablesTest.CassConfig, "gdelt1")
     df.select(count("id")).collect().head(0) should equal (3)
     df.agg(sum("year")).collect().head(0) should equal (4030)
+  }
+
+  it("should throw ColumnTypeMismatch if existing columns are not same type") {
+    datastore.newDataset("gdelt2").futureValue should equal (Success)
+    val idStrCol = Column("id", "gdelt2", 0, Column.ColumnType.StringColumn)
+    datastore.newColumn(idStrCol).futureValue should equal (Success)
+
+    intercept[ColumnTypeMismatch] {
+      sql.saveAsFiloDataset(dataDF, AllTablesTest.CassConfig, "gdelt2", createDataset=true)
+    }
   }
 }
