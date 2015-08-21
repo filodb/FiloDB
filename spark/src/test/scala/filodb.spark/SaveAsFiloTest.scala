@@ -71,4 +71,17 @@ class SaveAsFiloTest extends AllTablesTest(SaveAsFiloTest.system) {
       sql.saveAsFiloDataset(dataDF, AllTablesTest.CassConfig, "gdelt2", createDataset=true)
     }
   }
+
+  it("should write table if there are existing matching columns") {
+    datastore.newDataset("gdelt3").futureValue should equal (Success)
+    val idStrCol = Column("id", "gdelt3", 0, Column.ColumnType.LongColumn)
+    datastore.newColumn(idStrCol).futureValue should equal (Success)
+
+    sql.saveAsFiloDataset(dataDF, AllTablesTest.CassConfig, "gdelt3",
+                          writeTimeout = 2.minutes)
+
+    // Now read stuff back and ensure it got written
+    val df = sql.filoDataset(AllTablesTest.CassConfig, "gdelt3")
+    df.select(count("id")).collect().head(0) should equal (3)
+  }
 }
