@@ -57,7 +57,28 @@ Build the spark data source module with `sbt spark/assembly`.  Then, CD into a S
 bin/spark-shell --jars ../FiloDB/spark/target/scala-2.10/filodb-spark-assembly-0.1-SNAPSHOT.jar
 ```
 
-Create a config, then create a dataframe on the above dataset:
+### Ingesting and Querying with DataFrames (New API)
+
+You can use the Spark Dataframes `read` and `write` APIs with FiloDB.  This should also make it possible to create and ingest data using only JDBC, or the SQL Shell.  To create a dataset:
+
+```scala
+    dataDF.write.format("filodb.spark").
+                 option("dataset", "test1").
+                 option("create_dataset", "true").
+                 save()
+```
+
+Note the `create_dataset` option, which automatically creates columns and partitions (which you would otherwise need to do through the CLI).
+
+To read it back:
+
+```scala
+val df = sql.read.format("filodb.spark").option("dataset", "test1").load()
+```
+
+### Ingesting and Querying with DataFrames (Old API)
+
+Create a config first and import the implicit functions:
 
 ```scala
 scala> val config = com.typesafe.config.ConfigFactory.parseString("max-outstanding-futures = 16")
@@ -66,8 +87,6 @@ config: com.typesafe.config.Config = Config(SimpleConfigObject({"max-outstanding
 scala> import filodb.spark._
 import filodb.spark._
 ```
-
-### Ingesting and Querying with DataFrames
 
 The easiest way to create a table, its columns, and ingest data is to use the implicit method `saveAsFiloDataset`:
 

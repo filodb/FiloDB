@@ -84,4 +84,13 @@ class SaveAsFiloTest extends AllTablesTest(SaveAsFiloTest.system) {
     val df = sql.filoDataset(AllTablesTest.CassConfig, "gdelt3")
     df.select(count("id")).collect().head(0) should equal (3)
   }
+
+  it("should write and read using DF write() and read() APIs") {
+    dataDF.write.format("filodb.spark").
+                 option("dataset", "test1").
+                 option("create_dataset", "true").
+                 save()
+    val df = sql.read.format("filodb.spark").option("dataset", "test1").load()
+    df.agg(sum("year")).collect().head(0) should equal (4030)
+  }
 }
