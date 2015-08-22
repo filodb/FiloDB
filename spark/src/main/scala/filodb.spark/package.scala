@@ -153,7 +153,7 @@ package object spark extends StrictLogging {
       df.rdd.mapPartitionsWithIndex { case (index, rowIter) =>
         // Everything within this function runs on each partition/executor, so need a local datastore & system
         val _datastore = new CassandraDatastore(filoConfig)
-        val _system = ActorSystem(s"partition_$index")
+        val _system = ActorSystem(s"partition$index")
         val coordinator = _system.actorOf(CoordinatorActor.props(_datastore))
         logger.info(s"Starting ingestion of DataFrame for dataset $dataset, partition $index...")
         val ingestActor = _system.actorOf(RddRowSourceActor.props(rowIter, dfColumns,
