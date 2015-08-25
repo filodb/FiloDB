@@ -15,18 +15,14 @@ object Types {
   // A Chunk is a single columnar chunk for a given table, partition, column
   type Chunk = ByteBuffer
   type ColumnName = String
-
-  // A Segment represents columnar chunks for a given table, partition, range of keys, and columns
-  type Segment[K] = (KeyRange[K], Map[ColumnName, Chunk])
+  type TableName = String
+  type ChunkID = Long    // Each chunk is identified by segmentID and a long timestamp
 
   type SortOrder = Set[(ColumnName,Boolean)]
   type Rearrange[K] = (Segment[K]) => Segment[K]
 
   // TODO: support composite partition keys?
   type PartitionKey = String
-
-  // A range of keys, used for describing chunks as well as queries
-  case class KeyRange[K](table: String, partition: PartitionKey, start: K, end: K)
 }
 
 /**
@@ -72,7 +68,7 @@ trait Reprojector {
    * In order to implement this, it needs to know the column schema for the table it is flushing, the
    * type of primary key, etc.
    */
-  def flushToSegment[K](memtable: MemTable, sortOrder: SortOrder): Segment[K]
+  def flushToSegment[K](memtable: MemTable, sortOrder: SortOrder)(policy: FlushPolicy): Segment[K]
 
   def removeRows[K](memTable: MemTable, keyRange: KeyRange[K]): MemTable
 
@@ -80,16 +76,17 @@ trait Reprojector {
 }
 
 /**
- * Contains low level functions for implementing a column store.
- * Higher level functions outside of this scope are responsible for transforming and merging the read chunks
- * into segments for reading.
+ * Implementation of a column store.  Writes and reads segments, which are pretty high level.
+ * Must be able to read and write both the columnar chunks and the SegmentRowIndex.
+ * Hopefully, for fast I/O, the columns are stored together.  :)
  */
 trait ColumnStore {
   import Types._
 
   def appendSegment[K](segment: Segment[K]): Future[Response]
 
-  def readChunks[K](column: ColumnName, keyRange: KeyRange[K]): Future[Either[Iterator[Chunk], ErrorResponse]]
+  def readSegments[K](columns: Set[String], keyRange: KeyRange[K]):
+      Future[Either[Iterator[Segment[K]], ErrorResponse]]
 }
 
 // def readSegments(columnStore:ColumnStore, keyRange: KeyRange, columns: Seq[ColumnName]): Array[Segment]

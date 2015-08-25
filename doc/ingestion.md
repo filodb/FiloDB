@@ -1,3 +1,4 @@
+# NOTE: This describes the old ingestion pathway.  The goals are probably still valid, but everything else will be changing dramatically.
 
 ## Ingestion Goals
 
