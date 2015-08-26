@@ -42,3 +42,6 @@ class GenericSegment[K](val keyRange: KeyRange[K],
 
   def getColumns: collection.Set[String] = chunks.keySet
 }
+
+// TODO: add a Segment class that helps take in a bunch of rows and serializes them into chunks,
+// also correctly updating the rowIndex and chunkID.

@@ -18,10 +18,11 @@ Implications:
 * All chunks for all columns within a segment must have the same number of rows.  This guarantees the `SegmentRowIndex` is column-independent.  This implies:
     - The Memtable / tuple mover must fill in NA values if not all columns in a row are being written, and make sure the same number of rows are written for every column chunk
 * The `SegmentRowIndex` is referenced by a `SegmentID`, within a partition, which is basically the first primary key of the primary key range of a segment
-* A single chunk of columnar data is referenced by (SegmentID, Timestamp).  The Timestamp must be the same for all chunks that are flushed at the same time.
-* Chunks are sorted by (SegmentID, Timestamp).  This guarantees that chunks can be read in update order, in case the `SegmentRowIndex` needs to be reconstructed.
+* A single chunk of columnar data is referenced by (SegmentID, ChunkID).  The ChunkID must be the same for all chunks that are flushed from the same set of rows.  The ChunkID should be monotonically increasing with successive writes. With a single writer, using a counter would lead to more efficient reads.
+* Chunks are sorted by (SegmentID, ChunkID).  This guarantees that chunks can be read in update order, in case the `SegmentRowIndex` needs to be reconstructed.
 * The `SegmentRowIndex` will need to be updated every time more chunks are flushed out.  It needs to be computed at write time to keep reads fast
 * It is entirely possible that certain sets of chunks might be deprecated entirely as they will be replaced by data from newer chunks.
+* Since the `SegmentRowIndex` and `ChunkID` are stateful across chunks, and due to the nature of blob storage, the columnar store should only be written to by a single writer.
 * The `SegmentRowIndex` could be entirely reconstructed from all the columnar chunks in a segment.
 * The `SegmentRowIndex` needs to be read for every query, in order to account for row updates and deletes.... unless the data is append-only, there are never updates (probably impossible for at-least-once systems), and you don't care about reading in sorted order from a single segment
 

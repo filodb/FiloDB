@@ -16,10 +16,10 @@ class SegmentSpec extends FunSpec with Matchers {
 
   it("should add and get chunks back out") {
     val segment = new GenericSegment(keyRange, rowIndex)
-    segment.addChunks(2000L, Map("columnA" -> bytes1, "columnB" -> bytes2))
-    segment.addChunks(2500L, Map("columnA" -> bytes1, "columnB" -> bytes2))
+    segment.addChunks(0, Map("columnA" -> bytes1, "columnB" -> bytes2))
+    segment.addChunks(1, Map("columnA" -> bytes1, "columnB" -> bytes2))
 
     segment.getColumns should equal (Set("columnA", "columnB"))
-    segment.getChunks("columnA") should equal (Seq((2000L, bytes1), (2500L, bytes1)))
+    segment.getChunks("columnA") should equal (Seq((0, bytes1), (1, bytes1)))
   }
 }

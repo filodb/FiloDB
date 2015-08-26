@@ -16,7 +16,7 @@ object Types {
   type Chunk = ByteBuffer
   type ColumnName = String
   type TableName = String
-  type ChunkID = Long    // Each chunk is identified by segmentID and a long timestamp
+  type ChunkID = Int    // Each chunk is identified by segmentID and a long timestamp
 
   type SortOrder = Set[(ColumnName,Boolean)]
   type Rearrange[K] = (Segment[K]) => Segment[K]
