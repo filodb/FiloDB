@@ -12,7 +12,7 @@ trait Segment[K] {
   import Types._
 
   val keyRange: KeyRange[K]
-  val index: SegmentRowIndex[K]
+  val index: SegmentRowIndex
 
   def addChunk(id: ChunkID, column: String, bytes: Chunk): Unit
   def addChunks(id: ChunkID, chunks: Map[String, Chunk]): Unit
@@ -21,7 +21,7 @@ trait Segment[K] {
 }
 
 class GenericSegment[K](val keyRange: KeyRange[K],
-                        val index: SegmentRowIndex[K]) extends Segment[K] {
+                        val index: SegmentRowIndex) extends Segment[K] {
   import Types._
 
   val chunkIds = ArrayBuffer[ChunkID]()
