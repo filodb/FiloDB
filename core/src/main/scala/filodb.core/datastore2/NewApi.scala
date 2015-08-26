@@ -39,7 +39,7 @@ trait MemTable {
 trait FlushPolicy {
   import Types._
 
-  //this could check memory size, no of documents, time interval
+  // this could check memory size, no of documents, time interval
   def shouldFlush(memtable: MemTable): Boolean
 
   // Determine the next table and partition to flush

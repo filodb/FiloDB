@@ -25,7 +25,7 @@ trait PrimaryKeyHelper[T] {
  * A typeclass for a timestamp based on a Long = milliseconds since Epoch
  */
 case class TimestampKeyHelper(intervalMs: Long) extends PrimaryKeyHelper[Long] {
-  def ordering = Ordering.Long
+  def ordering: Ordering[Long] = Ordering.Long
   def getSegment(key: Long): (Long, Long) = {
     val segmentNum = key / intervalMs
     (segmentNum * intervalMs, (segmentNum + 1) * intervalMs)
