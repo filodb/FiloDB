@@ -83,9 +83,25 @@ trait Reprojector {
 trait ColumnStore {
   import Types._
 
-  def appendSegment[K](segment: Segment[K]): Future[Response]
+  /**
+   * Appends the segment to the column store.  The chunks in a segment will be appended to the other chunks
+   * already present in that segment, while the SegmentRowIndex will be merged such that the new row index
+   * contains the correct sorted read order in order of PK.  It is assumed that the new chunks are newer
+   * or will potentially overwrite the existing data.
+   * @param segment the Segment to write / merge to the columnar store
+   * @param version the version # to write the segment to
+   * @returns Success, or other ErrorResponse
+   */
+  def appendSegment[K](segment: Segment[K], version: Int): Future[Response]
 
-  def readSegments[K](columns: Set[String], keyRange: KeyRange[K]):
+  /**
+   * Reads segments from the column store, in order of primary key.
+   * @param columns the set of columns to read back
+   * @param keyRange describes the partition and range of keys to read back
+   * @param version the version # to read from
+   * @returns either an iterator over segments, or ErrorResponse
+   */
+  def readSegments[K](columns: Set[String], keyRange: KeyRange[K], version: Int):
       Future[Either[Iterator[Segment[K]], ErrorResponse]]
 }
 
