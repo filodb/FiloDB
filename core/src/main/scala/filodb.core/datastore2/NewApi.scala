@@ -104,5 +104,3 @@ trait ColumnStore {
   def readSegments[K](columns: Set[String], keyRange: KeyRange[K], version: Int):
       Future[Either[Iterator[Segment[K]], ErrorResponse]]
 }
-
-// def readSegments(columnStore:ColumnStore, keyRange: KeyRange, columns: Seq[ColumnName]): Array[Segment]
