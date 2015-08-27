@@ -1,5 +1,6 @@
 package filodb.core.datastore2
 
+import java.nio.ByteBuffer
 import scala.math.Ordering
 
 /**
@@ -11,14 +12,17 @@ import scala.math.Ordering
 /**
  * A typeclass for working with primary keys.
  */
-trait PrimaryKeyHelper[T] {
-  def ordering: Ordering[T]    // must be comparable
+trait PrimaryKeyHelper[K] {
+  def ordering: Ordering[K]    // must be comparable
 
   /**
    * Returns the inclusive start and exclusive end keys for the segment corresponding to a primary key.
    * Must return the same start and end for all keys within [start, end) of a segment.
    */
-  def getSegment(key: T): (T, T)
+  def getSegment(key: K): (K, K)
+
+  def toBytes(key: K): ByteBuffer
+  def fromBytes(bytes: ByteBuffer): K
 }
 
 /**
@@ -30,6 +34,8 @@ case class TimestampKeyHelper(intervalMs: Long) extends PrimaryKeyHelper[Long] {
     val segmentNum = key / intervalMs
     (segmentNum * intervalMs, (segmentNum + 1) * intervalMs)
   }
+  def toBytes(key: Long): ByteBuffer = ByteBuffer.allocate(java.lang.Long.BYTES).putLong(key)
+  def fromBytes(bytes: ByteBuffer): Long = bytes.getLong
 }
 
 // A range of keys, used for describing ingest rows as well as queries
