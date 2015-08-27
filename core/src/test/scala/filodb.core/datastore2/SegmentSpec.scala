@@ -20,6 +20,9 @@ class SegmentSpec extends FunSpec with Matchers {
     segment.addChunks(1, Map("columnA" -> bytes1, "columnB" -> bytes2))
 
     segment.getColumns should equal (Set("columnA", "columnB"))
-    segment.getChunks("columnA") should equal (Seq((0, bytes1), (1, bytes1)))
+    segment.getChunks.toSet should equal (Set(("columnA", 0, bytes1),
+                                              ("columnA", 1, bytes1),
+                                              ("columnB", 0, bytes2),
+                                              ("columnB", 1, bytes2)))
   }
 }

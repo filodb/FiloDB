@@ -1,10 +1,11 @@
 package filodb.core.datastore2
 
+import java.nio.ByteBuffer
 import scala.collection.immutable.TreeMap
 import scala.collection.mutable.{ArrayBuffer, HashMap}
 
 /**
- * A Segment represents columnar chunks for a given table, partition, range of keys, and columns.
+ * A Segment represents columnar chunks for a given dataset, partition, range of keys, and columns.
  * It also contains an index to help read data out in sorted order.
  * For more details see [[doc/sorted_chunk_merge.md]].
  */
@@ -14,15 +15,24 @@ trait Segment[K] {
   val keyRange: KeyRange[K]
   val index: SegmentRowIndex
 
+  protected val helper: PrimaryKeyHelper[K]
+  def segmentId: ByteBuffer = helper.toBytes(keyRange.start)
+  def dataset: TableName    = keyRange.dataset
+  def partition: PartitionKey = keyRange.partition
+
+  override def toString: String = s"Segment($dataset : $partition / ${keyRange.start})"
+
   def addChunk(id: ChunkID, column: String, bytes: Chunk): Unit
   def addChunks(id: ChunkID, chunks: Map[String, Chunk]): Unit
-  def getChunks(column: String): Seq[(ChunkID, Chunk)]
+  def getChunks: Iterator[(String, ChunkID, Chunk)]
   def getColumns: collection.Set[String]
 }
 
-class GenericSegment[K](val keyRange: KeyRange[K],
-                        val index: SegmentRowIndex) extends Segment[K] {
+class GenericSegment[K : PrimaryKeyHelper](val keyRange: KeyRange[K],
+                                           val index: SegmentRowIndex) extends Segment[K] {
   import Types._
+
+  protected val helper = implicitly[PrimaryKeyHelper[K]]
 
   val chunkIds = ArrayBuffer[ChunkID]()
   val chunks = new HashMap[String, HashMap[ChunkID, Chunk]]
@@ -37,8 +47,10 @@ class GenericSegment[K](val keyRange: KeyRange[K],
     for { (col, chunk) <- chunks } { addChunk(id, col, chunk) }
   }
 
-  def getChunks(column: String): Seq[(ChunkID, Chunk)] =
-    chunkIds.map { id => (id, chunks(column)(id)) }
+  def getChunks: Iterator[(String, ChunkID, Chunk)] =
+    for { column <- chunks.keysIterator
+          chunkId <- chunks(column).keysIterator }
+    yield { (column, chunkId, chunks(column)(chunkId)) }
 
   def getColumns: collection.Set[String] = chunks.keySet
 }
