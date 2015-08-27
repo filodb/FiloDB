@@ -11,23 +11,23 @@ One challenge in FiloDB is how to continuously insert fresh data into a column s
 
 ### Index Writes Within a Segment
 
-The key to this algorithm is that, even though segments are ordered within a partition, rows of data within a segment do not need to be written in sorted order. Chunks of data are flushed out, and a `SegmentRowIndex`, one per segment per partition, is updated for all columns.  This `SegmentRowIndex` is a sorted map from the PrimaryKey to a (chunkID, rowNum).  Basically it tells the scanning engine, in order to read the data in sorted key order, what chunks and what row # within the chunk to read from.
+The key to this algorithm is that, even though segments are ordered within a partition, rows of data within a segment do not need to be written in sorted order. Chunks of data are flushed out, and a `ChunkRowMap`, one per segment per partition, is updated for all columns.  This `ChunkRowMap` is a sorted map from the sort key of a projection to a (chunkID, rowNum).  Basically it tells the scanning engine, in order to read the data in sorted key order, what chunks and what row # within the chunk to read from.
 
 Implications:
 
-* All chunks for all columns within a segment must have the same number of rows.  This guarantees the `SegmentRowIndex` is column-independent.  This implies:
+* All chunks for all columns within a segment must have the same number of rows.  This guarantees the `ChunkRowMap` is column-independent.  This implies:
     - The Memtable / tuple mover must fill in NA values if not all columns in a row are being written, and make sure the same number of rows are written for every column chunk
-* The `SegmentRowIndex` is referenced by a `SegmentID`, within a partition, which is basically the first primary key of the primary key range of a segment
+* The `ChunkRowMap` is referenced by a `SegmentID`, within a partition, which is basically the first primary key of the primary key range of a segment
 * A single chunk of columnar data is referenced by (SegmentID, ChunkID).  The ChunkID must be the same for all chunks that are flushed from the same set of rows.  The ChunkID should be monotonically increasing with successive writes. With a single writer, using a counter would lead to more efficient reads.
-* Chunks are sorted by (SegmentID, ChunkID).  This guarantees that chunks can be read in update order, in case the `SegmentRowIndex` needs to be reconstructed.
-* The `SegmentRowIndex` will need to be updated every time more chunks are flushed out.  It needs to be computed at write time to keep reads fast
+* Chunks are sorted by (SegmentID, ChunkID).  This guarantees that chunks can be read in update order, in case the `ChunkRowMap` needs to be reconstructed.
+* The `ChunkRowMap` will need to be updated every time more chunks are flushed out.  It needs to be computed at write time to keep reads fast
 * It is entirely possible that certain sets of chunks might be deprecated entirely as they will be replaced by data from newer chunks.
-* Since the `SegmentRowIndex` and `ChunkID` are stateful across chunks, and due to the nature of blob storage, the columnar store should only be written to by a single writer.
-* The `SegmentRowIndex` could be entirely reconstructed from all the columnar chunks in a segment.
-* The `SegmentRowIndex` needs to be read for every query, in order to account for row updates and deletes.... unless the data is append-only, there are never updates (probably impossible for at-least-once systems), and you don't care about reading in sorted order from a single segment
+* Since the `ChunkRowMap` and `ChunkID` are stateful across chunks, and due to the nature of blob storage, the columnar store should only be written to by a single writer.
+* The `ChunkRowMap` could be entirely reconstructed from all the columnar chunks in a segment.
+* The `ChunkRowMap` needs to be read for every query, in order to account for row updates and deletes.... unless the data is append-only, there are never updates (probably impossible for at-least-once systems), and you don't care about reading in sorted order from a single segment
 
 ### Optimizations and Compactions
 
-From time to time, all the chunks within a segment should be compacted.  After compaction, there should only be one chunk per column, with all data stored in sorted order.  In this case the `SegmentRowIndex` isn't necessary anymore, leading to optimal read speeds.
+From time to time, all the chunks within a segment should be compacted.  After compaction, there should only be one chunk per column, with all data stored in sorted order.  In this case the `ChunkRowMap` isn't necessary anymore, leading to optimal read speeds.
 
-The primary key does not need to be stored with the `SegmentRowIndex`, if the primary key is just one of the columns, since the `SegmentRowIndex` can be used to read out the primary key chunks in sorted order.   What is needed is just a compacted representation of the UUID and row numbers for each PK.
+The primary key does not need to be stored with the `ChunkRowMap`, if the primary key is just one of the columns, since the `ChunkRowMap` can be used to read out the primary key chunks in sorted order.   What is needed is just a compacted representation of the UUID and row numbers for each PK.

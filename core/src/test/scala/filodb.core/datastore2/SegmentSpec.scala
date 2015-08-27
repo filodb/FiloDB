@@ -12,7 +12,7 @@ class SegmentSpec extends FunSpec with Matchers {
   val bytes1 = ByteBuffer.wrap("apple".getBytes("UTF-8"))
   val bytes2 = ByteBuffer.wrap("orange".getBytes("UTF-8"))
 
-  val rowIndex = new UpdatableSegmentRowIndex[Long]
+  val rowIndex = new UpdatableChunkRowMap[Long]
 
   it("should add and get chunks back out") {
     val segment = new GenericSegment(keyRange, rowIndex)

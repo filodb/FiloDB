@@ -6,11 +6,11 @@ import scala.collection.immutable.TreeMap
 import scala.collection.mutable.{ArrayBuffer, HashMap}
 
 /**
- * A SegmentRowIndex stores a sorted index that maps primary keys to (chunkID, row #) -- basically the
- * location within each columnar chunk where that primary key resides.  Iterating through the index
- * allows one to read out data in PK sorted order.
+ * A ChunkRowMap stores a sorted index that maps sort keys to (chunkID, row #) -- basically the
+ * location within each columnar chunk where that sort key resides.  Iterating through the index
+ * allows one to read out data in projection sorted order.
  */
-trait SegmentRowIndex {
+trait ChunkRowMap {
   import Types._
 
   // Separate iterators are defined to avoid Tuple2 object allocation
@@ -22,7 +22,7 @@ trait SegmentRowIndex {
  * Used during the columnar chunk flush process to quickly update a rowIndex, and merge it with what exists
  * on disk already
  */
-class UpdatableSegmentRowIndex[K : PrimaryKeyHelper] extends SegmentRowIndex {
+class UpdatableChunkRowMap[K : PrimaryKeyHelper] extends ChunkRowMap {
   import Types._
 
   implicit val ordering = implicitly[PrimaryKeyHelper[K]].ordering
@@ -32,7 +32,7 @@ class UpdatableSegmentRowIndex[K : PrimaryKeyHelper] extends SegmentRowIndex {
     index = index + (key -> (chunkID -> rowNum))
   }
 
-  def update(other: UpdatableSegmentRowIndex[K]): Unit = {
+  def update(other: UpdatableChunkRowMap[K]): Unit = {
     index = index ++ other.index
   }
 
@@ -49,18 +49,18 @@ class UpdatableSegmentRowIndex[K : PrimaryKeyHelper] extends SegmentRowIndex {
      BuilderEncoder.seqToBuffer(rowNumIterator.toSeq))
 }
 
-object UpdatableSegmentRowIndex {
-  def apply[K](chunkIdsBuffer: ByteBuffer, rowNumsBuffer: ByteBuffer): UpdatableSegmentRowIndex[K] = ???
+object UpdatableChunkRowMap {
+  def apply[K](chunkIdsBuffer: ByteBuffer, rowNumsBuffer: ByteBuffer): UpdatableChunkRowMap[K] = ???
 }
 
 /**
- * A SegmentRowIndex which is optimized for reads from disk/memory.  Directly extracts the chunkIds
+ * A ChunkRowMap which is optimized for reads from disk/memory.  Directly extracts the chunkIds
  * and rowNumbers from Filo binary vectors - does not waste time/memory constructing a TreeMap, and also
  * does not need the primary keys.  For this reason, it cannot handle merges and is really only appropriate
  * for query/read time.
  */
-class BinarySegmentRowIndex(chunkIdsBuffer: ByteBuffer,
-                            rowNumsBuffer: ByteBuffer) extends SegmentRowIndex {
+class BinaryChunkRowMap(chunkIdsBuffer: ByteBuffer,
+                            rowNumsBuffer: ByteBuffer) extends ChunkRowMap {
   import Types._
   import ColumnParser._
 

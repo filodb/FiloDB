@@ -13,7 +13,7 @@ trait Segment[K] {
   import Types._
 
   val keyRange: KeyRange[K]
-  val index: SegmentRowIndex
+  val index: ChunkRowMap
 
   protected val helper: PrimaryKeyHelper[K]
   def segmentId: ByteBuffer = helper.toBytes(keyRange.start)
@@ -29,7 +29,7 @@ trait Segment[K] {
 }
 
 class GenericSegment[K : PrimaryKeyHelper](val keyRange: KeyRange[K],
-                                           val index: SegmentRowIndex) extends Segment[K] {
+                                           val index: ChunkRowMap) extends Segment[K] {
   import Types._
 
   protected val helper = implicitly[PrimaryKeyHelper[K]]

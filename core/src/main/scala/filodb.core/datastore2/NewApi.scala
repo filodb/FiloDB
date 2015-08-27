@@ -77,7 +77,7 @@ trait Reprojector {
 
 /**
  * Implementation of a column store.  Writes and reads segments, which are pretty high level.
- * Must be able to read and write both the columnar chunks and the SegmentRowIndex.
+ * Must be able to read and write both the columnar chunks and the ChunkRowMap.
  * Hopefully, for fast I/O, the columns are stored together.  :)
  */
 trait ColumnStore {
@@ -85,14 +85,14 @@ trait ColumnStore {
 
   /**
    * Appends the segment to the column store.  The chunks in a segment will be appended to the other chunks
-   * already present in that segment, while the SegmentRowIndex will be merged such that the new row index
-   * contains the correct sorted read order in order of PK.  It is assumed that the new chunks are newer
+   * already present in that segment, while the ChunkRowMap will be merged such that the new row index
+   * contains the correct sorted read order.  It is assumed that the new chunks are newer
    * or will potentially overwrite the existing data.
    * @param segment the Segment to write / merge to the columnar store
    * @param version the version # to write the segment to
    * @returns Success, or other ErrorResponse
    */
-  def appendSegment[K](segment: Segment[K], version: Int): Future[Response]
+  def appendSegment[K : PrimaryKeyHelper](segment: Segment[K], version: Int): Future[Response]
 
   /**
    * Reads segments from the column store, in order of primary key.
