@@ -15,7 +15,7 @@ trait Segment[K] {
   val keyRange: KeyRange[K]
   val index: ChunkRowMap
 
-  protected val helper: PrimaryKeyHelper[K]
+  protected val helper: SortKeyHelper[K]
   def segmentId: ByteBuffer = helper.toBytes(keyRange.start)
   def dataset: TableName    = keyRange.dataset
   def partition: PartitionKey = keyRange.partition
@@ -28,11 +28,11 @@ trait Segment[K] {
   def getColumns: collection.Set[String]
 }
 
-class GenericSegment[K : PrimaryKeyHelper](val keyRange: KeyRange[K],
+class GenericSegment[K : SortKeyHelper](val keyRange: KeyRange[K],
                                            val index: ChunkRowMap) extends Segment[K] {
   import Types._
 
-  protected val helper = implicitly[PrimaryKeyHelper[K]]
+  protected val helper = implicitly[SortKeyHelper[K]]
 
   val chunkIds = ArrayBuffer[ChunkID]()
   val chunks = new HashMap[String, HashMap[ChunkID, Chunk]]

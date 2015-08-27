@@ -22,10 +22,10 @@ trait ChunkRowMap {
  * Used during the columnar chunk flush process to quickly update a rowIndex, and merge it with what exists
  * on disk already
  */
-class UpdatableChunkRowMap[K : PrimaryKeyHelper] extends ChunkRowMap {
+class UpdatableChunkRowMap[K : SortKeyHelper] extends ChunkRowMap {
   import Types._
 
-  implicit val ordering = implicitly[PrimaryKeyHelper[K]].ordering
+  implicit val ordering = implicitly[SortKeyHelper[K]].ordering
   var index = TreeMap[K, (ChunkID, Int)]()
 
   def update(key: K, chunkID: ChunkID, rowNum: Int): Unit = {

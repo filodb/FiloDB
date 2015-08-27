@@ -25,6 +25,12 @@ object Types {
   type PartitionKey = String
 }
 
+// A range of keys, used for describing ingest rows as well as queries
+case class KeyRange[K : SortKeyHelper](dataset: Types.TableName,
+                                       partition: Types.PartitionKey,
+                                       start: K, end: K)
+
+
 /**
  * The MemTable serves these purposes:
  * 1) Holds incoming rows of data before being flushed
@@ -92,7 +98,7 @@ trait ColumnStore {
    * @param version the version # to write the segment to
    * @returns Success, or other ErrorResponse
    */
-  def appendSegment[K : PrimaryKeyHelper](segment: Segment[K], version: Int): Future[Response]
+  def appendSegment[K : SortKeyHelper](segment: Segment[K], version: Int): Future[Response]
 
   /**
    * Reads segments from the column store, in order of primary key.
