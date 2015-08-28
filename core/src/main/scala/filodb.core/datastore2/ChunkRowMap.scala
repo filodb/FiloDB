@@ -60,7 +60,7 @@ object UpdatableChunkRowMap {
  * for query/read time.
  */
 class BinaryChunkRowMap(chunkIdsBuffer: ByteBuffer,
-                            rowNumsBuffer: ByteBuffer) extends ChunkRowMap {
+                        rowNumsBuffer: ByteBuffer) extends ChunkRowMap {
   import Types._
   import ColumnParser._
 

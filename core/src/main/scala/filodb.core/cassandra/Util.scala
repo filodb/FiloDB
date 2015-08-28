@@ -2,6 +2,7 @@ package filodb.core.cassandra
 
 import com.datastax.driver.core.exceptions.DriverException
 import com.websudos.phantom.dsl._
+import java.nio.ByteBuffer
 import scala.concurrent.Future
 
 import filodb.core.messages._
@@ -27,5 +28,14 @@ object Util {
       case e: NoSuchElementException   => MetadataException(e)
       case e: IllegalArgumentException => MetadataException(e)
     }
+  }
+
+  // Phantom 1.8.x can't deal with ByteBuffers with non-zero position and/or non-zero arrayOffset.
+  // Code in 1.9.x seems totally different.  This is a workaround for now, hopefully the new code
+  // will be much more performant.
+  def strictBytes(origBuf: ByteBuffer): ByteBuffer = {
+    val offset = origBuf.arrayOffset + origBuf.position
+    val strictBytes = java.util.Arrays.copyOfRange(origBuf.array, offset, offset + origBuf.remaining)
+    ByteBuffer.wrap(strictBytes)
   }
 }

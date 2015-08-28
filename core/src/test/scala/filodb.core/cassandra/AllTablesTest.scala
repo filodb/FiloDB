@@ -34,7 +34,7 @@ abstract class AllTablesTest(system: ActorSystem) extends ActorTest(system)
 with SimpleCassandraTest
 with Futures {
   implicit val defaultPatience =
-    PatienceConfig(timeout = Span(2, Seconds), interval = Span(10, Millis))
+    PatienceConfig(timeout = Span(10, Seconds), interval = Span(50, Millis))
 
   implicit val keySpace = KeySpace("unittest")
 

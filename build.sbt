@@ -33,22 +33,25 @@ lazy val extraRepos = Seq(
   "twitter-repo" at "http://maven.twttr.com",
   "Websudos releases" at "https://dl.bintray.com/websudos/oss-releases/",
   "Pellucid Bintray" at "http://dl.bintray.com/pellucid/maven",
-  "Velvia Bintray" at "https://dl.bintray.com/velvia/maven"
+  "Velvia Bintray" at "https://dl.bintray.com/velvia/maven",
+  "spray repo" at "http://repo.spray.io"
 )
 
 val excludeShapeless = ExclusionRule(organization = "com.chuusai")
+// Zookeeper pulls in slf4j-log4j12 which we DON'T want
+val excludeZK = ExclusionRule(organization = "org.apache.zookeeper")
 
 lazy val coreDeps = Seq(
   "com.websudos"         %% "phantom-dsl"       % phantomVersion,
-  // "com.websudos"         %% "phantom-zookeeper" % phantomVersion,
   "com.typesafe.akka"    %% "akka-slf4j"        % akkaVersion,
   "com.typesafe.scala-logging" %% "scala-logging-slf4j" % "2.1.2",
   "ch.qos.logback"        % "logback-classic"   % "1.0.7",
   "com.beachape"         %% "enumeratum"        % "1.2.1",
   "org.velvia.filo"      %% "filo-scala"        % "0.1.3" excludeAll(excludeShapeless),
   "com.opencsv"           % "opencsv"           % "3.3",
+  "io.spray"             %% "spray-caching"     % "1.3.2",
   "com.nativelibs4java"  %% "scalaxy-loops"     % "0.3.3" % "provided",
-  "com.websudos"         %% "phantom-testkit"   % phantomVersion % "test",
+  "com.websudos"         %% "phantom-testkit"   % phantomVersion % "test" excludeAll(excludeZK),
   "com.typesafe.akka"    %% "akka-testkit"      % akkaVersion % "test"
 )
 
