@@ -103,7 +103,7 @@ trait ColumnStore {
   /**
    * Reads segments from the column store, in order of primary key.
    * @param columns the set of columns to read back
-   * @param keyRange describes the partition and range of keys to read back
+   * @param keyRange describes the partition and range of keys to read back. NOTE: end range is exclusive!
    * @param version the version # to read from
    * @returns either an iterator over segments, or ErrorResponse
    */

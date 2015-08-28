@@ -11,7 +11,7 @@ One challenge in FiloDB is how to continuously insert fresh data into a column s
 
 ### Index Writes Within a Segment
 
-The key to this algorithm is that, even though segments are ordered within a partition, rows of data within a segment do not need to be written in sorted order. Chunks of data are flushed out, and a `ChunkRowMap`, one per segment per partition, is updated for all columns.  This `ChunkRowMap` is a sorted map from the sort key of a projection to a (chunkID, rowNum).  Basically it tells the scanning engine, in order to read the data in sorted key order, what chunks and what row # within the chunk to read from.
+The key to this algorithm is that, even though segments are ordered within a partition, rows of data within a segment do not need to be written in sorted order. Chunks of data are appended, and a `ChunkRowMap`, one per segment per partition, is updated for all columns.  This `ChunkRowMap` is a sorted map from the sort key of a projection to a (chunkID, rowNum).  Basically it tells the scanning engine, in order to read the data in sorted key order, what chunks and what row # within the chunk to read from.
 
 Implications:
 
