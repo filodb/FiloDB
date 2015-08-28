@@ -15,6 +15,13 @@ object CassandraDatastoreSpec {
 class CassandraDatastoreSpec extends AllTablesTest(CassandraDatastoreSpec.getNewSystem) {
   import Datastore._
 
+  override def beforeAll() {
+    super.beforeAll()
+    createAllTables()
+  }
+
+  before { truncateAllTables() }
+
   describe("column API") {
     it("should return IllegalColumnChange if an invalid column addition submitted") {
       val firstColumn = Column("first", "foo", 1, Column.ColumnType.StringColumn)
