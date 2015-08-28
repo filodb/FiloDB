@@ -25,7 +25,7 @@ lazy val spark = (project in file("spark"))
                    .settings(assemblyOption in assembly := (assemblyOption in assembly).value.copy(includeScala = false))
                    .dependsOn(core % "compile->compile; test->test")
 
-val phantomVersion = "1.8.12"
+val phantomVersion = "1.11.0"
 val akkaVersion    = "2.3.7"
 
 lazy val extraRepos = Seq(

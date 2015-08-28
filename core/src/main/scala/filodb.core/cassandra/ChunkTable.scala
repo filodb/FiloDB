@@ -10,6 +10,8 @@ import scala.concurrent.Future
 import filodb.core.messages._
 import filodb.core.datastore2.Types
 
+case class ChunkedData(column: String, chunks: Seq[(ByteBuffer, Types.ChunkID, ByteBuffer)]) extends Response
+
 /**
  * Represents the table which holds the actual columnar chunks for segments
  *
@@ -17,7 +19,7 @@ import filodb.core.datastore2.Types
  * chunk actually stores many many rows grouped together into one binary chunk for efficiency.
  */
 sealed class ChunkTable(dataset: String, config: Config)
-extends CassandraTable[ChunkTable, (String, ByteBuffer, Long, ByteBuffer)]
+extends CassandraTable[ChunkTable, (String, ByteBuffer, Int, ByteBuffer)]
 with SimpleCassandraConnector {
   import Util._
 
@@ -34,7 +36,7 @@ with SimpleCassandraConnector {
   object data extends BlobColumn(this)
   //scalastyle:on
 
-  override def fromRow(row: Row): (String, ByteBuffer, Long, ByteBuffer) =
+  override def fromRow(row: Row): (String, ByteBuffer, Int, ByteBuffer) =
     (columnName(row), segmentId(row), chunkId(row), data(row))
 
   def writeChunks(partition: String,
@@ -52,9 +54,24 @@ with SimpleCassandraConnector {
       case (batch, (columnName, id, bytes)) =>
         batch.add(insertQ.value(_.chunkId, id)
                          .value(_.columnName, columnName)
-                         .value(_.data, strictBytes(bytes)))
+                         .value(_.data, bytes))
     }
     batch.future().toResponse()
-
   }
+
+  // Reads back all the chunks from the requested column for the segments falling within
+  // the starting and ending segment IDs.  No paging is performed - so be sure to not
+  // ask for too large of a range.  Also, beware the starting segment ID must line up with the
+  // segment boundary, and the ending segment ID is exclusive!
+  def readChunks(partition: String,
+                 version: Int,
+                 column: String,
+                 startSegmentId: ByteBuffer,
+                 untilSegmentId: ByteBuffer): Future[Response] =
+    select(_.segmentId, _.chunkId, _.data).where(_.columnName eqs column)
+      .and(_.partition eqs partition)
+      .and(_.version eqs version)
+      .and(_.segmentId gte startSegmentId).and(_.segmentId lt untilSegmentId)
+      .fetch().map(chunks => ChunkedData(column, chunks))
+      .handleErrors
 }

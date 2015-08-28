@@ -80,17 +80,11 @@ object DataTable extends DataTable with SimpleCassandraConnector with DataApi {
     // NOTE2: the batch add is immutable, so use foldLeft to get the updated batch
     val batch = columnsBytes.foldLeft(Batch.unlogged) {
       case (batch, (columnName, bytes)) =>
-        // Phantom 1.8.x can't deal with ByteBuffers with non-zero position and/or non-zero arrayOffset.
-        // Code in 1.9.x seems totally different.  This is a workaround for now, hopefully the new code
-        // will be much more performant.
-        val offset = bytes.arrayOffset + bytes.position
-        val strictBytes = java.util.Arrays.copyOfRange(bytes.array, offset, offset + bytes.remaining)
-
         // Sucks, it seems that reusing a partially prepared query doesn't work.
         // Issue filed: https://github.com/websudos/phantom/issues/166
         batch.add(insertQuery(shard).value(_.rowId, rowId)
                                     .value(_.columnName, columnName)
-                                    .value(_.data, ByteBuffer.wrap(strictBytes)))
+                                    .value(_.data, bytes))
     }
     batch.future().toResponse()
   }

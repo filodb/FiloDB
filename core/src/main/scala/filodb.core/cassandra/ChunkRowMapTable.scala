@@ -55,7 +55,7 @@ with SimpleCassandraConnector {
     insert.value(_.partition, partition)
           .value(_.version,   version)
           .value(_.segmentId, segmentId)
-          .value(_.chunkIds,  strictBytes(chunkIds))
-          .value(_.rowNums,   strictBytes(rowNums))
+          .value(_.chunkIds,  chunkIds)
+          .value(_.rowNums,   rowNums)
           .future().toResponse()
 }
