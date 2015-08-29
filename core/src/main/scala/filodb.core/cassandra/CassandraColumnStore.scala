@@ -54,8 +54,12 @@ class CassandraColumnStore(config: Config)
     yield { if (writeChunkResp == Success) writeIndexResp else writeChunkResp }
   }
 
-  def readSegments[K](columns: Set[String], keyRange: KeyRange[K], version: Int):
-      Future[Either[Iterator[Segment[K]], ErrorResponse]] = ???
+  def readSegments[K : SortKeyHelper](columns: Set[String], keyRange: KeyRange[K], version: Int):
+      Future[Iterator[Segment[K]]] = {
+    // TODO: implement actual paging and the iterator over segments.  Or maybe that should be implemented
+    // at a higher level.
+    populateSegments(columns, keyRange, version).map(_.toIterator)
+  }
 
   def clearRowMapCache(): Unit = { rowMapCache.clear() }
 
@@ -84,12 +88,12 @@ class CassandraColumnStore(config: Config)
                              chunkTable: ChunkTable,
                              rowMapTable: ChunkRowMapTable): Future[UpdatableChunkRowMap[K]] = {
     val idx = rowMapCache((segment.dataset, segment.partition, segment.segmentId, version)) {
-      (rowMapTable.getChunkMap(segment.partition, version, segment.segmentId) collect {
-        case ChunkRowMapRecord(_, chunkIds, rowNums, _) =>
-          ???
-        case NotFound =>
+      (rowMapTable.getChunkMaps(segment.partition, version, segment.segmentId, segment.segmentId) collect {
+        case Nil =>
           logger.debug(s"No row index found for $segment, creating a new one")
           (new UpdatableChunkRowMap[K])
+        case chunks: Any =>
+          ???
       }).asInstanceOf[Future[UpdatableChunkRowMap[_]]]
     }
     idx.asInstanceOf[Future[UpdatableChunkRowMap[K]]]
@@ -111,4 +115,56 @@ class CassandraColumnStore(config: Config)
     rowMapTable.writeChunkMap(segment.partition, version, segment.segmentId,
                              chunkIds, rowNums)
   }
+
+  // Populates segments by reading the ChunkRowMaps first, then reading the columnar chunk data.
+  // Does most of the work of actually reading segments... but does not page results.
+  // NOTE: ChunkRowMaps could be used to estimate how much data will be read in the chunks, and
+  // thus limit the amount of memory used / terminate early
+  private def populateSegments[K : SortKeyHelper](columns: Set[String], keyRange: KeyRange[K], version: Int):
+      Future[Seq[Segment[K]]] = {
+    val helper = implicitly[SortKeyHelper[K]]
+    val fut =
+      for { (chunkTable, rowMapTable) <- getSegmentTables(keyRange.dataset)
+            cassRowMaps <- rowMapTable.getChunkMaps(keyRange.partition, version,
+                                                    keyRange.binaryStart, keyRange.binaryEnd)
+            segments     = createSegments(cassRowMaps, keyRange)
+            chunks      <- getAllChunks(chunkTable, columns, keyRange, version) if cassRowMaps.nonEmpty
+      } yield {
+        chunks.foreach { case ChunkedData(columnName, chunkTriples) =>
+          var segIndex = 0
+          chunkTriples.foreach { case (segmentId, chunkId, chunkBytes) =>
+            // Rely on the fact that chunks are sorted by segmentId, in the same order as the rowMaps
+            val segmentKey = helper.fromBytes(segmentId)
+            while (segmentKey != segments(segIndex).keyRange.start) segIndex += 1
+            segments(segIndex).addChunk(chunkId, columnName, chunkBytes)
+          }
+        }
+        segments
+      }
+    fut.recover {
+      // No chunk maps found, so just return empty list of segments
+      case e: java.util.NoSuchElementException => Nil
+    }
+  }
+
+  private def createSegments[K : SortKeyHelper](cassRowMaps: Seq[ChunkRowMapRecord],
+                                                origKeyRange: KeyRange[K]): Seq[Segment[K]] = {
+    val helper = implicitly[SortKeyHelper[K]]
+    cassRowMaps.map {
+      case ChunkRowMapRecord(segmentId, chunkIds, rowNums, _) =>
+        val rowMap = new BinaryChunkRowMap(chunkIds, rowNums)
+        val (segStart, segEnd) = helper.getSegment(helper.fromBytes(segmentId))
+        val segKeyRange = origKeyRange.copy(start = segStart, end = segEnd)
+        new GenericSegment(segKeyRange, rowMap)
+    }
+  }
+
+  // Reads columnar chunk data from each column in parallel.
+  // Future.sequence creates a Future.failure() with the first exception from any of the futures.
+  private def getAllChunks[K](chunkTable: ChunkTable,
+                              columns: Set[String],
+                              keyRange: KeyRange[K],
+                              version: Int): Future[Seq[ChunkedData]] =
+    Future.sequence(columns.toSeq.map(chunkTable.readChunks(keyRange.partition, version, _,
+                                                            keyRange.binaryStart, keyRange.binaryEnd)))
 }

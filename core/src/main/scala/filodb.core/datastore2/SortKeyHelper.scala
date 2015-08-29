@@ -34,7 +34,8 @@ case class TimestampKeyHelper(intervalMs: Long) extends SortKeyHelper[Long] {
     val segmentNum = key / intervalMs
     (segmentNum * intervalMs, (segmentNum + 1) * intervalMs)
   }
-  def toBytes(key: Long): ByteBuffer = ByteBuffer.allocate(java.lang.Long.BYTES).putLong(key)
+  def toBytes(key: Long): ByteBuffer =
+    ByteBuffer.allocate(java.lang.Long.BYTES).putLong(key).flip.asInstanceOf[ByteBuffer]
   def fromBytes(bytes: ByteBuffer): Long = bytes.getLong
 }
 

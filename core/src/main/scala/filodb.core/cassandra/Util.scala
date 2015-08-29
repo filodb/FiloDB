@@ -19,6 +19,11 @@ object Util {
         case e: DriverException => StorageEngineException(e)
       }
     }
+
+    def toResponseOnly(notAppliedResponse: Response = NotApplied): Future[Response] =
+      f.map { resultSet =>
+        if (resultSet.wasApplied) Success else notAppliedResponse
+      }
   }
 
   implicit class HandleErrors(f: Future[Response]) {
@@ -29,4 +34,6 @@ object Util {
       case e: IllegalArgumentException => MetadataException(e)
     }
   }
+
+  def toHex(bb: ByteBuffer): String = com.datastax.driver.core.utils.Bytes.toHexString(bb)
 }

@@ -28,7 +28,11 @@ object Types {
 // A range of keys, used for describing ingest rows as well as queries
 case class KeyRange[K : SortKeyHelper](dataset: Types.TableName,
                                        partition: Types.PartitionKey,
-                                       start: K, end: K)
+                                       start: K, end: K) {
+  val helper = implicitly[SortKeyHelper[K]]
+  def binaryStart: ByteBuffer = helper.toBytes(start)
+  def binaryEnd: ByteBuffer = helper.toBytes(end)
+}
 
 
 /**
@@ -96,7 +100,7 @@ trait ColumnStore {
    * or will potentially overwrite the existing data.
    * @param segment the Segment to write / merge to the columnar store
    * @param version the version # to write the segment to
-   * @returns Success, or other ErrorResponse
+   * @returns Success. Future.failure(exception) otherwise.
    */
   def appendSegment[K : SortKeyHelper](segment: Segment[K], version: Int): Future[Response]
 
@@ -105,8 +109,8 @@ trait ColumnStore {
    * @param columns the set of columns to read back
    * @param keyRange describes the partition and range of keys to read back. NOTE: end range is exclusive!
    * @param version the version # to read from
-   * @returns either an iterator over segments, or ErrorResponse
+   * @returns An iterator over segments
    */
-  def readSegments[K](columns: Set[String], keyRange: KeyRange[K], version: Int):
-      Future[Either[Iterator[Segment[K]], ErrorResponse]]
+  def readSegments[K : SortKeyHelper](columns: Set[String], keyRange: KeyRange[K], version: Int):
+      Future[Iterator[Segment[K]]]
 }

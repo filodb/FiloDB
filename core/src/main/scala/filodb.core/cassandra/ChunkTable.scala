@@ -10,7 +10,7 @@ import scala.concurrent.Future
 import filodb.core.messages._
 import filodb.core.datastore2.Types
 
-case class ChunkedData(column: String, chunks: Seq[(ByteBuffer, Types.ChunkID, ByteBuffer)]) extends Response
+case class ChunkedData(column: String, chunks: Seq[(ByteBuffer, Types.ChunkID, ByteBuffer)])
 
 /**
  * Represents the table which holds the actual columnar chunks for segments
@@ -56,7 +56,7 @@ with SimpleCassandraConnector {
                          .value(_.columnName, columnName)
                          .value(_.data, bytes))
     }
-    batch.future().toResponse()
+    batch.future().toResponseOnly()
   }
 
   // Reads back all the chunks from the requested column for the segments falling within
@@ -67,11 +67,10 @@ with SimpleCassandraConnector {
                  version: Int,
                  column: String,
                  startSegmentId: ByteBuffer,
-                 untilSegmentId: ByteBuffer): Future[Response] =
+                 untilSegmentId: ByteBuffer): Future[ChunkedData] =
     select(_.segmentId, _.chunkId, _.data).where(_.columnName eqs column)
       .and(_.partition eqs partition)
       .and(_.version eqs version)
       .and(_.segmentId gte startSegmentId).and(_.segmentId lt untilSegmentId)
       .fetch().map(chunks => ChunkedData(column, chunks))
-      .handleErrors
 }

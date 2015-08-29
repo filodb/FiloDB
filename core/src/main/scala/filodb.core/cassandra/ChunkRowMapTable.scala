@@ -2,7 +2,6 @@ package filodb.core.cassandra
 
 import com.datastax.driver.core.Row
 import com.typesafe.config.Config
-import com.typesafe.scalalogging.slf4j.StrictLogging
 import com.websudos.phantom.dsl._
 import java.nio.ByteBuffer
 import scala.concurrent.Future
@@ -10,9 +9,9 @@ import scala.concurrent.Future
 import filodb.core.messages._
 
 case class ChunkRowMapRecord(segmentId: ByteBuffer,
-                           chunkIds: ByteBuffer,
-                           rowNums: ByteBuffer,
-                           columns: Set[String]) extends Response
+                             chunkIds: ByteBuffer,
+                             rowNums: ByteBuffer,
+                             columns: Set[String])
 
 /**
  * Represents the table which holds the ChunkRowMap for each segment of a partition.
@@ -40,13 +39,23 @@ with SimpleCassandraConnector {
   override def fromRow(row: Row): ChunkRowMapRecord =
     ChunkRowMapRecord(segmentId(row), chunkIds(row), rowNums(row), columnsWritten(row))
 
-  def getChunkMap(partition: String, version: Int, segmentId: ByteBuffer): Future[Response] =
+  /**
+   * Retrieves a whole series of chunk maps, in the range [startSegmentId, untilSegmentId)
+   * @returns ChunkMaps(...), if nothing found will return ChunkMaps(Nil).
+   */
+  def getChunkMaps(partition: String,
+                   version: Int,
+                   startSegmentId: ByteBuffer,
+                   untilSegmentId: ByteBuffer): Future[Seq[ChunkRowMapRecord]] =
     select.where(_.partition eqs partition)
           .and(_.version eqs version)
-          .and(_.segmentId eqs segmentId)
-          .one().map { opt => opt.getOrElse(NotFound) }
-          .handleErrors
+          .and(_.segmentId gte startSegmentId).and(_.segmentId lt untilSegmentId)
+          .fetch()
 
+  /**
+   * Writes a new chunk map to the chunkRowTable.
+   * @returns Success, or an exception as a Future.failure
+   */
   def writeChunkMap(partition: String,
                     version: Int,
                     segmentId: ByteBuffer,
@@ -57,5 +66,5 @@ with SimpleCassandraConnector {
           .value(_.segmentId, segmentId)
           .value(_.chunkIds,  chunkIds)
           .value(_.rowNums,   rowNums)
-          .future().toResponse()
+          .future().toResponseOnly()
 }

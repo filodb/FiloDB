@@ -49,10 +49,14 @@ class CassandraColumnStoreSpec extends CassandraFlatSpec with BeforeAndAfter {
   rowIndex.index = rowIndex.index ++
                      Map(500L -> (0 -> 0), 1000L -> (1 -> 0), 600L -> (0 -> 1), 700L -> (0 -> 2))
 
-  private def getChunkRowMap[K](segment: Segment[K]): Future[Response] =
-    rowMapTable.getChunkMap(segment.partition, 0, segment.segmentId)
+  private def getChunkRowMap[K](segment: Segment[K]): Future[BinaryChunkRowMap] =
+    rowMapTable.getChunkMaps(segment.partition, 0, segment.segmentId, segment.keyRange.binaryEnd).
+                collect {
+      case Seq(ChunkRowMapRecord(_, chunkIds, rowNums, _)) => new BinaryChunkRowMap(chunkIds, rowNums)
+      case x: Seq[_] => throw new RuntimeException("Got back unexpected chunkMaps " + x)
+    }
 
-  "CassandraColumnStore" should "write a segment into an empty table" in {
+  "appendSegment" should "write a segment into an empty table" in {
     whenReady(colStore.appendSegment(baseSegment, 0)) { response =>
       response should equal (Success)
     }
@@ -64,13 +68,41 @@ class CassandraColumnStoreSpec extends CassandraFlatSpec with BeforeAndAfter {
                              ("columnB", 1, bytes2)))
     }
 
-    whenReady(getChunkRowMap(baseSegment)) { response =>
-      response match {
-        case ChunkRowMapRecord(_, chunkIds, rowNums, _) =>
-          val binRowMap = new BinaryChunkRowMap(chunkIds, rowNums)
-          binRowMap.chunkIdIterator.toSeq should equal (Seq(0, 0, 0, 1))
-          binRowMap.rowNumIterator.toSeq should equal (Seq(0, 1, 2, 0))
-      }
+    whenReady(getChunkRowMap(baseSegment)) { binRowMap =>
+      binRowMap.chunkIdIterator.toSeq should equal (Seq(0, 0, 0, 1))
+      binRowMap.rowNumIterator.toSeq should equal (Seq(0, 1, 2, 0))
+    }
+  }
+
+  "readSegments" should "read segments back that were written" in {
+    whenReady(colStore.appendSegment(baseSegment, 0)) { response =>
+      response should equal (Success)
+    }
+
+    whenReady(colStore.readSegments(Set("columnA", "columnB"), keyRange, 0)) { segIter =>
+      val segments = segIter.toSeq
+      segments should have length (1)
+      segments.head.keyRange should equal (baseSegment.keyRange)
+      segments.head.getChunks.toSet should equal (baseSegment.getChunks.toSet)
+      segments.head.index.rowNumIterator.toSeq should equal (baseSegment.index.rowNumIterator.toSeq)
+    }
+  }
+
+  it should "return empty iterator if cannot find segment" in {
+    whenReady(colStore.readSegments(Set("columnA", "columnB"), keyRange, 0)) { segIter =>
+      segIter.toSeq should have length (0)
+    }
+  }
+
+  it should "return empty segment if cannot find columns" in {
+    whenReady(colStore.appendSegment(baseSegment, 0)) { response =>
+      response should equal (Success)
+    }
+
+    whenReady(colStore.readSegments(Set("notACol"), keyRange, 0)) { segIter =>
+      val segments = segIter.toSeq
+      segments should have length (1)
+      segments.head.getChunks.toSeq should equal (Nil)
     }
   }
 }
