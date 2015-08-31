@@ -25,7 +25,7 @@ trait ChunkMergingStrategy {
    * but only the sort key column, then this can read back just the ChunkRowMap and the sort key vectors.
    */
   def readSegmentForCache[K](dataset: TableName,
-                             partition: String,
+                             partition: PartitionKey,
                              version: Int,
                              segmentId: ByteBuffer): Future[Segment[K]]
 

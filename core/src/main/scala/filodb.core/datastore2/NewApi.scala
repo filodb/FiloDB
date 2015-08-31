@@ -12,11 +12,12 @@ import scala.concurrent.Future
 object Types {
   // A Chunk is a single columnar chunk for a given table, partition, column
   type Chunk = ByteBuffer
-  type ColumnName = String
+  // TODO: Change ColumnId to an Int.  Would be more efficient, and allow renaming columns.
+  type ColumnId = String
   type TableName = String
   type ChunkID = Int    // Each chunk is identified by segmentID and a long timestamp
 
-  type SortOrder = Set[(ColumnName,Boolean)]
+  type SortOrder = Set[(ColumnId, Boolean)]
   type Rearrange[K] = (Segment[K]) => Segment[K]
 
   // TODO: support composite partition keys?

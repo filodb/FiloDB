@@ -32,11 +32,11 @@ trait ColumnStore {
    * @param version the version # to read from
    * @returns An iterator over segments
    */
-  def readSegments[K : SortKeyHelper](columns: Set[String], keyRange: KeyRange[K], version: Int):
+  def readSegments[K : SortKeyHelper](columns: Set[ColumnId], keyRange: KeyRange[K], version: Int):
       Future[Iterator[Segment[K]]]
 }
 
-case class ChunkedData(column: String, chunks: Seq[(ByteBuffer, Types.ChunkID, ByteBuffer)])
+case class ChunkedData(column: Types.ColumnId, chunks: Seq[(ByteBuffer, Types.ChunkID, ByteBuffer)])
 
 /**
  * A partial implementation of a ColumnStore, based on separating storage of chunks and ChunkRowMaps,
@@ -56,13 +56,13 @@ trait CachedMergingColumnStore {
    * @returns Success. Future.failure(exception) otherwise.
    */
   def writeChunks(dataset: TableName,
-                  partition: String,
+                  partition: PartitionKey,
                   version: Int,
                   segmentId: ByteBuffer,
-                  chunks: Iterator[(String, ChunkID, ByteBuffer)]): Future[Response]
+                  chunks: Iterator[(ColumnId, ChunkID, ByteBuffer)]): Future[Response]
 
   def writeChunkRowMap(dataset: TableName,
-                       partition: String,
+                       partition: PartitionKey,
                        version: Int,
                        segmentId: ByteBuffer,
                        chunkRowMap: ChunkRowMap): Future[Response]
@@ -76,7 +76,7 @@ trait CachedMergingColumnStore {
    * @param version the version to read back
    * @returns a sequence of ChunkedData, each triple is (segmentId, chunkId, bytes) for each chunk
    */
-  def readChunks[K](columns: Set[String],
+  def readChunks[K](columns: Set[ColumnId],
                     keyRange: KeyRange[K],
                     version: Int): Future[Seq[ChunkedData]]
 
