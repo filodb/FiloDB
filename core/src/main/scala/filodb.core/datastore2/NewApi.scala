@@ -3,8 +3,6 @@ package filodb.core.datastore2
 import java.nio.ByteBuffer
 import scala.concurrent.Future
 
-import filodb.core.messages.{ErrorResponse, Response}
-
 /**
  * Temporary home for new FiloDB API definitions, including column store and memtable etc.
  * Perhaps they should be moved into filodb.core.columnstore and filodb.core.reprojector
@@ -83,34 +81,4 @@ trait Reprojector {
   def removeRows[K](memTable: MemTable, keyRange: KeyRange[K]): MemTable
 
   def readRows[K](memTable: MemTable, keyRange: KeyRange[K], sortOrder: SortOrder): Iterator[Row]
-}
-
-/**
- * Implementation of a column store.  Writes and reads segments, which are pretty high level.
- * Must be able to read and write both the columnar chunks and the ChunkRowMap.
- * Hopefully, for fast I/O, the columns are stored together.  :)
- */
-trait ColumnStore {
-  import Types._
-
-  /**
-   * Appends the segment to the column store.  The chunks in a segment will be appended to the other chunks
-   * already present in that segment, while the ChunkRowMap will be merged such that the new row index
-   * contains the correct sorted read order.  It is assumed that the new chunks are newer
-   * or will potentially overwrite the existing data.
-   * @param segment the Segment to write / merge to the columnar store
-   * @param version the version # to write the segment to
-   * @returns Success. Future.failure(exception) otherwise.
-   */
-  def appendSegment[K : SortKeyHelper](segment: Segment[K], version: Int): Future[Response]
-
-  /**
-   * Reads segments from the column store, in order of primary key.
-   * @param columns the set of columns to read back
-   * @param keyRange describes the partition and range of keys to read back. NOTE: end range is exclusive!
-   * @param version the version # to read from
-   * @returns An iterator over segments
-   */
-  def readSegments[K : SortKeyHelper](columns: Set[String], keyRange: KeyRange[K], version: Int):
-      Future[Iterator[Segment[K]]]
 }

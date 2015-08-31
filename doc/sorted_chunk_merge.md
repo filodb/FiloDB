@@ -9,9 +9,31 @@ One challenge in FiloDB is how to continuously insert fresh data into a column s
 * Within a single partition, the storage engine (say Cassandra) is responsible for keeping the segments in sort key sort order.
 * Within a single segment, for a single column, the data is grouped into columnar chunks.  Each chunk is not aware of the sort key, it just knows it has data for a single column as a binary vector.  The chunk is the smallest unit of data read or written.
 
+### An Interface for Columnar Chunk Merging
+
+The ColumnStore by itself does not know how to merge chunks.  The primitives of a column store implementation, at the low level are:
+
+* writeChunks
+* writeChunkRowMap (see below)
+* readChunks
+* readChunkRowMaps
+* scanChunkRowMaps
+
+Instead, the higher level ColumnStore relies on a `ChunkMergingStrategy`, which knows how to do the following:
+
+* read a segment or partial segment into memory (for a cache)
+* merge the segment with a new partial segment of data to be inserted.  The combined segment is now ready to be read or written to disk.
+* prune the combined segment for saving to a cache
+
 ### Index Writes Within a Segment
 
 The key to this algorithm is that, even though segments are ordered within a partition, rows of data within a segment do not need to be written in sorted order. Chunks of data are appended, and a `ChunkRowMap`, one per segment per partition, is updated for all columns.  This `ChunkRowMap` is a sorted map from the sort key of a projection to a (chunkID, rowNum).  Basically it tells the scanning engine, in order to read the data in sorted key order, what chunks and what row # within the chunk to read from.
+
+In terms of its `ChunkMergingStrategy`:
+
+* Only the ChunkRowMap, and the primary key chunks, from existing segments are read
+* New chunks are added to the end of a segment, and the ChunkRowMap is updated to point at the new segments.  Existing chunks are not modified.
+* Only the ChunkRowMap and the primary key chunks are saved to the cache.
 
 Implications:
 
