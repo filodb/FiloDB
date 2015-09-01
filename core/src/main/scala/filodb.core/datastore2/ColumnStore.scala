@@ -1,7 +1,8 @@
 package filodb.core.datastore2
 
 import java.nio.ByteBuffer
-import scala.concurrent.Future
+import scala.concurrent.{ExecutionContext, Future}
+import spray.caching._
 
 import filodb.core.messages.Response
 
@@ -43,8 +44,14 @@ case class ChunkedData(column: Types.ColumnId, chunks: Seq[(ByteBuffer, Types.Ch
  * use of a segment cache to speed up merging, and a ChunkMergingStrategy to merge segments.  It defines
  * lower level primitives and implements the ColumnStore methods in terms of these primitives.
  */
-trait CachedMergingColumnStore {
+trait CachedMergingColumnStore extends ColumnStore {
   import Types._
+
+  def segmentCache: Cache[Segment[_]]
+
+  def mergingStrategy: ChunkMergingStrategy
+
+  implicit val ec: ExecutionContext
 
   /**
    *  == Lower level storage engine primitives ==
@@ -75,12 +82,19 @@ trait CachedMergingColumnStore {
    * @param keyRange the range of segments to read from, note [start, end) <-- end is exclusive!
    * @param version the version to read back
    * @returns a sequence of ChunkedData, each triple is (segmentId, chunkId, bytes) for each chunk
+   *          must be sorted in order of increasing segmentId
    */
   def readChunks[K](columns: Set[ColumnId],
                     keyRange: KeyRange[K],
                     version: Int): Future[Seq[ChunkedData]]
 
-  def readChunkRowMaps[K](keyRange: KeyRange[K], version: Int): Future[Seq[ChunkRowMap]]
+  /**
+   * Reads back all the ChunkRowMaps from multiple segments in a keyRange.
+   * @param keyRange the range of segments to read from, note [start, end) <-- end is exclusive!
+   * @param version the version to read back
+   * @returns a sequence of (segmentId, ChunkRowMap)'s
+   */
+  def readChunkRowMaps[K](keyRange: KeyRange[K], version: Int): Future[Seq[(ByteBuffer, ChunkRowMap)]]
 
   /**
    * Designed to scan over many many ChunkRowMaps from multiple partitions.  Intended for fast scanning
@@ -95,4 +109,71 @@ trait CachedMergingColumnStore {
   /**
    * == Caching and merging implementation of the high level functions ==
    */
+
+  def clearSegmentCache(): Unit = { segmentCache.clear() }
+
+  def appendSegment[K : SortKeyHelper](segment: Segment[K], version: Int): Future[Response] = {
+    for { oldSegment <- getSegFromCache(segment.keyRange, version)
+          mergedSegment = mergingStrategy.mergeSegments(oldSegment, segment)
+          writeChunksResp <- writeChunks(segment.dataset, segment.partition, version,
+                                         segment.segmentId, segment.getChunks)
+          writeCRMapResp <- writeChunkRowMap(segment.dataset, segment.partition, version,
+                                         segment.segmentId, segment.index) }
+    yield {
+      // Important!  Update the cache with the new merged segment.
+      updateCache(segment.keyRange, version, mergedSegment)
+      writeCRMapResp
+    }
+  }
+
+  def readSegments[K : SortKeyHelper](columns: Set[String], keyRange: KeyRange[K], version: Int):
+      Future[Iterator[Segment[K]]] = {
+    // TODO: implement actual paging and the iterator over segments.  Or maybe that should be implemented
+    // at a higher level.
+    (for { rowMaps <- readChunkRowMaps(keyRange, version)
+          chunks  <- readChunks(columns, keyRange, version) if rowMaps.nonEmpty }
+    yield {
+      buildSegments(rowMaps, chunks, keyRange).toIterator
+    }).recover {
+      // No chunk maps found, so just return empty list of segments
+      case e: java.util.NoSuchElementException => Iterator.empty
+    }
+  }
+
+  private def getSegFromCache[K : SortKeyHelper](keyRange: KeyRange[K], version: Int): Future[Segment[K]] = {
+    segmentCache((keyRange.dataset, keyRange.partition, version, keyRange.binaryStart))(
+                 mergingStrategy.readSegmentForCache(keyRange, version).
+                 asInstanceOf[Future[Segment[_]]]).asInstanceOf[Future[Segment[K]]]
+  }
+
+  private def updateCache[K](keyRange: KeyRange[K], version: Int, newSegment: Segment[K]): Unit = {
+    // NOTE: Spray caching doesn't have an update() method, so we have to delete and then repopulate. :(
+    // TODO: consider if we need to lock the code below. Probably not since ColumnStore is single-writer but
+    // we might want to update the spray-caching API to have an update method.
+    val key = (keyRange.dataset, keyRange.partition, version, keyRange.binaryStart)
+    segmentCache.remove(key)
+    segmentCache(key)(newSegment.asInstanceOf[Segment[_]])
+  }
+
+  // @param rowMaps a Seq of (segmentId, ChunkRowMap)
+  private def buildSegments[K : SortKeyHelper](rowMaps: Seq[(ByteBuffer, ChunkRowMap)],
+                                               chunks: Seq[ChunkedData],
+                                               origKeyRange: KeyRange[K]): Seq[Segment[K]] = {
+    val helper = implicitly[SortKeyHelper[K]]
+    val segments = rowMaps.map { case (segmentId, rowMap) =>
+        val (segStart, segEnd) = helper.getSegment(helper.fromBytes(segmentId))
+        val segKeyRange = origKeyRange.copy(start = segStart, end = segEnd)
+        new GenericSegment(segKeyRange, rowMap)
+    }
+    chunks.foreach { case ChunkedData(columnName, chunkTriples) =>
+      var segIndex = 0
+      chunkTriples.foreach { case (segmentId, chunkId, chunkBytes) =>
+        // Rely on the fact that chunks are sorted by segmentId, in the same order as the rowMaps
+        val segmentKey = helper.fromBytes(segmentId)
+        while (segmentKey != segments(segIndex).keyRange.start) segIndex += 1
+        segments(segIndex).addChunk(chunkId, columnName, chunkBytes)
+      }
+    }
+    segments
+  }
 }

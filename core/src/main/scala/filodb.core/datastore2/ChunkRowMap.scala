@@ -16,6 +16,13 @@ trait ChunkRowMap {
   // Separate iterators are defined to avoid Tuple2 object allocation
   def chunkIdIterator: Iterator[ChunkID]
   def rowNumIterator: Iterator[Int]
+
+  /**
+   * Serializes the data in the row index.  NOTE: The primary keys are not serialized, since it is
+   * assumed they exist in a different column.
+   * @returns two binary Filo vectors, first one for the chunkIds, and second one for the rowNums.
+   */
+  def serialize(): (ByteBuffer, ByteBuffer)
 }
 
 /**
@@ -39,11 +46,6 @@ class UpdatableChunkRowMap[K : SortKeyHelper] extends ChunkRowMap {
   def chunkIdIterator: Iterator[ChunkID] = index.valuesIterator.map(_._1)
   def rowNumIterator: Iterator[Int] = index.valuesIterator.map(_._2)
 
-  /**
-   * Serializes the data in the row index.  NOTE: The primary keys are not serialized, since it is
-   * assumed they exist in a different column.
-   * @returns two binary Filo vectors, first one for the chunkIds, and second one for the rowNums.
-   */
   def serialize(): (ByteBuffer, ByteBuffer) =
     (BuilderEncoder.seqToBuffer(chunkIdIterator.toSeq),
      BuilderEncoder.seqToBuffer(rowNumIterator.toSeq))
@@ -69,4 +71,5 @@ class BinaryChunkRowMap(chunkIdsBuffer: ByteBuffer,
 
   def chunkIdIterator: Iterator[ChunkID] = chunkIds.toIterator
   def rowNumIterator: Iterator[Int] = rowNums.toIterator
+  def serialize(): (ByteBuffer, ByteBuffer) = (chunkIdsBuffer, rowNumsBuffer)
 }

@@ -32,7 +32,7 @@ class CassandraColumnStoreSpec extends CassandraFlatSpec with BeforeAndAfter {
   before {
     Await.result(chunkTable.truncate.future(), 3 seconds)
     Await.result(rowMapTable.truncate.future(), 3 seconds)
-    colStore.clearRowMapCache()
+    colStore.clearSegmentCache()
   }
 
   implicit val keyHelper = TimestampKeyHelper(10000L)

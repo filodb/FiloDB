@@ -32,24 +32,24 @@ class GenericSegment[K](val keyRange: KeyRange[K],
   import Types._
 
   val chunkIds = ArrayBuffer[ChunkID]()
-  val chunks = new HashMap[String, HashMap[ChunkID, Chunk]]
+  val chunks = new HashMap[ColumnId, HashMap[ChunkID, Chunk]]
 
-  def addChunk(id: ChunkID, column: String, bytes: Chunk): Unit = {
+  def addChunk(id: ChunkID, column: ColumnId, bytes: Chunk): Unit = {
     if (!(chunkIds contains id)) chunkIds += id
     val columnChunks = chunks.getOrElseUpdate(column, new HashMap[ChunkID, Chunk])
     columnChunks(id) = bytes
   }
 
-  def addChunks(id: ChunkID, chunks: Map[String, Chunk]): Unit = {
+  def addChunks(id: ChunkID, chunks: Map[ColumnId, Chunk]): Unit = {
     for { (col, chunk) <- chunks } { addChunk(id, col, chunk) }
   }
 
-  def getChunks: Iterator[(String, ChunkID, Chunk)] =
+  def getChunks: Iterator[(ColumnId, ChunkID, Chunk)] =
     for { column <- chunks.keysIterator
           chunkId <- chunks(column).keysIterator }
     yield { (column, chunkId, chunks(column)(chunkId)) }
 
-  def getColumns: collection.Set[String] = chunks.keySet
+  def getColumns: collection.Set[ColumnId] = chunks.keySet
 }
 
 // TODO: add a Segment class that helps take in a bunch of rows and serializes them into chunks,
