@@ -18,7 +18,7 @@ FiloDB is a new open-source database based on Apache Cassandra and Spark SQL.  F
 * Incrementally computed columns and geospatial annotations
 * MPP-like automatic caching of projections from popular queries for fast results
 
-FiloDB is a great fit for bulk analytical workloads, or streaming / append-only event data.  It is not optimized for heavily transactional, update-oriented workflows.
+FiloDB is a great fit for bulk analytical workloads, or streaming / mostly-append event data.  It is not optimized for heavily transactional, update-oriented workflows.
 
 [Overview presentation](http://velvia.github.io/presentations/2014-filodb/#/) -- see the docs folder for design docs.
 
@@ -46,6 +46,8 @@ Your feedback will help decide the next batch of features, such as:
     - what architecture is best supported
 
 ## Building and Testing
+
+First, start up local Cassandra, at least 2.0.6 or above, but preferably 2.1.x.  I use [CCM](https://github.com/pcmanus/ccm).
 
 Run the tests with `sbt test`, or for continuous development, `sbt ~test`.  Noisy cassandra logs can be seen in `filodb-test.log`.
 
