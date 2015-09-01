@@ -17,6 +17,9 @@ trait ChunkRowMap {
   def chunkIdIterator: Iterator[ChunkID]
   def rowNumIterator: Iterator[Int]
 
+  // Returns the next chunkId to be used for new chunks.  Usually just an increasing counter.
+  def nextChunkId: ChunkID
+
   /**
    * Serializes the data in the row index.  NOTE: The primary keys are not serialized, since it is
    * assumed they exist in a different column.
@@ -34,13 +37,11 @@ class UpdatableChunkRowMap[K : SortKeyHelper] extends ChunkRowMap {
 
   implicit val ordering = implicitly[SortKeyHelper[K]].ordering
   var index = TreeMap[K, (ChunkID, Int)]()
+  var nextChunkId: ChunkID = 0
 
   def update(key: K, chunkID: ChunkID, rowNum: Int): Unit = {
     index = index + (key -> (chunkID -> rowNum))
-  }
-
-  def update(other: UpdatableChunkRowMap[K]): Unit = {
-    index = index ++ other.index
+    if (chunkID >= nextChunkId) nextChunkId = (chunkID + 1)
   }
 
   def chunkIdIterator: Iterator[ChunkID] = index.valuesIterator.map(_._1)
@@ -51,10 +52,6 @@ class UpdatableChunkRowMap[K : SortKeyHelper] extends ChunkRowMap {
      BuilderEncoder.seqToBuffer(rowNumIterator.toSeq))
 }
 
-object UpdatableChunkRowMap {
-  def apply[K](chunkIdsBuffer: ByteBuffer, rowNumsBuffer: ByteBuffer): UpdatableChunkRowMap[K] = ???
-}
-
 /**
  * A ChunkRowMap which is optimized for reads from disk/memory.  Directly extracts the chunkIds
  * and rowNumbers from Filo binary vectors - does not waste time/memory constructing a TreeMap, and also
@@ -62,7 +59,8 @@ object UpdatableChunkRowMap {
  * for query/read time.
  */
 class BinaryChunkRowMap(chunkIdsBuffer: ByteBuffer,
-                        rowNumsBuffer: ByteBuffer) extends ChunkRowMap {
+                        rowNumsBuffer: ByteBuffer,
+                        val nextChunkId: Types.ChunkID) extends ChunkRowMap {
   import Types._
   import ColumnParser._
 

@@ -69,7 +69,8 @@ extends CachedMergingColumnStore with StrictLogging {
                        chunkRowMap: ChunkRowMap): Future[Response] = {
     val (chunkIds, rowNums) = chunkRowMap.serialize()
     for { (chunkTable, rowMapTable) <- getSegmentTables(dataset)
-          resp <- rowMapTable.writeChunkMap(partition, version, segmentId, chunkIds, rowNums) }
+          resp <- rowMapTable.writeChunkMap(partition, version, segmentId,
+                                            chunkIds, rowNums, chunkRowMap.nextChunkId) }
     yield { resp }
   }
 
@@ -90,8 +91,8 @@ extends CachedMergingColumnStore with StrictLogging {
                                                   keyRange.binaryStart, keyRange.binaryEnd) }
     yield {
       cassRowMaps.map {
-        case ChunkRowMapRecord(segmentId, chunkIds, rowNums, _) =>
-          val rowMap = new BinaryChunkRowMap(chunkIds, rowNums)
+        case ChunkRowMapRecord(segmentId, chunkIds, rowNums, nextChunkId) =>
+          val rowMap = new BinaryChunkRowMap(chunkIds, rowNums, nextChunkId)
           (segmentId, rowMap)
       }
     }

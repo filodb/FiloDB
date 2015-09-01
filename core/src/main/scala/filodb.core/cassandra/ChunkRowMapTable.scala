@@ -11,7 +11,7 @@ import filodb.core.messages._
 case class ChunkRowMapRecord(segmentId: ByteBuffer,
                              chunkIds: ByteBuffer,
                              rowNums: ByteBuffer,
-                             columns: Set[String])
+                             nextChunkId: Int)
 
 /**
  * Represents the table which holds the ChunkRowMap for each segment of a partition.
@@ -33,11 +33,13 @@ with SimpleCassandraConnector {
   object segmentId extends BlobColumn(this) with PrimaryKey[ByteBuffer]
   object chunkIds extends BlobColumn(this)
   object rowNums extends BlobColumn(this)
-  object columnsWritten extends SetColumn[ChunkRowMapTable, ChunkRowMapRecord, String](this)
+  object nextChunkId extends IntColumn(this)
+  // Keeping below to remember how to define a set column, but move it elsewhere.
+  // object columnsWritten extends SetColumn[ChunkRowMapTable, ChunkRowMapRecord, String](this)
   //scalastyle:on
 
   override def fromRow(row: Row): ChunkRowMapRecord =
-    ChunkRowMapRecord(segmentId(row), chunkIds(row), rowNums(row), columnsWritten(row))
+    ChunkRowMapRecord(segmentId(row), chunkIds(row), rowNums(row), nextChunkId(row))
 
   /**
    * Retrieves a whole series of chunk maps, in the range [startSegmentId, untilSegmentId)
@@ -60,11 +62,13 @@ with SimpleCassandraConnector {
                     version: Int,
                     segmentId: ByteBuffer,
                     chunkIds: ByteBuffer,
-                    rowNums: ByteBuffer): Future[Response] =
+                    rowNums: ByteBuffer,
+                    nextChunkId: Int): Future[Response] =
     insert.value(_.partition, partition)
           .value(_.version,   version)
           .value(_.segmentId, segmentId)
           .value(_.chunkIds,  chunkIds)
           .value(_.rowNums,   rowNums)
+          .value(_.nextChunkId, nextChunkId)
           .future().toResponseOnly()
 }

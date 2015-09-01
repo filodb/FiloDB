@@ -52,7 +52,8 @@ class CassandraColumnStoreSpec extends CassandraFlatSpec with BeforeAndAfter {
   private def getChunkRowMap[K](segment: Segment[K]): Future[BinaryChunkRowMap] =
     rowMapTable.getChunkMaps(segment.partition, 0, segment.segmentId, segment.keyRange.binaryEnd).
                 collect {
-      case Seq(ChunkRowMapRecord(_, chunkIds, rowNums, _)) => new BinaryChunkRowMap(chunkIds, rowNums)
+      case Seq(ChunkRowMapRecord(_, chunkIds, rowNums, nextId)) =>
+        new BinaryChunkRowMap(chunkIds, rowNums, nextId)
       case x: Seq[_] => throw new RuntimeException("Got back unexpected chunkMaps " + x)
     }
 
