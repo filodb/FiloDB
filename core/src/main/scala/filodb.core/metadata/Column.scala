@@ -43,16 +43,18 @@ case class Column(name: String,
 }
 
 object Column extends StrictLogging {
-  sealed trait ColumnType extends EnumEntry
+  sealed trait ColumnType extends EnumEntry {
+    val clazz: Class[_]
+  }
 
   object ColumnType extends Enum[ColumnType] {
     val values = findValues
 
-    case object IntColumn extends ColumnType
-    case object LongColumn extends ColumnType
-    case object DoubleColumn extends ColumnType
-    case object StringColumn extends ColumnType
-    case object BitmapColumn extends ColumnType
+    case object IntColumn extends ColumnType { val clazz = classOf[Int] }
+    case object LongColumn extends ColumnType { val clazz = classOf[Long] }
+    case object DoubleColumn extends ColumnType { val clazz = classOf[Double] }
+    case object StringColumn extends ColumnType { val clazz = classOf[String] }
+    case object BitmapColumn extends ColumnType { val clazz = classOf[Boolean] }
   }
 
   sealed trait Serializer extends EnumEntry
