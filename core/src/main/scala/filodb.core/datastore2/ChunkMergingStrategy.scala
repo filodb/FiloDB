@@ -78,17 +78,18 @@ extends ChunkMergingStrategy with StrictLogging {
   }
 
   // We only need to store the sort column
-  def pruneForCache[K](segment: Segment[K]): Segment[K] = segment match {
-    case g: GenericSegment[K] =>
-      val sortColumn = getSortColumn(segment.dataset)
-      if (g.getColumns == Set(sortColumn)) {
-        segment
-      } else {
-        val prunedSeg = new GenericSegment(g.keyRange, g.index)
-        g.chunks(sortColumn).foreach { case (chunkId, chunk) =>
-          prunedSeg.addChunk(chunkId, sortColumn, chunk)
-        }
-        prunedSeg
+  def pruneForCache[K](segment: Segment[K]): Segment[K] = {
+    val sortColumn = getSortColumn(segment.dataset)
+    if (segment.getColumns == Set(sortColumn)) {
+      segment
+    } else {
+      val prunedSeg = new GenericSegment(segment.keyRange, segment.index)
+      segment.getChunks
+             .filter { case (column, chunkId, chunk) => column == sortColumn }
+             .foreach { case (_, chunkId, chunk) =>
+        prunedSeg.addChunk(chunkId, sortColumn, chunk)
       }
+      prunedSeg
+    }
   }
 }
