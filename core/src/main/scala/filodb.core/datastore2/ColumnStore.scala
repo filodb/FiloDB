@@ -4,7 +4,7 @@ import java.nio.ByteBuffer
 import scala.concurrent.{ExecutionContext, Future}
 import spray.caching._
 
-import filodb.core.messages.Response
+import filodb.core.messages._
 import RowReader.TypedFieldExtractor
 
 /**
@@ -116,12 +116,14 @@ trait CachedMergingColumnStore extends ColumnStore {
 
   def appendSegment[K: SortKeyHelper: TypedFieldExtractor](segment: Segment[K],
                                                            version: Int): Future[Response] = {
+    if (segment.isEmpty) return(Future.successful(NotApplied))
     for { oldSegment <- getSegFromCache(segment.keyRange, version)
           mergedSegment = mergingStrategy.mergeSegments(oldSegment, segment)
           writeChunksResp <- writeChunks(segment.dataset, segment.partition, version,
-                                         segment.segmentId, segment.getChunks)
+                                         segment.segmentId, mergedSegment.getChunks)
           writeCRMapResp <- writeChunkRowMap(segment.dataset, segment.partition, version,
-                                         segment.segmentId, segment.index) }
+                                         segment.segmentId, mergedSegment.index)
+            if writeChunksResp == Success }
     yield {
       // Important!  Update the cache with the new merged segment.
       updateCache(segment.keyRange, version, mergedSegment)
@@ -155,7 +157,7 @@ trait CachedMergingColumnStore extends ColumnStore {
     // we might want to update the spray-caching API to have an update method.
     val key = (keyRange.dataset, keyRange.partition, version, keyRange.binaryStart)
     segmentCache.remove(key)
-    segmentCache(key)(newSegment.asInstanceOf[Segment[_]])
+    segmentCache(key)(mergingStrategy.pruneForCache(newSegment).asInstanceOf[Segment[_]])
   }
 
   // @param rowMaps a Seq of (segmentId, ChunkRowMap)

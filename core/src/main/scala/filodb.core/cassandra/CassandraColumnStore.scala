@@ -47,7 +47,7 @@ extends CachedMergingColumnStore with StrictLogging {
   val segmentCache = LruCache[Segment[_]](segmentCacheSize)
 
   // TODO: yes, we need to actually get a real sort key :)
-  val mergingStrategy = new AppendingChunkMergingStrategy(this, { x => "Foo" })
+  val mergingStrategy = new AppendingChunkMergingStrategy(this, { x => "age" })
 
   /**
    * Implementations of low-level storage primitives

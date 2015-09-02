@@ -4,10 +4,12 @@ import com.typesafe.config.ConfigFactory
 import com.websudos.phantom.testkit._
 import java.nio.ByteBuffer
 import org.scalatest.BeforeAndAfter
-import scala.concurrent.{Await, Future}
+import org.velvia.filo.TupleRowIngestSupport
 import scala.concurrent.duration._
+import scala.concurrent.{Await, Future}
 
 import filodb.core.messages._
+import filodb.core.metadata.Column
 import filodb.core.datastore2.Types
 
 class CassandraColumnStoreSpec extends CassandraFlatSpec with BeforeAndAfter {
@@ -35,7 +37,7 @@ class CassandraColumnStoreSpec extends CassandraFlatSpec with BeforeAndAfter {
     colStore.clearSegmentCache()
   }
 
-  implicit val keyHelper = TimestampKeyHelper(10000L)
+  import SegmentSpec._
   val keyRange = KeyRange(dataset, "partition", 0L, 10000L)
 
   val bytes1 = ByteBuffer.wrap("apple".getBytes("UTF-8"))
@@ -57,6 +59,8 @@ class CassandraColumnStoreSpec extends CassandraFlatSpec with BeforeAndAfter {
       case x: Seq[_] => throw new RuntimeException("Got back unexpected chunkMaps " + x)
     }
 
+  // NOTE: The test below purposefully does not use any of the read APIs so that if only the read code
+  // breaks, this test can independently test for write failures
   "appendSegment" should "write a segment into an empty table" in {
     whenReady(colStore.appendSegment(baseSegment, 0)) { response =>
       response should equal (Success)
@@ -74,6 +78,36 @@ class CassandraColumnStoreSpec extends CassandraFlatSpec with BeforeAndAfter {
       binRowMap.rowNumIterator.toSeq should equal (Seq(0, 1, 2, 0))
     }
   }
+
+  it should "NOOP if the segment is empty" in {
+    val segment = getRowWriter(keyRange)
+    whenReady(colStore.appendSegment(segment, 0)) { response =>
+      response should equal (NotApplied)
+    }
+  }
+
+  it should "append new rows to a cached segment successfully" in {
+    val segment = getRowWriter(keyRange)
+    segment.addRowsAsChunk(names take 3)
+    whenReady(colStore.appendSegment(segment, 0)) { response =>
+      response should equal (Success)
+    }
+
+    // Writing segment2, last 3 rows, should get appended to first 3 in same segment
+    val segment2 = getRowWriter(keyRange)
+    segment2.addRowsAsChunk(names drop 3)
+    whenReady(colStore.appendSegment(segment2, 0)) { response =>
+      response should equal (Success)
+    }
+
+    // Now read it back and verify
+    whenReady(getChunkRowMap(segment)) { binRowMap =>
+      binRowMap.chunkIdIterator.toSeq should equal (Seq(0, 0, 0, 1, 1, 1))
+      binRowMap.rowNumIterator.toSeq should equal (Seq(0, 2, 1, 2, 1, 0))
+    }
+  }
+
+  it should "append new rows to an uncached segment successfully" in (pending)
 
   "readSegments" should "read segments back that were written" in {
     whenReady(colStore.appendSegment(baseSegment, 0)) { response =>

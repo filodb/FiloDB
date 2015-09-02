@@ -72,13 +72,13 @@ extends ChunkMergingStrategy with StrictLogging {
     }
   }
 
-
   def mergeSegments[K: TypedFieldExtractor: SortKeyHelper](oldSegment: Segment[K],
                                                            newSegment: Segment[K]): Segment[K] = {
     val extractor = implicitly[TypedFieldExtractor[K]]
 
     // How much to offset chunkIds in newSegment.  0 in newSegment == nextChunkId in oldSegment.
     val offsetChunkId = oldSegment.index.nextChunkId
+    logger.trace(s"mergeSegments: offsetChunkId = $offsetChunkId")
 
     // Merge old ChunkRowMap with new segment's ChunkRowMap with chunkIds offset
     // NOTE: Working with a TreeMap is probably not the most efficient way to merge two sorted lists
@@ -106,6 +106,7 @@ extends ChunkMergingStrategy with StrictLogging {
                 mergedSegment.addChunk(chunkId + offsetChunkId, column, chunk)
               }
 
+    logger.trace(s"mergedSegment = $mergedSegment")
     mergedSegment
   }
 
@@ -113,6 +114,7 @@ extends ChunkMergingStrategy with StrictLogging {
   def pruneForCache[K](segment: Segment[K]): Segment[K] = {
     val sortColumn = getSortColumn(segment.dataset)
     if (segment.getColumns == Set(sortColumn)) {
+      logger.trace(s"pruneForcache: segment only has ${segment.getColumns}, not pruning")
       segment
     } else {
       val prunedSeg = new GenericSegment(segment.keyRange, segment.index)
@@ -121,6 +123,7 @@ extends ChunkMergingStrategy with StrictLogging {
              .foreach { case (_, chunkId, chunk) =>
         prunedSeg.addChunk(chunkId, sortColumn, chunk)
       }
+      logger.trace(s"Pruned segment: $prunedSeg")
       prunedSeg
     }
   }

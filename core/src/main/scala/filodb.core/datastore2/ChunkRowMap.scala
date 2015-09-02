@@ -20,6 +20,8 @@ trait ChunkRowMap {
   // Returns the next chunkId to be used for new chunks.  Usually just an increasing counter.
   def nextChunkId: ChunkID
 
+  def isEmpty: Boolean
+
   /**
    * Serializes the data in the row index.  NOTE: The primary keys are not serialized, since it is
    * assumed they exist in a different column.
@@ -62,6 +64,8 @@ class UpdatableChunkRowMap[K: SortKeyHelper] extends ChunkRowMap {
   def chunkIdIterator: Iterator[ChunkID] = index.valuesIterator.map(_._1)
   def rowNumIterator: Iterator[Int] = index.valuesIterator.map(_._2)
 
+  def isEmpty: Boolean = index.isEmpty
+
   def serialize(): (ByteBuffer, ByteBuffer) =
     (BuilderEncoder.seqToBuffer(chunkIdIterator.toSeq),
      BuilderEncoder.seqToBuffer(rowNumIterator.toSeq))
@@ -91,5 +95,6 @@ class BinaryChunkRowMap(chunkIdsBuffer: ByteBuffer,
 
   def chunkIdIterator: Iterator[ChunkID] = chunkIds.toIterator
   def rowNumIterator: Iterator[Int] = rowNums.toIterator
+  def isEmpty: Boolean = chunkIds.length == 0
   def serialize(): (ByteBuffer, ByteBuffer) = (chunkIdsBuffer, rowNumsBuffer)
 }

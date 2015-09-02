@@ -22,15 +22,17 @@ trait Segment[K] {
   def dataset: TableName    = keyRange.dataset
   def partition: PartitionKey = keyRange.partition
 
-  override def toString: String = s"Segment($dataset : $partition / ${keyRange.start})"
+  override def toString: String = s"Segment($dataset : $partition / ${keyRange.start}) columns($getColumns)"
 
   def addChunk(id: ChunkID, column: ColumnId, bytes: Chunk): Unit
   def getChunks: Iterator[(ColumnId, ChunkID, Chunk)]
-  def getColumns: collection.Set[String]
+  def getColumns: collection.Set[ColumnId]
 
   def addChunks(id: ChunkID, chunks: Map[ColumnId, Chunk]): Unit = {
     for { (col, chunk) <- chunks } { addChunk(id, col, chunk) }
   }
+
+  def isEmpty: Boolean = getColumns.isEmpty || index.isEmpty
 }
 
 /**
@@ -177,6 +179,14 @@ object RowReaderSegment {
 
   private val DefaultReaderFactory: RowReaderFactory =
     (bytes, clazzes) => new MutableRowReader(bytes, clazzes)
+
+  def apply[K](genSeg: GenericSegment[K], schema: Seq[Column]): RowReaderSegment[K] = {
+    val (chunkIdBuf, rowNumBuf) = genSeg.index.serialize()
+    val binChunkMap = new BinaryChunkRowMap(chunkIdBuf, rowNumBuf, genSeg.index.nextChunkId)
+    val readSeg = new RowReaderSegment(genSeg.keyRange, binChunkMap, schema)
+    genSeg.getChunks.foreach { case (col, id, bytes) => readSeg.addChunk(id, col, bytes) }
+    readSeg
+  }
 }
 
 // Move these to filo project

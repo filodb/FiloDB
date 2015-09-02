@@ -7,26 +7,8 @@ import org.velvia.filo.{ColumnParser, TupleRowIngestSupport}
 import org.scalatest.FunSpec
 import org.scalatest.Matchers
 
-class SegmentSpec extends FunSpec with Matchers {
+object SegmentSpec {
   implicit val keyHelper = TimestampKeyHelper(10000L)
-  val keyRange = KeyRange("dataset", "partition", 0L, 10000L)
-
-  val bytes1 = ByteBuffer.wrap("apple".getBytes("UTF-8"))
-  val bytes2 = ByteBuffer.wrap("orange".getBytes("UTF-8"))
-
-  val rowIndex = new UpdatableChunkRowMap[Long]
-
-  it("GenericSegment should add and get chunks back out") {
-    val segment = new GenericSegment(keyRange, rowIndex)
-    segment.addChunks(0, Map("columnA" -> bytes1, "columnB" -> bytes2))
-    segment.addChunks(1, Map("columnA" -> bytes1, "columnB" -> bytes2))
-
-    segment.getColumns should equal (Set("columnA", "columnB"))
-    segment.getChunks.toSet should equal (Set(("columnA", 0, bytes1),
-                                              ("columnA", 1, bytes1),
-                                              ("columnB", 0, bytes2),
-                                              ("columnB", 1, bytes2)))
-  }
 
   val schema = Seq(Column("first", "dataset1", 0, Column.ColumnType.StringColumn),
                    Column("last", "dataset1", 0, Column.ColumnType.StringColumn),
@@ -41,15 +23,46 @@ class SegmentSpec extends FunSpec with Matchers {
                   (Some("Peyton"), Some("Manning"), Some(39L)),
                   (Some("Terrance"), Some("Knighton"), Some(29L)))
 
+  def getRowWriter(keyRange: KeyRange[Long]): RowWriterSegment[Long, Product] =
+    new RowWriterSegment(keyRange, schema, support,
+                         { p: Product => p.productElement(2).asInstanceOf[Option[Long]].get })
+
+  val firstNames = Seq("Khalil", "Rodney", "Ndamukong", "Terrance", "Peyton", "Jerry")
+}
+
+class SegmentSpec extends FunSpec with Matchers {
+  import SegmentSpec._
+  val keyRange = KeyRange("dataset", "partition", 0L, 10000L)
+
+  val bytes1 = ByteBuffer.wrap("apple".getBytes("UTF-8"))
+  val bytes2 = ByteBuffer.wrap("orange".getBytes("UTF-8"))
+
+  it("GenericSegment should add and get chunks back out") {
+    val rowIndex = new UpdatableChunkRowMap[Long]
+    val segment = new GenericSegment(keyRange, rowIndex)
+    segment.isEmpty should equal (true)
+    segment.addChunks(0, Map("columnA" -> bytes1, "columnB" -> bytes2))
+    segment.addChunks(1, Map("columnA" -> bytes1, "columnB" -> bytes2))
+    segment.isEmpty should equal (true)
+    rowIndex.update(0L, 0, 0)
+    segment.isEmpty should equal (false)
+
+    segment.getColumns should equal (Set("columnA", "columnB"))
+    segment.getChunks.toSet should equal (Set(("columnA", 0, bytes1),
+                                              ("columnA", 1, bytes1),
+                                              ("columnB", 0, bytes2),
+                                              ("columnB", 1, bytes2)))
+  }
+
   it("RowWriterSegment should add rows and chunkify properly") {
-    val segment = new RowWriterSegment(keyRange, schema, support,
-                                       { p: Product => p.productElement(2).asInstanceOf[Option[Long]].get })
+    val segment = getRowWriter(keyRange)
     segment.addRowsAsChunk(names)
 
     segment.index.nextChunkId should equal (1)
     segment.index.chunkIdIterator.toSeq should equal (Seq(0, 0, 0, 0, 0, 0))
     segment.index.rowNumIterator.toSeq should equal (Seq(0, 2, 1, 5, 4, 3))
     segment.getChunks.toSeq should have length (3)
+    segment.getColumns should equal (Set("first", "last", "age"))
 
     // Write some of the rows as another chunk and make sure index updates properly
     // NOTE: this is row merging in operation!
@@ -62,16 +75,12 @@ class SegmentSpec extends FunSpec with Matchers {
   }
 
   it("RowReaderSegment should read back rows in sort key order") {
-    val segment = new RowWriterSegment(keyRange, schema, support,
-                                       { p: Product => p.productElement(2).asInstanceOf[Option[Long]].get })
+    val segment = getRowWriter(keyRange)
     segment.addRowsAsChunk(names)
-    val (chunkIdBuf, rowNumBuf) = segment.index.serialize()
-    val binChunkMap = new BinaryChunkRowMap(chunkIdBuf, rowNumBuf, segment.index.nextChunkId)
-    val readSeg = new RowReaderSegment(keyRange, binChunkMap, schema)
-    segment.getChunks.foreach { case (col, id, bytes) => readSeg.addChunk(id, col, bytes) }
+    val readSeg = RowReaderSegment(segment, schema)
 
-    readSeg.rowIterator().map(_.getString(0)).toSeq should equal (Seq(
-               "Khalil", "Rodney", "Ndamukong", "Terrance", "Peyton", "Jerry"))
+    readSeg.getColumns should equal (Set("first", "last", "age"))
+    readSeg.rowIterator().map(_.getString(0)).toSeq should equal (firstNames)
 
     // Should be able to obtain another rowIterator
     readSeg.rowIterator().map(_.getLong(2)).toSeq should equal (Seq(24L, 25L, 28L, 29L, 39L, 40L))
