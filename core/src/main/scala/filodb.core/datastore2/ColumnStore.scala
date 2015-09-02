@@ -25,8 +25,8 @@ trait ColumnStore {
    * @param version the version # to write the segment to
    * @returns Success. Future.failure(exception) otherwise.
    */
-  def appendSegment[K : SortKeyHelper : TypedFieldExtractor](segment: Segment[K],
-                                                             version: Int): Future[Response]
+  def appendSegment[K: SortKeyHelper: TypedFieldExtractor](segment: Segment[K],
+                                                           version: Int): Future[Response]
 
   /**
    * Reads segments from the column store, in order of primary key.
@@ -35,7 +35,7 @@ trait ColumnStore {
    * @param version the version # to read from
    * @returns An iterator over segments
    */
-  def readSegments[K : SortKeyHelper](columns: Set[ColumnId], keyRange: KeyRange[K], version: Int):
+  def readSegments[K: SortKeyHelper](columns: Set[ColumnId], keyRange: KeyRange[K], version: Int):
       Future[Iterator[Segment[K]]]
 }
 
@@ -114,8 +114,8 @@ trait CachedMergingColumnStore extends ColumnStore {
 
   def clearSegmentCache(): Unit = { segmentCache.clear() }
 
-  def appendSegment[K : SortKeyHelper : TypedFieldExtractor](segment: Segment[K],
-                                                             version: Int): Future[Response] = {
+  def appendSegment[K: SortKeyHelper: TypedFieldExtractor](segment: Segment[K],
+                                                           version: Int): Future[Response] = {
     for { oldSegment <- getSegFromCache(segment.keyRange, version)
           mergedSegment = mergingStrategy.mergeSegments(oldSegment, segment)
           writeChunksResp <- writeChunks(segment.dataset, segment.partition, version,
@@ -129,7 +129,7 @@ trait CachedMergingColumnStore extends ColumnStore {
     }
   }
 
-  def readSegments[K : SortKeyHelper](columns: Set[String], keyRange: KeyRange[K], version: Int):
+  def readSegments[K: SortKeyHelper](columns: Set[String], keyRange: KeyRange[K], version: Int):
       Future[Iterator[Segment[K]]] = {
     // TODO: implement actual paging and the iterator over segments.  Or maybe that should be implemented
     // at a higher level.
@@ -143,7 +143,7 @@ trait CachedMergingColumnStore extends ColumnStore {
     }
   }
 
-  private def getSegFromCache[K : SortKeyHelper](keyRange: KeyRange[K], version: Int): Future[Segment[K]] = {
+  private def getSegFromCache[K: SortKeyHelper](keyRange: KeyRange[K], version: Int): Future[Segment[K]] = {
     segmentCache((keyRange.dataset, keyRange.partition, version, keyRange.binaryStart))(
                  mergingStrategy.readSegmentForCache(keyRange, version).
                  asInstanceOf[Future[Segment[_]]]).asInstanceOf[Future[Segment[K]]]
@@ -159,9 +159,9 @@ trait CachedMergingColumnStore extends ColumnStore {
   }
 
   // @param rowMaps a Seq of (segmentId, ChunkRowMap)
-  private def buildSegments[K : SortKeyHelper](rowMaps: Seq[(ByteBuffer, ChunkRowMap)],
-                                               chunks: Seq[ChunkedData],
-                                               origKeyRange: KeyRange[K]): Seq[Segment[K]] = {
+  private def buildSegments[K: SortKeyHelper](rowMaps: Seq[(ByteBuffer, ChunkRowMap)],
+                                              chunks: Seq[ChunkedData],
+                                              origKeyRange: KeyRange[K]): Seq[Segment[K]] = {
     val helper = implicitly[SortKeyHelper[K]]
     val segments = rowMaps.map { case (segmentId, rowMap) =>
         val (segStart, segEnd) = helper.getSegment(helper.fromBytes(segmentId))

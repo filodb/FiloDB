@@ -28,7 +28,7 @@ trait ChunkMergingStrategy {
    *
    * @param keyRange the keyRange of the segment to read.  It's important this corresponds to one segment.
    */
-  def readSegmentForCache[K : SortKeyHelper](keyRange: KeyRange[K], version: Int): Future[Segment[K]]
+  def readSegmentForCache[K: SortKeyHelper](keyRange: KeyRange[K], version: Int): Future[Segment[K]]
 
   /**
    * Merges an existing segment cached using readSegmentForCache with a new partial segment to be inserted.
@@ -37,7 +37,7 @@ trait ChunkMergingStrategy {
    * @returns a merged Segment ready to be flushed to disk.  This typically will only include chunks that need
    *          to be updated or written to disk.
    */
-  def mergeSegments[K : TypedFieldExtractor : SortKeyHelper](oldSegment: Segment[K],
+  def mergeSegments[K: TypedFieldExtractor: SortKeyHelper](oldSegment: Segment[K],
                                                              newSegment: Segment[K]): Segment[K]
 
   /**
@@ -61,7 +61,7 @@ class AppendingChunkMergingStrategy(columnStore: ColumnStore,
                                    (implicit ec: ExecutionContext)
 extends ChunkMergingStrategy with StrictLogging {
   // We only need to read back the sort column in order to merge with another segment's sort column
-  def readSegmentForCache[K : SortKeyHelper](keyRange: KeyRange[K], version: Int): Future[Segment[K]] = {
+  def readSegmentForCache[K: SortKeyHelper](keyRange: KeyRange[K], version: Int): Future[Segment[K]] = {
     columnStore.readSegments(Set(getSortColumn(keyRange.dataset)), keyRange, version).map { iter =>
       iter.toSeq.headOption match {
         case Some(firstSegment) => firstSegment
@@ -73,8 +73,8 @@ extends ChunkMergingStrategy with StrictLogging {
   }
 
 
-  def mergeSegments[K : TypedFieldExtractor : SortKeyHelper](oldSegment: Segment[K],
-                                                             newSegment: Segment[K]): Segment[K] = {
+  def mergeSegments[K: TypedFieldExtractor: SortKeyHelper](oldSegment: Segment[K],
+                                                           newSegment: Segment[K]): Segment[K] = {
     val extractor = implicitly[TypedFieldExtractor[K]]
 
     // How much to offset chunkIds in newSegment.  0 in newSegment == nextChunkId in oldSegment.
