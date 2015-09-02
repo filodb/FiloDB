@@ -125,15 +125,18 @@ class RowReaderSegment[K](val keyRange: KeyRange[K],
 
   def getColumns: collection.Set[ColumnId] = columns.map(_.name).toSet
 
+  private def getReaders(readerFactory: RowReaderFactory): Array[RowReader] =
+    (0 until index.nextChunkId).map { chunkId =>
+      readerFactory(chunks(chunkId), clazzes)
+    }.toArray
+
   /**
-   * Iterates over rows in this segment in the sort order defined by the ChunkRowMap
+   * Iterates over rows in this segment in the sort order defined by the ChunkRowMap.
+   * Creates new RowReaders every time, so that multiple calls could be made and original
+   * state in the Segment is not mutated.
    */
-  def rowIterator(readerFactory: (Array[ByteBuffer], Array[Class[_]]) => RowReader = DefaultReaderFactory):
-      Iterator[RowReader] = {
-    val readers: Array[RowReader] =
-      (0 until index.nextChunkId).map { chunkId =>
-        readerFactory(chunks(chunkId), clazzes)
-      }.toArray
+  def rowIterator(readerFactory: RowReaderFactory = DefaultReaderFactory): Iterator[RowReader] = {
+    val readers = getReaders(readerFactory)
     new Iterator[RowReader] {
       val chunkIdIter = index.chunkIdIterator
       val rowNumIter = index.rowNumIterator
@@ -146,10 +149,33 @@ class RowReaderSegment[K](val keyRange: KeyRange[K],
       }
     }
   }
+
+  /**
+   * Returns an Iterator over (reader, chunkId, rowNum).  Intended for efficient ChunkRowMap
+   * merging operations.
+   */
+  def rowChunkIterator(readerFactory: RowReaderFactory = DefaultReaderFactory):
+      Iterator[(RowReader, ChunkID, Int)] = {
+    val readers = getReaders(readerFactory)
+    new Iterator[(RowReader, ChunkID, Int)] {
+      val chunkIdIter = index.chunkIdIterator
+      val rowNumIter = index.rowNumIterator
+
+      def hasNext: Boolean = chunkIdIter.hasNext
+      def next: (RowReader, ChunkID, Int) = {
+        val nextChunk = chunkIdIter.next
+        val nextRowNo = rowNumIter.next
+        readers(nextChunk).rowNo = nextRowNo
+        (readers(nextChunk), nextChunk, nextRowNo)
+      }
+    }
+  }
 }
 
 object RowReaderSegment {
-  private val DefaultReaderFactory: (Array[ByteBuffer], Array[Class[_]]) => RowReader =
+  type RowReaderFactory = (Array[ByteBuffer], Array[Class[_]]) => RowReader
+
+  private val DefaultReaderFactory: RowReaderFactory =
     (bytes, clazzes) => new MutableRowReader(bytes, clazzes)
 }
 
@@ -173,6 +199,16 @@ abstract class RowReader {
   final def getLong(columnNo: Int): Long = parsers(columnNo).asInstanceOf[ColumnWrapper[Long]](rowNo)
   final def getDouble(columnNo: Int): Double = parsers(columnNo).asInstanceOf[ColumnWrapper[Double]](rowNo)
   final def getString(columnNo: Int): String = parsers(columnNo).asInstanceOf[ColumnWrapper[String]](rowNo)
+}
+
+object RowReader {
+  trait TypedFieldExtractor[F] {
+    def getField(reader: RowReader, columnNo: Int): F
+  }
+
+  implicit object LongFieldExtractor extends TypedFieldExtractor[Long] {
+    final def getField(reader: RowReader, columnNo: Int): Long = reader.getLong(columnNo)
+  }
 }
 
 private object Classes {

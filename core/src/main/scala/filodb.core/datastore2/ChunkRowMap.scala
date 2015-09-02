@@ -2,7 +2,7 @@ package filodb.core.datastore2
 
 import org.velvia.filo.{BuilderEncoder, ColumnParser}
 import java.nio.ByteBuffer
-import scala.collection.immutable.TreeMap
+import scala.collection.immutable.{SortedMap, TreeMap}
 import scala.collection.mutable.{ArrayBuffer, HashMap}
 
 /**
@@ -44,12 +44,34 @@ class UpdatableChunkRowMap[K : SortKeyHelper] extends ChunkRowMap {
     if (chunkID >= nextChunkId) nextChunkId = (chunkID + 1)
   }
 
+  //scalastyle:off
+  def ++(items: Seq[(K, (ChunkID, Int))]): UpdatableChunkRowMap[K] = {
+    //scalastyle:on
+    val newCRMap = new UpdatableChunkRowMap[K]
+    newCRMap.index = this.index ++ items
+    newCRMap.nextChunkId = Math.max(this.nextChunkId,
+                                    items.map(_._2._1).max + 1)
+    newCRMap
+  }
+
+  //scalastyle:off
+  def ++(otherTree: SortedMap[K, (ChunkID, Int)]): UpdatableChunkRowMap[K] =
+    ++(otherTree.toSeq)
+  //scalastyle:on
+
   def chunkIdIterator: Iterator[ChunkID] = index.valuesIterator.map(_._1)
   def rowNumIterator: Iterator[Int] = index.valuesIterator.map(_._2)
 
   def serialize(): (ByteBuffer, ByteBuffer) =
     (BuilderEncoder.seqToBuffer(chunkIdIterator.toSeq),
      BuilderEncoder.seqToBuffer(rowNumIterator.toSeq))
+}
+
+object UpdatableChunkRowMap {
+  import Types._
+
+  def apply[K: SortKeyHelper](items: Seq[(K, (ChunkID, Int))]): UpdatableChunkRowMap[K] =
+    (new UpdatableChunkRowMap[K]) ++ items
 }
 
 /**

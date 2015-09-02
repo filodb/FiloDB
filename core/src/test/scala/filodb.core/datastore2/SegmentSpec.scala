@@ -75,5 +75,8 @@ class SegmentSpec extends FunSpec with Matchers {
 
     // Should be able to obtain another rowIterator
     readSeg.rowIterator().map(_.getLong(2)).toSeq should equal (Seq(24L, 25L, 28L, 29L, 39L, 40L))
+
+    readSeg.rowChunkIterator().map { case (reader, id, rowNo) => (reader.getString(0), id, rowNo) }.
+      take(2).toSeq should equal (Seq(("Khalil", 0, 0), ("Rodney", 0, 2)))
   }
 }

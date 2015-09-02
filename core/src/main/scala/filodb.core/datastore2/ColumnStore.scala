@@ -5,6 +5,7 @@ import scala.concurrent.{ExecutionContext, Future}
 import spray.caching._
 
 import filodb.core.messages.Response
+import RowReader.TypedFieldExtractor
 
 /**
  * High-level interface of a column store.  Writes and reads segments, which are pretty high level.
@@ -24,7 +25,8 @@ trait ColumnStore {
    * @param version the version # to write the segment to
    * @returns Success. Future.failure(exception) otherwise.
    */
-  def appendSegment[K : SortKeyHelper](segment: Segment[K], version: Int): Future[Response]
+  def appendSegment[K : SortKeyHelper : TypedFieldExtractor](segment: Segment[K],
+                                                             version: Int): Future[Response]
 
   /**
    * Reads segments from the column store, in order of primary key.
@@ -112,7 +114,8 @@ trait CachedMergingColumnStore extends ColumnStore {
 
   def clearSegmentCache(): Unit = { segmentCache.clear() }
 
-  def appendSegment[K : SortKeyHelper](segment: Segment[K], version: Int): Future[Response] = {
+  def appendSegment[K : SortKeyHelper : TypedFieldExtractor](segment: Segment[K],
+                                                             version: Int): Future[Response] = {
     for { oldSegment <- getSegFromCache(segment.keyRange, version)
           mergedSegment = mergingStrategy.mergeSegments(oldSegment, segment)
           writeChunksResp <- writeChunks(segment.dataset, segment.partition, version,

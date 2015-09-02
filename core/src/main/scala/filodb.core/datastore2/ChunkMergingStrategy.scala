@@ -4,6 +4,9 @@ import com.typesafe.scalalogging.slf4j.StrictLogging
 import java.nio.ByteBuffer
 import scala.concurrent.{ExecutionContext, Future}
 
+import RowReader.TypedFieldExtractor
+import Types._
+
 /**
  * The ChunkMergingStrategy implements the storage-independent business logic to merge segments and
  * chunks/indices within segments.  It is the secret sauce that allows FiloDB to efficiently merge in
@@ -18,8 +21,6 @@ import scala.concurrent.{ExecutionContext, Future}
  * prime projection, what are all the columns that need to be rewritten etc.
  */
 trait ChunkMergingStrategy {
-  import Types._
-
   /**
    * Reads the minimum necessary amount of data to populate the segment cache for merging operations.
    * This reads back one segment.  For example, if the merging operation does not need existing chunks,
@@ -36,7 +37,8 @@ trait ChunkMergingStrategy {
    * @returns a merged Segment ready to be flushed to disk.  This typically will only include chunks that need
    *          to be updated or written to disk.
    */
-  def mergeSegments[K](oldSegment: Segment[K], newSegment: Segment[K]): Segment[K]
+  def mergeSegments[K : TypedFieldExtractor : SortKeyHelper](oldSegment: Segment[K],
+                                                             newSegment: Segment[K]): Segment[K]
 
   /**
    * Prunes a segment to only what needs to be cached.
@@ -49,7 +51,7 @@ trait ChunkMergingStrategy {
  * Basically instead of modifying existing chunks in place, it appends new data as new chunks, and modifies
  * a ChunkRowMap index so that chunks can be read in proper sort key order.
  * This strategy trades off some read speed for mostly append only and much faster write semantics
- * (only modifying the chunkRowMap in place), and also works for multi-version merging.
+ * (only modifying the chunkRowMap in place), and also works well for multi-version merging.
  *
  * @param columnStore the column store to use
  * @param getSortColumn a function that returns the sort column given a dataset
@@ -58,8 +60,6 @@ class AppendingChunkMergingStrategy(columnStore: ColumnStore,
                                     getSortColumn: Types.TableName => Types.ColumnId)
                                    (implicit ec: ExecutionContext)
 extends ChunkMergingStrategy with StrictLogging {
-  import Types._
-
   // We only need to read back the sort column in order to merge with another segment's sort column
   def readSegmentForCache[K : SortKeyHelper](keyRange: KeyRange[K], version: Int): Future[Segment[K]] = {
     columnStore.readSegments(Set(getSortColumn(keyRange.dataset)), keyRange, version).map { iter =>
@@ -72,9 +72,41 @@ extends ChunkMergingStrategy with StrictLogging {
     }
   }
 
-  def mergeSegments[K](oldSegment: Segment[K], newSegment: Segment[K]): Segment[K] = {
-    // TODO: actually implement the merge.  For now, just return the new segment.
-    newSegment
+
+  def mergeSegments[K : TypedFieldExtractor : SortKeyHelper](oldSegment: Segment[K],
+                                                             newSegment: Segment[K]): Segment[K] = {
+    val extractor = implicitly[TypedFieldExtractor[K]]
+
+    // How much to offset chunkIds in newSegment.  0 in newSegment == nextChunkId in oldSegment.
+    val offsetChunkId = oldSegment.index.nextChunkId
+
+    // Merge old ChunkRowMap with new segment's ChunkRowMap with chunkIds offset
+    // NOTE: Working with a TreeMap is probably not the most efficient way to merge two sorted lists
+    // since both indexes can be read in sort key order.  So, TODO: replace this with more efficient
+    // sorted iterator merge.  Probably not an issue for now.
+    val baseIndex = oldSegment match {
+      case g: GenericSegment[K] =>
+        g.index.asInstanceOf[UpdatableChunkRowMap[K]]
+      case rr: RowReaderSegment[K] =>
+        // This should be a segment read from disk via readSegmentForCache().  Cheat assume only sort col
+        val items = rr.rowChunkIterator().map { case (reader, chunkId, rowNum) =>
+          extractor.getField(reader, 0) -> (chunkId -> rowNum)
+        }
+        UpdatableChunkRowMap(items.toSeq)
+    }
+    val offsetNewTree = newSegment.index.asInstanceOf[UpdatableChunkRowMap[K]].
+                                   index.mapValues { case (chunkId, rowNum) =>
+                                     (chunkId + offsetChunkId, rowNum)
+                                   }
+
+    // Translate chunkIds from newSegment to (oldSegment.nextChunkId + _)
+    val mergedSegment = new GenericSegment(oldSegment.keyRange, baseIndex ++ offsetNewTree)
+    newSegment.getChunks
+              .foreach { case (column, chunkId, chunk) =>
+                mergedSegment.addChunk(chunkId + offsetChunkId, column, chunk)
+              }
+
+    mergedSegment
   }
 
   // We only need to store the sort column
