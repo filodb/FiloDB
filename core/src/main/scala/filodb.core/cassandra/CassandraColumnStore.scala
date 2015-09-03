@@ -7,6 +7,7 @@ import scala.concurrent.{ExecutionContext, Future}
 import spray.caching._
 
 import filodb.core.messages._
+import filodb.core.metadata.Column
 import filodb.core.datastore2.{CachedMergingColumnStore, Types}
 
 /**
@@ -29,10 +30,12 @@ import filodb.core.datastore2.{CachedMergingColumnStore, Types}
  *
  * ==Constructor Args==
  * @param config see the Configuration section above for the needed config
+ * @param getSortColumn a function that returns the sort column given a dataset
  * @param ec An ExecutionContext for futures.  See this for a way to do backpressure with futures:
  *        http://quantifind.com/blog/2015/06/throttling-instantiations-of-scala-futures-1/
  */
-class CassandraColumnStore(config: Config)
+class CassandraColumnStore(config: Config,
+                           getSortColumn: Types.TableName => Column)
                           (implicit val ec: ExecutionContext)
 extends CachedMergingColumnStore with StrictLogging {
   import filodb.core.datastore2._
@@ -46,8 +49,7 @@ extends CachedMergingColumnStore with StrictLogging {
   val rowMapTableCache = LruCache[ChunkRowMapTable](tableCacheSize)
   val segmentCache = LruCache[Segment[_]](segmentCacheSize)
 
-  // TODO: yes, we need to actually get a real sort key :)
-  val mergingStrategy = new AppendingChunkMergingStrategy(this, { x => "age" })
+  val mergingStrategy = new AppendingChunkMergingStrategy(this, getSortColumn)
 
   /**
    * Implementations of low-level storage primitives
@@ -85,7 +87,7 @@ extends CachedMergingColumnStore with StrictLogging {
   }
 
   def readChunkRowMaps[K](keyRange: KeyRange[K],
-                          version: Int): Future[Seq[(ByteBuffer, ChunkRowMap)]] = {
+                          version: Int): Future[Seq[(ByteBuffer, BinaryChunkRowMap)]] = {
     for { (chunkTable, rowMapTable) <- getSegmentTables(keyRange.dataset)
           cassRowMaps <- rowMapTable.getChunkMaps(keyRange.partition, version,
                                                   keyRange.binaryStart, keyRange.binaryEnd) }

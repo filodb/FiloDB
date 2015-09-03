@@ -4,6 +4,7 @@ import com.typesafe.scalalogging.slf4j.StrictLogging
 import java.nio.ByteBuffer
 import scala.concurrent.{ExecutionContext, Future}
 
+import filodb.core.metadata.Column
 import RowReader.TypedFieldExtractor
 import Types._
 
@@ -57,12 +58,12 @@ trait ChunkMergingStrategy {
  * @param getSortColumn a function that returns the sort column given a dataset
  */
 class AppendingChunkMergingStrategy(columnStore: ColumnStore,
-                                    getSortColumn: Types.TableName => Types.ColumnId)
+                                    getSortColumn: Types.TableName => Column)
                                    (implicit ec: ExecutionContext)
 extends ChunkMergingStrategy with StrictLogging {
   // We only need to read back the sort column in order to merge with another segment's sort column
   def readSegmentForCache[K: SortKeyHelper](keyRange: KeyRange[K], version: Int): Future[Segment[K]] = {
-    columnStore.readSegments(Set(getSortColumn(keyRange.dataset)), keyRange, version).map { iter =>
+    columnStore.readSegments(Seq(getSortColumn(keyRange.dataset)), keyRange, version).map { iter =>
       iter.toSeq.headOption match {
         case Some(firstSegment) => firstSegment
         case None =>
@@ -112,7 +113,7 @@ extends ChunkMergingStrategy with StrictLogging {
 
   // We only need to store the sort column
   def pruneForCache[K](segment: Segment[K]): Segment[K] = {
-    val sortColumn = getSortColumn(segment.dataset)
+    val sortColumn = getSortColumn(segment.dataset).name
     if (segment.getColumns == Set(sortColumn)) {
       logger.trace(s"pruneForcache: segment only has ${segment.getColumns}, not pruning")
       segment

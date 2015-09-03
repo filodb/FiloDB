@@ -16,9 +16,11 @@ class CassandraColumnStoreSpec extends CassandraFlatSpec with BeforeAndAfter {
   import scala.concurrent.ExecutionContext.Implicits.global
   import com.websudos.phantom.dsl._
   import filodb.core.datastore2._
+  import SegmentSpec._
 
   implicit val keySpace = KeySpace("unittest")
-  val colStore = new CassandraColumnStore(ConfigFactory.load())
+  val colStore = new CassandraColumnStore(ConfigFactory.load(),
+                                          { x => schema(2) })
   val dataset = "foo"
 
   val (chunkTable, rowMapTable) = Await.result(colStore.getSegmentTables(dataset), 3 seconds)
@@ -37,7 +39,6 @@ class CassandraColumnStoreSpec extends CassandraFlatSpec with BeforeAndAfter {
     colStore.clearSegmentCache()
   }
 
-  import SegmentSpec._
   val keyRange = KeyRange(dataset, "partition", 0L, 10000L)
 
   val bytes1 = ByteBuffer.wrap("apple".getBytes("UTF-8"))
@@ -100,44 +101,76 @@ class CassandraColumnStoreSpec extends CassandraFlatSpec with BeforeAndAfter {
       response should equal (Success)
     }
 
-    // Now read it back and verify
-    whenReady(getChunkRowMap(segment)) { binRowMap =>
-      binRowMap.chunkIdIterator.toSeq should equal (Seq(0, 0, 0, 1, 1, 1))
-      binRowMap.rowNumIterator.toSeq should equal (Seq(0, 2, 1, 2, 1, 0))
+    whenReady(colStore.readSegments(schema, keyRange, 0)) { segIter =>
+      val segments = segIter.toSeq
+      segments should have length (1)
+      val readSeg = segments.head.asInstanceOf[RowReaderSegment[Long]]
+      readSeg.keyRange should equal (segment.keyRange)
+      readSeg.rowIterator().map(_.getLong(2)).toSeq should equal (Seq(24L, 25L, 28L, 29L, 39L, 40L))
+      readSeg.rowIterator().map(_.getString(0)).toSeq should equal (firstNames)
     }
   }
 
-  it should "append new rows to an uncached segment successfully" in (pending)
-
-  "readSegments" should "read segments back that were written" in {
-    whenReady(colStore.appendSegment(baseSegment, 0)) { response =>
+  it should "replace rows to an uncached segment successfully" in {
+    val segment = getRowWriter(keyRange)
+    segment.addRowsAsChunk(names drop 1)
+    whenReady(colStore.appendSegment(segment, 0)) { response =>
       response should equal (Success)
     }
 
-    whenReady(colStore.readSegments(Set("columnA", "columnB"), keyRange, 0)) { segIter =>
+    colStore.clearSegmentCache()
+
+    // Writing segment2, repeat 1 row and add another row.  Should read orig segment from disk.
+    val segment2 = getRowWriter(keyRange)
+    segment2.addRowsAsChunk(names take 2)
+    whenReady(colStore.appendSegment(segment2, 0)) { response =>
+      response should equal (Success)
+    }
+
+    whenReady(colStore.readSegments(schema, keyRange, 0)) { segIter =>
       val segments = segIter.toSeq
       segments should have length (1)
-      segments.head.keyRange should equal (baseSegment.keyRange)
-      segments.head.getChunks.toSet should equal (baseSegment.getChunks.toSet)
-      segments.head.index.rowNumIterator.toSeq should equal (baseSegment.index.rowNumIterator.toSeq)
+      val readSeg = segments.head.asInstanceOf[RowReaderSegment[Long]]
+      readSeg.keyRange should equal (segment.keyRange)
+      readSeg.rowIterator().map(_.getLong(2)).toSeq should equal (Seq(24L, 25L, 28L, 29L, 39L, 40L))
+      readSeg.rowIterator().map(_.getString(0)).toSeq should equal (firstNames)
+    }
+  }
+
+  "readSegments" should "read segments back that were written" in {
+    val segment = getRowWriter(keyRange)
+    segment.addRowsAsChunk(names)
+    whenReady(colStore.appendSegment(segment, 0)) { response =>
+      response should equal (Success)
+    }
+
+    whenReady(colStore.readSegments(schema, keyRange, 0)) { segIter =>
+      val segments = segIter.toSeq
+      segments should have length (1)
+      val readSeg = segments.head.asInstanceOf[RowReaderSegment[Long]]
+      readSeg.keyRange should equal (segment.keyRange)
+      readSeg.getChunks.toSet should equal (segment.getChunks.toSet)
+      readSeg.index.rowNumIterator.toSeq should equal (segment.index.rowNumIterator.toSeq)
+      readSeg.rowIterator().map(_.getLong(2)).toSeq should equal (Seq(24L, 25L, 28L, 29L, 39L, 40L))
     }
   }
 
   it should "return empty iterator if cannot find segment" in {
-    whenReady(colStore.readSegments(Set("columnA", "columnB"), keyRange, 0)) { segIter =>
+    whenReady(colStore.readSegments(schema, keyRange, 0)) { segIter =>
       segIter.toSeq should have length (0)
     }
   }
 
-  it should "return empty segment if cannot find columns" in {
+  it should "return segment with empty chunks if cannot find columns" in {
     whenReady(colStore.appendSegment(baseSegment, 0)) { response =>
       response should equal (Success)
     }
 
-    whenReady(colStore.readSegments(Set("notACol"), keyRange, 0)) { segIter =>
+    val fakeCol = Column("notACol", dataset, 0, Column.ColumnType.StringColumn)
+    whenReady(colStore.readSegments(Seq(fakeCol), keyRange, 0)) { segIter =>
       val segments = segIter.toSeq
       segments should have length (1)
-      segments.head.getChunks.toSeq should equal (Nil)
+      segments.head.getChunks.toSet should equal (Set(("notACol", 0, null), ("notACol", 1, null)))
     }
   }
 }

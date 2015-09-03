@@ -15,9 +15,10 @@ class ChunkMergingStrategySpec extends FunSpec with Matchers {
   val sortKey = "age"
 
   import scala.concurrent.ExecutionContext.Implicits.global
-  val colStore = new CassandraColumnStore(ConfigFactory.load())
+  val colStore = new CassandraColumnStore(ConfigFactory.load(),
+                                          { x => schema(2) })
   val dataset = "foo"
-  val mergingStrategy = new AppendingChunkMergingStrategy(colStore, { x => "age" })
+  val mergingStrategy = new AppendingChunkMergingStrategy(colStore, { x => schema(2) })
 
   private def mergeRows(firstSegRows: Seq[Product], secondSegRows: Seq[Product]) = {
       val segment = getRowWriter(keyRange)

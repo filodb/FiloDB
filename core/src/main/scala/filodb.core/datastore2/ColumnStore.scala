@@ -5,6 +5,7 @@ import scala.concurrent.{ExecutionContext, Future}
 import spray.caching._
 
 import filodb.core.messages._
+import filodb.core.metadata.Column
 import RowReader.TypedFieldExtractor
 
 /**
@@ -30,12 +31,13 @@ trait ColumnStore {
 
   /**
    * Reads segments from the column store, in order of primary key.
-   * @param columns the set of columns to read back
+   * @param columns the set of columns to read back.  Order determines the order of columns read back
+   *                in each row
    * @param keyRange describes the partition and range of keys to read back. NOTE: end range is exclusive!
    * @param version the version # to read from
-   * @returns An iterator over segments
+   * @returns An iterator over RowReaderSegment's
    */
-  def readSegments[K: SortKeyHelper](columns: Set[ColumnId], keyRange: KeyRange[K], version: Int):
+  def readSegments[K: SortKeyHelper](columns: Seq[Column], keyRange: KeyRange[K], version: Int):
       Future[Iterator[Segment[K]]]
 }
 
@@ -96,7 +98,7 @@ trait CachedMergingColumnStore extends ColumnStore {
    * @param version the version to read back
    * @returns a sequence of (segmentId, ChunkRowMap)'s
    */
-  def readChunkRowMaps[K](keyRange: KeyRange[K], version: Int): Future[Seq[(ByteBuffer, ChunkRowMap)]]
+  def readChunkRowMaps[K](keyRange: KeyRange[K], version: Int): Future[Seq[(ByteBuffer, BinaryChunkRowMap)]]
 
   /**
    * Designed to scan over many many ChunkRowMaps from multiple partitions.  Intended for fast scanning
@@ -131,14 +133,14 @@ trait CachedMergingColumnStore extends ColumnStore {
     }
   }
 
-  def readSegments[K: SortKeyHelper](columns: Set[String], keyRange: KeyRange[K], version: Int):
+  def readSegments[K: SortKeyHelper](columns: Seq[Column], keyRange: KeyRange[K], version: Int):
       Future[Iterator[Segment[K]]] = {
     // TODO: implement actual paging and the iterator over segments.  Or maybe that should be implemented
     // at a higher level.
     (for { rowMaps <- readChunkRowMaps(keyRange, version)
-          chunks  <- readChunks(columns, keyRange, version) if rowMaps.nonEmpty }
+          chunks   <- readChunks(columns.map(_.name).toSet, keyRange, version) if rowMaps.nonEmpty }
     yield {
-      buildSegments(rowMaps, chunks, keyRange).toIterator
+      buildSegments(rowMaps, chunks, keyRange, columns).toIterator
     }).recover {
       // No chunk maps found, so just return empty list of segments
       case e: java.util.NoSuchElementException => Iterator.empty
@@ -161,14 +163,15 @@ trait CachedMergingColumnStore extends ColumnStore {
   }
 
   // @param rowMaps a Seq of (segmentId, ChunkRowMap)
-  private def buildSegments[K: SortKeyHelper](rowMaps: Seq[(ByteBuffer, ChunkRowMap)],
+  private def buildSegments[K: SortKeyHelper](rowMaps: Seq[(ByteBuffer, BinaryChunkRowMap)],
                                               chunks: Seq[ChunkedData],
-                                              origKeyRange: KeyRange[K]): Seq[Segment[K]] = {
+                                              origKeyRange: KeyRange[K],
+                                              schema: Seq[Column]): Seq[Segment[K]] = {
     val helper = implicitly[SortKeyHelper[K]]
     val segments = rowMaps.map { case (segmentId, rowMap) =>
         val (segStart, segEnd) = helper.getSegment(helper.fromBytes(segmentId))
         val segKeyRange = origKeyRange.copy(start = segStart, end = segEnd)
-        new GenericSegment(segKeyRange, rowMap)
+        new RowReaderSegment(segKeyRange, rowMap, schema)
     }
     chunks.foreach { case ChunkedData(columnName, chunkTriples) =>
       var segIndex = 0
