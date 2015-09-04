@@ -5,7 +5,7 @@ import scala.concurrent.{ExecutionContext, Future}
 import filodb.core.messages._
 
 object MetaStore {
-  case class IllegalColumnChange(reasons: Seq[String]) extends Response
+  case class IllegalColumnChange(reasons: Seq[String]) extends Exception
 }
 
 /**
@@ -57,13 +57,10 @@ trait MetaStore {
    * @return Success if succeeds, or AlreadyExists, or IllegalColumnChange
    */
   def newColumn(column: Column): Future[Response] = {
-    getSchema(column.dataset, Int.MaxValue).flatMap {
-      case schema: Column.Schema =>
-        val invalidReasons = Column.invalidateNewColumn(column.dataset, schema, column)
-        if (invalidReasons.nonEmpty) { Future.successful(IllegalColumnChange(invalidReasons)) }
-        else                         { insertColumn(column) }
-      case other: ErrorResponse =>
-        Future.successful(other)
+    getSchema(column.dataset, Int.MaxValue).flatMap { schema =>
+      val invalidReasons = Column.invalidateNewColumn(column.dataset, schema, column)
+      if (invalidReasons.nonEmpty) { Future.failed(IllegalColumnChange(invalidReasons)) }
+      else                         { insertColumn(column) }
     }
   }
 

@@ -13,7 +13,8 @@ import filodb.core.metadata.Dataset
 sealed class DatasetTable extends CassandraTable[DatasetTable, Dataset] {
   // scalastyle:off
   object name extends StringColumn(this) with PartitionKey[String]
-  object partitions extends SetColumn[DatasetTable, Dataset, String](this)
+  object partitionColumn extends StringColumn(this) with StaticColumn[String]
+  object options extends StringColumn(this) with StaticColumn[String]
   // scalastyle:on
 
   override def fromRow(row: Row): Dataset =
