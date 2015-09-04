@@ -3,8 +3,6 @@ package filodb.core.metadata
 import com.typesafe.scalalogging.slf4j.StrictLogging
 import enumeratum.{Enum, EnumEntry}
 
-import filodb.core.messages.{Command, Response}
-
 /**
  * Defines a column of data and its properties.
  *
