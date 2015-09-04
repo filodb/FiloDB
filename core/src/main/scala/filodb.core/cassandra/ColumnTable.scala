@@ -5,7 +5,6 @@ import com.websudos.phantom.dsl._
 import play.api.libs.iteratee.Iteratee
 import scala.concurrent.Future
 
-import filodb.core.datastore.{ColumnApi, Datastore}
 import filodb.core.metadata.Column
 
 /**
@@ -37,7 +36,7 @@ sealed class ColumnTable extends CassandraTable[ColumnTable, Column] {
  * Asynchronous methods to operate on columns.  All normal errors and exceptions are returned
  * through ErrorResponse types.
  */
-object ColumnTable extends ColumnTable with SimpleCassandraConnector with ColumnApi {
+object ColumnTable extends ColumnTable with SimpleCassandraConnector {
   override val tableName = "columns"
 
   // TODO: add in Config-based initialization code to find the keyspace, cluster, etc.
@@ -45,18 +44,11 @@ object ColumnTable extends ColumnTable with SimpleCassandraConnector with Column
 
   import Util._
   import filodb.core.messages._
-  import Datastore.TheSchema
 
-  private def getSchemaNoErrorHandling(dataset: String, version: Int): Future[Column.Schema] = {
+  def getSchema(dataset: String, version: Int): Future[Column.Schema] = {
     val enum = select.where(_.dataset eqs dataset).and(_.version lte version)
                      .fetchEnumerator()
     enum run Iteratee.fold(Column.EmptySchema)(Column.schemaFold)
-  }
-
-  def getSchema(dataset: String, version: Int): Future[Response] = {
-    getSchemaNoErrorHandling(dataset, version)
-      .map { schema => TheSchema(schema) }
-      .handleErrors
   }
 
   def insertColumn(column: Column): Future[Response] = {

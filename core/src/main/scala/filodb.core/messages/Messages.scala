@@ -24,3 +24,5 @@ case object NotFound extends Response
 case object NotApplied extends Response
 case object AlreadyExists extends Response
 case object Success extends Response
+
+case class NotFoundError(what: String) extends Exception

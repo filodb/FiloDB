@@ -37,7 +37,6 @@ object Dataset {
    */
   def apply(name: String,
             sortColumn: String,
-            partitionColumn: String = DefaultPartitionColumn,
-            options: DatasetOptions = DefaultOptions): Dataset =
-    Dataset(name, Seq(Projection(0, sortColumn)), partitionColumn, options)
+            partitionColumn: String): Dataset =
+    Dataset(name, Seq(Projection(0, sortColumn)), partitionColumn)
 }
