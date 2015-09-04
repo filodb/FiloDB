@@ -1,4 +1,4 @@
-package filodb.core.cassandra
+package filodb.cassandra
 
 import com.datastax.driver.core.Row
 import com.typesafe.config.Config

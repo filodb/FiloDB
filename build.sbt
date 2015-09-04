@@ -10,6 +10,18 @@ lazy val core = (project in file("core"))
                   .settings(scalacOptions += "-language:postfixOps")
                   .settings(libraryDependencies ++= coreDeps)
 
+lazy val coordinator = (project in file("coordinator"))
+                         .settings(mySettings:_*)
+                         .settings(name := "filodb-coordinator")
+                         .settings(libraryDependencies ++= coordDeps)
+                         .dependsOn(core)
+
+lazy val cassandra = (project in file("cassandra"))
+                       .settings(mySettings:_*)
+                       .settings(name := "filodb-cassandra")
+                       .settings(libraryDependencies ++= cassDeps)
+                       .dependsOn(core)
+
 lazy val cli = (project in file("cli"))
                  .settings(mySettings:_*)
                  .settings(name := "filodb-cli")
@@ -42,17 +54,23 @@ val excludeShapeless = ExclusionRule(organization = "com.chuusai")
 val excludeZK = ExclusionRule(organization = "org.apache.zookeeper")
 
 lazy val coreDeps = Seq(
-  "com.websudos"         %% "phantom-dsl"       % phantomVersion,
   "com.typesafe.akka"    %% "akka-slf4j"        % akkaVersion,
   "com.typesafe.scala-logging" %% "scala-logging-slf4j" % "2.1.2",
   "ch.qos.logback"        % "logback-classic"   % "1.0.7",
   "com.beachape"         %% "enumeratum"        % "1.2.1",
   "org.velvia.filo"      %% "filo-scala"        % "0.1.3" excludeAll(excludeShapeless),
-  "com.opencsv"           % "opencsv"           % "3.3",
   "io.spray"             %% "spray-caching"     % "1.3.2",
   "com.nativelibs4java"  %% "scalaxy-loops"     % "0.3.3" % "provided",
-  "com.websudos"         %% "phantom-testkit"   % phantomVersion % "test" excludeAll(excludeZK),
   "com.typesafe.akka"    %% "akka-testkit"      % akkaVersion % "test"
+)
+
+lazy val cassDeps = Seq(
+  "com.websudos"         %% "phantom-dsl"       % phantomVersion,
+  "com.websudos"         %% "phantom-testkit"   % phantomVersion % "test" excludeAll(excludeZK)
+)
+
+lazy val coordDeps = Seq(
+  "com.opencsv"           % "opencsv"           % "3.3"
 )
 
 lazy val cliDeps = Seq(

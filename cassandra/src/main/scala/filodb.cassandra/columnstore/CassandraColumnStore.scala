@@ -1,4 +1,4 @@
-package filodb.core.cassandra
+package filodb.cassandra
 
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.slf4j.StrictLogging
