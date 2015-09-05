@@ -1,10 +1,10 @@
-package filodb.core.datastore2
+package filodb.core.columnstore
 
 import java.nio.ByteBuffer
 import scala.concurrent.{ExecutionContext, Future}
 import spray.caching._
 
-import filodb.core.messages._
+import filodb.core._
 import filodb.core.metadata.Column
 import RowReader.TypedFieldExtractor
 
@@ -15,7 +15,7 @@ import RowReader.TypedFieldExtractor
  * exists though to allow special implementations that want to use different lower level primitives.
  */
 trait ColumnStore {
-  import Types._
+  import filodb.core.Types._
 
   /**
    * Appends the segment to the column store.  The passed in segment must be somehow merged with an existing
@@ -49,7 +49,7 @@ case class ChunkedData(column: Types.ColumnId, chunks: Seq[(ByteBuffer, Types.Ch
  * lower level primitives and implements the ColumnStore methods in terms of these primitives.
  */
 trait CachedMergingColumnStore extends ColumnStore {
-  import Types._
+  import filodb.core.Types._
 
   def segmentCache: Cache[Segment[_]]
 

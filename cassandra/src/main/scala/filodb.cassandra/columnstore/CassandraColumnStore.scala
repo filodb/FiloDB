@@ -6,9 +6,9 @@ import java.nio.ByteBuffer
 import scala.concurrent.{ExecutionContext, Future}
 import spray.caching._
 
+import filodb.core.columnstore.{CachedMergingColumnStore, Types}
 import filodb.core.messages._
 import filodb.core.metadata.Column
-import filodb.core.datastore2.{CachedMergingColumnStore, Types}
 
 /**
  * Implementation of a column store using Apache Cassandra tables.
@@ -38,7 +38,7 @@ class CassandraColumnStore(config: Config,
                            getSortColumn: Types.TableName => Column)
                           (implicit val ec: ExecutionContext)
 extends CachedMergingColumnStore with StrictLogging {
-  import filodb.core.datastore2._
+  import filodb.core.columnstore._
   import Types._
 
   val cassandraConfig = config.getConfig("cassandra")

@@ -10,12 +10,12 @@ import scala.concurrent.{Await, Future}
 
 import filodb.core.messages._
 import filodb.core.metadata.Column
-import filodb.core.datastore2.Types
+import filodb.core.Types
 
 class CassandraColumnStoreSpec extends CassandraFlatSpec with BeforeAndAfter {
   import scala.concurrent.ExecutionContext.Implicits.global
   import com.websudos.phantom.dsl._
-  import filodb.core.datastore2._
+  import filodb.core.columnstore._
   import SegmentSpec._
 
   implicit val keySpace = KeySpace("unittest")

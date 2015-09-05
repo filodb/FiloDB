@@ -1,4 +1,4 @@
-package filodb.core.datastore2
+package filodb.core
 
 import java.nio.ByteBuffer
 import scala.math.Ordering

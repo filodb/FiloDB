@@ -1,6 +1,6 @@
 package filodb.core.metadata
 
-import filodb.core.datastore2.Types
+import filodb.core.Types
 
 /**
  * A dataset is a table with a schema.

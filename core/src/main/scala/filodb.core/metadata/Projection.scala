@@ -1,6 +1,6 @@
 package filodb.core.metadata
 
-import filodb.core.datastore2.Types._
+import filodb.core.Types._
 
 /**
  * A Projection defines one particular view of a dataset, designed to be optimized for a particular query.

@@ -1,9 +1,11 @@
-package filodb.core.datastore2
+package filodb.core.columnstore
 
 import org.velvia.filo.{BuilderEncoder, ColumnParser}
 import java.nio.ByteBuffer
 import scala.collection.immutable.{SortedMap, TreeMap}
 import scala.collection.mutable.{ArrayBuffer, HashMap}
+
+import filodb.core._
 
 /**
  * A ChunkRowMap stores a sorted index that maps sort keys to (chunkID, row #) -- basically the
@@ -11,7 +13,7 @@ import scala.collection.mutable.{ArrayBuffer, HashMap}
  * allows one to read out data in projection sorted order.
  */
 trait ChunkRowMap {
-  import Types._
+  import filodb.core.Types._
 
   // Separate iterators are defined to avoid Tuple2 object allocation
   def chunkIdIterator: Iterator[ChunkID]
@@ -35,7 +37,7 @@ trait ChunkRowMap {
  * on disk already
  */
 class UpdatableChunkRowMap[K: SortKeyHelper] extends ChunkRowMap {
-  import Types._
+  import filodb.core.Types._
 
   implicit val ordering = implicitly[SortKeyHelper[K]].ordering
   var index = TreeMap[K, (ChunkID, Int)]()
@@ -72,7 +74,7 @@ class UpdatableChunkRowMap[K: SortKeyHelper] extends ChunkRowMap {
 }
 
 object UpdatableChunkRowMap {
-  import Types._
+  import filodb.core.Types._
 
   def apply[K: SortKeyHelper](items: Seq[(K, (ChunkID, Int))]): UpdatableChunkRowMap[K] =
     (new UpdatableChunkRowMap[K]) ++ items
@@ -87,7 +89,7 @@ object UpdatableChunkRowMap {
 class BinaryChunkRowMap(chunkIdsBuffer: ByteBuffer,
                         rowNumsBuffer: ByteBuffer,
                         val nextChunkId: Types.ChunkID) extends ChunkRowMap {
-  import Types._
+  import filodb.core.Types._
   import ColumnParser._
 
   private val chunkIds = ColumnParser.parse[ChunkID](chunkIdsBuffer)

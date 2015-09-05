@@ -8,7 +8,7 @@ import java.nio.ByteBuffer
 import scala.concurrent.Future
 
 import filodb.core.messages._
-import filodb.core.datastore2.{ChunkedData, Types}
+import filodb.core.columnstore.{ChunkedData, Types}
 
 /**
  * Represents the table which holds the actual columnar chunks for segments

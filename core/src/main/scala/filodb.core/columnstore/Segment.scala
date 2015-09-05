@@ -1,10 +1,12 @@
-package filodb.core.datastore2
+package filodb.core.columnstore
 
 import java.nio.ByteBuffer
 import org.velvia.filo.{IngestColumn, RowIngestSupport, RowToColumnBuilder}
 import scala.collection.immutable.TreeMap
 import scala.collection.mutable.{ArrayBuffer, HashMap}
 
+import filodb.core.{KeyRange, SortKeyHelper}
+import filodb.core.Types._
 import filodb.core.metadata.Column
 
 /**
@@ -13,8 +15,6 @@ import filodb.core.metadata.Column
  * For more details see [[doc/sorted_chunk_merge.md]].
  */
 trait Segment[K] {
-  import Types._
-
   val keyRange: KeyRange[K]
   val index: ChunkRowMap
 
@@ -40,8 +40,6 @@ trait Segment[K] {
  */
 class GenericSegment[K](val keyRange: KeyRange[K],
                         val index: ChunkRowMap) extends Segment[K] {
-  import Types._
-
   val chunkIds = ArrayBuffer[ChunkID]()
   val chunks = new HashMap[ColumnId, HashMap[ChunkID, Chunk]]
 
@@ -107,7 +105,6 @@ extends GenericSegment(keyRange, null) {
 class RowReaderSegment[K](val keyRange: KeyRange[K],
                           val index: BinaryChunkRowMap,
                           columns: Seq[Column]) extends Segment[K] {
-  import Types._
   import RowReaderSegment._
 
   // chunks(chunkId)(columnNum)

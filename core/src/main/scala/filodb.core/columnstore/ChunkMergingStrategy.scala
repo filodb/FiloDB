@@ -1,4 +1,4 @@
-package filodb.core.datastore2
+package filodb.core.columnstore
 
 import com.typesafe.scalalogging.slf4j.StrictLogging
 import java.nio.ByteBuffer
@@ -6,7 +6,8 @@ import scala.concurrent.{ExecutionContext, Future}
 
 import filodb.core.metadata.Column
 import RowReader.TypedFieldExtractor
-import Types._
+import filodb.core.Types._
+import filodb.core._
 
 /**
  * The ChunkMergingStrategy implements the storage-independent business logic to merge segments and

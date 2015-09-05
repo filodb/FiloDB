@@ -1,4 +1,4 @@
-package filodb.core.datastore2
+package filodb.core.columnstore
 
 import com.typesafe.config.ConfigFactory
 import filodb.core.metadata.Column
