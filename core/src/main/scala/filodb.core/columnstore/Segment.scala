@@ -124,7 +124,7 @@ class RowReaderSegment[K](val keyRange: KeyRange[K],
 
   def getColumns: collection.Set[ColumnId] = columns.map(_.name).toSet
 
-  private def getReaders(readerFactory: RowReaderFactory): Array[RowReader] =
+  private def getReaders(readerFactory: RowReaderFactory): Array[FiloRowReader] =
     (0 until index.nextChunkId).map { chunkId =>
       readerFactory(chunks(chunkId), clazzes)
     }.toArray
@@ -172,7 +172,7 @@ class RowReaderSegment[K](val keyRange: KeyRange[K],
 }
 
 object RowReaderSegment {
-  type RowReaderFactory = (Array[ByteBuffer], Array[Class[_]]) => RowReader
+  type RowReaderFactory = (Array[ByteBuffer], Array[Class[_]]) => FiloRowReader
 
   private val DefaultReaderFactory: RowReaderFactory =
     (bytes, clazzes) => new MutableRowReader(bytes, clazzes)
@@ -190,6 +190,17 @@ object RowReaderSegment {
 import org.velvia.filo.ColumnWrapper
 
 /**
+ * A generic trait for reading typed values out of a row of data.
+ */
+trait RowReader {
+  def notNull(columnNo: Int): Boolean
+  def getInt(columnNo: Int): Int
+  def getLong(columnNo: Int): Long
+  def getDouble(columnNo: Int): Double
+  def getString(columnNo: Int): String
+}
+
+/**
  * A RowReader is designed for fast iteration over rows of multiple Filo vectors, ideally all
  * with the same length.  An Iterator[RowReader] sets the rowNo and returns this RowReader, and
  * the application is responsible for calling the right method to extract each value.
@@ -197,7 +208,7 @@ import org.velvia.filo.ColumnWrapper
  * intermediate Row object; the get* methods read directly from Filo vectors.
  * For example, a Spark Row can inherit from RowReader.
  */
-abstract class RowReader {
+abstract class FiloRowReader extends RowReader {
   def parsers: Array[ColumnWrapper[_]]
   var rowNo: Int = -1
 
@@ -228,7 +239,7 @@ private object Classes {
   val String = classOf[String]
 }
 
-class MutableRowReader(chunks: Array[ByteBuffer], classes: Array[Class[_]]) extends RowReader {
+class MutableRowReader(chunks: Array[ByteBuffer], classes: Array[Class[_]]) extends FiloRowReader {
   import org.velvia.filo.ColumnParser._
 
   val parsers: Array[ColumnWrapper[_]] = chunks.zip(classes).map {
