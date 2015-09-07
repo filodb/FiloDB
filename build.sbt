@@ -61,12 +61,12 @@ lazy val coreDeps = Seq(
   "org.velvia.filo"      %% "filo-scala"        % "0.1.3" excludeAll(excludeShapeless),
   "io.spray"             %% "spray-caching"     % "1.3.2",
   "com.nativelibs4java"  %% "scalaxy-loops"     % "0.3.3" % "provided",
-  "com.typesafe.akka"    %% "akka-testkit"      % akkaVersion % "test"
+  "com.typesafe.akka"    %% "akka-testkit"      % akkaVersion % "test",
+  "com.websudos"         %% "phantom-testkit"   % phantomVersion % "test" excludeAll(excludeZK)
 )
 
 lazy val cassDeps = Seq(
-  "com.websudos"         %% "phantom-dsl"       % phantomVersion,
-  "com.websudos"         %% "phantom-testkit"   % phantomVersion % "test" excludeAll(excludeZK)
+  "com.websudos"         %% "phantom-dsl"       % phantomVersion
 )
 
 lazy val coordDeps = Seq(

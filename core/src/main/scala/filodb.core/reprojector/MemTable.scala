@@ -54,5 +54,10 @@ trait MemTable {
   def readRows[K](keyRange: KeyRange[K], sortOrder: SortOrder): Iterator[RowReader]
 
   def removeRows[K](keyRange: KeyRange[K]): Unit
+
+  /**
+   * Returns the key range encompassing all the rows in a given partition of a dataset.
+   */
+  def getKeyRange[K](dataset: Dataset, partition: PartitionKey): KeyRange[K]
 }
 
