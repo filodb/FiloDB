@@ -1,6 +1,6 @@
 package filodb.core.reprojector
 
-import filodb.core.KeyRange
+import filodb.core.{KeyRange, SortKeyHelper}
 import filodb.core.Types._
 import filodb.core.metadata.{Column, Dataset}
 import filodb.core.columnstore.RowReader
@@ -30,6 +30,7 @@ object MemTable {
  */
 trait MemTable {
   import MemTable._
+  import RowReader._
 
   def totalNumRows: Long
   def totalBytesUsed: Long
@@ -37,6 +38,8 @@ trait MemTable {
 
   def mostStaleDatasets(k: Int = DefaultTopK): Seq[String]
   def mostStalePartitions(dataset: String, k: Int = DefaultTopK): Seq[PartitionKey]
+
+  def close(): Unit
 
   /**
    * === Row ingest, read, delete operations ===
@@ -51,18 +54,31 @@ trait MemTable {
    * @param timestamp the write timestamp to associate with the rows, used to calculate staleness
    * @returns Ingested or PleaseWait, if the MemTable is too full.
    */
-  def ingestRows(dataset: Dataset,
-                 schema: Seq[Column],
-                 rows: Seq[RowReader],
-                 timestamp: Long): IngestionResponse
+  def ingestRows[K: TypedFieldExtractor](dataset: Dataset,
+                                         schema: Seq[Column],
+                                         rows: Seq[RowReader],
+                                         timestamp: Long): IngestionResponse
 
-  def readRows[K](keyRange: KeyRange[K], sortOrder: SortOrder): Iterator[RowReader]
+  def readRows[K](keyRange: KeyRange[K]): Iterator[RowReader]
 
   def removeRows[K](keyRange: KeyRange[K]): Unit
 
   /**
    * Returns the key range encompassing all the rows in a given partition of a dataset.
    */
-  def getKeyRange[K](dataset: Dataset, partition: PartitionKey): KeyRange[K]
+  def getKeyRange[K: SortKeyHelper](dataset: Dataset, partition: PartitionKey): KeyRange[K]
+
+  /**
+   * == Common helper funcs ==
+   */
+  protected def getPartitioningFunc(dataset: Dataset, schema: Seq[Column]):
+      Option[RowReader => PartitionKey] = {
+    if (dataset.partitionColumn == Dataset.DefaultPartitionColumn) {
+      Some(row => Dataset.DefaultPartitionKey)
+    } else {
+      val partitionColNo = schema.indexWhere(_.hasId(dataset.partitionColumn))
+      if (partitionColNo < 0) None else Some(row => row.getString(partitionColNo))
+    }
+  }
 }
 

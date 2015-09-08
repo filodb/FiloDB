@@ -201,6 +201,28 @@ trait RowReader {
 }
 
 /**
+ * An example of a RowReader that can read from Scala tuples containing Option[_]
+ */
+case class TupleRowReader(tuple: Product) extends RowReader {
+  def notNull(columnNo: Int): Boolean = tuple.productElement(columnNo) != None
+  def getInt(columnNo: Int): Int = tuple.productElement(columnNo) match {
+    case Some(x: Int) => x
+  }
+
+  def getLong(columnNo: Int): Long = tuple.productElement(columnNo) match {
+    case Some(x: Long) => x
+  }
+
+  def getDouble(columnNo: Int): Double = tuple.productElement(columnNo) match {
+    case Some(x: Double) => x
+  }
+
+  def getString(columnNo: Int): String = tuple.productElement(columnNo) match {
+    case Some(x: String) => x
+  }
+}
+
+/**
  * A RowReader is designed for fast iteration over rows of multiple Filo vectors, ideally all
  * with the same length.  An Iterator[RowReader] sets the rowNo and returns this RowReader, and
  * the application is responsible for calling the right method to extract each value.

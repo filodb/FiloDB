@@ -1,7 +1,7 @@
 package filodb.core.columnstore
 
 import filodb.core._
-import filodb.core.metadata.Column
+import filodb.core.metadata.{Column, Dataset}
 import java.nio.ByteBuffer
 import org.velvia.filo.{ColumnParser, TupleRowIngestSupport}
 
@@ -16,6 +16,8 @@ object SegmentSpec {
                    Column("age", "dataset1", 0, Column.ColumnType.LongColumn))
 
   val support = TupleRowIngestSupport
+
+  val dataset = Dataset("dataset", "age")
 
   val names = Seq((Some("Khalil"), Some("Mack"), Some(24L)),
                   (Some("Ndamukong"), Some("Suh"), Some(28L)),
