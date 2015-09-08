@@ -54,23 +54,26 @@ val excludeShapeless = ExclusionRule(organization = "com.chuusai")
 val excludeZK = ExclusionRule(organization = "org.apache.zookeeper")
 
 lazy val coreDeps = Seq(
-  "com.typesafe.akka"    %% "akka-slf4j"        % akkaVersion,
   "com.typesafe.scala-logging" %% "scala-logging-slf4j" % "2.1.2",
   "ch.qos.logback"        % "logback-classic"   % "1.0.7",
   "com.beachape"         %% "enumeratum"        % "1.2.1",
   "org.velvia.filo"      %% "filo-scala"        % "0.1.3" excludeAll(excludeShapeless),
   "io.spray"             %% "spray-caching"     % "1.3.2",
+  "org.mapdb"             % "mapdb"             % "2.0-beta6",
+  "com.typesafe"          % "config"            % "1.2.0",
   "com.nativelibs4java"  %% "scalaxy-loops"     % "0.3.3" % "provided",
-  "com.typesafe.akka"    %% "akka-testkit"      % akkaVersion % "test",
-  "com.websudos"         %% "phantom-testkit"   % phantomVersion % "test" excludeAll(excludeZK)
+  "org.scalatest"        %% "scalatest"         % "2.2.4"
 )
 
 lazy val cassDeps = Seq(
-  "com.websudos"         %% "phantom-dsl"       % phantomVersion
+  "com.websudos"         %% "phantom-dsl"       % phantomVersion,
+  "com.websudos"         %% "phantom-testkit"   % phantomVersion % "test" excludeAll(excludeZK)
 )
 
 lazy val coordDeps = Seq(
-  "com.opencsv"           % "opencsv"           % "3.3"
+  "com.typesafe.akka"    %% "akka-slf4j"        % akkaVersion,
+  "com.opencsv"           % "opencsv"           % "3.3",
+  "com.typesafe.akka"    %% "akka-testkit"      % akkaVersion % "test"
 )
 
 lazy val cliDeps = Seq(

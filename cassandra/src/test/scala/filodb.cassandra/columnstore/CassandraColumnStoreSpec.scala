@@ -161,6 +161,8 @@ class CassandraColumnStoreSpec extends CassandraFlatSpec with BeforeAndAfter {
     }
   }
 
+  it should "return empty iterator if cannot find partition or version" in (pending)
+
   it should "return segment with empty chunks if cannot find columns" in {
     whenReady(colStore.appendSegment(baseSegment, 0)) { response =>
       response should equal (Success)

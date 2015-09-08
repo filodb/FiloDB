@@ -7,6 +7,9 @@ import filodb.core.metadata.Dataset
 
 /**
  * Holds the current state of a dataset reprojector, especially outstanding ColumnStore tasks.
+ * One per dataset, typed to the dataset's sort key.
+ *
+ * outstandingTasks should hold a future for writing in each fixed keyRange interval.
  */
 trait ReprojectorState[K] {
   def dataset: Dataset
@@ -22,7 +25,7 @@ trait Reprojector {
   /**
    * Does reprojection (columnar flushes from memtable) for a single dataset.  Returns an updated copy of
    * the ReprojectorState.  Side effects:
-   *  - ColumnStore I/O
+   *  - ColumnStore I/O. May split segments and write into multiple segments.
    *  - May delete rows from MemTable that have been acked successfully as flushed by ColumnStore.
    *
    * @returns an updated ReprojectorState with current outstanding I/O requests. Stale ones may be cleaned up.

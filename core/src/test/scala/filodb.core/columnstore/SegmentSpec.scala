@@ -1,5 +1,6 @@
 package filodb.core.columnstore
 
+import filodb.core._
 import filodb.core.metadata.Column
 import java.nio.ByteBuffer
 import org.velvia.filo.{ColumnParser, TupleRowIngestSupport}

@@ -3,6 +3,8 @@ package filodb.core.metadata
 import com.typesafe.scalalogging.slf4j.StrictLogging
 import enumeratum.{Enum, EnumEntry}
 
+import filodb.core.Types._
+
 /**
  * Defines a column of data and its properties.
  *
@@ -29,6 +31,9 @@ case class Column(name: String,
                   serializer: Column.Serializer = Column.Serializer.FiloSerializer,
                   isDeleted: Boolean = false,
                   isSystem: Boolean = false) {
+  // More type safe than just using ==, if we ever change the type of ColumnId
+  def hasId(id: ColumnId): Boolean = name == id
+
   /**
    * Has one of the properties other than name, dataset, version changed?
    * (Name and dataset have to be constant for comparison to even be valid)

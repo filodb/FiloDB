@@ -1,5 +1,6 @@
 package filodb.core.columnstore
 
+import filodb.core._
 import java.nio.ByteBuffer
 
 import org.scalatest.FunSpec

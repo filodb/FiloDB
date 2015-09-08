@@ -1,10 +1,10 @@
 package filodb.core.columnstore
 
 import com.typesafe.config.ConfigFactory
+import filodb.core._
 import filodb.core.metadata.Column
 import java.nio.ByteBuffer
 import org.velvia.filo.{ColumnParser, TupleRowIngestSupport}
-import filodb.core.cassandra.CassandraColumnStore
 
 import org.scalatest.FunSpec
 import org.scalatest.Matchers
@@ -15,8 +15,7 @@ class ChunkMergingStrategySpec extends FunSpec with Matchers {
   val sortKey = "age"
 
   import scala.concurrent.ExecutionContext.Implicits.global
-  val colStore = new CassandraColumnStore(ConfigFactory.load(),
-                                          { x => schema(2) })
+  val colStore = new InMemoryColumnStore({ x => schema(2) })
   val dataset = "foo"
   val mergingStrategy = new AppendingChunkMergingStrategy(colStore, { x => schema(2) })
 
