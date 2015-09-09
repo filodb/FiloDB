@@ -28,6 +28,7 @@ class MapDBMemTableSpec extends FunSpec with Matchers with BeforeAndAfter {
       resp should equal (MemTable.Ingested)
 
       mTable.datasets should equal (Set(dataset.name))
+      mTable.numRows(dataset) should equal (6L)
 
       val outRows = mTable.readRows(keyRange)
       outRows.toSeq.map(_.getString(0)) should equal (firstNames)
@@ -38,6 +39,8 @@ class MapDBMemTableSpec extends FunSpec with Matchers with BeforeAndAfter {
       resp should equal (MemTable.Ingested)
       val resp2 = mTable.ingestRows[Long](dataset, schema, names.take(2).map(TupleRowReader), 10001L)
       resp2 should equal (MemTable.Ingested)
+
+      mTable.numRows(dataset) should equal (4L)
 
       val outRows = mTable.readRows(keyRange)
       outRows.toSeq.map(_.getString(0)) should equal (Seq("Khalil", "Rodney", "Ndamukong", "Jerry"))

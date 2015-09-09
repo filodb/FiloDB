@@ -3,6 +3,7 @@ package filodb.core.reprojector
 import com.typesafe.config.Config
 import org.mapdb._
 import scala.collection.mutable.HashSet
+import scala.math.Ordered
 import scala.util.Try
 
 import filodb.core.{KeyRange, SortKeyHelper}
@@ -10,9 +11,21 @@ import filodb.core.Types._
 import filodb.core.metadata.{Column, Dataset}
 import filodb.core.columnstore.RowReader
 
+case class IndexKey[K: SortKeyHelper](partition: PartitionKey, k: K) extends Ordered[IndexKey[K]] {
+  val helper = implicitly[SortKeyHelper[K]]
+  def compare(that: IndexKey[K]): Int =
+    if (partition == that.partition) { helper.ordering.compare(k, that.k) }
+    else                             { partition compare that.partition }
+}
+
 /**
  * A MemTable backed by MapDB.  Need to do some experimentation to come up with a setup that is fast
  * yet safe, for reading and writing. Not there yet.
+ *
+ * Right now, for each dataset, there exists two BTreeMaps:
+ * - One sorted by (partition key, sort key) for reading rows in a segment
+ * - One sorted by atomic row counter, for determining flush order
+ *
  * ==Configuration==
  * {{{
  *   memtable {
@@ -25,12 +38,7 @@ class MapDBMemTable(config: Config) extends MemTable {
   import RowReader._
   import collection.JavaConversions._
 
-  def totalNumRows: Long = ???
-  def totalBytesUsed: Long = ???
   def datasets: Set[String] = _datasets.toSet
-
-  def mostStaleDatasets(k: Int = DefaultTopK): Seq[String] = ???
-  def mostStalePartitions(dataset: String, k: Int = DefaultTopK): Seq[PartitionKey] = ???
 
   def close(): Unit = { db.close() }
 
@@ -55,16 +63,16 @@ class MapDBMemTable(config: Config) extends MemTable {
     }
   }
 
-  // TODO: heap structures for timestamp / most stale calculations
+  private val rowCounter = db.atomicLong("/counter")
 
   /**
    * === Row ingest, read, delete operations ===
    */
 
-  def ingestRows[K: TypedFieldExtractor](dataset: Dataset,
-                                         schema: Seq[Column],
-                                         rows: Seq[RowReader],
-                                         timestamp: Long): IngestionResponse = {
+  def ingestRows[K: TypedFieldExtractor: SortKeyHelper](dataset: Dataset,
+                                                        schema: Seq[Column],
+                                                        rows: Seq[RowReader],
+                                                        timestamp: Long): IngestionResponse = {
     val extractor = implicitly[TypedFieldExtractor[K]]
     _datasets += dataset.name
 
@@ -76,17 +84,17 @@ class MapDBMemTable(config: Config) extends MemTable {
     val sortColNo = schema.indexWhere(_.hasId(dataset.projections.head.sortColumn))
     if (sortColNo < 0) return BadSchema
 
-    // Next. group all the rows by partition
-    val rowsByPart = rows.groupBy(partitionFunc)
+    // For each row: bump row counter, insert into rows map and then index
+    // NOTE: index simply points back at rows map
+    val (indexMap, rowMap) = getMaps[K](dataset.name)
+    for { row <- rows } {
+      val rowNum = rowCounter.incrementAndGet
+      rowMap.put(rowNum, row)
+      val sortKey = extractor.getField(row, sortColNo)
+      val oldRowNum = indexMap.put(IndexKey(partitionFunc(row), sortKey), rowNum)
 
-    // For each partition: get the database
-    for { (partition, partRows) <- rowsByPart } {
-      val partMap = db.treeMap[K, RowReader](getDBName(dataset.name, partition))
-
-      // Insert the rows by sort key
-      partRows.foreach { row => partMap.put(extractor.getField(row, sortColNo), row) }
-
-      // Update timestamp for each partition
+      // If we are replacing an existing row, delete the old row in rowMap
+      if (oldRowNum != 0) rowMap.remove(oldRowNum)
     }
 
     // commit the whole thing
@@ -95,31 +103,44 @@ class MapDBMemTable(config: Config) extends MemTable {
     Ingested
   }
 
-  def readRows[K](keyRange: KeyRange[K]): Iterator[RowReader] = {
-    val partMap = db.treeMap[K, RowReader](getDBName(keyRange.dataset, keyRange.partition))
-    partMap.subMap(keyRange.start, keyRange.end).keySet.iterator.map { k => partMap.get(k) }
+  def readRows[K: SortKeyHelper](keyRange: KeyRange[K]): Iterator[RowReader] = {
+    val (indexMap, rowMap) = getMaps[K](keyRange.dataset)
+    indexMap.subMap(IndexKey(keyRange.partition, keyRange.start), IndexKey(keyRange.partition, keyRange.end))
+      .keySet.iterator.map { k => rowMap.get(indexMap.get(k)) }
   }
 
-  def removeRows[K](keyRange: KeyRange[K]): Unit = {
-    // get database for partition
-    val partMap = db.treeMap[K, RowReader](getDBName(keyRange.dataset, keyRange.partition))
+  def removeRows[K: SortKeyHelper](dataset: Dataset, partition: PartitionKey, keys: Seq[K]): Unit = {
+    val (indexMap, rowMap) = getMaps[K](dataset.name)
 
-    // remove rows
-    partMap.subMap(keyRange.start, keyRange.end).keySet.iterator.foreach { k => partMap.remove(k) }
+    // remove rows in both index as well as rowMap
+    keys.foreach { k =>
+      val indexKey = IndexKey(partition, k)
+      rowMap.remove(indexMap.get(indexKey))
+      indexMap.remove(indexKey)
+    }
+
+    // TODO: remove pending state
     db.commit()
-
-    // is partition empty?  Then delete DB, remove staleness timestamp from heap, update dataset staleness
   }
 
-  /**
-   * Returns the key range encompassing all the rows in a given partition of a dataset.
-   */
-  def getKeyRange[K: SortKeyHelper](dataset: Dataset, partition: PartitionKey): KeyRange[K] = {
-    val partMap = db.treeMap[K, RowReader](getDBName(dataset.name, partition))
-    KeyRange(dataset.name, partition, partMap.firstKey, partMap.lastKey)
+  def oldestAvailableRow[K](dataset: Dataset, skipPending: Boolean = true): Option[(PartitionKey, K)] = ???
+
+  def markRowsAsPending[K](dataset: Dataset, partition: PartitionKey, keys: Seq[K]): Unit = ???
+
+  def numRows(dataset: Dataset): Long = {
+    val (_, rowMap) = getMaps(dataset.name)
+    rowMap.size()
   }
 
   // private funcs
-  private def getDBName(datasetName: String, partition: PartitionKey) = s"$datasetName/$partition"
+  private def getMaps[K](dataset: String) = {
+    (db.treeMap[IndexKey[K], Long](s"$dataset/index0"),
+     db.treeMapCreate(s"$dataset/rows")
+       .keySerializer(Serializer.LONG)
+       .valueSerializer(db.getDefaultSerializer())
+       .valuesOutsideNodesEnable()   // Otherwise will pull out all values in a BTree Node at once
+       .counterEnable()
+       .makeOrGet().asInstanceOf[BTreeMap[Long, RowReader]])
+  }
 }
 

@@ -32,12 +32,7 @@ trait MemTable {
   import MemTable._
   import RowReader._
 
-  def totalNumRows: Long
-  def totalBytesUsed: Long
   def datasets: Set[String]
-
-  def mostStaleDatasets(k: Int = DefaultTopK): Seq[String]
-  def mostStalePartitions(dataset: String, k: Int = DefaultTopK): Seq[PartitionKey]
 
   def close(): Unit
 
@@ -54,19 +49,40 @@ trait MemTable {
    * @param timestamp the write timestamp to associate with the rows, used to calculate staleness
    * @returns Ingested or PleaseWait, if the MemTable is too full.
    */
-  def ingestRows[K: TypedFieldExtractor](dataset: Dataset,
-                                         schema: Seq[Column],
-                                         rows: Seq[RowReader],
-                                         timestamp: Long): IngestionResponse
-
-  def readRows[K](keyRange: KeyRange[K]): Iterator[RowReader]
-
-  def removeRows[K](keyRange: KeyRange[K]): Unit
+  def ingestRows[K: TypedFieldExtractor: SortKeyHelper](dataset: Dataset,
+                                                        schema: Seq[Column],
+                                                        rows: Seq[RowReader],
+                                                        timestamp: Long): IngestionResponse
 
   /**
-   * Returns the key range encompassing all the rows in a given partition of a dataset.
+   * Reads rows out. Note that inserts may be happening while rows are read, so results are not
+   * guaranteed to be stable.
    */
-  def getKeyRange[K: SortKeyHelper](dataset: Dataset, partition: PartitionKey): KeyRange[K]
+  def readRows[K: SortKeyHelper](keyRange: KeyRange[K]): Iterator[RowReader]
+
+  /**
+   * Removes specific rows from a particular partition.  Note: we do NOT give a range here, because
+   * inserts can be happening to the same range while keys are deleted.
+   */
+  def removeRows[K: SortKeyHelper](dataset: Dataset, partition: PartitionKey, keys: Seq[K]): Unit
+
+  /**
+   * == Operations to help triage rows for reprojection ==
+   */
+
+  /**
+   * Returns the oldest row in the dataset.
+   * @param skipPending if true, skip rows that are marked as pending
+   * @returns None if there are no more available rows.
+   */
+  def oldestAvailableRow[K](dataset: Dataset, skipPending: Boolean = true): Option[(PartitionKey, K)]
+
+  /**
+   * Marks a bunch of rows as "pending", perhaps they are being written out to ColumnStore?
+   */
+  def markRowsAsPending[K](dataset: Dataset, partition: PartitionKey, keys: Seq[K]): Unit
+
+  def numRows(dataset: Dataset): Long
 
   /**
    * == Common helper funcs ==
