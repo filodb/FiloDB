@@ -162,7 +162,9 @@ trait MemTable extends StrictLogging {
       Some(row => Dataset.DefaultPartitionKey)
     } else {
       val partitionColNo = schema.indexWhere(_.hasId(dataset.partitionColumn))
-      if (partitionColNo < 0) None else Some(row => row.getString(partitionColNo))
+      if (partitionColNo < 0) return None
+      if (schema(partitionColNo).columnType != Column.ColumnType.StringColumn) return None
+      Some(row => row.getString(partitionColNo))
     }
   }
 }
