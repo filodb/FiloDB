@@ -2,37 +2,45 @@ package filodb.core.reprojector
 
 import filodb.core.Types._
 
+/**
+ * FlushPolicy's check for new flush cycle opportunities by looking at the active memtables and using
+ * some heuristics to determine what datasets to flush next.  Flush means to flipBuffers() and cause
+ * the Active table to be swapped into Locked state.
+ */
 trait FlushPolicy {
-  // this could check memory size, state of memtable, etc.
-  def shouldFlush(memtable: MemTable): Boolean
-
-  // Determine the next dataset and version to flush
-  def nextFlush(memtable: MemTable): (TableName, Int)
-
-  protected def allNumRows(memtable: MemTable): Seq[((TableName, Int), Long)] = {
-    for { dataset <- memtable.datasets.toSeq
-          version <- memtable.versionsForDataset(dataset).get.toSeq }
-    yield { ((dataset, version), memtable.numRows(dataset, version, MemTable.Active).get) }
-  }
+  /**
+   * Determine the next dataset and version to flush using some heuristic.
+   * Should ignore currently flushing datasets (ie Locked memtable is nonempty)
+   * @returns None if it is not time to flush yet, or all datasets are already being flushed.
+   *          Some((dataset, version)) for the next flushing candidate.
+   */
+  def nextFlush(memtable: MemTable): Option[(TableName, Int)]
 }
 
 /**
  * A really dumb flush policy based purely on the total # of rows across all datasets.
+ * Flushes if the total # of rows is equal to or exceeding the maxTotalRows.
  */
 class NumRowsFlushPolicy(maxTotalRows: Long) extends FlushPolicy {
-  def shouldFlush(memtable: MemTable): Boolean = {
-    val totalRows = allNumRows(memtable).map(_._2).sum
-    totalRows > maxTotalRows
-  }
+  def nextFlush(memtable: MemTable): Option[(TableName, Int)] = {
+    val activeRows = memtable.allNumRows(MemTable.Active)
+    val flushingRows = memtable.flushingDatasets
+    val totalRows = activeRows.map(_._2).sum + flushingRows.map(_._2).sum
 
-  // Determine the next dataset and version to flush
-  def nextFlush(memtable: MemTable): (TableName, Int) = {
-    // Just iterate and find the (dataset, version) with the most rows
-    val numRows = allNumRows(memtable)
-    val highest = numRows.foldLeft(numRows.head) { case (highest, (nameVer, numRows)) =>
-      if (numRows > highest._2) (nameVer, numRows) else highest
+    if (totalRows < maxTotalRows) {
+      None
+    } else {
+      val flushingSet = flushingRows.map(_._1).toSet
+      val notFlushingRows = activeRows.filterNot { case (dv, numRows) => flushingSet contains dv }
+      if (notFlushingRows.isEmpty) {
+        None
+      } else {
+        val highest = notFlushingRows.foldLeft(notFlushingRows.head) { case (highest, (nameVer, numRows)) =>
+          if (numRows > highest._2) (nameVer, numRows) else highest
+        }
+        Some(highest._1)
+      }
     }
-    highest._1
   }
 }
 

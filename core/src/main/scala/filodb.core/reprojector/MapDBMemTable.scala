@@ -107,7 +107,10 @@ class MapDBMemTable(config: Config) extends MemTable {
     val lockedName = tableName(dataset, version, Locked)
     // First check that lock table is empty
     getRowMap[Any](dataset, version, Locked).map { lockedMap =>
-      if (lockedMap.size() != 0) return LockedNotEmpty
+      if (lockedMap.size() != 0) {
+        logger.warn(s"Cannot flip buffers for ($dataset/$version) because Locked memtable nonempty")
+        return LockedNotEmpty
+      }
       logger.debug(s"Deleting locked memtable for dataset $dataset / version $version")
       db.delete(lockedName)
     }.getOrElse(return NoSuchDatasetVersion)

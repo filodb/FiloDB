@@ -47,6 +47,8 @@ object MemTable {
  * For each (dataset, version), a MemTable ingests new rows into an Active table.  It can then be
  * flipped into a Locked table, which cannot ingest new rows and is used for flushing/reprojections.
  *
+ * A dataset being actively flushed has a Locked table whose number of rows is decreasing towards 0.
+ *
  * It definitely must be multithread safe, and very very fast.  Synchronization occurs around setting up
  * new ingestion datasets.
  *
@@ -96,11 +98,6 @@ trait MemTable extends StrictLogging {
 
   def getIngestionSetup(dataset: TableName, version: Int): Option[IngestionSetup] =
     ingestionSetups.get(dataset).flatMap(_.get(version))
-
-  def datasets: Set[String] = ingestionSetups.keys.toSet
-
-  def versionsForDataset(dataset: TableName): Option[Set[Int]] =
-    ingestionSetups.get(dataset).map(_.keys.toSet)
 
   private val ingestionSetups = new HashMap[TableName, HashMap[Int, IngestionSetup]]
 
@@ -152,6 +149,34 @@ trait MemTable extends StrictLogging {
   def flipBuffers(dataset: TableName, version: Int): FlipResponse
 
   def numRows(dataset: TableName, version: Int, buffer: BufferType): Option[Long]
+
+  /**
+   * == Querying and Stats ==
+   */
+  def datasets: Set[String] = ingestionSetups.keys.toSet
+
+  def versionsForDataset(dataset: TableName): Option[Set[Int]] =
+    ingestionSetups.get(dataset).map(_.keys.toSet)
+
+  /**
+   * Returns a list of the number of rows for each (dataset, version) memtable.
+   * @param buffer specify whether to look up Active or Locked memtables
+   * @param nonZero if true, only return tables that have nonzero # of rows
+   */
+  def allNumRows(buffer: BufferType, nonZero: Boolean = false): Seq[((TableName, Int), Long)] = {
+    val records = {
+      for { dataset <- datasets.toSeq
+            version <- versionsForDataset(dataset).get.toSeq }
+      yield { ((dataset, version), numRows(dataset, version, buffer).get) }
+    }
+    if (nonZero) records.filter(_._2 > 0) else records
+  }
+
+  /**
+   * Returns the (dataset, version) and # of rows in the Locked table for all dataset/versions
+   * that have non-empty Locked tables, ie that are actively being flushed.
+   */
+  def flushingDatasets: Seq[((TableName, Int), Long)] = allNumRows(Locked, nonZero = true)
 
   /**
    * == Common helper funcs ==

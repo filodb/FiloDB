@@ -92,7 +92,7 @@ class MapDBMemTableSpec extends FunSpec with Matchers with BeforeAndAfter {
       mTable.ingestRows("dataset", 0, names.take(3).map(TupleRowReader)) should equal (Ingested)
 
       mTable.numRows("dataset", 0, Active) should equal (Some(3L))
-      mTable.numRows("dataset", 0, Locked) should equal (Some(6L))
+      mTable.flushingDatasets should equal (Seq((("dataset", 0), 6L)))
 
       val outRows = mTable.readRows(keyRange, 0, Active)
       outRows.toSeq.map(_.getString(0)) should equal (firstNames take 3)
