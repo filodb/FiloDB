@@ -26,13 +26,13 @@ trait SortKeyHelper[K] {
 }
 
 /**
- * A typeclass for a timestamp based on a Long = milliseconds since Epoch
+ * A typeclass for a Long-based sort key
  */
-case class TimestampKeyHelper(intervalMs: Long) extends SortKeyHelper[Long] {
+case class LongKeyHelper(segmentLen: Long) extends SortKeyHelper[Long] {
   def ordering: Ordering[Long] = Ordering.Long
   def getSegment(key: Long): (Long, Long) = {
-    val segmentNum = key / intervalMs
-    (segmentNum * intervalMs, (segmentNum + 1) * intervalMs)
+    val segmentNum = key / segmentLen
+    (segmentNum * segmentLen, (segmentNum + 1) * segmentLen)
   }
   def toBytes(key: Long): ByteBuffer =
     ByteBuffer.allocate(java.lang.Long.BYTES).putLong(key).flip.asInstanceOf[ByteBuffer]

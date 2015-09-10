@@ -2,7 +2,6 @@ package filodb.core.reprojector
 
 import com.typesafe.config.Config
 import org.mapdb._
-import scala.collection.mutable.HashSet
 import scala.math.Ordered
 import scala.util.Try
 
@@ -11,6 +10,7 @@ import filodb.core.Types._
 import filodb.core.metadata.{Column, Dataset}
 import filodb.core.columnstore.RowReader
 
+// TODO: Implement MapDB Serializer for IndexKey
 case class IndexKey[K: SortKeyHelper](partition: PartitionKey, k: K) extends Ordered[IndexKey[K]] {
   val helper = implicitly[SortKeyHelper[K]]
   def compare(that: IndexKey[K]): Int =
@@ -22,9 +22,9 @@ case class IndexKey[K: SortKeyHelper](partition: PartitionKey, k: K) extends Ord
  * A MemTable backed by MapDB.  Need to do some experimentation to come up with a setup that is fast
  * yet safe, for reading and writing. Not there yet.
  *
- * Right now, for each dataset, there exists two BTreeMaps:
- * - One sorted by (partition key, sort key) for reading rows in a segment
- * - One sorted by atomic row counter, for determining flush order
+ * MapDB table namespacing scheme:
+ *   datasetName/version/active
+ *   datasetName/version/locked
  *
  * ==Configuration==
  * {{{
@@ -38,14 +38,11 @@ class MapDBMemTable(config: Config) extends MemTable {
   import RowReader._
   import collection.JavaConversions._
 
-  def datasets: Set[String] = _datasets.toSet
-
   def close(): Unit = { db.close() }
 
   // Data structures
 
   private val backingDbFile = Try(config.getString("memtable.local-filename")).toOption
-  private val _datasets = new HashSet[String]()
 
   // Use MMap-backed DB for fast I/O, yet persisted for easy recovery.
   // Leave the WAL for safer commits.  Experiment with this, maybe we can use WAL
@@ -63,38 +60,22 @@ class MapDBMemTable(config: Config) extends MemTable {
     }
   }
 
-  private val rowCounter = db.atomicLong("/counter")
-
   /**
    * === Row ingest, read, delete operations ===
    */
-
-  def ingestRows[K: TypedFieldExtractor: SortKeyHelper](dataset: Dataset,
-                                                        schema: Seq[Column],
-                                                        rows: Seq[RowReader],
-                                                        timestamp: Long): IngestionResponse = {
+  def ingestRowsInner[K: TypedFieldExtractor](setup: IngestionSetup,
+                                              version: Int,
+                                              rows: Seq[RowReader]): IngestionResponse = {
     val extractor = implicitly[TypedFieldExtractor[K]]
-    _datasets += dataset.name
+    implicit val helper = setup.helper[K]
 
     // First check if the DB is too full
 
-    // Get the ordinal/col# for partition key, and sort key
-    val partitionFunc = getPartitioningFunc(dataset, schema).getOrElse(return BadSchema)
-
-    val sortColNo = schema.indexWhere(_.hasId(dataset.projections.head.sortColumn))
-    if (sortColNo < 0) return BadSchema
-
-    // For each row: bump row counter, insert into rows map and then index
-    // NOTE: index simply points back at rows map
-    val (indexMap, rowMap) = getMaps[K](dataset.name)
+    // For each row: insert into rows map
+    val rowMap = getRowMap[K](setup.dataset.name, version, Active).get
     for { row <- rows } {
-      val rowNum = rowCounter.incrementAndGet
-      rowMap.put(rowNum, row)
-      val sortKey = extractor.getField(row, sortColNo)
-      val oldRowNum = indexMap.put(IndexKey(partitionFunc(row), sortKey), rowNum)
-
-      // If we are replacing an existing row, delete the old row in rowMap
-      if (oldRowNum != 0) rowMap.remove(oldRowNum)
+      val sortKey = extractor.getField(row, setup.sortColumnNum)
+      rowMap.put(IndexKey(setup.partitioningFunc(row), sortKey), row)
     }
 
     // commit the whole thing
@@ -103,44 +84,59 @@ class MapDBMemTable(config: Config) extends MemTable {
     Ingested
   }
 
-  def readRows[K: SortKeyHelper](keyRange: KeyRange[K]): Iterator[RowReader] = {
-    val (indexMap, rowMap) = getMaps[K](keyRange.dataset)
-    indexMap.subMap(IndexKey(keyRange.partition, keyRange.start), IndexKey(keyRange.partition, keyRange.end))
-      .keySet.iterator.map { k => rowMap.get(indexMap.get(k)) }
+  def readRows[K: SortKeyHelper](keyRange: KeyRange[K],
+                                 version: Int,
+                                 buffer: BufferType): Iterator[RowReader] = {
+    getRowMap[K](keyRange.dataset, version, buffer).map { rowMap =>
+      rowMap.subMap(IndexKey(keyRange.partition, keyRange.start), IndexKey(keyRange.partition, keyRange.end))
+        .keySet.iterator.map { k => rowMap.get(k) }
+    }.getOrElse {
+      Iterator.empty
+    }
   }
 
-  def removeRows[K: SortKeyHelper](dataset: Dataset, partition: PartitionKey, keys: Seq[K]): Unit = {
-    val (indexMap, rowMap) = getMaps[K](dataset.name)
-
-    // remove rows in both index as well as rowMap
-    keys.foreach { k =>
-      val indexKey = IndexKey(partition, k)
-      rowMap.remove(indexMap.get(indexKey))
-      indexMap.remove(indexKey)
+  def removeRows[K: SortKeyHelper](keyRange: KeyRange[K], version: Int): Unit = {
+    getRowMap[K](keyRange.dataset, version, Locked).map { rowMap =>
+      rowMap.subMap(IndexKey(keyRange.partition, keyRange.start), IndexKey(keyRange.partition, keyRange.end))
+        .keySet.iterator.foreach { k => rowMap.remove(k) }
     }
-
-    // TODO: remove pending state
     db.commit()
   }
 
-  def oldestAvailableRow[K](dataset: Dataset, skipPending: Boolean = true): Option[(PartitionKey, K)] = ???
+  def flipBuffers(dataset: TableName, version: Int): FlipResponse = {
+    val lockedName = tableName(dataset, version, Locked)
+    // First check that lock table is empty
+    getRowMap[Any](dataset, version, Locked).map { lockedMap =>
+      if (lockedMap.size() != 0) return LockedNotEmpty
+      logger.debug(s"Deleting locked memtable for dataset $dataset / version $version")
+      db.delete(lockedName)
+    }.getOrElse(return NoSuchDatasetVersion)
 
-  def markRowsAsPending[K](dataset: Dataset, partition: PartitionKey, keys: Seq[K]): Unit = ???
+    logger.debug(s"Flipping active to locked memtable for dataset $dataset / version $version")
+    db.rename(tableName(dataset, version, Active), lockedName)
+    Flipped
+  }
 
-  def numRows(dataset: Dataset): Long = {
-    val (_, rowMap) = getMaps(dataset.name)
-    rowMap.size()
+  def numRows(dataset: TableName, version: Int, buffer: BufferType): Option[Long] = {
+    getRowMap[Any](dataset, version, buffer).map { rowMap =>
+      rowMap.size()
+    }
   }
 
   // private funcs
-  private def getMaps[K](dataset: String) = {
-    (db.treeMap[IndexKey[K], Long](s"$dataset/index0"),
-     db.treeMapCreate(s"$dataset/rows")
-       .keySerializer(Serializer.LONG)
-       .valueSerializer(db.getDefaultSerializer())
-       .valuesOutsideNodesEnable()   // Otherwise will pull out all values in a BTree Node at once
-       .counterEnable()
-       .makeOrGet().asInstanceOf[BTreeMap[Long, RowReader]])
+  private def tableName(dataset: TableName, version: Int, buffer: BufferType) =
+    s"$dataset/$version/" + (if (buffer == Active) "active" else "locked")
+
+  private def getRowMap[K](dataset: TableName, version: Int, buffer: BufferType) = {
+    // We don't really need the IngestionSetup, just want to make sure users setup tables first
+    getIngestionSetup(dataset, version).map { setup =>
+      db.treeMapCreate(tableName(dataset, version, buffer))
+        .keySerializer(db.getDefaultSerializer())
+        .valueSerializer(db.getDefaultSerializer())
+        .valuesOutsideNodesEnable()   // Otherwise will pull out all values in a BTree Node at once
+        .counterEnable()
+        .makeOrGet().asInstanceOf[BTreeMap[IndexKey[K], RowReader]]
+    }
   }
 }
 

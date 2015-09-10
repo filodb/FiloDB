@@ -9,7 +9,7 @@ import org.scalatest.FunSpec
 import org.scalatest.Matchers
 
 object SegmentSpec {
-  implicit val keyHelper = TimestampKeyHelper(10000L)
+  implicit val keyHelper = LongKeyHelper(10000L)
 
   val schema = Seq(Column("first", "dataset1", 0, Column.ColumnType.StringColumn),
                    Column("last", "dataset1", 0, Column.ColumnType.StringColumn),

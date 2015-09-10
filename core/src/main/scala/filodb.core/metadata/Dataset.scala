@@ -1,5 +1,8 @@
 package filodb.core.metadata
 
+import scala.reflect.ClassTag
+
+import filodb.core._
 import filodb.core.Types
 
 /**
@@ -22,7 +25,8 @@ case class Dataset(name: String,
  * Config options for a table define operational details for the column store and memtable.
  * Every option must have a default!
  */
-case class DatasetOptions(chunkSize: Int)
+case class DatasetOptions(chunkSize: Int,
+                          segmentSize: String)
 
 object Dataset {
   // If a partitioning column is not defined then this refers to a single global partition, and
@@ -30,7 +34,8 @@ object Dataset {
   val DefaultPartitionColumn = ":single"
   val DefaultPartitionKey: Types.PartitionKey = "/0"
 
-  val DefaultOptions = DatasetOptions(chunkSize = 1000)
+  val DefaultOptions = DatasetOptions(chunkSize = 1000,
+                                      segmentSize = "10000")
 
   /**
    * Creates a new Dataset with a single superprojection with a defined sort order.
@@ -42,4 +47,15 @@ object Dataset {
 
   def apply(name: String, sortColumn: String): Dataset =
     Dataset(name, Seq(Projection(0, sortColumn)), DefaultPartitionColumn)
+
+  /**
+   * Returns a SortKeyHelper configured from the DatasetOptions.
+   */
+  def sortKeyHelper[K: ClassTag](options: DatasetOptions): SortKeyHelper[K] = {
+    import Column.ColumnType._
+    implicitly[ClassTag[K]].runtimeClass match {
+      case java.lang.Long.TYPE => (new LongKeyHelper(options.segmentSize.toLong)).
+                                    asInstanceOf[SortKeyHelper[K]]
+    }
+  }
 }

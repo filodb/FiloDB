@@ -24,26 +24,37 @@ class MapDBMemTableSpec extends FunSpec with Matchers with BeforeAndAfter {
 
   describe("insertRows and readRows") {
     it("should insert out of order rows and read them back in order") {
-      val resp = mTable.ingestRows[Long](dataset, schema, names.map(TupleRowReader), 10000L)
+      val setupResp = mTable.setupIngestion(dataset, schema, 0)
+      setupResp should equal (MemTable.SetupDone)
+
+      val resp = mTable.ingestRows("dataset", 0, names.map(TupleRowReader))
       resp should equal (MemTable.Ingested)
 
       mTable.datasets should equal (Set(dataset.name))
-      mTable.numRows(dataset) should equal (6L)
+      mTable.numRows("dataset", 0, MemTable.Active) should equal (Some(6L))
 
-      val outRows = mTable.readRows(keyRange)
+      val outRows = mTable.readRows(keyRange, 0, MemTable.Active)
       outRows.toSeq.map(_.getString(0)) should equal (firstNames)
     }
 
     it("should replace rows and read them back in order") {
-      val resp = mTable.ingestRows[Long](dataset, schema, names.take(4).map(TupleRowReader), 10000L)
+      val setupResp = mTable.setupIngestion(dataset, schema, 0)
+      setupResp should equal (MemTable.SetupDone)
+
+      val resp = mTable.ingestRows("dataset", 0, names.take(4).map(TupleRowReader))
       resp should equal (MemTable.Ingested)
-      val resp2 = mTable.ingestRows[Long](dataset, schema, names.take(2).map(TupleRowReader), 10001L)
+      val resp2 = mTable.ingestRows("dataset", 0, names.take(2).map(TupleRowReader))
       resp2 should equal (MemTable.Ingested)
 
-      mTable.numRows(dataset) should equal (4L)
+      mTable.numRows("dataset", 0, MemTable.Active) should equal (Some(4L))
 
-      val outRows = mTable.readRows(keyRange)
+      val outRows = mTable.readRows(keyRange, 0, MemTable.Active)
       outRows.toSeq.map(_.getString(0)) should equal (Seq("Khalil", "Rodney", "Ndamukong", "Jerry"))
+    }
+
+    it("should get NoSuchDatasetVersion if do not setup first") {
+      val resp = mTable.ingestRows("a_dataset", 0, names.map(TupleRowReader))
+      resp should equal (MemTable.NoSuchDatasetVersion)
     }
 
     it("should correctly report stale partitions") (pending)
