@@ -3,37 +3,22 @@ package filodb.core.reprojector
 import scala.concurrent.Future
 
 import filodb.core._
-import filodb.core.metadata.Dataset
-
-/**
- * Holds the current state of a dataset reprojector, especially outstanding ColumnStore tasks.
- * One per dataset, typed to the dataset's sort key.
- *
- * outstandingTasks should hold a future for writing in each fixed keyRange interval.
- */
-trait ReprojectorState[K] {
-  def dataset: Dataset
-  def outstandingTasks: Map[KeyRange[K], Future[Response]]
-}
+import filodb.core.metadata.{Dataset, Column}
 
 /**
  * The Reprojector flushes rows out of the MemTable and writes out Segments to the ColumnStore.
- * Most of the work done by this actual implementation should just be figuring out which rows/keyranges/
- * partitions/segments to flush.  Most of the work should be done asynchronously.
+ * All of the work should be done asynchronously.
+ * The reprojector should be stateless.  It takes MemTables and creates Futures for reprojection tasks.
  */
 trait Reprojector {
   /**
-   * Does reprojection (columnar flushes from memtable) for a single dataset.  Returns an updated copy of
-   * the ReprojectorState.  Side effects:
-   *  - ColumnStore I/O. May split segments and write into multiple segments.
-   *  - May delete rows from MemTable that have been acked successfully as flushed by ColumnStore.
+   * Does reprojection (columnar flushes from memtable) for a single dataset.
+   * Should be completely stateless.
+   * Does not need to reproject all the rows from the Locked memtable, but should progressively
+   * delete rows from the memtable until there are none left.
    *
-   * @returns an updated ReprojectorState with current outstanding I/O requests. Stale ones may be cleaned up.
+   * @returns a Future[Response], representing a reprojection task.  It should only modify memtable state
+   *          if the task succeeds.
    */
-  def reproject[K](state: ReprojectorState[K]): ReprojectorState[K]
-
-  /**
-   * Cleans up tasks that have been done from the ReprojectorState.
-   */
-  def cleanup[K](state: ReprojectorState[K]): ReprojectorState[K]
+  def newTask[K](memTable: MemTable, dataset: Types.TableName, version: Int): Future[Response]
 }
