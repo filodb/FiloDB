@@ -135,6 +135,13 @@ trait MemTable extends StrictLogging {
                                  buffer: BufferType): Iterator[RowReader]
 
   /**
+   * Reads all rows of the memtable out, from every partition.  Partition ordering is not
+   * guaranteed, but all sort keys K within the partition will be ordered.
+   */
+  def readAllRows[K](dataset: TableName, version: Int, buffer: BufferType):
+      Iterator[(PartitionKey, K, RowReader)]
+
+  /**
    * Removes specific rows from a particular keyRange and version.  Can only remove rows
    * from the Locked buffer.
    */

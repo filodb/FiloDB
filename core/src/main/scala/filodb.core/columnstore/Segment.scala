@@ -61,14 +61,10 @@ class GenericSegment[K](val keyRange: KeyRange[K],
  * A Segment class for easily adding bunches of rows as new columnar chunks, based upon
  * a fixed schema and RowIngestSupport typeclass.  Automatically increments the chunkId
  * properly.
- *
- * @param getSortKey a function to extract the sort key K out of the row type R.  Note that
- *                   the sort key must not be optional.
  */
 class RowWriterSegment[K: SortKeyHelper, R](override val keyRange: KeyRange[K],
                                             schema: Seq[Column],
-                                            ingestSupport: RowIngestSupport[R],
-                                            getSortKey: R => K)
+                                            ingestSupport: RowIngestSupport[R])
 //scalastyle:off
 //sorry for this ugly hack but only way to get scalac to pass in the SortKeyHelper
 // properly it seems :(
@@ -86,11 +82,20 @@ extends GenericSegment(keyRange, null) {
   /**
    * Adds a bunch of rows as a new set of chunks with the same chunkId.  The nextChunkId from
    * a ChunkRowMap will be used.
+   * @param getSortKey a function to extract the sort key K out of the row type R.  Note that
+   *                   the sort key must not be optional.
    */
-  def addRowsAsChunk(rows: Seq[R]): Unit = {
+  def addRowsAsChunk(rows: Seq[R], getSortKey: R => K): Unit = {
     val newChunkId = index.nextChunkId
     rows.zipWithIndex.foreach { case (r, i) => updatingIndex.update(getSortKey(r), newChunkId, i) }
     val chunkMap = RowToColumnBuilder.buildFromRows(rows, filoSchema, ingestSupport)
+    chunkMap.foreach { case (col, bytes) => addChunk(newChunkId, col, bytes) }
+  }
+
+  def addRowsAsChunk(rows: Seq[(PartitionKey, K, R)]): Unit = {
+    val newChunkId = index.nextChunkId
+    rows.zipWithIndex.foreach { case ((_, k, r), i) => updatingIndex.update(k, newChunkId, i) }
+    val chunkMap = RowToColumnBuilder.buildFromRows(rows.map(_._3), filoSchema, ingestSupport)
     chunkMap.foreach { case (col, bytes) => addChunk(newChunkId, col, bytes) }
   }
 }

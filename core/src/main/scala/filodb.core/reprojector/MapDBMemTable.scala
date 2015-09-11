@@ -95,6 +95,17 @@ class MapDBMemTable(config: Config) extends MemTable {
     }
   }
 
+  def readAllRows[K](dataset: TableName, version: Int, buffer: BufferType):
+      Iterator[(PartitionKey, K, RowReader)] = {
+    getRowMap[K](dataset, version, buffer).map { rowMap =>
+      rowMap.keySet.iterator.map { case index @ IndexKey(part, k) =>
+        (part, k, rowMap.get(index))
+      }
+    }.getOrElse {
+      Iterator.empty
+    }
+  }
+
   def removeRows[K: SortKeyHelper](keyRange: KeyRange[K], version: Int): Unit = {
     getRowMap[K](keyRange.dataset, version, Locked).map { rowMap =>
       rowMap.subMap(IndexKey(keyRange.partition, keyRange.start), IndexKey(keyRange.partition, keyRange.end))

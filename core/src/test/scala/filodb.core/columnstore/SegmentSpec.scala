@@ -27,8 +27,9 @@ object SegmentSpec {
                   (Some("Terrance"), Some("Knighton"), Some(29L)))
 
   def getRowWriter(keyRange: KeyRange[Long]): RowWriterSegment[Long, Product] =
-    new RowWriterSegment(keyRange, schema, support,
-                         { p: Product => p.productElement(2).asInstanceOf[Option[Long]].get })
+    new RowWriterSegment(keyRange, schema, support)
+
+  def getSortKey(p: Product): Long = p.productElement(2).asInstanceOf[Option[Long]].get
 
   val firstNames = Seq("Khalil", "Rodney", "Ndamukong", "Terrance", "Peyton", "Jerry")
 }
@@ -59,7 +60,7 @@ class SegmentSpec extends FunSpec with Matchers {
 
   it("RowWriterSegment should add rows and chunkify properly") {
     val segment = getRowWriter(keyRange)
-    segment.addRowsAsChunk(names)
+    segment.addRowsAsChunk(names, getSortKey _)
 
     segment.index.nextChunkId should equal (1)
     segment.index.chunkIdIterator.toSeq should equal (Seq(0, 0, 0, 0, 0, 0))
@@ -69,7 +70,7 @@ class SegmentSpec extends FunSpec with Matchers {
 
     // Write some of the rows as another chunk and make sure index updates properly
     // NOTE: this is row merging in operation!
-    segment.addRowsAsChunk(names.drop(4))
+    segment.addRowsAsChunk(names.drop(4), getSortKey _)
 
     segment.index.nextChunkId should equal (2)
     segment.index.chunkIdIterator.toSeq should equal (Seq(0, 0, 0, 1, 1, 0))
@@ -79,7 +80,7 @@ class SegmentSpec extends FunSpec with Matchers {
 
   it("RowReaderSegment should read back rows in sort key order") {
     val segment = getRowWriter(keyRange)
-    segment.addRowsAsChunk(names)
+    segment.addRowsAsChunk(names, getSortKey _)
     val readSeg = RowReaderSegment(segment, schema)
 
     readSeg.getColumns should equal (Set("first", "last", "age"))

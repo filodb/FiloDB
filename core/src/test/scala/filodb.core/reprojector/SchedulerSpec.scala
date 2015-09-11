@@ -5,7 +5,7 @@ import scala.concurrent.Future
 
 import filodb.core._
 import filodb.core.metadata.{Column, Dataset}
-import filodb.core.columnstore.{TupleRowReader, SegmentSpec}
+import filodb.core.columnstore.{TupleRowReader, RowReader, SegmentSpec}
 
 import org.scalatest.{FunSpec, Matchers, BeforeAndAfter}
 
@@ -45,11 +45,12 @@ class SchedulerSpec extends FunSpec with Matchers with BeforeAndAfter {
     resp should equal (Ingested)
   }
 
+  import RowReader._
   val testReprojector = new Reprojector {
-    def reproject[K](memTable: MemTable, dataset: Dataset, schema: Seq[Column], version: Int):
-        Future[Response] = {
-      reprojections = reprojections :+ (dataset.name -> version)
-      Future.successful(Success)
+    def reproject[K: TypedFieldExtractor](memTable: MemTable, setup: IngestionSetup, version: Int):
+        Future[Seq[Response]] = {
+      reprojections = reprojections :+ (setup.dataset.name -> version)
+      Future.successful(Seq(Success))
     }
   }
 

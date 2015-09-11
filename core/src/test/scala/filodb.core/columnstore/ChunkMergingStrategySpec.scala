@@ -21,10 +21,10 @@ class ChunkMergingStrategySpec extends FunSpec with Matchers {
 
   private def mergeRows(firstSegRows: Seq[Product], secondSegRows: Seq[Product]) = {
       val segment = getRowWriter(keyRange)
-      if (firstSegRows.nonEmpty) segment.addRowsAsChunk(firstSegRows)
+      if (firstSegRows.nonEmpty) segment.addRowsAsChunk(firstSegRows, getSortKey _)
 
       val segment2 = getRowWriter(keyRange)
-      if (secondSegRows.nonEmpty) segment2.addRowsAsChunk(secondSegRows)
+      if (secondSegRows.nonEmpty) segment2.addRowsAsChunk(secondSegRows, getSortKey _)
 
       val mergedSeg = mergingStrategy.mergeSegments(segment, segment2)
       mergedSeg should not be ('empty)
@@ -60,13 +60,13 @@ class ChunkMergingStrategySpec extends FunSpec with Matchers {
 
     it("should merge new rows to a nonempty RowReaderSegment successfully") {
       val segment = getRowWriter(keyRange)
-      segment.addRowsAsChunk(names take 3)
+      segment.addRowsAsChunk(names take 3, getSortKey _)
       // The below two lines simulate a write segment / read cycle
       val prunedSeg = mergingStrategy.pruneForCache(segment)
       val readerSeg = RowReaderSegment(prunedSeg.asInstanceOf[GenericSegment[Long]], schema drop 2)
 
       val segment2 = getRowWriter(keyRange)
-      segment2.addRowsAsChunk(names drop 3)
+      segment2.addRowsAsChunk(names drop 3, getSortKey _)
       val mergedSeg = mergingStrategy.mergeSegments(readerSeg, segment2)
 
       mergedSeg.index.chunkIdIterator.toSeq should equal (Seq(0, 0, 0, 1, 1, 1))
@@ -108,7 +108,7 @@ class ChunkMergingStrategySpec extends FunSpec with Matchers {
   describe("pruneForCache") {
     it("should prune segments that have more than the sortColumn") {
       val segment = getRowWriter(keyRange)
-      segment.addRowsAsChunk(names take 3)
+      segment.addRowsAsChunk(names take 3, getSortKey _)
       val prunedSeg = mergingStrategy.pruneForCache(segment)
 
       prunedSeg.getColumns should equal (Set("age"))

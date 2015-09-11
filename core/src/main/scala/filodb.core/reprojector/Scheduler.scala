@@ -30,7 +30,8 @@ class Scheduler(memTable: MemTable,
   logger.info(s"Starting Scheduler with memTable $memTable, reprojector $reprojector, and $flushPolicy")
 
   // Keeps track of active reprojection tasks, one per dataset/version
-  var tasks = Map.empty[(TableName, Int), Future[Response]]
+  type TaskMap = Map[(TableName, Int), Future[Seq[Response]]]
+  var tasks = Map.empty[(TableName, Int), Future[Seq[Response]]]
 
   /**
    * Call this periodically to maintain reprojection tasks.
@@ -81,11 +82,10 @@ class Scheduler(memTable: MemTable,
     tasks = tasks + ((dataset -> version) -> newTaskFuture)
   }
 
-  private def cleanupTasks(tasks: Map[(TableName, Int), Future[Response]]):
-      Map[(TableName, Int), Future[Response]] =
+  private def cleanupTasks(tasks: TaskMap): TaskMap =
     tasks.filterNot { case (nameVer, taskFuture) => isComplete(nameVer, taskFuture) }
 
-  private def isComplete(nameVer: (TableName, Int), taskFuture: Future[Response]): Boolean =
+  private def isComplete(nameVer: (TableName, Int), taskFuture: Future[Seq[Response]]): Boolean =
     taskFuture.value match {
       case None             => false
       case Some(Failure(t)) => logger.error(s"Reprojection task $nameVer failed", t)
