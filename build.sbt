@@ -59,10 +59,10 @@ lazy val coreDeps = Seq(
   "com.beachape"         %% "enumeratum"        % "1.2.1",
   "org.velvia.filo"      %% "filo-scala"        % "0.1.3" excludeAll(excludeShapeless),
   "io.spray"             %% "spray-caching"     % "1.3.2",
-  "org.mapdb"             % "mapdb"             % "2.0-beta6",
+  "org.mapdb"             % "mapdb"             % "1.0.6",
   "com.typesafe"          % "config"            % "1.2.0",
   "com.nativelibs4java"  %% "scalaxy-loops"     % "0.3.3" % "provided",
-  "org.scalatest"        %% "scalatest"         % "2.2.4"
+  "org.scalatest"        %% "scalatest"         % "2.2.4" % "test"
 )
 
 lazy val cassDeps = Seq(

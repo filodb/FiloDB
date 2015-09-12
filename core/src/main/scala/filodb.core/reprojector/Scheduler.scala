@@ -10,6 +10,7 @@ import filodb.core.metadata.MetaStore
 
 object Scheduler {
   val DefaultMaxTasks = 16
+  val DefaultMaxFailures = 32
 }
 
 /**
@@ -25,13 +26,17 @@ object Scheduler {
 class Scheduler(memTable: MemTable,
                 reprojector: Reprojector,
                 flushPolicy: FlushPolicy,
-                maxTasks: Int = Scheduler.DefaultMaxTasks) extends StrictLogging {
+                maxTasks: Int = Scheduler.DefaultMaxTasks,
+                maxFailures: Int = Scheduler.DefaultMaxFailures) extends StrictLogging {
   import Scheduler._
   logger.info(s"Starting Scheduler with memTable $memTable, reprojector $reprojector, and $flushPolicy")
 
   // Keeps track of active reprojection tasks, one per dataset/version
   type TaskMap = Map[(TableName, Int), Future[Seq[Response]]]
   var tasks = Map.empty[(TableName, Int), Future[Seq[Response]]]
+
+  // A list of failed Tasks with the most recent failure in front. Capped.
+  var failedTasks = List.empty[((TableName, Int), Throwable)]
 
   /**
    * Call this periodically to maintain reprojection tasks.
@@ -76,6 +81,7 @@ class Scheduler(memTable: MemTable,
     }
   }
 
+  // TODO: limit retries of failed tasks?  What to do with rows in memtable?
   private def addNewTask(dataset: TableName, version: Int): Unit = {
     val newTaskFuture = reprojector.newTask(memTable, dataset, version)
     logger.debug(s"Starting new reprojection task for ($dataset/$version)...")
@@ -89,6 +95,7 @@ class Scheduler(memTable: MemTable,
     taskFuture.value match {
       case None             => false
       case Some(Failure(t)) => logger.error(s"Reprojection task $nameVer failed", t)
+                               failedTasks = ((nameVer, t) :: failedTasks).take(maxFailures)
                                true
       case Some(Success(r)) => logger.debug(s"Reprojection task $nameVer succeeded: $r")
                                true

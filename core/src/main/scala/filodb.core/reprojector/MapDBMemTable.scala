@@ -10,14 +10,6 @@ import filodb.core.Types._
 import filodb.core.metadata.{Column, Dataset}
 import filodb.core.columnstore.RowReader
 
-// TODO: Implement MapDB Serializer for IndexKey
-case class IndexKey[K: SortKeyHelper](partition: PartitionKey, k: K) extends Ordered[IndexKey[K]] {
-  val helper = implicitly[SortKeyHelper[K]]
-  def compare(that: IndexKey[K]): Int =
-    if (partition == that.partition) { helper.ordering.compare(k, that.k) }
-    else                             { partition compare that.partition }
-}
-
 /**
  * A MemTable backed by MapDB.  Need to do some experimentation to come up with a setup that is fast
  * yet safe, for reading and writing. Not there yet.
@@ -29,7 +21,7 @@ case class IndexKey[K: SortKeyHelper](partition: PartitionKey, k: K) extends Ord
  * ==Configuration==
  * {{{
  *   memtable {
- *     local-filename = "/tmp/filodb.memtable"
+ *     backup-dir = "/tmp/filodb.memtable/"
  *   }
  * }}}
  */
@@ -42,23 +34,10 @@ class MapDBMemTable(config: Config) extends MemTable {
 
   // Data structures
 
-  private val backingDbFile = Try(config.getString("memtable.local-filename")).toOption
+  private val backupDir = Try(config.getString("memtable.backup-dir")).toOption
 
-  // Use MMap-backed DB for fast I/O, yet persisted for easy recovery.
-  // Leave the WAL for safer commits.  Experiment with this, maybe we can use WAL
-  // for crash recovery.
-  private val db = {
-    backingDbFile.map { dbFile =>
-      DBMaker.fileDB(new java.io.File(dbFile))
-             .fileMmapEnable()            // always enable mmap
-             .fileMmapEnableIfSupported() // only enable on supported platforms
-             .fileMmapCleanerHackEnable() // closes file on DB.close()
-             .closeOnJvmShutdown
-             .make()
-    }.getOrElse {
-      DBMaker.memoryDB.closeOnJvmShutdown.make()
-    }
-  }
+  // According to MapDB examples, use incremental backup with memory-only store
+  private val db = DBMaker.newHeapDB.transactionDisable.closeOnJvmShutdown.make()
 
   /**
    * === Row ingest, read, delete operations ===
@@ -75,12 +54,8 @@ class MapDBMemTable(config: Config) extends MemTable {
     val rowMap = getRowMap[K](setup.dataset.name, version, Active).get
     for { row <- rows } {
       val sortKey = extractor.getField(row, setup.sortColumnNum)
-      rowMap.put(IndexKey(setup.partitioningFunc(row), sortKey), row)
+      rowMap.put((setup.partitioningFunc(row), sortKey), row)
     }
-
-    // commit the whole thing
-    db.commit()
-
     Ingested
   }
 
@@ -88,7 +63,7 @@ class MapDBMemTable(config: Config) extends MemTable {
                                  version: Int,
                                  buffer: BufferType): Iterator[RowReader] = {
     getRowMap[K](keyRange.dataset, version, buffer).map { rowMap =>
-      rowMap.subMap(IndexKey(keyRange.partition, keyRange.start), IndexKey(keyRange.partition, keyRange.end))
+      rowMap.subMap((keyRange.partition, keyRange.start), (keyRange.partition, keyRange.end))
         .keySet.iterator.map { k => rowMap.get(k) }
     }.getOrElse {
       Iterator.empty
@@ -98,7 +73,7 @@ class MapDBMemTable(config: Config) extends MemTable {
   def readAllRows[K](dataset: TableName, version: Int, buffer: BufferType):
       Iterator[(PartitionKey, K, RowReader)] = {
     getRowMap[K](dataset, version, buffer).map { rowMap =>
-      rowMap.keySet.iterator.map { case index @ IndexKey(part, k) =>
+      rowMap.keySet.iterator.map { case index @ (part, k) =>
         (part, k, rowMap.get(index))
       }
     }.getOrElse {
@@ -108,10 +83,9 @@ class MapDBMemTable(config: Config) extends MemTable {
 
   def removeRows[K: SortKeyHelper](keyRange: KeyRange[K], version: Int): Unit = {
     getRowMap[K](keyRange.dataset, version, Locked).map { rowMap =>
-      rowMap.subMap(IndexKey(keyRange.partition, keyRange.start), IndexKey(keyRange.partition, keyRange.end))
-        .keySet.iterator.foreach { k => rowMap.remove(k) }
+      rowMap.subMap((keyRange.partition, keyRange.start), (keyRange.partition, keyRange.end))
+            .keySet.iterator.foreach { k => rowMap.remove(k) }
     }
-    db.commit()
   }
 
   def flipBuffers(dataset: TableName, version: Int): FlipResponse = {
@@ -144,12 +118,12 @@ class MapDBMemTable(config: Config) extends MemTable {
   private def getRowMap[K](dataset: TableName, version: Int, buffer: BufferType) = {
     // We don't really need the IngestionSetup, just want to make sure users setup tables first
     getIngestionSetup(dataset, version).map { setup =>
-      db.treeMapCreate(tableName(dataset, version, buffer))
-        .keySerializer(db.getDefaultSerializer())
-        .valueSerializer(db.getDefaultSerializer())
+      implicit val sortKeyOrdering: Ordering[K] = setup.helper[K].ordering
+      db.createTreeMap(tableName(dataset, version, buffer))
+        .comparator(Ordering[(PartitionKey, K)])
         .valuesOutsideNodesEnable()   // Otherwise will pull out all values in a BTree Node at once
         .counterEnable()
-        .makeOrGet().asInstanceOf[BTreeMap[IndexKey[K], RowReader]]
+        .makeOrGet().asInstanceOf[BTreeMap[(PartitionKey, K), RowReader]]
     }
   }
 }

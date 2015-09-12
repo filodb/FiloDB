@@ -1,5 +1,6 @@
 package filodb.core.reprojector
 
+import com.typesafe.scalalogging.slf4j.StrictLogging
 import org.velvia.filo.RowIngestSupport
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -58,7 +59,7 @@ trait Reprojector {
  */
 class DefaultReprojector(columnStore: ColumnStore,
                          maxRows: Int = 100000)
-                        (implicit ec: ExecutionContext) extends Reprojector {
+                        (implicit ec: ExecutionContext) extends Reprojector with StrictLogging {
   import MemTable._
   import Types._
   import RowReader._
@@ -99,7 +100,9 @@ class DefaultReprojector(columnStore: ColumnStore,
     val segmentTasks: Seq[Future[Response]] = segments.map { segment =>
       for { resp <- columnStore.appendSegment(segment, version) if resp == Success }
       yield {
+        logger.debug(s"Finished merging segment ${segment.keyRange}, version $version...")
         memTable.removeRows(segment.keyRange, version)
+        logger.debug(s"Removed rows for segment $segment from Locked table...")
         resp
       }
     }

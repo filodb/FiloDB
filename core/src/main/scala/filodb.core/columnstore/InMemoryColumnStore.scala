@@ -1,7 +1,9 @@
 package filodb.core.columnstore
 
+import com.typesafe.scalalogging.slf4j.StrictLogging
 import java.nio.ByteBuffer
 import java.util.TreeMap
+import javax.xml.bind.DatatypeConverter
 import scala.collection.mutable.HashMap
 import scala.concurrent.{ExecutionContext, Future}
 import spray.caching._
@@ -15,16 +17,17 @@ import filodb.core.metadata.Column
  * TODO: use thread-safe structures
  */
 class InMemoryColumnStore(getSortColumn: Types.TableName => Column)
-                         (implicit val ec: ExecutionContext) extends CachedMergingColumnStore {
+                         (implicit val ec: ExecutionContext)
+extends CachedMergingColumnStore with StrictLogging {
   import Types._
-  import filodb.core.columnstore._
   import collection.JavaConversions._
 
   val segmentCache = LruCache[Segment[_]](100)
 
   val mergingStrategy = new AppendingChunkMergingStrategy(this, getSortColumn)
 
-  type ChunkTree = TreeMap[(ColumnId, ByteBuffer, ChunkID), ByteBuffer]
+  type ChunkKey = (Types.ColumnId, ByteBuffer, Types.ChunkID)
+  type ChunkTree = TreeMap[ChunkKey, Array[Byte]]
   type RowMapTree = TreeMap[ByteBuffer, (ByteBuffer, ByteBuffer, Int)]
 
   val chunkDb = new HashMap[(TableName, PartitionKey, Int), ChunkTree]
@@ -35,8 +38,11 @@ class InMemoryColumnStore(getSortColumn: Types.TableName => Column)
                   version: Int,
                   segmentId: ByteBuffer,
                   chunks: Iterator[(ColumnId, ChunkID, ByteBuffer)]): Future[Response] = Future {
-    val chunkTree = chunkDb.getOrElseUpdate((dataset, partition, version), new ChunkTree)
-    chunks.foreach { case (colId, chunkId, bytes) => chunkTree.put((colId, segmentId, chunkId), bytes) }
+    val chunkTree = chunkDb.getOrElseUpdate((dataset, partition, version),
+                                            new ChunkTree((Ordering[ChunkKey])))
+    chunks.foreach { case (colId, chunkId, bytes) =>
+      chunkTree.put((colId, segmentId, chunkId), minimalBytes(bytes))
+    }
     Success
   }
 
@@ -54,14 +60,16 @@ class InMemoryColumnStore(getSortColumn: Types.TableName => Column)
   def readChunks[K](columns: Set[ColumnId],
                     keyRange: KeyRange[K],
                     version: Int): Future[Seq[ChunkedData]] = Future {
-    val chunkTree = chunkDb.getOrElseUpdate((keyRange.dataset, keyRange.partition, version), new ChunkTree)
+    val chunkTree = chunkDb.getOrElseUpdate((keyRange.dataset, keyRange.partition, version),
+                                            new ChunkTree((Ordering[ChunkKey])))
+    logger.debug(s"Reading chunks from columns $columns, keyRange $keyRange, version $version")
     for { column <- columns.toSeq } yield {
       val startKey = (column, keyRange.binaryStart, 0)
       val endKey   = (column, keyRange.binaryEnd,   0)  // exclusive end
       val it = chunkTree.subMap(startKey, endKey).entrySet.iterator
       val chunkList = it.toSeq.map { entry =>
         val (colId, segmentId, chunkId) = entry.getKey
-        (segmentId, chunkId, entry.getValue)
+        (segmentId, chunkId, ByteBuffer.wrap(entry.getValue))
       }
       ChunkedData(column, chunkList)
     }
@@ -81,4 +89,13 @@ class InMemoryColumnStore(getSortColumn: Types.TableName => Column)
                        partitionFilter: (PartitionKey => Boolean),
                        params: Map[String, String])
                       (processFunc: (ChunkRowMap => Unit)): Future[Response] = ???
+
+  def bbToHex(bb: ByteBuffer): String = DatatypeConverter.printHexBinary(bb.array)
+
+  def minimalBytes(bb: ByteBuffer): Array[Byte] = {
+    if (bb.position == 0 && bb.arrayOffset == 0) return bb.array
+    val aray = new Array[Byte](bb.remaining)
+    System.arraycopy(bb.array, bb.arrayOffset + bb.position, aray, 0, bb.remaining)
+    aray
+  }
 }

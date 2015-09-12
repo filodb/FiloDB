@@ -5,15 +5,18 @@ import com.typesafe.config.ConfigFactory
 import filodb.core.KeyRange
 import filodb.core.metadata.{Column, Dataset}
 import filodb.core.columnstore.{TupleRowReader, SegmentSpec}
+import scala.concurrent.Future
 
 import org.scalatest.{FunSpec, Matchers, BeforeAndAfter}
+import org.scalatest.concurrent.ScalaFutures
 
-class MapDBMemTableSpec extends FunSpec with Matchers with BeforeAndAfter {
+class MapDBMemTableSpec extends FunSpec with Matchers with BeforeAndAfter with ScalaFutures {
   import SegmentSpec._
   import MemTable._
 
   val keyRange = KeyRange("dataset", Dataset.DefaultPartitionKey, 0L, 10000L)
   var mTable: MemTable = _
+  import scala.concurrent.ExecutionContext.Implicits.global
 
   before {
     mTable = new MapDBMemTable(ConfigFactory.load)
@@ -99,6 +102,30 @@ class MapDBMemTableSpec extends FunSpec with Matchers with BeforeAndAfter {
 
       // Now, if we attempt to flip again, it should error out because Locked is not empty
       mTable.flipBuffers("dataset", 0) should equal (LockedNotEmpty)
+    }
+  }
+
+  describe("removeRows") {
+    it("should be able to delete rows") {
+      mTable.setupIngestion(dataset, schema, 0) should equal (SetupDone)
+      mTable.ingestRows("dataset", 0, names.map(TupleRowReader)) should equal (Ingested)
+
+      mTable.flipBuffers("dataset", 0) should equal (Flipped)
+
+      mTable.removeRows(keyRange, 0)
+      mTable.flushingDatasets should equal (Nil)
+    }
+
+    it("should be able to delete rows in a separate thread") {
+      mTable.setupIngestion(dataset, schema, 0) should equal (SetupDone)
+      mTable.ingestRows("dataset", 0, names.map(TupleRowReader)) should equal (Ingested)
+
+      mTable.flipBuffers("dataset", 0) should equal (Flipped)
+
+      val f = Future { mTable.removeRows(keyRange, 0) }
+      whenReady(f) { nothing =>
+        mTable.flushingDatasets should equal (Nil)
+      }
     }
   }
 
