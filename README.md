@@ -1,7 +1,7 @@
 # FiloDB
 
 [![Join the chat at https://gitter.im/velvia/FiloDB](https://badges.gitter.im/Join%20Chat.svg)](https://gitter.im/velvia/FiloDB?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)
-Distributed.  Columnar.  Versioned.
+Distributed.  Columnar.  Versioned.  Streaming.
 
 ```
     _______ __      ____  ____ 
@@ -11,14 +11,16 @@ Distributed.  Columnar.  Versioned.
 /_/   /_/_/\____/_____/_____/  
 ```
 
-FiloDB is a new open-source database based on Apache Cassandra and Spark SQL.  FiloDB brings breakthrough performance levels for analytical queries by using a columnar storage layout with different space-saving techniques like dictionary compression.  At the same time, row-level, column-level operations and built in versioning gives FiloDB far more flexibility than can be achieved using file-based technologies like Parquet alone.  
+FiloDB is a new open-source high performance analytical database based on Apache Cassandra and Spark SQL.
 
-* FiloDB aim's to bring one to two orders of magnitude speedups over OLAP performance of Cassandra 2.x CQL tables + Spark.  For the POC performance comparison, please see [cassandra-gdelt](http://github.com/velvia/cassandra-gdelt) repo.
-* Enable easy exactly-once ingestion from Kafka for streaming geospatial applications. 
-* Incrementally computed columns and geospatial annotations
-* MPP-like automatic caching of projections from popular queries for fast results
+* **Distributed** - FiloDB is designed from the beginning to run on best-of-breed distributed, scale-out storage platforms such as Apache Cassandra.  Queries run in parallel in Apache Spark for scale-out ad-hoc analysis.
+* **Columnar** - FiloDB brings breakthrough performance levels for analytical queries by using a columnar storage layout with different space-saving techniques like dictionary compression.  The performance is comparable to Parquet, and one to two orders of magnitude faster than Spark on Cassandra 2.x for analytical queries.  For the POC performance comparison, please see [cassandra-gdelt](http://github.com/velvia/cassandra-gdelt) repo.
+* **Versioned** - At the same time, row-level, column-level operations and built in versioning gives FiloDB far more flexibility than can be achieved using file-based technologies like Parquet alone.
+* Designed for **streaming** - Enable easy exactly-once ingestion from Kafka for streaming events, time series, and IoT applications - yet enable extremely fast ad-hoc analysis using the ease of use of SQL.  Each row is keyed by a partition and sort key, and writes using the same key are idempotent.  FiloDB does the hard work of keeping data stored in an efficient and sorted format.
 
-FiloDB is a great fit for bulk analytical workloads, or streaming / append-only event data.  It is not optimized for heavily transactional, update-oriented workflows.
+FiloDB is easy to use!  You can use Spark SQL for both ingestion (including from Streaming!) and querying.  You can connect Tableau or any other JDBC analysis tool to Spark SQL, and easily ingest data from JSON, CSV, any traditional database, Kafka, or any of the many sources supported by Spark.
+
+FiloDB is a great fit for bulk analytical workloads, or streaming /  event data.  It is not optimized for heavily transactional, update-oriented workflows.
 
 [Overview presentation](http://velvia.github.io/presentations/2014-filodb/#/) -- see the docs folder for design docs.
 
@@ -26,14 +28,19 @@ To compile the .mermaid source files to .png's, install the [Mermaid CLI](http:/
 
 ## Current Status
 
-Definitely alpha or pre-alpha.  What is here is more intended to show what is possible with columnar storage on Cassandra combined with Spark, and gather feedback.
-- Append-only
-- Ingestion and querying through Spark DataFrames
-- Keyed by partition and row number only
-- Only int, double, long, and string types
-- Localhost only - no locality in Spark input source
+* The storage format is subject to change at this time.
+* You can ingest data using Spark, partitioned by a partition key, and sorted using a sort key.
+* Only string partition keys and Long/Timestamp sort keys are supported, but many more to come
 
-Also, the design and architecture are heavily in flux.  Currently this is designed as a layer on top of Cassandra, but may (probably will) evolve towards something that can integrate with existing C* tables.
+## Roadmap
+
+Your input is appreciated!
+
+* Support for many more data types and sort and partition keys - please give us your input!
+* In-memory caching for significant query speedup
+* Projections.  Often-repeated queries can be sped up significantly with projections.
+* Use of GPU and SIMD instructions to speed up queries
+* Non-Spark ingestion API
 
 ## You can help!
 
