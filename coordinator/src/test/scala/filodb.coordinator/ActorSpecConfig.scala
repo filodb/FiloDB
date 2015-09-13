@@ -1,7 +1,9 @@
 package filodb.core
 
 import akka.actor.ActorSystem
+import akka.testkit.{ImplicitSender, TestKit}
 import com.typesafe.config.ConfigFactory
+import org.scalatest.{FunSpecLike, Matchers, BeforeAndAfter, BeforeAndAfterAll}
 
 trait ActorSpecConfig {
   val defaultConfig = """
@@ -12,4 +14,12 @@ trait ActorSpecConfig {
   // Allow Java system properties to set config options like akka.test.timefactor
   lazy val config = ConfigFactory.parseString(configString).withFallback(ConfigFactory.defaultOverrides())
   def getNewSystem = ActorSystem("test", config)
+}
+
+abstract class ActorTest(system: ActorSystem) extends TestKit(system)
+with FunSpecLike with Matchers with BeforeAndAfterAll with BeforeAndAfter with ImplicitSender {
+  override def afterAll() {
+    super.afterAll()
+    TestKit.shutdownActorSystem(system)
+  }
 }

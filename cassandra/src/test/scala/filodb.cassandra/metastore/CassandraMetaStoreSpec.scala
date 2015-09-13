@@ -1,19 +1,17 @@
-package filodb.core.cassandra
+package filodb.cassandra.metastore
 
-import akka.actor.ActorSystem
+import com.typesafe.config.ConfigFactory
 import java.nio.ByteBuffer
 import scala.concurrent.Future
 
-import filodb.core.datastore.Datastore
-import filodb.core.metadata.{Column, Dataset, Partition, Shard}
-import filodb.core.messages._
+import filodb.core._
+import filodb.core.metadata.{Column, Dataset, MetaStore}
+import filodb.cassandra.AllTablesTest
 
-object CassandraDatastoreSpec {
-  def getNewSystem = ActorSystem("test")
-}
+class CassandraMetaStoreSpec extends AllTablesTest {
+  import MetaStore._
 
-class CassandraDatastoreSpec extends AllTablesTest(CassandraDatastoreSpec.getNewSystem) {
-  import Datastore._
+  val metastore = new CassandraMetaStore(ConfigFactory.load)
 
   override def beforeAll() {
     super.beforeAll()
@@ -25,61 +23,20 @@ class CassandraDatastoreSpec extends AllTablesTest(CassandraDatastoreSpec.getNew
   describe("column API") {
     it("should return IllegalColumnChange if an invalid column addition submitted") {
       val firstColumn = Column("first", "foo", 1, Column.ColumnType.StringColumn)
-      whenReady(datastore.newColumn(firstColumn)) { response =>
+      whenReady(metastore.newColumn(firstColumn)) { response =>
         response should equal (Success)
       }
 
-      whenReady(datastore.newColumn(firstColumn.copy(version = 0))) { response =>
-        response.getClass should equal (classOf[IllegalColumnChange])
+      whenReady(metastore.newColumn(firstColumn.copy(version = 0)).failed) { err =>
+        err shouldBe an [IllegalColumnChange]
       }
     }
 
     val monthYearCol = Column("monthYear", "gdelt", 1, Column.ColumnType.LongColumn)
     it("should be able to create a Column and get the Schema") {
-      datastore.newColumn(monthYearCol).futureValue should equal (Success)
-      datastore.getSchema("gdelt", 10).futureValue should equal (TheSchema(Map("monthYear" -> monthYearCol)))
+      metastore.newColumn(monthYearCol).futureValue should equal (Success)
+      metastore.getSchema("gdelt", 10).futureValue should equal (Map("monthYear" -> monthYearCol))
     }
   }
 
-  describe("partition API") {
-    val p = Partition("foo", "first")
-    val pp = p.copy(shardVersions = Map(0L -> (0 -> 1)))
-
-    it("should not allow adding an invalid or not empty Partition") {
-      whenReady(datastore.newPartition(pp)) { response =>
-        response should equal (NotEmpty)
-      }
-
-      whenReady(datastore.newPartition(p.copy(chunkSize = 0))) { response =>
-        response should equal (NotValid)
-      }
-    }
-
-    it("should update both datasets and partitions table") {
-      whenReady(datastore.newPartition(p)) { response =>
-        response should equal (Success)
-      }
-
-      whenReady(datastore.getDataset(p.dataset)) { response =>
-        response should equal (TheDataset(Dataset("foo", Set("first"))))
-      }
-    }
-  }
-
-  describe("data API and throttling") {
-    val bb = ByteBuffer.wrap(Array[Byte](1, 2, 3, 4))
-    val shard = Shard(Partition("dummy", "0", chunkSize = 100), 0, 0L)
-    val columnBytes = Map("a" -> bb, "b" -> bb)
-
-    it("lots of concurrent write requests should get mostly TooManyRequests, some Acks") {
-      // Cassandra is pretty fast, but with a default test max futures limit of 3, should not take
-      // too many tries to hit the limit.
-      val futures = (0 until 20).map(i => datastore.insertOneChunk(shard, 0L, 3L, columnBytes))
-      val responses = Future.sequence(futures).futureValue
-      val acks = responses.collect { case Datastore.Ack(num) => num }.length
-      val tooManyRequests = responses.collect { case TooManyRequests => 1 }.length
-      acks should be > 1
-      tooManyRequests should be > 10
-    }
-  }
 }

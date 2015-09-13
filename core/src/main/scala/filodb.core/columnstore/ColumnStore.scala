@@ -177,7 +177,8 @@ trait CachedMergingColumnStore extends ColumnStore {
       var segIndex = 0
       chunkTriples.foreach { case (segmentId, chunkId, chunkBytes) =>
         // Rely on the fact that chunks are sorted by segmentId, in the same order as the rowMaps
-        segmentId.position(0)
+        // TODO: sigh.  The below line made core tests pass, but Cass tests fail.  ByteBuffers suck.
+        // segmentId.position(0)
         val segmentKey = helper.fromBytes(segmentId)
         while (segmentKey != segments(segIndex).keyRange.start) segIndex += 1
         segments(segIndex).addChunk(chunkId, columnName, chunkBytes)

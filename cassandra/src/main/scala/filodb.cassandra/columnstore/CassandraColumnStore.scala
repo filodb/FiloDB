@@ -1,4 +1,4 @@
-package filodb.cassandra
+package filodb.cassandra.columnstore
 
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.slf4j.StrictLogging
@@ -6,8 +6,8 @@ import java.nio.ByteBuffer
 import scala.concurrent.{ExecutionContext, Future}
 import spray.caching._
 
-import filodb.core.columnstore.{CachedMergingColumnStore, Types}
-import filodb.core.messages._
+import filodb.core._
+import filodb.core.columnstore.CachedMergingColumnStore
 import filodb.core.metadata.Column
 
 /**

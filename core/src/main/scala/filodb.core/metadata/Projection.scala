@@ -9,6 +9,7 @@ import filodb.core.Types._
  * By convention, projection 0 is the SuperProjection which consists of all columns from the dataset.
  */
 case class Projection(id: Int,
+                      dataset: TableName,
                       // TODO: support multiple sort columns
                       sortColumn: ColumnId,
                       reverse: Boolean = false,

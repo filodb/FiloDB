@@ -1,4 +1,4 @@
-package filodb.cassandra
+package filodb.cassandra.metastore
 
 import com.datastax.driver.core.Row
 import com.websudos.phantom.dsl._
@@ -42,13 +42,13 @@ object ColumnTable extends ColumnTable with SimpleCassandraConnector {
   // TODO: add in Config-based initialization code to find the keyspace, cluster, etc.
   implicit val keySpace = KeySpace("unittest")
 
-  import Util._
-  import filodb.core.messages._
+  import filodb.cassandra.Util._
+  import filodb.core._
 
   def getSchema(dataset: String, version: Int): Future[Column.Schema] = {
     val enum = select.where(_.dataset eqs dataset).and(_.version lte version)
                      .fetchEnumerator()
-    enum run Iteratee.fold(Column.EmptySchema)(Column.schemaFold)
+    (enum run Iteratee.fold(Column.EmptySchema)(Column.schemaFold)).handleErrors
   }
 
   def insertColumn(column: Column): Future[Response] = {

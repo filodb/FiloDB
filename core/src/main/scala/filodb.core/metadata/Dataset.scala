@@ -1,5 +1,7 @@
 package filodb.core.metadata
 
+import com.typesafe.config.{ConfigFactory, ConfigRenderOptions}
+import scala.collection.JavaConverters._
 import scala.reflect.ClassTag
 
 import filodb.core._
@@ -26,7 +28,23 @@ case class Dataset(name: String,
  * Every option must have a default!
  */
 case class DatasetOptions(chunkSize: Int,
-                          segmentSize: String)
+                          segmentSize: String) {
+  override def toString: String = {
+    val config = ConfigFactory.parseMap(Map(
+                   "chunkSize" -> chunkSize,
+                   "segmentSize" -> segmentSize
+                 ).asJava)
+    config.root.render(ConfigRenderOptions.concise)
+  }
+}
+
+object DatasetOptions {
+  def fromString(s: String): DatasetOptions = {
+    val config = ConfigFactory.parseString(s)
+    DatasetOptions(chunkSize = config.getInt("chunkSize"),
+                   segmentSize = config.getString("segmentSize"))
+  }
+}
 
 object Dataset {
   // If a partitioning column is not defined then this refers to a single global partition, and
@@ -43,10 +61,10 @@ object Dataset {
   def apply(name: String,
             sortColumn: String,
             partitionColumn: String): Dataset =
-    Dataset(name, Seq(Projection(0, sortColumn)), partitionColumn)
+    Dataset(name, Seq(Projection(0, name, sortColumn)), partitionColumn)
 
   def apply(name: String, sortColumn: String): Dataset =
-    Dataset(name, Seq(Projection(0, sortColumn)), DefaultPartitionColumn)
+    Dataset(name, Seq(Projection(0, name, sortColumn)), DefaultPartitionColumn)
 
   /**
    * Returns a SortKeyHelper configured from the DatasetOptions.

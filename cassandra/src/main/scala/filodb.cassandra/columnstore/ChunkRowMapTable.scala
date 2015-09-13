@@ -1,4 +1,4 @@
-package filodb.cassandra
+package filodb.cassandra.columnstore
 
 import com.datastax.driver.core.Row
 import com.typesafe.config.Config
@@ -6,7 +6,7 @@ import com.websudos.phantom.dsl._
 import java.nio.ByteBuffer
 import scala.concurrent.Future
 
-import filodb.core.messages._
+import filodb.core._
 
 case class ChunkRowMapRecord(segmentId: ByteBuffer,
                              chunkIds: ByteBuffer,
@@ -21,7 +21,7 @@ case class ChunkRowMapRecord(segmentId: ByteBuffer,
 sealed class ChunkRowMapTable(dataset: String, config: Config)
 extends CassandraTable[ChunkRowMapTable, ChunkRowMapRecord]
 with SimpleCassandraConnector {
-  import Util._
+  import filodb.cassandra.Util._
 
   override val tableName = dataset + "_chunkmap"
   // TODO: keySpace and other things really belong to a trait
@@ -70,5 +70,5 @@ with SimpleCassandraConnector {
           .value(_.chunkIds,  chunkIds)
           .value(_.rowNums,   rowNums)
           .value(_.nextChunkId, nextChunkId)
-          .future().toResponseOnly()
+          .future().toResponse()
 }

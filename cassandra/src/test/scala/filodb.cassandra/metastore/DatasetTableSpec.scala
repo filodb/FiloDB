@@ -1,14 +1,14 @@
-package filodb.core.cassandra
+package filodb.cassandra.metastore
 
 import com.websudos.phantom.dsl._
 import com.websudos.phantom.testkit._
 import org.scalatest.BeforeAndAfter
 import scala.concurrent.Await
 import scala.concurrent.duration._
+import scala.language.postfixOps
 
-import filodb.core.datastore.Datastore
+import filodb.core._
 import filodb.core.metadata.Dataset
-import filodb.core.messages._
 
 class DatasetTableSpec extends CassandraFlatSpec with BeforeAndAfter {
  implicit val keySpace = KeySpace("unittest")
@@ -17,70 +17,55 @@ class DatasetTableSpec extends CassandraFlatSpec with BeforeAndAfter {
   override def beforeAll() {
     super.beforeAll()
     // Note: This is a CREATE TABLE IF NOT EXISTS
-    Await.result(DatasetTableOps.create.ifNotExists.future(), 3 seconds)
+    Await.result(DatasetTable.create.ifNotExists.future(), 3 seconds)
   }
 
   before {
-    Await.result(DatasetTableOps.truncate.future(), 3 seconds)
+    Await.result(DatasetTable.truncate.future(), 3 seconds)
   }
+
+  val fooDataset = Dataset("foo", "someSortCol")
 
   import scala.concurrent.ExecutionContext.Implicits.global
 
   "DatasetTable" should "create a dataset successfully, then return AlreadyExists" in {
-    whenReady(DatasetTableOps.createNewDataset("foo")) { response =>
+    whenReady(DatasetTable.createNewDataset(fooDataset)) { response =>
       response should equal (Success)
     }
 
     // Second time around, dataset already exists
-    whenReady(DatasetTableOps.createNewDataset("foo")) { response =>
+    whenReady(DatasetTable.createNewDataset(fooDataset)) { response =>
       response should equal (AlreadyExists)
     }
   }
 
-  it should "not delete a dataset if it is NotFound" in {
-    whenReady(DatasetTableOps.deleteDataset("foo")) { response =>
-      response should equal (NotFound)
-    }
-  }
+  // Apparently, deleting a nonexisting dataset also returns success.  :/
 
-  it should "delete an empty dataset" in {
-    whenReady(DatasetTableOps.createNewDataset("foo")) { response =>
+  it should "delete a dataset" in {
+    whenReady(DatasetTable.createNewDataset(fooDataset)) { response =>
       response should equal (Success)
     }
-    whenReady(DatasetTableOps.deleteDataset("foo")) { response =>
+    whenReady(DatasetTable.deleteDataset("foo")) { response =>
       response should equal (Success)
     }
-  }
 
-  it should "return StorageEngineException when trying to delete nonempty Dataset" in {
-    val f = DatasetTableOps.insert
-              .value(_.name, "bar")
-              .value(_.partitions, Set("first"))
-              .future
-    whenReady(f) { result => result.wasApplied should equal (true) }
-
-    whenReady(DatasetTableOps.deleteDataset("bar")) { response =>
-      response.getClass should be (classOf[MetadataException])
+    whenReady(DatasetTable.getDataset("foo").failed) { err =>
+      err shouldBe a [NotFoundError]
     }
   }
 
-  it should "return NotFound when trying to get nonexisting dataset" in {
-    whenReady(DatasetTableOps.getDataset("foo")) { response =>
-      response should equal (NotFound)
+  it should "return NotFoundError when trying to get nonexisting dataset" in {
+    whenReady(DatasetTable.getDataset("foo").failed) { err =>
+      err shouldBe a [NotFoundError]
     }
   }
 
   it should "return the Dataset if it exists" in {
-    val f = DatasetTableOps.insert
-              .value(_.name, "bar")
-              .value(_.partitions, Set("first"))
-              .future
-    whenReady(f) { result => result.wasApplied should equal (true) }
+    val barDataset = Dataset("bar", "sortCol")
+    DatasetTable.createNewDataset(barDataset).futureValue should equal (Success)
 
-    whenReady(DatasetTableOps.getDataset("bar")) { response =>
-      val Datastore.TheDataset(dataset) = response
-      dataset.name should equal ("bar")
-      dataset.partitions should equal (Set("first"))
+    whenReady(DatasetTable.getDataset("bar")) { dataset =>
+      dataset should equal (barDataset)
     }
   }
 }

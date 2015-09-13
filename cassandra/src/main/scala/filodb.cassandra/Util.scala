@@ -5,7 +5,7 @@ import com.websudos.phantom.dsl._
 import java.nio.ByteBuffer
 import scala.concurrent.Future
 
-import filodb.core.messages._
+import filodb.core._
 
 /**
  * Utilities for dealing with Cassandra I/O
@@ -16,22 +16,17 @@ object Util {
       f.map { resultSet =>
         if (resultSet.wasApplied) Success else notAppliedResponse
       }.recover {
-        case e: DriverException => StorageEngineException(e)
+        case e: DriverException => throw StorageEngineException(e)
       }
     }
-
-    def toResponseOnly(notAppliedResponse: Response = NotApplied): Future[Response] =
-      f.map { resultSet =>
-        if (resultSet.wasApplied) Success else notAppliedResponse
-      }
   }
 
-  implicit class HandleErrors(f: Future[Response]) {
-    def handleErrors: Future[Response] = f.recover {
-      case e: DriverException => StorageEngineException(e)
+  implicit class HandleErrors[T](f: Future[T]) {
+    def handleErrors: Future[T] = f.recover {
+      case e: DriverException          => throw StorageEngineException(e)
       // from invalid Enum strings, which should never happen, or some other parsing error
-      case e: NoSuchElementException   => MetadataException(e)
-      case e: IllegalArgumentException => MetadataException(e)
+      case e: NoSuchElementException   => throw MetadataException(e)
+      case e: IllegalArgumentException => throw MetadataException(e)
     }
   }
 

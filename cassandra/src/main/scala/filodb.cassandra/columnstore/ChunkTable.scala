@@ -1,4 +1,4 @@
-package filodb.cassandra
+package filodb.cassandra.columnstore
 
 import com.datastax.driver.core.Row
 import com.typesafe.config.Config
@@ -7,8 +7,8 @@ import com.websudos.phantom.dsl._
 import java.nio.ByteBuffer
 import scala.concurrent.Future
 
-import filodb.core.messages._
-import filodb.core.columnstore.{ChunkedData, Types}
+import filodb.core._
+import filodb.core.columnstore.ChunkedData
 
 /**
  * Represents the table which holds the actual columnar chunks for segments
@@ -19,7 +19,7 @@ import filodb.core.columnstore.{ChunkedData, Types}
 sealed class ChunkTable(dataset: String, config: Config)
 extends CassandraTable[ChunkTable, (String, ByteBuffer, Int, ByteBuffer)]
 with SimpleCassandraConnector {
-  import Util._
+  import filodb.cassandra.Util._
 
   override val tableName = dataset + "_chunks"
   // TODO: keySpace and other things really belong to a trait
@@ -54,7 +54,7 @@ with SimpleCassandraConnector {
                          .value(_.columnName, columnName)
                          .value(_.data, bytes))
     }
-    batch.future().toResponseOnly()
+    batch.future().toResponse()
   }
 
   // Reads back all the chunks from the requested column for the segments falling within

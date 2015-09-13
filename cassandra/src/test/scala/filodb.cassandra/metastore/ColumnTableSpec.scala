@@ -1,14 +1,14 @@
-package filodb.core.cassandra
+package filodb.cassandra.metastore
 
 import com.websudos.phantom.dsl._
 import com.websudos.phantom.testkit._
 import org.scalatest.BeforeAndAfter
 import scala.concurrent.Await
 import scala.concurrent.duration._
+import scala.language.postfixOps
 
-import filodb.core.datastore.Datastore
+import filodb.core._
 import filodb.core.metadata.Column
-import filodb.core.messages._
 
 class ColumnTableSpec extends CassandraFlatSpec with BeforeAndAfter {
   implicit val keySpace = KeySpace("unittest")
@@ -31,24 +31,15 @@ class ColumnTableSpec extends CassandraFlatSpec with BeforeAndAfter {
   import scala.concurrent.ExecutionContext.Implicits.global
 
   "ColumnTable" should "return empty schema if a dataset does not exist in columns table" in {
-    whenReady(ColumnTable.getSchema("foo", 1)) { response =>
-      response should equal (Datastore.TheSchema(Map()))
-    }
+    ColumnTable.getSchema("foo", 1).futureValue should equal (Map())
   }
 
   it should "add the first column and read it back as a schema" in {
-    whenReady(ColumnTable.insertColumn(firstColumn)) { response =>
-      response should equal (Success)
-    }
-
-    whenReady(ColumnTable.getSchema("foo", 2)) { response =>
-      response should equal (Datastore.TheSchema(Map("first" -> firstColumn)))
-    }
+    ColumnTable.insertColumn(firstColumn).futureValue should equal (Success)
+    ColumnTable.getSchema("foo", 2).futureValue should equal (Map("first" -> firstColumn))
 
     // Check that limiting the getSchema query to version 0 does not return the version 1 column
-    whenReady(ColumnTable.getSchema("foo", 0)) { response =>
-      response should equal (Datastore.TheSchema(Map()))
-    }
+    ColumnTable.getSchema("foo", 0).futureValue should equal (Map())
   }
 
   it should "return MetadataException if illegal column type encoded in Cassandra" in {
@@ -57,10 +48,8 @@ class ColumnTableSpec extends CassandraFlatSpec with BeforeAndAfter {
                               .value(_.version, 5)
                               .value(_.columnType, "_so_not_a_real_type")
                               .future()
-    Await.result(f, 3 seconds)
+    f.futureValue
 
-    whenReady(ColumnTable.getSchema("bar", 7)) { response =>
-      response.getClass should equal (classOf[MetadataException])
-    }
+    ColumnTable.getSchema("bar", 7).failed.futureValue shouldBe a [MetadataException]
   }
 }
