@@ -11,6 +11,10 @@ import filodb.core.metadata.MetaStore
 object Scheduler {
   val DefaultMaxTasks = 16
   val DefaultMaxFailures = 32
+
+  sealed trait FlushResponse
+  case object Flushed extends FlushResponse
+  case object NoAvailableTasks extends FlushResponse
 }
 
 /**
@@ -21,7 +25,8 @@ object Scheduler {
  * One reprojection task per (dataset, version) is scheduled at a time.
  *
  * IMPORTANT: Not meant to be called concurrently, since all the work is done offline in futures.
- * This should be instantiated as a singleton.
+ * This should be instantiated as a singleton and invoked only from a single thread
+ * or from a single Actor.
  */
 class Scheduler(memTable: MemTable,
                 reprojector: Reprojector,
@@ -78,6 +83,25 @@ class Scheduler(memTable: MemTable,
       }
     } else {
       logger.debug(s"Task table full (${tasks.size} tasks), not starting more flushes...")
+    }
+  }
+
+  /**
+   * Initiates a flush cycle manually for a given dataset and version.
+   * This might be called by an ingestion source when it is done with the ingestion, for example.
+   * @returns Flushed, or NoAvailableTasks if there are no slots available to start a flush.
+   */
+  def flush(dataset: TableName, version: Int): FlushResponse = {
+    if (tasks contains (dataset -> version)) return Flushed
+    if (tasks.size < maxTasks) {
+      // NOTE: doens't matter if the memtable could be flipped.  If it cannot, that means existing
+      // flush in progress, but no active task, so we can initiate a task.
+      memTable.flipBuffers(dataset, version)
+      logger.info(s"Starting new flush cycle for ($dataset/$version)...")
+      addNewTask(dataset, version)
+      Flushed
+    } else {
+      NoAvailableTasks
     }
   }
 

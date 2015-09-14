@@ -115,4 +115,12 @@ class SchedulerSpec extends FunSpec with Matchers with BeforeAndAfter {
     reprojections should equal (Seq(("C", 0), ("B", 0)))
     mTable.flushingDatasets.toSet should equal (Set((("B", 0), 40), (("C", 0), 50)))
   }
+
+  it("flush() should initiate flush even if datasets not reached limit yet") {
+    ingestRows("A", 50)
+    ingestRows("B", 49)
+    scheduler.flush("B", 0) should equal (Scheduler.Flushed)
+    scheduler.tasks should have size (1)
+    reprojections should equal (Seq(("B", 0)))
+  }
 }
