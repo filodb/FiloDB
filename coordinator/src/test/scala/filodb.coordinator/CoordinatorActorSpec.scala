@@ -1,23 +1,25 @@
-package filodb.core.ingest
+package filodb.coordinator
 
 import akka.actor.{ActorSystem, ActorRef, PoisonPill}
 import akka.testkit.TestActorRef
 import akka.pattern.gracefulStop
 import com.typesafe.config.ConfigFactory
 import java.nio.ByteBuffer
-import org.velvia.filo.{ColumnParser, TupleRowIngestSupport}
 import scala.concurrent.Await
 import scala.concurrent.duration._
 
-import filodb.core.ActorSpecConfig
-import filodb.core.cassandra.AllTablesTest
-import filodb.core.metadata.{Column, Dataset, Partition, Shard}
-import filodb.core.messages._
+import filodb.core._
+import filodb.core.columnstore.TupleRowReader
+import filodb.core.metadata.{Column, Dataset}
+import filodb.core.reprojector.{MapDBMemTable, NumRowsFlushPolicy}
+import filodb.cassandra.AllTablesTest
 
 object CoordinatorActorSpec extends ActorSpecConfig
 
-class CoordinatorActorSpec extends AllTablesTest(CoordinatorActorSpec.getNewSystem) {
+class CoordinatorActorSpec extends ActorTest(CoordinatorActorSpec.getNewSystem)
+with CoordinatorSetup with AllTablesTest {
   import akka.testkit._
+  import CoordinatorActor._
 
   override def beforeAll() {
     super.beforeAll()
@@ -26,51 +28,36 @@ class CoordinatorActorSpec extends AllTablesTest(CoordinatorActorSpec.getNewSyst
 
   before { truncateAllTables() }
 
-  def withCoordinatorActor(dataset: String, partition: String, columns: Seq[String])(f: ActorRef => Unit) {
-    val coordinator = system.actorOf(CoordinatorActor.props(datastore))
-    coordinator ! CoordinatorActor.StartRowIngestion(dataset, partition, columns, 0, TupleRowIngestSupport)
-    try {
-      f(coordinator)
-    } finally {
-      // Stop the actor. This isn't strictly necessary, but prevents extraneous messages from spilling over
-      // to the next test.  Also, you cannot create two actors with the same name.
-      val stopping = gracefulStop(coordinator, 3.seconds.dilated, PoisonPill)
-      Await.result(stopping, 4.seconds.dilated)
-    }
+  lazy val memTable = new MapDBMemTable(config)
+  lazy val flushPolicy = new NumRowsFlushPolicy(100L)
+  coordinatorActor
+
+  override def afterAll() {
+    gracefulStop(coordinatorActor, 3.seconds.dilated, PoisonPill).futureValue
   }
 
-  describe("CoordinatorActor StartRowIngestion verification") {
-    it("should return NoDatasetColumns when dataset missing or no columns defined") {
-      createTable("noColumns", "first", Nil)
+  describe("CoordinatorActor SetupIngestion verification") {
+    it("should return UnknownDataset when dataset missing or no columns defined") {
+      createTable(GdeltDataset.copy(name = "noColumns"), Nil)
 
-      withCoordinatorActor("none", "first", GdeltColNames) { coordinator =>
-        expectMsg(CoordinatorActor.NoDatasetColumns)
-      }
+      coordinatorActor ! SetupIngestion("none", GdeltColNames, 0)
+      expectMsg(UnknownDataset)
 
-      withCoordinatorActor("noColumns", "first", GdeltColNames) { coordinator =>
-        expectMsg(CoordinatorActor.NoDatasetColumns)
-      }
-    }
-
-    it("should return error when dataset present but partition not defined") {
-      createTable("gdelt", "1979-1984", GdeltColumns)
-      withCoordinatorActor("gdelt", "2001", GdeltColNames) { coordinator =>
-        expectMsg(NotFound)
-      }
+      coordinatorActor ! SetupIngestion("noColumns", GdeltColNames, 0)
+      expectMsg(UndefinedColumns(GdeltColNames))
     }
 
     it("should return UndefinedColumns if trying to ingest undefined columns") {
-      createTable("gdelt", "1979-1984", GdeltColumns)
-      withCoordinatorActor("gdelt", "1979-1984", Seq("monthYear", "last")) { coordinator =>
-        expectMsg(CoordinatorActor.UndefinedColumns(Seq("last")))
-      }
+      createTable(GdeltDataset, GdeltColumns)
+
+      coordinatorActor ! SetupIngestion(dsName, Seq("monthYear", "last"), 0)
+      expectMsg(UndefinedColumns(Seq("last")))
     }
 
-    it("should return RowIngestionReady if dataset, partition, columns all validate") {
-      createTable("gdelt", "1979-1984", GdeltColumns)
-      withCoordinatorActor("gdelt", "1979-1984", GdeltColNames) { coordinator =>
-        expectMsgType[CoordinatorActor.RowIngestionReady]
-      }
+    it("should return BadSchema if dataset definition bazooka") {
+      createTable(GdeltDataset.copy(partitionColumn = "foo"), GdeltColumns)
+      coordinatorActor ! SetupIngestion(dsName, GdeltColNames, 0)
+      expectMsg(BadSchema)
     }
   }
 
@@ -80,19 +67,15 @@ class CoordinatorActorSpec extends AllTablesTest(CoordinatorActorSpec.getNewSyst
   )
 
   it("should be able to start ingestion, send rows, and get an ack back") {
-    createTable("gdelt", "1979-1984", GdeltColumns)
-    withCoordinatorActor("gdelt", "1979-1984", GdeltColNames) { coordinator =>
-      val ready = expectMsgType[CoordinatorActor.RowIngestionReady]
-      val rowIngester = ready.rowIngestActor
-      rows.zipWithIndex.foreach { case (row, i) =>
-        rowIngester ! RowIngesterActor.Row(i.toLong, i.toLong, 0, row)
-      }
-      rowIngester ! RowIngesterActor.Flush
+    createTable(GdeltDataset, GdeltColumns)
 
-      expectMsg(IngesterActor.Ack("gdelt", "1979-1984", 1L))
-    }
+    coordinatorActor ! SetupIngestion(dsName, GdeltColNames, 0)
+    expectMsg(IngestionReady)
+
+    coordinatorActor ! IngestRows(dsName, 0, rows.map(TupleRowReader), 1L)
+    expectMsg(Ack(1L))
+
+    // Now, try to flush and check that stuff was written to columnstore...
   }
-
-  it("should be able to stop ingestion stream") (pending)
 }
 

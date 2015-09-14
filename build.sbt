@@ -14,7 +14,8 @@ lazy val coordinator = (project in file("coordinator"))
                          .settings(mySettings:_*)
                          .settings(name := "filodb-coordinator")
                          .settings(libraryDependencies ++= coordDeps)
-                         .dependsOn(core)
+                         .dependsOn(core % "compile->compile; test->test",
+                                    cassandra % "compile->compile; test->test")
 
 lazy val cassandra = (project in file("cassandra"))
                        .settings(mySettings:_*)
@@ -60,7 +61,7 @@ lazy val coreDeps = Seq(
   "org.velvia.filo"      %% "filo-scala"        % "0.1.3" excludeAll(excludeShapeless),
   "io.spray"             %% "spray-caching"     % "1.3.2",
   "org.mapdb"             % "mapdb"             % "1.0.6",
-  "com.typesafe"          % "config"            % "1.2.0",
+  "net.ceedubs"          %% "ficus"             % "1.0.1",
   "com.nativelibs4java"  %% "scalaxy-loops"     % "0.3.3" % "provided",
   "org.scalatest"        %% "scalatest"         % "2.2.4" % "test"
 )
@@ -73,7 +74,8 @@ lazy val cassDeps = Seq(
 lazy val coordDeps = Seq(
   "com.typesafe.akka"    %% "akka-slf4j"        % akkaVersion,
   "com.opencsv"           % "opencsv"           % "3.3",
-  "com.typesafe.akka"    %% "akka-testkit"      % akkaVersion % "test"
+  "com.typesafe.akka"    %% "akka-testkit"      % akkaVersion % "test",
+  "org.scalatest"        %% "scalatest"         % "2.2.4" % "test"
 )
 
 lazy val cliDeps = Seq(

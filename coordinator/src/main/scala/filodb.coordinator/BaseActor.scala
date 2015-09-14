@@ -1,4 +1,4 @@
-package filodb.core
+package filodb.coordinator
 
 import akka.actor.Actor
 import com.typesafe.scalalogging.slf4j.StrictLogging

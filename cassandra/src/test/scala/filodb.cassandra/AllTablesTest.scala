@@ -20,7 +20,7 @@ object AllTablesTest {
   val CassConfig = ConfigFactory.parseString(CassConfigStr)
 }
 
-abstract class AllTablesTest extends FunSpec with BeforeAndAfter with SimpleCassandraTest {
+trait AllTablesTest extends SimpleCassandraTest {
   import filodb.cassandra.metastore._
 
   implicit val defaultPatience =
@@ -30,8 +30,12 @@ abstract class AllTablesTest extends FunSpec with BeforeAndAfter with SimpleCass
 
   implicit val context = scala.concurrent.ExecutionContext.Implicits.global
 
-  lazy val columnStore = new CassandraColumnStore(ConfigFactory.load,
+  val config = ConfigFactory.load
+
+  lazy val columnStore = new CassandraColumnStore(config,
                                                   x => GdeltColumns(0))
+
+  lazy val metaStore = new CassandraMetaStore(config)
 
   def createAllTables(): Unit = {
     val f = for { _ <- DatasetTable.create.ifNotExists.future()
@@ -49,7 +53,7 @@ abstract class AllTablesTest extends FunSpec with BeforeAndAfter with SimpleCass
 
   import Column.ColumnType._
 
-  val dsName = "dataset"
+  val dsName = "gdelt"
   val GdeltDataset = Dataset(dsName ,"id")
   val GdeltColumns = Seq(Column("id",      dsName, 0, LongColumn),
                          Column("sqlDate", dsName, 0, StringColumn),
@@ -57,4 +61,9 @@ abstract class AllTablesTest extends FunSpec with BeforeAndAfter with SimpleCass
                          Column("year",    dsName, 0, IntColumn))
 
   val GdeltColNames = GdeltColumns.map(_.name)
+
+  def createTable(dataset: Dataset, columns: Seq[Column]): Unit = {
+    metaStore.newDataset(dataset).futureValue should equal (Success)
+    columns.foreach { col => metaStore.newColumn(col).futureValue should equal (Success) }
+  }
 }

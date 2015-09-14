@@ -1,166 +1,134 @@
-package filodb.core.ingest
+package filodb.coordinator
 
 import akka.actor.{Actor, ActorRef, Props}
-import org.velvia.filo.RowIngestSupport
-import scala.collection.mutable.HashMap
+import com.typesafe.config.Config
+import net.ceedubs.ficus.Ficus._
 import scala.concurrent.Future
+import scala.concurrent.duration._
 
-import filodb.core.BaseActor
-import filodb.core.datastore.Datastore
-import filodb.core.messages._
-import filodb.core.metadata.{Partition, Column}
+import filodb.core._
+import filodb.core.metadata.{Column, Dataset, MetaStore}
+import filodb.core.columnstore.ColumnStore
+import filodb.core.columnstore.RowReader
+import filodb.core.reprojector.{MemTable, Scheduler}
 
 /**
- * The CoordinatorActor is the common API entry point for all FiloDB ingestion operations.
+ * The CoordinatorActor is the common API entry point for all FiloDB ingestion and metadata operations.
  * It is a singleton - there should be exactly one such actor per node/JVM process.
  * It is responsible for:
- * - spinning up an Ingester and RowIngester actor per ingestion stream
- * - validating dataset, schema, etc.
- * - monitoring timeouts and failure recovery from (Row)IngesterActor deaths/exceptions
- * - keeping away too many ingestion requests
+ *  - Acting as the gateway to the MemTable, Scheduler, and MetaStore for local and remote actors
+ *  - Supervising any other actors, such as regular scheduler heartbeats
+ *  - Maintaining MemTable backpressure on clients to prevent OOM
  *
  * It is called by local (eg HTTP) as well as remote (eg Spark ETL) processes.
- *
- * See doc/ingestion.md and the ingestion flow diagram for more details about the entire ingestion flow.
  */
 object CoordinatorActor {
-  // //////////// Commands
-
   /**
-   * Tells the CoordinatorActor to spin up the actor pipeline for high volume ingestion of a
-   * single dataset.  Should be sent from an actor, which will get back a RowIngestionReady
-   * with an ActorRef to start pushing rows to.   It will get Acks back from the IngesterActor.
+   * Sets up ingestion for a given dataset, version, and schema of columns.
+   * The dataset and columns must have been previously defined.
    *
-   * @return RowIngestionReady, or NotFound, CannotLockPartition, UndefinedColumns etc.
+   * @returns BadSchema if the partition column is unsupported, sort column invalid, etc.
    */
-  case class StartRowIngestion[R](dataset: String,
-                                  partition: String,
-                                  columns: Seq[String],
-                                  initialVersion: Int,
-                                  rowIngestSupport: RowIngestSupport[R])
+  case class SetupIngestion(dataset: String, schema: Seq[String], version: Int)
 
-
-  /**
-   * Explicitly stop ingestion.  Always use this when possible to help keep resources low.
-   */
-  case class StopIngestion(streamId: Int)
-
-  // ////////// Responses
-
-  case class RowIngestionReady(streamId: Int, rowIngestActor: ActorRef) extends Response
-  case object CannotLockPartition extends ErrorResponse
-  case object NoDatasetColumns extends ErrorResponse
+  case object IngestionReady extends Response
+  case object UnknownDataset extends ErrorResponse
   case class UndefinedColumns(undefined: Seq[String]) extends ErrorResponse
+  case object AlreadySetup extends ErrorResponse
+  case object BadSchema extends ErrorResponse
 
-  /*
-   * This may be sent back for several reasons:
-   * - in response to an explicit StopIngestion
-   * - Idle / lack of activity or new input for that dataset/partition
+  /**
+   * Ingests a new set of rows for a given dataset and version.
+   * The partitioning column and sort column are set up in the dataset.
    *
-   * Either case, it means that the entire pipeline (Ingester, RowIngester) has been shut down, and
-   * their resources released.  Any intermediate data would have been flushed.
+   * @param seqNo the sequence number to be returned for acknowledging the entire set of rows
    */
-  case class IngestionStopped(streamId: Int) extends Response
+  case class IngestRows(dataset: String, version: Int, rows: Seq[RowReader], seqNo: Long)
 
-  // /////////// Internal messaging
-  case class GoodToGo(originator: ActorRef, streamId: Int, ingester: ActorRef,
-                      rowIngester: ActorRef, partition: Partition)
+  case class Ack(seqNo: Long) extends Response
+
+  /**
+   * Initiates a flush of the remaining MemTable rows of the given dataset and version.
+   * Usually used when at the end of ingesting some large blob of data.
+   */
+  case class Flush(dataset: String, version: Int)
 
   def invalidColumns(columns: Seq[String], schema: Column.Schema): Seq[String] =
     (columns.toSet -- schema.keys).toSeq
 
-  def props(datastore: Datastore): Props =
-    Props(classOf[CoordinatorActor], datastore)
+  def props(memTable: MemTable,
+            metaStore: MetaStore,
+            scheduler: Scheduler,
+            config: Config): Props =
+    Props(classOf[CoordinatorActor], memTable, metaStore, scheduler, config)
 }
 
-class CoordinatorActor(datastore: Datastore) extends BaseActor {
+/**
+ * ==Configuration==
+ * {{{
+ *   {
+ *     memtable-retry-interval = 10 s
+ *     scheduler-interval = 10 s
+ *   }
+ * }}}
+ */
+class CoordinatorActor(memTable: MemTable,
+                       metaStore: MetaStore,
+                       scheduler: Scheduler,
+                       config: Config) extends BaseActor {
   import CoordinatorActor._
   import context.dispatcher
 
-  val streamIds = new HashMap[Int, (String, String)]
-  val ingesterActors = new HashMap[Int, ActorRef]
-  val rowIngesterActors = new HashMap[Int, ActorRef]
-  var nextStreamId = 0
+  val memtablePushback = config.as[FiniteDuration]("memtable-retry-interval")
+  val schedulerInterval = config.as[FiniteDuration]("scheduler-interval")
+
+  val schedulerActor = context.actorOf(SchedulerActor.props(scheduler), "scheduler")
+  context.system.scheduler.schedule(schedulerInterval, schedulerInterval,
+                                    schedulerActor, SchedulerActor.RunOnce)
 
   private def verifySchema(originator: ActorRef, dataset: String, version: Int, columns: Seq[String]):
       Future[Option[Column.Schema]] = {
-    datastore.getSchema(dataset, version).collect {
-      case Datastore.TheSchema(schema) =>
-        val undefinedCols = invalidColumns(columns, schema)
-        if (schema.isEmpty) {
-          logger.info(s"Either no columns defined or no dataset $dataset")
-          originator ! NoDatasetColumns
-          None
-        } else if (undefinedCols.nonEmpty) {
-          logger.info(s"Undefined columns $undefinedCols for dataset $dataset with schema $schema")
-          originator ! UndefinedColumns(undefinedCols.toSeq)
-          None
-        } else {
-          Some(schema)
-        }
-      case r: Response =>
-        originator ! r
+    metaStore.getSchema(dataset, version).map { schema =>
+      val undefinedCols = invalidColumns(columns, schema)
+      if (undefinedCols.nonEmpty) {
+        logger.info(s"Undefined columns $undefinedCols for dataset $dataset with schema $schema")
+        originator ! UndefinedColumns(undefinedCols.toSeq)
         None
-    }.recover {
-      case t: Throwable =>
-        originator ! MetadataException(t)
-        None
-    }
-  }
-
-  private def getPartition(originator: ActorRef, dataset: String, partitionName: String):
-      Future[Option[Partition]] = {
-    datastore.getPartition(dataset, partitionName).collect {
-      case Datastore.ThePartition(partObj) =>
-        Some(partObj)
-      case r: Response                =>
-        originator ! r
-        None
-    }.recover {
-      case t: Throwable =>
-        originator ! MetadataException(t)
-        None
+      } else {
+        Some(schema)
+      }
     }
   }
 
   def receive: Receive = {
-    case StartRowIngestion(dataset, partition, columns, initVersion, rowIngestSupport) =>
-
-      // TODO: check that there aren't too many ingestion streams already
-
+    case SetupIngestion(dataset, columns, version) =>
       val originator = sender     // capture mutable sender for async response
-      val streamId = nextStreamId
-      nextStreamId += 1
-      for { schema <- verifySchema(originator, dataset, initVersion, columns) if schema.isDefined
-            partOpt <- getPartition(originator, dataset, partition) if partOpt.isDefined }
-      {
+      (for { datasetObj <- metaStore.getDataset(dataset)
+             schema <- verifySchema(originator, dataset, version, columns) if schema.isDefined }
+      yield {
         val columnSeq = columns.map(schema.get(_))
-        val partObj = partOpt.get
-
-        val ingester = context.actorOf(
-          IngesterActor.props(partObj, columnSeq, datastore, originator),
-          s"ingester-$partObj")
-        val rowIngester = context.actorOf(
-          RowIngesterActor.props(ingester, columnSeq, partObj, rowIngestSupport),
-          s"rowIngester-$partObj-$rowIngestSupport")
-
-        // Send message to myself to modify state, don't do it in async future callback
-        self ! GoodToGo(originator, streamId, ingester, rowIngester, partObj)
+        memTable.setupIngestion(datasetObj, columnSeq, version) match {
+          case MemTable.SetupDone    => originator ! IngestionReady
+          case MemTable.AlreadySetup => originator ! AlreadySetup
+          case MemTable.BadSchema    => originator ! BadSchema
+        }
+      }).recover {
+        case NotFoundError(what) => originator ! UnknownDataset
+        case t: Throwable        => originator ! MetadataException(t)
       }
 
-    case GoodToGo(originator, streamId, ingester, rowIngester, partition) =>
-      streamIds += streamId -> (partition.dataset -> partition.partition)
-      ingesterActors += streamId -> ingester
-      rowIngesterActors += streamId -> rowIngester
-      logger.info(s"Set up ingestion pipeline for $partition, streamId=$streamId")
-      originator ! RowIngestionReady(streamId, rowIngester)
+    case ingestCmd @ IngestRows(dataset, version, rows, seqNo) =>
+      // Check if we are over limit or under memory
+      // Ingest rows into the memtable
+      memTable.ingestRows(dataset, version, rows) match {
+        case MemTable.NoSuchDatasetVersion => sender ! UnknownDataset
+        case MemTable.Ingested             => sender ! Ack(seqNo)
+        case MemTable.PleaseWait           =>
+          logger.debug(s"MemTable full, retrying in $memtablePushback...")
+          context.system.scheduler.scheduleOnce(memtablePushback, self, ingestCmd)
+      }
 
-    case StopIngestion(streamId) =>
-      logger.error("Unimplemented!")
-      ???
-
-    // TODO: implement error recovery and watch actors for termination
-    // Consider restarting everything as a group?
-    // case Terminated(actorRef) =>
+    case flushCmd @ Flush(dataset, version) =>
+      schedulerActor.forward(flushCmd)
   }
 }

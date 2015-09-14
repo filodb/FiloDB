@@ -1,7 +1,9 @@
-package filodb.core.ingest
+package filodb.coordinator
 
 import akka.actor.{Actor, ActorRef, PoisonPill}
 import com.typesafe.scalalogging.slf4j.StrictLogging
+
+import filodb.core.columnstore.RowReader
 
 object RowSource {
   case object Start
@@ -13,15 +15,14 @@ object RowSource {
  * RowSource is a trait to make it easy to write sources (Actors) for specific
  * input methods - eg from HTTP JSON, or CSV, or Kafka, etc.
  * It has logic to handle flow control/backpressure.
- * It also handles acquiring the RowIngesterActor etc.
+ * It talks to a CoordinatorActor of a FiloDB node.  RowSource may be remote.
  *
  * To start initialization and reading from source, send the Start message.
  */
-trait RowSource[R] extends Actor with StrictLogging {
+trait RowSource extends Actor with StrictLogging {
   import RowSource._
 
-  // Maximum number of unacked rows to push at a time.
-  // Should be greater than the chunkSize.
+  // Maximum number of unacked rows to push at a time.  Used for flow control.
   def maxUnackedRows: Int
 
   // rows to read at a time
@@ -29,21 +30,22 @@ trait RowSource[R] extends Actor with StrictLogging {
 
   def coordinatorActor: ActorRef
 
-  // Returns the StartRowIngestion message needed for initialization
-  def getStartMessage(): CoordinatorActor.StartRowIngestion[R]
+  // Returns the SetupIngestion message needed for initialization
+  def getStartMessage(): CoordinatorActor.SetupIngestion
 
-  // Returns a new row from source => (seqID, rowID, version, row)
+  def dataset: String
+  def version: Int
+
+  // Returns a new row from source => (seqID, row)
   // The seqIDs should be increasing.
   // Returns None if the source reached the end of data.
-  def getNewRow(): Option[(Long, Long, Int, R)]
+  def getNewRow(): Option[(Long, RowReader)]
 
   // Anything additional to do when we hit end of data and it's all acked, before killing oneself
   def allDoneAndGood(): Unit = {}
 
   // Needs to be initialized to the first sequence # at the beginning
   var lastAckedSeqNo: Long
-  var rowIngesterActor: ActorRef = _
-  var streamId: Int = -1
 
   private var currentHiSeqNo: Long = lastAckedSeqNo
   private var isDoneReading: Boolean = false
@@ -54,31 +56,33 @@ trait RowSource[R] extends Actor with StrictLogging {
       whoStartedMe = sender
       coordinatorActor ! getStartMessage()
 
-    case CoordinatorActor.RowIngestionReady(stId, rowIngestActor) =>
-      rowIngesterActor = rowIngestActor
-      streamId = stId
+    case CoordinatorActor.IngestionReady =>
       self ! GetMoreRows
 
     case GetMoreRows =>
-      for { i <- 1 to rowsToRead if (!isDoneReading) } {
-        getNewRow() match {
-          case Some((seqID, rowID, version, row)) =>
-            currentHiSeqNo = seqID
-            rowIngesterActor ! RowIngesterActor.Row(seqID, rowID, version, row)
-          case None =>
-            rowIngesterActor ! RowIngesterActor.Flush
-            logger.debug("Marking isDoneReading as true")
-            isDoneReading = true
-        }
+      val rows = (1 to rowsToRead).iterator
+                   .map(i => getNewRow())
+                   .takeWhile { row =>
+                     if (!row.isDefined) isDoneReading = true
+                     row.isDefined
+                   }.collect { case Some((seqID, row)) =>
+                     currentHiSeqNo = seqID
+                     row
+                   }.toSeq
+      if (rows.nonEmpty) {
+        coordinatorActor ! CoordinatorActor.IngestRows(dataset, version, rows, currentHiSeqNo)
       }
-      if (!isDoneReading && (currentHiSeqNo - lastAckedSeqNo < maxUnackedRows)) self ! GetMoreRows
+      if (isDoneReading) {
+        logger.debug("Marking isDoneReading as true")
+        coordinatorActor ! CoordinatorActor.Flush(dataset, version)
+      } else if (currentHiSeqNo - lastAckedSeqNo < maxUnackedRows) {
+        self ! GetMoreRows
+      }
 
-    case IngesterActor.Ack(_, _, lastSequenceNo) =>
+    case CoordinatorActor.Ack(lastSequenceNo) =>
       lastAckedSeqNo = lastSequenceNo
       if (currentHiSeqNo - lastAckedSeqNo < maxUnackedRows) self ! GetMoreRows
       if (isDoneReading && currentHiSeqNo == lastAckedSeqNo) {
-        // NOTE: StopIngestion is not implemented right now  :(
-        // coordinatorActor ! CoordinatorActor.StopIngestion(streamId)
         logger.info(s"Ingestion is all done")
         allDoneAndGood()
         whoStartedMe ! AllDone

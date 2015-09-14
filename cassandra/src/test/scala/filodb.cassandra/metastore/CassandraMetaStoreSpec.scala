@@ -8,7 +8,9 @@ import filodb.core._
 import filodb.core.metadata.{Column, Dataset, MetaStore}
 import filodb.cassandra.AllTablesTest
 
-class CassandraMetaStoreSpec extends AllTablesTest {
+import org.scalatest.{FunSpec, BeforeAndAfter}
+
+class CassandraMetaStoreSpec extends FunSpec with BeforeAndAfter with AllTablesTest {
   import MetaStore._
 
   val metastore = new CassandraMetaStore(ConfigFactory.load)
