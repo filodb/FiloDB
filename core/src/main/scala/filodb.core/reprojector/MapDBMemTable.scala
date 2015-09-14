@@ -22,6 +22,7 @@ import filodb.core.columnstore.RowReader
  * {{{
  *   memtable {
  *     backup-dir = "/tmp/filodb.memtable/"
+ *     max-rows-per-table = 1000000
  *   }
  * }}}
  */
@@ -35,6 +36,7 @@ class MapDBMemTable(config: Config) extends MemTable {
   // Data structures
 
   private val backupDir = Try(config.getString("memtable.backup-dir")).toOption
+  private val maxRowsPerTable = config.getInt("memtable.max-rows-per-table")
 
   // According to MapDB examples, use incremental backup with memory-only store
   private val db = DBMaker.newHeapDB.transactionDisable.closeOnJvmShutdown.make()
@@ -48,10 +50,9 @@ class MapDBMemTable(config: Config) extends MemTable {
     val extractor = implicitly[TypedFieldExtractor[K]]
     implicit val helper = setup.helper[K]
 
-    // First check if the DB is too full
-
     // For each row: insert into rows map
     val rowMap = getRowMap[K](setup.dataset.name, version, Active).get
+    if (rowMap.size() >= maxRowsPerTable) return PleaseWait
     for { row <- rows } {
       val sortKey = extractor.getField(row, setup.sortColumnNum)
       rowMap.put((setup.partitioningFunc(row), sortKey), row)

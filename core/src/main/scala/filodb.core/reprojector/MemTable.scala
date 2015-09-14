@@ -9,22 +9,22 @@ import filodb.core.metadata.{Column, Dataset}
 import filodb.core.columnstore.RowReader
 
 object MemTable {
-  trait SetupResponse
+  sealed trait SetupResponse
   case object SetupDone extends SetupResponse
   case object AlreadySetup extends SetupResponse
   case object BadSchema extends SetupResponse
 
-  trait IngestionResponse
+  sealed trait IngestionResponse
   case object Ingested extends IngestionResponse
   case object PleaseWait extends IngestionResponse  // Cannot quite ingest yet
 
-  trait FlipResponse
+  sealed trait FlipResponse
   case object Flipped extends FlipResponse
   case object LockedNotEmpty extends FlipResponse
 
   case object NoSuchDatasetVersion extends IngestionResponse with FlipResponse
 
-  trait BufferType
+  sealed trait BufferType
   case object Active extends BufferType
   case object Locked extends BufferType
 
