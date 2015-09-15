@@ -10,7 +10,7 @@ import scala.concurrent.{Await, Future}
 import scala.language.postfixOps
 
 import filodb.core._
-import filodb.core.metadata.{Column, Projection}
+import filodb.core.metadata.{Column, Projection, RichProjection}
 import filodb.core.Types
 
 class CassandraColumnStoreSpec extends CassandraFlatSpec with BeforeAndAfter {
@@ -20,21 +20,20 @@ class CassandraColumnStoreSpec extends CassandraFlatSpec with BeforeAndAfter {
   import SegmentSpec._
 
   implicit val keySpace = KeySpace("unittest")
-  val colStore = new CassandraColumnStore(ConfigFactory.load(),
-                                          { x => schema(2) })
+  val colStore = new CassandraColumnStore(ConfigFactory.load())
   val dataset = "foo"
-  val projection = Projection(0, dataset, "someCol")
+  val fooProj = Projection(0, dataset, "someCol")
 
   val (chunkTable, rowMapTable) = Await.result(colStore.getSegmentTables(dataset), 3 seconds)
 
   // First create the tables in C*
   override def beforeAll() {
     super.beforeAll()
-    colStore.initializeProjection(projection).futureValue
+    colStore.initializeProjection(fooProj).futureValue
   }
 
   before {
-    colStore.clearProjectionData(projection).futureValue
+    colStore.clearProjectionData(fooProj).futureValue
     colStore.clearSegmentCache()
   }
 
@@ -62,7 +61,7 @@ class CassandraColumnStoreSpec extends CassandraFlatSpec with BeforeAndAfter {
   // NOTE: The test below purposefully does not use any of the read APIs so that if only the read code
   // breaks, this test can independently test for write failures
   "appendSegment" should "write a segment into an empty table" in {
-    whenReady(colStore.appendSegment(baseSegment, 0)) { response =>
+    whenReady(colStore.appendSegment(projection, baseSegment, 0)) { response =>
       response should equal (Success)
     }
 
@@ -81,7 +80,7 @@ class CassandraColumnStoreSpec extends CassandraFlatSpec with BeforeAndAfter {
 
   it should "NOOP if the segment is empty" in {
     val segment = getRowWriter(keyRange)
-    whenReady(colStore.appendSegment(segment, 0)) { response =>
+    whenReady(colStore.appendSegment(projection, segment, 0)) { response =>
       response should equal (NotApplied)
     }
   }
@@ -89,14 +88,14 @@ class CassandraColumnStoreSpec extends CassandraFlatSpec with BeforeAndAfter {
   it should "append new rows to a cached segment successfully" in {
     val segment = getRowWriter(keyRange)
     segment.addRowsAsChunk(names take 3, getSortKey _)
-    whenReady(colStore.appendSegment(segment, 0)) { response =>
+    whenReady(colStore.appendSegment(projection, segment, 0)) { response =>
       response should equal (Success)
     }
 
     // Writing segment2, last 3 rows, should get appended to first 3 in same segment
     val segment2 = getRowWriter(keyRange)
     segment2.addRowsAsChunk(names drop 3, getSortKey _)
-    whenReady(colStore.appendSegment(segment2, 0)) { response =>
+    whenReady(colStore.appendSegment(projection, segment2, 0)) { response =>
       response should equal (Success)
     }
 
@@ -113,7 +112,7 @@ class CassandraColumnStoreSpec extends CassandraFlatSpec with BeforeAndAfter {
   it should "replace rows to an uncached segment successfully" in {
     val segment = getRowWriter(keyRange)
     segment.addRowsAsChunk(names drop 1, getSortKey _)
-    whenReady(colStore.appendSegment(segment, 0)) { response =>
+    whenReady(colStore.appendSegment(projection, segment, 0)) { response =>
       response should equal (Success)
     }
 
@@ -122,7 +121,7 @@ class CassandraColumnStoreSpec extends CassandraFlatSpec with BeforeAndAfter {
     // Writing segment2, repeat 1 row and add another row.  Should read orig segment from disk.
     val segment2 = getRowWriter(keyRange)
     segment2.addRowsAsChunk(names take 2, getSortKey _)
-    whenReady(colStore.appendSegment(segment2, 0)) { response =>
+    whenReady(colStore.appendSegment(projection, segment2, 0)) { response =>
       response should equal (Success)
     }
 
@@ -139,7 +138,7 @@ class CassandraColumnStoreSpec extends CassandraFlatSpec with BeforeAndAfter {
   "readSegments" should "read segments back that were written" in {
     val segment = getRowWriter(keyRange)
     segment.addRowsAsChunk(names, getSortKey _)
-    whenReady(colStore.appendSegment(segment, 0)) { response =>
+    whenReady(colStore.appendSegment(projection, segment, 0)) { response =>
       response should equal (Success)
     }
 
@@ -163,7 +162,7 @@ class CassandraColumnStoreSpec extends CassandraFlatSpec with BeforeAndAfter {
   it should "return empty iterator if cannot find partition or version" in (pending)
 
   it should "return segment with empty chunks if cannot find columns" in {
-    whenReady(colStore.appendSegment(baseSegment, 0)) { response =>
+    whenReady(colStore.appendSegment(projection, baseSegment, 0)) { response =>
       response should equal (Success)
     }
 

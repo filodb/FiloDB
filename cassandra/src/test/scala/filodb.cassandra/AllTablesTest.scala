@@ -32,9 +32,7 @@ trait AllTablesTest extends SimpleCassandraTest {
 
   val config = ConfigFactory.load
 
-  lazy val columnStore = new CassandraColumnStore(config,
-                                                  x => GdeltColumns(0))
-
+  lazy val columnStore = new CassandraColumnStore(config)
   lazy val metaStore = new CassandraMetaStore(config)
 
   import Column.ColumnType._

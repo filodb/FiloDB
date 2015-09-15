@@ -30,12 +30,10 @@ import filodb.core.metadata.{Column, Projection}
  *
  * ==Constructor Args==
  * @param config see the Configuration section above for the needed config
- * @param getSortColumn a function that returns the sort column given a dataset
  * @param ec An ExecutionContext for futures.  See this for a way to do backpressure with futures:
  *        http://quantifind.com/blog/2015/06/throttling-instantiations-of-scala-futures-1/
  */
-class CassandraColumnStore(config: Config,
-                           getSortColumn: Types.TableName => Column)
+class CassandraColumnStore(config: Config)
                           (implicit val ec: ExecutionContext)
 extends CachedMergingColumnStore with StrictLogging {
   import filodb.core.columnstore._
@@ -49,7 +47,7 @@ extends CachedMergingColumnStore with StrictLogging {
   val rowMapTableCache = LruCache[ChunkRowMapTable](tableCacheSize)
   val segmentCache = LruCache[Segment[_]](segmentCacheSize)
 
-  val mergingStrategy = new AppendingChunkMergingStrategy(this, getSortColumn)
+  val mergingStrategy = new AppendingChunkMergingStrategy(this)
 
   /**
    * Initializes the column store for a given dataset projection.  Must be called once before appending

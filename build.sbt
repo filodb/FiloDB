@@ -28,7 +28,7 @@ lazy val cli = (project in file("cli"))
                  .settings(name := "filodb-cli")
                  .settings(libraryDependencies ++= cliDeps)
                  .settings(cliAssemblySettings:_*)
-                 .dependsOn(core)
+                 .dependsOn(core, coordinator, cassandra)
 
 lazy val spark = (project in file("spark"))
                    .settings(mySettings:_*)
@@ -36,7 +36,8 @@ lazy val spark = (project in file("spark"))
                    .settings(libraryDependencies ++= sparkDeps)
                    .settings(assemblySettings:_*)
                    .settings(assemblyOption in assembly := (assemblyOption in assembly).value.copy(includeScala = false))
-                   .dependsOn(core % "compile->compile; test->test")
+                   .dependsOn(core % "compile->compile; test->test",
+                              coordinator, cassandra)
 
 val phantomVersion = "1.11.0"
 val akkaVersion    = "2.3.7"
