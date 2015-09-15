@@ -23,6 +23,7 @@ object Types {
 }
 
 // A range of keys, used for describing ingest rows as well as queries
+// TODO: this should really be based on a Projection or RichProjection, not dataset.
 case class KeyRange[K : SortKeyHelper](dataset: Types.TableName,
                                        partition: Types.PartitionKey,
                                        start: K, end: K) {

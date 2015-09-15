@@ -6,7 +6,7 @@ import scala.concurrent.{ExecutionContext, Future}
 
 import filodb.core._
 import filodb.core.columnstore.{ColumnStore, RowReader, RowWriterSegment, Segment}
-import filodb.core.metadata.{Dataset, Column}
+import filodb.core.metadata.{Dataset, Column, RichProjection}
 
 /**
  * The Reprojector flushes rows out of the MemTable and writes out Segments to the ColumnStore.
@@ -96,9 +96,10 @@ class DefaultReprojector(columnStore: ColumnStore,
       Future[Seq[Response]] = {
     implicit val helper = setup.helper[K]
     val datasetName = setup.dataset.name
+    val projection = RichProjection(setup.dataset, setup.schema)
     val segments = chunkize(memTable.readAllRows[K](datasetName, version, Locked), setup)
     val segmentTasks: Seq[Future[Response]] = segments.map { segment =>
-      for { resp <- columnStore.appendSegment(segment, version) if resp == Success }
+      for { resp <- columnStore.appendSegment(projection, segment, version) if resp == Success }
       yield {
         logger.debug(s"Finished merging segment ${segment.keyRange}, version $version...")
         memTable.removeRows(segment.keyRange, version)

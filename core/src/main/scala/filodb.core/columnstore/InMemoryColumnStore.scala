@@ -16,15 +16,14 @@ import filodb.core.metadata.{Column, Projection}
  * Good for testing or performance.
  * TODO: use thread-safe structures
  */
-class InMemoryColumnStore(getSortColumn: Types.TableName => Column)
-                         (implicit val ec: ExecutionContext)
+class InMemoryColumnStore(implicit val ec: ExecutionContext)
 extends CachedMergingColumnStore with StrictLogging {
   import Types._
   import collection.JavaConversions._
 
   val segmentCache = LruCache[Segment[_]](100)
 
-  val mergingStrategy = new AppendingChunkMergingStrategy(this, getSortColumn)
+  val mergingStrategy = new AppendingChunkMergingStrategy(this)
 
   type ChunkKey = (Types.ColumnId, ByteBuffer, Types.ChunkID)
   type ChunkTree = TreeMap[ChunkKey, Array[Byte]]

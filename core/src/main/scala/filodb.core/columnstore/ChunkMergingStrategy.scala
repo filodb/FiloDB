@@ -4,7 +4,7 @@ import com.typesafe.scalalogging.slf4j.StrictLogging
 import java.nio.ByteBuffer
 import scala.concurrent.{ExecutionContext, Future}
 
-import filodb.core.metadata.Column
+import filodb.core.metadata.{Column, RichProjection}
 import RowReader.TypedFieldExtractor
 import filodb.core.Types._
 import filodb.core._
@@ -30,7 +30,9 @@ trait ChunkMergingStrategy {
    *
    * @param keyRange the keyRange of the segment to read.  It's important this corresponds to one segment.
    */
-  def readSegmentForCache[K: SortKeyHelper](keyRange: KeyRange[K], version: Int): Future[Segment[K]]
+  def readSegmentForCache[K: SortKeyHelper](projection: RichProjection,
+                                            keyRange: KeyRange[K],
+                                            version: Int): Future[Segment[K]]
 
   /**
    * Merges an existing segment cached using readSegmentForCache with a new partial segment to be inserted.
@@ -45,7 +47,7 @@ trait ChunkMergingStrategy {
   /**
    * Prunes a segment to only what needs to be cached.
    */
-  def pruneForCache[K](segment: Segment[K]): Segment[K]
+  def pruneForCache[K](projection: RichProjection, segment: Segment[K]): Segment[K]
 }
 
 /**
@@ -58,13 +60,14 @@ trait ChunkMergingStrategy {
  * @param columnStore the column store to use
  * @param getSortColumn a function that returns the sort column given a dataset
  */
-class AppendingChunkMergingStrategy(columnStore: ColumnStore,
-                                    getSortColumn: Types.TableName => Column)
+class AppendingChunkMergingStrategy(columnStore: ColumnStore)
                                    (implicit ec: ExecutionContext)
 extends ChunkMergingStrategy with StrictLogging {
   // We only need to read back the sort column in order to merge with another segment's sort column
-  def readSegmentForCache[K: SortKeyHelper](keyRange: KeyRange[K], version: Int): Future[Segment[K]] = {
-    columnStore.readSegments(Seq(getSortColumn(keyRange.dataset)), keyRange, version).map { iter =>
+  def readSegmentForCache[K: SortKeyHelper](projection: RichProjection,
+                                            keyRange: KeyRange[K],
+                                            version: Int): Future[Segment[K]] = {
+    columnStore.readSegments(Seq(projection.sortColumn), keyRange, version).map { iter =>
       iter.toSeq.headOption match {
         case Some(firstSegment) => firstSegment
         case None =>
@@ -113,8 +116,8 @@ extends ChunkMergingStrategy with StrictLogging {
   }
 
   // We only need to store the sort column
-  def pruneForCache[K](segment: Segment[K]): Segment[K] = {
-    val sortColumn = getSortColumn(segment.dataset).name
+  def pruneForCache[K](projection: RichProjection, segment: Segment[K]): Segment[K] = {
+    val sortColumn = projection.sortColumn.name
     if (segment.getColumns == Set(sortColumn)) {
       logger.trace(s"pruneForcache: segment only has ${segment.getColumns}, not pruning")
       segment

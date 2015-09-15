@@ -5,7 +5,7 @@ import scala.concurrent.{ExecutionContext, Future}
 import spray.caching._
 
 import filodb.core._
-import filodb.core.metadata.{Column, Projection}
+import filodb.core.metadata.{Column, Projection, RichProjection}
 import RowReader.TypedFieldExtractor
 
 /**
@@ -37,7 +37,8 @@ trait ColumnStore {
    * @param version the version # to write the segment to
    * @returns Success. Future.failure(exception) otherwise.
    */
-  def appendSegment[K: SortKeyHelper: TypedFieldExtractor](segment: Segment[K],
+  def appendSegment[K: SortKeyHelper: TypedFieldExtractor](projection: RichProjection,
+                                                           segment: Segment[K],
                                                            version: Int): Future[Response]
 
   /**
@@ -127,10 +128,11 @@ trait CachedMergingColumnStore extends ColumnStore {
 
   def clearSegmentCache(): Unit = { segmentCache.clear() }
 
-  def appendSegment[K: SortKeyHelper: TypedFieldExtractor](segment: Segment[K],
+  def appendSegment[K: SortKeyHelper: TypedFieldExtractor](projection: RichProjection,
+                                                           segment: Segment[K],
                                                            version: Int): Future[Response] = {
     if (segment.isEmpty) return(Future.successful(NotApplied))
-    for { oldSegment <- getSegFromCache(segment.keyRange, version)
+    for { oldSegment <- getSegFromCache(projection, segment.keyRange, version)
           mergedSegment = mergingStrategy.mergeSegments(oldSegment, segment)
           writeChunksResp <- writeChunks(segment.dataset, segment.partition, version,
                                          segment.segmentId, mergedSegment.getChunks)
@@ -139,7 +141,7 @@ trait CachedMergingColumnStore extends ColumnStore {
             if writeChunksResp == Success }
     yield {
       // Important!  Update the cache with the new merged segment.
-      updateCache(segment.keyRange, version, mergedSegment)
+      updateCache(projection, segment.keyRange, version, mergedSegment)
       writeCRMapResp
     }
   }
@@ -158,19 +160,24 @@ trait CachedMergingColumnStore extends ColumnStore {
     }
   }
 
-  private def getSegFromCache[K: SortKeyHelper](keyRange: KeyRange[K], version: Int): Future[Segment[K]] = {
+  private def getSegFromCache[K: SortKeyHelper](projection: RichProjection,
+                                                keyRange: KeyRange[K],
+                                                version: Int): Future[Segment[K]] = {
     segmentCache((keyRange.dataset, keyRange.partition, version, keyRange.binaryStart))(
-                 mergingStrategy.readSegmentForCache(keyRange, version).
+                 mergingStrategy.readSegmentForCache(projection, keyRange, version).
                  asInstanceOf[Future[Segment[_]]]).asInstanceOf[Future[Segment[K]]]
   }
 
-  private def updateCache[K](keyRange: KeyRange[K], version: Int, newSegment: Segment[K]): Unit = {
+  private def updateCache[K](projection: RichProjection,
+                             keyRange: KeyRange[K],
+                             version: Int,
+                             newSegment: Segment[K]): Unit = {
     // NOTE: Spray caching doesn't have an update() method, so we have to delete and then repopulate. :(
     // TODO: consider if we need to lock the code below. Probably not since ColumnStore is single-writer but
     // we might want to update the spray-caching API to have an update method.
     val key = (keyRange.dataset, keyRange.partition, version, keyRange.binaryStart)
     segmentCache.remove(key)
-    segmentCache(key)(mergingStrategy.pruneForCache(newSegment).asInstanceOf[Segment[_]])
+    segmentCache(key)(mergingStrategy.pruneForCache(projection, newSegment).asInstanceOf[Segment[_]])
   }
 
   // @param rowMaps a Seq of (segmentId, ChunkRowMap)

@@ -15,9 +15,9 @@ class ChunkMergingStrategySpec extends FunSpec with Matchers {
   val sortKey = "age"
 
   import scala.concurrent.ExecutionContext.Implicits.global
-  val colStore = new InMemoryColumnStore({ x => schema(2) })
+  val colStore = new InMemoryColumnStore
   val dataset = "foo"
-  val mergingStrategy = new AppendingChunkMergingStrategy(colStore, { x => schema(2) })
+  val mergingStrategy = new AppendingChunkMergingStrategy(colStore)
 
   private def mergeRows(firstSegRows: Seq[Product], secondSegRows: Seq[Product]) = {
       val segment = getRowWriter(keyRange)
@@ -62,7 +62,7 @@ class ChunkMergingStrategySpec extends FunSpec with Matchers {
       val segment = getRowWriter(keyRange)
       segment.addRowsAsChunk(names take 3, getSortKey _)
       // The below two lines simulate a write segment / read cycle
-      val prunedSeg = mergingStrategy.pruneForCache(segment)
+      val prunedSeg = mergingStrategy.pruneForCache(projection, segment)
       val readerSeg = RowReaderSegment(prunedSeg.asInstanceOf[GenericSegment[Long]], schema drop 2)
 
       val segment2 = getRowWriter(keyRange)
@@ -109,7 +109,7 @@ class ChunkMergingStrategySpec extends FunSpec with Matchers {
     it("should prune segments that have more than the sortColumn") {
       val segment = getRowWriter(keyRange)
       segment.addRowsAsChunk(names take 3, getSortKey _)
-      val prunedSeg = mergingStrategy.pruneForCache(segment)
+      val prunedSeg = mergingStrategy.pruneForCache(projection, segment)
 
       prunedSeg.getColumns should equal (Set("age"))
       prunedSeg.getChunks.toSet should equal (segment.getChunks.filter(_._1 == "age").toSet)

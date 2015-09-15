@@ -28,7 +28,7 @@ class EndToEndSpec extends FunSpec with Matchers with BeforeAndAfter with ScalaF
 
   val mTable = new MapDBMemTable(ConfigFactory.load)
   val flushPolicy = new NumRowsFlushPolicy(100L)
-  val columnStore = new InMemoryColumnStore(x => schema(2))   // age column is the sort column
+  val columnStore = new InMemoryColumnStore
   val reprojector = new DefaultReprojector(columnStore)
   val scheduler = new Scheduler(mTable, reprojector, flushPolicy, maxTasks = 2)
 

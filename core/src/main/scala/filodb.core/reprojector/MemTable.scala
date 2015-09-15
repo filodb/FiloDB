@@ -28,12 +28,14 @@ object MemTable {
   case object Active extends BufferType
   case object Locked extends BufferType
 
+  // TODO: Base this on RichProjection, maybe this is not needed
   case class IngestionSetup(dataset: Dataset,
                             schema: Seq[Column],
                             partitioningFunc: RowReader => PartitionKey,
                             sortColumnNum: Int,
                             keyHelper: SortKeyHelper[Any]) {
     def helper[K]: SortKeyHelper[K] = keyHelper.asInstanceOf[SortKeyHelper[K]]
+    def sortColumn: Column = schema(sortColumnNum)
   }
 }
 
