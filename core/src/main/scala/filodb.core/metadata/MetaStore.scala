@@ -18,6 +18,16 @@ trait MetaStore {
   implicit val ec: ExecutionContext
 
   /**
+   * Initializes the MetaStore so it is ready for further commands.
+   */
+  def initialize(): Future[Response]
+
+  /**
+   * Clears all dataset and column metadata from the MetaStore.
+   */
+  def clearAllData(): Future[Response]
+
+  /**
    * ** Dataset API ***
    */
 

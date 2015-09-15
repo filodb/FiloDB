@@ -42,6 +42,10 @@ object DatasetTable extends DatasetTable with SimpleCassandraConnector {
   import filodb.core._
   import filodb.core.Types._
 
+  def initialize(): Future[Response] = create.ifNotExists.future().toResponse()
+
+  def clearAll(): Future[Response] = truncate.future().toResponse()
+
   def insertProjection(projection: Projection): Future[Response] =
     insert.value(_.name, projection.dataset)
           .value(_.projectionId, projection.id)

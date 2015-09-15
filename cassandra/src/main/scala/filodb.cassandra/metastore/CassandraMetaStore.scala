@@ -8,9 +8,18 @@ import filodb.core.metadata.{Column, Dataset, MetaStore}
 
 class CassandraMetaStore(config: Config)
                         (implicit val ec: ExecutionContext) extends MetaStore {
-
   val datasetTable = DatasetTable
   val columnTable = ColumnTable
+
+  def initialize(): Future[Response] =
+    for { dtResp <- datasetTable.initialize()
+          ctResp <- columnTable.initialize() }
+    yield { ctResp }
+
+  def clearAllData(): Future[Response] =
+    for { dtResp <- datasetTable.clearAll()
+          ctResp <- columnTable.clearAll() }
+    yield { ctResp }
 
   def newDataset(dataset: Dataset): Future[Response] =
     datasetTable.createNewDataset(dataset)

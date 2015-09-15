@@ -45,6 +45,10 @@ object ColumnTable extends ColumnTable with SimpleCassandraConnector {
   import filodb.cassandra.Util._
   import filodb.core._
 
+  def initialize(): Future[Response] = create.ifNotExists.future().toResponse()
+
+  def clearAll(): Future[Response] = truncate.future().toResponse()
+
   def getSchema(dataset: String, version: Int): Future[Column.Schema] = {
     val enum = select.where(_.dataset eqs dataset).and(_.version lte version)
                      .fetchEnumerator()

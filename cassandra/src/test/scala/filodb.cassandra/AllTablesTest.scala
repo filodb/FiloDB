@@ -37,20 +37,6 @@ trait AllTablesTest extends SimpleCassandraTest {
 
   lazy val metaStore = new CassandraMetaStore(config)
 
-  def createAllTables(): Unit = {
-    val f = for { _ <- DatasetTable.create.ifNotExists.future()
-                  _ <- ColumnTable.create.ifNotExists.future() }
-            yield { 0 }
-    Await.result(f, 10 seconds)
-  }
-
-  def truncateAllTables(): Unit = {
-    val f = for { _ <- DatasetTable.truncate.future()
-                  _ <- ColumnTable.truncate.future() }
-            yield { 0 }
-    Await.result(f, 10 seconds)
-  }
-
   import Column.ColumnType._
 
   val dsName = "gdelt"

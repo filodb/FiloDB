@@ -17,10 +17,10 @@ class CassandraMetaStoreSpec extends FunSpec with BeforeAndAfter with AllTablesT
 
   override def beforeAll() {
     super.beforeAll()
-    createAllTables()
+    metastore.initialize().futureValue
   }
 
-  before { truncateAllTables() }
+  before { metastore.clearAllData().futureValue }
 
   describe("column API") {
     it("should return IllegalColumnChange if an invalid column addition submitted") {
