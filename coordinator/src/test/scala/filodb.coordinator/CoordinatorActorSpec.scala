@@ -75,6 +75,7 @@ with CoordinatorSetup with AllTablesTest {
   it("should be able to start ingestion, send rows, and get an ack back") {
     probe.send(coordActor, CreateDataset(GdeltDataset, GdeltColumns))
     probe.expectMsg(DatasetCreated)
+    columnStore.clearProjectionData(GdeltDataset.projections.head).futureValue should equal (Success)
 
     probe.send(coordActor, SetupIngestion(dsName, GdeltColNames, 0))
     probe.expectMsg(IngestionReady)
@@ -86,6 +87,7 @@ with CoordinatorSetup with AllTablesTest {
     probe.send(coordActor, Flush(dsName, 0))
     probe.expectMsg(SchedulerActor.Flushed)
 
+    // scheduler.tasks.values.head.failed.futureValue.printStackTrace()
     whenReady(scheduler.tasks.values.head) { responses =>
       memTable.flushingDatasets should equal (Nil)
       implicit val helper = new LongKeyHelper(10000L)

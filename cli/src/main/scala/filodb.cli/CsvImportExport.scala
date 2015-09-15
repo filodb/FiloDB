@@ -10,6 +10,7 @@ import scala.concurrent.duration._
 import scala.language.postfixOps
 
 import filodb.core.metadata.MetaStore
+import filodb.core.reprojector.MemTable
 import filodb.coordinator.RowSource
 import filodb.coordinator.sources.CsvSourceActor
 import filodb.core._
@@ -19,6 +20,7 @@ import filodb.core._
 trait CsvImportExport {
   val system: ActorSystem
   val metaStore: MetaStore
+  val memTable: MemTable
   val coordinatorActor: ActorRef
   var exitCode = 0
 
@@ -34,13 +36,14 @@ trait CsvImportExport {
     }
   }
 
-  protected def parse[T, B](cmd: => Future[T])(func: T => B): B = {
-    func(Await.result(cmd, 5 seconds))
+  protected def parse[T, B](cmd: => Future[T], awaitTimeout: FiniteDuration = 5 seconds)(func: T => B): B = {
+    func(Await.result(cmd, awaitTimeout))
   }
 
-  protected def actorAsk[B](actor: ActorRef, msg: Any)(f: PartialFunction[Any, B]): B = {
-    implicit val timeout = Timeout(5 seconds)
-    parse(actor ? msg)(f)
+  protected def actorAsk[B](actor: ActorRef, msg: Any,
+                            askTimeout: FiniteDuration = 5 seconds)(f: PartialFunction[Any, B]): B = {
+    implicit val timeout = Timeout(askTimeout)
+    parse(actor ? msg, askTimeout)(f)
   }
 
   protected def awaitSuccess(cmd: => Future[Response]) {
@@ -53,8 +56,20 @@ trait CsvImportExport {
     val fileReader = new java.io.FileReader(csvPath)
     println("Ingesting CSV at " + csvPath)
     val csvActor = system.actorOf(CsvSourceActor.props(fileReader, dataset, version, coordinatorActor))
-    implicit val timeout = Timeout(60 minutes)
-    Await.result(csvActor ? RowSource.Start, 61 minutes)
+    actorAsk(csvActor, RowSource.Start, 61 minutes) {
+      case RowSource.SetupError(err) =>
+        println(s"ERROR: $err")
+        exitCode = 2
+      case RowSource.AllDone =>
+        println("Waiting for scheduler/memTable to finish flushing everything")
+        Thread sleep 5000
+        while (memTable.flushingDatasets.nonEmpty) {
+          print(".")
+          Thread sleep 1000
+        }
+        println("ingestCSV finished!")
+        exitCode = 0
+    }
   }
 
   def exportCSV(dataset: String, version: Int,

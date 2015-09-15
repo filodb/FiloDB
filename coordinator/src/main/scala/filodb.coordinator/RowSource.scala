@@ -3,12 +3,14 @@ package filodb.coordinator
 import akka.actor.{Actor, ActorRef, PoisonPill}
 import com.typesafe.scalalogging.slf4j.StrictLogging
 
+import filodb.core._
 import filodb.core.columnstore.RowReader
 
 object RowSource {
   case object Start
   case object GetMoreRows
   case object AllDone
+  case class SetupError(err: ErrorResponse)
 }
 
 /**
@@ -59,31 +61,35 @@ trait RowSource extends Actor with StrictLogging {
     case CoordinatorActor.IngestionReady =>
       self ! GetMoreRows
 
+    case e: ErrorResponse =>
+      whoStartedMe ! SetupError(e)
+
     case GetMoreRows =>
       val rows = (1 to rowsToRead).iterator
                    .map(i => getNewRow())
-                   .takeWhile { row =>
-                     if (!row.isDefined) isDoneReading = true
-                     row.isDefined
-                   }.collect { case Some((seqID, row)) =>
-                     currentHiSeqNo = seqID
-                     row
-                   }.toSeq
+                   .takeWhile(_.isDefined)
+                   .toSeq.flatten
       if (rows.nonEmpty) {
-        coordinatorActor ! CoordinatorActor.IngestRows(dataset, version, rows, currentHiSeqNo)
-      }
-      if (isDoneReading) {
-        logger.debug("Marking isDoneReading as true")
-        coordinatorActor ! CoordinatorActor.Flush(dataset, version)
-      } else if (currentHiSeqNo - lastAckedSeqNo < maxUnackedRows) {
-        self ! GetMoreRows
+        val maxSeqId = rows.map(_._1).max
+        currentHiSeqNo = Math.max(currentHiSeqNo, maxSeqId)
+        coordinatorActor ! CoordinatorActor.IngestRows(dataset, version, rows.map(_._2), currentHiSeqNo)
+        // Go get more rows
+        if (currentHiSeqNo - lastAckedSeqNo < maxUnackedRows) {
+          self ! GetMoreRows
+        } else {
+          logger.debug(s"Over high water mark: currentHi = $currentHiSeqNo, lastAcked = $lastAckedSeqNo")
+        }
+      } else {
+        logger.debug(s"Marking isDoneReading as true: HiSeqNo = $currentHiSeqNo, lastAcked = $lastAckedSeqNo")
+        isDoneReading = true
       }
 
     case CoordinatorActor.Ack(lastSequenceNo) =>
       lastAckedSeqNo = lastSequenceNo
-      if (currentHiSeqNo - lastAckedSeqNo < maxUnackedRows) self ! GetMoreRows
+      if (!isDoneReading && (currentHiSeqNo - lastAckedSeqNo < maxUnackedRows)) self ! GetMoreRows
       if (isDoneReading && currentHiSeqNo == lastAckedSeqNo) {
         logger.info(s"Ingestion is all done")
+        coordinatorActor ! CoordinatorActor.Flush(dataset, version)
         allDoneAndGood()
         whoStartedMe ! AllDone
         self ! PoisonPill

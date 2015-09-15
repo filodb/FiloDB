@@ -5,6 +5,8 @@
     <!-- Enable JMX-based changing of log levels, reloading of config, etc. -->
     <jmxConfigurator />
 
+  <!-- <logger name="filodb" level="DEBUG" /> -->
+
     <appender name="file" class="ch.qos.logback.core.rolling.RollingFileAppender">
         <!--See http://logback.qos.ch/manual/appenders.html#RollingFileAppender-->
         <!--and http://logback.qos.ch/manual/appenders.html#TimeBasedRollingPolicy-->

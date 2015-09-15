@@ -22,6 +22,7 @@ trait FlushPolicy {
  * Flushes if the total # of rows is equal to or exceeding the maxTotalRows.
  */
 class NumRowsFlushPolicy(maxTotalRows: Long) extends FlushPolicy {
+  override def toString: String = s"NumRowsFlushPolicy($maxTotalRows)"
   def nextFlush(memtable: MemTable): Option[(TableName, Int)] = {
     val activeRows = memtable.allNumRows(MemTable.Active)
     val flushingRows = memtable.flushingDatasets

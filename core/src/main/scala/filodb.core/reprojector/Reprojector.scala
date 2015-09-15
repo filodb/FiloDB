@@ -69,7 +69,7 @@ class DefaultReprojector(columnStore: ColumnStore,
   // out.  Heck we could create a custom FiloRowReader which has methods to extract this out.
   // Might be faster than creating a Tuple3 for every row... or not, for complex sort and partition keys
   def chunkize[K](rows: Iterator[(PartitionKey, K, RowReader)],
-                  setup: IngestionSetup): Seq[Segment[K]] = {
+                  setup: IngestionSetup): Iterator[Segment[K]] = {
     implicit val helper = setup.helper[K]
     var numRows = 0
     rows.sortedGroupBy { case (partition, sortKey, row) =>
@@ -79,6 +79,7 @@ class DefaultReprojector(columnStore: ColumnStore,
       // For each segment grouping of rows... set up a Segment
       val keyRange = KeyRange(setup.dataset.name, partition, segStart, segUntil)
       val segment = new RowWriterSegment(keyRange, setup.schema, RowReaderSupport)
+      logger.debug(s"Created new segment $segment for encoding...")
 
       // Group rows into chunk sized bytes and add to segment
       segmentRowsIt.grouped(setup.dataset.options.chunkSize).foreach { chunkRowsIt =>
@@ -89,7 +90,7 @@ class DefaultReprojector(columnStore: ColumnStore,
       segment
     // NOTE: semantics below make sure we write entire segments, but takeWhile() wastes
     // the last segment produced.  TODO: what we really need is a takeUntil.
-    }.takeWhile(s => numRows < maxRows).toSeq
+    }.takeWhile(s => numRows < maxRows)
   }
 
   def reproject[K: TypedFieldExtractor](memTable: MemTable, setup: IngestionSetup, version: Int):
@@ -106,7 +107,7 @@ class DefaultReprojector(columnStore: ColumnStore,
         logger.debug(s"Removed rows for segment $segment from Locked table...")
         resp
       }
-    }
+    }.toSeq
     Future.sequence(segmentTasks)
   }
 }
