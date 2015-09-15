@@ -6,6 +6,7 @@ import filodb.core.reprojector.Scheduler
 
 object SchedulerActor {
   case object RunOnce
+  case object ReportStats
 
   case object Flushed
   case object NoSlotsAvailable
@@ -27,7 +28,15 @@ class SchedulerActor(scheduler: Scheduler) extends BaseActor {
   def receive: Receive = {
     case RunOnce =>
       scheduler.runOnce()
+
+    case ReportStats =>
+      val stats = scheduler.stats
+      logger.info(s"Scheduler tasks: ${stats.activeTasks}")
+      logger.info(s"Failed tasks: ${stats.failedTasks}")
+      logger.info(s"MemTable active table rows: ${stats.activeRows}")
+      logger.info(s"MemTable flushing tables: ${stats.flushingRows}")
       // TODO: Check for any failures, and report them ... perhaps on EventBus?
+
     case CoordinatorActor.Flush(dataset, version) =>
       scheduler.flush(dataset, version) match {
         case Scheduler.Flushed          => sender ! Flushed

@@ -15,6 +15,12 @@ object Scheduler {
   sealed trait FlushResponse
   case object Flushed extends FlushResponse
   case object NoAvailableTasks extends FlushResponse
+
+  // Reports on scheduler and memtable stats, good for debugging
+  case class SchedulerStats(activeTasks: Set[(TableName, Int)],
+                            failedTasks: Seq[((TableName, Int), Throwable)],
+                            activeRows: Seq[((TableName, Int), Long)],
+                            flushingRows: Seq[((TableName, Int), Long)])
 }
 
 /**
@@ -60,11 +66,13 @@ class Scheduler(memTable: MemTable,
     // Kick off more reprojection tasks to keep flushes going until Locked tables are empty.
     val moreToFlush = memTable.flushingDatasets.map(_._1).toSet
     val flushingNeedTask = moreToFlush -- tasks.keySet
-    logger.debug(s"Flushes in progress: $moreToFlush   needing a task: $flushingNeedTask")
     val tasksLeft = maxTasks - tasks.size
-    logger.debug(s"Room for $tasksLeft tasks, starting them...")
-    flushingNeedTask.take(tasksLeft).foreach { case (dataset, ver) =>
-      addNewTask(dataset, ver)
+    if (flushingNeedTask.nonEmpty) {
+      logger.debug(s"Flushes in progress: $moreToFlush   needing a task: $flushingNeedTask")
+      logger.debug(s"Room for $tasksLeft tasks, starting them...")
+      flushingNeedTask.take(tasksLeft).foreach { case (dataset, ver) =>
+        addNewTask(dataset, ver)
+      }
     }
 
     // At this point, every dataset with pending flushes should have a task, unless
@@ -105,6 +113,12 @@ class Scheduler(memTable: MemTable,
     }
   }
 
+  def stats: SchedulerStats =
+    SchedulerStats(tasks.keySet,
+                   failedTasks,
+                   memTable.allNumRows(MemTable.Active, true),
+                   memTable.flushingDatasets)
+
   // TODO: limit retries of failed tasks?  What to do with rows in memtable?
   private def addNewTask(dataset: TableName, version: Int): Unit = {
     val newTaskFuture = reprojector.newTask(memTable, dataset, version)
@@ -121,7 +135,7 @@ class Scheduler(memTable: MemTable,
       case Some(Failure(t)) => logger.error(s"Reprojection task $nameVer failed", t)
                                failedTasks = ((nameVer, t) :: failedTasks).take(maxFailures)
                                true
-      case Some(Success(r)) => logger.debug(s"Reprojection task $nameVer succeeded: $r")
+      case Some(Success(r)) => logger.info(s"Reprojection task $nameVer succeeded: $r")
                                true
     }
 }

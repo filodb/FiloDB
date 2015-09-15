@@ -77,7 +77,8 @@ object CoordinatorActor {
  * {{{
  *   {
  *     memtable-retry-interval = 10 s
- *     scheduler-interval = 10 s
+ *     scheduler-interval = 1 s
+ *     scheduler-reporting-interval = 30s
  *   }
  * }}}
  */
@@ -91,10 +92,13 @@ class CoordinatorActor(memTable: MemTable,
 
   val memtablePushback = config.as[FiniteDuration]("memtable-retry-interval")
   val schedulerInterval = config.as[FiniteDuration]("scheduler-interval")
+  val reportingInterval = config.as[FiniteDuration]("scheduler-reporting-interval")
 
   val schedulerActor = context.actorOf(SchedulerActor.props(scheduler), "scheduler")
   context.system.scheduler.schedule(schedulerInterval, schedulerInterval,
                                     schedulerActor, SchedulerActor.RunOnce)
+  context.system.scheduler.schedule(reportingInterval, reportingInterval,
+                                    schedulerActor, SchedulerActor.ReportStats)
 
   private def verifySchema(originator: ActorRef, dataset: String, version: Int, columns: Seq[String]):
       Future[Option[Column.Schema]] = {
