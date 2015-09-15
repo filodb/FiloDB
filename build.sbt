@@ -15,7 +15,7 @@ lazy val coordinator = (project in file("coordinator"))
                          .settings(name := "filodb-coordinator")
                          .settings(libraryDependencies ++= coordDeps)
                          .dependsOn(core % "compile->compile; test->test",
-                                    cassandra % "compile->compile; test->test")
+                                    cassandra % "test->test")
 
 lazy val cassandra = (project in file("cassandra"))
                        .settings(mySettings:_*)

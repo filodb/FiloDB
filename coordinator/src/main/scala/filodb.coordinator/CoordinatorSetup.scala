@@ -5,7 +5,7 @@ import com.typesafe.config.Config
 
 import filodb.core.metadata.MetaStore
 import filodb.core.columnstore.ColumnStore
-import filodb.core.reprojector.{MemTable, Scheduler, FlushPolicy, DefaultReprojector}
+import filodb.core.reprojector._
 
 /**
  * A trait to make setup of the CoordinatorActor stack a bit easier.
@@ -32,8 +32,16 @@ trait CoordinatorSetup {
                                      config.getInt("scheduler-max-tasks"))
 
   lazy val coordinatorActor =
-    system.actorOf(CoordinatorActor.props(memTable, metaStore, scheduler,
+    system.actorOf(CoordinatorActor.props(memTable, metaStore, scheduler, columnStore,
                                           config.getConfig("coordinator")),
                    "coordinator")
 
+}
+
+/**
+ * A CoordinatorSetup with default memtable and flushpolicy initialized from config
+ */
+trait DefaultCoordinatorSetup extends CoordinatorSetup {
+  lazy val memTable = new MapDBMemTable(config)
+  lazy val flushPolicy = new NumRowsFlushPolicy(config.getInt("memtable.flush-trigger-rows"))
 }

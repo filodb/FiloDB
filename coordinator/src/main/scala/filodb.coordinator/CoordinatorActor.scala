@@ -24,6 +24,14 @@ import filodb.core.reprojector.{MemTable, Scheduler}
  */
 object CoordinatorActor {
   /**
+   * Creates a new dataset with columns and a default projection.
+   */
+  case class CreateDataset(dataset: Dataset, columns: Seq[Column])
+
+  case object DatasetCreated extends Response
+  case class DatasetError(msg: String) extends ErrorResponse
+
+  /**
    * Sets up ingestion for a given dataset, version, and schema of columns.
    * The dataset and columns must have been previously defined.
    *
@@ -59,8 +67,9 @@ object CoordinatorActor {
   def props(memTable: MemTable,
             metaStore: MetaStore,
             scheduler: Scheduler,
+            columnStore: ColumnStore,
             config: Config): Props =
-    Props(classOf[CoordinatorActor], memTable, metaStore, scheduler, config)
+    Props(classOf[CoordinatorActor], memTable, metaStore, scheduler, columnStore, config)
 }
 
 /**
@@ -75,6 +84,7 @@ object CoordinatorActor {
 class CoordinatorActor(memTable: MemTable,
                        metaStore: MetaStore,
                        scheduler: Scheduler,
+                       columnStore: ColumnStore,
                        config: Config) extends BaseActor {
   import CoordinatorActor._
   import context.dispatcher
@@ -100,22 +110,43 @@ class CoordinatorActor(memTable: MemTable,
     }
   }
 
-  def receive: Receive = {
-    case SetupIngestion(dataset, columns, version) =>
-      val originator = sender     // capture mutable sender for async response
-      (for { datasetObj <- metaStore.getDataset(dataset)
-             schema <- verifySchema(originator, dataset, version, columns) if schema.isDefined }
+  private def createDataset(originator: ActorRef, datasetObj: Dataset, columns: Seq[Column]) = {
+    if (datasetObj.projections.isEmpty) {
+      originator ! DatasetError(s"There must be at least one projection in dataset $datasetObj")
+    } else {
+      (for { resp1 <- metaStore.newDataset(datasetObj)
+             resp2 <- Future.sequence(columns.map(metaStore.newColumn(_)))
+             resp3 <- columnStore.initializeProjection(datasetObj.projections.head) }
       yield {
-        val columnSeq = columns.map(schema.get(_))
-        memTable.setupIngestion(datasetObj, columnSeq, version) match {
-          case MemTable.SetupDone    => originator ! IngestionReady
-          case MemTable.AlreadySetup => originator ! AlreadySetup
-          case MemTable.BadSchema    => originator ! BadSchema
-        }
+        originator ! DatasetCreated
       }).recover {
-        case NotFoundError(what) => originator ! UnknownDataset
-        case t: Throwable        => originator ! MetadataException(t)
+        case e: StorageEngineException => originator ! e
       }
+    }
+  }
+
+  private def setupIngestion(originator: ActorRef, dataset: String, columns: Seq[String], version: Int) = {
+    (for { datasetObj <- metaStore.getDataset(dataset)
+           schema <- verifySchema(originator, dataset, version, columns) if schema.isDefined }
+    yield {
+      val columnSeq = columns.map(schema.get(_))
+      memTable.setupIngestion(datasetObj, columnSeq, version) match {
+        case MemTable.SetupDone    => originator ! IngestionReady
+        case MemTable.AlreadySetup => originator ! AlreadySetup
+        case MemTable.BadSchema    => originator ! BadSchema
+      }
+    }).recover {
+      case NotFoundError(what) => originator ! UnknownDataset
+      case t: Throwable        => originator ! MetadataException(t)
+    }
+  }
+
+  def receive: Receive = {
+    case CreateDataset(datasetObj, columns) =>
+      createDataset(sender, datasetObj, columns)
+
+    case SetupIngestion(dataset, columns, version) =>
+      setupIngestion(sender, dataset, columns, version)
 
     case ingestCmd @ IngestRows(dataset, version, rows, seqNo) =>
       // Check if we are over limit or under memory

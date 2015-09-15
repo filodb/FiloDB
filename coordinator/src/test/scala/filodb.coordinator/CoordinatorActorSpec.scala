@@ -24,7 +24,6 @@ with CoordinatorSetup with AllTablesTest {
   override def beforeAll() {
     super.beforeAll()
     metaStore.initialize().futureValue
-    columnStore.initializeProjection(GdeltDataset.projections.head).futureValue
   }
 
   var coordActor: ActorRef = _
@@ -34,7 +33,7 @@ with CoordinatorSetup with AllTablesTest {
 
   before {
     metaStore.clearAllData().futureValue
-    coordActor = system.actorOf(CoordinatorActor.props(memTable, metaStore, scheduler,
+    coordActor = system.actorOf(CoordinatorActor.props(memTable, metaStore, scheduler, columnStore,
                                 config.getConfig("coordinator")))
     probe = TestProbe()
   }
@@ -74,7 +73,8 @@ with CoordinatorSetup with AllTablesTest {
   )
 
   it("should be able to start ingestion, send rows, and get an ack back") {
-    createTable(GdeltDataset, GdeltColumns)
+    probe.send(coordActor, CreateDataset(GdeltDataset, GdeltColumns))
+    probe.expectMsg(DatasetCreated)
 
     probe.send(coordActor, SetupIngestion(dsName, GdeltColNames, 0))
     probe.expectMsg(IngestionReady)
