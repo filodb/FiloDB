@@ -59,7 +59,7 @@ class CsvSourceActor(csvStream: java.io.Reader,
     Option(reader.readNext()).map { rowValues =>
       val out = (seqId, ArrayStringRowReader(rowValues))
       seqId += 1
-      if (seqId % 10000 == 0) logger.debug(s"seqId = $seqId")
+      if (seqId % 100000 == 0) logger.info(s"Ingested $seqId rows...")
       out
     }
   }

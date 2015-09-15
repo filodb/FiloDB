@@ -55,10 +55,10 @@ trait Reprojector {
  * Default reprojector, which scans the Locked memtable, turning them into segments for flushing,
  * using fixed segment widths
  *
- * @param maxRows the maximum number of rows to reproject for each reprojection task.
+ * @param numSegments the number of segments to reproject for each reprojection task.
  */
 class DefaultReprojector(columnStore: ColumnStore,
-                         maxRows: Int = 100000)
+                         numSegments: Int = 3)
                         (implicit ec: ExecutionContext) extends Reprojector with StrictLogging {
   import MemTable._
   import Types._
@@ -71,7 +71,6 @@ class DefaultReprojector(columnStore: ColumnStore,
   def chunkize[K](rows: Iterator[(PartitionKey, K, RowReader)],
                   setup: IngestionSetup): Iterator[Segment[K]] = {
     implicit val helper = setup.helper[K]
-    var numRows = 0
     rows.sortedGroupBy { case (partition, sortKey, row) =>
       // lazy grouping of partition/segment from the sortKey
       (partition, helper.getSegment(sortKey))
@@ -85,12 +84,9 @@ class DefaultReprojector(columnStore: ColumnStore,
       segmentRowsIt.grouped(setup.dataset.options.chunkSize).foreach { chunkRowsIt =>
         val chunkRows = chunkRowsIt.toSeq
         segment.addRowsAsChunk(chunkRows)
-        numRows += chunkRows.length
       }
       segment
-    // NOTE: semantics below make sure we write entire segments, but takeWhile() wastes
-    // the last segment produced.  TODO: what we really need is a takeUntil.
-    }.takeWhile(s => numRows < maxRows)
+    }.take(numSegments)
   }
 
   def reproject[K: TypedFieldExtractor](memTable: MemTable, setup: IngestionSetup, version: Int):
