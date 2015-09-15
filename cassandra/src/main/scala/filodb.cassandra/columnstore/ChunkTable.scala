@@ -37,6 +37,10 @@ with SimpleCassandraConnector {
   override def fromRow(row: Row): (String, ByteBuffer, Int, ByteBuffer) =
     (columnName(row), segmentId(row), chunkId(row), data(row))
 
+  def initialize(): Future[Response] = create.ifNotExists.future().toResponse()
+
+  def clearAll(): Future[Response] = truncate.future().toResponse()
+
   def writeChunks(partition: String,
                   version: Int,
                   segmentId: ByteBuffer,

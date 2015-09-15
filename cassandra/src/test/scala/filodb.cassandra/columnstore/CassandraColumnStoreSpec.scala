@@ -10,7 +10,7 @@ import scala.concurrent.{Await, Future}
 import scala.language.postfixOps
 
 import filodb.core._
-import filodb.core.metadata.Column
+import filodb.core.metadata.{Column, Projection}
 import filodb.core.Types
 
 class CassandraColumnStoreSpec extends CassandraFlatSpec with BeforeAndAfter {
@@ -23,20 +23,18 @@ class CassandraColumnStoreSpec extends CassandraFlatSpec with BeforeAndAfter {
   val colStore = new CassandraColumnStore(ConfigFactory.load(),
                                           { x => schema(2) })
   val dataset = "foo"
+  val projection = Projection(0, dataset, "someCol")
 
   val (chunkTable, rowMapTable) = Await.result(colStore.getSegmentTables(dataset), 3 seconds)
 
   // First create the tables in C*
   override def beforeAll() {
     super.beforeAll()
-    // Note: This is a CREATE TABLE IF NOT EXISTS
-    Await.result(chunkTable.create.ifNotExists.future(), 3 seconds)
-    Await.result(rowMapTable.create.ifNotExists.future(), 3 seconds)
+    colStore.initializeProjection(projection).futureValue
   }
 
   before {
-    Await.result(chunkTable.truncate.future(), 3 seconds)
-    Await.result(rowMapTable.truncate.future(), 3 seconds)
+    colStore.clearProjectionData(projection).futureValue
     colStore.clearSegmentCache()
   }
 

@@ -9,7 +9,7 @@ import scala.concurrent.{ExecutionContext, Future}
 import spray.caching._
 
 import filodb.core._
-import filodb.core.metadata.Column
+import filodb.core.metadata.{Column, Projection}
 
 /**
  * A ColumnStore implementation which is entirely in memory for speed.
@@ -32,6 +32,10 @@ extends CachedMergingColumnStore with StrictLogging {
 
   val chunkDb = new HashMap[(TableName, PartitionKey, Int), ChunkTree]
   val rowMaps = new HashMap[(TableName, PartitionKey, Int), RowMapTree]
+
+  def initializeProjection(projection: Projection): Future[Response] = Future.successful(Success)
+
+  def clearProjectionData(projection: Projection): Future[Response] = ???
 
   def writeChunks(dataset: TableName,
                   partition: PartitionKey,

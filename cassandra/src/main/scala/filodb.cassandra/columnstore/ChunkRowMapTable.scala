@@ -41,6 +41,10 @@ with SimpleCassandraConnector {
   override def fromRow(row: Row): ChunkRowMapRecord =
     ChunkRowMapRecord(segmentId(row), chunkIds(row), rowNums(row), nextChunkId(row))
 
+  def initialize(): Future[Response] = create.ifNotExists.future().toResponse()
+
+  def clearAll(): Future[Response] = truncate.future().toResponse()
+
   /**
    * Retrieves a whole series of chunk maps, in the range [startSegmentId, untilSegmentId)
    * @returns ChunkMaps(...), if nothing found will return ChunkMaps(Nil).

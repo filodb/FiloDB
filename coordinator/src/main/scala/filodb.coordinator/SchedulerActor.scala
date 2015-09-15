@@ -7,6 +7,9 @@ import filodb.core.reprojector.Scheduler
 object SchedulerActor {
   case object RunOnce
 
+  case object Flushed
+  case object NoSlotsAvailable
+
   def props(scheduler: Scheduler): Props =
     Props(classOf[SchedulerActor], scheduler)
 }
@@ -26,9 +29,11 @@ class SchedulerActor(scheduler: Scheduler) extends BaseActor {
       scheduler.runOnce()
       // TODO: Check for any failures, and report them ... perhaps on EventBus?
     case CoordinatorActor.Flush(dataset, version) =>
-      scheduler.flush(dataset, version)
-      // TODO: check response.
-      // Though, arguably there is no point to retry, because if there are no slots,
+      scheduler.flush(dataset, version) match {
+        case Scheduler.Flushed          => sender ! Flushed
+        case Scheduler.NoAvailableTasks => sender ! NoSlotsAvailable
+      }
+      // Arguably there is no point to retry, because if there are no slots,
       // eventually the dataset will get flushed in subsequent scheduler runs, depending
       // on the FlushPolicy.
   }

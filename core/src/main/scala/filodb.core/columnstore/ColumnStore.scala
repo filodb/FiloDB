@@ -5,7 +5,7 @@ import scala.concurrent.{ExecutionContext, Future}
 import spray.caching._
 
 import filodb.core._
-import filodb.core.metadata.Column
+import filodb.core.metadata.{Column, Projection}
 import RowReader.TypedFieldExtractor
 
 /**
@@ -16,6 +16,17 @@ import RowReader.TypedFieldExtractor
  */
 trait ColumnStore {
   import filodb.core.Types._
+
+  /**
+   * Initializes the column store for a given dataset projection.  Must be called once before appending
+   * segments to that projection.
+   */
+  def initializeProjection(projection: Projection): Future[Response]
+
+  /**
+   * Clears all data from the column store for that given projection.
+   */
+  def clearProjectionData(projection: Projection): Future[Response]
 
   /**
    * Appends the segment to the column store.  The passed in segment must be somehow merged with an existing

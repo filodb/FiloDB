@@ -8,7 +8,7 @@ import spray.caching._
 
 import filodb.core._
 import filodb.core.columnstore.CachedMergingColumnStore
-import filodb.core.metadata.Column
+import filodb.core.metadata.{Column, Projection}
 
 /**
  * Implementation of a column store using Apache Cassandra tables.
@@ -50,6 +50,23 @@ extends CachedMergingColumnStore with StrictLogging {
   val segmentCache = LruCache[Segment[_]](segmentCacheSize)
 
   val mergingStrategy = new AppendingChunkMergingStrategy(this, getSortColumn)
+
+  /**
+   * Initializes the column store for a given dataset projection.  Must be called once before appending
+   * segments to that projection.
+   */
+  def initializeProjection(projection: Projection): Future[Response] =
+    for { (chunkTable, rowMapTable) <- getSegmentTables(projection.dataset)
+          ctResp                    <- chunkTable.initialize()
+          rmtResp                   <- rowMapTable.initialize() } yield { rmtResp }
+
+  /**
+   * Clears all data from the column store for that given projection.
+   */
+  def clearProjectionData(projection: Projection): Future[Response] =
+    for { (chunkTable, rowMapTable) <- getSegmentTables(projection.dataset)
+          ctResp                    <- chunkTable.clearAll()
+          rmtResp                   <- rowMapTable.clearAll() } yield { rmtResp }
 
   /**
    * Implementations of low-level storage primitives
