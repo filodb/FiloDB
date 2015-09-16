@@ -20,7 +20,7 @@ trait CoordinatorSetup {
   // and strongly consider using a BlockingQueue with the ThreadPoolExecutor with limited capacity
   implicit val ec = scala.concurrent.ExecutionContext.Implicits.global
 
-  // These should be implemented as lazy val's
+  // These should be implemented as lazy val's, though tests might want to reset them
   val memTable: MemTable
   val flushPolicy: FlushPolicy
   val columnStore: ColumnStore
@@ -36,6 +36,10 @@ trait CoordinatorSetup {
                                           config.getConfig("coordinator")),
                    "coordinator")
 
+  def clearState(): Unit = {
+    memTable.clearAllData()
+    scheduler.reset()
+  }
 }
 
 /**

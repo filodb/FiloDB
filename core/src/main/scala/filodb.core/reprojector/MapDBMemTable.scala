@@ -112,6 +112,11 @@ class MapDBMemTable(config: Config) extends MemTable {
     }
   }
 
+  def clearAllDataInner(): Unit = {
+    logger.info(s"MemTable: ERASING ALL TABLES!!")
+    db.getAll().keys.foreach(db.delete)
+  }
+
   // private funcs
   private def tableName(dataset: TableName, version: Int, buffer: BufferType) =
     s"$dataset/$version/" + (if (buffer == Active) "active" else "locked")

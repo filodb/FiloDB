@@ -24,6 +24,6 @@ case object AlreadyExists extends Response
 case object Success extends Response
 
 // Common exceptions
-case class NotFoundError(what: String) extends Exception
-case class StorageEngineException(t: Throwable) extends Exception
-case class MetadataException(t: Throwable) extends Exception
+case class NotFoundError(what: String) extends Exception(what)
+case class StorageEngineException(t: Throwable) extends Exception(t)
+case class MetadataException(t: Throwable) extends Exception(t)

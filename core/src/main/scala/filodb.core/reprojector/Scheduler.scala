@@ -119,6 +119,12 @@ class Scheduler(memTable: MemTable,
                    memTable.allNumRows(MemTable.Active, true),
                    memTable.flushingDatasets)
 
+  // Should be used mostly for tests
+  def reset(): Unit = {
+    tasks = Map.empty[(TableName, Int), Future[Seq[Response]]]
+    failedTasks = List.empty[((TableName, Int), Throwable)]
+  }
+
   // TODO: limit retries of failed tasks?  What to do with rows in memtable?
   private def addNewTask(dataset: TableName, version: Int): Unit = {
     val newTaskFuture = reprojector.newTask(memTable, dataset, version)

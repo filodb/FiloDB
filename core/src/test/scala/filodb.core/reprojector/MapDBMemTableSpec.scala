@@ -15,15 +15,11 @@ class MapDBMemTableSpec extends FunSpec with Matchers with BeforeAndAfter with S
   import MemTable._
 
   val keyRange = KeyRange("dataset", Dataset.DefaultPartitionKey, 0L, 10000L)
-  var mTable: MemTable = _
+  val mTable: MemTable = new MapDBMemTable(ConfigFactory.load)
   import scala.concurrent.ExecutionContext.Implicits.global
 
   before {
-    mTable = new MapDBMemTable(ConfigFactory.load)
-  }
-
-  after {
-    mTable.close()
+    mTable.clearAllData()
   }
 
   val schemaWithPartCol = schema ++ Seq(

@@ -16,11 +16,12 @@ import filodb.core.metadata.{Column, Dataset}
 import filodb.coordinator.{CoordinatorActor, RowSource}
 
 package spark {
-  case class DatasetNotFound(dataset: String) extends Exception
+  case class DatasetNotFound(dataset: String) extends Exception(s"Dataset $dataset not found")
   // For each mismatch: the column name, DataFrame type, and existing column type
   case class ColumnTypeMismatch(mismatches: Set[(String, DataType, Column.ColumnType)]) extends Exception
-  case class NoSortColumn(name: String) extends Exception
-  case class NoPartitionColumn(name: String) extends Exception
+  case class NoSortColumn(name: String) extends Exception(s"No sort column found $name")
+  case class NoPartitionColumn(name: String) extends Exception(s"No partition column found $name")
+  case object BadSchemaError extends Exception("Sort/partition column not a supported type, schema error")
 }
 
 /**
@@ -38,7 +39,6 @@ package spark {
  */
 package object spark extends StrictLogging {
   val DefaultWriteTimeout = 999 minutes
-  val DefaultPartitionCol = ":partition"
 
   implicit class FiloContext(sqlContext: SQLContext) {
     implicit val context = scala.concurrent.ExecutionContext.Implicits.global
@@ -63,6 +63,7 @@ package object spark extends StrictLogging {
     import filodb.spark.FiloRelation._
     import FiloSetup._
     import CoordinatorActor._
+    import RowSource._
 
     private def checkAndAddColumns(df: DataFrame,
                                    dataset: String,
@@ -125,12 +126,12 @@ package object spark extends StrictLogging {
      * @param partitionColumn must have one column specifically for partitioning.
      *          Partitioning columns could be created using an expression on another column
      *          {{{
-     *            val newDF = df.withColumn(":partition", df("someCol") % 100)
+     *            val newDF = df.withColumn("partition", df("someCol") % 100)
      *          }}}
      *          or even UDFs:
      *          {{{
      *            val idHash = sqlContext.udf.register("hashCode", (s: String) => s.hashCode())
-     *            val newDF = df.withColumn(":partition", idHash(df("id")) % 100)
+     *            val newDF = df.withColumn("partition", idHash(df("id")) % 100)
      *          }}}
      * @param version the version number to write to
      * @param createDataset if true, then creates a Dataset if one doesn't exist.  Defaults to false to
@@ -165,6 +166,12 @@ package object spark extends StrictLogging {
         implicit val timeout = Timeout(writeTimeout)
         val res = Await.result(ingestActor ? RowSource.Start, writeTimeout)
         logger.info(s"Got back $res from RddRowSourceActor...")
+        res match {
+          case SetupError(UnknownDataset) => throw DatasetNotFound(dataset)
+          case SetupError(BadSchema)      => throw BadSchemaError
+          case SetupError(err)            => throw new RuntimeException(s"Error with ingestion setup: $err")
+          case AllDone                    => logger.info(s"Ingestion done for partition $index")
+        }
         Iterator.empty
       }.count()
     }

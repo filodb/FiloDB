@@ -160,6 +160,16 @@ trait MemTable extends StrictLogging {
   def numRows(dataset: TableName, version: Int, buffer: BufferType): Option[Long]
 
   /**
+   * Yes, this clears everything!  It's meant for testing only.
+   */
+  def clearAllData(): Unit = {
+    ingestionSetups.clear()
+    clearAllDataInner()
+  }
+
+  def clearAllDataInner(): Unit
+
+  /**
    * == Querying and Stats ==
    */
   def datasets: Set[String] = ingestionSetups.keys.toSet

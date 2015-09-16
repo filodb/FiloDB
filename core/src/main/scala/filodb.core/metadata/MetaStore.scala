@@ -5,7 +5,9 @@ import scala.concurrent.{ExecutionContext, Future}
 import filodb.core._
 
 object MetaStore {
-  case class IllegalColumnChange(reasons: Seq[String]) extends Exception
+  case class IllegalColumnChange(reasons: Seq[String]) extends Exception {
+    override def getMessage: String = reasons.mkString(", ")
+  }
 }
 
 /**
