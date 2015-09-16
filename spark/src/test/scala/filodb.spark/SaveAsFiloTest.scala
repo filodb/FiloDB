@@ -1,13 +1,19 @@
 package filodb.spark
 
 import akka.actor.ActorSystem
+import com.typesafe.config.ConfigFactory
 import org.apache.spark.SparkContext
 import org.apache.spark.sql.SQLContext
+import org.apache.spark.sql.catalyst.expressions.Literal
+import org.apache.spark.sql.{Column => SparkColumn}
 import scala.concurrent.duration._
 
-import filodb.core.cassandra.AllTablesTest
+import filodb.core._
 import filodb.core.metadata.Column
-import filodb.core.messages._
+import filodb.cassandra.AllTablesTest
+import filodb.cassandra.metastore.CassandraMetaStore
+
+import org.scalatest.{FunSpec, BeforeAndAfter, BeforeAndAfterAll}
 
 object SaveAsFiloTest {
   val system = ActorSystem("test")
@@ -16,13 +22,13 @@ object SaveAsFiloTest {
 /**
  * Test saveAsFiloDataset
  */
-class SaveAsFiloTest extends AllTablesTest(SaveAsFiloTest.system) {
+class SaveAsFiloTest extends FunSpec with BeforeAndAfter with BeforeAndAfterAll with AllTablesTest {
   // Setup SQLContext and a sample DataFrame
   val sc = new SparkContext("local[4]", "test")
   val sql = new SQLContext(sc)
 
   override def beforeAll() {
-    createAllTables()
+    metaStore.initialize().futureValue
   }
 
   override def afterAll() {
@@ -31,7 +37,7 @@ class SaveAsFiloTest extends AllTablesTest(SaveAsFiloTest.system) {
   }
 
   before {
-    truncateAllTables()
+    metaStore.clearAllData().futureValue
   }
 
   // Sample data
@@ -41,6 +47,7 @@ class SaveAsFiloTest extends AllTablesTest(SaveAsFiloTest.system) {
     """{"id":2,"sqlDate":"2015/03/15T17:00Z",                  "year":2015}"""
   )
   val dataDF = sql.read.json(sc.parallelize(jsonRows, 1))
+                       .withColumn(":partition", new SparkColumn(Literal("/0")))
 
   import filodb.spark._
   import org.apache.spark.sql.functions._

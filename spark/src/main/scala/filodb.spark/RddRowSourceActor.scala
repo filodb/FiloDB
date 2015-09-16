@@ -6,23 +6,22 @@ import org.apache.spark.sql.{SQLContext, DataFrame, Row}
 import org.apache.spark.sql.types._
 import org.velvia.filo.RowIngestSupport
 
-import filodb.core.BaseActor
-import filodb.core.ingest.{CoordinatorActor, RowSource}
+import filodb.coordinator.{BaseActor, CoordinatorActor, RowSource}
+import filodb.core.columnstore.RowReader
 
 object RddRowSourceActor {
   // Needs to be a multiple of chunkSize. Not sure how to have a good default though.
   val DefaultMaxUnackedRows = 5000
-  val DefaultRowsToRead = 100
+  val DefaultRowsToRead = 1000
 
   def props(rows: Iterator[Row],
             columns: Seq[String],
             dataset: String,
-            partition: String,
             version: Int,
             coordinatorActor: ActorRef,
             maxUnackedRows: Int = RddRowSourceActor.DefaultMaxUnackedRows,
             rowsToRead: Int = RddRowSourceActor.DefaultRowsToRead): Props =
-    Props(classOf[RddRowSourceActor], rows, columns, dataset, partition, version,
+    Props(classOf[RddRowSourceActor], rows, columns, dataset, version,
           coordinatorActor, maxUnackedRows, rowsToRead)
 }
 
@@ -33,13 +32,12 @@ object RddRowSourceActor {
  */
 class RddRowSourceActor(rows: Iterator[Row],
                         columns: Seq[String],
-                        dataset: String,
-                        partition: String,
-                        version: Int,
+                        val dataset: String,
+                        val version: Int,
                         val coordinatorActor: ActorRef,
                         val maxUnackedRows: Int = RddRowSourceActor.DefaultMaxUnackedRows,
                         val rowsToRead: Int = RddRowSourceActor.DefaultRowsToRead)
-extends BaseActor with RowSource[Row] {
+extends BaseActor with RowSource {
   import CoordinatorActor._
   import RddRowSourceActor._
 
@@ -47,17 +45,16 @@ extends BaseActor with RowSource[Row] {
   var seqId: Long = 0
   var lastAckedSeqNo = seqId
 
-  def getStartMessage(): StartRowIngestion[Row] =
-    StartRowIngestion(dataset, partition, columns, version, SparkRowIngestSupport)
+  def getStartMessage(): SetupIngestion = SetupIngestion(dataset, columns, version)
 
   // Returns a new row from source => (seqID, rowID, version, row)
   // The seqIDs should be increasing.
   // Returns None if the source reached the end of data.
-  def getNewRow(): Option[(Long, Long, Int, Row)] = {
+  def getNewRow(): Option[(Long, RowReader)] = {
     if (rows.hasNext) {
-      val out = (seqId, seqId, version, rows.next)
+      val out = (seqId, RddRowReader(rows.next))
       seqId += 1
-      if (seqId % 10000 == 0) logger.debug(s"seqId = $seqId")
+      if (seqId % 10000 == 0) logger.info(s"Parsed $seqId rows...")
       Some(out)
     } else {
       None
@@ -65,14 +62,10 @@ extends BaseActor with RowSource[Row] {
   }
 }
 
-object SparkRowIngestSupport extends RowIngestSupport[Row] {
-  type R = Row
-  def getString(row: R, columnNo: Int): Option[String] =
-    if (row.isNullAt(columnNo)) None else Some(row.getString(columnNo))
-  def getInt(row: R, columnNo: Int): Option[Int] =
-    if (row.isNullAt(columnNo)) None else Some(row.getInt(columnNo))
-  def getLong(row: R, columnNo: Int): Option[Long] =
-    if (row.isNullAt(columnNo)) None else Some(row.getLong(columnNo))
-  def getDouble(row: R, columnNo: Int): Option[Double] =
-    if (row.isNullAt(columnNo)) None else Some(row.getDouble(columnNo))
+case class RddRowReader(row: Row) extends RowReader {
+  def notNull(columnNo: Int): Boolean = !row.isNullAt(columnNo)
+  def getInt(columnNo: Int): Int = row.getInt(columnNo)
+  def getLong(columnNo: Int): Long = row.getLong(columnNo)
+  def getDouble(columnNo: Int): Double = row.getDouble(columnNo)
+  def getString(columnNo: Int): String = row.getString(columnNo)
 }

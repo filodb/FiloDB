@@ -14,7 +14,7 @@ import filodb.core.reprojector._
 trait CoordinatorSetup {
   val system: ActorSystem
   // The global configuration object
-  val config: Config
+  def config: Config
 
   // TODO: Allow for a configurable thread pool for the futures, don't just use the global one
   // and strongly consider using a BlockingQueue with the ThreadPoolExecutor with limited capacity

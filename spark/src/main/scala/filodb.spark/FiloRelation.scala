@@ -1,12 +1,15 @@
 package filodb.spark
 
-import akka.actor.ActorSystem
+import akka.actor.ActorRef
+import akka.pattern.ask
+import akka.util.Timeout
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.slf4j.StrictLogging
-import org.velvia.filo.RowSetter
+import java.nio.ByteBuffer
 import scala.concurrent.{Await, Future}
 import scala.concurrent.duration._
 import scala.language.postfixOps
+import scala.reflect.ClassTag
 
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.catalyst.expressions.{MutableRow, SpecificMutableRow}
@@ -14,46 +17,55 @@ import org.apache.spark.sql.sources.{BaseRelation, TableScan, PrunedScan}
 import org.apache.spark.sql.types._
 import org.apache.spark.sql.{DataFrame, Row, SQLContext}
 
-import filodb.core.cassandra.CassandraDatastore
-import filodb.core.datastore.{Datastore, ReadRowExtractor}
-import filodb.core.messages._
-import filodb.core.metadata.Column
+import filodb.core._
+import filodb.core.metadata.{Column, Dataset, RichProjection}
+import filodb.core.columnstore.{MutableRowReader, RowReaderSegment}
 
 object FiloRelation {
-  val DefaultMinPartitions = 4
+  val DefaultMinPartitions = 1
 
   import TypeConverters._
 
-  def parseResponse[B](cmd: => Future[Response])
-                      (handler: PartialFunction[Response, B]): B = {
-    Await.result(cmd, 5 seconds) match {
-      case StorageEngineException(t) => throw new RuntimeException("Error reading from storage", t)
-      case e: ErrorResponse =>  throw new RuntimeException("Error: " + e)
-      case r: Response => handler(r)
+  def parse[T, B](cmd: => Future[T], awaitTimeout: FiniteDuration = 5 seconds)(func: T => B): B = {
+    func(Await.result(cmd, awaitTimeout))
+  }
+
+  def actorAsk[B](actor: ActorRef, msg: Any,
+                  askTimeout: FiniteDuration = 5 seconds)(f: PartialFunction[Any, B]): B = {
+    implicit val timeout = Timeout(askTimeout)
+    parse(actor ? msg, askTimeout)(f)
+  }
+
+  def getRows[K: ClassTag](projection: RichProjection,
+                           version: Int,
+                           columns: Seq[Column],
+                           params: Map[String, String]): Iterator[Row] = {
+    implicit val helper = Dataset.sortKeyHelper[K](projection.dataset.options)
+    parse(FiloSetup.columnStore.scanSegments[K](columns, projection.dataset.name, version),
+          10 minutes) { segmentIt =>
+      segmentIt.flatMap { case seg: RowReaderSegment[K] =>
+        seg.rowIterator((bytes, clazzes) => new SparkRowReader(bytes, clazzes))
+           .asInstanceOf[Iterator[Row]]
+      }
     }
   }
 
+
   // It's good to put complex functions inside an object, to be sure that everything
   // inside the function does not depend on an explicit outer class and can be serializable
-  def perNodeRowScanner(config: Config, dataset: String, version: Int, columns: Seq[Column],
-                        partIter: Iterator[String]): Iterator[Row] = {
+  def perNodeRowScanner(config: Config, dataset: Dataset, version: Int, columns: Seq[Column],
+                        paramIter: Iterator[Map[String, String]]): Iterator[Row] = {
     // NOTE: all the code inside here runs distributed on each node.  So, create my own datastore, etc.
-    val _datastore = new CassandraDatastore(config)
-    val system = ActorSystem("FiloRelation")
+    FiloSetup.init(config)
+    FiloSetup.columnStore    // force startup
+    val projection = RichProjection(dataset, columns)
 
-    partIter.flatMap { partitionName =>
-      val partObj = parseResponse(_datastore.getPartition(dataset, partitionName)(system.dispatcher)) {
-        case Datastore.ThePartition(partitionObj) => partitionObj
-      }
-      val rowIter = new ReadRowExtractor(_datastore, partObj, version, columns,
-                                         SparkRowSetter)(system)
-      val mutRow = new SpecificMutableRow(columnsToSqlTypes(columns))
-      new Iterator[Row] {
-        def hasNext: Boolean = rowIter.hasNext
-        def next: Row = {
-          rowIter.next(mutRow)
-          mutRow
-        }
+    paramIter.flatMap { param =>
+      import Column.ColumnType._
+      projection.sortColumn.columnType match {
+        case LongColumn    => getRows[Long](projection, version, columns, param)
+        case other: Column.ColumnType =>
+          throw new RuntimeException(s"Unsupported sort column type $other attempted for dataset $dataset")
       }
     }
   }
@@ -81,20 +93,15 @@ case class FiloRelation(filoConfig: Config,
   import TypeConverters._
   import FiloRelation._
 
-  val datastore = new CassandraDatastore(filoConfig)
+  FiloSetup.init(filoConfig)
 
   implicit val context = scala.concurrent.ExecutionContext.Implicits.global
 
-  val partitions = parseResponse(datastore.getDataset(dataset)) {
-    case Datastore.TheDataset(dataset) =>
-      logger.info(s"Got dataset $dataset")
-      dataset.partitions
-  }
+  val datasetObj = parse(FiloSetup.metaStore.getDataset(dataset)) { ds => ds }
 
-  val filoSchema = parseResponse(datastore.getSchema(dataset, version)) {
-    case Datastore.TheSchema(schemaObj) =>
-      logger.info(s"Read schema for dataset $dataset = $schemaObj")
-      schemaObj
+  val filoSchema = parse(FiloSetup.metaStore.getSchema(dataset, version)) { schema =>
+      logger.info(s"Read schema for dataset $dataset = $schema")
+      schema
   }
 
   val schema = StructType(columnsToSqlFields(filoSchema.values.toSeq))
@@ -104,24 +111,27 @@ case class FiloRelation(filoConfig: Config,
   def buildScan(requiredColumns: Array[String]): RDD[Row] = {
     // Define vars to distribute inside the method
     val _config = this.filoConfig
-    val _dataset = this.dataset
+    val _dataset = this.datasetObj
     val _version = this.version
     val filoColumns = requiredColumns.map(this.filoSchema)
 
-    // Right now we are distributing partitions.  Perhaps in the future we should distribute shards.
-    // Also one can use makeRDD to send location aware stuff :)
-    sqlContext.sparkContext.parallelize(partitions.toSeq, minPartitions)
-      .mapPartitions { partIter =>
-        perNodeRowScanner(_config, _dataset, _version, filoColumns, partIter)
+    // TODO: actually figure out how to distribute token range stuff
+    sqlContext.sparkContext.parallelize(Seq(Map.empty[String, String]), minPartitions)
+      .mapPartitions { paramIter =>
+        perNodeRowScanner(_config, _dataset, _version, filoColumns, paramIter)
       }
   }
 }
 
-object SparkRowSetter extends RowSetter[MutableRow] {
-  def setInt(row: MutableRow, index: Int, data: Int): Unit = row.setInt(index, data)
-  def setLong(row: MutableRow, index: Int, data: Long): Unit = row.setLong(index, data)
-  def setDouble(row: MutableRow, index: Int, data: Double): Unit = row.setDouble(index, data)
-  def setString(row: MutableRow, index: Int, data: String): Unit = row.setString(index, data)
-
-  def setNA(row: MutableRow, index: Int): Unit = row.setNullAt(index)
+class SparkRowReader(chunks: Array[ByteBuffer], classes: Array[Class[_]]) extends
+    MutableRowReader(chunks, classes) with Row {
+  def apply(i: Int): Any = ???
+  def copy(): org.apache.spark.sql.Row = ???
+  def getBoolean(i: Int): Boolean = ???
+  def getByte(i: Int): Byte = ???
+  def getFloat(i: Int): Float = ???
+  def getShort(i: Int): Short = ???
+  def isNullAt(i: Int): Boolean = !notNull(i)
+  def length: Int = ???
+  def toSeq: Seq[Any] = ???
 }

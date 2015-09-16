@@ -11,16 +11,16 @@ import scala.concurrent.{Await, Future}
 import scala.concurrent.duration._
 import scala.language.postfixOps
 
-import filodb.core.cassandra.CassandraDatastore
-import filodb.core.datastore.Datastore
-import filodb.core.ingest.{CoordinatorActor, RowSource}
-import filodb.core.metadata.{Column, Dataset, Partition}
-import filodb.core.messages._
+import filodb.core._
+import filodb.core.metadata.{Column, Dataset}
+import filodb.coordinator.{CoordinatorActor, RowSource}
 
 package spark {
   case class DatasetNotFound(dataset: String) extends Exception
   // For each mismatch: the column name, DataFrame type, and existing column type
   case class ColumnTypeMismatch(mismatches: Set[(String, DataType, Column.ColumnType)]) extends Exception
+  case class NoSortColumn(name: String) extends Exception
+  case class NoPartitionColumn(name: String) extends Exception
 }
 
 /**
@@ -38,6 +38,7 @@ package spark {
  */
 package object spark extends StrictLogging {
   val DefaultWriteTimeout = 999 minutes
+  val DefaultPartitionCol = ":partition"
 
   implicit class FiloContext(sqlContext: SQLContext) {
     implicit val context = scala.concurrent.ExecutionContext.Implicits.global
@@ -62,16 +63,16 @@ package object spark extends StrictLogging {
 
     import filodb.spark.TypeConverters._
     import filodb.spark.FiloRelation._
+    import FiloSetup._
+    import CoordinatorActor._
 
-    private def checkAndAddColumns(datastore: Datastore,
-                                   df: DataFrame,
+    private def checkAndAddColumns(df: DataFrame,
                                    dataset: String,
                                    version: Int): Unit = {
       // Pull out existing dataset schema
-      val schema = parseResponse(datastore.getSchema(dataset, version)) {
-        case Datastore.TheSchema(schemaObj) =>
-          logger.info(s"Read schema for dataset $dataset = $schemaObj")
-          schemaObj
+      val schema = parse(metaStore.getSchema(dataset, version)) { schema =>
+        logger.info(s"Read schema for dataset $dataset = $schema")
+        schema
       }
 
       // Translate DF schema to columns, create new ones if needed
@@ -90,48 +91,51 @@ package object spark extends StrictLogging {
       if (missingCols.nonEmpty) {
         val addMissingCols = missingCols.map { colName =>
           val newCol = Column(colName, dataset, version, sqlTypeToColType(namesTypes(colName)))
-          datastore.newColumn(newCol)
+          metaStore.newColumn(newCol)
         }
         runCommands(addMissingCols)
       }
     }
 
-    private def checkAndAddPartitions(datastore: Datastore,
-                                      df: DataFrame,
-                                      dataset: String,
-                                      createDataset: Boolean = false): Unit = {
-      val numPartitions = df.rdd.partitions.size
-      val dfPartNames = (0 until numPartitions).map(_.toString)
+    // This doesn't create columns, because that's in checkAndAddColumns.  However, it
+    // does check that the sortColumn and partitionColumn are in the DF.
+    private def createNewDataset(datasetName: String,
+                                 sortColumn: String,
+                                 partitionColumn: String,
+                                 df: DataFrame): Unit = {
+      df.schema.find(_.name == sortColumn).getOrElse(throw NoSortColumn(sortColumn))
+      df.schema.find(_.name == partitionColumn).getOrElse(throw NoPartitionColumn(partitionColumn))
 
-      val datasetObj = parseResponse(datastore.getDataset(dataset)) {
-        case Datastore.TheDataset(datasetObj) => datasetObj
-        case NotFound =>
-          if (createDataset) {
-            logger.info(s"Dataset $dataset not found, creating...")
-            runCommands(Set(datastore.newDataset(dataset)))
-            Dataset(dataset, Set.empty)
-          } else {
-            throw DatasetNotFound(dataset)
-          }
-      }
-      val missingPartitions = dfPartNames.toSet -- datasetObj.partitions
-      if (missingPartitions.nonEmpty) {
-        logger.info(s"Adding missing partitions - $missingPartitions")
-        val addMissingParts = missingPartitions.map(Partition(dataset, _)).map(datastore.newPartition)
-        runCommands(addMissingParts)
+      val dataset = Dataset(datasetName, sortColumn, partitionColumn)
+      logger.info(s"Creating dataset $dataset...")
+      actorAsk(coordinatorActor, CreateDataset(dataset, Nil)) {
+        case DatasetCreated =>
+          logger.info(s"Dataset $datasetName created successfully...")
+        case DatasetError(errMsg) =>
+          throw new RuntimeException(s"Error creating dataset: $errMsg")
       }
     }
 
     /**
      * Saves a DataFrame in a FiloDB Table
      * - Creates columns in FiloDB from DF schema if needed
-     * - Creates partitions if needed based on partition ordinal number
      * - Only overwrite supported for now, not appends
      *
      * @param df the DataFrame to write to FiloDB
      * @param filoConfig the Configuration for connecting to FiloDB
      * @param dataset the name of the FiloDB table/dataset to read from
-     * @param version the version number to read from
+     * @param version the version number to write to
+     * @param sortColumn the name of the column used as the sort primary key within each partition
+     * @param partitionColumn must have one column specifically for partitioning.
+     *          Partitioning columns could be created using an expression on another column
+     *          {{{
+     *            val newDF = df.withColumn(":partition", df("someCol") % 100)
+     *          }}}
+     *          or even UDFs:
+     *          {{{
+     *            val idHash = sqlContext.udf.register("hashCode", (s: String) => s.hashCode())
+     *            val newDF = df.withColumn(":partition", idHash(df("id")) % 100)
+     *          }}}
      * @param createDataset if true, then creates a Dataset if one doesn't exist.  Defaults to false to
      *                      prevent accidental table creation.
      * @param writeTimeout Maximum time to wait for write of each partition to complete
@@ -140,26 +144,30 @@ package object spark extends StrictLogging {
                           filoConfig: Config,
                           dataset: String,
                           version: Int = 0,
+                          sortColumn: String,
+                          partitionColumn: String,
                           createDataset: Boolean = false,
                           writeTimeout: FiniteDuration = DefaultWriteTimeout): Unit = {
+      FiloSetup.init(filoConfig)
 
-      val datastore = new CassandraDatastore(filoConfig)
+      // Do a groupBy partitioncolumn if needed so that partitions are on same node, if user specified
+      // partitionColumn?   TODO
 
-      checkAndAddPartitions(datastore, df, dataset, createDataset)
-      checkAndAddColumns(datastore, df, dataset, version)
+      if (createDataset) createNewDataset(dataset, sortColumn, partitionColumn, df)
+      checkAndAddColumns(df, dataset, version)
       val dfColumns = df.schema.map(_.name)
 
       // For each partition, start the ingestion
       df.rdd.mapPartitionsWithIndex { case (index, rowIter) =>
         // Everything within this function runs on each partition/executor, so need a local datastore & system
-        val _datastore = new CassandraDatastore(filoConfig)
-        val _system = ActorSystem(s"partition$index")
-        val coordinator = _system.actorOf(CoordinatorActor.props(_datastore))
+        FiloSetup.init(filoConfig)
+
         logger.info(s"Starting ingestion of DataFrame for dataset $dataset, partition $index...")
-        val ingestActor = _system.actorOf(RddRowSourceActor.props(rowIter, dfColumns,
-                                          dataset, index.toString, version, coordinator))
+        val ingestActor = FiloSetup.system.actorOf(RddRowSourceActor.props(rowIter, dfColumns,
+                            dataset, version, FiloSetup.coordinatorActor))
         implicit val timeout = Timeout(writeTimeout)
         val res = Await.result(ingestActor ? RowSource.Start, writeTimeout)
+        logger.info(s"Got back $res from RddRowSourceActor...")
         Iterator.empty
       }.count()
     }
