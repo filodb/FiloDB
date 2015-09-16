@@ -12,6 +12,7 @@ import scala.language.postfixOps
 import scala.reflect.ClassTag
 
 import org.apache.spark.rdd.RDD
+import org.apache.spark.SparkContext
 import org.apache.spark.sql.catalyst.expressions.{MutableRow, SpecificMutableRow}
 import org.apache.spark.sql.sources.{BaseRelation, TableScan, PrunedScan}
 import org.apache.spark.sql.types._
@@ -79,13 +80,12 @@ object FiloRelation {
  * parallelize reads from different columns.
  *
  * @constructor
- * @param filoConfig the Cassandra configuration
+ * @param sparkContext the spark context to pull config from
  * @param dataset the name of the dataset to read from
  * @param the version of the dataset data to read
  * @param minPartitions the minimum # of partitions to read from
  */
-case class FiloRelation(filoConfig: Config,
-                        dataset: String,
+case class FiloRelation(dataset: String,
                         version: Int = 0,
                         minPartitions: Int = FiloRelation.DefaultMinPartitions)
                        (@transient val sqlContext: SQLContext)
@@ -93,6 +93,7 @@ case class FiloRelation(filoConfig: Config,
   import TypeConverters._
   import FiloRelation._
 
+  val filoConfig = FiloSetup.configFromSpark(sqlContext.sparkContext)
   FiloSetup.init(filoConfig)
 
   implicit val context = scala.concurrent.ExecutionContext.Implicits.global

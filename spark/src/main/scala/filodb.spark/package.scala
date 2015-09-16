@@ -26,14 +26,14 @@ package spark {
 /**
  * Provides base methods for reading from and writing to FiloDB tables/datasets.
  * Note that this is not the recommended DataFrame load/save API, please see DefaultSource.scala.
+ * Configuration is done through setting SparkConf variables, like filodb.cassandra.keyspace
  * Here is how you could use these APIs
  *
  * {{{
  *   > import filodb.spark._
- *   > val config = com.typesafe.config.ConfigFactory.parseString("max-outstanding-futures = 16")
- *   > sqlContext.saveAsFiloDataset(myDF, config, "table1", createDataset=true)
+ *   > sqlContext.saveAsFiloDataset(myDF, "table1", "sortCol", "partCol", createDataset=true)
  *
- *   > sqlContext.filoDataset(config, "table1")
+ *   > sqlContext.filoDataset("table1")
  * }}}
  */
 package object spark extends StrictLogging {
@@ -46,15 +46,13 @@ package object spark extends StrictLogging {
     /**
      * Creates a DataFrame from a FiloDB table.  Does no reading until a query is run, but it does
      * read the schema for the table.
-     * @param filoConfig the Configuration for connecting to FiloDB
      * @param dataset the name of the FiloDB table/dataset to read from
      * @param version the version number to read from
      */
-    def filoDataset(filoConfig: Config,
-                    dataset: String,
+    def filoDataset(dataset: String,
                     version: Int = 0,
                     minPartitions: Int = FiloRelation.DefaultMinPartitions): DataFrame =
-      sqlContext.baseRelationToDataFrame(FiloRelation(filoConfig, dataset, version, minPartitions)(sqlContext))
+      sqlContext.baseRelationToDataFrame(FiloRelation(dataset, version, minPartitions)(sqlContext))
 
     private def runCommands[B](cmds: Set[Future[Response]]): Unit = {
       val responseSet = Await.result(Future.sequence(cmds), 5 seconds)
@@ -122,9 +120,7 @@ package object spark extends StrictLogging {
      * - Only overwrite supported for now, not appends
      *
      * @param df the DataFrame to write to FiloDB
-     * @param filoConfig the Configuration for connecting to FiloDB
      * @param dataset the name of the FiloDB table/dataset to read from
-     * @param version the version number to write to
      * @param sortColumn the name of the column used as the sort primary key within each partition
      * @param partitionColumn must have one column specifically for partitioning.
      *          Partitioning columns could be created using an expression on another column
@@ -136,18 +132,19 @@ package object spark extends StrictLogging {
      *            val idHash = sqlContext.udf.register("hashCode", (s: String) => s.hashCode())
      *            val newDF = df.withColumn(":partition", idHash(df("id")) % 100)
      *          }}}
+     * @param version the version number to write to
      * @param createDataset if true, then creates a Dataset if one doesn't exist.  Defaults to false to
      *                      prevent accidental table creation.
      * @param writeTimeout Maximum time to wait for write of each partition to complete
      */
     def saveAsFiloDataset(df: DataFrame,
-                          filoConfig: Config,
                           dataset: String,
-                          version: Int = 0,
                           sortColumn: String,
                           partitionColumn: String,
+                          version: Int = 0,
                           createDataset: Boolean = false,
                           writeTimeout: FiniteDuration = DefaultWriteTimeout): Unit = {
+      val filoConfig = FiloSetup.configFromSpark(sqlContext.sparkContext)
       FiloSetup.init(filoConfig)
 
       // Do a groupBy partitioncolumn if needed so that partitions are on same node, if user specified

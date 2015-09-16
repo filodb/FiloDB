@@ -1,13 +1,16 @@
 package filodb.spark
 
 import akka.actor.ActorSystem
-import com.typesafe.config.Config
+import com.typesafe.config.{Config, ConfigFactory}
+import org.apache.spark.SparkContext
 
 import filodb.cassandra.columnstore.CassandraColumnStore
 import filodb.cassandra.metastore.CassandraMetaStore
 import filodb.coordinator.DefaultCoordinatorSetup
 
 object FiloSetup extends DefaultCoordinatorSetup {
+  import collection.JavaConverters._
+
   var config: Config = _
   lazy val system = ActorSystem("filo-spark")
   lazy val columnStore = new CassandraColumnStore(config)
@@ -18,5 +21,12 @@ object FiloSetup extends DefaultCoordinatorSetup {
     coordinatorActor    // Force coordinatorActor to start
   }
 
-  // TODO: get config from SparkConfig and options
+  def init(context: SparkContext): Unit = init(configFromSpark(context))
+
+  def configFromSpark(context: SparkContext): Config = {
+    val conf = context.getConf
+    val filoOverrides = conf.getAll.filter { case (k, v) => k.startsWith("filodb") }
+    ConfigFactory.parseMap(filoOverrides.toMap.asJava)
+                 .withFallback(ConfigFactory.load)
+  }
 }

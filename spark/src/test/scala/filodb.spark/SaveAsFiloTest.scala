@@ -9,7 +9,7 @@ import org.apache.spark.sql.{Column => SparkColumn}
 import scala.concurrent.duration._
 
 import filodb.core._
-import filodb.core.metadata.Column
+import filodb.core.metadata.{Column, Dataset}
 import filodb.cassandra.AllTablesTest
 import filodb.cassandra.metastore.CassandraMetaStore
 
@@ -40,7 +40,7 @@ class SaveAsFiloTest extends FunSpec with BeforeAndAfter with BeforeAndAfterAll 
     metaStore.clearAllData().futureValue
   }
 
-  // Sample data
+  // Sample data.  Note how we must create a partitioning column.
   val jsonRows = Seq(
     """{"id":0,"sqlDate":"2015/03/15T15:00Z","monthYear":32015,"year":2015}""",
     """{"id":1,"sqlDate":"2015/03/15T16:00Z","monthYear":42015}""",
@@ -54,48 +54,51 @@ class SaveAsFiloTest extends FunSpec with BeforeAndAfter with BeforeAndAfterAll 
 
   it("should error out if dataset not created and createDataset=false") {
     intercept[DatasetNotFound] {
-      sql.saveAsFiloDataset(dataDF, AllTablesTest.CassConfig, "gdelt1")
+      sql.saveAsFiloDataset(dataDF, "gdelt1", "id", ":partition")
     }
   }
 
   it("should create missing columns and partitions and write table") {
-    sql.saveAsFiloDataset(dataDF, AllTablesTest.CassConfig, "gdelt1",
+    sql.saveAsFiloDataset(dataDF, "gdelt1", "id", ":partition",
                           createDataset=true,
                           writeTimeout = 2.minutes)
 
     // Now read stuff back and ensure it got written
-    val df = sql.filoDataset(AllTablesTest.CassConfig, "gdelt1")
+    val df = sql.filoDataset("gdelt1")
     df.select(count("id")).collect().head(0) should equal (3)
     df.agg(sum("year")).collect().head(0) should equal (4030)
   }
 
   it("should throw ColumnTypeMismatch if existing columns are not same type") {
-    datastore.newDataset("gdelt2").futureValue should equal (Success)
+    val ds = Dataset("gdelt2", "id")
+    metaStore.newDataset(ds).futureValue should equal (Success)
     val idStrCol = Column("id", "gdelt2", 0, Column.ColumnType.StringColumn)
-    datastore.newColumn(idStrCol).futureValue should equal (Success)
+    metaStore.newColumn(idStrCol).futureValue should equal (Success)
 
     intercept[ColumnTypeMismatch] {
-      sql.saveAsFiloDataset(dataDF, AllTablesTest.CassConfig, "gdelt2", createDataset=true)
+      sql.saveAsFiloDataset(dataDF, "gdelt2", "id", ":partition", createDataset=true)
     }
   }
 
   it("should write table if there are existing matching columns") {
-    datastore.newDataset("gdelt3").futureValue should equal (Success)
+    val ds = Dataset("gdelt3", "id")
+    metaStore.newDataset(ds).futureValue should equal (Success)
     val idStrCol = Column("id", "gdelt3", 0, Column.ColumnType.LongColumn)
-    datastore.newColumn(idStrCol).futureValue should equal (Success)
+    metaStore.newColumn(idStrCol).futureValue should equal (Success)
 
-    sql.saveAsFiloDataset(dataDF, AllTablesTest.CassConfig, "gdelt3",
+    sql.saveAsFiloDataset(dataDF, "gdelt3", "id", ":partition",
                           writeTimeout = 2.minutes)
 
     // Now read stuff back and ensure it got written
-    val df = sql.filoDataset(AllTablesTest.CassConfig, "gdelt3")
+    val df = sql.filoDataset("gdelt3")
     df.select(count("id")).collect().head(0) should equal (3)
   }
 
   it("should write and read using DF write() and read() APIs") {
     dataDF.write.format("filodb.spark").
                  option("dataset", "test1").
-                 option("create_dataset", "true").
+                 option("sort_column", "id").
+                 option("partition_column", ":partition").
                  save()
     val df = sql.read.format("filodb.spark").option("dataset", "test1").load()
     df.agg(sum("year")).collect().head(0) should equal (4030)
