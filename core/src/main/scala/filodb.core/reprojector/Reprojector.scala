@@ -42,6 +42,8 @@ trait Reprojector {
                   throw new IllegalArgumentException(s"Could not find $dataset/$version"))
     setup.schema(setup.sortColumnNum).columnType match {
       case LongColumn    => reproject[Long](memTable, setup, version)
+      case IntColumn     => reproject[Int](memTable, setup, version)
+      case DoubleColumn  => reproject[Double](memTable, setup, version)
       case other: Column.ColumnType => throw new RuntimeException("Illegal sort key type $other")
     }
   }

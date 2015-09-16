@@ -254,6 +254,14 @@ object RowReader {
   implicit object LongFieldExtractor extends TypedFieldExtractor[Long] {
     final def getField(reader: RowReader, columnNo: Int): Long = reader.getLong(columnNo)
   }
+
+  implicit object IntFieldExtractor extends TypedFieldExtractor[Int] {
+    final def getField(reader: RowReader, columnNo: Int): Int = reader.getInt(columnNo)
+  }
+
+  implicit object DoubleFieldExtractor extends TypedFieldExtractor[Double] {
+    final def getField(reader: RowReader, columnNo: Int): Double = reader.getDouble(columnNo)
+  }
 }
 
 private object Classes {

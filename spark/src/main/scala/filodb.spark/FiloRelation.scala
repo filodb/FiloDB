@@ -65,6 +65,8 @@ object FiloRelation {
       import Column.ColumnType._
       projection.sortColumn.columnType match {
         case LongColumn    => getRows[Long](projection, version, columns, param)
+        case IntColumn     => getRows[Int](projection, version, columns, param)
+        case DoubleColumn  => getRows[Double](projection, version, columns, param)
         case other: Column.ColumnType =>
           throw new RuntimeException(s"Unsupported sort column type $other attempted for dataset $dataset")
       }

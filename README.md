@@ -29,8 +29,8 @@ To compile the .mermaid source files to .png's, install the [Mermaid CLI](http:/
 ## Current Status
 
 * The storage format is subject to change at this time.
-* You can ingest data using Spark, partitioned by a partition key, and sorted using a sort key.
-* Only string partition keys and Long/Timestamp sort keys are supported, but many more to come
+* You can ingest data using Spark, partitioned by a partition key, and sorted using a sort key.  CLI ingestion only by CSV files.
+* Only string partition keys and Long/Timestamp/Int/Double sort keys are supported, but many more to come
 
 ## Roadmap
 
@@ -82,6 +82,22 @@ val df = sql.read.format("filodb.spark").option("dataset", "gdelt").load()
 ```
 
 ### Detailed Ingestion Example
+
+This example uses a checked in CSV file to walk through ingesting data.
+
+- Launching spark shell with spark-csv
+- Loading CSV file from Spark
+
+```scala
+```
+
+Now, we have to decide on a sort and partitioning column.  The partitioning column decides how data is going to be distributed across the cluster, while the sort column acts as a primary key within each partition and decides how data will be sorted within each partition.
+
+If a partitioning column is not specified, FiloDB's Spark API will create a default one with the name "_partition", with a fixed value, which means everything will be thrown into one node, and is only suitable for small amounts of data.
+
+- DIscuss how to create a partition column
+- Write data without partition column
+- Write data with partition column
 
 ### Ingesting and Querying with DataFrames (Old API)
 

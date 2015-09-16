@@ -87,6 +87,8 @@ trait MemTable extends StrictLogging {
 
       val helper = (schema(sortColNo).columnType match {
         case LongColumn    => Dataset.sortKeyHelper[Long](dataset.options)
+        case IntColumn     => Dataset.sortKeyHelper[Int](dataset.options)
+        case DoubleColumn  => Dataset.sortKeyHelper[Double](dataset.options)
         case other: Column.ColumnType =>
           logger.info(s"Unsupported sort column type $other attempted for dataset $dataset")
           return BadSchema
@@ -120,6 +122,8 @@ trait MemTable extends StrictLogging {
     val setup = getIngestionSetup(dataset, version).getOrElse(return NoSuchDatasetVersion)
     setup.schema(setup.sortColumnNum).columnType match {
       case LongColumn    => ingestRowsInner[Long](setup, version, rows)
+      case IntColumn     => ingestRowsInner[Int](setup, version, rows)
+      case DoubleColumn  => ingestRowsInner[Double](setup, version, rows)
       case other: Column.ColumnType => throw new RuntimeException("Illegal sort key type $other")
     }
   }

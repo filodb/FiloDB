@@ -26,7 +26,7 @@ trait SortKeyHelper[K] {
 }
 
 /**
- * A typeclass for a Long-based sort key
+ * Typeclasses for sort keys
  */
 case class LongKeyHelper(segmentLen: Long) extends SortKeyHelper[Long] {
   def ordering: Ordering[Long] = Ordering.Long
@@ -37,5 +37,27 @@ case class LongKeyHelper(segmentLen: Long) extends SortKeyHelper[Long] {
   def toBytes(key: Long): ByteBuffer =
     ByteBuffer.allocate(java.lang.Long.BYTES).putLong(key).flip.asInstanceOf[ByteBuffer]
   def fromBytes(bytes: ByteBuffer): Long = bytes.getLong
+}
+
+case class IntKeyHelper(segmentLen: Int) extends SortKeyHelper[Int] {
+  def ordering: Ordering[Int] = Ordering.Int
+  def getSegment(key: Int): (Int, Int) = {
+    val segmentNum = key / segmentLen
+    (segmentNum * segmentLen, (segmentNum + 1) * segmentLen)
+  }
+  def toBytes(key: Int): ByteBuffer =
+    ByteBuffer.allocate(java.lang.Integer.BYTES).putInt(key).flip.asInstanceOf[ByteBuffer]
+  def fromBytes(bytes: ByteBuffer): Int = bytes.getInt
+}
+
+case class DoubleKeyHelper(segmentLen: Double) extends SortKeyHelper[Double] {
+  def ordering: Ordering[Double] = Ordering.Double
+  def getSegment(key: Double): (Double, Double) = {
+    val segmentNum = Math.floor(key / segmentLen)
+    (segmentNum * segmentLen, (segmentNum + 1) * segmentLen)
+  }
+  def toBytes(key: Double): ByteBuffer =
+    ByteBuffer.allocate(java.lang.Double.BYTES).putDouble(key).flip.asInstanceOf[ByteBuffer]
+  def fromBytes(bytes: ByteBuffer): Double = bytes.getDouble
 }
 

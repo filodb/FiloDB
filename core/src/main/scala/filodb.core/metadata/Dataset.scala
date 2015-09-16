@@ -74,6 +74,10 @@ object Dataset {
     implicitly[ClassTag[K]].runtimeClass match {
       case java.lang.Long.TYPE => (new LongKeyHelper(options.segmentSize.toLong)).
                                     asInstanceOf[SortKeyHelper[K]]
+      case java.lang.Integer.TYPE => (new IntKeyHelper(options.segmentSize.toInt)).
+                                    asInstanceOf[SortKeyHelper[K]]
+      case java.lang.Double.TYPE => (new DoubleKeyHelper(options.segmentSize.toDouble)).
+                                    asInstanceOf[SortKeyHelper[K]]
     }
   }
 }
