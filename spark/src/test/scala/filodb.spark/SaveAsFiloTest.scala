@@ -4,8 +4,6 @@ import akka.actor.ActorSystem
 import com.typesafe.config.ConfigFactory
 import org.apache.spark.{SparkContext, SparkException}
 import org.apache.spark.sql.{SaveMode, SQLContext}
-import org.apache.spark.sql.catalyst.expressions.Literal
-import org.apache.spark.sql.{Column => SparkColumn}
 import scala.concurrent.duration._
 
 import filodb.core._
@@ -63,20 +61,19 @@ class SaveAsFiloTest extends FunSpec with BeforeAndAfter with BeforeAndAfterAll 
     """{"id":2,"sqlDate":"2015/03/15T17:00Z",                  "year":2015}"""
   )
   val dataDF = sql.read.json(sc.parallelize(jsonRows, 1))
-                       .withColumn(partitionCol, new SparkColumn(Literal("/0")))
 
   import filodb.spark._
   import org.apache.spark.sql.functions._
 
   it("should error out if dataset not created and createDataset=false") {
     val err = intercept[SparkException] {
-      sql.saveAsFiloDataset(dataDF, "gdelt1", "id", partitionCol)
+      sql.saveAsFiloDataset(dataDF, "gdelt1", "id")
     }
     err.getMessage should include ("DatasetNotFound")
   }
 
   ignore("should create missing columns and partitions and write table") {
-    sql.saveAsFiloDataset(dataDF, "gdelt1", "id", partitionCol,
+    sql.saveAsFiloDataset(dataDF, "gdelt1", "id",
                           createDataset=true,
                           writeTimeout = 2.minutes)
 
@@ -92,7 +89,7 @@ class SaveAsFiloTest extends FunSpec with BeforeAndAfter with BeforeAndAfterAll 
     metaStore.newColumn(idStrCol).futureValue should equal (Success)
 
     intercept[ColumnTypeMismatch] {
-      sql.saveAsFiloDataset(dataDF, "gdelt2", "id", partitionCol, createDataset=true)
+      sql.saveAsFiloDataset(dataDF, "gdelt2", "id", createDataset=true)
     }
   }
 
@@ -101,7 +98,7 @@ class SaveAsFiloTest extends FunSpec with BeforeAndAfter with BeforeAndAfterAll 
     val idStrCol = Column("id", "gdelt3", 0, Column.ColumnType.LongColumn)
     metaStore.newColumn(idStrCol).futureValue should equal (Success)
 
-    sql.saveAsFiloDataset(dataDF, "gdelt3", "id", partitionCol,
+    sql.saveAsFiloDataset(dataDF, "gdelt3", "id",
                           writeTimeout = 2.minutes)
 
     // Now read stuff back and ensure it got written
@@ -113,10 +110,13 @@ class SaveAsFiloTest extends FunSpec with BeforeAndAfter with BeforeAndAfterAll 
     dataDF.write.format("filodb.spark").
                  option("dataset", "test1").
                  option("sort_column", "id").
-                 option("partition_column", partitionCol).
                  mode(SaveMode.Overwrite).
                  save()
     val df = sql.read.format("filodb.spark").option("dataset", "test1").load()
     df.agg(sum("year")).collect().head(0) should equal (4030)
   }
+
+  it("should write in Append mode without first creating dataset") (pending)
+
+  it("should be able to write with a user-specified partitioning column") (pending)
 }

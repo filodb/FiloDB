@@ -5,8 +5,9 @@ import akka.pattern.ask
 import akka.util.Timeout
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.slf4j.StrictLogging
-import org.apache.spark.sql.{SQLContext, DataFrame}
+import org.apache.spark.sql.{SQLContext, DataFrame, Column => SparkColumn}
 import org.apache.spark.sql.types.DataType
+import org.apache.spark.sql.catalyst.expressions.Literal
 import scala.concurrent.{Await, Future}
 import scala.concurrent.duration._
 import scala.language.postfixOps
@@ -123,7 +124,9 @@ package object spark extends StrictLogging {
      * @param df the DataFrame to write to FiloDB
      * @param dataset the name of the FiloDB table/dataset to read from
      * @param sortColumn the name of the column used as the sort primary key within each partition
-     * @param partitionColumn must have one column specifically for partitioning.
+     * @param partitionColumn one column specifically for partitioning.  If not specified, then
+     *                        one global partition will be created for all the data, which is
+     *                        probably not what you want, but easier for getting started.
      *          Partitioning columns could be created using an expression on another column
      *          {{{
      *            val newDF = df.withColumn("partition", df("someCol") % 100)
@@ -141,22 +144,29 @@ package object spark extends StrictLogging {
     def saveAsFiloDataset(df: DataFrame,
                           dataset: String,
                           sortColumn: String,
-                          partitionColumn: String,
+                          partitionColumn: Option[String] = None,
                           version: Int = 0,
                           createDataset: Boolean = false,
                           writeTimeout: FiniteDuration = DefaultWriteTimeout): Unit = {
       val filoConfig = FiloSetup.configFromSpark(sqlContext.sparkContext)
       FiloSetup.init(filoConfig)
 
-      // Do a groupBy partitioncolumn if needed so that partitions are on same node, if user specified
-      // partitionColumn?   TODO
+      // Create an extra column if partition column not specified
+      val (partCol, df1) = partitionColumn.map { userPartCol =>
+        (userPartCol, df)
+      }.getOrElse {
+        val df1 = df.withColumn("_partition", new SparkColumn(Literal("/0")))
+        ("_partition", df1)
+      }
 
-      if (createDataset) createNewDataset(dataset, sortColumn, partitionColumn, df)
-      checkAndAddColumns(df, dataset, version)
-      val dfColumns = df.schema.map(_.name)
+      // TODO: Do a groupBy partitioncolumn if needed so that partitions are on same node
+
+      if (createDataset) createNewDataset(dataset, sortColumn, partCol, df1)
+      checkAndAddColumns(df1, dataset, version)
+      val dfColumns = df1.schema.map(_.name)
 
       // For each partition, start the ingestion
-      df.rdd.mapPartitionsWithIndex { case (index, rowIter) =>
+      df1.rdd.mapPartitionsWithIndex { case (index, rowIter) =>
         // Everything within this function runs on each partition/executor, so need a local datastore & system
         FiloSetup.init(filoConfig)
 

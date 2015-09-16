@@ -63,43 +63,41 @@ bin/spark-shell --jars ../FiloDB/spark/target/scala-2.10/filodb-spark-assembly-0
 You can use the Spark Dataframes `read` and `write` APIs with FiloDB.  This should also make it possible to create and ingest data using only JDBC, or the SQL Shell.  To create a dataset:
 
 ```scala
-    dataDF.write.format("filodb.spark").
-                 option("dataset", "test1").
-                 option("create_dataset", "true").
-                 save()
+scala> import org.apache.spark.sql.SaveMode
+import org.apache.spark.sql.SaveMode
+scala> dataDF.write.format("filodb.spark").
+              option("dataset", "gdelt1").
+              option("sort_column", "GLOBALEVENTID").
+              option("partition_column", "_partition").
+              mode(SaveMode.Overwrite).
+              save()
 ```
 
-Note the `create_dataset` option, which automatically creates columns and partitions (which you would otherwise need to do through the CLI).
+Note the `OverWrite` save mode, which is not the default and causes the dataset and missing columns to be created.
 
 To read it back:
 
 ```scala
-val df = sql.read.format("filodb.spark").option("dataset", "test1").load()
+val df = sql.read.format("filodb.spark").option("dataset", "gdelt").load()
 ```
+
+### Detailed Ingestion Example
 
 ### Ingesting and Querying with DataFrames (Old API)
-
-Create a config first and import the implicit functions:
-
-```scala
-scala> val config = com.typesafe.config.ConfigFactory.parseString("max-outstanding-futures = 16")
-config: com.typesafe.config.Config = Config(SimpleConfigObject({"max-outstanding-futures":16}))
-
-scala> import filodb.spark._
-import filodb.spark._
-```
 
 The easiest way to create a table, its columns, and ingest data is to use the implicit method `saveAsFiloDataset`:
 
 ```scala
-scala> sqlContext.saveAsFiloDataset(myDF, config, "table1", createDataset=true)
+scala> import filodb.spark._
+import filodb.spark._
+scala> sqlContext.saveAsFiloDataset(myDF, "table1", sortCol, partCol, createDataset=true)
 ```
 
 Currently it does not append but rather overwrites, but this will be fixed.
 Reading is just as easy:
 
 ```scala
-scala> val df = sqlContext.filoDataset(config, "gdelt")
+scala> val df = sqlContext.filoDataset("gdelt")
 15/06/04 15:21:41 INFO DCAwareRoundRobinPolicy: Using data-center name 'datacenter1' for DCAwareRoundRobinPolicy (if this is incorrect, please provide the correct datacenter name with DCAwareRoundRobinPolicy constructor)
 15/06/04 15:21:41 INFO Cluster: New Cassandra host localhost/127.0.0.1:9042 added
 15/06/04 15:21:41 INFO FiloRelation: Read schema for dataset gdelt = Map(ActionGeo_CountryCode -> Column(ActionGeo_CountryCode,gdelt,0,StringColumn,FiloSerializer,false,false), Actor1Geo_FullName -> Column(Actor1Geo_FullName,gdelt,0,StringColumn,FiloSerializer,false,false), Actor2Name -> Column(Actor2Name,gdelt,0,StringColumn,FiloSerializer,false,false), ActionGeo_ADM1Code -> Column(ActionGeo_ADM1Code,gdelt,0,StringColumn,FiloSerializer,false,false), Actor2CountryCode -> Column(Actor2CountryCode,gdelt,0,StringColumn,FiloSerializer,fals...

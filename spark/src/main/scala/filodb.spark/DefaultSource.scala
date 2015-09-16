@@ -41,8 +41,7 @@ class DefaultSource extends RelationProvider with CreatableRelationProvider {
     val dataset = parameters.getOrElse("dataset", sys.error("'dataset' must be specified for FiloDB."))
     val version = parameters.getOrElse("version", "0").toInt
     val sortColumn = parameters.getOrElse("sort_column", sys.error("'sort_column' must be specified"))
-    val partitionColumn = parameters.getOrElse("partition_column",
-                                               sys.error("'partition_column' must be specified"))
+    val partitionColumn = parameters.get("partition_column")
 
     val createDataset = mode == SaveMode.Overwrite
 
