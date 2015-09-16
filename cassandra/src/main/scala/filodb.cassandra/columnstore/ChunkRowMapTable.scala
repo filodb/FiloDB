@@ -22,6 +22,7 @@ sealed class ChunkRowMapTable(dataset: String, config: Config)
 extends CassandraTable[ChunkRowMapTable, ChunkRowMapRecord]
 with SimpleCassandraConnector {
   import filodb.cassandra.Util._
+  import scala.collection.JavaConversions._
 
   override val tableName = dataset + "_chunkmap"
   // TODO: keySpace and other things really belong to a trait
@@ -57,6 +58,14 @@ with SimpleCassandraConnector {
           .and(_.version eqs version)
           .and(_.segmentId gte startSegmentId).and(_.segmentId lt untilSegmentId)
           .fetch()
+
+  def scanChunkMaps(version: Int): Future[Iterator[(String, ChunkRowMapRecord)]] =
+    select.future().map { rs =>
+            rs.iterator.filter(this.version(_) == version)
+              .map { row =>
+              (partition(row), fromRow(row))
+            }
+          }
 
   /**
    * Writes a new chunk map to the chunkRowTable.

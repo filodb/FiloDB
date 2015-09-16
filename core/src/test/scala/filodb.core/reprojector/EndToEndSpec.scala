@@ -87,5 +87,10 @@ class EndToEndSpec extends FunSpec with Matchers with BeforeAndAfter with ScalaF
       readSeg.keyRange should equal (keyRange.copy(end = 10000L))
       readSeg.rowIterator().map(_.getLong(2)).toSeq should equal ((0 to 99).map(_.toLong))
     }
+
+    whenReady(columnStore.scanSegments[Long](schema, dataset.name, 0)) { segIter =>
+      val segments = segIter.toSeq
+      segments should have length (6)
+    }
   }
 }

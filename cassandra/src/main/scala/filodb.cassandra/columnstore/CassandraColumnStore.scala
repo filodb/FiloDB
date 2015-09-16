@@ -97,7 +97,8 @@ extends CachedMergingColumnStore with StrictLogging {
     for { (chunkTable, rowMapTable) <- getSegmentTables(keyRange.dataset)
           data <- Future.sequence(columns.toSeq.map(
                     chunkTable.readChunks(keyRange.partition, version, _,
-                                          keyRange.binaryStart, keyRange.binaryEnd))) }
+                                          keyRange.binaryStart, keyRange.binaryEnd,
+                                          keyRange.endExclusive))) }
     yield { data }
   }
 
@@ -115,10 +116,24 @@ extends CachedMergingColumnStore with StrictLogging {
     }
   }
 
+  /**
+   * NOTE: for now this just scans all the records.
+   * params:
+   *   partition_token_start
+   *   partition_token_end
+   */
   def scanChunkRowMaps(dataset: TableName,
+                       version: Int,
                        partitionFilter: (PartitionKey => Boolean),
-                       params: Map[String, String])
-                      (processFunc: (ChunkRowMap => Unit)): Future[Response] = ???
+                       params: Map[String, String]): Future[Iterator[ChunkMapInfo]] =
+    for { (chunkTable, rowMapTable) <- getSegmentTables(dataset)
+          rowMaps <- rowMapTable.scanChunkMaps(version) }
+    yield {
+      rowMaps.map { case (part, ChunkRowMapRecord(segmentId, chunkIds, rowNums, nextChunkId)) =>
+        (part, segmentId, new BinaryChunkRowMap(chunkIds, rowNums, nextChunkId))
+      }
+    }
+
 
   // Retrieve handles to the tables for a particular dataset from the cache, creating the instances
   // if necessary

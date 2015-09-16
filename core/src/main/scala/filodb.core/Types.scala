@@ -26,7 +26,8 @@ object Types {
 // TODO: this should really be based on a Projection or RichProjection, not dataset.
 case class KeyRange[K : SortKeyHelper](dataset: Types.TableName,
                                        partition: Types.PartitionKey,
-                                       start: K, end: K) {
+                                       start: K, end: K,
+                                       endExclusive: Boolean = true) {
   val helper = implicitly[SortKeyHelper[K]]
   def binaryStart: ByteBuffer = helper.toBytes(start)
   def binaryEnd: ByteBuffer = helper.toBytes(end)

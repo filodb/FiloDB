@@ -1,7 +1,8 @@
 package filodb.core.columnstore
 
 import java.nio.ByteBuffer
-import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.{Await, ExecutionContext, Future}
+import scala.concurrent.duration._
 import spray.caching._
 
 import filodb.core._
@@ -43,6 +44,7 @@ trait ColumnStore {
 
   /**
    * Reads segments from the column store, in order of primary key.
+   * May not be designed for large amounts of data.
    * @param columns the set of columns to read back.  Order determines the order of columns read back
    *                in each row
    * @param keyRange describes the partition and range of keys to read back. NOTE: end range is exclusive!
@@ -51,6 +53,19 @@ trait ColumnStore {
    */
   def readSegments[K: SortKeyHelper](columns: Seq[Column], keyRange: KeyRange[K], version: Int):
       Future[Iterator[Segment[K]]]
+
+  /**
+   * Scans over segments from multiple partitions of a dataset.  Designed for huge amounts of data.
+   * The params determine things such as token ranges or some way of limiting the scanning.
+   *
+   * params:  see individual implementations, but
+   *   segment_group_size   determines # of segments to read at once. Must be integer string.
+   */
+  def scanSegments[K: SortKeyHelper](columns: Seq[Column],
+                                     dataset: TableName,
+                                     version: Int,
+                                     partitionFilter: (PartitionKey => Boolean) = (x => true),
+                                     params: Map[String, String] = Map.empty): Future[Iterator[Segment[K]]]
 }
 
 case class ChunkedData(column: Types.ColumnId, chunks: Seq[(ByteBuffer, Types.ChunkID, ByteBuffer)])
@@ -62,6 +77,7 @@ case class ChunkedData(column: Types.ColumnId, chunks: Seq[(ByteBuffer, Types.Ch
  */
 trait CachedMergingColumnStore extends ColumnStore {
   import filodb.core.Types._
+  import filodb.core.Iterators._
 
   def segmentCache: Cache[Segment[_]]
 
@@ -95,7 +111,7 @@ trait CachedMergingColumnStore extends ColumnStore {
    * is performed - so don't ask for too large of a range.  Recommendation is to read the ChunkRowMaps
    * first and use the info there to determine how much to read.
    * @param columns the columns to read back chunks from
-   * @param keyRange the range of segments to read from, note [start, end) <-- end is exclusive!
+   * @param keyRange the range of segments to read from.  Note endExclusive flag.
    * @param version the version to read back
    * @returns a sequence of ChunkedData, each triple is (segmentId, chunkId, bytes) for each chunk
    *          must be sorted in order of increasing segmentId
@@ -112,15 +128,19 @@ trait CachedMergingColumnStore extends ColumnStore {
    */
   def readChunkRowMaps[K](keyRange: KeyRange[K], version: Int): Future[Seq[(ByteBuffer, BinaryChunkRowMap)]]
 
+  type ChunkMapInfo = (PartitionKey, ByteBuffer, BinaryChunkRowMap)
+
   /**
    * Designed to scan over many many ChunkRowMaps from multiple partitions.  Intended for fast scanning
    * of many segments, such as reading all the data for one node from a Spark worker.
    * TODO: how to make passing stuff such as token ranges nicer, but still generic?
+   *
+   * @returns an iterator over ChunkRowMaps.  Must be sorted by partitionkey first, then segment Id.
    */
   def scanChunkRowMaps(dataset: TableName,
+                       version: Int,
                        partitionFilter: (PartitionKey => Boolean),
-                       params: Map[String, String])
-                      (processFunc: (ChunkRowMap => Unit)): Future[Response]
+                       params: Map[String, String]): Future[Iterator[ChunkMapInfo]]
 
   /**
    * == Caching and merging implementation of the high level functions ==
@@ -159,6 +179,44 @@ trait CachedMergingColumnStore extends ColumnStore {
       case e: java.util.NoSuchElementException => Iterator.empty
     }
   }
+
+  // NOTE: this is more or less a single-threaded implementation.  Reads of chunks for multiple columns
+  // happen in parallel, but we still block to wait for all of them to come back.
+  def scanSegments[K: SortKeyHelper](columns: Seq[Column],
+                                     dataset: TableName,
+                                     version: Int,
+                                     partitionFilter: (PartitionKey => Boolean),
+                                     params: Map[String, String]): Future[Iterator[Segment[K]]] = {
+    val segmentGroupSize = params.getOrElse("segment_group_size", "3").toInt
+
+    for { chunkmapsIt <- scanChunkRowMaps(dataset, version, partitionFilter, params) }
+    yield
+    (for { // Group by partition key first
+          (part, partChunkMaps) <- chunkmapsIt.sortedGroupBy { case (part, seg, rowMap) => part }
+          // Subdivide chunk row maps in each partition so we don't read more than we can chew
+          // TODO: make a custom grouping function based on # of rows accumulated
+          groupChunkMaps <- partChunkMaps.grouped(segmentGroupSize)
+          chunkMaps = groupChunkMaps.toSeq
+          keyRange = keyRangeFromMaps(chunkMaps, dataset, part) }
+    yield {
+      val rowMaps = chunkMaps.map { case (_, seg, rowMap) => (seg, rowMap) }
+      val chunks = Await.result(readChunks(columns.map(_.name).toSet, keyRange, version),
+                                5.minutes)
+      buildSegments(rowMaps, chunks, keyRange, columns).toIterator
+    }).flatten
+  }
+
+  private def keyRangeFromMaps[K: SortKeyHelper](chunkRowMaps: Seq[ChunkMapInfo],
+                                                 dataset: TableName,
+                                                 partition: PartitionKey): KeyRange[K] = {
+    require(partition == chunkRowMaps.head._1)
+    val helper = implicitly[SortKeyHelper[K]]
+    KeyRange(dataset, partition,
+             helper.fromBytes(chunkRowMaps.head._2),
+             helper.fromBytes(chunkRowMaps.last._2),
+             endExclusive = false)
+  }
+
 
   private def getSegFromCache[K: SortKeyHelper](projection: RichProjection,
                                                 keyRange: KeyRange[K],

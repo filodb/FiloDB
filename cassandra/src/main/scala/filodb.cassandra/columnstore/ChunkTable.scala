@@ -64,15 +64,21 @@ with SimpleCassandraConnector {
   // Reads back all the chunks from the requested column for the segments falling within
   // the starting and ending segment IDs.  No paging is performed - so be sure to not
   // ask for too large of a range.  Also, beware the starting segment ID must line up with the
-  // segment boundary, and the ending segment ID is exclusive!
+  // segment boundary.
+  // endExclusive indicates if the end segment ID is exclusive or not.
   def readChunks(partition: String,
                  version: Int,
                  column: String,
                  startSegmentId: ByteBuffer,
-                 untilSegmentId: ByteBuffer): Future[ChunkedData] =
-    select(_.segmentId, _.chunkId, _.data).where(_.columnName eqs column)
-      .and(_.partition eqs partition)
-      .and(_.version eqs version)
-      .and(_.segmentId gte startSegmentId).and(_.segmentId lt untilSegmentId)
-      .fetch().map(chunks => ChunkedData(column, chunks))
+                 untilSegmentId: ByteBuffer,
+                 endExclusive: Boolean = true): Future[ChunkedData] = {
+    val initialQuery =
+      select(_.segmentId, _.chunkId, _.data).where(_.columnName eqs column)
+        .and(_.partition eqs partition)
+        .and(_.version eqs version)
+        .and(_.segmentId gte startSegmentId)
+    val wholeQuery = if (endExclusive) { initialQuery.and(_.segmentId lt untilSegmentId) }
+                     else              { initialQuery.and(_.segmentId lte untilSegmentId) }
+    wholeQuery.fetch().map(chunks => ChunkedData(column, chunks))
+  }
 }

@@ -173,4 +173,22 @@ class CassandraColumnStoreSpec extends CassandraFlatSpec with BeforeAndAfter {
       segments.head.getChunks.toSet should equal (Set(("notACol", 0, null), ("notACol", 1, null)))
     }
   }
+
+  "scanSegments" should "read segments back that were written" in {
+    val segment = getRowWriter(keyRange)
+    segment.addRowsAsChunk(names, getSortKey _)
+    whenReady(colStore.appendSegment(projection, segment, 0)) { response =>
+      response should equal (Success)
+    }
+
+    whenReady(colStore.scanSegments[Long](schema, dataset, 0)) { segIter =>
+      val segments = segIter.toSeq
+      segments should have length (1)
+      val readSeg = segments.head.asInstanceOf[RowReaderSegment[Long]]
+      readSeg.keyRange should equal (segment.keyRange)
+      readSeg.getChunks.toSet should equal (segment.getChunks.toSet)
+      readSeg.index.rowNumIterator.toSeq should equal (segment.index.rowNumIterator.toSeq)
+      readSeg.rowIterator().map(_.getLong(2)).toSeq should equal (Seq(24L, 25L, 28L, 29L, 39L, 40L))
+    }
+  }
 }

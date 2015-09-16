@@ -89,9 +89,17 @@ extends CachedMergingColumnStore with StrictLogging {
   }
 
   def scanChunkRowMaps(dataset: TableName,
+                       version: Int,
                        partitionFilter: (PartitionKey => Boolean),
-                       params: Map[String, String])
-                      (processFunc: (ChunkRowMap => Unit)): Future[Response] = ???
+                       params: Map[String, String]): Future[Iterator[ChunkMapInfo]] = Future {
+    rowMaps.keys.filter { case (ds, partition, ver) => ds == dataset && ver == version }
+           .flatMap { case key @ (_, partition, _) =>
+             rowMaps(key).entrySet.iterator.map { entry =>
+               val (chunkIds, rowNums, nextChunkId) = entry.getValue
+               (partition, entry.getKey, new BinaryChunkRowMap(chunkIds, rowNums, nextChunkId))
+             }
+           }.toIterator
+  }
 
   def bbToHex(bb: ByteBuffer): String = DatatypeConverter.printHexBinary(bb.array)
 

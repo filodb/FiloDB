@@ -63,7 +63,7 @@ class DefaultReprojector(columnStore: ColumnStore,
   import MemTable._
   import Types._
   import RowReader._
-  import Iterators._
+  import filodb.core.Iterators._
 
   // PERF/TODO: Maybe we should pass in an Iterator[RowReader], and extract partition and sort keys
   // out.  Heck we could create a custom FiloRowReader which has methods to extract this out.
@@ -119,21 +119,4 @@ object RowReaderSupport extends RowIngestSupport[RowReader] {
     if (row.notNull(columnNo)) Some(row.getLong(columnNo)) else None
   def getDouble(row: R, columnNo: Int): Option[Double] =
     if (row.notNull(columnNo)) Some(row.getDouble(columnNo)) else None
-}
-
-// From http://stackoverflow.com/questions/10642337/is-there-are-iterative-version-of-groupby-in-scala
-object Iterators {
-  implicit class RichIterator[T](origIt: Iterator[T]) {
-    def sortedGroupBy[B](func: T => B): Iterator[(B, Iterator[T])] = new Iterator[(B, Iterator[T])] {
-      var iter = origIt
-      def hasNext: Boolean = iter.hasNext
-      def next: (B, Iterator[T]) = {
-        val first = iter.next()
-        val firstValue = func(first)
-        val (i1,i2) = iter.span(el => func(el) == firstValue)
-        iter = i2
-        (firstValue, Iterator.single(first) ++ i1)
-      }
-    }
-  }
 }
