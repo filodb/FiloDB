@@ -83,7 +83,7 @@ class SaveAsFiloTest extends FunSpec with BeforeAndAfter with BeforeAndAfterAll 
     df.agg(sum("year")).collect().head(0) should equal (4030)
   }
 
-  ignore("should throw ColumnTypeMismatch if existing columns are not same type") {
+  it("should throw ColumnTypeMismatch if existing columns are not same type") {
     metaStore.newDataset(ds2).futureValue should equal (Success)
     val idStrCol = Column("id", "gdelt2", 0, Column.ColumnType.StringColumn)
     metaStore.newColumn(idStrCol).futureValue should equal (Success)

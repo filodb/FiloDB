@@ -40,7 +40,7 @@ lazy val spark = (project in file("spark"))
                               coordinator,
                               cassandra % "compile->compile; test->test")
 
-val phantomVersion = "1.11.0"
+val phantomVersion = "1.12.2"
 val akkaVersion    = "2.3.7"
 
 lazy val extraRepos = Seq(
@@ -126,7 +126,11 @@ lazy val cliAssemblySettings = Seq(
 
 lazy val assemblySettings = Seq(
   assemblyMergeStrategy in assembly := {
+    case m if m.toLowerCase.endsWith("manifest.mf") => MergeStrategy.discard
+    case m if m.toLowerCase.matches("meta-inf.*\\.sf$") => MergeStrategy.discard
+    case m if m.toLowerCase.matches("meta-inf.*\\.properties") => MergeStrategy.discard
     case PathList(ps @ _*) if ps.last endsWith ".txt.1" => MergeStrategy.first
+      case "reference.conf" => MergeStrategy.concat
     case "application.conf"                            => MergeStrategy.concat
     case x =>
       val oldStrategy = (assemblyMergeStrategy in assembly).value
