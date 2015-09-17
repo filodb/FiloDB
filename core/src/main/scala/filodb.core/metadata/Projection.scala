@@ -1,5 +1,6 @@
 package filodb.core.metadata
 
+import filodb.core.SortKeyHelper
 import filodb.core.Types._
 
 /**
@@ -28,7 +29,9 @@ case class RichProjection(id: Int,
                           dataset: Dataset,
                           sortColumn: Column,
                           reverse: Boolean,
-                          columns: Seq[Column])
+                          columns: Seq[Column]) {
+  def helper[K]: SortKeyHelper[K] = Dataset.sortKeyHelper(dataset, sortColumn).get
+}
 
 object RichProjection {
   // TODO: error handling

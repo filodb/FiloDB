@@ -19,13 +19,15 @@ import org.apache.spark.sql.types._
 import org.apache.spark.sql.{DataFrame, Row, SQLContext}
 
 import filodb.core._
-import filodb.core.metadata.{Column, Dataset, RichProjection}
+import filodb.core.metadata.{Column, Dataset, DatasetOptions}
 import filodb.core.columnstore.{MutableRowReader, RowReaderSegment}
 
 object FiloRelation {
   val DefaultMinPartitions = 1
 
   import TypeConverters._
+
+  implicit val context = scala.concurrent.ExecutionContext.Implicits.global
 
   def parse[T, B](cmd: => Future[T], awaitTimeout: FiniteDuration = 5 seconds)(func: T => B): B = {
     func(Await.result(cmd, awaitTimeout))
@@ -37,12 +39,20 @@ object FiloRelation {
     parse(actor ? msg, askTimeout)(f)
   }
 
-  def getRows[K: ClassTag](projection: RichProjection,
-                           version: Int,
-                           columns: Seq[Column],
-                           params: Map[String, String]): Iterator[Row] = {
-    implicit val helper = Dataset.sortKeyHelper[K](projection.dataset.options)
-    parse(FiloSetup.columnStore.scanSegments[K](columns, projection.dataset.name, version),
+  def getDatasetObj(dataset: String): Dataset =
+    parse(FiloSetup.metaStore.getDataset(dataset)) { ds => ds }
+
+  def getSchema(dataset: String, version: Int): Column.Schema =
+    parse(FiloSetup.metaStore.getSchema(dataset, version)) { schema => schema }
+
+  def getRows[K](options: DatasetOptions,
+                 datasetName: String,
+                 version: Int,
+                 columns: Seq[Column],
+                 sortColumn: Column,
+                 params: Map[String, String]): Iterator[Row] = {
+    implicit val helper = Dataset.sortKeyHelper[K](options, sortColumn).get
+    parse(FiloSetup.columnStore.scanSegments[K](columns, datasetName, version, params = params),
           10 minutes) { segmentIt =>
       segmentIt.flatMap { case seg: RowReaderSegment[K] =>
         seg.rowIterator((bytes, clazzes) => new SparkRowReader(bytes, clazzes))
@@ -51,24 +61,28 @@ object FiloRelation {
     }
   }
 
-
   // It's good to put complex functions inside an object, to be sure that everything
   // inside the function does not depend on an explicit outer class and can be serializable
-  def perNodeRowScanner(config: Config, dataset: Dataset, version: Int, columns: Seq[Column],
+  def perNodeRowScanner(config: Config,
+                        datasetOptionStr: String,
+                        version: Int,
+                        columns: Seq[Column],
+                        sortColumn: Column,
                         paramIter: Iterator[Map[String, String]]): Iterator[Row] = {
     // NOTE: all the code inside here runs distributed on each node.  So, create my own datastore, etc.
     FiloSetup.init(config)
     FiloSetup.columnStore    // force startup
-    val projection = RichProjection(dataset, columns)
+    val options = DatasetOptions.fromString(datasetOptionStr)
+    val datasetName = sortColumn.dataset
 
     paramIter.flatMap { param =>
       import Column.ColumnType._
-      projection.sortColumn.columnType match {
-        case LongColumn    => getRows[Long](projection, version, columns, param)
-        case IntColumn     => getRows[Int](projection, version, columns, param)
-        case DoubleColumn  => getRows[Double](projection, version, columns, param)
+      sortColumn.columnType match {
+        case LongColumn    => getRows[Long](options, datasetName, version, columns, sortColumn, param)
+        case IntColumn     => getRows[Int](options, datasetName, version, columns, sortColumn, param)
+        case DoubleColumn  => getRows[Double](options, datasetName, version, columns, sortColumn, param)
         case other: Column.ColumnType =>
-          throw new RuntimeException(s"Unsupported sort column type $other attempted for dataset $dataset")
+          throw new RuntimeException(s"Unsupported sort column type $other for dataset $datasetName")
       }
     }
   }
@@ -98,14 +112,9 @@ case class FiloRelation(dataset: String,
   val filoConfig = FiloSetup.configFromSpark(sqlContext.sparkContext)
   FiloSetup.init(filoConfig)
 
-  implicit val context = scala.concurrent.ExecutionContext.Implicits.global
-
-  val datasetObj = parse(FiloSetup.metaStore.getDataset(dataset)) { ds => ds }
-
-  val filoSchema = parse(FiloSetup.metaStore.getSchema(dataset, version)) { schema =>
-      logger.info(s"Read schema for dataset $dataset = $schema")
-      schema
-  }
+  val datasetObj = getDatasetObj(dataset)
+  val filoSchema = getSchema(dataset, version)
+  logger.info(s"Read schema for dataset $dataset = $schema")
 
   val schema = StructType(columnsToSqlFields(filoSchema.values.toSeq))
 
@@ -114,14 +123,19 @@ case class FiloRelation(dataset: String,
   def buildScan(requiredColumns: Array[String]): RDD[Row] = {
     // Define vars to distribute inside the method
     val _config = this.filoConfig
-    val _dataset = this.datasetObj
+    val datasetOptionsStr = this.datasetObj.options.toString
     val _version = this.version
     val filoColumns = requiredColumns.map(this.filoSchema)
+    val sortCol = filoSchema(datasetObj.projections.head.sortColumn)
 
     // TODO: actually figure out how to distribute token range stuff
+    // NOTE: It's critical that the closure inside mapPartitions only references
+    // vars from buildScan() method, and not the FiloRelation class.  Otherwise
+    // the entire FiloRelation class would get serialized.
     sqlContext.sparkContext.parallelize(Seq(Map.empty[String, String]), minPartitions)
       .mapPartitions { paramIter =>
-        perNodeRowScanner(_config, _dataset, _version, filoColumns, paramIter)
+        perNodeRowScanner(_config, datasetOptionsStr, _version, filoColumns,
+                          sortCol, paramIter)
       }
   }
 }

@@ -39,6 +39,7 @@ class SaveAsFiloTest extends FunSpec with BeforeAndAfter with BeforeAndAfterAll 
     } catch {
       case e: Exception =>
     }
+    if (FiloSetup.config != null) FiloSetup.scheduler.reset()
   }
 
   override def afterAll() {
@@ -72,7 +73,7 @@ class SaveAsFiloTest extends FunSpec with BeforeAndAfter with BeforeAndAfterAll 
     err.getMessage should include ("DatasetNotFound")
   }
 
-  ignore("should create missing columns and partitions and write table") {
+  it("should create missing columns and partitions and write table") {
     sql.saveAsFiloDataset(dataDF, "gdelt1", "id",
                           createDataset=true,
                           writeTimeout = 2.minutes)

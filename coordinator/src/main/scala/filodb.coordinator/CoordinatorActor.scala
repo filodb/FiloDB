@@ -129,7 +129,13 @@ class CoordinatorActor(memTable: MemTable,
     }
   }
 
-  private def setupIngestion(originator: ActorRef, dataset: String, columns: Seq[String], version: Int) = {
+  private def setupIngestion(originator: ActorRef, dataset: String, columns: Seq[String], version: Int):
+      Unit = {
+    if (memTable.getIngestionSetup(dataset, version).isDefined) {
+      logger.info(s"Dataset $dataset / $version ingestion already set up, nothing to do...")
+      originator ! IngestionReady
+      return
+    }
     (for { datasetObj <- metaStore.getDataset(dataset)
            schema <- verifySchema(originator, dataset, version, columns) if schema.isDefined }
     yield {

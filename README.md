@@ -37,10 +37,10 @@ To compile the .mermaid source files to .png's, install the [Mermaid CLI](http:/
 Your input is appreciated!
 
 * Support for many more data types and sort and partition keys - please give us your input!
+* Non-Spark ingestion API.  Your input is again needed.
 * In-memory caching for significant query speedup
 * Projections.  Often-repeated queries can be sped up significantly with projections.
 * Use of GPU and SIMD instructions to speed up queries
-* Non-Spark ingestion API
 
 ## Getting Started
 
@@ -78,25 +78,40 @@ Note the `OverWrite` save mode, which is not the default and causes the dataset 
 To read it back:
 
 ```scala
-val df = sql.read.format("filodb.spark").option("dataset", "gdelt").load()
+val df = sqlContext.read.format("filodb.spark").option("dataset", "gdelt").load()
 ```
 
 ### Detailed Ingestion Example
 
-This example uses a checked in CSV file to walk through ingesting data.
+This example uses a checked in CSV file to walk through ingesting data.  To ingest the CSV, start spark-shell with the spark-csv package:
 
-- Launching spark shell with spark-csv
-- Loading CSV file from Spark
+```bash
+bin/spark-shell --jars $REPOS/FiloDB/spark/target/scala-2.10/filodb-spark-assembly-0.1-SNAPSHOT.jar --packages com.databricks:spark-csv_2.10:1.2.0 --driver-memory 3G --executor-memory 3G
+```
+
+Loading CSV file from Spark:
 
 ```scala
+scala> val csvDF = sqlContext.read.format("com.databricks.spark.csv").
+           option("header", "true").option("inferSchema", "true").
+           load("GDELT-1979-1984-100000.csv")
 ```
 
 Now, we have to decide on a sort and partitioning column.  The partitioning column decides how data is going to be distributed across the cluster, while the sort column acts as a primary key within each partition and decides how data will be sorted within each partition.
 
-If a partitioning column is not specified, FiloDB's Spark API will create a default one with the name "_partition", with a fixed value, which means everything will be thrown into one node, and is only suitable for small amounts of data.
+If a partitioning column is not specified, FiloDB's Spark API will create a default one with the name "_partition", with a fixed value, which means everything will be thrown into one node, and is only suitable for small amounts of data.  The following command will add the default partition column, and create the dataset too:
+
+```scala
+scala> import org.apache.spark.sql.SaveMode
+import org.apache.spark.sql.SaveMode
+scala> csvDF.write.format("filodb.spark").
+             option("dataset", "gdelt").option("sort_column", "GLOBALEVENTID").
+             mode(SaveMode.Overwrite).save()
+```
+
+- Write data without partition column
 
 - DIscuss how to create a partition column
-- Write data without partition column
 - Write data with partition column
 
 ### Ingesting and Querying with DataFrames (Old API)

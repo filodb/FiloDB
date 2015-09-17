@@ -70,7 +70,6 @@ object Dataset {
    * Returns a SortKeyHelper configured from the DatasetOptions.
    */
   def sortKeyHelper[K: ClassTag](options: DatasetOptions): SortKeyHelper[K] = {
-    import Column.ColumnType._
     implicitly[ClassTag[K]].runtimeClass match {
       case java.lang.Long.TYPE => (new LongKeyHelper(options.segmentSize.toLong)).
                                     asInstanceOf[SortKeyHelper[K]]
@@ -80,4 +79,18 @@ object Dataset {
                                     asInstanceOf[SortKeyHelper[K]]
     }
   }
+
+  def sortKeyHelper[K](options: DatasetOptions, sortColumn: Column): Option[SortKeyHelper[K]] = {
+    import Column.ColumnType._
+    val helper = sortColumn.columnType match {
+      case LongColumn    => Some(sortKeyHelper[Long](options))
+      case IntColumn     => Some(sortKeyHelper[Int](options))
+      case DoubleColumn  => Some(sortKeyHelper[Double](options))
+      case other: Column.ColumnType =>  None
+    }
+    helper.asInstanceOf[Option[SortKeyHelper[K]]]
+  }
+
+  def sortKeyHelper[K](dataset: Dataset, sortColumn: Column): Option[SortKeyHelper[K]] =
+    sortKeyHelper[K](dataset.options, sortColumn)
 }

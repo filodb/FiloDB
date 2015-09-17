@@ -85,14 +85,10 @@ trait MemTable extends StrictLogging {
       val versions = ingestionSetups.getOrElseUpdate(dataset.name, new HashMap[Int, IngestionSetup])
       if (versions contains version) return AlreadySetup
 
-      val helper = (schema(sortColNo).columnType match {
-        case LongColumn    => Dataset.sortKeyHelper[Long](dataset.options)
-        case IntColumn     => Dataset.sortKeyHelper[Int](dataset.options)
-        case DoubleColumn  => Dataset.sortKeyHelper[Double](dataset.options)
-        case other: Column.ColumnType =>
-          logger.info(s"Unsupported sort column type $other attempted for dataset $dataset")
-          return BadSchema
-      }).asInstanceOf[SortKeyHelper[Any]]
+      val helper = Dataset.sortKeyHelper[Any](dataset, schema(sortColNo)).getOrElse {
+        logger.info(s"Unsupported sort column type ${schema(sortColNo).columnType} for dataset $dataset")
+        return BadSchema
+      }
 
       versions(version) = IngestionSetup(dataset, schema, partitionFunc, sortColNo, helper)
       logger.info(s"Set up ingestion for dataset $dataset, version $version with schema $schema")
