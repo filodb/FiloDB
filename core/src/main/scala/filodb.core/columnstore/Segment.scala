@@ -18,7 +18,7 @@ trait Segment[K] {
   val keyRange: KeyRange[K]
   val index: ChunkRowMap
 
-  def segmentId: ByteBuffer = keyRange.binaryStart
+  def segmentId: SegmentId = keyRange.binaryStart
   def dataset: TableName    = keyRange.dataset
   def partition: PartitionKey = keyRange.partition
 

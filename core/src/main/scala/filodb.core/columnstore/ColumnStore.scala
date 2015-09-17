@@ -68,7 +68,7 @@ trait ColumnStore {
                                      params: Map[String, String] = Map.empty): Future[Iterator[Segment[K]]]
 }
 
-case class ChunkedData(column: Types.ColumnId, chunks: Seq[(ByteBuffer, Types.ChunkID, ByteBuffer)])
+case class ChunkedData(column: Types.ColumnId, chunks: Seq[(Types.SegmentId, Types.ChunkID, ByteBuffer)])
 
 /**
  * A partial implementation of a ColumnStore, based on separating storage of chunks and ChunkRowMaps,
@@ -97,13 +97,13 @@ trait CachedMergingColumnStore extends ColumnStore {
   def writeChunks(dataset: TableName,
                   partition: PartitionKey,
                   version: Int,
-                  segmentId: ByteBuffer,
+                  segmentId: SegmentId,
                   chunks: Iterator[(ColumnId, ChunkID, ByteBuffer)]): Future[Response]
 
   def writeChunkRowMap(dataset: TableName,
                        partition: PartitionKey,
                        version: Int,
-                       segmentId: ByteBuffer,
+                       segmentId: SegmentId,
                        chunkRowMap: ChunkRowMap): Future[Response]
 
   /**
@@ -126,9 +126,9 @@ trait CachedMergingColumnStore extends ColumnStore {
    * @param version the version to read back
    * @returns a sequence of (segmentId, ChunkRowMap)'s
    */
-  def readChunkRowMaps[K](keyRange: KeyRange[K], version: Int): Future[Seq[(ByteBuffer, BinaryChunkRowMap)]]
+  def readChunkRowMaps[K](keyRange: KeyRange[K], version: Int): Future[Seq[(SegmentId, BinaryChunkRowMap)]]
 
-  type ChunkMapInfo = (PartitionKey, ByteBuffer, BinaryChunkRowMap)
+  type ChunkMapInfo = (PartitionKey, SegmentId, BinaryChunkRowMap)
 
   /**
    * Designed to scan over many many ChunkRowMaps from multiple partitions.  Intended for fast scanning
@@ -239,7 +239,7 @@ trait CachedMergingColumnStore extends ColumnStore {
   }
 
   // @param rowMaps a Seq of (segmentId, ChunkRowMap)
-  private def buildSegments[K: SortKeyHelper](rowMaps: Seq[(ByteBuffer, BinaryChunkRowMap)],
+  private def buildSegments[K: SortKeyHelper](rowMaps: Seq[(SegmentId, BinaryChunkRowMap)],
                                               chunks: Seq[ChunkedData],
                                               origKeyRange: KeyRange[K],
                                               schema: Seq[Column]): Seq[Segment[K]] = {

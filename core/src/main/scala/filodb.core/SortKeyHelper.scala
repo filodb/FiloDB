@@ -1,7 +1,7 @@
 package filodb.core
 
-import java.nio.ByteBuffer
 import scala.math.Ordering
+import scodec.bits.{ByteVector, ByteOrdering}
 
 /**
  * Definitions for sort keys and key ranges.
@@ -21,8 +21,8 @@ trait SortKeyHelper[K] {
    */
   def getSegment(key: K): (K, K)
 
-  def toBytes(key: K): ByteBuffer
-  def fromBytes(bytes: ByteBuffer): K
+  def toBytes(key: K): ByteVector
+  def fromBytes(bytes: ByteVector): K
 }
 
 /**
@@ -34,9 +34,8 @@ case class LongKeyHelper(segmentLen: Long) extends SortKeyHelper[Long] {
     val segmentNum = key / segmentLen
     (segmentNum * segmentLen, (segmentNum + 1) * segmentLen)
   }
-  def toBytes(key: Long): ByteBuffer =
-    ByteBuffer.allocate(java.lang.Long.BYTES).putLong(key).flip.asInstanceOf[ByteBuffer]
-  def fromBytes(bytes: ByteBuffer): Long = bytes.getLong
+  def toBytes(key: Long): ByteVector = ByteVector.fromLong(key, ordering = ByteOrdering.LittleEndian)
+  def fromBytes(bytes: ByteVector): Long = bytes.toLong(true, ByteOrdering.LittleEndian)
 }
 
 case class IntKeyHelper(segmentLen: Int) extends SortKeyHelper[Int] {
@@ -45,9 +44,8 @@ case class IntKeyHelper(segmentLen: Int) extends SortKeyHelper[Int] {
     val segmentNum = key / segmentLen
     (segmentNum * segmentLen, (segmentNum + 1) * segmentLen)
   }
-  def toBytes(key: Int): ByteBuffer =
-    ByteBuffer.allocate(java.lang.Integer.BYTES).putInt(key).flip.asInstanceOf[ByteBuffer]
-  def fromBytes(bytes: ByteBuffer): Int = bytes.getInt
+  def toBytes(key: Int): ByteVector = ByteVector.fromInt(key, ordering = ByteOrdering.LittleEndian)
+  def fromBytes(bytes: ByteVector): Int = bytes.toInt(true, ByteOrdering.LittleEndian)
 }
 
 case class DoubleKeyHelper(segmentLen: Double) extends SortKeyHelper[Double] {
@@ -56,8 +54,9 @@ case class DoubleKeyHelper(segmentLen: Double) extends SortKeyHelper[Double] {
     val segmentNum = Math.floor(key / segmentLen)
     (segmentNum * segmentLen, (segmentNum + 1) * segmentLen)
   }
-  def toBytes(key: Double): ByteBuffer =
-    ByteBuffer.allocate(java.lang.Double.BYTES).putDouble(key).flip.asInstanceOf[ByteBuffer]
-  def fromBytes(bytes: ByteBuffer): Double = bytes.getDouble
+  def toBytes(key: Double): ByteVector =
+    ByteVector.fromLong(java.lang.Double.doubleToLongBits(key), ordering = ByteOrdering.LittleEndian)
+  def fromBytes(bytes: ByteVector): Double =
+    java.lang.Double.longBitsToDouble(bytes.toLong(true, ByteOrdering.LittleEndian))
 }
 

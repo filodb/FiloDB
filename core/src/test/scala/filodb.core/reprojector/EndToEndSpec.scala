@@ -41,7 +41,7 @@ class EndToEndSpec extends FunSpec with Matchers with BeforeAndAfter with ScalaF
   // Thus let's have the following:
   // "nfc"  0-99  10000-10099 10100-10199  20000-20099 20100-20199 20200-20299
   // "afc"  the same
-  // 1200 rows total
+  // 1200 rows total, 6 segments (3 x 2 partitions)
   // No need to test out of order since that's covered by other things (but we can scramble the rows
   // just for fun)
   val schemaWithPartCol = schema ++ Seq(
@@ -66,13 +66,23 @@ class EndToEndSpec extends FunSpec with Matchers with BeforeAndAfter with ScalaF
     mTable.ingestRows("dataset", 0, namesWithPartCol.map(TupleRowReader)) should equal (Ingested)
     mTable.allNumRows(Active) should equal (Seq((("dataset", 0), 1200L)))
 
-    // Schedule a flush, wait, and see that it's done.  mTable should be empty after flush is done.
+    // Schedule a flush, wait, and see that it's done.  Each flush task = 3 segments, so there
+    // should be one more.
     scheduler.runOnce()
     scheduler.tasks should have size (1)
     whenReady(scheduler.tasks.values.head) { responses =>
-      // Run this another time to clean up any tasks
+      scheduler.failedTasks should equal (Nil)
+      mTable.allNumRows(Active) should equal (Seq((("dataset", 0), 0L)))
+      mTable.flushingDatasets should equal (Seq((("dataset", 0), 600L)))
+    }
+
+    // Run this another time for final flush task
+    scheduler.runOnce()
+    scheduler.tasks should have size (1)
+    whenReady(scheduler.tasks.values.head) { responses =>
+      // Run one more time for final cleanup
       scheduler.runOnce()
-      scheduler.tasks should have size (0)      // should be done and no more flushes
+      scheduler.tasks should have size (0)
       scheduler.failedTasks should equal (Nil)
       mTable.allNumRows(Active) should equal (Seq((("dataset", 0), 0L)))
       mTable.flushingDatasets should equal (Nil)

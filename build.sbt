@@ -64,6 +64,7 @@ lazy val coreDeps = Seq(
   "io.spray"             %% "spray-caching"     % "1.3.2",
   "org.mapdb"             % "mapdb"             % "1.0.6",
   "net.ceedubs"          %% "ficus"             % "1.0.1",
+  "org.scodec"           %% "scodec-bits"       % "1.0.10",
   "com.nativelibs4java"  %% "scalaxy-loops"     % "0.3.3" % "provided",
   "org.scalatest"        %% "scalatest"         % "2.2.4" % "test"
 )

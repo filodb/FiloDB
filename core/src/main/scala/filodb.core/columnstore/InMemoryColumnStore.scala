@@ -25,9 +25,12 @@ extends CachedMergingColumnStore with StrictLogging {
 
   val mergingStrategy = new AppendingChunkMergingStrategy(this)
 
-  type ChunkKey = (Types.ColumnId, ByteBuffer, Types.ChunkID)
+  type ChunkKey = (ColumnId, SegmentId, ChunkID)
   type ChunkTree = TreeMap[ChunkKey, Array[Byte]]
-  type RowMapTree = TreeMap[ByteBuffer, (ByteBuffer, ByteBuffer, Int)]
+  type RowMapTree = TreeMap[SegmentId, (ByteBuffer, ByteBuffer, Int)]
+
+  val EmptyChunkTree = new ChunkTree(Ordering[ChunkKey])
+  val EmptyRowMapTree = new RowMapTree(Ordering[SegmentId])
 
   val chunkDb = new HashMap[(TableName, PartitionKey, Int), ChunkTree]
   val rowMaps = new HashMap[(TableName, PartitionKey, Int), RowMapTree]
@@ -39,10 +42,10 @@ extends CachedMergingColumnStore with StrictLogging {
   def writeChunks(dataset: TableName,
                   partition: PartitionKey,
                   version: Int,
-                  segmentId: ByteBuffer,
+                  segmentId: SegmentId,
                   chunks: Iterator[(ColumnId, ChunkID, ByteBuffer)]): Future[Response] = Future {
     val chunkTree = chunkDb.getOrElseUpdate((dataset, partition, version),
-                                            new ChunkTree((Ordering[ChunkKey])))
+                                            new ChunkTree(Ordering[ChunkKey]))
     chunks.foreach { case (colId, chunkId, bytes) =>
       chunkTree.put((colId, segmentId, chunkId), minimalBytes(bytes))
     }
@@ -52,9 +55,10 @@ extends CachedMergingColumnStore with StrictLogging {
   def writeChunkRowMap(dataset: TableName,
                        partition: PartitionKey,
                        version: Int,
-                       segmentId: ByteBuffer,
+                       segmentId: SegmentId,
                        chunkRowMap: ChunkRowMap): Future[Response] = Future {
-    val rowMapTree = rowMaps.getOrElseUpdate((dataset, partition, version), new RowMapTree)
+    val rowMapTree = rowMaps.getOrElseUpdate((dataset, partition, version),
+                                             new RowMapTree(Ordering[SegmentId]))
     val (chunkIds, rowNums) = chunkRowMap.serialize()
     rowMapTree.put(segmentId, (chunkIds, rowNums, chunkRowMap.nextChunkId))
     Success
@@ -63,8 +67,8 @@ extends CachedMergingColumnStore with StrictLogging {
   def readChunks[K](columns: Set[ColumnId],
                     keyRange: KeyRange[K],
                     version: Int): Future[Seq[ChunkedData]] = Future {
-    val chunkTree = chunkDb.getOrElseUpdate((keyRange.dataset, keyRange.partition, version),
-                                            new ChunkTree((Ordering[ChunkKey])))
+    val chunkTree = chunkDb.getOrElse((keyRange.dataset, keyRange.partition, version),
+                                      EmptyChunkTree)
     logger.debug(s"Reading chunks from columns $columns, keyRange $keyRange, version $version")
     for { column <- columns.toSeq } yield {
       val startKey = (column, keyRange.binaryStart, 0)
@@ -79,8 +83,8 @@ extends CachedMergingColumnStore with StrictLogging {
   }
 
   def readChunkRowMaps[K](keyRange: KeyRange[K], version: Int):
-      Future[Seq[(ByteBuffer, BinaryChunkRowMap)]] = Future {
-    val rowMapTree = rowMaps.getOrElseUpdate((keyRange.dataset, keyRange.partition, version), new RowMapTree)
+      Future[Seq[(SegmentId, BinaryChunkRowMap)]] = Future {
+    val rowMapTree = rowMaps.getOrElse((keyRange.dataset, keyRange.partition, version), EmptyRowMapTree)
     val it = rowMapTree.subMap(keyRange.binaryStart, keyRange.binaryEnd).entrySet.iterator
     it.toSeq.map { entry =>
       val (chunkIds, rowNums, nextChunkId) = entry.getValue
