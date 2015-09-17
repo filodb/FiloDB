@@ -47,17 +47,21 @@ case class Column(name: String,
 
 object Column extends StrictLogging {
   sealed trait ColumnType extends EnumEntry {
-    val clazz: Class[_]
+    // NOTE: due to a Spark serialization bug, this cannot be a val
+    // (https://github.com/apache/spark/pull/7122)
+    def clazz: Class[_]
   }
 
   object ColumnType extends Enum[ColumnType] {
     val values = findValues
 
-    case object IntColumn extends ColumnType { val clazz = classOf[Int] }
-    case object LongColumn extends ColumnType { val clazz = classOf[Long] }
-    case object DoubleColumn extends ColumnType { val clazz = classOf[Double] }
-    case object StringColumn extends ColumnType { val clazz = classOf[String] }
-    case object BitmapColumn extends ColumnType { val clazz = classOf[Boolean] }
+    //scalastyle:off
+    case object IntColumn extends ColumnType { def clazz = classOf[Int] }
+    case object LongColumn extends ColumnType { def clazz = classOf[Long] }
+    case object DoubleColumn extends ColumnType { def clazz = classOf[Double] }
+    case object StringColumn extends ColumnType { def clazz = classOf[String] }
+    case object BitmapColumn extends ColumnType { def clazz = classOf[Boolean] }
+    //scalastyle:on
   }
 
   sealed trait Serializer extends EnumEntry
