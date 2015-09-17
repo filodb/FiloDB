@@ -44,6 +44,8 @@ Your input is appreciated!
 
 ## Getting Started
 
+**YOU WILL NEED JDK 1.8**
+
 First, build the CLI using `sbt cli/assembly`.  This will create an executable in `cli/target/scala-2.10/filo-cli-*`.  In the examples below, the "filo-cli" command is an alias to this executable.
 
 To initialize the C* tables:
