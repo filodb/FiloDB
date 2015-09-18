@@ -129,7 +129,7 @@ exec java -jar "$0" "$@"
 """.split("\n")
 
 // Builds cli as a standalone executable to make it easier to launch commands
-lazy val cliAssemblySettings = Seq(
+lazy val cliAssemblySettings = assemblySettings ++ Seq(
   assemblyOption in assembly := (assemblyOption in assembly).value.copy(
                                   prependShellScript = Some(shellScript)),
   assemblyJarName in assembly := s"filo-cli-${version.value}"
