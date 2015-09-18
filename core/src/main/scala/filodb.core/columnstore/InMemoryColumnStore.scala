@@ -2,7 +2,7 @@ package filodb.core.columnstore
 
 import com.typesafe.scalalogging.slf4j.StrictLogging
 import java.nio.ByteBuffer
-import java.util.TreeMap
+import java.util.concurrent.ConcurrentSkipListMap
 import javax.xml.bind.DatatypeConverter
 import scala.collection.mutable.HashMap
 import scala.concurrent.{ExecutionContext, Future}
@@ -26,8 +26,8 @@ extends CachedMergingColumnStore with StrictLogging {
   val mergingStrategy = new AppendingChunkMergingStrategy(this)
 
   type ChunkKey = (ColumnId, SegmentId, ChunkID)
-  type ChunkTree = TreeMap[ChunkKey, Array[Byte]]
-  type RowMapTree = TreeMap[SegmentId, (ByteBuffer, ByteBuffer, Int)]
+  type ChunkTree = ConcurrentSkipListMap[ChunkKey, Array[Byte]]
+  type RowMapTree = ConcurrentSkipListMap[SegmentId, (ByteBuffer, ByteBuffer, Int)]
 
   val EmptyChunkTree = new ChunkTree(Ordering[ChunkKey])
   val EmptyRowMapTree = new RowMapTree(Ordering[SegmentId])
@@ -44,8 +44,9 @@ extends CachedMergingColumnStore with StrictLogging {
                   version: Int,
                   segmentId: SegmentId,
                   chunks: Iterator[(ColumnId, ChunkID, ByteBuffer)]): Future[Response] = Future {
-    val chunkTree = chunkDb.getOrElseUpdate((dataset, partition, version),
-                                            new ChunkTree(Ordering[ChunkKey]))
+    val chunkTree = chunkDb.synchronized {
+      chunkDb.getOrElseUpdate((dataset, partition, version), new ChunkTree(Ordering[ChunkKey]))
+    }
     chunks.foreach { case (colId, chunkId, bytes) =>
       chunkTree.put((colId, segmentId, chunkId), minimalBytes(bytes))
     }
@@ -57,8 +58,9 @@ extends CachedMergingColumnStore with StrictLogging {
                        version: Int,
                        segmentId: SegmentId,
                        chunkRowMap: ChunkRowMap): Future[Response] = Future {
-    val rowMapTree = rowMaps.getOrElseUpdate((dataset, partition, version),
-                                             new RowMapTree(Ordering[SegmentId]))
+    val rowMapTree = rowMaps.synchronized {
+      rowMaps.getOrElseUpdate((dataset, partition, version), new RowMapTree(Ordering[SegmentId]))
+    }
     val (chunkIds, rowNums) = chunkRowMap.serialize()
     rowMapTree.put(segmentId, (chunkIds, rowNums, chunkRowMap.nextChunkId))
     Success
@@ -72,8 +74,9 @@ extends CachedMergingColumnStore with StrictLogging {
     logger.debug(s"Reading chunks from columns $columns, keyRange $keyRange, version $version")
     for { column <- columns.toSeq } yield {
       val startKey = (column, keyRange.binaryStart, 0)
-      val endKey   = (column, keyRange.binaryEnd,   0)  // exclusive end
-      val it = chunkTree.subMap(startKey, endKey).entrySet.iterator
+      val endKey   = if (keyRange.endExclusive) { (column, keyRange.binaryEnd, 0) }
+                     else                       { (column, keyRange.binaryEnd, Int.MaxValue) }
+      val it = chunkTree.subMap(startKey, true, endKey, !keyRange.endExclusive).entrySet.iterator
       val chunkList = it.toSeq.map { entry =>
         val (colId, segmentId, chunkId) = entry.getKey
         (segmentId, chunkId, ByteBuffer.wrap(entry.getValue))
@@ -85,7 +88,8 @@ extends CachedMergingColumnStore with StrictLogging {
   def readChunkRowMaps[K](keyRange: KeyRange[K], version: Int):
       Future[Seq[(SegmentId, BinaryChunkRowMap)]] = Future {
     val rowMapTree = rowMaps.getOrElse((keyRange.dataset, keyRange.partition, version), EmptyRowMapTree)
-    val it = rowMapTree.subMap(keyRange.binaryStart, keyRange.binaryEnd).entrySet.iterator
+    val it = rowMapTree.subMap(keyRange.binaryStart, true,
+                               keyRange.binaryEnd, !keyRange.endExclusive).entrySet.iterator
     it.toSeq.map { entry =>
       val (chunkIds, rowNums, nextChunkId) = entry.getValue
       (entry.getKey, new BinaryChunkRowMap(chunkIds, rowNums, nextChunkId))
@@ -96,13 +100,14 @@ extends CachedMergingColumnStore with StrictLogging {
                        version: Int,
                        partitionFilter: (PartitionKey => Boolean),
                        params: Map[String, String]): Future[Iterator[ChunkMapInfo]] = Future {
-    rowMaps.keys.filter { case (ds, partition, ver) => ds == dataset && ver == version }
-           .flatMap { case key @ (_, partition, _) =>
-             rowMaps(key).entrySet.iterator.map { entry =>
-               val (chunkIds, rowNums, nextChunkId) = entry.getValue
-               (partition, entry.getKey, new BinaryChunkRowMap(chunkIds, rowNums, nextChunkId))
-             }
-           }.toIterator
+    val parts = rowMaps.keys.filter { case (ds, partition, ver) => ds == dataset && ver == version }
+    val maps = parts.toIterator.flatMap { case key @ (_, partition, _) =>
+                 rowMaps(key).keySet.iterator.map { segId =>
+                   val (chunkIds, rowNums, nextChunkId) = rowMaps(key).get(segId)
+                   (partition, segId, new BinaryChunkRowMap(chunkIds, rowNums, nextChunkId))
+                 }
+               }
+    maps.toIterator
   }
 
   def bbToHex(bb: ByteBuffer): String = DatatypeConverter.printHexBinary(bb.array)

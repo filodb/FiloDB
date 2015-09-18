@@ -1,5 +1,6 @@
 package filodb.core.columnstore
 
+import com.typesafe.scalalogging.slf4j.StrictLogging
 import java.nio.ByteBuffer
 import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.concurrent.duration._
@@ -75,7 +76,7 @@ case class ChunkedData(column: Types.ColumnId, chunks: Seq[(Types.SegmentId, Typ
  * use of a segment cache to speed up merging, and a ChunkMergingStrategy to merge segments.  It defines
  * lower level primitives and implements the ColumnStore methods in terms of these primitives.
  */
-trait CachedMergingColumnStore extends ColumnStore {
+trait CachedMergingColumnStore extends ColumnStore with StrictLogging {
   import filodb.core.Types._
   import filodb.core.Iterators._
 
@@ -253,8 +254,6 @@ trait CachedMergingColumnStore extends ColumnStore {
       var segIndex = 0
       chunkTriples.foreach { case (segmentId, chunkId, chunkBytes) =>
         // Rely on the fact that chunks are sorted by segmentId, in the same order as the rowMaps
-        // TODO: sigh.  The below line made core tests pass, but Cass tests fail.  ByteBuffers suck.
-        // segmentId.position(0)
         val segmentKey = helper.fromBytes(segmentId)
         while (segmentKey != segments(segIndex).keyRange.start) segIndex += 1
         segments(segIndex).addChunk(chunkId, columnName, chunkBytes)
