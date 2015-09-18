@@ -58,6 +58,8 @@ To initialize the C* tables:
 
      filo-cli --command init
 
+NOTE: the default Cassandra configuration is in `core/src/main/resources/application.conf`.
+
 ## Using Spark to ingest and query data
 
 Build the spark data source module with `sbt spark/assembly`.  Then, CD into a Spark 1.4.x distribution (1.4.0 and onwards should work), and start spark-shell with something like:
