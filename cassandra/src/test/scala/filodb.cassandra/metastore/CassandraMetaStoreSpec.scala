@@ -13,31 +13,29 @@ import org.scalatest.{FunSpec, BeforeAndAfter}
 class CassandraMetaStoreSpec extends FunSpec with BeforeAndAfter with AllTablesTest {
   import MetaStore._
 
-  val metastore = new CassandraMetaStore(ConfigFactory.load("application_test.conf").getConfig("cassandra"))
-
   override def beforeAll() {
     super.beforeAll()
-    metastore.initialize().futureValue
+    metaStore.initialize().futureValue
   }
 
-  before { metastore.clearAllData().futureValue }
+  before { metaStore.clearAllData().futureValue }
 
   describe("column API") {
     it("should return IllegalColumnChange if an invalid column addition submitted") {
       val firstColumn = Column("first", "foo", 1, Column.ColumnType.StringColumn)
-      whenReady(metastore.newColumn(firstColumn)) { response =>
+      whenReady(metaStore.newColumn(firstColumn)) { response =>
         response should equal (Success)
       }
 
-      whenReady(metastore.newColumn(firstColumn.copy(version = 0)).failed) { err =>
+      whenReady(metaStore.newColumn(firstColumn.copy(version = 0)).failed) { err =>
         err shouldBe an [IllegalColumnChange]
       }
     }
 
     val monthYearCol = Column("monthYear", "gdelt", 1, Column.ColumnType.LongColumn)
     it("should be able to create a Column and get the Schema") {
-      metastore.newColumn(monthYearCol).futureValue should equal (Success)
-      metastore.getSchema("gdelt", 10).futureValue should equal (Map("monthYear" -> monthYearCol))
+      metaStore.newColumn(monthYearCol).futureValue should equal (Success)
+      metaStore.getSchema("gdelt", 10).futureValue should equal (Map("monthYear" -> monthYearCol))
     }
   }
 

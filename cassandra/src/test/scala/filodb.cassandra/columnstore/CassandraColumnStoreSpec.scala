@@ -18,8 +18,9 @@ class CassandraColumnStoreSpec extends CassandraFlatSpec with BeforeAndAfter {
   import filodb.core.columnstore._
   import SegmentSpec._
 
-  implicit val keySpace = KeySpace("unittest")
-  val colStore = new CassandraColumnStore(ConfigFactory.load())
+  val config = ConfigFactory.load("application_test.conf")
+  val colStore = new CassandraColumnStore(config)
+  implicit val keySpace = KeySpace(config.getString("cassandra.keyspace"))
   val dataset = "foo"
   val fooProj = Projection(0, dataset, "someCol")
 
