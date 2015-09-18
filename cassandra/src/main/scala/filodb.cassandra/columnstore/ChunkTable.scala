@@ -6,6 +6,7 @@ import com.typesafe.scalalogging.slf4j.StrictLogging
 import com.websudos.phantom.dsl._
 import java.nio.ByteBuffer
 import scala.concurrent.Future
+import scodec.bits._
 
 import filodb.core._
 import filodb.core.columnstore.ChunkedData
@@ -17,7 +18,7 @@ import filodb.core.columnstore.ChunkedData
  * chunk actually stores many many rows grouped together into one binary chunk for efficiency.
  */
 sealed class ChunkTable(dataset: String, config: Config)
-extends CassandraTable[ChunkTable, (String, ByteBuffer, Int, ByteBuffer)]
+extends CassandraTable[ChunkTable, (String, Types.SegmentId, Int, ByteBuffer)]
 with SimpleCassandraConnector {
   import filodb.cassandra.Util._
 
@@ -34,8 +35,8 @@ with SimpleCassandraConnector {
   object data extends BlobColumn(this)
   //scalastyle:on
 
-  override def fromRow(row: Row): (String, ByteBuffer, Int, ByteBuffer) =
-    (columnName(row), segmentId(row), chunkId(row), data(row))
+  override def fromRow(row: Row): (String, Types.SegmentId, Int, ByteBuffer) =
+    (columnName(row), ByteVector(segmentId(row)), chunkId(row), data(row))
 
   def initialize(): Future[Response] = create.ifNotExists.future().toResponse()
 
@@ -43,11 +44,11 @@ with SimpleCassandraConnector {
 
   def writeChunks(partition: String,
                   version: Int,
-                  segmentId: ByteBuffer,
+                  segmentId: Types.SegmentId,
                   chunks: Iterator[(String, Types.ChunkID, ByteBuffer)]): Future[Response] = {
     val insertQ = insert.value(_.partition,  partition)
                         .value(_.version,    version)
-                        .value(_.segmentId,  segmentId)
+                        .value(_.segmentId,  segmentId.toByteBuffer)
     // NOTE: This is actually a good use of Unlogged Batch, because all of the inserts
     // are to the same partition key, so they will get collapsed down into one insert
     // for efficiency.
@@ -69,16 +70,19 @@ with SimpleCassandraConnector {
   def readChunks(partition: String,
                  version: Int,
                  column: String,
-                 startSegmentId: ByteBuffer,
-                 untilSegmentId: ByteBuffer,
+                 startSegmentId: Types.SegmentId,
+                 untilSegmentId: Types.SegmentId,
                  endExclusive: Boolean = true): Future[ChunkedData] = {
     val initialQuery =
       select(_.segmentId, _.chunkId, _.data).where(_.columnName eqs column)
         .and(_.partition eqs partition)
         .and(_.version eqs version)
-        .and(_.segmentId gte startSegmentId)
-    val wholeQuery = if (endExclusive) { initialQuery.and(_.segmentId lt untilSegmentId) }
-                     else              { initialQuery.and(_.segmentId lte untilSegmentId) }
-    wholeQuery.fetch().map(chunks => ChunkedData(column, chunks))
+        .and(_.segmentId gte startSegmentId.toByteBuffer)
+    val wholeQuery = if (endExclusive) { initialQuery.and(_.segmentId lt untilSegmentId.toByteBuffer) }
+                     else              { initialQuery.and(_.segmentId lte untilSegmentId.toByteBuffer) }
+    wholeQuery.fetch().map { chunks =>
+      val byteVectorChunks = chunks.map { case (seg, chunkId, data) => (ByteVector(seg), chunkId, data) }
+      ChunkedData(column, byteVectorChunks)
+    }
   }
 }

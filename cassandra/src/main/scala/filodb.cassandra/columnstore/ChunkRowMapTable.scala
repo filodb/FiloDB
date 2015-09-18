@@ -5,10 +5,11 @@ import com.typesafe.config.Config
 import com.websudos.phantom.dsl._
 import java.nio.ByteBuffer
 import scala.concurrent.Future
+import scodec.bits._
 
 import filodb.core._
 
-case class ChunkRowMapRecord(segmentId: ByteBuffer,
+case class ChunkRowMapRecord(segmentId: Types.SegmentId,
                              chunkIds: ByteBuffer,
                              rowNums: ByteBuffer,
                              nextChunkId: Int)
@@ -40,7 +41,7 @@ with SimpleCassandraConnector {
   //scalastyle:on
 
   override def fromRow(row: Row): ChunkRowMapRecord =
-    ChunkRowMapRecord(segmentId(row), chunkIds(row), rowNums(row), nextChunkId(row))
+    ChunkRowMapRecord(ByteVector(segmentId(row)), chunkIds(row), rowNums(row), nextChunkId(row))
 
   def initialize(): Future[Response] = create.ifNotExists.future().toResponse()
 
@@ -52,11 +53,12 @@ with SimpleCassandraConnector {
    */
   def getChunkMaps(partition: String,
                    version: Int,
-                   startSegmentId: ByteBuffer,
-                   untilSegmentId: ByteBuffer): Future[Seq[ChunkRowMapRecord]] =
+                   startSegmentId: Types.SegmentId,
+                   untilSegmentId: Types.SegmentId): Future[Seq[ChunkRowMapRecord]] =
     select.where(_.partition eqs partition)
           .and(_.version eqs version)
-          .and(_.segmentId gte startSegmentId).and(_.segmentId lt untilSegmentId)
+          .and(_.segmentId gte startSegmentId.toByteBuffer)
+          .and(_.segmentId lt untilSegmentId.toByteBuffer)
           .fetch()
 
   def scanChunkMaps(version: Int): Future[Iterator[(String, ChunkRowMapRecord)]] =
@@ -73,13 +75,13 @@ with SimpleCassandraConnector {
    */
   def writeChunkMap(partition: String,
                     version: Int,
-                    segmentId: ByteBuffer,
+                    segmentId: Types.SegmentId,
                     chunkIds: ByteBuffer,
                     rowNums: ByteBuffer,
                     nextChunkId: Int): Future[Response] =
     insert.value(_.partition, partition)
           .value(_.version,   version)
-          .value(_.segmentId, segmentId)
+          .value(_.segmentId, segmentId.toByteBuffer)
           .value(_.chunkIds,  chunkIds)
           .value(_.rowNums,   rowNums)
           .value(_.nextChunkId, nextChunkId)

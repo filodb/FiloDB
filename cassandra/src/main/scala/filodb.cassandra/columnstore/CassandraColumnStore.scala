@@ -72,7 +72,7 @@ extends CachedMergingColumnStore with StrictLogging {
   def writeChunks(dataset: TableName,
                   partition: PartitionKey,
                   version: Int,
-                  segmentId: ByteBuffer,
+                  segmentId: SegmentId,
                   chunks: Iterator[(ColumnId, ChunkID, ByteBuffer)]): Future[Response] = {
     for { (chunkTable, rowMapTable) <- getSegmentTables(dataset)
           resp <- chunkTable.writeChunks(partition, version, segmentId, chunks) }
@@ -82,7 +82,7 @@ extends CachedMergingColumnStore with StrictLogging {
   def writeChunkRowMap(dataset: TableName,
                        partition: PartitionKey,
                        version: Int,
-                       segmentId: ByteBuffer,
+                       segmentId: SegmentId,
                        chunkRowMap: ChunkRowMap): Future[Response] = {
     val (chunkIds, rowNums) = chunkRowMap.serialize()
     for { (chunkTable, rowMapTable) <- getSegmentTables(dataset)
@@ -103,7 +103,7 @@ extends CachedMergingColumnStore with StrictLogging {
   }
 
   def readChunkRowMaps[K](keyRange: KeyRange[K],
-                          version: Int): Future[Seq[(ByteBuffer, BinaryChunkRowMap)]] = {
+                          version: Int): Future[Seq[(SegmentId, BinaryChunkRowMap)]] = {
     for { (chunkTable, rowMapTable) <- getSegmentTables(keyRange.dataset)
           cassRowMaps <- rowMapTable.getChunkMaps(keyRange.partition, version,
                                                   keyRange.binaryStart, keyRange.binaryEnd) }
