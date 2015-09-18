@@ -76,9 +76,9 @@ You can use the Spark Dataframes `read` and `write` APIs with FiloDB.  This shou
 scala> import org.apache.spark.sql.SaveMode
 import org.apache.spark.sql.SaveMode
 scala> dataDF.write.format("filodb.spark").
-              option("dataset", "gdelt1").
-              option("sort_column", "GLOBALEVENTID").
-              option("partition_column", "_partition").
+              option("dataset", <<dataset-name>>).
+              option("sort_column", <<sortcolumn-name>>).
+              option("partition_column", <<partitioncolumn-name>>).
               mode(SaveMode.Overwrite).
               save()
 ```
