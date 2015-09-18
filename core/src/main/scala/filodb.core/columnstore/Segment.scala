@@ -1,7 +1,7 @@
 package filodb.core.columnstore
 
 import java.nio.ByteBuffer
-import org.velvia.filo.{IngestColumn, RowIngestSupport, RowToColumnBuilder}
+import org.velvia.filo.{IngestColumn, RowToColumnBuilder, RowReader, FiloRowReader, FastFiloRowReader}
 import scala.collection.immutable.TreeMap
 import scala.collection.mutable.{ArrayBuffer, HashMap}
 
@@ -62,9 +62,8 @@ class GenericSegment[K](val keyRange: KeyRange[K],
  * a fixed schema and RowIngestSupport typeclass.  Automatically increments the chunkId
  * properly.
  */
-class RowWriterSegment[K: SortKeyHelper, R](override val keyRange: KeyRange[K],
-                                            schema: Seq[Column],
-                                            ingestSupport: RowIngestSupport[R])
+class RowWriterSegment[K: SortKeyHelper](override val keyRange: KeyRange[K],
+                                         schema: Seq[Column])
 //scalastyle:off
 //sorry for this ugly hack but only way to get scalac to pass in the SortKeyHelper
 // properly it seems :(
@@ -82,20 +81,30 @@ extends GenericSegment(keyRange, null) {
   /**
    * Adds a bunch of rows as a new set of chunks with the same chunkId.  The nextChunkId from
    * a ChunkRowMap will be used.
-   * @param getSortKey a function to extract the sort key K out of the row type R.  Note that
+   * @param getSortKey a function to extract the sort key K out of the RowReader.  Note that
    *                   the sort key must not be optional.
    */
-  def addRowsAsChunk(rows: Seq[R], getSortKey: R => K): Unit = {
+  def addRowsAsChunk(rows: Iterator[RowReader], getSortKey: RowReader => K): Unit = {
     val newChunkId = index.nextChunkId
-    rows.zipWithIndex.foreach { case (r, i) => updatingIndex.update(getSortKey(r), newChunkId, i) }
-    val chunkMap = RowToColumnBuilder.buildFromRows(rows, filoSchema, ingestSupport)
+    val builder = new RowToColumnBuilder(filoSchema)
+    // NOTE: some RowReaders, such as the one from RowReaderSegment, must be iterators
+    // since rowNo in FastFiloRowReader is mutated.
+    rows.zipWithIndex.foreach { case (r, i) =>
+      updatingIndex.update(getSortKey(r), newChunkId, i)
+      builder.addRow(r)
+    }
+    val chunkMap = builder.convertToBytes()
     chunkMap.foreach { case (col, bytes) => addChunk(newChunkId, col, bytes) }
   }
 
-  def addRowsAsChunk(rows: Seq[(PartitionKey, K, R)]): Unit = {
+  def addRowsAsChunk(rows: Seq[(PartitionKey, K, RowReader)]): Unit = {
     val newChunkId = index.nextChunkId
-    rows.zipWithIndex.foreach { case ((_, k, r), i) => updatingIndex.update(k, newChunkId, i) }
-    val chunkMap = RowToColumnBuilder.buildFromRows(rows.map(_._3), filoSchema, ingestSupport)
+    val builder = new RowToColumnBuilder(filoSchema)
+    rows.zipWithIndex.foreach { case ((_, k, r), i) =>
+      updatingIndex.update(k, newChunkId, i)
+      builder.addRow(r)
+    }
+    val chunkMap = builder.convertToBytes()
     chunkMap.foreach { case (col, bytes) => addChunk(newChunkId, col, bytes) }
   }
 }
@@ -180,7 +189,7 @@ object RowReaderSegment {
   type RowReaderFactory = (Array[ByteBuffer], Array[Class[_]]) => FiloRowReader
 
   private val DefaultReaderFactory: RowReaderFactory =
-    (bytes, clazzes) => new MutableRowReader(bytes, clazzes)
+    (bytes, clazzes) => new FastFiloRowReader(bytes, clazzes)
 
   def apply[K](genSeg: GenericSegment[K], schema: Seq[Column]): RowReaderSegment[K] = {
     val (chunkIdBuf, rowNumBuf) = genSeg.index.serialize()
@@ -190,100 +199,3 @@ object RowReaderSegment {
     readSeg
   }
 }
-
-// Move these to filo project
-import org.velvia.filo.ColumnWrapper
-
-/**
- * A generic trait for reading typed values out of a row of data.
- */
-trait RowReader {
-  def notNull(columnNo: Int): Boolean
-  def getInt(columnNo: Int): Int
-  def getLong(columnNo: Int): Long
-  def getDouble(columnNo: Int): Double
-  def getString(columnNo: Int): String
-}
-
-/**
- * An example of a RowReader that can read from Scala tuples containing Option[_]
- */
-case class TupleRowReader(tuple: Product) extends RowReader {
-  def notNull(columnNo: Int): Boolean = tuple.productElement(columnNo) != None
-  def getInt(columnNo: Int): Int = tuple.productElement(columnNo) match {
-    case Some(x: Int) => x
-  }
-
-  def getLong(columnNo: Int): Long = tuple.productElement(columnNo) match {
-    case Some(x: Long) => x
-  }
-
-  def getDouble(columnNo: Int): Double = tuple.productElement(columnNo) match {
-    case Some(x: Double) => x
-  }
-
-  def getString(columnNo: Int): String = tuple.productElement(columnNo) match {
-    case Some(x: String) => x
-  }
-}
-
-/**
- * A RowReader is designed for fast iteration over rows of multiple Filo vectors, ideally all
- * with the same length.  An Iterator[RowReader] sets the rowNo and returns this RowReader, and
- * the application is responsible for calling the right method to extract each value.
- * The advantage of RowReader over RowExtractor is that one does not need to set values in some
- * intermediate Row object; the get* methods read directly from Filo vectors.
- * For example, a Spark Row can inherit from RowReader.
- */
-abstract class FiloRowReader extends RowReader {
-  def parsers: Array[ColumnWrapper[_]]
-  var rowNo: Int = -1
-
-  final def notNull(columnNo: Int): Boolean = parsers(columnNo).isAvailable(rowNo)
-  final def getInt(columnNo: Int): Int = parsers(columnNo).asInstanceOf[ColumnWrapper[Int]](rowNo)
-  final def getLong(columnNo: Int): Long = parsers(columnNo).asInstanceOf[ColumnWrapper[Long]](rowNo)
-  final def getDouble(columnNo: Int): Double = parsers(columnNo).asInstanceOf[ColumnWrapper[Double]](rowNo)
-  final def getString(columnNo: Int): String = parsers(columnNo).asInstanceOf[ColumnWrapper[String]](rowNo)
-}
-
-object RowReader {
-  trait TypedFieldExtractor[F] {
-    def getField(reader: RowReader, columnNo: Int): F
-  }
-
-  implicit object LongFieldExtractor extends TypedFieldExtractor[Long] {
-    final def getField(reader: RowReader, columnNo: Int): Long = reader.getLong(columnNo)
-  }
-
-  implicit object IntFieldExtractor extends TypedFieldExtractor[Int] {
-    final def getField(reader: RowReader, columnNo: Int): Int = reader.getInt(columnNo)
-  }
-
-  implicit object DoubleFieldExtractor extends TypedFieldExtractor[Double] {
-    final def getField(reader: RowReader, columnNo: Int): Double = reader.getDouble(columnNo)
-  }
-}
-
-private object Classes {
-  val Byte = java.lang.Byte.TYPE
-  val Short = java.lang.Short.TYPE
-  val Int = java.lang.Integer.TYPE
-  val Long = java.lang.Long.TYPE
-  val Float = java.lang.Float.TYPE
-  val Double = java.lang.Double.TYPE
-  val String = classOf[String]
-}
-
-class MutableRowReader(chunks: Array[ByteBuffer], classes: Array[Class[_]]) extends FiloRowReader {
-  import org.velvia.filo.ColumnParser._
-
-  val parsers: Array[ColumnWrapper[_]] = chunks.zip(classes).map {
-    case (chunk, Classes.String) => parse[String](chunk)
-    case (chunk, Classes.Int) => parse[Int](chunk)
-    case (chunk, Classes.Long) => parse[Long](chunk)
-    case (chunk, Classes.Double) => parse[Double](chunk)
-  }
-}
-
-// TODO: add a Segment class that helps take in a bunch of rows and serializes them into chunks,
-// also correctly updating the rowIndex and chunkID.

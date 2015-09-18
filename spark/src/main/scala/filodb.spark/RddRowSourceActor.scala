@@ -4,10 +4,9 @@ import akka.actor.{Actor, ActorRef, Props}
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.{SQLContext, DataFrame, Row}
 import org.apache.spark.sql.types._
-import org.velvia.filo.RowIngestSupport
+import org.velvia.filo.RowReader
 
 import filodb.coordinator.{BaseActor, CoordinatorActor, RowSource}
-import filodb.core.columnstore.RowReader
 
 object RddRowSourceActor {
   // Needs to be a multiple of chunkSize. Not sure how to have a good default though.

@@ -5,11 +5,12 @@ import akka.testkit.TestProbe
 import akka.pattern.gracefulStop
 import com.typesafe.config.ConfigFactory
 import java.nio.ByteBuffer
+import org.velvia.filo.TupleRowReader
 import scala.concurrent.Await
 import scala.concurrent.duration._
 
 import filodb.core._
-import filodb.core.columnstore.{RowReaderSegment, TupleRowReader}
+import filodb.core.columnstore.RowReaderSegment
 import filodb.core.metadata.{Column, Dataset}
 import filodb.core.reprojector.{MapDBMemTable, NumRowsFlushPolicy}
 import filodb.cassandra.AllTablesTest
@@ -73,26 +74,28 @@ with CoordinatorSetup with AllTablesTest {
   )
 
   it("should be able to start ingestion, send rows, and get an ack back") {
-    probe.send(coordActor, CreateDataset(GdeltDataset, GdeltColumns))
+    val dataset = Dataset("gdelt_cas", "id")
+    val columns = GdeltColumns.map(_.copy(dataset = "gdelt_cas"))
+    probe.send(coordActor, CreateDataset(dataset, columns))
     probe.expectMsg(DatasetCreated)
-    columnStore.clearProjectionData(GdeltDataset.projections.head).futureValue should equal (Success)
+    columnStore.clearProjectionData(dataset.projections.head).futureValue should equal (Success)
 
-    probe.send(coordActor, SetupIngestion(dsName, GdeltColNames, 0))
+    probe.send(coordActor, SetupIngestion(dataset.name, GdeltColNames, 0))
     probe.expectMsg(IngestionReady)
 
-    probe.send(coordActor, IngestRows(dsName, 0, rows.map(TupleRowReader), 1L))
+    probe.send(coordActor, IngestRows(dataset.name, 0, rows.map(TupleRowReader), 1L))
     probe.expectMsg(Ack(1L))
 
     // Now, try to flush and check that stuff was written to columnstore...
-    probe.send(coordActor, Flush(dsName, 0))
+    probe.send(coordActor, Flush(dataset.name, 0))
     probe.expectMsg(SchedulerActor.Flushed)
 
     // scheduler.tasks.values.head.failed.futureValue.printStackTrace()
     whenReady(scheduler.tasks.values.head) { responses =>
       memTable.flushingDatasets should equal (Nil)
       implicit val helper = new LongKeyHelper(10000L)
-      val keyRange = KeyRange(dsName, Dataset.DefaultPartitionKey, 0L, 30000L)
-      whenReady(columnStore.readSegments(GdeltColumns, keyRange, 0)) { segIter =>
+      val keyRange = KeyRange(dataset.name, Dataset.DefaultPartitionKey, 0L, 30000L)
+      whenReady(columnStore.readSegments(columns, keyRange, 0)) { segIter =>
         val readSeg = segIter.toSeq.head.asInstanceOf[RowReaderSegment[Long]]
         readSeg.rowIterator().map(_.getInt(2)).toSeq should equal (Seq(32015, 32015))
       }

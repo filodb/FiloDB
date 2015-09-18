@@ -4,7 +4,6 @@ import com.typesafe.config.ConfigFactory
 import com.websudos.phantom.testkit._
 import java.nio.ByteBuffer
 import org.scalatest.BeforeAndAfter
-import org.velvia.filo.TupleRowIngestSupport
 import scala.concurrent.duration._
 import scala.concurrent.{Await, Future}
 import scala.language.postfixOps
@@ -87,14 +86,14 @@ class CassandraColumnStoreSpec extends CassandraFlatSpec with BeforeAndAfter {
 
   it should "append new rows to a cached segment successfully" in {
     val segment = getRowWriter(keyRange)
-    segment.addRowsAsChunk(names take 3, getSortKey _)
+    segment.addRowsAsChunk(mapper(names take 3), getSortKey _)
     whenReady(colStore.appendSegment(projection, segment, 0)) { response =>
       response should equal (Success)
     }
 
     // Writing segment2, last 3 rows, should get appended to first 3 in same segment
     val segment2 = getRowWriter(keyRange)
-    segment2.addRowsAsChunk(names drop 3, getSortKey _)
+    segment2.addRowsAsChunk(mapper(names drop 3), getSortKey _)
     whenReady(colStore.appendSegment(projection, segment2, 0)) { response =>
       response should equal (Success)
     }
@@ -111,7 +110,7 @@ class CassandraColumnStoreSpec extends CassandraFlatSpec with BeforeAndAfter {
 
   it should "replace rows to an uncached segment successfully" in {
     val segment = getRowWriter(keyRange)
-    segment.addRowsAsChunk(names drop 1, getSortKey _)
+    segment.addRowsAsChunk(mapper(names drop 1), getSortKey _)
     whenReady(colStore.appendSegment(projection, segment, 0)) { response =>
       response should equal (Success)
     }
@@ -120,7 +119,7 @@ class CassandraColumnStoreSpec extends CassandraFlatSpec with BeforeAndAfter {
 
     // Writing segment2, repeat 1 row and add another row.  Should read orig segment from disk.
     val segment2 = getRowWriter(keyRange)
-    segment2.addRowsAsChunk(names take 2, getSortKey _)
+    segment2.addRowsAsChunk(mapper(names take 2), getSortKey _)
     whenReady(colStore.appendSegment(projection, segment2, 0)) { response =>
       response should equal (Success)
     }
@@ -137,7 +136,7 @@ class CassandraColumnStoreSpec extends CassandraFlatSpec with BeforeAndAfter {
 
   "readSegments" should "read segments back that were written" in {
     val segment = getRowWriter(keyRange)
-    segment.addRowsAsChunk(names, getSortKey _)
+    segment.addRowsAsChunk(mapper(names), getSortKey _)
     whenReady(colStore.appendSegment(projection, segment, 0)) { response =>
       response should equal (Success)
     }
@@ -176,7 +175,7 @@ class CassandraColumnStoreSpec extends CassandraFlatSpec with BeforeAndAfter {
 
   "scanSegments" should "read segments back that were written" in {
     val segment = getRowWriter(keyRange)
-    segment.addRowsAsChunk(names, getSortKey _)
+    segment.addRowsAsChunk(mapper(names), getSortKey _)
     whenReady(colStore.appendSegment(projection, segment, 0)) { response =>
       response should equal (Success)
     }

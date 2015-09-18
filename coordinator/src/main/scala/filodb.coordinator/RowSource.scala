@@ -2,9 +2,9 @@ package filodb.coordinator
 
 import akka.actor.{Actor, ActorRef, PoisonPill}
 import com.typesafe.scalalogging.slf4j.StrictLogging
+import org.velvia.filo.RowReader
 
 import filodb.core._
-import filodb.core.columnstore.RowReader
 
 object RowSource {
   case object Start

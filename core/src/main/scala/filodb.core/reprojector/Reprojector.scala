@@ -1,11 +1,11 @@
 package filodb.core.reprojector
 
 import com.typesafe.scalalogging.slf4j.StrictLogging
-import org.velvia.filo.RowIngestSupport
+import org.velvia.filo.RowReader
 import scala.concurrent.{ExecutionContext, Future}
 
 import filodb.core._
-import filodb.core.columnstore.{ColumnStore, RowReader, RowWriterSegment, Segment}
+import filodb.core.columnstore.{ColumnStore, RowWriterSegment, Segment}
 import filodb.core.metadata.{Dataset, Column, RichProjection}
 
 /**
@@ -79,7 +79,7 @@ class DefaultReprojector(columnStore: ColumnStore,
     }.map { case ((partition, (segStart, segUntil)), segmentRowsIt) =>
       // For each segment grouping of rows... set up a Segment
       val keyRange = KeyRange(setup.dataset.name, partition, segStart, segUntil)
-      val segment = new RowWriterSegment(keyRange, setup.schema, RowReaderSupport)
+      val segment = new RowWriterSegment(keyRange, setup.schema)
       logger.debug(s"Created new segment $segment for encoding...")
 
       // Group rows into chunk sized bytes and add to segment
@@ -108,17 +108,4 @@ class DefaultReprojector(columnStore: ColumnStore,
     }.toSeq
     Future.sequence(segmentTasks)
   }
-}
-
-// Grrr... only needed as long as Filo still uses old RowIngestSupport
-object RowReaderSupport extends RowIngestSupport[RowReader] {
-  type R = RowReader
-  def getString(row: R, columnNo: Int): Option[String] =
-    if (row.notNull(columnNo)) Some(row.getString(columnNo)) else None
-  def getInt(row: R, columnNo: Int): Option[Int] =
-    if (row.notNull(columnNo)) Some(row.getInt(columnNo)) else None
-  def getLong(row: R, columnNo: Int): Option[Long] =
-    if (row.notNull(columnNo)) Some(row.getLong(columnNo)) else None
-  def getDouble(row: R, columnNo: Int): Option[Double] =
-    if (row.notNull(columnNo)) Some(row.getDouble(columnNo)) else None
 }

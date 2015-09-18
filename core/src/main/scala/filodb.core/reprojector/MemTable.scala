@@ -1,12 +1,12 @@
 package filodb.core.reprojector
 
 import com.typesafe.scalalogging.slf4j.StrictLogging
+import org.velvia.filo.RowReader
 import scala.collection.mutable.HashMap
 
 import filodb.core.{KeyRange, SortKeyHelper}
 import filodb.core.Types._
 import filodb.core.metadata.{Column, Dataset}
-import filodb.core.columnstore.RowReader
 
 object MemTable {
   sealed trait SetupResponse

@@ -1,11 +1,12 @@
 package filodb.core.reprojector
 
 import com.typesafe.config.ConfigFactory
+import org.velvia.filo.TupleRowReader
 import scala.concurrent.Future
 
 import filodb.core._
 import filodb.core.metadata.{Column, Dataset}
-import filodb.core.columnstore.{TupleRowReader, SegmentSpec, RowReaderSegment, InMemoryColumnStore}
+import filodb.core.columnstore.{SegmentSpec, RowReaderSegment, InMemoryColumnStore}
 
 import org.scalatest.{FunSpec, Matchers, BeforeAndAfter}
 import org.scalatest.concurrent.ScalaFutures

@@ -2,13 +2,13 @@ package filodb.core.reprojector
 
 import com.typesafe.config.Config
 import org.mapdb._
+import org.velvia.filo.RowReader
 import scala.math.Ordered
 import scala.util.Try
 
 import filodb.core.{KeyRange, SortKeyHelper}
 import filodb.core.Types._
 import filodb.core.metadata.{Column, Dataset}
-import filodb.core.columnstore.RowReader
 
 /**
  * A MemTable backed by MapDB.  Need to do some experimentation to come up with a setup that is fast

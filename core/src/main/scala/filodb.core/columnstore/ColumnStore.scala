@@ -2,13 +2,13 @@ package filodb.core.columnstore
 
 import com.typesafe.scalalogging.slf4j.StrictLogging
 import java.nio.ByteBuffer
+import org.velvia.filo.RowReader.TypedFieldExtractor
 import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.concurrent.duration._
 import spray.caching._
 
 import filodb.core._
 import filodb.core.metadata.{Column, Projection, RichProjection}
-import RowReader.TypedFieldExtractor
 
 /**
  * High-level interface of a column store.  Writes and reads segments, which are pretty high level.

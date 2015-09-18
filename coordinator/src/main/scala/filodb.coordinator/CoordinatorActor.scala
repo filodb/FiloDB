@@ -3,13 +3,13 @@ package filodb.coordinator
 import akka.actor.{Actor, ActorRef, Props}
 import com.typesafe.config.Config
 import net.ceedubs.ficus.Ficus._
+import org.velvia.filo.RowReader
 import scala.concurrent.Future
 import scala.concurrent.duration._
 
 import filodb.core._
 import filodb.core.metadata.{Column, Dataset, MetaStore}
 import filodb.core.columnstore.ColumnStore
-import filodb.core.columnstore.RowReader
 import filodb.core.reprojector.{MemTable, Scheduler}
 
 /**

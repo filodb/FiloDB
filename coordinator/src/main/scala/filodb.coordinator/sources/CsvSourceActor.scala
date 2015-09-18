@@ -2,10 +2,10 @@ package filodb.coordinator.sources
 
 import akka.actor.{Actor, ActorRef, Props}
 import com.opencsv.CSVReader
+import org.velvia.filo.{ArrayStringRowReader, RowReader}
 import scala.util.Try
 
 import filodb.coordinator.{BaseActor, CoordinatorActor, RowSource}
-import filodb.core.columnstore.RowReader
 
 object CsvSourceActor {
   // Needs to be a multiple of chunkSize. Not sure how to have a good default though.
@@ -64,14 +64,3 @@ class CsvSourceActor(csvStream: java.io.Reader,
     }
   }
 }
-
-case class ArrayStringRowReader(strings: Array[String]) extends RowReader {
-  //scalastyle:off
-  def notNull(columnNo: Int): Boolean = strings(columnNo) != null && strings(columnNo) != ""
-  //scalastyle:on
-  def getInt(columnNo: Int): Int = strings(columnNo).toInt
-  def getLong(columnNo: Int): Long = strings(columnNo).toLong
-  def getDouble(columnNo: Int): Double = strings(columnNo).toDouble
-  def getString(columnNo: Int): String = strings(columnNo)
-}
-

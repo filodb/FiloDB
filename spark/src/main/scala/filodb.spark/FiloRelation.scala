@@ -6,6 +6,7 @@ import akka.util.Timeout
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.slf4j.StrictLogging
 import java.nio.ByteBuffer
+import org.velvia.filo.FastFiloRowReader
 import scala.concurrent.{Await, Future}
 import scala.concurrent.duration._
 import scala.language.postfixOps
@@ -20,7 +21,7 @@ import org.apache.spark.sql.{DataFrame, Row, SQLContext}
 
 import filodb.core._
 import filodb.core.metadata.{Column, Dataset, DatasetOptions}
-import filodb.core.columnstore.{MutableRowReader, RowReaderSegment}
+import filodb.core.columnstore.RowReaderSegment
 
 object FiloRelation {
   val DefaultMinPartitions = 1
@@ -141,14 +142,14 @@ case class FiloRelation(dataset: String,
 }
 
 class SparkRowReader(chunks: Array[ByteBuffer], classes: Array[Class[_]]) extends
-    MutableRowReader(chunks, classes) with Row {
-  def apply(i: Int): Any = ???
+    FastFiloRowReader(chunks, classes) with Row {
+  def apply(i: Int): Any = getAny(i)
   def copy(): org.apache.spark.sql.Row = ???
   def getBoolean(i: Int): Boolean = ???
   def getByte(i: Int): Byte = ???
   def getFloat(i: Int): Float = ???
   def getShort(i: Int): Short = ???
   def isNullAt(i: Int): Boolean = !notNull(i)
-  def length: Int = ???
+  def length: Int = parsers.length
   def toSeq: Seq[Any] = ???
 }

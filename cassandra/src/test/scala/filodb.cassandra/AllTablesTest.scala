@@ -38,7 +38,7 @@ trait AllTablesTest extends SimpleCassandraTest {
   import Column.ColumnType._
 
   val dsName = "gdelt"
-  val GdeltDataset = Dataset(dsName ,"id")
+  val GdeltDataset = Dataset(dsName, "id")
   val GdeltColumns = Seq(Column("id",      dsName, 0, LongColumn),
                          Column("sqlDate", dsName, 0, StringColumn),
                          Column("monthYear", dsName, 0, IntColumn),

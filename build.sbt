@@ -60,7 +60,7 @@ lazy val coreDeps = Seq(
   "com.typesafe.scala-logging" %% "scala-logging-slf4j" % "2.1.2",
   "ch.qos.logback"        % "logback-classic"   % "1.0.7",
   "com.beachape"         %% "enumeratum"        % "1.2.1",
-  "org.velvia.filo"      %% "filo-scala"        % "0.1.3" excludeAll(excludeShapeless),
+  "org.velvia.filo"      %% "filo-scala"        % "0.1.4" excludeAll(excludeShapeless),
   "io.spray"             %% "spray-caching"     % "1.3.2",
   "org.mapdb"             % "mapdb"             % "1.0.6",
   "net.ceedubs"          %% "ficus"             % "1.0.1",
@@ -96,7 +96,17 @@ lazy val coreSettings = Seq(
   scalacOptions ++= Seq("-Xlint", "-deprecation", "-Xfatal-warnings", "-feature")
 )
 
-lazy val universalSettings = coreSettings ++ styleSettings
+lazy val testSettings = Seq(
+    parallelExecution in Test := false,
+    concurrentRestrictions := Seq(
+      Tags.limit(Tags.CPU, java.lang.Runtime.getRuntime().availableProcessors()),
+      // limit to 1 concurrent test task, even across sub-projects
+      // Note: some components of tests seem to have the "Untagged" tag rather than "Test" tag.
+      // So, we limit the sum of "Test", "Untagged" tags to 1 concurrent
+      Tags.limitSum(1, Tags.Test, Tags.Untagged))
+)
+
+lazy val universalSettings = coreSettings ++ styleSettings ++ testSettings
 
 // Create a default Scala style task to run with tests
 lazy val testScalastyle = taskKey[Unit]("testScalastyle")

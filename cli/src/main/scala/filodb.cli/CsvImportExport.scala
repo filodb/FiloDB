@@ -4,7 +4,6 @@ import akka.actor.{ActorRef, ActorSystem}
 import akka.pattern.ask
 import akka.util.Timeout
 import com.opencsv.CSVWriter
-import org.velvia.filo.{ArrayStringRowSetter, RowSetter}
 import scala.concurrent.{Await, Future, ExecutionContext}
 import scala.concurrent.duration._
 import scala.language.postfixOps

@@ -2,10 +2,10 @@ package filodb.core.columnstore
 
 import com.typesafe.scalalogging.slf4j.StrictLogging
 import java.nio.ByteBuffer
+import org.velvia.filo.RowReader.TypedFieldExtractor
 import scala.concurrent.{ExecutionContext, Future}
 
 import filodb.core.metadata.{Column, RichProjection}
-import RowReader.TypedFieldExtractor
 import filodb.core.Types._
 import filodb.core._
 
