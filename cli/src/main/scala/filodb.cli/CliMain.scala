@@ -46,7 +46,7 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with DefaultCoord
   val system = ActorSystem("filo-cli")
   val config = ConfigFactory.load
   lazy val columnStore = new CassandraColumnStore(config)
-  lazy val metaStore = new CassandraMetaStore(config)
+  lazy val metaStore = new CassandraMetaStore(config.getConfig("cassandra"))
 
   def printHelp() {
     println("filo-cli help:")
