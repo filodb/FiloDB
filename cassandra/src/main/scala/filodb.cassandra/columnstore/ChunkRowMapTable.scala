@@ -7,6 +7,7 @@ import java.nio.ByteBuffer
 import scala.concurrent.Future
 import scodec.bits._
 
+import filodb.cassandra.FiloCassandraConnector
 import filodb.core._
 
 case class ChunkRowMapRecord(segmentId: Types.SegmentId,
@@ -18,16 +19,16 @@ case class ChunkRowMapRecord(segmentId: Types.SegmentId,
  * Represents the table which holds the ChunkRowMap for each segment of a partition.
  * This maps sort keys in sorted order to chunks and row number within each chunk.
  * The ChunkRowMap is written as two Filo binary vectors.
+ *
+ * @param config a Typesafe Config with hosts, port, and keyspace parameters for Cassandra connection
  */
-sealed class ChunkRowMapTable(dataset: String, config: Config)
+sealed class ChunkRowMapTable(dataset: String, val config: Config)
 extends CassandraTable[ChunkRowMapTable, ChunkRowMapRecord]
-with SimpleCassandraConnector {
+with FiloCassandraConnector {
   import filodb.cassandra.Util._
   import scala.collection.JavaConversions._
 
   override val tableName = dataset + "_chunkmap"
-  // TODO: keySpace and other things really belong to a trait
-  implicit val keySpace = KeySpace(config.getString("keyspace"))
 
   //scalastyle:off
   object partition extends StringColumn(this) with PartitionKey[String]

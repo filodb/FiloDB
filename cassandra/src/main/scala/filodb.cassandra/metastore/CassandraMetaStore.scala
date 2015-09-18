@@ -6,10 +6,15 @@ import scala.concurrent.{ExecutionContext, Future}
 import filodb.core._
 import filodb.core.metadata.{Column, Dataset, MetaStore}
 
+/**
+ * A class for Cassandra implementation of the MetaStore.
+ *
+ * @param config a Typesafe Config with hosts, port, and keyspace parameters for Cassandra connection
+ */
 class CassandraMetaStore(config: Config)
                         (implicit val ec: ExecutionContext) extends MetaStore {
-  val datasetTable = DatasetTable
-  val columnTable = ColumnTable
+  val datasetTable = new DatasetTable(config)
+  val columnTable = new ColumnTable(config)
 
   def initialize(): Future[Response] =
     for { dtResp <- datasetTable.initialize()

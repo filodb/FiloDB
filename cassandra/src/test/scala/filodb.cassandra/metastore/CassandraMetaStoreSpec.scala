@@ -13,7 +13,7 @@ import org.scalatest.{FunSpec, BeforeAndAfter}
 class CassandraMetaStoreSpec extends FunSpec with BeforeAndAfter with AllTablesTest {
   import MetaStore._
 
-  val metastore = new CassandraMetaStore(ConfigFactory.load)
+  val metastore = new CassandraMetaStore(ConfigFactory.load("application_test.conf").getConfig("cassandra"))
 
   override def beforeAll() {
     super.beforeAll()

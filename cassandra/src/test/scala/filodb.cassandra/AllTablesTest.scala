@@ -13,27 +13,19 @@ import filodb.core.metadata.{Column, Dataset}
 import filodb.core._
 import filodb.cassandra.columnstore.CassandraColumnStore
 
-object AllTablesTest {
-  val CassConfigStr = """
-                   | max-outstanding-futures = 2
-                   """.stripMargin
-  val CassConfig = ConfigFactory.parseString(CassConfigStr)
-}
-
 trait AllTablesTest extends SimpleCassandraTest {
   import filodb.cassandra.metastore._
 
   implicit val defaultPatience =
     PatienceConfig(timeout = Span(10, Seconds), interval = Span(50, Millis))
 
-  implicit val keySpace = KeySpace("unittest")
-
   implicit val context = scala.concurrent.ExecutionContext.Implicits.global
 
-  val config = ConfigFactory.load
+  val config = ConfigFactory.load("application_test.conf")
+  implicit val keySpace = KeySpace(config.getString("cassandra.keyspace"))
 
   lazy val columnStore = new CassandraColumnStore(config)
-  lazy val metaStore = new CassandraMetaStore(config)
+  lazy val metaStore = new CassandraMetaStore(config.getConfig("cassandra"))
 
   import Column.ColumnType._
 

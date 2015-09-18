@@ -8,6 +8,7 @@ import java.nio.ByteBuffer
 import scala.concurrent.Future
 import scodec.bits._
 
+import filodb.cassandra.FiloCassandraConnector
 import filodb.core._
 import filodb.core.columnstore.ChunkedData
 
@@ -16,15 +17,15 @@ import filodb.core.columnstore.ChunkedData
  *
  * Data is stored in a columnar fashion similar to Parquet -- grouped by column.  Each
  * chunk actually stores many many rows grouped together into one binary chunk for efficiency.
+ *
+ * @param config a Typesafe Config with hosts, port, and keyspace parameters for Cassandra connection
  */
-sealed class ChunkTable(dataset: String, config: Config)
+sealed class ChunkTable(dataset: String, val config: Config)
 extends CassandraTable[ChunkTable, (String, Types.SegmentId, Int, ByteBuffer)]
-with SimpleCassandraConnector {
+with FiloCassandraConnector {
   import filodb.cassandra.Util._
 
   override val tableName = dataset + "_chunks"
-  // TODO: keySpace and other things really belong to a trait
-  implicit val keySpace = KeySpace(config.getString("keyspace"))
 
   //scalastyle:off
   object partition extends StringColumn(this) with PartitionKey[String]

@@ -1,15 +1,22 @@
 package filodb.cassandra.metastore
 
 import com.datastax.driver.core.Row
+import com.typesafe.config.Config
 import com.websudos.phantom.dsl._
 import scala.concurrent.Future
 
+import filodb.cassandra.FiloCassandraConnector
 import filodb.core.metadata.{Dataset, DatasetOptions, Projection}
 
 /**
  * Represents the "dataset" Cassandra table tracking each dataset and its partitions
+ *
+ * @param config a Typesafe Config with hosts, port, and keyspace parameters for Cassandra connection
  */
-sealed class DatasetTable extends CassandraTable[DatasetTable, Projection] {
+sealed class DatasetTable(val config: Config) extends CassandraTable[DatasetTable, Projection]
+with FiloCassandraConnector {
+  override val tableName = "datasets"
+
   // scalastyle:off
   object name extends StringColumn(this) with PartitionKey[String]
   object partitionColumn extends StringColumn(this) with StaticColumn[String]
@@ -20,27 +27,16 @@ sealed class DatasetTable extends CassandraTable[DatasetTable, Projection] {
   object projectionSegmentSize extends StringColumn(this)
   // scalastyle:on
 
+  import filodb.cassandra.Util._
+  import filodb.core._
+  import filodb.core.Types._
+
   override def fromRow(row: Row): Projection =
     Projection(projectionId(row),
                name(row),
                projectionSortColumn(row),
                projectionReverse(row),
                segmentSize = projectionSegmentSize(row))
-}
-
-/**
- * Asynchronous methods to operate on datasets.  All normal errors and exceptions are returned
- * through ErrorResponse types.
- */
-object DatasetTable extends DatasetTable with SimpleCassandraConnector {
-  override val tableName = "datasets"
-
-  // TODO: add in Config-based initialization code to find the keyspace, cluster, etc.
-  implicit val keySpace = KeySpace("unittest")
-
-  import filodb.cassandra.Util._
-  import filodb.core._
-  import filodb.core.Types._
 
   def initialize(): Future[Response] = create.ifNotExists.future().toResponse()
 

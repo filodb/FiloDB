@@ -11,10 +11,11 @@ import filodb.coordinator.DefaultCoordinatorSetup
 object FiloSetup extends DefaultCoordinatorSetup {
   import collection.JavaConverters._
 
+  // The global config of filodb with cassandra, columnstore, etc. sections
   var config: Config = _
   lazy val system = ActorSystem("filo-spark")
   lazy val columnStore = new CassandraColumnStore(config)
-  lazy val metaStore = new CassandraMetaStore(config)
+  lazy val metaStore = new CassandraMetaStore(config.getConfig("cassandra"))
 
   def init(filoConfig: Config): Unit = {
     config = filoConfig

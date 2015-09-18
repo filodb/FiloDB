@@ -1,5 +1,6 @@
 package filodb.cassandra.metastore
 
+import com.typesafe.config.ConfigFactory
 import com.websudos.phantom.dsl._
 import com.websudos.phantom.testkit._
 import org.scalatest.BeforeAndAfter
@@ -11,17 +12,19 @@ import filodb.core._
 import filodb.core.metadata.Dataset
 
 class DatasetTableSpec extends CassandraFlatSpec with BeforeAndAfter {
- implicit val keySpace = KeySpace("unittest")
+  val config = ConfigFactory.load("application_test.conf").getConfig("cassandra")
+  val datasetTable = new DatasetTable(config)
+  implicit val keySpace = KeySpace(config.getString("keyspace"))
 
   // First create the datasets table
   override def beforeAll() {
     super.beforeAll()
     // Note: This is a CREATE TABLE IF NOT EXISTS
-    Await.result(DatasetTable.create.ifNotExists.future(), 3 seconds)
+    datasetTable.initialize().futureValue
   }
 
   before {
-    Await.result(DatasetTable.truncate.future(), 3 seconds)
+    datasetTable.clearAll().futureValue
   }
 
   val fooDataset = Dataset("foo", "someSortCol")
@@ -29,12 +32,12 @@ class DatasetTableSpec extends CassandraFlatSpec with BeforeAndAfter {
   import scala.concurrent.ExecutionContext.Implicits.global
 
   "DatasetTable" should "create a dataset successfully, then return AlreadyExists" in {
-    whenReady(DatasetTable.createNewDataset(fooDataset)) { response =>
+    whenReady(datasetTable.createNewDataset(fooDataset)) { response =>
       response should equal (Success)
     }
 
     // Second time around, dataset already exists
-    whenReady(DatasetTable.createNewDataset(fooDataset)) { response =>
+    whenReady(datasetTable.createNewDataset(fooDataset)) { response =>
       response should equal (AlreadyExists)
     }
   }
@@ -42,29 +45,29 @@ class DatasetTableSpec extends CassandraFlatSpec with BeforeAndAfter {
   // Apparently, deleting a nonexisting dataset also returns success.  :/
 
   it should "delete a dataset" in {
-    whenReady(DatasetTable.createNewDataset(fooDataset)) { response =>
+    whenReady(datasetTable.createNewDataset(fooDataset)) { response =>
       response should equal (Success)
     }
-    whenReady(DatasetTable.deleteDataset("foo")) { response =>
+    whenReady(datasetTable.deleteDataset("foo")) { response =>
       response should equal (Success)
     }
 
-    whenReady(DatasetTable.getDataset("foo").failed) { err =>
+    whenReady(datasetTable.getDataset("foo").failed) { err =>
       err shouldBe a [NotFoundError]
     }
   }
 
   it should "return NotFoundError when trying to get nonexisting dataset" in {
-    whenReady(DatasetTable.getDataset("foo").failed) { err =>
+    whenReady(datasetTable.getDataset("foo").failed) { err =>
       err shouldBe a [NotFoundError]
     }
   }
 
   it should "return the Dataset if it exists" in {
     val barDataset = Dataset("bar", "sortCol")
-    DatasetTable.createNewDataset(barDataset).futureValue should equal (Success)
+    datasetTable.createNewDataset(barDataset).futureValue should equal (Success)
 
-    whenReady(DatasetTable.getDataset("bar")) { dataset =>
+    whenReady(datasetTable.getDataset("bar")) { dataset =>
       dataset should equal (barDataset)
     }
   }

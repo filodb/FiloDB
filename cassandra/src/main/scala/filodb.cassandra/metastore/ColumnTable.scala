@@ -1,16 +1,23 @@
 package filodb.cassandra.metastore
 
 import com.datastax.driver.core.Row
+import com.typesafe.config.Config
 import com.websudos.phantom.dsl._
 import play.api.libs.iteratee.Iteratee
 import scala.concurrent.Future
 
+import filodb.cassandra.FiloCassandraConnector
 import filodb.core.metadata.Column
 
 /**
  * Represents the "columns" Cassandra table tracking column and schema changes for a dataset
+ *
+ * @param config a Typesafe Config with hosts, port, and keyspace parameters for Cassandra connection
  */
-sealed class ColumnTable extends CassandraTable[ColumnTable, Column] {
+sealed class ColumnTable(val config: Config) extends CassandraTable[ColumnTable, Column]
+with FiloCassandraConnector {
+  override val tableName = "columns"
+
   // scalastyle:off
   object dataset extends StringColumn(this) with PartitionKey[String]
   object version extends IntColumn(this) with PrimaryKey[Int]
@@ -21,6 +28,9 @@ sealed class ColumnTable extends CassandraTable[ColumnTable, Column] {
   object isSystem extends BooleanColumn(this)
   // scalastyle:on
 
+  import filodb.cassandra.Util._
+  import filodb.core._
+
   // May throw IllegalArgumentException if cannot convert one of the string types to one of the Enums
   override def fromRow(row: Row): Column =
     Column(name(row),
@@ -30,20 +40,6 @@ sealed class ColumnTable extends CassandraTable[ColumnTable, Column] {
            Column.Serializer.withName(serializer(row)),
            isDeleted(row),
            isSystem(row))
-}
-
-/**
- * Asynchronous methods to operate on columns.  All normal errors and exceptions are returned
- * through ErrorResponse types.
- */
-object ColumnTable extends ColumnTable with SimpleCassandraConnector {
-  override val tableName = "columns"
-
-  // TODO: add in Config-based initialization code to find the keyspace, cluster, etc.
-  implicit val keySpace = KeySpace("unittest")
-
-  import filodb.cassandra.Util._
-  import filodb.core._
 
   def initialize(): Future[Response] = create.ifNotExists.future().toResponse()
 
