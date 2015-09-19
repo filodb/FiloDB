@@ -239,6 +239,8 @@ trait CachedMergingColumnStore extends ColumnStore with StrictLogging {
     segmentCache(key)(mergingStrategy.pruneForCache(projection, newSegment).asInstanceOf[Segment[_]])
   }
 
+  import scala.util.control.Breaks._
+
   // @param rowMaps a Seq of (segmentId, ChunkRowMap)
   private def buildSegments[K: SortKeyHelper](rowMaps: Seq[(SegmentId, BinaryChunkRowMap)],
                                               chunks: Seq[ChunkedData],
@@ -252,11 +254,19 @@ trait CachedMergingColumnStore extends ColumnStore with StrictLogging {
     }
     chunks.foreach { case ChunkedData(columnName, chunkTriples) =>
       var segIndex = 0
-      chunkTriples.foreach { case (segmentId, chunkId, chunkBytes) =>
-        // Rely on the fact that chunks are sorted by segmentId, in the same order as the rowMaps
-        val segmentKey = helper.fromBytes(segmentId)
-        while (segmentKey != segments(segIndex).keyRange.start) segIndex += 1
-        segments(segIndex).addChunk(chunkId, columnName, chunkBytes)
+      breakable {
+        chunkTriples.foreach { case (segmentId, chunkId, chunkBytes) =>
+          // Rely on the fact that chunks are sorted by segmentId, in the same order as the rowMaps
+          val segmentKey = helper.fromBytes(segmentId)
+          while (segmentKey != segments(segIndex).keyRange.start) {
+            segIndex += 1
+            if (segIndex >= segments.length) {
+              logger.warn(s"Chunks with segmentId=$segmentKey ($origKeyRange) with no rowmap; corruption?")
+              break
+            }
+          }
+          segments(segIndex).addChunk(chunkId, columnName, chunkBytes)
+        }
       }
     }
     segments

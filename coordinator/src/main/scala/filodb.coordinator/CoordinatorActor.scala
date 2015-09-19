@@ -64,6 +64,8 @@ object CoordinatorActor {
   def invalidColumns(columns: Seq[String], schema: Column.Schema): Seq[String] =
     (columns.toSet -- schema.keys).toSeq
 
+  val DefaultMinFreeMb = 512
+
   def props(memTable: MemTable,
             metaStore: MetaStore,
             scheduler: Scheduler,
@@ -78,7 +80,9 @@ object CoordinatorActor {
  *   {
  *     memtable-retry-interval = 10 s
  *     scheduler-interval = 1 s
+ *     scheduler-reporting = false
  *     scheduler-reporting-interval = 30s
+ *     min-free-mb = 512
  *   }
  * }}}
  */
@@ -94,6 +98,7 @@ class CoordinatorActor(memTable: MemTable,
   val schedulerInterval = config.as[FiniteDuration]("scheduler-interval")
   val turnOnReporting   = config.as[Option[Boolean]]("scheduler-reporting").getOrElse(false)
   val reportingInterval = config.as[FiniteDuration]("scheduler-reporting-interval")
+  val minFreeMb = config.as[Option[Int]]("min-free-mb").getOrElse(DefaultMinFreeMb)
 
   val schedulerActor = context.actorOf(SchedulerActor.props(scheduler), "scheduler")
   context.system.scheduler.schedule(schedulerInterval, schedulerInterval,
@@ -134,18 +139,14 @@ class CoordinatorActor(memTable: MemTable,
 
   private def setupIngestion(originator: ActorRef, dataset: String, columns: Seq[String], version: Int):
       Unit = {
-    if (memTable.getIngestionSetup(dataset, version).isDefined) {
-      logger.info(s"Dataset $dataset / $version ingestion already set up, nothing to do...")
-      originator ! IngestionReady
-      return
-    }
     (for { datasetObj <- metaStore.getDataset(dataset)
            schema <- verifySchema(originator, dataset, version, columns) if schema.isDefined }
     yield {
       val columnSeq = columns.map(schema.get(_))
       memTable.setupIngestion(datasetObj, columnSeq, version) match {
         case MemTable.SetupDone    => originator ! IngestionReady
-        case MemTable.AlreadySetup => originator ! AlreadySetup
+        // If the table is already set up, that's fine!
+        case MemTable.AlreadySetup => originator ! IngestionReady
         case MemTable.BadSchema    => originator ! BadSchema
       }
     }).recover {
@@ -163,13 +164,17 @@ class CoordinatorActor(memTable: MemTable,
 
     case ingestCmd @ IngestRows(dataset, version, rows, seqNo) =>
       // Check if we are over limit or under memory
-      // Ingest rows into the memtable
-      memTable.ingestRows(dataset, version, rows) match {
-        case MemTable.NoSuchDatasetVersion => sender ! UnknownDataset
-        case MemTable.Ingested             => sender ! Ack(seqNo)
-        case MemTable.PleaseWait           =>
-          logger.debug(s"MemTable full, retrying in $memtablePushback...")
-          context.system.scheduler.scheduleOnce(memtablePushback, self, ingestCmd)
+      if (sys.runtime.freeMemory / (1024*1024) < minFreeMb) {
+        logger.info(s"Low on memory, not ingesting more rows for now...")
+      } else {
+        // Ingest rows into the memtable
+        memTable.ingestRows(dataset, version, rows) match {
+          case MemTable.NoSuchDatasetVersion => sender ! UnknownDataset
+          case MemTable.Ingested             => sender ! Ack(seqNo)
+          case MemTable.PleaseWait           =>
+            logger.info(s"MemTable full, retrying in $memtablePushback...")
+            context.system.scheduler.scheduleOnce(memtablePushback, self, ingestCmd)
+        }
       }
 
     case flushCmd @ Flush(dataset, version) =>

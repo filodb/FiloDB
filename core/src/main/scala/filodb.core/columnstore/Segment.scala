@@ -1,5 +1,6 @@
 package filodb.core.columnstore
 
+import com.typesafe.scalalogging.slf4j.StrictLogging
 import java.nio.ByteBuffer
 import org.velvia.filo.{IngestColumn, RowToColumnBuilder, RowReader, FiloRowReader, FastFiloRowReader}
 import scala.collection.immutable.TreeMap
@@ -118,7 +119,7 @@ extends GenericSegment(keyRange, null) {
  */
 class RowReaderSegment[K](val keyRange: KeyRange[K],
                           val index: BinaryChunkRowMap,
-                          columns: Seq[Column]) extends Segment[K] {
+                          columns: Seq[Column]) extends Segment[K] with StrictLogging {
   import RowReaderSegment._
 
   // chunks(chunkId)(columnNum)
@@ -128,7 +129,12 @@ class RowReaderSegment[K](val keyRange: KeyRange[K],
   val colIdToNumber = columns.zipWithIndex.map { case (col, idx) => (col.name, idx) }.toMap
 
   def addChunk(id: ChunkID, column: ColumnId, bytes: Chunk): Unit =
-    chunks(id)(colIdToNumber(column)) = bytes
+    if (id < chunks.size) {
+      chunks(id)(colIdToNumber(column)) = bytes
+    } else {
+      // Probably the result of corruption, such as OOM while writing segments
+      logger.debug(s"Ignoring chunk id=$id column=$column in $keyRange, chunks.size=${chunks.size}")
+    }
 
   def getChunks: Iterator[(ColumnId, ChunkID, Chunk)] = {
     for { chunkId <- (0 until index.nextChunkId).toIterator
