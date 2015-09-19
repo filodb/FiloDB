@@ -1,8 +1,9 @@
 val mySettings = Seq(organization := "org.velvia",
-                     scalaVersion := "2.10.4",
+                     scalaVersion := "2.10.5",
                      parallelExecution in Test := false,
-                     resolvers ++= extraRepos) ++
-                 universalSettings
+                     fork in Test := true,
+                     resolvers ++= extraRepos,
+                     ivyScala := ivyScala.value map { _.copy(overrideScalaVersion = true) }) ++ universalSettings
 
 lazy val core = (project in file("core"))
                   .settings(mySettings:_*)
@@ -132,7 +133,8 @@ exec java -jar "$0" "$@"
 lazy val cliAssemblySettings = assemblySettings ++ Seq(
   assemblyOption in assembly := (assemblyOption in assembly).value.copy(
                                   prependShellScript = Some(shellScript)),
-  assemblyJarName in assembly := s"filo-cli-${version.value}"
+  assemblyJarName in assembly := s"filo-cli-${version.value}",
+  logLevel in assembly := Level.Error
 )
 
 lazy val assemblySettings = Seq(
@@ -146,5 +148,6 @@ lazy val assemblySettings = Seq(
     case x =>
       val oldStrategy = (assemblyMergeStrategy in assembly).value
       oldStrategy(x)
-  }
+  },
+  test in assembly := {} //noisy for end-user since the jar is not available and user needs to build the project locally
 )
