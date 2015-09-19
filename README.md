@@ -93,7 +93,7 @@ val df = sqlContext.read.format("filodb.spark").option("dataset", "gdelt").load(
 
 ### Detailed Ingestion Example
 
-This example uses a checked in CSV file to walk through ingesting data.  To ingest the CSV, start spark-shell with the spark-csv package:
+This example uses the checked in CSV file `GDELT-1979-1984-100000.csv` to walk through ingesting data.  To ingest the CSV, start spark-shell with the spark-csv package:
 
 ```bash
 bin/spark-shell --jars $REPOS/FiloDB/spark/target/scala-2.10/filodb-spark-assembly-0.1-SNAPSHOT.jar --packages com.databricks:spark-csv_2.10:1.2.0 --driver-memory 3G --executor-memory 3G
