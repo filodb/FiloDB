@@ -4,6 +4,7 @@ import akka.actor.ActorSystem
 import com.typesafe.config.ConfigFactory
 import org.apache.spark.{SparkContext, SparkException, SparkConf}
 import org.apache.spark.sql.{SaveMode, SQLContext}
+import org.scalatest.time.{Millis, Seconds, Span}
 import scala.concurrent.duration._
 
 import filodb.core._
@@ -21,6 +22,10 @@ object SaveAsFiloTest {
  */
 class SaveAsFiloTest extends FunSpec with BeforeAndAfter with BeforeAndAfterAll
 with Matchers with ScalaFutures {
+
+  implicit val defaultPatience =
+    PatienceConfig(timeout = Span(10, Seconds), interval = Span(50, Millis))
+
   // Setup SQLContext and a sample DataFrame
   val conf = (new SparkConf).setMaster("local[4]")
                             .setAppName("test")
