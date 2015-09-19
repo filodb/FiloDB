@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+
+SCALA_VERSION="2.10"
+FILO_VERSION="0.1-SNAPSHOT"
+CLI_FILE=`pwd`"/cli/target/scala-$SCALA_VERSION/filo-cli-$FILO_VERSION"
+
+function isJava8(){
+if [[ "$JAVA" ]]; then
+    version=$("$JAVA" -version 2>&1 | awk -F '"' '/version/ {print $2}')
+    if [[ "$version" < "1.8" ]]; then
+        echo "FiloDB requires Java JDK 1.8 and the current version is $version. Please upgrade to continue."
+        exit
+    fi
+fi
+}
+
+if type -p java; then
+    JAVA=java
+else
+    echo "Failed to find Java in PATH. Please install Java JDK 1.8"
+    exit
+fi
+
+isJava8
+
+if type -p sbt; then
+    SBT=sbt
+else
+    echo "Failed to find SBT in PATH. Please install SBT"
+    exit
+fi
+
+if [ ! -f "$CLI_FILE" ];then
+    # run assembly if file doesn't exist
+    $SBT cli/assembly
+    # initialize DB on first run
+    $CLI_FILE --command init
+fi
+
+$CLI_FILE $1 $2
+
+
