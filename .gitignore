@@ -16,5 +16,8 @@ project/plugins/project/
 .scala_dependencies
 .worksheet
 
+# IntelliJ specific
+.idea/
+
 # HIVE
 metastore_db/
