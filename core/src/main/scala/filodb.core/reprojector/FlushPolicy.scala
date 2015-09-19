@@ -24,7 +24,7 @@ trait FlushPolicy {
 class NumRowsFlushPolicy(maxTotalRows: Long) extends FlushPolicy {
   override def toString: String = s"NumRowsFlushPolicy($maxTotalRows)"
   def nextFlush(memtable: MemTable): Option[(TableName, Int)] = {
-    val activeRows = memtable.allNumRows(MemTable.Active)
+    val activeRows = memtable.allNumRows(MemTable.Active, nonZero = true)
     val flushingRows = memtable.flushingDatasets
     val totalRows = activeRows.map(_._2).sum + flushingRows.map(_._2).sum
 

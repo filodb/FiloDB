@@ -49,9 +49,9 @@ class SchedulerSpec extends FunSpec with Matchers with BeforeAndAfter {
   import RowReader._
   val testReprojector = new Reprojector {
     def reproject[K: TypedFieldExtractor](memTable: MemTable, setup: IngestionSetup, version: Int):
-        Future[Seq[Response]] = {
+        Future[Seq[String]] = {
       reprojections = reprojections :+ (setup.dataset.name -> version)
-      Future.successful(Seq(Success))
+      Future.successful(Seq("Success"))
     }
   }
 

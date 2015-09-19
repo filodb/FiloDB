@@ -33,9 +33,9 @@ trait Reprojector {
    * to do work asynchronously.  Also, scheduling too many futures leads to long blocking time and
    * memory issues.
    *
-   * @returns a Future[Seq[Response]], representing states of individual segment flushes.
+   * @returns a Future[Seq[String]], representing info from individual segment flushes.
    */
-  def newTask(memTable: MemTable, dataset: Types.TableName, version: Int): Future[Seq[Response]] = {
+  def newTask(memTable: MemTable, dataset: Types.TableName, version: Int): Future[Seq[String]] = {
     import Column.ColumnType._
 
     val setup = memTable.getIngestionSetup(dataset, version).getOrElse(
@@ -50,7 +50,7 @@ trait Reprojector {
 
   // The inner, typed reprojection task launcher that must be implemented.
   def reproject[K: TypedFieldExtractor](memTable: MemTable, setup: IngestionSetup, version: Int):
-      Future[Seq[Response]]
+      Future[Seq[String]]
 }
 
 /**
@@ -92,18 +92,19 @@ class DefaultReprojector(columnStore: ColumnStore,
   }
 
   def reproject[K: TypedFieldExtractor](memTable: MemTable, setup: IngestionSetup, version: Int):
-      Future[Seq[Response]] = {
+      Future[Seq[String]] = {
     implicit val helper = setup.helper[K]
     val datasetName = setup.dataset.name
     val projection = RichProjection(setup.dataset, setup.schema)
     val segments = chunkize(memTable.readAllRows[K](datasetName, version, Locked), setup)
-    val segmentTasks: Seq[Future[Response]] = segments.map { segment =>
+    val segmentTasks: Seq[Future[String]] = segments.map { segment =>
       for { resp <- columnStore.appendSegment(projection, segment, version) if resp == Success }
       yield {
         logger.debug(s"Finished merging segment ${segment.keyRange}, version $version...")
         memTable.removeRows(segment.keyRange, version)
         logger.debug(s"Removed rows for segment $segment from Locked table...")
-        resp
+        // Return useful info about each successful reprojection
+        (segment.keyRange.partition, segment.keyRange.start).toString
       }
     }.toSeq
     Future.sequence(segmentTasks)

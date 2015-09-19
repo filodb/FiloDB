@@ -43,8 +43,9 @@ class Scheduler(memTable: MemTable,
   logger.info(s"Starting Scheduler with memTable $memTable, reprojector $reprojector, and $flushPolicy")
 
   // Keeps track of active reprojection tasks, one per dataset/version
-  type TaskMap = Map[(TableName, Int), Future[Seq[Response]]]
-  var tasks = Map.empty[(TableName, Int), Future[Seq[Response]]]
+  type TaskMap = Map[(TableName, Int), Future[Seq[String]]]
+  val EmptyTaskMap = Map.empty[(TableName, Int), Future[Seq[String]]]
+  var tasks = EmptyTaskMap
 
   // A list of failed Tasks with the most recent failure in front. Capped.
   var failedTasks = List.empty[((TableName, Int), Throwable)]
@@ -121,7 +122,7 @@ class Scheduler(memTable: MemTable,
 
   // Should be used mostly for tests
   def reset(): Unit = {
-    tasks = Map.empty[(TableName, Int), Future[Seq[Response]]]
+    tasks = EmptyTaskMap
     failedTasks = List.empty[((TableName, Int), Throwable)]
   }
 
@@ -135,13 +136,13 @@ class Scheduler(memTable: MemTable,
   private def cleanupTasks(tasks: TaskMap): TaskMap =
     tasks.filterNot { case (nameVer, taskFuture) => isComplete(nameVer, taskFuture) }
 
-  private def isComplete(nameVer: (TableName, Int), taskFuture: Future[Seq[Response]]): Boolean =
+  private def isComplete(nameVer: (TableName, Int), taskFuture: Future[Seq[String]]): Boolean =
     taskFuture.value match {
       case None             => false
       case Some(Failure(t)) => logger.error(s"Reprojection task $nameVer failed", t)
                                failedTasks = ((nameVer, t) :: failedTasks).take(maxFailures)
                                true
-      case Some(Success(r)) => logger.info(s"Reprojection task $nameVer succeeded: $r")
+      case Some(Success(r)) => logger.info(s"Reprojection task $nameVer succeeded: ${r.toList}")
                                true
     }
 }
