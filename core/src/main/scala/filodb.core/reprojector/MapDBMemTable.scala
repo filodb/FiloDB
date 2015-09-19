@@ -1,10 +1,10 @@
 package filodb.core.reprojector
 
 import com.typesafe.config.Config
+import net.ceedubs.ficus.Ficus._
 import org.mapdb._
 import org.velvia.filo.RowReader
 import scala.math.Ordered
-import scala.util.Try
 
 import filodb.core.{KeyRange, SortKeyHelper}
 import filodb.core.Types._
@@ -23,6 +23,7 @@ import filodb.core.metadata.{Column, Dataset}
  *   memtable {
  *     backup-dir = "/tmp/filodb.memtable/"
  *     max-rows-per-table = 1000000
+ *     min-free-mb = 512
  *   }
  * }}}
  */
@@ -35,8 +36,9 @@ class MapDBMemTable(config: Config) extends MemTable {
 
   // Data structures
 
-  private val backupDir = Try(config.getString("memtable.backup-dir")).toOption
+  private val backupDir = config.as[Option[String]]("memtable.backup-dir")
   private val maxRowsPerTable = config.getInt("memtable.max-rows-per-table")
+  val minFreeMb = config.as[Option[Int]]("min-free-mb").getOrElse(DefaultMinFreeMb)
 
   // According to MapDB examples, use incremental backup with memory-only store
   private val db = DBMaker.newHeapDB.transactionDisable.closeOnJvmShutdown.make()
@@ -58,6 +60,11 @@ class MapDBMemTable(config: Config) extends MemTable {
       rowMap.put((setup.partitioningFunc(row), sortKey), row)
     }
     Ingested
+  }
+
+  def canIngestInner(dataset: TableName, version: Int): Boolean = {
+    val rowMap = getRowMap[Any](dataset, version, Active).get
+    rowMap.size() < maxRowsPerTable
   }
 
   def readRows[K: SortKeyHelper](keyRange: KeyRange[K],

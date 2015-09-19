@@ -16,7 +16,8 @@ class MapDBMemTableSpec extends FunSpec with Matchers with BeforeAndAfter with S
   import MemTable._
 
   val keyRange = KeyRange("dataset", Dataset.DefaultPartitionKey, 0L, 10000L)
-  val mTable: MemTable = new MapDBMemTable(ConfigFactory.load)
+  val config = ConfigFactory.load("application_test.conf")
+  val mTable: MemTable = new MapDBMemTable(config)
   import scala.concurrent.ExecutionContext.Implicits.global
 
   before {
@@ -31,10 +32,17 @@ class MapDBMemTableSpec extends FunSpec with Matchers with BeforeAndAfter with S
     names.map { t => (t._1, t._2, t._3, Some(partNum.toString)) }
   }
 
+  // Must be more than the max-rows-per-table setting in application_test.conf
+  val lotsOfNames = (0 until 400).flatMap { partNum =>
+    names.map { t => (t._1, t._2, t._3, Some(partNum.toString)) }
+  }
+
   describe("insertRows, readRows, flip") {
     it("should insert out of order rows and read them back in order") {
       val setupResp = mTable.setupIngestion(dataset, schema, 0)
       setupResp should equal (SetupDone)
+
+      mTable.canIngest("dataset", 0) should be (true)
 
       val resp = mTable.ingestRows("dataset", 0, names.map(TupleRowReader))
       resp should equal (Ingested)
@@ -78,6 +86,22 @@ class MapDBMemTableSpec extends FunSpec with Matchers with BeforeAndAfter with S
 
       val outRows = mTable.readRows(keyRange.copy(partition = "5"), 0, Active)
       outRows.toSeq.map(_.getString(0)) should equal (firstNames)
+    }
+
+    it("should return PleaseWait and false on canIngest if too many rows in memtable") {
+      val setupResp = mTable.setupIngestion(dataset.copy(partitionColumn = "league"),
+                                            schemaWithPartCol, 0)
+      setupResp should equal (SetupDone)
+
+      mTable.canIngest("dataset", 0) should be (true)
+      val resp = mTable.ingestRows("dataset", 0, lotsOfNames.map(TupleRowReader))
+      resp should equal (Ingested)
+
+      mTable.numRows("dataset", 0, Active) should equal (Some(400L * names.length))
+
+      mTable.canIngest("dataset", 0) should be (false)
+      val resp2 = mTable.ingestRows("dataset", 0, lotsOfNames.take(10).map(TupleRowReader))
+      resp2 should equal (PleaseWait)
     }
 
     it("should be able to flip, insert into Active again, read from both") {

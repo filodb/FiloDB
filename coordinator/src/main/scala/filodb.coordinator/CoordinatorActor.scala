@@ -42,7 +42,6 @@ object CoordinatorActor {
   case object IngestionReady extends Response
   case object UnknownDataset extends ErrorResponse
   case class UndefinedColumns(undefined: Seq[String]) extends ErrorResponse
-  case object AlreadySetup extends ErrorResponse
   case object BadSchema extends ErrorResponse
 
   /**
@@ -64,8 +63,6 @@ object CoordinatorActor {
   def invalidColumns(columns: Seq[String], schema: Column.Schema): Seq[String] =
     (columns.toSet -- schema.keys).toSeq
 
-  val DefaultMinFreeMb = 512
-
   def props(memTable: MemTable,
             metaStore: MetaStore,
             scheduler: Scheduler,
@@ -78,11 +75,9 @@ object CoordinatorActor {
  * ==Configuration==
  * {{{
  *   {
- *     memtable-retry-interval = 10 s
  *     scheduler-interval = 1 s
  *     scheduler-reporting = false
  *     scheduler-reporting-interval = 30s
- *     min-free-mb = 512
  *   }
  * }}}
  */
@@ -94,11 +89,9 @@ class CoordinatorActor(memTable: MemTable,
   import CoordinatorActor._
   import context.dispatcher
 
-  val memtablePushback  = config.as[FiniteDuration]("memtable-retry-interval")
   val schedulerInterval = config.as[FiniteDuration]("scheduler-interval")
   val turnOnReporting   = config.as[Option[Boolean]]("scheduler-reporting").getOrElse(false)
   val reportingInterval = config.as[FiniteDuration]("scheduler-reporting-interval")
-  val minFreeMb = config.as[Option[Int]]("min-free-mb").getOrElse(DefaultMinFreeMb)
 
   val schedulerActor = context.actorOf(SchedulerActor.props(scheduler), "scheduler")
   context.system.scheduler.schedule(schedulerInterval, schedulerInterval,
@@ -163,19 +156,12 @@ class CoordinatorActor(memTable: MemTable,
       setupIngestion(sender, dataset, columns, version)
 
     case ingestCmd @ IngestRows(dataset, version, rows, seqNo) =>
-      // Check if we are over limit or under memory
-      if (sys.runtime.freeMemory / (1024*1024) < minFreeMb) {
-        logger.info(s"Low on memory, will retry writes later...")
-        context.system.scheduler.scheduleOnce(memtablePushback, self, ingestCmd)
-      } else {
-        // Ingest rows into the memtable
-        memTable.ingestRows(dataset, version, rows) match {
-          case MemTable.NoSuchDatasetVersion => sender ! UnknownDataset
-          case MemTable.Ingested             => sender ! Ack(seqNo)
-          case MemTable.PleaseWait           =>
-            logger.info(s"MemTable full, retrying in $memtablePushback...")
-            context.system.scheduler.scheduleOnce(memtablePushback, self, ingestCmd)
-        }
+      // Ingest rows into the memtable
+      memTable.ingestRows(dataset, version, rows) match {
+        case MemTable.NoSuchDatasetVersion => sender ! UnknownDataset
+        case MemTable.Ingested             => sender ! Ack(seqNo)
+        case MemTable.PleaseWait           =>
+          logger.info(s"MemTable full or low on memory, try rows again later...")
       }
 
     case flushCmd @ Flush(dataset, version) =>

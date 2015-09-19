@@ -28,6 +28,8 @@ object MemTable {
   case object Active extends BufferType
   case object Locked extends BufferType
 
+  val DefaultMinFreeMb = 512
+
   // TODO: Base this on RichProjection, maybe this is not needed
   case class IngestionSetup(dataset: Dataset,
                             schema: Seq[Column],
@@ -56,12 +58,19 @@ object MemTable {
  *
  * Data written to a MemTable should be logged via WAL or some other mechanism so it can be recovered in
  * case of failure.
+ *
+ * ==Backpressure==
+ * The idea is for clients to keep writing so long as it keeps getting back Ingested.  If it gets
+ * PleaseWait, then it needs to slow down and periodically retry, or call canIngest().
  */
 trait MemTable extends StrictLogging {
   import MemTable._
   import RowReader._
 
   def close(): Unit
+
+  // The minimum amount of free memory for ingestion to continue
+  def minFreeMb: Int
 
   /**
    * === Dataset ingestion setup ===
@@ -110,10 +119,16 @@ trait MemTable extends StrictLogging {
    * @param dataset the Dataset to ingest.  Must have been setup using setupIngestion().
    * @param version the version to ingest into.
    * @param rows the rows to ingest
-   * @returns Ingested or PleaseWait, if the MemTable is too full.
+   * @returns Ingested or PleaseWait, if the MemTable is too full or we are low on memory
    */
   def ingestRows(dataset: TableName, version: Int, rows: Seq[RowReader]): IngestionResponse = {
     import Column.ColumnType._
+
+    val freeMB = sys.runtime.freeMemory / (1024*1024)
+    if (freeMB < minFreeMb) {
+      logger.info(s"Only $freeMB memory left, cannot accept more writes...")
+      return PleaseWait
+    }
 
     val setup = getIngestionSetup(dataset, version).getOrElse(return NoSuchDatasetVersion)
     setup.schema(setup.sortColumnNum).columnType match {
@@ -127,6 +142,19 @@ trait MemTable extends StrictLogging {
   def ingestRowsInner[K: TypedFieldExtractor](setup: IngestionSetup,
                                               version: Int,
                                               rows: Seq[RowReader]): IngestionResponse
+
+  /**
+   * Returns true if the MemTable is capable of ingesting more data.  Designed to be a much
+   * lighter weight alternative to ingestRows so that clients can poll the memTable for when
+   * conditions are right for ingestion to occur again.
+   */
+  def canIngest(dataset: TableName, version: Int): Boolean = {
+    if (sys.runtime.freeMemory / (1024*1024) < minFreeMb) return false
+    canIngestInner(dataset, version)
+  }
+
+  // Determines if there is enough room for the specific dataset
+  def canIngestInner(dataset: TableName, version: Int): Boolean
 
   /**
    * Reads rows out. Note that inserts may be happening while rows are read, so results are not
