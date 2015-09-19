@@ -119,7 +119,6 @@ package object spark extends StrictLogging {
     /**
      * Saves a DataFrame in a FiloDB Table
      * - Creates columns in FiloDB from DF schema if needed
-     * - Only overwrite supported for now, not appends
      *
      * @param df the DataFrame to write to FiloDB
      * @param dataset the name of the FiloDB table/dataset to read from
@@ -159,14 +158,19 @@ package object spark extends StrictLogging {
         ("_partition", df1)
       }
 
-      // TODO: Do a groupBy partitioncolumn if needed so that partitions are on same node
-
       if (createDataset) createNewDataset(dataset, sortColumn, partCol, df1)
       checkAndAddColumns(df1, dataset, version)
       val dfColumns = df1.schema.map(_.name)
 
+      // Do a sort by partitioncolumn so that partitions are on same node... we hope
+      // val sortedDf = df1.sort(df1(partCol))  (note: this doesn't work yet)
+      val sortedDf = df1
+      val numPartitions = sortedDf.rdd.partitions.size
+      logger.info(s"Saving ($dataset/$version) with sortColumn $sortColumn, " +
+                  s"partitionColumn $partCol, $numPartitions partitions")
+
       // For each partition, start the ingestion
-      df1.rdd.mapPartitionsWithIndex { case (index, rowIter) =>
+      sortedDf.rdd.mapPartitionsWithIndex { case (index, rowIter) =>
         // Everything within this function runs on each partition/executor, so need a local datastore & system
         FiloSetup.init(filoConfig)
 

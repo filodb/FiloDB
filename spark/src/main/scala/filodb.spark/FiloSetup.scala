@@ -26,7 +26,9 @@ object FiloSetup extends DefaultCoordinatorSetup {
 
   def configFromSpark(context: SparkContext): Config = {
     val conf = context.getConf
-    val filoOverrides = conf.getAll.filter { case (k, v) => k.startsWith("filodb") }
+    val filoOverrides = conf.getAll.collect { case (k, v) if k.startsWith("filodb") =>
+                                                k.replace("filodb.", "") -> v
+                                            }
     ConfigFactory.parseMap(filoOverrides.toMap.asJava)
                  .withFallback(ConfigFactory.load)
   }

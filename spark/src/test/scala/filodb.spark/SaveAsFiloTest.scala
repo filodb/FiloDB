@@ -2,16 +2,15 @@ package filodb.spark
 
 import akka.actor.ActorSystem
 import com.typesafe.config.ConfigFactory
-import org.apache.spark.{SparkContext, SparkException}
+import org.apache.spark.{SparkContext, SparkException, SparkConf}
 import org.apache.spark.sql.{SaveMode, SQLContext}
 import scala.concurrent.duration._
 
 import filodb.core._
 import filodb.core.metadata.{Column, Dataset}
-import filodb.cassandra.AllTablesTest
-import filodb.cassandra.metastore.CassandraMetaStore
 
-import org.scalatest.{FunSpec, BeforeAndAfter, BeforeAndAfterAll}
+import org.scalatest.{FunSpec, BeforeAndAfter, BeforeAndAfterAll, Matchers}
+import org.scalatest.concurrent.ScalaFutures
 
 object SaveAsFiloTest {
   val system = ActorSystem("test")
@@ -20,15 +19,27 @@ object SaveAsFiloTest {
 /**
  * Test saveAsFiloDataset
  */
-class SaveAsFiloTest extends FunSpec with BeforeAndAfter with BeforeAndAfterAll with AllTablesTest {
+class SaveAsFiloTest extends FunSpec with BeforeAndAfter with BeforeAndAfterAll
+with Matchers with ScalaFutures {
   // Setup SQLContext and a sample DataFrame
-  val sc = new SparkContext("local[4]", "test")
+  val conf = (new SparkConf).setMaster("local[4]")
+                            .setAppName("test")
+                            .set("filodb.cassandra.keyspace", "unittest")
+  val sc = new SparkContext(conf)
   val sql = new SQLContext(sc)
 
   val partitionCol = "_partition"
   val ds1 = Dataset("gdelt1", "id")
   val ds2 = Dataset("gdelt2", "id")
   val ds3 = Dataset("gdelt3", "id", partitionCol)
+
+  // This is the same code that the Spark stuff uses.  Make sure we use exact same environment as real code
+  // so we don't have two copies of metaStore that could be configured differently.
+  val filoConfig = FiloSetup.configFromSpark(sc)
+  FiloSetup.init(filoConfig)
+
+  val metaStore = FiloSetup.metaStore
+  val columnStore = FiloSetup.columnStore
 
   override def beforeAll() {
     metaStore.initialize().futureValue
