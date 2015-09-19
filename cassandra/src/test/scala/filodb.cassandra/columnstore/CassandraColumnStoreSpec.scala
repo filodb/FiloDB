@@ -4,6 +4,7 @@ import com.typesafe.config.ConfigFactory
 import com.websudos.phantom.testkit._
 import java.nio.ByteBuffer
 import org.scalatest.BeforeAndAfter
+import org.scalatest.time.{Millis, Seconds, Span}
 import scala.concurrent.duration._
 import scala.concurrent.{Await, Future}
 import scala.language.postfixOps
@@ -18,11 +19,15 @@ class CassandraColumnStoreSpec extends CassandraFlatSpec with BeforeAndAfter {
   import filodb.core.columnstore._
   import SegmentSpec._
 
+  implicit val defaultPatience =
+    PatienceConfig(timeout = Span(10, Seconds), interval = Span(50, Millis))
+
   val config = ConfigFactory.load("application_test.conf")
   val colStore = new CassandraColumnStore(config)
   implicit val keySpace = KeySpace(config.getString("cassandra.keyspace"))
   val dataset = "foo"
   val fooProj = Projection(0, dataset, "someCol")
+
 
   val (chunkTable, rowMapTable) = Await.result(colStore.getSegmentTables(dataset), 3 seconds)
 
