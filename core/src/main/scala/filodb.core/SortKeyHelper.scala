@@ -27,6 +27,7 @@ trait SortKeyHelper[K] {
 
 /**
  * Typeclasses for sort keys
+ * NOTE: both the Ordering for ByteVector as well as how bytes are compared in most places is big-endian
  */
 case class LongKeyHelper(segmentLen: Long) extends SortKeyHelper[Long] {
   def ordering: Ordering[Long] = Ordering.Long
@@ -34,8 +35,8 @@ case class LongKeyHelper(segmentLen: Long) extends SortKeyHelper[Long] {
     val segmentNum = key / segmentLen
     (segmentNum * segmentLen, (segmentNum + 1) * segmentLen)
   }
-  def toBytes(key: Long): ByteVector = ByteVector.fromLong(key, ordering = ByteOrdering.LittleEndian)
-  def fromBytes(bytes: ByteVector): Long = bytes.toLong(true, ByteOrdering.LittleEndian)
+  def toBytes(key: Long): ByteVector = ByteVector.fromLong(key, ordering = ByteOrdering.BigEndian)
+  def fromBytes(bytes: ByteVector): Long = bytes.toLong(true, ByteOrdering.BigEndian)
 }
 
 case class IntKeyHelper(segmentLen: Int) extends SortKeyHelper[Int] {
@@ -44,8 +45,8 @@ case class IntKeyHelper(segmentLen: Int) extends SortKeyHelper[Int] {
     val segmentNum = key / segmentLen
     (segmentNum * segmentLen, (segmentNum + 1) * segmentLen)
   }
-  def toBytes(key: Int): ByteVector = ByteVector.fromInt(key, ordering = ByteOrdering.LittleEndian)
-  def fromBytes(bytes: ByteVector): Int = bytes.toInt(true, ByteOrdering.LittleEndian)
+  def toBytes(key: Int): ByteVector = ByteVector.fromInt(key, ordering = ByteOrdering.BigEndian)
+  def fromBytes(bytes: ByteVector): Int = bytes.toInt(true, ByteOrdering.BigEndian)
 }
 
 case class DoubleKeyHelper(segmentLen: Double) extends SortKeyHelper[Double] {
@@ -55,8 +56,8 @@ case class DoubleKeyHelper(segmentLen: Double) extends SortKeyHelper[Double] {
     (segmentNum * segmentLen, (segmentNum + 1) * segmentLen)
   }
   def toBytes(key: Double): ByteVector =
-    ByteVector.fromLong(java.lang.Double.doubleToLongBits(key), ordering = ByteOrdering.LittleEndian)
+    ByteVector.fromLong(java.lang.Double.doubleToLongBits(key), ordering = ByteOrdering.BigEndian)
   def fromBytes(bytes: ByteVector): Double =
-    java.lang.Double.longBitsToDouble(bytes.toLong(true, ByteOrdering.LittleEndian))
+    java.lang.Double.longBitsToDouble(bytes.toLong(true, ByteOrdering.BigEndian))
 }
 

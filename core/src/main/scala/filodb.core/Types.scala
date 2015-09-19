@@ -25,10 +25,10 @@ object Types {
   type PartitionKey = String
 
   // TODO: contribute this Ordering back to ByteVector
-  // Assumes unsigned comparison plus little endian, meaning that the first byte in a vector
+  // Assumes unsigned comparison, big endian, meaning that the first byte in a vector
   // is the most significant one.
   // Compares byte by byte, if all bytes equal up to the min length for both, then lengths are compared
-  implicit object ByteVectorOrdering extends Ordering[ByteVector] {
+  implicit object BigEndianByteVectorOrdering extends Ordering[ByteVector] {
     def compare(x: ByteVector, y: ByteVector): Int = {
       val minLen = Math.min(x.length, y.length)
       for { i <- 0 until minLen optimized } {

@@ -40,6 +40,16 @@ class ChunkMergingStrategySpec extends FunSpec with Matchers {
   }
 
   describe("mergeSegments") {
+    it("should forbid merging segments from different keyRanges") {
+      val segment = getRowWriter(keyRange)
+      segment.addRowsAsChunk(mapper(names take 3), getSortKey _)
+
+      val segment2 = getRowWriter(keyRange.copy(start = 20000L, end = 30000L))
+      segment2.addRowsAsChunk(mapper(names drop 3), getSortKey _)
+
+      intercept[RuntimeException] { mergingStrategy.mergeSegments(segment, segment2) }
+    }
+
     it("should merge a new segment with an empty segment") {
       val mergedSeg = mergeRows(Nil, names take 3)
 
