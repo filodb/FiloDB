@@ -165,7 +165,8 @@ class CoordinatorActor(memTable: MemTable,
     case ingestCmd @ IngestRows(dataset, version, rows, seqNo) =>
       // Check if we are over limit or under memory
       if (sys.runtime.freeMemory / (1024*1024) < minFreeMb) {
-        logger.info(s"Low on memory, not ingesting more rows for now...")
+        logger.info(s"Low on memory, will retry writes later...")
+        context.system.scheduler.scheduleOnce(memtablePushback, self, ingestCmd)
       } else {
         // Ingest rows into the memtable
         memTable.ingestRows(dataset, version, rows) match {
