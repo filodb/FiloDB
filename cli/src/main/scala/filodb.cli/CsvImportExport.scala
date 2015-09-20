@@ -28,7 +28,7 @@ trait CsvImportExport {
   import scala.collection.JavaConversions._
 
   protected def parseResponse[B](cmd: => Future[Response])(handler: PartialFunction[Response, B]): B = {
-    Await.result(cmd, 5 seconds) match {
+    Await.result(cmd, 15 seconds) match {
       case e: ErrorResponse =>
         println("ERROR: " + e)
         exitCode = 1
