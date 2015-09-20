@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 
+# set -x
 SCALA_VERSION="2.10"
 FILO_VERSION="0.1-SNAPSHOT"
 CLI_FILE=`pwd`"/cli/target/scala-$SCALA_VERSION/filo-cli-$FILO_VERSION"
@@ -37,6 +38,4 @@ if [ ! -f "$CLI_FILE" ];then
     $CLI_FILE --command init
 fi
 
-$CLI_FILE $1 $2
-
-
+$CLI_FILE $@
