@@ -27,7 +27,7 @@ class EndToEndSpec extends FunSpec with Matchers with BeforeAndAfter with ScalaF
 
   import scala.concurrent.ExecutionContext.Implicits.global
 
-  val mTable = new MapDBMemTable(ConfigFactory.load)
+  val mTable = new MapDBMemTable(ConfigFactory.load("application_test.conf"))
   val flushPolicy = new NumRowsFlushPolicy(100L)
   val columnStore = new InMemoryColumnStore
   val reprojector = new DefaultReprojector(columnStore)

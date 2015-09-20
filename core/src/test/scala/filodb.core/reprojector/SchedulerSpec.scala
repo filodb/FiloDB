@@ -21,7 +21,7 @@ class SchedulerSpec extends FunSpec with Matchers with BeforeAndAfter {
   var scheduler: Scheduler = _
 
   before {
-    mTable = new MapDBMemTable(ConfigFactory.load)
+    mTable = new MapDBMemTable(ConfigFactory.load("application_test.conf"))
     reprojections = Nil
     scheduler = new Scheduler(mTable, testReprojector, flushPolicy, maxTasks = 2)
   }

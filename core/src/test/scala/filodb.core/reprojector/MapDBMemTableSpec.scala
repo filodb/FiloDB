@@ -172,16 +172,20 @@ class MapDBMemTableSpec extends FunSpec with Matchers with BeforeAndAfter with S
 
   describe("setupIngestion errors") {
     it("should get BadSchema if cannot find sort column") {
-      mTable.setupIngestion(Dataset("a", "boo"), schema, 0) should equal (BadSchema)
+      val resp = mTable.setupIngestion(Dataset("a", "boo"), schema, 0)
+      resp shouldBe a [BadSchema]
+      resp.asInstanceOf[BadSchema].reason should include ("Sort column boo not in schema")
     }
 
     it("should get BadSchema if sort column is not supported type") {
-      mTable.setupIngestion(Dataset("a", "first"), schema, 0) should equal (BadSchema)
+      val resp = mTable.setupIngestion(Dataset("a", "first"), schema, 0)
+      resp shouldBe a [BadSchema]
+      resp.asInstanceOf[BadSchema].reason should include ("Unsupported sort column type")
     }
 
-    it("should get BadSchema if partition column unknown or not String type") {
-      mTable.setupIngestion(dataset.copy(partitionColumn = "XXX"), schema, 0) should equal (BadSchema)
-      mTable.setupIngestion(dataset.copy(partitionColumn = "age"), schema, 0) should equal (BadSchema)
+    it("should get BadSchema if partition column unknown") {
+      val resp = mTable.setupIngestion(dataset.copy(partitionColumn = "XXX"), schema, 0)
+      resp shouldBe a [BadSchema]
     }
 
     it("should get AlreadySetup if try to set up twice for same dataset/version") {

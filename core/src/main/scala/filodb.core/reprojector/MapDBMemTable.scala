@@ -38,7 +38,7 @@ class MapDBMemTable(config: Config) extends MemTable {
 
   private val backupDir = config.as[Option[String]]("memtable.backup-dir")
   private val maxRowsPerTable = config.getInt("memtable.max-rows-per-table")
-  val minFreeMb = config.as[Option[Int]]("min-free-mb").getOrElse(DefaultMinFreeMb)
+  val minFreeMb = config.as[Option[Int]]("memtable.min-free-mb").getOrElse(DefaultMinFreeMb)
 
   // According to MapDB examples, use incremental backup with memory-only store
   private val db = DBMaker.newHeapDB.transactionDisable.closeOnJvmShutdown.make()

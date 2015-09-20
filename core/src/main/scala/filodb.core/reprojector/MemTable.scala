@@ -12,7 +12,7 @@ object MemTable {
   sealed trait SetupResponse
   case object SetupDone extends SetupResponse
   case object AlreadySetup extends SetupResponse
-  case object BadSchema extends SetupResponse
+  case class BadSchema(reason: String) extends SetupResponse
 
   sealed trait IngestionResponse
   case object Ingested extends IngestionResponse
@@ -86,17 +86,20 @@ trait MemTable extends StrictLogging {
   def setupIngestion(dataset: Dataset, schema: Seq[Column], version: Int): SetupResponse = {
     import Column.ColumnType._
     ingestionSetups.synchronized {
-      val partitionFunc = getPartitioningFunc(dataset, schema).getOrElse(return BadSchema)
+      val partitionFunc = getPartitioningFunc(dataset, schema).getOrElse(
+                            return BadSchema(s"Problem with partitioning column ${dataset.partitionColumn}"))
 
-      val sortColNo = schema.indexWhere(_.hasId(dataset.projections.head.sortColumn))
-      if (sortColNo < 0) return BadSchema
+      val sortColName = dataset.projections.head.sortColumn
+      val sortColNo = schema.indexWhere(_.hasId(sortColName))
+      if (sortColNo < 0) return BadSchema(s"Sort column $sortColName not in schema $schema")
 
       val versions = ingestionSetups.getOrElseUpdate(dataset.name, new HashMap[Int, IngestionSetup])
       if (versions contains version) return AlreadySetup
 
       val helper = Dataset.sortKeyHelper[Any](dataset, schema(sortColNo)).getOrElse {
-        logger.info(s"Unsupported sort column type ${schema(sortColNo).columnType} for dataset $dataset")
-        return BadSchema
+        val msg = s"Unsupported sort column type ${schema(sortColNo).columnType} for dataset $dataset"
+        logger.info(msg)
+        return BadSchema(msg)
       }
 
       versions(version) = IngestionSetup(dataset, schema, partitionFunc, sortColNo, helper)
@@ -126,7 +129,8 @@ trait MemTable extends StrictLogging {
 
     val freeMB = sys.runtime.freeMemory / (1024*1024)
     if (freeMB < minFreeMb) {
-      logger.info(s"Only $freeMB memory left, cannot accept more writes...")
+      logger.info(s"Only $freeMB MB memory left, cannot accept more writes...")
+      sys.runtime.gc()
       return PleaseWait
     }
 
@@ -149,7 +153,10 @@ trait MemTable extends StrictLogging {
    * conditions are right for ingestion to occur again.
    */
   def canIngest(dataset: TableName, version: Int): Boolean = {
-    if (sys.runtime.freeMemory / (1024*1024) < minFreeMb) return false
+    if (sys.runtime.freeMemory / (1024*1024) < minFreeMb) {
+      sys.runtime.gc()
+      return false
+    }
     canIngestInner(dataset, version)
   }
 
@@ -235,8 +242,14 @@ trait MemTable extends StrictLogging {
     } else {
       val partitionColNo = schema.indexWhere(_.hasId(dataset.partitionColumn))
       if (partitionColNo < 0) return None
-      if (schema(partitionColNo).columnType != Column.ColumnType.StringColumn) return None
-      Some(row => row.getString(partitionColNo))
+
+      import Column.ColumnType._
+      schema(partitionColNo).columnType match {
+        case StringColumn => Some(row => row.getString(partitionColNo))
+        case IntColumn    => Some(row => row.getInt(partitionColNo).toString)
+        case LongColumn   => Some(row => row.getLong(partitionColNo).toString)
+        case other: Column.ColumnType => None
+      }
     }
   }
 }
