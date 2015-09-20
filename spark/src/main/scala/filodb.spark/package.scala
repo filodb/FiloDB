@@ -22,7 +22,7 @@ package spark {
   case class ColumnTypeMismatch(mismatches: Set[(String, DataType, Column.ColumnType)]) extends Exception
   case class NoSortColumn(name: String) extends Exception(s"No sort column found $name")
   case class NoPartitionColumn(name: String) extends Exception(s"No partition column found $name")
-  case object BadSchemaError extends Exception("Sort/partition column not a supported type, schema error")
+  case class BadSchemaError(reason: String) extends Exception(reason)
 }
 
 /**
@@ -182,7 +182,7 @@ package object spark extends StrictLogging {
         logger.info(s"Got back $res from RddRowSourceActor...")
         res match {
           case SetupError(UnknownDataset) => throw DatasetNotFound(dataset)
-          case SetupError(BadSchema)      => throw BadSchemaError
+          case SetupError(BadSchema(reason)) => throw BadSchemaError(reason)
           case SetupError(err)            => throw new RuntimeException(s"Error with ingestion setup: $err")
           case AllDone                    => logger.info(s"Ingestion done for partition $index")
         }
