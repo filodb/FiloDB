@@ -20,6 +20,13 @@ object RowSource {
  * It talks to a CoordinatorActor of a FiloDB node.  RowSource may be remote.
  *
  * To start initialization and reading from source, send the Start message.
+ *
+ * TODO: Right now this doesn't work reliably because nobody keeps refreshing this actor
+ * and checking with the memTable to see if we can write again.  Changes needed:
+ * 1) Follow similar model to code in CsvImportExport: use a FSM, have two states - writing and waiting
+ *    waiting is after memTable returns PleaseWait.  In waiting, periodically call memTable.canIngest()
+ * 2) In waiting -> writing transition, RowSource needs to rewind back to the last Acked sequence number
+ *    and replay incoming rows
  */
 trait RowSource extends Actor with StrictLogging {
   import RowSource._

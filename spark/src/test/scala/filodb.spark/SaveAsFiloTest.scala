@@ -30,6 +30,7 @@ with Matchers with ScalaFutures {
   val conf = (new SparkConf).setMaster("local[4]")
                             .setAppName("test")
                             .set("filodb.cassandra.keyspace", "unittest")
+                            .set("filodb.memtable.min-free-mb", "10")
   val sc = new SparkContext(conf)
   val sql = new SQLContext(sc)
 

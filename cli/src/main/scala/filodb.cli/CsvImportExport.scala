@@ -10,7 +10,7 @@ import scala.concurrent.duration._
 import scala.language.postfixOps
 
 import filodb.core.metadata.MetaStore
-import filodb.core.reprojector.MemTable
+import filodb.core.reprojector.{MemTable, Scheduler}
 import filodb.coordinator.CoordinatorActor
 import filodb.coordinator.sources.CsvSourceActor
 import filodb.core._
@@ -21,6 +21,7 @@ trait CsvImportExport {
   val system: ActorSystem
   val metaStore: MetaStore
   val memTable: MemTable
+  val scheduler: Scheduler
   val coordinatorActor: ActorRef
   var exitCode = 0
 
@@ -99,6 +100,7 @@ trait CsvImportExport {
     //     println(s"ERROR: $err")
     //     exitCode = 2
     //   case RowSource.AllDone =>
+        coordinatorActor ! CoordinatorActor.Flush(dataset, version)
         println("Waiting for scheduler/memTable to finish flushing everything")
         Thread sleep 5000
         while (memTable.flushingDatasets.nonEmpty) {

@@ -1,11 +1,9 @@
 package filodb
 
-import akka.actor.ActorSystem
-import akka.pattern.ask
-import akka.util.Timeout
+import akka.actor.ActorRef
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.slf4j.StrictLogging
-import org.apache.spark.sql.{SQLContext, DataFrame, Column => SparkColumn}
+import org.apache.spark.sql.{SQLContext, DataFrame, Row, Column => SparkColumn}
 import org.apache.spark.sql.types.DataType
 import org.apache.spark.sql.catalyst.expressions.Literal
 import scala.concurrent.{Await, Future}
@@ -14,6 +12,7 @@ import scala.language.postfixOps
 
 import filodb.core._
 import filodb.core.metadata.{Column, Dataset}
+import filodb.core.reprojector.MemTable
 import filodb.coordinator.{CoordinatorActor, RowSource}
 
 package spark {
@@ -41,8 +40,43 @@ package spark {
 package object spark extends StrictLogging {
   val DefaultWriteTimeout = 999 minutes
 
+  import CoordinatorActor._
+  import filodb.spark.FiloRelation._
+  import FiloSetup.{metaStore, memTable}
+
+  private def ingestRddRows(coordinatorActor: ActorRef,
+                            dataset: String,
+                            columns: Seq[String],
+                            version: Int,
+                            rows: Iterator[Row]): Unit = {
+    val ingestCmd = SetupIngestion(dataset, columns, version)
+    actorAsk(coordinatorActor, ingestCmd, 10 seconds) {
+      case IngestionReady =>
+      case UnknownDataset => throw DatasetNotFound(dataset)
+      case BadSchema(reason) => throw BadSchemaError(reason)
+      case other: ErrorResponse => throw new RuntimeException(other.toString)
+    }
+
+    var linesIngested = 0
+    rows.grouped(1000).foreach { lines =>
+      val mappedLines = lines.toSeq.map(RddRowReader)
+      var resp: MemTable.IngestionResponse = MemTable.PleaseWait
+      do {
+        resp = memTable.ingestRows(dataset, version, mappedLines)
+        if (resp == MemTable.PleaseWait) {
+          do {
+            logger.info("Waiting for MemTable to be able to ingest again...")
+            Thread sleep 10000
+          } while (!memTable.canIngest(dataset, version))
+        }
+      } while (resp != MemTable.Ingested)
+      linesIngested += mappedLines.length
+      if (linesIngested % 25000 == 0) logger.info(s"Ingested $linesIngested lines!")
+    }
+    coordinatorActor ! Flush(dataset, version)
+  }
+
   implicit class FiloContext(sqlContext: SQLContext) {
-    implicit val context = scala.concurrent.ExecutionContext.Implicits.global
 
     /**
      * Creates a DataFrame from a FiloDB table.  Does no reading until a query is run, but it does
@@ -61,10 +95,6 @@ package object spark extends StrictLogging {
     }
 
     import filodb.spark.TypeConverters._
-    import filodb.spark.FiloRelation._
-    import FiloSetup._
-    import CoordinatorActor._
-    import RowSource._
 
     private def checkAndAddColumns(df: DataFrame,
                                    dataset: String,
@@ -108,7 +138,7 @@ package object spark extends StrictLogging {
 
       val dataset = Dataset(datasetName, sortColumn, partitionColumn)
       logger.info(s"Creating dataset $dataset...")
-      actorAsk(coordinatorActor, CreateDataset(dataset, Nil)) {
+      actorAsk(FiloSetup.coordinatorActor, CreateDataset(dataset, Nil)) {
         case DatasetCreated =>
           logger.info(s"Dataset $datasetName created successfully...")
         case DatasetError(errMsg) =>
@@ -173,19 +203,8 @@ package object spark extends StrictLogging {
       sortedDf.rdd.mapPartitionsWithIndex { case (index, rowIter) =>
         // Everything within this function runs on each partition/executor, so need a local datastore & system
         FiloSetup.init(filoConfig)
-
         logger.info(s"Starting ingestion of DataFrame for dataset $dataset, partition $index...")
-        val ingestActor = FiloSetup.system.actorOf(RddRowSourceActor.props(rowIter, dfColumns,
-                            dataset, version, FiloSetup.coordinatorActor))
-        implicit val timeout = Timeout(writeTimeout)
-        val res = Await.result(ingestActor ? RowSource.Start, writeTimeout)
-        logger.info(s"Got back $res from RddRowSourceActor...")
-        res match {
-          case SetupError(UnknownDataset) => throw DatasetNotFound(dataset)
-          case SetupError(BadSchema(reason)) => throw BadSchemaError(reason)
-          case SetupError(err)            => throw new RuntimeException(s"Error with ingestion setup: $err")
-          case AllDone                    => logger.info(s"Ingestion done for partition $index")
-        }
+        ingestRddRows(FiloSetup.coordinatorActor, dataset, dfColumns, version, rowIter)
         Iterator.empty
       }.count()
     }

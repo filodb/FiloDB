@@ -37,6 +37,7 @@ To compile the .mermaid source files to .png's, install the [Mermaid CLI](http:/
 * The storage format is subject to change at this time.
 * Only ingestion through Spark / Spark Streaming, and CLI ingestion via CSV files.
 * Only string, Int, Long partition keys and Long/Timestamp/Int/Double sort keys are supported, but many more to come
+* You are currently responsible for ensuring that partition keys are not spread across multiple nodes of a DataFrame when ingesting.
 
 ## Roadmap
 
