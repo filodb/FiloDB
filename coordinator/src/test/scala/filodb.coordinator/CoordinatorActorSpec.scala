@@ -64,7 +64,7 @@ with CoordinatorSetup with AllTablesTest {
     it("should return BadSchema if dataset definition bazooka") {
       createTable(GdeltDataset.copy(partitionColumn = "foo"), GdeltColumns)
       probe.send(coordActor, SetupIngestion(dsName, GdeltColNames, 0))
-      probe.expectMsg(BadSchema)
+      probe.expectMsgClass(classOf[BadSchema])
     }
   }
 

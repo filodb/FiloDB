@@ -42,7 +42,7 @@ object CoordinatorActor {
   case object IngestionReady extends Response
   case object UnknownDataset extends ErrorResponse
   case class UndefinedColumns(undefined: Seq[String]) extends ErrorResponse
-  case object BadSchema extends ErrorResponse
+  case class BadSchema(message: String) extends ErrorResponse
 
   /**
    * Ingests a new set of rows for a given dataset and version.
@@ -140,7 +140,7 @@ class CoordinatorActor(memTable: MemTable,
         case MemTable.SetupDone    => originator ! IngestionReady
         // If the table is already set up, that's fine!
         case MemTable.AlreadySetup => originator ! IngestionReady
-        case MemTable.BadSchema    => originator ! BadSchema
+        case MemTable.BadSchema(msg) => originator ! BadSchema(msg)
       }
     }).recover {
       case NotFoundError(what) => originator ! UnknownDataset

@@ -3,14 +3,15 @@ package filodb.cli
 import akka.actor.{ActorRef, ActorSystem}
 import akka.pattern.ask
 import akka.util.Timeout
-import com.opencsv.CSVWriter
+import com.opencsv.{CSVReader, CSVWriter}
+import org.velvia.filo.{ArrayStringRowReader, RowReader}
 import scala.concurrent.{Await, Future, ExecutionContext}
 import scala.concurrent.duration._
 import scala.language.postfixOps
 
 import filodb.core.metadata.MetaStore
 import filodb.core.reprojector.MemTable
-import filodb.coordinator.RowSource
+import filodb.coordinator.CoordinatorActor
 import filodb.coordinator.sources.CsvSourceActor
 import filodb.core._
 
@@ -24,6 +25,7 @@ trait CsvImportExport {
   var exitCode = 0
 
   implicit val ec: ExecutionContext
+  import scala.collection.JavaConversions._
 
   protected def parseResponse[B](cmd: => Future[Response])(handler: PartialFunction[Response, B]): B = {
     Await.result(cmd, 5 seconds) match {
@@ -53,13 +55,50 @@ trait CsvImportExport {
 
   def ingestCSV(dataset: String, version: Int, csvPath: String) {
     val fileReader = new java.io.FileReader(csvPath)
-    println("Ingesting CSV at " + csvPath)
-    val csvActor = system.actorOf(CsvSourceActor.props(fileReader, dataset, version, coordinatorActor))
-    actorAsk(csvActor, RowSource.Start, 61 minutes) {
-      case RowSource.SetupError(err) =>
-        println(s"ERROR: $err")
+
+    val reader = new CSVReader(fileReader, ',')
+    val columns = reader.readNext.toSeq
+    println(s"Ingesting CSV at $csvPath with columns $columns...")
+
+    val ingestCmd = CoordinatorActor.SetupIngestion(dataset, columns, version: Int)
+    actorAsk(coordinatorActor, ingestCmd, 10 seconds) {
+      case CoordinatorActor.IngestionReady =>
+      case CoordinatorActor.UnknownDataset =>
+        println(s"Dataset $dataset is not known, you need to --create it first!")
         exitCode = 2
-      case RowSource.AllDone =>
+        return
+      case CoordinatorActor.UndefinedColumns(undefCols) =>
+        println(s"Some columns $undefCols are not defined, please define them with --create first!")
+        exitCode = 2
+        return
+      case CoordinatorActor.BadSchema(msg) =>
+        println(s"BadSchema - $msg")
+        exitCode = 2
+        return
+    }
+
+    var linesIngested = 0
+    reader.iterator.grouped(100).foreach { lines =>
+      val mappedLines = lines.toSeq.map(ArrayStringRowReader)
+      var resp: MemTable.IngestionResponse = MemTable.PleaseWait
+      do {
+        resp = memTable.ingestRows(dataset, version, mappedLines)
+        if (resp == MemTable.PleaseWait) {
+          do {
+            println("Waiting for MemTable to be able to ingest again...")
+            Thread sleep 10000
+          } while (!memTable.canIngest(dataset, version))
+        }
+      } while (resp != MemTable.Ingested)
+      linesIngested += mappedLines.length
+      if (linesIngested % 10000 == 0) println(s"Ingested $linesIngested lines!")
+    }
+    // val csvActor = system.actorOf(CsvSourceActor.props(fileReader, dataset, version, coordinatorActor))
+    // actorAsk(csvActor, RowSource.Start, 61 minutes) {
+    //   case RowSource.SetupError(err) =>
+    //     println(s"ERROR: $err")
+    //     exitCode = 2
+    //   case RowSource.AllDone =>
         println("Waiting for scheduler/memTable to finish flushing everything")
         Thread sleep 5000
         while (memTable.flushingDatasets.nonEmpty) {
@@ -68,7 +107,7 @@ trait CsvImportExport {
         }
         println("ingestCSV finished!")
         exitCode = 0
-    }
+    // }
   }
 
   def exportCSV(dataset: String, version: Int,

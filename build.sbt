@@ -126,7 +126,7 @@ lazy val styleSettings = Seq(
 )
 
 lazy val shellScript = """#!/usr/bin/env sh
-exec java -jar "$0" "$@"
+exec java -Xmx4g -Xms4g -jar "$0" "$@"
 """.split("\n")
 
 // Builds cli as a standalone executable to make it easier to launch commands

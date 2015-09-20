@@ -35,8 +35,8 @@ To compile the .mermaid source files to .png's, install the [Mermaid CLI](http:/
 ## Current Status
 
 * The storage format is subject to change at this time.
-* You can ingest data using Spark, partitioned by a partition key, and sorted using a sort key.  CLI ingestion only by CSV files.
-* Only string partition keys and Long/Timestamp/Int/Double sort keys are supported, but many more to come
+* Only ingestion through Spark / Spark Streaming, and CLI ingestion via CSV files.
+* Only string, Int, Long partition keys and Long/Timestamp/Int/Double sort keys are supported, but many more to come
 
 ## Roadmap
 
@@ -205,7 +205,7 @@ filo-cli --command list --dataset gdelt
 Import a CSV file (note: it must have a header row, the column names must match what was created before, and must be comma-delimited):
 
 ```
-filo-cli --command importcsv --dataset gdelt --partition first --filename GDELT_1979-1984.csv
+filo-cli --command importcsv --dataset gdelt --filename GDELT_1979-1984.csv
 ```
 
 Query/export some columns:
