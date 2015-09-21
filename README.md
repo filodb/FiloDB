@@ -37,7 +37,7 @@ To compile the .mermaid source files to .png's, install the [Mermaid CLI](http:/
 * The storage format is subject to change at this time.
 * Only ingestion through Spark / Spark Streaming, and CLI ingestion via CSV files.
 * Only string, Int, Long partition keys and Long/Timestamp/Int/Double sort keys are supported, but many more to come
-* You are currently responsible for ensuring that partition keys are not spread across multiple nodes of a DataFrame when ingesting.
+* You are currently responsible for ensuring that partition keys are not spread across multiple nodes of a DataFrame when ingesting.  It might be as simple as a `df.sort`.
 
 ## Roadmap
 
@@ -121,6 +121,8 @@ scala> csvDF.write.format("filodb.spark").
              option("dataset", "gdelt").option("sort_column", "GLOBALEVENTID").
              mode(SaveMode.Overwrite).save()
 ```
+
+Note that FiloDB uses an off-heap direct memory memtable, and you probably need to bump Spark's default direct memory size with a `-XX:MaxDirectMemorySize=1G` or some larger setting.
 
 - Write data without partition column
 
