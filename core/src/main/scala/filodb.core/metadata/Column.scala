@@ -3,7 +3,7 @@ package filodb.core.metadata
 import com.typesafe.scalalogging.slf4j.StrictLogging
 import enumeratum.{Enum, EnumEntry}
 
-import filodb.core.messages.{Command, Response}
+import filodb.core.Types._
 
 /**
  * Defines a column of data and its properties.
@@ -31,6 +31,9 @@ case class Column(name: String,
                   serializer: Column.Serializer = Column.Serializer.FiloSerializer,
                   isDeleted: Boolean = false,
                   isSystem: Boolean = false) {
+  // More type safe than just using ==, if we ever change the type of ColumnId
+  def hasId(id: ColumnId): Boolean = name == id
+
   /**
    * Has one of the properties other than name, dataset, version changed?
    * (Name and dataset have to be constant for comparison to even be valid)
@@ -43,16 +46,22 @@ case class Column(name: String,
 }
 
 object Column extends StrictLogging {
-  sealed trait ColumnType extends EnumEntry
+  sealed trait ColumnType extends EnumEntry {
+    // NOTE: due to a Spark serialization bug, this cannot be a val
+    // (https://github.com/apache/spark/pull/7122)
+    def clazz: Class[_]
+  }
 
   object ColumnType extends Enum[ColumnType] {
     val values = findValues
 
-    case object IntColumn extends ColumnType
-    case object LongColumn extends ColumnType
-    case object DoubleColumn extends ColumnType
-    case object StringColumn extends ColumnType
-    case object BitmapColumn extends ColumnType
+    //scalastyle:off
+    case object IntColumn extends ColumnType { def clazz = classOf[Int] }
+    case object LongColumn extends ColumnType { def clazz = classOf[Long] }
+    case object DoubleColumn extends ColumnType { def clazz = classOf[Double] }
+    case object StringColumn extends ColumnType { def clazz = classOf[String] }
+    case object BitmapColumn extends ColumnType { def clazz = classOf[Boolean] }
+    //scalastyle:on
   }
 
   sealed trait Serializer extends EnumEntry

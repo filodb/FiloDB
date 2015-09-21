@@ -3,8 +3,6 @@ package filodb.core
 import java.util.concurrent.atomic.AtomicInteger
 import scala.concurrent.{ExecutionContext, Future}
 
-import filodb.core.messages.{Response, TooManyRequests}
-
 trait FutureUtils {
   val limiter: ConcurrentLimiter
 

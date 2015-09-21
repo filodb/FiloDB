@@ -62,4 +62,19 @@ class ColumnSpec extends FunSpec with Matchers {
       reasons should have length 0
     }
   }
+
+  describe("Column serialization") {
+    // See https://github.com/apache/spark/pull/7122 - serialization bug involving Class[Long] etc.
+    it("should serialize and deserialize properly") {
+      val baos = new java.io.ByteArrayOutputStream
+      val oos = new java.io.ObjectOutputStream(baos)
+      oos.writeObject(ageColumn)
+
+      val bais = new java.io.ByteArrayInputStream(baos.toByteArray)
+      val ois = new java.io.ObjectInputStream(bais)
+      val readColumn = ois.readObject().asInstanceOf[Column]
+
+      readColumn should equal (ageColumn)
+    }
+  }
 }
