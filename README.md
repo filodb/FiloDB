@@ -1,7 +1,7 @@
 # FiloDB
 
 [![Join the chat at https://gitter.im/velvia/FiloDB](https://badges.gitter.im/Join%20Chat.svg)](https://gitter.im/velvia/FiloDB?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)
-Distributed.  Columnar.  Versioned.  Streaming.
+Distributed.  Columnar.  Versioned.  Streaming.  SQL.
 
 ```
     _______ __      ____  ____ 
@@ -54,6 +54,8 @@ Your input is appreciated!
 **YOU WILL NEED JDK 1.8**
 
 First, build the CLI using `sbt cli/assembly`.  This will create an executable in `cli/target/scala-2.10/filo-cli-*`.  In the examples below, the "filo-cli" command is an alias to this executable.
+
+Start up local Cassandra, at least 2.0.6 or above, but preferably 2.1.x.  I use [CCM](https://github.com/pcmanus/ccm).
 
 To initialize the C* tables:
 
