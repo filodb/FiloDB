@@ -71,6 +71,8 @@ Build the spark data source module with `sbt spark/assembly`.  Then, CD into a S
 bin/spark-shell --jars ../FiloDB/spark/target/scala-2.10/filodb-spark-assembly-0.1-SNAPSHOT.jar
 ```
 
+NOTE: you can also follow along using the [Spark Notebook](http://github.com/andypetrella/spark-notebook) in doc/FiloDB.snb....  launch the notebook using `EXTRA_CLASSPATH=$FILO_JAR ADD_JARS=$FILO_JAR ./bin/spark-notebook &` where `FILO_JAR` is the path above to `filodb-spark-assembly` jar.
+
 ### Ingesting and Querying with DataFrames (New API)
 
 You can use the Spark Dataframes `read` and `write` APIs with FiloDB.  This should also make it possible to create and ingest data using only JDBC, or the SQL Shell.  To create a dataset:
@@ -93,6 +95,8 @@ To read it back:
 ```scala
 val df = sqlContext.read.format("filodb.spark").option("dataset", "gdelt").load()
 ```
+
+Then see the "Querying Datasets" part of the examples below.
 
 ### Spark SQL Example
 
@@ -159,7 +163,6 @@ import filodb.spark._
 scala> sqlContext.saveAsFiloDataset(myDF, "table1", sortCol, partCol, createDataset=true)
 ```
 
-Currently it does not append but rather overwrites, but this will be fixed.
 Reading is just as easy:
 
 ```scala
