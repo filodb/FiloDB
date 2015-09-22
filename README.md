@@ -37,7 +37,7 @@ To compile the .mermaid source files to .png's, install the [Mermaid CLI](http:/
 * The storage format is subject to change at this time.
 * Only ingestion through Spark / Spark Streaming, and CLI ingestion via CSV files.
 * Only string, Int, Long partition keys and Long/Timestamp/Int/Double sort keys are supported, but many more to come
-* You are currently responsible for ensuring that partition keys are not spread across multiple nodes of a DataFrame when ingesting.
+* You are currently responsible for ensuring that partition keys are not spread across multiple nodes of a DataFrame when ingesting.  It might be as simple as a `df.sort`.
 
 ## Roadmap
 
@@ -71,6 +71,8 @@ Build the spark data source module with `sbt spark/assembly`.  Then, CD into a S
 bin/spark-shell --jars ../FiloDB/spark/target/scala-2.10/filodb-spark-assembly-0.1-SNAPSHOT.jar
 ```
 
+NOTE: you can also follow along using the [Spark Notebook](http://github.com/andypetrella/spark-notebook) in doc/FiloDB.snb....  launch the notebook using `EXTRA_CLASSPATH=$FILO_JAR ADD_JARS=$FILO_JAR ./bin/spark-notebook &` where `FILO_JAR` is the path above to `filodb-spark-assembly` jar.
+
 ### Ingesting and Querying with DataFrames (New API)
 
 You can use the Spark Dataframes `read` and `write` APIs with FiloDB.  This should also make it possible to create and ingest data using only JDBC, or the SQL Shell.  To create a dataset:
@@ -93,6 +95,28 @@ To read it back:
 ```scala
 val df = sqlContext.read.format("filodb.spark").option("dataset", "gdelt").load()
 ```
+
+Then see the "Querying Datasets" part of the examples below.
+
+### Spark SQL Example
+
+Start Spark-SQL:
+
+```bash
+  bin/spark-sql --jars path/to/FiloDB/spark/target/scala-2.10/filodb-spark-assembly-0.1-SNAPSHOT.jar
+```
+
+Create a temporary table:
+
+```sql
+  create temporary table gdelt
+  using filodb.spark
+  options (
+   dataset "gdelt"
+ );
+```
+
+Then, start running SQL queries!
 
 ### Detailed Ingestion Example
 
@@ -122,6 +146,8 @@ scala> csvDF.write.format("filodb.spark").
              mode(SaveMode.Overwrite).save()
 ```
 
+Note that FiloDB uses an off-heap direct memory memtable, and you probably need to bump Spark's default direct memory size with a `-XX:MaxDirectMemorySize=1G` or some larger setting.
+
 - Write data without partition column
 
 - DIscuss how to create a partition column
@@ -137,7 +163,6 @@ import filodb.spark._
 scala> sqlContext.saveAsFiloDataset(myDF, "table1", sortCol, partCol, createDataset=true)
 ```
 
-Currently it does not append but rather overwrites, but this will be fixed.
 Reading is just as easy:
 
 ```scala

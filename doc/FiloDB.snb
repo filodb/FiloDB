@@ -1,0 +1,112 @@
+{
+  "metadata" : {
+    "name" : "FiloDB",
+    "user_save_timestamp" : "1969-12-31T16:00:00.000Z",
+    "auto_save_timestamp" : "1969-12-31T16:00:00.000Z",
+    "language_info" : {
+      "name" : "scala",
+      "file_extension" : "scala",
+      "codemirror_mode" : "text/x-scala"
+    },
+    "trusted" : true,
+    "customLocalRepo" : null,
+    "customRepos" : null,
+    "customDeps" : null,
+    "customImports" : [ "import org.apache.spark.sql.functions._\n" ],
+    "customSparkConf" : {
+      "spark.app.name" : "Notebook",
+      "spark.master" : "local[8]",
+      "spark.executor.memory" : "2G"
+    }
+  },
+  "cells" : [ {
+    "metadata" : { },
+    "cell_type" : "markdown",
+    "source" : "## Querying Data using FiloDB\n1. Start Cassandra\n2. Ingest some data, according to FiloDB README (TODO: convert this to another notebook or more notebook steps)\nblah blah blah"
+  }, {
+    "metadata" : {
+      "trusted" : true,
+      "input_collapsed" : false,
+      "collapsed" : false
+    },
+    "cell_type" : "code",
+    "source" : "val sqlContext = new org.apache.spark.sql.SQLContext(sparkContext)",
+    "outputs" : [ ]
+  }, {
+    "metadata" : {
+      "trusted" : true,
+      "input_collapsed" : false,
+      "collapsed" : false
+    },
+    "cell_type" : "code",
+    "source" : "val df = sqlContext.read.format(\"filodb.spark\").option(\"dataset\", \"gdelt\").load()",
+    "outputs" : [ ]
+  }, {
+    "metadata" : {
+      "trusted" : true,
+      "input_collapsed" : false,
+      "collapsed" : false
+    },
+    "cell_type" : "code",
+    "source" : "df.registerTempTable(\"gdelt\")",
+    "outputs" : [ ]
+  }, {
+    "metadata" : { },
+    "cell_type" : "markdown",
+    "source" : "You can query FiloDB using the Spark DataFrames DSL, or using SQL.  Both of these are demoed below.  For SQL queries you need to register the DataFrame with a table name first.\nThe third way is a way of converting the output to a Scala collection so that Spark Notebook can render as a graph."
+  }, {
+    "metadata" : {
+      "trusted" : true,
+      "input_collapsed" : false,
+      "collapsed" : false
+    },
+    "cell_type" : "code",
+    "source" : "df.select(count(\"MonthYear\")).show",
+    "outputs" : [ ]
+  }, {
+    "metadata" : {
+      "trusted" : true,
+      "input_collapsed" : false,
+      "collapsed" : false
+    },
+    "cell_type" : "code",
+    "source" : "sqlContext.sql(\"select Actor1Name, count(*) as c from gdelt group by Actor1Name order by c desc limit 15\").show()",
+    "outputs" : [ ]
+  }, {
+    "metadata" : {
+      "trusted" : true,
+      "input_collapsed" : false,
+      "collapsed" : false
+    },
+    "cell_type" : "code",
+    "source" : "val sql1 = \"select Actor1Name, count(*) as c from gdelt group by Actor1Name order by c desc limit 15\"\nsqlContext.sql(sql1).collect.map { row => (row.getString(0), row.getLong(1)) }",
+    "outputs" : [ ]
+  }, {
+    "metadata" : {
+      "trusted" : true,
+      "input_collapsed" : false,
+      "collapsed" : true
+    },
+    "cell_type" : "markdown",
+    "source" : "## Machine Learning with FiloDB\n\nNow, how about something uniquely Spark .. feed SQL query results to MLLib to compute a correlation:"
+  }, {
+    "metadata" : {
+      "trusted" : true,
+      "input_collapsed" : false,
+      "collapsed" : false
+    },
+    "cell_type" : "code",
+    "source" : "import org.apache.spark.mllib.stat.Statistics\nval numMentions = df.select(\"NumMentions\").map(row => row.getInt(0).toDouble)\nval numArticles = df.select(\"NumArticles\").map(row => row.getInt(0).toDouble)\nStatistics.corr(numMentions, numArticles, \"pearson\")",
+    "outputs" : [ ]
+  }, {
+    "metadata" : {
+      "trusted" : true,
+      "input_collapsed" : false,
+      "collapsed" : true
+    },
+    "cell_type" : "code",
+    "source" : "",
+    "outputs" : [ ]
+  } ],
+  "nbformat" : 4
+}
