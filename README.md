@@ -94,6 +94,26 @@ To read it back:
 val df = sqlContext.read.format("filodb.spark").option("dataset", "gdelt").load()
 ```
 
+### Spark SQL Example
+
+Start Spark-SQL:
+
+```bash
+  bin/spark-sql --jars path/to/FiloDB/spark/target/scala-2.10/filodb-spark-assembly-0.1-SNAPSHOT.jar
+```
+
+Create a temporary table:
+
+```sql
+  create temporary table gdelt
+  using filodb.spark
+  options (
+   dataset "gdelt"
+ );
+```
+
+Then, start running SQL queries!
+
 ### Detailed Ingestion Example
 
 This example uses the checked in CSV file `GDELT-1979-1984-100000.csv` to walk through ingesting data.  To ingest the CSV, start spark-shell with the spark-csv package:
