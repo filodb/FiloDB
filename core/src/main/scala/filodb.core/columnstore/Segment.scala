@@ -47,7 +47,15 @@ class GenericSegment[K](val keyRange: KeyRange[K],
   def addChunk(id: ChunkID, column: ColumnId, bytes: Chunk): Unit = {
     if (!(chunkIds contains id)) chunkIds += id
     val columnChunks = chunks.getOrElseUpdate(column, new HashMap[ChunkID, Chunk])
-    columnChunks(id) = bytes
+    // If this is from a Filo ByteBuffer where the bytes only occupy part of the buffer,
+    // copy the bytes out to save memory
+    columnChunks(id) =
+      if (bytes.position > 0) {
+        val destBytes = new Array[Byte](bytes.remaining)
+        Array.copy(bytes.array, bytes.arrayOffset + bytes.position,
+                   destBytes, 0, bytes.remaining)
+        ByteBuffer.wrap(destBytes)
+      } else { bytes }
   }
 
   def getChunks: Iterator[(ColumnId, ChunkID, Chunk)] =
