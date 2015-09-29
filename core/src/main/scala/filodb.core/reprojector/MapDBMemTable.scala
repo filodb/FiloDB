@@ -41,7 +41,12 @@ class MapDBMemTable(config: Config) extends MemTable {
   val minFreeMb = config.as[Option[Int]]("memtable.min-free-mb").getOrElse(DefaultMinFreeMb)
 
   // According to MapDB examples, use incremental backup with memory-only store
-  private val db = DBMaker.newMemoryDB.transactionDisable.closeOnJvmShutdown.make()
+  // Also, the cache was causing us to run out of memory because it's unbounded.
+  private val db = DBMaker.newMemoryDB
+                          .transactionDisable
+                          .closeOnJvmShutdown
+                          .cacheDisable
+                          .make()
 
   /**
    * === Row ingest, read, delete operations ===
@@ -106,6 +111,7 @@ class MapDBMemTable(config: Config) extends MemTable {
       }
       logger.debug(s"Deleting locked memtable for dataset $dataset / version $version")
       db.delete(lockedName)
+      db.compact()
     }.getOrElse(return NoSuchDatasetVersion)
 
     logger.debug(s"Flipping active to locked memtable for dataset $dataset / version $version")

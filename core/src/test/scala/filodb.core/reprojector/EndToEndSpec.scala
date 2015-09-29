@@ -11,6 +11,29 @@ import filodb.core.columnstore.{SegmentSpec, RowReaderSegment, InMemoryColumnSto
 import org.scalatest.{FunSpec, Matchers, BeforeAndAfter}
 import org.scalatest.concurrent.ScalaFutures
 
+// MyTupleRowReader is a temporary fix due to a deserialization bug with TupleRowReader.
+// When new version of filo comes out, revert back to TupleRowReader.
+import org.velvia.filo.RowReader
+case class MyTupleRowReader(tuple: Product) extends RowReader {
+  def notNull(columnNo: Int): Boolean = tuple.productElement(columnNo).asInstanceOf[Option[Any]].nonEmpty
+  def getInt(columnNo: Int): Int = tuple.productElement(columnNo) match {
+    case Some(x: Int) => x
+  }
+
+  def getLong(columnNo: Int): Long = tuple.productElement(columnNo) match {
+    case Some(x: Long) => x
+  }
+
+  def getDouble(columnNo: Int): Double = tuple.productElement(columnNo) match {
+    case Some(x: Double) => x
+  }
+
+  def getString(columnNo: Int): String = tuple.productElement(columnNo) match {
+    case Some(x: String) => x
+  }
+}
+
+
 /**
  * Ingests rows into MemTable, calling Scheduler with DefaultReprojector, with the InMemoryColumnStore.
  * Then reads data back out.
@@ -64,7 +87,7 @@ class EndToEndSpec extends FunSpec with Matchers with BeforeAndAfter with ScalaF
   it("should ingest all rows, flush them to columstore, and be able to read them back") {
     // ingest rows into MemTable and check they are ingested OK
     mTable.setupIngestion(largeDataset, schemaWithPartCol, 0) should equal (SetupDone)
-    mTable.ingestRows("dataset", 0, namesWithPartCol.map(TupleRowReader)) should equal (Ingested)
+    mTable.ingestRows("dataset", 0, namesWithPartCol.map(MyTupleRowReader)) should equal (Ingested)
     mTable.allNumRows(Active) should equal (Seq((("dataset", 0), 1200L)))
 
     // Schedule a flush, wait, and see that it's done.  Each flush task = 3 segments, so there

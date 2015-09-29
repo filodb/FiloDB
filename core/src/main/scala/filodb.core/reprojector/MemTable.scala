@@ -130,6 +130,7 @@ trait MemTable extends StrictLogging {
     val freeMB = sys.runtime.freeMemory / (1024*1024)
     if (freeMB < minFreeMb) {
       logger.info(s"Only $freeMB MB memory left, cannot accept more writes...")
+      logger.info(s"MemTable state: ${allNumRows(Active, true)}")
       sys.runtime.gc()
       return PleaseWait
     }
