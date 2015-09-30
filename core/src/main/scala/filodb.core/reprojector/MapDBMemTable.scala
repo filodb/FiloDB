@@ -4,7 +4,9 @@ import com.typesafe.config.Config
 import net.ceedubs.ficus.Ficus._
 import org.mapdb._
 import org.velvia.filo.RowReader
+import scala.collection.Map
 import scala.math.Ordered
+import scalaxy.loops._
 
 import filodb.core.{KeyRange, SortKeyHelper}
 import filodb.core.Types._
@@ -13,6 +15,12 @@ import filodb.core.metadata.{Column, Dataset}
 /**
  * A MemTable backed by MapDB.  Need to do some experimentation to come up with a setup that is fast
  * yet safe, for reading and writing. Not there yet.
+ *
+ * We serialize RowReaders for storage into MapDB, because some RowReaders can store deep graphs and be
+ * very expensive for the default serialization (for example SparkRowReader).
+ *
+ * NOTE: MapDB apparently has an issue with memory leaks, deleteTable / deleteRows does not appear to
+ * compact the table properly.
  *
  * MapDB table namespacing scheme:
  *   datasetName/version/active
@@ -59,10 +67,11 @@ class MapDBMemTable(config: Config) extends MemTable {
 
     // For each row: insert into rows map
     val rowMap = getRowMap[K](setup.dataset.name, version, Active).get
+    val serializer = serializers((setup.dataset.name, version))
     if (rowMap.size() >= maxRowsPerTable) return PleaseWait
     for { row <- rows } {
       val sortKey = extractor.getField(row, setup.sortColumnNum)
-      rowMap.put((setup.partitioningFunc(row), sortKey), row)
+      rowMap.put((setup.partitioningFunc(row), sortKey), serializer.serialize(row))
     }
     Ingested
   }
@@ -76,8 +85,9 @@ class MapDBMemTable(config: Config) extends MemTable {
                                  version: Int,
                                  buffer: BufferType): Iterator[RowReader] = {
     getRowMap[K](keyRange.dataset, version, buffer).map { rowMap =>
+      val serializer = serializers((keyRange.dataset, version))
       rowMap.subMap((keyRange.partition, keyRange.start), (keyRange.partition, keyRange.end))
-        .keySet.iterator.map { k => rowMap.get(k) }
+        .keySet.iterator.map { k => serializer.deserialize(rowMap.get(k)) }
     }.getOrElse {
       Iterator.empty
     }
@@ -86,8 +96,9 @@ class MapDBMemTable(config: Config) extends MemTable {
   def readAllRows[K](dataset: TableName, version: Int, buffer: BufferType):
       Iterator[(PartitionKey, K, RowReader)] = {
     getRowMap[K](dataset, version, buffer).map { rowMap =>
+      val serializer = serializers((dataset, version))
       rowMap.keySet.iterator.map { case index @ (part, k) =>
-        (part, k, rowMap.get(index))
+        (part, k, serializer.deserialize(rowMap.get(index)))
       }
     }.getOrElse {
       Iterator.empty
@@ -134,16 +145,66 @@ class MapDBMemTable(config: Config) extends MemTable {
   private def tableName(dataset: TableName, version: Int, buffer: BufferType) =
     s"$dataset/$version/" + (if (buffer == Active) "active" else "locked")
 
+  var serializers = Map.empty[(TableName, Int), RowReaderSerializer]
+
   private def getRowMap[K](dataset: TableName, version: Int, buffer: BufferType) = {
-    // We don't really need the IngestionSetup, just want to make sure users setup tables first
     getIngestionSetup(dataset, version).map { setup =>
+      serializers.synchronized {
+        val nameVer = (setup.dataset.name, version)
+        if (!(serializers contains nameVer)) {
+          serializers = serializers + (nameVer -> new RowReaderSerializer(setup.schema))
+        }
+      }
       implicit val sortKeyOrdering: Ordering[K] = setup.helper[K].ordering
-      db.createTreeMap(tableName(dataset, version, buffer))
+      db.createTreeMap(tableName(setup.dataset.name, version, buffer))
         .comparator(Ordering[(PartitionKey, K)])
         .valuesOutsideNodesEnable()   // Otherwise will pull out all values in a BTree Node at once
         .counterEnable()
-        .makeOrGet().asInstanceOf[BTreeMap[(PartitionKey, K), RowReader]]
+        .valueSerializer(Serializer.BYTE_ARRAY)
+        .makeOrGet().asInstanceOf[BTreeMap[(PartitionKey, K), Array[Byte]]]
     }
   }
 }
 
+// This is not going to be the most efficient serializer around, but it would be better than serializing
+// using Java serializer complex objects such as Spark's Row, which includes references to Schema etc.
+class RowReaderSerializer(schema: Seq[Column]) {
+  import org.velvia.MsgPack
+  import Column.ColumnType._
+
+  val fillerFuncs: Array[(RowReader, Array[Any]) => Unit] = schema.map(_.columnType).zipWithIndex.map {
+    case (IntColumn, i)    => (r: RowReader, a: Array[Any]) => a(i) = r.getInt(i)
+    case (LongColumn, i)   => (r: RowReader, a: Array[Any]) => a(i) = r.getLong(i)
+    case (DoubleColumn, i) => (r: RowReader, a: Array[Any]) => a(i) = r.getDouble(i)
+    case (StringColumn, i) => (r: RowReader, a: Array[Any]) => a(i) = r.getString(i)
+    case (x, i)            => throw new RuntimeException(s"RowReaderSerializer: Unsupported column type $x")
+  }.toArray
+
+  def serialize(r: RowReader): Array[Byte] = {
+    val aray = new Array[Any](schema.length)
+    for { i <- 0 until schema.length optimized } {
+      //scalastyle:off
+      if (r.notNull(i)) { fillerFuncs(i)(r, aray) }
+      else              { aray(i) = null }
+      //scalastyle:on
+    }
+    MsgPack.pack(aray)
+  }
+
+  def deserialize(bytes: Array[Byte]): RowReader = {
+    val data = MsgPack.unpack(bytes)
+    VectorRowReader(data.asInstanceOf[Vector[Any]])
+  }
+}
+
+case class VectorRowReader(vector: Vector[Any]) extends RowReader {
+  import org.velvia.MsgPackUtils
+
+  //scalastyle:off
+  def notNull(columnNo: Int): Boolean = vector(columnNo) != null
+  //scalastyle:on
+  def getInt(columnNo: Int): Int = MsgPackUtils.getInt(vector(columnNo))
+  def getLong(columnNo: Int): Long = MsgPackUtils.getLong(vector(columnNo))
+  def getDouble(columnNo: Int): Double = vector(columnNo).asInstanceOf[Double]
+  def getString(columnNo: Int): String = vector(columnNo).asInstanceOf[String]
+}

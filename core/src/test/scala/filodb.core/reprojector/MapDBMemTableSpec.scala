@@ -49,6 +49,7 @@ class MapDBMemTableSpec extends FunSpec with Matchers with BeforeAndAfter with S
 
       mTable.datasets should equal (Set(dataset.name))
       mTable.numRows("dataset", 0, Active) should equal (Some(6L))
+      mTable.numRows("dataset", 0, Locked) should equal (Some(0L))
 
       val outRows = mTable.readRows(keyRange, 0, Active)
       outRows.toSeq.map(_.getString(0)) should equal (firstNames)

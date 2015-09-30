@@ -64,6 +64,7 @@ lazy val coreDeps = Seq(
   "org.velvia.filo"      %% "filo-scala"        % "0.1.4" excludeAll(excludeShapeless),
   "io.spray"             %% "spray-caching"     % "1.3.2",
   "org.mapdb"             % "mapdb"             % "1.0.6",
+  "org.velvia"           %% "msgpack4s"         % "0.5.1",
   "net.ceedubs"          %% "ficus"             % "1.0.1",
   "org.scodec"           %% "scodec-bits"       % "1.0.10",
   "com.nativelibs4java"  %% "scalaxy-loops"     % "0.3.3" % "provided",
