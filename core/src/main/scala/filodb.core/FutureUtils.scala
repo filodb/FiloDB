@@ -1,6 +1,7 @@
 package filodb.core
 
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.{ArrayBlockingQueue, TimeUnit, ThreadFactory, ThreadPoolExecutor}
 import scala.concurrent.{ExecutionContext, Future}
 
 trait FutureUtils {
@@ -20,6 +21,38 @@ trait FutureUtils {
     } else {
       Future.successful(TooManyRequests)
     }
+  }
+}
+
+object FutureUtils {
+  /**
+   * Obtains an ExecutionContext with a bounded number of tasks.  Additional attempts to add more Runnables
+   * to the context when the number of tasks has reached maxTasks will result in blockage.
+   * See http://quantifind.com/blog/2015/06/throttling-instantiations-of-scala-futures-1/
+   * @param maxTasks the maximum number of tasks that can be added before blocking
+   * @param poolName the string prefix to append to worker threads of this threadpool
+   * @param numWorkers the number of threads in the thread pool
+   */
+  def getBoundedExecContext(maxTasks: Int,
+                            poolName: String,
+                            numWorkers: Int = sys.runtime.availableProcessors): ExecutionContext = {
+    ExecutionContext.fromExecutorService(
+      new ThreadPoolExecutor(
+        numWorkers, numWorkers,
+        0L, TimeUnit.SECONDS,
+        new ArrayBlockingQueue[Runnable](maxTasks) {
+          override def offer(e: Runnable): Boolean = {
+            put(e); // may block if waiting for empty room
+            true
+          }
+        },
+        new ThreadFactory {
+          val counter = new AtomicInteger
+          override def newThread(r: Runnable): Thread =
+            new Thread(r, s"$poolName-${counter.incrementAndGet}")
+        }
+      )
+     )
   }
 }
 

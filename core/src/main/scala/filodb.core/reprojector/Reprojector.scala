@@ -21,9 +21,7 @@ trait Reprojector {
    * Does reprojection (columnar flushes from memtable) for a single dataset.
    * Should completely flush all segments out of the locked memtable.
    * Throttling is achieved via passing in an ExecutionContext which limits the number of futures, and
-   * sizing the thread pool appropriately.
-   *    TOOD: create an ExecutionContext based on the blog post
-   *    TODO: test!!
+   * sizing the thread pool appropriately -- see CoordinatorSetup for an example
    *
    * Failures:
    * The Scheduler only schedules one reprojection task at a time per (dataset, version), so if this fails,

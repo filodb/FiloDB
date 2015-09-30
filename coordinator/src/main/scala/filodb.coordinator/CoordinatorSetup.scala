@@ -3,8 +3,9 @@ package filodb.coordinator
 import akka.actor.ActorSystem
 import com.typesafe.config.Config
 
-import filodb.core.metadata.MetaStore
 import filodb.core.columnstore.ColumnStore
+import filodb.core.FutureUtils
+import filodb.core.metadata.MetaStore
 import filodb.core.reprojector._
 
 /**
@@ -16,9 +17,9 @@ trait CoordinatorSetup {
   // The global configuration object
   def config: Config
 
-  // TODO: Allow for a configurable thread pool for the futures, don't just use the global one
-  // and strongly consider using a BlockingQueue with the ThreadPoolExecutor with limited capacity
-  implicit val ec = scala.concurrent.ExecutionContext.Implicits.global
+  implicit lazy val ec = FutureUtils.getBoundedExecContext(config.getInt("max-reprojection-futures"),
+                                                      "filodb.core",
+                                                      config.getInt("core-futures-pool-size"))
 
   // These should be implemented as lazy val's, though tests might want to reset them
   val memTable: MemTable
