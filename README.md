@@ -151,8 +151,6 @@ Or you can start a spark-shell locally,
 ```bash
 bin/spark-shell --jars ../FiloDB/spark/target/scala-2.10/filodb-spark-assembly-0.1-SNAPSHOT.jar --packages com.databricks:spark-csv_2.10:1.2.0 --driver-memory 3G --executor-memory 3G
 ```
-Note that FiloDB uses an off-heap direct memory memtable, and you probably need to bump Spark's default direct memory size with a `-XX:MaxDirectMemorySize=1G` or some larger setting.
-
 
 Loading CSV file from Spark:
 
