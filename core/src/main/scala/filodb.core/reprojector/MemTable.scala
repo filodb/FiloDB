@@ -180,6 +180,12 @@ trait MemTable extends StrictLogging {
       Iterator[(PartitionKey, K, RowReader)]
 
   /**
+   * Deletes the entire locked table for a given dataset and version.
+   * Note: does not check if it is empty or not.  Should be only called once all reprojections are done.
+   */
+  def deleteLockedTable(dataset: TableName, version: Int): Unit
+
+  /**
    * Removes specific rows from a particular keyRange and version.  Can only remove rows
    * from the Locked buffer.
    */

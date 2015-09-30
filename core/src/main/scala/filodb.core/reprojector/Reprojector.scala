@@ -19,14 +19,16 @@ trait Reprojector {
 
   /**
    * Does reprojection (columnar flushes from memtable) for a single dataset.
-   * Should be completely stateless.
-   * Does not need to reproject all the rows from the Locked memtable, but should progressively
-   * delete rows from the memtable until there are none left.  This is how the reprojector marks progress:
-   * by deleting rows that has been committed to ColumnStore.
+   * Should completely flush all segments out of the locked memtable.
+   * Throttling is achieved via passing in an ExecutionContext which limits the number of futures, and
+   * sizing the thread pool appropriately.
+   *    TOOD: create an ExecutionContext based on the blog post
+   *    TODO: test!!
    *
    * Failures:
    * The Scheduler only schedules one reprojection task at a time per (dataset, version), so if this fails,
    * then it can be rerun.
+   * TODO: keep track of failures so we don't have to repeat successful segment writes.
    *
    * Most likely this will involve scheduling a whole bunch of futures to write segments.
    * Be careful to do too much work, newTask is supposed to not take too much CPU time and use Futures
@@ -56,11 +58,8 @@ trait Reprojector {
 /**
  * Default reprojector, which scans the Locked memtable, turning them into segments for flushing,
  * using fixed segment widths
- *
- * @param numSegments the number of segments to reproject for each reprojection task.
  */
-class DefaultReprojector(columnStore: ColumnStore,
-                         numSegments: Int = 3)
+class DefaultReprojector(columnStore: ColumnStore)
                         (implicit ec: ExecutionContext) extends Reprojector with StrictLogging {
   import MemTable._
   import Types._
@@ -88,7 +87,7 @@ class DefaultReprojector(columnStore: ColumnStore,
         segment.addRowsAsChunk(chunkRows)
       }
       segment
-    }.take(numSegments)
+    }
   }
 
   def reproject[K: TypedFieldExtractor](memTable: MemTable, setup: IngestionSetup, version: Int):
@@ -97,16 +96,21 @@ class DefaultReprojector(columnStore: ColumnStore,
     val datasetName = setup.dataset.name
     val projection = RichProjection(setup.dataset, setup.schema)
     val segments = chunkize(memTable.readAllRows[K](datasetName, version, Locked), setup)
-    val segmentTasks: Seq[Future[String]] = segments.map { segment =>
+    val segmentTasks = segments.map { segment =>
       for { resp <- columnStore.appendSegment(projection, segment, version) if resp == Success }
       yield {
-        logger.debug(s"Finished merging segment ${segment.keyRange}, version $version...")
-        memTable.removeRows(segment.keyRange, version)
-        logger.debug(s"Removed rows for segment $segment from Locked table...")
+        logger.info(s"Finished merging segment ${segment.keyRange}, version $version...")
         // Return useful info about each successful reprojection
         (segment.keyRange.partition, segment.keyRange.start).toString
       }
-    }.toSeq
-    Future.sequence(segmentTasks)
+    }
+    logger.info(s"Starting reprojection for dataset $datasetName, version $version")
+    for { tasks <- Future { segmentTasks }
+          results <- Future.sequence(tasks.toList) }
+    yield {
+      logger.info(s"Clearing locked memtable for ($datasetName, $version)")
+      memTable.deleteLockedTable(datasetName, version)
+      results
+    }
   }
 }

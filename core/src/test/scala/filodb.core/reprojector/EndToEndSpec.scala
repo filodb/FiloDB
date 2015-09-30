@@ -90,27 +90,18 @@ class EndToEndSpec extends FunSpec with Matchers with BeforeAndAfter with ScalaF
     mTable.ingestRows("dataset", 0, namesWithPartCol.map(MyTupleRowReader)) should equal (Ingested)
     mTable.allNumRows(Active) should equal (Seq((("dataset", 0), 1200L)))
 
-    // Schedule a flush, wait, and see that it's done.  Each flush task = 3 segments, so there
-    // should be one more.
+    // Schedule a flush, wait, and see that it's done and all segments written.
     scheduler.runOnce()
     scheduler.tasks should have size (1)
     whenReady(scheduler.tasks.values.head) { responses =>
-      scheduler.failedTasks should equal (Nil)
-      mTable.allNumRows(Active) should equal (Seq((("dataset", 0), 0L)))
-      mTable.flushingDatasets should equal (Seq((("dataset", 0), 600L)))
-    }
-
-    // Run this another time for final flush task
-    scheduler.runOnce()
-    scheduler.tasks should have size (1)
-    whenReady(scheduler.tasks.values.head) { responses =>
-      // Run one more time for final cleanup
-      scheduler.runOnce()
-      scheduler.tasks should have size (0)
       scheduler.failedTasks should equal (Nil)
       mTable.allNumRows(Active) should equal (Seq((("dataset", 0), 0L)))
       mTable.flushingDatasets should equal (Nil)
     }
+
+    // Run this another time to verify no tasks scheduled
+    scheduler.runOnce()
+    scheduler.tasks should have size (0)
 
     // Now, read stuff back from the column store and check that it's all there
     val keyRange = KeyRange(dataset.name, "nfc", 0L, 30000L)
