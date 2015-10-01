@@ -211,7 +211,11 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with DefaultCoord
     }
   }
 
-  override def exportCSV(dataset: String, version: Int, columnNames: Seq[String], limit: Int, outFile: Option[String]): Unit = {
+  override def exportCSV(dataset: String,
+                         version: Int,
+                         columnNames: Seq[String],
+                         limit: Int,
+                         outFile: Option[String]): Unit = {
     val schema = Await.result(metaStore.getSchema(dataset, version), 10.second)
     val columns = columnNames.map(schema)
 
@@ -227,7 +231,5 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with DefaultCoord
     }
 
     writeResult(dataset, requiredRows, columnNames, columns, outFile)
-
   }
-
 }

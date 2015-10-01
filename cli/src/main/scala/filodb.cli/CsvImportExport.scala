@@ -94,45 +94,15 @@ trait CsvImportExport {
       linesIngested += mappedLines.length
       if (linesIngested % 10000 == 0) println(s"Ingested $linesIngested lines!")
     }
-    // val csvActor = system.actorOf(CsvSourceActor.props(fileReader, dataset, version, coordinatorActor))
-    // actorAsk(csvActor, RowSource.Start, 61 minutes) {
-    //   case RowSource.SetupError(err) =>
-    //     println(s"ERROR: $err")
-    //     exitCode = 2
-    //   case RowSource.AllDone =>
-        coordinatorActor ! CoordinatorActor.Flush(dataset, version)
-        println("Waiting for scheduler/memTable to finish flushing everything")
-        Thread sleep 5000
-        while (memTable.flushingDatasets.nonEmpty) {
-          print(".")
-          Thread sleep 1000
-        }
-        println("ingestCSV finished!")
-        exitCode = 0
-    // }
-  }
 
-  def exportCSV(dataset: String, version: Int,
-                columnNames: Seq[String], limit: Int,
-                outFile: Option[String]) {
-    val columns = parse(metaStore.getSchema(dataset, version)) { schema =>
-      columnNames.map(schema)
+    coordinatorActor ! CoordinatorActor.Flush(dataset, version)
+    println("Waiting for scheduler/memTable to finish flushing everything")
+    Thread sleep 5000
+    while (memTable.flushingDatasets.nonEmpty) {
+      print(".")
+      Thread sleep 1000
     }
-
-    val outStream = outFile.map(new java.io.FileOutputStream(_)).getOrElse(System.out)
-    val writer = new CSVWriter(new java.io.OutputStreamWriter(outStream))
-    writer.writeNext(columnNames.toArray, false)
-
-    println("Sorry, exportCSV functionality is temporarily unavailable")
-
-    // val extractor = new ReadRowExtractor(datastore, partObj, version, columns, ArrayStringRowSetter)(system)
-    // val row = Array.fill(columns.length)("")
-    // var rowNo = 0
-    // while (rowNo < limit && extractor.hasNext) {
-    //   extractor.next(row)
-    //   writer.writeNext(row, false)
-    //   rowNo += 1
-    // }
-    // writer.flush()
+    println("ingestCSV finished!")
+    exitCode = 0
   }
 }
