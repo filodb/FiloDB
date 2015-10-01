@@ -54,10 +54,10 @@ trait CsvImportExport {
     }
   }
 
-  def ingestCSV(dataset: String, version: Int, csvPath: String) {
+  def ingestCSV(dataset: String, version: Int, csvPath: String, delimiter: Char) {
     val fileReader = new java.io.FileReader(csvPath)
 
-    val reader = new CSVReader(fileReader, ',')
+    val reader = new CSVReader(fileReader, delimiter)
     val columns = reader.readNext.toSeq
     println(s"Ingesting CSV at $csvPath with columns $columns...")
 
@@ -80,7 +80,7 @@ trait CsvImportExport {
 
     var linesIngested = 0
     reader.iterator.grouped(100).foreach { lines =>
-      val mappedLines = lines.toSeq.map(ArrayStringRowReader)
+      val mappedLines = lines.map(ArrayStringRowReader)
       var resp: MemTable.IngestionResponse = MemTable.PleaseWait
       do {
         resp = memTable.ingestRows(dataset, version, mappedLines)

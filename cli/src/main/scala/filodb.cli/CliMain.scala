@@ -1,8 +1,16 @@
 package filodb.cli
 
+import java.io.OutputStream
+import javax.activation.UnsupportedDataTypeException
+
 import akka.actor.ActorSystem
+import com.opencsv.CSVWriter
 import com.quantifind.sumac.{ArgMain, FieldArgs}
 import com.typesafe.config.ConfigFactory
+import filodb.core.SortKeyHelper
+import filodb.core.columnstore.RowReaderSegment
+import filodb.core.metadata.Column.{ColumnType, Schema}
+import org.velvia.filo.{RowReader, FastFiloRowReader}
 import scala.concurrent.Await
 import scala.concurrent.duration._
 import scala.language.postfixOps
@@ -10,7 +18,6 @@ import scala.language.postfixOps
 import filodb.cassandra.columnstore.CassandraColumnStore
 import filodb.cassandra.metastore.CassandraMetaStore
 import filodb.coordinator.{CoordinatorActor, DefaultCoordinatorSetup}
-import filodb.core._
 import filodb.core.metadata.{Column, Dataset}
 
 //scalastyle:off
@@ -24,6 +31,7 @@ class Arguments extends FieldArgs {
   var select: Option[Seq[String]] = None
   var limit: Int = 1000
   var outfile: Option[String] = None
+  var delimiter: String = ","
 
   import Column.ColumnType._
 
@@ -40,6 +48,8 @@ class Arguments extends FieldArgs {
     }.getOrElse(Nil)
   }
 }
+
+case class UnsupportedSortKeyException(columnType: ColumnType) extends Exception(s"Sort on $columnType is not Supported.")
 
 object CliMain extends ArgMain[Arguments] with CsvImportExport with DefaultCoordinatorSetup {
 
@@ -70,9 +80,12 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with DefaultCoord
           val datasetName = args.dataset.get
           createDatasetAndColumns(datasetName, args.toColumns(datasetName, version), args.sortColumn)
         case Some("importcsv") =>
+          import org.apache.commons.lang3.StringEscapeUtils._
+          val delimiter = unescapeJava(args.delimiter)(0)
           ingestCSV(args.dataset.get,
                     version,
-                    args.filename.get)
+                    args.filename.get,
+                    delimiter)
         case x: Any =>
           args.select.map { selectCols =>
             exportCSV(args.dataset.get,
@@ -130,4 +143,91 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with DefaultCoord
         exitCode = 2
     }
   }
+
+  import scala.language.existentials
+  import filodb.core.metadata.Column.ColumnType._
+
+  private def getSortKeyHelper(dataset: String, schema: Schema): SortKeyHelper[_ >: Int with Long with Double <: AnyVal] = {
+    parse(metaStore.getDataset(dataset)) {
+      actualDataset =>
+        val sortColumn = schema(actualDataset.projections.head.sortColumn)
+
+        sortColumn.columnType match {
+          case IntColumn =>
+            Dataset.sortKeyHelper[Int](actualDataset.options)
+          case LongColumn =>
+            Dataset.sortKeyHelper[Long](actualDataset.options)
+          case DoubleColumn =>
+            Dataset.sortKeyHelper[Double](actualDataset.options)
+          case x =>
+            throw UnsupportedSortKeyException(x)
+        }
+    }
+  }
+
+  private def getRowValues(columns: Seq[Column],
+                           columnCount: Int,
+                           rowReader: RowReader): Array[String] = {
+    var position = 0
+    val content = new Array[String](columnCount)
+    while(position<columnCount){
+      val value: String = columns(position).columnType match {
+        case IntColumn => rowReader.getInt(position).toString
+        case LongColumn => rowReader.getLong(position).toString
+        case DoubleColumn => rowReader.getDouble(position).toString
+        case StringColumn => rowReader.getString(position)
+        case _ => throw new UnsupportedDataTypeException
+      }
+      content.update(position,value)
+      position += 1
+    }
+    content
+  }
+
+  private def writeResult(datasetName: String,
+                          rows: Iterator[RowReader],
+                          columnNames: Seq[String],
+                          columns: Seq[Column],
+                          outFile: Option[String]) = {
+    var outStream: OutputStream = null
+    var writer: CSVWriter = null
+    val columnCount: Int = columns.size
+    try {
+      outStream = outFile.map(new java.io.FileOutputStream(_)).getOrElse(System.out)
+      writer = new CSVWriter(new java.io.OutputStreamWriter(outStream))
+      writer.writeNext(columnNames.toArray, false)
+      rows.foreach {
+        r =>
+          val content: Array[String] = getRowValues(columns,columnCount, r)
+          writer.writeNext(content, false)
+      }
+    } catch {
+      case e: Throwable =>
+        println(s"Failed to select/export dataset $datasetName")
+        throw e
+    } finally {
+      writer.close()
+      outStream.close()
+    }
+  }
+
+  override def exportCSV(dataset: String, version: Int, columnNames: Seq[String], limit: Int, outFile: Option[String]): Unit = {
+    val schema = Await.result(metaStore.getSchema(dataset, version), 10.second)
+    val columns = columnNames.map(schema)
+
+    implicit val sortKeyHelper = getSortKeyHelper(dataset, schema)
+
+    val requiredRows = parse(columnStore.scanSegments(columns, dataset, version)) {
+      segmentIterator =>
+        segmentIterator.flatMap {
+          case seg: RowReaderSegment[_] =>
+            val result = seg.rowIterator((bytes, clazzes) => new FastFiloRowReader(bytes, clazzes))
+            result
+        }.take(limit)
+    }
+
+    writeResult(dataset, requiredRows, columnNames, columns, outFile)
+
+  }
+
 }
