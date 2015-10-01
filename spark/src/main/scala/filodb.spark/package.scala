@@ -83,11 +83,14 @@ package object spark extends StrictLogging {
      * read the schema for the table.
      * @param dataset the name of the FiloDB table/dataset to read from
      * @param version the version number to read from
+     * @param splitsPerNode the parallelism or number of splits per node
      */
     def filoDataset(dataset: String,
                     version: Int = 0,
-                    minPartitions: Int = FiloRelation.DefaultMinPartitions): DataFrame =
-      sqlContext.baseRelationToDataFrame(FiloRelation(dataset, version, minPartitions)(sqlContext))
+                    minPartitions: Int = FiloRelation.DefaultMinPartitions,
+                    splitsPerNode: Int = 1): DataFrame =
+      sqlContext.baseRelationToDataFrame(FiloRelation(dataset, version, minPartitions, splitsPerNode)
+                                                     (sqlContext))
 
     private def runCommands[B](cmds: Set[Future[Response]]): Unit = {
       val responseSet = Await.result(Future.sequence(cmds), 5 seconds)

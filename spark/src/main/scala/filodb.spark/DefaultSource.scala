@@ -15,12 +15,14 @@ class DefaultSource extends RelationProvider with CreatableRelationProvider {
    * Parameters:
    *   dataset
    *   version          defaults to 0
+   *   splits_per_node  defaults to 1, the number of splits or read threads per node
    */
   def createRelation(sqlContext: SQLContext, parameters: Map[String, String]): BaseRelation = {
     // dataset is a mandatory parameter.  Need to know the name.
     val dataset = parameters.getOrElse("dataset", sys.error("'dataset' must be specified for FiloDB."))
     val version = parameters.getOrElse("version", "0").toInt
-    FiloRelation(dataset, version)(sqlContext)
+    val splitsPerNode = parameters.getOrElse("splits_per_node", "1").toInt
+    FiloRelation(dataset, version, splitsPerNode = splitsPerNode)(sqlContext)
   }
 
   /**

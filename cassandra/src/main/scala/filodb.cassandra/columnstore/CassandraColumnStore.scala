@@ -6,6 +6,7 @@ import java.nio.ByteBuffer
 import scala.concurrent.{ExecutionContext, Future}
 import spray.caching._
 
+import filodb.cassandra.FiloCassandraConnector
 import filodb.core._
 import filodb.core.columnstore.CachedMergingColumnStore
 import filodb.core.metadata.{Column, Projection}
@@ -38,6 +39,7 @@ class CassandraColumnStore(config: Config)
 extends CachedMergingColumnStore with StrictLogging {
   import filodb.core.columnstore._
   import Types._
+  import collection.JavaConverters._
 
   val cassandraConfig = config.getConfig("cassandra")
   val tableCacheSize = config.getInt("columnstore.tablecache-size")
@@ -117,23 +119,53 @@ extends CachedMergingColumnStore with StrictLogging {
   }
 
   /**
-   * NOTE: for now this just scans all the records.
-   * params:
-   *   partition_token_start
-   *   partition_token_end
+   * required params:
+   *   token_start - string representation of start of token range
+   *   token_end   - string representation of end of token range
    */
   def scanChunkRowMaps(dataset: TableName,
                        version: Int,
                        partitionFilter: (PartitionKey => Boolean),
-                       params: Map[String, String]): Future[Iterator[ChunkMapInfo]] =
+                       params: Map[String, String]): Future[Iterator[ChunkMapInfo]] = {
+    val tokenStart = params("token_start")
+    val tokenEnd   = params("token_end")
     for { (chunkTable, rowMapTable) <- getSegmentTables(dataset)
-          rowMaps <- rowMapTable.scanChunkMaps(version) }
+          rowMaps <- rowMapTable.scanChunkMaps(version, tokenStart, tokenEnd) }
     yield {
       rowMaps.map { case (part, ChunkRowMapRecord(segmentId, chunkIds, rowNums, nextChunkId)) =>
         (part, segmentId, new BinaryChunkRowMap(chunkIds, rowNums, nextChunkId))
       }
     }
+  }
 
+  private val clusterConnector = new FiloCassandraConnector {
+    def config: Config = cassandraConfig
+  }
+
+
+  /**
+   * Splits scans of a dataset across multiple token ranges.
+   * params:
+   *   splits_per_node - how much parallelism or ways to divide a token range on each node
+   *
+   * @returns each split will have token_start, token_end, replicas filled in
+   */
+  def getScanSplits(dataset: TableName,
+                    params: Map[String, String] = Map.empty): Seq[Map[String, String]] = {
+    val metadata = clusterConnector.session.getCluster.getMetadata
+    val splitsPerNode = params.getOrElse("splits_per_node", "1").toInt
+    require(splitsPerNode >= 1, s"Must specify at least 1 splits_per_node, got $splitsPerNode")
+
+    val tokenRanges = metadata.getTokenRanges.asScala.toSeq.flatMap { range =>
+      range.splitEvenly(splitsPerNode).asScala
+    }
+    tokenRanges.map { tokenRange =>
+      val replicas = metadata.getReplicas(clusterConnector.keySpace.name, tokenRange).asScala
+      Map("token_start" -> tokenRange.getStart.toString,
+          "token_end"   -> tokenRange.getEnd.toString,
+          "replicas"    -> replicas.map(_.toString).mkString(","))
+    }
+  }
 
   // Retrieve handles to the tables for a particular dataset from the cache, creating the instances
   // if necessary

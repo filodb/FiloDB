@@ -67,6 +67,14 @@ trait ColumnStore {
                                      version: Int,
                                      partitionFilter: (PartitionKey => Boolean) = (x => true),
                                      params: Map[String, String] = Map.empty): Future[Iterator[Segment[K]]]
+
+  /**
+   * Determines how to split the scanning of a dataset across a columnstore.
+   * @param params implementation-specific flags to affect the scanning, including parallelism, locality etc
+   * @returns individual param maps for each split, to be fed to parallel/distributed scanSegments calls
+   */
+  def getScanSplits(dataset: TableName,
+                    params: Map[String, String] = Map.empty): Seq[Map[String, String]]
 }
 
 case class ChunkedData(column: Types.ColumnId, chunks: Seq[(Types.SegmentId, Types.ChunkID, ByteBuffer)])

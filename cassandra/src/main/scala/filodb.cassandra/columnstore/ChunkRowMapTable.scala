@@ -62,13 +62,18 @@ with FiloCassandraConnector {
           .and(_.segmentId lt untilSegmentId.toByteBuffer)
           .fetch()
 
-  def scanChunkMaps(version: Int): Future[Iterator[(String, ChunkRowMapRecord)]] =
-    select.future().map { rs =>
-            rs.iterator.filter(this.version(_) == version)
-              .map { row =>
-              (partition(row), fromRow(row))
-            }
-          }
+  def scanChunkMaps(version: Int,
+                    startToken: String,
+                    endToken: String): Future[Iterator[(String, ChunkRowMapRecord)]] = {
+    val tokenQ = "TOKEN(partition, version)"
+    val cql = s"SELECT * FROM ${keySpace.name}.$tableName WHERE " +
+              s"$tokenQ >= $startToken AND $tokenQ < $endToken"
+    Future {
+      session.execute(cql).iterator
+             .filter(this.version(_) == version)
+             .map { row => (partition(row), fromRow(row)) }
+    }
+  }
 
   /**
    * Writes a new chunk map to the chunkRowTable.

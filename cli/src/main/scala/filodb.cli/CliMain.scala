@@ -211,7 +211,7 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with DefaultCoord
     }
   }
 
-  override def exportCSV(dataset: String,
+  def exportCSV(dataset: String,
                          version: Int,
                          columnNames: Seq[String],
                          limit: Int,
@@ -221,7 +221,9 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with DefaultCoord
 
     implicit val sortKeyHelper = getSortKeyHelper(dataset, schema)
 
-    val requiredRows = parse(columnStore.scanSegments(columns, dataset, version)) {
+    // NOTE: we will only return data from the first split!
+    val splits = columnStore.getScanSplits(dataset)
+    val requiredRows = parse(columnStore.scanSegments(columns, dataset, version, params=splits.head)) {
       segmentIterator =>
         segmentIterator.flatMap {
           case seg: RowReaderSegment[_] =>

@@ -6,6 +6,7 @@ import akka.util.Timeout
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.slf4j.StrictLogging
 import java.nio.ByteBuffer
+import net.ceedubs.ficus.Ficus._
 import org.velvia.filo.FastFiloRowReader
 import scala.concurrent.{Await, Future}
 import scala.concurrent.duration._
@@ -104,7 +105,8 @@ object FiloRelation {
  */
 case class FiloRelation(dataset: String,
                         version: Int = 0,
-                        minPartitions: Int = FiloRelation.DefaultMinPartitions)
+                        minPartitions: Int = FiloRelation.DefaultMinPartitions,
+                        splitsPerNode: Int = 1)
                        (@transient val sqlContext: SQLContext)
     extends BaseRelation with TableScan with PrunedScan with StrictLogging {
   import TypeConverters._
@@ -128,12 +130,13 @@ case class FiloRelation(dataset: String,
     val _version = this.version
     val filoColumns = requiredColumns.map(this.filoSchema)
     val sortCol = filoSchema(datasetObj.projections.head.sortColumn)
+    val splitOpts = Map("splits_per_node" -> splitsPerNode.toString)
+    val splits = FiloSetup.columnStore.getScanSplits(dataset, splitOpts)
 
-    // TODO: actually figure out how to distribute token range stuff
     // NOTE: It's critical that the closure inside mapPartitions only references
     // vars from buildScan() method, and not the FiloRelation class.  Otherwise
     // the entire FiloRelation class would get serialized.
-    sqlContext.sparkContext.parallelize(Seq(Map.empty[String, String]), minPartitions)
+    sqlContext.sparkContext.parallelize(splits, minPartitions)
       .mapPartitions { paramIter =>
         perNodeRowScanner(_config, datasetOptionsStr, _version, filoColumns,
                           sortCol, paramIter)

@@ -186,7 +186,10 @@ class CassandraColumnStoreSpec extends CassandraFlatSpec with BeforeAndAfter {
       response should equal (Success)
     }
 
-    whenReady(colStore.scanSegments[Long](schema, dataset, 0)) { segIter =>
+    val paramSet = colStore.getScanSplits(dataset)
+    paramSet should have length (1)
+
+    whenReady(colStore.scanSegments[Long](schema, dataset, 0, params = paramSet.head)) { segIter =>
       val segments = segIter.toSeq
       segments should have length (1)
       val readSeg = segments.head.asInstanceOf[RowReaderSegment[Long]]
@@ -194,6 +197,22 @@ class CassandraColumnStoreSpec extends CassandraFlatSpec with BeforeAndAfter {
       readSeg.getChunks.toSet should equal (segment.getChunks.toSet)
       readSeg.index.rowNumIterator.toSeq should equal (segment.index.rowNumIterator.toSeq)
       readSeg.rowIterator().map(_.getLong(2)).toSeq should equal (Seq(24L, 25L, 28L, 29L, 39L, 40L))
+    }
+  }
+
+  "getScanSplits" should "return splits from Cassandra" in {
+    // Single split, token_start should equal token_end
+    val singleSplit = colStore.getScanSplits(dataset)
+    singleSplit should have length (1)
+    singleSplit.head("token_start") should equal (singleSplit.head("token_end"))
+    singleSplit.head("replicas").split(",").size should equal (1)
+
+    // Multiple splits.  Each split token start/end should not equal each other.
+    val multiSplit = colStore.getScanSplits(dataset, Map("splits_per_node" -> "2"))
+    multiSplit should have length (2)
+    multiSplit.foreach { split =>
+      split("token_start") should not equal (split("token_end"))
+      split("replicas").split(",").size should equal (1)
     }
   }
 }

@@ -110,6 +110,11 @@ extends CachedMergingColumnStore with StrictLogging {
     maps.toIterator
   }
 
+  // InMemoryColumnStore is just on one node, so return no splits for now.
+  // TODO: achieve parallelism by splitting on a range of partitions.
+  def getScanSplits(dataset: TableName,
+                    params: Map[String, String]): Seq[Map[String, String]] = Seq(Map.empty)
+
   def bbToHex(bb: ByteBuffer): String = DatatypeConverter.printHexBinary(bb.array)
 
   def minimalBytes(bb: ByteBuffer): Array[Byte] = {
