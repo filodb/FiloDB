@@ -211,8 +211,7 @@ package object spark extends StrictLogging {
       val dfColumns = df1.schema.map(_.name)
 
       // Do a sort by partitioncolumn so that partitions are on same node... we hope
-      // val sortedDf = df1.sort(df1(partCol))  (note: this doesn't work yet)
-      val sortedDf = df1
+      val sortedDf = df1.sort(df1(partCol))
       val numPartitions = sortedDf.rdd.partitions.size
       logger.info(s"Saving ($dataset/$version) with sortColumn $sortColumn, " +
                   s"partitionColumn $partCol, $numPartitions partitions")

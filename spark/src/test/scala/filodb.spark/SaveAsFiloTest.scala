@@ -181,5 +181,5 @@ with Matchers with ScalaFutures {
     df.agg(sum("year")).collect().head(0) should equal (8062)
   }
 
-  // it("should be able to write with a user-specified partitioning column") (pending)
+  it("should be able to write with a user-specified partitioning column") (pending)
 }
