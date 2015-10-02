@@ -39,6 +39,8 @@ object MemTable {
     def helper[K]: SortKeyHelper[K] = keyHelper.asInstanceOf[SortKeyHelper[K]]
     def sortColumn: Column = schema(sortColumnNum)
   }
+
+  case class NullPartitionValue(partCol: String) extends Exception(s"Null partition value for col $partCol")
 }
 
 /**
@@ -79,14 +81,20 @@ trait MemTable extends StrictLogging {
   /**
    * Prepares the memtable for ingesting a particular dataset with a schema.  Note: no checking is here
    * done to make sure the schema is valid.  If the schema needs to be changed, use a new version.
-   * @dataset a Dataset with valid partitioning key.  projections(0).sortColumn will also be used.
+   * @dataset a Dataset with valid partitioning column.  projections(0).sortColumn will also be used.
+   * @defaultPartitionKey if Some(key), a null value in partitioning column will cause key to be used.
+   *                      if None, then NullPartitionValue will be thrown when null value
+   *                        is encountered in a partitioning column.
    * @returns BadSchema if cannot determine a partitioningFunc or sort column
    *          AlreadySetup if the dataset has been setup before
    */
-  def setupIngestion(dataset: Dataset, schema: Seq[Column], version: Int): SetupResponse = {
+  def setupIngestion(dataset: Dataset,
+                     schema: Seq[Column],
+                     version: Int,
+                     defaultPartitionKey: Option[PartitionKey] = None): SetupResponse = {
     import Column.ColumnType._
     ingestionSetups.synchronized {
-      val partitionFunc = getPartitioningFunc(dataset, schema).getOrElse(
+      val partitionFunc = getPartitioningFunc(dataset, schema, defaultPartitionKey).getOrElse(
                             return BadSchema(s"Problem with partitioning column ${dataset.partitionColumn}"))
 
       val sortColName = dataset.projections.head.sortColumn
@@ -242,7 +250,9 @@ trait MemTable extends StrictLogging {
   /**
    * == Common helper funcs ==
    */
-  private def getPartitioningFunc(dataset: Dataset, schema: Seq[Column]):
+  private def getPartitioningFunc(dataset: Dataset,
+                                  schema: Seq[Column],
+                                  defaultPartitionKey: Option[PartitionKey]):
       Option[RowReader => PartitionKey] = {
     if (dataset.partitionColumn == Dataset.DefaultPartitionColumn) {
       Some(row => Dataset.DefaultPartitionKey)
@@ -251,11 +261,19 @@ trait MemTable extends StrictLogging {
       if (partitionColNo < 0) return None
 
       import Column.ColumnType._
-      schema(partitionColNo).columnType match {
+      val extractFunc: Option[RowReader => PartitionKey] = schema(partitionColNo).columnType match {
         case StringColumn => Some(row => row.getString(partitionColNo))
         case IntColumn    => Some(row => row.getInt(partitionColNo).toString)
         case LongColumn   => Some(row => row.getLong(partitionColNo).toString)
         case other: Column.ColumnType => None
+      }
+      extractFunc.map { func =>
+        defaultPartitionKey.map { defKey =>
+          (row: RowReader) => if (row.notNull(partitionColNo)) func(row) else defKey
+        }.getOrElse {
+          (row: RowReader) => if (row.notNull(partitionColNo)) { func(row) }
+                              else { throw NullPartitionValue(schema(partitionColNo).name) }
+        }
       }
     }
   }

@@ -8,6 +8,7 @@ import scala.concurrent.Future
 import scala.concurrent.duration._
 
 import filodb.core._
+import filodb.core.Types._
 import filodb.core.metadata.{Column, Dataset, MetaStore, Projection}
 import filodb.core.columnstore.ColumnStore
 import filodb.core.reprojector.{MemTable, Scheduler}
@@ -35,9 +36,15 @@ object CoordinatorActor {
    * Sets up ingestion for a given dataset, version, and schema of columns.
    * The dataset and columns must have been previously defined.
    *
+   * @defaultPartitionKey if Some(key), a null value in partitioning column will cause key to be used.
+   *                      if None, then NullPartitionValue will be thrown when null value
+   *                        is encountered in a partitioning column.
    * @returns BadSchema if the partition column is unsupported, sort column invalid, etc.
    */
-  case class SetupIngestion(dataset: String, schema: Seq[String], version: Int)
+  case class SetupIngestion(dataset: String,
+                            schema: Seq[String],
+                            version: Int,
+                            defaultPartitionKey: Option[PartitionKey] = None)
 
   case object IngestionReady extends Response
   case object UnknownDataset extends ErrorResponse
@@ -138,13 +145,16 @@ class CoordinatorActor(memTable: MemTable,
     }
   }
 
-  private def setupIngestion(originator: ActorRef, dataset: String, columns: Seq[String], version: Int):
-      Unit = {
+  private def setupIngestion(originator: ActorRef,
+                             dataset: String,
+                             columns: Seq[String],
+                             version: Int,
+                             defaultPartKey: Option[PartitionKey]): Unit = {
     (for { datasetObj <- metaStore.getDataset(dataset)
            schema <- verifySchema(originator, dataset, version, columns) if schema.isDefined }
     yield {
       val columnSeq = columns.map(schema.get(_))
-      memTable.setupIngestion(datasetObj, columnSeq, version) match {
+      memTable.setupIngestion(datasetObj, columnSeq, version, defaultPartKey) match {
         case MemTable.SetupDone    => originator ! IngestionReady
         // If the table is already set up, that's fine!
         case MemTable.AlreadySetup => originator ! IngestionReady
@@ -166,8 +176,8 @@ class CoordinatorActor(memTable: MemTable,
     case CreateDataset(datasetObj, columns) =>
       createDataset(sender, datasetObj, columns)
 
-    case SetupIngestion(dataset, columns, version) =>
-      setupIngestion(sender, dataset, columns, version)
+    case SetupIngestion(dataset, columns, version, defaultPartKey) =>
+      setupIngestion(sender, dataset, columns, version, defaultPartKey)
 
     case ingestCmd @ IngestRows(dataset, version, rows, seqNo) =>
       // Ingest rows into the memtable

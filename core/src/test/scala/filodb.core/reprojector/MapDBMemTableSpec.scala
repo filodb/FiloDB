@@ -32,6 +32,9 @@ class MapDBMemTableSpec extends FunSpec with Matchers with BeforeAndAfter with S
     names.map { t => (t._1, t._2, t._3, Some(partNum.toString)) }
   }
 
+  val namesWithNullPartCol =
+    util.Random.shuffle(namesWithPartCol ++ namesWithPartCol.take(3).map { t => (t._1, t._2, t._3, None) })
+
   // Must be more than the max-rows-per-table setting in application_test.conf
   val lotsOfNames = (0 until 400).flatMap { partNum =>
     names.map { t => (t._1, t._2, t._3, Some(partNum.toString)) }
@@ -87,6 +90,30 @@ class MapDBMemTableSpec extends FunSpec with Matchers with BeforeAndAfter with S
 
       val outRows = mTable.readRows(keyRange.copy(partition = "5"), 0, Active)
       outRows.toSeq.map(_.getString(0)) should equal (firstNames)
+    }
+
+    it("should throw error if null partition col value and no defaultPartitionKey") {
+      val setupResp = mTable.setupIngestion(dataset.copy(partitionColumn = "league"),
+                                            schemaWithPartCol, 0)
+      setupResp should equal (SetupDone)
+
+      intercept[NullPartitionValue] {
+        mTable.ingestRows("dataset", 0, namesWithNullPartCol.map(TupleRowReader))
+      }
+    }
+
+    it("should use defaultPartitionKey if one provided and null part col value") {
+      val setupResp = mTable.setupIngestion(dataset.copy(partitionColumn = "league"),
+                                            schemaWithPartCol, 0,
+                                            Some("foobar"))
+      setupResp should equal (SetupDone)
+
+      val resp = mTable.ingestRows("dataset", 0, namesWithNullPartCol.map(TupleRowReader))
+      resp should equal (Ingested)
+
+      mTable.numRows("dataset", 0, Active).get should equal (namesWithNullPartCol.length.toLong)
+      val outRows = mTable.readRows(keyRange.copy(partition = "foobar"), 0, Active)
+      outRows.toSeq should have length (3)
     }
 
     it("should return PleaseWait and false on canIngest if too many rows in memtable") {

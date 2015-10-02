@@ -33,7 +33,7 @@ class DefaultSource extends RelationProvider with CreatableRelationProvider {
    *   version          defaults to 0
    *   partition_column name of the partitioning column
    *   sort_column      name of the sort column within each partition
-   *   write_timeout    set the timeout
+   *   default_partition_key if defined, use this as the partition key when partitioning column is null
    */
   def createRelation(
       sqlContext: SQLContext,
@@ -44,10 +44,11 @@ class DefaultSource extends RelationProvider with CreatableRelationProvider {
     val version = parameters.getOrElse("version", "0").toInt
     val sortColumn = parameters.getOrElse("sort_column", sys.error("'sort_column' must be specified"))
     val partitionColumn = parameters.get("partition_column")
+    val defaultPartKey = parameters.get("default_partition_key")
 
     sqlContext.saveAsFiloDataset(data, dataset,
                                  sortColumn, partitionColumn, version,
-                                 mode)
+                                 mode, defaultPartKey)
 
     // The below is inefficient as it reads back the schema that was written earlier - though it shouldn't
     // take very long

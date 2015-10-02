@@ -48,8 +48,9 @@ package object spark extends StrictLogging {
                             dataset: String,
                             columns: Seq[String],
                             version: Int,
-                            rows: Iterator[Row]): Unit = {
-    val ingestCmd = SetupIngestion(dataset, columns, version)
+                            rows: Iterator[Row],
+                            defaultPartitionKey: Option[Types.PartitionKey]): Unit = {
+    val ingestCmd = SetupIngestion(dataset, columns, version, defaultPartitionKey)
     actorAsk(coordinatorActor, ingestCmd, 10 seconds) {
       case IngestionReady =>
       case UnknownDataset => throw DatasetNotFound(dataset)
@@ -179,7 +180,9 @@ package object spark extends StrictLogging {
      *            val newDF = df.withColumn("partition", idHash(df("id")) % 100)
      *          }}}
      * @param version the version number to write to
-     * @param mode the Spark SaveMode - ErrorIfExists, Append, Overwrite, Ignore
+     * @param mode the Spark SaveMode - ErrorIfExists, Append, Overwrite, Ignore\
+     * @param defaultPartitionKey if Some(key), use this when hit null in partition column, otherwise
+     *                            throw an error
      * @param writeTimeout Maximum time to wait for write of each partition to complete
      */
     def saveAsFiloDataset(df: DataFrame,
@@ -188,6 +191,7 @@ package object spark extends StrictLogging {
                           partitionColumn: Option[String] = None,
                           version: Int = 0,
                           mode: SaveMode = SaveMode.Append,
+                          defaultPartitionKey: Option[Types.PartitionKey] = None,
                           writeTimeout: FiniteDuration = DefaultWriteTimeout): Unit = {
       val filoConfig = FiloSetup.configFromSpark(sqlContext.sparkContext)
       FiloSetup.init(filoConfig)
@@ -221,7 +225,8 @@ package object spark extends StrictLogging {
         // Everything within this function runs on each partition/executor, so need a local datastore & system
         FiloSetup.init(filoConfig)
         logger.info(s"Starting ingestion of DataFrame for dataset $dataset, partition $index...")
-        ingestRddRows(FiloSetup.coordinatorActor, dataset, dfColumns, version, rowIter)
+        ingestRddRows(FiloSetup.coordinatorActor, dataset, dfColumns, version, rowIter,
+                      defaultPartitionKey)
         Iterator.empty
       }.count()
     }

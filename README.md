@@ -73,12 +73,12 @@ To compile the .mermaid source files to .png's, install the [Mermaid CLI](http:/
 
 2. Start a Cassandra Cluster. If its not accessible at `localhost:9042` update it in `core/src/main/resources/application.conf`.
 
-3. FiloDB can be used through `filo-cli` or as a Spark data source. The CLI supports data ingestion from CSV files only.
+3. FiloDB can be used through `filo-cli` or as a Spark data source. The CLI supports data ingestion from CSV files only; the Spark data source is better tested and richer in features.
 
 There are two crucial parts to a dataset in FiloDB,
 
 1. partitioning column - decides how data is going to be distributed across the cluster
-2. sort column         - acts as a primary key within each partition and decides how data will be sorted within each partition
+2. sort column         - acts as a primary key within each partition and decides how data will be sorted within each partition.  Like the "clustering key" from Cassandra.
 
 Specifying the partitioning column is optional.  If a partitioning column is not specified, FiloDB will create a default one with a fixed value, which means everything will be thrown into one node, and is only suitable for small amounts of data.
 
@@ -144,6 +144,8 @@ The options to use with the data-source api are:
 | sort_column      | name of the column according to which the data should be sorted  | write      | No       |
 | partition_column | name of the column according to which data should be partitioned | write      | Yes      |
 | splits_per_node  | number of read threads per node, defaults to 1 | read | Yes |
+| default_partition_key | default value to use for the partition key if the partition_column has a null value.  If not specified, an error is thrown. | write | Yes |
+| version          | numeric version of data to write, defaults to 0  | write | Yes |
 
 #### Spark data-source Example (spark-shell)
 
@@ -180,9 +182,11 @@ Or, specifying the `partition_column`,
 scala> csvDF.write.format("filodb.spark").
     option("dataset", "gdelt").
     option("sort_column", "GLOBALEVENTID").
-    option("partition_column", "Year").
+    option("partition_column", "MonthYear").
     mode(SaveMode.Overwrite).save()
 ```
+
+Note that for efficient columnar encoding, wide rows with fewer partition keys are better for performance.
 
 Reading the dataset,
 ```
@@ -272,7 +276,7 @@ scala> val correlation = Statistics.corr(numMentions, numArticles, "pearson")
 * The storage format is subject to change at this time.
 * Only ingestion through Spark / Spark Streaming, and CLI ingestion via CSV files.
 * Only string, Int, Long partition keys and Long/Timestamp/Int/Double sort keys are supported, but many more to come
-* You are currently responsible for ensuring that partition keys are not spread across multiple nodes of a DataFrame when ingesting.  It might be as simple as a `df.sort`.
+* CSV export from CLI will only read data from one node of a cluster.
 
 ## Roadmap
 
