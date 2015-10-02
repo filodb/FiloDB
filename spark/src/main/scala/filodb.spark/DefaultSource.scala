@@ -45,11 +45,9 @@ class DefaultSource extends RelationProvider with CreatableRelationProvider {
     val sortColumn = parameters.getOrElse("sort_column", sys.error("'sort_column' must be specified"))
     val partitionColumn = parameters.get("partition_column")
 
-    val createDataset = mode == SaveMode.Overwrite
-
     sqlContext.saveAsFiloDataset(data, dataset,
                                  sortColumn, partitionColumn, version,
-                                 createDataset=createDataset)
+                                 mode)
 
     // The below is inefficient as it reads back the schema that was written earlier - though it shouldn't
     // take very long

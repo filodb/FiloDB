@@ -26,7 +26,8 @@ trait ColumnStore {
   def initializeProjection(projection: Projection): Future[Response]
 
   /**
-   * Clears all data from the column store for that given projection.
+   * Clears all data from the column store for that given projection, for all versions.
+   * NOTE: please make sure there are no reprojections or writes going on before calling this
    */
   def clearProjectionData(projection: Projection): Future[Response]
 
@@ -93,6 +94,18 @@ trait CachedMergingColumnStore extends ColumnStore with StrictLogging {
   def mergingStrategy: ChunkMergingStrategy
 
   implicit val ec: ExecutionContext
+
+  def clearProjectionData(projection: Projection): Future[Response] = {
+    // Clear out any entries from segmentCache first
+    logger.info(s"Clearing out segment cache for dataset ${projection.dataset}")
+    segmentCache.keys.foreach { case key @ (dataset, _, _, _) =>
+      if (dataset == projection.dataset) segmentCache.remove(key)
+    }
+    logger.info(s"Clearing all columnar projection data for dataset ${projection.dataset}")
+    clearProjectionDataInner(projection)
+  }
+
+  def clearProjectionDataInner(projection: Projection): Future[Response]
 
   /**
    *  == Lower level storage engine primitives ==

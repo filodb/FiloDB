@@ -8,7 +8,7 @@ import scala.concurrent.Future
 import scala.concurrent.duration._
 
 import filodb.core._
-import filodb.core.metadata.{Column, Dataset, MetaStore}
+import filodb.core.metadata.{Column, Dataset, MetaStore, Projection}
 import filodb.core.columnstore.ColumnStore
 import filodb.core.reprojector.{MemTable, Scheduler}
 
@@ -57,8 +57,16 @@ object CoordinatorActor {
   /**
    * Initiates a flush of the remaining MemTable rows of the given dataset and version.
    * Usually used when at the end of ingesting some large blob of data.
+   * @returns SchedulerActor.Flushed
    */
   case class Flush(dataset: String, version: Int)
+
+  /**
+   * Truncates all data from a projection of a dataset.  Waits for any pending flushes from said
+   * dataset to finish first, and also clears the columnStore cache for that dataset.
+   */
+  case class TruncateProjection(projection: Projection)
+  case object ProjectionTruncated
 
   def invalidColumns(columns: Seq[String], schema: Column.Schema): Seq[String] =
     (columns.toSet -- schema.keys).toSeq
@@ -148,6 +156,12 @@ class CoordinatorActor(memTable: MemTable,
     }
   }
 
+  private def truncateProjection(originator: ActorRef, projection: Projection): Unit = {
+    for { reprojResult <- scheduler.waitForReprojection(projection.dataset)
+          resp <- columnStore.clearProjectionData(projection) }
+    { originator ! ProjectionTruncated }
+  }
+
   def receive: Receive = {
     case CreateDataset(datasetObj, columns) =>
       createDataset(sender, datasetObj, columns)
@@ -166,5 +180,8 @@ class CoordinatorActor(memTable: MemTable,
 
     case flushCmd @ Flush(dataset, version) =>
       schedulerActor.forward(flushCmd)
+
+    case TruncateProjection(projection) =>
+      truncateProjection(sender, projection)
   }
 }

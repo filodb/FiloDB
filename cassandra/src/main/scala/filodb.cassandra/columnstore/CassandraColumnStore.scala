@@ -63,7 +63,7 @@ extends CachedMergingColumnStore with StrictLogging {
   /**
    * Clears all data from the column store for that given projection.
    */
-  def clearProjectionData(projection: Projection): Future[Response] =
+  def clearProjectionDataInner(projection: Projection): Future[Response] =
     for { (chunkTable, rowMapTable) <- getSegmentTables(projection.dataset)
           ctResp                    <- chunkTable.clearAll()
           rmtResp                   <- rowMapTable.clearAll() } yield { rmtResp }

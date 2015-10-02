@@ -80,7 +80,7 @@ There are two crucial parts to a dataset in FiloDB,
 1. partitioning column - decides how data is going to be distributed across the cluster
 2. sort column         - acts as a primary key within each partition and decides how data will be sorted within each partition
 
-Specifying partitioning column is optional.  If a partitioning column is not specified, FiloDB will create a default one with a fixed value, which means everything will be thrown into one node, and is only suitable for small amounts of data.
+Specifying the partitioning column is optional.  If a partitioning column is not specified, FiloDB will create a default one with a fixed value, which means everything will be thrown into one node, and is only suitable for small amounts of data.
 
 ### Using the CLI
 
@@ -143,6 +143,7 @@ The options to use with the data-source api are:
 | dataset          | name of the dataset                                              | read/write | No       |
 | sort_column      | name of the column according to which the data should be sorted  | write      | No       |
 | partition_column | name of the column according to which data should be partitioned | write      | Yes      |
+| splits_per_node  | number of read threads per node, defaults to 1 | read | Yes |
 
 #### Spark data-source Example (spark-shell)
 
@@ -179,7 +180,7 @@ Or, specifying the `partition_column`,
 scala> csvDF.write.format("filodb.spark").
     option("dataset", "gdelt").
     option("sort_column", "GLOBALEVENTID").
-    option("partition_column","Year").
+    option("partition_column", "Year").
     mode(SaveMode.Overwrite).save()
 ```
 

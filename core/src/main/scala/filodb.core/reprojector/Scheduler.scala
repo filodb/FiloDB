@@ -1,7 +1,7 @@
 package filodb.core.reprojector
 
 import com.typesafe.scalalogging.slf4j.StrictLogging
-import scala.concurrent.Future
+import scala.concurrent.{ExecutionContext, Future}
 import scala.util.{Failure, Success}
 
 import filodb.core._
@@ -119,6 +119,34 @@ class Scheduler(memTable: MemTable,
                    failedTasks,
                    memTable.allNumRows(MemTable.Active, true),
                    memTable.flushingDatasets)
+
+  /**
+   * Returns a Future for any outstanding reprojection tasks for a given dataset
+   * @returns Future[Nil] if there are no reprojection tasks for given dataset/version
+   *          Future[Nil] for a reprojection task that errors out
+   *          Future[Seq[String]] for a reprojection task that finishes normally
+   */
+  def waitForReprojection(dataset: TableName, version: Int)
+                         (implicit ec: ExecutionContext): Future[Seq[String]] = {
+    tasks.get((dataset, version))
+         .map { taskFuture =>
+           taskFuture.recoverWith {
+             case t: Throwable => Future.successful(Nil)
+           }
+         }.getOrElse(Future.successful(Nil))
+  }
+
+  /**
+   * Same as waitForReprojection but acts on all versions of a given dataset
+   * @returns a Seq of (version, Seq[String]) pairs
+   */
+  def waitForReprojection(dataset: TableName)
+                         (implicit ec: ExecutionContext): Future[Seq[(Int, Seq[String])]] = {
+    val matchingVers = tasks.keys.filter { case (ds, _) => ds == dataset }.toSeq
+    Future.sequence(matchingVers.map { case (_, ver) =>
+                      waitForReprojection(dataset, ver).map { details => (ver, details) }
+                    })
+  }
 
   // Should be used mostly for tests
   def reset(): Unit = {

@@ -38,6 +38,7 @@ with Matchers with ScalaFutures {
   val ds1 = Dataset("gdelt1", "id")
   val ds2 = Dataset("gdelt2", "id")
   val ds3 = Dataset("gdelt3", "id", partitionCol)
+  val test1 = Dataset("test1", "id")
 
   // This is the same code that the Spark stuff uses.  Make sure we use exact same environment as real code
   // so we don't have two copies of metaStore that could be configured differently.
@@ -49,13 +50,9 @@ with Matchers with ScalaFutures {
 
   override def beforeAll() {
     metaStore.initialize().futureValue
-    try {
-      columnStore.clearProjectionData(ds1.projections.head).futureValue
-      columnStore.clearProjectionData(ds2.projections.head).futureValue
-      columnStore.clearProjectionData(ds3.projections.head).futureValue
-    } catch {
-      case e: Exception =>
-    }
+    columnStore.initializeProjection(ds1.projections.head).futureValue
+    columnStore.initializeProjection(ds2.projections.head).futureValue
+    columnStore.initializeProjection(ds3.projections.head).futureValue
     if (FiloSetup.config != null) FiloSetup.scheduler.reset()
   }
 
@@ -66,11 +63,22 @@ with Matchers with ScalaFutures {
 
   before {
     metaStore.clearAllData().futureValue
+    columnStore.clearSegmentCache()
+    try {
+      columnStore.clearProjectionData(ds1.projections.head).futureValue
+      columnStore.clearProjectionData(ds2.projections.head).futureValue
+      columnStore.clearProjectionData(ds3.projections.head).futureValue
+      columnStore.clearProjectionData(test1.projections.head).futureValue
+    } catch {
+      case e: Exception =>
+    }
   }
 
   after {
     FiloSetup.clearState()
   }
+
+  implicit val ec = FiloSetup.ec
 
   // Sample data.  Note how we must create a partitioning column.
   val jsonRows = Seq(
@@ -83,16 +91,8 @@ with Matchers with ScalaFutures {
   import filodb.spark._
   import org.apache.spark.sql.functions._
 
-  it("should error out if dataset not created and createDataset=false") {
-    val err = intercept[SparkException] {
-      sql.saveAsFiloDataset(dataDF, "gdelt1", "id")
-    }
-    err.getMessage should include ("DatasetNotFound")
-  }
-
   it("should create missing columns and partitions and write table") {
     sql.saveAsFiloDataset(dataDF, "gdelt1", "id",
-                          createDataset=true,
                           writeTimeout = 2.minutes)
 
     // Now read stuff back and ensure it got written
@@ -107,11 +107,11 @@ with Matchers with ScalaFutures {
     metaStore.newColumn(idStrCol).futureValue should equal (Success)
 
     intercept[ColumnTypeMismatch] {
-      sql.saveAsFiloDataset(dataDF, "gdelt2", "id", createDataset=true)
+      sql.saveAsFiloDataset(dataDF, "gdelt2", "id")
     }
   }
 
-  ignore("should write table if there are existing matching columns") {
+  it("should write table if there are existing matching columns") {
     metaStore.newDataset(ds3).futureValue should equal (Success)
     val idStrCol = Column("id", "gdelt3", 0, Column.ColumnType.LongColumn)
     metaStore.newColumn(idStrCol).futureValue should equal (Success)
@@ -124,7 +124,7 @@ with Matchers with ScalaFutures {
     df.select(count("id")).collect().head(0) should equal (3)
   }
 
-  ignore("should write and read using DF write() and read() APIs") {
+  it("should write and read using DF write() and read() APIs") {
     dataDF.write.format("filodb.spark").
                  option("dataset", "test1").
                  option("sort_column", "id").
@@ -134,7 +134,52 @@ with Matchers with ScalaFutures {
     df.agg(sum("year")).collect().head(0) should equal (4030)
   }
 
-  it("should write in Append mode without first creating dataset") (pending)
+  val jsonRows2 = Seq(
+    """{"id":3,"sqlDate":"2015/03/15T18:00Z","monthYear":32015,"year":2016}""",
+    """{"id":4,"sqlDate":"2015/03/15T19:00Z","monthYear":42015}""",
+    """{"id":5,"sqlDate":"2015/03/15T19:30Z",                  "year":2016}"""
+  )
+  val dataDF2 = sql.read.json(sc.parallelize(jsonRows2, 1))
 
-  it("should be able to write with a user-specified partitioning column") (pending)
+  ignore("should overwrite existing data if mode=Overwrite") {
+    dataDF.write.format("filodb.spark").
+                 option("dataset", "gdelt1").
+                 option("sort_column", "id").
+                 save()
+
+    // Data is different, should not append, should overwrite
+    dataDF2.write.format("filodb.spark").
+                 option("dataset", "gdelt1").
+                 option("sort_column", "id").
+                 mode(SaveMode.Overwrite).
+                 save()
+
+    FiloSetup.scheduler.waitForReprojection("gdelt1", 0).futureValue
+
+    val df = sql.read.format("filodb.spark").option("dataset", "gdelt1").load()
+    df.agg(sum("year")).collect().head(0) should equal (4032)
+  }
+
+  ignore("should append data in Append mode") {
+    dataDF.write.format("filodb.spark").
+                 option("dataset", "gdelt1").
+                 option("sort_column", "id").
+                 mode(SaveMode.Append).
+                 save()
+
+    FiloSetup.scheduler.waitForReprojection("gdelt1", 0).futureValue
+
+    dataDF2.write.format("filodb.spark").
+                 option("dataset", "gdelt1").
+                 option("sort_column", "id").
+                 mode(SaveMode.Append).
+                 save()
+
+    FiloSetup.scheduler.waitForReprojection("gdelt1", 0).futureValue
+
+    val df = sql.read.format("filodb.spark").option("dataset", "gdelt1").load()
+    df.agg(sum("year")).collect().head(0) should equal (8062)
+  }
+
+  // it("should be able to write with a user-specified partitioning column") (pending)
 }

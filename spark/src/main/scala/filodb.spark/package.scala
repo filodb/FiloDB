@@ -3,7 +3,7 @@ package filodb
 import akka.actor.ActorRef
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.slf4j.StrictLogging
-import org.apache.spark.sql.{SQLContext, DataFrame, Row, Column => SparkColumn}
+import org.apache.spark.sql.{SQLContext, SaveMode, DataFrame, Row, Column => SparkColumn}
 import org.apache.spark.sql.types.DataType
 import org.apache.spark.sql.catalyst.expressions.Literal
 import scala.concurrent.{Await, Future}
@@ -13,7 +13,7 @@ import scala.language.postfixOps
 import filodb.core._
 import filodb.core.metadata.{Column, Dataset}
 import filodb.core.reprojector.MemTable
-import filodb.coordinator.{CoordinatorActor, RowSource}
+import filodb.coordinator.{CoordinatorActor, RowSource, SchedulerActor}
 
 package spark {
   case class DatasetNotFound(dataset: String) extends Exception(s"Dataset $dataset not found")
@@ -66,14 +66,16 @@ package object spark extends StrictLogging {
         if (resp == MemTable.PleaseWait) {
           do {
             logger.info("Waiting for MemTable to be able to ingest again...")
-            Thread sleep 10000
+            Thread sleep 5000
           } while (!memTable.canIngest(dataset, version))
         }
       } while (resp != MemTable.Ingested)
       linesIngested += mappedLines.length
       if (linesIngested % 25000 == 0) logger.info(s"Ingested $linesIngested lines!")
     }
-    coordinatorActor ! Flush(dataset, version)
+    actorAsk(coordinatorActor, Flush(dataset, version)) {
+      case SchedulerActor.Flushed => logger.info(s"Flushed!")
+    }
   }
 
   implicit class FiloContext(sqlContext: SQLContext) {
@@ -149,6 +151,14 @@ package object spark extends StrictLogging {
       }
     }
 
+    private def truncateDataset(dataset: Dataset): Unit = {
+      logger.info(s"Truncating dataset ${dataset.name}")
+      // parse(FiloSetup.columnStore.clearProjectionData(dataset.projections.head)) { resp => resp }
+      actorAsk(FiloSetup.coordinatorActor, TruncateProjection(dataset.projections.head), 1.minute) {
+        case ProjectionTruncated => logger.info(s"Truncation of ${dataset.name} finished")
+      }
+    }
+
     /**
      * Saves a DataFrame in a FiloDB Table
      * - Creates columns in FiloDB from DF schema if needed
@@ -169,8 +179,7 @@ package object spark extends StrictLogging {
      *            val newDF = df.withColumn("partition", idHash(df("id")) % 100)
      *          }}}
      * @param version the version number to write to
-     * @param createDataset if true, then creates a Dataset if one doesn't exist.  Defaults to false to
-     *                      prevent accidental table creation.
+     * @param mode the Spark SaveMode - ErrorIfExists, Append, Overwrite, Ignore
      * @param writeTimeout Maximum time to wait for write of each partition to complete
      */
     def saveAsFiloDataset(df: DataFrame,
@@ -178,7 +187,7 @@ package object spark extends StrictLogging {
                           sortColumn: String,
                           partitionColumn: Option[String] = None,
                           version: Int = 0,
-                          createDataset: Boolean = false,
+                          mode: SaveMode = SaveMode.Append,
                           writeTimeout: FiniteDuration = DefaultWriteTimeout): Unit = {
       val filoConfig = FiloSetup.configFromSpark(sqlContext.sparkContext)
       FiloSetup.init(filoConfig)
@@ -191,7 +200,13 @@ package object spark extends StrictLogging {
         ("_partition", df1)
       }
 
-      if (createDataset) createNewDataset(dataset, sortColumn, partCol, df1)
+      try {
+        val datasetObj = getDatasetObj(dataset)
+        if (mode == SaveMode.Overwrite) truncateDataset(datasetObj)
+      } catch {
+        case e: NotFoundError =>
+          createNewDataset(dataset, sortColumn, partCol, df1)
+      }
       checkAndAddColumns(df1, dataset, version)
       val dfColumns = df1.schema.map(_.name)
 
