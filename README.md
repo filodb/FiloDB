@@ -38,7 +38,7 @@ Columnar, versioned layers of data wrapped in a yummy high-performance analytica
 
 ## Run analytical queries up to 100x faster on Spark SQL and Cassandra.
 
-FiloDB is a new open-source distributed, versioned, and columnar analytical database.
+FiloDB is a new open-source distributed, versioned, and columnar analytical database designed for modern streaming workloads.
 
 * **Distributed** - FiloDB is designed from the beginning to run on best-of-breed distributed, scale-out storage platforms such as Apache Cassandra.  Queries run in parallel in Apache Spark for scale-out ad-hoc analysis.
 * **Columnar** - FiloDB brings breakthrough performance levels for analytical queries by using a columnar storage layout with different space-saving techniques like dictionary compression.  The performance is comparable to Parquet, and one to two orders of magnitude faster than Spark on Cassandra 2.x for analytical queries.  For the POC performance comparison, please see [cassandra-gdelt](http://github.com/velvia/cassandra-gdelt) repo.
