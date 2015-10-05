@@ -41,7 +41,7 @@ Columnar, versioned layers of data wrapped in a yummy high-performance analytica
 FiloDB is a new open-source distributed, versioned, and columnar analytical database designed for modern streaming workloads.
 
 * **Distributed** - FiloDB is designed from the beginning to run on best-of-breed distributed, scale-out storage platforms such as Apache Cassandra.  Queries run in parallel in Apache Spark for scale-out ad-hoc analysis.
-* **Columnar** - FiloDB brings breakthrough performance levels for analytical queries by using a columnar storage layout with different space-saving techniques like dictionary compression.  The performance is comparable to Parquet, and one to two orders of magnitude faster than Spark on Cassandra 2.x for analytical queries.  For the POC performance comparison, please see [cassandra-gdelt](http://github.com/velvia/cassandra-gdelt) repo.
+* **Columnar** - FiloDB brings breakthrough performance levels for analytical queries by using a columnar storage layout with different space-saving techniques like dictionary compression.  True columnar querying techniques are on the roadmap.  The current performance is comparable to Parquet, and one to two orders of magnitude faster than Spark on Cassandra 2.x for analytical queries.  For the POC performance comparison, please see [cassandra-gdelt](http://github.com/velvia/cassandra-gdelt) repo.
 * **Versioned** - At the same time, row-level, column-level operations and built in versioning gives FiloDB far more flexibility than can be achieved using file-based technologies like Parquet alone.
 * Designed for **streaming** - Enable easy exactly-once ingestion from Kafka for streaming events, time series, and IoT applications - yet enable extremely fast ad-hoc analysis using the ease of use of SQL.  Each row is keyed by a partition and sort key, and writes using the same key are idempotent.  FiloDB does the hard work of keeping data stored in an efficient and sorted format.
 
@@ -54,6 +54,17 @@ FiloDB is a great fit for bulk analytical workloads, or streaming /  event data.
 [Overview presentation](http://velvia.github.io/presentations/2014-filodb/#/) -- see the docs folder for design docs.
 
 To compile the .mermaid source files to .png's, install the [Mermaid CLI](http://knsv.github.io/mermaid/mermaidCLI.html).
+
+## Roadmap
+
+Your input is appreciated!
+
+* True columnar querying and execution, using late materialization and vectorization techniques
+* Use of GPU and SIMD instructions to speed up queries
+* Support for many more data types and sort and partition keys - please give us your input!
+* Non-Spark ingestion API.  Your input is again needed.
+* In-memory caching for significant query speedup
+* Projections.  Often-repeated queries can be sped up significantly with projections.
 
 ## Pre-requisites
 
@@ -277,16 +288,6 @@ scala> val correlation = Statistics.corr(numMentions, numArticles, "pearson")
 * Only ingestion through Spark / Spark Streaming, and CLI ingestion via CSV files.
 * Only string, Int, Long partition keys and Long/Timestamp/Int/Double sort keys are supported, but many more to come
 * CSV export from CLI will only read data from one node of a cluster.
-
-## Roadmap
-
-Your input is appreciated!
-
-* Support for many more data types and sort and partition keys - please give us your input!
-* Non-Spark ingestion API.  Your input is again needed.
-* In-memory caching for significant query speedup
-* Projections.  Often-repeated queries can be sped up significantly with projections.
-* Use of GPU and SIMD instructions to speed up queries
 
 ## Building and Testing
 

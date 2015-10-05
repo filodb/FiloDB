@@ -138,6 +138,9 @@ class RowReaderSegment[K](val keyRange: KeyRange[K],
 
   def addChunk(id: ChunkID, column: ColumnId, bytes: Chunk): Unit =
     if (id < chunks.size) {
+      //scalastyle:off
+      if (bytes == null) logger.warn(s"null chunk detected! id=$id column=$column in $keyRange")
+      //scalastyle:on
       chunks(id)(colIdToNumber(column)) = bytes
     } else {
       // Probably the result of corruption, such as OOM while writing segments
@@ -154,7 +157,11 @@ class RowReaderSegment[K](val keyRange: KeyRange[K],
 
   private def getReaders(readerFactory: RowReaderFactory): Array[FiloRowReader] =
     (0 until index.nextChunkId).map { chunkId =>
-      readerFactory(chunks(chunkId), clazzes)
+      val reader = readerFactory(chunks(chunkId), clazzes)
+      // Cheap check for empty chunks
+      if (reader.parsers(0).length == 0)
+        logger.warn(s"empty chunk detected!  chunkId=$chunkId in $keyRange")
+      reader
     }.toArray
 
   /**
