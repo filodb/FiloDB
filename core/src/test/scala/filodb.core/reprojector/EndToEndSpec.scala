@@ -10,6 +10,7 @@ import filodb.core.columnstore.{SegmentSpec, RowReaderSegment, InMemoryColumnSto
 
 import org.scalatest.{FunSpec, Matchers, BeforeAndAfter}
 import org.scalatest.concurrent.ScalaFutures
+import org.scalatest.time.{Millis, Span, Seconds}
 
 // MyTupleRowReader is a temporary fix due to a deserialization bug with TupleRowReader.
 // When new version of filo comes out, revert back to TupleRowReader.
@@ -49,6 +50,9 @@ class EndToEndSpec extends FunSpec with Matchers with BeforeAndAfter with ScalaF
   import MemTable._
 
   import scala.concurrent.ExecutionContext.Implicits.global
+
+  implicit val defaultPatience =
+    PatienceConfig(timeout = Span(10, Seconds), interval = Span(50, Millis))
 
   val mTable = new MapDBMemTable(ConfigFactory.load("application_test.conf"))
   val flushPolicy = new NumRowsFlushPolicy(100L)
