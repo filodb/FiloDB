@@ -219,9 +219,14 @@ package object spark extends StrictLogging {
       val numPartitions = sortedDf.rdd.partitions.size
       logger.info(s"Saving ($dataset/$version) with sortColumn $sortColumn, " +
                   s"partitionColumn $partCol, $numPartitions partitions")
+      ingestDF(sortedDf, filoConfig, dataset, dfColumns, version, defaultPartitionKey)
+    }
 
+    def ingestDF(df: DataFrame, filoConfig: Config, dataset: String,
+                 dfColumns: Seq[String], version: Int,
+                 defaultPartitionKey: Option[Types.PartitionKey]): Unit = {
       // For each partition, start the ingestion
-      sortedDf.rdd.mapPartitionsWithIndex { case (index, rowIter) =>
+      df.rdd.mapPartitionsWithIndex { case (index, rowIter) =>
         // Everything within this function runs on each partition/executor, so need a local datastore & system
         FiloSetup.init(filoConfig)
         logger.info(s"Starting ingestion of DataFrame for dataset $dataset, partition $index...")
