@@ -26,7 +26,7 @@ extends CachedMergingColumnStore with StrictLogging {
   val mergingStrategy = new AppendingChunkMergingStrategy(this)
 
   type ChunkKey = (ColumnId, SegmentId, ChunkID)
-  type ChunkTree = ConcurrentSkipListMap[ChunkKey, Array[Byte]]
+  type ChunkTree = ConcurrentSkipListMap[ChunkKey, ByteBuffer]
   type RowMapTree = ConcurrentSkipListMap[SegmentId, (ByteBuffer, ByteBuffer, Int)]
 
   val EmptyChunkTree = new ChunkTree(Ordering[ChunkKey])
@@ -48,7 +48,7 @@ extends CachedMergingColumnStore with StrictLogging {
       chunkDb.getOrElseUpdate((dataset, partition, version), new ChunkTree(Ordering[ChunkKey]))
     }
     chunks.foreach { case (colId, chunkId, bytes) =>
-      chunkTree.put((colId, segmentId, chunkId), minimalBytes(bytes))
+      chunkTree.put((colId, segmentId, chunkId), bytes)
     }
     Success
   }
@@ -79,7 +79,7 @@ extends CachedMergingColumnStore with StrictLogging {
       val it = chunkTree.subMap(startKey, true, endKey, !keyRange.endExclusive).entrySet.iterator
       val chunkList = it.toSeq.map { entry =>
         val (colId, segmentId, chunkId) = entry.getKey
-        (segmentId, chunkId, ByteBuffer.wrap(entry.getValue))
+        (segmentId, chunkId, entry.getValue)
       }
       ChunkedData(column, chunkList)
     }
@@ -116,11 +116,4 @@ extends CachedMergingColumnStore with StrictLogging {
                     params: Map[String, String]): Seq[Map[String, String]] = Seq(Map.empty)
 
   def bbToHex(bb: ByteBuffer): String = DatatypeConverter.printHexBinary(bb.array)
-
-  def minimalBytes(bb: ByteBuffer): Array[Byte] = {
-    if (bb.position == 0 && bb.arrayOffset == 0) return bb.array
-    val aray = new Array[Byte](bb.remaining)
-    System.arraycopy(bb.array, bb.arrayOffset + bb.position, aray, 0, bb.remaining)
-    aray
-  }
 }

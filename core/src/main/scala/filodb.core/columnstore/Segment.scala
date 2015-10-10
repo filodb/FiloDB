@@ -2,7 +2,7 @@ package filodb.core.columnstore
 
 import com.typesafe.scalalogging.slf4j.StrictLogging
 import java.nio.ByteBuffer
-import org.velvia.filo.{IngestColumn, RowToColumnBuilder, RowReader, FiloRowReader, FastFiloRowReader}
+import org.velvia.filo.{VectorInfo, RowToVectorBuilder, RowReader, FiloRowReader, FastFiloRowReader}
 import scala.collection.immutable.TreeMap
 import scala.collection.mutable.{ArrayBuffer, HashMap}
 
@@ -47,15 +47,7 @@ class GenericSegment[K](val keyRange: KeyRange[K],
   def addChunk(id: ChunkID, column: ColumnId, bytes: Chunk): Unit = {
     if (!(chunkIds contains id)) chunkIds += id
     val columnChunks = chunks.getOrElseUpdate(column, new HashMap[ChunkID, Chunk])
-    // If this is from a Filo ByteBuffer where the bytes only occupy part of the buffer,
-    // copy the bytes out to save memory
-    columnChunks(id) =
-      if (bytes.position > 0) {
-        val destBytes = new Array[Byte](bytes.remaining)
-        Array.copy(bytes.array, bytes.arrayOffset + bytes.position,
-                   destBytes, 0, bytes.remaining)
-        ByteBuffer.wrap(destBytes)
-      } else { bytes }
+    columnChunks(id) = bytes
   }
 
   def getChunks: Iterator[(ColumnId, ChunkID, Chunk)] =
@@ -82,7 +74,7 @@ extends GenericSegment(keyRange, null) {
   val filoSchema = schema.map {
     case Column(name, _, _, colType, serializer, false, false) =>
       require(serializer == Column.Serializer.FiloSerializer)
-      IngestColumn(name, colType.clazz)
+      VectorInfo(name, colType.clazz)
   }
 
   val updatingIndex = index.asInstanceOf[UpdatableChunkRowMap[K]]
@@ -95,7 +87,7 @@ extends GenericSegment(keyRange, null) {
    */
   def addRowsAsChunk(rows: Iterator[RowReader], getSortKey: RowReader => K): Unit = {
     val newChunkId = index.nextChunkId
-    val builder = new RowToColumnBuilder(filoSchema)
+    val builder = new RowToVectorBuilder(filoSchema)
     // NOTE: some RowReaders, such as the one from RowReaderSegment, must be iterators
     // since rowNo in FastFiloRowReader is mutated.
     rows.zipWithIndex.foreach { case (r, i) =>
@@ -108,7 +100,7 @@ extends GenericSegment(keyRange, null) {
 
   def addRowsAsChunk(rows: Seq[(PartitionKey, K, RowReader)]): Unit = {
     val newChunkId = index.nextChunkId
-    val builder = new RowToColumnBuilder(filoSchema)
+    val builder = new RowToVectorBuilder(filoSchema)
     rows.zipWithIndex.foreach { case ((_, k, r), i) =>
       updatingIndex.update(k, newChunkId, i)
       builder.addRow(r)
@@ -159,8 +151,9 @@ class RowReaderSegment[K](val keyRange: KeyRange[K],
     (0 until index.nextChunkId).map { chunkId =>
       val reader = readerFactory(chunks(chunkId), clazzes)
       // Cheap check for empty chunks
-      if (reader.parsers(0).length == 0)
+      if (reader.parsers(0).length == 0) {
         logger.warn(s"empty chunk detected!  chunkId=$chunkId in $keyRange")
+      }
       reader
     }.toArray
 

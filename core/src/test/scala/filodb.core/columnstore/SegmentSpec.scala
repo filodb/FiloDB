@@ -3,7 +3,7 @@ package filodb.core.columnstore
 import filodb.core._
 import filodb.core.metadata.{Column, Dataset, RichProjection}
 import java.nio.ByteBuffer
-import org.velvia.filo.{ColumnParser, RowReader, TupleRowReader}
+import org.velvia.filo.{RowReader, TupleRowReader}
 
 import org.scalatest.FunSpec
 import org.scalatest.Matchers

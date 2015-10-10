@@ -1,6 +1,6 @@
 package filodb.core.columnstore
 
-import org.velvia.filo.{BuilderEncoder, ColumnParser}
+import org.velvia.filo.{FiloVector, VectorBuilder, VectorReader}
 import java.nio.ByteBuffer
 import scala.collection.immutable.{SortedMap, TreeMap}
 import scala.collection.mutable.{ArrayBuffer, HashMap}
@@ -69,8 +69,8 @@ class UpdatableChunkRowMap[K: SortKeyHelper] extends ChunkRowMap {
   def isEmpty: Boolean = index.isEmpty
 
   def serialize(): (ByteBuffer, ByteBuffer) =
-    (BuilderEncoder.seqToBuffer(chunkIdIterator.toSeq),
-     BuilderEncoder.seqToBuffer(rowNumIterator.toSeq))
+    (VectorBuilder(chunkIdIterator.toSeq).toFiloBuffer,
+     VectorBuilder(rowNumIterator.toSeq).toFiloBuffer)
 }
 
 object UpdatableChunkRowMap {
@@ -90,10 +90,10 @@ class BinaryChunkRowMap(chunkIdsBuffer: ByteBuffer,
                         rowNumsBuffer: ByteBuffer,
                         val nextChunkId: Types.ChunkID) extends ChunkRowMap {
   import filodb.core.Types._
-  import ColumnParser._
+  import VectorReader._
 
-  private val chunkIds = ColumnParser.parse[ChunkID](chunkIdsBuffer)
-  private val rowNums = ColumnParser.parse[Int](rowNumsBuffer)
+  private val chunkIds = FiloVector[ChunkID](chunkIdsBuffer)
+  private val rowNums = FiloVector[Int](rowNumsBuffer)
 
   def chunkIdIterator: Iterator[ChunkID] = chunkIds.toIterator
   def rowNumIterator: Iterator[Int] = rowNums.toIterator

@@ -148,9 +148,7 @@ class SparkRowReader(chunks: Array[ByteBuffer], classes: Array[Class[_]]) extend
     FastFiloRowReader(chunks, classes) with Row {
   def apply(i: Int): Any = getAny(i)
   def copy(): org.apache.spark.sql.Row = ???
-  def getBoolean(i: Int): Boolean = ???
   def getByte(i: Int): Byte = ???
-  def getFloat(i: Int): Float = ???
   def getShort(i: Int): Short = ???
   def isNullAt(i: Int): Boolean = !notNull(i)
   def length: Int = parsers.length

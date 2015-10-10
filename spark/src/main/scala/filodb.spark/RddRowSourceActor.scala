@@ -63,8 +63,10 @@ extends BaseActor with RowSource {
 
 case class RddRowReader(row: Row) extends RowReader {
   def notNull(columnNo: Int): Boolean = !row.isNullAt(columnNo)
+  def getBoolean(columnNo: Int): Boolean = row.getBoolean(columnNo)
   def getInt(columnNo: Int): Int = row.getInt(columnNo)
   def getLong(columnNo: Int): Long = row.getLong(columnNo)
   def getDouble(columnNo: Int): Double = row.getDouble(columnNo)
+  def getFloat(columnNo: Int): Float = row.getFloat(columnNo)
   def getString(columnNo: Int): String = row.getString(columnNo)
 }

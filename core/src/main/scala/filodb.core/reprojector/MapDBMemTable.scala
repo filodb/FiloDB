@@ -50,7 +50,7 @@ class MapDBMemTable(config: Config) extends MemTable {
 
   // According to MapDB examples, use incremental backup with memory-only store
   // Also, the cache was causing us to run out of memory because it's unbounded.
-  private val db = DBMaker.newMemoryDB
+  private val db = DBMaker.newMemoryDirectDB
                           .transactionDisable
                           .closeOnJvmShutdown
                           .cacheDisable
@@ -208,8 +208,10 @@ case class VectorRowReader(vector: Vector[Any]) extends RowReader {
   //scalastyle:off
   def notNull(columnNo: Int): Boolean = vector(columnNo) != null
   //scalastyle:on
+  def getBoolean(columnNo: Int): Boolean = vector(columnNo).asInstanceOf[Boolean]
   def getInt(columnNo: Int): Int = MsgPackUtils.getInt(vector(columnNo))
   def getLong(columnNo: Int): Long = MsgPackUtils.getLong(vector(columnNo))
   def getDouble(columnNo: Int): Double = vector(columnNo).asInstanceOf[Double]
+  def getFloat(columnNo: Int): Float = vector(columnNo).asInstanceOf[Float]
   def getString(columnNo: Int): String = vector(columnNo).asInstanceOf[String]
 }
