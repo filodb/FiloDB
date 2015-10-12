@@ -15,12 +15,12 @@ import filodb.core.metadata.{Column, Dataset}
 import filodb.core.reprojector.{MapDBMemTable, NumRowsFlushPolicy}
 import filodb.cassandra.AllTablesTest
 
-object CoordinatorActorSpec extends ActorSpecConfig
+object NodeCoordinatorActorSpec extends ActorSpecConfig
 
-class CoordinatorActorSpec extends ActorTest(CoordinatorActorSpec.getNewSystem)
+class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNewSystem)
 with CoordinatorSetup with AllTablesTest {
   import akka.testkit._
-  import CoordinatorActor._
+  import NodeCoordinatorActor._
 
   override def beforeAll() {
     super.beforeAll()
@@ -34,7 +34,7 @@ with CoordinatorSetup with AllTablesTest {
 
   before {
     metaStore.clearAllData().futureValue
-    coordActor = system.actorOf(CoordinatorActor.props(memTable, metaStore, scheduler, columnStore,
+    coordActor = system.actorOf(NodeCoordinatorActor.props(memTable, metaStore, scheduler, columnStore,
                                 config.getConfig("coordinator")))
     probe = TestProbe()
   }
@@ -43,7 +43,7 @@ with CoordinatorSetup with AllTablesTest {
     gracefulStop(coordActor, 3.seconds.dilated, PoisonPill).futureValue
   }
 
-  describe("CoordinatorActor SetupIngestion verification") {
+  describe("NodeCoordinatorActor SetupIngestion verification") {
     it("should return UnknownDataset when dataset missing or no columns defined") {
       createTable(Dataset("noColumns", "noSort"), Nil)
 

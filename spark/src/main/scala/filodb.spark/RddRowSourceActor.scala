@@ -6,7 +6,7 @@ import org.apache.spark.sql.{SQLContext, DataFrame, Row}
 import org.apache.spark.sql.types._
 import org.velvia.filo.RowReader
 
-import filodb.coordinator.{BaseActor, CoordinatorActor, RowSource}
+import filodb.coordinator.{BaseActor, NodeCoordinatorActor, RowSource}
 
 object RddRowSourceActor {
   // Needs to be a multiple of chunkSize. Not sure how to have a good default though.
@@ -37,7 +37,7 @@ class RddRowSourceActor(rows: Iterator[Row],
                         val maxUnackedRows: Int = RddRowSourceActor.DefaultMaxUnackedRows,
                         val rowsToRead: Int = RddRowSourceActor.DefaultRowsToRead)
 extends BaseActor with RowSource {
-  import CoordinatorActor._
+  import NodeCoordinatorActor._
   import RddRowSourceActor._
 
   // Assume for now rowIDs start from 0.

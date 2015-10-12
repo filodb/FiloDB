@@ -9,7 +9,7 @@ import filodb.core.metadata.MetaStore
 import filodb.core.reprojector._
 
 /**
- * A trait to make setup of the CoordinatorActor stack a bit easier.
+ * A trait to make setup of the NodeCoordinatorActor stack a bit easier.
  * Mixed in for tests as well as the main FiloDB app and anywhere else the stack needs to be spun up.
  */
 trait CoordinatorSetup {
@@ -33,8 +33,8 @@ trait CoordinatorSetup {
                                      config.getInt("scheduler-max-tasks"))
 
   lazy val coordinatorActor =
-    system.actorOf(CoordinatorActor.props(memTable, metaStore, scheduler, columnStore,
-                                          config.getConfig("coordinator")),
+    system.actorOf(NodeCoordinatorActor.props(memTable, metaStore, scheduler, columnStore,
+                                              config.getConfig("coordinator")),
                    "coordinator")
 
   def clearState(): Unit = {

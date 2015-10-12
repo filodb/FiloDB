@@ -5,7 +5,7 @@ import com.opencsv.CSVReader
 import org.velvia.filo.{ArrayStringRowReader, RowReader}
 import scala.util.Try
 
-import filodb.coordinator.{BaseActor, CoordinatorActor, RowSource}
+import filodb.coordinator.{BaseActor, NodeCoordinatorActor, RowSource}
 
 object CsvSourceActor {
   // Needs to be a multiple of chunkSize. Not sure how to have a good default though.
@@ -40,7 +40,7 @@ class CsvSourceActor(csvStream: java.io.Reader,
                      val rowsToRead: Int = CsvSourceActor.DefaultRowsToRead,
                      separatorChar: Char = ',') extends BaseActor with RowSource {
   import CsvSourceActor._
-  import CoordinatorActor._
+  import NodeCoordinatorActor._
 
   val reader = new CSVReader(csvStream, separatorChar)
   val columns = reader.readNext.toSeq

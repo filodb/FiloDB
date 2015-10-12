@@ -19,7 +19,7 @@ object FiloSetup extends DefaultCoordinatorSetup {
 
   def init(filoConfig: Config): Unit = {
     config = filoConfig
-    coordinatorActor    // Force coordinatorActor to start
+    coordinatorActor       // Force NodeCoordinatorActor to start
   }
 
   def init(context: SparkContext): Unit = init(configFromSpark(context))

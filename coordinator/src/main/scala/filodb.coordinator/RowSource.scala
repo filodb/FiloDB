@@ -17,7 +17,7 @@ object RowSource {
  * RowSource is a trait to make it easy to write sources (Actors) for specific
  * input methods - eg from HTTP JSON, or CSV, or Kafka, etc.
  * It has logic to handle flow control/backpressure.
- * It talks to a CoordinatorActor of a FiloDB node.  RowSource may be remote.
+ * It talks to a NodeCoordinatorActor of a FiloDB node.  RowSource may be remote.
  *
  * To start initialization and reading from source, send the Start message.
  *
@@ -40,7 +40,7 @@ trait RowSource extends Actor with StrictLogging {
   def coordinatorActor: ActorRef
 
   // Returns the SetupIngestion message needed for initialization
-  def getStartMessage(): CoordinatorActor.SetupIngestion
+  def getStartMessage(): NodeCoordinatorActor.SetupIngestion
 
   def dataset: String
   def version: Int
@@ -65,7 +65,7 @@ trait RowSource extends Actor with StrictLogging {
       whoStartedMe = sender
       coordinatorActor ! getStartMessage()
 
-    case CoordinatorActor.IngestionReady =>
+    case NodeCoordinatorActor.IngestionReady =>
       self ! GetMoreRows
 
     case e: ErrorResponse =>
@@ -79,7 +79,7 @@ trait RowSource extends Actor with StrictLogging {
       if (rows.nonEmpty) {
         val maxSeqId = rows.map(_._1).max
         currentHiSeqNo = Math.max(currentHiSeqNo, maxSeqId)
-        coordinatorActor ! CoordinatorActor.IngestRows(dataset, version, rows.map(_._2), currentHiSeqNo)
+        coordinatorActor ! NodeCoordinatorActor.IngestRows(dataset, version, rows.map(_._2), currentHiSeqNo)
         // Go get more rows
         if (currentHiSeqNo - lastAckedSeqNo < maxUnackedRows) {
           self ! GetMoreRows
@@ -91,12 +91,12 @@ trait RowSource extends Actor with StrictLogging {
         isDoneReading = true
       }
 
-    case CoordinatorActor.Ack(lastSequenceNo) =>
+    case NodeCoordinatorActor.Ack(lastSequenceNo) =>
       lastAckedSeqNo = lastSequenceNo
       if (!isDoneReading && (currentHiSeqNo - lastAckedSeqNo < maxUnackedRows)) self ! GetMoreRows
       if (isDoneReading && currentHiSeqNo == lastAckedSeqNo) {
         logger.info(s"Ingestion is all done")
-        coordinatorActor ! CoordinatorActor.Flush(dataset, version)
+        coordinatorActor ! NodeCoordinatorActor.Flush(dataset, version)
         allDoneAndGood()
         whoStartedMe ! AllDone
         self ! PoisonPill

@@ -11,7 +11,7 @@ import scala.language.postfixOps
 
 import filodb.core.metadata.MetaStore
 import filodb.core.reprojector.{MemTable, Scheduler}
-import filodb.coordinator.CoordinatorActor
+import filodb.coordinator.NodeCoordinatorActor
 import filodb.coordinator.sources.CsvSourceActor
 import filodb.core._
 
@@ -61,18 +61,18 @@ trait CsvImportExport {
     val columns = reader.readNext.toSeq
     println(s"Ingesting CSV at $csvPath with columns $columns...")
 
-    val ingestCmd = CoordinatorActor.SetupIngestion(dataset, columns, version: Int)
+    val ingestCmd = NodeCoordinatorActor.SetupIngestion(dataset, columns, version: Int)
     actorAsk(coordinatorActor, ingestCmd, 10 seconds) {
-      case CoordinatorActor.IngestionReady =>
-      case CoordinatorActor.UnknownDataset =>
+      case NodeCoordinatorActor.IngestionReady =>
+      case NodeCoordinatorActor.UnknownDataset =>
         println(s"Dataset $dataset is not known, you need to --create it first!")
         exitCode = 2
         return
-      case CoordinatorActor.UndefinedColumns(undefCols) =>
+      case NodeCoordinatorActor.UndefinedColumns(undefCols) =>
         println(s"Some columns $undefCols are not defined, please define them with --create first!")
         exitCode = 2
         return
-      case CoordinatorActor.BadSchema(msg) =>
+      case NodeCoordinatorActor.BadSchema(msg) =>
         println(s"BadSchema - $msg")
         exitCode = 2
         return
@@ -95,7 +95,7 @@ trait CsvImportExport {
       if (linesIngested % 10000 == 0) println(s"Ingested $linesIngested lines!")
     }
 
-    coordinatorActor ! CoordinatorActor.Flush(dataset, version)
+    coordinatorActor ! NodeCoordinatorActor.Flush(dataset, version)
     println("Waiting for scheduler/memTable to finish flushing everything")
     Thread sleep 5000
     while (memTable.flushingDatasets.nonEmpty) {

@@ -14,16 +14,20 @@ import filodb.core.columnstore.ColumnStore
 import filodb.core.reprojector.{MemTable, Scheduler}
 
 /**
- * The CoordinatorActor is the common API entry point for all FiloDB ingestion and metadata operations.
+ * The NodeCoordinatorActor is the common API entry point for all FiloDB ingestion and metadata operations.
  * It is a singleton - there should be exactly one such actor per node/JVM process.
  * It is responsible for:
- *  - Acting as the gateway to the MemTable, Scheduler, and MetaStore for local and remote actors
- *  - Supervising any other actors, such as regular scheduler heartbeats
- *  - Maintaining MemTable backpressure on clients to prevent OOM
+ * - Overall external FiloDB API.
+ * - Staying aware of status of other NodeCoordinators around the ring
+ * - Metadata changes (dataset/column changes)
+ * - Caching changes to dataset metadata?
+ * - Supervising, spinning up, cleaning up DatasetNodeCoordinatorActors
+ * - Forwarding new changes (rows) to other NodeNodeCoordinatorActors if they are not local
+ * - Forwarding rows to DatasetNodeCoordinatorActors
  *
  * It is called by local (eg HTTP) as well as remote (eg Spark ETL) processes.
  */
-object CoordinatorActor {
+object NodeCoordinatorActor {
   /**
    * Creates a new dataset with columns and a default projection.
    */
@@ -83,7 +87,7 @@ object CoordinatorActor {
             scheduler: Scheduler,
             columnStore: ColumnStore,
             config: Config): Props =
-    Props(classOf[CoordinatorActor], memTable, metaStore, scheduler, columnStore, config)
+    Props(classOf[NodeCoordinatorActor], memTable, metaStore, scheduler, columnStore, config)
 }
 
 /**
@@ -96,12 +100,12 @@ object CoordinatorActor {
  *   }
  * }}}
  */
-class CoordinatorActor(memTable: MemTable,
-                       metaStore: MetaStore,
-                       scheduler: Scheduler,
-                       columnStore: ColumnStore,
-                       config: Config) extends BaseActor {
-  import CoordinatorActor._
+class NodeCoordinatorActor(memTable: MemTable,
+                           metaStore: MetaStore,
+                           scheduler: Scheduler,
+                           columnStore: ColumnStore,
+                           config: Config) extends BaseActor {
+  import NodeCoordinatorActor._
   import context.dispatcher
 
   val schedulerInterval = config.as[FiniteDuration]("scheduler-interval")

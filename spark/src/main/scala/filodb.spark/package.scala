@@ -13,7 +13,7 @@ import scala.language.postfixOps
 import filodb.core._
 import filodb.core.metadata.{Column, Dataset}
 import filodb.core.reprojector.MemTable
-import filodb.coordinator.{CoordinatorActor, RowSource, SchedulerActor}
+import filodb.coordinator.{NodeCoordinatorActor, RowSource, SchedulerActor}
 
 package spark {
   case class DatasetNotFound(dataset: String) extends Exception(s"Dataset $dataset not found")
@@ -40,7 +40,7 @@ package spark {
 package object spark extends StrictLogging {
   val DefaultWriteTimeout = 999 minutes
 
-  import CoordinatorActor._
+  import NodeCoordinatorActor._
   import filodb.spark.FiloRelation._
   import FiloSetup.{metaStore, memTable}
 

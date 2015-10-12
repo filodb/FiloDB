@@ -17,7 +17,7 @@ import scala.language.postfixOps
 
 import filodb.cassandra.columnstore.CassandraColumnStore
 import filodb.cassandra.metastore.CassandraMetaStore
-import filodb.coordinator.{CoordinatorActor, DefaultCoordinatorSetup}
+import filodb.coordinator.{NodeCoordinatorActor, DefaultCoordinatorSetup}
 import filodb.core.metadata.{Column, Dataset}
 
 //scalastyle:off
@@ -134,11 +134,11 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with DefaultCoord
     }
     println(s"Creating dataset $dataset with sort column $sortColumn...")
     val datasetObj = Dataset(dataset, sortColumn)
-    actorAsk(coordinatorActor, CoordinatorActor.CreateDataset(datasetObj, columns)) {
-      case CoordinatorActor.DatasetCreated =>
+    actorAsk(coordinatorActor, NodeCoordinatorActor.CreateDataset(datasetObj, columns)) {
+      case NodeCoordinatorActor.DatasetCreated =>
         println(s"Dataset $dataset created!")
         exitCode = 0
-      case CoordinatorActor.DatasetError(errMsg) =>
+      case NodeCoordinatorActor.DatasetError(errMsg) =>
         println(s"Error creating dataset $dataset: $errMsg")
         exitCode = 2
     }

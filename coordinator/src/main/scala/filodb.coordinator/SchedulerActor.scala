@@ -37,7 +37,7 @@ class SchedulerActor(scheduler: Scheduler) extends BaseActor {
       logger.info(s"MemTable flushing tables: ${stats.flushingRows}")
       // TODO: Check for any failures, and report them ... perhaps on EventBus?
 
-    case CoordinatorActor.Flush(dataset, version) =>
+    case NodeCoordinatorActor.Flush(dataset, version) =>
       scheduler.flush(dataset, version) match {
         case Scheduler.Flushed          => sender ! Flushed
         case Scheduler.NoAvailableTasks => sender ! NoSlotsAvailable
