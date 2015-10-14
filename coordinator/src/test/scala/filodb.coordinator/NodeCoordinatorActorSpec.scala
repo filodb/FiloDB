@@ -34,8 +34,8 @@ with CoordinatorSetup with AllTablesTest {
 
   before {
     metaStore.clearAllData().futureValue
-    coordActor = system.actorOf(NodeCoordinatorActor.props(memTable, metaStore, scheduler, columnStore,
-                                config.getConfig("coordinator")))
+    coordActor = system.actorOf(NodeCoordinatorActor.props(memTable, metaStore, reprojector, columnStore,
+                                config))
     probe = TestProbe()
   }
 
@@ -87,18 +87,15 @@ with CoordinatorSetup with AllTablesTest {
     probe.expectMsg(Ack(1L))
 
     // Now, try to flush and check that stuff was written to columnstore...
+    // Note that once we receive the Flushed message back, that means flush cycle was completed.
     probe.send(coordActor, Flush(dataset.name, 0))
-    probe.expectMsg(SchedulerActor.Flushed)
+    probe.expectMsg(Flushed)
 
-    // scheduler.tasks.values.head.failed.futureValue.printStackTrace()
-    whenReady(scheduler.tasks.values.head) { responses =>
-      memTable.flushingDatasets should equal (Nil)
-      implicit val helper = new LongKeyHelper(10000L)
-      val keyRange = KeyRange(dataset.name, Dataset.DefaultPartitionKey, 0L, 30000L)
-      whenReady(columnStore.readSegments(columns, keyRange, 0)) { segIter =>
-        val readSeg = segIter.toSeq.head.asInstanceOf[RowReaderSegment[Long]]
-        readSeg.rowIterator().map(_.getInt(2)).toSeq should equal (Seq(32015, 32015))
-      }
+    implicit val helper = new LongKeyHelper(10000L)
+    val keyRange = KeyRange(dataset.name, Dataset.DefaultPartitionKey, 0L, 30000L)
+    whenReady(columnStore.readSegments(columns, keyRange, 0)) { segIter =>
+      val readSeg = segIter.toSeq.head.asInstanceOf[RowReaderSegment[Long]]
+      readSeg.rowIterator().map(_.getInt(2)).toSeq should equal (Seq(32015, 32015))
     }
   }
 }

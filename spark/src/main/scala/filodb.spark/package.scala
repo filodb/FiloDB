@@ -13,7 +13,7 @@ import scala.language.postfixOps
 import filodb.core._
 import filodb.core.metadata.{Column, Dataset}
 import filodb.core.reprojector.MemTable
-import filodb.coordinator.{NodeCoordinatorActor, RowSource, SchedulerActor}
+import filodb.coordinator.{NodeCoordinatorActor, RowSource, DatasetCoordinatorActor}
 
 package spark {
   case class DatasetNotFound(dataset: String) extends Exception(s"Dataset $dataset not found")
@@ -75,7 +75,7 @@ package object spark extends StrictLogging {
       if (linesIngested % 25000 == 0) logger.info(s"Ingested $linesIngested lines!")
     }
     actorAsk(coordinatorActor, Flush(dataset, version)) {
-      case SchedulerActor.Flushed => logger.info(s"Flushed!")
+      case Flushed => logger.info(s"Flushed!")
     }
   }
 

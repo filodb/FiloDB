@@ -11,7 +11,7 @@ import filodb.core._
 import filodb.core.Types._
 import filodb.core.metadata.{Column, Dataset, MetaStore, Projection}
 import filodb.core.columnstore.ColumnStore
-import filodb.core.reprojector.{MemTable, Scheduler}
+import filodb.core.reprojector.{MemTable, Reprojector}
 
 /**
  * The NodeCoordinatorActor is the common API entry point for all FiloDB ingestion and metadata operations.
@@ -21,9 +21,9 @@ import filodb.core.reprojector.{MemTable, Scheduler}
  * - Staying aware of status of other NodeCoordinators around the ring
  * - Metadata changes (dataset/column changes)
  * - Caching changes to dataset metadata?
- * - Supervising, spinning up, cleaning up DatasetNodeCoordinatorActors
- * - Forwarding new changes (rows) to other NodeNodeCoordinatorActors if they are not local
- * - Forwarding rows to DatasetNodeCoordinatorActors
+ * - Supervising, spinning up, cleaning up DatasetCoordinatorActors
+ * - Forwarding new changes (rows) to other NodeCoordinatorActors if they are not local
+ * - Forwarding rows to DatasetCoordinatorActors
  *
  * It is called by local (eg HTTP) as well as remote (eg Spark ETL) processes.
  */
@@ -60,6 +60,7 @@ object NodeCoordinatorActor {
    * The partitioning column and sort column are set up in the dataset.
    *
    * @param seqNo the sequence number to be returned for acknowledging the entire set of rows
+   * @returns Ack(seqNo) returned when the set of rows has been committed to the MemTable.
    */
   case class IngestRows(dataset: String, version: Int, rows: Seq[RowReader], seqNo: Long)
 
@@ -68,26 +69,30 @@ object NodeCoordinatorActor {
   /**
    * Initiates a flush of the remaining MemTable rows of the given dataset and version.
    * Usually used when at the end of ingesting some large blob of data.
-   * @returns SchedulerActor.Flushed
+   * @returns Flushed when the flush cycle has finished successfully, commiting data to columnstore.
    */
   case class Flush(dataset: String, version: Int)
+  case object Flushed
 
   /**
    * Truncates all data from a projection of a dataset.  Waits for any pending flushes from said
    * dataset to finish first, and also clears the columnStore cache for that dataset.
    */
-  case class TruncateProjection(projection: Projection)
+  case class TruncateProjection(projection: Projection, version: Int)
   case object ProjectionTruncated
+
+  // Internal messages
+  case class AddDatasetCoord(dataset: TableName, version: Int, dsCoordRef: ActorRef)
 
   def invalidColumns(columns: Seq[String], schema: Column.Schema): Seq[String] =
     (columns.toSet -- schema.keys).toSeq
 
   def props(memTable: MemTable,
             metaStore: MetaStore,
-            scheduler: Scheduler,
+            reprojector: Reprojector,
             columnStore: ColumnStore,
             config: Config): Props =
-    Props(classOf[NodeCoordinatorActor], memTable, metaStore, scheduler, columnStore, config)
+    Props(classOf[NodeCoordinatorActor], memTable, metaStore, reprojector, columnStore, config)
 }
 
 /**
@@ -102,22 +107,24 @@ object NodeCoordinatorActor {
  */
 class NodeCoordinatorActor(memTable: MemTable,
                            metaStore: MetaStore,
-                           scheduler: Scheduler,
+                           reprojector: Reprojector,
                            columnStore: ColumnStore,
                            config: Config) extends BaseActor {
   import NodeCoordinatorActor._
   import context.dispatcher
 
-  val schedulerInterval = config.as[FiniteDuration]("scheduler-interval")
-  val turnOnReporting   = config.as[Option[Boolean]]("scheduler-reporting").getOrElse(false)
-  val reportingInterval = config.as[FiniteDuration]("scheduler-reporting-interval")
+  val dsCoordinators = new collection.mutable.HashMap[(TableName, Int), ActorRef]
 
-  val schedulerActor = context.actorOf(SchedulerActor.props(scheduler), "scheduler")
-  context.system.scheduler.schedule(schedulerInterval, schedulerInterval,
-                                    schedulerActor, SchedulerActor.RunOnce)
-  if (turnOnReporting) {
-    context.system.scheduler.schedule(reportingInterval, reportingInterval,
-                                      schedulerActor, SchedulerActor.ReportStats)
+  // Make sure the function below is NOT called from a Future, it updates state!
+  private def createDatasetCoord(datasetObj: Dataset, version: Int): ActorRef = {
+    val props = DatasetCoordinatorActor.props(datasetObj, version, columnStore, reprojector,
+                                              config, memTable)
+    context.actorOf(props, s"ds-coord-${datasetObj.name}-$version")
+  }
+
+  private def withDsCoord(originator: ActorRef, dataset: String, version: Int)
+                         (func: ActorRef => Unit): Unit = {
+    dsCoordinators.get((dataset, version)).map(func).getOrElse(originator ! UnknownDataset)
   }
 
   private def verifySchema(originator: ActorRef, dataset: String, version: Int, columns: Seq[String]):
@@ -154,26 +161,26 @@ class NodeCoordinatorActor(memTable: MemTable,
                              columns: Seq[String],
                              version: Int,
                              defaultPartKey: Option[PartitionKey]): Unit = {
-    (for { datasetObj <- metaStore.getDataset(dataset)
+    // Try to get the dataset coordinator.  Create one if it doesn't exist.
+    val dsCoordFuture: Future[ActorRef] =
+      dsCoordinators.get((dataset, version)).map(Future.successful)
+                    .getOrElse({
+                      for { datasetObj <- metaStore.getDataset(dataset) } yield {
+                        val ref = createDatasetCoord(datasetObj, version)
+                        // This happens in a future, use messages so state updates in actor loop
+                        self ! AddDatasetCoord(dataset, version, ref)
+                        ref
+                      }
+                    })
+    (for { dsCoord <- dsCoordFuture
            schema <- verifySchema(originator, dataset, version, columns) if schema.isDefined }
     yield {
       val columnSeq = columns.map(schema.get(_))
-      memTable.setupIngestion(datasetObj, columnSeq, version, defaultPartKey) match {
-        case MemTable.SetupDone    => originator ! IngestionReady
-        // If the table is already set up, that's fine!
-        case MemTable.AlreadySetup => originator ! IngestionReady
-        case MemTable.BadSchema(msg) => originator ! BadSchema(msg)
-      }
+      dsCoord ! DatasetCoordinatorActor.Setup(originator, columnSeq, defaultPartKey)
     }).recover {
       case NotFoundError(what) => originator ! UnknownDataset
       case t: Throwable        => originator ! MetadataException(t)
     }
-  }
-
-  private def truncateProjection(originator: ActorRef, projection: Projection): Unit = {
-    for { reprojResult <- scheduler.waitForReprojection(projection.dataset)
-          resp <- columnStore.clearProjectionData(projection) }
-    { originator ! ProjectionTruncated }
   }
 
   def receive: Receive = {
@@ -183,19 +190,18 @@ class NodeCoordinatorActor(memTable: MemTable,
     case SetupIngestion(dataset, columns, version, defaultPartKey) =>
       setupIngestion(sender, dataset, columns, version, defaultPartKey)
 
-    case ingestCmd @ IngestRows(dataset, version, rows, seqNo) =>
-      // Ingest rows into the memtable
-      memTable.ingestRows(dataset, version, rows) match {
-        case MemTable.NoSuchDatasetVersion => sender ! UnknownDataset
-        case MemTable.Ingested             => sender ! Ack(seqNo)
-        case MemTable.PleaseWait           =>
-          logger.info(s"MemTable full or low on memory, try rows again later...")
-      }
+    case IngestRows(dataset, version, rows, seqNo) =>
+      withDsCoord(sender, dataset, version) { _ ! DatasetCoordinatorActor.NewRows(sender, rows, seqNo) }
 
     case flushCmd @ Flush(dataset, version) =>
-      schedulerActor.forward(flushCmd)
+      withDsCoord(sender, dataset, version) { _ ! DatasetCoordinatorActor.StartFlush(Some(sender)) }
 
-    case TruncateProjection(projection) =>
-      truncateProjection(sender, projection)
+    case TruncateProjection(projection, version) =>
+      withDsCoord(sender, projection.dataset, version) {
+        _ ! DatasetCoordinatorActor.ClearProjection(sender, projection)
+      }
+
+    case AddDatasetCoord(dataset, version, dsCoordRef) =>
+      dsCoordinators((dataset, version)) = dsCoordRef
   }
 }

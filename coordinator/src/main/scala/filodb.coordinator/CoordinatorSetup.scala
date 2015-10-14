@@ -33,8 +33,8 @@ trait CoordinatorSetup {
                                      config.getInt("scheduler-max-tasks"))
 
   lazy val coordinatorActor =
-    system.actorOf(NodeCoordinatorActor.props(memTable, metaStore, scheduler, columnStore,
-                                              config.getConfig("coordinator")),
+    system.actorOf(NodeCoordinatorActor.props(memTable, metaStore, reprojector, columnStore,
+                                              config),
                    "coordinator")
 
   def clearState(): Unit = {
