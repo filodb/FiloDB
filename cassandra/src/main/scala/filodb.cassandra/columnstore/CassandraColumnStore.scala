@@ -148,7 +148,7 @@ extends CachedMergingColumnStore with StrictLogging {
    * params:
    *   splits_per_node - how much parallelism or ways to divide a token range on each node
    *
-   * @returns each split will have token_start, token_end, replicas filled in
+   * @return each split will have token_start, token_end, replicas filled in
    */
   def getScanSplits(dataset: TableName,
                     params: Map[String, String] = Map.empty): Seq[Map[String, String]] = {

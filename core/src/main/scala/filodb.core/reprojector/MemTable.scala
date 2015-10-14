@@ -85,7 +85,7 @@ trait MemTable extends StrictLogging {
    * @defaultPartitionKey if Some(key), a null value in partitioning column will cause key to be used.
    *                      if None, then NullPartitionValue will be thrown when null value
    *                        is encountered in a partitioning column.
-   * @returns BadSchema if cannot determine a partitioningFunc or sort column
+   * @return BadSchema if cannot determine a partitioningFunc or sort column
    *          AlreadySetup if the dataset has been setup before
    */
   def setupIngestion(dataset: Dataset,
@@ -130,7 +130,7 @@ trait MemTable extends StrictLogging {
    * @param dataset the Dataset to ingest.  Must have been setup using setupIngestion().
    * @param version the version to ingest into.
    * @param rows the rows to ingest
-   * @returns Ingested or PleaseWait, if the MemTable is too full or we are low on memory
+   * @return Ingested or PleaseWait, if the MemTable is too full or we are low on memory
    */
   def ingestRows(dataset: TableName, version: Int, rows: Seq[RowReader]): IngestionResponse = {
     import Column.ColumnType._
@@ -203,7 +203,7 @@ trait MemTable extends StrictLogging {
    * Flips the active and locked buffers. After this is called, ingestion will immediately
    * proceed to the new active buffer, and the existing active buffer becomes the new Locked
    * buffer.
-   * @returns NotEmpty if the locked buffer is not empty
+   * @return NotEmpty if the locked buffer is not empty
    */
   def flipBuffers(dataset: TableName, version: Int): FlipResponse
 

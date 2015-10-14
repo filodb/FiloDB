@@ -50,7 +50,7 @@ with FiloCassandraConnector {
 
   /**
    * Retrieves a whole series of chunk maps, in the range [startSegmentId, untilSegmentId)
-   * @returns ChunkMaps(...), if nothing found will return ChunkMaps(Nil).
+   * @return ChunkMaps(...), if nothing found will return ChunkMaps(Nil).
    */
   def getChunkMaps(partition: String,
                    version: Int,
@@ -77,7 +77,7 @@ with FiloCassandraConnector {
 
   /**
    * Writes a new chunk map to the chunkRowTable.
-   * @returns Success, or an exception as a Future.failure
+   * @return Success, or an exception as a Future.failure
    */
   def writeChunkMap(partition: String,
                     version: Int,

@@ -27,7 +27,7 @@ trait ChunkRowMap {
   /**
    * Serializes the data in the row index.  NOTE: The primary keys are not serialized, since it is
    * assumed they exist in a different column.
-   * @returns two binary Filo vectors, first one for the chunkIds, and second one for the rowNums.
+   * @return two binary Filo vectors, first one for the chunkIds, and second one for the rowNums.
    */
   def serialize(): (ByteBuffer, ByteBuffer)
 }

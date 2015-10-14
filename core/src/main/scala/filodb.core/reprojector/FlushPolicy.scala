@@ -11,7 +11,7 @@ trait FlushPolicy {
   /**
    * Determine the next dataset and version to flush using some heuristic.
    * Should ignore currently flushing datasets (ie Locked memtable is nonempty)
-   * @returns None if it is not time to flush yet, or all datasets are already being flushed.
+   * @return None if it is not time to flush yet, or all datasets are already being flushed.
    *          Some((dataset, version)) for the next flushing candidate.
    */
   def nextFlush(memtable: MemTable): Option[(TableName, Int)]

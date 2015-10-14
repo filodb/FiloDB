@@ -98,7 +98,7 @@ class Scheduler(memTable: MemTable,
   /**
    * Initiates a flush cycle manually for a given dataset and version.
    * This might be called by an ingestion source when it is done with the ingestion, for example.
-   * @returns Flushed, or NoAvailableTasks if there are no slots available to start a flush.
+   * @return Flushed, or NoAvailableTasks if there are no slots available to start a flush.
    */
   def flush(dataset: TableName, version: Int): FlushResponse = {
     if (tasks contains (dataset -> version)) return Flushed
@@ -122,7 +122,7 @@ class Scheduler(memTable: MemTable,
 
   /**
    * Returns a Future for any outstanding reprojection tasks for a given dataset
-   * @returns Future[Nil] if there are no reprojection tasks for given dataset/version
+   * @return Future[Nil] if there are no reprojection tasks for given dataset/version
    *          Future[Nil] for a reprojection task that errors out
    *          Future[Seq[String]] for a reprojection task that finishes normally
    */
@@ -138,7 +138,7 @@ class Scheduler(memTable: MemTable,
 
   /**
    * Same as waitForReprojection but acts on all versions of a given dataset
-   * @returns a Seq of (version, Seq[String]) pairs
+   * @return a Seq of (version, Seq[String]) pairs
    */
   def waitForReprojection(dataset: TableName)
                          (implicit ec: ExecutionContext): Future[Seq[(Int, Seq[String])]] = {

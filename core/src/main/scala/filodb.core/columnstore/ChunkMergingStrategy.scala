@@ -38,7 +38,7 @@ trait ChunkMergingStrategy {
    * Merges an existing segment cached using readSegmentForCache with a new partial segment to be inserted.
    * @param oldSegment the existing segment from the cache, populated using readSegmentForCache
    * @param newSegment the new partial segment containing only new data/rows to be inserted
-   * @returns a merged Segment ready to be flushed to disk.  This typically will only include chunks that need
+   * @return a merged Segment ready to be flushed to disk.  This typically will only include chunks that need
    *          to be updated or written to disk.
    */
   def mergeSegments[K: TypedFieldExtractor: SortKeyHelper](oldSegment: Segment[K],

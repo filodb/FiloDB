@@ -43,7 +43,7 @@ object NodeCoordinatorActor {
    * @defaultPartitionKey if Some(key), a null value in partitioning column will cause key to be used.
    *                      if None, then NullPartitionValue will be thrown when null value
    *                        is encountered in a partitioning column.
-   * @returns BadSchema if the partition column is unsupported, sort column invalid, etc.
+   * @return BadSchema if the partition column is unsupported, sort column invalid, etc.
    */
   case class SetupIngestion(dataset: String,
                             schema: Seq[String],
@@ -60,7 +60,7 @@ object NodeCoordinatorActor {
    * The partitioning column and sort column are set up in the dataset.
    *
    * @param seqNo the sequence number to be returned for acknowledging the entire set of rows
-   * @returns Ack(seqNo) returned when the set of rows has been committed to the MemTable.
+   * @return Ack(seqNo) returned when the set of rows has been committed to the MemTable.
    */
   case class IngestRows(dataset: String, version: Int, rows: Seq[RowReader], seqNo: Long)
 
@@ -69,7 +69,7 @@ object NodeCoordinatorActor {
   /**
    * Initiates a flush of the remaining MemTable rows of the given dataset and version.
    * Usually used when at the end of ingesting some large blob of data.
-   * @returns Flushed when the flush cycle has finished successfully, commiting data to columnstore.
+   * @return Flushed when the flush cycle has finished successfully, commiting data to columnstore.
    */
   case class Flush(dataset: String, version: Int)
   case object Flushed

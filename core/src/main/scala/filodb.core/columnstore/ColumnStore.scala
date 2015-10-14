@@ -38,7 +38,7 @@ trait ColumnStore {
    * preserved such that the chunk/row# in the ChunkRowMap can be read out in sort key order.
    * @param segment the partial Segment to write / merge to the columnar store
    * @param version the version # to write the segment to
-   * @returns Success. Future.failure(exception) otherwise.
+   * @return Success. Future.failure(exception) otherwise.
    */
   def appendSegment[K: SortKeyHelper: TypedFieldExtractor](projection: RichProjection,
                                                            segment: Segment[K],
@@ -51,7 +51,7 @@ trait ColumnStore {
    *                in each row
    * @param keyRange describes the partition and range of keys to read back. NOTE: end range is exclusive!
    * @param version the version # to read from
-   * @returns An iterator over RowReaderSegment's
+   * @return An iterator over RowReaderSegment's
    */
   def readSegments[K: SortKeyHelper](columns: Seq[Column], keyRange: KeyRange[K], version: Int):
       Future[Iterator[Segment[K]]]
@@ -72,7 +72,7 @@ trait ColumnStore {
   /**
    * Determines how to split the scanning of a dataset across a columnstore.
    * @param params implementation-specific flags to affect the scanning, including parallelism, locality etc
-   * @returns individual param maps for each split, to be fed to parallel/distributed scanSegments calls
+   * @return individual param maps for each split, to be fed to parallel/distributed scanSegments calls
    */
   def getScanSplits(dataset: TableName,
                     params: Map[String, String] = Map.empty): Seq[Map[String, String]]
@@ -114,7 +114,7 @@ trait CachedMergingColumnStore extends ColumnStore with StrictLogging {
   /**
    * Writes chunks to underlying storage.
    * @param chunks an Iterator over triples of (columnName, chunkId, chunk bytes)
-   * @returns Success. Future.failure(exception) otherwise.
+   * @return Success. Future.failure(exception) otherwise.
    */
   def writeChunks(dataset: TableName,
                   partition: PartitionKey,
@@ -135,7 +135,7 @@ trait CachedMergingColumnStore extends ColumnStore with StrictLogging {
    * @param columns the columns to read back chunks from
    * @param keyRange the range of segments to read from.  Note endExclusive flag.
    * @param version the version to read back
-   * @returns a sequence of ChunkedData, each triple is (segmentId, chunkId, bytes) for each chunk
+   * @return a sequence of ChunkedData, each triple is (segmentId, chunkId, bytes) for each chunk
    *          must be sorted in order of increasing segmentId
    */
   def readChunks[K](columns: Set[ColumnId],
@@ -146,7 +146,7 @@ trait CachedMergingColumnStore extends ColumnStore with StrictLogging {
    * Reads back all the ChunkRowMaps from multiple segments in a keyRange.
    * @param keyRange the range of segments to read from, note [start, end) <-- end is exclusive!
    * @param version the version to read back
-   * @returns a sequence of (segmentId, ChunkRowMap)'s
+   * @return a sequence of (segmentId, ChunkRowMap)'s
    */
   def readChunkRowMaps[K](keyRange: KeyRange[K], version: Int): Future[Seq[(SegmentId, BinaryChunkRowMap)]]
 
@@ -157,7 +157,7 @@ trait CachedMergingColumnStore extends ColumnStore with StrictLogging {
    * of many segments, such as reading all the data for one node from a Spark worker.
    * TODO: how to make passing stuff such as token ranges nicer, but still generic?
    *
-   * @returns an iterator over ChunkRowMaps.  Must be sorted by partitionkey first, then segment Id.
+   * @return an iterator over ChunkRowMaps.  Must be sorted by partitionkey first, then segment Id.
    */
   def scanChunkRowMaps(dataset: TableName,
                        version: Int,

@@ -36,21 +36,21 @@ trait MetaStore {
   /**
    * Creates a new dataset with the given name, if it doesn't already exist.
    * @param dataset the Dataset to create.  Should have superprojection defined.
-   * @returns Success, or AlreadyExists, or StorageEngineException
+   * @return Success, or AlreadyExists, or StorageEngineException
    */
   def newDataset(dataset: Dataset): Future[Response]
 
   /**
    * Retrieves a Dataset object of the given name
    * @param name Name of the dataset to retrieve
-   * @returns a Dataset
+   * @return a Dataset
    */
   def getDataset(name: String): Future[Dataset]
 
   /**
    * Deletes dataset metadata including all projections.  Does not delete column store data.
    * @param name Name of the dataset to delete.
-   * @returns Success, or MetadataException, or StorageEngineException
+   * @return Success, or MetadataException, or StorageEngineException
    */
   def deleteDataset(name: String): Future[Response]
 
