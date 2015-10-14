@@ -33,7 +33,7 @@ trait Reprojector {
    * to do work asynchronously.  Also, scheduling too many futures leads to long blocking time and
    * memory issues.
    *
-   * @returns a Future[Seq[String]], representing info from individual segment flushes.
+   * @return a Future[Seq[String]], representing info from individual segment flushes.
    */
   def newTask(memTable: MemTable, dataset: Types.TableName, version: Int): Future[Seq[String]] = {
     import Column.ColumnType._

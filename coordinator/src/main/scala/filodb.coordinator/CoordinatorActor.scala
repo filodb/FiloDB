@@ -39,7 +39,7 @@ object CoordinatorActor {
    * @defaultPartitionKey if Some(key), a null value in partitioning column will cause key to be used.
    *                      if None, then NullPartitionValue will be thrown when null value
    *                        is encountered in a partitioning column.
-   * @returns BadSchema if the partition column is unsupported, sort column invalid, etc.
+   * @return BadSchema if the partition column is unsupported, sort column invalid, etc.
    */
   case class SetupIngestion(dataset: String,
                             schema: Seq[String],
@@ -64,7 +64,7 @@ object CoordinatorActor {
   /**
    * Initiates a flush of the remaining MemTable rows of the given dataset and version.
    * Usually used when at the end of ingesting some large blob of data.
-   * @returns SchedulerActor.Flushed
+   * @return SchedulerActor.Flushed
    */
   case class Flush(dataset: String, version: Int)
 
