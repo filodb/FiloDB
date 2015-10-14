@@ -25,7 +25,9 @@ object DatasetCoordinatorActor {
                    defaultPartitionKey: Option[PartitionKey] = None)
 
   /**
-   * Ingests a bunch of rows into this dataset, version's memtable
+   * Ingests a bunch of rows into this dataset, version's memtable.
+   * Automatically checks at the end if the memtable should be flushed, and sends a StartFlush
+   * message to itself to initiate a flush.  This is done before the Ack is sent back.
    * @return Ack(seqNo)
    */
   case class NewRows(ackTo: ActorRef, rows: Seq[RowReader], seqNo: Long)
@@ -42,6 +44,16 @@ object DatasetCoordinatorActor {
    * Clears all data from the projection.  Waits for existing flush to finish first.
    */
   case class ClearProjection(replyTo: ActorRef, projection: Projection)
+
+  /**
+   * Returns current stats.  Note: numRows* will return -1 if the memtable is not set up yet
+   */
+  case object GetStats
+  case class Stats(flushesStarted: Int,
+                   flushesSucceeded: Int,
+                   flushesFailed: Int,
+                   numRowsActive: Long,
+                   numRowsFlushing: Long)
 
   // Internal messages
   case class FlushDone(result: Seq[String])
@@ -95,6 +107,9 @@ class DatasetCoordinatorActor(datasetObj: Dataset,
   def flushingRows: Option[Long] = memTable.numRows(datasetObj.name, version, MemTable.Locked)
 
   var curReprojection: Option[Future[Seq[String]]] = None
+  var flushesStarted = 0
+  var flushesSucceeded = 0
+  var flushesFailed = 0
 
   private def reportStats(): Unit = {
     logger.info(s"MemTable active table rows: $activeRows")
@@ -103,15 +118,32 @@ class DatasetCoordinatorActor(datasetObj: Dataset,
 
   var flushedCallbacks: List[ActorRef] = Nil
 
+  private def ingestRows(ackTo: ActorRef, rows: Seq[RowReader], seqNo: Long): Unit = {
+    // TODO: backpressure based on max # of rows in memtable
+    val msg = memTable.ingestRows(datasetObj.name, version, rows) match {
+      case MemTable.NoSuchDatasetVersion => Some(NodeCoordinatorActor.UnknownDataset)
+      case MemTable.Ingested             => Some(NodeCoordinatorActor.Ack(seqNo))
+      case MemTable.PleaseWait           =>
+        logger.info(s"MemTable full or low on memory, try rows again later...")
+        None
+    }
+
+    // Now, check how full the memtable is, and if it needs to be flipped, and a flush started
+    if (shouldFlush) self ! StartFlush()
+
+    msg.foreach(ackTo.!)
+  }
+
   private def startFlush(): Unit = {
+    logger.info(s"Starting new flush cycle for (${datasetObj.name}/$version)...")
+    reportStats()
     if (memTable.flipBuffers(datasetObj.name, version) != MemTable.Flipped) {
       logger.warn("This should not happen, unless Scheduler is running concurrently!")
       return
     }
-    logger.info(s"Starting new flush cycle for (${datasetObj.name}/$version)...")
-    reportStats()
     val newTaskFuture = reprojector.newTask(memTable, datasetObj.name, version)
     curReprojection = Some(newTaskFuture)
+    flushesStarted += 1
     newTaskFuture.map { results =>
       self ! FlushDone(results)
     }
@@ -122,13 +154,14 @@ class DatasetCoordinatorActor(datasetObj: Dataset,
 
   private def shouldFlush: Boolean =
     activeRows.map { numRows =>
-      (numRows > flushTriggerRows && curReprojection == None)
+      (numRows >= flushTriggerRows && curReprojection == None)
     }.getOrElse(false)
 
   private def handleFlushDone(): Unit = {
     curReprojection = None
     flushedCallbacks.foreach { ref => ref ! NodeCoordinatorActor.Flushed }
     flushedCallbacks = Nil
+    flushesSucceeded += 1
     // See if another flush needs to be initiated
     if (shouldFlush) self ! StartFlush()
   }
@@ -137,6 +170,7 @@ class DatasetCoordinatorActor(datasetObj: Dataset,
     // TODO: let everyone know task failed?  Or not until retries are all up?
     flushedCallbacks.foreach { ref => ref ! FlushFailed(t) }
     flushedCallbacks = Nil
+    flushesFailed += 1
     // TODO: retry?
     // Don't delete reprojection.  Just let everything suspend?
   }
@@ -157,16 +191,7 @@ class DatasetCoordinatorActor(datasetObj: Dataset,
       }
 
     case NewRows(ackTo, rows, seqNo) =>
-      // TODO: backpressure based on max # of rows in memtable
-      memTable.ingestRows(datasetObj.name, version, rows) match {
-        case MemTable.NoSuchDatasetVersion => ackTo ! NodeCoordinatorActor.UnknownDataset
-        case MemTable.Ingested             => ackTo ! NodeCoordinatorActor.Ack(seqNo)
-        case MemTable.PleaseWait           =>
-          logger.info(s"MemTable full or low on memory, try rows again later...")
-      }
-
-      // Now, check how full the memtable is, and if it needs to be flipped, and a flush started
-      if (shouldFlush) self ! StartFlush()
+      ingestRows(ackTo, rows, seqNo)
 
     case StartFlush(originator) =>
       originator.foreach { callbackRef => flushedCallbacks = flushedCallbacks :+ callbackRef }
@@ -175,6 +200,10 @@ class DatasetCoordinatorActor(datasetObj: Dataset,
 
     case ClearProjection(replyTo, projection) =>
       clearProjection(replyTo, projection)
+
+    case GetStats =>
+      sender ! Stats(flushesStarted, flushesSucceeded, flushesFailed,
+                     activeRows.getOrElse(-1L), flushingRows.getOrElse(-1L))
 
     case FlushDone(results) =>
       logger.info(s"Reprojection task (${datasetObj.name}, $version) succeeded: ${results.toList}")
