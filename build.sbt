@@ -100,9 +100,11 @@ lazy val coreSettings = Seq(
 
 lazy val testSettings = Seq(
     parallelExecution in Test := false,
-    concurrentRestrictions := Seq(
-      Tags.limit(Tags.CPU, java.lang.Runtime.getRuntime().availableProcessors()),
+    concurrentRestrictions in Global := Seq(
+      // Tags.limit(Tags.CPU, java.lang.Runtime.getRuntime().availableProcessors()),
+      Tags.limit(Tags.CPU, 1),
       // limit to 1 concurrent test task, even across sub-projects
+      Tags.limit(Tags.Test, 1),
       // Note: some components of tests seem to have the "Untagged" tag rather than "Test" tag.
       // So, we limit the sum of "Test", "Untagged" tags to 1 concurrent
       Tags.limitSum(1, Tags.Test, Tags.Untagged))
