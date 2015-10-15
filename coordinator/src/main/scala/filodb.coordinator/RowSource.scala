@@ -103,7 +103,10 @@ trait RowSource extends Actor with StrictLogging {
         }
       } else {
         logger.debug(s" ==> doneReading: HiSeqNo = $currentHiSeqNo, lastAcked = $lastAckedSeqNo")
-        if (currentHiSeqNo == lastAckedSeqNo) { finish() }
+        if (currentHiSeqNo == lastAckedSeqNo) {
+          sendFlush()
+          context.become(doneReading)
+        }
         else { context.become(doneReading) }
       }
 
@@ -140,12 +143,16 @@ trait RowSource extends Actor with StrictLogging {
   def doneReading: Receive = {
     case NodeCoordinatorActor.Ack(lastSequenceNo) =>
       lastAckedSeqNo = lastSequenceNo
-      if (currentHiSeqNo == lastAckedSeqNo) finish()
+      if (currentHiSeqNo == lastAckedSeqNo) sendFlush()
+
+    case NodeCoordinatorActor.Flushed =>
+      finish()
   }
+
+  def sendFlush(): Unit = { coordinatorActor ! NodeCoordinatorActor.Flush(dataset, version) }
 
   def finish(): Unit = {
     logger.info(s"Ingestion is all done")
-    coordinatorActor ! NodeCoordinatorActor.Flush(dataset, version)
     allDoneAndGood()
     whoStartedMe ! AllDone
     self ! PoisonPill

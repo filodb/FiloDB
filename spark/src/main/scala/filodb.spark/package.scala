@@ -12,7 +12,6 @@ import scala.language.postfixOps
 
 import filodb.core._
 import filodb.core.metadata.{Column, Dataset}
-import filodb.core.reprojector.MemTable
 import filodb.coordinator.{NodeCoordinatorActor, RowSource, DatasetCoordinatorActor}
 
 package spark {
@@ -42,40 +41,24 @@ package object spark extends StrictLogging {
 
   import NodeCoordinatorActor._
   import filodb.spark.FiloRelation._
-  import FiloSetup.{metaStore, memTable}
+  import FiloSetup.metaStore
+  import RowSource._
 
   private def ingestRddRows(coordinatorActor: ActorRef,
                             dataset: String,
                             columns: Seq[String],
                             version: Int,
                             rows: Iterator[Row],
+                            writeTimeout: FiniteDuration,
                             defaultPartitionKey: Option[Types.PartitionKey]): Unit = {
-    val ingestCmd = SetupIngestion(dataset, columns, version, defaultPartitionKey)
-    actorAsk(coordinatorActor, ingestCmd, 10 seconds) {
-      case IngestionReady =>
-      case UnknownDataset => throw DatasetNotFound(dataset)
-      case BadSchema(reason) => throw BadSchemaError(reason)
-      case other: ErrorResponse => throw new RuntimeException(other.toString)
-    }
-
-    var linesIngested = 0
-    rows.grouped(1000).foreach { lines =>
-      val mappedLines = lines.toSeq.map(RddRowReader)
-      var resp: MemTable.IngestionResponse = MemTable.PleaseWait
-      do {
-        resp = memTable.ingestRows(dataset, version, mappedLines)
-        if (resp == MemTable.PleaseWait) {
-          do {
-            logger.info("Waiting for MemTable to be able to ingest again...")
-            Thread sleep 5000
-          } while (!memTable.canIngest(dataset, version))
-        }
-      } while (resp != MemTable.Ingested)
-      linesIngested += mappedLines.length
-      if (linesIngested % 25000 == 0) logger.info(s"Ingested $linesIngested lines!")
-    }
-    actorAsk(coordinatorActor, Flush(dataset, version)) {
-      case Flushed => logger.info(s"Flushed!")
+    val props = RddRowSourceActor.props(rows, columns, dataset, version, coordinatorActor,
+                                        defaultPartitionKey)
+    val rddRowActor = FiloSetup.system.actorOf(props)
+    actorAsk(rddRowActor, Start, writeTimeout) {
+      case AllDone =>
+      case SetupError(UnknownDataset) => throw DatasetNotFound(dataset)
+      case SetupError(BadSchema(reason)) => throw BadSchemaError(reason)
+      case SetupError(other)          => throw new RuntimeException(other.toString)
     }
   }
 
@@ -221,11 +204,12 @@ package object spark extends StrictLogging {
       val numPartitions = sortedDf.rdd.partitions.size
       logger.info(s"Saving ($dataset/$version) with sortColumn $sortColumn, " +
                   s"partitionColumn $partCol, $numPartitions partitions")
-      ingestDF(sortedDf, filoConfig, dataset, dfColumns, version, defaultPartitionKey)
+      ingestDF(sortedDf, filoConfig, dataset, dfColumns, version, writeTimeout, defaultPartitionKey)
     }
 
     def ingestDF(df: DataFrame, filoConfig: Config, dataset: String,
                  dfColumns: Seq[String], version: Int,
+                 writeTimeout: FiniteDuration,
                  defaultPartitionKey: Option[Types.PartitionKey]): Unit = {
       // For each partition, start the ingestion
       df.rdd.mapPartitionsWithIndex { case (index, rowIter) =>
@@ -233,7 +217,7 @@ package object spark extends StrictLogging {
         FiloSetup.init(filoConfig)
         logger.info(s"Starting ingestion of DataFrame for dataset $dataset, partition $index...")
         ingestRddRows(FiloSetup.coordinatorActor, dataset, dfColumns, version, rowIter,
-                      defaultPartitionKey)
+                      writeTimeout, defaultPartitionKey)
         Iterator.empty
       }.count()
     }

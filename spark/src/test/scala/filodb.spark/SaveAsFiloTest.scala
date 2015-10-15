@@ -53,7 +53,6 @@ with Matchers with ScalaFutures {
     columnStore.initializeProjection(ds1.projections.head).futureValue
     columnStore.initializeProjection(ds2.projections.head).futureValue
     columnStore.initializeProjection(ds3.projections.head).futureValue
-    if (FiloSetup.config != null) FiloSetup.scheduler.reset()
   }
 
   override def afterAll() {
@@ -154,8 +153,6 @@ with Matchers with ScalaFutures {
                  mode(SaveMode.Overwrite).
                  save()
 
-    FiloSetup.scheduler.waitForReprojection("gdelt1", 0).futureValue
-
     val df = sql.read.format("filodb.spark").option("dataset", "gdelt1").load()
     df.agg(sum("year")).collect().head(0) should equal (4032)
   }
@@ -167,15 +164,11 @@ with Matchers with ScalaFutures {
                  mode(SaveMode.Append).
                  save()
 
-    FiloSetup.scheduler.waitForReprojection("gdelt1", 0).futureValue
-
     dataDF2.write.format("filodb.spark").
                  option("dataset", "gdelt1").
                  option("sort_column", "id").
                  mode(SaveMode.Append).
                  save()
-
-    FiloSetup.scheduler.waitForReprojection("gdelt1", 0).futureValue
 
     val df = sql.read.format("filodb.spark").option("dataset", "gdelt1").load()
     df.agg(sum("year")).collect().head(0) should equal (8062)
