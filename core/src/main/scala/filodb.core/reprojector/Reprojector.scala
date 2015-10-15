@@ -51,6 +51,11 @@ trait Reprojector {
   // The inner, typed reprojection task launcher that must be implemented.
   def reproject[K: TypedFieldExtractor](memTable: MemTable, setup: IngestionSetup, version: Int):
       Future[Seq[String]]
+
+  /**
+   * A simple function that reads rows out of a memTable and converts them to segments
+   */
+  def toSegments[K](memTable: MemTable, setup: IngestionSetup, version: Int): Iterator[Segment[K]]
 }
 
 /**
@@ -67,9 +72,9 @@ class DefaultReprojector(columnStore: ColumnStore)
   // PERF/TODO: Maybe we should pass in an Iterator[RowReader], and extract partition and sort keys
   // out.  Heck we could create a custom FiloRowReader which has methods to extract this out.
   // Might be faster than creating a Tuple3 for every row... or not, for complex sort and partition keys
-  def chunkize[K](rows: Iterator[(PartitionKey, K, RowReader)],
-                  setup: IngestionSetup): Iterator[Segment[K]] = {
+  def toSegments[K](memTable: MemTable, setup: IngestionSetup, version: Int): Iterator[Segment[K]] = {
     implicit val helper = setup.helper[K]
+    val rows = memTable.readAllRows[K](setup.dataset.name, version, Locked)
     rows.sortedGroupBy { case (partition, sortKey, row) =>
       // lazy grouping of partition/segment from the sortKey
       (partition, helper.getSegment(sortKey))
@@ -93,7 +98,7 @@ class DefaultReprojector(columnStore: ColumnStore)
     implicit val helper = setup.helper[K]
     val datasetName = setup.dataset.name
     val projection = RichProjection(setup.dataset, setup.schema)
-    val segments = chunkize(memTable.readAllRows[K](datasetName, version, Locked), setup)
+    val segments = toSegments[K](memTable, setup, version)
     val segmentTasks = segments.map { segment =>
       for { resp <- columnStore.appendSegment(projection, segment, version) if resp == Success }
       yield {

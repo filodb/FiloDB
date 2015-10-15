@@ -77,11 +77,15 @@ with ScalaFutures {
 
   import RowReader._
   val testReprojector = new Reprojector {
+    import filodb.core.columnstore.Segment
+    import filodb.core.reprojector.MemTable.IngestionSetup
+
     def reproject[K: TypedFieldExtractor](memTable: MemTable, setup: MemTable.IngestionSetup, version: Int):
         Future[Seq[String]] = {
       reprojections = reprojections :+ (setup.dataset.name -> version)
       Future.successful(Seq("Success"))
     }
+    def toSegments[K](memTable: MemTable, setup: IngestionSetup, version: Int): Iterator[Segment[K]] = ???
   }
 
   it("should respond to GetStats with no flushes and no rows") {
