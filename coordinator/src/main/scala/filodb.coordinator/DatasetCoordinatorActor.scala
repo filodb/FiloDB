@@ -40,6 +40,10 @@ object DatasetCoordinatorActor {
    */
   case class StartFlush(replyTo: Option[ActorRef] = None)
 
+  // Checks if memtable is ready to accept more rows.  Common reason why not is due to lack of memory
+  // or the row limit has been reached
+  case object CanIngest
+
   /**
    * Clears all data from the projection.  Waits for existing flush to finish first.
    */
@@ -200,6 +204,9 @@ class DatasetCoordinatorActor(datasetObj: Dataset,
 
     case ClearProjection(replyTo, projection) =>
       clearProjection(replyTo, projection)
+
+    case CanIngest =>
+      sender ! NodeCoordinatorActor.CanIngest(memTable.canIngest(datasetObj.name, version))
 
     case GetStats =>
       sender ! Stats(flushesStarted, flushesSucceeded, flushesFailed,

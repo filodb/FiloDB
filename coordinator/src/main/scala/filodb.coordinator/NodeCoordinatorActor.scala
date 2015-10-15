@@ -75,6 +75,13 @@ object NodeCoordinatorActor {
   case object Flushed
 
   /**
+   * Checks to see if the DatasetCoordActor is ready to take in more rows.  Usually sent when an actor
+   * is in a wait state.
+   */
+  case class CheckCanIngest(dataset: String, version: Int)
+  case class CanIngest(can: Boolean)
+
+  /**
    * Truncates all data from a projection of a dataset.  Waits for any pending flushes from said
    * dataset to finish first, and also clears the columnStore cache for that dataset.
    */
@@ -200,6 +207,9 @@ class NodeCoordinatorActor(memTable: MemTable,
       withDsCoord(sender, projection.dataset, version) {
         _ ! DatasetCoordinatorActor.ClearProjection(sender, projection)
       }
+
+    case CheckCanIngest(dataset, version) =>
+      withDsCoord(sender, dataset, version) { _.forward(DatasetCoordinatorActor.CanIngest) }
 
     case AddDatasetCoord(dataset, version, dsCoordRef) =>
       dsCoordinators((dataset, version)) = dsCoordRef

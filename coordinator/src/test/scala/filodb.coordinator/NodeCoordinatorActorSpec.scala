@@ -77,6 +77,9 @@ with CoordinatorSetup with AllTablesTest {
     probe.send(coordActor, SetupIngestion(largeDataset.name, schemaWithPartCol.map(_.name), 0))
     probe.expectMsg(IngestionReady)
 
+    probe.send(coordActor, CheckCanIngest(largeDataset.name, 0))
+    probe.expectMsg(CanIngest(true))
+
     probe.send(coordActor, IngestRows(largeDataset.name, 0, lotLotNames.map(TupleRowReader), 1L))
     probe.expectMsg(Ack(1L))
 
