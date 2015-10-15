@@ -23,14 +23,9 @@ trait CoordinatorSetup {
 
   // These should be implemented as lazy val's, though tests might want to reset them
   val memTable: MemTable
-  val flushPolicy: FlushPolicy
   val columnStore: ColumnStore
   val metaStore: MetaStore
   lazy val reprojector = new DefaultReprojector(columnStore)
-  lazy val scheduler = new Scheduler(memTable,
-                                     reprojector,
-                                     flushPolicy,
-                                     config.getInt("scheduler-max-tasks"))
 
   lazy val coordinatorActor =
     system.actorOf(NodeCoordinatorActor.props(memTable, metaStore, reprojector, columnStore,
@@ -39,14 +34,12 @@ trait CoordinatorSetup {
 
   def clearState(): Unit = {
     memTable.clearAllData()
-    scheduler.reset()
   }
 }
 
 /**
- * A CoordinatorSetup with default memtable and flushpolicy initialized from config
+ * A CoordinatorSetup with default memtable initialized from config
  */
 trait DefaultCoordinatorSetup extends CoordinatorSetup {
   lazy val memTable = new MapDBMemTable(config)
-  lazy val flushPolicy = new NumRowsFlushPolicy(config.getInt("memtable.flush-trigger-rows"))
 }

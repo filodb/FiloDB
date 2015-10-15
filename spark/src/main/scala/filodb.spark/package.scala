@@ -152,10 +152,10 @@ package object spark extends StrictLogging {
       }
     }
 
-    private def truncateDataset(dataset: Dataset): Unit = {
+    private def truncateDataset(dataset: Dataset, version: Int): Unit = {
       logger.info(s"Truncating dataset ${dataset.name}")
-      // parse(FiloSetup.columnStore.clearProjectionData(dataset.projections.head)) { resp => resp }
-      actorAsk(FiloSetup.coordinatorActor, TruncateProjection(dataset.projections.head), 1.minute) {
+      actorAsk(FiloSetup.coordinatorActor,
+               TruncateProjection(dataset.projections.head, version), 1.minute) {
         case ProjectionTruncated => logger.info(s"Truncation of ${dataset.name} finished")
       }
     }
@@ -206,7 +206,7 @@ package object spark extends StrictLogging {
 
       try {
         val datasetObj = getDatasetObj(dataset)
-        if (mode == SaveMode.Overwrite) truncateDataset(datasetObj)
+        if (mode == SaveMode.Overwrite) truncateDataset(datasetObj, version)
       } catch {
         case e: NotFoundError =>
           createNewDataset(dataset, sortColumn, partCol, df1)

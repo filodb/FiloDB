@@ -10,17 +10,19 @@ import scala.concurrent.Await
 import scala.concurrent.duration._
 
 import filodb.core._
-import filodb.core.columnstore.RowReaderSegment
+import filodb.core.columnstore.{RowReaderSegment, SegmentSpec}
 import filodb.core.metadata.{Column, Dataset}
-import filodb.core.reprojector.{MapDBMemTable, NumRowsFlushPolicy}
+import filodb.core.reprojector.MapDBMemTable
 import filodb.cassandra.AllTablesTest
 
 object NodeCoordinatorActorSpec extends ActorSpecConfig
 
+// This is really an end to end ingestion test, it's what a client talking to a FiloDB node would do
 class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNewSystem)
 with CoordinatorSetup with AllTablesTest {
   import akka.testkit._
   import NodeCoordinatorActor._
+  import SegmentSpec._
 
   override def beforeAll() {
     super.beforeAll()
@@ -30,7 +32,6 @@ with CoordinatorSetup with AllTablesTest {
   var coordActor: ActorRef = _
   var probe: TestProbe = _
   lazy val memTable = new MapDBMemTable(config)
-  lazy val flushPolicy = new NumRowsFlushPolicy(100L)
 
   before {
     metaStore.clearAllData().futureValue
@@ -68,22 +69,15 @@ with CoordinatorSetup with AllTablesTest {
     }
   }
 
-  val rows = Seq(
-    (Some(0L), Some("2015/03/15T15:00Z"), Some(32015), Some(2015)),
-    (Some(1L), Some("2015/03/15T16:00Z"), Some(32015), Some(2015))
-  )
-
   it("should be able to start ingestion, send rows, and get an ack back") {
-    val dataset = Dataset("gdelt_cas", "id")
-    val columns = GdeltColumns.map(_.copy(dataset = "gdelt_cas"))
-    probe.send(coordActor, CreateDataset(dataset, columns))
+    probe.send(coordActor, CreateDataset(largeDataset, schemaWithPartCol))
     probe.expectMsg(DatasetCreated)
-    columnStore.clearProjectionData(dataset.projections.head).futureValue should equal (Success)
+    columnStore.clearProjectionData(largeDataset.projections.head).futureValue should equal (Success)
 
-    probe.send(coordActor, SetupIngestion(dataset.name, GdeltColNames, 0))
+    probe.send(coordActor, SetupIngestion(largeDataset.name, schemaWithPartCol.map(_.name), 0))
     probe.expectMsg(IngestionReady)
 
-    probe.send(coordActor, IngestRows(dataset.name, 0, rows.map(TupleRowReader), 1L))
+    probe.send(coordActor, IngestRows(largeDataset.name, 0, lotLotNames.map(TupleRowReader), 1L))
     probe.expectMsg(Ack(1L))
 
     // Now, try to flush and check that stuff was written to columnstore...
@@ -91,11 +85,22 @@ with CoordinatorSetup with AllTablesTest {
     probe.send(coordActor, Flush(dataset.name, 0))
     probe.expectMsg(Flushed)
 
-    implicit val helper = new LongKeyHelper(10000L)
-    val keyRange = KeyRange(dataset.name, Dataset.DefaultPartitionKey, 0L, 30000L)
-    whenReady(columnStore.readSegments(columns, keyRange, 0)) { segIter =>
-      val readSeg = segIter.toSeq.head.asInstanceOf[RowReaderSegment[Long]]
-      readSeg.rowIterator().map(_.getInt(2)).toSeq should equal (Seq(32015, 32015))
+    // Now, read stuff back from the column store and check that it's all there
+    val keyRange = KeyRange(largeDataset.name, "nfc", 0L, 30000L)
+    whenReady(columnStore.readSegments(schema, keyRange, 0)) { segIter =>
+      val segments = segIter.toSeq
+      segments should have length (3)
+      val readSeg = segments.head.asInstanceOf[RowReaderSegment[Long]]
+      readSeg.keyRange should equal (keyRange.copy(end = 10000L))
+      readSeg.rowIterator().map(_.getLong(2)).toSeq should equal ((0 to 99).map(_.toLong))
+    }
+
+    val splits = columnStore.getScanSplits(largeDataset.name)
+    splits should have length (1)
+    whenReady(columnStore.scanSegments[Long](schema, largeDataset.name, 0,
+                                             params = splits.head)) { segIter =>
+      val segments = segIter.toSeq
+      segments should have length (6)
     }
   }
 }
