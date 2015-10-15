@@ -145,6 +145,7 @@ trait RowSource extends Actor with StrictLogging {
       lastAckedSeqNo = lastSequenceNo
       if (currentHiSeqNo == lastAckedSeqNo) sendFlush()
 
+    // Only until we get the Flushed signal do we know all rows are finished flushing.
     case NodeCoordinatorActor.Flushed =>
       finish()
   }
