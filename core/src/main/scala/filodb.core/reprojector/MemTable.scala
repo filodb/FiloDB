@@ -135,7 +135,7 @@ trait MemTable extends StrictLogging {
   def ingestRows(dataset: TableName, version: Int, rows: Seq[RowReader]): IngestionResponse = {
     import Column.ColumnType._
 
-    val freeMB = sys.runtime.freeMemory / (1024*1024)
+    val freeMB = getRealFreeMb
     if (freeMB < minFreeMb) {
       logger.info(s"Only $freeMB MB memory left, cannot accept more writes...")
       logger.info(s"MemTable state: ${allNumRows(Active, true)}")
@@ -156,13 +156,16 @@ trait MemTable extends StrictLogging {
                                               version: Int,
                                               rows: Seq[RowReader]): IngestionResponse
 
+  private def getRealFreeMb: Int =
+    ((sys.runtime.maxMemory - (sys.runtime.totalMemory - sys.runtime.freeMemory)) / (1024 * 1024)).toInt
+
   /**
    * Returns true if the MemTable is capable of ingesting more data.  Designed to be a much
    * lighter weight alternative to ingestRows so that clients can poll the memTable for when
    * conditions are right for ingestion to occur again.
    */
   def canIngest(dataset: TableName, version: Int): Boolean = {
-    if (sys.runtime.freeMemory / (1024*1024) < minFreeMb) {
+    if (getRealFreeMb < minFreeMb) {
       sys.runtime.gc()
       return false
     }
