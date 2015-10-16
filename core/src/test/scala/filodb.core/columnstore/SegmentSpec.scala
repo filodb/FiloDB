@@ -18,7 +18,7 @@ object SegmentSpec {
   def mapper(rows: Seq[Product]): Iterator[RowReader] = rows.map(TupleRowReader).toIterator
 
   val dataset = Dataset("dataset", "age")
-  val projection = RichProjection(dataset, schema)
+  val projection = RichProjection[Long](dataset, schema)
 
   val names = Seq((Some("Khalil"), Some("Mack"), Some(24L)),
                   (Some("Ndamukong"), Some("Suh"), Some(28L)),

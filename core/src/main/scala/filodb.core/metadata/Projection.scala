@@ -1,5 +1,6 @@
 package filodb.core.metadata
 
+import org.velvia.filo.RowReader
 import scala.util.{Try, Success, Failure}
 
 import filodb.core.SortKeyHelper
@@ -26,29 +27,31 @@ case class Projection(id: Int,
 /**
  * This is a Projection with information filled out from Dataset and Columns.
  * ie it has the actual Dataset and Column types as opposed to IDs, and a list of all columns.
+ * It is also guaranteed to have a valid sortColumn and dataset partition column, and will
+ * have a SortKeyHelper and partitioning function as well.
  */
-case class RichProjection(id: Int,
-                          dataset: Dataset,
-                          sortColumn: Column,
-                          sortColNo: Int,
-                          reverse: Boolean,
-                          columns: Seq[Column]) {
-  def helper[K]: SortKeyHelper[K] = Dataset.sortKeyHelper(dataset, sortColumn).get
-}
+case class RichProjection[K](id: Int,
+                             dataset: Dataset,
+                             sortColumn: Column,
+                             sortColNo: Int,
+                             reverse: Boolean,
+                             columns: Seq[Column],
+                             helper: SortKeyHelper[K],
+                             partitionFunc: RowReader => PartitionKey)
 
 object RichProjection {
   case class BadSchema(reason: String) extends Exception("BadSchema: " + reason)
 
-  def apply(dataset: Dataset, columns: Seq[Column], projectionId: Int = 0): RichProjection = {
-    val tryProj = make(dataset, columns, projectionId)
+  def apply[K](dataset: Dataset, columns: Seq[Column], projectionId: Int = 0): RichProjection[K] = {
+    val tryProj = make[K](dataset, columns, projectionId)
     tryProj.recover {
       case t: Throwable => throw t
     }
     tryProj.get
   }
 
-  def make(dataset: Dataset, columns: Seq[Column], projectionId: Int = 0): Try[RichProjection] = {
-    def fail(reason: String): Try[RichProjection] = Failure(BadSchema(reason))
+  def make[K](dataset: Dataset, columns: Seq[Column], projectionId: Int = 0): Try[RichProjection[K]] = {
+    def fail(reason: String): Try[RichProjection[K]] = Failure(BadSchema(reason))
 
     val normProjection = dataset.projections(projectionId)
     val richColumns = {
@@ -69,7 +72,12 @@ object RichProjection {
     if (!(SortKeyHelper.ValidSortClasses contains sortColumn.columnType.clazz)) {
       return fail(s"Unsupported sort column type ${sortColumn.columnType}")
     }
-    Success(RichProjection(projectionId, dataset, sortColumn, sortColNo,
-                           normProjection.reverse, richColumns))
+
+    val helper = Dataset.sortKeyHelper[K](dataset, sortColumn).get
+
+    for { partitionFunc <- Dataset.getPartitioningFunc(dataset, richColumns) } yield {
+      RichProjection[K](projectionId, dataset, sortColumn, sortColNo,
+                        normProjection.reverse, richColumns, helper, partitionFunc)
+    }
   }
 }

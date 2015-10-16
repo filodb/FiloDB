@@ -25,6 +25,10 @@ trait SortKeyHelper[K] {
   def fromBytes(bytes: ByteVector): K
 }
 
+object SortKeyHelper {
+  val ValidSortClasses = Seq(classOf[Long], classOf[Int], classOf[Double])
+}
+
 /**
  * Typeclasses for sort keys
  * NOTE: both the Ordering for ByteVector as well as how bytes are compared in most places is big-endian
