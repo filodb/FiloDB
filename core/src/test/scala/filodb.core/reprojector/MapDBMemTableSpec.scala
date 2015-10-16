@@ -4,7 +4,7 @@ import com.typesafe.config.ConfigFactory
 import org.velvia.filo.TupleRowReader
 
 import filodb.core.KeyRange
-import filodb.core.metadata.{Column, Dataset}
+import filodb.core.metadata.{Column, Dataset, RichProjection}
 import filodb.core.columnstore.SegmentSpec
 import scala.concurrent.Future
 
@@ -13,15 +13,15 @@ import org.scalatest.concurrent.ScalaFutures
 
 class MapDBMemTableSpec extends FunSpec with Matchers with BeforeAndAfter with ScalaFutures {
   import SegmentSpec._
-  import MemTable._
 
   val keyRange = KeyRange("dataset", Dataset.DefaultPartitionKey, 0L, 10000L)
   val config = ConfigFactory.load("application_test.conf")
-  val mTable: MemTable = new MapDBMemTable(config)
   import scala.concurrent.ExecutionContext.Implicits.global
 
+  var resp: Int = 0
+
   before {
-    mTable.clearAllData()
+    resp = -1
   }
 
   val schemaWithPartCol = schema ++ Seq(
@@ -31,6 +31,8 @@ class MapDBMemTableSpec extends FunSpec with Matchers with BeforeAndAfter with S
   val namesWithPartCol = (0 until 50).flatMap { partNum =>
     names.map { t => (t._1, t._2, t._3, Some(partNum.toString)) }
   }
+
+  val projWithPartCol = RichProjection[Long](dataset.copy(partitionColumn = "league"), schemaWithPartCol)
 
   val namesWithNullPartCol =
     util.Random.shuffle(namesWithPartCol ++ namesWithPartCol.take(3).map { t => (t._1, t._2, t._3, None) })
@@ -42,183 +44,74 @@ class MapDBMemTableSpec extends FunSpec with Matchers with BeforeAndAfter with S
 
   describe("insertRows, readRows, flip") {
     it("should insert out of order rows and read them back in order") {
-      val setupResp = mTable.setupIngestion(dataset, schema, 0)
-      setupResp should equal (SetupDone)
+      val mTable = new MapDBMemTable(projection, config)
+      mTable.numRows should be (0)
 
-      mTable.canIngest("dataset", 0) should be (true)
+      mTable.ingestRows(names.map(TupleRowReader)) { resp = 2 }
+      resp should equal (2)
 
-      val resp = mTable.ingestRows("dataset", 0, names.map(TupleRowReader))
-      resp should equal (Ingested)
+      mTable.numRows should equal (6)
 
-      mTable.datasets should equal (Set(dataset.name))
-      mTable.numRows("dataset", 0, Active) should equal (Some(6L))
-      mTable.numRows("dataset", 0, Locked) should equal (Some(0L))
-
-      val outRows = mTable.readRows(keyRange, 0, Active)
+      val outRows = mTable.readRows(keyRange)
       outRows.toSeq.map(_.getString(0)) should equal (firstNames)
     }
 
     it("should replace rows and read them back in order") {
-      val setupResp = mTable.setupIngestion(dataset, schema, 0)
-      setupResp should equal (SetupDone)
+      val mTable = new MapDBMemTable(projection, config)
+      mTable.ingestRows(names.take(4).map(TupleRowReader)) { resp = 1 }
+      resp should equal (1)
+      mTable.ingestRows(names.take(2).map(TupleRowReader)) { resp = 3 }
+      resp should equal (3)
 
-      val resp = mTable.ingestRows("dataset", 0, names.take(4).map(TupleRowReader))
-      resp should equal (Ingested)
-      val resp2 = mTable.ingestRows("dataset", 0, names.take(2).map(TupleRowReader))
-      resp2 should equal (Ingested)
+      mTable.numRows should equal (4)
 
-      mTable.numRows("dataset", 0, Active) should equal (Some(4L))
-
-      val outRows = mTable.readRows(keyRange, 0, Active)
+      val outRows = mTable.readRows(keyRange)
       outRows.toSeq.map(_.getString(0)) should equal (Seq("Khalil", "Rodney", "Ndamukong", "Jerry"))
     }
 
-    it("should get NoSuchDatasetVersion if do not setup first") {
-      val resp = mTable.ingestRows("a_dataset", 0, names.map(TupleRowReader))
-      resp should equal (NoSuchDatasetVersion)
-    }
-
     it("should ingest into multiple partitions using partition column") {
-      val setupResp = mTable.setupIngestion(dataset.copy(partitionColumn = "league"),
-                                            schemaWithPartCol, 0)
-      setupResp should equal (SetupDone)
+      val memTable = new MapDBMemTable(projWithPartCol, config)
 
-      val resp = mTable.ingestRows("dataset", 0, namesWithPartCol.map(TupleRowReader))
-      resp should equal (Ingested)
+      memTable.ingestRows(namesWithPartCol.map(TupleRowReader)) { resp = 66 }
+      resp should equal (66)
 
-      mTable.numRows("dataset", 0, Active) should equal (Some(50L * names.length))
+      memTable.numRows should equal (50 * names.length)
 
-      val outRows = mTable.readRows(keyRange.copy(partition = "5"), 0, Active)
+      val outRows = memTable.readRows(keyRange.copy(partition = "5"))
       outRows.toSeq.map(_.getString(0)) should equal (firstNames)
     }
 
     it("should throw error if null partition col value and no defaultPartitionKey") {
-      val setupResp = mTable.setupIngestion(dataset.copy(partitionColumn = "league"),
-                                            schemaWithPartCol, 0)
-      setupResp should equal (SetupDone)
+      val mTable = new MapDBMemTable(projWithPartCol, config)
 
-      intercept[NullPartitionValue] {
-        mTable.ingestRows("dataset", 0, namesWithNullPartCol.map(TupleRowReader))
+      intercept[Dataset.NullPartitionValue] {
+        mTable.ingestRows(namesWithNullPartCol.map(TupleRowReader)) { resp = 22 }
       }
     }
 
     it("should use defaultPartitionKey if one provided and null part col value") {
-      val setupResp = mTable.setupIngestion(dataset.copy(partitionColumn = "league"),
-                                            schemaWithPartCol, 0,
-                                            Some("foobar"))
-      setupResp should equal (SetupDone)
+      val newOptions = dataset.options.copy(defaultPartitionKey = Some("foobar"))
+      val datasetWithDefPartKey = dataset.copy(options = newOptions, partitionColumn = "league")
+      val newProj = RichProjection[Long](datasetWithDefPartKey, schemaWithPartCol)
+      val mTable = new MapDBMemTable(newProj, config)
 
-      val resp = mTable.ingestRows("dataset", 0, namesWithNullPartCol.map(TupleRowReader))
-      resp should equal (Ingested)
+      mTable.ingestRows(namesWithNullPartCol.map(TupleRowReader)) { resp = 99 }
+      resp should equal (99)
 
-      mTable.numRows("dataset", 0, Active).get should equal (namesWithNullPartCol.length.toLong)
-      val outRows = mTable.readRows(keyRange.copy(partition = "foobar"), 0, Active)
+      mTable.numRows should equal (namesWithNullPartCol.length)
+      val outRows = mTable.readRows(keyRange.copy(partition = "foobar"))
       outRows.toSeq should have length (3)
-    }
-
-    it("should return PleaseWait and false on canIngest if too many rows in memtable") {
-      val setupResp = mTable.setupIngestion(dataset.copy(partitionColumn = "league"),
-                                            schemaWithPartCol, 0)
-      setupResp should equal (SetupDone)
-
-      mTable.canIngest("dataset", 0) should be (true)
-      val resp = mTable.ingestRows("dataset", 0, lotsOfNames.map(TupleRowReader))
-      resp should equal (Ingested)
-
-      mTable.numRows("dataset", 0, Active) should equal (Some(400L * names.length))
-
-      mTable.canIngest("dataset", 0) should be (false)
-      val resp2 = mTable.ingestRows("dataset", 0, lotsOfNames.take(10).map(TupleRowReader))
-      resp2 should equal (PleaseWait)
-    }
-
-    it("should be able to flip, insert into Active again, read from both") {
-      val setupResp = mTable.setupIngestion(dataset, schema, 0)
-      setupResp should equal (SetupDone)
-
-      val resp = mTable.ingestRows("dataset", 0, names.map(TupleRowReader))
-      resp should equal (Ingested)
-
-      mTable.flipBuffers("dataset", 0) should equal (Flipped)
-
-      mTable.ingestRows("dataset", 0, names.take(3).map(TupleRowReader)) should equal (Ingested)
-
-      mTable.numRows("dataset", 0, Active) should equal (Some(3L))
-      mTable.flushingDatasets should equal (Seq((("dataset", 0), 6L)))
-
-      val outRows = mTable.readRows(keyRange, 0, Active)
-      outRows.toSeq.map(_.getString(0)) should equal (firstNames take 3)
-
-      // Now, if we attempt to flip again, it should error out because Locked is not empty
-      mTable.flipBuffers("dataset", 0) should equal (LockedNotEmpty)
     }
   }
 
   describe("removeRows") {
     it("should be able to delete rows") {
-      mTable.setupIngestion(dataset, schema, 0) should equal (SetupDone)
-      mTable.ingestRows("dataset", 0, names.map(TupleRowReader)) should equal (Ingested)
+      val mTable = new MapDBMemTable(projection, config)
+      mTable.ingestRows(names.map(TupleRowReader)) { resp = 17 }
+      resp should equal (17)
 
-      mTable.flipBuffers("dataset", 0) should equal (Flipped)
-
-      mTable.removeRows(keyRange, 0)
-      mTable.flushingDatasets should equal (Nil)
-    }
-
-    it("should be able to delete rows in a separate thread") {
-      mTable.setupIngestion(dataset, schema, 0) should equal (SetupDone)
-      mTable.ingestRows("dataset", 0, names.map(TupleRowReader)) should equal (Ingested)
-
-      mTable.flipBuffers("dataset", 0) should equal (Flipped)
-
-      val f = Future { mTable.removeRows(keyRange, 0) }
-      whenReady(f) { nothing =>
-        mTable.flushingDatasets should equal (Nil)
-      }
-    }
-  }
-
-  describe("numRows") {
-    it("should get no rows out of Locked partition") {
-      val setupResp = mTable.setupIngestion(dataset, schema, 0)
-      setupResp should equal (SetupDone)
-
-      mTable.numRows("dataset", 0, Locked) should equal (Some(0L))
-    }
-
-    it("should get None out of unknown dataset or version") {
-      val setupResp = mTable.setupIngestion(dataset, schema, 0)
-      setupResp should equal (SetupDone)
-
-      val resp = mTable.ingestRows("dataset", 0, names.map(TupleRowReader))
-      resp should equal (Ingested)
-
-      mTable.numRows("dataset", 1, Active) should equal (None)
-      mTable.numRows("not_dataset", 0, Active) should equal (None)
-    }
-  }
-
-  describe("setupIngestion errors") {
-    it("should get BadSchema if cannot find sort column") {
-      val resp = mTable.setupIngestion(Dataset("a", "boo"), schema, 0)
-      resp shouldBe a [BadSchema]
-      resp.asInstanceOf[BadSchema].reason should include ("Sort column boo not in schema")
-    }
-
-    it("should get BadSchema if sort column is not supported type") {
-      val resp = mTable.setupIngestion(Dataset("a", "first"), schema, 0)
-      resp shouldBe a [BadSchema]
-      resp.asInstanceOf[BadSchema].reason should include ("Unsupported sort column type")
-    }
-
-    it("should get BadSchema if partition column unknown") {
-      val resp = mTable.setupIngestion(dataset.copy(partitionColumn = "XXX"), schema, 0)
-      resp shouldBe a [BadSchema]
-    }
-
-    it("should get AlreadySetup if try to set up twice for same dataset/version") {
-      mTable.setupIngestion(dataset, schema, 0) should equal (SetupDone)
-      mTable.setupIngestion(dataset, schemaWithPartCol, 0) should equal (AlreadySetup)
+      mTable.removeRows(keyRange)
+      mTable.numRows should equal (0)
     }
   }
 }
