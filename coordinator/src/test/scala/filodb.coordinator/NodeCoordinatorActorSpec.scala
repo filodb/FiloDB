@@ -65,7 +65,13 @@ with CoordinatorSetup with AllTablesTest {
       probe.expectMsgClass(classOf[BadSchema])
     }
 
-    it("should get AlreadySetup if try to set up twice for same dataset/version") (pending)
+    it("should get IngestionReady if try to set up concurrently for same dataset/version") {
+      createTable(GdeltDataset, GdeltColumns)
+
+      val probes = (1 to 8).map { n => TestProbe() }
+      probes.foreach { probe => probe.send(coordActor, SetupIngestion(dsName, GdeltColNames, 0)) }
+      probes.foreach { probe => probe.expectMsg(IngestionReady) }
+    }
   }
 
   it("should be able to start ingestion, send rows, and get an ack back") {

@@ -29,7 +29,9 @@ with ScalaFutures {
 
   import scala.concurrent.ExecutionContext.Implicits.global
 
-  val config = ConfigFactory.parseString("memtable.flush-trigger-rows = 100")
+  val config = ConfigFactory.parseString(
+                 """memtable.flush-trigger-rows = 100
+                    memtable.max-rows-per-table = 200""")
                  .withFallback(ConfigFactory.load("application_test.conf"))
   val keyRange = KeyRange("dataset", Dataset.DefaultPartitionKey, 0L, 10000L)
   val myDataset = dataset.copy(partitionColumn = "league")
@@ -105,8 +107,16 @@ with ScalaFutures {
     reprojections should equal (Seq(("dataset", 0)))
   }
 
-  it("should not send Ack if over maximum number of rows") (pending)
-  // Test that CanIngest returns false also
+  it("should not send Ack if over maximum number of rows") {
+    // First one will go through, but make memTable full
+    dsActor ! NewRows(probe.ref, namesWithPartCol.take(205).map(TupleRowReader), 0L)
+    // Second one will not go through or get an ack, already over limit
+    // (Hopefully this gets sent before the table is flushed)
+    dsActor ! NewRows(probe.ref, namesWithPartCol.drop(205).take(20).map(TupleRowReader), 1L)
+
+    probe.expectMsg(NodeCoordinatorActor.Ack(0L))
+    probe.expectNoMsg
+  }
 
   it("StartFlush should initiate flush even if # rows not reached trigger yet") {
     ingestRows(99)
