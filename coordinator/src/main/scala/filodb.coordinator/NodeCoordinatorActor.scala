@@ -90,6 +90,7 @@ object NodeCoordinatorActor {
 
   // Internal messages
   case class AddDatasetCoord(dataset: TableName, version: Int, dsCoordRef: ActorRef)
+  case class DatasetCreateNotify(dataset: TableName, version: Int, msg: Any)
 
   def invalidColumns(columns: Seq[String], schema: Column.Schema): Seq[String] =
     (columns.toSet -- schema.keys).toSeq
@@ -116,6 +117,7 @@ class NodeCoordinatorActor(metaStore: MetaStore,
   import context.dispatcher
 
   val dsCoordinators = new collection.mutable.HashMap[(TableName, Int), ActorRef]
+  val dsCoordNotify = new collection.mutable.HashMap[(TableName, Int), List[ActorRef]]
 
   private def withDsCoord(originator: ActorRef, dataset: String, version: Int)
                          (func: ActorRef => Unit): Unit = {
@@ -158,9 +160,19 @@ class NodeCoordinatorActor(metaStore: MetaStore,
                              columns: Seq[String],
                              version: Int,
                              defaultPartKey: Option[PartitionKey]): Unit = {
+    def notify(msg: Any): Unit = { self ! DatasetCreateNotify(dataset, version, msg) }
+
     if (dsCoordinators contains (dataset -> version)) {
       originator ! IngestionReady
+    } else if (dsCoordNotify contains (dataset -> version)) {
+      // There is already a setupIngestion / dsCoordActor creation in progress.  Add to list of callbacks
+      // for the final result.
+      dsCoordNotify((dataset -> version)) = originator :: dsCoordNotify((dataset -> version))
     } else {
+      dsCoordNotify((dataset -> version)) = List(originator)
+      // Everything after this point happens in a future, asynchronously from the actor processing.
+      // Thus 1) don't modify internal state, and 2) make sure we don't have multiple actor creations
+      // happening in parallel, thus the need for dsCoordNotify.
       (for { datasetObj <- metaStore.getDataset(dataset)
              schema <- verifySchema(originator, dataset, version, columns) if schema.isDefined }
       yield {
@@ -168,8 +180,8 @@ class NodeCoordinatorActor(metaStore: MetaStore,
         // Create the RichProjection, and ferret out any errors
         val proj = RichProjection.make(datasetObj, columnSeq)
         proj.recover {
-          case RichProjection.BadSchema(reason) => originator ! BadSchema(reason)
-          case Dataset.BadPartitionColumn(reason) => originator ! BadSchema(reason)
+          case RichProjection.BadSchema(reason) => notify(BadSchema(reason))
+          case Dataset.BadPartitionColumn(reason) => notify(BadSchema(reason))
         }
         proj.foreach { richProj =>
           // Create the dataset coordinator
@@ -177,11 +189,11 @@ class NodeCoordinatorActor(metaStore: MetaStore,
           val props = DatasetCoordinatorActor.props(typedProj, version, columnStore, reprojector, config)
           val ref = context.actorOf(props, s"ds-coord-${datasetObj.name}-$version")
           self ! AddDatasetCoord(dataset, version, ref)
-          originator ! IngestionReady
+          notify(IngestionReady)
         }
       }).recover {
-        case NotFoundError(what) => originator ! UnknownDataset
-        case t: Throwable        => originator ! MetadataException(t)
+        case NotFoundError(what) => notify(UnknownDataset)
+        case t: Throwable        => notify(MetadataException(t))
       }
     }
   }
@@ -209,5 +221,9 @@ class NodeCoordinatorActor(metaStore: MetaStore,
 
     case AddDatasetCoord(dataset, version, dsCoordRef) =>
       dsCoordinators((dataset, version)) = dsCoordRef
+
+    case DatasetCreateNotify(dataset, version, msg) =>
+      dsCoordNotify((dataset -> version)).foreach(_ ! msg)
+      dsCoordNotify.remove((dataset -> version))
   }
 }
