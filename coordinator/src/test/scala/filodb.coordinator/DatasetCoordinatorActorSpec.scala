@@ -9,9 +9,9 @@ import scala.concurrent.Future
 import scala.concurrent.duration._
 
 import filodb.core._
-import filodb.core.metadata.{Column, Dataset}
+import filodb.core.metadata.{Column, Dataset, RichProjection}
 import filodb.core.columnstore.{InMemoryColumnStore, SegmentSpec}
-import filodb.core.reprojector.{DefaultReprojector, MemTable, MapDBMemTable, Reprojector}
+import filodb.core.reprojector.{DefaultReprojector, MemTable, Reprojector}
 
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Span, Seconds}
@@ -33,8 +33,10 @@ with ScalaFutures {
                  .withFallback(ConfigFactory.load("application_test.conf"))
   val keyRange = KeyRange("dataset", Dataset.DefaultPartitionKey, 0L, 10000L)
   val myDataset = dataset.copy(partitionColumn = "league")
-  // TODO: remove once we get no longer need flushpolicy and scheduler, and move memtable inside DSCoordActor
-  val memTable = new MapDBMemTable(config)
+  val schemaWithPartCol = schema ++ Seq(
+    Column("league", "dataset", 0, Column.ColumnType.StringColumn)
+  )
+  val myProjection = RichProjection(myDataset, schemaWithPartCol)
   val columnStore = new InMemoryColumnStore
 
   var dsActor: ActorRef = _
@@ -47,11 +49,10 @@ with ScalaFutures {
   }
 
   before {
-    memTable.clearAllData()
     columnStore.clearProjectionData(myDataset.projections.head).futureValue
     reprojections = Nil
     dsActor = system.actorOf(DatasetCoordinatorActor.props(
-                                  myDataset, 0, columnStore, testReprojector, config, memTable))
+                                  myProjection, 0, columnStore, testReprojector, config))
     probe = TestProbe()
   }
 
@@ -59,66 +60,65 @@ with ScalaFutures {
     gracefulStop(dsActor, 3.seconds.dilated, PoisonPill).futureValue
   }
 
-  val schemaWithPartCol = schema ++ Seq(
-    Column("league", "dataset", 0, Column.ColumnType.StringColumn)
-  )
-
   val namesWithPartCol = (0 until 50).flatMap { partNum =>
     names.map { t => (t._1, t._2, t._3, Some(partNum.toString)) }
   }
 
-  private def ingestRows(numRows: Int) {
-    dsActor ! Setup(probe.ref, schemaWithPartCol)
-    probe.expectMsg(NodeCoordinatorActor.IngestionReady)
 
+  private def ingestRows(numRows: Int) {
     dsActor ! NewRows(probe.ref, namesWithPartCol.take(numRows).map(TupleRowReader), 0L)
     probe.expectMsg(NodeCoordinatorActor.Ack(0L))
   }
 
-  import RowReader._
   val testReprojector = new Reprojector {
     import filodb.core.columnstore.Segment
-    import filodb.core.reprojector.MemTable.IngestionSetup
 
-    def reproject[K: TypedFieldExtractor](memTable: MemTable, setup: MemTable.IngestionSetup, version: Int):
-        Future[Seq[String]] = {
-      reprojections = reprojections :+ (setup.dataset.name -> version)
+    def reproject[K](memTable: MemTable[K], version: Int): Future[Seq[String]] = {
+      reprojections = reprojections :+ (memTable.projection.dataset.name -> version)
       Future.successful(Seq("Success"))
+
     }
-    def toSegments[K](memTable: MemTable, setup: IngestionSetup, version: Int): Iterator[Segment[K]] = ???
+
+    def toSegments[K](memTable: MemTable[K]): Iterator[Segment[K]] = ???
   }
 
   it("should respond to GetStats with no flushes and no rows") {
     probe.send(dsActor, GetStats)
-    probe.expectMsg(Stats(0, 0, 0, -1L, -1L))
+    probe.expectMsg(Stats(0, 0, 0, 0, -1))
     reprojections should equal (Nil)
   }
 
   it("should not flush if datasets not reached limit yet") {
     ingestRows(99)
     probe.send(dsActor, GetStats)
-    probe.expectMsg(Stats(0, 0, 0, 99L, 0L))
+    probe.expectMsg(Stats(0, 0, 0, 99, -1))
     reprojections should equal (Nil)
   }
 
   it("should automatically flush after ingesting enough rows") {
     ingestRows(100)
+    // Ingest more rows.  These should be ingested into the active table AFTER flush is initiated.
+    Thread sleep 250
+    ingestRows(20)
     probe.send(dsActor, GetStats)
-    probe.expectMsg(Stats(1, 0, 0, 0L, 100L))   // remember our reprojector doesn't delete rows
+    probe.expectMsg(Stats(1, 1, 0, 20, -1))
     reprojections should equal (Seq(("dataset", 0)))
   }
+
+  it("should not send Ack if over maximum number of rows") (pending)
+  // Test that CanIngest returns false also
 
   it("StartFlush should initiate flush even if # rows not reached trigger yet") {
     ingestRows(99)
     probe.send(dsActor, GetStats)
-    probe.expectMsg(Stats(0, 0, 0, 99L, 0L))
+    probe.expectMsg(Stats(0, 0, 0, 99, -1))
     reprojections should equal (Nil)
 
     dsActor ! StartFlush(Some(probe.ref))
     probe.expectMsg(NodeCoordinatorActor.Flushed)
     probe.send(dsActor, GetStats)
     probe.expectMsgPF(3.seconds.dilated) {
-      case Stats(1, 1, 0, 0L, _) =>
+      case Stats(1, 1, 0, 0, _) =>
     }
     reprojections should equal (Seq(("dataset", 0)))
   }

@@ -12,7 +12,6 @@ import scala.concurrent.duration._
 import filodb.core._
 import filodb.core.columnstore.{RowReaderSegment, SegmentSpec}
 import filodb.core.metadata.{Column, Dataset}
-import filodb.core.reprojector.MapDBMemTable
 import filodb.cassandra.AllTablesTest
 
 object NodeCoordinatorActorSpec extends ActorSpecConfig
@@ -31,12 +30,10 @@ with CoordinatorSetup with AllTablesTest {
 
   var coordActor: ActorRef = _
   var probe: TestProbe = _
-  lazy val memTable = new MapDBMemTable(config)
 
   before {
     metaStore.clearAllData().futureValue
-    coordActor = system.actorOf(NodeCoordinatorActor.props(memTable, metaStore, reprojector, columnStore,
-                                config))
+    coordActor = system.actorOf(NodeCoordinatorActor.props(metaStore, reprojector, columnStore, config))
     probe = TestProbe()
   }
 
@@ -67,6 +64,8 @@ with CoordinatorSetup with AllTablesTest {
       probe.send(coordActor, SetupIngestion(dsName, GdeltColNames, 0))
       probe.expectMsgClass(classOf[BadSchema])
     }
+
+    it("should get AlreadySetup if try to set up twice for same dataset/version") (pending)
   }
 
   it("should be able to start ingestion, send rows, and get an ack back") {

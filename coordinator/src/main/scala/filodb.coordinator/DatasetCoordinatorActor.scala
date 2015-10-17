@@ -2,35 +2,29 @@ package filodb.coordinator
 
 import akka.actor.{Actor, ActorRef, Props}
 import com.typesafe.config.Config
+import net.ceedubs.ficus.Ficus._
 import org.velvia.filo.RowReader
 import scala.concurrent.Future
 
-import filodb.core.metadata.{Column, Dataset, Projection}
+import filodb.core.metadata.{Column, Dataset, Projection, RichProjection}
 import filodb.core.columnstore.ColumnStore
-import filodb.core.reprojector.{MemTable, Reprojector}
+import filodb.core.reprojector.{MemTable, MapDBMemTable, Reprojector}
 
 object DatasetCoordinatorActor {
   import filodb.core.Types._
 
   /**
-   * One-time setup of dataset ingestion.
-   * @param columns the schema of Columns to ingest. Each row should have the same schema.
-   * @param defaultPartitionKey if Some(key), a null value in partitioning column will cause key to be used.
-   *                            if None, then NullPartitionValue will be thrown when null value
-   *                            is encountered in a partitioning column.
-   * @return see return values in NodeCoordinatorActor
-   */
-  case class Setup(replyTo: ActorRef,
-                   columns: Seq[Column],
-                   defaultPartitionKey: Option[PartitionKey] = None)
-
-  /**
    * Ingests a bunch of rows into this dataset, version's memtable.
    * Automatically checks at the end if the memtable should be flushed, and sends a StartFlush
    * message to itself to initiate a flush.  This is done before the Ack is sent back.
+   * @param rows the rows to ingest.  Must have the same schema, for now, as the columns passed in
+   *        when the ingestion was set up.
    * @return Ack(seqNo)
    */
   case class NewRows(ackTo: ActorRef, rows: Seq[RowReader], seqNo: Long)
+
+  // The default minimum amt of memory in MB to allow ingesting more data
+  val DefaultMinFreeMb = 512
 
   /**
    * Initiates a memtable flush to the columnStore if one is not already in progress.
@@ -56,21 +50,19 @@ object DatasetCoordinatorActor {
   case class Stats(flushesStarted: Int,
                    flushesSucceeded: Int,
                    flushesFailed: Int,
-                   numRowsActive: Long,
-                   numRowsFlushing: Long)
+                   numRowsActive: Int,
+                   numRowsFlushing: Int)
 
   // Internal messages
   case class FlushDone(result: Seq[String])
   case class FlushFailed(t: Throwable)
 
-  def props(datasetObj: Dataset,
-            version: Int,
-            columnStore: ColumnStore,
-            reprojector: Reprojector,
-            config: Config,
-            memTable: MemTable): Props =
-    Props(classOf[DatasetCoordinatorActor], datasetObj, version, columnStore,
-          reprojector, config, memTable)
+  def props[K](projection: RichProjection[K],
+               version: Int,
+               columnStore: ColumnStore,
+               reprojector: Reprojector,
+               config: Config): Props =
+    Props(classOf[DatasetCoordinatorActor[K]], projection, version, columnStore, reprojector, config)
 }
 
 /**
@@ -79,41 +71,55 @@ object DatasetCoordinatorActor {
  * One per (dataset, version) per node.
  *
  * Responsible for:
- * - Owning and setting up the MemTable
- * - Feeding rows into the MemTable
+ * - Owning and setting up MemTables for ingestion
+ * - Feeding rows into the MemTable, and knowing when not to feed the memTable
  * - Forwarding acks from MemTable back to client
  * - Scheduling memtable flushes, “flipping” MemTables, and
- *   calling Reprojector to convert MemTable rows to Segments
- * - Calling the ColumnStore to append Segments to disk
+ *   calling Reprojector to convert MemTable rows to Segments and flush them to disk
  *
  * Scheduling is reactive and not done on a schedule right now.  Flushes are checked and initiated after
  * rows are inserted and after flushes are done.
+ *
+ * There are usually two MemTables held by this actor.  One, the activeMemTable, ingests incoming rows.
+ * The other, the flushingMemTable, is immutable and holds rows for flushing.  The two are switched.
  *
  * ==Configuration==
  * {{{
  *   memtable {
  *     flush-trigger-rows = 50000    # No of rows above which memtable flush might be triggered
+ *     max-rows-per-table = 1000000
+ *     min-free-mb = 512
  *   }
  * }}}
  */
-class DatasetCoordinatorActor(datasetObj: Dataset,
-                              version: Int,
-                              columnStore: ColumnStore,
-                              reprojector: Reprojector,
-                              config: Config,
-                              memTable: MemTable) extends BaseActor {
+class DatasetCoordinatorActor[K](projection: RichProjection[K],
+                                 version: Int,
+                                 columnStore: ColumnStore,
+                                 reprojector: Reprojector,
+                                 config: Config) extends BaseActor {
   import DatasetCoordinatorActor._
   import context.dispatcher
 
+  val datasetName = projection.dataset.name
+  val nameVer = s"$datasetName/$version"
   val flushTriggerRows = config.getLong("memtable.flush-trigger-rows")
+  val maxRowsPerTable = config.getInt("memtable.max-rows-per-table")
+  val minFreeMb = config.as[Option[Int]]("memtable.min-free-mb").getOrElse(DefaultMinFreeMb)
 
-  def activeRows: Option[Long] = memTable.numRows(datasetObj.name, version, MemTable.Active)
-  def flushingRows: Option[Long] = memTable.numRows(datasetObj.name, version, MemTable.Locked)
+  def activeRows: Int = activeTable.numRows
+  def flushingRows: Int = flushingTable.map(_.numRows).getOrElse(-1)
+
+  var activeTable: MemTable[K] = makeNewTable
+  var flushingTable: Option[MemTable[K]] = None
 
   var curReprojection: Option[Future[Seq[String]]] = None
   var flushesStarted = 0
   var flushesSucceeded = 0
   var flushesFailed = 0
+
+  def makeNewTable(): MemTable[K] = {
+    new MapDBMemTable(projection, config)
+  }
 
   private def reportStats(): Unit = {
     logger.info(s"MemTable active table rows: $activeRows")
@@ -123,29 +129,42 @@ class DatasetCoordinatorActor(datasetObj: Dataset,
   var flushedCallbacks: List[ActorRef] = Nil
 
   private def ingestRows(ackTo: ActorRef, rows: Seq[RowReader], seqNo: Long): Unit = {
-    // TODO: backpressure based on max # of rows in memtable
-    val msg = memTable.ingestRows(datasetObj.name, version, rows) match {
-      case MemTable.NoSuchDatasetVersion => Some(NodeCoordinatorActor.UnknownDataset)
-      case MemTable.Ingested             => Some(NodeCoordinatorActor.Ack(seqNo))
-      case MemTable.PleaseWait           =>
-        logger.info(s"MemTable full or low on memory, try rows again later...")
-        None
+    // TODO: gate on total rows in both active and flushing tables, not just active table?
+    if (activeRows >= maxRowsPerTable) {
+      logger.debug(s"MemTable ($nameVer) is at $activeRows rows, cannot accept writes...")
+      return
     }
+
+    val freeMB = getRealFreeMb
+    if (freeMB < minFreeMb) {
+      logger.info(s"Only $freeMB MB memory left, cannot accept more writes...")
+      logger.info(s"Active table ($nameVer) has $activeRows rows")
+      sys.runtime.gc()
+      return
+    }
+
+    // MemTable will take callback function and call back to ack rows
+    activeTable.ingestRows(rows) { ackTo ! NodeCoordinatorActor.Ack(seqNo) }
 
     // Now, check how full the memtable is, and if it needs to be flipped, and a flush started
     if (shouldFlush) self ! StartFlush()
-
-    msg.foreach(ackTo.!)
   }
 
+  private def canIngest: Boolean = getRealFreeMb >= minFreeMb && activeRows < maxRowsPerTable
+
+  private def getRealFreeMb: Int =
+    ((sys.runtime.maxMemory - (sys.runtime.totalMemory - sys.runtime.freeMemory)) / (1024 * 1024)).toInt
+
   private def startFlush(): Unit = {
-    logger.info(s"Starting new flush cycle for (${datasetObj.name}/$version)...")
+    logger.info(s"Starting new flush cycle for ($nameVer)...")
     reportStats()
-    if (memTable.flipBuffers(datasetObj.name, version) != MemTable.Flipped) {
-      logger.warn("This should not happen, unless Scheduler is running concurrently!")
+    if (curReprojection.isDefined || flushingTable.isDefined) {
+      logger.warn("This should not happen. Not starting flush; $curReprojection; $flushingTable")
       return
     }
-    val newTaskFuture = reprojector.newTask(memTable, datasetObj.name, version)
+    flushingTable = Some(activeTable)
+    activeTable = makeNewTable()
+    val newTaskFuture = reprojector.reproject(flushingTable.get, version)
     curReprojection = Some(newTaskFuture)
     flushesStarted += 1
     newTaskFuture.map { results =>
@@ -157,12 +176,13 @@ class DatasetCoordinatorActor(datasetObj: Dataset,
   }
 
   private def shouldFlush: Boolean =
-    activeRows.map { numRows =>
-      (numRows >= flushTriggerRows && curReprojection == None)
-    }.getOrElse(false)
+    activeRows >= flushTriggerRows && curReprojection == None
 
   private def handleFlushDone(): Unit = {
     curReprojection = None
+    // Close the flushing table and mark it as None
+    flushingTable.foreach(_.close())
+    flushingTable = None
     flushedCallbacks.foreach { ref => ref ! NodeCoordinatorActor.Flushed }
     flushedCallbacks = Nil
     flushesSucceeded += 1
@@ -186,14 +206,6 @@ class DatasetCoordinatorActor(datasetObj: Dataset,
   }
 
   def receive: Receive = {
-    case Setup(replyTo, columns, defaultPartKey) =>
-      memTable.setupIngestion(datasetObj, columns, version, defaultPartKey) match {
-        case MemTable.SetupDone      => replyTo ! NodeCoordinatorActor.IngestionReady
-        // If the table is already set up, that's fine!
-        case MemTable.AlreadySetup   => replyTo ! NodeCoordinatorActor.IngestionReady
-        case MemTable.BadSchema(msg) => replyTo ! NodeCoordinatorActor.BadSchema(msg)
-      }
-
     case NewRows(ackTo, rows, seqNo) =>
       ingestRows(ackTo, rows, seqNo)
 
@@ -206,19 +218,19 @@ class DatasetCoordinatorActor(datasetObj: Dataset,
       clearProjection(replyTo, projection)
 
     case CanIngest =>
-      sender ! NodeCoordinatorActor.CanIngest(memTable.canIngest(datasetObj.name, version))
+      sender ! NodeCoordinatorActor.CanIngest(canIngest)
 
     case GetStats =>
       sender ! Stats(flushesStarted, flushesSucceeded, flushesFailed,
-                     activeRows.getOrElse(-1L), flushingRows.getOrElse(-1L))
+                     activeRows, flushingRows)
 
     case FlushDone(results) =>
-      logger.info(s"Reprojection task (${datasetObj.name}, $version) succeeded: ${results.toList}")
+      logger.info(s"Reprojection task ($nameVer) succeeded: ${results.toList}")
       reportStats()
       handleFlushDone()
 
     case FlushFailed(t) =>
-      logger.error(s"Error in reprojection task (${datasetObj.name}, $version)", t)
+      logger.error(s"Error in reprojection task ($nameVer)", t)
       reportStats()
       handleFlushErr(t)
   }

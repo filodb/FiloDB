@@ -9,9 +9,9 @@ import scala.concurrent.duration._
 
 import filodb.core._
 import filodb.core.Types._
-import filodb.core.metadata.{Column, Dataset, MetaStore, Projection}
+import filodb.core.metadata.{Column, Dataset, MetaStore, Projection, RichProjection}
 import filodb.core.columnstore.ColumnStore
-import filodb.core.reprojector.{MemTable, Reprojector}
+import filodb.core.reprojector.Reprojector
 
 /**
  * The NodeCoordinatorActor is the common API entry point for all FiloDB ingestion and metadata operations.
@@ -94,26 +94,21 @@ object NodeCoordinatorActor {
   def invalidColumns(columns: Seq[String], schema: Column.Schema): Seq[String] =
     (columns.toSet -- schema.keys).toSeq
 
-  def props(memTable: MemTable,
-            metaStore: MetaStore,
+  def props(metaStore: MetaStore,
             reprojector: Reprojector,
             columnStore: ColumnStore,
             config: Config): Props =
-    Props(classOf[NodeCoordinatorActor], memTable, metaStore, reprojector, columnStore, config)
+    Props(classOf[NodeCoordinatorActor], metaStore, reprojector, columnStore, config)
 }
 
 /**
  * ==Configuration==
  * {{{
  *   {
- *     scheduler-interval = 1 s
- *     scheduler-reporting = false
- *     scheduler-reporting-interval = 30s
  *   }
  * }}}
  */
-class NodeCoordinatorActor(memTable: MemTable,
-                           metaStore: MetaStore,
+class NodeCoordinatorActor(metaStore: MetaStore,
                            reprojector: Reprojector,
                            columnStore: ColumnStore,
                            config: Config) extends BaseActor {
@@ -121,13 +116,6 @@ class NodeCoordinatorActor(memTable: MemTable,
   import context.dispatcher
 
   val dsCoordinators = new collection.mutable.HashMap[(TableName, Int), ActorRef]
-
-  // Make sure the function below is NOT called from a Future, it updates state!
-  private def createDatasetCoord(datasetObj: Dataset, version: Int): ActorRef = {
-    val props = DatasetCoordinatorActor.props(datasetObj, version, columnStore, reprojector,
-                                              config, memTable)
-    context.actorOf(props, s"ds-coord-${datasetObj.name}-$version")
-  }
 
   private def withDsCoord(originator: ActorRef, dataset: String, version: Int)
                          (func: ActorRef => Unit): Unit = {
@@ -163,30 +151,38 @@ class NodeCoordinatorActor(memTable: MemTable,
     }
   }
 
+  // If the coordinator is already set up, then everything is already fine.
+  // Otherwise get the dataset object and create a new actor, re-initializing state.
   private def setupIngestion(originator: ActorRef,
                              dataset: String,
                              columns: Seq[String],
                              version: Int,
                              defaultPartKey: Option[PartitionKey]): Unit = {
-    // Try to get the dataset coordinator.  Create one if it doesn't exist.
-    val dsCoordFuture: Future[ActorRef] =
-      dsCoordinators.get((dataset, version)).map(Future.successful)
-                    .getOrElse({
-                      for { datasetObj <- metaStore.getDataset(dataset) } yield {
-                        val ref = createDatasetCoord(datasetObj, version)
-                        // This happens in a future, use messages so state updates in actor loop
-                        self ! AddDatasetCoord(dataset, version, ref)
-                        ref
-                      }
-                    })
-    (for { dsCoord <- dsCoordFuture
-           schema <- verifySchema(originator, dataset, version, columns) if schema.isDefined }
-    yield {
-      val columnSeq = columns.map(schema.get(_))
-      dsCoord ! DatasetCoordinatorActor.Setup(originator, columnSeq, defaultPartKey)
-    }).recover {
-      case NotFoundError(what) => originator ! UnknownDataset
-      case t: Throwable        => originator ! MetadataException(t)
+    if (dsCoordinators contains (dataset -> version)) {
+      originator ! IngestionReady
+    } else {
+      (for { datasetObj <- metaStore.getDataset(dataset)
+             schema <- verifySchema(originator, dataset, version, columns) if schema.isDefined }
+      yield {
+        val columnSeq = columns.map(schema.get(_))
+        // Create the RichProjection, and ferret out any errors
+        val proj = RichProjection.make(datasetObj, columnSeq)
+        proj.recover {
+          case RichProjection.BadSchema(reason) => originator ! BadSchema(reason)
+          case Dataset.BadPartitionColumn(reason) => originator ! BadSchema(reason)
+        }
+        proj.foreach { richProj =>
+          // Create the dataset coordinator
+          val typedProj = richProj.asInstanceOf[RichProjection[richProj.helper.Key]]
+          val props = DatasetCoordinatorActor.props(typedProj, version, columnStore, reprojector, config)
+          val ref = context.actorOf(props, s"ds-coord-${datasetObj.name}-$version")
+          self ! AddDatasetCoord(dataset, version, ref)
+          originator ! IngestionReady
+        }
+      }).recover {
+        case NotFoundError(what) => originator ! UnknownDataset
+        case t: Throwable        => originator ! MetadataException(t)
+      }
     }
   }
 

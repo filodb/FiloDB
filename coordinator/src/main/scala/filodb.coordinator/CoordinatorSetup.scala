@@ -22,24 +22,16 @@ trait CoordinatorSetup {
                                                       config.getInt("core-futures-pool-size"))
 
   // These should be implemented as lazy val's, though tests might want to reset them
-  val memTable: MemTable
   val columnStore: ColumnStore
   val metaStore: MetaStore
   lazy val reprojector = new DefaultReprojector(columnStore)
 
   lazy val coordinatorActor =
-    system.actorOf(NodeCoordinatorActor.props(memTable, metaStore, reprojector, columnStore,
-                                              config),
+    system.actorOf(NodeCoordinatorActor.props(metaStore, reprojector, columnStore, config),
                    "coordinator")
-
-  def clearState(): Unit = {
-    memTable.clearAllData()
-  }
 }
 
 /**
  * A CoordinatorSetup with default memtable initialized from config
  */
-trait DefaultCoordinatorSetup extends CoordinatorSetup {
-  lazy val memTable = new MapDBMemTable(config)
-}
+trait DefaultCoordinatorSetup extends CoordinatorSetup
