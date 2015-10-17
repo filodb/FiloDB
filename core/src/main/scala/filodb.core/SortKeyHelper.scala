@@ -1,5 +1,8 @@
 package filodb.core
 
+import org.velvia.filo.RowReader
+import org.velvia.filo.RowReader._
+
 import scala.math.Ordering
 import scodec.bits.{ByteVector, ByteOrdering}
 
@@ -13,6 +16,7 @@ import scodec.bits.{ByteVector, ByteOrdering}
  * A typeclass for working with sort keys.
  */
 trait SortKeyHelper[K] {
+  type Key = K
   def ordering: Ordering[K]    // must be comparable
 
   /**
@@ -23,17 +27,28 @@ trait SortKeyHelper[K] {
 
   def toBytes(key: K): ByteVector
   def fromBytes(bytes: ByteVector): K
+
+  def getSortKeyFunc(sortColNums: Seq[Int]): RowReader => K
 }
 
 object SortKeyHelper {
   val ValidSortClasses = Seq(classOf[Long], classOf[Int], classOf[Double])
 }
 
+abstract class SingleSortKeyHelper[K: TypedFieldExtractor] extends SortKeyHelper[K] {
+  val extractor = implicitly[TypedFieldExtractor[K]]
+
+  def getSortKeyFunc(sortColNums: Seq[Int]): RowReader => K = {
+    require(sortColNums.length == 1)
+    extractor.getField(_, sortColNums.head)
+  }
+}
+
 /**
  * Typeclasses for sort keys
  * NOTE: both the Ordering for ByteVector as well as how bytes are compared in most places is big-endian
  */
-case class LongKeyHelper(segmentLen: Long) extends SortKeyHelper[Long] {
+case class LongKeyHelper(segmentLen: Long) extends SingleSortKeyHelper[Long] {
   def ordering: Ordering[Long] = Ordering.Long
   def getSegment(key: Long): (Long, Long) = {
     val segmentNum = key / segmentLen
@@ -43,7 +58,7 @@ case class LongKeyHelper(segmentLen: Long) extends SortKeyHelper[Long] {
   def fromBytes(bytes: ByteVector): Long = bytes.toLong(true, ByteOrdering.BigEndian)
 }
 
-case class IntKeyHelper(segmentLen: Int) extends SortKeyHelper[Int] {
+case class IntKeyHelper(segmentLen: Int) extends SingleSortKeyHelper[Int] {
   def ordering: Ordering[Int] = Ordering.Int
   def getSegment(key: Int): (Int, Int) = {
     val segmentNum = key / segmentLen
@@ -53,7 +68,7 @@ case class IntKeyHelper(segmentLen: Int) extends SortKeyHelper[Int] {
   def fromBytes(bytes: ByteVector): Int = bytes.toInt(true, ByteOrdering.BigEndian)
 }
 
-case class DoubleKeyHelper(segmentLen: Double) extends SortKeyHelper[Double] {
+case class DoubleKeyHelper(segmentLen: Double) extends SingleSortKeyHelper[Double] {
   def ordering: Ordering[Double] = Ordering.Double
   def getSegment(key: Double): (Double, Double) = {
     val segmentNum = Math.floor(key / segmentLen)

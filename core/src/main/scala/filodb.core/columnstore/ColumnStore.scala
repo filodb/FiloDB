@@ -40,9 +40,9 @@ trait ColumnStore {
    * @param version the version # to write the segment to
    * @return Success. Future.failure(exception) otherwise.
    */
-  def appendSegment[K: TypedFieldExtractor](projection: RichProjection[K],
-                                            segment: Segment[K],
-                                            version: Int): Future[Response]
+  def appendSegment[K](projection: RichProjection[K],
+                       segment: Segment[K],
+                       version: Int): Future[Response]
 
   /**
    * Reads segments from the column store, in order of primary key.
@@ -170,9 +170,9 @@ trait CachedMergingColumnStore extends ColumnStore with StrictLogging {
 
   def clearSegmentCache(): Unit = { segmentCache.clear() }
 
-  def appendSegment[K: TypedFieldExtractor](projection: RichProjection[K],
-                                            segment: Segment[K],
-                                            version: Int): Future[Response] = {
+  def appendSegment[K](projection: RichProjection[K],
+                       segment: Segment[K],
+                       version: Int): Future[Response] = {
     if (segment.isEmpty) return(Future.successful(NotApplied))
     implicit val helper = projection.helper
     for { oldSegment <- getSegFromCache(projection, segment.keyRange, version)

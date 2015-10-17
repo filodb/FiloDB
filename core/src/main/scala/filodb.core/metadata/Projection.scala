@@ -37,7 +37,9 @@ case class RichProjection[K](id: Int,
                              reverse: Boolean,
                              columns: Seq[Column],
                              helper: SortKeyHelper[K],
-                             partitionFunc: RowReader => PartitionKey)
+                             partitionFunc: RowReader => PartitionKey) {
+  def sortKeyFunc: RowReader => K = helper.getSortKeyFunc(Seq(sortColNo))
+}
 
 object RichProjection {
   case class BadSchema(reason: String) extends Exception("BadSchema: " + reason)

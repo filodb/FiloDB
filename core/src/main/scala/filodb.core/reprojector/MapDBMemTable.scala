@@ -28,11 +28,8 @@ import RowReader._
  *   }
  * }}}
  */
-class MapDBMemTable[K: TypedFieldExtractor](val projection: RichProjection[K],
-                                            config: Config) extends MemTable[K] {
+class MapDBMemTable[K](val projection: RichProjection[K], config: Config) extends MemTable[K] {
   import collection.JavaConversions._
-
-  val extractor = implicitly[TypedFieldExtractor[K]]
 
   def close(): Unit = { db.close() }
 
@@ -45,6 +42,7 @@ class MapDBMemTable[K: TypedFieldExtractor](val projection: RichProjection[K],
                           .make()
 
   val serializer = new RowReaderSerializer(projection.columns)
+  val sortKeyFunc = projection.sortKeyFunc
 
   implicit lazy val sortKeyOrdering: Ordering[K] = projection.helper.ordering
   lazy val rowMap = db.createTreeMap("filo")
@@ -61,7 +59,7 @@ class MapDBMemTable[K: TypedFieldExtractor](val projection: RichProjection[K],
   def ingestRows(rows: Seq[RowReader])(callback: => Unit): Unit = {
     // For each row: insert into rows map
     for { row <- rows } {
-      val sortKey = extractor.getField(row, projection.sortColNo)
+      val sortKey = sortKeyFunc(row)
       rowMap.put((projection.partitionFunc(row), sortKey), serializer.serialize(row))
     }
     // Since this is an in-memory table only, just call back right away.

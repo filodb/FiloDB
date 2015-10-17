@@ -1,7 +1,8 @@
 package filodb.core.metadata
 
-import filodb.core.columnstore.SegmentSpec
+import org.velvia.filo.TupleRowReader
 
+import filodb.core.columnstore.SegmentSpec
 import org.scalatest.{FunSpec, Matchers, BeforeAndAfter}
 
 class ProjectionSpec extends FunSpec with Matchers {
@@ -40,6 +41,17 @@ class ProjectionSpec extends FunSpec with Matchers {
       resp.sortColumn should equal (schema(2))
       resp.sortColNo should equal (2)
       resp.columns should equal (schema)
+      resp.helper shouldBe a[filodb.core.LongKeyHelper]
+      names.take(3).map(TupleRowReader).map(resp.sortKeyFunc) should equal (Seq(24L, 28L, 25L))
+    }
+
+    it("should get working RichProjection back even if called with [Nothing]") {
+      val resp = RichProjection(dataset, schema)
+      resp.sortColumn should equal (schema(2))
+      resp.sortColNo should equal (2)
+      resp.columns should equal (schema)
+      resp.helper shouldBe a[filodb.core.LongKeyHelper]
+      names.take(3).map(TupleRowReader).map(resp.sortKeyFunc) should equal (Seq(24L, 28L, 25L))
     }
   }
 }

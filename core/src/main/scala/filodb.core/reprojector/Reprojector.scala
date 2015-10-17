@@ -34,7 +34,7 @@ trait Reprojector {
    *
    * @return a Future[Seq[String]], representing info from individual segment flushes.
    */
-  def reproject[K: TypedFieldExtractor](memTable: MemTable[K], version: Int): Future[Seq[String]]
+  def reproject[K](memTable: MemTable[K], version: Int): Future[Seq[String]]
 
   /**
    * A simple function that reads rows out of a memTable and converts them to segments.
@@ -78,7 +78,7 @@ class DefaultReprojector(columnStore: ColumnStore)
     }
   }
 
-  def reproject[K: TypedFieldExtractor](memTable: MemTable[K], version: Int): Future[Seq[String]] = {
+  def reproject[K](memTable: MemTable[K], version: Int): Future[Seq[String]] = {
     val projection = memTable.projection
     val datasetName = projection.dataset.name
     val segments = toSegments(memTable)

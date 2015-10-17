@@ -41,8 +41,8 @@ trait ChunkMergingStrategy {
    * @return a merged Segment ready to be flushed to disk.  This typically will only include chunks that need
    *          to be updated or written to disk.
    */
-  def mergeSegments[K: TypedFieldExtractor: SortKeyHelper](oldSegment: Segment[K],
-                                                           newSegment: Segment[K]): Segment[K]
+  def mergeSegments[K: SortKeyHelper](oldSegment: Segment[K],
+                                      newSegment: Segment[K]): Segment[K]
 
   /**
    * Prunes a segment to only what needs to be cached.
@@ -78,9 +78,10 @@ extends ChunkMergingStrategy with StrictLogging {
     }
   }
 
-  def mergeSegments[K: TypedFieldExtractor: SortKeyHelper](oldSegment: Segment[K],
-                                                           newSegment: Segment[K]): Segment[K] = {
-    val extractor = implicitly[TypedFieldExtractor[K]]
+  def mergeSegments[K: SortKeyHelper](oldSegment: Segment[K],
+                                      newSegment: Segment[K]): Segment[K] = {
+    // NOTE: This only works for single sort keys
+    val sortKeyFunc = implicitly[SortKeyHelper[K]].getSortKeyFunc(Seq(0))
 
     // One should NEVER be allowed to merge segments from different places... unless we are perhaps
     // talking about splitting and merging, but that's outside the scope of this method
@@ -100,7 +101,7 @@ extends ChunkMergingStrategy with StrictLogging {
       case rr: RowReaderSegment[K] =>
         // This should be a segment read from disk via readSegmentForCache().  Cheat assume only sort col
         val items = rr.rowChunkIterator().map { case (reader, chunkId, rowNum) =>
-          extractor.getField(reader, 0) -> (chunkId -> rowNum)
+          sortKeyFunc(reader) -> (chunkId -> rowNum)
         }
         UpdatableChunkRowMap(items.toSeq)
     }
