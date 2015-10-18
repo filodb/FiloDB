@@ -65,4 +65,3 @@ trait MemTable[K] extends StrictLogging {
    */
   def clearAllData(): Unit
 }
-
