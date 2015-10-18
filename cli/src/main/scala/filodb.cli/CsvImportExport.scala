@@ -10,7 +10,6 @@ import scala.concurrent.duration._
 import scala.language.postfixOps
 
 import filodb.core.metadata.MetaStore
-import filodb.core.reprojector.MemTable
 import filodb.coordinator.{NodeCoordinatorActor, RowSource}
 import filodb.coordinator.sources.CsvSourceActor
 import filodb.core._
@@ -20,7 +19,6 @@ import filodb.core._
 trait CsvImportExport {
   val system: ActorSystem
   val metaStore: MetaStore
-  val memTable: MemTable
   val coordinatorActor: ActorRef
   var exitCode = 0
 
