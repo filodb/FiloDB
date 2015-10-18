@@ -121,11 +121,13 @@ package object spark extends StrictLogging {
     private def createNewDataset(datasetName: String,
                                  sortColumn: String,
                                  partitionColumn: String,
+                                 defaultPartitionKey: Option[Types.PartitionKey],
                                  df: DataFrame): Unit = {
       df.schema.find(_.name == sortColumn).getOrElse(throw NoSortColumn(sortColumn))
       df.schema.find(_.name == partitionColumn).getOrElse(throw NoPartitionColumn(partitionColumn))
 
-      val dataset = Dataset(datasetName, sortColumn, partitionColumn)
+      val options = Dataset.DefaultOptions.copy(defaultPartitionKey = defaultPartitionKey)
+      val dataset = Dataset(datasetName, sortColumn, partitionColumn).copy(options = options)
       logger.info(s"Creating dataset $dataset...")
       actorAsk(FiloSetup.coordinatorActor, CreateDataset(dataset, Nil)) {
         case DatasetCreated =>
@@ -192,7 +194,7 @@ package object spark extends StrictLogging {
         if (mode == SaveMode.Overwrite) truncateDataset(datasetObj, version)
       } catch {
         case e: NotFoundError =>
-          createNewDataset(dataset, sortColumn, partCol, df1)
+          createNewDataset(dataset, sortColumn, partCol, defaultPartitionKey, df1)
       }
       checkAndAddColumns(df1, dataset, version)
       val dfColumns = df1.schema.map(_.name)
