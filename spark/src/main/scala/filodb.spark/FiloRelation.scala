@@ -117,9 +117,9 @@ case class FiloRelation(dataset: String,
 
   val datasetObj = getDatasetObj(dataset)
   val filoSchema = getSchema(dataset, version)
-  logger.info(s"Read schema for dataset $dataset = $schema")
 
   val schema = StructType(columnsToSqlFields(filoSchema.values.toSeq))
+  logger.info(s"Read schema for dataset $dataset = $schema")
 
   def buildScan(): RDD[Row] = buildScan(filoSchema.keys.toArray)
 
