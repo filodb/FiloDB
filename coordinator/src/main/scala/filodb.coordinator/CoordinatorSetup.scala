@@ -9,11 +9,11 @@ import filodb.core.metadata.MetaStore
 import filodb.core.reprojector._
 
 /**
- * A trait to make setup of the NodeCoordinatorActor stack a bit easier.
+ * A trait to make setup of the [[NodeCoordinatorActor]] stack a bit easier.
  * Mixed in for tests as well as the main FiloDB app and anywhere else the stack needs to be spun up.
  */
 trait CoordinatorSetup {
-  val system: ActorSystem
+  def system: ActorSystem
   // The global configuration object
   def config: Config
 
@@ -26,6 +26,7 @@ trait CoordinatorSetup {
   val metaStore: MetaStore
   lazy val reprojector = new DefaultReprojector(columnStore)
 
+  // TODO: consider having a root actor supervising everything
   lazy val coordinatorActor =
     system.actorOf(NodeCoordinatorActor.props(metaStore, reprojector, columnStore, config),
                    "coordinator")

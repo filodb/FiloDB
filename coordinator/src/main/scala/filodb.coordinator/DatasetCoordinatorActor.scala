@@ -13,6 +13,8 @@ import filodb.core.reprojector.{MemTable, MapDBMemTable, Reprojector}
 object DatasetCoordinatorActor {
   import filodb.core.Types._
 
+  sealed trait DSCoordinatorMessage
+
   /**
    * Ingests a bunch of rows into this dataset, version's memtable.
    * Automatically checks at the end if the memtable should be flushed, and sends a StartFlush
@@ -21,7 +23,7 @@ object DatasetCoordinatorActor {
    *        when the ingestion was set up.
    * @return Ack(seqNo)
    */
-  case class NewRows(ackTo: ActorRef, rows: Seq[RowReader], seqNo: Long)
+  case class NewRows(ackTo: ActorRef, rows: Seq[RowReader], seqNo: Long) extends DSCoordinatorMessage
 
   // The default minimum amt of memory in MB to allow ingesting more data
   val DefaultMinFreeMb = 512
@@ -32,30 +34,30 @@ object DatasetCoordinatorActor {
    * @param replyTo optionally, add to the list of folks to get a message back when flush/reprojection
    *                finishes.
    */
-  case class StartFlush(replyTo: Option[ActorRef] = None)
+  case class StartFlush(replyTo: Option[ActorRef] = None) extends DSCoordinatorMessage
 
   // Checks if memtable is ready to accept more rows.  Common reason why not is due to lack of memory
   // or the row limit has been reached
-  case object CanIngest
+  case object CanIngest extends DSCoordinatorMessage
 
   /**
    * Clears all data from the projection.  Waits for existing flush to finish first.
    */
-  case class ClearProjection(replyTo: ActorRef, projection: Projection)
+  case class ClearProjection(replyTo: ActorRef, projection: Projection) extends DSCoordinatorMessage
 
   /**
    * Returns current stats.  Note: numRows* will return -1 if the memtable is not set up yet
    */
-  case object GetStats
+  case object GetStats extends DSCoordinatorMessage
   case class Stats(flushesStarted: Int,
                    flushesSucceeded: Int,
                    flushesFailed: Int,
                    numRowsActive: Int,
-                   numRowsFlushing: Int)
+                   numRowsFlushing: Int) extends DSCoordinatorMessage
 
   // Internal messages
-  case class FlushDone(result: Seq[String])
-  case class FlushFailed(t: Throwable)
+  case class FlushDone(result: Seq[String]) extends DSCoordinatorMessage
+  case class FlushFailed(t: Throwable) extends DSCoordinatorMessage
 
   def props[K](projection: RichProjection[K],
                version: Int,
@@ -92,7 +94,7 @@ object DatasetCoordinatorActor {
  *   }
  * }}}
  */
-class DatasetCoordinatorActor[K](projection: RichProjection[K],
+private[filodb] class DatasetCoordinatorActor[K](projection: RichProjection[K],
                                  version: Int,
                                  columnStore: ColumnStore,
                                  reprojector: Reprojector,
@@ -102,6 +104,7 @@ class DatasetCoordinatorActor[K](projection: RichProjection[K],
 
   val datasetName = projection.dataset.name
   val nameVer = s"$datasetName/$version"
+  // TODO: consider passing in a DatasetCoordinatorSettings class, so config doesn't have to be reparsed
   val flushTriggerRows = config.getLong("memtable.flush-trigger-rows")
   val maxRowsPerTable = config.getInt("memtable.max-rows-per-table")
   val minFreeMb = config.as[Option[Int]]("memtable.min-free-mb").getOrElse(DefaultMinFreeMb)

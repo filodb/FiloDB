@@ -17,7 +17,7 @@ import filodb.core._
 // Turn off style rules for CLI classes
 //scalastyle:off
 trait CsvImportExport {
-  val system: ActorSystem
+  def system: ActorSystem
   val metaStore: MetaStore
   val coordinatorActor: ActorRef
   var exitCode = 0
@@ -45,17 +45,22 @@ trait CsvImportExport {
     parse(actor ? msg, askTimeout)(f)
   }
 
-  protected def awaitSuccess(cmd: => Future[Response]) {
+  protected def awaitSuccess(cmd: => Future[Response]): Unit = {
     parseResponse(cmd) {
       case Success =>   println("Succeeded.")
     }
   }
 
-  def ingestCSV(dataset: String, version: Int, csvPath: String, delimiter: Char) {
+  def ingestCSV(dataset: String,
+                version: Int,
+                csvPath: String,
+                delimiter: Char,
+                timeout: FiniteDuration): Unit = {
     val fileReader = new java.io.FileReader(csvPath)
 
+    // TODO: consider using a supervisor actor to start these
     val csvActor = system.actorOf(CsvSourceActor.props(fileReader, dataset, version, coordinatorActor))
-    actorAsk(csvActor, RowSource.Start, 99 minutes) {
+    actorAsk(csvActor, RowSource.Start, timeout) {
       case RowSource.SetupError(e) =>
         println(s"Error $e setting up CSV ingestion of $dataset/$version at $csvPath")
         exitCode = 2

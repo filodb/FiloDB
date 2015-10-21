@@ -28,13 +28,17 @@ import filodb.core.reprojector.Reprojector
  * It is called by local (eg HTTP) as well as remote (eg Spark ETL) processes.
  */
 object NodeCoordinatorActor {
+  // Public, external Actor/Akka API, so every incoming command should be a NodeCommand
+  sealed trait NodeCommand
+  sealed trait NodeResponse
+
   /**
    * Creates a new dataset with columns and a default projection.
    */
-  case class CreateDataset(dataset: Dataset, columns: Seq[Column])
+  case class CreateDataset(dataset: Dataset, columns: Seq[Column]) extends NodeCommand
 
-  case object DatasetCreated extends Response
-  case class DatasetError(msg: String) extends ErrorResponse
+  case object DatasetCreated extends Response with NodeResponse
+  case class DatasetError(msg: String) extends ErrorResponse with NodeResponse
 
   /**
    * Sets up ingestion for a given dataset, version, and schema of columns.
@@ -48,12 +52,12 @@ object NodeCoordinatorActor {
   case class SetupIngestion(dataset: String,
                             schema: Seq[String],
                             version: Int,
-                            defaultPartitionKey: Option[PartitionKey] = None)
+                            defaultPartitionKey: Option[PartitionKey] = None) extends NodeCommand
 
-  case object IngestionReady extends Response
-  case object UnknownDataset extends ErrorResponse
-  case class UndefinedColumns(undefined: Seq[String]) extends ErrorResponse
-  case class BadSchema(message: String) extends ErrorResponse
+  case object IngestionReady extends Response with NodeResponse
+  case object UnknownDataset extends ErrorResponse with NodeResponse
+  case class UndefinedColumns(undefined: Seq[String]) extends ErrorResponse with NodeResponse
+  case class BadSchema(message: String) extends ErrorResponse with NodeResponse
 
   /**
    * Ingests a new set of rows for a given dataset and version.
@@ -62,35 +66,35 @@ object NodeCoordinatorActor {
    * @param seqNo the sequence number to be returned for acknowledging the entire set of rows
    * @return Ack(seqNo) returned when the set of rows has been committed to the MemTable.
    */
-  case class IngestRows(dataset: String, version: Int, rows: Seq[RowReader], seqNo: Long)
+  case class IngestRows(dataset: String, version: Int, rows: Seq[RowReader], seqNo: Long) extends NodeCommand
 
-  case class Ack(seqNo: Long) extends Response
+  case class Ack(seqNo: Long) extends Response with NodeResponse
 
   /**
    * Initiates a flush of the remaining MemTable rows of the given dataset and version.
    * Usually used when at the end of ingesting some large blob of data.
    * @return Flushed when the flush cycle has finished successfully, commiting data to columnstore.
    */
-  case class Flush(dataset: String, version: Int)
-  case object Flushed
+  case class Flush(dataset: String, version: Int) extends NodeCommand
+  case object Flushed extends NodeResponse
 
   /**
    * Checks to see if the DatasetCoordActor is ready to take in more rows.  Usually sent when an actor
    * is in a wait state.
    */
-  case class CheckCanIngest(dataset: String, version: Int)
-  case class CanIngest(can: Boolean)
+  case class CheckCanIngest(dataset: String, version: Int) extends NodeCommand
+  case class CanIngest(can: Boolean) extends NodeResponse
 
   /**
    * Truncates all data from a projection of a dataset.  Waits for any pending flushes from said
    * dataset to finish first, and also clears the columnStore cache for that dataset.
    */
-  case class TruncateProjection(projection: Projection, version: Int)
-  case object ProjectionTruncated
+  case class TruncateProjection(projection: Projection, version: Int) extends NodeCommand
+  case object ProjectionTruncated extends NodeResponse
 
   // Internal messages
-  case class AddDatasetCoord(dataset: TableName, version: Int, dsCoordRef: ActorRef)
-  case class DatasetCreateNotify(dataset: TableName, version: Int, msg: Any)
+  case class AddDatasetCoord(dataset: TableName, version: Int, dsCoordRef: ActorRef) extends NodeCommand
+  case class DatasetCreateNotify(dataset: TableName, version: Int, msg: Any) extends NodeCommand
 
   def invalidColumns(columns: Seq[String], schema: Column.Schema): Seq[String] =
     (columns.toSet -- schema.keys).toSeq

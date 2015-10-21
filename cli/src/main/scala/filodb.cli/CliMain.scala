@@ -30,6 +30,7 @@ class Arguments extends FieldArgs {
   var version: Option[Int] = None
   var select: Option[Seq[String]] = None
   var limit: Int = 1000
+  var timeoutMinutes: Int = 99
   var outfile: Option[String] = None
   var delimiter: String = ","
 
@@ -85,7 +86,8 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with DefaultCoord
           ingestCSV(args.dataset.get,
                     version,
                     args.filename.get,
-                    delimiter)
+                    delimiter,
+                    args.timeoutMinutes.minutes)
         case x: Any =>
           args.select.map { selectCols =>
             exportCSV(args.dataset.get,
