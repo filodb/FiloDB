@@ -54,7 +54,7 @@ object NodeCoordinatorActor {
                             version: Int,
                             defaultPartitionKey: Option[PartitionKey] = None) extends NodeCommand
 
-  case object IngestionReady extends Response with NodeResponse
+  case object IngestionReady extends NodeResponse
   case object UnknownDataset extends ErrorResponse with NodeResponse
   case class UndefinedColumns(undefined: Seq[String]) extends ErrorResponse with NodeResponse
   case class BadSchema(message: String) extends ErrorResponse with NodeResponse
@@ -68,7 +68,7 @@ object NodeCoordinatorActor {
    */
   case class IngestRows(dataset: String, version: Int, rows: Seq[RowReader], seqNo: Long) extends NodeCommand
 
-  case class Ack(seqNo: Long) extends Response with NodeResponse
+  case class Ack(seqNo: Long) extends NodeResponse
 
   /**
    * Initiates a flush of the remaining MemTable rows of the given dataset and version.
@@ -109,8 +109,6 @@ object NodeCoordinatorActor {
 /**
  * ==Configuration==
  * {{{
- *   {
- *   }
  * }}}
  */
 class NodeCoordinatorActor(metaStore: MetaStore,
@@ -142,7 +140,7 @@ class NodeCoordinatorActor(metaStore: MetaStore,
     }
   }
 
-  private def createDataset(originator: ActorRef, datasetObj: Dataset, columns: Seq[Column]) = {
+  private def createDataset(originator: ActorRef, datasetObj: Dataset, columns: Seq[Column]): Unit = {
     if (datasetObj.projections.isEmpty) {
       originator ! DatasetError(s"There must be at least one projection in dataset $datasetObj")
     } else {
@@ -162,9 +160,27 @@ class NodeCoordinatorActor(metaStore: MetaStore,
   private def setupIngestion(originator: ActorRef,
                              dataset: String,
                              columns: Seq[String],
-                             version: Int,
-                             defaultPartKey: Option[PartitionKey]): Unit = {
+                             version: Int): Unit = {
     def notify(msg: Any): Unit = { self ! DatasetCreateNotify(dataset, version, msg) }
+
+    def createDatasetCoordActor(datasetObj: Dataset, richProj: RichProjection[_]): Unit = {
+      val typedProj = richProj.asInstanceOf[RichProjection[richProj.helper.Key]]
+      val props = DatasetCoordinatorActor.props(typedProj, version, columnStore, reprojector, config)
+      val ref = context.actorOf(props, s"ds-coord-${datasetObj.name}-$version")
+      self ! AddDatasetCoord(dataset, version, ref)
+      notify(IngestionReady)
+    }
+
+    def createProjectionAndActor(datasetObj: Dataset, schema: Option[Column.Schema]): Unit = {
+      val columnSeq = columns.map(schema.get(_))
+      // Create the RichProjection, and ferret out any errors
+      val proj = RichProjection.make(datasetObj, columnSeq)
+      proj.recover {
+        case RichProjection.BadSchema(reason) => notify(BadSchema(reason))
+        case Dataset.BadPartitionColumn(reason) => notify(BadSchema(reason))
+      }
+      for { richProj <- proj } createDatasetCoordActor(datasetObj, richProj)
+    }
 
     if (dsCoordinators contains (dataset -> version)) {
       originator ! IngestionReady
@@ -180,21 +196,7 @@ class NodeCoordinatorActor(metaStore: MetaStore,
       (for { datasetObj <- metaStore.getDataset(dataset)
              schema <- verifySchema(originator, dataset, version, columns) if schema.isDefined }
       yield {
-        val columnSeq = columns.map(schema.get(_))
-        // Create the RichProjection, and ferret out any errors
-        val proj = RichProjection.make(datasetObj, columnSeq)
-        proj.recover {
-          case RichProjection.BadSchema(reason) => notify(BadSchema(reason))
-          case Dataset.BadPartitionColumn(reason) => notify(BadSchema(reason))
-        }
-        proj.foreach { richProj =>
-          // Create the dataset coordinator
-          val typedProj = richProj.asInstanceOf[RichProjection[richProj.helper.Key]]
-          val props = DatasetCoordinatorActor.props(typedProj, version, columnStore, reprojector, config)
-          val ref = context.actorOf(props, s"ds-coord-${datasetObj.name}-$version")
-          self ! AddDatasetCoord(dataset, version, ref)
-          notify(IngestionReady)
-        }
+        createProjectionAndActor(datasetObj, schema)
       }).recover {
         case NotFoundError(what) => notify(UnknownDataset)
         case t: Throwable        => notify(MetadataException(t))
@@ -207,7 +209,7 @@ class NodeCoordinatorActor(metaStore: MetaStore,
       createDataset(sender, datasetObj, columns)
 
     case SetupIngestion(dataset, columns, version, defaultPartKey) =>
-      setupIngestion(sender, dataset, columns, version, defaultPartKey)
+      setupIngestion(sender, dataset, columns, version)
 
     case IngestRows(dataset, version, rows, seqNo) =>
       withDsCoord(sender, dataset, version) { _ ! DatasetCoordinatorActor.NewRows(sender, rows, seqNo) }
@@ -227,7 +229,7 @@ class NodeCoordinatorActor(metaStore: MetaStore,
       dsCoordinators((dataset, version)) = dsCoordRef
 
     case DatasetCreateNotify(dataset, version, msg) =>
-      dsCoordNotify((dataset -> version)).foreach(_ ! msg)
+      for { listener <- dsCoordNotify((dataset -> version)) } listener ! msg
       dsCoordNotify.remove((dataset -> version))
   }
 }

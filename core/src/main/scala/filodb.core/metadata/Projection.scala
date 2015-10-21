@@ -44,13 +44,8 @@ case class RichProjection[K](id: Int,
 object RichProjection {
   case class BadSchema(reason: String) extends Exception("BadSchema: " + reason)
 
-  def apply[K](dataset: Dataset, columns: Seq[Column], projectionId: Int = 0): RichProjection[K] = {
-    val tryProj = make[K](dataset, columns, projectionId)
-    tryProj.recover {
-      case t: Throwable => throw t
-    }
-    tryProj.get
-  }
+  def apply[K](dataset: Dataset, columns: Seq[Column], projectionId: Int = 0): RichProjection[K] =
+    make[K](dataset, columns, projectionId).get
 
   def make[K](dataset: Dataset, columns: Seq[Column], projectionId: Int = 0): Try[RichProjection[K]] = {
     def fail(reason: String): Try[RichProjection[K]] = Failure(BadSchema(reason))

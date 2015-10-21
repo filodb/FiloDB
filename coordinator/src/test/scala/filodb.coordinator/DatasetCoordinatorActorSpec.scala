@@ -27,7 +27,7 @@ with ScalaFutures {
   implicit val defaultPatience =
     PatienceConfig(timeout = Span(10, Seconds), interval = Span(50, Millis))
 
-  import scala.concurrent.ExecutionContext.Implicits.global
+  import system.dispatcher
 
   val config = ConfigFactory.parseString(
                  """memtable.flush-trigger-rows = 100

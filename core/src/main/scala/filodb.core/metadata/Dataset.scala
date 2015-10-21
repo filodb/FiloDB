@@ -105,9 +105,13 @@ object Dataset {
   def sortKeyHelper[K](dataset: Dataset, sortColumn: Column): Option[SortKeyHelper[K]] =
     sortKeyHelper[K](dataset.options, sortColumn)
 
-  case class BadPartitionColumn(reason: String) extends Exception("BadPartitionColumn: " + reason)
+  trait PartitionValueException
+
+  case class BadPartitionColumn(reason: String) extends Exception("BadPartitionColumn: " + reason) with
+      PartitionValueException
 
   case class NullPartitionValue(partCol: String) extends Exception(s"Null partition value for col $partCol")
+      with PartitionValueException
 
   /**
    * Gets a partitioning function to extract the PartitionKey out of a row.  The return

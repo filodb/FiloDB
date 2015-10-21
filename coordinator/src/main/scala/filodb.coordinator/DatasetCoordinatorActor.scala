@@ -132,28 +132,31 @@ private[filodb] class DatasetCoordinatorActor[K](projection: RichProjection[K],
   var flushedCallbacks: List[ActorRef] = Nil
 
   private def ingestRows(ackTo: ActorRef, rows: Seq[RowReader], seqNo: Long): Unit = {
+    if (canIngest) {
+      // MemTable will take callback function and call back to ack rows
+      activeTable.ingestRows(rows) { ackTo ! NodeCoordinatorActor.Ack(seqNo) }
+
+      // Now, check how full the memtable is, and if it needs to be flipped, and a flush started
+      if (shouldFlush) self ! StartFlush()
+    }
+  }
+
+  private def canIngest: Boolean = {
     // TODO: gate on total rows in both active and flushing tables, not just active table?
     if (activeRows >= maxRowsPerTable) {
       logger.debug(s"MemTable ($nameVer) is at $activeRows rows, cannot accept writes...")
-      return
+      false
+    } else {
+      val freeMB = getRealFreeMb
+      if (freeMB < minFreeMb) {
+        logger.info(s"Only $freeMB MB memory left, cannot accept more writes...")
+        logger.info(s"Active table ($nameVer) has $activeRows rows")
+        sys.runtime.gc()
+        false
+      }
+      true
     }
-
-    val freeMB = getRealFreeMb
-    if (freeMB < minFreeMb) {
-      logger.info(s"Only $freeMB MB memory left, cannot accept more writes...")
-      logger.info(s"Active table ($nameVer) has $activeRows rows")
-      sys.runtime.gc()
-      return
-    }
-
-    // MemTable will take callback function and call back to ack rows
-    activeTable.ingestRows(rows) { ackTo ! NodeCoordinatorActor.Ack(seqNo) }
-
-    // Now, check how full the memtable is, and if it needs to be flipped, and a flush started
-    if (shouldFlush) self ! StartFlush()
   }
-
-  private def canIngest: Boolean = getRealFreeMb >= minFreeMb && activeRows < maxRowsPerTable
 
   private def getRealFreeMb: Int =
     ((sys.runtime.maxMemory - (sys.runtime.totalMemory - sys.runtime.freeMemory)) / (1024 * 1024)).toInt
@@ -170,9 +173,7 @@ private[filodb] class DatasetCoordinatorActor[K](projection: RichProjection[K],
     val newTaskFuture = reprojector.reproject(flushingTable.get, version)
     curReprojection = Some(newTaskFuture)
     flushesStarted += 1
-    newTaskFuture.map { results =>
-      self ! FlushDone(results)
-    }
+    for { results <- newTaskFuture } self ! FlushDone(results)
     newTaskFuture.recover {
       case t: Throwable => self ! FlushFailed(t)
     }
@@ -186,7 +187,7 @@ private[filodb] class DatasetCoordinatorActor[K](projection: RichProjection[K],
     // Close the flushing table and mark it as None
     flushingTable.foreach(_.close())
     flushingTable = None
-    flushedCallbacks.foreach { ref => ref ! NodeCoordinatorActor.Flushed }
+    for { ref <- flushedCallbacks } ref ! NodeCoordinatorActor.Flushed
     flushedCallbacks = Nil
     flushesSucceeded += 1
     // See if another flush needs to be initiated

@@ -36,6 +36,10 @@ class ProjectionSpec extends FunSpec with Matchers {
       }
     }
 
+    it("apply() should throw exception for bad schema") {
+      intercept[BadSchema] { RichProjection[Long](Dataset("a", "first"), schema) }
+    }
+
     it("should get RichProjection back with proper dataset and schema") {
       val resp = RichProjection[Long](dataset, schema)
       resp.sortColumn should equal (schema(2))

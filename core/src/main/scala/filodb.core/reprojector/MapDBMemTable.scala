@@ -51,7 +51,7 @@ class MapDBMemTable[K](val projection: RichProjection[K], config: Config) extend
                       .valuesOutsideNodesEnable()
                       .counterEnable()
                       .valueSerializer(Serializer.BYTE_ARRAY)
-                      .makeOrGet().asInstanceOf[BTreeMap[(PartitionKey, K), Array[Byte]]]
+                      .makeOrGet[(PartitionKey, K), Array[Byte]]()
 
   /**
    * === Row ingest, read, delete operations ===
