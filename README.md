@@ -70,8 +70,8 @@ Your input is appreciated!
 
 1. [Java 8](http://www.oracle.com/technetwork/java/javase/downloads/jdk8-downloads-2133151.html)
 2. [SBT](http://www.scala-sbt.org/)
-3. [Apache Cassandra](http://cassandra.apache.org/)(We prefer using [CCM](https://github.com/pcmanus/ccm))
-4. [Apache Spark (1.4.x)](http://spark.apache.org/) (optional - not required if you are only using the CLI)
+3. [Apache Cassandra](http://cassandra.apache.org/) (We prefer using [CCM](https://github.com/pcmanus/ccm) for local testing)
+4. [Apache Spark (1.4.x)](http://spark.apache.org/) (Not strictly needed if you only use CLI, but you probably want to use Spark for queries)
 
 ## Getting Started
 
@@ -92,6 +92,33 @@ There are two crucial parts to a dataset in FiloDB,
 2. sort column         - acts as a primary key within each partition and decides how data will be sorted within each partition.  Like the "clustering key" from Cassandra.
 
 Specifying the partitioning column is optional.  If a partitioning column is not specified, FiloDB will create a default one with a fixed value, which means everything will be thrown into one node, and is only suitable for small amounts of data.
+
+### Example FiloDB Schema for machine metrics
+
+This is one way I would recommend setting things up to take advantage of FiloDB.
+
+The metric names are the column names.  This lets you select on just one metric and effectively take advantage of columnar layout.
+
+* Partition key = hostname
+* Sort key = timestamp
+* Columns: hostname, timestamp, CPU, load_avg, disk_usage, etc.
+
+You can add more metrics/columns over time, but storing each metric in its own column is FAR FAR more efficient, at least in FiloDB.   For example, disk usage metrics are likely to have very different numbers than load_avg, and so Filo can optimize the storage of each one independently.  Right now I would store them as ints and longs if possible.
+
+With the above layout, as long as there aren’t too many hostnames, set the memtable max size and flush trigger to both high numbers, you should get good read performance.  Queries that would work well for the above layout:
+
+- SELECT avg(load_avg), min(load_avg), max(load_avg) FROM metrics WHERE timestamp > t1 AND timestamp < t2
+etc.
+
+Queries that would work well once we expose a local Cassandra query interface:
+- Select metrics from one individual host
+
+Another possible layout is something like this:
+
+Partition key = hostname % 1024 (or pick your # of shards)
+Sort key = hostname, timestamp
+
+This will have to wait for the multiple-sort-key-column change of course.
 
 ### Using the CLI
 
