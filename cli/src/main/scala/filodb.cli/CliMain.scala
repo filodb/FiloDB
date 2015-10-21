@@ -18,7 +18,7 @@ import scala.language.postfixOps
 import filodb.cassandra.columnstore.CassandraColumnStore
 import filodb.cassandra.metastore.CassandraMetaStore
 import filodb.coordinator.{NodeCoordinatorActor, DefaultCoordinatorSetup}
-import filodb.core.metadata.{Column, Dataset}
+import filodb.core.metadata.{Column, Dataset, RichProjection}
 
 //scalastyle:off
 class Arguments extends FieldArgs {
@@ -149,30 +149,12 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with DefaultCoord
   import scala.language.existentials
   import filodb.core.metadata.Column.ColumnType._
 
-  private def getSortKeyHelper(dataset: String, schema: Schema): SortKeyHelper[_ >: Int with Long with Double <: AnyVal] = {
-    parse(metaStore.getDataset(dataset)) {
-      actualDataset =>
-        val sortColumn = schema(actualDataset.projections.head.sortColumn)
-
-        sortColumn.columnType match {
-          case IntColumn =>
-            Dataset.sortKeyHelper[Int](actualDataset.options)
-          case LongColumn =>
-            Dataset.sortKeyHelper[Long](actualDataset.options)
-          case DoubleColumn =>
-            Dataset.sortKeyHelper[Double](actualDataset.options)
-          case x =>
-            throw UnsupportedSortKeyException(x)
-        }
-    }
-  }
-
   private def getRowValues(columns: Seq[Column],
                            columnCount: Int,
                            rowReader: RowReader): Array[String] = {
     var position = 0
     val content = new Array[String](columnCount)
-    while(position<columnCount){
+    while (position < columnCount) {
       val value: String = columns(position).columnType match {
         case IntColumn => rowReader.getInt(position).toString
         case LongColumn => rowReader.getLong(position).toString
@@ -214,18 +196,22 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with DefaultCoord
   }
 
   def exportCSV(dataset: String,
-                         version: Int,
-                         columnNames: Seq[String],
-                         limit: Int,
-                         outFile: Option[String]): Unit = {
+                version: Int,
+                columnNames: Seq[String],
+                limit: Int,
+                outFile: Option[String]): Unit = {
     val schema = Await.result(metaStore.getSchema(dataset, version), 10.second)
+    val datasetObj = parse(metaStore.getDataset(dataset)) { ds => ds }
+    val richProj = RichProjection(datasetObj, schema.values.toSeq)
+    val typedProj = richProj.asInstanceOf[RichProjection[richProj.helper.Key]]
     val columns = columnNames.map(schema)
 
-    implicit val sortKeyHelper = getSortKeyHelper(dataset, schema)
+    implicit val sortKeyHelper = typedProj.helper
 
     // NOTE: we will only return data from the first split!
     val splits = columnStore.getScanSplits(dataset)
-    val requiredRows = parse(columnStore.scanSegments(columns, dataset, version, params=splits.head)) {
+    val requiredRows = parse(
+      columnStore.scanSegments[typedProj.helper.Key](columns, dataset, version, params=splits.head)) {
       segmentIterator =>
         segmentIterator.flatMap {
           case seg: RowReaderSegment[_] =>
