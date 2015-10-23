@@ -18,7 +18,10 @@ class ProjectionSpec extends FunSpec with Matchers {
       }
     }
 
-    it("should get BadSchema if sort column is not supported type") {
+    // Now that String is a supported sort column type, this test doesn't make sense anymore.
+    // Leave this here though because eventually we will add a column type that cannot be used
+    // as a sort column.
+    ignore("should get BadSchema if sort column is not supported type") {
       val resp = RichProjection.make[Long](Dataset("a", "first"), schema)
       resp.isFailure should be (true)
       resp.recover {
@@ -37,7 +40,7 @@ class ProjectionSpec extends FunSpec with Matchers {
     }
 
     it("apply() should throw exception for bad schema") {
-      intercept[BadSchema] { RichProjection[Long](Dataset("a", "first"), schema) }
+      intercept[BadSchema] { RichProjection[Long](Dataset("a", "boo"), schema) }
     }
 
     it("should get RichProjection back with proper dataset and schema") {
@@ -47,6 +50,16 @@ class ProjectionSpec extends FunSpec with Matchers {
       resp.columns should equal (schema)
       resp.helper shouldBe a[filodb.core.LongKeyHelper]
       names.take(3).map(TupleRowReader).map(resp.sortKeyFunc) should equal (Seq(24L, 28L, 25L))
+    }
+
+    it("should create RichProjection properly for String sort key column") {
+      val resp = RichProjection[String](Dataset("a", "first"), schema)
+      resp.sortColumn should equal (schema(0))
+      resp.sortColNo should equal (0)
+      resp.columns should equal (schema)
+      resp.helper shouldBe a[filodb.core.StringKeyHelper]
+      names.take(3).map(TupleRowReader).map(resp.sortKeyFunc) should equal (
+                     Seq("Khalil", "Ndamukong", "Rodney"))
     }
 
     it("should get working RichProjection back even if called with [Nothing]") {

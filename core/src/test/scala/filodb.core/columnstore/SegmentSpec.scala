@@ -117,4 +117,15 @@ class SegmentSpec extends FunSpec with Matchers {
     readSeg.rowChunkIterator().map { case (reader, id, rowNo) => (reader.getString(0), id, rowNo) }.
       take(2).toSeq should equal (Seq(("Khalil", 0, 0), ("Rodney", 0, 2)))
   }
+
+  it("RowWriter and RowReader should work for rows with string sort keys") {
+    implicit val stringHelper = new StringKeyHelper(1)
+    val stringKeyRange = KeyRange("dataset", "partition", "000", "zzz")
+    val segment = new RowWriterSegment(stringKeyRange, schema)
+    segment.addRowsAsChunk(mapper(names), (r: RowReader) => r.getString(0))
+    val readSeg = RowReaderSegment(segment, schema)
+
+    val sortedNames = Seq("Jerry", "Khalil", "Ndamukong", "Peyton", "Rodney", "Terrance")
+    readSeg.rowIterator().map(_.getString(0)).toSeq should equal (sortedNames)
+  }
 }
