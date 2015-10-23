@@ -37,7 +37,11 @@ extends CachedMergingColumnStore with StrictLogging {
 
   def initializeProjection(projection: Projection): Future[Response] = Future.successful(Success)
 
-  def clearProjectionDataInner(projection: Projection): Future[Response] = ???
+  def clearProjectionDataInner(projection: Projection): Future[Response] = Future {
+    chunkDb.keys.collect { case key @ (ds, _, _) if ds == projection.dataset => chunkDb remove key }
+    rowMaps.keys.collect { case key @ (ds, _, _) if ds == projection.dataset => rowMaps remove key }
+    Success
+  }
 
   def writeChunks(dataset: TableName,
                   partition: PartitionKey,

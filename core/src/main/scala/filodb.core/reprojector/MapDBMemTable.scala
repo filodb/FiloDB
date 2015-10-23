@@ -1,7 +1,6 @@
 package filodb.core.reprojector
 
 import com.typesafe.config.Config
-import net.ceedubs.ficus.Ficus._
 import org.mapdb._
 import org.velvia.filo.RowReader
 import scala.collection.Map
@@ -10,7 +9,8 @@ import scalaxy.loops._
 
 import filodb.core.{KeyRange, SortKeyHelper}
 import filodb.core.Types._
-import filodb.core.metadata.{Column, Dataset}
+import filodb.core.metadata.{Column, Dataset, RichProjection}
+import RowReader._
 
 /**
  * A MemTable backed by MapDB.  Need to do some experimentation to come up with a setup that is fast
@@ -22,31 +22,16 @@ import filodb.core.metadata.{Column, Dataset}
  * NOTE: MapDB apparently has an issue with memory leaks, deleteTable / deleteRows does not appear to
  * compact the table properly.
  *
- * MapDB table namespacing scheme:
- *   datasetName/version/active
- *   datasetName/version/locked
- *
  * ==Configuration==
  * {{{
  *   memtable {
- *     backup-dir = "/tmp/filodb.memtable/"
- *     max-rows-per-table = 1000000
- *     min-free-mb = 512
  *   }
  * }}}
  */
-class MapDBMemTable(config: Config) extends MemTable {
-  import MemTable._
-  import RowReader._
+class MapDBMemTable[K](val projection: RichProjection[K], config: Config) extends MemTable[K] {
   import collection.JavaConversions._
 
   def close(): Unit = { db.close() }
-
-  // Data structures
-
-  private val backupDir = config.as[Option[String]]("memtable.backup-dir")
-  private val maxRowsPerTable = config.getInt("memtable.max-rows-per-table")
-  val minFreeMb = config.as[Option[Int]]("memtable.min-free-mb").getOrElse(DefaultMinFreeMb)
 
   // According to MapDB examples, use incremental backup with memory-only store
   // Also, the cache was causing us to run out of memory because it's unbounded.
@@ -56,118 +41,52 @@ class MapDBMemTable(config: Config) extends MemTable {
                           .cacheDisable
                           .make()
 
+  val serializer = new RowReaderSerializer(projection.columns)
+  val sortKeyFunc = projection.sortKeyFunc
+
+  implicit lazy val sortKeyOrdering: Ordering[K] = projection.helper.ordering
+  lazy val rowMap = db.createTreeMap("filo")
+                      .comparator(Ordering[(PartitionKey, K)])
+                      // Otherwise will pull out all values in a BTree Node at once
+                      .valuesOutsideNodesEnable()
+                      .counterEnable()
+                      .valueSerializer(Serializer.BYTE_ARRAY)
+                      .makeOrGet[(PartitionKey, K), Array[Byte]]()
+
   /**
    * === Row ingest, read, delete operations ===
    */
-  def ingestRowsInner[K: TypedFieldExtractor](setup: IngestionSetup,
-                                              version: Int,
-                                              rows: Seq[RowReader]): IngestionResponse = {
-    val extractor = implicitly[TypedFieldExtractor[K]]
-    implicit val helper = setup.helper[K]
-
+  def ingestRows(rows: Seq[RowReader])(callback: => Unit): Unit = {
     // For each row: insert into rows map
-    val rowMap = getRowMap[K](setup.dataset.name, version, Active).get
-    val serializer = serializers((setup.dataset.name, version))
-    if (rowMap.size() >= maxRowsPerTable) return PleaseWait
     for { row <- rows } {
-      val sortKey = extractor.getField(row, setup.sortColumnNum)
-      rowMap.put((setup.partitioningFunc(row), sortKey), serializer.serialize(row))
+      val sortKey = sortKeyFunc(row)
+      rowMap.put((projection.partitionFunc(row), sortKey), serializer.serialize(row))
     }
-    Ingested
+    // Since this is an in-memory table only, just call back right away.
+    callback
   }
 
-  def canIngestInner(dataset: TableName, version: Int): Boolean = {
-    val rowMap = getRowMap[Any](dataset, version, Active).get
-    rowMap.size() < maxRowsPerTable
+  def readRows(keyRange: KeyRange[K]): Iterator[RowReader] = {
+    rowMap.subMap((keyRange.partition, keyRange.start), (keyRange.partition, keyRange.end))
+      .keySet.iterator.map { k => serializer.deserialize(rowMap.get(k)) }
   }
 
-  def readRows[K: SortKeyHelper](keyRange: KeyRange[K],
-                                 version: Int,
-                                 buffer: BufferType): Iterator[RowReader] = {
-    getRowMap[K](keyRange.dataset, version, buffer).map { rowMap =>
-      val serializer = serializers((keyRange.dataset, version))
-      rowMap.subMap((keyRange.partition, keyRange.start), (keyRange.partition, keyRange.end))
-        .keySet.iterator.map { k => serializer.deserialize(rowMap.get(k)) }
-    }.getOrElse {
-      Iterator.empty
+  def readAllRows(): Iterator[(PartitionKey, K, RowReader)] = {
+    rowMap.keySet.iterator.map { case index @ (part, k) =>
+      (part, k, serializer.deserialize(rowMap.get(index)))
     }
   }
 
-  def readAllRows[K](dataset: TableName, version: Int, buffer: BufferType):
-      Iterator[(PartitionKey, K, RowReader)] = {
-    getRowMap[K](dataset, version, buffer).map { rowMap =>
-      val serializer = serializers((dataset, version))
-      rowMap.keySet.iterator.map { case index @ (part, k) =>
-        (part, k, serializer.deserialize(rowMap.get(index)))
-      }
-    }.getOrElse {
-      Iterator.empty
-    }
+  def removeRows(keyRange: KeyRange[K]): Unit = {
+    rowMap.subMap((keyRange.partition, keyRange.start), (keyRange.partition, keyRange.end))
+          .keySet.iterator.foreach { k => rowMap.remove(k) }
   }
 
-  def removeRows[K: SortKeyHelper](keyRange: KeyRange[K], version: Int): Unit = {
-    getRowMap[K](keyRange.dataset, version, Locked).map { rowMap =>
-      rowMap.subMap((keyRange.partition, keyRange.start), (keyRange.partition, keyRange.end))
-            .keySet.iterator.foreach { k => rowMap.remove(k) }
-    }
-  }
+  def numRows: Int = rowMap.size().toInt
 
-  def deleteLockedTable(dataset: TableName, version: Int): Unit = {
-    val lockedName = tableName(dataset, version, Locked)
-    logger.debug(s"Deleting locked memtable for dataset $dataset / version $version")
-    db.delete(lockedName)
-  }
-
-  def flipBuffers(dataset: TableName, version: Int): FlipResponse = {
-    val lockedName = tableName(dataset, version, Locked)
-    // First check that lock table is empty
-    getRowMap[Any](dataset, version, Locked).map { lockedMap =>
-      if (lockedMap.size != 0) {
-        logger.warn(s"Cannot flip buffers for ($dataset/$version) because Locked memtable nonempty")
-        return LockedNotEmpty
-      }
-      deleteLockedTable(dataset, version)
-      db.compact()
-    }.getOrElse(return NoSuchDatasetVersion)
-
-    logger.debug(s"Flipping active to locked memtable for dataset $dataset / version $version")
-    db.rename(tableName(dataset, version, Active), lockedName)
-    Flipped
-  }
-
-  def numRows(dataset: TableName, version: Int, buffer: BufferType): Option[Long] = {
-    getRowMap[Any](dataset, version, buffer).map { rowMap =>
-      rowMap.size()
-    }
-  }
-
-  def clearAllDataInner(): Unit = {
+  def clearAllData(): Unit = {
     logger.info(s"MemTable: ERASING ALL TABLES!!")
     db.getAll().keys.foreach(db.delete)
-  }
-
-  // private funcs
-  private def tableName(dataset: TableName, version: Int, buffer: BufferType) =
-    s"$dataset/$version/" + (if (buffer == Active) "active" else "locked")
-
-  var serializers = Map.empty[(TableName, Int), RowReaderSerializer]
-
-  private def getRowMap[K](dataset: TableName, version: Int, buffer: BufferType) = {
-    getIngestionSetup(dataset, version).map { setup =>
-      serializers.synchronized {
-        val nameVer = (setup.dataset.name, version)
-        if (!(serializers contains nameVer)) {
-          serializers = serializers + (nameVer -> new RowReaderSerializer(setup.schema))
-        }
-      }
-      implicit val sortKeyOrdering: Ordering[K] = setup.helper[K].ordering
-      db.createTreeMap(tableName(setup.dataset.name, version, buffer))
-        .comparator(Ordering[(PartitionKey, K)])
-        .valuesOutsideNodesEnable()   // Otherwise will pull out all values in a BTree Node at once
-        .counterEnable()
-        .valueSerializer(Serializer.BYTE_ARRAY)
-        .makeOrGet().asInstanceOf[BTreeMap[(PartitionKey, K), Array[Byte]]]
-    }
   }
 }
 

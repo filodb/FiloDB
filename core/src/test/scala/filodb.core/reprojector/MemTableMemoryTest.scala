@@ -11,13 +11,12 @@ import org.scalatest.{FunSpec, Matchers, BeforeAndAfter}
 
 class MemTableMemoryTest extends FunSpec with Matchers with BeforeAndAfter {
   import SegmentSpec._
-  import MemTable._
 
   val keyRange = KeyRange("dataset", Dataset.DefaultPartitionKey, 0L, 10000L)
   val newSetting = "memtable.max-rows-per-table = 200000"
   val config = ConfigFactory.parseString(newSetting).withFallback(
                  ConfigFactory.load("application_test.conf"))
-  val mTable: MemTable = new MapDBMemTable(config)
+  val mTable = new MapDBMemTable(projection, config)
   import scala.concurrent.ExecutionContext.Implicits.global
 
   before {
@@ -47,13 +46,9 @@ class MemTableMemoryTest extends FunSpec with Matchers with BeforeAndAfter {
     println(s"Start: free memory = $startFreeMem")
     printDetailedMemUsage()
 
-    val setupResp = mTable.setupIngestion(dataset, schema, 0)
-    setupResp should equal (SetupDone)
-
     var numRows = 0
     lotsOfNames.map(TupleRowReader).grouped(2000).foreach { rows =>
-      mTable.ingestRows("dataset", 0, rows.toSeq) should equal (Ingested)
-      numRows += rows.length
+      mTable.ingestRows(rows.toSeq) { numRows += rows.length }
       // println(s"Ingested $numRows rows")
       // Thread sleep 1000
     }

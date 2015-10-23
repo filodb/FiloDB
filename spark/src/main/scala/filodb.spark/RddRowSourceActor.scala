@@ -6,7 +6,8 @@ import org.apache.spark.sql.{SQLContext, DataFrame, Row}
 import org.apache.spark.sql.types._
 import org.velvia.filo.RowReader
 
-import filodb.coordinator.{BaseActor, CoordinatorActor, RowSource}
+import filodb.core.Types
+import filodb.coordinator.{BaseActor, NodeCoordinatorActor, RowSource}
 
 object RddRowSourceActor {
   // Needs to be a multiple of chunkSize. Not sure how to have a good default though.
@@ -18,33 +19,37 @@ object RddRowSourceActor {
             dataset: String,
             version: Int,
             coordinatorActor: ActorRef,
+            defaultPartitionKey: Option[Types.PartitionKey],
             maxUnackedRows: Int = RddRowSourceActor.DefaultMaxUnackedRows,
             rowsToRead: Int = RddRowSourceActor.DefaultRowsToRead): Props =
     Props(classOf[RddRowSourceActor], rows, columns, dataset, version,
-          coordinatorActor, maxUnackedRows, rowsToRead)
+          coordinatorActor, defaultPartitionKey, maxUnackedRows, rowsToRead)
 }
 
 /**
  * A source actor for ingesting from one partition of a Spark DataFrame/SchemaRDD.
  * Assumes that the columns in the DataFrame have already been verified to be supported
  * by FiloDB and exist in the dataset already.
+ *
+ * TODO: implement the rewind() function, store unacked rows so we can replay them
  */
 class RddRowSourceActor(rows: Iterator[Row],
                         columns: Seq[String],
                         val dataset: String,
                         val version: Int,
                         val coordinatorActor: ActorRef,
+                        defaultPartitionKey: Option[Types.PartitionKey],
                         val maxUnackedRows: Int = RddRowSourceActor.DefaultMaxUnackedRows,
                         val rowsToRead: Int = RddRowSourceActor.DefaultRowsToRead)
 extends BaseActor with RowSource {
-  import CoordinatorActor._
+  import NodeCoordinatorActor._
   import RddRowSourceActor._
 
   // Assume for now rowIDs start from 0.
   var seqId: Long = 0
   var lastAckedSeqNo = seqId
 
-  def getStartMessage(): SetupIngestion = SetupIngestion(dataset, columns, version)
+  def getStartMessage(): SetupIngestion = SetupIngestion(dataset, columns, version, defaultPartitionKey)
 
   // Returns a new row from source => (seqID, rowID, version, row)
   // The seqIDs should be increasing.

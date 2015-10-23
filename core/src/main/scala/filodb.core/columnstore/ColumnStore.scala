@@ -40,9 +40,9 @@ trait ColumnStore {
    * @param version the version # to write the segment to
    * @return Success. Future.failure(exception) otherwise.
    */
-  def appendSegment[K: SortKeyHelper: TypedFieldExtractor](projection: RichProjection,
-                                                           segment: Segment[K],
-                                                           version: Int): Future[Response]
+  def appendSegment[K](projection: RichProjection[K],
+                       segment: Segment[K],
+                       version: Int): Future[Response]
 
   /**
    * Reads segments from the column store, in order of primary key.
@@ -170,10 +170,11 @@ trait CachedMergingColumnStore extends ColumnStore with StrictLogging {
 
   def clearSegmentCache(): Unit = { segmentCache.clear() }
 
-  def appendSegment[K: SortKeyHelper: TypedFieldExtractor](projection: RichProjection,
-                                                           segment: Segment[K],
-                                                           version: Int): Future[Response] = {
+  def appendSegment[K](projection: RichProjection[K],
+                       segment: Segment[K],
+                       version: Int): Future[Response] = {
     if (segment.isEmpty) return(Future.successful(NotApplied))
+    implicit val helper = projection.helper
     for { oldSegment <- getSegFromCache(projection, segment.keyRange, version)
           mergedSegment = mergingStrategy.mergeSegments(oldSegment, segment)
           writeChunksResp <- writeChunks(segment.dataset, segment.partition, version,
@@ -240,15 +241,15 @@ trait CachedMergingColumnStore extends ColumnStore with StrictLogging {
   }
 
 
-  private def getSegFromCache[K: SortKeyHelper](projection: RichProjection,
-                                                keyRange: KeyRange[K],
-                                                version: Int): Future[Segment[K]] = {
+  private def getSegFromCache[K](projection: RichProjection[K],
+                                 keyRange: KeyRange[K],
+                                 version: Int): Future[Segment[K]] = {
     segmentCache((keyRange.dataset, keyRange.partition, version, keyRange.binaryStart))(
                  mergingStrategy.readSegmentForCache(projection, keyRange, version).
                  asInstanceOf[Future[Segment[_]]]).asInstanceOf[Future[Segment[K]]]
   }
 
-  private def updateCache[K](projection: RichProjection,
+  private def updateCache[K](projection: RichProjection[K],
                              keyRange: KeyRange[K],
                              version: Int,
                              newSegment: Segment[K]): Unit = {

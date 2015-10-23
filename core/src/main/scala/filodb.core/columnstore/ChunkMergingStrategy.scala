@@ -30,9 +30,9 @@ trait ChunkMergingStrategy {
    *
    * @param keyRange the keyRange of the segment to read.  It's important this corresponds to one segment.
    */
-  def readSegmentForCache[K: SortKeyHelper](projection: RichProjection,
-                                            keyRange: KeyRange[K],
-                                            version: Int): Future[Segment[K]]
+  def readSegmentForCache[K](projection: RichProjection[K],
+                             keyRange: KeyRange[K],
+                             version: Int): Future[Segment[K]]
 
   /**
    * Merges an existing segment cached using readSegmentForCache with a new partial segment to be inserted.
@@ -41,13 +41,13 @@ trait ChunkMergingStrategy {
    * @return a merged Segment ready to be flushed to disk.  This typically will only include chunks that need
    *          to be updated or written to disk.
    */
-  def mergeSegments[K: TypedFieldExtractor: SortKeyHelper](oldSegment: Segment[K],
-                                                             newSegment: Segment[K]): Segment[K]
+  def mergeSegments[K: SortKeyHelper](oldSegment: Segment[K],
+                                      newSegment: Segment[K]): Segment[K]
 
   /**
    * Prunes a segment to only what needs to be cached.
    */
-  def pruneForCache[K](projection: RichProjection, segment: Segment[K]): Segment[K]
+  def pruneForCache[K](projection: RichProjection[K], segment: Segment[K]): Segment[K]
 }
 
 /**
@@ -64,9 +64,10 @@ class AppendingChunkMergingStrategy(columnStore: ColumnStore)
                                    (implicit ec: ExecutionContext)
 extends ChunkMergingStrategy with StrictLogging {
   // We only need to read back the sort column in order to merge with another segment's sort column
-  def readSegmentForCache[K: SortKeyHelper](projection: RichProjection,
-                                            keyRange: KeyRange[K],
-                                            version: Int): Future[Segment[K]] = {
+  def readSegmentForCache[K](projection: RichProjection[K],
+                             keyRange: KeyRange[K],
+                             version: Int): Future[Segment[K]] = {
+    implicit val helper = projection.helper
     columnStore.readSegments(Seq(projection.sortColumn), keyRange, version).map { iter =>
       iter.toSeq.headOption match {
         case Some(firstSegment) => firstSegment
@@ -77,9 +78,10 @@ extends ChunkMergingStrategy with StrictLogging {
     }
   }
 
-  def mergeSegments[K: TypedFieldExtractor: SortKeyHelper](oldSegment: Segment[K],
-                                                           newSegment: Segment[K]): Segment[K] = {
-    val extractor = implicitly[TypedFieldExtractor[K]]
+  def mergeSegments[K: SortKeyHelper](oldSegment: Segment[K],
+                                      newSegment: Segment[K]): Segment[K] = {
+    // NOTE: This only works for single sort keys
+    val sortKeyFunc = implicitly[SortKeyHelper[K]].getSortKeyFunc(Seq(0))
 
     // One should NEVER be allowed to merge segments from different places... unless we are perhaps
     // talking about splitting and merging, but that's outside the scope of this method
@@ -99,7 +101,7 @@ extends ChunkMergingStrategy with StrictLogging {
       case rr: RowReaderSegment[K] =>
         // This should be a segment read from disk via readSegmentForCache().  Cheat assume only sort col
         val items = rr.rowChunkIterator().map { case (reader, chunkId, rowNum) =>
-          extractor.getField(reader, 0) -> (chunkId -> rowNum)
+          sortKeyFunc(reader) -> (chunkId -> rowNum)
         }
         UpdatableChunkRowMap(items.toSeq)
     }
@@ -119,7 +121,7 @@ extends ChunkMergingStrategy with StrictLogging {
   }
 
   // We only need to store the sort column
-  def pruneForCache[K](projection: RichProjection, segment: Segment[K]): Segment[K] = {
+  def pruneForCache[K](projection: RichProjection[K], segment: Segment[K]): Segment[K] = {
     val sortColumn = projection.sortColumn.name
     if (segment.getColumns == Set(sortColumn)) {
       logger.trace(s"pruneForcache: segment only has ${segment.getColumns}, not pruning")

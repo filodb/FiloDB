@@ -47,17 +47,19 @@ object FiloRelation {
   def getSchema(dataset: String, version: Int): Column.Schema =
     parse(FiloSetup.metaStore.getSchema(dataset, version)) { schema => schema }
 
-  def getRows[K](options: DatasetOptions,
-                 datasetName: String,
-                 version: Int,
-                 columns: Seq[Column],
-                 sortColumn: Column,
-                 params: Map[String, String]): Iterator[Row] = {
-    implicit val helper = Dataset.sortKeyHelper[K](options, sortColumn).get
-    parse(FiloSetup.columnStore.scanSegments[K](columns, datasetName, version, params = params),
+  def getRows(options: DatasetOptions,
+              datasetName: String,
+              version: Int,
+              columns: Seq[Column],
+              sortColumn: Column,
+              params: Map[String, String]): Iterator[Row] = {
+    val untypedHelper = Dataset.sortKeyHelper(options, sortColumn).get
+    implicit val helper = untypedHelper.asInstanceOf[SortKeyHelper[untypedHelper.Key]]
+    parse(FiloSetup.columnStore.scanSegments[helper.Key](columns, datasetName, version, params = params),
           10 minutes) { segmentIt =>
-      segmentIt.flatMap { case seg: RowReaderSegment[K] =>
-        seg.rowIterator((bytes, clazzes) => new SparkRowReader(bytes, clazzes))
+      segmentIt.flatMap { seg =>
+        val readerSeg = seg.asInstanceOf[RowReaderSegment[helper.Key]]
+        readerSeg.rowIterator((bytes, clazzes) => new SparkRowReader(bytes, clazzes))
            .asInstanceOf[Iterator[Row]]
       }
     }
@@ -78,14 +80,7 @@ object FiloRelation {
     val datasetName = sortColumn.dataset
 
     paramIter.flatMap { param =>
-      import Column.ColumnType._
-      sortColumn.columnType match {
-        case LongColumn    => getRows[Long](options, datasetName, version, columns, sortColumn, param)
-        case IntColumn     => getRows[Int](options, datasetName, version, columns, sortColumn, param)
-        case DoubleColumn  => getRows[Double](options, datasetName, version, columns, sortColumn, param)
-        case other: Column.ColumnType =>
-          throw new RuntimeException(s"Unsupported sort column type $other for dataset $datasetName")
-      }
+      getRows(options, datasetName, version, columns, sortColumn, param)
     }
   }
 }

@@ -14,7 +14,6 @@ import filodb.core.metadata.{Dataset, Column, RichProjection}
  * The reprojector should be stateless.  It takes MemTables and creates Futures for reprojection tasks.
  */
 trait Reprojector {
-  import MemTable.IngestionSetup
   import RowReader._
 
   /**
@@ -35,22 +34,13 @@ trait Reprojector {
    *
    * @return a Future[Seq[String]], representing info from individual segment flushes.
    */
-  def newTask(memTable: MemTable, dataset: Types.TableName, version: Int): Future[Seq[String]] = {
-    import Column.ColumnType._
+  def reproject[K](memTable: MemTable[K], version: Int): Future[Seq[String]]
 
-    val setup = memTable.getIngestionSetup(dataset, version).getOrElse(
-                  throw new IllegalArgumentException(s"Could not find $dataset/$version"))
-    setup.schema(setup.sortColumnNum).columnType match {
-      case LongColumn    => reproject[Long](memTable, setup, version)
-      case IntColumn     => reproject[Int](memTable, setup, version)
-      case DoubleColumn  => reproject[Double](memTable, setup, version)
-      case other: Column.ColumnType => throw new RuntimeException("Illegal sort key type $other")
-    }
-  }
-
-  // The inner, typed reprojection task launcher that must be implemented.
-  def reproject[K: TypedFieldExtractor](memTable: MemTable, setup: IngestionSetup, version: Int):
-      Future[Seq[String]]
+  /**
+   * A simple function that reads rows out of a memTable and converts them to segments.
+   * Used by reproject(), separated out for ease of testing.
+   */
+  def toSegments[K](memTable: MemTable[K]): Iterator[Segment[K]]
 }
 
 /**
@@ -59,7 +49,6 @@ trait Reprojector {
  */
 class DefaultReprojector(columnStore: ColumnStore)
                         (implicit ec: ExecutionContext) extends Reprojector with StrictLogging {
-  import MemTable._
   import Types._
   import RowReader._
   import filodb.core.Iterators._
@@ -67,20 +56,21 @@ class DefaultReprojector(columnStore: ColumnStore)
   // PERF/TODO: Maybe we should pass in an Iterator[RowReader], and extract partition and sort keys
   // out.  Heck we could create a custom FiloRowReader which has methods to extract this out.
   // Might be faster than creating a Tuple3 for every row... or not, for complex sort and partition keys
-  def chunkize[K](rows: Iterator[(PartitionKey, K, RowReader)],
-                  setup: IngestionSetup): Iterator[Segment[K]] = {
-    implicit val helper = setup.helper[K]
+  def toSegments[K](memTable: MemTable[K]): Iterator[Segment[K]] = {
+    val dataset = memTable.projection.dataset
+    implicit val helper = memTable.projection.helper
+    val rows = memTable.readAllRows()
     rows.sortedGroupBy { case (partition, sortKey, row) =>
       // lazy grouping of partition/segment from the sortKey
       (partition, helper.getSegment(sortKey))
     }.map { case ((partition, (segStart, segUntil)), segmentRowsIt) =>
       // For each segment grouping of rows... set up a Segment
-      val keyRange = KeyRange(setup.dataset.name, partition, segStart, segUntil)
-      val segment = new RowWriterSegment(keyRange, setup.schema)
+      val keyRange = KeyRange(dataset.name, partition, segStart, segUntil)
+      val segment = new RowWriterSegment(keyRange, memTable.projection.columns)
       logger.debug(s"Created new segment $segment for encoding...")
 
       // Group rows into chunk sized bytes and add to segment
-      segmentRowsIt.grouped(setup.dataset.options.chunkSize).foreach { chunkRowsIt =>
+      segmentRowsIt.grouped(dataset.options.chunkSize).foreach { chunkRowsIt =>
         val chunkRows = chunkRowsIt.toSeq
         segment.addRowsAsChunk(chunkRows)
       }
@@ -88,12 +78,10 @@ class DefaultReprojector(columnStore: ColumnStore)
     }
   }
 
-  def reproject[K: TypedFieldExtractor](memTable: MemTable, setup: IngestionSetup, version: Int):
-      Future[Seq[String]] = {
-    implicit val helper = setup.helper[K]
-    val datasetName = setup.dataset.name
-    val projection = RichProjection(setup.dataset, setup.schema)
-    val segments = chunkize(memTable.readAllRows[K](datasetName, version, Locked), setup)
+  def reproject[K](memTable: MemTable[K], version: Int): Future[Seq[String]] = {
+    val projection = memTable.projection
+    val datasetName = projection.dataset.name
+    val segments = toSegments(memTable)
     val segmentTasks = segments.map { segment =>
       for { resp <- columnStore.appendSegment(projection, segment, version) if resp == Success }
       yield {
@@ -106,8 +94,6 @@ class DefaultReprojector(columnStore: ColumnStore)
     for { tasks <- Future { segmentTasks }
           results <- Future.sequence(tasks.toList) }
     yield {
-      logger.info(s"Clearing locked memtable for ($datasetName, $version)")
-      memTable.deleteLockedTable(datasetName, version)
       results
     }
   }

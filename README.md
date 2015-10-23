@@ -70,8 +70,8 @@ Your input is appreciated!
 
 1. [Java 8](http://www.oracle.com/technetwork/java/javase/downloads/jdk8-downloads-2133151.html)
 2. [SBT](http://www.scala-sbt.org/)
-3. [Apache Cassandra](http://cassandra.apache.org/)(We prefer using [CCM](https://github.com/pcmanus/ccm))
-4. [Apache Spark (1.4.x)](http://spark.apache.org/) (optional - not required if you are only using the CLI)
+3. [Apache Cassandra](http://cassandra.apache.org/) (We prefer using [CCM](https://github.com/pcmanus/ccm) for local testing)
+4. [Apache Spark (1.4.x)](http://spark.apache.org/) (Not strictly needed if you only use CLI, but you probably want to use Spark for queries)
 
 ## Getting Started
 
@@ -91,7 +91,36 @@ There are two crucial parts to a dataset in FiloDB,
 1. partitioning column - decides how data is going to be distributed across the cluster
 2. sort column         - acts as a primary key within each partition and decides how data will be sorted within each partition.  Like the "clustering key" from Cassandra.
 
-Specifying the partitioning column is optional.  If a partitioning column is not specified, FiloDB will create a default one with a fixed value, which means everything will be thrown into one node, and is only suitable for small amounts of data.
+The PRIMARY KEY for FiloDB consists of (partition key, sort key).  When choosing the above values you must make sure the combination of the two are unique.  This is very similar to Cassandra CQL Tables, whose primary key consists of (partition columns, clustering columns).  The partition key in FiloDB maps to the Cassandra partition key, and sort key maps to the clustering key.
+
+Specifying the partitioning column is optional.  If a partitioning column is not specified, FiloDB will create a default one with a fixed value, which means everything will be thrown into one node, and is only suitable for small amounts of data.  If you don't specify a partitioning column, then you have to make sure your sort keys are all unique.
+
+### Example FiloDB Schema for machine metrics
+
+This is one way I would recommend setting things up to take advantage of FiloDB.
+
+The metric names are the column names.  This lets you select on just one metric and effectively take advantage of columnar layout.
+
+* Partition key = hostname
+* Sort key = timestamp
+* Columns: hostname, timestamp, CPU, load_avg, disk_usage, etc.
+
+You can add more metrics/columns over time, but storing each metric in its own column is FAR FAR more efficient, at least in FiloDB.   For example, disk usage metrics are likely to have very different numbers than load_avg, and so Filo can optimize the storage of each one independently.  Right now I would store them as ints and longs if possible.
+
+With the above layout, as long as there aren’t too many hostnames, set the memtable max size and flush trigger to both high numbers, you should get good read performance.  Queries that would work well for the above layout:
+
+- SELECT avg(load_avg), min(load_avg), max(load_avg) FROM metrics WHERE timestamp > t1 AND timestamp < t2
+etc.
+
+Queries that would work well once we expose a local Cassandra query interface:
+- Select metrics from one individual host
+
+Another possible layout is something like this:
+
+Partition key = hostname % 1024 (or pick your # of shards)
+Sort key = hostname, timestamp
+
+This will have to wait for the multiple-sort-key-column change of course.
 
 ### Using the CLI
 
@@ -106,6 +135,7 @@ The `filo-cli` accepts arguments as key-value pairs. The following keys are supp
 | command    | Its value can be either of `init`,`create`,`importcsv` or `list`.<br/><br/>The `init` command is used to create the FiloDB schema.<br/><br/>The `create` command is used to define new a dataset. For example,<br/>```./filo-cli --command create --dataset playlist --columns id:int,album:string,artist:string,title:string --sortColumn id``` <br/>Note: The sort column is not optional.<br/><br/>The `list` command can be used to view the schema of a dataset. For example, <br/>```./filo-cli --command list --dataset playlist```<br/><br/>The `importcsv` command can be used to load data from a CSV file into a dataset. For example,<br/>```./filo-cli --command importcsv --dataset playlist --filename playlist.csv```<br/>Note: The CSV file should be delimited with comma and have a header row. The column names must match those specified when creating the schema for that dataset. |
 | select     | Its value should be a comma-separated string of the columns to be selected,<br/>```./filo-cli --dataset playlist --select album,title```<br/>The result from `select` is printed in the console by default. An output file can be specified with the key `--outfile`. For example,<br/>```./filo-cli --dataset playlist --select album,title --outfile playlist.csv```                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | delimiter  | This is optional key to be used with `importcsv` command. Its value should be the field delimiter character. Default value is comma.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| timeoutMinutes | The number of minutes to time out for CSV ingestion.  Needs to be greater than the max amount of time for ingesting the whole file.  Defaults to 99.  |
 
 #### CLI Example
 The following examples use the [GDELT public dataset](http://data.gdeltproject.org/documentation/GDELT-Data_Format_Codebook.pdf) and can be run from the project directory.
@@ -155,7 +185,7 @@ The options to use with the data-source api are:
 | sort_column      | name of the column according to which the data should be sorted  | write      | No       |
 | partition_column | name of the column according to which data should be partitioned | write      | Yes      |
 | splits_per_node  | number of read threads per node, defaults to 1 | read | Yes |
-| default_partition_key | default value to use for the partition key if the partition_column has a null value.  If not specified, an error is thrown. | write | Yes |
+| default_partition_key | default value to use for the partition key if the partition_column has a null value.  If not specified, an error is thrown. Note that this only has an effect if the dataset is created for the first time.| write | Yes |
 | version          | numeric version of data to write, defaults to 0  | write | Yes |
 
 #### Spark data-source Example (spark-shell)
