@@ -81,12 +81,15 @@ object Dataset {
    * Returns a SortKeyHelper configured from the DatasetOptions.
    */
   def sortKeyHelper[K: ClassTag](options: DatasetOptions): SortKeyHelper[K] = {
+    val StringClass = classOf[String]
     implicitly[ClassTag[K]].runtimeClass match {
       case java.lang.Long.TYPE => (new LongKeyHelper(options.segmentSize.toLong)).
                                     asInstanceOf[SortKeyHelper[K]]
       case java.lang.Integer.TYPE => (new IntKeyHelper(options.segmentSize.toInt)).
                                     asInstanceOf[SortKeyHelper[K]]
       case java.lang.Double.TYPE => (new DoubleKeyHelper(options.segmentSize.toDouble)).
+                                    asInstanceOf[SortKeyHelper[K]]
+      case StringClass         => (new StringKeyHelper(options.segmentSize.toInt)).
                                     asInstanceOf[SortKeyHelper[K]]
     }
   }
@@ -97,6 +100,7 @@ object Dataset {
       case LongColumn    => Some(sortKeyHelper[Long](options))
       case IntColumn     => Some(sortKeyHelper[Int](options))
       case DoubleColumn  => Some(sortKeyHelper[Double](options))
+      case StringColumn  => Some(sortKeyHelper[String](options))
       case other: Column.ColumnType =>  None
     }
     helper.asInstanceOf[Option[SortKeyHelper[K]]]
