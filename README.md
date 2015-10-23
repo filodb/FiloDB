@@ -91,7 +91,9 @@ There are two crucial parts to a dataset in FiloDB,
 1. partitioning column - decides how data is going to be distributed across the cluster
 2. sort column         - acts as a primary key within each partition and decides how data will be sorted within each partition.  Like the "clustering key" from Cassandra.
 
-Specifying the partitioning column is optional.  If a partitioning column is not specified, FiloDB will create a default one with a fixed value, which means everything will be thrown into one node, and is only suitable for small amounts of data.
+The PRIMARY KEY for FiloDB consists of (partition key, sort key).  When choosing the above values you must make sure the combination of the two are unique.  This is very similar to Cassandra CQL Tables, whose primary key consists of (partition columns, clustering columns).  The partition key in FiloDB maps to the Cassandra partition key, and sort key maps to the clustering key.
+
+Specifying the partitioning column is optional.  If a partitioning column is not specified, FiloDB will create a default one with a fixed value, which means everything will be thrown into one node, and is only suitable for small amounts of data.  If you don't specify a partitioning column, then you have to make sure your sort keys are all unique.
 
 ### Example FiloDB Schema for machine metrics
 
