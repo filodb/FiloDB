@@ -97,7 +97,7 @@ case class StringKeyHelper(prefixLen: Int) extends SingleSortKeyHelper[String] {
     (start, end)
   }
 
-  def toBytes(key: String): ByteVector = ByteVector(key.getBytes("UTF-8"))
+  def toBytes(key: String): ByteVector = ByteVector(key.take(prefixLen).getBytes("UTF-8"))
   def fromBytes(bytes: ByteVector): String = new String(bytes.toArray, "UTF-8")
 }
 
