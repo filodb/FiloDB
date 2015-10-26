@@ -92,8 +92,8 @@ class BinaryChunkRowMap(chunkIdsBuffer: ByteBuffer,
   import filodb.core.Types._
   import VectorReader._
 
-  private val chunkIds = FiloVector[ChunkID](chunkIdsBuffer)
-  private val rowNums = FiloVector[Int](rowNumsBuffer)
+  val chunkIds = FiloVector[ChunkID](chunkIdsBuffer)
+  val rowNums = FiloVector[Int](rowNumsBuffer)
 
   def chunkIdIterator: Iterator[ChunkID] = chunkIds.toIterator
   def rowNumIterator: Iterator[Int] = rowNums.toIterator
