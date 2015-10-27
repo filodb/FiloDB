@@ -73,9 +73,8 @@ package object spark extends StrictLogging {
      */
     def filoDataset(dataset: String,
                     version: Int = 0,
-                    minPartitions: Int = FiloRelation.DefaultMinPartitions,
                     splitsPerNode: Int = 1): DataFrame =
-      sqlContext.baseRelationToDataFrame(FiloRelation(dataset, version, minPartitions, splitsPerNode)
+      sqlContext.baseRelationToDataFrame(FiloRelation(dataset, version, splitsPerNode)
                                                      (sqlContext))
 
     private def runCommands[B](cmds: Set[Future[Response]]): Unit = {

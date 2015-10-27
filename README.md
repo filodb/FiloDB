@@ -186,7 +186,7 @@ The options to use with the data-source api are:
 | dataset          | name of the dataset                                              | read/write | No       |
 | sort_column      | name of the column according to which the data should be sorted  | write      | No       |
 | partition_column | name of the column according to which data should be partitioned | write      | Yes      |
-| splits_per_node  | number of read threads per node, defaults to 1 | read | Yes |
+| splits_per_node  | number of read threads per node, defaults to 4 | read | Yes |
 | default_partition_key | default value to use for the partition key if the partition_column has a null value.  If not specified, an error is thrown. Note that this only has an effect if the dataset is created for the first time.| write | Yes |
 | version          | numeric version of data to write, defaults to 0  | write | Yes |
 
