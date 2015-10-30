@@ -44,9 +44,10 @@ object NodeCoordinatorActor {
    * Sets up ingestion for a given dataset, version, and schema of columns.
    * The dataset and columns must have been previously defined.
    *
-   * @defaultPartitionKey if Some(key), a null value in partitioning column will cause key to be used.
-   *                      if None, then NullPartitionValue will be thrown when null value
-   *                        is encountered in a partitioning column.
+   * @param defaultPartitionKey
+   *        if Some(key), a null value in partitioning column will cause key to be used.
+   *        if None, then NullPartitionValue will be thrown when null value is encountered
+   *        in a partitioning column.
    * @return BadSchema if the partition column is unsupported, sort column invalid, etc.
    */
   case class SetupIngestion(dataset: String,

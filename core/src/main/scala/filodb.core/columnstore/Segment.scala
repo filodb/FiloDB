@@ -13,7 +13,7 @@ import filodb.core.metadata.Column
 /**
  * A Segment represents columnar chunks for a given dataset, partition, range of keys, and columns.
  * It also contains an index to help read data out in sorted order.
- * For more details see [[doc/sorted_chunk_merge.md]].
+ * For more details see `doc/sorted_chunk_merge.md`.
  */
 trait Segment[K] {
   val keyRange: KeyRange[K]
