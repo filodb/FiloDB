@@ -143,6 +143,7 @@ package object spark extends StrictLogging {
       actorAsk(FiloSetup.coordinatorActor,
                TruncateProjection(dataset.projections.head, version), 1.minute) {
         case ProjectionTruncated => logger.info(s"Truncation of ${dataset.name} finished")
+        case UnknownDataset => throw NotFoundError(s"(${dataset.name}, ${version}})")
       }
     }
 
