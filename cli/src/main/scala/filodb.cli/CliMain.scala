@@ -18,6 +18,7 @@ import scala.language.postfixOps
 import filodb.cassandra.columnstore.CassandraColumnStore
 import filodb.cassandra.metastore.CassandraMetaStore
 import filodb.coordinator.{NodeCoordinatorActor, DefaultCoordinatorSetup}
+import filodb.core.columnstore.{Analyzer, CachedMergingColumnStore}
 import filodb.core.metadata.{Column, Dataset, RichProjection}
 
 //scalastyle:off
@@ -61,7 +62,7 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with DefaultCoord
 
   def printHelp() {
     println("filo-cli help:")
-    println("  commands: init create importcsv list")
+    println("  commands: init create importcsv list analyze")
     println("  columns: <colName1>:<type1>,<colName2>:<type2>,... ")
     println("  types:  int,long,double,string")
     println("  OR:  --select col1, col2  [--limit <n>]  [--outfile /tmp/out.csv]")
@@ -88,6 +89,10 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with DefaultCoord
                     args.filename.get,
                     delimiter,
                     args.timeoutMinutes.minutes)
+        case Some("analyze") =>
+          println(Analyzer.analyze(columnStore.asInstanceOf[CachedMergingColumnStore],
+                                   args.dataset.get,
+                                   version).prettify())
         case x: Any =>
           args.select.map { selectCols =>
             exportCSV(args.dataset.get,
