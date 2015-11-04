@@ -128,7 +128,7 @@ case class FiloRelation(dataset: String,
     // NOTE: It's critical that the closure inside mapPartitions only references
     // vars from buildScan() method, and not the FiloRelation class.  Otherwise
     // the entire FiloRelation class would get serialized.
-    sqlContext.sparkContext.parallelize(splits)
+    sqlContext.sparkContext.parallelize(splits, splits.length)
       .mapPartitions { paramIter =>
         perNodeRowScanner(_config, datasetOptionsStr, _version, filoColumns,
                           sortCol, paramIter)
