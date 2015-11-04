@@ -65,7 +65,7 @@ class DefaultReprojector(columnStore: ColumnStore)
       (partition, helper.getSegment(sortKey))
     }.map { case ((partition, (segStart, segUntil)), segmentRowsIt) =>
       // For each segment grouping of rows... set up a Segment
-      val keyRange = KeyRange(dataset.name, partition, segStart, segUntil)
+      val keyRange = KeyRange(dataset.name, partition, segStart, segStart)
       val segment = new RowWriterSegment(keyRange, memTable.projection.columns)
       logger.debug(s"Created new segment $segment for encoding...")
 

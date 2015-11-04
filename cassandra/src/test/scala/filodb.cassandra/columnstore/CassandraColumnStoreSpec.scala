@@ -108,7 +108,7 @@ class CassandraColumnStoreSpec extends CassandraFlatSpec with BeforeAndAfter {
       val segments = segIter.toSeq
       segments should have length (1)
       val readSeg = segments.head.asInstanceOf[RowReaderSegment[Long]]
-      readSeg.keyRange should equal (segment.keyRange)
+      readSeg.keyRange.start should equal (segment.keyRange.start)
       readSeg.rowIterator().map(_.getLong(2)).toSeq should equal (Seq(24L, 25L, 28L, 29L, 39L, 40L))
       readSeg.rowIterator().map(_.getString(0)).toSeq should equal (firstNames)
     }
@@ -134,7 +134,7 @@ class CassandraColumnStoreSpec extends CassandraFlatSpec with BeforeAndAfter {
       val segments = segIter.toSeq
       segments should have length (1)
       val readSeg = segments.head.asInstanceOf[RowReaderSegment[Long]]
-      readSeg.keyRange should equal (segment.keyRange)
+      readSeg.keyRange.start should equal (segment.keyRange.start)
       readSeg.rowIterator().map(_.getLong(2)).toSeq should equal (Seq(24L, 25L, 28L, 29L, 39L, 40L))
       readSeg.rowIterator().map(_.getString(0)).toSeq should equal (firstNames)
     }
@@ -151,7 +151,7 @@ class CassandraColumnStoreSpec extends CassandraFlatSpec with BeforeAndAfter {
       val segments = segIter.toSeq
       segments should have length (1)
       val readSeg = segments.head.asInstanceOf[RowReaderSegment[Long]]
-      readSeg.keyRange should equal (segment.keyRange)
+      readSeg.keyRange.start should equal (segment.keyRange.start)
       readSeg.getChunks.toSet should equal (segment.getChunks.toSet)
       readSeg.index.rowNumIterator.toSeq should equal (segment.index.rowNumIterator.toSeq)
       readSeg.rowIterator().map(_.getLong(2)).toSeq should equal (Seq(24L, 25L, 28L, 29L, 39L, 40L))
@@ -193,7 +193,7 @@ class CassandraColumnStoreSpec extends CassandraFlatSpec with BeforeAndAfter {
       val segments = segIter.toSeq
       segments should have length (1)
       val readSeg = segments.head.asInstanceOf[RowReaderSegment[Long]]
-      readSeg.keyRange should equal (segment.keyRange)
+      readSeg.keyRange.start should equal (segment.keyRange.start)
       readSeg.getChunks.toSet should equal (segment.getChunks.toSet)
       readSeg.index.rowNumIterator.toSeq should equal (segment.index.rowNumIterator.toSeq)
       readSeg.rowIterator().map(_.getLong(2)).toSeq should equal (Seq(24L, 25L, 28L, 29L, 39L, 40L))

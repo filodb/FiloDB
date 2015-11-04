@@ -85,7 +85,7 @@ extends ChunkMergingStrategy with StrictLogging {
 
     // One should NEVER be allowed to merge segments from different places... unless we are perhaps
     // talking about splitting and merging, but that's outside the scope of this method
-    require(oldSegment.keyRange == newSegment.keyRange,
+    require(oldSegment.keyRange.start == newSegment.keyRange.start,
       s"Cannot merge segments from different keyRanges (${oldSegment.keyRange}, ${newSegment.keyRange})")
 
     // How much to offset chunkIds in newSegment.  0 in newSegment == nextChunkId in oldSegment.
