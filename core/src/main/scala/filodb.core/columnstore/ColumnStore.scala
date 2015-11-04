@@ -270,8 +270,8 @@ trait CachedMergingColumnStore extends ColumnStore with StrictLogging {
                                               schema: Seq[Column]): Seq[Segment[K]] = {
     val helper = implicitly[SortKeyHelper[K]]
     val segments = rowMaps.map { case (segmentId, rowMap) =>
-        val (segStart, segEnd) = helper.getSegment(helper.fromBytes(segmentId))
-        val segKeyRange = origKeyRange.copy(start = segStart, end = segEnd, endExclusive = true)
+        val segStart = helper.fromBytes(segmentId)
+        val segKeyRange = origKeyRange.copy(start = segStart, end = segStart, endExclusive = true)
         new RowReaderSegment(segKeyRange, rowMap, schema)
     }
     chunks.foreach { case ChunkedData(columnName, chunkTriples) =>
