@@ -41,12 +41,25 @@ object Types {
 }
 
 // A range of keys, used for describing ingest rows as well as queries
+// If start or end are not specified, that implies an open-ended key range on that side.
 // TODO: this should really be based on a Projection or RichProjection, not dataset.
 case class KeyRange[K : SortKeyHelper](dataset: Types.TableName,
                                        partition: Types.PartitionKey,
-                                       start: K, end: K,
+                                       start: Option[K], end: Option[K],
                                        endExclusive: Boolean = true) {
   val helper = implicitly[SortKeyHelper[K]]
-  def binaryStart: ByteVector = helper.toBytes(start)
-  def binaryEnd: ByteVector = helper.toBytes(end)
+  def binaryStart: ByteVector = helper.toBytes(start.get)
+  def binaryEnd: ByteVector = helper.toBytes(end.get)
+}
+
+object KeyRange {
+  def apply[K: SortKeyHelper](dataset: Types.TableName, partition: Types.PartitionKey, start: K, end: K):
+      KeyRange[K] = KeyRange(dataset, partition, Some(start), Some(end))
+
+  def apply[K: SortKeyHelper](dataset: Types.TableName,
+                              partition: Types.PartitionKey,
+                              start: K,
+                              end: K,
+                              endExclusive: Boolean):
+      KeyRange[K] = KeyRange(dataset, partition, Some(start), Some(end), endExclusive)
 }

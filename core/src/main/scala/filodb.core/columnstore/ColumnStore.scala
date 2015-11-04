@@ -173,7 +173,7 @@ trait CachedMergingColumnStore extends ColumnStore with StrictLogging {
   def appendSegment[K](projection: RichProjection[K],
                        segment: Segment[K],
                        version: Int): Future[Response] = {
-    if (segment.isEmpty) return(Future.successful(NotApplied))
+    if (segment.isEmpty) return (Future.successful(NotApplied))
     implicit val helper = projection.helper
     for { oldSegment <- getSegFromCache(projection, segment.keyRange, version)
           mergedSegment = mergingStrategy.mergeSegments(oldSegment, segment)
@@ -270,8 +270,8 @@ trait CachedMergingColumnStore extends ColumnStore with StrictLogging {
                                               schema: Seq[Column]): Seq[Segment[K]] = {
     val helper = implicitly[SortKeyHelper[K]]
     val segments = rowMaps.map { case (segmentId, rowMap) =>
-        val segStart = helper.fromBytes(segmentId)
-        val segKeyRange = origKeyRange.copy(start = segStart, end = segStart, endExclusive = true)
+        val segStart = Some(helper.fromBytes(segmentId))
+        val segKeyRange = origKeyRange.copy(start = segStart, end = None, endExclusive = true)
         new RowReaderSegment(segKeyRange, rowMap, schema)
     }
     chunks.foreach { case ChunkedData(columnName, chunkTriples) =>
@@ -280,7 +280,7 @@ trait CachedMergingColumnStore extends ColumnStore with StrictLogging {
         chunkTriples.foreach { case (segmentId, chunkId, chunkBytes) =>
           // Rely on the fact that chunks are sorted by segmentId, in the same order as the rowMaps
           val segmentKey = helper.fromBytes(segmentId)
-          while (segmentKey != segments(segIndex).keyRange.start) {
+          while (segmentKey != segments(segIndex).keyRange.start.get) {
             segIndex += 1
             if (segIndex >= segments.length) {
               logger.warn(s"Chunks with segmentId=$segmentKey ($origKeyRange) with no rowmap; corruption?")

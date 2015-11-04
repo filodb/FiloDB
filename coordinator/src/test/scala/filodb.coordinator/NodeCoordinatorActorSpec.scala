@@ -99,7 +99,7 @@ with CoordinatorSetup with AllTablesTest {
       val segments = segIter.toSeq
       segments should have length (3)
       val readSeg = segments.head.asInstanceOf[RowReaderSegment[Long]]
-      readSeg.keyRange should equal (keyRange.copy(end = keyRange.start))
+      readSeg.keyRange should equal (keyRange.copy(end = None))
       readSeg.rowIterator().map(_.getLong(2)).toSeq should equal ((0 to 99).map(_.toLong))
     }
 

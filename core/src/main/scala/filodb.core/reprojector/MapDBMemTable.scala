@@ -67,7 +67,9 @@ class MapDBMemTable[K](val projection: RichProjection[K], config: Config) extend
   }
 
   def readRows(keyRange: KeyRange[K]): Iterator[RowReader] = {
-    rowMap.subMap((keyRange.partition, keyRange.start), (keyRange.partition, keyRange.end))
+    // TODO: support open-ended keyRanges
+    require(keyRange.start.isDefined && keyRange.end.isDefined)
+    rowMap.subMap((keyRange.partition, keyRange.start.get), (keyRange.partition, keyRange.end.get))
       .keySet.iterator.map { k => serializer.deserialize(rowMap.get(k)) }
   }
 
@@ -78,7 +80,9 @@ class MapDBMemTable[K](val projection: RichProjection[K], config: Config) extend
   }
 
   def removeRows(keyRange: KeyRange[K]): Unit = {
-    rowMap.subMap((keyRange.partition, keyRange.start), (keyRange.partition, keyRange.end))
+    // TODO: support open-ended keyRanges
+    require(keyRange.start.isDefined && keyRange.end.isDefined)
+    rowMap.subMap((keyRange.partition, keyRange.start.get), (keyRange.partition, keyRange.end.get))
           .keySet.iterator.foreach { k => rowMap.remove(k) }
   }
 
