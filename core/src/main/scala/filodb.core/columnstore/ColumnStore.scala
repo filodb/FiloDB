@@ -79,6 +79,7 @@ trait ColumnStore {
 }
 
 case class ChunkedData(column: Types.ColumnId, chunks: Seq[(Types.SegmentId, Types.ChunkID, ByteBuffer)])
+case class SegmentInfo[K](start: K, numRows: Int)
 
 /**
  * A partial implementation of a ColumnStore, based on separating storage of chunks and ChunkRowMaps,
@@ -163,6 +164,30 @@ trait CachedMergingColumnStore extends ColumnStore with StrictLogging {
                        version: Int,
                        partitionFilter: (PartitionKey => Boolean),
                        params: Map[String, String]): Future[Iterator[ChunkMapInfo]]
+
+  /**
+   * Reads back basic info for all segments in a given partition:
+   * @return (segmentsUuid, segmentInfos) - where segmentsUuid is a unique ID identifying the current
+   *           state of the segments.  The SegmentInfos are returned in order of incr. start value.
+   */
+  def readPartitionSegments[K](projection: RichProjection[K],
+                               version: Int,
+                               partition: PartitionKey): Future[(Long, Seq[SegmentInfo[K]])]
+
+  /**
+   * Atomically updates the segment information for a given partition, succeeding only if the stored
+   * segmentsUuid is equal to prevUuid.  This guarantees that nobody else has modified the segment info
+   * while the writer was updating it in memory.  If NotApplied is returned, then the writer should call
+   * readPartitionSegments and assume another writer has already updated this, and retry.
+   * Think of this as a form of optimistic locking.
+   * @param prevUuid the unique ID of the previous segment infos.  If there was no previous info, then 0L.
+   * @param newSegmentInfos any new segments to be added to the partition
+   */
+  def updatePartitionSegments[K](projection: RichProjection[K],
+                                 version: Int,
+                                 partition: PartitionKey,
+                                 prevUuid: Long,
+                                 newSegmentInfos: Seq[SegmentInfo[K]]): Future[Response]
 
   /**
    * == Caching and merging implementation of the high level functions ==
