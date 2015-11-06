@@ -158,7 +158,7 @@ extends CachedMergingColumnStore with StrictLogging {
     val tokenRanges = metadata.getTokenRanges.asScala.toSeq.flatMap { range =>
       range.splitEvenly(splitsPerNode).asScala
     }
-    if (params.getOrElse("total_splits", s"${tokenRanges.size}").toInt == 1) {
+    if (params.getOrElse("total_splits", "0").toInt == 1) {
       val tokenRangeMerge = tokenRanges.reduceLeft { (tokenLeft, tokenRight) =>
         tokenLeft.mergeWith(tokenRight)
       }
