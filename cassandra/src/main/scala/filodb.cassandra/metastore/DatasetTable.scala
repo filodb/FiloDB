@@ -3,6 +3,7 @@ package filodb.cassandra.metastore
 import com.datastax.driver.core.Row
 import com.typesafe.config.Config
 import com.websudos.phantom.dsl._
+import filodb.core
 import scala.concurrent.Future
 
 import filodb.cassandra.FiloCassandraConnector
@@ -58,7 +59,7 @@ with FiloCassandraConnector {
           insertProj <- insertProjection(dataset.projections.head)
              if (dataset.projections.nonEmpty) && createResp == Success }
     yield { insertProj }).recover {
-      case e: NoSuchElementException => throw new StorageEngineException(new Exception("Dataset already exists",e))
+      case e: NoSuchElementException => AlreadyExists
     }
 
   def getProjection(dataset: TableName, id: Int): Future[Projection] =
