@@ -149,6 +149,9 @@ class NodeCoordinatorActor(metaStore: MetaStore,
              resp2 <- Future.sequence(columns.map(metaStore.newColumn(_)))
              resp3 <- columnStore.initializeProjection(datasetObj.projections.head) }
       yield {
+        if(resp1 equals AlreadyExists)
+          originator ! AlreadyExists
+        else
         originator ! DatasetCreated
       }).recover {
         case e: StorageEngineException => originator ! e
