@@ -186,7 +186,7 @@ class CassandraColumnStoreSpec extends CassandraFlatSpec with BeforeAndAfter {
       response should equal (Success)
     }
 
-    val paramSet = colStore.getScanSplits(dataset)
+    val paramSet = colStore.getScanSplits(dataset,Map("total_splits" -> "1"))
     paramSet should have length (1)
 
     whenReady(colStore.scanSegments[Long](schema, dataset, 0, params = paramSet.head)) { segIter =>
@@ -202,7 +202,7 @@ class CassandraColumnStoreSpec extends CassandraFlatSpec with BeforeAndAfter {
 
   "getScanSplits" should "return splits from Cassandra" in {
     // Single split, token_start should equal token_end
-    val singleSplit = colStore.getScanSplits(dataset)
+    val singleSplit = colStore.getScanSplits(dataset,Map("total_splits" -> "1"))
     singleSplit should have length (1)
     singleSplit.head("token_start") should equal (singleSplit.head("token_end"))
     singleSplit.head("replicas").split(",").size should equal (1)
