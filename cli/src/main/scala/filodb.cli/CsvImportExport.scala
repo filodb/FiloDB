@@ -41,7 +41,7 @@ trait CsvImportExport {
   }
 
   protected def actorAsk[B](actor: ActorRef, msg: Any,
-                            askTimeout: FiniteDuration = 21474834 seconds)(f: PartialFunction[Any, B]): B = {
+                            askTimeout: FiniteDuration = 5 seconds)(f: PartialFunction[Any, B]): B = {
     implicit val timeout = Timeout(askTimeout)
     parse(actor ? msg, askTimeout)(f)
   }
