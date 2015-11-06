@@ -36,11 +36,12 @@ trait CsvImportExport {
   }
 
   protected def parse[T, B](cmd: => Future[T], awaitTimeout: FiniteDuration = 5 seconds)(func: T => B): B = {
-    func(Await.result(cmd, awaitTimeout))
+    implicit val timeout = Timeout(21474834 seconds)
+    func(Await.result(cmd, timeout.duration))
   }
 
   protected def actorAsk[B](actor: ActorRef, msg: Any,
-                            askTimeout: FiniteDuration = 5 seconds)(f: PartialFunction[Any, B]): B = {
+                            askTimeout: FiniteDuration = 21474834 seconds)(f: PartialFunction[Any, B]): B = {
     implicit val timeout = Timeout(askTimeout)
     parse(actor ? msg, askTimeout)(f)
   }

@@ -178,6 +178,7 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with DefaultCoord
                           columnNames: Seq[String],
                           columns: Seq[Column],
                           outFile: Option[String]) = {
+    var exitcode = 0
     var outStream: OutputStream = null
     var writer: CSVWriter = null
     val columnCount: Int = columns.size
@@ -193,11 +194,13 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with DefaultCoord
     } catch {
       case e: Throwable =>
         println(s"Failed to select/export dataset $datasetName")
+        exitcode = 1
         throw e
     } finally {
       writer.close()
       outStream.close()
     }
+    exitcode
   }
 
   def exportCSV(dataset: String,
@@ -205,6 +208,8 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with DefaultCoord
                 columnNames: Seq[String],
                 limit: Int,
                 outFile: Option[String]): Unit = {
+    println(s"Exporting data of ${columnNames} of dataset ${dataset} " +
+      s"with limit of ${limit} to file ${outFile.getOrElse("not specified")}")
     val schema = Await.result(metaStore.getSchema(dataset, version), 10.second)
     val datasetObj = parse(metaStore.getDataset(dataset)) { ds => ds }
     val richProj = RichProjection(datasetObj, schema.values.toSeq)
@@ -213,8 +218,7 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with DefaultCoord
 
     implicit val sortKeyHelper = typedProj.helper
 
-    // NOTE: we will only return data from the first split!
-    val splits = columnStore.getScanSplits(dataset)
+    val splits = columnStore.getScanSplits(dataset,Map("total_splits" -> "1"))
     val requiredRows = parse(
       columnStore.scanSegments[typedProj.helper.Key](columns, dataset, version, params=splits.head)) {
       segmentIterator =>
@@ -225,6 +229,8 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with DefaultCoord
         }.take(limit)
     }
 
-    writeResult(dataset, requiredRows, columnNames, columns, outFile)
+    val exitcode = writeResult(dataset, requiredRows, columnNames, columns, outFile)
+    if(exitcode == 0)
+      println("Succeeded !")
   }
 }

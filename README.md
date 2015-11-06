@@ -164,6 +164,12 @@ Query/export some columns:
 ./filo-cli --dataset gdelt --select MonthYear,Actor2Code --limit 5 --outfile out.csv
 ```
 
+Analyze a dataset:
+
+```
+./filo-cli --command analyze --dataset gdelt 
+```
+
 ### Using FiloDB data-source with Spark
 
 FiloDB has a Spark data-source module - `filodb.spark`. So, you can use the Spark Dataframes `read` and `write` APIs with FiloDB. To use it, follow the steps below
