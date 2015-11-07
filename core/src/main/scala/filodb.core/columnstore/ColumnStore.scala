@@ -79,7 +79,7 @@ trait ColumnStore {
 }
 
 case class ChunkedData(column: Types.ColumnId, chunks: Seq[(Types.SegmentId, Types.ChunkID, ByteBuffer)])
-case class SegmentInfo[K](start: K, numRows: Int)
+case class SegmentInfo[K](start: Option[K], end: Option[K], numRows: Int)
 
 /**
  * A partial implementation of a ColumnStore, based on separating storage of chunks and ChunkRowMaps,

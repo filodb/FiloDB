@@ -35,7 +35,7 @@ extends CachedMergingColumnStore with StrictLogging {
 
   val chunkDb = new HashMap[(TableName, PartitionKey, Int), ChunkTree]
   val rowMaps = new HashMap[(TableName, PartitionKey, Int), RowMapTree]
-  val segInfos = new HashMap[(TableName, PartitionKey, Int), (Long, Seq[(ByteVector, Int)])]
+  val segInfos = new HashMap[(TableName, PartitionKey, Int), (Long, Seq[(ByteVector, ByteVector, Int)])]
 
   def initializeProjection(projection: Projection): Future[Response] = Future.successful(Success)
 
@@ -122,8 +122,10 @@ extends CachedMergingColumnStore with StrictLogging {
                                partition: PartitionKey): Future[(Long, Seq[SegmentInfo[K]])] = Future {
     val (uuid, rawSegInfos) = segInfos.getOrElse((projection.dataset.name, partition, version),
                                                  (0L, Nil))
-    (uuid, rawSegInfos.map { case (rawSegId, numRows) =>
-             SegmentInfo(projection.helper.fromBytes(rawSegId), numRows)
+    (uuid, rawSegInfos.map { case (rawStart, rawEnd, numRows) =>
+             SegmentInfo(projection.helper.fromSegmentBinary(rawStart),
+                         projection.helper.fromSegmentBinary(rawEnd),
+                         numRows)
            })
   }
 
@@ -144,7 +146,8 @@ extends CachedMergingColumnStore with StrictLogging {
         val helper = projection.helper
         // insert newSegmentInfos into orig infos, keep everything sorted (append + sort)
         val newRawInfos = newSegmentInfos.map {
-          case SegmentInfo(start, numRows) => (helper.toBytes(start), numRows) }
+          case SegmentInfo(start, end, numRows) => (helper.toSegmentBinary(start),
+                                                    helper.toSegmentBinary(end), numRows) }
         val sortedInfos = (origSegInfos ++ newRawInfos).sortBy(_._1)
 
         // Compute new Uuid.  TODO - find a better algorithm, is this really unique?

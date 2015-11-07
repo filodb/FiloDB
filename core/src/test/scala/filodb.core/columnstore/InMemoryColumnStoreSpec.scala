@@ -11,7 +11,7 @@ import org.scalatest.concurrent.ScalaFutures
 class InMemoryColumnStoreSpec extends FunSpec with Matchers with BeforeAndAfter with ScalaFutures {
   import SegmentSpec._
 
-  private val toSegmentInfo = (t: (Long, Int)) => SegmentInfo(t._1, t._2)
+  private val toSegmentInfo = (t: (Long, Int)) => SegmentInfo(Some(t._1), None, t._2)
 
   val aSegments = Seq((10L, 10), (100L, 5), (150L, 20)).map(toSegmentInfo)
   val bSegments = Seq((0L, 3), (180L, 15)).map(toSegmentInfo)
