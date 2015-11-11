@@ -112,9 +112,9 @@ class SegmentChopperSpec extends FunSpec with Matchers with BeforeAndAfter with 
       chopper2.insertKeysForPartition("baz", (10499L to 10507L))
       chopper2.insertKeysForPartition("foo", (25L to 35L))
 
-      chopper2.keyRanges() should equal (Seq(KeyRange[Long]("dataset", "baz", None, Some(10507L)),
+      chopper2.keyRanges() should equal (Seq(KeyRange[Long]("dataset", "baz", None, Some(10507L), false),
                                              KeyRange[Long]("dataset", "foo", Some(10L), Some(29L)),
-                                             KeyRange[Long]("dataset", "foo", Some(29L), Some(35L))))
+                                             KeyRange[Long]("dataset", "foo", Some(29L), Some(35L), false)))
     }
   }
 

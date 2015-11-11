@@ -166,15 +166,16 @@ class SegmentChopper[K](projection: RichProjection[K],
   /**
    * Returns all of the updated segments as KeyRanges, intended for use with Reprojector.
    * @return a list of KeyRanges, sorted in ascending partition key / sortkey order.
-   *         Note that all KeyRanges produced will have endExclusive = true.
+   *         Note that the last keyRange of a partition has endExclusive = false, others true.
    */
   def keyRanges(): Seq[KeyRange[K]] = {
     implicit val helper = projection.helper
     segmentMetaMap.keys.toSeq.sorted.flatMap { partition =>
-      segmentMetaMap(partition).collect {
+      val keyRanges = segmentMetaMap(partition).collect {
         case SegmentMeta(_, start, end, _, true) =>
           KeyRange[K](projection.dataset.name, partition, start, end, true)
       }
+      keyRanges.dropRight(1) :+ keyRanges.last.copy(endExclusive = false)
     }
   }
 }
