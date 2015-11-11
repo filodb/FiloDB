@@ -51,9 +51,14 @@ class MapDBMemTableSpec extends FunSpec with Matchers with BeforeAndAfter with S
       resp should equal (2)
 
       mTable.numRows should equal (6)
+      mTable.partitions should equal (Set(Dataset.DefaultPartitionKey))
 
       val outRows = mTable.readRows(keyRange)
       outRows.toSeq.map(_.getString(0)) should equal (firstNames)
+
+      val outKeys = mTable.allKeys.toSeq
+      outKeys.map(_._1).toSet should equal (Set(Dataset.DefaultPartitionKey))
+      outKeys.map(_._2) should equal (Seq(24L, 25L, 28L, 29L, 39L, 40L))
     }
 
     it("should replace rows and read them back in order") {
@@ -92,6 +97,7 @@ class MapDBMemTableSpec extends FunSpec with Matchers with BeforeAndAfter with S
       resp should equal (66)
 
       memTable.numRows should equal (50 * names.length)
+      memTable.partitions should equal (Set((0 until 50).map(_.toString) :_*))
 
       val outRows = memTable.readRows(keyRange.copy(partition = "5"))
       outRows.toSeq.map(_.getString(0)) should equal (firstNames)

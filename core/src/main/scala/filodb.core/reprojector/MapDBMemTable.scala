@@ -43,6 +43,7 @@ class MapDBMemTable[K](val projection: RichProjection[K], config: Config) extend
 
   val serializer = new RowReaderSerializer(projection.columns)
   val sortKeyFunc = projection.sortKeyFunc
+  val partitions = new collection.mutable.HashSet[PartitionKey]()
 
   implicit lazy val sortKeyOrdering: Ordering[K] = projection.helper.ordering
   lazy val rowMap = db.createTreeMap("filo")
@@ -60,7 +61,9 @@ class MapDBMemTable[K](val projection: RichProjection[K], config: Config) extend
     // For each row: insert into rows map
     for { row <- rows } {
       val sortKey = sortKeyFunc(row)
-      rowMap.put((projection.partitionFunc(row), sortKey), serializer.serialize(row))
+      val partition = projection.partitionFunc(row)
+      partitions += partition
+      rowMap.put((partition, sortKey), serializer.serialize(row))
     }
     // Since this is an in-memory table only, just call back right away.
     callback
@@ -75,11 +78,8 @@ class MapDBMemTable[K](val projection: RichProjection[K], config: Config) extend
         .keySet.iterator.map { k => serializer.deserialize(rowMap.get(k)) }
   }
 
-  def readAllRows(): Iterator[(PartitionKey, K, RowReader)] = {
-    rowMap.keySet.iterator.map { case index @ (part, k) =>
-      (part, k, serializer.deserialize(rowMap.get(index)))
-    }
-  }
+  def allKeys(): Iterator[(PartitionKey, K)] =
+    rowMap.keySet.iterator
 
   def removeRows(keyRange: KeyRange[K]): Unit = {
     // TODO: support open-ended keyRanges
