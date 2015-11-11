@@ -12,7 +12,7 @@ class DatasetSpec extends FunSpec with Matchers {
 
   describe("DatasetOptions serialization") {
     it("should serialize options successfully") {
-      val options = DatasetOptions(chunkSize = 1000, segmentSize = "10000")
+      val options = DatasetOptions(chunkSize = 1000)
       DatasetOptions.fromString(options.toString) should equal (options)
 
       val options2 = options.copy(defaultPartitionKey = Some("<none>"))

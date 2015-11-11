@@ -9,7 +9,7 @@ import org.scalatest.FunSpec
 import org.scalatest.Matchers
 
 object SegmentSpec {
-  implicit val keyHelper = LongKeyHelper(10000L)
+  implicit val keyHelper = LongKeyHelper
 
   val schema = Seq(Column("first", "dataset", 0, Column.ColumnType.StringColumn),
                    Column("last", "dataset", 0, Column.ColumnType.StringColumn),
@@ -119,7 +119,7 @@ class SegmentSpec extends FunSpec with Matchers {
   }
 
   it("RowWriter and RowReader should work for rows with string sort keys") {
-    implicit val stringHelper = new StringKeyHelper(1)
+    implicit val stringHelper = StringKeyHelper
     val stringKeyRange = KeyRange("dataset", "partition", "000", "zzz")
     val segment = new RowWriterSegment(stringKeyRange, schema)
     segment.addRowsAsChunk(mapper(names), (r: RowReader) => r.getString(0))

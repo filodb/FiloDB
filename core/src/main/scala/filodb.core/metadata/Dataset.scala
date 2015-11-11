@@ -32,12 +32,10 @@ case class Dataset(name: String,
  * Every option must have a default!
  */
 case class DatasetOptions(chunkSize: Int,
-                          segmentSize: String,
                           defaultPartitionKey: Option[PartitionKey] = None) {
   override def toString: String = {
     val map = Map(
-                   "chunkSize" -> chunkSize,
-                   "segmentSize" -> segmentSize
+                   "chunkSize" -> chunkSize
                  ) ++
               defaultPartitionKey.map(k => Map("defaultPartitionKey" -> k)).getOrElse(Map.empty)
     val config = ConfigFactory.parseMap(map.asJava)
@@ -49,7 +47,6 @@ object DatasetOptions {
   def fromString(s: String): DatasetOptions = {
     val config = ConfigFactory.parseString(s)
     DatasetOptions(chunkSize = config.getInt("chunkSize"),
-                   segmentSize = config.getString("segmentSize"),
                    defaultPartitionKey = config.as[Option[PartitionKey]]("defaultPartitionKey"))
   }
 }
@@ -63,8 +60,7 @@ object Dataset {
   val DefaultPartitionColumn = ":single"
   val DefaultPartitionKey: PartitionKey = "/0"
 
-  val DefaultOptions = DatasetOptions(chunkSize = 1000,
-                                      segmentSize = "10000")
+  val DefaultOptions = DatasetOptions(chunkSize = 1000)
 
   /**
    * Creates a new Dataset with a single superprojection with a defined sort order.
@@ -82,16 +78,12 @@ object Dataset {
    */
   def sortKeyHelper[K: ClassTag](options: DatasetOptions): SortKeyHelper[K] = {
     val StringClass = classOf[String]
-    implicitly[ClassTag[K]].runtimeClass match {
-      case java.lang.Long.TYPE => (new LongKeyHelper(options.segmentSize.toLong)).
-                                    asInstanceOf[SortKeyHelper[K]]
-      case java.lang.Integer.TYPE => (new IntKeyHelper(options.segmentSize.toInt)).
-                                    asInstanceOf[SortKeyHelper[K]]
-      case java.lang.Double.TYPE => (new DoubleKeyHelper(options.segmentSize.toDouble)).
-                                    asInstanceOf[SortKeyHelper[K]]
-      case StringClass         => (new StringKeyHelper(options.segmentSize.toInt)).
-                                    asInstanceOf[SortKeyHelper[K]]
-    }
+    (implicitly[ClassTag[K]].runtimeClass match {
+      case java.lang.Long.TYPE    => LongKeyHelper
+      case java.lang.Integer.TYPE => IntKeyHelper
+      case java.lang.Double.TYPE  => DoubleKeyHelper
+      case StringClass            => StringKeyHelper
+    }).asInstanceOf[SortKeyHelper[K]]
   }
 
   def sortKeyHelper[K](options: DatasetOptions, sortColumn: Column): Option[SortKeyHelper[K]] = {

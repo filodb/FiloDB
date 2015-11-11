@@ -48,7 +48,7 @@ class ProjectionSpec extends FunSpec with Matchers {
       resp.sortColumn should equal (schema(2))
       resp.sortColNo should equal (2)
       resp.columns should equal (schema)
-      resp.helper shouldBe a[filodb.core.LongKeyHelper]
+      resp.helper should equal (filodb.core.LongKeyHelper)
       names.take(3).map(TupleRowReader).map(resp.sortKeyFunc) should equal (Seq(24L, 28L, 25L))
     }
 
@@ -57,7 +57,7 @@ class ProjectionSpec extends FunSpec with Matchers {
       resp.sortColumn should equal (schema(0))
       resp.sortColNo should equal (0)
       resp.columns should equal (schema)
-      resp.helper shouldBe a[filodb.core.StringKeyHelper]
+      resp.helper should equal (filodb.core.StringKeyHelper)
       names.take(3).map(TupleRowReader).map(resp.sortKeyFunc) should equal (
                      Seq("Khalil", "Ndamukong", "Rodney"))
     }
@@ -67,7 +67,7 @@ class ProjectionSpec extends FunSpec with Matchers {
       resp.sortColumn should equal (schema(2))
       resp.sortColNo should equal (2)
       resp.columns should equal (schema)
-      resp.helper shouldBe a[filodb.core.LongKeyHelper]
+      resp.helper should equal (filodb.core.LongKeyHelper)
       names.take(3).map(TupleRowReader).map(resp.sortKeyFunc) should equal (Seq(24L, 28L, 25L))
     }
   }
