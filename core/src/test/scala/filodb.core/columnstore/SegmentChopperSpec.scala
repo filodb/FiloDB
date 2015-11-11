@@ -165,6 +165,21 @@ class SegmentChopperSpec extends FunSpec with Matchers with BeforeAndAfter with 
       metaMap5("b").map(_.start) should equal (Seq(None))
     }
 
-    it("will not return updated uuid if compare-and-swap fails") (pending)
+    it("will not return updated uuid if compare-and-swap fails") {
+      val (metaMap, uuidMap) = SegmentChopper.loadSegmentInfos(projection, Seq("a", "b"), 0, columnStore).
+                                              futureValue
+      val chopper = new SegmentChopper(projection, metaMap, 10, 20)
+      chopper.insertKeysForPartition("a", (0 to 15).map(_.toLong))
+      val uuidMap2 = SegmentChopper.tryUpdateSegmentInfos(projection, Seq("a", "b"), 0,
+                                                          chopper, uuidMap, columnStore).futureValue
+      uuidMap2.keys should equal (Set("a"))   // "b" is empty
+
+      // Now, let's pretend another node also writing to partition a.  It doesn't know about new uuid.
+      val chopper2 = new SegmentChopper(projection, metaMap, 10, 20)
+      chopper2.insertKeysForPartition("a", (30L to 35L))
+      val uuidMap3 = SegmentChopper.tryUpdateSegmentInfos(projection, Seq("a", "b"), 0,
+                                                          chopper2, uuidMap, columnStore).futureValue
+      uuidMap3.keys should equal (Set())     // writes to a segmentInfo should fail
+    }
   }
 }
