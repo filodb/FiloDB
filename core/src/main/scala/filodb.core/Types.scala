@@ -48,7 +48,7 @@ case class KeyRange[K : SortKeyHelper](dataset: Types.TableName,
                                        start: Option[K], end: Option[K],
                                        endExclusive: Boolean = true) {
   val helper = implicitly[SortKeyHelper[K]]
-  def binaryStart: ByteVector = helper.toBytes(start.get)
+  def binaryStart: ByteVector = start.map(helper.toBytes).getOrElse(helper.minBinaryValue)
   def binaryEnd: ByteVector = helper.toBytes(end.get)
 }
 

@@ -146,10 +146,15 @@ class SegmentChopper[K](projection: RichProjection[K],
   }
 
   /**
-   * Same as insertOrderedKeys, but takes a Seq of (partition, sort) keys in any order.
-   * @param keys a list of partition and sort keys, in any order.
+   * Inserts keys from an ordered iterator of partitionKey/K, such as from MemTable.allKeys() method.
    */
-  def insertKeys(keys: Seq[(PartitionKey, K)]): Unit = ???
+  def insertOrderedKeys(keys: Iterator[(PartitionKey, K)]): Unit = {
+    import Iterators._
+
+    keys.sortedGroupBy(_._1).foreach { case (partition, sortKeys) =>
+      insertKeysForPartition(partition, sortKeys.map(_._2).toSeq)
+    }
+  }
 
   /**
    * Returns only the updated segments (the origSegments are immutable except when split).

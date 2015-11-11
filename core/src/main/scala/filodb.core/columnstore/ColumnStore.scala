@@ -53,7 +53,7 @@ trait ColumnStore {
    * @param version the version # to read from
    * @return An iterator over RowReaderSegment's
    */
-  def readSegments[K: SortKeyHelper](columns: Seq[Column], keyRange: KeyRange[K], version: Int):
+  def readSegments[K](columns: Seq[Column], keyRange: KeyRange[K], version: Int):
       Future[Iterator[Segment[K]]]
 
   /**
@@ -216,12 +216,12 @@ trait CachedMergingColumnStore extends ColumnStore with StrictLogging {
     }
   }
 
-  def readSegments[K: SortKeyHelper](columns: Seq[Column], keyRange: KeyRange[K], version: Int):
+  def readSegments[K](columns: Seq[Column], keyRange: KeyRange[K], version: Int):
       Future[Iterator[Segment[K]]] = {
     // TODO: implement actual paging and the iterator over segments.  Or maybe that should be implemented
     // at a higher level.
     (for { rowMaps <- readChunkRowMaps(keyRange, version)
-          chunks   <- readChunks(columns.map(_.name).toSet, keyRange, version) if rowMaps.nonEmpty }
+           chunks   <- readChunks(columns.map(_.name).toSet, keyRange, version) if rowMaps.nonEmpty }
     yield {
       buildSegments(rowMaps, chunks, keyRange, columns).toIterator
     }).recover {
@@ -291,11 +291,11 @@ trait CachedMergingColumnStore extends ColumnStore with StrictLogging {
   import scala.util.control.Breaks._
 
   // @param rowMaps a Seq of (segmentId, ChunkRowMap)
-  private def buildSegments[K: SortKeyHelper](rowMaps: Seq[(SegmentId, BinaryChunkRowMap)],
-                                              chunks: Seq[ChunkedData],
-                                              origKeyRange: KeyRange[K],
-                                              schema: Seq[Column]): Seq[Segment[K]] = {
-    val helper = implicitly[SortKeyHelper[K]]
+  private def buildSegments[K](rowMaps: Seq[(SegmentId, BinaryChunkRowMap)],
+                               chunks: Seq[ChunkedData],
+                               origKeyRange: KeyRange[K],
+                               schema: Seq[Column]): Seq[Segment[K]] = {
+    implicit val helper = origKeyRange.helper
     val segments = rowMaps.map { case (segmentId, rowMap) =>
         val segStart = Some(helper.fromBytes(segmentId))
         val segKeyRange = origKeyRange.copy(start = segStart, end = None, endExclusive = true)

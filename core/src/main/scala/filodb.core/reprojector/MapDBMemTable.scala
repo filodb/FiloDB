@@ -93,6 +93,7 @@ class MapDBMemTable[K](val projection: RichProjection[K], config: Config) extend
   def clearAllData(): Unit = {
     logger.info(s"MemTable: ERASING ALL TABLES!!")
     db.getAll().keys.foreach(db.delete)
+    partitions.clear()
   }
 }
 
