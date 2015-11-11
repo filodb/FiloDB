@@ -19,6 +19,7 @@ trait SortKeyHelper[K] {
   type Key = K
   def ordering: Ordering[K]        // must be comparable
   def minBinaryValue: ByteVector   // A minimum binary value for this type of key
+  val minValue: K                  // the minimum value for this type of key
 
   /**
    * Returns the inclusive start and exclusive end keys for the segment corresponding to a sort key.
@@ -51,6 +52,8 @@ abstract class SingleSortKeyHelper[K: TypedFieldExtractor] extends SortKeyHelper
     require(sortColNums.length == 1)
     extractor.getField(_, sortColNums.head)
   }
+
+  def minBinaryValue: ByteVector = toBytes(minValue)
 }
 
 /**
@@ -59,7 +62,7 @@ abstract class SingleSortKeyHelper[K: TypedFieldExtractor] extends SortKeyHelper
  */
 case class LongKeyHelper(segmentLen: Long) extends SingleSortKeyHelper[Long] {
   def ordering: Ordering[Long] = Ordering.Long
-  val minBinaryValue = toBytes(Long.MinValue)
+  val minValue = Long.MinValue
   def getSegment(key: Long): (Long, Long) = {
     val segmentNum = key / segmentLen
     (segmentNum * segmentLen, (segmentNum + 1) * segmentLen)
@@ -71,7 +74,7 @@ case class LongKeyHelper(segmentLen: Long) extends SingleSortKeyHelper[Long] {
 
 case class IntKeyHelper(segmentLen: Int) extends SingleSortKeyHelper[Int] {
   def ordering: Ordering[Int] = Ordering.Int
-  val minBinaryValue = toBytes(Int.MinValue)
+  val minValue = Int.MinValue
   def getSegment(key: Int): (Int, Int) = {
     val segmentNum = key / segmentLen
     (segmentNum * segmentLen, (segmentNum + 1) * segmentLen)
@@ -83,7 +86,7 @@ case class IntKeyHelper(segmentLen: Int) extends SingleSortKeyHelper[Int] {
 
 case class DoubleKeyHelper(segmentLen: Double) extends SingleSortKeyHelper[Double] {
   def ordering: Ordering[Double] = Ordering.Double
-  val minBinaryValue = toBytes(Double.MinValue)
+  val minValue = Double.MinValue
   def getSegment(key: Double): (Double, Double) = {
     val segmentNum = Math.floor(key / segmentLen)
     (segmentNum * segmentLen, (segmentNum + 1) * segmentLen)
@@ -105,7 +108,7 @@ case class DoubleKeyHelper(segmentLen: Double) extends SingleSortKeyHelper[Doubl
  */
 case class StringKeyHelper(prefixLen: Int) extends SingleSortKeyHelper[String] {
   def ordering: Ordering[String] = Ordering.String
-  val minBinaryValue = ByteVector(0x00)
+  val minValue = ""
   def getSegment(key: String): (String, String) = {
     val start = key.take(prefixLen)
     val end = start.take(start.length - 1) + ((start(start.length - 1) + 1).toChar)

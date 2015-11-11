@@ -66,11 +66,13 @@ class MapDBMemTable[K](val projection: RichProjection[K], config: Config) extend
     callback
   }
 
-  def readRows(keyRange: KeyRange[K]): Iterator[RowReader] = {
-    // TODO: support open-ended keyRanges
-    require(keyRange.start.isDefined && keyRange.end.isDefined)
-    rowMap.subMap((keyRange.partition, keyRange.start.get), (keyRange.partition, keyRange.end.get))
-      .keySet.iterator.map { k => serializer.deserialize(rowMap.get(k)) }
+  def readRows(keyRange: KeyRange[K]): Iterator[RowReader] = keyRange match {
+    case KeyRange(_, partition, Some(start), Some(end), endExclusive) =>
+      rowMap.subMap((partition, start), true, (partition, end), !endExclusive)
+        .keySet.iterator.map { k => serializer.deserialize(rowMap.get(k)) }
+    case KeyRange(_, partition, None, Some(end), endExclusive) =>
+      rowMap.subMap((partition, keyRange.helper.minValue), true, (partition, end), !endExclusive)
+        .keySet.iterator.map { k => serializer.deserialize(rowMap.get(k)) }
   }
 
   def readAllRows(): Iterator[(PartitionKey, K, RowReader)] = {

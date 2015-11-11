@@ -69,6 +69,22 @@ class MapDBMemTableSpec extends FunSpec with Matchers with BeforeAndAfter with S
       outRows.toSeq.map(_.getString(0)) should equal (Seq("Khalil", "Rodney", "Ndamukong", "Jerry"))
     }
 
+    it("should read rows with endExclusive true/false and start = None correctly") {
+      val mTable = new MapDBMemTable(projection, config)
+      mTable.ingestRows(names.map(TupleRowReader)) { resp = 2 }
+      resp should equal (2)
+
+      val outRows = mTable.readRows(keyRange.copy(start = None))
+      outRows.toSeq.map(_.getString(0)) should equal (firstNames)
+
+      val keyRange2 = keyRange.copy(start = Some(25L), end = Some(29L))
+      val outRows2 = mTable.readRows(keyRange2)
+      outRows2.toSeq.map(_.getString(0)) should equal (Seq("Rodney", "Ndamukong"))
+
+      val outRows3 = mTable.readRows(keyRange2.copy(endExclusive = false))
+      outRows3.toSeq.map(_.getString(0)) should equal (Seq("Rodney", "Ndamukong", "Terrance"))
+    }
+
     it("should ingest into multiple partitions using partition column") {
       val memTable = new MapDBMemTable(projWithPartCol, config)
 
