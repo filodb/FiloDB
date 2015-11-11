@@ -64,8 +64,9 @@ case class LongKeyHelper(segmentLen: Long) extends SingleSortKeyHelper[Long] {
     val segmentNum = key / segmentLen
     (segmentNum * segmentLen, (segmentNum + 1) * segmentLen)
   }
-  def toBytes(key: Long): ByteVector = ByteVector.fromLong(key, ordering = ByteOrdering.BigEndian)
-  def fromBytes(bytes: ByteVector): Long = bytes.toLong(true, ByteOrdering.BigEndian)
+  def toBytes(key: Long): ByteVector = ByteVector.fromLong(key + Long.MinValue,
+                                                           ordering = ByteOrdering.BigEndian)
+  def fromBytes(bytes: ByteVector): Long = bytes.toLong(true, ByteOrdering.BigEndian) - Long.MinValue
 }
 
 case class IntKeyHelper(segmentLen: Int) extends SingleSortKeyHelper[Int] {
@@ -75,8 +76,9 @@ case class IntKeyHelper(segmentLen: Int) extends SingleSortKeyHelper[Int] {
     val segmentNum = key / segmentLen
     (segmentNum * segmentLen, (segmentNum + 1) * segmentLen)
   }
-  def toBytes(key: Int): ByteVector = ByteVector.fromInt(key, ordering = ByteOrdering.BigEndian)
-  def fromBytes(bytes: ByteVector): Int = bytes.toInt(true, ByteOrdering.BigEndian)
+  def toBytes(key: Int): ByteVector = ByteVector.fromInt(key + Int.MinValue,
+                                                         ordering = ByteOrdering.BigEndian)
+  def fromBytes(bytes: ByteVector): Int = bytes.toInt(true, ByteOrdering.BigEndian) - Int.MinValue
 }
 
 case class DoubleKeyHelper(segmentLen: Double) extends SingleSortKeyHelper[Double] {
