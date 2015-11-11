@@ -1,6 +1,8 @@
 package filodb.core.columnstore
 
+import com.typesafe.scalalogging.slf4j.StrictLogging
 import scala.collection.mutable.{ArrayBuffer, HashMap}
+import scala.concurrent.{ExecutionContext, Future}
 
 import filodb.core._
 import filodb.core.metadata.RichProjection
@@ -45,7 +47,7 @@ case class SegmentMeta[K](partition: PartitionKey,
  * @param maxRowsPerSegment the max # rows allowed for a segment, it MUST be split at this point
  */
 class SegmentChopper[K](projection: RichProjection[K],
-                        val segmentMetaMap: HashMap[PartitionKey, ArrayBuffer[SegmentMeta[K]]],
+                        val segmentMetaMap: SegmentChopper.SegmentMetaMap[K],
                         minRowsPerSegment: Int = SegmentChopper.DefaultMinRowsPerSegment,
                         maxRowsPerSegment: Int = SegmentChopper.DefaultMaxRowsPerSegment) {
   implicit val ordering = projection.helper.ordering
@@ -76,9 +78,9 @@ class SegmentChopper[K](projection: RichProjection[K],
     else {
       var segIndex = 0
       var keyIndex = 0
-      val segments = segmentMetaMap.getOrElseUpdate(partition,
-                       // Empty partition, create an initial empty Segments
-                       ArrayBuffer(SegmentMeta[K](partition, None, None, 0, updated = true)))
+      val segments = segmentMetaMap.getOrElseUpdate(partition, ArrayBuffer())
+      // Empty partition, create an initial empty Segments
+      if (segments.isEmpty) segments += SegmentMeta[K](partition, None, None, 0, updated = true)
       val lastSegIndex = segments.length - 1
 
       // Loop through keys, until we come to end of a segment.... unless we're already at last segment
@@ -166,19 +168,23 @@ class SegmentChopper[K](projection: RichProjection[K],
    * @return a list of KeyRanges, sorted in ascending partition key / sortkey order.
    *         Note that all KeyRanges produced will have endExclusive = true.
    */
-  def keyRanges(dataset: TableName): Seq[KeyRange[K]] = {
+  def keyRanges(): Seq[KeyRange[K]] = {
     implicit val helper = projection.helper
     segmentMetaMap.keys.toSeq.sorted.flatMap { partition =>
       segmentMetaMap(partition).collect {
-        case SegmentMeta(_, start, end, _, true) => KeyRange[K](dataset, partition, start, end, true)
+        case SegmentMeta(_, start, end, _, true) =>
+          KeyRange[K](projection.dataset.name, partition, start, end, true)
       }
     }
   }
 }
 
-object SegmentChopper {
+object SegmentChopper extends StrictLogging {
   val DefaultMaxRowsPerSegment = 50000
   val DefaultMinRowsPerSegment = 25000
+
+  type SegmentMetaMap[K] = HashMap[PartitionKey, ArrayBuffer[SegmentMeta[K]]]
+  type SegmentUuidMap = HashMap[PartitionKey, Long]
 
   /**
    * @param origSegments a list of the original segments, should be sorted in order of partitionKey and start.
@@ -187,12 +193,65 @@ object SegmentChopper {
                origSegments: Seq[(PartitionKey, SegmentInfo[K])],
                minRowsPerSegment: Int = DefaultMinRowsPerSegment,
                maxRowsPerSegment: Int = DefaultMaxRowsPerSegment): SegmentChopper[K] = {
-    val segmentMeta = new HashMap[PartitionKey, ArrayBuffer[SegmentMeta[K]]]
+    val segmentMeta = new SegmentMetaMap[K]
     origSegments.foreach { case (partition, SegmentInfo(start, end, numRows)) =>
       val meta = SegmentMeta(partition, start, end, numRows)
       val partitionSegments = segmentMeta.getOrElseUpdate(partition, new ArrayBuffer[SegmentMeta[K]])
       partitionSegments += meta
     }
     new SegmentChopper(projection, segmentMeta, minRowsPerSegment, maxRowsPerSegment)
+  }
+
+  def toSegmentMeta[K](partition: PartitionKey, segmentInfos: Seq[SegmentInfo[K]]): Seq[SegmentMeta[K]] =
+    segmentInfos.map { case SegmentInfo(start, end, numRows) =>
+      SegmentMeta(partition, start, end, numRows)
+    }
+
+  /**
+   * Produces a segmentMetaMap for initializing or updating a SegmentChopper.  One use case is for updating
+   * a SegmentChopper after a tryUpdateSegmentInfos call fails for certain partitions.
+   */
+  def loadSegmentInfos[K](projection: RichProjection[K],
+                          partitions: Seq[PartitionKey],
+                          version: Int,
+                          columnStore: CachedMergingColumnStore)
+                         (implicit ec: ExecutionContext): Future[(SegmentMetaMap[K], SegmentUuidMap)] = {
+    val uuidMap = new SegmentUuidMap
+    val metaMap = new SegmentMetaMap[K]
+    for { uuidsInfos <- Future.sequence(partitions.map { p =>
+                          columnStore.readPartitionSegments(projection, version, p)
+                        }) } yield {
+      uuidsInfos.zip(partitions).foreach { case ((uuid, segInfos), partition) =>
+        uuidMap(partition) = uuid
+        metaMap(partition) = ArrayBuffer(toSegmentMeta(partition, segInfos) :_*)
+      }
+      (metaMap, uuidMap)
+    }
+  }
+
+  /**
+   * Attempts to update segmentInfos for a whole set of partitions based on a SegmentChopper and previous
+   * UUIDs for each partition.  CompareAndSwap is done on write.
+   * @return a Map(PartitionKey -> UUID) containing the newer UUIDs for successfully updated partitions.
+   *         Missing partition keys for which the compare and swap failed (not I/O failure, which would
+   *         result in a Future failure, but rather that the UUIDs did not agree).  Segment info must be
+   *         reloaded for these partition keys.
+   */
+  def tryUpdateSegmentInfos[K](projection: RichProjection[K],
+                               partitions: Seq[PartitionKey],
+                               version: Int,
+                               chopper: SegmentChopper[K],
+                               uuidMap: SegmentUuidMap,
+                               columnStore: CachedMergingColumnStore)
+                              (implicit ec: ExecutionContext): Future[Map[PartitionKey, Long]] = {
+    val infoMap = chopper.updatedSegments()
+    val filteredPartitions = partitions.filter { p => infoMap(p).nonEmpty }
+    for { responses <- Future.sequence(filteredPartitions.map { p =>
+                         columnStore.updatePartitionSegments(projection, version, p, uuidMap(p), infoMap(p))
+                       }) } yield {
+      logger.debug(s"Responses for updating segment infos for partitions $partitions: $responses")
+      responses.zip(filteredPartitions).collect {
+        case (SegmentsUpdated(newUuid), part) => part -> newUuid }.toMap
+    }
   }
 }

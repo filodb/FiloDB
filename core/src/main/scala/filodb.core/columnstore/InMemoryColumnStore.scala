@@ -29,13 +29,15 @@ extends CachedMergingColumnStore with StrictLogging {
   type ChunkKey = (ColumnId, SegmentId, ChunkID)
   type ChunkTree = ConcurrentSkipListMap[ChunkKey, ByteBuffer]
   type RowMapTree = ConcurrentSkipListMap[SegmentId, (ByteBuffer, ByteBuffer, Int)]
+  type SegInfoTree = ConcurrentSkipListMap[ByteVector, (ByteVector, Int)]
 
   val EmptyChunkTree = new ChunkTree(Ordering[ChunkKey])
   val EmptyRowMapTree = new RowMapTree(Ordering[SegmentId])
+  val EmptySegInfoTree = new SegInfoTree(Ordering[ByteVector])
 
   val chunkDb = new HashMap[(TableName, PartitionKey, Int), ChunkTree]
   val rowMaps = new HashMap[(TableName, PartitionKey, Int), RowMapTree]
-  val segInfos = new HashMap[(TableName, PartitionKey, Int), (Long, Seq[(ByteVector, ByteVector, Int)])]
+  val segInfos = new HashMap[(TableName, PartitionKey, Int), (Long, SegInfoTree)]
 
   def initializeProjection(projection: Projection): Future[Response] = Future.successful(Success)
 
@@ -121,11 +123,11 @@ extends CachedMergingColumnStore with StrictLogging {
                                version: Int,
                                partition: PartitionKey): Future[(Long, Seq[SegmentInfo[K]])] = Future {
     val (uuid, rawSegInfos) = segInfos.getOrElse((projection.dataset.name, partition, version),
-                                                 (0L, Nil))
-    (uuid, rawSegInfos.map { case (rawStart, rawEnd, numRows) =>
-             SegmentInfo(projection.helper.fromSegmentBinary(rawStart),
-                         projection.helper.fromSegmentBinary(rawEnd),
-                         numRows)
+                                                 (0L, EmptySegInfoTree))
+    (uuid, rawSegInfos.entrySet.iterator.toSeq.map { entry =>
+             SegmentInfo(projection.helper.fromSegmentBinary(entry.getKey),
+                         projection.helper.fromSegmentBinary(entry.getValue._1),
+                         entry.getValue._2)
            })
   }
 
@@ -137,24 +139,22 @@ extends CachedMergingColumnStore with StrictLogging {
                                  prevUuid: Long,
                                  newSegmentInfos: Seq[SegmentInfo[K]]): Future[Response] = Future {
     segInfos.synchronized {
-      val (origUuid, origSegInfos) = segInfos.getOrElse((projection.dataset.name, partition, version),
-                                                        (0L, Nil))
+      val (origUuid, segInfoTree) = segInfos.getOrElse((projection.dataset.name, partition, version),
+                                                        (0L, new SegInfoTree(Ordering[ByteVector])))
       if (prevUuid != origUuid) {
         logger.info(s"Stored UUID $origUuid does not match passed UUID $prevUuid, beware multiple writers!")
         NotApplied
       } else {
         val helper = projection.helper
-        // insert newSegmentInfos into orig infos, keep everything sorted (append + sort)
-        val newRawInfos = newSegmentInfos.map {
-          case SegmentInfo(start, end, numRows) => (helper.toSegmentBinary(start),
-                                                    helper.toSegmentBinary(end), numRows) }
-        val sortedInfos = (origSegInfos ++ newRawInfos).sortBy(_._1)
+        newSegmentInfos.foreach { case SegmentInfo(start, end, numRows) =>
+          segInfoTree.put(helper.toSegmentBinary(start), (helper.toSegmentBinary(end), numRows))
+        }
 
         // Compute new Uuid.  TODO - find a better algorithm, is this really unique?
         val newUuid = java.util.UUID.randomUUID.getMostSignificantBits
 
-        segInfos((projection.dataset.name, partition, version)) = (newUuid, sortedInfos)
-        Success
+        segInfos((projection.dataset.name, partition, version)) = (newUuid, segInfoTree)
+        SegmentsUpdated(newUuid)
       }
     }
   }

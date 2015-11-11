@@ -80,6 +80,7 @@ trait ColumnStore {
 
 case class ChunkedData(column: Types.ColumnId, chunks: Seq[(Types.SegmentId, Types.ChunkID, ByteBuffer)])
 case class SegmentInfo[K](start: Option[K], end: Option[K], numRows: Int)
+case class SegmentsUpdated(newUuid: Long) extends Response
 
 /**
  * A partial implementation of a ColumnStore, based on separating storage of chunks and ChunkRowMaps,
@@ -182,6 +183,7 @@ trait CachedMergingColumnStore extends ColumnStore with StrictLogging {
    * Think of this as a form of optimistic locking.
    * @param prevUuid the unique ID of the previous segment infos.  If there was no previous info, then 0L.
    * @param newSegmentInfos any new segments to be added to the partition
+   * @return SegmentsUpdated with the new UUID if successful, NotApplied if UUIDs do not match
    */
   def updatePartitionSegments[K](projection: RichProjection[K],
                                  version: Int,

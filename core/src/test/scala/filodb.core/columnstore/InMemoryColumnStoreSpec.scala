@@ -27,20 +27,37 @@ class InMemoryColumnStoreSpec extends FunSpec with Matchers with BeforeAndAfter 
 
   describe("PartitionSegments") {
     it("should update partition segments where no dataset/partition existed") {
-      columnStore.updatePartitionSegments(projection, 0, "A", 0, aSegments).futureValue should equal (Success)
+      val resp = columnStore.updatePartitionSegments(projection, 0, "A", 0, aSegments).futureValue
+      resp shouldBe a [SegmentsUpdated]
       val (uuid, infos) = columnStore.readPartitionSegments(projection, 0, "A").futureValue
       infos should equal (aSegments)
+      resp.asInstanceOf[SegmentsUpdated].newUuid should equal (uuid)
     }
 
     it("should add new partition segments to existing dataset/partition") {
-      columnStore.updatePartitionSegments(projection, 0, "B", 0, aSegments).futureValue should equal (Success)
-      val (uuid, infos) = columnStore.readPartitionSegments(projection, 0, "B").futureValue
-      infos should equal (aSegments)
+      val resp = columnStore.updatePartitionSegments(projection, 0, "B", 0, aSegments).futureValue
+      resp shouldBe a [SegmentsUpdated]
 
-      columnStore.updatePartitionSegments(projection, 0, "B", uuid, bSegments).futureValue should
-          equal (Success)
+      resp match {
+        case SegmentsUpdated(newUuid) =>
+          columnStore.updatePartitionSegments(projection, 0, "B", newUuid, bSegments).
+            futureValue shouldBe a [SegmentsUpdated]
+      }
       val (_, infos2) = columnStore.readPartitionSegments(projection, 0, "B").futureValue
       infos2 should equal (sortedSegments)
+    }
+
+    it("should replace existing partition segment info") {
+      val resp = columnStore.updatePartitionSegments(projection, 0, "B", 0, aSegments).futureValue
+      resp match {
+        case SegmentsUpdated(newUuid) =>
+          val resp2 = columnStore.updatePartitionSegments(projection, 0, "B", newUuid, aSegments.take(1))
+                        .futureValue
+          resp2 shouldBe a [SegmentsUpdated]
+      }
+
+      val (uuid, infos) = columnStore.readPartitionSegments(projection, 0, "B").futureValue
+      infos should equal (aSegments)
     }
 
     it("should return Nil when existing dataset/partition doesn't exist") {
@@ -49,7 +66,8 @@ class InMemoryColumnStoreSpec extends FunSpec with Matchers with BeforeAndAfter 
     }
 
     it("should return NotApplied if prevUuid does not match") {
-      columnStore.updatePartitionSegments(projection, 0, "C", 0, aSegments).futureValue should equal (Success)
+      columnStore.updatePartitionSegments(projection, 0, "C", 0, aSegments).
+        futureValue shouldBe a [SegmentsUpdated]
       val (uuid, infos) = columnStore.readPartitionSegments(projection, 0, "C").futureValue
 
       columnStore.updatePartitionSegments(projection, 0, "C", uuid + 111, bSegments).futureValue should
