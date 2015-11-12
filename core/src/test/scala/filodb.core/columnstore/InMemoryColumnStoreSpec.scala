@@ -6,23 +6,22 @@ import filodb.core.metadata.{Column, Dataset, RichProjection}
 import org.scalatest.{FunSpec, Matchers, BeforeAndAfter}
 import org.scalatest.concurrent.ScalaFutures
 
-// TODO: Test other ColumnStore logic, especially read side and appendSegments
-// This tests both ColumnStore and InMemoryColumnStore logic.
-class InMemoryColumnStoreSpec extends FunSpec with Matchers with BeforeAndAfter with ScalaFutures {
+trait PartitionSegmentColStoreTests extends FunSpec with Matchers with BeforeAndAfter with ScalaFutures {
   import SegmentSpec._
 
-  private val toSegmentInfo = (t: (Long, Int)) => SegmentInfo(Some(t._1), None, t._2)
+  def columnStore: CachedMergingColumnStore
 
-  val aSegments = Seq((10L, 10), (100L, 5), (150L, 20)).map(toSegmentInfo)
-  val bSegments = Seq((0L, 3), (180L, 15)).map(toSegmentInfo)
-  val sortedSegments = Seq((0L, 3), (10L, 10), (100L, 5), (150L, 20), (180L, 15)).map(toSegmentInfo)
+  private val toSegmentInfo = (t: (Long, Long, Int)) => SegmentInfo(if (t._1 == 0L) None else Some(t._1),
+                                                                    Some(t._2), t._3)
 
-  import scala.concurrent.ExecutionContext.Implicits.global
-  val columnStore = new InMemoryColumnStore
+  val aSegments = Seq((0L, 10L, 10), (100L, 150L, 5), (150L, 199L, 20)).map(toSegmentInfo)
+  val bSegments = Seq((10L, 100L, 3), (199L, 220L, 15)).map(toSegmentInfo)
+  val sortedSegments = Seq((0L, 10L, 10), (10L, 100L, 3), (100L, 150L, 5),
+                           (150L, 199L, 20), (199L, 220L, 15)).map(toSegmentInfo)
 
   before {
     columnStore.clearSegmentCache()
-    columnStore.clearProjectionData(dataset.projections.head)
+    columnStore.clearProjectionData(dataset.projections.head).futureValue
   }
 
   describe("PartitionSegments") {
@@ -74,4 +73,12 @@ class InMemoryColumnStoreSpec extends FunSpec with Matchers with BeforeAndAfter 
           equal (NotApplied)
     }
   }
+}
+
+// TODO: Test other ColumnStore logic, especially read side and appendSegments
+// This tests both ColumnStore and InMemoryColumnStore logic.
+class InMemoryColumnStoreSpec extends PartitionSegmentColStoreTests {
+  import SegmentSpec._
+  import scala.concurrent.ExecutionContext.Implicits.global
+  val columnStore = new InMemoryColumnStore
 }

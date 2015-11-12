@@ -4,12 +4,13 @@ import com.typesafe.config.Config
 import com.typesafe.scalalogging.slf4j.StrictLogging
 import java.nio.ByteBuffer
 import scala.concurrent.{ExecutionContext, Future}
+import scodec.bits._
 import spray.caching._
 
 import filodb.cassandra.FiloCassandraConnector
 import filodb.core._
 import filodb.core.columnstore.CachedMergingColumnStore
-import filodb.core.metadata.{Column, Projection}
+import filodb.core.metadata.{Column, Projection, RichProjection}
 
 /**
  * Implementation of a column store using Apache Cassandra tables.
@@ -135,6 +136,42 @@ extends CachedMergingColumnStore with StrictLogging {
       rowMaps.map { case (part, ChunkRowMapRecord(segmentId, chunkIds, rowNums, nextChunkId)) =>
         (part, segmentId, new BinaryChunkRowMap(chunkIds, rowNums, nextChunkId))
       }
+    }
+  }
+
+  def readPartitionSegments[K](projection: RichProjection[K],
+                               version: Int,
+                               partition: PartitionKey): Future[(Long, Seq[SegmentInfo[K]])] = {
+    val helper = projection.helper
+    for { (chunkTable, rowMapTable) <- getSegmentTables(projection.dataset.name)
+          uuidOpt <- rowMapTable.readUuid(partition, version)
+          uuid = uuidOpt.getOrElse(0L)
+          rawSegInfos <- rowMapTable.readSegmentInfos(partition, version) } yield {
+      val segInfos = rawSegInfos.map { case (startBB, endBB, numRows) =>
+        SegmentInfo[K](helper.fromSegmentBinary(ByteVector(startBB)),
+                       helper.fromSegmentBinary(ByteVector(endBB)),
+                       numRows)
+      }
+      (uuid, segInfos)
+    }
+  }
+
+  def updatePartitionSegments[K](projection: RichProjection[K],
+                                 version: Int,
+                                 partition: PartitionKey,
+                                 prevUuid: Long,
+                                 newSegmentInfos: Seq[SegmentInfo[K]]): Future[Response] = {
+    val helper = projection.helper
+    val rawInfos = newSegmentInfos.map { case SegmentInfo(start, end, numRows) =>
+      (helper.toSegmentBinary(start).toByteBuffer, helper.toSegmentBinary(end).toByteBuffer, numRows)
+    }
+    // Compute new Uuid.  TODO - find a better algorithm, is this really unique?
+    val newUuid = java.util.UUID.randomUUID.getMostSignificantBits
+    for { (chunkTable, rowMapTable) <- getSegmentTables(projection.dataset.name)
+          resp <- rowMapTable.updateSegmentInfos(partition, version, prevUuid, newUuid, rawInfos) }
+    yield {
+      if (resp == Success) { SegmentsUpdated(newUuid) }
+      else                 { resp }
     }
   }
 
