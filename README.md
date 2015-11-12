@@ -3,6 +3,8 @@
 [![Join the chat at https://gitter.im/velvia/FiloDB](https://badges.gitter.im/Join%20Chat.svg)](https://gitter.im/velvia/FiloDB?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)
 Distributed.  Columnar.  Versioned.  Streaming.  SQL.
 
+## NOTE: The repo has been relocated to [TupleJump](http://github.com/tuplejump/FiloDB).
+
 ```
     _______ __      ____  ____ 
    / ____(_) /___  / __ \/ __ )
