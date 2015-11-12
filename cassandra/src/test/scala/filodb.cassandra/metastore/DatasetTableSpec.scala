@@ -4,6 +4,7 @@ import com.typesafe.config.ConfigFactory
 import com.websudos.phantom.dsl._
 import com.websudos.phantom.testkit._
 import org.scalatest.BeforeAndAfter
+import org.scalatest.concurrent.PatienceConfiguration.Timeout
 import scala.concurrent.Await
 import scala.concurrent.duration._
 import scala.language.postfixOps
@@ -20,11 +21,13 @@ class DatasetTableSpec extends CassandraFlatSpec with BeforeAndAfter {
   override def beforeAll() {
     super.beforeAll()
     // Note: This is a CREATE TABLE IF NOT EXISTS
-    datasetTable.initialize().futureValue
+    val timeout = Timeout(5000 seconds)
+    datasetTable.initialize().futureValue(timeout)
   }
 
   before {
-    datasetTable.clearAll().futureValue
+    val timeout = Timeout(5000 seconds)
+    datasetTable.clearAll().futureValue(timeout)
   }
 
   val fooDataset = Dataset("foo", "someSortCol")
