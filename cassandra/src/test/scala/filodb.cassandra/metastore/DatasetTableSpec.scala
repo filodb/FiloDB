@@ -29,7 +29,7 @@ class DatasetTableSpec extends CassandraFlatSpec with BeforeAndAfter {
   }
 
   val fooDataset = Dataset("foo", "someSortCol")
-  val timeout = Timeout(50 seconds)
+  val timeout = Timeout(10 seconds)
   import scala.concurrent.ExecutionContext.Implicits.global
 
   "DatasetTable" should "create a dataset successfully, then return AlreadyExists" in {
