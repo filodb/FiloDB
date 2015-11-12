@@ -155,18 +155,18 @@ extends CachedMergingColumnStore with StrictLogging {
     val metadata = clusterConnector.session.getCluster.getMetadata
     val splitsPerNode = params.getOrElse("splits_per_node", "1").toInt
     require(splitsPerNode >= 1, s"Must specify at least 1 splits_per_node, got $splitsPerNode")
-    val tokensByReplica = metadata.getTokenRanges.asScala.toSeq.groupBy(tokenRange =>
-      metadata.getReplicas(clusterConnector.keySpace.name,
-      tokenRange))
-    val tokenRanges = for {key <- tokensByReplica.keys} yield {
+    val tokensByReplica = metadata.getTokenRanges.asScala.toSeq.groupBy { tokenRange =>
+      metadata.getReplicas(clusterConnector.keySpace.name, tokenRange)
+    }
+    val tokenRanges = for { key <- tokensByReplica.keys } yield {
       if (tokensByReplica(key).size > 1) {
         tokensByReplica(key).reduceLeft(_.mergeWith(_)).splitEvenly(splitsPerNode).asScala
       }
       else {
-        tokensByReplica(key).flatMap(range => range.splitEvenly(splitsPerNode).asScala)
+        tokensByReplica(key).flatMap { range => range.splitEvenly(splitsPerNode).asScala }
       }
     }
-    val tokensComplete = tokenRanges.flatMap(token => token).toSeq
+    val tokensComplete = tokenRanges.flatMap { token => token } .toSeq
     tokensComplete.map { tokenRange =>
       val replicas = metadata.getReplicas(clusterConnector.keySpace.name, tokenRange).asScala
       Map("token_start" -> tokenRange.getStart.toString,
