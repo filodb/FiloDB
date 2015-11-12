@@ -21,17 +21,15 @@ class DatasetTableSpec extends CassandraFlatSpec with BeforeAndAfter {
   override def beforeAll() {
     super.beforeAll()
     // Note: This is a CREATE TABLE IF NOT EXISTS
-    val timeout = Timeout(5000 seconds)
     datasetTable.initialize().futureValue(timeout)
   }
 
   before {
-    val timeout = Timeout(5000 seconds)
     datasetTable.clearAll().futureValue(timeout)
   }
 
   val fooDataset = Dataset("foo", "someSortCol")
-  val timeout = Timeout(5000 seconds)
+  val timeout = Timeout(50 seconds)
   import scala.concurrent.ExecutionContext.Implicits.global
 
   "DatasetTable" should "create a dataset successfully, then return AlreadyExists" in {
