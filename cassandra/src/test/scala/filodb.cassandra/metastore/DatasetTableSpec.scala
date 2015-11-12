@@ -31,16 +31,16 @@ class DatasetTableSpec extends CassandraFlatSpec with BeforeAndAfter {
   }
 
   val fooDataset = Dataset("foo", "someSortCol")
-
+  val timeout = Timeout(5000 seconds)
   import scala.concurrent.ExecutionContext.Implicits.global
 
   "DatasetTable" should "create a dataset successfully, then return AlreadyExists" in {
-    whenReady(datasetTable.createNewDataset(fooDataset)) { response =>
+    whenReady(datasetTable.createNewDataset(fooDataset),timeout) { response =>
       response should equal (Success)
     }
 
     // Second time around, dataset already exists
-    whenReady(datasetTable.createNewDataset(fooDataset)) { response =>
+    whenReady(datasetTable.createNewDataset(fooDataset),timeout) { response =>
       response should equal (AlreadyExists)
     }
   }
@@ -48,29 +48,29 @@ class DatasetTableSpec extends CassandraFlatSpec with BeforeAndAfter {
   // Apparently, deleting a nonexisting dataset also returns success.  :/
 
   it should "delete a dataset" in {
-    whenReady(datasetTable.createNewDataset(fooDataset)) { response =>
+    whenReady(datasetTable.createNewDataset(fooDataset),timeout) { response =>
       response should equal (Success)
     }
-    whenReady(datasetTable.deleteDataset("foo")) { response =>
+    whenReady(datasetTable.deleteDataset("foo"),timeout) { response =>
       response should equal (Success)
     }
 
-    whenReady(datasetTable.getDataset("foo").failed) { err =>
+    whenReady(datasetTable.getDataset("foo").failed,timeout) { err =>
       err shouldBe a [NotFoundError]
     }
   }
 
   it should "return NotFoundError when trying to get nonexisting dataset" in {
-    whenReady(datasetTable.getDataset("foo").failed) { err =>
+    whenReady(datasetTable.getDataset("foo").failed,timeout) { err =>
       err shouldBe a [NotFoundError]
     }
   }
 
   it should "return the Dataset if it exists" in {
     val barDataset = Dataset("bar", "sortCol")
-    datasetTable.createNewDataset(barDataset).futureValue should equal (Success)
+    datasetTable.createNewDataset(barDataset).futureValue(timeout) should equal (Success)
 
-    whenReady(datasetTable.getDataset("bar")) { dataset =>
+    whenReady(datasetTable.getDataset("bar"),timeout) { dataset =>
       dataset should equal (barDataset)
     }
   }
