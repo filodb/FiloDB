@@ -170,8 +170,8 @@ extends CachedMergingColumnStore with StrictLogging {
     tokensComplete.map { tokenRange =>
       val replicas = metadata.getReplicas(clusterConnector.keySpace.name, tokenRange).asScala
       Map("token_start" -> tokenRange.getStart.toString,
-        "token_end" -> tokenRange.getEnd.toString,
-        "replicas" -> replicas.map(_.toString).mkString(","))
+          "token_end"   -> tokenRange.getEnd.toString,
+          "replicas"    -> replicas.map(_.toString).mkString(","))
     }
   }
 
