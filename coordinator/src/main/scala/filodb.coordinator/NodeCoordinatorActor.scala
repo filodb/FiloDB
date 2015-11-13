@@ -10,7 +10,7 @@ import scala.concurrent.duration._
 import filodb.core._
 import filodb.core.Types._
 import filodb.core.metadata.{Column, Dataset, MetaStore, Projection, RichProjection}
-import filodb.core.columnstore.ColumnStore
+import filodb.core.columnstore.CachedMergingColumnStore
 import filodb.core.reprojector.Reprojector
 
 /**
@@ -102,7 +102,7 @@ object NodeCoordinatorActor {
 
   def props(metaStore: MetaStore,
             reprojector: Reprojector,
-            columnStore: ColumnStore,
+            columnStore: CachedMergingColumnStore,
             config: Config): Props =
     Props(classOf[NodeCoordinatorActor], metaStore, reprojector, columnStore, config)
 }
@@ -114,7 +114,7 @@ object NodeCoordinatorActor {
  */
 class NodeCoordinatorActor(metaStore: MetaStore,
                            reprojector: Reprojector,
-                           columnStore: ColumnStore,
+                           columnStore: CachedMergingColumnStore,
                            config: Config) extends BaseActor {
   import NodeCoordinatorActor._
   import context.dispatcher

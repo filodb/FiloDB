@@ -75,13 +75,13 @@ with ScalaFutures {
   val testReprojector = new Reprojector {
     import filodb.core.columnstore.Segment
 
-    def reproject[K](memTable: MemTable[K], version: Int): Future[Seq[String]] = {
+    def reproject[K](memTable: MemTable[K], version: Int, ranges: Seq[KeyRange[K]]):
+        Future[Seq[KeyRange[K]]] = {
       reprojections = reprojections :+ (memTable.projection.dataset.name -> version)
-      Future.successful(Seq("Success"))
-
+      Future.successful(ranges)
     }
 
-    def toSegments[K](memTable: MemTable[K]): Iterator[Segment[K]] = ???
+    def toSegments[K](memTable: MemTable[K], ranges: Seq[KeyRange[K]]): Iterator[Segment[K]] = ???
   }
 
   it("should respond to GetStats with no flushes and no rows") {

@@ -3,7 +3,7 @@ package filodb.coordinator
 import akka.actor.ActorSystem
 import com.typesafe.config.Config
 
-import filodb.core.columnstore.ColumnStore
+import filodb.core.columnstore.{CachedMergingColumnStore, ColumnStore}
 import filodb.core.FutureUtils
 import filodb.core.metadata.MetaStore
 import filodb.core.reprojector._
@@ -28,7 +28,8 @@ trait CoordinatorSetup {
 
   // TODO: consider having a root actor supervising everything
   lazy val coordinatorActor =
-    system.actorOf(NodeCoordinatorActor.props(metaStore, reprojector, columnStore, config),
+    system.actorOf(NodeCoordinatorActor.props(metaStore, reprojector,
+                   columnStore.asInstanceOf[CachedMergingColumnStore], config),
                    "coordinator")
 }
 
