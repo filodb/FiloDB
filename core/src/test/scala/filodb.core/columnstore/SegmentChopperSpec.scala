@@ -139,21 +139,21 @@ class SegmentChopperSpec extends FunSpec with Matchers with BeforeAndAfter with 
       val chopper = new SegmentChopper(projection, metaMap, 10, 20)
       // Update only partition a, then only b, just make sure that works
       chopper.insertKeysForPartition("a", (0 to 15).map(_.toLong))
-      val uuidMap2 = SegmentChopper.tryUpdateSegmentInfos(projection, Seq("a", "b"), 0,
+      val uuidMap2 = SegmentChopper.tryUpdateSegmentInfos(projection, 0,
                                                           chopper, uuidMap, columnStore).futureValue
       uuidMap2.keys should equal (Set("a"))   // "b" is empty
 
       uuidMap ++= uuidMap2
       val chopper2 = new SegmentChopper(projection, chopper.segmentMetaMap, 10, 20)
       chopper2.insertKeysForPartition("b", Seq(10L, 15L, 12345L, 67890L))
-      val uuidMap3 = SegmentChopper.tryUpdateSegmentInfos(projection, Seq("a", "b"), 0,
+      val uuidMap3 = SegmentChopper.tryUpdateSegmentInfos(projection, 0,
                                                           chopper2, uuidMap, columnStore).futureValue
       uuidMap3.keys should equal (Set("b"))
 
       // Update a again, now both a and b should be updates
       chopper2.insertKeysForPartition("a", Seq(16L, 70L))
       uuidMap ++= uuidMap3
-      val uuidMap4 = SegmentChopper.tryUpdateSegmentInfos(projection, Seq("a", "b"), 0,
+      val uuidMap4 = SegmentChopper.tryUpdateSegmentInfos(projection, 0,
                                                           chopper2, uuidMap, columnStore).futureValue
       uuidMap4.keys should equal (Set("a", "b"))
 
@@ -170,14 +170,14 @@ class SegmentChopperSpec extends FunSpec with Matchers with BeforeAndAfter with 
                                               futureValue
       val chopper = new SegmentChopper(projection, metaMap, 10, 20)
       chopper.insertKeysForPartition("a", (0 to 15).map(_.toLong))
-      val uuidMap2 = SegmentChopper.tryUpdateSegmentInfos(projection, Seq("a", "b"), 0,
+      val uuidMap2 = SegmentChopper.tryUpdateSegmentInfos(projection, 0,
                                                           chopper, uuidMap, columnStore).futureValue
       uuidMap2.keys should equal (Set("a"))   // "b" is empty
 
       // Now, let's pretend another node also writing to partition a.  It doesn't know about new uuid.
       val chopper2 = new SegmentChopper(projection, metaMap, 10, 20)
       chopper2.insertKeysForPartition("a", (30L to 35L))
-      val uuidMap3 = SegmentChopper.tryUpdateSegmentInfos(projection, Seq("a", "b"), 0,
+      val uuidMap3 = SegmentChopper.tryUpdateSegmentInfos(projection, 0,
                                                           chopper2, uuidMap, columnStore).futureValue
       uuidMap3.keys should equal (Set())     // writes to a segmentInfo should fail
     }

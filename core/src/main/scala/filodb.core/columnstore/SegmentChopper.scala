@@ -244,18 +244,17 @@ object SegmentChopper extends StrictLogging {
    *         reloaded for these partition keys.
    */
   def tryUpdateSegmentInfos[K](projection: RichProjection[K],
-                               partitions: Seq[PartitionKey],
                                version: Int,
                                chopper: SegmentChopper[K],
                                uuidMap: SegmentUuidMap,
                                columnStore: CachedMergingColumnStore)
                               (implicit ec: ExecutionContext): Future[Map[PartitionKey, Long]] = {
     val infoMap = chopper.updatedSegments()
-    val filteredPartitions = partitions.filter { p => infoMap(p).nonEmpty }
+    val filteredPartitions = infoMap.keys.filter { p => infoMap(p).nonEmpty }.toSeq
     for { responses <- Future.sequence(filteredPartitions.map { p =>
                          columnStore.updatePartitionSegments(projection, version, p, uuidMap(p), infoMap(p))
                        }) } yield {
-      logger.debug(s"Responses for updating segment infos for partitions $partitions: $responses")
+      logger.debug(s"Responses for updating segment infos for partitions $filteredPartitions: $responses")
       responses.zip(filteredPartitions).collect {
         case (SegmentsUpdated(newUuid), part) => part -> newUuid }.toMap
     }
