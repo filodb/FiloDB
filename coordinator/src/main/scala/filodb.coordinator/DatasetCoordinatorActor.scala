@@ -165,15 +165,23 @@ private[filodb] class DatasetCoordinatorActor[K](projection: RichProjection[K],
   private def getRealFreeMb: Int =
     ((sys.runtime.maxMemory - (sys.runtime.totalMemory - sys.runtime.freeMemory)) / (1024 * 1024)).toInt
 
+  // Finds and loads missing partition info if needed from column store
   private def initializeChopper(memTable: MemTable[K]): Future[SegmentChopper[K]] = {
-    for { (metaMap, uuidMap) <- SegmentChopper.loadSegmentInfos(
-                                  projection, memTable.partitions.toSeq, version,
-                                  columnStore) } yield {
-      flushingChopper = new SegmentChopper(projection,
-                                           flushingChopper.segmentMetaMap ++ metaMap)
-      flushingUuidMap ++= uuidMap
-      flushingChopper.insertOrderedKeys(memTable.allKeys)
-      flushingChopper
+    val missingPartitions = memTable.partitions -- flushingChopper.segmentMetaMap.keys
+    if (missingPartitions.nonEmpty) {
+      logger.info(s"Loading segment info for missing partitions $missingPartitions")
+      for { (metaMap, uuidMap) <- SegmentChopper.loadSegmentInfos(
+                                    projection, missingPartitions.toSeq, version,
+                                    columnStore) } yield {
+        flushingChopper = new SegmentChopper(projection,
+                                             flushingChopper.segmentMetaMap ++ metaMap)
+        flushingUuidMap ++= uuidMap
+        flushingChopper.insertOrderedKeys(memTable.allKeys)
+        flushingChopper
+      }
+    } else {
+      flushingChopper = new SegmentChopper(projection, flushingChopper.segmentMetaMap)
+      Future.successful(flushingChopper)
     }
   }
 
@@ -185,11 +193,12 @@ private[filodb] class DatasetCoordinatorActor[K](projection: RichProjection[K],
                         projection, version,
                         flushingChopper, flushingUuidMap,
                         columnStore) } yield {
-      // NOTE: really need something working below.  Or have tryUpdate... return failures as well as successes
+      // TODO: really need something working below.  Or have tryUpdate... return failures as well as successes
       val failedPartitions = flushingTable.get.partitions -- newUuids.keys
       if (failedPartitions.isEmpty) {
         flushingUuidMap ++= newUuids
       } else {
+        logger.info(s"updateSegmentMeta failed for ($nameVer): need to resync partitions $failedPartitions")
         loadSegmentInfos(projection, failedPartitions.toSeq, version, columnStore).flatMap {
           case (newMetaMap, newUuidMap) =>
             flushingUuidMap ++= newUuidMap
