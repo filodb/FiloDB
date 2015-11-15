@@ -94,13 +94,13 @@ with CoordinatorSetup with AllTablesTest {
     probe.expectMsg(Flushed)
 
     // Now, read stuff back from the column store and check that it's all there
-    val keyRange = KeyRange(largeDataset.name, "nfc", 0L, 30000L)
+    val keyRange = KeyRange[Long](largeDataset.name, "nfc", None, Some(30000L))
     whenReady(columnStore.readSegments(schema, keyRange, 0)) { segIter =>
       val segments = segIter.toSeq
-      segments should have length (3)
+      segments should have length (1)
       val readSeg = segments.head.asInstanceOf[RowReaderSegment[Long]]
-      readSeg.keyRange should equal (keyRange.copy(end = 10000L))
-      readSeg.rowIterator().map(_.getLong(2)).toSeq should equal ((0 to 99).map(_.toLong))
+      readSeg.keyRange should equal (keyRange.copy(end = None))
+      readSeg.rowIterator().map(_.getLong(2)).toSeq.take(100) should equal ((0 to 99).map(_.toLong))
     }
 
     val splits = columnStore.getScanSplits(largeDataset.name)
@@ -108,7 +108,7 @@ with CoordinatorSetup with AllTablesTest {
     whenReady(columnStore.scanSegments[Long](schema, largeDataset.name, 0,
                                              params = splits.head)) { segIter =>
       val segments = segIter.toSeq
-      segments should have length (6)
+      segments should have length (2)
     }
   }
 }

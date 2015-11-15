@@ -51,9 +51,14 @@ class MapDBMemTableSpec extends FunSpec with Matchers with BeforeAndAfter with S
       resp should equal (2)
 
       mTable.numRows should equal (6)
+      mTable.partitions should equal (Set(Dataset.DefaultPartitionKey))
 
       val outRows = mTable.readRows(keyRange)
       outRows.toSeq.map(_.getString(0)) should equal (firstNames)
+
+      val outKeys = mTable.allKeys.toSeq
+      outKeys.map(_._1).toSet should equal (Set(Dataset.DefaultPartitionKey))
+      outKeys.map(_._2) should equal (Seq(24L, 25L, 28L, 29L, 39L, 40L))
     }
 
     it("should replace rows and read them back in order") {
@@ -69,6 +74,22 @@ class MapDBMemTableSpec extends FunSpec with Matchers with BeforeAndAfter with S
       outRows.toSeq.map(_.getString(0)) should equal (Seq("Khalil", "Rodney", "Ndamukong", "Jerry"))
     }
 
+    it("should read rows with endExclusive true/false and start = None correctly") {
+      val mTable = new MapDBMemTable(projection, config)
+      mTable.ingestRows(names.map(TupleRowReader)) { resp = 2 }
+      resp should equal (2)
+
+      val outRows = mTable.readRows(keyRange.copy(start = None))
+      outRows.toSeq.map(_.getString(0)) should equal (firstNames)
+
+      val keyRange2 = keyRange.copy(start = Some(25L), end = Some(29L))
+      val outRows2 = mTable.readRows(keyRange2)
+      outRows2.toSeq.map(_.getString(0)) should equal (Seq("Rodney", "Ndamukong"))
+
+      val outRows3 = mTable.readRows(keyRange2.copy(endExclusive = false))
+      outRows3.toSeq.map(_.getString(0)) should equal (Seq("Rodney", "Ndamukong", "Terrance"))
+    }
+
     it("should ingest into multiple partitions using partition column") {
       val memTable = new MapDBMemTable(projWithPartCol, config)
 
@@ -76,6 +97,7 @@ class MapDBMemTableSpec extends FunSpec with Matchers with BeforeAndAfter with S
       resp should equal (66)
 
       memTable.numRows should equal (50 * names.length)
+      memTable.partitions should equal (Set((0 until 50).map(_.toString) :_*))
 
       val outRows = memTable.readRows(keyRange.copy(partition = "5"))
       outRows.toSeq.map(_.getString(0)) should equal (firstNames)

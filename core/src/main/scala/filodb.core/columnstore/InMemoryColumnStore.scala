@@ -6,10 +6,11 @@ import java.util.concurrent.ConcurrentSkipListMap
 import javax.xml.bind.DatatypeConverter
 import scala.collection.mutable.HashMap
 import scala.concurrent.{ExecutionContext, Future}
+import scodec.bits._
 import spray.caching._
 
 import filodb.core._
-import filodb.core.metadata.{Column, Projection}
+import filodb.core.metadata.{Column, Projection, RichProjection}
 
 /**
  * A ColumnStore implementation which is entirely in memory for speed.
@@ -28,18 +29,22 @@ extends CachedMergingColumnStore with StrictLogging {
   type ChunkKey = (ColumnId, SegmentId, ChunkID)
   type ChunkTree = ConcurrentSkipListMap[ChunkKey, ByteBuffer]
   type RowMapTree = ConcurrentSkipListMap[SegmentId, (ByteBuffer, ByteBuffer, Int)]
+  type SegInfoTree = ConcurrentSkipListMap[ByteVector, (ByteVector, Int)]
 
   val EmptyChunkTree = new ChunkTree(Ordering[ChunkKey])
   val EmptyRowMapTree = new RowMapTree(Ordering[SegmentId])
+  val EmptySegInfoTree = new SegInfoTree(Ordering[ByteVector])
 
   val chunkDb = new HashMap[(TableName, PartitionKey, Int), ChunkTree]
   val rowMaps = new HashMap[(TableName, PartitionKey, Int), RowMapTree]
+  val segInfos = new HashMap[(TableName, PartitionKey, Int), (Long, SegInfoTree)]
 
   def initializeProjection(projection: Projection): Future[Response] = Future.successful(Success)
 
   def clearProjectionDataInner(projection: Projection): Future[Response] = Future {
     chunkDb.keys.collect { case key @ (ds, _, _) if ds == projection.dataset => chunkDb remove key }
     rowMaps.keys.collect { case key @ (ds, _, _) if ds == projection.dataset => rowMaps remove key }
+    segInfos.keys.collect { case key @ (ds, _, _) if ds == projection.dataset => segInfos remove key }
     Success
   }
 
@@ -112,6 +117,46 @@ extends CachedMergingColumnStore with StrictLogging {
                  }
                }
     maps.toIterator
+  }
+
+  def readPartitionSegments[K](projection: RichProjection[K],
+                               version: Int,
+                               partition: PartitionKey): Future[(Long, Seq[SegmentInfo[K]])] = Future {
+    val (uuid, rawSegInfos) = segInfos.getOrElse((projection.dataset.name, partition, version),
+                                                 (0L, EmptySegInfoTree))
+    (uuid, rawSegInfos.entrySet.iterator.toSeq.map { entry =>
+             SegmentInfo(projection.helper.fromSegmentBinary(entry.getKey),
+                         projection.helper.fromSegmentBinary(entry.getValue._1),
+                         entry.getValue._2)
+           })
+  }
+
+  // NOTE: It is up to the application to keep the ChunkRowMaps and the partition segments in sync
+  // at least in this implementation.
+  def updatePartitionSegments[K](projection: RichProjection[K],
+                                 version: Int,
+                                 partition: PartitionKey,
+                                 prevUuid: Long,
+                                 newSegmentInfos: Seq[SegmentInfo[K]]): Future[Response] = Future {
+    segInfos.synchronized {
+      val (origUuid, segInfoTree) = segInfos.getOrElse((projection.dataset.name, partition, version),
+                                                        (0L, new SegInfoTree(Ordering[ByteVector])))
+      if (prevUuid != origUuid) {
+        logger.info(s"Stored UUID $origUuid does not match passed UUID $prevUuid, beware multiple writers!")
+        NotApplied
+      } else {
+        val helper = projection.helper
+        newSegmentInfos.foreach { case SegmentInfo(start, end, numRows) =>
+          segInfoTree.put(helper.toSegmentBinary(start), (helper.toSegmentBinary(end), numRows))
+        }
+
+        // Compute new Uuid.  TODO - find a better algorithm, is this really unique?
+        val newUuid = java.util.UUID.randomUUID.getMostSignificantBits
+
+        segInfos((projection.dataset.name, partition, version)) = (newUuid, segInfoTree)
+        SegmentsUpdated(newUuid)
+      }
+    }
   }
 
   // InMemoryColumnStore is just on one node, so return no splits for now.

@@ -6,8 +6,9 @@ import net.ceedubs.ficus.Ficus._
 import org.velvia.filo.RowReader
 import scala.concurrent.Future
 
+import filodb.core._
 import filodb.core.metadata.{Column, Dataset, Projection, RichProjection}
-import filodb.core.columnstore.ColumnStore
+import filodb.core.columnstore.{ColumnStore, CachedMergingColumnStore, SegmentChopper}
 import filodb.core.reprojector.{MemTable, MapDBMemTable, Reprojector}
 
 object DatasetCoordinatorActor {
@@ -56,12 +57,12 @@ object DatasetCoordinatorActor {
                    numRowsFlushing: Int) extends DSCoordinatorMessage
 
   // Internal messages
-  case class FlushDone(result: Seq[String]) extends DSCoordinatorMessage
+  case class FlushDone[K](result: Seq[KeyRange[K]]) extends DSCoordinatorMessage
   case class FlushFailed(t: Throwable) extends DSCoordinatorMessage
 
   def props[K](projection: RichProjection[K],
                version: Int,
-               columnStore: ColumnStore,
+               columnStore: CachedMergingColumnStore,
                reprojector: Reprojector,
                config: Config): Props =
     Props(classOf[DatasetCoordinatorActor[K]], projection, version, columnStore, reprojector, config)
@@ -96,10 +97,11 @@ object DatasetCoordinatorActor {
  */
 private[filodb] class DatasetCoordinatorActor[K](projection: RichProjection[K],
                                  version: Int,
-                                 columnStore: ColumnStore,
+                                 columnStore: CachedMergingColumnStore,
                                  reprojector: Reprojector,
                                  config: Config) extends BaseActor {
   import DatasetCoordinatorActor._
+  import SegmentChopper._
   import context.dispatcher
 
   val datasetName = projection.dataset.name
@@ -114,8 +116,10 @@ private[filodb] class DatasetCoordinatorActor[K](projection: RichProjection[K],
 
   var activeTable: MemTable[K] = makeNewTable
   var flushingTable: Option[MemTable[K]] = None
+  val flushingUuidMap = new SegmentUuidMap
+  var flushingChopper: SegmentChopper[K] = SegmentChopper(projection, Nil)
 
-  var curReprojection: Option[Future[Seq[String]]] = None
+  var curReprojection: Option[Future[Seq[KeyRange[K]]]] = None
   var flushesStarted = 0
   var flushesSucceeded = 0
   var flushesFailed = 0
@@ -161,6 +165,48 @@ private[filodb] class DatasetCoordinatorActor[K](projection: RichProjection[K],
   private def getRealFreeMb: Int =
     ((sys.runtime.maxMemory - (sys.runtime.totalMemory - sys.runtime.freeMemory)) / (1024 * 1024)).toInt
 
+  // Finds and loads missing partition info if needed from column store
+  private def initializeChopper(memTable: MemTable[K]): Future[SegmentChopper[K]] = {
+    val missingPartitions = memTable.partitions -- flushingChopper.segmentMetaMap.keys
+    if (missingPartitions.nonEmpty) {
+      logger.info(s"Loading segment info for missing partitions $missingPartitions")
+      for { (metaMap, uuidMap) <- SegmentChopper.loadSegmentInfos(
+                                    projection, missingPartitions.toSeq, version,
+                                    columnStore) } yield {
+        flushingChopper = new SegmentChopper(projection,
+                                             flushingChopper.segmentMetaMap ++ metaMap)
+        flushingUuidMap ++= uuidMap
+        flushingChopper.insertOrderedKeys(memTable.allKeys)
+        flushingChopper
+      }
+    } else {
+      flushingChopper = new SegmentChopper(projection, flushingChopper.segmentMetaMap)
+      Future.successful(flushingChopper)
+    }
+  }
+
+  // Try to update the segment meta, and if the CAS fails, re-read the meta and try again for the failed
+  // partitions.
+  // @annotation.tailrec
+  private def updateSegmentMeta(): Future[Unit] = {
+    for { (newUuids, failures) <- SegmentChopper.tryUpdateSegmentInfos(
+                                    projection, version, flushingChopper, flushingUuidMap, columnStore) }
+    yield {
+      flushingUuidMap ++= newUuids
+      if (failures.nonEmpty) {
+        logger.info(s"updateSegmentMeta failed for ($nameVer): need to resync partitions $failures")
+        loadSegmentInfos(projection, failures.toSeq, version, columnStore).flatMap {
+          case (newMetaMap, newUuidMap) =>
+            flushingUuidMap ++= newUuidMap
+            flushingChopper = new SegmentChopper(projection, flushingChopper.segmentMetaMap ++ newMetaMap)
+            val failedKeys = flushingTable.get.allKeys.filter(failures contains _._1)
+            flushingChopper.insertOrderedKeys(failedKeys)
+            updateSegmentMeta()
+        }
+      }
+    }
+  }
+
   private def startFlush(): Unit = {
     logger.info(s"Starting new flush cycle for ($nameVer)...")
     reportStats()
@@ -168,19 +214,27 @@ private[filodb] class DatasetCoordinatorActor[K](projection: RichProjection[K],
       logger.warn("This should not happen. Not starting flush; $curReprojection; $flushingTable")
       return
     }
+    // flushingTable being defined actually marks the beginning of the entire flushing process,
+    // which includes segmentation, updating segment info as well as reprojecting to column store.
+    // curReprojection only includes the reprojection itself.
     flushingTable = Some(activeTable)
     activeTable = makeNewTable()
-    val newTaskFuture = reprojector.reproject(flushingTable.get, version)
-    curReprojection = Some(newTaskFuture)
-    flushesStarted += 1
-    for { results <- newTaskFuture } self ! FlushDone(results)
-    newTaskFuture.recover {
-      case t: Throwable => self ! FlushFailed(t)
+    // Right now, we do segment choppping/segmentation at beginning of flush.
+    // In the future, we'll want to do it live as rows come in for memtable reading.
+    for { chopper <- initializeChopper(flushingTable.get)
+          ()      <- updateSegmentMeta() } {
+      val newTaskFuture = reprojector.reproject(flushingTable.get, version, flushingChopper.keyRanges)
+      curReprojection = Some(newTaskFuture)
+      flushesStarted += 1
+      for { results <- newTaskFuture } self ! FlushDone(results)
+      newTaskFuture.recover {
+        case t: Throwable => self ! FlushFailed(t)
+      }
     }
   }
 
   private def shouldFlush: Boolean =
-    activeRows >= flushTriggerRows && curReprojection == None
+    activeRows >= flushTriggerRows && flushingTable == None
 
   private def handleFlushDone(): Unit = {
     curReprojection = None
@@ -215,7 +269,7 @@ private[filodb] class DatasetCoordinatorActor[K](projection: RichProjection[K],
 
     case StartFlush(originator) =>
       originator.foreach { callbackRef => flushedCallbacks = flushedCallbacks :+ callbackRef }
-      if (!curReprojection.isDefined) { startFlush() }
+      if (!flushingTable.isDefined) { startFlush() }
       else { logger.debug(s"Ignoring StartFlush, reprojection already in progress...") }
 
     case ClearProjection(replyTo, projection) =>

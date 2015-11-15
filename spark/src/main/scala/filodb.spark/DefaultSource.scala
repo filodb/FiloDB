@@ -10,18 +10,20 @@ import org.apache.spark.sql.sources._
 class DefaultSource extends RelationProvider with CreatableRelationProvider {
   import collection.JavaConverters._
 
+  val DefaultSplitsPerNode = "4"
+
   /**
    * Implements dataframe.read() functionality.
    * Parameters:
    *   dataset
    *   version          defaults to 0
-   *   splits_per_node  defaults to 1, the number of splits or read threads per node
+   *   splits_per_node  defaults to 4, the number of splits or read threads per node
    */
   def createRelation(sqlContext: SQLContext, parameters: Map[String, String]): BaseRelation = {
     // dataset is a mandatory parameter.  Need to know the name.
     val dataset = parameters.getOrElse("dataset", sys.error("'dataset' must be specified for FiloDB."))
     val version = parameters.getOrElse("version", "0").toInt
-    val splitsPerNode = parameters.getOrElse("splits_per_node", "1").toInt
+    val splitsPerNode = parameters.getOrElse("splits_per_node", DefaultSplitsPerNode).toInt
     FiloRelation(dataset, version, splitsPerNode = splitsPerNode)(sqlContext)
   }
 
@@ -45,11 +47,10 @@ class DefaultSource extends RelationProvider with CreatableRelationProvider {
     val sortColumn = parameters.getOrElse("sort_column", sys.error("'sort_column' must be specified"))
     val partitionColumn = parameters.get("partition_column")
     val defaultPartKey = parameters.get("default_partition_key")
-    val segmentSize = parameters.get("segment_size")
 
     sqlContext.saveAsFiloDataset(data, dataset,
                                  sortColumn, partitionColumn, version,
-                                 mode, defaultPartKey, segmentSize)
+                                 mode, defaultPartKey)
 
     // The below is inefficient as it reads back the schema that was written earlier - though it shouldn't
     // take very long

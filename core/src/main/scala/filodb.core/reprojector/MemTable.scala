@@ -47,10 +47,15 @@ trait MemTable[K] extends StrictLogging {
   def readRows(keyRange: KeyRange[K]): Iterator[RowReader]
 
   /**
-   * Reads all rows of the memtable out, from every partition.  Partition ordering is not
+   * Reads all keys of the memtable out, from every partition.  Partition ordering is not
    * guaranteed, but all sort keys K within the partition will be ordered.
    */
-  def readAllRows(): Iterator[(PartitionKey, K, RowReader)]
+  def allKeys(): Iterator[(PartitionKey, K)]
+
+  /**
+   * Returns a set of all the partition keys ingested
+   */
+  def partitions: collection.Set[PartitionKey]
 
   /**
    * Removes specific rows from a particular keyRange and version.  Can only remove rows

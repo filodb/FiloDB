@@ -44,7 +44,7 @@ class ChunkMergingStrategySpec extends FunSpec with Matchers {
       val segment = getRowWriter(keyRange)
       segment.addRowsAsChunk(mapper(names take 3), getSortKey _)
 
-      val segment2 = getRowWriter(keyRange.copy(start = 20000L, end = 30000L))
+      val segment2 = getRowWriter(keyRange.copy(start = Some(20000L), end = Some(30000L)))
       segment2.addRowsAsChunk(mapper(names drop 3), getSortKey _)
 
       intercept[RuntimeException] { mergingStrategy.mergeSegments(segment, segment2) }

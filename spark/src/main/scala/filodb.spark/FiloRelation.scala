@@ -25,8 +25,6 @@ import filodb.core.metadata.{Column, Dataset, DatasetOptions}
 import filodb.core.columnstore.RowReaderSegment
 
 object FiloRelation {
-  val DefaultMinPartitions = 1
-
   import TypeConverters._
 
   implicit val context = scala.concurrent.ExecutionContext.Implicits.global
@@ -96,11 +94,9 @@ object FiloRelation {
  * @param sparkContext the spark context to pull config from
  * @param dataset the name of the dataset to read from
  * @param the version of the dataset data to read
- * @param minPartitions the minimum # of partitions to read from
  */
 case class FiloRelation(dataset: String,
                         version: Int = 0,
-                        minPartitions: Int = FiloRelation.DefaultMinPartitions,
                         splitsPerNode: Int = 1)
                        (@transient val sqlContext: SQLContext)
     extends BaseRelation with TableScan with PrunedScan with StrictLogging {
@@ -127,11 +123,12 @@ case class FiloRelation(dataset: String,
     val sortCol = filoSchema(datasetObj.projections.head.sortColumn)
     val splitOpts = Map("splits_per_node" -> splitsPerNode.toString)
     val splits = FiloSetup.columnStore.getScanSplits(dataset, splitOpts)
+    logger.info(s"Splits = $splits")
 
     // NOTE: It's critical that the closure inside mapPartitions only references
     // vars from buildScan() method, and not the FiloRelation class.  Otherwise
     // the entire FiloRelation class would get serialized.
-    sqlContext.sparkContext.parallelize(splits, minPartitions)
+    sqlContext.sparkContext.parallelize(splits, splits.length)
       .mapPartitions { paramIter =>
         perNodeRowScanner(_config, datasetOptionsStr, _version, filoColumns,
                           sortCol, paramIter)

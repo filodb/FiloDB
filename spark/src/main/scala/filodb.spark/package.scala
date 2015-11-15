@@ -73,9 +73,8 @@ package object spark extends StrictLogging {
      */
     def filoDataset(dataset: String,
                     version: Int = 0,
-                    minPartitions: Int = FiloRelation.DefaultMinPartitions,
                     splitsPerNode: Int = 1): DataFrame =
-      sqlContext.baseRelationToDataFrame(FiloRelation(dataset, version, minPartitions, splitsPerNode)
+      sqlContext.baseRelationToDataFrame(FiloRelation(dataset, version, splitsPerNode)
                                                      (sqlContext))
 
     private def runCommands[B](cmds: Set[Future[Response]]): Unit = {
@@ -122,14 +121,12 @@ package object spark extends StrictLogging {
                                  sortColumn: String,
                                  partitionColumn: String,
                                  defaultPartitionKey: Option[Types.PartitionKey],
-                                 segmentSize: Option[String],
                                  df: DataFrame): Unit = {
       df.schema.find(_.name == sortColumn).getOrElse(throw NoSortColumn(sortColumn))
       df.schema.find(_.name == partitionColumn).getOrElse(throw NoPartitionColumn(partitionColumn))
 
       val options = Dataset.DefaultOptions.copy(defaultPartitionKey = defaultPartitionKey)
-      val options2 = segmentSize.map { newSize => options.copy(segmentSize = newSize) }.getOrElse(options)
-      val dataset = Dataset(datasetName, sortColumn, partitionColumn).copy(options = options2)
+      val dataset = Dataset(datasetName, sortColumn, partitionColumn).copy(options = options)
       logger.info(s"Creating dataset $dataset...")
       actorAsk(FiloSetup.coordinatorActor, CreateDataset(dataset, Nil)) {
         case DatasetCreated =>
@@ -171,7 +168,6 @@ package object spark extends StrictLogging {
      * @param mode the Spark SaveMode - ErrorIfExists, Append, Overwrite, Ignore\
      * @param defaultPartitionKey if Some(key), use this when hit null in partition column, otherwise
      *                            throw an error
-     * @param segmentSize the segment size to use when dividing rows into segments
      * @param writeTimeout Maximum time to wait for write of each partition to complete
      */
     def saveAsFiloDataset(df: DataFrame,
@@ -181,7 +177,6 @@ package object spark extends StrictLogging {
                           version: Int = 0,
                           mode: SaveMode = SaveMode.Append,
                           defaultPartitionKey: Option[Types.PartitionKey] = None,
-                          segmentSize: Option[String] = None,
                           writeTimeout: FiniteDuration = DefaultWriteTimeout): Unit = {
       val filoConfig = FiloSetup.configFromSpark(sqlContext.sparkContext)
       FiloSetup.init(filoConfig)
@@ -199,7 +194,7 @@ package object spark extends StrictLogging {
         if (mode == SaveMode.Overwrite) truncateDataset(datasetObj, version)
       } catch {
         case e: NotFoundError =>
-          createNewDataset(dataset, sortColumn, partCol, defaultPartitionKey, segmentSize, df1)
+          createNewDataset(dataset, sortColumn, partCol, defaultPartitionKey, df1)
       }
       checkAndAddColumns(df1, dataset, version)
       val dfColumns = df1.schema.map(_.name)

@@ -43,6 +43,7 @@ class MapDBMemTable[K](val projection: RichProjection[K], config: Config) extend
 
   val serializer = new RowReaderSerializer(projection.columns)
   val sortKeyFunc = projection.sortKeyFunc
+  val partitions = new collection.mutable.HashSet[PartitionKey]()
 
   implicit lazy val sortKeyOrdering: Ordering[K] = projection.helper.ordering
   lazy val rowMap = db.createTreeMap("filo")
@@ -60,25 +61,30 @@ class MapDBMemTable[K](val projection: RichProjection[K], config: Config) extend
     // For each row: insert into rows map
     for { row <- rows } {
       val sortKey = sortKeyFunc(row)
-      rowMap.put((projection.partitionFunc(row), sortKey), serializer.serialize(row))
+      val partition = projection.partitionFunc(row)
+      partitions += partition
+      rowMap.put((partition, sortKey), serializer.serialize(row))
     }
     // Since this is an in-memory table only, just call back right away.
     callback
   }
 
-  def readRows(keyRange: KeyRange[K]): Iterator[RowReader] = {
-    rowMap.subMap((keyRange.partition, keyRange.start), (keyRange.partition, keyRange.end))
-      .keySet.iterator.map { k => serializer.deserialize(rowMap.get(k)) }
+  def readRows(keyRange: KeyRange[K]): Iterator[RowReader] = keyRange match {
+    case KeyRange(_, partition, Some(start), Some(end), endExclusive) =>
+      rowMap.subMap((partition, start), true, (partition, end), !endExclusive)
+        .keySet.iterator.map { k => serializer.deserialize(rowMap.get(k)) }
+    case KeyRange(_, partition, None, Some(end), endExclusive) =>
+      rowMap.subMap((partition, keyRange.helper.minValue), true, (partition, end), !endExclusive)
+        .keySet.iterator.map { k => serializer.deserialize(rowMap.get(k)) }
   }
 
-  def readAllRows(): Iterator[(PartitionKey, K, RowReader)] = {
-    rowMap.keySet.iterator.map { case index @ (part, k) =>
-      (part, k, serializer.deserialize(rowMap.get(index)))
-    }
-  }
+  def allKeys(): Iterator[(PartitionKey, K)] =
+    rowMap.keySet.iterator
 
   def removeRows(keyRange: KeyRange[K]): Unit = {
-    rowMap.subMap((keyRange.partition, keyRange.start), (keyRange.partition, keyRange.end))
+    // TODO: support open-ended keyRanges
+    require(keyRange.start.isDefined && keyRange.end.isDefined)
+    rowMap.subMap((keyRange.partition, keyRange.start.get), (keyRange.partition, keyRange.end.get))
           .keySet.iterator.foreach { k => rowMap.remove(k) }
   }
 
@@ -87,6 +93,7 @@ class MapDBMemTable[K](val projection: RichProjection[K], config: Config) extend
   def clearAllData(): Unit = {
     logger.info(s"MemTable: ERASING ALL TABLES!!")
     db.getAll().keys.foreach(db.delete)
+    partitions.clear()
   }
 }
 

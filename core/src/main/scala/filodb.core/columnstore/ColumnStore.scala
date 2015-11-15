@@ -53,7 +53,7 @@ trait ColumnStore {
    * @param version the version # to read from
    * @return An iterator over RowReaderSegment's
    */
-  def readSegments[K: SortKeyHelper](columns: Seq[Column], keyRange: KeyRange[K], version: Int):
+  def readSegments[K](columns: Seq[Column], keyRange: KeyRange[K], version: Int):
       Future[Iterator[Segment[K]]]
 
   /**
@@ -79,6 +79,8 @@ trait ColumnStore {
 }
 
 case class ChunkedData(column: Types.ColumnId, chunks: Seq[(Types.SegmentId, Types.ChunkID, ByteBuffer)])
+case class SegmentInfo[K](start: Option[K], end: Option[K], numRows: Int)
+case class SegmentsUpdated(newUuid: Long) extends Response
 
 /**
  * A partial implementation of a ColumnStore, based on separating storage of chunks and ChunkRowMaps,
@@ -165,6 +167,31 @@ trait CachedMergingColumnStore extends ColumnStore with StrictLogging {
                        params: Map[String, String]): Future[Iterator[ChunkMapInfo]]
 
   /**
+   * Reads back basic info for all segments in a given partition:
+   * @return (segmentsUuid, segmentInfos) - where segmentsUuid is a unique ID identifying the current
+   *           state of the segments.  The SegmentInfos are returned in order of incr. start value.
+   */
+  def readPartitionSegments[K](projection: RichProjection[K],
+                               version: Int,
+                               partition: PartitionKey): Future[(Long, Seq[SegmentInfo[K]])]
+
+  /**
+   * Atomically updates the segment information for a given partition, succeeding only if the stored
+   * segmentsUuid is equal to prevUuid.  This guarantees that nobody else has modified the segment info
+   * while the writer was updating it in memory.  If NotApplied is returned, then the writer should call
+   * readPartitionSegments and assume another writer has already updated this, and retry.
+   * Think of this as a form of optimistic locking.
+   * @param prevUuid the unique ID of the previous segment infos.  If there was no previous info, then 0L.
+   * @param newSegmentInfos any new segments to be added to the partition
+   * @return SegmentsUpdated with the new UUID if successful, NotApplied if UUIDs do not match
+   */
+  def updatePartitionSegments[K](projection: RichProjection[K],
+                                 version: Int,
+                                 partition: PartitionKey,
+                                 prevUuid: Long,
+                                 newSegmentInfos: Seq[SegmentInfo[K]]): Future[Response]
+
+  /**
    * == Caching and merging implementation of the high level functions ==
    */
 
@@ -173,7 +200,7 @@ trait CachedMergingColumnStore extends ColumnStore with StrictLogging {
   def appendSegment[K](projection: RichProjection[K],
                        segment: Segment[K],
                        version: Int): Future[Response] = {
-    if (segment.isEmpty) return(Future.successful(NotApplied))
+    if (segment.isEmpty) return (Future.successful(NotApplied))
     implicit val helper = projection.helper
     for { oldSegment <- getSegFromCache(projection, segment.keyRange, version)
           mergedSegment = mergingStrategy.mergeSegments(oldSegment, segment)
@@ -189,12 +216,12 @@ trait CachedMergingColumnStore extends ColumnStore with StrictLogging {
     }
   }
 
-  def readSegments[K: SortKeyHelper](columns: Seq[Column], keyRange: KeyRange[K], version: Int):
+  def readSegments[K](columns: Seq[Column], keyRange: KeyRange[K], version: Int):
       Future[Iterator[Segment[K]]] = {
     // TODO: implement actual paging and the iterator over segments.  Or maybe that should be implemented
     // at a higher level.
     (for { rowMaps <- readChunkRowMaps(keyRange, version)
-          chunks   <- readChunks(columns.map(_.name).toSet, keyRange, version) if rowMaps.nonEmpty }
+           chunks   <- readChunks(columns.map(_.name).toSet, keyRange, version) if rowMaps.nonEmpty }
     yield {
       buildSegments(rowMaps, chunks, keyRange, columns).toIterator
     }).recover {
@@ -264,14 +291,14 @@ trait CachedMergingColumnStore extends ColumnStore with StrictLogging {
   import scala.util.control.Breaks._
 
   // @param rowMaps a Seq of (segmentId, ChunkRowMap)
-  private def buildSegments[K: SortKeyHelper](rowMaps: Seq[(SegmentId, BinaryChunkRowMap)],
-                                              chunks: Seq[ChunkedData],
-                                              origKeyRange: KeyRange[K],
-                                              schema: Seq[Column]): Seq[Segment[K]] = {
-    val helper = implicitly[SortKeyHelper[K]]
+  private def buildSegments[K](rowMaps: Seq[(SegmentId, BinaryChunkRowMap)],
+                               chunks: Seq[ChunkedData],
+                               origKeyRange: KeyRange[K],
+                               schema: Seq[Column]): Seq[Segment[K]] = {
+    implicit val helper = origKeyRange.helper
     val segments = rowMaps.map { case (segmentId, rowMap) =>
-        val (segStart, segEnd) = helper.getSegment(helper.fromBytes(segmentId))
-        val segKeyRange = origKeyRange.copy(start = segStart, end = segEnd, endExclusive = true)
+        val segStart = helper.fromSegmentBinary(segmentId)
+        val segKeyRange = origKeyRange.copy(start = segStart, end = None, endExclusive = true)
         new RowReaderSegment(segKeyRange, rowMap, schema)
     }
     chunks.foreach { case ChunkedData(columnName, chunkTriples) =>
@@ -279,7 +306,7 @@ trait CachedMergingColumnStore extends ColumnStore with StrictLogging {
       breakable {
         chunkTriples.foreach { case (segmentId, chunkId, chunkBytes) =>
           // Rely on the fact that chunks are sorted by segmentId, in the same order as the rowMaps
-          val segmentKey = helper.fromBytes(segmentId)
+          val segmentKey = helper.fromSegmentBinary(segmentId)
           while (segmentKey != segments(segIndex).keyRange.start) {
             segIndex += 1
             if (segIndex >= segments.length) {
