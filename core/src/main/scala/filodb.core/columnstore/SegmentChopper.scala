@@ -238,25 +238,28 @@ object SegmentChopper extends StrictLogging {
   /**
    * Attempts to update segmentInfos for a whole set of partitions based on a SegmentChopper and previous
    * UUIDs for each partition.  CompareAndSwap is done on write.
-   * @return a Map(PartitionKey -> UUID) containing the newer UUIDs for successfully updated partitions.
-   *         Missing partition keys for which the compare and swap failed (not I/O failure, which would
-   *         result in a Future failure, but rather that the UUIDs did not agree).  Segment info must be
-   *         reloaded for these partition keys.
+   * @return (newUuids, failedPartitions)
+   *          newUuids - a Map(PartitionKey -> UUID) containing the newer UUIDs for successfully
+   *                     updated partitions.
+   *          failedPartitions - the partitions for which segment updates could not be completed due to
+   *                     failed Compare-and-Swap (not I/O failure, which would result in a Future failure)
    */
   def tryUpdateSegmentInfos[K](projection: RichProjection[K],
                                version: Int,
                                chopper: SegmentChopper[K],
                                uuidMap: SegmentUuidMap,
                                columnStore: CachedMergingColumnStore)
-                              (implicit ec: ExecutionContext): Future[Map[PartitionKey, Long]] = {
+                              (implicit ec: ExecutionContext):
+                                  Future[(Map[PartitionKey, Long], Set[PartitionKey])] = {
     val infoMap = chopper.updatedSegments()
     val filteredPartitions = infoMap.keys.filter { p => infoMap(p).nonEmpty }.toSeq
     for { responses <- Future.sequence(filteredPartitions.map { p =>
                          columnStore.updatePartitionSegments(projection, version, p, uuidMap(p), infoMap(p))
                        }) } yield {
       logger.debug(s"Responses for updating segment infos for partitions $filteredPartitions: $responses")
-      responses.zip(filteredPartitions).collect {
+      val newUuids = responses.zip(filteredPartitions).collect {
         case (SegmentsUpdated(newUuid), part) => part -> newUuid }.toMap
+      (newUuids, filteredPartitions.toSet -- newUuids.keys)
     }
   }
 }

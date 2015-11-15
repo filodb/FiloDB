@@ -189,21 +189,17 @@ private[filodb] class DatasetCoordinatorActor[K](projection: RichProjection[K],
   // partitions.
   // @annotation.tailrec
   private def updateSegmentMeta(): Future[Unit] = {
-    for { newUuids <- SegmentChopper.tryUpdateSegmentInfos(
-                        projection, version,
-                        flushingChopper, flushingUuidMap,
-                        columnStore) } yield {
-      // TODO: really need something working below.  Or have tryUpdate... return failures as well as successes
-      val failedPartitions = flushingTable.get.partitions -- newUuids.keys
-      if (failedPartitions.isEmpty) {
-        flushingUuidMap ++= newUuids
-      } else {
-        logger.info(s"updateSegmentMeta failed for ($nameVer): need to resync partitions $failedPartitions")
-        loadSegmentInfos(projection, failedPartitions.toSeq, version, columnStore).flatMap {
+    for { (newUuids, failures) <- SegmentChopper.tryUpdateSegmentInfos(
+                                    projection, version, flushingChopper, flushingUuidMap, columnStore) }
+    yield {
+      flushingUuidMap ++= newUuids
+      if (failures.nonEmpty) {
+        logger.info(s"updateSegmentMeta failed for ($nameVer): need to resync partitions $failures")
+        loadSegmentInfos(projection, failures.toSeq, version, columnStore).flatMap {
           case (newMetaMap, newUuidMap) =>
             flushingUuidMap ++= newUuidMap
             flushingChopper = new SegmentChopper(projection, flushingChopper.segmentMetaMap ++ newMetaMap)
-            val failedKeys = flushingTable.get.allKeys.filter(failedPartitions contains _._1)
+            val failedKeys = flushingTable.get.allKeys.filter(failures contains _._1)
             flushingChopper.insertOrderedKeys(failedKeys)
             updateSegmentMeta()
         }
