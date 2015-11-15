@@ -297,7 +297,7 @@ trait CachedMergingColumnStore extends ColumnStore with StrictLogging {
                                schema: Seq[Column]): Seq[Segment[K]] = {
     implicit val helper = origKeyRange.helper
     val segments = rowMaps.map { case (segmentId, rowMap) =>
-        val segStart = Some(helper.fromBytes(segmentId))
+        val segStart = helper.fromSegmentBinary(segmentId)
         val segKeyRange = origKeyRange.copy(start = segStart, end = None, endExclusive = true)
         new RowReaderSegment(segKeyRange, rowMap, schema)
     }
@@ -306,8 +306,8 @@ trait CachedMergingColumnStore extends ColumnStore with StrictLogging {
       breakable {
         chunkTriples.foreach { case (segmentId, chunkId, chunkBytes) =>
           // Rely on the fact that chunks are sorted by segmentId, in the same order as the rowMaps
-          val segmentKey = helper.fromBytes(segmentId)
-          while (segmentKey != segments(segIndex).keyRange.start.get) {
+          val segmentKey = helper.fromSegmentBinary(segmentId)
+          while (segmentKey != segments(segIndex).keyRange.start) {
             segIndex += 1
             if (segIndex >= segments.length) {
               logger.warn(s"Chunks with segmentId=$segmentKey ($origKeyRange) with no rowmap; corruption?")
