@@ -4,7 +4,6 @@ import com.typesafe.config.Config
 import com.typesafe.scalalogging.slf4j.StrictLogging
 import java.nio.ByteBuffer
 import scala.concurrent.{ExecutionContext, Future}
-import scodec.bits._
 import spray.caching._
 
 import filodb.cassandra.FiloCassandraConnector
@@ -48,6 +47,7 @@ extends CachedMergingColumnStore with StrictLogging {
 
   val chunkTableCache = LruCache[ChunkTable](tableCacheSize)
   val rowMapTableCache = LruCache[ChunkRowMapTable](tableCacheSize)
+  val segInfoTableCache = LruCache[SegmentInfoTable](tableCacheSize)
   val segmentCache = LruCache[Segment[_]](segmentCacheSize)
 
   val mergingStrategy = new AppendingChunkMergingStrategy(this)
@@ -58,16 +58,20 @@ extends CachedMergingColumnStore with StrictLogging {
    */
   def initializeProjection(projection: Projection): Future[Response] =
     for { (chunkTable, rowMapTable) <- getSegmentTables(projection.dataset)
+          segInfoTable              <- getSegInfoTable(projection.dataset)
           ctResp                    <- chunkTable.initialize()
-          rmtResp                   <- rowMapTable.initialize() } yield { rmtResp }
+          rmtResp                   <- rowMapTable.initialize()
+          siResp                    <- segInfoTable.initialize() } yield { siResp }
 
   /**
    * Clears all data from the column store for that given projection.
    */
   def clearProjectionDataInner(projection: Projection): Future[Response] =
     for { (chunkTable, rowMapTable) <- getSegmentTables(projection.dataset)
+          segInfoTable              <- getSegInfoTable(projection.dataset)
           ctResp                    <- chunkTable.clearAll()
-          rmtResp                   <- rowMapTable.clearAll() } yield { rmtResp }
+          rmtResp                   <- rowMapTable.clearAll()
+          siResp                    <- segInfoTable.clearAll() } yield { siResp }
 
   /**
    * Implementations of low-level storage primitives
@@ -143,13 +147,13 @@ extends CachedMergingColumnStore with StrictLogging {
                                version: Int,
                                partition: PartitionKey): Future[(Long, Seq[SegmentInfo[K]])] = {
     val helper = projection.helper
-    for { (chunkTable, rowMapTable) <- getSegmentTables(projection.dataset.name)
-          uuidOpt <- rowMapTable.readUuid(partition, version)
+    for { segInfoTable <- getSegInfoTable(projection.dataset.name)
+          uuidOpt      <- segInfoTable.readUuid(partition, version)
           uuid = uuidOpt.getOrElse(0L)
-          rawSegInfos <- rowMapTable.readSegmentInfos(partition, version) } yield {
-      val segInfos = rawSegInfos.map { case (startBB, endBB, numRows) =>
-        SegmentInfo[K](helper.fromSegmentBinary(ByteVector(startBB)),
-                       helper.fromSegmentBinary(ByteVector(endBB)),
+          rawSegInfos  <- segInfoTable.readSegmentInfos(partition, version) } yield {
+      val segInfos = rawSegInfos.map { case (startBV, endBV, numRows) =>
+        SegmentInfo[K](helper.fromSegmentBinary(startBV),
+                       helper.fromSegmentBinary(endBV),
                        numRows)
       }
       (uuid, segInfos)
@@ -163,12 +167,12 @@ extends CachedMergingColumnStore with StrictLogging {
                                  newSegmentInfos: Seq[SegmentInfo[K]]): Future[Response] = {
     val helper = projection.helper
     val rawInfos = newSegmentInfos.map { case SegmentInfo(start, end, numRows) =>
-      (helper.toSegmentBinary(start).toByteBuffer, helper.toSegmentBinary(end).toByteBuffer, numRows)
+      (helper.toSegmentBinary(start), helper.toSegmentBinary(end), numRows)
     }
     // Compute new Uuid.  TODO - find a better algorithm, is this really unique?
     val newUuid = java.util.UUID.randomUUID.getMostSignificantBits
-    for { (chunkTable, rowMapTable) <- getSegmentTables(projection.dataset.name)
-          resp <- rowMapTable.updateSegmentInfos(partition, version, prevUuid, newUuid, rawInfos) }
+    for { segInfoTable <- getSegInfoTable(projection.dataset.name)
+          resp <- segInfoTable.updateSegmentInfos(partition, version, prevUuid, newUuid, rawInfos) }
     yield {
       if (resp == Success) { SegmentsUpdated(newUuid) }
       else                 { resp }
@@ -218,5 +222,10 @@ extends CachedMergingColumnStore with StrictLogging {
     for { chunkTable <- chunkTableFuture
           rowMapTable <- chunkRowMapTableFuture }
     yield { (chunkTable, rowMapTable) }
+  }
+
+  def getSegInfoTable(dataset: TableName): Future[SegmentInfoTable] = segInfoTableCache(dataset) {
+    logger.debug(s"Creating a new SegmentInfoTable for dataset $dataset with config $cassandraConfig")
+    new SegmentInfoTable(dataset, cassandraConfig)
   }
 }
