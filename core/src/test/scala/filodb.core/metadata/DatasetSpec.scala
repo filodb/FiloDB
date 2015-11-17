@@ -1,14 +1,13 @@
 package filodb.core.metadata
 
+import filodb.core.Setup
+import filodb.core.store.{Dataset, DatasetOptions}
+import org.scalatest.{FunSpec, Matchers}
 import org.velvia.filo.TupleRowReader
 
-import filodb.core.columnstore.SegmentSpec
-
-import org.scalatest.{FunSpec, Matchers, BeforeAndAfter}
-
 class DatasetSpec extends FunSpec with Matchers {
-  import SegmentSpec._
   import Dataset._
+  import Setup._
 
   describe("DatasetOptions serialization") {
     it("should serialize options successfully") {

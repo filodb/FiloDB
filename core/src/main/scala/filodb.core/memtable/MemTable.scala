@@ -1,12 +1,9 @@
-package filodb.core.reprojector
+package filodb.core.memtable
 
 import com.typesafe.scalalogging.slf4j.StrictLogging
-import org.velvia.filo.RowReader
-import scala.collection.mutable.HashMap
-
-import filodb.core.{KeyRange, SortKeyHelper}
 import filodb.core.Types._
-import filodb.core.metadata.{Column, Dataset, RichProjection}
+import filodb.core.metadata._
+import org.velvia.filo.RowReader
 
 /**
  * The MemTable serves these purposes:
@@ -19,13 +16,12 @@ import filodb.core.metadata.{Column, Dataset, RichProjection}
  * Data written to a MemTable should be logged via WAL or some other mechanism so it can be recovered in
  * case of failure.
  */
-trait MemTable[K] extends StrictLogging {
-  import RowReader._
+trait MemTable[R,S] extends StrictLogging {
 
   def close(): Unit
 
   // A RichProjection with valid partitioning column.
-  def projection: RichProjection[K]
+  def projection: ProjectionInfo[R,S]
 
   /**
    * === Row ingest, read, delete operations ===
@@ -34,9 +30,9 @@ trait MemTable[K] extends StrictLogging {
   /**
    * Ingests a bunch of new rows.
    * @param rows the rows to ingest.  For now, they must have the exact same columns, in the exact same order,
-   *        as in the projection.
+   *             as in the projection.
    * @param callback the function to call back when the MemTable has committed the new rows to disk.
-   *        This is probably done asynchronously as we don't want to commit new rows with every write.
+   *                 This is probably done asynchronously as we don't want to commit new rows with every write.
    */
   def ingestRows(rows: Seq[RowReader])(callback: => Unit): Unit
 
@@ -44,19 +40,20 @@ trait MemTable[K] extends StrictLogging {
    * Reads rows out.  If reading from a MemTable actively inserting, the rows read might not reflect
    * latest updates.
    */
-  def readRows(keyRange: KeyRange[K]): Iterator[RowReader]
+  def readRows(partitionKey: PartitionKey, keyRange: KeyRange[S]): Iterator[RowReader]
 
   /**
    * Reads all rows of the memtable out, from every partition.  Partition ordering is not
    * guaranteed, but all sort keys K within the partition will be ordered.
    */
-  def readAllRows(): Iterator[(PartitionKey, K, RowReader)]
+  def readAllRows(): Iterator[(PartitionKey, S, RowReader)]
+
 
   /**
    * Removes specific rows from a particular keyRange and version.  Can only remove rows
    * from the Locked buffer.
    */
-  def removeRows(keyRange: KeyRange[K]): Unit
+  def removeRows(partitionKey: PartitionKey, keyRange: KeyRange[S]): Unit
 
   def numRows: Int
 

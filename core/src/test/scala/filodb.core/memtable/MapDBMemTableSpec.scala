@@ -1,20 +1,18 @@
-package filodb.core.reprojector
+package filodb.core.memtable
 
 import com.typesafe.config.ConfigFactory
 import org.velvia.filo.TupleRowReader
 
-import filodb.core.KeyRange
-import filodb.core.metadata.{Column, Dataset, RichProjection}
-import filodb.core.columnstore.SegmentSpec
+import filodb.core.metadata._
+import filodb.core.store.{MetaStore, Dataset}
 import scala.concurrent.Future
 
 import org.scalatest.{FunSpec, Matchers, BeforeAndAfter}
 import org.scalatest.concurrent.ScalaFutures
 
 class MapDBMemTableSpec extends FunSpec with Matchers with BeforeAndAfter with ScalaFutures {
-  import SegmentSpec._
-
-  val keyRange = KeyRange("dataset", Dataset.DefaultPartitionKey, 0L, 10000L)
+  import filodb.core.Setup._
+  val keyRange = KeyRange(0L,1000000L)
   val config = ConfigFactory.load("application_test.conf")
   import scala.concurrent.ExecutionContext.Implicits.global
 
@@ -32,7 +30,7 @@ class MapDBMemTableSpec extends FunSpec with Matchers with BeforeAndAfter with S
     names.map { t => (t._1, t._2, t._3, Some(partNum.toString)) }
   }
 
-  val projWithPartCol = RichProjection[Long](dataset.copy(partitionColumn = "league"), schemaWithPartCol)
+  val projWithPartCol = MetaStore.projectionInfo[String,Long](dataset.copy(partitionColumn = "league"), schemaWithPartCol)
 
   val namesWithNullPartCol =
     util.Random.shuffle(namesWithPartCol ++ namesWithPartCol.take(3).map { t => (t._1, t._2, t._3, None) })
@@ -52,7 +50,7 @@ class MapDBMemTableSpec extends FunSpec with Matchers with BeforeAndAfter with S
 
       mTable.numRows should equal (6)
 
-      val outRows = mTable.readRows(keyRange)
+      val outRows = mTable.readRows(Dataset.DefaultPartitionKey,keyRange)
       outRows.toSeq.map(_.getString(0)) should equal (firstNames)
     }
 
@@ -65,7 +63,7 @@ class MapDBMemTableSpec extends FunSpec with Matchers with BeforeAndAfter with S
 
       mTable.numRows should equal (4)
 
-      val outRows = mTable.readRows(keyRange)
+      val outRows = mTable.readRows(Dataset.DefaultPartitionKey,keyRange)
       outRows.toSeq.map(_.getString(0)) should equal (Seq("Khalil", "Rodney", "Ndamukong", "Jerry"))
     }
 
@@ -77,7 +75,7 @@ class MapDBMemTableSpec extends FunSpec with Matchers with BeforeAndAfter with S
 
       memTable.numRows should equal (50 * names.length)
 
-      val outRows = memTable.readRows(keyRange.copy(partition = "5"))
+      val outRows = memTable.readRows("5",keyRange)
       outRows.toSeq.map(_.getString(0)) should equal (firstNames)
     }
 
@@ -92,14 +90,14 @@ class MapDBMemTableSpec extends FunSpec with Matchers with BeforeAndAfter with S
     it("should use defaultPartitionKey if one provided and null part col value") {
       val newOptions = dataset.options.copy(defaultPartitionKey = Some("foobar"))
       val datasetWithDefPartKey = dataset.copy(options = newOptions, partitionColumn = "league")
-      val newProj = RichProjection[Long](datasetWithDefPartKey, schemaWithPartCol)
+      val newProj = MetaStore.projectionInfo[String,Long](datasetWithDefPartKey, schemaWithPartCol)
       val mTable = new MapDBMemTable(newProj, config)
 
       mTable.ingestRows(namesWithNullPartCol.map(TupleRowReader)) { resp = 99 }
       resp should equal (99)
 
       mTable.numRows should equal (namesWithNullPartCol.length)
-      val outRows = mTable.readRows(keyRange.copy(partition = "foobar"))
+      val outRows = mTable.readRows("foobar",keyRange)
       outRows.toSeq should have length (3)
     }
   }
@@ -110,7 +108,7 @@ class MapDBMemTableSpec extends FunSpec with Matchers with BeforeAndAfter with S
       mTable.ingestRows(names.map(TupleRowReader)) { resp = 17 }
       resp should equal (17)
 
-      mTable.removeRows(keyRange)
+      mTable.removeRows(Dataset.DefaultPartitionKey,keyRange)
       mTable.numRows should equal (0)
     }
   }

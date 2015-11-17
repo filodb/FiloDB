@@ -7,8 +7,8 @@ import akka.actor.ActorSystem
 import com.opencsv.CSVWriter
 import com.quantifind.sumac.{ArgMain, FieldArgs}
 import com.typesafe.config.ConfigFactory
-import filodb.core.SortKeyHelper
-import filodb.core.columnstore.RowReaderSegment
+import filodb.core.KeyType$
+import filodb.core.store.{Dataset, RowReaderSegment, Analyzer, CachedMergingColumnStore}
 import filodb.core.metadata.Column.{ColumnType, Schema}
 import org.velvia.filo.{RowReader, FastFiloRowReader}
 import scala.concurrent.Await
@@ -18,8 +18,7 @@ import scala.language.postfixOps
 import filodb.cassandra.columnstore.CassandraColumnStore
 import filodb.cassandra.metastore.CassandraMetaStore
 import filodb.coordinator.{NodeCoordinatorActor, DefaultCoordinatorSetup}
-import filodb.core.columnstore.{Analyzer, CachedMergingColumnStore}
-import filodb.core.metadata.{Column, Dataset, RichProjection}
+import filodb.core.metadata.{Column, ProjectionInfo$}
 
 //scalastyle:off
 class Arguments extends FieldArgs {
@@ -207,8 +206,8 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with DefaultCoord
                 outFile: Option[String]): Unit = {
     val schema = Await.result(metaStore.getSchema(dataset, version), 10.second)
     val datasetObj = parse(metaStore.getDataset(dataset)) { ds => ds }
-    val richProj = RichProjection(datasetObj, schema.values.toSeq)
-    val typedProj = richProj.asInstanceOf[RichProjection[richProj.helper.Key]]
+    val richProj = ProjectionInfo(datasetObj, schema.values.toSeq)
+    val typedProj = richProj.asInstanceOf[ProjectionInfo[richProj.helper.Key]]
     val columns = columnNames.map(schema)
 
     implicit val sortKeyHelper = typedProj.helper

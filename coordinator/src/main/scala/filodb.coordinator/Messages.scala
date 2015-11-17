@@ -1,4 +1,4 @@
-package filodb.core
+package filodb.coordinator
 
 /**
  * Common types for asynchronous command/response

@@ -6,9 +6,9 @@ import net.ceedubs.ficus.Ficus._
 import org.velvia.filo.RowReader
 import scala.concurrent.Future
 
-import filodb.core.metadata.{Column, Dataset, Projection, RichProjection}
-import filodb.core.columnstore.ColumnStore
-import filodb.core.reprojector.{MemTable, MapDBMemTable, Reprojector}
+import filodb.core.metadata.{Column, ProjectionInfo$}
+import filodb.core.store.{Projection, ColumnStore}
+import filodb.core.memtable.{MemTable, MapDBMemTable, Reprojector}
 
 object DatasetCoordinatorActor {
   import filodb.core.Types._
@@ -59,7 +59,7 @@ object DatasetCoordinatorActor {
   case class FlushDone(result: Seq[String]) extends DSCoordinatorMessage
   case class FlushFailed(t: Throwable) extends DSCoordinatorMessage
 
-  def props[K](projection: RichProjection[K],
+  def props[K](projection: ProjectionInfo[K],
                version: Int,
                columnStore: ColumnStore,
                reprojector: Reprojector,
@@ -94,7 +94,7 @@ object DatasetCoordinatorActor {
  *   }
  * }}}
  */
-private[filodb] class DatasetCoordinatorActor[K](projection: RichProjection[K],
+private[filodb] class DatasetCoordinatorActor[K](projection: ProjectionInfo[K],
                                  version: Int,
                                  columnStore: ColumnStore,
                                  reprojector: Reprojector,

@@ -21,8 +21,8 @@ import org.apache.spark.sql.types._
 import org.apache.spark.sql.{DataFrame, Row, SQLContext}
 
 import filodb.core._
-import filodb.core.metadata.{Column, Dataset, DatasetOptions}
-import filodb.core.columnstore.RowReaderSegment
+import filodb.core.metadata.Column
+import filodb.core.store.{DatasetOptions, Dataset, RowReaderSegment}
 
 object FiloRelation {
   import TypeConverters._
@@ -51,8 +51,8 @@ object FiloRelation {
               columns: Seq[Column],
               sortColumn: Column,
               params: Map[String, String]): Iterator[Row] = {
-    val untypedHelper = Dataset.sortKeyHelper(options, sortColumn).get
-    implicit val helper = untypedHelper.asInstanceOf[SortKeyHelper[untypedHelper.Key]]
+    val untypedHelper = Dataset.keyType(options, sortColumn).get
+    implicit val helper = untypedHelper.asInstanceOf[KeyType[untypedHelper.Key]]
     parse(FiloSetup.columnStore.scanSegments[helper.Key](columns, datasetName, version, params = params),
           10 minutes) { segmentIt =>
       segmentIt.flatMap { seg =>

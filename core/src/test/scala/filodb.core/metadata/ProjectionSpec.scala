@@ -1,74 +1,74 @@
 package filodb.core.metadata
 
+import filodb.core.Setup
+import filodb.core.store.MetaStore.BadSchema
+import filodb.core.store.{Dataset, MetaStore, Projection}
+import org.scalatest.{FunSpec, Matchers}
 import org.velvia.filo.TupleRowReader
 
-import filodb.core.columnstore.SegmentSpec
-import org.scalatest.{FunSpec, Matchers, BeforeAndAfter}
-
 class ProjectionSpec extends FunSpec with Matchers {
-  import SegmentSpec._
-  import RichProjection._
 
-  describe("RichProjection") {
+  import Setup._
+
+  describe("Projection") {
     it("should get BadSchema if cannot find sort column") {
-      val resp = RichProjection.make[Long](Dataset("a", "boo"), schema)
-      resp.isFailure should be (true)
+      val resp = MetaStore.makeProjection[Long,String](Dataset("a", "boo","far"), schema)
+      resp.isFailure should be(true)
       resp.recover {
-        case BadSchema(reason) => reason should include ("Sort column boo not in columns")
+        case BadSchema(reason) => reason should include("Sort column boo not in columns")
       }
     }
 
-    // Now that String is a supported sort column type, this test doesn't make sense anymore.
-    // Leave this here though because eventually we will add a column type that cannot be used
-    // as a sort column.
-    ignore("should get BadSchema if sort column is not supported type") {
-      val resp = RichProjection.make[Long](Dataset("a", "first"), schema)
-      resp.isFailure should be (true)
+    it("should get BadSchema if sort column is not a valid column") {
+      val resp = MetaStore.makeProjection[Long,String](Dataset("a", "first","far"), schema)
+      resp.isFailure should be(true)
       resp.recover {
-        case BadSchema(reason) => reason should include ("Unsupported sort column type")
+        case BadSchema(reason) => reason should include("Unsupported sort column type")
       }
     }
 
     it("should get BadSchema if projection columns are missing from schema") {
-      val missingColProj = Projection(0, "a", "age", columns = Seq("first", "yards"))
+      val missingColProj = Projection(0, "a", "age","dummy", columns = Seq("first", "yards"))
       val missingColDataset = Dataset("a", Seq(missingColProj), Dataset.DefaultPartitionColumn)
-      val resp = RichProjection.make[Long](missingColDataset, schema)
-      resp.isFailure should be (true)
+      val resp = MetaStore.makeProjection[String,Long](missingColDataset, schema)
+      resp.isFailure should be(true)
       resp.recover {
-        case BadSchema(reason) => reason should include ("Specified projection columns are missing")
+        case BadSchema(reason) => reason should include("Specified projection columns are missing")
       }
     }
 
     it("apply() should throw exception for bad schema") {
-      intercept[BadSchema] { RichProjection[Long](Dataset("a", "boo"), schema) }
+      intercept[BadSchema] {
+        MetaStore.projectionInfo[Long,String](Dataset("a", "boo","far"), schema)
+      }
     }
 
     it("should get RichProjection back with proper dataset and schema") {
-      val resp = RichProjection[Long](dataset, schema)
-      resp.sortColumn should equal (schema(2))
-      resp.sortColNo should equal (2)
-      resp.columns should equal (schema)
-      resp.helper shouldBe a[filodb.core.LongKeyHelper]
-      names.take(3).map(TupleRowReader).map(resp.sortKeyFunc) should equal (Seq(24L, 28L, 25L))
+      val resp = MetaStore.projectionInfo[String,Long](dataset, schema)
+      resp.sortColumn should equal(schema(2))
+      resp.sortColNo should equal(2)
+      resp.columns should equal(schema)
+      resp.segmentType shouldBe a[filodb.core.LongKeyType]
+      names.take(3).map(TupleRowReader).map(resp.segmentFunction) should equal(Seq(24L, 28L, 25L))
     }
 
     it("should create RichProjection properly for String sort key column") {
-      val resp = RichProjection[String](Dataset("a", "first"), schema)
-      resp.sortColumn should equal (schema(0))
-      resp.sortColNo should equal (0)
-      resp.columns should equal (schema)
-      resp.helper shouldBe a[filodb.core.StringKeyHelper]
-      names.take(3).map(TupleRowReader).map(resp.sortKeyFunc) should equal (
-                     Seq("Khalil", "Ndamukong", "Rodney"))
+      val resp = MetaStore.projectionInfo[String,String](Dataset("a", "first","age","last"), schema)
+      resp.sortColumn should equal(schema(2))
+      resp.sortColNo should equal(2)
+      resp.columns should equal(schema)
+      resp.segmentType shouldBe a[filodb.core.LongKeyType]
+      names.take(3).map(TupleRowReader).map(resp.segmentFunction) should equal(
+        Seq(24, 28, 25))
     }
 
     it("should get working RichProjection back even if called with [Nothing]") {
-      val resp = RichProjection(dataset, schema)
-      resp.sortColumn should equal (schema(2))
-      resp.sortColNo should equal (2)
-      resp.columns should equal (schema)
-      resp.helper shouldBe a[filodb.core.LongKeyHelper]
-      names.take(3).map(TupleRowReader).map(resp.sortKeyFunc) should equal (Seq(24L, 28L, 25L))
+      val resp = MetaStore.projectionInfo(dataset, schema)
+      resp.sortColumn should equal(schema(2))
+      resp.sortColNo should equal(2)
+      resp.columns should equal(schema)
+      resp.segmentType shouldBe a[filodb.core.LongKeyType]
+      names.take(3).map(TupleRowReader).map(resp.segmentFunction) should equal(Seq(24L, 28L, 25L))
     }
   }
 }

@@ -4,6 +4,8 @@ import com.datastax.driver.core.Row
 import com.typesafe.config.Config
 import com.websudos.phantom.dsl._
 import java.nio.ByteBuffer
+import filodb.coordinator.Response
+
 import scala.concurrent.Future
 import scodec.bits._
 

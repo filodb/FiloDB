@@ -4,13 +4,12 @@ import akka.actor.{ActorRef, ActorSystem}
 import akka.pattern.ask
 import akka.util.Timeout
 import com.opencsv.{CSVReader, CSVWriter}
+import filodb.core.store.MetaStore
 import org.velvia.filo.{ArrayStringRowReader, RowReader}
 import scala.concurrent.{Await, Future, ExecutionContext}
 import scala.concurrent.duration._
 import scala.language.postfixOps
-
-import filodb.core.metadata.MetaStore
-import filodb.coordinator.{NodeCoordinatorActor, RowSource}
+import filodb.coordinator._
 import filodb.coordinator.sources.CsvSourceActor
 import filodb.core._
 

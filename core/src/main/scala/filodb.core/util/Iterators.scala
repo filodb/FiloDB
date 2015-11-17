@@ -1,4 +1,4 @@
-package filodb.core
+package filodb.core.util
 
 // From http://stackoverflow.com/questions/10642337/is-there-are-iterative-version-of-groupby-in-scala
 object Iterators {

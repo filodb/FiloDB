@@ -3,6 +3,7 @@ package filodb.cassandra.metastore
 import com.typesafe.config.ConfigFactory
 import com.websudos.phantom.dsl._
 import com.websudos.phantom.testkit._
+import filodb.coordinator.{MetadataException, Success}
 import org.scalatest.BeforeAndAfter
 import scala.concurrent.Await
 import scala.concurrent.duration._

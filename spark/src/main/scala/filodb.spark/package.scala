@@ -3,6 +3,7 @@ package filodb
 import akka.actor.ActorRef
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.slf4j.StrictLogging
+import filodb.core.store.Dataset
 import org.apache.spark.sql.{SQLContext, SaveMode, DataFrame, Row, Column => SparkColumn}
 import org.apache.spark.sql.types.DataType
 import org.apache.spark.sql.catalyst.expressions.Literal
@@ -11,8 +12,8 @@ import scala.concurrent.duration._
 import scala.language.postfixOps
 
 import filodb.core._
-import filodb.core.metadata.{Column, Dataset}
-import filodb.coordinator.{NodeCoordinatorActor, RowSource, DatasetCoordinatorActor}
+import filodb.core.metadata.Column
+import filodb.coordinator._
 
 package spark {
   case class DatasetNotFound(dataset: String) extends Exception(s"Dataset $dataset not found")

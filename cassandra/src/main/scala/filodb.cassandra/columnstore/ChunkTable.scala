@@ -5,12 +5,14 @@ import com.typesafe.config.Config
 import com.typesafe.scalalogging.slf4j.StrictLogging
 import com.websudos.phantom.dsl._
 import java.nio.ByteBuffer
+import filodb.coordinator.Response
+
 import scala.concurrent.Future
 import scodec.bits._
 
 import filodb.cassandra.FiloCassandraConnector
 import filodb.core._
-import filodb.core.columnstore.ChunkedData
+import filodb.core.store.ChunkedData
 
 /**
  * Represents the table which holds the actual columnar chunks for segments
@@ -46,7 +48,7 @@ with FiloCassandraConnector {
   def writeChunks(partition: String,
                   version: Int,
                   segmentId: Types.SegmentId,
-                  chunks: Iterator[(String, Types.ChunkID, ByteBuffer)]): Future[Response] = {
+                  chunks: Iterator[(String, Types.ChunkId, ByteBuffer)]): Future[Response] = {
     val insertQ = insert.value(_.partition,  partition)
                         .value(_.version,    version)
                         .value(_.segmentId,  segmentId.toByteBuffer)

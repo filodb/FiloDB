@@ -3,13 +3,15 @@ package filodb.cassandra.columnstore
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.slf4j.StrictLogging
 import java.nio.ByteBuffer
+import filodb.coordinator.Response
+
 import scala.concurrent.{ExecutionContext, Future}
 import spray.caching._
 
 import filodb.cassandra.FiloCassandraConnector
 import filodb.core._
-import filodb.core.columnstore.CachedMergingColumnStore
-import filodb.core.metadata.{Column, Projection}
+import filodb.core.store.CachedMergingColumnStore
+import filodb.core.metadata.Column
 
 /**
  * Implementation of a column store using Apache Cassandra tables.
@@ -37,7 +39,7 @@ import filodb.core.metadata.{Column, Projection}
 class CassandraColumnStore(config: Config)
                           (implicit val ec: ExecutionContext)
 extends CachedMergingColumnStore with StrictLogging {
-  import filodb.core.columnstore._
+  import filodb.core.store._
   import Types._
   import collection.JavaConverters._
 
@@ -75,7 +77,7 @@ extends CachedMergingColumnStore with StrictLogging {
                   partition: PartitionKey,
                   version: Int,
                   segmentId: SegmentId,
-                  chunks: Iterator[(ColumnId, ChunkID, ByteBuffer)]): Future[Response] = {
+                  chunks: Iterator[(ColumnId, ChunkId, ByteBuffer)]): Future[Response] = {
     for { (chunkTable, rowMapTable) <- getSegmentTables(dataset)
           resp <- chunkTable.writeChunks(partition, version, segmentId, chunks) }
     yield { resp }

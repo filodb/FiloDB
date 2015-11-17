@@ -3,13 +3,14 @@ package filodb.cassandra.metastore
 import com.typesafe.config.ConfigFactory
 import com.websudos.phantom.dsl._
 import com.websudos.phantom.testkit._
+import filodb.coordinator.{NotFoundError, Success, AlreadyExists}
+import filodb.core.store.Dataset
 import org.scalatest.BeforeAndAfter
 import scala.concurrent.Await
 import scala.concurrent.duration._
 import scala.language.postfixOps
 
 import filodb.core._
-import filodb.core.metadata.Dataset
 
 class DatasetTableSpec extends CassandraFlatSpec with BeforeAndAfter {
   val config = ConfigFactory.load("application_test.conf").getConfig("cassandra")

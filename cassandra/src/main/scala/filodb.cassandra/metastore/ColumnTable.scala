@@ -3,6 +3,7 @@ package filodb.cassandra.metastore
 import com.datastax.driver.core.Row
 import com.typesafe.config.Config
 import com.websudos.phantom.dsl._
+import filodb.coordinator.{AlreadyExists, Response}
 import play.api.libs.iteratee.Iteratee
 import scala.concurrent.Future
 

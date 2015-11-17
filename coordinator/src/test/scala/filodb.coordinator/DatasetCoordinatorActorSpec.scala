@@ -9,9 +9,9 @@ import scala.concurrent.Future
 import scala.concurrent.duration._
 
 import filodb.core._
-import filodb.core.metadata.{Column, Dataset, RichProjection}
-import filodb.core.columnstore.{InMemoryColumnStore, SegmentSpec}
-import filodb.core.reprojector.{DefaultReprojector, MemTable, Reprojector}
+import filodb.core.metadata.{Column, ProjectionInfo$}
+import filodb.core.store.{Dataset, InMemoryColumnStore, SegmentSpec}
+import filodb.core.memtable.{DefaultReprojector, MemTable, Reprojector}
 
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Span, Seconds}
@@ -38,7 +38,7 @@ with ScalaFutures {
   val schemaWithPartCol = schema ++ Seq(
     Column("league", "dataset", 0, Column.ColumnType.StringColumn)
   )
-  val myProjection = RichProjection(myDataset, schemaWithPartCol)
+  val myProjection = ProjectionInfo(myDataset, schemaWithPartCol)
   val columnStore = new InMemoryColumnStore
 
   var dsActor: ActorRef = _
@@ -73,7 +73,7 @@ with ScalaFutures {
   }
 
   val testReprojector = new Reprojector {
-    import filodb.core.columnstore.Segment
+    import filodb.core.store.Segment
 
     def reproject[K](memTable: MemTable[K], version: Int): Future[Seq[String]] = {
       reprojections = reprojections :+ (memTable.projection.dataset.name -> version)

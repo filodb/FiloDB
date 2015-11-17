@@ -2,13 +2,15 @@ package filodb.spark
 
 import akka.actor.ActorSystem
 import com.typesafe.config.ConfigFactory
+import filodb.coordinator.Success
+import filodb.core.store.Dataset
 import org.apache.spark.{SparkContext, SparkException, SparkConf}
 import org.apache.spark.sql.{SaveMode, SQLContext}
 import org.scalatest.time.{Millis, Seconds, Span}
 import scala.concurrent.duration._
 
 import filodb.core._
-import filodb.core.metadata.{Column, Dataset}
+import filodb.core.metadata.Column
 
 import org.scalatest.{FunSpec, BeforeAndAfter, BeforeAndAfterAll, Matchers}
 import org.scalatest.concurrent.ScalaFutures

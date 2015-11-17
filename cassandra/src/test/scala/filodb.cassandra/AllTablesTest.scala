@@ -3,13 +3,15 @@ package filodb.cassandra
 import com.typesafe.config.ConfigFactory
 import com.websudos.phantom.dsl._
 import com.websudos.phantom.testkit._
+import filodb.coordinator.Success
+import filodb.core.store.Dataset
 import org.scalatest.{FunSpec, BeforeAndAfter}
 import org.scalatest.time.{Millis, Span, Seconds}
 import scala.concurrent.Await
 import scala.concurrent.duration._
 import scala.language.postfixOps
 
-import filodb.core.metadata.{Column, Dataset}
+import filodb.core.metadata.Column
 import filodb.core._
 import filodb.cassandra.columnstore.CassandraColumnStore
 

@@ -3,10 +3,12 @@ package filodb.cassandra.metastore
 import com.datastax.driver.core.Row
 import com.typesafe.config.Config
 import com.websudos.phantom.dsl._
+import filodb.coordinator.{NotFoundError, Success, AlreadyExists, Response}
+import filodb.core.store.{Projection, DatasetOptions, Dataset}
 import scala.concurrent.Future
 
 import filodb.cassandra.FiloCassandraConnector
-import filodb.core.metadata.{Dataset, DatasetOptions, Projection}
+import filodb.core.metadata.Projection
 
 /**
  * Represents the "dataset" Cassandra table tracking each dataset and its partitions

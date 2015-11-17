@@ -1,10 +1,12 @@
 package filodb.cassandra.metastore
 
 import com.typesafe.config.Config
+import filodb.coordinator.Response
+import filodb.core.store.{Dataset, MetaStore}
 import scala.concurrent.{ExecutionContext, Future}
 
 import filodb.core._
-import filodb.core.metadata.{Column, Dataset, MetaStore}
+import filodb.core.metadata.Column
 
 /**
  * A class for Cassandra implementation of the MetaStore.

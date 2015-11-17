@@ -1,23 +1,18 @@
-package filodb.core.reprojector
+package filodb.core.memtable
 
 import com.typesafe.config.ConfigFactory
+import filodb.core.metadata._
+import org.scalatest.{BeforeAndAfter, FunSpec, Matchers}
 import org.velvia.filo.TupleRowReader
 
-import filodb.core.KeyRange
-import filodb.core.metadata.{Column, Dataset}
-import filodb.core.columnstore.SegmentSpec
-
-import org.scalatest.{FunSpec, Matchers, BeforeAndAfter}
-
 class MemTableMemoryTest extends FunSpec with Matchers with BeforeAndAfter {
-  import SegmentSpec._
 
-  val keyRange = KeyRange("dataset", Dataset.DefaultPartitionKey, 0L, 10000L)
+  import filodb.core.Setup._
+
   val newSetting = "memtable.max-rows-per-table = 200000"
   val config = ConfigFactory.parseString(newSetting).withFallback(
-                 ConfigFactory.load("application_test.conf"))
+    ConfigFactory.load("application_test.conf"))
   val mTable = new MapDBMemTable(projection, config)
-  import scala.concurrent.ExecutionContext.Implicits.global
 
   before {
     mTable.clearAllData()
@@ -29,7 +24,7 @@ class MemTableMemoryTest extends FunSpec with Matchers with BeforeAndAfter {
 
   val numRows = 100000
 
-  val lotsOfNames = (0 until (numRows/6)).toIterator.flatMap { partNum =>
+  val lotsOfNames = (0 until (numRows / 6)).toIterator.flatMap { partNum =>
     names.map { t => (t._1, t._2, t._3, Some(partNum.toString)) }.toIterator
   }
 
@@ -48,7 +43,9 @@ class MemTableMemoryTest extends FunSpec with Matchers with BeforeAndAfter {
 
     var numRows = 0
     lotsOfNames.map(TupleRowReader).grouped(2000).foreach { rows =>
-      mTable.ingestRows(rows.toSeq) { numRows += rows.length }
+      mTable.ingestRows(rows.toSeq) {
+        numRows += rows.length
+      }
       // println(s"Ingested $numRows rows")
       // Thread sleep 1000
     }

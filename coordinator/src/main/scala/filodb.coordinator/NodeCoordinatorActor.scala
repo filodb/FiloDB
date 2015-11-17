@@ -9,9 +9,9 @@ import scala.concurrent.duration._
 
 import filodb.core._
 import filodb.core.Types._
-import filodb.core.metadata.{Column, Dataset, MetaStore, Projection, RichProjection}
-import filodb.core.columnstore.ColumnStore
-import filodb.core.reprojector.Reprojector
+import filodb.core.metadata.{Column, ProjectionInfo$}
+import filodb.core.store.{Projection, Dataset, MetaStore, ColumnStore}
+import filodb.core.memtable.Reprojector
 
 /**
  * The NodeCoordinatorActor is the common API entry point for all FiloDB ingestion and metadata operations.
@@ -164,8 +164,8 @@ class NodeCoordinatorActor(metaStore: MetaStore,
                              version: Int): Unit = {
     def notify(msg: Any): Unit = { self ! DatasetCreateNotify(dataset, version, msg) }
 
-    def createDatasetCoordActor(datasetObj: Dataset, richProj: RichProjection[_]): Unit = {
-      val typedProj = richProj.asInstanceOf[RichProjection[richProj.helper.Key]]
+    def createDatasetCoordActor(datasetObj: Dataset, richProj: ProjectionInfo[_]): Unit = {
+      val typedProj = richProj.asInstanceOf[ProjectionInfo[richProj.helper.Key]]
       val props = DatasetCoordinatorActor.props(typedProj, version, columnStore, reprojector, config)
       val ref = context.actorOf(props, s"ds-coord-${datasetObj.name}-$version")
       self ! AddDatasetCoord(dataset, version, ref)
@@ -175,9 +175,9 @@ class NodeCoordinatorActor(metaStore: MetaStore,
     def createProjectionAndActor(datasetObj: Dataset, schema: Option[Column.Schema]): Unit = {
       val columnSeq = columns.map(schema.get(_))
       // Create the RichProjection, and ferret out any errors
-      val proj = RichProjection.make(datasetObj, columnSeq)
+      val proj = ProjectionInfo.make(datasetObj, columnSeq)
       proj.recover {
-        case RichProjection.BadSchema(reason) => notify(BadSchema(reason))
+        case ProjectionInfo.BadSchema(reason) => notify(BadSchema(reason))
         case Dataset.BadPartitionColumn(reason) => notify(BadSchema(reason))
       }
       for { richProj <- proj } createDatasetCoordActor(datasetObj, richProj)

@@ -2,10 +2,13 @@ package filodb.cassandra.metastore
 
 import com.typesafe.config.ConfigFactory
 import java.nio.ByteBuffer
+import filodb.coordinator.Success
+import filodb.core.store.MetaStore
+
 import scala.concurrent.Future
 
 import filodb.core._
-import filodb.core.metadata.{Column, Dataset, MetaStore}
+import filodb.core.metadata.Column
 import filodb.cassandra.AllTablesTest
 
 import org.scalatest.{FunSpec, BeforeAndAfter}
