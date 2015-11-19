@@ -11,7 +11,7 @@ import filodb.coordinator.{BaseActor, NodeCoordinatorActor, RowSource}
 
 object RddRowSourceActor {
   // Needs to be a multiple of chunkSize. Not sure how to have a good default though.
-  val DefaultMaxUnackedRows = 5000
+  val DefaultMaxUnackedBatches = 10
   val DefaultRowsToRead = 1000
 
   def props(rows: Iterator[Row],
@@ -20,10 +20,10 @@ object RddRowSourceActor {
             version: Int,
             coordinatorActor: ActorRef,
             defaultPartitionKey: Option[Types.PartitionKey],
-            maxUnackedRows: Int = RddRowSourceActor.DefaultMaxUnackedRows,
+            maxUnackedBatches: Int = RddRowSourceActor.DefaultMaxUnackedBatches,
             rowsToRead: Int = RddRowSourceActor.DefaultRowsToRead): Props =
     Props(classOf[RddRowSourceActor], rows, columns, dataset, version,
-          coordinatorActor, defaultPartitionKey, maxUnackedRows, rowsToRead)
+          coordinatorActor, defaultPartitionKey, maxUnackedBatches, rowsToRead)
 }
 
 /**
@@ -39,31 +39,21 @@ class RddRowSourceActor(rows: Iterator[Row],
                         val version: Int,
                         val coordinatorActor: ActorRef,
                         defaultPartitionKey: Option[Types.PartitionKey],
-                        val maxUnackedRows: Int = RddRowSourceActor.DefaultMaxUnackedRows,
-                        val rowsToRead: Int = RddRowSourceActor.DefaultRowsToRead)
+                        val maxUnackedBatches: Int = RddRowSourceActor.DefaultMaxUnackedBatches,
+                        rowsToRead: Int = RddRowSourceActor.DefaultRowsToRead)
 extends BaseActor with RowSource {
   import NodeCoordinatorActor._
   import RddRowSourceActor._
 
-  // Assume for now rowIDs start from 0.
-  var seqId: Long = 0
-  var lastAckedSeqNo = seqId
-
   def getStartMessage(): SetupIngestion = SetupIngestion(dataset, columns, version, defaultPartitionKey)
 
-  // Returns a new row from source => (seqID, rowID, version, row)
-  // The seqIDs should be increasing.
-  // Returns None if the source reached the end of data.
-  def getNewRow(): Option[(Long, RowReader)] = {
-    if (rows.hasNext) {
-      val out = (seqId, RddRowReader(rows.next))
-      seqId += 1
-      if (seqId % 10000 == 0) logger.info(s"Parsed $seqId rows...")
-      Some(out)
-    } else {
-      None
-    }
+  val seqIds = Iterator.from(0).map { id =>
+    if (id % 20 == 0) logger.info(s"Ingesting batch starting at row ${id * rowsToRead}")
+    id.toLong
   }
+
+  val groupedRows = rows.map(RddRowReader).grouped(rowsToRead)
+  val batchIterator = seqIds.zip(groupedRows)
 }
 
 case class RddRowReader(row: Row) extends RowReader {
