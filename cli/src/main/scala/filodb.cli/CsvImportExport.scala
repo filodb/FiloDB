@@ -10,7 +10,7 @@ import scala.concurrent.duration._
 import scala.language.postfixOps
 
 import filodb.core.metadata.MetaStore
-import filodb.coordinator.{NodeCoordinatorActor, RowSource}
+import filodb.coordinator.{NodeCoordinatorActor, DatasetCoordinatorActor, RowSource}
 import filodb.coordinator.sources.CsvSourceActor
 import filodb.core._
 
@@ -66,6 +66,17 @@ trait CsvImportExport {
         exitCode = 2
         return
       case RowSource.AllDone =>
+    }
+
+    // There might still be rows left after the latest flush is done, so initiate another flush
+    actorAsk(coordinatorActor, NodeCoordinatorActor.GetIngestionStats(dataset, version)) {
+      case DatasetCoordinatorActor.Stats(_, _, _, activeRows, _) =>
+        if (activeRows > 0) {
+          println(s"Still $activeRows left to flush in active memTable, trigger another flush....")
+          actorAsk(coordinatorActor, NodeCoordinatorActor.Flush(dataset, version), timeout) {
+            case NodeCoordinatorActor.Flushed =>
+          }
+        }
     }
 
     println("ingestCSV finished!")

@@ -87,6 +87,11 @@ object NodeCoordinatorActor {
   case class CanIngest(can: Boolean) extends NodeResponse
 
   /**
+   * Gets the latest ingestion stats from the DatasetCoordinatorActor
+   */
+  case class GetIngestionStats(dataset: String, version: Int) extends NodeCommand
+
+  /**
    * Truncates all data from a projection of a dataset.  Waits for any pending flushes from said
    * dataset to finish first, and also clears the columnStore cache for that dataset.
    */
@@ -225,6 +230,9 @@ class NodeCoordinatorActor(metaStore: MetaStore,
 
     case CheckCanIngest(dataset, version) =>
       withDsCoord(sender, dataset, version) { _.forward(DatasetCoordinatorActor.CanIngest) }
+
+    case GetIngestionStats(dataset, version) =>
+      withDsCoord(sender, dataset, version) { _.forward(DatasetCoordinatorActor.GetStats) }
 
     case AddDatasetCoord(dataset, version, dsCoordRef) =>
       dsCoordinators((dataset, version)) = dsCoordRef

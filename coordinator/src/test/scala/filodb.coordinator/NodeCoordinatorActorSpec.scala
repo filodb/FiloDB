@@ -93,6 +93,9 @@ with CoordinatorSetup with AllTablesTest {
     probe.send(coordActor, Flush(dataset.name, 0))
     probe.expectMsg(Flushed)
 
+    probe.send(coordActor, GetIngestionStats(dataset.name, 0))
+    probe.expectMsg(DatasetCoordinatorActor.Stats(1, 1, 0, 0, -1))
+
     // Now, read stuff back from the column store and check that it's all there
     val keyRange = KeyRange(largeDataset.name, "nfc", 0L, 30000L)
     whenReady(columnStore.readSegments(schema, keyRange, 0)) { segIter =>
