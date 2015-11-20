@@ -1,6 +1,6 @@
 package filodb.coordinator
 
-import akka.actor.{Actor, ActorRef, PoisonPill}
+import akka.actor.{Actor, ActorRef, Cancellable, PoisonPill}
 import com.typesafe.scalalogging.slf4j.StrictLogging
 import org.velvia.filo.RowReader
 import scala.collection.mutable.HashMap
@@ -84,12 +84,15 @@ trait RowSource extends Actor with StrictLogging {
           self ! GetMoreRows
         } else {
           logger.debug(s" ==> waiting: outstanding seqIds = ${outstanding.keys}")
-          context.system.scheduler.scheduleOnce(waitingPeriod, self, CheckCanIngest)
+          schedule(waitingPeriod, CheckCanIngest)
           context.become(waiting)
         }
       } else {
-        logger.debug(s" ==> doneReading: outstanding seqIds = ${outstanding.keys}")
-        if (outstanding.isEmpty) sendFlush()
+        logger.info(s" ==> (${self.path.name}) doneReading: outstanding seqIds = ${outstanding.keys}")
+        if (outstanding.isEmpty)  { sendFlush() }
+        else {
+          schedule(waitingPeriod, CheckCanIngest)
+        }
         context.become(doneReading)
       }
 
@@ -99,7 +102,7 @@ trait RowSource extends Actor with StrictLogging {
     case CheckCanIngest =>
   }
 
-  def waiting: Receive = {
+  def waitingAck: Receive = {
     case NodeCoordinatorActor.Ack(lastSequenceNo) =>
       if (outstanding contains lastSequenceNo) outstanding.remove(lastSequenceNo)
       if (outstanding.isEmpty) {
@@ -107,7 +110,11 @@ trait RowSource extends Actor with StrictLogging {
         self ! GetMoreRows
         context.become(reading)
       }
+  }
 
+  def waiting: Receive = waitingAck orElse replay
+
+  val replay: Receive = {
     case CheckCanIngest =>
       coordinatorActor ! NodeCoordinatorActor.CheckCanIngest(dataset, version)
 
@@ -119,10 +126,10 @@ trait RowSource extends Actor with StrictLogging {
         }
       }
       logger.debug(s"Scheduling another CheckCanIngest in case any unacked messages left")
-      context.system.scheduler.scheduleOnce(waitingPeriod, self, CheckCanIngest)
+      schedule(waitingPeriod, CheckCanIngest)
   }
 
-  def doneReading: Receive = {
+  def doneReadingAck: Receive = {
     case NodeCoordinatorActor.Ack(lastSequenceNo) =>
       if (outstanding contains lastSequenceNo) outstanding.remove(lastSequenceNo)
       if (outstanding.isEmpty) sendFlush()
@@ -132,12 +139,22 @@ trait RowSource extends Actor with StrictLogging {
       finish()
   }
 
+  // If we don't get acks back, need to keep trying
+  def doneReading: Receive = doneReadingAck orElse replay
+
   def sendFlush(): Unit = coordinatorActor ! NodeCoordinatorActor.Flush(dataset, version)
 
+  private var scheduledTask: Option[Cancellable] = None
+  def schedule(delay: FiniteDuration, msg: Any): Unit = {
+    val task = context.system.scheduler.scheduleOnce(delay, self, msg)
+    scheduledTask = Some(task)
+  }
+
   def finish(): Unit = {
-    logger.info(s"Ingestion is all done")
+    logger.info(s"(${self.path.name}) Ingestion is all done")
     allDoneAndGood()
     whoStartedMe ! AllDone
+    scheduledTask.foreach(_.cancel)
     self ! PoisonPill
   }
 
