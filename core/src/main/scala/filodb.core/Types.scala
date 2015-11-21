@@ -19,9 +19,6 @@ object Types {
 
   type SortOrder = Set[(ColumnId, Boolean)]
 
-  // TODO: support composite partition keys?
-  type PartitionKey = String
-
   // TODO: contribute this Ordering back to ByteVector
   // Assumes unsigned comparison, big endian, meaning that the first byte in a vector
   // is the most significant one.

@@ -1,7 +1,7 @@
 package filodb.core.store
 
 import filodb.core.Setup._
-import filodb.core.Types.{ChunkId, ColumnId, PartitionKey}
+import filodb.core.Types.{ChunkId, ColumnId}
 import filodb.core.metadata._
 import filodb.core.query.UnorderedSegmentScan
 import filodb.core.reprojector.Reprojector
@@ -18,69 +18,84 @@ object ColumnStoreSpec {
   import scala.concurrent.ExecutionContext.Implicits.global
 
   trait MapChunkStore extends ChunkStore {
-    val chunksMap = new java.util.HashMap[PartitionKey, java.util.TreeMap[Any, java.util.TreeMap[ChunkId, Chunk[_,_]]]]
+    val chunksMap = new java.util.HashMap[Any, java.util.TreeMap[Any, java.util.TreeMap[ChunkId, ChunkWithMeta]]]
 
-    override def appendChunk[R,S](chunk: Chunk[R,S]): Future[Boolean] = {
+    override def appendChunk(chunk: ChunkWithMeta): Future[Boolean] = {
       var segments = chunksMap.get(chunk.segmentInfo.partition)
       if (segments == null) {
-        segments = new java.util.TreeMap[Any, java.util.TreeMap[ChunkId, Chunk[_,_]]]()
+        segments = new java.util.TreeMap[Any, java.util.TreeMap[ChunkId, ChunkWithMeta]]()
         chunksMap.put(chunk.segmentInfo.partition, segments)
       }
       var chunks = segments.get(chunk.segmentInfo.segment)
       if (chunks == null) {
-        chunks = new java.util.TreeMap[ChunkId, Chunk[_,_]]()
+        chunks = new java.util.TreeMap[ChunkId, ChunkWithMeta]()
         segments.put(chunk.segmentInfo.segment, chunks)
       }
       chunks.put(chunk.chunkId, chunk)
       Future(true)
     }
 
-    override def readChunksForSegments[R,S](segmentInfoSeq: Seq[SegmentInfo[R,S]],
-                                            columns: Seq[ColumnId]): Future[Map[SegmentInfo[R,S], Seq[Chunk[R,S]]]] = {
-      var segmentMap = Map[SegmentInfo[R,S], Seq[Chunk[R,S]]]()
+    override def getAllChunksForSegments(segmentInfoSeq: Seq[SegmentInfo],
+                                         columns: Seq[ColumnId]): Future[Map[SegmentInfo, Seq[ChunkWithMeta]]] = {
+      var segmentMap = Map[SegmentInfo, Seq[ChunkWithMeta]]()
       segmentInfoSeq.foreach { segmentInfo =>
         val segments = chunksMap.get(segmentInfo.partition)
         val segment = segments.get(segmentInfo.segment)
-        val chunks: Seq[Chunk[R,S]] = segment.values().asScala.map(_.asInstanceOf[Chunk[R,S]]).toSeq
+        val chunks = segment.values().asScala.toSeq
         segmentMap = segmentMap + (segmentInfo -> chunks)
       }
       Future(segmentMap)
     }
+
+    override def getChunks(segmentInfo: SegmentInfo,
+                           chunkIds: Seq[ChunkId]): Seq[ChunkWithId] = {
+      val segments = chunksMap.get(segmentInfo.partition)
+      val segment = segments.get(segmentInfo.segment)
+      val chunks = segment.values().asScala
+      chunks.filter(i => chunkIds.contains(i.chunkId)).toSeq
+    }
+
   }
 
   trait MapSummaryStore extends SummaryStore {
-    val summaryMap = new java.util.HashMap[PartitionKey, java.util.TreeMap[Any, (SegmentVersion, SegmentSummary[_,_])]]()
+    val summaryMap = new java.util.HashMap[Any, java.util.TreeMap[Any, (SegmentVersion, SegmentSummary)]]()
 
     /**
      * Atomically compare and swap the new SegmentSummary for this SegmentID
      */
-    override def compareAndSwapSummary[R,S](segmentVersion: SegmentVersion, segmentInfo: SegmentInfo[R,S], segmentSummary: SegmentSummary[R,S]): Future[Boolean] = {
+    override def compareAndSwapSummary(segmentVersion: SegmentVersion,
+                                       segmentInfo: SegmentInfo,
+                                       segmentSummary: SegmentSummary): Future[Boolean] = {
       var segments = summaryMap.get(segmentInfo.partition)
       if (segments == null) {
-        segments = new java.util.TreeMap[Any, (SegmentVersion, SegmentSummary[_,_])]()
+        segments = new java.util.TreeMap[Any, (SegmentVersion, SegmentSummary)]()
         summaryMap.put(segmentInfo.partition, segments)
       }
       segments.put(segmentInfo.segment, (segmentVersion, segmentSummary))
       Future(true)
     }
 
-    override def readSegmentSummary[R,S](segmentInfo: SegmentInfo[R,S]): Future[Option[(SegmentVersion, SegmentSummary[R,S])]] = {
+    override def readSegmentSummary(segmentInfo: SegmentInfo):
+    Future[Option[(SegmentVersion, SegmentSummary)]] = {
       val segments = summaryMap.get(segmentInfo.partition)
       if (segments != null) {
         val s = segments.get(segmentInfo.segment)
         if (s != null) {
-          val (version, summary: SegmentSummary[R,S]) = s
-          Future(Some((version, summary.asInstanceOf[SegmentSummary[R,S]])))
+          val (version, summary: SegmentSummary) = s
+          Future(Some((version, summary.asInstanceOf[SegmentSummary])))
         } else Future(None)
       } else Future(None)
     }
 
-    override def readSegmentSummaries[R,S](projection: ProjectionInfo[R,S],
-                                         partitionKey: PartitionKey,
-                                         keyRange: KeyRange[S]): Future[Seq[SegmentSummary[R,S]]] = {
+    override def readSegmentSummaries(projection: Projection,
+                                      partitionKey: Any,
+                                      keyRange: KeyRange[_]): Future[Seq[SegmentSummary]] = {
       val segments = summaryMap.get(partitionKey)
-      Future(segments.subMap(keyRange.start, keyRange.end).values()
-        .asScala.map(_._2.asInstanceOf[SegmentSummary[R,S]]).toSeq)
+      if (segments == null)
+        Future(List.empty[SegmentSummary])
+      else
+        Future(segments.subMap(keyRange.start, keyRange.end).values()
+          .asScala.map(_._2).toSeq)
     }
   }
 
@@ -96,14 +111,19 @@ class ColumnStoreSpec extends FunSpec with Matchers with BeforeAndAfter with Sca
     it("should store and read one flush properly") {
       val mapColumnStore = new MapColumnStore()
 
-      val rows = names2.map(TupleRowReader)
-      val flushes = Reprojector.project(Dataset.DefaultPartitionKey, projection, rows)
-      flushes.map { flush =>
-        Await.result(mapColumnStore.flushToSegment(projection, flush), 10 seconds)
+      val rows = names.map(TupleRowReader)
+      val partitions = Reprojector.project(projection, rows).toSeq
+      partitions.length should be(2)
+      val results = partitions.map { case (p, flushes) =>
+        flushes.map { flush =>
+          Await.result(mapColumnStore.flushToSegment(projection, flush), 100 seconds)
+        }
       }
-      val segments = Await.result(mapColumnStore.readSegments(projection,
-        Dataset.DefaultPartitionKey,
-        projection.columns.map(i => i.name), KeyRange[Long](10L, 50L)), 10 seconds)
+      results.foreach(seq => seq.foreach { r: Boolean =>
+        r should be(true)
+      })
+      val segments = Await.result(mapColumnStore.readSegments(projection, "US",
+        projection.schema.map(i => i.name), KeyRange("A", "Z")), 10 seconds)
 
       segments.length should be(2)
       val scan = new UnorderedSegmentScan(segments.head)
@@ -111,15 +131,19 @@ class ColumnStoreSpec extends FunSpec with Matchers with BeforeAndAfter with Sca
       val threeReaders = scan.getMoreRows(3)
       scan.hasMoreRows should be(false)
       val reader = threeReaders.head
-      reader.getString(0) should be("Peyton")
-      reader.getLong(2) should be(24)
+      reader.getString(0) should be("US")
+      reader.getString(1) should be("NY")
+      reader.getString(2) should be("Ndamukong")
+      reader.getLong(4) should be(28)
 
       val scan2 = new UnorderedSegmentScan(segments.last)
       scan2.hasMoreRows should be(true)
       val threeMore = scan2.getMoreRows(3)
       val reader1 = threeMore.last
-      reader1.getString(0) should be("Jerry")
-      reader1.getLong(2) should be(40)
+      reader1.getString(0) should be("US")
+      reader1.getString(1) should be("SF")
+      reader1.getString(2) should be("Khalil")
+      reader1.getLong(4) should be(24)
 
     }
   }

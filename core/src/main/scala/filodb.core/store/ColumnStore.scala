@@ -2,18 +2,20 @@ package filodb.core.store
 
 import java.util.UUID
 
-import filodb.core.KeyType
 import filodb.core.Types._
 import filodb.core.metadata._
-import filodb.core.reprojector.SegmentFlush
 
 import scala.concurrent.Future
 
 trait ChunkStore {
-  def appendChunk[R,S](chunk: Chunk[R,S]): Future[Boolean]
+  def appendChunk(chunk: ChunkWithMeta): Future[Boolean]
 
-  def readChunksForSegments[R,S](segmentInfoSeq: Seq[SegmentInfo[R,S]],
-                            columns: Seq[ColumnId]): Future[Map[SegmentInfo[R,S], Seq[Chunk[R,S]]]]
+  def getChunks(segment: SegmentInfo,
+                chunkIds: Seq[ChunkId]): Seq[ChunkWithId]
+
+  def getAllChunksForSegments(segmentInfoSeq: Seq[SegmentInfo],
+                              columns: Seq[ColumnId])
+  : Future[Map[SegmentInfo, Seq[ChunkWithMeta]]]
 }
 
 trait SummaryStore {
@@ -22,15 +24,16 @@ trait SummaryStore {
   /**
    * Atomically compare and swap the new SegmentSummary for this SegmentID
    */
-  def compareAndSwapSummary[R,S](segmentVersion: SegmentVersion,
-                            segmentInfo: SegmentInfo[R,S],
-                            segmentSummary: SegmentSummary[R,S]): Future[Boolean]
+  def compareAndSwapSummary(segmentVersion: SegmentVersion,
+                            segmentInfo: SegmentInfo,
+                            segmentSummary: SegmentSummary): Future[Boolean]
 
-  def readSegmentSummaries[R,S](projection: ProjectionInfo[R,S],
-                           partitionKey: PartitionKey,
-                           keyRange: KeyRange[S]): Future[Seq[SegmentSummary[R,S]]]
+  def readSegmentSummaries(projectionId: Projection,
+                           partitionKey: Any,
+                           segmentRange: KeyRange[_]): Future[Seq[SegmentSummary]]
 
-  def readSegmentSummary[R,S](segmentInfo: SegmentInfo[R,S]): Future[Option[(SegmentVersion, SegmentSummary[R,S])]]
+  def readSegmentSummary(segmentInfo: SegmentInfo)
+  : Future[Option[(SegmentVersion, SegmentSummary)]]
 
 }
 
@@ -40,13 +43,13 @@ trait ColumnStore {
 
   import scala.concurrent.ExecutionContext.Implicits.global
 
-  def readSegments[R,S](projection: ProjectionInfo[R,S],
-                   partitionKey: PartitionKey,
+  def readSegments(projection: Projection,
+                   partitionKey: Any,
                    columns: Seq[ColumnId],
-                   keyRange: KeyRange[S]): Future[Seq[Segment[R,S]]] =
+                   segmentRange: KeyRange[_]): Future[Seq[Segment]] =
     for {
-      segmentMeta <- readSegmentSummaries(projection, partitionKey, keyRange)
-      segmentData <- readChunksForSegments(segmentMeta.map(_.segmentInfo), columns)
+      segmentMeta <- readSegmentSummaries(projection, partitionKey, segmentRange)
+      segmentData <- getAllChunksForSegments(segmentMeta.map(_.segmentInfo), columns)
       mapping = segmentMeta.map(meta => DefaultSegment(meta.segmentInfo, segmentData(meta.segmentInfo)))
     } yield mapping
 
@@ -57,21 +60,32 @@ trait ColumnStore {
    * If the attempt passes, we append the new chunks to the Segment.
    * There is a particular thorny edge case where the summary is stored but the chunk is not.
    */
-  def flushToSegment[R,S](projection: ProjectionInfo[R,S], segmentFlush: SegmentFlush[R,S]): Future[Boolean] = {
+  def flushToSegment(projection: Projection,
+                     flushedChunk: FlushedChunk): Future[Boolean] = {
     for {
-      s <- readSegmentSummary(segmentFlush.segmentInfo)
-      segmentSummary = s.map(_._2).getOrElse(DefaultSegmentSummary(projection.rowKeyType,
-        segmentFlush.segmentInfo, None))
+      s <- readSegmentSummary(flushedChunk.segmentInfo)
+      segmentSummary = s.map(_._2).getOrElse(
+        DefaultSegmentSummary(projection.keyType, flushedChunk.segmentInfo, None))
 
-      segmentVersion = s.map(_._1).getOrElse(UUID.randomUUID())
+      segmentVersion = s.fold(UUID.randomUUID())(_._1)
       chunkId = segmentSummary.nextChunkId
-      (chunkSummary, newSummary) = segmentSummary.withSortKeys(chunkId, segmentFlush.rowKeys)
-      chunkOverrides = segmentSummary.buildOverrides(projection.rowKeyType,segmentFlush.rowKeys, chunkSummary.keyRange)
+      (chunkSummary, newSummary) = segmentSummary.withKeys(chunkId, flushedChunk.keys, flushedChunk.sortedKeyRange)
 
-      newChunk = new DefaultChunk(chunkId, segmentFlush.segmentInfo, segmentFlush.columnVectors,
-        segmentFlush.rowKeys.length, chunkOverrides)
+      possibleOverrides = segmentSummary.possibleOverrides(flushedChunk.keys)
+      possiblyOverriddenChunks = possibleOverrides.map(o =>
+        getChunks(flushedChunk.segmentInfo, o.seq))
+        .getOrElse(List.empty[ChunkWithId])
 
-      swapResult <- compareAndSwapSummary(segmentVersion, segmentFlush.segmentInfo, newSummary)
+      chunkOverrides = segmentSummary.actualOverrides(flushedChunk.keys, possiblyOverriddenChunks)
+
+      newChunk = new DefaultChunk(chunkId,
+        flushedChunk.keys,
+        flushedChunk.segmentInfo,
+        flushedChunk.columnVectors,
+        flushedChunk.keys.length,
+        if (chunkOverrides.isEmpty) None else Some(chunkOverrides))
+
+      swapResult <- compareAndSwapSummary(segmentVersion, flushedChunk.segmentInfo, newSummary)
       // hoping that chunk will be appended always. If this fails, the db is corrupted!!
       result <- if (swapResult) appendChunk(newChunk) else Future(false)
     } yield result

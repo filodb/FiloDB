@@ -57,7 +57,7 @@ extends CachedMergingColumnStore with StrictLogging {
    * Initializes the column store for a given dataset projection.  Must be called once before appending
    * segments to that projection.
    */
-  def initializeProjection(projection: Projection): Future[Response] =
+  def initializeProjection(projection: ProjectionInfo): Future[Response] =
     for { (chunkTable, rowMapTable) <- getSegmentTables(projection.dataset)
           ctResp                    <- chunkTable.initialize()
           rmtResp                   <- rowMapTable.initialize() } yield { rmtResp }
@@ -65,7 +65,7 @@ extends CachedMergingColumnStore with StrictLogging {
   /**
    * Clears all data from the column store for that given projection.
    */
-  def clearProjectionDataInner(projection: Projection): Future[Response] =
+  def clearProjectionDataInner(projection: ProjectionInfo): Future[Response] =
     for { (chunkTable, rowMapTable) <- getSegmentTables(projection.dataset)
           ctResp                    <- chunkTable.clearAll()
           rmtResp                   <- rowMapTable.clearAll() } yield { rmtResp }

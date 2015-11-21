@@ -27,7 +27,7 @@ class CassandraColumnStoreSpec extends CassandraFlatSpec with BeforeAndAfter {
   val colStore = new CassandraColumnStore(config)
   implicit val keySpace = KeySpace(config.getString("cassandra.keyspace"))
   val dataset = "foo"
-  val fooProj = Projection(0, dataset, "someCol")
+  val fooProj = ProjectionInfo(0, dataset, "someCol")
 
 
   val (chunkTable, rowMapTable) = Await.result(colStore.getSegmentTables(dataset), 3 seconds)

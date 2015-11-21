@@ -23,20 +23,16 @@ trait Dataflow {
 }
 
 
-class UnorderedSegmentScan[R,S](segment: Segment[R,S]) extends Dataflow {
+class UnorderedSegmentScan(segment: Segment) extends Dataflow {
 
   val chunkAccessTable: Array[(ChunkId, Array[FiloVector[_]])] = buildAccessTable()
-  val overrideIndex: mutable.HashMap[Int, mutable.Set[R]] with mutable.MultiMap[Int, R] = buildOverrideIndex()
-
-  private def projection = segment.projection
+  val overrideIndex: mutable.HashMap[Int, mutable.Set[Int]] with mutable.MultiMap[Int, Int] = buildOverrideIndex()
 
   private def chunks = segment.chunks
 
   private def classes = segment.columns.map(_.columnType.clazz).toArray
 
   private def numChunks = chunks.length
-
-  private def sortKeyColumn = projection.sortColNo
 
 
   private def buildAccessTable() = {
@@ -48,17 +44,17 @@ class UnorderedSegmentScan[R,S](segment: Segment[R,S]) extends Dataflow {
   }
 
   private def buildOverrideIndex() = {
-    val overrideIndex = new mutable.HashMap[Int, mutable.Set[R]]() with mutable.MultiMap[Int, R]
+    val overrideIndex = new mutable.HashMap[Int, mutable.Set[Int]]() with mutable.MultiMap[Int, Int]
     val allOverrides = chunks.map(_.chunkOverrides).collect { case Some(x) => x }.flatten.zipWithIndex
     allOverrides.foreach { case ((chunkId, keys), i) => keys.foreach(overrideIndex.addBinding(i, _)) }
     overrideIndex
   }
 
-  var currentLocation = (0, 0)
+  var currentLocation = (0, -1)
 
   private def getNextLocation: Option[(Int, Int)] = {
     var newLocation = move(currentLocation)
-    while (isSkip(SingleRowReader(newLocation._2, chunkAccessTable(newLocation._1)._2), newLocation._1)) {
+    while (isSkip(newLocation)) {
       newLocation = move(newLocation)
     }
     if (newLocation._1 < numChunks && newLocation._2 < chunks(newLocation._1).numRows) Some(newLocation) else None
@@ -75,9 +71,9 @@ class UnorderedSegmentScan[R,S](segment: Segment[R,S]) extends Dataflow {
     (chunkNum, rowOffset)
   }
 
-  private def isSkip(row: SingleRowReader, chunkNum: Int): Boolean = {
-    overrideIndex.get(chunkNum).exists { overrides =>
-      overrides.contains(projection.rowKeyFunction(row))
+  private def isSkip(location: (Int, Int)): Boolean = {
+    overrideIndex.get(location._1).exists { overrides =>
+      overrides.contains(location._2)
     }
   }
 

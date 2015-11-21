@@ -11,34 +11,35 @@ import scodec.bits.ByteVector
  */
 trait KeySetDigest {
 
-  def contains[K: KeyType](rowKey: K): Boolean
+  def contains(rowKey: Any): Boolean
+
+  def keyType: KeyType
 
 }
 
 /**
  * A KeySetDigest which uses a bloom filter to check the presence of a row key.
  */
-class BloomDigest(bloomFilter: BloomFilter) extends KeySetDigest {
+class BloomDigest(val bloomFilter: BloomFilter, val keyType: KeyType) extends KeySetDigest {
 
-  override def contains[K: KeyType](rowKey: K): Boolean = {
-    val helper = implicitly[KeyType[K]]
-    bloomFilter.isPresent(helper.toBytes(rowKey).toArray)
+  override def contains(rowKey: Any): Boolean = {
+    bloomFilter.isPresent(keyType.toBytes(rowKey.asInstanceOf[keyType.T]).toArray)
   }
 }
 
 
 object BloomDigest {
 
-  def apply[K](rowKeys: Seq[K], helper: KeyType[K]): BloomDigest = {
+  def apply(rowKeys: Seq[_], helper: KeyType): BloomDigest = {
     val length = rowKeys.length
     val bloomFilter = new BloomFilter(length, length * 10)
     rowKeys.foreach { rowKey =>
-      bloomFilter.add(helper.toBytes(rowKey).toArray)
+      bloomFilter.add(helper.toBytes(rowKey.asInstanceOf[helper.T]).toArray)
     }
-    new BloomDigest(bloomFilter)
+    new BloomDigest(bloomFilter, helper)
   }
 
-  def apply[K](digestBytes: ByteVector,helper: KeyType[K]): BloomDigest = {
-    new BloomDigest(BloomFilter.deserialize(digestBytes.toArray))
+  def apply(digestBytes: ByteVector, helper: KeyType): BloomDigest = {
+    new BloomDigest(BloomFilter.deserialize(digestBytes.toArray), helper)
   }
 }

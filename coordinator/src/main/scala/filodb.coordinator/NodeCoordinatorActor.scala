@@ -10,7 +10,7 @@ import scala.concurrent.duration._
 import filodb.core._
 import filodb.core.Types._
 import filodb.core.metadata.{Column, ProjectionInfo$}
-import filodb.core.store.{Projection, Dataset, MetaStore, ColumnStore}
+import filodb.core.store.{ProjectionInfo, Dataset, MetaStore, ColumnStore}
 import filodb.core.memtable.Reprojector
 
 /**
@@ -90,7 +90,7 @@ object NodeCoordinatorActor {
    * Truncates all data from a projection of a dataset.  Waits for any pending flushes from said
    * dataset to finish first, and also clears the columnStore cache for that dataset.
    */
-  case class TruncateProjection(projection: Projection, version: Int) extends NodeCommand
+  case class TruncateProjection(projection: ProjectionInfo, version: Int) extends NodeCommand
   case object ProjectionTruncated extends NodeResponse
 
   // Internal messages

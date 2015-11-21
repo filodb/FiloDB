@@ -3,27 +3,40 @@ package filodb.core.metadata
 import java.nio.ByteBuffer
 
 import filodb.core.Types._
-import scodec.bits.ByteVector
 
 
-trait Chunk[R,S] {
+trait Chunk {
 
-  def chunkId: ChunkId
-
-  def segmentInfo: SegmentInfo[R,S]
+  def segmentInfo: SegmentInfo
 
   def columnVectors: Array[ByteBuffer]
 
-  def chunkOverrides: Option[Seq[(ChunkId, Seq[R])]]
+  def keys: Seq[_]
+
+}
+
+trait ChunkWithId extends Chunk {
+  def chunkId: ChunkId
+}
+
+trait ChunkWithMeta extends ChunkWithId {
+
+  def chunkOverrides: Option[Seq[(ChunkId, Seq[Int])]]
 
   def numRows: Int
 
   override def toString: String = s"Chunk($segmentInfo/ $chunkId) rows($numRows)"
+
 }
 
+case class FlushedChunk(segmentInfo: SegmentInfo,
+                        keys: Seq[Any],
+                        sortedKeyRange: KeyRange[Any],
+                        columnVectors: Array[ByteBuffer]) extends Chunk
 
-case class DefaultChunk[R,S](chunkId: ChunkId,
-                           segmentInfo: SegmentInfo[R,S],
-                           columnVectors: Array[ByteBuffer],
-                           numRows: Int,
-                           chunkOverrides: Option[Seq[(ChunkId, Seq[R])]] = None) extends Chunk[R,S]
+case class DefaultChunk(chunkId: ChunkId,
+                        keys: Seq[Any],
+                        segmentInfo: SegmentInfo,
+                        columnVectors: Array[ByteBuffer],
+                        numRows: Int,
+                        chunkOverrides: Option[Seq[(ChunkId, Seq[Int])]] = None) extends ChunkWithMeta

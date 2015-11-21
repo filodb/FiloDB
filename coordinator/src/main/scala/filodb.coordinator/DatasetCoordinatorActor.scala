@@ -7,7 +7,7 @@ import org.velvia.filo.RowReader
 import scala.concurrent.Future
 
 import filodb.core.metadata.{Column, ProjectionInfo$}
-import filodb.core.store.{Projection, ColumnStore}
+import filodb.core.store.{ProjectionInfo, ColumnStore}
 import filodb.core.memtable.{MemTable, MapDBMemTable, Reprojector}
 
 object DatasetCoordinatorActor {
@@ -43,7 +43,7 @@ object DatasetCoordinatorActor {
   /**
    * Clears all data from the projection.  Waits for existing flush to finish first.
    */
-  case class ClearProjection(replyTo: ActorRef, projection: Projection) extends DSCoordinatorMessage
+  case class ClearProjection(replyTo: ActorRef, projection: ProjectionInfo) extends DSCoordinatorMessage
 
   /**
    * Returns current stats.  Note: numRows* will return -1 if the memtable is not set up yet
@@ -203,7 +203,7 @@ private[filodb] class DatasetCoordinatorActor[K](projection: ProjectionInfo[K],
     // Don't delete reprojection.  Just let everything suspend?
   }
 
-  private def clearProjection(originator: ActorRef, projection: Projection): Unit = {
+  private def clearProjection(originator: ActorRef, projection: ProjectionInfo): Unit = {
     for { flushResult <- curReprojection.getOrElse(Future.successful(Nil))
           resp <- columnStore.clearProjectionData(projection) }
     { originator ! NodeCoordinatorActor.ProjectionTruncated }

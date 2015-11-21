@@ -4,7 +4,7 @@ import com.datastax.driver.core.Row
 import com.typesafe.config.Config
 import com.websudos.phantom.dsl._
 import filodb.coordinator.{NotFoundError, Success, AlreadyExists, Response}
-import filodb.core.store.{Projection, DatasetOptions, Dataset}
+import filodb.core.store.{ProjectionInfo, DatasetOptions, Dataset}
 import scala.concurrent.Future
 
 import filodb.cassandra.FiloCassandraConnector
@@ -15,7 +15,7 @@ import filodb.core.metadata.Projection
  *
  * @param config a Typesafe Config with hosts, port, and keyspace parameters for Cassandra connection
  */
-sealed class DatasetTable(val config: Config) extends CassandraTable[DatasetTable, Projection]
+sealed class DatasetTable(val config: Config) extends CassandraTable[DatasetTable, ProjectionInfo]
 with FiloCassandraConnector {
   override val tableName = "datasets"
 
@@ -33,8 +33,8 @@ with FiloCassandraConnector {
   import filodb.core._
   import filodb.core.Types._
 
-  override def fromRow(row: Row): Projection =
-    Projection(projectionId(row),
+  override def fromRow(row: Row): ProjectionInfo =
+    ProjectionInfo(projectionId(row),
                name(row),
                projectionSortColumn(row),
                projectionReverse(row),
@@ -44,7 +44,7 @@ with FiloCassandraConnector {
 
   def clearAll(): Future[Response] = truncate.future().toResponse()
 
-  def insertProjection(projection: Projection): Future[Response] =
+  def insertProjection(projection: ProjectionInfo): Future[Response] =
     insert.value(_.name, projection.dataset)
           .value(_.projectionId, projection.id)
           .value(_.projectionSortColumn, projection.sortColumn)
@@ -63,7 +63,7 @@ with FiloCassandraConnector {
       case e: NoSuchElementException => AlreadyExists
     }
 
-  def getProjection(dataset: TableName, id: Int): Future[Projection] =
+  def getProjection(dataset: TableName, id: Int): Future[ProjectionInfo] =
     select.where(_.name eqs dataset).and(_.projectionId eqs id)
           .one().map(_.getOrElse(throw NotFoundError(s"Dataset $dataset")))
 

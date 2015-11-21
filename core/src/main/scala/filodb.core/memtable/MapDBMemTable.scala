@@ -1,7 +1,6 @@
 package filodb.core.memtable
 
 import com.typesafe.config.Config
-import filodb.core.Types._
 import filodb.core.metadata._
 import org.mapdb._
 import org.velvia.filo.RowReader
@@ -24,7 +23,7 @@ import scalaxy.loops._
  *   }
  * }}}
  */
-class MapDBMemTable[R, S](val projection: ProjectionInfo[R, S], config: Config) extends MemTable[R, S] {
+class MapDBMemTable(val projection: Projection, config: Config) extends MemTable {
 
   import collection.JavaConversions._
 
@@ -40,44 +39,55 @@ class MapDBMemTable[R, S](val projection: ProjectionInfo[R, S], config: Config) 
     .cacheDisable
     .make()
 
-  val serializer = new RowReaderSerializer(projection.columns)
-  val segmentFunc = projection.segmentFunction
+  val serializer = new RowReaderSerializer(projection.schema)
+  val keyFunc = projection.keyFunction
+  val partitionFunc = projection.partitionFunction
+  val partitionType = projection.partitionType
+  val keyType = projection.keyType
 
-  implicit lazy val segmentKeyOrdering: Ordering[S] = projection.segmentType.ordering
+  implicit lazy val keyOrdering: Ordering[(partitionType.T, keyType.T)] =
+    Ordering.Tuple2(partitionType.ordering, keyType.ordering)
+
   lazy val rowMap = db.createTreeMap("filo")
-    .comparator(Ordering[(PartitionKey, S)])
+    .comparator(Ordering[(partitionType.T, keyType.T)])
     // Otherwise will pull out all values in a BTree Node at once
     .valuesOutsideNodesEnable()
     .counterEnable()
     .valueSerializer(Serializer.BYTE_ARRAY)
-    .makeOrGet[(PartitionKey, S), Array[Byte]]()
+    .makeOrGet[(partitionType.T, keyType.T), Array[Byte]]()
 
   /**
    * === Row ingest, read, delete operations ===
    */
-  def ingestRows(rows: Seq[RowReader])(callback: => Unit): Unit = {
+  def ingestRows(rows: Seq[RowReader]): Unit = {
     // For each row: insert into rows map
     for {row <- rows} {
-      val segment = segmentFunc(row)
-      rowMap.put((projection.partitionFunc(row), segment), serializer.serialize(row))
+      val key = keyFunc(row).asInstanceOf[keyType.T]
+      val partKey = partitionFunc(row).asInstanceOf[partitionType.T]
+      rowMap.put((partKey, key), serializer.serialize(row))
     }
-    // Since this is an in-memory table only, just call back right away.
-    callback
   }
 
-  def readRows(partitionKey: PartitionKey, keyRange: KeyRange[S]): Iterator[RowReader] = {
-    rowMap.subMap((partitionKey, keyRange.start), (partitionKey, keyRange.end))
+  def readRows(partitionKey: Any, keyRange: KeyRange[_]): Iterator[RowReader] = {
+    val pk = partitionKey.asInstanceOf[partitionType.T]
+    val start = keyRange.start.asInstanceOf[keyType.T]
+    val end = keyRange.end.asInstanceOf[keyType.T]
+    rowMap.subMap((pk, start), (pk, end))
       .keySet.iterator.map { k => serializer.deserialize(rowMap.get(k)) }
   }
 
-  def readAllRows(): Iterator[(PartitionKey, S, RowReader)] = {
+  def readAllRows(): Iterator[(_, _, RowReader)] = {
     rowMap.keySet.iterator.map { case index@(part, k) =>
       (part, k, serializer.deserialize(rowMap.get(index)))
     }
   }
 
-  def removeRows(partitionKey: PartitionKey, keyRange: KeyRange[S]): Unit = {
-    rowMap.subMap((partitionKey, keyRange.start), (partitionKey, keyRange.end))
+  def removeRows(partitionKey: Any, keyRange: KeyRange[_]): Unit = {
+    val pk = partitionKey.asInstanceOf[partitionType.T]
+    val start = keyRange.start.asInstanceOf[keyType.T]
+    val end = keyRange.end.asInstanceOf[keyType.T]
+
+    rowMap.subMap((pk, start), (pk, end))
       .keySet.iterator.foreach { k => rowMap.remove(k) }
   }
 
