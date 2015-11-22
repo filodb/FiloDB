@@ -16,7 +16,7 @@ class MemTableMemoryTest extends FunSpec with Matchers with BeforeAndAfter {
   val newSetting = "memtable.max-rows-per-table = 200000"
   val config = ConfigFactory.parseString(newSetting).withFallback(
                  ConfigFactory.load("application_test.conf"))
-  val mTable = new MapDBMemTable(projection, config)
+  val mTable = new FiloMemTable(projection, config)
   import scala.concurrent.ExecutionContext.Implicits.global
 
   before {
