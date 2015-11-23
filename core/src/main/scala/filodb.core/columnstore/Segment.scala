@@ -98,7 +98,7 @@ extends GenericSegment(keyRange, null) {
     chunkMap.foreach { case (col, bytes) => addChunk(newChunkId, col, bytes) }
   }
 
-  def addRowsAsChunk(rows: Seq[(PartitionKey, K, RowReader)]): Unit = {
+  def addRowsAsChunk(rows: Iterator[(PartitionKey, K, RowReader)]): Unit = {
     val newChunkId = index.nextChunkId
     val builder = new RowToVectorBuilder(filoSchema)
     rows.zipWithIndex.foreach { case ((_, k, r), i) =>

@@ -8,7 +8,7 @@ import scala.concurrent.Future
 
 import filodb.core.metadata.{Column, Dataset, Projection, RichProjection}
 import filodb.core.columnstore.ColumnStore
-import filodb.core.reprojector.{MemTable, MapDBMemTable, Reprojector}
+import filodb.core.reprojector.{MemTable, FiloMemTable, Reprojector}
 
 object DatasetCoordinatorActor {
   import filodb.core.Types._
@@ -121,7 +121,7 @@ private[filodb] class DatasetCoordinatorActor[K](projection: RichProjection[K],
   var flushesFailed = 0
 
   def makeNewTable(): MemTable[K] = {
-    new MapDBMemTable(projection, config)
+    new FiloMemTable(projection, config)
   }
 
   private def reportStats(): Unit = {
@@ -168,6 +168,7 @@ private[filodb] class DatasetCoordinatorActor[K](projection: RichProjection[K],
       logger.warn("This should not happen. Not starting flush; $curReprojection; $flushingTable")
       return
     }
+    activeTable.forceCommit()
     flushingTable = Some(activeTable)
     activeTable = makeNewTable()
     val newTaskFuture = reprojector.reproject(flushingTable.get, version)

@@ -29,9 +29,11 @@ with ScalaFutures {
 
   import system.dispatcher
 
+  // Need to force smaller flush interval to ensure acks get back in time
   val config = ConfigFactory.parseString(
                  """memtable.flush-trigger-rows = 100
-                    memtable.max-rows-per-table = 200""")
+                    memtable.max-rows-per-table = 200
+                    memtable.flush.interval = 500 ms""")
                  .withFallback(ConfigFactory.load("application_test.conf"))
   val keyRange = KeyRange("dataset", Dataset.DefaultPartitionKey, 0L, 10000L)
   val myDataset = dataset.copy(partitionColumn = "league")

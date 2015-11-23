@@ -70,9 +70,8 @@ class DefaultReprojector(columnStore: ColumnStore)
       logger.debug(s"Created new segment $segment for encoding...")
 
       // Group rows into chunk sized bytes and add to segment
-      segmentRowsIt.grouped(dataset.options.chunkSize).foreach { chunkRowsIt =>
-        val chunkRows = chunkRowsIt.toSeq
-        segment.addRowsAsChunk(chunkRows)
+      while (segmentRowsIt.nonEmpty) {
+        segment.addRowsAsChunk(segmentRowsIt.take(dataset.options.chunkSize))
       }
       segment
     }
