@@ -2,10 +2,12 @@ package filodb.core.reprojector
 
 import com.typesafe.config.Config
 import java.nio.ByteBuffer
+import java.util.concurrent.{Executors, ScheduledFuture, TimeUnit}
 import java.util.TreeMap
 import net.ceedubs.ficus.Ficus._
 import org.velvia.filo.{VectorInfo, RowToVectorBuilder, RowReader, FiloRowReader, FastFiloRowReader}
 import scala.collection.mutable.{ArrayBuffer, HashMap}
+import scala.concurrent.duration.FiniteDuration
 import scala.math.Ordered
 import scalaxy.loops._
 
@@ -19,7 +21,8 @@ import filodb.core.metadata.{Column, Dataset, RichProjection}
  * The index is just an on-heap TreeMap per partition and keeps rows in sorted order.
  * The idea is to minimize serialization costs by leveraging Filo vectors, as compared to MapDB,
  * which has to do several expensive key serialization steps when inserting into a Map.
- * Reads are still efficient because Filo vectors are designed for fast random access.
+ * Reads are still efficient because Filo vectors are designed for fast random access and minimal
+ * deserialization.
  * New rows are kept in tempRows while enough rows or time elapses to be flushed into columnar
  * chunks.  If not enough rows before flush.interval elapses, then the chunk is flushed anyways, but will be
  * appended to next time, such that each chunk always fills up.
@@ -38,6 +41,7 @@ class FiloMemTable[K](val projection: RichProjection[K], config: Config) extends
   import collection.JavaConverters._
 
   val chunkSize = config.as[Option[Int]]("memtable.filo.chunksize").getOrElse(1000)
+  val flushInterval = config.as[FiniteDuration]("memtable.flush.interval")
 
   // From sort key K to a Long: upper 32-bits = chunk index, lower 32 bits = row index
   type KeyMap = TreeMap[K, Long]
@@ -59,6 +63,8 @@ class FiloMemTable[K](val projection: RichProjection[K], config: Config) extends
   private val tempRows = new ArrayBuffer[RowReader]
   private val callbacks = new ArrayBuffer[(Int, Int, () => Unit)]   // Start and end row index for each callback
   private val builder = new RowToVectorBuilder(filoSchema)
+  private val scheduler = Executors.newSingleThreadScheduledExecutor()
+  private var flushTask: Option[ScheduledFuture[_]] = None
 
   private def getKeyMap(partition: PartitionKey): KeyMap = {
     partKeyMap.getOrElse(partition, {
@@ -72,9 +78,31 @@ class FiloMemTable[K](val projection: RichProjection[K], config: Config) extends
   private def chunkRowIdToLong(chunkIndex: Int, rowNo: Int): Long =
     (chunkIndex.toLong << 32) + rowNo
 
+  private def invokeAndCleanupCallbacks(rowsToAdd: Int): Unit = {
+    // Both this method and ingestRows modifies tempRows and callbacks
+    tempRows.synchronized {
+      // invoke callbacks
+      while (callbacks.nonEmpty && callbacks.head._1 < rowsToAdd && callbacks.head._2 < rowsToAdd) {
+        callbacks.head._3()
+        callbacks.remove(0, 1)
+      }
+
+      // Remove rows added from tempRows
+      tempRows.remove(0, rowsToAdd)
+
+      // Adjust remaining callback row indices
+      callbacks.zipWithIndex.foreach { case ((firstIdx, lastIdx, fn), i) =>
+        callbacks(i) = (Math.min(0, firstIdx - rowsToAdd), Math.min(0, lastIdx - rowsToAdd), fn)
+      }
+    }
+  }
+
   // Converts rows to chunks, merging with previous chunks as needed, and invokes callbacks
   // Also updates the partKeyMap which maps every sort key to its chunk ID and row index
   private def flushRowsToChunks(): Unit = synchronized {
+    // VERY IMPORTANT: pass false to cancel so this task is not interrupted
+    // Cancel any other scheduled tasks, if one was scheduled
+    flushTask.foreach(_.cancel(false))
     builder.reset()
 
     // Last chunk written partial?  Get chunks out, populate builder, remove from chunks
@@ -107,19 +135,8 @@ class FiloMemTable[K](val projection: RichProjection[K], config: Config) extends
     chunks += chunkAray
     readers += new FastFiloRowReader(chunkAray, clazzes)
 
-    // invoke callbacks
-    while (callbacks.nonEmpty && callbacks.head._1 < rowsToAdd && callbacks.head._2 < rowsToAdd) {
-      callbacks.head._3()
-      callbacks.remove(0, 1)
-    }
-
-    // Remove rows added from tempRows
-    tempRows.remove(0, rowsToAdd)
-
-    // Adjust remaining callback row indices
-    callbacks.zipWithIndex.foreach { case ((firstIdx, lastIdx, fn), i) =>
-      callbacks(i) = (Math.min(0, firstIdx - rowsToAdd), Math.min(0, lastIdx - rowsToAdd), fn)
-    }
+    invokeAndCleanupCallbacks(rowsToAdd)
+    flushTask = None
   }
 
   def close(): Unit = {}
@@ -128,15 +145,25 @@ class FiloMemTable[K](val projection: RichProjection[K], config: Config) extends
    * === Row ingest, read, delete operations ===
    */
   def ingestRows(rows: Seq[RowReader])(callback: => Unit): Unit = if (rows.nonEmpty) {
-    val oldLen = tempRows.length
-    tempRows ++= rows
-    callbacks += ((oldLen, tempRows.length - 1, { () => callback }))
+    tempRows.synchronized {
+      val oldLen = tempRows.length
+      tempRows ++= rows
+      callbacks += ((oldLen, tempRows.length - 1, { () => callback }))
+    }
     while (tempRows.length >= chunkSize) flushRowsToChunks()
+    // If rows have not been flushed, schedule a task in the future to flush it
+    if (tempRows.nonEmpty && !flushTask.isDefined) {
+      val fut = scheduler.schedule(new Runnable { def run: Unit = { flushRowsToChunks() }},
+                                   flushInterval.toMillis,
+                                   TimeUnit.MILLISECONDS)
+      flushTask = Some(fut)
+    }
   }
 
   /**
-   * Forces the rows in tempRows to be committed into the chunk store and disk storage / WAL.
+   * Forces all the rows in tempRows to be committed into the chunk store and disk storage / WAL.
    * This might be necessary before flushing the memtable, or for testing.
+   * As a result, no background flush task needs to be scheduled since all rows will be flushed.
    */
   def forceCommit(): Unit = {
     while (tempRows.nonEmpty) flushRowsToChunks()
@@ -171,6 +198,9 @@ class FiloMemTable[K](val projection: RichProjection[K], config: Config) extends
   def numRows: Int = chunks.length * chunkSize + tempRows.length
 
   def clearAllData(): Unit = {
+    // Forcibly cancel any running or scheduled flush tasks
+    flushTask.foreach(_.cancel(true))
+    flushTask = None
     chunks.clear
     readers.clear
     partKeyMap.clear

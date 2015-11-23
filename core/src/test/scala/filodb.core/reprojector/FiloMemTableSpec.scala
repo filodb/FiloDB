@@ -51,8 +51,6 @@ class FiloMemTableSpec extends FunSpec with Matchers with BeforeAndAfter {
       mTable.forceCommit()
       resp should equal (2)
 
-      // mTable.numRows should equal (6)
-
       val outRows = mTable.readRows(keyRange)
       outRows.toSeq.map(_.getString(0)) should equal (firstNames)
     }
@@ -65,8 +63,6 @@ class FiloMemTableSpec extends FunSpec with Matchers with BeforeAndAfter {
       mTable.ingestRows(names.take(2).map(TupleRowReader)) { resp = 3 }
       mTable.forceCommit()
       resp should equal (3)
-
-      // mTable.numRows should equal (4)
 
       val outRows = mTable.readRows(keyRange)
       outRows.toSeq.map(_.getString(0)) should equal (Seq("Khalil", "Rodney", "Ndamukong", "Jerry"))
@@ -102,13 +98,23 @@ class FiloMemTableSpec extends FunSpec with Matchers with BeforeAndAfter {
       mTable.forceCommit()
       resp should equal (99)
 
-      // mTable.numRows should equal (namesWithNullPartCol.length)
       val outRows = mTable.readRows(keyRange.copy(partition = "foobar"))
       outRows.toSeq should have length (3)
     }
   }
 
   describe("flushing") {
-    it("should flush automatically after flushInterval elapsed even if # rows < chunkSize") (pending)
+    it("should flush automatically after flushInterval elapsed even if # rows < chunkSize") {
+      // Ensure flush happens much sooner
+      val modConfig = ConfigFactory.parseString("memtable.flush.interval = 500 ms")
+                                   .withFallback(config)
+      val mTable = new FiloMemTable(projection, modConfig)
+
+      mTable.ingestRows(names.map(TupleRowReader)) { resp = 2 }
+      Thread sleep 1200    // Well beyond flush interval
+
+      val outRows = mTable.readRows(keyRange)
+      outRows.toSeq.map(_.getString(0)) should equal (firstNames)
+    }
   }
 }
