@@ -34,11 +34,6 @@ class FiloMemTableSpec extends FunSpec with Matchers with BeforeAndAfter {
   val namesWithNullPartCol =
     util.Random.shuffle(namesWithPartCol ++ namesWithPartCol.take(3).map { t => (t._1, t._2, t._3, None) })
 
-  // Must be more than the max-rows-per-table setting in application_test.conf
-  val lotsOfNames = (0 until 400).flatMap { partNum =>
-    names.map { t => (t._1, t._2, t._3, Some(partNum.toString)) }
-  }
-
   // Turn this into a common spec for all memTables
   describe("insertRows, readRows with forced flush") {
     it("should insert out of order rows and read them back in order") {
@@ -48,8 +43,11 @@ class FiloMemTableSpec extends FunSpec with Matchers with BeforeAndAfter {
       mTable.ingestRows(names.map(TupleRowReader)) { resp = 2 }
       // Not enough rows to auto flush.   Should not have flushed and made callback.
       resp should equal (-1)
+      mTable.numRows should be (0)
+
       mTable.forceCommit()
       resp should equal (2)
+      mTable.numRows should be (names.length)
 
       val outRows = mTable.readRows(keyRange)
       outRows.toSeq.map(_.getString(0)) should equal (firstNames)
@@ -111,7 +109,12 @@ class FiloMemTableSpec extends FunSpec with Matchers with BeforeAndAfter {
       val mTable = new FiloMemTable(projection, modConfig)
 
       mTable.ingestRows(names.map(TupleRowReader)) { resp = 2 }
+      resp should equal (-1)
+      // Second set of rows should not cause flush either
+      mTable.ingestRows(names.map(TupleRowReader)) { resp = 3 }
+      resp should equal (-1)
       Thread sleep 1200    // Well beyond flush interval
+      resp should equal (3)
 
       val outRows = mTable.readRows(keyRange)
       outRows.toSeq.map(_.getString(0)) should equal (firstNames)

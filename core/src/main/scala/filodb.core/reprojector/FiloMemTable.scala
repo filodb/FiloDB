@@ -193,9 +193,14 @@ class FiloMemTable[K](val projection: RichProjection[K], config: Config) extends
 
   def removeRows(keyRange: KeyRange[K]): Unit = ???
 
-  // Only approximate, and it's better to give not the # of unique rows but the # of rows
-  // ingested into chunks, because lots of replaces still uses up more memory
-  def numRows: Int = chunks.length * chunkSize + tempRows.length
+  // NOTE: gives number of rows committed into chunks, not # of unique rows, because this is supposed
+  // to indicate amount of memory used
+  def numRows: Int = {
+    if (chunks.length == 0)  { 0 }
+    else {
+      (chunks.length - 1) * chunkSize + readers.last.parsers(0).length
+    }
+  }
 
   def clearAllData(): Unit = {
     // Forcibly cancel any running or scheduled flush tasks
