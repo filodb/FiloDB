@@ -9,14 +9,12 @@ import filodb.core.columnstore.SegmentSpec
 import scala.concurrent.Future
 
 import org.scalatest.{FunSpec, Matchers, BeforeAndAfter}
-import org.scalatest.concurrent.ScalaFutures
 
-class MapDBMemTableSpec extends FunSpec with Matchers with BeforeAndAfter with ScalaFutures {
+class MapDBMemTableSpec extends FunSpec with Matchers with BeforeAndAfter {
   import SegmentSpec._
 
   val keyRange = KeyRange("dataset", Dataset.DefaultPartitionKey, 0L, 10000L)
   val config = ConfigFactory.load("application_test.conf")
-  import scala.concurrent.ExecutionContext.Implicits.global
 
   var resp: Int = 0
 
@@ -36,11 +34,6 @@ class MapDBMemTableSpec extends FunSpec with Matchers with BeforeAndAfter with S
 
   val namesWithNullPartCol =
     util.Random.shuffle(namesWithPartCol ++ namesWithPartCol.take(3).map { t => (t._1, t._2, t._3, None) })
-
-  // Must be more than the max-rows-per-table setting in application_test.conf
-  val lotsOfNames = (0 until 400).flatMap { partNum =>
-    names.map { t => (t._1, t._2, t._3, Some(partNum.toString)) }
-  }
 
   describe("insertRows, readRows, flip") {
     it("should insert out of order rows and read them back in order") {
