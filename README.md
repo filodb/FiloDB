@@ -17,6 +17,8 @@ Distributed.  Columnar.  Versioned.  Streaming.  SQL.
 
 Columnar, versioned layers of data wrapped in a yummy high-performance analytical database engine.
 
+See [architecture](doc/architecture.md) and [datasets and reading](doc/datasets_reading.md) for more information.
+
 <!-- START doctoc generated TOC please keep comment here to allow auto update -->
 <!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
 **Table of Contents**  *generated with [DocToc](https://github.com/thlorenz/doctoc)*
