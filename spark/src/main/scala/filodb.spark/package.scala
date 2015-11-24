@@ -50,10 +50,11 @@ package object spark extends StrictLogging {
                             version: Int,
                             rows: Iterator[Row],
                             writeTimeout: FiniteDuration,
-                            defaultPartitionKey: Option[Types.PartitionKey]): Unit = {
+                            defaultPartitionKey: Option[Types.PartitionKey],
+                            partitionIndex: Int): Unit = {
     val props = RddRowSourceActor.props(rows, columns, dataset, version, coordinatorActor,
                                         defaultPartitionKey)
-    val rddRowActor = FiloSetup.system.actorOf(props)
+    val rddRowActor = FiloSetup.system.actorOf(props, s"${dataset}_${version}_$partitionIndex")
     actorAsk(rddRowActor, Start, writeTimeout) {
       case AllDone =>
       case SetupError(UnknownDataset) => throw DatasetNotFound(dataset)
@@ -73,9 +74,8 @@ package object spark extends StrictLogging {
      */
     def filoDataset(dataset: String,
                     version: Int = 0,
-                    minPartitions: Int = FiloRelation.DefaultMinPartitions,
                     splitsPerNode: Int = 1): DataFrame =
-      sqlContext.baseRelationToDataFrame(FiloRelation(dataset, version, minPartitions, splitsPerNode)
+      sqlContext.baseRelationToDataFrame(FiloRelation(dataset, version, splitsPerNode)
                                                      (sqlContext))
 
     private def runCommands[B](cmds: Set[Future[Response]]): Unit = {
@@ -224,7 +224,7 @@ package object spark extends StrictLogging {
         FiloSetup.init(filoConfig)
         logger.info(s"Starting ingestion of DataFrame for dataset $dataset, partition $index...")
         ingestRddRows(FiloSetup.coordinatorActor, dataset, dfColumns, version, rowIter,
-                      writeTimeout, defaultPartitionKey)
+                      writeTimeout, defaultPartitionKey, index)
         Iterator.empty
       }.count()
     }

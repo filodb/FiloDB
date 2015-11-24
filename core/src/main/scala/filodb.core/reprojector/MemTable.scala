@@ -61,6 +61,12 @@ trait MemTable[K] extends StrictLogging {
   def numRows: Int
 
   /**
+   * Forces any new ingested rows to be committed to WAL/permanent storage so they will be recovered
+   * in case the process dies.
+   */
+  def forceCommit(): Unit
+
+  /**
    * Yes, this clears everything!  It's meant for testing only.
    */
   def clearAllData(): Unit

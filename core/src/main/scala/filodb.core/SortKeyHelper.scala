@@ -32,7 +32,7 @@ trait SortKeyHelper[K] {
 }
 
 object SortKeyHelper {
-  val ValidSortClasses = Seq(classOf[Long], classOf[Int], classOf[Double])
+  val ValidSortClasses = Seq(classOf[Long], classOf[Int], classOf[Double], classOf[String])
 }
 
 abstract class SingleSortKeyHelper[K: TypedFieldExtractor] extends SortKeyHelper[K] {
@@ -78,5 +78,28 @@ case class DoubleKeyHelper(segmentLen: Double) extends SingleSortKeyHelper[Doubl
     ByteVector.fromLong(java.lang.Double.doubleToLongBits(key), ordering = ByteOrdering.BigEndian)
   def fromBytes(bytes: ByteVector): Double =
     java.lang.Double.longBitsToDouble(bytes.toLong(true, ByteOrdering.BigEndian))
+}
+
+/**
+ * Right now, you have to specify a prefixLen for the string key helper.
+ * All string keys with identical prefixes (characters 0 to prefixLen - 1) will then be
+ * bucketed into the same segment.
+ * Thus one needs to look through your string sort key data and make sure to bucketize
+ * correctly.
+ *
+ * TODO: perhaps combine prefixLen with a range of chars the last char is allowed to vary on
+ */
+case class StringKeyHelper(prefixLen: Int) extends SingleSortKeyHelper[String] {
+  def ordering: Ordering[String] = Ordering.String
+  def getSegment(key: String): (String, String) = {
+    val start = key.take(prefixLen)
+    val end = start.take(start.length - 1) + ((start(start.length - 1) + 1).toChar)
+    (start, end)
+  }
+
+  private final val UTF8Encoding = "UTF-8"
+
+  def toBytes(key: String): ByteVector = ByteVector(key.take(prefixLen).getBytes(UTF8Encoding))
+  def fromBytes(bytes: ByteVector): String = new String(bytes.toArray, UTF8Encoding)
 }
 

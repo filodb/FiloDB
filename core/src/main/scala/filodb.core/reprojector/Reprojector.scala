@@ -65,14 +65,15 @@ class DefaultReprojector(columnStore: ColumnStore)
       (partition, helper.getSegment(sortKey))
     }.map { case ((partition, (segStart, segUntil)), segmentRowsIt) =>
       // For each segment grouping of rows... set up a Segment
-      val keyRange = KeyRange(dataset.name, partition, segStart, segUntil)
+      val keyRange = KeyRange(dataset.name, partition, segStart, segStart)
       val segment = new RowWriterSegment(keyRange, memTable.projection.columns)
       logger.debug(s"Created new segment $segment for encoding...")
 
       // Group rows into chunk sized bytes and add to segment
-      segmentRowsIt.grouped(dataset.options.chunkSize).foreach { chunkRowsIt =>
-        val chunkRows = chunkRowsIt.toSeq
-        segment.addRowsAsChunk(chunkRows)
+      // NOTE: because RowReaders could be mutable, we need to keep this a pure Iterator.  Turns out
+      // this is also more efficient than Iterator.grouped
+      while (segmentRowsIt.nonEmpty) {
+        segment.addRowsAsChunk(segmentRowsIt.take(dataset.options.chunkSize))
       }
       segment
     }

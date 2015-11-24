@@ -9,18 +9,18 @@ import filodb.coordinator.{BaseActor, NodeCoordinatorActor, RowSource}
 
 object CsvSourceActor {
   // Needs to be a multiple of chunkSize. Not sure how to have a good default though.
-  val DefaultMaxUnackedRows = 5000
-  val DefaultRowsToRead = 100
+  val DefaultMaxUnackedBatches = 50
+  val RowsToRead = 100
 
   def props(csvStream: java.io.Reader,
             dataset: String,
             version: Int,
             coordinatorActor: ActorRef,
-            maxUnackedRows: Int = DefaultMaxUnackedRows,
-            rowsToRead: Int = DefaultRowsToRead,
+            maxUnackedBatches: Int = DefaultMaxUnackedBatches,
+            rowsToRead: Int = RowsToRead,
             separatorChar: Char = ','): Props =
   Props(classOf[CsvSourceActor], csvStream, dataset, version,
-        coordinatorActor, maxUnackedRows, rowsToRead, separatorChar)
+        coordinatorActor, maxUnackedBatches, rowsToRead, separatorChar)
 }
 
 /**
@@ -36,31 +36,22 @@ class CsvSourceActor(csvStream: java.io.Reader,
                      val dataset: String,
                      val version: Int,
                      val coordinatorActor: ActorRef,
-                     val maxUnackedRows: Int = CsvSourceActor.DefaultMaxUnackedRows,
-                     val rowsToRead: Int = CsvSourceActor.DefaultRowsToRead,
+                     val maxUnackedBatches: Int = CsvSourceActor.DefaultMaxUnackedBatches,
+                     rowsToRead: Int = CsvSourceActor.RowsToRead,
                      separatorChar: Char = ',') extends BaseActor with RowSource {
   import CsvSourceActor._
   import NodeCoordinatorActor._
+  import collection.JavaConverters._
 
   val reader = new CSVReader(csvStream, separatorChar)
   val columns = reader.readNext.toSeq
   logger.info(s"Started CsvSourceActor, ingesting CSV with columns $columns...")
 
-  // Assume for now rowIDs start from 0.
-  var seqId: Long = 0
-  var lastAckedSeqNo = seqId
-
   def getStartMessage(): SetupIngestion = SetupIngestion(dataset, columns, version)
 
-  // Returns a new row from source => (seqID, rowID, version, row)
-  // The seqIDs should be increasing.
-  // Returns None if the source reached the end of data.
-  def getNewRow(): Option[(Long, RowReader)] = {
-    Option(reader.readNext()).map { rowValues =>
-      val out = (seqId, ArrayStringRowReader(rowValues))
-      seqId += 1
-      if (seqId % 100000 == 0) logger.info(s"Ingested $seqId rows...")
-      out
-    }
-  }
+  val seqIds = Iterator.from(1).map(_.toLong)
+  val batchRows: Iterator[Seq[RowReader]] = reader.iterator.asScala
+                                                  .map(ArrayStringRowReader)
+                                                  .grouped(rowsToRead)
+  val batchIterator = seqIds.zip(batchRows)
 }

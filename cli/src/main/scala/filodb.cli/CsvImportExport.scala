@@ -4,19 +4,20 @@ import akka.actor.{ActorRef, ActorSystem}
 import akka.pattern.ask
 import akka.util.Timeout
 import com.opencsv.{CSVReader, CSVWriter}
+import com.typesafe.scalalogging.slf4j.StrictLogging
 import org.velvia.filo.{ArrayStringRowReader, RowReader}
 import scala.concurrent.{Await, Future, ExecutionContext}
 import scala.concurrent.duration._
 import scala.language.postfixOps
 
 import filodb.core.metadata.MetaStore
-import filodb.coordinator.{NodeCoordinatorActor, RowSource}
+import filodb.coordinator.{NodeCoordinatorActor, DatasetCoordinatorActor, RowSource}
 import filodb.coordinator.sources.CsvSourceActor
 import filodb.core._
 
 // Turn off style rules for CLI classes
 //scalastyle:off
-trait CsvImportExport {
+trait CsvImportExport extends StrictLogging {
   def system: ActorSystem
   val metaStore: MetaStore
   val coordinatorActor: ActorRef
@@ -35,12 +36,15 @@ trait CsvImportExport {
     }
   }
 
-  protected def parse[T, B](cmd: => Future[T], awaitTimeout: FiniteDuration = 5 seconds)(func: T => B): B = {
+  private val DefaultTimeout = 5 seconds
+
+  protected def parse[T, B](cmd: => Future[T], awaitTimeout: FiniteDuration = DefaultTimeout)
+                           (func: T => B): B = {
     func(Await.result(cmd, awaitTimeout))
   }
 
   protected def actorAsk[B](actor: ActorRef, msg: Any,
-                            askTimeout: FiniteDuration = 5 seconds)(f: PartialFunction[Any, B]): B = {
+                            askTimeout: FiniteDuration = DefaultTimeout)(f: PartialFunction[Any, B]): B = {
     implicit val timeout = Timeout(askTimeout)
     parse(actor ? msg, askTimeout)(f)
   }
@@ -68,7 +72,21 @@ trait CsvImportExport {
       case RowSource.AllDone =>
     }
 
-    println("ingestCSV finished!")
+    // There might still be rows left after the latest flush is done, so initiate another flush
+    actorAsk(coordinatorActor, NodeCoordinatorActor.GetIngestionStats(dataset, version)) {
+      case DatasetCoordinatorActor.Stats(_, _, _, activeRows, _) =>
+        if (activeRows > 0) {
+          logger.info(s"Still $activeRows left to flush in active memTable, trigger another flush....")
+          actorAsk(coordinatorActor, NodeCoordinatorActor.Flush(dataset, version), timeout) {
+            case NodeCoordinatorActor.Flushed =>
+            case DatasetCoordinatorActor.FlushFailed(t) =>
+              println(s"ERROR! Flush failed with exception ${t.getMessage}")
+              t.printStackTrace()
+          }
+        }
+    }
+
+    println("Ingestion of $csvPath finished!")
     exitCode = 0
   }
 }

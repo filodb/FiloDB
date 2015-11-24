@@ -98,7 +98,7 @@ extends GenericSegment(keyRange, null) {
     chunkMap.foreach { case (col, bytes) => addChunk(newChunkId, col, bytes) }
   }
 
-  def addRowsAsChunk(rows: Seq[(PartitionKey, K, RowReader)]): Unit = {
+  def addRowsAsChunk(rows: Iterator[(PartitionKey, K, RowReader)]): Unit = {
     val newChunkId = index.nextChunkId
     val builder = new RowToVectorBuilder(filoSchema)
     rows.zipWithIndex.foreach { case ((_, k, r), i) =>
@@ -164,15 +164,27 @@ class RowReaderSegment[K](val keyRange: KeyRange[K],
    */
   def rowIterator(readerFactory: RowReaderFactory = DefaultReaderFactory): Iterator[RowReader] = {
     val readers = getReaders(readerFactory)
-    new Iterator[RowReader] {
-      val chunkIdIter = index.chunkIdIterator
-      val rowNumIter = index.rowNumIterator
+    if (readers.isEmpty) { Iterator.empty }
+    else {
+      new Iterator[RowReader] {
+        var curChunk = 0
+        var curReader = readers(curChunk)
+        val len = index.chunkIds.length
+        var i = 0
 
-      def hasNext: Boolean = chunkIdIter.hasNext
-      def next: RowReader = {
-        val nextChunk = chunkIdIter.next
-        readers(nextChunk).rowNo = rowNumIter.next
-        readers(nextChunk)
+        // NOTE: manually iterate over the chunkIds / rowNums FiloVectors, instead of using the
+        // iterator methods, which are extremely slow and boxes everything
+        def hasNext: Boolean = i < len
+        def next: RowReader = {
+          val nextChunk = index.chunkIds(i)
+          if (nextChunk != curChunk) {
+            curChunk = nextChunk
+            curReader = readers(nextChunk)
+          }
+          curReader.rowNo = index.rowNums(i)
+          i += 1
+          curReader
+        }
       }
     }
   }

@@ -10,18 +10,20 @@ import org.apache.spark.sql.sources._
 class DefaultSource extends RelationProvider with CreatableRelationProvider {
   import collection.JavaConverters._
 
+  val DefaultSplitsPerNode = "4"
+
   /**
    * Implements dataframe.read() functionality.
    * Parameters:
    *   dataset
    *   version          defaults to 0
-   *   splits_per_node  defaults to 1, the number of splits or read threads per node
+   *   splits_per_node  defaults to 4, the number of splits or read threads per node
    */
   def createRelation(sqlContext: SQLContext, parameters: Map[String, String]): BaseRelation = {
     // dataset is a mandatory parameter.  Need to know the name.
     val dataset = parameters.getOrElse("dataset", sys.error("'dataset' must be specified for FiloDB."))
     val version = parameters.getOrElse("version", "0").toInt
-    val splitsPerNode = parameters.getOrElse("splits_per_node", "1").toInt
+    val splitsPerNode = parameters.getOrElse("splits_per_node", DefaultSplitsPerNode).toInt
     FiloRelation(dataset, version, splitsPerNode = splitsPerNode)(sqlContext)
   }
 
