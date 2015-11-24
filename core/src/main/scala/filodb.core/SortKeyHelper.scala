@@ -97,7 +97,9 @@ case class StringKeyHelper(prefixLen: Int) extends SingleSortKeyHelper[String] {
     (start, end)
   }
 
-  def toBytes(key: String): ByteVector = ByteVector(key.take(prefixLen).getBytes("UTF-8"))
-  def fromBytes(bytes: ByteVector): String = new String(bytes.toArray, "UTF-8")
+  private final val UTF8Encoding = "UTF-8"
+
+  def toBytes(key: String): ByteVector = ByteVector(key.take(prefixLen).getBytes(UTF8Encoding))
+  def fromBytes(bytes: ByteVector): String = new String(bytes.toArray, UTF8Encoding)
 }
 

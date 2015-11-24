@@ -18,11 +18,11 @@ case class Histogram(min: Int, max: Int, sum: Int, numElems: Int, buckets: Map[I
       case x: Int => x
     }
     val key = bucketKeys(bucket)
-    Histogram(Math.min(elem, this.min),
-              Math.max(elem, this.max),
-              this.sum + elem,
-              this.numElems + 1,
-              buckets + (key -> (buckets.getOrElse(key, 0) + 1)))
+    copy(min = Math.min(elem, this.min),
+         max = Math.max(elem, this.max),
+         sum = this.sum + elem,
+         numElems = this.numElems + 1,
+         buckets = buckets + (key -> (buckets.getOrElse(key, 0) + 1)))
   }
 
   def prettify(name: String, maxBarLen: Int = 60): String = {

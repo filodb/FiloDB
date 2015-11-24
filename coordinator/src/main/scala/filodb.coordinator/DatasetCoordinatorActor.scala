@@ -120,9 +120,7 @@ private[filodb] class DatasetCoordinatorActor[K](projection: RichProjection[K],
   var flushesSucceeded = 0
   var flushesFailed = 0
 
-  def makeNewTable(): MemTable[K] = {
-    new FiloMemTable(projection, config)
-  }
+  def makeNewTable(): MemTable[K] = new FiloMemTable(projection, config)
 
   private def reportStats(): Unit = {
     logger.info(s"MemTable active table rows: $activeRows")

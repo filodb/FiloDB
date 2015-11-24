@@ -56,8 +56,7 @@ class FiloMemTable[K](val projection: RichProjection[K], config: Config) extends
       VectorInfo(name, colType.clazz)
   }
   private val clazzes = filoSchema.map(_.dataType).toArray
-  private val colIdToNumber =
-    projection.columns.zipWithIndex.map { case (col, idx) => (col.name, idx) }.toMap
+  private val colIds = filoSchema.map(_.name).toArray
 
   // Holds temporary rows before being flushed to chunk columnar storage
   private val tempRows = new ArrayBuffer[RowReader]
@@ -130,8 +129,8 @@ class FiloMemTable[K](val projection: RichProjection[K], config: Config) extends
     }
 
     // Add chunks
-    val chunkAray = new Array[ByteBuffer](filoSchema.length)
-    builder.convertToBytes().foreach { case (colName, bb) => chunkAray(colIdToNumber(colName)) = bb }
+    val colIdToBuffers = builder.convertToBytes()
+    val chunkAray = colIds.map(colIdToBuffers)
     chunks += chunkAray
     readers += new FastFiloRowReader(chunkAray, clazzes)
 
@@ -152,7 +151,7 @@ class FiloMemTable[K](val projection: RichProjection[K], config: Config) extends
     }
     while (tempRows.length >= chunkSize) flushRowsToChunks()
     // If rows have not been flushed, schedule a task in the future to flush it
-    if (tempRows.nonEmpty && !flushTask.isDefined) {
+    if (tempRows.nonEmpty && flushTask.isEmpty) {
       val fut = scheduler.schedule(new Runnable { def run: Unit = { flushRowsToChunks() }},
                                    flushInterval.toMillis,
                                    TimeUnit.MILLISECONDS)

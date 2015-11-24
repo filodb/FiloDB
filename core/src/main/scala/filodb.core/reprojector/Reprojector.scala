@@ -70,6 +70,8 @@ class DefaultReprojector(columnStore: ColumnStore)
       logger.debug(s"Created new segment $segment for encoding...")
 
       // Group rows into chunk sized bytes and add to segment
+      // NOTE: because RowReaders could be mutable, we need to keep this a pure Iterator.  Turns out
+      // this is also more efficient than Iterator.grouped
       while (segmentRowsIt.nonEmpty) {
         segment.addRowsAsChunk(segmentRowsIt.take(dataset.options.chunkSize))
       }

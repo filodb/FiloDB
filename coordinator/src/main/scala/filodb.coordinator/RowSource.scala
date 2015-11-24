@@ -54,14 +54,14 @@ trait RowSource extends Actor with StrictLogging {
   // Anything additional to do when we hit end of data and it's all acked, before killing oneself
   def allDoneAndGood(): Unit = {}
 
-  private var whoStartedMe: ActorRef = _
+  private var whoStartedMe: Option[ActorRef] = None
   private val outstanding = new HashMap[Long, Seq[RowReader]]
 
   import context.dispatcher
 
   def start: Receive = {
     case Start =>
-      whoStartedMe = sender
+      whoStartedMe = Some(sender)
       coordinatorActor ! getStartMessage()
 
     case NodeCoordinatorActor.IngestionReady =>
@@ -70,31 +70,16 @@ trait RowSource extends Actor with StrictLogging {
       context.become(reading)
 
     case e: ErrorResponse =>
-      whoStartedMe ! SetupError(e)
+      whoStartedMe.foreach(_ ! SetupError(e))
   }
 
   def reading: Receive = {
+    case GetMoreRows if batchIterator.hasNext => sendRows()
     case GetMoreRows =>
-      if (batchIterator.hasNext) {
-        val (nextSeqId, nextBatch) = batchIterator.next
-        outstanding(nextSeqId) = nextBatch
-        coordinatorActor ! NodeCoordinatorActor.IngestRows(dataset, version, nextBatch, nextSeqId)
-        // Go get more rows
-        if (outstanding.size < maxUnackedBatches) {
-          self ! GetMoreRows
-        } else {
-          logger.debug(s" ==> waiting: outstanding seqIds = ${outstanding.keys}")
-          schedule(waitingPeriod, CheckCanIngest)
-          context.become(waiting)
-        }
-      } else {
-        logger.info(s" ==> (${self.path.name}) doneReading: outstanding seqIds = ${outstanding.keys}")
-        if (outstanding.isEmpty)  { sendFlush() }
-        else {
-          schedule(waitingPeriod, CheckCanIngest)
-        }
-        context.become(doneReading)
-      }
+      logger.info(s" ==> (${self.path.name}) doneReading: outstanding seqIds = ${outstanding.keys}")
+      if (outstanding.isEmpty)  { sendFlush() }
+      else                      { schedule(waitingPeriod, CheckCanIngest) }
+      context.become(doneReading)
 
     case NodeCoordinatorActor.Ack(lastSequenceNo) =>
       if (outstanding contains lastSequenceNo) outstanding.remove(lastSequenceNo)
@@ -142,6 +127,22 @@ trait RowSource extends Actor with StrictLogging {
   // If we don't get acks back, need to keep trying
   def doneReading: Receive = doneReadingAck orElse replay
 
+  // Gets the next batch of data from the batchIterator, then determine if we can get more rows
+  // or need to wait.
+  def sendRows(): Unit = {
+    val (nextSeqId, nextBatch) = batchIterator.next
+    outstanding(nextSeqId) = nextBatch
+    coordinatorActor ! NodeCoordinatorActor.IngestRows(dataset, version, nextBatch, nextSeqId)
+    // Go get more rows
+    if (outstanding.size < maxUnackedBatches) {
+      self ! GetMoreRows
+    } else {
+      logger.debug(s" ==> waiting: outstanding seqIds = ${outstanding.keys}")
+      schedule(waitingPeriod, CheckCanIngest)
+      context.become(waiting)
+    }
+  }
+
   def sendFlush(): Unit = coordinatorActor ! NodeCoordinatorActor.Flush(dataset, version)
 
   private var scheduledTask: Option[Cancellable] = None
@@ -153,7 +154,7 @@ trait RowSource extends Actor with StrictLogging {
   def finish(): Unit = {
     logger.info(s"(${self.path.name}) Ingestion is all done")
     allDoneAndGood()
-    whoStartedMe ! AllDone
+    whoStartedMe.foreach(_ ! AllDone)
     scheduledTask.foreach(_.cancel)
     self ! PoisonPill
   }
