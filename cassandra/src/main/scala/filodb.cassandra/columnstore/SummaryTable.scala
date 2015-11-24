@@ -50,13 +50,14 @@ sealed class SummaryTable(val config: Config)
   def compareAndSetSummary(projection: Projection,
                            partition: ByteBuffer,
                            segmentId: String,
-                           oldVersion: java.util.UUID,
+                           oldVersion: Option[java.util.UUID],
                            segmentVersion: java.util.UUID,
                            segmentSummary: SegmentSummary): Future[Response] = {
-    if (oldVersion == null) {
-      insertSummary(projection, partition, segmentId, segmentVersion, segmentSummary)
-    } else {
-      updateSummary(projection, partition, segmentId, oldVersion, segmentVersion, segmentSummary)
+    oldVersion match {
+      case None =>
+        insertSummary(projection, partition, segmentId, segmentVersion, segmentSummary)
+      case Some(v) =>
+        updateSummary(projection, partition, segmentId, v, segmentVersion, segmentSummary)
     }
   }
 

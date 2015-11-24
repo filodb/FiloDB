@@ -16,11 +16,13 @@ import scala.concurrent.Future
 class CassandraChunkStore(config: Config) extends ChunkStore {
   val chunkTable = new ChunkTable(config)
 
-  override def appendChunk(segmentInfo: SegmentInfo, chunk: ChunkWithMeta): Future[Boolean] = {
-    val projection = segmentInfo.projection
+  override def appendChunk(projection: Projection,
+                           partition: Any,
+                           segment: Any,
+                           chunk: ChunkWithMeta): Future[Boolean] = {
     val pType = projection.partitionType
-    val pk = pType.toBytes(segmentInfo.partition.asInstanceOf[pType.T])
-    val segmentId = segmentInfo.segment.toString
+    val pk = pType.toBytes(partition.asInstanceOf[pType.T])
+    val segmentId = segment.toString
     chunkTable.writeChunks(projection, pk.toByteBuffer, segmentId, chunk).map {
       case Success => true
       case _ => false
@@ -31,24 +33,24 @@ class CassandraChunkStore(config: Config) extends ChunkStore {
   override def getAllChunksForSegments(projection: Projection,
                                        partition: Any,
                                        segmentRange: KeyRange[_],
-                                       columns: Seq[ColumnId]): Future[Map[SegmentInfo, Seq[ChunkWithMeta]]] = {
+                                       columns: Seq[ColumnId]): Future[Seq[(Any, Seq[ChunkWithMeta])]] = {
     val pType = projection.partitionType
     val pk = pType.toBytes(partition.asInstanceOf[pType.T])
 
     val chunks = chunkTable.readChunksForSegmentRange(projection, pk.toByteBuffer,
       segmentRange.start.toString, segmentRange.end.toString,
       columns)
-    chunks.map { result =>
-      result.map { case (sid, seq) => DefaultSegmentInfo(partition, sid, projection) -> seq }.toMap
-    }
+    chunks
   }
 
-  override def getChunks(segmentInfo: SegmentInfo, columns: Seq[String],
-                         chunkIds: Seq[ChunkId]): Future[Seq[ChunkWithId]] = {
-    val projection = segmentInfo.projection
+  override def getSegmentChunks(projection: Projection,
+                                partition: Any,
+                                segment: Any,
+                                columns: Seq[String],
+                                chunkIds: Seq[ChunkId]): Future[Seq[ChunkWithId]] = {
     val pType = projection.partitionType
-    val pk = pType.toBytes(segmentInfo.partition.asInstanceOf[pType.T])
-    val segmentId = segmentInfo.segment.toString
+    val pk = pType.toBytes(partition.asInstanceOf[pType.T])
+    val segmentId = segment.toString
     chunkTable.readChunks(projection, pk.toByteBuffer, segmentId, columns, chunkIds)
   }
 
