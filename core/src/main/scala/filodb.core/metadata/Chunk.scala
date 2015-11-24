@@ -3,11 +3,10 @@ package filodb.core.metadata
 import java.nio.ByteBuffer
 
 import filodb.core.Types._
+import org.velvia.filo.{FastFiloRowReader, RowReader}
 
 
 trait Chunk {
-
-  def segmentInfo: SegmentInfo
 
   def columnVectors: Array[ByteBuffer]
 
@@ -19,24 +18,26 @@ trait ChunkWithId extends Chunk {
   def chunkId: ChunkId
 }
 
+
 trait ChunkWithMeta extends ChunkWithId {
 
   def chunkOverrides: Option[Seq[(ChunkId, Seq[Int])]]
 
   def numRows: Int
 
-  override def toString: String = s"Chunk($segmentInfo/ $chunkId) rows($numRows)"
+  override def toString: String = s"Chunk($$chunkId) rows($numRows)"
 
 }
 
-case class FlushedChunk(segmentInfo: SegmentInfo,
+case class FlushedChunk(projection: Projection,
+                        partition: Any,
+                        segment: Any,
                         keys: Seq[Any],
                         sortedKeyRange: KeyRange[Any],
                         columnVectors: Array[ByteBuffer]) extends Chunk
 
 case class DefaultChunk(chunkId: ChunkId,
                         keys: Seq[Any],
-                        segmentInfo: SegmentInfo,
                         columnVectors: Array[ByteBuffer],
                         numRows: Int,
                         chunkOverrides: Option[Seq[(ChunkId, Seq[Int])]] = None) extends ChunkWithMeta

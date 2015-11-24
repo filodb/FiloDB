@@ -3,7 +3,7 @@ package filodb.core.reprojector
 import java.nio.ByteBuffer
 
 import filodb.core.metadata._
-import org.velvia.filo.{RowReader, RowToVectorBuilder}
+import org.velvia.filo.{RowToVectorBuilder, RowReader}
 
 
 trait Reprojector {
@@ -25,7 +25,6 @@ object Reprojector extends Reprojector {
       val segmentChunks = segmentedRows.map { case (segment, segmentRowsIter) =>
         val segmentRows = segmentRowsIter.toSeq
         // For each segment grouping of rows... set up a SegmentInfo
-        val segmentInfo = DefaultSegmentInfo(projection.dataset, partitionKey, segment, projection)
         // within a segment we sort rows by sort order
         implicit val ordering = projection.sortType.ordering
         val rows = segmentRows.sortBy(projection.sortFunction)
@@ -40,7 +39,7 @@ object Reprojector extends Reprojector {
         projection.schema.zipWithIndex.foreach { case (c, i) => columnVectors(i) = columnVectorMap(c.name) }
         // we also separate the keys for summarizing
         val keys = rows.map(i => projection.keyFunction(i))
-        FlushedChunk(segmentInfo, keys, sortKeyRange, columnVectors)
+        FlushedChunk(projection, partitionKey, segment, keys, sortKeyRange, columnVectors)
       }.toSeq
       (partitionKey, segmentChunks)
     }

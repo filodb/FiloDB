@@ -1,12 +1,11 @@
 package filodb.cassandra.metastore
 
 import com.typesafe.config.Config
-import filodb.coordinator.Response
-import filodb.core.store.{Dataset, MetaStore}
-import scala.concurrent.{ExecutionContext, Future}
-
-import filodb.core._
+import filodb.core.Messages.{NotFoundError, Response}
 import filodb.core.metadata.Column
+import filodb.core.store.{Dataset, MetaStore, ProjectionInfo}
+
+import scala.concurrent.{ExecutionContext, Future}
 
 /**
  * A class for Cassandra implementation of the MetaStore.
@@ -15,31 +14,41 @@ import filodb.core.metadata.Column
  */
 class CassandraMetaStore(config: Config)
                         (implicit val ec: ExecutionContext) extends MetaStore {
-  val datasetTable = new DatasetTable(config)
-  val columnTable = new ColumnTable(config)
 
-  def initialize(): Future[Response] =
-    for { dtResp <- datasetTable.initialize()
-          ctResp <- columnTable.initialize() }
-    yield { ctResp }
+  val projectionTable = new ProjectionTable(config)
 
-  def clearAllData(): Future[Response] =
-    for { dtResp <- datasetTable.clearAll()
-          ctResp <- columnTable.clearAll() }
-    yield { ctResp }
+  /**
+   * Retrieves a Dataset object of the given name
+   * @param name Name of the dataset to retrieve
+   * @return a Dataset
+   */
+  override def getDataset(name: String): Future[Dataset] = {
+    for {
+      projections <- projectionTable.getProjections(name)
+      dataset = if (projections.isEmpty) {
+        throw NotFoundError(s"Dataset $dataset")
+      } else {
+        Dataset(name, projections.head.schema, projections)
+      }
+    } yield dataset
+  }
 
-  def newDataset(dataset: Dataset): Future[Response] =
-    datasetTable.createNewDataset(dataset)
+  override def addProjection(projectionInfo: ProjectionInfo): Future[Response] = {
+    projectionTable.insertProjection(projectionInfo)
+  }
 
-  def getDataset(name: String): Future[Dataset] =
-    datasetTable.getDataset(name)
+  /**
+   * Get the schema for a version of a dataset.  This scans all defined columns from the first version
+   * on up to figure out the changes. Deleted columns are not returned.
+   * Implementations should use Column.foldSchema.
+   * @param dataset the name of the dataset to return the schema for
+   * @return a Schema, column name -> Column definition, or ErrorResponse
+   */
+  override def getSchema(dataset: String): Future[Seq[Column]] = {
+    projectionTable.getSuperProjection(dataset).map(_.schema)
+  }
 
-  def deleteDataset(name: String): Future[Response] =
-    datasetTable.deleteDataset(name)
-
-  def insertColumn(column: Column): Future[Response] =
-    columnTable.insertColumn(column)
-
-  def getSchema(dataset: String, version: Int): Future[Column.Schema] =
-    columnTable.getSchema(dataset, version)
+  override def getProjection(name: String, projectionId: Int): Future[ProjectionInfo] = {
+    projectionTable.getProjection(name, projectionId)
+  }
 }

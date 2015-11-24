@@ -62,6 +62,7 @@ val excludeZK = ExclusionRule(organization = "org.apache.zookeeper")
 lazy val coreDeps = Seq(
   "com.typesafe.scala-logging" %% "scala-logging-slf4j" % "2.1.2",
   "com.clearspring.analytics" % "stream"        % "2.7.0",
+  "it.unimi.dsi"          % "dsiutils"          % "2.2.4",
   "ch.qos.logback"        % "logback-classic"   % "1.0.7",
   "com.beachape"         %% "enumeratum"        % "1.2.1",
   "org.velvia.filo"      %% "filo-scala"        % "0.2.0",

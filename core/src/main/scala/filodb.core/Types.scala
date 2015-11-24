@@ -15,7 +15,7 @@ object Types {
   // TODO: Change ColumnId to an Int.  Would be more efficient, and allow renaming columns.
   type ColumnId = String
   type TableName = String
-  type ChunkId = Long // Each chunk is identified by segmentID and a long timestamp
+  type ChunkId = Int // Each chunk is identified by segmentID and a long timestamp
 
   type SortOrder = Set[(ColumnId, Boolean)]
 

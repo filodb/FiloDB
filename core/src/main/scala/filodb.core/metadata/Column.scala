@@ -1,9 +1,12 @@
 package filodb.core.metadata
 
+import java.io._
+import java.nio.ByteBuffer
+
 import com.typesafe.scalalogging.slf4j.StrictLogging
 import enumeratum.{Enum, EnumEntry}
-
 import filodb.core.Types._
+import it.unimi.dsi.io.ByteBufferInputStream
 
 /**
  * Defines a column of data and its properties.
@@ -15,13 +18,13 @@ import filodb.core.Types._
  * 1. A Column def remains in effect for subsequent versions unless
  * 2. It has been marked deleted in subsequent versions, or
  * 3. Its columnType or serializer has been changed, in which case data
- *    from previous versions are discarded (due to incompatibility)
+ * from previous versions are discarded (due to incompatibility)
  *
  * ==System Columns and Names==
  * Column names starting with a colon (':') are reserved for "system" columns:
  * - ':deleted' - special bitmap column marking deleted rows
  * - ':inherited' - special bitmap column, 1 means this row was inherited from
- *   previous versions due to a chunk operation, but doesn't belong to this version
+ * previous versions due to a chunk operation, but doesn't belong to this version
  *
  */
 case class Column(name: String,
@@ -41,11 +44,55 @@ case class Column(name: String,
    */
   def propertyChanged(other: Column): Boolean =
     (columnType != other.columnType) ||
-    (serializer != other.serializer) ||
-    (isDeleted != other.isDeleted)
+      (serializer != other.serializer) ||
+      (isDeleted != other.isDeleted)
+
+
+  def write(o: DataOutput): Unit = {
+    o.writeUTF(name)
+    o.writeUTF(dataset)
+    o.writeUTF(columnType.entryName)
+    o.writeInt(version)
+  }
+
 }
 
 object Column extends StrictLogging {
+
+
+  def read(i: DataInput): Column = {
+    val name = i.readUTF()
+    val dataset = i.readUTF()
+    val colTypeStr = i.readUTF()
+    val version = i.readInt()
+    val columnType = ColumnType.withName(colTypeStr)
+    Column(name, dataset, version, columnType)
+  }
+
+  def readSchema(b: ByteBuffer): Seq[Column] = {
+    val in = new DataInputStream(new ByteBufferInputStream(b))
+    readSchema(in)
+  }
+
+  def readSchema(i: DataInput): Seq[Column] = {
+    val l = i.readInt()
+    (0 to l).map(c => read(i))
+  }
+
+  def schemaAsByteBuffer(schema: Seq[Column]): ByteBuffer = {
+    val baos = new ByteArrayOutputStream()
+    val os = new DataOutputStream(baos)
+    writeSchema(schema, os)
+    os.flush()
+    baos.flush()
+    ByteBuffer.wrap(baos.toByteArray)
+  }
+
+  def writeSchema(schema: Seq[Column], o: DataOutput): Unit = {
+    o.write(schema.length)
+    schema.foreach(c => c.write(o))
+  }
+
   sealed trait ColumnType extends EnumEntry {
     // NOTE: due to a Spark serialization bug, this cannot be a val
     // (https://github.com/apache/spark/pull/7122)
@@ -56,11 +103,26 @@ object Column extends StrictLogging {
     val values = findValues
 
     //scalastyle:off
-    case object IntColumn extends ColumnType { def clazz = classOf[Int] }
-    case object LongColumn extends ColumnType { def clazz = classOf[Long] }
-    case object DoubleColumn extends ColumnType { def clazz = classOf[Double] }
-    case object StringColumn extends ColumnType { def clazz = classOf[String] }
-    case object BitmapColumn extends ColumnType { def clazz = classOf[Boolean] }
+    case object IntColumn extends ColumnType {
+      def clazz = classOf[Int]
+    }
+
+    case object LongColumn extends ColumnType {
+      def clazz = classOf[Long]
+    }
+
+    case object DoubleColumn extends ColumnType {
+      def clazz = classOf[Double]
+    }
+
+    case object StringColumn extends ColumnType {
+      def clazz = classOf[String]
+    }
+
+    case object BitmapColumn extends ColumnType {
+      def clazz = classOf[Boolean]
+    }
+
     //scalastyle:on
   }
 
@@ -70,6 +132,7 @@ object Column extends StrictLogging {
     val values = findValues
 
     case object FiloSerializer extends Serializer
+
   }
 
   type Schema = Map[String, Column]
@@ -81,7 +144,9 @@ object Column extends StrictLogging {
    * Contains the business rules above.
    */
   def schemaFold(schema: Schema, newColumn: Column): Schema = {
-    if (newColumn.isDeleted) { schema - newColumn.name }
+    if (newColumn.isDeleted) {
+      schema - newColumn.name
+    }
     else if (schema.contains(newColumn.name)) {
       // See if newColumn changed anything from older definition
       if (newColumn.propertyChanged(schema(newColumn.name))) {
@@ -111,11 +176,11 @@ object Column extends StrictLogging {
     val alreadyHaveIt = schema contains column.name
     Seq(
       check((column.isSystem && startsWithColon) || (!column.isSystem && !startsWithColon),
-            "Only system columns can start with a colon"),
+        "Only system columns can start with a colon"),
       check(!alreadyHaveIt || (alreadyHaveIt && column.version > schema(column.name).version),
-            "Cannot add column at version lower than latest definition"),
+        "Cannot add column at version lower than latest definition"),
       check(!alreadyHaveIt || (alreadyHaveIt && column.propertyChanged(schema(column.name))),
-            "Nothing changed from previous definition"),
+        "Nothing changed from previous definition"),
       check(alreadyHaveIt || (!alreadyHaveIt && !column.isDeleted), "New column cannot be deleted")
     ).flatten
   }

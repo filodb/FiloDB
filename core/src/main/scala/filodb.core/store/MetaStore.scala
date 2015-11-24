@@ -26,46 +26,25 @@ object MetaStore {
 trait MetaStore {
 
   /**
-   * Clears all dataset and column metadata from the MetaStore.
-   */
-  def clearAllData(): Future[Boolean]
-
-  /**
-   * ** Dataset API ***
-   */
-
-  /**
-   * Creates a new dataset with the given name, if it doesn't already exist.
-   * @param dataset the Dataset to create.  Should have superprojection defined.
-   * @return Success, or AlreadyExists, or StorageEngineException
-   */
-  def newDataset(dataset: Dataset): Future[Boolean]
-
-  /**
    * Retrieves a Dataset object of the given name
    * @param name Name of the dataset to retrieve
    * @return a Dataset
    */
   def getDataset(name: String): Future[Dataset]
 
-  /**
-   * Deletes dataset metadata including all projections.  Does not delete column store data.
-   * @param name Name of the dataset to delete.
-   * @return Success, or MetadataException, or StorageEngineException
-   */
-  def deleteDataset(name: String): Future[Boolean]
+  def getProjection(name: String, projectionId: Int): Future[ProjectionInfo]
 
-  // TODO: add/delete projections
+  def addProjection(projectionInfo: ProjectionInfo): Future[Boolean]
+
 
   /**
    * Get the schema for a version of a dataset.  This scans all defined columns from the first version
    * on up to figure out the changes. Deleted columns are not returned.
    * Implementations should use Column.foldSchema.
    * @param dataset the name of the dataset to return the schema for
-   * @param version the version of the dataset to return the schema for
    * @return a Schema, column name -> Column definition, or ErrorResponse
    */
-  def getSchema(dataset: String, version: Int): Future[Seq[Column]]
+  def getSchema(dataset: String): Future[Seq[Column]]
 }
 
 /**
@@ -131,7 +110,7 @@ object Dataset {
              ): Dataset = {
     val projections = Seq(
       ProjectionInfo(0, name, schema,
-        Seq(keyColumn), Seq(sortColumn), Seq(segmentColumn), Seq(partitionColumn)
+        Seq(partitionColumn), Seq(keyColumn), Seq(sortColumn), Seq(segmentColumn)
       )
     )
     Dataset(name, schema, projections)
@@ -178,10 +157,10 @@ object Dataset {
 case class ProjectionInfo(id: Int,
                           dataset: TableName,
                           schema: Seq[Column],
+                          partitionColumns: Seq[ColumnId],
                           keyColumns: Seq[ColumnId],
                           sortColumns: Seq[ColumnId],
                           segmentColumns: Seq[ColumnId],
-                          partitionColumns: Seq[ColumnId],
                           reverse: Boolean = false,
                           includeColumns: Seq[ColumnId] = Nil,
                           // Probably not necessary in the future

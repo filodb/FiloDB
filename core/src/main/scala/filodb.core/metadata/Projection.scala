@@ -38,23 +38,23 @@ case class Projection(id: Int,
 
   // scalastyle:off
 
-  val partitionFunction = keyFunction[partitionType.T](
+  val partitionFunction = getKeyFunction[partitionType.T](
     partitionType.asInstanceOf[KeyType {type T = partitionType.T}],
     partitionColumns)
 
-  val keyFunction = keyFunction[keyType.T](
+  val keyFunction = getKeyFunction[keyType.T](
     keyType.asInstanceOf[KeyType {type T = keyType.T}],
     keyColumns)
 
-  val sortFunction = keyFunction[sortType.T](
+  val sortFunction = getKeyFunction[sortType.T](
     sortType.asInstanceOf[KeyType {type T = sortType.T}],
     sortColumns)
 
-  val segmentFunction = keyFunction[segmentType.T](
+  val segmentFunction = getKeyFunction[segmentType.T](
     segmentType.asInstanceOf[KeyType {type T = segmentType.T}],
     segmentColumns)
 
-  def keyFunction[R](keyType: KeyType {type T = R}, columns: Seq[ColumnId]): RowReader => R = {
+  def getKeyFunction[R](keyType: KeyType {type T = R}, columns: Seq[ColumnId]): RowReader => R = {
     val keyColNos = columns.map(col => columnIndexes.getOrElse(col, throw BadSchema("Invalid column $col")))
     keyType.getKeyFunc(keyColNos)
   }

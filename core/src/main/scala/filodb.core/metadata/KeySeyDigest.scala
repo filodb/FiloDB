@@ -9,11 +9,13 @@ import scodec.bits.ByteVector
  * A KeySetDigest is a summary structure which helps determine the presence of a row key in a set of row keys.
  * Examples of this digest can be a BloomFilter of row keys or simply a HashSet or row keys.
  */
-trait KeySetDigest {
+trait KeySetDigest extends Serializable{
 
   def contains(rowKey: Any): Boolean
 
   def keyType: KeyType
+
+  def toBytes:ByteVector
 
 }
 
@@ -25,6 +27,8 @@ class BloomDigest(val bloomFilter: BloomFilter, val keyType: KeyType) extends Ke
   override def contains(rowKey: Any): Boolean = {
     bloomFilter.isPresent(keyType.toBytes(rowKey.asInstanceOf[keyType.T]).toArray)
   }
+
+  override def toBytes: ByteVector = ByteVector(BloomFilter.serialize(bloomFilter))
 }
 
 

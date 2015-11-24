@@ -1,7 +1,12 @@
 package filodb.core.metadata
 
+import java.io._
+import java.nio.ByteBuffer
+
 import filodb.core.KeyType
 import filodb.core.Types._
+import it.unimi.dsi.io.ByteBufferInputStream
+import scodec.bits.ByteVector
 
 import scala.collection.mutable.ArrayBuffer
 
@@ -19,8 +24,6 @@ import scala.collection.mutable.ArrayBuffer
  *
  */
 trait SegmentSummary {
-
-  def segmentInfo: SegmentInfo
 
   def nextChunkId: ChunkId = numChunks
 
@@ -49,25 +52,59 @@ trait SegmentSummary {
     }
   }
 
-  def withKeys(chunkId: ChunkId, keys: Seq[Any], range: KeyRange[Any]): (ChunkSummary, SegmentSummary)
+  def withKeys(chunkId: ChunkId, keys: Seq[Any]): SegmentSummary
 
+  def toBytes: ByteBuffer = {
+    val baos = new ByteArrayOutputStream()
+    val os = new DataOutputStream(baos)
+    chunkSummaries match {
+      case Some(summaries) => {
+        summaries.foreach { case (cid, summary) =>
+          os.writeInt(cid)
+          summary.write(os)
+        }
+      }
+      case None => os.writeInt(0)
+    }
+    os.flush()
+    baos.flush()
+    ByteBuffer.wrap(baos.toByteArray)
+
+  }
+
+}
+
+object SegmentSummary {
+  def fromBytes(keyType: KeyType, bb: ByteBuffer):SegmentSummary = {
+    val in = new DataInputStream(new ByteBufferInputStream(bb))
+    val length = in.readInt()
+    if (length > 0) {
+      val chunkSummaries = (0 to length).map { i =>
+        val chunkId = in.readInt()
+        val chunkSummary = ChunkSummary.read(in, keyType)
+        (chunkId, chunkSummary)
+      }
+      DefaultSegmentSummary(keyType, Some(chunkSummaries))
+    } else {
+      DefaultSegmentSummary(keyType, None)
+    }
+  }
 }
 
 
 case class DefaultSegmentSummary(keyType: KeyType,
-                                 segmentInfo: SegmentInfo,
                                  chunkSummaries: Option[Seq[(ChunkId, ChunkSummary)]] = None)
   extends SegmentSummary {
 
-  override def withKeys(chunkId: ChunkId, keys: Seq[Any], range: KeyRange[Any]): (ChunkSummary, SegmentSummary) = {
+  override def withKeys(chunkId: ChunkId, keys: Seq[Any]): SegmentSummary = {
     val keyDigest = BloomDigest(keys, keyType)
-    val newChunkSummary = ChunkSummary(keyDigest, keys.length, range)
+    val newChunkSummary = ChunkSummary(keyDigest, keys.length)
     val newSummary = (chunkId, newChunkSummary)
     val newSummaries = chunkSummaries match {
       case Some(summaries) => summaries :+ newSummary
       case _ => List(newSummary)
     }
-    (newChunkSummary, DefaultSegmentSummary(keyType, segmentInfo, Some(newSummaries)))
+    DefaultSegmentSummary(keyType, Some(newSummaries))
   }
 }
 
@@ -76,6 +113,24 @@ case class DefaultSegmentSummary(keyType: KeyType,
  * ChunkSummary is a quick summary of the number of rows, the key range(max and min keys) and the KeySetDigest
  * of a Chunk
  */
-case class ChunkSummary(digest: KeySetDigest, numRows: Int, sortKeyRange: KeyRange[Any])
+case class ChunkSummary(digest: KeySetDigest, numRows: Int) {
+  def write(out: DataOutput):Unit={
+    val bytes = digest.toBytes
+    out.writeInt(bytes.length)
+    out.write(bytes.toArray)
+    out.writeInt(numRows)
+  }
+}
+
+object ChunkSummary {
+  def read(in: DataInput, keyType: KeyType): ChunkSummary = {
+    val numBytes = in.readInt()
+    val byteArr = new Array[Byte](numBytes)
+    in.readFully(byteArr)
+    val digest = BloomDigest(ByteVector(byteArr), keyType)
+    val numRows = in.readInt()
+    ChunkSummary(digest, numRows)
+  }
+}
 
 

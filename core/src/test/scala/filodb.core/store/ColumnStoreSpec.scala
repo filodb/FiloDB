@@ -1,5 +1,7 @@
 package filodb.core.store
 
+import java.util.UUID
+
 import filodb.core.Setup._
 import filodb.core.Types.{ChunkId, ColumnId}
 import filodb.core.metadata._
@@ -20,39 +22,47 @@ object ColumnStoreSpec {
   trait MapChunkStore extends ChunkStore {
     val chunksMap = new java.util.HashMap[Any, java.util.TreeMap[Any, java.util.TreeMap[ChunkId, ChunkWithMeta]]]
 
-    override def appendChunk(chunk: ChunkWithMeta): Future[Boolean] = {
-      var segments = chunksMap.get(chunk.segmentInfo.partition)
+    override def appendChunk(projection: Projection,
+                             partition: Any,
+                             segment: Any,
+                             chunk: ChunkWithMeta): Future[Boolean] = {
+      var segments = chunksMap.get(partition)
       if (segments == null) {
         segments = new java.util.TreeMap[Any, java.util.TreeMap[ChunkId, ChunkWithMeta]]()
-        chunksMap.put(chunk.segmentInfo.partition, segments)
+        chunksMap.put(partition, segments)
       }
-      var chunks = segments.get(chunk.segmentInfo.segment)
+      var chunks = segments.get(segment)
       if (chunks == null) {
         chunks = new java.util.TreeMap[ChunkId, ChunkWithMeta]()
-        segments.put(chunk.segmentInfo.segment, chunks)
+        segments.put(segment, chunks)
       }
       chunks.put(chunk.chunkId, chunk)
       Future(true)
     }
 
-    override def getAllChunksForSegments(segmentInfoSeq: Seq[SegmentInfo],
-                                         columns: Seq[ColumnId]): Future[Map[SegmentInfo, Seq[ChunkWithMeta]]] = {
-      var segmentMap = Map[SegmentInfo, Seq[ChunkWithMeta]]()
-      segmentInfoSeq.foreach { segmentInfo =>
-        val segments = chunksMap.get(segmentInfo.partition)
-        val segment = segments.get(segmentInfo.segment)
-        val chunks = segment.values().asScala.toSeq
-        segmentMap = segmentMap + (segmentInfo -> chunks)
-      }
+    override def getAllChunksForSegments(projection: Projection,
+                                         partition: Any,
+                                         segmentRange: KeyRange[_],
+                                         columns: Seq[ColumnId]): Future[Seq[(Any, Seq[ChunkWithMeta])]] = {
+      val segments = chunksMap.get(partition).subMap(segmentRange.start, segmentRange.end)
+      val segmentMap = segments.entrySet().asScala.map { case entry =>
+        val segmentId = entry.getKey
+        val chunkMap = entry.getValue
+        val chunks = chunkMap.entrySet().asScala.map(_.getValue).toSeq
+        segmentId -> chunks
+      }.toSeq
       Future(segmentMap)
     }
 
-    override def getChunks(segmentInfo: SegmentInfo,
-                           chunkIds: Seq[ChunkId]): Seq[ChunkWithId] = {
-      val segments = chunksMap.get(segmentInfo.partition)
-      val segment = segments.get(segmentInfo.segment)
+    override def getSegmentChunks(projection: Projection,
+                                  partition: Any,
+                                  segmentId: Any,
+                                  columns: Seq[ColumnId],
+                                  chunkIds: Seq[ChunkId]): Future[Seq[ChunkWithId]] = {
+      val segments = chunksMap.get(partition)
+      val segment = segments.get(segmentId)
       val chunks = segment.values().asScala
-      chunks.filter(i => chunkIds.contains(i.chunkId)).toSeq
+      Future(chunks.filter(i => chunkIds.contains(i.chunkId)).toSeq)
     }
 
   }
@@ -60,43 +70,51 @@ object ColumnStoreSpec {
   trait MapSummaryStore extends SummaryStore {
     val summaryMap = new java.util.HashMap[Any, java.util.TreeMap[Any, (SegmentVersion, SegmentSummary)]]()
 
-    /**
-     * Atomically compare and swap the new SegmentSummary for this SegmentID
-     */
-    override def compareAndSwapSummary(segmentVersion: SegmentVersion,
-                                       segmentInfo: SegmentInfo,
+    override def compareAndSwapSummary(projection: Projection,
+                                       partition: Any,
+                                       segment: Any,
+                                       oldVersion: Option[SegmentVersion],
+                                       segmentVersion: SegmentVersion,
                                        segmentSummary: SegmentSummary): Future[Boolean] = {
-      var segments = summaryMap.get(segmentInfo.partition)
+      var segments = summaryMap.get(partition)
       if (segments == null) {
         segments = new java.util.TreeMap[Any, (SegmentVersion, SegmentSummary)]()
-        summaryMap.put(segmentInfo.partition, segments)
+        summaryMap.put(partition, segments)
       }
-      segments.put(segmentInfo.segment, (segmentVersion, segmentSummary))
-      Future(true)
+      val vAndS = segments.get(segment)
+      oldVersion match {
+        case Some(v) => {
+          if (vAndS._1.equals(v)) {
+            segments.put(segment, (segmentVersion, segmentSummary))
+            Future(true)
+          } else Future(false)
+        }
+        case None => {
+          if (vAndS == null) {
+            segments.put(segment, (segmentVersion, segmentSummary))
+            Future(true)
+          } else Future(false)
+        }
+      }
+
     }
 
-    override def readSegmentSummary(segmentInfo: SegmentInfo):
+    override def readSegmentSummary(projection: Projection,
+                                    partition: Any,
+                                    segment: Any):
     Future[Option[(SegmentVersion, SegmentSummary)]] = {
-      val segments = summaryMap.get(segmentInfo.partition)
-      if (segments != null) {
-        val s = segments.get(segmentInfo.segment)
+      val segments = summaryMap.get(partition)
+      val v = if (segments != null) {
+        val s = segments.get(segment)
         if (s != null) {
           val (version, summary: SegmentSummary) = s
           Future(Some((version, summary.asInstanceOf[SegmentSummary])))
         } else Future(None)
       } else Future(None)
+      v
     }
 
-    override def readSegmentSummaries(projection: Projection,
-                                      partitionKey: Any,
-                                      keyRange: KeyRange[_]): Future[Seq[SegmentSummary]] = {
-      val segments = summaryMap.get(partitionKey)
-      if (segments == null)
-        Future(List.empty[SegmentSummary])
-      else
-        Future(segments.subMap(keyRange.start, keyRange.end).values()
-          .asScala.map(_._2).toSeq)
-    }
+    override def newVersion: SegmentVersion = UUID.randomUUID()
   }
 
   class MapColumnStore extends ColumnStore with MapChunkStore with MapSummaryStore
@@ -113,10 +131,11 @@ class ColumnStoreSpec extends FunSpec with Matchers with BeforeAndAfter with Sca
 
       val rows = names.map(TupleRowReader)
       val partitions = Reprojector.project(projection, rows).toSeq
+
       partitions.length should be(2)
       val results = partitions.map { case (p, flushes) =>
         flushes.map { flush =>
-          Await.result(mapColumnStore.flushToSegment(projection, flush), 100 seconds)
+          Await.result(mapColumnStore.flushToSegment(flush.projection, flush.partition, flush.segment, flush), 100 seconds)
         }
       }
       results.foreach(seq => seq.foreach { r: Boolean =>

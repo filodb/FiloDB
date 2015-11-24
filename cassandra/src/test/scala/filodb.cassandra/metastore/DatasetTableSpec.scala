@@ -14,7 +14,7 @@ import filodb.core._
 
 class DatasetTableSpec extends CassandraFlatSpec with BeforeAndAfter {
   val config = ConfigFactory.load("application_test.conf").getConfig("cassandra")
-  val datasetTable = new DatasetTable(config)
+  val datasetTable = new ProjectionTable(config)
   implicit val keySpace = KeySpace(config.getString("keyspace"))
 
   // First create the datasets table
