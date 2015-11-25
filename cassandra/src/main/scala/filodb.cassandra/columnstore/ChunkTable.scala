@@ -39,7 +39,10 @@ with FiloCassandraConnector {
   override def fromRow(row: Row): (String, Types.SegmentId, Int, ByteBuffer) =
     (columnName(row), ByteVector(segmentId(row)), chunkId(row), data(row))
 
-  def initialize(): Future[Response] = create.ifNotExists.future().toResponse()
+  // WITH COMPACT STORAGE saves 35% on storage costs according to this article:
+  // http://blog.librato.com/posts/cassandra-compact-storage
+  def initialize(): Future[Response] = create.ifNotExists.option(Storage.CompactStorage)
+                                             .future().toResponse()
 
   def clearAll(): Future[Response] = truncate.future().toResponse()
 
