@@ -7,7 +7,7 @@ import com.websudos.phantom.builder.MultiColumnInClause
 import com.websudos.phantom.dsl._
 import filodb.cassandra.FiloCassandraConnector
 import filodb.core.Messages.Response
-import filodb.core.metadata.{ChunkWithMeta, Projection}
+import filodb.core.metadata.{SimpleChunk, ChunkWithMeta, Projection}
 
 import scala.concurrent.Future
 

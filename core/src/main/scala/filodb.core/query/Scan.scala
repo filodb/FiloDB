@@ -23,7 +23,7 @@ trait Dataflow {
 }
 
 
-class UnorderedSegmentScan(segment: Segment) extends Dataflow {
+class SegmentScan(val segment: Segment) extends Dataflow {
 
   val chunkAccessTable: Array[(ChunkId, Array[FiloVector[_]])] = buildAccessTable()
   val overrideIndex: mutable.HashMap[Int, mutable.Set[Int]] with mutable.MultiMap[Int, Int] = buildOverrideIndex()
@@ -52,28 +52,53 @@ class UnorderedSegmentScan(segment: Segment) extends Dataflow {
 
   var currentLocation = (0, -1)
 
+  private def isInvalid(loc: (Int, Int)) = {
+    loc._1 < 0 && loc._2 < 0
+  }
+
   private def getNextLocation: Option[(Int, Int)] = {
-    var newLocation = move(currentLocation)
-    while (isSkip(newLocation)) {
+    var newLocation = currentLocation
+    do {
       newLocation = move(newLocation)
+    } while (isSkip(newLocation))
+    val totalChunks = numChunks
+    val valid = !isInvalid(newLocation)
+    val isValidChunk = newLocation._1 < totalChunks
+    if (valid && isValidChunk && newLocation._2 < chunks(newLocation._1).numRows) {
+      Some(newLocation)
+    } else {
+      None
     }
-    if (newLocation._1 < numChunks && newLocation._2 < chunks(newLocation._1).numRows) Some(newLocation) else None
   }
 
   private def move(loc: (Int, Int)) = {
     var (chunkNum, rowOffset) = loc
-    if (rowOffset < chunks(chunkNum).numRows) {
-      rowOffset = rowOffset + 1
-    } else {
-      chunkNum = chunkNum + 1
-      rowOffset = 0
+    if (chunkNum < numChunks) {
+      if (rowOffset + 1 < chunks(chunkNum).numRows) {
+        rowOffset = rowOffset + 1
+      } else {
+        rowOffset = -1
+      }
+    }
+    if (rowOffset == -1) {
+      if (chunkNum + 1 < numChunks) {
+        chunkNum = chunkNum + 1
+        rowOffset = 0
+      }
+      else {
+        chunkNum = -1
+      }
     }
     (chunkNum, rowOffset)
   }
 
   private def isSkip(location: (Int, Int)): Boolean = {
-    overrideIndex.get(location._1).exists { overrides =>
-      overrides.contains(location._2)
+    if (isInvalid(location)) {
+      false
+    } else {
+      overrideIndex.get(location._1).exists { overrides =>
+        overrides.contains(location._2)
+      }
     }
   }
 

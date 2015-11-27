@@ -1,6 +1,5 @@
 package filodb.cassandra.columnstore
 
-import com.typesafe.config.Config
 import filodb.cassandra.util.TimeUUIDUtils
 import filodb.core.Messages.Success
 import filodb.core.metadata.{Projection, SegmentSummary}
@@ -8,8 +7,8 @@ import filodb.core.store.SummaryStore
 
 import scala.concurrent.Future
 
-class CassandraSummaryStore(config: Config) extends SummaryStore {
-  val summaryTable = new SummaryTable(config)
+trait CassandraSummaryStore extends SummaryStore {
+  def summaryTable: SummaryTable
 
   /**
    * Atomically compare and swap the new SegmentSummary for this SegmentID

@@ -3,19 +3,27 @@ package filodb.core.reprojector
 import java.nio.ByteBuffer
 
 import filodb.core.metadata._
+import filodb.core.reprojector.Reprojector.SegmentFlush
 import org.velvia.filo.{RowToVectorBuilder, RowReader}
 
 
 trait Reprojector {
 
   def project(projection: Projection,
-              rows: Seq[RowReader]): Iterator[(Any, Seq[FlushedChunk])]
+              rows: Seq[RowReader]): Iterator[(Any, Seq[SegmentFlush])]
 }
 
 object Reprojector extends Reprojector {
 
+  case class SegmentFlush(projection: Projection,
+                          partition: Any,
+                          segment: Any,
+                          keys: Seq[Any],
+                          sortedKeyRange: KeyRange[Any],
+                          columnVectors: Array[ByteBuffer]) extends Chunk
 
-  override def project(projection: Projection, rows: Seq[RowReader]): Iterator[(Any, Seq[FlushedChunk])] = {
+
+  override def project(projection: Projection, rows: Seq[RowReader]): Iterator[(Any, Seq[SegmentFlush])] = {
     // lets group rows within partition by segment
     import filodb.core.util.Iterators._
     val partitionedRows = rows.iterator.sortedGroupBy(projection.partitionFunction)
@@ -39,7 +47,7 @@ object Reprojector extends Reprojector {
         projection.schema.zipWithIndex.foreach { case (c, i) => columnVectors(i) = columnVectorMap(c.name) }
         // we also separate the keys for summarizing
         val keys = rows.map(i => projection.keyFunction(i))
-        FlushedChunk(projection, partitionKey, segment, keys, sortKeyRange, columnVectors)
+        SegmentFlush(projection, partitionKey, segment, keys, sortKeyRange, columnVectors)
       }.toSeq
       (partitionKey, segmentChunks)
     }

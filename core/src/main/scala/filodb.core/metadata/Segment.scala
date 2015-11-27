@@ -18,6 +18,8 @@ trait Segment {
 
   def numChunks: Int = chunks.length
 
+  override def toString: String = s"Segment($segmentId) chunks($numChunks) rows($numRows)"
+
 }
 
 
