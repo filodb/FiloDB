@@ -17,7 +17,7 @@ csvDF.write.format("filodb.spark").
 ```
 
 * [NYC Taxi Trip and Fare Info](http://www.andresmh.com/nyctaxitrips/) - really interesting geospatial-temporal public dataset.  Trip data is 2.4GB for one part, ~ 15 million rows, and there are 12 parts.
-    - `select(count("medallion")).show` should result in 14776615 records for the `trip_data_1.csv` (Part 1).   Parquet takes around 25 secs on my machine.
+    - `select(count("medallion")).show` should result in 14776615 records for the `trip_data_1.csv` (Part 1).   CSV takes around 25 secs on my machine.
     - id column is a workaround to make a unique ID out of two columns
 
 ```scala
@@ -26,6 +26,7 @@ val aInt = new java.util.concurrent.atomic.AtomicInteger(0)
 val autoId = sqlContext.udf.register("autoId", { () => aInt.getAndIncrement() })
 val tripsWithCols = tripsCsv.
    withColumn("medalPrefix", strPrefix(tripsCsv("medallion"), lit(2))).withColumn("id", autoId())
+import org.apache.spark.sql.SaveMode
 tripsWithCols.write.format("filodb.spark").option("dataset", "nyctaxitrips").
   option("sort_column", "id").option("partition_column", "medalPrefix").
   option("default_partition_key", "<none>").
