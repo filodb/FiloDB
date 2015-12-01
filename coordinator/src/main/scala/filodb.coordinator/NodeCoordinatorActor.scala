@@ -1,6 +1,6 @@
 package filodb.coordinator
 
-import akka.actor.{Actor, ActorRef, Props}
+import akka.actor.{Actor, ActorRef, PoisonPill, Props}
 import com.typesafe.config.Config
 import net.ceedubs.ficus.Ficus._
 import org.velvia.filo.RowReader
@@ -99,6 +99,7 @@ object NodeCoordinatorActor {
   case object ProjectionTruncated extends NodeResponse
 
   // Internal messages
+  case object Reset
   case class AddDatasetCoord(dataset: TableName, version: Int, dsCoordRef: ActorRef) extends NodeCommand
   case class DatasetCreateNotify(dataset: TableName, version: Int, msg: Any) extends NodeCommand
 
@@ -233,6 +234,11 @@ class NodeCoordinatorActor(metaStore: MetaStore,
 
     case GetIngestionStats(dataset, version) =>
       withDsCoord(sender, dataset, version) { _.forward(DatasetCoordinatorActor.GetStats) }
+
+    case Reset =>
+      dsCoordinators.values.foreach(_ ! PoisonPill)
+      dsCoordinators.clear()
+      dsCoordNotify.clear()
 
     case AddDatasetCoord(dataset, version, dsCoordRef) =>
       dsCoordinators((dataset, version)) = dsCoordRef

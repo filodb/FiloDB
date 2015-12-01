@@ -132,7 +132,8 @@ extends CachedMergingColumnStore with StrictLogging {
     for { (chunkTable, rowMapTable) <- getSegmentTables(dataset)
           rowMaps <- rowMapTable.scanChunkMaps(version, tokenStart, tokenEnd) }
     yield {
-      rowMaps.map { case (part, ChunkRowMapRecord(segmentId, chunkIds, rowNums, nextChunkId)) =>
+      rowMaps.filter { case (part, _) => partitionFilter(part) }
+             .map { case (part, ChunkRowMapRecord(segmentId, chunkIds, rowNums, nextChunkId)) =>
         (part, segmentId, new BinaryChunkRowMap(chunkIds, rowNums, nextChunkId))
       }
     }

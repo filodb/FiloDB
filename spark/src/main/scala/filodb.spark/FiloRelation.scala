@@ -16,7 +16,7 @@ import scala.reflect.ClassTag
 import org.apache.spark.rdd.RDD
 import org.apache.spark.SparkContext
 import org.apache.spark.sql.catalyst.expressions.{MutableRow, SpecificMutableRow}
-import org.apache.spark.sql.sources.{BaseRelation, TableScan, PrunedScan}
+import org.apache.spark.sql.sources.{BaseRelation, TableScan, PrunedScan, PrunedFilteredScan, Filter}
 import org.apache.spark.sql.types._
 import org.apache.spark.sql.{DataFrame, Row, SQLContext}
 
@@ -50,10 +50,12 @@ object FiloRelation {
               version: Int,
               columns: Seq[Column],
               sortColumn: Column,
+              filterFunc: Types.PartitionKey => Boolean,
               params: Map[String, String]): Iterator[Row] = {
     val untypedHelper = Dataset.sortKeyHelper(options, sortColumn).get
     implicit val helper = untypedHelper.asInstanceOf[SortKeyHelper[untypedHelper.Key]]
-    parse(FiloSetup.columnStore.scanSegments[helper.Key](columns, datasetName, version, params = params),
+    parse(FiloSetup.columnStore.scanSegments[helper.Key](columns, datasetName, version,
+                                                         filterFunc, params = params),
           10 minutes) { segmentIt =>
       segmentIt.flatMap { seg =>
         val readerSeg = seg.asInstanceOf[RowReaderSegment[helper.Key]]
@@ -70,6 +72,7 @@ object FiloRelation {
                         version: Int,
                         columns: Seq[Column],
                         sortColumn: Column,
+                        filterFunc: Types.PartitionKey => Boolean,
                         paramIter: Iterator[Map[String, String]]): Iterator[Row] = {
     // NOTE: all the code inside here runs distributed on each node.  So, create my own datastore, etc.
     FiloSetup.init(config)
@@ -78,7 +81,7 @@ object FiloRelation {
     val datasetName = sortColumn.dataset
 
     paramIter.flatMap { param =>
-      getRows(options, datasetName, version, columns, sortColumn, param)
+      getRows(options, datasetName, version, columns, sortColumn, filterFunc, param)
     }
   }
 }
@@ -99,7 +102,7 @@ case class FiloRelation(dataset: String,
                         version: Int = 0,
                         splitsPerNode: Int = 1)
                        (@transient val sqlContext: SQLContext)
-    extends BaseRelation with TableScan with PrunedScan with StrictLogging {
+    extends BaseRelation with TableScan with PrunedScan with PrunedFilteredScan with StrictLogging {
   import TypeConverters._
   import FiloRelation._
 
@@ -114,7 +117,10 @@ case class FiloRelation(dataset: String,
 
   def buildScan(): RDD[Row] = buildScan(filoSchema.keys.toArray)
 
-  def buildScan(requiredColumns: Array[String]): RDD[Row] = {
+  def buildScan(requiredColumns: Array[String]): RDD[Row] =
+    buildScan(requiredColumns, Array.empty)
+
+  def buildScan(requiredColumns: Array[String], filters: Array[Filter]): RDD[Row] = {
     // Define vars to distribute inside the method
     val _config = this.filoConfig
     val datasetOptionsStr = this.datasetObj.options.toString
@@ -125,14 +131,30 @@ case class FiloRelation(dataset: String,
     val splits = FiloSetup.columnStore.getScanSplits(dataset, splitOpts)
     logger.info(s"Splits = $splits")
 
+    val filterFuncs = getFilterFuncs(filters.toList)
+    require(filterFuncs.length <= 1, "More than one filtering function not supported right now")
+    val filterFunc = if (filterFuncs.isEmpty) ((p: Types.PartitionKey) => true) else filterFuncs.head
+
     // NOTE: It's critical that the closure inside mapPartitions only references
     // vars from buildScan() method, and not the FiloRelation class.  Otherwise
     // the entire FiloRelation class would get serialized.
     sqlContext.sparkContext.parallelize(splits, splits.length)
       .mapPartitions { paramIter =>
         perNodeRowScanner(_config, datasetOptionsStr, _version, filoColumns,
-                          sortCol, paramIter)
+                          sortCol, filterFunc, paramIter)
       }
+  }
+
+  // For now just implement really simple filtering
+  private def getFilterFuncs(filters: Seq[Filter]): Seq[Types.PartitionKey => Boolean] = {
+    import org.apache.spark.sql.sources._
+    filters.flatMap {
+      case EqualTo(datasetObj.partitionColumn, equalVal) =>
+        val compareVal = equalVal.toString   // must convert to same type as partitionKey
+        Some((p: Types.PartitionKey) => p == compareVal)
+      case other: Filter =>
+        None
+    }
   }
 }
 

@@ -9,6 +9,7 @@ import scala.concurrent.duration._
 
 import filodb.core._
 import filodb.core.metadata.{Column, Dataset}
+import filodb.coordinator.NodeCoordinatorActor.Reset
 
 import org.scalatest.{FunSpec, BeforeAndAfter, BeforeAndAfterAll, Matchers}
 import org.scalatest.concurrent.ScalaFutures
@@ -71,6 +72,7 @@ with Matchers with ScalaFutures {
     } catch {
       case e: Exception =>
     }
+    FiloSetup.coordinatorActor ! Reset
   }
 
   implicit val ec = FiloSetup.ec
@@ -170,5 +172,20 @@ with Matchers with ScalaFutures {
     df.agg(sum("year")).collect().head(0) should equal (8062)
   }
 
-  it("should be able to write with a user-specified partitioning column") (pending)
+  // Also test that we can read back from just one partition
+  it("should be able to write with a user-specified partitioning column") {
+    dataDF.write.format("filodb.spark").
+                 option("dataset", "test1").
+                 option("sort_column", "id").
+                 option("partition_column", "year").
+                 option("default_partition_key", "<none>").
+                 mode(SaveMode.Overwrite).
+                 save()
+    val df = sql.read.format("filodb.spark").option("dataset", "test1").load()
+    df.agg(sum("id")).collect().head(0) should equal (3)
+    df.registerTempTable("test1")
+    sql.sql("SELECT sum(id) FROM test1 WHERE year = 2015").collect.head(0) should equal (2)
+    // The below _should_ work but somehow Spark throws an error can't figure out year should be included
+    // df.agg(sum("id")).where(df("year") === 2015).collect().head(0) should equal (2)
+  }
 }
