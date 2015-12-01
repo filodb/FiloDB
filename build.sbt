@@ -88,7 +88,8 @@ lazy val cliDeps = Seq(
 )
 
 lazy val sparkDeps = Seq(
-  "org.apache.spark"     %% "spark-sql"         % "1.4.1" % "provided"
+  "org.apache.spark"     %% "spark-sql"         % "1.4.1" % "provided",
+  "org.apache.spark"     %% "spark-streaming"   % "1.4.1" % "provided"
 )
 
 //////////////////////////

@@ -240,6 +240,12 @@ val df = sqlContext.read.format("filodb.spark").option("dataset", "gdelt").load(
 
 The dataset can be queried using the DataFrame DSL. See the section [Querying Datasets](#querying-datasets) for examples.
 
+### Spark Streaming Example
+
+It's not difficult to ingest data into FiloDB using Spark Streaming.  Simple use `foreachRDD` on your `DStream` and then [transform each RDD into a DataFrame](https://spark.apache.org/docs/latest/streaming-programming-guide.html#dataframe-and-sql-operations).
+
+For an example, see the [StreamingTest](spark/src/test/scala/filodb.spark/StreamingTest.scala).
+
 #### Spark SQL Example (spark-sql)
 
 Start Spark-SQL:
