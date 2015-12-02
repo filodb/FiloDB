@@ -99,6 +99,23 @@ The PRIMARY KEY for FiloDB consists of (partition key, sort key).  When choosing
 
 Specifying the partitioning column is optional.  If a partitioning column is not specified, FiloDB will create a default one with a fixed value, which means everything will be thrown into one node, and is only suitable for small amounts of data.  If you don't specify a partitioning column, then you have to make sure your sort keys are all unique.
 
+### FiloDB Data Modelling and Performance Considerations
+
+**Choosing a Partition Key**.
+
+- If there are too few partitions, then FiloDB will not be able to distribute and parallelize reads.
+- If the numer of rows in each partition is too few, then the storage will not be efficient.
+- If the partition key is time based, there may be a hotspot in the cluster as recent data is all written into the same set of replicas, and likewise for read patterns as well.
+
+**Segment Key and Chunk Size**.
+
+Within each partition, data is delineated by *segments*, which consists of non-overlapping ranges of sort keys.  Within each segment, successive flushes of the MemTable writes data in *chunks*.  The segmentation is key to sorting and filtering data by sort key, and the chunk size (which depends on segmentation) also affects performance.  The smaller the chunk size, the higher the overhead of scanning data becomes.
+
+Segmentation and chunk size distribution may be checked by the CLI `analyze` command.  In addition, the following configuration affects segmentation and chunk size:
+* `memtable.max-rows-per-table`, `memtable.flush-trigger-rows` affects how many rows are kept in the MemTable at a time, and this along with how many partitions are in the MemTable directly leads to the chunk size upon flushing.
+* `segment_size` option when creating a dataset determines the segment size.  For Long, Int, and Double sort keys, the segment size is the rounding factor.  For example, if Long sort key is used and they represent milliseconds, a segment size of 10000 means that data will be segmented into 10 second intervals.  For String sort keys, the segment size is the number of characters at the start of a string that creates the segment key.  Experimentation along with running `filo-cli analyze` is recommended to come up with a good number.
+* `chunk_size` option when creating a dataset caps the size of a single chunk.
+
 ### Example FiloDB Schema for machine metrics
 
 This is one way I would recommend setting things up to take advantage of FiloDB.
