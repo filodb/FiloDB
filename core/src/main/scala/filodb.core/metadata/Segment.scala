@@ -9,8 +9,6 @@ trait Segment {
 
   def segmentId: Any
 
-  def columns: Seq[Column] = projection.schema
-
   // chunks are time ordered
   def chunks: Seq[ChunkWithMeta]
 

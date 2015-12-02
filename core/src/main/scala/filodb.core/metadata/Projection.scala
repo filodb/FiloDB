@@ -25,15 +25,16 @@ case class Projection(id: Int,
                       sortType: KeyType,
                       segmentType: KeyType) {
 
-  val schemaMap = schema.map(i => (i.name -> i)).toMap
+  val schemaMap = schema.map(i => i.name -> i).toMap
+  val columnNames = schema.map(i => i.name)
 
   val columnIndexes = schema.zipWithIndex.map { case (c, i) => c.name -> i }.toMap
 
 
   def filoSchema: Seq[VectorInfo] = schema.map {
     case Column(name, _, _, colType, serializer, false, false) =>
-      require(serializer == Column.Serializer.FiloSerializer)
       VectorInfo(name, colType.clazz)
+    case _ => throw new IllegalArgumentException("Need schema to be composed of columns")
   }
 
   // scalastyle:off

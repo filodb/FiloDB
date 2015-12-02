@@ -76,8 +76,11 @@ lazy val coreDeps = Seq(
 )
 
 lazy val cassDeps = Seq(
-  "com.websudos"         %% "phantom-dsl"       % phantomVersion,
-  "com.websudos"         %% "phantom-testkit"   % phantomVersion % "test" excludeAll(excludeZK)
+  "com.websudos"                  %% "phantom-dsl"              % phantomVersion,
+  "com.fasterxml.jackson.core"    % "jackson-databind"          % "2.4.1.1",
+  "com.fasterxml.jackson.module"  % "jackson-module-scala_2.10" % "2.4.1",
+  "org.cassandraunit"             % "cassandra-unit"            % "2.0.2.2"       % "test",
+  "com.websudos"                  %% "phantom-testkit"          % phantomVersion  % "test" excludeAll(excludeZK)
 )
 
 lazy val coordDeps = Seq(

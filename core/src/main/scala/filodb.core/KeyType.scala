@@ -16,7 +16,7 @@ trait KeyType {
 
   def ordering: Ordering[T] // must be comparable
 
-  def toBytes(key: T): ByteVector
+  def toBytes(key: T): (Int, ByteVector)
 
   def fromBytes(bytes: ByteVector): T
 
@@ -63,11 +63,14 @@ case class CompositeKeyType(atomTypes: Seq[SingleKeyType]) extends KeyType {
 
   override def ordering: scala.Ordering[Seq[_]] = CompositeOrdering(atomTypes)
 
-  override def toBytes(key: Seq[_]): ByteVector = (0 to atomTypes.length).map { i =>
-    val atomType = atomTypes(i)
-    val bytes = atomType.toBytes(key(i).asInstanceOf[atomType.T])
-    ByteVector(bytes.length.toByte).++(bytes)
-  }.reduce[ByteVector] { case (a, b) => a ++ b }
+  override def toBytes(key: Seq[_]): (Int, ByteVector) = {
+    val fullBuffer = (0 to atomTypes.length).map { i =>
+      val atomType = atomTypes(i)
+      val bytes = atomType.toBytes(key(i).asInstanceOf[atomType.T])
+      ByteVector(bytes._2.length.toByte).++(bytes._2)
+    }.reduce[ByteVector] { case (a, b) => a ++ b }
+    (fullBuffer.length, fullBuffer)
+  }
 
   override def fromBytes(bytes: ByteVector): Seq[_] = {
     val elements = scala.collection.mutable.ListBuffer.empty[Any]
@@ -101,9 +104,9 @@ case class LongKeyType() extends SingleKeyType {
 
   def ordering: Ordering[Long] = Ordering.Long
 
-  def toBytes(key: Long): ByteVector = ByteVector.fromLong(key, ordering = ByteOrdering.BigEndian)
+  def toBytes(key: Long): (Int, ByteVector) = (8, ByteVector.fromLong(key, ordering = ByteOrdering.BigEndian))
 
-  def fromBytes(bytes: ByteVector): Long = bytes.toLong(true, ByteOrdering.BigEndian)
+  def fromBytes(bytes: ByteVector): Long = bytes.toLong(signed = true, ByteOrdering.BigEndian)
 
   override def extractor: TypedFieldExtractor[Long] = LongFieldExtractor
 }
@@ -113,9 +116,9 @@ case class IntKeyType() extends SingleKeyType {
 
   def ordering: Ordering[Int] = Ordering.Int
 
-  def toBytes(key: Int): ByteVector = ByteVector.fromInt(key, ordering = ByteOrdering.BigEndian)
+  def toBytes(key: Int): (Int, ByteVector) = (4, ByteVector.fromInt(key, ordering = ByteOrdering.BigEndian))
 
-  def fromBytes(bytes: ByteVector): Int = bytes.toInt(true, ByteOrdering.BigEndian)
+  def fromBytes(bytes: ByteVector): Int = bytes.toInt(signed = true, ByteOrdering.BigEndian)
 
   override def extractor: TypedFieldExtractor[Int] = IntFieldExtractor
 }
@@ -125,11 +128,11 @@ case class DoubleKeyType() extends SingleKeyType {
 
   def ordering: Ordering[Double] = Ordering.Double
 
-  def toBytes(key: Double): ByteVector =
-    ByteVector.fromLong(java.lang.Double.doubleToLongBits(key), ordering = ByteOrdering.BigEndian)
+  def toBytes(key: Double): (Int, ByteVector) =
+    (8, ByteVector.fromLong(java.lang.Double.doubleToLongBits(key), ordering = ByteOrdering.BigEndian))
 
   def fromBytes(bytes: ByteVector): Double =
-    java.lang.Double.longBitsToDouble(bytes.toLong(true, ByteOrdering.BigEndian))
+    java.lang.Double.longBitsToDouble(bytes.toLong(signed = true, ByteOrdering.BigEndian))
 
   override def extractor: TypedFieldExtractor[Double] = DoubleFieldExtractor
 }
@@ -143,12 +146,15 @@ case class DoubleKeyType() extends SingleKeyType {
  *
  * TODO: perhaps combine prefixLen with a range of chars the last char is allowed to vary on
  */
-case class StringKeyType(prefixLen: Int) extends SingleKeyType {
+case class StringKeyType() extends SingleKeyType {
   type T = String
 
   def ordering: Ordering[String] = Ordering.String
 
-  def toBytes(key: String): ByteVector = ByteVector(key.take(prefixLen).getBytes("UTF-8"))
+  def toBytes(key: String): (Int, ByteVector) = {
+    val bv = ByteVector(key.getBytes("UTF-8"))
+    (bv.length, bv)
+  }
 
   def fromBytes(bytes: ByteVector): String = new String(bytes.toArray, "UTF-8")
 

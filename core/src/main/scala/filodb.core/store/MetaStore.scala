@@ -30,7 +30,7 @@ trait MetaStore {
    * @param name Name of the dataset to retrieve
    * @return a Dataset
    */
-  def getDataset(name: String): Future[Dataset]
+  def getDataset(name: String): Future[Option[Dataset]]
 
   def getProjection(name: String, projectionId: Int): Future[ProjectionInfo]
 
@@ -125,7 +125,7 @@ object Dataset {
       case java.lang.Long.TYPE => new LongKeyType()
       case java.lang.Integer.TYPE => new IntKeyType()
       case java.lang.Double.TYPE => new DoubleKeyType()
-      case StringClass => new StringKeyType(options.segmentSize.toInt)
+      case StringClass => new StringKeyType()
     }
   }
 

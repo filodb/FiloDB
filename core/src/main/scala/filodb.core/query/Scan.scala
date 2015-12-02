@@ -20,17 +20,21 @@ trait Dataflow {
   def hasMoreRows: Boolean
 
   def getMoreRows(batchSize: Int): Array[FiloRowReader]
+
+  def classes: Array[Class[_]]
 }
 
 
-class SegmentScan(val segment: Segment) extends Dataflow {
+class SegmentScan(val segment: Segment, columns: Seq[ColumnId]) extends Dataflow {
 
   val chunkAccessTable: Array[(ChunkId, Array[FiloVector[_]])] = buildAccessTable()
   val overrideIndex: mutable.HashMap[Int, mutable.Set[Int]] with mutable.MultiMap[Int, Int] = buildOverrideIndex()
 
   private def chunks = segment.chunks
 
-  private def classes = segment.columns.map(_.columnType.clazz).toArray
+  def classes: Array[Class[_]] =columns.map { col =>
+      segment.projection.schemaMap.get(col).get.columnType.clazz
+    }.toArray
 
   private def numChunks = chunks.length
 

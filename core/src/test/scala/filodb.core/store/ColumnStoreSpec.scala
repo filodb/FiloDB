@@ -5,7 +5,6 @@ import java.util.UUID
 import filodb.core.Setup._
 import filodb.core.Types.{ChunkId, ColumnId}
 import filodb.core.metadata._
-import filodb.core.query.SegmentScan
 import filodb.core.reprojector.Reprojector
 import filodb.core.reprojector.Reprojector.SegmentFlush
 import filodb.core.store.ColumnStoreSpec.MapColumnStore
@@ -69,19 +68,19 @@ object ColumnStoreSpec {
       Future(chunks.toSeq)
     }
 
-    override def getSegmentChunks(projection: Projection,
-                                  partition: Any,
-                                  segmentId: Any,
-                                  columns: Seq[ColumnId],
-                                  chunkIds: Seq[ChunkId]): Future[Seq[ChunkWithId]] = {
+    override def getKeySets(projection: Projection,
+                            partition: Any,
+                            segmentId: Any,
+                            columns: Seq[ColumnId],
+                            chunkIds: Seq[ChunkId]): Future[Seq[(ChunkId, Seq[_])]] = {
       val segmentRes = chunksMap.get(partition)
       val chunks = segmentRes match {
         case Some(segments) => {
-          segments.get(segmentId).fold(Seq.empty[ChunkWithId]) { case segment =>
-            segment.map(_._2).toSeq
+          segments.get(segmentId).fold(Seq.empty[(ChunkId, Seq[_])]) { case segment =>
+            segment.map(i => (i._1, i._2.keys)).toSeq
           }
         }
-        case None => Seq.empty[ChunkWithId]
+        case None => Seq.empty[(ChunkId, Seq[_])]
       }
       Future(chunks)
     }
@@ -173,12 +172,12 @@ class ColumnStoreSpec extends FunSpec with Matchers with BeforeAndAfter with Sca
   describe("Concurrent flushes") {
     it("should NOT allow concurrent flushes to write against the same summary version") {
       import scala.concurrent.ExecutionContext.Implicits.global
-      val mapColumnStore = new MapColumnStore()
+      val columnStore = new MapColumnStore()
       val rows = names.map(TupleRowReader)
       val partitions = Reprojector.project(projection, rows).toSeq
 
       partitions.length should be(2)
-      val results = flushPartitions(mapColumnStore, partitions)
+      val results = flushPartitions(columnStore, partitions)
       checkResults(results)
 
 
@@ -197,22 +196,22 @@ class ColumnStoreSpec extends FunSpec with Matchers with BeforeAndAfter with Sca
 
       val (v1, v2, s1, s2) = Await.result(for {
       //now read the segment summary
-        (version1, summary1) <- mapColumnStore.getVersionAndSummaryWithDefaults(projection, flush1.partition, flush1.segment)
-        (version2, summary2) <- mapColumnStore.getVersionAndSummaryWithDefaults(projection, flush2.partition, flush2.segment)
+        (version1, summary1) <- columnStore.getVersionAndSummaryWithDefaults(projection, flush1.partition, flush1.segment)
+        (version2, summary2) <- columnStore.getVersionAndSummaryWithDefaults(projection, flush2.partition, flush2.segment)
       } yield (version1, version2, summary1, summary2), 100 seconds)
       //check we got the same version
       v1.get should be(v2.get)
 
       val (result1, result2) = Await.result(for {
-        newChunk1 <- mapColumnStore.newChunkFromSummary(projection, flush1.partition, flush1.segment, flush1, s1)
-        newChunk2 <- mapColumnStore.newChunkFromSummary(projection, flush2.partition, flush2.segment, flush2, s2)
+        newChunk1 <- columnStore.newChunkFromSummary(projection, flush1.partition, flush1.segment, flush1, s1)
+        newChunk2 <- columnStore.newChunkFromSummary(projection, flush2.partition, flush2.segment, flush2, s2)
         newSummary1 = s1.withKeys(newChunk1.chunkId, newChunk1.keys)
         newSummary2 = s2.withKeys(newChunk2.chunkId, newChunk2.keys)
 
-        r1 <- mapColumnStore.compareAndSwapSummaryAndChunk(projection,
-          flush1.partition, flush1.segment, v1, mapColumnStore.newVersion, newChunk1, newSummary1)
-        r2 <- mapColumnStore.compareAndSwapSummaryAndChunk(projection,
-          flush2.partition, flush2.segment, v2, mapColumnStore.newVersion, newChunk2, newSummary2)
+        r1 <- columnStore.compareAndSwapSummaryAndChunk(projection,
+          flush1.partition, flush1.segment, v1, columnStore.newVersion, newChunk1, newSummary1)
+        r2 <- columnStore.compareAndSwapSummaryAndChunk(projection,
+          flush2.partition, flush2.segment, v2, columnStore.newVersion, newChunk2, newSummary2)
 
       } yield (r1, r2), 100 seconds)
       result1 should be(true)
@@ -240,7 +239,7 @@ class ColumnStoreSpec extends FunSpec with Matchers with BeforeAndAfter with Sca
         projection.schema.map(i => i.name), KeyRange("A", "Z")), 10 seconds)
 
       segments.length should be(2)
-      val scan = new SegmentScan(segments.head)
+      val scan = segments.head
       scan.hasMoreRows should be(true)
       val threeReaders = scan.getMoreRows(3)
       scan.hasMoreRows should be(false)
@@ -250,7 +249,7 @@ class ColumnStoreSpec extends FunSpec with Matchers with BeforeAndAfter with Sca
       reader.getString(2) should be("Ndamukong")
       reader.getLong(4) should be(28)
 
-      val scan2 = new SegmentScan(segments.last)
+      val scan2 = segments.last
       scan2.hasMoreRows should be(true)
       val threeMore = scan2.getMoreRows(3)
       val reader1 = threeMore.last
@@ -280,7 +279,7 @@ class ColumnStoreSpec extends FunSpec with Matchers with BeforeAndAfter with Sca
 
       segments.length should be(2)
 
-      val scan2 = new SegmentScan(segments.last)
+      val scan2 = segments.last
       scan2.hasMoreRows should be(true)
       val threeMore = scan2.getMoreRows(3)
       val reader1 = threeMore.last

@@ -4,6 +4,7 @@ import java.util.UUID
 
 import filodb.core.Types._
 import filodb.core.metadata._
+import filodb.core.query.{Dataflow, SegmentScan}
 import filodb.core.reprojector.Reprojector.SegmentFlush
 
 import scala.concurrent.Future
@@ -14,11 +15,11 @@ trait ChunkStore {
                             segment: Any,
                             chunk: ChunkWithMeta): Future[Boolean]
 
-  protected def getSegmentChunks(projection: Projection,
-                                 partition: Any,
-                                 segment: Any,
-                                 columns: Seq[ColumnId],
-                                 chunkIds: Seq[ChunkId]): Future[Seq[ChunkWithId]]
+  protected def getKeySets(projection: Projection,
+                           partition: Any,
+                           segment: Any,
+                           columns: Seq[ColumnId],
+                           chunkIds: Seq[ChunkId]): Future[Seq[(ChunkId, Seq[_])]]
 
   protected def getAllChunksForSegments(projection: Projection,
                                         partitionKey: Any,
@@ -58,11 +59,11 @@ trait ColumnStore {
   def readSegments(projection: Projection,
                    partitionKey: Any,
                    columns: Seq[ColumnId],
-                   segmentRange: KeyRange[_]): Future[Seq[Segment]] =
+                   segmentRange: KeyRange[_]): Future[Seq[Dataflow]] =
     for {
       segmentData <- getAllChunksForSegments(projection, partitionKey, segmentRange, columns)
       mapping = segmentData.map { case (segmentId, data) =>
-        DefaultSegment(projection, partitionKey, segmentId, data)
+        new SegmentScan(DefaultSegment(projection, partitionKey, segmentId, data), columns)
       }
     } yield mapping
 
@@ -88,12 +89,12 @@ trait ColumnStore {
   }
 
   protected[store] def compareAndSwapSummaryAndChunk(projection: Projection,
-                                              partition: Any,
-                                              segment: Any,
-                                              oldVersion: Option[SegmentVersion],
-                                              newVersion: SegmentVersion,
-                                              newChunk: ChunkWithMeta,
-                                              newSummary: SegmentSummary): Future[Boolean] = {
+                                                     partition: Any,
+                                                     segment: Any,
+                                                     oldVersion: Option[SegmentVersion],
+                                                     newVersion: SegmentVersion,
+                                                     newChunk: ChunkWithMeta,
+                                                     newSummary: SegmentSummary): Future[Boolean] = {
     for {
     // Compare and swap the new summary if the version stayed the same
       swapResult <- compareAndSwapSummary(projection, partition, segment, oldVersion, newVersion, newSummary)
@@ -126,13 +127,14 @@ trait ColumnStore {
     val possibleOverrides = segmentSummary.possibleOverrides(segmentFlush.keys)
     for {
       possiblyOverriddenChunks <- possibleOverrides.map { o =>
-        getSegmentChunks(projection, partition, segment, projection.keyColumns, o)
-      }.getOrElse(Future(List.empty[ChunkWithId]))
+        getKeySets(projection, partition, segment, projection.keyColumns, o)
+      }.getOrElse(Future(List.empty[(ChunkId, Seq[_])]))
 
       chunkOverrides = segmentSummary.actualOverrides(segmentFlush.keys, possiblyOverriddenChunks)
 
       newChunk = new DefaultChunk(chunkId,
         segmentFlush.keys,
+        projection.columnNames,
         segmentFlush.columnVectors,
         segmentFlush.keys.length,
         if (chunkOverrides.isEmpty) None else Some(chunkOverrides))

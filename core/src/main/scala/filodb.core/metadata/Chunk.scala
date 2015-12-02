@@ -1,19 +1,25 @@
 package filodb.core.metadata
 
-import java.io.{DataInputStream, DataOutputStream, ByteArrayOutputStream}
+import java.io.{ByteArrayOutputStream, DataInputStream, DataOutputStream}
 import java.nio.ByteBuffer
 
+import filodb.core.KeyType
 import filodb.core.Types._
-import filodb.core.reprojector.Reprojector.SegmentFlush
 import it.unimi.dsi.io.ByteBufferInputStream
-import org.velvia.filo.{FastFiloRowReader, RowReader}
+import scodec.bits.ByteVector
 
 
-trait Chunk {
+trait KeySet {
+  def keys: Seq[_]
+}
+
+case class SimpleKeySet(keys: Seq[_]) extends KeySet
+
+trait Chunk extends KeySet {
+
+  def columns: Seq[ColumnId]
 
   def columnVectors: Array[ByteBuffer]
-
-  def keys: Seq[_]
 
 }
 
@@ -34,13 +40,14 @@ trait ChunkWithMeta extends ChunkWithId {
 
 case class DefaultChunk(chunkId: ChunkId,
                         keys: Seq[Any],
+                        columns: Seq[ColumnId],
                         columnVectors: Array[ByteBuffer],
                         numRows: Int,
                         chunkOverrides: Option[Seq[(ChunkId, Seq[Int])]] = None) extends ChunkWithMeta
 
 
 object SimpleChunk {
-  def chunkOverridesAsByteBuffer(chunkOverrides: Option[Seq[(ChunkId, Seq[Int])]]): ByteBuffer = {
+  def metadataAsByteBuffer(numRows: Int, chunkOverrides: Option[Seq[(ChunkId, Seq[Int])]]): ByteBuffer = {
     val baos = new ByteArrayOutputStream()
     val os = new DataOutputStream(baos)
     chunkOverrides match {
@@ -53,48 +60,75 @@ object SimpleChunk {
         }
       case None => os.writeInt(0)
     }
+    os.writeInt(numRows)
     os.flush()
     baos.flush()
     ByteBuffer.wrap(baos.toByteArray)
   }
 
+  def keysAsByteBuffer(keys: Seq[_], keyType: KeyType):ByteBuffer = {
+    val baos = new ByteArrayOutputStream()
+    val os = new DataOutputStream(baos)
+    keys.foreach { key =>
+      val (l, keyBytes) = keyType.toBytes(key.asInstanceOf[keyType.T])
+      os.writeInt(l)
+      os.write(keyBytes.toArray)
+    }
+    os.flush()
+    baos.flush()
+    ByteBuffer.wrap(baos.toByteArray)
+  }
+
+  def keysFromByteBuffer(keyBuffer: ByteBuffer, keyType: KeyType):Seq[_] = {
+    val is = new ByteBufferInputStream(keyBuffer)
+    val in = new DataInputStream(is)
+    val length = in.readInt()
+    (0 until length).map { i =>
+      val keyLength = in.readInt()
+      val byteArray = new Array[Byte](keyLength)
+      in.read(byteArray)
+      keyType.fromBytes(ByteVector(byteArray))
+    }
+  }
+
 }
 
 
-case class SimpleChunk(projection: Projection, chunkId: ChunkId,
-                       namedVectors: Map[String, ByteBuffer],
-                       numRows: Int,
-                       chunkOverrideBuffer: ByteBuffer) extends ChunkWithMeta {
+case class SimpleChunk(projection: Projection,
+                       columns: Seq[ColumnId],
+                       chunkId: ChunkId,
+                       columnVectors: Array[ByteBuffer],
+                       keyBuffer: ByteBuffer,
+                       metadataBuffer: ByteBuffer) extends ChunkWithMeta {
 
-  private val classes = projection.schema.map(_.columnType.clazz).toArray
 
-  override def keys: Seq[_] = {
-    val reader = new FastFiloRowReader(columnVectors, classes)
-    val k = Array[Any](numRows)
-    (0 to numRows).foreach { i =>
-      reader.rowNo = i
-      k(i) = projection.keyFunction(reader)
-    }
-    k.toSeq
-  }
+  private val metadata = metaDataFromByteBuffer(metadataBuffer)
 
-  override def chunkOverrides: Option[Seq[(ChunkId, Seq[Int])]] = {
-    val is = new ByteBufferInputStream(chunkOverrideBuffer)
+  def chunkOverrides: Option[Seq[(ChunkId, Seq[Int])]] = metadata._2
+
+  def numRows: Int = metadata._1
+
+  override def keys: Seq[_] =
+    SimpleChunk.keysFromByteBuffer(keyBuffer, projection.keyType)
+
+  private def metaDataFromByteBuffer(byteBuffer: ByteBuffer) = {
+    val is = new ByteBufferInputStream(byteBuffer)
     val in = new DataInputStream(is)
     val length = in.readInt()
-    if (length > 0) {
-      val chunks = (0 to length).map { i =>
+    val overrides = if (length > 0) {
+      val chunks = (0 until length).map { i =>
         val chunkId = in.readInt()
         val rowIdLength = in.readInt()
-        val rowIds = (0 to rowIdLength).map(j => in.readInt()).toSeq
+        val rowIds = (0 until rowIdLength).map(j => in.readInt()).toSeq
         chunkId -> rowIds
       }
       Some(chunks)
     } else {
       None
     }
+    val numRows = in.readInt()
+    (numRows, overrides)
   }
 
-  override def columnVectors: Array[ByteBuffer] = projection.schema.map(col => namedVectors(col.name)).toArray
 }
 

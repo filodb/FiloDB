@@ -4,7 +4,7 @@ import java.nio.ByteBuffer
 
 import filodb.core.metadata._
 import filodb.core.reprojector.Reprojector.SegmentFlush
-import org.velvia.filo.{RowToVectorBuilder, RowReader}
+import org.velvia.filo.{RowReader, RowToVectorBuilder}
 
 
 trait Reprojector {
@@ -20,7 +20,7 @@ object Reprojector extends Reprojector {
                           segment: Any,
                           keys: Seq[Any],
                           sortedKeyRange: KeyRange[Any],
-                          columnVectors: Array[ByteBuffer]) extends Chunk
+                          columnVectors: Array[ByteBuffer])
 
 
   override def project(projection: Projection, rows: Seq[RowReader]): Iterator[(Any, Seq[SegmentFlush])] = {

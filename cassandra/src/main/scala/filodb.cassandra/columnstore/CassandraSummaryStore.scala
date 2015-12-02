@@ -8,6 +8,7 @@ import filodb.core.store.SummaryStore
 import scala.concurrent.Future
 
 trait CassandraSummaryStore extends SummaryStore {
+  import scala.concurrent.ExecutionContext.Implicits.global
   def summaryTable: SummaryTable
 
   /**
@@ -20,7 +21,7 @@ trait CassandraSummaryStore extends SummaryStore {
                                      segmentVersion: SegmentVersion,
                                      segmentSummary: SegmentSummary): Future[Boolean] = {
     val pType = projection.partitionType
-    val pk = pType.toBytes(partition.asInstanceOf[pType.T]).toByteBuffer
+    val pk = pType.toBytes(partition.asInstanceOf[pType.T])._2.toByteBuffer
     val segmentId = segment.toString
     summaryTable.compareAndSetSummary(projection, pk, segmentId,
       oldVersion, newVersion, segmentSummary).map {
@@ -33,7 +34,7 @@ trait CassandraSummaryStore extends SummaryStore {
                                   partition: Any,
                                   segment: Any): Future[Option[(SegmentVersion, SegmentSummary)]] = {
     val pType = projection.partitionType
-    val pk = pType.toBytes(partition.asInstanceOf[pType.T]).toByteBuffer
+    val pk = pType.toBytes(partition.asInstanceOf[pType.T])._2.toByteBuffer
     val segmentId = segment.toString
     summaryTable.readSummary(projection, pk, segmentId)
   }

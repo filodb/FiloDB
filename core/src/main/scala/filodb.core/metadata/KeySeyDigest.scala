@@ -25,7 +25,7 @@ trait KeySetDigest extends Serializable{
 class BloomDigest(val bloomFilter: BloomFilter, val keyType: KeyType) extends KeySetDigest {
 
   override def contains(rowKey: Any): Boolean = {
-    bloomFilter.isPresent(keyType.toBytes(rowKey.asInstanceOf[keyType.T]).toArray)
+    bloomFilter.isPresent(keyType.toBytes(rowKey.asInstanceOf[keyType.T])._2.toArray)
   }
 
   override def toBytes: ByteVector = ByteVector(BloomFilter.serialize(bloomFilter))
@@ -38,7 +38,7 @@ object BloomDigest {
     val length = rowKeys.length
     val bloomFilter = new BloomFilter(length, length * 10)
     rowKeys.foreach { rowKey =>
-      bloomFilter.add(helper.toBytes(rowKey.asInstanceOf[helper.T]).toArray)
+      bloomFilter.add(helper.toBytes(rowKey.asInstanceOf[helper.T])._2.toArray)
     }
     new BloomDigest(bloomFilter, helper)
   }

@@ -39,16 +39,16 @@ trait SegmentSummary {
     }.map(_._1))
   }
 
-  def actualOverrides(rowKeys: Seq[Any], chunks: Seq[ChunkWithId]): Seq[(ChunkId, Seq[Int])] = {
+  def actualOverrides(rowKeys: Seq[Any], chunks: Seq[(ChunkId, Seq[Any])]): Seq[(ChunkId, Seq[Int])] = {
 
     chunks.map { chunk =>
       val positions = ArrayBuffer[Int]()
       // this chunk is likely to have one of the rowKeys
       rowKeys.foreach { key =>
-        val index = chunk.keys.indexOf(key)
+        val index = chunk._2.indexOf(key)
         if (index > -1) positions += index
       }
-      (chunk.chunkId, positions.toSeq)
+      (chunk._1, positions.toSeq)
     }
   }
 
@@ -75,11 +75,11 @@ trait SegmentSummary {
 }
 
 object SegmentSummary {
-  def fromBytes(keyType: KeyType, bb: ByteBuffer):SegmentSummary = {
+  def fromBytes(keyType: KeyType, bb: ByteBuffer): SegmentSummary = {
     val in = new DataInputStream(new ByteBufferInputStream(bb))
     val length = in.readInt()
     if (length > 0) {
-      val chunkSummaries = (0 to length).map { i =>
+      val chunkSummaries = (0 until length).map { i =>
         val chunkId = in.readInt()
         val chunkSummary = ChunkSummary.read(in, keyType)
         (chunkId, chunkSummary)
@@ -114,7 +114,7 @@ case class DefaultSegmentSummary(keyType: KeyType,
  * of a Chunk
  */
 case class ChunkSummary(digest: KeySetDigest, numRows: Int) {
-  def write(out: DataOutput):Unit={
+  def write(out: DataOutput): Unit = {
     val bytes = digest.toBytes
     out.writeInt(bytes.length)
     out.write(bytes.toArray)

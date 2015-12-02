@@ -3,7 +3,6 @@ package filodb.cassandra
 import com.datastax.driver.core.exceptions.DriverException
 import com.websudos.phantom.dsl._
 import java.nio.ByteBuffer
-import filodb.coordinator.Messages._
 import filodb.core.Messages._
 
 import scala.concurrent.Future

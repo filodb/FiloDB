@@ -1,7 +1,7 @@
 package filodb.cassandra.metastore
 
 import com.typesafe.config.Config
-import filodb.core.Messages.{NotFoundError, Response}
+import filodb.core.Messages.Success
 import filodb.core.metadata.Column
 import filodb.core.store.{Dataset, MetaStore, ProjectionInfo}
 
@@ -22,19 +22,25 @@ class CassandraMetaStore(config: Config)
    * @param name Name of the dataset to retrieve
    * @return a Dataset
    */
-  override def getDataset(name: String): Future[Dataset] = {
+  override def getDataset(name: String): Future[Option[Dataset]] = {
     for {
       projections <- projectionTable.getProjections(name)
       dataset = if (projections.isEmpty) {
-        throw NotFoundError(s"Dataset $dataset")
+        None
       } else {
-        Dataset(name, projections.head.schema, projections)
+        Some(Dataset(name, projections.head.schema, projections))
       }
     } yield dataset
   }
 
-  override def addProjection(projectionInfo: ProjectionInfo): Future[Response] = {
-    projectionTable.insertProjection(projectionInfo)
+  override def addProjection(projectionInfo: ProjectionInfo): Future[Boolean] = {
+    for {
+      inserted <- projectionTable.insertProjection(projectionInfo)
+      result = inserted match {
+        case Success => true
+        case _ => false
+      }
+    } yield result
   }
 
   /**

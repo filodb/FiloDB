@@ -57,11 +57,11 @@ with FiloCassandraConnector {
     )
   }
 
-  def columns(str: String) = {
+  private def columns(str: String) = {
     str.split(",")
   }
 
-  def str(cols: Seq[ColumnId]) = cols.mkString(",")
+  private def str(cols: Seq[ColumnId]) = cols.mkString(",")
 
   def initialize(): Future[Response] = create.ifNotExists.future().toResponse()
 

@@ -2,8 +2,10 @@ package filodb.cassandra.columnstore
 
 import java.nio.ByteBuffer
 
+import com.datastax.driver.core.Session
 import com.typesafe.config.Config
 import com.websudos.phantom.CassandraTable
+import com.websudos.phantom.connectors.KeySpace
 import com.websudos.phantom.dsl._
 import filodb.cassandra.FiloCassandraConnector
 import filodb.core.Messages.Response
@@ -11,11 +13,13 @@ import filodb.core.metadata.{Projection, SegmentSummary}
 
 import scala.concurrent.Future
 
-sealed class SummaryTable(val config: Config)
-  extends CassandraTable[SummaryTable, (String, java.util.UUID, ByteBuffer)]
-  with FiloCassandraConnector {
+sealed class SummaryTable(ks:KeySpace,_session: Session)
+  extends CassandraTable[SummaryTable, (String, java.util.UUID, ByteBuffer)]{
 
   import filodb.cassandra.Util._
+
+  implicit val keySpace= ks
+  implicit val session = _session
 
   //scalastyle:off
 
@@ -31,6 +35,9 @@ sealed class SummaryTable(val config: Config)
 
   object chunkSummaries extends BlobColumn(this)
 
+  def initialize():Future[Response] = create.ifNotExists.future().toResponse()
+
+  def clearAll():Future[Response] = truncate.future().toResponse()
 
   def readSummary(projection: Projection,
                   partition: ByteBuffer,
