@@ -1,3 +1,15 @@
+<!-- START doctoc generated TOC please keep comment here to allow auto update -->
+<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
+**Table of Contents**  *generated with [DocToc](https://github.com/thlorenz/doctoc)*
+
+- [Fast sorted columnar chunk merging](#fast-sorted-columnar-chunk-merging)
+  - [Columnar Chunking Defined](#columnar-chunking-defined)
+  - [An Interface for Columnar Chunk Merging](#an-interface-for-columnar-chunk-merging)
+  - [Index Writes Within a Segment](#index-writes-within-a-segment)
+  - [Optimizations and Compactions](#optimizations-and-compactions)
+
+<!-- END doctoc generated TOC please keep comment here to allow auto update -->
+
 ## Fast sorted columnar chunk merging
 
 One challenge in FiloDB is how to continuously insert fresh data into a column store and keep the data in that columnar projection sorted at the same time, yet relatively read-optimized.  Suppose that one has N columns, and in a projection data for each column is divided into relatively evenly spaced chunks.  If one had to merge fresh data into each chunk, and keep the data within each chunk sorted, it would make for a very expensive merging process -- one would need to read chunks for every column, merge in fresh data such that the old and new data is sorted together, and rewrite all the chunks.  This describes a faster mechanism for sorted columnar chunk merging.

@@ -1,3 +1,12 @@
+<!-- START doctoc generated TOC please keep comment here to allow auto update -->
+<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
+**Table of Contents**  *generated with [DocToc](https://github.com/thlorenz/doctoc)*
+
+- [Datasets](#datasets)
+- [Reading Material (Mostly for FiloDB research)](#reading-material-mostly-for-filodb-research)
+
+<!-- END doctoc generated TOC please keep comment here to allow auto update -->
+
 ## Datasets
 
 * [GDELT public dataset](http://data.gdeltproject.org/documentation/GDELT-Data_Format_Codebook.pdf) - used frequently for bulk ingestion testing.  Ingest the first 4 million lines (1979-1984), which comes out to about 1.1GB CSV file.  Entire dataset is more than 250 million rows / 250GB

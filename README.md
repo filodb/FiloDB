@@ -24,17 +24,20 @@ See [architecture](doc/architecture.md) and [datasets and reading](doc/datasets_
 **Table of Contents**  *generated with [DocToc](https://github.com/thlorenz/doctoc)*
 
 - [Run analytical queries up to 100x faster on Spark SQL and Cassandra.](#run-analytical-queries-up-to-100x-faster-on-spark-sql-and-cassandra)
+- [Roadmap](#roadmap)
 - [Pre-requisites](#pre-requisites)
 - [Getting Started](#getting-started)
-  - [Using the CLI](#using-the-cli)
+  - [FiloDB Data Modelling and Performance Considerations](#filodb-data-modelling-and-performance-considerations)
+  - [Example FiloDB Schema for machine metrics](#example-filodb-schema-for-machine-metrics)
+  - [Distributed Partitioning](#distributed-partitioning)
+- [Using the CLI](#using-the-cli)
     - [CLI Example](#cli-example)
-  - [Using FiloDB data-source with Spark](#using-filodb-data-source-with-spark)
-    - [Spark data-source Example (spark-shell)](#spark-data-source-example-spark-shell)
-    - [Spark SQL Example (spark-sql)](#spark-sql-example-spark-sql)
-    - [Ingesting and Querying with DataFrames (Old API)](#ingesting-and-querying-with-dataframes-old-api)
-    - [Querying Datasets](#querying-datasets)
+- [Using FiloDB data-source with Spark](#using-filodb-data-source-with-spark)
+  - [Spark data-source Example (spark-shell)](#spark-data-source-example-spark-shell)
+  - [Spark Streaming Example](#spark-streaming-example)
+  - [Spark SQL Example (spark-sql)](#spark-sql-example-spark-sql)
+  - [Querying Datasets](#querying-datasets)
 - [Current Status](#current-status)
-- [Roadmap](#roadmap)
 - [Building and Testing](#building-and-testing)
 - [You can help!](#you-can-help)
 
@@ -55,7 +58,7 @@ Connect Tableau or any other JDBC analysis tool to Spark SQL, and easily ingest 
 
 FiloDB is a great fit for bulk analytical workloads, or streaming /  event data.  It is not optimized for heavily transactional, update-oriented workflows.
 
-[Overview presentation](http://velvia.github.io/presentations/2014-filodb/#/) -- see the docs folder for design docs.
+[Overview presentation](http://velvia.github.io/presentations/2015-filodb-spark-streaming/#/) -- see the docs folder for design docs.
 
 To compile the .mermaid source files to .png's, install the [Mermaid CLI](http://knsv.github.io/mermaid/mermaidCLI.html).
 
@@ -89,6 +92,8 @@ Your input is appreciated!
 2. Start a Cassandra Cluster. If its not accessible at `localhost:9042` update it in `core/src/main/resources/application.conf`.
 
 3. FiloDB can be used through `filo-cli` or as a Spark data source. The CLI supports data ingestion from CSV files only; the Spark data source is better tested and richer in features.
+
+Note: There is at least one release out now, tagged via Git and also located in the "Releases" tab on Github.
 
 There are two crucial parts to a dataset in FiloDB,
 
@@ -150,7 +155,7 @@ Currently, FiloDB is a library in Spark and requires the user to distribute data
 * The easiest strategy to accomplish this is to have data partitioned via a queue such as Kafka.  That way, when the data comes into Spark Streaming, it is already partitioned correctly.
 * Another way of accomplishing this is to use a DataFrame's `sort` method before using the DataFrame write API.
 
-### Using the CLI
+## Using the CLI
 
 The `filo-cli` accepts arguments as key-value pairs. The following keys are supported:
 
@@ -192,7 +197,7 @@ Query/export some columns:
 ./filo-cli --dataset gdelt --select MonthYear,Actor2Code --limit 5 --outfile out.csv
 ```
 
-### Using FiloDB data-source with Spark
+## Using FiloDB data-source with Spark
 
 FiloDB has a Spark data-source module - `filodb.spark`. So, you can use the Spark Dataframes `read` and `write` APIs with FiloDB. To use it, follow the steps below
 
@@ -216,7 +221,7 @@ The options to use with the data-source api are:
 | default_partition_key | default value to use for the partition key if the partition_column has a null value.  If not specified, an error is thrown. Note that this only has an effect if the dataset is created for the first time.| write | Yes |
 | version          | numeric version of data to write, defaults to 0  | write | Yes |
 
-#### Spark data-source Example (spark-shell)
+### Spark data-source Example (spark-shell)
 
 You can follow along using the [Spark Notebook](http://github.com/andypetrella/spark-notebook) in doc/FiloDB.snb....  launch the notebook using `EXTRA_CLASSPATH=$FILO_JAR ADD_JARS=$FILO_JAR ./bin/spark-notebook &` where `FILO_JAR` is the path to `filodb-spark-assembly` jar.
 
@@ -270,7 +275,7 @@ It's not difficult to ingest data into FiloDB using Spark Streaming.  Simple use
 
 For an example, see the [StreamingTest](spark/src/test/scala/filodb.spark/StreamingTest.scala).
 
-#### Spark SQL Example (spark-sql)
+### Spark SQL Example (spark-sql)
 
 Start Spark-SQL:
 
@@ -290,28 +295,7 @@ Create a temporary table using an existing dataset,
 
 Then, start running SQL queries!
 
-#### Ingesting and Querying with DataFrames (Old API)
-
-Create a table using the method `saveAsFiloDataset`:
-
-```scala
-scala> import filodb.spark._
-import filodb.spark._
-scala> sqlContext.saveAsFiloDataset(myDF, "table1", sortCol, partCol, createDataset=true)
-```
-
-Read using `filoDataset`:
-
-```scala
-scala> val df = sqlContext.filoDataset("gdelt")
-15/06/04 15:21:41 INFO DCAwareRoundRobinPolicy: Using data-center name 'datacenter1' for DCAwareRoundRobinPolicy (if this is incorrect, please provide the correct datacenter name with DCAwareRoundRobinPolicy constructor)
-15/06/04 15:21:41 INFO Cluster: New Cassandra host localhost/127.0.0.1:9042 added
-15/06/04 15:21:41 INFO FiloRelation: Read schema for dataset gdelt = Map(ActionGeo_CountryCode -> Column(ActionGeo_CountryCode,gdelt,0,StringColumn,FiloSerializer,false,false), Actor1Geo_FullName -> Column(Actor1Geo_FullName,gdelt,0,StringColumn,FiloSerializer,false,false), Actor2Name -> Column(Actor2Name,gdelt,0,StringColumn,FiloSerializer,false,false), ActionGeo_ADM1Code -> Column(ActionGeo_ADM1Code,gdelt,0,StringColumn,FiloSerializer,false,false), Actor2CountryCode -> Column(Actor2CountryCode,gdelt,0,StringColumn,FiloSerializer,fals...
-```
-
-The dataset can be queried using the DataFrame DSL. See the section [Querying Datasets](#querying-datasets) for examples.
-
-#### Querying Datasets
+### Querying Datasets
 
 Now do some queries, using the DataFrame DSL:
 
@@ -348,10 +332,15 @@ scala> val correlation = Statistics.corr(numMentions, numArticles, "pearson")
 
 ## Current Status
 
-* The storage format is subject to change at this time.
+Version 0.1 is released!  It offers a stable point from which to try FiloDB.
+* Ingestion is relatively efficient, stable, and tested up to a 2.4 GB / 15 million row data source (doesn't mean more doesn't work, just what is regularly tested)
+* Query columnar projection and partition key filtering pushdown.  Sort key filtering pushdown not in yet.
 * Only ingestion through Spark / Spark Streaming, and CLI ingestion via CSV files.
-* Only string, Int, Long partition keys and Long/Timestamp/Int/Double sort keys are supported, but many more to come
 * CSV export from CLI will only read data from one node of a cluster.
+
+Version 0.2 will include many more features:
+- Composite partition, sort, and segment keys
+- More efficient storage engine
 
 ## Building and Testing
 
