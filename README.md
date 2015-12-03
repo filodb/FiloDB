@@ -143,6 +143,13 @@ Sort key = hostname, timestamp
 
 This will have to wait for the multiple-sort-key-column change of course.
 
+### Distributed Partitioning
+
+Currently, FiloDB is a library in Spark and requires the user to distribute data such that no two nodes have rows with the same partition key.
+
+* The easiest strategy to accomplish this is to have data partitioned via a queue such as Kafka.  That way, when the data comes into Spark Streaming, it is already partitioned correctly.
+* Another way of accomplishing this is to use a DataFrame's `sort` method before using the DataFrame write API.
+
 ### Using the CLI
 
 The `filo-cli` accepts arguments as key-value pairs. The following keys are supported:

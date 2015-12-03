@@ -23,11 +23,12 @@ csvDF.write.format("filodb.spark").
 ```scala
 val strPrefix = sqlContext.udf.register("strPrefix", { (s: String, numChars: Int) => s.take(numChars) })
 val aInt = new java.util.concurrent.atomic.AtomicInteger(0)
-val autoId = sqlContext.udf.register("autoId", { () => aInt.getAndIncrement() })
+val autoId = sqlContext.udf.register("autoId", { () => aInt.incrementAndGet() })
 val tripsWithCols = tripsCsv.
    withColumn("medalPrefix", strPrefix(tripsCsv("medallion"), lit(2))).withColumn("id", autoId())
 import org.apache.spark.sql.SaveMode
-tripsWithCols.write.format("filodb.spark").option("dataset", "nyctaxitrips").
+tripsWithCols.sort("medalPrefix").write.
+  format("filodb.spark").option("dataset", "nyctaxitrips").
   option("sort_column", "id").option("partition_column", "medalPrefix").
   option("default_partition_key", "<none>").
   option("segment_size", "100000").mode(SaveMode.Overwrite).save()
