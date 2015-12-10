@@ -37,8 +37,8 @@ object Reprojector extends Reprojector {
         implicit val ordering = projection.sortType.ordering
         val rows = segmentRows.sortBy(projection.sortFunction)
         val sortKeyRange = KeyRange(
-          projection.sortFunction(segmentRows.head),
-          projection.sortFunction(segmentRows.last)
+          Some(projection.sortFunction(segmentRows.head)),
+          Some(projection.sortFunction(segmentRows.last))
         )
 
         // then write the rows as a chunk to the segment

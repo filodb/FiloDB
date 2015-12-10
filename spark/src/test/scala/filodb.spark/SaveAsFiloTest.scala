@@ -44,11 +44,11 @@ with Matchers with ScalaFutures {
 
   // This is the same code that the Spark stuff uses.  Make sure we use exact same environment as real code
   // so we don't have two copies of metaStore that could be configured differently.
-  val filoConfig = FiloSetup.configFromSpark(sc)
-  FiloSetup.init(filoConfig)
+  val filoConfig = Filo.configFromSpark(sc)
+  Filo.init(filoConfig)
 
-  val metaStore = FiloSetup.metaStore
-  val columnStore = FiloSetup.columnStore
+  val metaStore = Filo.metaStore
+  val columnStore = Filo.columnStore
 
   override def beforeAll() {
     metaStore.initialize().futureValue
@@ -75,7 +75,7 @@ with Matchers with ScalaFutures {
     }
   }
 
-  implicit val ec = FiloSetup.ec
+  implicit val ec = Filo.ec
 
   // Sample data.  Note how we must create a partitioning column.
   val jsonRows = Seq(

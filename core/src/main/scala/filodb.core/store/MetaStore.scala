@@ -61,6 +61,11 @@ case class Dataset(name: String,
   val projections = projectionInfoSeq.map {
     _.getProjection(options)
   }
+
+  val superProjection = projections.head
+
+  val partitionColumns = superProjection.partitionColumns
+
 }
 
 /**

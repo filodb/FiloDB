@@ -5,6 +5,8 @@ import java.util.UUID
 import filodb.core.Setup._
 import filodb.core.Types.{ChunkId, ColumnId}
 import filodb.core.metadata._
+import filodb.core.query.Dataflow._
+import filodb.core.query.{Dataflow, PartitionScanInfo, ScanInfo, SegmentedPartitionScanInfo}
 import filodb.core.reprojector.Reprojector
 import filodb.core.reprojector.Reprojector.SegmentFlush
 import filodb.core.store.ColumnStoreSpec.MapColumnStore
@@ -53,17 +55,18 @@ object ColumnStoreSpec {
       Future(true)
     }
 
-    override def getAllChunksForSegments(projection: Projection,
-                                         partition: Any,
-                                         segmentRange: KeyRange[_],
-                                         columns: Seq[ColumnId]): Future[Seq[(Any, Seq[ChunkWithMeta])]] = {
+    override def getChunks(scanInfo: ScanInfo)
+    : Future[Seq[((Any, Any), Seq[ChunkWithMeta])]] = {
+      val info = scanInfo.asInstanceOf[SegmentedPartitionScanInfo]
+      val partition = info.partition
+      val segmentRange = info.segmentRange
       val segmentRes = chunksMap.get(partition)
       val chunks = segmentRes match {
         case Some(segments) => segments.range(segmentRange.start, segmentRange.end).map { case (segmentId, chunkMap) =>
-          segmentId -> chunkMap.map(_._2).toSeq
+          (partition, segmentId) -> chunkMap.map(_._2).toSeq
         }
 
-        case None => Seq.empty[(Any, Seq[ChunkWithMeta])]
+        case None => Seq.empty[((Any, Any), Seq[ChunkWithMeta])]
       }
       Future(chunks.toSeq)
     }
@@ -147,11 +150,33 @@ object ColumnStoreSpec {
     override def newVersion: SegmentVersion = UUID.randomUUID()
   }
 
-  class MapColumnStore extends ColumnStore with MapChunkStore with MapSummaryStore
+  trait SimpleQueryApi extends QueryApi {
+    override def getScanSplits(splitCount: Int,
+                               splitSize: Long,
+                               projection: Projection,
+                               columns: Seq[ColumnId],
+                               partition: Option[Any],
+                               segmentRange: Option[KeyRange[_]]): Future[Seq[Seq[ScanInfo]]] = {
+      partition match {
+        case Some(pk) => segmentRange match {
+          case Some(range) => Future(Seq(Seq(SegmentedPartitionScanInfo(projection, columns, pk, range))))
+          case None => Future(Seq(Seq(PartitionScanInfo(projection, columns, pk))))
+        }
+        case None => throw new UnsupportedOperationException
+      }
+    }
+  }
+
+  class MapColumnStore extends ColumnStore with
+  MapChunkStore
+  with MapSummaryStore
+  with SimpleQueryApi
 
 }
 
 class ColumnStoreSpec extends FunSpec with Matchers with BeforeAndAfter with ScalaFutures {
+
+  implicit val rowReaderFactory:Dataflow.RowReaderFactory = Dataflow.DefaultReaderFactory
 
   import scala.concurrent.duration._
 
@@ -235,14 +260,15 @@ class ColumnStoreSpec extends FunSpec with Matchers with BeforeAndAfter with Sca
       val results = flushPartitions(mapColumnStore, partitions)
       checkResults(results)
 
-      val segments = Await.result(mapColumnStore.readSegments(projection, "US",
-        projection.schema.map(i => i.name), KeyRange("A", "Z")), 10 seconds)
+      val segments = Await.result(mapColumnStore.readSegments(
+        SegmentedPartitionScanInfo(projection,projection.columnNames,"US", keyRange)
+        ), 10 seconds)
 
       segments.length should be(2)
       val scan = segments.head
-      scan.hasMoreRows should be(true)
+      scan.hasNext should be(true)
       val threeReaders = scan.getMoreRows(3)
-      scan.hasMoreRows should be(false)
+      scan.hasNext should be(false)
       val reader = threeReaders.head
       reader.getString(0) should be("US")
       reader.getString(1) should be("NY")
@@ -250,7 +276,7 @@ class ColumnStoreSpec extends FunSpec with Matchers with BeforeAndAfter with Sca
       reader.getLong(4) should be(28)
 
       val scan2 = segments.last
-      scan2.hasMoreRows should be(true)
+      scan2.hasNext should be(true)
       val threeMore = scan2.getMoreRows(3)
       val reader1 = threeMore.last
       reader1.getString(0) should be("US")
@@ -274,13 +300,23 @@ class ColumnStoreSpec extends FunSpec with Matchers with BeforeAndAfter with Sca
       val results2 = flushPartitions(mapColumnStore, partitions2)
       checkResults(results2)
 
-      val segments = Await.result(mapColumnStore.readSegments(projection, "US",
-        projection.schema.map(i => i.name), KeyRange("A", "Z")), 10 seconds)
+      val scanInfos = Await.result(mapColumnStore.getScanSplits(10, 1000,
+        projection,
+        projection.columnNames,
+        Some("US"),
+        Some(keyRange))
+        , 10 seconds)
+      scanInfos.length should be(1)
+      scanInfos.head.length should be(1)
+
+      val segments = Await.result(
+        mapColumnStore.readSegments(scanInfos.head.head),
+        10 seconds)
 
       segments.length should be(2)
 
       val scan2 = segments.last
-      scan2.hasMoreRows should be(true)
+      scan2.hasNext should be(true)
       val threeMore = scan2.getMoreRows(3)
       val reader1 = threeMore.last
       reader1.getString(0) should be("US")

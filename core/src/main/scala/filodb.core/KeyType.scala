@@ -20,7 +20,7 @@ trait KeyType {
 
   def fromBytes(bytes: ByteVector): T
 
-  def getKeyFunc(sortColNums: Seq[Int]): RowReader => T
+  def getKeyFunc(columnNumbers: Seq[Int]): RowReader => T
 
 }
 
@@ -30,9 +30,9 @@ object KeyType {
 
 abstract class SingleKeyType extends KeyType {
 
-  def getKeyFunc(sortColNums: Seq[Int]): RowReader => T = {
-    require(sortColNums.length == 1)
-    extractor.getField(_, sortColNums.head)
+  def getKeyFunc(columnNumbers: Seq[Int]): RowReader => T = {
+    require(columnNumbers.length == 1)
+    extractor.getField(_, columnNumbers.head)
   }
 
   def extractor: TypedFieldExtractor[T]

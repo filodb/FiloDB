@@ -22,7 +22,7 @@ object Setup {
   // primary key and segment are same
   val dataset = Dataset("dataset", schema, "country", "first", "age", "city")
   val projection = dataset.projections.head
-  val keyRange = KeyRange("A", "Z")
+  val keyRange = KeyRange(Some("A"), Some("Z"))
   val DefaultPartitionKey = "Single"
 
   val names = Seq(

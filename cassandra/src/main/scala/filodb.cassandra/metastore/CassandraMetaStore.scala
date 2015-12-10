@@ -1,6 +1,7 @@
 package filodb.cassandra.metastore
 
-import com.typesafe.config.Config
+import com.datastax.driver.core.Session
+import com.websudos.phantom.connectors.KeySpace
 import filodb.core.Messages.Success
 import filodb.core.metadata.Column
 import filodb.core.store.{Dataset, MetaStore, ProjectionInfo}
@@ -10,12 +11,11 @@ import scala.concurrent.{ExecutionContext, Future}
 /**
  * A class for Cassandra implementation of the MetaStore.
  *
- * @param config a Typesafe Config with hosts, port, and keyspace parameters for Cassandra connection
  */
-class CassandraMetaStore(config: Config)
+class CassandraMetaStore(keySpace: KeySpace, session: Session)
                         (implicit val ec: ExecutionContext) extends MetaStore {
 
-  val projectionTable = new ProjectionTable(config)
+  val projectionTable = new ProjectionTable(keySpace, session)
 
   /**
    * Retrieves a Dataset object of the given name

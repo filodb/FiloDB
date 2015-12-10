@@ -1,11 +1,12 @@
 package filodb.cassandra.columnstore
 
-import filodb.core.Messages
 import filodb.core.Messages._
-import filodb.core.Types.{ChunkId, ColumnId}
+import filodb.core.Types.ChunkId
 import filodb.core.metadata._
+import filodb.core.query.ScanInfo
 import filodb.core.store.ChunkStore
 import filodb.core.util.Iterators._
+
 import scala.concurrent.Future
 
 trait CassandraChunkStore extends ChunkStore {
@@ -24,59 +25,40 @@ trait CassandraChunkStore extends ChunkStore {
     val pType = projection.partitionType
     val pk = pType.toBytes(partition.asInstanceOf[pType.T])._2.toByteBuffer
     val segmentId = segment.toString
-    var responses = projection.schema.zipWithIndex.map { case (col, i) =>
-      val chunkData = chunk.columnVectors(i)
-      responseToBoolean(chunkTable.writeChunks(projection, pk, col.name, segmentId, chunk.chunkId, chunkData))
-    }
     val metadataBuf = SimpleChunk.metadataAsByteBuffer(chunk.numRows, chunk.chunkOverrides)
     val keysBuf = SimpleChunk.keysAsByteBuffer(chunk.keys, projection.keyType)
-    val metaInsert = responseToBoolean(
-      chunkTable.writeChunks(projection, pk, META_COLUMN_NAME, segmentId, chunk.chunkId, metadataBuf))
-    val keysInsert = responseToBoolean(
-      chunkTable.writeChunks(projection, pk, KEYS_COLUMN_NAME, segmentId, chunk.chunkId, keysBuf))
-    responses = responses :+ metaInsert
-    responses = responses :+ keysInsert
-    (Future sequence responses).map { results =>
-      results.reduce(_ & _)
-    }
-  }
 
-  private def responseToBoolean(f: Future[Messages.Response]) = {
-    f.map {
+    chunkTable.writeChunks(projection, pk,
+      projection.columnNames ++ Seq(META_COLUMN_NAME, KEYS_COLUMN_NAME),
+      segmentId, chunk.chunkId,
+      chunk.columnVectors ++ Seq(metadataBuf, keysBuf))
+      .map {
       case Success => true
       case _ => false
     }
   }
 
-  override def getAllChunksForSegments(projection: Projection,
-                                       partition: Any,
-                                       segmentRange: KeyRange[_],
-                                       columns: Seq[ColumnId]): Future[Seq[(Any, Seq[ChunkWithMeta])]] = {
-    val pType = projection.partitionType
-    val pk = pType.toBytes(partition.asInstanceOf[pType.T])._2.toByteBuffer
 
+  override def getChunks(scanInfo: ScanInfo): Future[Seq[((Any, Any), Seq[ChunkWithMeta])]] = {
+    val columns = scanInfo.columns
+    val projection = scanInfo.projection
     for {
+      metaResult <- chunkTable.getChunkData(scanInfo, META_COLUMN_NAME)
+
       dataResult <- Future sequence columns.map { col =>
-        chunkTable.getDataBySegmentAndChunk(projection, pk, col,
-          segmentRange.start.toString,
-          segmentRange.end.toString)
+        chunkTable.getDataBySegmentAndChunk(scanInfo, col)
       }
-      metaResult <- chunkTable.getChunkData(projection, pk, META_COLUMN_NAME,
-        segmentRange.start.toString,
-        segmentRange.end.toString)
 
-      keysResult <- chunkTable.getDataBySegmentAndChunk(projection, pk, KEYS_COLUMN_NAME,
-        segmentRange.start.toString,
-        segmentRange.end.toString)
+      keysResult <- chunkTable.getDataBySegmentAndChunk(scanInfo, KEYS_COLUMN_NAME)
 
 
-      segmentChunks = metaResult.map { case (segmentId, chunkId, metadata) =>
-        val colBuffers = (0 until columns.length).map(i => dataResult(i)((segmentId, chunkId))).toArray
-        val keysBuffer = keysResult((segmentId, chunkId))
-        (segmentId, chunkId) -> SimpleChunk(projection, columns, chunkId, colBuffers, keysBuffer, metadata)
+      segmentChunks = metaResult.map { case (pk, segmentId, chunkId, metadata) =>
+        val colBuffers = (0 until columns.length).map(i => dataResult(i)((pk, segmentId, chunkId))).toArray
+        val keysBuffer = keysResult((pk, segmentId, chunkId))
+        (pk, segmentId, chunkId) -> SimpleChunk(projection, columns, chunkId, colBuffers, keysBuffer, metadata)
       }.iterator
 
-      res = segmentChunks.sortedGroupBy(i => i._1._1).map { case (segmentId, seq) =>
+      res = segmentChunks.sortedGroupBy(i => (i._1._1, i._1._2)).map { case (segmentId, seq) =>
         (segmentId, seq.map(_._2).toSeq)
       }.toSeq
     } yield res

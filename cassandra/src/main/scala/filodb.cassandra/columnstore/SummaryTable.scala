@@ -3,11 +3,9 @@ package filodb.cassandra.columnstore
 import java.nio.ByteBuffer
 
 import com.datastax.driver.core.Session
-import com.typesafe.config.Config
 import com.websudos.phantom.CassandraTable
 import com.websudos.phantom.connectors.KeySpace
 import com.websudos.phantom.dsl._
-import filodb.cassandra.FiloCassandraConnector
 import filodb.core.Messages.Response
 import filodb.core.metadata.{Projection, SegmentSummary}
 

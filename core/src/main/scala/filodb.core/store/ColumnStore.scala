@@ -4,7 +4,8 @@ import java.util.UUID
 
 import filodb.core.Types._
 import filodb.core.metadata._
-import filodb.core.query.{Dataflow, SegmentScan}
+import filodb.core.query.Dataflow.RowReaderFactory
+import filodb.core.query.{Dataflow, ScanInfo, SegmentScan}
 import filodb.core.reprojector.Reprojector.SegmentFlush
 
 import scala.concurrent.Future
@@ -21,11 +22,10 @@ trait ChunkStore {
                            columns: Seq[ColumnId],
                            chunkIds: Seq[ChunkId]): Future[Seq[(ChunkId, Seq[_])]]
 
-  protected def getAllChunksForSegments(projection: Projection,
-                                        partitionKey: Any,
-                                        segmentRange: KeyRange[_],
-                                        columns: Seq[ColumnId])
-  : Future[Seq[(Any, Seq[ChunkWithMeta])]]
+
+  protected def getChunks(scanInfo: ScanInfo)
+  : Future[Seq[((Any, Any), Seq[ChunkWithMeta])]]
+
 }
 
 trait SummaryStore {
@@ -50,30 +50,40 @@ trait SummaryStore {
 
 }
 
+trait QueryApi {
+
+  def getScanSplits(splitCount: Int,
+                    splitSize: Long,
+                    projection: Projection,
+                    columns:Seq[ColumnId],
+                    partition: Option[Any] = None,
+                    segmentRange: Option[KeyRange[_]] = None): Future[Seq[Seq[ScanInfo]]]
+
+}
 
 trait ColumnStore {
-  self: ChunkStore with SummaryStore =>
+  self: ChunkStore with SummaryStore with QueryApi =>
 
   import scala.concurrent.ExecutionContext.Implicits.global
 
-  def readSegments(projection: Projection,
-                   partitionKey: Any,
-                   columns: Seq[ColumnId],
-                   segmentRange: KeyRange[_]): Future[Seq[Dataflow]] =
+
+  def readSegments(scanInfo: ScanInfo)(implicit rowReaderFactory:RowReaderFactory): Future[Seq[Dataflow]] =
     for {
-      segmentData <- getAllChunksForSegments(projection, partitionKey, segmentRange, columns)
-      mapping = segmentData.map { case (segmentId, data) =>
-        new SegmentScan(DefaultSegment(projection, partitionKey, segmentId, data), columns)
+      segmentData <- getChunks(scanInfo)
+      mapping = segmentData.map { case ((partitionKey, segmentId), data) =>
+        new SegmentScan(
+          DefaultSegment(scanInfo.projection, partitionKey, segmentId, data),
+          scanInfo.columns)
       }
     } yield mapping
 
   /**
    * There is a particular thorny edge case where the summary is stored but the chunk is not.
    */
-  def flushToSegment(projection: Projection,
-                     partition: Any,
-                     segment: Any,
-                     segmentFlush: SegmentFlush): Future[Boolean] = {
+  def flushToSegment(segmentFlush: SegmentFlush): Future[Boolean] = {
+    val projection: Projection =segmentFlush.projection
+    val partition: Any = segmentFlush.partition
+    val segment: Any = segmentFlush.segment
     for {
     // first get version and summary for this segment
       (oldVersion, segmentSummary) <- getVersionAndSummaryWithDefaults(projection, partition, segment)

@@ -1,148 +1,159 @@
 package filodb.spark
 
-import akka.actor.ActorRef
-import akka.pattern.ask
-import akka.util.Timeout
-import com.typesafe.config.Config
 import com.typesafe.scalalogging.slf4j.StrictLogging
-import java.nio.ByteBuffer
-import net.ceedubs.ficus.Ficus._
-import org.velvia.filo.FastFiloRowReader
-import scala.concurrent.{Await, Future}
-import scala.concurrent.duration._
-import scala.language.postfixOps
-import scala.reflect.ClassTag
-
+import filodb.core.metadata.{Column, KeyRange}
+import filodb.core.store.Dataset
+import filodb.spark.rdd.FiloRDD
 import org.apache.spark.rdd.RDD
-import org.apache.spark.SparkContext
-import org.apache.spark.sql.catalyst.expressions.{MutableRow, SpecificMutableRow}
-import org.apache.spark.sql.sources.{BaseRelation, TableScan, PrunedScan}
+import org.apache.spark.sql.sources.{Filter, _}
 import org.apache.spark.sql.types._
-import org.apache.spark.sql.{DataFrame, Row, SQLContext}
+import org.apache.spark.sql.{Row, SQLContext}
+import org.velvia.filo.ArrayStringRowReader
 
-import filodb.core._
-import filodb.core.metadata.Column
-import filodb.core.store.{DatasetOptions, Dataset, RowReaderSegment}
+import scala.language.postfixOps
 
 object FiloRelation {
-  import TypeConverters._
 
   implicit val context = scala.concurrent.ExecutionContext.Implicits.global
 
-  def parse[T, B](cmd: => Future[T], awaitTimeout: FiniteDuration = 5 seconds)(func: T => B): B = {
-    func(Await.result(cmd, awaitTimeout))
-  }
-
-  def actorAsk[B](actor: ActorRef, msg: Any,
-                  askTimeout: FiniteDuration = 5 seconds)(f: PartialFunction[Any, B]): B = {
-    implicit val timeout = Timeout(askTimeout)
-    parse(actor ? msg, askTimeout)(f)
-  }
 
   def getDatasetObj(dataset: String): Dataset =
-    parse(FiloSetup.metaStore.getDataset(dataset)) { ds => ds }
+    Filo.parse(Filo.metaStore.getDataset(dataset)) { ds => ds.get }
 
-  def getSchema(dataset: String, version: Int): Column.Schema =
-    parse(FiloSetup.metaStore.getSchema(dataset, version)) { schema => schema }
+  def getSchema(dataset: String, version: Int): Seq[Column] =
+    Filo.parse(Filo.metaStore.getSchema(dataset)) { schema => schema }
 
-  def getRows(options: DatasetOptions,
-              datasetName: String,
-              version: Int,
-              columns: Seq[Column],
-              sortColumn: Column,
-              params: Map[String, String]): Iterator[Row] = {
-    val untypedHelper = Dataset.keyType(options, sortColumn).get
-    implicit val helper = untypedHelper.asInstanceOf[KeyType[untypedHelper.Key]]
-    parse(FiloSetup.columnStore.scanSegments[helper.Key](columns, datasetName, version, params = params),
-          10 minutes) { segmentIt =>
-      segmentIt.flatMap { seg =>
-        val readerSeg = seg.asInstanceOf[RowReaderSegment[helper.Key]]
-        readerSeg.rowIterator((bytes, clazzes) => new SparkRowReader(bytes, clazzes))
-           .asInstanceOf[Iterator[Row]]
-      }
-    }
-  }
-
-  // It's good to put complex functions inside an object, to be sure that everything
-  // inside the function does not depend on an explicit outer class and can be serializable
-  def perNodeRowScanner(config: Config,
-                        datasetOptionStr: String,
-                        version: Int,
-                        columns: Seq[Column],
-                        sortColumn: Column,
-                        paramIter: Iterator[Map[String, String]]): Iterator[Row] = {
-    // NOTE: all the code inside here runs distributed on each node.  So, create my own datastore, etc.
-    FiloSetup.init(config)
-    FiloSetup.columnStore    // force startup
-    val options = DatasetOptions.fromString(datasetOptionStr)
-    val datasetName = sortColumn.dataset
-
-    paramIter.flatMap { param =>
-      getRows(options, datasetName, version, columns, sortColumn, param)
-    }
-  }
 }
 
 /**
  * Schema and row scanner, with pruned column optimization for fast reading from FiloDB
- *
  * NOTE: Each Spark partition is given 1 to N Filo partitions, and the code sequentially
- * reads data from each partition.  Within each partition read, actors/futures are used to
- * parallelize reads from different columns.
+ * reads data from each partition
  *
- * @constructor
- * @param sparkContext the spark context to pull config from
- * @param dataset the name of the dataset to read from
- * @param the version of the dataset data to read
  */
 case class FiloRelation(dataset: String,
                         version: Int = 0,
                         splitsPerNode: Int = 1)
                        (@transient val sqlContext: SQLContext)
-    extends BaseRelation with TableScan with PrunedScan with StrictLogging {
-  import TypeConverters._
-  import FiloRelation._
+  extends BaseRelation with TableScan with PrunedFilteredScan with StrictLogging {
 
-  val filoConfig = FiloSetup.configFromSpark(sqlContext.sparkContext)
-  FiloSetup.init(filoConfig)
+  import filodb.spark.FiloRelation._
+  import filodb.spark.TypeConverters._
+
+  val sc = sqlContext.sparkContext
+  val filoConfig = Filo.configFromSpark(sc)
+  Filo.init(filoConfig)
 
   val datasetObj = getDatasetObj(dataset)
   val filoSchema = getSchema(dataset, version)
+  val superProjection = datasetObj.superProjection
+  val partitionColumns = datasetObj.partitionColumns
 
-  val schema = StructType(columnsToSqlFields(filoSchema.values.toSeq))
+  val schema = StructType(columnsToSqlFields(filoSchema))
   logger.info(s"Read schema for dataset $dataset = $schema")
 
-  def buildScan(): RDD[Row] = buildScan(filoSchema.keys.toArray)
+  def buildScan(): RDD[Row] = buildScan(superProjection.columnNames.toArray, Array.empty[Filter])
 
-  def buildScan(requiredColumns: Array[String]): RDD[Row] = {
-    // Define vars to distribute inside the method
-    val _config = this.filoConfig
-    val datasetOptionsStr = this.datasetObj.options.toString
-    val _version = this.version
-    val filoColumns = requiredColumns.map(this.filoSchema)
-    val sortCol = filoSchema(datasetObj.projections.head.sortColumn)
-    val splitOpts = Map("splits_per_node" -> splitsPerNode.toString)
-    val splits = FiloSetup.columnStore.getScanSplits(dataset, splitOpts)
-    logger.info(s"Splits = $splits")
+  def buildScan(requiredColumns: Array[String], filters: Array[Filter]): RDD[Row] = {
 
-    // NOTE: It's critical that the closure inside mapPartitions only references
-    // vars from buildScan() method, and not the FiloRelation class.  Otherwise
-    // the entire FiloRelation class would get serialized.
-    sqlContext.sparkContext.parallelize(splits, splits.length)
-      .mapPartitions { paramIter =>
-        perNodeRowScanner(_config, datasetOptionsStr, _version, filoColumns,
-                          sortCol, paramIter)
+    val partitionOption = getPartitionKey(filters)
+
+    val suitableProjections = datasetObj.projections
+      .filter(p => requiredColumns forall (p.columnNames contains))
+
+    val bestAvailable = suitableProjections
+      .find(p => getSegmentFilters(p.segmentColumns, filters).nonEmpty)
+
+    bestAvailable match {
+      //there is a segment range clause in the match
+      case Some(projection) =>
+        val segmentRangeOption = getSegmentRange(projection.segmentColumns, filters)
+        new FiloRDD(sc, splitsPerNode, Long.MaxValue, projection, requiredColumns, partitionOption, segmentRangeOption)
+
+      case None =>
+        val projection = suitableProjections.headOption.getOrElse(datasetObj.superProjection)
+        new FiloRDD(sc, splitsPerNode, Long.MaxValue, projection, requiredColumns, partitionOption)
+    }
+  }
+
+
+  private def getPartitionKey(filters: Array[Filter]): Option[Any] = {
+    val partitionFilters = getPartitionFilters(filters)
+    val containsPartitionKey = partitionFilters.length == partitionColumns.length
+    if (containsPartitionKey) {
+      val valueMap = partitionFilters.map { case EqualTo(col, value) => col -> value }.toMap
+      val rowReader = new ArrayStringRowReader(
+        filoSchema.map(col => valueMap.getOrElse(col.name, "").toString).toArray
+      )
+      Some(superProjection.partitionFunction(rowReader))
+    } else None
+  }
+
+  private def getSegmentRange(segmentColumns: Seq[String],
+                              filters: Array[Filter]): Option[KeyRange[_]] = {
+    val segmentFilters = getSegmentFilters(segmentColumns, filters)
+    segmentFilters.length match {
+
+      case 1 =>
+        val predicate = segmentFilters.head
+        predicate match {
+          case EqualTo(columnName, value) =>
+            Some(KeyRange(Some(value), Some(value)))
+          case LessThan(columnName, value) =>
+            Some(KeyRange(None, Some(value), startExclusive = false, endExclusive = true))
+          case LessThanOrEqual(columnName, value) =>
+            Some(KeyRange(None, Some(value), startExclusive = false, endExclusive = false))
+          case GreaterThan(columnName, value) =>
+            Some(KeyRange(Some(value), None, startExclusive = true, endExclusive = false))
+          case GreaterThanOrEqual(columnName, value) =>
+            Some(KeyRange(Some(value), None, startExclusive = false, endExclusive = false))
+          case _ => None
+        }
+      case 2 =>
+        //ordered by class name in reverse i.e Lt comes first, then Lte, then Gt then Gte
+        val orderedFilters = segmentFilters.sortBy(_.getClass.getName).reverse
+        val predicate = (orderedFilters.head, orderedFilters.last)
+
+        predicate match {
+          case (LessThan(_, start), GreaterThan(_, end)) =>
+            Some(KeyRange(Some(start), Some(end), startExclusive = true, endExclusive = true))
+          case (LessThanOrEqual(_, start), GreaterThan(_, end)) =>
+            Some(KeyRange(Some(start), Some(end), startExclusive = false, endExclusive = true))
+          case (LessThanOrEqual(_, start), GreaterThanOrEqual(_, end)) =>
+            Some(KeyRange(Some(start), Some(end), startExclusive = false, endExclusive = false))
+          case (LessThan(_, start), GreaterThanOrEqual(_, end)) =>
+            Some(KeyRange(Some(start), Some(end), startExclusive = true, endExclusive = false))
+          case _ => None
+        }
+
+      case _ => None
+
+    }
+
+  }
+
+  private def getPartitionFilters(filters: Array[Filter]) = filters.filter {
+    case predicate =>
+      predicate match {
+        case EqualTo(col, _) => partitionColumns.contains(col)
+        case _ => false
       }
   }
+
+  private def getSegmentFilters(segmentColumns: Seq[String],
+                                filters: Array[Filter]) = filters.filter {
+    case predicate =>
+      predicate match {
+        case EqualTo(columnName, _) if segmentColumns.contains(columnName) => true
+        case LessThan(columnName, _) if segmentColumns.contains(columnName) => true
+        case LessThanOrEqual(columnName, _) if segmentColumns.contains(columnName) => true
+        case GreaterThan(columnName, _) if segmentColumns.contains(columnName) => true
+        case GreaterThanOrEqual(columnName, _) if segmentColumns.contains(columnName) => true
+        case In(columnName, _) if segmentColumns.contains(columnName) => true
+        case _ => false
+      }
+  }
+
+
 }
 
-class SparkRowReader(chunks: Array[ByteBuffer], classes: Array[Class[_]]) extends
-    FastFiloRowReader(chunks, classes) with Row {
-  def apply(i: Int): Any = getAny(i)
-  def copy(): org.apache.spark.sql.Row = ???
-  def getByte(i: Int): Byte = ???
-  def getShort(i: Int): Short = ???
-  def isNullAt(i: Int): Boolean = !notNull(i)
-  def length: Int = parsers.length
-  def toSeq: Seq[Any] = ???
-}

@@ -1,9 +1,9 @@
 package filodb.cassandra.metastore
 
 
-import com.typesafe.config.Config
+import com.datastax.driver.core.Session
+import com.websudos.phantom.connectors.KeySpace
 import com.websudos.phantom.dsl._
-import filodb.cassandra.FiloCassandraConnector
 import filodb.core.Messages._
 import filodb.core.Types._
 import filodb.core.metadata.Column
@@ -16,10 +16,14 @@ import scala.concurrent.Future
  *
  * @param config a Typesafe Config with hosts, port, and keyspace parameters for Cassandra connection
  */
-sealed class ProjectionTable(val config: Config) extends CassandraTable[ProjectionTable, ProjectionInfo]
-with FiloCassandraConnector {
+sealed class ProjectionTable(ks: KeySpace, _session: Session)
+  extends CassandraTable[ProjectionTable, ProjectionInfo] {
 
   import filodb.cassandra.Util._
+
+  implicit val keySpace = ks
+  implicit val session = _session
+
   override val tableName = "projections"
 
   // scalastyle:off
@@ -86,7 +90,7 @@ with FiloCassandraConnector {
     select.where(_.name eqs dataset).and(_.projectionId eqs 0)
       .one().map(_.getOrElse(throw NotFoundError(s"Dataset $dataset")))
 
-  def getProjections(dataset:TableName):Future[Seq[ProjectionInfo]] ={
+  def getProjections(dataset: TableName): Future[Seq[ProjectionInfo]] = {
     select.where(_.name eqs dataset).fetch()
   }
 

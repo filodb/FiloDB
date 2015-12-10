@@ -4,45 +4,52 @@ import java.nio.ByteBuffer
 
 import filodb.core.Types._
 import filodb.core.metadata._
-import org.velvia.filo.{FastFiloRowReader, FiloRowReader, FiloVector}
+import filodb.core.query.Dataflow.RowReaderFactory
+import org.velvia.filo.{FastFiloRowReader, FiloRowReader, FiloVector, RowReader}
 
 import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
 
-case class SingleRowReader(rowNum: Int, parsers: Array[FiloVector[_]]) extends FiloRowReader {
-  rowNo = rowNum
+
+object Dataflow {
+  type RowReaderFactory = (Array[ByteBuffer], Array[Class[_]]) => FiloRowReader
+
+  val DefaultReaderFactory: RowReaderFactory =
+    (bytes, classes) => new FastFiloRowReader(bytes, classes)
+
 }
 
-trait Dataflow {
-  type RowReaderFactory = (Array[ByteBuffer], Array[Class[_]]) => FiloRowReader
-  val readerFactory: RowReaderFactory = (bytes, classes) => new FastFiloRowReader(bytes, classes)
-
-  def hasMoreRows: Boolean
-
-  def getMoreRows(batchSize: Int): Array[FiloRowReader]
+trait Dataflow extends Iterator[RowReader] {
 
   def classes: Array[Class[_]]
+
+  def getMoreRows(count: Int): Array[RowReader]
+
 }
 
 
-class SegmentScan(val segment: Segment, columns: Seq[ColumnId]) extends Dataflow {
+class SegmentScan(val segment: Segment,
+                  columns: Seq[ColumnId])
+                 (implicit val rowReaderFactory: RowReaderFactory)
+  extends Dataflow {
 
-  val chunkAccessTable: Array[(ChunkId, Array[FiloVector[_]])] = buildAccessTable()
+  val chunkAccessTable: Array[(ChunkId, FiloRowReader)] = buildAccessTable()
   val overrideIndex: mutable.HashMap[Int, mutable.Set[Int]] with mutable.MultiMap[Int, Int] = buildOverrideIndex()
 
   private def chunks = segment.chunks
 
-  def classes: Array[Class[_]] =columns.map { col =>
-      segment.projection.schemaMap.get(col).get.columnType.clazz
-    }.toArray
+  def classes: Array[Class[_]] = columns.map { col =>
+    segment.projection.schemaMap.get(col).get.columnType.clazz
+  }.toArray
 
   private def numChunks = chunks.length
 
 
   private def buildAccessTable() = {
-    val chunkAccessTable: Array[(ChunkId, Array[FiloVector[_]])] = new Array(numChunks)
+    val chunkAccessTable: Array[(ChunkId, FiloRowReader)] = new Array(numChunks)
     chunks.zipWithIndex.foreach { case (chunk, j) =>
-      chunkAccessTable(j) = (chunk.chunkId, readerFactory(chunk.columnVectors, classes).parsers)
+      chunkAccessTable(j) = (chunk.chunkId,
+        rowReaderFactory(chunk.columnVectors, classes))
     }
     chunkAccessTable
   }
@@ -106,7 +113,7 @@ class SegmentScan(val segment: Segment, columns: Seq[ColumnId]) extends Dataflow
     }
   }
 
-  override def hasMoreRows: Boolean = {
+  override def hasNext: Boolean = {
     val l = getNextLocation
     l match {
       case Some(location) => true
@@ -114,12 +121,25 @@ class SegmentScan(val segment: Segment, columns: Seq[ColumnId]) extends Dataflow
     }
   }
 
-  override def getMoreRows(batchSize: Int): Array[FiloRowReader] = {
-    val rows = ArrayBuffer[FiloRowReader]()
-    while (hasMoreRows) {
+  override def next(): RowReader = {
+    val (chunkNum, rowOffset) = getNextLocation.get
+    chunkAccessTable(chunkNum)._2.rowNo = rowOffset
+    chunkAccessTable(chunkNum)._2
+  }
+
+  override def getMoreRows(count: Int): Array[RowReader] = {
+    var fetched = 0
+    val rows = ArrayBuffer[RowReader]()
+    while (hasNext && fetched < count) {
       currentLocation = getNextLocation.get
-      rows.+=:(SingleRowReader(currentLocation._2, chunkAccessTable(currentLocation._1)._2))
+      rows.+=:(SingleRowReader(currentLocation._2, chunkAccessTable(currentLocation._1)._2.parsers))
+      fetched += 1
     }
     rows.toArray
   }
+
+}
+
+case class SingleRowReader(rowNum: Int, parsers: Array[FiloVector[_]]) extends FiloRowReader {
+  rowNo = rowNum
 }

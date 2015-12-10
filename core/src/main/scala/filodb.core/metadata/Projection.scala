@@ -55,7 +55,8 @@ case class Projection(id: Int,
     segmentType.asInstanceOf[KeyType {type T = segmentType.T}],
     segmentColumns)
 
-  def getKeyFunction[R](keyType: KeyType {type T = R}, columns: Seq[ColumnId]): RowReader => R = {
+  def getKeyFunction[R](keyType: KeyType {type T = R},
+                        columns: Seq[ColumnId]): RowReader => R = {
     val keyColNos = columns.map(col => columnIndexes.getOrElse(col, throw BadSchema("Invalid column $col")))
     keyType.getKeyFunc(keyColNos)
   }

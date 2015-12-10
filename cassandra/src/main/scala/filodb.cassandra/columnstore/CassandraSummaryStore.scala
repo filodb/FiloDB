@@ -5,12 +5,12 @@ import filodb.core.Messages.Success
 import filodb.core.metadata.{Projection, SegmentSummary}
 import filodb.core.store.SummaryStore
 
-import scala.concurrent.Future
+import scala.concurrent.{ExecutionContext, Future}
 
 trait CassandraSummaryStore extends SummaryStore {
-  import scala.concurrent.ExecutionContext.Implicits.global
-  def summaryTable: SummaryTable
 
+  def summaryTable: SummaryTable
+  implicit val ec: ExecutionContext
   /**
    * Atomically compare and swap the new SegmentSummary for this SegmentID
    */
