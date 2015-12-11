@@ -6,11 +6,11 @@ import org.apache.spark.SparkContext
 
 import scala.concurrent.{Await, Future}
 import scala.concurrent.duration._
-
+import scala.language.postfixOps
 object Filo {
 
   import collection.JavaConverters._
-  implicit val context = scala.concurrent.ExecutionContext.Implicits.global
+  implicit val executionContext = scala.concurrent.ExecutionContext.Implicits.global
 
   // The global config of filodb with cassandra, columnstore, etc. sections
   var config: Config = _

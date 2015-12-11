@@ -24,7 +24,7 @@ with BeforeAndAfter with Matchers with ScalaFutures {
   def flushPartitions(mapColumnStore: ColumnStore, partitions: Seq[(Any, Seq[SegmentFlush])]): Seq[Seq[Boolean]] = {
     partitions.map { case (p, flushes) =>
       flushes.map { flush =>
-        Await.result(mapColumnStore.flushToSegment(flush.projection, flush.partition, flush.segment, flush), 100 seconds)
+        Await.result(mapColumnStore.flushToSegment(flush), 100 seconds)
       }
     }
   }

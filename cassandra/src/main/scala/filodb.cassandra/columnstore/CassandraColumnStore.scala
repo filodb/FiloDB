@@ -17,18 +17,18 @@ extends ColumnStore
 
   override def summaryTable: SummaryTable = new SummaryTable(keySpace, session)
 
-  def initialize: Future[List[Response]] = {
+  def initialize: Future[Seq[Response]] = {
     for {
       c <- chunkTable.initialize()
       s <- summaryTable.initialize()
-    } yield List(c, s)
+    } yield Seq(c, s)
   }
 
-  def clearAll: Future[List[Response]] = {
+  def clearAll: Future[Seq[Response]] = {
     for {
       c <- chunkTable.clearAll()
       s <- summaryTable.clearAll()
-    } yield List(c, s)
+    } yield Seq(c, s)
   }
 
 }

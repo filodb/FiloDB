@@ -1,176 +1,61 @@
 package filodb.spark
 
-import akka.actor.ActorSystem
-import com.typesafe.config.ConfigFactory
-import filodb.coordinator.Success
-import filodb.core.store.Dataset
-import org.apache.spark.{SparkContext, SparkException, SparkConf}
-import org.apache.spark.sql.{SaveMode, SQLContext}
-import org.scalatest.time.{Millis, Seconds, Span}
-import scala.concurrent.duration._
-
-import filodb.core._
+import filodb.cassandra.CassandraTest
 import filodb.core.metadata.Column
+import filodb.core.store.Dataset
 
-import org.scalatest.{FunSpec, BeforeAndAfter, BeforeAndAfterAll, Matchers}
-import org.scalatest.concurrent.ScalaFutures
-
-object SaveAsFiloTest {
-  val system = ActorSystem("test")
-}
-
+import scala.concurrent.Await
+import scala.concurrent.duration._
+import scala.language.postfixOps
 /**
  * Test saveAsFiloDataset
  */
-class SaveAsFiloTest extends FunSpec with BeforeAndAfter with BeforeAndAfterAll
-with Matchers with ScalaFutures {
+class SaveAsFiloTest extends SparkTest with CassandraTest {
 
-  implicit val defaultPatience =
-    PatienceConfig(timeout = Span(10, Seconds), interval = Span(50, Millis))
 
-  // Setup SQLContext and a sample DataFrame
-  val conf = (new SparkConf).setMaster("local[4]")
-                            .setAppName("test")
-                            .set("filodb.cassandra.keyspace", "unittest")
-                            .set("filodb.memtable.min-free-mb", "10")
-  val sc = new SparkContext(conf)
-  val sql = new SQLContext(sc)
-
-  val partitionCol = "_partition"
-  val ds1 = Dataset("gdelt1", "id")
-  val ds2 = Dataset("gdelt2", "id")
-  val ds3 = Dataset("gdelt3", "id", partitionCol)
-  val test1 = Dataset("test1", "id")
-
-  // This is the same code that the Spark stuff uses.  Make sure we use exact same environment as real code
-  // so we don't have two copies of metaStore that could be configured differently.
-  val filoConfig = Filo.configFromSpark(sc)
-  Filo.init(filoConfig)
-
-  val metaStore = Filo.metaStore
-  val columnStore = Filo.columnStore
-
-  override def beforeAll() {
-    metaStore.initialize().futureValue
-    columnStore.initializeProjection(ds1.projections.head).futureValue
-    columnStore.initializeProjection(ds2.projections.head).futureValue
-    columnStore.initializeProjection(ds3.projections.head).futureValue
+  override def beforeAll(): Unit = {
+    super.beforeAll()
+    Filo.init(sc)
+    Await.result(Filo.columnStore.initialize, 10 seconds)
+    Await.result(Filo.metaStore.initialize, 10 seconds)
+    Filo.metaStore.addProjection(dataset.projectionInfoSeq.head)
   }
 
   override def afterAll() {
     super.afterAll()
+    Await.result(Filo.columnStore.clearAll, 10 seconds)
+    Await.result(Filo.metaStore.clearAll, 10 seconds)
     sc.stop()
   }
 
-  before {
-    metaStore.clearAllData().futureValue
-    columnStore.clearSegmentCache()
-    try {
-      columnStore.clearProjectionData(ds1.projections.head).futureValue
-      columnStore.clearProjectionData(ds2.projections.head).futureValue
-      columnStore.clearProjectionData(ds3.projections.head).futureValue
-      columnStore.clearProjectionData(test1.projections.head).futureValue
-    } catch {
-      case e: Exception =>
-    }
-  }
+  implicit val ec = Filo.executionContext
 
-  implicit val ec = Filo.ec
+  val schema = Seq(
+    Column("id", "jsonds", 0, Column.ColumnType.IntColumn),
+    Column("sqlDate", "jsonds", 0, Column.ColumnType.StringColumn),
+    Column("monthYear", "jsonds", 0, Column.ColumnType.IntColumn),
+    Column("year", "jsonds", 0, Column.ColumnType.IntColumn))
+
+  val dataset = Dataset("jsonds", schema, "year", "id", "sqlDate", "monthYear")
 
   // Sample data.  Note how we must create a partitioning column.
   val jsonRows = Seq(
     """{"id":0,"sqlDate":"2015/03/15T15:00Z","monthYear":32015,"year":2015}""",
-    """{"id":1,"sqlDate":"2015/03/15T16:00Z","monthYear":42015}""",
-    """{"id":2,"sqlDate":"2015/03/15T17:00Z",                  "year":2015}"""
+    """{"id":1,"sqlDate":"2015/03/15T16:00Z","monthYear":42015,"year":2014}""",
+    """{"id":2,"sqlDate":"2015/03/15T17:00Z","monthYear":42015,"year":2015}"""
   )
+
   val dataDF = sql.read.json(sc.parallelize(jsonRows, 1))
 
   import filodb.spark._
   import org.apache.spark.sql.functions._
 
-  it("should create missing columns and partitions and write table") {
-    sql.saveAsFiloDataset(dataDF, "gdelt1", "id",
-                          writeTimeout = 2.minutes)
+  it("should write table to a Filo table and read from it") {
+    sql.saveAsFiloDataset(dataDF, "jsonds")
 
     // Now read stuff back and ensure it got written
-    val df = sql.filoDataset("gdelt1")
-    df.select(count("id")).collect().head(0) should equal (3)
-    df.agg(sum("year")).collect().head(0) should equal (4030)
+    val df = sql.sql("select * from jsonds")
   }
 
-  it("should throw ColumnTypeMismatch if existing columns are not same type") {
-    metaStore.newDataset(ds2).futureValue should equal (Success)
-    val idStrCol = Column("id", "gdelt2", 0, Column.ColumnType.StringColumn)
-    metaStore.newColumn(idStrCol).futureValue should equal (Success)
 
-    intercept[ColumnTypeMismatch] {
-      sql.saveAsFiloDataset(dataDF, "gdelt2", "id")
-    }
-  }
-
-  it("should write table if there are existing matching columns") {
-    metaStore.newDataset(ds3).futureValue should equal (Success)
-    val idStrCol = Column("id", "gdelt3", 0, Column.ColumnType.LongColumn)
-    metaStore.newColumn(idStrCol).futureValue should equal (Success)
-
-    sql.saveAsFiloDataset(dataDF, "gdelt3", "id",
-                          writeTimeout = 2.minutes)
-
-    // Now read stuff back and ensure it got written
-    val df = sql.filoDataset("gdelt3")
-    df.select(count("id")).collect().head(0) should equal (3)
-  }
-
-  it("should write and read using DF write() and read() APIs") {
-    dataDF.write.format("filodb.spark").
-                 option("dataset", "test1").
-                 option("sort_column", "id").
-                 mode(SaveMode.Overwrite).
-                 save()
-    val df = sql.read.format("filodb.spark").option("dataset", "test1").load()
-    df.agg(sum("year")).collect().head(0) should equal (4030)
-  }
-
-  val jsonRows2 = Seq(
-    """{"id":3,"sqlDate":"2015/03/15T18:00Z","monthYear":32015,"year":2016}""",
-    """{"id":4,"sqlDate":"2015/03/15T19:00Z","monthYear":42015}""",
-    """{"id":5,"sqlDate":"2015/03/15T19:30Z",                  "year":2016}"""
-  )
-  val dataDF2 = sql.read.json(sc.parallelize(jsonRows2, 1))
-
-  it("should overwrite existing data if mode=Overwrite") {
-    dataDF.write.format("filodb.spark").
-                 option("dataset", "gdelt1").
-                 option("sort_column", "id").
-                 save()
-
-    // Data is different, should not append, should overwrite
-    dataDF2.write.format("filodb.spark").
-                 option("dataset", "gdelt1").
-                 option("sort_column", "id").
-                 mode(SaveMode.Overwrite).
-                 save()
-
-    val df = sql.read.format("filodb.spark").option("dataset", "gdelt1").load()
-    df.agg(sum("year")).collect().head(0) should equal (4032)
-  }
-
-  it("should append data in Append mode") {
-    dataDF.write.format("filodb.spark").
-                 option("dataset", "gdelt2").
-                 option("sort_column", "id").
-                 mode(SaveMode.Append).
-                 save()
-
-    dataDF2.write.format("filodb.spark").
-                 option("dataset", "gdelt2").
-                 option("sort_column", "id").
-                 mode(SaveMode.Append).
-                 save()
-
-    val df = sql.read.format("filodb.spark").option("dataset", "gdelt2").load()
-    df.agg(sum("year")).collect().head(0) should equal (8062)
-  }
-
-  it("should be able to write with a user-specified partitioning column") (pending)
 }

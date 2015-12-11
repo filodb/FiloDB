@@ -47,6 +47,10 @@ sealed class ProjectionTable(ks: KeySpace, _session: Session)
 
   // scalastyle:on
 
+  def initialize(): Future[Response] = create.ifNotExists.future().toResponse()
+
+  def clearAll(): Future[Response] = truncate.future().toResponse()
+
   override def fromRow(row: Row): ProjectionInfo = {
     val bb = schema(row)
     val schemaObj = Column.readSchema(bb)
@@ -67,9 +71,6 @@ sealed class ProjectionTable(ks: KeySpace, _session: Session)
 
   private def str(cols: Seq[ColumnId]) = cols.mkString(",")
 
-  def initialize(): Future[Response] = create.ifNotExists.future().toResponse()
-
-  def clearAll(): Future[Response] = truncate.future().toResponse()
 
   def insertProjection(projection: ProjectionInfo): Future[Response] =
     insert.value(_.name, projection.dataset)

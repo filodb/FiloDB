@@ -36,7 +36,7 @@ object Defaults {
     ContactPoint.embedded
       .withClusterBuilder(
         _.withoutJMXReporting().withoutMetrics().withPoolingOptions(new PoolingOptions().setHeartbeatIntervalSeconds(0))
-      ).keySpace("unittest")
+      ).keySpace(keySpaceString)
   }
 
 }

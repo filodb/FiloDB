@@ -44,14 +44,8 @@ class DefaultSource extends RelationProvider with CreatableRelationProvider {
       data: DataFrame): BaseRelation = {
     val dataset = parameters.getOrElse("dataset", sys.error("'dataset' must be specified for FiloDB."))
     val version = parameters.getOrElse("version", "0").toInt
-    val sortColumn = parameters.getOrElse("sort_column", sys.error("'sort_column' must be specified"))
-    val partitionColumn = parameters.get("partition_column")
-    val defaultPartKey = parameters.get("default_partition_key")
-    val segmentSize = parameters.get("segment_size")
 
-    sqlContext.saveAsFiloDataset(data, dataset,
-                                 sortColumn, partitionColumn, version,
-                                 mode, defaultPartKey, segmentSize)
+    sqlContext.saveAsFiloDataset(data, dataset)
 
     // The below is inefficient as it reads back the schema that was written earlier - though it shouldn't
     // take very long

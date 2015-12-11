@@ -3,7 +3,7 @@ package filodb.coordinator
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.{ArrayBlockingQueue, ThreadFactory, ThreadPoolExecutor, TimeUnit}
 
-import filodb.core.TooManyRequests
+import filodb.core.Messages.{TooManyRequests, Response}
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -63,7 +63,7 @@ object FutureUtils {
  * A simple concurrent resource limiter using j.u.c.AtomicInteger
  * @param limit the maximum number of outstanding futures at one time
  */
-private[core] class ConcurrentLimiter(limit: Int) {
+class ConcurrentLimiter(limit: Int) {
   val counter = new AtomicInteger
 
   def obtain(): Boolean = {

@@ -2,7 +2,7 @@ package filodb.cassandra.metastore
 
 import com.datastax.driver.core.Session
 import com.websudos.phantom.connectors.KeySpace
-import filodb.core.Messages.Success
+import filodb.core.Messages.{Response, Success}
 import filodb.core.metadata.Column
 import filodb.core.store.{Dataset, MetaStore, ProjectionInfo}
 
@@ -17,6 +17,13 @@ class CassandraMetaStore(keySpace: KeySpace, session: Session)
 
   val projectionTable = new ProjectionTable(keySpace, session)
 
+  def initialize: Future[Seq[Response]] = {
+    Future sequence Seq(projectionTable.initialize())
+  }
+
+  def clearAll: Future[Seq[Response]] = {
+    Future sequence Seq(projectionTable.clearAll())
+  }
   /**
    * Retrieves a Dataset object of the given name
    * @param name Name of the dataset to retrieve

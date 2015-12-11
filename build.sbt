@@ -40,7 +40,6 @@ lazy val spark = (project in file("spark"))
                    .settings(assemblySettings:_*)
                    .settings(assemblyOption in assembly := (assemblyOption in assembly).value.copy(includeScala = false))
                    .dependsOn(core % "compile->compile; test->test",
-                              coordinator,
                               cassandra % "compile->compile; test->test")
 
 val phantomVersion = "1.12.2"

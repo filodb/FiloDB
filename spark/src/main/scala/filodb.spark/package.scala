@@ -7,7 +7,7 @@ import org.apache.spark.sql.{DataFrame, Row, SQLContext, SaveMode}
 import scala.concurrent.Future
 
 package object spark {
-
+  implicit val executionContext = Filo.executionContext
   implicit class FiloContext(sqlContext: SQLContext) {
 
     def saveAsFiloDataset(df: DataFrame,
