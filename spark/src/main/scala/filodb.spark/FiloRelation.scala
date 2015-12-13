@@ -41,8 +41,7 @@ case class FiloRelation(dataset: String,
   import filodb.spark.TypeConverters._
 
   val sc = sqlContext.sparkContext
-  val filoConfig = Filo.configFromSpark(sc)
-  Filo.init(filoConfig)
+  val filoConfig = Filo.init(sc)
 
   val datasetObj = getDatasetObj(dataset)
   val filoSchema = getSchema(dataset, version)

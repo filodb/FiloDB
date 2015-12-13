@@ -3,6 +3,8 @@ package filodb.spark
 import filodb.cassandra.CassandraTest
 import filodb.core.metadata.Column
 import filodb.core.store.Dataset
+import org.apache.spark.sql.SQLContext
+import org.apache.spark.{SparkContext, SparkConf}
 
 import scala.concurrent.Await
 import scala.concurrent.duration._
@@ -10,7 +12,17 @@ import scala.language.postfixOps
 /**
  * Test saveAsFiloDataset
  */
-class SaveAsFiloTest extends SparkTest with CassandraTest {
+class SaveAsFiloTest extends CassandraTest {
+
+  // Setup SQLContext and a sample DataFrame
+  val conf = (new SparkConf).setMaster("local[4]")
+    .setAppName("test")
+    .set("filodb.cassandra.hosts", "localhost")
+    .set("filodb.cassandra.port", "9142")
+    .set("filodb.cassandra.keyspace", "unittest")
+    .set("filodb.memtable.min-free-mb", "10")
+  val sc = new SparkContext(conf)
+  val sql = new SQLContext(sc)
 
 
   override def beforeAll(): Unit = {
@@ -31,10 +43,10 @@ class SaveAsFiloTest extends SparkTest with CassandraTest {
   implicit val ec = Filo.executionContext
 
   val schema = Seq(
-    Column("id", "jsonds", 0, Column.ColumnType.IntColumn),
+    Column("id", "jsonds", 0, Column.ColumnType.LongColumn),
+    Column("monthYear", "jsonds", 0, Column.ColumnType.LongColumn),
     Column("sqlDate", "jsonds", 0, Column.ColumnType.StringColumn),
-    Column("monthYear", "jsonds", 0, Column.ColumnType.IntColumn),
-    Column("year", "jsonds", 0, Column.ColumnType.IntColumn))
+    Column("year", "jsonds", 0, Column.ColumnType.LongColumn))
 
   val dataset = Dataset("jsonds", schema, "year", "id", "sqlDate", "monthYear")
 

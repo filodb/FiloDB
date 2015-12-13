@@ -13,8 +13,6 @@ import scala.concurrent.Future
 
 /**
  * Represents partitions in a dataset
- *
- * @param config a Typesafe Config with hosts, port, and keyspace parameters for Cassandra connection
  */
 sealed class ProjectionTable(ks: KeySpace, _session: Session)
   extends CassandraTable[ProjectionTable, ProjectionInfo] {
@@ -24,16 +22,12 @@ sealed class ProjectionTable(ks: KeySpace, _session: Session)
   implicit val keySpace = ks
   implicit val session = _session
 
-  override val tableName = "projections"
-
   // scalastyle:off
-  object name extends StringColumn(this) with PartitionKey[String]
-
-  object options extends StringColumn(this)
-
-  object schema extends BlobColumn(this)
+  object dataset extends StringColumn(this) with PartitionKey[String]
 
   object projectionId extends IntColumn(this) with PrimaryKey[Int]
+
+  object datasetSchema extends BlobColumn(this)
 
   object partitionKeyColumns extends StringColumn(this)
 
@@ -52,10 +46,10 @@ sealed class ProjectionTable(ks: KeySpace, _session: Session)
   def clearAll(): Future[Response] = truncate.future().toResponse()
 
   override def fromRow(row: Row): ProjectionInfo = {
-    val bb = schema(row)
+    val bb = datasetSchema(row)
     val schemaObj = Column.readSchema(bb)
     ProjectionInfo(projectionId(row),
-      name(row),
+      dataset(row),
       schemaObj,
       columns(partitionKeyColumns(row)),
       columns(keyColumns(row)),
@@ -73,26 +67,27 @@ sealed class ProjectionTable(ks: KeySpace, _session: Session)
 
 
   def insertProjection(projection: ProjectionInfo): Future[Response] =
-    insert.value(_.name, projection.dataset)
+    insert.value(_.dataset, projection.dataset)
       .value(_.projectionId, projection.id)
-      .value(_.schema, Column.schemaAsByteBuffer(projection.schema))
+      .value(_.datasetSchema, Column.schemaAsByteBuffer(projection.schema))
       .value(_.partitionKeyColumns, str(projection.partitionColumns))
       .value(_.keyColumns, str(projection.keyColumns))
       .value(_.sortColumns, str(projection.sortColumns))
       .value(_.segmentColumns, str(projection.segmentColumns))
+      .value(_.projectionReverse, projection.reverse)
       .future.toResponse()
 
 
   def getProjection(dataset: TableName, id: Int): Future[ProjectionInfo] =
-    select.where(_.name eqs dataset).and(_.projectionId eqs id)
+    select.where(_.dataset eqs dataset).and(_.projectionId eqs id)
       .one().map(_.getOrElse(throw NotFoundError(s"Dataset $dataset")))
 
   def getSuperProjection(dataset: TableName): Future[ProjectionInfo] =
-    select.where(_.name eqs dataset).and(_.projectionId eqs 0)
+    select.where(_.dataset eqs dataset).and(_.projectionId eqs 0)
       .one().map(_.getOrElse(throw NotFoundError(s"Dataset $dataset")))
 
   def getProjections(dataset: TableName): Future[Seq[ProjectionInfo]] = {
-    select.where(_.name eqs dataset).fetch()
+    select.where(_.dataset eqs dataset).fetch()
   }
 
 }

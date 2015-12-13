@@ -1,6 +1,5 @@
 package filodb.core.memtable
 
-import com.typesafe.config.ConfigFactory
 import filodb.core.metadata._
 import org.scalatest.{BeforeAndAfter, FunSpec, Matchers}
 import org.velvia.filo.TupleRowReader
@@ -10,9 +9,7 @@ class MemTableMemoryTest extends FunSpec with Matchers with BeforeAndAfter {
   import filodb.core.Setup._
 
   val newSetting = "memtable.max-rows-per-table = 200000"
-  val config = ConfigFactory.parseString(newSetting).withFallback(
-    ConfigFactory.load("application_test.conf"))
-  val mTable = new MapDBMemTable(projection, config)
+  val mTable = new MapDBMemTable(projection)
 
   before {
     mTable.clearAllData()

@@ -7,7 +7,8 @@ import org.apache.spark.SparkContext
 import scala.concurrent.{Await, Future}
 import scala.concurrent.duration._
 import scala.language.postfixOps
-object Filo {
+
+object Filo extends Serializable{
 
   import collection.JavaConverters._
   implicit val executionContext = scala.concurrent.ExecutionContext.Implicits.global
@@ -15,7 +16,7 @@ object Filo {
   // The global config of filodb with cassandra, columnstore, etc. sections
   var config: Config = _
 
-  lazy val connector = new FiloCassandraConnector(config)
+  lazy val connector = new FiloCassandraConnector(config.getConfig("cassandra"))
   lazy val metaStore = connector.metaStore
   lazy val columnStore = connector.columnStore
 

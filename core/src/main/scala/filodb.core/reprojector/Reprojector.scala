@@ -7,7 +7,7 @@ import filodb.core.reprojector.Reprojector.SegmentFlush
 import org.velvia.filo.{RowReader, RowToVectorBuilder}
 
 
-trait Reprojector {
+trait Reprojector extends Serializable{
 
   def project(projection: Projection,
               rows: Seq[RowReader]): Iterator[(Any, Seq[SegmentFlush])]

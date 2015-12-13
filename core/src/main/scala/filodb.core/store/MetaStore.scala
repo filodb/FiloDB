@@ -1,6 +1,5 @@
 package filodb.core.store
 
-import com.typesafe.config.{ConfigFactory, ConfigRenderOptions}
 import filodb.core.Types._
 import filodb.core._
 import filodb.core.metadata.{Column, Projection}
@@ -55,12 +54,9 @@ trait MetaStore {
  */
 case class Dataset(name: String,
                    schema: Seq[Column],
-                   projectionInfoSeq: Seq[ProjectionInfo],
-                   options: DatasetOptions = Dataset.DefaultOptions) {
+                   projectionInfoSeq: Seq[ProjectionInfo]) {
 
-  val projections = projectionInfoSeq.map {
-    _.getProjection(options)
-  }
+  val projections = projectionInfoSeq.map(_.getProjection)
 
   val superProjection = projections.head
 
@@ -69,39 +65,9 @@ case class Dataset(name: String,
 }
 
 /**
- * Config options for a table define operational details for the column store and memtable.
- * Every option must have a default!
- */
-case class DatasetOptions(chunkSize: Int,
-                          segmentSize: String) {
-
-
-  override def toString: String = {
-    val options = Map[String, Object](
-      "chunkSize" -> chunkSize.toString,
-      "segmentSize" -> segmentSize
-    )
-    import scala.collection.JavaConverters._
-    val config = ConfigFactory.parseMap(options.asJava)
-    config.root.render(ConfigRenderOptions.concise)
-  }
-}
-
-object DatasetOptions {
-  def fromString(s: String): DatasetOptions = {
-    val config = ConfigFactory.parseString(s)
-    DatasetOptions(chunkSize = config.getInt("chunkSize"),
-      segmentSize = config.getString("segmentSize"))
-  }
-}
-
-/**
  * Contains many helper functions especially pertaining to dataset partitioning.
  */
 object Dataset {
-
-  val DefaultOptions = DatasetOptions(chunkSize = 1000,
-    segmentSize = "10000")
 
   /**
    * Creates a new Dataset with a single superprojection with a defined sort order.
@@ -124,7 +90,7 @@ object Dataset {
   /**
    * Returns a SortKeyHelper configured from the DatasetOptions.
    */
-  def keyTypeForOptions[K: ClassTag](options: DatasetOptions): SingleKeyType = {
+  def keyType[K: ClassTag](): SingleKeyType = {
     val StringClass = classOf[String]
     implicitly[ClassTag[K]].runtimeClass match {
       case java.lang.Long.TYPE => new LongKeyType()
@@ -134,19 +100,19 @@ object Dataset {
     }
   }
 
-  def keyTypeForOptionsAndColumn[K](options: DatasetOptions, column: Column): Option[SingleKeyType] = {
+  def keyTypeForColumn[K](column: Column): Option[SingleKeyType] = {
     import filodb.core.metadata.Column.ColumnType._
     column.columnType match {
-      case LongColumn => Some(keyTypeForOptions[Long](options))
-      case IntColumn => Some(keyTypeForOptions[Int](options))
-      case DoubleColumn => Some(keyTypeForOptions[Double](options))
-      case StringColumn => Some(keyTypeForOptions[String](options))
+      case LongColumn => Some(keyType[Long]())
+      case IntColumn => Some(keyType[Int]())
+      case DoubleColumn => Some(keyType[Double]())
+      case StringColumn => Some(keyType[String]())
       case other: Column.ColumnType => None
     }
   }
 
   def keyType(dataset: Dataset, column: Column): Option[SingleKeyType] =
-    keyTypeForOptionsAndColumn(dataset.options, column)
+    keyTypeForColumn(column)
 
 
 }
@@ -171,40 +137,36 @@ case class ProjectionInfo(id: Int,
                           // Probably not necessary in the future
                           segmentSize: String = "10000") {
 
-  val schemaMap = schema.map(i => (i.name -> i)).toMap
+  val schemaMap = schema.map(i => i.name -> i).toMap
 
   val columnIndexes = schema.zipWithIndex.map { case (c, i) => c.name -> i }.toMap
 
 
-  def getProjection(options: DatasetOptions): Projection = {
+  def getProjection: Projection = {
 
-    val pType = keyType(options, partitionColumns)
-    val kType = keyType(options, keyColumns)
-    val oType = keyType(options, sortColumns)
-    val sType = keyType(options, segmentColumns)
+    val pType = keyType(partitionColumns)
+    val kType = keyType(keyColumns)
+    val oType = keyType(sortColumns)
+    val sType = keyType(segmentColumns)
 
     Projection(id, dataset, reverse, schema,
       partitionColumns, keyColumns, sortColumns, segmentColumns,
       pType, kType, oType, sType)
   }
 
-  def keyType(options: DatasetOptions, columns: Seq[ColumnId]): KeyType = {
-    columns.length match {
-      // scalastyle:off
-      case no if no <= 0 => throw BadSchema("Invalid number of columns in $keyName")
-      case 1 => {
-        val col = columns(0)
-        Dataset.keyTypeForOptionsAndColumn(options,
-          schemaMap.getOrElse(col, throw BadSchema("Invalid column $col")))
-          .getOrElse(throw BadSchema("Invalid key column $col"))
-      }
-      case no if no > 0 => {
-        val keyTypes = columns.map(col => schemaMap.getOrElse(col, throw BadSchema("Invalid column $col")))
-          .map(Dataset.keyTypeForOptionsAndColumn(options, _).getOrElse(throw BadSchema("Invalid key column $col")))
-        CompositeKeyType(keyTypes)
-      }
-      // scalastyle:on
-    }
+  def keyType(columns: Seq[ColumnId]): KeyType = columns.length match {
+    // scalastyle:off
+    case no if no <= 0 => throw BadSchema("Invalid number of columns in $keyName")
+    case 1 =>
+      val col = columns.head
+      Dataset.keyTypeForColumn(
+        schemaMap.getOrElse(col, throw BadSchema("Invalid column $col")))
+        .getOrElse(throw BadSchema("Invalid key column $col"))
+    case no if no > 0 =>
+      val keyTypes = columns.map(col => schemaMap.getOrElse(col, throw BadSchema("Invalid column $col")))
+        .map(Dataset.keyTypeForColumn(_).getOrElse(throw BadSchema("Invalid key column $col")))
+      CompositeKeyType(keyTypes)
+    // scalastyle:on
   }
 
 }

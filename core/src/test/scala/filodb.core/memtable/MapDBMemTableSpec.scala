@@ -1,6 +1,5 @@
 package filodb.core.memtable
 
-import com.typesafe.config.ConfigFactory
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.{BeforeAndAfter, FunSpec, Matchers}
 import org.velvia.filo.TupleRowReader
@@ -9,8 +8,6 @@ class MapDBMemTableSpec extends FunSpec with Matchers with BeforeAndAfter with S
 
   import filodb.core.Setup._
 
-  val config = ConfigFactory.load("application_test.conf")
-
   // Must be more than the max-rows-per-table setting in application_test.conf
   val lotsOfNames = (0 until 400).flatMap { partNum =>
     names.map { t => (t._1, t._2, t._3, Some(partNum.toString)) }
@@ -18,7 +15,7 @@ class MapDBMemTableSpec extends FunSpec with Matchers with BeforeAndAfter with S
 
   describe("insertRows, readRows, flip") {
     it("should insert out of order rows and read them back in order") {
-      val mTable = new MapDBMemTable(projection, config)
+      val mTable = new MapDBMemTable(projection)
       mTable.numRows should be(0)
 
       mTable.ingestRows(names.map(TupleRowReader))
@@ -29,7 +26,7 @@ class MapDBMemTableSpec extends FunSpec with Matchers with BeforeAndAfter with S
     }
 
     it("should replace rows and read them back in order or key") {
-      val mTable = new MapDBMemTable(projection, config)
+      val mTable = new MapDBMemTable(projection)
       mTable.ingestRows(names.take(4).map(TupleRowReader))
       mTable.ingestRows(names.take(2).map(TupleRowReader))
       mTable.numRows should equal(4)
@@ -42,7 +39,7 @@ class MapDBMemTableSpec extends FunSpec with Matchers with BeforeAndAfter with S
 
   describe("removeRows") {
     it("should be able to delete rows") {
-      val mTable = new MapDBMemTable(projection, config)
+      val mTable = new MapDBMemTable(projection)
       mTable.ingestRows(names.map(TupleRowReader))
 
       mTable.removeRows("US", keyRange)

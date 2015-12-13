@@ -39,8 +39,8 @@ lazy val spark = (project in file("spark"))
                    .settings(libraryDependencies ++= sparkDeps)
                    .settings(assemblySettings:_*)
                    .settings(assemblyOption in assembly := (assemblyOption in assembly).value.copy(includeScala = false))
-                   .dependsOn(core % "compile->compile; test->test",
-                              cassandra % "compile->compile; test->test")
+                   .dependsOn(core % "compile->compile; test->test")
+                   .dependsOn(cassandra % "compile->compile; test->test")
 
 val phantomVersion = "1.12.2"
 val akkaVersion    = "2.3.7"
@@ -68,7 +68,6 @@ lazy val coreDeps = Seq(
   "io.spray"             %% "spray-caching"     % "1.3.2",
   "org.mapdb"             % "mapdb"             % "1.0.6",
   "org.velvia"           %% "msgpack4s"         % "0.5.1",
-  "net.ceedubs"          %% "ficus"             % "1.0.1",
   "org.scodec"           %% "scodec-bits"       % "1.0.10",
   "com.nativelibs4java"  %% "scalaxy-loops"     % "0.3.3" % "provided",
   "org.scalatest"        %% "scalatest"         % "2.2.4" % "test"

@@ -5,13 +5,12 @@ import com.typesafe.config.Config
 import com.websudos.phantom.connectors.{ContactPoints, KeySpace, VersionNumber}
 import filodb.cassandra.columnstore.CassandraColumnStore
 import filodb.cassandra.metastore.CassandraMetaStore
-import net.ceedubs.ficus.Ficus._
 
 import scala.concurrent.ExecutionContext
 
 class FiloCassandraConnector(config: Config)(implicit val ec: ExecutionContext) {
   private[this] lazy val connector =
-    ContactPoints(config.as[Seq[String]]("hosts"), config.getInt("port"))
+    ContactPoints(config.getString("hosts").split(','), config.getInt("port"))
       .withClusterBuilder(_.withAuthProvider(authProvider))
       .keySpace(keySpace.name)
 

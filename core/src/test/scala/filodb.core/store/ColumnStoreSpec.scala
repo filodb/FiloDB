@@ -62,7 +62,7 @@ object ColumnStoreSpec {
       val segmentRange = info.segmentRange
       val segmentRes = chunksMap.get(partition)
       val chunks = segmentRes match {
-        case Some(segments) => segments.range(segmentRange.start, segmentRange.end).map { case (segmentId, chunkMap) =>
+        case Some(segments) => segments.range(segmentRange.start.get, segmentRange.end.get).map { case (segmentId, chunkMap) =>
           (partition, segmentId) -> chunkMap.map(_._2).toSeq
         }
 

@@ -12,6 +12,10 @@ with AsyncAssertions
 with BeforeAndAfterAll {
   self: BeforeAndAfterAll with Suite =>
 
+  val hosts="localhost"
+
+  val port = "9142"
+
   private[this] val connector = Defaults.defaultConnector
 
   implicit lazy val keySpace: KeySpace = KeySpace(Defaults.keySpaceString)

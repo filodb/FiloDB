@@ -44,7 +44,6 @@ with BeforeAndAfter with Matchers with ScalaFutures {
   }
 
   before {
-    super.beforeAll()
     Await.result(columnStore.clearAll, 10 seconds)
   }
 

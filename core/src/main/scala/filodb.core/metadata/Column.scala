@@ -76,7 +76,7 @@ object Column extends StrictLogging {
 
   def readSchema(i: DataInput): Seq[Column] = {
     val l = i.readInt()
-    (0 to l).map(c => read(i))
+    (0 until l).map(c => read(i))
   }
 
   def schemaAsByteBuffer(schema: Seq[Column]): ByteBuffer = {
@@ -89,7 +89,7 @@ object Column extends StrictLogging {
   }
 
   def writeSchema(schema: Seq[Column], o: DataOutput): Unit = {
-    o.write(schema.length)
+    o.writeInt(schema.length)
     schema.foreach(c => c.write(o))
   }
 

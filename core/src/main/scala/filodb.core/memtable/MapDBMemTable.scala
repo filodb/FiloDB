@@ -1,6 +1,5 @@
 package filodb.core.memtable
 
-import com.typesafe.config.Config
 import filodb.core.metadata._
 import org.mapdb._
 import org.velvia.filo.RowReader
@@ -23,7 +22,7 @@ import scalaxy.loops._
  *   }
  * }}}
  */
-class MapDBMemTable(val projection: Projection, config: Config) extends MemTable {
+class MapDBMemTable(val projection: Projection) extends MemTable {
 
   import collection.JavaConversions._
 
