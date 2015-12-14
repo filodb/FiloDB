@@ -22,7 +22,7 @@ import scalaxy.loops._
  *   }
  * }}}
  */
-class MapDBMemTable(val projection: Projection) extends MemTable {
+class MapDBMemTable(val projection: Projection, val rowSchema:Seq[Column]) extends MemTable {
 
   import collection.JavaConversions._
 
@@ -38,9 +38,10 @@ class MapDBMemTable(val projection: Projection) extends MemTable {
     .cacheDisable
     .make()
 
+  val columnIndexes = rowSchema.zipWithIndex.map{case (col,i)=> col.name ->i}.toMap
   val serializer = new RowReaderSerializer(projection.schema)
-  val keyFunc = projection.keyFunction
-  val partitionFunc = projection.partitionFunction
+  val keyFunc = projection.keyFunction(columnIndexes)
+  val partitionFunc = projection.partitionFunction(columnIndexes)
   val partitionType = projection.partitionType
   val keyType = projection.keyType
 
@@ -69,8 +70,8 @@ class MapDBMemTable(val projection: Projection) extends MemTable {
 
   def readRows(partitionKey: Any, keyRange: KeyRange[_]): Iterator[RowReader] = {
     val pk = partitionKey.asInstanceOf[partitionType.T]
-    val start = keyRange.start.asInstanceOf[keyType.T]
-    val end = keyRange.end.asInstanceOf[keyType.T]
+    val start = keyRange.start.get.asInstanceOf[keyType.T]
+    val end = keyRange.end.get.asInstanceOf[keyType.T]
     rowMap.subMap((pk, start), (pk, end))
       .keySet.iterator.map { k => serializer.deserialize(rowMap.get(k)) }
   }
@@ -83,8 +84,8 @@ class MapDBMemTable(val projection: Projection) extends MemTable {
 
   def removeRows(partitionKey: Any, keyRange: KeyRange[_]): Unit = {
     val pk = partitionKey.asInstanceOf[partitionType.T]
-    val start = keyRange.start.asInstanceOf[keyType.T]
-    val end = keyRange.end.asInstanceOf[keyType.T]
+    val start = keyRange.start.get.asInstanceOf[keyType.T]
+    val end = keyRange.end.get.asInstanceOf[keyType.T]
 
     rowMap.subMap((pk, start), (pk, end))
       .keySet.iterator.foreach { k => rowMap.remove(k) }

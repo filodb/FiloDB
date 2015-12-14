@@ -4,13 +4,14 @@ import com.typesafe.config.{Config, ConfigFactory}
 import filodb.cassandra.FiloCassandraConnector
 import org.apache.spark.SparkContext
 
-import scala.concurrent.{Await, Future}
 import scala.concurrent.duration._
+import scala.concurrent.{Await, Future}
 import scala.language.postfixOps
 
-object Filo extends Serializable{
+object Filo extends Serializable {
 
   import collection.JavaConverters._
+
   implicit val executionContext = scala.concurrent.ExecutionContext.Implicits.global
 
   // The global config of filodb with cassandra, columnstore, etc. sections
@@ -23,8 +24,6 @@ object Filo extends Serializable{
   def init(filoConfig: Config): Unit = {
     config = filoConfig
   }
-
-  def init(context: SparkContext): Unit = init(configFromSpark(context))
 
   def configFromSpark(context: SparkContext): Config = {
     val conf = context.getConf

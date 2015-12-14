@@ -22,10 +22,11 @@ class FiloRDD(@transient val sc: SparkContext,
               segmentRange: Option[KeyRange[_]] = None
                ) extends RDD[Row](sc, Seq.empty) {
 
+  val filoConfig = Filo.configFromSpark(sc)
 
   @DeveloperApi
   override def compute(split: Partition, context: TaskContext): Iterator[Row] = {
-    Filo.init(sc)
+    Filo.init(filoConfig)
     val partition = split.asInstanceOf[FiloPartition]
     val scans = partition.scans
     val segmentScans = scans.iterator.flatMap(readSegments(_))
@@ -42,7 +43,7 @@ class FiloRDD(@transient val sc: SparkContext,
   }
 
   override protected def getPartitions: Array[Partition] = {
-    Filo.init(sc)
+    Filo.init(filoConfig)
     val scanSplitsCmd = Filo.columnStore.getScanSplits(splitCount, splitSize, projection,
       columns, partition, segmentRange)
     val scanSplits = Filo.parse(scanSplitsCmd)(s => s)

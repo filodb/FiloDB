@@ -25,4 +25,6 @@ object TypeConverters {
 
   def structToColTypes(struct: StructType): Seq[Column.ColumnType] =
     struct.map { field => sqlTypeToColType(field.dataType) }
+
+
 }

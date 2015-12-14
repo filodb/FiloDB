@@ -41,8 +41,8 @@ case class FiloRelation(dataset: String,
   import filodb.spark.TypeConverters._
 
   val sc = sqlContext.sparkContext
-  val filoConfig = Filo.init(sc)
-
+  val filoConfig = Filo.configFromSpark(sc)
+  Filo.init(filoConfig)
   val datasetObj = getDatasetObj(dataset)
   val filoSchema = getSchema(dataset, version)
   val superProjection = datasetObj.superProjection
@@ -51,10 +51,11 @@ case class FiloRelation(dataset: String,
   val schema = StructType(columnsToSqlFields(filoSchema))
   logger.info(s"Read schema for dataset $dataset = $schema")
 
-  def buildScan(): RDD[Row] = buildScan(superProjection.columnNames.toArray, Array.empty[Filter])
+  def buildScan(): RDD[Row] = buildScan(schema.fieldNames, Array.empty[Filter])
 
   def buildScan(requiredColumns: Array[String], filters: Array[Filter]): RDD[Row] = {
 
+    val columnIndexes = filoSchema.zipWithIndex.map { case (col, i) => col.name -> i }.toMap
     val partitionOption = getPartitionKey(filters)
 
     val suitableProjections = datasetObj.projections
@@ -64,11 +65,12 @@ case class FiloRelation(dataset: String,
       .find(p => getSegmentFilters(p.segmentColumns, filters).nonEmpty)
 
     bestAvailable match {
-      //there is a segment range clause in the match
+      // there is a segment matching projection
       case Some(projection) =>
         val segmentRangeOption = getSegmentRange(projection.segmentColumns, filters)
         new FiloRDD(sc, splitsPerNode, Long.MaxValue, projection, requiredColumns, partitionOption, segmentRangeOption)
 
+      // this is a full scan or partition scan without Segment Range
       case None =>
         val projection = suitableProjections.headOption.getOrElse(datasetObj.superProjection)
         new FiloRDD(sc, splitsPerNode, Long.MaxValue, projection, requiredColumns, partitionOption)
@@ -77,6 +79,7 @@ case class FiloRelation(dataset: String,
 
 
   private def getPartitionKey(filters: Array[Filter]): Option[Any] = {
+    val columnIndexes = filoSchema.zipWithIndex.map { case (col, i) => col.name -> i }.toMap
     val partitionFilters = getPartitionFilters(filters)
     val containsPartitionKey = partitionFilters.length == partitionColumns.length
     if (containsPartitionKey) {
@@ -84,8 +87,10 @@ case class FiloRelation(dataset: String,
       val rowReader = new ArrayStringRowReader(
         filoSchema.map(col => valueMap.getOrElse(col.name, "").toString).toArray
       )
-      Some(superProjection.partitionFunction(rowReader))
-    } else None
+      Some(superProjection.partitionFunction(columnIndexes)(rowReader))
+    } else {
+      None
+    }
   }
 
   private def getSegmentRange(segmentColumns: Seq[String],
@@ -109,19 +114,19 @@ case class FiloRelation(dataset: String,
           case _ => None
         }
       case 2 =>
-        //ordered by class name in reverse i.e Lt comes first, then Lte, then Gt then Gte
-        val orderedFilters = segmentFilters.sortBy(_.getClass.getName).reverse
+        // ordered by class name i.e Gt comes first, then Gte then Lt then Lte
+        val orderedFilters = segmentFilters.sortBy(_.getClass.getName)
         val predicate = (orderedFilters.head, orderedFilters.last)
 
         predicate match {
-          case (LessThan(_, start), GreaterThan(_, end)) =>
+          case (GreaterThan(_, start), LessThan(_, end)) =>
             Some(KeyRange(Some(start), Some(end), startExclusive = true, endExclusive = true))
-          case (LessThanOrEqual(_, start), GreaterThan(_, end)) =>
-            Some(KeyRange(Some(start), Some(end), startExclusive = false, endExclusive = true))
-          case (LessThanOrEqual(_, start), GreaterThanOrEqual(_, end)) =>
-            Some(KeyRange(Some(start), Some(end), startExclusive = false, endExclusive = false))
-          case (LessThan(_, start), GreaterThanOrEqual(_, end)) =>
+          case (GreaterThan(_, start), LessThanOrEqual(_, end)) =>
             Some(KeyRange(Some(start), Some(end), startExclusive = true, endExclusive = false))
+          case (GreaterThanOrEqual(_, start), LessThan(_, end)) =>
+            Some(KeyRange(Some(start), Some(end), startExclusive = false, endExclusive = true))
+          case (GreaterThanOrEqual(_, start), LessThanOrEqual(_, end)) =>
+            Some(KeyRange(Some(start), Some(end), startExclusive = false, endExclusive = false))
           case _ => None
         }
 
@@ -132,7 +137,7 @@ case class FiloRelation(dataset: String,
   }
 
   private def getPartitionFilters(filters: Array[Filter]) = filters.filter {
-    case predicate =>
+    case (predicate) =>
       predicate match {
         case EqualTo(col, _) => partitionColumns.contains(col)
         case _ => false
@@ -141,7 +146,7 @@ case class FiloRelation(dataset: String,
 
   private def getSegmentFilters(segmentColumns: Seq[String],
                                 filters: Array[Filter]) = filters.filter {
-    case predicate =>
+    case (predicate) =>
       predicate match {
         case EqualTo(columnName, _) if segmentColumns.contains(columnName) => true
         case LessThan(columnName, _) if segmentColumns.contains(columnName) => true

@@ -12,9 +12,10 @@ import filodb.core.reprojector.Reprojector.SegmentFlush
 import filodb.core.store.ColumnStoreSpec.MapColumnStore
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.{BeforeAndAfter, FunSpec, Matchers}
-import org.velvia.filo.TupleRowReader
+import org.velvia.filo.{RowReader, FiloRowReader, TupleRowReader}
 
 import scala.collection.immutable.TreeMap
+import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.{Await, Future}
 
 object ColumnStoreSpec {
@@ -267,7 +268,7 @@ class ColumnStoreSpec extends FunSpec with Matchers with BeforeAndAfter with Sca
       segments.length should be(2)
       val scan = segments.head
       scan.hasNext should be(true)
-      val threeReaders = scan.getMoreRows(3)
+      val threeReaders = getMoreRows(scan,2)
       scan.hasNext should be(false)
       val reader = threeReaders.head
       reader.getString(0) should be("US")
@@ -277,7 +278,8 @@ class ColumnStoreSpec extends FunSpec with Matchers with BeforeAndAfter with Sca
 
       val scan2 = segments.last
       scan2.hasNext should be(true)
-      val threeMore = scan2.getMoreRows(3)
+      val threeMore = getMoreRows(scan2,1)
+      scan2.hasNext should be(false)
       val reader1 = threeMore.last
       reader1.getString(0) should be("US")
       reader1.getString(1) should be("SF")
@@ -317,7 +319,8 @@ class ColumnStoreSpec extends FunSpec with Matchers with BeforeAndAfter with Sca
 
       val scan2 = segments.last
       scan2.hasNext should be(true)
-      val threeMore = scan2.getMoreRows(3)
+      val threeMore = getMoreRows(scan2,1)
+      scan2.hasNext should be(false)
       val reader1 = threeMore.last
       reader1.getString(0) should be("US")
       reader1.getString(1) should be("SF")
@@ -327,5 +330,6 @@ class ColumnStoreSpec extends FunSpec with Matchers with BeforeAndAfter with Sca
 
     }
   }
+
 
 }

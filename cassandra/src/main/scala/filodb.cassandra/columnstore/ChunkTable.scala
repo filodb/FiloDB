@@ -127,23 +127,39 @@ sealed class ChunkTable(ks: KeySpace, _session: Session)
           .and(_.projectionId eqs projection.id)
           .and(_.columnName eqs columnName)
         query = appendSegmentRange(segmentRange, query)
-        query.fetch()
+        query.allowFiltering().fetch()
     }
   }
 
 
-  def appendSegmentRange(segmentRange: KeyRange[_], query: SelectQuery[ChunkTable, (ByteBuffer, String, ChunkId, ByteBuffer), Unlimited, Unordered, Unspecified, Chainned]): SelectQuery[ChunkTable, (ByteBuffer, String, ChunkId, ByteBuffer), Unlimited, Unordered, Unspecified, Chainned] = {
-    val start = if (segmentRange.start.isDefined) {
-      if (segmentRange.startExclusive)
-        query.and(_.segmentId gt segmentRange.start.get.toString)
-      else query.and(_.segmentId gte segmentRange.start.get.toString)
-    } else query
+  private def appendSegmentRange(segmentRange: KeyRange[_],
+                                 query: SelectQuery[ChunkTable,
+                                   (ByteBuffer, String, ChunkId, ByteBuffer),
+                                   Unlimited,
+                                   Unordered,
+                                   Unspecified,
+                                   Chainned]) = {
+    val start =
+      if (segmentRange.start.isDefined) {
+        if (segmentRange.startExclusive) {
+          query.and(_.segmentId gt segmentRange.start.get.toString)
+        } else {
+          query.and(_.segmentId gte segmentRange.start.get.toString)
+        }
+      } else {
+        query
+      }
 
     if (segmentRange.end.isDefined) {
-      if (segmentRange.endExclusive)
+      if (segmentRange.endExclusive) {
         start.and(_.segmentId lt segmentRange.end.get.toString)
-      else start.and(_.segmentId lte segmentRange.end.get.toString)
-    } else start
+      }
+      else {
+        start.and(_.segmentId lte segmentRange.end.get.toString)
+      }
+    } else {
+      start
+    }
 
 
   }

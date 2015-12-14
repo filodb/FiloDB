@@ -5,10 +5,9 @@ import java.nio.ByteBuffer
 import filodb.core.Types._
 import filodb.core.metadata._
 import filodb.core.query.Dataflow.RowReaderFactory
-import org.velvia.filo.{FastFiloRowReader, FiloRowReader, FiloVector, RowReader}
+import org.velvia.filo.{FastFiloRowReader, FiloRowReader, RowReader}
 
 import scala.collection.mutable
-import scala.collection.mutable.ArrayBuffer
 
 
 object Dataflow {
@@ -22,8 +21,6 @@ object Dataflow {
 trait Dataflow extends Iterator[RowReader] {
 
   def classes: Array[Class[_]]
-
-  def getMoreRows(count: Int): Array[RowReader]
 
 }
 
@@ -122,24 +119,10 @@ class SegmentScan(val segment: Segment,
   }
 
   override def next(): RowReader = {
-    val (chunkNum, rowOffset) = getNextLocation.get
+    currentLocation = getNextLocation.get
+    val (chunkNum, rowOffset) = currentLocation
     chunkAccessTable(chunkNum)._2.rowNo = rowOffset
     chunkAccessTable(chunkNum)._2
+
   }
-
-  override def getMoreRows(count: Int): Array[RowReader] = {
-    var fetched = 0
-    val rows = ArrayBuffer[RowReader]()
-    while (hasNext && fetched < count) {
-      currentLocation = getNextLocation.get
-      rows.+=:(SingleRowReader(currentLocation._2, chunkAccessTable(currentLocation._1)._2.parsers))
-      fetched += 1
-    }
-    rows.toArray
-  }
-
-}
-
-case class SingleRowReader(rowNum: Int, parsers: Array[FiloVector[_]]) extends FiloRowReader {
-  rowNo = rowNum
 }

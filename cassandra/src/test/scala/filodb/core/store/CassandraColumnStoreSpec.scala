@@ -2,7 +2,6 @@ package filodb.core.store
 
 import filodb.cassandra.CassandraTest
 import filodb.cassandra.columnstore.CassandraColumnStore
-import filodb.core.metadata._
 import filodb.core.query.{Dataflow, SegmentedPartitionScanInfo}
 import filodb.core.reprojector.Reprojector
 import filodb.core.reprojector.Reprojector.SegmentFlush
@@ -15,7 +14,8 @@ import scala.language.postfixOps
 
 class CassandraColumnStoreSpec extends CassandraTest
 with BeforeAndAfter with Matchers with ScalaFutures {
-  implicit val rowReaderFactory:Dataflow.RowReaderFactory = Dataflow.DefaultReaderFactory
+  implicit val rowReaderFactory: Dataflow.RowReaderFactory = Dataflow.DefaultReaderFactory
+
   import com.websudos.phantom.dsl._
   import filodb.core.Setup._
 
@@ -104,7 +104,7 @@ with BeforeAndAfter with Matchers with ScalaFutures {
 
 
   describe("Store and read rows") {
-    it("should store and read one flush properly") {
+    it("should store and read one flush properly with Partition Key And Segment Range") {
 
       val rows = names.map(TupleRowReader)
       val partitions = Reprojector.project(projection, rows).toSeq
@@ -122,7 +122,7 @@ with BeforeAndAfter with Matchers with ScalaFutures {
       segments.length should be(2)
       val scan = segments.head
       scan.hasNext should be(true)
-      val threeReaders = scan.getMoreRows(3)
+      val threeReaders = getMoreRows(scan, 2)
       scan.hasNext should be(false)
       val reader = threeReaders.head
       reader.getString(0) should be("US")
@@ -132,7 +132,8 @@ with BeforeAndAfter with Matchers with ScalaFutures {
 
       val scan2 = segments.last
       scan2.hasNext should be(true)
-      val threeMore = scan2.getMoreRows(3)
+      val threeMore = getMoreRows(scan2, 1)
+      scan.hasNext should be(false)
       val reader1 = threeMore.last
       reader1.getString(0) should be("US")
       reader1.getString(1) should be("SF")
@@ -162,7 +163,8 @@ with BeforeAndAfter with Matchers with ScalaFutures {
 
       val scan2 = segments.last
       scan2.hasNext should be(true)
-      val threeMore = scan2.getMoreRows(3)
+      val threeMore = getMoreRows(scan2, 1)
+      scan2.hasNext should be(false)
       val reader1 = threeMore.last
       reader1.getString(0) should be("US")
       reader1.getString(1) should be("SF")
@@ -172,7 +174,7 @@ with BeforeAndAfter with Matchers with ScalaFutures {
 
     }
 
-    it("should store and read data for TokenRange splits") {
+    it("should store and read data for Full TokenRange") {
 
       val rows = names.map(TupleRowReader)
       val rows2 = names2.map(TupleRowReader)
@@ -196,14 +198,81 @@ with BeforeAndAfter with Matchers with ScalaFutures {
 
       val scan2 = segments.last
       scan2.hasNext should be(true)
-      val threeMore = scan2.getMoreRows(3)
+      val threeMore = getMoreRows(scan2, 3)
+      scan2.hasNext should be(false)
       val reader1 = threeMore.last
       reader1.getString(0) should be("UK")
       reader1.getString(1) should be("LN")
-      reader1.getString(2) should be("Terrance")
-      reader1.getString(3) should be("Parr")
-      reader1.getLong(4) should be(29)
+      reader1.getString(2) should be("Peyton")
+      reader1.getString(3) should be("Manning")
+      reader1.getLong(4) should be(50)
 
+    }
+
+    it("should store and read data for TokenRange with Partition") {
+
+      val rows = names.map(TupleRowReader)
+      val rows2 = names2.map(TupleRowReader)
+      val partitions = Reprojector.project(projection, rows).toSeq
+      val partitions2 = Reprojector.project(projection, rows2).toSeq
+      partitions.length should be(2)
+      partitions2.length should be(2)
+      val results = flushPartitions(columnStore, partitions)
+      checkResults(results)
+      val results2 = flushPartitions(columnStore, partitions2)
+      checkResults(results2)
+
+      val scans = columnStore.getScanSplits(10, 1000, projection, projection.columnNames, Some("US"), None)
+      val segments = Await.result(for {
+        s <- scans
+        res <- Future sequence (s.flatten.map(columnStore.readSegments(_)))
+      } yield res.flatten, 10 seconds)
+
+      segments.length should be(2)
+
+      val scan2 = segments.last
+      scan2.hasNext should be(true)
+      val threeMore = getMoreRows(scan2, 1)
+      scan2.hasNext should be(false)
+      val reader1 = threeMore.last
+      reader1.getString(0) should be("US")
+      reader1.getString(1) should be("SF")
+      reader1.getString(2) should be("Khalil")
+      reader1.getString(3) should be("Khadri")
+      reader1.getLong(4) should be(24)
+    }
+
+    it("should store and read data for TokenRange with Partition And Segment Range") {
+
+      val rows = names.map(TupleRowReader)
+      val rows2 = names2.map(TupleRowReader)
+      val partitions = Reprojector.project(projection, rows).toSeq
+      val partitions2 = Reprojector.project(projection, rows2).toSeq
+      partitions.length should be(2)
+      partitions2.length should be(2)
+      val results = flushPartitions(columnStore, partitions)
+      checkResults(results)
+      val results2 = flushPartitions(columnStore, partitions2)
+      checkResults(results2)
+
+      val scans = columnStore.getScanSplits(10, 1000, projection, projection.columnNames, Some("US"), Some(keyRange))
+      val segments = Await.result(for {
+        s <- scans
+        res <- Future sequence (s.flatten.map(columnStore.readSegments(_)))
+      } yield res.flatten, 10 seconds)
+
+      segments.length should be(2)
+
+      val scan2 = segments.last
+      scan2.hasNext should be(true)
+      val threeMore = getMoreRows(scan2, 1)
+      scan2.hasNext should be(false)
+      val reader1 = threeMore.last
+      reader1.getString(0) should be("US")
+      reader1.getString(1) should be("SF")
+      reader1.getString(2) should be("Khalil")
+      reader1.getString(3) should be("Khadri")
+      reader1.getLong(4) should be(24)
     }
   }
 

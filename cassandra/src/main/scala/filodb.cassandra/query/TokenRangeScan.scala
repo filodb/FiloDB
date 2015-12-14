@@ -34,12 +34,13 @@ case class TokenRange(start: Long, end: Long,
 
   def unwrap(): Seq[TokenRange] = {
     val minToken = Long.MinValue
-    if (isWrapAround)
+    if (isWrapAround) {
       Seq(
         TokenRange(start, minToken, replicas, dataSize / 2),
         TokenRange(minToken, end, replicas, dataSize / 2))
-    else
+    } else {
       Seq(this)
+    }
   }
 }
 
@@ -50,8 +51,10 @@ object Cluster {
   val MaxParallelism = 16
   private val pool: ForkJoinPool = new ForkJoinPool(MaxParallelism)
 
-  def getClusterTokenRanges(session: Session, keySpaceName: String, splitCount: Int,
-                            splitSize: Long) = {
+  def getClusterTokenRanges(session: Session,
+                            keySpaceName: String,
+                            splitCount: Int,
+                            splitSize: Long): Array[Seq[TokenRange]] = {
     val totalDataSize = splitCount * splitSize
     val tokenRanges = describeRing(keySpaceName, totalDataSize, session)
     val endpointCount = tokenRanges.map(_.replicas).reduce(_ ++ _).size
@@ -59,16 +62,19 @@ object Cluster {
     val maxGroupSize = tokenRanges.size / endpointCount
     val tokenRangeGrouper = new TokenRangeGrouper(splitSize, maxGroupSize)
     tokenRangeGrouper.group(splits).toArray
-
   }
 
   private def describeRing(keySpaceName: String, totalDataSize: Long, session: Session) = {
     val cluster = session.getCluster
     val metadata = cluster.getMetadata
-    for (tr <- metadata.getTokenRanges.toSeq) yield tokenRange(keySpaceName, totalDataSize, tr, metadata)
+    for {tr <- metadata.getTokenRanges.toSeq}
+      yield tokenRange(keySpaceName, totalDataSize, tr, metadata)
   }
 
-  private def tokenRange(keyspaceName: String, totalDataSize: Long, range: DriverTokenRange, metadata: Metadata): TokenRange = {
+  private def tokenRange(keyspaceName: String,
+                         totalDataSize: Long,
+                         range: DriverTokenRange,
+                         metadata: Metadata): TokenRange = {
     val startToken = range.getStart.getValue.toString.toLong
     val endToken = range.getEnd.getValue.toString.toLong
     val replicas = metadata.getReplicas(Metadata.quote(keyspaceName), range).map(_.getAddress).toSet
@@ -80,8 +86,9 @@ object Cluster {
                        tokenRanges: Iterable[TokenRange]): Iterable[TokenRange] = {
     val parTokenRanges = tokenRanges.par
     parTokenRanges.tasksupport = new ForkJoinTaskSupport(Cluster.pool)
-    (for (tokenRange <- parTokenRanges;
-          split <- split(tokenRange, splitSize)) yield split).seq
+
+    (for {tokenRange <- parTokenRanges; split <- split(tokenRange, splitSize)}
+      yield split).seq
   }
 
   val totalTokenCount = BigInt(Long.MaxValue) - BigInt(Long.MinValue)
@@ -90,8 +97,12 @@ object Cluster {
     distance(token1, token2).toDouble / totalTokenCount.toDouble
 
   private def distance(left: Long, right: Long): BigInt = {
-    if (right > left) BigInt(right) - BigInt(left)
-    else BigInt(right) - BigInt(left) + totalTokenCount
+    if (right > left) {
+      BigInt(right) - BigInt(left)
+    }
+    else {
+      BigInt(right) - BigInt(left) + totalTokenCount
+    }
   }
 
   private def split(range: TokenRange, splitSize: Long): Seq[TokenRange] = {
@@ -102,9 +113,9 @@ object Cluster {
     val left = range.start
     val right = range.end
     val splitPoints =
-      (for (i <- 0 until n) yield left + (rangeTokenCount * i / n).toLong) :+ right
+      (for {i <- 0 until n} yield left + (rangeTokenCount * i / n).toLong) :+ right
 
-    for (Seq(l, r) <- splitPoints.sliding(2).toSeq) yield
+    for {Seq(l, r) <- splitPoints.sliding(2).toSeq} yield
     new TokenRange(l, r, range.replicas, rangeSize / n)
   }
 
@@ -128,7 +139,7 @@ import scala.annotation.tailrec
 class TokenRangeGrouper(maxRowCountPerGroup: Long, maxGroupSize: Int = Int.MaxValue) {
 
   private implicit object InetAddressOrdering extends Ordering[InetAddress] {
-    override def compare(x: InetAddress, y: InetAddress) =
+    override def compare(x: InetAddress, y: InetAddress): Int =
       x.getHostAddress.compareTo(y.getHostAddress)
   }
 

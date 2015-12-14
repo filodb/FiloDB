@@ -1,7 +1,10 @@
 package filodb.core.metadata
 
 
-case class KeyRange[+K](start: Option[K], end: Option[K], startExclusive: Boolean = false, endExclusive: Boolean = false)
+case class KeyRange[+K](start: Option[K],
+                        end: Option[K],
+                        startExclusive: Boolean = false,
+                        endExclusive: Boolean = false)
 
 trait Segment {
 

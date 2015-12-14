@@ -3,6 +3,7 @@ package filodb.core
 import java.nio.ByteBuffer
 
 import filodb.core.metadata.{Column, KeyRange}
+import filodb.core.query.Dataflow
 import filodb.core.store.Dataset
 import org.velvia.filo.{FastFiloRowReader, FiloRowReader, RowReader, TupleRowReader}
 
@@ -50,4 +51,13 @@ object Setup {
   val firstNames = Seq("Khalil", "Ndamukong", "Rodney", "Terrance", "Peyton", "Jerry")
 
 
+  def getMoreRows(dataflow: Dataflow,count:Int) ={
+    var i = 0
+    val buffer = new Array[RowReader](count)
+    while(dataflow.hasNext && i < count){
+      buffer(i) = dataflow.next()
+      i+=1
+    }
+    buffer
+  }
 }

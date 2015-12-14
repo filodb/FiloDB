@@ -9,7 +9,7 @@ class MemTableMemoryTest extends FunSpec with Matchers with BeforeAndAfter {
   import filodb.core.Setup._
 
   val newSetting = "memtable.max-rows-per-table = 200000"
-  val mTable = new MapDBMemTable(projection)
+  val mTable = new MapDBMemTable(projection,projection.schema)
 
   before {
     mTable.clearAllData()

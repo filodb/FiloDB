@@ -6,6 +6,14 @@ import filodb.core.store.MetaStore.BadSchema
 import org.velvia.filo.{RowReader, VectorInfo}
 
 
+object Projection {
+  def toFiloSchema(schema: Seq[Column]): Seq[VectorInfo] = schema.map {
+    case Column(name, _, _, colType, serializer, false, false) =>
+      VectorInfo(name, colType.clazz)
+    case _ => throw new IllegalArgumentException("Need schema to be composed of columns")
+  }
+}
+
 /**
  * This is a Projection with information filled out from Dataset and Columns.
  * ie it has the actual Dataset and Column types as opposed to IDs, and a list of all columns.
@@ -28,35 +36,27 @@ case class Projection(id: Int,
   val schemaMap = schema.map(i => i.name -> i).toMap
   val columnNames = schema.map(i => i.name)
 
-  val columnIndexes = schema.zipWithIndex.map { case (c, i) => c.name -> i }.toMap
-
-
-  def filoSchema: Seq[VectorInfo] = schema.map {
-    case Column(name, _, _, colType, serializer, false, false) =>
-      VectorInfo(name, colType.clazz)
-    case _ => throw new IllegalArgumentException("Need schema to be composed of columns")
-  }
-
   // scalastyle:off
 
-  val partitionFunction = getKeyFunction[partitionType.T](
+  def partitionFunction(columnIndexes: Map[String, Int]) = getKeyFunction[partitionType.T](
     partitionType.asInstanceOf[KeyType {type T = partitionType.T}],
-    partitionColumns)
+    partitionColumns, columnIndexes)
 
-  val keyFunction = getKeyFunction[keyType.T](
+  def keyFunction(columnIndexes: Map[String, Int]) = getKeyFunction[keyType.T](
     keyType.asInstanceOf[KeyType {type T = keyType.T}],
-    keyColumns)
+    keyColumns, columnIndexes)
 
-  val sortFunction = getKeyFunction[sortType.T](
+  def sortFunction(columnIndexes: Map[String, Int]) = getKeyFunction[sortType.T](
     sortType.asInstanceOf[KeyType {type T = sortType.T}],
-    sortColumns)
+    sortColumns, columnIndexes)
 
-  val segmentFunction = getKeyFunction[segmentType.T](
+  def segmentFunction(columnIndexes: Map[String, Int]) = getKeyFunction[segmentType.T](
     segmentType.asInstanceOf[KeyType {type T = segmentType.T}],
-    segmentColumns)
+    segmentColumns, columnIndexes)
 
   def getKeyFunction[R](keyType: KeyType {type T = R},
-                        columns: Seq[ColumnId]): RowReader => R = {
+                        columns: Seq[ColumnId],
+                        columnIndexes: Map[String, Int]): RowReader => R = {
     val keyColNos = columns.map(col => columnIndexes.getOrElse(col, throw BadSchema("Invalid column $col")))
     keyType.getKeyFunc(keyColNos)
   }
