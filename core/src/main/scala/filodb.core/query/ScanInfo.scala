@@ -7,8 +7,6 @@ import filodb.core.metadata.{KeyRange, Projection}
 
 trait ScanInfo extends Serializable {
 
-  def locationInfo: Seq[InetAddress]
-
   def projection: Projection
 
   def columns: Seq[ColumnId]
@@ -24,13 +22,12 @@ trait SegmentedScanInfo extends ScanInfo {
 
 case class PartitionScanInfo(projection: Projection,
                              columns: Seq[ColumnId],
-                             partition: Any) extends ScanInfo {
-  override def locationInfo: Seq[InetAddress] = ScanInfo.LOCAL
-}
+                             partition: Any) extends ScanInfo
 
 case class SegmentedPartitionScanInfo(projection: Projection,
                                       columns: Seq[ColumnId],
                                       partition: Any,
-                                      segmentRange: KeyRange[_]) extends SegmentedScanInfo {
-  override def locationInfo: Seq[InetAddress] = ScanInfo.LOCAL
-}
+                                      segmentRange: KeyRange[_]) extends SegmentedScanInfo
+
+case class ScanSplit(scans:Seq[ScanInfo],
+                     replicas:Seq[String] = ScanInfo.LOCAL.map(_.toString))

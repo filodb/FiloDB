@@ -1,5 +1,6 @@
 package filodb.spark
 
+import com.typesafe.config.Config
 import com.typesafe.scalalogging.slf4j.StrictLogging
 import filodb.core.metadata.{Column, KeyRange}
 import filodb.core.store.Dataset
@@ -32,6 +33,7 @@ object FiloRelation {
  *
  */
 case class FiloRelation(dataset: String,
+                        filoConfig: Config,
                         version: Int = 0,
                         splitsPerNode: Int = 1)
                        (@transient val sqlContext: SQLContext)
@@ -41,8 +43,6 @@ case class FiloRelation(dataset: String,
   import filodb.spark.TypeConverters._
 
   val sc = sqlContext.sparkContext
-  val filoConfig = Filo.configFromSpark(sc)
-  Filo.init(filoConfig)
   val datasetObj = getDatasetObj(dataset)
   val filoSchema = getSchema(dataset, version)
   val superProjection = datasetObj.superProjection
@@ -55,7 +55,6 @@ case class FiloRelation(dataset: String,
 
   def buildScan(requiredColumns: Array[String], filters: Array[Filter]): RDD[Row] = {
 
-    val columnIndexes = filoSchema.zipWithIndex.map { case (col, i) => col.name -> i }.toMap
     val partitionOption = getPartitionKey(filters)
 
     val suitableProjections = datasetObj.projections
@@ -68,12 +67,14 @@ case class FiloRelation(dataset: String,
       // there is a segment matching projection
       case Some(projection) =>
         val segmentRangeOption = getSegmentRange(projection.segmentColumns, filters)
-        new FiloRDD(sc, splitsPerNode, Long.MaxValue, projection, requiredColumns, partitionOption, segmentRangeOption)
+        new FiloRDD(sc, filoConfig, splitsPerNode, Long.MaxValue,
+          projection, requiredColumns, partitionOption, segmentRangeOption)
 
       // this is a full scan or partition scan without Segment Range
       case None =>
         val projection = suitableProjections.headOption.getOrElse(datasetObj.superProjection)
-        new FiloRDD(sc, splitsPerNode, Long.MaxValue, projection, requiredColumns, partitionOption)
+        new FiloRDD(sc, filoConfig, splitsPerNode, Long.MaxValue,
+          projection, requiredColumns, partitionOption)
     }
   }
 

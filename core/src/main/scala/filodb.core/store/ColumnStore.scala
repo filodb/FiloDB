@@ -1,11 +1,12 @@
 package filodb.core.store
 
+import java.net.InetAddress
 import java.util.UUID
 
 import filodb.core.Types._
 import filodb.core.metadata._
 import filodb.core.query.Dataflow.RowReaderFactory
-import filodb.core.query.{Dataflow, ScanInfo, SegmentScan}
+import filodb.core.query.{ScanSplit, Dataflow, ScanInfo, SegmentScan}
 import filodb.core.reprojector.Reprojector.SegmentFlush
 
 import scala.concurrent.Future
@@ -57,7 +58,7 @@ trait QueryApi {
                     projection: Projection,
                     columns:Seq[ColumnId],
                     partition: Option[Any] = None,
-                    segmentRange: Option[KeyRange[_]] = None): Future[Seq[Seq[ScanInfo]]]
+                    segmentRange: Option[KeyRange[_]] = None): Future[Seq[ScanSplit]]
 
 }
 

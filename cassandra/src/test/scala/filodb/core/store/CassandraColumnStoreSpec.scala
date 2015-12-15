@@ -187,12 +187,15 @@ with BeforeAndAfter with Matchers with ScalaFutures {
       val results2 = flushPartitions(columnStore, partitions2)
       checkResults(results2)
 
-      val scans = columnStore.getScanSplits(10, 1000, projection, projection.columnNames, None, None)
-      val segments = Await.result(for {
-        s <- scans
-        res <- Future sequence (s.flatten.map(columnStore.readSegments(_)))
-      } yield res.flatten, 10 seconds)
+      val scanSplits = columnStore.getScanSplits(10, 1000, projection, projection.columnNames, None, None)
 
+      val future = for {
+        s <- scanSplits
+        scans = s.flatMap(_.scans)
+        res <- Future sequence scans.map(sc => columnStore.readSegments(sc))
+      } yield res.flatten
+
+      val segments: Seq[Dataflow] = Await.result(future, 10 seconds)
 
       segments.length should be(3)
 
@@ -222,11 +225,16 @@ with BeforeAndAfter with Matchers with ScalaFutures {
       val results2 = flushPartitions(columnStore, partitions2)
       checkResults(results2)
 
-      val scans = columnStore.getScanSplits(10, 1000, projection, projection.columnNames, Some("US"), None)
-      val segments = Await.result(for {
-        s <- scans
-        res <- Future sequence (s.flatten.map(columnStore.readSegments(_)))
-      } yield res.flatten, 10 seconds)
+      val scanSplits = columnStore.getScanSplits(10, 1000,
+        projection, projection.columnNames, Some("US"), None)
+
+      val future = for {
+        s <- scanSplits
+        scans = s.flatMap(_.scans)
+        res <- Future sequence scans.map(sc => columnStore.readSegments(sc))
+      } yield res.flatten
+
+      val segments: Seq[Dataflow] = Await.result(future, 10 seconds)
 
       segments.length should be(2)
 
@@ -255,12 +263,15 @@ with BeforeAndAfter with Matchers with ScalaFutures {
       val results2 = flushPartitions(columnStore, partitions2)
       checkResults(results2)
 
-      val scans = columnStore.getScanSplits(10, 1000, projection, projection.columnNames, Some("US"), Some(keyRange))
-      val segments = Await.result(for {
-        s <- scans
-        res <- Future sequence (s.flatten.map(columnStore.readSegments(_)))
-      } yield res.flatten, 10 seconds)
+      val scanSplits = columnStore.getScanSplits(10, 1000, projection,
+        projection.columnNames, Some("US"), Some(keyRange))
+      val future = for {
+        s <- scanSplits
+        scans = s.flatMap(_.scans)
+        res <- Future sequence scans.map(sc => columnStore.readSegments(sc))
+      } yield res.flatten
 
+      val segments: Seq[Dataflow] = Await.result(future, 10 seconds)
       segments.length should be(2)
 
       val scan2 = segments.last

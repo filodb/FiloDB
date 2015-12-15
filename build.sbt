@@ -89,7 +89,10 @@ lazy val coordDeps = Seq(
 )
 
 lazy val cliDeps = Seq(
-  "com.quantifind"       %% "sumac"             % "0.3.0"
+  "com.quantifind"       %% "sumac"             % "0.3.0",
+  "org.jboss.aesh"        % "aesh"              % "0.66",
+  "org.jboss.aesh"        % "aesh-extensions"   % "0.66",
+  "com.github.lalyos"     % "jfiglet"           % "0.0.7"
 )
 
 lazy val sparkDeps = Seq(

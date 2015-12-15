@@ -1,8 +1,9 @@
 package filodb
 
-import com.typesafe.config.Config
-import filodb.core.metadata.{Column, Projection}
+import com.typesafe.config.{Config, ConfigFactory}
+import filodb.core.metadata.Column
 import filodb.core.reprojector.Reprojector
+import org.apache.spark.SparkContext
 import org.apache.spark.sql.types.DataType
 import org.apache.spark.sql.{DataFrame, Row, SQLContext, SaveMode}
 
@@ -27,6 +28,17 @@ case class BadSchemaError(reason: String) extends Exception(reason)
 package object spark {
 
 
+
+  def configFromSpark(context: SparkContext): Config = {
+    val conf = context.getConf
+    val filoOverrides = conf.getAll.collect { case (k, v) if k.startsWith("spark.filodb") =>
+      k.replace("spark.filodb.", "") -> v
+    }
+    import scala.collection.JavaConverters._
+    ConfigFactory.parseMap(filoOverrides.toMap.asJava)
+  }
+
+
   implicit class FiloContext(sqlContext: SQLContext) extends Serializable {
 
     import TypeConverters._
@@ -43,7 +55,7 @@ package object spark {
         schemaMap(colName)
       }
 
-      val filoConfig = Filo.configFromSpark(sqlContext.sparkContext)
+      val filoConfig = configFromSpark(sqlContext.sparkContext)
       // For each partition, start the ingestion
       df.rdd.mapPartitions { rowIter =>
         Filo.parse(ingest(filoConfig, dataset, rowIter, dfOrderSchema))(r => r).iterator

@@ -5,17 +5,15 @@ import java.util.UUID
 import filodb.core.Setup._
 import filodb.core.Types.{ChunkId, ColumnId}
 import filodb.core.metadata._
-import filodb.core.query.Dataflow._
-import filodb.core.query.{Dataflow, PartitionScanInfo, ScanInfo, SegmentedPartitionScanInfo}
+import filodb.core.query._
 import filodb.core.reprojector.Reprojector
 import filodb.core.reprojector.Reprojector.SegmentFlush
 import filodb.core.store.ColumnStoreSpec.MapColumnStore
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.{BeforeAndAfter, FunSpec, Matchers}
-import org.velvia.filo.{RowReader, FiloRowReader, TupleRowReader}
+import org.velvia.filo.TupleRowReader
 
 import scala.collection.immutable.TreeMap
-import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.{Await, Future}
 
 object ColumnStoreSpec {
@@ -157,11 +155,15 @@ object ColumnStoreSpec {
                                projection: Projection,
                                columns: Seq[ColumnId],
                                partition: Option[Any],
-                               segmentRange: Option[KeyRange[_]]): Future[Seq[Seq[ScanInfo]]] = {
+                               segmentRange: Option[KeyRange[_]]): Future[Seq[ScanSplit]] = {
       partition match {
         case Some(pk) => segmentRange match {
-          case Some(range) => Future(Seq(Seq(SegmentedPartitionScanInfo(projection, columns, pk, range))))
-          case None => Future(Seq(Seq(PartitionScanInfo(projection, columns, pk))))
+          case Some(range) => Future(Seq(
+            ScanSplit(Seq(SegmentedPartitionScanInfo(projection, columns, pk, range)))
+          ))
+          case None => Future(Seq(
+            ScanSplit(Seq(PartitionScanInfo(projection, columns, pk)))
+          ))
         }
         case None => throw new UnsupportedOperationException
       }
@@ -177,7 +179,7 @@ object ColumnStoreSpec {
 
 class ColumnStoreSpec extends FunSpec with Matchers with BeforeAndAfter with ScalaFutures {
 
-  implicit val rowReaderFactory:Dataflow.RowReaderFactory = Dataflow.DefaultReaderFactory
+  implicit val rowReaderFactory: Dataflow.RowReaderFactory = Dataflow.DefaultReaderFactory
 
   import scala.concurrent.duration._
 
@@ -262,13 +264,13 @@ class ColumnStoreSpec extends FunSpec with Matchers with BeforeAndAfter with Sca
       checkResults(results)
 
       val segments = Await.result(mapColumnStore.readSegments(
-        SegmentedPartitionScanInfo(projection,projection.columnNames,"US", keyRange)
-        ), 10 seconds)
+        SegmentedPartitionScanInfo(projection, projection.columnNames, "US", keyRange)
+      ), 10 seconds)
 
       segments.length should be(2)
       val scan = segments.head
       scan.hasNext should be(true)
-      val threeReaders = getMoreRows(scan,2)
+      val threeReaders = getMoreRows(scan, 2)
       scan.hasNext should be(false)
       val reader = threeReaders.head
       reader.getString(0) should be("US")
@@ -278,7 +280,7 @@ class ColumnStoreSpec extends FunSpec with Matchers with BeforeAndAfter with Sca
 
       val scan2 = segments.last
       scan2.hasNext should be(true)
-      val threeMore = getMoreRows(scan2,1)
+      val threeMore = getMoreRows(scan2, 1)
       scan2.hasNext should be(false)
       val reader1 = threeMore.last
       reader1.getString(0) should be("US")
@@ -309,17 +311,17 @@ class ColumnStoreSpec extends FunSpec with Matchers with BeforeAndAfter with Sca
         Some(keyRange))
         , 10 seconds)
       scanInfos.length should be(1)
-      scanInfos.head.length should be(1)
+      scanInfos.head.scans.length should be(1)
 
       val segments = Await.result(
-        mapColumnStore.readSegments(scanInfos.head.head),
+        mapColumnStore.readSegments(scanInfos.head.scans.head),
         10 seconds)
 
       segments.length should be(2)
 
       val scan2 = segments.last
       scan2.hasNext should be(true)
-      val threeMore = getMoreRows(scan2,1)
+      val threeMore = getMoreRows(scan2, 1)
       scan2.hasNext should be(false)
       val reader1 = threeMore.last
       reader1.getString(0) should be("US")

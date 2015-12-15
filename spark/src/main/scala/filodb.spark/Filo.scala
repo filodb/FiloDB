@@ -1,8 +1,7 @@
 package filodb.spark
 
-import com.typesafe.config.{Config, ConfigFactory}
+import com.typesafe.config.Config
 import filodb.cassandra.FiloCassandraConnector
-import org.apache.spark.SparkContext
 
 import scala.concurrent.duration._
 import scala.concurrent.{Await, Future}
@@ -10,11 +9,10 @@ import scala.language.postfixOps
 
 object Filo extends Serializable {
 
-  import collection.JavaConverters._
 
   implicit val executionContext = scala.concurrent.ExecutionContext.Implicits.global
 
-  // The global config of filodb with cassandra, columnstore, etc. sections
+  // The global config of filodb with cassandra, spark, etc. sections
   var config: Config = _
 
   lazy val connector = new FiloCassandraConnector(config.getConfig("cassandra"))
@@ -25,16 +23,7 @@ object Filo extends Serializable {
     config = filoConfig
   }
 
-  def configFromSpark(context: SparkContext): Config = {
-    val conf = context.getConf
-    val filoOverrides = conf.getAll.collect { case (k, v) if k.startsWith("filodb") =>
-      k.replace("filodb.", "") -> v
-    }
-    ConfigFactory.parseMap(filoOverrides.toMap.asJava)
-      .withFallback(ConfigFactory.load)
-  }
-
-  def parse[T, B](cmd: => Future[T], awaitTimeout: FiniteDuration = 5 seconds)(func: T => B): B = {
+  def parse[T, B](cmd: => Future[T], awaitTimeout: FiniteDuration = 5.seconds)(func: T => B): B = {
     func(Await.result(cmd, awaitTimeout))
   }
 

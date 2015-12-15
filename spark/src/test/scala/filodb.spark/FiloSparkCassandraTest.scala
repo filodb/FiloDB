@@ -4,30 +4,30 @@ import filodb.cassandra.CassandraTest
 import filodb.core.metadata.Column
 import filodb.core.store.Dataset
 import org.apache.spark.sql.SQLContext
-import org.apache.spark.{SparkContext, SparkConf}
+import org.apache.spark.{SparkConf, SparkContext}
 
 import scala.concurrent.Await
 import scala.concurrent.duration._
 import scala.language.postfixOps
+
 /**
  * Test saveAsFiloDataset
  */
 class FiloSparkCassandraTest extends CassandraTest {
 
   // Setup SQLContext and a sample DataFrame
-  val conf = (new SparkConf).setMaster("local[4]")
+  val conf = (new SparkConf(false)).setMaster("local[4]")
     .setAppName("test")
-    .set("filodb.cassandra.hosts", "localhost")
-    .set("filodb.cassandra.port", "9142")
-    .set("filodb.cassandra.keyspace", "unittest")
-    .set("filodb.memtable.min-free-mb", "10")
+    .set("spark.filodb.cassandra.hosts", "localhost")
+    .set("spark.filodb.cassandra.port", "9142")
+    .set("spark.filodb.cassandra.keyspace", "unittest")
   val sc = new SparkContext(conf)
   val sql = new SQLContext(sc)
 
 
   override def beforeAll(): Unit = {
     super.beforeAll()
-    Filo.init(Filo.configFromSpark(sc))
+    Filo.init(configFromSpark(sc))
     Await.result(Filo.columnStore.initialize, 10 seconds)
     Await.result(Filo.metaStore.initialize, 10 seconds)
   }
@@ -47,9 +47,9 @@ class FiloSparkCassandraTest extends CassandraTest {
     Column("monthYear", "jsonds", 0, Column.ColumnType.LongColumn),
     Column("year", "jsonds", 0, Column.ColumnType.LongColumn))
 
+  //Table name,Schema, Part Key, Primary Key, Sort Order,Segment
   val dataset = Dataset("jsonds", schema, "year", "id", "sqlDate", "monthYear")
 
-  // Sample data.  Note how we must create a partitioning column.
   val jsonRows = Seq(
     """{"id":0,"sqlDate":"2015/03/15T15:00Z","monthYear":32015,"year":2015}""",
     """{"id":1,"sqlDate":"2015/03/15T16:00Z","monthYear":42015,"year":2014}""",
@@ -59,13 +59,12 @@ class FiloSparkCassandraTest extends CassandraTest {
   val dataDF = sql.read.json(sc.parallelize(jsonRows, 1))
 
   import filodb.spark._
-  import org.apache.spark.sql.functions._
 
   it("should write table to a Filo table and read from it") {
     Filo.metaStore.addProjection(dataset.projectionInfoSeq.head)
     sql.saveAsFiloDataset(dataDF, "jsonds")
     // Now read stuff back and ensure it got written
-    val jsonDS = sql.read.format("filodb.spark").option("dataset","jsonds").load()
+    val jsonDS = sql.read.format("filodb.spark").option("dataset", "jsonds").load()
     jsonDS.registerTempTable("jsonds")
     val df = sql.sql("select id,sqlDate from jsonds")
     df.show()
@@ -79,7 +78,7 @@ class FiloSparkCassandraTest extends CassandraTest {
     Filo.metaStore.addProjection(dataset.projectionInfoSeq.head)
     sql.saveAsFiloDataset(dataDF, "jsonds")
     // Now read stuff back and ensure it got written
-    val jsonDS = sql.read.format("filodb.spark").option("dataset","jsonds").load()
+    val jsonDS = sql.read.format("filodb.spark").option("dataset", "jsonds").load()
     jsonDS.registerTempTable("jsonds")
     val df = sql.sql("select sqlDate from jsonds where year=2015")
     df.show()
@@ -90,7 +89,7 @@ class FiloSparkCassandraTest extends CassandraTest {
     Filo.metaStore.addProjection(dataset.projectionInfoSeq.head)
     sql.saveAsFiloDataset(dataDF, "jsonds")
     // Now read stuff back and ensure it got written
-    val jsonDS = sql.read.format("filodb.spark").option("dataset","jsonds").load()
+    val jsonDS = sql.read.format("filodb.spark").option("dataset", "jsonds").load()
     jsonDS.registerTempTable("jsonds")
     val df = sql.sql("select sqlDate from jsonds where monthYear=42015")
     df.show()
@@ -116,7 +115,7 @@ class FiloSparkCassandraTest extends CassandraTest {
     Filo.metaStore.addProjection(dataset.projectionInfoSeq.head)
     sql.saveAsFiloDataset(dataDF, "jsonds")
     // Now read stuff back and ensure it got written
-    val jsonDS = sql.read.format("filodb.spark").option("dataset","jsonds").load()
+    val jsonDS = sql.read.format("filodb.spark").option("dataset", "jsonds").load()
     jsonDS.registerTempTable("jsonds")
     val df = sql.sql("select sqlDate,monthYear from jsonds where year=2015 AND monthYear=42015")
     df.show()
