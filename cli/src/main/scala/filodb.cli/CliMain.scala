@@ -54,8 +54,10 @@ class CliMain {
           case _ =>
             val start: Long = System.currentTimeMillis
             try {
-              //do some operation
+              // do some operation
+              // Call Filo Interpreter
               val end: Long = System.currentTimeMillis
+              // print the result
               printWriter.println(getSuccessString("Query took " + (start - end) + " millis"))
             } catch {
               case e: Exception => printWriter.println(getErrorString(e.getMessage))

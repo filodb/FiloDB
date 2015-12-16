@@ -10,10 +10,6 @@ import scala.reflect.ClassTag
 
 object MetaStore {
 
-  case class IllegalColumnChange(reasons: Seq[String]) extends Exception {
-    override def getMessage: String = reasons.mkString(", ")
-  }
-
   case class BadSchema(reason: String) extends Exception("BadSchema: " + reason)
 
 }
