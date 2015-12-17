@@ -83,6 +83,21 @@ object Dataset {
     Dataset(name, schema, projections)
   }
 
+  def apply(name: String,
+            schema: Seq[Column],
+            partitionColumn: Seq[ColumnId],
+            keyColumn: Seq[ColumnId],
+            sortColumn: Seq[ColumnId],
+            segmentColumn: Seq[ColumnId]
+           ): Dataset = {
+    val projections = Seq(
+      ProjectionInfo(0, name, schema,
+        partitionColumn, keyColumn, sortColumn, segmentColumn
+      )
+    )
+    Dataset(name, schema, projections)
+  }
+
   /**
    * Returns a SortKeyHelper configured from the DatasetOptions.
    */

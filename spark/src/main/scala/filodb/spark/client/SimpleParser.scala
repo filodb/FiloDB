@@ -4,17 +4,20 @@ import org.apache.commons.lang.StringUtils
 
 import scala.util.parsing.combinator.{JavaTokenParsers, RegexParsers}
 import scala.language.implicitConversions
+
 sealed trait Command
 
 case class Load(tableName: String,
-                delimiter: Char,
                 url: String,
-                nullValue: String,
-                emptyValue: String,
-                useDefaults: Boolean) extends Command
+                format: String,
+                options: Map[String, String]) extends Command
 
 case class Create(tableName: String,
-                  columns: Map[String, String]) extends Command
+                  columns: Map[String, String],
+                  partitionCols: Seq[String],
+                  primaryCols: Seq[String],
+                  segmentCols: Seq[String],
+                  sortCols: Seq[String]) extends Command
 
 
 object SimpleParser extends RegexParsers with JavaTokenParsers {
@@ -41,32 +44,56 @@ object SimpleParser extends RegexParsers with JavaTokenParsers {
         throw new IllegalArgumentException(msg)
     }
 
+  def parseSelect(input: String): Boolean =
+    parseAll(select, StringUtils.removeEnd(input, ";")) match {
+      case s: Success[_] => true
+      case e: Error =>
+        val msg = "Cannot parse [" + input + "] because " + e.msg
+        throw new IllegalArgumentException(msg)
+      case f: Failure =>
+        val msg = "Cannot parse [" + input + "] because " + f.msg
+        throw new IllegalArgumentException(msg)
+    }
+
+  lazy val select: Parser[Boolean] =
+    SELECT ~ ".*".r ^^ {
+      case url ~ dl => true
+    }
+
 
   lazy val load: Parser[Load] =
     (LOAD ~> quotedStr) ~
-      (DELIMITED ~> BY ~> quotedStr).? ~
-      (WITH ~> NULL ~> quotedStr).? ~
-      (WITH ~> EMPTY ~> quotedStr).? ~
-      (NO ~> DEFAULTS).? ~
-      (INTO ~> ident) ^^ {
-      case url ~ dl ~ nullVal ~ emptyVal ~ noDef ~ name =>
-        Load(name, dl.getOrElse(",").toCharArray()(0), url,
-          nullValue = nullVal.orNull,
-          emptyValue = emptyVal.orNull,
-          noDef.fold(true) {
-            case s: String => false
-            case _ => true
-          })
+      (INTO ~> ident) ~
+      (WITH ~> FORMAT ~> quotedStr) ~
+      (WITH ~> OPTIONS ~> options).? ^^ {
+      case url ~ name ~ format ~ options =>
+        Load(name, url, format, options.getOrElse(Map()))
     }
 
   lazy val create: Parser[Create] =
     CREATE ~
       (TABLE | VIEW) ~
       (IF ~> NOT ~> EXISTS).? ~
-      ident ~ columns ^^ {
-      case c ~ tv ~ e ~ tableName ~ cols =>
-        Create(tableName, cols)
+      ident ~
+      columns ~
+      (PRIMARY ~> KEY ~> columnNames) ~
+      (PARTITION ~> BY ~> columnNames) ~
+      (SEGMENT ~> BY ~> columnNames)~
+      (SORT ~> BY ~> columnNames) ^^ {
+      case c ~ tv ~ e ~ tableName ~ cols ~ primaryCols ~ partitionCols ~ segmentCols ~ sortCols =>
+        Create(tableName, cols, partitionCols, primaryCols, segmentCols, sortCols)
     }
+
+  def options: Parser[Map[String, String]] =
+    "(" ~> repsep(option, ",") <~ ")" ^^ {
+      Map() ++ _
+    }
+
+  def option: Parser[(String, String)] =
+    quotedStr ~ quotedStr ^^ {
+      case optionKey ~ optionVal => (optionKey, optionVal)
+    }
+
 
   def columns: Parser[Map[String, String]] =
     "(" ~> repsep(column, ",") <~ ")" ^^ {
@@ -76,6 +103,16 @@ object SimpleParser extends RegexParsers with JavaTokenParsers {
   def column: Parser[(String, String)] =
     ident ~ ident ^^ {
       case columnName ~ dataType => (columnName, dataType)
+    }
+
+  def columnNames: Parser[Seq[String]] =
+    "(" ~> repsep(columnName, ",") <~ ")" ^^ {
+      Seq() ++ _
+    }
+
+  def columnName: Parser[(String)] =
+    ident ^^ {
+      case columnName: String => columnName
     }
 
 
@@ -101,6 +138,14 @@ object SimpleParser extends RegexParsers with JavaTokenParsers {
   protected val PROJECTION = Keyword("PROJECTION")
   protected val TEMPORARY = Keyword("TEMPORARY")
   protected val INTO = Keyword("INTO")
+  protected val PARTITION = Keyword("PARTITION")
+  protected val PRIMARY = Keyword("PRIMARY")
+  protected val SEGMENT = Keyword("SEGMENT")
+  protected val SELECT = Keyword("SELECT")
+  protected val KEY = Keyword("KEY")
+  protected val OPTIONS = Keyword("OPTIONS")
+  protected val FORMAT = Keyword("FORMAT")
+  protected val SORT = Keyword("SORT")
 
   case class Keyword(key: String)
 
