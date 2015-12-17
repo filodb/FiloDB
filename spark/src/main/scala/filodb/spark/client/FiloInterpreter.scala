@@ -5,12 +5,39 @@ import filodb.core.metadata.Column.ColumnType
 import filodb.spark._
 import filodb.core.store.Dataset
 import filodb.spark.Filo
+import org.apache.spark.{SparkContext, SparkConf}
 import org.apache.spark.sql.SQLContext
+import scala.concurrent.Await
 import scala.language.postfixOps
+import scala.concurrent.duration._
 
 object FiloInterpreter {
 
-  def interpret(input: String, sql: SQLContext): Any = {
+  val conf = (new SparkConf(false)).setMaster("local[4]")
+    .setAppName("test")
+    .set("spark.filodb.cassandra.hosts", "localhost")
+    .set("spark.filodb.cassandra.port", "9142")
+    .set("spark.filodb.cassandra.keyspace", "unittest")
+  val sc = new SparkContext(conf)
+  val sql = new SQLContext(sc)
+
+  def init() :Unit  = {
+    Filo.init(configFromSpark(sc))
+    Await.result(Filo.columnStore.initialize, 10 seconds)
+    Await.result(Filo.metaStore.initialize, 10 seconds)
+  }
+
+  def stop():Unit ={
+    Await.result(Filo.columnStore.clearAll, 10 seconds)
+    Await.result(Filo.metaStore.clearAll, 10 seconds)
+    sc.stop()
+  }
+
+  def getSparkContext : SparkContext = sc
+
+  def getSqlContext: SQLContext = sql
+
+  def interpret(input: String): Any = {
     input.toLowerCase.trim match {
 
       case s: String if s.startsWith("s") =>

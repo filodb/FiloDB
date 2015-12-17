@@ -1,39 +1,22 @@
 package filodb.spark.client
 
 import scala.collection.Map
-import scala.collection.immutable.{List, Seq}
+import scala.collection.immutable.Seq
 import scala.language.postfixOps
 import filodb.cassandra.CassandraTest
 import filodb.spark._
-import org.apache.spark.sql.{DataFrame, SQLContext}
-import org.apache.spark.{SparkContext, SparkConf}
-import scala.concurrent.duration._
-import scala.concurrent.Await
+import org.apache.spark.sql.DataFrame
 
 class FiloInterpreterTest extends CassandraTest {
 
-  // Setup SQLContext and a sample DataFrame
-  val conf = (new SparkConf(false)).setMaster("local[4]")
-    .setAppName("test")
-    .set("spark.filodb.cassandra.hosts", "localhost")
-    .set("spark.filodb.cassandra.port", "9142")
-    .set("spark.filodb.cassandra.keyspace", "unittest")
-  val sc = new SparkContext(conf)
-  val sql = new SQLContext(sc)
-
-
   override def beforeAll(): Unit = {
     super.beforeAll()
-    Filo.init(configFromSpark(sc))
-    Await.result(Filo.columnStore.initialize, 10 seconds)
-    Await.result(Filo.metaStore.initialize, 10 seconds)
+    FiloInterpreter.init()
   }
 
   override def afterAll() {
     super.afterAll()
-    Await.result(Filo.columnStore.clearAll, 10 seconds)
-    Await.result(Filo.metaStore.clearAll, 10 seconds)
-    sc.stop()
+    FiloInterpreter.stop()
   }
 
   implicit val ec = Filo.executionContext
@@ -82,54 +65,54 @@ class FiloInterpreterTest extends CassandraTest {
   }
 
   it("should write table to a Filo table and read from it") {
-    FiloInterpreter.interpret(createTable, sql)
-    FiloInterpreter.interpret(loadTable, sql)
+    FiloInterpreter.interpret(createTable)
+    FiloInterpreter.interpret(loadTable)
     // Now read stuff back and ensure it got written
-    val jsonDS = sql.read.format("filodb.spark").option("dataset", "jsonds").load()
+    val jsonDS = FiloInterpreter.getSqlContext.read.format("filodb.spark").option("dataset", "jsonds").load()
     jsonDS.registerTempTable("jsonds")
-    val df = FiloInterpreter.interpret("select id,sqlDate from jsonds", sql).asInstanceOf[DataFrame]
+    val df = FiloInterpreter.interpret("select id,sqlDate from jsonds").asInstanceOf[DataFrame]
     df.show()
     df.count() should be(3)
-    val df2 = FiloInterpreter.interpret("select * from jsonds", sql).asInstanceOf[DataFrame]
+    val df2 = FiloInterpreter.interpret("select * from jsonds").asInstanceOf[DataFrame]
     df2.show()
     df2.count() should be(3)
   }
 
   it("should not read when partition key is not specified") {
     intercept[IllegalArgumentException] {
-      FiloInterpreter.interpret(createTableWithoutParition, sql)
+      FiloInterpreter.interpret(createTableWithoutParition)
     }
   }
 
   it("should not read when segment key is not specified") {
     intercept[IllegalArgumentException] {
-      FiloInterpreter.interpret(createTableWithoutSegment, sql)
+      FiloInterpreter.interpret(createTableWithoutSegment)
     }
   }
 
   it("should not read when primary key is not specified") {
     intercept[IllegalArgumentException] {
-      FiloInterpreter.interpret(createTableWithoutPrimary, sql)
+      FiloInterpreter.interpret(createTableWithoutPrimary)
     }
   }
 
   it("should not read when format is not specified") {
     intercept[IllegalArgumentException] {
-      FiloInterpreter.interpret(loadTableWithoutFormat, sql)
+      FiloInterpreter.interpret(loadTableWithoutFormat)
     }
 
   }
 
   it("should read options in load statement when specified") {
-    FiloInterpreter.interpret(createTable, sql)
-    FiloInterpreter.interpret(loadTableWithOptions, sql)
+    FiloInterpreter.interpret(createTable)
+    FiloInterpreter.interpret(loadTableWithOptions)
     // Now read stuff back and ensure it got written
-    val jsonDS = sql.read.format("filodb.spark").option("dataset", "jsonds").load()
+    val jsonDS = FiloInterpreter.getSqlContext.read.format("filodb.spark").option("dataset", "jsonds").load()
     jsonDS.registerTempTable("jsonds")
-    val df = FiloInterpreter.interpret("select id,sqlDate from jsonds", sql).asInstanceOf[DataFrame]
+    val df = FiloInterpreter.interpret("select id,sqlDate from jsonds").asInstanceOf[DataFrame]
     df.show()
     df.count() should be(3)
-    val df2 = FiloInterpreter.interpret("select * from jsonds", sql).asInstanceOf[DataFrame]
+    val df2 = FiloInterpreter.interpret("select * from jsonds").asInstanceOf[DataFrame]
     df2.show()
     df2.count() should be(3)
   }
