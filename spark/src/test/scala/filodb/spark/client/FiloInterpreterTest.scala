@@ -71,10 +71,8 @@ class FiloInterpreterTest extends CassandraTest {
     val jsonDS = FiloInterpreter.getSqlContext.read.format("filodb.spark").option("dataset", "jsonds").load()
     jsonDS.registerTempTable("jsonds")
     val df = FiloInterpreter.interpret("select id,sqlDate from jsonds").asInstanceOf[DataFrame]
-    df.show()
     df.count() should be(3)
     val df2 = FiloInterpreter.interpret("select * from jsonds").asInstanceOf[DataFrame]
-    df2.show()
     df2.count() should be(3)
   }
 
@@ -110,10 +108,8 @@ class FiloInterpreterTest extends CassandraTest {
     val jsonDS = FiloInterpreter.getSqlContext.read.format("filodb.spark").option("dataset", "jsonds").load()
     jsonDS.registerTempTable("jsonds")
     val df = FiloInterpreter.interpret("select id,sqlDate from jsonds").asInstanceOf[DataFrame]
-    df.show()
     df.count() should be(3)
     val df2 = FiloInterpreter.interpret("select * from jsonds").asInstanceOf[DataFrame]
-    df2.show()
     df2.count() should be(3)
   }
 }

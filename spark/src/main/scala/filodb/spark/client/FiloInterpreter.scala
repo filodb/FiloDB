@@ -7,9 +7,11 @@ import filodb.core.store.Dataset
 import filodb.spark.Filo
 import org.apache.spark.{SparkContext, SparkConf}
 import org.apache.spark.sql.SQLContext
-import scala.concurrent.Await
+import scala.concurrent.{Future, Await}
 import scala.language.postfixOps
 import scala.concurrent.duration._
+import scala.concurrent.ExecutionContext.Implicits.global
+import scala.util.{Success,Failure}
 
 object FiloInterpreter {
 
@@ -43,6 +45,7 @@ object FiloInterpreter {
       case s: String if s.startsWith("s") =>
         if (SimpleParser.parseSelect(input)) {
           val df = sql.sql(input)
+          df.show(20)
           return df
         }
 
@@ -54,12 +57,16 @@ object FiloInterpreter {
         } toSeq
         val dataset = Dataset.apply(create.tableName, columns,
           create.partitionCols, create.primaryCols, create.sortCols, create.segmentCols)
-        Filo.metaStore.addProjection(dataset.projectionInfoSeq.head)
+         Filo.metaStore.addProjection(dataset.projectionInfoSeq.head).onComplete{
+          case Success(value) => true
+          case Failure(value) => false
+        }
 
       case l: String if l.startsWith("l") =>
         val load = SimpleParser.parseLoad(input)
         val dataDF = sql.read.format(load.format).options(load.options).load(load.url)
         sql.saveAsFiloDataset(dataDF, load.tableName)
+        true
 
       case _ => throw new IllegalArgumentException("Cannot parse the given statement")
     }
