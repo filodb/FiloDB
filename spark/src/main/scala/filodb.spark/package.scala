@@ -28,7 +28,6 @@ case class BadSchemaError(reason: String) extends Exception(reason)
 package object spark {
 
 
-
   def configFromSpark(context: SparkContext): Config = {
     val conf = context.getConf
     val filoOverrides = conf.getAll.collect { case (k, v) if k.startsWith("spark.filodb") =>
@@ -45,6 +44,7 @@ package object spark {
 
     def saveAsFiloDataset(df: DataFrame,
                           dataset: String,
+                          flushSize: Int = 10000,
                           mode: SaveMode = SaveMode.Append): Unit = {
       val datasetObj = FiloRelation.getDatasetObj(dataset)
       val namesTypes = df.schema.map { f => f.name -> f.dataType }
@@ -58,25 +58,32 @@ package object spark {
       val filoConfig = configFromSpark(sqlContext.sparkContext)
       // For each partition, start the ingestion
       df.rdd.mapPartitions { rowIter =>
-        Filo.parse(ingest(filoConfig, dataset, rowIter, dfOrderSchema))(r => r).iterator
-      }.collect()
+        Filo.init(filoConfig)
+        Filo.parse(ingest(flushSize,filoConfig, dataset, rowIter, dfOrderSchema))(r => r).iterator
+      }.count()
     }
 
 
-    private def ingest(filoConfig: Config, dataset: String, rowIter: Iterator[Row], dfOrderSchema: Seq[Column]) = {
-      Filo.init(filoConfig)
+    private def ingest(flushSize: Int,filoConfig: Config, dataset: String, rowIter: Iterator[Row], dfOrderSchema: Seq[Column]) = {
+
       implicit val executionContext = Filo.executionContext
       val datasetObj = FiloRelation.getDatasetObj(dataset)
       Future sequence datasetObj.projections.flatMap { projection =>
-        // reproject the data
-        val projectedData = Reprojector.project(projection,
-          rowIter.map(r => RddRowReader(r)).toSeq,
-          Some(dfOrderSchema)
-        )
-        projectedData.map { case (partition, segmentFlushes) =>
-          segmentFlushes
-            .map(flush => Filo.columnStore.flushToSegment(flush))
+        // group the flushes into flush Size rows
+        // this is a compromise between memory and ingestion speed.
+        rowIter.grouped(flushSize).map{ rows=>
+          // reproject the data
+          val projectedData = Reprojector.project(projection,
+            rows.map(r => RddRowReader(r)).iterator,
+            Some(dfOrderSchema)
+          )
+          // now flush each segment
+          projectedData.flatMap { case (partition, segmentFlushes) =>
+            segmentFlushes
+              .map(flush => Filo.columnStore.flushToSegment(flush))
+          }
         }
+
       }.flatten
 
     }

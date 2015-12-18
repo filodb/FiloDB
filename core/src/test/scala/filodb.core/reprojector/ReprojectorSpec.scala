@@ -10,7 +10,7 @@ class ReprojectorSpec extends FunSpec with Matchers with BeforeAndAfter with Sca
 
   describe("Rows to Flush") {
     it("should correctly project rows to flush") {
-      val rows = names.map(TupleRowReader)
+      val rows = names.map(TupleRowReader).iterator
       val partitions = Reprojector.project(projection, rows).toSeq
       partitions.length should be(2)
       val classes = projection.schema.map(_.columnType.clazz).toArray

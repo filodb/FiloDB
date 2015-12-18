@@ -10,7 +10,7 @@ import org.velvia.filo.{RowReader, RowToVectorBuilder}
 trait Reprojector extends Serializable {
 
   def project(projection: Projection,
-              rows: Seq[RowReader],
+              rows: Iterator[RowReader],
               rowSchema: Option[Seq[Column]] = None): Iterator[(Any, Seq[SegmentFlush])]
 }
 
@@ -25,13 +25,13 @@ object Reprojector extends Reprojector {
 
 
   override def project(projection: Projection,
-                       rows: Seq[RowReader],
+                       rows: Iterator[RowReader],
                        passedSchema: Option[Seq[Column]] = None): Iterator[(Any, Seq[SegmentFlush])] = {
     val rowSchema = passedSchema.getOrElse(projection.schema)
     val columnIndexes = rowSchema.zipWithIndex.map { case (col, i) => col.name -> i }.toMap
     // lets group rows within partition by segment
     import filodb.core.util.Iterators._
-    val partitionedRows = rows.iterator.sortedGroupBy(projection.partitionFunction(columnIndexes))
+    val partitionedRows = rows.sortedGroupBy(projection.partitionFunction(columnIndexes))
     partitionedRows.map { case (partitionKey, partRows) =>
 
       val segmentedRows = partRows.sortedGroupBy(projection.segmentFunction(columnIndexes))

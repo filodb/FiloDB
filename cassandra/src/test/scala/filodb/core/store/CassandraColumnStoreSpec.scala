@@ -54,7 +54,7 @@ with BeforeAndAfter with Matchers with ScalaFutures {
 
   describe("Concurrent flushes") {
     it("should NOT allow concurrent flushes to write against the same summary version") {
-      val rows = names.map(TupleRowReader)
+      val rows = names.map(TupleRowReader).iterator
       val partitions = Reprojector.project(projection, rows).toSeq
 
       partitions.length should be(2)
@@ -62,12 +62,12 @@ with BeforeAndAfter with Matchers with ScalaFutures {
       checkResults(results)
 
 
-      val rows1 = names2.map(TupleRowReader)
+      val rows1 = names2.map(TupleRowReader).iterator
       val partitions1 = Reprojector.project(projection, rows1).toSeq
       partitions1.length should be(2)
       val flush1 = partitions1.head._2.head
 
-      val rows2 = names3.map(TupleRowReader)
+      val rows2 = names3.map(TupleRowReader).iterator
       val partitions2 = Reprojector.project(projection, rows2).toSeq
       partitions2.length should be(2)
       val flush2 = partitions2.head._2.head
@@ -106,7 +106,7 @@ with BeforeAndAfter with Matchers with ScalaFutures {
   describe("Store and read rows") {
     it("should store and read one flush properly with Partition Key And Segment Range") {
 
-      val rows = names.map(TupleRowReader)
+      val rows = names.map(TupleRowReader).iterator
       val partitions = Reprojector.project(projection, rows).toSeq
 
       partitions.length should be(2)
@@ -144,8 +144,8 @@ with BeforeAndAfter with Matchers with ScalaFutures {
 
     it("should store and read data from multiples flushes properly with overrides") {
 
-      val rows = names.map(TupleRowReader)
-      val rows2 = names2.map(TupleRowReader)
+      val rows = names.map(TupleRowReader).iterator
+      val rows2 = names2.map(TupleRowReader).iterator
       val partitions = Reprojector.project(projection, rows).toSeq
       val partitions2 = Reprojector.project(projection, rows2).toSeq
       partitions.length should be(2)
@@ -176,8 +176,8 @@ with BeforeAndAfter with Matchers with ScalaFutures {
 
     it("should store and read data for Full TokenRange") {
 
-      val rows = names.map(TupleRowReader)
-      val rows2 = names2.map(TupleRowReader)
+      val rows = names.map(TupleRowReader).iterator
+      val rows2 = names2.map(TupleRowReader).iterator
       val partitions = Reprojector.project(projection, rows).toSeq
       val partitions2 = Reprojector.project(projection, rows2).toSeq
       partitions.length should be(2)
@@ -214,8 +214,8 @@ with BeforeAndAfter with Matchers with ScalaFutures {
 
     it("should store and read data for TokenRange with Partition") {
 
-      val rows = names.map(TupleRowReader)
-      val rows2 = names2.map(TupleRowReader)
+      val rows = names.map(TupleRowReader).iterator
+      val rows2 = names2.map(TupleRowReader).iterator
       val partitions = Reprojector.project(projection, rows).toSeq
       val partitions2 = Reprojector.project(projection, rows2).toSeq
       partitions.length should be(2)
@@ -252,8 +252,8 @@ with BeforeAndAfter with Matchers with ScalaFutures {
 
     it("should store and read data for TokenRange with Partition And Segment Range") {
 
-      val rows = names.map(TupleRowReader)
-      val rows2 = names2.map(TupleRowReader)
+      val rows = names.map(TupleRowReader).iterator
+      val rows2 = names2.map(TupleRowReader).iterator
       val partitions = Reprojector.project(projection, rows).toSeq
       val partitions2 = Reprojector.project(projection, rows2).toSeq
       partitions.length should be(2)

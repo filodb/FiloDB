@@ -23,7 +23,7 @@ object Filo extends Serializable {
     config = filoConfig
   }
 
-  def parse[T, B](cmd: => Future[T], awaitTimeout: FiniteDuration = 5.seconds)(func: T => B): B = {
+  def parse[T, B](cmd: => Future[T], awaitTimeout: FiniteDuration = 50000.seconds)(func: T => B): B = {
     func(Await.result(cmd, awaitTimeout))
   }
 
