@@ -14,12 +14,20 @@ import scala.concurrent.duration._
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.util.{Success, Failure}
 
+/**
+  * Filo Interpreter to parse and execute the commands sent through CLI.
+  *
+  */
+
 object FiloInterpreter {
   //scalastyle:off
   var sc: SparkContext = null
   var sql: SQLContext = null
 
   //scalastyle:on
+  /** To initialize the columnStore, metaStore and the SqlContext and SparkContext
+    * @param sContext the spark context to be used for initialization
+    */
   def init(sContext: SparkContext): Unit = {
     sc = sContext
     sql = new SQLContext(sc)
@@ -28,12 +36,16 @@ object FiloInterpreter {
     Await.result(Filo.metaStore.initialize, 10 seconds)
   }
 
+  /** The method to be called in the end to clear the columnStore and metaStore */
   def stop(): Unit = {
     Await.result(Filo.columnStore.clearAll, 10 seconds)
     Await.result(Filo.metaStore.clearAll, 10 seconds)
     sc.stop()
   }
 
+  /** Interprets load, create, select, show and describe statements and executes them
+    * @param input Statement to be parsed and executed if valid
+    */
   def interpret(input: String): Future[DataFrame] = {
     input.toLowerCase.trim match {
 
@@ -77,6 +89,9 @@ object FiloInterpreter {
   private lazy val dfFailure = sql.read.json(sc.parallelize(Seq( """{"status":0}"""), 1))
   private lazy val dfSuccess = sql.read.json(sc.parallelize(Seq( """{"status":1}"""), 1))
 
+  /** handles the show tables action
+    * @param input  the statement to be parsed for the show tables command
+    */
   private def handleShow(input: String): Future[DataFrame] = {
     if (SimpleParser.parseShow(input)) {
       val description = Filo.metaStore.projectionTable.getAllSuperProjectionNames
@@ -96,6 +111,9 @@ object FiloInterpreter {
     }
   }
 
+  /** handles the create table action
+    * @param create  the case class for describe consisting the parameters for create command
+    */
   private def handleCreate(create: Create): DataFrame = {
     val columns = create.columns map {
       case (colName, colType) =>
@@ -109,6 +127,9 @@ object FiloInterpreter {
     dfSuccess
   }
 
+  /** handles the describe tables or projections action
+    * @param describe the case class for describe consisting the parameters for describe command
+    */
   private def handleDescribe(describe: Describe): Future[DataFrame] = {
     if (describe.isTable) {
       val description = Filo.metaStore.projectionTable.getSuperProjection(describe.tableName)
@@ -147,6 +168,10 @@ object FiloInterpreter {
 
   }
 
+  /** Converts the dataframe into String with the max number of rows as
+   * @param numRows max number of rows to be displayed
+   * @param dataframe the dataframe to be converted into string
+   */
   def showString(numRows: Int, dataframe: DataFrame): String = {
     val sb = new StringBuilder
     val data = dataframe.take(numRows)
