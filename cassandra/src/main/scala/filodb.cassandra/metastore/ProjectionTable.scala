@@ -90,4 +90,8 @@ sealed class ProjectionTable(ks: KeySpace, _session: Session)
     select.where(_.dataset eqs dataset).fetch()
   }
 
+  def getAllSuperProjectionNames: Future[Seq[String]] ={
+    select.where(_.projectionId eqs 0).allowFiltering().fetch().map(list => list map(info => info.dataset))
+  }
+
 }

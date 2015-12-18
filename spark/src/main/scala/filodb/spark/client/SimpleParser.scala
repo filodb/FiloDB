@@ -19,40 +19,56 @@ case class Create(tableName: String,
                   segmentCols: Seq[String],
                   sortCols: Seq[String]) extends Command
 
+case class Describe(tableName: String,
+                    isTable: Boolean,
+                    projectionName: Option[Int]) extends Command
+
 
 object SimpleParser extends RegexParsers with JavaTokenParsers {
+
+  private def handleError(e: Error,input: String) = {
+    val msg = "Cannot parse [" + input + "] because " + e.msg
+    throw new IllegalArgumentException(msg)
+  }
+
+  private def handleFailure(f: Failure,input: String) ={
+    val msg = "Cannot parse [" + input + "] because " + f.msg
+    throw new IllegalArgumentException(msg)
+  }
 
   def parseLoad(input: String): Load =
     parseAll(load, StringUtils.removeEnd(input, ";")) match {
       case s: Success[_] => s.get.asInstanceOf[Load]
-      case e: Error =>
-        val msg = "Cannot parse [" + input + "] because " + e.msg
-        throw new IllegalArgumentException(msg)
-      case f: Failure =>
-        val msg = "Cannot parse [" + input + "] because " + f.msg
-        throw new IllegalArgumentException(msg)
+      case e: Error => handleError(e, input)
+      case f: Failure => handleFailure(f, input)
+    }
+
+  def parseShow(input: String): Boolean =
+    parseAll(show, StringUtils.removeEnd(input, ";")) match {
+      case s: Success[_] => true
+      case e: Error => handleError(e, input)
+      case f: Failure => handleFailure(f, input)
+    }
+
+  def parseDecribe(input: String): Describe =
+    parseAll(describe, StringUtils.removeEnd(input, ";")) match {
+      case s: Success[_] => s.get.asInstanceOf[Describe]
+      case e: Error => handleError(e, input)
+      case f: Failure => handleFailure(f, input)
     }
 
   def parseCreate(input: String): Create =
     parseAll(create, StringUtils.removeEnd(input, ";")) match {
       case s: Success[_] => s.get.asInstanceOf[Create]
-      case e: Error =>
-        val msg = "Cannot parse [" + input + "] because " + e.msg
-        throw new IllegalArgumentException(msg)
-      case f: Failure =>
-        val msg = "Cannot parse [" + input + "] because " + f.msg
-        throw new IllegalArgumentException(msg)
+      case e: Error => handleError(e, input)
+      case f: Failure => handleFailure(f, input)
     }
 
   def parseSelect(input: String): Boolean =
     parseAll(select, StringUtils.removeEnd(input, ";")) match {
       case s: Success[_] => true
-      case e: Error =>
-        val msg = "Cannot parse [" + input + "] because " + e.msg
-        throw new IllegalArgumentException(msg)
-      case f: Failure =>
-        val msg = "Cannot parse [" + input + "] because " + f.msg
-        throw new IllegalArgumentException(msg)
+      case e: Error => handleError(e, input)
+      case f: Failure => handleFailure(f, input)
     }
 
   lazy val select: Parser[Boolean] =
@@ -60,6 +76,21 @@ object SimpleParser extends RegexParsers with JavaTokenParsers {
       case url ~ dl => true
     }
 
+  lazy val show: Parser[Boolean] =
+    SHOW ~ TABLES ^^ {
+      case url ~ dl => true
+    }
+
+  lazy val describe: Parser[Describe] =
+    DESCRIBE ~ (TABLE | PROJECTION) ~ ident ~ "[0-9]*".r.? ^^ {
+      case url ~ tp ~ table ~ proj =>
+        if (tp.equals("TABLE")) {
+            Describe(table,true,None)
+        }
+        else{
+          Describe(table,false,Some(proj.getOrElse("0").toInt))
+        }
+    }
 
   lazy val load: Parser[Load] =
     (LOAD ~> quotedStr) ~
@@ -78,43 +109,41 @@ object SimpleParser extends RegexParsers with JavaTokenParsers {
       columns ~
       (PRIMARY ~> KEY ~> columnNames) ~
       (PARTITION ~> BY ~> columnNames) ~
-      (SEGMENT ~> BY ~> columnNames)~
+      (SEGMENT ~> BY ~> columnNames) ~
       (SORT ~> BY ~> columnNames) ^^ {
       case c ~ tv ~ e ~ tableName ~ cols ~ primaryCols ~ partitionCols ~ segmentCols ~ sortCols =>
         Create(tableName, cols, partitionCols, primaryCols, segmentCols, sortCols)
     }
 
-  def options: Parser[Map[String, String]] =
+  def options: Parser[Map[String, String]] = {
+    def option: Parser[(String, String)] =
+      quotedStr ~ ":" ~ quotedStr ^^ {
+        case optionKey ~ sep ~ optionVal => (optionKey, optionVal)
+      }
     "(" ~> repsep(option, ",") <~ ")" ^^ {
       Map() ++ _
     }
+  }
 
-  def option: Parser[(String, String)] =
-    quotedStr ~ quotedStr ^^ {
-      case optionKey ~ optionVal => (optionKey, optionVal)
-    }
-
-
-  def columns: Parser[Map[String, String]] =
+  def columns: Parser[Map[String, String]] = {
+    def column: Parser[(String, String)] =
+      ident ~ ident ^^ {
+        case columnName ~ dataType => (columnName, dataType)
+      }
     "(" ~> repsep(column, ",") <~ ")" ^^ {
       Map() ++ _
     }
+  }
 
-  def column: Parser[(String, String)] =
-    ident ~ ident ^^ {
-      case columnName ~ dataType => (columnName, dataType)
-    }
-
-  def columnNames: Parser[Seq[String]] =
+  def columnNames: Parser[Seq[String]] = {
+    def columnName: Parser[(String)] =
+      ident ^^ {
+        case columnName: String => columnName
+      }
     "(" ~> repsep(columnName, ",") <~ ")" ^^ {
       Seq() ++ _
     }
-
-  def columnName: Parser[(String)] =
-    ident ^^ {
-      case columnName: String => columnName
-    }
-
+  }
 
   protected lazy val quotedStr: Parser[String] =
     ("'" + """([^'\p{Cntrl}\\]|\\[\\'"bfnrt]|\\u[a-fA-F0-9]{4})*""" + "'").r ^^ {
@@ -146,6 +175,9 @@ object SimpleParser extends RegexParsers with JavaTokenParsers {
   protected val OPTIONS = Keyword("OPTIONS")
   protected val FORMAT = Keyword("FORMAT")
   protected val SORT = Keyword("SORT")
+  protected val SHOW = Keyword("SHOW")
+  protected val DESCRIBE = Keyword("DESCRIBE")
+  protected val TABLES = Keyword("TABLES")
 
   case class Keyword(key: String)
 
@@ -153,5 +185,4 @@ object SimpleParser extends RegexParsers with JavaTokenParsers {
   implicit def keyword2Parser(kw: Keyword): Parser[String] = {
     ("""(?i)\Q""" + kw.key + """\E""").r
   }
-
 }
