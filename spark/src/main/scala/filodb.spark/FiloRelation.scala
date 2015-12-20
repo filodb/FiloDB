@@ -2,8 +2,7 @@ package filodb.spark
 
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.slf4j.StrictLogging
-import filodb.core.metadata.{Column, KeyRange}
-import filodb.core.store.Dataset
+import filodb.core.metadata.KeyRange
 import filodb.spark.rdd.FiloRDD
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.sources.{Filter, _}
@@ -13,18 +12,6 @@ import org.velvia.filo.ArrayStringRowReader
 
 import scala.language.postfixOps
 
-object FiloRelation {
-
-  implicit val context = scala.concurrent.ExecutionContext.Implicits.global
-
-
-  def getDatasetObj(dataset: String): Dataset =
-    Filo.parse(Filo.metaStore.getDataset(dataset)) { ds => ds.get }
-
-  def getSchema(dataset: String, version: Int): Seq[Column] =
-    Filo.parse(Filo.metaStore.getSchema(dataset)) { schema => schema }
-
-}
 
 /**
  * Schema and row scanner, with pruned column optimization for fast reading from FiloDB
@@ -35,16 +22,17 @@ object FiloRelation {
 case class FiloRelation(dataset: String,
                         filoConfig: Config,
                         version: Int = 0,
-                        splitsPerNode: Int = 1)
+                        splitsPerNode: Int = 1,
+                        splitSize: Long = Long.MaxValue)
                        (@transient val sqlContext: SQLContext)
   extends BaseRelation with TableScan with PrunedFilteredScan with StrictLogging {
 
-  import filodb.spark.FiloRelation._
   import filodb.spark.TypeConverters._
 
   val sc = sqlContext.sparkContext
-  val datasetObj = getDatasetObj(dataset)
-  val filoSchema = getSchema(dataset, version)
+  Filo.init(configFromSpark(sc))
+  val datasetObj = Filo.getDatasetObj(dataset)
+  val filoSchema = Filo.getSchema(dataset, version)
   val superProjection = datasetObj.superProjection
   val partitionColumns = datasetObj.partitionColumns
 
@@ -67,13 +55,13 @@ case class FiloRelation(dataset: String,
       // there is a segment matching projection
       case Some(projection) =>
         val segmentRangeOption = getSegmentRange(projection.segmentColumns, filters)
-        new FiloRDD(sc, filoConfig, splitsPerNode, Long.MaxValue,
+        new FiloRDD(sc, filoConfig, splitsPerNode, splitSize,
           projection, requiredColumns, partitionOption, segmentRangeOption)
 
       // this is a full scan or partition scan without Segment Range
       case None =>
         val projection = suitableProjections.headOption.getOrElse(datasetObj.superProjection)
-        new FiloRDD(sc, filoConfig, splitsPerNode, Long.MaxValue,
+        new FiloRDD(sc, filoConfig, splitsPerNode, splitSize,
           projection, requiredColumns, partitionOption)
     }
   }

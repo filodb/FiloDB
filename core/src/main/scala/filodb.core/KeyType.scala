@@ -22,6 +22,8 @@ trait KeyType {
 
   def getKeyFunc(columnNumbers: Seq[Int]): RowReader => T
 
+  def size(key: T):Int
+
 }
 
 object KeyType {
@@ -93,6 +95,10 @@ case class CompositeKeyType(atomTypes: Seq[SingleKeyType]) extends KeyType {
     }
     toSeq
   }
+
+  override def size(key: Seq[_]): Int = atomTypes.zipWithIndex.map{
+    case (t,i) => t.size(key(i).asInstanceOf[t.T])
+  }.sum
 }
 
 /**
@@ -109,6 +115,8 @@ case class LongKeyType() extends SingleKeyType {
   def fromBytes(bytes: ByteVector): Long = bytes.toLong(signed = true, ByteOrdering.BigEndian)
 
   override def extractor: TypedFieldExtractor[Long] = LongFieldExtractor
+
+  override def size(key:Long): Int = 8
 }
 
 case class IntKeyType() extends SingleKeyType {
@@ -121,6 +129,8 @@ case class IntKeyType() extends SingleKeyType {
   def fromBytes(bytes: ByteVector): Int = bytes.toInt(signed = true, ByteOrdering.BigEndian)
 
   override def extractor: TypedFieldExtractor[Int] = IntFieldExtractor
+
+  override def size(key:Int): Int = 4
 }
 
 case class DoubleKeyType() extends SingleKeyType {
@@ -135,17 +145,10 @@ case class DoubleKeyType() extends SingleKeyType {
     java.lang.Double.longBitsToDouble(bytes.toLong(signed = true, ByteOrdering.BigEndian))
 
   override def extractor: TypedFieldExtractor[Double] = DoubleFieldExtractor
+
+  override def size(key:Double): Int = 8
 }
 
-/**
- * Right now, you have to specify a prefixLen for the string key helper.
- * All string keys with identical prefixes (characters 0 to prefixLen - 1) will then be
- * bucketed into the same segment.
- * Thus one needs to look through your string sort key data and make sure to bucketize
- * correctly.
- *
- * TODO: perhaps combine prefixLen with a range of chars the last char is allowed to vary on
- */
 case class StringKeyType() extends SingleKeyType {
   type T = String
 
@@ -159,5 +162,7 @@ case class StringKeyType() extends SingleKeyType {
   def fromBytes(bytes: ByteVector): String = new String(bytes.toArray, "UTF-8")
 
   override def extractor: TypedFieldExtractor[String] = StringFieldExtractor
+
+  override def size(key:String): Int = key.getBytes("UTF-8").length
 }
 

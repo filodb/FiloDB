@@ -8,15 +8,17 @@ import com.websudos.phantom.connectors.KeySpace
 import com.websudos.phantom.dsl._
 import filodb.core.Messages.Response
 import filodb.core.metadata.{Projection, SegmentSummary}
+import filodb.core.util.MemoryPool
 
 import scala.concurrent.Future
 
-sealed class SummaryTable(ks:KeySpace,_session: Session)
-  extends CassandraTable[SummaryTable, (String, java.util.UUID, ByteBuffer)]{
+sealed class SummaryTable(ks: KeySpace, _session: Session)
+  extends CassandraTable[SummaryTable, (String, java.util.UUID, ByteBuffer)]
+  with MemoryPool {
 
   import filodb.cassandra.Util._
 
-  implicit val keySpace= ks
+  implicit val keySpace = ks
   implicit val session = _session
 
   //scalastyle:off
@@ -33,9 +35,9 @@ sealed class SummaryTable(ks:KeySpace,_session: Session)
 
   object chunkSummaries extends BlobColumn(this)
 
-  def initialize():Future[Response] = create.ifNotExists.future().toResponse()
+  def initialize(): Future[Response] = create.ifNotExists.future().toResponse()
 
-  def clearAll():Future[Response] = truncate.future().toResponse()
+  def clearAll(): Future[Response] = truncate.future().toResponse()
 
   def readSummary(projection: Projection,
                   partition: ByteBuffer,
@@ -72,14 +74,19 @@ sealed class SummaryTable(ks:KeySpace,_session: Session)
                     oldVersion: java.util.UUID,
                     newVersion: java.util.UUID,
                     segmentSummary: SegmentSummary): Future[Response] = {
+    val ssBytes = acquire(segmentSummary.size)
+    segmentSummary.write(ssBytes)
     val updateQuery = update.where(_.dataset eqs projection.dataset)
       .and(_.projectionId eqs projection.id)
       .and(_.partition eqs partition)
       .and(_.segmentId eqs segmentId)
       .modify(_.segmentVersion setTo newVersion)
-      .and(_.chunkSummaries setTo segmentSummary.toBytes)
+      .and(_.chunkSummaries setTo ssBytes)
       .onlyIf(_.segmentVersion is oldVersion)
-    updateQuery.future.toResponse()
+    updateQuery.future.map { f =>
+      release(ssBytes)
+      f
+    }.toResponse()
   }
 
   def insertSummary(projection: Projection,
@@ -87,13 +94,19 @@ sealed class SummaryTable(ks:KeySpace,_session: Session)
                     segmentId: String,
                     segmentVersion: UUID,
                     segmentSummary: SegmentSummary): Future[Response] = {
+    val segmentSummarySize = segmentSummary.size
+    val ssBytes = acquire(segmentSummarySize)
+    segmentSummary.write(ssBytes)
     insert.value(_.dataset, projection.dataset)
       .value(_.projectionId, projection.id)
       .value(_.partition, partition)
       .value(_.segmentId, segmentId)
       .value(_.segmentVersion, segmentVersion)
-      .value(_.chunkSummaries, segmentSummary.toBytes)
-      .ifNotExists().future().toResponse()
+      .value(_.chunkSummaries, ssBytes)
+      .ifNotExists().future().map { f =>
+      release(ssBytes)
+      f
+    }.toResponse()
   }
 
 

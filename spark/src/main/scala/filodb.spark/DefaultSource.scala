@@ -10,6 +10,7 @@ import org.apache.spark.sql.{DataFrame, SQLContext, SaveMode}
 class DefaultSource extends RelationProvider with CreatableRelationProvider {
 
   val DefaultSplitsPerNode = "4"
+  val DefaultSplitSize = "100000"
 
   /**
    * Implements dataframe.read() functionality.
@@ -23,8 +24,9 @@ class DefaultSource extends RelationProvider with CreatableRelationProvider {
     val dataset = parameters.getOrElse("dataset", sys.error("'dataset' must be specified for FiloDB."))
     val version = parameters.getOrElse("version", "0").toInt
     val splitsPerNode = parameters.getOrElse("splits_per_node", DefaultSplitsPerNode).toInt
+    val splitSize = parameters.getOrElse("split-size", DefaultSplitSize).toInt
     val filoConfig = configFromSpark(sqlContext.sparkContext)
-    FiloRelation(dataset,filoConfig, version, splitsPerNode = splitsPerNode)(sqlContext)
+    FiloRelation(dataset, filoConfig, version, splitsPerNode, splitSize)(sqlContext)
   }
 
   /**
@@ -37,15 +39,14 @@ class DefaultSource extends RelationProvider with CreatableRelationProvider {
    * sort_column      name of the sort column within each partition
    * default_partition_key if defined, use this as the partition key when partitioning column is null
    */
-  def createRelation(
-                      sqlContext: SQLContext,
+  def createRelation(sqlContext: SQLContext,
                       mode: SaveMode,
                       parameters: Map[String, String],
                       data: DataFrame): BaseRelation = {
     val dataset = parameters.getOrElse("dataset", sys.error("'dataset' must be specified for FiloDB."))
     val version = parameters.getOrElse("version", "0").toInt
-    sqlContext.saveAsFiloDataset(data, dataset)
     val filoConfig = configFromSpark(sqlContext.sparkContext)
-    FiloRelation(dataset,filoConfig, version)(sqlContext)
+    sqlContext.saveAsFiloDataset(data, dataset)
+    FiloRelation(dataset, filoConfig, version)(sqlContext)
   }
 }

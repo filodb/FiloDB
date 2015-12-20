@@ -33,8 +33,9 @@ case class Projection(id: Int,
                       sortType: KeyType,
                       segmentType: KeyType) {
 
-  val schemaMap = schema.map(i => i.name -> i).toMap
-  val columnNames = schema.map(i => i.name)
+  val schemaMap = schema.map(c => c.name -> c).toMap
+  val columnIndexes = schema.zipWithIndex.map { case (c, i) => c.name -> i }.toMap
+  val columnNames = schema.map(c => c.name)
 
   // scalastyle:off
 

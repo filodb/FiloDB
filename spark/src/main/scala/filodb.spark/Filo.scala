@@ -2,6 +2,8 @@ package filodb.spark
 
 import com.typesafe.config.Config
 import filodb.cassandra.FiloCassandraConnector
+import filodb.core.metadata.Column
+import filodb.core.store.Dataset
 
 import scala.concurrent.duration._
 import scala.concurrent.{Await, Future}
@@ -12,19 +14,29 @@ object Filo extends Serializable {
 
   implicit val executionContext = scala.concurrent.ExecutionContext.Implicits.global
 
-  // The global config of filodb with cassandra, spark, etc. sections
-  var config: Config = _
-
-  lazy val connector = new FiloCassandraConnector(config.getConfig("cassandra"))
+  lazy val connector = new FiloCassandraConnector(filoConfig.getConfig("cassandra"))
   lazy val metaStore = connector.metaStore
   lazy val columnStore = connector.columnStore
 
-  def init(filoConfig: Config): Unit = {
-    config = filoConfig
+  // scalastyle:off
+  var filoConfig: Config = null
+  def init(config: Config) = {
+    if (filoConfig == null) {
+      filoConfig = config
+    }
   }
+  // scalastyle:on
+
+  def getDatasetObj(dataset: String): Dataset =
+    Filo.parse(metaStore.getDataset(dataset)) { ds => ds.get }
+
+  def getSchema(dataset: String, version: Int): Seq[Column] =
+    Filo.parse(metaStore.getSchema(dataset)) { schema => schema }
 
   def parse[T, B](cmd: => Future[T], awaitTimeout: FiniteDuration = 50000.seconds)(func: T => B): B = {
     func(Await.result(cmd, awaitTimeout))
   }
+
+  implicit val context = scala.concurrent.ExecutionContext.Implicits.global
 
 }

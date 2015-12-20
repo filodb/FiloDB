@@ -1,72 +1,88 @@
 package filodb.core.util
 
 import java.nio.ByteBuffer
-import java.util.concurrent.atomic.AtomicBoolean
-
-import scala.annotation.tailrec
+import java.util
+import java.util.concurrent.{ConcurrentHashMap, ConcurrentLinkedQueue, ConcurrentMap}
 
 trait BufferPool {
-  def acquire(): ByteBuffer
+  def acquire(size: Int): ByteBuffer
 
-  def release(buf: ByteBuffer)
+  def release(buf: ByteBuffer): Unit
 }
 
-object DirectByteBufferPool extends BufferPool{
-  val thePool = new DirectByteBufferPool(8192, 1000)
+trait MemoryPool extends BufferPool {
+  val thePool = new MappedByteBufferPool(1024, true)
 
-  def acquire(): ByteBuffer = thePool.acquire()
+  def acquire(size: Int): ByteBuffer = thePool.acquire(size)
 
   def release(buf: ByteBuffer): Unit = thePool.release(buf)
 
 }
+// scalastyle:off
+class MappedByteBufferPool(factor: Int, direct: Boolean = true) {
+  private final val directBuffers: ConcurrentMap[Integer, util.Queue[ByteBuffer]]
+  = new ConcurrentHashMap[Integer, util.Queue[ByteBuffer]]
+  private final val heapBuffers: ConcurrentMap[Integer, util.Queue[ByteBuffer]]
+  = new ConcurrentHashMap[Integer, util.Queue[ByteBuffer]]
 
-/**
- * A buffer pool which keeps a free list of direct buffers of a specified default
- * size in a simple fixed size stack.
- *
- * If the stack is full a buffer offered back is not kept but will be let for
- * being freed by normal garbage collection.
- */
-class DirectByteBufferPool(defaultBufferSize: Int, maxPoolEntries: Int) extends BufferPool {
-  private[this] val locked = new AtomicBoolean(false)
-  private[this] val pool: Array[ByteBuffer] = new Array[ByteBuffer](maxPoolEntries)
-  private[this] var buffersInPool: Int = 0
+  def acquire(size: Int): ByteBuffer = {
+    val bucket: Int = bucketFor(size)
+    val buffers: ConcurrentMap[Integer, util.Queue[ByteBuffer]] = buffersFor(direct)
+    var result: ByteBuffer = null
+    val byteBuffers: util.Queue[ByteBuffer] = buffers.get(bucket)
+    if (byteBuffers != null) result = byteBuffers.poll
+    if (result == null) {
+      val capacity: Int = bucket * factor
+      result = if (direct) allocateDirect(capacity) else allocate(capacity)
+    }
+    result.clear()
+    result
+  }
 
-  def acquire(): ByteBuffer =
-    takeBufferFromPool()
-
-  def release(buf: ByteBuffer): Unit =
-    offerBufferToPool(buf)
-
-  private def allocate(size: Int): ByteBuffer =
-    ByteBuffer.allocateDirect(size)
-
-  @tailrec
-  private final def takeBufferFromPool(): ByteBuffer =
-    if (locked.compareAndSet(false, true)) {
-      val buffer =
-        try if (buffersInPool > 0) {
-          buffersInPool -= 1
-          pool(buffersInPool)
-        } else null
-        finally locked.set(false)
-
-      // allocate new and clear outside the lock
-      if (buffer == null)
-        allocate(defaultBufferSize)
-      else {
-        buffer.clear()
-        buffer
+  def release(buffer: ByteBuffer): Unit = {
+    if (buffer!= null){
+      assert((buffer.capacity % factor) == 0)
+      val bucket: Int = bucketFor(buffer.capacity)
+      val buffers: ConcurrentMap[Integer, util.Queue[ByteBuffer]] = buffersFor(buffer.isDirect)
+      var byteBuffers: util.Queue[ByteBuffer] = buffers.get(bucket)
+      if (byteBuffers == null) {
+        byteBuffers = new ConcurrentLinkedQueue[ByteBuffer]
+        val existing: util.Queue[ByteBuffer] = buffers.putIfAbsent(bucket, byteBuffers)
+        if (existing != null) byteBuffers = existing
       }
-    } else takeBufferFromPool() // spin while locked
+      buffer.clear()
+      byteBuffers.offer(buffer)
+    }
+  }
 
-  @tailrec
-  private final def offerBufferToPool(buf: ByteBuffer): Unit =
-    if (locked.compareAndSet(false, true))
-      try if (buffersInPool < maxPoolEntries) {
-        pool(buffersInPool) = buf
-        buffersInPool += 1
-      } // else let the buffer be gc'd
-      finally locked.set(false)
-    else offerBufferToPool(buf) // spin while locked
+  def clear(): Unit = {
+    directBuffers.clear()
+    heapBuffers.clear()
+  }
+
+  private def bucketFor(size: Int): Int = {
+    var bucket: Int = size / factor
+    if (size % factor > 0) {
+      bucket += 1
+    }
+    bucket
+  }
+
+  def buffersFor(direct: Boolean): ConcurrentMap[Integer, util.Queue[ByteBuffer]] = {
+    if (direct) directBuffers else heapBuffers
+  }
+
+  def allocateDirect(capacity: Int): ByteBuffer = {
+    val buf: ByteBuffer = ByteBuffer.allocateDirect(capacity)
+    buf.limit(0)
+    buf
+  }
+
+  def allocate(capacity: Int): ByteBuffer = {
+    val buf: ByteBuffer = ByteBuffer.allocate(capacity)
+    buf.limit(0)
+    buf
+  }
+
 }
+// scalastyle:on

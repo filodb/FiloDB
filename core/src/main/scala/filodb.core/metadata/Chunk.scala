@@ -1,10 +1,11 @@
 package filodb.core.metadata
 
-import java.io.{ByteArrayOutputStream, DataInputStream, DataOutputStream}
+import java.io.{DataInputStream, DataOutputStream}
 import java.nio.ByteBuffer
 
 import filodb.core.KeyType
 import filodb.core.Types._
+import filodb.core.util.ByteBufferOutputStream
 import it.unimi.dsi.io.ByteBufferInputStream
 import scodec.bits.ByteVector
 
@@ -36,6 +37,14 @@ trait ChunkWithMeta extends ChunkWithId {
 
   override def toString: String = s"Chunk($chunkId) rows($numRows)"
 
+  def metaDataByteSize: Int =
+    4 + chunkOverrides.fold(0)(f =>
+      f.map { case (cid, seq) => seq.length }.sum
+    )
+
+  def keySize(keyType: KeyType): Int = 4 + keys.map { key =>
+    keyType.size(key.asInstanceOf[keyType.T])
+  }.sum
 }
 
 case class DefaultChunk(chunkId: ChunkId,
@@ -47,8 +56,8 @@ case class DefaultChunk(chunkId: ChunkId,
 
 
 object SimpleChunk {
-  def metadataAsByteBuffer(numRows: Int, chunkOverrides: Option[Seq[(ChunkId, Seq[Int])]]): ByteBuffer = {
-    val baos = new ByteArrayOutputStream()
+  def writeMetadata(byteBuffer: ByteBuffer, numRows: Int, chunkOverrides: Option[Seq[(ChunkId, Seq[Int])]]): Unit = {
+    val baos = new ByteBufferOutputStream(byteBuffer)
     val os = new DataOutputStream(baos)
     chunkOverrides match {
       case Some(overrides) =>
@@ -63,12 +72,13 @@ object SimpleChunk {
     os.writeInt(numRows)
     os.flush()
     baos.flush()
-    ByteBuffer.wrap(baos.toByteArray)
+    byteBuffer.flip()
   }
 
-  def keysAsByteBuffer(keys: Seq[_], keyType: KeyType):ByteBuffer = {
-    val baos = new ByteArrayOutputStream()
+  def writeKeys(byteBuffer: ByteBuffer, keys: Seq[_], keyType: KeyType): Unit = {
+    val baos = new ByteBufferOutputStream(byteBuffer)
     val os = new DataOutputStream(baos)
+    os.writeInt(keys.length)
     keys.foreach { key =>
       val (l, keyBytes) = keyType.toBytes(key.asInstanceOf[keyType.T])
       os.writeInt(l)
@@ -76,10 +86,10 @@ object SimpleChunk {
     }
     os.flush()
     baos.flush()
-    ByteBuffer.wrap(baos.toByteArray)
+    byteBuffer.flip()
   }
 
-  def keysFromByteBuffer(keyBuffer: ByteBuffer, keyType: KeyType):Seq[_] = {
+  def keysFromByteBuffer(keyBuffer: ByteBuffer, keyType: KeyType): Seq[_] = {
     val is = new ByteBufferInputStream(keyBuffer)
     val in = new DataInputStream(is)
     val length = in.readInt()

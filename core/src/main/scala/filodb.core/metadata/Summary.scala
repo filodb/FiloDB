@@ -5,6 +5,7 @@ import java.nio.ByteBuffer
 
 import filodb.core.KeyType
 import filodb.core.Types._
+import filodb.core.util.ByteBufferOutputStream
 import it.unimi.dsi.io.ByteBufferInputStream
 import scodec.bits.ByteVector
 
@@ -54,11 +55,12 @@ trait SegmentSummary {
 
   def withKeys(chunkId: ChunkId, keys: Seq[Any]): SegmentSummary
 
-  def toBytes: ByteBuffer = {
-    val baos = new ByteArrayOutputStream()
+  def write(byteBuffer: ByteBuffer): Unit = {
+    val baos = new ByteBufferOutputStream(byteBuffer)
     val os = new DataOutputStream(baos)
     chunkSummaries match {
       case Some(summaries) => {
+        os.writeInt(summaries.length)
         summaries.foreach { case (cid, summary) =>
           os.writeInt(cid)
           summary.write(os)
@@ -68,8 +70,14 @@ trait SegmentSummary {
     }
     os.flush()
     baos.flush()
-    ByteBuffer.wrap(baos.toByteArray)
+    byteBuffer.flip()
+  }
 
+  def size: Int = {
+    // summaries size + chunkSummaries X chunkId + summary size
+    val summariesSize =
+      chunkSummaries.fold(0)(_.map { case (cid, summary) => 4 + summary.size }.sum)
+    4 + summariesSize
   }
 
 }
@@ -120,6 +128,8 @@ case class ChunkSummary(digest: KeySetDigest, numRows: Int) {
     out.write(bytes.toArray)
     out.writeInt(numRows)
   }
+
+  def size: Int = digest.memoryInBytes(numRows).round.toInt
 }
 
 object ChunkSummary {

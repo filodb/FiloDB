@@ -46,7 +46,9 @@ package object spark {
                           dataset: String,
                           flushSize: Int = 10000,
                           mode: SaveMode = SaveMode.Append): Unit = {
-      val datasetObj = FiloRelation.getDatasetObj(dataset)
+      val filoConfig = configFromSpark(sqlContext.sparkContext)
+      Filo.init(filoConfig)
+      val datasetObj = Filo.getDatasetObj(dataset)
       val namesTypes = df.schema.map { f => f.name -> f.dataType }
       val schema = datasetObj.schema.map(col => col.name -> col)
       validateSchema(namesTypes, schema)
@@ -55,23 +57,21 @@ package object spark {
         schemaMap(colName)
       }
 
-      val filoConfig = configFromSpark(sqlContext.sparkContext)
       // For each partition, start the ingestion
       df.rdd.mapPartitions { rowIter =>
         Filo.init(filoConfig)
-        Filo.parse(ingest(flushSize,filoConfig, dataset, rowIter, dfOrderSchema))(r => r).iterator
+        Filo.parse(ingest(flushSize, dataset, rowIter, dfOrderSchema))(r => r).iterator
       }.count()
     }
 
 
-    private def ingest(flushSize: Int,filoConfig: Config, dataset: String, rowIter: Iterator[Row], dfOrderSchema: Seq[Column]) = {
-
+    private def ingest(flushSize: Int, dataset: String, rowIter: Iterator[Row], dfOrderSchema: Seq[Column]) = {
       implicit val executionContext = Filo.executionContext
-      val datasetObj = FiloRelation.getDatasetObj(dataset)
+      val datasetObj = Filo.getDatasetObj(dataset)
       Future sequence datasetObj.projections.flatMap { projection =>
         // group the flushes into flush Size rows
         // this is a compromise between memory and ingestion speed.
-        rowIter.grouped(flushSize).map{ rows=>
+        rowIter.grouped(flushSize).map { rows =>
           // reproject the data
           val projectedData = Reprojector.project(projection,
             rows.map(r => RddRowReader(r)).iterator,

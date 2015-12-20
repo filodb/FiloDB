@@ -6,10 +6,11 @@ import filodb.core.metadata._
 import filodb.core.query.ScanInfo
 import filodb.core.store.ChunkStore
 import filodb.core.util.Iterators._
+import filodb.core.util.MemoryPool
 
 import scala.concurrent.Future
 
-trait CassandraChunkStore extends ChunkStore {
+trait CassandraChunkStore extends ChunkStore with MemoryPool {
 
   import scala.concurrent.ExecutionContext.Implicits.global
 
@@ -25,16 +26,29 @@ trait CassandraChunkStore extends ChunkStore {
     val pType = projection.partitionType
     val pk = pType.toBytes(partition.asInstanceOf[pType.T])._2.toByteBuffer
     val segmentId = segment.toString
-    val metadataBuf = SimpleChunk.metadataAsByteBuffer(chunk.numRows, chunk.chunkOverrides)
-    val keysBuf = SimpleChunk.keysAsByteBuffer(chunk.keys, projection.keyType)
+
+    val metaDataSize = chunk.metaDataByteSize
+    val metadataBuf = acquire(metaDataSize)
+    val keySize = chunk.keySize(projection.keyType)
+    val keysBuf = acquire(keySize)
+    SimpleChunk.writeMetadata(metadataBuf, chunk.numRows, chunk.chunkOverrides)
+    SimpleChunk.writeKeys(keysBuf, chunk.keys, projection.keyType)
 
     chunkTable.writeChunks(projection, pk,
       projection.columnNames ++ Seq(META_COLUMN_NAME, KEYS_COLUMN_NAME),
       segmentId, chunk.chunkId,
       chunk.columnVectors ++ Seq(metadataBuf, keysBuf))
       .map {
-      case Success => true
-      case _ => false
+      case Success => {
+        release(metadataBuf)
+        release(keysBuf)
+        true
+      }
+      case _ => {
+        release(metadataBuf)
+        release(keysBuf)
+        false
+      }
     }
   }
 

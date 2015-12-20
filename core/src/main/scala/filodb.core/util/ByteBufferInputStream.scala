@@ -5,7 +5,7 @@ import java.nio.ByteBuffer
 
 class ByteBufferInputStream(private var buffer: ByteBuffer)
   extends InputStream {
-
+  // scalastyle:off
   override def read(): Int = {
     if (buffer == null || buffer.remaining() == 0) {
       cleanUp()
@@ -43,9 +43,10 @@ class ByteBufferInputStream(private var buffer: ByteBuffer)
     }
   }
 
-  private def cleanUp() {
+  private def cleanUp(): Unit = {
     if (buffer != null) {
       buffer = null
     }
   }
+  // scalastyle:on
 }

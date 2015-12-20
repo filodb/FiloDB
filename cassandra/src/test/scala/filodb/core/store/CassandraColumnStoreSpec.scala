@@ -187,7 +187,7 @@ with BeforeAndAfter with Matchers with ScalaFutures {
       val results2 = flushPartitions(columnStore, partitions2)
       checkResults(results2)
 
-      val scanSplits = columnStore.getScanSplits(10, 1000, projection, projection.columnNames, None, None)
+      val scanSplits = columnStore.getScanSplits(1, 1000, projection, projection.columnNames, None, None)
 
       val future = for {
         s <- scanSplits
@@ -201,9 +201,9 @@ with BeforeAndAfter with Matchers with ScalaFutures {
 
       val scan2 = segments.last
       scan2.hasNext should be(true)
-      val threeMore = getMoreRows(scan2, 3)
+      val more= getMoreRows(scan2, 4)
       scan2.hasNext should be(false)
-      val reader1 = threeMore.last
+      val reader1 = more.last
       reader1.getString(0) should be("UK")
       reader1.getString(1) should be("LN")
       reader1.getString(2) should be("Peyton")
@@ -225,7 +225,7 @@ with BeforeAndAfter with Matchers with ScalaFutures {
       val results2 = flushPartitions(columnStore, partitions2)
       checkResults(results2)
 
-      val scanSplits = columnStore.getScanSplits(10, 1000,
+      val scanSplits = columnStore.getScanSplits(1, 1000,
         projection, projection.columnNames, Some("US"), None)
 
       val future = for {
@@ -263,7 +263,7 @@ with BeforeAndAfter with Matchers with ScalaFutures {
       val results2 = flushPartitions(columnStore, partitions2)
       checkResults(results2)
 
-      val scanSplits = columnStore.getScanSplits(10, 1000, projection,
+      val scanSplits = columnStore.getScanSplits(1, 1000, projection,
         projection.columnNames, Some("US"), Some(keyRange))
       val future = for {
         s <- scanSplits

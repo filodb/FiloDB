@@ -24,12 +24,13 @@ class FiloSparkCassandraTest extends CassandraTest {
   val sc = new SparkContext(conf)
   val sql = new SQLContext(sc)
 
-
   override def beforeAll(): Unit = {
     super.beforeAll()
     Filo.init(configFromSpark(sc))
     Await.result(Filo.columnStore.initialize, 10 seconds)
     Await.result(Filo.metaStore.initialize, 10 seconds)
+    Filo.metaStore.addProjection(dataset.projectionInfoSeq.head)
+    sql.saveAsFiloDataset(dataDF, "jsonds")
   }
 
   override def afterAll() {
@@ -61,9 +62,6 @@ class FiloSparkCassandraTest extends CassandraTest {
   import filodb.spark._
 
   it("should write table to a Filo table and read from it") {
-    Filo.metaStore.addProjection(dataset.projectionInfoSeq.head)
-    sql.saveAsFiloDataset(dataDF, "jsonds")
-    // Now read stuff back and ensure it got written
     val jsonDS = sql.read.format("filodb.spark").option("dataset", "jsonds").load()
     jsonDS.registerTempTable("jsonds")
     val df = sql.sql("select id,sqlDate from jsonds")
@@ -75,9 +73,6 @@ class FiloSparkCassandraTest extends CassandraTest {
 
   }
   it("should read when partition key is specified") {
-    Filo.metaStore.addProjection(dataset.projectionInfoSeq.head)
-    sql.saveAsFiloDataset(dataDF, "jsonds")
-    // Now read stuff back and ensure it got written
     val jsonDS = sql.read.format("filodb.spark").option("dataset", "jsonds").load()
     jsonDS.registerTempTable("jsonds")
     val df = sql.sql("select sqlDate from jsonds where year=2015")
@@ -86,42 +81,40 @@ class FiloSparkCassandraTest extends CassandraTest {
   }
 
   it("should read when segment key is specified") {
-    Filo.metaStore.addProjection(dataset.projectionInfoSeq.head)
-    sql.saveAsFiloDataset(dataDF, "jsonds")
-    // Now read stuff back and ensure it got written
     val jsonDS = sql.read.format("filodb.spark").option("dataset", "jsonds").load()
-    jsonDS.registerTempTable("jsonds")
-    val df = sql.sql("select sqlDate from jsonds where monthYear=42015")
+    jsonDS.registerTempTable("jsonds1")
+    val all = sql.sql("select * from jsonds1")
+    all.show()
+    all.count should be(3)
+
+    val df = sql.sql("select sqlDate from jsonds1 where monthYear=42015")
     df.show()
     df.count() should be(2)
-    val df1 = sql.sql("select sqlDate from jsonds where monthYear >0 AND monthYear < 32016")
+    val df1 = sql.sql("select sqlDate from jsonds1 where monthYear >0 AND monthYear < 32016")
     df1.show()
     df1.count() should be(1)
-    val df2 = sql.sql("select sqlDate from jsonds where monthYear >32014 AND monthYear < 42016")
+    val df2 = sql.sql("select sqlDate from jsonds1 where monthYear >32014 AND monthYear < 42016")
     df2.show()
     df2.count() should be(3)
-    val df3 = sql.sql("select sqlDate from jsonds where monthYear >=32015 AND monthYear < 42015")
+    val df3 = sql.sql("select sqlDate from jsonds1 where monthYear >=32015 AND monthYear < 42015")
     df3.show()
     df3.count() should be(1)
-    val df4 = sql.sql("select monthYear,sqlDate from jsonds where monthYear >=32015 AND monthYear <= 42015")
+    val df4 = sql.sql("select monthYear,sqlDate from jsonds1 where monthYear >=32015 AND monthYear <= 42015")
     df4.show()
     df4.count() should be(3)
-    val df5 = sql.sql("select id,sqlDate from jsonds where monthYear >32015 AND monthYear <= 42015")
+    val df5 = sql.sql("select id,sqlDate from jsonds1 where monthYear >32015 AND monthYear <= 42015")
     df5.show()
     df5.count() should be(2)
 
   }
   it("should read when partition key and segment keys are specified") {
-    Filo.metaStore.addProjection(dataset.projectionInfoSeq.head)
-    sql.saveAsFiloDataset(dataDF, "jsonds")
-    // Now read stuff back and ensure it got written
     val jsonDS = sql.read.format("filodb.spark").option("dataset", "jsonds").load()
-    jsonDS.registerTempTable("jsonds")
-    val df = sql.sql("select sqlDate,monthYear from jsonds where year=2015 AND monthYear=42015")
+    jsonDS.registerTempTable("jsonds2")
+    val df = sql.sql("select sqlDate,monthYear from jsonds2 where year=2015 AND monthYear=42015")
     df.show()
     df.count() should be(1)
 
-    val df2 = sql.sql("select sqlDate,id from jsonds where year=2015 AND monthYear > 32015")
+    val df2 = sql.sql("select sqlDate,id from jsonds2 where year=2015 AND monthYear > 32015")
     df2.show()
     df2.count() should be(1)
   }
