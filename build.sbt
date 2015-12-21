@@ -11,12 +11,14 @@ lazy val core = (project in file("core"))
                   .settings(mySettings:_*)
                   .settings(name := "filodb-core")
                   .settings(scalacOptions += "-language:postfixOps")
+                  .settings(assemblySettings:_*)
                   .settings(libraryDependencies ++= coreDeps)
 
 lazy val coordinator = (project in file("coordinator"))
                          .settings(mySettings:_*)
                          .settings(name := "filodb-coordinator")
                          .settings(libraryDependencies ++= coordDeps)
+                         .settings(assemblySettings:_*)
                          .dependsOn(core % "compile->compile; test->test",
                                     cassandra % "test->test")
 
@@ -24,14 +26,16 @@ lazy val cassandra = (project in file("cassandra"))
                        .settings(mySettings:_*)
                        .settings(name := "filodb-cassandra")
                        .settings(libraryDependencies ++= cassDeps)
+                       .settings(assemblySettings:_*)
                        .dependsOn(core % "compile->compile; test->test")
 
 lazy val cli = (project in file("cli"))
                  .settings(mySettings:_*)
                  .settings(name := "filodb-cli")
                  .settings(libraryDependencies ++= cliDeps)
-                 .settings(cliAssemblySettings:_*)
-                 .dependsOn(core, coordinator, cassandra)
+               //  .settings(cliAssemblySettings:_*)
+                 .settings(assemblySettings:_*)
+                 .dependsOn(core, coordinator, cassandra, spark)
 
 lazy val spark = (project in file("spark"))
                    .settings(mySettings:_*)
@@ -92,7 +96,9 @@ lazy val cliDeps = Seq(
   "com.quantifind"       %% "sumac"             % "0.3.0",
   "org.jboss.aesh"        % "aesh"              % "0.66",
   "org.jboss.aesh"        % "aesh-extensions"   % "0.66",
-  "com.github.lalyos"     % "jfiglet"           % "0.0.7"
+  "com.github.lalyos"     % "jfiglet"           % "0.0.7",
+  "org.apache.spark"     %% "spark-sql"         % "1.4.1",
+  "com.typesafe"         %  "config"           % "1.3.0"
 )
 
 lazy val sparkDeps = Seq(
@@ -156,9 +162,10 @@ lazy val assemblySettings = Seq(
     case PathList(ps @ _*) if ps.last endsWith ".txt.1" => MergeStrategy.first
       case "reference.conf" => MergeStrategy.concat
     case "application.conf"                            => MergeStrategy.concat
-    case x =>
+    case _ => MergeStrategy.first
+    /*case x =>
       val oldStrategy = (assemblyMergeStrategy in assembly).value
-      oldStrategy(x)
+      oldStrategy(x)*/
   },
   test in assembly := {} //noisy for end-user since the jar is not available and user needs to build the project locally
 )

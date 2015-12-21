@@ -1,6 +1,8 @@
 package filodb.cli
 
 import com.github.lalyos.jfiglet.FigletFont
+import org.apache.spark.sql.Row
+import org.apache.spark.{SparkContext, SparkConf}
 import org.jboss.aesh.console.helper.InterruptHook
 import org.jboss.aesh.console.settings.SettingsBuilder
 import org.jboss.aesh.console.{AeshConsoleCallback, Console, ConsoleOperation, Prompt}
@@ -8,8 +10,15 @@ import org.jboss.aesh.edit.actions.Action
 import org.jboss.aesh.terminal._
 import java.io.{IOException, PrintStream, PrintWriter}
 import scala.collection.JavaConversions._
+import filodb.spark.client._
+import scala.concurrent.ExecutionContext.Implicits.global
+import scala.concurrent.{Await, Future}
+import scala.util.{Failure, Success}
+import scala.concurrent.duration._
+import scala.language.postfixOps
+import com.typesafe.config.ConfigFactory
 
-class CliMain {
+object CliMain {
 
   var PROMPT: Array[Char] = "filo>".toCharArray
   var resultColor: TerminalColor = new TerminalColor(Color.WHITE, Color.DEFAULT)
@@ -34,7 +43,17 @@ class CliMain {
         new TerminalColor(Color.YELLOW, Color.DEFAULT, Color.Intensity.NORMAL),
         CharacterType.ITALIC)
     }.toList
+    val config = ConfigFactory.load()
+    val settings = config.getConfig("spark")
     val prompt: Prompt = new Prompt(chars)
+    val conf = (new SparkConf(false))
+      .setMaster(settings.getString("master"))
+      .setAppName(settings.getString("appName"))
+      .set("spark.filodb.cassandra.hosts", settings.getString("hosts"))
+      .set("spark.filodb.cassandra.port", settings.getString("port"))
+      .set("spark.filodb.cassandra.keyspace", settings.getString("keyspace"))
+    val sc = new SparkContext(conf)
+    FiloInterpreter.init(sc)
     console.start()
     console.setPrompt(prompt)
   }
@@ -49,6 +68,7 @@ class CliMain {
           case "quit" | "exit" | "reset" =>
             console.getShell.out.println()
             console.stop()
+            FiloInterpreter.stop()
             System.exit(0)
           case "clear" => console.clear()
           case _ =>
@@ -56,9 +76,21 @@ class CliMain {
             try {
               // do some operation
               // Call Filo Interpreter
+              val result = FiloInterpreter.interpret(output.getBuffer)
+              val df = Await.result(result,10 seconds)
+              if(df.count() == 1 && df.columns.mkString(",") == "Filo-status") {
+                  if(df.collect().head.mkString(",") == "1") {
+                    printWriter.println(getSuccessString("Successful operation"))
+                  }
+                  if(df.collect().head.mkString(",") == "0") {
+                       throw new Exception("Unsuccessful operation")
+                    }
+                }
+              else {
+                printWriter.println(getSuccessString(FiloInterpreter.showString(20, df)))
+              }
               val end: Long = System.currentTimeMillis
-              // print the result
-              printWriter.println(getSuccessString("Query took " + (start - end) + " millis"))
+              printWriter.println(getNormalString("Query took " + (start - end) + " millis"))
             } catch {
               case e: Exception => printWriter.println(getErrorString(e.getMessage))
             } finally {

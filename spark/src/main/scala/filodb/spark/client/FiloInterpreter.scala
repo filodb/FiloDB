@@ -86,8 +86,8 @@ object FiloInterpreter {
     }
   }
 
-  private lazy val dfFailure = sql.read.json(sc.parallelize(Seq( """{"status":0}"""), 1))
-  private lazy val dfSuccess = sql.read.json(sc.parallelize(Seq( """{"status":1}"""), 1))
+  private lazy val dfFailure = sql.read.json(sc.parallelize(Seq( """{"Filo-status":0}"""), 1))
+  private lazy val dfSuccess = sql.read.json(sc.parallelize(Seq( """{"Filo-status":1}"""), 1))
 
   /** handles the show tables action
     * @param input  the statement to be parsed for the show tables command
