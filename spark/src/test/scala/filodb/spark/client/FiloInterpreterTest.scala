@@ -88,11 +88,11 @@ class FiloInterpreterTest extends CassandraTest {
     val df = FiloInterpreter.interpret("select id,sqlDate from jsonds")
     val data = Await.result(df,10 seconds)
     data.count() should be(3)
-    print(FiloInterpreter.showString(20,data))
+    print(FiloInterpreter.getStringFromDF(20,data))
     val df2 = FiloInterpreter.interpret("select * from jsonds")
     val data2 = Await.result(df2,10 seconds)
     data2.count() should be(3)
-    print(FiloInterpreter.showString(20,data2))
+    print(FiloInterpreter.getStringFromDF(20,data2))
   }
 
   it("should not read when partition key is not specified") {
@@ -127,11 +127,11 @@ class FiloInterpreterTest extends CassandraTest {
     val df = FiloInterpreter.interpret("select id,sqlDate from jsonds")
     val data = Await.result(df,10 seconds)
     data.count() should be(3)
-    print(FiloInterpreter.showString(20,data))
+    print(FiloInterpreter.getStringFromDF(20,data))
     val df2 = FiloInterpreter.interpret("select * from jsonds")
     val data2 = Await.result(df2,10 seconds)
     data2.count() should be(3)
-    print(FiloInterpreter.showString(20,data2))
+    print(FiloInterpreter.getStringFromDF(20,data2))
   }
 
   it("should show tables when specified") {
@@ -139,7 +139,7 @@ class FiloInterpreterTest extends CassandraTest {
     FiloInterpreter.interpret(loadTable)
     val df = FiloInterpreter.interpret(showTables)
     val data = Await.result(df,10 seconds)
-    print(FiloInterpreter.showString(20,data))
+    print(FiloInterpreter.getStringFromDF(20,data))
   }
 
   it("it should describe table when specified") {
@@ -147,7 +147,7 @@ class FiloInterpreterTest extends CassandraTest {
     FiloInterpreter.interpret(loadTable)
     val df = FiloInterpreter.interpret(describeTable)
     val data = Await.result(df,10 seconds)
-    print(FiloInterpreter.showString(20,data))
+    print(FiloInterpreter.getStringFromDF(20,data))
   }
 
   it("it should describe projection when specified") {
@@ -155,7 +155,7 @@ class FiloInterpreterTest extends CassandraTest {
     FiloInterpreter.interpret(loadTable)
     val df = FiloInterpreter.interpret(describeProjection)
     val data = Await.result(df,10 seconds)
-    print(FiloInterpreter.showString(20,data))
+    print(FiloInterpreter.getStringFromDF(20,data))
   }
 
 }

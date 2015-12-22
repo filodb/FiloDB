@@ -47,12 +47,13 @@ object CliMain {
     val settings = config.getConfig("spark")
     val prompt: Prompt = new Prompt(chars)
     val conf = new SparkConf(false)
-      .setMaster(settings.getString("master"))
-      .setAppName(settings.getString("appName"))
-      .set("spark.filodb.cassandra.hosts", settings.getString("hosts"))
-      .set("spark.filodb.cassandra.port", settings.getString("port"))
-      .set("spark.filodb.cassandra.keyspace", settings.getString("keyspace"))
-      .setJars(Seq(settings.getString("jar")))
+      .setMaster(args.mkString(","))
+      .setAppName("cli")
+      // Set the following in spark configuration
+      /*.set("spark.filodb.cassandra.hosts", "localhost")
+      .set("spark.filodb.cassandra.port", "9042")
+      .set("spark.filodb.cassandra.keyspace", "cli")*/
+      .setJars(Seq(System.getProperty("addedJar")))
     val sc = new SparkContext(conf)
     FiloInterpreter.init(sc)
     console.start()
@@ -88,7 +89,7 @@ object CliMain {
                     }
                 }
               else {
-                printWriter.println(getSuccessString(FiloInterpreter.showString(20, df)))
+                printWriter.println(getSuccessString(FiloInterpreter.getStringFromDF(20, df)))
               }
               val end: Long = System.currentTimeMillis
               printWriter.println(getNormalString("Query took " + (start - end) + " millis"))
