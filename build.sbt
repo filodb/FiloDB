@@ -137,11 +137,13 @@ lazy val testSettings = Seq(
       Tags.limitSum(1, Tags.Test, Tags.Untagged))
 )
 
-
 val base = file(".").getAbsolutePath
-/* This requires the sbt spark/assembly task to be executed earlier */
+/* This sbt stage task requires the sbt spark/assembly task to be executed earlier .After,
+* execute universal:packageBin or universal:packageZipTarball for a zip or tgz file*/
 bashScriptExtraDefines +=
-  s"""addJava "-DaddedJar="${base}/spark/target/scala-2.10/filodb-spark-assembly-0.1-SNAPSHOT.jar""""".stripMargin
+  s"""addJava "-DaddedJar="${base.stripSuffix(".")}spark/target/scala-2.10/filodb-spark-assembly-0.1-SNAPSHOT.jar""""".stripMargin
+
+batScriptExtraDefines += """set _JAVA_OPTS=%_JAVA_OPTS% -DaddedJar=%ROOT_HOME%\spark\target\scala-2.10\filodb-spark-assembly-0.1-SNAPSHOT.jar"""
 
 lazy val universalSettings = coreSettings ++ styleSettings ++ testSettings
 
