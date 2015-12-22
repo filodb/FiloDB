@@ -43,16 +43,14 @@ object CliMain {
         new TerminalColor(Color.YELLOW, Color.DEFAULT, Color.Intensity.NORMAL),
         CharacterType.ITALIC)
     }.toList
-    val config = ConfigFactory.load()
-    val settings = config.getConfig("spark")
     val prompt: Prompt = new Prompt(chars)
     val conf = new SparkConf(false)
       .setMaster(args.mkString(","))
       .setAppName("cli")
       // Set the following in spark configuration
-      /*.set("spark.filodb.cassandra.hosts", "localhost")
+      .set("spark.filodb.cassandra.hosts", "localhost")
       .set("spark.filodb.cassandra.port", "9042")
-      .set("spark.filodb.cassandra.keyspace", "cli")*/
+      .set("spark.filodb.cassandra.keyspace", "cli")
       .setJars(Seq(System.getProperty("addedJar")))
     val sc = new SparkContext(conf)
     FiloInterpreter.init(sc)
