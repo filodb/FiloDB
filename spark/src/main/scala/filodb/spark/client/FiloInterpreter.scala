@@ -5,7 +5,7 @@ import filodb.core.metadata.Column.ColumnType
 import filodb.spark._
 import filodb.core.store.{ProjectionInfo, Dataset}
 import filodb.spark.Filo
-import org.apache.commons.lang3.StringUtils
+import org.apache.commons.lang.StringUtils
 import org.apache.spark.SparkContext
 import org.apache.spark.sql.{DataFrame, SQLContext}
 import scala.concurrent.{Future, Await}
@@ -52,7 +52,7 @@ object FiloInterpreter {
       case select: String if select.startsWith("select") =>
         if (SimpleParser.parseSelect(input)) {
           Future {
-            sql.sql(input)
+            sql.sql(StringUtils.removeEnd(input, ";"))
           }
         }
         else {

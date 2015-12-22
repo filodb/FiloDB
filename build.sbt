@@ -1,3 +1,5 @@
+
+import com.typesafe.sbt.SbtNativePackager.packageArchetype
 import sbt.Keys._
 
 val mySettings = Seq(organization := "org.velvia",
@@ -7,18 +9,31 @@ val mySettings = Seq(organization := "org.velvia",
                      resolvers ++= extraRepos,
                      ivyScala := ivyScala.value map { _.copy(overrideScalaVersion = true) }) ++ universalSettings
 
+lazy val root = Project(
+  id = "root",
+  base = file("."),
+  // configure your native packaging settings here
+  settings = packageArchetype.java_application++ Seq(
+    maintainer := "Tuplejump",
+    packageDescription := "FiloDB",
+    packageSummary := "FiloDB",
+    // entrypoint
+    mainClass in Compile := Some("filodb.cli.CliMain")
+  ),
+  // always run all commands on each sub project
+  aggregate = Seq(core,coordinator,cassandra,cli,spark)
+) dependsOn(core,coordinator,cassandra,cli,spark) // this does the actual aggregation
+
 lazy val core = (project in file("core"))
                   .settings(mySettings:_*)
                   .settings(name := "filodb-core")
                   .settings(scalacOptions += "-language:postfixOps")
-                  .settings(assemblySettings:_*)
                   .settings(libraryDependencies ++= coreDeps)
 
 lazy val coordinator = (project in file("coordinator"))
                          .settings(mySettings:_*)
                          .settings(name := "filodb-coordinator")
                          .settings(libraryDependencies ++= coordDeps)
-                         .settings(assemblySettings:_*)
                          .dependsOn(core % "compile->compile; test->test",
                                     cassandra % "test->test")
 
@@ -26,15 +41,13 @@ lazy val cassandra = (project in file("cassandra"))
                        .settings(mySettings:_*)
                        .settings(name := "filodb-cassandra")
                        .settings(libraryDependencies ++= cassDeps)
-                       .settings(assemblySettings:_*)
                        .dependsOn(core % "compile->compile; test->test")
 
 lazy val cli = (project in file("cli"))
                  .settings(mySettings:_*)
                  .settings(name := "filodb-cli")
                  .settings(libraryDependencies ++= cliDeps)
-               //  .settings(cliAssemblySettings:_*)
-                 .settings(assemblySettings:_*)
+                 .settings(cliAssemblySettings:_*)
                  .dependsOn(core, coordinator, cassandra, spark)
 
 lazy val spark = (project in file("spark"))
@@ -124,6 +137,12 @@ lazy val testSettings = Seq(
       Tags.limitSum(1, Tags.Test, Tags.Untagged))
 )
 
+
+val base = file(".").getAbsolutePath
+/* This requires the sbt spark/assembly task to be executed earlier */
+bashScriptExtraDefines +=
+  s"""addJava "-DaddedJar="${base}/spark/target/scala-2.10/filodb-spark-assembly-0.1-SNAPSHOT.jar""""".stripMargin
+
 lazy val universalSettings = coreSettings ++ styleSettings ++ testSettings
 
 // Create a default Scala style task to run with tests
@@ -162,10 +181,9 @@ lazy val assemblySettings = Seq(
     case PathList(ps @ _*) if ps.last endsWith ".txt.1" => MergeStrategy.first
       case "reference.conf" => MergeStrategy.concat
     case "application.conf"                            => MergeStrategy.concat
-    case _ => MergeStrategy.first
-    /*case x =>
+    case x =>
       val oldStrategy = (assemblyMergeStrategy in assembly).value
-      oldStrategy(x)*/
+      oldStrategy(x)
   },
   test in assembly := {} //noisy for end-user since the jar is not available and user needs to build the project locally
 )
