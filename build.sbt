@@ -12,17 +12,14 @@ val mySettings = Seq(organization := "org.velvia",
 lazy val root = Project(
   id = "root",
   base = file("."),
-  // configure your native packaging settings here
   settings = packageArchetype.java_application++ Seq(
     maintainer := "Tuplejump",
     packageDescription := "FiloDB",
     packageSummary := "FiloDB",
-    // entrypoint
     mainClass in Compile := Some("filodb.cli.CliMain")
   ),
-  // always run all commands on each sub project
   aggregate = Seq(core,coordinator,cassandra,cli,spark)
-) dependsOn(core,coordinator,cassandra,cli,spark) // this does the actual aggregation
+) dependsOn(core,coordinator,cassandra,cli,spark)
 
 lazy val core = (project in file("core"))
                   .settings(mySettings:_*)
