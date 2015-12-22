@@ -7,6 +7,7 @@ import filodb.spark.Filo
 import org.apache.spark.SparkContext
 import org.apache.spark.sql.{SQLContext, DataFrame}
 import scala.concurrent.ExecutionContext.Implicits.global
+import scala.language.postfixOps
 import scala.concurrent.Future
 
 object FiloExecutor {
