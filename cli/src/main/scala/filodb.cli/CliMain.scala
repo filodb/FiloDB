@@ -1,7 +1,6 @@
 package filodb.cli
 
 import com.github.lalyos.jfiglet.FigletFont
-import org.apache.spark.sql.Row
 import org.apache.spark.{SparkContext, SparkConf}
 import org.jboss.aesh.console.helper.InterruptHook
 import org.jboss.aesh.console.settings.SettingsBuilder
@@ -11,12 +10,7 @@ import org.jboss.aesh.terminal._
 import java.io.{IOException, PrintStream, PrintWriter}
 import scala.collection.JavaConversions._
 import filodb.spark.client._
-import scala.concurrent.ExecutionContext.Implicits.global
-import scala.concurrent.{Await, Future}
-import scala.util.{Failure, Success}
-import scala.concurrent.duration._
 import scala.language.postfixOps
-import com.typesafe.config.ConfigFactory
 
 object CliMain {
 
@@ -76,8 +70,7 @@ object CliMain {
             try {
               // do some operation
               // Call Filo Interpreter
-              val result = FiloInterpreter.interpret(output.getBuffer)
-              val df = Await.result(result,10 seconds)
+              val df = FiloInterpreter.interpret(output.getBuffer)
               if(df.count() == 1 && df.columns.mkString(",") == "Filo-status") {
                   if(df.collect().head.mkString(",") == "1") {
                     printWriter.println(getSuccessString("Successful operation"))
@@ -87,7 +80,7 @@ object CliMain {
                     }
                 }
               else {
-                printWriter.println(getSuccessString(FiloInterpreter.getStringFromDF(20, df)))
+                printWriter.println(getSuccessString(FiloInterpreter.dfToString(df,20)))
               }
               val end: Long = System.currentTimeMillis
               printWriter.println(getNormalString("Query took " + (start - end) + " millis"))

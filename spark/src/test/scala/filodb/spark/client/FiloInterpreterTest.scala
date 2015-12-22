@@ -4,12 +4,9 @@ import org.apache.spark.{SparkConf, SparkContext}
 
 import scala.collection.Map
 import scala.collection.immutable.Seq
-import scala.concurrent.Await
 import scala.language.postfixOps
 import filodb.cassandra.CassandraTest
 import filodb.spark._
-import org.apache.spark.sql.DataFrame
-import scala.concurrent.duration._
 
 class FiloInterpreterTest extends CassandraTest {
 
@@ -86,13 +83,11 @@ class FiloInterpreterTest extends CassandraTest {
     FiloInterpreter.interpret(loadTable)
     // Now read stuff back and ensure it got written
     val df = FiloInterpreter.interpret("select id,sqlDate from jsonds")
-    val data = Await.result(df,10 seconds)
-    data.count() should be(3)
-    print(FiloInterpreter.getStringFromDF(20,data))
+    df.count() should be(3)
+    print(FiloInterpreter.dfToString(df, 20))
     val df2 = FiloInterpreter.interpret("select * from jsonds")
-    val data2 = Await.result(df2,10 seconds)
-    data2.count() should be(3)
-    print(FiloInterpreter.getStringFromDF(20,data2))
+    df2.count() should be(3)
+    print(FiloInterpreter.dfToString(df2, 20))
   }
 
   it("should not read when partition key is not specified") {
@@ -125,37 +120,32 @@ class FiloInterpreterTest extends CassandraTest {
     FiloInterpreter.interpret(loadTableWithOptions)
     // Now read stuff back and ensure it got written
     val df = FiloInterpreter.interpret("select id,sqlDate from jsonds")
-    val data = Await.result(df,10 seconds)
-    data.count() should be(3)
-    print(FiloInterpreter.getStringFromDF(20,data))
+    df.count() should be(3)
+    print(FiloInterpreter.dfToString(df, 20))
     val df2 = FiloInterpreter.interpret("select * from jsonds")
-    val data2 = Await.result(df2,10 seconds)
-    data2.count() should be(3)
-    print(FiloInterpreter.getStringFromDF(20,data2))
+    df2.count() should be(3)
+    print(FiloInterpreter.dfToString(df2, 20))
   }
 
   it("should show tables when specified") {
     FiloInterpreter.interpret(createTable)
     FiloInterpreter.interpret(loadTable)
     val df = FiloInterpreter.interpret(showTables)
-    val data = Await.result(df,10 seconds)
-    print(FiloInterpreter.getStringFromDF(20,data))
+    print(FiloInterpreter.dfToString(df, 20))
   }
 
   it("it should describe table when specified") {
     FiloInterpreter.interpret(createTable)
     FiloInterpreter.interpret(loadTable)
     val df = FiloInterpreter.interpret(describeTable)
-    val data = Await.result(df,10 seconds)
-    print(FiloInterpreter.getStringFromDF(20,data))
+    print(FiloInterpreter.dfToString(df, 20))
   }
 
   it("it should describe projection when specified") {
     FiloInterpreter.interpret(createTable)
     FiloInterpreter.interpret(loadTable)
     val df = FiloInterpreter.interpret(describeProjection)
-    val data = Await.result(df,10 seconds)
-    print(FiloInterpreter.getStringFromDF(20,data))
+    print(FiloInterpreter.dfToString(df, 20))
   }
 
 }

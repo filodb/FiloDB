@@ -10,7 +10,7 @@ val mySettings = Seq(organization := "org.velvia",
                      ivyScala := ivyScala.value map { _.copy(overrideScalaVersion = true) }) ++ universalSettings
 
 lazy val root = Project(
-  id = "root",
+  id = "Filo-sh",
   base = file("."),
   settings = packageArchetype.java_application++ Seq(
     maintainer := "Tuplejump",

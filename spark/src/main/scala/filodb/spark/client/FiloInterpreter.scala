@@ -5,10 +5,9 @@ import filodb.spark.Filo
 import org.apache.commons.lang.StringUtils
 import org.apache.spark.SparkContext
 import org.apache.spark.sql.{DataFrame, SQLContext}
-import scala.concurrent.{Future, Await}
+import scala.concurrent.Await
 import scala.language.postfixOps
 import scala.concurrent.duration._
-import scala.concurrent.ExecutionContext.Implicits.global
 
 /**
   * Filo Interpreter to parse and execute the commands sent through CLI.
@@ -34,39 +33,29 @@ object FiloInterpreter {
 
   /** The method to be called in the end to clear the columnStore and metaStore */
   def stop(): Unit = {
-    Await.result(Filo.columnStore.clearAll, 10 seconds)
-    Await.result(Filo.metaStore.clearAll, 10 seconds)
     sc.stop()
   }
 
   /** Interprets load, create, select, show and describe statements and executes them
     * @param input Statement to be parsed and executed if valid
     */
-  def interpret(input: String): Future[DataFrame] = {
+  def interpret(input: String): DataFrame = {
     input.toLowerCase.trim match {
       case select: String if select.startsWith("select") =>
         if (SimpleParser.parseSelect(input)) {
-          Future {
             sql.sql(StringUtils.removeEnd(input, ";"))
-          }
         }
         else {
-          Future {
             dfFailure
-          }
         }
       case create: String if create.startsWith("create") =>
         val create = SimpleParser.parseCreate(input)
-        Future {
           FiloExecutor.handleCreate(create, sql, dfSuccess)
-        }
       case load: String if load.startsWith("load") =>
         val load = SimpleParser.parseLoad(input)
         val dataDF = sql.read.format(load.format).options(load.options).load(load.url)
         sql.saveAsFiloDataset(dataDF, load.tableName)
-        Future {
           dfSuccess
-        }
       case show: String if show.startsWith("show") =>
         FiloExecutor.handleShow(input, sql, sc, dfFailure)
       case describe: String if describe.startsWith("describe") =>
@@ -77,10 +66,10 @@ object FiloInterpreter {
   }
 
   /** Converts the dataframe into String with the max number of rows as numRows
-    * @param numRows max number of rows to be displayed
     * @param dataframe the dataframe to be converted into string
+    * @param numRows max number of rows to be displayed
     */
-  def getStringFromDF(numRows: Int, dataframe: DataFrame): String = {
+  def dfToString(dataframe: DataFrame, numRows: Int): String = {
     val sb = new StringBuilder
     val data = dataframe.take(numRows)
     val numCols = dataframe.schema.fieldNames.length

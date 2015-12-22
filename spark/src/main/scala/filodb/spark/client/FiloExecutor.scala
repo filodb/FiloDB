@@ -8,28 +8,26 @@ import org.apache.spark.SparkContext
 import org.apache.spark.sql.{SQLContext, DataFrame}
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.language.postfixOps
-import scala.concurrent.Future
 
 object FiloExecutor {
   /** handles the show tables action
     * @param input  the statement to be parsed for the show tables command
     */
-  def handleShow(input: String, sql: SQLContext, sc: SparkContext, dfFailure: DataFrame): Future[DataFrame] = {
+  def handleShow(input: String, sql: SQLContext, sc: SparkContext, dfFailure: DataFrame): DataFrame = {
     if (SimpleParser.parseShow(input)) {
       val description = Filo.metaStore.projectionTable.getAllSuperProjectionNames
       Filo.columnStore.summaryTable
-      for {
+      val result = for {
         infoAll <- description
       } yield {
         val seq: Seq[String] = infoAll.map(name =>
           s"""{"dataset" : "$name"}""")
         sql.read.json(sc.parallelize(seq))
       }
+      Filo.parse(result)(df => df)
     }
     else {
-      Future {
         dfFailure
-      }
     }
   }
 
@@ -52,10 +50,10 @@ object FiloExecutor {
   /** handles the describe tables or projections action
     * @param describe the case class for describe consisting the parameters for describe command
     */
-  def handleDescribe(describe: Describe, sql: SQLContext, sc: SparkContext, dfFailure: DataFrame): Future[DataFrame] = {
+  def handleDescribe(describe: Describe, sql: SQLContext, sc: SparkContext, dfFailure: DataFrame): DataFrame = {
     if (describe.isTable) {
       val description = Filo.metaStore.projectionTable.getSuperProjection(describe.tableName)
-      for {
+      val result = for {
         info <- description
       } yield {
         sql.read.json(sc.parallelize(Seq(
@@ -66,12 +64,13 @@ object FiloExecutor {
                   "primaryKey" : "${info.keyColumns.mkString(",")}" ,
                   "segmentColumns": "${info.segmentColumns.mkString(",")}" }"""), 1))
       }
+      Filo.parse(result)(df => df)
     }
     else {
       describe.projectionName match {
         case Some(id) =>
           val description = Filo.metaStore.getProjection(describe.tableName, id)
-          for {
+          val result = for {
             info <- description
           } yield {
             sql.read.json(sc.parallelize(Seq(
@@ -82,9 +81,9 @@ object FiloExecutor {
                   "primaryKey" : "${info.keyColumns.mkString(",")}" ,
                   "segmentColumns": "${info.segmentColumns.mkString(",")}" }"""), 1))
           }
-        case _ => Future {
+          Filo.parse(result)(df => df)
+        case _ =>
           dfFailure
-        }
       }
     }
 
