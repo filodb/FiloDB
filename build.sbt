@@ -1,3 +1,5 @@
+
+import com.typesafe.sbt.SbtNativePackager.packageArchetype
 import sbt.Keys._
 
 val mySettings = Seq(organization := "org.velvia",
@@ -6,6 +8,35 @@ val mySettings = Seq(organization := "org.velvia",
                      fork in Test := true,
                      resolvers ++= extraRepos,
                      ivyScala := ivyScala.value map { _.copy(overrideScalaVersion = true) }) ++ universalSettings
+
+val scala_Version = "2.10"
+
+lazy val root = Project(
+  id = "Filo-sh",
+  base = file("."),
+  settings = packageArchetype.java_application++ Seq(
+    maintainer := "Tuplejump",
+    packageDescription := "FiloDB",
+    packageSummary := "FiloDB",
+    mainClass in Compile := Some("filodb.cli.CliMain")
+  ),
+  aggregate = Seq(core,coordinator,cassandra,cli,spark)
+) dependsOn(core,coordinator,cassandra,cli,spark)
+
+enablePlugins(UniversalPlugin)
+
+// The universal:packageBin task requires spark/assembly and stage to be executed
+mappings in Universal  := {
+  val universalMappings = (mappings in Universal).value
+  val fatJar = (assembly in spark).value
+  universalMappings :+ (fatJar -> ("lib/" + fatJar.getName))
+}
+
+bashScriptExtraDefines +=
+  """addJava "-DaddedJar=${lib_dir}/""" + s"""filodb-spark-assembly-${version.value}.jar" """.trim
+
+batScriptExtraDefines +=
+  s"""set _JAVA_OPTS=%_JAVA_OPTS% -DaddedJar=%APP_LIB_DIR%\\filodb-spark-assembly-${version.value}.jar"""
 
 lazy val core = (project in file("core"))
                   .settings(mySettings:_*)
@@ -31,7 +62,7 @@ lazy val cli = (project in file("cli"))
                  .settings(name := "filodb-cli")
                  .settings(libraryDependencies ++= cliDeps)
                  .settings(cliAssemblySettings:_*)
-                 .dependsOn(core, coordinator, cassandra)
+                 .dependsOn(core, coordinator, cassandra, spark)
 
 lazy val spark = (project in file("spark"))
                    .settings(mySettings:_*)
@@ -92,7 +123,9 @@ lazy val cliDeps = Seq(
   "com.quantifind"       %% "sumac"             % "0.3.0",
   "org.jboss.aesh"        % "aesh"              % "0.66",
   "org.jboss.aesh"        % "aesh-extensions"   % "0.66",
-  "com.github.lalyos"     % "jfiglet"           % "0.0.7"
+  "com.github.lalyos"     % "jfiglet"           % "0.0.7",
+  "org.apache.spark"     %% "spark-sql"         % "1.4.1",
+  "com.typesafe"         %  "config"           % "1.3.0"
 )
 
 lazy val sparkDeps = Seq(
@@ -137,8 +170,7 @@ lazy val styleSettings = Seq(
 )
 
 lazy val shellScript = """#!/usr/bin/env sh
-exec java -Xmx4g -Xms4g -jar "$0" "$@"
-""".split("\n")
+exec java -Xmx4g -Xms4g -jar "$0" "$@" """.split("\n")
 
 // Builds cli as a standalone executable to make it easier to launch commands
 lazy val cliAssemblySettings = assemblySettings ++ Seq(
