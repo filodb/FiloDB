@@ -9,6 +9,8 @@ val mySettings = Seq(organization := "org.velvia",
                      resolvers ++= extraRepos,
                      ivyScala := ivyScala.value map { _.copy(overrideScalaVersion = true) }) ++ universalSettings
 
+val scala_Version = "2.10"
+
 lazy val root = Project(
   id = "Filo-sh",
   base = file("."),
@@ -20,6 +22,21 @@ lazy val root = Project(
   ),
   aggregate = Seq(core,coordinator,cassandra,cli,spark)
 ) dependsOn(core,coordinator,cassandra,cli,spark)
+
+enablePlugins(UniversalPlugin)
+
+// The universal:packageBin task requires spark/assembly and stage to be executed
+mappings in Universal  := {
+  val universalMappings = (mappings in Universal).value
+  val fatJar = (assembly in spark).value
+  universalMappings :+ (fatJar -> ("lib/" + fatJar.getName))
+}
+
+bashScriptExtraDefines +=
+  """addJava "-DaddedJar=${lib_dir}/""" + s"""filodb-spark-assembly-${version.value}.jar" """.trim
+
+batScriptExtraDefines +=
+  s"""set _JAVA_OPTS=%_JAVA_OPTS% -DaddedJar=%APP_LIB_DIR%\\filodb-spark-assembly-${version.value}.jar"""
 
 lazy val core = (project in file("core"))
                   .settings(mySettings:_*)
@@ -134,10 +151,6 @@ lazy val testSettings = Seq(
       Tags.limitSum(1, Tags.Test, Tags.Untagged))
 )
 
-bashScriptExtraDefines += """addJava "-DaddedJar=${lib_dir}/org.velvia.filodb-spark-0.1-SNAPSHOT.jar""""
-
-batScriptExtraDefines += """set _JAVA_OPTS=%_JAVA_OPTS% -DaddedJar=%APP_LIB_DIR%\org.velvia.filodb-spark-0.1-SNAPSHOT.jar"""
-
 lazy val universalSettings = coreSettings ++ styleSettings ++ testSettings
 
 // Create a default Scala style task to run with tests
@@ -157,8 +170,7 @@ lazy val styleSettings = Seq(
 )
 
 lazy val shellScript = """#!/usr/bin/env sh
-exec java -Xmx4g -Xms4g -jar "$0" "$@"
-""".split("\n")
+exec java -Xmx4g -Xms4g -jar "$0" "$@" """.split("\n")
 
 // Builds cli as a standalone executable to make it easier to launch commands
 lazy val cliAssemblySettings = assemblySettings ++ Seq(
