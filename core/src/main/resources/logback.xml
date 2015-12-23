@@ -1,50 +1,47 @@
 <configuration>
 
+    <appender name="METRICS" class="ch.qos.logback.core.FileAppender">
+        <file>filodb-metrics.log</file>
+        <!-- truncate the logfile every time we start the test -->
+        <append>false</append>
 
-  <appender name="METRICS" class="ch.qos.logback.core.FileAppender">
-    <file>filodb-metrics.log</file>
+        <encoder>
+            <pattern>[%date{ISO8601}] %-5level %logger{26} - %msg%n</pattern>
+        </encoder>
 
-    <!-- truncate the logfile every time we start the test -->
-    <append>false</append>
+    </appender>
+    <appender name="FLOW" class="ch.qos.logback.core.FileAppender">
+        <file>filodb-flow.log</file>
 
-    <encoder>
-      <pattern>[%date{ISO8601}] %-5level %logger{26} [%X{akkaSource}] - %msg%n</pattern>
-    </encoder>
+        <!-- truncate the logfile every time we start the test -->
+        <append>false</append>
 
-  </appender>
-  <appender name="FLOW" class="ch.qos.logback.core.FileAppender">
-    <file>filodb-flow.log</file>
+        <encoder>
+            <pattern>[%date{ISO8601}] %-5level %logger{26} - %msg%n</pattern>
+        </encoder>
 
-    <!-- truncate the logfile every time we start the test -->
-    <append>false</append>
+    </appender>
 
-    <encoder>
-      <pattern>[%date{ISO8601}] %-5level %logger{26} [%X{akkaSource}] - %msg%n</pattern>
-    </encoder>
+    <appender name="SINK" class="ch.qos.logback.core.FileAppender">
+        <file>filodb.log</file>
 
-  </appender>
+        <!-- truncate the logfile every time we start the test -->
+        <append>false</append>
 
-  <appender name="SINK" class="ch.qos.logback.core.FileAppender">
-    <file>filodb.log</file>
+        <encoder>
+            <pattern>[%date{ISO8601}] %-5level %logger{26} - %msg%n</pattern>
+        </encoder>
 
-    <!-- truncate the logfile every time we start the test -->
-    <append>false</append>
+    </appender>
 
-    <encoder>
-      <pattern>[%date{ISO8601}] %-5level %logger{26} [%X{akkaSource}] - %msg%n</pattern>
-    </encoder>
+    <logger name="filodb-flow" level="DEBUG">
+        <appender-ref ref="FLOW"/>
+    </logger>
+    <logger name="filodb-metrics" level="DEBUG">
+        <appender-ref ref="METRICS"/>
+    </logger>
 
-  </appender>
-
-  <root level="INFO">
-    <appender-ref ref="SINK"/>
-  </root>
-
-  <logger name="filodb.flow" level="DEBUG">
-    <appender-ref ref="FLOW"/>
-  </logger>
-  <logger name="filodb.metrics" level="DEBUG">
-    <appender-ref ref="METRICS"/>
-  </logger>
-
+    <root level="INFO">
+        <appender-ref ref="SINK"/>
+    </root>
 </configuration>
