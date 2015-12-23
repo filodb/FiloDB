@@ -6,9 +6,9 @@ case class KeyRange[+K](start: Option[K],
                         startExclusive: Boolean = false,
                         endExclusive: Boolean = false) {
 
-  def debugStart = if (startExclusive) "(" else "[" + start.getOrElse("Unspecified")
+  private def debugStart = if (startExclusive) "(" else "[" + start.getOrElse("Unspecified")
 
-  def debugEnd = end.getOrElse("Unspecified") + {
+  private def debugEnd = end.getOrElse("Unspecified") + {
     if (endExclusive) ")" else "]"
   }
 
