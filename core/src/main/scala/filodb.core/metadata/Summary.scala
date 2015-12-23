@@ -55,10 +55,35 @@ trait SegmentSummary {
 
   def withKeys(chunkId: ChunkId, keys: Seq[Any]): SegmentSummary
 
-  def write(byteBuffer: ByteBuffer): Unit = {
+  def size: Int = {
+    // summaries size + chunkSummaries X chunkId + summary size
+    val summariesSize =
+      chunkSummaries.fold(0)(_.map { case (cid, summary) => 4 + summary.size }.sum)
+    4 + summariesSize + 100
+  }
+
+}
+
+object SegmentSummary {
+  def read(keyType: KeyType, bb: ByteBuffer): SegmentSummary = {
+    val in = new DataInputStream(new ByteBufferInputStream(bb))
+    val length = in.readInt()
+    if (length > 0) {
+      val chunkSummaries = (0 until length).map { i =>
+        val chunkId = in.readInt()
+        val chunkSummary = ChunkSummary.read(in, keyType)
+        (chunkId, chunkSummary)
+      }
+      DefaultSegmentSummary(keyType, Some(chunkSummaries))
+    } else {
+      DefaultSegmentSummary(keyType, None)
+    }
+  }
+
+  def write(byteBuffer: ByteBuffer,segmentSummary:SegmentSummary): Unit = {
     val baos = new ByteBufferOutputStream(byteBuffer)
     val os = new DataOutputStream(baos)
-    chunkSummaries match {
+    segmentSummary.chunkSummaries match {
       case Some(summaries) => {
         os.writeInt(summaries.length)
         summaries.foreach { case (cid, summary) =>
@@ -73,36 +98,13 @@ trait SegmentSummary {
     byteBuffer.flip()
   }
 
-  def size: Int = {
-    // summaries size + chunkSummaries X chunkId + summary size
-    val summariesSize =
-      chunkSummaries.fold(0)(_.map { case (cid, summary) => 4 + summary.size }.sum)
-    4 + summariesSize
-  }
-
-}
-
-object SegmentSummary {
-  def fromBytes(keyType: KeyType, bb: ByteBuffer): SegmentSummary = {
-    val in = new DataInputStream(new ByteBufferInputStream(bb))
-    val length = in.readInt()
-    if (length > 0) {
-      val chunkSummaries = (0 until length).map { i =>
-        val chunkId = in.readInt()
-        val chunkSummary = ChunkSummary.read(in, keyType)
-        (chunkId, chunkSummary)
-      }
-      DefaultSegmentSummary(keyType, Some(chunkSummaries))
-    } else {
-      DefaultSegmentSummary(keyType, None)
-    }
-  }
 }
 
 
 case class DefaultSegmentSummary(keyType: KeyType,
                                  chunkSummaries: Option[Seq[(ChunkId, ChunkSummary)]] = None)
   extends SegmentSummary {
+
 
   override def withKeys(chunkId: ChunkId, keys: Seq[Any]): SegmentSummary = {
     val keyDigest = BloomDigest(keys, keyType)

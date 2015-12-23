@@ -18,6 +18,7 @@ extends ColumnStore
   override def summaryTable: SummaryTable = new SummaryTable(keySpace, session)
 
   def initialize: Future[Seq[Response]] = {
+    flow.warn(s"Initializing column store")
     for {
       c <- chunkTable.initialize()
       s <- summaryTable.initialize()
@@ -25,6 +26,7 @@ extends ColumnStore
   }
 
   def clearAll: Future[Seq[Response]] = {
+    flow.warn(s"Removing all data")
     for {
       c <- chunkTable.clearAll()
       s <- summaryTable.clearAll()

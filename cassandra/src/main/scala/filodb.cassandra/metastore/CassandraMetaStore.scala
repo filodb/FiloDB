@@ -5,6 +5,7 @@ import com.websudos.phantom.connectors.KeySpace
 import filodb.core.Messages.{Response, Success}
 import filodb.core.metadata.Column
 import filodb.core.store.{Dataset, MetaStore, ProjectionInfo}
+import filodb.core.util.FiloLogging
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -13,17 +14,21 @@ import scala.concurrent.{ExecutionContext, Future}
  *
  */
 class CassandraMetaStore(keySpace: KeySpace, session: Session)
-                        (implicit val ec: ExecutionContext) extends MetaStore {
+                        (implicit val ec: ExecutionContext) extends MetaStore
+with FiloLogging {
 
   val projectionTable = new ProjectionTable(keySpace, session)
 
   def initialize: Future[Seq[Response]] = {
+    flow.warn(s"Initializing meta store")
     Future sequence Seq(projectionTable.initialize())
   }
 
   def clearAll: Future[Seq[Response]] = {
+    flow.warn(s"Removing all tables")
     Future sequence Seq(projectionTable.clearAll())
   }
+
   /**
    * Retrieves a Dataset object of the given name
    * @param name Name of the dataset to retrieve
@@ -41,6 +46,7 @@ class CassandraMetaStore(keySpace: KeySpace, session: Session)
   }
 
   override def addProjection(projectionInfo: ProjectionInfo): Future[Boolean] = {
+    flow.debug(s"Creating projection $projectionInfo")
     for {
       inserted <- projectionTable.insertProjection(projectionInfo)
       result = inserted match {

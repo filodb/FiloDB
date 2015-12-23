@@ -4,7 +4,16 @@ package filodb.core.metadata
 case class KeyRange[+K](start: Option[K],
                         end: Option[K],
                         startExclusive: Boolean = false,
-                        endExclusive: Boolean = false)
+                        endExclusive: Boolean = false) {
+
+  def debugStart = if (startExclusive) "(" else "[" + start.getOrElse("Unspecified")
+
+  def debugEnd = end.getOrElse("Unspecified") + {
+    if (endExclusive) ")" else "]"
+  }
+
+  override def toString: String = s"Segment Range $debugStart to $debugEnd"
+}
 
 trait Segment {
 

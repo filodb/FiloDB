@@ -10,14 +10,24 @@ trait BufferPool {
   def release(buf: ByteBuffer): Unit
 }
 
-trait MemoryPool extends BufferPool {
+trait MemoryPool extends BufferPool with FiloLogging {
   val thePool = new MappedByteBufferPool(1024, true)
 
-  def acquire(size: Int): ByteBuffer = thePool.acquire(size)
+  def acquire(size: Int): ByteBuffer = {
+    val bb = thePool.acquire(size)
+    val bbSize = bb.capacity()
+    metrics.debug(s"Requested size - $size. Acquired buffer with capacity $bbSize")
+    bb
+  }
 
-  def release(buf: ByteBuffer): Unit = thePool.release(buf)
+  def release(buf: ByteBuffer): Unit = {
+    val bbSize = buf.capacity()
+    thePool.release(buf)
+    metrics.debug(s"Released buffer with capacity $bbSize")
+  }
 
 }
+
 // scalastyle:off
 class MappedByteBufferPool(factor: Int, direct: Boolean = true) {
   private final val directBuffers: ConcurrentMap[Integer, util.Queue[ByteBuffer]]
@@ -40,7 +50,7 @@ class MappedByteBufferPool(factor: Int, direct: Boolean = true) {
   }
 
   def release(buffer: ByteBuffer): Unit = {
-    if (buffer!= null){
+    if (buffer != null) {
       assert((buffer.capacity % factor) == 0)
       val bucket: Int = bucketFor(buffer.capacity)
       val buffers: ConcurrentMap[Integer, util.Queue[ByteBuffer]] = buffersFor(buffer.isDirect)
@@ -85,4 +95,5 @@ class MappedByteBufferPool(factor: Int, direct: Boolean = true) {
   }
 
 }
+
 // scalastyle:on

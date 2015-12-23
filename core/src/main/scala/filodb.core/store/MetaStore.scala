@@ -165,4 +165,13 @@ case class ProjectionInfo(id: Int,
     // scalastyle:on
   }
 
+  override def toString:String = {
+    s"""Projection $dataset|$id  {
+       |schema [$schema]
+       |partition [$partitionColumns]
+       |primary [$keyColumns]
+       |segment [$segmentColumns]
+     """.stripMargin
+  }
+
 }

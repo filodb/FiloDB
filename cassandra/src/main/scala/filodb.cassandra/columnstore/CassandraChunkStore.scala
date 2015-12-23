@@ -1,5 +1,6 @@
 package filodb.cassandra.columnstore
 
+import com.typesafe.scalalogging.slf4j.StrictLogging
 import filodb.core.Messages._
 import filodb.core.Types.ChunkId
 import filodb.core.metadata._
@@ -10,7 +11,7 @@ import filodb.core.util.MemoryPool
 
 import scala.concurrent.Future
 
-trait CassandraChunkStore extends ChunkStore with MemoryPool {
+trait CassandraChunkStore extends ChunkStore with MemoryPool with StrictLogging{
 
   import scala.concurrent.ExecutionContext.Implicits.global
 
@@ -28,8 +29,10 @@ trait CassandraChunkStore extends ChunkStore with MemoryPool {
     val segmentId = segment.toString
 
     val metaDataSize = chunk.metaDataByteSize
+    logger.debug(s"Acquiring buffer of size $metaDataSize for ChunkMetadata")
     val metadataBuf = acquire(metaDataSize)
     val keySize = chunk.keySize(projection.keyType)
+    logger.debug(s"Acquiring buffer of size $keySize for Chunk Key Buffer")
     val keysBuf = acquire(keySize)
     SimpleChunk.writeMetadata(metadataBuf, chunk.numRows, chunk.chunkOverrides)
     SimpleChunk.writeKeys(keysBuf, chunk.keys, projection.keyType)

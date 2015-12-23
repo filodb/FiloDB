@@ -40,10 +40,10 @@
     <appender-ref ref="SINK"/>
   </root>
 
-  <logger name="filodb-flow" level="DEBUG">
+  <logger name="filodb.flow" level="DEBUG">
     <appender-ref ref="FLOW"/>
   </logger>
-  <logger name="filodb-metrics" level="DEBUG">
+  <logger name="filodb.metrics" level="DEBUG">
     <appender-ref ref="METRICS"/>
   </logger>
 

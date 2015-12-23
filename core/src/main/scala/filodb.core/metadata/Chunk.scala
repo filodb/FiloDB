@@ -3,6 +3,7 @@ package filodb.core.metadata
 import java.io.{DataInputStream, DataOutputStream}
 import java.nio.ByteBuffer
 
+import com.typesafe.scalalogging.slf4j.StrictLogging
 import filodb.core.KeyType
 import filodb.core.Types._
 import filodb.core.util.ByteBufferOutputStream
@@ -40,11 +41,11 @@ trait ChunkWithMeta extends ChunkWithId {
   def metaDataByteSize: Int =
     4 + chunkOverrides.fold(0)(f =>
       f.map { case (cid, seq) => seq.length }.sum
-    )
+    ) + 100
 
   def keySize(keyType: KeyType): Int = 4 + keys.map { key =>
     keyType.size(key.asInstanceOf[keyType.T])
-  }.sum
+  }.sum + 100
 }
 
 case class DefaultChunk(chunkId: ChunkId,
@@ -55,17 +56,21 @@ case class DefaultChunk(chunkId: ChunkId,
                         chunkOverrides: Option[Seq[(ChunkId, Seq[Int])]] = None) extends ChunkWithMeta
 
 
-object SimpleChunk {
+object SimpleChunk extends StrictLogging {
   def writeMetadata(byteBuffer: ByteBuffer, numRows: Int, chunkOverrides: Option[Seq[(ChunkId, Seq[Int])]]): Unit = {
     val baos = new ByteBufferOutputStream(byteBuffer)
     val os = new DataOutputStream(baos)
     chunkOverrides match {
       case Some(overrides) =>
-        os.writeInt(overrides.length)
-        overrides.foreach { case (cid, seq) =>
+        val length = overrides.length
+        logger.debug(s"Chunk Metadata num overrides is $length")
+        os.writeInt(length)
+        overrides.foreach { case (cid, positions) =>
+          val posLength = positions.length
+          logger.debug(s"Chunk Metadata writing $posLength overridden positions for $cid")
           os.writeInt(cid)
-          os.writeInt(seq.length)
-          if (seq.nonEmpty) seq.foreach(os.writeInt)
+          os.writeInt(posLength)
+          if (positions.nonEmpty) positions.foreach(os.writeInt)
         }
       case None => os.writeInt(0)
     }
@@ -101,27 +106,8 @@ object SimpleChunk {
     }
   }
 
-}
-
-
-case class SimpleChunk(projection: Projection,
-                       columns: Seq[ColumnId],
-                       chunkId: ChunkId,
-                       columnVectors: Array[ByteBuffer],
-                       keyBuffer: ByteBuffer,
-                       metadataBuffer: ByteBuffer) extends ChunkWithMeta {
-
-
-  private val metadata = metaDataFromByteBuffer(metadataBuffer)
-
-  def chunkOverrides: Option[Seq[(ChunkId, Seq[Int])]] = metadata._2
-
-  def numRows: Int = metadata._1
-
-  override def keys: Seq[_] =
-    SimpleChunk.keysFromByteBuffer(keyBuffer, projection.keyType)
-
-  private def metaDataFromByteBuffer(byteBuffer: ByteBuffer) = {
+  def metaDataFromByteBuffer(byteBuffer: ByteBuffer)
+  : (Int, Option[Seq[(ChunkId, Seq[Int])]]) = {
     val is = new ByteBufferInputStream(byteBuffer)
     val in = new DataInputStream(is)
     val length = in.readInt()
@@ -139,6 +125,28 @@ case class SimpleChunk(projection: Projection,
     val numRows = in.readInt()
     (numRows, overrides)
   }
+
+
+}
+
+
+case class SimpleChunk(projection: Projection,
+                       columns: Seq[ColumnId],
+                       chunkId: ChunkId,
+                       columnVectors: Array[ByteBuffer],
+                       keyBuffer: ByteBuffer,
+                       metadataBuffer: ByteBuffer) extends ChunkWithMeta {
+
+
+  private val metadata = SimpleChunk.metaDataFromByteBuffer(metadataBuffer)
+
+  def chunkOverrides: Option[Seq[(ChunkId, Seq[Int])]] = metadata._2
+
+  def numRows: Int = metadata._1
+
+  override def keys: Seq[_] =
+    SimpleChunk.keysFromByteBuffer(keyBuffer, projection.keyType)
+
 
 }
 

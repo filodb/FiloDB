@@ -8,13 +8,14 @@ import com.websudos.phantom.connectors.KeySpace
 import com.websudos.phantom.dsl._
 import filodb.core.Messages.Response
 import filodb.core.metadata.{Projection, SegmentSummary}
-import filodb.core.util.MemoryPool
+import filodb.core.util.{FiloLogging, MemoryPool}
 
 import scala.concurrent.Future
 
 sealed class SummaryTable(ks: KeySpace, _session: Session)
   extends CassandraTable[SummaryTable, (String, java.util.UUID, ByteBuffer)]
-  with MemoryPool {
+  with MemoryPool with FiloLogging{
+
 
   import filodb.cassandra.Util._
 
@@ -50,7 +51,7 @@ sealed class SummaryTable(ks: KeySpace, _session: Session)
       .and(_.segmentId eqs segmentId)
     for {
       result <- query.one()
-      summary = result.map { case (version, buf) => (version, SegmentSummary.fromBytes(segmentType, buf)) }
+      summary = result.map { case (version, buf) => (version, SegmentSummary.read(segmentType, buf)) }
     } yield summary
   }
 
@@ -74,8 +75,10 @@ sealed class SummaryTable(ks: KeySpace, _session: Session)
                     oldVersion: java.util.UUID,
                     newVersion: java.util.UUID,
                     segmentSummary: SegmentSummary): Future[Response] = {
-    val ssBytes = acquire(segmentSummary.size)
-    segmentSummary.write(ssBytes)
+    val segmentSummarySize = segmentSummary.size
+    metrics.debug(s"Acquiring buffer of size $segmentSummarySize for SegmentSummary")
+    val ssBytes = acquire(segmentSummarySize)
+    SegmentSummary.write(ssBytes,segmentSummary)
     val updateQuery = update.where(_.dataset eqs projection.dataset)
       .and(_.projectionId eqs projection.id)
       .and(_.partition eqs partition)
@@ -95,8 +98,9 @@ sealed class SummaryTable(ks: KeySpace, _session: Session)
                     segmentVersion: UUID,
                     segmentSummary: SegmentSummary): Future[Response] = {
     val segmentSummarySize = segmentSummary.size
+    metrics.debug(s"Acquiring buffer of size $segmentSummarySize for SegmentSummary")
     val ssBytes = acquire(segmentSummarySize)
-    segmentSummary.write(ssBytes)
+    SegmentSummary.write(ssBytes,segmentSummary)
     insert.value(_.dataset, projection.dataset)
       .value(_.projectionId, projection.id)
       .value(_.partition, partition)
