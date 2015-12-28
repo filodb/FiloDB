@@ -38,10 +38,10 @@ object CliMain {
         CharacterType.ITALIC)
     }.toList
     val prompt: Prompt = new Prompt(chars)
-    val conf = new SparkConf(false)
+    val conf = new SparkConf(true)
       .setMaster(args.mkString(","))
       .setAppName("cli")
-      // Set the following in spark configuration
+      // Set the following in environment variables to the application
       /*.set("spark.filodb.cassandra.hosts", "localhost")
       .set("spark.filodb.cassandra.port", "9042")
       .set("spark.filodb.cassandra.keyspace", "cli")*/
