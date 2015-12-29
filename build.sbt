@@ -148,10 +148,6 @@ lazy val styleSettings = Seq(
   (compile in Test) <<= (compile in Test) dependsOn compileScalastyle
 )
 
-lazy val shellScript = """#!/usr/bin/env sh
-exec java -Xmx4g -Xms4g -jar "$0" "$@"
-""".split("\n")
-
 lazy val assemblySettings = Seq(
   assemblyMergeStrategy in assembly := {
     case m if m.toLowerCase.endsWith("manifest.mf") => MergeStrategy.discard
