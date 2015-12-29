@@ -31,6 +31,7 @@ object Distribution {
     }
 
   val jars = Set(
+    "aesh-0.66.jar", "aesh-extensions-0.66.jar", "jfiglet-0.0.7.jar", "jansi-1.11.jar",
     "javax.inject.jar", "aopalliance.jar", "unused-1.0.0.jar",
     "RoaringBitmap-0.4.5.jar", "zookeeper-3.4.5.jar", "cglib-2.2.1-v20090111.jar",
     "akka-remote_2.10-2.3.4-spark.jar", "asm-3.2.jar", "spark-sql_2.10-1.4.1.jar",

@@ -31,8 +31,17 @@ lazy val cli = (project in file("cli"))
                  .settings(mySettings:_*)
                  .settings(name := "filodb-cli")
                  .settings(libraryDependencies ++= cliDeps)
-                 .settings(cliAssemblySettings:_*)
                  .enablePlugins(JavaAppPackaging)
+                 .enablePlugins(UniversalPlugin)
+                 .settings(mappings in Universal  := {
+                    val universalMappings = (mappings in Universal).value
+                    val fatJar = (assembly in spark).value
+                    universalMappings :+ (fatJar -> ("lib/" + fatJar.getName))})
+                 .settings(bashScriptExtraDefines +=
+                   """addJava "-DaddedJar=${lib_dir}/""" + s"""filodb-spark-assembly-${version.value}.jar"""".trim)
+                 .settings(batScriptExtraDefines +=
+                   s"""set _JAVA_OPTS=%_JAVA_OPTS% -DaddedJar=%APP_LIB_DIR%\\filodb-spark-assembly-${version.value}.jar""")
+                 .settings(cliAssemblySettings:_*)
                  .dependsOn(core, coordinator, cassandra,spark)
 
 lazy val spark = (project in file("spark"))
@@ -58,7 +67,7 @@ lazy val extraRepos = Seq(
 
 val excludeShapeless = ExclusionRule(organization = "com.chuusai")
 // Zookeeper pulls in slf4j-log4j12 which we DON'T want
-val excludeZK = ExclusionRule(organization = "org.apache.zookeeper")
+val excludeZK = ExclusionRule(organization = "org.apache.zookeeper", name = "zookeeper")
 
 lazy val coreDeps = Seq(
   "com.typesafe.scala-logging" %% "scala-logging-slf4j" % "2.1.2",
@@ -96,18 +105,15 @@ lazy val cliDeps = Seq(
     exclude("commons-beanutils", "commons-beanutils-core").
     exclude("commons-collections", "commons-collections").
     exclude("commons-logging", "commons-logging").
-    exclude("com.esotericsoftware.minlog", "minlog")
+    exclude("com.esotericsoftware.minlog", "minlog"),
+  "org.jboss.aesh"        % "aesh"              % "0.66",
+  "com.github.lalyos"     % "jfiglet"           % "0.0.7",
+  "org.jboss.aesh"        % "aesh-extensions"   % "0.66"
 )
 
 lazy val sparkDeps = Seq(
-  "org.jboss.aesh"        % "aesh"              % "0.66",
-  "com.github.lalyos"     % "jfiglet"           % "0.0.7",
-  "org.jboss.aesh"        % "aesh-extensions"   % "0.66",
   "org.apache.spark"     %% "spark-sql"         % "1.4.1"  % "provided"
 )
-
-//////////////////////////
-///
 
 lazy val coreSettings = Seq(
   scalacOptions ++= Seq("-Xlint", "-deprecation", "-Xfatal-warnings", "-feature","-no-specialization")
@@ -160,7 +166,7 @@ lazy val cliAssemblySettings =  Seq(
     case "reference.conf" => MergeStrategy.concat
     case "application.conf"                            => MergeStrategy.concat
     case m if m.toLowerCase.endsWith("org.apache.hadoop.fs.filesystem") => MergeStrategy.concat
-    case x => MergeStrategy.last
+    case x =>  MergeStrategy.last
   },
   assemblyExcludedJars in assembly := { val cp = (fullClasspath in assembly).value
       val includesJar = Distribution.jars
@@ -188,4 +194,6 @@ val zip = TaskKey[File]("zip", "Creates a distributable zip file.")
 
 zip <<= Distribution.zipTask
 
-addCommandAlias("dist", ";clean;spark/assembly;cli/assembly;zip")
+addCommandAlias("distZip", ";clean;spark/assembly;cli/assembly;zip")
+
+addCommandAlias("dist", ";clean;cli/stage;cli/universal:packageBin")
