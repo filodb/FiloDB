@@ -1,5 +1,7 @@
 import sbt._
 import Keys._
+import sbtassembly.AssemblyPlugin.autoImport._
+import sbtassembly.PathList
 
 object Distribution {
 
@@ -29,6 +31,26 @@ object Distribution {
       IO.zip(entries(distdir).map(d => (d, d.getAbsolutePath.substring(distdir.getParent.length))), zipFile)
       zipFile
     }
+
+  lazy val cliAssemblySettings =  Seq(
+    assemblyJarName in assembly := s"filo-cli-${version.value}",
+    logLevel in assembly := Level.Error,
+    assemblyMergeStrategy in assembly := {
+      case m if m.toLowerCase.endsWith("manifest.mf") => MergeStrategy.discard
+      case m if m.toLowerCase.matches("meta-inf.*\\.sf$") => MergeStrategy.discard
+      case m if m.toLowerCase.matches("meta-inf.*\\.properties") => MergeStrategy.discard
+      case PathList(ps @ _*) if ps.last endsWith ".txt.1" => MergeStrategy.first
+      case "reference.conf" => MergeStrategy.concat
+      case "application.conf"                            => MergeStrategy.concat
+      case m if m.toLowerCase.endsWith("org.apache.hadoop.fs.filesystem") => MergeStrategy.concat
+      case x =>  MergeStrategy.last
+    },
+    assemblyExcludedJars in assembly := { val cp = (fullClasspath in assembly).value
+      val includesJar = Distribution.jars
+      cp filterNot { jar => includesJar.contains(jar.data.getName)}
+    },
+    test in assembly := {} //noisy for end-user since the jar is not available and user needs to build the project locally
+  )
 
   val jars = Set(
     "aesh-0.66.jar", "aesh-extensions-0.66.jar", "jfiglet-0.0.7.jar", "jansi-1.11.jar",

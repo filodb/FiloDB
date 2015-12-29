@@ -41,10 +41,10 @@ object CliMain {
     val conf = new SparkConf(true)
       .setAppName("cli")
       // Set the following in environment variables to the application
-      /*.set("spark.master","local[4]")
-      .set("spark.filodb.cassandra.hosts", "localhost")
-      .set("spark.filodb.cassandra.port", "9042")
-      .set("spark.filodb.cassandra.keyspace", "cli")*/
+      .set("spark.master", Option(System.getProperty("spark.master")).getOrElse("local[4]"))
+      .set("spark.filodb.cassandra.hosts", Option(System.getProperty("spark.filodb.cassandra.hosts")).getOrElse("localhost"))
+      .set("spark.filodb.cassandra.port", Option(System.getProperty("spark.filodb.cassandra.port")).getOrElse("9042"))
+      .set("spark.filodb.cassandra.keyspace", Option(System.getProperty("spark.filodb.cassandra.keyspace")).getOrElse("cli"))
       .setJars(Seq(System.getProperty("addedJar")))
     val sc = new SparkContext(conf)
     FiloInterpreter.init(sc)
@@ -71,16 +71,16 @@ object CliMain {
               // do some operation
               // Call Filo Interpreter
               val df = FiloInterpreter.interpret(output.getBuffer)
-              if(df.count() == 1 && df.columns.mkString(",") == "Filo-status") {
-                  if(df.collect().head.mkString(",") == "1") {
-                    printWriter.println(getSuccessString("Successful operation"))
-                  }
-                  if(df.collect().head.mkString(",") == "0") {
-                       throw new Exception("Unsuccessful operation")
-                    }
+              if (df.count() == 1 && df.columns.mkString(",") == "Filo-status") {
+                if (df.collect().head.mkString(",") == "1") {
+                  printWriter.println(getSuccessString("Successful operation"))
                 }
+                if (df.collect().head.mkString(",") == "0") {
+                  throw new Exception("Unsuccessful operation")
+                }
+              }
               else {
-                printWriter.println(getSuccessString(FiloInterpreter.dfToString(df,20)))
+                printWriter.println(getSuccessString(FiloInterpreter.dfToString(df, 20)))
               }
               val end: Long = System.currentTimeMillis
               printWriter.println(getNormalString("Query took " + (start - end) + " millis"))

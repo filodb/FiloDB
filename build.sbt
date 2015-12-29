@@ -41,7 +41,7 @@ lazy val cli = (project in file("cli"))
                    """addJava "-DaddedJar=${lib_dir}/""" + s"""filodb-spark-assembly-${version.value}.jar"""".trim)
                  .settings(batScriptExtraDefines +=
                    s"""set _JAVA_OPTS=%_JAVA_OPTS% -DaddedJar=%APP_LIB_DIR%\\filodb-spark-assembly-${version.value}.jar""")
-                 .settings(cliAssemblySettings:_*)
+                 .settings(Distribution.cliAssemblySettings:_*)
                  .dependsOn(core, coordinator, cassandra,spark)
 
 lazy val spark = (project in file("spark"))
@@ -116,8 +116,7 @@ lazy val sparkDeps = Seq(
 )
 
 lazy val coreSettings = Seq(
-  scalacOptions ++= Seq("-Xlint", "-deprecation", "-Xfatal-warnings", "-feature","-no-specialization")
-)
+  scalacOptions ++= Seq("-Xlint", "-deprecation", "-Xfatal-warnings", "-feature"))
 
 lazy val testSettings = Seq(
     parallelExecution in Test := false,
@@ -153,28 +152,6 @@ lazy val shellScript = """#!/usr/bin/env sh
 exec java -Xmx4g -Xms4g -jar "$0" "$@"
 """.split("\n")
 
-
-
-lazy val cliAssemblySettings =  Seq(
-  assemblyJarName in assembly := s"filo-cli-${version.value}",
-  logLevel in assembly := Level.Error,
-  assemblyMergeStrategy in assembly := {
-    case m if m.toLowerCase.endsWith("manifest.mf") => MergeStrategy.discard
-    case m if m.toLowerCase.matches("meta-inf.*\\.sf$") => MergeStrategy.discard
-    case m if m.toLowerCase.matches("meta-inf.*\\.properties") => MergeStrategy.discard
-    case PathList(ps @ _*) if ps.last endsWith ".txt.1" => MergeStrategy.first
-    case "reference.conf" => MergeStrategy.concat
-    case "application.conf"                            => MergeStrategy.concat
-    case m if m.toLowerCase.endsWith("org.apache.hadoop.fs.filesystem") => MergeStrategy.concat
-    case x =>  MergeStrategy.last
-  },
-  assemblyExcludedJars in assembly := { val cp = (fullClasspath in assembly).value
-      val includesJar = Distribution.jars
-      cp filterNot { jar => includesJar.contains(jar.data.getName)}
-    },
-  test in assembly := {} //noisy for end-user since the jar is not available and user needs to build the project locally
-)
-
 lazy val assemblySettings = Seq(
   assemblyMergeStrategy in assembly := {
     case m if m.toLowerCase.endsWith("manifest.mf") => MergeStrategy.discard
@@ -189,7 +166,6 @@ lazy val assemblySettings = Seq(
   },
   test in assembly := {} //noisy for end-user since the jar is not available and user needs to build the project locally
 )
-
 val zip = TaskKey[File]("zip", "Creates a distributable zip file.")
 
 zip <<= Distribution.zipTask
