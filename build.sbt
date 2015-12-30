@@ -1,5 +1,6 @@
 import sbt.Keys._
 
+
 val mySettings = Seq(organization := "org.velvia",
                      scalaVersion := "2.10.4",
                      parallelExecution in Test := false,
@@ -30,7 +31,17 @@ lazy val cli = (project in file("cli"))
                  .settings(mySettings:_*)
                  .settings(name := "filodb-cli")
                  .settings(libraryDependencies ++= cliDeps)
-                 .settings(cliAssemblySettings:_*)
+                 .enablePlugins(JavaAppPackaging)
+                 .enablePlugins(UniversalPlugin)
+                 .settings(mappings in Universal  := {
+                    val universalMappings = (mappings in Universal).value
+                    val fatJar = (assembly in spark).value
+                    universalMappings :+ (fatJar -> ("lib/" + fatJar.getName))})
+                 .settings(bashScriptExtraDefines +=
+                   """addJava "-DaddedJar=${lib_dir}/""" + s"""filodb-spark-assembly-${version.value}.jar"""".trim)
+                 .settings(batScriptExtraDefines +=
+                   s"""set _JAVA_OPTS=%_JAVA_OPTS% -DaddedJar=%APP_LIB_DIR%\\filodb-spark-assembly-${version.value}.jar""")
+                 .settings(Distribution.cliAssemblySettings:_*)
                  .dependsOn(core, coordinator, cassandra,spark)
 
 lazy val spark = (project in file("spark"))
@@ -38,7 +49,12 @@ lazy val spark = (project in file("spark"))
                    .settings(name := "filodb-spark")
                    .settings(libraryDependencies ++= sparkDeps)
                    .settings(assemblySettings:_*)
-                   .settings(assemblyOption in assembly := (assemblyOption in assembly).value.copy(includeScala = false))
+                   .settings(assemblyExcludedJars in assembly := { val cp = (fullClasspath
+                     in assembly).value
+                     val excludesJar = Seq("logback-classic-1.1.2.jar")
+                     cp filter { jar => excludesJar.contains(jar.data.getName)}
+                   })
+                   .settings(assemblyOption in assembly := (assemblyOption in assembly).value.copy(includeScala = true))
                    .dependsOn(core % "compile->compile; test->test")
                    .dependsOn(cassandra % "compile->compile; test->test")
 
@@ -59,10 +75,11 @@ val excludeShapeless = ExclusionRule(organization = "com.chuusai")
 val excludeZK = ExclusionRule(organization = "org.apache.zookeeper")
 
 lazy val coreDeps = Seq(
+  "org.slf4j" % "slf4j-log4j12" % "1.7.10",
   "com.typesafe.scala-logging" %% "scala-logging-slf4j" % "2.1.2",
   "com.clearspring.analytics" % "stream"        % "2.7.0",
   "it.unimi.dsi"          % "dsiutils"          % "2.2.4",
-  "ch.qos.logback"        % "logback-classic"   % "1.0.7",
+  //"ch.qos.logback"        % "logback-classic"   % "1.0.7",
   "com.beachape"         %% "enumeratum"        % "1.2.1",
   "org.velvia.filo"      %% "filo-scala"        % "0.2.0",
   "io.spray"             %% "spray-caching"     % "1.3.2",
@@ -89,22 +106,23 @@ lazy val coordDeps = Seq(
 )
 
 lazy val cliDeps = Seq(
+  ("org.apache.spark"     %% "spark-sql"         % "1.4.1").
+    exclude("org.mortbay.jetty", "servlet-api").
+    exclude("commons-beanutils", "commons-beanutils-core").
+    exclude("commons-collections", "commons-collections").
+    exclude("commons-logging", "commons-logging").
+    exclude("com.esotericsoftware.minlog", "minlog"),
   "org.jboss.aesh"        % "aesh"              % "0.66",
   "com.github.lalyos"     % "jfiglet"           % "0.0.7",
-  "org.apache.spark"     %% "spark-sql"         % "1.4.1",
   "org.jboss.aesh"        % "aesh-extensions"   % "0.66"
 )
 
 lazy val sparkDeps = Seq(
-  "org.apache.spark"     %% "spark-sql"         % "1.4.1" % "provided"
+  "org.apache.spark"     %% "spark-sql"         % "1.4.1"  % "provided"
 )
-
-//////////////////////////
-///
 
 lazy val coreSettings = Seq(
-  scalacOptions ++= Seq("-Xlint", "-deprecation", "-Xfatal-warnings", "-feature")
-)
+  scalacOptions ++= Seq("-Xlint", "-deprecation", "-Xfatal-warnings", "-feature"))
 
 lazy val testSettings = Seq(
     parallelExecution in Test := false,
@@ -136,18 +154,6 @@ lazy val styleSettings = Seq(
   (compile in Test) <<= (compile in Test) dependsOn compileScalastyle
 )
 
-lazy val shellScript = """#!/usr/bin/env sh
-exec java -Xmx4g -Xms4g -jar "$0" "$@"
-""".split("\n")
-
-// Builds cli as a standalone executable to make it easier to launch commands
-lazy val cliAssemblySettings = assemblySettings ++ Seq(
-  assemblyOption in assembly := (assemblyOption in assembly).value.copy(
-                                  prependShellScript = Some(shellScript)),
-  assemblyJarName in assembly := s"filo-cli-${version.value}",
-  logLevel in assembly := Level.Error
-)
-
 lazy val assemblySettings = Seq(
   assemblyMergeStrategy in assembly := {
     case m if m.toLowerCase.endsWith("manifest.mf") => MergeStrategy.discard
@@ -162,3 +168,10 @@ lazy val assemblySettings = Seq(
   },
   test in assembly := {} //noisy for end-user since the jar is not available and user needs to build the project locally
 )
+val zip = TaskKey[File]("zip", "Creates a distributable zip file.")
+
+zip <<= Distribution.zipTask
+
+addCommandAlias("distZip", ";clean;spark/assembly;cli/assembly;zip")
+
+addCommandAlias("dist", ";clean;cli/stage;cli/universal:packageBin")
