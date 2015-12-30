@@ -102,6 +102,28 @@ object Column extends StrictLogging {
   object ColumnType extends Enum[ColumnType] {
     val values = findValues
 
+    def toFiloColumnType(colType: String): ColumnType = {
+      colType.toLowerCase match {
+        case "int" => IntColumn
+        case "long" => LongColumn
+        case "double" => DoubleColumn
+        case "string" => StringColumn
+        case _ =>
+          throw new IllegalArgumentException(s"unsupported column type : $colType")
+      }
+    }
+
+    def toSqlType(colType: ColumnType): String = {
+      colType match {
+        case IntColumn => "int"
+        case LongColumn => "long"
+        case DoubleColumn => "double"
+        case StringColumn => "string"
+        case _ =>
+          throw new IllegalArgumentException(s"unsupported column type : $colType")
+      }
+    }
+
     //scalastyle:off
     case object IntColumn extends ColumnType {
       def clazz = classOf[Int]
@@ -185,19 +207,14 @@ object Column extends StrictLogging {
     ).flatten
   }
 
-  def filoSchemaFromDataframeSchema(tableName: String, dataFrameSchemaStr: String):String = {
+  def filoSchemaFromDataframeSchema(tableName: String, dataFrameSchemaStr: String): String = {
     val all = dataFrameSchemaStr.split(",")
     all.map { c =>
       val colAndTypeStr = c.split(":")
       val colName = colAndTypeStr(0).trim
       val colTypeStr = colAndTypeStr(1).trim
-      val colType = colTypeStr.toLowerCase match {
-        case "int" => "Column.ColumnType.IntColumn"
-        case "bigint" => "Column.ColumnType.LongColumn"
-        case "double" => "Column.ColumnType.DoubleColumn"
-        case "string" => "Column.ColumnType.StringColumn"
-      }
-      s"""Column(\"${colName.trim}\", \"${tableName}\", 0, $colType)"""
+      val colType = ColumnType.toFiloColumnType(colTypeStr)
+      s"""Column(\"${colName.trim}\", \"$tableName\", 0, $colType)"""
     }.mkString(",\n")
   }
 }

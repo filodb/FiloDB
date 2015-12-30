@@ -17,7 +17,7 @@ class ReprojectorSpec extends FunSpec with Matchers with BeforeAndAfter with Sca
       val usFlushes = partitions.head._2
       usFlushes.length should be(2)
 
-      val reader = readerFactory(usFlushes.head.columnVectors, classes)
+      val reader = readerFactory(usFlushes.toSeq.head.columnVectors, classes)
       reader.rowNo = 0
       //part key should match
       reader.getString(0) should be("US")
@@ -28,7 +28,7 @@ class ReprojectorSpec extends FunSpec with Matchers with BeforeAndAfter with Sca
 
       val ukFlushes = partitions.last._2
       ukFlushes.length should be(1)
-      val reader1 = readerFactory(ukFlushes.head.columnVectors, classes)
+      val reader1 = readerFactory(ukFlushes.toSeq.head.columnVectors, classes)
 
       //there should be six rows
       (0 until 3).foreach { i =>

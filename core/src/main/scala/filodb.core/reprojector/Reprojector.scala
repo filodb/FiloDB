@@ -14,7 +14,7 @@ trait Reprojector extends Serializable {
 
   def project(projection: Projection,
               rows: Iterator[RowReader],
-              rowSchema: Option[Seq[Column]] = None): Iterator[(Any, Seq[SegmentFlush])]
+              rowSchema: Option[Seq[Column]] = None): Iterator[(Any, Iterator[SegmentFlush])]
 }
 
 object Reprojector extends Reprojector {
@@ -28,30 +28,30 @@ object Reprojector extends Reprojector {
 
   override def project(projection: Projection,
                        rows: Iterator[RowReader],
-                       passedSchema: Option[Seq[Column]] = None): Iterator[(Any, Seq[SegmentFlush])] = {
+                       passedSchema: Option[Seq[Column]] = None): Iterator[(Any, Iterator[SegmentFlush])] = {
 
     val rowSchema = passedSchema.getOrElse(projection.schema)
     val columnIndexes = rowSchema.zipWithIndex.map { case (col, i) => col.name -> i }.toMap
     val keyFunction = projection.keyFunction(columnIndexes)
-    // lets group rows within partition by segment
+    val partitionFunction = projection.partitionFunction(columnIndexes)
     import filodb.core.util.Iterators._
-    val partitionedRows = rows.sortedGroupBy(projection.partitionFunction(columnIndexes))
+    // group rows by partition
+    val partitionedRows = rows.sortedGroupBy(partitionFunction)
     partitionedRows.map { case (partitionKey, partRows) =>
-
+      // then group rows within partition by segment
       val segmentedRows = partRows.sortedGroupBy(projection.segmentFunction(columnIndexes))
       val segmentChunks = segmentedRows.map { case (segment, segmentRowsIter) =>
         // For each segment grouping of rows... set up a SegmentInfo
-        // within a segment we sort rows by sort order
-        // then write the rows as a chunk to the segment
+        // then write the rows as a chunk to the segment flush
+        // we also separate the keys for summarizing
         val (keys, columnVectorMap) = buildFromRows(keyFunction,
           segmentRowsIter,
           Projection.toFiloSchema(rowSchema))
         val columnVectors = new Array[ByteBuffer](projection.schema.length)
         projection.schema.zipWithIndex.foreach { case (c, i) => columnVectors(i) = columnVectorMap(c.name) }
-        // we also separate the keys for summarizing
 
         SegmentFlush(projection, partitionKey, segment, keys, columnVectors)
-      }.toSeq
+      }
       (partitionKey, segmentChunks)
     }
   }

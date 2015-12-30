@@ -21,11 +21,11 @@ with BeforeAndAfter with Matchers with ScalaFutures {
 
   import scala.concurrent.duration._
 
-  def flushPartitions(mapColumnStore: ColumnStore, partitions: Seq[(Any, Seq[SegmentFlush])]): Seq[Seq[Boolean]] = {
+  def flushPartitions(mapColumnStore: ColumnStore, partitions: Seq[(Any, Iterator[SegmentFlush])]): Seq[Seq[Boolean]] = {
     partitions.map { case (p, flushes) =>
       flushes.map { flush =>
         Await.result(mapColumnStore.flushToSegment(flush), 100 seconds)
-      }
+      }.toSeq
     }
   }
 
@@ -65,12 +65,12 @@ with BeforeAndAfter with Matchers with ScalaFutures {
       val rows1 = names2.map(TupleRowReader).iterator
       val partitions1 = Reprojector.project(projection, rows1).toSeq
       partitions1.length should be(2)
-      val flush1 = partitions1.head._2.head
+      val flush1 = partitions1.head._2.toSeq.head
 
       val rows2 = names3.map(TupleRowReader).iterator
       val partitions2 = Reprojector.project(projection, rows2).toSeq
       partitions2.length should be(2)
-      val flush2 = partitions2.head._2.head
+      val flush2 = partitions2.head._2.toSeq.head
 
       flush1.partition should be(flush2.partition)
       flush1.segment should be(flush2.segment)

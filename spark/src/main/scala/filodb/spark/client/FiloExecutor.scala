@@ -37,7 +37,7 @@ object FiloExecutor {
   def handleCreate(create: Create, sql: SQLContext, dfSuccess: DataFrame): DataFrame = {
     val columns = create.columns map {
       case (colName, colType) =>
-        Column(colName, create.tableName, 0, ColumnType.withName(colType))
+        Column(colName, create.tableName, 0, ColumnType.toFiloColumnType(colType))
     } toSeq
     val dataset = Dataset.apply(create.tableName, columns,
       create.partitionCols, create.primaryCols, create.segmentCols)
