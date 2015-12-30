@@ -102,6 +102,15 @@ object Column extends StrictLogging {
   object ColumnType extends Enum[ColumnType] {
     val values = findValues
 
+    def toFiloColumnType(colType :String): ColumnType = {
+          colType.toLowerCase() match {
+            case "int"    => IntColumn
+            case "long"   => LongColumn
+            case "double" => DoubleColumn
+            case "string" => StringColumn
+            case _ => throw new IllegalArgumentException(s"unsupported column type : $colType")
+          }
+    }
     //scalastyle:off
     case object IntColumn extends ColumnType {
       def clazz = classOf[Int]

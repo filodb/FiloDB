@@ -29,20 +29,20 @@ class FiloInterpreterTest extends CassandraTest {
 
   implicit val ec = Filo.executionContext
 
-  val createTable = "CREATE TABLE jsonds (id LongColumn,sqlDate StringColumn," +
-    "monthYear LongColumn,year LongColumn) PRIMARY KEY (id) " +
+  val createTable = "CREATE TABLE jsonds (id long,sqlDate string," +
+    "monthYear long,year long) PRIMARY KEY (id) " +
     "PARTITION BY (year) SEGMENT BY (monthYear) SORT BY (sqlDate)"
 
-  val createTableWithoutParition = "CREATE TABLE jsonds (id LongColumn,sqlDate StringColumn," +
-    "monthYear LongColumn,year LongColumn) PRIMARY KEY (id) " +
+  val createTableWithoutParition = "CREATE TABLE jsonds (id long,sqlDate string," +
+    "monthYear long,year long) PRIMARY KEY (id) " +
     "SEGMENT BY (monthYear) SORT BY (sqlDate)"
 
-  val createTableWithoutPrimary = "CREATE TABLE jsonds (id LongColumn,sqlDate StringColumn," +
-    "monthYear LongColumn,year LongColumn) " +
+  val createTableWithoutPrimary = "CREATE TABLE jsonds (id long,sqlDate string," +
+    "monthYear long,year long) " +
     "PARTITION BY (year) SEGMENT BY (monthYear) SORT BY (sqlDate)"
 
-  val createTableWithoutSegment = "CREATE TABLE jsonds (id LongColumn,sqlDate StringColumn," +
-    "monthYear LongColumn,year LongColumn) PRIMARY KEY (id) " +
+  val createTableWithoutSegment = "CREATE TABLE jsonds (id long,sqlDate string," +
+    "monthYear long,year long) PRIMARY KEY (id) " +
     "PARTITION BY (year) SORT BY (sqlDate)"
 
   val loadTableWithoutFormat = "LOAD './src/test/resources/filoData.json' INTO jsonds"
@@ -65,7 +65,7 @@ class FiloInterpreterTest extends CassandraTest {
     create.segmentCols should contain theSameElementsAs Seq("monthYear")
     create.sortCols should contain theSameElementsAs Seq("sqlDate")
     create.tableName should be("jsonds")
-    val cols = Map("id" -> "LongColumn", "sqlDate" -> "StringColumn", "monthYear" -> "LongColumn", "year" -> "LongColumn")
+    val cols = Map("id" -> "long", "sqlDate" -> "string", "monthYear" -> "long", "year" -> "long")
     create.columns should contain theSameElementsAs cols
   }
 
