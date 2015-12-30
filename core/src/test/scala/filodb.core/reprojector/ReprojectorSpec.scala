@@ -11,13 +11,13 @@ class ReprojectorSpec extends FunSpec with Matchers with BeforeAndAfter with Sca
   describe("Rows to Flush") {
     it("should correctly project rows to flush") {
       val rows = names.map(TupleRowReader).iterator
-      val partitions = Reprojector.project(projection, rows).toSeq
-      partitions.length should be(2)
+      val partitions = Reprojector.project(projection, rows).toSeq.groupBy(f=> f.partition)
+      partitions.size should be(2)
       val classes = projection.schema.map(_.columnType.clazz).toArray
-      val usFlushes = partitions.head._2
+      val usFlushes = partitions.last._2
       usFlushes.length should be(2)
 
-      val reader = readerFactory(usFlushes.toSeq.head.columnVectors, classes)
+      val reader = readerFactory(usFlushes.head.columnVectors, classes)
       reader.rowNo = 0
       //part key should match
       reader.getString(0) should be("US")
@@ -26,7 +26,7 @@ class ReprojectorSpec extends FunSpec with Matchers with BeforeAndAfter with Sca
       reader.getString(2) should be("Khalil")
       reader.getLong(4) should be(24)
 
-      val ukFlushes = partitions.last._2
+      val ukFlushes = partitions.head._2
       ukFlushes.length should be(1)
       val reader1 = readerFactory(ukFlushes.toSeq.head.columnVectors, classes)
 
@@ -41,7 +41,7 @@ class ReprojectorSpec extends FunSpec with Matchers with BeforeAndAfter with Sca
           reader1.getString(1) should be("LN")
           //sorted by age in UK segment
           reader1.getString(2) should be("Jerry")
-          reader1.getLong(4) should be(29)
+          reader1.getLong(4) should be(40)
         }
       }
 

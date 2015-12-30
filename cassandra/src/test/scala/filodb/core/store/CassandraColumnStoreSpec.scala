@@ -21,20 +21,19 @@ with BeforeAndAfter with Matchers with ScalaFutures {
 
   import scala.concurrent.duration._
 
-  def flushPartitions(mapColumnStore: ColumnStore, partitions: Seq[(Any, Iterator[SegmentFlush])]): Seq[Seq[Boolean]] = {
-    partitions.map { case (p, flushes) =>
-      flushes.map { flush =>
-        Await.result(mapColumnStore.flushToSegment(flush), 100 seconds)
-      }.toSeq
+  def flushPartitions(mapColumnStore: ColumnStore, partitions: Iterator[SegmentFlush]): Seq[Boolean] = {
+    partitions.map { flush =>
+      Await.result(mapColumnStore.flushToSegment(flush), 100 seconds)
+    }.toSeq
+  }
+
+
+
+  def checkResults(results: Seq[Boolean]): Unit = {
+    results.foreach { r: Boolean =>
+      r should be(true)
     }
   }
-
-  def checkResults(results: Seq[Seq[Boolean]]): Unit = {
-    results.foreach(seq => seq.foreach { r: Boolean =>
-      r should be(true)
-    })
-  }
-
   var columnStore: CassandraColumnStore = null
 
   override def beforeAll() {
@@ -55,22 +54,28 @@ with BeforeAndAfter with Matchers with ScalaFutures {
   describe("Concurrent flushes") {
     it("should NOT allow concurrent flushes to write against the same summary version") {
       val rows = names.map(TupleRowReader).iterator
-      val partitions = Reprojector.project(projection, rows).toSeq
+      val partitions = Reprojector.project(projection, rows)
+        .toSeq.groupBy(f => f.partition)
 
-      partitions.length should be(2)
-      val results = flushPartitions(columnStore, partitions)
+      partitions.size should be(2)
+      val results = flushPartitions(columnStore,
+        partitions.values.flatten.iterator)
       checkResults(results)
 
 
       val rows1 = names2.map(TupleRowReader).iterator
-      val partitions1 = Reprojector.project(projection, rows1).toSeq
-      partitions1.length should be(2)
-      val flush1 = partitions1.head._2.toSeq.head
+      val partitions1 = Reprojector.project(projection, rows1)
+        .toSeq.groupBy(f => f.partition)
+      partitions1.size should be(2)
+      val flushes1 = partitions1.values.flatten
+      val flush1 = flushes1.head
 
       val rows2 = names3.map(TupleRowReader).iterator
-      val partitions2 = Reprojector.project(projection, rows2).toSeq
-      partitions2.length should be(2)
-      val flush2 = partitions2.head._2.toSeq.head
+      val partitions2 = Reprojector.project(projection, rows2)
+        .toSeq.groupBy(f => f.partition)
+      partitions2.size should be(2)
+      val flushes2 = partitions2.values.flatten
+      val flush2 = flushes2.head
 
       flush1.partition should be(flush2.partition)
       flush1.segment should be(flush2.segment)
@@ -107,12 +112,14 @@ with BeforeAndAfter with Matchers with ScalaFutures {
     it("should store and read one flush properly with Partition Key And Segment Range") {
 
       val rows = names.map(TupleRowReader).iterator
-      val partitions = Reprojector.project(projection, rows).toSeq
+      val partitions = Reprojector.project(projection, rows)
+        .toSeq.groupBy(f => f.partition)
 
-      partitions.length should be(2)
-      partitions.head._1 should be("US")
-      partitions.last._1 should be("UK")
-      val results = flushPartitions(columnStore, partitions)
+      partitions.size should be(2)
+      val flushes = partitions.values.flatten
+      flushes.last.partition should be("US")
+      flushes.head.partition should be("UK")
+      val results = flushPartitions(columnStore, flushes.iterator)
       checkResults(results)
 
       val segments = Await.result(columnStore.readSegments(
@@ -146,13 +153,17 @@ with BeforeAndAfter with Matchers with ScalaFutures {
 
       val rows = names.map(TupleRowReader).iterator
       val rows2 = names2.map(TupleRowReader).iterator
-      val partitions = Reprojector.project(projection, rows).toSeq
-      val partitions2 = Reprojector.project(projection, rows2).toSeq
-      partitions.length should be(2)
-      partitions2.length should be(2)
-      val results = flushPartitions(columnStore, partitions)
+      val partitions = Reprojector.project(projection, rows)
+        .toSeq.groupBy(f => f.partition)
+      val partitions2 = Reprojector.project(projection, rows2)
+        .toSeq.groupBy(f => f.partition)
+      partitions.size should be(2)
+      partitions2.size should be(2)
+      val flushes1 = partitions.values.flatten
+      val flushes2 = partitions2.values.flatten
+      val results = flushPartitions(columnStore, flushes1.iterator)
       checkResults(results)
-      val results2 = flushPartitions(columnStore, partitions2)
+      val results2 = flushPartitions(columnStore, flushes2.iterator)
       checkResults(results2)
 
       val segments = Await.result(columnStore.readSegments(
@@ -175,17 +186,22 @@ with BeforeAndAfter with Matchers with ScalaFutures {
     }
 
     it("should store and read data for Full TokenRange") {
-
       val rows = names.map(TupleRowReader).iterator
       val rows2 = names2.map(TupleRowReader).iterator
-      val partitions = Reprojector.project(projection, rows).toSeq
-      val partitions2 = Reprojector.project(projection, rows2).toSeq
-      partitions.length should be(2)
-      partitions2.length should be(2)
-      val results = flushPartitions(columnStore, partitions)
+
+      val partitions = Reprojector.project(projection, rows)
+        .toSeq.groupBy(f => f.partition)
+      val partitions2 = Reprojector.project(projection, rows2)
+        .toSeq.groupBy(f => f.partition)
+      partitions.size should be(2)
+      partitions2.size should be(2)
+      val flushes1 = partitions.values.flatten
+      val flushes2 = partitions2.values.flatten
+      val results = flushPartitions(columnStore, flushes1.iterator)
       checkResults(results)
-      val results2 = flushPartitions(columnStore, partitions2)
+      val results2 = flushPartitions(columnStore, flushes2.iterator)
       checkResults(results2)
+
 
       val scanSplits = columnStore.getScanSplits(1, 1000, projection, projection.columnNames, None, None)
 
@@ -212,17 +228,22 @@ with BeforeAndAfter with Matchers with ScalaFutures {
     }
 
     it("should store and read data for TokenRange with Partition") {
-
       val rows = names.map(TupleRowReader).iterator
       val rows2 = names2.map(TupleRowReader).iterator
-      val partitions = Reprojector.project(projection, rows).toSeq
-      val partitions2 = Reprojector.project(projection, rows2).toSeq
-      partitions.length should be(2)
-      partitions2.length should be(2)
-      val results = flushPartitions(columnStore, partitions)
+
+      val partitions = Reprojector.project(projection, rows)
+        .toSeq.groupBy(f => f.partition)
+      val partitions2 = Reprojector.project(projection, rows2)
+        .toSeq.groupBy(f => f.partition)
+      partitions.size should be(2)
+      partitions2.size should be(2)
+      val flushes1 = partitions.values.flatten
+      val flushes2 = partitions2.values.flatten
+      val results = flushPartitions(columnStore, flushes1.iterator)
       checkResults(results)
-      val results2 = flushPartitions(columnStore, partitions2)
+      val results2 = flushPartitions(columnStore, flushes2.iterator)
       checkResults(results2)
+
 
       val scanSplits = columnStore.getScanSplits(1, 1000,
         projection, projection.columnNames, Some("US"), None)
@@ -250,16 +271,20 @@ with BeforeAndAfter with Matchers with ScalaFutures {
     }
 
     it("should store and read data for TokenRange with Partition And Segment Range") {
-
       val rows = names.map(TupleRowReader).iterator
       val rows2 = names2.map(TupleRowReader).iterator
-      val partitions = Reprojector.project(projection, rows).toSeq
-      val partitions2 = Reprojector.project(projection, rows2).toSeq
-      partitions.length should be(2)
-      partitions2.length should be(2)
-      val results = flushPartitions(columnStore, partitions)
+
+      val partitions = Reprojector.project(projection, rows)
+        .toSeq.groupBy(f => f.partition)
+      val partitions2 = Reprojector.project(projection, rows2)
+        .toSeq.groupBy(f => f.partition)
+      partitions.size should be(2)
+      partitions2.size should be(2)
+      val flushes1 = partitions.values.flatten
+      val flushes2 = partitions2.values.flatten
+      val results = flushPartitions(columnStore, flushes1.iterator)
       checkResults(results)
-      val results2 = flushPartitions(columnStore, partitions2)
+      val results2 = flushPartitions(columnStore, flushes2.iterator)
       checkResults(results2)
 
       val scanSplits = columnStore.getScanSplits(1, 1000, projection,

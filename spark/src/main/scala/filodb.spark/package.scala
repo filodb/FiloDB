@@ -71,18 +71,13 @@ package object spark {
         // this is a compromise between memory and ingestion speed.
         rowIter.grouped(flushSize).map { rows =>
           // reproject the data
-          val projectedData = Reprojector.project(projection,
+          Reprojector.project(projection,
             rows.map(r => RddRowReader(r)).iterator,
             Some(dfOrderSchema)
-          )
-          // now flush each segment
-          projectedData.flatMap { case (partition, segmentFlushes) =>
-            segmentFlushes.map(flush =>
+          ).map{flush =>
               Filo.parse(Filo.columnStore.flushToSegment(flush))(r => r)
-            )
           }
         }
-
       }.flatten.iterator
 
     }

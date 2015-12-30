@@ -183,18 +183,16 @@ class ColumnStoreSpec extends FunSpec with Matchers with BeforeAndAfter with Sca
 
   import scala.concurrent.duration._
 
-  def flushPartitions(mapColumnStore: MapColumnStore, partitions: Seq[(Any, Iterator[SegmentFlush])]): Seq[Seq[Boolean]] = {
-    partitions.map { case (p, flushes) =>
-      flushes.map { flush =>
-        Await.result(mapColumnStore.flushToSegment(flush), 100 seconds)
-      }.toSeq
-    }
+  def flushPartitions(mapColumnStore: MapColumnStore, partitions: Iterator[SegmentFlush]): Seq[Boolean] = {
+    partitions.map { flush =>
+      Await.result(mapColumnStore.flushToSegment(flush), 100 seconds)
+    }.toSeq
   }
 
-  def checkResults(results: Seq[Seq[Boolean]]): Unit = {
-    results.foreach(seq => seq.foreach { r: Boolean =>
+  def checkResults(results: Seq[Boolean]): Unit = {
+    results.foreach { r: Boolean =>
       r should be(true)
-    })
+    }
   }
 
   describe("Concurrent flushes") {
@@ -202,22 +200,28 @@ class ColumnStoreSpec extends FunSpec with Matchers with BeforeAndAfter with Sca
       import scala.concurrent.ExecutionContext.Implicits.global
       val columnStore = new MapColumnStore()
       val rows = names.map(TupleRowReader).iterator
-      val partitions = Reprojector.project(projection, rows).toSeq
+      val partitions = Reprojector.project(projection, rows)
+        .toSeq.groupBy(f => f.partition)
 
-      partitions.length should be(2)
-      val results = flushPartitions(columnStore, partitions)
+      partitions.size should be(2)
+      val results = flushPartitions(columnStore,
+        partitions.values.flatten.iterator)
       checkResults(results)
 
 
       val rows1 = names2.map(TupleRowReader).iterator
-      val partitions1 = Reprojector.project(projection, rows1).toSeq
-      partitions1.length should be(2)
-      val flush1 = partitions1.head._2.toSeq.head
+      val partitions1 = Reprojector.project(projection, rows1)
+        .toSeq.groupBy(f => f.partition)
+      partitions1.size should be(2)
+      val flushes1 = partitions1.values.flatten
+      val flush1 = flushes1.head
 
       val rows2 = names3.map(TupleRowReader).iterator
-      val partitions2 = Reprojector.project(projection, rows2).toSeq
-      partitions2.length should be(2)
-      val flush2 = partitions2.head._2.toSeq.head
+      val partitions2 = Reprojector.project(projection, rows2)
+        .toSeq.groupBy(f => f.partition)
+      partitions2.size should be(2)
+      val flushes2 = partitions2.values.flatten
+      val flush2 = flushes2.head
 
       flush1.partition should be(flush2.partition)
       flush1.segment should be(flush2.segment)
@@ -255,12 +259,14 @@ class ColumnStoreSpec extends FunSpec with Matchers with BeforeAndAfter with Sca
       val mapColumnStore = new MapColumnStore()
 
       val rows = names.map(TupleRowReader).iterator
-      val partitions = Reprojector.project(projection, rows).toSeq
+      val partitions = Reprojector.project(projection, rows)
+        .toSeq.groupBy(f => f.partition)
 
-      partitions.length should be(2)
-      partitions.head._1 should be("US")
-      partitions.last._1 should be("UK")
-      val results = flushPartitions(mapColumnStore, partitions)
+      partitions.size should be(2)
+      val flushes = partitions.values.flatten
+      flushes.last.partition should be("US")
+      flushes.head.partition should be("UK")
+      val results = flushPartitions(mapColumnStore, flushes.iterator)
       checkResults(results)
 
       val segments = Await.result(mapColumnStore.readSegments(
@@ -295,13 +301,17 @@ class ColumnStoreSpec extends FunSpec with Matchers with BeforeAndAfter with Sca
 
       val rows = names.map(TupleRowReader).iterator
       val rows2 = names2.map(TupleRowReader).iterator
-      val partitions = Reprojector.project(projection, rows).toSeq
-      val partitions2 = Reprojector.project(projection, rows2).toSeq
-      partitions.length should be(2)
-      partitions2.length should be(2)
-      val results = flushPartitions(mapColumnStore, partitions)
+      val partitions = Reprojector.project(projection, rows)
+        .toSeq.groupBy(f => f.partition)
+      val partitions2 = Reprojector.project(projection, rows2)
+        .toSeq.groupBy(f => f.partition)
+      partitions.size should be(2)
+      partitions2.size should be(2)
+      val results = flushPartitions(mapColumnStore,
+        partitions.values.flatten.iterator)
       checkResults(results)
-      val results2 = flushPartitions(mapColumnStore, partitions2)
+      val results2 = flushPartitions(mapColumnStore,
+        partitions2.values.flatten.iterator)
       checkResults(results2)
 
       val scanInfos = Await.result(mapColumnStore.getScanSplits(10, 1000,
