@@ -27,8 +27,8 @@ object FiloInterpreter {
     sc = sContext
     sql = new SQLContext(sc)
     Filo.init(configFromSpark(sc))
-    Await.result(Filo.columnStore.initialize, 10 seconds)
-    Await.result(Filo.metaStore.initialize, 10 seconds)
+    Filo.parse(Filo.columnStore.initialize)(x=>x)
+    Filo.parse(Filo.metaStore.initialize)(x=>x)
   }
 
   /** The method to be called in the end to clear the columnStore and metaStore */
