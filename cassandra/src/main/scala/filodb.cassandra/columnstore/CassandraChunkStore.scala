@@ -1,17 +1,16 @@
 package filodb.cassandra.columnstore
 
-import com.typesafe.scalalogging.slf4j.StrictLogging
 import filodb.core.Messages._
 import filodb.core.Types.ChunkId
 import filodb.core.metadata._
 import filodb.core.query.ScanInfo
 import filodb.core.store.ChunkStore
 import filodb.core.util.Iterators._
-import filodb.core.util.MemoryPool
+import filodb.core.util.{FiloLogging, MemoryPool}
 
 import scala.concurrent.Future
 
-trait CassandraChunkStore extends ChunkStore with MemoryPool with StrictLogging{
+trait CassandraChunkStore extends ChunkStore with MemoryPool with FiloLogging {
 
   import scala.concurrent.ExecutionContext.Implicits.global
 
@@ -29,29 +28,35 @@ trait CassandraChunkStore extends ChunkStore with MemoryPool with StrictLogging{
     val segmentId = segment.toString
 
     val metaDataSize = chunk.metaDataByteSize
-    logger.debug(s"Acquiring buffer of size $metaDataSize for ChunkMetadata")
+    metrics.debug(s"Acquiring buffer of size $metaDataSize for ChunkMetadata")
     val metadataBuf = acquire(metaDataSize)
     val keySize = chunk.keySize(projection.keyType)
-    logger.debug(s"Acquiring buffer of size $keySize for Chunk Key Buffer")
+    metrics.debug(s"Acquiring buffer of size $keySize for Chunk Key Buffer")
     val keysBuf = acquire(keySize)
-    SimpleChunk.writeMetadata(metadataBuf, chunk.numRows, chunk.chunkOverrides)
-    SimpleChunk.writeKeys(keysBuf, chunk.keys, projection.keyType)
+    try {
+      SimpleChunk.writeMetadata(metadataBuf, chunk.numRows, chunk.chunkOverrides)
+      SimpleChunk.writeKeys(keysBuf, chunk.keys, projection.keyType)
 
-    chunkTable.writeChunks(projection, pk,
-      projection.columnNames ++ Seq(META_COLUMN_NAME, KEYS_COLUMN_NAME),
-      segmentId, chunk.chunkId,
-      chunk.columnVectors ++ Seq(metadataBuf, keysBuf))
-      .map {
-      case Success => {
-        release(metadataBuf)
-        release(keysBuf)
-        true
+      chunkTable.writeChunks(projection, pk,
+        projection.columnNames ++ Seq(META_COLUMN_NAME, KEYS_COLUMN_NAME),
+        segmentId, chunk.chunkId,
+        chunk.columnVectors ++ Seq(metadataBuf, keysBuf))
+        .map {
+        case Success => true
+        case _ => {
+          metrics.warn(s"Exception occurred while writing to db")
+          false
+        }
       }
-      case _ => {
-        release(metadataBuf)
-        release(keysBuf)
-        false
+    } catch {
+      case t: Throwable => {
+        metrics.warn("Exception occurred while writing buffer", t)
+        flow.warn("Exception occurred while writing buffer", t)
+        throw t
       }
+    } finally {
+      release(metadataBuf)
+      release(keysBuf)
     }
   }
 

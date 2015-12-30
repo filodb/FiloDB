@@ -33,8 +33,6 @@ sealed class ProjectionTable(ks: KeySpace, _session: Session)
 
   object keyColumns extends StringColumn(this)
 
-  object sortColumns extends StringColumn(this)
-
   object segmentColumns extends StringColumn(this)
 
   object projectionReverse extends BooleanColumn(this)
@@ -53,7 +51,6 @@ sealed class ProjectionTable(ks: KeySpace, _session: Session)
       schemaObj,
       columns(partitionKeyColumns(row)),
       columns(keyColumns(row)),
-      columns(sortColumns(row)),
       columns(segmentColumns(row)),
       projectionReverse(row)
     )
@@ -72,7 +69,6 @@ sealed class ProjectionTable(ks: KeySpace, _session: Session)
       .value(_.datasetSchema, Column.schemaAsByteBuffer(projection.schema))
       .value(_.partitionKeyColumns, str(projection.partitionColumns))
       .value(_.keyColumns, str(projection.keyColumns))
-      .value(_.sortColumns, str(projection.sortColumns))
       .value(_.segmentColumns, str(projection.segmentColumns))
       .value(_.projectionReverse, projection.reverse)
       .future.toResponse()

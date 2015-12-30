@@ -184,4 +184,20 @@ object Column extends StrictLogging {
       check(alreadyHaveIt || (!alreadyHaveIt && !column.isDeleted), "New column cannot be deleted")
     ).flatten
   }
+
+  def filoSchemaFromDataframeSchema(tableName: String, dataFrameSchemaStr: String):String = {
+    val all = dataFrameSchemaStr.split(",")
+    all.map { c =>
+      val colAndTypeStr = c.split(":")
+      val colName = colAndTypeStr(0).trim
+      val colTypeStr = colAndTypeStr(1).trim
+      val colType = colTypeStr.toLowerCase match {
+        case "int" => "Column.ColumnType.IntColumn"
+        case "bigint" => "Column.ColumnType.LongColumn"
+        case "double" => "Column.ColumnType.DoubleColumn"
+        case "string" => "Column.ColumnType.StringColumn"
+      }
+      s"""Column(\"${colName.trim}\", \"${tableName}\", 0, $colType)"""
+    }.mkString(",\n")
+  }
 }

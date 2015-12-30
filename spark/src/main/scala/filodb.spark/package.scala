@@ -7,8 +7,6 @@ import org.apache.spark.SparkContext
 import org.apache.spark.sql.types.DataType
 import org.apache.spark.sql.{DataFrame, Row, SQLContext, SaveMode}
 
-import scala.concurrent.Future
-
 
 package spark {
 
@@ -44,7 +42,7 @@ package object spark {
 
     def saveAsFiloDataset(df: DataFrame,
                           dataset: String,
-                          flushSize: Int = 10000,
+                          flushSize: Int = 1000,
                           mode: SaveMode = SaveMode.Append): Unit = {
       val filoConfig = configFromSpark(sqlContext.sparkContext)
       Filo.init(filoConfig)
@@ -60,7 +58,7 @@ package object spark {
       // For each partition, start the ingestion
       df.rdd.mapPartitions { rowIter =>
         Filo.init(filoConfig)
-        Filo.parse(ingest(flushSize, dataset, rowIter, dfOrderSchema))(r => r).iterator
+        ingest(flushSize, dataset, rowIter, dfOrderSchema)
       }.count()
     }
 
@@ -68,7 +66,7 @@ package object spark {
     private def ingest(flushSize: Int, dataset: String, rowIter: Iterator[Row], dfOrderSchema: Seq[Column]) = {
       implicit val executionContext = Filo.executionContext
       val datasetObj = Filo.getDatasetObj(dataset)
-      Future sequence datasetObj.projections.flatMap { projection =>
+      datasetObj.projections.flatMap { projection =>
         // group the flushes into flush Size rows
         // this is a compromise between memory and ingestion speed.
         rowIter.grouped(flushSize).map { rows =>
@@ -79,12 +77,13 @@ package object spark {
           )
           // now flush each segment
           projectedData.flatMap { case (partition, segmentFlushes) =>
-            segmentFlushes
-              .map(flush => Filo.columnStore.flushToSegment(flush))
+            segmentFlushes.map(flush =>
+              Filo.parse(Filo.columnStore.flushToSegment(flush))(r => r)
+            )
           }
         }
 
-      }.flatten
+      }.flatten.iterator
 
     }
 

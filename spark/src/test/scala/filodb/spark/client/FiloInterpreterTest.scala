@@ -31,19 +31,19 @@ class FiloInterpreterTest extends CassandraTest {
 
   val createTable = "CREATE TABLE jsonds (id LongColumn,sqlDate StringColumn," +
     "monthYear LongColumn,year LongColumn) PRIMARY KEY (id) " +
-    "PARTITION BY (year) SEGMENT BY (monthYear) SORT BY (sqlDate)"
+    "PARTITION BY (year) SEGMENT BY (monthYear)"
 
   val createTableWithoutParition = "CREATE TABLE jsonds (id LongColumn,sqlDate StringColumn," +
     "monthYear LongColumn,year LongColumn) PRIMARY KEY (id) " +
-    "SEGMENT BY (monthYear) SORT BY (sqlDate)"
+    "SEGMENT BY (monthYear)"
 
   val createTableWithoutPrimary = "CREATE TABLE jsonds (id LongColumn,sqlDate StringColumn," +
     "monthYear LongColumn,year LongColumn) " +
-    "PARTITION BY (year) SEGMENT BY (monthYear) SORT BY (sqlDate)"
+    "PARTITION BY (year) SEGMENT BY (monthYear)"
 
   val createTableWithoutSegment = "CREATE TABLE jsonds (id LongColumn,sqlDate StringColumn," +
     "monthYear LongColumn,year LongColumn) PRIMARY KEY (id) " +
-    "PARTITION BY (year) SORT BY (sqlDate)"
+    "PARTITION BY (year)"
 
   val loadTableWithoutFormat = "LOAD './src/test/resources/filoData.json' INTO jsonds"
 
@@ -63,7 +63,6 @@ class FiloInterpreterTest extends CassandraTest {
     create.partitionCols should contain theSameElementsAs Seq("year")
     create.primaryCols should contain theSameElementsAs Seq("id")
     create.segmentCols should contain theSameElementsAs Seq("monthYear")
-    create.sortCols should contain theSameElementsAs Seq("sqlDate")
     create.tableName should be("jsonds")
     val cols = Map("id" -> "LongColumn", "sqlDate" -> "StringColumn", "monthYear" -> "LongColumn", "year" -> "LongColumn")
     create.columns should contain theSameElementsAs cols

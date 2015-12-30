@@ -5,11 +5,6 @@ import java.nio.ByteBuffer
 
 class ByteBufferOutputStream(byteBuffer: ByteBuffer) extends OutputStream {
 
-  /** Creates a stream with a new non-direct buffer of the specified size. */
-
-  def this(bufferSize: Int) = this(ByteBuffer.allocate(bufferSize))
-
-
   @throws(classOf[IOException])
   def write(b: Int): Unit = {
     if (!byteBuffer.hasRemaining) flush

@@ -40,7 +40,7 @@ object FiloExecutor {
         Column(colName, create.tableName, 0, ColumnType.withName(colType))
     } toSeq
     val dataset = Dataset.apply(create.tableName, columns,
-      create.partitionCols, create.primaryCols, create.sortCols, create.segmentCols)
+      create.partitionCols, create.primaryCols, create.segmentCols)
     Filo.metaStore.addProjection(dataset.projectionInfoSeq.head)
     val tableDS = sql.read.format("filodb.spark").option("dataset", create.tableName).load()
     tableDS.registerTempTable(create.tableName)

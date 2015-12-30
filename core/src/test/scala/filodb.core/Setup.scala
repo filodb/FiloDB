@@ -21,7 +21,7 @@ object Setup {
   def mapper(rows: Seq[Product]): Iterator[RowReader] = rows.map(TupleRowReader).toIterator
 
   // primary key and segment are same
-  val dataset = Dataset("dataset", schema, "country", "first", "age", "city")
+  val dataset = Dataset("dataset", schema, "country", "first", "city")
   val projection = dataset.projections.head
   val keyRange = KeyRange(Some("A"), Some("Z"))
   val DefaultPartitionKey = "Single"

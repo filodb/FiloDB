@@ -49,7 +49,7 @@ class FiloSparkCassandraTest extends CassandraTest {
     Column("year", "jsonds", 0, Column.ColumnType.LongColumn))
 
   //Table name,Schema, Part Key, Primary Key, Sort Order,Segment
-  val dataset = Dataset("jsonds", schema, "year", "id", "sqlDate", "monthYear")
+  val dataset = Dataset("jsonds", schema, "year", "id", "monthYear")
 
   val jsonRows = Seq(
     """{"id":0,"sqlDate":"2015/03/15T15:00Z","monthYear":32015,"year":2015}""",

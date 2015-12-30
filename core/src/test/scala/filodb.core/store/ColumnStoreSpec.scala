@@ -275,8 +275,8 @@ class ColumnStoreSpec extends FunSpec with Matchers with BeforeAndAfter with Sca
       val reader = threeReaders.head
       reader.getString(0) should be("US")
       reader.getString(1) should be("NY")
-      reader.getString(2) should be("Ndamukong")
-      reader.getLong(4) should be(28)
+      reader.getString(2) should be("Rodney")
+      reader.getLong(4) should be(25)
 
       val scan2 = segments.last
       scan2.hasNext should be(true)

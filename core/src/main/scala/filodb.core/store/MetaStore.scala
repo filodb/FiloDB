@@ -72,12 +72,11 @@ object Dataset {
             schema: Seq[Column],
             partitionColumn: ColumnId,
             keyColumn: ColumnId,
-            sortColumn: ColumnId,
             segmentColumn: ColumnId
              ): Dataset = {
     val projections = Seq(
       ProjectionInfo(0, name, schema,
-        Seq(partitionColumn), Seq(keyColumn), Seq(sortColumn), Seq(segmentColumn)
+        Seq(partitionColumn), Seq(keyColumn), Seq(segmentColumn)
       )
     )
     Dataset(name, schema, projections)
@@ -87,12 +86,11 @@ object Dataset {
             schema: Seq[Column],
             partitionColumns: Seq[ColumnId],
             keyColumns: Seq[ColumnId],
-            sortColumns: Seq[ColumnId],
             segmentColumns: Seq[ColumnId]
-           ): Dataset = {
+             ): Dataset = {
     val projections = Seq(
       ProjectionInfo(0, name, schema,
-        partitionColumns, keyColumns, sortColumns, segmentColumns
+        partitionColumns, keyColumns, segmentColumns
       )
     )
     Dataset(name, schema, projections)
@@ -141,12 +139,9 @@ case class ProjectionInfo(id: Int,
                           schema: Seq[Column],
                           partitionColumns: Seq[ColumnId],
                           keyColumns: Seq[ColumnId],
-                          sortColumns: Seq[ColumnId],
                           segmentColumns: Seq[ColumnId],
                           reverse: Boolean = false,
-                          includeColumns: Seq[ColumnId] = Nil,
-                          // Probably not necessary in the future
-                          segmentSize: String = "10000") {
+                          includeColumns: Seq[ColumnId] = Nil) {
 
   val schemaMap = schema.map(i => i.name -> i).toMap
 
@@ -157,12 +152,11 @@ case class ProjectionInfo(id: Int,
 
     val pType = keyType(partitionColumns)
     val kType = keyType(keyColumns)
-    val oType = keyType(sortColumns)
     val sType = keyType(segmentColumns)
 
     Projection(id, dataset, reverse, schema,
-      partitionColumns, keyColumns, sortColumns, segmentColumns,
-      pType, kType, oType, sType)
+      partitionColumns, keyColumns, segmentColumns,
+      pType, kType, sType)
   }
 
   def keyType(columns: Seq[ColumnId]): KeyType = columns.length match {
@@ -180,13 +174,13 @@ case class ProjectionInfo(id: Int,
     // scalastyle:on
   }
 
-  override def toString:String = {
+  override def toString: String = {
     s"""Projection $dataset|$id  {
-       |schema [$schema]
-       |partition [$partitionColumns]
-       |primary [$keyColumns]
-       |segment [$segmentColumns]
-     """.stripMargin
+                                 |schema [$schema]
+                                 |partition [$partitionColumns]
+                                 |primary [$keyColumns]
+                                 |segment [$segmentColumns]
+     }""".stripMargin
   }
 
 }

@@ -16,8 +16,7 @@ case class Create(tableName: String,
                   columns: Map[String, String],
                   partitionCols: Seq[String],
                   primaryCols: Seq[String],
-                  segmentCols: Seq[String],
-                  sortCols: Seq[String]) extends Command
+                  segmentCols: Seq[String]) extends Command
 
 case class Describe(tableName: String,
                     isTable: Boolean,
@@ -109,10 +108,9 @@ object SimpleParser extends RegexParsers with JavaTokenParsers {
       columns ~
       (PRIMARY ~> KEY ~> columnNames) ~
       (PARTITION ~> BY ~> columnNames) ~
-      (SEGMENT ~> BY ~> columnNames) ~
-      (SORT ~> BY ~> columnNames) ^^ {
-      case c ~ tv ~ e ~ tableName ~ cols ~ primaryCols ~ partitionCols ~ segmentCols ~ sortCols =>
-        Create(tableName, cols, partitionCols, primaryCols, segmentCols, sortCols)
+      (SEGMENT ~> BY ~> columnNames) ^^ {
+      case c ~ tv ~ e ~ tableName ~ cols ~ primaryCols ~ partitionCols ~ segmentCols =>
+        Create(tableName, cols, partitionCols, primaryCols, segmentCols)
     }
 
   def options: Parser[Map[String, String]] = {

@@ -127,8 +127,8 @@ with BeforeAndAfter with Matchers with ScalaFutures {
       val reader = threeReaders.head
       reader.getString(0) should be("US")
       reader.getString(1) should be("NY")
-      reader.getString(2) should be("Ndamukong")
-      reader.getLong(4) should be(28)
+      reader.getString(2) should be("Rodney")
+      reader.getLong(4) should be(25)
 
       val scan2 = segments.last
       scan2.hasNext should be(true)
@@ -206,9 +206,8 @@ with BeforeAndAfter with Matchers with ScalaFutures {
       val reader1 = more.last
       reader1.getString(0) should be("UK")
       reader1.getString(1) should be("LN")
-      reader1.getString(2) should be("Peyton")
-      reader1.getString(3) should be("Manning")
-      reader1.getLong(4) should be(50)
+      reader1.getString(2) should be("Helen")
+      reader1.getLong(4) should be(29)
 
     }
 

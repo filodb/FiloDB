@@ -40,7 +40,7 @@ class ReprojectorSpec extends FunSpec with Matchers with BeforeAndAfter with Sca
           //segment should be London
           reader1.getString(1) should be("LN")
           //sorted by age in UK segment
-          reader1.getString(2) should be("Terrance")
+          reader1.getString(2) should be("Jerry")
           reader1.getLong(4) should be(29)
         }
       }

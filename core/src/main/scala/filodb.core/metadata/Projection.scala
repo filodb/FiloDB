@@ -26,11 +26,9 @@ case class Projection(id: Int,
                       schema: Seq[Column],
                       partitionColumns: Seq[ColumnId],
                       keyColumns: Seq[ColumnId],
-                      sortColumns: Seq[ColumnId],
                       segmentColumns: Seq[ColumnId],
                       partitionType: KeyType,
                       keyType: KeyType,
-                      sortType: KeyType,
                       segmentType: KeyType) {
 
   val schemaMap = schema.map(c => c.name -> c).toMap
@@ -46,10 +44,6 @@ case class Projection(id: Int,
   def keyFunction(columnIndexes: Map[String, Int]) = getKeyFunction[keyType.T](
     keyType.asInstanceOf[KeyType {type T = keyType.T}],
     keyColumns, columnIndexes)
-
-  def sortFunction(columnIndexes: Map[String, Int]) = getKeyFunction[sortType.T](
-    sortType.asInstanceOf[KeyType {type T = sortType.T}],
-    sortColumns, columnIndexes)
 
   def segmentFunction(columnIndexes: Map[String, Int]) = getKeyFunction[segmentType.T](
     segmentType.asInstanceOf[KeyType {type T = segmentType.T}],

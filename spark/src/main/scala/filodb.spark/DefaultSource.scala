@@ -40,13 +40,14 @@ class DefaultSource extends RelationProvider with CreatableRelationProvider {
    * default_partition_key if defined, use this as the partition key when partitioning column is null
    */
   def createRelation(sqlContext: SQLContext,
-                      mode: SaveMode,
-                      parameters: Map[String, String],
-                      data: DataFrame): BaseRelation = {
+                     mode: SaveMode,
+                     parameters: Map[String, String],
+                     data: DataFrame): BaseRelation = {
     val dataset = parameters.getOrElse("dataset", sys.error("'dataset' must be specified for FiloDB."))
     val version = parameters.getOrElse("version", "0").toInt
+    val flushSize = parameters.getOrElse("flush-size", "1000").toInt
     val filoConfig = configFromSpark(sqlContext.sparkContext)
-    sqlContext.saveAsFiloDataset(data, dataset)
+    sqlContext.saveAsFiloDataset(data, dataset, flushSize)
     FiloRelation(dataset, filoConfig, version)(sqlContext)
   }
 }

@@ -42,6 +42,12 @@ lazy val spark = (project in file("spark"))
                    .dependsOn(core % "compile->compile; test->test")
                    .dependsOn(cassandra % "compile->compile; test->test")
 
+lazy val perfTests = (project in file("perftests"))
+                   .settings(mySettings: _*)
+                   .settings(name := "filodb-perf")
+                   .settings(libraryDependencies ++= perfDeps)
+                   .dependsOn(core, coordinator, cassandra, spark % "compile->compile; test->test")
+
 val phantomVersion = "1.12.2"
 val akkaVersion    = "2.3.7"
 
@@ -93,6 +99,11 @@ lazy val cliDeps = Seq(
   "com.github.lalyos"     % "jfiglet"           % "0.0.7",
   "org.apache.spark"     %% "spark-sql"         % "1.4.1",
   "org.jboss.aesh"        % "aesh-extensions"   % "0.66"
+)
+
+lazy val perfDeps = Seq(
+  "com.databricks"       %% "spark-csv"         % "1.3.0",
+  "org.apache.spark"     %% "spark-sql"         % "1.4.1"
 )
 
 lazy val sparkDeps = Seq(

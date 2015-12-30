@@ -22,7 +22,9 @@ trait KeyType {
 
   def getKeyFunc(columnNumbers: Seq[Int]): RowReader => T
 
-  def size(key: T):Int
+  def size(key: T): Int
+
+  def isVariableLength: Boolean
 
 }
 
@@ -38,6 +40,8 @@ abstract class SingleKeyType extends KeyType {
   }
 
   def extractor: TypedFieldExtractor[T]
+
+  override def isVariableLength: Boolean = false
 
 }
 
@@ -96,9 +100,12 @@ case class CompositeKeyType(atomTypes: Seq[SingleKeyType]) extends KeyType {
     toSeq
   }
 
-  override def size(key: Seq[_]): Int = atomTypes.zipWithIndex.map{
-    case (t,i) => t.size(key(i).asInstanceOf[t.T])
+  override def size(key: Seq[_]): Int = atomTypes.zipWithIndex.map {
+    case (t, i) => t.size(key(i).asInstanceOf[t.T])
   }.sum
+
+  def isVariableLength: Boolean =
+    atomTypes.map(_.isVariableLength).reduce((a, b) => a && b)
 }
 
 /**
@@ -116,7 +123,7 @@ case class LongKeyType() extends SingleKeyType {
 
   override def extractor: TypedFieldExtractor[Long] = LongFieldExtractor
 
-  override def size(key:Long): Int = 8
+  override def size(key: Long): Int = 8
 }
 
 case class IntKeyType() extends SingleKeyType {
@@ -130,7 +137,7 @@ case class IntKeyType() extends SingleKeyType {
 
   override def extractor: TypedFieldExtractor[Int] = IntFieldExtractor
 
-  override def size(key:Int): Int = 4
+  override def size(key: Int): Int = 4
 }
 
 case class DoubleKeyType() extends SingleKeyType {
@@ -146,7 +153,7 @@ case class DoubleKeyType() extends SingleKeyType {
 
   override def extractor: TypedFieldExtractor[Double] = DoubleFieldExtractor
 
-  override def size(key:Double): Int = 8
+  override def size(key: Double): Int = 8
 }
 
 case class StringKeyType() extends SingleKeyType {
@@ -163,6 +170,8 @@ case class StringKeyType() extends SingleKeyType {
 
   override def extractor: TypedFieldExtractor[String] = StringFieldExtractor
 
-  override def size(key:String): Int = key.getBytes("UTF-8").length
+  override def size(key: String): Int = key.getBytes("UTF-8").length
+
+  override def isVariableLength: Boolean = true
 }
 
