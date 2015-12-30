@@ -49,6 +49,11 @@ lazy val spark = (project in file("spark"))
                    .settings(name := "filodb-spark")
                    .settings(libraryDependencies ++= sparkDeps)
                    .settings(assemblySettings:_*)
+                   .settings(assemblyExcludedJars in assembly := { val cp = (fullClasspath
+                     in assembly).value
+                     val excludesJar = Seq("logback-classic-1.1.2.jar")
+                     cp filter { jar => excludesJar.contains(jar.data.getName)}
+                   })
                    .settings(assemblyOption in assembly := (assemblyOption in assembly).value.copy(includeScala = true))
                    .dependsOn(core % "compile->compile; test->test")
                    .dependsOn(cassandra % "compile->compile; test->test")
@@ -67,13 +72,14 @@ lazy val extraRepos = Seq(
 
 val excludeShapeless = ExclusionRule(organization = "com.chuusai")
 // Zookeeper pulls in slf4j-log4j12 which we DON'T want
-val excludeZK = ExclusionRule(organization = "org.apache.zookeeper", name = "zookeeper")
+val excludeZK = ExclusionRule(organization = "org.apache.zookeeper")
 
 lazy val coreDeps = Seq(
+  "org.slf4j" % "slf4j-log4j12" % "1.7.10",
   "com.typesafe.scala-logging" %% "scala-logging-slf4j" % "2.1.2",
   "com.clearspring.analytics" % "stream"        % "2.7.0",
   "it.unimi.dsi"          % "dsiutils"          % "2.2.4",
-  "ch.qos.logback"        % "logback-classic"   % "1.0.7",
+  //"ch.qos.logback"        % "logback-classic"   % "1.0.7",
   "com.beachape"         %% "enumeratum"        % "1.2.1",
   "org.velvia.filo"      %% "filo-scala"        % "0.2.0",
   "io.spray"             %% "spray-caching"     % "1.3.2",
