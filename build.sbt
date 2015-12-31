@@ -41,6 +41,13 @@ lazy val spark = (project in file("spark"))
                               coordinator,
                               cassandra % "compile->compile; test->test")
 
+lazy val jmh = (project in file("jmh"))
+                 .settings(mySettings:_*)
+                 .settings(name := "filodb-jmh")
+                 .settings(libraryDependencies ++= jmhDeps)
+                 .enablePlugins(JmhPlugin)
+                 .dependsOn(core, coordinator)
+
 val phantomVersion = "1.12.2"
 val akkaVersion    = "2.3.7"
 
@@ -90,6 +97,10 @@ lazy val cliDeps = Seq(
 lazy val sparkDeps = Seq(
   "org.apache.spark"     %% "spark-sql"         % "1.4.1" % "provided",
   "org.apache.spark"     %% "spark-streaming"   % "1.4.1" % "provided"
+)
+
+lazy val jmhDeps = Seq(
+  "com.nativelibs4java"  %% "scalaxy-loops"     % "0.3.3" % "provided"
 )
 
 //////////////////////////
