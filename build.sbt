@@ -46,7 +46,7 @@ lazy val jmh = (project in file("jmh"))
                  .settings(name := "filodb-jmh")
                  .settings(libraryDependencies ++= jmhDeps)
                  .enablePlugins(JmhPlugin)
-                 .dependsOn(core, coordinator)
+                 .dependsOn(core, spark)
 
 val phantomVersion = "1.12.2"
 val akkaVersion    = "2.3.7"
@@ -66,7 +66,7 @@ val excludeZK = ExclusionRule(organization = "org.apache.zookeeper")
 
 lazy val coreDeps = Seq(
   "com.typesafe.scala-logging" %% "scala-logging-slf4j" % "2.1.2",
-  "ch.qos.logback"        % "logback-classic"   % "1.0.7",
+  "org.slf4j"             % "slf4j-api"         % "1.7.10",
   "com.beachape"         %% "enumeratum"        % "1.2.1",
   "org.velvia.filo"      %% "filo-scala"        % "0.2.0",
   "io.spray"             %% "spray-caching"     % "1.3.2",
@@ -75,11 +75,13 @@ lazy val coreDeps = Seq(
   "net.ceedubs"          %% "ficus"             % "1.0.1",
   "org.scodec"           %% "scodec-bits"       % "1.0.10",
   "com.nativelibs4java"  %% "scalaxy-loops"     % "0.3.3" % "provided",
+  "ch.qos.logback"        % "logback-classic"   % "1.0.7" % "test",  // to get good test logs
   "org.scalatest"        %% "scalatest"         % "2.2.4" % "test"
 )
 
 lazy val cassDeps = Seq(
   "com.websudos"         %% "phantom-dsl"       % phantomVersion,
+  "ch.qos.logback"        % "logback-classic"   % "1.0.7" % "test",  // to get good test logs
   "com.websudos"         %% "phantom-testkit"   % phantomVersion % "test" excludeAll(excludeZK)
 )
 
@@ -87,10 +89,12 @@ lazy val coordDeps = Seq(
   "com.typesafe.akka"    %% "akka-slf4j"        % akkaVersion,
   "com.opencsv"           % "opencsv"           % "3.3",
   "com.typesafe.akka"    %% "akka-testkit"      % akkaVersion % "test",
+  "ch.qos.logback"        % "logback-classic"   % "1.0.7" % "test",  // to get good test logs
   "org.scalatest"        %% "scalatest"         % "2.2.4" % "test"
 )
 
 lazy val cliDeps = Seq(
+  "ch.qos.logback"        % "logback-classic"   % "1.0.7",
   "com.quantifind"       %% "sumac"             % "0.3.0"
 )
 
@@ -100,7 +104,8 @@ lazy val sparkDeps = Seq(
 )
 
 lazy val jmhDeps = Seq(
-  "com.nativelibs4java"  %% "scalaxy-loops"     % "0.3.3" % "provided"
+  "com.nativelibs4java"  %% "scalaxy-loops"     % "0.3.3" % "provided",
+  "org.apache.spark"     %% "spark-sql"         % "1.4.1"
 )
 
 //////////////////////////
