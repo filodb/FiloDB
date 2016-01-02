@@ -7,7 +7,8 @@ import com.typesafe.config.Config
 import com.typesafe.scalalogging.slf4j.StrictLogging
 import java.nio.ByteBuffer
 import net.ceedubs.ficus.Ficus._
-import org.velvia.filo.FastFiloRowReader
+import org.joda.time.DateTime
+import org.velvia.filo.{FiloRowReader, FiloVector, ParsersFromChunks}
 import scala.concurrent.{Await, Future}
 import scala.concurrent.duration._
 import scala.language.postfixOps
@@ -158,13 +159,31 @@ case class FiloRelation(dataset: String,
   }
 }
 
-class SparkRowReader(chunks: Array[ByteBuffer], classes: Array[Class[_]]) extends
-    FastFiloRowReader(chunks, classes) with Row {
-  def apply(i: Int): Any = getAny(i)
+class SparkRowReader(val chunks: Array[ByteBuffer],
+                     val classes: Array[Class[_]],
+                     val emptyLen: Int = 0) extends FiloRowReader with ParsersFromChunks with Row {
+  var rowNo: Int = -1
+  final def setRowNo(newRowNo: Int): Unit = { rowNo = newRowNo }
+
+  final def notNull(columnNo: Int): Boolean = parsers(columnNo).isAvailable(rowNo)
+
+  override final def getBoolean(columnNo: Int): Boolean =
+    parsers(columnNo).asInstanceOf[FiloVector[Boolean]](rowNo)
+
+  override final def getInt(columnNo: Int): Int =
+    parsers(columnNo).asInstanceOf[FiloVector[Int]](rowNo)
+  override final def getLong(columnNo: Int): Long =
+    parsers(columnNo).asInstanceOf[FiloVector[Long]](rowNo)
+  override final def getDouble(columnNo: Int): Double =
+    parsers(columnNo).asInstanceOf[FiloVector[Double]](rowNo)
+  override final def getFloat(columnNo: Int): Float =
+    parsers(columnNo).asInstanceOf[FiloVector[Float]](rowNo)
+  override final def getString(columnNo: Int): String =
+    parsers(columnNo).asInstanceOf[FiloVector[String]](rowNo)
+  final def getDateTime(columnNo: Int): DateTime = parsers(columnNo).asInstanceOf[FiloVector[DateTime]](rowNo)
+
+  final def get(columnNo: Int): Any = parsers(columnNo).boxed(rowNo)
+  override final def isNullAt(i: Int): Boolean = !notNull(i)
   def copy(): org.apache.spark.sql.Row = ???
-  def getByte(i: Int): Byte = ???
-  def getShort(i: Int): Short = ???
-  def isNullAt(i: Int): Boolean = !notNull(i)
   def length: Int = parsers.length
-  def toSeq: Seq[Any] = ???
 }

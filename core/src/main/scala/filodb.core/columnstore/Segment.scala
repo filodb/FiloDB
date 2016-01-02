@@ -181,7 +181,7 @@ class RowReaderSegment[K](val keyRange: KeyRange[K],
             curChunk = nextChunk
             curReader = readers(nextChunk)
           }
-          curReader.rowNo = index.rowNums(i)
+          curReader.setRowNo(index.rowNums(i))
           i += 1
           curReader
         }
@@ -204,7 +204,7 @@ class RowReaderSegment[K](val keyRange: KeyRange[K],
       def next: (RowReader, ChunkID, Int) = {
         val nextChunk = chunkIdIter.next
         val nextRowNo = rowNumIter.next
-        readers(nextChunk).rowNo = nextRowNo
+        readers(nextChunk).setRowNo(nextRowNo)
         (readers(nextChunk), nextChunk, nextRowNo)
       }
     }

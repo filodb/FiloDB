@@ -10,7 +10,7 @@ import scala.language.postfixOps
 import filodb.core._
 import filodb.core.metadata.{Column, Dataset, RichProjection}
 import filodb.core.columnstore.{RowReaderSegment, RowWriterSegment}
-import org.velvia.filo.{FiloVector, FiloRowReader, RowReader, TupleRowReader}
+import org.velvia.filo.{FiloVector, FastFiloRowReader, RowReader, TupleRowReader}
 
 import java.util.concurrent.TimeUnit
 
@@ -77,7 +77,7 @@ class IntSumReadBenchmark {
     val it = readSeg.rowIterator()
     var sum = 0
     while(it.hasNext) {
-      sum += it.next.asInstanceOf[FiloRowReader].getAny(0).asInstanceOf[Int]
+      sum += it.next.asInstanceOf[FastFiloRowReader].getAny(0).asInstanceOf[Int]
     }
     sum
   }

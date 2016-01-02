@@ -135,4 +135,5 @@ case class VectorRowReader(vector: Vector[Any]) extends RowReader {
   def getDouble(columnNo: Int): Double = vector(columnNo).asInstanceOf[Double]
   def getFloat(columnNo: Int): Float = vector(columnNo).asInstanceOf[Float]
   def getString(columnNo: Int): String = vector(columnNo).asInstanceOf[String]
+  def getDateTime(columnNo: Int): org.joda.time.DateTime = ???
 }

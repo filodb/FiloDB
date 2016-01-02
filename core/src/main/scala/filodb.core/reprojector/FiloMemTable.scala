@@ -108,7 +108,7 @@ class FiloMemTable[K](val projection: RichProjection[K], config: Config) extends
     if (readers.nonEmpty && readers.last.parsers(0).length < chunkSize) {
       val reader = readers.last
       for { i <- 0 until reader.parsers(0).length optimized } {
-        reader.rowNo = i
+        reader.setRowNo(i)
         builder.addRow(reader)
       }
       chunks.remove(chunks.length - 1, 1)
@@ -170,7 +170,7 @@ class FiloMemTable[K](val projection: RichProjection[K], config: Config) extends
 
   private def getRowReader(keyLong: Long): RowReader = {
     val reader = readers((keyLong >> 32).toInt)
-    reader.rowNo = keyLong.toInt
+    reader.setRowNo(keyLong.toInt)
     reader
   }
 

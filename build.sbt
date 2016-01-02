@@ -68,7 +68,9 @@ lazy val coreDeps = Seq(
   "com.typesafe.scala-logging" %% "scala-logging-slf4j" % "2.1.2",
   "org.slf4j"             % "slf4j-api"         % "1.7.10",
   "com.beachape"         %% "enumeratum"        % "1.2.1",
-  "org.velvia.filo"      %% "filo-scala"        % "0.2.0",
+  "org.velvia.filo"      %% "filo-scala"        % "0.2.2",
+  "joda-time"             % "joda-time"         % "2.2",
+  "org.joda"              % "joda-convert"      % "1.2",
   "io.spray"             %% "spray-caching"     % "1.3.2",
   "org.mapdb"             % "mapdb"             % "1.0.6",
   "org.velvia"           %% "msgpack4s"         % "0.5.1",
@@ -99,13 +101,13 @@ lazy val cliDeps = Seq(
 )
 
 lazy val sparkDeps = Seq(
-  "org.apache.spark"     %% "spark-sql"         % "1.4.1" % "provided",
-  "org.apache.spark"     %% "spark-streaming"   % "1.4.1" % "provided"
+  "org.apache.spark"     %% "spark-sql"         % "1.5.2" % "provided",
+  "org.apache.spark"     %% "spark-streaming"   % "1.5.2" % "provided"
 )
 
 lazy val jmhDeps = Seq(
   "com.nativelibs4java"  %% "scalaxy-loops"     % "0.3.3" % "provided",
-  "org.apache.spark"     %% "spark-sql"         % "1.4.1"
+  "org.apache.spark"     %% "spark-sql"         % "1.5.2"
 )
 
 //////////////////////////

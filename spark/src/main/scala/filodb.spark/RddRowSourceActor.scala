@@ -4,6 +4,7 @@ import akka.actor.{Actor, ActorRef, Props}
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.{SQLContext, DataFrame, Row}
 import org.apache.spark.sql.types._
+import org.joda.time.DateTime
 import org.velvia.filo.RowReader
 
 import filodb.core.Types
@@ -64,4 +65,5 @@ case class RddRowReader(row: Row) extends RowReader {
   def getDouble(columnNo: Int): Double = row.getDouble(columnNo)
   def getFloat(columnNo: Int): Float = row.getFloat(columnNo)
   def getString(columnNo: Int): String = row.getString(columnNo)
+  def getDateTime(columnNo: Int): DateTime = ???
 }
