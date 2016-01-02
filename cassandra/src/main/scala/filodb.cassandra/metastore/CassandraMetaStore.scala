@@ -40,4 +40,9 @@ class CassandraMetaStore(config: Config)
 
   def getSchema(dataset: String, version: Int): Future[Column.Schema] =
     columnTable.getSchema(dataset, version)
+
+  def shutdown(): Unit = {
+    datasetTable.shutdown()
+    columnTable.shutdown()
+  }
 }

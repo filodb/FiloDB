@@ -44,6 +44,7 @@ extends CachedMergingColumnStore with StrictLogging {
   val cassandraConfig = config.getConfig("cassandra")
   val tableCacheSize = config.getInt("columnstore.tablecache-size")
   val segmentCacheSize = config.getInt("columnstore.segment-cache-size")
+  logger.info(s"Starting CassandraColumnStore with config $cassandraConfig")
 
   val chunkTableCache = LruCache[ChunkTable](tableCacheSize)
   val rowMapTableCache = LruCache[ChunkRowMapTable](tableCacheSize)
@@ -143,6 +144,9 @@ extends CachedMergingColumnStore with StrictLogging {
     def config: Config = cassandraConfig
   }
 
+  def shutdown(): Unit = {
+    clusterConnector.shutdown()
+  }
 
   /**
    * Splits scans of a dataset across multiple token ranges.
@@ -180,12 +184,12 @@ extends CachedMergingColumnStore with StrictLogging {
   // if necessary
   def getSegmentTables(dataset: TableName): Future[(ChunkTable, ChunkRowMapTable)] = {
     val chunkTableFuture = chunkTableCache(dataset) {
-      logger.debug(s"Creating a new ChunkTable for dataset $dataset with config $cassandraConfig")
-      new ChunkTable(dataset, cassandraConfig)
+      logger.debug(s"Creating a new ChunkTable for dataset $dataset")
+      new ChunkTable(dataset, clusterConnector)
     }
     val chunkRowMapTableFuture = rowMapTableCache(dataset) {
-      logger.debug(s"Creating a new ChunkRowMapTable for dataset $dataset with config $cassandraConfig")
-      new ChunkRowMapTable(dataset, cassandraConfig)
+      logger.debug(s"Creating a new ChunkRowMapTable for dataset $dataset")
+      new ChunkRowMapTable(dataset, clusterConnector)
     }
     for { chunkTable <- chunkTableFuture
           rowMapTable <- chunkRowMapTableFuture }

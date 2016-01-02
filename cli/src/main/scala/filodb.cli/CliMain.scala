@@ -108,8 +108,7 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with DefaultCoord
         e.printStackTrace()
         exitCode = 2
     } finally {
-      system.shutdown()
-      com.websudos.phantom.Manager.shutdown()
+      shutdown()
       sys.exit(exitCode)
     }
   }

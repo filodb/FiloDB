@@ -76,6 +76,11 @@ trait ColumnStore {
    */
   def getScanSplits(dataset: TableName,
                     params: Map[String, String] = Map.empty): Seq[Map[String, String]]
+
+  /**
+   * Shuts down the ColumnStore, including any threads that might be hanging around
+   */
+  def shutdown(): Unit
 }
 
 case class ChunkedData(column: Types.ColumnId, chunks: Seq[(Types.SegmentId, Types.ChunkID, ByteBuffer)])

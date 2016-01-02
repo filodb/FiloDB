@@ -114,6 +114,8 @@ extends CachedMergingColumnStore with StrictLogging {
     maps.toIterator
   }
 
+  def shutdown(): Unit = {}
+
   // InMemoryColumnStore is just on one node, so return no splits for now.
   // TODO: achieve parallelism by splitting on a range of partitions.
   def getScanSplits(dataset: TableName,

@@ -31,4 +31,9 @@ trait FiloCassandraConnector {
   def cassandraVersion: VersionNumber =  connector.cassandraVersion
 
   def cassandraVersions: Set[VersionNumber] =  connector.cassandraVersions
+
+  def shutdown(): Unit = {
+    com.websudos.phantom.Manager.shutdown()
+    session.getCluster.close()
+  }
 }

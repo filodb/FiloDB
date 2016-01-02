@@ -30,6 +30,12 @@ trait CoordinatorSetup {
   lazy val coordinatorActor =
     system.actorOf(NodeCoordinatorActor.props(metaStore, reprojector, columnStore, config),
                    "coordinator")
+
+  def shutdown(): Unit = {
+    system.shutdown()
+    columnStore.shutdown()
+    metaStore.shutdown()
+  }
 }
 
 /**

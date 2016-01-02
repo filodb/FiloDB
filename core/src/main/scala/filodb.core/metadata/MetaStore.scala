@@ -94,4 +94,9 @@ trait MetaStore {
    * @return a Schema, column name -> Column definition, or ErrorResponse
    */
   def getSchema(dataset: String, version: Int): Future[Column.Schema]
+
+  /**
+   * Shuts down the MetaStore, including any threads that might be hanging around
+   */
+  def shutdown(): Unit
 }
