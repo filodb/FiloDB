@@ -76,7 +76,7 @@ Your input is appreciated!
 1. [Java 8](http://www.oracle.com/technetwork/java/javase/downloads/jdk8-downloads-2133151.html)
 2. [SBT](http://www.scala-sbt.org/)
 3. [Apache Cassandra](http://cassandra.apache.org/) (We prefer using [CCM](https://github.com/pcmanus/ccm) for local testing)
-4. [Apache Spark (1.4.x)](http://spark.apache.org/) (Not strictly needed if you only use CLI, but you probably want to use Spark for queries)
+4. [Apache Spark (1.5.x)](http://spark.apache.org/) (Not strictly needed if you only use CLI, but you probably want to use Spark for queries)
 
 ## Getting Started
 
@@ -206,7 +206,7 @@ FiloDB has a Spark data-source module - `filodb.spark`. So, you can use the Spar
    $ ./filo-cli --command init
    $ sbt spark/assembly
    ```
-3. Use the jar `FiloDB/spark/target/scala-2.10/filodb-spark-assembly-0.1-SNAPSHOT.jar` with Spark 1.4.x.
+3. Use the jar `FiloDB/spark/target/scala-2.10/filodb-spark-assembly-0.2-SNAPSHOT.jar` with Spark 1.5.x.
 
 The options to use with the data-source api are:
 
