@@ -3,7 +3,7 @@ package filodb.spark
 import java.nio.ByteBuffer
 
 import org.apache.spark.sql.Row
-import org.velvia.filo.{RowReader, FastFiloRowReader}
+import org.velvia.filo.{FastFiloRowReader, RowReader}
 
 class SparkRowReader(chunks: Array[ByteBuffer],
                      classes: Array[Class[_]])
@@ -23,12 +23,21 @@ class SparkRowReader(chunks: Array[ByteBuffer],
   def toSeq: Seq[Any] = ???
 }
 
-case class RddRowReader(row: Row) extends RowReader {
+class RddRowReader extends RowReader {
+  var row: Row = null
+
   def notNull(columnNo: Int): Boolean = !row.isNullAt(columnNo)
+
   def getBoolean(columnNo: Int): Boolean = row.getBoolean(columnNo)
+
   def getInt(columnNo: Int): Int = row.getInt(columnNo)
+
   def getLong(columnNo: Int): Long = row.getLong(columnNo)
+
   def getDouble(columnNo: Int): Double = row.getDouble(columnNo)
+
   def getFloat(columnNo: Int): Float = row.getFloat(columnNo)
+
   def getString(columnNo: Int): String = row.getString(columnNo)
 }
+

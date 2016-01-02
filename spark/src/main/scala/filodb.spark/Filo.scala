@@ -1,5 +1,6 @@
 package filodb.spark
 
+import akka.actor.{ActorRef, ActorSystem, Props}
 import com.typesafe.config.Config
 import filodb.cassandra.FiloCassandraConnector
 import filodb.core.metadata.Column
@@ -11,6 +12,7 @@ import scala.language.postfixOps
 
 object Filo extends Serializable {
 
+  lazy val system = ActorSystem("filo-spark")
 
   implicit val executionContext = scala.concurrent.ExecutionContext.Implicits.global
 
@@ -20,11 +22,13 @@ object Filo extends Serializable {
 
   // scalastyle:off
   var filoConfig: Config = null
+
   def init(config: Config) = {
     if (filoConfig == null) {
       filoConfig = config
     }
   }
+
   // scalastyle:on
 
   def getDatasetObj(dataset: String): Dataset =
@@ -37,6 +41,12 @@ object Filo extends Serializable {
     func(Await.result(cmd, awaitTimeout))
   }
 
-  implicit val context = scala.concurrent.ExecutionContext.Implicits.global
+  def newActor(props: Props): ActorRef = system.actorOf(props)
+
+  def memoryCheck(minFreeMB: Int) = () => getRealFreeMb > minFreeMB
+
+  private def getRealFreeMb: Int =
+    ((sys.runtime.maxMemory - (sys.runtime.totalMemory - sys.runtime.freeMemory)) / (1024 * 1024)).toInt
+
 
 }

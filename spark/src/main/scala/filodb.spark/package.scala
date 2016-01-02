@@ -1,11 +1,15 @@
 package filodb
 
 import com.typesafe.config.{Config, ConfigFactory}
-import filodb.core.metadata.Column
+import filodb.coordinator.reactive.StreamingProcessor
+import filodb.core.metadata.{Column, Projection}
 import filodb.core.reprojector.Reprojector
 import org.apache.spark.SparkContext
 import org.apache.spark.sql.types.DataType
 import org.apache.spark.sql.{DataFrame, Row, SQLContext, SaveMode}
+import org.velvia.filo.RowReader
+
+import scala.concurrent.Future
 
 
 package spark {
@@ -54,32 +58,46 @@ package object spark {
       val dfOrderSchema = namesTypes.map { case (colName, x) =>
         schemaMap(colName)
       }
+      // for each of the projections
+      datasetObj.projections.map { projection =>
+        // For each partition, start the ingestion
+        df.rdd.mapPartitions { rowIter =>
+          Filo.init(filoConfig)
+          ingest(flushSize, projection, rowIter, dfOrderSchema)
+          Iterator.empty
+        }.count()
 
-      // For each partition, start the ingestion
-      df.rdd.mapPartitions { rowIter =>
-        Filo.init(filoConfig)
-        ingest(flushSize, dataset, rowIter, dfOrderSchema)
-      }.count()
+      }
+    }
+
+    private def ingest(flushSize: Int, projection: Projection, rowIter: Iterator[Row], dfOrderSchema: Seq[Column]) = {
+      implicit val executionContext = Filo.executionContext
+
+      def save(rows: Iterator[Row]) = Filo.parse(
+        Future sequence Reprojector.project(projection,
+          new RowIterator(rows),
+          Some(dfOrderSchema)
+        ).map { flush =>
+          Filo.columnStore.flushToSegment(flush)
+        })(r => r)
+
+      val rowProcessorProps = StreamingProcessor.props[Row, Iterator[Boolean]](
+        rowIter, save, Filo.memoryCheck(512))
+
+      val rowProcessor = Filo.newActor(rowProcessorProps)
+      StreamingProcessor.start(rowProcessor)
     }
 
 
-    private def ingest(flushSize: Int, dataset: String, rowIter: Iterator[Row], dfOrderSchema: Seq[Column]) = {
-      implicit val executionContext = Filo.executionContext
-      val datasetObj = Filo.getDatasetObj(dataset)
-      datasetObj.projections.flatMap { projection =>
-        // group the flushes into flush Size rows
-        // this is a compromise between memory and ingestion speed.
-        rowIter.grouped(flushSize).map { rows =>
-          // reproject the data
-          Reprojector.project(projection,
-            rows.map(r => RddRowReader(r)).iterator,
-            Some(dfOrderSchema)
-          ).map{flush =>
-              Filo.parse(Filo.columnStore.flushToSegment(flush))(r => r)
-          }
-        }
-      }.flatten.iterator
+    class RowIterator(iterator: Iterator[Row]) extends Iterator[RowReader] {
+      val rowReader = new RddRowReader
 
+      override def hasNext: Boolean = iterator.hasNext
+
+      override def next(): RowReader = {
+        rowReader.row = iterator.next
+        rowReader
+      }
     }
 
     private def validateSchema(namesTypes: Seq[(String, DataType)], schema: Seq[(String, Column)]): Unit = {

@@ -57,6 +57,7 @@ lazy val spark = (project in file("spark"))
                    .settings(assemblyOption in assembly := (assemblyOption in assembly).value.copy(includeScala = true))
                    .dependsOn(core % "compile->compile; test->test")
                    .dependsOn(cassandra % "compile->compile; test->test")
+                   .dependsOn(coordinator % "compile->compile; test->test")
 
 lazy val perfTests = (project in file("perftests"))
                    .settings(mySettings: _*)
