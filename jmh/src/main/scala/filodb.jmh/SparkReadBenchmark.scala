@@ -1,10 +1,7 @@
 package filodb.jmh
 
 import java.util.concurrent.TimeUnit
-import org.openjdk.jmh.annotations.Benchmark
-import org.openjdk.jmh.annotations.BenchmarkMode
-import org.openjdk.jmh.annotations.{Mode, State, Scope}
-import org.openjdk.jmh.annotations.OutputTimeUnit
+import org.openjdk.jmh.annotations._
 import scalaxy.loops._
 import scala.language.postfixOps
 import scala.concurrent.Await
@@ -13,7 +10,7 @@ import scala.concurrent.duration._
 import filodb.core._
 import filodb.core.metadata.{Column, Dataset, RichProjection}
 import filodb.core.columnstore.{InMemoryColumnStore, RowReaderSegment, RowWriterSegment}
-import filodb.spark.{SparkRowReader, TypeConverters}
+import filodb.spark.{SparkRowReader, FiloSetup, TypeConverters}
 import org.apache.spark.sql.{DataFrame, Row, SQLContext}
 import org.apache.spark.sql.types._
 import org.apache.spark.sql.functions.sum
@@ -35,7 +32,7 @@ object SparkReadBenchmark {
   }
 }
 
-@State(Scope.Thread)
+@State(Scope.Benchmark)
 class SparkReadBenchmark {
   val NumRows = 5000000
   // Source of rows
@@ -71,9 +68,21 @@ class SparkReadBenchmark {
   // Now create an RDD[Row] out of it, and a Schema, -> DataFrame
   val conf = (new SparkConf).setMaster("local[4]")
                             .setAppName("test")
+                            .set("filodb.cassandra.keyspace", "filodb")
+                            .set("filodb.memtable.min-free-mb", "10")
   val sc = new SparkContext(conf)
   val sql = new SQLContext(sc)
+  // Below is to make sure that Filo actor system stuff is run before test code
+  // so test code is not hit with unnecessary slowdown
+  val filoConfig = FiloSetup.configFromSpark(sc)
+  FiloSetup.init(filoConfig)
   val sqlSchema = StructType(TypeConverters.columnsToSqlFields(schema))
+
+  @TearDown
+  def shutdownFiloActors(): Unit = {
+    FiloSetup.shutdown()
+    sc.stop()
+  }
 
   // How long does it take to iterate through all the rows
   @Benchmark
@@ -93,5 +102,16 @@ class SparkReadBenchmark {
     val testRdd = makeTestRDD()
     val df = sql.createDataFrame(testRdd, sqlSchema)
     df.select("int").limit(2).collect()
+  }
+
+  val cassDF = sql.read.format("filodb.spark").option("dataset", "randomInts").load()
+
+  // NOTE: before running this test, MUST do sbt jmh/run on CreateCassTestData to populate
+  // the randomInts FiloDB table in Cassandra.
+  @Benchmark
+  @BenchmarkMode(Array(Mode.SingleShotTime))
+  @OutputTimeUnit(TimeUnit.SECONDS)
+  def sparkCassSum(): Any = {
+    cassDF.agg(sum(cassDF("data"))).collect().head
   }
 }
