@@ -21,6 +21,7 @@ object SparkReadBenchmark {
   import scala.concurrent.ExecutionContext.Implicits.global
   implicit val keyHelper = IntKeyHelper(10000)
 
+  // Pretty much lifted from FiloRelation.getRows()
   def readInner(schema: Seq[Column]): Iterator[Row] = {
     val _colStore = new InMemoryColumnStore
     Await.result(_colStore.scanSegments[Int](schema, "dataset", 0), 10.seconds).flatMap { seg =>
@@ -32,6 +33,33 @@ object SparkReadBenchmark {
   }
 }
 
+/**
+ * A benchmark to compare performance of filodb.spark connector against different scenarios,
+ * for an analytical query summing 5 million random integers from a single column of a
+ * FiloDB dataset.  Description:
+ * - sparkSum(): Sum 5 million integers stored using InMemoryColumnStore.
+ *   NOTE: we use code lifted from FiloRelation, but not the actual FiloRelation, because
+ *   of the lack of an InMemoryMetaStore, and to avoid having to ingest through MemTable etc.
+ * - sparkBaseline(): Get the first 2 records.  Just to see what the baseline latency is of a
+ *   DataFrame query.
+ * - sparkCassSum(): Sum 5 million integers using CassandraColumnStore.  Must have run CreateCassTestData
+ *   first to populate into Cassandra.
+ *
+ * To get the scan speed, one needs to subtract the baseline from the total time of sparkSum/sparkCassSum.
+ * For example, on my laptop, here is the JMH output:
+ * {{{
+ *  Benchmark                         Mode  Cnt  Score   Error  Units
+ *  SparkReadBenchmark.sparkBaseline    ss    9  0.026 ± 0.002   s/op
+ *  SparkReadBenchmark.sparkCassSum     ss    9  0.845 ± 0.114   s/op
+ *  SparkReadBenchmark.sparkSum         ss    9  0.049 ± 0.006   s/op
+ * }}}
+ *
+ * (The above run against Cassandra 2.1.6, 5GB heap, with jmh:run -i 3 -wi 3 -f3 filodb.jmh.SparkReadBenchmark)
+ *
+ * Thus:
+ * - Cassandra scan speed = 5000000 / (0.845 - 0.026) = 6,105,006 ops/sec
+ * - InMemory scan speed  = 5000000 / (0.049 - 0.026) = 217,391,304 ops/sec
+ */
 @State(Scope.Benchmark)
 class SparkReadBenchmark {
   val NumRows = 5000000
