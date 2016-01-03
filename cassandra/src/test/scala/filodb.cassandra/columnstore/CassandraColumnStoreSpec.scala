@@ -16,7 +16,7 @@ import filodb.core.Types
 class CassandraColumnStoreSpec extends CassandraFlatSpec with BeforeAndAfter {
   import scala.concurrent.ExecutionContext.Implicits.global
   import com.websudos.phantom.dsl._
-  import filodb.core.columnstore._
+  import filodb.core.store._
   import SegmentSpec._
 
   implicit val defaultPatience =

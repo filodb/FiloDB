@@ -11,7 +11,7 @@ import scala.concurrent.duration._
 
 import filodb.core._
 import filodb.core.metadata.{Column, Dataset}
-import filodb.core.columnstore.SegmentSpec
+import filodb.core.store.SegmentSpec
 
 import org.scalatest.{FunSpec, BeforeAndAfter, BeforeAndAfterAll, Matchers}
 import org.scalatest.concurrent.ScalaFutures

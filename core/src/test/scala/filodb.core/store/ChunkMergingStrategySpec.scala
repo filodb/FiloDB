@@ -1,4 +1,4 @@
-package filodb.core.columnstore
+package filodb.core.store
 
 import com.typesafe.config.ConfigFactory
 import filodb.core._

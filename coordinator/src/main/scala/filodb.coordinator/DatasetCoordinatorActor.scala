@@ -7,7 +7,7 @@ import org.velvia.filo.RowReader
 import scala.concurrent.Future
 
 import filodb.core.metadata.{Column, Dataset, Projection, RichProjection}
-import filodb.core.columnstore.ColumnStore
+import filodb.core.store.ColumnStore
 import filodb.core.reprojector.{MemTable, FiloMemTable, Reprojector}
 
 object DatasetCoordinatorActor {

@@ -8,7 +8,7 @@ import com.opencsv.CSVWriter
 import com.quantifind.sumac.{ArgMain, FieldArgs}
 import com.typesafe.config.ConfigFactory
 import filodb.core.SortKeyHelper
-import filodb.core.columnstore.RowReaderSegment
+import filodb.core.store.RowReaderSegment
 import filodb.core.metadata.Column.{ColumnType, Schema}
 import org.velvia.filo.{RowReader, FastFiloRowReader}
 import scala.concurrent.Await
@@ -18,7 +18,7 @@ import scala.language.postfixOps
 import filodb.cassandra.columnstore.CassandraColumnStore
 import filodb.cassandra.metastore.CassandraMetaStore
 import filodb.coordinator.{NodeCoordinatorActor, DefaultCoordinatorSetup}
-import filodb.core.columnstore.{Analyzer, CachedMergingColumnStore}
+import filodb.core.store.{Analyzer, CachedMergingColumnStore}
 import filodb.core.metadata.{Column, Dataset, RichProjection}
 
 //scalastyle:off

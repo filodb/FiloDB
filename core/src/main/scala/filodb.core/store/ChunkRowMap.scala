@@ -1,4 +1,4 @@
-package filodb.core.columnstore
+package filodb.core.store
 
 import org.velvia.filo.{FiloVector, VectorBuilder, VectorReader}
 import java.nio.ByteBuffer

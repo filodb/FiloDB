@@ -23,7 +23,7 @@ import org.apache.spark.sql.{DataFrame, Row, SQLContext}
 
 import filodb.core._
 import filodb.core.metadata.{Column, Dataset, DatasetOptions}
-import filodb.core.columnstore.RowReaderSegment
+import filodb.core.store.RowReaderSegment
 
 object FiloRelation {
   import TypeConverters._

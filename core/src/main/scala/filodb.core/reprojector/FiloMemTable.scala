@@ -13,7 +13,7 @@ import scalaxy.loops._
 
 import filodb.core.{KeyRange, SortKeyHelper}
 import filodb.core.Types._
-import filodb.core.columnstore.{RowWriterSegment, Segment}
+import filodb.core.store.{RowWriterSegment, Segment}
 import filodb.core.metadata.{Column, Dataset, RichProjection}
 
 /**

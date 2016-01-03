@@ -10,7 +10,7 @@ import scala.concurrent.duration._
 import filodb.core._
 import filodb.core.Types._
 import filodb.core.metadata.{Column, Dataset, MetaStore, Projection, RichProjection}
-import filodb.core.columnstore.ColumnStore
+import filodb.core.store.ColumnStore
 import filodb.core.reprojector.Reprojector
 
 /**

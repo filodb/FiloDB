@@ -6,7 +6,7 @@ import scodec.bits.ByteVector
 
 /**
  * Temporary home for new FiloDB API definitions, including column store and memtable etc.
- * Perhaps they should be moved into filodb.core.columnstore and filodb.core.reprojector
+ * Perhaps they should be moved into filodb.core.store and filodb.core.reprojector
  *
  * NOT included: the MetadataStore, which contains column, partition, version definitions
  */

@@ -2,7 +2,7 @@ package filodb.core.metadata
 
 import org.velvia.filo.TupleRowReader
 
-import filodb.core.columnstore.SegmentSpec
+import filodb.core.store.SegmentSpec
 import org.scalatest.{FunSpec, Matchers, BeforeAndAfter}
 
 class ProjectionSpec extends FunSpec with Matchers {

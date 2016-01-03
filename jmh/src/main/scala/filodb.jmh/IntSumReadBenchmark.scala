@@ -9,7 +9,7 @@ import scala.language.postfixOps
 
 import filodb.core._
 import filodb.core.metadata.{Column, Dataset, RichProjection}
-import filodb.core.columnstore.{RowReaderSegment, RowWriterSegment}
+import filodb.core.store.{RowReaderSegment, RowWriterSegment}
 import org.velvia.filo.{FiloVector, FastFiloRowReader, RowReader, TupleRowReader}
 
 import java.util.concurrent.TimeUnit
