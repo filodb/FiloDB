@@ -5,7 +5,8 @@ import java.nio.ByteBuffer
 import scala.concurrent.Future
 
 import filodb.core._
-import filodb.core.metadata.{Column, Dataset, MetaStore}
+import filodb.core.metadata.{Column, Dataset}
+import filodb.core.store.MetaStore
 import filodb.cassandra.AllTablesTest
 
 import org.scalatest.{FunSpec, BeforeAndAfter}

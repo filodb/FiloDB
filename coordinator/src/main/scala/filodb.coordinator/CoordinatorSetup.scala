@@ -3,9 +3,8 @@ package filodb.coordinator
 import akka.actor.ActorSystem
 import com.typesafe.config.Config
 
-import filodb.core.store.ColumnStore
+import filodb.core.store.{ColumnStore, MetaStore}
 import filodb.core.FutureUtils
-import filodb.core.metadata.MetaStore
 import filodb.core.reprojector._
 
 /**

@@ -4,7 +4,8 @@ import com.typesafe.config.Config
 import scala.concurrent.{ExecutionContext, Future}
 
 import filodb.core._
-import filodb.core.metadata.{Column, Dataset, MetaStore}
+import filodb.core.metadata.{Column, Dataset}
+import filodb.core.store.MetaStore
 
 /**
  * A class for Cassandra implementation of the MetaStore.
