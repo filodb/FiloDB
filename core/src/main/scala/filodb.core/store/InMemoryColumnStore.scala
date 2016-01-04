@@ -25,6 +25,8 @@ extends CachedMergingColumnStore with StrictLogging {
   import Types._
   import collection.JavaConversions._
 
+  logger.info("Starting InMemoryColumnStore...")
+
   val segmentCache = LruCache[Segment[_]](100)
 
   val mergingStrategy = new AppendingChunkMergingStrategy(this)

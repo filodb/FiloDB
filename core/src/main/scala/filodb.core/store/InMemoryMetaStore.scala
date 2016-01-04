@@ -16,6 +16,8 @@ import filodb.core.metadata.{Column, Dataset}
 class InMemoryMetaStore(implicit val ec: ExecutionContext) extends MetaStore with StrictLogging {
   import collection.JavaConverters._
 
+  logger.info("Starting InMemoryMetaStore...")
+
   val datasets = new TrieMap[String, Dataset]
   type ColumnMap = TreeMap[(Int, Types.ColumnId), Column]
   val colMapOrdering = math.Ordering[(Int, Types.ColumnId)]
@@ -24,6 +26,7 @@ class InMemoryMetaStore(implicit val ec: ExecutionContext) extends MetaStore wit
   def initialize(): Future[Response] = Future.successful(Success)
 
   def clearAllData(): Future[Response] = Future {
+    logger.warn("Clearing all data!")
     datasets.clear()
     columns.clear()
     Success

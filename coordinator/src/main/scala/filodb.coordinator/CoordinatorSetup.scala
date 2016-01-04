@@ -36,8 +36,3 @@ trait CoordinatorSetup {
     metaStore.shutdown()
   }
 }
-
-/**
- * A CoordinatorSetup with default memtable initialized from config
- */
-trait DefaultCoordinatorSetup extends CoordinatorSetup
