@@ -1,7 +1,7 @@
 package filodb.core.store
 
 import com.typesafe.scalalogging.slf4j.StrictLogging
-import java.util.TreeMap
+import java.util.concurrent.ConcurrentSkipListMap
 import scala.collection.concurrent.TrieMap
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -19,7 +19,7 @@ class InMemoryMetaStore(implicit val ec: ExecutionContext) extends MetaStore wit
   logger.info("Starting InMemoryMetaStore...")
 
   val datasets = new TrieMap[String, Dataset]
-  type ColumnMap = TreeMap[(Int, Types.ColumnId), Column]
+  type ColumnMap = ConcurrentSkipListMap[(Int, Types.ColumnId), Column]
   val colMapOrdering = math.Ordering[(Int, Types.ColumnId)]
   val columns = new TrieMap[String, ColumnMap]
 
@@ -64,13 +64,16 @@ class InMemoryMetaStore(implicit val ec: ExecutionContext) extends MetaStore wit
    */
 
   def insertColumn(column: Column): Future[Response] = {
-    val columnMap = columns.getOrElseUpdate(column.dataset, new ColumnMap(colMapOrdering))
-    if (columnMap.containsKey((column.version, column.name))) {
-      Future.successful(NotApplied)
-    } else {
-      columnMap.put((column.version, column.name), column)
-      Future.successful(Success)
+    // See https://issues.scala-lang.org/browse/SI-7943
+    val columnMap = columns.get(column.dataset) match {
+      case Some(cMap) => cMap
+      case None =>
+        val newCMap = new ColumnMap(colMapOrdering)
+        columns.putIfAbsent(column.dataset, newCMap).getOrElse(newCMap)
     }
+    val oldVal = columnMap.putIfAbsent((column.version, column.name), column)
+    // If oldVal is null then it was absent and write worked.
+    Future.successful(Option(oldVal).map(x => NotApplied).getOrElse(Success))
   }
 
   def getSchema(dataset: String, version: Int): Future[Column.Schema] = Future {
