@@ -14,6 +14,10 @@ import filodb.core.metadata.{Column, Projection}
 /**
  * A ColumnStore implementation which is entirely in memory for speed.
  * Good for testing or performance.
+ *
+ * NOTE: This implementation effectively only works on a single node.
+ * We would need, for example, a Spark-specific implementation which can
+ * know how to distribute data, or at least keep track of different nodes,
  * TODO: use thread-safe structures
  */
 class InMemoryColumnStore(implicit val ec: ExecutionContext)
