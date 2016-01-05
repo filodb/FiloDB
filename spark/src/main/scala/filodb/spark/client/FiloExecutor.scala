@@ -16,7 +16,6 @@ object FiloExecutor {
   def handleShow(input: String, sql: SQLContext, sc: SparkContext, dfFailure: DataFrame): DataFrame = {
     if (SimpleParser.parseShow(input)) {
       val description = Filo.metaStore.projectionTable.getAllSuperProjectionNames
-      Filo.columnStore.summaryTable
       val result = for {
         infoAll <- description
       } yield {

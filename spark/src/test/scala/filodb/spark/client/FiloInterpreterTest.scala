@@ -24,6 +24,8 @@ class FiloInterpreterTest extends CassandraTest {
 
   override def afterAll() {
     super.afterAll()
+    Filo.parse(Filo.columnStore.clearAll)(x=>x)
+    Filo.parse(Filo.metaStore.clearAll)(x=>x)
     FiloInterpreter.stop()
   }
 
