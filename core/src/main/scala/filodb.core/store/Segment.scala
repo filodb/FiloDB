@@ -169,13 +169,13 @@ class RowReaderSegment[K](val keyRange: KeyRange[K],
       new Iterator[RowReader] {
         var curChunk = 0
         var curReader = readers(curChunk)
-        val len = index.chunkIds.length
-        var i = 0
+        private final val len = index.chunkIds.length
+        private var i = 0
 
         // NOTE: manually iterate over the chunkIds / rowNums FiloVectors, instead of using the
         // iterator methods, which are extremely slow and boxes everything
-        def hasNext: Boolean = i < len
-        def next: RowReader = {
+        final def hasNext: Boolean = i < len
+        final def next: RowReader = {
           val nextChunk = index.chunkIds(i)
           if (nextChunk != curChunk) {
             curChunk = nextChunk
