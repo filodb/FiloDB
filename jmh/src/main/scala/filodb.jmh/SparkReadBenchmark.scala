@@ -21,10 +21,11 @@ object SparkReadBenchmark {
   import scala.concurrent.ExecutionContext.Implicits.global
   implicit val keyHelper = IntKeyHelper(10000)
 
+  val colStore = new InMemoryColumnStore
+
   // Pretty much lifted from FiloRelation.getRows()
   def readInner(schema: Seq[Column]): Iterator[Row] = {
-    val _colStore = new InMemoryColumnStore
-    Await.result(_colStore.scanSegments[Int](schema, "dataset", 0), 10.seconds).flatMap { seg =>
+    Await.result(colStore.scanSegments[Int](schema, "dataset", 0), 10.seconds).flatMap { seg =>
       val readerSeg = seg.asInstanceOf[RowReaderSegment[Int]]
       readerSeg.rowIterator((bytes, clazzes) => new SparkRowReader(bytes, clazzes))
          .asInstanceOf[Iterator[Row]]
@@ -76,14 +77,13 @@ class SparkReadBenchmark {
 
   // Merge segments into InMemoryColumnStore
   import scala.concurrent.ExecutionContext.Implicits.global
-  val colStore = new InMemoryColumnStore
   rowStream.take(NumRows).grouped(10000).foreach { rows =>
     val firstRowNum = rows.head._2.get
     val keyRange = KeyRange("dataset", "partition", firstRowNum, firstRowNum + 10000)
     val writerSeg = new RowWriterSegment(keyRange, schema)
     writerSeg.addRowsAsChunk(rows.toIterator.map(TupleRowReader),
                              (r: RowReader) => r.getInt(1) )
-    Await.result(colStore.appendSegment(projection, writerSeg, 0), 10.seconds)
+    Await.result(SparkReadBenchmark.colStore.appendSegment(projection, writerSeg, 0), 10.seconds)
   }
 
   private def makeTestRDD() = {
@@ -96,6 +96,7 @@ class SparkReadBenchmark {
   // Now create an RDD[Row] out of it, and a Schema, -> DataFrame
   val conf = (new SparkConf).setMaster("local[4]")
                             .setAppName("test")
+                            // .set("spark.sql.tungsten.enabled", "false")
                             .set("filodb.cassandra.keyspace", "filodb")
                             .set("filodb.memtable.min-free-mb", "10")
   val sc = new SparkContext(conf)
@@ -120,6 +121,21 @@ class SparkReadBenchmark {
     val testRdd = makeTestRDD()
     val df = sql.createDataFrame(testRdd, sqlSchema)
     df.agg(sum(df("int"))).collect().head
+  }
+
+  // Measure the speed of InMemoryColumnStore's ScanSegments over many segments
+  // Including null check
+  @Benchmark
+  @BenchmarkMode(Array(Mode.SingleShotTime))
+  @OutputTimeUnit(TimeUnit.SECONDS)
+  def inMemoryColStoreOnly(): Any = {
+    val it = SparkReadBenchmark.readInner(schema)
+    var sum = 0
+    while (it.hasNext) {
+      val row = it.next
+      if (!row.isNullAt(0)) sum += row.getInt(0)
+    }
+    sum
   }
 
   // Baseline comparison ... see what the minimal time for a Spark task is.

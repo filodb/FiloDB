@@ -68,6 +68,22 @@ class IntSumReadBenchmark {
   }
 
   /**
+   * Row-wise scanning with null/isAvailable check
+   */
+  @Benchmark
+  @BenchmarkMode(Array(Mode.Throughput))
+  @OutputTimeUnit(TimeUnit.SECONDS)
+  def rowWiseSegmentScanNullCheck(): Int = {
+    val it = readSeg.rowIterator()
+    var sum = 0
+    while(it.hasNext) {
+      val row = it.next
+      if (row.notNull(0)) sum += row.getInt(0)
+    }
+    sum
+  }
+
+  /**
    * Simulation of boxed row-wise scanning speed (Spark 1.4.x aggregations)
    */
   @Benchmark

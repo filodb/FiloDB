@@ -78,11 +78,11 @@ extends CachedMergingColumnStore with StrictLogging {
 
   def readChunks[K](columns: Set[ColumnId],
                     keyRange: KeyRange[K],
-                    version: Int): Future[Seq[ChunkedData]] = Future {
+                    version: Int): Future[Seq[ChunkedData]] = {
     val chunkTree = chunkDb.getOrElse((keyRange.dataset, keyRange.partition, version),
                                       EmptyChunkTree)
     logger.debug(s"Reading chunks from columns $columns, keyRange $keyRange, version $version")
-    for { column <- columns.toSeq } yield {
+    val chunks = for { column <- columns.toSeq } yield {
       val startKey = (column, keyRange.binaryStart, 0)
       val endKey   = if (keyRange.endExclusive) { (column, keyRange.binaryEnd, 0) }
                      else                       { (column, keyRange.binaryEnd, Int.MaxValue) }
@@ -93,6 +93,7 @@ extends CachedMergingColumnStore with StrictLogging {
       }
       ChunkedData(column, chunkList)
     }
+    Future.successful(chunks)
   }
 
   def readChunkRowMaps[K](keyRange: KeyRange[K], version: Int):
