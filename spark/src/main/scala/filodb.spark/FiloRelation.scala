@@ -149,9 +149,11 @@ case class FiloRelation(dataset: String,
   // For now just implement really simple filtering
   private def getFilterFuncs(filters: Seq[Filter]): Seq[Types.PartitionKey => Boolean] = {
     import org.apache.spark.sql.sources._
+    logger.info(s"Filters = $filters")
     filters.flatMap {
       case EqualTo(datasetObj.partitionColumn, equalVal) =>
         val compareVal = equalVal.toString   // must convert to same type as partitionKey
+        logger.info(s"Adding filter predicate === $compareVal")
         Some((p: Types.PartitionKey) => p == compareVal)
       case other: Filter =>
         None
