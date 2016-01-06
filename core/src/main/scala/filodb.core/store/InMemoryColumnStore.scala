@@ -111,14 +111,44 @@ extends CachedMergingColumnStore with StrictLogging {
                        version: Int,
                        partitionFilter: (PartitionKey => Boolean),
                        params: Map[String, String]): Future[Iterator[ChunkMapInfo]] = Future {
-    val parts = rowMaps.keys.filter { case (ds, partition, ver) => ds == dataset && ver == version }
+    val parts = rowMaps.keys.filter { case (ds, partition, ver) =>
+      ds == dataset && ver == version && partitionFilter(partition) }
     val maps = parts.toIterator.flatMap { case key @ (_, partition, _) =>
-                 rowMaps(key).keySet.iterator.map { segId =>
-                   val (chunkIds, rowNums, nextChunkId) = rowMaps(key).get(segId)
+                 rowMaps(key).entrySet.iterator.map { entry =>
+                   val segId = entry.getKey
+                   val (chunkIds, rowNums, nextChunkId) = entry.getValue
                    (partition, segId, new BinaryChunkRowMap(chunkIds, rowNums, nextChunkId))
                  }
                }
     maps.toIterator
+  }
+
+  // Add an efficient scanSegments implementation here, which can avoid much of the async
+  // cruft unnecessary for in-memory stuff
+  override def scanSegments[K: SortKeyHelper](columns: Seq[Column],
+                                              dataset: TableName,
+                                              version: Int,
+                                              partitionFilter: (PartitionKey => Boolean),
+                                              params: Map[String, String]): Future[Iterator[Segment[K]]] = {
+    val helper = implicitly[SortKeyHelper[K]]
+    for { chunkmapsIt <- scanChunkRowMaps(dataset, version, partitionFilter, params) }
+    yield {
+      chunkmapsIt.map { case (partition, segId, binChunkRowMap) =>
+        val decodedSegId = helper.fromBytes(segId)
+        val keyRange = KeyRange(dataset, partition, decodedSegId, decodedSegId)
+        val segment = new RowReaderSegment(keyRange, binChunkRowMap, columns)
+        for { column <- columns } {
+          val colName = column.name
+          val chunkTree = chunkDb.getOrElse((dataset, partition, version), EmptyChunkTree)
+          chunkTree.subMap((colName, segId, 0), true, (colName, segId, Int.MaxValue), true)
+                   .entrySet.iterator.foreach { entry =>
+            val (_, _, chunkId) = entry.getKey
+            segment.addChunk(chunkId, colName, entry.getValue)
+          }
+        }
+        segment
+      }
+    }
   }
 
   def shutdown(): Unit = {}
