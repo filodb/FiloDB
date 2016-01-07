@@ -129,6 +129,7 @@ with Matchers with ScalaFutures {
                  save()
     val df = sql.read.format("filodb.spark").option("dataset", "test1").load()
     df.agg(sum("year")).collect().head(0) should equal (4030)
+    df.select("id", "year").limit(2).collect()   // Just to make sure row copy works
   }
 
   val jsonRows2 = Seq(

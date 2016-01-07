@@ -16,10 +16,12 @@ import scala.reflect.ClassTag
 
 import org.apache.spark.rdd.RDD
 import org.apache.spark.SparkContext
-import org.apache.spark.sql.catalyst.expressions.{MutableRow, SpecificMutableRow}
+import org.apache.spark.sql.catalyst.InternalRow
+import org.apache.spark.sql.catalyst.expressions.{BaseGenericInternalRow, GenericInternalRow}
 import org.apache.spark.sql.sources.{BaseRelation, TableScan, PrunedScan, PrunedFilteredScan, Filter}
 import org.apache.spark.sql.types._
 import org.apache.spark.sql.{DataFrame, Row, SQLContext}
+import org.apache.spark.unsafe.types.UTF8String
 
 import filodb.core._
 import filodb.core.metadata.{Column, Dataset, DatasetOptions}
@@ -116,6 +118,9 @@ case class FiloRelation(dataset: String,
   val schema = StructType(columnsToSqlFields(filoSchema.values.toSeq))
   logger.info(s"Read schema for dataset $dataset = $schema")
 
+  // Return false when returning RDD[InternalRow]
+  override def needConversion: Boolean = false
+
   def buildScan(): RDD[Row] = buildScan(filoSchema.keys.toArray)
 
   def buildScan(requiredColumns: Array[String]): RDD[Row] =
@@ -161,9 +166,17 @@ case class FiloRelation(dataset: String,
   }
 }
 
+/**
+ * Base the SparkRowReader on Spark's InternalRow.  Scans are much faster because
+ * sources that return RDD[Row] need to be converted to RDD[InternalRow], and the
+ * conversion is horribly expensive, especially for primitives.
+ * The only downside is that the API is not stable.  :/
+ * TODO: get UTF8String's out of Filo as well, so no string conversion needed :D
+ */
 class SparkRowReader(val chunks: Array[ByteBuffer],
                      val classes: Array[Class[_]],
-                     val emptyLen: Int = 0) extends FiloRowReader with ParsersFromChunks with Row {
+                     val emptyLen: Int = 0)
+extends BaseGenericInternalRow with FiloRowReader with ParsersFromChunks {
   var rowNo: Int = -1
   final def setRowNo(newRowNo: Int): Unit = { rowNo = newRowNo }
 
@@ -171,7 +184,6 @@ class SparkRowReader(val chunks: Array[ByteBuffer],
 
   override final def getBoolean(columnNo: Int): Boolean =
     parsers(columnNo).asInstanceOf[FiloVector[Boolean]](rowNo)
-
   override final def getInt(columnNo: Int): Int =
     parsers(columnNo).asInstanceOf[FiloVector[Int]](rowNo)
   override final def getLong(columnNo: Int): Long =
@@ -180,12 +192,22 @@ class SparkRowReader(val chunks: Array[ByteBuffer],
     parsers(columnNo).asInstanceOf[FiloVector[Double]](rowNo)
   override final def getFloat(columnNo: Int): Float =
     parsers(columnNo).asInstanceOf[FiloVector[Float]](rowNo)
-  override final def getString(columnNo: Int): String =
-    parsers(columnNo).asInstanceOf[FiloVector[String]](rowNo)
+
+  // NOTE: This is horribly slow as it decodes a String from Filo's UTF8, then has
+  // to convert back to string.  When Filo gets UTF8 support then use
+  // UTF8String.fromAddress(object, offset, numBytes)... might enable zero copy strings
+  override final def getUTF8String(columnNo: Int): UTF8String = {
+    val str = parsers(columnNo).asInstanceOf[FiloVector[String]](rowNo)
+    UTF8String.fromString(str)
+  }
+
   final def getDateTime(columnNo: Int): DateTime = parsers(columnNo).asInstanceOf[FiloVector[DateTime]](rowNo)
 
-  final def get(columnNo: Int): Any = parsers(columnNo).boxed(rowNo)
+  final def genericGet(columnNo: Int): Any = parsers(columnNo).boxed(rowNo)
   override final def isNullAt(i: Int): Boolean = !notNull(i)
-  def copy(): org.apache.spark.sql.Row = ???
-  def length: Int = parsers.length
+  def numFields: Int = parsers.length
+
+  // Only used for pure select() queries, doesn't need to be fast?
+  def copy(): InternalRow =
+    new GenericInternalRow((0 until numFields).map(genericGet).toArray)
 }
