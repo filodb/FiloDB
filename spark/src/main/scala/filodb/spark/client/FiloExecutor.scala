@@ -16,7 +16,6 @@ object FiloExecutor {
   def handleShow(input: String, sql: SQLContext, sc: SparkContext, dfFailure: DataFrame): DataFrame = {
     if (SimpleParser.parseShow(input)) {
       val description = Filo.metaStore.projectionTable.getAllSuperProjectionNames
-      Filo.columnStore.summaryTable
       val result = for {
         infoAll <- description
       } yield {
@@ -42,8 +41,8 @@ object FiloExecutor {
     val dataset = Dataset.apply(create.tableName, columns,
       create.partitionCols, create.primaryCols, create.segmentCols)
     Filo.metaStore.addProjection(dataset.projectionInfoSeq.head)
-    val tableDS = sql.read.format("filodb.spark").option("dataset", create.tableName).load()
-    tableDS.registerTempTable(create.tableName)
+    /* val tableDS = sql.read.format("filodb.spark").option("dataset", create.tableName).load()
+    tableDS.registerTempTable(create.tableName) */
     dfSuccess
   }
 

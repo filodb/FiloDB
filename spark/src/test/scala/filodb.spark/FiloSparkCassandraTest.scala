@@ -27,16 +27,16 @@ class FiloSparkCassandraTest extends CassandraTest {
   override def beforeAll(): Unit = {
     super.beforeAll()
     Filo.init(configFromSpark(sc))
-    Await.result(Filo.columnStore.initialize, 10 seconds)
-    Await.result(Filo.metaStore.initialize, 10 seconds)
+    Filo.parse(Filo.columnStore.initialize)(x => x)
+    Filo.parse(Filo.metaStore.initialize)(x => x)
     Filo.metaStore.addProjection(dataset.projectionInfoSeq.head)
     sql.saveAsFiloDataset(dataDF, "jsonds")
   }
 
-  override def afterAll() {
+  override def afterAll(): Unit = {
     super.afterAll()
-    Await.result(Filo.columnStore.clearAll, 10 seconds)
-    Await.result(Filo.metaStore.clearAll, 10 seconds)
+    Filo.parse(Filo.columnStore.clearAll)(x=>x)
+    Filo.parse(Filo.metaStore.clearAll)(x=>x)
     sc.stop()
   }
 
@@ -48,7 +48,7 @@ class FiloSparkCassandraTest extends CassandraTest {
     Column("monthYear", "jsonds", 0, Column.ColumnType.LongColumn),
     Column("year", "jsonds", 0, Column.ColumnType.LongColumn))
 
-  //Table name,Schema, Part Key, Primary Key, Sort Order,Segment
+  // Table name,Schema, Part Key, Primary Key, Sort Order,Segment
   val dataset = Dataset("jsonds", schema, "year", "id", "monthYear")
 
   val jsonRows = Seq(

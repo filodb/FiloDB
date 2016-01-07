@@ -8,6 +8,7 @@ import org.apache.spark.sql.{DataFrame, SQLContext}
 import scala.concurrent.Await
 import scala.language.postfixOps
 import scala.concurrent.duration._
+import scala.concurrent.ExecutionContext.Implicits.global
 
 /**
   * Filo Interpreter to parse and execute the commands sent through CLI.
@@ -27,8 +28,16 @@ object FiloInterpreter {
     sc = sContext
     sql = new SQLContext(sc)
     Filo.init(configFromSpark(sc))
-    Filo.parse(Filo.columnStore.initialize)(x=>x)
-    Filo.parse(Filo.metaStore.initialize)(x=>x)
+    Filo.parse(Filo.columnStore.initialize)(x => x)
+    Filo.parse(Filo.metaStore.initialize)(x => x)
+    val description = Filo.metaStore.projectionTable.getAllSuperProjectionNames
+    val result = for {
+      infoAll <- description
+    } yield {
+      infoAll.foreach { name => val tableDS = sql.read.format("filodb.spark").option("dataset", name).load()
+        tableDS.registerTempTable(name)
+      }
+    }
   }
 
   /** The method to be called in the end to clear the columnStore and metaStore */
@@ -43,19 +52,21 @@ object FiloInterpreter {
     input.toLowerCase.trim match {
       case select: String if select.startsWith("select") =>
         if (SimpleParser.parseSelect(input)) {
-            sql.sql(StringUtils.removeEnd(input, ";"))
+          sql.sql(StringUtils.removeEnd(input, ";"))
         }
         else {
-            dfFailure
+          dfFailure
         }
       case create: String if create.startsWith("create") =>
         val create = SimpleParser.parseCreate(input)
-          FiloExecutor.handleCreate(create, sql, dfSuccess)
+        FiloExecutor.handleCreate(create, sql, dfSuccess)
       case load: String if load.startsWith("load") =>
         val load = SimpleParser.parseLoad(input)
         val dataDF = sql.read.format(load.format).options(load.options).load(load.url)
         sql.saveAsFiloDataset(dataDF, load.tableName)
-          dfSuccess
+        val tableDS = sql.read.format("filodb.spark").option("dataset", load.tableName).load()
+        tableDS.registerTempTable(load.tableName)
+        dfSuccess
       case show: String if show.startsWith("show") =>
         FiloExecutor.handleShow(input, sql, sc, dfFailure)
       case describe: String if describe.startsWith("describe") =>

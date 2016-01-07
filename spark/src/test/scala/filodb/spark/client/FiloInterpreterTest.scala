@@ -22,8 +22,10 @@ class FiloInterpreterTest extends CassandraTest {
     FiloInterpreter.init(sc)
   }
 
-  override def afterAll() {
+  override def afterAll(): Unit = {
     super.afterAll()
+    Filo.parse(Filo.columnStore.clearAll)(x=>x)
+    Filo.parse(Filo.metaStore.clearAll)(x=>x)
     FiloInterpreter.stop()
   }
 
@@ -78,8 +80,14 @@ class FiloInterpreterTest extends CassandraTest {
   }
 
   it("should write table to a Filo table and read from it") {
-    FiloInterpreter.interpret(createTable)
-    FiloInterpreter.interpret(loadTable)
+    val dfCreate = FiloInterpreter.interpret(createTable)
+    dfCreate.count() should be(1)
+    dfCreate.columns.mkString(",") should be("Filo-status")
+    dfCreate.collect().head.mkString(",") should be("1")
+    val dfLoad = FiloInterpreter.interpret(loadTable)
+    dfLoad.count() should be(1)
+    dfLoad.columns.mkString(",") should be("Filo-status")
+    dfLoad.collect().head.mkString(",") should be("1")
     // Now read stuff back and ensure it got written
     val df = FiloInterpreter.interpret("select id,sqlDate from jsonds")
     df.count() should be(3)
@@ -115,8 +123,14 @@ class FiloInterpreterTest extends CassandraTest {
   }
 
   it("should read options in load statement when specified") {
-    FiloInterpreter.interpret(createTable)
-    FiloInterpreter.interpret(loadTableWithOptions)
+    val dfCreate = FiloInterpreter.interpret(createTable)
+    dfCreate.count() should be(1)
+    dfCreate.columns.mkString(",") should be("Filo-status")
+    dfCreate.collect().head.mkString(",") should be("1")
+    val dfLoad = FiloInterpreter.interpret(loadTableWithOptions)
+    dfLoad.count() should be(1)
+    dfLoad.columns.mkString(",") should be("Filo-status")
+    dfLoad.collect().head.mkString(",") should be("1")
     // Now read stuff back and ensure it got written
     val df = FiloInterpreter.interpret("select id,sqlDate from jsonds")
     df.count() should be(3)
