@@ -29,8 +29,8 @@ with Matchers with ScalaFutures {
   // Setup SQLContext and a sample DataFrame
   val conf = (new SparkConf).setMaster("local[4]")
                             .setAppName("test")
-                            .set("filodb.cassandra.keyspace", "unittest")
-                            .set("filodb.memtable.min-free-mb", "10")
+                            .set("spark.filodb.cassandra.keyspace", "unittest")
+                            .set("spark.filodb.memtable.min-free-mb", "10")
   val ssc = new StreamingContext(conf, Milliseconds(700))
   val sql = new SQLContext(ssc.sparkContext)
 

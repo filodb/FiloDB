@@ -219,6 +219,13 @@ The options to use with the data-source api are:
 | default_partition_key | default value to use for the partition key if the partition_column has a null value.  If not specified, an error is thrown. Note that this only has an effect if the dataset is created for the first time.| write | Yes |
 | version          | numeric version of data to write, defaults to 0  | write | Yes |
 
+### Configuring FiloDB
+
+Some options must be configured before starting the Spark Shell or Spark application.  There are two methods:
+
+1. Modify the `application.conf` and rebuild, or repackage a new configuration.
+2. Override the built in defaults by setting SparkConf configuration values, preceding the filo settings with `spark.filodb`.  For example, to change the keyspace, pass `--conf spark.filodb.cassandra.keyspace=mykeyspace` to Spark Shell/Submit.  To use the fast in-memory column store instead of Cassandra, pass `--conf spark.filodb.store=in-memory`.
+
 ### Spark data-source Example (spark-shell)
 
 You can follow along using the [Spark Notebook](http://github.com/andypetrella/spark-notebook) in doc/FiloDB.snb....  launch the notebook using `EXTRA_CLASSPATH=$FILO_JAR ADD_JARS=$FILO_JAR ./bin/spark-notebook &` where `FILO_JAR` is the path to `filodb-spark-assembly` jar.
