@@ -111,9 +111,9 @@ extends CachedMergingColumnStore with StrictLogging {
                        version: Int,
                        partitionFilter: (PartitionKey => Boolean),
                        params: Map[String, String]): Future[Iterator[ChunkMapInfo]] = Future {
-    val parts = rowMaps.keys.filter { case (ds, partition, ver) =>
+    val parts = rowMaps.keysIterator.filter { case (ds, partition, ver) =>
       ds == dataset && ver == version && partitionFilter(partition) }
-    val maps = parts.toIterator.flatMap { case key @ (_, partition, _) =>
+    val maps = parts.flatMap { case key @ (_, partition, _) =>
                  rowMaps(key).entrySet.iterator.map { entry =>
                    val segId = entry.getKey
                    val (chunkIds, rowNums, nextChunkId) = entry.getValue

@@ -70,22 +70,20 @@ object FiloRelation {
 
   // It's good to put complex functions inside an object, to be sure that everything
   // inside the function does not depend on an explicit outer class and can be serializable
-  def perNodeRowScanner(config: Config,
+  def perPartitionRowScanner(config: Config,
                         datasetOptionStr: String,
                         version: Int,
                         columns: Seq[Column],
                         sortColumn: Column,
                         filterFunc: Types.PartitionKey => Boolean,
-                        paramIter: Iterator[Map[String, String]]): Iterator[Row] = {
+                        param: Map[String, String]): Iterator[Row] = {
     // NOTE: all the code inside here runs distributed on each node.  So, create my own datastore, etc.
     FiloSetup.init(config)
     FiloSetup.columnStore    // force startup
     val options = DatasetOptions.fromString(datasetOptionStr)
     val datasetName = sortColumn.dataset
 
-    paramIter.flatMap { param =>
-      getRows(options, datasetName, version, columns, sortColumn, filterFunc, param)
-    }
+    getRows(options, datasetName, version, columns, sortColumn, filterFunc, param)
   }
 }
 
@@ -144,10 +142,13 @@ case class FiloRelation(dataset: String,
     // NOTE: It's critical that the closure inside mapPartitions only references
     // vars from buildScan() method, and not the FiloRelation class.  Otherwise
     // the entire FiloRelation class would get serialized.
+    // Also, each partition should only need one param.
     sqlContext.sparkContext.parallelize(splits, splits.length)
       .mapPartitions { paramIter =>
-        perNodeRowScanner(_config, datasetOptionsStr, _version, filoColumns,
-                          sortCol, filterFunc, paramIter)
+        val params = paramIter.toSeq
+        require(params.length == 1)
+        perPartitionRowScanner(_config, datasetOptionsStr, _version, filoColumns,
+                               sortCol, filterFunc, params.head)
       }
   }
 
