@@ -1,7 +1,7 @@
 # FiloDB
 
 [![Join the chat at https://gitter.im/velvia/FiloDB](https://badges.gitter.im/Join%20Chat.svg)](https://gitter.im/velvia/FiloDB?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)
-Distributed.  Columnar.  Versioned.  Streaming.  SQL.
+High-performance distributed analytical database + Spark SQL queries + built for streaming.
 
 ```
     _______ __      ____  ____ 
@@ -21,46 +21,57 @@ See [architecture](doc/architecture.md) and [datasets and reading](doc/datasets_
 <!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
 **Table of Contents**  *generated with [DocToc](https://github.com/thlorenz/doctoc)*
 
-- [Run analytical queries up to 100x faster on Spark SQL and Cassandra.](#run-analytical-queries-up-to-100x-faster-on-spark-sql-and-cassandra)
-- [Roadmap](#roadmap)
+- [Overview](#overview)
+  - [Use Cases](#use-cases)
+  - [Anti-use-cases](#anti-use-cases)
+  - [Roadmap](#roadmap)
 - [Pre-requisites](#pre-requisites)
 - [Getting Started](#getting-started)
   - [FiloDB Data Modelling and Performance Considerations](#filodb-data-modelling-and-performance-considerations)
   - [Example FiloDB Schema for machine metrics](#example-filodb-schema-for-machine-metrics)
   - [Distributed Partitioning](#distributed-partitioning)
-- [Using the CLI](#using-the-cli)
-    - [CLI Example](#cli-example)
 - [Using FiloDB data-source with Spark](#using-filodb-data-source-with-spark)
+  - [Configuring FiloDB](#configuring-filodb)
   - [Spark data-source Example (spark-shell)](#spark-data-source-example-spark-shell)
   - [Spark Streaming Example](#spark-streaming-example)
   - [Spark SQL Example (spark-sql)](#spark-sql-example-spark-sql)
   - [Querying Datasets](#querying-datasets)
+- [Using the CLI](#using-the-cli)
+    - [CLI Example](#cli-example)
 - [Current Status](#current-status)
 - [Building and Testing](#building-and-testing)
 - [You can help!](#you-can-help)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
-## Run analytical queries up to 100x faster on Spark SQL and Cassandra.
+## Overview
 
 FiloDB is a new open-source distributed, versioned, and columnar analytical database designed for modern streaming workloads.
 
-* **Distributed** - FiloDB is designed from the beginning to run on best-of-breed distributed, scale-out storage platforms such as Apache Cassandra.  Queries run in parallel in Apache Spark for scale-out ad-hoc analysis.
-* **Columnar** - FiloDB brings breakthrough performance levels for analytical queries by using a columnar storage layout with different space-saving techniques like dictionary compression.  True columnar querying techniques are on the roadmap.  The current performance is comparable to Parquet, and one to two orders of magnitude faster than Spark on Cassandra 2.x for analytical queries.  For the POC performance comparison, please see [cassandra-gdelt](http://github.com/velvia/cassandra-gdelt) repo.
-* **Versioned** - At the same time, row-level, column-level operations and built in versioning gives FiloDB far more flexibility than can be achieved using file-based technologies like Parquet alone.
-* Designed for **streaming** - Enable easy exactly-once ingestion from Kafka for streaming events, time series, and IoT applications - yet enable extremely fast ad-hoc analysis using the ease of use of SQL.  Each row is keyed by a partition and sort key, and writes using the same key are idempotent.  FiloDB does the hard work of keeping data stored in an efficient and sorted format.
-
-FiloDB is easy to use!  You can use Spark SQL for both ingestion (including from Streaming!) and querying.
-
-Connect Tableau or any other JDBC analysis tool to Spark SQL, and easily ingest data from any source with Spark support(JSON, CSV, traditional database, Kafka, etc.)
-
-FiloDB is a great fit for bulk analytical workloads, or streaming /  event data.  It is not optimized for heavily transactional, update-oriented workflows.
+* **High performance** - faster than Parquet scan speeds, plus filtering along two or more dimensions
+* **Compact storage** - within 35% of Parquet
+* **Idempotent writes** - primary-key based appends and updates; easy exactly-once ingestion from streaming sources
+* **Distributed** - pluggable storage engine includes Apache Cassandra and in-memory
+* **Low-latency** - minimal SQL query latency of 25ms on one node; sub-second easily achievable with filtering and easy to use concurrency control
+* **SQL queries** - plug in Tableau or any tool using JDBC/ODBC drivers
+* Ingest from Spark/Spark Streaming from any supported Spark data source
 
 [Overview presentation](http://velvia.github.io/presentations/2015-filodb-spark-streaming/#/) -- see the docs folder for design docs.
 
 To compile the .mermaid source files to .png's, install the [Mermaid CLI](http://knsv.github.io/mermaid/mermaidCLI.html).
 
-## Roadmap
+### Use Cases
+
+* Storage and analysis of streaming event / time series data
+* Data warehousing
+* In-memory database for Spark Streaming analytics
+* Low-latency in-memory SQL database engine
+
+### Anti-use-cases
+
+* Heavily transactional, update-oriented workflows
+
+### Roadmap
 
 Your input is appreciated!
 
@@ -75,8 +86,8 @@ Your input is appreciated!
 
 1. [Java 8](http://www.oracle.com/technetwork/java/javase/downloads/jdk8-downloads-2133151.html)
 2. [SBT](http://www.scala-sbt.org/)
-3. [Apache Cassandra](http://cassandra.apache.org/) (We prefer using [CCM](https://github.com/pcmanus/ccm) for local testing)
-4. [Apache Spark (1.5.x)](http://spark.apache.org/) (Not strictly needed if you only use CLI, but you probably want to use Spark for queries)
+3. [Apache Cassandra](http://cassandra.apache.org/) (We prefer using [CCM](https://github.com/pcmanus/ccm) for local testing) (Optional if you are using the in-memory column store)
+4. [Apache Spark (1.5.x)](http://spark.apache.org/)
 
 ## Getting Started
 
@@ -87,7 +98,9 @@ Your input is appreciated!
     $ cd FiloDB
     ```
 
-2. Start a Cassandra Cluster. If its not accessible at `localhost:9042` update it in `core/src/main/resources/application.conf`.
+2. Choose either the Cassandra column store (default) or the in-memory column store.
+    - Start a Cassandra Cluster. If its not accessible at `localhost:9042` update it in `core/src/main/resources/application.conf`.
+    - Or, use FiloDB's in-memory column store with Spark (does not work with CLI). Pass the `--conf spark.filodb.store=in-memory` to `spark-submit` / `spark-shell`.  This is a great option to test things out, and is really really fast!
 
 3. FiloDB can be used through `filo-cli` or as a Spark data source. The CLI supports data ingestion from CSV files only; the Spark data source is better tested and richer in features.
 
@@ -152,48 +165,6 @@ Currently, FiloDB is a library in Spark and requires the user to distribute data
 
 * The easiest strategy to accomplish this is to have data partitioned via a queue such as Kafka.  That way, when the data comes into Spark Streaming, it is already partitioned correctly.
 * Another way of accomplishing this is to use a DataFrame's `sort` method before using the DataFrame write API.
-
-## Using the CLI
-
-The `filo-cli` accepts arguments as key-value pairs. The following keys are supported:
-
-| key          | purpose                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-|--------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| dataset    | It is required for all the operations. Its value should be the name of the dataset                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| limit      | This is optional key to be used with `select`. Its value should be the number of rows required.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| columns    | This is required for defining the schema of a dataset. Its value should be a comma-separated string of the format, `column1:typeOfColumn1,column2:typeOfColumn2` where column1 and column2 are the names of the columns and typeOfColumn1 and typeOfColumn2 are one of `int`,`long`,`double`, `string`                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| sortColumn | This is required for defining the schema. Its value should be the name of the column on which the data is to be sorted.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| command    | Its value can be either of `init`,`create`,`importcsv`,`analyze` or `list`.<br/><br/>The `init` command is used to create the FiloDB schema.<br/><br/>The `create` command is used to define new a dataset. For example,<br/>```./filo-cli --command create --dataset playlist --columns id:int,album:string,artist:string,title:string --sortColumn id``` <br/>Note: The sort column is not optional.<br/><br/>The `list` command can be used to view the schema of a dataset. For example, <br/>```./filo-cli --command list --dataset playlist```<br/><br/>The `importcsv` command can be used to load data from a CSV file into a dataset. For example,<br/>```./filo-cli --command importcsv --dataset playlist --filename playlist.csv```<br/>Note: The CSV file should be delimited with comma and have a header row. The column names must match those specified when creating the schema for that dataset. |
-| select     | Its value should be a comma-separated string of the columns to be selected,<br/>```./filo-cli --dataset playlist --select album,title```<br/>The result from `select` is printed in the console by default. An output file can be specified with the key `--outfile`. For example,<br/>```./filo-cli --dataset playlist --select album,title --outfile playlist.csv```                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| delimiter  | This is optional key to be used with `importcsv` command. Its value should be the field delimiter character. Default value is comma.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| timeoutMinutes | The number of minutes to time out for CSV ingestion.  Needs to be greater than the max amount of time for ingesting the whole file.  Defaults to 99.  |
-
-#### CLI Example
-The following examples use the [GDELT public dataset](http://data.gdeltproject.org/documentation/GDELT-Data_Format_Codebook.pdf) and can be run from the project directory.
-
-Create a dataset with all the columns :
-
-```
-./filo-cli --command create --dataset gdelt --columns GLOBALEVENTID:int,SQLDATE:string,MonthYear:int,Year:int,FractionDate:double,Actor1Code:string,Actor1Name:string,Actor1CountryCode:string,Actor1KnownGroupCode:string,Actor1EthnicCode:string,Actor1Religion1Code:string,Actor1Religion2Code:string,Actor1Type1Code:string,Actor1Type2Code:string,Actor1Type3Code:string,Actor2Code:string,Actor2Name:string,Actor2CountryCode:string,Actor2KnownGroupCode:string,Actor2EthnicCode:string,Actor2Religion1Code:string,Actor2Religion2Code:string,Actor2Type1Code:string,Actor2Type2Code:string,Actor2Type3Code:string,IsRootEvent:int,EventCode:string,EventBaseCode:string,EventRootCode:string,QuadClass:int,GoldsteinScale:double,NumMentions:int,NumSources:int,NumArticles:int,AvgTone:double,Actor1Geo_Type:int,Actor1Geo_FullName:string,Actor1Geo_CountryCode:string,Actor1Geo_ADM1Code:string,Actor1Geo_Lat:double,Actor1Geo_Long:double,Actor1Geo_FeatureID:int,Actor2Geo_Type:int,Actor2Geo_FullName:string,Actor2Geo_CountryCode:string,Actor2Geo_ADM1Code:string,Actor2Geo_Lat:double,Actor2Geo_Long:double,Actor2Geo_FeatureID:int,ActionGeo_Type:int,ActionGeo_FullName:string,ActionGeo_CountryCode:string,ActionGeo_ADM1Code:string,ActionGeo_Lat:double,ActionGeo_Long:double,ActionGeo_FeatureID:int,DATEADDED:string,Actor1Geo_FullLocation:string,Actor2Geo_FullLocation:string,ActionGeo_FullLocation:string --sortColumn GLOBALEVENTID
-```
-
-Verify the dataset metadata:
-
-```
-./filo-cli --command list --dataset gdelt
-```
-
-Import data from a CSV file:
-
-```
-./filo-cli --command importcsv --dataset gdelt --filename GDELT-1979-1984-100000.csv
-```
-
-Query/export some columns:
-
-```
-./filo-cli --dataset gdelt --select MonthYear,Actor2Code --limit 5 --outfile out.csv
-```
 
 ## Using FiloDB data-source with Spark
 
@@ -332,6 +303,48 @@ scala> val numArticles = df.select("NumArticles").map(row => row.getInt(0).toDou
 numArticles: org.apache.spark.rdd.RDD[Double] = MapPartitionsRDD[104] at map at DataFrame.scala:848
 
 scala> val correlation = Statistics.corr(numMentions, numArticles, "pearson")
+```
+
+## Using the CLI
+
+The `filo-cli` accepts arguments as key-value pairs. The following keys are supported:
+
+| key          | purpose                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+|--------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| dataset    | It is required for all the operations. Its value should be the name of the dataset                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| limit      | This is optional key to be used with `select`. Its value should be the number of rows required.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| columns    | This is required for defining the schema of a dataset. Its value should be a comma-separated string of the format, `column1:typeOfColumn1,column2:typeOfColumn2` where column1 and column2 are the names of the columns and typeOfColumn1 and typeOfColumn2 are one of `int`,`long`,`double`, `string`                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| sortColumn | This is required for defining the schema. Its value should be the name of the column on which the data is to be sorted.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| command    | Its value can be either of `init`,`create`,`importcsv`,`analyze` or `list`.<br/><br/>The `init` command is used to create the FiloDB schema.<br/><br/>The `create` command is used to define new a dataset. For example,<br/>```./filo-cli --command create --dataset playlist --columns id:int,album:string,artist:string,title:string --sortColumn id``` <br/>Note: The sort column is not optional.<br/><br/>The `list` command can be used to view the schema of a dataset. For example, <br/>```./filo-cli --command list --dataset playlist```<br/><br/>The `importcsv` command can be used to load data from a CSV file into a dataset. For example,<br/>```./filo-cli --command importcsv --dataset playlist --filename playlist.csv```<br/>Note: The CSV file should be delimited with comma and have a header row. The column names must match those specified when creating the schema for that dataset. |
+| select     | Its value should be a comma-separated string of the columns to be selected,<br/>```./filo-cli --dataset playlist --select album,title```<br/>The result from `select` is printed in the console by default. An output file can be specified with the key `--outfile`. For example,<br/>```./filo-cli --dataset playlist --select album,title --outfile playlist.csv```                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| delimiter  | This is optional key to be used with `importcsv` command. Its value should be the field delimiter character. Default value is comma.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| timeoutMinutes | The number of minutes to time out for CSV ingestion.  Needs to be greater than the max amount of time for ingesting the whole file.  Defaults to 99.  |
+
+#### CLI Example
+The following examples use the [GDELT public dataset](http://data.gdeltproject.org/documentation/GDELT-Data_Format_Codebook.pdf) and can be run from the project directory.
+
+Create a dataset with all the columns :
+
+```
+./filo-cli --command create --dataset gdelt --columns GLOBALEVENTID:int,SQLDATE:string,MonthYear:int,Year:int,FractionDate:double,Actor1Code:string,Actor1Name:string,Actor1CountryCode:string,Actor1KnownGroupCode:string,Actor1EthnicCode:string,Actor1Religion1Code:string,Actor1Religion2Code:string,Actor1Type1Code:string,Actor1Type2Code:string,Actor1Type3Code:string,Actor2Code:string,Actor2Name:string,Actor2CountryCode:string,Actor2KnownGroupCode:string,Actor2EthnicCode:string,Actor2Religion1Code:string,Actor2Religion2Code:string,Actor2Type1Code:string,Actor2Type2Code:string,Actor2Type3Code:string,IsRootEvent:int,EventCode:string,EventBaseCode:string,EventRootCode:string,QuadClass:int,GoldsteinScale:double,NumMentions:int,NumSources:int,NumArticles:int,AvgTone:double,Actor1Geo_Type:int,Actor1Geo_FullName:string,Actor1Geo_CountryCode:string,Actor1Geo_ADM1Code:string,Actor1Geo_Lat:double,Actor1Geo_Long:double,Actor1Geo_FeatureID:int,Actor2Geo_Type:int,Actor2Geo_FullName:string,Actor2Geo_CountryCode:string,Actor2Geo_ADM1Code:string,Actor2Geo_Lat:double,Actor2Geo_Long:double,Actor2Geo_FeatureID:int,ActionGeo_Type:int,ActionGeo_FullName:string,ActionGeo_CountryCode:string,ActionGeo_ADM1Code:string,ActionGeo_Lat:double,ActionGeo_Long:double,ActionGeo_FeatureID:int,DATEADDED:string,Actor1Geo_FullLocation:string,Actor2Geo_FullLocation:string,ActionGeo_FullLocation:string --sortColumn GLOBALEVENTID
+```
+
+Verify the dataset metadata:
+
+```
+./filo-cli --command list --dataset gdelt
+```
+
+Import data from a CSV file:
+
+```
+./filo-cli --command importcsv --dataset gdelt --filename GDELT-1979-1984-100000.csv
+```
+
+Query/export some columns:
+
+```
+./filo-cli --dataset gdelt --select MonthYear,Actor2Code --limit 5 --outfile out.csv
 ```
 
 
