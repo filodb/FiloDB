@@ -214,7 +214,7 @@ class RowReaderSegment[K](val keyRange: KeyRange[K],
 object RowReaderSegment {
   type RowReaderFactory = (Array[ByteBuffer], Array[Class[_]]) => FiloRowReader
 
-  private val DefaultReaderFactory: RowReaderFactory =
+  val DefaultReaderFactory: RowReaderFactory =
     (bytes, clazzes) => new FastFiloRowReader(bytes, clazzes)
 
   def apply[K](genSeg: GenericSegment[K], schema: Seq[Column]): RowReaderSegment[K] = {

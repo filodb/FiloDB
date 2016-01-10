@@ -7,7 +7,7 @@ import scala.concurrent.{Await, Future}
 import scala.language.postfixOps
 
 import filodb.core._
-import filodb.core.metadata.{Column, Projection, RichProjection}
+import filodb.core.metadata.{Dataset, Column, Projection, RichProjection}
 import filodb.core.Types
 
 import org.scalatest.{FlatSpec, Matchers, BeforeAndAfter, BeforeAndAfterAll}
@@ -25,21 +25,18 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
   val config = ConfigFactory.load("application_test.conf")
   def colStore: CachedMergingColumnStore
 
-  val dataset = "foo"
-  val fooProj = Projection(0, dataset, "someCol")
-
   // First create the tables in C*
   override def beforeAll() {
     super.beforeAll()
-    colStore.initializeProjection(fooProj).futureValue
+    colStore.initializeProjection(dataset.projections.head).futureValue
   }
 
   before {
-    colStore.clearProjectionData(fooProj).futureValue
+    colStore.clearProjectionData(dataset.projections.head).futureValue
     colStore.clearSegmentCache()
   }
 
-  val keyRange = KeyRange(dataset, "partition", 0L, 10000L)
+  val keyRange = KeyRange(dataset.name, "partition", 0L, 10000L)
 
   val bytes1 = ByteBuffer.wrap("apple".getBytes("UTF-8"))
   val bytes2 = ByteBuffer.wrap("orange".getBytes("UTF-8"))
@@ -142,7 +139,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
       response should equal (Success)
     }
 
-    val fakeCol = Column("notACol", dataset, 0, Column.ColumnType.StringColumn)
+    val fakeCol = Column("notACol", dataset.name, 0, Column.ColumnType.StringColumn)
     whenReady(colStore.readSegments(Seq(fakeCol), keyRange, 0)) { segIter =>
       val segments = segIter.toSeq
       segments should have length (1)
@@ -157,10 +154,10 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
       response should equal (Success)
     }
 
-    val paramSet = colStore.getScanSplits(dataset)
+    val paramSet = colStore.getScanSplits(dataset.name)
     paramSet should have length (1)
 
-    whenReady(colStore.scanSegments[Long](schema, dataset, 0, params = paramSet.head)) { segIter =>
+    whenReady(colStore.scanSegments[Long](schema, dataset.name, 0, params = paramSet.head)) { segIter =>
       val segments = segIter.toSeq
       segments should have length (1)
       val readSeg = segments.head.asInstanceOf[RowReaderSegment[Long]]
@@ -168,6 +165,21 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
       readSeg.getChunks.toSet should equal (segment.getChunks.toSet)
       readSeg.index.rowNumIterator.toSeq should equal (segment.index.rowNumIterator.toSeq)
       readSeg.rowIterator().map(_.getLong(2)).toSeq should equal (Seq(24L, 25L, 28L, 29L, 39L, 40L))
+    }
+  }
+
+  "scanRows" should "read back rows that were written" in {
+    val segment = getRowWriter(keyRange)
+    segment.addRowsAsChunk(mapper(names), getSortKey _)
+    whenReady(colStore.appendSegment(projection, segment, 0)) { response =>
+      response should equal (Success)
+    }
+
+    val paramSet = colStore.getScanSplits(dataset.name)
+    paramSet should have length (1)
+
+    whenReady(colStore.scanRows(schema, dataset.name, 0, params = paramSet.head)) { rowIter =>
+      rowIter.map(_.getLong(2)).toSeq should equal (Seq(24L, 25L, 28L, 29L, 39L, 40L))
     }
   }
 }

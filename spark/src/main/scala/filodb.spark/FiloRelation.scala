@@ -8,7 +8,7 @@ import com.typesafe.scalalogging.slf4j.StrictLogging
 import java.nio.ByteBuffer
 import net.ceedubs.ficus.Ficus._
 import org.joda.time.DateTime
-import org.velvia.filo.{FiloRowReader, FiloVector, ParsersFromChunks}
+import org.velvia.filo.{FiloRowReader, FiloVector, ParsersFromChunks, RowReader}
 import scala.concurrent.{Await, Future}
 import scala.concurrent.duration._
 import scala.language.postfixOps
@@ -48,42 +48,26 @@ object FiloRelation {
   def getSchema(dataset: String, version: Int): Column.Schema =
     parse(FiloSetup.metaStore.getSchema(dataset, version)) { schema => schema }
 
-  def getRows(options: DatasetOptions,
-              datasetName: String,
-              version: Int,
-              columns: Seq[Column],
-              sortColumn: Column,
-              filterFunc: Types.PartitionKey => Boolean,
-              params: Map[String, String]): Iterator[Row] = {
-    val untypedHelper = Dataset.sortKeyHelper(options, sortColumn).get
-    implicit val helper = untypedHelper.asInstanceOf[SortKeyHelper[untypedHelper.Key]]
-    parse(FiloSetup.columnStore.scanSegments[helper.Key](columns, datasetName, version,
-                                                         filterFunc, params = params),
-          10 minutes) { segmentIt =>
-      segmentIt.flatMap { seg =>
-        val readerSeg = seg.asInstanceOf[RowReaderSegment[helper.Key]]
-        readerSeg.rowIterator((bytes, clazzes) => new SparkRowReader(bytes, clazzes))
-           .asInstanceOf[Iterator[Row]]
-      }
-    }
-  }
-
   // It's good to put complex functions inside an object, to be sure that everything
   // inside the function does not depend on an explicit outer class and can be serializable
   def perPartitionRowScanner(config: Config,
-                        datasetOptionStr: String,
-                        version: Int,
-                        columns: Seq[Column],
-                        sortColumn: Column,
-                        filterFunc: Types.PartitionKey => Boolean,
-                        param: Map[String, String]): Iterator[Row] = {
+                             datasetOptionStr: String,
+                             version: Int,
+                             columns: Seq[Column],
+                             sortColumn: Column,
+                             filterFunc: Types.PartitionKey => Boolean,
+                             param: Map[String, String]): Iterator[Row] = {
     // NOTE: all the code inside here runs distributed on each node.  So, create my own datastore, etc.
     FiloSetup.init(config)
     FiloSetup.columnStore    // force startup
     val options = DatasetOptions.fromString(datasetOptionStr)
-    val datasetName = sortColumn.dataset
+    val untypedHelper = Dataset.sortKeyHelper(options, sortColumn).get
+    implicit val helper = untypedHelper.asInstanceOf[SortKeyHelper[untypedHelper.Key]]
 
-    getRows(options, datasetName, version, columns, sortColumn, filterFunc, param)
+    parse(FiloSetup.columnStore.scanRows(
+            columns, sortColumn.dataset, version, filterFunc, params = param,
+            (bytes, clazzes) => new SparkRowReader(bytes, clazzes)),
+          10 minutes) { rowIt => rowIt.asInstanceOf[Iterator[Row]] }
   }
 }
 

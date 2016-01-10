@@ -2,6 +2,7 @@ package filodb.core.store
 
 import com.typesafe.scalalogging.slf4j.StrictLogging
 import java.nio.ByteBuffer
+import org.velvia.filo.RowReader
 import org.velvia.filo.RowReader.TypedFieldExtractor
 import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.concurrent.duration._
@@ -18,6 +19,10 @@ import filodb.core.metadata.{Column, Projection, RichProjection}
  */
 trait ColumnStore {
   import filodb.core.Types._
+  import RowReaderSegment._
+
+  def ec: ExecutionContext
+  implicit val execContext = ec
 
   /**
    * Initializes the column store for a given dataset projection.  Must be called once before appending
@@ -68,6 +73,52 @@ trait ColumnStore {
                                      version: Int,
                                      partitionFilter: (PartitionKey => Boolean) = (x => true),
                                      params: Map[String, String] = Map.empty): Future[Iterator[Segment[K]]]
+
+  /**
+   * Scans over segments, just like scanRows, but returns an iterator of RowReader
+   * for all of those row-oriented applications.  Contains a high performance iterator
+   * implementation, probably faster than trying to do it yourself.  :)
+   */
+  def scanRows[K: SortKeyHelper](columns: Seq[Column],
+                  dataset: TableName,
+                  version: Int,
+                  partitionFilter: (PartitionKey => Boolean) = (x => true),
+                  params: Map[String, String] = Map.empty,
+                  readerFactory: RowReaderFactory = DefaultReaderFactory): Future[Iterator[RowReader]] = {
+    for { segmentIt <- scanSegments[K](columns, dataset, version, partitionFilter, params) }
+    yield {
+      if (segmentIt.hasNext) {
+        // TODO: fork this kind of code into a macro, called fastFlatMap.
+        // That's what we really need...  :-p
+        new Iterator[RowReader] {
+          final def getNextRowIt: Iterator[RowReader] = {
+            val readerSeg = segmentIt.next.asInstanceOf[RowReaderSegment[K]]
+            readerSeg.rowIterator(readerFactory)
+          }
+
+          var rowIt: Iterator[RowReader] = getNextRowIt
+
+          final def hasNext: Boolean = {
+            var _hasNext = rowIt.hasNext
+            while (!_hasNext) {
+              if (segmentIt.hasNext) {
+                rowIt = getNextRowIt
+                _hasNext = rowIt.hasNext
+              } else {
+                // all done. No more segments.
+                return false
+              }
+            }
+            _hasNext
+          }
+
+          final def next: RowReader = rowIt.next.asInstanceOf[RowReader]
+        }
+      } else {
+        Iterator.empty
+      }
+    }
+  }
 
   /**
    * Determines how to split the scanning of a dataset across a columnstore.

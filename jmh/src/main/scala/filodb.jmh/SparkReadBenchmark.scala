@@ -34,16 +34,16 @@ import org.velvia.filo.{RowReader, TupleRowReader}
  * For example, on my laptop, here is the JMH output:
  * {{{
  *  Benchmark                         Mode  Cnt  Score   Error  Units
- *  SparkReadBenchmark.sparkBaseline    ss   15  0.023 ± 0.002   s/op
- *  SparkReadBenchmark.sparkSum         ss   15  0.415 ± 0.034   s/op
- *  SparkCassBenchmark.sparkCassSum     ss   15  0.622 ± 0.031   s/op
+ *  SparkReadBenchmark.sparkBaseline    ss   15  0.025 ± 0.002   s/op
+ *  SparkReadBenchmark.sparkSum         ss   15  0.231 ± 0.010   s/op
+ *  SparkCassBenchmark.sparkCassSum     ss   15  0.541 ± 0.054   s/op
  * }}}
  *
  * (The above run against Cassandra 2.1.6, 5GB heap, with jmh:run -i 3 -wi 3 -f3 filodb.jmh.SparkReadBenchmark)
  *
  * Thus:
- * - Cassandra scan speed = 5000000 / (0.622 - 0.023) =  8,347,245 ops/sec
- * - InMemory scan speed  = 5000000 / (0.415 - 0.023) = 12,755,102 ops/sec
+ * - Cassandra scan speed = 5000000 / (0.541 - 0.023) =  9,689,922 ops/sec
+ * - InMemory scan speed  = 5000000 / (0.231 - 0.023) = 24,271,844 ops/sec
  */
 @State(Scope.Benchmark)
 class SparkReadBenchmark {
@@ -103,14 +103,16 @@ class SparkReadBenchmark {
     df.agg(sum(df("int"))).collect().head
   }
 
+  val optionsStr = dataset.options.toString
+
   // Measure the speed of InMemoryColumnStore's ScanSegments over many segments
   // Including null check
   @Benchmark
   @BenchmarkMode(Array(Mode.SingleShotTime))
   @OutputTimeUnit(TimeUnit.SECONDS)
   def inMemoryColStoreOnly(): Any = {
-    val it = FiloRelation.getRows(dataset.options, dataset.name, 0, schema, schema.last,
-                                  (x => true), Map.empty).asInstanceOf[Iterator[InternalRow]]
+    val it = FiloRelation.perPartitionRowScanner(filoConfig, optionsStr, 0, schema, schema.last,
+                            (x => true), Map.empty).asInstanceOf[Iterator[InternalRow]]
     var sum = 0
     while (it.hasNext) {
       val row = it.next

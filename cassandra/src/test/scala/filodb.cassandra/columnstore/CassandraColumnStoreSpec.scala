@@ -20,7 +20,7 @@ class CassandraColumnStoreSpec extends CassandraFlatSpec with ColumnStoreSpec {
   implicit val keySpace = KeySpace(config.getString("cassandra.keyspace"))
 
   val (chunkTable, rowMapTable) =
-    Await.result(colStore.asInstanceOf[CassandraColumnStore].getSegmentTables(dataset), 3 seconds)
+    Await.result(colStore.asInstanceOf[CassandraColumnStore].getSegmentTables(dataset.name), 3 seconds)
 
   private def getChunkRowMap[K](segment: Segment[K]): Future[BinaryChunkRowMap] =
     rowMapTable.getChunkMaps(segment.partition, 0, segment.segmentId, segment.keyRange.binaryEnd).
@@ -52,13 +52,13 @@ class CassandraColumnStoreSpec extends CassandraFlatSpec with ColumnStoreSpec {
 
   "getScanSplits" should "return splits from Cassandra" in {
     // Single split, token_start should equal token_end
-    val singleSplit = colStore.getScanSplits(dataset)
+    val singleSplit = colStore.getScanSplits(dataset.name)
     singleSplit should have length (1)
     singleSplit.head("token_start") should equal (singleSplit.head("token_end"))
     singleSplit.head("replicas").split(",").size should equal (1)
 
     // Multiple splits.  Each split token start/end should not equal each other.
-    val multiSplit = colStore.getScanSplits(dataset, Map("splits_per_node" -> "2"))
+    val multiSplit = colStore.getScanSplits(dataset.name, Map("splits_per_node" -> "2"))
     multiSplit should have length (2)
     multiSplit.foreach { split =>
       split("token_start") should not equal (split("token_end"))
