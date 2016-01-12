@@ -17,7 +17,8 @@ import filodb.coordinator.{NodeCoordinatorActor, RowSource, DatasetCoordinatorAc
 package spark {
   case class DatasetNotFound(dataset: String) extends Exception(s"Dataset $dataset not found")
   // For each mismatch: the column name, DataFrame type, and existing column type
-  case class ColumnTypeMismatch(mismatches: Set[(String, DataType, Column.ColumnType)]) extends Exception
+  case class ColumnTypeMismatch(mismatches: Set[(String, DataType, Column.ColumnType)]) extends
+    Exception(s"Mismatches:\n${mismatches.toList.mkString("\n")}")
   case class NoSortColumn(name: String) extends Exception(s"No sort column found $name")
   case class NoPartitionColumn(name: String) extends Exception(s"No partition column found $name")
   case class BadSchemaError(reason: String) extends Exception(reason)
