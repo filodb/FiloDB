@@ -1,4 +1,4 @@
-package filodb.core.columnstore
+package filodb.core.store
 
 import com.typesafe.scalalogging.slf4j.StrictLogging
 import java.nio.ByteBuffer
@@ -169,13 +169,13 @@ class RowReaderSegment[K](val keyRange: KeyRange[K],
       new Iterator[RowReader] {
         var curChunk = 0
         var curReader = readers(curChunk)
-        val len = index.chunkIds.length
-        var i = 0
+        private final val len = index.chunkIds.length
+        private var i = 0
 
         // NOTE: manually iterate over the chunkIds / rowNums FiloVectors, instead of using the
         // iterator methods, which are extremely slow and boxes everything
-        def hasNext: Boolean = i < len
-        def next: RowReader = {
+        final def hasNext: Boolean = i < len
+        final def next: RowReader = {
           val nextChunk = index.chunkIds(i)
           if (nextChunk != curChunk) {
             curChunk = nextChunk
@@ -214,7 +214,7 @@ class RowReaderSegment[K](val keyRange: KeyRange[K],
 object RowReaderSegment {
   type RowReaderFactory = (Array[ByteBuffer], Array[Class[_]]) => FiloRowReader
 
-  private val DefaultReaderFactory: RowReaderFactory =
+  val DefaultReaderFactory: RowReaderFactory =
     (bytes, clazzes) => new FastFiloRowReader(bytes, clazzes)
 
   def apply[K](genSeg: GenericSegment[K], schema: Seq[Column]): RowReaderSegment[K] = {

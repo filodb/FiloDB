@@ -10,7 +10,7 @@ import scala.concurrent.{Await, Future, ExecutionContext}
 import scala.concurrent.duration._
 import scala.language.postfixOps
 
-import filodb.core.metadata.MetaStore
+import filodb.core.store.MetaStore
 import filodb.coordinator.{NodeCoordinatorActor, DatasetCoordinatorActor, RowSource}
 import filodb.coordinator.sources.CsvSourceActor
 import filodb.core._

@@ -8,7 +8,7 @@ import com.typesafe.scalalogging.slf4j.StrictLogging
 import java.nio.ByteBuffer
 import net.ceedubs.ficus.Ficus._
 import org.joda.time.DateTime
-import org.velvia.filo.{FiloRowReader, FiloVector, ParsersFromChunks}
+import org.velvia.filo.{FiloRowReader, FiloVector, ParsersFromChunks, RowReader}
 import scala.concurrent.{Await, Future}
 import scala.concurrent.duration._
 import scala.language.postfixOps
@@ -16,14 +16,16 @@ import scala.reflect.ClassTag
 
 import org.apache.spark.rdd.RDD
 import org.apache.spark.SparkContext
-import org.apache.spark.sql.catalyst.expressions.{MutableRow, SpecificMutableRow}
+import org.apache.spark.sql.catalyst.InternalRow
+import org.apache.spark.sql.catalyst.expressions.{BaseGenericInternalRow, GenericInternalRow}
 import org.apache.spark.sql.sources.{BaseRelation, TableScan, PrunedScan, PrunedFilteredScan, Filter}
 import org.apache.spark.sql.types._
 import org.apache.spark.sql.{DataFrame, Row, SQLContext}
+import org.apache.spark.unsafe.types.UTF8String
 
 import filodb.core._
 import filodb.core.metadata.{Column, Dataset, DatasetOptions}
-import filodb.core.columnstore.RowReaderSegment
+import filodb.core.store.RowReaderSegment
 
 object FiloRelation {
   import TypeConverters._
@@ -46,44 +48,26 @@ object FiloRelation {
   def getSchema(dataset: String, version: Int): Column.Schema =
     parse(FiloSetup.metaStore.getSchema(dataset, version)) { schema => schema }
 
-  def getRows(options: DatasetOptions,
-              datasetName: String,
-              version: Int,
-              columns: Seq[Column],
-              sortColumn: Column,
-              filterFunc: Types.PartitionKey => Boolean,
-              params: Map[String, String]): Iterator[Row] = {
-    val untypedHelper = Dataset.sortKeyHelper(options, sortColumn).get
-    implicit val helper = untypedHelper.asInstanceOf[SortKeyHelper[untypedHelper.Key]]
-    parse(FiloSetup.columnStore.scanSegments[helper.Key](columns, datasetName, version,
-                                                         filterFunc, params = params),
-          10 minutes) { segmentIt =>
-      segmentIt.flatMap { seg =>
-        val readerSeg = seg.asInstanceOf[RowReaderSegment[helper.Key]]
-        readerSeg.rowIterator((bytes, clazzes) => new SparkRowReader(bytes, clazzes))
-           .asInstanceOf[Iterator[Row]]
-      }
-    }
-  }
-
   // It's good to put complex functions inside an object, to be sure that everything
   // inside the function does not depend on an explicit outer class and can be serializable
-  def perNodeRowScanner(config: Config,
-                        datasetOptionStr: String,
-                        version: Int,
-                        columns: Seq[Column],
-                        sortColumn: Column,
-                        filterFunc: Types.PartitionKey => Boolean,
-                        paramIter: Iterator[Map[String, String]]): Iterator[Row] = {
+  def perPartitionRowScanner(config: Config,
+                             datasetOptionStr: String,
+                             version: Int,
+                             columns: Seq[Column],
+                             sortColumn: Column,
+                             filterFunc: Types.PartitionKey => Boolean,
+                             param: Map[String, String]): Iterator[Row] = {
     // NOTE: all the code inside here runs distributed on each node.  So, create my own datastore, etc.
     FiloSetup.init(config)
     FiloSetup.columnStore    // force startup
     val options = DatasetOptions.fromString(datasetOptionStr)
-    val datasetName = sortColumn.dataset
+    val untypedHelper = Dataset.sortKeyHelper(options, sortColumn).get
+    implicit val helper = untypedHelper.asInstanceOf[SortKeyHelper[untypedHelper.Key]]
 
-    paramIter.flatMap { param =>
-      getRows(options, datasetName, version, columns, sortColumn, filterFunc, param)
-    }
+    parse(FiloSetup.columnStore.scanRows(
+            columns, sortColumn.dataset, version, filterFunc, params = param,
+            (bytes, clazzes) => new SparkRowReader(bytes, clazzes)),
+          10 minutes) { rowIt => rowIt.asInstanceOf[Iterator[Row]] }
   }
 }
 
@@ -116,6 +100,9 @@ case class FiloRelation(dataset: String,
   val schema = StructType(columnsToSqlFields(filoSchema.values.toSeq))
   logger.info(s"Read schema for dataset $dataset = $schema")
 
+  // Return false when returning RDD[InternalRow]
+  override def needConversion: Boolean = false
+
   def buildScan(): RDD[Row] = buildScan(filoSchema.keys.toArray)
 
   def buildScan(requiredColumns: Array[String]): RDD[Row] =
@@ -139,19 +126,24 @@ case class FiloRelation(dataset: String,
     // NOTE: It's critical that the closure inside mapPartitions only references
     // vars from buildScan() method, and not the FiloRelation class.  Otherwise
     // the entire FiloRelation class would get serialized.
+    // Also, each partition should only need one param.
     sqlContext.sparkContext.parallelize(splits, splits.length)
       .mapPartitions { paramIter =>
-        perNodeRowScanner(_config, datasetOptionsStr, _version, filoColumns,
-                          sortCol, filterFunc, paramIter)
+        val params = paramIter.toSeq
+        require(params.length == 1)
+        perPartitionRowScanner(_config, datasetOptionsStr, _version, filoColumns,
+                               sortCol, filterFunc, params.head)
       }
   }
 
   // For now just implement really simple filtering
   private def getFilterFuncs(filters: Seq[Filter]): Seq[Types.PartitionKey => Boolean] = {
     import org.apache.spark.sql.sources._
+    logger.info(s"Filters = $filters")
     filters.flatMap {
       case EqualTo(datasetObj.partitionColumn, equalVal) =>
         val compareVal = equalVal.toString   // must convert to same type as partitionKey
+        logger.info(s"Adding filter predicate === $compareVal")
         Some((p: Types.PartitionKey) => p == compareVal)
       case other: Filter =>
         None
@@ -159,9 +151,17 @@ case class FiloRelation(dataset: String,
   }
 }
 
+/**
+ * Base the SparkRowReader on Spark's InternalRow.  Scans are much faster because
+ * sources that return RDD[Row] need to be converted to RDD[InternalRow], and the
+ * conversion is horribly expensive, especially for primitives.
+ * The only downside is that the API is not stable.  :/
+ * TODO: get UTF8String's out of Filo as well, so no string conversion needed :D
+ */
 class SparkRowReader(val chunks: Array[ByteBuffer],
                      val classes: Array[Class[_]],
-                     val emptyLen: Int = 0) extends FiloRowReader with ParsersFromChunks with Row {
+                     val emptyLen: Int = 0)
+extends BaseGenericInternalRow with FiloRowReader with ParsersFromChunks {
   var rowNo: Int = -1
   final def setRowNo(newRowNo: Int): Unit = { rowNo = newRowNo }
 
@@ -169,7 +169,6 @@ class SparkRowReader(val chunks: Array[ByteBuffer],
 
   override final def getBoolean(columnNo: Int): Boolean =
     parsers(columnNo).asInstanceOf[FiloVector[Boolean]](rowNo)
-
   override final def getInt(columnNo: Int): Int =
     parsers(columnNo).asInstanceOf[FiloVector[Int]](rowNo)
   override final def getLong(columnNo: Int): Long =
@@ -178,12 +177,22 @@ class SparkRowReader(val chunks: Array[ByteBuffer],
     parsers(columnNo).asInstanceOf[FiloVector[Double]](rowNo)
   override final def getFloat(columnNo: Int): Float =
     parsers(columnNo).asInstanceOf[FiloVector[Float]](rowNo)
-  override final def getString(columnNo: Int): String =
-    parsers(columnNo).asInstanceOf[FiloVector[String]](rowNo)
+
+  // NOTE: This is horribly slow as it decodes a String from Filo's UTF8, then has
+  // to convert back to string.  When Filo gets UTF8 support then use
+  // UTF8String.fromAddress(object, offset, numBytes)... might enable zero copy strings
+  override final def getUTF8String(columnNo: Int): UTF8String = {
+    val str = parsers(columnNo).asInstanceOf[FiloVector[String]](rowNo)
+    UTF8String.fromString(str)
+  }
+
   final def getDateTime(columnNo: Int): DateTime = parsers(columnNo).asInstanceOf[FiloVector[DateTime]](rowNo)
 
-  final def get(columnNo: Int): Any = parsers(columnNo).boxed(rowNo)
+  final def genericGet(columnNo: Int): Any = parsers(columnNo).boxed(rowNo)
   override final def isNullAt(i: Int): Boolean = !notNull(i)
-  def copy(): org.apache.spark.sql.Row = ???
-  def length: Int = parsers.length
+  def numFields: Int = parsers.length
+
+  // Only used for pure select() queries, doesn't need to be fast?
+  def copy(): InternalRow =
+    new GenericInternalRow((0 until numFields).map(genericGet).toArray)
 }

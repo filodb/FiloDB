@@ -5,7 +5,7 @@ import org.velvia.filo.TupleRowReader
 
 import filodb.core.KeyRange
 import filodb.core.metadata.{Column, Dataset}
-import filodb.core.columnstore.SegmentSpec
+import filodb.core.store.SegmentSpec
 
 import org.scalatest.{FunSpec, Matchers, BeforeAndAfter}
 

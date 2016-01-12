@@ -5,7 +5,7 @@ import org.velvia.filo.RowReader
 import scala.concurrent.{ExecutionContext, Future}
 
 import filodb.core._
-import filodb.core.columnstore.{ColumnStore, RowWriterSegment, Segment}
+import filodb.core.store.{ColumnStore, RowWriterSegment, Segment}
 import filodb.core.metadata.{Dataset, Column, RichProjection}
 
 /**

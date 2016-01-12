@@ -8,7 +8,7 @@ import spray.caching._
 
 import filodb.cassandra.FiloCassandraConnector
 import filodb.core._
-import filodb.core.columnstore.CachedMergingColumnStore
+import filodb.core.store.CachedMergingColumnStore
 import filodb.core.metadata.{Column, Projection}
 
 /**
@@ -37,7 +37,7 @@ import filodb.core.metadata.{Column, Projection}
 class CassandraColumnStore(config: Config)
                           (implicit val ec: ExecutionContext)
 extends CachedMergingColumnStore with StrictLogging {
-  import filodb.core.columnstore._
+  import filodb.core.store._
   import Types._
   import collection.JavaConverters._
 

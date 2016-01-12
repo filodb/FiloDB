@@ -10,7 +10,7 @@ import scodec.bits._
 
 import filodb.cassandra.FiloCassandraConnector
 import filodb.core._
-import filodb.core.columnstore.ChunkedData
+import filodb.core.store.ChunkedData
 
 /**
  * Represents the table which holds the actual columnar chunks for segments

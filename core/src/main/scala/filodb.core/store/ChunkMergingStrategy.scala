@@ -1,4 +1,4 @@
-package filodb.core.columnstore
+package filodb.core.store
 
 import com.typesafe.scalalogging.slf4j.StrictLogging
 import java.nio.ByteBuffer

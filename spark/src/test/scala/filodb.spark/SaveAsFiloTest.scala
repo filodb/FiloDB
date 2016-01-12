@@ -30,8 +30,8 @@ with Matchers with ScalaFutures {
   // Setup SQLContext and a sample DataFrame
   val conf = (new SparkConf).setMaster("local[4]")
                             .setAppName("test")
-                            .set("filodb.cassandra.keyspace", "unittest")
-                            .set("filodb.memtable.min-free-mb", "10")
+                            .set("spark.filodb.cassandra.keyspace", "unittest")
+                            .set("spark.filodb.memtable.min-free-mb", "10")
   val sc = new SparkContext(conf)
   val sql = new SQLContext(sc)
 
@@ -129,6 +129,7 @@ with Matchers with ScalaFutures {
                  save()
     val df = sql.read.format("filodb.spark").option("dataset", "test1").load()
     df.agg(sum("year")).collect().head(0) should equal (4030)
+    df.select("id", "year").limit(2).collect()   // Just to make sure row copy works
   }
 
   val jsonRows2 = Seq(

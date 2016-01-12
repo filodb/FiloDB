@@ -1,4 +1,4 @@
-package filodb.core.columnstore
+package filodb.core.store
 
 import com.typesafe.scalalogging.slf4j.StrictLogging
 import java.nio.ByteBuffer
@@ -14,12 +14,18 @@ import filodb.core.metadata.{Column, Projection}
 /**
  * A ColumnStore implementation which is entirely in memory for speed.
  * Good for testing or performance.
+ *
+ * NOTE: This implementation effectively only works on a single node.
+ * We would need, for example, a Spark-specific implementation which can
+ * know how to distribute data, or at least keep track of different nodes,
  * TODO: use thread-safe structures
  */
 class InMemoryColumnStore(implicit val ec: ExecutionContext)
 extends CachedMergingColumnStore with StrictLogging {
   import Types._
   import collection.JavaConversions._
+
+  logger.info("Starting InMemoryColumnStore...")
 
   val segmentCache = LruCache[Segment[_]](100)
 
@@ -72,11 +78,11 @@ extends CachedMergingColumnStore with StrictLogging {
 
   def readChunks[K](columns: Set[ColumnId],
                     keyRange: KeyRange[K],
-                    version: Int): Future[Seq[ChunkedData]] = Future {
+                    version: Int): Future[Seq[ChunkedData]] = {
     val chunkTree = chunkDb.getOrElse((keyRange.dataset, keyRange.partition, version),
                                       EmptyChunkTree)
     logger.debug(s"Reading chunks from columns $columns, keyRange $keyRange, version $version")
-    for { column <- columns.toSeq } yield {
+    val chunks = for { column <- columns.toSeq } yield {
       val startKey = (column, keyRange.binaryStart, 0)
       val endKey   = if (keyRange.endExclusive) { (column, keyRange.binaryEnd, 0) }
                      else                       { (column, keyRange.binaryEnd, Int.MaxValue) }
@@ -87,6 +93,7 @@ extends CachedMergingColumnStore with StrictLogging {
       }
       ChunkedData(column, chunkList)
     }
+    Future.successful(chunks)
   }
 
   def readChunkRowMaps[K](keyRange: KeyRange[K], version: Int):
@@ -104,14 +111,44 @@ extends CachedMergingColumnStore with StrictLogging {
                        version: Int,
                        partitionFilter: (PartitionKey => Boolean),
                        params: Map[String, String]): Future[Iterator[ChunkMapInfo]] = Future {
-    val parts = rowMaps.keys.filter { case (ds, partition, ver) => ds == dataset && ver == version }
-    val maps = parts.toIterator.flatMap { case key @ (_, partition, _) =>
-                 rowMaps(key).keySet.iterator.map { segId =>
-                   val (chunkIds, rowNums, nextChunkId) = rowMaps(key).get(segId)
+    val parts = rowMaps.keysIterator.filter { case (ds, partition, ver) =>
+      ds == dataset && ver == version && partitionFilter(partition) }
+    val maps = parts.flatMap { case key @ (_, partition, _) =>
+                 rowMaps(key).entrySet.iterator.map { entry =>
+                   val segId = entry.getKey
+                   val (chunkIds, rowNums, nextChunkId) = entry.getValue
                    (partition, segId, new BinaryChunkRowMap(chunkIds, rowNums, nextChunkId))
                  }
                }
     maps.toIterator
+  }
+
+  // Add an efficient scanSegments implementation here, which can avoid much of the async
+  // cruft unnecessary for in-memory stuff
+  override def scanSegments[K: SortKeyHelper](columns: Seq[Column],
+                                              dataset: TableName,
+                                              version: Int,
+                                              partitionFilter: (PartitionKey => Boolean),
+                                              params: Map[String, String]): Future[Iterator[Segment[K]]] = {
+    val helper = implicitly[SortKeyHelper[K]]
+    for { chunkmapsIt <- scanChunkRowMaps(dataset, version, partitionFilter, params) }
+    yield {
+      chunkmapsIt.map { case (partition, segId, binChunkRowMap) =>
+        val decodedSegId = helper.fromBytes(segId)
+        val keyRange = KeyRange(dataset, partition, decodedSegId, decodedSegId)
+        val segment = new RowReaderSegment(keyRange, binChunkRowMap, columns)
+        for { column <- columns } {
+          val colName = column.name
+          val chunkTree = chunkDb.getOrElse((dataset, partition, version), EmptyChunkTree)
+          chunkTree.subMap((colName, segId, 0), true, (colName, segId, Int.MaxValue), true)
+                   .entrySet.iterator.foreach { entry =>
+            val (_, _, chunkId) = entry.getKey
+            segment.addChunk(chunkId, colName, entry.getValue)
+          }
+        }
+        segment
+      }
+    }
   }
 
   def shutdown(): Unit = {}

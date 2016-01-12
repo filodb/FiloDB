@@ -10,7 +10,7 @@ import scala.concurrent.Await
 import scala.concurrent.duration._
 
 import filodb.core._
-import filodb.core.columnstore.{RowReaderSegment, SegmentSpec}
+import filodb.core.store.{RowReaderSegment, SegmentSpec}
 import filodb.core.metadata.{Column, Dataset}
 import filodb.cassandra.AllTablesTest
 

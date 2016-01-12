@@ -1,4 +1,4 @@
-package filodb.core.columnstore
+package filodb.core.store
 
 import filodb.core._
 import java.nio.ByteBuffer
