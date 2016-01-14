@@ -20,4 +20,16 @@ class TypesSpec extends FunSpec with Matchers {
       hex"0080" should be > hex"007f"
     }
   }
+
+  describe("KeyTypes") {
+    it("should serialize and unserialize CompositeKeyTypes correctly") {
+      val types = Seq(IntKeyType, StringKeyType)
+      val compositeType = CompositeKeyType(types)
+
+      val orig1 = Seq(1001, "AdamAndEve")
+      compositeType.fromBytes(compositeType.toBytes(orig1)) should equal (orig1)
+    }
+
+    it("should binary compare Int and Long key types correctly") (pending)
+  }
 }
