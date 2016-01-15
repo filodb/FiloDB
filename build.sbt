@@ -72,8 +72,6 @@ lazy val coreDeps = Seq(
   "joda-time"             % "joda-time"         % "2.2",
   "org.joda"              % "joda-convert"      % "1.2",
   "io.spray"             %% "spray-caching"     % "1.3.2",
-  "org.mapdb"             % "mapdb"             % "1.0.6",
-  "org.velvia"           %% "msgpack4s"         % "0.5.1",
   "net.ceedubs"          %% "ficus"             % "1.0.1",
   "org.scodec"           %% "scodec-bits"       % "1.0.10",
   "com.nativelibs4java"  %% "scalaxy-loops"     % "0.3.3" % "provided",
