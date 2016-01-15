@@ -2,7 +2,9 @@ package filodb.core.metadata
 
 import com.typesafe.scalalogging.slf4j.StrictLogging
 import enumeratum.{Enum, EnumEntry}
+import scala.util.{Failure, Success, Try}
 
+import filodb.core.{CompositeKeyType, KeyType}
 import filodb.core.Types._
 
 /**
@@ -74,6 +76,19 @@ object Column extends StrictLogging {
 
   type Schema = Map[String, Column]
   val EmptySchema = Map.empty[String, Column]
+
+  /**
+   * Converts a list of columns to the appropriate KeyType.
+   * @returns a Try[KeyType], with failures possibly being UnsupportedKeyType
+   */
+  def columnsToKeyType(columns: Seq[Column]): Try[KeyType] = columns match {
+    case Nil      => Failure(new IllegalArgumentException("Empty columns supplied"))
+    case Seq(col) => KeyType.getKeyType(col.columnType.clazz)
+    case cols: Seq[Column] =>
+      val keyTypes = cols.map { col => KeyType.getKeyType(col.columnType.clazz) }
+                         .map { triedType => triedType.getOrElse(return triedType) }
+      Success(CompositeKeyType(keyTypes))
+  }
 
   /**
    * Fold function used to compute a schema up from a list of Column instances.

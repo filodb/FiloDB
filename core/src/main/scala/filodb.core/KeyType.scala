@@ -2,6 +2,9 @@ package filodb.core
 
 import org.velvia.filo.RowReader
 import org.velvia.filo.RowReader._
+import scala.language.postfixOps
+import scala.util.{Failure, Try}
+import scalaxy.loops._
 import scodec.bits.{ByteOrdering, ByteVector}
 
 import scala.math.Ordering
@@ -23,20 +26,47 @@ trait KeyType {
 
   def fromBytes(bytes: ByteVector): T
 
-  // Extracts the type T from a RowReader
-  def getKeyFunc(columnNumbers: Seq[Int]): RowReader => T
+  /**
+   * Extracts the type T from a RowReader.
+   * @params columnNumbers an array of column numbers to extract from.  Sorry, must be
+   *                       an array for speed.
+   * @throws a NullKeyValue exception if nulls are found.  Nulls cannot be injected into
+   *         keys.
+   */
+  def getKeyFunc(columnNumbers: Array[Int]): RowReader => T
 
   def size(key: T): Int
 }
 
 object KeyType {
-  val ValidSortClasses = Seq(classOf[Long], classOf[Int], classOf[Double], classOf[String])
+  val ClazzToKeyType = Map[Class[_], SingleKeyType](
+    classOf[Long]   -> LongKeyType,
+    classOf[Int]    -> IntKeyType,
+    classOf[Double] -> DoubleKeyType,
+    classOf[String] -> StringKeyType
+  )
+
+  def getKeyType(clazz: Class[_]): Try[SingleKeyType] =
+    ClazzToKeyType.get(clazz)
+                  .map(kt => util.Success(kt))
+                  .getOrElse(Failure(UnsupportedKeyType(clazz)))
 }
 
+import scala.language.existentials
+case class NullKeyValue(colIndex: Int) extends Exception(s"Null partition value for col index $colIndex")
+case class UnsupportedKeyType(clazz: Class[_]) extends Exception(s"Type $clazz is not supported for keys")
+
 abstract class SingleKeyType extends KeyType {
-  def getKeyFunc(columnNumbers: Seq[Int]): RowReader => T = {
-    require(columnNumbers.length == 1)
-    extractor.getField(_, columnNumbers.head)
+  def getKeyFunc(columnNumbers: Array[Int]): RowReader => T = {
+    require(columnNumbers.size == 1)
+    val columnNum = columnNumbers(0)
+    (r: RowReader) => {
+      if (r.notNull(columnNum)) {
+        extractor.getField(r, columnNum)
+      } else {
+        throw NullKeyValue(columnNum)
+      }
+    }
   }
 
   def extractor: TypedFieldExtractor[T]
@@ -44,20 +74,17 @@ abstract class SingleKeyType extends KeyType {
 
 case class CompositeOrdering(atomTypes: Seq[SingleKeyType]) extends Ordering[Seq[_]] {
   override def compare(x: Seq[_], y: Seq[_]): Int = {
-    import scala.math.Ordered.orderingToOrdered
     if (x.length == y.length && x.length == atomTypes.length) {
-      (0 to x.length).foreach { i =>
+      for { i <- 0 until x.length optimized } {
         val keyType = atomTypes(i)
-        implicit val ordering = keyType.ordering
-        val xi = x(i).asInstanceOf[keyType.T]
-        val yi = y(i).asInstanceOf[keyType.T]
-        val res = xi compare yi
-        if (res != 0) res
+        val res = keyType.ordering.compare(x(i).asInstanceOf[keyType.T],
+                                           y(i).asInstanceOf[keyType.T])
+        if (res != 0) return res
       }
+      return 0
     }
     throw new IllegalArgumentException("Comparing wrong composite types")
   }
-
 }
 
 /**
@@ -65,6 +92,8 @@ case class CompositeOrdering(atomTypes: Seq[SingleKeyType]) extends Ordering[Seq
  * in front of each element.
  * TODO(velvia): handle components which are more than 256 bytes long...
  * TODO(velvia): Think of a way to serialize such that keys are somewhat binary comparable
+ * TODO(velvia): Optimize performance.  Use Metal vector types, custom generated classes,
+ *               anything except terribly inefficient Seq[_]
  */
 case class CompositeKeyType(atomTypes: Seq[SingleKeyType]) extends KeyType {
   type T = Seq[_]
@@ -90,11 +119,22 @@ case class CompositeKeyType(atomTypes: Seq[SingleKeyType]) extends KeyType {
     }
   }
 
-  override def getKeyFunc(sortColNums: Seq[Int]): (RowReader) => Seq[_] = {
-    def toSeq(rowReader: RowReader): Seq[_] = atomTypes.
-      zip(sortColNums).map { case (t, colNum) =>
-      t.extractor.getField(rowReader, colNum)
+  override def getKeyFunc(columnNumbers: Array[Int]): (RowReader) => Seq[_] = {
+    require(columnNumbers.size == atomTypes.length)
+
+    def getValue(rowReader: RowReader, keyType: SingleKeyType, columnNo: Int): Any =
+      if (rowReader.notNull(columnNo)) {
+        keyType.extractor.getField(rowReader, columnNo)
+      } else {
+        throw NullKeyValue(columnNo)
+      }
+
+    def toSeq(rowReader: RowReader): Seq[_] = {
+      (0 until columnNumbers.size).map { i =>
+        getValue(rowReader, atomTypes(i), columnNumbers(i))
+      }
     }
+
     toSeq
   }
 

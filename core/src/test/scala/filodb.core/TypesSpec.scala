@@ -1,6 +1,8 @@
 package filodb.core
 
+import org.velvia.filo.TupleRowReader
 import scodec.bits._
+
 import org.scalatest.{FunSpec, Matchers}
 
 class TypesSpec extends FunSpec with Matchers {
@@ -28,6 +30,31 @@ class TypesSpec extends FunSpec with Matchers {
 
       val orig1 = Seq(1001, "AdamAndEve")
       compositeType.fromBytes(compositeType.toBytes(orig1)) should equal (orig1)
+    }
+
+    it("should compare CompositeKeyTypes using ordering trait") {
+      val types = Seq(IntKeyType, StringKeyType)
+      val compositeType = CompositeKeyType(types)
+
+      val orig1 = Seq(1001, "AdamAndEve")
+      val orig2 = Seq(1001, "Noah")
+      implicit val ordering = compositeType.ordering
+      assert(orig1 < orig2)
+    }
+
+    it("should check for null keys with getKeyFunc") {
+      val intKeyFunc = IntKeyType.getKeyFunc(Array(1))
+      val row1 = TupleRowReader((Some("ape"), None))
+      intercept[NullKeyValue] {
+        intKeyFunc(row1)
+      }
+
+      val types = Seq[StringKeyType, IntKeyType]
+      val compositeType = CompositeKeyType(types)
+      val compositeKeyFunc = compositeType.getKeyFunc(Array(0, 1))
+      intercept[NullKeyValue] {
+        compositeKeyFunc(row1)
+      }
     }
 
     it("should binary compare Int and Long key types correctly") (pending)

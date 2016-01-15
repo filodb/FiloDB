@@ -42,11 +42,11 @@ object Types {
 
 // A range of keys, used for describing ingest rows as well as queries
 // TODO: this should really be based on a Projection or RichProjection, not dataset.
-case class KeyRange[K : SortKeyHelper](dataset: Types.TableName,
-                                       partition: Types.PartitionKey,
-                                       start: K, end: K,
-                                       endExclusive: Boolean = true) {
-  val helper = implicitly[SortKeyHelper[K]]
-  def binaryStart: ByteVector = helper.toBytes(start)
-  def binaryEnd: ByteVector = helper.toBytes(end)
+case class KeyRange[+K](dataset: Types.TableName,
+                        partition: Types.PartitionKey,
+                        start: K, end: K,
+                        endExclusive: Boolean = true)
+                       (implicit keyType: KeyType { type T = K }) {
+  def binaryStart: ByteVector = keyType.toBytes(start)
+  def binaryEnd: ByteVector = keyType.toBytes(end)
 }
