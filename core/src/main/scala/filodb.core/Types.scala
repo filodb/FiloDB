@@ -19,10 +19,7 @@ object Types {
   type TableName = String
   type ChunkID = Int    // Each chunk is identified by segmentID and a long timestamp
 
-  type SortOrder = Set[(ColumnId, Boolean)]
-
-  // TODO: support composite partition keys?
-  type PartitionKey = String
+  type BinaryPartition = ByteVector
 
   // TODO: contribute this Ordering back to ByteVector
   // Assumes unsigned comparison, big endian, meaning that the first byte in a vector
@@ -41,12 +38,11 @@ object Types {
 }
 
 // A range of keys, used for describing ingest rows as well as queries
-// TODO: this should really be based on a Projection or RichProjection, not dataset.
-case class KeyRange[+K](dataset: Types.TableName,
-                        partition: Types.PartitionKey,
-                        start: K, end: K,
-                        endExclusive: Boolean = true)
-                       (implicit keyType: KeyType { type T = K }) {
-  def binaryStart: ByteVector = keyType.toBytes(start)
-  def binaryEnd: ByteVector = keyType.toBytes(end)
-}
+// Right now this describes a range of segments, not row keys.
+case class KeyRange[PK, SK](partition: PK,
+                            start: SK, end: SK,
+                            endExclusive: Boolean = true)
+
+case class BinaryKeyRange(partition: Types.BinaryPartition,
+                          start: Types.SegmentId, end: Types.SegmentId,
+                          endExclusive: Boolean = true)

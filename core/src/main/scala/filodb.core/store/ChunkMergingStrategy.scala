@@ -30,9 +30,9 @@ trait ChunkMergingStrategy {
    *
    * @param keyRange the keyRange of the segment to read.  It's important this corresponds to one segment.
    */
-  def readSegmentForCache[K](projection: RichProjection[K],
-                             keyRange: KeyRange[K],
-                             version: Int): Future[Segment[K]]
+  def readSegmentForCache(projection: RichProjection,
+                          version: Int)(
+                          segInfo: SegmentInfo[projection.PK, projection.SK]): Future[Segment]
 
   /**
    * Merges an existing segment cached using readSegmentForCache with a new partial segment to be inserted.
@@ -41,13 +41,12 @@ trait ChunkMergingStrategy {
    * @return a merged Segment ready to be flushed to disk.  This typically will only include chunks that need
    *          to be updated or written to disk.
    */
-  def mergeSegments[K: SortKeyHelper](oldSegment: Segment[K],
-                                      newSegment: Segment[K]): Segment[K]
+  def mergeSegments(oldSegment: Segment, newSegment: Segment): Segment
 
   /**
    * Prunes a segment to only what needs to be cached.
    */
-  def pruneForCache[K](projection: RichProjection[K], segment: Segment[K]): Segment[K]
+  def pruneForCache(projection: RichProjection, segment: Segment): Segment
 }
 
 /**
@@ -64,54 +63,57 @@ class AppendingChunkMergingStrategy(columnStore: ColumnStore)
                                    (implicit ec: ExecutionContext)
 extends ChunkMergingStrategy with StrictLogging {
   // We only need to read back the sort column in order to merge with another segment's sort column
-  def readSegmentForCache[K](projection: RichProjection[K],
-                             keyRange: KeyRange[K],
-                             version: Int): Future[Segment[K]] = {
-    implicit val helper = projection.helper
-    columnStore.readSegments(Seq(projection.sortColumn), keyRange, version).map { iter =>
+  def readSegmentForCache(projection: RichProjection,
+                          version: Int)(
+                          segInfo: SegmentInfo[projection.PK, projection.SK]): Future[Segment] = {
+    val keyRange = KeyRange(segInfo.partition, segInfo.segment, segInfo.segment)
+    columnStore.readSegments(projection, projection.rowKeyColumns, keyRange, version).map { iter =>
       iter.toSeq.headOption match {
         case Some(firstSegment) => firstSegment
         case None =>
           logger.debug(s"No segment/ChunkRowMap found for $keyRange, creating a new one")
-          new GenericSegment(keyRange, new UpdatableChunkRowMap[K])
+          new GenericSegment(projection,
+                             new UpdatableChunkRowMap[projection.RK]()(projection.rowKeyType))(segInfo)
       }
     }
   }
 
-  def mergeSegments[K: SortKeyHelper](oldSegment: Segment[K],
-                                      newSegment: Segment[K]): Segment[K] = {
-    // NOTE: This only works for single sort keys
-    val sortKeyFunc = implicitly[SortKeyHelper[K]].getSortKeyFunc(Seq(0))
-
+  def mergeSegments(oldSegment: Segment, newSegment: Segment): Segment = {
     // One should NEVER be allowed to merge segments from different places... unless we are perhaps
     // talking about splitting and merging, but that's outside the scope of this method
-    require(oldSegment.keyRange.start == newSegment.keyRange.start,
-      s"Cannot merge segments from different keyRanges (${oldSegment.keyRange}, ${newSegment.keyRange})")
+    require(oldSegment.segInfo == newSegment.segInfo,
+      s"Cannot merge different segments: orig ${oldSegment.segInfo} != new ${newSegment.segInfo}")
 
     // How much to offset chunkIds in newSegment.  0 in newSegment == nextChunkId in oldSegment.
     val offsetChunkId = oldSegment.index.nextChunkId
+
+    // NOTE: row key columns will be read in order defined in projection.
+    // So don't use the default rowKeyFunc in projection, which is designed for ingested rows.
+    val rowKeyFunc = oldSegment.projection.rowKeyType.getKeyFunc(
+                       (0 until oldSegment.projection.rowKeyColumns.length).toArray)
 
     // Merge old ChunkRowMap with new segment's ChunkRowMap with chunkIds offset
     // NOTE: Working with a TreeMap is probably not the most efficient way to merge two sorted lists
     // since both indexes can be read in sort key order.  So, TODO: replace this with more efficient
     // sorted iterator merge.  Probably not an issue for now.
     val baseIndex = oldSegment match {
-      case g: GenericSegment[K] =>
-        g.index.asInstanceOf[UpdatableChunkRowMap[K]]
-      case rr: RowReaderSegment[K] =>
+      case g: GenericSegment =>
+        g.index.asInstanceOf[UpdatableChunkRowMap[oldSegment.projection.RK]]
+      case rr: RowReaderSegment =>
         // This should be a segment read from disk via readSegmentForCache().  Cheat assume only sort col
         val items = rr.rowChunkIterator().map { case (reader, chunkId, rowNum) =>
-          sortKeyFunc(reader) -> (chunkId -> rowNum)
+          rowKeyFunc(reader) -> (chunkId -> rowNum)
         }
-        UpdatableChunkRowMap(items.toSeq)
+        UpdatableChunkRowMap(items.toSeq)(oldSegment.projection.rowKeyType)
     }
-    val offsetNewTree = newSegment.index.asInstanceOf[UpdatableChunkRowMap[K]].
+    val offsetNewTree = newSegment.index.asInstanceOf[UpdatableChunkRowMap[oldSegment.projection.RK]].
                                    index.mapValues { case (chunkId, rowNum) =>
                                      (chunkId + offsetChunkId, rowNum)
                                    }
 
     // Translate chunkIds from newSegment to (oldSegment.nextChunkId + _)
-    val mergedSegment = new GenericSegment(oldSegment.keyRange, baseIndex ++ offsetNewTree)
+    val mergedSegment = new GenericSegment(oldSegment.projection,
+                                           baseIndex ++ offsetNewTree)(oldSegment.segInfo)
     newSegment.getChunks
               .foreach { case (column, chunkId, chunk) =>
                 mergedSegment.addChunk(chunkId + offsetChunkId, column, chunk)
@@ -120,18 +122,18 @@ extends ChunkMergingStrategy with StrictLogging {
     mergedSegment
   }
 
-  // We only need to store the sort column
-  def pruneForCache[K](projection: RichProjection[K], segment: Segment[K]): Segment[K] = {
-    val sortColumn = projection.sortColumn.name
-    if (segment.getColumns == Set(sortColumn)) {
+  // We only need to store the row key columns
+  def pruneForCache(projection: RichProjection, segment: Segment): Segment = {
+    val rowKeyColumns = projection.projection.keyColIds
+    if (segment.getColumns == Set(rowKeyColumns)) {
       logger.trace(s"pruneForcache: segment only has ${segment.getColumns}, not pruning")
       segment
     } else {
-      val prunedSeg = new GenericSegment(segment.keyRange, segment.index)
+      val prunedSeg = new GenericSegment(segment.projection, segment.index)(segment.segInfo)
       segment.getChunks
-             .filter { case (column, chunkId, chunk) => column == sortColumn }
-             .foreach { case (_, chunkId, chunk) =>
-        prunedSeg.addChunk(chunkId, sortColumn, chunk)
+             .filter { case (column, chunkId, chunk) => rowKeyColumns contains column }
+             .foreach { case (column, chunkId, chunk) =>
+        prunedSeg.addChunk(chunkId, column, chunk)
       }
       logger.trace(s"Pruned segment: $prunedSeg")
       prunedSeg

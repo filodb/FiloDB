@@ -3,13 +3,13 @@ package filodb.core.metadata
 import org.velvia.filo.RowReader
 import scala.util.{Try, Success, Failure}
 
-import filodb.core.KeyType
+import filodb.core.{KeyType, KeyRange, BinaryKeyRange}
 import filodb.core.Types._
 
 /**
  * A Projection defines one particular view of a dataset, designed to be optimized for a particular query.
  * It usually defines a sort order and subset of the columns.
- * Within a partition, **key columns** define a unique primary key for each record.
+ * Within a partition, **row key columns** define a unique primary key for each row.
  * Records/rows are grouped by the **segment key** into segments.
  * Projections are sorted by the **segment key**.
  *
@@ -23,7 +23,7 @@ case class Projection(id: Int,
                       segmentColId: ColumnId,
                       reverse: Boolean = false,
                       // Nil columns means all columns
-                      // Must include the keyColumns and segmentColumn.
+                      // Must include the rowKeyColumns and segmentColumn.
                       columns: Seq[ColumnId] = Nil)
 
 /**
@@ -37,29 +37,39 @@ case class RichProjection(projection: Projection,
                           segmentColumn: Column,
                           segmentColIndex: Int,
                           segmentType: KeyType,
-                          keyColumns: Seq[Column],
-                          keyColIndices: Seq[Int],
-                          keyType: KeyType,
+                          rowKeyColumns: Seq[Column],
+                          rowKeyColIndices: Seq[Int],
+                          rowKeyType: KeyType,
                           partitionColumns: Seq[Column],
                           partitionColIndices: Seq[Int],
                           partitionType: KeyType) {
-  def datasetName = projection.dataset
+  type SK = segmentType.T
+  type RK = rowKeyType.T
+  type PK = partitionType.T
 
-  def segmentKeyFunc: RowReader => segmentType.T =
+  def datasetName: String = projection.dataset
+
+  def segmentKeyFunc: RowReader => SK =
     segmentType.getKeyFunc(Array(segmentColIndex))
 
-  def keyKeyFunc: RowReader => keyType.T =
-    keyType.getKeyFunc(keyColIndices.toArray)
+  def rowKeyFunc: RowReader => RK =
+    rowKeyType.getKeyFunc(rowKeyColIndices.toArray)
 
   // Returns the partition key function, checking to see if a default partition key
   // should be returned.
   // TODO(velvia): get rid of default partition key when computed columns are introduced.
-  def partitionKeyFunc: RowReader => partitionType.T =
+  def partitionKeyFunc: RowReader => PK =
     if (dataset.partitionColumns == Seq(Dataset.DefaultPartitionColumn)) {
-      (row: RowReader) => Dataset.DefaultPartitionKey.asInstanceOf[partitionType.T]
+      (row: RowReader) => Dataset.DefaultPartitionKey.asInstanceOf[PK]
     } else {
       partitionType.getKeyFunc(partitionColIndices.toArray)
     }
+
+  def toBinaryKeyRange[PK, SK](keyRange: KeyRange[PK, SK]): BinaryKeyRange =
+    BinaryKeyRange(partitionType.toBytes(keyRange.partition.asInstanceOf[partitionType.T]),
+                   segmentType.toBytes(keyRange.start.asInstanceOf[segmentType.T]),
+                   segmentType.toBytes(keyRange.end.asInstanceOf[segmentType.T]),
+                   keyRange.endExclusive)
 }
 
 object RichProjection {
@@ -91,10 +101,10 @@ object RichProjection {
       return fail(s"Segment column ${normProjection.segmentColId} not in columns $richColumns"))
     val segmentColumn = richColumns(segmentColIndex)
 
-    val keyColIndices = normProjection.keyColIds.map { colId =>
+    val rowKeyColIndices = normProjection.keyColIds.map { colId =>
       idToIndex.getOrElse(colId, return fail(s"Key column $colId not in columns $richColumns"))
     }
-    val keyColumns = keyColIndices.map(richColumns)
+    val rowKeyColumns = rowKeyColIndices.map(richColumns)
 
     val partitionColIndices = dataset.partitionColumns.map { colId =>
       idToIndex.getOrElse(colId, return fail(s"Partition column $colId not in columns $richColumns"))
@@ -102,11 +112,11 @@ object RichProjection {
     val partitionColumns = partitionColIndices.map(richColumns)
 
     for { segmentType <- KeyType.getKeyType(segmentColumn.columnType.clazz)
-          keyType     <- Column.columnsToKeyType(keyColumns)
+          rowKeyType     <- Column.columnsToKeyType(rowKeyColumns)
           partitionType <- Column.columnsToKeyType(partitionColumns) } yield {
       RichProjection(normProjection, dataset, richColumns,
                      segmentColumn, segmentColIndex, segmentType,
-                     keyColumns, keyColIndices, keyType,
+                     rowKeyColumns, rowKeyColIndices, rowKeyType,
                      partitionColumns, partitionColIndices, partitionType)
     }
   }

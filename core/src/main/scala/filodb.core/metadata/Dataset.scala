@@ -30,15 +30,11 @@ case class Dataset(name: String,
  * Config options for a table define operational details for the column store and memtable.
  * Every option must have a default!
  */
-case class DatasetOptions(chunkSize: Int,
-                          segmentSize: String,
-                          defaultPartitionKey: Option[PartitionKey] = None) {
+case class DatasetOptions(chunkSize: Int) {
   override def toString: String = {
     val map = Map(
-                   "chunkSize" -> chunkSize,
-                   "segmentSize" -> segmentSize
-                 ) ++
-              defaultPartitionKey.map(k => Map("defaultPartitionKey" -> k)).getOrElse(Map.empty)
+                   "chunkSize" -> chunkSize
+                 )
     val config = ConfigFactory.parseMap(map.asJava)
     config.root.render(ConfigRenderOptions.concise)
   }
@@ -47,9 +43,7 @@ case class DatasetOptions(chunkSize: Int,
 object DatasetOptions {
   def fromString(s: String): DatasetOptions = {
     val config = ConfigFactory.parseString(s)
-    DatasetOptions(chunkSize = config.getInt("chunkSize"),
-                   segmentSize = config.getString("segmentSize"),
-                   defaultPartitionKey = config.as[Option[PartitionKey]]("defaultPartitionKey"))
+    DatasetOptions(chunkSize = config.getInt("chunkSize"))
   }
 }
 
@@ -60,10 +54,9 @@ object Dataset {
   // If a partitioning column is not defined then this refers to a single global partition, and
   // the dataset must fit in one node.
   val DefaultPartitionColumn = ":single"
-  val DefaultPartitionKey: PartitionKey = "/0"
+  val DefaultPartitionKey = "/0"
 
-  val DefaultOptions = DatasetOptions(chunkSize = 1000,
-                                      segmentSize = "10000")
+  val DefaultOptions = DatasetOptions(chunkSize = 1000)
 
   /**
    * Creates a new Dataset with a single superprojection with a single key column and

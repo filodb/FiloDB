@@ -6,12 +6,12 @@ import java.util.concurrent.{Executors, ScheduledFuture, TimeUnit}
 import java.util.TreeMap
 import net.ceedubs.ficus.Ficus._
 import org.velvia.filo.{VectorInfo, RowToVectorBuilder, RowReader, FiloRowReader, FastFiloRowReader}
-import scala.collection.mutable.{ArrayBuffer, HashMap}
+import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.duration.FiniteDuration
 import scala.math.Ordered
 import scalaxy.loops._
 
-import filodb.core.{KeyRange, SortKeyHelper}
+import filodb.core.KeyRange
 import filodb.core.Types._
 import filodb.core.store.{RowWriterSegment, Segment}
 import filodb.core.metadata.{Column, Dataset, RichProjection}
@@ -36,19 +36,26 @@ import filodb.core.metadata.{Column, Dataset, RichProjection}
  *   }
  * }}}
  */
-class FiloMemTable[K](val projection: RichProjection[K], config: Config) extends MemTable[K] {
+class FiloMemTable(val projection: RichProjection, config: Config) extends MemTable {
   import RowReader._
   import collection.JavaConverters._
 
   val chunkSize = config.as[Option[Int]]("memtable.filo.chunksize").getOrElse(1000)
   val flushInterval = config.as[FiniteDuration]("memtable.flush.interval")
 
-  // From sort key K to a Long: upper 32-bits = chunk index, lower 32 bits = row index
-  type KeyMap = TreeMap[K, Long]
+  type PK = projection.partitionType.T
+  type RK = projection.rowKeyType.T
+  type SK = projection.segmentType.T
+
+  // From row key K to a Long: upper 32-bits = chunk index, lower 32 bits = row index
+  type KeyMap = TreeMap[RK, Long]
 
   private val chunks = new ArrayBuffer[Array[ByteBuffer]]
   private val readers = new ArrayBuffer[FiloRowReader]
-  private val partKeyMap = new HashMap[PartitionKey, KeyMap]
+
+  private implicit val partOrdering = projection.partitionType.ordering
+  private implicit val partSegOrdering = projection.segmentType.ordering
+  private val partSegKeyMap = new TreeMap[(PK, SK), KeyMap](Ordering[(PK, SK)])
 
   private val filoSchema = projection.columns.map {
     case Column(name, _, _, colType, serializer, false, false) =>
@@ -65,13 +72,18 @@ class FiloMemTable[K](val projection: RichProjection[K], config: Config) extends
   private val scheduler = Executors.newSingleThreadScheduledExecutor()
   private var flushTask: Option[ScheduledFuture[_]] = None
 
-  private def getKeyMap(partition: PartitionKey): KeyMap = {
-    partKeyMap.getOrElse(partition, {
-      // Only hit this if partition isn't defined, so save expensive synchronization for initial cases only
-      partKeyMap.synchronized {
-        partKeyMap.getOrElseUpdate(partition, new KeyMap(projection.helper.ordering))
-      }
-    })
+  // NOTE: No synchronization required, because MemTables are used within an actor.
+  // See InMemoryMetaStore for a thread-safe design
+  private def getKeyMap(partition: PK, segment: SK): KeyMap = {
+    partSegKeyMap.get((partition, segment)) match {
+      //scalastyle:off
+      case null =>
+        //scalastyle:on
+        val newMap = new KeyMap(projection.rowKeyType.ordering)
+        partSegKeyMap.put((partition, segment), newMap)
+        newMap
+      case k: KeyMap => k
+    }
   }
 
   private def chunkRowIdToLong(chunkIndex: Int, rowNo: Int): Long =
@@ -97,7 +109,7 @@ class FiloMemTable[K](val projection: RichProjection[K], config: Config) extends
   }
 
   // Converts rows to chunks, merging with previous chunks as needed, and invokes callbacks
-  // Also updates the partKeyMap which maps every sort key to its chunk ID and row index
+  // Also updates the partSegKeyMap which maps every sort key to its chunk ID and row index
   private def flushRowsToChunks(): Unit = synchronized {
     // VERY IMPORTANT: pass false to cancel so this task is not interrupted
     // Cancel any other scheduled tasks, if one was scheduled
@@ -115,17 +127,19 @@ class FiloMemTable[K](val projection: RichProjection[K], config: Config) extends
       readers.remove(readers.length - 1, 1)
     }
 
-    // Add new rows to builder, adding to partKeyMap in the meantime
+    // Add new rows to builder, adding to partSegKeyMap in the meantime
     val baseLength = builder.builders.head.length   // Nonzero only if partial chunks added
     val rowsToAdd = Math.min(chunkSize - baseLength, tempRows.length)
     val nextChunkIndex = chunks.length
-    val sortKeyFunc = projection.sortKeyFunc
+    val rowKeyFunc = projection.rowKeyFunc
+    val partitionFunc = projection.partitionKeyFunc
+    val segmentKeyFunc = projection.segmentKeyFunc
 
     for { i <- 0 until rowsToAdd optimized } {
       val row = tempRows(i)
       builder.addRow(row)
-      val keyMap = getKeyMap(projection.partitionFunc(row))
-      keyMap.put(sortKeyFunc(row), chunkRowIdToLong(nextChunkIndex, baseLength + i))
+      val keyMap = getKeyMap(partitionFunc(row), segmentKeyFunc(row))
+      keyMap.put(rowKeyFunc(row), chunkRowIdToLong(nextChunkIndex, baseLength + i))
     }
 
     // Add chunks
@@ -174,23 +188,20 @@ class FiloMemTable[K](val projection: RichProjection[K], config: Config) extends
     reader
   }
 
-  def readRows(keyRange: KeyRange[K]): Iterator[RowReader] = {
-    val keyMap = getKeyMap(keyRange.partition)
-    keyMap.subMap(keyRange.start, true, keyRange.end, !keyRange.endExclusive)
-          .values.iterator.asScala
+  def readRows(keyRange: KeyRange[projection.PK, projection.SK]): Iterator[RowReader] = {
+    val keyMap = getKeyMap(keyRange.partition, keyRange.start)
+    keyMap.values.iterator.asScala
           .map(getRowReader)
   }
 
-  def readAllRows(): Iterator[(PartitionKey, K, RowReader)] = {
-    partKeyMap.keys.toIterator.flatMap { partition =>
-      getKeyMap(partition).entrySet.iterator.asScala
+  def readAllRows(): Iterator[(projection.PK, projection.SK, projection.RK, RowReader)] = {
+    partSegKeyMap.keySet.iterator.asScala.flatMap { case (partition, segment) =>
+      getKeyMap(partition, segment).entrySet.iterator.asScala
         .map { entry =>
-          (partition, entry.getKey, getRowReader(entry.getValue))
+          (partition, segment, entry.getKey, getRowReader(entry.getValue))
         }
     }
   }
-
-  def removeRows(keyRange: KeyRange[K]): Unit = ???
 
   // NOTE: gives number of rows committed into chunks, not # of unique rows, because this is supposed
   // to indicate amount of memory used
@@ -207,7 +218,7 @@ class FiloMemTable[K](val projection: RichProjection[K], config: Config) extends
     flushTask = None
     chunks.clear
     readers.clear
-    partKeyMap.clear
+    partSegKeyMap.clear
     tempRows.clear
     callbacks.clear
     builder.reset()

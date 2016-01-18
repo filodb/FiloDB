@@ -5,7 +5,7 @@ import org.velvia.filo.RowReader
 import scala.concurrent.{ExecutionContext, Future}
 
 import filodb.core._
-import filodb.core.store.{ColumnStore, RowWriterSegment, Segment}
+import filodb.core.store.{ColumnStore, RowWriterSegment, Segment, SegmentInfo}
 import filodb.core.metadata.{Dataset, Column, RichProjection}
 
 /**
@@ -34,13 +34,13 @@ trait Reprojector {
    *
    * @return a Future[Seq[String]], representing info from individual segment flushes.
    */
-  def reproject[K](memTable: MemTable[K], version: Int): Future[Seq[String]]
+  def reproject(memTable: MemTable, version: Int): Future[Seq[String]]
 
   /**
    * A simple function that reads rows out of a memTable and converts them to segments.
    * Used by reproject(), separated out for ease of testing.
    */
-  def toSegments[K](memTable: MemTable[K]): Iterator[Segment[K]]
+  def toSegments(memTable: MemTable): Iterator[Segment]
 }
 
 /**
@@ -56,39 +56,39 @@ class DefaultReprojector(columnStore: ColumnStore)
   // PERF/TODO: Maybe we should pass in an Iterator[RowReader], and extract partition and sort keys
   // out.  Heck we could create a custom FiloRowReader which has methods to extract this out.
   // Might be faster than creating a Tuple3 for every row... or not, for complex sort and partition keys
-  def toSegments[K](memTable: MemTable[K]): Iterator[Segment[K]] = {
-    val dataset = memTable.projection.dataset
-    implicit val helper = memTable.projection.helper
-    val rows = memTable.readAllRows()
-    rows.sortedGroupBy { case (partition, sortKey, row) =>
+  def toSegments(memTable: MemTable): Iterator[Segment] = {
+    val projection = memTable.projection
+    val dataset = projection.dataset
+    memTable.readAllRows().sortedGroupBy { case (partition, segment, rowKey, row) =>
       // lazy grouping of partition/segment from the sortKey
-      (partition, helper.getSegment(sortKey))
-    }.map { case ((partition, (segStart, segUntil)), segmentRowsIt) =>
+      (partition, segment)
+    }.map { case ((partition, segmentKey), segmentRowsIt) =>
       // For each segment grouping of rows... set up a Segment
-      val keyRange = KeyRange(dataset.name, partition, segStart, segStart)
-      val segment = new RowWriterSegment(keyRange, memTable.projection.columns)
+      val segInfo = SegmentInfo(partition.asInstanceOf[projection.PK],
+                                segmentKey.asInstanceOf[projection.SK])
+      val segment = new RowWriterSegment(projection, projection.columns)(segInfo)
       logger.debug(s"Created new segment $segment for encoding...")
 
       // Group rows into chunk sized bytes and add to segment
       // NOTE: because RowReaders could be mutable, we need to keep this a pure Iterator.  Turns out
       // this is also more efficient than Iterator.grouped
       while (segmentRowsIt.nonEmpty) {
-        segment.addRowsAsChunk(segmentRowsIt.take(dataset.options.chunkSize))
+        segment.addRichRowsAsChunk(segmentRowsIt.take(dataset.options.chunkSize))
       }
       segment
     }
   }
 
-  def reproject[K](memTable: MemTable[K], version: Int): Future[Seq[String]] = {
+  def reproject(memTable: MemTable, version: Int): Future[Seq[String]] = {
     val projection = memTable.projection
-    val datasetName = projection.dataset.name
+    val datasetName = projection.datasetName
     val segments = toSegments(memTable)
     val segmentTasks = segments.map { segment =>
       for { resp <- columnStore.appendSegment(projection, segment, version) if resp == Success }
       yield {
-        logger.info(s"Finished merging segment ${segment.keyRange}, version $version...")
+        logger.info(s"Finished merging segment ${segment.segInfo}, version $version...")
         // Return useful info about each successful reprojection
-        (segment.keyRange.partition, segment.keyRange.start).toString
+        segment.segInfo.toString
       }
     }
     logger.info(s"Starting reprojection for dataset $datasetName, version $version")

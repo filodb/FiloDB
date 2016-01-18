@@ -6,6 +6,7 @@ import scala.collection.immutable.{SortedMap, TreeMap}
 import scala.collection.mutable.{ArrayBuffer, HashMap}
 
 import filodb.core._
+import filodb.core.metadata.RichProjection
 
 /**
  * A ChunkRowMap stores a sorted index that maps sort keys to (chunkID, row #) -- basically the
@@ -36,10 +37,10 @@ trait ChunkRowMap {
  * Used during the columnar chunk flush process to quickly update a rowIndex, and merge it with what exists
  * on disk already
  */
-class UpdatableChunkRowMap[K: SortKeyHelper] extends ChunkRowMap {
+class UpdatableChunkRowMap[K](implicit val keyType: KeyType { type T = K }) extends ChunkRowMap {
   import filodb.core.Types._
 
-  implicit val ordering = implicitly[SortKeyHelper[K]].ordering
+  implicit val ordering = keyType.ordering
   var index = TreeMap[K, (ChunkID, Int)]()
   var nextChunkId: ChunkID = 0
 
@@ -76,7 +77,8 @@ class UpdatableChunkRowMap[K: SortKeyHelper] extends ChunkRowMap {
 object UpdatableChunkRowMap {
   import filodb.core.Types._
 
-  def apply[K: SortKeyHelper](items: Seq[(K, (ChunkID, Int))]): UpdatableChunkRowMap[K] =
+  def apply[K](items: Seq[(K, (ChunkID, Int))])
+              (implicit keyType: KeyType { type T = K }): UpdatableChunkRowMap[K] =
     (new UpdatableChunkRowMap[K]) ++ items
 }
 

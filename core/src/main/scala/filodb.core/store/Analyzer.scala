@@ -66,11 +66,10 @@ object Analyzer {
     var rowsInSegment: Histogram = Histogram.empty
     var chunksInSegment: Histogram = Histogram.empty
     var segmentsInPartition: Histogram = Histogram.empty
-    val partitionSegments = (new collection.mutable.HashMap[PartitionKey, Int]).withDefaultValue(0)
+    val partitionSegments = (new collection.mutable.HashMap[BinaryPartition, Int]).withDefaultValue(0)
 
     for { param <- cs.getScanSplits(dataset)
-          rowmaps = Await.result(cs.scanChunkRowMaps(dataset, version, (p: PartitionKey) => true,
-                                                     params = param), 5.minutes)
+          rowmaps = Await.result(cs.scanChunkRowMaps(dataset, version, param), 5.minutes)
           (partKey, _, rowmap) <- rowmaps } yield {
       // Figure out # chunks and rows per segment
       val numRows = rowmap.chunkIds.length
