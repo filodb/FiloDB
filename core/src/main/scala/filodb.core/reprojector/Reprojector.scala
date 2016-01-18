@@ -64,8 +64,7 @@ class DefaultReprojector(columnStore: ColumnStore)
       (partition, segment)
     }.map { case ((partition, segmentKey), segmentRowsIt) =>
       // For each segment grouping of rows... set up a Segment
-      val segInfo = SegmentInfo(partition.asInstanceOf[projection.PK],
-                                segmentKey.asInstanceOf[projection.SK])
+      val segInfo = SegmentInfo(partition, segmentKey).basedOn(projection)
       val segment = new RowWriterSegment(projection, projection.columns)(segInfo)
       logger.debug(s"Created new segment $segment for encoding...")
 

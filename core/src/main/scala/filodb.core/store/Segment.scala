@@ -11,8 +11,18 @@ import filodb.core.Types._
 import filodb.core.metadata.{Column, RichProjection}
 
 //scalastyle:off
-case class SegmentInfo[+PK, +SK](partition: PK, segment: SK)
+case class SegmentInfo[+PK, +SK](partition: PK, segment: SK) {
 //scalastyle:on
+  /**
+   * Recast this SegmentInfo in the PK and SK types of another projection object.
+   * Be careful using this.  This is needed because dependent-path types in Scala are not that smart.
+   * If a class takes a RichProjection as a parameter, then the types of that SegmentInfo becomes
+   * tied to that class's projection parameter, and Scala does not know that the original projection
+   * object has the same types.
+   */
+  def basedOn(projection: RichProjection): SegmentInfo[projection.PK, projection.SK] =
+    this.asInstanceOf[SegmentInfo[projection.PK, projection.SK]]
+}
 
 /**
  * A Segment represents all the rows that belong to a single segment key in a given projection.
@@ -53,8 +63,7 @@ class GenericSegment private(val projection: RichProjection,
           (segInfo: SegmentInfo[projection.PK, projection.SK]) =
     this(projection, segInfo, index)
 
-  def segInfo: SegmentInfo[projection.PK, projection.SK] =
-    _segInfo.asInstanceOf[SegmentInfo[projection.PK, projection.SK]]
+  def segInfo: SegmentInfo[projection.PK, projection.SK] = _segInfo.basedOn(projection)
 
   val chunkIds = ArrayBuffer[ChunkID]()
   val chunks = new HashMap[ColumnId, HashMap[ChunkID, Chunk]]
@@ -83,7 +92,7 @@ class RowWriterSegment private(override val projection: RichProjection,
                                schema: Seq[Column])
 extends GenericSegment(projection,
                        new UpdatableChunkRowMap[projection.RK]()(projection.rowKeyType))(
-                       segInfo.asInstanceOf[SegmentInfo[projection.PK, projection.SK]]) {
+                       segInfo.basedOn(projection)) {
   def this(projection: RichProjection, schema: Seq[Column])
           (segInfo: SegmentInfo[projection.PK, projection.SK]) = this(projection, segInfo, schema)
 
@@ -140,8 +149,7 @@ class RowReaderSegment(val projection: RichProjection,
                        columns: Seq[Column]) extends Segment with StrictLogging {
   import RowReaderSegment._
 
-  def segInfo: SegmentInfo[projection.PK, projection.SK] =
-    _segInfo.asInstanceOf[SegmentInfo[projection.PK, projection.SK]]
+  def segInfo: SegmentInfo[projection.PK, projection.SK] = _segInfo.basedOn(projection)
 
   // chunks(chunkId)(columnNum)
   val chunks = Array.fill(index.nextChunkId)(new Array[ByteBuffer](columns.length))

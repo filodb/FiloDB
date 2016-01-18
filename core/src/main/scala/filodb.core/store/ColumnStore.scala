@@ -321,7 +321,7 @@ trait CachedMergingColumnStore extends ColumnStore with StrictLogging {
                               segment: Segment,
                               version: Int): Future[Segment] = {
     segmentCache((projection.datasetName, segment.binaryPartition, version, segment.segmentId)) {
-      val newSegInfo = segment.segInfo.asInstanceOf[SegmentInfo[projection.PK, projection.SK]]
+      val newSegInfo = segment.segInfo.basedOn(projection)
       mergingStrategy.readSegmentForCache(projection, version)(newSegInfo)
     }
   }
