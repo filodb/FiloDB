@@ -3,16 +3,16 @@ package filodb.core.reprojector
 import com.typesafe.config.ConfigFactory
 import org.velvia.filo.TupleRowReader
 
-import filodb.core.KeyRange
+import filodb.core._
 import filodb.core.metadata.{Column, Dataset, RichProjection}
 import filodb.core.store.SegmentSpec
 
 import org.scalatest.{FunSpec, Matchers, BeforeAndAfter}
 
 class FiloMemTableSpec extends FunSpec with Matchers with BeforeAndAfter {
-  import SegmentSpec._
+  import NamesTestData._
 
-  val keyRange = KeyRange("dataset", Dataset.DefaultPartitionKey, 0L, 10000L)
+  val keyRange = KeyRange(Dataset.DefaultPartitionKey, 0, 0)
   val config = ConfigFactory.load("application_test.conf")
 
   var resp: Int = 0
@@ -21,18 +21,15 @@ class FiloMemTableSpec extends FunSpec with Matchers with BeforeAndAfter {
     resp = -1
   }
 
-  val schemaWithPartCol = schema ++ Seq(
-    Column("league", "dataset", 0, Column.ColumnType.StringColumn)
-  )
-
   val namesWithPartCol = (0 until 50).flatMap { partNum =>
-    names.map { t => (t._1, t._2, t._3, Some(partNum.toString)) }
+    names.map { t => (t._1, t._2, t._3, t._4, Some(partNum.toString)) }
   }
 
-  val projWithPartCol = RichProjection[Long](dataset.copy(partitionColumn = "league"), schemaWithPartCol)
+  val projWithPartCol = RichProjection(largeDataset, schemaWithPartCol)
 
   val namesWithNullPartCol =
-    util.Random.shuffle(namesWithPartCol ++ namesWithPartCol.take(3).map { t => (t._1, t._2, t._3, None) })
+    util.Random.shuffle(namesWithPartCol ++ namesWithPartCol.take(3)
+               .map { t => (t._1, t._2, t._3, t._4, None) })
 
   // Turn this into a common spec for all memTables
   describe("insertRows, readRows with forced flush") {
@@ -49,7 +46,7 @@ class FiloMemTableSpec extends FunSpec with Matchers with BeforeAndAfter {
       resp should equal (2)
       mTable.numRows should be (names.length)
 
-      val outRows = mTable.readRows(keyRange)
+      val outRows = mTable.readRows(keyRange.basedOn(mTable.projection))
       outRows.toSeq.map(_.getString(0)) should equal (firstNames)
     }
 
@@ -62,7 +59,7 @@ class FiloMemTableSpec extends FunSpec with Matchers with BeforeAndAfter {
       mTable.forceCommit()
       resp should equal (3)
 
-      val outRows = mTable.readRows(keyRange)
+      val outRows = mTable.readRows(keyRange.basedOn(mTable.projection))
       outRows.toSeq.map(_.getString(0)) should equal (Seq("Khalil", "Rodney", "Ndamukong", "Jerry"))
     }
 
@@ -74,30 +71,16 @@ class FiloMemTableSpec extends FunSpec with Matchers with BeforeAndAfter {
 
       memTable.numRows should equal (50 * names.length)
 
-      val outRows = memTable.readRows(keyRange.copy(partition = "5"))
+      val outRows = memTable.readRows(keyRange.copy(partition = "5").basedOn(memTable.projection))
       outRows.toSeq.map(_.getString(0)) should equal (firstNames)
     }
 
-    it("should throw error if null partition col value and no defaultPartitionKey") {
+    it("should throw error if null partition col value") {
       val mTable = new FiloMemTable(projWithPartCol, config)
 
-      intercept[Dataset.NullPartitionValue] {
+      intercept[NullKeyValue] {
         mTable.ingestRows(namesWithNullPartCol.map(TupleRowReader)) { resp = 22 }
       }
-    }
-
-    it("should use defaultPartitionKey if one provided and null part col value") {
-      val newOptions = dataset.options.copy(defaultPartitionKey = Some("foobar"))
-      val datasetWithDefPartKey = dataset.copy(options = newOptions, partitionColumn = "league")
-      val newProj = RichProjection[Long](datasetWithDefPartKey, schemaWithPartCol)
-      val mTable = new FiloMemTable(newProj, config)
-
-      mTable.ingestRows(namesWithNullPartCol.map(TupleRowReader)) { resp = 99 }
-      mTable.forceCommit()
-      resp should equal (99)
-
-      val outRows = mTable.readRows(keyRange.copy(partition = "foobar"))
-      outRows.toSeq should have length (3)
     }
   }
 
@@ -116,7 +99,7 @@ class FiloMemTableSpec extends FunSpec with Matchers with BeforeAndAfter {
       Thread sleep 1200    // Well beyond flush interval
       resp should equal (3)
 
-      val outRows = mTable.readRows(keyRange)
+      val outRows = mTable.readRows(keyRange.basedOn(mTable.projection))
       outRows.toSeq.map(_.getString(0)) should equal (firstNames)
     }
   }

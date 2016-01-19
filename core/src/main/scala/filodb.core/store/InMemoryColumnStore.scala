@@ -126,17 +126,18 @@ extends CachedMergingColumnStore with StrictLogging {
 
   // Add an efficient scanSegments implementation here, which can avoid much of the async
   // cruft unnecessary for in-memory stuff
-  override def scanSegments[P](projection: RichProjection { type PK = P },
-                               columns: Seq[Column],
-                               version: Int,
-                               partitionFilter: (P => Boolean) = (x: P) => true,
-                               params: Map[String, String] = Map.empty): Future[Iterator[Segment]] = {
+  override def scanSegments(projection: RichProjection,
+                            columns: Seq[Column],
+                            version: Int,
+                            params: Map[String, String] = Map.empty)
+                           (partitionFilter: (projection.PK => Boolean) = (x: projection.PK) => true):
+                              Future[Iterator[Segment]] = {
     for { chunkmapsIt <- scanChunkRowMaps(projection.datasetName, version, params) }
     yield {
       chunkmapsIt.map(crm => toSegIndex(projection, crm))
                  .filter { case SegmentIndex(_, _, part, _, _) => partitionFilter(part) }
                  .map { case SegmentIndex(binPart, segId, part, segmentKey, binChunkRowMap) =>
-        val segInfo = SegmentInfo[P, projection.SK](part, segmentKey)
+        val segInfo = SegmentInfo(part, segmentKey)
         val segment = new RowReaderSegment(projection, segInfo, binChunkRowMap, columns)
         for { column <- columns } {
           val colName = column.name

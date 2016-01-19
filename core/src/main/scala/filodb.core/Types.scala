@@ -4,6 +4,8 @@ import java.nio.ByteBuffer
 import scalaxy.loops._
 import scodec.bits.ByteVector
 
+import filodb.core.metadata.RichProjection
+
 /**
  * Temporary home for new FiloDB API definitions, including column store and memtable etc.
  * Perhaps they should be moved into filodb.core.store and filodb.core.reprojector
@@ -41,7 +43,10 @@ object Types {
 // Right now this describes a range of segments, not row keys.
 case class KeyRange[PK, SK](partition: PK,
                             start: SK, end: SK,
-                            endExclusive: Boolean = true)
+                            endExclusive: Boolean = true) {
+  def basedOn(projection: RichProjection): KeyRange[projection.PK, projection.SK] =
+    this.asInstanceOf[KeyRange[projection.PK, projection.SK]]
+}
 
 case class BinaryKeyRange(partition: Types.BinaryPartition,
                           start: Types.SegmentId, end: Types.SegmentId,

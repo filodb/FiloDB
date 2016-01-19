@@ -8,9 +8,9 @@ import org.scalatest.Matchers
 
 class ChunkRowMapSpec extends FunSpec with Matchers {
   describe("UpdatableChunkRowMap") {
-    implicit val keyHelper = LongKeyHelper(10000L)
+    implicit val keyType = LongKeyType
     it("should be able to add individual key -> (chunkId, rowNum) pairs") {
-      val rowIndex = new UpdatableChunkRowMap[Long]
+      val rowIndex = new UpdatableChunkRowMap
       rowIndex.update(1001L, 0, 0)
       rowIndex.update(1002L, 0, 1)
       rowIndex.update(1002L, 1, 0)
@@ -20,7 +20,7 @@ class ChunkRowMapSpec extends FunSpec with Matchers {
     }
 
     it("should be able to create a new index from items") {
-      val rowIndex = new UpdatableChunkRowMap[Long]
+      val rowIndex = new UpdatableChunkRowMap
       val newIndex = rowIndex ++ Seq(1001L -> (0 -> 0), 1002L -> (0 -> 1), 1002L -> (1 -> 0))
       newIndex.chunkIdIterator.toSeq should equal (Seq(0, 1))
       newIndex.rowNumIterator.toSeq should equal (Seq(0, 0))
@@ -28,7 +28,7 @@ class ChunkRowMapSpec extends FunSpec with Matchers {
     }
 
     it("should be able to ++ another treeMap or sequence of items") {
-      val rowIndex = new UpdatableChunkRowMap[Long]
+      val rowIndex = new UpdatableChunkRowMap
       rowIndex.update(1001L, 0, 0)
       rowIndex.update(1002L, 0, 1)
 
@@ -40,7 +40,7 @@ class ChunkRowMapSpec extends FunSpec with Matchers {
     }
 
     it("should be able to serialize to Filo vectors") {
-      val rowIndex = new UpdatableChunkRowMap[Long]
+      val rowIndex = new UpdatableChunkRowMap
       rowIndex.update(1001L, 0, 0)
       rowIndex.update(1002L, 0, 1)
       val (chunkIdBuf, rowNumBuf) = rowIndex.serialize()

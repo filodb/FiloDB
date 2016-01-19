@@ -24,14 +24,14 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
 
   describe("dataset API") {
     it("should create a new Dataset if one not there") {
-      val dataset = Dataset("foo", "autoid")
+      val dataset = Dataset("foo", "autoid", "seg")
       metaStore.newDataset(dataset).futureValue should equal (Success)
 
       metaStore.getDataset("foo").futureValue should equal (dataset)
     }
 
     it("should return AlreadyExists if dataset already exists") {
-      val dataset = Dataset("foo", "autoid")
+      val dataset = Dataset("foo", "autoid", "seg")
       metaStore.newDataset(dataset).futureValue should equal (Success)
       metaStore.newDataset(dataset).futureValue should equal (AlreadyExists)
     }

@@ -49,7 +49,7 @@ class TypesSpec extends FunSpec with Matchers {
         intKeyFunc(row1)
       }
 
-      val types = Seq[StringKeyType, IntKeyType]
+      val types = Seq(StringKeyType, IntKeyType)
       val compositeType = CompositeKeyType(types)
       val compositeKeyFunc = compositeType.getKeyFunc(Array(0, 1))
       intercept[NullKeyValue] {

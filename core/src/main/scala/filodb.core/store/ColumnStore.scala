@@ -72,24 +72,26 @@ trait ColumnStore {
    * params:  see individual implementations, but
    *   segment_group_size   determines # of segments to read at once. Must be integer string.
    */
-  def scanSegments[P](projection: RichProjection { type PK = P },
-                      columns: Seq[Column],
-                      version: Int,
-                      partitionFilter: (P => Boolean) = (x: P) => true,
-                      params: Map[String, String] = Map.empty): Future[Iterator[Segment]]
+  def scanSegments(projection: RichProjection,
+                   columns: Seq[Column],
+                   version: Int,
+                   params: Map[String, String] = Map.empty)
+                  (partitionFilter: (projection.PK => Boolean) = (x: projection.PK) => true):
+    Future[Iterator[Segment]]
 
   /**
    * Scans over segments, just like scanRows, but returns an iterator of RowReader
    * for all of those row-oriented applications.  Contains a high performance iterator
    * implementation, probably faster than trying to do it yourself.  :)
    */
-  def scanRows[P](projection: RichProjection { type PK = P },
-                  columns: Seq[Column],
-                  version: Int,
-                  partitionFilter: (P => Boolean) = (x: P) => true,
-                  params: Map[String, String] = Map.empty,
-                  readerFactory: RowReaderFactory = DefaultReaderFactory): Future[Iterator[RowReader]] = {
-    for { segmentIt <- scanSegments(projection, columns, version, partitionFilter, params) }
+  def scanRows(projection: RichProjection,
+               columns: Seq[Column],
+               version: Int,
+               params: Map[String, String] = Map.empty,
+               readerFactory: RowReaderFactory = DefaultReaderFactory)
+              (partitionFilter: (projection.PK => Boolean) = (x: projection.PK) => true):
+    Future[Iterator[RowReader]] = {
+    for { segmentIt <- scanSegments(projection, columns, version, params)(partitionFilter) }
     yield {
       if (segmentIt.hasNext) {
         // TODO: fork this kind of code into a macro, called fastFlatMap.
@@ -289,11 +291,12 @@ trait CachedMergingColumnStore extends ColumnStore with StrictLogging {
 
   // NOTE: this is more or less a single-threaded implementation.  Reads of chunks for multiple columns
   // happen in parallel, but we still block to wait for all of them to come back.
-  def scanSegments[P](projection: RichProjection { type PK = P },
-                      columns: Seq[Column],
-                      version: Int,
-                      partitionFilter: (P => Boolean) = (x: P) => true,
-                      params: Map[String, String] = Map.empty): Future[Iterator[Segment]] = {
+  def scanSegments(projection: RichProjection,
+                   columns: Seq[Column],
+                   version: Int,
+                   params: Map[String, String] = Map.empty)
+                  (partitionFilter: (projection.PK => Boolean) = (x: projection.PK) => true):
+                     Future[Iterator[Segment]] = {
     val segmentGroupSize = params.getOrElse("segment_group_size", "3").toInt
 
     for { chunkmapsIt <- scanChunkRowMaps(projection.datasetName, version, params) }

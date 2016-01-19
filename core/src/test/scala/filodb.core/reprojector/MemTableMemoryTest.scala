@@ -3,16 +3,15 @@ package filodb.core.reprojector
 import com.typesafe.config.ConfigFactory
 import org.velvia.filo.TupleRowReader
 
-import filodb.core.KeyRange
+import filodb.core.NamesTestData
 import filodb.core.metadata.{Column, Dataset}
 import filodb.core.store.SegmentSpec
 
 import org.scalatest.{FunSpec, Matchers, BeforeAndAfter}
 
 class MemTableMemoryTest extends FunSpec with Matchers with BeforeAndAfter {
-  import SegmentSpec._
+  import NamesTestData._
 
-  val keyRange = KeyRange("dataset", Dataset.DefaultPartitionKey, 0L, 10000L)
   val newSetting = "memtable.max-rows-per-table = 200000"
   val config = ConfigFactory.parseString(newSetting).withFallback(
                  ConfigFactory.load("application_test.conf"))
@@ -23,14 +22,10 @@ class MemTableMemoryTest extends FunSpec with Matchers with BeforeAndAfter {
     mTable.clearAllData()
   }
 
-  val schemaWithPartCol = schema ++ Seq(
-    Column("league", "dataset", 0, Column.ColumnType.StringColumn)
-  )
-
   val numRows = 100000
 
   val lotsOfNames = (0 until (numRows/6)).toIterator.flatMap { partNum =>
-    names.map { t => (t._1, t._2, t._3, Some(partNum.toString)) }.toIterator
+    names.map { t => (t._1, t._2, t._3, t._4, Some(partNum.toString)) }.toIterator
   }
 
   private def printDetailedMemUsage() {
