@@ -4,7 +4,7 @@ import java.nio.ByteBuffer
 import scala.concurrent.Future
 
 import filodb.core._
-import filodb.core.metadata.{Column, Dataset}
+import filodb.core.metadata.{Column, DataColumn, Dataset}
 
 import org.scalatest.{FunSpec, Matchers, BeforeAndAfter, BeforeAndAfterAll}
 import org.scalatest.concurrent.ScalaFutures
@@ -43,7 +43,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
 
   describe("column API") {
     it("should return IllegalColumnChange if an invalid column addition submitted") {
-      val firstColumn = Column("first", "foo", 1, Column.ColumnType.StringColumn)
+      val firstColumn = DataColumn(0, "first", "foo", 1, Column.ColumnType.StringColumn)
       whenReady(metaStore.newColumn(firstColumn)) { response =>
         response should equal (Success)
       }
@@ -53,7 +53,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
       }
     }
 
-    val monthYearCol = Column("monthYear", "gdelt", 1, Column.ColumnType.LongColumn)
+    val monthYearCol = DataColumn(1, "monthYear", "gdelt", 1, Column.ColumnType.LongColumn)
     it("should be able to create a Column and get the Schema") {
       metaStore.newColumn(monthYearCol).futureValue should equal (Success)
       metaStore.getSchema("gdelt", 10).futureValue should equal (Map("monthYear" -> monthYearCol))

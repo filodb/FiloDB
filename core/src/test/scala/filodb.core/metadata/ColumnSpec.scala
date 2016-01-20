@@ -6,14 +6,14 @@ import org.scalatest.Matchers
 class ColumnSpec extends FunSpec with Matchers {
   import Column.ColumnType
 
-  val firstColumn = Column("first", "foo", 1, ColumnType.StringColumn)
-  val ageColumn = Column("age", "foo", 1, ColumnType.IntColumn)
+  val firstColumn = DataColumn(0, "first", "foo", 1, ColumnType.StringColumn)
+  val ageColumn = DataColumn(2, "age", "foo", 1, ColumnType.IntColumn)
   val schema = Map("first" -> firstColumn, "age" -> ageColumn)
 
   describe("Column.schemaFold") {
     it("should add new columns to the schema") {
-      val deletedSysCol = Column(":deleted", "foo", 1, ColumnType.BitmapColumn, isSystem = true)
-      Column.schemaFold(schema, deletedSysCol) should equal (schema + (":deleted" -> deletedSysCol))
+      val deletedCol = DataColumn(3, ":deleted", "foo", 1, ColumnType.BitmapColumn)
+      Column.schemaFold(schema, deletedCol) should equal (schema + (":deleted" -> deletedCol))
     }
 
     it("should remove deleted columns from the schema") {
@@ -32,7 +32,7 @@ class ColumnSpec extends FunSpec with Matchers {
       val newCol = ageColumn.copy(name = ":illegal")
       val reasons = Column.invalidateNewColumn("foo", schema, newCol)
       reasons should have length 1
-      reasons.head should startWith ("Only system")
+      reasons.head should startWith ("Data columns cannot start")
     }
 
     it("should check that cannot add columns at lower versions") {

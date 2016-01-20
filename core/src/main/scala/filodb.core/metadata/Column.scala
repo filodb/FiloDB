@@ -2,6 +2,7 @@ package filodb.core.metadata
 
 import com.typesafe.scalalogging.slf4j.StrictLogging
 import enumeratum.{Enum, EnumEntry}
+import org.velvia.filo.VectorInfo
 import scala.util.{Failure, Success, Try}
 
 import filodb.core.{CompositeKeyType, KeyType}
@@ -20,30 +21,39 @@ import filodb.core.Types._
  *    from previous versions are discarded (due to incompatibility)
  *
  * ==System Columns and Names==
- * Column names starting with a colon (':') are reserved for "system" columns:
+ * Column names starting with a colon (':') are reserved for "system" and computed columns:
  * - ':deleted' - special bitmap column marking deleted rows
- * - ':inherited' - special bitmap column, 1 means this row was inherited from
- *   previous versions due to a chunk operation, but doesn't belong to this version
+ * - other columns are computed columns whose values are generated from other columns or a function
  *
+ * System columns are not actually stored.
  */
-case class Column(name: String,
-                  dataset: String,
-                  version: Int,
-                  columnType: Column.ColumnType,
-                  serializer: Column.Serializer = Column.Serializer.FiloSerializer,
-                  isDeleted: Boolean = false,
-                  isSystem: Boolean = false) {
-  // More type safe than just using ==, if we ever change the type of ColumnId
-  def hasId(id: ColumnId): Boolean = name == id
+trait Column {
+  def id: Int         // Every column must have a unique ID
+  def name: String
+  def dataset: String
+  def columnType: Column.ColumnType
 
+  // More type safe than just using ==, if we ever change the type of ColumnId
+  // TODO(velvia): remove this and just use id
+  def hasId(_id: ColumnId): Boolean = name == _id
+}
+
+/**
+ * A Column that holds real data.
+ */
+case class DataColumn(id: Int,
+                      name: String,
+                      dataset: String,
+                      version: Int,
+                      columnType: Column.ColumnType,
+                      isDeleted: Boolean = false) extends Column {
   /**
    * Has one of the properties other than name, dataset, version changed?
    * (Name and dataset have to be constant for comparison to even be valid)
    * (Since name has to be constant, can't change from system to nonsystem)
    */
-  def propertyChanged(other: Column): Boolean =
+  def propertyChanged(other: DataColumn): Boolean =
     (columnType != other.columnType) ||
-    (serializer != other.serializer) ||
     (isDeleted != other.isDeleted)
 }
 
@@ -66,16 +76,8 @@ object Column extends StrictLogging {
     //scalastyle:on
   }
 
-  sealed trait Serializer extends EnumEntry
-
-  object Serializer extends Enum[Serializer] {
-    val values = findValues
-
-    case object FiloSerializer extends Serializer
-  }
-
-  type Schema = Map[String, Column]
-  val EmptySchema = Map.empty[String, Column]
+  type Schema = Map[String, DataColumn]
+  val EmptySchema = Map.empty[String, DataColumn]
 
   /**
    * Converts a list of columns to the appropriate KeyType.
@@ -91,11 +93,18 @@ object Column extends StrictLogging {
   }
 
   /**
-   * Fold function used to compute a schema up from a list of Column instances.
+   * Converts a list of data columns to Filo VectorInfos for building Filo vectors
+   */
+  def toFiloSchema(columns: Seq[Column]): Seq[VectorInfo] = columns.collect {
+    case DataColumn(_, name, _, _, colType, false) => VectorInfo(name, colType.clazz)
+  }
+
+  /**
+   * Fold function used to compute a schema up from a list of DataColumn instances.
    * Assumes the list of columns is sorted in increasing version.
    * Contains the business rules above.
    */
-  def schemaFold(schema: Schema, newColumn: Column): Schema = {
+  def schemaFold(schema: Schema, newColumn: DataColumn): Schema = {
     if (newColumn.isDeleted) { schema - newColumn.name }
     else if (schema.contains(newColumn.name)) {
       // See if newColumn changed anything from older definition
@@ -115,18 +124,17 @@ object Column extends StrictLogging {
    * Checks for any problems with a column about to be "created" or changed.
    * @param dataset the name of the dataset for which this column change applies
    * @param schema the latest schema from scanning all versions
-   * @param column the Column to be validated
+   * @param column the DataColumn to be validated
    * @return A Seq[String] of every reason the column is not valid
    */
-  def invalidateNewColumn(dataset: String, schema: Schema, column: Column): Seq[String] = {
+  def invalidateNewColumn(dataset: String, schema: Schema, column: DataColumn): Seq[String] = {
     def check(requirement: => Boolean, failMessage: String): Option[String] =
       if (requirement) None else Some(failMessage)
 
     val startsWithColon = column.name.startsWith(":")
     val alreadyHaveIt = schema contains column.name
     Seq(
-      check((column.isSystem && startsWithColon) || (!column.isSystem && !startsWithColon),
-            "Only system columns can start with a colon"),
+      check(!startsWithColon, "Data columns cannot start with a colon"),
       check(!alreadyHaveIt || (alreadyHaveIt && column.version > schema(column.name).version),
             "Cannot add column at version lower than latest definition"),
       check(!alreadyHaveIt || (alreadyHaveIt && column.propertyChanged(schema(column.name))),

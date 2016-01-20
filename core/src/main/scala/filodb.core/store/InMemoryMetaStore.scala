@@ -6,7 +6,7 @@ import scala.collection.concurrent.TrieMap
 import scala.concurrent.{ExecutionContext, Future}
 
 import filodb.core._
-import filodb.core.metadata.{Column, Dataset}
+import filodb.core.metadata.{Column, DataColumn, Dataset}
 
 /**
  * An in-memory MetaStore.  Does not aim to keep data distributed, but is just a
@@ -19,7 +19,7 @@ class InMemoryMetaStore(implicit val ec: ExecutionContext) extends MetaStore wit
   logger.info("Starting InMemoryMetaStore...")
 
   val datasets = new TrieMap[String, Dataset]
-  type ColumnMap = ConcurrentSkipListMap[(Int, Types.ColumnId), Column]
+  type ColumnMap = ConcurrentSkipListMap[(Int, Types.ColumnId), DataColumn]
   val colMapOrdering = math.Ordering[(Int, Types.ColumnId)]
   val columns = new TrieMap[String, ColumnMap]
 
@@ -63,7 +63,7 @@ class InMemoryMetaStore(implicit val ec: ExecutionContext) extends MetaStore wit
    * ** Column API ***
    */
 
-  def insertColumn(column: Column): Future[Response] = {
+  def insertColumn(column: DataColumn): Future[Response] = {
     // See https://issues.scala-lang.org/browse/SI-7943
     val columnMap = columns.get(column.dataset) match {
       case Some(cMap) => cMap

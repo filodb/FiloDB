@@ -7,7 +7,7 @@ import scala.concurrent.{Await, Future}
 import scala.language.postfixOps
 
 import filodb.core._
-import filodb.core.metadata.{Dataset, Column, Projection, RichProjection}
+import filodb.core.metadata.{Dataset, Column, DataColumn, Projection, RichProjection}
 import filodb.core.Types
 
 import org.scalatest.{FlatSpec, Matchers, BeforeAndAfter, BeforeAndAfterAll}
@@ -141,7 +141,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
       response should equal (Success)
     }
 
-    val fakeCol = Column("notACol", dataset.name, 0, Column.ColumnType.StringColumn)
+    val fakeCol = DataColumn(5, "notACol", dataset.name, 0, Column.ColumnType.StringColumn)
     whenReady(colStore.readSegments(projection, Seq(fakeCol), keyRange, 0)) { segIter =>
       val segments = segIter.toSeq
       segments should have length (1)

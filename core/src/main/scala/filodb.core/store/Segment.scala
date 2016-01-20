@@ -2,7 +2,7 @@ package filodb.core.store
 
 import com.typesafe.scalalogging.slf4j.StrictLogging
 import java.nio.ByteBuffer
-import org.velvia.filo.{VectorInfo, RowToVectorBuilder, RowReader, FiloRowReader, FastFiloRowReader}
+import org.velvia.filo.{RowToVectorBuilder, RowReader, FiloRowReader, FastFiloRowReader}
 import scala.collection.immutable.TreeMap
 import scala.collection.mutable.{ArrayBuffer, HashMap}
 
@@ -96,11 +96,7 @@ extends GenericSegment(projection,
   def this(projection: RichProjection, schema: Seq[Column])
           (segInfo: SegmentInfo[projection.PK, projection.SK]) = this(projection, segInfo, schema)
 
-  val filoSchema = schema.map {
-    case Column(name, _, _, colType, serializer, false, false) =>
-      require(serializer == Column.Serializer.FiloSerializer)
-      VectorInfo(name, colType.clazz)
-  }
+  val filoSchema = Column.toFiloSchema(schema)
 
   val updatingIndex = index.asInstanceOf[UpdatableChunkRowMap[projection.RK]]
 

@@ -1,15 +1,15 @@
 package filodb.core
 
 import filodb.core._
-import filodb.core.metadata.{Column, Dataset, RichProjection}
+import filodb.core.metadata.{Column, DataColumn, Dataset, RichProjection}
 import filodb.core.store.{SegmentInfo, RowWriterSegment}
 import org.velvia.filo.{RowReader, TupleRowReader}
 
 object NamesTestData {
-  val schema = Seq(Column("first", "dataset", 0, Column.ColumnType.StringColumn),
-                   Column("last",  "dataset", 0, Column.ColumnType.StringColumn),
-                   Column("age",   "dataset", 0, Column.ColumnType.LongColumn),
-                   Column("seg",   "dataset", 0, Column.ColumnType.IntColumn))
+  val schema = Seq(DataColumn(0, "first", "dataset", 0, Column.ColumnType.StringColumn),
+                   DataColumn(1, "last",  "dataset", 0, Column.ColumnType.StringColumn),
+                   DataColumn(2, "age",   "dataset", 0, Column.ColumnType.LongColumn),
+                   DataColumn(3, "seg",   "dataset", 0, Column.ColumnType.IntColumn))
 
   def mapper(rows: Seq[Product]): Iterator[RowReader] = rows.map(TupleRowReader).toIterator
 
@@ -37,7 +37,7 @@ object NamesTestData {
   // No need to test out of order since that's covered by other things (but we can scramble the rows
   // just for fun)
   val schemaWithPartCol = schema ++ Seq(
-    Column("league", "dataset", 0, Column.ColumnType.StringColumn)
+    DataColumn(4, "league", "dataset", 0, Column.ColumnType.StringColumn)
   )
 
   val largeDataset = dataset.copy(options = Dataset.DefaultOptions.copy(chunkSize = 100),

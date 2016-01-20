@@ -26,7 +26,7 @@ class ProjectionSpec extends FunSpec with Matchers {
     }
 
     it("should get BadSchema if any key is not supported type") {
-      val schema2 = schema ++ Seq(Column("bool", "a", 0, Column.ColumnType.BitmapColumn))
+      val schema2 = schema ++ Seq(DataColumn(99, "bool", "a", 0, Column.ColumnType.BitmapColumn))
       val resp = RichProjection.make(Dataset("a", "bool", "seg"), schema2)
       resp.isFailure should be (true)
       resp.recover {

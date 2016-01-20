@@ -5,7 +5,7 @@ import java.nio.ByteBuffer
 import java.util.concurrent.{Executors, ScheduledFuture, TimeUnit}
 import java.util.TreeMap
 import net.ceedubs.ficus.Ficus._
-import org.velvia.filo.{VectorInfo, RowToVectorBuilder, RowReader, FiloRowReader, FastFiloRowReader}
+import org.velvia.filo.{RowToVectorBuilder, RowReader, FiloRowReader, FastFiloRowReader}
 import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.duration.FiniteDuration
 import scala.math.Ordered
@@ -57,11 +57,7 @@ class FiloMemTable(val projection: RichProjection, config: Config) extends MemTa
   private implicit val partSegOrdering = projection.segmentType.ordering
   private val partSegKeyMap = new TreeMap[(PK, SK), KeyMap](Ordering[(PK, SK)])
 
-  private val filoSchema = projection.columns.map {
-    case Column(name, _, _, colType, serializer, false, false) =>
-      require(serializer == Column.Serializer.FiloSerializer)
-      VectorInfo(name, colType.clazz)
-  }
+  private val filoSchema = Column.toFiloSchema(projection.columns)
   private val clazzes = filoSchema.map(_.dataType).toArray
   private val colIds = filoSchema.map(_.name).toArray
 
