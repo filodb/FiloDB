@@ -55,15 +55,8 @@ case class RichProjection(projection: Projection,
   def rowKeyFunc: RowReader => RK =
     rowKeyType.getKeyFunc(rowKeyColIndices.toArray)
 
-  // Returns the partition key function, checking to see if a default partition key
-  // should be returned.
-  // TODO(velvia): get rid of default partition key when computed columns are introduced.
   def partitionKeyFunc: RowReader => PK =
-    if (dataset.partitionColumns == Seq(Dataset.DefaultPartitionColumn)) {
-      (row: RowReader) => Dataset.DefaultPartitionKey.asInstanceOf[PK]
-    } else {
-      partitionType.getKeyFunc(partitionColIndices.toArray)
-    }
+    partitionType.getKeyFunc(partitionColIndices.toArray)
 
   def toBinaryKeyRange[PK, SK](keyRange: KeyRange[PK, SK]): BinaryKeyRange =
     BinaryKeyRange(partitionType.toBytes(keyRange.partition.asInstanceOf[partitionType.T]),
@@ -78,17 +71,35 @@ object RichProjection {
   def apply(dataset: Dataset, columns: Seq[Column], projectionId: Int = 0): RichProjection =
     make(dataset, columns, projectionId).get
 
+  // Returns computed (generated) columns to add to the schema if needed
+  // TODO(velvia): try using Scalaz's ValidationNEL etc. could make code simpler
+  private def getComputedColumns(datasetName: String,
+                                 columnNames: Seq[String],
+                                 origColumns: Seq[Column]): Try[Seq[Column]] = {
+    val columns = columnNames.filter(ComputedColumn.isComputedColumn)
+                             .map { expr =>
+                               ComputedColumn.analyze(expr, datasetName, origColumns)
+                                             .recover { case t: Throwable => return Failure(t) }.get
+                             }
+    Success(columns)
+  }
+
   def make(dataset: Dataset, columns: Seq[Column], projectionId: Int = 0): Try[RichProjection] = {
     def fail(reason: String): Try[RichProjection] = Failure(BadSchema(reason))
 
     if (projectionId >= dataset.projections.length) return fail(s"projectionId $projectionId missing")
 
     val normProjection = dataset.projections(projectionId)
+    // NOTE: right now computed columns MUST be at the end, because Filo vectorization can't handle mixing
+    val allColIds = dataset.partitionColumns ++ normProjection.keyColIds ++ Seq(normProjection.segmentColId)
+    val tryComputedColumns = getComputedColumns(dataset.name, allColIds, columns)
+    val allColumns = columns ++ tryComputedColumns.recover { case t: Throwable => return Failure(t) }.get
+
     val richColumns = {
       if (normProjection.columns.isEmpty) {
-        columns
+        allColumns
       } else {
-        val columnMap = columns.map { c => c.name -> c }.toMap
+        val columnMap = allColumns.map { c => c.name -> c }.toMap
         val missing = normProjection.columns.toSet -- columnMap.keySet
         if (missing.nonEmpty) return fail(s"Specified projection columns are missing: $missing")
         normProjection.columns.map(columnMap)

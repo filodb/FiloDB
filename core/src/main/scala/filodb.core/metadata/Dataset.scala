@@ -53,8 +53,8 @@ object DatasetOptions {
 object Dataset {
   // If a partitioning column is not defined then this refers to a single global partition, and
   // the dataset must fit in one node.
-  val DefaultPartitionColumn = ":single"
   val DefaultPartitionKey = "/0"
+  val DefaultPartitionColumn = s":string $DefaultPartitionKey"
 
   val DefaultOptions = DatasetOptions(chunkSize = 1000)
 

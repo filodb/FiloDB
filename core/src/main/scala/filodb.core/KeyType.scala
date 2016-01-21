@@ -148,7 +148,7 @@ case class CompositeKeyType(atomTypes: Seq[SingleKeyType]) extends KeyType {
  * NOTE: both the Ordering for ByteVector as well as how bytes are compared in most places is big-endian
  * TODO: make byte comparison unsigned
  */
-case object LongKeyType extends SingleKeyType {
+trait LongKeyTypeLike extends SingleKeyType {
   type T = Long
 
   def ordering: Ordering[Long] = Ordering.Long
@@ -162,7 +162,9 @@ case object LongKeyType extends SingleKeyType {
   override def size(key: Long): Int = 8
 }
 
-case object IntKeyType extends SingleKeyType {
+case object LongKeyType extends LongKeyTypeLike
+
+trait IntKeyTypeLike extends SingleKeyType {
   type T = Int
 
   def ordering: Ordering[Int] = Ordering.Int
@@ -176,7 +178,9 @@ case object IntKeyType extends SingleKeyType {
   override def size(key: Int): Int = 4
 }
 
-case object DoubleKeyType extends SingleKeyType {
+case object IntKeyType extends IntKeyTypeLike
+
+trait DoubleKeyTypeLike extends SingleKeyType {
   type T = Double
 
   def ordering: Ordering[Double] = Ordering.Double
@@ -192,7 +196,9 @@ case object DoubleKeyType extends SingleKeyType {
   override def size(key: Double): Int = 8
 }
 
-case object StringKeyType extends SingleKeyType {
+case object DoubleKeyType extends DoubleKeyTypeLike
+
+trait StringKeyTypeLike extends SingleKeyType {
   type T = String
 
   def ordering: Ordering[String] = Ordering.String
@@ -205,4 +211,6 @@ case object StringKeyType extends SingleKeyType {
 
   override def size(key: String): Int = key.getBytes("UTF-8").length
 }
+
+case object StringKeyType extends StringKeyTypeLike
 

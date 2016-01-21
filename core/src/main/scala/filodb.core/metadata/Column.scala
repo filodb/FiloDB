@@ -5,7 +5,7 @@ import enumeratum.{Enum, EnumEntry}
 import org.velvia.filo.VectorInfo
 import scala.util.{Failure, Success, Try}
 
-import filodb.core.{CompositeKeyType, KeyType}
+import filodb.core.{CompositeKeyType, KeyType, SingleKeyType}
 import filodb.core.Types._
 
 /**
@@ -85,9 +85,10 @@ object Column extends StrictLogging {
    */
   def columnsToKeyType(columns: Seq[Column]): Try[KeyType] = columns match {
     case Nil      => Failure(new IllegalArgumentException("Empty columns supplied"))
-    case Seq(col) => KeyType.getKeyType(col.columnType.clazz)
+    case Seq(DataColumn(_, _, _, _, columnType, _)) => KeyType.getKeyType(columnType.clazz)
+    case Seq(ComputedColumn(_, _, _, _, keyType))   => Success(keyType)
     case cols: Seq[Column] =>
-      val keyTypes = cols.map { col => KeyType.getKeyType(col.columnType.clazz) }
+      val keyTypes = cols.map { col => columnsToKeyType(Seq(col)).asInstanceOf[Try[SingleKeyType]] }
                          .map { triedType => triedType.getOrElse(return triedType) }
       Success(CompositeKeyType(keyTypes))
   }
