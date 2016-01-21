@@ -66,8 +66,8 @@ extends ChunkMergingStrategy with StrictLogging {
   def readSegmentForCache(projection: RichProjection,
                           version: Int)(
                           segInfo: SegmentInfo[projection.PK, projection.SK]): Future[Segment] = {
-    val keyRange = KeyRange(segInfo.partition, segInfo.segment, segInfo.segment)
-    columnStore.readSegments(projection, projection.rowKeyColumns, keyRange, version).map { iter =>
+    val keyRange = KeyRange(segInfo.partition, segInfo.segment, segInfo.segment, endExclusive = false)
+    columnStore.readSegments(projection, projection.rowKeyColumns, version)(keyRange).map { iter =>
       iter.toSeq.headOption match {
         case Some(firstSegment) => firstSegment
         case None =>

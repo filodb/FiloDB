@@ -67,13 +67,16 @@ class ProjectionSpec extends FunSpec with Matchers {
     it("should get RichProjection back with proper dataset and schema") {
       val resp = RichProjection(dataset, schema)
       resp.datasetName should equal (dataset.name)
-      resp.columns should equal (schema)
+      resp.columns.take(4) should equal (schema)
+      resp.columns.last shouldBe a[ComputedColumn]
+      resp.columns.last.name should equal (Dataset.DefaultPartitionColumn)
       resp.rowKeyColumns should equal (Seq(schema(2)))
       resp.rowKeyColIndices should equal (Seq(2))
       resp.rowKeyType should equal (LongKeyType)
       resp.segmentColumn should equal (schema(3))
       resp.segmentColIndex should equal (3)
       resp.segmentType should equal (IntKeyType)
+      resp.partitionColIndices should equal (Seq(4))
       names.take(3).map(TupleRowReader).map(resp.rowKeyFunc) should equal (Seq(24L, 28L, 25L))
     }
 
@@ -83,7 +86,7 @@ class ProjectionSpec extends FunSpec with Matchers {
       val resp = RichProjection(Dataset("a", "first", "seg"), schema)
       resp.rowKeyColumns should equal (Seq(schema(0)))
       resp.rowKeyColIndices should equal (Seq(0))
-      resp.columns should equal (schema)
+      resp.columns.take(4) should equal (schema)
       resp.rowKeyType should equal (StringKeyType)
       names.take(3).map(TupleRowReader).map(resp.rowKeyFunc) should equal (
                      Seq("Khalil", "Ndamukong", "Rodney"))

@@ -56,14 +56,14 @@ trait ColumnStore {
    * @param projection the Projection to read from
    * @param columns the set of columns to read back.  Order determines the order of columns read back
    *                in each row
-   * @param keyRange describes the partition and range of keys to read back. NOTE: end range is exclusive!
    * @param version the version # to read from
+   * @param keyRange describes the partition and range of keys to read back. NOTE: end range is exclusive!
    * @return An iterator over RowReaderSegment's
    */
-  def readSegments[P, S](projection: RichProjection,
-                         columns: Seq[Column],
-                         keyRange: KeyRange[P, S],
-                         version: Int): Future[Iterator[Segment]]
+  def readSegments(projection: RichProjection,
+                   columns: Seq[Column],
+                   version: Int)
+                  (keyRange: KeyRange[projection.PK, projection.SK]): Future[Iterator[Segment]]
 
   /**
    * Scans over segments from multiple partitions of a dataset.  Designed for huge amounts of data.
@@ -235,12 +235,12 @@ trait CachedMergingColumnStore extends ColumnStore with StrictLogging {
                                 segment: S,
                                 chunkMap: BinaryChunkRowMap)
 
-  def toSegIndex[P, S](projection: RichProjection,
-                       chunkMapInfo: ChunkMapInfo): SegmentIndex[P, S] = {
+  def toSegIndex(projection: RichProjection, chunkMapInfo: ChunkMapInfo):
+        SegmentIndex[projection.PK, projection.SK] = {
     SegmentIndex(chunkMapInfo._1,
                  chunkMapInfo._2,
-                 projection.partitionType.fromBytes(chunkMapInfo._1).asInstanceOf[P],
-                 projection.segmentType.fromBytes(chunkMapInfo._2).asInstanceOf[S],
+                 projection.partitionType.fromBytes(chunkMapInfo._1),
+                 projection.segmentType.fromBytes(chunkMapInfo._2),
                  chunkMapInfo._3)
   }
 
@@ -268,10 +268,10 @@ trait CachedMergingColumnStore extends ColumnStore with StrictLogging {
     }
   }
 
-  def readSegments[P, S](projection: RichProjection,
-                         columns: Seq[Column],
-                         keyRange: KeyRange[P, S],
-                         version: Int): Future[Iterator[Segment]] = {
+  def readSegments(projection: RichProjection,
+                   columns: Seq[Column],
+                   version: Int)
+                  (keyRange: KeyRange[projection.PK, projection.SK]): Future[Iterator[Segment]] = {
     // TODO: implement actual paging and the iterator over segments.  Or maybe that should be implemented
     // at a higher level.
     val binKeyRange = projection.toBinaryKeyRange(keyRange)
@@ -281,7 +281,7 @@ trait CachedMergingColumnStore extends ColumnStore with StrictLogging {
                                  binKeyRange,
                                  version) if rowMaps.nonEmpty }
     yield {
-      val indexMaps = rowMaps.map(crm => toSegIndex[projection.PK, projection.SK](projection, crm))
+      val indexMaps = rowMaps.map(crm => toSegIndex(projection, crm))
       buildSegments(projection, indexMaps.toSeq, chunks, columns).toIterator
     }).recover {
       // No chunk maps found, so just return empty list of segments

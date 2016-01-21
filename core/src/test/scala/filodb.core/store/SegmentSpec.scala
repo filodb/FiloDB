@@ -41,8 +41,8 @@ class SegmentSpec extends FunSpec with Matchers {
     segment.index.nextChunkId should equal (1)
     segment.index.chunkIdIterator.toSeq should equal (Seq(0, 0, 0, 0, 0, 0))
     segment.index.rowNumIterator.toSeq should equal (Seq(0, 2, 1, 5, 4, 3))
-    segment.getChunks.toSeq should have length (3)
-    segment.getColumns should equal (Set("first", "last", "age"))
+    segment.getChunks.toSeq should have length (4)
+    segment.getColumns should equal (Set("first", "last", "age", "seg"))
 
     // Write some of the rows as another chunk and make sure index updates properly
     // NOTE: this is row merging in operation!
@@ -51,7 +51,8 @@ class SegmentSpec extends FunSpec with Matchers {
     segment.index.nextChunkId should equal (2)
     segment.index.chunkIdIterator.toSeq should equal (Seq(0, 0, 0, 1, 1, 0))
     segment.index.rowNumIterator.toSeq should equal (Seq(0, 2, 1, 1, 0, 3))
-    segment.getChunks.toSeq should have length (6)
+    // Remember that we have to include the seg column
+    segment.getChunks.toSeq should have length (8)
   }
 
   it("RowReaderSegment should read back rows in sort key order") {
@@ -59,7 +60,7 @@ class SegmentSpec extends FunSpec with Matchers {
     segment.addRowsAsChunk(mapper(names))
     val readSeg = RowReaderSegment(segment, schema)
 
-    readSeg.getColumns should equal (Set("first", "last", "age"))
+    readSeg.getColumns should equal (Set("first", "last", "age", "seg"))
     readSeg.rowIterator().map(_.getString(0)).toSeq should equal (firstNames)
 
     // Should be able to obtain another rowIterator

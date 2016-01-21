@@ -27,7 +27,7 @@ class ChunkMergingStrategySpec extends FunSpec with Matchers {
       val mergedSeg = mergingStrategy.mergeSegments(segment, segment2)
       mergedSeg should not be ('empty)
       mergedSeg.segInfo should equal (segment.segInfo)
-      mergedSeg.getColumns should equal (Set("first", "last", "age"))
+      mergedSeg.getColumns should equal (Set("first", "last", "age", "seg"))
 
       // Verify that the merged Segment has the same chunks as segment2, except the chunkId is offset
       val offsetChunks = segment2.getChunks.map { case (colId, chunkId, bytes) =>
@@ -104,8 +104,8 @@ class ChunkMergingStrategySpec extends FunSpec with Matchers {
       mergedSeg.index.rowNumIterator.toSeq should equal (Seq(0, 2, 1, 5, 4, 3))
 
       // Case 2: overwrite and append new data.  Let's give Jerry Rice a last name.
-      val newNames = Seq((Some("Jerry"), Some("Rice"),  Some(40L)),
-                         (Some("Tim"),   Some("Brown"), Some(45L)))
+      val newNames = Seq((Some("Jerry"), Some("Rice"),  Some(40L), Some(0)),
+                         (Some("Tim"),   Some("Brown"), Some(45L), Some(0)))
       val mergedSeg2 = mergeRows(names, newNames)
 
       mergedSeg2.index.chunkIdIterator.toSeq should equal (Seq(0, 0, 0, 0, 0, 1, 1))

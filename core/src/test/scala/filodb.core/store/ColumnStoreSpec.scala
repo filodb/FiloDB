@@ -37,7 +37,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
   }
 
   val segInfo = SegmentInfo("partition", 0).basedOn(projection)
-  val keyRange = KeyRange("partition", 0, 0, endExclusive = false)
+  val keyRange = KeyRange("partition", 0, 0, endExclusive = false).basedOn(projection)
 
   val bytes1 = ByteBuffer.wrap("apple".getBytes("UTF-8"))
   val bytes2 = ByteBuffer.wrap("orange".getBytes("UTF-8"))
@@ -74,7 +74,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
       response should equal (Success)
     }
 
-    whenReady(colStore.readSegments(projection, schema, keyRange, 0)) { segIter =>
+    whenReady(colStore.readSegments(projection, schema, 0)(keyRange)) { segIter =>
       val segments = segIter.toSeq
       segments should have length (1)
       val readSeg = segments.head.asInstanceOf[RowReaderSegment]
@@ -100,7 +100,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
       response should equal (Success)
     }
 
-    whenReady(colStore.readSegments(projection, schema, keyRange, 0)) { segIter =>
+    whenReady(colStore.readSegments(projection, schema, 0)(keyRange)) { segIter =>
       val segments = segIter.toSeq
       segments should have length (1)
       val readSeg = segments.head.asInstanceOf[RowReaderSegment]
@@ -117,7 +117,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
       response should equal (Success)
     }
 
-    whenReady(colStore.readSegments(projection, schema, keyRange, 0)) { segIter =>
+    whenReady(colStore.readSegments(projection, schema, 0)(keyRange)) { segIter =>
       val segments = segIter.toSeq
       segments should have length (1)
       val readSeg = segments.head.asInstanceOf[RowReaderSegment]
@@ -129,7 +129,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
   }
 
   it should "return empty iterator if cannot find segment" in {
-    whenReady(colStore.readSegments(projection, schema, keyRange, 0)) { segIter =>
+    whenReady(colStore.readSegments(projection, schema, 0)(keyRange)) { segIter =>
       segIter.toSeq should have length (0)
     }
   }
@@ -142,7 +142,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
     }
 
     val fakeCol = DataColumn(5, "notACol", dataset.name, 0, Column.ColumnType.StringColumn)
-    whenReady(colStore.readSegments(projection, Seq(fakeCol), keyRange, 0)) { segIter =>
+    whenReady(colStore.readSegments(projection, Seq(fakeCol), 0)(keyRange)) { segIter =>
       val segments = segIter.toSeq
       segments should have length (1)
       segments.head.getChunks.toSet should equal (Set(("notACol", 0, null), ("notACol", 1, null)))
