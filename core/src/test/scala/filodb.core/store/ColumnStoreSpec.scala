@@ -29,10 +29,12 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
   override def beforeAll() {
     super.beforeAll()
     colStore.initializeProjection(dataset.projections.head).futureValue
+    colStore.initializeProjection(GdeltTestData.dataset2.projections.head).futureValue
   }
 
   before {
     colStore.clearProjectionData(dataset.projections.head).futureValue
+    colStore.clearProjectionData(GdeltTestData.dataset2.projections.head).futureValue
     colStore.clearSegmentCache()
   }
 
@@ -184,4 +186,23 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
       rowIter.map(_.getLong(2)).toSeq should equal (Seq(24L, 25L, 28L, 29L, 39L, 40L))
     }
   }
+
+  it should "read back rows written with multi-column row keys" in {
+    import GdeltTestData._
+    val segInfo = SegmentInfo(197901, "0").basedOn(projection2)
+    val segment = new RowWriterSegment(projection2, schema)(segInfo)
+    segment.addRowsAsChunk(readers.toIterator.take(20))
+    colStore.appendSegment(projection2, segment, 0).futureValue should equal (Success)
+
+    val paramSet = colStore.getScanSplits(dataset.name)
+    paramSet should have length (1)
+
+    whenReady(colStore.scanRows(projection2, schema, 0, params = paramSet.head)()) { rowIter =>
+      rowIter.map(_.getInt(6)).sum should equal (127)
+    }
+  }
+
+  // Write ALL rows for ones with null values
+  // actually wait, maybe this should be the end-to-end ReprojectorSpec?
+  it should "write and read back rows written with multi-part (partly null) partition keys" in (pending)
 }

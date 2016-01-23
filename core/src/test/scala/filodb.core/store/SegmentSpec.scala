@@ -79,4 +79,15 @@ class SegmentSpec extends FunSpec with Matchers {
     val sortedNames = Seq("Jerry", "Khalil", "Ndamukong", "Peyton", "Rodney", "Terrance")
     readSeg.rowIterator().map(_.getString(0)).toSeq should equal (sortedNames)
   }
+
+  it("RowWriter and RowReader should work for rows with multi-column row keys") {
+    import GdeltTestData._
+    val segInfo = SegmentInfo(197901, "0").basedOn(projection2)
+    val segment = new RowWriterSegment(projection2, schema)(segInfo)
+    segment.addRowsAsChunk(readers.toIterator.take(20))
+    val readSeg = RowReaderSegment(segment, schema)
+
+    // Sum up all the NumArticles for first 20 rows
+    readSeg.rowIterator().map(_.getInt(6)).sum should equal (127)
+  }
 }

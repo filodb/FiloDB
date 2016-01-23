@@ -63,6 +63,37 @@ class FiloMemTableSpec extends FunSpec with Matchers with BeforeAndAfter {
       outRows.toSeq.map(_.getString(0)) should equal (Seq("Khalil", "Rodney", "Ndamukong", "Jerry"))
     }
 
+    it("should insert/replace rows with multiple partition keys and read them back in order") {
+      // Multiple partition keys: Actor2Code, Year
+      val mTable = new FiloMemTable(GdeltTestData.projection1, config)
+      mTable.ingestRows(GdeltTestData.readers.take(10)) { resp = 7 }
+      mTable.forceCommit()
+      resp should equal (7)
+      mTable.ingestRows(GdeltTestData.readers.take(2)) { resp = 9 }
+      mTable.forceCommit()
+      resp should equal (9)
+
+      val keyRange = KeyRange(Seq("AGR", 1979), "0", "0")
+      val outRows = mTable.readRows(keyRange.basedOn(mTable.projection))
+      outRows.toSeq.map(_.getString(5)) should equal (Seq("FARMER", "FARMER"))
+    }
+
+    it("should insert/replace rows with multiple row keys and read them back in order") {
+      // Multiple row keys: Actor2Code, GLOBALEVENTID
+      val mTable = new FiloMemTable(GdeltTestData.projection2, config)
+      mTable.ingestRows(GdeltTestData.readers.take(6)) { resp = 8 }
+      mTable.forceCommit()
+      resp should equal (8)
+      mTable.ingestRows(GdeltTestData.readers.take(2)) { resp = 10 }
+      mTable.forceCommit()
+      resp should equal (10)
+
+      val keyRange = KeyRange(197901, "0", "0")
+      val outRows = mTable.readRows(keyRange.basedOn(mTable.projection))
+      outRows.toSeq.map(_.getString(5)) should equal (
+                 Seq("AFRICA", "FARMER", "FARMER", "CHINA", "POLICE", "IMMIGRANT"))
+    }
+
     it("should ingest into multiple partitions using partition column") {
       val memTable = new FiloMemTable(projWithPartCol, config)
 
@@ -82,6 +113,8 @@ class FiloMemTableSpec extends FunSpec with Matchers with BeforeAndAfter {
         mTable.ingestRows(namesWithNullPartCol.map(TupleRowReader)) { resp = 22 }
       }
     }
+
+    it("should not throw error if :getOrElse computed column used with null partition col value") (pending)
   }
 
   describe("flushing") {

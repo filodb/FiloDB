@@ -9,6 +9,7 @@ import org.scalatest.{FunSpec, Matchers, BeforeAndAfter}
 class ProjectionSpec extends FunSpec with Matchers {
   import NamesTestData._
   import RichProjection._
+  import ComputedKeyTypes._
 
   describe("RichProjection") {
     it("should get BadSchema if cannot find row key or segment key") {
@@ -52,6 +53,14 @@ class ProjectionSpec extends FunSpec with Matchers {
       }
     }
 
+    it("should get back NoSuchFunction if computed column function not found") {
+      val resp = RichProjection.make(dataset.copy(partitionColumns = Seq(":notAFunc 1")), schema)
+      resp.isFailure should be (true)
+      resp.recover {
+        case NoSuchFunction(func) => func should equal ("notAFunc")
+      }
+    }
+
     it("should get back partitioning func for default key if partitioning column is default") {
       val resp = RichProjection.make(dataset, schema)
       resp.isSuccess should be (true)
@@ -80,7 +89,26 @@ class ProjectionSpec extends FunSpec with Matchers {
       names.take(3).map(TupleRowReader).map(resp.rowKeyFunc) should equal (Seq(24L, 28L, 25L))
     }
 
-    it("should get RichProjection back with multiple partition and row key columns") (pending)
+    it("should get RichProjection back with multiple partition and row key columns") {
+      val multiDataset = Dataset(dataset.name, Seq("seg", "age"), "seg", Seq("first", "last"))
+      val resp = RichProjection(multiDataset, schema)
+      resp.columns should equal (schema)
+      resp.rowKeyColumns should equal (Seq(schema(3), schema(2)))
+      resp.rowKeyColIndices should equal (Seq(3, 2))
+      resp.rowKeyType shouldBe a[CompositeKeyType]
+      resp.segmentColumn should equal (schema(3))
+      resp.segmentType should equal (IntKeyType)
+      resp.partitionColIndices should equal (Seq(0, 1))
+      resp.partitionType shouldBe a[CompositeKeyType]
+    }
+
+    it("should handle ComputedColumn in segment key") {
+      val resp = RichProjection(Dataset("foo", "age", ":string 1"), schema)
+      resp.columns should have length (schema.length + 2)    // extra 2 computed columns: partition and seg
+      resp.segmentColumn shouldBe a[ComputedColumn]
+      resp.segmentColIndex should equal (5)
+      resp.segmentType shouldBe a[ComputedStringKeyType]
+    }
 
     it("should create RichProjection properly for String sort key column") {
       val resp = RichProjection(Dataset("a", "first", "seg"), schema)

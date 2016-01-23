@@ -122,7 +122,7 @@ object RichProjection {
     }
     val partitionColumns = partitionColIndices.map(richColumns)
 
-    for { segmentType   <- KeyType.getKeyType(segmentColumn.columnType.clazz)
+    for { segmentType   <- Column.columnsToKeyType(Seq(segmentColumn))
           rowKeyType    <- Column.columnsToKeyType(rowKeyColumns)
           partitionType <- Column.columnsToKeyType(partitionColumns) } yield {
       RichProjection(normProjection, dataset, richColumns,

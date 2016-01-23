@@ -3,7 +3,8 @@ package filodb.core
 import filodb.core._
 import filodb.core.metadata.{Column, DataColumn, Dataset, RichProjection}
 import filodb.core.store.{SegmentInfo, RowWriterSegment}
-import org.velvia.filo.{RowReader, TupleRowReader}
+import org.velvia.filo.{RowReader, TupleRowReader, ArrayStringRowReader}
+import scala.io.Source
 
 object NamesTestData {
   val schema = Seq(DataColumn(0, "first", "dataset", 0, Column.ColumnType.StringColumn),
@@ -54,4 +55,32 @@ object NamesTestData {
              Some(rowNo / 10000 * 10000),    // the segment key
              Some(league)) }                 // partition key
   }
+}
+
+/**
+ * The first 99 rows of the GDELT data set, from a few select columns, enough to really play around
+ * with different layouts and multiple partition as well as row keys.  And hey it's real data!
+ */
+object GdeltTestData {
+  val gdeltLines = Source.fromURL(getClass.getResource("/GDELT-sample-test.csv"))
+                         .getLines.toSeq.drop(1)     // drop the header line
+
+  val readers = gdeltLines.map { line => ArrayStringRowReader(line.split(",")) }
+
+  val schema = Seq(DataColumn(0, "GLOBALEVENTID", "gdelt", 0, Column.ColumnType.IntColumn),
+                   DataColumn(1, "SQLDATE",       "gdelt", 0, Column.ColumnType.IntColumn),
+                   DataColumn(2, "MonthYear",     "gdelt", 0, Column.ColumnType.IntColumn),
+                   DataColumn(3, "Year",          "gdelt", 0, Column.ColumnType.IntColumn),
+                   DataColumn(4, "Actor2Code",    "gdelt", 0, Column.ColumnType.StringColumn),
+                   DataColumn(5, "Actor2Name",    "gdelt", 0, Column.ColumnType.StringColumn),
+                   DataColumn(6, "NumArticles",   "gdelt", 0, Column.ColumnType.IntColumn),
+                   DataColumn(7, "AvgTone",       "gdelt", 0, Column.ColumnType.DoubleColumn))
+
+  // Dataset1: Partition keys (Actor2Code, Year) / Row key GLOBALEVENTID / Seg :string 0
+  val dataset1 = Dataset("gdelt", Seq("GLOBALEVENTID"), ":string 0", Seq("Actor2Code", "Year"))
+  val projection1 = RichProjection(dataset1, schema)
+
+  // Dataset2: Partition key (MonthYear) / Row keys (Actor2Code, GLOBALEVENTID)
+  val dataset2 = Dataset("gdelt", Seq("Actor2Code", "GLOBALEVENTID"), ":string 0", Seq("MonthYear"))
+  val projection2 = RichProjection(dataset2, schema)
 }
