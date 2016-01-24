@@ -102,7 +102,8 @@ with CoordinatorSetup with ScalaFutures {
     probe.send(coordActor, CheckCanIngest(dataset1.name, 0))
     probe.expectMsg(CanIngest(true))
 
-    probe.send(coordActor, IngestRows(dataset1.name, 0, readers, 1L))
+    // TODO: use :getOrElse once it's ready, then ingest all 99 rows
+    probe.send(coordActor, IngestRows(dataset1.name, 0, readers.take(50), 1L))
     probe.expectMsg(Ack(1L))
 
     // Now, try to flush and check that stuff was written to columnstore...
@@ -114,20 +115,19 @@ with CoordinatorSetup with ScalaFutures {
     probe.expectMsg(DatasetCoordinatorActor.Stats(1, 1, 0, 0, -1))
 
     // Now, read stuff back from the column store and check that it's all there
-    val keyRange = KeyRange("nfc", 0L, 30000L).basedOn(projection1)
+    val keyRange = KeyRange(Seq("GOV", 1979), "0", "0", endExclusive = false).basedOn(projection1)
     whenReady(columnStore.readSegments(projection1, schema, 0)(keyRange)) { segIter =>
       val segments = segIter.toSeq
-      segments should have length (3)
+      segments should have length (1)
       val readSeg = segments.head.asInstanceOf[RowReaderSegment]
       readSeg.segInfo.segment should equal (keyRange.start)
-      readSeg.rowIterator().map(_.getLong(2)).toSeq should equal ((0 to 99).map(_.toLong))
+      readSeg.rowIterator().map(_.getInt(6)).sum should equal (67)
     }
 
     val splits = columnStore.getScanSplits(dataset1.name)
     splits should have length (1)
-    whenReady(columnStore.scanSegments(projection1, schema, 0, params = splits.head)()) { segIter =>
-      val segments = segIter.toSeq
-      segments should have length (6)
+    whenReady(columnStore.scanRows(projection1, schema, 0, params = splits.head)()) { rowIter =>
+      rowIter.map(_.getInt(6)).sum should equal (288)
     }
   }
 }

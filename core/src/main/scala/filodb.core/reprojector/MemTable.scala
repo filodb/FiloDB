@@ -34,13 +34,13 @@ trait MemTable extends StrictLogging {
    */
 
   /**
-   * Ingests a bunch of new rows.
+   * Ingests a bunch of new rows.  When this method returns, the rows will have been comitted to disk
+   * such that a crash could be recoverable.
    * @param rows the rows to ingest.  For now, they must have the exact same columns, in the exact same order,
-   *        as in the projection.
-   * @param callback the function to call back when the MemTable has committed the new rows to disk.
-   *        This is probably done asynchronously as we don't want to commit new rows with every write.
+   *        as in the projection.  Also, the caller should do buffering; ingesting a very small number of rows
+   *        might be extremely inefficient.
    */
-  def ingestRows(rows: Seq[RowReader])(callback: => Unit): Unit
+  def ingestRows(rows: Seq[RowReader]): Unit
 
   /**
    * Reads rows out.  If reading from a MemTable actively inserting, the rows read might not reflect
@@ -55,12 +55,6 @@ trait MemTable extends StrictLogging {
   def readAllRows(): Iterator[(projection.PK, projection.SK, projection.RK, RowReader)]
 
   def numRows: Int
-
-  /**
-   * Forces any new ingested rows to be committed to WAL/permanent storage so they will be recovered
-   * in case the process dies.
-   */
-  def forceCommit(): Unit
 
   /**
    * Yes, this clears everything!  It's meant for testing only.

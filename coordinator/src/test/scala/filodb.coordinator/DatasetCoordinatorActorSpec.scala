@@ -33,7 +33,7 @@ with ScalaFutures {
   val config = ConfigFactory.parseString(
                  """memtable.flush-trigger-rows = 100
                     memtable.max-rows-per-table = 200
-                    memtable.flush.interval = 500 ms""")
+                    memtable.flush.interval = 300 ms""")
                  .withFallback(ConfigFactory.load("application_test.conf"))
 
   val myDataset = largeDataset
@@ -105,6 +105,8 @@ with ScalaFutures {
     probe.expectMsg(Stats(1, 1, 0, 20, -1))
     reprojections should equal (Seq(("dataset", 0)))
   }
+
+  it("should error out and restart when encountering null partition column") (pending)
 
   it("should not send Ack if over maximum number of rows") {
     // First one will go through, but make memTable full

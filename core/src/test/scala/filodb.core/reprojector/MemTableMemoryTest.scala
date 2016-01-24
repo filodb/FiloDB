@@ -43,7 +43,8 @@ class MemTableMemoryTest extends FunSpec with Matchers with BeforeAndAfter {
 
     var numRows = 0
     lotsOfNames.map(TupleRowReader).grouped(2000).foreach { rows =>
-      mTable.ingestRows(rows.toSeq) { numRows += rows.length }
+      mTable.ingestRows(rows.toSeq)
+      numRows += rows.length
       // println(s"Ingested $numRows rows")
       // Thread sleep 1000
     }
