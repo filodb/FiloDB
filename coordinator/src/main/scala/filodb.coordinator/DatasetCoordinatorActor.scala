@@ -59,12 +59,12 @@ object DatasetCoordinatorActor {
   case class FlushDone(result: Seq[String]) extends DSCoordinatorMessage
   case class FlushFailed(t: Throwable) extends DSCoordinatorMessage
 
-  def props[K](projection: RichProjection[K],
-               version: Int,
-               columnStore: ColumnStore,
-               reprojector: Reprojector,
-               config: Config): Props =
-    Props(classOf[DatasetCoordinatorActor[K]], projection, version, columnStore, reprojector, config)
+  def props(projection: RichProjection,
+            version: Int,
+            columnStore: ColumnStore,
+            reprojector: Reprojector,
+            config: Config): Props =
+    Props(classOf[DatasetCoordinatorActor], projection, version, columnStore, reprojector, config)
 }
 
 /**
@@ -94,15 +94,15 @@ object DatasetCoordinatorActor {
  *   }
  * }}}
  */
-private[filodb] class DatasetCoordinatorActor[K](projection: RichProjection[K],
-                                 version: Int,
-                                 columnStore: ColumnStore,
-                                 reprojector: Reprojector,
-                                 config: Config) extends BaseActor {
+private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
+                                              version: Int,
+                                              columnStore: ColumnStore,
+                                              reprojector: Reprojector,
+                                              config: Config) extends BaseActor {
   import DatasetCoordinatorActor._
   import context.dispatcher
 
-  val datasetName = projection.dataset.name
+  val datasetName = projection.datasetName
   val nameVer = s"$datasetName/$version"
   // TODO: consider passing in a DatasetCoordinatorSettings class, so config doesn't have to be reparsed
   val flushTriggerRows = config.getLong("memtable.flush-trigger-rows")
@@ -112,15 +112,15 @@ private[filodb] class DatasetCoordinatorActor[K](projection: RichProjection[K],
   def activeRows: Int = activeTable.numRows
   def flushingRows: Int = flushingTable.map(_.numRows).getOrElse(-1)
 
-  var activeTable: MemTable[K] = makeNewTable
-  var flushingTable: Option[MemTable[K]] = None
+  var activeTable: MemTable = makeNewTable
+  var flushingTable: Option[MemTable] = None
 
   var curReprojection: Option[Future[Seq[String]]] = None
   var flushesStarted = 0
   var flushesSucceeded = 0
   var flushesFailed = 0
 
-  def makeNewTable(): MemTable[K] = new FiloMemTable(projection, config)
+  def makeNewTable(): MemTable = new FiloMemTable(projection, config)
 
   private def reportStats(): Unit = {
     logger.info(s"MemTable active table rows: $activeRows")

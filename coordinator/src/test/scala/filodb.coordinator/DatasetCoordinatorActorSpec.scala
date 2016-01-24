@@ -21,7 +21,7 @@ object DatasetCoordinatorActorSpec extends ActorSpecConfig
 class DatasetCoordinatorActorSpec extends ActorTest(DatasetCoordinatorActorSpec.getNewSystem)
 with ScalaFutures {
   import akka.testkit._
-  import SegmentSpec._
+  import NamesTestData._
   import DatasetCoordinatorActor._
 
   implicit val defaultPatience =
@@ -35,11 +35,8 @@ with ScalaFutures {
                     memtable.max-rows-per-table = 200
                     memtable.flush.interval = 500 ms""")
                  .withFallback(ConfigFactory.load("application_test.conf"))
-  val keyRange = KeyRange("dataset", Dataset.DefaultPartitionKey, 0L, 10000L)
-  val myDataset = dataset.copy(partitionColumn = "league")
-  val schemaWithPartCol = schema ++ Seq(
-    Column("league", "dataset", 0, Column.ColumnType.StringColumn)
-  )
+
+  val myDataset = largeDataset
   val myProjection = RichProjection(myDataset, schemaWithPartCol)
   val columnStore = new InMemoryColumnStore
 
@@ -65,7 +62,7 @@ with ScalaFutures {
   }
 
   val namesWithPartCol = (0 until 50).flatMap { partNum =>
-    names.map { t => (t._1, t._2, t._3, Some(partNum.toString)) }
+    names.map { t => (t._1, t._2, t._3, t._4, Some(partNum.toString)) }
   }
 
 
@@ -77,13 +74,13 @@ with ScalaFutures {
   val testReprojector = new Reprojector {
     import filodb.core.store.Segment
 
-    def reproject[K](memTable: MemTable[K], version: Int): Future[Seq[String]] = {
+    def reproject(memTable: MemTable, version: Int): Future[Seq[String]] = {
       reprojections = reprojections :+ (memTable.projection.dataset.name -> version)
       Future.successful(Seq("Success"))
 
     }
 
-    def toSegments[K](memTable: MemTable[K]): Iterator[Segment[K]] = ???
+    def toSegments(memTable: MemTable): Iterator[Segment] = ???
   }
 
   it("should respond to GetStats with no flushes and no rows") {
