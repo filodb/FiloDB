@@ -27,6 +27,8 @@ trait KeyType {
 
   def fromBytes(bytes: ByteVector): T
 
+  def fromString(str: String): T
+
   /**
    * Extracts the type T from a RowReader.
    * @params columnNumbers an array of column numbers to extract from.  Sorry, must be
@@ -91,9 +93,9 @@ case class CompositeOrdering(atomTypes: Seq[SingleKeyType]) extends Ordering[Seq
 case class CompositeKeyType(atomTypes: Seq[SingleKeyType]) extends KeyType {
   type T = Seq[_]
 
-  override def ordering: scala.Ordering[Seq[_]] = CompositeOrdering(atomTypes)
+  def ordering: scala.Ordering[Seq[_]] = CompositeOrdering(atomTypes)
 
-  override def toBytes(key: Seq[_]): ByteVector = {
+  def toBytes(key: Seq[_]): ByteVector = {
     (0 until atomTypes.length).map { i =>
       val atomType = atomTypes(i)
       val bytes = atomType.toBytes(key(i).asInstanceOf[atomType.T])
@@ -101,7 +103,7 @@ case class CompositeKeyType(atomTypes: Seq[SingleKeyType]) extends KeyType {
     }.reduce[ByteVector] { case (a, b) => a ++ b }
   }
 
-  override def fromBytes(bytes: ByteVector): Seq[_] = {
+  def fromBytes(bytes: ByteVector): Seq[_] = {
     var currentOffset = 0
     atomTypes.map { atomType =>
       val length: Int = bytes.get(currentOffset).toInt
@@ -109,6 +111,13 @@ case class CompositeKeyType(atomTypes: Seq[SingleKeyType]) extends KeyType {
       val atomBytes = bytes.slice(currentOffset, currentOffset + length)
       currentOffset = currentOffset + length
       atomType.fromBytes(atomBytes)
+    }
+  }
+
+  def fromString(str: String): T = {
+    val components = str.split(",")
+    (0 until atomTypes.length).map { i =>
+      atomTypes(i).fromString(components(i))
     }
   }
 
@@ -145,8 +154,9 @@ case class CompositeKeyType(atomTypes: Seq[SingleKeyType]) extends KeyType {
 object SingleKeyTypes {
   trait LongKeyTypeLike extends SingleKeyTypeBase[Long] {
     def toBytes(key: Long): ByteVector = ByteVector.fromLong(key, ordering = ByteOrdering.BigEndian)
-
     def fromBytes(bytes: ByteVector): Long = bytes.toLong(signed = true, ByteOrdering.BigEndian)
+
+    def fromString(str: String): Long = str.toLong
 
     override def isSegmentType: Boolean = true
     override def size(key: Long): Int = 8
@@ -156,8 +166,9 @@ object SingleKeyTypes {
 
   trait IntKeyTypeLike extends SingleKeyTypeBase[Int] {
     def toBytes(key: Int): ByteVector = ByteVector.fromInt(key, ordering = ByteOrdering.BigEndian)
-
     def fromBytes(bytes: ByteVector): Int = bytes.toInt(signed = true, ByteOrdering.BigEndian)
+
+    def fromString(str: String): Int = str.toInt
 
     override def isSegmentType: Boolean = true
     override def size(key: Int): Int = 4
@@ -172,6 +183,8 @@ object SingleKeyTypes {
     def fromBytes(bytes: ByteVector): Double =
       java.lang.Double.longBitsToDouble(bytes.toLong(signed = true, ByteOrdering.BigEndian))
 
+    def fromString(str: String): Double = str.toDouble
+
     override def size(key: Double): Int = 8
   }
 
@@ -180,6 +193,7 @@ object SingleKeyTypes {
   trait StringKeyTypeLike extends SingleKeyTypeBase[String] {
     def toBytes(key: String): ByteVector = ByteVector(key.getBytes("UTF-8"))
     def fromBytes(bytes: ByteVector): String = new String(bytes.toArray, "UTF-8")
+    def fromString(str: String): String = str
     override def isSegmentType: Boolean = true
     override def size(key: String): Int = key.getBytes("UTF-8").length
   }
@@ -189,6 +203,7 @@ object SingleKeyTypes {
   implicit case object BooleanKeyType extends SingleKeyTypeBase[Boolean] {
     def toBytes(key: Boolean): ByteVector = ByteVector(if(key) -1.toByte else 0.toByte)
     def fromBytes(bytes: ByteVector): Boolean = bytes(0) != 0
+    def fromString(str: String): Boolean = str.toBoolean
     def size(key: Boolean): Int = 1
   }
 }

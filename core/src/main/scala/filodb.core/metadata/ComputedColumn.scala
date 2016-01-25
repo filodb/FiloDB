@@ -3,7 +3,7 @@ package filodb.core.metadata
 import org.velvia.filo.RowReader
 import scala.util.{Failure, Success, Try}
 
-import filodb.core.{CompositeKeyType, KeyType}
+import filodb.core.{KeyType, SingleKeyTypeBase}
 import filodb.core.Types._
 
 /**
@@ -21,7 +21,7 @@ case class ComputedColumn(id: Int,
 object ComputedColumn {
   import SimpleComputations._
 
-  val AllComputations = Seq(ConstStringComputation)
+  val AllComputations = Seq(ConstStringComputation, GetOrElseComputation)
   val nameToComputation = AllComputations.map { comp => comp.funcName -> comp }.toMap
 
   def isComputedColumn(expr: String): Boolean = expr.startsWith(":")
@@ -83,6 +83,35 @@ object SimpleComputations {
       } else {
         Failure(WrongNumberArguments(args.length, 1))
       }
+    }
+  }
+
+  /**
+   * Syntax: :getOrElse <colName> <defaultValue>
+   * returns <defaultValue> if <colName> is null
+   */
+  object GetOrElseComputation extends ColumnComputation {
+    def funcName: String = "getOrElse"
+    def analyze(expr: String, dataset: TableName, schema: Seq[Column]): Try[ComputedColumn] = {
+      val args = userArgs(expr)
+      if (args.length != 2) return Failure(WrongNumberArguments(args.length, 2))
+
+      // Look for column name argument
+      val sourceColIndex = schema.indexWhere(_.name == args(0))
+      if (sourceColIndex < 0) return Failure(BadArgument(s"Could not find source column ${args(0)}"))
+      val sourceColType = schema(sourceColIndex).columnType
+
+      val keyType = sourceColType.keyType
+      val extractor = keyType.asInstanceOf[SingleKeyTypeBase[keyType.T]].extractor
+      val defaultValue = Try(keyType.fromString(args(1))).recover { case t: Throwable =>
+        return Failure(BadArgument(s"Could not parse [${args(1)}]: ${t.getMessage}"))
+      }.get
+
+      val computedKeyType = getComputedType(keyType)((r: RowReader) =>
+                                if (r.notNull(sourceColIndex)) { extractor.getField(r, sourceColIndex) }
+                                else { defaultValue }
+                              )
+      Success(ComputedColumn(0, expr, dataset, sourceColType, computedKeyType))
     }
   }
 }

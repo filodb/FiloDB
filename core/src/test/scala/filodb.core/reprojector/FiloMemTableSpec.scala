@@ -89,6 +89,13 @@ class FiloMemTableSpec extends FunSpec with Matchers with BeforeAndAfter {
       }
     }
 
-    it("should not throw error if :getOrElse computed column used with null partition col value") (pending)
+    it("should not throw error if :getOrElse computed column used with null partition col value") {
+      val largeDatasetGetOrElse = largeDataset.copy(partitionColumns = Seq(":getOrElse league --"))
+      val projWithPartCol2 = RichProjection(largeDatasetGetOrElse, schemaWithPartCol)
+      val mTable = new FiloMemTable(projWithPartCol2, config)
+
+      mTable.ingestRows(namesWithNullPartCol.map(TupleRowReader))
+      mTable.numRows should equal (namesWithNullPartCol.length)
+    }
   }
 }
