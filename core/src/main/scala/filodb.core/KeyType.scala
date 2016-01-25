@@ -3,7 +3,6 @@ package filodb.core
 import org.velvia.filo.RowReader
 import org.velvia.filo.RowReader._
 import scala.language.postfixOps
-import scala.util.{Failure, Try}
 import scalaxy.loops._
 import scodec.bits.{ByteOrdering, ByteVector}
 
@@ -11,7 +10,9 @@ import scala.math.Ordering
 
 /**
  * A generic typeclass for dealing with keys (partition, sort, segment) of various types.
- * Including comparison, serialization, extraction from rows.
+ * Including comparison, serialization, extraction from rows, extraction from strings.
+ * In general, every column type has a KeyType, since any column could be used for any keys,
+ * except for segment keys which have some special requirements.
  */
 trait KeyType {
   type T
@@ -35,28 +36,18 @@ trait KeyType {
    */
   def getKeyFunc(columnNumbers: Array[Int]): RowReader => T
 
+  def isSegmentType: Boolean = false
+
   def size(key: T): Int
 }
 
-object KeyType {
-  val ClazzToKeyType = Map[Class[_], SingleKeyType](
-    classOf[Long]   -> LongKeyType,
-    classOf[Int]    -> IntKeyType,
-    classOf[Double] -> DoubleKeyType,
-    classOf[String] -> StringKeyType
-  )
+import SingleKeyTypes._
 
-  def getKeyType(clazz: Class[_]): Try[SingleKeyType] =
-    ClazzToKeyType.get(clazz)
-                  .map(kt => util.Success(kt))
-                  .getOrElse(Failure(UnsupportedKeyType(clazz)))
-}
-
-import scala.language.existentials
 case class NullKeyValue(colIndex: Int) extends Exception(s"Null partition value for col index $colIndex")
-case class UnsupportedKeyType(clazz: Class[_]) extends Exception(s"Type $clazz is not supported for keys")
 
-abstract class SingleKeyType extends KeyType {
+abstract class SingleKeyTypeBase[K : Ordering : TypedFieldExtractor] extends KeyType {
+  type T = K
+
   def getKeyFunc(columnNumbers: Array[Int]): RowReader => T = {
     require(columnNumbers.size == 1)
     val columnNum = columnNumbers(0)
@@ -69,7 +60,9 @@ abstract class SingleKeyType extends KeyType {
     }
   }
 
-  def extractor: TypedFieldExtractor[T]
+  def ordering: Ordering[T] = implicitly[Ordering[K]]
+
+  def extractor: TypedFieldExtractor[T] = implicitly[TypedFieldExtractor[K]]
 }
 
 case class CompositeOrdering(atomTypes: Seq[SingleKeyType]) extends Ordering[Seq[_]] {
@@ -143,74 +136,59 @@ case class CompositeKeyType(atomTypes: Seq[SingleKeyType]) extends KeyType {
   }.sum
 }
 
+
 /**
- * Typeclasses for keys
+ * Typeclasses for single keys
  * NOTE: both the Ordering for ByteVector as well as how bytes are compared in most places is big-endian
  * TODO: make byte comparison unsigned
  */
-trait LongKeyTypeLike extends SingleKeyType {
-  type T = Long
+object SingleKeyTypes {
+  trait LongKeyTypeLike extends SingleKeyTypeBase[Long] {
+    def toBytes(key: Long): ByteVector = ByteVector.fromLong(key, ordering = ByteOrdering.BigEndian)
 
-  def ordering: Ordering[Long] = Ordering.Long
+    def fromBytes(bytes: ByteVector): Long = bytes.toLong(signed = true, ByteOrdering.BigEndian)
 
-  def toBytes(key: Long): ByteVector = ByteVector.fromLong(key, ordering = ByteOrdering.BigEndian)
+    override def isSegmentType: Boolean = true
+    override def size(key: Long): Int = 8
+  }
 
-  def fromBytes(bytes: ByteVector): Long = bytes.toLong(signed = true, ByteOrdering.BigEndian)
+  implicit case object LongKeyType extends LongKeyTypeLike
 
-  override def extractor: TypedFieldExtractor[Long] = LongFieldExtractor
+  trait IntKeyTypeLike extends SingleKeyTypeBase[Int] {
+    def toBytes(key: Int): ByteVector = ByteVector.fromInt(key, ordering = ByteOrdering.BigEndian)
 
-  override def size(key: Long): Int = 8
+    def fromBytes(bytes: ByteVector): Int = bytes.toInt(signed = true, ByteOrdering.BigEndian)
+
+    override def isSegmentType: Boolean = true
+    override def size(key: Int): Int = 4
+  }
+
+  implicit case object IntKeyType extends IntKeyTypeLike
+
+  trait DoubleKeyTypeLike extends SingleKeyTypeBase[Double] {
+    def toBytes(key: Double): ByteVector =
+      ByteVector.fromLong(java.lang.Double.doubleToLongBits(key), ordering = ByteOrdering.BigEndian)
+
+    def fromBytes(bytes: ByteVector): Double =
+      java.lang.Double.longBitsToDouble(bytes.toLong(signed = true, ByteOrdering.BigEndian))
+
+    override def size(key: Double): Int = 8
+  }
+
+  implicit case object DoubleKeyType extends DoubleKeyTypeLike
+
+  trait StringKeyTypeLike extends SingleKeyTypeBase[String] {
+    def toBytes(key: String): ByteVector = ByteVector(key.getBytes("UTF-8"))
+    def fromBytes(bytes: ByteVector): String = new String(bytes.toArray, "UTF-8")
+    override def isSegmentType: Boolean = true
+    override def size(key: String): Int = key.getBytes("UTF-8").length
+  }
+
+  implicit case object StringKeyType extends StringKeyTypeLike
+
+  implicit case object BooleanKeyType extends SingleKeyTypeBase[Boolean] {
+    def toBytes(key: Boolean): ByteVector = ByteVector(if(key) -1.toByte else 0.toByte)
+    def fromBytes(bytes: ByteVector): Boolean = bytes(0) != 0
+    def size(key: Boolean): Int = 1
+  }
 }
-
-case object LongKeyType extends LongKeyTypeLike
-
-trait IntKeyTypeLike extends SingleKeyType {
-  type T = Int
-
-  def ordering: Ordering[Int] = Ordering.Int
-
-  def toBytes(key: Int): ByteVector = ByteVector.fromInt(key, ordering = ByteOrdering.BigEndian)
-
-  def fromBytes(bytes: ByteVector): Int = bytes.toInt(signed = true, ByteOrdering.BigEndian)
-
-  override def extractor: TypedFieldExtractor[Int] = IntFieldExtractor
-
-  override def size(key: Int): Int = 4
-}
-
-case object IntKeyType extends IntKeyTypeLike
-
-trait DoubleKeyTypeLike extends SingleKeyType {
-  type T = Double
-
-  def ordering: Ordering[Double] = Ordering.Double
-
-  def toBytes(key: Double): ByteVector =
-    ByteVector.fromLong(java.lang.Double.doubleToLongBits(key), ordering = ByteOrdering.BigEndian)
-
-  def fromBytes(bytes: ByteVector): Double =
-    java.lang.Double.longBitsToDouble(bytes.toLong(signed = true, ByteOrdering.BigEndian))
-
-  override def extractor: TypedFieldExtractor[Double] = DoubleFieldExtractor
-
-  override def size(key: Double): Int = 8
-}
-
-case object DoubleKeyType extends DoubleKeyTypeLike
-
-trait StringKeyTypeLike extends SingleKeyType {
-  type T = String
-
-  def ordering: Ordering[String] = Ordering.String
-
-  def toBytes(key: String): ByteVector = ByteVector(key.getBytes("UTF-8"))
-
-  def fromBytes(bytes: ByteVector): String = new String(bytes.toArray, "UTF-8")
-
-  override def extractor: TypedFieldExtractor[String] = StringFieldExtractor
-
-  override def size(key: String): Int = key.getBytes("UTF-8").length
-}
-
-case object StringKeyType extends StringKeyTypeLike
-

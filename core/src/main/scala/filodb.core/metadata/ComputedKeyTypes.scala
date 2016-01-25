@@ -1,6 +1,7 @@
 package filodb.core.metadata
 
 import filodb.core._
+import filodb.core.SingleKeyTypes._
 import org.velvia.filo.RowReader
 
 object ComputedKeyTypes {

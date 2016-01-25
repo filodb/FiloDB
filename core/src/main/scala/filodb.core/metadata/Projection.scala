@@ -84,12 +84,16 @@ object RichProjection {
     Success(columns)
   }
 
+
   def make(dataset: Dataset, columns: Seq[Column], projectionId: Int = 0): Try[RichProjection] = {
     def fail(reason: String): Try[RichProjection] = Failure(BadSchema(reason))
 
     if (projectionId >= dataset.projections.length) return fail(s"projectionId $projectionId missing")
 
     val normProjection = dataset.projections(projectionId)
+    if (dataset.partitionColumns.isEmpty) return fail("Dataset partition columns cannot be empty")
+    if (normProjection.keyColIds.isEmpty) return fail("Key columns cannot be empty")
+
     // NOTE: right now computed columns MUST be at the end, because Filo vectorization can't handle mixing
     val allColIds = dataset.partitionColumns ++ normProjection.keyColIds ++ Seq(normProjection.segmentColId)
     val tryComputedColumns = getComputedColumns(dataset.name, allColIds, columns)
@@ -111,24 +115,24 @@ object RichProjection {
     val segmentColIndex = idToIndex.getOrElse(normProjection.segmentColId,
       return fail(s"Segment column ${normProjection.segmentColId} not in columns $richColumns"))
     val segmentColumn = richColumns(segmentColIndex)
+    val segmentType = Column.columnsToKeyType(Seq(segmentColumn))
+    if (!segmentType.isSegmentType) return fail(s"${segmentColumn.columnType} is not supported for segments")
 
     val rowKeyColIndices = normProjection.keyColIds.map { colId =>
       idToIndex.getOrElse(colId, return fail(s"Key column $colId not in columns $richColumns"))
     }
     val rowKeyColumns = rowKeyColIndices.map(richColumns)
+    val rowKeyType = Column.columnsToKeyType(rowKeyColumns)
 
     val partitionColIndices = dataset.partitionColumns.map { colId =>
       idToIndex.getOrElse(colId, return fail(s"Partition column $colId not in columns $richColumns"))
     }
     val partitionColumns = partitionColIndices.map(richColumns)
+    val partitionType = Column.columnsToKeyType(partitionColumns)
 
-    for { segmentType   <- Column.columnsToKeyType(Seq(segmentColumn))
-          rowKeyType    <- Column.columnsToKeyType(rowKeyColumns)
-          partitionType <- Column.columnsToKeyType(partitionColumns) } yield {
-      RichProjection(normProjection, dataset, richColumns,
-                     segmentColumn, segmentColIndex, segmentType,
-                     rowKeyColumns, rowKeyColIndices, rowKeyType,
-                     partitionColumns, partitionColIndices, partitionType)
-    }
+    Success(RichProjection(normProjection, dataset, richColumns,
+                           segmentColumn, segmentColIndex, segmentType,
+                           rowKeyColumns, rowKeyColIndices, rowKeyType,
+                           partitionColumns, partitionColIndices, partitionType))
   }
 }

@@ -3,9 +3,9 @@ package filodb.core.metadata
 import com.typesafe.scalalogging.slf4j.StrictLogging
 import enumeratum.{Enum, EnumEntry}
 import org.velvia.filo.VectorInfo
-import scala.util.{Failure, Success, Try}
+import scala.reflect.ClassTag
 
-import filodb.core.{CompositeKeyType, KeyType, SingleKeyType}
+import filodb.core.{CompositeKeyType, KeyType, SingleKeyType, SingleKeyTypeBase}
 import filodb.core.Types._
 
 /**
@@ -62,18 +62,23 @@ object Column extends StrictLogging {
     // NOTE: due to a Spark serialization bug, this cannot be a val
     // (https://github.com/apache/spark/pull/7122)
     def clazz: Class[_]
+    def keyType: KeyType
+  }
+
+  sealed abstract class RichColumnType[T : ClassTag : SingleKeyTypeBase] extends ColumnType {
+    def clazz: Class[_] = implicitly[ClassTag[T]].runtimeClass
+    def keyType: KeyType = implicitly[SingleKeyTypeBase[T]]
   }
 
   object ColumnType extends Enum[ColumnType] {
     val values = findValues
 
-    //scalastyle:off
-    case object IntColumn extends ColumnType { def clazz = classOf[Int] }
-    case object LongColumn extends ColumnType { def clazz = classOf[Long] }
-    case object DoubleColumn extends ColumnType { def clazz = classOf[Double] }
-    case object StringColumn extends ColumnType { def clazz = classOf[String] }
-    case object BitmapColumn extends ColumnType { def clazz = classOf[Boolean] }
-    //scalastyle:on
+    import filodb.core.SingleKeyTypes._
+    case object IntColumn extends RichColumnType[Int]
+    case object LongColumn extends RichColumnType[Long]
+    case object DoubleColumn extends RichColumnType[Double]
+    case object StringColumn extends RichColumnType[String]
+    case object BitmapColumn extends RichColumnType[Boolean]
   }
 
   type Schema = Map[String, DataColumn]
@@ -81,16 +86,15 @@ object Column extends StrictLogging {
 
   /**
    * Converts a list of columns to the appropriate KeyType.
-   * @returns a Try[KeyType], with failures possibly being UnsupportedKeyType
+   * @returns a KeyType
    */
-  def columnsToKeyType(columns: Seq[Column]): Try[KeyType] = columns match {
-    case Nil      => Failure(new IllegalArgumentException("Empty columns supplied"))
-    case Seq(DataColumn(_, _, _, _, columnType, _)) => KeyType.getKeyType(columnType.clazz)
-    case Seq(ComputedColumn(_, _, _, _, keyType))   => Success(keyType)
+  def columnsToKeyType(columns: Seq[Column]): KeyType = columns match {
+    case Nil      => throw new IllegalArgumentException("Empty columns supplied")
+    case Seq(DataColumn(_, _, _, _, columnType, _)) => columnType.keyType
+    case Seq(ComputedColumn(_, _, _, _, keyType))   => keyType
     case cols: Seq[Column] =>
-      val keyTypes = cols.map { col => columnsToKeyType(Seq(col)).asInstanceOf[Try[SingleKeyType]] }
-                         .map { triedType => triedType.getOrElse(return triedType) }
-      Success(CompositeKeyType(keyTypes))
+      val keyTypes = cols.map { col => columnsToKeyType(Seq(col)).asInstanceOf[SingleKeyType] }
+      CompositeKeyType(keyTypes)
   }
 
   /**

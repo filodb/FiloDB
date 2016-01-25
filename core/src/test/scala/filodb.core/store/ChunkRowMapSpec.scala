@@ -7,8 +7,9 @@ import org.scalatest.FunSpec
 import org.scalatest.Matchers
 
 class ChunkRowMapSpec extends FunSpec with Matchers {
+  import SingleKeyTypes.LongKeyType
+
   describe("UpdatableChunkRowMap") {
-    implicit val keyType = LongKeyType
     it("should be able to add individual key -> (chunkId, rowNum) pairs") {
       val rowIndex = new UpdatableChunkRowMap
       rowIndex.update(1001L, 0, 0)

@@ -17,7 +17,7 @@ class SegmentSpec extends FunSpec with Matchers {
   val bytes2 = ByteBuffer.wrap("orange".getBytes("UTF-8"))
 
   it("GenericSegment should add and get chunks back out") {
-    implicit val keyType = LongKeyType
+    import SingleKeyTypes.LongKeyType
     val rowIndex = new UpdatableChunkRowMap
     val segment = new GenericSegment(projection, rowIndex)(segInfo.basedOn(projection))
     segment.isEmpty should equal (true)

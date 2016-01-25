@@ -44,7 +44,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
   val bytes1 = ByteBuffer.wrap("apple".getBytes("UTF-8"))
   val bytes2 = ByteBuffer.wrap("orange".getBytes("UTF-8"))
 
-  implicit val keyType = LongKeyType
+  implicit val keyType = SingleKeyTypes.LongKeyType
   val rowIndex = new UpdatableChunkRowMap
 
   val baseSegment = new GenericSegment(projection, rowIndex)(segInfo)

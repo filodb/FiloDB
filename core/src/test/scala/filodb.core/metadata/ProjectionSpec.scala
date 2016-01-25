@@ -10,6 +10,7 @@ class ProjectionSpec extends FunSpec with Matchers {
   import NamesTestData._
   import RichProjection._
   import ComputedKeyTypes._
+  import SingleKeyTypes._
 
   describe("RichProjection") {
     it("should get BadSchema if cannot find row key or segment key") {
@@ -26,9 +27,9 @@ class ProjectionSpec extends FunSpec with Matchers {
       }
     }
 
-    it("should get BadSchema if any key is not supported type") {
+    it("should get BadSchema if segment key is not supported type") {
       val schema2 = schema ++ Seq(DataColumn(99, "bool", "a", 0, Column.ColumnType.BitmapColumn))
-      val resp = RichProjection.make(Dataset("a", "bool", "seg"), schema2)
+      val resp = RichProjection.make(Dataset("a", "age", "bool"), schema2)
       resp.isFailure should be (true)
       resp.recover {
         case BadSchema(reason) => reason should include ("is not supported")
@@ -42,6 +43,22 @@ class ProjectionSpec extends FunSpec with Matchers {
       resp.isFailure should be (true)
       resp.recover {
         case BadSchema(reason) => reason should include ("Specified projection columns are missing")
+      }
+    }
+
+    it("should get BadSchema if key columns or partition columns are empty") {
+      val emptyKeyColsDataset = Dataset("b", Seq(), "seg", Seq(":string 0"))
+      val resp1 = RichProjection.make(emptyKeyColsDataset, schema)
+      resp1.isFailure should be (true)
+      resp1.recover {
+        case BadSchema(reason) => reason should include ("cannot be empty")
+      }
+
+      val emptyPartDataset = Dataset("c", Seq("age"), "seg", Nil)
+      val resp2 = RichProjection.make(emptyPartDataset, schema)
+      resp2.isFailure should be (true)
+      resp2.recover {
+        case BadSchema(reason) => reason should include ("cannot be empty")
       }
     }
 
