@@ -32,7 +32,7 @@ extends CassandraTable[ChunkRowMapTable, ChunkRowMapRecord] {
   implicit val session = connector.session
 
   //scalastyle:off
-  object partition extends StringColumn(this) with PartitionKey[String]
+  object partition extends BlobColumn(this) with PartitionKey[ByteBuffer]
   object version extends IntColumn(this) with PartitionKey[Int]
   object segmentId extends BlobColumn(this) with PrimaryKey[ByteBuffer]
   object chunkIds extends BlobColumn(this)
@@ -53,11 +53,11 @@ extends CassandraTable[ChunkRowMapTable, ChunkRowMapRecord] {
    * Retrieves a whole series of chunk maps, in the range [startSegmentId, untilSegmentId)
    * @return ChunkMaps(...), if nothing found will return ChunkMaps(Nil).
    */
-  def getChunkMaps(partition: String,
+  def getChunkMaps(partition: Types.BinaryPartition,
                    version: Int,
                    startSegmentId: Types.SegmentId,
                    untilSegmentId: Types.SegmentId): Future[Seq[ChunkRowMapRecord]] =
-    select.where(_.partition eqs partition)
+    select.where(_.partition eqs partition.toByteBuffer)
           .and(_.version eqs version)
           .and(_.segmentId gte startSegmentId.toByteBuffer)
           .and(_.segmentId lt untilSegmentId.toByteBuffer)
@@ -65,14 +65,14 @@ extends CassandraTable[ChunkRowMapTable, ChunkRowMapRecord] {
 
   def scanChunkMaps(version: Int,
                     startToken: String,
-                    endToken: String): Future[Iterator[(String, ChunkRowMapRecord)]] = {
+                    endToken: String): Future[Iterator[(Types.BinaryPartition, ChunkRowMapRecord)]] = {
     val tokenQ = "TOKEN(partition, version)"
     val cql = s"SELECT * FROM ${keySpace.name}.$tableName WHERE " +
               s"$tokenQ >= $startToken AND $tokenQ < $endToken"
     Future {
       session.execute(cql).iterator
              .filter(this.version(_) == version)
-             .map { row => (partition(row), fromRow(row)) }
+             .map { row => (ByteVector(partition(row)), fromRow(row)) }
     }
   }
 
@@ -80,13 +80,13 @@ extends CassandraTable[ChunkRowMapTable, ChunkRowMapRecord] {
    * Writes a new chunk map to the chunkRowTable.
    * @return Success, or an exception as a Future.failure
    */
-  def writeChunkMap(partition: String,
+  def writeChunkMap(partition: Types.BinaryPartition,
                     version: Int,
                     segmentId: Types.SegmentId,
                     chunkIds: ByteBuffer,
                     rowNums: ByteBuffer,
                     nextChunkId: Int): Future[Response] =
-    insert.value(_.partition, partition)
+    insert.value(_.partition, partition.toByteBuffer)
           .value(_.version,   version)
           .value(_.segmentId, segmentId.toByteBuffer)
           .value(_.chunkIds,  chunkIds)

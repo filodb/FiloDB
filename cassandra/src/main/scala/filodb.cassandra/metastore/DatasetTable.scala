@@ -19,12 +19,13 @@ with FiloCassandraConnector {
 
   // scalastyle:off
   object name extends StringColumn(this) with PartitionKey[String]
-  object partitionColumn extends StringColumn(this) with StaticColumn[String]
+  object partitionColumns extends StringColumn(this) with StaticColumn[String]
   object options extends StringColumn(this) with StaticColumn[String]
   object projectionId extends IntColumn(this) with PrimaryKey[Int]
-  object projectionSortColumn extends StringColumn(this)
+  object keyColumns extends StringColumn(this)
+  object segmentColumns extends StringColumn(this)
+  object projectionColumns extends StringColumn(this)
   object projectionReverse extends BooleanColumn(this)
-  object projectionSegmentSize extends StringColumn(this)
   // scalastyle:on
 
   import filodb.cassandra.Util._
@@ -34,9 +35,18 @@ with FiloCassandraConnector {
   override def fromRow(row: Row): Projection =
     Projection(projectionId(row),
                name(row),
-               projectionSortColumn(row),
+               splitCString(keyColumns(row)),
+               segmentColumns(row),
                projectionReverse(row),
-               segmentSize = projectionSegmentSize(row))
+               splitCString(projectionColumns(row)))
+
+  // We use \001 to split and demarcate column name strings, because
+  // 1) this char is not allowed,
+  // 2) spaces, : () are used in function definitions
+  // 3) Cassandra CQLSH will highlight weird unicode chars in diff color so it's easy to see :)
+  private def stringsToStr(strings: Seq[String]): String = strings.mkString("\001")
+  private def splitCString(string: String): Seq[String] =
+    if (string.isEmpty) Nil else string.split('\001').toSeq
 
   def initialize(): Future[Response] = create.ifNotExists.future().toResponse()
 
@@ -45,14 +55,15 @@ with FiloCassandraConnector {
   def insertProjection(projection: Projection): Future[Response] =
     insert.value(_.name, projection.dataset)
           .value(_.projectionId, projection.id)
-          .value(_.projectionSortColumn, projection.sortColumn)
+          .value(_.keyColumns, stringsToStr(projection.keyColIds))
+          .value(_.segmentColumns, projection.segmentColId)
           .value(_.projectionReverse, projection.reverse)
-          .value(_.projectionSegmentSize, projection.segmentSize)
+          .value(_.projectionColumns, stringsToStr(projection.columns))
           .future.toResponse()
 
   def createNewDataset(dataset: Dataset): Future[Response] =
     (for { createResp <- insert.value(_.name, dataset.name)
-                               .value(_.partitionColumn, dataset.partitionColumn)
+                               .value(_.partitionColumns, stringsToStr(dataset.partitionColumns))
                                .value(_.options, dataset.options.toString)
                                .ifNotExists.future().toResponse(AlreadyExists)
           insertProj <- insertProjection(dataset.projections.head)
@@ -67,8 +78,8 @@ with FiloCassandraConnector {
 
   def getDataset(dataset: TableName): Future[Dataset] =
     for { proj <- getProjection(dataset, 0)
-          Some((partCol, options)) <- select(_.partitionColumn, _.options).where(_.name eqs dataset).one() }
-    yield { Dataset(dataset, Seq(proj), partCol, DatasetOptions.fromString(options)) }
+          Some((partCols, options)) <- select(_.partitionColumns, _.options).where(_.name eqs dataset).one() }
+    yield { Dataset(dataset, Seq(proj), splitCString(partCols), DatasetOptions.fromString(options)) }
 
   // NOTE: CQL does not return any error if you DELETE FROM datasets WHERE name = ...
   def deleteDataset(name: String): Future[Response] =

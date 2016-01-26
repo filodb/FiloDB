@@ -48,7 +48,7 @@ extends CachedMergingColumnStore with StrictLogging {
 
   val chunkTableCache = LruCache[ChunkTable](tableCacheSize)
   val rowMapTableCache = LruCache[ChunkRowMapTable](tableCacheSize)
-  val segmentCache = LruCache[Segment[_]](segmentCacheSize)
+  val segmentCache = LruCache[Segment](segmentCacheSize)
 
   val mergingStrategy = new AppendingChunkMergingStrategy(this)
 
@@ -73,7 +73,7 @@ extends CachedMergingColumnStore with StrictLogging {
    * Implementations of low-level storage primitives
    */
   def writeChunks(dataset: TableName,
-                  partition: PartitionKey,
+                  partition: BinaryPartition,
                   version: Int,
                   segmentId: SegmentId,
                   chunks: Iterator[(ColumnId, ChunkID, ByteBuffer)]): Future[Response] = {
@@ -83,7 +83,7 @@ extends CachedMergingColumnStore with StrictLogging {
   }
 
   def writeChunkRowMap(dataset: TableName,
-                       partition: PartitionKey,
+                       partition: BinaryPartition,
                        version: Int,
                        segmentId: SegmentId,
                        chunkRowMap: ChunkRowMap): Future[Response] = {
@@ -94,27 +94,29 @@ extends CachedMergingColumnStore with StrictLogging {
     yield { resp }
   }
 
-  def readChunks[K](columns: Set[ColumnId],
-                    keyRange: KeyRange[K],
-                    version: Int): Future[Seq[ChunkedData]] = {
-    for { (chunkTable, rowMapTable) <- getSegmentTables(keyRange.dataset)
+  def readChunks(dataset: TableName,
+                 columns: Set[ColumnId],
+                 keyRange: BinaryKeyRange,
+                 version: Int): Future[Seq[ChunkedData]] = {
+    for { (chunkTable, rowMapTable) <- getSegmentTables(dataset)
           data <- Future.sequence(columns.toSeq.map(
                     chunkTable.readChunks(keyRange.partition, version, _,
-                                          keyRange.binaryStart, keyRange.binaryEnd,
+                                          keyRange.start, keyRange.end,
                                           keyRange.endExclusive))) }
     yield { data }
   }
 
-  def readChunkRowMaps[K](keyRange: KeyRange[K],
-                          version: Int): Future[Seq[(SegmentId, BinaryChunkRowMap)]] = {
-    for { (chunkTable, rowMapTable) <- getSegmentTables(keyRange.dataset)
+  def readChunkRowMaps(dataset: TableName,
+                       keyRange: BinaryKeyRange,
+                       version: Int): Future[Iterator[ChunkMapInfo]] = {
+    for { (chunkTable, rowMapTable) <- getSegmentTables(dataset)
           cassRowMaps <- rowMapTable.getChunkMaps(keyRange.partition, version,
-                                                  keyRange.binaryStart, keyRange.binaryEnd) }
+                                                  keyRange.start, keyRange.end) }
     yield {
-      cassRowMaps.map {
+      cassRowMaps.toIterator.map {
         case ChunkRowMapRecord(segmentId, chunkIds, rowNums, nextChunkId) =>
           val rowMap = new BinaryChunkRowMap(chunkIds, rowNums, nextChunkId)
-          (segmentId, rowMap)
+          (keyRange.partition, segmentId, rowMap)
       }
     }
   }
@@ -126,15 +128,13 @@ extends CachedMergingColumnStore with StrictLogging {
    */
   def scanChunkRowMaps(dataset: TableName,
                        version: Int,
-                       partitionFilter: (PartitionKey => Boolean),
                        params: Map[String, String]): Future[Iterator[ChunkMapInfo]] = {
     val tokenStart = params("token_start")
     val tokenEnd   = params("token_end")
     for { (chunkTable, rowMapTable) <- getSegmentTables(dataset)
           rowMaps <- rowMapTable.scanChunkMaps(version, tokenStart, tokenEnd) }
     yield {
-      rowMaps.filter { case (part, _) => partitionFilter(part) }
-             .map { case (part, ChunkRowMapRecord(segmentId, chunkIds, rowNums, nextChunkId)) =>
+      rowMaps.map { case (part, ChunkRowMapRecord(segmentId, chunkIds, rowNums, nextChunkId)) =>
         (part, segmentId, new BinaryChunkRowMap(chunkIds, rowNums, nextChunkId))
       }
     }

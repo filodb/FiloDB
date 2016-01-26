@@ -7,14 +7,14 @@ import play.api.libs.iteratee.Iteratee
 import scala.concurrent.Future
 
 import filodb.cassandra.FiloCassandraConnector
-import filodb.core.metadata.Column
+import filodb.core.metadata.{Column, DataColumn}
 
 /**
  * Represents the "columns" Cassandra table tracking column and schema changes for a dataset
  *
  * @param config a Typesafe Config with hosts, port, and keyspace parameters for Cassandra connection
  */
-sealed class ColumnTable(val config: Config) extends CassandraTable[ColumnTable, Column]
+sealed class ColumnTable(val config: Config) extends CassandraTable[ColumnTable, DataColumn]
 with FiloCassandraConnector {
   override val tableName = "columns"
 
@@ -22,24 +22,22 @@ with FiloCassandraConnector {
   object dataset extends StringColumn(this) with PartitionKey[String]
   object version extends IntColumn(this) with PrimaryKey[Int]
   object name extends StringColumn(this) with PrimaryKey[String]
+  object id extends IntColumn(this)
   object columnType extends StringColumn(this)
-  object serializer extends StringColumn(this)
   object isDeleted extends BooleanColumn(this)
-  object isSystem extends BooleanColumn(this)
   // scalastyle:on
 
   import filodb.cassandra.Util._
   import filodb.core._
 
   // May throw IllegalArgumentException if cannot convert one of the string types to one of the Enums
-  override def fromRow(row: Row): Column =
-    Column(name(row),
-           dataset(row),
-           version(row),
-           Column.ColumnType.withName(columnType(row)),
-           Column.Serializer.withName(serializer(row)),
-           isDeleted(row),
-           isSystem(row))
+  override def fromRow(row: Row): DataColumn =
+    DataColumn(id(row),
+               name(row),
+               dataset(row),
+               version(row),
+               Column.ColumnType.withName(columnType(row)),
+               isDeleted(row))
 
   def initialize(): Future[Response] = create.ifNotExists.future().toResponse()
 
@@ -51,14 +49,13 @@ with FiloCassandraConnector {
     (enum run Iteratee.fold(Column.EmptySchema)(Column.schemaFold)).handleErrors
   }
 
-  def insertColumn(column: Column): Future[Response] = {
+  def insertColumn(column: DataColumn): Future[Response] = {
     insert.value(_.dataset, column.dataset)
           .value(_.name,    column.name)
           .value(_.version, column.version)
+          .value(_.id,      column.id)
           .value(_.columnType, column.columnType.toString)
-          .value(_.serializer, column.serializer.toString)
           .value(_.isDeleted, column.isDeleted)
-          .value(_.isSystem, column.isSystem)
           .ifNotExists
           .future().toResponse(AlreadyExists)
   }

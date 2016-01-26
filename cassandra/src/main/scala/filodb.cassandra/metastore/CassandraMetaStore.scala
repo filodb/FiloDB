@@ -4,7 +4,7 @@ import com.typesafe.config.Config
 import scala.concurrent.{ExecutionContext, Future}
 
 import filodb.core._
-import filodb.core.metadata.{Column, Dataset}
+import filodb.core.metadata.{Column, DataColumn, Dataset}
 import filodb.core.store.MetaStore
 
 /**
@@ -36,7 +36,7 @@ class CassandraMetaStore(config: Config)
   def deleteDataset(name: String): Future[Response] =
     datasetTable.deleteDataset(name)
 
-  def insertColumn(column: Column): Future[Response] =
+  def insertColumn(column: DataColumn): Future[Response] =
     columnTable.insertColumn(column)
 
   def getSchema(dataset: String, version: Int): Future[Column.Schema] =

@@ -27,7 +27,7 @@ extends CassandraTable[ChunkTable, (String, Types.SegmentId, Int, ByteBuffer)] {
   implicit val session = connector.session
 
   //scalastyle:off
-  object partition extends StringColumn(this) with PartitionKey[String]
+  object partition extends BlobColumn(this) with PartitionKey[ByteBuffer]
   object version extends IntColumn(this) with PartitionKey[Int]
   object columnName extends StringColumn(this) with PrimaryKey[String]
   object segmentId extends BlobColumn(this) with PrimaryKey[ByteBuffer]
@@ -45,11 +45,11 @@ extends CassandraTable[ChunkTable, (String, Types.SegmentId, Int, ByteBuffer)] {
 
   def clearAll(): Future[Response] = truncate.future().toResponse()
 
-  def writeChunks(partition: String,
+  def writeChunks(partition: Types.BinaryPartition,
                   version: Int,
                   segmentId: Types.SegmentId,
                   chunks: Iterator[(String, Types.ChunkID, ByteBuffer)]): Future[Response] = {
-    val insertQ = insert.value(_.partition,  partition)
+    val insertQ = insert.value(_.partition,  partition.toByteBuffer)
                         .value(_.version,    version)
                         .value(_.segmentId,  segmentId.toByteBuffer)
     // NOTE: This is actually a good use of Unlogged Batch, because all of the inserts
@@ -70,7 +70,7 @@ extends CassandraTable[ChunkTable, (String, Types.SegmentId, Int, ByteBuffer)] {
   // ask for too large of a range.  Also, beware the starting segment ID must line up with the
   // segment boundary.
   // endExclusive indicates if the end segment ID is exclusive or not.
-  def readChunks(partition: String,
+  def readChunks(partition: Types.BinaryPartition,
                  version: Int,
                  column: String,
                  startSegmentId: Types.SegmentId,
@@ -78,7 +78,7 @@ extends CassandraTable[ChunkTable, (String, Types.SegmentId, Int, ByteBuffer)] {
                  endExclusive: Boolean = true): Future[ChunkedData] = {
     val initialQuery =
       select(_.segmentId, _.chunkId, _.data).where(_.columnName eqs column)
-        .and(_.partition eqs partition)
+        .and(_.partition eqs partition.toByteBuffer)
         .and(_.version eqs version)
         .and(_.segmentId gte startSegmentId.toByteBuffer)
     val wholeQuery = if (endExclusive) { initialQuery.and(_.segmentId lt untilSegmentId.toByteBuffer) }
