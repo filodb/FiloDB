@@ -112,6 +112,28 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
     }
   }
 
+  it should "replace rows with multi row keys to an uncached segment" in {
+    import GdeltTestData._
+    val segInfo = SegmentInfo(197901, "0").basedOn(projection2)
+    val segment = new RowWriterSegment(projection2, schema)(segInfo)
+    segment.addRowsAsChunk(readers.toIterator.take(20))
+    colStore.appendSegment(projection2, segment, 0).futureValue should equal (Success)
+
+    colStore.clearSegmentCache()
+
+    val segment2 = new RowWriterSegment(projection2, schema)(segInfo)
+    segment2.addRowsAsChunk(readers.toIterator.take(3))
+    colStore.appendSegment(projection2, segment2, 0).futureValue should equal (Success)
+
+    val keyRange = KeyRange(197901, "0", "0", endExclusive = false).basedOn(projection2)
+    whenReady(colStore.readSegments(projection2, schema, 0)(keyRange)) { segIter =>
+      val segments = segIter.toSeq
+      segments should have length (1)
+      val readSeg = segments.head.asInstanceOf[RowReaderSegment]
+      readSeg.rowIterator().map(_.getInt(6)).sum should equal (127)
+    }
+  }
+
   "readSegments" should "read segments back that were written" in {
     val segment = getRowWriter()
     segment.addRowsAsChunk(mapper(names))
@@ -201,8 +223,4 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
       rowIter.map(_.getInt(6)).sum should equal (127)
     }
   }
-
-  // Write ALL rows for ones with null values
-  // actually wait, maybe this should be the end-to-end ReprojectorSpec?
-  it should "write and read back rows written with multi-part (partly null) partition keys" in (pending)
 }
