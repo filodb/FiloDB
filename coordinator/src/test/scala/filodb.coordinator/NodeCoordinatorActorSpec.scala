@@ -92,42 +92,41 @@ with CoordinatorSetup with ScalaFutures {
   }
 
   it("should be able to start ingestion, send rows, and get an ack back") {
-    probe.send(coordActor, CreateDataset(dataset1, schema))
+    probe.send(coordActor, CreateDataset(dataset3, schema))
     probe.expectMsg(DatasetCreated)
-    columnStore.clearProjectionData(dataset1.projections.head).futureValue should equal (Success)
+    columnStore.clearProjectionData(dataset3.projections.head).futureValue should equal (Success)
 
-    probe.send(coordActor, SetupIngestion(dataset1.name, schema.map(_.name), 0))
+    probe.send(coordActor, SetupIngestion(dataset3.name, schema.map(_.name), 0))
     probe.expectMsg(IngestionReady)
 
-    probe.send(coordActor, CheckCanIngest(dataset1.name, 0))
+    probe.send(coordActor, CheckCanIngest(dataset3.name, 0))
     probe.expectMsg(CanIngest(true))
 
-    // TODO: use :getOrElse once it's ready, then ingest all 99 rows
-    probe.send(coordActor, IngestRows(dataset1.name, 0, readers.take(50), 1L))
+    probe.send(coordActor, IngestRows(dataset3.name, 0, readers, 1L))
     probe.expectMsg(Ack(1L))
 
     // Now, try to flush and check that stuff was written to columnstore...
     // Note that once we receive the Flushed message back, that means flush cycle was completed.
-    probe.send(coordActor, Flush(dataset1.name, 0))
+    probe.send(coordActor, Flush(dataset3.name, 0))
     probe.expectMsg(Flushed)
 
-    probe.send(coordActor, GetIngestionStats(dataset1.name, 0))
+    probe.send(coordActor, GetIngestionStats(dataset3.name, 0))
     probe.expectMsg(DatasetCoordinatorActor.Stats(1, 1, 0, 0, -1))
 
     // Now, read stuff back from the column store and check that it's all there
-    val keyRange = KeyRange(Seq("GOV", 1979), "0", "0", endExclusive = false).basedOn(projection1)
-    whenReady(columnStore.readSegments(projection1, schema, 0)(keyRange)) { segIter =>
+    val keyRange = KeyRange(Seq("GOV", 1979), "0", "0", endExclusive = false).basedOn(projection3)
+    whenReady(columnStore.readSegments(projection3, schema, 0)(keyRange)) { segIter =>
       val segments = segIter.toSeq
       segments should have length (1)
       val readSeg = segments.head.asInstanceOf[RowReaderSegment]
       readSeg.segInfo.segment should equal (keyRange.start)
-      readSeg.rowIterator().map(_.getInt(6)).sum should equal (67)
+      readSeg.rowIterator().map(_.getInt(6)).sum should equal (80)
     }
 
-    val splits = columnStore.getScanSplits(dataset1.name)
+    val splits = columnStore.getScanSplits(dataset3.name)
     splits should have length (1)
-    whenReady(columnStore.scanRows(projection1, schema, 0, params = splits.head)()) { rowIter =>
-      rowIter.map(_.getInt(6)).sum should equal (288)
+    whenReady(columnStore.scanRows(projection3, schema, 0, params = splits.head)()) { rowIter =>
+      rowIter.map(_.getInt(6)).sum should equal (492)
     }
   }
 }

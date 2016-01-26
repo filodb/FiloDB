@@ -124,18 +124,11 @@ case class CompositeKeyType(atomTypes: Seq[SingleKeyType]) extends KeyType {
   override def getKeyFunc(columnNumbers: Array[Int]): (RowReader) => Seq[_] = {
     require(columnNumbers.size == atomTypes.length)
 
-    def getValue(rowReader: RowReader, keyType: SingleKeyType, columnNo: Int): Any =
-      if (rowReader.notNull(columnNo)) {
-        keyType.extractor.getField(rowReader, columnNo)
-      } else {
-        throw NullKeyValue(columnNo)
-      }
-
-    def toSeq(rowReader: RowReader): Seq[_] = {
-      (0 until columnNumbers.size).map { i =>
-        getValue(rowReader, atomTypes(i), columnNumbers(i))
-      }
+    val keyFuncs: Seq[RowReader => Any] = atomTypes.zip(columnNumbers).map { case (atomType, colNo) =>
+      atomType.getKeyFunc(Array(colNo)).asInstanceOf[RowReader => Any]
     }
+
+    def toSeq(rowReader: RowReader): Seq[_] = keyFuncs.map(_(rowReader))
 
     toSeq
   }

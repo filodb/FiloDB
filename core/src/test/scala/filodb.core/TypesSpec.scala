@@ -1,6 +1,6 @@
 package filodb.core
 
-import org.velvia.filo.TupleRowReader
+import org.velvia.filo.{RowReader, TupleRowReader}
 import scodec.bits._
 
 import org.scalatest.{FunSpec, Matchers}
@@ -56,6 +56,18 @@ class TypesSpec extends FunSpec with Matchers {
       intercept[NullKeyValue] {
         compositeKeyFunc(row1)
       }
+    }
+
+    it("CompositeKeyType should use getKeyFunc from individual KeyTypes") {
+      val row1 = TupleRowReader((Some("ape"), None))
+
+      import filodb.core.metadata.ComputedKeyTypes.ComputedIntKeyType
+      val intKeyType = new ComputedIntKeyType((r: RowReader) => -2)
+      val types = Seq(StringKeyType, intKeyType)
+      val compositeType = CompositeKeyType(types)
+      val compositeKeyFunc = compositeType.getKeyFunc(Array(0, 1))
+      // Should not throw NullKeyValue anymore, since ComputedIntKeyType should always return -2
+      compositeKeyFunc(row1) should equal (Seq("ape", -2))
     }
 
     it("should binary compare Int and Long key types correctly") (pending)

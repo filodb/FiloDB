@@ -83,4 +83,9 @@ object GdeltTestData {
   // Dataset2: Partition key (MonthYear) / Row keys (Actor2Code, GLOBALEVENTID)
   val dataset2 = Dataset("gdelt", Seq("Actor2Code", "GLOBALEVENTID"), ":string 0", Seq("MonthYear"))
   val projection2 = RichProjection(dataset2, schema)
+
+  // Dataset3: same as Dataset1 but with :getOrElse to prevent null partition keys
+  val dataset3 = Dataset("gdelt", Seq("GLOBALEVENTID"), ":string 0",
+                         Seq(":getOrElse Actor2Code NONE", ":getOrElse Year -1"))
+  val projection3 = RichProjection(dataset3, schema)
 }
