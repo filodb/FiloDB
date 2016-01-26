@@ -96,7 +96,7 @@ Your input is appreciated!
 1. Clone the project and cd into the project directory,
 
     ```
-    $ git clone https://github.com/velvia/FiloDB.git
+    $ git clone https://github.com/tuplejump/FiloDB.git
     $ cd FiloDB
     ```
 
