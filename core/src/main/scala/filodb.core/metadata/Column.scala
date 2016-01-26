@@ -136,10 +136,12 @@ object Column extends StrictLogging {
     def check(requirement: => Boolean, failMessage: String): Option[String] =
       if (requirement) None else Some(failMessage)
 
-    val startsWithColon = column.name.startsWith(":")
+    import scala.language.postfixOps
+    val illicitCharsRegex = "[:() ,\001]+"r
     val alreadyHaveIt = schema contains column.name
     Seq(
-      check(!startsWithColon, "Data columns cannot start with a colon"),
+      // check(!startsWithColon, "Data columns cannot start with a colon"),
+      illicitCharsRegex.findFirstMatchIn(column.name).map(x => s"Illegal char $x found in column name"),
       check(!alreadyHaveIt || (alreadyHaveIt && column.version > schema(column.name).version),
             "Cannot add column at version lower than latest definition"),
       check(!alreadyHaveIt || (alreadyHaveIt && column.propertyChanged(schema(column.name))),

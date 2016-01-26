@@ -32,7 +32,19 @@ class ColumnSpec extends FunSpec with Matchers {
       val newCol = ageColumn.copy(name = ":illegal")
       val reasons = Column.invalidateNewColumn("foo", schema, newCol)
       reasons should have length 1
-      reasons.head should startWith ("Data columns cannot start")
+      reasons.head should startWith ("Illegal char :")
+    }
+
+    it("should check that column names cannot contain illegal chars") {
+      def checkIsIllegal(name: String): Unit = {
+        val newCol = ageColumn.copy(name = name)
+        val reasons = Column.invalidateNewColumn("foo", schema, newCol)
+        reasons.head should startWith ("Illegal char")
+      }
+
+      checkIsIllegal("ille gal")
+      checkIsIllegal("(illegal)")
+      checkIsIllegal("ille\001gal")
     }
 
     it("should check that cannot add columns at lower versions") {
