@@ -56,7 +56,7 @@ object Dataset {
   val DefaultPartitionKey = "/0"
   val DefaultPartitionColumn = s":string $DefaultPartitionKey"
 
-  val DefaultOptions = DatasetOptions(chunkSize = 1000)
+  val DefaultOptions = DatasetOptions(chunkSize = 5000)
 
   /**
    * Creates a new Dataset with a single superprojection with a single key column and
