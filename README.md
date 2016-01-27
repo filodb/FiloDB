@@ -79,7 +79,6 @@ Your input is appreciated!
 
 * True columnar querying and execution, using late materialization and vectorization techniques
 * Use of GPU and SIMD instructions to speed up queries
-* Support for many more data types and sort and partition keys - please give us your input!
 * Non-Spark ingestion API.  Your input is again needed.
 * In-memory caching for significant query speedup
 * Projections.  Often-repeated queries can be sped up significantly with projections.
@@ -87,7 +86,7 @@ Your input is appreciated!
 ## Pre-requisites
 
 1. [Java 8](http://www.oracle.com/technetwork/java/javase/downloads/jdk8-downloads-2133151.html)
-2. [SBT](http://www.scala-sbt.org/)
+2. [SBT](http://www.scala-sbt.org/) to build
 3. [Apache Cassandra](http://cassandra.apache.org/) (We prefer using [CCM](https://github.com/pcmanus/ccm) for local testing) (Optional if you are using the in-memory column store)
 4. [Apache Spark (1.5.x)](http://spark.apache.org/)
 
@@ -104,34 +103,79 @@ Your input is appreciated!
     - Start a Cassandra Cluster. If its not accessible at `localhost:9042` update it in `core/src/main/resources/application.conf`.
     - Or, use FiloDB's in-memory column store with Spark (does not work with CLI). Pass the `--conf spark.filodb.store=in-memory` to `spark-submit` / `spark-shell`.  This is a great option to test things out, and is really really fast!
 
-3. FiloDB can be used through `filo-cli` or as a Spark data source. The CLI supports data ingestion from CSV files only; the Spark data source is better tested and richer in features.
+3. For Cassandra, run `filo-cli --command init` to initialize the default `filodb` keyspace.
+4. Now, you can use Spark to ingest/query, or the CLI to ingest/examine metadata.
 
 Note: There is at least one release out now, tagged via Git and also located in the "Releases" tab on Github.
 
-There are two crucial parts to a dataset in FiloDB,
+## Introduction to FiloDB Data Modelling
 
-1. partitioning column - decides how data is going to be distributed across the cluster
-2. sort column         - acts as a primary key within each partition and decides how data will be sorted within each partition.  Like the "clustering key" from Cassandra.
+Perhaps it's easiest by starting with a diagram of how FiloDB stores data.
 
-The PRIMARY KEY for FiloDB consists of (partition key, sort key).  When choosing the above values you must make sure the combination of the two are unique.  This is very similar to Cassandra CQL Tables, whose primary key consists of (partition columns, clustering columns).  The partition key in FiloDB maps to the Cassandra partition key, and sort key maps to the clustering key.
+<table>
+  <tr>
+    <td></td>
+    <td colspan="2">Column A</td>
+    <td colspan="2">Column B</td>
+  </tr>
+  <tr>
+    <td>Partition key 1</td>
+    <td>Segment 1</td>
+    <td>Segment 2</td>
+    <td>Segment 1</td>
+    <td>Segment 2</td>
+  </tr>
+  <tr>
+    <td>Partition key 2</td>
+    <td>Segment 1</td>
+    <td>Segment 2</td>
+    <td>Segment 1</td>
+    <td>Segment 2</td>
+  </tr>
+</table>
 
-Specifying the partitioning column is optional.  If a partitioning column is not specified, FiloDB will create a default one with a fixed value, which means everything will be thrown into one node, and is only suitable for small amounts of data.  If you don't specify a partitioning column, then you have to make sure your sort keys are all unique.
+Three types of key define the data model of a FiloDB table.
 
-### FiloDB Data Modelling and Performance Considerations
+1. **partition key** - decides how data is going to be distributed across the cluster. All data within one partition key is guaranteed to fit on one node. May consist of multiple columns.
+2. **segment key** - groups row values into efficient chunks.  Segments within a partition are sorted by segment key and range scans can be done over segment keys.
+1. **row key**       - acts as a primary key within each partition and decides how data will be sorted within each segment.  May consist of multiple columns.
 
-**Choosing a Partition Key**.
+The PRIMARY KEY for FiloDB consists of (partition key, row key).  When choosing the above values you must make sure the combination of the two are unique.  No component of a primary key may be null - see the `:getOrElse` function for a way of dealing with null inputs.
 
+Specifying the partitioning column is optional.  If a partitioning column is not specified, FiloDB will create a default one with a fixed value, which means everything will be thrown into one node, and is only suitable for small amounts of data.  If you don't specify a partitioning column, then you have to make sure your row keys are all unique.
+
+### Computed Columns
+
+You may specify a function, or computed column, for use with any key column.  This is especially useful for working around the non-null requirement for keys, or for computing a good segment key.
+
+| Name      | Description     | Example     |
+| :-------- | :-------------- | :---------- |
+| string    | returns a constant string value | `:string /0` |
+| getOrElse | returns default value if column value is null | `:getOrElse columnA ---` |
+
+### FiloDB vs Cassandra Data Modelling
+
+* Like Cassandra, partitions (physical rows) distribute data and clustering keys act as a primary key within a partition
+* Like Cassandra, a single partition is the smallest unit of parallelism when querying from Spark
+* Wider rows work better for FiloDB (bigger chunk/segment size)
+* FiloDB does not have Cassandra's restrictions for partition key filtering. You can filter by any partition keys with most operators.  This means less tables in FiloDB can match more query patterns.
+
+### Data Modelling and Performance Considerations
+
+**Choosing Partition Keys**.
+
+- Partition keys are the most efficient way to filter data
 - If there are too few partitions, then FiloDB will not be able to distribute and parallelize reads.
 - If the numer of rows in each partition is too few, then the storage will not be efficient.
 - If the partition key is time based, there may be a hotspot in the cluster as recent data is all written into the same set of replicas, and likewise for read patterns as well.
 
 **Segment Key and Chunk Size**.
 
-Within each partition, data is delineated by *segments*, which consists of non-overlapping ranges of sort keys.  Within each segment, successive flushes of the MemTable writes data in *chunks*.  The segmentation is key to sorting and filtering data by sort key, and the chunk size (which depends on segmentation) also affects performance.  The smaller the chunk size, the higher the overhead of scanning data becomes.
+Within each partition, data is delineated by the segment key into *segments*.  Within each segment, successive flushes of the MemTable writes data in *chunks*.  The segmentation is key to sorting and filtering data within partitions, and the chunk size (which depends on segmentation) also affects performance.  The smaller the chunk size, the higher the overhead of scanning data becomes.
 
 Segmentation and chunk size distribution may be checked by the CLI `analyze` command.  In addition, the following configuration affects segmentation and chunk size:
 * `memtable.max-rows-per-table`, `memtable.flush-trigger-rows` affects how many rows are kept in the MemTable at a time, and this along with how many partitions are in the MemTable directly leads to the chunk size upon flushing.
-* `segment_size` option when creating a dataset determines the segment size.  For Long, Int, and Double sort keys, the segment size is the rounding factor.  For example, if Long sort key is used and they represent milliseconds, a segment size of 10000 means that data will be segmented into 10 second intervals.  For String sort keys, the segment size is the number of characters at the start of a string that creates the segment key.  Experimentation along with running `filo-cli analyze` is recommended to come up with a good number.
+* The segment size is directly controlled by the segment key.  Choosing a segment key that groups data into big enough chunks (at least 1000 is a good guide) is highly recommended.  Experimentation along with running `filo-cli analyze` is recommended to come up with a good segment key.
 * `chunk_size` option when creating a dataset caps the size of a single chunk.
 
 ### Example FiloDB Schema for machine metrics
@@ -141,7 +185,8 @@ This is one way I would recommend setting things up to take advantage of FiloDB.
 The metric names are the column names.  This lets you select on just one metric and effectively take advantage of columnar layout.
 
 * Partition key = hostname
-* Sort key = timestamp
+* Row key = timestamp (say millis)
+* Segment key = `:round timestamp 10000` (Timestamp rounded to nearest 10000 millis or 10 seconds)
 * Columns: hostname, timestamp, CPU, load_avg, disk_usage, etc.
 
 You can add more metrics/columns over time, but storing each metric in its own column is FAR FAR more efficient, at least in FiloDB.   For example, disk usage metrics are likely to have very different numbers than load_avg, and so Filo can optimize the storage of each one independently.  Right now I would store them as ints and longs if possible.
@@ -156,10 +201,8 @@ Queries that would work well once we expose a local Cassandra query interface:
 
 Another possible layout is something like this:
 
-Partition key = hostname % 1024 (or pick your # of shards)
-Sort key = hostname, timestamp
-
-This will have to wait for the multiple-sort-key-column change of course.
+* Partition key = hostname % 1024 (or pick your # of shards)
+* Row key = hostname, timestamp
 
 ### Distributed Partitioning
 
