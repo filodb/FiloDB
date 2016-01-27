@@ -311,8 +311,8 @@ trait CachedMergingColumnStore extends ColumnStore with StrictLogging {
     yield {
       val chunkMaps = groupChunkMaps.toSeq
       val binKeyRange = BinaryKeyRange(part,
-                                       chunkMaps.head.binPartition,
-                                       chunkMaps.last.binPartition,
+                                       chunkMaps.head.segmentId,
+                                       chunkMaps.last.segmentId,
                                        endExclusive = false)
       val chunks = Await.result(readChunks(projection.datasetName, columns.map(_.name).toSet,
                                            binKeyRange, version), 5.minutes)

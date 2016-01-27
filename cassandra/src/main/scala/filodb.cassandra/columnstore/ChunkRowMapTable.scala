@@ -51,16 +51,16 @@ extends CassandraTable[ChunkRowMapTable, ChunkRowMapRecord] {
 
   /**
    * Retrieves a whole series of chunk maps, in the range [startSegmentId, untilSegmentId)
+   * End is exclusive or not depending on keyRange.endExclusive flag
    * @return ChunkMaps(...), if nothing found will return ChunkMaps(Nil).
    */
-  def getChunkMaps(partition: Types.BinaryPartition,
-                   version: Int,
-                   startSegmentId: Types.SegmentId,
-                   untilSegmentId: Types.SegmentId): Future[Seq[ChunkRowMapRecord]] =
-    select.where(_.partition eqs partition.toByteBuffer)
+  def getChunkMaps(keyRange: BinaryKeyRange,
+                   version: Int): Future[Seq[ChunkRowMapRecord]] =
+    select.where(_.partition eqs keyRange.partition.toByteBuffer)
           .and(_.version eqs version)
-          .and(_.segmentId gte startSegmentId.toByteBuffer)
-          .and(_.segmentId lt untilSegmentId.toByteBuffer)
+          .and(_.segmentId gte keyRange.start.toByteBuffer)
+          .and(if (keyRange.endExclusive) { _.segmentId lt keyRange.end.toByteBuffer }
+               else                       { _.segmentId lte keyRange.end.toByteBuffer })
           .fetch()
 
   def scanChunkMaps(version: Int,

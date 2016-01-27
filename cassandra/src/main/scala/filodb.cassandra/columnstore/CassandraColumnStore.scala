@@ -110,8 +110,7 @@ extends CachedMergingColumnStore with StrictLogging {
                        keyRange: BinaryKeyRange,
                        version: Int): Future[Iterator[ChunkMapInfo]] = {
     for { (chunkTable, rowMapTable) <- getSegmentTables(dataset)
-          cassRowMaps <- rowMapTable.getChunkMaps(keyRange.partition, version,
-                                                  keyRange.start, keyRange.end) }
+          cassRowMaps <- rowMapTable.getChunkMaps(keyRange, version) }
     yield {
       cassRowMaps.toIterator.map {
         case ChunkRowMapRecord(segmentId, chunkIds, rowNums, nextChunkId) =>
