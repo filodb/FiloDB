@@ -24,7 +24,8 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
 
   describe("dataset API") {
     it("should create a new Dataset if one not there") {
-      val dataset = Dataset("foo", "autoid", "seg")
+      val dataset = Dataset("foo", Seq("key1", ":getOrElse key2 --"), "seg",
+                            Seq("part1", ":getOrElse part2 00"))
       metaStore.newDataset(dataset).futureValue should equal (Success)
 
       metaStore.getDataset("foo").futureValue should equal (dataset)

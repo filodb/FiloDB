@@ -65,7 +65,8 @@ class DatasetTableSpec extends CassandraFlatSpec with BeforeAndAfter {
   }
 
   it should "return the Dataset if it exists" in {
-    val barDataset = Dataset("bar", "sortCol", "seg")
+    val barDataset = Dataset("bar", Seq("key1", ":getOrElse key2 --"), "seg",
+                             Seq("part1", ":getOrElse part2 00"))
     datasetTable.createNewDataset(barDataset).futureValue(timeout) should equal (Success)
 
     whenReady(datasetTable.getDataset("bar"),timeout) { dataset =>
