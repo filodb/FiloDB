@@ -55,6 +55,24 @@ case class DataColumn(id: Int,
   def propertyChanged(other: DataColumn): Boolean =
     (columnType != other.columnType) ||
     (isDeleted != other.isDeleted)
+
+  // Use this for efficient serialization over the wire.
+  // We leave out the dataset because that is almost always inferred from context.
+  // NOTE: this is one reason why column names cannot have commas
+  override def toString: String =
+    s"[$id,$name,$version,$columnType${if (isDeleted) ",t" else ""}]"
+}
+
+object DataColumn {
+  /**
+   * Recreates a DataColumn from its toString output
+   */
+  def fromString(str: String, dataset: String): DataColumn = {
+    val parts = str.drop(1).dropRight(1).split(',')
+    DataColumn(parts(0).toInt, parts(1), dataset, parts(2).toInt,
+               Column.ColumnType.withName(parts(3)),
+               parts.size > 4)
+  }
 }
 
 object Column extends StrictLogging {
