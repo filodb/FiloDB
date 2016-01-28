@@ -33,9 +33,10 @@ class DefaultSource extends RelationProvider with CreatableRelationProvider {
    * Parameters:
    *   dataset
    *   version          defaults to 0
-   *   partition_column name of the partitioning column
-   *   sort_column      name of the sort column within each partition
-   *   default_partition_key if defined, use this as the partition key when partitioning column is null
+   *   row_keys         comma-separated list of row keys
+   *   segment_key
+   *   partition_keys   comma-separated list of partition keys
+   *   chunk_size       defaults to 5000
    */
   def createRelation(
       sqlContext: SQLContext,
@@ -44,14 +45,15 @@ class DefaultSource extends RelationProvider with CreatableRelationProvider {
       data: DataFrame): BaseRelation = {
     val dataset = parameters.getOrElse("dataset", sys.error("'dataset' must be specified for FiloDB."))
     val version = parameters.getOrElse("version", "0").toInt
-    val sortColumn = parameters.getOrElse("sort_column", sys.error("'sort_column' must be specified"))
-    val partitionColumn = parameters.get("partition_column")
-    val defaultPartKey = parameters.get("default_partition_key")
-    val segmentSize = parameters.get("segment_size")
+    val rowKeys = parameters.getOrElse("row_keys", sys.error("'row_keys' must be specified.")).
+                             split(',').toSeq
+    val segKey  = parameters.getOrElse("segment_key", sys.error("'segment_key' must be specified."))
+    val partitionKeys = parameters.get("partition_keys").map(_.split(',').toSeq).getOrElse(Nil)
+    val chunkSize = parameters.get("chunk_size").map(_.toInt)
 
     sqlContext.saveAsFiloDataset(data, dataset,
-                                 sortColumn, partitionColumn, version,
-                                 mode, defaultPartKey, segmentSize)
+                                 rowKeys, segKey, partitionKeys, version,
+                                 chunkSize, mode)
 
     // The below is inefficient as it reads back the schema that was written earlier - though it shouldn't
     // take very long

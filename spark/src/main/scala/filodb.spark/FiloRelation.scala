@@ -12,7 +12,6 @@ import org.velvia.filo.{FiloRowReader, FiloVector, ParsersFromChunks, RowReader}
 import scala.concurrent.{Await, Future}
 import scala.concurrent.duration._
 import scala.language.postfixOps
-import scala.reflect.ClassTag
 
 import org.apache.spark.rdd.RDD
 import org.apache.spark.SparkContext
@@ -24,7 +23,7 @@ import org.apache.spark.sql.{DataFrame, Row, SQLContext}
 import org.apache.spark.unsafe.types.UTF8String
 
 import filodb.core._
-import filodb.core.metadata.{Column, Dataset, DatasetOptions}
+import filodb.core.metadata.{Column, Dataset, RichProjection}
 import filodb.core.store.RowReaderSegment
 
 object FiloRelation {
@@ -48,25 +47,34 @@ object FiloRelation {
   def getSchema(dataset: String, version: Int): Column.Schema =
     parse(FiloSetup.metaStore.getSchema(dataset, version)) { schema => schema }
 
+  // For now just implement really simple filtering
+  // private def getFilterFuncs(filters: Seq[Filter]): Seq[Types.PartitionKey => Boolean] = {
+  //   import org.apache.spark.sql.sources._
+  //   logger.info(s"Filters = $filters")
+  //   filters.flatMap {
+  //     case EqualTo(datasetObj.partitionColumn, equalVal) =>
+  //       val compareVal = equalVal.toString   // must convert to same type as partitionKey
+  //       logger.info(s"Adding filter predicate === $compareVal")
+  //       Some((p: Types.PartitionKey) => p == compareVal)
+  //     case other: Filter =>
+  //       None
+  //   }
+  // }
+
   // It's good to put complex functions inside an object, to be sure that everything
   // inside the function does not depend on an explicit outer class and can be serializable
   def perPartitionRowScanner(config: Config,
-                             datasetOptionStr: String,
+                             readOnlyProjectionString: String,
                              version: Int,
-                             columns: Seq[Column],
-                             sortColumn: Column,
-                             filterFunc: Types.PartitionKey => Boolean,
                              param: Map[String, String]): Iterator[Row] = {
     // NOTE: all the code inside here runs distributed on each node.  So, create my own datastore, etc.
     FiloSetup.init(config)
     FiloSetup.columnStore    // force startup
-    val options = DatasetOptions.fromString(datasetOptionStr)
-    val untypedHelper = Dataset.sortKeyHelper(options, sortColumn).get
-    implicit val helper = untypedHelper.asInstanceOf[SortKeyHelper[untypedHelper.Key]]
+    val readOnlyProjection = RichProjection.readOnlyFromString(readOnlyProjectionString)
 
     parse(FiloSetup.columnStore.scanRows(
-            columns, sortColumn.dataset, version, filterFunc, params = param,
-            (bytes, clazzes) => new SparkRowReader(bytes, clazzes)),
+            readOnlyProjection, readOnlyProjection.columns, version, params = param,
+            (bytes, clazzes) => new SparkRowReader(bytes, clazzes))(),
           10 minutes) { rowIt => rowIt.asInstanceOf[Iterator[Row]] }
   }
 }
@@ -111,17 +119,17 @@ case class FiloRelation(dataset: String,
   def buildScan(requiredColumns: Array[String], filters: Array[Filter]): RDD[Row] = {
     // Define vars to distribute inside the method
     val _config = this.filoConfig
-    val datasetOptionsStr = this.datasetObj.options.toString
+    val projection = RichProjection(this.datasetObj, filoSchema.values.toSeq)
     val _version = this.version
     val filoColumns = requiredColumns.map(this.filoSchema)
-    val sortCol = filoSchema(datasetObj.projections.head.sortColumn)
+    val readOnlyProjStr = projection.toReadOnlyProjString(filoColumns.map(_.name))
     val splitOpts = Map("splits_per_node" -> splitsPerNode.toString)
     val splits = FiloSetup.columnStore.getScanSplits(dataset, splitOpts)
     logger.info(s"Splits = $splits")
 
-    val filterFuncs = getFilterFuncs(filters.toList)
-    require(filterFuncs.length <= 1, "More than one filtering function not supported right now")
-    val filterFunc = if (filterFuncs.isEmpty) ((p: Types.PartitionKey) => true) else filterFuncs.head
+    // val filterFuncs = getFilterFuncs(filters.toList)
+    // require(filterFuncs.length <= 1, "More than one filtering function not supported right now")
+    // val filterFunc = if (filterFuncs.isEmpty) ((p: Types.PartitionKey) => true) else filterFuncs.head
 
     // NOTE: It's critical that the closure inside mapPartitions only references
     // vars from buildScan() method, and not the FiloRelation class.  Otherwise
@@ -131,23 +139,8 @@ case class FiloRelation(dataset: String,
       .mapPartitions { paramIter =>
         val params = paramIter.toSeq
         require(params.length == 1)
-        perPartitionRowScanner(_config, datasetOptionsStr, _version, filoColumns,
-                               sortCol, filterFunc, params.head)
+        perPartitionRowScanner(_config, readOnlyProjStr, _version, params.head)
       }
-  }
-
-  // For now just implement really simple filtering
-  private def getFilterFuncs(filters: Seq[Filter]): Seq[Types.PartitionKey => Boolean] = {
-    import org.apache.spark.sql.sources._
-    logger.info(s"Filters = $filters")
-    filters.flatMap {
-      case EqualTo(datasetObj.partitionColumn, equalVal) =>
-        val compareVal = equalVal.toString   // must convert to same type as partitionKey
-        logger.info(s"Adding filter predicate === $compareVal")
-        Some((p: Types.PartitionKey) => p == compareVal)
-      case other: Filter =>
-        None
-    }
   }
 }
 

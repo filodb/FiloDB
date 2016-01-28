@@ -21,7 +21,7 @@ case class NameRecord(first: Option[String], last: Option[String],
 
 class StreamingTest extends FunSpec with BeforeAndAfter with BeforeAndAfterAll
 with Matchers with ScalaFutures {
-  import SegmentSpec._
+  import NamesTestData._
 
   implicit val defaultPatience =
     PatienceConfig(timeout = Span(10, Seconds), interval = Span(50, Millis))
@@ -67,7 +67,7 @@ with Matchers with ScalaFutures {
   it("should ingest successive streaming RDDs as DataFrames...") {
     val queue = mutable.Queue[RDD[NameRecord]]()
     val _names = lotLotNames
-    _names.map(n => NameRecord(n._1, n._2, n._3, n._4)).
+    _names.map(n => NameRecord(n._1, n._2, n._3, n._5)).
                 grouped(200).
                 foreach { g => queue += ssc.sparkContext.parallelize(g, 1) }
     val nameChunks = ssc.queueStream(queue)
@@ -75,8 +75,9 @@ with Matchers with ScalaFutures {
     nameChunks.foreachRDD { rdd =>
       rdd.toDF.write.format("filodb.spark").
           option("dataset", largeDataset.name).
-          option("sort_column", "age").
-          option("partition_column", "league").save()
+          option("row_keys", "age").
+          option("segment_key", ":string 0").
+          option("partition_keys", "league").save()
     }
     ssc.start()
     ssc.awaitTerminationOrTimeout(8000)

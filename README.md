@@ -229,11 +229,23 @@ The options to use with the data-source api are:
 | option           | value                                                            | command    | optional |
 |------------------|------------------------------------------------------------------|------------|----------|
 | dataset          | name of the dataset                                              | read/write | No       |
-| sort_column      | name of the column according to which the data should be sorted  | write      | No       |
-| partition_column | name of the column according to which data should be partitioned | write      | Yes      |
+| row_keys         | comma-separated list of column name(s) or computed column functions to use for the row primary key within each partition.  Cannot be null.  Use `:getOrElse` function if null values might be encountered.  | write      | No       |
+| segment_key      | name of the column (could be computed) to use to group rows into segments in a partition.  Cannot be null.  Use `:getOrElse` function if null values might be encountered.  | write      | No      |
+| partition_keys   | comma-separated list of column name(s) or computed column functions to use for the partition key.  Cannot be null.  Use `:getOrElse` function if null values might be encountered.  If not specified, defaults to `:string /0` (a single partition).  | write      | Yes      |
 | splits_per_node  | number of read threads per node, defaults to 4 | read | Yes |
-| default_partition_key | default value to use for the partition key if the partition_column has a null value.  If not specified, an error is thrown. Note that this only has an effect if the dataset is created for the first time.| write | Yes |
-| version          | numeric version of data to write, defaults to 0  | write | Yes |
+| chunk_size       | Max number of rows to put into one chunk.  Note that this only has an effect if the dataset is created for the first time.| write | Yes |
+| version          | numeric version of data to write, defaults to 0  | read/write | Yes |
+
+Partitioning columns could be created using an expression on the original column in Spark:
+
+    val newDF = df.withColumn("partition", df("someCol") % 100)
+
+or even UDFs:
+
+    val idHash = sqlContext.udf.register("hashCode", (s: String) => s.hashCode())
+    val newDF = df.withColumn("partition", idHash(df("id")) % 100) 
+
+However, note that the above methods will lead to a physical column being created, so use of computed columns is probably preferable.
 
 ### Configuring FiloDB
 
