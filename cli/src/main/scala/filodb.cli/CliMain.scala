@@ -128,7 +128,7 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
     }
     parse(metaStore.getSchema(dataset, Int.MaxValue)) { schema =>
       println("Columns:")
-      schema.values.foreach { case DataColumn(_, name, _, ver, colType, _) =>
+      schema.values.toSeq.sortBy(_.name).foreach { case DataColumn(_, name, _, ver, colType, _) =>
         println("  %-35.35s %5d %s".format(name, ver, colType))
       }
     }
