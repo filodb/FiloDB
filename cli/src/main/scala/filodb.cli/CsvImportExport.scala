@@ -86,7 +86,7 @@ trait CsvImportExport extends StrictLogging {
         }
     }
 
-    println("Ingestion of $csvPath finished!")
+    println(s"Ingestion of $csvPath finished!")
     exitCode = 0
   }
 }
