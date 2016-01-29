@@ -1,5 +1,6 @@
 package filodb.core.metadata
 
+import org.scalactic._
 import org.velvia.filo.TupleRowReader
 import scala.language.existentials
 
@@ -13,81 +14,65 @@ class ProjectionSpec extends FunSpec with Matchers {
   import SingleKeyTypes._
 
   describe("RichProjection") {
-    it("should get BadSchema if cannot find row key or segment key") {
+    it("should get MissingColumnNames if cannot find row key or segment key") {
       val resp = RichProjection.make(Dataset("a", "boo", "seg"), schema)
-      resp.isFailure should be (true)
-      resp.recover {
-        case BadSchema(reason) => reason should include ("Key column boo not in columns")
-      }
+      resp.isBad should be (true)
+      resp.swap.get should equal (MissingColumnNames(Seq("boo"), "row"))
 
       val resp2 = RichProjection.make(Dataset("a", "age", "bar"), schema)
-      resp2.isFailure should be (true)
-      resp2.recover {
-        case BadSchema(reason) => reason should include ("Segment column bar not in columns")
-      }
+      resp2.isBad should be (true)
+      resp2.swap.get should equal (MissingColumnNames(Seq("bar"), "segment"))
     }
 
-    it("should get BadSchema if segment key is not supported type") {
+    it("should get UnsupportedSegmentColumnType if segment key is not supported type") {
       val schema2 = schema ++ Seq(DataColumn(99, "bool", "a", 0, Column.ColumnType.BitmapColumn))
       val resp = RichProjection.make(Dataset("a", "age", "bool"), schema2)
-      resp.isFailure should be (true)
-      resp.recover {
-        case BadSchema(reason) => reason should include ("is not supported")
-      }
+      resp.isBad should be (true)
+      resp.swap.get should equal (UnsupportedSegmentColumnType("bool", Column.ColumnType.BitmapColumn))
     }
 
-    it("should get BadSchema if projection columns are missing from schema") {
+    it("should get MissingColumnNames if projection columns are missing from schema") {
       val missingColProj = Projection(0, "a", Seq("age"), "seg", columns = Seq("first", "yards"))
       val missingColDataset = Dataset("a", Seq(missingColProj), Seq(Dataset.DefaultPartitionColumn))
       val resp = RichProjection.make(missingColDataset, schema)
-      resp.isFailure should be (true)
-      resp.recover {
-        case BadSchema(reason) => reason should include ("Specified projection columns are missing")
-      }
+      resp.isBad should be (true)
+      resp.swap.get should equal (MissingColumnNames(Seq("yards"), "projection"))
     }
 
-    it("should get BadSchema if key columns or partition columns are empty") {
+    it("should get NoColumnsSpecified if key columns or partition columns are empty") {
       val emptyKeyColsDataset = Dataset("b", Seq(), "seg", Seq(":string 0"))
       val resp1 = RichProjection.make(emptyKeyColsDataset, schema)
-      resp1.isFailure should be (true)
-      resp1.recover {
-        case BadSchema(reason) => reason should include ("cannot be empty")
-      }
+      resp1.isBad should be (true)
+      resp1.swap.get should equal (NoColumnsSpecified("row"))
 
       val emptyPartDataset = Dataset("c", Seq("age"), "seg", Nil)
       val resp2 = RichProjection.make(emptyPartDataset, schema)
-      resp2.isFailure should be (true)
-      resp2.recover {
-        case BadSchema(reason) => reason should include ("cannot be empty")
-      }
+      resp2.isBad should be (true)
+      resp2.swap.get should equal (NoColumnsSpecified("partition"))
     }
 
-    it("should get BadSchema if cannot find partitioning column") {
+    it("should get MissingColumnNames if cannot find partitioning column") {
       val resp = RichProjection.make(dataset.copy(partitionColumns = Seq("boo")), schema)
-      resp.isFailure should be (true)
-      resp.recover {
-        case BadSchema(reason) => reason should include ("Partition column boo not in columns")
-      }
+      resp.isBad should be (true)
+      resp.swap.get should equal (MissingColumnNames(Seq("boo"), "partition"))
     }
 
     it("should get back NoSuchFunction if computed column function not found") {
       val resp = RichProjection.make(dataset.copy(partitionColumns = Seq(":notAFunc 1")), schema)
-      resp.isFailure should be (true)
-      resp.recover {
-        case NoSuchFunction(func) => func should equal ("notAFunc")
-      }
+      resp.isBad should be (true)
+      resp.swap.get should equal (ComputedColumnErrs(Seq(NoSuchFunction("notAFunc"))))
     }
 
     it("should get back partitioning func for default key if partitioning column is default") {
       val resp = RichProjection.make(dataset, schema)
-      resp.isSuccess should be (true)
+      resp.isGood should be (true)
       val partFunc = resp.get.partitionKeyFunc
 
       partFunc(names.map(TupleRowReader).head) should equal (Dataset.DefaultPartitionKey)
     }
 
     it("apply() should throw exception for bad schema") {
-      intercept[BadSchema] { RichProjection(Dataset("a", "boo", "seg"), schema) }
+      intercept[BadSchemaError] { RichProjection(Dataset("a", "boo", "seg"), schema) }
     }
 
     it("should get RichProjection back with proper dataset and schema") {

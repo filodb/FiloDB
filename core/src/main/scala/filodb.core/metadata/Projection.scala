@@ -1,7 +1,8 @@
 package filodb.core.metadata
 
+import com.typesafe.scalalogging.slf4j.StrictLogging
+import org.scalactic._
 import org.velvia.filo.RowReader
-import scala.util.{Try, Success, Failure}
 
 import filodb.core.{CompositeKeyType, KeyType, KeyRange, BinaryKeyRange}
 import filodb.core.Types._
@@ -91,80 +92,95 @@ case class RichProjection(projection: Projection,
   }
 }
 
-object RichProjection {
-  case class BadSchema(reason: String) extends Exception("BadSchema: " + reason)
+object RichProjection extends StrictLogging {
+  import Accumulation._
 
+  sealed trait BadSchema
+  case class MissingColumnNames(missing: Seq[String], keyType: String) extends BadSchema
+  case class NoColumnsSpecified(keyType: String) extends BadSchema
+  case class NoSuchProjectionId(id: Int) extends BadSchema
+  case class UnsupportedSegmentColumnType(name: String, colType: Column.ColumnType) extends BadSchema
+  case class ComputedColumnErrs(errs: Seq[InvalidComputedColumnSpec]) extends BadSchema
+
+  case class BadSchemaError(badSchema: BadSchema) extends Exception(badSchema.toString)
+
+  /**
+   * Creates a RichProjection from the dataset and column information, validating errors.
+   * @return a RichProjection
+   * @throws BadSchemaError
+   */
   def apply(dataset: Dataset, columns: Seq[Column], projectionId: Int = 0): RichProjection =
-    make(dataset, columns, projectionId).get
+    make(dataset, columns, projectionId).badMap(BadSchemaError).toTry.get
 
   // Returns computed (generated) columns to add to the schema if needed
-  // TODO(velvia): try using Scalaz's ValidationNEL etc. could make code simpler
   private def getComputedColumns(datasetName: String,
                                  columnNames: Seq[String],
-                                 origColumns: Seq[Column]): Try[Seq[Column]] = {
-    val columns = columnNames.filter(ComputedColumn.isComputedColumn)
-                             .map { expr =>
-                               ComputedColumn.analyze(expr, datasetName, origColumns)
-                                             .recover { case t: Throwable => return Failure(t) }.get
-                             }
-    Success(columns)
+                                 origColumns: Seq[Column]): Seq[Column] Or BadSchema = {
+    columnNames.filter(ComputedColumn.isComputedColumn)
+               .map { expr => ComputedColumn.analyze(expr, datasetName, origColumns) }
+               .combined.badMap { errs => ComputedColumnErrs(errs.toSeq) }
+  }
+
+  private def getColumnsFromNames(allColumns: Seq[Column],
+                                  columnNames: Seq[String]): Seq[Column] Or BadSchema = {
+    if (columnNames.isEmpty) {
+      Good(allColumns)
+    } else {
+      val columnMap = allColumns.map { c => c.name -> c }.toMap
+      val missing = columnNames.toSet -- columnMap.keySet
+      if (missing.nonEmpty) { Bad(MissingColumnNames(missing.toSeq, "projection")) }
+      else                  { Good(columnNames.map(columnMap)) }
+    }
+  }
+
+  private def getColIndicesAndType(richColumns: Seq[Column],
+                                   columnNames: Seq[String],
+                                   typ: String): (Seq[Int], Seq[Column], KeyType) Or BadSchema = {
+    if (columnNames.isEmpty) {
+      Bad(NoColumnsSpecified(typ))
+    } else {
+      val idToIndex = richColumns.zipWithIndex.map { case (col, i) => col.name -> i }.toMap
+      val colIndices = columnNames.map { colName => idToIndex.getOrElse(colName, -1) }
+      val notFound = colIndices.zip(columnNames).collect { case (-1, name) => name }
+      if (notFound.nonEmpty) return Bad(MissingColumnNames(notFound, typ))
+      val columns = colIndices.map(richColumns)
+      val keyType = Column.columnsToKeyType(columns)
+      if (typ == "segment" && !keyType.isSegmentType) {
+        Bad(UnsupportedSegmentColumnType(columnNames.head, columns.head.columnType))
+      } else {
+        Good((colIndices, columns, keyType))
+      }
+    }
   }
 
   /**
    * Creates a full RichProjection, validating all the row, partition, and segment keys, and
    * creating proper KeyTypes for each type of key, including handling composite keys and
    * computed functions.
-   * @return a Success(RichProjection), or Failure with the error, most likely a BadSchema.
+   * @return a Good(RichProjection), or Bad(BadSchema)
    */
-  def make(dataset: Dataset, columns: Seq[Column], projectionId: Int = 0): Try[RichProjection] = {
-    def fail(reason: String): Try[RichProjection] = Failure(BadSchema(reason))
-
-    if (projectionId >= dataset.projections.length) return fail(s"projectionId $projectionId missing")
+  def make(dataset: Dataset, columns: Seq[Column], projectionId: Int = 0): RichProjection Or BadSchema = {
+    if (projectionId >= dataset.projections.length) return Bad(NoSuchProjectionId(projectionId))
 
     val normProjection = dataset.projections(projectionId)
-    if (dataset.partitionColumns.isEmpty) return fail("Dataset partition columns cannot be empty")
-    if (normProjection.keyColIds.isEmpty) return fail("Key columns cannot be empty")
 
     // NOTE: right now computed columns MUST be at the end, because Filo vectorization can't handle mixing
     val allColIds = dataset.partitionColumns ++ normProjection.keyColIds ++ Seq(normProjection.segmentColId)
-    val tryComputedColumns = getComputedColumns(dataset.name, allColIds, columns)
-    val allColumns = columns ++ tryComputedColumns.recover { case t: Throwable => return Failure(t) }.get
 
-    val richColumns = {
-      if (normProjection.columns.isEmpty) {
-        allColumns
-      } else {
-        val columnMap = allColumns.map { c => c.name -> c }.toMap
-        val missing = normProjection.columns.toSet -- columnMap.keySet
-        if (missing.nonEmpty) return fail(s"Specified projection columns are missing: $missing")
-        normProjection.columns.map(columnMap)
-      }
+    for { computedColumns <- getComputedColumns(dataset.name, allColIds, columns)
+          dataColumns <- getColumnsFromNames(columns, normProjection.columns)
+          richColumns = dataColumns ++ computedColumns
+          // scalac has problems dealing with (a, b, c) <- getColIndicesAndType... apparently
+          segStuff <- getColIndicesAndType(richColumns, Seq(normProjection.segmentColId), "segment")
+          keyStuff <- getColIndicesAndType(richColumns, normProjection.keyColIds, "row")
+          partStuff <- getColIndicesAndType(richColumns, dataset.partitionColumns, "partition") }
+    yield {
+      val (segColIdx, segCols, segType) = segStuff
+      RichProjection(normProjection, dataset, richColumns,
+                     segCols.head, segColIdx.head, segType,
+                     keyStuff._2, keyStuff._1, keyStuff._3,
+                     partStuff._2, partStuff._1, partStuff._3)
     }
-
-    val idToIndex = richColumns.zipWithIndex.map { case (col, i) => col.name -> i }.toMap
-
-    val segmentColIndex = idToIndex.getOrElse(normProjection.segmentColId,
-      return fail(s"Segment column ${normProjection.segmentColId} not in columns $richColumns"))
-    val segmentColumn = richColumns(segmentColIndex)
-    val segmentType = Column.columnsToKeyType(Seq(segmentColumn))
-    if (!segmentType.isSegmentType) return fail(s"${segmentColumn.columnType} is not supported for segments")
-
-    val rowKeyColIndices = normProjection.keyColIds.map { colId =>
-      idToIndex.getOrElse(colId, return fail(s"Key column $colId not in columns $richColumns"))
-    }
-    val rowKeyColumns = rowKeyColIndices.map(richColumns)
-    val rowKeyType = Column.columnsToKeyType(rowKeyColumns)
-
-    val partitionColIndices = dataset.partitionColumns.map { colId =>
-      idToIndex.getOrElse(colId, return fail(s"Partition column $colId not in columns $richColumns"))
-    }
-    val partitionColumns = partitionColIndices.map(richColumns)
-    val partitionType = Column.columnsToKeyType(partitionColumns)
-
-    Success(RichProjection(normProjection, dataset, richColumns,
-                           segmentColumn, segmentColIndex, segmentType,
-                           rowKeyColumns, rowKeyColIndices, rowKeyType,
-                           partitionColumns, partitionColIndices, partitionType))
   }
 
   /**

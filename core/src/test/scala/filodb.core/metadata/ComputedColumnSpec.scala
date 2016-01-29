@@ -1,5 +1,6 @@
 package filodb.core.metadata
 
+import org.scalactic._
 import org.velvia.filo.TupleRowReader
 
 import filodb.core._
@@ -7,13 +8,14 @@ import org.scalatest.{FunSpec, Matchers, BeforeAndAfter}
 
 class ComputedColumnSpec extends FunSpec with Matchers {
   import NamesTestData._
+  import RichProjection.ComputedColumnErrs
 
   describe(":getOrElse") {
     it("should return WrongNumberArguments when # args not 2") {
       val resp = RichProjection.make(dataset.copy(partitionColumns = Seq(":getOrElse 1")), schema)
-      resp.isFailure should be (true)
+      resp.isBad should be (true)
       resp.recover {
-        case WrongNumberArguments(given, expected) =>
+        case ComputedColumnErrs(Seq(WrongNumberArguments(given, expected))) =>
           given should equal (1)
           expected should equal (2)
       }
@@ -21,17 +23,19 @@ class ComputedColumnSpec extends FunSpec with Matchers {
 
     it("should return BadArgument if source column not found") {
       val resp = RichProjection.make(dataset.copy(partitionColumns = Seq(":getOrElse xx 1")), schema)
-      resp.isFailure should be (true)
+      resp.isBad should be (true)
       resp.recover {
-        case BadArgument(reason) => reason should include ("Could not find source column")
+        case ComputedColumnErrs(Seq(BadArgument(reason))) =>
+          reason should include ("Could not find source column")
       }
     }
 
     it("should return BadArgument if cannot parse non-string default value") {
       val resp = RichProjection.make(dataset.copy(partitionColumns = Seq(":getOrElse age notInt")), schema)
-      resp.isFailure should be (true)
+      resp.isBad should be (true)
       resp.recover {
-        case BadArgument(reason) => reason should include ("Could not parse")
+        case ComputedColumnErrs(Seq(BadArgument(reason))) =>
+          reason should include ("Could not parse")
       }
     }
 
