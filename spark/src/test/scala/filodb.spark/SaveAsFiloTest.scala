@@ -109,6 +109,19 @@ with Matchers with ScalaFutures {
     }
   }
 
+  it("should throw BadSchemaError if illegal computed column specification") {
+    // year is a Long column, <none> cannot be parsed to a Long
+    intercept[BadSchemaError] {
+      dataDF.write.format("filodb.spark").
+                   option("dataset", "test1").
+                   option("row_keys", "id").
+                   option("segment_key", segCol).
+                   option("partition_keys", ":getOrElse year <none>").
+                   mode(SaveMode.Overwrite).
+                   save()
+    }
+  }
+
   it("should write table if there are existing matching columns") {
     metaStore.newDataset(ds3).futureValue should equal (Success)
     val idStrCol = DataColumn(0, "id", "gdelt1", 0, Column.ColumnType.LongColumn)
@@ -185,7 +198,7 @@ with Matchers with ScalaFutures {
                  option("dataset", "test1").
                  option("row_keys", "id").
                  option("segment_key", segCol).
-                 option("partition_keys", ":getOrElse year <none>").
+                 option("partition_keys", ":getOrElse year 9999").
                  mode(SaveMode.Overwrite).
                  save()
     val df = sql.read.format("filodb.spark").option("dataset", "test1").load()
@@ -195,4 +208,6 @@ with Matchers with ScalaFutures {
     // The below _should_ work but somehow Spark throws an error can't figure out year should be included
     // df.agg(sum("id")).where(df("year") === 2015).collect().head(0) should equal (2)
   }
+
+  it("should be able to write with multi-column partition keys") (pending)
 }

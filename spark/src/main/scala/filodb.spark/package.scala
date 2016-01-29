@@ -132,7 +132,7 @@ package object spark extends StrictLogging {
 
       // validate against schema.  Checks key names, computed columns, etc.
       RichProjection.make(dataset, dfColumns).recover {
-        case RichProjection.BadSchema(reason) => throw BadSchemaError(reason)
+        case err: RichProjection.BadSchema => throw BadSchemaError(err.toString)
       }
 
       logger.info(s"Creating dataset $dataset...")
