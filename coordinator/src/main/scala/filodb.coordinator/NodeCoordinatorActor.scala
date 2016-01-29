@@ -178,9 +178,10 @@ class NodeCoordinatorActor(metaStore: MetaStore,
     def createProjectionAndActor(datasetObj: Dataset, schema: Option[Column.Schema]): Unit = {
       val columnSeq = columns.map(schema.get(_))
       // Create the RichProjection, and ferret out any errors
+      logger.debug(s"Creating projection from dataset $datasetObj, columns $columnSeq")
       val proj = RichProjection.make(datasetObj, columnSeq)
       proj.recover {
-        case RichProjection.BadSchema(reason) => notify(BadSchema(reason))
+        case err: RichProjection.BadSchema => notify(BadSchema(err.toString))
       }
       for { richProj <- proj } createDatasetCoordActor(datasetObj, richProj)
     }
@@ -239,7 +240,8 @@ class NodeCoordinatorActor(metaStore: MetaStore,
     case AddDatasetCoord(dataset, version, dsCoordRef) =>
       dsCoordinators((dataset, version)) = dsCoordRef
 
-    case DatasetCreateNotify(dataset, version, msg) =>
+    case d @ DatasetCreateNotify(dataset, version, msg) =>
+      logger.debug(s"$d")
       for { listener <- dsCoordNotify((dataset -> version)) } listener ! msg
       dsCoordNotify.remove((dataset -> version))
   }
