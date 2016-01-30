@@ -109,7 +109,7 @@ with Matchers with ScalaFutures {
     }
   }
 
-  it("should throw BadSchemaError if illegal computed column specification") {
+  it("should throw BadSchemaError if illegal computed column specification or bad schema") {
     // year is a Long column, <none> cannot be parsed to a Long
     intercept[BadSchemaError] {
       dataDF.write.format("filodb.spark").
@@ -117,6 +117,16 @@ with Matchers with ScalaFutures {
                    option("row_keys", "id").
                    option("segment_key", segCol).
                    option("partition_keys", ":getOrElse year <none>").
+                   mode(SaveMode.Overwrite).
+                   save()
+    }
+
+    intercept[BadSchemaError] {
+      dataDF.write.format("filodb.spark").
+                   option("dataset", "test1").
+                   option("row_keys", "not_a_col").
+                   option("segment_key", segCol).
+                   option("partition_keys", ":fooMucnhkin 123").
                    mode(SaveMode.Overwrite).
                    save()
     }
@@ -209,5 +219,18 @@ with Matchers with ScalaFutures {
     // df.agg(sum("id")).where(df("year") === 2015).collect().head(0) should equal (2)
   }
 
-  it("should be able to write with multi-column partition keys") (pending)
+  it("should be able to write with multi-column partition keys") {
+    import sql.implicits._
+
+    val gdeltDF = sc.parallelize(GdeltTestData.records.toSeq).toDF()
+    gdeltDF.write.format("filodb.spark").
+                 option("dataset", "gdelt3").
+                 option("row_keys", "eventId").
+                 option("segment_key", segCol).
+                 option("partition_keys", ":getOrElse actor2Code --,:getOrElse year -1").
+                 mode(SaveMode.Overwrite).
+                 save()
+    val df = sql.read.format("filodb.spark").option("dataset", "gdelt3").load()
+    df.agg(sum("numArticles")).collect().head(0) should equal (492)
+  }
 }

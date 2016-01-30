@@ -76,6 +76,15 @@ object GdeltTestData {
                    DataColumn(6, "NumArticles",   "gdelt", 0, Column.ColumnType.IntColumn),
                    DataColumn(7, "AvgTone",       "gdelt", 0, Column.ColumnType.DoubleColumn))
 
+  case class GdeltRecord(eventId: Int, sqlDate: Int, monthYear: Int, year: Int,
+                         actor2Code: String, actor2Name: String, numArticles: Int, avgTone: Double)
+
+  val records = gdeltLines.map { line =>
+    val parts = line.split(',')
+    GdeltRecord(parts(0).toInt, parts(1).toInt, parts(2).toInt, parts(3).toInt,
+                parts(4), parts(5), parts(6).toInt, parts(7).toDouble)
+  }
+
   // Dataset1: Partition keys (Actor2Code, Year) / Row key GLOBALEVENTID / Seg :string 0
   val dataset1 = Dataset("gdelt", Seq("GLOBALEVENTID"), ":string 0", Seq("Actor2Code", "Year"))
   val projection1 = RichProjection(dataset1, schema)
