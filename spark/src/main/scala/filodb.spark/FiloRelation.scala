@@ -183,7 +183,10 @@ extends BaseGenericInternalRow with FiloRowReader with ParsersFromChunks {
 
   final def getDateTime(columnNo: Int): DateTime = parsers(columnNo).asInstanceOf[FiloVector[DateTime]](rowNo)
 
-  final def genericGet(columnNo: Int): Any = parsers(columnNo).boxed(rowNo)
+  final def genericGet(columnNo: Int): Any =
+    if (classes(columnNo) == classOf[String]) { getUTF8String(columnNo) }
+    else { parsers(columnNo).boxed(rowNo) }
+
   override final def isNullAt(i: Int): Boolean = !notNull(i)
   def numFields: Int = parsers.length
 
