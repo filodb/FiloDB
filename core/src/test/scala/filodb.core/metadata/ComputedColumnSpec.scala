@@ -89,4 +89,20 @@ class ComputedColumnSpec extends FunSpec with Matchers {
       proj.rowKeyFunc(TupleRowReader((Some(2.00001), None))) should equal (2.0)
     }
   }
+
+  describe(":stringPrefix") {
+    it("should take string prefix") {
+      val proj = RichProjection(dataset.copy(partitionColumns = Seq(":stringPrefix first 2")), schema)
+      val partFunc = proj.partitionKeyFunc
+
+      partFunc(TupleRowReader(names(1))) should equal ("Nd")
+    }
+
+    it("should return empty string if column value null") {
+      val proj = RichProjection(dataset.copy(partitionColumns = Seq(":stringPrefix last 3")), schema)
+      val partFunc = proj.partitionKeyFunc
+
+      partFunc(TupleRowReader(names(3))) should equal ("")
+    }
+  }
 }

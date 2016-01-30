@@ -53,8 +53,6 @@ object SimpleComputations {
    * NOTE: the rounding value is used as the default value if the source column is null.
    */
   object RoundComputation extends SingleColumnComputation {
-    import Column.ColumnType._
-
     def funcName: String = "round"
 
     def analyze(expr: String,
@@ -80,4 +78,23 @@ object SimpleComputations {
     }
   }
 
+  /**
+   * :stringPrefix stringCol numChars
+   * Defaults to "" if null string column
+   */
+  object StringPrefixComputation extends SingleColumnComputation {
+    def funcName: String = "stringPrefix"
+
+    def analyze(expr: String,
+                dataset: TableName,
+                schema: Seq[Column]): ComputedColumn Or InvalidComputedColumnSpec = {
+      for { info <- parse(expr, schema, Set(StringColumn))
+            numChars <- parseParam(SingleKeyTypes.IntKeyType, info.param) }
+      yield {
+        computedColumnWithDefault(expr, dataset, info)("".asInstanceOf[info.keyType.T]){
+          ((s: String) => s.take(numChars)).asInstanceOf[info.keyType.T => info.keyType.T]
+        }
+      }
+    }
+  }
 }

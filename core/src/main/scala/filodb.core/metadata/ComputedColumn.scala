@@ -22,7 +22,10 @@ case class ComputedColumn(id: Int,
 object ComputedColumn {
   import SimpleComputations._
 
-  val AllComputations = Seq(ConstStringComputation, GetOrElseComputation, RoundComputation)
+  val AllComputations = Seq(ConstStringComputation,
+                            GetOrElseComputation,
+                            RoundComputation,
+                            StringPrefixComputation)
   val nameToComputation = AllComputations.map { comp => comp.funcName -> comp }.toMap
 
   def isComputedColumn(expr: String): Boolean = expr.startsWith(":")
