@@ -152,6 +152,8 @@ You may specify a function, or computed column, for use with any key column.  Th
 | :-------- | :-------------- | :---------- |
 | string    | returns a constant string value | `:string /0` |
 | getOrElse | returns default value if column value is null | `:getOrElse columnA ---` |
+| round     | rounds down a numeric column.  Useful for bucketing by time or bucketing numeric IDs.  | `:round timestamp 10000` |
+| stringPrefix | takes the first N chars of a string; good for partitioning | `:stringPrefix token 4` |
 
 ### FiloDB vs Cassandra Data Modelling
 
@@ -261,7 +263,7 @@ You can follow along using the [Spark Notebook](http://github.com/andypetrella/s
 Or you can start a spark-shell locally,
 
 ```bash
-bin/spark-shell --jars ../FiloDB/spark/target/scala-2.10/filodb-spark-assembly-0.1-SNAPSHOT.jar --packages com.databricks:spark-csv_2.10:1.2.0 --driver-memory 3G --executor-memory 3G
+bin/spark-shell --jars ../FiloDB/spark/target/scala-2.10/filodb-spark-assembly-0.2-SNAPSHOT.jar --packages com.databricks:spark-csv_2.10:1.2.0 --driver-memory 3G --executor-memory 3G
 ```
 
 Loading CSV file from Spark:
@@ -279,18 +281,18 @@ import org.apache.spark.sql.SaveMode
 
 scala> csvDF.write.format("filodb.spark").
              option("dataset", "gdelt").
-             option("sort_column", "GLOBALEVENTID").
+             option("row_keys", "GLOBALEVENTID").
+             option("segment_key", ":round GLOBALEVENTID 10000").
+             option("partition_keys", ":getOrElse MonthYear -1").
              mode(SaveMode.Overwrite).save()
 ```
 
-Or, specifying the `partition_column`,
+Above, we partition the GDELT dataset by MonthYear, creating roughly 72 partitions for 1979-1984, with the unique GLOBALEVENTID used as a row key.  We group every 10000 eventIDs into a segment using the convenient `:round` computed column.  You could use multiple columns for the partition or row keys, of course.  For example, to partition by country code and year instead:
 
 ```scala
-scala> csvDF.write.format("filodb.spark").
-    option("dataset", "gdelt").
-    option("sort_column", "GLOBALEVENTID").
-    option("partition_column", "MonthYear").
-    mode(SaveMode.Overwrite).save()
+             option("row_keys", "GLOBALEVENTID").
+             option("segment_key", ":round GLOBALEVENTID 10000").
+             option("partition_keys", ":getOrElse Actor2CountryCode NONE,:getOrElse Year -1")
 ```
 
 Note that for efficient columnar encoding, wide rows with fewer partition keys are better for performance.
@@ -313,7 +315,7 @@ For an example, see the [StreamingTest](spark/src/test/scala/filodb.spark/Stream
 Start Spark-SQL:
 
 ```bash
-  bin/spark-sql --jars path/to/FiloDB/spark/target/scala-2.10/filodb-spark-assembly-0.1-SNAPSHOT.jar
+  bin/spark-sql --jars path/to/FiloDB/spark/target/scala-2.10/filodb-spark-assembly-0.2-SNAPSHOT.jar
 ```
 
 Create a temporary table using an existing dataset,
@@ -327,6 +329,8 @@ Create a temporary table using an existing dataset,
 ```
 
 Then, start running SQL queries!
+
+NOTE: The above syntax should also work with remote SQL clients like beeline / spark-beeline.  Just run the Hive ThriftServer that comes with Spark (NOTE: not all distributions of Spark comes with this, you may need to built it).
 
 ### Querying Datasets
 
