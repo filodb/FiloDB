@@ -83,7 +83,7 @@ case class RichProjection(projection: Projection,
       case ComputedColumn(id, _, _, colType, _) => DataColumn(id, "segCol", "", 0, colType).toString
       case d: Column                            => d.toString
     }
-    val extraColStrings = columns.filter { col => readColumns.contains(col.name) }.map(_.toString)
+    val extraColStrings = readColumns.map { colName => columns.find(_.name == colName).get.toString }
     Seq(datasetName,
         projection.reverse.toString,
         partitionColStrings.mkString(":"),

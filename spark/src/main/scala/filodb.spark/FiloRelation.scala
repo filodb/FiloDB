@@ -122,10 +122,12 @@ case class FiloRelation(dataset: String,
     val projection = RichProjection(this.datasetObj, filoSchema.values.toSeq)
     val _version = this.version
     val filoColumns = requiredColumns.map(this.filoSchema)
+    logger.info(s"Scanning columns ${filoColumns.toSeq}")
     val readOnlyProjStr = projection.toReadOnlyProjString(filoColumns.map(_.name))
     val splitOpts = Map("splits_per_node" -> splitsPerNode.toString)
     val splits = FiloSetup.columnStore.getScanSplits(dataset, splitOpts)
     logger.info(s"Splits = $splits")
+    logger.debug(s"readOnlyProjStr = $readOnlyProjStr")
 
     // val filterFuncs = getFilterFuncs(filters.toList)
     // require(filterFuncs.length <= 1, "More than one filtering function not supported right now")

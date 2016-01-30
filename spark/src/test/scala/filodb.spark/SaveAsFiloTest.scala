@@ -97,6 +97,10 @@ with Matchers with ScalaFutures {
     val df = sql.filoDataset("gdelt1")
     df.select(count("id")).collect().head(0) should equal (3)
     df.agg(sum("year")).collect().head(0) should equal (4030)
+    val row = df.select("id", "sqlDate", "monthYear").limit(1).collect.head
+    row(0) should equal (0)
+    row(1) should equal ("2015/03/15T15:00Z")
+    row(2) should equal (32015)
   }
 
   it("should throw ColumnTypeMismatch if existing columns are not same type") {
