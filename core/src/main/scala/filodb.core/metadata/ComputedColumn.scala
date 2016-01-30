@@ -2,6 +2,7 @@ package filodb.core.metadata
 
 import org.scalactic._
 import org.velvia.filo.RowReader
+import org.velvia.filo.RowReader._
 
 import filodb.core.{KeyType, SingleKeyTypeBase}
 import filodb.core.Types._
@@ -21,7 +22,7 @@ case class ComputedColumn(id: Int,
 object ComputedColumn {
   import SimpleComputations._
 
-  val AllComputations = Seq(ConstStringComputation, GetOrElseComputation)
+  val AllComputations = Seq(ConstStringComputation, GetOrElseComputation, RoundComputation)
   val nameToComputation = AllComputations.map { comp => comp.funcName -> comp }.toMap
 
   def isComputedColumn(expr: String): Boolean = expr.startsWith(":")
@@ -56,6 +57,8 @@ case object NotComputedColumn extends InvalidComputedColumnSpec
  * and attempts to return a ComputedColumn with keyType with the computation function.
  */
 trait ColumnComputation {
+  import TypeCheckedTripleEquals._
+
   // The name of the computation function, without the leading ":"
   def funcName: String
 
@@ -76,70 +79,72 @@ trait ColumnComputation {
    * @param numArgs expected number of arguments
    * @return Good(Seq[String]) if number of args matches numArgs, or Bad(WrongNumberArguments)
    */
-  def getFixedNumArgs(expr: String, numArgs: Int): Seq[String] Or InvalidComputedColumnSpec = {
+  def fixedNumArgs(expr: String, numArgs: Int): Seq[String] Or InvalidComputedColumnSpec = {
     val args = userArgs(expr)
     if (args.length == numArgs) Good(args) else Bad(WrongNumberArguments(args.length, numArgs))
   }
-}
 
-object SimpleComputations {
-  import ComputedKeyTypes._
-  import Column.ColumnType._
-  import TypeCheckedTripleEquals._
-
-  object ConstStringComputation extends ColumnComputation {
-    def funcName: String = "string"
-
-    def analyze(expr: String,
-                dataset: TableName,
-                schema: Seq[Column]): ComputedColumn Or InvalidComputedColumnSpec = {
-      for { args <- getFixedNumArgs(expr, 1) }
-      yield {
-        ComputedColumn(0, expr, dataset, StringColumn,
-                       new ComputedStringKeyType((x: RowReader) => args.head))
-      }
-    }
+  def columnIndex(schema: Seq[Column], colName: String): Int Or InvalidComputedColumnSpec = {
+    val sourceColIndex = schema.indexWhere(_.name === colName)
+    if (sourceColIndex < 0) { Bad(BadArgument(s"Could not find source column $colName")) }
+    else                    { Good(sourceColIndex) }
   }
 
-  /**
-   * Syntax: :getOrElse <colName> <defaultValue>
-   * returns <defaultValue> if <colName> is null
-   */
-  object GetOrElseComputation extends ColumnComputation {
+  def validatedColumnType(schema: Seq[Column], colIndex: Int, allowedTypes: Set[Column.ColumnType]):
+      Column.ColumnType Or InvalidComputedColumnSpec = {
+    val colType = schema(colIndex).columnType
+    if (allowedTypes.contains(colType)) { Good(colType) }
+    else { Bad(BadArgument(s"$colType not in allowed set $allowedTypes")) }
+  }
 
-    def funcName: String = "getOrElse"
-
-    private def getColIndex(schema: Seq[Column], colName: String): Int Or InvalidComputedColumnSpec = {
-      val sourceColIndex = schema.indexWhere(_.name === colName)
-      if (sourceColIndex < 0) { Bad(BadArgument(s"Could not find source column $colName")) }
-      else                    { Good(sourceColIndex) }
+  def parseParam(keyType: KeyType, arg: String): keyType.T Or InvalidComputedColumnSpec = {
+    try { Good(keyType.fromString(arg)) }
+    catch {
+      case t: Throwable => Bad(BadArgument(s"Could not parse [$arg]: ${t.getMessage}"))
     }
+  }
+}
 
-    def analyze(expr: String,
-                dataset: TableName,
-                schema: Seq[Column]): ComputedColumn Or InvalidComputedColumnSpec = {
+/**
+ * A case class and trait to facilitate single column computations
+ */
+case class SingleColumnInfo(sourceColumn: String,
+                                param: String,
+                                colIndex: Int,
+                                colType: Column.ColumnType) {
+  val keyType = colType.keyType
+}
 
-      def getDefaultValue(keyType: KeyType, arg: String): keyType.T Or InvalidComputedColumnSpec = {
-        try { Good(keyType.fromString(arg)) }
-        catch {
-          case t: Throwable => Bad(BadArgument(s"Could not parse [$arg]: ${t.getMessage}"))
-        }
-      }
+trait SingleColumnComputation extends ColumnComputation {
+  def parse(expr: String, schema: Seq[Column]): SingleColumnInfo Or InvalidComputedColumnSpec = {
+    for { args <- fixedNumArgs(expr, 2)
+          sourceColIndex <- columnIndex(schema, args(0))
+          sourceColType = schema(sourceColIndex).columnType }
+    yield { SingleColumnInfo(args(0), args(1), sourceColIndex, sourceColType) }
+  }
 
-      for { args <- getFixedNumArgs(expr, 2)
-            sourceColIndex <- getColIndex(schema, args(0))
-            sourceColType = schema(sourceColIndex).columnType
-            keyType = sourceColType.keyType
-            extractor = keyType.asInstanceOf[SingleKeyTypeBase[keyType.T]].extractor
-            defaultValue <- getDefaultValue(keyType, args(1)) }
-      yield {
-        val computedKeyType = getComputedType(keyType)((r: RowReader) =>
-                                  if (r.notNull(sourceColIndex)) {
-                                    extractor.getField(r, sourceColIndex).asInstanceOf[keyType.T]
-                                  } else { defaultValue }
-                                )
-        ComputedColumn(0, expr, dataset, sourceColType, computedKeyType)
-      }
+  def parse(expr: String, schema: Seq[Column], allowedTypes: Set[Column.ColumnType]):
+      SingleColumnInfo Or InvalidComputedColumnSpec = {
+    for { args <- fixedNumArgs(expr, 2)
+          sourceColIndex <- columnIndex(schema, args(0))
+          sourceColType <- validatedColumnType(schema, sourceColIndex, allowedTypes) }
+    yield { SingleColumnInfo(args(0), args(1), sourceColIndex, sourceColType) }
+  }
+
+  def computedColumn(expr: String, dataset: TableName, c: SingleColumnInfo)
+                    (readerFunc: RowReader => c.keyType.T): ComputedColumn = {
+    val computedKeyType = ComputedKeyTypes.getComputedType(c.keyType)(readerFunc)
+    ComputedColumn(0, expr, dataset, c.colType, computedKeyType)
+  }
+
+  def computedColumnWithDefault(expr: String, dataset: TableName, c: SingleColumnInfo)
+                    (default: c.keyType.T)(valueFunc: c.keyType.T => c.keyType.T): ComputedColumn = {
+    val extractor = c.keyType.asInstanceOf[SingleKeyTypeBase[c.keyType.T]].extractor
+    val colIndex = c.colIndex
+    computedColumn(expr, dataset, c) { (r: RowReader) =>
+      if (r.notNull(colIndex)) {
+        valueFunc(extractor.getField(r, colIndex))
+      } else { default }
     }
   }
 }

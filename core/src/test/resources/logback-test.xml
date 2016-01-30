@@ -1,9 +1,9 @@
 <configuration>
 
   <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
-    <layout class="ch.qos.logback.classic.PatternLayout">
+    <encoder>
       <pattern>[%date{ISO8601}] %-5level %logger{26} [%X{akkaSource}] - %msg%n</pattern>
-    </layout>
+    </encoder>
   </appender>
 
   <appender name="FILE" class="ch.qos.logback.core.FileAppender">

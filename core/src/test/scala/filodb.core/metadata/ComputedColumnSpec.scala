@@ -53,4 +53,40 @@ class ComputedColumnSpec extends FunSpec with Matchers {
       partFunc(TupleRowReader(names(3))) should equal ("--")
     }
   }
+
+  describe(":round") {
+    it("should return BadArgument if rounding value different type than source column") {
+      val resp = RichProjection.make(dataset.copy(partitionColumns = Seq(":round age 1.23")), schema)
+      resp.isBad should be (true)
+      resp.recover {
+        case ComputedColumnErrs(Seq(BadArgument(reason))) =>
+          reason should include ("Could not parse")
+      }
+    }
+
+    it("should return BadArgument if attempt to use :round with unsupported type") {
+      val resp = RichProjection.make(dataset.copy(partitionColumns = Seq(":round first 10")), schema)
+      resp.isBad should be (true)
+      resp.recover {
+        case ComputedColumnErrs(Seq(BadArgument(reason))) =>
+          reason should include ("not in allowed")
+      }
+    }
+
+    it("should round long value") {
+      val proj = RichProjection(dataset.copy(partitionColumns = Seq(":round age 10")), schema)
+      val partFunc = proj.partitionKeyFunc
+
+      partFunc(TupleRowReader(names(1))) should equal (20L)
+    }
+
+    it("should round double value") {
+      val dblDataset = Dataset("a", ":round dbl 2.0", ":string /0")
+      val dblColumn = DataColumn(0, "dbl", "a", 0, Column.ColumnType.DoubleColumn)
+      val proj = RichProjection(dblDataset, Seq(dblColumn))
+      proj.rowKeyFunc(TupleRowReader((Some(1.999), None))) should equal (0.0)
+      proj.rowKeyFunc(TupleRowReader((Some(3.999), None))) should equal (2.0)
+      proj.rowKeyFunc(TupleRowReader((Some(2.00001), None))) should equal (2.0)
+    }
+  }
 }
