@@ -177,7 +177,7 @@ Within each partition, data is delineated by the segment key into *segments*.  W
 
 Segmentation and chunk size distribution may be checked by the CLI `analyze` command.  In addition, the following configuration affects segmentation and chunk size:
 * `memtable.max-rows-per-table`, `memtable.flush-trigger-rows` affects how many rows are kept in the MemTable at a time, and this along with how many partitions are in the MemTable directly leads to the chunk size upon flushing.
-* The segment size is directly controlled by the segment key.  Choosing a segment key that groups data into big enough chunks (at least 1000 is a good guide) is highly recommended.  Experimentation along with running `filo-cli analyze` is recommended to come up with a good segment key.
+* The segment size is directly controlled by the segment key.  Choosing a segment key that groups data into big enough chunks (at least 1000 is a good guide) is highly recommended.  Experimentation along with running `filo-cli analyze` is recommended to come up with a good segment key.  See the Spark ingestion of GDELT below on an example... choosing an inappropriate segment key leads to MUCH slower ingest and read performance.
 * `chunk_size` option when creating a dataset caps the size of a single chunk.
 
 ### Example FiloDB Schema for machine metrics
@@ -287,13 +287,18 @@ scala> csvDF.write.format("filodb.spark").
              mode(SaveMode.Overwrite).save()
 ```
 
-Above, we partition the GDELT dataset by MonthYear, creating roughly 72 partitions for 1979-1984, with the unique GLOBALEVENTID used as a row key.  We group every 10000 eventIDs into a segment using the convenient `:round` computed column.  You could use multiple columns for the partition or row keys, of course.  For example, to partition by country code and year instead:
+Above, we partition the GDELT dataset by MonthYear, creating roughly 72 partitions for 1979-1984, with the unique GLOBALEVENTID used as a row key.  We group every 10000 eventIDs into a segment using the convenient `:round` computed column (GLOBALEVENTID is correlated with time, so in this case we could pack segments with consecutive EVENTIDs). You could use multiple columns for the partition or row keys, of course.  For example, to partition by country code and year instead:
 
 ```scala
+scala> csvDF.write.format("filodb.spark").
+             option("dataset", "gdelt_by_country_year").
              option("row_keys", "GLOBALEVENTID").
-             option("segment_key", ":round GLOBALEVENTID 10000").
-             option("partition_keys", ":getOrElse Actor2CountryCode NONE,:getOrElse Year -1")
+             option("segment_key", ":string 0").
+             option("partition_keys", ":getOrElse Actor2CountryCode NONE,:getOrElse Year -1").
+             mode(SaveMode.Overwrite).save()
 ```
+
+Note that in the above case, since events are spread over a much larger number of partitions, it no longer makes sense to use GLOBALEVENTID as a segment key - at least with the original 10000 as a rounding factor.  There are very few events for a given country and year within the space of 10000 event IDs, leading to inefficient storage.  Instead, we use a single segment for each partition.  We probably could have used `:round GLOBALEVENTID 500000` or some other bigger factor as well.  Using `:round GLOBALEVENT 10000` lead to 3x slower ingest and at least 5x slower reads.
 
 Note that for efficient columnar encoding, wide rows with fewer partition keys are better for performance.
 
