@@ -70,7 +70,7 @@ class ChunkMergingStrategySpec extends FunSpec with Matchers {
       val segment = getRowWriter()
       segment.addRowsAsChunk(mapper(names take 3))
       // The below two lines simulate a write segment / read cycle
-      val prunedSeg = mergingStrategy.pruneForCache(projection, segment)
+      val prunedSeg = mergingStrategy.pruneForCache(segment)
       val readerSeg = RowReaderSegment(prunedSeg.asInstanceOf[GenericSegment], schema drop 2)
 
       val segment2 = getRowWriter()
@@ -117,7 +117,7 @@ class ChunkMergingStrategySpec extends FunSpec with Matchers {
     it("should prune segments that have more than the sortColumn") {
       val segment = getRowWriter()
       segment.addRowsAsChunk(mapper(names take 3))
-      val prunedSeg = mergingStrategy.pruneForCache(projection, segment)
+      val prunedSeg = mergingStrategy.pruneForCache(segment)
 
       prunedSeg.getColumns should equal (Set("age"))
       prunedSeg.getChunks.toSet should equal (segment.getChunks.filter(_._1 == "age").toSet)

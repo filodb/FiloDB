@@ -19,7 +19,7 @@ object SimpleComputations {
                 schema: Seq[Column]): ComputedColumn Or InvalidComputedColumnSpec = {
       for { args <- fixedNumArgs(expr, 1) }
       yield {
-        ComputedColumn(0, expr, dataset, StringColumn,
+        ComputedColumn(0, expr, dataset, StringColumn, Nil,
                        new ComputedStringKeyType((x: RowReader) => args.head))
       }
     }

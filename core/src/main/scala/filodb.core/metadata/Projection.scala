@@ -76,12 +76,12 @@ case class RichProjection(projection: Projection,
    */
   def toReadOnlyProjString(readColumns: Seq[String]): String = {
     val partitionColStrings = partitionColumns.zipWithIndex.map {
-      case (ComputedColumn(id, _, _, colType, _), i) => DataColumn(id, s"part_$i", "", 0, colType).toString
-      case (d: Column, i)                            => d.toString
+      case (ComputedColumn(id, _, _, colType, _, _), i) => DataColumn(id, s"part_$i", "", 0, colType).toString
+      case (d: Column, i)                               => d.toString
     }
     val segmentColString = segmentColumn match {
-      case ComputedColumn(id, _, _, colType, _) => DataColumn(id, "segCol", "", 0, colType).toString
-      case d: Column                            => d.toString
+      case ComputedColumn(id, _, _, colType, _, _) => DataColumn(id, "segCol", "", 0, colType).toString
+      case d: Column                               => d.toString
     }
     val extraColStrings = readColumns.map { colName => columns.find(_.name == colName).get.toString }
     Seq(datasetName,
@@ -89,6 +89,31 @@ case class RichProjection(projection: Projection,
         partitionColStrings.mkString(":"),
         segmentColString,
         extraColStrings.mkString(":")).mkString("\001")
+  }
+
+  /**
+   * Creates a new RichProjection intended only for ChunkMergingStrategy.mergeSegments...
+   * it reads only the source columns needed to recreate the row key, so the row key functions need
+   * to be recomputed.
+   */
+  def toRowKeyOnlyProjection: RichProjection = {
+    // First, reduce set of columns to row key columns (including any computed source columns)
+    val newColumns: Seq[Column] = rowKeyColumns.flatMap {
+      case c: ComputedColumn => c.sourceColumns.map { srcCol => columns.find(_.name == srcCol).get }
+      case d: Column => Seq(d)
+    }
+    // Recompute any computed columns based on new column indices
+    val rkColumnsIndices = rowKeyColumns.map {
+      case c: ComputedColumn => (ComputedColumn.analyze(c.expr, datasetName, newColumns).get, -1)
+      case d: Column         => (d, newColumns.indexWhere(_.name == d.name))
+    }
+    val newRkColumns = rkColumnsIndices.map(_._1)
+    val newRkIndices = rkColumnsIndices.map(_._2)
+    val newRkType = Column.columnsToKeyType(newRkColumns)
+    this.copy(columns = newColumns,
+              rowKeyColumns = newRkColumns,
+              rowKeyColIndices = newRkIndices,
+              rowKeyType = newRkType)
   }
 }
 

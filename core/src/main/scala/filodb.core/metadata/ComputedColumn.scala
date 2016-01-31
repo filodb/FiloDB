@@ -15,6 +15,7 @@ case class ComputedColumn(id: Int,
                           expr: String,   // The original computation expression
                           dataset: String,
                           columnType: Column.ColumnType,
+                          sourceColumns: Seq[String],    // names of source columns
                           keyType: KeyType) extends Column {
   def name: String = expr
 }
@@ -112,9 +113,9 @@ trait ColumnComputation {
  * A case class and trait to facilitate single column computations
  */
 case class SingleColumnInfo(sourceColumn: String,
-                                param: String,
-                                colIndex: Int,
-                                colType: Column.ColumnType) {
+                            param: String,
+                            colIndex: Int,
+                            colType: Column.ColumnType) {
   val keyType = colType.keyType
 }
 
@@ -137,7 +138,7 @@ trait SingleColumnComputation extends ColumnComputation {
   def computedColumn(expr: String, dataset: TableName, c: SingleColumnInfo)
                     (readerFunc: RowReader => c.keyType.T): ComputedColumn = {
     val computedKeyType = ComputedKeyTypes.getComputedType(c.keyType)(readerFunc)
-    ComputedColumn(0, expr, dataset, c.colType, computedKeyType)
+    ComputedColumn(0, expr, dataset, c.colType, Seq(c.sourceColumn), computedKeyType)
   }
 
   def computedColumnWithDefault(expr: String, dataset: TableName, c: SingleColumnInfo)

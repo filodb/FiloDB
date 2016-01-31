@@ -108,8 +108,8 @@ object Column extends StrictLogging {
    */
   def columnsToKeyType(columns: Seq[Column]): KeyType = columns match {
     case Nil      => throw new IllegalArgumentException("Empty columns supplied")
-    case Seq(DataColumn(_, _, _, _, columnType, _)) => columnType.keyType
-    case Seq(ComputedColumn(_, _, _, _, keyType))   => keyType
+    case Seq(DataColumn(_, _, _, _, columnType, _))  => columnType.keyType
+    case Seq(ComputedColumn(_, _, _, _, _, keyType)) => keyType
     case cols: Seq[Column] =>
       val keyTypes = cols.map { col => columnsToKeyType(Seq(col)).asInstanceOf[SingleKeyType] }
       CompositeKeyType(keyTypes)

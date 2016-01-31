@@ -254,7 +254,7 @@ trait CachedMergingColumnStore extends ColumnStore with StrictLogging {
                     segment: Segment,
                     version: Int): Future[Response] = {
     if (segment.isEmpty) return(Future.successful(NotApplied))
-    for { oldSegment <- getSegFromCache(projection, segment, version)
+    for { oldSegment <- getSegFromCache(projection.toRowKeyOnlyProjection, segment, version)
           mergedSegment = mergingStrategy.mergeSegments(oldSegment, segment)
           writeChunksResp <- writeChunks(projection.datasetName, segment.binaryPartition, version,
                                          segment.segmentId, mergedSegment.getChunks)
@@ -337,7 +337,7 @@ trait CachedMergingColumnStore extends ColumnStore with StrictLogging {
     // we might want to update the spray-caching API to have an update method.
     val key = (projection.datasetName, newSegment.binaryPartition, version, newSegment.segmentId)
     segmentCache.remove(key)
-    segmentCache(key)(mergingStrategy.pruneForCache(projection, newSegment))
+    segmentCache(key)(mergingStrategy.pruneForCache(newSegment))
   }
 
   import scala.util.control.Breaks._
