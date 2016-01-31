@@ -64,7 +64,7 @@ class FiloMemTableSpec extends FunSpec with Matchers with BeforeAndAfter {
       mTable.ingestRows(GdeltTestData.readers.take(6))
       mTable.ingestRows(GdeltTestData.readers.take(2))
 
-      val keyRange = KeyRange(197901, "0", "0")
+      val keyRange = KeyRange(197901, 0, 0)
       val outRows = mTable.readRows(keyRange.basedOn(mTable.projection))
       outRows.toSeq.map(_.getString(5)) should equal (
                  Seq("AFRICA", "FARMER", "FARMER", "CHINA", "POLICE", "IMMIGRANT"))

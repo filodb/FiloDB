@@ -347,20 +347,18 @@ trait CachedMergingColumnStore extends ColumnStore with StrictLogging {
                                   chunks: Seq[ChunkedData],
                                   schema: Seq[Column]): Seq[Segment] = {
     val segments = rowMaps.map { case SegmentIndex(_, _, partition, segStart, rowMap) =>
-        val segInfo = SegmentInfo(partition, segStart)
-        new RowReaderSegment(projection, segInfo, rowMap, schema)
+      val segInfo = SegmentInfo(partition, segStart)
+      new RowReaderSegment(projection, segInfo, rowMap, schema)
     }
     chunks.foreach { case ChunkedData(columnName, chunkTriples) =>
       var segIndex = 0
       breakable {
         chunkTriples.foreach { case (segmentId, chunkId, chunkBytes) =>
           // Rely on the fact that chunks are sorted by segmentId, in the same order as the rowMaps
-          val segmentKey = projection.segmentType.fromBytes(segmentId)
-          val segInfo = segments(segIndex).segInfo
-          while (segmentKey != segInfo.segment) {
+          while (segmentId != rowMaps(segIndex).segmentId) {
             segIndex += 1
             if (segIndex >= segments.length) {
-              logger.warn(s"Chunks with segmentId=$segmentKey (part ${segInfo.partition})" +
+              logger.warn(s"Chunks with segmentId=$segmentId (part ${rowMaps.head.partition})" +
                            " with no rowmap; corruption?")
               break
             }

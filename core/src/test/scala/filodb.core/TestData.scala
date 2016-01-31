@@ -90,11 +90,25 @@ object GdeltTestData {
   val projection1 = RichProjection(dataset1, schema)
 
   // Dataset2: Partition key (MonthYear) / Row keys (Actor2Code, GLOBALEVENTID)
-  val dataset2 = Dataset("gdelt", Seq("Actor2Code", "GLOBALEVENTID"), ":string 0", Seq("MonthYear"))
+  // Segment ID is to group GLOBALEVENTID such that there will be two segments
+  val dataset2 = Dataset("gdelt", Seq(":getOrElse Actor2Code NONE", "GLOBALEVENTID"),
+                         ":round GLOBALEVENTID 50", Seq("MonthYear"))
   val projection2 = RichProjection(dataset2, schema)
 
   // Dataset3: same as Dataset1 but with :getOrElse to prevent null partition keys
   val dataset3 = Dataset("gdelt", Seq("GLOBALEVENTID"), ":string 0",
                          Seq(":getOrElse Actor2Code NONE", ":getOrElse Year -1"))
   val projection3 = RichProjection(dataset3, schema)
+
+  // Returns projection2 grouped by segment with a fake partition key
+  def getSegments(partKey: projection2.PK): Seq[RowWriterSegment] = {
+    val inputGroupedBySeg = readers.toSeq.groupBy(projection2.segmentKeyFunc)
+                                   .toSeq.sortBy(_._1.asInstanceOf[Int])
+    inputGroupedBySeg.map { case (segmentKey, lines) =>
+      val seg = new RowWriterSegment(projection2, schema)(SegmentInfo(partKey, segmentKey).
+                                                          basedOn(projection2))
+      seg.addRowsAsChunk(lines.toIterator)
+      seg
+    }
+  }
 }

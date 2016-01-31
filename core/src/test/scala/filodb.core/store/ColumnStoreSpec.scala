@@ -112,25 +112,29 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
     }
   }
 
+  // The first row key column is a computed column, so this test also ensures that retrieving the original
+  // source columns works.
   it should "replace rows with multi row keys to an uncached segment" in {
     import GdeltTestData._
-    val segInfo = SegmentInfo(197901, "0").basedOn(projection2)
-    val segment = new RowWriterSegment(projection2, schema)(segInfo)
-    segment.addRowsAsChunk(readers.toIterator.take(20))
-    colStore.appendSegment(projection2, segment, 0).futureValue should equal (Success)
+    val segments = getSegments(197901.asInstanceOf[projection2.PK])
+    segments.foreach { seg =>
+      colStore.appendSegment(projection2, seg, 0).futureValue should equal (Success)
+    }
 
     colStore.clearSegmentCache()
 
-    val segment2 = new RowWriterSegment(projection2, schema)(segInfo)
+    val segment2 = new RowWriterSegment(projection2, schema)(segments.head.segInfo.basedOn(projection2))
     segment2.addRowsAsChunk(readers.toIterator.take(3))
     colStore.appendSegment(projection2, segment2, 0).futureValue should equal (Success)
 
-    val keyRange = KeyRange(197901, "0", "0", endExclusive = false).basedOn(projection2)
+    val keyRange = KeyRange(197901,
+                            segments.head.segInfo.segment,
+                            segments.last.segInfo.segment, endExclusive = false).basedOn(projection2)
     whenReady(colStore.readSegments(projection2, schema, 0)(keyRange)) { segIter =>
       val segments = segIter.toSeq
-      segments should have length (1)
+      segments should have length (2)
       val readSeg = segments.head.asInstanceOf[RowReaderSegment]
-      readSeg.rowIterator().map(_.getInt(6)).sum should equal (127)
+      readSeg.rowIterator().map(_.getInt(6)).sum should equal (288)
     }
   }
 
@@ -211,16 +215,16 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
 
   it should "read back rows written with multi-column row keys" in {
     import GdeltTestData._
-    val segInfo = SegmentInfo(197901, "0").basedOn(projection2)
-    val segment = new RowWriterSegment(projection2, schema)(segInfo)
-    segment.addRowsAsChunk(readers.toIterator.take(20))
-    colStore.appendSegment(projection2, segment, 0).futureValue should equal (Success)
+    val segments = getSegments(197901.asInstanceOf[projection2.PK])
+    segments.foreach { seg =>
+      colStore.appendSegment(projection2, seg, 0).futureValue should equal (Success)
+    }
 
     val paramSet = colStore.getScanSplits(dataset.name)
     paramSet should have length (1)
 
     whenReady(colStore.scanRows(projection2, schema, 0, params = paramSet.head)()) { rowIter =>
-      rowIter.map(_.getInt(6)).sum should equal (127)
+      rowIter.map(_.getInt(6)).sum should equal (492)
     }
   }
 }
