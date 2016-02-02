@@ -3,6 +3,8 @@ package filodb.core
 import filodb.core._
 import filodb.core.metadata.{Column, DataColumn, Dataset, RichProjection}
 import filodb.core.store.{SegmentInfo, RowWriterSegment}
+import java.sql.Timestamp
+import org.joda.time.DateTime
 import org.velvia.filo.{RowReader, TupleRowReader, ArrayStringRowReader}
 import scala.io.Source
 
@@ -68,7 +70,7 @@ object GdeltTestData {
   val readers = gdeltLines.map { line => ArrayStringRowReader(line.split(",")) }
 
   val schema = Seq(DataColumn(0, "GLOBALEVENTID", "gdelt", 0, Column.ColumnType.IntColumn),
-                   DataColumn(1, "SQLDATE",       "gdelt", 0, Column.ColumnType.IntColumn),
+                   DataColumn(1, "SQLDATE",       "gdelt", 0, Column.ColumnType.TimestampColumn),
                    DataColumn(2, "MonthYear",     "gdelt", 0, Column.ColumnType.IntColumn),
                    DataColumn(3, "Year",          "gdelt", 0, Column.ColumnType.IntColumn),
                    DataColumn(4, "Actor2Code",    "gdelt", 0, Column.ColumnType.StringColumn),
@@ -76,12 +78,13 @@ object GdeltTestData {
                    DataColumn(6, "NumArticles",   "gdelt", 0, Column.ColumnType.IntColumn),
                    DataColumn(7, "AvgTone",       "gdelt", 0, Column.ColumnType.DoubleColumn))
 
-  case class GdeltRecord(eventId: Int, sqlDate: Int, monthYear: Int, year: Int,
+  case class GdeltRecord(eventId: Int, sqlDate: Timestamp, monthYear: Int, year: Int,
                          actor2Code: String, actor2Name: String, numArticles: Int, avgTone: Double)
 
   val records = gdeltLines.map { line =>
     val parts = line.split(',')
-    GdeltRecord(parts(0).toInt, parts(1).toInt, parts(2).toInt, parts(3).toInt,
+    GdeltRecord(parts(0).toInt, new Timestamp(DateTime.parse(parts(1)).getMillis),
+                parts(2).toInt, parts(3).toInt,
                 parts(4), parts(5), parts(6).toInt, parts(7).toDouble)
   }
 

@@ -1,5 +1,7 @@
 package filodb.core
 
+import java.sql.Timestamp
+import org.joda.time.DateTime
 import org.velvia.filo.RowReader
 import org.velvia.filo.RowReader._
 import scala.language.postfixOps
@@ -198,5 +200,22 @@ object SingleKeyTypes {
     def fromBytes(bytes: ByteVector): Boolean = bytes(0) != 0
     def fromString(str: String): Boolean = str.toBoolean
     def size(key: Boolean): Int = 1
+  }
+
+  implicit val timestampOrdering = Ordering.by((t: Timestamp) => t.getTime)
+
+  implicit case object TimestampKeyType extends SingleKeyTypeBase[Timestamp] {
+    def toBytes(key: Timestamp): ByteVector = LongKeyType.toBytes(key.getTime)
+    def fromBytes(bytes: ByteVector): Timestamp = new Timestamp(LongKeyType.fromBytes(bytes))
+    // Assume that most Timestamp string args are ISO8601-style date time strings.  Fallback to long ms.
+    override def fromString(str: String): Timestamp = {
+      try {
+        new Timestamp(DateTime.parse(str).getMillis)
+      } catch {
+        case e: java.lang.IllegalArgumentException => new Timestamp(str.toLong)
+      }
+    }
+    override def isSegmentType: Boolean = true
+    def size(key: Timestamp): Int = 8
   }
 }

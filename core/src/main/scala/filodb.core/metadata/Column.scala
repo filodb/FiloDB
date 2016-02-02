@@ -97,6 +97,7 @@ object Column extends StrictLogging {
     case object DoubleColumn extends RichColumnType[Double]
     case object StringColumn extends RichColumnType[String]
     case object BitmapColumn extends RichColumnType[Boolean]
+    case object TimestampColumn extends RichColumnType[java.sql.Timestamp]
   }
 
   type Schema = Map[String, DataColumn]

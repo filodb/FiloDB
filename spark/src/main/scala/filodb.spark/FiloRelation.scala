@@ -8,7 +8,7 @@ import com.typesafe.scalalogging.slf4j.StrictLogging
 import java.nio.ByteBuffer
 import net.ceedubs.ficus.Ficus._
 import org.joda.time.DateTime
-import org.velvia.filo.{FiloRowReader, FiloVector, ParsersFromChunks, RowReader}
+import org.velvia.filo.{FiloRowReader, FiloVector, RowReader, VectorReader}
 import scala.concurrent.{Await, Future}
 import scala.concurrent.duration._
 import scala.language.postfixOps
@@ -146,6 +146,32 @@ case class FiloRelation(dataset: String,
   }
 }
 
+object SparkRowReader {
+  import VectorReader._
+  import FiloVector._
+
+  val TimestampClass = classOf[java.sql.Timestamp]
+
+  // Customize the Filo vector maker to return Long vectors for Timestamp columns.
+  // This is because Spark 1.5's InternalRow expects Long primitives for that type.
+  val timestampVectorMaker: VectorMaker = {
+    case TimestampClass => ((b: ByteBuffer, len: Int) => FiloVector[Long](b, len))
+  }
+
+  val spark15vectorMaker = timestampVectorMaker orElse defaultVectorMaker
+}
+
+/**
+ * A class to wrap the original FiloVector[Long] for Spark's InternalRow Timestamp representation,
+ * which is based on microseconds rather than milliseconds.
+ */
+class SparkTimestampFiloVector(innerVector: FiloVector[Long]) extends FiloVector[Long] {
+  final def isAvailable(index: Int): Boolean = innerVector.isAvailable(index)
+  final def foreach[B](fn: Long => B): Unit = innerVector.foreach(fn)
+  final def apply(index: Int): Long = innerVector(index) * 1000
+  final def length: Int = innerVector.length
+}
+
 /**
  * Base the SparkRowReader on Spark's InternalRow.  Scans are much faster because
  * sources that return RDD[Row] need to be converted to RDD[InternalRow], and the
@@ -153,12 +179,21 @@ case class FiloRelation(dataset: String,
  * The only downside is that the API is not stable.  :/
  * TODO: get UTF8String's out of Filo as well, so no string conversion needed :D
  */
-class SparkRowReader(val chunks: Array[ByteBuffer],
-                     val classes: Array[Class[_]],
-                     val emptyLen: Int = 0)
-extends BaseGenericInternalRow with FiloRowReader with ParsersFromChunks {
+class SparkRowReader(chunks: Array[ByteBuffer],
+                     classes: Array[Class[_]],
+                     emptyLen: Int = 0)
+extends BaseGenericInternalRow with FiloRowReader {
   var rowNo: Int = -1
   final def setRowNo(newRowNo: Int): Unit = { rowNo = newRowNo }
+
+  val parsers = FiloVector.makeVectors(chunks, classes, emptyLen, SparkRowReader.spark15vectorMaker)
+
+  // Hack: wrap timestamp FiloVectors to give correct representation (microsecond-based)
+  for { i <- 0 until chunks.size } {
+    if (classes(i) == classOf[java.sql.Timestamp]) {
+      parsers(i) = new SparkTimestampFiloVector(parsers(i).asInstanceOf[FiloVector[Long]])
+    }
+  }
 
   final def notNull(columnNo: Int): Boolean = parsers(columnNo).isAvailable(rowNo)
 
@@ -181,8 +216,7 @@ extends BaseGenericInternalRow with FiloRowReader with ParsersFromChunks {
     UTF8String.fromString(str)
   }
 
-  final def getDateTime(columnNo: Int): DateTime = parsers(columnNo).asInstanceOf[FiloVector[DateTime]](rowNo)
-
+  final def getAny(columnNo: Int): Any = genericGet(columnNo)
   final def genericGet(columnNo: Int): Any =
     if (classes(columnNo) == classOf[String]) { getUTF8String(columnNo) }
     else { parsers(columnNo).boxed(rowNo) }

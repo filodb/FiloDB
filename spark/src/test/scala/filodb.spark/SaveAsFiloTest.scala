@@ -1,7 +1,7 @@
 package filodb.spark
 
-import akka.actor.ActorSystem
 import com.typesafe.config.ConfigFactory
+import java.sql.Timestamp
 import org.apache.spark.{SparkContext, SparkException, SparkConf}
 import org.apache.spark.sql.{SaveMode, SQLContext}
 import org.scalatest.time.{Millis, Seconds, Span}
@@ -15,7 +15,12 @@ import org.scalatest.{FunSpec, BeforeAndAfter, BeforeAndAfterAll, Matchers}
 import org.scalatest.concurrent.ScalaFutures
 
 object SaveAsFiloTest {
-  val system = ActorSystem("test")
+  case class TSData(machine: String, metric: Double, time: Timestamp)
+  val timeseries = Seq(
+    TSData("com.abc.def.foo", 1.1, new Timestamp(1000000L)),
+    TSData("com.abc.def.bar", 1.2, new Timestamp(1000010L)),
+    TSData("com.abc.def.baz", 1.3, new Timestamp(1000020L))
+  )
 }
 
 /**
@@ -86,7 +91,6 @@ with Matchers with ScalaFutures {
   )
   val dataDF = sql.read.json(sc.parallelize(jsonRows, 1))
 
-  import filodb.spark._
   import org.apache.spark.sql.functions._
 
   it("should create missing columns and partitions and write table") {
@@ -250,5 +254,20 @@ with Matchers with ScalaFutures {
                  save()
     val df = sql.read.format("filodb.spark").option("dataset", "gdelt3").load()
     df.agg(sum("numArticles")).collect().head(0) should equal (492)
+  }
+
+  it("should be able to ingest Spark Timestamp columns and query them") {
+    import sql.implicits._
+    val tsDF = sc.parallelize(SaveAsFiloTest.timeseries).toDF()
+    tsDF.write.format("filodb.spark").
+               option("dataset", "test1").
+               option("row_keys", "time").
+               option("segment_key", ":string 0").
+               mode(SaveMode.Overwrite).save()
+    val df = sql.read.format("filodb.spark").option("dataset", "test1").load()
+    val selectedRow = df.select("metric", "time").limit(1).collect.head
+    selectedRow(0) should equal (1.1)
+    selectedRow(1) should equal (new Timestamp(1000000L))
+    df.agg(max("time")).collect().head(0) should equal (new Timestamp(1000020L))
   }
 }

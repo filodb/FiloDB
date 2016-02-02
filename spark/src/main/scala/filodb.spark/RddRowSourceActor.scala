@@ -63,5 +63,5 @@ case class RddRowReader(row: Row) extends RowReader {
   def getDouble(columnNo: Int): Double = row.getDouble(columnNo)
   def getFloat(columnNo: Int): Float = row.getFloat(columnNo)
   def getString(columnNo: Int): String = row.getString(columnNo)
-  def getDateTime(columnNo: Int): DateTime = ???
+  def getAny(columnNo: Int): Any = row.get(columnNo)
 }
