@@ -32,7 +32,8 @@ trait ChunkMergingStrategy {
    */
   def readSegmentForCache(projection: RichProjection,
                           version: Int)(
-                          segInfo: SegmentInfo[projection.PK, projection.SK]): Future[Segment]
+                          segInfo: SegmentInfo[projection.PK, projection.SK])
+                         (implicit ec: ExecutionContext): Future[Segment]
 
   /**
    * Merges an existing segment cached using readSegmentForCache with a new partial segment to be inserted.
@@ -60,7 +61,6 @@ trait ChunkMergingStrategy {
  * @param getSortColumn a function that returns the sort column given a dataset
  */
 class AppendingChunkMergingStrategy(columnStore: ColumnStore)
-                                   (implicit ec: ExecutionContext)
 extends ChunkMergingStrategy with StrictLogging {
   /**
    * Reads only the row key-relevant columns from a segment.
@@ -70,7 +70,8 @@ extends ChunkMergingStrategy with StrictLogging {
    */
   def readSegmentForCache(projection: RichProjection,
                           version: Int)(
-                          segInfo: SegmentInfo[projection.PK, projection.SK]): Future[Segment] = {
+                          segInfo: SegmentInfo[projection.PK, projection.SK])
+                         (implicit ec: ExecutionContext): Future[Segment] = {
     val keyRange = KeyRange(segInfo.partition, segInfo.segment, segInfo.segment, endExclusive = false)
     columnStore.readSegments(projection, projection.columns, version)(keyRange).map { iter =>
       iter.toSeq.headOption match {

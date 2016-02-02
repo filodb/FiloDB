@@ -14,7 +14,7 @@ class CassandraColumnStoreSpec extends CassandraFlatSpec with ColumnStoreSpec {
   import filodb.core.store._
   import NamesTestData._
 
-  val colStore = new CassandraColumnStore(config)
+  val colStore = new CassandraColumnStore(config, global)
   implicit val keySpace = KeySpace(config.getString("cassandra.keyspace"))
 
   "getScanSplits" should "return splits from Cassandra" in {

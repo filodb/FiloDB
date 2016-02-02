@@ -147,7 +147,7 @@ case class ChunkedData(column: Types.ColumnId, chunks: Seq[(Types.SegmentId, Typ
  * use of a segment cache to speed up merging, and a ChunkMergingStrategy to merge segments.  It defines
  * lower level primitives and implements the ColumnStore methods in terms of these primitives.
  */
-trait CachedMergingColumnStore extends ColumnStore with StrictLogging {
+trait CachedMergingColumnStore extends ColumnStore with ColumnStoreScanner with StrictLogging {
   import filodb.core.Types._
   import filodb.core.Iterators._
 
@@ -155,6 +155,7 @@ trait CachedMergingColumnStore extends ColumnStore with StrictLogging {
 
   def mergingStrategy: ChunkMergingStrategy
 
+  // This ExecutionContext is the default used for writing, it should have bounds set
   implicit val ec: ExecutionContext
 
   def clearProjectionData(projection: Projection): Future[Response] = {
@@ -191,60 +192,6 @@ trait CachedMergingColumnStore extends ColumnStore with StrictLogging {
                        chunkRowMap: ChunkRowMap): Future[Response]
 
   /**
-   * Reads back all the chunks from multiple columns of a keyRange at once.  Note that no paging
-   * is performed - so don't ask for too large of a range.  Recommendation is to read the ChunkRowMaps
-   * first and use the info there to determine how much to read.
-   * @param dataset the name of the dataset to read chunks from
-   * @param columns the columns to read back chunks from
-   * @param keyRange the binary range of segments to read from.  Note endExclusive flag.
-   * @param version the version to read back
-   * @return a sequence of ChunkedData, each triple is (segmentId, chunkId, bytes) for each chunk
-   *          must be sorted in order of increasing segmentId
-   */
-  def readChunks(dataset: TableName,
-                 columns: Set[ColumnId],
-                 keyRange: BinaryKeyRange,
-                 version: Int): Future[Seq[ChunkedData]]
-
-  type ChunkMapInfo = (BinaryPartition, SegmentId, BinaryChunkRowMap)
-
-  /**
-   * Reads back all the ChunkRowMaps from multiple segments in a keyRange.
-   * @param keyRange the range of segments to read from, note [start, end) <-- end is exclusive!
-   * @param version the version to read back
-   * @return a sequence of (segmentId, ChunkRowMap)'s
-   */
-  def readChunkRowMaps(dataset: TableName,
-                       keyRange: BinaryKeyRange,
-                       version: Int): Future[Iterator[ChunkMapInfo]]
-
-  /**
-   * Designed to scan over many many ChunkRowMaps from multiple partitions.  Intended for fast scanning
-   * of many segments, such as reading all the data for one node from a Spark worker.
-   * TODO: how to make passing stuff such as token ranges nicer, but still generic?
-   *
-   * @return an iterator over ChunkRowMaps.  Must be sorted by partitionkey first, then segment Id.
-   */
-  def scanChunkRowMaps(dataset: TableName,
-                       version: Int,
-                       params: Map[String, String]): Future[Iterator[ChunkMapInfo]]
-
-  case class SegmentIndex[P, S](binPartition: BinaryPartition,
-                                segmentId: SegmentId,
-                                partition: P,
-                                segment: S,
-                                chunkMap: BinaryChunkRowMap)
-
-  def toSegIndex(projection: RichProjection, chunkMapInfo: ChunkMapInfo):
-        SegmentIndex[projection.PK, projection.SK] = {
-    SegmentIndex(chunkMapInfo._1,
-                 chunkMapInfo._2,
-                 projection.partitionType.fromBytes(chunkMapInfo._1),
-                 projection.segmentType.fromBytes(chunkMapInfo._2),
-                 chunkMapInfo._3)
-  }
-
-  /**
    * == Caching and merging implementation of the high level functions ==
    */
 
@@ -268,64 +215,12 @@ trait CachedMergingColumnStore extends ColumnStore with StrictLogging {
     }
   }
 
-  def readSegments(projection: RichProjection,
-                   columns: Seq[Column],
-                   version: Int)
-                  (keyRange: KeyRange[projection.PK, projection.SK]): Future[Iterator[Segment]] = {
-    // TODO: implement actual paging and the iterator over segments.  Or maybe that should be implemented
-    // at a higher level.
-    val binKeyRange = projection.toBinaryKeyRange(keyRange)
-    (for { rowMaps <- readChunkRowMaps(projection.datasetName, binKeyRange, version)
-           chunks  <- readChunks(projection.datasetName,
-                                 columns.map(_.name).toSet,
-                                 binKeyRange,
-                                 version) if rowMaps.nonEmpty }
-    yield {
-      val indexMaps = rowMaps.map(crm => toSegIndex(projection, crm))
-      buildSegments(projection, indexMaps.toSeq, chunks, columns).toIterator
-    }).recover {
-      // No chunk maps found, so just return empty list of segments
-      case e: java.util.NoSuchElementException => Iterator.empty
-    }
-  }
-
-  // NOTE: this is more or less a single-threaded implementation.  Reads of chunks for multiple columns
-  // happen in parallel, but we still block to wait for all of them to come back.
-  def scanSegments(projection: RichProjection,
-                   columns: Seq[Column],
-                   version: Int,
-                   params: Map[String, String] = Map.empty)
-                  (partitionFilter: (projection.PK => Boolean) = (x: projection.PK) => true):
-                     Future[Iterator[Segment]] = {
-    val segmentGroupSize = params.getOrElse("segment_group_size", "3").toInt
-
-    for { chunkmapsIt <- scanChunkRowMaps(projection.datasetName, version, params) }
-    yield
-    (for { // Group by partition key first
-          (part, partChunkMaps) <- chunkmapsIt.map(crm => toSegIndex(projection, crm))
-                                     .filter { case SegmentIndex(_, _, part, _, _) => partitionFilter(part) }
-                                     .sortedGroupBy { case SegmentIndex(part, _, _, _, _) => part }
-          // Subdivide chunk row maps in each partition so we don't read more than we can chew
-          // TODO: make a custom grouping function based on # of rows accumulated
-          groupChunkMaps <- partChunkMaps.grouped(segmentGroupSize) }
-    yield {
-      val chunkMaps = groupChunkMaps.toSeq
-      val binKeyRange = BinaryKeyRange(part,
-                                       chunkMaps.head.segmentId,
-                                       chunkMaps.last.segmentId,
-                                       endExclusive = false)
-      val chunks = Await.result(readChunks(projection.datasetName, columns.map(_.name).toSet,
-                                           binKeyRange, version), 5.minutes)
-      buildSegments(projection, chunkMaps, chunks, columns).toIterator
-    }).flatten
-  }
-
   private def getSegFromCache(projection: RichProjection,
                               segment: Segment,
                               version: Int): Future[Segment] = {
     segmentCache((projection.datasetName, segment.binaryPartition, version, segment.segmentId)) {
       val newSegInfo = segment.segInfo.basedOn(projection)
-      mergingStrategy.readSegmentForCache(projection, version)(newSegInfo)
+      mergingStrategy.readSegmentForCache(projection, version)(newSegInfo)(readEc)
     }
   }
 
@@ -338,35 +233,5 @@ trait CachedMergingColumnStore extends ColumnStore with StrictLogging {
     val key = (projection.datasetName, newSegment.binaryPartition, version, newSegment.segmentId)
     segmentCache.remove(key)
     segmentCache(key)(mergingStrategy.pruneForCache(newSegment))
-  }
-
-  import scala.util.control.Breaks._
-
-  private def buildSegments[P, S](projection: RichProjection,
-                                  rowMaps: Seq[SegmentIndex[P, S]],
-                                  chunks: Seq[ChunkedData],
-                                  schema: Seq[Column]): Seq[Segment] = {
-    val segments = rowMaps.map { case SegmentIndex(_, _, partition, segStart, rowMap) =>
-      val segInfo = SegmentInfo(partition, segStart)
-      new RowReaderSegment(projection, segInfo, rowMap, schema)
-    }
-    chunks.foreach { case ChunkedData(columnName, chunkTriples) =>
-      var segIndex = 0
-      breakable {
-        chunkTriples.foreach { case (segmentId, chunkId, chunkBytes) =>
-          // Rely on the fact that chunks are sorted by segmentId, in the same order as the rowMaps
-          while (segmentId != rowMaps(segIndex).segmentId) {
-            segIndex += 1
-            if (segIndex >= segments.length) {
-              logger.warn(s"Chunks with segmentId=$segmentId (part ${rowMaps.head.partition})" +
-                           " with no rowmap; corruption?")
-              break
-            }
-          }
-          segments(segIndex).addChunk(chunkId, columnName, chunkBytes)
-        }
-      }
-    }
-    segments
   }
 }

@@ -61,6 +61,8 @@ object Analyzer {
   val NumChunksPerSegmentBucketKeys = Array(0, 5, 10, 25, 50, 100)
   val NumRowsPerSegmentBucketKeys = Array(0, 10, 100, 1000, 5000, 10000, 50000)
 
+  import scala.concurrent.ExecutionContext.Implicits.global
+
   def analyze(cs: CachedMergingColumnStore, dataset: TableName, version: Int): ColumnStoreAnalysis = {
     var numSegments = 0
     var rowsInSegment: Histogram = Histogram.empty

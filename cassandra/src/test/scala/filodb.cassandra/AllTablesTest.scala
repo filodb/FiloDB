@@ -24,7 +24,7 @@ trait AllTablesTest extends SimpleCassandraTest {
   val config = ConfigFactory.load("application_test.conf")
   implicit val keySpace = KeySpace(config.getString("cassandra.keyspace"))
 
-  lazy val columnStore = new CassandraColumnStore(config)
+  lazy val columnStore = new CassandraColumnStore(config, context)
   lazy val metaStore = new CassandraMetaStore(config.getConfig("cassandra"))
 
   import Column.ColumnType._

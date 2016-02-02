@@ -13,7 +13,7 @@ class ChunkMergingStrategySpec extends FunSpec with Matchers {
   import NamesTestData._
 
   import scala.concurrent.ExecutionContext.Implicits.global
-  val colStore = new InMemoryColumnStore
+  val colStore = new InMemoryColumnStore(global)
   val dataset = "foo"
   val mergingStrategy = new AppendingChunkMergingStrategy(colStore)
 
