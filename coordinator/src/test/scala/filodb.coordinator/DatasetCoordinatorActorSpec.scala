@@ -38,7 +38,7 @@ with ScalaFutures {
 
   val myDataset = largeDataset
   val myProjection = RichProjection(myDataset, schemaWithPartCol)
-  val columnStore = new InMemoryColumnStore
+  val columnStore = new InMemoryColumnStore(dispatcher)
 
   var dsActor: ActorRef = _
   var probe: TestProbe = _

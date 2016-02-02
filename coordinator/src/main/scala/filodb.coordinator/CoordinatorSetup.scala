@@ -19,6 +19,8 @@ trait CoordinatorSetup {
   implicit lazy val ec = FutureUtils.getBoundedExecContext(config.getInt("max-reprojection-futures"),
                                                       "filodb.core",
                                                       config.getInt("core-futures-pool-size"))
+  lazy val readEc = FutureUtils.getBoundedExecContext(256, "filodb.query",
+                                                 config.getInt("queries-futures-pool-size"))
 
   // These should be implemented as lazy val's, though tests might want to reset them
   val columnStore: ColumnStore

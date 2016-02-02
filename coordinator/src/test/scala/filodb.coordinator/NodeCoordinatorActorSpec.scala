@@ -30,7 +30,7 @@ with CoordinatorSetup with ScalaFutures {
                             .withFallback(ConfigFactory.load("application_test.conf"))
 
   implicit val context = scala.concurrent.ExecutionContext.Implicits.global
-  lazy val columnStore = new InMemoryColumnStore
+  lazy val columnStore = new InMemoryColumnStore(context)
   lazy val metaStore = new InMemoryMetaStore
 
   override def beforeAll() {

@@ -16,8 +16,8 @@ object FiloSetup extends CoordinatorSetup {
   var config: Config = _
   lazy val system = ActorSystem("filo-spark")
   lazy val columnStore = config.getString("store") match {
-    case "cassandra" => new CassandraColumnStore(config)
-    case "in-memory" => new InMemoryColumnStore
+    case "cassandra" => new CassandraColumnStore(config, readEc)
+    case "in-memory" => new InMemoryColumnStore(readEc)
   }
   lazy val metaStore = config.getString("store") match {
     case "cassandra" => new CassandraMetaStore(config.getConfig("cassandra"))
