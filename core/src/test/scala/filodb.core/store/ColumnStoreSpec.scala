@@ -9,6 +9,7 @@ import scala.language.postfixOps
 import filodb.core._
 import filodb.core.metadata.{Dataset, Column, DataColumn, Projection, RichProjection}
 import filodb.core.Types
+import filodb.core.query.KeyFilter
 
 import org.scalatest.{FlatSpec, Matchers, BeforeAndAfter, BeforeAndAfterAll}
 import org.scalatest.concurrent.ScalaFutures
@@ -225,6 +226,53 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
 
     whenReady(colStore.scanRows(projection2, schema, 0, params = paramSet.head)()) { rowIter =>
       rowIter.map(_.getInt(6)).sum should equal (492)
+    }
+  }
+
+  it should "filter rows written with single partition key" in {
+    import GdeltTestData._
+    val segments = getSegmentsByPartKey(projection2)
+    segments.foreach { seg =>
+      colStore.appendSegment(projection2, seg, 0).futureValue should equal (Success)
+    }
+
+    val paramSet = colStore.getScanSplits(dataset.name)
+    paramSet should have length (1)
+
+    val filterFunc = KeyFilter.equalsFunc(projection2.partitionType)(197902.asInstanceOf[projection2.PK])
+
+    whenReady(colStore.scanRows(projection2, schema, 0, params = paramSet.head)(filterFunc)) { rowIter =>
+      rowIter.map(_.getInt(6)).sum should equal (22)
+    }
+  }
+
+  import SingleKeyTypes._
+
+  it should "filter rows written with multiple column partition keys" in {
+    import GdeltTestData._
+    val segments = getSegmentsByPartKey(projection3)
+    segments.foreach { seg =>
+      colStore.appendSegment(projection3, seg, 0).futureValue should equal (Success)
+    }
+
+    val paramSet = colStore.getScanSplits(dataset.name)
+    paramSet should have length (1)
+
+    // Test 1:  IN query on first column only
+    val inFilter = KeyFilter.inFunc(StringKeyType)(Set("JPN", "KHM"))
+    val filter1 = KeyFilter.makePartitionFilterFunc(projection3, Seq(0), Seq(inFilter))
+    whenReady(colStore.scanRows(projection3, schema, 0, params = paramSet.head)(filter1)) { rowIter =>
+      val rows = rowIter.toSeq
+      rows.map(_.getInt(6)).sum should equal (30)
+      rows.map(_.getString(4)).toSet should equal (Set("JPN", "KHM"))
+    }
+
+    // Test 2: = filter on both partition columns
+    val eqFilters = Seq(KeyFilter.equalsFunc(StringKeyType)("JPN"),
+                        KeyFilter.equalsFunc(IntKeyType)(1979))
+    val filter2 = KeyFilter.makePartitionFilterFunc(projection3, Seq(0, 1), eqFilters)
+    whenReady(colStore.scanRows(projection3, schema, 0, params = paramSet.head)(filter2)) { rowIter =>
+      rowIter.map(_.getInt(6)).sum should equal (10)
     }
   }
 }

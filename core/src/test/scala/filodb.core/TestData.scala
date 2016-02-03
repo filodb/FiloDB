@@ -114,4 +114,16 @@ object GdeltTestData {
       seg
     }
   }
+
+  // Returns projection1 or 2 segments grouped by partition with a fake segment key
+  def getSegmentsByPartKey(projection: RichProjection): Seq[RowWriterSegment] = {
+    val segmentKey: Any = if (projection == projection2) 0 else "0"
+    val inputGroupedBySeg = readers.toSeq.groupBy(projection.partitionKeyFunc)
+    inputGroupedBySeg.map { case (partKey, lines) =>
+      val seg = new RowWriterSegment(projection, schema)(SegmentInfo(partKey, segmentKey).
+                                                          basedOn(projection))
+      seg.addRowsAsChunk(lines.toIterator)
+      seg
+    }.toSeq
+  }
 }
