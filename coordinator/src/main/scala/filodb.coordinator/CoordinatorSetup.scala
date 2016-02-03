@@ -16,11 +16,22 @@ trait CoordinatorSetup {
   // The global configuration object
   def config: Config
 
-  implicit lazy val ec = FutureUtils.getBoundedExecContext(config.getInt("max-reprojection-futures"),
-                                                      "filodb.core",
-                                                      config.getInt("core-futures-pool-size"))
-  lazy val readEc = FutureUtils.getBoundedExecContext(256, "filodb.query",
-                                                 config.getInt("queries-futures-pool-size"))
+  // implicit lazy val ec = FutureUtils.getBoundedExecContext(config.getInt("max-reprojection-futures"),
+  //                                                     "filodb.core",
+  //                                                     config.getInt("core-futures-pool-size"))
+  // lazy val readEc = FutureUtils.getBoundedExecContext(256, "filodb.query",
+  //                                                config.getInt("queries-futures-pool-size"))
+
+  // NOTE: Using getBoundedExecContext above was leading to deadlocks.  I believe this is because
+  // ColumnStore.appendSegment calls out to 4 or 5 other futures, including getting the tables, cached
+  // indexes, writing to both chunkMap as well as chunks tables, and saving cached segments.  Thus it would
+  // be deadlocked blocked waiting for space on the queue for one of these things, while the original future
+  // is waiting for it to get unblocked.
+  // Using the global context is not great, but at least doesn't deadlock.
+  // In the future: implement backpressure in the reprojector... at a higher level.  However, these is
+  // already backpressure in DatasetCoordinatorActor.
+  implicit val ec = scala.concurrent.ExecutionContext.Implicits.global
+  val readEc = ec
 
   // These should be implemented as lazy val's, though tests might want to reset them
   val columnStore: ColumnStore
