@@ -9,7 +9,7 @@
 
 ## Datasets
 
-* [GDELT public dataset](http://data.gdeltproject.org/documentation/GDELT-Data_Format_Codebook.pdf) - used frequently for bulk ingestion testing.  Ingest the first 4 million lines (1979-1984), which comes out to about 1.1GB CSV file.  Entire dataset is more than 250 million rows / 250GB
+* [GDELT public dataset](http://data.gdeltproject.org/documentation/GDELT-Data_Format_Codebook.pdf) - used frequently for bulk ingestion testing.  Ingest the first 4 million lines (1979-1984), which comes out to about 1.1GB CSV file.  Entire dataset is more than 250 million rows / 250GB.  See the discussion on README about different modelling options.
     - To ingest:
 
 ```scala
@@ -18,30 +18,35 @@ val csvDF = sqlContext.read.format("com.databricks.spark.csv").
               load(pathToGdeltCsv)
 import org.apache.spark.sql.SaveMode
 csvDF.write.format("filodb.spark").
-  option("dataset", "gdelt").
-  option("sort_column", "GLOBALEVENTID").
-  option("partition_column", "MonthYear").
-  option("default_partition_key", "<none>").
-  mode(SaveMode.Overwrite).save()
+             option("dataset", "gdelt").
+             option("row_keys", "GLOBALEVENTID").
+             option("segment_key", ":round GLOBALEVENTID 10000").
+             option("partition_keys", ":getOrElse MonthYear -1").
+             mode(SaveMode.Overwrite).save()
 ```
 
 * [NYC Taxi Trip and Fare Info](http://www.andresmh.com/nyctaxitrips/) - really interesting geospatial-temporal public dataset.  Trip data is 2.4GB for one part, ~ 15 million rows, and there are 12 parts.
     - `select(count("medallion")).show` should result in 14776615 records for the `trip_data_1.csv` (Part 1).   CSV takes around 25 secs on my machine.
+    - Partition by string prefix of medallion gives a pretty even distribution
+    - Segment by pickup_datetime allows range queries by time
     - id column is a workaround to make a unique ID out of two columns
 
 ```scala
-val strPrefix = sqlContext.udf.register("strPrefix", { (s: String, numChars: Int) => s.take(numChars) })
 val aInt = new java.util.concurrent.atomic.AtomicInteger(0)
 val autoId = sqlContext.udf.register("autoId", { () => aInt.incrementAndGet() })
-val tripsWithCols = tripsCsv.
-   withColumn("medalPrefix", strPrefix(tripsCsv("medallion"), lit(2))).withColumn("id", autoId())
+val taxiDF = sqlContext.read.format("com.databricks.spark.csv").
+               option("header", "true").option("inferSchema", "true").
+               load(pathToNycTaxiCsv)
 import org.apache.spark.sql.SaveMode
-tripsWithCols.sort("medalPrefix").write.
-  format("filodb.spark").option("dataset", "nyctaxitrips").
-  option("sort_column", "id").option("partition_column", "medalPrefix").
-  option("default_partition_key", "<none>").
-  option("segment_size", "100000").mode(SaveMode.Overwrite).save()
+taxiDF.write.format("filodb.spark").
+  option("dataset", "nyc_taxi").
+  option("row_keys", "hack_license,pickup_datetime").
+  option("segment_key", ":stringPrefix medallion 3").
+  option("partition_keys", ":stringPrefix medallion 2").
+  mode(SaveMode.Overwrite).save()
 ```
+
+NOTE: for a stress testing scenario use `:stringPrefix medallion 3` as a segment key.  It creates really tiny segments and a massive amount of Futures and massive amount of (unnecessary) I/O.
 
 * [Weather Datasets and APIs](https://github.com/killrweather/killrweather/wiki/9.-Weather-Data-Sources-and-APIs)
     - Also see the [KillrWeather](https://github.com/killrweather/killrweather/tree/master/data/load) data sets
