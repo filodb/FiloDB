@@ -29,7 +29,10 @@ See [architecture](doc/architecture.md) and [datasets and reading](doc/datasets_
   - [Roadmap](#roadmap)
 - [Pre-requisites](#pre-requisites)
 - [Getting Started](#getting-started)
-  - [FiloDB Data Modelling and Performance Considerations](#filodb-data-modelling-and-performance-considerations)
+- [Introduction to FiloDB Data Modelling](#introduction-to-filodb-data-modelling)
+  - [Computed Columns](#computed-columns)
+  - [FiloDB vs Cassandra Data Modelling](#filodb-vs-cassandra-data-modelling)
+  - [Data Modelling and Performance Considerations](#data-modelling-and-performance-considerations)
   - [Example FiloDB Schema for machine metrics](#example-filodb-schema-for-machine-metrics)
   - [Distributed Partitioning](#distributed-partitioning)
 - [Using FiloDB data-source with Spark](#using-filodb-data-source-with-spark)
@@ -51,6 +54,7 @@ See [architecture](doc/architecture.md) and [datasets and reading](doc/datasets_
 FiloDB is a new open-source distributed, versioned, and columnar analytical database designed for modern streaming workloads.
 
 * **High performance** - faster than Parquet scan speeds, plus filtering along two or more dimensions
+  - Very flexible filtering: filter on only part of a partition key, much more flexible than allowed in Cassandra
 * **Compact storage** - within 35% of Parquet
 * **Idempotent writes** - primary-key based appends and updates; easy exactly-once ingestion from streaming sources
 * **Distributed** - pluggable storage engine includes Apache Cassandra and in-memory
@@ -166,7 +170,7 @@ You may specify a function, or computed column, for use with any key column.  Th
 
 **Choosing Partition Keys**.
 
-- Partition keys are the most efficient way to filter data
+- Partition keys are the most efficient way to filter data.  Remember that, unlike Cassandra, FiloDB is able to efficiently filter any column in a partition key -- even string contains, IN on only one column.  It can do this because FiloDB pre-scans a much smaller table ahead of scanning the main columnar chunk table.  This flexibility means that there is no need to populate different tables with different orders of partition keys just to optimize for different queries.
 - If there are too few partitions, then FiloDB will not be able to distribute and parallelize reads.
 - If the numer of rows in each partition is too few, then the storage will not be efficient.
 - If the partition key is time based, there may be a hotspot in the cluster as recent data is all written into the same set of replicas, and likewise for read patterns as well.

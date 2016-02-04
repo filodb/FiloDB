@@ -17,16 +17,17 @@ import org.apache.spark.rdd.RDD
 import org.apache.spark.SparkContext
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.{BaseGenericInternalRow, GenericInternalRow}
-import org.apache.spark.sql.sources.{BaseRelation, TableScan, PrunedScan, PrunedFilteredScan, Filter}
+import org.apache.spark.sql.sources._
 import org.apache.spark.sql.types._
 import org.apache.spark.sql.{DataFrame, Row, SQLContext}
 import org.apache.spark.unsafe.types.UTF8String
 
 import filodb.core._
+import filodb.core.query.KeyFilter
 import filodb.core.metadata.{Column, Dataset, RichProjection}
 import filodb.core.store.RowReaderSegment
 
-object FiloRelation {
+object FiloRelation extends StrictLogging {
   import TypeConverters._
 
   implicit val context = scala.concurrent.ExecutionContext.Implicits.global
@@ -47,26 +48,56 @@ object FiloRelation {
   def getSchema(dataset: String, version: Int): Column.Schema =
     parse(FiloSetup.metaStore.getSchema(dataset, version)) { schema => schema }
 
-  // For now just implement really simple filtering
-  // private def getFilterFuncs(filters: Seq[Filter]): Seq[Types.PartitionKey => Boolean] = {
-  //   import org.apache.spark.sql.sources._
-  //   logger.info(s"Filters = $filters")
-  //   filters.flatMap {
-  //     case EqualTo(datasetObj.partitionColumn, equalVal) =>
-  //       val compareVal = equalVal.toString   // must convert to same type as partitionKey
-  //       logger.info(s"Adding filter predicate === $compareVal")
-  //       Some((p: Types.PartitionKey) => p == compareVal)
-  //     case other: Filter =>
-  //       None
-  //   }
-  // }
+  // Parses the Spark filters, matching them to partition key columns, and returning
+  // tuples of (position, keytype, applicable filters).
+  // NOTE: for now support just one filter per column
+  def parsePartitionFilters(projection: RichProjection,
+                            filters: Seq[Filter]): Seq[(Int, KeyType, Seq[Filter])] = {
+    logger.info(s"Incoming filters = $filters")
+    val colToFiltersMap: Map[String, Seq[Filter]] = filters.collect {
+      case f @ EqualTo(col, _) => col -> f
+      case f @ In(col, _)      => col -> f
+    }.groupBy(_._1).mapValues( colFilterPairs => colFilterPairs.map(_._2))
+
+    val columnIdxTypeMap = KeyFilter.mapPartitionColumns(projection, colToFiltersMap.keys.toSeq)
+
+    logger.info(s"Matching partition key col name / pos / keyType: $columnIdxTypeMap")
+    columnIdxTypeMap.map { case (colName, (pos, keyType)) =>
+      (pos, keyType, colToFiltersMap(colName))
+    }.toSeq
+  }
+
+  def filtersToFunc(projection: RichProjection,
+                    filterStuff: Seq[(Int, KeyType, Seq[Filter])]): Any => Boolean = {
+    def toFunc(keyType: KeyType, f: Filter): Any => Boolean = f match {
+      case EqualTo(_, value) => KeyFilter.equalsFunc(keyType)(value.asInstanceOf[keyType.T])
+      case In(_, values)     => KeyFilter.inFunc(keyType)(values.toSet.asInstanceOf[Set[keyType.T]])
+      case other: Filter     => throw new IllegalArgumentException(s"Sorry, filter $other not supported")
+    }
+
+    // Compute one func per column/position
+    logger.info(s"Filters by position: $filterStuff")
+    val funcs = filterStuff.map { case (pos, keyType, filters) =>
+      filters.tail.foldLeft(toFunc(keyType, filters.head)) { case (curFunc, newFilter) =>
+        KeyFilter.andFunc(curFunc, toFunc(keyType, newFilter))
+      }
+    }
+
+    if (funcs.isEmpty) {
+      logger.info(s"Using default filtering function")
+      (a: Any) => true
+    } else {
+      KeyFilter.makePartitionFilterFunc(projection, filterStuff.map(_._1), funcs)
+    }
+  }
 
   // It's good to put complex functions inside an object, to be sure that everything
   // inside the function does not depend on an explicit outer class and can be serializable
   def perPartitionRowScanner(config: Config,
                              readOnlyProjectionString: String,
                              version: Int,
-                             param: Map[String, String]): Iterator[Row] = {
+                             param: Map[String, String],
+                             filterFunc: Any => Boolean): Iterator[Row] = {
     // NOTE: all the code inside here runs distributed on each node.  So, create my own datastore, etc.
     FiloSetup.init(config)
     FiloSetup.columnStore    // force startup
@@ -74,7 +105,7 @@ object FiloRelation {
 
     parse(FiloSetup.columnStore.scanRows(
             readOnlyProjection, readOnlyProjection.columns, version, params = param,
-            (bytes, clazzes) => new SparkRowReader(bytes, clazzes))(),
+            (bytes, clazzes) => new SparkRowReader(bytes, clazzes))(filterFunc),
           10 minutes) { rowIt => rowIt.asInstanceOf[Iterator[Row]] }
   }
 }
@@ -129,9 +160,7 @@ case class FiloRelation(dataset: String,
     logger.info(s"Splits = $splits")
     logger.debug(s"readOnlyProjStr = $readOnlyProjStr")
 
-    // val filterFuncs = getFilterFuncs(filters.toList)
-    // require(filterFuncs.length <= 1, "More than one filtering function not supported right now")
-    // val filterFunc = if (filterFuncs.isEmpty) ((p: Types.PartitionKey) => true) else filterFuncs.head
+    val filterFunc = filtersToFunc(projection, parsePartitionFilters(projection, filters.toList))
 
     // NOTE: It's critical that the closure inside mapPartitions only references
     // vars from buildScan() method, and not the FiloRelation class.  Otherwise
@@ -141,7 +170,7 @@ case class FiloRelation(dataset: String,
       .mapPartitions { paramIter =>
         val params = paramIter.toSeq
         require(params.length == 1)
-        perPartitionRowScanner(_config, readOnlyProjStr, _version, params.head)
+        perPartitionRowScanner(_config, readOnlyProjStr, _version, params.head, filterFunc)
       }
   }
 }

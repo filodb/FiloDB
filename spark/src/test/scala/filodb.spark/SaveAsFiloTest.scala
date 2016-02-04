@@ -242,6 +242,25 @@ with Matchers with ScalaFutures {
     df.agg(sum("numArticles")).collect().head(0) should equal (492)
   }
 
+  it("should be able to parse and use partition filters in queries") {
+    import sql.implicits._
+
+    val gdeltDF = sc.parallelize(GdeltTestData.records.toSeq).toDF()
+    gdeltDF.write.format("filodb.spark").
+                 option("dataset", "gdelt3").
+                 option("row_keys", "eventId").
+                 option("segment_key", segCol).
+                 option("partition_keys", ":getOrElse actor2Code --,:getOrElse year -1").
+                 mode(SaveMode.Overwrite).
+                 save()
+    val df = sql.read.format("filodb.spark").option("dataset", "gdelt3").load()
+    df.registerTempTable("gdelt")
+    sql.sql("select sum(numArticles) from gdelt where actor2Code in ('JPN', 'KHM')").collect().
+      head(0) should equal (30)
+    sql.sql("select sum(numArticles) from gdelt where actor2Code = 'JPN' AND year = 1979").collect().
+      head(0) should equal (10)
+  }
+
   it("should be able to write with multi-column row keys") {
     import sql.implicits._
 
