@@ -8,19 +8,16 @@ import com.typesafe.scalalogging.slf4j.StrictLogging
 import java.nio.ByteBuffer
 import net.ceedubs.ficus.Ficus._
 import org.joda.time.DateTime
-import org.velvia.filo.{FiloRowReader, FiloVector, RowReader, VectorReader}
+import org.velvia.filo.{FastFiloRowReader, FiloVector, RowReader, VectorReader}
 import scala.concurrent.{Await, Future}
 import scala.concurrent.duration._
 import scala.language.postfixOps
 
 import org.apache.spark.rdd.RDD
 import org.apache.spark.SparkContext
-import org.apache.spark.sql.catalyst.InternalRow
-import org.apache.spark.sql.catalyst.expressions.{BaseGenericInternalRow, GenericInternalRow}
 import org.apache.spark.sql.sources._
 import org.apache.spark.sql.types._
 import org.apache.spark.sql.{DataFrame, Row, SQLContext}
-import org.apache.spark.unsafe.types.UTF8String
 
 import filodb.core._
 import filodb.core.query.KeyFilter
@@ -67,11 +64,18 @@ object FiloRelation extends StrictLogging {
     }.toSeq
   }
 
+  // Turns out Spark 1.4 passes UTF8String's as args a lot. Need to sanitize them.
+  def sanitize(item: Any): Any = item match {
+    case u: UTF8String => item.toString
+    case o: Any        => o
+  }
+
   def filtersToFunc(projection: RichProjection,
                     filterStuff: Seq[(Int, KeyType, Seq[Filter])]): Any => Boolean = {
     def toFunc(keyType: KeyType, f: Filter): Any => Boolean = f match {
-      case EqualTo(_, value) => KeyFilter.equalsFunc(keyType)(value.asInstanceOf[keyType.T])
-      case In(_, values)     => KeyFilter.inFunc(keyType)(values.toSet.asInstanceOf[Set[keyType.T]])
+      case EqualTo(_, value) => KeyFilter.equalsFunc(keyType)(sanitize(value).asInstanceOf[keyType.T])
+      case In(_, values)     => KeyFilter.inFunc(keyType)(
+                                  values.map(sanitize).toSet.asInstanceOf[Set[keyType.T]])
       case other: Filter     => throw new IllegalArgumentException(s"Sorry, filter $other not supported")
     }
 
@@ -139,9 +143,6 @@ case class FiloRelation(dataset: String,
   val schema = StructType(columnsToSqlFields(filoSchema.values.toSeq))
   logger.info(s"Read schema for dataset $dataset = $schema")
 
-  // Return false when returning RDD[InternalRow]
-  override def needConversion: Boolean = false
-
   def buildScan(): RDD[Row] = buildScan(filoSchema.keys.toArray)
 
   def buildScan(requiredColumns: Array[String]): RDD[Row] =
@@ -175,85 +176,20 @@ case class FiloRelation(dataset: String,
   }
 }
 
-object SparkRowReader {
-  import VectorReader._
-  import FiloVector._
-
-  val TimestampClass = classOf[java.sql.Timestamp]
-
-  // Customize the Filo vector maker to return Long vectors for Timestamp columns.
-  // This is because Spark 1.5's InternalRow expects Long primitives for that type.
-  val timestampVectorMaker: VectorMaker = {
-    case TimestampClass => ((b: ByteBuffer, len: Int) => FiloVector[Long](b, len))
-  }
-
-  val spark15vectorMaker = timestampVectorMaker orElse defaultVectorMaker
-}
-
-/**
- * A class to wrap the original FiloVector[Long] for Spark's InternalRow Timestamp representation,
- * which is based on microseconds rather than milliseconds.
- */
-class SparkTimestampFiloVector(innerVector: FiloVector[Long]) extends FiloVector[Long] {
-  final def isAvailable(index: Int): Boolean = innerVector.isAvailable(index)
-  final def foreach[B](fn: Long => B): Unit = innerVector.foreach(fn)
-  final def apply(index: Int): Long = innerVector(index) * 1000
-  final def length: Int = innerVector.length
-}
-
-/**
- * Base the SparkRowReader on Spark's InternalRow.  Scans are much faster because
- * sources that return RDD[Row] need to be converted to RDD[InternalRow], and the
- * conversion is horribly expensive, especially for primitives.
- * The only downside is that the API is not stable.  :/
- * TODO: get UTF8String's out of Filo as well, so no string conversion needed :D
- */
 class SparkRowReader(chunks: Array[ByteBuffer],
                      classes: Array[Class[_]],
                      emptyLen: Int = 0)
-extends BaseGenericInternalRow with FiloRowReader {
-  var rowNo: Int = -1
-  final def setRowNo(newRowNo: Int): Unit = { rowNo = newRowNo }
-
-  val parsers = FiloVector.makeVectors(chunks, classes, emptyLen, SparkRowReader.spark15vectorMaker)
-
-  // Hack: wrap timestamp FiloVectors to give correct representation (microsecond-based)
-  for { i <- 0 until chunks.size } {
-    if (classes(i) == classOf[java.sql.Timestamp]) {
-      parsers(i) = new SparkTimestampFiloVector(parsers(i).asInstanceOf[FiloVector[Long]])
-    }
+extends FastFiloRowReader(chunks, classes, emptyLen) with Row {
+  def apply(i: Int): Any = getAny(i)
+  def copy(): org.apache.spark.sql.Row = {
+    val copy = new SparkRowReader(chunks, classes, emptyLen)
+    copy.setRowNo(rowNo)
+    copy
   }
-
-  final def notNull(columnNo: Int): Boolean = parsers(columnNo).isAvailable(rowNo)
-
-  override final def getBoolean(columnNo: Int): Boolean =
-    parsers(columnNo).asInstanceOf[FiloVector[Boolean]](rowNo)
-  override final def getInt(columnNo: Int): Int =
-    parsers(columnNo).asInstanceOf[FiloVector[Int]](rowNo)
-  override final def getLong(columnNo: Int): Long =
-    parsers(columnNo).asInstanceOf[FiloVector[Long]](rowNo)
-  override final def getDouble(columnNo: Int): Double =
-    parsers(columnNo).asInstanceOf[FiloVector[Double]](rowNo)
-  override final def getFloat(columnNo: Int): Float =
-    parsers(columnNo).asInstanceOf[FiloVector[Float]](rowNo)
-
-  // NOTE: This is horribly slow as it decodes a String from Filo's UTF8, then has
-  // to convert back to string.  When Filo gets UTF8 support then use
-  // UTF8String.fromAddress(object, offset, numBytes)... might enable zero copy strings
-  override final def getUTF8String(columnNo: Int): UTF8String = {
-    val str = parsers(columnNo).asInstanceOf[FiloVector[String]](rowNo)
-    UTF8String.fromString(str)
-  }
-
-  final def getAny(columnNo: Int): Any = genericGet(columnNo)
-  final def genericGet(columnNo: Int): Any =
-    if (classes(columnNo) == classOf[String]) { getUTF8String(columnNo) }
-    else { parsers(columnNo).boxed(rowNo) }
-
-  override final def isNullAt(i: Int): Boolean = !notNull(i)
-  def numFields: Int = parsers.length
-
-  // Only used for pure select() queries, doesn't need to be fast?
-  def copy(): InternalRow =
-    new GenericInternalRow((0 until numFields).map(genericGet).toArray)
+  def getByte(i: Int): Byte = ???
+  def getShort(i: Int): Short = ???
+  def isNullAt(i: Int): Boolean = !notNull(i)
+  def length: Int = parsers.length
+  def toSeq: Seq[Any] =
+    (0 until length).map(apply)
 }

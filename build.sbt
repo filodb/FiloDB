@@ -47,7 +47,7 @@ lazy val jmh = (project in file("jmh"))
                  .enablePlugins(JmhPlugin)
                  .dependsOn(core, spark)
 
-val phantomVersion = "1.12.2"
+val phantomVersion = "1.11.0"
 val akkaVersion    = "2.3.7"
 
 lazy val extraRepos = Seq(
@@ -99,8 +99,8 @@ lazy val cliDeps = Seq(
 )
 
 lazy val sparkDeps = Seq(
-  "org.apache.spark"     %% "spark-sql"         % "1.5.2" % "provided",
-  "org.apache.spark"     %% "spark-streaming"   % "1.5.2" % "provided"
+  "org.apache.spark"     %% "spark-sql"         % "1.4.1" % "provided",
+  "org.apache.spark"     %% "spark-streaming"   % "1.4.1" % "provided"
 )
 
 lazy val jmhDeps = Seq(
