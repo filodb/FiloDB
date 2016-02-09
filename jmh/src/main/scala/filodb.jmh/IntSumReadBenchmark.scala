@@ -8,11 +8,21 @@ import scalaxy.loops._
 import scala.language.postfixOps
 
 import filodb.core._
-import filodb.core.metadata.{Column, Dataset, RichProjection}
-import filodb.core.store.{RowReaderSegment, RowWriterSegment}
+import filodb.core.metadata.{Column, DataColumn, Dataset, RichProjection}
+import filodb.core.store.{RowReaderSegment, RowWriterSegment, SegmentInfo}
 import org.velvia.filo.{FiloVector, FastFiloRowReader, RowReader, TupleRowReader}
 
 import java.util.concurrent.TimeUnit
+
+object IntSumReadBenchmark {
+  val schema = Seq(DataColumn(0, "int", "dataset", 0, Column.ColumnType.IntColumn),
+                   DataColumn(1, "rownum", "dataset", 0, Column.ColumnType.IntColumn))
+
+  val dataset = Dataset("dataset", "rownum", ":round rownum 10000")
+  val projection = RichProjection(dataset, schema)
+
+  val rowStream = Iterator.from(0).map { row => (Some(util.Random.nextInt), Some(row)) }
+}
 
 /**
  * Microbenchmark of simple integer summing of Filo chunks in FiloDB segments,
@@ -21,20 +31,12 @@ import java.util.concurrent.TimeUnit
  */
 @State(Scope.Thread)
 class IntSumReadBenchmark {
+  import IntSumReadBenchmark._
   val NumRows = 10000
-  implicit val keyHelper = IntKeyHelper(10000)
 
-  val schema = Seq(Column("int", "dataset", 0, Column.ColumnType.IntColumn),
-                   Column("rownum", "dataset", 0, Column.ColumnType.IntColumn))
-
-  val dataset = Dataset("dataset", "rownum")
-
-  val rowStream = Iterator.from(0).map { row => (Some(util.Random.nextInt), Some(row)) }
-
-  val keyRange = KeyRange("dataset", "partition", 0, NumRows)
-  val writerSeg = new RowWriterSegment(keyRange, schema)
-  writerSeg.addRowsAsChunk(rowStream.map(TupleRowReader).take(NumRows),
-                           (r: RowReader) => r.getInt(1) )
+  val writerSeg = new RowWriterSegment(projection, schema)(
+                                       SegmentInfo("/0", 0).basedOn(projection))
+  writerSeg.addRowsAsChunk(rowStream.map(TupleRowReader).take(NumRows))
   val readSeg = RowReaderSegment(writerSeg, schema)
 
   /**
