@@ -56,7 +56,7 @@ class Arguments extends FieldArgs {
 object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorSetup {
 
   val system = ActorSystem("filo-cli")
-  val config = ConfigFactory.load
+  val config = ConfigFactory.load.getConfig("filodb")
   lazy val columnStore = new CassandraColumnStore(config, readEc)
   lazy val metaStore = new CassandraMetaStore(config.getConfig("cassandra"))
 

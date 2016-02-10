@@ -17,7 +17,7 @@ class ColumnTableSpec extends CassandraFlatSpec with BeforeAndAfter {
 
   val firstColumn = DataColumn(0, "first", "foo", 1, ColumnType.StringColumn)
 
-  val config = ConfigFactory.load("application_test.conf").getConfig("cassandra")
+  val config = ConfigFactory.load("application_test.conf").getConfig("filodb.cassandra")
   val columnTable = new ColumnTable(config)
   implicit val keySpace = KeySpace(config.getString("keyspace"))
   val timeout = Timeout(30 seconds)

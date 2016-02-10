@@ -24,6 +24,9 @@ object FiloSetup extends CoordinatorSetup {
     case "in-memory" => new InMemoryMetaStore
   }
 
+  /**
+   * The config within the filodb.** level.
+=   */
   def init(filoConfig: Config): Unit = {
     config = filoConfig
     coordinatorActor       // Force NodeCoordinatorActor to start
@@ -34,9 +37,10 @@ object FiloSetup extends CoordinatorSetup {
   def configFromSpark(context: SparkContext): Config = {
     val conf = context.getConf
     val filoOverrides = conf.getAll.collect { case (k, v) if k.startsWith("spark.filodb") =>
-                                                k.replace("spark.filodb.", "") -> v
+                                                k.replace("spark.filodb.", "filodb.") -> v
                                             }
     ConfigFactory.parseMap(filoOverrides.toMap.asJava)
                  .withFallback(ConfigFactory.load)
+                 .getConfig("filodb")
   }
 }

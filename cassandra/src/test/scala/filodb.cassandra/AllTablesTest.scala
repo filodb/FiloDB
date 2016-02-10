@@ -21,7 +21,7 @@ trait AllTablesTest extends SimpleCassandraTest {
 
   implicit val context = scala.concurrent.ExecutionContext.Implicits.global
 
-  val config = ConfigFactory.load("application_test.conf")
+  val config = ConfigFactory.load("application_test.conf").getConfig("filodb")
   implicit val keySpace = KeySpace(config.getString("cassandra.keyspace"))
 
   lazy val columnStore = new CassandraColumnStore(config, context)
