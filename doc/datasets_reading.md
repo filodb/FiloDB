@@ -56,3 +56,4 @@ NOTE: for a stress testing scenario use `:stringPrefix medallion 3` as a segment
 
 * [Design and Implementation of Modern Column-Oriented DBs](http://db.csail.mit.edu/pubs/abadi-column-stores.pdf)
 * [Positional Update Handling in Column Stores](http://www.cs.cornell.edu/~guoz/Guozhang%20Wang%20slides/Positional%20Update%20Handling%20in%20Column%20Stores.pdf)
+* [SnappyData Architecture](http://www.snappydata.io/snappy-industrial) - a hybrid in-memory, Spark-integrated row/column store

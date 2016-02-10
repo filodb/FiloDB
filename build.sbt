@@ -67,7 +67,7 @@ lazy val coreDeps = Seq(
   "com.typesafe.scala-logging" %% "scala-logging-slf4j" % "2.1.2",
   "org.slf4j"             % "slf4j-api"         % "1.7.10",
   "com.beachape"         %% "enumeratum"        % "1.2.1",
-  "org.velvia.filo"      %% "filo-scala"        % "0.2.3-SNAPSHOT",
+  "org.velvia.filo"      %% "filo-scala"        % "0.2.4",
   "joda-time"             % "joda-time"         % "2.2",
   "org.joda"              % "joda-convert"      % "1.2",
   "io.spray"             %% "spray-caching"     % "1.3.2",

@@ -23,7 +23,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
   implicit val defaultPatience =
     PatienceConfig(timeout = Span(10, Seconds), interval = Span(50, Millis))
 
-  val config = ConfigFactory.load("application_test.conf")
+  val config = ConfigFactory.load("application_test.conf").getConfig("filodb")
   def colStore: CachedMergingColumnStore
 
   // First create the tables in C*

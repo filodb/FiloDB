@@ -13,7 +13,7 @@ class FiloMemTableSpec extends FunSpec with Matchers with BeforeAndAfter {
   import NamesTestData._
 
   val keyRange = KeyRange(Dataset.DefaultPartitionKey, 0, 0)
-  val config = ConfigFactory.load("application_test.conf")
+  val config = ConfigFactory.load("application_test.conf").getConfig("filodb")
 
   val namesWithPartCol = (0 until 50).flatMap { partNum =>
     names.map { t => (t._1, t._2, t._3, t._4, Some(partNum.toString)) }

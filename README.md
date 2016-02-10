@@ -436,6 +436,13 @@ Version 0.2 will include many more features:
 
 Run the tests with `sbt test`, or for continuous development, `sbt ~test`.  Noisy cassandra logs can be seen in `filodb-test.log`.
 
+To run benchmarks, from within SBT:
+
+    cd jmh
+    jmh:run -i 5 -wi 5 -f3
+
+You can get the huge variety of JMH options by running `jmh:run -help`.
+
 ## You can help!
 
 - Send your use cases for OLAP on Cassandra and Spark
