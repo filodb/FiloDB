@@ -44,6 +44,7 @@ See [architecture](doc/architecture.md) and [datasets and reading](doc/datasets_
 - [Using the CLI](#using-the-cli)
     - [CLI Example](#cli-example)
 - [Current Status](#current-status)
+- [Deploying](#deploying)
 - [Building and Testing](#building-and-testing)
 - [You can help!](#you-can-help)
 
@@ -422,15 +423,14 @@ Query/export some columns:
 
 ## Current Status
 
-Version 0.1 is released!  It offers a stable point from which to try FiloDB.
-* Ingestion is relatively efficient, stable, and tested up to a 2.4 GB / 15 million row data source (doesn't mean more doesn't work, just what is regularly tested)
-* Query columnar projection and partition key filtering pushdown.  Sort key filtering pushdown not in yet.
-* Only ingestion through Spark / Spark Streaming, and CLI ingestion via CSV files.
-* CSV export from CLI will only read data from one node of a cluster.
+* Version 0.1 is the stable, latest released version.  It offers a stable point from which to try FiloDB.
+* Master contains much more features - multi column partition and row keys, separate segment key, much richer projection key filtering (IN, etc.), better performance and error handling
 
-Version 0.2 will include many more features:
-- Composite partition, sort, and segment keys
-- More efficient storage engine
+## Deploying
+
+The current version assumes Spark 1.5.x and Cassandra 2.1.x or 2.2.x.
+
+There is a branch for Datastax Enterprise 4.8 / Spark 1.4.  Note that if you are using DSE or have vnodes enabled, a lower number of vnodes (16 or less) is STRONGLY recommended as higher numbers of vnodes slows down queries substantially and basically prevents subsecond queries from happening.
 
 ## Building and Testing
 

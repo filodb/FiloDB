@@ -112,7 +112,16 @@ extends CachedMergingColumnStore with CassandraColumnStoreScanner with StrictLog
     }
     val tokenRanges = for { key <- tokensByReplica.keys } yield {
       if (tokensByReplica(key).size > 1) {
-        tokensByReplica(key).reduceLeft(_.mergeWith(_)).splitEvenly(splitsPerNode).asScala
+        // NOTE: If vnodes are enabled, like in DSE, the token ranges are not contiguous and cannot
+        // therefore be merged. In that case just give up.  Lesson: don't use a lot of vnodes.
+        try {
+          tokensByReplica(key).sorted.reduceLeft(_.mergeWith(_)).splitEvenly(splitsPerNode).asScala
+        } catch {
+          case e: IllegalArgumentException =>
+            logger.warn(s"Non-contiguous token ranges, cannot merge.  This is probably because of vnodes.")
+            logger.warn("Reduce the number of vnodes for better performance.")
+            tokensByReplica(key)
+        }
       }
       else {
         tokensByReplica(key).flatMap { range => range.splitEvenly(splitsPerNode).asScala }
