@@ -21,7 +21,13 @@ import filodb.core.metadata.{Column, Projection}
  * ==Configuration==
  * {{{
  *   cassandra {
+ *     hosts = ["1.2.3.4", "1.2.3.5"]
+ *     port = 9042
  *     keyspace = "my_cass_keyspace"
+ *     username = ""
+ *     password = ""
+ *     read-timeout = 12 s    # default read timeout of 12 seconds
+ *     connect-timeout = 5 s
  *   }
  *   columnstore {
  *     tablecache-size = 50    # Number of cache entries for C* for ChunkTable etc.

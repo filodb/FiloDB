@@ -1,7 +1,10 @@
 package filodb.core.reprojector
 
+import com.typesafe.config.Config
 import com.typesafe.scalalogging.slf4j.StrictLogging
+import net.ceedubs.ficus.Ficus._
 import org.velvia.filo.RowReader
+import scala.concurrent.duration.FiniteDuration
 import scala.concurrent.{ExecutionContext, Future}
 
 import filodb.core._
@@ -46,12 +49,23 @@ trait Reprojector {
 /**
  * Default reprojector, which scans the Locked memtable, turning them into segments for flushing,
  * using fixed segment widths
+ *
+ * ==Config==
+ * {{{
+ *   reprojector {
+ *     retries = 3
+ *     retry-base-timeunit = 5 s
+ *   }
+ * }}}
  */
-class DefaultReprojector(columnStore: ColumnStore)
+class DefaultReprojector(config: Config, columnStore: ColumnStore)
                         (implicit ec: ExecutionContext) extends Reprojector with StrictLogging {
   import Types._
   import RowReader._
   import filodb.core.Iterators._
+
+  val retries = config.getInt("reprojector.retries")
+  val retryBaseTime = config.as[FiniteDuration]("reprojector.retry-base-timeunit")
 
   // PERF/TODO: Maybe we should pass in an Iterator[RowReader], and extract partition and sort keys
   // out.  Heck we could create a custom FiloRowReader which has methods to extract this out.
@@ -78,12 +92,16 @@ class DefaultReprojector(columnStore: ColumnStore)
     }
   }
 
+  import markatta.futiles.Retry._
+
   def reproject(memTable: MemTable, version: Int): Future[Seq[String]] = {
     val projection = memTable.projection
     val datasetName = projection.datasetName
     val segments = toSegments(memTable)
     val segmentTasks = segments.map { segment =>
-      for { resp <- columnStore.appendSegment(projection, segment, version) if resp == Success }
+      for { resp <- retryWithBackOff(retries, retryBaseTime) {
+                      columnStore.appendSegment(projection, segment, version)
+                    } if resp == Success }
       yield {
         logger.info(s"Finished merging segment ${segment.segInfo}, version $version...")
         // Return useful info about each successful reprojection
@@ -91,10 +109,6 @@ class DefaultReprojector(columnStore: ColumnStore)
       }
     }
     logger.info(s"Starting reprojection for dataset $datasetName, version $version")
-    for { tasks <- Future { segmentTasks }
-          results <- Future.sequence(tasks.toList) }
-    yield {
-      results
-    }
+    Future.sequence(segmentTasks.toList)
   }
 }

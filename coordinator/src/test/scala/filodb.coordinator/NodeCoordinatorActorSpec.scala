@@ -1,7 +1,7 @@
 package filodb.coordinator
 
 import akka.actor.{ActorSystem, ActorRef, PoisonPill}
-import akka.testkit.TestProbe
+import akka.testkit.{EventFilter, TestProbe}
 import akka.pattern.gracefulStop
 import com.typesafe.config.ConfigFactory
 import scala.concurrent.Await
@@ -129,6 +129,25 @@ with CoordinatorSetup with ScalaFutures {
     whenReady(columnStore.scanRows(projection3, schema, 0, params = splits.head)()) { rowIter =>
       rowIter.map(_.getInt(6)).sum should equal (492)
     }
+  }
+
+  it("should stop datasetActor if error occurs and prevent further ingestion") {
+    probe.send(coordActor, CreateDataset(dataset1, schema))
+    probe.expectMsg(DatasetCreated)
+    columnStore.clearProjectionData(dataset1.projections.head).futureValue should equal (Success)
+
+    probe.send(coordActor, SetupIngestion(dataset1.name, schema.map(_.name), 0))
+    probe.expectMsg(IngestionReady)
+
+    EventFilter[NullKeyValue](occurrences = 1) intercept {
+      probe.send(coordActor, IngestRows(dataset1.name, 0, readers, 1L))
+      // This should trigger an error, and datasetCoordinatorActor will stop, and no ack will be forthcoming.
+      probe.expectNoMsg
+    }
+
+    // Now, if we send more rows, we will get UnknownDataset
+    probe.send(coordActor, IngestRows(dataset1.name, 0, readers, 1L))
+    probe.expectMsg(UnknownDataset)
   }
 }
 

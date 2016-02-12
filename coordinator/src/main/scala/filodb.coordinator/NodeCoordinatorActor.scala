@@ -1,6 +1,6 @@
 package filodb.coordinator
 
-import akka.actor.{Actor, ActorRef, PoisonPill, Props}
+import akka.actor.{Actor, ActorRef, PoisonPill, Props, SupervisorStrategy, Terminated}
 import com.typesafe.config.Config
 import net.ceedubs.ficus.Ficus._
 import org.velvia.filo.RowReader
@@ -126,6 +126,9 @@ class NodeCoordinatorActor(metaStore: MetaStore,
   val dsCoordinators = new collection.mutable.HashMap[(TableName, Int), ActorRef]
   val dsCoordNotify = new collection.mutable.HashMap[(TableName, Int), List[ActorRef]]
 
+  // By default, stop children DatasetCoordinatorActors when something goes wrong.
+  override val supervisorStrategy = SupervisorStrategy.stoppingStrategy
+
   private def withDsCoord(originator: ActorRef, dataset: String, version: Int)
                          (func: ActorRef => Unit): Unit = {
     dsCoordinators.get((dataset, version)).map(func).getOrElse(originator ! UnknownDataset)
@@ -239,6 +242,14 @@ class NodeCoordinatorActor(metaStore: MetaStore,
 
     case AddDatasetCoord(dataset, version, dsCoordRef) =>
       dsCoordinators((dataset, version)) = dsCoordRef
+      context.watch(dsCoordRef)
+
+    case Terminated(childRef) =>
+      dsCoordinators.find { case (key, ref) => ref == childRef }
+                    .foreach { case (key, _) =>
+                      logger.warn(s"Actor $childRef has terminated!  Ingestion for $key will stop.")
+                      dsCoordinators.remove(key)
+                    }
 
     case d @ DatasetCreateNotify(dataset, version, msg) =>
       logger.debug(s"$d")
