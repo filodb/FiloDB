@@ -13,7 +13,8 @@ import filodb.core.reprojector._
  */
 trait CoordinatorSetup {
   def system: ActorSystem
-  // The global configuration object
+
+  // The global Filo configuration object.  Should be ConfigFactory.load.getConfig("filodb")
   def config: Config
 
   // implicit lazy val ec = FutureUtils.getBoundedExecContext(config.getInt("max-reprojection-futures"),
@@ -36,7 +37,7 @@ trait CoordinatorSetup {
   // These should be implemented as lazy val's, though tests might want to reset them
   val columnStore: ColumnStore
   val metaStore: MetaStore
-  lazy val reprojector = new DefaultReprojector(columnStore)
+  lazy val reprojector = new DefaultReprojector(config, columnStore)
 
   // TODO: consider having a root actor supervising everything
   lazy val coordinatorActor =
