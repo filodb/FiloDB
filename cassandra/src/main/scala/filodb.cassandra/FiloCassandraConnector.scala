@@ -10,7 +10,8 @@ trait FiloCassandraConnector {
   private[this] lazy val connector =
     ContactPoints(config.as[Seq[String]]("hosts"), config.getInt("port"))
       .withClusterBuilder(_.withAuthProvider(authProvider)
-                           .withSocketOptions(socketOptions))
+                           .withSocketOptions(socketOptions)
+                           .withQueryOptions(queryOptions))
       .keySpace(keySpace.name)
 
   // Cassandra config with following keys:  keyspace, hosts, port, username, password
@@ -31,6 +32,14 @@ trait FiloCassandraConnector {
       opts.setReadTimeoutMillis(to.toMillis.toInt) }
     config.as[Option[FiniteDuration]]("connect-timeout").foreach { to =>
       opts.setConnectTimeoutMillis(to.toMillis.toInt) }
+    opts
+  }
+
+  private[this] lazy val queryOptions = {
+    val opts = new QueryOptions()
+    config.as[Option[String]]("default-consistency-level").foreach { cslevel =>
+      opts.setConsistencyLevel(ConsistencyLevel.valueOf(cslevel))
+    }
     opts
   }
 
