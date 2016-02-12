@@ -224,12 +224,18 @@ private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
   }
 
   private def handleFlushErr(t: Throwable): Unit = {
-    // TODO: let everyone know task failed?  Or not until retries are all up?
     flushedCallbacks.foreach { ref => ref ! FlushFailed(t) }
     flushedCallbacks = Nil
     flushesFailed += 1
-    // TODO: retry?
-    // Don't delete reprojection.  Just let everything suspend?
+    // At this point, we can attempt a couple different things.
+    //  1. Retry the segments that did not succeed writing (how do we know what they are?)
+    //     This only makes sense for certain failures.
+    //  2. Skip the segments in error.
+    //  3. Fail and throw an exception, and let our supervisor actor deal with it.  This most likely
+    //     means a loss of state and messages.
+    // For now, just throw an error, and assume we can't proceed.
+    // TODO: implement retry.
+    throw t
   }
 
   private def clearProjection(originator: ActorRef, projection: Projection): Unit = {

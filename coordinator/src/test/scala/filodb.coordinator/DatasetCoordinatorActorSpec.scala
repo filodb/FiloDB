@@ -107,8 +107,6 @@ with ScalaFutures {
     reprojections should equal (Seq(("dataset", 0)))
   }
 
-  it("should error out and restart when encountering null partition column") (pending)
-
   it("should not send Ack if over maximum number of rows") {
     // First one will go through, but make memTable full
     dsActor ! NewRows(probe.ref, namesWithPartCol.take(205).map(TupleRowReader), 0L)
