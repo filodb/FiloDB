@@ -1,14 +1,16 @@
 package filodb.cassandra
 
-import com.datastax.driver.core.{AuthProvider, PlainTextAuthProvider, Session, VersionNumber}
+import com.datastax.driver.core._
 import com.typesafe.config.Config
 import com.websudos.phantom.connectors.{ContactPoints, KeySpace}
 import net.ceedubs.ficus.Ficus._
+import scala.concurrent.duration.FiniteDuration
 
 trait FiloCassandraConnector {
   private[this] lazy val connector =
     ContactPoints(config.as[Seq[String]]("hosts"), config.getInt("port"))
-      .withClusterBuilder(_.withAuthProvider(authProvider))
+      .withClusterBuilder(_.withAuthProvider(authProvider)
+                           .withSocketOptions(socketOptions))
       .keySpace(keySpace.name)
 
   // Cassandra config with following keys:  keyspace, hosts, port, username, password
@@ -19,10 +21,18 @@ trait FiloCassandraConnector {
   private[this] lazy val authProvider =
     if (authEnabled) {
       new PlainTextAuthProvider(config.getString("username"), config.getString("password"))
-    }
-    else {
+    } else {
       AuthProvider.NONE
     }
+
+  private[this] lazy val socketOptions = {
+    val opts = new SocketOptions
+    config.as[Option[FiniteDuration]]("read-timeout").foreach { to =>
+      opts.setReadTimeoutMillis(to.toMillis.toInt) }
+    config.as[Option[FiniteDuration]]("connect-timeout").foreach { to =>
+      opts.setConnectTimeoutMillis(to.toMillis.toInt) }
+    opts
+  }
 
   implicit lazy val keySpace = KeySpace(config.getString("keyspace"))
 
