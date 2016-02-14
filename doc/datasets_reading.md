@@ -32,8 +32,6 @@ csvDF.write.format("filodb.spark").
     - id column is a workaround to make a unique ID out of two columns
 
 ```scala
-val aInt = new java.util.concurrent.atomic.AtomicInteger(0)
-val autoId = sqlContext.udf.register("autoId", { () => aInt.incrementAndGet() })
 val taxiDF = sqlContext.read.format("com.databricks.spark.csv").
                option("header", "true").option("inferSchema", "true").
                load(pathToNycTaxiCsv)
