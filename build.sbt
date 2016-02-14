@@ -45,7 +45,7 @@ lazy val jmh = (project in file("jmh"))
                  .settings(name := "filodb-jmh")
                  .settings(libraryDependencies ++= jmhDeps)
                  .enablePlugins(JmhPlugin)
-                 .dependsOn(core, spark)
+                 .dependsOn(core % "compile->compile; compile->test", spark)
 
 val phantomVersion = "1.12.2"
 val akkaVersion    = "2.3.7"
