@@ -43,7 +43,7 @@ trait Reprojector {
    * A simple function that reads rows out of a memTable and converts them to segments.
    * Used by reproject(), separated out for ease of testing.
    */
-  def toSegments(memTable: MemTable): Iterator[Segment]
+  def toSegments(memTable: MemTable, segments: Seq[(Any, Any)]): Seq[Segment]
 }
 
 /**
@@ -62,24 +62,17 @@ class DefaultReprojector(config: Config, columnStore: ColumnStore)
                         (implicit ec: ExecutionContext) extends Reprojector with StrictLogging {
   import Types._
   import RowReader._
-  import filodb.core.Iterators._
 
   val retries = config.getInt("reprojector.retries")
   val retryBaseTime = config.as[FiniteDuration]("reprojector.retry-base-timeunit")
 
-  // PERF/TODO: Maybe we should pass in an Iterator[RowReader], and extract partition and sort keys
-  // out.  Heck we could create a custom FiloRowReader which has methods to extract this out.
-  // Might be faster than creating a Tuple3 for every row... or not, for complex sort and partition keys
-  def toSegments(memTable: MemTable): Iterator[Segment] = {
-    val projection = memTable.projection
-    val dataset = projection.dataset
-    memTable.readAllRows().sortedGroupBy { case (partition, segment, rowKey, row) =>
-      // lazy grouping of partition/segment from the sortKey
-      (partition, segment)
-    }.map { case ((partition, segmentKey), segmentRowsIt) =>
+  def toSegments(memTable: MemTable, segments: Seq[(Any, Any)]): Seq[Segment] = {
+    val dataset = memTable.projection.dataset
+    segments.map { case (partition, segmentKey) =>
       // For each segment grouping of rows... set up a Segment
-      val segInfo = SegmentInfo(partition, segmentKey).basedOn(projection)
-      val segment = new RowWriterSegment(projection, projection.columns)(segInfo)
+      val segInfo = SegmentInfo(partition, segmentKey).basedOn(memTable.projection)
+      val segment = new RowWriterSegment(memTable.projection, memTable.projection.columns)(segInfo)
+      val segmentRowsIt = memTable.readRows(segInfo)
       logger.debug(s"Created new segment $segment for encoding...")
 
       // Group rows into chunk sized bytes and add to segment
@@ -97,7 +90,7 @@ class DefaultReprojector(config: Config, columnStore: ColumnStore)
   def reproject(memTable: MemTable, version: Int): Future[Seq[String]] = {
     val projection = memTable.projection
     val datasetName = projection.datasetName
-    val segments = toSegments(memTable)
+    val segments = toSegments(memTable, memTable.getSegments.toSeq)
     val segmentTasks = segments.map { segment =>
       for { resp <- retryWithBackOff(retries, retryBaseTime) {
                       columnStore.appendSegment(projection, segment, version)
@@ -109,6 +102,6 @@ class DefaultReprojector(config: Config, columnStore: ColumnStore)
       }
     }
     logger.info(s"Starting reprojection for dataset $datasetName, version $version")
-    Future.sequence(segmentTasks.toList)
+    Future.sequence(segmentTasks)
   }
 }

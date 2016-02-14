@@ -1,5 +1,6 @@
 package filodb.jmh
 
+import ch.qos.logback.classic.{Level, Logger}
 import com.typesafe.config.ConfigFactory
 import java.util.concurrent.TimeUnit
 import org.openjdk.jmh.annotations.Benchmark
@@ -21,6 +22,8 @@ import filodb.core.store.{InMemoryColumnStore, Segment}
 class ReprojectionBenchmark {
   import GdeltTestData._
 
+  org.slf4j.LoggerFactory.getLogger("filodb").asInstanceOf[Logger].setLevel(Level.ERROR)
+
   val numRows = 2000   // 50 records per segment, so 40 segments
   val lines = (0 until numRows).map { i =>
     val parts = gdeltLines(i % gdeltLines.length).split(',')
@@ -40,6 +43,8 @@ class ReprojectionBenchmark {
   // Populate memtable
   mTable.ingestRows(lines)
 
+  val segments = mTable.getSegments.toSeq
+
   /**
    * Simulation of a columnar query engine scanning the segment chunks columnar wise
    */
@@ -47,6 +52,6 @@ class ReprojectionBenchmark {
   @BenchmarkMode(Array(Mode.Throughput))
   @OutputTimeUnit(TimeUnit.SECONDS)
   def toSegments(): Seq[Segment] = {
-    reprojector.toSegments(mTable).toList
+    reprojector.toSegments(mTable, segments).toList
   }
 }

@@ -7,6 +7,7 @@ import scala.collection.mutable.HashMap
 import filodb.core.KeyRange
 import filodb.core.Types._
 import filodb.core.metadata.{Column, Dataset, RichProjection}
+import filodb.core.store.SegmentInfo
 
 /**
  * The MemTable serves these purposes:
@@ -43,16 +44,17 @@ trait MemTable extends StrictLogging {
   def ingestRows(rows: Seq[RowReader]): Unit
 
   /**
-   * Reads rows out.  If reading from a MemTable actively inserting, the rows read might not reflect
-   * latest updates.
+   * Reads rows out from one segment.
    */
-  def readRows(keyRange: KeyRange[projection.PK, projection.SK]): Iterator[RowReader]
+  def readRows(partition: projection.PK, segment: projection.SK): Iterator[(projection.RK, RowReader)]
+
+  def readRows(segInfo: SegmentInfo[projection.PK, projection.SK]): Iterator[(projection.RK, RowReader)] =
+    readRows(segInfo.partition, segInfo.segment)
 
   /**
-   * Reads all rows of the memtable out, from every partition.  Partition ordering is not
-   * guaranteed, but all sort keys K within the partition will be ordered.
+   * Reads all segments contained in the MemTable.  No particular order is guaranteed.
    */
-  def readAllRows(): Iterator[(projection.PK, projection.SK, projection.RK, RowReader)]
+  def getSegments(): Iterator[(projection.PK, projection.SK)]
 
   def numRows: Int
 

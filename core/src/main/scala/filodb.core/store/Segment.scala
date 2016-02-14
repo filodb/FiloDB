@@ -118,12 +118,10 @@ extends GenericSegment(projection,
     chunkMap.foreach { case (col, bytes) => addChunk(newChunkId, col, bytes) }
   }
 
-  def addRichRowsAsChunk(rows: Iterator[(RichProjection#PK,
-                                         RichProjection#SK,
-                                         RichProjection#RK, RowReader)]): Unit = {
+  def addRichRowsAsChunk(rows: Iterator[(RichProjection#RK, RowReader)]): Unit = {
     val newChunkId = index.nextChunkId
     val builder = new RowToVectorBuilder(filoSchema)
-    rows.zipWithIndex.foreach { case ((_, _, k, r), i) =>
+    rows.zipWithIndex.foreach { case ((k, r), i) =>
       updatingIndex.update(k.asInstanceOf[projection.RK], newChunkId, i)
       builder.addRow(r)
     }

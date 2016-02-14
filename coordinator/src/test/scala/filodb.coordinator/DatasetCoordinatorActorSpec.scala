@@ -81,7 +81,7 @@ with ScalaFutures {
 
     }
 
-    def toSegments(memTable: MemTable): Iterator[Segment] = ???
+    def toSegments(memTable: MemTable, segments: Seq[(Any, Any)]): Seq[Segment] = ???
   }
 
   it("should respond to GetStats with no flushes and no rows") {

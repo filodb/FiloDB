@@ -1,5 +1,6 @@
 package filodb.jmh
 
+import ch.qos.logback.classic.{Level, Logger}
 import org.openjdk.jmh.annotations.Benchmark
 import org.openjdk.jmh.annotations.BenchmarkMode
 import org.openjdk.jmh.annotations.{Mode, State, Scope}
@@ -22,6 +23,8 @@ object IntSumReadBenchmark {
   val projection = RichProjection(dataset, schema)
 
   val rowStream = Iterator.from(0).map { row => (Some(util.Random.nextInt), Some(row)) }
+
+  org.slf4j.LoggerFactory.getLogger("filodb").asInstanceOf[Logger].setLevel(Level.ERROR)
 }
 
 /**
