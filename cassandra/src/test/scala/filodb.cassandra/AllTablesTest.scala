@@ -17,7 +17,7 @@ trait AllTablesTest extends SimpleCassandraTest {
   import filodb.cassandra.metastore._
 
   implicit val defaultPatience =
-    PatienceConfig(timeout = Span(15, Seconds), interval = Span(50, Millis))
+    PatienceConfig(timeout = Span(30, Seconds), interval = Span(250, Millis))
 
   implicit val context = scala.concurrent.ExecutionContext.Implicits.global
 

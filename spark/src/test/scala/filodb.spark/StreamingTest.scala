@@ -80,7 +80,7 @@ with Matchers with ScalaFutures {
           option("partition_keys", "league").save()
     }
     ssc.start()
-    ssc.awaitTerminationOrTimeout(8000)
+    ssc.awaitTerminationOrTimeout(16000)
 
     import org.apache.spark.sql.functions._
 

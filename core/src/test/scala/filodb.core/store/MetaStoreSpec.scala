@@ -14,13 +14,14 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
   import MetaStore._
 
   def metaStore: MetaStore
+  def defaultPatience: PatienceConfig
 
   override def beforeAll() {
     super.beforeAll()
-    metaStore.initialize().futureValue
+    metaStore.initialize().futureValue(defaultPatience)
   }
 
-  before { metaStore.clearAllData().futureValue }
+  before { metaStore.clearAllData().futureValue(defaultPatience) }
 
   describe("dataset API") {
     it("should create a new Dataset if one not there") {
