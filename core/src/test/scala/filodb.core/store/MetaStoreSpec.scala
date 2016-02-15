@@ -52,7 +52,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
 
       whenReady(metaStore.newColumn(firstColumn.copy(version = 0)).failed) { err =>
         err shouldBe an [IllegalColumnChange]
-      }
+      } (patienceConfig)
     }
 
     val monthYearCol = DataColumn(1, "monthYear", "gdelt", 1, Column.ColumnType.LongColumn)
