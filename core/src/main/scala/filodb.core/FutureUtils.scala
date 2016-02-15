@@ -27,30 +27,28 @@ trait FutureUtils {
 object FutureUtils {
   /**
    * Obtains an ExecutionContext with a bounded number of tasks.  Additional attempts to add more Runnables
-   * to the context when the number of tasks has reached maxTasks will result in blockage.
-   * See http://quantifind.com/blog/2015/06/throttling-instantiations-of-scala-futures-1/
-   * @param maxTasks the maximum number of tasks that can be added before blocking
+   * to the context when the number of tasks has reached maxTasks will result in tasks being run in their
+   * own thread - which slows things down, but doesn't block and create deadlocks.
+   * @param maxTasks the maximum number of tasks that can be queued
    * @param poolName the string prefix to append to worker threads of this threadpool
-   * @param numWorkers the number of threads in the thread pool
+   * @param corePoolSize the minimum number of threads in the thread pool
+   * @param maxPoolSize the maximum number of threads the pool expands to when the queue is full
    */
   def getBoundedExecContext(maxTasks: Int,
                             poolName: String,
-                            numWorkers: Int = sys.runtime.availableProcessors): ExecutionContext = {
+                            corePoolSize: Int = sys.runtime.availableProcessors,
+                            maxPoolSize: Int = sys.runtime.availableProcessors * 4): ExecutionContext = {
     ExecutionContext.fromExecutorService(
       new ThreadPoolExecutor(
-        numWorkers, numWorkers,
-        0L, TimeUnit.SECONDS,
-        new ArrayBlockingQueue[Runnable](maxTasks) {
-          override def offer(e: Runnable): Boolean = {
-            put(e); // may block if waiting for empty room
-            true
-          }
-        },
+        corePoolSize, maxPoolSize,
+        10L, TimeUnit.SECONDS,
+        new ArrayBlockingQueue[Runnable](maxTasks),
         new ThreadFactory {
           val counter = new AtomicInteger
           override def newThread(r: Runnable): Thread =
             new Thread(r, s"$poolName-${counter.incrementAndGet}")
-        }
+        },
+        new ThreadPoolExecutor.CallerRunsPolicy
       )
      )
   }

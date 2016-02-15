@@ -17,22 +17,16 @@ trait CoordinatorSetup {
   // The global Filo configuration object.  Should be ConfigFactory.load.getConfig("filodb")
   def config: Config
 
-  // implicit lazy val ec = FutureUtils.getBoundedExecContext(config.getInt("max-reprojection-futures"),
-  //                                                     "filodb.core",
-  //                                                     config.getInt("core-futures-pool-size"))
-  // lazy val readEc = FutureUtils.getBoundedExecContext(256, "filodb.query",
-  //                                                config.getInt("queries-futures-pool-size"))
+  implicit lazy val ec = FutureUtils.getBoundedExecContext(config.getInt("core-futures-queue-length"),
+                                                           "filodb.core",
+                                                           config.getInt("core-futures-pool-size"),
+                                                           config.getInt("core-futures-max-pool-size"))
 
-  // NOTE: Using getBoundedExecContext above was leading to deadlocks.  I believe this is because
-  // ColumnStore.appendSegment calls out to 4 or 5 other futures, including getting the tables, cached
-  // indexes, writing to both chunkMap as well as chunks tables, and saving cached segments.  Thus it would
-  // be deadlocked blocked waiting for space on the queue for one of these things, while the original future
-  // is waiting for it to get unblocked.
-  // Using the global context is not great, but at least doesn't deadlock.
-  // In the future: implement backpressure in the reprojector... at a higher level.  However, these is
-  // already backpressure in DatasetCoordinatorActor.
-  implicit val ec = scala.concurrent.ExecutionContext.Implicits.global
-  val readEc = ec
+  // A separate ExecutionContext can optionally be used for reads, to control read task queue length
+  // separately perhaps.  I have found this is not really necessary.  This was originally created to
+  // help decongest heavy write workloads, but a better design has been the throttling of reprojection
+  // by limiting number of segments flushed at once (see the use of foldLeftSequentially in Reprojector).
+  lazy val readEc = ec
 
   // These should be implemented as lazy val's, though tests might want to reset them
   val columnStore: ColumnStore
