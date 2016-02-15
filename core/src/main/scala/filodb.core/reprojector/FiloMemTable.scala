@@ -81,20 +81,12 @@ class FiloMemTable(val projection: RichProjection, config: Config) extends MemTa
     }
   }
 
-  def readRows(keyRange: KeyRange[projection.PK, projection.SK]): Iterator[RowReader] = {
-    val keyMap = getKeyMap(keyRange.partition, keyRange.start)
-    keyMap.values.iterator.asScala
-          .map(appendStore.getRowReader)
-  }
+  def readRows(partition: projection.PK, segment: projection.SK): Iterator[(projection.RK, RowReader)] =
+    getKeyMap(partition, segment).entrySet.iterator.asScala
+      .map { entry => (entry.getKey, appendStore.getRowReader(entry.getValue)) }
 
-  def readAllRows(): Iterator[(projection.PK, projection.SK, projection.RK, RowReader)] = {
-    partSegKeyMap.keySet.iterator.asScala.flatMap { case (partition, segment) =>
-      getKeyMap(partition, segment).entrySet.iterator.asScala
-        .map { entry =>
-          (partition, segment, entry.getKey, appendStore.getRowReader(entry.getValue))
-        }
-    }
-  }
+  def getSegments(): Iterator[(projection.PK, projection.SK)] =
+    partSegKeyMap.keySet.iterator.asScala
 
   def numRows: Int = appendStore.numRows
 

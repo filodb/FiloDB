@@ -1,8 +1,7 @@
 language: scala
 env:
   global:
-#    _JAVA_OPTIONS="-Xmx1500m -XX:MaxPermSize=512m -Dakka.test.timefactor=3"
-   _JAVA_OPTIONS="-Dakka.test.timefactor=3 -Xmx3g -XX:MaxPermSize=512m -XX:MaxMetaspaceSize=256m"
+   _JAVA_OPTIONS="-Dakka.test.timefactor=3 -XX:MaxMetaspaceSize=256m"
 scala:
   - 2.10.4
 services:

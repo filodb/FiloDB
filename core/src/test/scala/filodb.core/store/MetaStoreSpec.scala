@@ -14,13 +14,14 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
   import MetaStore._
 
   def metaStore: MetaStore
+  def defaultPatience: PatienceConfig
 
   override def beforeAll() {
     super.beforeAll()
-    metaStore.initialize().futureValue
+    metaStore.initialize().futureValue(defaultPatience)
   }
 
-  before { metaStore.clearAllData().futureValue }
+  before { metaStore.clearAllData().futureValue(defaultPatience) }
 
   describe("dataset API") {
     it("should create a new Dataset if one not there") {
@@ -51,7 +52,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
 
       whenReady(metaStore.newColumn(firstColumn.copy(version = 0)).failed) { err =>
         err shouldBe an [IllegalColumnChange]
-      }
+      } (patienceConfig)
     }
 
     val monthYearCol = DataColumn(1, "monthYear", "gdelt", 1, Column.ColumnType.LongColumn)

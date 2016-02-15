@@ -1,5 +1,6 @@
 package filodb.cassandra.columnstore
 
+import com.googlecode.concurrentlinkedhashmap.ConcurrentLinkedHashMap
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.slf4j.StrictLogging
 import java.nio.ByteBuffer
@@ -32,6 +33,7 @@ import filodb.core.metadata.{Column, Projection}
  *   columnstore {
  *     tablecache-size = 50    # Number of cache entries for C* for ChunkTable etc.
  *     segment-cache-size = 1000    # Number of segments to cache
+ *     chunk-batch-size = 16
  *   }
  * }}}
  *
@@ -49,6 +51,7 @@ extends CachedMergingColumnStore with CassandraColumnStoreScanner with StrictLog
   import collection.JavaConverters._
 
   val segmentCacheSize = config.getInt("columnstore.segment-cache-size")
+  val chunkBatchSize = config.getInt("columnstore.chunk-batch-size")
   logger.info(s"Starting CassandraColumnStore with config $cassandraConfig")
 
   val segmentCache = LruCache[Segment](segmentCacheSize)
@@ -59,18 +62,22 @@ extends CachedMergingColumnStore with CassandraColumnStoreScanner with StrictLog
    * Initializes the column store for a given dataset projection.  Must be called once before appending
    * segments to that projection.
    */
-  def initializeProjection(projection: Projection): Future[Response] =
-    for { (chunkTable, rowMapTable) <- getSegmentTables(projection.dataset)
-          ctResp                    <- chunkTable.initialize()
+  def initializeProjection(projection: Projection): Future[Response] = {
+    val chunkTable = getOrCreateChunkTable(projection.dataset)
+    val rowMapTable = getOrCreateRowMapTable(projection.dataset)
+    for { ctResp                    <- chunkTable.initialize()
           rmtResp                   <- rowMapTable.initialize() } yield { rmtResp }
+  }
 
   /**
    * Clears all data from the column store for that given projection.
    */
-  def clearProjectionDataInner(projection: Projection): Future[Response] =
-    for { (chunkTable, rowMapTable) <- getSegmentTables(projection.dataset)
-          ctResp                    <- chunkTable.clearAll()
+  def clearProjectionDataInner(projection: Projection): Future[Response] = {
+    val chunkTable = getOrCreateChunkTable(projection.dataset)
+    val rowMapTable = getOrCreateRowMapTable(projection.dataset)
+    for { ctResp                    <- chunkTable.clearAll()
           rmtResp                   <- rowMapTable.clearAll() } yield { rmtResp }
+  }
 
   /**
    * Implementations of low-level storage primitives
@@ -80,9 +87,8 @@ extends CachedMergingColumnStore with CassandraColumnStoreScanner with StrictLog
                   version: Int,
                   segmentId: SegmentId,
                   chunks: Iterator[(ColumnId, ChunkID, ByteBuffer)]): Future[Response] = {
-    for { (chunkTable, rowMapTable) <- getSegmentTables(dataset)
-          resp <- chunkTable.writeChunks(partition, version, segmentId, chunks) }
-    yield { resp }
+    val chunkTable = getOrCreateChunkTable(dataset)
+    chunkTable.writeChunks(partition, version, segmentId, chunks)
   }
 
   def writeChunkRowMap(dataset: TableName,
@@ -91,10 +97,9 @@ extends CachedMergingColumnStore with CassandraColumnStoreScanner with StrictLog
                        segmentId: SegmentId,
                        chunkRowMap: ChunkRowMap): Future[Response] = {
     val (chunkIds, rowNums) = chunkRowMap.serialize()
-    for { (chunkTable, rowMapTable) <- getSegmentTables(dataset)
-          resp <- rowMapTable.writeChunkMap(partition, version, segmentId,
-                                            chunkIds, rowNums, chunkRowMap.nextChunkId) }
-    yield { resp }
+    val rowMapTable = getOrCreateRowMapTable(dataset)
+    rowMapTable.writeChunkMap(partition, version, segmentId,
+                              chunkIds, rowNums, chunkRowMap.nextChunkId)
   }
 
   def shutdown(): Unit = {
@@ -153,8 +158,10 @@ trait CassandraColumnStoreScanner extends ColumnStoreScanner with StrictLogging 
   val cassandraConfig = config.getConfig("cassandra")
   val tableCacheSize = config.getInt("columnstore.tablecache-size")
 
-  val chunkTableCache = LruCache[ChunkTable](tableCacheSize)
-  val rowMapTableCache = LruCache[ChunkRowMapTable](tableCacheSize)
+  val chunkTableCache = new ConcurrentLinkedHashMap.Builder[TableName, ChunkTable].
+                          maximumWeightedCapacity(tableCacheSize).build
+  val rowMapTableCache = new ConcurrentLinkedHashMap.Builder[TableName, ChunkRowMapTable].
+                          maximumWeightedCapacity(tableCacheSize).build
 
   protected val clusterConnector = new FiloCassandraConnector {
     def config: Config = cassandraConfig
@@ -164,20 +171,19 @@ trait CassandraColumnStoreScanner extends ColumnStoreScanner with StrictLogging 
                  columns: Set[ColumnId],
                  keyRange: BinaryKeyRange,
                  version: Int)(implicit ec: ExecutionContext): Future[Seq[ChunkedData]] = {
-    for { (chunkTable, rowMapTable) <- getSegmentTables(dataset)
-          data <- Future.sequence(columns.toSeq.map(
+    val chunkTable = getOrCreateChunkTable(dataset)
+    Future.sequence(columns.toSeq.map(
                     chunkTable.readChunks(keyRange.partition, version, _,
                                           keyRange.start, keyRange.end,
-                                          keyRange.endExclusive))) }
-    yield { data }
+                                          keyRange.endExclusive)))
   }
 
   def readChunkRowMaps(dataset: TableName,
                        keyRange: BinaryKeyRange,
                        version: Int)
                       (implicit ec: ExecutionContext): Future[Iterator[ChunkMapInfo]] = {
-    for { (chunkTable, rowMapTable) <- getSegmentTables(dataset)
-          cassRowMaps <- rowMapTable.getChunkMaps(keyRange, version) }
+    val rowMapTable = getOrCreateRowMapTable(dataset)
+    for { cassRowMaps <- rowMapTable.getChunkMaps(keyRange, version) }
     yield {
       cassRowMaps.toIterator.map {
         case ChunkRowMapRecord(segmentId, chunkIds, rowNums, nextChunkId) =>
@@ -198,8 +204,8 @@ trait CassandraColumnStoreScanner extends ColumnStoreScanner with StrictLogging 
                       (implicit ec: ExecutionContext): Future[Iterator[ChunkMapInfo]] = {
     val tokenStart = params("token_start")
     val tokenEnd   = params("token_end")
-    for { (chunkTable, rowMapTable) <- getSegmentTables(dataset)
-          rowMaps <- rowMapTable.scanChunkMaps(version, tokenStart, tokenEnd) }
+    val rowMapTable = getOrCreateRowMapTable(dataset)
+    for { rowMaps <- rowMapTable.scanChunkMaps(version, tokenStart, tokenEnd) }
     yield {
       rowMaps.map { case (part, ChunkRowMapRecord(segmentId, chunkIds, rowNums, nextChunkId)) =>
         (part, segmentId, new BinaryChunkRowMap(chunkIds, rowNums, nextChunkId))
@@ -207,20 +213,25 @@ trait CassandraColumnStoreScanner extends ColumnStoreScanner with StrictLogging 
     }
   }
 
-  // Retrieve handles to the tables for a particular dataset from the cache, creating the instances
-  // if necessary
-  def getSegmentTables(dataset: TableName)
-                      (implicit ec: ExecutionContext): Future[(ChunkTable, ChunkRowMapTable)] = {
-    val chunkTableFuture = chunkTableCache(dataset) {
-      logger.debug(s"Creating a new ChunkTable for dataset $dataset")
-      new ChunkTable(dataset, clusterConnector)
+  import java.util.function.{Function => JFunction}
+  import scala.language.implicitConversions
+
+  implicit def scalaFuncToJavaFunc[T, R](func1: Function[T, R]): JFunction[T, R] =
+    new JFunction[T, R] {
+      override def apply(t: T): R = func1.apply(t)
     }
-    val chunkRowMapTableFuture = rowMapTableCache(dataset) {
-      logger.debug(s"Creating a new ChunkRowMapTable for dataset $dataset")
-      new ChunkRowMapTable(dataset, clusterConnector)
-    }
-    for { chunkTable <- chunkTableFuture
-          rowMapTable <- chunkRowMapTableFuture }
-    yield { (chunkTable, rowMapTable) }
+
+  def getOrCreateChunkTable(dataset: TableName): ChunkTable = {
+    chunkTableCache.computeIfAbsent(dataset,
+                                    { (dataset: TableName) =>
+                                      logger.debug(s"Creating a new ChunkTable for dataset $dataset")
+                                      new ChunkTable(dataset, clusterConnector) })
+  }
+
+  def getOrCreateRowMapTable(dataset: TableName): ChunkRowMapTable = {
+    rowMapTableCache.computeIfAbsent(dataset,
+                                     { (dataset: TableName) =>
+                                       logger.debug(s"Creating a new ChunkRowMapTable for dataset $dataset")
+                                       new ChunkRowMapTable(dataset, clusterConnector) })
   }
 }

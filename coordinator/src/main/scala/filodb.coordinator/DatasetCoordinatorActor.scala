@@ -9,7 +9,7 @@ import scala.concurrent.duration.FiniteDuration
 import scala.concurrent.Future
 
 import filodb.core.metadata.{Column, Dataset, Projection, RichProjection}
-import filodb.core.store.ColumnStore
+import filodb.core.store.{ColumnStore, SegmentInfo}
 import filodb.core.reprojector.{MemTable, FiloMemTable, Reprojector}
 
 object DatasetCoordinatorActor {
@@ -59,7 +59,7 @@ object DatasetCoordinatorActor {
 
   // Internal messages
   case object MemTableWrite extends DSCoordinatorMessage
-  case class FlushDone(result: Seq[String]) extends DSCoordinatorMessage
+  case class FlushDone(result: Seq[SegmentInfo[_, _]]) extends DSCoordinatorMessage
   case class FlushFailed(t: Throwable) extends DSCoordinatorMessage
 
   def props(projection: RichProjection,
@@ -78,7 +78,7 @@ object DatasetCoordinatorActor {
  * Responsible for:
  * - Owning and setting up MemTables for ingestion
  * - Feeding rows into the MemTable, and knowing when not to feed the memTable
- * - Forwarding acks from MemTable back to client
+ * - Forwarding acks back to client
  * - Scheduling memtable flushes, “flipping” MemTables, and
  *   calling Reprojector to convert MemTable rows to Segments and flush them to disk
  *
@@ -124,7 +124,7 @@ private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
   var activeTable: MemTable = makeNewTable
   var flushingTable: Option[MemTable] = None
 
-  var curReprojection: Option[Future[Seq[String]]] = None
+  var curReprojection: Option[Future[Seq[SegmentInfo[_, _]]]] = None
   var flushesStarted = 0
   var flushesSucceeded = 0
   var flushesFailed = 0
@@ -267,7 +267,9 @@ private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
       writeToMemTable()
 
     case FlushDone(results) =>
-      logger.info(s"Reprojection task ($nameVer) succeeded: ${results.toList}")
+      val resultStr = if (results.length < 32) { results.mkString(", ") }
+                      else { s"${results.length} segments: [${results.take(3)} ... ${results.takeRight(3)}]" }
+      logger.info(s"Reprojection task ($nameVer) succeeded: $resultStr")
       reportStats()
       handleFlushDone()
 

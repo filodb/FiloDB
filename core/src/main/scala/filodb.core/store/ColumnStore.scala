@@ -203,8 +203,7 @@ trait CachedMergingColumnStore extends ColumnStore with ColumnStoreScanner with 
     if (segment.isEmpty) return(Future.successful(NotApplied))
     for { oldSegment <- getSegFromCache(projection.toRowKeyOnlyProjection, segment, version)
           mergedSegment = mergingStrategy.mergeSegments(oldSegment, segment)
-          writeChunksResp <- writeChunks(projection.datasetName, segment.binaryPartition, version,
-                                         segment.segmentId, mergedSegment.getChunks)
+          writeChunksResp <- writeBatchedChunks(projection.datasetName, version, mergedSegment)
           writeCRMapResp <- writeChunkRowMap(projection.datasetName, segment.binaryPartition, version,
                                          segment.segmentId, mergedSegment.index)
             if writeChunksResp == Success }
@@ -213,6 +212,15 @@ trait CachedMergingColumnStore extends ColumnStore with ColumnStoreScanner with 
       updateCache(projection, version, mergedSegment)
       writeCRMapResp
     }
+  }
+
+  def chunkBatchSize: Int
+
+  private def writeBatchedChunks(dataset: TableName, version: Int, segment: Segment): Future[Response] = {
+    val binPartition = segment.binaryPartition
+    Future.traverse(segment.getChunks.grouped(chunkBatchSize).toSeq) { chunks =>
+      writeChunks(dataset, binPartition, version, segment.segmentId, chunks.toIterator)
+    }.map { responses => responses.head }
   }
 
   private def getSegFromCache(projection: RichProjection,

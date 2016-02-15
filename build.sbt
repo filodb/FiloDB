@@ -45,7 +45,7 @@ lazy val jmh = (project in file("jmh"))
                  .settings(name := "filodb-jmh")
                  .settings(libraryDependencies ++= jmhDeps)
                  .enablePlugins(JmhPlugin)
-                 .dependsOn(core, spark)
+                 .dependsOn(core % "compile->compile; compile->test", spark)
 
 val phantomVersion = "1.11.0"
 val akkaVersion    = "2.3.7"
@@ -118,6 +118,11 @@ lazy val coreSettings = Seq(
 
 lazy val testSettings = Seq(
     parallelExecution in Test := false,
+    // Needed to avoid cryptic EOFException crashes in forked tests
+    // in Travis with `sudo: false`.
+    // See https://github.com/sbt/sbt/issues/653
+    // and https://github.com/travis-ci/travis-ci/issues/3775
+    javaOptions += "-Xmx1250M",
     concurrentRestrictions in Global := Seq(
       // Tags.limit(Tags.CPU, java.lang.Runtime.getRuntime().availableProcessors()),
       Tags.limit(Tags.CPU, 1),
