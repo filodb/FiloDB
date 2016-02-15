@@ -28,6 +28,7 @@ extends CachedMergingColumnStore with InMemoryColumnStoreScanner with StrictLogg
   logger.info("Starting InMemoryColumnStore...")
 
   val segmentCache = LruCache[Segment](100)
+  val chunkBatchSize = 256
 
   val mergingStrategy = new AppendingChunkMergingStrategy(this)
 

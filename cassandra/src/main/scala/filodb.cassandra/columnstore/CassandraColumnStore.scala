@@ -33,6 +33,7 @@ import filodb.core.metadata.{Column, Projection}
  *   columnstore {
  *     tablecache-size = 50    # Number of cache entries for C* for ChunkTable etc.
  *     segment-cache-size = 1000    # Number of segments to cache
+ *     chunk-batch-size = 16
  *   }
  * }}}
  *
@@ -50,6 +51,7 @@ extends CachedMergingColumnStore with CassandraColumnStoreScanner with StrictLog
   import collection.JavaConverters._
 
   val segmentCacheSize = config.getInt("columnstore.segment-cache-size")
+  val chunkBatchSize = config.getInt("columnstore.chunk-batch-size")
   logger.info(s"Starting CassandraColumnStore with config $cassandraConfig")
 
   val segmentCache = LruCache[Segment](segmentCacheSize)
