@@ -1,6 +1,6 @@
 package filodb.coordinator
 
-import akka.actor.{Actor, ActorRef, PoisonPill, Props}
+import akka.actor.{Actor, ActorRef, PoisonPill, Props, SupervisorStrategy, Terminated}
 import com.typesafe.config.Config
 import net.ceedubs.ficus.Ficus._
 import org.velvia.filo.RowReader
@@ -9,7 +9,7 @@ import scala.concurrent.duration._
 
 import filodb.core._
 import filodb.core.Types._
-import filodb.core.metadata.{Column, Dataset, Projection, RichProjection}
+import filodb.core.metadata.{Column, DataColumn, Dataset, Projection, RichProjection}
 import filodb.core.store.{ColumnStore, MetaStore}
 import filodb.core.reprojector.Reprojector
 
@@ -34,8 +34,11 @@ object NodeCoordinatorActor {
 
   /**
    * Creates a new dataset with columns and a default projection.
+   * @dataset the Dataset object
+   * @columns DataColumns to create for that dataset.  Must include partition and row key columns, at a
+   *          minimum.  Computed columns can be left out.
    */
-  case class CreateDataset(dataset: Dataset, columns: Seq[Column]) extends NodeCommand
+  case class CreateDataset(dataset: Dataset, columns: Seq[DataColumn]) extends NodeCommand
 
   case object DatasetCreated extends Response with NodeResponse
   case class DatasetError(msg: String) extends ErrorResponse with NodeResponse
@@ -44,20 +47,15 @@ object NodeCoordinatorActor {
    * Sets up ingestion for a given dataset, version, and schema of columns.
    * The dataset and columns must have been previously defined.
    *
-   * @param defaultPartitionKey
-   *        if Some(key), a null value in partitioning column will cause key to be used.
-   *        if None, then NullPartitionValue will be thrown when null value is encountered
-   *        in a partitioning column.
    * @return BadSchema if the partition column is unsupported, sort column invalid, etc.
    */
   case class SetupIngestion(dataset: String,
                             schema: Seq[String],
-                            version: Int,
-                            defaultPartitionKey: Option[PartitionKey] = None) extends NodeCommand
+                            version: Int) extends NodeCommand
 
   case object IngestionReady extends NodeResponse
   case object UnknownDataset extends ErrorResponse with NodeResponse
-  case class UndefinedColumns(undefined: Seq[String]) extends ErrorResponse with NodeResponse
+  case class UndefinedColumns(undefined: Set[String]) extends ErrorResponse with NodeResponse
   case class BadSchema(message: String) extends ErrorResponse with NodeResponse
 
   /**
@@ -103,8 +101,8 @@ object NodeCoordinatorActor {
   case class AddDatasetCoord(dataset: TableName, version: Int, dsCoordRef: ActorRef) extends NodeCommand
   case class DatasetCreateNotify(dataset: TableName, version: Int, msg: Any) extends NodeCommand
 
-  def invalidColumns(columns: Seq[String], schema: Column.Schema): Seq[String] =
-    (columns.toSet -- schema.keys).toSeq
+  def invalidColumns(columns: Seq[String], schema: Column.Schema): Set[String] =
+    (columns.toSet -- schema.keys)
 
   def props(metaStore: MetaStore,
             reprojector: Reprojector,
@@ -128,6 +126,9 @@ class NodeCoordinatorActor(metaStore: MetaStore,
   val dsCoordinators = new collection.mutable.HashMap[(TableName, Int), ActorRef]
   val dsCoordNotify = new collection.mutable.HashMap[(TableName, Int), List[ActorRef]]
 
+  // By default, stop children DatasetCoordinatorActors when something goes wrong.
+  override val supervisorStrategy = SupervisorStrategy.stoppingStrategy
+
   private def withDsCoord(originator: ActorRef, dataset: String, version: Int)
                          (func: ActorRef => Unit): Unit = {
     dsCoordinators.get((dataset, version)).map(func).getOrElse(originator ! UnknownDataset)
@@ -139,7 +140,7 @@ class NodeCoordinatorActor(metaStore: MetaStore,
       val undefinedCols = invalidColumns(columns, schema)
       if (undefinedCols.nonEmpty) {
         logger.info(s"Undefined columns $undefinedCols for dataset $dataset with schema $schema")
-        originator ! UndefinedColumns(undefinedCols.toSeq)
+        originator ! UndefinedColumns(undefinedCols)
         None
       } else {
         Some(schema)
@@ -147,7 +148,7 @@ class NodeCoordinatorActor(metaStore: MetaStore,
     }
   }
 
-  private def createDataset(originator: ActorRef, datasetObj: Dataset, columns: Seq[Column]): Unit = {
+  private def createDataset(originator: ActorRef, datasetObj: Dataset, columns: Seq[DataColumn]): Unit = {
     if (datasetObj.projections.isEmpty) {
       originator ! DatasetError(s"There must be at least one projection in dataset $datasetObj")
     } else {
@@ -170,9 +171,8 @@ class NodeCoordinatorActor(metaStore: MetaStore,
                              version: Int): Unit = {
     def notify(msg: Any): Unit = { self ! DatasetCreateNotify(dataset, version, msg) }
 
-    def createDatasetCoordActor(datasetObj: Dataset, richProj: RichProjection[_]): Unit = {
-      val typedProj = richProj.asInstanceOf[RichProjection[richProj.helper.Key]]
-      val props = DatasetCoordinatorActor.props(typedProj, version, columnStore, reprojector, config)
+    def createDatasetCoordActor(datasetObj: Dataset, richProj: RichProjection): Unit = {
+      val props = DatasetCoordinatorActor.props(richProj, version, columnStore, reprojector, config)
       val ref = context.actorOf(props, s"ds-coord-${datasetObj.name}-$version")
       self ! AddDatasetCoord(dataset, version, ref)
       notify(IngestionReady)
@@ -181,10 +181,10 @@ class NodeCoordinatorActor(metaStore: MetaStore,
     def createProjectionAndActor(datasetObj: Dataset, schema: Option[Column.Schema]): Unit = {
       val columnSeq = columns.map(schema.get(_))
       // Create the RichProjection, and ferret out any errors
+      logger.debug(s"Creating projection from dataset $datasetObj, columns $columnSeq")
       val proj = RichProjection.make(datasetObj, columnSeq)
       proj.recover {
-        case RichProjection.BadSchema(reason) => notify(BadSchema(reason))
-        case Dataset.BadPartitionColumn(reason) => notify(BadSchema(reason))
+        case err: RichProjection.BadSchema => notify(BadSchema(err.toString))
       }
       for { richProj <- proj } createDatasetCoordActor(datasetObj, richProj)
     }
@@ -215,7 +215,7 @@ class NodeCoordinatorActor(metaStore: MetaStore,
     case CreateDataset(datasetObj, columns) =>
       createDataset(sender, datasetObj, columns)
 
-    case SetupIngestion(dataset, columns, version, defaultPartKey) =>
+    case SetupIngestion(dataset, columns, version) =>
       setupIngestion(sender, dataset, columns, version)
 
     case IngestRows(dataset, version, rows, seqNo) =>
@@ -242,8 +242,17 @@ class NodeCoordinatorActor(metaStore: MetaStore,
 
     case AddDatasetCoord(dataset, version, dsCoordRef) =>
       dsCoordinators((dataset, version)) = dsCoordRef
+      context.watch(dsCoordRef)
 
-    case DatasetCreateNotify(dataset, version, msg) =>
+    case Terminated(childRef) =>
+      dsCoordinators.find { case (key, ref) => ref == childRef }
+                    .foreach { case (key, _) =>
+                      logger.warn(s"Actor $childRef has terminated!  Ingestion for $key will stop.")
+                      dsCoordinators.remove(key)
+                    }
+
+    case d @ DatasetCreateNotify(dataset, version, msg) =>
+      logger.debug(s"$d")
       for { listener <- dsCoordNotify((dataset -> version)) } listener ! msg
       dsCoordNotify.remove((dataset -> version))
   }

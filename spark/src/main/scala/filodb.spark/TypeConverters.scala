@@ -2,7 +2,7 @@ package filodb.spark
 
 import org.apache.spark.sql.types._
 
-import filodb.core.metadata.Column
+import filodb.core.metadata.{Column, DataColumn}
 
 object TypeConverters {
   val colTypeToSqlType: Map[Column.ColumnType, DataType] = Map(
@@ -10,11 +10,12 @@ object TypeConverters {
     Column.ColumnType.DoubleColumn -> DoubleType,
     Column.ColumnType.LongColumn   -> LongType,
     Column.ColumnType.StringColumn -> StringType,
-    Column.ColumnType.BitmapColumn -> BooleanType
+    Column.ColumnType.BitmapColumn -> BooleanType,
+    Column.ColumnType.TimestampColumn -> TimestampType
   )
 
   def columnsToSqlFields(columns: Seq[Column]): Seq[StructField] =
-    columns.map { case Column(name, _, _, colType, _, false, false) =>
+    columns.map { case DataColumn(_, name, _, _, colType, false) =>
       StructField(name, colTypeToSqlType(colType), true)
     }
 

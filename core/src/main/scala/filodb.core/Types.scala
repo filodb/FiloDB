@@ -4,6 +4,8 @@ import java.nio.ByteBuffer
 import scalaxy.loops._
 import scodec.bits.ByteVector
 
+import filodb.core.metadata.RichProjection
+
 /**
  * Temporary home for new FiloDB API definitions, including column store and memtable etc.
  * Perhaps they should be moved into filodb.core.store and filodb.core.reprojector
@@ -19,10 +21,7 @@ object Types {
   type TableName = String
   type ChunkID = Int    // Each chunk is identified by segmentID and a long timestamp
 
-  type SortOrder = Set[(ColumnId, Boolean)]
-
-  // TODO: support composite partition keys?
-  type PartitionKey = String
+  type BinaryPartition = ByteVector
 
   // TODO: contribute this Ordering back to ByteVector
   // Assumes unsigned comparison, big endian, meaning that the first byte in a vector
@@ -41,12 +40,14 @@ object Types {
 }
 
 // A range of keys, used for describing ingest rows as well as queries
-// TODO: this should really be based on a Projection or RichProjection, not dataset.
-case class KeyRange[K : SortKeyHelper](dataset: Types.TableName,
-                                       partition: Types.PartitionKey,
-                                       start: K, end: K,
-                                       endExclusive: Boolean = true) {
-  val helper = implicitly[SortKeyHelper[K]]
-  def binaryStart: ByteVector = helper.toBytes(start)
-  def binaryEnd: ByteVector = helper.toBytes(end)
+// Right now this describes a range of segments, not row keys.
+case class KeyRange[PK, SK](partition: PK,
+                            start: SK, end: SK,
+                            endExclusive: Boolean = true) {
+  def basedOn(projection: RichProjection): KeyRange[projection.PK, projection.SK] =
+    this.asInstanceOf[KeyRange[projection.PK, projection.SK]]
 }
+
+case class BinaryKeyRange(partition: Types.BinaryPartition,
+                          start: Types.SegmentId, end: Types.SegmentId,
+                          endExclusive: Boolean = true)

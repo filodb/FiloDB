@@ -15,8 +15,7 @@ lazy val coordinator = (project in file("coordinator"))
                          .settings(mySettings:_*)
                          .settings(name := "filodb-coordinator")
                          .settings(libraryDependencies ++= coordDeps)
-                         .dependsOn(core % "compile->compile; test->test",
-                                    cassandra % "test->test")
+                         .dependsOn(core % "compile->compile; test->test")
 
 lazy val cassandra = (project in file("cassandra"))
                        .settings(mySettings:_*)
@@ -46,7 +45,7 @@ lazy val jmh = (project in file("jmh"))
                  .settings(name := "filodb-jmh")
                  .settings(libraryDependencies ++= jmhDeps)
                  .enablePlugins(JmhPlugin)
-                 .dependsOn(core, spark)
+                 .dependsOn(core % "compile->compile; compile->test", spark)
 
 val phantomVersion = "1.12.2"
 val akkaVersion    = "2.3.7"
@@ -68,14 +67,14 @@ lazy val coreDeps = Seq(
   "com.typesafe.scala-logging" %% "scala-logging-slf4j" % "2.1.2",
   "org.slf4j"             % "slf4j-api"         % "1.7.10",
   "com.beachape"         %% "enumeratum"        % "1.2.1",
-  "org.velvia.filo"      %% "filo-scala"        % "0.2.2",
+  "org.velvia.filo"      %% "filo-scala"        % "0.2.4",
   "joda-time"             % "joda-time"         % "2.2",
   "org.joda"              % "joda-convert"      % "1.2",
   "io.spray"             %% "spray-caching"     % "1.3.2",
-  "org.mapdb"             % "mapdb"             % "1.0.6",
-  "org.velvia"           %% "msgpack4s"         % "0.5.1",
   "net.ceedubs"          %% "ficus"             % "1.0.1",
   "org.scodec"           %% "scodec-bits"       % "1.0.10",
+  "org.scalactic"        %% "scalactic"         % "2.2.6",
+  "com.markatta"         %% "futiles"           % "1.1.3",
   "com.nativelibs4java"  %% "scalaxy-loops"     % "0.3.3" % "provided",
   "ch.qos.logback"        % "logback-classic"   % "1.0.7" % "test",  // to get good test logs
   "org.scalatest"        %% "scalatest"         % "2.2.4" % "test"
@@ -119,6 +118,11 @@ lazy val coreSettings = Seq(
 
 lazy val testSettings = Seq(
     parallelExecution in Test := false,
+    // Needed to avoid cryptic EOFException crashes in forked tests
+    // in Travis with `sudo: false`.
+    // See https://github.com/sbt/sbt/issues/653
+    // and https://github.com/travis-ci/travis-ci/issues/3775
+    javaOptions += "-Xmx1250M",
     concurrentRestrictions in Global := Seq(
       // Tags.limit(Tags.CPU, java.lang.Runtime.getRuntime().availableProcessors()),
       Tags.limit(Tags.CPU, 1),

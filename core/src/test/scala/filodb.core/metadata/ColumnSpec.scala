@@ -6,14 +6,14 @@ import org.scalatest.Matchers
 class ColumnSpec extends FunSpec with Matchers {
   import Column.ColumnType
 
-  val firstColumn = Column("first", "foo", 1, ColumnType.StringColumn)
-  val ageColumn = Column("age", "foo", 1, ColumnType.IntColumn)
+  val firstColumn = DataColumn(0, "first", "foo", 1, ColumnType.StringColumn)
+  val ageColumn = DataColumn(2, "age", "foo", 1, ColumnType.IntColumn)
   val schema = Map("first" -> firstColumn, "age" -> ageColumn)
 
   describe("Column.schemaFold") {
     it("should add new columns to the schema") {
-      val deletedSysCol = Column(":deleted", "foo", 1, ColumnType.BitmapColumn, isSystem = true)
-      Column.schemaFold(schema, deletedSysCol) should equal (schema + (":deleted" -> deletedSysCol))
+      val deletedCol = DataColumn(3, ":deleted", "foo", 1, ColumnType.BitmapColumn)
+      Column.schemaFold(schema, deletedCol) should equal (schema + (":deleted" -> deletedCol))
     }
 
     it("should remove deleted columns from the schema") {
@@ -32,7 +32,19 @@ class ColumnSpec extends FunSpec with Matchers {
       val newCol = ageColumn.copy(name = ":illegal")
       val reasons = Column.invalidateNewColumn("foo", schema, newCol)
       reasons should have length 1
-      reasons.head should startWith ("Only system")
+      reasons.head should startWith ("Illegal char :")
+    }
+
+    it("should check that column names cannot contain illegal chars") {
+      def checkIsIllegal(name: String): Unit = {
+        val newCol = ageColumn.copy(name = name)
+        val reasons = Column.invalidateNewColumn("foo", schema, newCol)
+        reasons.head should startWith ("Illegal char")
+      }
+
+      checkIsIllegal("ille gal")
+      checkIsIllegal("(illegal)")
+      checkIsIllegal("ille\001gal")
     }
 
     it("should check that cannot add columns at lower versions") {
@@ -64,17 +76,9 @@ class ColumnSpec extends FunSpec with Matchers {
   }
 
   describe("Column serialization") {
-    // See https://github.com/apache/spark/pull/7122 - serialization bug involving Class[Long] etc.
     it("should serialize and deserialize properly") {
-      val baos = new java.io.ByteArrayOutputStream
-      val oos = new java.io.ObjectOutputStream(baos)
-      oos.writeObject(ageColumn)
-
-      val bais = new java.io.ByteArrayInputStream(baos.toByteArray)
-      val ois = new java.io.ObjectInputStream(bais)
-      val readColumn = ois.readObject().asInstanceOf[Column]
-
-      readColumn should equal (ageColumn)
+      DataColumn.fromString(firstColumn.toString, "foo") should equal (firstColumn)
+      DataColumn.fromString(ageColumn.toString, "foo") should equal (ageColumn)
     }
   }
 }

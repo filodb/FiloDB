@@ -1,13 +1,15 @@
 package filodb.coordinator
 
-import akka.actor.{Actor, ActorRef, Props}
+import akka.actor.{Actor, ActorRef, Cancellable, Props}
 import com.typesafe.config.Config
 import net.ceedubs.ficus.Ficus._
 import org.velvia.filo.RowReader
+import scala.collection.mutable.ArrayBuffer
+import scala.concurrent.duration.FiniteDuration
 import scala.concurrent.Future
 
 import filodb.core.metadata.{Column, Dataset, Projection, RichProjection}
-import filodb.core.store.ColumnStore
+import filodb.core.store.{ColumnStore, SegmentInfo}
 import filodb.core.reprojector.{MemTable, FiloMemTable, Reprojector}
 
 object DatasetCoordinatorActor {
@@ -56,15 +58,16 @@ object DatasetCoordinatorActor {
                    numRowsFlushing: Int) extends DSCoordinatorMessage
 
   // Internal messages
-  case class FlushDone(result: Seq[String]) extends DSCoordinatorMessage
+  case object MemTableWrite extends DSCoordinatorMessage
+  case class FlushDone(result: Seq[SegmentInfo[_, _]]) extends DSCoordinatorMessage
   case class FlushFailed(t: Throwable) extends DSCoordinatorMessage
 
-  def props[K](projection: RichProjection[K],
-               version: Int,
-               columnStore: ColumnStore,
-               reprojector: Reprojector,
-               config: Config): Props =
-    Props(classOf[DatasetCoordinatorActor[K]], projection, version, columnStore, reprojector, config)
+  def props(projection: RichProjection,
+            version: Int,
+            columnStore: ColumnStore,
+            reprojector: Reprojector,
+            config: Config): Props =
+    Props(classOf[DatasetCoordinatorActor], projection, version, columnStore, reprojector, config)
 }
 
 /**
@@ -75,7 +78,7 @@ object DatasetCoordinatorActor {
  * Responsible for:
  * - Owning and setting up MemTables for ingestion
  * - Feeding rows into the MemTable, and knowing when not to feed the memTable
- * - Forwarding acks from MemTable back to client
+ * - Forwarding acks back to client
  * - Scheduling memtable flushes, “flipping” MemTables, and
  *   calling Reprojector to convert MemTable rows to Segments and flush them to disk
  *
@@ -91,36 +94,47 @@ object DatasetCoordinatorActor {
  *     flush-trigger-rows = 50000    # No of rows above which memtable flush might be triggered
  *     max-rows-per-table = 1000000
  *     min-free-mb = 512
+ *     filo.chunksize = 1000   # The number of rows per Filo chunk
+ *     flush.interval = 1 s    # If less than chunksize rows ingested before this interval, then
+ *                             # rows will be written into the WAL and MemTable. NOTE: this is not the
+ *                             # columnar store flush interval.
  *   }
  * }}}
- */
-private[filodb] class DatasetCoordinatorActor[K](projection: RichProjection[K],
-                                 version: Int,
-                                 columnStore: ColumnStore,
-                                 reprojector: Reprojector,
-                                 config: Config) extends BaseActor {
+*/
+private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
+                                              version: Int,
+                                              columnStore: ColumnStore,
+                                              reprojector: Reprojector,
+                                              config: Config) extends BaseActor {
   import DatasetCoordinatorActor._
   import context.dispatcher
 
-  val datasetName = projection.dataset.name
+  val datasetName = projection.datasetName
   val nameVer = s"$datasetName/$version"
   // TODO: consider passing in a DatasetCoordinatorSettings class, so config doesn't have to be reparsed
   val flushTriggerRows = config.getLong("memtable.flush-trigger-rows")
   val maxRowsPerTable = config.getInt("memtable.max-rows-per-table")
   val minFreeMb = config.as[Option[Int]]("memtable.min-free-mb").getOrElse(DefaultMinFreeMb)
+  val chunkSize = config.as[Option[Int]]("memtable.filo.chunksize").getOrElse(1000)
+  val flushInterval = config.as[FiniteDuration]("memtable.flush.interval")
 
   def activeRows: Int = activeTable.numRows
   def flushingRows: Int = flushingTable.map(_.numRows).getOrElse(-1)
 
-  var activeTable: MemTable[K] = makeNewTable
-  var flushingTable: Option[MemTable[K]] = None
+  var activeTable: MemTable = makeNewTable
+  var flushingTable: Option[MemTable] = None
 
-  var curReprojection: Option[Future[Seq[String]]] = None
+  var curReprojection: Option[Future[Seq[SegmentInfo[_, _]]]] = None
   var flushesStarted = 0
   var flushesSucceeded = 0
   var flushesFailed = 0
 
-  def makeNewTable(): MemTable[K] = new FiloMemTable(projection, config)
+  // Holds temporary rows before being flushed to MemTable
+  val tempRows = new ArrayBuffer[RowReader]
+  val ackTos = new ArrayBuffer[(ActorRef, Long)]
+  var mTableWriteTask: Option[Cancellable] = None
+
+  def makeNewTable(): MemTable = new FiloMemTable(projection, config)
 
   private def reportStats(): Unit = {
     logger.info(s"MemTable active table rows: $activeRows")
@@ -131,12 +145,28 @@ private[filodb] class DatasetCoordinatorActor[K](projection: RichProjection[K],
 
   private def ingestRows(ackTo: ActorRef, rows: Seq[RowReader], seqNo: Long): Unit = {
     if (canIngest) {
-      // MemTable will take callback function and call back to ack rows
-      activeTable.ingestRows(rows) { ackTo ! NodeCoordinatorActor.Ack(seqNo) }
+      tempRows ++= rows
+      ackTos += ackTo -> seqNo
+      if (tempRows.length >= chunkSize) {
+        mTableWriteTask.foreach(_.cancel)
+        writeToMemTable()
+      } else if (!mTableWriteTask.isDefined) {
+        // schedule future write to memtable, don't have enough rows yet
+        mTableWriteTask = Some(context.system.scheduler.scheduleOnce(flushInterval, self, MemTableWrite))
+      }
 
       // Now, check how full the memtable is, and if it needs to be flipped, and a flush started
       if (shouldFlush) self ! StartFlush()
     }
+  }
+
+  private def writeToMemTable(): Unit = if (tempRows.nonEmpty) {
+    logger.debug(s"Flushing ${tempRows.length} rows to MemTable...")
+    activeTable.ingestRows(tempRows)
+    ackTos.foreach { case (ackTo, seqNo) => ackTo ! NodeCoordinatorActor.Ack(seqNo) }
+    tempRows.clear()
+    ackTos.clear()
+    mTableWriteTask = None
   }
 
   private def canIngest: Boolean = {
@@ -166,7 +196,7 @@ private[filodb] class DatasetCoordinatorActor[K](projection: RichProjection[K],
       logger.warn("This should not happen. Not starting flush; $curReprojection; $flushingTable")
       return
     }
-    activeTable.forceCommit()
+    writeToMemTable()
     flushingTable = Some(activeTable)
     activeTable = makeNewTable()
     val newTaskFuture = reprojector.reproject(flushingTable.get, version)
@@ -194,12 +224,18 @@ private[filodb] class DatasetCoordinatorActor[K](projection: RichProjection[K],
   }
 
   private def handleFlushErr(t: Throwable): Unit = {
-    // TODO: let everyone know task failed?  Or not until retries are all up?
     flushedCallbacks.foreach { ref => ref ! FlushFailed(t) }
     flushedCallbacks = Nil
     flushesFailed += 1
-    // TODO: retry?
-    // Don't delete reprojection.  Just let everything suspend?
+    // At this point, we can attempt a couple different things.
+    //  1. Retry the segments that did not succeed writing (how do we know what they are?)
+    //     This only makes sense for certain failures.
+    //  2. Skip the segments in error.
+    //  3. Fail and throw an exception, and let our supervisor actor deal with it.  This most likely
+    //     means a loss of state and messages.
+    // For now, just throw an error, and assume we can't proceed.
+    // TODO: implement retry.
+    throw t
   }
 
   private def clearProjection(originator: ActorRef, projection: Projection): Unit = {
@@ -227,8 +263,13 @@ private[filodb] class DatasetCoordinatorActor[K](projection: RichProjection[K],
       sender ! Stats(flushesStarted, flushesSucceeded, flushesFailed,
                      activeRows, flushingRows)
 
+    case MemTableWrite =>
+      writeToMemTable()
+
     case FlushDone(results) =>
-      logger.info(s"Reprojection task ($nameVer) succeeded: ${results.toList}")
+      val resultStr = if (results.length < 32) { results.mkString(", ") }
+                      else { s"${results.length} segments: [${results.take(3)} ... ${results.takeRight(3)}]" }
+      logger.info(s"Reprojection task ($nameVer) succeeded: $resultStr")
       reportStats()
       handleFlushDone()
 

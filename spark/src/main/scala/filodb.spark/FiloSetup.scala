@@ -16,14 +16,17 @@ object FiloSetup extends CoordinatorSetup {
   var config: Config = _
   lazy val system = ActorSystem("filo-spark")
   lazy val columnStore = config.getString("store") match {
-    case "cassandra" => new CassandraColumnStore(config)
-    case "in-memory" => new InMemoryColumnStore
+    case "cassandra" => new CassandraColumnStore(config, readEc)
+    case "in-memory" => new InMemoryColumnStore(readEc)
   }
   lazy val metaStore = config.getString("store") match {
     case "cassandra" => new CassandraMetaStore(config.getConfig("cassandra"))
     case "in-memory" => new InMemoryMetaStore
   }
 
+  /**
+   * The config within the filodb.** level.
+=   */
   def init(filoConfig: Config): Unit = {
     config = filoConfig
     coordinatorActor       // Force NodeCoordinatorActor to start
@@ -34,9 +37,10 @@ object FiloSetup extends CoordinatorSetup {
   def configFromSpark(context: SparkContext): Config = {
     val conf = context.getConf
     val filoOverrides = conf.getAll.collect { case (k, v) if k.startsWith("spark.filodb") =>
-                                                k.replace("spark.filodb.", "") -> v
+                                                k.replace("spark.filodb.", "filodb.") -> v
                                             }
     ConfigFactory.parseMap(filoOverrides.toMap.asJava)
                  .withFallback(ConfigFactory.load)
+                 .getConfig("filodb")
   }
 }

@@ -32,7 +32,8 @@ object CreateCassTestData extends App {
   println("Writing random DF to FiloDB...")
   randomDF.write.format("filodb.spark").
                option("dataset", "randomInts").
-               option("sort_column", "rownum").
+               option("row_keys", "rownum").
+               option("segment_key", ":round rownum 30000").
                mode(SaveMode.Overwrite).
                save()
 

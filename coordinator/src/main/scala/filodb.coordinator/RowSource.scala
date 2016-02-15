@@ -14,6 +14,7 @@ object RowSource {
   case object AllDone
   case object CheckCanIngest
   case class SetupError(err: ErrorResponse)
+  case class IngestionErr(msg: String)
 }
 
 /**
@@ -84,6 +85,9 @@ trait RowSource extends Actor with StrictLogging {
     case NodeCoordinatorActor.Ack(lastSequenceNo) =>
       if (outstanding contains lastSequenceNo) outstanding.remove(lastSequenceNo)
 
+    case NodeCoordinatorActor.UnknownDataset =>
+        whoStartedMe.foreach(_ ! IngestionErr("Ingestion actors shut down, check error logs"))
+
     case CheckCanIngest =>
   }
 
@@ -95,6 +99,9 @@ trait RowSource extends Actor with StrictLogging {
         self ! GetMoreRows
         context.become(reading)
       }
+
+    case NodeCoordinatorActor.UnknownDataset =>
+        whoStartedMe.foreach(_ ! IngestionErr("Ingestion actors shut down, check error logs"))
   }
 
   def waiting: Receive = waitingAck orElse replay

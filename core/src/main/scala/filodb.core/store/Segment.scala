@@ -2,28 +2,41 @@ package filodb.core.store
 
 import com.typesafe.scalalogging.slf4j.StrictLogging
 import java.nio.ByteBuffer
-import org.velvia.filo.{VectorInfo, RowToVectorBuilder, RowReader, FiloRowReader, FastFiloRowReader}
+import org.velvia.filo.{RowToVectorBuilder, RowReader, FiloRowReader, FastFiloRowReader}
 import scala.collection.immutable.TreeMap
 import scala.collection.mutable.{ArrayBuffer, HashMap}
 
-import filodb.core.{KeyRange, SortKeyHelper}
+import filodb.core.KeyType
 import filodb.core.Types._
-import filodb.core.metadata.Column
+import filodb.core.metadata.{Column, RichProjection}
+
+//scalastyle:off
+case class SegmentInfo[+PK, +SK](partition: PK, segment: SK) {
+//scalastyle:on
+  /**
+   * Recast this SegmentInfo in the PK and SK types of another projection object.
+   * Be careful using this.  This is needed because dependent-path types in Scala are not that smart.
+   * If a class takes a RichProjection as a parameter, then the types of that SegmentInfo becomes
+   * tied to that class's projection parameter, and Scala does not know that the original projection
+   * object has the same types.
+   */
+  def basedOn(projection: RichProjection): SegmentInfo[projection.PK, projection.SK] =
+    this.asInstanceOf[SegmentInfo[projection.PK, projection.SK]]
+}
 
 /**
- * A Segment represents columnar chunks for a given dataset, partition, range of keys, and columns.
- * It also contains an index to help read data out in sorted order.
- * For more details see `doc/sorted_chunk_merge.md`.
+ * A Segment represents all the rows that belong to a single segment key in a given projection.
+ * When new rows belonging to that segment key are added, they are added to the same segment.
  */
-trait Segment[K] {
-  val keyRange: KeyRange[K]
-  val index: ChunkRowMap
+trait Segment {
+  val projection: RichProjection
+  def segInfo: SegmentInfo[projection.PK, projection.SK]
+  def index: ChunkRowMap
 
-  def segmentId: SegmentId = keyRange.binaryStart
-  def dataset: TableName    = keyRange.dataset
-  def partition: PartitionKey = keyRange.partition
+  def binaryPartition: BinaryPartition = projection.partitionType.toBytes(segInfo.partition)
+  def segmentId: SegmentId = projection.segmentType.toBytes(segInfo.segment)
 
-  override def toString: String = s"Segment($dataset : $partition / ${keyRange.start}) columns($getColumns)"
+  override def toString: String = s"$segInfo columns($getColumns)"
 
   def addChunk(id: ChunkID, column: ColumnId, bytes: Chunk): Unit
   def getChunks: Iterator[(ColumnId, ChunkID, Chunk)]
@@ -38,9 +51,20 @@ trait Segment[K] {
 
 /**
  * A generic segment implementation
+ *
+ * NOTE: making the constructor private is a hack around Scala not supporting path-dependent types
+ * in class constructor param lists. See
+ * http://stackoverflow.com/questions/32763822/use-of-path-dependent-type-as-a-class-parameter
  */
-class GenericSegment[K](val keyRange: KeyRange[K],
-                        val index: ChunkRowMap) extends Segment[K] {
+class GenericSegment private(val projection: RichProjection,
+                             _segInfo: SegmentInfo[RichProjection#PK, RichProjection#SK],
+                             val index: ChunkRowMap) extends Segment {
+  def this(projection: RichProjection, index: ChunkRowMap)
+          (segInfo: SegmentInfo[projection.PK, projection.SK]) =
+    this(projection, segInfo, index)
+
+  def segInfo: SegmentInfo[projection.PK, projection.SK] = _segInfo.basedOn(projection)
+
   val chunkIds = ArrayBuffer[ChunkID]()
   val chunks = new HashMap[ColumnId, HashMap[ChunkID, Chunk]]
 
@@ -63,46 +87,42 @@ class GenericSegment[K](val keyRange: KeyRange[K],
  * a fixed schema and RowIngestSupport typeclass.  Automatically increments the chunkId
  * properly.
  */
-class RowWriterSegment[K: SortKeyHelper](override val keyRange: KeyRange[K],
-                                         schema: Seq[Column])
-//scalastyle:off
-//sorry for this ugly hack but only way to get scalac to pass in the SortKeyHelper
-// properly it seems :(
-extends GenericSegment(keyRange, null) {
-  //scalastyle:on
-  override val index = new UpdatableChunkRowMap[K]
-  val filoSchema = schema.map {
-    case Column(name, _, _, colType, serializer, false, false) =>
-      require(serializer == Column.Serializer.FiloSerializer)
-      VectorInfo(name, colType.clazz)
-  }
+class RowWriterSegment private(override val projection: RichProjection,
+                               segInfo: SegmentInfo[RichProjection#PK, RichProjection#SK],
+                               schema: Seq[Column])
+extends GenericSegment(projection,
+                       new UpdatableChunkRowMap[projection.RK]()(projection.rowKeyType))(
+                       segInfo.basedOn(projection)) {
+  def this(projection: RichProjection, schema: Seq[Column])
+          (segInfo: SegmentInfo[projection.PK, projection.SK]) = this(projection, segInfo, schema)
 
-  val updatingIndex = index.asInstanceOf[UpdatableChunkRowMap[K]]
+  val filoSchema = Column.toFiloSchema(schema)
+
+  val updatingIndex = index.asInstanceOf[UpdatableChunkRowMap[projection.RK]]
 
   /**
    * Adds a bunch of rows as a new set of chunks with the same chunkId.  The nextChunkId from
    * a ChunkRowMap will be used.
-   * @param getSortKey a function to extract the sort key K out of the RowReader.  Note that
-   *                   the sort key must not be optional.
    */
-  def addRowsAsChunk(rows: Iterator[RowReader], getSortKey: RowReader => K): Unit = {
+  def addRowsAsChunk(rows: Iterator[RowReader]): Unit = {
     val newChunkId = index.nextChunkId
     val builder = new RowToVectorBuilder(filoSchema)
+    val rowKeyFunc = projection.rowKeyFunc
     // NOTE: some RowReaders, such as the one from RowReaderSegment, must be iterators
     // since rowNo in FastFiloRowReader is mutated.
     rows.zipWithIndex.foreach { case (r, i) =>
-      updatingIndex.update(getSortKey(r), newChunkId, i)
+      updatingIndex.update(rowKeyFunc(r).asInstanceOf[projection.RK], newChunkId, i)
       builder.addRow(r)
     }
     val chunkMap = builder.convertToBytes()
     chunkMap.foreach { case (col, bytes) => addChunk(newChunkId, col, bytes) }
   }
 
-  def addRowsAsChunk(rows: Iterator[(PartitionKey, K, RowReader)]): Unit = {
+  def addRichRowsAsChunk(rows: Iterator[(RichProjection#RK, RowReader)]): Unit = {
     val newChunkId = index.nextChunkId
     val builder = new RowToVectorBuilder(filoSchema)
-    rows.zipWithIndex.foreach { case ((_, k, r), i) =>
-      updatingIndex.update(k, newChunkId, i)
+    rows.zipWithIndex.foreach { case ((k, r), i) =>
+      updatingIndex.update(k.asInstanceOf[projection.RK], newChunkId, i)
       builder.addRow(r)
     }
     val chunkMap = builder.convertToBytes()
@@ -117,10 +137,13 @@ extends GenericSegment(keyRange, null) {
  * It assumes that the ChunkID is a counter with low cardinality, and stores everything
  * as arrays for extremely fast access.
  */
-class RowReaderSegment[K](val keyRange: KeyRange[K],
-                          val index: BinaryChunkRowMap,
-                          columns: Seq[Column]) extends Segment[K] with StrictLogging {
+class RowReaderSegment(val projection: RichProjection,
+                       _segInfo: SegmentInfo[_, _],
+                       val index: BinaryChunkRowMap,
+                       columns: Seq[Column]) extends Segment with StrictLogging {
   import RowReaderSegment._
+
+  def segInfo: SegmentInfo[projection.PK, projection.SK] = _segInfo.basedOn(projection)
 
   // chunks(chunkId)(columnNum)
   val chunks = Array.fill(index.nextChunkId)(new Array[ByteBuffer](columns.length))
@@ -131,12 +154,12 @@ class RowReaderSegment[K](val keyRange: KeyRange[K],
   def addChunk(id: ChunkID, column: ColumnId, bytes: Chunk): Unit =
     if (id < chunks.size) {
       //scalastyle:off
-      if (bytes == null) logger.warn(s"null chunk detected! id=$id column=$column in $keyRange")
+      if (bytes == null) logger.warn(s"null chunk detected! id=$id column=$column in $segInfo")
       //scalastyle:on
       chunks(id)(colIdToNumber(column)) = bytes
     } else {
       // Probably the result of corruption, such as OOM while writing segments
-      logger.debug(s"Ignoring chunk id=$id column=$column in $keyRange, chunks.size=${chunks.size}")
+      logger.debug(s"Ignoring chunk id=$id column=$column in $segInfo, chunks.size=${chunks.size}")
     }
 
   def getChunks: Iterator[(ColumnId, ChunkID, Chunk)] = {
@@ -152,7 +175,7 @@ class RowReaderSegment[K](val keyRange: KeyRange[K],
       val reader = readerFactory(chunks(chunkId), clazzes)
       // Cheap check for empty chunks
       if (reader.parsers(0).length == 0) {
-        logger.warn(s"empty chunk detected!  chunkId=$chunkId in $keyRange")
+        logger.warn(s"empty chunk detected!  chunkId=$chunkId in $segInfo")
       }
       reader
     }.toArray
@@ -217,10 +240,10 @@ object RowReaderSegment {
   val DefaultReaderFactory: RowReaderFactory =
     (bytes, clazzes) => new FastFiloRowReader(bytes, clazzes)
 
-  def apply[K](genSeg: GenericSegment[K], schema: Seq[Column]): RowReaderSegment[K] = {
+  def apply(genSeg: GenericSegment, schema: Seq[Column]): RowReaderSegment = {
     val (chunkIdBuf, rowNumBuf) = genSeg.index.serialize()
     val binChunkMap = new BinaryChunkRowMap(chunkIdBuf, rowNumBuf, genSeg.index.nextChunkId)
-    val readSeg = new RowReaderSegment(genSeg.keyRange, binChunkMap, schema)
+    val readSeg = new RowReaderSegment(genSeg.projection, genSeg.segInfo, binChunkMap, schema)
     genSeg.getChunks.foreach { case (col, id, bytes) => readSeg.addChunk(id, col, bytes) }
     readSeg
   }

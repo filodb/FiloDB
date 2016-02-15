@@ -1,6 +1,10 @@
 <configuration>
 
-  <logger name="filodb" level="DEBUG" />
+  <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+    <encoder>
+      <pattern>[%date{ISO8601}] %-5level %logger{26} [%X{akkaSource}] - %msg%n</pattern>
+    </encoder>
+  </appender>
 
   <appender name="FILE" class="ch.qos.logback.core.FileAppender">
     <file>filodb-test.log</file>
@@ -14,7 +18,13 @@
 
   </appender>
 
-  <root level="INFO">
+  <!-- NOTE: additivity=false means filodb debug logs will not go to STDOUT -->
+  <logger name="filodb" level="DEBUG" additivity="false">
     <appender-ref ref="FILE" />
+  </logger>
+
+  <root level="WARN">
+    <appender-ref ref="FILE" />
+    <appender-ref ref="STDOUT" />
   </root>
 </configuration>

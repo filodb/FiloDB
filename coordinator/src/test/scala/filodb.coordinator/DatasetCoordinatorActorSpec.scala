@@ -10,7 +10,7 @@ import scala.concurrent.duration._
 
 import filodb.core._
 import filodb.core.metadata.{Column, Dataset, RichProjection}
-import filodb.core.store.{InMemoryColumnStore, SegmentSpec}
+import filodb.core.store.{InMemoryColumnStore, SegmentInfo}
 import filodb.core.reprojector.{DefaultReprojector, MemTable, Reprojector}
 
 import org.scalatest.concurrent.ScalaFutures
@@ -21,7 +21,7 @@ object DatasetCoordinatorActorSpec extends ActorSpecConfig
 class DatasetCoordinatorActorSpec extends ActorTest(DatasetCoordinatorActorSpec.getNewSystem)
 with ScalaFutures {
   import akka.testkit._
-  import SegmentSpec._
+  import NamesTestData._
   import DatasetCoordinatorActor._
 
   implicit val defaultPatience =
@@ -31,17 +31,15 @@ with ScalaFutures {
 
   // Need to force smaller flush interval to ensure acks get back in time
   val config = ConfigFactory.parseString(
-                 """memtable.flush-trigger-rows = 100
-                    memtable.max-rows-per-table = 200
-                    memtable.flush.interval = 500 ms""")
+                 """filodb.memtable.flush-trigger-rows = 100
+                    filodb.memtable.max-rows-per-table = 200
+                    filodb.memtable.flush.interval = 300 ms""")
                  .withFallback(ConfigFactory.load("application_test.conf"))
-  val keyRange = KeyRange("dataset", Dataset.DefaultPartitionKey, 0L, 10000L)
-  val myDataset = dataset.copy(partitionColumn = "league")
-  val schemaWithPartCol = schema ++ Seq(
-    Column("league", "dataset", 0, Column.ColumnType.StringColumn)
-  )
+                 .getConfig("filodb")
+
+  val myDataset = largeDataset
   val myProjection = RichProjection(myDataset, schemaWithPartCol)
-  val columnStore = new InMemoryColumnStore
+  val columnStore = new InMemoryColumnStore(dispatcher)
 
   var dsActor: ActorRef = _
   var probe: TestProbe = _
@@ -65,7 +63,7 @@ with ScalaFutures {
   }
 
   val namesWithPartCol = (0 until 50).flatMap { partNum =>
-    names.map { t => (t._1, t._2, t._3, Some(partNum.toString)) }
+    names.map { t => (t._1, t._2, t._3, t._4, Some(partNum.toString)) }
   }
 
 
@@ -74,16 +72,18 @@ with ScalaFutures {
     probe.expectMsg(NodeCoordinatorActor.Ack(0L))
   }
 
+  val dummySegInfo = SegmentInfo("Success", 0)
+
   val testReprojector = new Reprojector {
     import filodb.core.store.Segment
 
-    def reproject[K](memTable: MemTable[K], version: Int): Future[Seq[String]] = {
+    def reproject(memTable: MemTable, version: Int): Future[Seq[SegmentInfo[_, _]]] = {
       reprojections = reprojections :+ (memTable.projection.dataset.name -> version)
-      Future.successful(Seq("Success"))
+      Future.successful(Seq(dummySegInfo))
 
     }
 
-    def toSegments[K](memTable: MemTable[K]): Iterator[Segment[K]] = ???
+    def toSegments(memTable: MemTable, segments: Seq[(Any, Any)]): Seq[Segment] = ???
   }
 
   it("should respond to GetStats with no flushes and no rows") {

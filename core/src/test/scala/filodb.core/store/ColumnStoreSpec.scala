@@ -7,8 +7,9 @@ import scala.concurrent.{Await, Future}
 import scala.language.postfixOps
 
 import filodb.core._
-import filodb.core.metadata.{Dataset, Column, Projection, RichProjection}
+import filodb.core.metadata.{Dataset, Column, DataColumn, Projection, RichProjection}
 import filodb.core.Types
+import filodb.core.query.KeyFilter
 
 import org.scalatest.{FlatSpec, Matchers, BeforeAndAfter, BeforeAndAfterAll}
 import org.scalatest.concurrent.ScalaFutures
@@ -17,33 +18,37 @@ import org.scalatest.time.{Millis, Seconds, Span}
 trait ColumnStoreSpec extends FlatSpec with Matchers
 with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
   import scala.concurrent.ExecutionContext.Implicits.global
-  import SegmentSpec._
+  import NamesTestData._
 
   implicit val defaultPatience =
     PatienceConfig(timeout = Span(10, Seconds), interval = Span(50, Millis))
 
-  val config = ConfigFactory.load("application_test.conf")
+  val config = ConfigFactory.load("application_test.conf").getConfig("filodb")
   def colStore: CachedMergingColumnStore
 
   // First create the tables in C*
   override def beforeAll() {
     super.beforeAll()
     colStore.initializeProjection(dataset.projections.head).futureValue
+    colStore.initializeProjection(GdeltTestData.dataset2.projections.head).futureValue
   }
 
   before {
     colStore.clearProjectionData(dataset.projections.head).futureValue
+    colStore.clearProjectionData(GdeltTestData.dataset2.projections.head).futureValue
     colStore.clearSegmentCache()
   }
 
-  val keyRange = KeyRange(dataset.name, "partition", 0L, 10000L)
+  val segInfo = SegmentInfo("partition", 0).basedOn(projection)
+  val keyRange = KeyRange("partition", 0, 0, endExclusive = false).basedOn(projection)
 
   val bytes1 = ByteBuffer.wrap("apple".getBytes("UTF-8"))
   val bytes2 = ByteBuffer.wrap("orange".getBytes("UTF-8"))
 
-  val rowIndex = new UpdatableChunkRowMap[Long]
+  implicit val keyType = SingleKeyTypes.LongKeyType
+  val rowIndex = new UpdatableChunkRowMap
 
-  val baseSegment = new GenericSegment(keyRange, rowIndex)
+  val baseSegment = new GenericSegment(projection, rowIndex)(segInfo)
   baseSegment.addChunks(0, Map("columnA" -> bytes1, "columnB" -> bytes2))
   baseSegment.addChunks(1, Map("columnA" -> bytes1, "columnB" -> bytes2))
   rowIndex.index = rowIndex.index ++
@@ -52,39 +57,39 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
   // NOTE: The test below purposefully does not use any of the read APIs so that if only the read code
   // breaks, this test can independently test for write failures
   "appendSegment" should "NOOP if the segment is empty" in {
-    val segment = getRowWriter(keyRange)
+    val segment = getRowWriter()
     whenReady(colStore.appendSegment(projection, segment, 0)) { response =>
       response should equal (NotApplied)
     }
   }
 
   it should "append new rows to a cached segment successfully" in {
-    val segment = getRowWriter(keyRange)
-    segment.addRowsAsChunk(mapper(names take 3), getSortKey _)
+    val segment = getRowWriter()
+    segment.addRowsAsChunk(mapper(names take 3))
     whenReady(colStore.appendSegment(projection, segment, 0)) { response =>
       response should equal (Success)
     }
 
     // Writing segment2, last 3 rows, should get appended to first 3 in same segment
-    val segment2 = getRowWriter(keyRange)
-    segment2.addRowsAsChunk(mapper(names drop 3), getSortKey _)
+    val segment2 = getRowWriter()
+    segment2.addRowsAsChunk(mapper(names drop 3))
     whenReady(colStore.appendSegment(projection, segment2, 0)) { response =>
       response should equal (Success)
     }
 
-    whenReady(colStore.readSegments(schema, keyRange, 0)) { segIter =>
+    whenReady(colStore.readSegments(projection, schema, 0)(keyRange)) { segIter =>
       val segments = segIter.toSeq
       segments should have length (1)
-      val readSeg = segments.head.asInstanceOf[RowReaderSegment[Long]]
-      readSeg.keyRange.start should equal (segment.keyRange.start)
+      val readSeg = segments.head.asInstanceOf[RowReaderSegment]
+      readSeg.segInfo.segment should equal (segment.segInfo.segment)
       readSeg.rowIterator().map(_.getLong(2)).toSeq should equal (Seq(24L, 25L, 28L, 29L, 39L, 40L))
       readSeg.rowIterator().map(_.getString(0)).toSeq should equal (firstNames)
     }
   }
 
   it should "replace rows to an uncached segment successfully" in {
-    val segment = getRowWriter(keyRange)
-    segment.addRowsAsChunk(mapper(names drop 1), getSortKey _)
+    val segment = getRowWriter()
+    segment.addRowsAsChunk(mapper(names drop 1))
     whenReady(colStore.appendSegment(projection, segment, 0)) { response =>
       response should equal (Success)
     }
@@ -92,34 +97,60 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
     colStore.clearSegmentCache()
 
     // Writing segment2, repeat 1 row and add another row.  Should read orig segment from disk.
-    val segment2 = getRowWriter(keyRange)
-    segment2.addRowsAsChunk(mapper(names take 2), getSortKey _)
+    val segment2 = getRowWriter()
+    segment2.addRowsAsChunk(mapper(names take 2))
     whenReady(colStore.appendSegment(projection, segment2, 0)) { response =>
       response should equal (Success)
     }
 
-    whenReady(colStore.readSegments(schema, keyRange, 0)) { segIter =>
+    whenReady(colStore.readSegments(projection, schema, 0)(keyRange)) { segIter =>
       val segments = segIter.toSeq
       segments should have length (1)
-      val readSeg = segments.head.asInstanceOf[RowReaderSegment[Long]]
-      readSeg.keyRange.start should equal (segment.keyRange.start)
+      val readSeg = segments.head.asInstanceOf[RowReaderSegment]
+      readSeg.segInfo.segment should equal (segment.segInfo.segment)
       readSeg.rowIterator().map(_.getLong(2)).toSeq should equal (Seq(24L, 25L, 28L, 29L, 39L, 40L))
       readSeg.rowIterator().map(_.getString(0)).toSeq should equal (firstNames)
     }
   }
 
+  // The first row key column is a computed column, so this test also ensures that retrieving the original
+  // source columns works.
+  it should "replace rows with multi row keys to an uncached segment" in {
+    import GdeltTestData._
+    val segments = getSegments(197901.asInstanceOf[projection2.PK])
+    segments.foreach { seg =>
+      colStore.appendSegment(projection2, seg, 0).futureValue should equal (Success)
+    }
+
+    colStore.clearSegmentCache()
+
+    val segment2 = new RowWriterSegment(projection2, schema)(segments.head.segInfo.basedOn(projection2))
+    segment2.addRowsAsChunk(readers.toIterator.take(3))
+    colStore.appendSegment(projection2, segment2, 0).futureValue should equal (Success)
+
+    val keyRange = KeyRange(197901,
+                            segments.head.segInfo.segment,
+                            segments.last.segInfo.segment, endExclusive = false).basedOn(projection2)
+    whenReady(colStore.readSegments(projection2, schema, 0)(keyRange)) { segIter =>
+      val segments = segIter.toSeq
+      segments should have length (2)
+      val readSeg = segments.head.asInstanceOf[RowReaderSegment]
+      readSeg.rowIterator().map(_.getInt(6)).sum should equal (288)
+    }
+  }
+
   "readSegments" should "read segments back that were written" in {
-    val segment = getRowWriter(keyRange)
-    segment.addRowsAsChunk(mapper(names), getSortKey _)
+    val segment = getRowWriter()
+    segment.addRowsAsChunk(mapper(names))
     whenReady(colStore.appendSegment(projection, segment, 0)) { response =>
       response should equal (Success)
     }
 
-    whenReady(colStore.readSegments(schema, keyRange, 0)) { segIter =>
+    whenReady(colStore.readSegments(projection, schema, 0)(keyRange)) { segIter =>
       val segments = segIter.toSeq
       segments should have length (1)
-      val readSeg = segments.head.asInstanceOf[RowReaderSegment[Long]]
-      readSeg.keyRange.start should equal (segment.keyRange.start)
+      val readSeg = segments.head.asInstanceOf[RowReaderSegment]
+      readSeg.segInfo.segment should equal (segment.segInfo.segment)
       readSeg.getChunks.toSet should equal (segment.getChunks.toSet)
       readSeg.index.rowNumIterator.toSeq should equal (segment.index.rowNumIterator.toSeq)
       readSeg.rowIterator().map(_.getLong(2)).toSeq should equal (Seq(24L, 25L, 28L, 29L, 39L, 40L))
@@ -127,7 +158,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
   }
 
   it should "return empty iterator if cannot find segment" in {
-    whenReady(colStore.readSegments(schema, keyRange, 0)) { segIter =>
+    whenReady(colStore.readSegments(projection, schema, 0)(keyRange)) { segIter =>
       segIter.toSeq should have length (0)
     }
   }
@@ -139,8 +170,8 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
       response should equal (Success)
     }
 
-    val fakeCol = Column("notACol", dataset.name, 0, Column.ColumnType.StringColumn)
-    whenReady(colStore.readSegments(Seq(fakeCol), keyRange, 0)) { segIter =>
+    val fakeCol = DataColumn(5, "notACol", dataset.name, 0, Column.ColumnType.StringColumn)
+    whenReady(colStore.readSegments(projection, Seq(fakeCol), 0)(keyRange)) { segIter =>
       val segments = segIter.toSeq
       segments should have length (1)
       segments.head.getChunks.toSet should equal (Set(("notACol", 0, null), ("notACol", 1, null)))
@@ -148,8 +179,8 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
   }
 
   "scanSegments" should "read segments back that were written" in {
-    val segment = getRowWriter(keyRange)
-    segment.addRowsAsChunk(mapper(names), getSortKey _)
+    val segment = getRowWriter()
+    segment.addRowsAsChunk(mapper(names))
     whenReady(colStore.appendSegment(projection, segment, 0)) { response =>
       response should equal (Success)
     }
@@ -157,11 +188,11 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
     val paramSet = colStore.getScanSplits(dataset.name)
     paramSet should have length (1)
 
-    whenReady(colStore.scanSegments[Long](schema, dataset.name, 0, params = paramSet.head)) { segIter =>
+    whenReady(colStore.scanSegments(projection, schema, 0, params = paramSet.head)()) { segIter =>
       val segments = segIter.toSeq
       segments should have length (1)
-      val readSeg = segments.head.asInstanceOf[RowReaderSegment[Long]]
-      readSeg.keyRange.start should equal (segment.keyRange.start)
+      val readSeg = segments.head.asInstanceOf[RowReaderSegment]
+      readSeg.segInfo.segment should equal (segment.segInfo.segment)
       readSeg.getChunks.toSet should equal (segment.getChunks.toSet)
       readSeg.index.rowNumIterator.toSeq should equal (segment.index.rowNumIterator.toSeq)
       readSeg.rowIterator().map(_.getLong(2)).toSeq should equal (Seq(24L, 25L, 28L, 29L, 39L, 40L))
@@ -169,8 +200,8 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
   }
 
   "scanRows" should "read back rows that were written" in {
-    val segment = getRowWriter(keyRange)
-    segment.addRowsAsChunk(mapper(names), getSortKey _)
+    val segment = getRowWriter()
+    segment.addRowsAsChunk(mapper(names))
     whenReady(colStore.appendSegment(projection, segment, 0)) { response =>
       response should equal (Success)
     }
@@ -178,8 +209,70 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
     val paramSet = colStore.getScanSplits(dataset.name)
     paramSet should have length (1)
 
-    whenReady(colStore.scanRows(schema, dataset.name, 0, params = paramSet.head)) { rowIter =>
+    whenReady(colStore.scanRows(projection, schema, 0, params = paramSet.head)()) { rowIter =>
       rowIter.map(_.getLong(2)).toSeq should equal (Seq(24L, 25L, 28L, 29L, 39L, 40L))
+    }
+  }
+
+  it should "read back rows written with multi-column row keys" in {
+    import GdeltTestData._
+    val segments = getSegments(197901.asInstanceOf[projection2.PK])
+    segments.foreach { seg =>
+      colStore.appendSegment(projection2, seg, 0).futureValue should equal (Success)
+    }
+
+    val paramSet = colStore.getScanSplits(dataset.name)
+    paramSet should have length (1)
+
+    whenReady(colStore.scanRows(projection2, schema, 0, params = paramSet.head)()) { rowIter =>
+      rowIter.map(_.getInt(6)).sum should equal (492)
+    }
+  }
+
+  it should "filter rows written with single partition key" in {
+    import GdeltTestData._
+    val segments = getSegmentsByPartKey(projection2)
+    segments.foreach { seg =>
+      colStore.appendSegment(projection2, seg, 0).futureValue should equal (Success)
+    }
+
+    val paramSet = colStore.getScanSplits(dataset.name)
+    paramSet should have length (1)
+
+    val filterFunc = KeyFilter.equalsFunc(projection2.partitionType)(197902.asInstanceOf[projection2.PK])
+
+    whenReady(colStore.scanRows(projection2, schema, 0, params = paramSet.head)(filterFunc)) { rowIter =>
+      rowIter.map(_.getInt(6)).sum should equal (22)
+    }
+  }
+
+  import SingleKeyTypes._
+
+  it should "filter rows written with multiple column partition keys" in {
+    import GdeltTestData._
+    val segments = getSegmentsByPartKey(projection3)
+    segments.foreach { seg =>
+      colStore.appendSegment(projection3, seg, 0).futureValue should equal (Success)
+    }
+
+    val paramSet = colStore.getScanSplits(dataset.name)
+    paramSet should have length (1)
+
+    // Test 1:  IN query on first column only
+    val inFilter = KeyFilter.inFunc(StringKeyType)(Set("JPN", "KHM"))
+    val filter1 = KeyFilter.makePartitionFilterFunc(projection3, Seq(0), Seq(inFilter))
+    whenReady(colStore.scanRows(projection3, schema, 0, params = paramSet.head)(filter1)) { rowIter =>
+      val rows = rowIter.toSeq
+      rows.map(_.getInt(6)).sum should equal (30)
+      rows.map(_.getString(4)).toSet should equal (Set("JPN", "KHM"))
+    }
+
+    // Test 2: = filter on both partition columns
+    val eqFilters = Seq(KeyFilter.equalsFunc(StringKeyType)("JPN"),
+                        KeyFilter.equalsFunc(IntKeyType)(1979))
+    val filter2 = KeyFilter.makePartitionFilterFunc(projection3, Seq(0, 1), eqFilters)
+    whenReady(colStore.scanRows(projection3, schema, 0, params = paramSet.head)(filter2)) { rowIter =>
+      rowIter.map(_.getInt(6)).sum should equal (10)
     }
   }
 }

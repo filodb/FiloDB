@@ -20,11 +20,10 @@ object RddRowSourceActor {
             dataset: String,
             version: Int,
             coordinatorActor: ActorRef,
-            defaultPartitionKey: Option[Types.PartitionKey],
             maxUnackedBatches: Int = RddRowSourceActor.DefaultMaxUnackedBatches,
             rowsToRead: Int = RddRowSourceActor.DefaultRowsToRead): Props =
     Props(classOf[RddRowSourceActor], rows, columns, dataset, version,
-          coordinatorActor, defaultPartitionKey, maxUnackedBatches, rowsToRead)
+          coordinatorActor, maxUnackedBatches, rowsToRead)
 }
 
 /**
@@ -39,14 +38,13 @@ class RddRowSourceActor(rows: Iterator[Row],
                         val dataset: String,
                         val version: Int,
                         val coordinatorActor: ActorRef,
-                        defaultPartitionKey: Option[Types.PartitionKey],
                         val maxUnackedBatches: Int = RddRowSourceActor.DefaultMaxUnackedBatches,
                         rowsToRead: Int = RddRowSourceActor.DefaultRowsToRead)
 extends BaseActor with RowSource {
   import NodeCoordinatorActor._
   import RddRowSourceActor._
 
-  def getStartMessage(): SetupIngestion = SetupIngestion(dataset, columns, version, defaultPartitionKey)
+  def getStartMessage(): SetupIngestion = SetupIngestion(dataset, columns, version)
 
   val seqIds = Iterator.from(0).map { id =>
     if (id % 20 == 0) logger.info(s"Ingesting batch starting at row ${id * rowsToRead}")
@@ -65,5 +63,5 @@ case class RddRowReader(row: Row) extends RowReader {
   def getDouble(columnNo: Int): Double = row.getDouble(columnNo)
   def getFloat(columnNo: Int): Float = row.getFloat(columnNo)
   def getString(columnNo: Int): String = row.getString(columnNo)
-  def getDateTime(columnNo: Int): DateTime = ???
+  def getAny(columnNo: Int): Any = row.get(columnNo)
 }

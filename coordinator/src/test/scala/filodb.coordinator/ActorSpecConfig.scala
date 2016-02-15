@@ -8,6 +8,7 @@ import org.scalatest.{FunSpecLike, Matchers, BeforeAndAfter, BeforeAndAfterAll}
 trait ActorSpecConfig {
   val defaultConfig = """
                       | akka.log-dead-letters = 0
+                      | akka.loggers = ["akka.testkit.TestEventListener"]
                       """.stripMargin
   // Making this lazy is needed for overrides to work successfully
   lazy val configString = defaultConfig

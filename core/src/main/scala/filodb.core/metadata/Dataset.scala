@@ -8,38 +8,33 @@ import scala.reflect.ClassTag
 import scala.util.{Try, Success, Failure}
 
 import filodb.core._
-import filodb.core.Types
-import filodb.core.Types.PartitionKey
+import filodb.core.Types._
 
 /**
  * A dataset is a table with a schema.
- * A dataset is partitioned, a partitioning column controls how data is distributed.
+ * A dataset is partitioned, partitioning columns controls how data is distributed.
  * Data within a dataset consists of multiple projections, including a main "superprojection"
  * that contains all columns.
  */
 case class Dataset(name: String,
                    projections: Seq[Projection],
                    /**
-                    *  Defines the column to be used for partitioning.
+                    *  Defines the columns to be used for partitioning.
                     *  If one is not defined, then assume a single global partition, with a special
                     *  column name.
                     */
-                   partitionColumn: String = Dataset.DefaultPartitionColumn,
+                   partitionColumns: Seq[ColumnId] = Seq(Dataset.DefaultPartitionColumn),
                    options: DatasetOptions = Dataset.DefaultOptions)
 
 /**
  * Config options for a table define operational details for the column store and memtable.
  * Every option must have a default!
  */
-case class DatasetOptions(chunkSize: Int,
-                          segmentSize: String,
-                          defaultPartitionKey: Option[PartitionKey] = None) {
+case class DatasetOptions(chunkSize: Int) {
   override def toString: String = {
     val map = Map(
-                   "chunkSize" -> chunkSize,
-                   "segmentSize" -> segmentSize
-                 ) ++
-              defaultPartitionKey.map(k => Map("defaultPartitionKey" -> k)).getOrElse(Map.empty)
+                   "chunkSize" -> chunkSize
+                 )
     val config = ConfigFactory.parseMap(map.asJava)
     config.root.render(ConfigRenderOptions.concise)
   }
@@ -48,9 +43,7 @@ case class DatasetOptions(chunkSize: Int,
 object DatasetOptions {
   def fromString(s: String): DatasetOptions = {
     val config = ConfigFactory.parseString(s)
-    DatasetOptions(chunkSize = config.getInt("chunkSize"),
-                   segmentSize = config.getString("segmentSize"),
-                   defaultPartitionKey = config.as[Option[PartitionKey]]("defaultPartitionKey"))
+    DatasetOptions(chunkSize = config.getInt("chunkSize"))
   }
 }
 
@@ -60,97 +53,27 @@ object DatasetOptions {
 object Dataset {
   // If a partitioning column is not defined then this refers to a single global partition, and
   // the dataset must fit in one node.
-  val DefaultPartitionColumn = ":single"
-  val DefaultPartitionKey: PartitionKey = "/0"
+  val DefaultPartitionKey = "/0"
+  val DefaultPartitionColumn = s":string $DefaultPartitionKey"
 
-  val DefaultOptions = DatasetOptions(chunkSize = 1000,
-                                      segmentSize = "10000")
+  val DefaultOptions = DatasetOptions(chunkSize = 5000)
 
   /**
-   * Creates a new Dataset with a single superprojection with a defined sort order.
+   * Creates a new Dataset with a single superprojection with a single key column and
+   * segment column.
    */
   def apply(name: String,
-            sortColumn: String,
+            keyColumn: String,
+            segmentColumn: String,
             partitionColumn: String): Dataset =
-    Dataset(name, Seq(Projection(0, name, sortColumn)), partitionColumn)
+    Dataset(name, Seq(Projection(0, name, Seq(keyColumn), segmentColumn)), Seq(partitionColumn))
 
-  def apply(name: String, sortColumn: String): Dataset =
-    Dataset(name, Seq(Projection(0, name, sortColumn)), DefaultPartitionColumn)
+  def apply(name: String,
+            keyColumns: Seq[String],
+            segmentColumn: String,
+            partitionColumns: Seq[String]): Dataset =
+    Dataset(name, Seq(Projection(0, name, keyColumns, segmentColumn)), partitionColumns)
 
-  /**
-   * Returns a SortKeyHelper configured from the DatasetOptions.
-   */
-  def sortKeyHelper[K: ClassTag](options: DatasetOptions): SortKeyHelper[K] = {
-    val StringClass = classOf[String]
-    implicitly[ClassTag[K]].runtimeClass match {
-      case java.lang.Long.TYPE => (new LongKeyHelper(options.segmentSize.toLong)).
-                                    asInstanceOf[SortKeyHelper[K]]
-      case java.lang.Integer.TYPE => (new IntKeyHelper(options.segmentSize.toInt)).
-                                    asInstanceOf[SortKeyHelper[K]]
-      case java.lang.Double.TYPE => (new DoubleKeyHelper(options.segmentSize.toDouble)).
-                                    asInstanceOf[SortKeyHelper[K]]
-      case StringClass         => (new StringKeyHelper(options.segmentSize.toInt)).
-                                    asInstanceOf[SortKeyHelper[K]]
-    }
-  }
-
-  def sortKeyHelper[K](options: DatasetOptions, sortColumn: Column): Option[SortKeyHelper[K]] = {
-    import Column.ColumnType._
-    val helper = sortColumn.columnType match {
-      case LongColumn    => Some(sortKeyHelper[Long](options))
-      case IntColumn     => Some(sortKeyHelper[Int](options))
-      case DoubleColumn  => Some(sortKeyHelper[Double](options))
-      case StringColumn  => Some(sortKeyHelper[String](options))
-      case other: Column.ColumnType =>  None
-    }
-    helper.asInstanceOf[Option[SortKeyHelper[K]]]
-  }
-
-  def sortKeyHelper[K](dataset: Dataset, sortColumn: Column): Option[SortKeyHelper[K]] =
-    sortKeyHelper[K](dataset.options, sortColumn)
-
-  trait PartitionValueException
-
-  case class BadPartitionColumn(reason: String) extends Exception("BadPartitionColumn: " + reason) with
-      PartitionValueException
-
-  case class NullPartitionValue(partCol: String) extends Exception(s"Null partition value for col $partCol")
-      with PartitionValueException
-
-  /**
-   * Gets a partitioning function to extract the PartitionKey out of a row.  The return
-   * results depend on how the Dataset and DatasetOptions are configured.
-   *
-   * @return a partitioning function RowReader => PartitionKey:
-   *   If dataset.partitionColumn is DefaultPartitionColumn, then just returns the DefaultPartitioningKey
-   *   If dataset.partitionColumn does not exist in schema or is not supported type, BadPartitionColumn
-   *   Otherwise, a function that extracts the partition key out.
-   *     If the defaultPartitionKey is defined, then when a null partition column value is found,
-   *     it will use that default.  Otherwise a NullPartitionValue is returned.
-   */
-  def getPartitioningFunc(dataset: Dataset, schema: Seq[Column]): Try[RowReader => PartitionKey] = {
-    if (dataset.partitionColumn == DefaultPartitionColumn) {
-      Success((row: RowReader) => DefaultPartitionKey)
-    } else {
-      val partitionColNo = schema.indexWhere(_.hasId(dataset.partitionColumn))
-      if (partitionColNo < 0) return Failure(BadPartitionColumn(
-        s"Column ${dataset.partitionColumn} not in schema $schema"))
-
-      import Column.ColumnType._
-      val extractFunc: RowReader => PartitionKey = schema(partitionColNo).columnType match {
-        case StringColumn => row => row.getString(partitionColNo)
-        case IntColumn    => row => row.getInt(partitionColNo).toString
-        case LongColumn   => row => row.getLong(partitionColNo).toString
-        case other: Column.ColumnType =>
-          return Failure(BadPartitionColumn(s"Unsupported partitioning type $other"))
-      }
-      val func = dataset.options.defaultPartitionKey.map { defKey =>
-        (row: RowReader) => if (row.notNull(partitionColNo)) extractFunc(row) else defKey
-      }.getOrElse {
-        (row: RowReader) => if (row.notNull(partitionColNo)) { extractFunc(row) }
-                            else { throw NullPartitionValue(schema(partitionColNo).name) }
-      }
-      Success(func)
-    }
-  }
+  def apply(name: String, keyColumn: String, segmentColumn: String): Dataset =
+    Dataset(name, keyColumn, segmentColumn, DefaultPartitionColumn)
 }

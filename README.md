@@ -29,7 +29,10 @@ See [architecture](doc/architecture.md) and [datasets and reading](doc/datasets_
   - [Roadmap](#roadmap)
 - [Pre-requisites](#pre-requisites)
 - [Getting Started](#getting-started)
-  - [FiloDB Data Modelling and Performance Considerations](#filodb-data-modelling-and-performance-considerations)
+- [Introduction to FiloDB Data Modelling](#introduction-to-filodb-data-modelling)
+  - [Computed Columns](#computed-columns)
+  - [FiloDB vs Cassandra Data Modelling](#filodb-vs-cassandra-data-modelling)
+  - [Data Modelling and Performance Considerations](#data-modelling-and-performance-considerations)
   - [Example FiloDB Schema for machine metrics](#example-filodb-schema-for-machine-metrics)
   - [Distributed Partitioning](#distributed-partitioning)
 - [Using FiloDB data-source with Spark](#using-filodb-data-source-with-spark)
@@ -41,6 +44,7 @@ See [architecture](doc/architecture.md) and [datasets and reading](doc/datasets_
 - [Using the CLI](#using-the-cli)
     - [CLI Example](#cli-example)
 - [Current Status](#current-status)
+- [Deploying](#deploying)
 - [Building and Testing](#building-and-testing)
 - [You can help!](#you-can-help)
 
@@ -51,6 +55,7 @@ See [architecture](doc/architecture.md) and [datasets and reading](doc/datasets_
 FiloDB is a new open-source distributed, versioned, and columnar analytical database designed for modern streaming workloads.
 
 * **High performance** - faster than Parquet scan speeds, plus filtering along two or more dimensions
+  - Very flexible filtering: filter on only part of a partition key, much more flexible than allowed in Cassandra
 * **Compact storage** - within 35% of Parquet
 * **Idempotent writes** - primary-key based appends and updates; easy exactly-once ingestion from streaming sources
 * **Distributed** - pluggable storage engine includes Apache Cassandra and in-memory
@@ -79,7 +84,6 @@ Your input is appreciated!
 
 * True columnar querying and execution, using late materialization and vectorization techniques
 * Use of GPU and SIMD instructions to speed up queries
-* Support for many more data types and sort and partition keys - please give us your input!
 * Non-Spark ingestion API.  Your input is again needed.
 * In-memory caching for significant query speedup
 * Projections.  Often-repeated queries can be sped up significantly with projections.
@@ -87,7 +91,7 @@ Your input is appreciated!
 ## Pre-requisites
 
 1. [Java 8](http://www.oracle.com/technetwork/java/javase/downloads/jdk8-downloads-2133151.html)
-2. [SBT](http://www.scala-sbt.org/)
+2. [SBT](http://www.scala-sbt.org/) to build
 3. [Apache Cassandra](http://cassandra.apache.org/) (We prefer using [CCM](https://github.com/pcmanus/ccm) for local testing) (Optional if you are using the in-memory column store)
 4. [Apache Spark (1.5.x)](http://spark.apache.org/)
 
@@ -104,34 +108,81 @@ Your input is appreciated!
     - Start a Cassandra Cluster. If its not accessible at `localhost:9042` update it in `core/src/main/resources/application.conf`.
     - Or, use FiloDB's in-memory column store with Spark (does not work with CLI). Pass the `--conf spark.filodb.store=in-memory` to `spark-submit` / `spark-shell`.  This is a great option to test things out, and is really really fast!
 
-3. FiloDB can be used through `filo-cli` or as a Spark data source. The CLI supports data ingestion from CSV files only; the Spark data source is better tested and richer in features.
+3. For Cassandra, run `filo-cli --command init` to initialize the default `filodb` keyspace.
+4. Now, you can use Spark to ingest/query, or the CLI to ingest/examine metadata.
 
 Note: There is at least one release out now, tagged via Git and also located in the "Releases" tab on Github.
 
-There are two crucial parts to a dataset in FiloDB,
+## Introduction to FiloDB Data Modelling
 
-1. partitioning column - decides how data is going to be distributed across the cluster
-2. sort column         - acts as a primary key within each partition and decides how data will be sorted within each partition.  Like the "clustering key" from Cassandra.
+Perhaps it's easiest by starting with a diagram of how FiloDB stores data.
 
-The PRIMARY KEY for FiloDB consists of (partition key, sort key).  When choosing the above values you must make sure the combination of the two are unique.  This is very similar to Cassandra CQL Tables, whose primary key consists of (partition columns, clustering columns).  The partition key in FiloDB maps to the Cassandra partition key, and sort key maps to the clustering key.
+<table>
+  <tr>
+    <td></td>
+    <td colspan="2">Column A</td>
+    <td colspan="2">Column B</td>
+  </tr>
+  <tr>
+    <td>Partition key 1</td>
+    <td>Segment 1</td>
+    <td>Segment 2</td>
+    <td>Segment 1</td>
+    <td>Segment 2</td>
+  </tr>
+  <tr>
+    <td>Partition key 2</td>
+    <td>Segment 1</td>
+    <td>Segment 2</td>
+    <td>Segment 1</td>
+    <td>Segment 2</td>
+  </tr>
+</table>
 
-Specifying the partitioning column is optional.  If a partitioning column is not specified, FiloDB will create a default one with a fixed value, which means everything will be thrown into one node, and is only suitable for small amounts of data.  If you don't specify a partitioning column, then you have to make sure your sort keys are all unique.
+Three types of key define the data model of a FiloDB table.
 
-### FiloDB Data Modelling and Performance Considerations
+1. **partition key** - decides how data is going to be distributed across the cluster. All data within one partition key is guaranteed to fit on one node. May consist of multiple columns.
+2. **segment key** - groups row values into efficient chunks.  Segments within a partition are sorted by segment key and range scans can be done over segment keys.
+1. **row key**       - acts as a primary key within each partition and decides how data will be sorted within each segment.  May consist of multiple columns.
 
-**Choosing a Partition Key**.
+The PRIMARY KEY for FiloDB consists of (partition key, row key).  When choosing the above values you must make sure the combination of the two are unique.  No component of a primary key may be null - see the `:getOrElse` function for a way of dealing with null inputs.
 
+Specifying the partitioning column is optional.  If a partitioning column is not specified, FiloDB will create a default one with a fixed value, which means everything will be thrown into one node, and is only suitable for small amounts of data.  If you don't specify a partitioning column, then you have to make sure your row keys are all unique.
+
+### Computed Columns
+
+You may specify a function, or computed column, for use with any key column.  This is especially useful for working around the non-null requirement for keys, or for computing a good segment key.
+
+| Name      | Description     | Example     |
+| :-------- | :-------------- | :---------- |
+| string    | returns a constant string value | `:string /0` |
+| getOrElse | returns default value if column value is null | `:getOrElse columnA ---` |
+| round     | rounds down a numeric column.  Useful for bucketing by time or bucketing numeric IDs.  | `:round timestamp 10000` |
+| stringPrefix | takes the first N chars of a string; good for partitioning | `:stringPrefix token 4` |
+
+### FiloDB vs Cassandra Data Modelling
+
+* Like Cassandra, partitions (physical rows) distribute data and clustering keys act as a primary key within a partition
+* Like Cassandra, a single partition is the smallest unit of parallelism when querying from Spark
+* Wider rows work better for FiloDB (bigger chunk/segment size)
+* FiloDB does not have Cassandra's restrictions for partition key filtering. You can filter by any partition keys with most operators.  This means less tables in FiloDB can match more query patterns.
+
+### Data Modelling and Performance Considerations
+
+**Choosing Partition Keys**.
+
+- Partition keys are the most efficient way to filter data.  Remember that, unlike Cassandra, FiloDB is able to efficiently filter any column in a partition key -- even string contains, IN on only one column.  It can do this because FiloDB pre-scans a much smaller table ahead of scanning the main columnar chunk table.  This flexibility means that there is no need to populate different tables with different orders of partition keys just to optimize for different queries.
 - If there are too few partitions, then FiloDB will not be able to distribute and parallelize reads.
 - If the numer of rows in each partition is too few, then the storage will not be efficient.
 - If the partition key is time based, there may be a hotspot in the cluster as recent data is all written into the same set of replicas, and likewise for read patterns as well.
 
 **Segment Key and Chunk Size**.
 
-Within each partition, data is delineated by *segments*, which consists of non-overlapping ranges of sort keys.  Within each segment, successive flushes of the MemTable writes data in *chunks*.  The segmentation is key to sorting and filtering data by sort key, and the chunk size (which depends on segmentation) also affects performance.  The smaller the chunk size, the higher the overhead of scanning data becomes.
+Within each partition, data is delineated by the segment key into *segments*.  Within each segment, successive flushes of the MemTable writes data in *chunks*.  The segmentation is key to sorting and filtering data within partitions, and the chunk size (which depends on segmentation) also affects performance.  The smaller the chunk size, the higher the overhead of scanning data becomes.
 
 Segmentation and chunk size distribution may be checked by the CLI `analyze` command.  In addition, the following configuration affects segmentation and chunk size:
 * `memtable.max-rows-per-table`, `memtable.flush-trigger-rows` affects how many rows are kept in the MemTable at a time, and this along with how many partitions are in the MemTable directly leads to the chunk size upon flushing.
-* `segment_size` option when creating a dataset determines the segment size.  For Long, Int, and Double sort keys, the segment size is the rounding factor.  For example, if Long sort key is used and they represent milliseconds, a segment size of 10000 means that data will be segmented into 10 second intervals.  For String sort keys, the segment size is the number of characters at the start of a string that creates the segment key.  Experimentation along with running `filo-cli analyze` is recommended to come up with a good number.
+* The segment size is directly controlled by the segment key.  Choosing a segment key that groups data into big enough chunks (at least 1000 is a good guide) is highly recommended.  Experimentation along with running `filo-cli analyze` is recommended to come up with a good segment key.  See the Spark ingestion of GDELT below on an example... choosing an inappropriate segment key leads to MUCH slower ingest and read performance.
 * `chunk_size` option when creating a dataset caps the size of a single chunk.
 
 ### Example FiloDB Schema for machine metrics
@@ -141,7 +192,8 @@ This is one way I would recommend setting things up to take advantage of FiloDB.
 The metric names are the column names.  This lets you select on just one metric and effectively take advantage of columnar layout.
 
 * Partition key = hostname
-* Sort key = timestamp
+* Row key = timestamp (say millis)
+* Segment key = `:round timestamp 10000` (Timestamp rounded to nearest 10000 millis or 10 seconds)
 * Columns: hostname, timestamp, CPU, load_avg, disk_usage, etc.
 
 You can add more metrics/columns over time, but storing each metric in its own column is FAR FAR more efficient, at least in FiloDB.   For example, disk usage metrics are likely to have very different numbers than load_avg, and so Filo can optimize the storage of each one independently.  Right now I would store them as ints and longs if possible.
@@ -156,10 +208,8 @@ Queries that would work well once we expose a local Cassandra query interface:
 
 Another possible layout is something like this:
 
-Partition key = hostname % 1024 (or pick your # of shards)
-Sort key = hostname, timestamp
-
-This will have to wait for the multiple-sort-key-column change of course.
+* Partition key = hostname % 1024 (or pick your # of shards)
+* Row key = hostname, timestamp
 
 ### Distributed Partitioning
 
@@ -186,11 +236,23 @@ The options to use with the data-source api are:
 | option           | value                                                            | command    | optional |
 |------------------|------------------------------------------------------------------|------------|----------|
 | dataset          | name of the dataset                                              | read/write | No       |
-| sort_column      | name of the column according to which the data should be sorted  | write      | No       |
-| partition_column | name of the column according to which data should be partitioned | write      | Yes      |
+| row_keys         | comma-separated list of column name(s) or computed column functions to use for the row primary key within each partition.  Cannot be null.  Use `:getOrElse` function if null values might be encountered.  | write      | No       |
+| segment_key      | name of the column (could be computed) to use to group rows into segments in a partition.  Cannot be null.  Use `:getOrElse` function if null values might be encountered.  | write      | No      |
+| partition_keys   | comma-separated list of column name(s) or computed column functions to use for the partition key.  Cannot be null.  Use `:getOrElse` function if null values might be encountered.  If not specified, defaults to `:string /0` (a single partition).  | write      | Yes      |
 | splits_per_node  | number of read threads per node, defaults to 4 | read | Yes |
-| default_partition_key | default value to use for the partition key if the partition_column has a null value.  If not specified, an error is thrown. Note that this only has an effect if the dataset is created for the first time.| write | Yes |
-| version          | numeric version of data to write, defaults to 0  | write | Yes |
+| chunk_size       | Max number of rows to put into one chunk.  Note that this only has an effect if the dataset is created for the first time.| write | Yes |
+| version          | numeric version of data to write, defaults to 0  | read/write | Yes |
+
+Partitioning columns could be created using an expression on the original column in Spark:
+
+    val newDF = df.withColumn("partition", df("someCol") % 100)
+
+or even UDFs:
+
+    val idHash = sqlContext.udf.register("hashCode", (s: String) => s.hashCode())
+    val newDF = df.withColumn("partition", idHash(df("id")) % 100) 
+
+However, note that the above methods will lead to a physical column being created, so use of computed columns is probably preferable.
 
 ### Configuring FiloDB
 
@@ -206,7 +268,7 @@ You can follow along using the [Spark Notebook](http://github.com/andypetrella/s
 Or you can start a spark-shell locally,
 
 ```bash
-bin/spark-shell --jars ../FiloDB/spark/target/scala-2.10/filodb-spark-assembly-0.1-SNAPSHOT.jar --packages com.databricks:spark-csv_2.10:1.2.0 --driver-memory 3G --executor-memory 3G
+bin/spark-shell --jars ../FiloDB/spark/target/scala-2.10/filodb-spark-assembly-0.2-SNAPSHOT.jar --packages com.databricks:spark-csv_2.10:1.2.0 --driver-memory 3G --executor-memory 3G
 ```
 
 Loading CSV file from Spark:
@@ -224,19 +286,24 @@ import org.apache.spark.sql.SaveMode
 
 scala> csvDF.write.format("filodb.spark").
              option("dataset", "gdelt").
-             option("sort_column", "GLOBALEVENTID").
+             option("row_keys", "GLOBALEVENTID").
+             option("segment_key", ":round GLOBALEVENTID 10000").
+             option("partition_keys", ":getOrElse MonthYear -1").
              mode(SaveMode.Overwrite).save()
 ```
 
-Or, specifying the `partition_column`,
+Above, we partition the GDELT dataset by MonthYear, creating roughly 72 partitions for 1979-1984, with the unique GLOBALEVENTID used as a row key.  We group every 10000 eventIDs into a segment using the convenient `:round` computed column (GLOBALEVENTID is correlated with time, so in this case we could pack segments with consecutive EVENTIDs). You could use multiple columns for the partition or row keys, of course.  For example, to partition by country code and year instead:
 
 ```scala
 scala> csvDF.write.format("filodb.spark").
-    option("dataset", "gdelt").
-    option("sort_column", "GLOBALEVENTID").
-    option("partition_column", "MonthYear").
-    mode(SaveMode.Overwrite).save()
+             option("dataset", "gdelt_by_country_year").
+             option("row_keys", "GLOBALEVENTID").
+             option("segment_key", ":string 0").
+             option("partition_keys", ":getOrElse Actor2CountryCode NONE,:getOrElse Year -1").
+             mode(SaveMode.Overwrite).save()
 ```
+
+Note that in the above case, since events are spread over a much larger number of partitions, it no longer makes sense to use GLOBALEVENTID as a segment key - at least with the original 10000 as a rounding factor.  There are very few events for a given country and year within the space of 10000 event IDs, leading to inefficient storage.  Instead, we use a single segment for each partition.  We probably could have used `:round GLOBALEVENTID 500000` or some other bigger factor as well.  Using `:round GLOBALEVENT 10000` lead to 3x slower ingest and at least 5x slower reads.
 
 Note that for efficient columnar encoding, wide rows with fewer partition keys are better for performance.
 
@@ -258,7 +325,7 @@ For an example, see the [StreamingTest](spark/src/test/scala/filodb.spark/Stream
 Start Spark-SQL:
 
 ```bash
-  bin/spark-sql --jars path/to/FiloDB/spark/target/scala-2.10/filodb-spark-assembly-0.1-SNAPSHOT.jar
+  bin/spark-sql --jars path/to/FiloDB/spark/target/scala-2.10/filodb-spark-assembly-0.2-SNAPSHOT.jar
 ```
 
 Create a temporary table using an existing dataset,
@@ -272,6 +339,8 @@ Create a temporary table using an existing dataset,
 ```
 
 Then, start running SQL queries!
+
+NOTE: The above syntax should also work with remote SQL clients like beeline / spark-beeline.  Just run the Hive ThriftServer that comes with Spark (NOTE: not all distributions of Spark comes with this, you may need to built it).
 
 ### Querying Datasets
 
@@ -315,8 +384,10 @@ The `filo-cli` accepts arguments as key-value pairs. The following keys are supp
 |--------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | dataset    | It is required for all the operations. Its value should be the name of the dataset                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | limit      | This is optional key to be used with `select`. Its value should be the number of rows required.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| columns    | This is required for defining the schema of a dataset. Its value should be a comma-separated string of the format, `column1:typeOfColumn1,column2:typeOfColumn2` where column1 and column2 are the names of the columns and typeOfColumn1 and typeOfColumn2 are one of `int`,`long`,`double`, `string`                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| sortColumn | This is required for defining the schema. Its value should be the name of the column on which the data is to be sorted.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| columns    | This is required for defining the schema of a dataset. Its value should be a comma-separated string of the format, `column1:typeOfColumn1,column2:typeOfColumn2` where column1 and column2 are the names of the columns and typeOfColumn1 and typeOfColumn2 are one of `int`,`long`,`double`,`string`,`bool`                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| rowKeys | This is required for defining the row keys. Its value should be comma-separated list of column names or computed column functions to make up the row key                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| segmentKey | The column name or computed column for the segment key |
+| partitionKeys | Comma-separated list of column names or computed columns to make up the partition key |
 | command    | Its value can be either of `init`,`create`,`importcsv`,`analyze` or `list`.<br/><br/>The `init` command is used to create the FiloDB schema.<br/><br/>The `create` command is used to define new a dataset. For example,<br/>```./filo-cli --command create --dataset playlist --columns id:int,album:string,artist:string,title:string --sortColumn id``` <br/>Note: The sort column is not optional.<br/><br/>The `list` command can be used to view the schema of a dataset. For example, <br/>```./filo-cli --command list --dataset playlist```<br/><br/>The `importcsv` command can be used to load data from a CSV file into a dataset. For example,<br/>```./filo-cli --command importcsv --dataset playlist --filename playlist.csv```<br/>Note: The CSV file should be delimited with comma and have a header row. The column names must match those specified when creating the schema for that dataset. |
 | select     | Its value should be a comma-separated string of the columns to be selected,<br/>```./filo-cli --dataset playlist --select album,title```<br/>The result from `select` is printed in the console by default. An output file can be specified with the key `--outfile`. For example,<br/>```./filo-cli --dataset playlist --select album,title --outfile playlist.csv```                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | delimiter  | This is optional key to be used with `importcsv` command. Its value should be the field delimiter character. Default value is comma.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
@@ -328,7 +399,7 @@ The following examples use the [GDELT public dataset](http://data.gdeltproject.o
 Create a dataset with all the columns :
 
 ```
-./filo-cli --command create --dataset gdelt --columns GLOBALEVENTID:int,SQLDATE:string,MonthYear:int,Year:int,FractionDate:double,Actor1Code:string,Actor1Name:string,Actor1CountryCode:string,Actor1KnownGroupCode:string,Actor1EthnicCode:string,Actor1Religion1Code:string,Actor1Religion2Code:string,Actor1Type1Code:string,Actor1Type2Code:string,Actor1Type3Code:string,Actor2Code:string,Actor2Name:string,Actor2CountryCode:string,Actor2KnownGroupCode:string,Actor2EthnicCode:string,Actor2Religion1Code:string,Actor2Religion2Code:string,Actor2Type1Code:string,Actor2Type2Code:string,Actor2Type3Code:string,IsRootEvent:int,EventCode:string,EventBaseCode:string,EventRootCode:string,QuadClass:int,GoldsteinScale:double,NumMentions:int,NumSources:int,NumArticles:int,AvgTone:double,Actor1Geo_Type:int,Actor1Geo_FullName:string,Actor1Geo_CountryCode:string,Actor1Geo_ADM1Code:string,Actor1Geo_Lat:double,Actor1Geo_Long:double,Actor1Geo_FeatureID:int,Actor2Geo_Type:int,Actor2Geo_FullName:string,Actor2Geo_CountryCode:string,Actor2Geo_ADM1Code:string,Actor2Geo_Lat:double,Actor2Geo_Long:double,Actor2Geo_FeatureID:int,ActionGeo_Type:int,ActionGeo_FullName:string,ActionGeo_CountryCode:string,ActionGeo_ADM1Code:string,ActionGeo_Lat:double,ActionGeo_Long:double,ActionGeo_FeatureID:int,DATEADDED:string,Actor1Geo_FullLocation:string,Actor2Geo_FullLocation:string,ActionGeo_FullLocation:string --sortColumn GLOBALEVENTID
+./filo-cli --command create --dataset gdelt --columns GLOBALEVENTID:int,SQLDATE:string,MonthYear:int,Year:int,FractionDate:double,Actor1Code:string,Actor1Name:string,Actor1CountryCode:string,Actor1KnownGroupCode:string,Actor1EthnicCode:string,Actor1Religion1Code:string,Actor1Religion2Code:string,Actor1Type1Code:string,Actor1Type2Code:string,Actor1Type3Code:string,Actor2Code:string,Actor2Name:string,Actor2CountryCode:string,Actor2KnownGroupCode:string,Actor2EthnicCode:string,Actor2Religion1Code:string,Actor2Religion2Code:string,Actor2Type1Code:string,Actor2Type2Code:string,Actor2Type3Code:string,IsRootEvent:int,EventCode:string,EventBaseCode:string,EventRootCode:string,QuadClass:int,GoldsteinScale:double,NumMentions:int,NumSources:int,NumArticles:int,AvgTone:double,Actor1Geo_Type:int,Actor1Geo_FullName:string,Actor1Geo_CountryCode:string,Actor1Geo_ADM1Code:string,Actor1Geo_Lat:double,Actor1Geo_Long:double,Actor1Geo_FeatureID:int,Actor2Geo_Type:int,Actor2Geo_FullName:string,Actor2Geo_CountryCode:string,Actor2Geo_ADM1Code:string,Actor2Geo_Lat:double,Actor2Geo_Long:double,Actor2Geo_FeatureID:int,ActionGeo_Type:int,ActionGeo_FullName:string,ActionGeo_CountryCode:string,ActionGeo_ADM1Code:string,ActionGeo_Lat:double,ActionGeo_Long:double,ActionGeo_FeatureID:int,DATEADDED:string,Actor1Geo_FullLocation:string,Actor2Geo_FullLocation:string,ActionGeo_FullLocation:string --rowKeys GLOBALEVENTID --segmentKey ':string 0'
 ```
 
 Verify the dataset metadata:
@@ -352,19 +423,25 @@ Query/export some columns:
 
 ## Current Status
 
-Version 0.1 is released!  It offers a stable point from which to try FiloDB.
-* Ingestion is relatively efficient, stable, and tested up to a 2.4 GB / 15 million row data source (doesn't mean more doesn't work, just what is regularly tested)
-* Query columnar projection and partition key filtering pushdown.  Sort key filtering pushdown not in yet.
-* Only ingestion through Spark / Spark Streaming, and CLI ingestion via CSV files.
-* CSV export from CLI will only read data from one node of a cluster.
+* Version 0.1 is the stable, latest released version.  It offers a stable point from which to try FiloDB.
+* Master contains much more features - multi column partition and row keys, separate segment key, much richer projection key filtering (IN, etc.), better performance and error handling
 
-Version 0.2 will include many more features:
-- Composite partition, sort, and segment keys
-- More efficient storage engine
+## Deploying
+
+The current version assumes Spark 1.5.x and Cassandra 2.1.x or 2.2.x.
+
+There is a branch for Datastax Enterprise 4.8 / Spark 1.4.  Note that if you are using DSE or have vnodes enabled, a lower number of vnodes (16 or less) is STRONGLY recommended as higher numbers of vnodes slows down queries substantially and basically prevents subsecond queries from happening.
 
 ## Building and Testing
 
 Run the tests with `sbt test`, or for continuous development, `sbt ~test`.  Noisy cassandra logs can be seen in `filodb-test.log`.
+
+To run benchmarks, from within SBT:
+
+    cd jmh
+    jmh:run -i 5 -wi 5 -f3
+
+You can get the huge variety of JMH options by running `jmh:run -help`.
 
 ## You can help!
 

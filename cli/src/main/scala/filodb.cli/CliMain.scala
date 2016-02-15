@@ -7,7 +7,6 @@ import akka.actor.ActorSystem
 import com.opencsv.CSVWriter
 import com.quantifind.sumac.{ArgMain, FieldArgs}
 import com.typesafe.config.ConfigFactory
-import filodb.core.SortKeyHelper
 import filodb.core.store.RowReaderSegment
 import filodb.core.metadata.Column.{ColumnType, Schema}
 import org.velvia.filo.{RowReader, FastFiloRowReader}
@@ -19,7 +18,7 @@ import filodb.cassandra.columnstore.CassandraColumnStore
 import filodb.cassandra.metastore.CassandraMetaStore
 import filodb.coordinator.{NodeCoordinatorActor, CoordinatorSetup}
 import filodb.core.store.{Analyzer, CachedMergingColumnStore}
-import filodb.core.metadata.{Column, Dataset, RichProjection}
+import filodb.core.metadata.{Column, DataColumn, Dataset, RichProjection}
 
 //scalastyle:off
 class Arguments extends FieldArgs {
@@ -27,7 +26,9 @@ class Arguments extends FieldArgs {
   var command: Option[String] = None
   var filename: Option[String] = None
   var columns: Option[Map[String, String]] = None
-  var sortColumn: String = "NOT_A_COLUMN"
+  var rowKeys: Seq[String] = Nil
+  var segmentKey: Option[String] = None
+  var partitionKeys: Seq[String] = Nil
   var version: Option[Int] = None
   var select: Option[Seq[String]] = None
   var limit: Int = 1000
@@ -37,34 +38,33 @@ class Arguments extends FieldArgs {
 
   import Column.ColumnType._
 
-  def toColumns(dataset: String, version: Int): Seq[Column] = {
+  def toColumns(dataset: String, version: Int): Seq[DataColumn] = {
     columns.map { colStrStr =>
       colStrStr.map { case (name, colType) =>
         colType match {
-          case "int"    => Column(name, dataset, version, IntColumn)
-          case "long"   => Column(name, dataset, version, LongColumn)
-          case "double" => Column(name, dataset, version, DoubleColumn)
-          case "string" => Column(name, dataset, version, StringColumn)
+          case "int"    => DataColumn(0, name, dataset, version, IntColumn)
+          case "long"   => DataColumn(0, name, dataset, version, LongColumn)
+          case "double" => DataColumn(0, name, dataset, version, DoubleColumn)
+          case "string" => DataColumn(0, name, dataset, version, StringColumn)
+          case "bool"   => DataColumn(0, name, dataset, version, BitmapColumn)
         }
       }.toSeq
     }.getOrElse(Nil)
   }
 }
 
-case class UnsupportedSortKeyException(columnType: ColumnType) extends Exception(s"Sort on $columnType is not Supported.")
-
 object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorSetup {
 
   val system = ActorSystem("filo-cli")
-  val config = ConfigFactory.load
-  lazy val columnStore = new CassandraColumnStore(config)
+  val config = ConfigFactory.load.getConfig("filodb")
+  lazy val columnStore = new CassandraColumnStore(config, readEc)
   lazy val metaStore = new CassandraMetaStore(config.getConfig("cassandra"))
 
   def printHelp() {
     println("filo-cli help:")
     println("  commands: init create importcsv list analyze")
     println("  columns: <colName1>:<type1>,<colName2>:<type2>,... ")
-    println("  types:  int,long,double,string")
+    println("  types:  int,long,double,string,bool")
     println("  OR:  --select col1, col2  [--limit <n>]  [--outfile /tmp/out.csv]")
   }
 
@@ -79,8 +79,14 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
           args.dataset.map(dumpDataset).getOrElse(dumpAllDatasets())
         case Some("create") =>
           require(args.dataset.isDefined && args.columns.isDefined, "Need to specify dataset and columns")
+          require(args.segmentKey.isDefined, "--segmentKey must be defined")
+          require(args.rowKeys.nonEmpty, "--rowKeys must be defined")
           val datasetName = args.dataset.get
-          createDatasetAndColumns(datasetName, args.toColumns(datasetName, version), args.sortColumn)
+          createDatasetAndColumns(datasetName, args.toColumns(datasetName, version),
+                                  args.rowKeys,
+                                  args.segmentKey.get,
+                                  if (args.partitionKeys.isEmpty) { Seq(Dataset.DefaultPartitionColumn) }
+                                  else { args.partitionKeys })
         case Some("importcsv") =>
           import org.apache.commons.lang3.StringEscapeUtils._
           val delimiter = unescapeJava(args.delimiter)(0)
@@ -116,13 +122,13 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
   def dumpDataset(dataset: String) {
     parse(metaStore.getDataset(dataset)) { datasetObj =>
       println(s"Dataset name: ${datasetObj.name}")
-      println(s"Partition Column: ${datasetObj.partitionColumn}")
+      println(s"Partition keys: ${datasetObj.partitionColumns.mkString(", ")}")
       println(s"Options: ${datasetObj.options}\n")
       datasetObj.projections.foreach(println)
     }
     parse(metaStore.getSchema(dataset, Int.MaxValue)) { schema =>
       println("Columns:")
-      schema.values.foreach { case Column(name, _, ver, colType, _, _, _) =>
+      schema.values.toSeq.sortBy(_.name).foreach { case DataColumn(_, name, _, ver, colType, _) =>
         println("  %-35.35s %5d %s".format(name, ver, colType))
       }
     }
@@ -131,15 +137,12 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
   def dumpAllDatasets() { println("TODO") }
 
   def createDatasetAndColumns(dataset: String,
-                              columns: Seq[Column],
-                              sortColumn: String) {
-    if (!columns.find(_.name == sortColumn).isDefined) {
-      println(s"SortColumn $sortColumn is not amongst list of columns")
-      exitCode = 1
-      return
-    }
-    println(s"Creating dataset $dataset with sort column $sortColumn...")
-    val datasetObj = Dataset(dataset, sortColumn)
+                              columns: Seq[DataColumn],
+                              rowKeys: Seq[String],
+                              segmentKey: String,
+                              partitionKeys: Seq[String]) {
+    println(s"Creating dataset $dataset...")
+    val datasetObj = Dataset(dataset, rowKeys, segmentKey, partitionKeys)
     actorAsk(coordinatorActor, NodeCoordinatorActor.CreateDataset(datasetObj, columns)) {
       case NodeCoordinatorActor.DatasetCreated =>
         println(s"Dataset $dataset created!")
@@ -207,23 +210,12 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
     val schema = Await.result(metaStore.getSchema(dataset, version), 10.second)
     val datasetObj = parse(metaStore.getDataset(dataset)) { ds => ds }
     val richProj = RichProjection(datasetObj, schema.values.toSeq)
-    val typedProj = richProj.asInstanceOf[RichProjection[richProj.helper.Key]]
     val columns = columnNames.map(schema)
-
-    implicit val sortKeyHelper = typedProj.helper
 
     // NOTE: we will only return data from the first split!
     val splits = columnStore.getScanSplits(dataset)
-    val requiredRows = parse(
-      columnStore.scanSegments[typedProj.helper.Key](columns, dataset, version, params=splits.head)) {
-      segmentIterator =>
-        segmentIterator.flatMap {
-          case seg: RowReaderSegment[_] =>
-            val result = seg.rowIterator((bytes, clazzes) => new FastFiloRowReader(bytes, clazzes))
-            result
-        }.take(limit)
-    }
-
+    val requiredRows = parse(columnStore.scanRows(richProj, columns, version, params=splits.head)()) {
+                         x => x.take(limit) }
     writeResult(dataset, requiredRows, columnNames, columns, outFile)
   }
 }

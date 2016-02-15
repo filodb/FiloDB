@@ -10,26 +10,24 @@ import org.scalatest.FunSpec
 import org.scalatest.Matchers
 
 class ChunkMergingStrategySpec extends FunSpec with Matchers {
-  import SegmentSpec._
-  val keyRange = KeyRange("dataset", "partition", 0L, 10000L)
-  val sortKey = "age"
+  import NamesTestData._
 
   import scala.concurrent.ExecutionContext.Implicits.global
-  val colStore = new InMemoryColumnStore
+  val colStore = new InMemoryColumnStore(global)
   val dataset = "foo"
   val mergingStrategy = new AppendingChunkMergingStrategy(colStore)
 
   private def mergeRows(firstSegRows: Seq[Product], secondSegRows: Seq[Product]) = {
-      val segment = getRowWriter(keyRange)
-      if (firstSegRows.nonEmpty) segment.addRowsAsChunk(mapper(firstSegRows), getSortKey _)
+      val segment = getRowWriter()
+      if (firstSegRows.nonEmpty) segment.addRowsAsChunk(mapper(firstSegRows))
 
-      val segment2 = getRowWriter(keyRange)
-      if (secondSegRows.nonEmpty) segment2.addRowsAsChunk(mapper(secondSegRows), getSortKey _)
+      val segment2 = getRowWriter()
+      if (secondSegRows.nonEmpty) segment2.addRowsAsChunk(mapper(secondSegRows))
 
       val mergedSeg = mergingStrategy.mergeSegments(segment, segment2)
       mergedSeg should not be ('empty)
-      mergedSeg.keyRange should equal (segment.keyRange)
-      mergedSeg.getColumns should equal (Set("first", "last", "age"))
+      mergedSeg.segInfo should equal (segment.segInfo)
+      mergedSeg.getColumns should equal (Set("first", "last", "age", "seg"))
 
       // Verify that the merged Segment has the same chunks as segment2, except the chunkId is offset
       val offsetChunks = segment2.getChunks.map { case (colId, chunkId, bytes) =>
@@ -41,11 +39,11 @@ class ChunkMergingStrategySpec extends FunSpec with Matchers {
 
   describe("mergeSegments") {
     it("should forbid merging segments from different keyRanges") {
-      val segment = getRowWriter(keyRange)
-      segment.addRowsAsChunk(mapper(names take 3), getSortKey _)
+      val segment = getRowWriter()
+      segment.addRowsAsChunk(mapper(names take 3))
 
-      val segment2 = getRowWriter(keyRange.copy(start = 20000L, end = 30000L))
-      segment2.addRowsAsChunk(mapper(names drop 3), getSortKey _)
+      val segment2 = getRowWriter(20)
+      segment2.addRowsAsChunk(mapper(names drop 3))
 
       intercept[RuntimeException] { mergingStrategy.mergeSegments(segment, segment2) }
     }
@@ -69,14 +67,14 @@ class ChunkMergingStrategySpec extends FunSpec with Matchers {
     }
 
     it("should merge new rows to a nonempty RowReaderSegment successfully") {
-      val segment = getRowWriter(keyRange)
-      segment.addRowsAsChunk(mapper(names take 3), getSortKey _)
+      val segment = getRowWriter()
+      segment.addRowsAsChunk(mapper(names take 3))
       // The below two lines simulate a write segment / read cycle
-      val prunedSeg = mergingStrategy.pruneForCache(projection, segment)
-      val readerSeg = RowReaderSegment(prunedSeg.asInstanceOf[GenericSegment[Long]], schema drop 2)
+      val prunedSeg = mergingStrategy.pruneForCache(segment)
+      val readerSeg = RowReaderSegment(prunedSeg.asInstanceOf[GenericSegment], schema drop 2)
 
-      val segment2 = getRowWriter(keyRange)
-      segment2.addRowsAsChunk(mapper(names drop 3), getSortKey _)
+      val segment2 = getRowWriter()
+      segment2.addRowsAsChunk(mapper(names drop 3))
       val mergedSeg = mergingStrategy.mergeSegments(readerSeg, segment2)
 
       mergedSeg.index.chunkIdIterator.toSeq should equal (Seq(0, 0, 0, 1, 1, 1))
@@ -106,8 +104,8 @@ class ChunkMergingStrategySpec extends FunSpec with Matchers {
       mergedSeg.index.rowNumIterator.toSeq should equal (Seq(0, 2, 1, 5, 4, 3))
 
       // Case 2: overwrite and append new data.  Let's give Jerry Rice a last name.
-      val newNames = Seq((Some("Jerry"), Some("Rice"),  Some(40L)),
-                         (Some("Tim"),   Some("Brown"), Some(45L)))
+      val newNames = Seq((Some("Jerry"), Some("Rice"),  Some(40L), Some(0)),
+                         (Some("Tim"),   Some("Brown"), Some(45L), Some(0)))
       val mergedSeg2 = mergeRows(names, newNames)
 
       mergedSeg2.index.chunkIdIterator.toSeq should equal (Seq(0, 0, 0, 0, 0, 1, 1))
@@ -117,9 +115,9 @@ class ChunkMergingStrategySpec extends FunSpec with Matchers {
 
   describe("pruneForCache") {
     it("should prune segments that have more than the sortColumn") {
-      val segment = getRowWriter(keyRange)
-      segment.addRowsAsChunk(mapper(names take 3), getSortKey _)
-      val prunedSeg = mergingStrategy.pruneForCache(projection, segment)
+      val segment = getRowWriter()
+      segment.addRowsAsChunk(mapper(names take 3))
+      val prunedSeg = mergingStrategy.pruneForCache(segment)
 
       prunedSeg.getColumns should equal (Set("age"))
       prunedSeg.getChunks.toSet should equal (segment.getChunks.filter(_._1 == "age").toSet)

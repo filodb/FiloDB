@@ -10,14 +10,14 @@ import scala.concurrent.duration._
 import scala.language.postfixOps
 
 import filodb.core._
-import filodb.core.metadata.Column
+import filodb.core.metadata.{Column, DataColumn}
 
 class ColumnTableSpec extends CassandraFlatSpec with BeforeAndAfter {
   import Column.ColumnType
 
-  val firstColumn = Column("first", "foo", 1, ColumnType.StringColumn)
+  val firstColumn = DataColumn(0, "first", "foo", 1, ColumnType.StringColumn)
 
-  val config = ConfigFactory.load("application_test.conf").getConfig("cassandra")
+  val config = ConfigFactory.load("application_test.conf").getConfig("filodb.cassandra")
   val columnTable = new ColumnTable(config)
   implicit val keySpace = KeySpace(config.getString("keyspace"))
   val timeout = Timeout(30 seconds)
@@ -51,6 +51,7 @@ class ColumnTableSpec extends CassandraFlatSpec with BeforeAndAfter {
                               .value(_.name, "age")
                               .value(_.version, 5)
                               .value(_.columnType, "_so_not_a_real_type")
+                              .value(_.id, 0)
                               .future()
     f.futureValue
 

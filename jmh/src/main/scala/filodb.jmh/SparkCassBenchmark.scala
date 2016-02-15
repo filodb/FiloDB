@@ -1,5 +1,6 @@
 package filodb.jmh
 
+import ch.qos.logback.classic.{Level, Logger}
 import java.util.concurrent.TimeUnit
 import org.openjdk.jmh.annotations._
 import scalaxy.loops._
@@ -23,6 +24,8 @@ import org.velvia.filo.{RowReader, TupleRowReader}
 // the randomInts FiloDB table in Cassandra.
 @State(Scope.Benchmark)
 class SparkCassBenchmark {
+  org.slf4j.LoggerFactory.getLogger("filodb").asInstanceOf[Logger].setLevel(Level.ERROR)
+
   // Now create an RDD[Row] out of it, and a Schema, -> DataFrame
   val conf = (new SparkConf).setMaster("local[4]")
                             .setAppName("test")

@@ -1,11 +1,14 @@
 package filodb.core.reprojector
 
+import com.typesafe.config.Config
 import com.typesafe.scalalogging.slf4j.StrictLogging
+import net.ceedubs.ficus.Ficus._
 import org.velvia.filo.RowReader
+import scala.concurrent.duration.FiniteDuration
 import scala.concurrent.{ExecutionContext, Future}
 
 import filodb.core._
-import filodb.core.store.{ColumnStore, RowWriterSegment, Segment}
+import filodb.core.store.{ColumnStore, RowWriterSegment, Segment, SegmentInfo}
 import filodb.core.metadata.{Dataset, Column, RichProjection}
 
 /**
@@ -18,84 +21,94 @@ trait Reprojector {
 
   /**
    * Does reprojection (columnar flushes from memtable) for a single dataset.
-   * Should completely flush all segments out of the locked memtable.
-   * Throttling is achieved via passing in an ExecutionContext which limits the number of futures, and
-   * sizing the thread pool appropriately -- see CoordinatorSetup for an example
+   * Should completely flush all segments out of the memtable.
+   * Throttling is achieved by writing only segment-batch-size segments at a time, and not starting
+   * the segment creation/appending of the next batch until the previous batch is done.
    *
-   * Failures:
-   * The Scheduler only schedules one reprojection task at a time per (dataset, version), so if this fails,
-   * then it can be rerun.
-   * TODO: keep track of failures so we don't have to repeat successful segment writes.
+   * NOTE: using special ExecutionContexts to throttle is a BAD idea.  The segment append is too complex
+   * and its too easy to get into deadlock situations, plus it doesn't throttle memory use.
    *
-   * Most likely this will involve scheduling a whole bunch of futures to write segments.
-   * Be careful to do too much work, newTask is supposed to not take too much CPU time and use Futures
-   * to do work asynchronously.  Also, scheduling too many futures leads to long blocking time and
-   * memory issues.
-   *
-   * @return a Future[Seq[String]], representing info from individual segment flushes.
+   * @return a Future[Seq[SegmentInfo]], representing successful segment flushes
    */
-  def reproject[K](memTable: MemTable[K], version: Int): Future[Seq[String]]
+  def reproject(memTable: MemTable, version: Int): Future[Seq[SegmentInfo[_, _]]]
 
   /**
    * A simple function that reads rows out of a memTable and converts them to segments.
    * Used by reproject(), separated out for ease of testing.
    */
-  def toSegments[K](memTable: MemTable[K]): Iterator[Segment[K]]
+  def toSegments(memTable: MemTable, segments: Seq[(Any, Any)]): Seq[Segment]
+
+  protected def printSegInfos(infos: Seq[(Any, Any)]): String = {
+    val ellipsis = if (infos.length > 3) Seq("...") else Nil
+    val infoStrings = (infos.take(3).map(_.toString) ++ ellipsis).mkString(", ")
+    s"${infos.length} segments: [$infoStrings]"
+  }
 }
 
 /**
  * Default reprojector, which scans the Locked memtable, turning them into segments for flushing,
  * using fixed segment widths
+ *
+ * ==Config==
+ * {{{
+ *   reprojector {
+ *     retries = 3
+ *     retry-base-timeunit = 5 s
+ *     segment-batch-size = 64
+ *   }
+ * }}}
  */
-class DefaultReprojector(columnStore: ColumnStore)
+class DefaultReprojector(config: Config, columnStore: ColumnStore)
                         (implicit ec: ExecutionContext) extends Reprojector with StrictLogging {
   import Types._
   import RowReader._
-  import filodb.core.Iterators._
 
-  // PERF/TODO: Maybe we should pass in an Iterator[RowReader], and extract partition and sort keys
-  // out.  Heck we could create a custom FiloRowReader which has methods to extract this out.
-  // Might be faster than creating a Tuple3 for every row... or not, for complex sort and partition keys
-  def toSegments[K](memTable: MemTable[K]): Iterator[Segment[K]] = {
+  val retries = config.getInt("reprojector.retries")
+  val retryBaseTime = config.as[FiniteDuration]("reprojector.retry-base-timeunit")
+  val segmentBatchSize = config.getInt("reprojector.segment-batch-size")
+
+  def toSegments(memTable: MemTable, segments: Seq[(Any, Any)]): Seq[Segment] = {
     val dataset = memTable.projection.dataset
-    implicit val helper = memTable.projection.helper
-    val rows = memTable.readAllRows()
-    rows.sortedGroupBy { case (partition, sortKey, row) =>
-      // lazy grouping of partition/segment from the sortKey
-      (partition, helper.getSegment(sortKey))
-    }.map { case ((partition, (segStart, segUntil)), segmentRowsIt) =>
+    segments.map { case (partition, segmentKey) =>
       // For each segment grouping of rows... set up a Segment
-      val keyRange = KeyRange(dataset.name, partition, segStart, segStart)
-      val segment = new RowWriterSegment(keyRange, memTable.projection.columns)
-      logger.debug(s"Created new segment $segment for encoding...")
+      val segInfo = SegmentInfo(partition, segmentKey).basedOn(memTable.projection)
+      val segment = new RowWriterSegment(memTable.projection, memTable.projection.columns)(segInfo)
+      val segmentRowsIt = memTable.readRows(segInfo)
+      logger.debug(s"Created new segment ${segment.segInfo} for encoding...")
 
       // Group rows into chunk sized bytes and add to segment
       // NOTE: because RowReaders could be mutable, we need to keep this a pure Iterator.  Turns out
       // this is also more efficient than Iterator.grouped
       while (segmentRowsIt.nonEmpty) {
-        segment.addRowsAsChunk(segmentRowsIt.take(dataset.options.chunkSize))
+        segment.addRichRowsAsChunk(segmentRowsIt.take(dataset.options.chunkSize))
       }
       segment
     }
   }
 
-  def reproject[K](memTable: MemTable[K], version: Int): Future[Seq[String]] = {
+  import markatta.futiles.Retry._
+  import markatta.futiles.Traversal._
+
+  def reproject(memTable: MemTable, version: Int): Future[Seq[SegmentInfo[_, _]]] = {
     val projection = memTable.projection
-    val datasetName = projection.dataset.name
-    val segments = toSegments(memTable)
-    val segmentTasks = segments.map { segment =>
-      for { resp <- columnStore.appendSegment(projection, segment, version) if resp == Success }
-      yield {
-        logger.info(s"Finished merging segment ${segment.keyRange}, version $version...")
-        // Return useful info about each successful reprojection
-        (segment.keyRange.partition, segment.keyRange.start).toString
+    val datasetName = projection.datasetName
+
+    // First, group the segments into batches for throttling
+    val batches = memTable.getSegments.grouped(segmentBatchSize).toSeq
+
+    // Now, flush each batch sequentially.  Nice thing is this returns after at most one batch.
+    foldLeftSequentially(batches)(Seq.empty[SegmentInfo[_, _]]) { case (acc, segmentBatch) =>
+      val segInfos = printSegInfos(segmentBatch)
+      logger.info(s"Reprojecting dataset ($datasetName, $version): $segInfos")
+      val futures = toSegments(memTable, segmentBatch).map { segment =>
+        retryWithBackOff(retries, retryBaseTime) {
+          columnStore.appendSegment(projection, segment, version)
+        }.map { resp => segment.segInfo.asInstanceOf[SegmentInfo[_, _]] }
       }
-    }
-    logger.info(s"Starting reprojection for dataset $datasetName, version $version")
-    for { tasks <- Future { segmentTasks }
-          results <- Future.sequence(tasks.toList) }
-    yield {
-      results
+      Future.sequence(futures).map { successSegs =>
+        logger.info(s"  >> Succeeded ($datasetName, $version): $segInfos")
+        acc ++ successSegs
+      }
     }
   }
 }

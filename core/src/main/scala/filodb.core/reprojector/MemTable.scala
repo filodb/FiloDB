@@ -4,9 +4,10 @@ import com.typesafe.scalalogging.slf4j.StrictLogging
 import org.velvia.filo.RowReader
 import scala.collection.mutable.HashMap
 
-import filodb.core.{KeyRange, SortKeyHelper}
+import filodb.core.KeyRange
 import filodb.core.Types._
 import filodb.core.metadata.{Column, Dataset, RichProjection}
+import filodb.core.store.SegmentInfo
 
 /**
  * The MemTable serves these purposes:
@@ -18,53 +19,44 @@ import filodb.core.metadata.{Column, Dataset, RichProjection}
  *
  * Data written to a MemTable should be logged via WAL or some other mechanism so it can be recovered in
  * case of failure.
+ *
+ * MemTables are owned by the DatasetCoordinatorActor, so writes do not have to be thread-safe.
  */
-trait MemTable[K] extends StrictLogging {
+trait MemTable extends StrictLogging {
   import RowReader._
 
   def close(): Unit
 
-  // A RichProjection with valid partitioning column.
-  def projection: RichProjection[K]
+  // A RichProjection with valid partitioning, segment, row key columns.
+  val projection: RichProjection
 
   /**
    * === Row ingest, read, delete operations ===
    */
 
   /**
-   * Ingests a bunch of new rows.
+   * Ingests a bunch of new rows.  When this method returns, the rows will have been comitted to disk
+   * such that a crash could be recoverable.
    * @param rows the rows to ingest.  For now, they must have the exact same columns, in the exact same order,
-   *        as in the projection.
-   * @param callback the function to call back when the MemTable has committed the new rows to disk.
-   *        This is probably done asynchronously as we don't want to commit new rows with every write.
+   *        as in the projection.  Also, the caller should do buffering; ingesting a very small number of rows
+   *        might be extremely inefficient.
    */
-  def ingestRows(rows: Seq[RowReader])(callback: => Unit): Unit
+  def ingestRows(rows: Seq[RowReader]): Unit
 
   /**
-   * Reads rows out.  If reading from a MemTable actively inserting, the rows read might not reflect
-   * latest updates.
+   * Reads rows out from one segment.
    */
-  def readRows(keyRange: KeyRange[K]): Iterator[RowReader]
+  def readRows(partition: projection.PK, segment: projection.SK): Iterator[(projection.RK, RowReader)]
+
+  def readRows(segInfo: SegmentInfo[projection.PK, projection.SK]): Iterator[(projection.RK, RowReader)] =
+    readRows(segInfo.partition, segInfo.segment)
 
   /**
-   * Reads all rows of the memtable out, from every partition.  Partition ordering is not
-   * guaranteed, but all sort keys K within the partition will be ordered.
+   * Reads all segments contained in the MemTable.  No particular order is guaranteed.
    */
-  def readAllRows(): Iterator[(PartitionKey, K, RowReader)]
-
-  /**
-   * Removes specific rows from a particular keyRange and version.  Can only remove rows
-   * from the Locked buffer.
-   */
-  def removeRows(keyRange: KeyRange[K]): Unit
+  def getSegments(): Iterator[(projection.PK, projection.SK)]
 
   def numRows: Int
-
-  /**
-   * Forces any new ingested rows to be committed to WAL/permanent storage so they will be recovered
-   * in case the process dies.
-   */
-  def forceCommit(): Unit
 
   /**
    * Yes, this clears everything!  It's meant for testing only.

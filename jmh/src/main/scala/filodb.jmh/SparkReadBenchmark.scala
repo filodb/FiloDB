@@ -8,8 +8,8 @@ import scala.concurrent.{Await, Future}
 import scala.concurrent.duration._
 
 import filodb.core._
-import filodb.core.metadata.{Column, Dataset, RichProjection}
-import filodb.core.store.RowWriterSegment
+import filodb.core.metadata.{Column, Dataset}
+import filodb.core.store.{RowWriterSegment, SegmentInfo}
 import filodb.spark.{FiloSetup, FiloRelation}
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.functions.sum
@@ -49,8 +49,6 @@ import org.velvia.filo.{RowReader, TupleRowReader}
 class SparkReadBenchmark {
   val NumRows = 5000000
   // Source of rows
-  implicit val keyHelper = IntKeyHelper(10000)
-
   val conf = (new SparkConf).setMaster("local[4]")
                             .setAppName("test")
                             // .set("spark.sql.tungsten.enabled", "false")
@@ -62,11 +60,7 @@ class SparkReadBenchmark {
   val filoConfig = FiloSetup.configFromSpark(sc)
   FiloSetup.init(filoConfig)
 
-  val schema = Seq(Column("int", "dataset", 0, Column.ColumnType.IntColumn),
-                   Column("rownum", "dataset", 0, Column.ColumnType.IntColumn))
-
-  val dataset = Dataset("dataset", "rownum")
-  val projection = RichProjection[Int](dataset, schema)
+  import IntSumReadBenchmark._
 
   // Initialize metastore
   import scala.concurrent.ExecutionContext.Implicits.global
@@ -74,16 +68,13 @@ class SparkReadBenchmark {
   val createColumns = schema.map { col => FiloSetup.metaStore.newColumn(col) }
   Await.result(Future.sequence(createColumns), 3.seconds)
 
-  val rowStream = Iterator.from(0).map { row => (Some(util.Random.nextInt), Some(row)) }
-
   // Merge segments into InMemoryColumnStore
   import scala.concurrent.ExecutionContext.Implicits.global
   rowStream.take(NumRows).grouped(10000).foreach { rows =>
-    val firstRowNum = rows.head._2.get
-    val keyRange = KeyRange("dataset", "partition", firstRowNum, firstRowNum + 10000)
-    val writerSeg = new RowWriterSegment(keyRange, schema)
-    writerSeg.addRowsAsChunk(rows.toIterator.map(TupleRowReader),
-                             (r: RowReader) => r.getInt(1) )
+    val segKey = projection.segmentKeyFunc(TupleRowReader(rows.head))
+    val writerSeg = new RowWriterSegment(projection, schema)(
+                                         SegmentInfo("/0", segKey).basedOn(projection))
+    writerSeg.addRowsAsChunk(rows.toIterator.map(TupleRowReader))
     Await.result(FiloSetup.columnStore.appendSegment(projection, writerSeg, 0), 10.seconds)
   }
 
@@ -103,7 +94,7 @@ class SparkReadBenchmark {
     df.agg(sum(df("int"))).collect().head
   }
 
-  val optionsStr = dataset.options.toString
+  val readOnlyProjStr = projection.toReadOnlyProjString(Seq("int"))
 
   // Measure the speed of InMemoryColumnStore's ScanSegments over many segments
   // Including null check
@@ -111,8 +102,8 @@ class SparkReadBenchmark {
   @BenchmarkMode(Array(Mode.SingleShotTime))
   @OutputTimeUnit(TimeUnit.SECONDS)
   def inMemoryColStoreOnly(): Any = {
-    val it = FiloRelation.perPartitionRowScanner(filoConfig, optionsStr, 0, schema, schema.last,
-                            (x => true), Map.empty).asInstanceOf[Iterator[InternalRow]]
+    val it = FiloRelation.perPartitionRowScanner(filoConfig, readOnlyProjStr, 0,
+                            Map.empty, (x => true)).asInstanceOf[Iterator[InternalRow]]
     var sum = 0
     while (it.hasNext) {
       val row = it.next

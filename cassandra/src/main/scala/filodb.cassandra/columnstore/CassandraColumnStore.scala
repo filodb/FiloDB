@@ -1,5 +1,6 @@
 package filodb.cassandra.columnstore
 
+import com.googlecode.concurrentlinkedhashmap.ConcurrentLinkedHashMap
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.slf4j.StrictLogging
 import java.nio.ByteBuffer
@@ -8,7 +9,7 @@ import spray.caching._
 
 import filodb.cassandra.FiloCassandraConnector
 import filodb.core._
-import filodb.core.store.CachedMergingColumnStore
+import filodb.core.store.{CachedMergingColumnStore, ColumnStoreScanner}
 import filodb.core.metadata.{Column, Projection}
 
 /**
@@ -21,34 +22,39 @@ import filodb.core.metadata.{Column, Projection}
  * ==Configuration==
  * {{{
  *   cassandra {
+ *     hosts = ["1.2.3.4", "1.2.3.5"]
+ *     port = 9042
  *     keyspace = "my_cass_keyspace"
+ *     username = ""
+ *     password = ""
+ *     read-timeout = 12 s    # default read timeout of 12 seconds
+ *     connect-timeout = 5 s
  *   }
  *   columnstore {
  *     tablecache-size = 50    # Number of cache entries for C* for ChunkTable etc.
  *     segment-cache-size = 1000    # Number of segments to cache
+ *     chunk-batch-size = 16
  *   }
  * }}}
  *
  * ==Constructor Args==
  * @param config see the Configuration section above for the needed config
- * @param ec An ExecutionContext for futures.  See this for a way to do backpressure with futures:
+ * @param readEc An ExecutionContext for reads.  This must be separate from writes to prevent deadlocks.
+ * @param ec An ExecutionContext for futures for writes.  See this for a way to do backpressure with futures:
  *        http://quantifind.com/blog/2015/06/throttling-instantiations-of-scala-futures-1/
  */
-class CassandraColumnStore(config: Config)
+class CassandraColumnStore(val config: Config, val readEc: ExecutionContext)
                           (implicit val ec: ExecutionContext)
-extends CachedMergingColumnStore with StrictLogging {
+extends CachedMergingColumnStore with CassandraColumnStoreScanner with StrictLogging {
   import filodb.core.store._
   import Types._
   import collection.JavaConverters._
 
-  val cassandraConfig = config.getConfig("cassandra")
-  val tableCacheSize = config.getInt("columnstore.tablecache-size")
   val segmentCacheSize = config.getInt("columnstore.segment-cache-size")
+  val chunkBatchSize = config.getInt("columnstore.chunk-batch-size")
   logger.info(s"Starting CassandraColumnStore with config $cassandraConfig")
 
-  val chunkTableCache = LruCache[ChunkTable](tableCacheSize)
-  val rowMapTableCache = LruCache[ChunkRowMapTable](tableCacheSize)
-  val segmentCache = LruCache[Segment[_]](segmentCacheSize)
+  val segmentCache = LruCache[Segment](segmentCacheSize)
 
   val mergingStrategy = new AppendingChunkMergingStrategy(this)
 
@@ -56,92 +62,44 @@ extends CachedMergingColumnStore with StrictLogging {
    * Initializes the column store for a given dataset projection.  Must be called once before appending
    * segments to that projection.
    */
-  def initializeProjection(projection: Projection): Future[Response] =
-    for { (chunkTable, rowMapTable) <- getSegmentTables(projection.dataset)
-          ctResp                    <- chunkTable.initialize()
+  def initializeProjection(projection: Projection): Future[Response] = {
+    val chunkTable = getOrCreateChunkTable(projection.dataset)
+    val rowMapTable = getOrCreateRowMapTable(projection.dataset)
+    for { ctResp                    <- chunkTable.initialize()
           rmtResp                   <- rowMapTable.initialize() } yield { rmtResp }
+  }
 
   /**
    * Clears all data from the column store for that given projection.
    */
-  def clearProjectionDataInner(projection: Projection): Future[Response] =
-    for { (chunkTable, rowMapTable) <- getSegmentTables(projection.dataset)
-          ctResp                    <- chunkTable.clearAll()
+  def clearProjectionDataInner(projection: Projection): Future[Response] = {
+    val chunkTable = getOrCreateChunkTable(projection.dataset)
+    val rowMapTable = getOrCreateRowMapTable(projection.dataset)
+    for { ctResp                    <- chunkTable.clearAll()
           rmtResp                   <- rowMapTable.clearAll() } yield { rmtResp }
+  }
 
   /**
    * Implementations of low-level storage primitives
    */
   def writeChunks(dataset: TableName,
-                  partition: PartitionKey,
+                  partition: BinaryPartition,
                   version: Int,
                   segmentId: SegmentId,
                   chunks: Iterator[(ColumnId, ChunkID, ByteBuffer)]): Future[Response] = {
-    for { (chunkTable, rowMapTable) <- getSegmentTables(dataset)
-          resp <- chunkTable.writeChunks(partition, version, segmentId, chunks) }
-    yield { resp }
+    val chunkTable = getOrCreateChunkTable(dataset)
+    chunkTable.writeChunks(partition, version, segmentId, chunks)
   }
 
   def writeChunkRowMap(dataset: TableName,
-                       partition: PartitionKey,
+                       partition: BinaryPartition,
                        version: Int,
                        segmentId: SegmentId,
                        chunkRowMap: ChunkRowMap): Future[Response] = {
     val (chunkIds, rowNums) = chunkRowMap.serialize()
-    for { (chunkTable, rowMapTable) <- getSegmentTables(dataset)
-          resp <- rowMapTable.writeChunkMap(partition, version, segmentId,
-                                            chunkIds, rowNums, chunkRowMap.nextChunkId) }
-    yield { resp }
-  }
-
-  def readChunks[K](columns: Set[ColumnId],
-                    keyRange: KeyRange[K],
-                    version: Int): Future[Seq[ChunkedData]] = {
-    for { (chunkTable, rowMapTable) <- getSegmentTables(keyRange.dataset)
-          data <- Future.sequence(columns.toSeq.map(
-                    chunkTable.readChunks(keyRange.partition, version, _,
-                                          keyRange.binaryStart, keyRange.binaryEnd,
-                                          keyRange.endExclusive))) }
-    yield { data }
-  }
-
-  def readChunkRowMaps[K](keyRange: KeyRange[K],
-                          version: Int): Future[Seq[(SegmentId, BinaryChunkRowMap)]] = {
-    for { (chunkTable, rowMapTable) <- getSegmentTables(keyRange.dataset)
-          cassRowMaps <- rowMapTable.getChunkMaps(keyRange.partition, version,
-                                                  keyRange.binaryStart, keyRange.binaryEnd) }
-    yield {
-      cassRowMaps.map {
-        case ChunkRowMapRecord(segmentId, chunkIds, rowNums, nextChunkId) =>
-          val rowMap = new BinaryChunkRowMap(chunkIds, rowNums, nextChunkId)
-          (segmentId, rowMap)
-      }
-    }
-  }
-
-  /**
-   * required params:
-   *   token_start - string representation of start of token range
-   *   token_end   - string representation of end of token range
-   */
-  def scanChunkRowMaps(dataset: TableName,
-                       version: Int,
-                       partitionFilter: (PartitionKey => Boolean),
-                       params: Map[String, String]): Future[Iterator[ChunkMapInfo]] = {
-    val tokenStart = params("token_start")
-    val tokenEnd   = params("token_end")
-    for { (chunkTable, rowMapTable) <- getSegmentTables(dataset)
-          rowMaps <- rowMapTable.scanChunkMaps(version, tokenStart, tokenEnd) }
-    yield {
-      rowMaps.filter { case (part, _) => partitionFilter(part) }
-             .map { case (part, ChunkRowMapRecord(segmentId, chunkIds, rowNums, nextChunkId)) =>
-        (part, segmentId, new BinaryChunkRowMap(chunkIds, rowNums, nextChunkId))
-      }
-    }
-  }
-
-  private val clusterConnector = new FiloCassandraConnector {
-    def config: Config = cassandraConfig
+    val rowMapTable = getOrCreateRowMapTable(dataset)
+    rowMapTable.writeChunkMap(partition, version, segmentId,
+                              chunkIds, rowNums, chunkRowMap.nextChunkId)
   }
 
   def shutdown(): Unit = {
@@ -165,7 +123,16 @@ extends CachedMergingColumnStore with StrictLogging {
     }
     val tokenRanges = for { key <- tokensByReplica.keys } yield {
       if (tokensByReplica(key).size > 1) {
-        tokensByReplica(key).reduceLeft(_.mergeWith(_)).splitEvenly(splitsPerNode).asScala
+        // NOTE: If vnodes are enabled, like in DSE, the token ranges are not contiguous and cannot
+        // therefore be merged. In that case just give up.  Lesson: don't use a lot of vnodes.
+        try {
+          tokensByReplica(key).sorted.reduceLeft(_.mergeWith(_)).splitEvenly(splitsPerNode).asScala
+        } catch {
+          case e: IllegalArgumentException =>
+            logger.warn(s"Non-contiguous token ranges, cannot merge.  This is probably because of vnodes.")
+            logger.warn("Reduce the number of vnodes for better performance.")
+            tokensByReplica(key)
+        }
       }
       else {
         tokensByReplica(key).flatMap { range => range.splitEvenly(splitsPerNode).asScala }
@@ -179,20 +146,92 @@ extends CachedMergingColumnStore with StrictLogging {
           "replicas"    -> replicas.map(_.toString).mkString(","))
     }
   }
+}
 
-  // Retrieve handles to the tables for a particular dataset from the cache, creating the instances
-  // if necessary
-  def getSegmentTables(dataset: TableName): Future[(ChunkTable, ChunkRowMapTable)] = {
-    val chunkTableFuture = chunkTableCache(dataset) {
-      logger.debug(s"Creating a new ChunkTable for dataset $dataset")
-      new ChunkTable(dataset, clusterConnector)
+trait CassandraColumnStoreScanner extends ColumnStoreScanner with StrictLogging {
+  import filodb.core.store._
+  import Types._
+  import collection.JavaConverters._
+
+  def config: Config
+
+  val cassandraConfig = config.getConfig("cassandra")
+  val tableCacheSize = config.getInt("columnstore.tablecache-size")
+
+  val chunkTableCache = new ConcurrentLinkedHashMap.Builder[TableName, ChunkTable].
+                          maximumWeightedCapacity(tableCacheSize).build
+  val rowMapTableCache = new ConcurrentLinkedHashMap.Builder[TableName, ChunkRowMapTable].
+                          maximumWeightedCapacity(tableCacheSize).build
+
+  protected val clusterConnector = new FiloCassandraConnector {
+    def config: Config = cassandraConfig
+  }
+
+  def readChunks(dataset: TableName,
+                 columns: Set[ColumnId],
+                 keyRange: BinaryKeyRange,
+                 version: Int)(implicit ec: ExecutionContext): Future[Seq[ChunkedData]] = {
+    val chunkTable = getOrCreateChunkTable(dataset)
+    Future.sequence(columns.toSeq.map(
+                    chunkTable.readChunks(keyRange.partition, version, _,
+                                          keyRange.start, keyRange.end,
+                                          keyRange.endExclusive)))
+  }
+
+  def readChunkRowMaps(dataset: TableName,
+                       keyRange: BinaryKeyRange,
+                       version: Int)
+                      (implicit ec: ExecutionContext): Future[Iterator[ChunkMapInfo]] = {
+    val rowMapTable = getOrCreateRowMapTable(dataset)
+    for { cassRowMaps <- rowMapTable.getChunkMaps(keyRange, version) }
+    yield {
+      cassRowMaps.toIterator.map {
+        case ChunkRowMapRecord(segmentId, chunkIds, rowNums, nextChunkId) =>
+          val rowMap = new BinaryChunkRowMap(chunkIds, rowNums, nextChunkId)
+          (keyRange.partition, segmentId, rowMap)
+      }
     }
-    val chunkRowMapTableFuture = rowMapTableCache(dataset) {
-      logger.debug(s"Creating a new ChunkRowMapTable for dataset $dataset")
-      new ChunkRowMapTable(dataset, clusterConnector)
+  }
+
+  /**
+   * required params:
+   *   token_start - string representation of start of token range
+   *   token_end   - string representation of end of token range
+   */
+  def scanChunkRowMaps(dataset: TableName,
+                       version: Int,
+                       params: Map[String, String])
+                      (implicit ec: ExecutionContext): Future[Iterator[ChunkMapInfo]] = {
+    val tokenStart = params("token_start")
+    val tokenEnd   = params("token_end")
+    val rowMapTable = getOrCreateRowMapTable(dataset)
+    for { rowMaps <- rowMapTable.scanChunkMaps(version, tokenStart, tokenEnd) }
+    yield {
+      rowMaps.map { case (part, ChunkRowMapRecord(segmentId, chunkIds, rowNums, nextChunkId)) =>
+        (part, segmentId, new BinaryChunkRowMap(chunkIds, rowNums, nextChunkId))
+      }
     }
-    for { chunkTable <- chunkTableFuture
-          rowMapTable <- chunkRowMapTableFuture }
-    yield { (chunkTable, rowMapTable) }
+  }
+
+  import java.util.function.{Function => JFunction}
+  import scala.language.implicitConversions
+
+  implicit def scalaFuncToJavaFunc[T, R](func1: Function[T, R]): JFunction[T, R] =
+    new JFunction[T, R] {
+      override def apply(t: T): R = func1.apply(t)
+    }
+
+  def getOrCreateChunkTable(dataset: TableName): ChunkTable = {
+    chunkTableCache.computeIfAbsent(dataset,
+                                    { (dataset: TableName) =>
+                                      logger.debug(s"Creating a new ChunkTable for dataset $dataset")
+                                      new ChunkTable(dataset, clusterConnector) })
+  }
+
+  def getOrCreateRowMapTable(dataset: TableName): ChunkRowMapTable = {
+    rowMapTableCache.computeIfAbsent(dataset,
+                                     { (dataset: TableName) =>
+                                       logger.debug(s"Creating a new ChunkRowMapTable for dataset $dataset")
+                                       new ChunkRowMapTable(dataset, clusterConnector) })
   }
 }
