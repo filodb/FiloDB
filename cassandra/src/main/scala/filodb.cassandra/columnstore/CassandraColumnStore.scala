@@ -1,5 +1,6 @@
 package filodb.cassandra.columnstore
 
+import com.datastax.driver.core.{Host, TokenRange}
 import com.googlecode.concurrentlinkedhashmap.ConcurrentLinkedHashMap
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.slf4j.StrictLogging
@@ -9,8 +10,8 @@ import spray.caching._
 
 import filodb.cassandra.FiloCassandraConnector
 import filodb.core._
-import filodb.core.store.{CachedMergingColumnStore, ColumnStoreScanner}
-import filodb.core.metadata.{Column, Projection}
+import filodb.core.store._
+import filodb.core.metadata.{Column, Projection, RichProjection}
 
 /**
  * Implementation of a column store using Apache Cassandra tables.
@@ -108,15 +109,11 @@ extends CachedMergingColumnStore with CassandraColumnStoreScanner with StrictLog
 
   /**
    * Splits scans of a dataset across multiple token ranges.
-   * params:
-   *   splits_per_node - how much parallelism or ways to divide a token range on each node
-   *
+   * @param splitsPerNode  - how much parallelism or ways to divide a token range on each node
    * @return each split will have token_start, token_end, replicas filled in
    */
-  def getScanSplits(dataset: TableName,
-                    params: Map[String, String] = Map.empty): Seq[Map[String, String]] = {
+  def getScanSplits(dataset: TableName, splitsPerNode: Int = 1): Seq[ScanSplit] = {
     val metadata = clusterConnector.session.getCluster.getMetadata
-    val splitsPerNode = params.getOrElse("splits_per_node", "1").toInt
     require(splitsPerNode >= 1, s"Must specify at least 1 splits_per_node, got $splitsPerNode")
     val tokensByReplica = metadata.getTokenRanges.asScala.toSeq.groupBy { tokenRange =>
       metadata.getReplicas(clusterConnector.keySpace.name, tokenRange)
@@ -141,12 +138,12 @@ extends CachedMergingColumnStore with CassandraColumnStoreScanner with StrictLog
     val tokensComplete = tokenRanges.flatMap { token => token } .toSeq
     tokensComplete.map { tokenRange =>
       val replicas = metadata.getReplicas(clusterConnector.keySpace.name, tokenRange).asScala
-      Map("token_start" -> tokenRange.getStart.toString,
-          "token_end"   -> tokenRange.getEnd.toString,
-          "replicas"    -> replicas.map(_.toString).mkString(","))
+      CassandraTokenRangeSplit(tokenRange, replicas.toSet)
     }
   }
 }
+
+case class CassandraTokenRangeSplit(tokenRange: TokenRange, replicas: Set[Host]) extends ScanSplit
 
 trait CassandraColumnStoreScanner extends ColumnStoreScanner with StrictLogging {
   import filodb.core.store._
@@ -178,37 +175,27 @@ trait CassandraColumnStoreScanner extends ColumnStoreScanner with StrictLogging 
                                           keyRange.endExclusive)))
   }
 
-  def readChunkRowMaps(dataset: TableName,
-                       keyRange: BinaryKeyRange,
-                       version: Int)
-                      (implicit ec: ExecutionContext): Future[Iterator[ChunkMapInfo]] = {
-    val rowMapTable = getOrCreateRowMapTable(dataset)
-    for { cassRowMaps <- rowMapTable.getChunkMaps(keyRange, version) }
-    yield {
-      cassRowMaps.toIterator.map {
-        case ChunkRowMapRecord(segmentId, chunkIds, rowNums, nextChunkId) =>
-          val rowMap = new BinaryChunkRowMap(chunkIds, rowNums, nextChunkId)
-          (keyRange.partition, segmentId, rowMap)
-      }
-    }
-  }
-
-  /**
-   * required params:
-   *   token_start - string representation of start of token range
-   *   token_end   - string representation of end of token range
-   */
-  def scanChunkRowMaps(dataset: TableName,
+  def scanChunkRowMaps(projection: RichProjection,
                        version: Int,
-                       params: Map[String, String])
-                      (implicit ec: ExecutionContext): Future[Iterator[ChunkMapInfo]] = {
-    val tokenStart = params("token_start")
-    val tokenEnd   = params("token_end")
-    val rowMapTable = getOrCreateRowMapTable(dataset)
-    for { rowMaps <- rowMapTable.scanChunkMaps(version, tokenStart, tokenEnd) }
-    yield {
-      rowMaps.map { case (part, ChunkRowMapRecord(segmentId, chunkIds, rowNums, nextChunkId)) =>
-        (part, segmentId, new BinaryChunkRowMap(chunkIds, rowNums, nextChunkId))
+                       method: ScanMethod)
+                      (implicit ec: ExecutionContext):
+    Future[Iterator[SegmentIndex[projection.PK, projection.SK]]] = {
+    val rowMapTable = getOrCreateRowMapTable(projection.datasetName)
+    val futCrmRecords = method match {
+      case SinglePartitionScan(partition) =>
+        val binPart = projection.partitionType.toBytes(partition.asInstanceOf[projection.PK])
+        rowMapTable.getChunkMaps(binPart, version)
+
+      case SinglePartitionRangeScan(k) =>
+        rowMapTable.getChunkMaps(projection.toBinaryKeyRange(k), version)
+
+      case FilteredPartitionScan(CassandraTokenRangeSplit(tokenRange, _), filterFunc) =>
+        rowMapTable.scanChunkMaps(version, tokenRange.getStart.toString, tokenRange.getEnd.toString)
+          .map(_.filter { crm => filterFunc(projection.partitionType.fromBytes(crm.binPartition)) })
+    }
+    futCrmRecords.map { crmIt =>
+      crmIt.map { case ChunkRowMapRecord(binPart, segmentId, chunkIds, rowNums, nextChunkId) =>
+        toSegIndex(projection, (binPart, segmentId, new BinaryChunkRowMap(chunkIds, rowNums, nextChunkId)))
       }
     }
   }

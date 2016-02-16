@@ -127,7 +127,7 @@ trait ColumnStore {
    * @param splitsPerNode the number of splits to target per node.  May not actually be possible.
    * @return a Seq[ScanSplit]
    */
-  def getScanSplits(dataset: TableName, splitsPerNode: Int): Seq[ScanSplit]
+  def getScanSplits(dataset: TableName, splitsPerNode: Int = 1): Seq[ScanSplit]
 
   /**
    * Shuts down the ColumnStore, including any threads that might be hanging around
