@@ -4,6 +4,7 @@ import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.concurrent.duration._
 import scala.util.Try
 
+import filodb.core.metadata.RichProjection
 import filodb.core.Types._
 
 case class Histogram(min: Int, max: Int, sum: Int, numElems: Int, buckets: Map[Int, Int]) {
@@ -63,16 +64,24 @@ object Analyzer {
 
   import scala.concurrent.ExecutionContext.Implicits.global
 
-  def analyze(cs: CachedMergingColumnStore, dataset: TableName, version: Int): ColumnStoreAnalysis = {
+  def analyze(cs: CachedMergingColumnStore,
+              metaStore: MetaStore,
+              dataset: TableName,
+              version: Int): ColumnStoreAnalysis = {
     var numSegments = 0
     var rowsInSegment: Histogram = Histogram.empty
     var chunksInSegment: Histogram = Histogram.empty
     var segmentsInPartition: Histogram = Histogram.empty
     val partitionSegments = (new collection.mutable.HashMap[BinaryPartition, Int]).withDefaultValue(0)
 
-    for { param <- cs.getScanSplits(dataset)
-          rowmaps = Await.result(cs.scanChunkRowMaps(dataset, version, param), 5.minutes)
-          (partKey, _, rowmap) <- rowmaps } yield {
+    val datasetObj = Await.result(metaStore.getDataset(dataset), 5.minutes)
+    val schema = Await.result(metaStore.getSchema(dataset, version), 5.minutes)
+    val projection = RichProjection(datasetObj, schema.values.toSeq)
+    val splits = cs.getScanSplits(dataset, 1)
+    val indexes = Await.result(cs.scanChunkRowMaps(projection, version,
+                                                   FilteredPartitionScan(splits.head)), 5.minutes)
+
+    indexes.foreach { case cs.SegmentIndex(partKey, _, _, _, rowmap) =>
       // Figure out # chunks and rows per segment
       val numRows = rowmap.chunkIds.length
       val numChunks = rowmap.nextChunkId
