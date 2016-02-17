@@ -12,6 +12,20 @@ import spray.caching._
 import filodb.core._
 import filodb.core.metadata.{Column, Projection, RichProjection}
 
+trait ScanMethod
+case class SinglePartitionScan(partition: Any) extends ScanMethod
+case class SinglePartitionRangeScan(keyRange: KeyRange[_, _]) extends ScanMethod
+case class FilteredPartitionScan(split: ScanSplit,
+                                 filter: Any => Boolean = (a: Any) => true) extends ScanMethod
+case class FilteredPartitionRangeScan(split: ScanSplit,
+                                      start: Any, end: Any,
+                                      filter: Any => Boolean = (a: Any) => true) extends ScanMethod
+
+trait ScanSplit {
+  // Should return a set of hostnames or IP addresses describing the preferred hosts for that scan split
+  def hostnames: Set[String]
+}
+
 /**
  * High-level interface of a column store.  Writes and reads segments, which are pretty high level.
  * Most implementations will probably want to be based on something like the CachedmergingColumnStore
@@ -51,47 +65,31 @@ trait ColumnStore {
                     version: Int): Future[Response]
 
   /**
-   * Reads segments from the column store, in order of primary key.
-   * May not be designed for large amounts of data.
+   * Scans segments from a dataset.  ScanMethod determines what gets scanned.
+   *
    * @param projection the Projection to read from
    * @param columns the set of columns to read back.  Order determines the order of columns read back
    *                in each row
    * @param version the version # to read from
-   * @param keyRange describes the partition and range of keys to read back. NOTE: end range is exclusive!
+   * @param method ScanMethod determining what to read from
    * @return An iterator over RowReaderSegment's
-   */
-  def readSegments(projection: RichProjection,
-                   columns: Seq[Column],
-                   version: Int)
-                  (keyRange: KeyRange[projection.PK, projection.SK]): Future[Iterator[Segment]]
-
-  /**
-   * Scans over segments from multiple partitions of a dataset.  Designed for huge amounts of data.
-   * The params determine things such as token ranges or some way of limiting the scanning.
-   *
-   * params:  see individual implementations, but
-   *   segment_group_size   determines # of segments to read at once. Must be integer string.
    */
   def scanSegments(projection: RichProjection,
                    columns: Seq[Column],
                    version: Int,
-                   params: Map[String, String] = Map.empty)
-                  (partitionFilter: (projection.PK => Boolean) = (x: projection.PK) => true):
-    Future[Iterator[Segment]]
+                   method: ScanMethod): Future[Iterator[Segment]]
 
   /**
-   * Scans over segments, just like scanRows, but returns an iterator of RowReader
+   * Scans over segments, just like scanSegments, but returns an iterator of RowReader
    * for all of those row-oriented applications.  Contains a high performance iterator
    * implementation, probably faster than trying to do it yourself.  :)
    */
   def scanRows(projection: RichProjection,
                columns: Seq[Column],
                version: Int,
-               params: Map[String, String] = Map.empty,
-               readerFactory: RowReaderFactory = DefaultReaderFactory)
-              (partitionFilter: (projection.PK => Boolean) = (x: projection.PK) => true):
-    Future[Iterator[RowReader]] = {
-    for { segmentIt <- scanSegments(projection, columns, version, params)(partitionFilter) }
+               method: ScanMethod,
+               readerFactory: RowReaderFactory = DefaultReaderFactory): Future[Iterator[RowReader]] = {
+    for { segmentIt <- scanSegments(projection, columns, version, method) }
     yield {
       if (segmentIt.hasNext) {
         // TODO: fork this kind of code into a macro, called fastFlatMap.
@@ -128,11 +126,11 @@ trait ColumnStore {
 
   /**
    * Determines how to split the scanning of a dataset across a columnstore.
-   * @param params implementation-specific flags to affect the scanning, including parallelism, locality etc
-   * @return individual param maps for each split, to be fed to parallel/distributed scanSegments calls
+   * @param dataset the name of the dataset to determine splits for
+   * @param splitsPerNode the number of splits to target per node.  May not actually be possible.
+   * @return a Seq[ScanSplit]
    */
-  def getScanSplits(dataset: TableName,
-                    params: Map[String, String] = Map.empty): Seq[Map[String, String]]
+  def getScanSplits(dataset: TableName, splitsPerNode: Int = 1): Seq[ScanSplit]
 
   /**
    * Shuts down the ColumnStore, including any threads that might be hanging around

@@ -22,7 +22,7 @@ import org.apache.spark.sql.{DataFrame, Row, SQLContext}
 import filodb.core._
 import filodb.core.query.KeyFilter
 import filodb.core.metadata.{Column, Dataset, RichProjection}
-import filodb.core.store.RowReaderSegment
+import filodb.core.store.{RowReaderSegment, ScanMethod, SinglePartitionScan, FilteredPartitionScan}
 
 object FiloRelation extends StrictLogging {
   import TypeConverters._
@@ -70,6 +70,21 @@ object FiloRelation extends StrictLogging {
     case o: Any        => o
   }
 
+  // Single partition query?
+  def singlePartitionQuery(projection: RichProjection,
+                           filterStuff: Seq[(Int, KeyType, Seq[Filter])]): Option[Any] = {
+    // Are all the partition keys given in filters?
+    // Are all the filters EqualTo?
+    val equalPredValues: Seq[Any] = filterStuff.collect {
+      case (pos, keyType, Seq(EqualTo(_, equalValue))) => sanitize(equalValue)
+    }
+    if (equalPredValues.length == projection.partitionColumns.length) {
+      if (equalPredValues.length == 1) Some(equalPredValues.head) else Some(equalPredValues)
+    } else {
+      None
+    }
+  }
+
   def filtersToFunc(projection: RichProjection,
                     filterStuff: Seq[(Int, KeyType, Seq[Filter])]): Any => Boolean = {
     def toFunc(keyType: KeyType, f: Filter): Any => Boolean = f match {
@@ -100,16 +115,15 @@ object FiloRelation extends StrictLogging {
   def perPartitionRowScanner(config: Config,
                              readOnlyProjectionString: String,
                              version: Int,
-                             param: Map[String, String],
-                             filterFunc: Any => Boolean): Iterator[Row] = {
+                             method: ScanMethod): Iterator[Row] = {
     // NOTE: all the code inside here runs distributed on each node.  So, create my own datastore, etc.
     FiloSetup.init(config)
     FiloSetup.columnStore    // force startup
     val readOnlyProjection = RichProjection.readOnlyFromString(readOnlyProjectionString)
 
     parse(FiloSetup.columnStore.scanRows(
-            readOnlyProjection, readOnlyProjection.columns, version, params = param,
-            (bytes, clazzes) => new SparkRowReader(bytes, clazzes))(filterFunc),
+            readOnlyProjection, readOnlyProjection.columns, version, method,
+            (bytes, clazzes) => new SparkRowReader(bytes, clazzes)),
           10 minutes) { rowIt => rowIt.asInstanceOf[Iterator[Row]] }
   }
 }
@@ -156,23 +170,35 @@ case class FiloRelation(dataset: String,
     val filoColumns = requiredColumns.map(this.filoSchema)
     logger.info(s"Scanning columns ${filoColumns.toSeq}")
     val readOnlyProjStr = projection.toReadOnlyProjString(filoColumns.map(_.name))
-    val splitOpts = Map("splits_per_node" -> splitsPerNode.toString)
-    val splits = FiloSetup.columnStore.getScanSplits(dataset, splitOpts)
-    logger.info(s"Splits = $splits")
     logger.debug(s"readOnlyProjStr = $readOnlyProjStr")
 
-    val filterFunc = filtersToFunc(projection, parsePartitionFilters(projection, filters.toList))
+    val parsedFilters = parsePartitionFilters(projection, filters.toList)
+    singlePartitionQuery(projection, parsedFilters) match {
+      case Some(partitionKey) =>
+        sqlContext.sparkContext.parallelize(Seq(partitionKey), 1)
+          .mapPartitions { partKeyIter =>
+            perPartitionRowScanner(_config, readOnlyProjStr, _version,
+                                   SinglePartitionScan(partKeyIter.next))
+          }
 
-    // NOTE: It's critical that the closure inside mapPartitions only references
-    // vars from buildScan() method, and not the FiloRelation class.  Otherwise
-    // the entire FiloRelation class would get serialized.
-    // Also, each partition should only need one param.
-    sqlContext.sparkContext.parallelize(splits, splits.length)
-      .mapPartitions { paramIter =>
-        val params = paramIter.toSeq
-        require(params.length == 1)
-        perPartitionRowScanner(_config, readOnlyProjStr, _version, params.head, filterFunc)
-      }
+      case None =>
+        val splits = FiloSetup.columnStore.getScanSplits(dataset, splitsPerNode)
+        logger.info(s"${splits.length} splits: [${splits.take(3).mkString(", ")}...]")
+
+        val filterFunc = filtersToFunc(projection, parsedFilters)
+
+        // NOTE: It's critical that the closure inside mapPartitions only references
+        // vars from buildScan() method, and not the FiloRelation class.  Otherwise
+        // the entire FiloRelation class would get serialized.
+        // Also, each partition should only need one param.
+        sqlContext.sparkContext.parallelize(splits, splits.length)
+          .mapPartitions { splitIter =>
+            val _splits = splitIter.toSeq
+            require(_splits.length == 1)
+            perPartitionRowScanner(_config, readOnlyProjStr, _version,
+                                   FilteredPartitionScan(_splits.head, filterFunc))
+          }
+    }
   }
 }
 

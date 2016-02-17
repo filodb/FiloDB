@@ -17,7 +17,7 @@ import scala.language.postfixOps
 import filodb.cassandra.columnstore.CassandraColumnStore
 import filodb.cassandra.metastore.CassandraMetaStore
 import filodb.coordinator.{NodeCoordinatorActor, CoordinatorSetup}
-import filodb.core.store.{Analyzer, CachedMergingColumnStore}
+import filodb.core.store.{Analyzer, CachedMergingColumnStore,FilteredPartitionScan}
 import filodb.core.metadata.{Column, DataColumn, Dataset, RichProjection}
 
 //scalastyle:off
@@ -97,6 +97,7 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
                     args.timeoutMinutes.minutes)
         case Some("analyze") =>
           println(Analyzer.analyze(columnStore.asInstanceOf[CachedMergingColumnStore],
+                                   metaStore,
                                    args.dataset.get,
                                    version).prettify())
         case x: Any =>
@@ -214,7 +215,8 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
 
     // NOTE: we will only return data from the first split!
     val splits = columnStore.getScanSplits(dataset)
-    val requiredRows = parse(columnStore.scanRows(richProj, columns, version, params=splits.head)()) {
+    val requiredRows = parse(columnStore.scanRows(richProj, columns, version,
+                                                  FilteredPartitionScan(splits.head))) {
                          x => x.take(limit) }
     writeResult(dataset, requiredRows, columnNames, columns, outFile)
   }

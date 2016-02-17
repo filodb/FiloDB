@@ -75,14 +75,10 @@ extends CachedMergingColumnStore with InMemoryColumnStoreScanner with StrictLogg
   override def scanSegments(projection: RichProjection,
                             columns: Seq[Column],
                             version: Int,
-                            params: Map[String, String] = Map.empty)
-                           (partitionFilter: (projection.PK => Boolean) = (x: projection.PK) => true):
-                              Future[Iterator[Segment]] = {
-    for { chunkmapsIt <- scanChunkRowMaps(projection.datasetName, version, params) }
+                            method: ScanMethod): Future[Iterator[Segment]] = {
+    for { indices <- scanChunkRowMaps(projection, version, method) }
     yield {
-      chunkmapsIt.map(crm => toSegIndex(projection, crm))
-                 .filter { case SegmentIndex(_, _, part, _, _) => partitionFilter(part) }
-                 .map { case SegmentIndex(binPart, segId, part, segmentKey, binChunkRowMap) =>
+      indices.map { case SegmentIndex(binPart, segId, part, segmentKey, binChunkRowMap) =>
         val segInfo = SegmentInfo(part, segmentKey)
         val segment = new RowReaderSegment(projection, segInfo, binChunkRowMap, columns)
         for { column <- columns } {
@@ -103,10 +99,15 @@ extends CachedMergingColumnStore with InMemoryColumnStoreScanner with StrictLogg
 
   // InMemoryColumnStore is just on one node, so return no splits for now.
   // TODO: achieve parallelism by splitting on a range of partitions.
-  def getScanSplits(dataset: TableName,
-                    params: Map[String, String]): Seq[Map[String, String]] = Seq(Map.empty)
+  def getScanSplits(dataset: TableName, splitsPerNode: Int): Seq[ScanSplit] =
+    Seq(InMemoryWholeSplit)
 
   def bbToHex(bb: ByteBuffer): String = DatatypeConverter.printHexBinary(bb.array)
+}
+
+// TODO(velvia): Implement real splits?
+case object InMemoryWholeSplit extends ScanSplit {
+  def hostnames: Set[String] = Set.empty
 }
 
 trait InMemoryColumnStoreScanner extends ColumnStoreScanner {
@@ -144,32 +145,37 @@ trait InMemoryColumnStoreScanner extends ColumnStoreScanner {
     Future.successful(chunks)
   }
 
-  def readChunkRowMaps(dataset: TableName,
-                       keyRange: BinaryKeyRange,
-                       version: Int)
-                      (implicit ec: ExecutionContext): Future[Iterator[ChunkMapInfo]] = Future {
-    val rowMapTree = rowMaps.getOrElse((dataset, keyRange.partition, version), EmptyRowMapTree)
-    val it = rowMapTree.subMap(keyRange.start, true,
-                               keyRange.end, !keyRange.endExclusive).entrySet.iterator
-    it.map { entry =>
-      val (chunkIds, rowNums, nextChunkId) = entry.getValue
-      (keyRange.partition, entry.getKey, new BinaryChunkRowMap(chunkIds, rowNums, nextChunkId))
-    }
-  }
-
-  def scanChunkRowMaps(dataset: TableName,
+  def scanChunkRowMaps(projection: RichProjection,
                        version: Int,
-                       params: Map[String, String])
-                      (implicit ec: ExecutionContext): Future[Iterator[ChunkMapInfo]] = Future {
-    val parts = rowMaps.keysIterator.filter { case (ds, partition, ver) =>
-      ds == dataset && ver == version }
-    val maps = parts.flatMap { case key @ (_, partition, _) =>
-                 rowMaps(key).entrySet.iterator.map { entry =>
-                   val segId = entry.getKey
-                   val (chunkIds, rowNums, nextChunkId) = entry.getValue
-                   (partition, segId, new BinaryChunkRowMap(chunkIds, rowNums, nextChunkId))
-                 }
-               }
-    maps.toIterator
+                       method: ScanMethod)
+                      (implicit ec: ExecutionContext):
+    Future[Iterator[SegmentIndex[projection.PK, projection.SK]]] = {
+    val partAndMaps = method match {
+      case SinglePartitionScan(partition) =>
+        val binPart = projection.partitionType.toBytes(partition.asInstanceOf[projection.PK])
+        Seq((binPart, rowMaps.getOrElse((projection.datasetName, binPart, version), EmptyRowMapTree))).
+          toIterator
+
+      case SinglePartitionRangeScan(k) =>
+        val binKR = projection.toBinaryKeyRange(k)
+        val rowMapTree = rowMaps.getOrElse((projection.datasetName, binKR.partition, version),
+                                           EmptyRowMapTree)
+        val subMap = rowMapTree.subMap(binKR.start, true, binKR.end, !binKR.endExclusive)
+        Iterator.single((binKR.partition, subMap))
+
+      case FilteredPartitionScan(split, filterFunc) =>
+        val binParts = rowMaps.keysIterator.collect { case (ds, binPart, ver) if
+          ds == projection.datasetName && ver == version => binPart }
+        binParts.filter { binPart => filterFunc(projection.partitionType.fromBytes(binPart))
+                }.map { binPart => (binPart, rowMaps((projection.datasetName, binPart, version))) }
+    }
+    val segIndices = partAndMaps.flatMap { case (binPart, rowMap) =>
+      rowMap.entrySet.iterator.map { entry =>
+        val (chunkIds, rowNums, nextChunkId) = entry.getValue
+        val info = (binPart, entry.getKey, new BinaryChunkRowMap(chunkIds, rowNums, nextChunkId))
+        toSegIndex(projection, info)
+      }
+    }
+    Future.successful(segIndices)
   }
 }
