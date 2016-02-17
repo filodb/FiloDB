@@ -9,7 +9,7 @@ import scala.concurrent.duration._
 
 import filodb.core._
 import filodb.core.metadata.{Column, Dataset}
-import filodb.core.store.{RowWriterSegment, SegmentInfo}
+import filodb.core.store.{FilteredPartitionScan, RowWriterSegment, SegmentInfo}
 import filodb.spark.{FiloSetup, FiloRelation}
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.functions.sum
@@ -67,6 +67,7 @@ class SparkReadBenchmark {
   Await.result(FiloSetup.metaStore.newDataset(dataset), 3.seconds)
   val createColumns = schema.map { col => FiloSetup.metaStore.newColumn(col) }
   Await.result(Future.sequence(createColumns), 3.seconds)
+  val split = FiloSetup.columnStore.getScanSplits(dataset.name).head
 
   // Merge segments into InMemoryColumnStore
   import scala.concurrent.ExecutionContext.Implicits.global
@@ -103,7 +104,7 @@ class SparkReadBenchmark {
   @OutputTimeUnit(TimeUnit.SECONDS)
   def inMemoryColStoreOnly(): Any = {
     val it = FiloRelation.perPartitionRowScanner(filoConfig, readOnlyProjStr, 0,
-                            Map.empty, (x => true)).asInstanceOf[Iterator[InternalRow]]
+                            FilteredPartitionScan(split)).asInstanceOf[Iterator[InternalRow]]
     var sum = 0
     while (it.hasNext) {
       val row = it.next

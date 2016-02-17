@@ -106,7 +106,9 @@ extends CachedMergingColumnStore with InMemoryColumnStoreScanner with StrictLogg
 }
 
 // TODO(velvia): Implement real splits?
-case object InMemoryWholeSplit extends ScanSplit
+case object InMemoryWholeSplit extends ScanSplit {
+  def hostnames: Set[String] = Set.empty
+}
 
 trait InMemoryColumnStoreScanner extends ColumnStoreScanner {
   import Types._

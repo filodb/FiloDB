@@ -1,9 +1,10 @@
 package filodb.cassandra.columnstore
 
-import com.datastax.driver.core.{Host, TokenRange}
+import com.datastax.driver.core.TokenRange
 import com.googlecode.concurrentlinkedhashmap.ConcurrentLinkedHashMap
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.slf4j.StrictLogging
+import java.net.InetSocketAddress
 import java.nio.ByteBuffer
 import scala.concurrent.{ExecutionContext, Future}
 import spray.caching._
@@ -138,12 +139,17 @@ extends CachedMergingColumnStore with CassandraColumnStoreScanner with StrictLog
     val tokensComplete = tokenRanges.flatMap { token => token } .toSeq
     tokensComplete.map { tokenRange =>
       val replicas = metadata.getReplicas(clusterConnector.keySpace.name, tokenRange).asScala
-      CassandraTokenRangeSplit(tokenRange, replicas.toSet)
+      CassandraTokenRangeSplit(tokenRange.getStart.toString,
+                               tokenRange.getEnd.toString,
+                               replicas.map(_.getSocketAddress).toSet)
     }
   }
 }
 
-case class CassandraTokenRangeSplit(tokenRange: TokenRange, replicas: Set[Host]) extends ScanSplit
+case class CassandraTokenRangeSplit(startToken: String, endToken: String,
+                                    replicas: Set[InetSocketAddress]) extends ScanSplit {
+  def hostnames: Set[String] = replicas.map(_.getHostName)
+}
 
 trait CassandraColumnStoreScanner extends ColumnStoreScanner with StrictLogging {
   import filodb.core.store._
@@ -189,8 +195,8 @@ trait CassandraColumnStoreScanner extends ColumnStoreScanner with StrictLogging 
       case SinglePartitionRangeScan(k) =>
         rowMapTable.getChunkMaps(projection.toBinaryKeyRange(k), version)
 
-      case FilteredPartitionScan(CassandraTokenRangeSplit(tokenRange, _), filterFunc) =>
-        rowMapTable.scanChunkMaps(version, tokenRange.getStart.toString, tokenRange.getEnd.toString)
+      case FilteredPartitionScan(CassandraTokenRangeSplit(startToken, endToken, _), filterFunc) =>
+        rowMapTable.scanChunkMaps(version, startToken, endToken)
           .map(_.filter { crm => filterFunc(projection.partitionType.fromBytes(crm.binPartition)) })
     }
     futCrmRecords.map { crmIt =>

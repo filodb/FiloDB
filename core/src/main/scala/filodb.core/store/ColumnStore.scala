@@ -21,7 +21,10 @@ case class FilteredPartitionRangeScan(split: ScanSplit,
                                       start: Any, end: Any,
                                       filter: Any => Boolean = (a: Any) => true) extends ScanMethod
 
-trait ScanSplit
+trait ScanSplit {
+  // Should return a set of hostnames or IP addresses describing the preferred hosts for that scan split
+  def hostnames: Set[String]
+}
 
 /**
  * High-level interface of a column store.  Writes and reads segments, which are pretty high level.
