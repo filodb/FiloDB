@@ -30,7 +30,7 @@ class SaveAsFiloTest extends FunSpec with BeforeAndAfter with BeforeAndAfterAll
 with Matchers with ScalaFutures {
 
   implicit val defaultPatience =
-    PatienceConfig(timeout = Span(10, Seconds), interval = Span(50, Millis))
+    PatienceConfig(timeout = Span(15, Seconds), interval = Span(250, Millis))
 
   // Setup SQLContext and a sample DataFrame
   val conf = (new SparkConf).setMaster("local[4]")
@@ -56,10 +56,11 @@ with Matchers with ScalaFutures {
   val columnStore = FiloSetup.columnStore
 
   override def beforeAll() {
-    metaStore.initialize().futureValue
-    columnStore.initializeProjection(ds1.projections.head).futureValue
-    columnStore.initializeProjection(ds2.projections.head).futureValue
-    columnStore.initializeProjection(ds3.projections.head).futureValue
+    metaStore.initialize().futureValue(defaultPatience)
+    columnStore.initializeProjection(ds1.projections.head).futureValue(defaultPatience)
+    columnStore.initializeProjection(ds2.projections.head).futureValue(defaultPatience)
+    columnStore.initializeProjection(ds3.projections.head).futureValue(defaultPatience)
+    columnStore.initializeProjection(test1.projections.head).futureValue(defaultPatience)
   }
 
   override def afterAll() {
@@ -68,13 +69,13 @@ with Matchers with ScalaFutures {
   }
 
   before {
-    metaStore.clearAllData().futureValue
+    metaStore.clearAllData().futureValue(defaultPatience)
     columnStore.clearSegmentCache()
     try {
-      columnStore.clearProjectionData(ds1.projections.head).futureValue
-      columnStore.clearProjectionData(ds2.projections.head).futureValue
-      columnStore.clearProjectionData(ds3.projections.head).futureValue
-      columnStore.clearProjectionData(test1.projections.head).futureValue
+      columnStore.clearProjectionData(ds1.projections.head).futureValue(defaultPatience)
+      columnStore.clearProjectionData(ds2.projections.head).futureValue(defaultPatience)
+      columnStore.clearProjectionData(ds3.projections.head).futureValue(defaultPatience)
+      columnStore.clearProjectionData(test1.projections.head).futureValue(defaultPatience)
     } catch {
       case e: Exception =>
     }
