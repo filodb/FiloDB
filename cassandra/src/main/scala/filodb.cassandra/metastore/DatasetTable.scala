@@ -81,6 +81,8 @@ with FiloCassandraConnector {
           Some((partCols, options)) <- select(_.partitionColumns, _.options).where(_.name eqs dataset).one() }
     yield { Dataset(dataset, Seq(proj), splitCString(partCols), DatasetOptions.fromString(options)) }
 
+  def getAllDatasets: Future[Seq[String]] = select(_.name).fetch.map(_.distinct)
+
   // NOTE: CQL does not return any error if you DELETE FROM datasets WHERE name = ...
   def deleteDataset(name: String): Future[Response] =
     delete.where(_.name eqs name).future().toResponse()

@@ -33,6 +33,9 @@ class CassandraMetaStore(config: Config)
   def getDataset(name: String): Future[Dataset] =
     datasetTable.getDataset(name)
 
+  def getAllDatasets(): Future[Seq[String]] =
+    datasetTable.getAllDatasets
+
   def deleteDataset(name: String): Future[Response] =
     datasetTable.deleteDataset(name)
 

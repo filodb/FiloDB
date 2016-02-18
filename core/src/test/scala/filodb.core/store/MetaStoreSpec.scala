@@ -41,6 +41,16 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
     it("should return NotFound if getDataset on nonexisting dataset") {
       metaStore.getDataset("notThere").failed.futureValue shouldBe a [NotFoundError]
     }
+
+    it("should return all datasets created") {
+      for { i <- 0 to 2 } {
+        val dataset = Dataset(i.toString, Seq("key1", ":getOrElse key2 --"), "seg",
+                              Seq("part1", ":getOrElse part2 00"))
+        metaStore.newDataset(dataset).futureValue should equal (Success)
+      }
+
+      metaStore.getAllDatasets().futureValue.toSet should equal (Set("0", "1", "2"))
+    }
   }
 
   describe("column API") {
