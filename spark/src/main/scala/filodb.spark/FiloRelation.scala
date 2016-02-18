@@ -185,13 +185,15 @@ case class FiloRelation(dataset: String,
         val splits = FiloSetup.columnStore.getScanSplits(dataset, splitsPerNode)
         logger.info(s"${splits.length} splits: [${splits.take(3).mkString(", ")}...]")
 
+        val splitsWithLocations = splits.map { s => (s, s.hostnames.toSeq) }
+
         val filterFunc = filtersToFunc(projection, parsedFilters)
 
         // NOTE: It's critical that the closure inside mapPartitions only references
         // vars from buildScan() method, and not the FiloRelation class.  Otherwise
         // the entire FiloRelation class would get serialized.
         // Also, each partition should only need one param.
-        sqlContext.sparkContext.parallelize(splits, splits.length)
+        sqlContext.sparkContext.makeRDD(splitsWithLocations)
           .mapPartitions { splitIter =>
             val _splits = splitIter.toSeq
             require(_splits.length == 1)
