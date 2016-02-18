@@ -49,6 +49,11 @@ trait MetaStore {
   def getDataset(name: String): Future[Dataset]
 
   /**
+   * Retrieves the names of all datasets registered in the metastore
+   */
+  def getAllDatasets(): Future[Seq[String]]
+
+  /**
    * Deletes dataset metadata including all projections and columns.  Does not delete column store data.
    * @param name Name of the dataset to delete.
    * @return Success, or MetadataException, or StorageEngineException
