@@ -223,8 +223,7 @@ with Matchers with ScalaFutures {
     df.agg(sum("id")).collect().head(0) should equal (3)
     df.registerTempTable("test1")
     sql.sql("SELECT sum(id) FROM test1 WHERE year = 2015").collect.head(0) should equal (2)
-    // The below _should_ work but somehow Spark throws an error can't figure out year should be included
-    // df.agg(sum("id")).where(df("year") === 2015).collect().head(0) should equal (2)
+    sql.sql("SELECT count(*) FROM test1").collect.head(0) should equal (3)
   }
 
   it("should be able to write with multi-column partition keys") {
