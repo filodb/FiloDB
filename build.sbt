@@ -49,6 +49,7 @@ lazy val jmh = (project in file("jmh"))
 
 val phantomVersion = "1.12.2"
 val akkaVersion    = "2.3.7"
+val sparkVersion   = "1.5.2"
 
 lazy val extraRepos = Seq(
   "Typesafe repository releases" at "http://repo.typesafe.com/typesafe/releases/",
@@ -100,8 +101,9 @@ lazy val cliDeps = Seq(
 )
 
 lazy val sparkDeps = Seq(
-  "org.apache.spark"     %% "spark-sql"         % "1.5.2" % "provided",
-  "org.apache.spark"     %% "spark-streaming"   % "1.5.2" % "provided"
+  "org.apache.spark"     %% "spark-sql"         % sparkVersion % "provided",
+  "org.apache.spark"     %% "spark-streaming"   % sparkVersion % "provided",
+  "org.apache.spark"     %% "spark-hive-thriftserver" % sparkVersion % "provided" exclude("org.slf4j", "slf4j-log4j12")
 )
 
 lazy val jmhDeps = Seq(
