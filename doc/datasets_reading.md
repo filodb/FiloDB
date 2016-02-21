@@ -9,7 +9,7 @@
 
 ## Datasets
 
-* [GDELT public dataset](http://data.gdeltproject.org/documentation/GDELT-Data_Format_Codebook.pdf) - used frequently for bulk ingestion testing.  Ingest the first 4 million lines (1979-1984), which comes out to about 1.1GB CSV file.  Entire dataset is more than 250 million rows / 250GB.  See the discussion on README about different modelling options.
+* [GDELT public dataset](http://data.gdeltproject.org/documentation/GDELT-Data_Format_Codebook.pdf) - geo-spatial-political event dataset - used frequently for bulk ingestion testing.  Ingest the first 4 million lines (1979-1984), which comes out to about 1.1GB CSV file.  Entire dataset is more than 250 million rows / 250GB.  See the discussion on README about different modelling options.
     - To ingest:
 
 ```scala
@@ -49,6 +49,7 @@ NOTE: for a stress testing scenario use `:stringPrefix medallion 3` as a segment
 * [Weather Datasets and APIs](https://github.com/killrweather/killrweather/wiki/9.-Weather-Data-Sources-and-APIs)
     - Also see the [KillrWeather](https://github.com/killrweather/killrweather/tree/master/data/load) data sets
 * [Airline on-time performance data](http://stat-computing.org/dataexpo/2009/) - nearly 120 million records, 16GB uncompressed
+* [PCoE NASA Datasets](http://ti.arc.nasa.gov/tech/dash/pcoe/prognostic-data-repository/) - a series of time series datasets used for modeling and prediction of failure scenarios 
 
 ## Reading Material (Mostly for FiloDB research)
 
