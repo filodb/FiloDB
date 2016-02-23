@@ -73,7 +73,7 @@ object FiloRelation extends StrictLogging {
     // Are all the partition keys given in filters?
     // Are all the filters EqualTo?
     val equalPredValues: Seq[Any] = filterStuff.collect {
-      case (pos, keyType, Seq(EqualTo(_, equalValue))) => equalValue
+      case (pos, keyType, Seq(EqualTo(_, equalValue))) => KeyFilter.parseSingleValue(keyType)(equalValue)
     }
     if (equalPredValues.length == projection.partitionColumns.length) {
       if (equalPredValues.length == 1) Some(equalPredValues.head) else Some(equalPredValues)
@@ -84,9 +84,11 @@ object FiloRelation extends StrictLogging {
 
   def filtersToFunc(projection: RichProjection,
                     filterStuff: Seq[(Int, KeyType, Seq[Filter])]): Any => Boolean = {
+    import KeyFilter._
+
     def toFunc(keyType: KeyType, f: Filter): Any => Boolean = f match {
-      case EqualTo(_, value) => KeyFilter.equalsFunc(keyType)(value.asInstanceOf[keyType.T])
-      case In(_, values)     => KeyFilter.inFunc(keyType)(values.toSet.asInstanceOf[Set[keyType.T]])
+      case EqualTo(_, value) => equalsFunc(keyType)(parseSingleValue(keyType)(value))
+      case In(_, values)     => inFunc(keyType)(parseValues(keyType)(values.toSet).toSet)
       case other: Filter     => throw new IllegalArgumentException(s"Sorry, filter $other not supported")
     }
 
@@ -94,7 +96,7 @@ object FiloRelation extends StrictLogging {
     logger.info(s"Filters by position: $filterStuff")
     val funcs = filterStuff.map { case (pos, keyType, filters) =>
       filters.tail.foldLeft(toFunc(keyType, filters.head)) { case (curFunc, newFilter) =>
-        KeyFilter.andFunc(curFunc, toFunc(keyType, newFilter))
+        andFunc(curFunc, toFunc(keyType, newFilter))
       }
     }
 
@@ -102,7 +104,7 @@ object FiloRelation extends StrictLogging {
       logger.info(s"Using default filtering function")
       (a: Any) => true
     } else {
-      KeyFilter.makePartitionFilterFunc(projection, filterStuff.map(_._1), funcs)
+      makePartitionFilterFunc(projection, filterStuff.map(_._1), funcs)
     }
   }
 
