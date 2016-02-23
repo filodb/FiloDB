@@ -159,6 +159,7 @@ You may specify a function, or computed column, for use with any key column.  Th
 | getOrElse | returns default value if column value is null | `:getOrElse columnA ---` |
 | round     | rounds down a numeric column.  Useful for bucketing by time or bucketing numeric IDs.  | `:round timestamp 10000` |
 | stringPrefix | takes the first N chars of a string; good for partitioning | `:stringPrefix token 4` |
+| timeslice | bucketizes a Long (millisecond) or Timestamp column using duration strings - 500ms, 5s, 10m, 3h, etc. | `:timeslice arrivalTime 30s` |
 
 ### FiloDB vs Cassandra Data Modelling
 
