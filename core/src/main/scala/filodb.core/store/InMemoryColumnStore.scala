@@ -2,7 +2,7 @@ package filodb.core.store
 
 import com.typesafe.scalalogging.slf4j.StrictLogging
 import java.nio.ByteBuffer
-import java.util.concurrent.ConcurrentSkipListMap
+import java.util.concurrent.{ConcurrentSkipListMap, ConcurrentNavigableMap}
 import javax.xml.bind.DatatypeConverter
 import scala.collection.mutable.HashMap
 import scala.concurrent.{ExecutionContext, Future}
@@ -117,6 +117,7 @@ trait InMemoryColumnStoreScanner extends ColumnStoreScanner {
   type ChunkKey = (ColumnId, SegmentId, ChunkID)
   type ChunkTree = ConcurrentSkipListMap[ChunkKey, ByteBuffer]
   type RowMapTree = ConcurrentSkipListMap[SegmentId, (ByteBuffer, ByteBuffer, Int)]
+  type RowMapTreeLike = ConcurrentNavigableMap[SegmentId, (ByteBuffer, ByteBuffer, Int)]
 
   val EmptyChunkTree = new ChunkTree(Ordering[ChunkKey])
   val EmptyRowMapTree = new RowMapTree(Ordering[SegmentId])
@@ -145,29 +146,38 @@ trait InMemoryColumnStoreScanner extends ColumnStoreScanner {
     Future.successful(chunks)
   }
 
+  def singlePartScan(projection: RichProjection, version: Int, partition: Any):
+    Iterator[(BinaryPartition, RowMapTreeLike)] = {
+    val binPart = projection.partitionType.toBytes(partition.asInstanceOf[projection.PK])
+    Seq((binPart, rowMaps.getOrElse((projection.datasetName, binPart, version), EmptyRowMapTree))).
+      toIterator
+  }
+
+  def singlePartRangeScan(projection: RichProjection, version: Int, k: KeyRange[_, _]):
+    Iterator[(BinaryPartition, RowMapTreeLike)] = {
+    val binKR = projection.toBinaryKeyRange(k)
+    val rowMapTree = rowMaps.getOrElse((projection.datasetName, binKR.partition, version),
+                                       EmptyRowMapTree)
+    val subMap = rowMapTree.subMap(binKR.start, true, binKR.end, !binKR.endExclusive)
+    Iterator.single((binKR.partition, subMap))
+  }
+
   def scanChunkRowMaps(projection: RichProjection,
                        version: Int,
                        method: ScanMethod)
                       (implicit ec: ExecutionContext):
     Future[Iterator[SegmentIndex[projection.PK, projection.SK]]] = {
     val partAndMaps = method match {
-      case SinglePartitionScan(partition) =>
-        val binPart = projection.partitionType.toBytes(partition.asInstanceOf[projection.PK])
-        Seq((binPart, rowMaps.getOrElse((projection.datasetName, binPart, version), EmptyRowMapTree))).
-          toIterator
-
-      case SinglePartitionRangeScan(k) =>
-        val binKR = projection.toBinaryKeyRange(k)
-        val rowMapTree = rowMaps.getOrElse((projection.datasetName, binKR.partition, version),
-                                           EmptyRowMapTree)
-        val subMap = rowMapTree.subMap(binKR.start, true, binKR.end, !binKR.endExclusive)
-        Iterator.single((binKR.partition, subMap))
+      case SinglePartitionScan(partition) => singlePartScan(projection, version, partition)
+      case SinglePartitionRangeScan(k)    => singlePartRangeScan(projection, version, k)
 
       case FilteredPartitionScan(split, filterFunc) =>
         val binParts = rowMaps.keysIterator.collect { case (ds, binPart, ver) if
           ds == projection.datasetName && ver == version => binPart }
         binParts.filter { binPart => filterFunc(projection.partitionType.fromBytes(binPart))
                 }.map { binPart => (binPart, rowMaps((projection.datasetName, binPart, version))) }
+
+      case other: ScanMethod => ???
     }
     val segIndices = partAndMaps.flatMap { case (binPart, rowMap) =>
       rowMap.entrySet.iterator.map { entry =>

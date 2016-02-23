@@ -74,14 +74,14 @@ object Analyzer {
     var segmentsInPartition: Histogram = Histogram.empty
     val partitionSegments = (new collection.mutable.HashMap[BinaryPartition, Int]).withDefaultValue(0)
 
-    val datasetObj = Await.result(metaStore.getDataset(dataset), 5.minutes)
-    val schema = Await.result(metaStore.getSchema(dataset, version), 5.minutes)
+    val datasetObj = Await.result(metaStore.getDataset(dataset), 1.minutes)
+    val schema = Await.result(metaStore.getSchema(dataset, version), 1.minutes)
     val projection = RichProjection(datasetObj, schema.values.toSeq)
     val splits = cs.getScanSplits(dataset, 1)
     val indexes = Await.result(cs.scanChunkRowMaps(projection, version,
-                                                   FilteredPartitionScan(splits.head)), 5.minutes)
+                                                   FilteredPartitionScan(splits.head)), 1.minutes)
 
-    indexes.foreach { case cs.SegmentIndex(partKey, _, _, _, rowmap) =>
+    indexes.foreach { case SegmentIndex(partKey, _, _, _, rowmap) =>
       // Figure out # chunks and rows per segment
       val numRows = rowmap.chunkIds.length
       val numChunks = rowmap.nextChunkId
