@@ -169,6 +169,7 @@ You may specify a function, or computed column, for use with any key column.  Th
 * Like Cassandra, a single partition is the smallest unit of parallelism when querying from Spark
 * Wider rows work better for FiloDB (bigger chunk/segment size)
 * FiloDB does not have Cassandra's restrictions for partition key filtering. You can filter by any partition keys with most operators.  This means less tables in FiloDB can match more query patterns.
+* Cassandra range scans over clustering keys is available over the segment key
 
 ### Data Modelling and Performance Considerations
 
@@ -434,6 +435,10 @@ Query/export some columns:
 The current version assumes Spark 1.5.x and Cassandra 2.1.x or 2.2.x.
 
 There is a branch for Datastax Enterprise 4.8 / Spark 1.4.  Note that if you are using DSE or have vnodes enabled, a lower number of vnodes (16 or less) is STRONGLY recommended as higher numbers of vnodes slows down queries substantially and basically prevents subsecond queries from happening.
+
+## Code Walkthrough
+
+Please go to the [architecture](doc/architecture.md) doc.
 
 ## Building and Testing
 

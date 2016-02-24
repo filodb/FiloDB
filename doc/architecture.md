@@ -16,21 +16,27 @@
 
 The code is laid out following the different parts and components.
 
+### Coordinator
+
+Provides an upper-level, client-facing interface for the core components, and manages the scheduling around the MemTable, Reprojector, flushes, and column store.  Handles different types of streaming data ingestion.
+
+Clients such as Spark and the CLI implement source actors that extend the [RowSource](coordinator/src/main/scala/filodb.coordinator/RowSource.scala) trait. `RowSource` communicates with the [NodeCoordinatorActor](coordinator/src/main/scala/filodb.coordinator/NodeCoordinatorActor.scala) - one per node - to establish streaming ingestion and send rows of data.  `RowSource` retries rows for which it does not receive an `Ack` such that ingestion is at-least-once, and has built-in backpressure not to try to send too many unacked rows. The `NodeCoordinatorActor` in turn creates a [DatasetCoordinatorActor](coordinator/src/main/scala/filodb.coordinator/DatasetCoordinatorActor.scala) to handle the state of memtables for each (dataset, version) pair, backpressure, and flushing the memtables to the column store.
+
 ### Core
 
 These components form the core part of FiloDB and are portable across data stores.
-* Memtable: The memtable is a temporary storage for row-format data and is flushed according to a FlushPolicy.
-* Reprojector: The Reprojector flushes a set of rows from a Memtable according to a FlushPolicy in order to achieve a desired projection or sort order in the column store. A reprojector outputs Segments.
-* ColumnStore: The column store saves and retrieves Segments from the underlying storage.  Includes the ability to merge segments in sorted order.  The core does not implement any particular columnstores, but it contains business logic applicable to all column stores.
-* MetaStore: An interface for persistence of database metadata, such as dataset, column, and projection state.
+
+Ingested rows come from the `DatasetCoordinatorActor` into a [MemTable](core/src/main/scala/filodb.core/reprojector/MemTable.scala), of which there is only one implementation currently, the [FiloMemTable](core/src/main/scala/filodb.core/reprojector/FiloMemTable.scala).  MemTables hold enough rows so they can be chunked efficiently.  MemTables are flushed to the columnstore using the [Reprojector](core/src/main/scala/filodb.core/reprojector/Reprojector.scala) based on scheduling and policies set by the `DatasetCoordinatorActor`.  The rows in the `MemTable` form Segments (see [Segment.scala](core/src/main/scala/filodb.core/store/Segment.scala)) and are appended to the [ColumnStore](core/src/main/scala/filodb.core/store/ColumnStore).
+
+The core module has an [InMemoryColumnStore](core/src/main/scala/filodb.core/store/InMemoryColumnStore.scala), a full `ColumnStore` implementation used for both testing and low-latency in-memory Spark queries.
+
+On the read side, the [ColumnStoreScanner](core/src/main/scala/filodb.core/store/ColumnStoreScanner.scala) contains APIs for reading out segments and rows using various `ScanMethod`s - there are ones for single partition queries, queries that span multiple partitions using custom filtering functions, etc.  Helper functions in [KeyFilter](core/src/main/scala/filodb.core/query/KeyFilter.scala) help compose functions for filtered scanning.
+
+FiloDB datasets consists of one or more projections, each of which contains columns.  The [MetaStore](core/src/main/scala/filodb.core/store/MetaStore.scala) defines an API for concurrent reads/writes/updates on dataset, projection, and column metadata.  Each [Column](core/src/main/scala/filodb.core/metadata/Column.scala) has a `ColumnType`, which has a [KeyType](core/src/main/scala/filodb.core/metadata/KeyType.scala).  `KeyType` is a fundamental type class defining serialization and extraction for each type of column/key.  Most of FiloDB depends heavily on [RichProjection](core/src/main/scala/filodb.core/metadata/Projection.scala), which contains the partition, row, and segment key columns and their `KeyType`s.
 
 ### Cassandra
 
 An implementation of ColumnStore and MetaStore for Apache Cassandra.
-
-### Coordinator
-
-Provides an upper-level, client-facing interface for the core components, and manages the scheduling around the MemTable, Reprojector, flushes, and column store.  Handles different types of streaming data ingestion.
 
 ### Spark
 
