@@ -30,7 +30,7 @@ class SaveAsFiloTest extends FunSpec with BeforeAndAfter with BeforeAndAfterAll
 with Matchers with ScalaFutures {
 
   implicit val defaultPatience =
-    PatienceConfig(timeout = Span(10, Seconds), interval = Span(50, Millis))
+    PatienceConfig(timeout = Span(15, Seconds), interval = Span(250, Millis))
 
   // Setup SQLContext and a sample DataFrame
   val conf = (new SparkConf).setMaster("local[4]")
@@ -56,10 +56,11 @@ with Matchers with ScalaFutures {
   val columnStore = FiloSetup.columnStore
 
   override def beforeAll() {
-    metaStore.initialize().futureValue
-    columnStore.initializeProjection(ds1.projections.head).futureValue
-    columnStore.initializeProjection(ds2.projections.head).futureValue
-    columnStore.initializeProjection(ds3.projections.head).futureValue
+    metaStore.initialize().futureValue(defaultPatience)
+    columnStore.initializeProjection(ds1.projections.head).futureValue(defaultPatience)
+    columnStore.initializeProjection(ds2.projections.head).futureValue(defaultPatience)
+    columnStore.initializeProjection(ds3.projections.head).futureValue(defaultPatience)
+    columnStore.initializeProjection(test1.projections.head).futureValue(defaultPatience)
   }
 
   override def afterAll() {
@@ -68,13 +69,13 @@ with Matchers with ScalaFutures {
   }
 
   before {
-    metaStore.clearAllData().futureValue
+    metaStore.clearAllData().futureValue(defaultPatience)
     columnStore.clearSegmentCache()
     try {
-      columnStore.clearProjectionData(ds1.projections.head).futureValue
-      columnStore.clearProjectionData(ds2.projections.head).futureValue
-      columnStore.clearProjectionData(ds3.projections.head).futureValue
-      columnStore.clearProjectionData(test1.projections.head).futureValue
+      columnStore.clearProjectionData(ds1.projections.head).futureValue(defaultPatience)
+      columnStore.clearProjectionData(ds2.projections.head).futureValue(defaultPatience)
+      columnStore.clearProjectionData(ds3.projections.head).futureValue(defaultPatience)
+      columnStore.clearProjectionData(test1.projections.head).futureValue(defaultPatience)
     } catch {
       case e: Exception =>
     }
@@ -223,8 +224,7 @@ with Matchers with ScalaFutures {
     df.agg(sum("id")).collect().head(0) should equal (3)
     df.registerTempTable("test1")
     sql.sql("SELECT sum(id) FROM test1 WHERE year = 2015").collect.head(0) should equal (2)
-    // The below _should_ work but somehow Spark throws an error can't figure out year should be included
-    // df.agg(sum("id")).where(df("year") === 2015).collect().head(0) should equal (2)
+    sql.sql("SELECT count(*) FROM test1").collect.head(0) should equal (3)
   }
 
   it("should be able to write with multi-column partition keys") {
@@ -251,6 +251,25 @@ with Matchers with ScalaFutures {
                  option("row_keys", "eventId").
                  option("segment_key", segCol).
                  option("partition_keys", ":getOrElse actor2Code --,:getOrElse year -1").
+                 mode(SaveMode.Overwrite).
+                 save()
+    val df = sql.read.format("filodb.spark").option("dataset", "gdelt3").load()
+    df.registerTempTable("gdelt")
+    sql.sql("select sum(numArticles) from gdelt where actor2Code in ('JPN', 'KHM')").collect().
+      head(0) should equal (30)
+    sql.sql("select sum(numArticles) from gdelt where actor2Code = 'JPN' AND year = 1979").collect().
+      head(0) should equal (10)
+  }
+
+  it("should be able to parse and use partition filters even if partition has computed column") {
+    import sql.implicits._
+
+    val gdeltDF = sc.parallelize(GdeltTestData.records.toSeq).toDF()
+    gdeltDF.write.format("filodb.spark").
+                 option("dataset", "gdelt3").
+                 option("row_keys", "eventId").
+                 option("segment_key", segCol).
+                 option("partition_keys", ":stringPrefix actor2Code 1,:getOrElse year -1").
                  mode(SaveMode.Overwrite).
                  save()
     val df = sql.read.format("filodb.spark").option("dataset", "gdelt3").load()

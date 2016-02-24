@@ -135,5 +135,16 @@ class ProjectionSpec extends FunSpec with Matchers {
       readOnlyProj.partitionType.asInstanceOf[CompositeKeyType].atomTypes should equal (
                                                Seq(StringKeyType, StringKeyType))
     }
+
+    it("should deserialize readOnlyProjectionStrings with empty columns") {
+      val multiDataset = Dataset("a", Seq("age"), ":string /0", Seq("first", ":getOrElse last --"))
+      val proj = RichProjection(multiDataset, schema)
+      val serialized = proj.toReadOnlyProjString(Nil)
+      val readOnlyProj = RichProjection.readOnlyFromString(serialized)
+
+      readOnlyProj.datasetName should equal (proj.datasetName)
+      readOnlyProj.segmentType should equal (StringKeyType)
+      readOnlyProj.columns should equal (Nil)
+    }
   }
 }

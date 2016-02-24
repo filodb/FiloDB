@@ -10,6 +10,12 @@ import scala.concurrent.duration._
 import filodb.core._
 import filodb.core.metadata.{Column, Projection, RichProjection}
 
+case class SegmentIndex[P, S](binPartition: Types.BinaryPartition,
+                              segmentId: Types.SegmentId,
+                              partition: P,
+                              segment: S,
+                              chunkMap: BinaryChunkRowMap)
+
 /**
  * Encapsulates the reading and scanning logic of the ColumnStore.
  * We are careful to separate out ExecutionContext for reading only.
@@ -41,32 +47,14 @@ trait ColumnStoreScanner extends StrictLogging {
   type ChunkMapInfo = (BinaryPartition, SegmentId, BinaryChunkRowMap)
 
   /**
-   * Reads back all the ChunkRowMaps from multiple segments in a keyRange.
-   * @param keyRange the range of segments to read from, note [start, end) <-- end is exclusive!
-   * @param version the version to read back
-   * @return a sequence of (segmentId, ChunkRowMap)'s
+   * Scans over ChunkRowMaps according to the method.
+   * @return an iterator over SegmentIndex.
    */
-  def readChunkRowMaps(dataset: TableName,
-                       keyRange: BinaryKeyRange,
-                       version: Int)(implicit ec: ExecutionContext): Future[Iterator[ChunkMapInfo]]
-
-  /**
-   * Designed to scan over many many ChunkRowMaps from multiple partitions.  Intended for fast scanning
-   * of many segments, such as reading all the data for one node from a Spark worker.
-   * TODO: how to make passing stuff such as token ranges nicer, but still generic?
-   *
-   * @return an iterator over ChunkRowMaps.  Must be sorted by partitionkey first, then segment Id.
-   */
-  def scanChunkRowMaps(dataset: TableName,
+  def scanChunkRowMaps(projection: RichProjection,
                        version: Int,
-                       params: Map[String, String])
-                      (implicit ec: ExecutionContext): Future[Iterator[ChunkMapInfo]]
-
-  case class SegmentIndex[P, S](binPartition: BinaryPartition,
-                                segmentId: SegmentId,
-                                partition: P,
-                                segment: S,
-                                chunkMap: BinaryChunkRowMap)
+                       method: ScanMethod)
+                      (implicit ec: ExecutionContext):
+    Future[Iterator[SegmentIndex[projection.PK, projection.SK]]]
 
   def toSegIndex(projection: RichProjection, chunkMapInfo: ChunkMapInfo):
         SegmentIndex[projection.PK, projection.SK] = {
@@ -77,42 +65,19 @@ trait ColumnStoreScanner extends StrictLogging {
                  chunkMapInfo._3)
   }
 
-  def readSegments(projection: RichProjection,
-                   columns: Seq[Column],
-                   version: Int)
-                  (keyRange: KeyRange[projection.PK, projection.SK]): Future[Iterator[Segment]] = {
-    implicit val ec = readEc
-    val binKeyRange = projection.toBinaryKeyRange(keyRange)
-    (for { rowMaps <- readChunkRowMaps(projection.datasetName, binKeyRange, version)
-           chunks  <- readChunks(projection.datasetName,
-                                 columns.map(_.name).toSet,
-                                 binKeyRange,
-                                 version) if rowMaps.nonEmpty }
-    yield {
-      val indexMaps = rowMaps.map(crm => toSegIndex(projection, crm))
-      buildSegments(projection, indexMaps.toSeq, chunks, columns).toIterator
-    }).recover {
-      // No chunk maps found, so just return empty list of segments
-      case e: java.util.NoSuchElementException => Iterator.empty
-    }
-  }
-
   // NOTE: this is more or less a single-threaded implementation.  Reads of chunks for multiple columns
   // happen in parallel, but we still block to wait for all of them to come back.
   def scanSegments(projection: RichProjection,
                    columns: Seq[Column],
                    version: Int,
-                   params: Map[String, String] = Map.empty)
-                  (partitionFilter: (projection.PK => Boolean) = (x: projection.PK) => true):
-                     Future[Iterator[Segment]] = {
+                   method: ScanMethod): Future[Iterator[Segment]] = {
     implicit val ec = readEc
-    val segmentGroupSize = params.getOrElse("segment_group_size", "3").toInt
+    val segmentGroupSize = 3
 
-    for { chunkmapsIt <- scanChunkRowMaps(projection.datasetName, version, params) }
+    for { segmentIndexIt <- scanChunkRowMaps(projection, version, method) }
     yield
     (for { // Group by partition key first
-          (part, partChunkMaps) <- chunkmapsIt.map(crm => toSegIndex(projection, crm))
-                                     .filter { case SegmentIndex(_, _, part, _, _) => partitionFilter(part) }
+          (part, partChunkMaps) <- segmentIndexIt
                                      .sortedGroupBy { case SegmentIndex(part, _, _, _, _) => part }
           // Subdivide chunk row maps in each partition so we don't read more than we can chew
           // TODO: make a custom grouping function based on # of rows accumulated

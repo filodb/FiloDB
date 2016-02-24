@@ -9,7 +9,7 @@
 
 ## Datasets
 
-* [GDELT public dataset](http://data.gdeltproject.org/documentation/GDELT-Data_Format_Codebook.pdf) - geo-spatial-political event dataset - used frequently for bulk ingestion testing.  Ingest the first 4 million lines (1979-1984), which comes out to about 1.1GB CSV file.  Entire dataset is more than 250 million rows / 250GB.  See the discussion on README about different modelling options.
+* [GDELT public dataset](http://data.gdeltproject.org/documentation/GDELT-Data_Format_Codebook.pdf) - A geo-spatial-political event dataset.  Ingest the first 4 million lines (1979-1984), which comes out to about 1.1GB CSV file.  Entire dataset is more than 250 million rows / 250GB.  See the discussion on README about different modelling options.
     - To ingest:
 
 ```scala
@@ -25,10 +25,11 @@ csvDF.write.format("filodb.spark").
              mode(SaveMode.Overwrite).save()
 ```
 
-* [NYC Taxi Trip and Fare Info](http://www.andresmh.com/nyctaxitrips/) - really interesting geospatial-temporal public dataset.  Trip data is 2.4GB for one part, ~ 15 million rows, and there are 12 parts.
+* [NYC Taxi Trip and Fare Info](http://www.andresmh.com/nyctaxitrips/) - really interesting geospatial-temporal public time series data.  Contains New York City taxi transactions, and an example of how to handle time series / IoT with many entities. Trip data is 2.4GB for one part, ~ 15 million rows, and there are 12 parts.
     - `select(count("medallion")).show` should result in 14776615 records for the `trip_data_1.csv` (Part 1).   CSV takes around 25 secs on my machine.
-    - Partition by string prefix of medallion gives a pretty even distribution
-    - Segment by pickup_datetime allows range queries by time
+    - Partition by string prefix of medallion gives a pretty even distribution, into 676 shards, of all taxi transactions.  Note that even with this level of sharding, reading data for one taxi/medallion for a given time range is still pretty fast.
+    - Segment by pickup_datetime allows range queries by time.
+      + 14.766 million records divided by (676 partitions * 6 days per segment) =~ rouhgly 4000 records per segment, which is about right
     - id column is a workaround to make a unique ID out of two columns
 
 ```scala
@@ -39,7 +40,7 @@ import org.apache.spark.sql.SaveMode
 taxiDF.write.format("filodb.spark").
   option("dataset", "nyc_taxi").
   option("row_keys", "hack_license,pickup_datetime").
-  option("segment_key", ":stringPrefix medallion 3").
+  option("segment_key", ":timeslice pickup_datetime 6d").
   option("partition_keys", ":stringPrefix medallion 2").
   mode(SaveMode.Overwrite).save()
 ```
