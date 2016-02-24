@@ -11,7 +11,6 @@ import filodb.core._
 import filodb.core.metadata.{Column, Dataset}
 import filodb.core.store.{FilteredPartitionScan, RowWriterSegment, SegmentInfo}
 import filodb.spark.{FiloSetup, FiloRelation}
-import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.functions.sum
 import org.apache.spark.sql.types._
 import org.apache.spark.sql.{DataFrame, Row, SQLContext}
@@ -104,7 +103,7 @@ class SparkReadBenchmark {
   @OutputTimeUnit(TimeUnit.SECONDS)
   def inMemoryColStoreOnly(): Any = {
     val it = FiloRelation.perPartitionRowScanner(filoConfig, readOnlyProjStr, 0,
-                            FilteredPartitionScan(split)).asInstanceOf[Iterator[InternalRow]]
+                            FilteredPartitionScan(split))
     var sum = 0
     while (it.hasNext) {
       val row = it.next

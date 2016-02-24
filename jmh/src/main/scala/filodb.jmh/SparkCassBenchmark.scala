@@ -13,7 +13,6 @@ import filodb.core.metadata.{Column, Dataset, RichProjection}
 import filodb.core.store.{InMemoryColumnStore, RowReaderSegment, RowWriterSegment}
 import filodb.spark.{SparkRowReader, FiloSetup, TypeConverters}
 import org.apache.spark.sql.{DataFrame, Row, SQLContext}
-import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.types._
 import org.apache.spark.sql.functions.sum
 import org.apache.spark.{SparkContext, SparkException, SparkConf}

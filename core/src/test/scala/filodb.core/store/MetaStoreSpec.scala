@@ -14,7 +14,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
   import MetaStore._
 
   def metaStore: MetaStore
-  def defaultPatience: PatienceConfig
+  implicit def defaultPatience: PatienceConfig
 
   override def beforeAll() {
     super.beforeAll()

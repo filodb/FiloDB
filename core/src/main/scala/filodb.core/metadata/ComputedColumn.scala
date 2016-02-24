@@ -26,6 +26,7 @@ object ComputedColumn {
   val AllComputations = Seq(ConstStringComputation,
                             GetOrElseComputation,
                             RoundComputation,
+                            TimesliceComputation,
                             StringPrefixComputation)
   val nameToComputation = AllComputations.map { comp => comp.funcName -> comp }.toMap
 
@@ -135,17 +136,31 @@ trait SingleColumnComputation extends ColumnComputation {
     yield { SingleColumnInfo(args(0), args(1), sourceColIndex, sourceColType) }
   }
 
-  def computedColumn(expr: String, dataset: TableName, c: SingleColumnInfo)
-                    (readerFunc: RowReader => c.keyType.T): ComputedColumn = {
-    val computedKeyType = ComputedKeyTypes.getComputedType(c.keyType)(readerFunc)
-    ComputedColumn(0, expr, dataset, c.colType, Seq(c.sourceColumn), computedKeyType)
+  def computedColumn(expr: String,
+                     dataset: TableName,
+                     sourceColumns: Seq[String],
+                     colType: Column.ColumnType,
+                     keyType: KeyType)
+                    (readerFunc: RowReader => keyType.T): ComputedColumn = {
+    val computedKeyType = ComputedKeyTypes.getComputedType(keyType)(readerFunc)
+    ComputedColumn(0, expr, dataset, colType, sourceColumns, computedKeyType)
   }
 
   def computedColumnWithDefault(expr: String, dataset: TableName, c: SingleColumnInfo)
-                    (default: c.keyType.T)(valueFunc: c.keyType.T => c.keyType.T): ComputedColumn = {
-    val extractor = c.keyType.asInstanceOf[SingleKeyTypeBase[c.keyType.T]].extractor
-    val colIndex = c.colIndex
-    computedColumn(expr, dataset, c) { (r: RowReader) =>
+                    (default: c.keyType.T)(valueFunc: c.keyType.T => c.keyType.T): ComputedColumn =
+    computedColumnWithDefault(expr, dataset, c, c.colType, c.keyType)(default)(valueFunc)
+
+  def computedColumnWithDefault(expr: String,
+                                dataset: TableName,
+                                sourceColInfo: SingleColumnInfo,
+                                colType: Column.ColumnType,
+                                destKeyType: KeyType)
+                               (default: destKeyType.T)
+                               (valueFunc: sourceColInfo.keyType.T => destKeyType.T): ComputedColumn = {
+    val extractor = sourceColInfo.keyType.asInstanceOf[SingleKeyTypeBase[sourceColInfo.keyType.T]].extractor
+    val colIndex = sourceColInfo.colIndex
+    computedColumn(expr, dataset, Seq(sourceColInfo.sourceColumn), colType, destKeyType) {
+    (r: RowReader) =>
       if (r.notNull(colIndex)) {
         valueFunc(extractor.getField(r, colIndex))
       } else { default }

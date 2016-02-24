@@ -1,5 +1,6 @@
 package filodb.core.metadata
 
+import java.sql.Timestamp
 import org.scalactic._
 import org.velvia.filo.TupleRowReader
 
@@ -87,6 +88,34 @@ class ComputedColumnSpec extends FunSpec with Matchers {
       proj.rowKeyFunc(TupleRowReader((Some(1.999), None))) should equal (0.0)
       proj.rowKeyFunc(TupleRowReader((Some(3.999), None))) should equal (2.0)
       proj.rowKeyFunc(TupleRowReader((Some(2.00001), None))) should equal (2.0)
+    }
+  }
+
+  describe(":timeslice") {
+    it("should return BadArgument if time duration string not formatted properly") {
+      val resp = RichProjection.make(dataset.copy(
+                                       partitionColumns = Seq(":timeslice age 2zz")), schema)
+      resp.isBad should be (true)
+      resp.recover {
+        case ComputedColumnErrs(Seq(BadArgument(reason))) =>
+          reason should include ("Could not parse time unit")
+      }
+    }
+
+    it("should timeslice long values as milliseconds") {
+      val proj = RichProjection(dataset.copy(partitionColumns = Seq(":timeslice age 5s")), schema)
+      val partFunc = proj.partitionKeyFunc
+
+      partFunc(TupleRowReader(names(1))) should equal (0L)
+      partFunc(TupleRowReader(names(1).copy(_3 = Some(9999L)))) should equal (5000L)
+    }
+
+    it("should timeslice Timestamp values") {
+      val tsDataset = Dataset("a", ":timeslice ts 5m", ":string /0")
+      val tsColumn = DataColumn(0, "ts", "a", 0, Column.ColumnType.TimestampColumn)
+      val proj = RichProjection(tsDataset, Seq(tsColumn))
+
+      proj.rowKeyFunc(TupleRowReader((Some(new Timestamp(300001L)), None))) should equal (300000L)
     }
   }
 

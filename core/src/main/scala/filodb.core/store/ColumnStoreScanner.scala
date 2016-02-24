@@ -10,6 +10,12 @@ import scala.concurrent.duration._
 import filodb.core._
 import filodb.core.metadata.{Column, Projection, RichProjection}
 
+case class SegmentIndex[P, S](binPartition: Types.BinaryPartition,
+                              segmentId: Types.SegmentId,
+                              partition: P,
+                              segment: S,
+                              chunkMap: BinaryChunkRowMap)
+
 /**
  * Encapsulates the reading and scanning logic of the ColumnStore.
  * We are careful to separate out ExecutionContext for reading only.
@@ -49,12 +55,6 @@ trait ColumnStoreScanner extends StrictLogging {
                        method: ScanMethod)
                       (implicit ec: ExecutionContext):
     Future[Iterator[SegmentIndex[projection.PK, projection.SK]]]
-
-  case class SegmentIndex[P, S](binPartition: BinaryPartition,
-                                segmentId: SegmentId,
-                                partition: P,
-                                segment: S,
-                                chunkMap: BinaryChunkRowMap)
 
   def toSegIndex(projection: RichProjection, chunkMapInfo: ChunkMapInfo):
         SegmentIndex[projection.PK, projection.SK] = {

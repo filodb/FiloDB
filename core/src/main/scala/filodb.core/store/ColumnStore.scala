@@ -12,7 +12,7 @@ import spray.caching._
 import filodb.core._
 import filodb.core.metadata.{Column, Projection, RichProjection}
 
-trait ScanMethod
+sealed trait ScanMethod
 case class SinglePartitionScan(partition: Any) extends ScanMethod
 case class SinglePartitionRangeScan(keyRange: KeyRange[_, _]) extends ScanMethod
 case class FilteredPartitionScan(split: ScanSplit,

@@ -149,6 +149,8 @@ The PRIMARY KEY for FiloDB consists of (partition key, row key).  When choosing 
 
 Specifying the partitioning column is optional.  If a partitioning column is not specified, FiloDB will create a default one with a fixed value, which means everything will be thrown into one node, and is only suitable for small amounts of data.  If you don't specify a partitioning column, then you have to make sure your row keys are all unique.
 
+For examples of data modeling and choosing keys, see the examples below as well as [datasets](doc/datasets_reading.md).
+
 ### Computed Columns
 
 You may specify a function, or computed column, for use with any key column.  This is especially useful for working around the non-null requirement for keys, or for computing a good segment key.
@@ -159,6 +161,7 @@ You may specify a function, or computed column, for use with any key column.  Th
 | getOrElse | returns default value if column value is null | `:getOrElse columnA ---` |
 | round     | rounds down a numeric column.  Useful for bucketing by time or bucketing numeric IDs.  | `:round timestamp 10000` |
 | stringPrefix | takes the first N chars of a string; good for partitioning | `:stringPrefix token 4` |
+| timeslice | bucketizes a Long (millisecond) or Timestamp column using duration strings - 500ms, 5s, 10m, 3h, etc. | `:timeslice arrivalTime 30s` |
 
 ### FiloDB vs Cassandra Data Modelling
 

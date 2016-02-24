@@ -62,6 +62,8 @@ lazy val extraRepos = Seq(
 val excludeShapeless = ExclusionRule(organization = "com.chuusai")
 // Zookeeper pulls in slf4j-log4j12 which we DON'T want
 val excludeZK = ExclusionRule(organization = "org.apache.zookeeper")
+// This one is brought by Spark by default
+val excludeSlf4jLog4j = ExclusionRule(organization = "org.slf4j", name = "slf4j-log4j12")
 
 lazy val coreDeps = Seq(
   "com.typesafe.scala-logging" %% "scala-logging-slf4j" % "2.1.2",
@@ -100,13 +102,14 @@ lazy val cliDeps = Seq(
 )
 
 lazy val sparkDeps = Seq(
-  "org.apache.spark"     %% "spark-sql"         % "1.4.1" % "provided",
-  "org.apache.spark"     %% "spark-streaming"   % "1.4.1" % "provided"
+  // We don't want LOG4J.  We want Logback!  The excludeZK is to help with a conflict re Coursier plugin.
+  "org.apache.spark"     %% "spark-sql"         % "1.4.1" % "provided" excludeAll(excludeSlf4jLog4j, excludeZK),
+  "org.apache.spark"     %% "spark-streaming"   % "1.4.1" % "provided" excludeAll(excludeSlf4jLog4j, excludeZK)
 )
 
 lazy val jmhDeps = Seq(
   "com.nativelibs4java"  %% "scalaxy-loops"     % "0.3.3" % "provided",
-  "org.apache.spark"     %% "spark-sql"         % "1.5.2"
+  "org.apache.spark"     %% "spark-sql"         % "1.4.1" excludeAll(excludeSlf4jLog4j, excludeZK)
 )
 
 //////////////////////////
