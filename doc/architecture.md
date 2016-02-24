@@ -32,6 +32,8 @@ The core module has an [InMemoryColumnStore](core/src/main/scala/filodb.core/sto
 
 On the read side, the [ColumnStoreScanner](core/src/main/scala/filodb.core/store/ColumnStoreScanner.scala) contains APIs for reading out segments and rows using various `ScanMethod`s - there are ones for single partition queries, queries that span multiple partitions using custom filtering functions, etc.  Helper functions in [KeyFilter](core/src/main/scala/filodb.core/query/KeyFilter.scala) help compose functions for filtered scanning.
 
+All `ColumnStore` and `MetaStore` APIs are Scala Future based to take maximum advantage of CPU and nonblocking behavior.
+
 FiloDB datasets consists of one or more projections, each of which contains columns.  The [MetaStore](core/src/main/scala/filodb.core/store/MetaStore.scala) defines an API for concurrent reads/writes/updates on dataset, projection, and column metadata.  Each [Column](core/src/main/scala/filodb.core/metadata/Column.scala) has a `ColumnType`, which has a [KeyType](core/src/main/scala/filodb.core/metadata/KeyType.scala).  `KeyType` is a fundamental type class defining serialization and extraction for each type of column/key.  Most of FiloDB depends heavily on [RichProjection](core/src/main/scala/filodb.core/metadata/Projection.scala), which contains the partition, row, and segment key columns and their `KeyType`s.
 
 ### Cassandra
