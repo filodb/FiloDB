@@ -149,6 +149,8 @@ The PRIMARY KEY for FiloDB consists of (partition key, row key).  When choosing 
 
 Specifying the partitioning column is optional.  If a partitioning column is not specified, FiloDB will create a default one with a fixed value, which means everything will be thrown into one node, and is only suitable for small amounts of data.  If you don't specify a partitioning column, then you have to make sure your row keys are all unique.
 
+For examples of data modeling and choosing keys, see the examples below as well as [datasets](doc/datasets_reading.md).
+
 ### Computed Columns
 
 You may specify a function, or computed column, for use with any key column.  This is especially useful for working around the non-null requirement for keys, or for computing a good segment key.
