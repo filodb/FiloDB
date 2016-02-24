@@ -148,7 +148,8 @@ extends CachedMergingColumnStore with CassandraColumnStoreScanner with StrictLog
 
 case class CassandraTokenRangeSplit(startToken: String, endToken: String,
                                     replicas: Set[InetSocketAddress]) extends ScanSplit {
-  def hostnames: Set[String] = replicas.map(_.getHostName)
+  // NOTE: You need both the host string and the IP address for Spark's locality to work
+  def hostnames: Set[String] = replicas.flatMap(r => Set(r.getHostString, r.getAddress.getHostAddress))
 }
 
 trait CassandraColumnStoreScanner extends ColumnStoreScanner with StrictLogging {
