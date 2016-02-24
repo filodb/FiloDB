@@ -50,6 +50,7 @@ NOTE: for a stress testing scenario use `:stringPrefix medallion 3` as a segment
 * [Weather Datasets and APIs](https://github.com/killrweather/killrweather/wiki/9.-Weather-Data-Sources-and-APIs)
     - Also see the [KillrWeather](https://github.com/killrweather/killrweather/tree/master/data/load) data sets
 * [Airline on-time performance data](http://stat-computing.org/dataexpo/2009/) - nearly 120 million records, 16GB uncompressed
+* [PCoE NASA Datasets](http://ti.arc.nasa.gov/tech/dash/pcoe/prognostic-data-repository/) - a series of time series datasets used for modeling and prediction of failure scenarios 
 
 ## Reading Material (Mostly for FiloDB research)
 
