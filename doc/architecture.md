@@ -2,7 +2,7 @@
 <!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
 **Table of Contents**  *generated with [DocToc](https://github.com/thlorenz/doctoc)*
 
-- [FiloDB Architecture Overview](#filodb-architecture-overview)
+- [FiloDB Architecture and Code Overview](#filodb-architecture-overview)
   - [Coordinator](#coordinator)
   - [Core](#core)
   - [Cassandra](#cassandra)
@@ -10,7 +10,7 @@
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
-## FiloDB Architecture Overview
+## FiloDB Architecture and Code Overview
 
 ![FiloDB Architecture](filodb_architecture.png)
 
