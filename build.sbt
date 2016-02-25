@@ -103,7 +103,7 @@ lazy val cliDeps = Seq(
 
 lazy val sparkDeps = Seq(
   // We don't want LOG4J.  We want Logback!  The excludeZK is to help with a conflict re Coursier plugin.
-  "org.apache.spark"     %% "spark-sql"         % "1.5.2" % "provided" excludeAll(excludeSlf4jLog4j, excludeZK),
+  "org.apache.spark"     %% "spark-hive"        % "1.5.2" % "provided" excludeAll(excludeSlf4jLog4j, excludeZK),
   "org.apache.spark"     %% "spark-streaming"   % "1.5.2" % "provided" excludeAll(excludeSlf4jLog4j, excludeZK)
 )
 

@@ -142,7 +142,7 @@ case class FiloRelation(dataset: String,
                         version: Int = 0,
                         splitsPerNode: Int = 1)
                        (@transient val sqlContext: SQLContext)
-    extends BaseRelation with TableScan with PrunedScan with PrunedFilteredScan with StrictLogging {
+    extends BaseRelation with InsertableRelation with PrunedScan with PrunedFilteredScan with StrictLogging {
   import TypeConverters._
   import FiloRelation._
 
@@ -157,6 +157,9 @@ case class FiloRelation(dataset: String,
 
   // Return false when returning RDD[InternalRow]
   override def needConversion: Boolean = false
+
+  override def insert(data: DataFrame, overwrite: Boolean): Unit =
+    sqlContext.insertIntoFilo(data, dataset, version, overwrite)
 
   def buildScan(): RDD[Row] = buildScan(filoSchema.keys.toArray)
 

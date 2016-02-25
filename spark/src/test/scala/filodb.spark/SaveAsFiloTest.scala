@@ -3,7 +3,8 @@ package filodb.spark
 import com.typesafe.config.ConfigFactory
 import java.sql.Timestamp
 import org.apache.spark.{SparkContext, SparkException, SparkConf}
-import org.apache.spark.sql.{SaveMode, SQLContext}
+import org.apache.spark.sql.SaveMode
+import org.apache.spark.sql.hive.HiveContext
 import org.scalatest.time.{Millis, Seconds, Span}
 import scala.concurrent.duration._
 
@@ -38,7 +39,7 @@ with Matchers with ScalaFutures {
                             .set("spark.filodb.cassandra.keyspace", "unittest")
                             .set("spark.filodb.memtable.min-free-mb", "10")
   val sc = new SparkContext(conf)
-  val sql = new SQLContext(sc)
+  val sql = new HiveContext(sc)
 
   val segCol = ":string 0"
   val partKeys = Seq(":string part0")
@@ -227,6 +228,20 @@ with Matchers with ScalaFutures {
 
     val df = sql.read.format("filodb.spark").option("dataset", "gdelt2").load()
     df.agg(sum("year")).collect().head(0) should equal (8062)
+  }
+
+  it("should append data using SQL INSERT INTO statements") {
+    sql.saveAsFilo(dataDF2, "gdelt1", Seq("id"), segCol, partKeys,
+                          writeTimeout = 2.minutes)
+    sql.saveAsFilo(dataDF, "gdelt2", Seq("id"), segCol, partKeys,
+                          writeTimeout = 2.minutes)
+
+    val gdelt1 = sql.filoDataset("gdelt1")
+    val gdelt2 = sql.filoDataset("gdelt2")
+    gdelt1.registerTempTable("gdelt1")
+    gdelt2.registerTempTable("gdelt2")
+    sql.sql("INSERT INTO table gdelt2 SELECT * FROM gdelt1").count()
+    gdelt2.agg(sum("year")).collect().head(0) should equal (8062)
   }
 
   // Also test that we can read back from just one partition
