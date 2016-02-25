@@ -154,6 +154,20 @@ with Matchers with ScalaFutures {
     df.select(count("id")).collect().head(0) should equal (3)
   }
 
+  it("should throw error in ErrorIfExists mode if dataset already exists") {
+    sql.saveAsFilo(dataDF, "gdelt2", Seq("id"), segCol, partKeys,
+                          writeTimeout = 2.minutes)
+
+    intercept[RuntimeException] {
+      // The default mode is ErrorIfExists
+      dataDF.write.format("filodb.spark").
+                   option("dataset", "gdelt2").
+                   option("row_keys", "id").
+                   option("segment_key", segCol).
+                   save()
+    }
+  }
+
   it("should write and read using DF write() and read() APIs") {
     dataDF.write.format("filodb.spark").
                  option("dataset", "test1").
@@ -181,14 +195,23 @@ with Matchers with ScalaFutures {
                  save()
 
     // Data is different, should not append, should overwrite
+    // Also try changing one of the keys and ensure dataset is rewritten
+    val newSegCol = ":string AA"
     dataDF2.write.format("filodb.spark").
                  option("dataset", "gdelt1").
                  option("row_keys", "id").
-                 option("segment_key", segCol).
+                 option("segment_key", newSegCol).
                  mode(SaveMode.Overwrite).
                  save()
 
     val df = sql.read.format("filodb.spark").option("dataset", "gdelt1").load()
+    df.agg(sum("year")).collect().head(0) should equal (4032)
+
+    val dsObj = metaStore.getDataset("gdelt1").futureValue
+    dsObj.projections.head.segmentColId should equal (newSegCol)
+
+    // Also try overwriting with insert API
+    sql.insertIntoFilo(dataDF2, "gdelt1", overwrite = true)
     df.agg(sum("year")).collect().head(0) should equal (4032)
   }
 
@@ -200,12 +223,7 @@ with Matchers with ScalaFutures {
                  mode(SaveMode.Append).
                  save()
 
-    dataDF2.write.format("filodb.spark").
-                 option("dataset", "gdelt2").
-                 option("row_keys", "id").
-                 option("segment_key", segCol).
-                 mode(SaveMode.Append).
-                 save()
+    sql.insertIntoFilo(dataDF2, "gdelt2")
 
     val df = sql.read.format("filodb.spark").option("dataset", "gdelt2").load()
     df.agg(sum("year")).collect().head(0) should equal (8062)

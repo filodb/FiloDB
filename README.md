@@ -318,7 +318,7 @@ val df = sqlContext.read.format("filodb.spark").option("dataset", "gdelt").load(
 
 The dataset can be queried using the DataFrame DSL. See the section [Querying Datasets](#querying-datasets) for examples.
 
-### Spark/Scala API
+### Spark/Scala/Java API
 
 There is a more typesafe API than the Spark Data Source API.
 
@@ -343,6 +343,13 @@ The API for creating a DataFrame is also much more concise:
 
 ```scala
 val df = sqlContext.filoDataset("gdelt")
+```
+
+The above method calls rely on an implicit conversion. From Java, you would need to create a new `FiloContext` first:
+
+```java
+FiloContext fc = new filodb.spark.FiloContext(sqlContext);
+fc.insertIntoFilo(df, "gdelt");
 ```
 
 ### Spark Streaming Example
