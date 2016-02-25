@@ -25,7 +25,13 @@ case class Projection(id: Int,
                       reverse: Boolean = false,
                       // Nil columns means all columns
                       // Must include the rowKeyColumns and segmentColumn.
-                      columns: Seq[ColumnId] = Nil)
+                      columns: Seq[ColumnId] = Nil) {
+  def detailedString: String =
+    s"Projection $id from dataset $dataset:\n" +
+    s"  Key columns: ${keyColIds.mkString(", ")}\n" +
+    s"  Segment column: $segmentColId\n" +
+    s"  Projection columns: ${columns.mkString(", ")}"
+}
 
 /**
  * This is a Projection with information filled out from Dataset and Columns.
