@@ -222,7 +222,7 @@ Currently, FiloDB is a library in Spark and requires the user to distribute data
 * The easiest strategy to accomplish this is to have data partitioned via a queue such as Kafka.  That way, when the data comes into Spark Streaming, it is already partitioned correctly.
 * Another way of accomplishing this is to use a DataFrame's `sort` method before using the DataFrame write API.
 
-## Using FiloDB data-source with Spark
+## Using FiloDB Data Source with Spark
 
 FiloDB has a Spark data-source module - `filodb.spark`. So, you can use the Spark Dataframes `read` and `write` APIs with FiloDB. To use it, follow the steps below
 
@@ -265,7 +265,7 @@ Some options must be configured before starting the Spark Shell or Spark applica
 1. Modify the `application.conf` and rebuild, or repackage a new configuration.
 2. Override the built in defaults by setting SparkConf configuration values, preceding the filo settings with `spark.filodb`.  For example, to change the keyspace, pass `--conf spark.filodb.cassandra.keyspace=mykeyspace` to Spark Shell/Submit.  To use the fast in-memory column store instead of Cassandra, pass `--conf spark.filodb.store=in-memory`.
 
-### Spark data-source Example (spark-shell)
+### Spark Data Source API Example (spark-shell)
 
 You can follow along using the [Spark Notebook](http://github.com/andypetrella/spark-notebook) in doc/FiloDB.snb....  launch the notebook using `EXTRA_CLASSPATH=$FILO_JAR ADD_JARS=$FILO_JAR ./bin/spark-notebook &` where `FILO_JAR` is the path to `filodb-spark-assembly` jar.
 
@@ -318,6 +318,33 @@ val df = sqlContext.read.format("filodb.spark").option("dataset", "gdelt").load(
 
 The dataset can be queried using the DataFrame DSL. See the section [Querying Datasets](#querying-datasets) for examples.
 
+### Spark/Scala API
+
+There is a more typesafe API than the Spark Data Source API.
+
+```scala
+import filodb.spark._
+sqlContext.saveAsFilo(df, "gdelt",
+                      rowKeys = Seq("GLOBALEVENTID"),
+                      segmentKey = ":round GLOBALEVENTID 10000",
+                      partitionKeys = Seq(":getOrElse MonthYear -1"))
+```
+
+The above creates the gdelt table based on the keys above, and also inserts data from the dataframe df.
+
+There is also an API purely for inserting data... after all, specifying the keys is not needed when inserting into an existing table.
+
+```scala
+import filodb.spark._
+sqlContext.insertIntoFilo(df, "gdelt")
+```
+
+The API for creating a DataFrame is also much more concise:
+
+```scala
+val df = sqlContext.filoDataset("gdelt")
+```
+
 ### Spark Streaming Example
 
 It's not difficult to ingest data into FiloDB using Spark Streaming.  Simple use `foreachRDD` on your `DStream` and then [transform each RDD into a DataFrame](https://spark.apache.org/docs/latest/streaming-programming-guide.html#dataframe-and-sql-operations).
@@ -343,6 +370,8 @@ Create a temporary table using an existing dataset,
 ```
 
 Then, start running SQL queries!
+
+NOTE: you can also create permanent entries into the Hive MetaStore with `create table`.
 
 NOTE: The above syntax should also work with remote SQL clients like beeline / spark-beeline.  Just run the Hive ThriftServer that comes with Spark (NOTE: not all distributions of Spark comes with this, you may need to built it).
 

@@ -24,7 +24,7 @@ object SaveAsFiloTest {
 }
 
 /**
- * Test saveAsFiloDataset
+ * Test saveAsFilo
  */
 class SaveAsFiloTest extends FunSpec with BeforeAndAfter with BeforeAndAfterAll
 with Matchers with ScalaFutures {
@@ -95,7 +95,7 @@ with Matchers with ScalaFutures {
   import org.apache.spark.sql.functions._
 
   it("should create missing columns and partitions and write table") {
-    sql.saveAsFiloDataset(dataDF, "gdelt1", Seq("id"), segCol, partKeys,
+    sql.saveAsFilo(dataDF, "gdelt1", Seq("id"), segCol, partKeys,
                           writeTimeout = 2.minutes)
 
     // Now read stuff back and ensure it got written
@@ -114,7 +114,7 @@ with Matchers with ScalaFutures {
     metaStore.newColumn(idStrCol).futureValue should equal (Success)
 
     intercept[ColumnTypeMismatch] {
-      sql.saveAsFiloDataset(dataDF, "gdelt2", Seq("id"), segCol, partKeys)
+      sql.saveAsFilo(dataDF, "gdelt2", Seq("id"), segCol, partKeys)
     }
   }
 
@@ -146,7 +146,7 @@ with Matchers with ScalaFutures {
     val idStrCol = DataColumn(0, "id", "gdelt1", 0, Column.ColumnType.LongColumn)
     metaStore.newColumn(idStrCol).futureValue should equal (Success)
 
-    sql.saveAsFiloDataset(dataDF, "gdelt1", Seq("id"), segCol, partKeys,
+    sql.saveAsFilo(dataDF, "gdelt1", Seq("id"), segCol, partKeys,
                           writeTimeout = 2.minutes)
 
     // Now read stuff back and ensure it got written
