@@ -34,7 +34,9 @@ class CassandraMetaStore(config: Config)
     datasetTable.getDataset(name)
 
   def deleteDataset(name: String): Future[Response] =
-    datasetTable.deleteDataset(name)
+    for { dtResp <- datasetTable.deleteDataset(name)
+          ctResp <- columnTable.deleteDataset(name) }
+    yield { ctResp }
 
   def insertColumn(column: DataColumn): Future[Response] =
     columnTable.insertColumn(column)

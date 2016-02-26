@@ -35,16 +35,18 @@ See [architecture](doc/architecture.md) and [datasets and reading](doc/datasets_
   - [Data Modelling and Performance Considerations](#data-modelling-and-performance-considerations)
   - [Example FiloDB Schema for machine metrics](#example-filodb-schema-for-machine-metrics)
   - [Distributed Partitioning](#distributed-partitioning)
-- [Using FiloDB data-source with Spark](#using-filodb-data-source-with-spark)
+- [Using FiloDB Data Source with Spark](#using-filodb-data-source-with-spark)
   - [Configuring FiloDB](#configuring-filodb)
-  - [Spark data-source Example (spark-shell)](#spark-data-source-example-spark-shell)
+  - [Spark Data Source API Example (spark-shell)](#spark-data-source-api-example-spark-shell)
+  - [Spark/Scala/Java API](#sparkscalajava-api)
   - [Spark Streaming Example](#spark-streaming-example)
-  - [Spark SQL Example (spark-sql)](#spark-sql-example-spark-sql)
+  - [SQL/Hive Example](#sqlhive-example)
   - [Querying Datasets](#querying-datasets)
 - [Using the CLI](#using-the-cli)
     - [CLI Example](#cli-example)
 - [Current Status](#current-status)
 - [Deploying](#deploying)
+- [Code Walkthrough](#code-walkthrough)
 - [Building and Testing](#building-and-testing)
 - [You can help!](#you-can-help)
 
@@ -109,7 +111,10 @@ Your input is appreciated!
     - Or, use FiloDB's in-memory column store with Spark (does not work with CLI). Pass the `--conf spark.filodb.store=in-memory` to `spark-submit` / `spark-shell`.  This is a great option to test things out, and is really really fast!
 
 3. For Cassandra, run `filo-cli --command init` to initialize the default `filodb` keyspace.
-4. Now, you can use Spark to ingest/query, or the CLI to ingest/examine metadata.
+4. Dataset creation can be done using `filo-cli` or using Spark Shell / Scala/Java API.
+5. Inserting data can be done using `filo-cli` (CSV only), using Spark SQL/JDBC (INSERT INTO), or the Spark Shell / Scala / Java API.
+6. Querying is done using Spark SQL/JDBC or Scala/Java API.
+7. Listing/deleting/maintenance can be done using `filo-cli`.  If using Cassandra, `cqlsh` can also be used to inspect metadata.
 
 Note: There is at least one release out now, tagged via Git and also located in the "Releases" tab on Github.
 
@@ -169,6 +174,7 @@ You may specify a function, or computed column, for use with any key column.  Th
 * Like Cassandra, a single partition is the smallest unit of parallelism when querying from Spark
 * Wider rows work better for FiloDB (bigger chunk/segment size)
 * FiloDB does not have Cassandra's restrictions for partition key filtering. You can filter by any partition keys with most operators.  This means less tables in FiloDB can match more query patterns.
+* Cassandra range scans over clustering keys is available over the segment key
 
 ### Data Modelling and Performance Considerations
 
@@ -221,7 +227,7 @@ Currently, FiloDB is a library in Spark and requires the user to distribute data
 * The easiest strategy to accomplish this is to have data partitioned via a queue such as Kafka.  That way, when the data comes into Spark Streaming, it is already partitioned correctly.
 * Another way of accomplishing this is to use a DataFrame's `sort` method before using the DataFrame write API.
 
-## Using FiloDB data-source with Spark
+## Using FiloDB Data Source with Spark
 
 FiloDB has a Spark data-source module - `filodb.spark`. So, you can use the Spark Dataframes `read` and `write` APIs with FiloDB. To use it, follow the steps below
 
@@ -264,7 +270,7 @@ Some options must be configured before starting the Spark Shell or Spark applica
 1. Modify the `application.conf` and rebuild, or repackage a new configuration.
 2. Override the built in defaults by setting SparkConf configuration values, preceding the filo settings with `spark.filodb`.  For example, to change the keyspace, pass `--conf spark.filodb.cassandra.keyspace=mykeyspace` to Spark Shell/Submit.  To use the fast in-memory column store instead of Cassandra, pass `--conf spark.filodb.store=in-memory`.
 
-### Spark data-source Example (spark-shell)
+### Spark Data Source API Example (spark-shell)
 
 You can follow along using the [Spark Notebook](http://github.com/andypetrella/spark-notebook) in doc/FiloDB.snb....  launch the notebook using `EXTRA_CLASSPATH=$FILO_JAR ADD_JARS=$FILO_JAR ./bin/spark-notebook &` where `FILO_JAR` is the path to `filodb-spark-assembly` jar.
 
@@ -317,19 +323,55 @@ val df = sqlContext.read.format("filodb.spark").option("dataset", "gdelt").load(
 
 The dataset can be queried using the DataFrame DSL. See the section [Querying Datasets](#querying-datasets) for examples.
 
+### Spark/Scala/Java API
+
+There is a more typesafe API than the Spark Data Source API.
+
+```scala
+import filodb.spark._
+sqlContext.saveAsFilo(df, "gdelt",
+                      rowKeys = Seq("GLOBALEVENTID"),
+                      segmentKey = ":round GLOBALEVENTID 10000",
+                      partitionKeys = Seq(":getOrElse MonthYear -1"))
+```
+
+The above creates the gdelt table based on the keys above, and also inserts data from the dataframe df.
+
+There is also an API purely for inserting data... after all, specifying the keys is not needed when inserting into an existing table.
+
+```scala
+import filodb.spark._
+sqlContext.insertIntoFilo(df, "gdelt")
+```
+
+The API for creating a DataFrame is also much more concise:
+
+```scala
+val df = sqlContext.filoDataset("gdelt")
+```
+
+The above method calls rely on an implicit conversion. From Java, you would need to create a new `FiloContext` first:
+
+```java
+FiloContext fc = new filodb.spark.FiloContext(sqlContext);
+fc.insertIntoFilo(df, "gdelt");
+```
+
 ### Spark Streaming Example
 
 It's not difficult to ingest data into FiloDB using Spark Streaming.  Simple use `foreachRDD` on your `DStream` and then [transform each RDD into a DataFrame](https://spark.apache.org/docs/latest/streaming-programming-guide.html#dataframe-and-sql-operations).
 
 For an example, see the [StreamingTest](spark/src/test/scala/filodb.spark/StreamingTest.scala).
 
-### Spark SQL Example (spark-sql)
+### SQL/Hive Example
 
 Start Spark-SQL:
 
 ```bash
   bin/spark-sql --jars path/to/FiloDB/spark/target/scala-2.10/filodb-spark-assembly-0.2-SNAPSHOT.jar
 ```
+
+(NOTE: if you want to connect with a real Hive Metastore, you should probably instead start the thrift server, also adding the `--jars` above, and then start the `spark-beeline` client)
 
 Create a temporary table using an existing dataset,
 
@@ -343,7 +385,19 @@ Create a temporary table using an existing dataset,
 
 Then, start running SQL queries!
 
-NOTE: The above syntax should also work with remote SQL clients like beeline / spark-beeline.  Just run the Hive ThriftServer that comes with Spark (NOTE: not all distributions of Spark comes with this, you may need to built it).
+You probably want to create a permanent Hive Metastore entry so you don't have to run `create temporary table` every single time at startup:
+
+```sql
+  CREATE TABLE gdelt using filodb.spark options (dataset "gdelt");
+```
+
+Once this is done, you could insert data using SQL syntax:
+
+```sql
+  INSERT INTO TABLE gdelt SELECT * FROM othertable;
+```
+
+Of course, this assumes `othertable` has a similar schema.
 
 ### Querying Datasets
 
@@ -434,6 +488,10 @@ Query/export some columns:
 The current version assumes Spark 1.5.x and Cassandra 2.1.x or 2.2.x.
 
 There is a branch for Datastax Enterprise 4.8 / Spark 1.4.  Note that if you are using DSE or have vnodes enabled, a lower number of vnodes (16 or less) is STRONGLY recommended as higher numbers of vnodes slows down queries substantially and basically prevents subsecond queries from happening.
+
+## Code Walkthrough
+
+Please go to the [architecture](doc/architecture.md) doc.
 
 ## Building and Testing
 

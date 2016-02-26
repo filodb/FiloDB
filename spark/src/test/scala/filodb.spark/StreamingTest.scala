@@ -77,7 +77,8 @@ with Matchers with ScalaFutures {
           option("dataset", largeDataset.name).
           option("row_keys", "age").
           option("segment_key", ":string 0").
-          option("partition_keys", "league").save()
+          option("partition_keys", "league").
+          mode(SaveMode.Append).save()
     }
     ssc.start()
     ssc.awaitTerminationOrTimeout(16000)

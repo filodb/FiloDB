@@ -32,12 +32,12 @@ object KeyFilter {
   // ComputedColumns so that proper transformation of a value can happen for predicate pushdowns.
   // For example, if a partition column uses :stringPrefix, then apply that first to a value.
   def parseSingleValue(kt: KeyType)(value: Any): kt.T = {
-    val keyFunc = kt.getKeyFunc(Array[Int]())
+    val keyFunc = kt.getKeyFunc(Array(0))
     keyFunc(SingleValueRowReader(value)).asInstanceOf[kt.T]
   }
 
   def parseValues(kt: KeyType)(values: Iterable[Any]): Iterable[kt.T] = {
-    val keyFunc = kt.getKeyFunc(Array[Int]())
+    val keyFunc = kt.getKeyFunc(Array(0))
     values.map(v => keyFunc(SingleValueRowReader(v)).asInstanceOf[kt.T])
   }
 

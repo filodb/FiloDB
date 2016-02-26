@@ -59,4 +59,7 @@ with FiloCassandraConnector {
           .ifNotExists
           .future().toResponse(AlreadyExists)
   }
+
+  def deleteDataset(dataset: String): Future[Response] =
+    delete.where(_.dataset eqs dataset).future().toResponse()
 }

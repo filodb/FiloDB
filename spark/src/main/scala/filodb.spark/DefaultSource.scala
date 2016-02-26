@@ -51,9 +51,9 @@ class DefaultSource extends RelationProvider with CreatableRelationProvider {
     val partitionKeys = parameters.get("partition_keys").map(_.split(',').toSeq).getOrElse(Nil)
     val chunkSize = parameters.get("chunk_size").map(_.toInt)
 
-    sqlContext.saveAsFiloDataset(data, dataset,
-                                 rowKeys, segKey, partitionKeys, version,
-                                 chunkSize, mode)
+    sqlContext.saveAsFilo(data, dataset,
+                          rowKeys, segKey, partitionKeys, version,
+                          chunkSize, mode)
 
     // The below is inefficient as it reads back the schema that was written earlier - though it shouldn't
     // take very long

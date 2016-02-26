@@ -146,18 +146,20 @@ case class FiloRelation(dataset: String,
                         version: Int = 0,
                         splitsPerNode: Int = 1)
                        (@transient val sqlContext: SQLContext)
-    extends BaseRelation with TableScan with PrunedScan with PrunedFilteredScan with StrictLogging {
+    extends BaseRelation with InsertableRelation with PrunedScan with PrunedFilteredScan with StrictLogging {
   import TypeConverters._
   import FiloRelation._
 
-  val filoConfig = FiloSetup.configFromSpark(sqlContext.sparkContext)
-  FiloSetup.init(filoConfig)
+  val filoConfig = FiloSetup.initAndGetConfig(sqlContext.sparkContext)
 
   val datasetObj = getDatasetObj(dataset)
   val filoSchema = getSchema(dataset, version)
 
   val schema = StructType(columnsToSqlFields(filoSchema.values.toSeq))
   logger.info(s"Read schema for dataset $dataset = $schema")
+
+  override def insert(data: DataFrame, overwrite: Boolean): Unit =
+    sqlContext.insertIntoFilo(data, dataset, version, overwrite)
 
   def buildScan(): RDD[Row] = buildScan(filoSchema.keys.toArray)
 

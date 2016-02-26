@@ -163,6 +163,14 @@ class NodeCoordinatorActor(metaStore: MetaStore,
     }
   }
 
+  private def truncateDataset(originator: ActorRef, projection: Projection): Unit = {
+    columnStore.clearProjectionData(projection)
+               .map { resp => originator ! ProjectionTruncated }
+               .recover {
+                 case e: Exception => originator ! DatasetError(e.getMessage)
+               }
+  }
+
   // If the coordinator is already set up, then everything is already fine.
   // Otherwise get the dataset object and create a new actor, re-initializing state.
   private def setupIngestion(originator: ActorRef,
@@ -225,9 +233,14 @@ class NodeCoordinatorActor(metaStore: MetaStore,
       withDsCoord(sender, dataset, version) { _ ! DatasetCoordinatorActor.StartFlush(Some(sender)) }
 
     case TruncateProjection(projection, version) =>
-      withDsCoord(sender, projection.dataset, version) {
-        _ ! DatasetCoordinatorActor.ClearProjection(sender, projection)
-      }
+      // First try through DS Coordinator so we could coordinate with flushes
+      dsCoordinators.get((projection.dataset, version))
+                    .map(_ ! DatasetCoordinatorActor.ClearProjection(sender, projection))
+                    .getOrElse {
+                      // Ok, so there is no DatasetCoordinatorActor, meaning no ingestion.  We should
+                      // still be able to truncate a projection if it exists.
+                      truncateDataset(sender, projection)
+                    }
 
     case CheckCanIngest(dataset, version) =>
       withDsCoord(sender, dataset, version) { _.forward(DatasetCoordinatorActor.CanIngest) }
