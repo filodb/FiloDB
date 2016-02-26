@@ -47,6 +47,7 @@ class Arguments extends FieldArgs {
           case "double" => DataColumn(0, name, dataset, version, DoubleColumn)
           case "string" => DataColumn(0, name, dataset, version, StringColumn)
           case "bool"   => DataColumn(0, name, dataset, version, BitmapColumn)
+          case "timestamp" => DataColumn(0, name, dataset, version, TimestampColumn)
         }
       }.toSeq
     }.getOrElse(Nil)
@@ -64,8 +65,10 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
     println("filo-cli help:")
     println("  commands: init create importcsv list analyze delete")
     println("  columns: <colName1>:<type1>,<colName2>:<type2>,... ")
-    println("  types:  int,long,double,string,bool")
+    println("  types:  int,long,double,string,bool,timestamp")
     println("  OR:  --select col1, col2  [--limit <n>]  [--outfile /tmp/out.csv]")
+    println("\nTo change config: pass -Dconfig.file=/path/to/config as first arg or set $FILO_CONFIG_FILE")
+    println("  or override any config by passing -Dconfig.path=newvalue as first args")
   }
 
   def main(args: Arguments) {

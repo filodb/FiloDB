@@ -43,7 +43,8 @@ See [architecture](doc/architecture.md) and [datasets and reading](doc/datasets_
   - [SQL/Hive Example](#sqlhive-example)
   - [Querying Datasets](#querying-datasets)
 - [Using the CLI](#using-the-cli)
-    - [CLI Example](#cli-example)
+  - [Running the CLI](#running-the-cli)
+  - [CLI Example](#cli-example)
 - [Current Status](#current-status)
 - [Deploying](#deploying)
 - [Code Walkthrough](#code-walkthrough)
@@ -452,7 +453,19 @@ The `delete` command is used to delete datasets. |
 | delimiter  | This is optional key to be used with `importcsv` command. Its value should be the field delimiter character. Default value is comma.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | timeoutMinutes | The number of minutes to time out for CSV ingestion.  Needs to be greater than the max amount of time for ingesting the whole file.  Defaults to 99.  |
 
-#### CLI Example
+### Running the CLI
+
+You may want to customize a configuration to point at your Cassandra cluster, or change other configuration parameters.  The easiest is to pass in a customized config file:
+
+    ./filo-cli -Dconfig.file=/path/to/myfilo.conf --command init
+
+You may also set the `FILO_CONFIG_FILE` environment var instead, but any `-Dconfig.file` args passed in takes precedence.
+
+Individual configuration params may also be changed by passing them on the command line.  They must be the first arguments passed in.  For example:
+
+    ./filo-cli -Dfilodb.columnstore.segment-cache-size=10000 --command ingestcsv ....
+
+### CLI Example
 The following examples use the [GDELT public dataset](http://data.gdeltproject.org/documentation/GDELT-Data_Format_Codebook.pdf) and can be run from the project directory.
 
 Create a dataset with all the columns :
@@ -488,6 +501,12 @@ Query/export some columns:
 ## Deploying
 
 The current version assumes Spark 1.5.x and Cassandra 2.1.x or 2.2.x.
+
+- sbt spark/assembly
+- sbt cli/assembly
+- Copy `core/src/main/resources/application.conf` and modify as needed for your own config file
+- Set FILO_CONFIG_FILE to the path to your custom config
+- Run the cli jar as the filo CLI command line tool and initialize keyspaces if using Cassandra: `filo-cli-*.jar --command init`
 
 There is a branch for Datastax Enterprise 4.8 / Spark 1.4.  Note that if you are using DSE or have vnodes enabled, a lower number of vnodes (16 or less) is STRONGLY recommended as higher numbers of vnodes slows down queries substantially and basically prevents subsecond queries from happening.
 

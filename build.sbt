@@ -154,8 +154,16 @@ lazy val styleSettings = Seq(
   (compile in Test) <<= (compile in Test) dependsOn compileScalastyle
 )
 
-lazy val shellScript = """#!/usr/bin/env sh
-exec java -Xmx4g -Xms4g -jar "$0" "$@"
+lazy val shellScript = """#!/bin/bash
+while [ "${1:0:2}" = "-D" ]
+do
+  allprops="$allprops $1"
+  shift
+done
+if [ ! -z "$FILO_CONFIG_FILE" ]; then
+  config="-Dconfig.file=$FILO_CONFIG_FILE"
+fi
+exec java -Xmx4g -Xms4g $config $allprops -jar "$0" "$@"
 """.split("\n")
 
 // Builds cli as a standalone executable to make it easier to launch commands
