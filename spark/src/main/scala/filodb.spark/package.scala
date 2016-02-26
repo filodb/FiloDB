@@ -70,7 +70,7 @@ package object spark extends StrictLogging {
      */
     def filoDataset(dataset: String,
                     version: Int = 0,
-                    splitsPerNode: Int = 1): DataFrame =
+                    splitsPerNode: Int = 4): DataFrame =
       sqlContext.baseRelationToDataFrame(FiloRelation(dataset, version, splitsPerNode)
                                                      (sqlContext))
 
