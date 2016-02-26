@@ -146,8 +146,7 @@ case class FiloRelation(dataset: String,
   import TypeConverters._
   import FiloRelation._
 
-  val filoConfig = FiloSetup.configFromSpark(sqlContext.sparkContext)
-  FiloSetup.init(filoConfig)
+  val filoConfig = FiloSetup.initAndGetConfig(sqlContext.sparkContext)
 
   val datasetObj = getDatasetObj(dataset)
   val filoSchema = getSchema(dataset, version)
