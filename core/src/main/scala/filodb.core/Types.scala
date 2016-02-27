@@ -51,3 +51,7 @@ case class KeyRange[PK, SK](partition: PK,
 case class BinaryKeyRange(partition: Types.BinaryPartition,
                           start: Types.SegmentId, end: Types.SegmentId,
                           endExclusive: Boolean = true)
+
+case class SegmentRange[SK](start: SK, end: SK)
+
+case class BinarySegmentRange(start: Types.SegmentId, end: Types.SegmentId)

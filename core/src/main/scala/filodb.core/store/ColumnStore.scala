@@ -18,7 +18,7 @@ case class SinglePartitionRangeScan(keyRange: KeyRange[_, _]) extends ScanMethod
 case class FilteredPartitionScan(split: ScanSplit,
                                  filter: Any => Boolean = (a: Any) => true) extends ScanMethod
 case class FilteredPartitionRangeScan(split: ScanSplit,
-                                      start: Any, end: Any,
+                                      segmentRange: SegmentRange[_],
                                       filter: Any => Boolean = (a: Any) => true) extends ScanMethod
 
 trait ScanSplit {

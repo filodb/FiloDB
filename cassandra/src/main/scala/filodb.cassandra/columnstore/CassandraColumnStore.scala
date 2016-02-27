@@ -200,6 +200,12 @@ trait CassandraColumnStoreScanner extends ColumnStoreScanner with StrictLogging 
         rowMapTable.scanChunkMaps(version, startToken, endToken)
           .map(_.filter { crm => filterFunc(projection.partitionType.fromBytes(crm.binPartition)) })
 
+      case FilteredPartitionRangeScan(CassandraTokenRangeSplit(startToken, endToken, _),
+                                      segRange, filterFunc) =>
+        val binRange = projection.toBinarySegRange(segRange)
+        rowMapTable.scanChunkMapsRange(version, startToken, endToken, binRange.start, binRange.end)
+          .map(_.filter { crm => filterFunc(projection.partitionType.fromBytes(crm.binPartition)) })
+
       case other: ScanMethod => ???
     }
     futCrmRecords.map { crmIt =>

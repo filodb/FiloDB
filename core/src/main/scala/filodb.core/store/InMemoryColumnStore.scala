@@ -184,11 +184,10 @@ trait InMemoryColumnStoreScanner extends ColumnStoreScanner {
       case FilteredPartitionScan(split, filterFunc) =>
         filteredPartScan(projection, version, split, filterFunc)
 
-      case FilteredPartitionRangeScan(split, start, end, filterFunc) =>
-        val binStart = projection.segmentType.toBytes(start.asInstanceOf[projection.SK])
-        val binEnd = projection.segmentType.toBytes(end.asInstanceOf[projection.SK])
+      case FilteredPartitionRangeScan(split, segRange, filterFunc) =>
+        val binSegRange = projection.toBinarySegRange(segRange)
         filteredPartScan(projection, version, split, filterFunc).map { case (binPart, rowMap) =>
-          (binPart, rowMap.subMap(binStart, true, binEnd, true))
+          (binPart, rowMap.subMap(binSegRange.start, true, binSegRange.end, true))
         }
     }
     val segIndices = partAndMaps.flatMap { case (binPart, rowMap) =>

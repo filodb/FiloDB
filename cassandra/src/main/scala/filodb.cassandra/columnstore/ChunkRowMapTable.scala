@@ -77,15 +77,30 @@ extends CassandraTable[ChunkRowMapTable, ChunkRowMapRecord] {
 
   def scanChunkMaps(version: Int,
                     startToken: String,
-                    endToken: String): Future[Iterator[ChunkRowMapRecord]] = {
+                    endToken: String,
+                    segmentClause: String = ""): Future[Iterator[ChunkRowMapRecord]] = {
     val tokenQ = "TOKEN(partition, version)"
     val cql = s"SELECT * FROM ${keySpace.name}.$tableName WHERE " +
-              s"$tokenQ >= $startToken AND $tokenQ < $endToken"
+              s"$tokenQ >= $startToken AND $tokenQ < $endToken $segmentClause"
     Future {
       session.execute(cql).iterator
              .filter(this.version(_) == version)
              .map { row => fromRow(row) }
     }
+  }
+
+  /**
+   * Retrieves a series of chunk maps from all partitions in the given token range,
+   * filtered by startSegment until endSegment inclusive.
+   */
+  def scanChunkMapsRange(version: Int,
+                         startToken: String,
+                         endToken: String,
+                         startSegment: Types.SegmentId,
+                         endSegment: Types.SegmentId): Future[Iterator[ChunkRowMapRecord]] = {
+    val clause = s"AND segmentid >= 0x${startSegment.toHex} AND segmentid <= 0x${endSegment.toHex} " +
+                  "ALLOW FILTERING"
+    scanChunkMaps(version, startToken, endToken, clause)
   }
 
   /**
