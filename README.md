@@ -33,6 +33,7 @@ See [architecture](doc/architecture.md) and [datasets and reading](doc/datasets_
   - [Computed Columns](#computed-columns)
   - [FiloDB vs Cassandra Data Modelling](#filodb-vs-cassandra-data-modelling)
   - [Data Modelling and Performance Considerations](#data-modelling-and-performance-considerations)
+  - [Predicate Pushdowns](#predicate-pushdowns)
   - [Example FiloDB Schema for machine metrics](#example-filodb-schema-for-machine-metrics)
   - [Distributed Partitioning](#distributed-partitioning)
 - [Using FiloDB Data Source with Spark](#using-filodb-data-source-with-spark)
@@ -57,12 +58,12 @@ See [architecture](doc/architecture.md) and [datasets and reading](doc/datasets_
 
 FiloDB is a new open-source distributed, versioned, and columnar analytical database designed for modern streaming workloads.
 
-* **High performance** - faster than Parquet scan speeds, plus filtering along two or more dimensions
+* **High performance** - competitive with Parquet scan speeds, plus filtering along two or more dimensions
   - Very flexible filtering: filter on only part of a partition key, much more flexible than allowed in Cassandra
-* **Compact storage** - within 35% of Parquet
+* **Compact storage** - within 35% of Parquet for CassandraColumnStore
 * **Idempotent writes** - primary-key based appends and updates; easy exactly-once ingestion from streaming sources
 * **Distributed** - pluggable storage engine includes Apache Cassandra and in-memory
-* **Low-latency** - minimal SQL query latency of 25ms on one node; sub-second easily achievable with filtering and easy to use concurrency control
+* **Low-latency** - minimal SQL query latency of 15ms on one node; sub-second easily achievable with filtering and easy to use concurrency control
 * **SQL queries** - plug in Tableau or any tool using JDBC/ODBC drivers
 * Ingest from Spark/Spark Streaming from any supported Spark data source
 
@@ -148,7 +149,7 @@ Perhaps it's easiest by starting with a diagram of how FiloDB stores data.
 Three types of key define the data model of a FiloDB table.
 
 1. **partition key** - decides how data is going to be distributed across the cluster. All data within one partition key is guaranteed to fit on one node. May consist of multiple columns.
-2. **segment key** - groups row values into efficient chunks.  Segments within a partition are sorted by segment key and range scans can be done over segment keys.
+2. **segment key** - groups row values into efficient chunks.  Segments within a partition are sorted by segment key and range scans can be done over segment keys.  Ideal is > 1000 rows per segment.
 1. **row key**       - acts as a primary key within each partition and decides how data will be sorted within each segment.  May consist of multiple columns.
 
 The PRIMARY KEY for FiloDB consists of (partition key, row key).  When choosing the above values you must make sure the combination of the two are unique.  No component of a primary key may be null - see the `:getOrElse` function for a way of dealing with null inputs.
@@ -194,6 +195,13 @@ Segmentation and chunk size distribution may be checked by the CLI `analyze` com
 * `memtable.max-rows-per-table`, `memtable.flush-trigger-rows` affects how many rows are kept in the MemTable at a time, and this along with how many partitions are in the MemTable directly leads to the chunk size upon flushing.
 * The segment size is directly controlled by the segment key.  Choosing a segment key that groups data into big enough chunks (at least 1000 is a good guide) is highly recommended.  Experimentation along with running `filo-cli analyze` is recommended to come up with a good segment key.  See the Spark ingestion of GDELT below on an example... choosing an inappropriate segment key leads to MUCH slower ingest and read performance.
 * `chunk_size` option when creating a dataset caps the size of a single chunk.
+
+### Predicate Pushdowns
+
+To help with planning, here is an exact list of the predicate pushdowns (in Spark) that help with reducing I/O and query times:
+
+* Partition key column(s): =, IN on any partition key column
+* Segment key:  must be of the form `segmentKey >/>= value AND segmentKey </<= value`
 
 ### Example FiloDB Schema for machine metrics
 
