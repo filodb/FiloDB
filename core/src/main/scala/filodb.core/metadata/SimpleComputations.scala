@@ -1,5 +1,7 @@
 package filodb.core.metadata
 
+import java.util.concurrent.TimeUnit
+
 import com.typesafe.config.ConfigFactory
 import java.sql.Timestamp
 import org.scalactic._
@@ -95,7 +97,7 @@ object SimpleComputations {
     def parseDurationMillis(arg: String): Long Or InvalidComputedColumnSpec = {
       try {
         val config = ConfigFactory.parseString(s"a = $arg")
-        Good(config.getMilliseconds("a"))
+        Good(config.getDuration("a", TimeUnit.MILLISECONDS))
       } catch {
         case e: Exception => Bad(BadArgument(e.getMessage))
       }
