@@ -313,7 +313,7 @@ with Matchers with ScalaFutures {
       head(0) should equal (10)
   }
 
-  it("should be able to write with multi-column row keys") {
+  it("should be able to write with multi-column row keys and filter by segment key") {
     import sql.implicits._
 
     val gdeltDF = sc.parallelize(GdeltTestData.records.toSeq).toDF()
@@ -325,6 +325,10 @@ with Matchers with ScalaFutures {
                  save()
     val df = sql.read.format("filodb.spark").option("dataset", "gdelt3").load()
     df.agg(sum("numArticles")).collect().head(0) should equal (492)
+
+    df.registerTempTable("gdelt")
+    sql.sql("select sum(numArticles) from gdelt where eventId >= 78 AND eventId <= 85").collect().
+      head(0) should equal (15)
   }
 
   it("should be able to ingest Spark Timestamp columns and query them") {

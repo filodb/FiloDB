@@ -6,7 +6,7 @@ import scala.language.postfixOps
 import scalaxy.loops._
 
 import filodb.core._
-import filodb.core.metadata.{DataColumn, ComputedColumn, RichProjection}
+import filodb.core.metadata.{Column, DataColumn, ComputedColumn, RichProjection}
 
 /**
  * Utilities to generate functions to filter keys.
@@ -73,8 +73,14 @@ object KeyFilter {
    * @param columnNames the names of columns to match
    * @return a Map(column name -> (position, keyType)) of identified partition columns
    */
-  def mapPartitionColumns(proj: RichProjection, columnNames: Seq[String]): Map[String, (Int, KeyType)] = {
-    proj.partitionColumns.zipWithIndex.collect {
+  def mapPartitionColumns(proj: RichProjection, columnNames: Seq[String]): Map[String, (Int, KeyType)] =
+    mapColumns(proj.partitionColumns, columnNames)
+
+  def mapSegmentColumn(proj: RichProjection, columnNames: Seq[String]): Map[String, (Int, KeyType)] =
+    mapColumns(Seq(proj.segmentColumn), columnNames)
+
+  def mapColumns(columns: Seq[Column], columnNames: Seq[String]): Map[String, (Int, KeyType)] = {
+    columns.zipWithIndex.collect {
       case (DataColumn(_, name, _, _, columnType, _), idx) => name -> (idx -> columnType.keyType)
       case (ComputedColumn(_, _, _, _, Seq(srcColumn), keyType), idx) => srcColumn -> (idx -> keyType)
     }.toMap.filterKeys { name => columnNames.contains(name) }

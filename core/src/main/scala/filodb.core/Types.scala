@@ -52,6 +52,9 @@ case class BinaryKeyRange(partition: Types.BinaryPartition,
                           start: Types.SegmentId, end: Types.SegmentId,
                           endExclusive: Boolean = true)
 
-case class SegmentRange[SK](start: SK, end: SK)
+case class SegmentRange[SK](start: SK, end: SK) {
+  def basedOn(projection: RichProjection): SegmentRange[projection.SK] =
+    this.asInstanceOf[SegmentRange[projection.SK]]
+}
 
 case class BinarySegmentRange(start: Types.SegmentId, end: Types.SegmentId)
