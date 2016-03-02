@@ -47,7 +47,7 @@ lazy val jmh = (project in file("jmh"))
                  .enablePlugins(JmhPlugin)
                  .dependsOn(core % "compile->compile; compile->test", spark)
 
-val phantomVersion = "1.12.2"
+val phantomVersion = "1.22.0"
 val akkaVersion    = "2.3.7"
 
 lazy val extraRepos = Seq(
@@ -64,6 +64,9 @@ val excludeShapeless = ExclusionRule(organization = "com.chuusai")
 val excludeZK = ExclusionRule(organization = "org.apache.zookeeper")
 // This one is brought by Spark by default
 val excludeSlf4jLog4j = ExclusionRule(organization = "org.slf4j", name = "slf4j-log4j12")
+// These ones are brought by Phantom
+val excludeLogback = ExclusionRule(organization = "ch.qos.logback", name = "logback-classic")
+val excludeLog4jOverSlf4j = ExclusionRule(organization = "org.slf4j", name = "log4j-over-slf4j")
 
 lazy val coreDeps = Seq(
   "com.typesafe.scala-logging" %% "scala-logging-slf4j" % "2.1.2",
@@ -83,9 +86,9 @@ lazy val coreDeps = Seq(
 )
 
 lazy val cassDeps = Seq(
-  "com.websudos"         %% "phantom-dsl"       % phantomVersion,
+  "com.websudos"         %% "phantom-dsl"       % phantomVersion excludeAll(excludeLogback, excludeLog4jOverSlf4j),
   "ch.qos.logback"        % "logback-classic"   % "1.0.7" % "test",  // to get good test logs
-  "com.websudos"         %% "phantom-testkit"   % phantomVersion % "test" excludeAll(excludeZK)
+  "com.websudos"         %% "phantom-testkit"   % "1.12.2" % "test" excludeAll(excludeZK)
 )
 
 lazy val coordDeps = Seq(
