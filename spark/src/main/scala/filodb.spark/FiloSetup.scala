@@ -25,8 +25,9 @@ object FiloSetup extends CoordinatorSetup {
   }
 
   /**
-   * The config within the filodb.** level.
-=   */
+    * The config within the filodb.** level.
+    * @param filoConfig
+    */
   def init(filoConfig: Config): Unit = {
     config = filoConfig
     coordinatorActor       // Force NodeCoordinatorActor to start

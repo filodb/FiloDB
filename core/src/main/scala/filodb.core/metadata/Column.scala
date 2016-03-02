@@ -105,7 +105,7 @@ object Column extends StrictLogging {
 
   /**
    * Converts a list of columns to the appropriate KeyType.
-   * @returns a KeyType
+   * @return a KeyType
    */
   def columnsToKeyType(columns: Seq[Column]): KeyType = columns match {
     case Nil      => throw new IllegalArgumentException("Empty columns supplied")
@@ -156,7 +156,7 @@ object Column extends StrictLogging {
       if (requirement) None else Some(failMessage)
 
     import scala.language.postfixOps
-    val illicitCharsRegex = "[:() ,\001]+"r
+    val illicitCharsRegex = "[:() ,\u0001]+"r
     val alreadyHaveIt = schema contains column.name
     Seq(
       // check(!startsWithColon, "Data columns cannot start with a colon"),

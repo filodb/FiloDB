@@ -34,8 +34,8 @@ object NodeCoordinatorActor {
 
   /**
    * Creates a new dataset with columns and a default projection.
-   * @dataset the Dataset object
-   * @columns DataColumns to create for that dataset.  Must include partition and row key columns, at a
+   * @param dataset the Dataset object
+   * @param columns DataColumns to create for that dataset.  Must include partition and row key columns, at a
    *          minimum.  Computed columns can be left out.
    */
   case class CreateDataset(dataset: Dataset, columns: Seq[DataColumn]) extends NodeCommand

@@ -44,9 +44,9 @@ with FiloCassandraConnector {
   // 1) this char is not allowed,
   // 2) spaces, : () are used in function definitions
   // 3) Cassandra CQLSH will highlight weird unicode chars in diff color so it's easy to see :)
-  private def stringsToStr(strings: Seq[String]): String = strings.mkString("\001")
+  private def stringsToStr(strings: Seq[String]): String = strings.mkString("\u0001")
   private def splitCString(string: String): Seq[String] =
-    if (string.isEmpty) Nil else string.split('\001').toSeq
+    if (string.isEmpty) Nil else string.split('\u0001').toSeq
 
   def initialize(): Future[Response] = create.ifNotExists.future().toResponse()
 
