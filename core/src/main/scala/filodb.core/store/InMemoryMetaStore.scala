@@ -53,6 +53,8 @@ class InMemoryMetaStore(implicit val ec: ExecutionContext) extends MetaStore wit
     datasets.get(name).map(Future.successful)
             .getOrElse(Future.failed(NotFoundError(name)))
 
+  def getAllDatasets(): Future[Seq[String]] = Future.successful(datasets.keys.toSeq)
+
   def deleteDataset(name: String): Future[Response] = Future {
     datasets.remove(name)
     columns.remove(name)

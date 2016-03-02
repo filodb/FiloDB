@@ -49,6 +49,7 @@ lazy val jmh = (project in file("jmh"))
 
 val phantomVersion = "1.12.2"
 val akkaVersion    = "2.3.7"
+val sparkVersion   = "1.5.2"
 
 lazy val extraRepos = Seq(
   "Typesafe repository releases" at "http://repo.typesafe.com/typesafe/releases/",
@@ -103,13 +104,14 @@ lazy val cliDeps = Seq(
 
 lazy val sparkDeps = Seq(
   // We don't want LOG4J.  We want Logback!  The excludeZK is to help with a conflict re Coursier plugin.
-  "org.apache.spark"     %% "spark-hive"        % "1.5.2" % "provided" excludeAll(excludeSlf4jLog4j, excludeZK),
-  "org.apache.spark"     %% "spark-streaming"   % "1.5.2" % "provided" excludeAll(excludeSlf4jLog4j, excludeZK)
+  "org.apache.spark"     %% "spark-hive"         % sparkVersion % "provided" excludeAll(excludeSlf4jLog4j, excludeZK),
+  "org.apache.spark"     %% "spark-hive-thriftserver" % sparkVersion % "provided" excludeAll(excludeSlf4jLog4j, excludeZK),
+  "org.apache.spark"     %% "spark-streaming"   % sparkVersion % "provided"
 )
 
 lazy val jmhDeps = Seq(
   "com.nativelibs4java"  %% "scalaxy-loops"     % "0.3.3" % "provided",
-  "org.apache.spark"     %% "spark-sql"         % "1.5.2" excludeAll(excludeSlf4jLog4j, excludeZK)
+  "org.apache.spark"     %% "spark-sql"         % sparkVersion excludeAll(excludeSlf4jLog4j, excludeZK)
 )
 
 //////////////////////////

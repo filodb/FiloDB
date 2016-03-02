@@ -12,6 +12,7 @@ import scala.language.postfixOps
 import filodb.core._
 import filodb.core.metadata.{Column, DataColumn, Dataset, RichProjection}
 import filodb.coordinator.{NodeCoordinatorActor, RowSource, DatasetCoordinatorActor}
+import org.apache.spark.sql.hive.filodb.MetaStoreSync
 
 package spark {
   case class DatasetNotFound(dataset: String) extends Exception(s"Dataset $dataset not found")
@@ -56,6 +57,25 @@ package object spark extends StrictLogging {
       case SetupError(UnknownDataset) => throw DatasetNotFound(dataset)
       case SetupError(BadSchema(reason)) => throw BadSchemaError(reason)
       case SetupError(other)          => throw new RuntimeException(other.toString)
+    }
+  }
+
+  /**
+   * Syncs FiloDB datasets into Hive Metastore.
+   * Usually does not need to be called manually, unless you did not use the right HiveContext/Spark
+   * to create FiloDB tables.
+   */
+  def syncToHive(sqlContext: SQLContext): Unit = {
+    val config = Option(FiloSetup.config).getOrElse {
+      FiloSetup.init(sqlContext.sparkContext)
+      FiloSetup.config
+    }
+    if (config.hasPath("hive.database-name")) {
+      MetaStoreSync.getHiveContext(sqlContext).foreach { hiveContext =>
+        MetaStoreSync.syncFiloTables(config.getString("hive.database-name"),
+                                     FiloSetup.metaStore,
+                                     hiveContext)
+      }
     }
   }
 
@@ -282,6 +302,8 @@ package object spark extends StrictLogging {
                       writeTimeout, index)
         Iterator.empty
       }.count()
+
+      syncToHive(sqlContext)
     }
   }
 }

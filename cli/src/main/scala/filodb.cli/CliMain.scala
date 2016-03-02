@@ -141,7 +141,11 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
     }
   }
 
-  def dumpAllDatasets() { println("TODO") }
+  def dumpAllDatasets() {
+    parse(metaStore.getAllDatasets) { datasets =>
+      datasets.foreach(println)
+    }
+  }
 
   def createDatasetAndColumns(dataset: String,
                               columns: Seq[DataColumn],
