@@ -162,6 +162,16 @@ trait InMemoryColumnStoreScanner extends ColumnStoreScanner {
     Iterator.single((binKR.partition, subMap))
   }
 
+  def filteredPartScan(projection: RichProjection,
+                       version: Int,
+                       split: ScanSplit,
+                       filterFunc: Any => Boolean): Iterator[(BinaryPartition, RowMapTreeLike)] = {
+    val binParts = rowMaps.keysIterator.collect { case (ds, binPart, ver) if
+      ds == projection.datasetName && ver == version => binPart }
+    binParts.filter { binPart => filterFunc(projection.partitionType.fromBytes(binPart))
+            }.map { binPart => (binPart, rowMaps((projection.datasetName, binPart, version))) }
+  }
+
   def scanChunkRowMaps(projection: RichProjection,
                        version: Int,
                        method: ScanMethod)
@@ -172,12 +182,13 @@ trait InMemoryColumnStoreScanner extends ColumnStoreScanner {
       case SinglePartitionRangeScan(k)    => singlePartRangeScan(projection, version, k)
 
       case FilteredPartitionScan(split, filterFunc) =>
-        val binParts = rowMaps.keysIterator.collect { case (ds, binPart, ver) if
-          ds == projection.datasetName && ver == version => binPart }
-        binParts.filter { binPart => filterFunc(projection.partitionType.fromBytes(binPart))
-                }.map { binPart => (binPart, rowMaps((projection.datasetName, binPart, version))) }
+        filteredPartScan(projection, version, split, filterFunc)
 
-      case other: ScanMethod => ???
+      case FilteredPartitionRangeScan(split, segRange, filterFunc) =>
+        val binSegRange = projection.toBinarySegRange(segRange)
+        filteredPartScan(projection, version, split, filterFunc).map { case (binPart, rowMap) =>
+          (binPart, rowMap.subMap(binSegRange.start, true, binSegRange.end, true))
+        }
     }
     val segIndices = partAndMaps.flatMap { case (binPart, rowMap) =>
       rowMap.entrySet.iterator.map { entry =>

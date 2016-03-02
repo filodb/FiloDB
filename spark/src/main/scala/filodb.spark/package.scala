@@ -70,7 +70,7 @@ package object spark extends StrictLogging {
      */
     def filoDataset(dataset: String,
                     version: Int = 0,
-                    splitsPerNode: Int = 1): DataFrame =
+                    splitsPerNode: Int = 4): DataFrame =
       sqlContext.baseRelationToDataFrame(FiloRelation(dataset, version, splitsPerNode)
                                                      (sqlContext))
 
@@ -120,14 +120,13 @@ package object spark extends StrictLogging {
       }
     }
 
-    // This doesn't create columns, because that's in checkAndAddColumns.
-    // It does check for schema errors though first.  :)
-    private def createNewDataset(datasetName: String,
-                                 rowKeys: Seq[String],
-                                 segmentKey: String,
-                                 partitionKeys: Seq[String],
-                                 chunkSize: Option[Int],
-                                 dfColumns: Seq[Column]): Unit = {
+    // Checks for schema errors via RichProjection.make, and returns created Dataset object
+    private def makeAndVerifyDataset(datasetName: String,
+                                     rowKeys: Seq[String],
+                                     segmentKey: String,
+                                     partitionKeys: Seq[String],
+                                     chunkSize: Option[Int],
+                                     dfColumns: Seq[Column]): Dataset = {
       val options = Dataset.DefaultOptions
       val options2 = chunkSize.map { newSize => options.copy(chunkSize = newSize) }.getOrElse(options)
       val dataset = Dataset(datasetName, rowKeys, segmentKey, partitionKeys).copy(options = options2)
@@ -137,10 +136,15 @@ package object spark extends StrictLogging {
         case err: RichProjection.BadSchema => throw BadSchemaError(err.toString)
       }
 
-      logger.info(s"Creating dataset $dataset...")
+      dataset
+    }
+
+    // This doesn't create columns, because that's in checkAndAddColumns.
+    private def createNewDataset(dataset: Dataset): Unit = {
+      logger.info(s"Creating dataset ${dataset.name}...")
       actorAsk(FiloSetup.coordinatorActor, CreateDataset(dataset, Nil)) {
         case DatasetCreated =>
-          logger.info(s"Dataset $datasetName created successfully...")
+          logger.info(s"Dataset ${dataset.name} created successfully...")
         case DatasetError(errMsg) =>
           throw new RuntimeException(s"Error creating dataset: $errMsg")
       }
@@ -188,12 +192,14 @@ package object spark extends StrictLogging {
       }
       (datasetObj, mode) match {
         case (None, SaveMode.Append) | (None, SaveMode.Overwrite) | (None, SaveMode.ErrorIfExists) =>
-          createNewDataset(dataset, rowKeys, segmentKey, partKeys, chunkSize, dfColumns)
+          val ds = makeAndVerifyDataset(dataset, rowKeys, segmentKey, partKeys, chunkSize, dfColumns)
+          createNewDataset(ds)
         case (Some(dsObj), SaveMode.ErrorIfExists) =>
           throw new RuntimeException(s"Dataset $dataset already exists!")
         case (Some(dsObj), SaveMode.Overwrite) =>
+          val ds = makeAndVerifyDataset(dataset, rowKeys, segmentKey, partKeys, chunkSize, dfColumns)
           deleteDataset(dataset)
-          createNewDataset(dataset, rowKeys, segmentKey, partKeys, chunkSize, dfColumns)
+          createNewDataset(ds)
         case (_, _) =>
           logger.info(s"Dataset $dataset definition not changed")
       }

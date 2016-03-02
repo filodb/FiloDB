@@ -6,6 +6,7 @@ import org.velvia.filo.RowReader
 
 import filodb.core.{CompositeKeyType, KeyType, KeyRange, BinaryKeyRange}
 import filodb.core.Types._
+import filodb.core._
 
 /**
  * A Projection defines one particular view of a dataset, designed to be optimized for a particular query.
@@ -70,6 +71,10 @@ case class RichProjection(projection: Projection,
                    segmentType.toBytes(keyRange.start.asInstanceOf[segmentType.T]),
                    segmentType.toBytes(keyRange.end.asInstanceOf[segmentType.T]),
                    keyRange.endExclusive)
+
+  def toBinarySegRange[SK](segmentRange: SegmentRange[SK]): BinarySegmentRange =
+    BinarySegmentRange(segmentType.toBytes(segmentRange.start.asInstanceOf[segmentType.T]),
+                       segmentType.toBytes(segmentRange.end.asInstanceOf[segmentType.T]))
 
   /**
    * Serializes this RichProjection into the minimal string needed to recover a "read-only" RichProjection,

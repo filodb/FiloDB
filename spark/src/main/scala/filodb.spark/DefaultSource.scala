@@ -45,9 +45,8 @@ class DefaultSource extends RelationProvider with CreatableRelationProvider {
       data: DataFrame): BaseRelation = {
     val dataset = parameters.getOrElse("dataset", sys.error("'dataset' must be specified for FiloDB."))
     val version = parameters.getOrElse("version", "0").toInt
-    val rowKeys = parameters.getOrElse("row_keys", sys.error("'row_keys' must be specified.")).
-                             split(',').toSeq
-    val segKey  = parameters.getOrElse("segment_key", sys.error("'segment_key' must be specified."))
+    val rowKeys = parameters.get("row_keys").map(_.split(',').toSeq).getOrElse(Nil)
+    val segKey  = parameters.getOrElse("segment_key", ":string /0")
     val partitionKeys = parameters.get("partition_keys").map(_.split(',').toSeq).getOrElse(Nil)
     val chunkSize = parameters.get("chunk_size").map(_.toInt)
 

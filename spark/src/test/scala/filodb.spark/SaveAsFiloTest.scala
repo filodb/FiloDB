@@ -142,6 +142,23 @@ with Matchers with ScalaFutures {
     }
   }
 
+  it("should not delete original metadata if overwrite with bad schema definition") {
+    sql.saveAsFilo(dataDF, "gdelt1", Seq("id"), segCol, partKeys,
+                          writeTimeout = 2.minutes)
+
+    intercept[BadSchemaError] {
+      dataDF.write.format("filodb.spark").
+                   option("dataset", "gdelt1").
+                   option("row_keys", "not_a_col").
+                   option("segment_key", segCol).
+                   option("partition_keys", ":fooMucnhkin 123").
+                   mode(SaveMode.Overwrite).
+                   save()
+    }
+
+    FiloSetup.metaStore.getDataset("gdelt1").futureValue should equal (ds1.copy(partitionColumns = partKeys))
+  }
+
   it("should write table if there are existing matching columns") {
     metaStore.newDataset(ds3).futureValue should equal (Success)
     val idStrCol = DataColumn(0, "id", "gdelt1", 0, Column.ColumnType.LongColumn)
@@ -313,7 +330,7 @@ with Matchers with ScalaFutures {
       head(0) should equal (10)
   }
 
-  it("should be able to write with multi-column row keys") {
+  it("should be able to write with multi-column row keys and filter by segment key") {
     import sql.implicits._
 
     val gdeltDF = sc.parallelize(GdeltTestData.records.toSeq).toDF()
@@ -325,6 +342,10 @@ with Matchers with ScalaFutures {
                  save()
     val df = sql.read.format("filodb.spark").option("dataset", "gdelt3").load()
     df.agg(sum("numArticles")).collect().head(0) should equal (492)
+
+    df.registerTempTable("gdelt")
+    sql.sql("select sum(numArticles) from gdelt where eventId >= 78 AND eventId <= 85").collect().
+      head(0) should equal (15)
   }
 
   it("should be able to ingest Spark Timestamp columns and query them") {

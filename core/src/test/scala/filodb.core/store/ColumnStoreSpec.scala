@@ -253,6 +253,35 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
     }
   }
 
+  it should "range scan by segment key and filter rows with single partition key" in {
+    import GdeltTestData._
+    val segments = getSegmentsByPartKey(projection2)
+    segments.foreach { seg =>
+      colStore.appendSegment(projection2, seg, 0).futureValue should equal (Success)
+    }
+
+    val paramSet = colStore.getScanSplits(dataset.name, 1)
+    paramSet should have length (1)
+
+    // First filter by segment range only.  There are two possible segment key values: 0 or 50, and
+    // two partitions, 197901 and 197902.  197902 only has segment 50 (IDs 91-98)
+    // There should be 49 rows and two partitions if we only ask for seg 50 across both partitions
+    val method1 = FilteredPartitionRangeScan(paramSet.head, SegmentRange(50, 50))
+    whenReady(colStore.scanRows(projection2, schema, 0, method1)) { rowIter =>
+      val rows = rowIter.map(r => (r.getInt(0), r.getInt(2))).toList
+      rows.length should equal (49)
+      rows.map(_._2).toSet should equal (Set(197901, 197902))
+      rows.map(_._1).min should equal (50)
+    }
+
+    // Ask for only seg 0 and partition 197902, there should be no rows
+    val filterFunc = KeyFilter.equalsFunc(projection2.partitionType)(197902.asInstanceOf[projection2.PK])
+    val method2 = FilteredPartitionRangeScan(paramSet.head, SegmentRange(0, 0), filterFunc)
+    whenReady(colStore.scanRows(projection2, schema, 0, method2)) { rowIter =>
+      rowIter.toSeq.length should equal (0)
+    }
+  }
+
   import SingleKeyTypes._
 
   it should "filter rows written with multiple column partition keys" in {
