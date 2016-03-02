@@ -1,11 +1,12 @@
 package filodb.core.query
 
 import org.scalactic._
+import org.velvia.filo.RowReader
 import scala.language.postfixOps
 import scalaxy.loops._
 
 import filodb.core._
-import filodb.core.metadata.{DataColumn, ComputedColumn, RichProjection}
+import filodb.core.metadata.{Column, DataColumn, ComputedColumn, RichProjection}
 
 /**
  * Utilities to generate functions to filter keys.
@@ -26,6 +27,19 @@ object KeyFilter {
 
   def andFunc(left: Any => Boolean, right: Any => Boolean): Any => Boolean =
     (item: Any) => left(item) && right(item)
+
+  // Parses the literal in an expression through a KeyType's key function... intended mostly for
+  // ComputedColumns so that proper transformation of a value can happen for predicate pushdowns.
+  // For example, if a partition column uses :stringPrefix, then apply that first to a value.
+  def parseSingleValue(kt: KeyType)(value: Any): kt.T = {
+    val keyFunc = kt.getKeyFunc(Array(0))
+    keyFunc(SingleValueRowReader(value)).asInstanceOf[kt.T]
+  }
+
+  def parseValues(kt: KeyType)(values: Iterable[Any]): Iterable[kt.T] = {
+    val keyFunc = kt.getKeyFunc(Array(0))
+    values.map(v => keyFunc(SingleValueRowReader(v)).asInstanceOf[kt.T])
+  }
 
   /**
    * Generates a filter func for a composite key type.
@@ -59,8 +73,14 @@ object KeyFilter {
    * @param columnNames the names of columns to match
    * @return a Map(column name -> (position, keyType)) of identified partition columns
    */
-  def mapPartitionColumns(proj: RichProjection, columnNames: Seq[String]): Map[String, (Int, KeyType)] = {
-    proj.partitionColumns.zipWithIndex.collect {
+  def mapPartitionColumns(proj: RichProjection, columnNames: Seq[String]): Map[String, (Int, KeyType)] =
+    mapColumns(proj.partitionColumns, columnNames)
+
+  def mapSegmentColumn(proj: RichProjection, columnNames: Seq[String]): Map[String, (Int, KeyType)] =
+    mapColumns(Seq(proj.segmentColumn), columnNames)
+
+  def mapColumns(columns: Seq[Column], columnNames: Seq[String]): Map[String, (Int, KeyType)] = {
+    columns.zipWithIndex.collect {
       case (DataColumn(_, name, _, _, columnType, _), idx) => name -> (idx -> columnType.keyType)
       case (ComputedColumn(_, _, _, _, Seq(srcColumn), keyType), idx) => srcColumn -> (idx -> keyType)
     }.toMap.filterKeys { name => columnNames.contains(name) }
@@ -82,4 +102,15 @@ object KeyFilter {
         funcs.head
     }
   }
+}
+
+case class SingleValueRowReader(value: Any) extends RowReader {
+  def notNull(columnNo: Int): Boolean = Option(value).isDefined
+  def getBoolean(columnNo: Int): Boolean = value.asInstanceOf[Boolean]
+  def getInt(columnNo: Int): Int = value.asInstanceOf[Int]
+  def getLong(columnNo: Int): Long = value.asInstanceOf[Long]
+  def getDouble(columnNo: Int): Double = value.asInstanceOf[Double]
+  def getFloat(columnNo: Int): Float = value.asInstanceOf[Float]
+  def getString(columnNo: Int): String = value.asInstanceOf[String]
+  def getAny(columnNo: Int): Any = value
 }

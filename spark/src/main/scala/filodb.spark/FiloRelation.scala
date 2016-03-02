@@ -25,7 +25,7 @@ import org.apache.spark.unsafe.types.UTF8String
 import filodb.core._
 import filodb.core.query.KeyFilter
 import filodb.core.metadata.{Column, Dataset, RichProjection}
-import filodb.core.store.RowReaderSegment
+import filodb.core.store._
 
 object FiloRelation extends StrictLogging {
   import TypeConverters._
@@ -48,30 +48,88 @@ object FiloRelation extends StrictLogging {
   def getSchema(dataset: String, version: Int): Column.Schema =
     parse(FiloSetup.metaStore.getSchema(dataset, version)) { schema => schema }
 
+  // Parses the Spark filters, mapping column names to the filters
+  def parseFilters(filters: Seq[Filter]): Map[String, Seq[Filter]] = {
+    logger.info(s"Incoming filters = $filters")
+    filters.collect {
+      case f @ EqualTo(col, _) => col -> f
+      case f @ In(col, _)      => col -> f
+      case f @ GreaterThan(col, _) => col -> f
+      case f @ GreaterThanOrEqual(col, _) => col -> f
+      case f @ LessThan(col, _) => col -> f
+      case f @ LessThanOrEqual(col, _) => col -> f
+    }.groupBy(_._1).mapValues( colFilterPairs => colFilterPairs.map(_._2))
+  }
+
   // Parses the Spark filters, matching them to partition key columns, and returning
   // tuples of (position, keytype, applicable filters).
   // NOTE: for now support just one filter per column
   def parsePartitionFilters(projection: RichProjection,
-                            filters: Seq[Filter]): Seq[(Int, KeyType, Seq[Filter])] = {
-    logger.info(s"Incoming filters = $filters")
-    val colToFiltersMap: Map[String, Seq[Filter]] = filters.collect {
-      case f @ EqualTo(col, _) => col -> f
-      case f @ In(col, _)      => col -> f
-    }.groupBy(_._1).mapValues( colFilterPairs => colFilterPairs.map(_._2))
-
-    val columnIdxTypeMap = KeyFilter.mapPartitionColumns(projection, colToFiltersMap.keys.toSeq)
+                            groupedFilters: Map[String, Seq[Filter]]): Seq[(Int, KeyType, Seq[Filter])] = {
+    val columnIdxTypeMap = KeyFilter.mapPartitionColumns(projection, groupedFilters.keys.toSeq)
 
     logger.info(s"Matching partition key col name / pos / keyType: $columnIdxTypeMap")
     columnIdxTypeMap.map { case (colName, (pos, keyType)) =>
-      (pos, keyType, colToFiltersMap(colName))
+      (pos, keyType, groupedFilters(colName))
     }.toSeq
+  }
+
+  // Single partition query?
+  def singlePartitionQuery(projection: RichProjection,
+                           filterStuff: Seq[(Int, KeyType, Seq[Filter])]): Option[Any] = {
+    // Are all the partition keys given in filters?
+    // Are all the filters EqualTo?
+    val equalPredValues: Seq[Any] = filterStuff.collect {
+      case (pos, keyType, Seq(EqualTo(_, equalValue))) => KeyFilter.parseSingleValue(keyType)(equalValue)
+    }
+    if (equalPredValues.length == projection.partitionColumns.length) {
+      if (equalPredValues.length == 1) Some(equalPredValues.head) else Some(equalPredValues)
+    } else {
+      None
+    }
+  }
+
+  def segmentRangeScan(projection: RichProjection,
+                       groupedFilters: Map[String, Seq[Filter]]): Option[SegmentRange[projection.SK]] = {
+    val columnIdxTypeMap = KeyFilter.mapSegmentColumn(projection, groupedFilters.keys.toSeq)
+    if (columnIdxTypeMap.isEmpty) { None }
+    else {
+      val (colName, (_, keyType)) = columnIdxTypeMap.head
+      val filters = groupedFilters(colName)
+
+      // Filters with segment column name (or source column) matches, but ensure we have >/>= and </<=
+      if (filters.length != 2) {
+        logger.info(s"Segment column $colName matches, but cannot push down with ${filters.length} filters")
+        None
+      } else {
+        val leftRightValues = filters match {
+          case Seq(GreaterThan(_, lVal),        LessThan(_, rVal)) => Some((lVal, rVal))
+          case Seq(GreaterThanOrEqual(_, lVal), LessThan(_, rVal)) => Some((lVal, rVal))
+          case Seq(GreaterThan(_, lVal),        LessThanOrEqual(_, rVal)) => Some((lVal, rVal))
+          case Seq(GreaterThanOrEqual(_, lVal), LessThanOrEqual(_, rVal)) => Some((lVal, rVal))
+          case other: Any => None
+        }
+        leftRightValues match {
+          case Some((lVal, rVal)) =>
+            val leftValue = KeyFilter.parseSingleValue(keyType)(lVal)
+            val rightValue = KeyFilter.parseSingleValue(keyType)(rVal)
+            logger.info(s"Pushing down segment range [$leftValue, $rightValue] on column $colName...")
+            Some(SegmentRange(leftValue, rightValue).basedOn(projection))
+          case None =>
+            logger.info(s"Segment column $colName matches, but cannot push down filters $filters")
+            None
+        }
+      }
+    }
   }
 
   def filtersToFunc(projection: RichProjection,
                     filterStuff: Seq[(Int, KeyType, Seq[Filter])]): Any => Boolean = {
+    import KeyFilter._
+
     def toFunc(keyType: KeyType, f: Filter): Any => Boolean = f match {
-      case EqualTo(_, value) => KeyFilter.equalsFunc(keyType)(value.asInstanceOf[keyType.T])
-      case In(_, values)     => KeyFilter.inFunc(keyType)(values.toSet.asInstanceOf[Set[keyType.T]])
+      case EqualTo(_, value) => equalsFunc(keyType)(parseSingleValue(keyType)(value))
+      case In(_, values)     => inFunc(keyType)(parseValues(keyType)(values.toSet).toSet)
       case other: Filter     => throw new IllegalArgumentException(s"Sorry, filter $other not supported")
     }
 
@@ -79,7 +137,7 @@ object FiloRelation extends StrictLogging {
     logger.info(s"Filters by position: $filterStuff")
     val funcs = filterStuff.map { case (pos, keyType, filters) =>
       filters.tail.foldLeft(toFunc(keyType, filters.head)) { case (curFunc, newFilter) =>
-        KeyFilter.andFunc(curFunc, toFunc(keyType, newFilter))
+        andFunc(curFunc, toFunc(keyType, newFilter))
       }
     }
 
@@ -87,8 +145,28 @@ object FiloRelation extends StrictLogging {
       logger.info(s"Using default filtering function")
       (a: Any) => true
     } else {
-      KeyFilter.makePartitionFilterFunc(projection, filterStuff.map(_._1), funcs)
+      makePartitionFilterFunc(projection, filterStuff.map(_._1), funcs)
     }
+  }
+
+  def splitsQuery(sqlContext: SQLContext,
+                  dataset: String,
+                  splitsPerNode: Int,
+                  config: Config,
+                  readOnlyProjStr: String,
+                  version: Int)(f: ScanSplit => ScanMethod): RDD[Row] = {
+    val splits = FiloSetup.columnStore.getScanSplits(dataset, splitsPerNode)
+    logger.info(s"${splits.length} splits: [${splits.take(3).mkString(", ")}...]")
+
+    val splitsWithLocations = splits.map { s => (s, s.hostnames.toSeq) }
+    // NOTE: It's critical that the closure inside mapPartitions only references
+    // vars from buildScan() method, and not the FiloRelation class.  Otherwise
+    // the entire FiloRelation class would get serialized.
+    // Also, each partition should only need one param.
+    sqlContext.sparkContext.makeRDD(splitsWithLocations)
+      .mapPartitions { splitIter =>
+        perPartitionRowScanner(config, readOnlyProjStr, version, f(splitIter.next))
+      }
   }
 
   // It's good to put complex functions inside an object, to be sure that everything
@@ -96,16 +174,15 @@ object FiloRelation extends StrictLogging {
   def perPartitionRowScanner(config: Config,
                              readOnlyProjectionString: String,
                              version: Int,
-                             param: Map[String, String],
-                             filterFunc: Any => Boolean): Iterator[Row] = {
+                             method: ScanMethod): Iterator[Row] = {
     // NOTE: all the code inside here runs distributed on each node.  So, create my own datastore, etc.
     FiloSetup.init(config)
     FiloSetup.columnStore    // force startup
     val readOnlyProjection = RichProjection.readOnlyFromString(readOnlyProjectionString)
 
     parse(FiloSetup.columnStore.scanRows(
-            readOnlyProjection, readOnlyProjection.columns, version, params = param,
-            (bytes, clazzes) => new SparkRowReader(bytes, clazzes))(filterFunc),
+            readOnlyProjection, readOnlyProjection.columns, version, method,
+            (bytes, clazzes) => new SparkRowReader(bytes, clazzes)),
           10 minutes) { rowIt => rowIt.asInstanceOf[Iterator[Row]] }
   }
 }
@@ -126,12 +203,11 @@ case class FiloRelation(dataset: String,
                         version: Int = 0,
                         splitsPerNode: Int = 1)
                        (@transient val sqlContext: SQLContext)
-    extends BaseRelation with TableScan with PrunedScan with PrunedFilteredScan with StrictLogging {
+    extends BaseRelation with InsertableRelation with PrunedScan with PrunedFilteredScan with StrictLogging {
   import TypeConverters._
   import FiloRelation._
 
-  val filoConfig = FiloSetup.configFromSpark(sqlContext.sparkContext)
-  FiloSetup.init(filoConfig)
+  val filoConfig = FiloSetup.initAndGetConfig(sqlContext.sparkContext)
 
   val datasetObj = getDatasetObj(dataset)
   val filoSchema = getSchema(dataset, version)
@@ -141,6 +217,9 @@ case class FiloRelation(dataset: String,
 
   // Return false when returning RDD[InternalRow]
   override def needConversion: Boolean = false
+
+  override def insert(data: DataFrame, overwrite: Boolean): Unit =
+    sqlContext.insertIntoFilo(data, dataset, version, overwrite)
 
   def buildScan(): RDD[Row] = buildScan(filoSchema.keys.toArray)
 
@@ -155,23 +234,37 @@ case class FiloRelation(dataset: String,
     val filoColumns = requiredColumns.map(this.filoSchema)
     logger.info(s"Scanning columns ${filoColumns.toSeq}")
     val readOnlyProjStr = projection.toReadOnlyProjString(filoColumns.map(_.name))
-    val splitOpts = Map("splits_per_node" -> splitsPerNode.toString)
-    val splits = FiloSetup.columnStore.getScanSplits(dataset, splitOpts)
-    logger.info(s"Splits = $splits")
     logger.debug(s"readOnlyProjStr = $readOnlyProjStr")
 
-    val filterFunc = filtersToFunc(projection, parsePartitionFilters(projection, filters.toList))
+    val groupedFilters = parseFilters(filters.toList)
+    val partitionFilters = parsePartitionFilters(projection, groupedFilters)
+    (singlePartitionQuery(projection, partitionFilters),
+     segmentRangeScan(projection, groupedFilters)) match {
+      case (Some(partitionKey), None) =>
+        sqlContext.sparkContext.parallelize(Seq(partitionKey), 1)
+          .mapPartitions { partKeyIter =>
+            perPartitionRowScanner(_config, readOnlyProjStr, _version,
+                                   SinglePartitionScan(partKeyIter.next))
+          }
 
-    // NOTE: It's critical that the closure inside mapPartitions only references
-    // vars from buildScan() method, and not the FiloRelation class.  Otherwise
-    // the entire FiloRelation class would get serialized.
-    // Also, each partition should only need one param.
-    sqlContext.sparkContext.parallelize(splits, splits.length)
-      .mapPartitions { paramIter =>
-        val params = paramIter.toSeq
-        require(params.length == 1)
-        perPartitionRowScanner(_config, readOnlyProjStr, _version, params.head, filterFunc)
-      }
+      case (Some(partitionKey), Some(segRange)) =>
+        val keyRange = KeyRange(partitionKey, segRange.start, segRange.end, endExclusive = false)
+        sqlContext.sparkContext.parallelize(Seq(keyRange), 1)
+          .mapPartitions { keyRangeIter =>
+            perPartitionRowScanner(_config, readOnlyProjStr, _version,
+                                   SinglePartitionRangeScan(keyRangeIter.next))
+          }
+
+      case (None, None) =>
+        val filterFunc = filtersToFunc(projection, partitionFilters)
+        splitsQuery(sqlContext, dataset, splitsPerNode, _config, readOnlyProjStr, _version) { s =>
+          FilteredPartitionScan(s, filterFunc) }
+
+      case (None, Some(segRange)) =>
+        val filterFunc = filtersToFunc(projection, partitionFilters)
+        splitsQuery(sqlContext, dataset, splitsPerNode, _config, readOnlyProjStr, _version)  { s =>
+          FilteredPartitionRangeScan(s, segRange, filterFunc) }
+    }
   }
 }
 

@@ -8,7 +8,7 @@ import scala.concurrent.Await
 import scala.concurrent.duration._
 
 import filodb.core._
-import filodb.core.store.{InMemoryMetaStore, InMemoryColumnStore, RowReaderSegment}
+import filodb.core.store._
 import filodb.core.metadata.{Column, DataColumn, Dataset}
 
 import org.scalatest.concurrent.ScalaFutures
@@ -115,18 +115,18 @@ with CoordinatorSetup with ScalaFutures {
     probe.expectMsg(DatasetCoordinatorActor.Stats(1, 1, 0, 0, -1))
 
     // Now, read stuff back from the column store and check that it's all there
-    val keyRange = KeyRange(Seq("GOV", 1979), "0", "0", endExclusive = false).basedOn(projection3)
-    whenReady(columnStore.readSegments(projection3, schema, 0)(keyRange)) { segIter =>
+    val scanMethod = SinglePartitionScan(Seq("GOV", 1979))
+    whenReady(columnStore.scanSegments(projection3, schema, 0, scanMethod)) { segIter =>
       val segments = segIter.toSeq
       segments should have length (1)
       val readSeg = segments.head.asInstanceOf[RowReaderSegment]
-      readSeg.segInfo.segment should equal (keyRange.start)
+      readSeg.segInfo.segment should equal ("0")
       readSeg.rowIterator().map(_.getInt(6)).sum should equal (80)
     }
 
-    val splits = columnStore.getScanSplits(dataset3.name)
+    val splits = columnStore.getScanSplits(dataset3.name, 1)
     splits should have length (1)
-    whenReady(columnStore.scanRows(projection3, schema, 0, params = splits.head)()) { rowIter =>
+    whenReady(columnStore.scanRows(projection3, schema, 0, FilteredPartitionScan(splits.head))) { rowIter =>
       rowIter.map(_.getInt(6)).sum should equal (492)
     }
   }

@@ -33,18 +33,22 @@ See [architecture](doc/architecture.md) and [datasets and reading](doc/datasets_
   - [Computed Columns](#computed-columns)
   - [FiloDB vs Cassandra Data Modelling](#filodb-vs-cassandra-data-modelling)
   - [Data Modelling and Performance Considerations](#data-modelling-and-performance-considerations)
+  - [Predicate Pushdowns](#predicate-pushdowns)
   - [Example FiloDB Schema for machine metrics](#example-filodb-schema-for-machine-metrics)
   - [Distributed Partitioning](#distributed-partitioning)
-- [Using FiloDB data-source with Spark](#using-filodb-data-source-with-spark)
+- [Using FiloDB Data Source with Spark](#using-filodb-data-source-with-spark)
   - [Configuring FiloDB](#configuring-filodb)
-  - [Spark data-source Example (spark-shell)](#spark-data-source-example-spark-shell)
+  - [Spark Data Source API Example (spark-shell)](#spark-data-source-api-example-spark-shell)
+  - [Spark/Scala/Java API](#sparkscalajava-api)
   - [Spark Streaming Example](#spark-streaming-example)
-  - [Spark SQL Example (spark-sql)](#spark-sql-example-spark-sql)
+  - [SQL/Hive Example](#sqlhive-example)
   - [Querying Datasets](#querying-datasets)
 - [Using the CLI](#using-the-cli)
-    - [CLI Example](#cli-example)
+  - [Running the CLI](#running-the-cli)
+  - [CLI Example](#cli-example)
 - [Current Status](#current-status)
 - [Deploying](#deploying)
+- [Code Walkthrough](#code-walkthrough)
 - [Building and Testing](#building-and-testing)
 - [You can help!](#you-can-help)
 
@@ -54,12 +58,12 @@ See [architecture](doc/architecture.md) and [datasets and reading](doc/datasets_
 
 FiloDB is a new open-source distributed, versioned, and columnar analytical database designed for modern streaming workloads.
 
-* **High performance** - faster than Parquet scan speeds, plus filtering along two or more dimensions
+* **High performance** - competitive with Parquet scan speeds, plus filtering along two or more dimensions
   - Very flexible filtering: filter on only part of a partition key, much more flexible than allowed in Cassandra
-* **Compact storage** - within 35% of Parquet
+* **Compact storage** - within 35% of Parquet for CassandraColumnStore
 * **Idempotent writes** - primary-key based appends and updates; easy exactly-once ingestion from streaming sources
 * **Distributed** - pluggable storage engine includes Apache Cassandra and in-memory
-* **Low-latency** - minimal SQL query latency of 25ms on one node; sub-second easily achievable with filtering and easy to use concurrency control
+* **Low-latency** - minimal SQL query latency of 15ms on one node; sub-second easily achievable with filtering and easy to use concurrency control
 * **SQL queries** - plug in Tableau or any tool using JDBC/ODBC drivers
 * Ingest from Spark/Spark Streaming from any supported Spark data source
 
@@ -109,7 +113,10 @@ Your input is appreciated!
     - Or, use FiloDB's in-memory column store with Spark (does not work with CLI). Pass the `--conf spark.filodb.store=in-memory` to `spark-submit` / `spark-shell`.  This is a great option to test things out, and is really really fast!
 
 3. For Cassandra, run `filo-cli --command init` to initialize the default `filodb` keyspace.
-4. Now, you can use Spark to ingest/query, or the CLI to ingest/examine metadata.
+4. Dataset creation can be done using `filo-cli` or using Spark Shell / Scala/Java API.
+5. Inserting data can be done using `filo-cli` (CSV only), using Spark SQL/JDBC (INSERT INTO), or the Spark Shell / Scala / Java API.
+6. Querying is done using Spark SQL/JDBC or Scala/Java API.
+7. Listing/deleting/maintenance can be done using `filo-cli`.  If using Cassandra, `cqlsh` can also be used to inspect metadata.
 
 Note: There is at least one release out now, tagged via Git and also located in the "Releases" tab on Github.
 
@@ -142,12 +149,14 @@ Perhaps it's easiest by starting with a diagram of how FiloDB stores data.
 Three types of key define the data model of a FiloDB table.
 
 1. **partition key** - decides how data is going to be distributed across the cluster. All data within one partition key is guaranteed to fit on one node. May consist of multiple columns.
-2. **segment key** - groups row values into efficient chunks.  Segments within a partition are sorted by segment key and range scans can be done over segment keys.
+2. **segment key** - groups row values into efficient chunks.  Segments within a partition are sorted by segment key and range scans can be done over segment keys.  Ideal is > 1000 rows per segment.
 1. **row key**       - acts as a primary key within each partition and decides how data will be sorted within each segment.  May consist of multiple columns.
 
 The PRIMARY KEY for FiloDB consists of (partition key, row key).  When choosing the above values you must make sure the combination of the two are unique.  No component of a primary key may be null - see the `:getOrElse` function for a way of dealing with null inputs.
 
 Specifying the partitioning column is optional.  If a partitioning column is not specified, FiloDB will create a default one with a fixed value, which means everything will be thrown into one node, and is only suitable for small amounts of data.  If you don't specify a partitioning column, then you have to make sure your row keys are all unique.
+
+For examples of data modeling and choosing keys, see the examples below as well as [datasets](doc/datasets_reading.md).
 
 ### Computed Columns
 
@@ -159,6 +168,7 @@ You may specify a function, or computed column, for use with any key column.  Th
 | getOrElse | returns default value if column value is null | `:getOrElse columnA ---` |
 | round     | rounds down a numeric column.  Useful for bucketing by time or bucketing numeric IDs.  | `:round timestamp 10000` |
 | stringPrefix | takes the first N chars of a string; good for partitioning | `:stringPrefix token 4` |
+| timeslice | bucketizes a Long (millisecond) or Timestamp column using duration strings - 500ms, 5s, 10m, 3h, etc. | `:timeslice arrivalTime 30s` |
 
 ### FiloDB vs Cassandra Data Modelling
 
@@ -166,6 +176,7 @@ You may specify a function, or computed column, for use with any key column.  Th
 * Like Cassandra, a single partition is the smallest unit of parallelism when querying from Spark
 * Wider rows work better for FiloDB (bigger chunk/segment size)
 * FiloDB does not have Cassandra's restrictions for partition key filtering. You can filter by any partition keys with most operators.  This means less tables in FiloDB can match more query patterns.
+* Cassandra range scans over clustering keys is available over the segment key
 
 ### Data Modelling and Performance Considerations
 
@@ -184,6 +195,13 @@ Segmentation and chunk size distribution may be checked by the CLI `analyze` com
 * `memtable.max-rows-per-table`, `memtable.flush-trigger-rows` affects how many rows are kept in the MemTable at a time, and this along with how many partitions are in the MemTable directly leads to the chunk size upon flushing.
 * The segment size is directly controlled by the segment key.  Choosing a segment key that groups data into big enough chunks (at least 1000 is a good guide) is highly recommended.  Experimentation along with running `filo-cli analyze` is recommended to come up with a good segment key.  See the Spark ingestion of GDELT below on an example... choosing an inappropriate segment key leads to MUCH slower ingest and read performance.
 * `chunk_size` option when creating a dataset caps the size of a single chunk.
+
+### Predicate Pushdowns
+
+To help with planning, here is an exact list of the predicate pushdowns (in Spark) that help with reducing I/O and query times:
+
+* Partition key column(s): =, IN on any partition key column
+* Segment key:  must be of the form `segmentKey >/>= value AND segmentKey </<= value`
 
 ### Example FiloDB Schema for machine metrics
 
@@ -218,7 +236,7 @@ Currently, FiloDB is a library in Spark and requires the user to distribute data
 * The easiest strategy to accomplish this is to have data partitioned via a queue such as Kafka.  That way, when the data comes into Spark Streaming, it is already partitioned correctly.
 * Another way of accomplishing this is to use a DataFrame's `sort` method before using the DataFrame write API.
 
-## Using FiloDB data-source with Spark
+## Using FiloDB Data Source with Spark
 
 FiloDB has a Spark data-source module - `filodb.spark`. So, you can use the Spark Dataframes `read` and `write` APIs with FiloDB. To use it, follow the steps below
 
@@ -236,8 +254,8 @@ The options to use with the data-source api are:
 | option           | value                                                            | command    | optional |
 |------------------|------------------------------------------------------------------|------------|----------|
 | dataset          | name of the dataset                                              | read/write | No       |
-| row_keys         | comma-separated list of column name(s) or computed column functions to use for the row primary key within each partition.  Cannot be null.  Use `:getOrElse` function if null values might be encountered.  | write      | No       |
-| segment_key      | name of the column (could be computed) to use to group rows into segments in a partition.  Cannot be null.  Use `:getOrElse` function if null values might be encountered.  | write      | No      |
+| row_keys         | comma-separated list of column name(s) or computed column functions to use for the row primary key within each partition.  Cannot be null.  Use `:getOrElse` function if null values might be encountered.  | write      | No if mode is OverWrite or creating dataset for first time  |
+| segment_key      | name of the column (could be computed) to use to group rows into segments in a partition.  Cannot be null.  Use `:getOrElse` function if null values might be encountered.  | write      | yes - defaults to `:string /0` |
 | partition_keys   | comma-separated list of column name(s) or computed column functions to use for the partition key.  Cannot be null.  Use `:getOrElse` function if null values might be encountered.  If not specified, defaults to `:string /0` (a single partition).  | write      | Yes      |
 | splits_per_node  | number of read threads per node, defaults to 4 | read | Yes |
 | chunk_size       | Max number of rows to put into one chunk.  Note that this only has an effect if the dataset is created for the first time.| write | Yes |
@@ -260,8 +278,9 @@ Some options must be configured before starting the Spark Shell or Spark applica
 
 1. Modify the `application.conf` and rebuild, or repackage a new configuration.
 2. Override the built in defaults by setting SparkConf configuration values, preceding the filo settings with `spark.filodb`.  For example, to change the keyspace, pass `--conf spark.filodb.cassandra.keyspace=mykeyspace` to Spark Shell/Submit.  To use the fast in-memory column store instead of Cassandra, pass `--conf spark.filodb.store=in-memory`.
+3. It might be easier to pass in an entire configuration file to FiloDB.  Pass the java option `-Dconfig.file=/path/to/my-filodb.conf`, for example using `--java-driver-options`.
 
-### Spark data-source Example (spark-shell)
+### Spark Data Source API Example (spark-shell)
 
 You can follow along using the [Spark Notebook](http://github.com/andypetrella/spark-notebook) in doc/FiloDB.snb....  launch the notebook using `EXTRA_CLASSPATH=$FILO_JAR ADD_JARS=$FILO_JAR ./bin/spark-notebook &` where `FILO_JAR` is the path to `filodb-spark-assembly` jar.
 
@@ -314,19 +333,55 @@ val df = sqlContext.read.format("filodb.spark").option("dataset", "gdelt").load(
 
 The dataset can be queried using the DataFrame DSL. See the section [Querying Datasets](#querying-datasets) for examples.
 
+### Spark/Scala/Java API
+
+There is a more typesafe API than the Spark Data Source API.
+
+```scala
+import filodb.spark._
+sqlContext.saveAsFilo(df, "gdelt",
+                      rowKeys = Seq("GLOBALEVENTID"),
+                      segmentKey = ":round GLOBALEVENTID 10000",
+                      partitionKeys = Seq(":getOrElse MonthYear -1"))
+```
+
+The above creates the gdelt table based on the keys above, and also inserts data from the dataframe df.
+
+There is also an API purely for inserting data... after all, specifying the keys is not needed when inserting into an existing table.
+
+```scala
+import filodb.spark._
+sqlContext.insertIntoFilo(df, "gdelt")
+```
+
+The API for creating a DataFrame is also much more concise:
+
+```scala
+val df = sqlContext.filoDataset("gdelt")
+```
+
+The above method calls rely on an implicit conversion. From Java, you would need to create a new `FiloContext` first:
+
+```java
+FiloContext fc = new filodb.spark.FiloContext(sqlContext);
+fc.insertIntoFilo(df, "gdelt");
+```
+
 ### Spark Streaming Example
 
 It's not difficult to ingest data into FiloDB using Spark Streaming.  Simple use `foreachRDD` on your `DStream` and then [transform each RDD into a DataFrame](https://spark.apache.org/docs/latest/streaming-programming-guide.html#dataframe-and-sql-operations).
 
 For an example, see the [StreamingTest](spark/src/test/scala/filodb.spark/StreamingTest.scala).
 
-### Spark SQL Example (spark-sql)
+### SQL/Hive Example
 
 Start Spark-SQL:
 
 ```bash
   bin/spark-sql --jars path/to/FiloDB/spark/target/scala-2.10/filodb-spark-assembly-0.2-SNAPSHOT.jar
 ```
+
+(NOTE: if you want to connect with a real Hive Metastore, you should probably instead start the thrift server, also adding the `--jars` above, and then start the `spark-beeline` client)
 
 Create a temporary table using an existing dataset,
 
@@ -340,7 +395,19 @@ Create a temporary table using an existing dataset,
 
 Then, start running SQL queries!
 
-NOTE: The above syntax should also work with remote SQL clients like beeline / spark-beeline.  Just run the Hive ThriftServer that comes with Spark (NOTE: not all distributions of Spark comes with this, you may need to built it).
+You probably want to create a permanent Hive Metastore entry so you don't have to run `create temporary table` every single time at startup:
+
+```sql
+  CREATE TABLE gdelt using filodb.spark options (dataset "gdelt");
+```
+
+Once this is done, you could insert data using SQL syntax:
+
+```sql
+  INSERT INTO TABLE gdelt SELECT * FROM othertable;
+```
+
+Of course, this assumes `othertable` has a similar schema.
 
 ### Querying Datasets
 
@@ -388,12 +455,25 @@ The `filo-cli` accepts arguments as key-value pairs. The following keys are supp
 | rowKeys | This is required for defining the row keys. Its value should be comma-separated list of column names or computed column functions to make up the row key                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | segmentKey | The column name or computed column for the segment key |
 | partitionKeys | Comma-separated list of column names or computed columns to make up the partition key |
-| command    | Its value can be either of `init`,`create`,`importcsv`,`analyze` or `list`.<br/><br/>The `init` command is used to create the FiloDB schema.<br/><br/>The `create` command is used to define new a dataset. For example,<br/>```./filo-cli --command create --dataset playlist --columns id:int,album:string,artist:string,title:string --sortColumn id``` <br/>Note: The sort column is not optional.<br/><br/>The `list` command can be used to view the schema of a dataset. For example, <br/>```./filo-cli --command list --dataset playlist```<br/><br/>The `importcsv` command can be used to load data from a CSV file into a dataset. For example,<br/>```./filo-cli --command importcsv --dataset playlist --filename playlist.csv```<br/>Note: The CSV file should be delimited with comma and have a header row. The column names must match those specified when creating the schema for that dataset. |
+| command    | Its value can be either of `init`, `create`, `importcsv`, `analyze`, `delete` or `list`.<br/><br/>The `init` command is used to create the FiloDB schema.<br/><br/>The `create` command is used to define new a dataset. For example,<br/>```./filo-cli --command create --dataset playlist --columns id:int,album:string,artist:string,title:string --rowKeys id --segmentKey ':string /0' ``` <br/>Note: The sort column is not optional.<br/><br/>The `list` command can be used to view the schema of a dataset. For example, <br/>```./filo-cli --command list --dataset playlist```<br/><br/>The `importcsv` command can be used to load data from a CSV file into a dataset. For example,<br/>```./filo-cli --command importcsv --dataset playlist --filename playlist.csv```<br/>Note: The CSV file should be delimited with comma and have a header row. The column names must match those specified when creating the schema for that dataset.<br>
+The `delete` command is used to delete datasets. |
 | select     | Its value should be a comma-separated string of the columns to be selected,<br/>```./filo-cli --dataset playlist --select album,title```<br/>The result from `select` is printed in the console by default. An output file can be specified with the key `--outfile`. For example,<br/>```./filo-cli --dataset playlist --select album,title --outfile playlist.csv```                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | delimiter  | This is optional key to be used with `importcsv` command. Its value should be the field delimiter character. Default value is comma.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | timeoutMinutes | The number of minutes to time out for CSV ingestion.  Needs to be greater than the max amount of time for ingesting the whole file.  Defaults to 99.  |
 
-#### CLI Example
+### Running the CLI
+
+You may want to customize a configuration to point at your Cassandra cluster, or change other configuration parameters.  The easiest is to pass in a customized config file:
+
+    ./filo-cli -Dconfig.file=/path/to/myfilo.conf --command init
+
+You may also set the `FILO_CONFIG_FILE` environment var instead, but any `-Dconfig.file` args passed in takes precedence.
+
+Individual configuration params may also be changed by passing them on the command line.  They must be the first arguments passed in.  For example:
+
+    ./filo-cli -Dfilodb.columnstore.segment-cache-size=10000 --command ingestcsv ....
+
+### CLI Example
 The following examples use the [GDELT public dataset](http://data.gdeltproject.org/documentation/GDELT-Data_Format_Codebook.pdf) and can be run from the project directory.
 
 Create a dataset with all the columns :
@@ -430,7 +510,17 @@ Query/export some columns:
 
 The current version assumes Spark 1.5.x and Cassandra 2.1.x or 2.2.x.
 
+- sbt spark/assembly
+- sbt cli/assembly
+- Copy `core/src/main/resources/application.conf` and modify as needed for your own config file
+- Set FILO_CONFIG_FILE to the path to your custom config
+- Run the cli jar as the filo CLI command line tool and initialize keyspaces if using Cassandra: `filo-cli-*.jar --command init`
+
 There is a branch for Datastax Enterprise 4.8 / Spark 1.4.  Note that if you are using DSE or have vnodes enabled, a lower number of vnodes (16 or less) is STRONGLY recommended as higher numbers of vnodes slows down queries substantially and basically prevents subsecond queries from happening.
+
+## Code Walkthrough
+
+Please go to the [architecture](doc/architecture.md) doc.
 
 ## Building and Testing
 

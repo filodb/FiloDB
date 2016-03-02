@@ -10,7 +10,8 @@ import scodec.bits._
 import filodb.cassandra.FiloCassandraConnector
 import filodb.core._
 
-case class ChunkRowMapRecord(segmentId: Types.SegmentId,
+case class ChunkRowMapRecord(binPartition: Types.BinaryPartition,
+                             segmentId: Types.SegmentId,
                              chunkIds: ByteBuffer,
                              rowNums: ByteBuffer,
                              nextChunkId: Int)
@@ -43,11 +44,22 @@ extends CassandraTable[ChunkRowMapTable, ChunkRowMapRecord] {
   //scalastyle:on
 
   override def fromRow(row: Row): ChunkRowMapRecord =
-    ChunkRowMapRecord(ByteVector(segmentId(row)), chunkIds(row), rowNums(row), nextChunkId(row))
+    ChunkRowMapRecord(ByteVector(partition(row)),
+                      ByteVector(segmentId(row)),
+                      chunkIds(row), rowNums(row), nextChunkId(row))
 
   def initialize(): Future[Response] = create.ifNotExists.future().toResponse()
 
   def clearAll(): Future[Response] = truncate.future().toResponse()
+
+  /**
+   * Retrieves all chunk maps from a single partition.
+   */
+  def getChunkMaps(binPartition: Types.BinaryPartition,
+                   version: Int): Future[Iterator[ChunkRowMapRecord]] =
+    select.where(_.partition eqs binPartition.toByteBuffer)
+          .and(_.version eqs version)
+          .fetch().map(_.toIterator)
 
   /**
    * Retrieves a whole series of chunk maps, in the range [startSegmentId, untilSegmentId)
@@ -55,25 +67,40 @@ extends CassandraTable[ChunkRowMapTable, ChunkRowMapRecord] {
    * @return ChunkMaps(...), if nothing found will return ChunkMaps(Nil).
    */
   def getChunkMaps(keyRange: BinaryKeyRange,
-                   version: Int): Future[Seq[ChunkRowMapRecord]] =
+                   version: Int): Future[Iterator[ChunkRowMapRecord]] =
     select.where(_.partition eqs keyRange.partition.toByteBuffer)
           .and(_.version eqs version)
           .and(_.segmentId gte keyRange.start.toByteBuffer)
           .and(if (keyRange.endExclusive) { _.segmentId lt keyRange.end.toByteBuffer }
                else                       { _.segmentId lte keyRange.end.toByteBuffer })
-          .fetch()
+          .fetch().map(_.toIterator)
 
   def scanChunkMaps(version: Int,
                     startToken: String,
-                    endToken: String): Future[Iterator[(Types.BinaryPartition, ChunkRowMapRecord)]] = {
+                    endToken: String,
+                    segmentClause: String = ""): Future[Iterator[ChunkRowMapRecord]] = {
     val tokenQ = "TOKEN(partition, version)"
     val cql = s"SELECT * FROM ${keySpace.name}.$tableName WHERE " +
-              s"$tokenQ >= $startToken AND $tokenQ < $endToken"
+              s"$tokenQ >= $startToken AND $tokenQ < $endToken $segmentClause"
     Future {
       session.execute(cql).iterator
              .filter(this.version(_) == version)
-             .map { row => (ByteVector(partition(row)), fromRow(row)) }
+             .map { row => fromRow(row) }
     }
+  }
+
+  /**
+   * Retrieves a series of chunk maps from all partitions in the given token range,
+   * filtered by startSegment until endSegment inclusive.
+   */
+  def scanChunkMapsRange(version: Int,
+                         startToken: String,
+                         endToken: String,
+                         startSegment: Types.SegmentId,
+                         endSegment: Types.SegmentId): Future[Iterator[ChunkRowMapRecord]] = {
+    val clause = s"AND segmentid >= 0x${startSegment.toHex} AND segmentid <= 0x${endSegment.toHex} " +
+                  "ALLOW FILTERING"
+    scanChunkMaps(version, startToken, endToken, clause)
   }
 
   /**

@@ -7,18 +7,18 @@ import akka.actor.ActorSystem
 import com.opencsv.CSVWriter
 import com.quantifind.sumac.{ArgMain, FieldArgs}
 import com.typesafe.config.ConfigFactory
-import filodb.core.store.RowReaderSegment
-import filodb.core.metadata.Column.{ColumnType, Schema}
 import org.velvia.filo.{RowReader, FastFiloRowReader}
 import scala.concurrent.Await
 import scala.concurrent.duration._
 import scala.language.postfixOps
 
+import filodb.core._
 import filodb.cassandra.columnstore.CassandraColumnStore
 import filodb.cassandra.metastore.CassandraMetaStore
 import filodb.coordinator.{NodeCoordinatorActor, CoordinatorSetup}
-import filodb.core.store.{Analyzer, CachedMergingColumnStore}
+import filodb.core.metadata.Column.{ColumnType, Schema}
 import filodb.core.metadata.{Column, DataColumn, Dataset, RichProjection}
+import filodb.core.store.{Analyzer, CachedMergingColumnStore, FilteredPartitionScan}
 
 //scalastyle:off
 class Arguments extends FieldArgs {
@@ -47,6 +47,7 @@ class Arguments extends FieldArgs {
           case "double" => DataColumn(0, name, dataset, version, DoubleColumn)
           case "string" => DataColumn(0, name, dataset, version, StringColumn)
           case "bool"   => DataColumn(0, name, dataset, version, BitmapColumn)
+          case "timestamp" => DataColumn(0, name, dataset, version, TimestampColumn)
         }
       }.toSeq
     }.getOrElse(Nil)
@@ -62,10 +63,12 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
 
   def printHelp() {
     println("filo-cli help:")
-    println("  commands: init create importcsv list analyze")
+    println("  commands: init create importcsv list analyze delete")
     println("  columns: <colName1>:<type1>,<colName2>:<type2>,... ")
-    println("  types:  int,long,double,string,bool")
+    println("  types:  int,long,double,string,bool,timestamp")
     println("  OR:  --select col1, col2  [--limit <n>]  [--outfile /tmp/out.csv]")
+    println("\nTo change config: pass -Dconfig.file=/path/to/config as first arg or set $FILO_CONFIG_FILE")
+    println("  or override any config by passing -Dconfig.path=newvalue as first args")
   }
 
   def main(args: Arguments) {
@@ -97,8 +100,12 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
                     args.timeoutMinutes.minutes)
         case Some("analyze") =>
           println(Analyzer.analyze(columnStore.asInstanceOf[CachedMergingColumnStore],
+                                   metaStore,
                                    args.dataset.get,
                                    version).prettify())
+        case Some("delete") =>
+          parse(metaStore.deleteDataset(args.dataset.get)) { x => x }
+
         case x: Any =>
           args.select.map { selectCols =>
             exportCSV(args.dataset.get,
@@ -124,10 +131,10 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
       println(s"Dataset name: ${datasetObj.name}")
       println(s"Partition keys: ${datasetObj.partitionColumns.mkString(", ")}")
       println(s"Options: ${datasetObj.options}\n")
-      datasetObj.projections.foreach(println)
+      datasetObj.projections.foreach(p => println(p.detailedString))
     }
     parse(metaStore.getSchema(dataset, Int.MaxValue)) { schema =>
-      println("Columns:")
+      println("\nColumns:")
       schema.values.toSeq.sortBy(_.name).foreach { case DataColumn(_, name, _, ver, colType, _) =>
         println("  %-35.35s %5d %s".format(name, ver, colType))
       }
@@ -218,7 +225,8 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
 
     // NOTE: we will only return data from the first split!
     val splits = columnStore.getScanSplits(dataset)
-    val requiredRows = parse(columnStore.scanRows(richProj, columns, version, params=splits.head)()) {
+    val requiredRows = parse(columnStore.scanRows(richProj, columns, version,
+                                                  FilteredPartitionScan(splits.head))) {
                          x => x.take(limit) }
     writeResult(dataset, requiredRows, columnNames, columns, outFile)
   }

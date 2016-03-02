@@ -102,7 +102,7 @@ with ScalaFutures {
   it("should automatically flush after ingesting enough rows") {
     ingestRows(100)
     // Ingest more rows.  These should be ingested into the active table AFTER flush is initiated.
-    Thread sleep 250
+    Thread sleep 500
     ingestRows(20)
     probe.send(dsActor, GetStats)
     probe.expectMsg(Stats(1, 1, 0, 20, -1))

@@ -174,7 +174,7 @@ class RowReaderSegment(val projection: RichProjection,
     (0 until index.nextChunkId).map { chunkId =>
       val reader = readerFactory(chunks(chunkId), clazzes)
       // Cheap check for empty chunks
-      if (reader.parsers(0).length == 0) {
+      if (clazzes.nonEmpty && reader.parsers(0).length == 0) {
         logger.warn(s"empty chunk detected!  chunkId=$chunkId in $segInfo")
       }
       reader

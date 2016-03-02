@@ -40,7 +40,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
   }
 
   val segInfo = SegmentInfo("partition", 0).basedOn(projection)
-  val keyRange = KeyRange("partition", 0, 0, endExclusive = false).basedOn(projection)
+  val partScan = SinglePartitionScan("partition")
 
   val bytes1 = ByteBuffer.wrap("apple".getBytes("UTF-8"))
   val bytes2 = ByteBuffer.wrap("orange".getBytes("UTF-8"))
@@ -77,7 +77,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
       response should equal (Success)
     }
 
-    whenReady(colStore.readSegments(projection, schema, 0)(keyRange)) { segIter =>
+    whenReady(colStore.scanSegments(projection, schema, 0, partScan)) { segIter =>
       val segments = segIter.toSeq
       segments should have length (1)
       val readSeg = segments.head.asInstanceOf[RowReaderSegment]
@@ -103,7 +103,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
       response should equal (Success)
     }
 
-    whenReady(colStore.readSegments(projection, schema, 0)(keyRange)) { segIter =>
+    whenReady(colStore.scanSegments(projection, schema, 0, partScan)) { segIter =>
       val segments = segIter.toSeq
       segments should have length (1)
       val readSeg = segments.head.asInstanceOf[RowReaderSegment]
@@ -128,10 +128,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
     segment2.addRowsAsChunk(readers.toIterator.take(3))
     colStore.appendSegment(projection2, segment2, 0).futureValue should equal (Success)
 
-    val keyRange = KeyRange(197901,
-                            segments.head.segInfo.segment,
-                            segments.last.segInfo.segment, endExclusive = false).basedOn(projection2)
-    whenReady(colStore.readSegments(projection2, schema, 0)(keyRange)) { segIter =>
+    whenReady(colStore.scanSegments(projection2, schema, 0, SinglePartitionScan(197901))) { segIter =>
       val segments = segIter.toSeq
       segments should have length (2)
       val readSeg = segments.head.asInstanceOf[RowReaderSegment]
@@ -139,14 +136,14 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
     }
   }
 
-  "readSegments" should "read segments back that were written" in {
+  "scanSegments SinglePartitionScan" should "read segments back that were written" in {
     val segment = getRowWriter()
     segment.addRowsAsChunk(mapper(names))
     whenReady(colStore.appendSegment(projection, segment, 0)) { response =>
       response should equal (Success)
     }
 
-    whenReady(colStore.readSegments(projection, schema, 0)(keyRange)) { segIter =>
+    whenReady(colStore.scanSegments(projection, schema, 0, partScan)) { segIter =>
       val segments = segIter.toSeq
       segments should have length (1)
       val readSeg = segments.head.asInstanceOf[RowReaderSegment]
@@ -157,13 +154,23 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
     }
   }
 
-  it should "return empty iterator if cannot find segment" in {
-    whenReady(colStore.readSegments(projection, schema, 0)(keyRange)) { segIter =>
+  it should "return empty iterator if cannot find segment (SinglePartitionRangeScan)" in {
+    val segment = getRowWriter()
+    segment.addRowsAsChunk(mapper(names))
+    colStore.appendSegment(projection, segment, 0).futureValue should equal (Success)
+
+    // partition exists but only for segment key 0, this should find nothing
+    val rangeScanNoSegment = SinglePartitionRangeScan(KeyRange("partition", 1000, 1000, false))
+    whenReady(colStore.scanSegments(projection, schema, 0, rangeScanNoSegment)) { segIter =>
       segIter.toSeq should have length (0)
     }
   }
 
-  it should "return empty iterator if cannot find partition or version" in (pending)
+  it should "return empty iterator if cannot find partition or version" in {
+    whenReady(colStore.scanSegments(projection, schema, 0, partScan)) { segIter =>
+      segIter.toSeq should have length (0)
+    }
+  }
 
   it should "return segment with empty chunks if cannot find columns" in {
     whenReady(colStore.appendSegment(projection, baseSegment, 0)) { response =>
@@ -171,24 +178,24 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
     }
 
     val fakeCol = DataColumn(5, "notACol", dataset.name, 0, Column.ColumnType.StringColumn)
-    whenReady(colStore.readSegments(projection, Seq(fakeCol), 0)(keyRange)) { segIter =>
+    whenReady(colStore.scanSegments(projection, Seq(fakeCol), 0, partScan)) { segIter =>
       val segments = segIter.toSeq
       segments should have length (1)
       segments.head.getChunks.toSet should equal (Set(("notACol", 0, null), ("notACol", 1, null)))
     }
   }
 
-  "scanSegments" should "read segments back that were written" in {
+  "scanSegments FilteredPartitionScan" should "read segments back that were written" in {
     val segment = getRowWriter()
     segment.addRowsAsChunk(mapper(names))
     whenReady(colStore.appendSegment(projection, segment, 0)) { response =>
       response should equal (Success)
     }
 
-    val paramSet = colStore.getScanSplits(dataset.name)
+    val paramSet = colStore.getScanSplits(dataset.name, 1)
     paramSet should have length (1)
 
-    whenReady(colStore.scanSegments(projection, schema, 0, params = paramSet.head)()) { segIter =>
+    whenReady(colStore.scanSegments(projection, schema, 0, FilteredPartitionScan(paramSet.head))) { segIter =>
       val segments = segIter.toSeq
       segments should have length (1)
       val readSeg = segments.head.asInstanceOf[RowReaderSegment]
@@ -206,10 +213,10 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
       response should equal (Success)
     }
 
-    val paramSet = colStore.getScanSplits(dataset.name)
+    val paramSet = colStore.getScanSplits(dataset.name, 1)
     paramSet should have length (1)
 
-    whenReady(colStore.scanRows(projection, schema, 0, params = paramSet.head)()) { rowIter =>
+    whenReady(colStore.scanRows(projection, schema, 0, FilteredPartitionScan(paramSet.head))) { rowIter =>
       rowIter.map(_.getLong(2)).toSeq should equal (Seq(24L, 25L, 28L, 29L, 39L, 40L))
     }
   }
@@ -221,10 +228,10 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
       colStore.appendSegment(projection2, seg, 0).futureValue should equal (Success)
     }
 
-    val paramSet = colStore.getScanSplits(dataset.name)
+    val paramSet = colStore.getScanSplits(dataset.name, 1)
     paramSet should have length (1)
 
-    whenReady(colStore.scanRows(projection2, schema, 0, params = paramSet.head)()) { rowIter =>
+    whenReady(colStore.scanRows(projection2, schema, 0, FilteredPartitionScan(paramSet.head))) { rowIter =>
       rowIter.map(_.getInt(6)).sum should equal (492)
     }
   }
@@ -236,13 +243,42 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
       colStore.appendSegment(projection2, seg, 0).futureValue should equal (Success)
     }
 
-    val paramSet = colStore.getScanSplits(dataset.name)
+    val paramSet = colStore.getScanSplits(dataset.name, 1)
     paramSet should have length (1)
 
     val filterFunc = KeyFilter.equalsFunc(projection2.partitionType)(197902.asInstanceOf[projection2.PK])
-
-    whenReady(colStore.scanRows(projection2, schema, 0, params = paramSet.head)(filterFunc)) { rowIter =>
+    val method = FilteredPartitionScan(paramSet.head, filterFunc)
+    whenReady(colStore.scanRows(projection2, schema, 0, method)) { rowIter =>
       rowIter.map(_.getInt(6)).sum should equal (22)
+    }
+  }
+
+  it should "range scan by segment key and filter rows with single partition key" in {
+    import GdeltTestData._
+    val segments = getSegmentsByPartKey(projection2)
+    segments.foreach { seg =>
+      colStore.appendSegment(projection2, seg, 0).futureValue should equal (Success)
+    }
+
+    val paramSet = colStore.getScanSplits(dataset.name, 1)
+    paramSet should have length (1)
+
+    // First filter by segment range only.  There are two possible segment key values: 0 or 50, and
+    // two partitions, 197901 and 197902.  197902 only has segment 50 (IDs 91-98)
+    // There should be 49 rows and two partitions if we only ask for seg 50 across both partitions
+    val method1 = FilteredPartitionRangeScan(paramSet.head, SegmentRange(50, 50))
+    whenReady(colStore.scanRows(projection2, schema, 0, method1)) { rowIter =>
+      val rows = rowIter.map(r => (r.getInt(0), r.getInt(2))).toList
+      rows.length should equal (49)
+      rows.map(_._2).toSet should equal (Set(197901, 197902))
+      rows.map(_._1).min should equal (50)
+    }
+
+    // Ask for only seg 0 and partition 197902, there should be no rows
+    val filterFunc = KeyFilter.equalsFunc(projection2.partitionType)(197902.asInstanceOf[projection2.PK])
+    val method2 = FilteredPartitionRangeScan(paramSet.head, SegmentRange(0, 0), filterFunc)
+    whenReady(colStore.scanRows(projection2, schema, 0, method2)) { rowIter =>
+      rowIter.toSeq.length should equal (0)
     }
   }
 
@@ -255,13 +291,14 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
       colStore.appendSegment(projection3, seg, 0).futureValue should equal (Success)
     }
 
-    val paramSet = colStore.getScanSplits(dataset.name)
+    val paramSet = colStore.getScanSplits(dataset.name, 1)
     paramSet should have length (1)
 
     // Test 1:  IN query on first column only
     val inFilter = KeyFilter.inFunc(StringKeyType)(Set("JPN", "KHM"))
     val filter1 = KeyFilter.makePartitionFilterFunc(projection3, Seq(0), Seq(inFilter))
-    whenReady(colStore.scanRows(projection3, schema, 0, params = paramSet.head)(filter1)) { rowIter =>
+    val method1 = FilteredPartitionScan(paramSet.head, filter1)
+    whenReady(colStore.scanRows(projection3, schema, 0, method1)) { rowIter =>
       val rows = rowIter.toSeq
       rows.map(_.getInt(6)).sum should equal (30)
       rows.map(_.getString(4)).toSet should equal (Set("JPN", "KHM"))
@@ -271,7 +308,8 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
     val eqFilters = Seq(KeyFilter.equalsFunc(StringKeyType)("JPN"),
                         KeyFilter.equalsFunc(IntKeyType)(1979))
     val filter2 = KeyFilter.makePartitionFilterFunc(projection3, Seq(0, 1), eqFilters)
-    whenReady(colStore.scanRows(projection3, schema, 0, params = paramSet.head)(filter2)) { rowIter =>
+    val method2 = FilteredPartitionScan(paramSet.head, filter2)
+    whenReady(colStore.scanRows(projection3, schema, 0, method2)) { rowIter =>
       rowIter.map(_.getInt(6)).sum should equal (10)
     }
   }

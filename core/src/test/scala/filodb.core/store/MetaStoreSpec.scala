@@ -14,7 +14,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
   import MetaStore._
 
   def metaStore: MetaStore
-  def defaultPatience: PatienceConfig
+  implicit def defaultPatience: PatienceConfig
 
   override def beforeAll() {
     super.beforeAll()
@@ -70,6 +70,15 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
       metaStore.newColumn(monthYearCol).futureValue should equal (Success)
       metaStore.getSchema("gdelt", 10).futureValue should equal (Map("monthYear" -> monthYearCol))
     }
-  }
 
+    it("deleteDatasets should delete both dataset and columns") {
+      val dataset = Dataset("gdelt", "autoid", "seg")
+      metaStore.newDataset(dataset).futureValue should equal (Success)
+      metaStore.newColumn(monthYearCol).futureValue should equal (Success)
+
+      metaStore.deleteDataset("gdelt").futureValue should equal (Success)
+      metaStore.getDataset("gdelt").failed.futureValue shouldBe a [NotFoundError]
+      metaStore.getSchema("gdelt", 10).futureValue should equal (Map.empty)
+    }
+  }
 }

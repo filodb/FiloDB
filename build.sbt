@@ -63,6 +63,8 @@ lazy val extraRepos = Seq(
 val excludeShapeless = ExclusionRule(organization = "com.chuusai")
 // Zookeeper pulls in slf4j-log4j12 which we DON'T want
 val excludeZK = ExclusionRule(organization = "org.apache.zookeeper")
+// This one is brought by Spark by default
+val excludeSlf4jLog4j = ExclusionRule(organization = "org.slf4j", name = "slf4j-log4j12")
 
 lazy val coreDeps = Seq(
   "com.typesafe.scala-logging" %% "scala-logging-slf4j" % "2.1.2",
@@ -101,14 +103,15 @@ lazy val cliDeps = Seq(
 )
 
 lazy val sparkDeps = Seq(
-  "org.apache.spark"     %% "spark-sql"         % sparkVersion % "provided",
-  "org.apache.spark"     %% "spark-streaming"   % sparkVersion % "provided",
-  "org.apache.spark"     %% "spark-hive-thriftserver" % sparkVersion % "provided" exclude("org.slf4j", "slf4j-log4j12")
+  // We don't want LOG4J.  We want Logback!  The excludeZK is to help with a conflict re Coursier plugin.
+  "org.apache.spark"     %% "spark-hive"         % sparkVersion % "provided" excludeAll(excludeSlf4jLog4j, excludeZK),
+  "org.apache.spark"     %% "spark-hive-thriftserver" % sparkVersion % "provided" excludeAll(excludeSlf4jLog4j, excludeZK),
+  "org.apache.spark"     %% "spark-streaming"   % sparkVersion % "provided"
 )
 
 lazy val jmhDeps = Seq(
   "com.nativelibs4java"  %% "scalaxy-loops"     % "0.3.3" % "provided",
-  "org.apache.spark"     %% "spark-sql"         % "1.5.2"
+  "org.apache.spark"     %% "spark-sql"         % sparkVersion excludeAll(excludeSlf4jLog4j, excludeZK)
 )
 
 //////////////////////////
@@ -153,8 +156,16 @@ lazy val styleSettings = Seq(
   (compile in Test) <<= (compile in Test) dependsOn compileScalastyle
 )
 
-lazy val shellScript = """#!/usr/bin/env sh
-exec java -Xmx4g -Xms4g -jar "$0" "$@"
+lazy val shellScript = """#!/bin/bash
+while [ "${1:0:2}" = "-D" ]
+do
+  allprops="$allprops $1"
+  shift
+done
+if [ ! -z "$FILO_CONFIG_FILE" ]; then
+  config="-Dconfig.file=$FILO_CONFIG_FILE"
+fi
+exec java -Xmx4g -Xms4g $config $allprops -jar "$0" "$@"
 """.split("\n")
 
 // Builds cli as a standalone executable to make it easier to launch commands

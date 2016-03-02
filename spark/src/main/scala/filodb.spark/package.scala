@@ -3,8 +3,8 @@ package filodb
 import akka.actor.ActorRef
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.slf4j.StrictLogging
-import org.apache.spark.sql.{SQLContext, SaveMode, DataFrame, Row, Column => SparkColumn}
-import org.apache.spark.sql.types.DataType
+import org.apache.spark.sql.{SQLContext, SaveMode, DataFrame, Row}
+import org.apache.spark.sql.types.StructType
 import scala.concurrent.{Await, Future}
 import scala.concurrent.duration._
 import scala.language.postfixOps
@@ -90,7 +90,7 @@ package object spark extends StrictLogging {
      */
     def filoDataset(dataset: String,
                     version: Int = 0,
-                    splitsPerNode: Int = 1): DataFrame =
+                    splitsPerNode: Int = 4): DataFrame =
       sqlContext.baseRelationToDataFrame(FiloRelation(dataset, version, splitsPerNode)
                                                      (sqlContext))
 
@@ -101,8 +101,10 @@ package object spark extends StrictLogging {
 
     import filodb.spark.TypeConverters._
 
-    private def dfToFiloColumns(df: DataFrame): Seq[DataColumn] = {
-      df.schema.map { f =>
+    private def dfToFiloColumns(df: DataFrame): Seq[DataColumn] = dfToFiloColumns(df.schema)
+
+    private def dfToFiloColumns(schema: StructType): Seq[DataColumn] = {
+      schema.map { f =>
         DataColumn(0, f.name, "", -1, sqlTypeToColType(f.dataType))
       }
     }
@@ -138,14 +140,13 @@ package object spark extends StrictLogging {
       }
     }
 
-    // This doesn't create columns, because that's in checkAndAddColumns.
-    // It does check for schema errors though first.  :)
-    private def createNewDataset(datasetName: String,
-                                 rowKeys: Seq[String],
-                                 segmentKey: String,
-                                 partitionKeys: Seq[String],
-                                 chunkSize: Option[Int],
-                                 dfColumns: Seq[Column]): Unit = {
+    // Checks for schema errors via RichProjection.make, and returns created Dataset object
+    private def makeAndVerifyDataset(datasetName: String,
+                                     rowKeys: Seq[String],
+                                     segmentKey: String,
+                                     partitionKeys: Seq[String],
+                                     chunkSize: Option[Int],
+                                     dfColumns: Seq[Column]): Dataset = {
       val options = Dataset.DefaultOptions
       val options2 = chunkSize.map { newSize => options.copy(chunkSize = newSize) }.getOrElse(options)
       val dataset = Dataset(datasetName, rowKeys, segmentKey, partitionKeys).copy(options = options2)
@@ -155,10 +156,15 @@ package object spark extends StrictLogging {
         case err: RichProjection.BadSchema => throw BadSchemaError(err.toString)
       }
 
-      logger.info(s"Creating dataset $dataset...")
+      dataset
+    }
+
+    // This doesn't create columns, because that's in checkAndAddColumns.
+    private def createNewDataset(dataset: Dataset): Unit = {
+      logger.info(s"Creating dataset ${dataset.name}...")
       actorAsk(FiloSetup.coordinatorActor, CreateDataset(dataset, Nil)) {
         case DatasetCreated =>
-          logger.info(s"Dataset $datasetName created successfully...")
+          logger.info(s"Dataset ${dataset.name} created successfully...")
         case DatasetError(errMsg) =>
           throw new RuntimeException(s"Error creating dataset: $errMsg")
       }
@@ -169,7 +175,53 @@ package object spark extends StrictLogging {
       actorAsk(FiloSetup.coordinatorActor,
                TruncateProjection(dataset.projections.head, version), 1.minute) {
         case ProjectionTruncated => logger.info(s"Truncation of ${dataset.name} finished")
-        case UnknownDataset => throw NotFoundError(s"(${dataset.name}, ${version}})")
+        case DatasetError(msg) => throw NotFoundError(s"$msg - (${dataset.name}, ${version})")
+      }
+    }
+
+    private def deleteDataset(dataset: String): Unit = {
+      logger.info(s"Deleting dataset $dataset")
+      parse(FiloSetup.metaStore.deleteDataset(dataset)) { resp => resp }
+    }
+
+    /**
+     * Creates (or recreates) a FiloDB dataset with certain row, segment, partition keys.  Only creates the
+     * dataset/projection definition and persists the dataset metadata; does not actually create the column
+     * definitions (that is done by the insert step).  The exact behavior depends on the mode:
+     *   Append  - creates the dataset if it doesn't exist
+     *   Overwrite - creates the dataset, deleting the old definition first if needed
+     *   ErrorIfExists - throws an error if the dataset already exists
+     *
+     * For the other paramter definitions, please see saveAsFiloDataset().
+     */
+    private[spark] def createOrUpdateDataset(schema: StructType,
+                                             dataset: String,
+                                             rowKeys: Seq[String],
+                                             segmentKey: String,
+                                             partitionKeys: Seq[String],
+                                             chunkSize: Option[Int] = None,
+                                             mode: SaveMode = SaveMode.Append): Unit = {
+      FiloSetup.init(sqlContext.sparkContext)
+      val partKeys = if (partitionKeys.nonEmpty) partitionKeys else Seq(Dataset.DefaultPartitionColumn)
+      val dfColumns = dfToFiloColumns(schema)
+
+      val datasetObj = try {
+        Some(getDatasetObj(dataset))
+      } catch {
+        case e: NotFoundError => None
+      }
+      (datasetObj, mode) match {
+        case (None, SaveMode.Append) | (None, SaveMode.Overwrite) | (None, SaveMode.ErrorIfExists) =>
+          val ds = makeAndVerifyDataset(dataset, rowKeys, segmentKey, partKeys, chunkSize, dfColumns)
+          createNewDataset(ds)
+        case (Some(dsObj), SaveMode.ErrorIfExists) =>
+          throw new RuntimeException(s"Dataset $dataset already exists!")
+        case (Some(dsObj), SaveMode.Overwrite) =>
+          val ds = makeAndVerifyDataset(dataset, rowKeys, segmentKey, partKeys, chunkSize, dfColumns)
+          deleteDataset(dataset)
+          createNewDataset(ds)
+        case (_, _) =>
+          logger.info(s"Dataset $dataset definition not changed")
       }
     }
 
@@ -204,50 +256,54 @@ package object spark extends StrictLogging {
      * @param mode the Spark SaveMode - ErrorIfExists, Append, Overwrite, Ignore
      * @param writeTimeout Maximum time to wait for write of each partition to complete
      */
-    def saveAsFiloDataset(df: DataFrame,
-                          dataset: String,
-                          rowKeys: Seq[String],
-                          segmentKey: String,
-                          partitionKeys: Seq[String],
-                          version: Int = 0,
-                          chunkSize: Option[Int] = None,
-                          mode: SaveMode = SaveMode.Append,
-                          writeTimeout: FiniteDuration = DefaultWriteTimeout): Unit = {
-      val filoConfig = FiloSetup.configFromSpark(sqlContext.sparkContext)
-      FiloSetup.init(filoConfig)
-
-      val partKeys = if (partitionKeys.nonEmpty) partitionKeys else Seq(Dataset.DefaultPartitionColumn)
-      val dfColumns = dfToFiloColumns(df)
-
-      try {
-        val datasetObj = getDatasetObj(dataset)
-        if (mode == SaveMode.Overwrite) truncateDataset(datasetObj, version)
-      } catch {
-        case e: NotFoundError =>
-          createNewDataset(dataset, rowKeys, segmentKey, partKeys, chunkSize, dfColumns)
-      }
-      checkAndAddColumns(dfColumns, dataset, version)
-
-      val numPartitions = df.rdd.partitions.size
-      logger.info(s"Saving ($dataset/$version) with row keys $rowKeys, segment key $segmentKey, " +
-                  s"partition keys $partKeys, $numPartitions partitions")
-      ingestDF(df, filoConfig, dataset, dfColumns.map(_.name), version, writeTimeout)
-
-      syncToHive(sqlContext)
+    def saveAsFilo(df: DataFrame,
+                   dataset: String,
+                   rowKeys: Seq[String],
+                   segmentKey: String,
+                   partitionKeys: Seq[String],
+                   version: Int = 0,
+                   chunkSize: Option[Int] = None,
+                   mode: SaveMode = SaveMode.Append,
+                   writeTimeout: FiniteDuration = DefaultWriteTimeout): Unit = {
+      createOrUpdateDataset(df.schema, dataset, rowKeys, segmentKey, partitionKeys, chunkSize, mode)
+      insertIntoFilo(df, dataset, version, mode == SaveMode.Overwrite, writeTimeout)
     }
 
-    def ingestDF(df: DataFrame, filoConfig: Config, dataset: String,
-                 dfColumns: Seq[String], version: Int,
-                 writeTimeout: FiniteDuration): Unit = {
+    /**
+     * Implements INSERT INTO into a Filo Dataset.  The dataset must already have been created.
+     * Will check and add any extra columns from the DataFrame into the dataset, but column type
+     * mismatches will result in an error.
+     * @param overwrite if true, first truncate the dataset before writing
+     */
+    def insertIntoFilo(df: DataFrame,
+                       dataset: String,
+                       version: Int = 0,
+                       overwrite: Boolean = false,
+                       writeTimeout: FiniteDuration = DefaultWriteTimeout): Unit = {
+      val filoConfig = FiloSetup.initAndGetConfig(sqlContext.sparkContext)
+      val dfColumns = dfToFiloColumns(df)
+      val columnNames = dfColumns.map(_.name)
+      checkAndAddColumns(dfColumns, dataset, version)
+
+      if (overwrite) {
+        val datasetObj = getDatasetObj(dataset)
+        truncateDataset(datasetObj, version)
+      }
+
+      val numPartitions = df.rdd.partitions.size
+      logger.info(s"Inserting into ($dataset/$version) with $numPartitions partitions")
+
       // For each partition, start the ingestion
       df.rdd.mapPartitionsWithIndex { case (index, rowIter) =>
         // Everything within this function runs on each partition/executor, so need a local datastore & system
         FiloSetup.init(filoConfig)
         logger.info(s"Starting ingestion of DataFrame for dataset $dataset, partition $index...")
-        ingestRddRows(FiloSetup.coordinatorActor, dataset, dfColumns, version, rowIter,
+        ingestRddRows(FiloSetup.coordinatorActor, dataset, columnNames, version, rowIter,
                       writeTimeout, index)
         Iterator.empty
       }.count()
+
+      syncToHive(sqlContext)
     }
   }
 }
