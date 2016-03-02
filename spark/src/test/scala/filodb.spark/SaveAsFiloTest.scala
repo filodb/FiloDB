@@ -142,6 +142,23 @@ with Matchers with ScalaFutures {
     }
   }
 
+  it("should not delete original metadata if overwrite with bad schema definition") {
+    sql.saveAsFilo(dataDF, "gdelt1", Seq("id"), segCol, partKeys,
+                          writeTimeout = 2.minutes)
+
+    intercept[BadSchemaError] {
+      dataDF.write.format("filodb.spark").
+                   option("dataset", "gdelt1").
+                   option("row_keys", "not_a_col").
+                   option("segment_key", segCol).
+                   option("partition_keys", ":fooMucnhkin 123").
+                   mode(SaveMode.Overwrite).
+                   save()
+    }
+
+    FiloSetup.metaStore.getDataset("gdelt1").futureValue should equal (ds1.copy(partitionColumns = partKeys))
+  }
+
   it("should write table if there are existing matching columns") {
     metaStore.newDataset(ds3).futureValue should equal (Success)
     val idStrCol = DataColumn(0, "id", "gdelt1", 0, Column.ColumnType.LongColumn)
