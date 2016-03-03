@@ -324,6 +324,14 @@ scala> csvDF.write.format("filodb.spark").
 
 Note that in the above case, since events are spread over a much larger number of partitions, it no longer makes sense to use GLOBALEVENTID as a segment key - at least with the original 10000 as a rounding factor.  There are very few events for a given country and year within the space of 10000 event IDs, leading to inefficient storage.  Instead, we use a single segment for each partition.  We probably could have used `:round GLOBALEVENTID 500000` or some other bigger factor as well.  Using `:round GLOBALEVENT 10000` lead to 3x slower ingest and at least 5x slower reads.
 
+The key definitions can be left out for appends:
+
+```scala
+sourceDataFrame.write.format("filodb.spark").
+                option("dataset", "gdelt").
+                mode(SaveMode.Append).save()
+```
+
 Note that for efficient columnar encoding, wide rows with fewer partition keys are better for performance.
 
 Reading the dataset,
@@ -503,8 +511,16 @@ Query/export some columns:
 
 ## Current Status
 
-* Version 0.1 is the stable, latest released version.  It offers a stable point from which to try FiloDB.
-* Master contains much more features - multi column partition and row keys, separate segment key, much richer projection key filtering (IN, etc.), better performance and error handling
+Version 0.2 is the stable, latest released version.  It has been tested on a cluster for a different variety of schemas, has a stable data model and ingestion, and features a huge number of improvements over the previous version:
+
+* Multi column partition and row keys
+* Separate segment key for much easier control of columnar chunk size and sort order
+* Much richer projection key filtering (IN and =, on any column)
+* Range scans within partitions by segment key
+* Computed columns for easily deriving segment and partition keys, especially useful for time series
+* Support for timestamp columns
+* Better performance and error handling: true node locality for reads; up to 2x faster scan performance; fast single partition reads; retries and configurable connection timeouts etc.
+* A ton of bug fixes
 
 ## Deploying
 
