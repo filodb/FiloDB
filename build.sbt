@@ -47,6 +47,11 @@ lazy val jmh = (project in file("jmh"))
                  .enablePlugins(JmhPlugin)
                  .dependsOn(core % "compile->compile; compile->test", spark)
 
+lazy val stress = (project in file("stress"))
+                    .settings(mySettings:_*)
+                    .settings(libraryDependencies ++= stressDeps)
+                    .dependsOn(spark)
+
 val phantomVersion = "1.12.2"
 val akkaVersion    = "2.3.7"
 val sparkVersion   = "1.5.2"
@@ -112,6 +117,11 @@ lazy val sparkDeps = Seq(
 lazy val jmhDeps = Seq(
   "com.nativelibs4java"  %% "scalaxy-loops"     % "0.3.3" % "provided",
   "org.apache.spark"     %% "spark-sql"         % sparkVersion excludeAll(excludeSlf4jLog4j, excludeZK)
+)
+
+lazy val stressDeps = Seq(
+  "com.databricks" %% "spark-csv" % "1.3.0",
+  "org.apache.spark"     %% "spark-sql"         % sparkVersion excludeAll(excludeZK)
 )
 
 //////////////////////////
