@@ -521,6 +521,7 @@ Version 0.2 is the stable, latest released version.  It has been tested on a clu
 * Support for timestamp columns
 * Better performance and error handling: true node locality for reads; up to 2x faster scan performance; fast single partition reads; retries and configurable connection timeouts etc.
 * A ton of bug fixes
+* An experimental feature to sync FiloDB tables to Hive MetaStore
 
 ## Deploying
 
