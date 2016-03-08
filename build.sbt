@@ -50,6 +50,7 @@ lazy val jmh = (project in file("jmh"))
 lazy val stress = (project in file("stress"))
                     .settings(mySettings:_*)
                     .settings(libraryDependencies ++= stressDeps)
+                    .settings(assemblySettings:_*)
                     .dependsOn(spark)
 
 val phantomVersion = "1.12.2"
@@ -121,7 +122,7 @@ lazy val jmhDeps = Seq(
 
 lazy val stressDeps = Seq(
   "com.databricks" %% "spark-csv" % "1.3.0",
-  "org.apache.spark"     %% "spark-sql"         % sparkVersion excludeAll(excludeZK)
+  "org.apache.spark"     %% "spark-sql"         % sparkVersion % "provided" excludeAll(excludeZK)
 )
 
 //////////////////////////
@@ -191,6 +192,7 @@ lazy val assemblySettings = Seq(
     case m if m.toLowerCase.endsWith("manifest.mf") => MergeStrategy.discard
     case m if m.toLowerCase.matches("meta-inf.*\\.sf$") => MergeStrategy.discard
     case m if m.toLowerCase.matches("meta-inf.*\\.properties") => MergeStrategy.discard
+    // case m if m.toLowerCase.matches("*\\.versions\\.properties") => MergeStrategy.discard
     case PathList(ps @ _*) if ps.last endsWith ".txt.1" => MergeStrategy.first
       case "reference.conf" => MergeStrategy.concat
     case "application.conf"                            => MergeStrategy.concat
