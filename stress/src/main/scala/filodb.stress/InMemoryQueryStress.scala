@@ -1,7 +1,7 @@
 package filodb.stress
 
 import org.apache.spark.{SparkContext, SparkConf}
-import org.apache.spark.sql.{SaveMode, SQLContext}
+import org.apache.spark.sql.{DataFrame, SaveMode, SQLContext}
 import scala.util.Random
 import scala.concurrent.duration.Duration
 import scala.concurrent.{Await, Future}
@@ -15,10 +15,12 @@ import filodb.spark._
  *
  * To prepare, download the first month's worth of data from http://www.andresmh.com/nyctaxitrips/
  *
+ * Recommended to run this with the first million rows only as a first run to make sure everything works.
  * Run it with LOTS of memory - 8GB recommended
  */
 object InMemoryQueryStress extends App {
   val taxiCsvFile = args(0)
+  val numRuns = 50    // Make this higher when doing performance profiling
 
   def puts(s: String): Unit = {
     //scalastyle:off
@@ -82,9 +84,14 @@ object InMemoryQueryStress extends App {
 
   import scala.concurrent.ExecutionContext.Implicits.global
 
+  val cachedDF = new collection.mutable.HashMap[String, DataFrame]
+
+  def getCachedDF(query: String): DataFrame =
+    cachedDF.getOrElseUpdate(query, sql.sql(query))
+
   def runQueries(queries: Array[String], numQueries: Int = 1000): Unit = {
     val startMillis = System.currentTimeMillis
-    val futures = (0 until numQueries).map(i => sql.sql(queries(Random.nextInt(queries.size))).rdd.collectAsync)
+    val futures = (0 until numQueries).map(i => getCachedDF(queries(Random.nextInt(queries.size))).rdd.collectAsync)
     val fut = Future.sequence(futures.asInstanceOf[Seq[Future[Array[_]]]])
     Await.result(fut, Duration.Inf)
     val endMillis = System.currentTimeMillis
@@ -96,7 +103,7 @@ object InMemoryQueryStress extends App {
   runQueries(allQueries.toArray, 100)
   Thread sleep 2000
   puts("Now running queries for real...")
-  runQueries(allQueries.toArray)
+  (0 until numRuns).foreach { i => runQueries(allQueries.toArray) }
 
   // clean up!
   FiloSetup.shutdown()
