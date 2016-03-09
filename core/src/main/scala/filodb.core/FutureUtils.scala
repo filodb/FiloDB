@@ -37,21 +37,24 @@ object FutureUtils {
   def getBoundedExecContext(maxTasks: Int,
                             poolName: String,
                             corePoolSize: Int = sys.runtime.availableProcessors,
-                            maxPoolSize: Int = sys.runtime.availableProcessors * 4): ExecutionContext = {
-    ExecutionContext.fromExecutorService(
-      new ThreadPoolExecutor(
-        corePoolSize, maxPoolSize,
-        10L, TimeUnit.SECONDS,
-        new ArrayBlockingQueue[Runnable](maxTasks),
-        new ThreadFactory {
-          val counter = new AtomicInteger
-          override def newThread(r: Runnable): Thread =
-            new Thread(r, s"$poolName-${counter.incrementAndGet}")
-        },
-        new ThreadPoolExecutor.CallerRunsPolicy
-      )
-     )
-  }
+                            maxPoolSize: Int = sys.runtime.availableProcessors * 4): ExecutionContext =
+    ExecutionContext.fromExecutorService(getBoundedTPE(maxTasks, poolName, corePoolSize, maxPoolSize))
+
+  def getBoundedTPE(maxTasks: Int,
+                    poolName: String,
+                    corePoolSize: Int = sys.runtime.availableProcessors,
+                    maxPoolSize: Int = sys.runtime.availableProcessors * 4): ThreadPoolExecutor =
+    new ThreadPoolExecutor(
+      corePoolSize, maxPoolSize,
+      10L, TimeUnit.SECONDS,
+      new ArrayBlockingQueue[Runnable](maxTasks),
+      new ThreadFactory {
+        val counter = new AtomicInteger
+        override def newThread(r: Runnable): Thread =
+          new Thread(r, s"$poolName-${counter.incrementAndGet}")
+      },
+      new ThreadPoolExecutor.CallerRunsPolicy
+    )
 }
 
 /**
