@@ -37,6 +37,7 @@ class DefaultSource extends RelationProvider with CreatableRelationProvider {
    *   segment_key
    *   partition_keys   comma-separated list of partition keys
    *   chunk_size       defaults to 5000
+   *   flush_after_write  defaults to true
    */
   def createRelation(
       sqlContext: SQLContext,
@@ -49,10 +50,12 @@ class DefaultSource extends RelationProvider with CreatableRelationProvider {
     val segKey  = parameters.getOrElse("segment_key", ":string /0")
     val partitionKeys = parameters.get("partition_keys").map(_.split(',').toSeq).getOrElse(Nil)
     val chunkSize = parameters.get("chunk_size").map(_.toInt)
+    val flushAfter = parameters.get("flush_after_write").map(_.toBoolean).getOrElse(true)
 
     sqlContext.saveAsFilo(data, dataset,
                           rowKeys, segKey, partitionKeys, version,
-                          chunkSize, mode)
+                          chunkSize, mode,
+                          flushAfterInsert = flushAfter)
 
     // The below is inefficient as it reads back the schema that was written earlier - though it shouldn't
     // take very long
