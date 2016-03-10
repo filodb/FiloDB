@@ -63,9 +63,11 @@ FiloDB is a new open-source distributed, versioned, and columnar analytical data
 * **High performance** - competitive with Parquet scan speeds, plus filtering along two or more dimensions
   - Very flexible filtering: filter on only part of a partition key, much more flexible than allowed in Cassandra
 * **Compact storage** - within 35% of Parquet for CassandraColumnStore
+  - See the blog post on [Apache Cassandra for analytics: a performance and storage analysis](https://www.oreilly.com/ideas/apache-cassandra-for-analytics-a-performance-and-storage-analysis)
 * **Idempotent writes** - primary-key based appends and updates; easy exactly-once ingestion from streaming sources
 * **Distributed** - pluggable storage engine includes Apache Cassandra and in-memory
 * **Low-latency** - minimal SQL query latency of 15ms on one node; sub-second easily achievable with filtering and easy to use concurrency control
+  - See post on [700 SQL Queries per Second in Apache Spark with FiloDB](http://velvia.github.io/Spark-Concurrent-Fast-Queries/)
 * **SQL queries** - plug in Tableau or any tool using JDBC/ODBC drivers
 * Ingest from Spark/Spark Streaming from any supported Spark data source
 
