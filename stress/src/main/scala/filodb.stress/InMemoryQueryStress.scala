@@ -43,7 +43,7 @@ object InMemoryQueryStress extends App {
   // trip info for a single driver within a given time range
   val singleDriverQueries = (1 to 20).map { i =>
     val medallion = medallions(Random.nextInt(medallions.size))
-    s"SELECT trip_distance, passenger_count from nyc_taxi where medallion = '$medallion'" +
+    s"SELECT avg(trip_distance), avg(passenger_count) from nyc_taxi where medallion = '$medallion'" +
     s" AND pickup_datetime > '2013-01-15T00Z' AND pickup_datetime < '2013-01-22T00Z'"
   }
 
