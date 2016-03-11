@@ -154,6 +154,14 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
                               partitionKeys: Seq[String]) {
     println(s"Creating dataset $dataset...")
     val datasetObj = Dataset(dataset, rowKeys, segmentKey, partitionKeys)
+
+    RichProjection.make(datasetObj, columns).recover {
+      case err: RichProjection.BadSchema =>
+        println(s"Bad dataset schema: $err")
+        exitCode = 2
+        return
+    }
+
     actorAsk(coordinatorActor, NodeCoordinatorActor.CreateDataset(datasetObj, columns)) {
       case NodeCoordinatorActor.DatasetCreated =>
         println(s"Dataset $dataset created!")
