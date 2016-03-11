@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="ScalaSbtSettings">
+    <option name="linkedExternalProjectsSettings">
+      <SbtProjectSettings>
+        <option name="externalProjectPath" value="$PROJECT_DIR$" />
+        <option name="jdk" value="1.8" />
+        <option name="modules">
+          <set>
+            <option value="$PROJECT_DIR$" />
+            <option value="$PROJECT_DIR$/cassandra" />
+            <option value="$PROJECT_DIR$/cassandra/project" />
+            <option value="$PROJECT_DIR$/cli" />
+            <option value="$PROJECT_DIR$/cli/project" />
+            <option value="$PROJECT_DIR$/coordinator" />
+            <option value="$PROJECT_DIR$/coordinator/project" />
+            <option value="$PROJECT_DIR$/core" />
+            <option value="$PROJECT_DIR$/core/project" />
+            <option value="$PROJECT_DIR$/jmh" />
+            <option value="$PROJECT_DIR$/jmh/project" />
+            <option value="$PROJECT_DIR$/project" />
+            <option value="$PROJECT_DIR$/spark" />
+            <option value="$PROJECT_DIR$/spark/project" />
+          </set>
+        </option>
+        <option name="sbtVersion" value="0.13.7" />
+        <option name="useAutoImport" value="true" />
+        <option name="useOurOwnAutoImport" value="true" />
+        <option name="myModules">
+          <set>
+            <option value="$PROJECT_DIR$" />
+            <option value="$PROJECT_DIR$/cassandra" />
+            <option value="$PROJECT_DIR$/cassandra/project" />
+            <option value="$PROJECT_DIR$/cli" />
+            <option value="$PROJECT_DIR$/cli/project" />
+            <option value="$PROJECT_DIR$/coordinator" />
+            <option value="$PROJECT_DIR$/coordinator/project" />
+            <option value="$PROJECT_DIR$/core" />
+            <option value="$PROJECT_DIR$/core/project" />
+            <option value="$PROJECT_DIR$/jmh" />
+            <option value="$PROJECT_DIR$/jmh/project" />
+            <option value="$PROJECT_DIR$/project" />
+            <option value="$PROJECT_DIR$/spark" />
+            <option value="$PROJECT_DIR$/spark/project" />
+          </set>
+        </option>
+      </SbtProjectSettings>
+    </option>
+  </component>
+</project>
