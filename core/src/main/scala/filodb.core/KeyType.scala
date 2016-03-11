@@ -1,14 +1,15 @@
 package filodb.core
 
 import java.sql.Timestamp
+
 import org.joda.time.DateTime
 import org.velvia.filo.RowReader
 import org.velvia.filo.RowReader._
-import scala.language.postfixOps
-import scalaxy.loops._
 import scodec.bits.{ByteOrdering, ByteVector}
 
+import scala.language.postfixOps
 import scala.math.Ordering
+import scalaxy.loops._
 
 /**
  * A generic typeclass for dealing with keys (partition, sort, segment) of various types.
@@ -44,8 +45,6 @@ trait KeyType {
 
   def size(key: T): Int
 }
-
-import SingleKeyTypes._
 
 case class NullKeyValue(colIndex: Int) extends Exception(s"Null partition value for col index $colIndex")
 

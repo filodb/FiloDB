@@ -1,19 +1,15 @@
 package filodb.jmh
 
-import ch.qos.logback.classic.{Level, Logger}
-import org.openjdk.jmh.annotations.Benchmark
-import org.openjdk.jmh.annotations.BenchmarkMode
-import org.openjdk.jmh.annotations.{Mode, State, Scope}
-import org.openjdk.jmh.annotations.OutputTimeUnit
-import scalaxy.loops._
-import scala.language.postfixOps
+import java.util.concurrent.TimeUnit
 
-import filodb.core._
+import ch.qos.logback.classic.{Level, Logger}
 import filodb.core.metadata.{Column, DataColumn, Dataset, RichProjection}
 import filodb.core.store.{RowReaderSegment, RowWriterSegment, SegmentInfo}
-import org.velvia.filo.{FiloVector, FastFiloRowReader, RowReader, TupleRowReader}
+import org.openjdk.jmh.annotations.{Benchmark, BenchmarkMode, Mode, OutputTimeUnit, Scope, State}
+import org.velvia.filo.{FastFiloRowReader, FiloVector, TupleRowReader}
 
-import java.util.concurrent.TimeUnit
+import scala.language.postfixOps
+import scalaxy.loops._
 
 object IntSumReadBenchmark {
   val schema = Seq(DataColumn(0, "int", "dataset", 0, Column.ColumnType.IntColumn),

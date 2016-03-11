@@ -2,11 +2,11 @@ package filodb.coordinator
 
 import akka.actor.{Actor, ActorRef, Cancellable, PoisonPill}
 import com.typesafe.scalalogging.slf4j.StrictLogging
+import filodb.core._
 import org.velvia.filo.RowReader
+
 import scala.collection.mutable.HashMap
 import scala.concurrent.duration._
-
-import filodb.core._
 
 object RowSource {
   case object Start

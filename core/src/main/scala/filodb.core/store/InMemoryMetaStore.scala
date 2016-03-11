@@ -1,12 +1,13 @@
 package filodb.core.store
 
-import com.typesafe.scalalogging.slf4j.StrictLogging
 import java.util.concurrent.ConcurrentSkipListMap
-import scala.collection.concurrent.TrieMap
-import scala.concurrent.{ExecutionContext, Future}
 
+import com.typesafe.scalalogging.slf4j.StrictLogging
 import filodb.core._
 import filodb.core.metadata.{Column, DataColumn, Dataset}
+
+import scala.collection.concurrent.TrieMap
+import scala.concurrent.{ExecutionContext, Future}
 
 /**
  * An in-memory MetaStore.  Does not aim to keep data distributed, but is just a

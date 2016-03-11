@@ -1,8 +1,8 @@
 package filodb.jmh
 
 import filodb.spark.FiloSetup
-import org.apache.spark.sql.{DataFrame, SaveMode, SQLContext}
-import org.apache.spark.{SparkContext, SparkException, SparkConf}
+import org.apache.spark.sql.{SQLContext, SaveMode}
+import org.apache.spark.{SparkConf, SparkContext}
 
 /**
  * Creates Cassandra test data for the SparkReadBenchmark.  Note that only 1 partition

@@ -1,11 +1,11 @@
 package filodb.core.store
 
-import scala.concurrent.{Await, ExecutionContext, Future}
+import filodb.core.Types._
+import filodb.core.metadata.RichProjection
+
+import scala.concurrent.Await
 import scala.concurrent.duration._
 import scala.util.Try
-
-import filodb.core.metadata.RichProjection
-import filodb.core.Types._
 
 case class Histogram(min: Int, max: Int, sum: Int, numElems: Int, buckets: Map[Int, Int]) {
   /** Adds an element to the Histogram, adding it to histogram buckets according to the

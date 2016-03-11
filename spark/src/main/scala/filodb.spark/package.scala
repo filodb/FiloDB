@@ -1,18 +1,17 @@
 package filodb
 
 import akka.actor.ActorRef
-import com.typesafe.config.Config
 import com.typesafe.scalalogging.slf4j.StrictLogging
-import org.apache.spark.sql.{SQLContext, SaveMode, DataFrame, Row}
-import org.apache.spark.sql.types.StructType
-import scala.concurrent.{Await, Future}
-import scala.concurrent.duration._
-import scala.language.postfixOps
-
+import filodb.coordinator.{NodeCoordinatorActor, RowSource}
 import filodb.core._
 import filodb.core.metadata.{Column, DataColumn, Dataset, RichProjection}
-import filodb.coordinator.{NodeCoordinatorActor, RowSource, DatasetCoordinatorActor}
 import org.apache.spark.sql.hive.filodb.MetaStoreSync
+import org.apache.spark.sql.types.StructType
+import org.apache.spark.sql.{DataFrame, Row, SQLContext, SaveMode}
+
+import scala.concurrent.duration._
+import scala.concurrent.{Await, Future}
+import scala.language.postfixOps
 
 package spark {
   case class DatasetNotFound(dataset: String) extends Exception(s"Dataset $dataset not found")
@@ -38,10 +37,10 @@ package spark {
 package object spark extends StrictLogging {
   val DefaultWriteTimeout = 999 minutes
 
-  import NodeCoordinatorActor._
-  import filodb.spark.FiloRelation._
   import FiloSetup.metaStore
+  import NodeCoordinatorActor._
   import RowSource._
+  import filodb.spark.FiloRelation._
 
   private def ingestRddRows(coordinatorActor: ActorRef,
                             dataset: String,

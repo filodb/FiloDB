@@ -1,16 +1,15 @@
 package filodb.core.store
 
-import com.typesafe.scalalogging.slf4j.StrictLogging
 import java.nio.ByteBuffer
-import org.velvia.filo.RowReader
-import org.velvia.filo.RowReader.TypedFieldExtractor
-import scala.concurrent.{Await, ExecutionContext, Future}
-import scala.concurrent.duration._
-import scala.language.existentials
-import spray.caching._
 
+import com.typesafe.scalalogging.slf4j.StrictLogging
 import filodb.core._
 import filodb.core.metadata.{Column, Projection, RichProjection}
+import org.velvia.filo.RowReader
+import spray.caching._
+
+import scala.concurrent.{ExecutionContext, Future}
+import scala.language.existentials
 
 sealed trait ScanMethod
 case class SinglePartitionScan(partition: Any) extends ScanMethod
@@ -33,8 +32,8 @@ trait ScanSplit {
  * exists though to allow special implementations that want to use different lower level primitives.
  */
 trait ColumnStore {
-  import filodb.core.Types._
   import RowReaderSegment._
+  import filodb.core.Types._
 
   def ec: ExecutionContext
   implicit val execContext = ec
@@ -147,7 +146,6 @@ case class ChunkedData(column: Types.ColumnId, chunks: Seq[(Types.SegmentId, Typ
  */
 trait CachedMergingColumnStore extends ColumnStore with ColumnStoreScanner with StrictLogging {
   import filodb.core.Types._
-  import filodb.core.Iterators._
 
   def segmentCache: Cache[Segment]
 

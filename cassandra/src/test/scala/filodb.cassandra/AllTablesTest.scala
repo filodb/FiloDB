@@ -3,15 +3,12 @@ package filodb.cassandra
 import com.typesafe.config.ConfigFactory
 import com.websudos.phantom.dsl._
 import com.websudos.phantom.testkit._
-import org.scalatest.{FunSpec, BeforeAndAfter}
-import org.scalatest.time.{Millis, Span, Seconds}
-import scala.concurrent.Await
-import scala.concurrent.duration._
-import scala.language.postfixOps
-
-import filodb.core.metadata.{Column, DataColumn, Dataset}
-import filodb.core._
 import filodb.cassandra.columnstore.CassandraColumnStore
+import filodb.core._
+import filodb.core.metadata.{Column, DataColumn, Dataset}
+import org.scalatest.time.{Millis, Seconds, Span}
+
+import scala.language.postfixOps
 
 trait AllTablesTest extends SimpleCassandraTest {
   import filodb.cassandra.metastore._

@@ -1,10 +1,11 @@
 package filodb.core
 
 import java.nio.ByteBuffer
-import scalaxy.loops._
-import scodec.bits.ByteVector
 
 import filodb.core.metadata.RichProjection
+import scodec.bits.ByteVector
+
+import scalaxy.loops._
 
 /**
  * Temporary home for new FiloDB API definitions, including column store and memtable etc.

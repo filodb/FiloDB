@@ -1,14 +1,13 @@
 package filodb.spark
 
-import org.apache.spark.sql.{DataFrame, SaveMode, SQLContext}
 import org.apache.spark.sql.sources._
+import org.apache.spark.sql.{DataFrame, SQLContext, SaveMode}
 
 /**
  * DefaultSource implements the Spark Dataframe read() and write() API for FiloDB.
  * This also enables Spark SQL / JDBC "CREATE TABLE" DDLs without any use of Scala.
  */
 class DefaultSource extends RelationProvider with CreatableRelationProvider {
-  import collection.JavaConverters._
 
   val DefaultSplitsPerNode = "4"
 

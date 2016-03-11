@@ -1,9 +1,9 @@
 package filodb.core.store
 
-import scala.concurrent.{ExecutionContext, Future}
-
 import filodb.core._
 import filodb.core.metadata.{Column, DataColumn, Dataset}
+
+import scala.concurrent.{ExecutionContext, Future}
 
 object MetaStore {
   case class IllegalColumnChange(reasons: Seq[String]) extends Exception {

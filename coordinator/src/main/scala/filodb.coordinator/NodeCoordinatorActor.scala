@@ -1,17 +1,15 @@
 package filodb.coordinator
 
-import akka.actor.{Actor, ActorRef, PoisonPill, Props, SupervisorStrategy, Terminated}
+import akka.actor.{ActorRef, PoisonPill, Props, SupervisorStrategy, Terminated}
 import com.typesafe.config.Config
-import net.ceedubs.ficus.Ficus._
-import org.velvia.filo.RowReader
-import scala.concurrent.Future
-import scala.concurrent.duration._
-
-import filodb.core._
 import filodb.core.Types._
+import filodb.core._
 import filodb.core.metadata.{Column, DataColumn, Dataset, Projection, RichProjection}
-import filodb.core.store.{ColumnStore, MetaStore}
 import filodb.core.reprojector.Reprojector
+import filodb.core.store.{ColumnStore, MetaStore}
+import org.velvia.filo.RowReader
+
+import scala.concurrent.Future
 
 /**
  * The NodeCoordinatorActor is the common API entry point for all FiloDB ingestion and metadata operations.

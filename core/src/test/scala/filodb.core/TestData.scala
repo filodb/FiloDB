@@ -1,11 +1,12 @@
 package filodb.core
 
-import filodb.core._
-import filodb.core.metadata.{Column, DataColumn, Dataset, RichProjection}
-import filodb.core.store.{SegmentInfo, RowWriterSegment}
 import java.sql.Timestamp
+
+import filodb.core.metadata.{Column, DataColumn, Dataset, RichProjection}
+import filodb.core.store.{RowWriterSegment, SegmentInfo}
 import org.joda.time.DateTime
-import org.velvia.filo.{RowReader, TupleRowReader, ArrayStringRowReader}
+import org.velvia.filo.{ArrayStringRowReader, RowReader, TupleRowReader}
+
 import scala.io.Source
 
 object NamesTestData {

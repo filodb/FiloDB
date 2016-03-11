@@ -1,28 +1,26 @@
 package filodb.coordinator
 
-import akka.actor.{ActorSystem, ActorRef, PoisonPill}
-import akka.testkit.TestProbe
+import akka.actor.{ActorRef, PoisonPill}
 import akka.pattern.gracefulStop
 import com.typesafe.config.ConfigFactory
-import org.velvia.filo.{RowReader, TupleRowReader}
+import filodb.core._
+import filodb.core.metadata.RichProjection
+import filodb.core.reprojector.{MemTable, Reprojector}
+import filodb.core.store.{InMemoryColumnStore, SegmentInfo}
+import org.scalatest.concurrent.ScalaFutures
+import org.scalatest.time.{Millis, Seconds, Span}
+import org.velvia.filo.TupleRowReader
+
 import scala.concurrent.Future
 import scala.concurrent.duration._
-
-import filodb.core._
-import filodb.core.metadata.{Column, Dataset, RichProjection}
-import filodb.core.store.{InMemoryColumnStore, SegmentInfo}
-import filodb.core.reprojector.{DefaultReprojector, MemTable, Reprojector}
-
-import org.scalatest.concurrent.ScalaFutures
-import org.scalatest.time.{Millis, Span, Seconds}
 
 object DatasetCoordinatorActorSpec extends ActorSpecConfig
 
 class DatasetCoordinatorActorSpec extends ActorTest(DatasetCoordinatorActorSpec.getNewSystem)
 with ScalaFutures {
-  import akka.testkit._
-  import NamesTestData._
   import DatasetCoordinatorActor._
+  import NamesTestData._
+  import akka.testkit._
 
   implicit val defaultPatience =
     PatienceConfig(timeout = Span(10, Seconds), interval = Span(50, Millis))

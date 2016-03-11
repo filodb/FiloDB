@@ -1,34 +1,30 @@
 package filodb.spark
 
+import java.nio.ByteBuffer
+
 import akka.actor.ActorRef
 import akka.pattern.ask
 import akka.util.Timeout
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.slf4j.StrictLogging
-import java.nio.ByteBuffer
-import net.ceedubs.ficus.Ficus._
-import org.joda.time.DateTime
-import org.velvia.filo.{FiloRowReader, FiloVector, RowReader, VectorReader}
-import scala.concurrent.{Await, Future}
-import scala.concurrent.duration._
-import scala.language.postfixOps
-
+import filodb.core._
+import filodb.core.metadata.{Column, Dataset, RichProjection}
+import filodb.core.query.KeyFilter
+import filodb.core.store._
 import org.apache.spark.rdd.RDD
-import org.apache.spark.SparkContext
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.{BaseGenericInternalRow, GenericInternalRow}
 import org.apache.spark.sql.sources._
 import org.apache.spark.sql.types._
 import org.apache.spark.sql.{DataFrame, Row, SQLContext}
 import org.apache.spark.unsafe.types.UTF8String
+import org.velvia.filo.{FiloRowReader, FiloVector, VectorReader}
 
-import filodb.core._
-import filodb.core.query.KeyFilter
-import filodb.core.metadata.{Column, Dataset, RichProjection}
-import filodb.core.store._
+import scala.concurrent.duration._
+import scala.concurrent.{Await, Future}
+import scala.language.postfixOps
 
 object FiloRelation extends StrictLogging {
-  import TypeConverters._
 
   implicit val context = scala.concurrent.ExecutionContext.Implicits.global
 
@@ -204,8 +200,8 @@ case class FiloRelation(dataset: String,
                         splitsPerNode: Int = 1)
                        (@transient val sqlContext: SQLContext)
     extends BaseRelation with InsertableRelation with PrunedScan with PrunedFilteredScan with StrictLogging {
-  import TypeConverters._
   import FiloRelation._
+  import TypeConverters._
 
   val filoConfig = FiloSetup.initAndGetConfig(sqlContext.sparkContext)
 
@@ -269,8 +265,8 @@ case class FiloRelation(dataset: String,
 }
 
 object SparkRowReader {
-  import VectorReader._
   import FiloVector._
+  import VectorReader._
 
   val TimestampClass = classOf[java.sql.Timestamp]
 

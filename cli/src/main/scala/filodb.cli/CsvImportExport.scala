@@ -3,17 +3,15 @@ package filodb.cli
 import akka.actor.{ActorRef, ActorSystem}
 import akka.pattern.ask
 import akka.util.Timeout
-import com.opencsv.{CSVReader, CSVWriter}
 import com.typesafe.scalalogging.slf4j.StrictLogging
-import org.velvia.filo.{ArrayStringRowReader, RowReader}
-import scala.concurrent.{Await, Future, ExecutionContext}
-import scala.concurrent.duration._
-import scala.language.postfixOps
-
-import filodb.core.store.MetaStore
-import filodb.coordinator.{NodeCoordinatorActor, DatasetCoordinatorActor, RowSource}
 import filodb.coordinator.sources.CsvSourceActor
+import filodb.coordinator.{DatasetCoordinatorActor, NodeCoordinatorActor, RowSource}
 import filodb.core._
+import filodb.core.store.MetaStore
+
+import scala.concurrent.duration._
+import scala.concurrent.{Await, ExecutionContext, Future}
+import scala.language.postfixOps
 
 // Turn off style rules for CLI classes
 //scalastyle:off
@@ -24,7 +22,6 @@ trait CsvImportExport extends StrictLogging {
   var exitCode = 0
 
   implicit val ec: ExecutionContext
-  import scala.collection.JavaConversions._
 
   protected def parseResponse[B](cmd: => Future[Response])(handler: PartialFunction[Response, B]): B = {
     Await.result(cmd, 15 seconds) match {

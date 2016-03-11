@@ -1,13 +1,13 @@
 package filodb.core
 
+import org.scalatest.{FunSpec, Matchers}
 import org.velvia.filo.{RowReader, TupleRowReader}
 import scodec.bits._
 
-import org.scalatest.{FunSpec, Matchers}
-
 class TypesSpec extends FunSpec with Matchers {
-  import Types._
   import SingleKeyTypes._
+  import Types._
+
   import Ordered._   // enables a < b
 
   describe("ByteVectorOrdering") {

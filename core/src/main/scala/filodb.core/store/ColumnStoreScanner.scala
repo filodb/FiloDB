@@ -1,14 +1,11 @@
 package filodb.core.store
 
 import com.typesafe.scalalogging.slf4j.StrictLogging
-import java.nio.ByteBuffer
-import org.velvia.filo.RowReader
-import org.velvia.filo.RowReader.TypedFieldExtractor
-import scala.concurrent.{Await, ExecutionContext, Future}
-import scala.concurrent.duration._
-
 import filodb.core._
-import filodb.core.metadata.{Column, Projection, RichProjection}
+import filodb.core.metadata.{Column, RichProjection}
+
+import scala.concurrent.duration._
+import scala.concurrent.{Await, ExecutionContext, Future}
 
 case class SegmentIndex[P, S](binPartition: Types.BinaryPartition,
                               segmentId: Types.SegmentId,
@@ -21,8 +18,8 @@ case class SegmentIndex[P, S](binPartition: Types.BinaryPartition,
  * We are careful to separate out ExecutionContext for reading only.
  */
 trait ColumnStoreScanner extends StrictLogging {
-  import filodb.core.Types._
   import filodb.core.Iterators._
+  import filodb.core.Types._
 
   // Use a separate ExecutionContext for reading.  This is important to prevent deadlocks.
   // Also, we do not make this implicit so that this trait can be mixed in elsewhere.

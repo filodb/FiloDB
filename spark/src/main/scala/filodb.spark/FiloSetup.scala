@@ -2,12 +2,11 @@ package filodb.spark
 
 import akka.actor.ActorSystem
 import com.typesafe.config.{Config, ConfigFactory}
-import org.apache.spark.SparkContext
-
 import filodb.cassandra.columnstore.CassandraColumnStore
 import filodb.cassandra.metastore.CassandraMetaStore
 import filodb.coordinator.CoordinatorSetup
-import filodb.core.store.{InMemoryMetaStore, InMemoryColumnStore}
+import filodb.core.store.{InMemoryColumnStore, InMemoryMetaStore}
+import org.apache.spark.SparkContext
 
 object FiloSetup extends CoordinatorSetup {
   import collection.JavaConverters._
