@@ -90,10 +90,10 @@ To compile the .mermaid source files to .png's, install the [Mermaid CLI](http:/
 
 Your input is appreciated!
 
-* True columnar querying and execution, using late materialization and vectorization techniques
-* Use of GPU and SIMD instructions to speed up queries
-* Non-Spark ingestion API.  Your input is again needed.
+* Productionization and automated stress testing
+* Kafka input API / connector (without needing Spark)
 * In-memory caching for significant query speedup
+* True columnar querying and execution, using late materialization and vectorization techniques.  GPU/SIMD.
 * Projections.  Often-repeated queries can be sped up significantly with projections.
 
 ## Pre-requisites
