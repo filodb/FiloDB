@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="ProjectModuleManager">
+    <modules>
+      <module fileurl="file://$PROJECT_DIR$/.idea/modules/cassandra.iml" filepath="$PROJECT_DIR$/.idea/modules/cassandra.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/modules/cassandra-build.iml" filepath="$PROJECT_DIR$/.idea/modules/cassandra-build.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/modules/cli.iml" filepath="$PROJECT_DIR$/.idea/modules/cli.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/modules/cli-build.iml" filepath="$PROJECT_DIR$/.idea/modules/cli-build.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/modules/coordinator.iml" filepath="$PROJECT_DIR$/.idea/modules/coordinator.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/modules/coordinator-build.iml" filepath="$PROJECT_DIR$/.idea/modules/coordinator-build.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/modules/core.iml" filepath="$PROJECT_DIR$/.idea/modules/core.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/modules/core-build.iml" filepath="$PROJECT_DIR$/.idea/modules/core-build.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/modules/filodb.iml" filepath="$PROJECT_DIR$/.idea/modules/filodb.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/modules/filodb-build.iml" filepath="$PROJECT_DIR$/.idea/modules/filodb-build.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/modules/jmh.iml" filepath="$PROJECT_DIR$/.idea/modules/jmh.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/modules/jmh-build.iml" filepath="$PROJECT_DIR$/.idea/modules/jmh-build.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/modules/spark.iml" filepath="$PROJECT_DIR$/.idea/modules/spark.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/modules/spark-build.iml" filepath="$PROJECT_DIR$/.idea/modules/spark-build.iml" />
+    </modules>
+  </component>
+</project>
