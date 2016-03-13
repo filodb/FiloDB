@@ -30,7 +30,6 @@ csvDF.write.format("filodb.spark").
     - Partition by string prefix of medallion gives a pretty even distribution, into 676 shards, of all taxi transactions.  Note that even with this level of sharding, reading data for one taxi/medallion for a given time range is still pretty fast.
     - Segment by pickup_datetime allows range queries by time.
       + 14.766 million records divided by (676 partitions * 6 days per segment) =~ rouhgly 4000 records per segment, which is about right
-    - id column is a workaround to make a unique ID out of two columns
 
 ```scala
 val taxiDF = sqlContext.read.format("com.databricks.spark.csv").
