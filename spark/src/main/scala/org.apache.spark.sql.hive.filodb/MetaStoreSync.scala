@@ -1,12 +1,11 @@
 package org.apache.spark.sql.hive.filodb
 
 import com.typesafe.scalalogging.slf4j.StrictLogging
-import org.apache.spark.sql.catalyst.TableIdentifier
-import org.apache.spark.sql.hive.HiveContext
-import org.apache.spark.sql.SQLContext
-
 import filodb.core.store.MetaStore
 import filodb.spark.FiloRelation
+import org.apache.spark.sql.SQLContext
+import org.apache.spark.sql.catalyst.TableIdentifier
+import org.apache.spark.sql.hive.HiveContext
 
 object MetaStoreSync extends StrictLogging {
   /**

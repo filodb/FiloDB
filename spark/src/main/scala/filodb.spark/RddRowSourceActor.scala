@@ -1,14 +1,9 @@
 package filodb.spark
 
-import akka.actor.{Actor, ActorRef, Props}
-import org.apache.spark.rdd.RDD
-import org.apache.spark.sql.{SQLContext, DataFrame, Row}
-import org.apache.spark.sql.types._
-import org.joda.time.DateTime
-import org.velvia.filo.RowReader
-
-import filodb.core.Types
+import akka.actor.{ActorRef, Props}
 import filodb.coordinator.{BaseActor, NodeCoordinatorActor, RowSource}
+import org.apache.spark.sql.Row
+import org.velvia.filo.RowReader
 
 object RddRowSourceActor {
   // Needs to be a multiple of chunkSize. Not sure how to have a good default though.
@@ -42,7 +37,6 @@ class RddRowSourceActor(rows: Iterator[Row],
                         rowsToRead: Int = RddRowSourceActor.DefaultRowsToRead)
 extends BaseActor with RowSource {
   import NodeCoordinatorActor._
-  import RddRowSourceActor._
 
   def getStartMessage(): SetupIngestion = SetupIngestion(dataset, columns, version)
 

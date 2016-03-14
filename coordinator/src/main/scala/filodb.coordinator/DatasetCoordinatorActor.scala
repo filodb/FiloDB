@@ -1,19 +1,18 @@
 package filodb.coordinator
 
-import akka.actor.{Actor, ActorRef, Cancellable, Props}
+import akka.actor.{ActorRef, Cancellable, Props}
 import com.typesafe.config.Config
+import filodb.core.metadata.{Projection, RichProjection}
+import filodb.core.reprojector.{FiloMemTable, MemTable, Reprojector}
+import filodb.core.store.{ColumnStore, SegmentInfo}
 import net.ceedubs.ficus.Ficus._
 import org.velvia.filo.RowReader
-import scala.collection.mutable.ArrayBuffer
-import scala.concurrent.duration.FiniteDuration
-import scala.concurrent.Future
 
-import filodb.core.metadata.{Column, Dataset, Projection, RichProjection}
-import filodb.core.store.{ColumnStore, SegmentInfo}
-import filodb.core.reprojector.{MemTable, FiloMemTable, Reprojector}
+import scala.collection.mutable.ArrayBuffer
+import scala.concurrent.Future
+import scala.concurrent.duration.FiniteDuration
 
 object DatasetCoordinatorActor {
-  import filodb.core.Types._
 
   sealed trait DSCoordinatorMessage
 

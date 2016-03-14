@@ -1,22 +1,19 @@
 package filodb.jmh
 
 import java.util.concurrent.TimeUnit
-import org.openjdk.jmh.annotations._
-import scalaxy.loops._
-import scala.language.postfixOps
-import scala.concurrent.{Await, Future}
-import scala.concurrent.duration._
 
-import filodb.core._
-import filodb.core.metadata.{Column, Dataset}
 import filodb.core.store.{FilteredPartitionScan, RowWriterSegment, SegmentInfo}
-import filodb.spark.{FiloSetup, FiloRelation}
+import filodb.spark.{FiloRelation, FiloSetup}
+import org.apache.spark.sql.SQLContext
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.functions.sum
-import org.apache.spark.sql.types._
-import org.apache.spark.sql.{DataFrame, Row, SQLContext}
-import org.apache.spark.{SparkContext, SparkException, SparkConf}
-import org.velvia.filo.{RowReader, TupleRowReader}
+import org.apache.spark.{SparkConf, SparkContext}
+import org.openjdk.jmh.annotations._
+import org.velvia.filo.TupleRowReader
+
+import scala.concurrent.duration._
+import scala.concurrent.{Await, Future}
+import scala.language.postfixOps
 
 /**
  * A benchmark to compare performance of FiloRelation against different scenarios,
@@ -70,7 +67,6 @@ class SparkReadBenchmark {
   val split = FiloSetup.columnStore.getScanSplits(dataset.name).head
 
   // Merge segments into InMemoryColumnStore
-  import scala.concurrent.ExecutionContext.Implicits.global
   rowStream.take(NumRows).grouped(10000).foreach { rows =>
     val segKey = projection.segmentKeyFunc(TupleRowReader(rows.head))
     val writerSeg = new RowWriterSegment(projection, schema)(

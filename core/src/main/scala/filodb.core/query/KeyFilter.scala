@@ -1,12 +1,12 @@
 package filodb.core.query
 
+import filodb.core._
+import filodb.core.metadata.{Column, ComputedColumn, DataColumn, RichProjection}
 import org.scalactic._
 import org.velvia.filo.RowReader
+
 import scala.language.postfixOps
 import scalaxy.loops._
-
-import filodb.core._
-import filodb.core.metadata.{Column, DataColumn, ComputedColumn, RichProjection}
 
 /**
  * Utilities to generate functions to filter keys.

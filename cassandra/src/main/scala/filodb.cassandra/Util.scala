@@ -1,11 +1,12 @@
 package filodb.cassandra
 
+import java.nio.ByteBuffer
+
 import com.datastax.driver.core.exceptions.DriverException
 import com.websudos.phantom.dsl._
-import java.nio.ByteBuffer
-import scala.concurrent.Future
-
 import filodb.core._
+
+import scala.concurrent.Future
 
 /**
  * Utilities for dealing with Cassandra I/O

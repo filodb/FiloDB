@@ -4,6 +4,7 @@ import com.datastax.driver.core._
 import com.typesafe.config.Config
 import com.websudos.phantom.connectors.{ContactPoints, KeySpace}
 import net.ceedubs.ficus.Ficus._
+
 import scala.concurrent.duration.FiniteDuration
 
 trait FiloCassandraConnector {

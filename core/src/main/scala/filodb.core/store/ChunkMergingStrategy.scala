@@ -1,13 +1,10 @@
 package filodb.core.store
 
 import com.typesafe.scalalogging.slf4j.StrictLogging
-import java.nio.ByteBuffer
-import org.velvia.filo.RowReader.TypedFieldExtractor
-import scala.concurrent.{ExecutionContext, Future}
-
-import filodb.core.metadata.{Column, RichProjection}
-import filodb.core.Types._
 import filodb.core._
+import filodb.core.metadata.RichProjection
+
+import scala.concurrent.{ExecutionContext, Future}
 
 /**
  * The ChunkMergingStrategy implements the storage-independent business logic to merge segments and

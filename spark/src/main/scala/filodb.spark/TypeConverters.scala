@@ -1,8 +1,7 @@
 package filodb.spark
 
-import org.apache.spark.sql.types._
-
 import filodb.core.metadata.{Column, DataColumn}
+import org.apache.spark.sql.types._
 
 object TypeConverters {
   val colTypeToSqlType: Map[Column.ColumnType, DataType] = Map(

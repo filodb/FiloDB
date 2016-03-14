@@ -1,14 +1,13 @@
 package filodb.core.store
 
-import com.typesafe.scalalogging.slf4j.StrictLogging
 import java.nio.ByteBuffer
-import org.velvia.filo.{RowToVectorBuilder, RowReader, FiloRowReader, FastFiloRowReader}
-import scala.collection.immutable.TreeMap
-import scala.collection.mutable.{ArrayBuffer, HashMap}
 
-import filodb.core.KeyType
+import com.typesafe.scalalogging.slf4j.StrictLogging
 import filodb.core.Types._
 import filodb.core.metadata.{Column, RichProjection}
+import org.velvia.filo.{FastFiloRowReader, FiloRowReader, RowReader, RowToVectorBuilder}
+
+import scala.collection.mutable.{ArrayBuffer, HashMap}
 
 //scalastyle:off
 case class SegmentInfo[+PK, +SK](partition: PK, segment: SK) {

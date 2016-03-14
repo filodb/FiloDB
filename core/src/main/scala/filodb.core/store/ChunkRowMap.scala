@@ -1,12 +1,11 @@
 package filodb.core.store
 
-import org.velvia.filo.{FiloVector, VectorBuilder, VectorReader}
 import java.nio.ByteBuffer
-import scala.collection.immutable.{SortedMap, TreeMap}
-import scala.collection.mutable.{ArrayBuffer, HashMap}
 
 import filodb.core._
-import filodb.core.metadata.RichProjection
+import org.velvia.filo.{FiloVector, VectorBuilder, VectorReader}
+
+import scala.collection.immutable.{SortedMap, TreeMap}
 
 /**
  * A ChunkRowMap stores a sorted index that maps sort keys to (chunkID, row #) -- basically the
@@ -91,8 +90,8 @@ object UpdatableChunkRowMap {
 class BinaryChunkRowMap(chunkIdsBuffer: ByteBuffer,
                         rowNumsBuffer: ByteBuffer,
                         val nextChunkId: Types.ChunkID) extends ChunkRowMap {
-  import filodb.core.Types._
   import VectorReader._
+  import filodb.core.Types._
 
   val chunkIds = FiloVector[ChunkID](chunkIdsBuffer)
   val rowNums = FiloVector[Int](rowNumsBuffer)

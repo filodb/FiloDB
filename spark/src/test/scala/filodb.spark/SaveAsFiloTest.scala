@@ -1,19 +1,18 @@
 package filodb.spark
 
-import com.typesafe.config.ConfigFactory
 import java.sql.Timestamp
-import org.apache.spark.{SparkContext, SparkException, SparkConf}
-import org.apache.spark.sql.SaveMode
-import org.apache.spark.sql.hive.HiveContext
-import org.scalatest.time.{Millis, Seconds, Span}
-import scala.concurrent.duration._
 
+import filodb.coordinator.NodeCoordinatorActor.Reset
 import filodb.core._
 import filodb.core.metadata.{Column, DataColumn, Dataset}
-import filodb.coordinator.NodeCoordinatorActor.Reset
-
-import org.scalatest.{FunSpec, BeforeAndAfter, BeforeAndAfterAll, Matchers}
+import org.apache.spark.sql.SaveMode
+import org.apache.spark.sql.hive.HiveContext
+import org.apache.spark.{SparkConf, SparkContext}
 import org.scalatest.concurrent.ScalaFutures
+import org.scalatest.time.{Millis, Seconds, Span}
+import org.scalatest.{BeforeAndAfter, BeforeAndAfterAll, FunSpec, Matchers}
+
+import scala.concurrent.duration._
 
 object SaveAsFiloTest {
   case class TSData(machine: String, metric: Double, time: Timestamp)

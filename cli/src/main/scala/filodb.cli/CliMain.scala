@@ -7,18 +7,16 @@ import akka.actor.ActorSystem
 import com.opencsv.CSVWriter
 import com.quantifind.sumac.{ArgMain, FieldArgs}
 import com.typesafe.config.ConfigFactory
-import org.velvia.filo.{RowReader, FastFiloRowReader}
+import filodb.cassandra.columnstore.CassandraColumnStore
+import filodb.cassandra.metastore.CassandraMetaStore
+import filodb.coordinator.{CoordinatorSetup, NodeCoordinatorActor}
+import filodb.core.metadata.{Column, DataColumn, Dataset, RichProjection}
+import filodb.core.store.{Analyzer, CachedMergingColumnStore, FilteredPartitionScan}
+import org.velvia.filo.RowReader
+
 import scala.concurrent.Await
 import scala.concurrent.duration._
 import scala.language.postfixOps
-
-import filodb.core._
-import filodb.cassandra.columnstore.CassandraColumnStore
-import filodb.cassandra.metastore.CassandraMetaStore
-import filodb.coordinator.{NodeCoordinatorActor, CoordinatorSetup}
-import filodb.core.metadata.Column.{ColumnType, Schema}
-import filodb.core.metadata.{Column, DataColumn, Dataset, RichProjection}
-import filodb.core.store.{Analyzer, CachedMergingColumnStore, FilteredPartitionScan}
 
 //scalastyle:off
 class Arguments extends FieldArgs {
@@ -164,8 +162,9 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
     }
   }
 
-  import scala.language.existentials
   import filodb.core.metadata.Column.ColumnType._
+
+  import scala.language.existentials
 
   private def getRowValues(columns: Seq[Column],
                            columnCount: Int,

@@ -1,15 +1,16 @@
 package filodb.core.store
 
-import com.typesafe.scalalogging.slf4j.StrictLogging
 import java.nio.ByteBuffer
-import java.util.concurrent.{ConcurrentSkipListMap, ConcurrentNavigableMap}
+import java.util.concurrent.{ConcurrentNavigableMap, ConcurrentSkipListMap}
 import javax.xml.bind.DatatypeConverter
-import scala.collection.mutable.HashMap
-import scala.concurrent.{ExecutionContext, Future}
-import spray.caching._
 
+import com.typesafe.scalalogging.slf4j.StrictLogging
 import filodb.core._
 import filodb.core.metadata.{Column, Projection, RichProjection}
+import spray.caching._
+
+import scala.collection.mutable.HashMap
+import scala.concurrent.{ExecutionContext, Future}
 
 /**
  * A ColumnStore implementation which is entirely in memory for speed.
@@ -23,6 +24,7 @@ import filodb.core.metadata.{Column, Projection, RichProjection}
 class InMemoryColumnStore(val readEc: ExecutionContext)(implicit val ec: ExecutionContext)
 extends CachedMergingColumnStore with InMemoryColumnStoreScanner with StrictLogging {
   import Types._
+
   import collection.JavaConversions._
 
   logger.info("Starting InMemoryColumnStore...")
@@ -113,6 +115,7 @@ case object InMemoryWholeSplit extends ScanSplit {
 
 trait InMemoryColumnStoreScanner extends ColumnStoreScanner {
   import Types._
+
   import collection.JavaConversions._
 
   type ChunkKey = (ColumnId, SegmentId, ChunkID)

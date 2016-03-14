@@ -1,27 +1,24 @@
 package filodb.coordinator
 
-import akka.actor.{ActorSystem, ActorRef, PoisonPill}
-import akka.testkit.{EventFilter, TestProbe}
+import akka.actor.{ActorRef, PoisonPill}
 import akka.pattern.gracefulStop
 import com.typesafe.config.ConfigFactory
-import scala.concurrent.Await
-import scala.concurrent.duration._
-
 import filodb.core._
+import filodb.core.metadata.{DataColumn, Dataset}
 import filodb.core.store._
-import filodb.core.metadata.{Column, DataColumn, Dataset}
-
 import org.scalatest.concurrent.ScalaFutures
-import org.scalatest.time.{Millis, Span, Seconds}
+import org.scalatest.time.{Millis, Seconds, Span}
+
+import scala.concurrent.duration._
 
 object NodeCoordinatorActorSpec extends ActorSpecConfig
 
 // This is really an end to end ingestion test, it's what a client talking to a FiloDB node would do
 class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNewSystem)
 with CoordinatorSetup with ScalaFutures {
-  import akka.testkit._
-  import NodeCoordinatorActor._
   import GdeltTestData._
+  import NodeCoordinatorActor._
+  import akka.testkit._
 
   implicit val defaultPatience =
     PatienceConfig(timeout = Span(10, Seconds), interval = Span(50, Millis))

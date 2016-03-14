@@ -1,7 +1,8 @@
 package filodb.core
 
 import java.util.concurrent.atomic.AtomicInteger
-import java.util.concurrent.{ArrayBlockingQueue, TimeUnit, ThreadFactory, ThreadPoolExecutor}
+import java.util.concurrent.{ArrayBlockingQueue, ThreadFactory, ThreadPoolExecutor, TimeUnit}
+
 import scala.concurrent.{ExecutionContext, Future}
 
 trait FutureUtils {

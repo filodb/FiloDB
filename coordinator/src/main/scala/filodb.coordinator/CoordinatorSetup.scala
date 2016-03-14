@@ -2,11 +2,11 @@ package filodb.coordinator
 
 import akka.actor.ActorSystem
 import com.typesafe.config.Config
-import scala.concurrent.ExecutionContext
-
-import filodb.core.store.{ColumnStore, MetaStore}
 import filodb.core.FutureUtils
 import filodb.core.reprojector._
+import filodb.core.store.{ColumnStore, MetaStore}
+
+import scala.concurrent.ExecutionContext
 
 /**
  * A trait to make setup of the [[NodeCoordinatorActor]] stack a bit easier.
