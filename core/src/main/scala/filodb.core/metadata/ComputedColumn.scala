@@ -38,7 +38,7 @@ object ComputedColumn {
    *          then the return value from the analyze() method of the computation
    */
   def analyze(expr: String,
-              dataset: TableName,
+              dataset: String,
               schema: Seq[Column]): ComputedColumn Or One[InvalidComputedColumnSpec] = {
     if (isComputedColumn(expr)) {
       val exprFunction = expr.split(' ').head.drop(1)
@@ -73,7 +73,7 @@ trait ColumnComputation {
    *          values.  NOTE: does not need to fill in id, which will be generated/replaced later.
    */
   def analyze(expr: String,
-              dataset: TableName,
+              dataset: String,
               schema: Seq[Column]): ComputedColumn Or InvalidComputedColumnSpec
 
   def userArgs(expr: String): Seq[String] = expr.split(" ").toSeq.drop(1)
@@ -137,7 +137,7 @@ trait SingleColumnComputation extends ColumnComputation {
   }
 
   def computedColumn(expr: String,
-                     dataset: TableName,
+                     dataset: String,
                      sourceColumns: Seq[String],
                      colType: Column.ColumnType,
                      keyType: KeyType)
@@ -146,12 +146,12 @@ trait SingleColumnComputation extends ColumnComputation {
     ComputedColumn(0, expr, dataset, colType, sourceColumns, computedKeyType)
   }
 
-  def computedColumnWithDefault(expr: String, dataset: TableName, c: SingleColumnInfo)
+  def computedColumnWithDefault(expr: String, dataset: String, c: SingleColumnInfo)
                     (default: c.keyType.T)(valueFunc: c.keyType.T => c.keyType.T): ComputedColumn =
     computedColumnWithDefault(expr, dataset, c, c.colType, c.keyType)(default)(valueFunc)
 
   def computedColumnWithDefault(expr: String,
-                                dataset: TableName,
+                                dataset: String,
                                 sourceColInfo: SingleColumnInfo,
                                 colType: Column.ColumnType,
                                 destKeyType: KeyType)

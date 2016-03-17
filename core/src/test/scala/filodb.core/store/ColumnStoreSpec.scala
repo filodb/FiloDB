@@ -192,7 +192,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
       response should equal (Success)
     }
 
-    val paramSet = colStore.getScanSplits(dataset.name, 1)
+    val paramSet = colStore.getScanSplits(datasetRef, 1)
     paramSet should have length (1)
 
     whenReady(colStore.scanSegments(projection, schema, 0, FilteredPartitionScan(paramSet.head))) { segIter =>
@@ -213,7 +213,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
       response should equal (Success)
     }
 
-    val paramSet = colStore.getScanSplits(dataset.name, 1)
+    val paramSet = colStore.getScanSplits(datasetRef, 1)
     paramSet should have length (1)
 
     whenReady(colStore.scanRows(projection, schema, 0, FilteredPartitionScan(paramSet.head))) { rowIter =>
@@ -233,7 +233,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
       colStore.appendSegment(projection2, seg, 0).futureValue should equal (Success)
     }
 
-    val paramSet = colStore.getScanSplits(dataset.name, 1)
+    val paramSet = colStore.getScanSplits(datasetRef, 1)
     paramSet should have length (1)
 
     whenReady(colStore.scanRows(projection2, schema, 0, FilteredPartitionScan(paramSet.head))) { rowIter =>
@@ -248,7 +248,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
       colStore.appendSegment(projection2, seg, 0).futureValue should equal (Success)
     }
 
-    val paramSet = colStore.getScanSplits(dataset.name, 1)
+    val paramSet = colStore.getScanSplits(datasetRef, 1)
     paramSet should have length (1)
 
     val filterFunc = KeyFilter.equalsFunc(projection2.partitionType)(197902.asInstanceOf[projection2.PK])
@@ -265,7 +265,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
       colStore.appendSegment(projection2, seg, 0).futureValue should equal (Success)
     }
 
-    val paramSet = colStore.getScanSplits(dataset.name, 1)
+    val paramSet = colStore.getScanSplits(datasetRef, 1)
     paramSet should have length (1)
 
     // First filter by segment range only.  There are two possible segment key values: 0 or 50, and
@@ -296,7 +296,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
       colStore.appendSegment(projection3, seg, 0).futureValue should equal (Success)
     }
 
-    val paramSet = colStore.getScanSplits(dataset.name, 1)
+    val paramSet = colStore.getScanSplits(datasetRef, 1)
     paramSet should have length (1)
 
     // Test 1:  IN query on first column only

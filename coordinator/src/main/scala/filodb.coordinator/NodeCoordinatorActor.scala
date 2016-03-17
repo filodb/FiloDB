@@ -98,8 +98,8 @@ object NodeCoordinatorActor {
 
   // Internal messages
   case object Reset
-  case class AddDatasetCoord(dataset: TableName, version: Int, dsCoordRef: ActorRef) extends NodeCommand
-  case class DatasetCreateNotify(dataset: TableName, version: Int, msg: Any) extends NodeCommand
+  case class AddDatasetCoord(dataset: DatasetRef, version: Int, dsCoordRef: ActorRef) extends NodeCommand
+  case class DatasetCreateNotify(dataset: DatasetRef, version: Int, msg: Any) extends NodeCommand
 
   def invalidColumns(columns: Seq[String], schema: Column.Schema): Set[String] =
     (columns.toSet -- schema.keys)
@@ -123,8 +123,8 @@ class NodeCoordinatorActor(metaStore: MetaStore,
   import NodeCoordinatorActor._
   import context.dispatcher
 
-  val dsCoordinators = new collection.mutable.HashMap[(TableName, Int), ActorRef]
-  val dsCoordNotify = new collection.mutable.HashMap[(TableName, Int), List[ActorRef]]
+  val dsCoordinators = new collection.mutable.HashMap[(DatasetRef, Int), ActorRef]
+  val dsCoordNotify = new collection.mutable.HashMap[(DatasetRef, Int), List[ActorRef]]
 
   // By default, stop children DatasetCoordinatorActors when something goes wrong.
   override val supervisorStrategy = SupervisorStrategy.stoppingStrategy

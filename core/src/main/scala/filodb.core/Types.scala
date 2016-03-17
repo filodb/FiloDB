@@ -18,7 +18,6 @@ object Types {
   type SegmentId = ByteVector
   // TODO: Change ColumnId to an Int.  Would be more efficient, and allow renaming columns.
   type ColumnId = String
-  type TableName = String
   type ChunkID = Int    // Each chunk is identified by segmentID and a long timestamp
 
   type BinaryPartition = ByteVector
@@ -37,6 +36,12 @@ object Types {
       x.length compare y.length
     }
   }
+}
+
+// database is like Cassandra keyspace, or HiveMetaStore/RDBMS database - a namespace for tables
+case class DatasetRef(dataset: String, database: Option[String] = None) {
+  override def toString: String =
+    database.map { db => s"$database.$dataset" }.getOrElse(dataset)
 }
 
 // A range of keys, used for describing ingest rows as well as queries

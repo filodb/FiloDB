@@ -32,8 +32,8 @@ extends CachedMergingColumnStore with InMemoryColumnStoreScanner with StrictLogg
 
   val mergingStrategy = new AppendingChunkMergingStrategy(this)
 
-  val chunkDb = new HashMap[(TableName, BinaryPartition, Int), ChunkTree]
-  val rowMaps = new HashMap[(TableName, BinaryPartition, Int), RowMapTree]
+  val chunkDb = new HashMap[(DatasetRef, BinaryPartition, Int), ChunkTree]
+  val rowMaps = new HashMap[(DatasetRef, BinaryPartition, Int), RowMapTree]
 
   def initializeProjection(projection: Projection): Future[Response] = Future.successful(Success)
 
@@ -43,7 +43,7 @@ extends CachedMergingColumnStore with InMemoryColumnStoreScanner with StrictLogg
     Success
   }
 
-  def writeChunks(dataset: TableName,
+  def writeChunks(dataset: DatasetRef,
                   partition: BinaryPartition,
                   version: Int,
                   segmentId: SegmentId,
@@ -57,7 +57,7 @@ extends CachedMergingColumnStore with InMemoryColumnStoreScanner with StrictLogg
     Success
   }
 
-  def writeChunkRowMap(dataset: TableName,
+  def writeChunkRowMap(dataset: DatasetRef,
                        partition: BinaryPartition,
                        version: Int,
                        segmentId: SegmentId,
@@ -83,7 +83,7 @@ extends CachedMergingColumnStore with InMemoryColumnStoreScanner with StrictLogg
         val segment = new RowReaderSegment(projection, segInfo, binChunkRowMap, columns)
         for { column <- columns } {
           val colName = column.name
-          val chunkTree = chunkDb.getOrElse((projection.datasetName, binPart, version), EmptyChunkTree)
+          val chunkTree = chunkDb.getOrElse((projection.datasetRef, binPart, version), EmptyChunkTree)
           chunkTree.subMap((colName, segId, 0), true, (colName, segId, Int.MaxValue), true)
                    .entrySet.iterator.foreach { entry =>
             val (_, _, chunkId) = entry.getKey
@@ -100,7 +100,7 @@ extends CachedMergingColumnStore with InMemoryColumnStoreScanner with StrictLogg
 
   // InMemoryColumnStore is just on one node, so return no splits for now.
   // TODO: achieve parallelism by splitting on a range of partitions.
-  def getScanSplits(dataset: TableName, splitsPerNode: Int): Seq[ScanSplit] =
+  def getScanSplits(dataset: DatasetRef, splitsPerNode: Int): Seq[ScanSplit] =
     Seq(InMemoryWholeSplit)
 
   def bbToHex(bb: ByteBuffer): String = DatatypeConverter.printHexBinary(bb.array)
@@ -123,10 +123,10 @@ trait InMemoryColumnStoreScanner extends ColumnStoreScanner {
   val EmptyChunkTree = new ChunkTree(Ordering[ChunkKey])
   val EmptyRowMapTree = new RowMapTree(Ordering[SegmentId])
 
-  def chunkDb: HashMap[(TableName, BinaryPartition, Int), ChunkTree]
-  def rowMaps: HashMap[(TableName, BinaryPartition, Int), RowMapTree]
+  def chunkDb: HashMap[(DatasetRef, BinaryPartition, Int), ChunkTree]
+  def rowMaps: HashMap[(DatasetRef, BinaryPartition, Int), RowMapTree]
 
-  def readChunks(dataset: TableName,
+  def readChunks(dataset: DatasetRef,
                  columns: Set[ColumnId],
                  keyRange: BinaryKeyRange,
                  version: Int)(implicit ec: ExecutionContext): Future[Seq[ChunkedData]] = {
@@ -151,14 +151,14 @@ trait InMemoryColumnStoreScanner extends ColumnStoreScanner {
   def singlePartScan(projection: RichProjection, version: Int, partition: Any):
     Iterator[(BinaryPartition, RowMapTreeLike)] = {
     val binPart = projection.partitionType.toBytes(partition.asInstanceOf[projection.PK])
-    Seq((binPart, rowMaps.getOrElse((projection.datasetName, binPart, version), EmptyRowMapTree))).
+    Seq((binPart, rowMaps.getOrElse((projection.datasetRef, binPart, version), EmptyRowMapTree))).
       toIterator
   }
 
   def singlePartRangeScan(projection: RichProjection, version: Int, k: KeyRange[_, _]):
     Iterator[(BinaryPartition, RowMapTreeLike)] = {
     val binKR = projection.toBinaryKeyRange(k)
-    val rowMapTree = rowMaps.getOrElse((projection.datasetName, binKR.partition, version),
+    val rowMapTree = rowMaps.getOrElse((projection.datasetRef, binKR.partition, version),
                                        EmptyRowMapTree)
     val subMap = rowMapTree.subMap(binKR.start, true, binKR.end, !binKR.endExclusive)
     Iterator.single((binKR.partition, subMap))
@@ -169,9 +169,9 @@ trait InMemoryColumnStoreScanner extends ColumnStoreScanner {
                        split: ScanSplit,
                        filterFunc: Any => Boolean): Iterator[(BinaryPartition, RowMapTreeLike)] = {
     val binParts = rowMaps.keysIterator.collect { case (ds, binPart, ver) if
-      ds == projection.datasetName && ver == version => binPart }
+      ds == projection.datasetRef && ver == version => binPart }
     binParts.filter { binPart => filterFunc(projection.partitionType.fromBytes(binPart))
-            }.map { binPart => (binPart, rowMaps((projection.datasetName, binPart, version))) }
+            }.map { binPart => (binPart, rowMaps((projection.datasetRef, binPart, version))) }
   }
 
   def scanChunkRowMaps(projection: RichProjection,

@@ -20,7 +20,7 @@ import filodb.core._
  * The Projection base class is normalized, ie it doesn't have all the information.
  */
 case class Projection(id: Int,
-                      dataset: TableName,
+                      dataset: DatasetRef,
                       keyColIds: Seq[ColumnId],
                       segmentColId: ColumnId,
                       reverse: Boolean = false,
@@ -55,7 +55,8 @@ case class RichProjection(projection: Projection,
   type RK = rowKeyType.T
   type PK = partitionType.T
 
-  def datasetName: String = projection.dataset
+  def datasetName: String = projection.dataset.toString
+  def datasetRef: DatasetRef = projection.dataset
 
   def segmentKeyFunc: RowReader => SK =
     segmentType.getKeyFunc(Array(segmentColIndex))

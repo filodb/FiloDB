@@ -32,7 +32,7 @@ class ProjectionSpec extends FunSpec with Matchers {
     }
 
     it("should get MissingColumnNames if projection columns are missing from schema") {
-      val missingColProj = Projection(0, "a", Seq("age"), "seg", columns = Seq("first", "yards"))
+      val missingColProj = Projection(0, DatasetRef("a"), Seq("age"), "seg", columns = Seq("first", "yards"))
       val missingColDataset = Dataset("a", Seq(missingColProj), Seq(Dataset.DefaultPartitionColumn))
       val resp = RichProjection.make(missingColDataset, schema)
       resp.isBad should be (true)

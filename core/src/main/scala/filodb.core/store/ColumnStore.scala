@@ -130,7 +130,7 @@ trait ColumnStore {
    * @param splitsPerNode the number of splits to target per node.  May not actually be possible.
    * @return a Seq[ScanSplit]
    */
-  def getScanSplits(dataset: TableName, splitsPerNode: Int = 1): Seq[ScanSplit]
+  def getScanSplits(dataset: DatasetRef, splitsPerNode: Int = 1): Seq[ScanSplit]
 
   /**
    * Shuts down the ColumnStore, including any threads that might be hanging around
@@ -177,13 +177,13 @@ trait CachedMergingColumnStore extends ColumnStore with ColumnStoreScanner with 
    * @param chunks an Iterator over triples of (columnName, chunkId, chunk bytes)
    * @return Success. Future.failure(exception) otherwise.
    */
-  def writeChunks(dataset: TableName,
+  def writeChunks(dataset: DatasetRef,
                   partition: BinaryPartition,
                   version: Int,
                   segmentId: SegmentId,
                   chunks: Iterator[(ColumnId, ChunkID, ByteBuffer)]): Future[Response]
 
-  def writeChunkRowMap(dataset: TableName,
+  def writeChunkRowMap(dataset: DatasetRef,
                        partition: BinaryPartition,
                        version: Int,
                        segmentId: SegmentId,
@@ -201,8 +201,8 @@ trait CachedMergingColumnStore extends ColumnStore with ColumnStoreScanner with 
     if (segment.isEmpty) return(Future.successful(NotApplied))
     for { oldSegment <- getSegFromCache(projection.toRowKeyOnlyProjection, segment, version)
           mergedSegment = mergingStrategy.mergeSegments(oldSegment, segment)
-          writeChunksResp <- writeBatchedChunks(projection.datasetName, version, mergedSegment)
-          writeCRMapResp <- writeChunkRowMap(projection.datasetName, segment.binaryPartition, version,
+          writeChunksResp <- writeBatchedChunks(projection.datasetRef, version, mergedSegment)
+          writeCRMapResp <- writeChunkRowMap(projection.datasetRef, segment.binaryPartition, version,
                                          segment.segmentId, mergedSegment.index)
             if writeChunksResp == Success }
     yield {
@@ -214,7 +214,7 @@ trait CachedMergingColumnStore extends ColumnStore with ColumnStoreScanner with 
 
   def chunkBatchSize: Int
 
-  private def writeBatchedChunks(dataset: TableName, version: Int, segment: Segment): Future[Response] = {
+  private def writeBatchedChunks(dataset: DatasetRef, version: Int, segment: Segment): Future[Response] = {
     val binPartition = segment.binaryPartition
     Future.traverse(segment.getChunks.grouped(chunkBatchSize).toSeq) { chunks =>
       writeChunks(dataset, binPartition, version, segment.segmentId, chunks.toIterator)

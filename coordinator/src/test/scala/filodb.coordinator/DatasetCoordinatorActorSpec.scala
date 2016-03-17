@@ -43,7 +43,7 @@ with ScalaFutures {
 
   var dsActor: ActorRef = _
   var probe: TestProbe = _
-  var reprojections: Seq[(Types.TableName, Int)] = Nil
+  var reprojections: Seq[(Types.DatasetRef, Int)] = Nil
 
   override def beforeAll() {
     super.beforeAll()

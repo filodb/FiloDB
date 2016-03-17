@@ -18,7 +18,7 @@ object SimpleComputations {
     def funcName: String = "string"
 
     def analyze(expr: String,
-                dataset: TableName,
+                dataset: String,
                 schema: Seq[Column]): ComputedColumn Or InvalidComputedColumnSpec = {
       for { args <- fixedNumArgs(expr, 1) }
       yield {
@@ -36,7 +36,7 @@ object SimpleComputations {
     def funcName: String = "getOrElse"
 
     def analyze(expr: String,
-                dataset: TableName,
+                dataset: String,
                 schema: Seq[Column]): ComputedColumn Or InvalidComputedColumnSpec = {
       for { info <- parse(expr, schema)
             defaultValue <- parseParam(info.keyType, info.param) }
@@ -59,7 +59,7 @@ object SimpleComputations {
     def funcName: String = "round"
 
     def analyze(expr: String,
-                dataset: TableName,
+                dataset: String,
                 schema: Seq[Column]): ComputedColumn Or InvalidComputedColumnSpec = {
       for { info <- parse(expr, schema, Set(IntColumn, LongColumn, DoubleColumn))
             roundingValue <- parseParam(info.keyType, info.param) }
@@ -102,7 +102,7 @@ object SimpleComputations {
     }
 
     def analyze(expr: String,
-                dataset: TableName,
+                dataset: String,
                 schema: Seq[Column]): ComputedColumn Or InvalidComputedColumnSpec = {
       for { info <- parse(expr, schema, Set(LongColumn, TimestampColumn))
             duration <- parseDurationMillis(info.param) }
@@ -127,7 +127,7 @@ object SimpleComputations {
     def funcName: String = "stringPrefix"
 
     def analyze(expr: String,
-                dataset: TableName,
+                dataset: String,
                 schema: Seq[Column]): ComputedColumn Or InvalidComputedColumnSpec = {
       for { info <- parse(expr, schema, Set(StringColumn))
             numChars <- parseParam(SingleKeyTypes.IntKeyType, info.param) }

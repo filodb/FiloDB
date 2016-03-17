@@ -72,11 +72,11 @@ with FiloCassandraConnector {
       case e: NoSuchElementException => AlreadyExists
     }
 
-  def getProjection(dataset: TableName, id: Int): Future[Projection] =
+  def getProjection(dataset: DatasetRef, id: Int): Future[Projection] =
     select.where(_.name eqs dataset).and(_.projectionId eqs id)
           .one().map(_.getOrElse(throw NotFoundError(s"Dataset $dataset")))
 
-  def getDataset(dataset: TableName): Future[Dataset] =
+  def getDataset(dataset: DatasetRef): Future[Dataset] =
     for { proj <- getProjection(dataset, 0)
           Some((partCols, options)) <- select(_.partitionColumns, _.options).where(_.name eqs dataset).one() }
     yield { Dataset(dataset, Seq(proj), splitCString(partCols), DatasetOptions.fromString(options)) }
