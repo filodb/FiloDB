@@ -42,10 +42,10 @@ trait MetaStore {
   /**
    * Creates a new dataset with the given name, if it doesn't already exist.
    * @param dataset the Dataset to create.  Should have superprojection defined.
-   * @param database optionally, the database in which to create the dataset
+   *        NOTE: the database name comes from the projection 0 DatasetRef
    * @return Success, or AlreadyExists, or StorageEngineException
    */
-  def newDataset(dataset: Dataset, database: Option[String] = None): Future[Response]
+  def newDataset(dataset: Dataset): Future[Response]
 
   /**
    * Retrieves a Dataset object of the given name

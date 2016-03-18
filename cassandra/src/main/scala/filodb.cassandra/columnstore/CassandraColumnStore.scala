@@ -115,9 +115,11 @@ extends CachedMergingColumnStore with CassandraColumnStoreScanner with StrictLog
    */
   def getScanSplits(dataset: DatasetRef, splitsPerNode: Int = 1): Seq[ScanSplit] = {
     val metadata = clusterConnector.session.getCluster.getMetadata
+    val keyspace = clusterConnector.keySpaceName(dataset)
     require(splitsPerNode >= 1, s"Must specify at least 1 splits_per_node, got $splitsPerNode")
+
     val tokensByReplica = metadata.getTokenRanges.asScala.toSeq.groupBy { tokenRange =>
-      metadata.getReplicas(clusterConnector.keySpace.name, tokenRange)
+      metadata.getReplicas(keyspace, tokenRange)
     }
     val tokenRanges = for { key <- tokensByReplica.keys } yield {
       if (tokensByReplica(key).size > 1) {
@@ -138,7 +140,7 @@ extends CachedMergingColumnStore with CassandraColumnStoreScanner with StrictLog
     }
     val tokensComplete = tokenRanges.flatMap { token => token } .toSeq
     tokensComplete.map { tokenRange =>
-      val replicas = metadata.getReplicas(clusterConnector.keySpace.name, tokenRange).asScala
+      val replicas = metadata.getReplicas(keyspace, tokenRange).asScala
       CassandraTokenRangeSplit(tokenRange.getStart.toString,
                                tokenRange.getEnd.toString,
                                replicas.map(_.getSocketAddress).toSet)
@@ -187,7 +189,7 @@ trait CassandraColumnStoreScanner extends ColumnStoreScanner with StrictLogging 
                        method: ScanMethod)
                       (implicit ec: ExecutionContext):
     Future[Iterator[SegmentIndex[projection.PK, projection.SK]]] = {
-    val rowMapTable = getOrCreateRowMapTable(projection.datasetName)
+    val rowMapTable = getOrCreateRowMapTable(projection.datasetRef)
     val futCrmRecords = method match {
       case SinglePartitionScan(partition) =>
         val binPart = projection.partitionType.toBytes(partition.asInstanceOf[projection.PK])

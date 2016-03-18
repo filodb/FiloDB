@@ -21,11 +21,11 @@ class DatasetTableSpec extends CassandraFlatSpec with BeforeAndAfter {
   override def beforeAll() {
     super.beforeAll()
     // Note: This is a CREATE TABLE IF NOT EXISTS
-    datasetTable.initialize().futureValue(timeout)
+    datasetTable.initialize("unittest").futureValue(timeout)
   }
 
   before {
-    datasetTable.clearAll().futureValue(timeout)
+    datasetTable.clearAll("unittest").futureValue(timeout)
   }
 
   val fooDataset = Dataset("foo", "someSortCol", "seg")
@@ -49,17 +49,17 @@ class DatasetTableSpec extends CassandraFlatSpec with BeforeAndAfter {
     whenReady(datasetTable.createNewDataset(fooDataset), timeout) { response =>
       response should equal (Success)
     }
-    whenReady(datasetTable.deleteDataset("foo"), timeout) { response =>
+    whenReady(datasetTable.deleteDataset(DatasetRef("foo")), timeout) { response =>
       response should equal (Success)
     }
 
-    whenReady(datasetTable.getDataset("foo").failed, timeout) { err =>
+    whenReady(datasetTable.getDataset(DatasetRef("foo")).failed, timeout) { err =>
       err shouldBe a [NotFoundError]
     }
   }
 
   it should "return NotFoundError when trying to get nonexisting dataset" in {
-    whenReady(datasetTable.getDataset("foo").failed, timeout) { err =>
+    whenReady(datasetTable.getDataset(DatasetRef("foo")).failed, timeout) { err =>
       err shouldBe a [NotFoundError]
     }
   }
@@ -69,7 +69,7 @@ class DatasetTableSpec extends CassandraFlatSpec with BeforeAndAfter {
                              Seq("part1", ":getOrElse part2 00"))
     datasetTable.createNewDataset(barDataset).futureValue(timeout) should equal (Success)
 
-    whenReady(datasetTable.getDataset("bar"),timeout) { dataset =>
+    whenReady(datasetTable.getDataset(DatasetRef("bar")),timeout) { dataset =>
       dataset should equal (barDataset)
     }
   }

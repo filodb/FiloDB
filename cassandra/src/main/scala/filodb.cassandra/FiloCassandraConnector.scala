@@ -6,13 +6,15 @@ import com.websudos.phantom.connectors.{ContactPoints, KeySpace}
 import net.ceedubs.ficus.Ficus._
 import scala.concurrent.duration.FiniteDuration
 
+import filodb.core.DatasetRef
+
 trait FiloCassandraConnector {
   private[this] lazy val connector =
     ContactPoints(config.as[Seq[String]]("hosts"), config.getInt("port"))
       .withClusterBuilder(_.withAuthProvider(authProvider)
                            .withSocketOptions(socketOptions)
                            .withQueryOptions(queryOptions))
-      .keySpace(keySpace.name)
+      .keySpace(defaultKeySpace.name)
 
   // Cassandra config with following keys:  keyspace, hosts, port, username, password
   def config: Config
@@ -43,9 +45,14 @@ trait FiloCassandraConnector {
     opts
   }
 
-  implicit lazy val keySpace = KeySpace(config.getString("keyspace"))
-
   implicit lazy val session: Session = connector.session
+
+  lazy val defaultKeySpace = KeySpace(config.getString("keyspace"))
+
+  def withKeyspace[T](ref: DatasetRef)(f: KeySpace => T): T =
+    f(ref.database.map(KeySpace(_)).getOrElse(defaultKeySpace))
+
+  def keySpaceName(ref: DatasetRef): String = ref.database.getOrElse(defaultKeySpace.name)
 
   def cassandraVersion: VersionNumber =  connector.cassandraVersion
 

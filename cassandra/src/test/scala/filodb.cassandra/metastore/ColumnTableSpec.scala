@@ -16,34 +16,35 @@ class ColumnTableSpec extends CassandraFlatSpec with BeforeAndAfter {
   import Column.ColumnType
 
   val firstColumn = DataColumn(0, "first", "foo", 1, ColumnType.StringColumn)
+  val fooRef = DatasetRef("foo", Some("unittest2"))
 
   val config = ConfigFactory.load("application_test.conf").getConfig("filodb.cassandra")
   val columnTable = new ColumnTable(config)
-  implicit val keySpace = KeySpace(config.getString("keyspace"))
+  implicit val keySpace = KeySpace("unittest2")
   val timeout = Timeout(30 seconds)
   // First create the columns table
   override def beforeAll() {
     super.beforeAll()
     // Note: This is a CREATE TABLE IF NOT EXISTS
-    columnTable.initialize().futureValue(timeout)
+    columnTable.initialize("unittest2").futureValue(timeout)
   }
 
   before {
-    columnTable.clearAll().futureValue(timeout)
+    columnTable.clearAll("unittest2").futureValue(timeout)
   }
 
   import scala.concurrent.ExecutionContext.Implicits.global
 
   "ColumnTable" should "return empty schema if a dataset does not exist in columns table" in {
-    columnTable.getSchema("foo", 1).futureValue(timeout) should equal (Map())
+    columnTable.getSchema(fooRef, 1).futureValue(timeout) should equal (Map())
   }
 
   it should "add the first column and read it back as a schema" in {
-    columnTable.insertColumn(firstColumn).futureValue should equal (Success)
-    columnTable.getSchema("foo", 2).futureValue(timeout) should equal (Map("first" -> firstColumn))
+    columnTable.insertColumn(firstColumn, fooRef).futureValue should equal (Success)
+    columnTable.getSchema(fooRef, 2).futureValue(timeout) should equal (Map("first" -> firstColumn))
 
     // Check that limiting the getSchema query to version 0 does not return the version 1 column
-    columnTable.getSchema("foo", 0).futureValue(timeout) should equal (Map())
+    columnTable.getSchema(fooRef, 0).futureValue(timeout) should equal (Map())
   }
 
   it should "return MetadataException if illegal column type encoded in Cassandra" in {
@@ -55,6 +56,7 @@ class ColumnTableSpec extends CassandraFlatSpec with BeforeAndAfter {
                               .future()
     f.futureValue
 
-    columnTable.getSchema("bar", 7).failed.futureValue(timeout) shouldBe a [MetadataException]
+    val barRef = DatasetRef("bar", Some("unittest2"))
+    columnTable.getSchema(barRef, 7).failed.futureValue(timeout) shouldBe a [MetadataException]
   }
 }

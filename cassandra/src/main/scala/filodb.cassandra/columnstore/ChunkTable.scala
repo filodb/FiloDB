@@ -18,12 +18,12 @@ import filodb.core.store.ChunkedData
  * Data is stored in a columnar fashion similar to Parquet -- grouped by column.  Each
  * chunk actually stores many many rows grouped together into one binary chunk for efficiency.
  */
-sealed class ChunkTable(dataset: String, connector: FiloCassandraConnector)
+sealed class ChunkTable(dataset: DatasetRef, connector: FiloCassandraConnector)
 extends CassandraTable[ChunkTable, (String, Types.SegmentId, Int, ByteBuffer)] {
   import filodb.cassandra.Util._
 
-  override val tableName = dataset + "_chunks"
-  implicit val keySpace = connector.keySpace
+  override val tableName = dataset.dataset + "_chunks"
+  implicit val keySpace = dataset.database.map(KeySpace).getOrElse(connector.defaultKeySpace)
   implicit val session = connector.session
 
   //scalastyle:off

@@ -38,7 +38,7 @@ class InMemoryMetaStore(implicit val ec: ExecutionContext) extends MetaStore wit
    * ** Dataset API ***
    */
 
-  def newDataset(dataset: Dataset, database: Option[String] = None): Future[Response] = {
+  def newDataset(dataset: Dataset): Future[Response] = {
     if (dataset.projections.isEmpty) {
       Future.failed(MetadataException(new IllegalArgumentException(s"Dataset $dataset has no projections")))
     } else {
