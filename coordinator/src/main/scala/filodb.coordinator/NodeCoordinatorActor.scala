@@ -34,11 +34,14 @@ object NodeCoordinatorActor {
 
   /**
    * Creates a new dataset with columns and a default projection.
-   * @dataset the Dataset object
-   * @columns DataColumns to create for that dataset.  Must include partition and row key columns, at a
+   * @param dataset the Dataset object
+   * @param columns DataColumns to create for that dataset.  Must include partition and row key columns, at a
    *          minimum.  Computed columns can be left out.
+   * @param database optionally, the database/keyspace to create the dataset in
    */
-  case class CreateDataset(dataset: Dataset, columns: Seq[DataColumn]) extends NodeCommand
+  case class CreateDataset(dataset: Dataset,
+                           columns: Seq[DataColumn],
+                           database: Option[String] = None) extends NodeCommand
 
   case object DatasetCreated extends Response with NodeResponse
   case class DatasetError(msg: String) extends ErrorResponse with NodeResponse
@@ -49,7 +52,7 @@ object NodeCoordinatorActor {
    *
    * @return BadSchema if the partition column is unsupported, sort column invalid, etc.
    */
-  case class SetupIngestion(dataset: String,
+  case class SetupIngestion(dataset: DatasetRef,
                             schema: Seq[String],
                             version: Int) extends NodeCommand
 
@@ -65,7 +68,10 @@ object NodeCoordinatorActor {
    * @param seqNo the sequence number to be returned for acknowledging the entire set of rows
    * @return Ack(seqNo) returned when the set of rows has been committed to the MemTable.
    */
-  case class IngestRows(dataset: String, version: Int, rows: Seq[RowReader], seqNo: Long) extends NodeCommand
+  case class IngestRows(dataset: DatasetRef,
+                        version: Int,
+                        rows: Seq[RowReader],
+                        seqNo: Long) extends NodeCommand
 
   case class Ack(seqNo: Long) extends NodeResponse
 
@@ -74,20 +80,20 @@ object NodeCoordinatorActor {
    * Usually used when at the end of ingesting some large blob of data.
    * @return Flushed when the flush cycle has finished successfully, commiting data to columnstore.
    */
-  case class Flush(dataset: String, version: Int) extends NodeCommand
+  case class Flush(dataset: DatasetRef, version: Int) extends NodeCommand
   case object Flushed extends NodeResponse
 
   /**
    * Checks to see if the DatasetCoordActor is ready to take in more rows.  Usually sent when an actor
    * is in a wait state.
    */
-  case class CheckCanIngest(dataset: String, version: Int) extends NodeCommand
+  case class CheckCanIngest(dataset: DatasetRef, version: Int) extends NodeCommand
   case class CanIngest(can: Boolean) extends NodeResponse
 
   /**
    * Gets the latest ingestion stats from the DatasetCoordinatorActor
    */
-  case class GetIngestionStats(dataset: String, version: Int) extends NodeCommand
+  case class GetIngestionStats(dataset: DatasetRef, version: Int) extends NodeCommand
 
   /**
    * Truncates all data from a projection of a dataset.  Waits for any pending flushes from said
@@ -129,12 +135,12 @@ class NodeCoordinatorActor(metaStore: MetaStore,
   // By default, stop children DatasetCoordinatorActors when something goes wrong.
   override val supervisorStrategy = SupervisorStrategy.stoppingStrategy
 
-  private def withDsCoord(originator: ActorRef, dataset: String, version: Int)
+  private def withDsCoord(originator: ActorRef, dataset: DatasetRef, version: Int)
                          (func: ActorRef => Unit): Unit = {
     dsCoordinators.get((dataset, version)).map(func).getOrElse(originator ! UnknownDataset)
   }
 
-  private def verifySchema(originator: ActorRef, dataset: String, version: Int, columns: Seq[String]):
+  private def verifySchema(originator: ActorRef, dataset: DatasetRef, version: Int, columns: Seq[String]):
       Future[Option[Column.Schema]] = {
     metaStore.getSchema(dataset, version).map { schema =>
       val undefinedCols = invalidColumns(columns, schema)
@@ -148,12 +154,15 @@ class NodeCoordinatorActor(metaStore: MetaStore,
     }
   }
 
-  private def createDataset(originator: ActorRef, datasetObj: Dataset, columns: Seq[DataColumn]): Unit = {
+  private def createDataset(originator: ActorRef,
+                            datasetObj: Dataset,
+                            ref: DatasetRef,
+                            columns: Seq[DataColumn]): Unit = {
     if (datasetObj.projections.isEmpty) {
       originator ! DatasetError(s"There must be at least one projection in dataset $datasetObj")
     } else {
       (for { resp1 <- metaStore.newDataset(datasetObj)
-             resp2 <- Future.sequence(columns.map(metaStore.newColumn(_)))
+             resp2 <- Future.sequence(columns.map(metaStore.newColumn(_, ref)))
              resp3 <- columnStore.initializeProjection(datasetObj.projections.head) }
       yield {
         originator ! DatasetCreated
@@ -174,7 +183,7 @@ class NodeCoordinatorActor(metaStore: MetaStore,
   // If the coordinator is already set up, then everything is already fine.
   // Otherwise get the dataset object and create a new actor, re-initializing state.
   private def setupIngestion(originator: ActorRef,
-                             dataset: String,
+                             dataset: DatasetRef,
                              columns: Seq[String],
                              version: Int): Unit = {
     def notify(msg: Any): Unit = { self ! DatasetCreateNotify(dataset, version, msg) }
@@ -220,8 +229,8 @@ class NodeCoordinatorActor(metaStore: MetaStore,
   }
 
   def receive: Receive = {
-    case CreateDataset(datasetObj, columns) =>
-      createDataset(sender, datasetObj, columns)
+    case CreateDataset(datasetObj, columns, db) =>
+      createDataset(sender, datasetObj, DatasetRef(datasetObj.name, db), columns)
 
     case SetupIngestion(dataset, columns, version) =>
       setupIngestion(sender, dataset, columns, version)

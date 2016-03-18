@@ -43,7 +43,7 @@ with ScalaFutures {
 
   var dsActor: ActorRef = _
   var probe: TestProbe = _
-  var reprojections: Seq[(Types.DatasetRef, Int)] = Nil
+  var reprojections: Seq[(DatasetRef, Int)] = Nil
 
   override def beforeAll() {
     super.beforeAll()
@@ -78,7 +78,7 @@ with ScalaFutures {
     import filodb.core.store.Segment
 
     def reproject(memTable: MemTable, version: Int): Future[Seq[SegmentInfo[_, _]]] = {
-      reprojections = reprojections :+ (memTable.projection.dataset.name -> version)
+      reprojections = reprojections :+ (memTable.projection.datasetRef -> version)
       Future.successful(Seq(dummySegInfo))
 
     }
@@ -106,7 +106,7 @@ with ScalaFutures {
     ingestRows(20)
     probe.send(dsActor, GetStats)
     probe.expectMsg(Stats(1, 1, 0, 20, -1))
-    reprojections should equal (Seq(("dataset", 0)))
+    reprojections should equal (Seq((DatasetRef("dataset"), 0)))
   }
 
   it("should not send Ack if over maximum number of rows") {
@@ -132,6 +132,6 @@ with ScalaFutures {
     probe.expectMsgPF(3.seconds.dilated) {
       case Stats(1, 1, 0, 0, _) =>
     }
-    reprojections should equal (Seq(("dataset", 0)))
+    reprojections should equal (Seq((DatasetRef("dataset"), 0)))
   }
 }
