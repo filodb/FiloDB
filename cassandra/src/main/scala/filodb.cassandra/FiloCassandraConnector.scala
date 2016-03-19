@@ -54,6 +54,11 @@ trait FiloCassandraConnector {
 
   def keySpaceName(ref: DatasetRef): String = ref.database.getOrElse(defaultKeySpace.name)
 
+  def createKeyspace(keyspace: String, replicationFactor: Int = 1): Unit = {
+    session.execute(s"CREATE KEYSPACE IF NOT EXISTS $keyspace WITH replication = " +
+                    s"{'class': 'SimpleStrategy', 'replication_factor' : $replicationFactor};")
+  }
+
   def cassandraVersion: VersionNumber =  connector.cassandraVersion
 
   def cassandraVersions: Set[VersionNumber] =  connector.cassandraVersions

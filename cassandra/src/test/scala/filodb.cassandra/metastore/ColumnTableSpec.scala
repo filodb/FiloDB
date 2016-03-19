@@ -25,6 +25,7 @@ class ColumnTableSpec extends CassandraFlatSpec with BeforeAndAfter {
   // First create the columns table
   override def beforeAll() {
     super.beforeAll()
+    columnTable.createKeyspace("unittest2")
     // Note: This is a CREATE TABLE IF NOT EXISTS
     columnTable.initialize("unittest2").futureValue(timeout)
   }
