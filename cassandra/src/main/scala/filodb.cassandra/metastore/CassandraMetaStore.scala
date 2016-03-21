@@ -17,10 +17,12 @@ class CassandraMetaStore(config: Config)
   val datasetTable = new DatasetTable(config)
   val columnTable = new ColumnTable(config)
 
-  def initialize(database: String): Future[Response] =
+  def initialize(database: String): Future[Response] = {
+    columnTable.createKeyspace(database)     // CREATE KEYSPACE IF NOT EXIST
     for { dtResp <- datasetTable.initialize(database)
           ctResp <- columnTable.initialize(database) }
     yield { ctResp }
+  }
 
   def clearAllData(database: String): Future[Response] =
     for { dtResp <- datasetTable.clearAll(database)
