@@ -260,6 +260,7 @@ The options to use with the data-source api are:
 | option           | value                                                            | command    | optional |
 |------------------|------------------------------------------------------------------|------------|----------|
 | dataset          | name of the dataset                                              | read/write | No       |
+| database         | name of the database to use for the dataset.  For Cassandra, defaults to `filodb.cassandra.keyspace` config.  | read/write | Yes |
 | row_keys         | comma-separated list of column name(s) or computed column functions to use for the row primary key within each partition.  Cannot be null.  Use `:getOrElse` function if null values might be encountered.  | write      | No if mode is OverWrite or creating dataset for first time  |
 | segment_key      | name of the column (could be computed) to use to group rows into segments in a partition.  Cannot be null.  Use `:getOrElse` function if null values might be encountered.  | write      | yes - defaults to `:string /0` |
 | partition_keys   | comma-separated list of column name(s) or computed column functions to use for the partition key.  Cannot be null.  Use `:getOrElse` function if null values might be encountered.  If not specified, defaults to `:string /0` (a single partition).  | write      | Yes      |
@@ -284,8 +285,10 @@ However, note that the above methods will lead to a physical column being create
 Some options must be configured before starting the Spark Shell or Spark application.  There are two methods:
 
 1. Modify the `application.conf` and rebuild, or repackage a new configuration.
-2. Override the built in defaults by setting SparkConf configuration values, preceding the filo settings with `spark.filodb`.  For example, to change the keyspace, pass `--conf spark.filodb.cassandra.keyspace=mykeyspace` to Spark Shell/Submit.  To use the fast in-memory column store instead of Cassandra, pass `--conf spark.filodb.store=in-memory`.
+2. Override the built in defaults by setting SparkConf configuration values, preceding the filo settings with `spark.filodb`.  For example, to change the default keyspace, pass `--conf spark.filodb.cassandra.keyspace=mykeyspace` to Spark Shell/Submit.  To use the fast in-memory column store instead of Cassandra, pass `--conf spark.filodb.store=in-memory`.
 3. It might be easier to pass in an entire configuration file to FiloDB.  Pass the java option `-Dconfig.file=/path/to/my-filodb.conf`, for example using `--java-driver-options`.
+
+Note that if Cassandra is kept as the default column store, the keyspace can be changed on each transaction by specifying the `database` option in the data source API, or the database parameter in the Scala API.
 
 ### Spark Data Source API Example (spark-shell)
 
@@ -362,6 +365,8 @@ sqlContext.saveAsFilo(df, "gdelt",
 
 The above creates the gdelt table based on the keys above, and also inserts data from the dataframe df.
 
+Please see the ScalaDoc for the method for more details -- there is a `database` option for specifying the Cassandra keyspace, and a `mode` option for specifying the Spark SQL SaveMode.
+
 There is also an API purely for inserting data... after all, specifying the keys is not needed when inserting into an existing table.
 
 ```scala
@@ -373,6 +378,7 @@ The API for creating a DataFrame is also much more concise:
 
 ```scala
 val df = sqlContext.filoDataset("gdelt")
+val df2 = sqlContext.filoDataset("gdelt", database = Some("keyspace2"))
 ```
 
 The above method calls rely on an implicit conversion. From Java, you would need to create a new `FiloContext` first:

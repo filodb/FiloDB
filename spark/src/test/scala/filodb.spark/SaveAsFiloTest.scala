@@ -47,6 +47,7 @@ with Matchers with ScalaFutures {
   val ds2 = Dataset("gdelt2", "id", segCol)
   val ds3 = Dataset("gdelt3", "id", segCol)
   val test1 = Dataset("test1", "id", segCol)
+  val ingestOptions = IngestionOptions(writeTimeout = 2.minutes)
 
   // This is the same code that the Spark stuff uses.  Make sure we use exact same environment as real code
   // so we don't have two copies of metaStore that could be configured differently.
@@ -57,7 +58,8 @@ with Matchers with ScalaFutures {
   val columnStore = FiloSetup.columnStore
 
   override def beforeAll() {
-    metaStore.initialize().futureValue(defaultPatience)
+    metaStore.initialize("unittest").futureValue(defaultPatience)
+    metaStore.initialize("unittest2").futureValue(defaultPatience)
     columnStore.initializeProjection(ds1.projections.head).futureValue(defaultPatience)
     columnStore.initializeProjection(ds2.projections.head).futureValue(defaultPatience)
     columnStore.initializeProjection(ds3.projections.head).futureValue(defaultPatience)
@@ -70,7 +72,8 @@ with Matchers with ScalaFutures {
   }
 
   before {
-    metaStore.clearAllData().futureValue(defaultPatience)
+    metaStore.clearAllData("unittest").futureValue(defaultPatience)
+    metaStore.clearAllData("unittest2").futureValue(defaultPatience)
     columnStore.clearSegmentCache()
     try {
       columnStore.clearProjectionData(ds1.projections.head).futureValue(defaultPatience)
@@ -97,7 +100,7 @@ with Matchers with ScalaFutures {
 
   it("should create missing columns and partitions and write table") {
     sql.saveAsFilo(dataDF, "gdelt1", Seq("id"), segCol, partKeys,
-                          writeTimeout = 2.minutes)
+                   options = ingestOptions)
 
     // Now read stuff back and ensure it got written
     val df = sql.filoDataset("gdelt1")
@@ -112,7 +115,7 @@ with Matchers with ScalaFutures {
   it("should throw ColumnTypeMismatch if existing columns are not same type") {
     metaStore.newDataset(ds2).futureValue should equal (Success)
     val idStrCol = DataColumn(0, "id", "gdelt2", 0, Column.ColumnType.StringColumn)
-    metaStore.newColumn(idStrCol).futureValue should equal (Success)
+    metaStore.newColumn(idStrCol, DatasetRef("gdelt2")).futureValue should equal (Success)
 
     intercept[ColumnTypeMismatch] {
       sql.saveAsFilo(dataDF, "gdelt2", Seq("id"), segCol, partKeys)
@@ -143,8 +146,7 @@ with Matchers with ScalaFutures {
   }
 
   it("should not delete original metadata if overwrite with bad schema definition") {
-    sql.saveAsFilo(dataDF, "gdelt1", Seq("id"), segCol, partKeys,
-                          writeTimeout = 2.minutes)
+    sql.saveAsFilo(dataDF, "gdelt1", Seq("id"), segCol, partKeys, options = ingestOptions)
 
     intercept[BadSchemaError] {
       dataDF.write.format("filodb.spark").
@@ -162,10 +164,9 @@ with Matchers with ScalaFutures {
   it("should write table if there are existing matching columns") {
     metaStore.newDataset(ds3).futureValue should equal (Success)
     val idStrCol = DataColumn(0, "id", "gdelt1", 0, Column.ColumnType.LongColumn)
-    metaStore.newColumn(idStrCol).futureValue should equal (Success)
+    metaStore.newColumn(idStrCol, DatasetRef("gdelt1")).futureValue should equal (Success)
 
-    sql.saveAsFilo(dataDF, "gdelt1", Seq("id"), segCol, partKeys,
-                          writeTimeout = 2.minutes)
+    sql.saveAsFilo(dataDF, "gdelt1", Seq("id"), segCol, partKeys, options = ingestOptions)
 
     // Now read stuff back and ensure it got written
     val df = sql.filoDataset("gdelt1")
@@ -173,8 +174,7 @@ with Matchers with ScalaFutures {
   }
 
   it("should throw error in ErrorIfExists mode if dataset already exists") {
-    sql.saveAsFilo(dataDF, "gdelt2", Seq("id"), segCol, partKeys,
-                          writeTimeout = 2.minutes)
+    sql.saveAsFilo(dataDF, "gdelt2", Seq("id"), segCol, partKeys, options = ingestOptions)
 
     intercept[RuntimeException] {
       // The default mode is ErrorIfExists
@@ -196,6 +196,24 @@ with Matchers with ScalaFutures {
     val df = sql.read.format("filodb.spark").option("dataset", "test1").load()
     df.agg(sum("year")).collect().head(0) should equal (4030)
     df.select("id", "year").limit(2).collect()   // Just to make sure row copy works
+  }
+
+  it("should write and read to another keyspace using DF write() and read() APIs") {
+    dataDF.write.format("filodb.spark").
+                 option("dataset", "test1").
+                 option("database", "unittest2").
+                 option("row_keys", "id").
+                 option("segment_key", segCol).
+                 mode(SaveMode.Overwrite).
+                 save()
+    val df = sql.read.format("filodb.spark").option("dataset", "test1").
+                      option("database", "unittest2").load()
+    df.agg(sum("year")).collect().head(0) should equal (4030)
+    df.select("id", "year").limit(2).collect()   // Just to make sure row copy works
+
+    intercept[NotFoundError] {
+      val df2 = sql.read.format("filodb.spark").option("dataset", "test1").load()
+    }
   }
 
   val jsonRows2 = Seq(
@@ -225,7 +243,7 @@ with Matchers with ScalaFutures {
     val df = sql.read.format("filodb.spark").option("dataset", "gdelt1").load()
     df.agg(sum("year")).collect().head(0) should equal (4032)
 
-    val dsObj = metaStore.getDataset("gdelt1").futureValue
+    val dsObj = metaStore.getDataset(DatasetRef("gdelt1")).futureValue
     dsObj.projections.head.segmentColId should equal (newSegCol)
 
     // Also try overwriting with insert API
@@ -248,10 +266,8 @@ with Matchers with ScalaFutures {
   }
 
   it("should append data using SQL INSERT INTO statements") {
-    sql.saveAsFilo(dataDF2, "gdelt1", Seq("id"), segCol, partKeys,
-                          writeTimeout = 2.minutes)
-    sql.saveAsFilo(dataDF, "gdelt2", Seq("id"), segCol, partKeys,
-                          writeTimeout = 2.minutes)
+    sql.saveAsFilo(dataDF2, "gdelt1", Seq("id"), segCol, partKeys, options = ingestOptions)
+    sql.saveAsFilo(dataDF, "gdelt2", Seq("id"), segCol, partKeys, options = ingestOptions)
 
     val gdelt1 = sql.filoDataset("gdelt1")
     val gdelt2 = sql.filoDataset("gdelt2")

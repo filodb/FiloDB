@@ -20,6 +20,19 @@ package spark {
   case class ColumnTypeMismatch(mismatches: Set[(String, Column.ColumnType, Column.ColumnType)]) extends
     Exception(s"Mismatches:\n${mismatches.toList.mkString("\n")}")
   case class BadSchemaError(reason: String) extends Exception(reason)
+
+  /**
+   * Options for calling saveAsFilo
+   * @param version the version number to write to
+   * @param chunkSize an optionally different chunkSize to set new dataset to use
+   * @param writeTimeout Maximum time to wait for write of each partition to complete
+   * @param flushAfterInsert if true, ensure all data is flushed in memtables at end of ingestion
+   */
+  case class IngestionOptions(version: Int = 0,
+                              chunkSize: Option[Int] = None,
+                              writeTimeout: FiniteDuration = DefaultWriteTimeout,
+                              flushAfterInsert: Boolean = true)
+
 }
 
 /**
@@ -44,7 +57,7 @@ package object spark extends StrictLogging {
   import RowSource._
 
   private def ingestRddRows(coordinatorActor: ActorRef,
-                            dataset: String,
+                            dataset: DatasetRef,
                             columns: Seq[String],
                             version: Int,
                             rows: Iterator[Row],
@@ -54,7 +67,7 @@ package object spark extends StrictLogging {
     val rddRowActor = FiloSetup.system.actorOf(props, s"${dataset}_${version}_$partitionIndex")
     actorAsk(rddRowActor, Start, writeTimeout) {
       case AllDone =>
-      case SetupError(UnknownDataset) => throw DatasetNotFound(dataset)
+      case SetupError(UnknownDataset) => throw DatasetNotFound(dataset.dataset)
       case SetupError(BadSchema(reason)) => throw BadSchemaError(reason)
       case SetupError(other)          => throw new RuntimeException(other.toString)
     }
@@ -84,14 +97,16 @@ package object spark extends StrictLogging {
     /**
      * Creates a DataFrame from a FiloDB table.  Does no reading until a query is run, but it does
      * read the schema for the table.
-     * @param dataset the name of the FiloDB table/dataset to read from
+     * @param dataset the name of the FiloDB dataset to read from
+     * @param database the database / Cassandra keyspace to read the dataset from
      * @param version the version number to read from
      * @param splitsPerNode the parallelism or number of splits per node
      */
     def filoDataset(dataset: String,
+                    database: Option[String] = None,
                     version: Int = 0,
                     splitsPerNode: Int = 4): DataFrame =
-      sqlContext.baseRelationToDataFrame(FiloRelation(dataset, version, splitsPerNode)
+      sqlContext.baseRelationToDataFrame(FiloRelation(DatasetRef(dataset, database), version, splitsPerNode)
                                                      (sqlContext))
 
     private def runCommands[B](cmds: Set[Future[Response]]): Unit = {
@@ -110,7 +125,7 @@ package object spark extends StrictLogging {
     }
 
     private def checkAndAddColumns(dfColumns: Seq[DataColumn],
-                                   dataset: String,
+                                   dataset: DatasetRef,
                                    version: Int): Unit = {
       // Pull out existing dataset schema
       val schema = parse(metaStore.getSchema(dataset, version)) { schema =>
@@ -133,15 +148,15 @@ package object spark extends StrictLogging {
 
       if (missingCols.nonEmpty) {
         val addMissingCols = missingCols.map { colName =>
-          val newCol = dfSchema(colName).copy(dataset = dataset, version = version)
-          metaStore.newColumn(newCol)
+          val newCol = dfSchema(colName).copy(dataset = dataset.dataset, version = version)
+          metaStore.newColumn(newCol, dataset)
         }
         runCommands(addMissingCols)
       }
     }
 
     // Checks for schema errors via RichProjection.make, and returns created Dataset object
-    private def makeAndVerifyDataset(datasetName: String,
+    private def makeAndVerifyDataset(datasetRef: DatasetRef,
                                      rowKeys: Seq[String],
                                      segmentKey: String,
                                      partitionKeys: Seq[String],
@@ -149,7 +164,7 @@ package object spark extends StrictLogging {
                                      dfColumns: Seq[Column]): Dataset = {
       val options = Dataset.DefaultOptions
       val options2 = chunkSize.map { newSize => options.copy(chunkSize = newSize) }.getOrElse(options)
-      val dataset = Dataset(datasetName, rowKeys, segmentKey, partitionKeys).copy(options = options2)
+      val dataset = Dataset(datasetRef, rowKeys, segmentKey, partitionKeys).copy(options = options2)
 
       // validate against schema.  Checks key names, computed columns, etc.
       RichProjection.make(dataset, dfColumns).recover {
@@ -179,7 +194,7 @@ package object spark extends StrictLogging {
       }
     }
 
-    private def deleteDataset(dataset: String): Unit = {
+    private def deleteDataset(dataset: DatasetRef): Unit = {
       logger.info(s"Deleting dataset $dataset")
       parse(FiloSetup.metaStore.deleteDataset(dataset)) { resp => resp }
     }
@@ -195,7 +210,7 @@ package object spark extends StrictLogging {
      * For the other paramter definitions, please see saveAsFiloDataset().
      */
     private[spark] def createOrUpdateDataset(schema: StructType,
-                                             dataset: String,
+                                             dataset: DatasetRef,
                                              rowKeys: Seq[String],
                                              segmentKey: String,
                                              partitionKeys: Seq[String],
@@ -232,7 +247,7 @@ package object spark extends StrictLogging {
      * @param df the DataFrame to write to FiloDB
      * @param dataset the name of the FiloDB table/dataset to read from
      * @param rowKeys the name of the column(s) used as the row primary key within each partition.
-     *                May be computed functions.
+     *                May be computed functions. Only used if mode is Overwrite and
      * @param segmentKey the name of the column or computed function used to group rows into segments and
      *                   to sort the partition by.
      * @param partitionKeys column name(s) used for partition key.  If empty, then the default Dataset
@@ -251,23 +266,23 @@ package object spark extends StrictLogging {
      *          However, note that the above methods will lead to a physical column being created, so
      *          use of computed columns is probably preferable.
      *
-     * @param version the version number to write to
-     * @param chunkSize an optionally different chunkSize to set new dataset to use
+     * @param database the database/keyspace to write to, optional.  Default behavior depends on ColumnStore.
      * @param mode the Spark SaveMode - ErrorIfExists, Append, Overwrite, Ignore
-     * @param writeTimeout Maximum time to wait for write of each partition to complete
+     * @param options various IngestionOptions, such as timeouts, version to write to, etc.
      */
     def saveAsFilo(df: DataFrame,
                    dataset: String,
                    rowKeys: Seq[String],
                    segmentKey: String,
                    partitionKeys: Seq[String],
-                   version: Int = 0,
-                   chunkSize: Option[Int] = None,
+                   database: Option[String] = None,
                    mode: SaveMode = SaveMode.Append,
-                   writeTimeout: FiniteDuration = DefaultWriteTimeout,
-                   flushAfterInsert: Boolean = true): Unit = {
-      createOrUpdateDataset(df.schema, dataset, rowKeys, segmentKey, partitionKeys, chunkSize, mode)
-      insertIntoFilo(df, dataset, version, mode == SaveMode.Overwrite, writeTimeout, flushAfterInsert)
+                   options: IngestionOptions = IngestionOptions()): Unit = {
+      val IngestionOptions(version, chunkSize, writeTimeout, flushAfterInsert) = options
+      val ref = DatasetRef(dataset, database)
+      createOrUpdateDataset(df.schema, ref, rowKeys, segmentKey, partitionKeys, chunkSize, mode)
+      insertIntoFilo(df, dataset, version, mode == SaveMode.Overwrite,
+                     database, writeTimeout, flushAfterInsert)
     }
 
     /**
@@ -277,14 +292,16 @@ package object spark extends StrictLogging {
      * @param overwrite if true, first truncate the dataset before writing
      */
     def insertIntoFilo(df: DataFrame,
-                       dataset: String,
+                       datasetName: String,
                        version: Int = 0,
                        overwrite: Boolean = false,
+                       database: Option[String] = None,
                        writeTimeout: FiniteDuration = DefaultWriteTimeout,
                        flushAfterInsert: Boolean = true): Unit = {
       val filoConfig = FiloSetup.initAndGetConfig(sqlContext.sparkContext)
       val dfColumns = dfToFiloColumns(df)
       val columnNames = dfColumns.map(_.name)
+      val dataset = DatasetRef(datasetName, database)
       checkAndAddColumns(dfColumns, dataset, version)
 
       if (overwrite) {

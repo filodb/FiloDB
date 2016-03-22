@@ -54,6 +54,8 @@ trait MetaStore {
    */
   def getDataset(ref: DatasetRef): Future[Dataset]
 
+  def getDataset(dataset: String): Future[Dataset] = getDataset(DatasetRef(dataset))
+
   /**
    * Retrieves the names of all datasets registered in the metastore
    * @param database the name of the database/keyspace to initialize the MetaStore for.  May be ignored by

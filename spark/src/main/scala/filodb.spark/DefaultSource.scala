@@ -3,6 +3,8 @@ package filodb.spark
 import org.apache.spark.sql.{DataFrame, SaveMode, SQLContext}
 import org.apache.spark.sql.sources._
 
+import filodb.core.DatasetRef
+
 /**
  * DefaultSource implements the Spark Dataframe read() and write() API for FiloDB.
  * This also enables Spark SQL / JDBC "CREATE TABLE" DDLs without any use of Scala.
@@ -16,15 +18,17 @@ class DefaultSource extends RelationProvider with CreatableRelationProvider {
    * Implements dataframe.read() functionality.
    * Parameters:
    *   dataset
+   *   database         defaults to filodb.cassandra.keyspace
    *   version          defaults to 0
    *   splits_per_node  defaults to 4, the number of splits or read threads per node
    */
   def createRelation(sqlContext: SQLContext, parameters: Map[String, String]): BaseRelation = {
     // dataset is a mandatory parameter.  Need to know the name.
     val dataset = parameters.getOrElse("dataset", sys.error("'dataset' must be specified for FiloDB."))
+    val database = parameters.get("database")
     val version = parameters.getOrElse("version", "0").toInt
     val splitsPerNode = parameters.getOrElse("splits_per_node", DefaultSplitsPerNode).toInt
-    FiloRelation(dataset, version, splitsPerNode = splitsPerNode)(sqlContext)
+    FiloRelation(DatasetRef(dataset, database), version, splitsPerNode = splitsPerNode)(sqlContext)
   }
 
   /**
@@ -32,6 +36,7 @@ class DefaultSource extends RelationProvider with CreatableRelationProvider {
    * Note: SaveMode.Overwrite means to create a new dataset
    * Parameters:
    *   dataset
+   *   database         defaults to filodb.cassandra.keyspace
    *   version          defaults to 0
    *   row_keys         comma-separated list of row keys
    *   segment_key
@@ -45,6 +50,7 @@ class DefaultSource extends RelationProvider with CreatableRelationProvider {
       parameters: Map[String, String],
       data: DataFrame): BaseRelation = {
     val dataset = parameters.getOrElse("dataset", sys.error("'dataset' must be specified for FiloDB."))
+    val database = parameters.get("database")
     val version = parameters.getOrElse("version", "0").toInt
     val rowKeys = parameters.get("row_keys").map(_.split(',').toSeq).getOrElse(Nil)
     val segKey  = parameters.getOrElse("segment_key", ":string /0")
@@ -52,13 +58,11 @@ class DefaultSource extends RelationProvider with CreatableRelationProvider {
     val chunkSize = parameters.get("chunk_size").map(_.toInt)
     val flushAfter = parameters.get("flush_after_write").map(_.toBoolean).getOrElse(true)
 
-    sqlContext.saveAsFilo(data, dataset,
-                          rowKeys, segKey, partitionKeys, version,
-                          chunkSize, mode,
-                          flushAfterInsert = flushAfter)
+    val options = IngestionOptions(version, chunkSize, flushAfterInsert = flushAfter)
+    sqlContext.saveAsFilo(data, dataset, rowKeys, segKey, partitionKeys, database, mode, options)
 
     // The below is inefficient as it reads back the schema that was written earlier - though it shouldn't
     // take very long
-    FiloRelation(dataset, version)(sqlContext)
+    FiloRelation(DatasetRef(dataset, database), version)(sqlContext)
   }
 }

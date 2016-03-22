@@ -43,7 +43,7 @@ with Matchers with ScalaFutures {
   val columnStore = FiloSetup.columnStore
 
   override def beforeAll() {
-    metaStore.initialize().futureValue
+    metaStore.initialize("unittest").futureValue
     columnStore.initializeProjection(largeDataset.projections.head).futureValue
   }
 
@@ -53,7 +53,7 @@ with Matchers with ScalaFutures {
   }
 
   before {
-    metaStore.clearAllData().futureValue
+    metaStore.clearAllData("unittest").futureValue
     columnStore.clearSegmentCache()
     try {
       columnStore.clearProjectionData(largeDataset.projections.head).futureValue
