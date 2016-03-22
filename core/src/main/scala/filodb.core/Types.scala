@@ -41,7 +41,7 @@ object Types {
 // database is like Cassandra keyspace, or HiveMetaStore/RDBMS database - a namespace for tables
 case class DatasetRef(dataset: String, database: Option[String] = None) {
   override def toString: String =
-    database.map { db => s"$database.$dataset" }.getOrElse(dataset)
+    database.map { db => s"$db.$dataset" }.getOrElse(dataset)
 }
 
 // A range of keys, used for describing ingest rows as well as queries

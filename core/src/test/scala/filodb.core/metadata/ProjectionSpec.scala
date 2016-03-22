@@ -71,6 +71,13 @@ class ProjectionSpec extends FunSpec with Matchers {
       partFunc(names.map(TupleRowReader).head) should equal (Dataset.DefaultPartitionKey)
     }
 
+    it("should change database with withDatabase") {
+      val prj = RichProjection(dataset, schema)
+      prj.datasetRef.database should equal (None)
+
+      prj.withDatabase("db2").datasetRef.database should equal (Some("db2"))
+    }
+
     it("apply() should throw exception for bad schema") {
       intercept[BadSchemaError] { RichProjection(Dataset("a", "boo", "seg"), schema) }
     }

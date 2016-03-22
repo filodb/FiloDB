@@ -26,16 +26,20 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
   val config = ConfigFactory.load("application_test.conf").getConfig("filodb")
   def colStore: CachedMergingColumnStore
 
+  val projectionDb2 = projection.withDatabase("unittest2")
+
   // First create the tables in C*
   override def beforeAll() {
     super.beforeAll()
     colStore.initializeProjection(dataset.projections.head).futureValue
     colStore.initializeProjection(GdeltTestData.dataset2.projections.head).futureValue
+    colStore.initializeProjection(projectionDb2.projection).futureValue
   }
 
   before {
     colStore.clearProjectionData(dataset.projections.head).futureValue
     colStore.clearProjectionData(GdeltTestData.dataset2.projections.head).futureValue
+    colStore.clearProjectionData(projectionDb2.projection).futureValue
     colStore.clearSegmentCache()
   }
 
@@ -223,6 +227,26 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
     // check that can read from same segment again
     whenReady(colStore.scanRows(projection, schema, 0, FilteredPartitionScan(paramSet.head))) { rowIter =>
       rowIter.map(_.getLong(2)).toSeq should equal (Seq(24L, 25L, 28L, 29L, 39L, 40L))
+    }
+  }
+
+  it should "read back rows written in another database" in {
+    val segment = getRowWriter()
+    segment.addRowsAsChunk(mapper(names))
+    whenReady(colStore.appendSegment(projectionDb2, segment, 0)) { response =>
+      response should equal (Success)
+    }
+
+    val paramSet = colStore.getScanSplits(datasetRef, 1)
+    paramSet should have length (1)
+
+    whenReady(colStore.scanRows(projectionDb2, schema, 0, FilteredPartitionScan(paramSet.head))) { rowIter =>
+      rowIter.map(_.getLong(2)).toSeq should equal (Seq(24L, 25L, 28L, 29L, 39L, 40L))
+    }
+
+    // Check that original keyspace/database has no data
+    whenReady(colStore.scanSegments(projection, schema, 0, partScan)) { segIter =>
+      segIter.toSeq should have length (0)
     }
   }
 

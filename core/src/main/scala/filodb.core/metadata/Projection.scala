@@ -32,6 +32,12 @@ case class Projection(id: Int,
     s"  Key columns: ${keyColIds.mkString(", ")}\n" +
     s"  Segment column: $segmentColId\n" +
     s"  Projection columns: ${columns.mkString(", ")}"
+
+  /**
+   * Returns a new Projection with the specified database and everything else kept the same
+   */
+  def withDatabase(database: String): Projection =
+    this.copy(dataset = this.dataset.copy(database = Some(database)))
 }
 
 /**
@@ -57,6 +63,12 @@ case class RichProjection(projection: Projection,
 
   def datasetName: String = projection.dataset.toString
   def datasetRef: DatasetRef = projection.dataset
+
+  /**
+   * Returns a new RichProjection with the specified database and everything else kept the same
+   */
+  def withDatabase(database: String): RichProjection =
+    this.copy(projection = this.projection.withDatabase(database))
 
   def segmentKeyFunc: RowReader => SK =
     segmentType.getKeyFunc(Array(segmentColIndex))
