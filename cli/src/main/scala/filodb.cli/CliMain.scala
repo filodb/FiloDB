@@ -89,7 +89,7 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
           require(args.segmentKey.isDefined, "--segmentKey must be defined")
           require(args.rowKeys.nonEmpty, "--rowKeys must be defined")
           val datasetName = args.dataset.get
-          createDatasetAndColumns(datasetName, args.toColumns(datasetName, version),
+          createDatasetAndColumns(getRef(args), args.toColumns(datasetName, version),
                                   args.rowKeys,
                                   args.segmentKey.get,
                                   if (args.partitionKeys.isEmpty) { Seq(Dataset.DefaultPartitionColumn) }
@@ -154,7 +154,7 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
     }
   }
 
-  def createDatasetAndColumns(dataset: String,
+  def createDatasetAndColumns(dataset: DatasetRef,
                               columns: Seq[DataColumn],
                               rowKeys: Seq[String],
                               segmentKey: String,

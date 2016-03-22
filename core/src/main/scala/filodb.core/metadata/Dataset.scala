@@ -72,15 +72,14 @@ object Dataset {
             keyColumns: Seq[String],
             segmentColumn: String,
             partitionColumns: Seq[String]): Dataset =
-    Dataset(name, Seq(Projection(0, DatasetRef(name), keyColumns, segmentColumn)), partitionColumns)
+    Dataset(DatasetRef(name), keyColumns, segmentColumn, partitionColumns)
 
-  def apply(name: String,
+  def apply(ref: DatasetRef,
             keyColumns: Seq[String],
             segmentColumn: String,
-            partitionColumns: Seq[String],
-            database: String): Dataset =
-    Dataset(name,
-            Seq(Projection(0, DatasetRef(name, Some(database)), keyColumns, segmentColumn)),
+            partitionColumns: Seq[String]): Dataset =
+    Dataset(ref.dataset,
+            Seq(Projection(0, ref, keyColumns, segmentColumn)),
             partitionColumns)
 
   def apply(name: String, keyColumn: String, segmentColumn: String): Dataset =
