@@ -153,5 +153,15 @@ class ProjectionSpec extends FunSpec with Matchers {
       readOnlyProj.segmentType should equal (StringKeyType)
       readOnlyProj.columns should equal (Nil)
     }
+
+    it("should deserialize readOnlyProjectionStrings with database specified") {
+      val ref = DatasetRef("a", Some("db2"))
+      val multiDataset = Dataset(ref, Seq("age"), ":string /0", Seq("first", ":getOrElse last --"))
+      val proj = RichProjection(multiDataset, schema)
+      val serialized = proj.toReadOnlyProjString(Nil)
+      val readOnlyProj = RichProjection.readOnlyFromString(serialized)
+
+      readOnlyProj.datasetRef should equal (ref)
+    }
   }
 }

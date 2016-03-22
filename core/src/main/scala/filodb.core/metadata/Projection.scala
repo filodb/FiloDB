@@ -245,7 +245,12 @@ object RichProjection extends StrictLogging {
       Nil
     }
     val segmentColumn = DataColumn.fromString(segStr, dsName)
-    val dataset = Dataset(dsName, Nil, segmentColumn.name, partitionColumns.map(_.name))
+    val dsNameParts = dsName.split('.').toSeq
+    val ref = dsNameParts match {
+      case Seq(db, ds) => DatasetRef(ds, Some(db))
+      case Seq(ds)     => DatasetRef(ds)
+    }
+    val dataset = Dataset(ref, Nil, segmentColumn.name, partitionColumns.map(_.name))
 
     RichProjection(dataset.projections.head, dataset, extraColumns,
                    segmentColumn, -1, Column.columnsToKeyType(Seq(segmentColumn)),
