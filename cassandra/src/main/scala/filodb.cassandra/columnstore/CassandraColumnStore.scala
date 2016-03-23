@@ -66,6 +66,7 @@ extends CachedMergingColumnStore with CassandraColumnStoreScanner with StrictLog
    */
   def initializeProjection(projection: Projection): Future[Response] = {
     val chunkTable = getOrCreateChunkTable(projection.dataset)
+    clusterConnector.createKeyspace(chunkTable.keySpace.name)
     val rowMapTable = getOrCreateRowMapTable(projection.dataset)
     for { ctResp                    <- chunkTable.initialize()
           rmtResp                   <- rowMapTable.initialize() } yield { rmtResp }
