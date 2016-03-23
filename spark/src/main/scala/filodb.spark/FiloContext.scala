@@ -51,6 +51,7 @@ class FiloContext(val sqlContext: SQLContext) extends AnyVal {
                                            segmentKey: String,
                                            partitionKeys: Seq[String],
                                            chunkSize: Option[Int] = None,
+                                           resetSchema: Boolean = false,
                                            mode: SaveMode = SaveMode.Append): Unit = {
     FiloSetup.init(sqlContext.sparkContext)
     val partKeys = if (partitionKeys.nonEmpty) partitionKeys else Seq(Dataset.DefaultPartitionColumn)
@@ -67,7 +68,7 @@ class FiloContext(val sqlContext: SQLContext) extends AnyVal {
         createNewDataset(ds)
       case (Some(dsObj), SaveMode.ErrorIfExists) =>
         throw new RuntimeException(s"Dataset $dataset already exists!")
-      case (Some(dsObj), SaveMode.Overwrite) =>
+      case (Some(dsObj), SaveMode.Overwrite) if resetSchema =>
         val ds = makeAndVerifyDataset(dataset, rowKeys, segmentKey, partKeys, chunkSize, dfColumns)
         deleteDataset(dataset)
         createNewDataset(ds)
@@ -114,9 +115,10 @@ class FiloContext(val sqlContext: SQLContext) extends AnyVal {
                  database: Option[String] = None,
                  mode: SaveMode = SaveMode.Append,
                  options: IngestionOptions = IngestionOptions()): Unit = {
-    val IngestionOptions(version, chunkSize, writeTimeout, flushAfterInsert) = options
+    val IngestionOptions(version, chunkSize, writeTimeout,
+                         flushAfterInsert, resetSchema) = options
     val ref = DatasetRef(dataset, database)
-    createOrUpdateDataset(df.schema, ref, rowKeys, segmentKey, partitionKeys, chunkSize, mode)
+    createOrUpdateDataset(df.schema, ref, rowKeys, segmentKey, partitionKeys, chunkSize, resetSchema, mode)
     insertIntoFilo(df, dataset, version, mode == SaveMode.Overwrite,
                    database, writeTimeout, flushAfterInsert)
   }

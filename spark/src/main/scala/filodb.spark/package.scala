@@ -28,11 +28,14 @@ package spark {
    * @param chunkSize an optionally different chunkSize to set new dataset to use
    * @param writeTimeout Maximum time to wait for write of each partition to complete
    * @param flushAfterInsert if true, ensure all data is flushed in memtables at end of ingestion
+   * @param resetSchema if true, allows dataset schema (eg partition keys) to be reset when overwriting
+   *          an existing dataset
    */
   case class IngestionOptions(version: Int = 0,
                               chunkSize: Option[Int] = None,
                               writeTimeout: FiniteDuration = DefaultWriteTimeout,
-                              flushAfterInsert: Boolean = true)
+                              flushAfterInsert: Boolean = true,
+                              resetSchema: Boolean = false)
 
 }
 

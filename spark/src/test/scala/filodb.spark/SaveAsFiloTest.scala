@@ -154,6 +154,7 @@ with Matchers with ScalaFutures {
                    option("row_keys", "not_a_col").
                    option("segment_key", segCol).
                    option("partition_keys", ":fooMucnhkin 123").
+                   option("reset_schema", "true").
                    mode(SaveMode.Overwrite).
                    save()
     }
@@ -231,7 +232,7 @@ with Matchers with ScalaFutures {
                  save()
 
     // Data is different, should not append, should overwrite
-    // Also try changing one of the keys and ensure dataset is rewritten
+    // Also try changing one of the keys.  If no reset_schema, then seg key not changed.
     val newSegCol = ":string AA"
     dataDF2.write.format("filodb.spark").
                  option("dataset", "gdelt1").
@@ -244,7 +245,18 @@ with Matchers with ScalaFutures {
     df.agg(sum("year")).collect().head(0) should equal (4032)
 
     val dsObj = metaStore.getDataset(DatasetRef("gdelt1")).futureValue
-    dsObj.projections.head.segmentColId should equal (newSegCol)
+    dsObj.projections.head.segmentColId should equal (segCol)
+
+    dataDF2.write.format("filodb.spark").
+                 option("dataset", "gdelt1").
+                 option("row_keys", "id").
+                 option("segment_key", newSegCol).
+                 option("reset_schema", "true").
+                 mode(SaveMode.Overwrite).
+                 save()
+
+    val dsObj2 = metaStore.getDataset(DatasetRef("gdelt1")).futureValue
+    dsObj2.projections.head.segmentColId should equal (newSegCol)
 
     // Also try overwriting with insert API
     sql.insertIntoFilo(dataDF2, "gdelt1", overwrite = true)
