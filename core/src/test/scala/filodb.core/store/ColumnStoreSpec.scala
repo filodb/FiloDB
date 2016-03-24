@@ -219,6 +219,11 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
     whenReady(colStore.scanRows(projection, schema, 0, FilteredPartitionScan(paramSet.head))) { rowIter =>
       rowIter.map(_.getLong(2)).toSeq should equal (Seq(24L, 25L, 28L, 29L, 39L, 40L))
     }
+
+    // check that can read from same segment again
+    whenReady(colStore.scanRows(projection, schema, 0, FilteredPartitionScan(paramSet.head))) { rowIter =>
+      rowIter.map(_.getLong(2)).toSeq should equal (Seq(24L, 25L, 28L, 29L, 39L, 40L))
+    }
   }
 
   it should "read back rows written with multi-column row keys" in {

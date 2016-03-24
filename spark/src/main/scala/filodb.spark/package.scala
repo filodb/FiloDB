@@ -244,9 +244,10 @@ package object spark extends StrictLogging {
                    version: Int = 0,
                    chunkSize: Option[Int] = None,
                    mode: SaveMode = SaveMode.Append,
-                   writeTimeout: FiniteDuration = DefaultWriteTimeout): Unit = {
+                   writeTimeout: FiniteDuration = DefaultWriteTimeout,
+                   flushAfterInsert: Boolean = true): Unit = {
       createOrUpdateDataset(df.schema, dataset, rowKeys, segmentKey, partitionKeys, chunkSize, mode)
-      insertIntoFilo(df, dataset, version, mode == SaveMode.Overwrite, writeTimeout)
+      insertIntoFilo(df, dataset, version, mode == SaveMode.Overwrite, writeTimeout, flushAfterInsert)
     }
 
     /**
@@ -259,7 +260,8 @@ package object spark extends StrictLogging {
                        dataset: String,
                        version: Int = 0,
                        overwrite: Boolean = false,
-                       writeTimeout: FiniteDuration = DefaultWriteTimeout): Unit = {
+                       writeTimeout: FiniteDuration = DefaultWriteTimeout,
+                       flushAfterInsert: Boolean = true): Unit = {
       val filoConfig = FiloSetup.initAndGetConfig(sqlContext.sparkContext)
       val dfColumns = dfToFiloColumns(df)
       val columnNames = dfColumns.map(_.name)
@@ -282,6 +284,15 @@ package object spark extends StrictLogging {
                       writeTimeout, index)
         Iterator.empty
       }.count()
+
+      // Ensure a flush of memtable after a potentially large ingestion?  But for streaming we might not want
+      // a flush every single time. TODO(velvia): make this configurable
+      if (flushAfterInsert) {
+        actorAsk(FiloSetup.coordinatorActor, Flush(dataset, version)) {
+          case Flushed =>
+          case other: Any => logger.warn(s"Could not finish flushing data!  $other")
+        }
+      }
     }
   }
 }

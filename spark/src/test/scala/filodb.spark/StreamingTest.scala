@@ -78,6 +78,8 @@ with Matchers with ScalaFutures {
           option("row_keys", "age").
           option("segment_key", ":string 0").
           option("partition_keys", "league").
+          // Flushing after each small batch would be very inefficient...
+          option("flush_after_write", "false").
           mode(SaveMode.Append).save()
     }
     ssc.start()

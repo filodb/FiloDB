@@ -87,7 +87,8 @@ extends CachedMergingColumnStore with InMemoryColumnStoreScanner with StrictLogg
           chunkTree.subMap((colName, segId, 0), true, (colName, segId, Int.MaxValue), true)
                    .entrySet.iterator.foreach { entry =>
             val (_, _, chunkId) = entry.getKey
-            segment.addChunk(chunkId, colName, entry.getValue)
+            // NOTE: extremely important to duplicate the ByteBuffer, because of mutable state / multi threading
+            segment.addChunk(chunkId, colName, entry.getValue.duplicate)
           }
         }
         segment
@@ -139,7 +140,8 @@ trait InMemoryColumnStoreScanner extends ColumnStoreScanner {
       val it = chunkTree.subMap(startKey, true, endKey, !keyRange.endExclusive).entrySet.iterator
       val chunkList = it.toSeq.map { entry =>
         val (colId, segmentId, chunkId) = entry.getKey
-        (segmentId, chunkId, entry.getValue)
+        // NOTE: extremely important to duplicate the ByteBuffer, because of mutable state / multi threading
+        (segmentId, chunkId, entry.getValue.duplicate)
       }
       ChunkedData(column, chunkList)
     }
@@ -193,7 +195,8 @@ trait InMemoryColumnStoreScanner extends ColumnStoreScanner {
     val segIndices = partAndMaps.flatMap { case (binPart, rowMap) =>
       rowMap.entrySet.iterator.map { entry =>
         val (chunkIds, rowNums, nextChunkId) = entry.getValue
-        val info = (binPart, entry.getKey, new BinaryChunkRowMap(chunkIds, rowNums, nextChunkId))
+        val info = (binPart, entry.getKey, new BinaryChunkRowMap(chunkIds.duplicate,
+                                                                 rowNums.duplicate, nextChunkId))
         toSegIndex(projection, info)
       }
     }

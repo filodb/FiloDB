@@ -4,7 +4,8 @@ env:
    _JAVA_OPTIONS="-Dakka.test.timefactor=3 -XX:MaxMetaspaceSize=256m"
 scala:
   - 2.10.4
-services:
-  - cassandra
 jdk:
   - oraclejdk8
+services:
+  - cassandra
+sudo: required
