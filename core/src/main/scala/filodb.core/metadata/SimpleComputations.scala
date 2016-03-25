@@ -14,6 +14,10 @@ object SimpleComputations {
   import SingleKeyTypes._
   import Column.ColumnType._
 
+  /**
+   * Syntax: :string <constStringValue>
+   * Produces a StringColumn with a single constant value
+   */
   object ConstStringComputation extends ColumnComputation {
     def funcName: String = "string"
 

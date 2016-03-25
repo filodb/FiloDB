@@ -51,4 +51,30 @@ object TimeComputations {
       }
     }
   }
+
+  /**
+   * Syntax: :monthOfYear <colName>
+   * Valid for: LongColumn, TimestampColumn
+   * Produces an IntColumn with values between 1 and 12 for the month of the timestamp/long original col
+   */
+  object MonthOfYearComputation extends SingleColumnComputation {
+    def funcName: String = "monthOfYear"
+
+    def analyze(expr: String,
+                dataset: String,
+                schema: Seq[Column]): ComputedColumn Or InvalidComputedColumnSpec = {
+      for { args <- fixedNumArgs(expr, 1)
+            sourceColIndex <- columnIndex(schema, args(0))
+            sourceColType <- validatedColumnType(schema, sourceColIndex, Set(LongColumn, TimestampColumn)) }
+      yield {
+        val info = SingleColumnInfo(args(0), "", sourceColIndex, sourceColType)
+        val func = (info.colType match {
+          case LongColumn      => (l: Long) => new DateTime(l).getMonthOfYear
+          case TimestampColumn => (t: Timestamp) => new DateTime(t).getMonthOfYear
+          case o: Column.ColumnType => ???
+        }).asInstanceOf[info.keyType.T => Int]
+        computedColumnWithDefault(expr, dataset, info, IntColumn, IntKeyType)(-1)(func)
+      }
+    }
+  }
 }

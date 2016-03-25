@@ -28,6 +28,7 @@ object ComputedColumn {
                             GetOrElseComputation,
                             RoundComputation,
                             TimesliceComputation,
+                            MonthOfYearComputation,
                             StringPrefixComputation)
   val nameToComputation = AllComputations.map { comp => comp.funcName -> comp }.toMap
 

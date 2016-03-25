@@ -119,6 +119,16 @@ class ComputedColumnSpec extends FunSpec with Matchers {
     }
   }
 
+  describe(":monthOfYear") {
+    it("should return month of year for timestamp column") {
+      val tsDataset = Dataset("a", ":monthOfYear ts", ":string /0")
+      val tsColumn = DataColumn(0, "ts", "a", 0, Column.ColumnType.TimestampColumn)
+      val proj = RichProjection(tsDataset, Seq(tsColumn))
+
+      proj.rowKeyFunc(TupleRowReader((Some(new Timestamp(300001L)), None))) should equal (12)
+    }
+  }
+
   describe(":stringPrefix") {
     it("should take string prefix") {
       val proj = RichProjection(dataset.copy(partitionColumns = Seq(":stringPrefix first 2")), schema)
