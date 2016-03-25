@@ -22,6 +22,7 @@ case class ComputedColumn(id: Int,
 
 object ComputedColumn {
   import SimpleComputations._
+  import TimeComputations._
 
   val AllComputations = Seq(ConstStringComputation,
                             GetOrElseComputation,
