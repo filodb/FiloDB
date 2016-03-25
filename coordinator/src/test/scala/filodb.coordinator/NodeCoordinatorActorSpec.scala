@@ -36,14 +36,14 @@ with CoordinatorSetup with ScalaFutures {
 
   override def beforeAll() {
     super.beforeAll()
-    metaStore.initialize().futureValue
+    metaStore.initialize("unittest").futureValue
   }
 
   var coordActor: ActorRef = _
   var probe: TestProbe = _
 
   before {
-    metaStore.clearAllData().futureValue
+    metaStore.clearAllData("unittest").futureValue
     coordActor = system.actorOf(NodeCoordinatorActor.props(metaStore, reprojector, columnStore, config))
     probe = TestProbe()
   }
@@ -54,7 +54,8 @@ with CoordinatorSetup with ScalaFutures {
 
   def createTable(dataset: Dataset, columns: Seq[DataColumn]): Unit = {
     metaStore.newDataset(dataset).futureValue should equal (Success)
-    columns.foreach { col => metaStore.newColumn(col).futureValue should equal (Success) }
+    val ref = DatasetRef(dataset.name)
+    columns.foreach { col => metaStore.newColumn(col, ref).futureValue should equal (Success) }
   }
 
   val colNames = schema.map(_.name)
@@ -63,23 +64,23 @@ with CoordinatorSetup with ScalaFutures {
     it("should return UnknownDataset when dataset missing or no columns defined") {
       createTable(Dataset("noColumns", "noSort", "seg"), Nil)
 
-      coordActor ! SetupIngestion("none", colNames, 0)
+      coordActor ! SetupIngestion(DatasetRef("none"), colNames, 0)
       expectMsg(UnknownDataset)
 
-      coordActor ! SetupIngestion("noColumns", colNames, 0)
+      coordActor ! SetupIngestion(DatasetRef("noColumns"), colNames, 0)
       expectMsg(UndefinedColumns(colNames.toSet))
     }
 
     it("should return UndefinedColumns if trying to ingest undefined columns") {
       createTable(dataset1, schema)
 
-      probe.send(coordActor, SetupIngestion(dataset1.name, Seq("MonthYear", "last"), 0))
+      probe.send(coordActor, SetupIngestion(projection1.datasetRef, Seq("MonthYear", "last"), 0))
       probe.expectMsg(UndefinedColumns(Set("last")))
     }
 
     it("should return BadSchema if dataset definition bazooka") {
       createTable(dataset1.copy(partitionColumns = Seq("foo")), schema)
-      probe.send(coordActor, SetupIngestion(dataset1.name, colNames, 0))
+      probe.send(coordActor, SetupIngestion(projection1.datasetRef, colNames, 0))
       probe.expectMsgClass(classOf[BadSchema])
     }
 
@@ -87,7 +88,7 @@ with CoordinatorSetup with ScalaFutures {
       createTable(dataset1, schema)
 
       val probes = (1 to 8).map { n => TestProbe() }
-      probes.foreach { probe => probe.send(coordActor, SetupIngestion(dataset1.name, colNames, 0)) }
+      probes.foreach { probe => probe.send(coordActor, SetupIngestion(projection1.datasetRef, colNames, 0)) }
       probes.foreach { probe => probe.expectMsg(IngestionReady) }
     }
   }
@@ -97,21 +98,22 @@ with CoordinatorSetup with ScalaFutures {
     probe.expectMsg(DatasetCreated)
     columnStore.clearProjectionData(dataset3.projections.head).futureValue should equal (Success)
 
-    probe.send(coordActor, SetupIngestion(dataset3.name, schema.map(_.name), 0))
+    val ref = projection3.datasetRef
+    probe.send(coordActor, SetupIngestion(ref, schema.map(_.name), 0))
     probe.expectMsg(IngestionReady)
 
-    probe.send(coordActor, CheckCanIngest(dataset3.name, 0))
+    probe.send(coordActor, CheckCanIngest(ref, 0))
     probe.expectMsg(CanIngest(true))
 
-    probe.send(coordActor, IngestRows(dataset3.name, 0, readers, 1L))
+    probe.send(coordActor, IngestRows(ref, 0, readers, 1L))
     probe.expectMsg(Ack(1L))
 
     // Now, try to flush and check that stuff was written to columnstore...
     // Note that once we receive the Flushed message back, that means flush cycle was completed.
-    probe.send(coordActor, Flush(dataset3.name, 0))
+    probe.send(coordActor, Flush(ref, 0))
     probe.expectMsg(Flushed)
 
-    probe.send(coordActor, GetIngestionStats(dataset3.name, 0))
+    probe.send(coordActor, GetIngestionStats(ref, 0))
     probe.expectMsg(DatasetCoordinatorActor.Stats(1, 1, 0, 0, -1))
 
     // Now, read stuff back from the column store and check that it's all there
@@ -124,7 +126,7 @@ with CoordinatorSetup with ScalaFutures {
       readSeg.rowIterator().map(_.getInt(6)).sum should equal (80)
     }
 
-    val splits = columnStore.getScanSplits(dataset3.name, 1)
+    val splits = columnStore.getScanSplits(ref, 1)
     splits should have length (1)
     whenReady(columnStore.scanRows(projection3, schema, 0, FilteredPartitionScan(splits.head))) { rowIter =>
       rowIter.map(_.getInt(6)).sum should equal (492)
@@ -136,17 +138,18 @@ with CoordinatorSetup with ScalaFutures {
     probe.expectMsg(DatasetCreated)
     columnStore.clearProjectionData(dataset1.projections.head).futureValue should equal (Success)
 
-    probe.send(coordActor, SetupIngestion(dataset1.name, schema.map(_.name), 0))
+    val ref = projection1.datasetRef
+    probe.send(coordActor, SetupIngestion(ref, schema.map(_.name), 0))
     probe.expectMsg(IngestionReady)
 
     EventFilter[NullKeyValue](occurrences = 1) intercept {
-      probe.send(coordActor, IngestRows(dataset1.name, 0, readers, 1L))
+      probe.send(coordActor, IngestRows(ref, 0, readers, 1L))
       // This should trigger an error, and datasetCoordinatorActor will stop, and no ack will be forthcoming.
       probe.expectNoMsg
     }
 
     // Now, if we send more rows, we will get UnknownDataset
-    probe.send(coordActor, IngestRows(dataset1.name, 0, readers, 1L))
+    probe.send(coordActor, IngestRows(ref, 0, readers, 1L))
     probe.expectMsg(UnknownDataset)
   }
 }

@@ -62,7 +62,9 @@ FiloDB is a new open-source distributed, versioned, and columnar analytical data
 
 * **High performance** - competitive with Parquet scan speeds, plus filtering along two or more dimensions
   - Very flexible filtering: filter on only part of a partition key, much more flexible than allowed in Cassandra
+  - Much faster bulk ingestion than raw Cassandra tables
 * **Compact storage** - within 35% of Parquet for CassandraColumnStore
+  - Up to 27x more data stored per GB, compared to Cassandra 2.x, in real world fact table storage
   - See the blog post on [Apache Cassandra for analytics: a performance and storage analysis](https://www.oreilly.com/ideas/apache-cassandra-for-analytics-a-performance-and-storage-analysis)
 * **Idempotent writes** - primary-key based appends and updates; easy exactly-once ingestion from streaming sources
 * **Distributed** - pluggable storage engine includes Apache Cassandra and in-memory
@@ -173,6 +175,7 @@ You may specify a function, or computed column, for use with any key column.  Th
 | round     | rounds down a numeric column.  Useful for bucketing by time or bucketing numeric IDs.  | `:round timestamp 10000` |
 | stringPrefix | takes the first N chars of a string; good for partitioning | `:stringPrefix token 4` |
 | timeslice | bucketizes a Long (millisecond) or Timestamp column using duration strings - 500ms, 5s, 10m, 3h, etc. | `:timeslice arrivalTime 30s` |
+| monthOfYear | return 1 to 12 (IntColumn) for the month number of a Long (millisecond) or Timestamp column | `:monthOfYear pickup_datetime` |
 
 ### FiloDB vs Cassandra Data Modelling
 
@@ -258,10 +261,12 @@ The options to use with the data-source api are:
 | option           | value                                                            | command    | optional |
 |------------------|------------------------------------------------------------------|------------|----------|
 | dataset          | name of the dataset                                              | read/write | No       |
+| database         | name of the database to use for the dataset.  For Cassandra, defaults to `filodb.cassandra.keyspace` config.  | read/write | Yes |
 | row_keys         | comma-separated list of column name(s) or computed column functions to use for the row primary key within each partition.  Cannot be null.  Use `:getOrElse` function if null values might be encountered.  | write      | No if mode is OverWrite or creating dataset for first time  |
 | segment_key      | name of the column (could be computed) to use to group rows into segments in a partition.  Cannot be null.  Use `:getOrElse` function if null values might be encountered.  | write      | yes - defaults to `:string /0` |
 | partition_keys   | comma-separated list of column name(s) or computed column functions to use for the partition key.  Cannot be null.  Use `:getOrElse` function if null values might be encountered.  If not specified, defaults to `:string /0` (a single partition).  | write      | Yes      |
 | splits_per_node  | number of read threads per node, defaults to 4 | read | Yes |
+| reset_schema     | If true, allows dataset schema (eg partition keys) to be redefined for an existing dataset when SaveMode.Overwrite is used.  Defaults to false.  | write | Yes |
 | chunk_size       | Max number of rows to put into one chunk.  Note that this only has an effect if the dataset is created for the first time.| write | Yes |
 | flush_after_write | initiates a memtable flush after Spark INSERT / DataFrame.write;  this ensures all the rows are flushed to ColumnStore.  Might want to be turned off for streaming  | write | yes - default true |
 | version          | numeric version of data to write, defaults to 0  | read/write | Yes |
@@ -282,8 +287,10 @@ However, note that the above methods will lead to a physical column being create
 Some options must be configured before starting the Spark Shell or Spark application.  There are two methods:
 
 1. Modify the `application.conf` and rebuild, or repackage a new configuration.
-2. Override the built in defaults by setting SparkConf configuration values, preceding the filo settings with `spark.filodb`.  For example, to change the keyspace, pass `--conf spark.filodb.cassandra.keyspace=mykeyspace` to Spark Shell/Submit.  To use the fast in-memory column store instead of Cassandra, pass `--conf spark.filodb.store=in-memory`.
+2. Override the built in defaults by setting SparkConf configuration values, preceding the filo settings with `spark.filodb`.  For example, to change the default keyspace, pass `--conf spark.filodb.cassandra.keyspace=mykeyspace` to Spark Shell/Submit.  To use the fast in-memory column store instead of Cassandra, pass `--conf spark.filodb.store=in-memory`.
 3. It might be easier to pass in an entire configuration file to FiloDB.  Pass the java option `-Dconfig.file=/path/to/my-filodb.conf`, for example using `--java-driver-options`.
+
+Note that if Cassandra is kept as the default column store, the keyspace can be changed on each transaction by specifying the `database` option in the data source API, or the database parameter in the Scala API.
 
 ### Spark Data Source API Example (spark-shell)
 
@@ -360,6 +367,8 @@ sqlContext.saveAsFilo(df, "gdelt",
 
 The above creates the gdelt table based on the keys above, and also inserts data from the dataframe df.
 
+Please see the ScalaDoc for the method for more details -- there is a `database` option for specifying the Cassandra keyspace, and a `mode` option for specifying the Spark SQL SaveMode.
+
 There is also an API purely for inserting data... after all, specifying the keys is not needed when inserting into an existing table.
 
 ```scala
@@ -371,6 +380,7 @@ The API for creating a DataFrame is also much more concise:
 
 ```scala
 val df = sqlContext.filoDataset("gdelt")
+val df2 = sqlContext.filoDataset("gdelt", database = Some("keyspace2"))
 ```
 
 The above method calls rely on an implicit conversion. From Java, you would need to create a new `FiloContext` first:
@@ -463,6 +473,7 @@ The `filo-cli` accepts arguments as key-value pairs. The following keys are supp
 | key          | purpose                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 |--------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | dataset    | It is required for all the operations. Its value should be the name of the dataset                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| database   | Specifies the "database" the dataset should operate in.  For Cassandra, this is the keyspace.  If not specified, uses config value.  |
 | limit      | This is optional key to be used with `select`. Its value should be the number of rows required.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | columns    | This is required for defining the schema of a dataset. Its value should be a comma-separated string of the format, `column1:typeOfColumn1,column2:typeOfColumn2` where column1 and column2 are the names of the columns and typeOfColumn1 and typeOfColumn2 are one of `int`,`long`,`double`,`string`,`bool`                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | rowKeys | This is required for defining the row keys. Its value should be comma-separated list of column names or computed column functions to make up the row key                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
@@ -485,6 +496,10 @@ You may also set the `FILO_CONFIG_FILE` environment var instead, but any `-Dconf
 Individual configuration params may also be changed by passing them on the command line.  They must be the first arguments passed in.  For example:
 
     ./filo-cli -Dfilodb.columnstore.segment-cache-size=10000 --command ingestcsv ....
+
+All `-D` config options must be passed before any other arguments.
+
+NOTE: The CLI currently only operates on the Cassandra column store.  The `--database` option may be used to specify which keyspace to operate on.  If the keyspace is not initialized, then FiloDB code will automatically create one for you, but you may want to create it yourself to control the options that you want.
 
 ### CLI Example
 The following examples use the [GDELT public dataset](http://data.gdeltproject.org/documentation/GDELT-Data_Format_Codebook.pdf) and can be run from the project directory.

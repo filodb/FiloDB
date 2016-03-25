@@ -20,7 +20,7 @@ import filodb.core._
  * The Projection base class is normalized, ie it doesn't have all the information.
  */
 case class Projection(id: Int,
-                      dataset: TableName,
+                      dataset: DatasetRef,
                       keyColIds: Seq[ColumnId],
                       segmentColId: ColumnId,
                       reverse: Boolean = false,
@@ -32,6 +32,12 @@ case class Projection(id: Int,
     s"  Key columns: ${keyColIds.mkString(", ")}\n" +
     s"  Segment column: $segmentColId\n" +
     s"  Projection columns: ${columns.mkString(", ")}"
+
+  /**
+   * Returns a new Projection with the specified database and everything else kept the same
+   */
+  def withDatabase(database: String): Projection =
+    this.copy(dataset = this.dataset.copy(database = Some(database)))
 }
 
 /**
@@ -55,7 +61,14 @@ case class RichProjection(projection: Projection,
   type RK = rowKeyType.T
   type PK = partitionType.T
 
-  def datasetName: String = projection.dataset
+  def datasetName: String = projection.dataset.toString
+  def datasetRef: DatasetRef = projection.dataset
+
+  /**
+   * Returns a new RichProjection with the specified database and everything else kept the same
+   */
+  def withDatabase(database: String): RichProjection =
+    this.copy(projection = this.projection.withDatabase(database))
 
   def segmentKeyFunc: RowReader => SK =
     segmentType.getKeyFunc(Array(segmentColIndex))
@@ -232,7 +245,12 @@ object RichProjection extends StrictLogging {
       Nil
     }
     val segmentColumn = DataColumn.fromString(segStr, dsName)
-    val dataset = Dataset(dsName, Nil, segmentColumn.name, partitionColumns.map(_.name))
+    val dsNameParts = dsName.split('.').toSeq
+    val ref = dsNameParts match {
+      case Seq(db, ds) => DatasetRef(ds, Some(db))
+      case Seq(ds)     => DatasetRef(ds)
+    }
+    val dataset = Dataset(ref, Nil, segmentColumn.name, partitionColumns.map(_.name))
 
     RichProjection(dataset.projections.head, dataset, extraColumns,
                    segmentColumn, -1, Column.columnsToKeyType(Seq(segmentColumn)),

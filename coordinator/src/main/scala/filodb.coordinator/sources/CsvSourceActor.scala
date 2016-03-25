@@ -6,6 +6,7 @@ import org.velvia.filo.{ArrayStringRowReader, RowReader}
 import scala.util.Try
 
 import filodb.coordinator.{BaseActor, NodeCoordinatorActor, RowSource}
+import filodb.core.DatasetRef
 
 object CsvSourceActor {
   // Needs to be a multiple of chunkSize. Not sure how to have a good default though.
@@ -13,7 +14,7 @@ object CsvSourceActor {
   val RowsToRead = 100
 
   def props(csvStream: java.io.Reader,
-            dataset: String,
+            dataset: DatasetRef,
             version: Int,
             coordinatorActor: ActorRef,
             maxUnackedBatches: Int = DefaultMaxUnackedBatches,
@@ -33,7 +34,7 @@ object CsvSourceActor {
  * Non-actors can send RowSource.Start message and wait for the AllDone message.
  */
 class CsvSourceActor(csvStream: java.io.Reader,
-                     val dataset: String,
+                     val dataset: DatasetRef,
                      val version: Int,
                      val coordinatorActor: ActorRef,
                      val maxUnackedBatches: Int = CsvSourceActor.DefaultMaxUnackedBatches,

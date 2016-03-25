@@ -146,12 +146,11 @@ object Column extends StrictLogging {
 
   /**
    * Checks for any problems with a column about to be "created" or changed.
-   * @param dataset the name of the dataset for which this column change applies
    * @param schema the latest schema from scanning all versions
    * @param column the DataColumn to be validated
    * @return A Seq[String] of every reason the column is not valid
    */
-  def invalidateNewColumn(dataset: String, schema: Schema, column: DataColumn): Seq[String] = {
+  def invalidateNewColumn(schema: Schema, column: DataColumn): Seq[String] = {
     def check(requirement: => Boolean, failMessage: String): Option[String] =
       if (requirement) None else Some(failMessage)
 

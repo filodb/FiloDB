@@ -66,13 +66,21 @@ object Dataset {
             keyColumn: String,
             segmentColumn: String,
             partitionColumn: String): Dataset =
-    Dataset(name, Seq(Projection(0, name, Seq(keyColumn), segmentColumn)), Seq(partitionColumn))
+    Dataset(name, Seq(keyColumn), segmentColumn, Seq(partitionColumn))
 
   def apply(name: String,
             keyColumns: Seq[String],
             segmentColumn: String,
             partitionColumns: Seq[String]): Dataset =
-    Dataset(name, Seq(Projection(0, name, keyColumns, segmentColumn)), partitionColumns)
+    Dataset(DatasetRef(name), keyColumns, segmentColumn, partitionColumns)
+
+  def apply(ref: DatasetRef,
+            keyColumns: Seq[String],
+            segmentColumn: String,
+            partitionColumns: Seq[String]): Dataset =
+    Dataset(ref.dataset,
+            Seq(Projection(0, ref, keyColumns, segmentColumn)),
+            partitionColumns)
 
   def apply(name: String, keyColumn: String, segmentColumn: String): Dataset =
     Dataset(name, keyColumn, segmentColumn, DefaultPartitionColumn)

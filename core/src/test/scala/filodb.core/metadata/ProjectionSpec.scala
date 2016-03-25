@@ -32,7 +32,7 @@ class ProjectionSpec extends FunSpec with Matchers {
     }
 
     it("should get MissingColumnNames if projection columns are missing from schema") {
-      val missingColProj = Projection(0, "a", Seq("age"), "seg", columns = Seq("first", "yards"))
+      val missingColProj = Projection(0, DatasetRef("a"), Seq("age"), "seg", columns = Seq("first", "yards"))
       val missingColDataset = Dataset("a", Seq(missingColProj), Seq(Dataset.DefaultPartitionColumn))
       val resp = RichProjection.make(missingColDataset, schema)
       resp.isBad should be (true)
@@ -69,6 +69,13 @@ class ProjectionSpec extends FunSpec with Matchers {
       val partFunc = resp.get.partitionKeyFunc
 
       partFunc(names.map(TupleRowReader).head) should equal (Dataset.DefaultPartitionKey)
+    }
+
+    it("should change database with withDatabase") {
+      val prj = RichProjection(dataset, schema)
+      prj.datasetRef.database should equal (None)
+
+      prj.withDatabase("db2").datasetRef.database should equal (Some("db2"))
     }
 
     it("apply() should throw exception for bad schema") {
@@ -145,6 +152,16 @@ class ProjectionSpec extends FunSpec with Matchers {
       readOnlyProj.datasetName should equal (proj.datasetName)
       readOnlyProj.segmentType should equal (StringKeyType)
       readOnlyProj.columns should equal (Nil)
+    }
+
+    it("should deserialize readOnlyProjectionStrings with database specified") {
+      val ref = DatasetRef("a", Some("db2"))
+      val multiDataset = Dataset(ref, Seq("age"), ":string /0", Seq("first", ":getOrElse last --"))
+      val proj = RichProjection(multiDataset, schema)
+      val serialized = proj.toReadOnlyProjString(Nil)
+      val readOnlyProj = RichProjection.readOnlyFromString(serialized)
+
+      readOnlyProj.datasetRef should equal (ref)
     }
   }
 }

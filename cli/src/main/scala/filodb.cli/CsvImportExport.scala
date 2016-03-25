@@ -55,7 +55,7 @@ trait CsvImportExport extends StrictLogging {
     }
   }
 
-  def ingestCSV(dataset: String,
+  def ingestCSV(dataset: DatasetRef,
                 version: Int,
                 csvPath: String,
                 delimiter: Char,
