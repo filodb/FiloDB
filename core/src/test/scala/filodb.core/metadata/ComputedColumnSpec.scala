@@ -125,7 +125,7 @@ class ComputedColumnSpec extends FunSpec with Matchers {
       val tsColumn = DataColumn(0, "ts", "a", 0, Column.ColumnType.TimestampColumn)
       val proj = RichProjection(tsDataset, Seq(tsColumn))
 
-      proj.rowKeyFunc(TupleRowReader((Some(new Timestamp(300001L)), None))) should equal (12)
+      proj.rowKeyFunc(TupleRowReader((Some(new Timestamp(300001L)), None))) should equal (1)
     }
   }
 

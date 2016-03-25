@@ -2,7 +2,7 @@ package filodb.core.metadata
 
 import com.typesafe.config.ConfigFactory
 import java.sql.Timestamp
-import org.joda.time.DateTime
+import org.joda.time.{DateTime, DateTimeZone}
 import org.scalactic._
 import org.velvia.filo.RowReader
 
@@ -69,8 +69,8 @@ object TimeComputations {
       yield {
         val info = SingleColumnInfo(args(0), "", sourceColIndex, sourceColType)
         val func = (info.colType match {
-          case LongColumn      => (l: Long) => new DateTime(l).getMonthOfYear
-          case TimestampColumn => (t: Timestamp) => new DateTime(t).getMonthOfYear
+          case LongColumn      => (l: Long) => new DateTime(l, DateTimeZone.UTC).getMonthOfYear
+          case TimestampColumn => (t: Timestamp) => new DateTime(t, DateTimeZone.UTC).getMonthOfYear
           case o: Column.ColumnType => ???
         }).asInstanceOf[info.keyType.T => Int]
         computedColumnWithDefault(expr, dataset, info, IntColumn, IntKeyType)(-1)(func)
