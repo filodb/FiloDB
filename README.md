@@ -19,7 +19,7 @@ High-performance distributed analytical database + Spark SQL queries + built for
 
 Columnar, versioned layers of data wrapped in a yummy high-performance analytical database engine.
 
-See [architecture](doc/architecture.md) and [datasets and reading](doc/datasets_reading.md) for more information.
+See [architecture](doc/architecture.md) and [datasets and reading](doc/datasets_reading.md) for more information.  Also see the Spark Notebooks under `doc`... there is one for time-series/geo analysis of the NYC Taxi dataset, and one for interactive charting of the GDELT dataset!
 
 <!-- START doctoc generated TOC please keep comment here to allow auto update -->
 <!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
@@ -294,7 +294,7 @@ Note that if Cassandra is kept as the default column store, the keyspace can be 
 
 ### Spark Data Source API Example (spark-shell)
 
-You can follow along using the [Spark Notebook](http://github.com/andypetrella/spark-notebook) in doc/FiloDB.snb....  launch the notebook using `EXTRA_CLASSPATH=$FILO_JAR ADD_JARS=$FILO_JAR ./bin/spark-notebook &` where `FILO_JAR` is the path to `filodb-spark-assembly` jar.
+You can follow along using the [Spark Notebook](http://github.com/andypetrella/spark-notebook)... launch the notebook using `EXTRA_CLASSPATH=$FILO_JAR ADD_JARS=$FILO_JAR ./bin/spark-notebook &` where `FILO_JAR` is the path to `filodb-spark-assembly` jar.  See the [FiloDB_GDELT](doc/FiloDB_GDELT.snb) notebook to follow the GDELT examples below, or the [NYC Taxi](doc/FiloDB_Taxi_Geo_demo.snb) notebook for some really neat time series/geo analysis!
 
 Or you can start a spark-shell locally,
 

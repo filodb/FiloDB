@@ -1,6 +1,6 @@
 {
   "metadata" : {
-    "name" : "FiloDB",
+    "name" : "FiloDB GDELT",
     "user_save_timestamp" : "1969-12-31T16:00:00.000Z",
     "auto_save_timestamp" : "1969-12-31T16:00:00.000Z",
     "language_info" : {
@@ -13,6 +13,7 @@
     "customRepos" : null,
     "customDeps" : null,
     "customImports" : [ "import org.apache.spark.sql.functions._\n" ],
+    "customArgs" : null,
     "customSparkConf" : {
       "spark.app.name" : "Notebook",
       "spark.master" : "local[8]",
@@ -22,7 +23,7 @@
   "cells" : [ {
     "metadata" : { },
     "cell_type" : "markdown",
-    "source" : "## Querying Data using FiloDB\n1. Start Cassandra\n2. Ingest some data, according to FiloDB README (TODO: convert this to another notebook or more notebook steps)\nblah blah blah"
+    "source" : "## Querying the GDELT dataset using FiloDB\n1. Start Cassandra\n2. Ingest the GDELT dataset, according to the [FiloDB README](https://github.com/tuplejump/FiloDB#spark-data-source-api-example-spark-shell) \n\nNote that the GDELT dataset is partitioned by YearMonth."
   }, {
     "metadata" : {
       "trusted" : true,
@@ -70,13 +71,13 @@
       "collapsed" : false
     },
     "cell_type" : "code",
-    "source" : "sqlContext.sql(\"select Actor1Name, count(*) as c from gdelt group by Actor1Name order by c desc limit 15\").show()",
+    "source" : "sqlContext.sql(\"select Actor1Name, count(*) as c from gdelt group by Actor1Name order by c desc limit 15\")",
     "outputs" : [ ]
   }, {
     "metadata" : {
       "trusted" : true,
       "input_collapsed" : false,
-      "collapsed" : false
+      "collapsed" : true
     },
     "cell_type" : "code",
     "source" : "val sql1 = \"select Actor1Name, count(*) as c from gdelt group by Actor1Name order by c desc limit 15\"\nsqlContext.sql(sql1).collect.map { row => (row.getString(0), row.getLong(1)) }",
@@ -99,13 +100,35 @@
     "source" : "import org.apache.spark.mllib.stat.Statistics\nval numMentions = df.select(\"NumMentions\").map(row => row.getInt(0).toDouble)\nval numArticles = df.select(\"NumArticles\").map(row => row.getInt(0).toDouble)\nStatistics.corr(numMentions, numArticles, \"pearson\")",
     "outputs" : [ ]
   }, {
+    "metadata" : { },
+    "cell_type" : "markdown",
+    "source" : "## Reactive Top Countries Graph by Year-Month\n\nNow, let's demonstrate how FiloDB lets one produce low-latency graphs and UIs.  We will figure out the top countries by number of political events (Actor1CountryCode) for a particular year-month, and let the user control what the year-month is."
+  }, {
     "metadata" : {
       "trusted" : true,
       "input_collapsed" : false,
-      "collapsed" : true
+      "collapsed" : false
     },
     "cell_type" : "code",
-    "source" : "",
+    "source" : "val topCountries = sqlContext.sql(\"\"\"select Actor1CountryCode, count(*) as c from gdelt WHERE MonthYear = 197901 \n                                     group by Actor1CountryCode order by c desc limit 15\"\"\")\n// NOTE: CustomC3Chart looks better but the reactive applyOn method is broken\n// val chart = CustomC3Chart(topCountries.collect(),\n//              chartOptions = \"\"\"\n//              { data: { x: 'Actor1CountryCode', \n//                        y: 'c',\n//                        type: 'bar'},\n//                axis: {x: { type: 'categorical' }}\n//              }\n//              \"\"\")\nval chart = widgets.BarChart(topCountries.collect(), fields=Some((\"Actor1CountryCode\", \"c\")))",
+    "outputs" : [ ]
+  }, {
+    "metadata" : {
+      "trusted" : true,
+      "input_collapsed" : false,
+      "collapsed" : false
+    },
+    "cell_type" : "code",
+    "source" : "import extraTypes._\nimplicit val ITI:types.InputType[Int] = SliderType[Int](198101, 198112, 1)\nval si = new InputBox(197901, \"Choose the month (Jan to Dec 1981)\")",
+    "outputs" : [ ]
+  }, {
+    "metadata" : {
+      "trusted" : true,
+      "input_collapsed" : false,
+      "collapsed" : false
+    },
+    "cell_type" : "code",
+    "source" : "si.currentData --> Connection.fromObserver { monthYear: Int =>\n  // Now modify the query to return new data whenever dropdown selection changes\n  val newData = sqlContext.sql(s\"\"\"select Actor1CountryCode, count(*) as c from gdelt WHERE MonthYear = $monthYear \n                                     group by Actor1CountryCode order by c desc limit 15\"\"\")\n  chart.applyOn(newData.collect())\n                                              }\n",
     "outputs" : [ ]
   } ],
   "nbformat" : 4

@@ -1,0 +1,268 @@
+{
+  "metadata" : {
+    "name" : "FiloDB Taxi Geo Demo",
+    "user_save_timestamp" : "1970-01-01T01:00:00.000Z",
+    "auto_save_timestamp" : "1970-01-01T01:00:00.000Z",
+    "language_info" : {
+      "name" : "scala",
+      "file_extension" : "scala",
+      "codemirror_mode" : "text/x-scala"
+    },
+    "trusted" : true,
+    "customLocalRepo" : null,
+    "customRepos" : null,
+    "customDeps" : null,
+    "customImports" : null,
+    "customArgs" : null,
+    "customSparkConf" : {
+      "spark.app.name" : "Notebook",
+      "spark.master" : "local[4]",
+      "spark.executor.memory" : "3G"
+    }
+  },
+  "cells" : [ {
+    "metadata" : {
+      "id" : "114816BC62A04AB88777439ABC42D1DA"
+    },
+    "cell_type" : "markdown",
+    "source" : "\n# Visualizing FiloDB New York City Taxi Data"
+  }, {
+    "metadata" : {
+      "id" : "B3641CCECB6B45F2A885DC4A03E7B0E6"
+    },
+    "cell_type" : "markdown",
+    "source" : "The public [NYC Taxi Dataset](http://www.andresmh.com/nyctaxitrips/) contains telemetry (pickup, dropoff locations, times) info on millions of taxi rides in NYC.\n\n| Medallion prefix  | 1/1 - 1/6   |  1/7 - 1/12  |\n| ----------------- | ----------- | ------------ |\n| AA             | records     |  records     |\n| AB             | records     |  records     |\n\n* Partition key - `:stringPrefix medallion 2` - hash multiple drivers trips into ~300 partitions\n* Segment key - `:timeslice pickup_datetime 6d`\n\nAllows for easy filtering by individual drivers, and slicing by time.\n\nThis Notebook assumes the user has followed the FiloDB NYC Taxi [ingestion instructions](https://github.com/tuplejump/FiloDB/blob/master/doc/datasets_reading.md) first."
+  }, {
+    "metadata" : {
+      "id" : "C0F7DF68B6FA4C2D86BA6C5A96EFD1E9"
+    },
+    "cell_type" : "markdown",
+    "source" : "## Load the data"
+  }, {
+    "metadata" : {
+      "trusted" : true,
+      "input_collapsed" : false,
+      "collapsed" : false,
+      "id" : "24493C8D5BD2466A8E0F6BC1E80A4D35"
+    },
+    "cell_type" : "code",
+    "source" : "import filodb.spark._\nval sqlContext = new org.apache.spark.sql.SQLContext(sc)\nval taxidata = sqlContext.filoDataset(\"nyc_taxi\")",
+    "outputs" : [ ]
+  }, {
+    "metadata" : {
+      "id" : "6F230212E3E54D3685FDFC743F019EAE"
+    },
+    "cell_type" : "markdown",
+    "source" : "### Find out a few specific taxi drivers (medallions)"
+  }, {
+    "metadata" : {
+      "trusted" : true,
+      "input_collapsed" : false,
+      "collapsed" : false,
+      "presentation" : {
+        "tabs_state" : "{\n  \"tab_id\": \"#tab876903593-0\"\n}"
+      },
+      "id" : "67798E3BEE8645958291506054761615"
+    },
+    "cell_type" : "code",
+    "source" : "taxidata.registerTempTable(\"nyctaxi\")\nval medallionCounts = sqlContext.sql(\"select medallion, count(*) as c from nyctaxi group by medallion limit 10\").collect.\n  map(r => (r.getString(0), r.getLong(1)))",
+    "outputs" : [ ]
+  }, {
+    "metadata" : {
+      "trusted" : true,
+      "input_collapsed" : false,
+      "collapsed" : false,
+      "presentation" : {
+        "tabs_state" : "{\n  \"tab_id\": \"#tab1416991956-0\"\n}",
+        "pivot_chart_state" : "{\n  \"hiddenAttributes\": [],\n  \"menuLimit\": 200,\n  \"cols\": [],\n  \"rows\": [],\n  \"vals\": [],\n  \"exclusions\": {},\n  \"inclusions\": {},\n  \"unusedAttrsVertical\": 85,\n  \"autoSortUnusedAttrs\": false,\n  \"inclusionsInfo\": {},\n  \"aggregatorName\": \"Count\",\n  \"rendererName\": \"Table\"\n}"
+      },
+      "id" : "43ACDE34911341408999741627A6D493"
+    },
+    "cell_type" : "code",
+    "source" : "val medallions = medallionCounts.map(_._1)\nmedallions",
+    "outputs" : [ ]
+  }, {
+    "metadata" : {
+      "id" : "49BB0F261FF249C1BC4E9F914B4AACF0"
+    },
+    "cell_type" : "markdown",
+    "source" : "## Visualize pickup points for one driver"
+  }, {
+    "metadata" : {
+      "id" : "4C4292C916D84C3484BE95A3CB9CD9C8"
+    },
+    "cell_type" : "markdown",
+    "source" : "Visualize pickup points as well as number of passengers (radius of circle) on a map, and let users pick different medallions to see interactive plots!\n\nNOTE: This is an example of a FiloDB query which does both partition key filtering (on medallion) and segment key filtering (on the timeslice of pickup_datetime).  Notice how FiloDB takes care of computed functions in both the partition and segment keys - you don't have to round the timestamp to the nearest 6 days, or truncate the medallion to the first two chars."
+  }, {
+    "metadata" : {
+      "trusted" : true,
+      "input_collapsed" : false,
+      "collapsed" : false,
+      "id" : "622B8D70911049CF85917D6223AA7D45"
+    },
+    "cell_type" : "code",
+    "source" : "val medallion = \"CF9E1033F414D0A76A78E8C7D2232441\"\nval medalData = sqlContext.sql(s\"select pickup_latitude, pickup_longitude, passenger_count from nyctaxi where medallion = '$medallion'\" +\n                               s\" AND pickup_datetime > '2013-01-15T00Z'\").\n   collect.map(r => (r.getDouble(0), r.getDouble(1), r.getInt(2)))",
+    "outputs" : [ ]
+  }, {
+    "metadata" : {
+      "id" : "2051821FC6454276841E35089EE3CABB"
+    },
+    "cell_type" : "markdown",
+    "source" : "Reactively update map data based on user selection of the driver/medallion.  See how fast FiloDB can query the driver data!"
+  }, {
+    "metadata" : {
+      "trusted" : true,
+      "input_collapsed" : false,
+      "collapsed" : false,
+      "id" : "3CE692E518FA45F38B6B25ED2CB1E8FA"
+    },
+    "cell_type" : "code",
+    "source" : "val map = widgets.GeoPointsChart(medalData, latLonFields=Some((\"_1\", \"_2\")), rField=Some(\"_3\"), maxPoints=250)\nval dropdown = new DropDown(medallions)\n\ndropdown.selected --> Connection.fromObserver { selectedMedal: String =>\n  // Now modify the query to return new data whenever dropdown selection changes\n  val newData = sqlContext.sql(s\"select pickup_latitude, pickup_longitude, passenger_count from nyctaxi where medallion = '$selectedMedal'\" +\n                               s\" AND pickup_datetime > '2013-01-15T00Z' AND pickup_longitude < -73 AND pickup_latitude > 40\").\n   collect.map(r => (r.getDouble(0), r.getDouble(1), r.getInt(2)))  \n  map.applyOn(newData)\n                                              }\n\ncolumn(dropdown, map)",
+    "outputs" : [ ]
+  }, {
+    "metadata" : {
+      "id" : "90DD4EF79B4247FE8AA0AB9EFC0B26B0"
+    },
+    "cell_type" : "markdown",
+    "source" : "## Taxi Speed Passengers Time/Distance Time of Day analysis"
+  }, {
+    "metadata" : {
+      "id" : "3D68890EFAD44854942CCAF219D74996"
+    },
+    "cell_type" : "markdown",
+    "source" : "One interesting analysis is to figure out taxi speed (distance / time) and number of passengers compared to the time of the day.  Let's start with some bar charts and then also get some visuals (on a map) to see taxi speed and passenger count by area by time of the day.   For the map, we will want to do binning (grouping by micro tile) as displaying millions of data points on a map is too much info.  We will tie the color of each point to the speed as an interesting analysis.\n\nNOTE: While all these could be done with Cassandra as well, it would take MUCH MUCH MUCH longer."
+  }, {
+    "metadata" : {
+      "trusted" : true,
+      "input_collapsed" : false,
+      "collapsed" : true,
+      "id" : "FFDE1E8FA9E64DA5B734EC042A9575F1"
+    },
+    "cell_type" : "code",
+    "source" : "// Define a hour of day function\nimport org.joda.time.DateTime\nimport java.sql.Timestamp\nval hourOfDay = sqlContext.udf.register(\"hourOfDay\", { (t: Timestamp) => new DateTime(t).getHourOfDay })",
+    "outputs" : [ ]
+  }, {
+    "metadata" : {
+      "id" : "319B0EAAD0FD4D9689693E2131F2A64B"
+    },
+    "cell_type" : "markdown",
+    "source" : "In order to facilitate faster geo map and data reading for this portion we're going to model the NYC Taxi dataset with hour of day for the partition key.  This will help us read back data for each hour of data faster."
+  }, {
+    "metadata" : {
+      "trusted" : true,
+      "input_collapsed" : false,
+      "collapsed" : true,
+      "id" : "FA79CEAFE4F44D088B643D9CEC795320"
+    },
+    "cell_type" : "code",
+    "source" : "val pathToNycTaxiCsv = \"/Users/evan/data/nyc_taxi/trip_data_1.csv\"\nval taxiDF = sqlContext.read.format(\"com.databricks.spark.csv\").\n                             option(\"header\", \"true\").option(\"inferSchema\", \"true\").\n                             load(pathToNycTaxiCsv)\nval dfWithHoD = taxiDF.withColumn(\"hourOfDay\", hourOfDay(taxiDF(\"pickup_datetime\")))\n\nimport org.apache.spark.sql.SaveMode\n\ndfWithHoD.write.format(\"filodb.spark\").\n  option(\"dataset\", \"nyc_taxi2\").\n  option(\"row_keys\", \"hack_license,pickup_datetime\").\n  option(\"segment_key\", \":timeslice pickup_datetime 4d\").\n  option(\"partition_keys\", \"hourOfDay\").\n  option(\"reset_schema\", \"true\").\n  mode(SaveMode.Overwrite).save()",
+    "outputs" : [ ]
+  }, {
+    "metadata" : {
+      "trusted" : true,
+      "input_collapsed" : false,
+      "collapsed" : false,
+      "id" : "7A31FB02D9B745F685F16C7F40CA62ED"
+    },
+    "cell_type" : "code",
+    "source" : "val taxi2 = sqlContext.filoDataset(\"nyc_taxi2\")\ntaxi2.registerTempTable(\"nyc_taxi2\")",
+    "outputs" : [ ]
+  }, {
+    "metadata" : {
+      "id" : "D1146ED033E945A5804A0CECD00126DD"
+    },
+    "cell_type" : "markdown",
+    "source" : "You will see that the number of records for each hour of the day is nontrivial...  the read below would take a regular Cassandra table many seconds."
+  }, {
+    "metadata" : {
+      "trusted" : true,
+      "input_collapsed" : false,
+      "collapsed" : false,
+      "id" : "5AABF1A3C021414AB85F16B6A7CEEEDB"
+    },
+    "cell_type" : "code",
+    "source" : "sqlContext.sql(\"select count(*) from nyc_taxi2 where hourOfDay = 9\").show",
+    "outputs" : [ ]
+  }, {
+    "metadata" : {
+      "trusted" : true,
+      "input_collapsed" : false,
+      "collapsed" : false,
+      "presentation" : {
+        "tabs_state" : "{\n  \"tab_id\": \"#tab540058388-0\"\n}",
+        "pivot_chart_state" : "{\n  \"hiddenAttributes\": [],\n  \"menuLimit\": 200,\n  \"cols\": [],\n  \"rows\": [],\n  \"vals\": [],\n  \"exclusions\": {},\n  \"inclusions\": {},\n  \"unusedAttrsVertical\": 85,\n  \"autoSortUnusedAttrs\": false,\n  \"inclusionsInfo\": {},\n  \"aggregatorName\": \"Count\",\n  \"rendererName\": \"Table\"\n}"
+      },
+      "id" : "6AFE95E326914CA8A76EC45B1E4E0C73"
+    },
+    "cell_type" : "code",
+    "source" : "val distTimeSpeed = sqlContext.sql(\"\"\"select hourOfDay,\n                                      avg(trip_distance) as dist, avg(trip_time_in_secs) as trip_time, \n                                      avg(trip_distance * 3600 / trip_time_in_secs) as speed_mph from nyc_taxi2\n                                      group by hourOfDay\"\"\")\ndistTimeSpeed.cache\ndistTimeSpeed.collect",
+    "outputs" : [ ]
+  }, {
+    "metadata" : {
+      "trusted" : true,
+      "input_collapsed" : false,
+      "collapsed" : false,
+      "id" : "066A8DFD327C4DF38CB7FCC7FA9D3EE4"
+    },
+    "cell_type" : "code",
+    "source" : "CustomC3Chart(distTimeSpeed.select(\"hourOfDay\", \"speed_mph\"),\n             chartOptions = \"\"\"\n             { data: { x: 'hourOfDay', \n                       y: 'speed_mph',\n                       type: 'bar'},\n               axis: {x: { type: 'categorical' }}\n             }\n             \"\"\")",
+    "outputs" : [ ]
+  }, {
+    "metadata" : {
+      "trusted" : true,
+      "input_collapsed" : false,
+      "collapsed" : false,
+      "id" : "B2EF6250211C4FD985EC84BC1D059363"
+    },
+    "cell_type" : "code",
+    "source" : "CustomC3Chart(distTimeSpeed.select(\"hourOfDay\", \"trip_time\"),\n             chartOptions = \"\"\"\n             { data: { x: 'hourOfDay', \n                       y: 'speed_mph',\n                       type: 'bar'},\n               axis: {x: { type: 'categorical' }}\n             }\n             \"\"\")",
+    "outputs" : [ ]
+  }, {
+    "metadata" : {
+      "id" : "CB9F50AC74D74EE18573A45429984D36"
+    },
+    "cell_type" : "markdown",
+    "source" : "## Aggregated cabs + Average Speed Map vs Time of Day\n\nThis is a really cool interactive map where you can slide a slider for the time of day back and forth, and the notebook is going to run a nontrivial SQL query + Spark code to aggregate the number of rides and average speed for each part of the map, and display it all in interactive time frame.  It shows you the kind of fast interactive time series analysis that is possible with FiloDB due to its speed plus fit for time series."
+  }, {
+    "metadata" : {
+      "trusted" : true,
+      "input_collapsed" : false,
+      "collapsed" : false,
+      "id" : "6B345F6470B24F508CAB335D44A399ED"
+    },
+    "cell_type" : "code",
+    "source" : "import notebook.front.widgets\n\nval binSize = 0.005\nsqlContext.udf.register(\"bin\", (d: Double) => Math.round(d / binSize) * binSize)\ncase class LatLonColor(lat: Double, lon: Double, color: String, count: Int)\n\ndef coloredBins(hour: Int) = sqlContext.sql(s\"\"\"select bin(pickup_latitude) as binlat, bin(pickup_longitude) as binlon, \n                                    avg(trip_distance * 3600 / trip_time_in_secs) as speed_mph, count(*) \n                             FROM nyc_taxi2 WHERE hourOfDay = $hour\n                             AND pickup_latitude > 40.5 AND pickup_latitude < 41.0\n                             AND pickup_longitude < -73.0 AND pickup_longitude > -75.0\n                             GROUP BY bin(pickup_latitude), bin(pickup_longitude)\n                             \"\"\").\n                             take(500).map { row =>\n                               val colorStr = row.getDouble(2) match {\n                                 case mph if mph < 15.0 => \"red\"\n                                 case mph if mph > 20.0 => \"green\"\n                                 case mph               => \"yellow\"\n                               }\n                               val radius = Math.min(row.getLong(3).toInt / 100, 10)\n                               (row.getDouble(0), row.getDouble(1), colorStr, radius + 1)\n                             }",
+    "outputs" : [ ]
+  }, {
+    "metadata" : {
+      "trusted" : true,
+      "input_collapsed" : false,
+      "collapsed" : false,
+      "id" : "AA294BD21F05470296E510EA04913CB1"
+    },
+    "cell_type" : "code",
+    "source" : "val speedRidesMap = widgets.GeoPointsChart(coloredBins(7),\n                                           latLonFields=Some((\"_1\", \"_2\")), colorField=Some(\"_3\"),                         \n                                           rField=Some(\"_4\"), maxPoints=500)\nspeedRidesMap",
+    "outputs" : [ ]
+  }, {
+    "metadata" : {
+      "trusted" : true,
+      "input_collapsed" : false,
+      "collapsed" : false,
+      "id" : "6EF4E8E82DA643FF8DBC2A5A7E6750A6"
+    },
+    "cell_type" : "code",
+    "source" : "implicit val ITI:widgets.types.InputType[Int] = widgets.extraTypes.SliderType[Int](0, 23, 1)\nimport notebook.JsonCodec._\nval si = new widgets.InputBox(0, \"Choose the hour of the day\")\nsi",
+    "outputs" : [ ]
+  }, {
+    "metadata" : {
+      "trusted" : true,
+      "input_collapsed" : false,
+      "collapsed" : true,
+      "id" : "C96DAC82A14F4693AF61A9DBB29C3B71"
+    },
+    "cell_type" : "code",
+    "source" : "si.currentData --> notebook.Connection.fromObserver { hour: Int => speedRidesMap.applyOn(coloredBins(hour)) }",
+    "outputs" : [ ]
+  } ],
+  "nbformat" : 4
+}

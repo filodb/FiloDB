@@ -44,6 +44,8 @@ taxiDF.write.format("filodb.spark").
   mode(SaveMode.Overwrite).save()
 ```
 
+There is a [Spark Notebook](FiloDB_Taxi_Geo_demo.snb) to analyze the NYC Taxi dataset.
+
 NOTE: for a stress testing scenario use `:stringPrefix medallion 3` as a segment key.  It creates really tiny segments and a massive amount of Futures and massive amount of (unnecessary) I/O.
 
 * [Weather Datasets and APIs](https://github.com/killrweather/killrweather/wiki/9.-Weather-Data-Sources-and-APIs)
