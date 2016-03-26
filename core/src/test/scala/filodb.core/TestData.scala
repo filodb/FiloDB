@@ -17,6 +17,7 @@ object NamesTestData {
   def mapper(rows: Seq[Product]): Iterator[RowReader] = rows.map(TupleRowReader).toIterator
 
   val dataset = Dataset("dataset", "age", "seg")
+  val datasetRef = DatasetRef(dataset.name)
   val projection = RichProjection(dataset, schema)
 
   val names = Seq((Some("Khalil"),    Some("Mack"),     Some(24L), Some(0)),

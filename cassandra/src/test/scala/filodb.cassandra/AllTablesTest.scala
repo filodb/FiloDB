@@ -40,6 +40,7 @@ trait AllTablesTest extends SimpleCassandraTest {
 
   def createTable(dataset: Dataset, columns: Seq[DataColumn]): Unit = {
     metaStore.newDataset(dataset).futureValue should equal (Success)
-    columns.foreach { col => metaStore.newColumn(col).futureValue should equal (Success) }
+    val ref = DatasetRef(dataset.name)
+    columns.foreach { col => metaStore.newColumn(col, ref).futureValue should equal (Success) }
   }
 }

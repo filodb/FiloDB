@@ -30,7 +30,7 @@ class ColumnSpec extends FunSpec with Matchers {
   describe("Column.invalidateNewColumn") {
     it("should check that regular column names don't have : in front") {
       val newCol = ageColumn.copy(name = ":illegal")
-      val reasons = Column.invalidateNewColumn("foo", schema, newCol)
+      val reasons = Column.invalidateNewColumn(schema, newCol)
       reasons should have length 1
       reasons.head should startWith ("Illegal char :")
     }
@@ -38,7 +38,7 @@ class ColumnSpec extends FunSpec with Matchers {
     it("should check that column names cannot contain illegal chars") {
       def checkIsIllegal(name: String): Unit = {
         val newCol = ageColumn.copy(name = name)
-        val reasons = Column.invalidateNewColumn("foo", schema, newCol)
+        val reasons = Column.invalidateNewColumn(schema, newCol)
         reasons.head should startWith ("Illegal char")
       }
 
@@ -49,28 +49,28 @@ class ColumnSpec extends FunSpec with Matchers {
 
     it("should check that cannot add columns at lower versions") {
       val newCol = ageColumn.copy(version = 0, columnType = ColumnType.StringColumn)
-      val reasons = Column.invalidateNewColumn("foo", schema, newCol)
+      val reasons = Column.invalidateNewColumn(schema, newCol)
       reasons should have length 1
       reasons.head should include ("at version lower")
     }
 
     it("should check that added columns change some property") {
       val newCol = ageColumn.copy(version = 2)
-      val reasons = Column.invalidateNewColumn("foo", schema, newCol)
+      val reasons = Column.invalidateNewColumn(schema, newCol)
       reasons should have length 1
       reasons.head should startWith ("Nothing changed")
     }
 
     it("should check that new columns are not deleted") {
       val deletedCol = firstColumn.copy(name = "last", isDeleted = true)
-      val reasons = Column.invalidateNewColumn("foo", schema, deletedCol)
+      val reasons = Column.invalidateNewColumn(schema, deletedCol)
       reasons should have length 1
       reasons.head should equal ("New column cannot be deleted")
     }
 
     it("should return no reasons for a valid new column") {
       val newCol = ageColumn.copy(version = 4, columnType = ColumnType.StringColumn)
-      val reasons = Column.invalidateNewColumn("foo", schema, newCol)
+      val reasons = Column.invalidateNewColumn(schema, newCol)
       reasons should have length 0
     }
   }

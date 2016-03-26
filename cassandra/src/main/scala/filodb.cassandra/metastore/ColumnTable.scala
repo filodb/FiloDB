@@ -7,6 +7,7 @@ import play.api.libs.iteratee.Iteratee
 import scala.concurrent.Future
 
 import filodb.cassandra.FiloCassandraConnector
+import filodb.core.DatasetRef
 import filodb.core.metadata.{Column, DataColumn}
 
 /**
@@ -39,18 +40,26 @@ with FiloCassandraConnector {
                Column.ColumnType.withName(columnType(row)),
                isDeleted(row))
 
-  def initialize(): Future[Response] = create.ifNotExists.future().toResponse()
+  def initialize(keyspace: String): Future[Response] = {
+    implicit val ks = KeySpace(keyspace)
+    create.ifNotExists.future().toResponse()
+  }
 
-  def clearAll(): Future[Response] = truncate.future().toResponse()
+  def clearAll(keyspace: String): Future[Response] = {
+    implicit val ks = KeySpace(keyspace)
+    truncate.future().toResponse()
+  }
 
-  def getSchema(dataset: String, version: Int): Future[Column.Schema] = {
-    val enum = select.where(_.dataset eqs dataset).and(_.version lte version)
+  def getSchema(dataset: DatasetRef, version: Int): Future[Column.Schema] = withKeyspace(dataset) { ks =>
+    implicit val keySpace = ks
+    val enum = select.where(_.dataset eqs dataset.dataset).and(_.version lte version)
                      .fetchEnumerator()
     (enum run Iteratee.fold(Column.EmptySchema)(Column.schemaFold)).handleErrors
   }
 
-  def insertColumn(column: DataColumn): Future[Response] = {
-    insert.value(_.dataset, column.dataset)
+  def insertColumn(column: DataColumn, dataset: DatasetRef): Future[Response] = withKeyspace(dataset) { ks =>
+    implicit val keySpace = ks
+    insert.value(_.dataset, dataset.dataset)
           .value(_.name,    column.name)
           .value(_.version, column.version)
           .value(_.id,      column.id)
@@ -60,6 +69,8 @@ with FiloCassandraConnector {
           .future().toResponse(AlreadyExists)
   }
 
-  def deleteDataset(dataset: String): Future[Response] =
-    delete.where(_.dataset eqs dataset).future().toResponse()
+  def deleteDataset(dataset: DatasetRef): Future[Response] = withKeyspace(dataset) { ks =>
+    implicit val keySpace = ks
+    delete.where(_.dataset eqs dataset.dataset).future().toResponse()
+  }
 }

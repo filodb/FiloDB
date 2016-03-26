@@ -17,35 +17,37 @@ class CassandraMetaStore(config: Config)
   val datasetTable = new DatasetTable(config)
   val columnTable = new ColumnTable(config)
 
-  def initialize(): Future[Response] =
-    for { dtResp <- datasetTable.initialize()
-          ctResp <- columnTable.initialize() }
+  def initialize(database: String): Future[Response] = {
+    columnTable.createKeyspace(database)     // CREATE KEYSPACE IF NOT EXIST
+    for { dtResp <- datasetTable.initialize(database)
+          ctResp <- columnTable.initialize(database) }
     yield { ctResp }
+  }
 
-  def clearAllData(): Future[Response] =
-    for { dtResp <- datasetTable.clearAll()
-          ctResp <- columnTable.clearAll() }
+  def clearAllData(database: String): Future[Response] =
+    for { dtResp <- datasetTable.clearAll(database)
+          ctResp <- columnTable.clearAll(database) }
     yield { ctResp }
 
   def newDataset(dataset: Dataset): Future[Response] =
     datasetTable.createNewDataset(dataset)
 
-  def getDataset(name: String): Future[Dataset] =
-    datasetTable.getDataset(name)
+  def getDataset(ref: DatasetRef): Future[Dataset] =
+    datasetTable.getDataset(ref)
 
-  def getAllDatasets(): Future[Seq[String]] =
-    datasetTable.getAllDatasets
+  def getAllDatasets(database: String): Future[Seq[String]] =
+    datasetTable.getAllDatasets(database)
 
-  def deleteDataset(name: String): Future[Response] =
-    for { dtResp <- datasetTable.deleteDataset(name)
-          ctResp <- columnTable.deleteDataset(name) }
+  def deleteDataset(ref: DatasetRef): Future[Response] =
+    for { dtResp <- datasetTable.deleteDataset(ref)
+          ctResp <- columnTable.deleteDataset(ref) }
     yield { ctResp }
 
-  def insertColumn(column: DataColumn): Future[Response] =
-    columnTable.insertColumn(column)
+  def insertColumn(column: DataColumn, ref: DatasetRef): Future[Response] =
+    columnTable.insertColumn(column, ref)
 
-  def getSchema(dataset: String, version: Int): Future[Column.Schema] =
-    columnTable.getSchema(dataset, version)
+  def getSchema(ref: DatasetRef, version: Int): Future[Column.Schema] =
+    columnTable.getSchema(ref, version)
 
   def shutdown(): Unit = {
     datasetTable.shutdown()

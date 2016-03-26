@@ -23,6 +23,7 @@ import filodb.core.store.{Analyzer, CachedMergingColumnStore, FilteredPartitionS
 //scalastyle:off
 class Arguments extends FieldArgs {
   var dataset: Option[String] = None
+  var database: Option[String] = None
   var command: Option[String] = None
   var filename: Option[String] = None
   var columns: Option[Map[String, String]] = None
@@ -66,10 +67,13 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
     println("  commands: init create importcsv list analyze delete")
     println("  columns: <colName1>:<type1>,<colName2>:<type2>,... ")
     println("  types:  int,long,double,string,bool,timestamp")
+    println("  common options:  --dataset --database")
     println("  OR:  --select col1, col2  [--limit <n>]  [--outfile /tmp/out.csv]")
     println("\nTo change config: pass -Dconfig.file=/path/to/config as first arg or set $FILO_CONFIG_FILE")
     println("  or override any config by passing -Dconfig.path=newvalue as first args")
   }
+
+  def getRef(args: Arguments): DatasetRef = DatasetRef(args.dataset.get, args.database)
 
   def main(args: Arguments) {
     try {
@@ -77,15 +81,15 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
       args.command match {
         case Some("init") =>
           println("Initializing FiloDB Cassandra tables...")
-          awaitSuccess(metaStore.initialize())
+          awaitSuccess(metaStore.initialize(args.database.getOrElse(config.getString("cassandra.keyspace"))))
         case Some("list") =>
-          args.dataset.map(dumpDataset).getOrElse(dumpAllDatasets())
+          args.dataset.map(ds => dumpDataset(ds, args.database)).getOrElse(dumpAllDatasets(args.database))
         case Some("create") =>
           require(args.dataset.isDefined && args.columns.isDefined, "Need to specify dataset and columns")
           require(args.segmentKey.isDefined, "--segmentKey must be defined")
           require(args.rowKeys.nonEmpty, "--rowKeys must be defined")
           val datasetName = args.dataset.get
-          createDatasetAndColumns(datasetName, args.toColumns(datasetName, version),
+          createDatasetAndColumns(getRef(args), args.toColumns(datasetName, version),
                                   args.rowKeys,
                                   args.segmentKey.get,
                                   if (args.partitionKeys.isEmpty) { Seq(Dataset.DefaultPartitionColumn) }
@@ -93,7 +97,7 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
         case Some("importcsv") =>
           import org.apache.commons.lang3.StringEscapeUtils._
           val delimiter = unescapeJava(args.delimiter)(0)
-          ingestCSV(args.dataset.get,
+          ingestCSV(getRef(args),
                     version,
                     args.filename.get,
                     delimiter,
@@ -101,14 +105,14 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
         case Some("analyze") =>
           println(Analyzer.analyze(columnStore.asInstanceOf[CachedMergingColumnStore],
                                    metaStore,
-                                   args.dataset.get,
+                                   getRef(args),
                                    version).prettify())
         case Some("delete") =>
-          parse(metaStore.deleteDataset(args.dataset.get)) { x => x }
+          parse(metaStore.deleteDataset(getRef(args))) { x => x }
 
         case x: Any =>
           args.select.map { selectCols =>
-            exportCSV(args.dataset.get,
+            exportCSV(getRef(args),
                       version,
                       selectCols,
                       args.limit,
@@ -126,14 +130,16 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
     }
   }
 
-  def dumpDataset(dataset: String) {
-    parse(metaStore.getDataset(dataset)) { datasetObj =>
+  def dumpDataset(dataset: String, database: Option[String]) {
+    val ref = DatasetRef(dataset, database)
+    require(ref.dataset == dataset)
+    parse(metaStore.getDataset(ref)) { datasetObj =>
       println(s"Dataset name: ${datasetObj.name}")
       println(s"Partition keys: ${datasetObj.partitionColumns.mkString(", ")}")
       println(s"Options: ${datasetObj.options}\n")
       datasetObj.projections.foreach(p => println(p.detailedString))
     }
-    parse(metaStore.getSchema(dataset, Int.MaxValue)) { schema =>
+    parse(metaStore.getSchema(ref, Int.MaxValue)) { schema =>
       println("\nColumns:")
       schema.values.toSeq.sortBy(_.name).foreach { case DataColumn(_, name, _, ver, colType, _) =>
         println("  %-35.35s %5d %s".format(name, ver, colType))
@@ -141,19 +147,28 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
     }
   }
 
-  def dumpAllDatasets() {
-    parse(metaStore.getAllDatasets) { datasets =>
+  def dumpAllDatasets(database: Option[String]) {
+    val keyspace = database.getOrElse(config.getString("cassandra.keyspace"))
+    parse(metaStore.getAllDatasets(keyspace)) { datasets =>
       datasets.foreach(println)
     }
   }
 
-  def createDatasetAndColumns(dataset: String,
+  def createDatasetAndColumns(dataset: DatasetRef,
                               columns: Seq[DataColumn],
                               rowKeys: Seq[String],
                               segmentKey: String,
                               partitionKeys: Seq[String]) {
     println(s"Creating dataset $dataset...")
     val datasetObj = Dataset(dataset, rowKeys, segmentKey, partitionKeys)
+
+    RichProjection.make(datasetObj, columns).recover {
+      case err: RichProjection.BadSchema =>
+        println(s"Bad dataset schema: $err")
+        exitCode = 2
+        return
+    }
+
     actorAsk(coordinatorActor, NodeCoordinatorActor.CreateDataset(datasetObj, columns)) {
       case NodeCoordinatorActor.DatasetCreated =>
         println(s"Dataset $dataset created!")
@@ -213,7 +228,7 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
     }
   }
 
-  def exportCSV(dataset: String,
+  def exportCSV(dataset: DatasetRef,
                 version: Int,
                 columnNames: Seq[String],
                 limit: Int,
@@ -228,6 +243,6 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
     val requiredRows = parse(columnStore.scanRows(richProj, columns, version,
                                                   FilteredPartitionScan(splits.head))) {
                          x => x.take(limit) }
-    writeResult(dataset, requiredRows, columnNames, columns, outFile)
+    writeResult(dataset.dataset, requiredRows, columnNames, columns, outFile)
   }
 }

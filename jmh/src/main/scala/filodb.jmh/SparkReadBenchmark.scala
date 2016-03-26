@@ -33,16 +33,16 @@ import org.velvia.filo.{RowReader, TupleRowReader}
  * For example, on my laptop, here is the JMH output:
  * {{{
  *  Benchmark                         Mode  Cnt  Score   Error  Units
- *  SparkReadBenchmark.sparkBaseline    ss   15  0.025 ± 0.002   s/op
- *  SparkReadBenchmark.sparkSum         ss   15  0.231 ± 0.010   s/op
+ *  SparkReadBenchmark.sparkBaseline    ss   15  0.018 ± 0.007   s/op
+ *  SparkReadBenchmark.sparkSum         ss   15  0.218 ± 0.007   s/op
  *  SparkCassBenchmark.sparkCassSum     ss   15  0.541 ± 0.054   s/op
  * }}}
  *
  * (The above run against Cassandra 2.1.6, 5GB heap, with jmh:run -i 3 -wi 3 -f3 filodb.jmh.SparkReadBenchmark)
  *
  * Thus:
- * - Cassandra scan speed = 5000000 / (0.541 - 0.023) =  9,689,922 ops/sec
- * - InMemory scan speed  = 5000000 / (0.231 - 0.023) = 24,271,844 ops/sec
+ * - Cassandra scan speed = 5000000 / (0.541 - 0.018) =  9,689,922 ops/sec
+ * - InMemory scan speed  = 5000000 / (0.218 - 0.018) = 25,000,000 ops/sec
  */
 @State(Scope.Benchmark)
 class SparkReadBenchmark {
@@ -64,9 +64,9 @@ class SparkReadBenchmark {
   // Initialize metastore
   import scala.concurrent.ExecutionContext.Implicits.global
   Await.result(FiloSetup.metaStore.newDataset(dataset), 3.seconds)
-  val createColumns = schema.map { col => FiloSetup.metaStore.newColumn(col) }
+  val createColumns = schema.map { col => FiloSetup.metaStore.newColumn(col, ref) }
   Await.result(Future.sequence(createColumns), 3.seconds)
-  val split = FiloSetup.columnStore.getScanSplits(dataset.name).head
+  val split = FiloSetup.columnStore.getScanSplits(ref).head
 
   // Merge segments into InMemoryColumnStore
   import scala.concurrent.ExecutionContext.Implicits.global

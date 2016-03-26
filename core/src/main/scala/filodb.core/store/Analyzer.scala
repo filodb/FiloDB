@@ -4,6 +4,7 @@ import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.concurrent.duration._
 import scala.util.Try
 
+import filodb.core.DatasetRef
 import filodb.core.metadata.RichProjection
 import filodb.core.Types._
 
@@ -66,7 +67,7 @@ object Analyzer {
 
   def analyze(cs: CachedMergingColumnStore,
               metaStore: MetaStore,
-              dataset: TableName,
+              dataset: DatasetRef,
               version: Int): ColumnStoreAnalysis = {
     var numSegments = 0
     var rowsInSegment: Histogram = Histogram.empty
