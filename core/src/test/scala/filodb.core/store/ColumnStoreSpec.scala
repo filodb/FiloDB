@@ -26,16 +26,20 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
   val config = ConfigFactory.load("application_test.conf").getConfig("filodb")
   def colStore: CachedMergingColumnStore
 
+  val projectionDb2 = projection.withDatabase("unittest2")
+
   // First create the tables in C*
   override def beforeAll() {
     super.beforeAll()
     colStore.initializeProjection(dataset.projections.head).futureValue
     colStore.initializeProjection(GdeltTestData.dataset2.projections.head).futureValue
+    colStore.initializeProjection(projectionDb2.projection).futureValue
   }
 
   before {
     colStore.clearProjectionData(dataset.projections.head).futureValue
     colStore.clearProjectionData(GdeltTestData.dataset2.projections.head).futureValue
+    colStore.clearProjectionData(projectionDb2.projection).futureValue
     colStore.clearSegmentCache()
   }
 
@@ -192,7 +196,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
       response should equal (Success)
     }
 
-    val paramSet = colStore.getScanSplits(dataset.name, 1)
+    val paramSet = colStore.getScanSplits(datasetRef, 1)
     paramSet should have length (1)
 
     whenReady(colStore.scanSegments(projection, schema, 0, FilteredPartitionScan(paramSet.head))) { segIter =>
@@ -213,7 +217,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
       response should equal (Success)
     }
 
-    val paramSet = colStore.getScanSplits(dataset.name, 1)
+    val paramSet = colStore.getScanSplits(datasetRef, 1)
     paramSet should have length (1)
 
     whenReady(colStore.scanRows(projection, schema, 0, FilteredPartitionScan(paramSet.head))) { rowIter =>
@@ -226,6 +230,26 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
     }
   }
 
+  it should "read back rows written in another database" in {
+    val segment = getRowWriter()
+    segment.addRowsAsChunk(mapper(names))
+    whenReady(colStore.appendSegment(projectionDb2, segment, 0)) { response =>
+      response should equal (Success)
+    }
+
+    val paramSet = colStore.getScanSplits(datasetRef, 1)
+    paramSet should have length (1)
+
+    whenReady(colStore.scanRows(projectionDb2, schema, 0, FilteredPartitionScan(paramSet.head))) { rowIter =>
+      rowIter.map(_.getLong(2)).toSeq should equal (Seq(24L, 25L, 28L, 29L, 39L, 40L))
+    }
+
+    // Check that original keyspace/database has no data
+    whenReady(colStore.scanSegments(projection, schema, 0, partScan)) { segIter =>
+      segIter.toSeq should have length (0)
+    }
+  }
+
   it should "read back rows written with multi-column row keys" in {
     import GdeltTestData._
     val segments = getSegments(197901.asInstanceOf[projection2.PK])
@@ -233,7 +257,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
       colStore.appendSegment(projection2, seg, 0).futureValue should equal (Success)
     }
 
-    val paramSet = colStore.getScanSplits(dataset.name, 1)
+    val paramSet = colStore.getScanSplits(datasetRef, 1)
     paramSet should have length (1)
 
     whenReady(colStore.scanRows(projection2, schema, 0, FilteredPartitionScan(paramSet.head))) { rowIter =>
@@ -248,7 +272,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
       colStore.appendSegment(projection2, seg, 0).futureValue should equal (Success)
     }
 
-    val paramSet = colStore.getScanSplits(dataset.name, 1)
+    val paramSet = colStore.getScanSplits(datasetRef, 1)
     paramSet should have length (1)
 
     val filterFunc = KeyFilter.equalsFunc(projection2.partitionType)(197902.asInstanceOf[projection2.PK])
@@ -265,7 +289,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
       colStore.appendSegment(projection2, seg, 0).futureValue should equal (Success)
     }
 
-    val paramSet = colStore.getScanSplits(dataset.name, 1)
+    val paramSet = colStore.getScanSplits(datasetRef, 1)
     paramSet should have length (1)
 
     // First filter by segment range only.  There are two possible segment key values: 0 or 50, and
@@ -296,7 +320,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
       colStore.appendSegment(projection3, seg, 0).futureValue should equal (Success)
     }
 
-    val paramSet = colStore.getScanSplits(dataset.name, 1)
+    val paramSet = colStore.getScanSplits(datasetRef, 1)
     paramSet should have length (1)
 
     // Test 1:  IN query on first column only

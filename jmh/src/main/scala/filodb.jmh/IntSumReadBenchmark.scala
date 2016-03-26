@@ -20,6 +20,7 @@ object IntSumReadBenchmark {
                    DataColumn(1, "rownum", "dataset", 0, Column.ColumnType.IntColumn))
 
   val dataset = Dataset("dataset", "rownum", ":round rownum 10000")
+  val ref = DatasetRef("dataset")
   val projection = RichProjection(dataset, schema)
 
   val rowStream = Iterator.from(0).map { row => (Some(util.Random.nextInt), Some(row)) }

@@ -66,6 +66,7 @@ extends CachedMergingColumnStore with CassandraColumnStoreScanner with StrictLog
    */
   def initializeProjection(projection: Projection): Future[Response] = {
     val chunkTable = getOrCreateChunkTable(projection.dataset)
+    clusterConnector.createKeyspace(chunkTable.keySpace.name)
     val rowMapTable = getOrCreateRowMapTable(projection.dataset)
     for { ctResp                    <- chunkTable.initialize()
           rmtResp                   <- rowMapTable.initialize() } yield { rmtResp }
@@ -84,7 +85,7 @@ extends CachedMergingColumnStore with CassandraColumnStoreScanner with StrictLog
   /**
    * Implementations of low-level storage primitives
    */
-  def writeChunks(dataset: TableName,
+  def writeChunks(dataset: DatasetRef,
                   partition: BinaryPartition,
                   version: Int,
                   segmentId: SegmentId,
@@ -93,7 +94,7 @@ extends CachedMergingColumnStore with CassandraColumnStoreScanner with StrictLog
     chunkTable.writeChunks(partition, version, segmentId, chunks)
   }
 
-  def writeChunkRowMap(dataset: TableName,
+  def writeChunkRowMap(dataset: DatasetRef,
                        partition: BinaryPartition,
                        version: Int,
                        segmentId: SegmentId,
@@ -113,11 +114,13 @@ extends CachedMergingColumnStore with CassandraColumnStoreScanner with StrictLog
    * @param splitsPerNode  - how much parallelism or ways to divide a token range on each node
    * @return each split will have token_start, token_end, replicas filled in
    */
-  def getScanSplits(dataset: TableName, splitsPerNode: Int = 1): Seq[ScanSplit] = {
+  def getScanSplits(dataset: DatasetRef, splitsPerNode: Int = 1): Seq[ScanSplit] = {
     val metadata = clusterConnector.session.getCluster.getMetadata
+    val keyspace = clusterConnector.keySpaceName(dataset)
     require(splitsPerNode >= 1, s"Must specify at least 1 splits_per_node, got $splitsPerNode")
+
     val tokensByReplica = metadata.getTokenRanges.asScala.toSeq.groupBy { tokenRange =>
-      metadata.getReplicas(clusterConnector.keySpace.name, tokenRange)
+      metadata.getReplicas(keyspace, tokenRange)
     }
     val tokenRanges = for { key <- tokensByReplica.keys } yield {
       if (tokensByReplica(key).size > 1) {
@@ -138,7 +141,7 @@ extends CachedMergingColumnStore with CassandraColumnStoreScanner with StrictLog
     }
     val tokensComplete = tokenRanges.flatMap { token => token } .toSeq
     tokensComplete.map { tokenRange =>
-      val replicas = metadata.getReplicas(clusterConnector.keySpace.name, tokenRange).asScala
+      val replicas = metadata.getReplicas(keyspace, tokenRange).asScala
       CassandraTokenRangeSplit(tokenRange.getStart.toString,
                                tokenRange.getEnd.toString,
                                replicas.map(_.getSocketAddress).toSet)
@@ -162,16 +165,16 @@ trait CassandraColumnStoreScanner extends ColumnStoreScanner with StrictLogging 
   val cassandraConfig = config.getConfig("cassandra")
   val tableCacheSize = config.getInt("columnstore.tablecache-size")
 
-  val chunkTableCache = new ConcurrentLinkedHashMap.Builder[TableName, ChunkTable].
+  val chunkTableCache = new ConcurrentLinkedHashMap.Builder[DatasetRef, ChunkTable].
                           maximumWeightedCapacity(tableCacheSize).build
-  val rowMapTableCache = new ConcurrentLinkedHashMap.Builder[TableName, ChunkRowMapTable].
+  val rowMapTableCache = new ConcurrentLinkedHashMap.Builder[DatasetRef, ChunkRowMapTable].
                           maximumWeightedCapacity(tableCacheSize).build
 
   protected val clusterConnector = new FiloCassandraConnector {
     def config: Config = cassandraConfig
   }
 
-  def readChunks(dataset: TableName,
+  def readChunks(dataset: DatasetRef,
                  columns: Set[ColumnId],
                  keyRange: BinaryKeyRange,
                  version: Int)(implicit ec: ExecutionContext): Future[Seq[ChunkedData]] = {
@@ -187,7 +190,7 @@ trait CassandraColumnStoreScanner extends ColumnStoreScanner with StrictLogging 
                        method: ScanMethod)
                       (implicit ec: ExecutionContext):
     Future[Iterator[SegmentIndex[projection.PK, projection.SK]]] = {
-    val rowMapTable = getOrCreateRowMapTable(projection.datasetName)
+    val rowMapTable = getOrCreateRowMapTable(projection.datasetRef)
     val futCrmRecords = method match {
       case SinglePartitionScan(partition) =>
         val binPart = projection.partitionType.toBytes(partition.asInstanceOf[projection.PK])
@@ -223,16 +226,16 @@ trait CassandraColumnStoreScanner extends ColumnStoreScanner with StrictLogging 
       override def apply(t: T): R = func1.apply(t)
     }
 
-  def getOrCreateChunkTable(dataset: TableName): ChunkTable = {
+  def getOrCreateChunkTable(dataset: DatasetRef): ChunkTable = {
     chunkTableCache.computeIfAbsent(dataset,
-                                    { (dataset: TableName) =>
+                                    { (dataset: DatasetRef) =>
                                       logger.debug(s"Creating a new ChunkTable for dataset $dataset")
                                       new ChunkTable(dataset, clusterConnector) })
   }
 
-  def getOrCreateRowMapTable(dataset: TableName): ChunkRowMapTable = {
+  def getOrCreateRowMapTable(dataset: DatasetRef): ChunkRowMapTable = {
     rowMapTableCache.computeIfAbsent(dataset,
-                                     { (dataset: TableName) =>
+                                     { (dataset: DatasetRef) =>
                                        logger.debug(s"Creating a new ChunkRowMapTable for dataset $dataset")
                                        new ChunkRowMapTable(dataset, clusterConnector) })
   }

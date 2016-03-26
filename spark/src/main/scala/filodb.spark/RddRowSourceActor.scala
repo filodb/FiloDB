@@ -7,7 +7,7 @@ import org.apache.spark.sql.types._
 import org.joda.time.DateTime
 import org.velvia.filo.RowReader
 
-import filodb.core.Types
+import filodb.core.{DatasetRef, Types}
 import filodb.coordinator.{BaseActor, NodeCoordinatorActor, RowSource}
 
 object RddRowSourceActor {
@@ -17,7 +17,7 @@ object RddRowSourceActor {
 
   def props(rows: Iterator[Row],
             columns: Seq[String],
-            dataset: String,
+            dataset: DatasetRef,
             version: Int,
             coordinatorActor: ActorRef,
             maxUnackedBatches: Int = RddRowSourceActor.DefaultMaxUnackedBatches,
@@ -35,7 +35,7 @@ object RddRowSourceActor {
  */
 class RddRowSourceActor(rows: Iterator[Row],
                         columns: Seq[String],
-                        val dataset: String,
+                        val dataset: DatasetRef,
                         val version: Int,
                         val coordinatorActor: ActorRef,
                         val maxUnackedBatches: Int = RddRowSourceActor.DefaultMaxUnackedBatches,

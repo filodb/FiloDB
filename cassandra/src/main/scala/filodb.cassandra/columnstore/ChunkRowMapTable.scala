@@ -23,13 +23,13 @@ case class ChunkRowMapRecord(binPartition: Types.BinaryPartition,
  *
  * @param config a Typesafe Config with hosts, port, and keyspace parameters for Cassandra connection
  */
-sealed class ChunkRowMapTable(dataset: String, connector: FiloCassandraConnector)
+sealed class ChunkRowMapTable(dataset: DatasetRef, connector: FiloCassandraConnector)
 extends CassandraTable[ChunkRowMapTable, ChunkRowMapRecord] {
   import filodb.cassandra.Util._
   import scala.collection.JavaConversions._
 
-  override val tableName = dataset + "_chunkmap"
-  implicit val keySpace = connector.keySpace
+  override val tableName = dataset.dataset + "_chunkmap"
+  implicit val keySpace = dataset.database.map(KeySpace).getOrElse(connector.defaultKeySpace)
   implicit val session = connector.session
 
   //scalastyle:off

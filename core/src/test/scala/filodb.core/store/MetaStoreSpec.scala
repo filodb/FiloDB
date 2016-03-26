@@ -18,10 +18,12 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
 
   override def beforeAll() {
     super.beforeAll()
-    metaStore.initialize().futureValue(defaultPatience)
+    metaStore.initialize("unittest").futureValue(defaultPatience)
   }
 
-  before { metaStore.clearAllData().futureValue(defaultPatience) }
+  val fooRef = DatasetRef("foo")
+
+  before { metaStore.clearAllData("unittest").futureValue(defaultPatience) }
 
   describe("dataset API") {
     it("should create a new Dataset if one not there") {
@@ -29,7 +31,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
                             Seq("part1", ":getOrElse part2 00"))
       metaStore.newDataset(dataset).futureValue should equal (Success)
 
-      metaStore.getDataset("foo").futureValue should equal (dataset)
+      metaStore.getDataset(fooRef).futureValue should equal (dataset)
     }
 
     it("should return AlreadyExists if dataset already exists") {
@@ -39,7 +41,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
     }
 
     it("should return NotFound if getDataset on nonexisting dataset") {
-      metaStore.getDataset("notThere").failed.futureValue shouldBe a [NotFoundError]
+      metaStore.getDataset(DatasetRef("notThere")).failed.futureValue shouldBe a [NotFoundError]
     }
 
     it("should return all datasets created") {
@@ -49,36 +51,38 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
         metaStore.newDataset(dataset).futureValue should equal (Success)
       }
 
-      metaStore.getAllDatasets().futureValue.toSet should equal (Set("0", "1", "2"))
+      metaStore.getAllDatasets("unittest").futureValue.toSet should equal (Set("0", "1", "2"))
     }
   }
 
   describe("column API") {
     it("should return IllegalColumnChange if an invalid column addition submitted") {
       val firstColumn = DataColumn(0, "first", "foo", 1, Column.ColumnType.StringColumn)
-      whenReady(metaStore.newColumn(firstColumn)) { response =>
+      whenReady(metaStore.newColumn(firstColumn, fooRef)) { response =>
         response should equal (Success)
       }
 
-      whenReady(metaStore.newColumn(firstColumn.copy(version = 0)).failed) { err =>
+      whenReady(metaStore.newColumn(firstColumn.copy(version = 0), fooRef).failed) { err =>
         err shouldBe an [IllegalColumnChange]
       } (patienceConfig)
     }
 
     val monthYearCol = DataColumn(1, "monthYear", "gdelt", 1, Column.ColumnType.LongColumn)
+    val gdeltRef = DatasetRef("gdelt")
+
     it("should be able to create a Column and get the Schema") {
-      metaStore.newColumn(monthYearCol).futureValue should equal (Success)
-      metaStore.getSchema("gdelt", 10).futureValue should equal (Map("monthYear" -> monthYearCol))
+      metaStore.newColumn(monthYearCol, gdeltRef).futureValue should equal (Success)
+      metaStore.getSchema(gdeltRef, 10).futureValue should equal (Map("monthYear" -> monthYearCol))
     }
 
     it("deleteDatasets should delete both dataset and columns") {
       val dataset = Dataset("gdelt", "autoid", "seg")
       metaStore.newDataset(dataset).futureValue should equal (Success)
-      metaStore.newColumn(monthYearCol).futureValue should equal (Success)
+      metaStore.newColumn(monthYearCol, gdeltRef).futureValue should equal (Success)
 
-      metaStore.deleteDataset("gdelt").futureValue should equal (Success)
-      metaStore.getDataset("gdelt").failed.futureValue shouldBe a [NotFoundError]
-      metaStore.getSchema("gdelt", 10).futureValue should equal (Map.empty)
+      metaStore.deleteDataset(gdeltRef).futureValue should equal (Success)
+      metaStore.getDataset(gdeltRef).failed.futureValue shouldBe a [NotFoundError]
+      metaStore.getSchema(gdeltRef, 10).futureValue should equal (Map.empty)
     }
   }
 }

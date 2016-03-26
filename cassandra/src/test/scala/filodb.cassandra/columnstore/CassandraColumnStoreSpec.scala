@@ -19,13 +19,13 @@ class CassandraColumnStoreSpec extends CassandraFlatSpec with ColumnStoreSpec {
 
   "getScanSplits" should "return splits from Cassandra" in {
     // Single split, token_start should equal token_end
-    val singleSplits = colStore.getScanSplits(dataset.name).asInstanceOf[Seq[CassandraTokenRangeSplit]]
+    val singleSplits = colStore.getScanSplits(datasetRef).asInstanceOf[Seq[CassandraTokenRangeSplit]]
     singleSplits should have length (1)
     singleSplits.head.startToken should equal (singleSplits.head.endToken)
     singleSplits.head.replicas.size should equal (1)
 
     // Multiple splits.  Each split token start/end should not equal each other.
-    val multiSplit = colStore.getScanSplits(dataset.name, 2).asInstanceOf[Seq[CassandraTokenRangeSplit]]
+    val multiSplit = colStore.getScanSplits(datasetRef, 2).asInstanceOf[Seq[CassandraTokenRangeSplit]]
     multiSplit should have length (2)
     multiSplit.foreach { split =>
       split.startToken should not equal (split.endToken)

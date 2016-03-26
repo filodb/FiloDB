@@ -45,7 +45,7 @@ trait RowSource extends Actor with StrictLogging {
   // Returns the SetupIngestion message needed for initialization
   def getStartMessage(): NodeCoordinatorActor.SetupIngestion
 
-  def dataset: String
+  def dataset: DatasetRef
   def version: Int
 
   // Returns newer batches of rows.

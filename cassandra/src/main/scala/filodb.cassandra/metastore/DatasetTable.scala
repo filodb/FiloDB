@@ -6,6 +6,7 @@ import com.websudos.phantom.dsl._
 import scala.concurrent.Future
 
 import filodb.cassandra.FiloCassandraConnector
+import filodb.core.DatasetRef
 import filodb.core.metadata.{Dataset, DatasetOptions, Projection}
 
 /**
@@ -34,7 +35,7 @@ with FiloCassandraConnector {
 
   override def fromRow(row: Row): Projection =
     Projection(projectionId(row),
-               name(row),
+               DatasetRef(name(row)),
                splitCString(keyColumns(row)),
                segmentColumns(row),
                projectionReverse(row),
@@ -48,20 +49,30 @@ with FiloCassandraConnector {
   private def splitCString(string: String): Seq[String] =
     if (string.isEmpty) Nil else string.split('\001').toSeq
 
-  def initialize(): Future[Response] = create.ifNotExists.future().toResponse()
+  def initialize(keyspace: String): Future[Response] = {
+    implicit val ks = KeySpace(keyspace)
+    create.ifNotExists.future().toResponse()
+  }
 
-  def clearAll(): Future[Response] = truncate.future().toResponse()
+  def clearAll(keyspace: String): Future[Response] = {
+    implicit val ks = KeySpace(keyspace)
+    truncate.future().toResponse()
+  }
 
-  def insertProjection(projection: Projection): Future[Response] =
-    insert.value(_.name, projection.dataset)
+  def insertProjection(projection: Projection): Future[Response] = withKeyspace(projection.dataset) { ks =>
+    implicit val keySpace = ks
+    insert.value(_.name, projection.dataset.dataset)
           .value(_.projectionId, projection.id)
           .value(_.keyColumns, stringsToStr(projection.keyColIds))
           .value(_.segmentColumns, projection.segmentColId)
           .value(_.projectionReverse, projection.reverse)
           .value(_.projectionColumns, stringsToStr(projection.columns))
           .future.toResponse()
+  }
 
   def createNewDataset(dataset: Dataset): Future[Response] =
+      withKeyspace(dataset.projections.head.dataset) { ks =>
+    implicit val keySpace = ks
     (for { createResp <- insert.value(_.name, dataset.name)
                                .value(_.partitionColumns, stringsToStr(dataset.partitionColumns))
                                .value(_.options, dataset.options.toString)
@@ -71,19 +82,34 @@ with FiloCassandraConnector {
     yield { insertProj }).recover {
       case e: NoSuchElementException => AlreadyExists
     }
+  }
 
-  def getProjection(dataset: TableName, id: Int): Future[Projection] =
-    select.where(_.name eqs dataset).and(_.projectionId eqs id)
-          .one().map(_.getOrElse(throw NotFoundError(s"Dataset $dataset")))
+  def getProjection(dataset: DatasetRef, id: Int): Future[Projection] = withKeyspace(dataset) { ks =>
+    implicit val keySpace = ks
+    select.where(_.name eqs dataset.dataset).and(_.projectionId eqs id)
+          .one().map(_.map(_.copy(dataset = dataset))
+                      .getOrElse(throw NotFoundError(s"Dataset $dataset")))
+  }
 
-  def getDataset(dataset: TableName): Future[Dataset] =
+  def getDataset(dataset: DatasetRef): Future[Dataset] = withKeyspace(dataset) { ks =>
+    implicit val keySpace = ks
     for { proj <- getProjection(dataset, 0)
-          Some((partCols, options)) <- select(_.partitionColumns, _.options).where(_.name eqs dataset).one() }
-    yield { Dataset(dataset, Seq(proj), splitCString(partCols), DatasetOptions.fromString(options)) }
+          Some((partCols, options)) <- select(_.partitionColumns, _.options)
+                                         .where(_.name eqs dataset.dataset).one() }
+    yield { Dataset(dataset.dataset,
+                    Seq(proj.copy(dataset = dataset)),
+                    splitCString(partCols),
+                    DatasetOptions.fromString(options)) }
+  }
 
-  def getAllDatasets: Future[Seq[String]] = select(_.name).fetch.map(_.distinct)
+  def getAllDatasets(database: String): Future[Seq[String]] = {
+    implicit val keySpace = KeySpace(database)
+    select(_.name).fetch.map(_.distinct)
+  }
 
   // NOTE: CQL does not return any error if you DELETE FROM datasets WHERE name = ...
-  def deleteDataset(name: String): Future[Response] =
-    delete.where(_.name eqs name).future().toResponse()
+  def deleteDataset(dataset: DatasetRef): Future[Response] = withKeyspace(dataset) { ks =>
+    implicit val keySpace = ks
+    delete.where(_.name eqs dataset.dataset).future().toResponse()
+  }
 }

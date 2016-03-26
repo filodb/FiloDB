@@ -42,10 +42,10 @@ object FiloRelation extends StrictLogging {
     parse(actor ? msg, askTimeout)(f)
   }
 
-  def getDatasetObj(dataset: String): Dataset =
+  def getDatasetObj(dataset: DatasetRef): Dataset =
     parse(FiloSetup.metaStore.getDataset(dataset)) { ds => ds }
 
-  def getSchema(dataset: String, version: Int): Column.Schema =
+  def getSchema(dataset: DatasetRef, version: Int): Column.Schema =
     parse(FiloSetup.metaStore.getSchema(dataset, version)) { schema => schema }
 
   // Parses the Spark filters, mapping column names to the filters
@@ -150,7 +150,7 @@ object FiloRelation extends StrictLogging {
   }
 
   def splitsQuery(sqlContext: SQLContext,
-                  dataset: String,
+                  dataset: DatasetRef,
                   splitsPerNode: Int,
                   config: Config,
                   readOnlyProjStr: String,
@@ -196,10 +196,10 @@ object FiloRelation extends StrictLogging {
  *
  * @constructor
  * @param sparkContext the spark context to pull config from
- * @param dataset the name of the dataset to read from
+ * @param dataset the DatasetRef with name and database/keyspace of the dataset to read from
  * @param the version of the dataset data to read
  */
-case class FiloRelation(dataset: String,
+case class FiloRelation(dataset: DatasetRef,
                         version: Int = 0,
                         splitsPerNode: Int = 1)
                        (@transient val sqlContext: SQLContext)
@@ -219,7 +219,7 @@ case class FiloRelation(dataset: String,
   override def needConversion: Boolean = false
 
   override def insert(data: DataFrame, overwrite: Boolean): Unit =
-    sqlContext.insertIntoFilo(data, dataset, version, overwrite)
+    sqlContext.insertIntoFilo(data, dataset.dataset, version, overwrite, dataset.database)
 
   def buildScan(): RDD[Row] = buildScan(filoSchema.keys.toArray)
 
