@@ -32,12 +32,12 @@ object FiloRelation extends StrictLogging {
 
   implicit val context = scala.concurrent.ExecutionContext.Implicits.global
 
-  def parse[T, B](cmd: => Future[T], awaitTimeout: FiniteDuration = 5 seconds)(func: T => B): B = {
+  def parse[T, B](cmd: => Future[T], awaitTimeout: FiniteDuration = 30 seconds)(func: T => B): B = {
     func(Await.result(cmd, awaitTimeout))
   }
 
   def actorAsk[B](actor: ActorRef, msg: Any,
-                  askTimeout: FiniteDuration = 5 seconds)(f: PartialFunction[Any, B]): B = {
+                  askTimeout: FiniteDuration = 30 seconds)(f: PartialFunction[Any, B]): B = {
     implicit val timeout = Timeout(askTimeout)
     parse(actor ? msg, askTimeout)(f)
   }
