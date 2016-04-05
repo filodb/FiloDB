@@ -1,6 +1,7 @@
 package filodb.coordinator
 
 import akka.actor.{Actor, ActorRef, Cancellable, Props}
+import akka.event.LoggingReceive
 import com.typesafe.config.Config
 import net.ceedubs.ficus.Ficus._
 import org.velvia.filo.RowReader
@@ -244,7 +245,7 @@ private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
     { originator ! NodeCoordinatorActor.ProjectionTruncated }
   }
 
-  def receive: Receive = {
+  def receive: Receive = LoggingReceive {
     case NewRows(ackTo, rows, seqNo) =>
       ingestRows(ackTo, rows, seqNo)
 
