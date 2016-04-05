@@ -1,8 +1,11 @@
 package filodb
 
-import akka.actor.ActorRef
+import akka.actor.{ActorRef}
+import akka.pattern.ask
+import akka.util.Timeout
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.slf4j.StrictLogging
+import java.util.concurrent.ArrayBlockingQueue
 import org.apache.spark.sql.{SQLContext, SaveMode, DataFrame, Row}
 import org.apache.spark.sql.types.StructType
 import scala.concurrent.{Await, Future}
@@ -69,9 +72,22 @@ package object spark extends StrictLogging {
                                    rows: Iterator[Row],
                                    writeTimeout: FiniteDuration,
                                    partitionIndex: Int): Unit = {
-    val props = RddRowSourceActor.props(rows, columns, dataset, version, coordinatorActor)
+    // Use a queue and read off of iterator in this, the Spark thread.  Due to the presence of ThreadLocals
+    // it is not safe for us to read off of this iterator in another (ie Actor) thread
+    val queue = new ArrayBlockingQueue[Seq[Row]](32)
+    val props = RddRowSourceActor.props(queue, columns, dataset, version, coordinatorActor)
     val rddRowActor = FiloSetup.system.actorOf(props, s"${dataset}_${version}_$partitionIndex")
-    actorAsk(rddRowActor, Start, writeTimeout) {
+    implicit val timeout = Timeout(writeTimeout)
+    val resp = rddRowActor ? Start
+    val rowChunks = rows.grouped(1000)
+    var i = 0
+    while (rowChunks.hasNext && !resp.value.isDefined) {
+      queue.put(rowChunks.next)
+      if (i % 20 == 0) logger.info(s"Ingesting batch starting at row ${i * 1000}")
+      i += 1
+    }
+    queue.put(Nil)    // Final marker that there are no more rows
+    Await.result(resp, writeTimeout) match {
       case AllDone =>
       case SetupError(UnknownDataset) => throw DatasetNotFound(dataset.dataset)
       case SetupError(BadSchema(reason)) => throw BadSchemaError(reason)

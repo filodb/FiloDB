@@ -1,6 +1,7 @@
 package filodb.spark
 
 import akka.actor.{Actor, ActorRef, Props}
+import java.util.concurrent.BlockingQueue
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.{SQLContext, DataFrame, Row}
 import org.apache.spark.sql.types._
@@ -15,15 +16,14 @@ object RddRowSourceActor {
   val DefaultMaxUnackedBatches = 10
   val DefaultRowsToRead = 1000
 
-  def props(rows: Iterator[Row],
+  def props(queue: BlockingQueue[Seq[Row]],
             columns: Seq[String],
             dataset: DatasetRef,
             version: Int,
             coordinatorActor: ActorRef,
-            maxUnackedBatches: Int = RddRowSourceActor.DefaultMaxUnackedBatches,
-            rowsToRead: Int = RddRowSourceActor.DefaultRowsToRead): Props =
-    Props(classOf[RddRowSourceActor], rows, columns, dataset, version,
-          coordinatorActor, maxUnackedBatches, rowsToRead)
+            maxUnackedBatches: Int = RddRowSourceActor.DefaultMaxUnackedBatches): Props =
+    Props(classOf[RddRowSourceActor], queue, columns, dataset, version,
+          coordinatorActor, maxUnackedBatches)
 }
 
 /**
@@ -33,25 +33,37 @@ object RddRowSourceActor {
  *
  * TODO: implement the rewind() function, store unacked rows so we can replay them
  */
-class RddRowSourceActor(rows: Iterator[Row],
+class RddRowSourceActor(queue: BlockingQueue[Seq[Row]],
                         columns: Seq[String],
                         val dataset: DatasetRef,
                         val version: Int,
                         val coordinatorActor: ActorRef,
-                        val maxUnackedBatches: Int = RddRowSourceActor.DefaultMaxUnackedBatches,
-                        rowsToRead: Int = RddRowSourceActor.DefaultRowsToRead)
+                        val maxUnackedBatches: Int = RddRowSourceActor.DefaultMaxUnackedBatches)
 extends BaseActor with RowSource {
   import NodeCoordinatorActor._
   import RddRowSourceActor._
 
   def getStartMessage(): SetupIngestion = SetupIngestion(dataset, columns, version)
 
-  val seqIds = Iterator.from(0).map { id =>
-    if (id % 20 == 0) logger.info(s"Ingesting batch starting at row ${id * rowsToRead}")
-    id.toLong
-  }
+  val seqIds = Iterator.from(0).map { id => id.toLong }
 
-  val groupedRows = rows.map(RddRowReader).grouped(rowsToRead)
+  val groupedRows = new Iterator[Seq[RowReader]] {
+    var done = false
+    var current: Seq[Row] = Seq.empty
+    def hasNext: Boolean = {
+      if (!done && current.isEmpty) {
+        current = queue.take()
+        if (current.isEmpty) done = true
+      }
+      !done
+    }
+    def next: Seq[RowReader] = {
+      val readers = current.map(RddRowReader)
+      // Reset current so we don't keep pulling in hasNext
+      current = Seq.empty
+      readers
+    }
+  }
   val batchIterator = seqIds.zip(groupedRows)
 }
 
