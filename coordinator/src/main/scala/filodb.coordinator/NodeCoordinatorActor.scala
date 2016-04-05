@@ -1,6 +1,7 @@
 package filodb.coordinator
 
 import akka.actor.{Actor, ActorRef, PoisonPill, Props, SupervisorStrategy, Terminated}
+import akka.event.LoggingReceive
 import com.typesafe.config.Config
 import net.ceedubs.ficus.Ficus._
 import org.velvia.filo.RowReader
@@ -228,7 +229,7 @@ class NodeCoordinatorActor(metaStore: MetaStore,
     }
   }
 
-  def receive: Receive = {
+  def receive: Receive = LoggingReceive {
     case CreateDataset(datasetObj, columns, db) =>
       createDataset(sender, datasetObj, DatasetRef(datasetObj.name, db), columns)
 
