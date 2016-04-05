@@ -6,6 +6,8 @@ import scala.util.Random
 import scala.concurrent.duration._
 import scala.concurrent.{Await, Future}
 
+import filodb.coordinator.{DatasetCoordinatorActor, NodeCoordinatorActor}
+import filodb.core.DatasetRef
 import filodb.spark._
 
 /**
@@ -99,6 +101,13 @@ object IngestionStress extends App {
     count
   }
 
+  def printIngestionStats(dataset: String): Unit = {
+    val getStatsMsg = NodeCoordinatorActor.GetIngestionStats(DatasetRef(dataset), 0)
+    FiloRelation.actorAsk(FiloSetup.coordinatorActor, getStatsMsg) {
+      case stats: DatasetCoordinatorActor.Stats => puts(s"  Stats for dataset $dataset => $stats")
+    }
+  }
+
   val fut = for { stressDf  <- stressIngestor
         hrOfDayDf <- hrOfDayIngestor
         stressCount <- checkDatasetCount(stressDf, inputLines)
@@ -107,6 +116,10 @@ object IngestionStress extends App {
 
     // Do something just so we have to depend on both things being done
     puts(s"Counts: $stressCount $hrCount")
+
+    puts("\nStats for each dataset:")
+    printIngestionStats("taxi_medallion_seg")
+    printIngestionStats("taxi_hour_of_day")
 
     // clean up!
     FiloSetup.shutdown()
