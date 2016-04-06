@@ -78,10 +78,12 @@ trait RowSource extends Actor with StrictLogging {
   def reading: Receive = LoggingReceive {
     case GetMoreRows if batchIterator.hasNext => sendRows()
     case GetMoreRows =>
-      logger.info(s" ==> (${self.path.name}) doneReading: outstanding seqIds = ${outstanding.keys}")
-      if (outstanding.isEmpty)  { sendFlush() }
-      else                      { schedule(waitingPeriod, CheckCanIngest) }
-      context.become(doneReading)
+      if (outstanding.isEmpty)  { finish() }
+      else                      {
+        logger.info(s" ==> (${self.path.name}) doneReading: outstanding seqIds = ${outstanding.keys}")
+        schedule(waitingPeriod, CheckCanIngest)
+        context.become(doneReading)
+      }
 
     case NodeCoordinatorActor.Ack(lastSequenceNo) =>
       if (outstanding contains lastSequenceNo) outstanding.remove(lastSequenceNo)
@@ -125,11 +127,7 @@ trait RowSource extends Actor with StrictLogging {
   def doneReadingAck: Receive = LoggingReceive {
     case NodeCoordinatorActor.Ack(lastSequenceNo) =>
       if (outstanding contains lastSequenceNo) outstanding.remove(lastSequenceNo)
-      if (outstanding.isEmpty) sendFlush()
-
-    // Only until we get the Flushed signal do we know all rows are finished flushing.
-    case NodeCoordinatorActor.Flushed =>
-      finish()
+      if (outstanding.isEmpty) finish()
   }
 
   // If we don't get acks back, need to keep trying
@@ -150,8 +148,6 @@ trait RowSource extends Actor with StrictLogging {
       context.become(waiting)
     }
   }
-
-  def sendFlush(): Unit = coordinatorActor ! NodeCoordinatorActor.Flush(dataset, version)
 
   private var scheduledTask: Option[Cancellable] = None
   def schedule(delay: FiniteDuration, msg: Any): Unit = {
