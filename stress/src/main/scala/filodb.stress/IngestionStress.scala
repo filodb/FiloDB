@@ -95,8 +95,8 @@ object IngestionStress extends App {
 
   def checkDatasetCount(df: DataFrame, expected: Long): Future[Long] = Future {
     val count = df.count()
-    if (count == expected)  puts(s"Count matched $count for dataframe $df")
-    else                    puts(s"Expected $expected rows, but actually got $count for dataframe $df")
+    if (count == expected) { puts(s"Count matched $count for dataframe $df") }
+    else                   { puts(s"Expected $expected rows, but actually got $count for dataframe $df") }
     count
   }
 
