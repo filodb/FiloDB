@@ -12,10 +12,11 @@ import scala.concurrent.Await
 import scala.concurrent.duration._
 import scala.language.postfixOps
 
-import filodb.core._
 import filodb.cassandra.columnstore.CassandraColumnStore
 import filodb.cassandra.metastore.CassandraMetaStore
+import filodb.coordinator.client.Client
 import filodb.coordinator.{NodeCoordinatorActor, CoordinatorSetup}
+import filodb.core._
 import filodb.core.metadata.Column.{ColumnType, Schema}
 import filodb.core.metadata.{Column, DataColumn, Dataset, RichProjection}
 import filodb.core.store.{Analyzer, CachedMergingColumnStore, FilteredPartitionScan}
@@ -61,6 +62,8 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
   val config = ConfigFactory.load.getConfig("filodb")
   lazy val columnStore = new CassandraColumnStore(config, readEc)
   lazy val metaStore = new CassandraMetaStore(config.getConfig("cassandra"))
+
+  import Client.{actorAsk, parse}
 
   def printHelp() {
     println("filo-cli help:")

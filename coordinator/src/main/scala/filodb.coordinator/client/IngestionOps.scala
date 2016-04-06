@@ -1,5 +1,7 @@
 package filodb.coordinator.client
 
+import scala.concurrent.duration._
+
 import filodb.core._
 import filodb.coordinator._
 
@@ -14,13 +16,23 @@ trait IngestionOps extends ClientBase {
    * @param version the version of the dataset to flush
    * @throws ClientException
    */
-  def flush(dataset: DatasetRef, version: Int): Unit = {
-    askCoordinator(Flush(dataset, version)) {
+  def flush(dataset: DatasetRef, version: Int, timeout: FiniteDuration = 30.seconds): Unit = {
+    askCoordinator(Flush(dataset, version), timeout) {
       case Flushed =>
     }
   }
 
-  def flush(datasetName: String,
-            database: Option[String] = None,
-            version: Int = 0): Unit = flush(DatasetRef(datasetName, database), version)
+  def flushByName(datasetName: String,
+                  database: Option[String] = None,
+                  version: Int = 0): Unit = flush(DatasetRef(datasetName, database), version)
+
+  /**
+   * Retrieves the current ingestion stats for a particular dataset and version.
+   */
+  def ingestionStats(dataset: DatasetRef,
+                     version: Int,
+                     timeout: FiniteDuration = 30.seconds): DatasetCoordinatorActor.Stats =
+    askCoordinator(GetIngestionStats(dataset, version), timeout) {
+      case stats: DatasetCoordinatorActor.Stats => stats
+    }
 }

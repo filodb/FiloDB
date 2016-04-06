@@ -62,6 +62,7 @@ package object spark extends StrictLogging {
   import filodb.spark.FiloRelation._
   import FiloSetup.metaStore
   import RowSource._
+  import filodb.coordinator.client.Client.{parse, actorAsk}
 
   val sparkLogger = logger
 

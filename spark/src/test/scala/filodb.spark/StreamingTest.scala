@@ -87,7 +87,7 @@ with Matchers with ScalaFutures {
 
     // Flush after end of stream.  This is only needed for this test to get definitive results; in a real
     // streaming app this would not be needed, ever....
-    FiloSetup.client.flush(largeDataset.name)
+    FiloSetup.client.flushByName(largeDataset.name)
 
     import org.apache.spark.sql.functions._
 
