@@ -82,6 +82,18 @@ extends CachedMergingColumnStore with CassandraColumnStoreScanner with StrictLog
           rmtResp                   <- rowMapTable.clearAll() } yield { rmtResp }
   }
 
+  def dropDataset(dataset: DatasetRef): Future[Response] = {
+    val chunkTable = getOrCreateChunkTable(dataset)
+    val rowMapTable = getOrCreateRowMapTable(dataset)
+    for { ctResp                    <- chunkTable.drop() if ctResp == Success
+          rmtResp                   <- rowMapTable.drop() if rmtResp == Success }
+    yield {
+      chunkTableCache.remove(dataset)
+      rowMapTableCache.remove(dataset)
+      rmtResp
+    }
+  }
+
   /**
    * Implementations of low-level storage primitives
    */

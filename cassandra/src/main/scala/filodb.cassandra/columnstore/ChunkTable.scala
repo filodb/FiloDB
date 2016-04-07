@@ -45,6 +45,8 @@ extends CassandraTable[ChunkTable, (String, Types.SegmentId, Int, ByteBuffer)] {
 
   def clearAll(): Future[Response] = truncate.future().toResponse()
 
+  def drop(): Future[Response] = delete.future().toResponse()
+
   def writeChunks(partition: Types.BinaryPartition,
                   version: Int,
                   segmentId: Types.SegmentId,
