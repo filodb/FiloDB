@@ -49,4 +49,4 @@ trait ClientBase {
 /**
  * Standard client for FiloDB coordinator actor, which takes reference to a single NodeCoordinator
  */
-class Client(val nodeCoordinator: ActorRef) extends IngestionOps
+class Client(val nodeCoordinator: ActorRef) extends IngestionOps with DatasetOps

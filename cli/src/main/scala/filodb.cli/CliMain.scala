@@ -111,7 +111,7 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
                                    getRef(args),
                                    version).prettify())
         case Some("delete") =>
-          parse(metaStore.deleteDataset(getRef(args))) { x => x }
+          client.deleteDataset(getRef(args))
 
         case x: Any =>
           args.select.map { selectCols =>
