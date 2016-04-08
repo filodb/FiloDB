@@ -52,7 +52,8 @@ extends CassandraTable[ChunkRowMapTable, ChunkRowMapRecord] {
 
   def clearAll(): Future[Response] = truncate.future().toResponse()
 
-  def drop(): Future[Response] = delete.future().toResponse()
+  def drop(): Future[Response] =
+    Future(session.execute(s"DROP TABLE IF EXISTS ${keySpace.name}.$tableName")).toResponse()
 
   /**
    * Retrieves all chunk maps from a single partition.
