@@ -500,6 +500,8 @@ Individual configuration params may also be changed by passing them on the comma
 
 All `-D` config options must be passed before any other arguments.
 
+You may also configure CLI logging by copying `cli/src/main/resources/logback.xml` to your deploy folder, customizing it, and passing on the command line `-Dlogback.configurationFile=/path/to/filo-cli-logback.xml`.
+
 NOTE: The CLI currently only operates on the Cassandra column store.  The `--database` option may be used to specify which keyspace to operate on.  If the keyspace is not initialized, then FiloDB code will automatically create one for you, but you may want to create it yourself to control the options that you want.
 
 ### CLI Example
@@ -532,17 +534,17 @@ Query/export some columns:
 
 ## Current Status
 
-Version 0.2 is the stable, latest released version.  It has been tested on a cluster for a different variety of schemas, has a stable data model and ingestion, and features a huge number of improvements over the previous version:
+Version 0.2 is the stable, latest released version.  It has been tested on a cluster for a different variety of schemas, has a stable data model and ingestion, and features a huge number of improvements over the previous version.
 
-* Multi column partition and row keys
-* Separate segment key for much easier control of columnar chunk size and sort order
-* Much richer projection key filtering (IN and =, on any column)
-* Range scans within partitions by segment key
-* Computed columns for easily deriving segment and partition keys, especially useful for time series
-* Support for timestamp columns
-* Better performance and error handling: true node locality for reads; up to 2x faster scan performance; fast single partition reads; retries and configurable connection timeouts etc.
-* A ton of bug fixes
-* An experimental feature to sync FiloDB tables to Hive MetaStore
+### Version 0.2.1 change list:
+
+* Write to multiple keyspaces in C*, using the `database` option
+* Stress tests
+* Issue #77: `flush_after_write` and controlling memtable flushes at end of ETL
+* More efficient streaming ingestion: flushes no longer automatically done at end of each partition of data
+* Issue #84: bug with ingesting into FiloDB after doing sort or shuffles using Tungsten Spark 1.5
+* filo-cli delete command now deletes both metadata and data tables
+* new filo-cli truncate command
 
 ## Deploying
 
