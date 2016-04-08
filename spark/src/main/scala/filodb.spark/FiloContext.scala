@@ -143,8 +143,7 @@ class FiloContext(val sqlContext: SQLContext) extends AnyVal {
     checkAndAddColumns(dfColumns, dataset, version)
 
     if (overwrite) {
-      val datasetObj = getDatasetObj(dataset)
-      truncateDataset(datasetObj, version)
+      FiloSetup.client.truncateDataset(dataset, version)
     }
 
     val numPartitions = df.rdd.partitions.size

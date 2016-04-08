@@ -67,7 +67,7 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
 
   def printHelp() {
     println("filo-cli help:")
-    println("  commands: init create importcsv list analyze delete")
+    println("  commands: init create importcsv list analyze delete truncate")
     println("  columns: <colName1>:<type1>,<colName2>:<type2>,... ")
     println("  types:  int,long,double,string,bool,timestamp")
     println("  common options:  --dataset --database")
@@ -85,8 +85,10 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
         case Some("init") =>
           println("Initializing FiloDB Cassandra tables...")
           awaitSuccess(metaStore.initialize(args.database.getOrElse(config.getString("cassandra.keyspace"))))
+
         case Some("list") =>
           args.dataset.map(ds => dumpDataset(ds, args.database)).getOrElse(dumpAllDatasets(args.database))
+
         case Some("create") =>
           require(args.dataset.isDefined && args.columns.isDefined, "Need to specify dataset and columns")
           require(args.segmentKey.isDefined, "--segmentKey must be defined")
@@ -97,6 +99,7 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
                                   args.segmentKey.get,
                                   if (args.partitionKeys.isEmpty) { Seq(Dataset.DefaultPartitionColumn) }
                                   else { args.partitionKeys })
+
         case Some("importcsv") =>
           import org.apache.commons.lang3.StringEscapeUtils._
           val delimiter = unescapeJava(args.delimiter)(0)
@@ -105,6 +108,7 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
                     args.filename.get,
                     delimiter,
                     args.timeoutMinutes.minutes)
+
         case Some("analyze") =>
           println(Analyzer.analyze(columnStore.asInstanceOf[CachedMergingColumnStore],
                                    metaStore,
@@ -112,6 +116,9 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
                                    version).prettify())
         case Some("delete") =>
           client.deleteDataset(getRef(args))
+
+        case Some("truncate") =>
+          client.truncateDataset(getRef(args), version)
 
         case x: Any =>
           args.select.map { selectCols =>

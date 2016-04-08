@@ -191,15 +191,6 @@ package object spark extends StrictLogging {
     }
   }
 
-  private[spark] def truncateDataset(dataset: Dataset, version: Int): Unit = {
-    logger.info(s"Truncating dataset ${dataset.name}")
-    actorAsk(FiloSetup.coordinatorActor,
-             TruncateProjection(dataset.projections.head, version), 1.minute) {
-      case ProjectionTruncated => logger.info(s"Truncation of ${dataset.name} finished")
-      case DatasetError(msg) => throw NotFoundError(s"$msg - (${dataset.name}, ${version})")
-    }
-  }
-
   private[spark] def deleteDataset(dataset: DatasetRef): Unit = {
     logger.info(s"Deleting dataset $dataset")
     parse(FiloSetup.metaStore.deleteDataset(dataset)) { resp => resp }
