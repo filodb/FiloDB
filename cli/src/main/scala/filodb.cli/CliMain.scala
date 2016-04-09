@@ -189,6 +189,9 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
       case NodeCoordinatorActor.DatasetError(errMsg) =>
         println(s"Error creating dataset $dataset: $errMsg")
         exitCode = 2
+      case other: Any =>
+        println(s"Error: $other")
+        exitCode = 2
     }
   }
 
