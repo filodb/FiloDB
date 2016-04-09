@@ -179,9 +179,12 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
         return
     }
 
-    actorAsk(coordinatorActor, NodeCoordinatorActor.CreateDataset(datasetObj, columns)) {
+    actorAsk(coordinatorActor, NodeCoordinatorActor.CreateDataset(datasetObj, columns, dataset.database)) {
       case NodeCoordinatorActor.DatasetCreated =>
         println(s"Dataset $dataset created!")
+        exitCode = 0
+      case NodeCoordinatorActor.DatasetAlreadyExists =>
+        println(s"Dataset $dataset already exists!")
         exitCode = 0
       case NodeCoordinatorActor.DatasetError(errMsg) =>
         println(s"Error creating dataset $dataset: $errMsg")

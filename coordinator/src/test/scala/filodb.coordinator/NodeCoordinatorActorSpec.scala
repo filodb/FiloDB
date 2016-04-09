@@ -93,6 +93,25 @@ with CoordinatorSetup with ScalaFutures {
     }
   }
 
+  describe("NodeCoordinatorActor DatasetOps commands") {
+    it("should be able to create new dataset") {
+      probe.send(coordActor, CreateDataset(dataset1, schema))
+      probe.expectMsg(DatasetCreated)
+    }
+
+    it("should return DatasetAlreadyExists creating dataset that already exists") {
+      probe.send(coordActor, CreateDataset(dataset1, schema))
+      probe.expectMsg(DatasetCreated)
+
+      probe.send(coordActor, CreateDataset(dataset1, schema))
+      probe.expectMsg(DatasetAlreadyExists)
+    }
+
+    it("should be able to DeleteDataset") (pending)
+
+    it("should be able to truncate a dataset") (pending)
+  }
+
   it("should be able to start ingestion, send rows, and get an ack back") {
     probe.send(coordActor, CreateDataset(dataset3, schema))
     probe.expectMsg(DatasetCreated)

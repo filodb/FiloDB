@@ -22,6 +22,7 @@ trait DatasetCommands {
                            database: Option[String] = None) extends NodeCommand
 
   case object DatasetCreated extends Response with NodeResponse
+  case object DatasetAlreadyExists extends Response with NodeResponse
   case class DatasetError(msg: String) extends ErrorResponse with NodeResponse
 
   /**
