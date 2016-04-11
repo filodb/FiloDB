@@ -75,6 +75,24 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
       metaStore.getSchema(gdeltRef, 10).futureValue should equal (Map("monthYear" -> monthYearCol))
     }
 
+    it("should return IllegalColumnChange if some column additions invalid") {
+      val firstColumn = DataColumn(0, "first", "foo", 1, Column.ColumnType.StringColumn)
+      val secondColumn = DataColumn(1, "second", "foo", 1, Column.ColumnType.IntColumn)
+      whenReady(metaStore.newColumn(firstColumn, fooRef)) { response =>
+        response should equal (Success)
+      }
+
+      val badColumn = firstColumn.copy(version = 0)  // lower version than first column!
+      whenReady(metaStore.newColumns(Seq(badColumn, secondColumn), fooRef).failed) { err =>
+        err shouldBe an [IllegalColumnChange]
+      } (patienceConfig)
+    }
+
+    it("should be able to add many new columns at once") {
+      val columns = (0 to 129).map { i => DataColumn(i, i.toString, "foo", 1, Column.ColumnType.IntColumn) }
+      metaStore.newColumns(columns, fooRef).futureValue should equal (Success)
+    }
+
     it("deleteDatasets should delete both dataset and columns") {
       val dataset = Dataset("gdelt", "autoid", "seg")
       metaStore.newDataset(dataset).futureValue should equal (Success)

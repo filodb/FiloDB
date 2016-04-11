@@ -88,7 +88,7 @@ class NodeCoordinatorActor(metaStore: MetaStore,
       originator ! DatasetError(s"There must be at least one projection in dataset $datasetObj")
     } else {
       (for { resp1 <- metaStore.newDataset(datasetObj) if resp1 == Success
-             resp2 <- Future.sequence(columns.map(metaStore.newColumn(_, ref)))
+             resp2 <- metaStore.newColumns(columns, ref)
              resp3 <- columnStore.initializeProjection(datasetObj.projections.head) }
       yield {
         originator ! DatasetCreated

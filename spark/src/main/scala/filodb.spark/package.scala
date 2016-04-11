@@ -115,11 +115,6 @@ package object spark extends StrictLogging {
     }
   }
 
-  private[spark] def runCommands[B](cmds: Set[Future[Response]]): Unit = {
-    val responseSet = Await.result(Future.sequence(cmds), 5 seconds)
-    if (!responseSet.forall(_ == Success)) throw new RuntimeException(s"Some commands failed: $responseSet")
-  }
-
   import filodb.spark.TypeConverters._
 
   private[spark] def dfToFiloColumns(df: DataFrame): Seq[DataColumn] = dfToFiloColumns(df.schema)
@@ -153,11 +148,10 @@ package object spark extends StrictLogging {
     if (matchingTypeErrs.nonEmpty) throw ColumnTypeMismatch(matchingTypeErrs)
 
     if (missingCols.nonEmpty) {
-      val addMissingCols = missingCols.map { colName =>
-        val newCol = dfSchema(colName).copy(dataset = dataset.dataset, version = version)
-        metaStore.newColumn(newCol, dataset)
+      val newCols = missingCols.map(dfSchema(_).copy(dataset = dataset.dataset, version = version))
+      parse(metaStore.newColumns(newCols.toSeq, dataset)) { resp =>
+        if (resp != Success) throw new RuntimeException(s"Error $resp creating new columns $newCols")
       }
-      runCommands(addMissingCols)
     }
   }
 

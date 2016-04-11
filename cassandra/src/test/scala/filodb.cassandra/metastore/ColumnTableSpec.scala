@@ -41,7 +41,7 @@ class ColumnTableSpec extends CassandraFlatSpec with BeforeAndAfter {
   }
 
   it should "add the first column and read it back as a schema" in {
-    columnTable.insertColumn(firstColumn, fooRef).futureValue should equal (Success)
+    columnTable.insertColumns(Seq(firstColumn), fooRef).futureValue should equal (Success)
     columnTable.getSchema(fooRef, 2).futureValue(timeout) should equal (Map("first" -> firstColumn))
 
     // Check that limiting the getSchema query to version 0 does not return the version 1 column

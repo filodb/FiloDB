@@ -67,7 +67,7 @@ class InMemoryMetaStore(implicit val ec: ExecutionContext) extends MetaStore wit
    * ** Column API ***
    */
 
-  def insertColumn(column: DataColumn, ref: DatasetRef): Future[Response] = {
+  def insertColumns(newColumns: Seq[DataColumn], ref: DatasetRef): Future[Response] = {
     // See https://issues.scala-lang.org/browse/SI-7943
     val columnMap = columns.get(ref.dataset) match {
       case Some(cMap) => cMap
@@ -75,9 +75,8 @@ class InMemoryMetaStore(implicit val ec: ExecutionContext) extends MetaStore wit
         val newCMap = new ColumnMap(colMapOrdering)
         columns.putIfAbsent(ref.dataset, newCMap).getOrElse(newCMap)
     }
-    val oldVal = columnMap.putIfAbsent((column.version, column.name), column)
-    // If oldVal is null then it was absent and write worked.
-    Future.successful(Option(oldVal).map(x => NotApplied).getOrElse(Success))
+    newColumns.foreach { c => columnMap.putIfAbsent((c.version, c.name), c) }
+    Future.successful(Success)
   }
 
   def getSchema(dataset: DatasetRef, version: Int): Future[Column.Schema] = Future {
