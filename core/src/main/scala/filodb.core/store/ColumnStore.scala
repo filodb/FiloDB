@@ -209,9 +209,9 @@ trait CachedMergingColumnStore extends ColumnStore with ColumnStoreScanner with 
     for { oldSegment <- getSegFromCache(projection.toRowKeyOnlyProjection, segment, version)
           mergedSegment = mergingStrategy.mergeSegments(oldSegment, segment)
           writeChunksResp <- writeBatchedChunks(projection.datasetRef, version, mergedSegment)
+            if writeChunksResp == Success
           writeCRMapResp <- writeChunkRowMap(projection.datasetRef, segment.binaryPartition, version,
-                                         segment.segmentId, mergedSegment.index)
-            if writeChunksResp == Success }
+                                         segment.segmentId, mergedSegment.index) }
     yield {
       // Important!  Update the cache with the new merged segment.
       updateCache(projection, version, mergedSegment)

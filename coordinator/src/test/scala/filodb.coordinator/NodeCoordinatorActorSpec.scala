@@ -44,6 +44,7 @@ with CoordinatorSetup with ScalaFutures {
 
   before {
     metaStore.clearAllData("unittest").futureValue
+    columnStore.dropDataset(DatasetRef(dataset1.name)).futureValue
     coordActor = system.actorOf(NodeCoordinatorActor.props(metaStore, reprojector, columnStore, config))
     probe = TestProbe()
   }
@@ -107,9 +108,19 @@ with CoordinatorSetup with ScalaFutures {
       probe.expectMsg(DatasetAlreadyExists)
     }
 
-    it("should be able to DeleteDataset") (pending)
+    it("should be able to drop a dataset") {
+      probe.send(coordActor, CreateDataset(dataset1, schema))
+      probe.expectMsg(DatasetCreated)
 
-    it("should be able to truncate a dataset") (pending)
+      val ref = DatasetRef(dataset1.name)
+      metaStore.getDataset(ref).futureValue should equal (dataset1)
+
+      probe.send(coordActor, DropDataset(DatasetRef(dataset1.name)))
+      probe.expectMsg(DatasetDropped)
+
+      // Now verify that the dataset was indeed dropped
+      metaStore.getDataset(ref).failed.futureValue shouldBe a [NotFoundError]
+    }
   }
 
   it("should be able to start ingestion, send rows, and get an ack back") {
