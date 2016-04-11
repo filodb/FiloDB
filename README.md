@@ -540,6 +540,7 @@ Version 0.2 is the stable, latest released version.  It has been tested on a clu
 
 * Write to multiple keyspaces in C*, using the `database` option
 * Stress tests
+* Productionization and robustification all around, especially with `filo-cli`
 * Issue #77: `flush_after_write` and controlling memtable flushes at end of ETL
 * More efficient streaming ingestion: flushes no longer automatically done at end of each partition of data
 * Issue #84: bug with ingesting into FiloDB after doing sort or shuffles using Tungsten Spark 1.5

@@ -21,6 +21,8 @@ import filodb.spark._
  * Recommended to run this with the first million rows only as a first run to make sure everything works.
  * Test at different memory settings - but recommend minimum 4G.
  *
+ * Also, if you run this locally, run it using local-cluster to test clustering effects.
+ *
  * TODO: randomize number of lines to ingest.  Maybe $numOfLines - util.Random.nextInt(10000)....
  */
 object IngestionStress extends App {
@@ -34,7 +36,7 @@ object IngestionStress extends App {
   }
 
   // Setup SparkContext, etc.
-  val conf = (new SparkConf).setMaster("local[8]")
+  val conf = (new SparkConf)//.setMaster("local[8]")
                             .setAppName("test")
                             .set("spark.filodb.cassandra.keyspace", "filostress")
                             .set("spark.sql.shuffle.partitions", "4")

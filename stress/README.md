@@ -8,7 +8,10 @@ To run:
 
 In your Spark distribution:
 
-    spark-submit --driver-memory 5g --executor-memory 5g --class filodb.stress.<stress test main class> <path-to-assembly-jar>  <args> 
+    spark-submit --driver-memory 5g --executor-memory 5g --master 'local-cluster[2,1,2048]' \
+      --class filodb.stress.<stress test main class> <path-to-assembly-jar>  <args> 
+
+The above example runs in `local-cluster` mode with 2 worker processes each with 2GB of memory.
 
 ### InMemoryQueryStress
 
