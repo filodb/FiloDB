@@ -121,8 +121,9 @@ lazy val jmhDeps = Seq(
 )
 
 lazy val stressDeps = Seq(
-  "com.databricks" %% "spark-csv" % "1.3.0",
-  "org.apache.spark"     %% "spark-sql"         % sparkVersion % "provided" excludeAll(excludeZK)
+  "com.databricks"       %% "spark-csv"         % "1.3.0",
+  "org.apache.spark"     %% "spark-sql"         % sparkVersion % "provided" excludeAll(excludeZK),
+  "org.apache.spark"     %% "spark-streaming"   % sparkVersion % "provided" excludeAll(excludeZK)
 )
 
 //////////////////////////
