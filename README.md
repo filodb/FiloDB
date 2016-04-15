@@ -49,6 +49,7 @@ See [architecture](doc/architecture.md) and [datasets and reading](doc/datasets_
   - [Running the CLI](#running-the-cli)
   - [CLI Example](#cli-example)
 - [Current Status](#current-status)
+  - [Version 0.2.1 change list:](#version-021-change-list)
 - [Deploying](#deploying)
 - [Code Walkthrough](#code-walkthrough)
 - [Building and Testing](#building-and-testing)
