@@ -55,7 +55,7 @@ lazy val stress = (project in file("stress"))
 
 val phantomVersion = "1.12.2"
 val akkaVersion    = "2.3.7"
-val sparkVersion   = "1.5.2"
+val sparkVersion   = "1.5.1"
 
 lazy val extraRepos = Seq(
   "Typesafe repository releases" at "http://repo.typesafe.com/typesafe/releases/",
