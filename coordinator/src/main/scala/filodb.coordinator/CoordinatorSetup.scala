@@ -4,9 +4,10 @@ import akka.actor.ActorSystem
 import com.typesafe.config.Config
 import scala.concurrent.ExecutionContext
 
-import filodb.core.store.{ColumnStore, MetaStore}
+import filodb.coordinator.client.Client
 import filodb.core.FutureUtils
 import filodb.core.reprojector._
+import filodb.core.store.{ColumnStore, MetaStore}
 
 /**
  * A trait to make setup of the [[NodeCoordinatorActor]] stack a bit easier.
@@ -40,6 +41,8 @@ trait CoordinatorSetup {
   lazy val coordinatorActor =
     system.actorOf(NodeCoordinatorActor.props(metaStore, reprojector, columnStore, config),
                    "coordinator")
+
+  lazy val client = new Client(coordinatorActor)
 
   def shutdown(): Unit = {
     system.shutdown()

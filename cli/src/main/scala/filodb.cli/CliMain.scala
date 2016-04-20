@@ -12,10 +12,11 @@ import scala.concurrent.Await
 import scala.concurrent.duration._
 import scala.language.postfixOps
 
-import filodb.core._
 import filodb.cassandra.columnstore.CassandraColumnStore
 import filodb.cassandra.metastore.CassandraMetaStore
+import filodb.coordinator.client.Client
 import filodb.coordinator.{NodeCoordinatorActor, CoordinatorSetup}
+import filodb.core._
 import filodb.core.metadata.Column.{ColumnType, Schema}
 import filodb.core.metadata.{Column, DataColumn, Dataset, RichProjection}
 import filodb.core.store.{Analyzer, CachedMergingColumnStore, FilteredPartitionScan}
@@ -62,9 +63,11 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
   lazy val columnStore = new CassandraColumnStore(config, readEc)
   lazy val metaStore = new CassandraMetaStore(config.getConfig("cassandra"))
 
+  import Client.{actorAsk, parse}
+
   def printHelp() {
     println("filo-cli help:")
-    println("  commands: init create importcsv list analyze delete")
+    println("  commands: init create importcsv list analyze delete truncate")
     println("  columns: <colName1>:<type1>,<colName2>:<type2>,... ")
     println("  types:  int,long,double,string,bool,timestamp")
     println("  common options:  --dataset --database")
@@ -82,8 +85,10 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
         case Some("init") =>
           println("Initializing FiloDB Cassandra tables...")
           awaitSuccess(metaStore.initialize(args.database.getOrElse(config.getString("cassandra.keyspace"))))
+
         case Some("list") =>
           args.dataset.map(ds => dumpDataset(ds, args.database)).getOrElse(dumpAllDatasets(args.database))
+
         case Some("create") =>
           require(args.dataset.isDefined && args.columns.isDefined, "Need to specify dataset and columns")
           require(args.segmentKey.isDefined, "--segmentKey must be defined")
@@ -94,6 +99,7 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
                                   args.segmentKey.get,
                                   if (args.partitionKeys.isEmpty) { Seq(Dataset.DefaultPartitionColumn) }
                                   else { args.partitionKeys })
+
         case Some("importcsv") =>
           import org.apache.commons.lang3.StringEscapeUtils._
           val delimiter = unescapeJava(args.delimiter)(0)
@@ -102,13 +108,17 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
                     args.filename.get,
                     delimiter,
                     args.timeoutMinutes.minutes)
+
         case Some("analyze") =>
           println(Analyzer.analyze(columnStore.asInstanceOf[CachedMergingColumnStore],
                                    metaStore,
                                    getRef(args),
                                    version).prettify())
         case Some("delete") =>
-          parse(metaStore.deleteDataset(getRef(args))) { x => x }
+          client.deleteDataset(getRef(args))
+
+        case Some("truncate") =>
+          client.truncateDataset(getRef(args), version)
 
         case x: Any =>
           args.select.map { selectCols =>
@@ -169,12 +179,18 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
         return
     }
 
-    actorAsk(coordinatorActor, NodeCoordinatorActor.CreateDataset(datasetObj, columns)) {
+    actorAsk(coordinatorActor, NodeCoordinatorActor.CreateDataset(datasetObj, columns, dataset.database)) {
       case NodeCoordinatorActor.DatasetCreated =>
         println(s"Dataset $dataset created!")
         exitCode = 0
+      case NodeCoordinatorActor.DatasetAlreadyExists =>
+        println(s"Dataset $dataset already exists!")
+        exitCode = 0
       case NodeCoordinatorActor.DatasetError(errMsg) =>
         println(s"Error creating dataset $dataset: $errMsg")
+        exitCode = 2
+      case other: Any =>
+        println(s"Error: $other")
         exitCode = 2
     }
   }

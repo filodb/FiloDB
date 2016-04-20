@@ -1,8 +1,11 @@
 package filodb
 
-import akka.actor.ActorRef
+import akka.actor.{ActorRef}
+import akka.pattern.ask
+import akka.util.Timeout
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.slf4j.StrictLogging
+import java.util.concurrent.ArrayBlockingQueue
 import org.apache.spark.sql.{SQLContext, SaveMode, DataFrame, Row}
 import org.apache.spark.sql.types.StructType
 import scala.concurrent.{Await, Future}
@@ -59,6 +62,7 @@ package object spark extends StrictLogging {
   import filodb.spark.FiloRelation._
   import FiloSetup.metaStore
   import RowSource._
+  import filodb.coordinator.client.Client.{parse, actorAsk}
 
   val sparkLogger = logger
 
@@ -69,9 +73,22 @@ package object spark extends StrictLogging {
                                    rows: Iterator[Row],
                                    writeTimeout: FiniteDuration,
                                    partitionIndex: Int): Unit = {
-    val props = RddRowSourceActor.props(rows, columns, dataset, version, coordinatorActor)
+    // Use a queue and read off of iterator in this, the Spark thread.  Due to the presence of ThreadLocals
+    // it is not safe for us to read off of this iterator in another (ie Actor) thread
+    val queue = new ArrayBlockingQueue[Seq[Row]](32)
+    val props = RddRowSourceActor.props(queue, columns, dataset, version, coordinatorActor)
     val rddRowActor = FiloSetup.system.actorOf(props, s"${dataset}_${version}_$partitionIndex")
-    actorAsk(rddRowActor, Start, writeTimeout) {
+    implicit val timeout = Timeout(writeTimeout)
+    val resp = rddRowActor ? Start
+    val rowChunks = rows.grouped(1000)
+    var i = 0
+    while (rowChunks.hasNext && !resp.value.isDefined) {
+      queue.put(rowChunks.next)
+      if (i % 20 == 0) logger.info(s"Ingesting batch starting at row ${i * 1000}")
+      i += 1
+    }
+    queue.put(Nil)    // Final marker that there are no more rows
+    Await.result(resp, writeTimeout) match {
       case AllDone =>
       case SetupError(UnknownDataset) => throw DatasetNotFound(dataset.dataset)
       case SetupError(BadSchema(reason)) => throw BadSchemaError(reason)
@@ -96,11 +113,6 @@ package object spark extends StrictLogging {
                                      hiveContext)
       }
     }
-  }
-
-  private[spark] def runCommands[B](cmds: Set[Future[Response]]): Unit = {
-    val responseSet = Await.result(Future.sequence(cmds), 5 seconds)
-    if (!responseSet.forall(_ == Success)) throw new RuntimeException(s"Some commands failed: $responseSet")
   }
 
   import filodb.spark.TypeConverters._
@@ -136,11 +148,10 @@ package object spark extends StrictLogging {
     if (matchingTypeErrs.nonEmpty) throw ColumnTypeMismatch(matchingTypeErrs)
 
     if (missingCols.nonEmpty) {
-      val addMissingCols = missingCols.map { colName =>
-        val newCol = dfSchema(colName).copy(dataset = dataset.dataset, version = version)
-        metaStore.newColumn(newCol, dataset)
+      val newCols = missingCols.map(dfSchema(_).copy(dataset = dataset.dataset, version = version))
+      parse(metaStore.newColumns(newCols.toSeq, dataset)) { resp =>
+        if (resp != Success) throw new RuntimeException(s"Error $resp creating new columns $newCols")
       }
-      runCommands(addMissingCols)
     }
   }
 
@@ -171,15 +182,6 @@ package object spark extends StrictLogging {
         logger.info(s"Dataset ${dataset.name} created successfully...")
       case DatasetError(errMsg) =>
         throw new RuntimeException(s"Error creating dataset: $errMsg")
-    }
-  }
-
-  private[spark] def truncateDataset(dataset: Dataset, version: Int): Unit = {
-    logger.info(s"Truncating dataset ${dataset.name}")
-    actorAsk(FiloSetup.coordinatorActor,
-             TruncateProjection(dataset.projections.head, version), 1.minute) {
-      case ProjectionTruncated => logger.info(s"Truncation of ${dataset.name} finished")
-      case DatasetError(msg) => throw NotFoundError(s"$msg - (${dataset.name}, ${version})")
     }
   }
 

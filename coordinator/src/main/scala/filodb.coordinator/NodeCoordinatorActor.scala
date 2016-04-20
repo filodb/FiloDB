@@ -1,9 +1,9 @@
 package filodb.coordinator
 
 import akka.actor.{Actor, ActorRef, PoisonPill, Props, SupervisorStrategy, Terminated}
+import akka.event.LoggingReceive
 import com.typesafe.config.Config
 import net.ceedubs.ficus.Ficus._
-import org.velvia.filo.RowReader
 import scala.concurrent.Future
 import scala.concurrent.duration._
 
@@ -27,85 +27,11 @@ import filodb.core.reprojector.Reprojector
  *
  * It is called by local (eg HTTP) as well as remote (eg Spark ETL) processes.
  */
-object NodeCoordinatorActor {
-  // Public, external Actor/Akka API, so every incoming command should be a NodeCommand
-  sealed trait NodeCommand
-  sealed trait NodeResponse
-
-  /**
-   * Creates a new dataset with columns and a default projection.
-   * @param dataset the Dataset object
-   * @param columns DataColumns to create for that dataset.  Must include partition and row key columns, at a
-   *          minimum.  Computed columns can be left out.
-   * @param database optionally, the database/keyspace to create the dataset in
-   */
-  case class CreateDataset(dataset: Dataset,
-                           columns: Seq[DataColumn],
-                           database: Option[String] = None) extends NodeCommand
-
-  case object DatasetCreated extends Response with NodeResponse
-  case class DatasetError(msg: String) extends ErrorResponse with NodeResponse
-
-  /**
-   * Sets up ingestion for a given dataset, version, and schema of columns.
-   * The dataset and columns must have been previously defined.
-   *
-   * @return BadSchema if the partition column is unsupported, sort column invalid, etc.
-   */
-  case class SetupIngestion(dataset: DatasetRef,
-                            schema: Seq[String],
-                            version: Int) extends NodeCommand
-
-  case object IngestionReady extends NodeResponse
-  case object UnknownDataset extends ErrorResponse with NodeResponse
-  case class UndefinedColumns(undefined: Set[String]) extends ErrorResponse with NodeResponse
-  case class BadSchema(message: String) extends ErrorResponse with NodeResponse
-
-  /**
-   * Ingests a new set of rows for a given dataset and version.
-   * The partitioning column and sort column are set up in the dataset.
-   *
-   * @param seqNo the sequence number to be returned for acknowledging the entire set of rows
-   * @return Ack(seqNo) returned when the set of rows has been committed to the MemTable.
-   */
-  case class IngestRows(dataset: DatasetRef,
-                        version: Int,
-                        rows: Seq[RowReader],
-                        seqNo: Long) extends NodeCommand
-
-  case class Ack(seqNo: Long) extends NodeResponse
-
-  /**
-   * Initiates a flush of the remaining MemTable rows of the given dataset and version.
-   * Usually used when at the end of ingesting some large blob of data.
-   * @return Flushed when the flush cycle has finished successfully, commiting data to columnstore.
-   */
-  case class Flush(dataset: DatasetRef, version: Int) extends NodeCommand
-  case object Flushed extends NodeResponse
-
-  /**
-   * Checks to see if the DatasetCoordActor is ready to take in more rows.  Usually sent when an actor
-   * is in a wait state.
-   */
-  case class CheckCanIngest(dataset: DatasetRef, version: Int) extends NodeCommand
-  case class CanIngest(can: Boolean) extends NodeResponse
-
-  /**
-   * Gets the latest ingestion stats from the DatasetCoordinatorActor
-   */
-  case class GetIngestionStats(dataset: DatasetRef, version: Int) extends NodeCommand
-
-  /**
-   * Truncates all data from a projection of a dataset.  Waits for any pending flushes from said
-   * dataset to finish first, and also clears the columnStore cache for that dataset.
-   */
-  case class TruncateProjection(projection: Projection, version: Int) extends NodeCommand
-  case object ProjectionTruncated extends NodeResponse
-
+object NodeCoordinatorActor extends NodeCommands {
   // Internal messages
   case object Reset
-  case class AddDatasetCoord(dataset: DatasetRef, version: Int, dsCoordRef: ActorRef) extends NodeCommand
-  case class DatasetCreateNotify(dataset: DatasetRef, version: Int, msg: Any) extends NodeCommand
+  case class AddDatasetCoord(dataset: DatasetRef, version: Int, dsCoordRef: ActorRef)
+  case class DatasetCreateNotify(dataset: DatasetRef, version: Int, msg: Any)
 
   def invalidColumns(columns: Seq[String], schema: Column.Schema): Set[String] =
     (columns.toSet -- schema.keys)
@@ -161,13 +87,15 @@ class NodeCoordinatorActor(metaStore: MetaStore,
     if (datasetObj.projections.isEmpty) {
       originator ! DatasetError(s"There must be at least one projection in dataset $datasetObj")
     } else {
-      (for { resp1 <- metaStore.newDataset(datasetObj)
-             resp2 <- Future.sequence(columns.map(metaStore.newColumn(_, ref)))
+      (for { resp1 <- metaStore.newDataset(datasetObj) if resp1 == Success
+             resp2 <- metaStore.newColumns(columns, ref)
              resp3 <- columnStore.initializeProjection(datasetObj.projections.head) }
       yield {
         originator ! DatasetCreated
       }).recover {
+        case e: NoSuchElementException => originator ! DatasetAlreadyExists
         case e: StorageEngineException => originator ! e
+        case e: Exception => originator ! DatasetError(e.toString)
       }
     }
   }
@@ -178,6 +106,15 @@ class NodeCoordinatorActor(metaStore: MetaStore,
                .recover {
                  case e: Exception => originator ! DatasetError(e.getMessage)
                }
+  }
+
+  private def dropDataset(originator: ActorRef, dataset: DatasetRef): Unit = {
+    (for { resp1 <- metaStore.deleteDataset(dataset)
+           resp2 <- columnStore.dropDataset(dataset) if resp1 == Success } yield {
+      if (resp2 == Success) originator ! DatasetDropped
+    }).recover {
+      case e: Exception => originator ! DatasetError(e.getMessage)
+    }
   }
 
   // If the coordinator is already set up, then everything is already fine.
@@ -228,18 +165,9 @@ class NodeCoordinatorActor(metaStore: MetaStore,
     }
   }
 
-  def receive: Receive = {
+  def datasetHandlers: Receive = LoggingReceive {
     case CreateDataset(datasetObj, columns, db) =>
       createDataset(sender, datasetObj, DatasetRef(datasetObj.name, db), columns)
-
-    case SetupIngestion(dataset, columns, version) =>
-      setupIngestion(sender, dataset, columns, version)
-
-    case IngestRows(dataset, version, rows, seqNo) =>
-      withDsCoord(sender, dataset, version) { _ ! DatasetCoordinatorActor.NewRows(sender, rows, seqNo) }
-
-    case flushCmd @ Flush(dataset, version) =>
-      withDsCoord(sender, dataset, version) { _ ! DatasetCoordinatorActor.StartFlush(Some(sender)) }
 
     case TruncateProjection(projection, version) =>
       // First try through DS Coordinator so we could coordinate with flushes
@@ -251,12 +179,27 @@ class NodeCoordinatorActor(metaStore: MetaStore,
                       truncateDataset(sender, projection)
                     }
 
+    case DropDataset(dataset) => dropDataset(sender, dataset)
+  }
+
+  def ingestHandlers: Receive = LoggingReceive {
+    case SetupIngestion(dataset, columns, version) =>
+      setupIngestion(sender, dataset, columns, version)
+
+    case IngestRows(dataset, version, rows, seqNo) =>
+      withDsCoord(sender, dataset, version) { _ ! DatasetCoordinatorActor.NewRows(sender, rows, seqNo) }
+
+    case flushCmd @ Flush(dataset, version) =>
+      withDsCoord(sender, dataset, version) { _ ! DatasetCoordinatorActor.StartFlush(Some(sender)) }
+
     case CheckCanIngest(dataset, version) =>
       withDsCoord(sender, dataset, version) { _.forward(DatasetCoordinatorActor.CanIngest) }
 
     case GetIngestionStats(dataset, version) =>
       withDsCoord(sender, dataset, version) { _.forward(DatasetCoordinatorActor.GetStats) }
+  }
 
+  def other: Receive = LoggingReceive {
     case Reset =>
       dsCoordinators.values.foreach(_ ! PoisonPill)
       dsCoordinators.clear()
@@ -278,4 +221,6 @@ class NodeCoordinatorActor(metaStore: MetaStore,
       for { listener <- dsCoordNotify((dataset -> version)) } listener ! msg
       dsCoordNotify.remove((dataset -> version))
   }
+
+  def receive: Receive = datasetHandlers orElse ingestHandlers orElse other
 }

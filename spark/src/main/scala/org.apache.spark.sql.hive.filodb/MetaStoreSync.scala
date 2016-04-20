@@ -9,6 +9,8 @@ import filodb.core.store.MetaStore
 import filodb.spark.FiloRelation
 
 object MetaStoreSync extends StrictLogging {
+  import filodb.coordinator.client.Client.parse
+
   /**
    * Tries to get a HiveContext either from a running ThriftServer or from the sqlcontext that's
    * passed in.
@@ -31,7 +33,7 @@ object MetaStoreSync extends StrictLogging {
   def syncFiloTables(databaseName: String, metastore: MetaStore, hiveContext: HiveContext): Int = {
     val catalog = hiveContext.catalog
     val hiveTables = catalog.getTables(Some(databaseName)).map(_._1)
-    val filoTables = FiloRelation.parse(metastore.getAllDatasets(databaseName)) { ds => ds }
+    val filoTables = parse(metastore.getAllDatasets(databaseName)) { ds => ds }
     val missingTables = filoTables.toSet -- hiveTables.toSet
     logger.info(s"Syncing FiloDB tables to Hive MetaStore.  Missing tables = $missingTables")
 

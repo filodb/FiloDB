@@ -225,7 +225,7 @@ with Matchers with ScalaFutures {
   val dataDF2 = sql.read.json(sc.parallelize(jsonRows2, 1))
 
   it("should overwrite existing data if mode=Overwrite") {
-    dataDF.write.format("filodb.spark").
+    dataDF.sort("id").write.format("filodb.spark").
                  option("dataset", "gdelt1").
                  option("row_keys", "id").
                  option("segment_key", segCol).

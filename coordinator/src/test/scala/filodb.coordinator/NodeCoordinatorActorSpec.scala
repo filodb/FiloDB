@@ -44,6 +44,7 @@ with CoordinatorSetup with ScalaFutures {
 
   before {
     metaStore.clearAllData("unittest").futureValue
+    columnStore.dropDataset(DatasetRef(dataset1.name)).futureValue
     coordActor = system.actorOf(NodeCoordinatorActor.props(metaStore, reprojector, columnStore, config))
     probe = TestProbe()
   }
@@ -90,6 +91,35 @@ with CoordinatorSetup with ScalaFutures {
       val probes = (1 to 8).map { n => TestProbe() }
       probes.foreach { probe => probe.send(coordActor, SetupIngestion(projection1.datasetRef, colNames, 0)) }
       probes.foreach { probe => probe.expectMsg(IngestionReady) }
+    }
+  }
+
+  describe("NodeCoordinatorActor DatasetOps commands") {
+    it("should be able to create new dataset") {
+      probe.send(coordActor, CreateDataset(dataset1, schema))
+      probe.expectMsg(DatasetCreated)
+    }
+
+    it("should return DatasetAlreadyExists creating dataset that already exists") {
+      probe.send(coordActor, CreateDataset(dataset1, schema))
+      probe.expectMsg(DatasetCreated)
+
+      probe.send(coordActor, CreateDataset(dataset1, schema))
+      probe.expectMsg(DatasetAlreadyExists)
+    }
+
+    it("should be able to drop a dataset") {
+      probe.send(coordActor, CreateDataset(dataset1, schema))
+      probe.expectMsg(DatasetCreated)
+
+      val ref = DatasetRef(dataset1.name)
+      metaStore.getDataset(ref).futureValue should equal (dataset1)
+
+      probe.send(coordActor, DropDataset(DatasetRef(dataset1.name)))
+      probe.expectMsg(DatasetDropped)
+
+      // Now verify that the dataset was indeed dropped
+      metaStore.getDataset(ref).failed.futureValue shouldBe a [NotFoundError]
     }
   }
 

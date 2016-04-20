@@ -43,6 +43,16 @@ extends CachedMergingColumnStore with InMemoryColumnStoreScanner with StrictLogg
     Success
   }
 
+  def dropDataset(dataset: DatasetRef): Future[Response] = {
+    chunkDb.synchronized {
+      chunkDb.retain { case ((ds, _, _), _) => ds != dataset }
+    }
+    rowMaps.synchronized {
+      rowMaps.retain { case ((ds, _, _), _) => ds != dataset }
+    }
+    Future.successful(Success)
+  }
+
   def writeChunks(dataset: DatasetRef,
                   partition: BinaryPartition,
                   version: Int,
