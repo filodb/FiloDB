@@ -1,6 +1,7 @@
 package filodb.coordinator
 
 import akka.actor.ActorSystem
+import akka.cluster.Cluster
 import com.typesafe.config.Config
 import scala.concurrent.ExecutionContext
 
@@ -41,6 +42,8 @@ trait CoordinatorSetup {
   lazy val coordinatorActor =
     system.actorOf(NodeCoordinatorActor.props(metaStore, reprojector, columnStore, config),
                    "coordinator")
+
+  lazy val cluster = Cluster(system)
 
   lazy val client = new Client(coordinatorActor)
 

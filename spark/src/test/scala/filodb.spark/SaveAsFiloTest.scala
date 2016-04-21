@@ -51,11 +51,10 @@ with Matchers with ScalaFutures {
 
   // This is the same code that the Spark stuff uses.  Make sure we use exact same environment as real code
   // so we don't have two copies of metaStore that could be configured differently.
-  val filoConfig = FiloSetup.configFromSpark(sc)
-  FiloSetup.init(filoConfig)
+  val filoConfig = FiloDriver.initAndGetConfig(sc)
 
-  val metaStore = FiloSetup.metaStore
-  val columnStore = FiloSetup.columnStore
+  val metaStore = FiloDriver.metaStore
+  val columnStore = FiloDriver.columnStore
 
   override def beforeAll() {
     metaStore.initialize("unittest").futureValue(defaultPatience)
@@ -68,6 +67,7 @@ with Matchers with ScalaFutures {
 
   override def afterAll() {
     super.afterAll()
+    FiloDriver.shutdown()
     sc.stop()
   }
 
@@ -83,10 +83,10 @@ with Matchers with ScalaFutures {
     } catch {
       case e: Exception =>
     }
-    FiloSetup.coordinatorActor ! Reset
+    FiloDriver.coordinatorActor ! Reset
   }
 
-  implicit val ec = FiloSetup.ec
+  implicit val ec = FiloDriver.ec
 
   // Sample data.  Note how we must create a partitioning column.
   val jsonRows = Seq(
@@ -159,7 +159,7 @@ with Matchers with ScalaFutures {
                    save()
     }
 
-    FiloSetup.metaStore.getDataset("gdelt1").futureValue should equal (ds1.copy(partitionColumns = partKeys))
+    FiloDriver.metaStore.getDataset("gdelt1").futureValue should equal (ds1.copy(partitionColumns = partKeys))
   }
 
   it("should write table if there are existing matching columns") {

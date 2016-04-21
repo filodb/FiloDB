@@ -46,10 +46,10 @@ with Matchers with ScalaFutures {
 
   // This is the same code that the Spark stuff uses.  Make sure we use exact same environment as real code
   // so we don't have two copies of metaStore that could be configured differently.
-  FiloSetup.init(sc)
+  FiloDriver.init(sc)
 
-  val metaStore = FiloSetup.metaStore
-  val columnStore = FiloSetup.columnStore
+  val metaStore = FiloDriver.metaStore
+  val columnStore = FiloDriver.columnStore
 
   override def beforeAll() {
     metaStore.initialize("unittest").futureValue(defaultPatience)
@@ -69,10 +69,10 @@ with Matchers with ScalaFutures {
     } catch {
       case e: Exception =>
     }
-    FiloSetup.coordinatorActor ! Reset
+    FiloDriver.coordinatorActor ! Reset
   }
 
-  implicit val ec = FiloSetup.ec
+  implicit val ec = FiloDriver.ec
 
   ignore("should be able to write in cluster with multi-column partition keys") {
     import sql.implicits._

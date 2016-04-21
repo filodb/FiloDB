@@ -54,7 +54,7 @@ lazy val stress = (project in file("stress"))
                     .dependsOn(spark)
 
 val phantomVersion = "1.12.2"
-val akkaVersion    = "2.3.7"
+val akkaVersion    = "2.3.15"
 val sparkVersion   = "1.5.1"
 
 lazy val extraRepos = Seq(
@@ -97,6 +97,7 @@ lazy val cassDeps = Seq(
 
 lazy val coordDeps = Seq(
   "com.typesafe.akka"    %% "akka-slf4j"        % akkaVersion,
+  "com.typesafe.akka"    %% "akka-cluster"      % akkaVersion,
   "com.opencsv"           % "opencsv"           % "3.3",
   "com.typesafe.akka"    %% "akka-testkit"      % akkaVersion % "test",
   "ch.qos.logback"        % "logback-classic"   % "1.0.7" % "test",  // to get good test logs

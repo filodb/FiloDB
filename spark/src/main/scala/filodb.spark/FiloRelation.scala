@@ -34,10 +34,10 @@ object FiloRelation extends StrictLogging {
   implicit val context = scala.concurrent.ExecutionContext.Implicits.global
 
   def getDatasetObj(dataset: DatasetRef): Dataset =
-    parse(FiloSetup.metaStore.getDataset(dataset)) { ds => ds }
+    parse(FiloDriver.metaStore.getDataset(dataset)) { ds => ds }
 
   def getSchema(dataset: DatasetRef, version: Int): Column.Schema =
-    parse(FiloSetup.metaStore.getSchema(dataset, version)) { schema => schema }
+    parse(FiloDriver.metaStore.getSchema(dataset, version)) { schema => schema }
 
   // Parses the Spark filters, mapping column names to the filters
   def parseFilters(filters: Seq[Filter]): Map[String, Seq[Filter]] = {
@@ -146,7 +146,7 @@ object FiloRelation extends StrictLogging {
                   config: Config,
                   readOnlyProjStr: String,
                   version: Int)(f: ScanSplit => ScanMethod): RDD[Row] = {
-    val splits = FiloSetup.columnStore.getScanSplits(dataset, splitsPerNode)
+    val splits = FiloDriver.columnStore.getScanSplits(dataset, splitsPerNode)
     logger.info(s"${splits.length} splits: [${splits.take(3).mkString(", ")}...]")
 
     val splitsWithLocations = splits.map { s => (s, s.hostnames.toSeq) }
@@ -167,11 +167,11 @@ object FiloRelation extends StrictLogging {
                              version: Int,
                              method: ScanMethod): Iterator[Row] = {
     // NOTE: all the code inside here runs distributed on each node.  So, create my own datastore, etc.
-    FiloSetup.init(config)
-    FiloSetup.columnStore    // force startup
+    FiloExecutor.init(config)
+    FiloExecutor.columnStore    // force startup
     val readOnlyProjection = RichProjection.readOnlyFromString(readOnlyProjectionString)
 
-    parse(FiloSetup.columnStore.scanRows(
+    parse(FiloExecutor.columnStore.scanRows(
             readOnlyProjection, readOnlyProjection.columns, version, method,
             (bytes, clazzes) => new SparkRowReader(bytes, clazzes)),
           10 minutes) { rowIt => rowIt.asInstanceOf[Iterator[Row]] }
@@ -198,7 +198,7 @@ case class FiloRelation(dataset: DatasetRef,
   import TypeConverters._
   import FiloRelation._
 
-  val filoConfig = FiloSetup.initAndGetConfig(sqlContext.sparkContext)
+  val filoConfig = FiloDriver.initAndGetConfig(sqlContext.sparkContext)
 
   val datasetObj = getDatasetObj(dataset)
   val filoSchema = getSchema(dataset, version)
