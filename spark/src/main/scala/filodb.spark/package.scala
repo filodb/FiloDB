@@ -15,7 +15,7 @@ import scala.language.postfixOps
 
 import filodb.core._
 import filodb.core.metadata.{Column, DataColumn, Dataset, RichProjection}
-import filodb.coordinator.{NodeCoordinatorActor, RowSource, DatasetCoordinatorActor}
+import filodb.coordinator.{IngestionCommands, DatasetCommands, RowSource, DatasetCoordinatorActor}
 import org.apache.spark.sql.hive.filodb.MetaStoreSync
 
 package spark {
@@ -58,8 +58,8 @@ package spark {
 package object spark extends StrictLogging {
   val DefaultWriteTimeout = 999 minutes
 
-  import NodeCoordinatorActor._
-  import filodb.spark.FiloRelation._
+  import IngestionCommands._
+  import DatasetCommands._
   import FiloDriver.metaStore
   import RowSource._
   import filodb.coordinator.client.Client.{parse, actorAsk}

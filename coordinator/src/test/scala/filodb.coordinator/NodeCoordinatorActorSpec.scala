@@ -20,7 +20,8 @@ object NodeCoordinatorActorSpec extends ActorSpecConfig
 class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNewSystem)
 with CoordinatorSetup with ScalaFutures {
   import akka.testkit._
-  import NodeCoordinatorActor._
+  import DatasetCommands._
+  import IngestionCommands._
   import GdeltTestData._
 
   implicit val defaultPatience =

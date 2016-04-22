@@ -6,7 +6,7 @@ import filodb.core._
 import filodb.coordinator._
 
 trait IngestionOps extends ClientBase {
-  import NodeCoordinatorActor._
+  import IngestionCommands._
 
   /**
    * Flushes the active memtable of the given dataset and version, no matter how much is in the memtable.

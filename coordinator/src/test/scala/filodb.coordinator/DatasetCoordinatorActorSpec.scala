@@ -69,7 +69,7 @@ with ScalaFutures {
 
   private def ingestRows(numRows: Int) {
     dsActor ! NewRows(probe.ref, namesWithPartCol.take(numRows).map(TupleRowReader), 0L)
-    probe.expectMsg(NodeCoordinatorActor.Ack(0L))
+    probe.expectMsg(IngestionCommands.Ack(0L))
   }
 
   val dummySegInfo = SegmentInfo("Success", 0)
@@ -116,7 +116,7 @@ with ScalaFutures {
     // (Hopefully this gets sent before the table is flushed)
     dsActor ! NewRows(probe.ref, namesWithPartCol.drop(205).take(20).map(TupleRowReader), 1L)
 
-    probe.expectMsg(NodeCoordinatorActor.Ack(0L))
+    probe.expectMsg(IngestionCommands.Ack(0L))
     probe.expectNoMsg
   }
 
@@ -127,7 +127,7 @@ with ScalaFutures {
     reprojections should equal (Nil)
 
     dsActor ! StartFlush(Some(probe.ref))
-    probe.expectMsg(NodeCoordinatorActor.Flushed)
+    probe.expectMsg(IngestionCommands.Flushed)
     probe.send(dsActor, GetStats)
     probe.expectMsgPF(3.seconds.dilated) {
       case Stats(1, 1, 0, 0, _) =>

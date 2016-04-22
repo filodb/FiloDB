@@ -15,7 +15,7 @@ import scala.language.postfixOps
 import filodb.cassandra.columnstore.CassandraColumnStore
 import filodb.cassandra.metastore.CassandraMetaStore
 import filodb.coordinator.client.{Client, LocalClient}
-import filodb.coordinator.{NodeCoordinatorActor, CoordinatorSetup}
+import filodb.coordinator.{DatasetCommands, CoordinatorSetup}
 import filodb.core._
 import filodb.core.metadata.Column.{ColumnType, Schema}
 import filodb.core.metadata.{Column, DataColumn, Dataset, RichProjection}
@@ -180,14 +180,14 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
         return
     }
 
-    actorAsk(coordinatorActor, NodeCoordinatorActor.CreateDataset(datasetObj, columns, dataset.database)) {
-      case NodeCoordinatorActor.DatasetCreated =>
+    actorAsk(coordinatorActor, DatasetCommands.CreateDataset(datasetObj, columns, dataset.database)) {
+      case DatasetCommands.DatasetCreated =>
         println(s"Dataset $dataset created!")
         exitCode = 0
-      case NodeCoordinatorActor.DatasetAlreadyExists =>
+      case DatasetCommands.DatasetAlreadyExists =>
         println(s"Dataset $dataset already exists!")
         exitCode = 0
-      case NodeCoordinatorActor.DatasetError(errMsg) =>
+      case DatasetCommands.DatasetError(errMsg) =>
         println(s"Error creating dataset $dataset: $errMsg")
         exitCode = 2
       case other: Any =>

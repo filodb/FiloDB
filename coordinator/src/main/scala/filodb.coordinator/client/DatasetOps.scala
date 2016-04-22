@@ -8,7 +8,7 @@ import filodb.core.metadata.Projection
 import filodb.coordinator._
 
 trait DatasetOps extends ClientBase with StrictLogging {
-  import NodeCoordinatorActor._
+  import DatasetCommands._
 
   /**
    * Deletes both the metadata (dataset, columns) as well as drops the column store tables for a dataset.

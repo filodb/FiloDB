@@ -7,14 +7,14 @@ import scala.language.postfixOps
 
 import filodb.core._
 import filodb.core.metadata.{Column, DataColumn, Dataset}
-import filodb.coordinator.NodeCoordinatorActor
+import filodb.coordinator.IngestionCommands
 
 /**
  * Class implementing insert and save Scala APIs.
  * Don't directly instantiate this, instead use the implicit conversion function.
  */
 class FiloContext(val sqlContext: SQLContext) extends AnyVal {
-  import NodeCoordinatorActor.{Flush, Flushed}
+  import IngestionCommands.{Flush, Flushed}
   import FiloRelation._
 
   /**
