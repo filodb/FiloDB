@@ -10,7 +10,7 @@ import scala.concurrent.duration._
 import filodb.core._
 import filodb.core.metadata.{Column, Dataset}
 import filodb.core.store.{FilteredPartitionScan, RowWriterSegment, SegmentInfo}
-import filodb.spark.{FiloSetup, FiloRelation}
+import filodb.spark.{FiloDriver, FiloRelation}
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.functions.sum
 import org.apache.spark.sql.types._
@@ -57,17 +57,16 @@ class SparkReadBenchmark {
   val sql = new SQLContext(sc)
   // Below is to make sure that Filo actor system stuff is run before test code
   // so test code is not hit with unnecessary slowdown
-  val filoConfig = FiloSetup.configFromSpark(sc)
-  FiloSetup.init(filoConfig)
+  val filoConfig = FiloDriver.initAndGetConfig(sc)
 
   import IntSumReadBenchmark._
 
   // Initialize metastore
   import scala.concurrent.ExecutionContext.Implicits.global
-  Await.result(FiloSetup.metaStore.newDataset(dataset), 3.seconds)
-  val createColumns = schema.map { col => FiloSetup.metaStore.newColumn(col, ref) }
+  Await.result(FiloDriver.metaStore.newDataset(dataset), 3.seconds)
+  val createColumns = schema.map { col => FiloDriver.metaStore.newColumn(col, ref) }
   Await.result(Future.sequence(createColumns), 3.seconds)
-  val split = FiloSetup.columnStore.getScanSplits(ref).head
+  val split = FiloDriver.columnStore.getScanSplits(ref).head
 
   // Merge segments into InMemoryColumnStore
   import scala.concurrent.ExecutionContext.Implicits.global
@@ -76,12 +75,12 @@ class SparkReadBenchmark {
     val writerSeg = new RowWriterSegment(projection, schema)(
                                          SegmentInfo("/0", segKey).basedOn(projection))
     writerSeg.addRowsAsChunk(rows.toIterator.map(TupleRowReader))
-    Await.result(FiloSetup.columnStore.appendSegment(projection, writerSeg, 0), 10.seconds)
+    Await.result(FiloDriver.columnStore.appendSegment(projection, writerSeg, 0), 10.seconds)
   }
 
   @TearDown
   def shutdownFiloActors(): Unit = {
-    FiloSetup.shutdown()
+    FiloDriver.shutdown()
     sc.stop()
   }
 

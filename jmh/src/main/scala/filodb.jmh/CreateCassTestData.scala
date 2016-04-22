@@ -1,6 +1,6 @@
 package filodb.jmh
 
-import filodb.spark.FiloSetup
+import filodb.spark.FiloDriver
 import org.apache.spark.sql.{DataFrame, SaveMode, SQLContext}
 import org.apache.spark.{SparkContext, SparkException, SparkConf}
 
@@ -43,6 +43,6 @@ object CreateCassTestData extends App {
   println("Done!")
 
   sc.stop()
-  FiloSetup.shutdown()
+  FiloDriver.shutdown()
   sys.exit(0)
 }
