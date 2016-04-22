@@ -43,8 +43,8 @@ class CassandraMetaStore(config: Config)
           ctResp <- columnTable.deleteDataset(ref) }
     yield { ctResp }
 
-  def insertColumn(column: DataColumn, ref: DatasetRef): Future[Response] =
-    columnTable.insertColumn(column, ref)
+  def insertColumns(columns: Seq[DataColumn], ref: DatasetRef): Future[Response] =
+    columnTable.insertColumns(columns, ref)
 
   def getSchema(ref: DatasetRef, version: Int): Future[Column.Schema] =
     columnTable.getSchema(ref, version)

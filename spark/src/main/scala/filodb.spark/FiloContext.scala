@@ -143,8 +143,7 @@ class FiloContext(val sqlContext: SQLContext) extends AnyVal {
     checkAndAddColumns(dfColumns, dataset, version)
 
     if (overwrite) {
-      val datasetObj = getDatasetObj(dataset)
-      truncateDataset(datasetObj, version)
+      FiloSetup.client.truncateDataset(dataset, version)
     }
 
     val numPartitions = df.rdd.partitions.size
@@ -160,13 +159,9 @@ class FiloContext(val sqlContext: SQLContext) extends AnyVal {
       Iterator.empty
     }.count()
 
-    // Ensure a flush of memtable after a potentially large ingestion?  But for streaming we might not want
-    // a flush every single time. TODO(velvia): make this configurable
-    if (flushAfterInsert) {
-      actorAsk(FiloSetup.coordinatorActor, Flush(dataset, version)) {
-        case Flushed =>
-        case other: Any => sparkLogger.warn(s"Could not finish flushing data!  $other")
-      }
-    }
+    // This is the only time that flush is explicitly called
+    if (flushAfterInsert) FiloSetup.client.flush(dataset, version)
+
+    syncToHive(sqlContext)
   }
 }

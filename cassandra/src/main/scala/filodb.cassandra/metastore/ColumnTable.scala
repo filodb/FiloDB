@@ -57,16 +57,19 @@ with FiloCassandraConnector {
     (enum run Iteratee.fold(Column.EmptySchema)(Column.schemaFold)).handleErrors
   }
 
-  def insertColumn(column: DataColumn, dataset: DatasetRef): Future[Response] = withKeyspace(dataset) { ks =>
+  def insertColumns(columns: Seq[DataColumn],
+                    dataset: DatasetRef): Future[Response] = withKeyspace(dataset) { ks =>
     implicit val keySpace = ks
-    insert.value(_.dataset, dataset.dataset)
-          .value(_.name,    column.name)
-          .value(_.version, column.version)
-          .value(_.id,      column.id)
-          .value(_.columnType, column.columnType.toString)
-          .value(_.isDeleted, column.isDeleted)
-          .ifNotExists
-          .future().toResponse(AlreadyExists)
+    val batch = columns.foldLeft(Batch.unlogged) { case (batch, column) =>
+      batch.add(insert.value(_.dataset, dataset.dataset)
+                      .value(_.name,    column.name)
+                      .value(_.version, column.version)
+                      .value(_.id,      column.id)
+                      .value(_.columnType, column.columnType.toString)
+                      .value(_.isDeleted, column.isDeleted)
+                      .ifNotExists)
+    }
+    batch.future().toResponse(AlreadyExists)
   }
 
   def deleteDataset(dataset: DatasetRef): Future[Response] = withKeyspace(dataset) { ks =>

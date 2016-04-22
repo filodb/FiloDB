@@ -19,6 +19,7 @@ import org.apache.spark.sql.sources._
 import org.apache.spark.sql.types._
 import org.apache.spark.sql.{DataFrame, Row, SQLContext}
 
+import filodb.coordinator.client.Client.parse
 import filodb.core._
 import filodb.core.query.KeyFilter
 import filodb.core.metadata.{Column, Dataset, RichProjection}
@@ -28,16 +29,6 @@ object FiloRelation extends StrictLogging {
   import TypeConverters._
 
   implicit val context = scala.concurrent.ExecutionContext.Implicits.global
-
-  def parse[T, B](cmd: => Future[T], awaitTimeout: FiniteDuration = 5 seconds)(func: T => B): B = {
-    func(Await.result(cmd, awaitTimeout))
-  }
-
-  def actorAsk[B](actor: ActorRef, msg: Any,
-                  askTimeout: FiniteDuration = 5 seconds)(f: PartialFunction[Any, B]): B = {
-    implicit val timeout = Timeout(askTimeout)
-    parse(actor ? msg, askTimeout)(f)
-  }
 
   def getDatasetObj(dataset: DatasetRef): Dataset =
     parse(FiloSetup.metaStore.getDataset(dataset)) { ds => ds }

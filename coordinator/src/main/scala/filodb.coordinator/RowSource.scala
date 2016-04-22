@@ -1,6 +1,7 @@
 package filodb.coordinator
 
 import akka.actor.{Actor, ActorRef, Cancellable, PoisonPill}
+import akka.event.LoggingReceive
 import com.typesafe.scalalogging.slf4j.StrictLogging
 import org.velvia.filo.RowReader
 import scala.collection.mutable.HashMap
@@ -60,7 +61,7 @@ trait RowSource extends Actor with StrictLogging {
 
   import context.dispatcher
 
-  def start: Receive = {
+  def start: Receive = LoggingReceive {
     case Start =>
       whoStartedMe = Some(sender)
       coordinatorActor ! getStartMessage()
@@ -74,13 +75,15 @@ trait RowSource extends Actor with StrictLogging {
       whoStartedMe.foreach(_ ! SetupError(e))
   }
 
-  def reading: Receive = {
+  def reading: Receive = LoggingReceive {
     case GetMoreRows if batchIterator.hasNext => sendRows()
     case GetMoreRows =>
-      logger.info(s" ==> (${self.path.name}) doneReading: outstanding seqIds = ${outstanding.keys}")
-      if (outstanding.isEmpty)  { sendFlush() }
-      else                      { schedule(waitingPeriod, CheckCanIngest) }
-      context.become(doneReading)
+      if (outstanding.isEmpty)  { finish() }
+      else                      {
+        logger.info(s" ==> (${self.path.name}) doneReading: outstanding seqIds = ${outstanding.keys}")
+        schedule(waitingPeriod, CheckCanIngest)
+        context.become(doneReading)
+      }
 
     case NodeCoordinatorActor.Ack(lastSequenceNo) =>
       if (outstanding contains lastSequenceNo) outstanding.remove(lastSequenceNo)
@@ -91,7 +94,7 @@ trait RowSource extends Actor with StrictLogging {
     case CheckCanIngest =>
   }
 
-  def waitingAck: Receive = {
+  def waitingAck: Receive = LoggingReceive {
     case NodeCoordinatorActor.Ack(lastSequenceNo) =>
       if (outstanding contains lastSequenceNo) outstanding.remove(lastSequenceNo)
       if (outstanding.isEmpty) {
@@ -106,7 +109,7 @@ trait RowSource extends Actor with StrictLogging {
 
   def waiting: Receive = waitingAck orElse replay
 
-  val replay: Receive = {
+  val replay: Receive = LoggingReceive {
     case CheckCanIngest =>
       coordinatorActor ! NodeCoordinatorActor.CheckCanIngest(dataset, version)
 
@@ -121,14 +124,10 @@ trait RowSource extends Actor with StrictLogging {
       schedule(waitingPeriod, CheckCanIngest)
   }
 
-  def doneReadingAck: Receive = {
+  def doneReadingAck: Receive = LoggingReceive {
     case NodeCoordinatorActor.Ack(lastSequenceNo) =>
       if (outstanding contains lastSequenceNo) outstanding.remove(lastSequenceNo)
-      if (outstanding.isEmpty) sendFlush()
-
-    // Only until we get the Flushed signal do we know all rows are finished flushing.
-    case NodeCoordinatorActor.Flushed =>
-      finish()
+      if (outstanding.isEmpty) finish()
   }
 
   // If we don't get acks back, need to keep trying
@@ -149,8 +148,6 @@ trait RowSource extends Actor with StrictLogging {
       context.become(waiting)
     }
   }
-
-  def sendFlush(): Unit = coordinatorActor ! NodeCoordinatorActor.Flush(dataset, version)
 
   private var scheduledTask: Option[Cancellable] = None
   def schedule(delay: FiniteDuration, msg: Any): Unit = {

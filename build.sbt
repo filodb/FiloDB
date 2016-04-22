@@ -47,6 +47,12 @@ lazy val jmh = (project in file("jmh"))
                  .enablePlugins(JmhPlugin)
                  .dependsOn(core % "compile->compile; compile->test", spark)
 
+lazy val stress = (project in file("stress"))
+                    .settings(mySettings:_*)
+                    .settings(libraryDependencies ++= stressDeps)
+                    .settings(assemblySettings:_*)
+                    .dependsOn(spark)
+
 val phantomVersion = "1.11.0"
 val akkaVersion    = "2.3.7"
 val sparkVersion   = "1.4.1"
@@ -111,6 +117,12 @@ lazy val sparkDeps = Seq(
 lazy val jmhDeps = Seq(
   "com.nativelibs4java"  %% "scalaxy-loops"     % "0.3.3" % "provided",
   "org.apache.spark"     %% "spark-sql"         % sparkVersion excludeAll(excludeSlf4jLog4j, excludeZK)
+)
+
+lazy val stressDeps = Seq(
+  "com.databricks"       %% "spark-csv"         % "1.3.0",
+  "org.apache.spark"     %% "spark-sql"         % sparkVersion % "provided" excludeAll(excludeZK),
+  "org.apache.spark"     %% "spark-streaming"   % sparkVersion % "provided" excludeAll(excludeZK)
 )
 
 //////////////////////////
@@ -180,6 +192,7 @@ lazy val assemblySettings = Seq(
     case m if m.toLowerCase.endsWith("manifest.mf") => MergeStrategy.discard
     case m if m.toLowerCase.matches("meta-inf.*\\.sf$") => MergeStrategy.discard
     case m if m.toLowerCase.matches("meta-inf.*\\.properties") => MergeStrategy.discard
+    // case m if m.toLowerCase.matches("*\\.versions\\.properties") => MergeStrategy.discard
     case PathList(ps @ _*) if ps.last endsWith ".txt.1" => MergeStrategy.first
       case "reference.conf" => MergeStrategy.concat
     case "application.conf"                            => MergeStrategy.concat

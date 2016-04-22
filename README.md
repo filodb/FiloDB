@@ -6,6 +6,7 @@
 High-performance distributed analytical database + Spark SQL queries + built for streaming.
 
 [filodb-announce](https://groups.google.com/forum/#!forum/filodb-announce) google group
+and [filodb-discuss](https://groups.google.com/forum/#!forum/filodb-discuss) google group
 
 ```
     _______ __      ____  ____ 
@@ -49,6 +50,7 @@ See [architecture](doc/architecture.md) and [datasets and reading](doc/datasets_
   - [Running the CLI](#running-the-cli)
   - [CLI Example](#cli-example)
 - [Current Status](#current-status)
+  - [Version 0.2.1 change list:](#version-021-change-list)
 - [Deploying](#deploying)
 - [Code Walkthrough](#code-walkthrough)
 - [Building and Testing](#building-and-testing)
@@ -479,8 +481,9 @@ The `filo-cli` accepts arguments as key-value pairs. The following keys are supp
 | rowKeys | This is required for defining the row keys. Its value should be comma-separated list of column names or computed column functions to make up the row key                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | segmentKey | The column name or computed column for the segment key |
 | partitionKeys | Comma-separated list of column names or computed columns to make up the partition key |
-| command    | Its value can be either of `init`, `create`, `importcsv`, `analyze`, `delete` or `list`.<br/><br/>The `init` command is used to create the FiloDB schema.<br/><br/>The `create` command is used to define new a dataset. For example,<br/>```./filo-cli --command create --dataset playlist --columns id:int,album:string,artist:string,title:string --rowKeys id --segmentKey ':string /0' ``` <br/>Note: The sort column is not optional.<br/><br/>The `list` command can be used to view the schema of a dataset. For example, <br/>```./filo-cli --command list --dataset playlist```<br/><br/>The `importcsv` command can be used to load data from a CSV file into a dataset. For example,<br/>```./filo-cli --command importcsv --dataset playlist --filename playlist.csv```<br/>Note: The CSV file should be delimited with comma and have a header row. The column names must match those specified when creating the schema for that dataset.<br>
-The `delete` command is used to delete datasets. |
+| command    | Its value can be either of `init`, `create`, `importcsv`, `analyze`, `delete`, `truncate` or `list`.<br/><br/>The `init` command is used to create the FiloDB schema.<br/><br/>The `create` command is used to define new a dataset. For example,<br/>```./filo-cli --command create --dataset playlist --columns id:int,album:string,artist:string,title:string --rowKeys id --segmentKey ':string /0' ``` <br/>Note: The sort column is not optional.<br/><br/>The `list` command can be used to view the schema of a dataset. For example, <br/>```./filo-cli --command list --dataset playlist```<br/><br/>The `importcsv` command can be used to load data from a CSV file into a dataset. For example,<br/>```./filo-cli --command importcsv --dataset playlist --filename playlist.csv```<br/>Note: The CSV file should be delimited with comma and have a header row. The column names must match those specified when creating the schema for that dataset.<br>
+The `delete` command is used to delete datasets, like a drop.<br>
+`truncate` truncates data for an existing dataset to 0. |
 | select     | Its value should be a comma-separated string of the columns to be selected,<br/>```./filo-cli --dataset playlist --select album,title```<br/>The result from `select` is printed in the console by default. An output file can be specified with the key `--outfile`. For example,<br/>```./filo-cli --dataset playlist --select album,title --outfile playlist.csv```                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | delimiter  | This is optional key to be used with `importcsv` command. Its value should be the field delimiter character. Default value is comma.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | timeoutMinutes | The number of minutes to time out for CSV ingestion.  Needs to be greater than the max amount of time for ingesting the whole file.  Defaults to 99.  |
@@ -498,6 +501,8 @@ Individual configuration params may also be changed by passing them on the comma
     ./filo-cli -Dfilodb.columnstore.segment-cache-size=10000 --command ingestcsv ....
 
 All `-D` config options must be passed before any other arguments.
+
+You may also configure CLI logging by copying `cli/src/main/resources/logback.xml` to your deploy folder, customizing it, and passing on the command line `-Dlogback.configurationFile=/path/to/filo-cli-logback.xml`.
 
 NOTE: The CLI currently only operates on the Cassandra column store.  The `--database` option may be used to specify which keyspace to operate on.  If the keyspace is not initialized, then FiloDB code will automatically create one for you, but you may want to create it yourself to control the options that you want.
 
@@ -531,17 +536,18 @@ Query/export some columns:
 
 ## Current Status
 
-Version 0.2 is the stable, latest released version.  It has been tested on a cluster for a different variety of schemas, has a stable data model and ingestion, and features a huge number of improvements over the previous version:
+Version 0.2 is the stable, latest released version.  It has been tested on a cluster for a different variety of schemas, has a stable data model and ingestion, and features a huge number of improvements over the previous version.
 
-* Multi column partition and row keys
-* Separate segment key for much easier control of columnar chunk size and sort order
-* Much richer projection key filtering (IN and =, on any column)
-* Range scans within partitions by segment key
-* Computed columns for easily deriving segment and partition keys, especially useful for time series
-* Support for timestamp columns
-* Better performance and error handling: true node locality for reads; up to 2x faster scan performance; fast single partition reads; retries and configurable connection timeouts etc.
-* A ton of bug fixes
-* An experimental feature to sync FiloDB tables to Hive MetaStore
+### Version 0.2.1 change list:
+
+* Write to multiple keyspaces in C*, using the `database` option
+* Stress tests
+* Productionization and robustification all around, especially with `filo-cli`
+* Issue #77: `flush_after_write` and controlling memtable flushes at end of ETL
+* More efficient streaming ingestion: flushes no longer automatically done at end of each partition of data
+* Issue #84: bug with ingesting into FiloDB after doing sort or shuffles using Tungsten Spark 1.5
+* filo-cli delete command now deletes both metadata and data tables
+* new filo-cli truncate command
 
 ## Deploying
 

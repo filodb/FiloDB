@@ -47,9 +47,16 @@ trait ColumnStore {
 
   /**
    * Clears all data from the column store for that given projection, for all versions.
+   * More like a truncation, not a drop.
    * NOTE: please make sure there are no reprojections or writes going on before calling this
    */
   def clearProjectionData(projection: Projection): Future[Response]
+
+  /**
+   * Completely and permanently drops the dataset from the column store.
+   * @param dataset the DatasetRef for the dataset to drop.
+   */
+  def dropDataset(dataset: DatasetRef): Future[Response]
 
   /**
    * Appends the segment to the column store.  The passed in segment must be somehow merged with an existing
@@ -202,9 +209,9 @@ trait CachedMergingColumnStore extends ColumnStore with ColumnStoreScanner with 
     for { oldSegment <- getSegFromCache(projection.toRowKeyOnlyProjection, segment, version)
           mergedSegment = mergingStrategy.mergeSegments(oldSegment, segment)
           writeChunksResp <- writeBatchedChunks(projection.datasetRef, version, mergedSegment)
+            if writeChunksResp == Success
           writeCRMapResp <- writeChunkRowMap(projection.datasetRef, segment.binaryPartition, version,
-                                         segment.segmentId, mergedSegment.index)
-            if writeChunksResp == Success }
+                                         segment.segmentId, mergedSegment.index) }
     yield {
       // Important!  Update the cache with the new merged segment.
       updateCache(projection, version, mergedSegment)

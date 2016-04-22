@@ -86,10 +86,21 @@ trait MetaStore {
    * @return Success if succeeds, or AlreadyExists, or IllegalColumnChange
    */
   def newColumn(column: DataColumn, dataset: DatasetRef): Future[Response] = {
+    newColumns(Seq(column), dataset)
+  }
+
+  /**
+   * Creates multiple new columns at a time.  Validation will be performed on all of the new columns
+   * independently before any new column is written.   This API is preferable over calling newColumn
+   * individually for a number of reasons:
+   * - Much more efficient, since it only reads the schema once
+   * - Ensures all changes are valid before any are written
+   */
+  def newColumns(columns: Seq[DataColumn], dataset: DatasetRef): Future[Response] = {
     getSchema(dataset, Int.MaxValue).flatMap { schema =>
-      val invalidReasons = Column.invalidateNewColumn(schema, column)
+      val invalidReasons = columns.flatMap { c => Column.invalidateNewColumn(schema, c) }
       if (invalidReasons.nonEmpty) { Future.failed(IllegalColumnChange(invalidReasons)) }
-      else                         { insertColumn(column, dataset) }
+      else                         { insertColumns(columns, dataset) }
     }
   }
 
@@ -101,7 +112,13 @@ trait MetaStore {
    * @param dataset the DatasetRef for the dataset for which the column should be created
    * @return Success if succeeds, or AlreadyExists
    */
-  def insertColumn(column: DataColumn, dataset: DatasetRef): Future[Response]
+  def insertColumn(column: DataColumn, dataset: DatasetRef): Future[Response] =
+    insertColumns(Seq(column), dataset)
+
+  /**
+   * Similar to insertColumns, but for inserting multiple columns at a time.
+   */
+  def insertColumns(columns: Seq[DataColumn], dataset: DatasetRef): Future[Response]
 
   /**
    * Get the schema for a version of a dataset.  This scans all defined columns from the first version
