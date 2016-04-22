@@ -154,13 +154,16 @@ class FiloContext(val sqlContext: SQLContext) extends AnyVal {
       // Everything within this function runs on each partition/executor, so need a local datastore & system
       FiloExecutor.init(filoConfig)
       sparkLogger.info(s"Starting ingestion of DataFrame for dataset $dataset, partition $index...")
-      ingestRddRows(FiloExecutor.coordinatorActor, dataset, columnNames, version, rowIter,
+      ingestRddRows(FiloExecutor.coordinator, dataset, columnNames, version, rowIter,
                     writeTimeout, index)
       Iterator.empty
     }.count()
 
     // This is the only time that flush is explicitly called
-    if (flushAfterInsert) FiloDriver.client.flush(dataset, version)
+    if (flushAfterInsert) {
+      val nodesFlushed = FiloDriver.client.flush(dataset, version)
+      sparkLogger.info(s"Flush completed on $nodesFlushed nodes for dataset $dataset")
+    }
 
     syncToHive(sqlContext)
   }

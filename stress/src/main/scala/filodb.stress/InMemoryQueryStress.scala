@@ -106,6 +106,6 @@ object InMemoryQueryStress extends App {
   (0 until numRuns).foreach { i => runQueries(allQueries.toArray) }
 
   // clean up!
-  FiloSetup.shutdown()
+  FiloDriver.shutdown()
   sc.stop()
 }

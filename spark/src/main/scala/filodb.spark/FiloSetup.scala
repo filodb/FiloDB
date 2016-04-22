@@ -1,12 +1,14 @@
 package filodb.spark
 
-import akka.actor.{ActorSystem, AddressFromURIString}
+import akka.actor.{ActorSystem, ActorRef, AddressFromURIString}
 import com.typesafe.config.{Config, ConfigFactory}
+import com.typesafe.scalalogging.slf4j.StrictLogging
 import org.apache.spark.SparkContext
 
 import filodb.cassandra.columnstore.CassandraColumnStore
 import filodb.cassandra.metastore.CassandraMetaStore
 import filodb.coordinator.CoordinatorSetup
+import filodb.coordinator.client.ClusterClient
 import filodb.core.store.{InMemoryMetaStore, InMemoryColumnStore}
 
 /**
@@ -40,12 +42,15 @@ trait FiloSetup extends CoordinatorSetup {
     ConfigFactory.parseString(s"akka.cluster.roles=[$role]").withFallback(ConfigFactory.load())
 }
 
-object FiloDriver extends FiloSetup {
+object FiloDriver extends FiloSetup with StrictLogging {
   import collection.JavaConverters._
+
+  lazy val client = new ClusterClient(system, Some("executor"))
 
   // The init method called from a SparkContext is going to be from the driver/app.
   def init(context: SparkContext): Unit =
     _config.getOrElse {
+      logger.info("Initializing FiloDriver clustering/coordination...")
       role = "driver"
       // Add in self cluster address, and join cluster ourselves
       val filoConfig = configFromSpark(context)
@@ -76,19 +81,32 @@ object FiloDriver extends FiloSetup {
   }
 }
 
-object FiloExecutor extends FiloSetup {
+object FiloExecutor extends FiloSetup with StrictLogging {
+  def isSingleJvm: Boolean = FiloDriver._config.isDefined
+
+  // If FiloDriver has also been initialized, then we are running in Spark local mode.  Don't use
+  // our own coordinator, use the driver's.
+  def coordinator: ActorRef = if (isSingleJvm) FiloDriver.coordinatorActor else this.coordinatorActor
+
   /**
    * Initializes the config if it is not set, and start things for an executor.
    * @param filoConfig The config within the filodb.** level.
    * @param role the Akka Cluster role, either "executor" or "driver"
    */
-  def init(filoConfig: Config): Unit = _config.getOrElse {
-    this.role = "executor"
-    _config = Some(filoConfig)
-    coordinatorActor       // Force NodeCoordinatorActor to start
-    // Get address from config and join cluster.  NOTE: It's OK to join cluster multiple times
-    val addr = AddressFromURIString.parse(filoConfig.getString("spark-driver-addr"))
-    cluster.join(addr)
-    Thread sleep 1000
+  def init(filoConfig: Config): Unit = if (isSingleJvm) {
+    _config = FiloDriver._config
+    logger.info("Skipping FiloExecutor initialization, driver and executor detected in same JVM")
+  } else {
+    // Normal cluster, driver and executor are separate JVMs, start up normally
+    _config.getOrElse {
+      this.role = "executor"
+      _config = Some(filoConfig)
+      coordinatorActor       // force coordinator to start
+      // get address from config and join cluster.  note: it's ok to join cluster multiple times
+      val addr = AddressFromURIString.parse(filoConfig.getString("spark-driver-addr"))
+      logger.info(s"Initializing FiloExecutor clustering by joining driver at $addr...")
+      cluster.join(addr)
+      Thread sleep 1000
+    }
   }
 }

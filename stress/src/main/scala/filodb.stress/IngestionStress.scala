@@ -102,8 +102,9 @@ object IngestionStress extends App {
   }
 
   def printIngestionStats(dataset: String): Unit = {
-    val stats = FiloSetup.client.ingestionStats(DatasetRef(dataset), 0)
-    puts(s"  Stats for dataset $dataset => $stats")
+    val stats = FiloDriver.client.ingestionStats(DatasetRef(dataset), 0)
+    puts(s"  Stats for dataset $dataset =>")
+    stats.foreach(s => puts(s"   $s"))
   }
 
   val fut = for { stressDf  <- stressIngestor
@@ -120,7 +121,7 @@ object IngestionStress extends App {
     printIngestionStats("taxi_hour_of_day")
 
     // clean up!
-    FiloSetup.shutdown()
+    FiloDriver.shutdown()
     sc.stop()
   }
 

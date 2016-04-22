@@ -5,7 +5,6 @@ import akka.cluster.Cluster
 import com.typesafe.config.Config
 import scala.concurrent.ExecutionContext
 
-import filodb.coordinator.client.Client
 import filodb.core.FutureUtils
 import filodb.core.reprojector._
 import filodb.core.store.{ColumnStore, MetaStore}
@@ -44,8 +43,6 @@ trait CoordinatorSetup {
                    "coordinator")
 
   lazy val cluster = Cluster(system)
-
-  lazy val client = new Client(coordinatorActor)
 
   def shutdown(): Unit = {
     system.shutdown()

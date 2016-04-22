@@ -14,7 +14,7 @@ import scala.language.postfixOps
 
 import filodb.cassandra.columnstore.CassandraColumnStore
 import filodb.cassandra.metastore.CassandraMetaStore
-import filodb.coordinator.client.Client
+import filodb.coordinator.client.{Client, LocalClient}
 import filodb.coordinator.{NodeCoordinatorActor, CoordinatorSetup}
 import filodb.core._
 import filodb.core.metadata.Column.{ColumnType, Schema}
@@ -62,6 +62,7 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
   val config = ConfigFactory.load.getConfig("filodb")
   lazy val columnStore = new CassandraColumnStore(config, readEc)
   lazy val metaStore = new CassandraMetaStore(config.getConfig("cassandra"))
+  val client = new LocalClient(coordinatorActor)
 
   import Client.{actorAsk, parse}
 
