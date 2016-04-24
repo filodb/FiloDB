@@ -31,6 +31,7 @@ with Matchers with ScalaFutures {
                             .setAppName("test")
                             .set("spark.filodb.cassandra.keyspace", "unittest")
                             .set("spark.filodb.memtable.min-free-mb", "10")
+                            .set("spark.ui.enabled", "false")
   val ssc = new StreamingContext(conf, Milliseconds(700))
   val sql = new SQLContext(ssc.sparkContext)
 

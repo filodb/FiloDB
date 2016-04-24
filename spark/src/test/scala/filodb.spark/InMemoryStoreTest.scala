@@ -9,22 +9,16 @@ import filodb.core._
 import filodb.core.metadata.{Column, DataColumn, Dataset}
 
 /**
- * Use local-cluster mode to test the finer points of ingestion on a cluster, especially
- * the ability to flush data and gather stats on all cluster nodes
- *
- * NOTE: Need to set SPARK_HOME and SPARK_SCALA_VERSION in order for this test to even run.
- * Therefore it should be disabled by default.
+ * Test the InMemoryColumnStore
  */
-class ClusterIngestTest extends SparkTestBase {
+class InMemoryStoreTest extends SparkTestBase {
 
   val currClassPath = sys.props("java.class.path")
 
   // Setup SQLContext and a sample DataFrame
-  val conf = (new SparkConf).setMaster("local-cluster[2,1,1024]")
+  val conf = (new SparkConf).setMaster("local[4]")
                             .setAppName("test")
-                            .set("spark.driver.extraClassPath", currClassPath)
-                            .set("spark.executor.extraClassPath", currClassPath)
-                            .set("spark.filodb.cassandra.keyspace", "unittest")
+                            .set("spark.filodb.store", "in-memory")
                             .set("spark.filodb.memtable.min-free-mb", "10")
                             .set("spark.ui.enabled", "false")
   val sc = new SparkContext(conf)
@@ -37,7 +31,7 @@ class ClusterIngestTest extends SparkTestBase {
   val segCol = ":string 0"
   val testProjections = Seq(dataset1.projections.head)
 
-  ignore("should be able to write in cluster with multi-column partition keys") {
+  it("should be able to write to InMemoryColumnStore with multi-column partition keys") {
     import sql.implicits._
 
     val gdeltDF = sc.parallelize(records.toSeq).toDF()
