@@ -38,11 +38,18 @@ trait FiloSetup extends CoordinatorSetup {
   }
   lazy val metaStore = config.getString("store") match {
     case "cassandra" => new CassandraMetaStore(config.getConfig("cassandra"))
-    case "in-memory" => new InMemoryMetaStore
+    case "in-memory" => SingleJvmInMemoryStore.metaStore
   }
 
   def configWithRole(role: String): Config =
     ConfigFactory.parseString(s"akka.cluster.roles=[$role]").withFallback(ConfigFactory.load())
+}
+
+// TODO: make the InMemoryMetaStore either distributed (using clustering to forward and distribute updates)
+// or, perhaps modify NodeCoordinator to not need metastore.
+object SingleJvmInMemoryStore {
+  import scala.concurrent.ExecutionContext.Implicits.global
+  lazy val metaStore = new InMemoryMetaStore
 }
 
 object FiloDriver extends FiloSetup with StrictLogging {
