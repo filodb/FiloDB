@@ -42,7 +42,8 @@ trait FiloSetup extends CoordinatorSetup {
   }
 
   def configWithRole(role: String): Config =
-    ConfigFactory.parseString(s"akka.cluster.roles=[$role]").withFallback(ConfigFactory.load())
+    ConfigFactory.parseString(s"""akka.cluster.roles=[$role]""")
+                 .withFallback(systemConfig)
 }
 
 // TODO: make the InMemoryMetaStore either distributed (using clustering to forward and distribute updates)
@@ -88,7 +89,7 @@ object FiloDriver extends FiloSetup with StrictLogging {
                                                 k.replace("spark.filodb.", "filodb.") -> v
                                             }
     ConfigFactory.parseMap(filoOverrides.toMap.asJava)
-                 .withFallback(ConfigFactory.load)
+                 .withFallback(systemConfig)
                  .getConfig("filodb")
   }
 }
