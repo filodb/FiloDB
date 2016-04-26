@@ -37,13 +37,13 @@ with Matchers with ScalaFutures {
   before {
     metaStore.clearAllData("unittest").futureValue(defaultPatience)
     metaStore.clearAllData("unittest2").futureValue(defaultPatience)
-    columnStore.clearSegmentCache()
+    FiloDriver.coordinatorActor ! Reset
     try {
       testProjections.foreach { p => columnStore.clearProjectionData(p).futureValue(defaultPatience) }
     } catch {
       case e: Exception =>
     }
-    FiloDriver.coordinatorActor ! Reset
+    FiloDriver.client.sendAllIngestors(Reset)
   }
 
   implicit lazy val ec = FiloDriver.ec

@@ -9,6 +9,7 @@ import scala.concurrent.{Await, Future}
 import scala.language.postfixOps
 
 import filodb.core._
+import filodb.coordinator.NodeClusterActor
 
 object Client {
   implicit val context = scala.concurrent.ExecutionContext.Implicits.global
@@ -71,40 +72,29 @@ class LocalClient(val nodeCoordinator: ActorRef) extends IngestionOps with Datas
 }
 
 /**
- * A client for connecting to a cluster of NodeCoordinators all having a specific role.
+ * A client for connecting to a cluster of NodeCoordinators.
+ * @param nodeClusterActor ActorRef to an instance of NodeClusterActor
+ * @param ingestionRole the role of the cluster members doing the ingestion
+ * @param metadataRole the role of the cluster member handling metadata updates
  */
-class ClusterClient(system: ActorSystem, role: Option[String]) extends IngestionOps with DatasetOps
+class ClusterClient(nodeClusterActor: ActorRef,
+                    ingestionRole: String,
+                    metadataRole: String) extends IngestionOps with DatasetOps
 with StrictLogging {
-  import akka.cluster.routing.ClusterRouterGroup
-  import akka.cluster.routing.ClusterRouterGroupSettings
-  import akka.routing._
+  import NodeClusterActor._
 
-  val coordRouter = system.actorOf(
-    // ClusterRouterGroup(ConsistentHashingGroup(Nil), ClusterRouterGroupSettings(
-    ClusterRouterGroup(RandomGroup(Nil), ClusterRouterGroupSettings(
-      totalInstances = 100, routeesPaths = List("/user/coordinator"),
-      allowLocalRoutees = true, useRole = role)).props(),
-    name = "coordinatorRouter")
-
-  private def getActorRefs(r: Routee): ActorRef = r match {
-    case ActorRefRoutee(ref) => ref
-    case ActorSelectionRoutee(selection) =>
-      logger.debug(s"Got ActorSelectionRoutee with selection $selection")
-      Await.result(selection.resolveOne(10 seconds), 11 seconds)
-  }
-
-  /**
-   * Uses the router to consistently hash messages
-   */
   def askCoordinator[B](msg: Any, askTimeout: FiniteDuration = 30 seconds)(f: PartialFunction[Any, B]): B =
-    Client.actorAsk(coordRouter, msg, askTimeout)(Client.standardResponse(f))
+    Client.actorAsk(nodeClusterActor, ForwardToOne(metadataRole, msg), askTimeout)(
+                    Client.standardResponse(f))
 
   def askAllCoordinators[B](msg: Any, askTimeout: FiniteDuration = 30 seconds)(f: PartialFunction[Any, B]):
     Seq[B] = {
     implicit val timeout = Timeout(askTimeout)
-    val routees = Await.result(coordRouter ? GetRoutees, askTimeout).asInstanceOf[Routees]
-    val refs = routees.routees.map(getActorRefs)
-    logger.debug(s"Sending message $msg to refs $refs, addresses ${refs.map(_.path.address)}...")
-    Client.actorsAsk(refs, msg, askTimeout)(Client.standardResponse(f))
+    val coords = Await.result(nodeClusterActor ? GetRefs(ingestionRole), askTimeout).
+                       asInstanceOf[Set[ActorRef]]
+    logger.debug(s"Sending message $msg to coords $coords, addresses ${coords.map(_.path.address)}...")
+    Client.actorsAsk(coords.toSeq, msg, askTimeout)(Client.standardResponse(f))
   }
+
+  def sendAllIngestors(msg: Any): Unit = nodeClusterActor ! ForwardToAll(ingestionRole, msg)
 }

@@ -148,13 +148,14 @@ class FiloContext(val sqlContext: SQLContext) extends AnyVal {
 
     val numPartitions = df.rdd.partitions.size
     sparkLogger.info(s"Inserting into ($dataset/$version) with $numPartitions partitions")
+    sparkLogger.debug(s"   Dataframe schema = $dfColumns")
 
     // For each partition, start the ingestion
     df.rdd.mapPartitionsWithIndex { case (index, rowIter) =>
       // Everything within this function runs on each partition/executor, so need a local datastore & system
       FiloExecutor.init(filoConfig)
       sparkLogger.info(s"Starting ingestion of DataFrame for dataset $dataset, partition $index...")
-      ingestRddRows(FiloExecutor.coordinator, dataset, columnNames, version, rowIter,
+      ingestRddRows(FiloExecutor.coordinatorActor, dataset, columnNames, version, rowIter,
                     writeTimeout, index)
       Iterator.empty
     }.count()

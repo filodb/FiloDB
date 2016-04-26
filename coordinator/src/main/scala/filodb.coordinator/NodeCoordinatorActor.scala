@@ -206,6 +206,7 @@ class NodeCoordinatorActor(metaStore: MetaStore,
       dsCoordinators.values.foreach(_ ! PoisonPill)
       dsCoordinators.clear()
       dsCoordNotify.clear()
+      columnStore.reset()
 
     case AddDatasetCoord(dataset, version, dsCoordRef) =>
       dsCoordinators((dataset, version)) = dsCoordRef
