@@ -90,8 +90,10 @@ with StrictLogging {
   def askAllCoordinators[B](msg: Any, askTimeout: FiniteDuration = 30 seconds)(f: PartialFunction[Any, B]):
     Seq[B] = {
     implicit val timeout = Timeout(askTimeout)
-    val coords = Await.result(nodeClusterActor ? GetRefs(ingestionRole), askTimeout).
-                       asInstanceOf[Set[ActorRef]]
+    val coords: Set[ActorRef] = Await.result(nodeClusterActor ? GetRefs(ingestionRole), askTimeout) match {
+      case refs: Set[ActorRef] @unchecked => refs
+      case NoSuchRole          => throw ClientException(NoSuchRole)
+    }
     logger.debug(s"Sending message $msg to coords $coords, addresses ${coords.map(_.path.address)}...")
     Client.actorsAsk(coords.toSeq, msg, askTimeout)(Client.standardResponse(f))
   }

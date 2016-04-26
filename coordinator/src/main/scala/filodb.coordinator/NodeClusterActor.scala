@@ -7,10 +7,12 @@ import akka.event.LoggingReceive
 import scala.collection.mutable.HashMap
 import scala.concurrent.duration._
 
+import filodb.core.ErrorResponse
+
 object NodeClusterActor {
   // Forwards message to one random recipient that has the given role.  Any replies go back to originator.
   case class ForwardToOne(role: String, msg: Any)
-  case object NoSuchRole
+  case object NoSuchRole extends ErrorResponse
 
   // Gets all the ActorRefs for a specific role.  Returns a Set[ActorRef].
   case class GetRefs(role: String)
