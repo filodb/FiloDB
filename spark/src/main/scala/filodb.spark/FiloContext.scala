@@ -7,6 +7,7 @@ import scala.language.postfixOps
 
 import filodb.core._
 import filodb.core.metadata.{Column, DataColumn, Dataset}
+import filodb.coordinator.client.ClientException
 import filodb.coordinator.IngestionCommands
 
 /**
@@ -162,8 +163,13 @@ class FiloContext(val sqlContext: SQLContext) extends AnyVal {
 
     // This is the only time that flush is explicitly called
     if (flushAfterInsert) {
-      val nodesFlushed = FiloDriver.client.flushCompletely(dataset, version)
-      sparkLogger.info(s"Flush completed on $nodesFlushed nodes for dataset $dataset")
+      try {
+        val nodesFlushed = FiloDriver.client.flushCompletely(dataset, version)
+        sparkLogger.info(s"Flush completed on $nodesFlushed nodes for dataset $dataset")
+      } catch {
+        case ClientException(msg) =>
+          sparkLogger.warn(s"Could not flush due to client exception $msg...")
+      }
     }
 
     syncToHive(sqlContext)
