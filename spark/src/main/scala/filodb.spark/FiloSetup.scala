@@ -60,7 +60,7 @@ object FiloDriver extends FiloSetup with StrictLogging {
   lazy val client = new ClusterClient(clusterActor, "executor", "driver")
 
   // The init method called from a SparkContext is going to be from the driver/app.
-  def init(context: SparkContext): Unit =
+  def init(context: SparkContext): Unit = synchronized {
     _config.getOrElse {
       logger.info("Initializing FiloDriver clustering/coordination...")
       role = "driver"
@@ -77,6 +77,7 @@ object FiloDriver extends FiloSetup with StrictLogging {
                                      .withFallback(filoConfig)
       _config = Some(finalConfig)
     }
+  }
 
   def initAndGetConfig(context: SparkContext): Config = {
     init(context)
@@ -100,14 +101,16 @@ object FiloExecutor extends FiloSetup with StrictLogging {
    * @param filoConfig The config within the filodb.** level.
    * @param role the Akka Cluster role, either "executor" or "driver"
    */
-  def init(filoConfig: Config): Unit = _config.getOrElse {
-    this.role = "executor"
-    _config = Some(filoConfig)
-    coordinatorActor       // force coordinator to start
-    // get address from config and join cluster.  note: it's ok to join cluster multiple times
-    val addr = AddressFromURIString.parse(filoConfig.getString("spark-driver-addr"))
-    logger.info(s"Initializing FiloExecutor clustering by joining driver at $addr...")
-    cluster.join(addr)
-    Thread sleep 1000
+  def init(filoConfig: Config): Unit = synchronized {
+    _config.getOrElse {
+      this.role = "executor"
+      _config = Some(filoConfig)
+      coordinatorActor       // force coordinator to start
+      // get address from config and join cluster.  note: it's ok to join cluster multiple times
+      val addr = AddressFromURIString.parse(filoConfig.getString("spark-driver-addr"))
+      logger.info(s"Initializing FiloExecutor clustering by joining driver at $addr...")
+      cluster.join(addr)
+      Thread sleep 1000
+    }
   }
 }
