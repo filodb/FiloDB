@@ -1,11 +1,12 @@
 package filodb.coordinator.client
 
+import com.typesafe.scalalogging.slf4j.StrictLogging
 import scala.concurrent.duration._
 
 import filodb.core._
 import filodb.coordinator._
 
-trait IngestionOps extends ClientBase {
+trait IngestionOps extends ClientBase with StrictLogging {
   import IngestionCommands._
 
   /**
@@ -20,6 +21,7 @@ trait IngestionOps extends ClientBase {
   def flush(dataset: DatasetRef, version: Int, timeout: FiniteDuration = 30.seconds): Int = {
     askAllCoordinators(Flush(dataset, version), timeout) {
       case Flushed => true
+      case FlushIgnored => false
       case UnknownDataset => false
     }.filter(x => x).length
   }
@@ -38,4 +40,24 @@ trait IngestionOps extends ClientBase {
       case stats: DatasetCoordinatorActor.Stats => Some(stats)
       case UnknownDataset => None
     }.flatten
+
+  /**
+   * Repeatedly checks the ingestion stats and flushes until everything is flushed for a given dataset.
+   */
+  def flushCompletely(dataset: DatasetRef, version: Int, timeout: FiniteDuration = 30.seconds): Int = {
+    var nodesFlushed: Int = 0
+
+    def anyRowsLeft: Boolean = {
+      val stats = ingestionStats(dataset, version, timeout)
+      logger.debug(s"Stats from all ingestors: $stats")
+      stats.map(_.numRowsActive).filter(_ >= 0).sum > 0
+    }
+
+    while(anyRowsLeft) {
+      nodesFlushed = flush(dataset, version, timeout)
+      Thread sleep 1000
+    }
+
+    nodesFlushed
+  }
 }

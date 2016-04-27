@@ -76,6 +76,7 @@ object IngestionCommands {
    */
   case class Flush(dataset: DatasetRef, version: Int) extends NodeCommand
   case object Flushed extends NodeResponse
+  case object FlushIgnored extends NodeResponse
 
   /**
    * Checks to see if the DatasetCoordActor is ready to take in more rows.  Usually sent when an actor

@@ -252,7 +252,10 @@ private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
     case StartFlush(originator) =>
       originator.foreach { callbackRef => flushedCallbacks = flushedCallbacks :+ callbackRef }
       if (!curReprojection.isDefined) { startFlush() }
-      else { logger.debug(s"Ignoring StartFlush, reprojection already in progress...") }
+      else {
+        logger.debug(s"Ignoring StartFlush, reprojection already in progress...")
+        originator.foreach { _ ! IngestionCommands.FlushIgnored }
+      }
 
     case ClearProjection(replyTo, projection) =>
       clearProjection(replyTo, projection)

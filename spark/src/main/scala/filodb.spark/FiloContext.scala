@@ -162,7 +162,7 @@ class FiloContext(val sqlContext: SQLContext) extends AnyVal {
 
     // This is the only time that flush is explicitly called
     if (flushAfterInsert) {
-      val nodesFlushed = FiloDriver.client.flush(dataset, version)
+      val nodesFlushed = FiloDriver.client.flushCompletely(dataset, version)
       sparkLogger.info(s"Flush completed on $nodesFlushed nodes for dataset $dataset")
     }
 
