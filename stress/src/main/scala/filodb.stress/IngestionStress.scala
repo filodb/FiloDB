@@ -42,6 +42,7 @@ object IngestionStress extends App {
                             .set("spark.scheduler.mode", "FAIR")
   val sc = new SparkContext(conf)
   val sql = new SQLContext(sc)
+  import sql.implicits._
 
   // Ingest the taxi file two different ways using two Futures
   // One way is by hour of day - very relaxed and fast
@@ -56,7 +57,7 @@ object IngestionStress extends App {
 
   val stressIngestor = Future {
     puts("Starting stressful ingestion...")
-    csvDF.write.format("filodb.spark").
+    csvDF.sort($"medallion").write.format("filodb.spark").
       option("dataset", "taxi_medallion_seg").
       option("row_keys", "hack_license,pickup_datetime").
       option("segment_key", ":stringPrefix medallion 3").
@@ -79,7 +80,7 @@ object IngestionStress extends App {
 
     val dfWithHoD = csvDF.withColumn("hourOfDay", hourOfDay(csvDF("pickup_datetime")))
 
-    dfWithHoD.write.format("filodb.spark").
+    dfWithHoD.sort($"hourOfDay").write.format("filodb.spark").
       option("dataset", "taxi_hour_of_day").
       option("row_keys", "hack_license,pickup_datetime").
       option("segment_key", ":timeslice pickup_datetime 4d").
