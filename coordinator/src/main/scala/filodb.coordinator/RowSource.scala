@@ -102,15 +102,13 @@ trait RowSource extends Actor with StrictLogging {
         self ! GetMoreRows
         context.become(reading)
       }
-
-    case IngestionCommands.UnknownDataset =>
-        whoStartedMe.foreach(_ ! IngestionErr("Ingestion actors shut down, check error logs"))
   }
 
   def waiting: Receive = waitingAck orElse replay
 
   val replay: Receive = LoggingReceive {
     case CheckCanIngest =>
+      logger.debug(s"Checking if dataset $dataset can ingest...")
       coordinatorActor ! IngestionCommands.CheckCanIngest(dataset, version)
 
     case IngestionCommands.CanIngest(can) =>
@@ -122,6 +120,12 @@ trait RowSource extends Actor with StrictLogging {
       }
       logger.debug(s"Scheduling another CheckCanIngest in case any unacked messages left")
       schedule(waitingPeriod, CheckCanIngest)
+
+    case IngestionCommands.UnknownDataset =>
+        whoStartedMe.foreach(_ ! IngestionErr("Ingestion actors shut down, check error logs"))
+
+    case e: ErrorResponse =>
+        whoStartedMe.foreach(_ ! IngestionErr(e.toString))
   }
 
   def doneReadingAck: Receive = LoggingReceive {
