@@ -59,8 +59,8 @@ object FiloRelation extends StrictLogging {
                             groupedFilters: Map[String, Seq[Filter]]): Seq[(Int, KeyType, Seq[Filter])] = {
     val columnIdxTypeMap = KeyFilter.mapPartitionColumns(projection, groupedFilters.keys.toSeq)
 
-    logger.info(s"Matching partition key col name / pos / keyType: $columnIdxTypeMap")
     columnIdxTypeMap.map { case (colName, (pos, keyType)) =>
+      logger.info(s"Pushing down partition column $colName, filters ${groupedFilters(colName)}")
       (pos, keyType, groupedFilters(colName))
     }.toSeq
   }
@@ -125,7 +125,7 @@ object FiloRelation extends StrictLogging {
     }
 
     // Compute one func per column/position
-    logger.info(s"Filters by position: $filterStuff")
+    logger.debug(s"Filters by position: $filterStuff")
     val funcs = filterStuff.map { case (pos, keyType, filters) =>
       filters.tail.foldLeft(toFunc(keyType, filters.head)) { case (curFunc, newFilter) =>
         andFunc(curFunc, toFunc(keyType, newFilter))
@@ -133,7 +133,7 @@ object FiloRelation extends StrictLogging {
     }
 
     if (funcs.isEmpty) {
-      logger.info(s"Using default filtering function")
+      logger.info(s"Scanning all partitions with no partition key filtering")
       (a: Any) => true
     } else {
       makePartitionFilterFunc(projection, filterStuff.map(_._1), funcs)
