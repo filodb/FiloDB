@@ -31,14 +31,16 @@ lazy val cli = (project in file("cli"))
                  .dependsOn(core, coordinator, cassandra)
 
 lazy val spark = (project in file("spark"))
-                   .settings(mySettings:_*)
                    .settings(name := "filodb-spark")
+                   .configs( IntegrationTest )
+                   .settings( Defaults.itSettings : _*)
+                   .settings(mySettings:_*)
                    .settings(libraryDependencies ++= sparkDeps)
                    .settings(assemblySettings:_*)
                    .settings(assemblyOption in assembly := (assemblyOption in assembly).value.copy(includeScala = false))
-                   .dependsOn(core % "compile->compile; test->test",
+                   .dependsOn(core % "compile->compile; test->test; it->test",
                               coordinator,
-                              cassandra % "compile->compile; test->test")
+                              cassandra % "compile->compile; test->test; it->test")
 
 lazy val jmh = (project in file("jmh"))
                  .settings(mySettings:_*)
@@ -113,7 +115,8 @@ lazy val sparkDeps = Seq(
   // We don't want LOG4J.  We want Logback!  The excludeZK is to help with a conflict re Coursier plugin.
   "org.apache.spark"     %% "spark-hive"         % sparkVersion % "provided" excludeAll(excludeSlf4jLog4j, excludeZK),
   "org.apache.spark"     %% "spark-hive-thriftserver" % sparkVersion % "provided" excludeAll(excludeSlf4jLog4j, excludeZK),
-  "org.apache.spark"     %% "spark-streaming"   % sparkVersion % "provided"
+  "org.apache.spark"     %% "spark-streaming"   % sparkVersion % "provided",
+  "org.scalatest"        %% "scalatest"         % "2.2.4" % "it"
 )
 
 lazy val jmhDeps = Seq(

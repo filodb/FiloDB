@@ -37,7 +37,7 @@ class ClusterIngestTest extends SparkTestBase {
   val segCol = ":string 0"
   val testProjections = Seq(dataset1.projections.head)
 
-  ignore("should be able to write in cluster with multi-column partition keys") {
+  it("should be able to write in cluster with multi-column partition keys") {
     import sql.implicits._
 
     val gdeltDF = sc.parallelize(records.toSeq).toDF()

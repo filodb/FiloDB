@@ -30,7 +30,6 @@ with Matchers with ScalaFutures {
 
   override def afterAll() {
     super.afterAll()
-    FiloDriver.shutdown()
     sc.stop()
   }
 
