@@ -3,6 +3,7 @@ package filodb.spark
 import akka.actor.{ActorSystem, ActorRef, AddressFromURIString}
 import com.typesafe.config.{Config, ConfigFactory}
 import com.typesafe.scalalogging.slf4j.StrictLogging
+import net.ceedubs.ficus.Ficus._
 import org.apache.spark.SparkContext
 
 import filodb.cassandra.columnstore.CassandraColumnStore
@@ -31,7 +32,11 @@ trait FiloSetup extends CoordinatorSetup {
   var _config: Option[Config] = None
   var role: String = "executor"
 
-  lazy val system = ActorSystem("filo-spark", configWithRole(role))
+  lazy val system = {
+    val port = systemConfig.as[Option[Int]](s"filodb.spark.$role.port").getOrElse(0)
+    ActorSystem("filo-spark", configAkka(role, port))
+  }
+
   lazy val columnStore = config.getString("store") match {
     case "cassandra" => new CassandraColumnStore(config, readEc)
     case "in-memory" => new InMemoryColumnStore(readEc)
@@ -41,8 +46,9 @@ trait FiloSetup extends CoordinatorSetup {
     case "in-memory" => SingleJvmInMemoryStore.metaStore
   }
 
-  def configWithRole(role: String): Config =
-    ConfigFactory.parseString(s"""akka.cluster.roles=[$role]""")
+  def configAkka(role: String, akkaPort: Int): Config =
+    ConfigFactory.parseString(s"""akka.cluster.roles=[$role]
+                                 |akka.remote.netty.tcp.port=$akkaPort""".stripMargin)
                  .withFallback(systemConfig)
 }
 

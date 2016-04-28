@@ -537,7 +537,7 @@ Query/export some columns:
 
 Version 0.2 is the stable, latest released version.  It has been tested on a cluster for a different variety of schemas, has a stable data model and ingestion, and features a huge number of improvements over the previous version.
 
-### Version 0.2.1 change list:
+### Version 0.3 change list:
 
 * Write to multiple keyspaces in C*, using the `database` option
 * Stress tests
@@ -547,6 +547,7 @@ Version 0.2 is the stable, latest released version.  It has been tested on a clu
 * Issue #84: bug with ingesting into FiloDB after doing sort or shuffles using Tungsten Spark 1.5
 * filo-cli delete command now deletes both metadata and data tables
 * new filo-cli truncate command
+* New Akka Cluster-based communication channel between driver and FiloDB coordinators helps ensure that all data is flushed at end of ingestions
 
 ## Deploying
 
@@ -559,6 +560,8 @@ The current version assumes Spark 1.5.x and Cassandra 2.1.x or 2.2.x.
 - Run the cli jar as the filo CLI command line tool and initialize keyspaces if using Cassandra: `filo-cli-*.jar --command init`
 
 There is a branch for Datastax Enterprise 4.8 / Spark 1.4.  Note that if you are using DSE or have vnodes enabled, a lower number of vnodes (16 or less) is STRONGLY recommended as higher numbers of vnodes slows down queries substantially and basically prevents subsecond queries from happening.
+
+By default, FiloDB nodes (basically all the Spark executors) talk to each other using a random port and locally assigned hostname.  You may wish to set `filodb.spark.driver.port`, `filodb.spark.executor.port` to assign specific ports (for AWS, for example) or possibly use a different config file on each host and set `akka.remote.netty.tcp.hostname` on each host's config file.
 
 ## Code Walkthrough
 
