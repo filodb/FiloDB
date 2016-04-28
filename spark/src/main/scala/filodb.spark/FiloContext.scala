@@ -168,7 +168,9 @@ class FiloContext(val sqlContext: SQLContext) extends AnyVal {
         sparkLogger.info(s"Flush completed on $nodesFlushed nodes for dataset $dataset")
       } catch {
         case ClientException(msg) =>
-          sparkLogger.warn(s"Could not flush due to client exception $msg...")
+          sparkLogger.warn(s"Could not flush due to client exception $msg on dataset $dataset...")
+        case e: Exception =>
+          sparkLogger.warn(s"Exception from flushing nodes for $dataset/$version", e)
       }
     }
 

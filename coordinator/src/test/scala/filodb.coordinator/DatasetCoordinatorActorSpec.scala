@@ -88,14 +88,14 @@ with ScalaFutures {
 
   it("should respond to GetStats with no flushes and no rows") {
     probe.send(dsActor, GetStats)
-    probe.expectMsg(Stats(0, 0, 0, 0, -1))
+    probe.expectMsg(Stats(0, 0, 0, 0, -1, 0L))
     reprojections should equal (Nil)
   }
 
   it("should not flush if datasets not reached limit yet") {
     ingestRows(99)
     probe.send(dsActor, GetStats)
-    probe.expectMsg(Stats(0, 0, 0, 99, -1))
+    probe.expectMsg(Stats(0, 0, 0, 99, -1, 99L))
     reprojections should equal (Nil)
   }
 
@@ -105,7 +105,7 @@ with ScalaFutures {
     Thread sleep 500
     ingestRows(20)
     probe.send(dsActor, GetStats)
-    probe.expectMsg(Stats(1, 1, 0, 20, -1))
+    probe.expectMsg(Stats(1, 1, 0, 20, -1, 120L))
     reprojections should equal (Seq((DatasetRef("dataset"), 0)))
   }
 
@@ -123,14 +123,14 @@ with ScalaFutures {
   it("StartFlush should initiate flush even if # rows not reached trigger yet") {
     ingestRows(99)
     probe.send(dsActor, GetStats)
-    probe.expectMsg(Stats(0, 0, 0, 99, -1))
+    probe.expectMsg(Stats(0, 0, 0, 99, -1, 99L))
     reprojections should equal (Nil)
 
     dsActor ! StartFlush(Some(probe.ref))
     probe.expectMsg(IngestionCommands.Flushed)
     probe.send(dsActor, GetStats)
     probe.expectMsgPF(3.seconds.dilated) {
-      case Stats(1, 1, 0, 0, _) =>
+      case Stats(1, 1, 0, 0, _, _) =>
     }
     reprojections should equal (Seq((DatasetRef("dataset"), 0)))
   }

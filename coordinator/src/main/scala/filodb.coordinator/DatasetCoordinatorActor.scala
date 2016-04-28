@@ -56,7 +56,8 @@ object DatasetCoordinatorActor {
                    flushesSucceeded: Int,
                    flushesFailed: Int,
                    numRowsActive: Int,
-                   numRowsFlushing: Int) extends DSCoordinatorMessage
+                   numRowsFlushing: Int,
+                   memtableRowsIngested: Long) extends DSCoordinatorMessage
 
   // Internal messages
   case object MemTableWrite extends DSCoordinatorMessage
@@ -129,6 +130,7 @@ private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
   var flushesStarted = 0
   var flushesSucceeded = 0
   var flushesFailed = 0
+  var rowsIngested = 0L
 
   // Holds temporary rows before being flushed to MemTable
   val tempRows = new ArrayBuffer[RowReader]
@@ -163,6 +165,7 @@ private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
 
   private def writeToMemTable(): Unit = if (tempRows.nonEmpty) {
     logger.debug(s"Flushing ${tempRows.length} rows to MemTable...")
+    rowsIngested += tempRows.length
     activeTable.ingestRows(tempRows)
     ackTos.foreach { case (ackTo, seqNo) => ackTo ! IngestionCommands.Ack(seqNo) }
     tempRows.clear()
@@ -265,7 +268,7 @@ private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
 
     case GetStats =>
       sender ! Stats(flushesStarted, flushesSucceeded, flushesFailed,
-                     activeRows, flushingRows)
+                     activeRows, flushingRows, rowsIngested)
 
     case MemTableWrite =>
       writeToMemTable()
