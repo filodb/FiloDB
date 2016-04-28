@@ -50,8 +50,16 @@ object IngestionStress extends App {
   val csvDF = sql.read.format("com.databricks.spark.csv").
                  option("header", "true").option("inferSchema", "true").
                  load(taxiCsvFile)
-  val inputLines = csvDF.count()
-  puts(s"$taxiCsvFile has $inputLines lines of data")
+  // Define a hour of day function
+  import org.joda.time.DateTime
+  import java.sql.Timestamp
+  val hourOfDay = sql.udf.register("hourOfDay", { (t: Timestamp) => new DateTime(t).getHourOfDay })
+  val dfWithHoD = csvDF.withColumn("hourOfDay", hourOfDay(csvDF("pickup_datetime")))
+
+  val stressLines = csvDF.count()
+  val hrLines = dfWithHoD.groupBy($"hourOfDay", $"hack_license", $"pickup_datetime").count().count()
+  puts(s"$taxiCsvFile has $stressLines unique lines of data for stress schema, and " +
+       s"$hrLines unique lines of data for hour of day schema")
 
   import scala.concurrent.ExecutionContext.Implicits.global
 
@@ -72,13 +80,6 @@ object IngestionStress extends App {
 
   val hrOfDayIngestor = Future {
     puts("Starting hour-of-day (easy) ingestion...")
-
-    // Define a hour of day function
-    import org.joda.time.DateTime
-    import java.sql.Timestamp
-    val hourOfDay = sql.udf.register("hourOfDay", { (t: Timestamp) => new DateTime(t).getHourOfDay })
-
-    val dfWithHoD = csvDF.withColumn("hourOfDay", hourOfDay(csvDF("pickup_datetime")))
 
     dfWithHoD.sort($"hourOfDay").write.format("filodb.spark").
       option("dataset", "taxi_hour_of_day").
@@ -110,8 +111,8 @@ object IngestionStress extends App {
 
   val fut = for { stressDf  <- stressIngestor
         hrOfDayDf <- hrOfDayIngestor
-        stressCount <- checkDatasetCount(stressDf, inputLines)
-        hrCount   <- checkDatasetCount(hrOfDayDf, inputLines) } yield {
+        stressCount <- checkDatasetCount(stressDf, stressLines)
+        hrCount   <- checkDatasetCount(hrOfDayDf, hrLines) } yield {
     puts("Now doing data comparison checking")
 
     // Do something just so we have to depend on both things being done
