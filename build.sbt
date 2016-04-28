@@ -33,7 +33,8 @@ lazy val cli = (project in file("cli"))
 lazy val spark = (project in file("spark"))
                    .settings(name := "filodb-spark")
                    .configs( IntegrationTest )
-                   .settings( Defaults.itSettings : _*)
+                   .settings(itSettings : _*)
+                   .settings(fork in IntegrationTest := true)
                    .settings(mySettings:_*)
                    .settings(libraryDependencies ++= sparkDeps)
                    .settings(assemblySettings:_*)
@@ -152,6 +153,10 @@ lazy val testSettings = Seq(
       // Note: some components of tests seem to have the "Untagged" tag rather than "Test" tag.
       // So, we limit the sum of "Test", "Untagged" tags to 1 concurrent
       Tags.limitSum(1, Tags.Test, Tags.Untagged))
+)
+
+lazy val itSettings = Defaults.itSettings ++ Seq(
+  fork in IntegrationTest := true
 )
 
 lazy val universalSettings = coreSettings ++ styleSettings ++ testSettings
