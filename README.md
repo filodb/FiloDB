@@ -369,6 +369,8 @@ sqlContext.saveAsFilo(df, "gdelt",
 
 The above creates the gdelt table based on the keys above, and also inserts data from the dataframe df.
 
+NOTE: If you are running Spark Shell in DSE, you might need to do `import _root_.filodb.spark._`.
+
 Please see the ScalaDoc for the method for more details -- there is a `database` option for specifying the Cassandra keyspace, and a `mode` option for specifying the Spark SQL SaveMode.
 
 There is also an API purely for inserting data... after all, specifying the keys is not needed when inserting into an existing table.
