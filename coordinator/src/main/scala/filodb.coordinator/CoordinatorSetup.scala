@@ -1,13 +1,31 @@
 package filodb.coordinator
 
 import akka.actor.ActorSystem
-import com.typesafe.config.Config
+import akka.cluster.Cluster
+import com.typesafe.config.{Config, ConfigFactory}
 import scala.concurrent.ExecutionContext
 
-import filodb.coordinator.client.Client
 import filodb.core.FutureUtils
 import filodb.core.reprojector._
 import filodb.core.store.{ColumnStore, MetaStore}
+
+object GlobalConfig {
+  // Loads the overall configuration in a specific order:
+  //  - System properties
+  //  - Config file in location specified by filodb.config.file
+  //  - filodb-defaults.conf (resource / in jar)
+  //  - cluster-reference.conf
+  //  - all other reference.conf's
+  val systemConfig: Config = {
+    val customConfig = sys.props.get("filodb.config.file").orElse(sys.props.get("config.file"))
+                                .map { path => ConfigFactory.parseFile(new java.io.File(path)) }
+                                .getOrElse(ConfigFactory.empty)
+    ConfigFactory.defaultOverrides.withFallback(customConfig)
+                 .withFallback(ConfigFactory.parseResources("filodb-defaults.conf"))
+                 .withFallback(ConfigFactory.parseResources("cluster-reference.conf"))
+                 .withFallback(ConfigFactory.defaultReference)
+  }
+}
 
 /**
  * A trait to make setup of the [[NodeCoordinatorActor]] stack a bit easier.
@@ -16,8 +34,10 @@ import filodb.core.store.{ColumnStore, MetaStore}
 trait CoordinatorSetup {
   def system: ActorSystem
 
-  // The global Filo configuration object.  Should be ConfigFactory.load.getConfig("filodb")
+  // The global Filo configuration object.  Should be systemConfig.getConfig("filodb")
   def config: Config
+
+  lazy val systemConfig: Config = GlobalConfig.systemConfig
 
   lazy val threadPool = FutureUtils.getBoundedTPE(config.getInt("core-futures-queue-length"),
                                                   "filodb.core",
@@ -42,7 +62,7 @@ trait CoordinatorSetup {
     system.actorOf(NodeCoordinatorActor.props(metaStore, reprojector, columnStore, config),
                    "coordinator")
 
-  lazy val client = new Client(coordinatorActor)
+  lazy val cluster = Cluster(system)
 
   def shutdown(): Unit = {
     system.shutdown()

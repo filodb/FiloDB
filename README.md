@@ -290,7 +290,7 @@ Some options must be configured before starting the Spark Shell or Spark applica
 
 1. Modify the `application.conf` and rebuild, or repackage a new configuration.
 2. Override the built in defaults by setting SparkConf configuration values, preceding the filo settings with `spark.filodb`.  For example, to change the default keyspace, pass `--conf spark.filodb.cassandra.keyspace=mykeyspace` to Spark Shell/Submit.  To use the fast in-memory column store instead of Cassandra, pass `--conf spark.filodb.store=in-memory`.
-3. It might be easier to pass in an entire configuration file to FiloDB.  Pass the java option `-Dconfig.file=/path/to/my-filodb.conf`, for example using `--java-driver-options`.
+3. It might be easier to pass in an entire configuration file to FiloDB.  Pass the java option `-Dfilodb.config.file=/path/to/my-filodb.conf`, for example using `--java-driver-options`.
 
 Note that if Cassandra is kept as the default column store, the keyspace can be changed on each transaction by specifying the `database` option in the data source API, or the database parameter in the Scala API.
 
@@ -492,9 +492,9 @@ The `delete` command is used to delete datasets, like a drop.<br>
 
 You may want to customize a configuration to point at your Cassandra cluster, or change other configuration parameters.  The easiest is to pass in a customized config file:
 
-    ./filo-cli -Dconfig.file=/path/to/myfilo.conf --command init
+    ./filo-cli -Dfilodb.config.file=/path/to/myfilo.conf --command init
 
-You may also set the `FILO_CONFIG_FILE` environment var instead, but any `-Dconfig.file` args passed in takes precedence.
+You may also set the `FILO_CONFIG_FILE` environment var instead, but any `-Dfilodb.config.file` args passed in takes precedence.
 
 Individual configuration params may also be changed by passing them on the command line.  They must be the first arguments passed in.  For example:
 
@@ -538,7 +538,7 @@ Query/export some columns:
 
 Version 0.2 is the stable, latest released version.  It has been tested on a cluster for a different variety of schemas, has a stable data model and ingestion, and features a huge number of improvements over the previous version.
 
-### Version 0.2.1 change list:
+### Version 0.3 change list:
 
 * Write to multiple keyspaces in C*, using the `database` option
 * Stress tests
@@ -548,6 +548,7 @@ Version 0.2 is the stable, latest released version.  It has been tested on a clu
 * Issue #84: bug with ingesting into FiloDB after doing sort or shuffles using Tungsten Spark 1.5
 * filo-cli delete command now deletes both metadata and data tables
 * new filo-cli truncate command
+* New Akka Cluster-based communication channel between driver and FiloDB coordinators helps ensure that all data is flushed at end of ingestions
 
 ## Deploying
 
@@ -560,6 +561,8 @@ The current version assumes Spark 1.5.x and Cassandra 2.1.x or 2.2.x.
 - Run the cli jar as the filo CLI command line tool and initialize keyspaces if using Cassandra: `filo-cli-*.jar --command init`
 
 There is a branch for Datastax Enterprise 4.8 / Spark 1.4.  Note that if you are using DSE or have vnodes enabled, a lower number of vnodes (16 or less) is STRONGLY recommended as higher numbers of vnodes slows down queries substantially and basically prevents subsecond queries from happening.
+
+By default, FiloDB nodes (basically all the Spark executors) talk to each other using a random port and locally assigned hostname.  You may wish to set `filodb.spark.driver.port`, `filodb.spark.executor.port` to assign specific ports (for AWS, for example) or possibly use a different config file on each host and set `akka.remote.netty.tcp.hostname` on each host's config file.
 
 ## Code Walkthrough
 

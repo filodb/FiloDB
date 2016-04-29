@@ -11,7 +11,7 @@ import scala.concurrent.duration._
 import filodb.core._
 import filodb.core.metadata.{Column, Dataset, RichProjection}
 import filodb.core.store.{InMemoryColumnStore, RowReaderSegment, RowWriterSegment}
-import filodb.spark.{SparkRowReader, FiloSetup, TypeConverters}
+import filodb.spark.{SparkRowReader, FiloDriver, TypeConverters}
 import org.apache.spark.sql.{DataFrame, Row, SQLContext}
 import org.apache.spark.sql.types._
 import org.apache.spark.sql.functions.sum
@@ -34,12 +34,11 @@ class SparkCassBenchmark {
   val sql = new SQLContext(sc)
   // Below is to make sure that Filo actor system stuff is run before test code
   // so test code is not hit with unnecessary slowdown
-  val filoConfig = FiloSetup.configFromSpark(sc)
-  FiloSetup.init(filoConfig)
+  val filoConfig = FiloDriver.initAndGetConfig(sc)
 
   @TearDown
   def shutdownFiloActors(): Unit = {
-    FiloSetup.shutdown()
+    FiloDriver.shutdown()
     sc.stop()
   }
 

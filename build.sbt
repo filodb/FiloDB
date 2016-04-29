@@ -31,14 +31,17 @@ lazy val cli = (project in file("cli"))
                  .dependsOn(core, coordinator, cassandra)
 
 lazy val spark = (project in file("spark"))
-                   .settings(mySettings:_*)
                    .settings(name := "filodb-spark")
+                   .configs( IntegrationTest )
+                   .settings(itSettings : _*)
+                   .settings(fork in IntegrationTest := true)
+                   .settings(mySettings:_*)
                    .settings(libraryDependencies ++= sparkDeps)
                    .settings(assemblySettings:_*)
                    .settings(assemblyOption in assembly := (assemblyOption in assembly).value.copy(includeScala = false))
-                   .dependsOn(core % "compile->compile; test->test",
+                   .dependsOn(core % "compile->compile; test->test; it->test",
                               coordinator,
-                              cassandra % "compile->compile; test->test")
+                              cassandra % "compile->compile; test->test; it->test")
 
 lazy val jmh = (project in file("jmh"))
                  .settings(mySettings:_*)
@@ -54,7 +57,7 @@ lazy val stress = (project in file("stress"))
                     .dependsOn(spark)
 
 val phantomVersion = "1.11.0"
-val akkaVersion    = "2.3.7"
+val akkaVersion    = "2.3.15"
 val sparkVersion   = "1.4.1"
 
 lazy val extraRepos = Seq(
@@ -97,6 +100,7 @@ lazy val cassDeps = Seq(
 
 lazy val coordDeps = Seq(
   "com.typesafe.akka"    %% "akka-slf4j"        % akkaVersion,
+  "com.typesafe.akka"    %% "akka-cluster"      % akkaVersion,
   "com.opencsv"           % "opencsv"           % "3.3",
   "com.typesafe.akka"    %% "akka-testkit"      % akkaVersion % "test",
   "ch.qos.logback"        % "logback-classic"   % "1.0.7" % "test",  // to get good test logs
@@ -111,7 +115,8 @@ lazy val cliDeps = Seq(
 lazy val sparkDeps = Seq(
   // We don't want LOG4J.  We want Logback!  The excludeZK is to help with a conflict re Coursier plugin.
   "org.apache.spark"     %% "spark-hive"        % sparkVersion % "provided" excludeAll(excludeSlf4jLog4j, excludeZK),
-  "org.apache.spark"     %% "spark-streaming"   % sparkVersion % "provided" excludeAll(excludeSlf4jLog4j, excludeZK)
+  "org.apache.spark"     %% "spark-streaming"   % sparkVersion % "provided" excludeAll(excludeSlf4jLog4j, excludeZK),
+  "org.scalatest"        %% "scalatest"         % "2.2.4" % "it"
 )
 
 lazy val jmhDeps = Seq(
@@ -147,6 +152,10 @@ lazy val testSettings = Seq(
       // Note: some components of tests seem to have the "Untagged" tag rather than "Test" tag.
       // So, we limit the sum of "Test", "Untagged" tags to 1 concurrent
       Tags.limitSum(1, Tags.Test, Tags.Untagged))
+)
+
+lazy val itSettings = Defaults.itSettings ++ Seq(
+  fork in IntegrationTest := true
 )
 
 lazy val universalSettings = coreSettings ++ styleSettings ++ testSettings
@@ -192,10 +201,9 @@ lazy val assemblySettings = Seq(
     case m if m.toLowerCase.endsWith("manifest.mf") => MergeStrategy.discard
     case m if m.toLowerCase.matches("meta-inf.*\\.sf$") => MergeStrategy.discard
     case m if m.toLowerCase.matches("meta-inf.*\\.properties") => MergeStrategy.discard
-    // case m if m.toLowerCase.matches("*\\.versions\\.properties") => MergeStrategy.discard
     case PathList(ps @ _*) if ps.last endsWith ".txt.1" => MergeStrategy.first
-      case "reference.conf" => MergeStrategy.concat
-    case "application.conf"                            => MergeStrategy.concat
+    case "reference.conf"    => MergeStrategy.concat
+    case "application.conf"  => MergeStrategy.concat
     case x =>
       val oldStrategy = (assemblyMergeStrategy in assembly).value
       oldStrategy(x)

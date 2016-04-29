@@ -44,7 +44,7 @@ trait RowSource extends Actor with StrictLogging {
   def coordinatorActor: ActorRef
 
   // Returns the SetupIngestion message needed for initialization
-  def getStartMessage(): NodeCoordinatorActor.SetupIngestion
+  def getStartMessage(): IngestionCommands.SetupIngestion
 
   def dataset: DatasetRef
   def version: Int
@@ -66,7 +66,7 @@ trait RowSource extends Actor with StrictLogging {
       whoStartedMe = Some(sender)
       coordinatorActor ! getStartMessage()
 
-    case NodeCoordinatorActor.IngestionReady =>
+    case IngestionCommands.IngestionReady =>
       self ! GetMoreRows
       logger.info(s" ==> Setup is all done, starting ingestion...")
       context.become(reading)
@@ -85,47 +85,51 @@ trait RowSource extends Actor with StrictLogging {
         context.become(doneReading)
       }
 
-    case NodeCoordinatorActor.Ack(lastSequenceNo) =>
+    case IngestionCommands.Ack(lastSequenceNo) =>
       if (outstanding contains lastSequenceNo) outstanding.remove(lastSequenceNo)
 
-    case NodeCoordinatorActor.UnknownDataset =>
+    case IngestionCommands.UnknownDataset =>
         whoStartedMe.foreach(_ ! IngestionErr("Ingestion actors shut down, check error logs"))
 
     case CheckCanIngest =>
   }
 
   def waitingAck: Receive = LoggingReceive {
-    case NodeCoordinatorActor.Ack(lastSequenceNo) =>
+    case IngestionCommands.Ack(lastSequenceNo) =>
       if (outstanding contains lastSequenceNo) outstanding.remove(lastSequenceNo)
       if (outstanding.isEmpty) {
         logger.debug(s" ==> reading, all unacked messages acked")
         self ! GetMoreRows
         context.become(reading)
       }
-
-    case NodeCoordinatorActor.UnknownDataset =>
-        whoStartedMe.foreach(_ ! IngestionErr("Ingestion actors shut down, check error logs"))
   }
 
   def waiting: Receive = waitingAck orElse replay
 
   val replay: Receive = LoggingReceive {
     case CheckCanIngest =>
-      coordinatorActor ! NodeCoordinatorActor.CheckCanIngest(dataset, version)
+      logger.debug(s"Checking if dataset $dataset can ingest...")
+      coordinatorActor ! IngestionCommands.CheckCanIngest(dataset, version)
 
-    case NodeCoordinatorActor.CanIngest(can) =>
+    case IngestionCommands.CanIngest(can) =>
       if (can) {
         logger.debug(s"Yay, we're allowed to ingest again!  Replaying unacked messages")
         outstanding.foreach { case (seqId, batch) =>
-          coordinatorActor ! NodeCoordinatorActor.IngestRows(dataset, version, batch, seqId)
+          coordinatorActor ! IngestionCommands.IngestRows(dataset, version, batch, seqId)
         }
       }
       logger.debug(s"Scheduling another CheckCanIngest in case any unacked messages left")
       schedule(waitingPeriod, CheckCanIngest)
+
+    case IngestionCommands.UnknownDataset =>
+        whoStartedMe.foreach(_ ! IngestionErr("Ingestion actors shut down, check error logs"))
+
+    case e: ErrorResponse =>
+        whoStartedMe.foreach(_ ! IngestionErr(e.toString))
   }
 
   def doneReadingAck: Receive = LoggingReceive {
-    case NodeCoordinatorActor.Ack(lastSequenceNo) =>
+    case IngestionCommands.Ack(lastSequenceNo) =>
       if (outstanding contains lastSequenceNo) outstanding.remove(lastSequenceNo)
       if (outstanding.isEmpty) finish()
   }
@@ -138,7 +142,7 @@ trait RowSource extends Actor with StrictLogging {
   def sendRows(): Unit = {
     val (nextSeqId, nextBatch) = batchIterator.next
     outstanding(nextSeqId) = nextBatch
-    coordinatorActor ! NodeCoordinatorActor.IngestRows(dataset, version, nextBatch, nextSeqId)
+    coordinatorActor ! IngestionCommands.IngestRows(dataset, version, nextBatch, nextSeqId)
     // Go get more rows
     if (outstanding.size < maxUnackedBatches) {
       self ! GetMoreRows

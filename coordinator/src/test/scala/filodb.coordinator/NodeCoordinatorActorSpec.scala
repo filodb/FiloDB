@@ -20,7 +20,8 @@ object NodeCoordinatorActorSpec extends ActorSpecConfig
 class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNewSystem)
 with CoordinatorSetup with ScalaFutures {
   import akka.testkit._
-  import NodeCoordinatorActor._
+  import DatasetCommands._
+  import IngestionCommands._
   import GdeltTestData._
 
   implicit val defaultPatience =
@@ -144,7 +145,7 @@ with CoordinatorSetup with ScalaFutures {
     probe.expectMsg(Flushed)
 
     probe.send(coordActor, GetIngestionStats(ref, 0))
-    probe.expectMsg(DatasetCoordinatorActor.Stats(1, 1, 0, 0, -1))
+    probe.expectMsg(DatasetCoordinatorActor.Stats(1, 1, 0, 0, -1, 99L))
 
     // Now, read stuff back from the column store and check that it's all there
     val scanMethod = SinglePartitionScan(Seq("GOV", 1979))

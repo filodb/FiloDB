@@ -27,7 +27,7 @@ import filodb.core.reprojector.Reprojector
  *
  * It is called by local (eg HTTP) as well as remote (eg Spark ETL) processes.
  */
-object NodeCoordinatorActor extends NodeCommands {
+object NodeCoordinatorActor {
   // Internal messages
   case object Reset
   case class AddDatasetCoord(dataset: DatasetRef, version: Int, dsCoordRef: ActorRef)
@@ -53,6 +53,8 @@ class NodeCoordinatorActor(metaStore: MetaStore,
                            columnStore: ColumnStore,
                            config: Config) extends BaseActor {
   import NodeCoordinatorActor._
+  import DatasetCommands._
+  import IngestionCommands._
   import context.dispatcher
 
   val dsCoordinators = new collection.mutable.HashMap[(DatasetRef, Int), ActorRef]
@@ -204,6 +206,7 @@ class NodeCoordinatorActor(metaStore: MetaStore,
       dsCoordinators.values.foreach(_ ! PoisonPill)
       dsCoordinators.clear()
       dsCoordNotify.clear()
+      columnStore.reset()
 
     case AddDatasetCoord(dataset, version, dsCoordRef) =>
       dsCoordinators((dataset, version)) = dsCoordRef

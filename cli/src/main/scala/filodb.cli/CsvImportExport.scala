@@ -10,7 +10,7 @@ import scala.concurrent.{Await, Future, ExecutionContext}
 import scala.concurrent.duration._
 import scala.language.postfixOps
 
-import filodb.coordinator.client.Client
+import filodb.coordinator.client.{Client, LocalClient}
 import filodb.coordinator.sources.CsvSourceActor
 import filodb.coordinator.RowSource
 import filodb.core._
@@ -22,7 +22,7 @@ trait CsvImportExport extends StrictLogging {
   def system: ActorSystem
   val metaStore: MetaStore
   def coordinatorActor: ActorRef
-  def client: Client
+  def client: LocalClient
   var exitCode = 0
 
   implicit val ec: ExecutionContext
@@ -62,7 +62,7 @@ trait CsvImportExport extends StrictLogging {
     }
 
     // There might still be rows left after the latest flush is done, so initiate another flush
-    val activeRows = client.ingestionStats(dataset, version).numRowsActive
+    val activeRows = client.ingestionStats(dataset, version).head.numRowsActive
     if (activeRows > 0) {
       logger.info(s"Still $activeRows left to flush in active memTable, triggering flush....")
       client.flush(dataset, version, timeout)

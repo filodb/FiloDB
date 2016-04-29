@@ -5,7 +5,7 @@ import com.opencsv.CSVReader
 import org.velvia.filo.{ArrayStringRowReader, RowReader}
 import scala.util.Try
 
-import filodb.coordinator.{BaseActor, NodeCoordinatorActor, RowSource}
+import filodb.coordinator.{BaseActor, IngestionCommands, RowSource}
 import filodb.core.DatasetRef
 
 object CsvSourceActor {
@@ -41,7 +41,7 @@ class CsvSourceActor(csvStream: java.io.Reader,
                      rowsToRead: Int = CsvSourceActor.RowsToRead,
                      separatorChar: Char = ',') extends BaseActor with RowSource {
   import CsvSourceActor._
-  import NodeCoordinatorActor._
+  import IngestionCommands._
   import collection.JavaConverters._
 
   val reader = new CSVReader(csvStream, separatorChar)

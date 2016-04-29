@@ -69,7 +69,7 @@ with ScalaFutures {
 
   private def ingestRows(numRows: Int) {
     dsActor ! NewRows(probe.ref, namesWithPartCol.take(numRows).map(TupleRowReader), 0L)
-    probe.expectMsg(NodeCoordinatorActor.Ack(0L))
+    probe.expectMsg(IngestionCommands.Ack(0L))
   }
 
   val dummySegInfo = SegmentInfo("Success", 0)
@@ -88,14 +88,14 @@ with ScalaFutures {
 
   it("should respond to GetStats with no flushes and no rows") {
     probe.send(dsActor, GetStats)
-    probe.expectMsg(Stats(0, 0, 0, 0, -1))
+    probe.expectMsg(Stats(0, 0, 0, 0, -1, 0L))
     reprojections should equal (Nil)
   }
 
   it("should not flush if datasets not reached limit yet") {
     ingestRows(99)
     probe.send(dsActor, GetStats)
-    probe.expectMsg(Stats(0, 0, 0, 99, -1))
+    probe.expectMsg(Stats(0, 0, 0, 99, -1, 99L))
     reprojections should equal (Nil)
   }
 
@@ -105,7 +105,7 @@ with ScalaFutures {
     Thread sleep 500
     ingestRows(20)
     probe.send(dsActor, GetStats)
-    probe.expectMsg(Stats(1, 1, 0, 20, -1))
+    probe.expectMsg(Stats(1, 1, 0, 20, -1, 120L))
     reprojections should equal (Seq((DatasetRef("dataset"), 0)))
   }
 
@@ -116,21 +116,21 @@ with ScalaFutures {
     // (Hopefully this gets sent before the table is flushed)
     dsActor ! NewRows(probe.ref, namesWithPartCol.drop(205).take(20).map(TupleRowReader), 1L)
 
-    probe.expectMsg(NodeCoordinatorActor.Ack(0L))
+    probe.expectMsg(IngestionCommands.Ack(0L))
     probe.expectNoMsg
   }
 
   it("StartFlush should initiate flush even if # rows not reached trigger yet") {
     ingestRows(99)
     probe.send(dsActor, GetStats)
-    probe.expectMsg(Stats(0, 0, 0, 99, -1))
+    probe.expectMsg(Stats(0, 0, 0, 99, -1, 99L))
     reprojections should equal (Nil)
 
     dsActor ! StartFlush(Some(probe.ref))
-    probe.expectMsg(NodeCoordinatorActor.Flushed)
+    probe.expectMsg(IngestionCommands.Flushed)
     probe.send(dsActor, GetStats)
     probe.expectMsgPF(3.seconds.dilated) {
-      case Stats(1, 1, 0, 0, _) =>
+      case Stats(1, 1, 0, 0, _, _) =>
     }
     reprojections should equal (Seq((DatasetRef("dataset"), 0)))
   }

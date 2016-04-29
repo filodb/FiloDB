@@ -15,7 +15,7 @@ import scala.language.postfixOps
 
 import filodb.core._
 import filodb.core.metadata.{Column, DataColumn, Dataset, RichProjection}
-import filodb.coordinator.{NodeCoordinatorActor, RowSource, DatasetCoordinatorActor}
+import filodb.coordinator.{IngestionCommands, DatasetCommands, RowSource, DatasetCoordinatorActor}
 
 package spark {
   case class DatasetNotFound(dataset: String) extends Exception(s"Dataset $dataset not found")
@@ -57,9 +57,9 @@ package spark {
 package object spark extends StrictLogging {
   val DefaultWriteTimeout = 999 minutes
 
-  import NodeCoordinatorActor._
-  import filodb.spark.FiloRelation._
-  import FiloSetup.metaStore
+  import IngestionCommands._
+  import DatasetCommands._
+  import FiloDriver.metaStore
   import RowSource._
   import filodb.coordinator.client.Client.{parse, actorAsk}
 
@@ -76,7 +76,7 @@ package object spark extends StrictLogging {
     // it is not safe for us to read off of this iterator in another (ie Actor) thread
     val queue = new ArrayBlockingQueue[Seq[Row]](32)
     val props = RddRowSourceActor.props(queue, columns, dataset, version, coordinatorActor)
-    val rddRowActor = FiloSetup.system.actorOf(props, s"${dataset}_${version}_$partitionIndex")
+    val rddRowActor = FiloExecutor.system.actorOf(props, s"${dataset}_${version}_$partitionIndex")
     implicit val timeout = Timeout(writeTimeout)
     val resp = rddRowActor ? Start
     val rowChunks = rows.grouped(1000)
@@ -101,10 +101,7 @@ package object spark extends StrictLogging {
    * to create FiloDB tables.
    */
   def syncToHive(sqlContext: SQLContext): Unit = {
-    val config = Option(FiloSetup.config).getOrElse {
-      FiloSetup.init(sqlContext.sparkContext)
-      FiloSetup.config
-    }
+    val config = FiloDriver.initAndGetConfig(sqlContext.sparkContext)
     // if (config.hasPath("hive.database-name")) {
     //   MetaStoreSync.getHiveContext(sqlContext).foreach { hiveContext =>
     //     MetaStoreSync.syncFiloTables(config.getString("hive.database-name"),
@@ -176,7 +173,7 @@ package object spark extends StrictLogging {
   // This doesn't create columns, because that's in checkAndAddColumns.
   private[spark] def createNewDataset(dataset: Dataset): Unit = {
     logger.info(s"Creating dataset ${dataset.name}...")
-    actorAsk(FiloSetup.coordinatorActor, CreateDataset(dataset, Nil)) {
+    actorAsk(FiloDriver.coordinatorActor, CreateDataset(dataset, Nil)) {
       case DatasetCreated =>
         logger.info(s"Dataset ${dataset.name} created successfully...")
       case DatasetError(errMsg) =>
@@ -186,7 +183,7 @@ package object spark extends StrictLogging {
 
   private[spark] def deleteDataset(dataset: DatasetRef): Unit = {
     logger.info(s"Deleting dataset $dataset")
-    parse(FiloSetup.metaStore.deleteDataset(dataset)) { resp => resp }
+    parse(metaStore.deleteDataset(dataset)) { resp => resp }
   }
 
   implicit def sqlToFiloContext(sql: SQLContext): FiloContext = new FiloContext(sql)

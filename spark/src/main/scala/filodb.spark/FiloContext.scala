@@ -7,14 +7,15 @@ import scala.language.postfixOps
 
 import filodb.core._
 import filodb.core.metadata.{Column, DataColumn, Dataset}
-import filodb.coordinator.NodeCoordinatorActor
+import filodb.coordinator.client.ClientException
+import filodb.coordinator.IngestionCommands
 
 /**
  * Class implementing insert and save Scala APIs.
  * Don't directly instantiate this, instead use the implicit conversion function.
  */
 class FiloContext(val sqlContext: SQLContext) extends AnyVal {
-  import NodeCoordinatorActor.{Flush, Flushed}
+  import IngestionCommands.{Flush, Flushed}
   import FiloRelation._
 
   /**
@@ -53,7 +54,7 @@ class FiloContext(val sqlContext: SQLContext) extends AnyVal {
                                            chunkSize: Option[Int] = None,
                                            resetSchema: Boolean = false,
                                            mode: SaveMode = SaveMode.Append): Unit = {
-    FiloSetup.init(sqlContext.sparkContext)
+    FiloDriver.init(sqlContext.sparkContext)
     val partKeys = if (partitionKeys.nonEmpty) partitionKeys else Seq(Dataset.DefaultPartitionColumn)
     val dfColumns = dfToFiloColumns(schema)
 
@@ -136,31 +137,42 @@ class FiloContext(val sqlContext: SQLContext) extends AnyVal {
                      database: Option[String] = None,
                      writeTimeout: FiniteDuration = DefaultWriteTimeout,
                      flushAfterInsert: Boolean = true): Unit = {
-    val filoConfig = FiloSetup.initAndGetConfig(sqlContext.sparkContext)
+    val filoConfig = FiloDriver.initAndGetConfig(sqlContext.sparkContext)
     val dfColumns = dfToFiloColumns(df)
     val columnNames = dfColumns.map(_.name)
     val dataset = DatasetRef(datasetName, database)
     checkAndAddColumns(dfColumns, dataset, version)
 
     if (overwrite) {
-      FiloSetup.client.truncateDataset(dataset, version)
+      FiloDriver.client.truncateDataset(dataset, version)
     }
 
     val numPartitions = df.rdd.partitions.size
     sparkLogger.info(s"Inserting into ($dataset/$version) with $numPartitions partitions")
+    sparkLogger.debug(s"   Dataframe schema = $dfColumns")
 
     // For each partition, start the ingestion
     df.rdd.mapPartitionsWithIndex { case (index, rowIter) =>
       // Everything within this function runs on each partition/executor, so need a local datastore & system
-      FiloSetup.init(filoConfig)
+      FiloExecutor.init(filoConfig)
       sparkLogger.info(s"Starting ingestion of DataFrame for dataset $dataset, partition $index...")
-      ingestRddRows(FiloSetup.coordinatorActor, dataset, columnNames, version, rowIter,
+      ingestRddRows(FiloExecutor.coordinatorActor, dataset, columnNames, version, rowIter,
                     writeTimeout, index)
       Iterator.empty
     }.count()
 
     // This is the only time that flush is explicitly called
-    if (flushAfterInsert) FiloSetup.client.flush(dataset, version)
+    if (flushAfterInsert) {
+      try {
+        val nodesFlushed = FiloDriver.client.flushCompletely(dataset, version)
+        sparkLogger.info(s"Flush completed on $nodesFlushed nodes for dataset $dataset")
+      } catch {
+        case ClientException(msg) =>
+          sparkLogger.warn(s"Could not flush due to client exception $msg on dataset $dataset...")
+        case e: Exception =>
+          sparkLogger.warn(s"Exception from flushing nodes for $dataset/$version", e)
+      }
+    }
 
     syncToHive(sqlContext)
   }

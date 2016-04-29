@@ -140,6 +140,11 @@ trait ColumnStore {
   def getScanSplits(dataset: DatasetRef, splitsPerNode: Int = 1): Seq[ScanSplit]
 
   /**
+   * Resets the state of the column store, mostly used for testing
+   */
+  def reset(): Unit
+
+  /**
    * Shuts down the ColumnStore, including any threads that might be hanging around
    */
   def shutdown(): Unit
@@ -199,6 +204,7 @@ trait CachedMergingColumnStore extends ColumnStore with ColumnStoreScanner with 
   /**
    * == Caching and merging implementation of the high level functions ==
    */
+  def reset(): Unit = { clearSegmentCache() }
 
   def clearSegmentCache(): Unit = { segmentCache.clear() }
 

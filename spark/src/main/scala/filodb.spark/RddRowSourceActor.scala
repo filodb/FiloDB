@@ -9,7 +9,7 @@ import org.joda.time.DateTime
 import org.velvia.filo.RowReader
 
 import filodb.core.{DatasetRef, Types}
-import filodb.coordinator.{BaseActor, NodeCoordinatorActor, RowSource}
+import filodb.coordinator.{BaseActor, IngestionCommands, RowSource}
 
 object RddRowSourceActor {
   // Needs to be a multiple of chunkSize. Not sure how to have a good default though.
@@ -40,7 +40,7 @@ class RddRowSourceActor(queue: BlockingQueue[Seq[Row]],
                         val coordinatorActor: ActorRef,
                         val maxUnackedBatches: Int = RddRowSourceActor.DefaultMaxUnackedBatches)
 extends BaseActor with RowSource {
-  import NodeCoordinatorActor._
+  import IngestionCommands._
   import RddRowSourceActor._
 
   def getStartMessage(): SetupIngestion = SetupIngestion(dataset, columns, version)

@@ -5,11 +5,11 @@ import org.velvia.filo.RowReader
 import filodb.core._
 import filodb.core.metadata.{Dataset, DataColumn, Projection}
 
-// Public, external Actor/Akka API, so every incoming command should be a NodeCommand
+// Public, external Actor/Akka API for NodeCoordinatorActor, so every incoming command should be a NodeCommand
 sealed trait NodeCommand
 sealed trait NodeResponse
 
-trait DatasetCommands {
+object DatasetCommands {
   /**
    * Creates a new dataset with columns and a default projection.
    * @param dataset the Dataset object
@@ -39,7 +39,7 @@ trait DatasetCommands {
   case object DatasetDropped extends NodeResponse
 }
 
-trait IngestionCommands {
+object IngestionCommands {
   /**
    * Sets up ingestion for a given dataset, version, and schema of columns.
    * The dataset and columns must have been previously defined.
@@ -76,6 +76,7 @@ trait IngestionCommands {
    */
   case class Flush(dataset: DatasetRef, version: Int) extends NodeCommand
   case object Flushed extends NodeResponse
+  case object FlushIgnored extends NodeResponse
 
   /**
    * Checks to see if the DatasetCoordActor is ready to take in more rows.  Usually sent when an actor
@@ -89,5 +90,3 @@ trait IngestionCommands {
    */
   case class GetIngestionStats(dataset: DatasetRef, version: Int) extends NodeCommand
 }
-
-trait NodeCommands extends DatasetCommands with IngestionCommands
