@@ -20,9 +20,13 @@ object GlobalConfig {
     val customConfig = sys.props.get("filodb.config.file").orElse(sys.props.get("config.file"))
                                 .map { path => ConfigFactory.parseFile(new java.io.File(path)) }
                                 .getOrElse(ConfigFactory.empty)
+    // Don't ask me why, but ConfigFactory.parseResources() does NOT work in Spark 1.4.1 executors
+    // and only the below works.
+    val defaultsFromUrl = ConfigFactory.parseURL(getClass.getResource("/filodb-defaults.conf"))
+    val clusterFromUrl = ConfigFactory.parseURL(getClass.getResource("/cluster-reference.conf"))
     ConfigFactory.defaultOverrides.withFallback(customConfig)
-                 .withFallback(ConfigFactory.parseResources("filodb-defaults.conf"))
-                 .withFallback(ConfigFactory.parseResources("cluster-reference.conf"))
+                 .withFallback(defaultsFromUrl)
+                 .withFallback(clusterFromUrl)
                  .withFallback(ConfigFactory.defaultReference)
   }
 }
