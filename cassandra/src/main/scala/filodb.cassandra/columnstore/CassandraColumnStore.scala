@@ -134,34 +134,41 @@ extends CachedMergingColumnStore with CassandraColumnStoreScanner with StrictLog
     val tokensByReplica = metadata.getTokenRanges.asScala.toSeq.groupBy { tokenRange =>
       metadata.getReplicas(keyspace, tokenRange)
     }
-    val tokenRanges = for { key <- tokensByReplica.keys } yield {
-      if (tokensByReplica(key).size > 1) {
-        // NOTE: If vnodes are enabled, like in DSE, the token ranges are not contiguous and cannot
-        // therefore be merged. In that case just give up.  Lesson: don't use a lot of vnodes.
+
+    val tokenRangeGroups: Seq[Seq[TokenRange]] = {
+      tokensByReplica.flatMap { case (replicaKey, rangesPerReplica) =>
+        // First, sort tokens in each replica group so that adjacent tokens are next to each other
+        val sortedRanges = rangesPerReplica.sorted
+
+        // If token ranges can be merged (adjacent), merge them and divide evenly into splitsPerNode
         try {
-          tokensByReplica(key).sorted.reduceLeft(_.mergeWith(_)).splitEvenly(splitsPerNode).asScala
+          // There is no "empty" or "zero" TokenRange, so we have to treat single range separately.
+          val singleRange =
+            if (sortedRanges.length > 1) { sortedRanges.reduceLeft(_.mergeWith(_)) }
+            else                         { sortedRanges.head }
+          // We end up with splitsPerNode sets of single token ranges
+          singleRange.splitEvenly(splitsPerNode).asScala.map(Seq(_))
+
+        // If they cannot be merged (DSE / vnodes), then try to group ranges into splitsPerNode groups
+        // This is less efficient but less partitions is still much much better.  Having a huge
+        // number of partitions is very slow for Spark, and we want to honor splitsPerNode.
         } catch {
           case e: IllegalArgumentException =>
-            logger.warn(s"Non-contiguous token ranges, cannot merge.  This is probably because of vnodes.")
-            logger.warn("Reduce the number of vnodes for better performance.")
-            tokensByReplica(key)
+            // First range goes to split 0, second goes to split 1, etc, capped by splits
+            sortedRanges.zipWithIndex.groupBy(_._2 % splitsPerNode).values.map(_.map(_._1)).toSeq
         }
-      }
-      else {
-        tokensByReplica(key).flatMap { range => range.splitEvenly(splitsPerNode).asScala }
-      }
+      }.toSeq
     }
-    val tokensComplete = tokenRanges.flatMap { token => token } .toSeq
-    tokensComplete.map { tokenRange =>
-      val replicas = metadata.getReplicas(keyspace, tokenRange).asScala
-      CassandraTokenRangeSplit(tokenRange.getStart.toString,
-                               tokenRange.getEnd.toString,
+
+    tokenRangeGroups.map { tokenRanges =>
+      val replicas = metadata.getReplicas(keyspace, tokenRanges.head).asScala
+      CassandraTokenRangeSplit(tokenRanges.map { range => (range.getStart.toString, range.getEnd.toString) },
                                replicas.map(_.getSocketAddress).toSet)
     }
   }
 }
 
-case class CassandraTokenRangeSplit(startToken: String, endToken: String,
+case class CassandraTokenRangeSplit(tokens: Seq[(String, String)],
                                     replicas: Set[InetSocketAddress]) extends ScanSplit {
   // NOTE: You need both the host string and the IP address for Spark's locality to work
   def hostnames: Set[String] = replicas.flatMap(r => Set(r.getHostString, r.getAddress.getHostAddress))
@@ -211,14 +218,14 @@ trait CassandraColumnStoreScanner extends ColumnStoreScanner with StrictLogging 
       case SinglePartitionRangeScan(k) =>
         rowMapTable.getChunkMaps(projection.toBinaryKeyRange(k), version)
 
-      case FilteredPartitionScan(CassandraTokenRangeSplit(startToken, endToken, _), filterFunc) =>
-        rowMapTable.scanChunkMaps(version, startToken, endToken)
+      case FilteredPartitionScan(CassandraTokenRangeSplit(tokens, _), filterFunc) =>
+        rowMapTable.scanChunkMaps(version, tokens)
           .map(_.filter { crm => filterFunc(projection.partitionType.fromBytes(crm.binPartition)) })
 
-      case FilteredPartitionRangeScan(CassandraTokenRangeSplit(startToken, endToken, _),
+      case FilteredPartitionRangeScan(CassandraTokenRangeSplit(tokens, _),
                                       segRange, filterFunc) =>
         val binRange = projection.toBinarySegRange(segRange)
-        rowMapTable.scanChunkMapsRange(version, startToken, endToken, binRange.start, binRange.end)
+        rowMapTable.scanChunkMapsRange(version, tokens, binRange.start, binRange.end)
           .map(_.filter { crm => filterFunc(projection.partitionType.fromBytes(crm.binPartition)) })
 
       case other: ScanMethod => ???

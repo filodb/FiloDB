@@ -79,16 +79,18 @@ extends CassandraTable[ChunkRowMapTable, ChunkRowMapRecord] {
           .fetch().map(_.toIterator)
 
   def scanChunkMaps(version: Int,
-                    startToken: String,
-                    endToken: String,
+                    tokens: Seq[(String, String)],
                     segmentClause: String = ""): Future[Iterator[ChunkRowMapRecord]] = {
     val tokenQ = "TOKEN(partition, version)"
-    val cql = s"SELECT * FROM ${keySpace.name}.$tableName WHERE " +
-              s"$tokenQ >= $startToken AND $tokenQ < $endToken $segmentClause"
+    def cql(start: String, end: String): String =
+      s"SELECT * FROM ${keySpace.name}.$tableName WHERE " +
+      s"$tokenQ >= $start AND $tokenQ < $end $segmentClause"
     Future {
-      session.execute(cql).iterator
-             .filter(this.version(_) == version)
-             .map { row => fromRow(row) }
+      tokens.iterator.flatMap { case (start, end) =>
+        session.execute(cql(start, end)).iterator
+               .filter(this.version(_) == version)
+               .map { row => fromRow(row) }
+      }
     }
   }
 
@@ -97,13 +99,12 @@ extends CassandraTable[ChunkRowMapTable, ChunkRowMapRecord] {
    * filtered by startSegment until endSegment inclusive.
    */
   def scanChunkMapsRange(version: Int,
-                         startToken: String,
-                         endToken: String,
+                         tokens: Seq[(String, String)],
                          startSegment: Types.SegmentId,
                          endSegment: Types.SegmentId): Future[Iterator[ChunkRowMapRecord]] = {
     val clause = s"AND segmentid >= 0x${startSegment.toHex} AND segmentid <= 0x${endSegment.toHex} " +
                   "ALLOW FILTERING"
-    scanChunkMaps(version, startToken, endToken, clause)
+    scanChunkMaps(version, tokens, clause)
   }
 
   /**
