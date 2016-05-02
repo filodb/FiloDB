@@ -197,6 +197,8 @@ You may specify a function, or computed column, for use with any key column.  Th
 - If there are too few partitions, then FiloDB will not be able to distribute and parallelize reads.
 - If the numer of rows in each partition is too few, then the storage will not be efficient.
 - If the partition key is time based, there may be a hotspot in the cluster as recent data is all written into the same set of replicas, and likewise for read patterns as well.
+- Consider picking a column or group of columns with low cardinality and not lowest cardinality, and has good distribution so that data is distributed across the cluster.
+- Consider only those columns that do not get updated. Since partition key is part of primary key, partition key columns cannot get updated.
 
 **Segment Key and Chunk Size**.
 
@@ -206,6 +208,11 @@ Segmentation and chunk size distribution may be checked by the CLI `analyze` com
 * `memtable.max-rows-per-table`, `memtable.flush-trigger-rows` affects how many rows are kept in the MemTable at a time, and this along with how many partitions are in the MemTable directly leads to the chunk size upon flushing.
 * The segment size is directly controlled by the segment key.  Choosing a segment key that groups data into big enough chunks (at least 1000 is a good guide) is highly recommended.  Experimentation along with running `filo-cli analyze` is recommended to come up with a good segment key.  See the Spark ingestion of GDELT below on an example... choosing an inappropriate segment key leads to MUCH slower ingest and read performance.
 * `chunk_size` option when creating a dataset caps the size of a single chunk.
+* Avoid picking any column that has the possibility of getting updated as a segment key column.
+* Consider low cardinal column within partition for segment key. Ideal segement key will hold at least 1000 values in a chunk as explained above. Use a computed columns 'String/0' as segmentkey if there are no good candidates available or your chosen segment key has potentional to hold very few values in chunks under each segement key.
+* Consider moving one of the partition keys as segment keys if your partition is not too wide.
+* Cosider creating computed columns to make good segment keys. Ex: Rounding date to month etc.
+* Ideal segment key would have chunks filled with thousands of values and frequently gets used as filter in queries.
 
 ### Predicate Pushdowns
 
@@ -213,6 +220,7 @@ To help with planning, here is an exact list of the predicate pushdowns (in Spar
 
 * Partition key column(s): =, IN on any partition key column
 * Segment key:  must be of the form `segmentKey >/>= value AND segmentKey </<= value`
+  Segment Key predicates will pushdown to cassandra if your storage engine is in Cassandra. FiloDB segment keys map to cluster key of the underlying cassandra storage.
 
 ### Example FiloDB Schema for machine metrics
 
