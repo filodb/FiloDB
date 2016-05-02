@@ -191,6 +191,7 @@ trait CassandraColumnStoreScanner extends ColumnStoreScanner with StrictLogging 
 
   protected val clusterConnector = new FiloCassandraConnector {
     def config: Config = cassandraConfig
+    val keyspace = cassandraConfig.getString("keyspace")
   }
 
   def readChunks(dataset: DatasetRef,

@@ -14,7 +14,7 @@ trait FiloCassandraConnector {
       .withClusterBuilder(_.withAuthProvider(authProvider)
                            .withSocketOptions(socketOptions)
                            .withQueryOptions(queryOptions))
-      .keySpace(defaultKeySpace.name)
+      .keySpace(keyspace)
 
   // Cassandra config with following keys:  keyspace, hosts, port, username, password
   def config: Config
@@ -47,13 +47,13 @@ trait FiloCassandraConnector {
 
   implicit lazy val session: Session = connector.session
 
-  lazy val defaultKeySpace = KeySpace(config.getString("keyspace"))
+  def keyspace: String
+  lazy val defaultKeySpace = config.getString("keyspace")
 
-  def withKeyspace[T](ref: DatasetRef)(f: KeySpace => T): T =
-    f(ref.database.map(KeySpace(_)).getOrElse(defaultKeySpace))
+  def keySpaceName(ref: DatasetRef): String = ref.database.getOrElse(defaultKeySpace)
 
-  def keySpaceName(ref: DatasetRef): String = ref.database.getOrElse(defaultKeySpace.name)
-
+  // This is really intended for unit tests.  Production users should create keyspaces manually,
+  // probably with something like NetworkTopologyStrategy.
   def createKeyspace(keyspace: String, replicationFactor: Int = 1): Unit = {
     session.execute(s"CREATE KEYSPACE IF NOT EXISTS $keyspace WITH replication = " +
                     s"{'class': 'SimpleStrategy', 'replication_factor' : $replicationFactor};")

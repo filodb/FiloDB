@@ -29,7 +29,7 @@ extends CassandraTable[ChunkRowMapTable, ChunkRowMapRecord] {
   import scala.collection.JavaConversions._
 
   override val tableName = dataset.dataset + "_chunkmap"
-  implicit val keySpace = dataset.database.map(KeySpace).getOrElse(connector.defaultKeySpace)
+  implicit val keySpace = KeySpace(dataset.database.getOrElse(connector.defaultKeySpace))
   implicit val session = connector.session
 
   //scalastyle:off
