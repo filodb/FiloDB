@@ -157,14 +157,16 @@ Perhaps it's easiest by starting with a diagram of how FiloDB stores data.
 Three types of key define the data model of a FiloDB table.
 
 1. **partition key** - decides how data is going to be distributed across the cluster. All data within one partition key is guaranteed to fit on one node. May consist of multiple columns.
-2. **segment key** - groups row values into efficient chunks.  Segments within a partition are sorted by segment key and range scans can be done over segment keys.  Ideal is > 1000 rows per segment.
+2. **segment key** - groups row values into efficient chunks.  Segments within a partition are sorted by segment key and range scans can be done over segment keys.   
 1. **row key**       - acts as a primary key within each partition and decides how data will be sorted within each segment.  May consist of multiple columns.
 
-The PRIMARY KEY for FiloDB consists of (partition key, row key).  When choosing the above values you must make sure the combination of the two are unique.  No component of a primary key may be null - see the `:getOrElse` function for a way of dealing with null inputs.
+The PRIMARY KEY for FiloDB consists of (partition key, segment_key, row key).  When choosing the above values you must make sure the combination of the three are unique.  No component of a primary key may be null - see the `:getOrElse` function for a way of dealing with null inputs.
 
-Specifying the partitioning column is optional.  If a partitioning column is not specified, FiloDB will create a default one with a fixed value, which means everything will be thrown into one node, and is only suitable for small amounts of data.  If you don't specify a partitioning column, then you have to make sure your row keys are all unique.
+Specifying the partitioning column is optional.  If a partitioning column is not specified, FiloDB will create a default one with a fixed value, which means everything will be thrown into one node, and is only suitable for small amounts of data.  If you don't specify a partitioning column, then you have to make sure combination of segment key and row key values are all unique.
 
 For examples of data modeling and choosing keys, see the examples below as well as [datasets](doc/datasets_reading.md).
+
+For additional information refer to Data Modeling and Performance Considerations.
 
 ### Computed Columns
 
