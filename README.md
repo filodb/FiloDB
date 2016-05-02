@@ -296,7 +296,7 @@ However, note that the above methods will lead to a physical column being create
 
 ### Configuring FiloDB
 
-Some options must be configured before starting the Spark Shell or Spark application.  There are two methods:
+Some options must be configured before starting the Spark Shell or Spark application. FiloDB executables are invoked by spark application. These configuration settings can be tuned as per the needs of individual application invoking filoDB executables. There are two methods:
 
 1. Modify the `application.conf` and rebuild, or repackage a new configuration.
 2. Override the built in defaults by setting SparkConf configuration values, preceding the filo settings with `spark.filodb`.  For example, to change the default keyspace, pass `--conf spark.filodb.cassandra.keyspace=mykeyspace` to Spark Shell/Submit.  To use the fast in-memory column store instead of Cassandra, pass `--conf spark.filodb.store=in-memory`.
