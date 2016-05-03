@@ -22,6 +22,7 @@ object DatasetCoordinatorActor {
    * Ingests a bunch of rows into this dataset, version's memtable.
    * Automatically checks at the end if the memtable should be flushed, and sends a StartFlush
    * message to itself to initiate a flush.  This is done before the Ack is sent back.
+   *
    * @param rows the rows to ingest.  Must have the same schema, for now, as the columns passed in
    *        when the ingestion was set up.
    * @return Ack(seqNo)
@@ -34,6 +35,7 @@ object DatasetCoordinatorActor {
   /**
    * Initiates a memtable flush to the columnStore if one is not already in progress.
    * Can also be used to listen to / wait for when a reprojection is finished.
+   *
    * @param replyTo optionally, add to the list of folks to get a message back when flush/reprojection
    *                finishes.
    */
@@ -117,7 +119,8 @@ private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
   val maxRowsPerTable = config.getInt("memtable.max-rows-per-table")
   val minFreeMb = config.as[Option[Int]]("memtable.min-free-mb").getOrElse(DefaultMinFreeMb)
   val chunkSize = config.as[Option[Int]]("memtable.filo.chunksize").getOrElse(1000)
-  val flushInterval = config.as[FiniteDuration]("memtable.flush.interval")
+  val mTableWriteInterval = config.as[FiniteDuration]("memtable.write.interval")
+  val mTableNoActivityFlushInterval = config.as[FiniteDuration]("memtable.noactivity.flush.interval")
 
   def activeRows: Int = activeTable.numRows
   def flushingRows: Int = flushingTable.map(_.numRows).getOrElse(-1)
@@ -134,6 +137,7 @@ private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
   val tempRows = new ArrayBuffer[RowReader]
   val ackTos = new ArrayBuffer[(ActorRef, Long)]
   var mTableWriteTask: Option[Cancellable] = None
+  var mTableFlushTask: Option[Cancellable] = None
 
   def makeNewTable(): MemTable = new FiloMemTable(projection, config)
 
@@ -146,6 +150,16 @@ private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
 
   private def ingestRows(ackTo: ActorRef, rows: Seq[RowReader], seqNo: Long): Unit = {
     if (canIngest) {
+
+      if (mTableFlushTask.isDefined) {
+        logger.debug("Cancelling scehduled memtable flush task when there is a write activity going on.")
+        mTableFlushTask.foreach(_.cancel)
+      }
+
+      mTableFlushTask = Some(context.system.scheduler.scheduleOnce
+      (mTableNoActivityFlushInterval,self, StartFlush(None)))
+
+      logger.debug("Scehduled new memtable flush task")
       tempRows ++= rows
       ackTos += ackTo -> seqNo
       if (tempRows.length >= chunkSize) {
@@ -153,7 +167,7 @@ private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
         writeToMemTable()
       } else if (!mTableWriteTask.isDefined) {
         // schedule future write to memtable, don't have enough rows yet
-        mTableWriteTask = Some(context.system.scheduler.scheduleOnce(flushInterval, self, MemTableWrite))
+        mTableWriteTask = Some(context.system.scheduler.scheduleOnce(mTableWriteInterval, self, MemTableWrite))
       }
 
       // Now, check how full the memtable is, and if it needs to be flipped, and a flush started
@@ -192,12 +206,13 @@ private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
 
   private def startFlush(): Unit = {
     logger.info(s"Starting new flush cycle for ($nameVer)...")
-    reportStats()
+
     if (curReprojection.isDefined || flushingTable.isDefined) {
       logger.warn("This should not happen. Not starting flush; $curReprojection; $flushingTable")
       return
     }
     writeToMemTable()
+    reportStats()
     flushingTable = Some(activeTable)
     activeTable = makeNewTable()
     val newTaskFuture = reprojector.reproject(flushingTable.get, version)
@@ -207,6 +222,7 @@ private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
     newTaskFuture.recover {
       case t: Throwable => self ! FlushFailed(t)
     }
+    logger.info(s" flush cycle for ($nameVer)... is complete")
   }
 
   private def shouldFlush: Boolean =
@@ -217,6 +233,7 @@ private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
     // Close the flushing table and mark it as None
     flushingTable.foreach(_.close())
     flushingTable = None
+    mTableFlushTask = None
     for { ref <- flushedCallbacks } ref ! NodeCoordinatorActor.Flushed
     flushedCallbacks = Nil
     flushesSucceeded += 1
