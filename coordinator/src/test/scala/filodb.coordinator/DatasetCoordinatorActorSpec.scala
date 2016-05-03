@@ -32,8 +32,9 @@ with ScalaFutures {
   // Need to force smaller flush interval to ensure acks get back in time
   val config = ConfigFactory.parseString(
                  """filodb.memtable.flush-trigger-rows = 100
-                    filodb.memtable.max-rows-per-table = 200
-                    filodb.memtable.flush.interval = 300 ms""")
+                    filodb.memtable.max-rows-per-table = 100
+                    filodb.memtable.noactivity.flush.interval = 2 s
+                    filodb.memtable.write.interval = 300 ms""")
                  .withFallback(ConfigFactory.load("application_test.conf"))
                  .getConfig("filodb")
 
@@ -133,5 +134,24 @@ with ScalaFutures {
       case Stats(1, 1, 0, 0, _) =>
     }
     reprojections should equal (Seq((DatasetRef("dataset"), 0)))
+  }
+
+  it("StartFlush should initiate flush when there is no write activity after few seconds") {
+    ingestRows(50)
+
+    probe.send(dsActor, GetStats)
+    probe.expectMsg(Stats(0, 0, 0, 50, -1))
+
+    Thread sleep 1000
+
+    // This Call will cancells scehduled memtable flush task
+    ingestRows(100)
+    probe.send(dsActor, GetStats)
+    probe.expectMsg(Stats(0, 0, 0, 150, -1))
+
+    Thread sleep 1000
+    probe.send(dsActor, GetStats)
+    probe.expectMsg(Stats(1, 1, 0, 0, -1))
+
   }
 }
