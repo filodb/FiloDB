@@ -88,17 +88,16 @@ object FiloRelation extends StrictLogging {
       val (colName, (_, keyType)) = columnIdxTypeMap.head
       val filters = groupedFilters(colName)
       logger.info(s"Incoming Segment Filters [$filters]")
-      
       if (filters.length == 1) {
         // Filters with segment column name (or source column) matches, and ensure we have = filter
          filters match {
-          case (Seq(EqualTo(_, filterValue))) =>
+          case Seq(EqualTo(_, filterValue)) =>
             val equalVal = KeyFilter.parseSingleValue(keyType)(filterValue)
             logger.info(s"Pushing down segment range [$equalVal,$equalVal] on column $colName...")
             Some(SegmentRange(equalVal, equalVal).basedOn(projection))
           case other: Any => None
         }
-      }else if (filters.length == 2) {
+      } else if (filters.length == 2) {
         // Filters with segment column name (or source column) matches, and ensure we have >/>= and </<= filters
         val leftRightValues = filters match {
           case Seq(GreaterThan(_, lVal),        LessThan(_, rVal)) => Some((lVal, rVal))
@@ -117,7 +116,7 @@ object FiloRelation extends StrictLogging {
             logger.info(s"Segment column $colName matches, but cannot push down filters $filters")
             None
         }
-      }else{
+      } else{
         logger.info(s"Segment column $colName matches, but cannot push down with ${filters.length} filters")
         None
       }
