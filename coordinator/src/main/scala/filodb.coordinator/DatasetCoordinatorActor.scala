@@ -157,7 +157,7 @@ private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
       }
 
       mTableFlushTask = Some(context.system.scheduler.scheduleOnce
-      (mTableNoActivityFlushInterval,self, StartFlush(None)))
+        (mTableNoActivityFlushInterval,self, StartFlush(None)))
 
       logger.debug("Scehduled new memtable flush task")
       tempRows ++= rows
