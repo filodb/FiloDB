@@ -54,7 +54,7 @@ extends CachedMergingColumnStore with CassandraColumnStoreScanner with StrictLog
 
   val segmentCacheSize = config.getInt("columnstore.segment-cache-size")
   val chunkBatchSize = config.getInt("columnstore.chunk-batch-size")
-  logger.info(s"Starting CassandraColumnStore with config $cassandraConfig")
+  logger.info(s"Starting CassandraColumnStore with config ${cassandraConfig.withoutPath("password")}")
 
   val segmentCache = LruCache[Segment](segmentCacheSize)
 
