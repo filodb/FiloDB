@@ -4,6 +4,7 @@ import com.datastax.driver.core.Row
 import com.typesafe.config.Config
 import com.websudos.phantom.dsl._
 import scala.concurrent.Future
+import scala.util.Try
 
 import filodb.cassandra.FiloCassandraConnector
 import filodb.core.DatasetRef
@@ -42,7 +43,7 @@ with FiloCassandraConnector {
                splitCString(keyColumns(row)),
                segmentColumns(row),
                projectionReverse(row),
-               splitCString(projectionColumns(row)))
+               splitCString(Try(projectionColumns(row)).getOrElse("")))
 
   // We use \001 to split and demarcate column name strings, because
   // 1) this char is not allowed,
