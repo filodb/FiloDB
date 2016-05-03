@@ -16,6 +16,8 @@
       <module fileurl="file://$PROJECT_DIR$/.idea/modules/jmh-build.iml" filepath="$PROJECT_DIR$/.idea/modules/jmh-build.iml" />
       <module fileurl="file://$PROJECT_DIR$/.idea/modules/spark.iml" filepath="$PROJECT_DIR$/.idea/modules/spark.iml" />
       <module fileurl="file://$PROJECT_DIR$/.idea/modules/spark-build.iml" filepath="$PROJECT_DIR$/.idea/modules/spark-build.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/modules/stress.iml" filepath="$PROJECT_DIR$/.idea/modules/stress.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/modules/stress-build.iml" filepath="$PROJECT_DIR$/.idea/modules/stress-build.iml" />
     </modules>
   </component>
 </project>
