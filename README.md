@@ -209,9 +209,9 @@ Segmentation and chunk size distribution may be checked by the CLI `analyze` com
 * The segment size is directly controlled by the segment key.  Choosing a segment key that groups data into big enough chunks (at least 1000 is a good guide) is highly recommended.  Experimentation along with running `filo-cli analyze` is recommended to come up with a good segment key.  See the Spark ingestion of GDELT below on an example... choosing an inappropriate segment key leads to MUCH slower ingest and read performance.
 * `chunk_size` option when creating a dataset caps the size of a single chunk.
 * Avoid picking any column that has the possibility of getting updated as a segment key column.
-* Consider low cardinal column within partition for segment key. Ideal segement key will hold at least 1000 values in a chunk as explained above. Use a computed columns 'String/0' as segmentkey if there are no good candidates available or your chosen segment key has potentional to hold very few values in chunks under each segement key.
+* Consider low cardinal column within partition for segment key. Ideal segement key will hold at least 1000 values in a chunk as explained above. Use a computed column like `:string /0` as segmentkey if there are no good candidates available or your chosen segment key has potentional to hold very few values in chunks under each segement key.
 * Consider moving one of the partition keys as segment keys if your partition is not too wide.
-* Cosider creating computed columns to make good segment keys. Ex: Rounding date to month etc.
+* Cosider creating computed columns to make good segment key. Ex: Rounding date to month etc.
 * Ideal segment key would have chunks filled with thousands of values and frequently gets used as filter in queries.
 
 ### Predicate Pushdowns
@@ -221,6 +221,8 @@ To help with planning, here is an exact list of the predicate pushdowns (in Spar
 * Partition key column(s): =, IN on any partition key column
 * Segment key:  must be of the form `segmentKey >/>= value AND segmentKey </<= value`
   Segment Key predicates will pushdown to cassandra if your storage engine is in Cassandra. FiloDB segment keys map to cluster key of the underlying cassandra storage.
+
+Note: You can see predicate pushdown filters in application logs by setting logging level to INFO.
 
 ### Example FiloDB Schema for machine metrics
 
@@ -365,6 +367,8 @@ val df = sqlContext.read.format("filodb.spark").option("dataset", "gdelt").load(
 
 The dataset can be queried using the DataFrame DSL. See the section [Querying Datasets](#querying-datasets) for examples.
 
+Note: For your production data loads sort the data frame before saving to FiloDB when the data source is not Cassandra. This will ensure to efficiently load segment chunks. Refer to [Distributed Partitioning](#distributed-partitioning) for additional info.
+
 ### Spark/Scala/Java API
 
 There is a more typesafe API than the Spark Data Source API.
@@ -477,6 +481,9 @@ numArticles: org.apache.spark.rdd.RDD[Double] = MapPartitionsRDD[104] at map at 
 
 scala> val correlation = Statistics.corr(numMentions, numArticles, "pearson")
 ```
+
+Notes: You can also query filoDB tables using Spark thrift server. Refer to [SQL/Hive Example](#sqlhive-example) for additional information regarding thrift server. 
+FiloDB logs can be viewed in corresponding spark application logs by setting appropriate setting in logback.xml. Refer to [logback configuration](http://logback.qos.ch/manual/configuration.html) and [logback appenders](http://logback.qos.ch/manual/appenders.html) for additional information regarding logging settings.
 
 ## Using the CLI
 
