@@ -17,16 +17,15 @@ class CassandraMetaStore(config: Config)
   val datasetTable = new DatasetTable(config)
   val columnTable = new ColumnTable(config)
 
-  def initialize(database: String): Future[Response] = {
-    columnTable.createKeyspace(database)     // CREATE KEYSPACE IF NOT EXIST
-    for { dtResp <- datasetTable.initialize(database)
-          ctResp <- columnTable.initialize(database) }
+  def initialize(): Future[Response] = {
+    for { dtResp <- datasetTable.initialize()
+          ctResp <- columnTable.initialize() }
     yield { ctResp }
   }
 
-  def clearAllData(database: String): Future[Response] =
-    for { dtResp <- datasetTable.clearAll(database)
-          ctResp <- columnTable.clearAll(database) }
+  def clearAllData(): Future[Response] =
+    for { dtResp <- datasetTable.clearAll()
+          ctResp <- columnTable.clearAll() }
     yield { ctResp }
 
   def newDataset(dataset: Dataset): Future[Response] =
@@ -35,7 +34,7 @@ class CassandraMetaStore(config: Config)
   def getDataset(ref: DatasetRef): Future[Dataset] =
     datasetTable.getDataset(ref)
 
-  def getAllDatasets(database: String): Future[Seq[String]] =
+  def getAllDatasets(database: Option[String]): Future[Seq[DatasetRef]] =
     datasetTable.getAllDatasets(database)
 
   def deleteDataset(ref: DatasetRef): Future[Response] =

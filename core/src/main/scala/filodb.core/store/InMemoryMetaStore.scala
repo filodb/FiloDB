@@ -25,9 +25,9 @@ class InMemoryMetaStore(implicit val ec: ExecutionContext) extends MetaStore wit
   val colMapOrdering = math.Ordering[(Int, Types.ColumnId)]
   val columns = new TrieMap[String, ColumnMap]
 
-  def initialize(database: String): Future[Response] = Future.successful(Success)
+  def initialize(): Future[Response] = Future.successful(Success)
 
-  def clearAllData(database: String): Future[Response] = Future {
+  def clearAllData(): Future[Response] = Future {
     logger.warn("Clearing all data!")
     datasets.clear()
     columns.clear()
@@ -55,7 +55,11 @@ class InMemoryMetaStore(implicit val ec: ExecutionContext) extends MetaStore wit
     datasets.get(ref.dataset).map(Future.successful)
             .getOrElse(Future.failed(NotFoundError(ref.dataset)))
 
-  def getAllDatasets(database: String): Future[Seq[String]] = Future.successful(datasets.keys.toSeq)
+  def getAllDatasets(database: Option[String]): Future[Seq[DatasetRef]] = {
+    val filterFunc: DatasetRef => Boolean =
+      database.map { db => (ref: DatasetRef) => ref.database.get == db }.getOrElse { ref => true }
+    Future.successful(datasets.values.map(_.projections.head.dataset).filter(filterFunc).toSeq)
+  }
 
   def deleteDataset(ref: DatasetRef): Future[Response] = Future {
     datasets.remove(ref.dataset)

@@ -21,11 +21,11 @@ class DatasetTableSpec extends CassandraFlatSpec with BeforeAndAfter {
   override def beforeAll() {
     super.beforeAll()
     // Note: This is a CREATE TABLE IF NOT EXISTS
-    datasetTable.initialize("unittest").futureValue(timeout)
+    datasetTable.initialize().futureValue(timeout)
   }
 
   before {
-    datasetTable.clearAll("unittest").futureValue(timeout)
+    datasetTable.clearAll().futureValue(timeout)
   }
 
   val fooDataset = Dataset("foo", "someSortCol", "seg")
@@ -65,11 +65,12 @@ class DatasetTableSpec extends CassandraFlatSpec with BeforeAndAfter {
   }
 
   it should "return the Dataset if it exists" in {
-    val barDataset = Dataset("bar", Seq("key1", ":getOrElse key2 --"), "seg",
+    val barRef = DatasetRef("bar", Some("funky_ks"))
+    val barDataset = Dataset(barRef, Seq("key1", ":getOrElse key2 --"), "seg",
                              Seq("part1", ":getOrElse part2 00"))
     datasetTable.createNewDataset(barDataset).futureValue(timeout) should equal (Success)
 
-    whenReady(datasetTable.getDataset(DatasetRef("bar")),timeout) { dataset =>
+    whenReady(datasetTable.getDataset(barRef),timeout) { dataset =>
       dataset should equal (barDataset)
     }
   }

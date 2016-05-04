@@ -29,7 +29,7 @@ with CoordinatorSetup with ScalaFutures {
   implicit val defaultPatience =
     PatienceConfig(timeout = Span(10, Seconds), interval = Span(50, Millis))
 
-  val config = ConfigFactory.parseString("filodb.memtable.flush.interval = 500 ms")
+  val config = ConfigFactory.parseString("filodb.memtable.write.interval = 500 ms")
                             .withFallback(ConfigFactory.load("application_test.conf"))
                             .getConfig("filodb")
 

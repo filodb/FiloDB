@@ -23,7 +23,7 @@ extends CassandraTable[ChunkTable, (String, Types.SegmentId, Int, ByteBuffer)] {
   import filodb.cassandra.Util._
 
   override val tableName = dataset.dataset + "_chunks"
-  implicit val keySpace = dataset.database.map(KeySpace).getOrElse(connector.defaultKeySpace)
+  implicit val keySpace = KeySpace(dataset.database.getOrElse(connector.defaultKeySpace))
   implicit val session = connector.session
 
   //scalastyle:off
