@@ -576,7 +576,7 @@ Datasets metadata -- use Spark (note: this example is using Datastax Enterprise;
 import org.apache.spark.sql.{Column, SaveMode}
 import org.apache.spark.sql.catalyst.expressions.Literal
 val oldData = csc.read.format("org.apache.spark.sql.cassandra").option("table", "datasets").option("keyspace", "filodb").load
-oldData.withColumn("database", Literal("filodb")).write.format("org.apache.spark.sql.cassandra").option("table", "datasets").option("keyspace", "filodb_admin").mode(SaveMode.Append).save
+oldData.withColumn("database", new Column(Literal("filodb"))).write.format("org.apache.spark.sql.cassandra").option("table", "datasets").option("keyspace", "filodb_admin").mode(SaveMode.Append).save
 ```
 
 ## Deploying
