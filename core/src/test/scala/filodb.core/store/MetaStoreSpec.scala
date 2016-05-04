@@ -18,16 +18,16 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
 
   override def beforeAll() {
     super.beforeAll()
-    metaStore.initialize("unittest").futureValue(defaultPatience)
+    metaStore.initialize().futureValue(defaultPatience)
   }
 
-  val fooRef = DatasetRef("foo")
+  val fooRef = DatasetRef("foo", Some("unittest"))
 
-  before { metaStore.clearAllData("unittest").futureValue(defaultPatience) }
+  before { metaStore.clearAllData().futureValue(defaultPatience) }
 
   describe("dataset API") {
     it("should create a new Dataset if one not there") {
-      val dataset = Dataset("foo", Seq("key1", ":getOrElse key2 --"), "seg",
+      val dataset = Dataset(fooRef, Seq("key1", ":getOrElse key2 --"), "seg",
                             Seq("part1", ":getOrElse part2 00"))
       metaStore.newDataset(dataset).futureValue should equal (Success)
 
@@ -46,12 +46,16 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
 
     it("should return all datasets created") {
       for { i <- 0 to 2 } {
-        val dataset = Dataset(i.toString, Seq("key1", ":getOrElse key2 --"), "seg",
+        val ref = DatasetRef(i.toString, Some((i % 2).toString))
+        val dataset = Dataset(ref, Seq("key1", ":getOrElse key2 --"), "seg",
                               Seq("part1", ":getOrElse part2 00"))
         metaStore.newDataset(dataset).futureValue should equal (Success)
       }
 
-      metaStore.getAllDatasets("unittest").futureValue.toSet should equal (Set("0", "1", "2"))
+      metaStore.getAllDatasets(Some("0")).futureValue.toSet should equal (
+        Set(DatasetRef("0", Some("0")), DatasetRef("2", Some("0"))))
+      metaStore.getAllDatasets(None).futureValue.toSet should equal (
+        Set(DatasetRef("0", Some("0")), DatasetRef("1", Some("1")), DatasetRef("2", Some("0"))))
     }
   }
 

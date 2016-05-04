@@ -36,14 +36,14 @@ with CoordinatorSetup with ScalaFutures {
 
   override def beforeAll() {
     super.beforeAll()
-    metaStore.initialize("unittest").futureValue
+    metaStore.initialize().futureValue
   }
 
   var coordActor: ActorRef = _
   var probe: TestProbe = _
 
   before {
-    metaStore.clearAllData("unittest").futureValue
+    metaStore.clearAllData().futureValue
     columnStore.dropDataset(DatasetRef(dataset1.name)).futureValue
     coordActor = system.actorOf(NodeCoordinatorActor.props(metaStore, reprojector, columnStore, config))
     probe = TestProbe()

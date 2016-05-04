@@ -4,6 +4,7 @@ import com.datastax.driver.core.Row
 import com.typesafe.config.Config
 import com.websudos.phantom.dsl._
 import scala.concurrent.Future
+import scala.util.Try
 
 import filodb.cassandra.FiloCassandraConnector
 import filodb.core.DatasetRef
@@ -17,8 +18,11 @@ import filodb.core.metadata.{Dataset, DatasetOptions, Projection}
 sealed class DatasetTable(val config: Config) extends CassandraTable[DatasetTable, Projection]
 with FiloCassandraConnector {
   override val tableName = "datasets"
+  val keyspace = config.getString("admin-keyspace")
+  implicit val ks = KeySpace(keyspace)
 
   // scalastyle:off
+  object database extends StringColumn(this) with PartitionKey[String]
   object name extends StringColumn(this) with PartitionKey[String]
   object partitionColumns extends StringColumn(this) with StaticColumn[String]
   object options extends StringColumn(this) with StaticColumn[String]
@@ -35,11 +39,11 @@ with FiloCassandraConnector {
 
   override def fromRow(row: Row): Projection =
     Projection(projectionId(row),
-               DatasetRef(name(row)),
+               DatasetRef(name(row), Some(database(row))),
                splitCString(keyColumns(row)),
                segmentColumns(row),
                projectionReverse(row),
-               splitCString(projectionColumns(row)))
+               splitCString(Try(projectionColumns(row)).getOrElse("")))
 
   // We use \001 to split and demarcate column name strings, because
   // 1) this char is not allowed,
@@ -49,31 +53,24 @@ with FiloCassandraConnector {
   private def splitCString(string: String): Seq[String] =
     if (string.isEmpty) Nil else string.split('\001').toSeq
 
-  def initialize(keyspace: String): Future[Response] = {
-    implicit val ks = KeySpace(keyspace)
-    create.ifNotExists.future().toResponse()
-  }
+  def initialize(): Future[Response] = create.ifNotExists.future().toResponse()
 
-  def clearAll(keyspace: String): Future[Response] = {
-    implicit val ks = KeySpace(keyspace)
-    truncate.future().toResponse()
-  }
+  def clearAll(): Future[Response] = truncate.future().toResponse()
 
-  def insertProjection(projection: Projection): Future[Response] = withKeyspace(projection.dataset) { ks =>
-    implicit val keySpace = ks
+  def insertProjection(projection: Projection): Future[Response] =
     insert.value(_.name, projection.dataset.dataset)
+          .value(_.database, projection.dataset.database.getOrElse(defaultKeySpace))
           .value(_.projectionId, projection.id)
           .value(_.keyColumns, stringsToStr(projection.keyColIds))
           .value(_.segmentColumns, projection.segmentColId)
           .value(_.projectionReverse, projection.reverse)
           .value(_.projectionColumns, stringsToStr(projection.columns))
           .future.toResponse()
-  }
 
   def createNewDataset(dataset: Dataset): Future[Response] =
-      withKeyspace(dataset.projections.head.dataset) { ks =>
-    implicit val keySpace = ks
     (for { createResp <- insert.value(_.name, dataset.name)
+                               .value(_.database, dataset.projections.head.
+                                                    dataset.database.getOrElse(defaultKeySpace))
                                .value(_.partitionColumns, stringsToStr(dataset.partitionColumns))
                                .value(_.options, dataset.options.toString)
                                .ifNotExists.future().toResponse(AlreadyExists)
@@ -82,34 +79,36 @@ with FiloCassandraConnector {
     yield { insertProj }).recover {
       case e: NoSuchElementException => AlreadyExists
     }
-  }
 
-  def getProjection(dataset: DatasetRef, id: Int): Future[Projection] = withKeyspace(dataset) { ks =>
-    implicit val keySpace = ks
-    select.where(_.name eqs dataset.dataset).and(_.projectionId eqs id)
-          .one().map(_.map(_.copy(dataset = dataset))
-                      .getOrElse(throw NotFoundError(s"Dataset $dataset")))
-  }
+  def getProjection(dataset: DatasetRef, id: Int): Future[Projection] =
+    select.where(_.name eqs dataset.dataset)
+          .and(_.database eqs dataset.database.getOrElse(defaultKeySpace))
+          .and(_.projectionId eqs id)
+          .one().map(_.getOrElse(throw NotFoundError(s"Dataset $dataset")))
 
-  def getDataset(dataset: DatasetRef): Future[Dataset] = withKeyspace(dataset) { ks =>
-    implicit val keySpace = ks
+  def getDataset(dataset: DatasetRef): Future[Dataset] =
     for { proj <- getProjection(dataset, 0)
           Some((partCols, options)) <- select(_.partitionColumns, _.options)
-                                         .where(_.name eqs dataset.dataset).one() }
+                                         .where(_.name eqs dataset.dataset)
+                                         .and(_.database eqs dataset.database.getOrElse(defaultKeySpace))
+                                         .one() }
     yield { Dataset(dataset.dataset,
-                    Seq(proj.copy(dataset = dataset)),
+                    Seq(proj),
                     splitCString(partCols),
                     DatasetOptions.fromString(options)) }
-  }
 
-  def getAllDatasets(database: String): Future[Seq[String]] = {
-    implicit val keySpace = KeySpace(database)
-    select(_.name).fetch.map(_.distinct)
+  // Return data filtered by database or all datasets
+  def getAllDatasets(database: Option[String]): Future[Seq[DatasetRef]] = {
+    val filterFunc: DatasetRef => Boolean =
+      database.map { db => (ref: DatasetRef) => ref.database.get == db }.getOrElse { ref => true }
+    select(_.database, _.name).fetch.map { data =>
+      data.map { case (db, name) => DatasetRef(name, Some(db)) }.filter(filterFunc).distinct
+    }
   }
 
   // NOTE: CQL does not return any error if you DELETE FROM datasets WHERE name = ...
-  def deleteDataset(dataset: DatasetRef): Future[Response] = withKeyspace(dataset) { ks =>
-    implicit val keySpace = ks
-    delete.where(_.name eqs dataset.dataset).future().toResponse()
-  }
+  def deleteDataset(dataset: DatasetRef): Future[Response] =
+    delete.where(_.name eqs dataset.dataset)
+          .and(_.database eqs dataset.database.getOrElse(defaultKeySpace))
+          .future().toResponse()
 }

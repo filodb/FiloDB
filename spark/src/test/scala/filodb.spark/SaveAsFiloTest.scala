@@ -37,6 +37,7 @@ with Matchers with ScalaFutures {
   val conf = (new SparkConf).setMaster("local[4]")
                             .setAppName("test")
                             .set("spark.filodb.cassandra.keyspace", "unittest")
+                            .set("spark.filodb.cassandra.admin-keyspace", "unittest")
                             .set("spark.filodb.memtable.min-free-mb", "10")
   val sc = new SparkContext(conf)
   val sql = new HiveContext(sc)
@@ -58,8 +59,7 @@ with Matchers with ScalaFutures {
   val columnStore = FiloSetup.columnStore
 
   override def beforeAll() {
-    metaStore.initialize("unittest").futureValue(defaultPatience)
-    metaStore.initialize("unittest2").futureValue(defaultPatience)
+    metaStore.initialize().futureValue(defaultPatience)
     columnStore.initializeProjection(ds1.projections.head).futureValue(defaultPatience)
     columnStore.initializeProjection(ds2.projections.head).futureValue(defaultPatience)
     columnStore.initializeProjection(ds3.projections.head).futureValue(defaultPatience)
@@ -72,8 +72,7 @@ with Matchers with ScalaFutures {
   }
 
   before {
-    metaStore.clearAllData("unittest").futureValue(defaultPatience)
-    metaStore.clearAllData("unittest2").futureValue(defaultPatience)
+    metaStore.clearAllData().futureValue(defaultPatience)
     columnStore.clearSegmentCache()
     try {
       columnStore.clearProjectionData(ds1.projections.head).futureValue(defaultPatience)
@@ -159,7 +158,8 @@ with Matchers with ScalaFutures {
                    save()
     }
 
-    FiloSetup.metaStore.getDataset("gdelt1").futureValue should equal (ds1.copy(partitionColumns = partKeys))
+    FiloSetup.metaStore.getDataset("gdelt1").futureValue should equal (
+      ds1.copy(partitionColumns = partKeys).withDatabase("unittest"))
   }
 
   it("should write table if there are existing matching columns") {
