@@ -33,7 +33,7 @@ object MetaStoreSync extends StrictLogging {
   def syncFiloTables(databaseName: String, metastore: MetaStore, hiveContext: HiveContext): Int = {
     val catalog = hiveContext.catalog
     val hiveTables = catalog.getTables(Some(databaseName)).map(_._1)
-    val filoTables = parse(metastore.getAllDatasets(databaseName)) { ds => ds }
+    val filoTables = parse(metastore.getAllDatasets(Some(databaseName))) { ds => ds.map(_.dataset) }
     val missingTables = filoTables.toSet -- hiveTables.toSet
     logger.info(s"Syncing FiloDB tables to Hive MetaStore.  Missing tables = $missingTables")
 

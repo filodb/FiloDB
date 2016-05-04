@@ -31,6 +31,7 @@ class SaveAsFiloTest extends SparkTestBase {
   val conf = (new SparkConf).setMaster("local[4]")
                             .setAppName("test")
                             .set("spark.filodb.cassandra.keyspace", "unittest")
+                            .set("spark.filodb.cassandra.admin-keyspace", "unittest")
                             .set("spark.filodb.memtable.min-free-mb", "10")
                             .set("spark.ui.enabled", "false")
   val sc = new SparkContext(conf)
@@ -120,7 +121,8 @@ class SaveAsFiloTest extends SparkTestBase {
                    save()
     }
 
-    FiloDriver.metaStore.getDataset("gdelt1").futureValue should equal (ds1.copy(partitionColumns = partKeys))
+    FiloDriver.metaStore.getDataset("gdelt1").futureValue should equal (
+      ds1.copy(partitionColumns = partKeys).withDatabase("unittest"))
   }
 
   it("should write table if there are existing matching columns") {
@@ -335,6 +337,24 @@ class SaveAsFiloTest extends SparkTestBase {
     df.registerTempTable("gdelt")
     sql.sql("select sum(numArticles) from gdelt where eventId >= 78 AND eventId <= 85").collect().
       head(0) should equal (15)
+  }
+
+  it("should be able to write with multi-column row keys and filter by segment key equals") {
+    import sql.implicits._
+
+    val gdeltDF = sc.parallelize(GdeltTestData.records.toSeq).toDF()
+    gdeltDF.write.format("filodb.spark").
+      option("dataset", "gdelt3").
+      option("row_keys", ":getOrElse actor2Code NONE,eventId").
+      option("segment_key", ":round eventId 50").
+      mode(SaveMode.Overwrite).
+      save()
+    val df = sql.read.format("filodb.spark").option("dataset", "gdelt3").load()
+    df.agg(sum("numArticles")).collect().head(0) should equal (492)
+
+    df.registerTempTable("gdelt")
+    sql.sql("select sum(numArticles) from gdelt where eventId = 21").collect().
+      head(0) should equal (10)
   }
 
   it("should be able to ingest Spark Timestamp columns and query them") {

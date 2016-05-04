@@ -24,7 +24,10 @@ case class Dataset(name: String,
                     *  column name.
                     */
                    partitionColumns: Seq[ColumnId] = Seq(Dataset.DefaultPartitionColumn),
-                   options: DatasetOptions = Dataset.DefaultOptions)
+                   options: DatasetOptions = Dataset.DefaultOptions) {
+  def withDatabase(database: String): Dataset =
+    this.copy(projections = projections.map(_.withDatabase(database)))
+}
 
 /**
  * Config options for a table define operational details for the column store and memtable.

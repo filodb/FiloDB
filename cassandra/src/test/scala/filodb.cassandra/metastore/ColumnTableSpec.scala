@@ -20,18 +20,16 @@ class ColumnTableSpec extends CassandraFlatSpec with BeforeAndAfter {
 
   val config = ConfigFactory.load("application_test.conf").getConfig("filodb.cassandra")
   val columnTable = new ColumnTable(config)
-  implicit val keySpace = KeySpace("unittest2")
+  implicit val keySpace = KeySpace("unittest")
   val timeout = Timeout(30 seconds)
   // First create the columns table
   override def beforeAll() {
     super.beforeAll()
-    columnTable.createKeyspace("unittest2")
-    // Note: This is a CREATE TABLE IF NOT EXISTS
-    columnTable.initialize("unittest2").futureValue(timeout)
+    columnTable.initialize().futureValue(timeout)
   }
 
   before {
-    columnTable.clearAll("unittest2").futureValue(timeout)
+    columnTable.clearAll().futureValue(timeout)
   }
 
   import scala.concurrent.ExecutionContext.Implicits.global
@@ -50,6 +48,7 @@ class ColumnTableSpec extends CassandraFlatSpec with BeforeAndAfter {
 
   it should "return MetadataException if illegal column type encoded in Cassandra" in {
     val f = columnTable.insert.value(_.dataset, "bar")
+                              .value(_.database, "unittest2")
                               .value(_.name, "age")
                               .value(_.version, 5)
                               .value(_.columnType, "_so_not_a_real_type")

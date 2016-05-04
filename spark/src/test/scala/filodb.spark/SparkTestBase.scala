@@ -23,8 +23,7 @@ with Matchers with ScalaFutures {
   lazy val columnStore = FiloDriver.columnStore
 
   override def beforeAll() {
-    metaStore.initialize("unittest").futureValue(defaultPatience)
-    metaStore.initialize("unittest2").futureValue(defaultPatience)
+    metaStore.initialize().futureValue(defaultPatience)
     testProjections.foreach { p => columnStore.initializeProjection(p).futureValue(defaultPatience) }
   }
 
@@ -34,8 +33,7 @@ with Matchers with ScalaFutures {
   }
 
   before {
-    metaStore.clearAllData("unittest").futureValue(defaultPatience)
-    metaStore.clearAllData("unittest2").futureValue(defaultPatience)
+    metaStore.clearAllData().futureValue(defaultPatience)
     FiloDriver.coordinatorActor ! Reset
     try {
       testProjections.foreach { p => columnStore.clearProjectionData(p).futureValue(defaultPatience) }

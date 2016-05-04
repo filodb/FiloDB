@@ -84,8 +84,8 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
       val version = args.version.getOrElse(0)
       args.command match {
         case Some("init") =>
-          println("Initializing FiloDB Cassandra tables...")
-          awaitSuccess(metaStore.initialize(args.database.getOrElse(config.getString("cassandra.keyspace"))))
+          println("Initializing FiloDB Admin keyspace and tables...")
+          awaitSuccess(metaStore.initialize())
 
         case Some("list") =>
           args.dataset.map(ds => dumpDataset(ds, args.database)).getOrElse(dumpAllDatasets(args.database))
@@ -159,9 +159,8 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
   }
 
   def dumpAllDatasets(database: Option[String]) {
-    val keyspace = database.getOrElse(config.getString("cassandra.keyspace"))
-    parse(metaStore.getAllDatasets(keyspace)) { datasets =>
-      datasets.foreach(println)
+    parse(metaStore.getAllDatasets(database)) { refs =>
+      refs.foreach { ref => println("%25s\t%s".format(ref.database.getOrElse(""), ref.dataset)) }
     }
   }
 

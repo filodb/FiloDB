@@ -23,17 +23,13 @@ trait MetaStore {
 
   /**
    * Initializes the MetaStore so it is ready for further commands.
-   * @param database the name of the database/keyspace to initialize the MetaStore for.  May be ignored by
-   *        some MetaStores.
    */
-  def initialize(database: String): Future[Response]
+  def initialize(): Future[Response]
 
   /**
    * Clears all dataset and column metadata from the MetaStore.
-   * @param database the name of the database/keyspace to initialize the MetaStore for.  May be ignored by
-   *        some MetaStores.
    */
-  def clearAllData(database: String): Future[Response]
+  def clearAllData(): Future[Response]
 
   /**
    * ** Dataset API ***
@@ -58,10 +54,10 @@ trait MetaStore {
 
   /**
    * Retrieves the names of all datasets registered in the metastore
-   * @param database the name of the database/keyspace to initialize the MetaStore for.  May be ignored by
-   *        some MetaStores.
+   * @param database the name of the database/keyspace to retrieve datasets for.  If None, return all
+   *                 datasets across all databases.
    */
-  def getAllDatasets(database: String): Future[Seq[String]]
+  def getAllDatasets(database: Option[String]): Future[Seq[DatasetRef]]
 
   /**
    * Deletes dataset metadata including all projections and columns.  Does not delete column store data.

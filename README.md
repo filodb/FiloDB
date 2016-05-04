@@ -6,6 +6,7 @@
 High-performance distributed analytical database + Spark SQL queries + built for streaming.
 
 [filodb-announce](https://groups.google.com/forum/#!forum/filodb-announce) google group
+and [filodb-discuss](https://groups.google.com/forum/#!forum/filodb-discuss) google group
 
 ```
     _______ __      ____  ____ 
@@ -119,7 +120,7 @@ Your input is appreciated!
     - Start a Cassandra Cluster. If its not accessible at `localhost:9042` update it in `core/src/main/resources/application.conf`.
     - Or, use FiloDB's in-memory column store with Spark (does not work with CLI). Pass the `--conf spark.filodb.store=in-memory` to `spark-submit` / `spark-shell`.  This is a great option to test things out, and is really really fast!
 
-3. For Cassandra, run `filo-cli --command init` to initialize the default `filodb` keyspace.
+3. For Cassandra, run `filo-cli --command init` to initialize the default `filodb_admin` keyspace.   In addition, you should use CQLSH to create any additional keyspaces you desire to store FiloDB datasets in.
 4. Dataset creation can be done using `filo-cli` or using Spark Shell / Scala/Java API.
 5. Inserting data can be done using `filo-cli` (CSV only), using Spark SQL/JDBC (INSERT INTO), or the Spark Shell / Scala / Java API.
 6. Querying is done using Spark SQL/JDBC or Scala/Java API.
@@ -209,7 +210,7 @@ Segmentation and chunk size distribution may be checked by the CLI `analyze` com
 To help with planning, here is an exact list of the predicate pushdowns (in Spark) that help with reducing I/O and query times:
 
 * Partition key column(s): =, IN on any partition key column
-* Segment key:  must be of the form `segmentKey >/>= value AND segmentKey </<= value`
+* Segment key:  must be of the form `segmentKey >/>= value AND segmentKey </<= value` or `segmentKey = value`
 
 ### Example FiloDB Schema for machine metrics
 
@@ -541,15 +542,42 @@ Version 0.2 is the stable, latest released version.  It has been tested on a clu
 
 ### Version 0.3 change list:
 
-* Write to multiple keyspaces in C*, using the `database` option
+* Read from / write to multiple keyspaces in C*, using the `database` option
+  - All dataset/column metadata is stored in a central keyspace which defaults to `filodb_admin`
 * Stress tests
 * Productionization and robustification all around, especially with `filo-cli`
+* A new clustering mode which ensures all data is flushed at the end of writes (when flush_after_write is true)
 * Issue #77: `flush_after_write` and controlling memtable flushes at end of ETL
+* More efficient reads from DSE and when vnodes are enabled
 * More efficient streaming ingestion: flushes no longer automatically done at end of each partition of data
 * Issue #84: bug with ingesting into FiloDB after doing sort or shuffles using Tungsten Spark 1.5
 * filo-cli delete command now deletes both metadata and data tables
 * new filo-cli truncate command
 * New Akka Cluster-based communication channel between driver and FiloDB coordinators helps ensure that all data is flushed at end of ingestions
+
+### Migrating Metadata from 0.2 Cassandra
+
+The methods for columns and datasets are different, due to special characters and other requirements of the datasets table.
+
+First, run `./filo-cli --command init` to create empty datasets and columns tables in the new admin keyspace.
+
+Column metadata:
+
+1. Assuming the source keyspace is filodb, issue these commands in CQLSH:
+    - `copy filodb.columns to '/tmp/filodb_columns.csv';`
+2. Add the name of the keyspace to the end of each line.
+    - `cat /tmp/filodb_columns.csv  | tr -d '\r' | awk '{ $0=$0",filodb" } 1' >/tmp/new_columns.csv`
+3. In CQLSH:
+    - `COPY filodb_admin.columns (dataset, version, name, columntype, id, isdeleted, database) FROM '/tmp/new_columns.csv';`
+
+Datasets metadata -- use Spark (note: this example is using Datastax Enterprise; if using regular spark, load the spark-cassandra-connector, and use sqlContext instead):
+
+```scala
+import org.apache.spark.sql.{Column, SaveMode}
+import org.apache.spark.sql.catalyst.expressions.Literal
+val oldData = csc.read.format("org.apache.spark.sql.cassandra").option("table", "datasets").option("keyspace", "filodb").load
+oldData.withColumn("database", Literal("filodb")).write.format("org.apache.spark.sql.cassandra").option("table", "datasets").option("keyspace", "filodb_admin").mode(SaveMode.Append).save
+```
 
 ## Deploying
 
