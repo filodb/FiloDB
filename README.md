@@ -210,7 +210,7 @@ Segmentation and chunk size distribution may be checked by the CLI `analyze` com
 To help with planning, here is an exact list of the predicate pushdowns (in Spark) that help with reducing I/O and query times:
 
 * Partition key column(s): =, IN on any partition key column
-* Segment key:  must be of the form `segmentKey >/>= value AND segmentKey </<= value`
+* Segment key:  must be of the form `segmentKey >/>= value AND segmentKey </<= value` or `segmentKey = value`
 
 ### Example FiloDB Schema for machine metrics
 
