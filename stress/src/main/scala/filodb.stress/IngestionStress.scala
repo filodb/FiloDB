@@ -42,6 +42,7 @@ object IngestionStress extends App {
                             .set("spark.scheduler.mode", "FAIR")
   val sc = new SparkContext(conf)
   val sql = new SQLContext(sc)
+  import sql.implicits._
 
   // Ingest the taxi file two different ways using two Futures
   // One way is by hour of day - very relaxed and fast
@@ -49,14 +50,22 @@ object IngestionStress extends App {
   val csvDF = sql.read.format("com.databricks.spark.csv").
                  option("header", "true").option("inferSchema", "true").
                  load(taxiCsvFile)
-  val inputLines = csvDF.count()
-  puts(s"$taxiCsvFile has $inputLines lines of data")
+  // Define a hour of day function
+  import org.joda.time.DateTime
+  import java.sql.Timestamp
+  val hourOfDay = sql.udf.register("hourOfDay", { (t: Timestamp) => new DateTime(t).getHourOfDay })
+  val dfWithHoD = csvDF.withColumn("hourOfDay", hourOfDay(csvDF("pickup_datetime")))
+
+  val stressLines = csvDF.count()
+  val hrLines = dfWithHoD.groupBy($"hourOfDay", $"hack_license", $"pickup_datetime").count().count()
+  puts(s"$taxiCsvFile has $stressLines unique lines of data for stress schema, and " +
+       s"$hrLines unique lines of data for hour of day schema")
 
   import scala.concurrent.ExecutionContext.Implicits.global
 
   val stressIngestor = Future {
     puts("Starting stressful ingestion...")
-    csvDF.write.format("filodb.spark").
+    csvDF.sort($"medallion").write.format("filodb.spark").
       option("dataset", "taxi_medallion_seg").
       option("row_keys", "hack_license,pickup_datetime").
       option("segment_key", ":stringPrefix medallion 3").
@@ -72,14 +81,7 @@ object IngestionStress extends App {
   val hrOfDayIngestor = Future {
     puts("Starting hour-of-day (easy) ingestion...")
 
-    // Define a hour of day function
-    import org.joda.time.DateTime
-    import java.sql.Timestamp
-    val hourOfDay = sql.udf.register("hourOfDay", { (t: Timestamp) => new DateTime(t).getHourOfDay })
-
-    val dfWithHoD = csvDF.withColumn("hourOfDay", hourOfDay(csvDF("pickup_datetime")))
-
-    dfWithHoD.write.format("filodb.spark").
+    dfWithHoD.sort($"hourOfDay").write.format("filodb.spark").
       option("dataset", "taxi_hour_of_day").
       option("row_keys", "hack_license,pickup_datetime").
       option("segment_key", ":timeslice pickup_datetime 4d").
@@ -102,14 +104,15 @@ object IngestionStress extends App {
   }
 
   def printIngestionStats(dataset: String): Unit = {
-    val stats = FiloSetup.client.ingestionStats(DatasetRef(dataset), 0)
-    puts(s"  Stats for dataset $dataset => $stats")
+    val stats = FiloDriver.client.ingestionStats(DatasetRef(dataset), 0)
+    puts(s"  Stats for dataset $dataset =>")
+    stats.foreach(s => puts(s"   $s"))
   }
 
   val fut = for { stressDf  <- stressIngestor
         hrOfDayDf <- hrOfDayIngestor
-        stressCount <- checkDatasetCount(stressDf, inputLines)
-        hrCount   <- checkDatasetCount(hrOfDayDf, inputLines) } yield {
+        stressCount <- checkDatasetCount(stressDf, stressLines)
+        hrCount   <- checkDatasetCount(hrOfDayDf, hrLines) } yield {
     puts("Now doing data comparison checking")
 
     // Do something just so we have to depend on both things being done
@@ -120,7 +123,7 @@ object IngestionStress extends App {
     printIngestionStats("taxi_hour_of_day")
 
     // clean up!
-    FiloSetup.shutdown()
+    FiloDriver.shutdown()
     sc.stop()
   }
 

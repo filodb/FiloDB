@@ -108,7 +108,14 @@ extends ChunkMergingStrategy with StrictLogging {
         val items = rr.rowChunkIterator().map { case (reader, chunkId, rowNum) =>
           rowKeyFunc(reader) -> (chunkId -> rowNum)
         }
-        UpdatableChunkRowMap(items.toSeq)(oldSegment.projection.rowKeyType)
+        try {
+          UpdatableChunkRowMap(items.toSeq)(oldSegment.projection.rowKeyType)
+        } catch {
+          case e: Exception =>
+            logger.error(s"Error merging new segment $newSegment to disk segment $oldSegment", e)
+            logger.info(s"Segment read from disk has chunks ${rr.chunks}")
+            throw e
+        }
     }
     val offsetNewTree = newSegment.index.asInstanceOf[UpdatableChunkRowMap[oldSegment.projection.RK]].
                                    index.mapValues { case (chunkId, rowNum) =>

@@ -32,16 +32,16 @@ with Matchers with ScalaFutures {
                             .set("spark.filodb.cassandra.keyspace", "unittest")
                             .set("spark.filodb.cassandra.admin-keyspace", "unittest")
                             .set("spark.filodb.memtable.min-free-mb", "10")
+                            .set("spark.ui.enabled", "false")
   val ssc = new StreamingContext(conf, Milliseconds(700))
   val sql = new SQLContext(ssc.sparkContext)
 
   // This is the same code that the Spark stuff uses.  Make sure we use exact same environment as real code
   // so we don't have two copies of metaStore that could be configured differently.
-  val filoConfig = FiloSetup.configFromSpark(ssc.sparkContext)
-  FiloSetup.init(filoConfig)
+  val filoConfig = FiloDriver.initAndGetConfig(ssc.sparkContext)
 
-  val metaStore = FiloSetup.metaStore
-  val columnStore = FiloSetup.columnStore
+  val metaStore = FiloDriver.metaStore
+  val columnStore = FiloDriver.columnStore
 
   override def beforeAll() {
     metaStore.initialize().futureValue
@@ -63,7 +63,7 @@ with Matchers with ScalaFutures {
     }
   }
 
-  implicit val ec = FiloSetup.ec
+  implicit val ec = FiloDriver.ec
 
   it("should ingest successive streaming RDDs as DataFrames...") {
     val queue = mutable.Queue[RDD[NameRecord]]()
@@ -88,7 +88,7 @@ with Matchers with ScalaFutures {
 
     // Flush after end of stream.  This is only needed for this test to get definitive results; in a real
     // streaming app this would not be needed, ever....
-    FiloSetup.client.flushByName(largeDataset.name)
+    FiloDriver.client.flushByName(largeDataset.name)
 
     import org.apache.spark.sql.functions._
 

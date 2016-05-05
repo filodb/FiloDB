@@ -1,6 +1,5 @@
 package filodb.spark
 
-import com.typesafe.config.ConfigFactory
 import java.sql.Timestamp
 import org.apache.spark.{SparkContext, SparkException, SparkConf}
 import org.apache.spark.sql.SaveMode
@@ -10,10 +9,6 @@ import scala.concurrent.duration._
 
 import filodb.core._
 import filodb.core.metadata.{Column, DataColumn, Dataset}
-import filodb.coordinator.NodeCoordinatorActor.Reset
-
-import org.scalatest.{FunSpec, BeforeAndAfter, BeforeAndAfterAll, Matchers}
-import org.scalatest.concurrent.ScalaFutures
 
 object SaveAsFiloTest {
   case class TSData(machine: String, metric: Double, time: Timestamp)
@@ -25,13 +20,12 @@ object SaveAsFiloTest {
 }
 
 /**
- * Test saveAsFilo
+ * Test all ingestion modes and options, and reading as well / predicate pushdowns
  */
-class SaveAsFiloTest extends FunSpec with BeforeAndAfter with BeforeAndAfterAll
-with Matchers with ScalaFutures {
+class SaveAsFiloTest extends SparkTestBase {
 
-  implicit val defaultPatience =
-    PatienceConfig(timeout = Span(15, Seconds), interval = Span(250, Millis))
+  // implicit val defaultPatience =
+  //   PatienceConfig(timeout = Span(15, Seconds), interval = Span(250, Millis))
 
   // Setup SQLContext and a sample DataFrame
   val conf = (new SparkConf).setMaster("local[4]")
@@ -39,6 +33,7 @@ with Matchers with ScalaFutures {
                             .set("spark.filodb.cassandra.keyspace", "unittest")
                             .set("spark.filodb.cassandra.admin-keyspace", "unittest")
                             .set("spark.filodb.memtable.min-free-mb", "10")
+                            .set("spark.ui.enabled", "false")
   val sc = new SparkContext(conf)
   val sql = new HiveContext(sc)
 
@@ -48,44 +43,12 @@ with Matchers with ScalaFutures {
   val ds2 = Dataset("gdelt2", "id", segCol)
   val ds3 = Dataset("gdelt3", "id", segCol)
   val test1 = Dataset("test1", "id", segCol)
+  val testProjections = Seq(ds1, ds2, ds3, test1).map(_.projections.head)
   val ingestOptions = IngestionOptions(writeTimeout = 2.minutes)
 
   // This is the same code that the Spark stuff uses.  Make sure we use exact same environment as real code
   // so we don't have two copies of metaStore that could be configured differently.
-  val filoConfig = FiloSetup.configFromSpark(sc)
-  FiloSetup.init(filoConfig)
-
-  val metaStore = FiloSetup.metaStore
-  val columnStore = FiloSetup.columnStore
-
-  override def beforeAll() {
-    metaStore.initialize().futureValue(defaultPatience)
-    columnStore.initializeProjection(ds1.projections.head).futureValue(defaultPatience)
-    columnStore.initializeProjection(ds2.projections.head).futureValue(defaultPatience)
-    columnStore.initializeProjection(ds3.projections.head).futureValue(defaultPatience)
-    columnStore.initializeProjection(test1.projections.head).futureValue(defaultPatience)
-  }
-
-  override def afterAll() {
-    super.afterAll()
-    sc.stop()
-  }
-
-  before {
-    metaStore.clearAllData().futureValue(defaultPatience)
-    columnStore.clearSegmentCache()
-    try {
-      columnStore.clearProjectionData(ds1.projections.head).futureValue(defaultPatience)
-      columnStore.clearProjectionData(ds2.projections.head).futureValue(defaultPatience)
-      columnStore.clearProjectionData(ds3.projections.head).futureValue(defaultPatience)
-      columnStore.clearProjectionData(test1.projections.head).futureValue(defaultPatience)
-    } catch {
-      case e: Exception =>
-    }
-    FiloSetup.coordinatorActor ! Reset
-  }
-
-  implicit val ec = FiloSetup.ec
+  val filoConfig = FiloDriver.initAndGetConfig(sc)
 
   // Sample data.  Note how we must create a partitioning column.
   val jsonRows = Seq(
@@ -158,7 +121,7 @@ with Matchers with ScalaFutures {
                    save()
     }
 
-    FiloSetup.metaStore.getDataset("gdelt1").futureValue should equal (
+    FiloDriver.metaStore.getDataset("gdelt1").futureValue should equal (
       ds1.copy(partitionColumns = partKeys).withDatabase("unittest"))
   }
 

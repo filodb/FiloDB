@@ -58,7 +58,8 @@ object DatasetCoordinatorActor {
                    flushesSucceeded: Int,
                    flushesFailed: Int,
                    numRowsActive: Int,
-                   numRowsFlushing: Int) extends DSCoordinatorMessage
+                   numRowsFlushing: Int,
+                   memtableRowsIngested: Long) extends DSCoordinatorMessage
 
   // Internal messages
   case object MemTableWrite extends DSCoordinatorMessage
@@ -132,6 +133,7 @@ private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
   var flushesStarted = 0
   var flushesSucceeded = 0
   var flushesFailed = 0
+  var rowsIngested = 0L
 
   // Holds temporary rows before being flushed to MemTable
   val tempRows = new ArrayBuffer[RowReader]
@@ -177,8 +179,9 @@ private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
 
   private def writeToMemTable(): Unit = if (tempRows.nonEmpty) {
     logger.debug(s"Flushing ${tempRows.length} rows to MemTable...")
+    rowsIngested += tempRows.length
     activeTable.ingestRows(tempRows)
-    ackTos.foreach { case (ackTo, seqNo) => ackTo ! NodeCoordinatorActor.Ack(seqNo) }
+    ackTos.foreach { case (ackTo, seqNo) => ackTo ! IngestionCommands.Ack(seqNo) }
     tempRows.clear()
     ackTos.clear()
     mTableWriteTask = None
@@ -213,6 +216,11 @@ private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
     }
     writeToMemTable()
     reportStats()
+
+    // Cancel any outstanding scheduled flushes
+    mTableFlushTask.foreach(_.cancel)
+    mTableFlushTask = None
+
     flushingTable = Some(activeTable)
     activeTable = makeNewTable()
     val newTaskFuture = reprojector.reproject(flushingTable.get, version)
@@ -233,8 +241,7 @@ private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
     // Close the flushing table and mark it as None
     flushingTable.foreach(_.close())
     flushingTable = None
-    mTableFlushTask = None
-    for { ref <- flushedCallbacks } ref ! NodeCoordinatorActor.Flushed
+    for { ref <- flushedCallbacks } ref ! IngestionCommands.Flushed
     flushedCallbacks = Nil
     flushesSucceeded += 1
     // See if another flush needs to be initiated
@@ -259,7 +266,7 @@ private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
   private def clearProjection(originator: ActorRef, projection: Projection): Unit = {
     for { flushResult <- curReprojection.getOrElse(Future.successful(Nil))
           resp <- columnStore.clearProjectionData(projection) }
-    { originator ! NodeCoordinatorActor.ProjectionTruncated }
+    { originator ! DatasetCommands.ProjectionTruncated }
   }
 
   def receive: Receive = LoggingReceive {
@@ -269,17 +276,20 @@ private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
     case StartFlush(originator) =>
       originator.foreach { callbackRef => flushedCallbacks = flushedCallbacks :+ callbackRef }
       if (!curReprojection.isDefined) { startFlush() }
-      else { logger.debug(s"Ignoring StartFlush, reprojection already in progress...") }
+      else {
+        logger.debug(s"Ignoring StartFlush, reprojection already in progress...")
+        originator.foreach { _ ! IngestionCommands.FlushIgnored }
+      }
 
     case ClearProjection(replyTo, projection) =>
       clearProjection(replyTo, projection)
 
     case CanIngest =>
-      sender ! NodeCoordinatorActor.CanIngest(canIngest)
+      sender ! IngestionCommands.CanIngest(canIngest)
 
     case GetStats =>
       sender ! Stats(flushesStarted, flushesSucceeded, flushesFailed,
-                     activeRows, flushingRows)
+                     activeRows, flushingRows, rowsIngested)
 
     case MemTableWrite =>
       writeToMemTable()

@@ -46,12 +46,12 @@ object StreamingStress extends App {
   val ssc = new StreamingContext(sc, Milliseconds(1000))
   val ref = DatasetRef("taxi_streaming")
 
-  FiloSetup.init(sc)
-  implicit val ec = FiloSetup.ec
+  FiloDriver.init(sc)
+  implicit val ec = FiloDriver.ec
 
   puts(s"Truncating dataset (if it exists already)...")
   try {
-    FiloSetup.client.truncateDataset(ref, 0)
+    FiloDriver.client.truncateDataset(ref, 0)
   } catch {
     case filodb.coordinator.client.ClientException(e) => puts(s"Ignoring error $e")
   }
@@ -120,7 +120,7 @@ object StreamingStress extends App {
       val numRecords = taxiData.count()
       puts(s"Taxi dataset now has   ===>  $numRecords records!")
 
-      val stats = Try(FiloSetup.client.ingestionStats(ref, 0)).getOrElse("Oops, dataset not there yet")
+      val stats = Try(FiloDriver.client.ingestionStats(ref, 0)).getOrElse("Oops, dataset not there yet")
       puts(s"  ==> Ingestion stats: $stats")
       Thread sleep 700
     }
@@ -130,6 +130,6 @@ object StreamingStress extends App {
   ssc.awaitTerminationOrTimeout(160000)
 
   // clean up!
-  FiloSetup.shutdown()
+  FiloDriver.shutdown()
   sc.stop()
 }
