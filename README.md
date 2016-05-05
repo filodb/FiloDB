@@ -50,7 +50,8 @@ See [architecture](doc/architecture.md) and [datasets and reading](doc/datasets_
   - [Running the CLI](#running-the-cli)
   - [CLI Example](#cli-example)
 - [Current Status](#current-status)
-  - [Version 0.2.1 change list:](#version-021-change-list)
+  - [Version 0.3 change list:](#version-03-change-list)
+  - [Migrating Metadata from 0.2 Cassandra](#migrating-metadata-from-02-cassandra)
 - [Deploying](#deploying)
 - [Code Walkthrough](#code-walkthrough)
 - [Building and Testing](#building-and-testing)
@@ -268,7 +269,7 @@ FiloDB has a Spark data-source module - `filodb.spark`. So, you can use the Spar
    $ ./filo-cli --command init
    $ sbt spark/assembly
    ```
-3. Use the jar `FiloDB/spark/target/scala-2.10/filodb-spark-assembly-0.2-SNAPSHOT.jar` with Spark 1.5.x.
+3. Use the jar `FiloDB/spark/target/scala-2.10/filodb-spark-assembly-0.3.jar` with Spark 1.5.x.
 
 The options to use with the data-source api are:
 
@@ -313,7 +314,7 @@ You can follow along using the [Spark Notebook](http://github.com/andypetrella/s
 Or you can start a spark-shell locally,
 
 ```bash
-bin/spark-shell --jars ../FiloDB/spark/target/scala-2.10/filodb-spark-assembly-0.2-SNAPSHOT.jar --packages com.databricks:spark-csv_2.10:1.2.0 --driver-memory 3G --executor-memory 3G
+bin/spark-shell --jars ../FiloDB/spark/target/scala-2.10/filodb-spark-assembly-0.3.jar --packages com.databricks:spark-csv_2.10:1.2.0 --driver-memory 3G --executor-memory 3G
 ```
 
 Loading CSV file from Spark:
@@ -419,7 +420,7 @@ For an example, see the [StreamingTest](spark/src/test/scala/filodb.spark/Stream
 Start Spark-SQL:
 
 ```bash
-  bin/spark-sql --jars path/to/FiloDB/spark/target/scala-2.10/filodb-spark-assembly-0.2-SNAPSHOT.jar
+  bin/spark-sql --jars path/to/FiloDB/spark/target/scala-2.10/filodb-spark-assembly-0.3.jar
 ```
 
 (NOTE: if you want to connect with a real Hive Metastore, you should probably instead start the thrift server, also adding the `--jars` above, and then start the `spark-beeline` client)
