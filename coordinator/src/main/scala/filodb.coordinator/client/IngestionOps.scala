@@ -50,9 +50,10 @@ trait IngestionOps extends ClientBase with StrictLogging {
     def anyRowsLeft: Boolean = {
       val stats = ingestionStats(dataset, version, timeout)
       logger.debug(s"Stats from all ingestors: $stats")
-      stats.map(_.numRowsActive).filter(_ >= 0).sum > 0
+      stats.collect { case s if s.numRowsActive >= 0 => s.numRowsActive }.sum > 0
     }
 
+    // TODO(velvia): Think of a more reactive way to do this, maybe have each actor handle FlushCompletely.
     while(anyRowsLeft) {
       nodesFlushed = flush(dataset, version, timeout)
       Thread sleep 1000

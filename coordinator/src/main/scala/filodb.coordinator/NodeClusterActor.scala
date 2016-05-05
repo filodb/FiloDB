@@ -47,7 +47,7 @@ object NodeClusterActor {
  *   making it very easy to handle for non-actors.
  * - It can notify when some address joins
  */
-class NodeClusterActor(cluster: Cluster,
+private[filodb] class NodeClusterActor(cluster: Cluster,
                        resolveActorTimeout: FiniteDuration) extends BaseActor {
   import NodeClusterActor._
 
@@ -62,7 +62,10 @@ class NodeClusterActor(cluster: Cluster,
   }
 
   // TODO: leave cluster?
-  override def postStop(): Unit = cluster.unsubscribe(self)
+  override def postStop(): Unit = {
+    cluster.unsubscribe(self)
+    cluster.leave(cluster.selfAddress)
+  }
 
   private def withRole(role: String)(f: Set[ActorRef] => Unit): Unit = roleToCoords.get(role) match {
     case None       => sender ! NoSuchRole
