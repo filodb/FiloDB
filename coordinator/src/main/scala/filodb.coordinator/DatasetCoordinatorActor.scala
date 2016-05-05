@@ -216,6 +216,11 @@ private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
     }
     writeToMemTable()
     reportStats()
+
+    // Cancel any outstanding scheduled flushes
+    mTableFlushTask.foreach(_.cancel)
+    mTableFlushTask = None
+
     flushingTable = Some(activeTable)
     activeTable = makeNewTable()
     val newTaskFuture = reprojector.reproject(flushingTable.get, version)
@@ -236,7 +241,6 @@ private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
     // Close the flushing table and mark it as None
     flushingTable.foreach(_.close())
     flushingTable = None
-    mTableFlushTask = None
     for { ref <- flushedCallbacks } ref ! IngestionCommands.Flushed
     flushedCallbacks = Nil
     flushesSucceeded += 1
