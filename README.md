@@ -157,14 +157,16 @@ Perhaps it's easiest by starting with a diagram of how FiloDB stores data.
 Three types of key define the data model of a FiloDB table.
 
 1. **partition key** - decides how data is going to be distributed across the cluster. All data within one partition key is guaranteed to fit on one node. May consist of multiple columns.
-2. **segment key** - groups row values into efficient chunks.  Segments within a partition are sorted by segment key and range scans can be done over segment keys.  Ideal is > 1000 rows per segment.
+2. **segment key** - groups row values into efficient chunks.  Segments within a partition are sorted by segment key and range scans can be done over segment keys.   
 1. **row key**       - acts as a primary key within each partition and decides how data will be sorted within each segment.  May consist of multiple columns.
 
-The PRIMARY KEY for FiloDB consists of (partition key, row key).  When choosing the above values you must make sure the combination of the two are unique.  No component of a primary key may be null - see the `:getOrElse` function for a way of dealing with null inputs.
+The PRIMARY KEY for FiloDB consists of (partition key, segment_key, row key).  When choosing the above values you must make sure the combination of the three are unique.  No component of a primary key may be null - see the `:getOrElse` function for a way of dealing with null inputs.
 
-Specifying the partitioning column is optional.  If a partitioning column is not specified, FiloDB will create a default one with a fixed value, which means everything will be thrown into one node, and is only suitable for small amounts of data.  If you don't specify a partitioning column, then you have to make sure your row keys are all unique.
+Specifying the partitioning column is optional.  If a partitioning column is not specified, FiloDB will create a default one with a fixed value, which means everything will be thrown into one node, and is only suitable for small amounts of data.  If you don't specify a partitioning column, then you have to make sure combination of segment key and row key values are all unique.
 
 For examples of data modeling and choosing keys, see the examples below as well as [datasets](doc/datasets_reading.md).
+
+For additional information refer to Data Modeling and Performance Considerations.
 
 ### Computed Columns
 
@@ -195,6 +197,8 @@ You may specify a function, or computed column, for use with any key column.  Th
 - If there are too few partitions, then FiloDB will not be able to distribute and parallelize reads.
 - If the numer of rows in each partition is too few, then the storage will not be efficient.
 - If the partition key is time based, there may be a hotspot in the cluster as recent data is all written into the same set of replicas, and likewise for read patterns as well.
+- Consider picking a column or group of columns with low cardinality, and has good distribution so that data is distributed across the cluster.
+- Consider only those columns that do not get updated. Since partition key is part of primary key, partition key columns cannot get updated.
 
 **Segment Key and Chunk Size**.
 
@@ -204,6 +208,11 @@ Segmentation and chunk size distribution may be checked by the CLI `analyze` com
 * `memtable.max-rows-per-table`, `memtable.flush-trigger-rows` affects how many rows are kept in the MemTable at a time, and this along with how many partitions are in the MemTable directly leads to the chunk size upon flushing.
 * The segment size is directly controlled by the segment key.  Choosing a segment key that groups data into big enough chunks (at least 1000 is a good guide) is highly recommended.  Experimentation along with running `filo-cli analyze` is recommended to come up with a good segment key.  See the Spark ingestion of GDELT below on an example... choosing an inappropriate segment key leads to MUCH slower ingest and read performance.
 * `chunk_size` option when creating a dataset caps the size of a single chunk.
+* Avoid picking any column that has the possibility of getting updated as a segment key column.
+* Consider a low cardinal column within partition for segment key. Ideal segment key will hold at least 1000 values in a chunk as explained above. Use a computed column like `:string /0` as the segment key if there are no good candidates available or your chosen segment key has potential to hold very few values in chunks under each segment key.
+* Consider moving one of the partition keys as segment keys if your partition is not too wide.  Use the `analyze` filo-cli command to discover partition size.
+* Cosider creating computed columns to make good segment key. Ex: Rounding date to month etc.
+* Ideal segment key would have chunks filled with thousands of values and frequently gets used as filter in queries.
 
 ### Predicate Pushdowns
 
@@ -211,6 +220,9 @@ To help with planning, here is an exact list of the predicate pushdowns (in Spar
 
 * Partition key column(s): =, IN on any partition key column
 * Segment key:  must be of the form `segmentKey >/>= value AND segmentKey </<= value` or `segmentKey = value`
+  Segment Key predicates will pushdown to cassandra if your storage engine is in Cassandra. FiloDB segment keys map to cluster key of the underlying cassandra storage.
+
+Note: You can see predicate pushdown filters in application logs by setting logging level to INFO.
 
 ### Example FiloDB Schema for machine metrics
 
@@ -286,7 +298,7 @@ However, note that the above methods will lead to a physical column being create
 
 ### Configuring FiloDB
 
-Some options must be configured before starting the Spark Shell or Spark application.  There are two methods:
+Some options must be configured before starting the Spark Shell or Spark application. FiloDB executables are invoked by spark application. These configuration settings can be tuned as per the needs of individual application invoking filoDB executables. There are two methods:
 
 1. Modify the `application.conf` and rebuild, or repackage a new configuration.
 2. Override the built in defaults by setting SparkConf configuration values, preceding the filo settings with `spark.filodb`.  For example, to change the default keyspace, pass `--conf spark.filodb.cassandra.keyspace=mykeyspace` to Spark Shell/Submit.  To use the fast in-memory column store instead of Cassandra, pass `--conf spark.filodb.store=in-memory`.
@@ -354,6 +366,8 @@ val df = sqlContext.read.format("filodb.spark").option("dataset", "gdelt").load(
 ```
 
 The dataset can be queried using the DataFrame DSL. See the section [Querying Datasets](#querying-datasets) for examples.
+
+Note: For your production data loads sort the data frame before saving to FiloDB when the data source is not Cassandra. This will ensure to efficiently load segment chunks. Refer to [Distributed Partitioning](#distributed-partitioning) for additional info.
 
 ### Spark/Scala/Java API
 
@@ -469,6 +483,10 @@ numArticles: org.apache.spark.rdd.RDD[Double] = MapPartitionsRDD[104] at map at 
 
 scala> val correlation = Statistics.corr(numMentions, numArticles, "pearson")
 ```
+
+Notes: You can also query filoDB tables using Spark thrift server. Refer to [SQL/Hive Example](#sqlhive-example) for additional information regarding thrift server. 
+
+FiloDB logs can be viewed in corresponding spark application logs by setting appropriate settings in `log4j.properties`, or `logback.xml` for DSE.
 
 ## Using the CLI
 
