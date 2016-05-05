@@ -62,10 +62,12 @@ trait CsvImportExport extends StrictLogging {
     }
 
     // There might still be rows left after the latest flush is done, so initiate another flush
-    val activeRows = client.ingestionStats(dataset, version).head.numRowsActive
+    val activeRows = client.ingestionStats(dataset, version).headOption.map(_.numRowsActive).getOrElse(-1)
     if (activeRows > 0) {
       logger.info(s"Still $activeRows left to flush in active memTable, triggering flush....")
       client.flush(dataset, version, timeout)
+    } else if (activeRows < 0) {
+      logger.warn(s"Unable to obtain any stats from ingestion, something is wrong.")
     }
 
     println(s"Ingestion of $csvPath finished!")

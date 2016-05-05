@@ -8,6 +8,7 @@ import filodb.coordinator._
 
 trait IngestionOps extends ClientBase with StrictLogging {
   import IngestionCommands._
+  import DatasetCoordinatorActor.Stats
 
   /**
    * Flushes the active memtable of the given dataset and version, no matter how much is in the memtable.
@@ -35,9 +36,9 @@ trait IngestionOps extends ClientBase with StrictLogging {
    */
   def ingestionStats(dataset: DatasetRef,
                      version: Int,
-                     timeout: FiniteDuration = 30.seconds): Seq[DatasetCoordinatorActor.Stats] =
+                     timeout: FiniteDuration = 30.seconds): Seq[Stats] =
     askAllCoordinators(GetIngestionStats(dataset, version), timeout) {
-      case stats: DatasetCoordinatorActor.Stats => Some(stats)
+      case stats: Stats => Some(stats)
       case UnknownDataset => None
     }.flatten
 
@@ -50,9 +51,10 @@ trait IngestionOps extends ClientBase with StrictLogging {
     def anyRowsLeft: Boolean = {
       val stats = ingestionStats(dataset, version, timeout)
       logger.debug(s"Stats from all ingestors: $stats")
-      stats.map(_.numRowsActive).filter(_ >= 0).sum > 0
+      stats.collect { case s: Stats if s.numRowsActive >= 0 => s.numRowsActive }.sum > 0
     }
 
+    // TODO(velvia): Think of a more reactive way to do this, maybe have each actor handle FlushCompletely.
     while(anyRowsLeft) {
       nodesFlushed = flush(dataset, version, timeout)
       Thread sleep 1000

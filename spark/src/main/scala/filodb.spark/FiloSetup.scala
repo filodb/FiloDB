@@ -78,6 +78,7 @@ object FiloDriver extends FiloSetup with StrictLogging {
       val selfAddr = cluster.selfAddress
       cluster.join(selfAddr)
       clusterActor
+      // TODO(velvia): Get rid of thread sleep by using NodeClusterActor to time it
       Thread sleep 1000   // Wait a little bit for cluster joining to take effect
       val finalConfig = ConfigFactory.parseString(s"""spark-driver-addr = "$selfAddr"""")
                                      .withFallback(filoConfig)

@@ -136,22 +136,34 @@ with ScalaFutures {
     reprojections should equal (Seq((DatasetRef("dataset"), 0)))
   }
 
+  // Sleeps such that no more than totalMs has elapsed from startMs.  If current time is already
+  // past (startMs + totalMs), don't sleep at all.
+  def sleepRemaining(startMs: Long, totalMs: Int): Unit = {
+    val remaining = (startMs + totalMs) - System.currentTimeMillis
+    if (remaining > 0) Thread sleep remaining
+  }
+
   it("StartFlush should initiate flush when there is no write activity after few seconds") {
     ingestRows(50)
 
+    val start1 = System.currentTimeMillis
     probe.send(dsActor, GetStats)
     probe.expectMsg(Stats(0, 0, 0, 50, -1, 50L))
+    sleepRemaining(start1, 1000)
 
+    // This Call will cancel the scheduled memtable flush task.
+    // After 1000 more ms, there should still be no flush (assuming the stats check happens
+    // within 1 second)
+    ingestRows(40)
+    val start2 = System.currentTimeMillis
     Thread sleep 1000
-
-    // This Call will cancel the scheduled memtable flush task
-    ingestRows(100)
     probe.send(dsActor, GetStats)
-    probe.expectMsg(Stats(0, 0, 0, 150, -1, 150L))
+    probe.expectMsg(Stats(0, 0, 0, 90, -1, 90L))
 
-    Thread sleep 1000
+    // However, 2.5 secs after the ingestion of new data, the flush should have kicked off
+    sleepRemaining(start2, 2500)
     probe.send(dsActor, GetStats)
-    probe.expectMsg(Stats(1, 1, 0, 0, -1, 150L))
+    probe.expectMsg(Stats(1, 1, 0, 0, -1, 90L))
 
   }
 }

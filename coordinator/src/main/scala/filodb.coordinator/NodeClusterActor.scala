@@ -1,6 +1,6 @@
 package filodb.coordinator
 
-import akka.actor.{ActorRef, Props, RootActorPath}
+import akka.actor._
 import akka.cluster.Cluster
 import akka.cluster.ClusterEvent._
 import akka.event.LoggingReceive
@@ -22,10 +22,17 @@ object NodeClusterActor {
 
   // Internal message
   case class AddCoordActor(roles: Set[String], ref: ActorRef)
+  case object EverybodyLeave  // Make every member leave, should be used only for testing
 
   def props(cluster: Cluster,
             resolveActorTimeout: FiniteDuration = 10.seconds): Props =
     Props(classOf[NodeClusterActor], cluster, resolveActorTimeout)
+
+  class RemoteAddressExtensionImpl(system: ExtendedActorSystem) extends Extension {
+    def address: Address = system.provider.getDefaultAddress
+  }
+
+  object RemoteAddressExtension extends ExtensionKey[RemoteAddressExtensionImpl]
 }
 
 /**
@@ -40,7 +47,7 @@ object NodeClusterActor {
  *   making it very easy to handle for non-actors.
  * - It can notify when some address joins
  */
-class NodeClusterActor(cluster: Cluster,
+private[filodb] class NodeClusterActor(cluster: Cluster,
                        resolveActorTimeout: FiniteDuration) extends BaseActor {
   import NodeClusterActor._
 
@@ -55,14 +62,20 @@ class NodeClusterActor(cluster: Cluster,
   }
 
   // TODO: leave cluster?
-  override def postStop(): Unit = cluster.unsubscribe(self)
+  override def postStop(): Unit = {
+    cluster.unsubscribe(self)
+    cluster.leave(cluster.selfAddress)
+  }
 
   private def withRole(role: String)(f: Set[ActorRef] => Unit): Unit = roleToCoords.get(role) match {
     case None       => sender ! NoSuchRole
     case Some(refs) => f(refs)
   }
 
-  def receive: Receive = LoggingReceive {
+  val localRemoteAddr = RemoteAddressExtension(context.system).address
+  var everybodyLeftSender: Option[ActorRef] = None
+
+  def membershipHandler: Receive = LoggingReceive {
     case MemberUp(member) =>
       logger.info(s"Member is Up: ${member.address} with roles ${member.roles}")
       val memberCoordActor = RootActorPath(member.address) / "user" / "coordinator"
@@ -74,19 +87,29 @@ class NodeClusterActor(cluster: Cluster,
                       "Maybe NodeCoordinatorActor did not start up before node joined cluster.", e)
       }
 
-    case AddCoordActor(roles, coordRef) =>
-      roles.foreach { role => roleToCoords(role) += coordRef }
-      logger.debug(s"Updated roleToCoords: $roleToCoords")
-
     case UnreachableMember(member) =>
       logger.info(s"Member detected as unreachable: $member")
 
     case MemberRemoved(member, previousStatus) =>
       logger.info(s"Member is Removed: ${member.address} after $previousStatus")
-      // TODO: remove all coord ActorRefs which have that member address
+      roleToCoords.keys.foreach { role =>
+        roleToCoords(role) = roleToCoords(role).filterNot { ref =>
+          // if we don't do this cannot properly match when self node is asked to leave
+          val addr = if (ref.path.address.hasLocalScope) localRemoteAddr else ref.path.address
+          addr == member.address
+        }
+      }
+      roleToCoords.retain { case (role, refs) => refs.nonEmpty }
+      if (roleToCoords.isEmpty) {
+        logger.info("All members removed!")
+        everybodyLeftSender.foreach { ref => ref ! EverybodyLeave }
+        everybodyLeftSender = None
+      }
 
     case _: MemberEvent => // ignore
+  }
 
+  def routerEvents: Receive = LoggingReceive {
     case ForwardToOne(role, msg) =>
       withRole(role) { refs => refs.toSeq.apply(util.Random.nextInt(refs.size)).forward(msg) }
 
@@ -95,5 +118,21 @@ class NodeClusterActor(cluster: Cluster,
 
     case ForwardToAll(role, msg) =>
       withRole(role) { refs => refs.foreach(_.forward(msg)) }
+
+    case AddCoordActor(roles, coordRef) =>
+      roles.foreach { role => roleToCoords(role) += coordRef }
+      logger.debug(s"Updated roleToCoords: $roleToCoords")
+
+    case EverybodyLeave =>
+      if (roleToCoords.isEmpty) { sender ! EverybodyLeave }
+      else if (everybodyLeftSender.isEmpty) {
+        logger.info(s"Removing all members from cluster...")
+        cluster.state.members.map(_.address).foreach(cluster.leave)
+        everybodyLeftSender = Some(sender)
+      } else {
+        logger.warn(s"Ignoring EverybodyLeave, somebody already sent it")
+      }
   }
+
+  def receive: Receive = membershipHandler orElse routerEvents
 }
