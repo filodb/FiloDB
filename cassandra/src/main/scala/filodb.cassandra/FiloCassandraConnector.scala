@@ -2,19 +2,20 @@ package filodb.cassandra
 
 import com.datastax.driver.core._
 import com.typesafe.config.Config
-import com.websudos.phantom.connectors.{ContactPoints, KeySpace}
 import net.ceedubs.ficus.Ficus._
 import scala.concurrent.duration.FiniteDuration
+import scala.concurrent.{ExecutionContext, Future}
 
-import filodb.core.DatasetRef
+import filodb.core._
 
 trait FiloCassandraConnector {
-  private[this] lazy val connector =
-    ContactPoints(config.as[Seq[String]]("hosts"), config.getInt("port"))
-      .withClusterBuilder(_.withAuthProvider(authProvider)
-                           .withSocketOptions(socketOptions)
-                           .withQueryOptions(queryOptions))
-      .keySpace(keyspace)
+  private[this] lazy val cluster =
+    Cluster.builder().addContactPoints(config.as[Seq[String]]("hosts") :_*)
+                 .withPort(config.getInt("port"))
+                 .withAuthProvider(authProvider)
+                 .withSocketOptions(socketOptions)
+                 .withQueryOptions(queryOptions)
+                 .build
 
   // Cassandra config with following keys:  keyspace, hosts, port, username, password
   def config: Config
@@ -45,9 +46,9 @@ trait FiloCassandraConnector {
     opts
   }
 
-  implicit lazy val session: Session = connector.session
+  implicit lazy val session: Session = cluster.connect()
+  implicit def ec: ExecutionContext
 
-  def keyspace: String
   lazy val defaultKeySpace = config.getString("keyspace")
 
   def keySpaceName(ref: DatasetRef): String = ref.database.getOrElse(defaultKeySpace)
@@ -59,12 +60,16 @@ trait FiloCassandraConnector {
                     s"{'class': 'SimpleStrategy', 'replication_factor' : $replicationFactor};")
   }
 
-  def cassandraVersion: VersionNumber =  connector.cassandraVersion
+  import Util._
 
-  def cassandraVersions: Set[VersionNumber] =  connector.cassandraVersions
+  def execCql(cql: String, notAppliedResponse: Response = NotApplied): Future[Response] =
+    session.executeAsync(cql).toScalaFuture.toResponse(notAppliedResponse)
+
+  def execStmt(statement: Statement, notAppliedResponse: Response = NotApplied): Future[Response] =
+    session.executeAsync(statement).toScalaFuture.toResponse(notAppliedResponse)
 
   def shutdown(): Unit = {
-    com.websudos.phantom.Manager.shutdown()
     session.getCluster.close()
+    session.close()
   }
 }

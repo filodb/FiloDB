@@ -2,9 +2,7 @@ package filodb.cassandra.metastore
 
 import com.datastax.driver.core.Row
 import com.typesafe.config.Config
-import com.websudos.phantom.dsl._
-import play.api.libs.iteratee.Iteratee
-import scala.concurrent.Future
+import scala.concurrent.{ExecutionContext, Future}
 
 import filodb.cassandra.FiloCassandraConnector
 import filodb.core.DatasetRef
@@ -15,63 +13,68 @@ import filodb.core.metadata.{Column, DataColumn}
  *
  * @param config a Typesafe Config with hosts, port, and keyspace parameters for Cassandra connection
  */
-sealed class ColumnTable(val config: Config) extends CassandraTable[ColumnTable, DataColumn]
-with FiloCassandraConnector {
-  override val tableName = "columns"
+sealed class ColumnTable(val config: Config)
+                        (implicit val ec: ExecutionContext) extends FiloCassandraConnector {
   val keyspace = config.getString("admin-keyspace")
-  implicit val ks = KeySpace(keyspace)
+  val tableString = s"${keyspace}.columns"
 
-  // scalastyle:off
-  object database extends StringColumn(this) with PartitionKey[String]
-  object dataset extends StringColumn(this) with PartitionKey[String]
-  object version extends IntColumn(this) with PrimaryKey[Int]
-  object name extends StringColumn(this) with PrimaryKey[String]
-  object id extends IntColumn(this)
-  object columnType extends StringColumn(this)
-  object isDeleted extends BooleanColumn(this)
-  // scalastyle:on
+  val createCql = s"""CREATE TABLE IF NOT EXISTS $tableString (
+                     |database text,
+                     |dataset text,
+                     |version int,
+                     |name text,
+                     |columntype text,
+                     |id int,
+                     |isdeleted boolean,
+                     |PRIMARY KEY ((database, dataset), version, name)
+                     |)""".stripMargin
 
   import filodb.cassandra.Util._
   import filodb.core._
 
   // May throw IllegalArgumentException if cannot convert one of the string types to one of the Enums
-  override def fromRow(row: Row): DataColumn =
-    DataColumn(id(row),
-               name(row),
-               dataset(row),
-               version(row),
-               Column.ColumnType.withName(columnType(row)),
-               isDeleted(row))
+  def fromRow(row: Row): DataColumn =
+    DataColumn(row.getInt("id"),
+               row.getString("name"),
+               row.getString("dataset"),
+               row.getInt("version"),
+               Column.ColumnType.withName(row.getString("columnType")),
+               row.getBool("isdeleted"))
 
-  def initialize(): Future[Response] = create.ifNotExists.future().toResponse()
+  def initialize(): Future[Response] = execCql(createCql)
 
-  def clearAll(): Future[Response] = truncate.future().toResponse()
+  def clearAll(): Future[Response] = execCql(s"TRUNCATE $tableString")
+
+  lazy val schemaCql = session.prepare(s"SELECT * FROM $tableString WHERE dataset = ? AND " +
+                                  s"database = ? AND version <= ?")
 
   def getSchema(dataset: DatasetRef, version: Int): Future[Column.Schema] = {
-    val enum = select.where(_.dataset eqs dataset.dataset)
-                     .and(_.database eqs dataset.database.getOrElse(defaultKeySpace))
-                     .and(_.version lte version)
-                     .fetchEnumerator()
-    (enum run Iteratee.fold(Column.EmptySchema)(Column.schemaFold)).handleErrors
+    session.executeAsync(schemaCql.bind(dataset.dataset,
+                                        dataset.database.getOrElse(defaultKeySpace),
+                                        version: java.lang.Integer)).toIterator.map { it =>
+      it.map(fromRow).foldLeft(Column.EmptySchema)(Column.schemaFold)
+    }.handleErrors
   }
+
+  lazy val columnInsertCql = session.prepare(
+    s"""INSERT INTO $tableString (dataset, database, name, version, id, columntype, isdeleted
+       |) VALUES (?, ?, ?, ?, ?, ?, ?) IF NOT EXISTS""".stripMargin
+  )
 
   def insertColumns(columns: Seq[DataColumn],
                     dataset: DatasetRef): Future[Response] = {
-    val batch = columns.foldLeft(Batch.unlogged) { case (batch, column) =>
-      batch.add(insert.value(_.dataset, dataset.dataset)
-                      .value(_.database, dataset.database.getOrElse(defaultKeySpace))
-                      .value(_.name,    column.name)
-                      .value(_.version, column.version)
-                      .value(_.id,      column.id)
-                      .value(_.columnType, column.columnType.toString)
-                      .value(_.isDeleted, column.isDeleted)
-                      .ifNotExists)
+    val db = dataset.database.getOrElse(defaultKeySpace)
+    val statements = columns.map { column =>
+      columnInsertCql.bind(dataset.dataset, db,
+                           column.name, column.version: java.lang.Integer,
+                           column.id: java.lang.Integer,
+                           column.columnType.toString,
+                           column.isDeleted: java.lang.Boolean)
     }
-    batch.future().toResponse(AlreadyExists)
+    execStmt(unloggedBatch(statements), AlreadyExists)
   }
 
   def deleteDataset(dataset: DatasetRef): Future[Response] =
-    delete.where(_.dataset eqs dataset.dataset)
-          .and(_.database eqs dataset.database.getOrElse(defaultKeySpace))
-          .future().toResponse()
+    execCql(s"DELETE FROM $tableString WHERE dataset = '${dataset.dataset}' AND " +
+            s"database = '${dataset.database.getOrElse(defaultKeySpace)}'")
 }

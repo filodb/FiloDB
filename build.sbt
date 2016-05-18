@@ -56,7 +56,7 @@ lazy val stress = (project in file("stress"))
                     .settings(assemblySettings:_*)
                     .dependsOn(spark)
 
-val phantomVersion = "1.12.2"
+val cassDriverVersion = "3.0.2"
 val akkaVersion    = "2.3.15"
 val sparkVersion   = "1.5.1"
 
@@ -93,9 +93,8 @@ lazy val coreDeps = Seq(
 )
 
 lazy val cassDeps = Seq(
-  "com.websudos"         %% "phantom-dsl"       % phantomVersion,
-  "ch.qos.logback"        % "logback-classic"   % "1.0.7" % "test",  // to get good test logs
-  "com.websudos"         %% "phantom-testkit"   % phantomVersion % "test" excludeAll(excludeZK)
+  "com.datastax.cassandra" % "cassandra-driver-core" % cassDriverVersion,
+  "ch.qos.logback"        % "logback-classic"   % "1.0.7" % "test"
 )
 
 lazy val coordDeps = Seq(
