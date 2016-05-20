@@ -74,6 +74,7 @@ val excludeShapeless = ExclusionRule(organization = "com.chuusai")
 val excludeZK = ExclusionRule(organization = "org.apache.zookeeper")
 // This one is brought by Spark by default
 val excludeSlf4jLog4j = ExclusionRule(organization = "org.slf4j", name = "slf4j-log4j12")
+val excludeJersey = ExclusionRule(organization = "com.sun.jersey")
 
 lazy val coreDeps = Seq(
   "com.typesafe.scala-logging" %% "scala-logging-slf4j" % "2.1.2",
@@ -121,7 +122,8 @@ lazy val sparkDeps = Seq(
 
 lazy val jmhDeps = Seq(
   "com.nativelibs4java"  %% "scalaxy-loops"     % "0.3.3" % "provided",
-  "org.apache.spark"     %% "spark-sql"         % sparkVersion excludeAll(excludeSlf4jLog4j, excludeZK)
+  "org.apache.spark"     %% "spark-sql"         % sparkVersion excludeAll(
+                                                    excludeSlf4jLog4j, excludeZK, excludeJersey)
 )
 
 lazy val stressDeps = Seq(
