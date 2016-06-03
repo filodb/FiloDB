@@ -46,7 +46,7 @@ trait FiloCassandraConnector {
     opts
   }
 
-  implicit lazy val session: Session = cluster.connect()
+  lazy val session: Session = cluster.connect()
   implicit def ec: ExecutionContext
 
   lazy val defaultKeySpace = config.getString("keyspace")
@@ -69,7 +69,7 @@ trait FiloCassandraConnector {
     session.executeAsync(statement).toScalaFuture.toResponse(notAppliedResponse)
 
   def shutdown(): Unit = {
-    session.getCluster.close()
     session.close()
+    session.getCluster.close()
   }
 }

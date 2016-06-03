@@ -33,7 +33,7 @@ object Util {
     }
   }
 
-  import com.google.common.util.concurrent._
+  import com.google.common.util.concurrent.{ListenableFuture, FutureCallback, Futures}
 
   implicit class CassandraFutureOps[A](lf: ListenableFuture[A]) {
     def toScalaFuture: Future[A] = {
