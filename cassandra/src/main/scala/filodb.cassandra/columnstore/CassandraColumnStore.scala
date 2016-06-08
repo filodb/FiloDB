@@ -6,9 +6,10 @@ import com.typesafe.config.Config
 import com.typesafe.scalalogging.slf4j.StrictLogging
 import java.net.InetSocketAddress
 import java.nio.ByteBuffer
+import java.util.HashSet
+
 import scala.concurrent.{ExecutionContext, Future}
 import spray.caching._
-
 import filodb.cassandra.FiloCassandraConnector
 import filodb.core._
 import filodb.core.store._
@@ -131,7 +132,8 @@ extends CachedMergingColumnStore with CassandraColumnStoreScanner with StrictLog
     val keyspace = clusterConnector.keySpaceName(dataset)
     require(splitsPerNode >= 1, s"Must specify at least 1 splits_per_node, got $splitsPerNode")
 
-    val tokensByReplica = metadata.getTokenRanges.asScala.toSeq.groupBy { tokenRange =>
+    val tokenRanges=unwrapTokenRanges(metadata.getTokenRanges.asScala.toSeq)
+    val tokensByReplica =tokenRanges.asScala.toSeq.groupBy { tokenRange =>
       metadata.getReplicas(keyspace, tokenRange)
     }
 
@@ -165,6 +167,13 @@ extends CachedMergingColumnStore with CassandraColumnStoreScanner with StrictLog
       CassandraTokenRangeSplit(tokenRanges.map { range => (range.getStart.toString, range.getEnd.toString) },
                                replicas.map(_.getSocketAddress).toSet)
     }
+  }
+
+  def unwrapTokenRanges(wrappedRanges : Seq[TokenRange] ): HashSet[TokenRange] = {
+    val tokenRanges = new HashSet[TokenRange]()
+    wrappedRanges.map(range => tokenRanges.addAll(range.unwrap()))
+    logger.debug(s"unwrapTokenRanges: ${tokenRanges.toString()}")
+    tokenRanges
   }
 }
 
