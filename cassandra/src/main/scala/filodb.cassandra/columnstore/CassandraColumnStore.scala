@@ -132,8 +132,9 @@ extends CachedMergingColumnStore with CassandraColumnStoreScanner with StrictLog
     val keyspace = clusterConnector.keySpaceName(dataset)
     require(splitsPerNode >= 1, s"Must specify at least 1 splits_per_node, got $splitsPerNode")
 
-    val tokenRanges=unwrapTokenRanges(metadata.getTokenRanges.asScala.toSeq)
-    val tokensByReplica =tokenRanges.asScala.toSeq.groupBy { tokenRange =>
+    val tokenRanges = unwrapTokenRanges(metadata.getTokenRanges.asScala.toSeq)
+    logger.debug(s"unwrapTokenRanges: ${tokenRanges.toString()}")
+    val tokensByReplica = tokenRanges.groupBy { tokenRange =>
       metadata.getReplicas(keyspace, tokenRange)
     }
 
@@ -169,11 +170,8 @@ extends CachedMergingColumnStore with CassandraColumnStoreScanner with StrictLog
     }
   }
 
-  def unwrapTokenRanges(wrappedRanges : Seq[TokenRange] ): HashSet[TokenRange] = {
-    val tokenRanges = new HashSet[TokenRange]()
-    wrappedRanges.map(range => tokenRanges.addAll(range.unwrap()))
-    logger.debug(s"unwrapTokenRanges: ${tokenRanges.toString()}")
-    tokenRanges
+  def unwrapTokenRanges(wrappedRanges : Seq[TokenRange] ): Seq[TokenRange] = {
+    wrappedRanges.flatMap(_.unwrap().asScala.toSeq)
   }
 }
 
