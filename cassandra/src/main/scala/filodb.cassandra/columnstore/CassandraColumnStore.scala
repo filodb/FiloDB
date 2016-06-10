@@ -170,9 +170,8 @@ extends CachedMergingColumnStore with CassandraColumnStoreScanner with StrictLog
     }
   }
 
-  def unwrapTokenRanges(wrappedRanges : Seq[TokenRange] ): Seq[TokenRange] = {
+  def unwrapTokenRanges(wrappedRanges : Seq[TokenRange]): Seq[TokenRange] =
     wrappedRanges.flatMap(_.unwrap().asScala.toSeq)
-  }
 }
 
 case class CassandraTokenRangeSplit(tokens: Seq[(String, String)],
