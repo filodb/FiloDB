@@ -67,6 +67,7 @@ package object spark extends StrictLogging {
   val sparkLogger = logger
 
   val actorCounter = new java.util.concurrent.atomic.AtomicInteger
+
   private[spark] def ingestRddRows(coordinatorActor: ActorRef,
                                    dataset: DatasetRef,
                                    columns: Seq[String],
