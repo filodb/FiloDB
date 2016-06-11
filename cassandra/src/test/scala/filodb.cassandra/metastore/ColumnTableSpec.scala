@@ -24,6 +24,7 @@ class ColumnTableSpec extends FlatSpec with AsyncTest {
   // First create the columns table
   override def beforeAll() {
     super.beforeAll()
+    columnTable.createKeyspace(columnTable.keyspace)
     columnTable.initialize().futureValue(timeout)
   }
 

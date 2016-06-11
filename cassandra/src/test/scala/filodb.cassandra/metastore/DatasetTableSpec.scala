@@ -20,6 +20,7 @@ class DatasetTableSpec extends FlatSpec with AsyncTest {
   // First create the datasets table
   override def beforeAll() {
     super.beforeAll()
+    datasetTable.createKeyspace(datasetTable.keyspace)
     // Note: This is a CREATE TABLE IF NOT EXISTS
     datasetTable.initialize().futureValue(timeout)
   }
