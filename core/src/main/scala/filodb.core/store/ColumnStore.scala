@@ -20,6 +20,8 @@ case class FilteredPartitionScan(split: ScanSplit,
 case class FilteredPartitionRangeScan(split: ScanSplit,
                                       segmentRange: SegmentRange[_],
                                       filter: Any => Boolean = (a: Any) => true) extends ScanMethod
+case class MultiPartitionScan(partitions: Seq[Any]) extends ScanMethod
+// case class MultiPartitionRangeScanMethod(partitions: Seq[Any]) extends ScanMethod
 
 trait ScanSplit {
   // Should return a set of hostnames or IP addresses describing the preferred hosts for that scan split

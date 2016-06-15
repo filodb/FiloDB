@@ -219,6 +219,15 @@ trait CassandraColumnStoreScanner extends ColumnStoreScanner with StrictLogging 
       case SinglePartitionRangeScan(k) =>
         rowMapTable.getChunkMaps(projection.toBinaryKeyRange(k), version)
 
+      case MultiPartitionScan(partitions) =>
+        logger.info(s"entering MultiPartitionScan:${partitions}")
+        val futureRows=partitions.map(partition => {
+          logger.info(s"partition :${partition}")
+          val binPart = projection.partitionType.toBytes(partition.asInstanceOf[projection.PK])
+          rowMapTable.getChunkMaps(binPart, version)
+        })
+        Future.sequence(futureRows).map(rows => rows.flatten.toIterator)
+
       case FilteredPartitionScan(CassandraTokenRangeSplit(tokens, _), filterFunc) =>
         rowMapTable.scanChunkMaps(version, tokens)
           .map(_.filter { crm => filterFunc(projection.partitionType.fromBytes(crm.binPartition)) })

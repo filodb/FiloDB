@@ -193,6 +193,8 @@ trait InMemoryColumnStoreScanner extends ColumnStoreScanner {
       case SinglePartitionScan(partition) => singlePartScan(projection, version, partition)
       case SinglePartitionRangeScan(k)    => singlePartRangeScan(projection, version, k)
 
+      case MultiPartitionScan(partitions) => singlePartScan(projection, version, partitions)
+
       case FilteredPartitionScan(split, filterFunc) =>
         filteredPartScan(projection, version, split, filterFunc)
 
