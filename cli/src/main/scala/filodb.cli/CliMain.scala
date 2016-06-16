@@ -12,14 +12,14 @@ import scala.concurrent.Await
 import scala.concurrent.duration._
 import scala.language.postfixOps
 
-import filodb.cassandra.columnstore.CassandraColumnStore
+import filodb.cassandra.columnstore.{CassandraColumnStore, CassandraTokenRangeSplit}
 import filodb.cassandra.metastore.CassandraMetaStore
 import filodb.coordinator.client.{Client, LocalClient}
 import filodb.coordinator.{DatasetCommands, CoordinatorSetup}
 import filodb.core._
 import filodb.core.metadata.Column.{ColumnType, Schema}
 import filodb.core.metadata.{Column, DataColumn, Dataset, RichProjection}
-import filodb.core.store.{Analyzer, CachedMergingColumnStore, FilteredPartitionScan}
+import filodb.core.store.{Analyzer, CachedMergingColumnStore, FilteredPartitionScan, ScanSplit}
 
 //scalastyle:off
 class Arguments extends FieldArgs {
@@ -31,6 +31,7 @@ class Arguments extends FieldArgs {
   var rowKeys: Seq[String] = Nil
   var segmentKey: Option[String] = None
   var partitionKeys: Seq[String] = Nil
+  var numSegments: Int = 10000
   var version: Option[Int] = None
   var select: Option[Seq[String]] = None
   var limit: Int = 1000
@@ -79,6 +80,15 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
 
   def getRef(args: Arguments): DatasetRef = DatasetRef(args.dataset.get, args.database)
 
+  def combineSplits(splits: Seq[ScanSplit]): ScanSplit = {
+    val csplits = splits.asInstanceOf[Seq[CassandraTokenRangeSplit]]
+
+    // Compress all the token ranges down into one split
+    csplits.foldLeft(csplits.head.copy(tokens = Nil)) { case (nextSplit, ourSplit) =>
+      ourSplit.copy(tokens = ourSplit.tokens ++ nextSplit.tokens)
+    }
+  }
+
   def main(args: Arguments) {
     try {
       val version = args.version.getOrElse(0)
@@ -114,7 +124,9 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
           println(Analyzer.analyze(columnStore.asInstanceOf[CachedMergingColumnStore],
                                    metaStore,
                                    getRef(args),
-                                   version).prettify())
+                                   version,
+                                   combineSplits,
+                                   args.numSegments).prettify())
         case Some("delete") =>
           client.deleteDataset(getRef(args))
 
