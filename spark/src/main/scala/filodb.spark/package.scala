@@ -129,13 +129,12 @@ package object spark extends StrictLogging {
                                         dataset: DatasetRef,
                                         version: Int): Unit = {
     // Pull out existing dataset schema
-    val schema = parse(metaStore.getSchema(dataset, version)) { schema =>
-      logger.info(s"Read schema for dataset $dataset = $schema")
-      schema
-    }
+    val schema = parse(metaStore.getSchema(dataset, version)) { schema => schema }
 
     // Translate DF schema to columns, create new ones if needed
-    val dfSchema = dfColumns.map { col => col.name -> col }.toMap
+    val dfSchemaSeq = dfColumns.map { col => col.name -> col }
+    logger.info(s"Columns from Dataframe Schema: ${dfSchemaSeq.map(_._2).zipWithIndex}")
+    val dfSchema = dfSchemaSeq.toMap
     val matchingCols = dfSchema.keySet.intersect(schema.keySet)
     val missingCols = dfSchema.keySet -- schema.keySet
     logger.info(s"Matching columns - $matchingCols\nMissing columns - $missingCols")
