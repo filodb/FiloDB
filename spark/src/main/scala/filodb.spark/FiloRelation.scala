@@ -93,7 +93,7 @@ object FiloRelation extends StrictLogging {
     }
     logger.info(s"predicateValues: ${predicateValues.toString()}")
     if (predicateValues.length == projection.partitionColumns.length) {
-      Some(combine(predicateValues))
+      if(predicateValues.length == 1) Some(predicateValues.flatten) else Some(combine(predicateValues))
     } else {
       None
     }
@@ -250,46 +250,58 @@ case class FiloRelation(dataset: DatasetRef,
   def buildScan(requiredColumns: Array[String]): RDD[Row] =
     buildScan(requiredColumns, Array.empty)
 
-  def buildMultiParitionScan(projection: RichProjection,
-                              groupedFilters: Map[String, Seq[Filter]],
-                              partitionFilters: Seq[(Int, KeyType, Seq[Filter])],
-                              readOnlyProjStr: String): RDD[Row] = {
+  def scanByPartitions(projection: RichProjection,groupedFilters: Map[String, Seq[Filter]],
+                              partitionFilters: Seq[(Int, KeyType, Seq[Filter])], readOnlyProjStr: String): RDD[Row] = {
     val _config = this.filoConfig
     val _version = this.version
     val segmentRange = segmentRangeScan(projection, groupedFilters)
-    (multiPartitionQuery(projection, partitionFilters), segmentRange) match {
-      case (Some(partitionKeys), None) =>
-        sqlContext.sparkContext.parallelize(partitionKeys, 1)
-          .mapPartitions { partKeyIter =>
-            perPartitionRowScanner(_config, readOnlyProjStr, _version,
-              MultiPartitionScan(partKeyIter.toSeq))
+    (singlePartitionQuery(projection, partitionFilters), segmentRange) match {
+      case (Some(partitionKey), None) =>
+        sqlContext.sparkContext.parallelize(Seq(partitionKey), 1).mapPartitions {
+          partKeyIter => perPartitionRowScanner(_config, readOnlyProjStr, _version,
+            SinglePartitionScan(partKeyIter.next))
           }
 
-      case (Some(partitionKeys), Some(segRange)) =>
-        sqlContext.sparkContext.parallelize(partitionKeys, 1)
-          .mapPartitions { partKeyIter =>
-            perPartitionRowScanner(_config, readOnlyProjStr, _version,
-              MultiPartitionScan(partKeyIter.toSeq))
+      case (Some(partitionKey), Some(segRange)) =>
+        val keyRange = KeyRange(partitionKey, segRange.start, segRange.end, endExclusive = false)
+        sqlContext.sparkContext.parallelize(Seq(keyRange), 1).mapPartitions {
+          keyRangeIter => perPartitionRowScanner(_config, readOnlyProjStr, _version,
+            SinglePartitionRangeScan(keyRangeIter.next))
           }
+      case _ =>
+        (multiPartitionQuery(projection, partitionFilters), segmentRange) match {
+          case (Some(partitionKeys), None) =>
+            sqlContext.sparkContext.parallelize(partitionKeys, 1).mapPartitions {
+              partKeyIter => perPartitionRowScanner(_config, readOnlyProjStr, _version,
+                MultiPartitionScan(partKeyIter.toSeq))
+              }
 
-      case (None, None) =>
-        val filterFunc = filtersToFunc(projection, partitionFilters)
-        splitsQuery(sqlContext, dataset, splitsPerNode, _config, readOnlyProjStr, _version) {
-          s => FilteredPartitionScan(s, filterFunc)
-        }
+          case (Some(partitionKeys), Some(segRange)) =>
+            val keyRanges = partitionKeys.map(partitionKey =>
+              KeyRange(partitionKey, segRange.start, segRange.end, endExclusive = false))
+            sqlContext.sparkContext.parallelize(keyRanges, 1).mapPartitions {
+              keyRangeIter => perPartitionRowScanner(_config, readOnlyProjStr, _version,
+                MultiPartitionRangeScan(keyRangeIter.toSeq))
+              }
 
-      case (None, Some(segRange)) =>
-        val filterFunc = filtersToFunc(projection, partitionFilters)
-        splitsQuery(sqlContext, dataset, splitsPerNode, _config, readOnlyProjStr, _version) { s =>
-          FilteredPartitionRangeScan(s, segRange, filterFunc)
+          case (None, None) =>
+            val filterFunc = filtersToFunc(projection, partitionFilters)
+            splitsQuery(sqlContext, dataset, splitsPerNode, _config, readOnlyProjStr, _version) {
+              s => FilteredPartitionScan(s, filterFunc)
+            }
+
+          case (None, Some(segRange)) =>
+            val filterFunc = filtersToFunc(projection, partitionFilters)
+            splitsQuery(sqlContext, dataset, splitsPerNode, _config, readOnlyProjStr, _version) { s =>
+              FilteredPartitionRangeScan(s, segRange, filterFunc)
+            }
         }
     }
   }
+
   def buildScan(requiredColumns: Array[String], filters: Array[Filter]): RDD[Row] = {
     // Define vars to distribute inside the method
-    val _config = this.filoConfig
     val projection = RichProjection(this.datasetObj, filoSchema.values.toSeq)
-    val _version = this.version
     val filoColumns = requiredColumns.map(this.filoSchema)
     logger.info(s"Scanning columns ${filoColumns.toSeq}")
     val readOnlyProjStr = projection.toReadOnlyProjString(filoColumns.map(_.name))
@@ -297,25 +309,8 @@ case class FiloRelation(dataset: DatasetRef,
 
     val groupedFilters = parseFilters(filters.toList)
     val partitionFilters = parsePartitionFilters(projection, groupedFilters)
-    (singlePartitionQuery(projection, partitionFilters),
-      segmentRangeScan(projection, groupedFilters)) match {
-      case (Some(partitionKey), None) =>
-        sqlContext.sparkContext.parallelize(Seq(partitionKey), 1)
-          .mapPartitions { partKeyIter =>
-            perPartitionRowScanner(_config, readOnlyProjStr, _version,
-              SinglePartitionScan(partKeyIter.next))
-          }
 
-      case (Some(partitionKey), Some(segRange)) =>
-        val keyRange = KeyRange(partitionKey, segRange.start, segRange.end, endExclusive = false)
-        sqlContext.sparkContext.parallelize(Seq(keyRange), 1)
-          .mapPartitions { keyRangeIter =>
-            perPartitionRowScanner(_config, readOnlyProjStr, _version,
-              SinglePartitionRangeScan(keyRangeIter.next))
-          }
-      case _ =>
-        buildMultiParitionScan(projection,groupedFilters,partitionFilters,readOnlyProjStr)
-    }
+    scanByPartitions(projection,groupedFilters,partitionFilters,readOnlyProjStr)
   }
 }
 

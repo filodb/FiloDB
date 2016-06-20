@@ -41,7 +41,7 @@ extends CassandraTable[ChunkRowMapTable, ChunkRowMapRecord] {
   object nextChunkId extends IntColumn(this)
   // Keeping below to remember how to define a set column, but move it elsewhere.
   // object columnsWritten extends SetColumn[ChunkRowMapTable, ChunkRowMapRecord, String](this)
-  //scalastyle:on
+  // scalastyle:on
 
   override def fromRow(row: Row): ChunkRowMapRecord =
     ChunkRowMapRecord(ByteVector(partition(row)),
@@ -67,7 +67,8 @@ extends CassandraTable[ChunkRowMapTable, ChunkRowMapRecord] {
   /**
    * Retrieves a whole series of chunk maps, in the range [startSegmentId, untilSegmentId)
    * End is exclusive or not depending on keyRange.endExclusive flag
-   * @return ChunkMaps(...), if nothing found will return ChunkMaps(Nil).
+    *
+    * @return ChunkMaps(...), if nothing found will return ChunkMaps(Nil).
    */
   def getChunkMaps(keyRange: BinaryKeyRange,
                    version: Int): Future[Iterator[ChunkRowMapRecord]] =
@@ -109,7 +110,8 @@ extends CassandraTable[ChunkRowMapTable, ChunkRowMapRecord] {
 
   /**
    * Writes a new chunk map to the chunkRowTable.
-   * @return Success, or an exception as a Future.failure
+    *
+    * @return Success, or an exception as a Future.failure
    */
   def writeChunkMap(partition: Types.BinaryPartition,
                     version: Int,

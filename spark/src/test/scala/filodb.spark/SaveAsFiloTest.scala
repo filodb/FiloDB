@@ -321,6 +321,77 @@ class SaveAsFiloTest extends SparkTestBase {
       head(0) should equal (10)
   }
 
+  it("should be able to parse and use single partition query") {
+    import sql.implicits._
+
+    val gdeltDF = sc.parallelize(GdeltTestData.records.toSeq).toDF()
+    gdeltDF.write.format("filodb.spark").
+      option("dataset", "gdelt3").
+      option("row_keys", "eventId").
+      option("segment_key", segCol).
+      option("partition_keys", ":getOrElse actor2Code --,:getOrElse year -1").
+      mode(SaveMode.Overwrite).
+      save()
+    val df = sql.read.format("filodb.spark").option("dataset", "gdelt3").load()
+    df.registerTempTable("gdelt")
+    sql.sql("select sum(numArticles) from gdelt where actor2Code = 'JPN' AND year = 1979").collect().
+      head(0) should equal (10)
+  }
+
+  it("should be able to parse and use multipartition query") {
+    import sql.implicits._
+
+    val gdeltDF = sc.parallelize(GdeltTestData.records.toSeq).toDF()
+    gdeltDF.write.format("filodb.spark").
+      option("dataset", "gdelt3").
+      option("row_keys", "eventId").
+      option("segment_key", segCol).
+      option("partition_keys", ":stringPrefix actor2Code 1").
+      mode(SaveMode.Overwrite).
+      save()
+    val df = sql.read.format("filodb.spark").option("dataset", "gdelt3").load()
+    df.registerTempTable("gdelt")
+    sql.sql("select sum(numArticles) from gdelt where actor2Code in ('JPN', 'KHM')").collect().
+      head(0) should equal (30)
+  }
+
+  it("should be able to filter by segment key and multiple partitions") {
+    import sql.implicits._
+
+    val gdeltDF = sc.parallelize(GdeltTestData.records.toSeq).toDF()
+    gdeltDF.write.format("filodb.spark").
+      option("dataset", "gdelt3").
+      option("row_keys", "eventId").
+      option("partition_keys", ":getOrElse actor2Code --,:getOrElse year -1").
+      option("segment_key", ":round eventId 50").
+      mode(SaveMode.Overwrite).
+      save()
+    val df = sql.read.format("filodb.spark").option("dataset", "gdelt3").load()
+    df.agg(sum("numArticles")).collect().head(0) should equal (492)
+
+    df.registerTempTable("gdelt")
+    sql.sql("select sum(numArticles) from gdelt where  actor2Code in ('JPN', 'KHM') " +
+      "and year=1979 and eventId >= 21 AND eventId <= 24").collect().
+      head(0) should equal (21)
+  }
+
+  it("should be able do full table scan when all partition keys are not part of the filters") {
+    import sql.implicits._
+
+    val gdeltDF = sc.parallelize(GdeltTestData.records.toSeq).toDF()
+    gdeltDF.write.format("filodb.spark").
+      option("dataset", "gdelt3").
+      option("row_keys", "eventId").
+      option("segment_key", segCol).
+      option("partition_keys", ":getOrElse actor2Code 1,:getOrElse year -1").
+      mode(SaveMode.Overwrite).
+      save()
+    val df = sql.read.format("filodb.spark").option("dataset", "gdelt3").load()
+    df.registerTempTable("gdelt")
+    sql.sql("select sum(numArticles) from gdelt where actor2Code ='JPN'  ").collect().
+      head(0) should equal (10)
+  }
+
   it("should be able to write with multi-column row keys and filter by segment key") {
     import sql.implicits._
 
