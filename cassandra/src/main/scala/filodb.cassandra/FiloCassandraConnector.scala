@@ -5,12 +5,16 @@ import com.typesafe.config.Config
 import net.ceedubs.ficus.Ficus._
 import scala.concurrent.duration.FiniteDuration
 import scala.concurrent.{ExecutionContext, Future}
+import scala.util.Try
 
 import filodb.core._
 
 trait FiloCassandraConnector {
   private[this] lazy val cluster =
-    Cluster.builder().addContactPoints(config.as[Seq[String]]("hosts") :_*)
+    Cluster.builder()
+                 .addContactPoints(
+                   Try(config.as[Seq[String]]("hosts")).getOrElse(config.getString("hosts").split(',').toSeq) :_*
+                  )
                  .withPort(config.getInt("port"))
                  .withAuthProvider(authProvider)
                  .withSocketOptions(socketOptions)
