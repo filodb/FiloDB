@@ -41,6 +41,12 @@ trait CoordinatorSetup {
   // The global Filo configuration object.  Should be systemConfig.getConfig("filodb")
   def config: Config
 
+  def kamonInit(): Unit = {
+    kamon.Kamon.start()
+    val traceLogger = system.actorOf(KamonTraceLogger.props(config))
+    kamon.Kamon.tracer.subscribe(traceLogger)
+  }
+
   lazy val systemConfig: Config = GlobalConfig.systemConfig
 
   lazy val threadPool = FutureUtils.getBoundedTPE(config.getInt("core-futures-queue-length"),
@@ -74,5 +80,15 @@ trait CoordinatorSetup {
     metaStore.shutdown()
     // Important: shut down executioncontext as well
     threadPool.shutdown()
+    kamon.Kamon.shutdown()
   }
+}
+
+/**
+ * This is an optional method for Spark and other FiloDB apps to reuse the same config loading
+ * mechanism provided by FiloDB, instead of using the default Typesafe config loading.  To use this
+ * pass -Dkamon.config-provider=filodb.coordinator.KamonConfigProvider
+ */
+class KamonConfigProvider extends kamon.ConfigProvider {
+  def config: Config = GlobalConfig.systemConfig
 }

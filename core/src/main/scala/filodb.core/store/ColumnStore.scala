@@ -1,6 +1,7 @@
 package filodb.core.store
 
 import com.typesafe.scalalogging.slf4j.StrictLogging
+import kamon.trace.{TraceContext, Tracer}
 import java.nio.ByteBuffer
 import org.velvia.filo.RowReader
 import org.velvia.filo.RowReader.TypedFieldExtractor
@@ -162,6 +163,7 @@ case class ChunkedData(column: Types.ColumnId, chunks: Seq[(Types.SegmentId, Typ
 trait CachedMergingColumnStore extends ColumnStore with ColumnStoreScanner with StrictLogging {
   import filodb.core.Types._
   import filodb.core.Iterators._
+  import filodb.core.Perftools._
 
   def segmentCache: Cache[Segment]
 
@@ -169,6 +171,8 @@ trait CachedMergingColumnStore extends ColumnStore with ColumnStoreScanner with 
 
   // This ExecutionContext is the default used for writing, it should have bounds set
   implicit val ec: ExecutionContext
+
+  protected val stats = ColumnStoreStats()
 
   def clearProjectionData(projection: Projection): Future[Response] = {
     // Clear out any entries from segmentCache first
@@ -212,35 +216,49 @@ trait CachedMergingColumnStore extends ColumnStore with ColumnStoreScanner with 
 
   def appendSegment(projection: RichProjection,
                     segment: Segment,
-                    version: Int): Future[Response] = {
-    if (segment.isEmpty) return(Future.successful(NotApplied))
+                    version: Int): Future[Response] = Tracer.withNewContext("append-segment") {
+    val ctx = Tracer.currentContext
+    stats.segmentAppend()
+    if (segment.isEmpty) {
+      stats.segmentEmpty()
+      return(Future.successful(NotApplied))
+    }
     for { oldSegment <- getSegFromCache(projection.toRowKeyOnlyProjection, segment, version)
-          mergedSegment = mergingStrategy.mergeSegments(oldSegment, segment)
-          writeChunksResp <- writeBatchedChunks(projection.datasetRef, version, mergedSegment)
+          mergedSegment = subtrace(ctx, "segment-index-merge", "ingestion") {
+                            mergingStrategy.mergeSegments(oldSegment, segment) }
+          writeChunksResp <- writeBatchedChunks(projection.datasetRef, version, mergedSegment, ctx)
             if writeChunksResp == Success
-          writeCRMapResp <- writeChunkRowMap(projection.datasetRef, segment.binaryPartition, version,
-                                         segment.segmentId, mergedSegment.index) }
-    yield {
+          writeCRMapResp <- asyncSubtrace(ctx, "write-index", "ingest-io") {
+                              writeChunkRowMap(projection.datasetRef, segment.binaryPartition, version,
+                                               segment.segmentId, mergedSegment.index) }
+    } yield {
       // Important!  Update the cache with the new merged segment.
       updateCache(projection, version, mergedSegment)
+      ctx.finish()
       writeCRMapResp
     }
   }
 
   def chunkBatchSize: Int
 
-  private def writeBatchedChunks(dataset: DatasetRef, version: Int, segment: Segment): Future[Response] = {
+  private def writeBatchedChunks(dataset: DatasetRef,
+                                 version: Int,
+                                 segment: Segment,
+                                 ctx: TraceContext): Future[Response] = {
     val binPartition = segment.binaryPartition
-    Future.traverse(segment.getChunks.grouped(chunkBatchSize).toSeq) { chunks =>
-      writeChunks(dataset, binPartition, version, segment.segmentId, chunks.toIterator)
-    }.map { responses => responses.head }
+    asyncSubtrace(ctx, "write-chunks", "ingest-io") {
+      Future.traverse(segment.getChunks.grouped(chunkBatchSize).toSeq) { chunks =>
+        writeChunks(dataset, binPartition, version, segment.segmentId, chunks.toIterator)
+      }.map { responses => responses.head }
+    }
   }
 
   private def getSegFromCache(projection: RichProjection,
                               segment: Segment,
-                              version: Int): Future[Segment] = {
+                              version: Int): Future[Segment] = asyncSubtrace("index-read", "ingest-io") {
     segmentCache((projection.datasetName, segment.binaryPartition, version, segment.segmentId)) {
       val newSegInfo = segment.segInfo.basedOn(projection)
+      stats.segmentIndexMissingRead()
       mergingStrategy.readSegmentForCache(projection, version)(newSegInfo)(readEc)
     }
   }

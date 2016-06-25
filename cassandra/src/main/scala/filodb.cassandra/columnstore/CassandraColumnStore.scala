@@ -104,7 +104,7 @@ extends CachedMergingColumnStore with CassandraColumnStoreScanner with StrictLog
                   segmentId: SegmentId,
                   chunks: Iterator[(ColumnId, ChunkID, ByteBuffer)]): Future[Response] = {
     val chunkTable = getOrCreateChunkTable(dataset)
-    chunkTable.writeChunks(partition, version, segmentId, chunks)
+    chunkTable.writeChunks(partition, version, segmentId, chunks, stats)
   }
 
   def writeChunkRowMap(dataset: DatasetRef,
@@ -115,7 +115,7 @@ extends CachedMergingColumnStore with CassandraColumnStoreScanner with StrictLog
     val (chunkIds, rowNums) = chunkRowMap.serialize()
     val rowMapTable = getOrCreateRowMapTable(dataset)
     rowMapTable.writeChunkMap(partition, version, segmentId,
-                              chunkIds, rowNums, chunkRowMap.nextChunkId)
+                              chunkIds, rowNums, chunkRowMap.nextChunkId, stats)
   }
 
   def shutdown(): Unit = {
