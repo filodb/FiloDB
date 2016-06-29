@@ -53,6 +53,9 @@ See [architecture](doc/architecture.md) and [datasets and reading](doc/datasets_
   - [Version 0.3 change list:](#version-03-change-list)
   - [Migrating Metadata from 0.2 Cassandra](#migrating-metadata-from-02-cassandra)
 - [Deploying](#deploying)
+- [Monitoring and Metrics](#monitoring-and-metrics)
+  - [Metrics Sinks](#metrics-sinks)
+  - [Metrics Configuration](#metrics-configuration)
 - [Code Walkthrough](#code-walkthrough)
 - [Building and Testing](#building-and-testing)
 - [You can help!](#you-can-help)
@@ -615,6 +618,28 @@ The current version assumes Spark 1.6.x and Cassandra 2.1.x or 2.2.x, though it 
 There is a branch for Datastax Enterprise 4.8 / Spark 1.4.  Note that if you are using DSE or have vnodes enabled, a lower number of vnodes (16 or less) is STRONGLY recommended as higher numbers of vnodes slows down queries substantially and basically prevents subsecond queries from happening.
 
 By default, FiloDB nodes (basically all the Spark executors) talk to each other using a random port and locally assigned hostname.  You may wish to set `filodb.spark.driver.port`, `filodb.spark.executor.port` to assign specific ports (for AWS, for example) or possibly use a different config file on each host and set `akka.remote.netty.tcp.hostname` on each host's config file.
+
+## Monitoring and Metrics
+
+FiloDB uses [Kamon](http://kamon.io) for metrics and Akka/Futures/async tracing.  Not only does this give us summary statistics, but this also gives us Zipkin-style tracing of the ingestion write path in production, which can give a much richer picture than just stats.
+
+### Metrics Sinks
+
+* statsd sink - this is packaged into FiloDB's spark module (but not the CLI module) by default.  All you need to do is stand up [statsd](https://github.com/etsy/statsd), [Statsite](http://armon.github.io/statsite/), or equivalent daemon.  See the Kamon [Statsd module](http://kamon.io/backends/statsd/) guide for configuration.
+* Kamon metrics logger - this is part of the coordinator module and will log all metrics (including segment trace metrics) at every Kamon tick interval, which defaults to 10 seconds.  It is disabled by default but could be enabled with `--conf spark.filodb.metrics-logger.enabled=true` or changing `filodb.metrics-logger.enabled` in your conf file.  Also, which metrics to log including pattern matching on names can be configured.
+* Kamon trace logger - this logs detailed trace information on segment appends and is always on if detailed tracing is on.
+
+### Metrics Configuration
+
+Kamon has many configurable options.  To get more detailed traces on the write / segment append path, for example, here is how you might pass to `spark-submit` or `spark-shell` options to set detailed tracing on and to trace 3% of all segment appends:
+
+    --driver-java-options '-XX:+UseG1GC -XX:MaxGCPauseMillis=500 -Dkamon.trace.level-of-detail=simple-trace -Dkamon.trace.random-sampler.chance=3'
+
+Methods of configuring Kamon (except for the metrics logger):
+
+- The best way to configure Kamon is to pass this Java property: `-Dkamon.config-provider=filodb.coordinator.KamonConfigProvider`.  This lets you configure Kamon through the same mechanisms as the rest of FiloDB: `-Dfilo.config.file` for example, and the configuration is automatically passed to each executor/worker.  Otherwise:
+- Passing Java options on the command line with `-D`, or for Spark, `--driver-java-options` and `--executor-java-options`
+- Passing options in a config file and using `-Dconfig.file`.  NOTE: `-Dfilo.config.file` will not work because Kamon uses a different initialization stack. Need to be done for both drivers and executors.
 
 ## Code Walkthrough
 

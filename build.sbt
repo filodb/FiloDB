@@ -105,6 +105,8 @@ lazy val cassDeps = commonDeps ++ Seq(
 lazy val coordDeps = commonDeps ++ Seq(
   "com.typesafe.akka"    %% "akka-slf4j"        % akkaVersion,
   "com.typesafe.akka"    %% "akka-cluster"      % akkaVersion,
+  // Take out the below line if you really don't want statsd metrics enabled
+  "io.kamon"             %% "kamon-statsd"        % "0.6.0",
   "com.opencsv"           % "opencsv"           % "3.3",
   "com.typesafe.akka"    %% "akka-testkit"      % akkaVersion % "test"
 )

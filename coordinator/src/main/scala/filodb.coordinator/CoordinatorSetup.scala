@@ -45,6 +45,7 @@ trait CoordinatorSetup {
     kamon.Kamon.start()
     val traceLogger = system.actorOf(KamonTraceLogger.props(config))
     kamon.Kamon.tracer.subscribe(traceLogger)
+    KamonLogger.start(system, config.getConfig("metrics-logger"))
   }
 
   lazy val systemConfig: Config = GlobalConfig.systemConfig
