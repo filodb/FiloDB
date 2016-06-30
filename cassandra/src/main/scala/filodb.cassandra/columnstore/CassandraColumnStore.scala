@@ -6,9 +6,10 @@ import com.typesafe.config.Config
 import com.typesafe.scalalogging.slf4j.StrictLogging
 import java.net.InetSocketAddress
 import java.nio.ByteBuffer
+import java.util.HashSet
+
 import scala.concurrent.{ExecutionContext, Future}
 import spray.caching._
-
 import filodb.cassandra.FiloCassandraConnector
 import filodb.core._
 import filodb.core.store._
@@ -66,7 +67,7 @@ extends CachedMergingColumnStore with CassandraColumnStoreScanner with StrictLog
    */
   def initializeProjection(projection: Projection): Future[Response] = {
     val chunkTable = getOrCreateChunkTable(projection.dataset)
-    clusterConnector.createKeyspace(chunkTable.keySpace.name)
+    clusterConnector.createKeyspace(chunkTable.keyspace)
     val rowMapTable = getOrCreateRowMapTable(projection.dataset)
     for { ctResp                    <- chunkTable.initialize()
           rmtResp                   <- rowMapTable.initialize() } yield { rmtResp }
@@ -131,7 +132,9 @@ extends CachedMergingColumnStore with CassandraColumnStoreScanner with StrictLog
     val keyspace = clusterConnector.keySpaceName(dataset)
     require(splitsPerNode >= 1, s"Must specify at least 1 splits_per_node, got $splitsPerNode")
 
-    val tokensByReplica = metadata.getTokenRanges.asScala.toSeq.groupBy { tokenRange =>
+    val tokenRanges = unwrapTokenRanges(metadata.getTokenRanges.asScala.toSeq)
+    logger.debug(s"unwrapTokenRanges: ${tokenRanges.toString()}")
+    val tokensByReplica = tokenRanges.groupBy { tokenRange =>
       metadata.getReplicas(keyspace, tokenRange)
     }
 
@@ -166,6 +169,9 @@ extends CachedMergingColumnStore with CassandraColumnStoreScanner with StrictLog
                                replicas.map(_.getSocketAddress).toSet)
     }
   }
+
+  def unwrapTokenRanges(wrappedRanges : Seq[TokenRange]): Seq[TokenRange] =
+    wrappedRanges.flatMap(_.unwrap().asScala.toSeq)
 }
 
 case class CassandraTokenRangeSplit(tokens: Seq[(String, String)],
@@ -191,7 +197,7 @@ trait CassandraColumnStoreScanner extends ColumnStoreScanner with StrictLogging 
 
   protected val clusterConnector = new FiloCassandraConnector {
     def config: Config = cassandraConfig
-    val keyspace = cassandraConfig.getString("keyspace")
+    def ec: ExecutionContext = readEc
   }
 
   def readChunks(dataset: DatasetRef,
@@ -279,13 +285,13 @@ trait CassandraColumnStoreScanner extends ColumnStoreScanner with StrictLogging 
     chunkTableCache.computeIfAbsent(dataset,
                                     { (dataset: DatasetRef) =>
                                       logger.debug(s"Creating a new ChunkTable for dataset $dataset")
-                                      new ChunkTable(dataset, clusterConnector) })
+                                      new ChunkTable(dataset, clusterConnector)(readEc) })
   }
 
   def getOrCreateRowMapTable(dataset: DatasetRef): ChunkRowMapTable = {
     rowMapTableCache.computeIfAbsent(dataset,
                                      { (dataset: DatasetRef) =>
                                        logger.debug(s"Creating a new ChunkRowMapTable for dataset $dataset")
-                                       new ChunkRowMapTable(dataset, clusterConnector) })
+                                       new ChunkRowMapTable(dataset, clusterConnector)(readEc) })
   }
 }

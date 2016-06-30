@@ -18,6 +18,7 @@ class CassandraMetaStore(config: Config)
   val columnTable = new ColumnTable(config)
 
   def initialize(): Future[Response] = {
+    datasetTable.createKeyspace(datasetTable.keyspace)
     for { dtResp <- datasetTable.initialize()
           ctResp <- columnTable.initialize() }
     yield { ctResp }

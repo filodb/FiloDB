@@ -66,6 +66,8 @@ package object spark extends StrictLogging {
 
   val sparkLogger = logger
 
+  val actorCounter = new java.util.concurrent.atomic.AtomicInteger
+
   private[spark] def ingestRddRows(coordinatorActor: ActorRef,
                                    dataset: DatasetRef,
                                    columns: Seq[String],
@@ -77,7 +79,8 @@ package object spark extends StrictLogging {
     // it is not safe for us to read off of this iterator in another (ie Actor) thread
     val queue = new ArrayBlockingQueue[Seq[Row]](32)
     val props = RddRowSourceActor.props(queue, columns, dataset, version, coordinatorActor)
-    val rddRowActor = FiloExecutor.system.actorOf(props, s"${dataset}_${version}_$partitionIndex")
+    val actorId = actorCounter.getAndIncrement()
+    val rddRowActor = FiloExecutor.system.actorOf(props, s"${dataset}_${version}_${partitionIndex}_${actorId}")
     implicit val timeout = Timeout(writeTimeout)
     val resp = rddRowActor ? Start
     val rowChunks = rows.grouped(1000)
