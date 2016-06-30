@@ -321,7 +321,7 @@ class SaveAsFiloTest extends SparkTestBase {
       head(0) should equal (10)
   }
 
-  it("should be able to parse and use single partition query") {
+  it("should be able to parse and use single partition query ") {
     import sql.implicits._
 
     val gdeltDF = sc.parallelize(GdeltTestData.records.toSeq).toDF()

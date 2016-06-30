@@ -194,7 +194,6 @@ trait CassandraColumnStoreScanner extends ColumnStoreScanner with StrictLogging 
     val keyspace = cassandraConfig.getString("keyspace")
   }
 
-
   def readChunks(dataset: DatasetRef,
                  columns: Set[ColumnId],
                  keyRange: BinaryKeyRange,
@@ -210,25 +209,23 @@ trait CassandraColumnStoreScanner extends ColumnStoreScanner with StrictLogging 
                          keyRanges: Seq[KeyRange[_, _]],
                          rowMapTable: ChunkRowMapTable,
                          version: Int)(implicit ec: ExecutionContext) :
-  Future[Iterator[ChunkRowMapRecord]] = {
-    val futureRows = keyRanges.map{range => {
-      logger.info(s"segmentRange :${range}")
+    Future[Iterator[ChunkRowMapRecord]] = {
+    val futureRows = keyRanges.map { range => {
       rowMapTable.getChunkMaps(projection.toBinaryKeyRange(range), version)
     }}
-    Future.sequence(futureRows).map(rows => rows.flatten.toIterator)
+    Future.sequence(futureRows).map { rows => rows.flatten.toIterator }
   }
 
   def multiPartScan(projection: RichProjection,
                     partitions: Seq[Any],
                     rowMapTable: ChunkRowMapTable,
                     version: Int)(implicit ec: ExecutionContext) :
-  Future[Iterator[ChunkRowMapRecord]] = {
-    val futureRows = partitions.map{partition => {
-      logger.info(s"partition :${partition}")
+    Future[Iterator[ChunkRowMapRecord]] = {
+    val futureRows = partitions.map { partition => {
       val binPart = projection.partitionType.toBytes(partition.asInstanceOf[projection.PK])
       rowMapTable.getChunkMaps(binPart, version)
     }}
-    Future.sequence(futureRows).map(rows => rows.flatten.toIterator)
+    Future.sequence(futureRows).map { rows => rows.flatten.toIterator }
   }
 
   def scanChunkRowMaps(projection: RichProjection,
@@ -246,12 +243,10 @@ trait CassandraColumnStoreScanner extends ColumnStoreScanner with StrictLogging 
         rowMapTable.getChunkMaps(projection.toBinaryKeyRange(k), version)
 
       case MultiPartitionScan(partitions) =>
-        logger.info(s"entering MultiPartitionScan:${partitions}")
-        multiPartScan(projection,partitions,rowMapTable,version)
+        multiPartScan(projection, partitions, rowMapTable, version)
 
       case MultiPartitionRangeScan(keyRanges) =>
-        logger.info(s"entering MultiPartitionRangeScan:${keyRanges}")
-        multiPartRangeScan(projection,keyRanges,rowMapTable,version)
+        multiPartRangeScan(projection, keyRanges, rowMapTable, version)
 
       case FilteredPartitionScan(CassandraTokenRangeSplit(tokens, _), filterFunc) =>
         rowMapTable.scanChunkMaps(version, tokens)
