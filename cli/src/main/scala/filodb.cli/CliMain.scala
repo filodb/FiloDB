@@ -35,7 +35,7 @@ class Arguments extends FieldArgs {
   var version: Option[Int] = None
   var select: Option[Seq[String]] = None
   var limit: Int = 1000
-  var timeoutMinutes: Int = 99
+  var timeoutSeconds: Int = 60
   var outfile: Option[String] = None
   var delimiter: String = ","
 
@@ -92,10 +92,13 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
   def main(args: Arguments) {
     try {
       val version = args.version.getOrElse(0)
+      val timeout = args.timeoutSeconds.seconds
       args.command match {
         case Some("init") =>
           println("Initializing FiloDB Admin keyspace and tables...")
-          awaitSuccess(metaStore.initialize())
+          parse(metaStore.initialize(), timeout) {
+            case Success =>   println("Succeeded.")
+          }
 
         case Some("list") =>
           args.dataset.map(ds => dumpDataset(ds, args.database)).getOrElse(dumpAllDatasets(args.database))
@@ -109,7 +112,8 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
                                   args.rowKeys,
                                   args.segmentKey.get,
                                   if (args.partitionKeys.isEmpty) { Seq(Dataset.DefaultPartitionColumn) }
-                                  else { args.partitionKeys })
+                                  else { args.partitionKeys },
+                                  timeout)
 
         case Some("importcsv") =>
           import org.apache.commons.lang3.StringEscapeUtils._
@@ -118,7 +122,7 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
                     version,
                     args.filename.get,
                     delimiter,
-                    args.timeoutMinutes.minutes)
+                    99.minutes)
 
         case Some("analyze") =>
           println(Analyzer.analyze(columnStore.asInstanceOf[CachedMergingColumnStore],
@@ -128,10 +132,10 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
                                    combineSplits,
                                    args.numSegments).prettify())
         case Some("delete") =>
-          client.deleteDataset(getRef(args))
+          client.deleteDataset(getRef(args), timeout)
 
         case Some("truncate") =>
-          client.truncateDataset(getRef(args), version)
+          client.truncateDataset(getRef(args), version, timeout)
 
         case x: Any =>
           args.select.map { selectCols =>
@@ -180,7 +184,8 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
                               columns: Seq[DataColumn],
                               rowKeys: Seq[String],
                               segmentKey: String,
-                              partitionKeys: Seq[String]) {
+                              partitionKeys: Seq[String],
+                              timeout: FiniteDuration) {
     println(s"Creating dataset $dataset...")
     val datasetObj = Dataset(dataset, rowKeys, segmentKey, partitionKeys)
 
@@ -191,7 +196,9 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
         return
     }
 
-    actorAsk(coordinatorActor, DatasetCommands.CreateDataset(datasetObj, columns, dataset.database)) {
+    actorAsk(coordinatorActor,
+             DatasetCommands.CreateDataset(datasetObj, columns, dataset.database),
+             timeout) {
       case DatasetCommands.DatasetCreated =>
         println(s"Dataset $dataset created!")
         exitCode = 0
