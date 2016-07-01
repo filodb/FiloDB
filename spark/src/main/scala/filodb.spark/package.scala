@@ -93,9 +93,11 @@ package object spark extends StrictLogging {
     queue.put(Nil)    // Final marker that there are no more rows
     Await.result(resp, writeTimeout) match {
       case AllDone =>
-      case SetupError(UnknownDataset) => throw DatasetNotFound(dataset.dataset)
+      case SetupError(UnknownDataset)    => throw DatasetNotFound(dataset.dataset)
       case SetupError(BadSchema(reason)) => throw BadSchemaError(reason)
-      case SetupError(other)          => throw new RuntimeException(other.toString)
+      case SetupError(other)             => throw new RuntimeException(other.toString)
+      case IngestionErr(errString, None) => throw new RuntimeException(errString)
+      case IngestionErr(errString, Some(e)) => throw new RuntimeException(errString, e)
     }
   }
 
