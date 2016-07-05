@@ -370,8 +370,8 @@ class SaveAsFiloTest extends SparkTestBase {
     df.agg(sum("numArticles")).collect().head(0) should equal (492)
 
     df.registerTempTable("gdelt")
-    sql.sql("select sum(numArticles) from gdelt where  actor2Code in ('JPN', 'KHM') " +
-      "and year=1979 and eventId >= 21 AND eventId <= 24").collect().
+    sql.sql("select sum(numArticles) from gdelt where year=1979 " +
+      "and  actor2Code in ('JPN', 'KHM')  and eventId >= 21 AND eventId <= 24").collect().
       head(0) should equal (21)
   }
 

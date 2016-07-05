@@ -78,12 +78,15 @@ object FiloRelation extends StrictLogging {
       case (pos, keyType, Seq(In(_, inValues))) =>
         (KeyFilter.parseValues(keyType)(inValues.toSet))
     }
-    logger.info(s"Push down predicate values: ${predicateValues.toString()}")
+    logger.info(s"Push down partition predicates: ${predicateValues.toString()}")
+    // 1. Verify if all partition keys are part of the filters or not.
+    // 2. If all present then get all possible coombinations of partition keys by calling combine method.
+    // 3. If number of partition key combinations are more than inqueryPartitionsLimit then
+    // run full table scan otherwise run multipartition scan.
     if (predicateValues.length == projection.partitionColumns.length) {
       if(predicateValues.length == 1) {
         predicateValues.flatten
-      }
-      else {
+      } else {
         val predList = combine(predicateValues)
         if (predList.size <= inqueryPartitionsLimit) predList else Nil
       }
@@ -92,6 +95,15 @@ object FiloRelation extends StrictLogging {
     }
   }
 
+  /**
+    * Method to get possible combinations of key values provided in partition key filters.
+    * For example filters provided in the query are actor2Code IN ('JPN', 'KHM') and year = 1979
+    * then this method returns all combinations like ('JPN',1979) , ('KHM',1979) which represents
+    * full partition key value.
+    * @param xs
+    * @tparam A
+    * @return
+    */
   def combine[A](xs: Traversable[Traversable[A]]): Seq[Seq[A]] =
     xs.filter(_.nonEmpty).foldLeft(Seq(Seq.empty[A])) {
       (x, y) => for {a <- x; b <- y} yield a :+ b
