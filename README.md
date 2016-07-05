@@ -50,6 +50,7 @@ See [architecture](doc/architecture.md) and [datasets and reading](doc/datasets_
   - [Running the CLI](#running-the-cli)
   - [CLI Example](#cli-example)
 - [Current Status](#current-status)
+  - [Upcoming version 0.4 change list:](#upcoming-version-04-change-list)
   - [Version 0.3 change list:](#version-03-change-list)
   - [Migrating Metadata from 0.2 Cassandra](#migrating-metadata-from-02-cassandra)
 - [Deploying](#deploying)
@@ -564,7 +565,17 @@ Query/export some columns:
 
 ## Current Status
 
-Version 0.2 is the stable, latest released version.  It has been tested on a cluster for a different variety of schemas, has a stable data model and ingestion, and features a huge number of improvements over the previous version.
+Version 0.3 is the stable, latest released version.  It has been tested on a cluster for a different variety of schemas, has a stable data model and ingestion, and features a huge number of improvements over the previous version.
+
+### Upcoming version 0.4 change list:
+
+* Defaults to Spark 1.6.1
+* New metrics and monitoring framework based on Kamon.io, with built in stats logging and statsd output, and tracing of write path
+* Replaced Phantom with direct usage of Java C* driver.  Bonus: use prepared statements, should result in better performance all around especially on ingest; plus should support C* 3.0+
+* WHERE clauses specifying multiple partition keys now get pushed down.  Should result in much better read performance in those cases.
+* Allow comma-separated list of hosts for `filodb.cassandra.hosts`
+* Fix missing data on read issue with wrapping token ranges in C*
+* Fix actor path uniqueness issue on ingestion
 
 ### Version 0.3 change list:
 
