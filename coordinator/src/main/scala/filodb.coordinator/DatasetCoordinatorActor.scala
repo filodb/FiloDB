@@ -3,6 +3,7 @@ package filodb.coordinator
 import akka.actor.{Actor, ActorRef, Cancellable, Props}
 import akka.event.LoggingReceive
 import com.typesafe.config.Config
+import kamon.Kamon
 import net.ceedubs.ficus.Ficus._
 import org.velvia.filo.RowReader
 import scala.collection.mutable.ArrayBuffer
@@ -52,6 +53,7 @@ object DatasetCoordinatorActor {
 
   /**
    * Returns current stats.  Note: numRows* will return -1 if the memtable is not set up yet
+   * TODO: Deprecate?  We now have Kamon, though that doesn't bring all stats back to driver
    */
   case object GetStats extends DSCoordinatorMessage
   case class Stats(flushesStarted: Int,
@@ -135,6 +137,16 @@ private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
   var flushesFailed = 0
   var rowsIngested = 0L
 
+  // ==== Kamon metrics ====
+  private val kamonTags = Map("dataset" -> datasetName, "version" -> version.toString)
+  val kamonRowsIngested = Kamon.metrics.gauge("dca-rows-ingested", kamonTags) { rowsIngested }
+  val kamonActiveRows   = Kamon.metrics.gauge("dca-active-rows", kamonTags) { activeRows.toLong }
+  val kamonFlushingRows = Kamon.metrics.gauge("dca-flushing-rows", kamonTags) { flushingRows.toLong }
+  val kamonFlushesDone  = Kamon.metrics.counter("dca-flushes-done", kamonTags)
+  val kamonFlushesFailed = Kamon.metrics.counter("dca-flushes-failed", kamonTags)
+  val kamonOOMCount     = Kamon.metrics.counter("dca-out-of-memory", kamonTags)
+  val kamonMemtableFull = Kamon.metrics.counter("dca-memtable-full", kamonTags)
+
   // Holds temporary rows before being flushed to MemTable
   val tempRows = new ArrayBuffer[RowReader]
   val ackTos = new ArrayBuffer[(ActorRef, Long)]
@@ -154,14 +166,14 @@ private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
     if (canIngest) {
 
       if (mTableFlushTask.isDefined) {
-        logger.debug("Cancelling scehduled memtable flush task when there is a write activity going on.")
+        logger.debug("Cancelling scheduled memtable flush task when there is a write activity going on.")
         mTableFlushTask.foreach(_.cancel)
       }
 
       mTableFlushTask = Some(context.system.scheduler.scheduleOnce
         (mTableNoActivityFlushInterval,self, StartFlush(None)))
 
-      logger.debug("Scehduled new memtable flush task")
+      logger.debug("Scheduled new memtable flush task")
       tempRows ++= rows
       ackTos += ackTo -> seqNo
       if (tempRows.length >= chunkSize) {
@@ -191,12 +203,14 @@ private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
     // TODO: gate on total rows in both active and flushing tables, not just active table?
     if (activeRows >= maxRowsPerTable) {
       logger.debug(s"MemTable ($nameVer) is at $activeRows rows, cannot accept writes...")
+      kamonMemtableFull.increment
       false
     } else {
       val freeMB = getRealFreeMb
       if (freeMB < minFreeMb) {
         logger.info(s"Only $freeMB MB memory left, cannot accept more writes...")
         logger.info(s"Active table ($nameVer) has $activeRows rows")
+        kamonOOMCount.increment
         sys.runtime.gc()
         false
       }
@@ -244,6 +258,7 @@ private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
     for { ref <- flushedCallbacks } ref ! IngestionCommands.Flushed
     flushedCallbacks = Nil
     flushesSucceeded += 1
+    kamonFlushesDone.increment
     // See if another flush needs to be initiated
     if (shouldFlush) self ! StartFlush()
   }
@@ -252,6 +267,7 @@ private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
     flushedCallbacks.foreach { ref => ref ! FlushFailed(t) }
     flushedCallbacks = Nil
     flushesFailed += 1
+    kamonFlushesFailed.increment
     // At this point, we can attempt a couple different things.
     //  1. Retry the segments that did not succeed writing (how do we know what they are?)
     //     This only makes sense for certain failures.
