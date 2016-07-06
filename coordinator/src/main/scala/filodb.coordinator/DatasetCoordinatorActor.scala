@@ -139,9 +139,11 @@ private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
 
   // ==== Kamon metrics ====
   private val kamonTags = Map("dataset" -> datasetName, "version" -> version.toString)
-  val kamonRowsIngested = Kamon.metrics.gauge("dca-rows-ingested", kamonTags) { rowsIngested }
+  val kamonRowsIngested = Kamon.metrics.counter("dca-rows-ingested", kamonTags)
   val kamonActiveRows   = Kamon.metrics.gauge("dca-active-rows", kamonTags) { activeRows.toLong }
-  val kamonFlushingRows = Kamon.metrics.gauge("dca-flushing-rows", kamonTags) { flushingRows.toLong }
+  val kamonFlushingRows = Kamon.metrics.gauge("dca-flushing-rows", kamonTags) {
+    Math.max(flushingRows, 0).toLong
+  }
   val kamonFlushesDone  = Kamon.metrics.counter("dca-flushes-done", kamonTags)
   val kamonFlushesFailed = Kamon.metrics.counter("dca-flushes-failed", kamonTags)
   val kamonOOMCount     = Kamon.metrics.counter("dca-out-of-memory", kamonTags)
@@ -192,6 +194,7 @@ private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
   private def writeToMemTable(): Unit = if (tempRows.nonEmpty) {
     logger.debug(s"Flushing ${tempRows.length} rows to MemTable...")
     rowsIngested += tempRows.length
+    kamonRowsIngested.increment(tempRows.length)
     activeTable.ingestRows(tempRows)
     ackTos.foreach { case (ackTo, seqNo) => ackTo ! IngestionCommands.Ack(seqNo) }
     tempRows.clear()

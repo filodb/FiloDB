@@ -113,6 +113,7 @@ object FiloExecutor extends FiloSetup with StrictLogging {
     _config.getOrElse {
       this.role = "executor"
       _config = Some(filoConfig)
+      kamonInit()
       coordinatorActor       // force coordinator to start
       // get address from config and join cluster.  note: it's ok to join cluster multiple times
       val addr = AddressFromURIString.parse(filoConfig.getString("spark-driver-addr"))
