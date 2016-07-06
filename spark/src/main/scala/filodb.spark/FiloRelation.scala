@@ -100,9 +100,6 @@ object FiloRelation extends StrictLogging {
     * For example filters provided in the query are actor2Code IN ('JPN', 'KHM') and year = 1979
     * then this method returns all combinations like ('JPN',1979) , ('KHM',1979) which represents
     * full partition key value.
-    * @param xs
-    * @tparam A
-    * @return
     */
   def combine[A](xs: Traversable[Traversable[A]]): Seq[Seq[A]] =
     xs.filter(_.nonEmpty).foldLeft(Seq(Seq.empty[A])) {
