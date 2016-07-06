@@ -41,6 +41,8 @@ trait CoordinatorSetup {
   // The global Filo configuration object.  Should be systemConfig.getConfig("filodb")
   def config: Config
 
+  // NOTE: should only be called once.  It's up to the classes inheriting this to protect themselves.
+  // This is automatically done by FiloSetup, for example.
   def kamonInit(): Unit = {
     kamon.Kamon.start()
     val traceLogger = system.actorOf(KamonTraceLogger.props(config))

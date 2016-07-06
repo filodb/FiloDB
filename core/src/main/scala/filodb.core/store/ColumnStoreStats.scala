@@ -28,7 +28,7 @@ object ColumnStoreStats {
   def apply(): ColumnStoreStats = new KamonColumnStoreStats
 }
 
-class KamonColumnStoreStats extends ColumnStoreStats {
+private[store] class KamonColumnStoreStats extends ColumnStoreStats {
   private val numChunkWriteCalls = Kamon.metrics.counter("chunk-write-calls-num")
   private val chunksPerCallHist  = Kamon.metrics.histogram("chunks-per-call")
   private val chunkBytesHist     = Kamon.metrics.histogram("chunk-bytes-per-call")
