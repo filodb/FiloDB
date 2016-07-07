@@ -56,7 +56,7 @@ lazy val stress = (project in file("stress"))
                     .settings(assemblySettings:_*)
                     .dependsOn(spark)
 
-val phantomVersion = "1.11.0"
+val cassDriverVersion = "3.0.2"
 val akkaVersion    = "2.3.15"
 val sparkVersion   = "1.4.1"
 
@@ -74,6 +74,7 @@ val excludeShapeless = ExclusionRule(organization = "com.chuusai")
 val excludeZK = ExclusionRule(organization = "org.apache.zookeeper")
 // This one is brought by Spark by default
 val excludeSlf4jLog4j = ExclusionRule(organization = "org.slf4j", name = "slf4j-log4j12")
+val excludeJersey = ExclusionRule(organization = "com.sun.jersey")
 
 lazy val coreDeps = Seq(
   "com.typesafe.scala-logging" %% "scala-logging-slf4j" % "2.1.2",
@@ -93,9 +94,8 @@ lazy val coreDeps = Seq(
 )
 
 lazy val cassDeps = Seq(
-  "com.websudos"         %% "phantom-dsl"       % phantomVersion,
-  "ch.qos.logback"        % "logback-classic"   % "1.0.7" % "test",  // to get good test logs
-  "com.websudos"         %% "phantom-testkit"   % phantomVersion % "test" excludeAll(excludeZK)
+  "com.datastax.cassandra" % "cassandra-driver-core" % cassDriverVersion,
+  "ch.qos.logback"        % "logback-classic"   % "1.0.7" % "test"
 )
 
 lazy val coordDeps = Seq(
@@ -121,7 +121,8 @@ lazy val sparkDeps = Seq(
 
 lazy val jmhDeps = Seq(
   "com.nativelibs4java"  %% "scalaxy-loops"     % "0.3.3" % "provided",
-  "org.apache.spark"     %% "spark-sql"         % sparkVersion excludeAll(excludeSlf4jLog4j, excludeZK)
+  "org.apache.spark"     %% "spark-sql"         % sparkVersion excludeAll(
+                                                    excludeSlf4jLog4j, excludeZK, excludeJersey)
 )
 
 lazy val stressDeps = Seq(
@@ -208,5 +209,8 @@ lazy val assemblySettings = Seq(
       val oldStrategy = (assemblyMergeStrategy in assembly).value
       oldStrategy(x)
   },
+  assemblyShadeRules in assembly := Seq(
+    ShadeRule.rename("com.datastax.driver.**" -> "filodb.datastax.driver.@1").inAll
+  ),
   test in assembly := {} //noisy for end-user since the jar is not available and user needs to build the project locally
 )

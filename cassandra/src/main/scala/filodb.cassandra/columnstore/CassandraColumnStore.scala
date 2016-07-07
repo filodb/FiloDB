@@ -67,7 +67,7 @@ extends CachedMergingColumnStore with CassandraColumnStoreScanner with StrictLog
    */
   def initializeProjection(projection: Projection): Future[Response] = {
     val chunkTable = getOrCreateChunkTable(projection.dataset)
-    clusterConnector.createKeyspace(chunkTable.keySpace.name)
+    clusterConnector.createKeyspace(chunkTable.keyspace)
     val rowMapTable = getOrCreateRowMapTable(projection.dataset)
     for { ctResp                    <- chunkTable.initialize()
           rmtResp                   <- rowMapTable.initialize() } yield { rmtResp }
@@ -197,7 +197,7 @@ trait CassandraColumnStoreScanner extends ColumnStoreScanner with StrictLogging 
 
   protected val clusterConnector = new FiloCassandraConnector {
     def config: Config = cassandraConfig
-    val keyspace = cassandraConfig.getString("keyspace")
+    def ec: ExecutionContext = readEc
   }
 
   def readChunks(dataset: DatasetRef,
@@ -209,6 +209,29 @@ trait CassandraColumnStoreScanner extends ColumnStoreScanner with StrictLogging 
                     chunkTable.readChunks(keyRange.partition, version, _,
                                           keyRange.start, keyRange.end,
                                           keyRange.endExclusive)))
+  }
+
+  def multiPartRangeScan(projection: RichProjection,
+                         keyRanges: Seq[KeyRange[_, _]],
+                         rowMapTable: ChunkRowMapTable,
+                         version: Int)(implicit ec: ExecutionContext) :
+    Future[Iterator[ChunkRowMapRecord]] = {
+    val futureRows = keyRanges.map { range => {
+      rowMapTable.getChunkMaps(projection.toBinaryKeyRange(range), version)
+    }}
+    Future.sequence(futureRows).map { rows => rows.flatten.toIterator }
+  }
+
+  def multiPartScan(projection: RichProjection,
+                    partitions: Seq[Any],
+                    rowMapTable: ChunkRowMapTable,
+                    version: Int)(implicit ec: ExecutionContext) :
+    Future[Iterator[ChunkRowMapRecord]] = {
+    val futureRows = partitions.map { partition => {
+      val binPart = projection.partitionType.toBytes(partition.asInstanceOf[projection.PK])
+      rowMapTable.getChunkMaps(binPart, version)
+    }}
+    Future.sequence(futureRows).map { rows => rows.flatten.toIterator }
   }
 
   def scanChunkRowMaps(projection: RichProjection,
@@ -224,6 +247,12 @@ trait CassandraColumnStoreScanner extends ColumnStoreScanner with StrictLogging 
 
       case SinglePartitionRangeScan(k) =>
         rowMapTable.getChunkMaps(projection.toBinaryKeyRange(k), version)
+
+      case MultiPartitionScan(partitions) =>
+        multiPartScan(projection, partitions, rowMapTable, version)
+
+      case MultiPartitionRangeScan(keyRanges) =>
+        multiPartRangeScan(projection, keyRanges, rowMapTable, version)
 
       case FilteredPartitionScan(CassandraTokenRangeSplit(tokens, _), filterFunc) =>
         rowMapTable.scanChunkMaps(version, tokens)
@@ -256,13 +285,13 @@ trait CassandraColumnStoreScanner extends ColumnStoreScanner with StrictLogging 
     chunkTableCache.computeIfAbsent(dataset,
                                     { (dataset: DatasetRef) =>
                                       logger.debug(s"Creating a new ChunkTable for dataset $dataset")
-                                      new ChunkTable(dataset, clusterConnector) })
+                                      new ChunkTable(dataset, clusterConnector)(readEc) })
   }
 
   def getOrCreateRowMapTable(dataset: DatasetRef): ChunkRowMapTable = {
     rowMapTableCache.computeIfAbsent(dataset,
                                      { (dataset: DatasetRef) =>
                                        logger.debug(s"Creating a new ChunkRowMapTable for dataset $dataset")
-                                       new ChunkRowMapTable(dataset, clusterConnector) })
+                                       new ChunkRowMapTable(dataset, clusterConnector)(readEc) })
   }
 }

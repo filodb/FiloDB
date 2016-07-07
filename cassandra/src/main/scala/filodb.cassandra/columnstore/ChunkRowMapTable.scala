@@ -2,9 +2,9 @@ package filodb.cassandra.columnstore
 
 import com.datastax.driver.core.Row
 import com.typesafe.config.Config
-import com.websudos.phantom.dsl._
+import com.typesafe.scalalogging.slf4j.StrictLogging
 import java.nio.ByteBuffer
-import scala.concurrent.Future
+import scala.concurrent.{ExecutionContext, Future}
 import scodec.bits._
 
 import filodb.cassandra.FiloCassandraConnector
@@ -24,45 +24,52 @@ case class ChunkRowMapRecord(binPartition: Types.BinaryPartition,
  * @param config a Typesafe Config with hosts, port, and keyspace parameters for Cassandra connection
  */
 sealed class ChunkRowMapTable(dataset: DatasetRef, connector: FiloCassandraConnector)
-extends CassandraTable[ChunkRowMapTable, ChunkRowMapRecord] {
+                             (implicit ec: ExecutionContext) extends StrictLogging {
   import filodb.cassandra.Util._
   import scala.collection.JavaConversions._
 
-  override val tableName = dataset.dataset + "_chunkmap"
-  implicit val keySpace = KeySpace(dataset.database.getOrElse(connector.defaultKeySpace))
-  implicit val session = connector.session
+  val keyspace = dataset.database.getOrElse(connector.defaultKeySpace)
+  val tableString = s"${keyspace}.${dataset.dataset + "_chunkmap"}"
+  val session = connector.session
 
-  //scalastyle:off
-  object partition extends BlobColumn(this) with PartitionKey[ByteBuffer]
-  object version extends IntColumn(this) with PartitionKey[Int]
-  object segmentId extends BlobColumn(this) with PrimaryKey[ByteBuffer]
-  object chunkIds extends BlobColumn(this)
-  object rowNums extends BlobColumn(this)
-  object nextChunkId extends IntColumn(this)
-  // Keeping below to remember how to define a set column, but move it elsewhere.
-  // object columnsWritten extends SetColumn[ChunkRowMapTable, ChunkRowMapRecord, String](this)
-  //scalastyle:on
+  val createCql = s"""CREATE TABLE IF NOT EXISTS $tableString (
+                     |    partition blob,
+                     |    version int,
+                     |    segmentid blob,
+                     |    chunkids blob,
+                     |    nextchunkid int,
+                     |    rownums blob,
+                     |    PRIMARY KEY ((partition, version), segmentid)
+                     |)""".stripMargin
 
-  override def fromRow(row: Row): ChunkRowMapRecord =
-    ChunkRowMapRecord(ByteVector(partition(row)),
-                      ByteVector(segmentId(row)),
-                      chunkIds(row), rowNums(row), nextChunkId(row))
 
-  def initialize(): Future[Response] = create.ifNotExists.future().toResponse()
+  def fromRow(row: Row): ChunkRowMapRecord =
+    ChunkRowMapRecord(ByteVector(row.getBytes("partition")),
+                      ByteVector(row.getBytes("segmentid")),
+                      row.getBytes("chunkids"), row.getBytes("rownums"), row.getInt("nextchunkid"))
 
-  def clearAll(): Future[Response] = truncate.future().toResponse()
+  def initialize(): Future[Response] = connector.execCql(createCql)
 
-  def drop(): Future[Response] =
-    Future(session.execute(s"DROP TABLE IF EXISTS ${keySpace.name}.$tableName")).toResponse()
+  def clearAll(): Future[Response] = connector.execCql(s"TRUNCATE $tableString")
+
+  def drop(): Future[Response] = connector.execCql(s"DROP TABLE IF EXISTS $tableString")
+
+  val selectCql = s"SELECT * FROM $tableString WHERE "
+  val partVersionFilter = "partition = ? AND version = ? "
+  lazy val allPartReadCql = session.prepare(selectCql + partVersionFilter)
+  lazy val rangeReadCql = session.prepare(selectCql + partVersionFilter +
+                                          "AND segmentid >= ? AND segmentid <= ?")
+  lazy val rangeReadExclCql = session.prepare(selectCql + partVersionFilter +
+                                              "AND segmentid >= ? AND segmentid < ?")
 
   /**
    * Retrieves all chunk maps from a single partition.
    */
   def getChunkMaps(binPartition: Types.BinaryPartition,
                    version: Int): Future[Iterator[ChunkRowMapRecord]] =
-    select.where(_.partition eqs binPartition.toByteBuffer)
-          .and(_.version eqs version)
-          .fetch().map(_.toIterator)
+    session.executeAsync(allPartReadCql.bind(toBuffer(binPartition),
+                                             version: java.lang.Integer))
+           .toIterator.map(_.map(fromRow))
 
   /**
    * Retrieves a whole series of chunk maps, in the range [startSegmentId, untilSegmentId)
@@ -70,25 +77,25 @@ extends CassandraTable[ChunkRowMapTable, ChunkRowMapRecord] {
    * @return ChunkMaps(...), if nothing found will return ChunkMaps(Nil).
    */
   def getChunkMaps(keyRange: BinaryKeyRange,
-                   version: Int): Future[Iterator[ChunkRowMapRecord]] =
-    select.where(_.partition eqs keyRange.partition.toByteBuffer)
-          .and(_.version eqs version)
-          .and(_.segmentId gte keyRange.start.toByteBuffer)
-          .and(if (keyRange.endExclusive) { _.segmentId lt keyRange.end.toByteBuffer }
-               else                       { _.segmentId lte keyRange.end.toByteBuffer })
-          .fetch().map(_.toIterator)
+                   version: Int): Future[Iterator[ChunkRowMapRecord]] = {
+    val cql = if (keyRange.endExclusive) rangeReadExclCql else rangeReadCql
+    session.executeAsync(cql.bind(toBuffer(keyRange.partition),
+                                  version: java.lang.Integer,
+                                  toBuffer(keyRange.start), toBuffer(keyRange.end)))
+           .toIterator.map(_.map(fromRow))
+  }
+
+  val tokenQ = "TOKEN(partition, version)"
 
   def scanChunkMaps(version: Int,
                     tokens: Seq[(String, String)],
                     segmentClause: String = ""): Future[Iterator[ChunkRowMapRecord]] = {
-    val tokenQ = "TOKEN(partition, version)"
     def cql(start: String, end: String): String =
-      s"SELECT * FROM ${keySpace.name}.$tableName WHERE " +
-      s"$tokenQ >= $start AND $tokenQ < $end $segmentClause"
+      selectCql + s"$tokenQ >= $start AND $tokenQ < $end $segmentClause"
     Future {
       tokens.iterator.flatMap { case (start, end) =>
         session.execute(cql(start, end)).iterator
-               .filter(this.version(_) == version)
+               .filter(_.getInt("version") == version)
                .map { row => fromRow(row) }
       }
     }
@@ -107,6 +114,10 @@ extends CassandraTable[ChunkRowMapTable, ChunkRowMapRecord] {
     scanChunkMaps(version, tokens, clause)
   }
 
+  lazy val writeChunkMapCql = session.prepare(
+    s"INSERT INTO $tableString (partition, version, segmentid, chunkids, rownums, nextchunkid) " +
+    "VALUES (?, ?, ?, ?, ?, ?)")
+
   /**
    * Writes a new chunk map to the chunkRowTable.
    * @return Success, or an exception as a Future.failure
@@ -117,11 +128,10 @@ extends CassandraTable[ChunkRowMapTable, ChunkRowMapRecord] {
                     chunkIds: ByteBuffer,
                     rowNums: ByteBuffer,
                     nextChunkId: Int): Future[Response] =
-    insert.value(_.partition, partition.toByteBuffer)
-          .value(_.version,   version)
-          .value(_.segmentId, segmentId.toByteBuffer)
-          .value(_.chunkIds,  chunkIds)
-          .value(_.rowNums,   rowNums)
-          .value(_.nextChunkId, nextChunkId)
-          .future().toResponse()
+    connector.execStmt(writeChunkMapCql.bind(toBuffer(partition),
+                                             version: java.lang.Integer,
+                                             toBuffer(segmentId),
+                                             chunkIds,
+                                             rowNums,
+                                             nextChunkId: java.lang.Integer))
 }

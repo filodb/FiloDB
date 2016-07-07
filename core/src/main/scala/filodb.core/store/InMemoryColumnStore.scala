@@ -165,6 +165,25 @@ trait InMemoryColumnStoreScanner extends ColumnStoreScanner {
       toIterator
   }
 
+  def multiPartScan(projection: RichProjection, version: Int, partitions: Seq[Any]):
+    Iterator[(BinaryPartition, RowMapTreeLike)] = {
+    partitions.toIterator.collect { case (partition)  => {
+      val binPart = projection.partitionType.toBytes(partition.asInstanceOf[projection.PK])
+       (binPart, rowMaps.getOrElse((projection.datasetRef, binPart, version), EmptyRowMapTree))
+    }}
+  }
+
+  def multiPartRangeScan(projection: RichProjection, version: Int, keyRanges: Seq[KeyRange[_, _]]):
+    Iterator[(BinaryPartition, RowMapTreeLike)] = {
+    keyRanges.toIterator.collect { case (range) => {
+      val binKR = projection.toBinaryKeyRange(range)
+      val rowMapTree = rowMaps.getOrElse((projection.datasetRef, binKR.partition, version),
+                                        EmptyRowMapTree)
+      val subMap = rowMapTree.subMap(binKR.start, true, binKR.end, !binKR.endExclusive)
+      (binKR.partition, subMap)
+    }}
+  }
+
   def singlePartRangeScan(projection: RichProjection, version: Int, k: KeyRange[_, _]):
     Iterator[(BinaryPartition, RowMapTreeLike)] = {
     val binKR = projection.toBinaryKeyRange(k)
@@ -192,6 +211,9 @@ trait InMemoryColumnStoreScanner extends ColumnStoreScanner {
     val partAndMaps = method match {
       case SinglePartitionScan(partition) => singlePartScan(projection, version, partition)
       case SinglePartitionRangeScan(k)    => singlePartRangeScan(projection, version, k)
+
+      case MultiPartitionScan(partitions) => multiPartScan(projection, version, partitions)
+      case MultiPartitionRangeScan(keyRanges) => multiPartRangeScan(projection, version, keyRanges)
 
       case FilteredPartitionScan(split, filterFunc) =>
         filteredPartScan(projection, version, split, filterFunc)

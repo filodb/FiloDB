@@ -3,9 +3,8 @@ package filodb.cassandra.columnstore
 import com.datastax.driver.core.Row
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.slf4j.StrictLogging
-import com.websudos.phantom.dsl._
 import java.nio.ByteBuffer
-import scala.concurrent.Future
+import scala.concurrent.{ExecutionContext, Future}
 import scodec.bits._
 
 import filodb.cassandra.FiloCassandraConnector
@@ -19,54 +18,56 @@ import filodb.core.store.ChunkedData
  * chunk actually stores many many rows grouped together into one binary chunk for efficiency.
  */
 sealed class ChunkTable(dataset: DatasetRef, connector: FiloCassandraConnector)
-extends CassandraTable[ChunkTable, (String, Types.SegmentId, Int, ByteBuffer)] {
+                       (implicit ec: ExecutionContext) extends StrictLogging {
   import filodb.cassandra.Util._
+  import collection.JavaConverters._
 
-  override val tableName = dataset.dataset + "_chunks"
-  implicit val keySpace = KeySpace(dataset.database.getOrElse(connector.defaultKeySpace))
-  implicit val session = connector.session
-
-  //scalastyle:off
-  object partition extends BlobColumn(this) with PartitionKey[ByteBuffer]
-  object version extends IntColumn(this) with PartitionKey[Int]
-  object columnName extends StringColumn(this) with PrimaryKey[String]
-  object segmentId extends BlobColumn(this) with PrimaryKey[ByteBuffer]
-  object chunkId extends IntColumn(this) with PrimaryKey[Int]
-  object data extends BlobColumn(this)
-  //scalastyle:on
-
-  override def fromRow(row: Row): (String, Types.SegmentId, Int, ByteBuffer) =
-    (columnName(row), ByteVector(segmentId(row)), chunkId(row), data(row))
+  val keyspace = dataset.database.getOrElse(connector.defaultKeySpace)
+  val tableString = s"${keyspace}.${dataset.dataset + "_chunks"}"
+  val session = connector.session
 
   // WITH COMPACT STORAGE saves 35% on storage costs according to this article:
   // http://blog.librato.com/posts/cassandra-compact-storage
-  def initialize(): Future[Response] = create.ifNotExists.option(Storage.CompactStorage)
-                                             .future().toResponse()
+  val createCql = s"""CREATE TABLE IF NOT EXISTS $tableString (
+                    |    partition blob,
+                    |    version int,
+                    |    columnname text,
+                    |    segmentid blob,
+                    |    chunkid int,
+                    |    data blob,
+                    |    PRIMARY KEY ((partition, version), columnname, segmentid, chunkid)
+                    |) WITH COMPACT STORAGE""".stripMargin
 
-  def clearAll(): Future[Response] = truncate.future().toResponse()
+  def initialize(): Future[Response] = connector.execCql(createCql)
 
-  def drop(): Future[Response] =
-    Future(session.execute(s"DROP TABLE IF EXISTS ${keySpace.name}.$tableName")).toResponse()
+  def clearAll(): Future[Response] = connector.execCql(s"TRUNCATE $tableString")
+
+  def drop(): Future[Response] = connector.execCql(s"DROP TABLE IF EXISTS $tableString")
+
+  lazy val writeChunksCql = session.prepare(
+    s"""INSERT INTO $tableString (partition, version, segmentid, chunkid, columnname, data
+      |) VALUES (?, ?, ?, ?, ?, ?)""".stripMargin
+  )
 
   def writeChunks(partition: Types.BinaryPartition,
                   version: Int,
                   segmentId: Types.SegmentId,
                   chunks: Iterator[(String, Types.ChunkID, ByteBuffer)]): Future[Response] = {
-    val insertQ = insert.value(_.partition,  partition.toByteBuffer)
-                        .value(_.version,    version)
-                        .value(_.segmentId,  segmentId.toByteBuffer)
-    // NOTE: This is actually a good use of Unlogged Batch, because all of the inserts
-    // are to the same partition key, so they will get collapsed down into one insert
-    // for efficiency.
-    // NOTE2: the batch add is immutable, so use foldLeft to get the updated batch
-    val batch = chunks.foldLeft(Batch.unlogged) {
-      case (batch, (columnName, id, bytes)) =>
-        batch.add(insertQ.value(_.chunkId, id)
-                         .value(_.columnName, columnName)
-                         .value(_.data, bytes))
+    val partBytes = toBuffer(partition)
+    val segKeyBytes = toBuffer(segmentId)
+    val statements = chunks.map { case (columnName, id, bytes) =>
+      writeChunksCql.bind(partBytes, version: java.lang.Integer, segKeyBytes,
+                          id: java.lang.Integer, columnName, bytes)
     }
-    batch.future().toResponse()
+    connector.execStmt(unloggedBatch(statements.toSeq))
   }
+
+  val readChunksCql = s"""SELECT segmentid, chunkid, data FROM $tableString WHERE
+                         | columnname = ? AND partition = ? AND version = ? AND
+                         | segmentid >= ? AND """.stripMargin
+
+  lazy val readChunksCqlExcl = session.prepare(readChunksCql + "segmentid < ?")
+  lazy val readChunksCqlIncl = session.prepare(readChunksCql + "segmentid <= ?")
 
   // Reads back all the chunks from the requested column for the segments falling within
   // the starting and ending segment IDs.  No paging is performed - so be sure to not
@@ -79,15 +80,12 @@ extends CassandraTable[ChunkTable, (String, Types.SegmentId, Int, ByteBuffer)] {
                  startSegmentId: Types.SegmentId,
                  untilSegmentId: Types.SegmentId,
                  endExclusive: Boolean = true): Future[ChunkedData] = {
-    val initialQuery =
-      select(_.segmentId, _.chunkId, _.data).where(_.columnName eqs column)
-        .and(_.partition eqs partition.toByteBuffer)
-        .and(_.version eqs version)
-        .and(_.segmentId gte startSegmentId.toByteBuffer)
-    val wholeQuery = if (endExclusive) { initialQuery.and(_.segmentId lt untilSegmentId.toByteBuffer) }
-                     else              { initialQuery.and(_.segmentId lte untilSegmentId.toByteBuffer) }
-    wholeQuery.fetch().map { chunks =>
-      val byteVectorChunks = chunks.map { case (seg, chunkId, data) => (ByteVector(seg), chunkId, data) }
+    val query = (if (endExclusive) readChunksCqlExcl else readChunksCqlIncl).bind(
+                  column, toBuffer(partition), version: java.lang.Integer,
+                  toBuffer(startSegmentId), toBuffer(untilSegmentId))
+    session.executeAsync(query).toScalaFuture.map { rs =>
+      val rows = rs.all().asScala
+      val byteVectorChunks = rows.map { row => (ByteVector(row.getBytes(0)), row.getInt(1), row.getBytes(2)) }
       ChunkedData(column, byteVectorChunks)
     }
   }

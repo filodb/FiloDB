@@ -1,25 +1,26 @@
 package filodb.cassandra.metastore
 
 import com.typesafe.config.ConfigFactory
-import com.websudos.phantom.dsl._
-import com.websudos.phantom.testkit._
-import org.scalatest.BeforeAndAfter
 import org.scalatest.concurrent.PatienceConfiguration.Timeout
+import org.scalatest.FlatSpec
 import scala.concurrent.Await
 import scala.concurrent.duration._
 import scala.language.postfixOps
 
+import filodb.cassandra.AsyncTest
 import filodb.core._
 import filodb.core.metadata.Dataset
 
-class DatasetTableSpec extends CassandraFlatSpec with BeforeAndAfter {
+class DatasetTableSpec extends FlatSpec with AsyncTest {
+  import scala.concurrent.ExecutionContext.Implicits.global
+
   val config = ConfigFactory.load("application_test.conf").getConfig("filodb.cassandra")
   val datasetTable = new DatasetTable(config)
-  implicit val keySpace = KeySpace(config.getString("keyspace"))
 
   // First create the datasets table
   override def beforeAll() {
     super.beforeAll()
+    datasetTable.createKeyspace(datasetTable.keyspace)
     // Note: This is a CREATE TABLE IF NOT EXISTS
     datasetTable.initialize().futureValue(timeout)
   }

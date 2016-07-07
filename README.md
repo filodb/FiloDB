@@ -220,6 +220,9 @@ Segmentation and chunk size distribution may be checked by the CLI `analyze` com
 To help with planning, here is an exact list of the predicate pushdowns (in Spark) that help with reducing I/O and query times:
 
 * Partition key column(s): =, IN on any partition key column
+  * = on every partition key results in a **single-partition** query
+  * = or IN on every partition key results in a **multi-partition** query, still faster than full table scan
+  * Otherwise, a filtered full table scan results - partitions not matching predicates will not be scanned
 * Segment key:  must be of the form `segmentKey >/>= value AND segmentKey </<= value` or `segmentKey = value`
   Segment Key predicates will pushdown to cassandra if your storage engine is in Cassandra. FiloDB segment keys map to cluster key of the underlying cassandra storage.
 
