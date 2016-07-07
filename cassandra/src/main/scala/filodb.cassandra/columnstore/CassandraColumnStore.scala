@@ -211,6 +211,29 @@ trait CassandraColumnStoreScanner extends ColumnStoreScanner with StrictLogging 
                                           keyRange.endExclusive)))
   }
 
+  def multiPartRangeScan(projection: RichProjection,
+                         keyRanges: Seq[KeyRange[_, _]],
+                         rowMapTable: ChunkRowMapTable,
+                         version: Int)(implicit ec: ExecutionContext) :
+    Future[Iterator[ChunkRowMapRecord]] = {
+    val futureRows = keyRanges.map { range => {
+      rowMapTable.getChunkMaps(projection.toBinaryKeyRange(range), version)
+    }}
+    Future.sequence(futureRows).map { rows => rows.flatten.toIterator }
+  }
+
+  def multiPartScan(projection: RichProjection,
+                    partitions: Seq[Any],
+                    rowMapTable: ChunkRowMapTable,
+                    version: Int)(implicit ec: ExecutionContext) :
+    Future[Iterator[ChunkRowMapRecord]] = {
+    val futureRows = partitions.map { partition => {
+      val binPart = projection.partitionType.toBytes(partition.asInstanceOf[projection.PK])
+      rowMapTable.getChunkMaps(binPart, version)
+    }}
+    Future.sequence(futureRows).map { rows => rows.flatten.toIterator }
+  }
+
   def scanChunkRowMaps(projection: RichProjection,
                        version: Int,
                        method: ScanMethod)
@@ -224,6 +247,12 @@ trait CassandraColumnStoreScanner extends ColumnStoreScanner with StrictLogging 
 
       case SinglePartitionRangeScan(k) =>
         rowMapTable.getChunkMaps(projection.toBinaryKeyRange(k), version)
+
+      case MultiPartitionScan(partitions) =>
+        multiPartScan(projection, partitions, rowMapTable, version)
+
+      case MultiPartitionRangeScan(keyRanges) =>
+        multiPartRangeScan(projection, keyRanges, rowMapTable, version)
 
       case FilteredPartitionScan(CassandraTokenRangeSplit(tokens, _), filterFunc) =>
         rowMapTable.scanChunkMaps(version, tokens)
