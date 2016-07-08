@@ -28,6 +28,7 @@ object GlobalConfig {
                  .withFallback(defaultsFromUrl)
                  .withFallback(clusterFromUrl)
                  .withFallback(ConfigFactory.defaultReference)
+                 .resolve()
   }
 }
 
