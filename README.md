@@ -122,10 +122,11 @@ Your input is appreciated!
     ```
 
 2. Choose either the Cassandra column store (default) or the in-memory column store.
-    - Start a Cassandra Cluster. If its not accessible at `localhost:9042` update it in `core/src/main/resources/application.conf`.
+    - Start a Cassandra Cluster.
+    - Copy `core/src/main/resources/filodb-defaults.conf` and modify the Cassandra settings for your cluster.  This step and passing in a custom config may be skipped for a localhost Cassandra cluster with no auth.
     - Or, use FiloDB's in-memory column store with Spark (does not work with CLI). Pass the `--conf spark.filodb.store=in-memory` to `spark-submit` / `spark-shell`.  This is a great option to test things out, and is really really fast!
 
-3. For Cassandra, run `filo-cli --command init` to initialize the default `filodb_admin` keyspace.   In addition, you should use CQLSH to create any additional keyspaces you desire to store FiloDB datasets in.
+3. For Cassandra, update the `keyspace-replication-options` config, then run `filo-cli -Dconfig.file=/path/to/my/filo.conf --command init` to initialize the default `filodb_admin` keyspace.   In addition, you should use CQLSH to create any additional keyspaces you desire to store FiloDB datasets in.
 4. Dataset creation can be done using `filo-cli` or using Spark Shell / Scala/Java API.
 5. Inserting data can be done using `filo-cli` (CSV only), using Spark SQL/JDBC (INSERT INTO), or the Spark Shell / Scala / Java API.
 6. Querying is done using Spark SQL/JDBC or Scala/Java API.
@@ -313,6 +314,20 @@ Some options must be configured before starting the Spark Shell or Spark applica
 3. It might be easier to pass in an entire configuration file to FiloDB.  Pass the java option `-Dfilodb.config.file=/path/to/my-filodb.conf`, for example using `--java-driver-options`.
 
 Note that if Cassandra is kept as the default column store, the keyspace can be changed on each transaction by specifying the `database` option in the data source API, or the database parameter in the Scala API.
+
+For metrics system configuration, see the metrics section below.
+
+#### Passing Cassandra Authentication Settings
+
+Typically, you have per-environment configuration files, and you do not want to check in username and password information.  Here are ways to pass in authentication settings:
+
+* Pass in the credentials on the command line.
+  - For Spark, `--conf spark.filodb.cassandra.username=XYZ` etc.
+  - For CLI, other apps, pass in JVM args: `-Dfilodb.cassandra.username=XYZ`
+* Put the credentials in a local file on the host, and refer to it from your config file.   In your config file, do `include "/usr/local/filodb-cass-auth.properties"`.  The properties file would look like:
+
+        filodb.cassandra.username=XYZ
+        filodb.cassandra.password=AABBCC
 
 ### Spark Data Source API Example (spark-shell)
 
