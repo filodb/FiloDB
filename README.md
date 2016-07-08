@@ -533,6 +533,8 @@ All `-D` config options must be passed before any other arguments.
 
 You may also configure CLI logging by copying `cli/src/main/resources/logback.xml` to your deploy folder, customizing it, and passing on the command line `-Dlogback.configurationFile=/path/to/filo-cli-logback.xml`.
 
+You can also change the logging directory by setting the FILO_LOG_DIR environment variable before calling the CLI.
+
 NOTE: The CLI currently only operates on the Cassandra column store.  The `--database` option may be used to specify which keyspace to operate on.  If the keyspace is not initialized, then FiloDB code will automatically create one for you, but you may want to create it yourself to control the options that you want.
 
 ### CLI Example

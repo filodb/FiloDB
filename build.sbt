@@ -191,7 +191,8 @@ done
 if [ ! -z "$FILO_CONFIG_FILE" ]; then
   config="-Dconfig.file=$FILO_CONFIG_FILE"
 fi
-exec java -Xmx4g -Xms4g $config $allprops -jar "$0" "$@"
+: ${FILO_LOG_DIR:="."}
+exec java -Xmx4g -Xms4g -DLOG_DIR=$FILO_LOG_DIR $config $allprops -jar "$0" "$@"
 """.split("\n")
 
 // Builds cli as a standalone executable to make it easier to launch commands
