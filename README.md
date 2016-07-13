@@ -106,7 +106,7 @@ Your input is appreciated!
 1. [Java 8](http://www.oracle.com/technetwork/java/javase/downloads/jdk8-downloads-2133151.html)
 2. [SBT](http://www.scala-sbt.org/) to build
 3. [Apache Cassandra](http://cassandra.apache.org/) (We prefer using [CCM](https://github.com/pcmanus/ccm) for local testing) (Optional if you are using the in-memory column store)
-4. [Apache Spark (1.5.x)](http://spark.apache.org/)
+4. [Apache Spark (1.6.x)](http://spark.apache.org/)
 
 ## Getting Started
 
@@ -272,7 +272,7 @@ FiloDB has a Spark data-source module - `filodb.spark`. So, you can use the Spar
    $ ./filo-cli --command init
    $ sbt spark/assembly
    ```
-3. Use the jar `FiloDB/spark/target/scala-2.10/filodb-spark-assembly-0.3.jar` with Spark 1.5.x.
+3. Use the jar `FiloDB/spark/target/scala-2.10/filodb-spark-assembly-0.3.jar` with Spark 1.6.x.
 
 The options to use with the data-source api are:
 
@@ -603,7 +603,7 @@ oldData.withColumn("database", new Column(Literal("filodb"))).write.format("org.
 
 ## Deploying
 
-The current version assumes Spark 1.5.x and Cassandra 2.1.x or 2.2.x.
+The current version assumes Spark 1.6.x and Cassandra 2.1.x or 2.2.x, though it seems to work on Spark 1.5.x as well.
 
 - sbt spark/assembly
 - sbt cli/assembly

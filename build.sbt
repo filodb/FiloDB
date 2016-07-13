@@ -58,7 +58,7 @@ lazy val stress = (project in file("stress"))
 
 val cassDriverVersion = "3.0.2"
 val akkaVersion    = "2.3.15"
-val sparkVersion   = "1.5.1"
+val sparkVersion   = "1.6.1"
 
 lazy val extraRepos = Seq(
   "Typesafe repository releases" at "http://repo.typesafe.com/typesafe/releases/",
