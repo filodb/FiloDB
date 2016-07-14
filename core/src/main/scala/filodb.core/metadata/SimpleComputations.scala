@@ -104,4 +104,27 @@ object SimpleComputations {
       }
     }
   }
+
+  /**
+   * :hash columnName numBuckets - for an int, long, or string column
+   * returns an int between 0 and (numBuckets - 1), or -1 if cannot hash
+   */
+  object HashComputation extends SingleColumnComputation {
+    def funcName: String = "hash"
+
+    def analyze(expr: String,
+                dataset: String,
+                schema: Seq[Column]): ComputedColumn Or InvalidComputedColumnSpec = {
+      for { info <- parse(expr, schema, Set(IntColumn, LongColumn, StringColumn))
+            numBuckets <- parseParam(SingleKeyTypes.IntKeyType, info.param) }
+      yield {
+        val func = (info.colType match {
+          case IntColumn  => (i: Int) => Math.abs(i % numBuckets)
+          case LongColumn => (l: Long) => Math.abs(l % numBuckets).toInt
+          case o: Column.ColumnType => (o: AnyRef) => Math.abs(o.hashCode % numBuckets)
+        }).asInstanceOf[info.keyType.T => Int]
+        computedColumnWithDefault(expr, dataset, info, IntColumn, IntKeyType)(-1)(func)
+      }
+    }
+  }
 }

@@ -184,6 +184,7 @@ You may specify a function, or computed column, for use with any key column.  Th
 | getOrElse | returns default value if column value is null.  NOTE: do not use the default value null for strings. | `:getOrElse columnA ---` |
 | round     | rounds down a numeric column.  Useful for bucketing by time or bucketing numeric IDs.  | `:round timestamp 10000` |
 | stringPrefix | takes the first N chars of a string; good for partitioning | `:stringPrefix token 4` |
+| hash      | hashes keys of any type to an int between 0 and N | `:hash customerID 400` | 
 | timeslice | bucketizes a Long (millisecond) or Timestamp column using duration strings - 500ms, 5s, 10m, 3h, etc. | `:timeslice arrivalTime 30s` |
 | monthOfYear | return 1 to 12 (IntColumn) for the month number of a Long (millisecond) or Timestamp column | `:monthOfYear pickup_datetime` |
 
@@ -590,6 +591,7 @@ Version 0.3 is the stable, latest released version.  It has been tested on a clu
 * New metrics and monitoring framework based on Kamon.io, with built in stats logging and statsd output, and tracing of write path
 * Replaced Phantom with direct usage of Java C* driver.  Bonus: use prepared statements, should result in better performance all around especially on ingest; plus should support C* 3.0+
 * WHERE clauses specifying multiple partition keys now get pushed down.  Should result in much better read performance in those cases.
+* New :hash function makes it easier to hash partition key components into smaller cardinality (but specify the full key in WHERE clauses)
 * New config `filodb.cassandra.keyspace-replication-options` allows any CQL replication option to be set when FiloDB keyspaces are created with CLI --command init
 * CLI log directory can be easily changed with FILO_LOG_DIR env var
 * CLI analyze command can now analyze segments from multiple partitions up to a configurable maximum # of segments

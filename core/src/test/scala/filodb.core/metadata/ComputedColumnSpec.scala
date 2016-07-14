@@ -144,4 +144,28 @@ class ComputedColumnSpec extends FunSpec with Matchers {
       partFunc(TupleRowReader(names(3))) should equal ("")
     }
   }
+
+  describe(":hash") {
+    it("should hash different string values to int between 0 and N") {
+      val proj = RichProjection(dataset.copy(partitionColumns = Seq(":hash first 10")), schema)
+      val partFunc = proj.partitionKeyFunc
+
+      partFunc(TupleRowReader(names(1))) should equal (4)
+      partFunc(TupleRowReader(names(2))) should equal (1)
+    }
+
+    it("should hash long values to int between 0 and N") {
+      val proj = RichProjection(dataset.copy(partitionColumns = Seq(":hash age 8")), schema)
+      val partFunc = proj.partitionKeyFunc
+
+      partFunc(TupleRowReader(names(1))) should equal (4)
+    }
+
+    it("should hash unknown string to -1") {
+      val proj = RichProjection(dataset.copy(partitionColumns = Seq(":hash last 10")), schema)
+      val partFunc = proj.partitionKeyFunc
+
+      partFunc(TupleRowReader(names(3))) should equal (-1)
+    }
+  }
 }
