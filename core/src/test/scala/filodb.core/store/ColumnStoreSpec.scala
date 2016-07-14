@@ -147,6 +147,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
       response should equal (Success)
     }
 
+    val readSegs1 = colStore.stats.readSegments
     whenReady(colStore.scanSegments(projection, schema, 0, partScan)) { segIter =>
       val segments = segIter.toSeq
       segments should have length (1)
@@ -156,6 +157,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
       readSeg.index.rowNumIterator.toSeq should equal (segment.index.rowNumIterator.toSeq)
       readSeg.rowIterator().map(_.getLong(2)).toSeq should equal (Seq(24L, 25L, 28L, 29L, 39L, 40L))
     }
+    (colStore.stats.readSegments - readSegs1) should equal (1)
   }
 
   it should "return empty iterator if cannot find segment (SinglePartitionRangeScan)" in {
@@ -327,11 +329,13 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
     val inFilter = KeyFilter.inFunc(StringKeyType)(Set("JPN", "KHM"))
     val filter1 = KeyFilter.makePartitionFilterFunc(projection3, Seq(0), Seq(inFilter))
     val method1 = FilteredPartitionScan(paramSet.head, filter1)
+    val readSegs1 = colStore.stats.readSegments
     whenReady(colStore.scanRows(projection3, schema, 0, method1)) { rowIter =>
       val rows = rowIter.toSeq
       rows.map(_.getInt(6)).sum should equal (30)
       rows.map(_.getString(4)).toSet should equal (Set("JPN", "KHM"))
     }
+    (colStore.stats.readSegments - readSegs1) should equal (2)
 
     // Test 2: = filter on both partition columns
     val eqFilters = Seq(KeyFilter.equalsFunc(StringKeyType)("JPN"),

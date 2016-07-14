@@ -172,8 +172,6 @@ trait CachedMergingColumnStore extends ColumnStore with ColumnStoreScanner with 
   // This ExecutionContext is the default used for writing, it should have bounds set
   implicit val ec: ExecutionContext
 
-  protected val stats = ColumnStoreStats()
-
   def clearProjectionData(projection: Projection): Future[Response] = {
     // Clear out any entries from segmentCache first
     logger.info(s"Clearing out segment cache for dataset ${projection.dataset}")

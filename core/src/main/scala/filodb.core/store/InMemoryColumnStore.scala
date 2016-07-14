@@ -91,6 +91,7 @@ extends CachedMergingColumnStore with InMemoryColumnStoreScanner with StrictLogg
       indices.map { case SegmentIndex(binPart, segId, part, segmentKey, binChunkRowMap) =>
         val segInfo = SegmentInfo(part, segmentKey)
         val segment = new RowReaderSegment(projection, segInfo, binChunkRowMap, columns)
+        stats.incrReadSegments(1)
         for { column <- columns } {
           val colName = column.name
           val chunkTree = chunkDb.getOrElse((projection.datasetRef, binPart, version), EmptyChunkTree)

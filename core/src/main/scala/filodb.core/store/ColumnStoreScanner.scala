@@ -28,6 +28,8 @@ trait ColumnStoreScanner extends StrictLogging {
   // Also, we do not make this implicit so that this trait can be mixed in elsewhere.
   def readEc: ExecutionContext
 
+  val stats = ColumnStoreStats()
+
   /**
    * Reads back all the chunks from multiple columns of a keyRange at once.  Note that no paging
    * is performed - so don't ask for too large of a range.  Recommendation is to read the ChunkRowMaps
@@ -84,6 +86,7 @@ trait ColumnStoreScanner extends StrictLogging {
           groupChunkMaps <- partChunkMaps.grouped(segmentGroupSize) }
     yield {
       val chunkMaps = groupChunkMaps.toSeq
+      stats.incrReadSegments(chunkMaps.length)
       val binKeyRange = BinaryKeyRange(part,
                                        chunkMaps.head.segmentId,
                                        chunkMaps.last.segmentId,
