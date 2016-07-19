@@ -593,6 +593,7 @@ Version 0.3 is the stable, latest released version.  It has been tested on a clu
 * WHERE clauses specifying multiple partition keys now get pushed down.  Should result in much better read performance in those cases.
 * New :hash function makes it easier to hash partition key components into smaller cardinality (but specify the full key in WHERE clauses)
 * New config `filodb.cassandra.keyspace-replication-options` allows any CQL replication option to be set when FiloDB keyspaces are created with CLI --command init
+* A few new configs for Cassandra CQL / chunk / sstable compression; can help improve remote read performance
 * CLI log directory can be easily changed with FILO_LOG_DIR env var
 * CLI analyze command can now analyze segments from multiple partitions up to a configurable maximum # of segments
 * Allow comma-separated list of hosts for `filodb.cassandra.hosts`
