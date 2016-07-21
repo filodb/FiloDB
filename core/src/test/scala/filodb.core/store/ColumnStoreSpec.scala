@@ -21,7 +21,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
   import NamesTestData._
 
   implicit val defaultPatience =
-    PatienceConfig(timeout = Span(10, Seconds), interval = Span(50, Millis))
+    PatienceConfig(timeout = Span(15, Seconds), interval = Span(250, Millis))
 
   val config = ConfigFactory.load("application_test.conf").getConfig("filodb")
   def colStore: ColumnStore with ColumnStoreScanner
@@ -43,8 +43,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
     colStore.reset()
   }
 
-  val segInfo = SegmentInfo("partition", 0).basedOn(projection)
-  val partScan = SinglePartitionScan("partition")
+  val partScan = SinglePartitionScan("/0")
 
   implicit val keyType = SingleKeyTypes.LongKeyType
 
@@ -159,7 +158,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
     colStore.appendSegment(projection, segment, 0).futureValue should equal (Success)
 
     // partition exists but only for segment key 0, this should find nothing
-    val rangeScanNoSegment = SinglePartitionRangeScan(KeyRange("partition", 1000, 1000, false))
+    val rangeScanNoSegment = SinglePartitionRangeScan(KeyRange("/0", 1000, 1000, false))
     whenReady(colStore.scanSegments(projection, schema, 0, rangeScanNoSegment)) { segIter =>
       segIter.toSeq should have length (0)
     }

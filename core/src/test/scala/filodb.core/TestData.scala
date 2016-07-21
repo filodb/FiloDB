@@ -28,9 +28,9 @@ object NamesTestData {
                   (Some("Terrance"),  Some("Knighton"), Some(29L), Some(0)))
 
   def getState(segment: Int = 0): SegmentState =
-    new SegmentState(projection, schema, Nil)(SegmentInfo("partition", segment).basedOn(projection))
+    new SegmentState(projection, schema, Nil)(SegmentInfo("/0", segment).basedOn(projection))
   def getWriterSegment(segment: Int = 0): ChunkSetSegment =
-    new ChunkSetSegment(projection, SegmentInfo("partition", segment).basedOn(projection))
+    new ChunkSetSegment(projection, SegmentInfo("/0", segment).basedOn(projection))
 
   val firstNames = names.map(_._1.get)
   val sortedFirstNames = Seq("Khalil", "Rodney", "Ndamukong", "Terrance", "Peyton", "Jerry")

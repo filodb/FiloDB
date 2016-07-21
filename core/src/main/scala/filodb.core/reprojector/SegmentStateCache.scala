@@ -58,6 +58,7 @@ class SegmentStateCache(config: Config, columnStore: ColumnStoreScanner)
                                             segmentInfo: SegmentInfo[_, _]) =>
       cacheMisses.increment
       val range = KeyRange(segInfo.partition, segInfo.segment, segInfo.segment, endExclusive = false)
+      logger.debug(s"Retrieving segment state from column store: $range")
       val indexRead = columnStore.scanIndices(projection, version, SinglePartitionRangeScan(range))
       val indexIt = Await.result(indexRead, waitTimeout)
       val infosAndSkips = indexIt.toSeq.headOption.map(_.infosAndSkips).getOrElse(Nil)
