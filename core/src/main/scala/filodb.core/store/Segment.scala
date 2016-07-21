@@ -117,22 +117,22 @@ class RowReaderSegment(val projection: RichProjection,
 
   val colIdToNumber = columns.zipWithIndex.map { case (col, idx) => (col.name, idx) }.toMap
 
-  def addChunk(id: ChunkID, column: ColumnId, bytes: Chunk): Unit =
-    if (id < chunks.size) {
-      //scalastyle:off
-      if (bytes == null) logger.warn(s"null chunk detected! id=$id column=$column in $segInfo")
-      //scalastyle:on
-      val chunkArray = chunks.getOrElseUpdate(id, new Array[ByteBuffer](columns.length))
-      chunkArray(colIdToNumber(column)) = bytes
-    } else {
-      // Probably the result of corruption, such as OOM while writing segments
-      logger.debug(s"Ignoring chunk id=$id column=$column in $segInfo, chunks.size=${chunks.size}")
-    }
+  def addChunk(id: ChunkID, column: ColumnId, bytes: Chunk): Unit = {
+    //scalastyle:off
+    if (bytes == null) logger.warn(s"null chunk detected! id=$id column=$column in $segInfo")
+    //scalastyle:on
+    val chunkArray = chunks.getOrElseUpdate(id, new Array[ByteBuffer](columns.length))
+    chunkArray(colIdToNumber(column)) = bytes
+  }
 
   def getColumns: collection.Set[ColumnId] = columns.map(_.name).toSet
 
+  // TODO: Detect when no chunks corresponding to chunkInfos.  Either missing column or
+  // inconsistency in data.  When inconsistency, should try reading again.
   private def getReaders(readerFactory: RowReaderFactory): Array[(FiloRowReader, Int, Array[Int])] =
-    chunkInfos.map { case (ChunkSetInfo(id, numRows, _, _), skipArray) =>
+    chunkInfos
+      .filter { case (info, _) => chunks contains info.id }
+      .map { case (ChunkSetInfo(id, numRows, _, _), skipArray) =>
       val reader = readerFactory(chunks(id), clazzes, numRows)
       // Cheap check for empty chunks
       if (clazzes.nonEmpty && reader.parsers(0).length == 0) {

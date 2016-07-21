@@ -35,7 +35,7 @@ class FiloMemTableSpec extends FunSpec with Matchers with BeforeAndAfter {
       mTable.numRows should be (names.length)
 
       val outRows = mTable.readRows(segInfo.basedOn(mTable.projection))
-      outRows.toSeq.map(_.getString(0)) should equal (firstNames)
+      outRows.toSeq.map(_.getString(0)) should equal (sortedFirstNames)
     }
 
     it("should replace rows and read them back in order") {
@@ -78,7 +78,7 @@ class FiloMemTableSpec extends FunSpec with Matchers with BeforeAndAfter {
       memTable.numRows should equal (50 * names.length)
 
       val outRows = memTable.readRows(segInfo.copy(partition = "5").basedOn(memTable.projection))
-      outRows.toSeq.map(_.getString(0)) should equal (firstNames)
+      outRows.toSeq.map(_.getString(0)) should equal (sortedFirstNames)
     }
 
     it("should throw error if null partition col value") {

@@ -2,7 +2,7 @@ package filodb.core
 
 import filodb.core._
 import filodb.core.metadata.{Column, DataColumn, Dataset, RichProjection}
-import filodb.core.store.{SegmentInfo, RowWriterSegment}
+import filodb.core.store.{SegmentInfo, ChunkSetSegment, SegmentState}
 import java.sql.Timestamp
 import org.joda.time.DateTime
 import org.velvia.filo.{RowReader, TupleRowReader, ArrayStringRowReader}
@@ -14,7 +14,7 @@ object NamesTestData {
                    DataColumn(2, "age",   "dataset", 0, Column.ColumnType.LongColumn),
                    DataColumn(3, "seg",   "dataset", 0, Column.ColumnType.IntColumn))
 
-  def mapper(rows: Seq[Product]): Iterator[RowReader] = rows.map(TupleRowReader).toIterator
+  def mapper(rows: Seq[Product]): Seq[RowReader] = rows.map(TupleRowReader)
 
   val dataset = Dataset("dataset", "age", "seg")
   val datasetRef = DatasetRef(dataset.name)
@@ -27,10 +27,13 @@ object NamesTestData {
                   (Some("Peyton"),    Some("Manning"),  Some(39L), Some(0)),
                   (Some("Terrance"),  Some("Knighton"), Some(29L), Some(0)))
 
-  def getRowWriter(segment: Int = 0): RowWriterSegment =
-    new RowWriterSegment(projection, schema)(SegmentInfo("partition", segment).basedOn(projection))
+  def getState(segment: Int = 0): SegmentState =
+    new SegmentState(projection, schema, Nil)(SegmentInfo("partition", segment).basedOn(projection))
+  def getWriterSegment(segment: Int = 0): ChunkSetSegment =
+    new ChunkSetSegment(projection, SegmentInfo("partition", segment).basedOn(projection))
 
-  val firstNames = Seq("Khalil", "Rodney", "Ndamukong", "Terrance", "Peyton", "Jerry")
+  val firstNames = names.map(_._1.get)
+  val sortedFirstNames = Seq("Khalil", "Rodney", "Ndamukong", "Terrance", "Peyton", "Jerry")
 
   // OK, what we want is to test multiple partitions, segments, multiple chunks per segment too.
   // With default segmentSize of 10000, change chunkSize to say 100.
@@ -105,25 +108,27 @@ object GdeltTestData {
   val projection3 = RichProjection(dataset3, schema)
 
   // Returns projection2 grouped by segment with a fake partition key
-  def getSegments(partKey: projection2.PK): Seq[RowWriterSegment] = {
+  def getSegments(partKey: projection2.PK): Seq[(ChunkSetSegment, SegmentState)] = {
     val inputGroupedBySeg = readers.toSeq.groupBy(projection2.segmentKeyFunc)
                                    .toSeq.sortBy(_._1.asInstanceOf[Int])
     inputGroupedBySeg.map { case (segmentKey, lines) =>
-      val seg = new RowWriterSegment(projection2, schema)(SegmentInfo(partKey, segmentKey).
-                                                          basedOn(projection2))
-      seg.addRowsAsChunk(lines.toIterator)
-      seg
+      val segInfo = SegmentInfo(partKey, segmentKey).basedOn(projection2)
+      val state = new SegmentState(projection2, schema, Nil)(segInfo)
+      val seg = new ChunkSetSegment(projection2, segInfo)
+      seg.addChunkSet(state, lines)
+      (seg, state)
     }
   }
 
   // Returns projection1 or 2 segments grouped by partition and segment key
-  def getSegmentsByPartKey(projection: RichProjection): Seq[RowWriterSegment] = {
+  def getSegmentsByPartKey(projection: RichProjection): Seq[ChunkSetSegment] = {
     val inputGroupedBySeg = readers.toSeq.groupBy(r => (projection.partitionKeyFunc(r),
                                                         projection.segmentKeyFunc(r)))
     inputGroupedBySeg.map { case ((partKey, segKey), lines) =>
-      val seg = new RowWriterSegment(projection, schema)(SegmentInfo(partKey, segKey).
-                                                          basedOn(projection))
-      seg.addRowsAsChunk(lines.toIterator)
+      val segInfo = SegmentInfo(partKey, segKey).basedOn(projection)
+      val state = new SegmentState(projection, schema, Nil)(segInfo)
+      val seg = new ChunkSetSegment(projection, segInfo)
+      seg.addChunkSet(state, lines)
       seg
     }.toSeq
   }

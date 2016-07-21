@@ -55,23 +55,26 @@ extends ColumnStore with InMemoryColumnStoreScanner with StrictLogging {
     val segmentId = segment.segmentId
     val dbKey = (projection.datasetRef, segment.binaryPartition, version)
 
-    // Add chunks
-    val chunkTree = chunkDb.synchronized {
-      chunkDb.getOrElseUpdate(dbKey, new ChunkTree(Ordering[ChunkKey]))
-    }
-    for { chunkSet       <- segment.chunkSets
-          (colId, bytes) <- chunkSet.chunks } {
-      chunkTree.put((colId, segmentId, chunkSet.info.id), bytes)
-    }
+    if (segment.chunkSets.isEmpty) { NotApplied }
+    else {
+      // Add chunks
+      val chunkTree = chunkDb.synchronized {
+        chunkDb.getOrElseUpdate(dbKey, new ChunkTree(Ordering[ChunkKey]))
+      }
+      for { chunkSet       <- segment.chunkSets
+            (colId, bytes) <- chunkSet.chunks } {
+        chunkTree.put((colId, segmentId, chunkSet.info.id), bytes)
+      }
 
-    // Add index objects - not serialized for speed
-    val indexTree = indices.synchronized {
-      indices.getOrElseUpdate(dbKey, new IndexTree(Ordering[SegmentId]))
-    }
-    val segmentIndex = Option(indexTree.get(segmentId)).getOrElse(Nil)
-    indexTree.put(segmentId, segmentIndex ++ segment.infosAndSkips)
+      // Add index objects - not serialized for speed
+      val indexTree = indices.synchronized {
+        indices.getOrElseUpdate(dbKey, new IndexTree(Ordering[SegmentId]))
+      }
+      val segmentIndex = Option(indexTree.get(segmentId)).getOrElse(Nil)
+      indexTree.put(segmentId, segmentIndex ++ segment.infosAndSkips)
 
-    Success
+      Success
+    }
   }
 
   // Add an efficient scanSegments implementation here, which can avoid much of the async
