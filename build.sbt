@@ -90,6 +90,7 @@ lazy val coreDeps = commonDeps ++ Seq(
   "io.spray"             %% "spray-caching"     % "1.3.2",
   "net.ceedubs"          %% "ficus"             % "1.0.1",
   "org.scodec"           %% "scodec-bits"       % "1.0.10",
+  "io.fastjson"           % "boon"              % "0.33",
   "org.scalactic"        %% "scalactic"         % "2.2.6",
   "com.markatta"         %% "futiles"           % "1.1.3",
   "com.nativelibs4java"  %% "scalaxy-loops"     % "0.3.3" % "provided"

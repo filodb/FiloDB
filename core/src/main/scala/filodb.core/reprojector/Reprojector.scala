@@ -9,13 +9,13 @@ import scala.concurrent.duration.FiniteDuration
 import scala.concurrent.{ExecutionContext, Future}
 
 import filodb.core._
-import filodb.core.store.{ColumnStore, RowWriterSegment, Segment, SegmentInfo}
+import filodb.core.store.{ColumnStore, ChunkSetSegment, Segment, SegmentInfo}
 import filodb.core.metadata.{Dataset, Column, RichProjection}
 
 /**
  * The Reprojector flushes rows out of the MemTable and writes out Segments to the ColumnStore.
  * All of the work should be done asynchronously.
- * The reprojector should be stateless.  It takes MemTables and creates Futures for reprojection tasks.
+ * It takes MemTables and creates Futures for reprojection tasks.
  */
 trait Reprojector {
   import RowReader._
@@ -37,7 +37,7 @@ trait Reprojector {
    * A simple function that reads rows out of a memTable and converts them to segments.
    * Used by reproject(), separated out for ease of testing.
    */
-  def toSegments(memTable: MemTable, segments: Seq[(Any, Any)]): Seq[Segment]
+  def toSegments(memTable: MemTable, segments: Seq[(Any, Any)], version: Int): Seq[ChunkSetSegment]
 
   protected def printSegInfos(infos: Seq[(Any, Any)]): String = {
     val ellipsis = if (infos.length > 3) Seq("...") else Nil
@@ -59,30 +59,36 @@ trait Reprojector {
  *   }
  * }}}
  */
-class DefaultReprojector(config: Config, columnStore: ColumnStore)
+class DefaultReprojector(config: Config,
+                         columnStore: ColumnStore,
+                         stateCache: SegmentStateCache)
                         (implicit ec: ExecutionContext) extends Reprojector with StrictLogging {
   import Types._
   import RowReader._
+  import Perftools._
 
   val retries = config.getInt("reprojector.retries")
   val retryBaseTime = config.as[FiniteDuration]("reprojector.retry-base-timeunit")
   val segmentBatchSize = config.getInt("reprojector.segment-batch-size")
 
-  def toSegments(memTable: MemTable, segments: Seq[(Any, Any)]): Seq[Segment] = {
+  def toSegments(memTable: MemTable, segments: Seq[(Any, Any)], version: Int): Seq[ChunkSetSegment] = {
     val dataset = memTable.projection.dataset
     segments.map { case (partition, segmentKey) =>
       Tracer.withNewContext("serialize-segment", true) {
         // For each segment grouping of rows... set up a Segment
         val segInfo = SegmentInfo(partition, segmentKey).basedOn(memTable.projection)
-        val segment = new RowWriterSegment(memTable.projection, memTable.projection.columns)(segInfo)
-        val segmentRowsIt = memTable.readRows(segInfo)
+        val state = subtrace("get-segment-state", "ingestion") {
+          stateCache.getSegmentState(memTable.projection, memTable.projection.columns, version)(segInfo)
+        }
+        val segment = new ChunkSetSegment(memTable.projection, segInfo)
+        val segmentRowsIt = memTable.safeReadRows(segInfo)
         logger.debug(s"Created new segment ${segment.segInfo} for encoding...")
 
         // Group rows into chunk sized bytes and add to segment
-        // NOTE: because RowReaders could be mutable, we need to keep this a pure Iterator.  Turns out
-        // this is also more efficient than Iterator.grouped
-        while (segmentRowsIt.nonEmpty) {
-          segment.addRichRowsAsChunk(segmentRowsIt.take(dataset.options.chunkSize))
+        subtrace("add-chunk-set", "ingestion") {
+          while (segmentRowsIt.nonEmpty) {
+            segment.addChunkSet(state, segmentRowsIt.take(dataset.options.chunkSize).toSeq)
+          }
         }
         segment
       }
@@ -103,7 +109,7 @@ class DefaultReprojector(config: Config, columnStore: ColumnStore)
     foldLeftSequentially(batches)(Seq.empty[SegmentInfo[_, _]]) { case (acc, segmentBatch) =>
       val segInfos = printSegInfos(segmentBatch)
       logger.info(s"Reprojecting dataset ($datasetName, $version): $segInfos")
-      val futures = toSegments(memTable, segmentBatch).map { segment =>
+      val futures = toSegments(memTable, segmentBatch, version).map { segment =>
         retryWithBackOff(retries, retryBaseTime) {
           columnStore.appendSegment(projection, segment, version)
         }.map { resp => segment.segInfo.asInstanceOf[SegmentInfo[_, _]] }
