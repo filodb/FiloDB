@@ -61,16 +61,17 @@ sealed class ChunkTable(dataset: DatasetRef, connector: FiloCassandraConnector)
   def writeChunks(partition: Types.BinaryPartition,
                   version: Int,
                   segmentId: Types.SegmentId,
-                  chunks: Iterator[(String, Types.ChunkID, ByteBuffer)],
+                  chunkId: Types.ChunkID,
+                  chunks: Map[String, ByteBuffer],
                   stats: ColumnStoreStats): Future[Response] = {
     val partBytes = toBuffer(partition)
     val segKeyBytes = toBuffer(segmentId)
     var chunkBytes = 0L
-    val statements = chunks.map { case (columnName, id, bytes) =>
+    val statements = chunks.map { case (columnName, bytes) =>
       val finalBytes = compress(bytes)
       chunkBytes += finalBytes.capacity.toLong
       writeChunksCql.bind(partBytes, version: java.lang.Integer, segKeyBytes,
-                          id: java.lang.Integer, columnName, finalBytes)
+                          chunkId: java.lang.Integer, columnName, finalBytes)
     }.toSeq
     stats.addChunkWriteStats(statements.length, chunkBytes)
     connector.execStmt(unloggedBatch(statements))

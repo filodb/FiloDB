@@ -13,7 +13,7 @@ trait ColumnStoreStats {
   def addChunkWriteStats(numChunks: Int, totalChunkBytes: Long): Unit
 
   /**
-   * Call this for each invocation of index read method
+   * Call this for each invocation of index write method
    */
   def addIndexWriteStats(totalIndexBytes: Long): Unit
 

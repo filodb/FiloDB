@@ -16,6 +16,8 @@ case class SegmentIndex[P, S](binPartition: Types.BinaryPartition,
                               segment: S,
                               infosAndSkips: ChunkSetInfo.ChunkInfosAndSkips)
 
+case class ChunkedData(column: Types.ColumnId, chunks: Seq[(Types.SegmentId, Types.ChunkID, ByteBuffer)])
+
 /**
  * Encapsulates the reading and scanning logic of the ColumnStore.
  * We are careful to separate out ExecutionContext for reading only.

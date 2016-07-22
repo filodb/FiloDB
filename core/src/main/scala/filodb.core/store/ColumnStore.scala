@@ -1,7 +1,6 @@
 package filodb.core.store
 
 import com.typesafe.scalalogging.slf4j.StrictLogging
-import kamon.trace.{TraceContext, Tracer}
 import java.nio.ByteBuffer
 import org.velvia.filo.RowReader
 import org.velvia.filo.RowReader.TypedFieldExtractor
@@ -148,5 +147,3 @@ trait ColumnStore {
    */
   def shutdown(): Unit
 }
-
-case class ChunkedData(column: Types.ColumnId, chunks: Seq[(Types.SegmentId, Types.ChunkID, ByteBuffer)])
