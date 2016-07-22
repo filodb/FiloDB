@@ -246,7 +246,7 @@ object FiloRelation extends StrictLogging {
 
     parse(FiloExecutor.columnStore.scanRows(
             readOnlyProjection, readOnlyProjection.columns, version, method,
-            (bytes, clazzes) => new SparkRowReader(bytes, clazzes)),
+            (bytes, clazzes, len) => new SparkRowReader(bytes, clazzes, len)),
           10 minutes) { rowIt => rowIt.asInstanceOf[Iterator[Row]] }
   }
 }

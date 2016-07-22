@@ -10,7 +10,7 @@ import scala.concurrent.duration._
 
 import filodb.core._
 import filodb.core.metadata.{Column, Dataset, RichProjection}
-import filodb.core.store.{InMemoryColumnStore, SegmentInfo}
+import filodb.core.store.{InMemoryColumnStore, SegmentInfo, ChunkSetSegment}
 import filodb.core.reprojector.{DefaultReprojector, MemTable, Reprojector}
 
 import org.scalatest.concurrent.ScalaFutures
@@ -81,10 +81,9 @@ with ScalaFutures {
     def reproject(memTable: MemTable, version: Int): Future[Seq[SegmentInfo[_, _]]] = {
       reprojections = reprojections :+ (memTable.projection.datasetRef -> version)
       Future.successful(Seq(dummySegInfo))
-
     }
 
-    def toSegments(memTable: MemTable, segments: Seq[(Any, Any)]): Seq[Segment] = ???
+    def toSegments(memTable: MemTable, segments: Seq[(Any, Any)], version: Int): Seq[ChunkSetSegment] = ???
   }
 
   it("should respond to GetStats with no flushes and no rows") {

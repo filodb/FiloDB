@@ -55,7 +55,7 @@ with Matchers with ScalaFutures {
 
   before {
     metaStore.clearAllData().futureValue
-    columnStore.clearSegmentCache()
+    FiloExecutor.stateCache.clear()
     try {
       columnStore.clearProjectionData(largeDataset.projections.head).futureValue
     } catch {

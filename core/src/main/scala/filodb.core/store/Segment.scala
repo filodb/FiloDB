@@ -196,4 +196,14 @@ object RowReaderSegment {
 
   val DefaultReaderFactory: RowReaderFactory =
     (bytes, clazzes, len) => new FastFiloRowReader(bytes, clazzes, len)
+
+  def apply(cs: ChunkSetSegment, schema: Seq[Column]): RowReaderSegment = {
+    val infosSkips = cs.chunkSets.map { cs => (cs.info, cs.skips) }
+    val seg = new RowReaderSegment(cs.projection, cs.segInfo, ChunkSetInfo.collectSkips(infosSkips), schema)
+    for { chunkSet <- cs.chunkSets
+          (colId, bytes) <- chunkSet.chunks } {
+      seg.addChunk(chunkSet.info.id, colId, bytes)
+    }
+    seg
+  }
 }
