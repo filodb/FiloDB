@@ -55,7 +55,6 @@ trait Reprojector {
  *   reprojector {
  *     retries = 3
  *     retry-base-timeunit = 5 s
- *     segment-batch-size = 64
  *   }
  * }}}
  */
@@ -69,7 +68,6 @@ class DefaultReprojector(config: Config,
 
   val retries = config.getInt("reprojector.retries")
   val retryBaseTime = config.as[FiniteDuration]("reprojector.retry-base-timeunit")
-  val segmentBatchSize = config.getInt("reprojector.segment-batch-size")
 
   def toSegments(memTable: MemTable, segments: Seq[(Any, Any)], version: Int): Seq[ChunkSetSegment] = {
     val dataset = memTable.projection.dataset
@@ -102,21 +100,24 @@ class DefaultReprojector(config: Config,
     val projection = memTable.projection
     val datasetName = projection.datasetName
 
-    // First, group the segments into batches for throttling
-    val batches = memTable.getSegments.grouped(segmentBatchSize).toSeq
+    val segments = memTable.getSegments.toSeq
+    val segInfos = printSegInfos(segments)
+    logger.info(s"Reprojecting dataset ($datasetName, $version): $segInfos")
 
-    // Now, flush each batch sequentially.  Nice thing is this returns after at most one batch.
-    foldLeftSequentially(batches)(Seq.empty[SegmentInfo[_, _]]) { case (acc, segmentBatch) =>
-      val segInfos = printSegInfos(segmentBatch)
-      logger.info(s"Reprojecting dataset ($datasetName, $version): $segInfos")
-      val futures = toSegments(memTable, segmentBatch, version).map { segment =>
+    // Serialize one segment at a time.  This takes longer than the actual column flush, which is async,
+    // so basically this future thread will intersperse writes in between serializations.
+    // At same time, do everything in a separate thread so caller won't be blocked
+    Future {
+      segments.map { partitionSegment =>
+        val segment = toSegments(memTable, Seq(partitionSegment), version).head
         retryWithBackOff(retries, retryBaseTime) {
           columnStore.appendSegment(projection, segment, version)
         }.map { resp => segment.segInfo.asInstanceOf[SegmentInfo[_, _]] }
       }
+    }.flatMap { futures =>
       Future.sequence(futures).map { successSegs =>
         logger.info(s"  >> Succeeded ($datasetName, $version): $segInfos")
-        acc ++ successSegs
+        successSegs
       }
     }
   }
