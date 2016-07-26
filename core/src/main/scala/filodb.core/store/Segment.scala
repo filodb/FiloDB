@@ -130,6 +130,7 @@ class RowReaderSegment(val projection: RichProjection,
   // TODO: Detect when no chunks corresponding to chunkInfos.  Either missing column or
   // inconsistency in data.  When inconsistency, should try reading again.
   private def getReaders(readerFactory: RowReaderFactory): Array[(FiloRowReader, Int, Array[Int])] =
+  if (columns.nonEmpty) {
     chunkInfos
       .filter { case (info, _) => chunks contains info.id }
       .map { case (ChunkSetInfo(id, numRows, _, _), skipArray) =>
@@ -140,6 +141,15 @@ class RowReaderSegment(val projection: RichProjection,
       }
       (reader, numRows, skipArray)
     }.toArray
+  } else {
+    // No columns, probably a select count(*) query
+    // Return an empty vector of the exact length, to allow proper counting of records
+    chunkInfos.map { case (ChunkSetInfo(id, numRows, _, _), skipArray) =>
+      //scalastyle:off
+      (readerFactory(Array[ByteBuffer](null), Array(classOf[Int]), numRows), numRows, skipArray)
+      //scalastyle:on
+    }.toArray
+  }
 
   /**
    * Iterates over rows in this segment, chunkset by chunkset, skipping over any rows
