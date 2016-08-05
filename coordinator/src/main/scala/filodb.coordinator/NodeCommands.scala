@@ -68,6 +68,9 @@ object IngestionCommands {
                         seqNo: Long) extends NodeCommand
 
   case class Ack(seqNo: Long) extends NodeResponse
+  // If ingestion cannot proceed, Nack is sent, then ResumeIngest is sent if things open up.
+  case class Nack(seqNo: Long) extends NodeResponse
+  case object ResumeIngest extends NodeResponse
 
   /**
    * Initiates a flush of the remaining MemTable rows of the given dataset and version.
