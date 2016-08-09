@@ -99,7 +99,6 @@ To compile the .mermaid source files to .png's, install the [Mermaid CLI](http:/
 
 Your input is appreciated!
 
-* Productionization and automated stress testing
 * Kafka input API / connector (without needing Spark)
 * In-memory caching for significant query speedup
 * True columnar querying and execution, using late materialization and vectorization techniques.  GPU/SIMD.
@@ -668,6 +667,8 @@ FiloDB uses [Kamon](http://kamon.io) for metrics and Akka/Futures/async tracing.
 Kamon has many configurable options.  To get more detailed traces on the write / segment append path, for example, here is how you might pass to `spark-submit` or `spark-shell` options to set detailed tracing on and to trace 3% of all segment appends:
 
     --driver-java-options '-XX:+UseG1GC -XX:MaxGCPauseMillis=500 -Dkamon.trace.level-of-detail=simple-trace -Dkamon.trace.random-sampler.chance=3'
+
+To change the metrics flush interval, you can set `kamon.metric.tick-interval` and `kamon.statsd.flush-interval`.  The statsd flush-interval must be equal to or greater than the tick-interval.
 
 Methods of configuring Kamon (except for the metrics logger):
 
