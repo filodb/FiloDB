@@ -8,17 +8,23 @@ import filodb.core.metadata.Column
 /**
   * Created by parekuti on 8/10/16.
   */
-class FiloChunksBinaryFormatter(columnCount : Short ) {
-  def columnDefinitions(cols: Seq[Column]) : Array[Byte] = {
+class ChunkHeader(cols : Seq[Column] = Seq() ) {
+  def header: Array[Byte] = {
+    fileFormatIdentifier ++
+      columnDefinitionIndicator ++
+      columnCountIndicator ++
+      columnDefinitions
+  }
+
+  def columnDefinitions : Array[Byte] = {
     val colDefinitions =cols.foldLeft("")(_  + _.toString + "\001").dropRight(1)
     val length = colDefinitions.length.toShort
     val bytes = colDefinitions.getBytes(StandardCharsets.UTF_8)
     littleEndian(shortToBytes(length)) ++ littleEndian(bytes)
   }
 
-  def columnCountIndicator : Array[Byte] = {
-    littleEndian(shortToBytes(columnCount))
-  }
+  def columnCountIndicator : Array[Byte] =
+    littleEndian(shortToBytes(cols.length.toShort))
 
   def columnDefinitionIndicator : Array[Byte] =
     littleEndian(Array[Byte](0x00,0x01))
