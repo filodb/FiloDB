@@ -1,6 +1,6 @@
 package filodb.core.reprojector
 
-import java.io.File
+import java.io.{File, FileOutputStream, FileWriter, RandomAccessFile}
 import java.nio.ByteBuffer
 import java.nio.charset.StandardCharsets
 import java.nio.file.{FileSystems, Files}
@@ -12,9 +12,6 @@ import filodb.core.metadata.{Column, DataColumn}
 import org.scalatest.{BeforeAndAfter, FunSpec, Matchers}
 import org.velvia.filo.{ArrayStringRowReader, RowToVectorBuilder, TupleRowReader}
 
-/**
-  * Created by parekuti on 8/10/16.
-  */
 class WriteAheadLogFileSpec extends FunSpec with Matchers with BeforeAndAfter{
   var config = ConfigFactory.load("application_test.conf")
     .getConfig("filodb")
@@ -44,7 +41,7 @@ class WriteAheadLogFileSpec extends FunSpec with Matchers with BeforeAndAfter{
     wal.delete
   }
 
-   ignore("write filochunks indicator to the file") {
+  ignore("write filochunks indicator to the file") {
     val wal = new WriteAheadLog(config, NamesTestData.datasetRef, 0, NamesTestData.schema)
     wal.writeChunks(new Array[ByteBuffer](0))
     val chunksInd = new Array[Byte](2)
@@ -78,6 +75,50 @@ class WriteAheadLogFileSpec extends FunSpec with Matchers with BeforeAndAfter{
     wal.delete
   }
 
+  it("Valid WAL header"){
+    val wal = new WriteAheadLog(config, datasetRef, 0, schema)
+    wal.writeChunks(createChunkData)
+    wal.close
+
+    val reader = new WriteAheadLogReader(config,wal.path)
+    reader.validFile should equal(true)
+
+    wal.delete()
+  }
+
+  it("Invalid file identifier in header") {
+    val wal = new WriteAheadLog(config, new DatasetRef(GdeltTestData.dataset1.name), 0, GdeltTestData.schema)
+    replaceBytes(wal, 1, Array[Byte]('X', 'X', 'X'))
+    val reader = new WriteAheadLogReader(config, wal.path)
+    reader.validFile should equal(false)
+    wal.delete()
+  }
+
+  it("Invalid column definition header" ){
+    val wal = new WriteAheadLog(config, new DatasetRef(GdeltTestData.dataset1.name), 0, GdeltTestData.schema)
+    replaceBytes(wal, 8, Array[Byte]('X', 'X'))
+    val reader = new WriteAheadLogReader(config,wal.path)
+    reader.validFile should equal(false)
+    wal.delete()
+  }
+
+  it("Invalid column count indicator" ){
+    val wal = new WriteAheadLog(config, new DatasetRef(GdeltTestData.dataset1.name), 0, GdeltTestData.schema)
+    replaceBytes(wal, 10, Array[Byte](0x11, 0x11))
+    val reader = new WriteAheadLogReader(config,wal.path)
+    reader.validFile should equal(false)
+    wal.delete()
+  }
+
+  it("Invalid column definitions size" ){
+    val wal = new WriteAheadLog(config, new DatasetRef(GdeltTestData.dataset1.name), 0, GdeltTestData.schema)
+    replaceBytes(wal, 12, Array[Byte](0x01, 0x01))
+    val reader = new WriteAheadLogReader(config,wal.path)
+    reader.validFile should equal(false)
+    wal.delete()
+  }
+
+
   private def createChunkData : Array[ByteBuffer] = {
     val filoSchema = Column.toFiloSchema(schema)
     val colIds = filoSchema.map(_.name).toArray
@@ -95,5 +136,12 @@ class WriteAheadLogFileSpec extends FunSpec with Matchers with BeforeAndAfter{
     readers.foreach(builder.addRow)
     val colIdToBuffers = builder.convertToBytes()
     colIds.map(colIdToBuffers)
+  }
+
+  private def replaceBytes(wal: WriteAheadLog, l: Long, bytes: Array[Byte]): Unit = {
+    val channel = new RandomAccessFile(wal.path, "rw")
+    channel.seek(l)
+    channel.write(bytes)
+    channel.close()
   }
 }

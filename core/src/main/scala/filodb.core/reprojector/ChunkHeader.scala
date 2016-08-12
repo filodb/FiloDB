@@ -5,14 +5,11 @@ import java.nio.ByteBuffer
 
 import filodb.core.metadata.Column
 
-/**
-  * Created by parekuti on 8/10/16.
-  */
 class ChunkHeader(cols : Seq[Column] = Seq() ) {
   def header: Array[Byte] = {
-    fileFormatIdentifier ++
-      columnDefinitionIndicator ++
-      columnCountIndicator ++
+    littleEndian(ChunkHeader.fileFormatIdentifier) ++
+      littleEndian(ChunkHeader.columnDefinitionIndicator) ++
+      littleEndian(ChunkHeader.columnCountIndicator(cols)) ++
       columnDefinitions
   }
 
@@ -23,16 +20,22 @@ class ChunkHeader(cols : Seq[Column] = Seq() ) {
     littleEndian(shortToBytes(length)) ++ littleEndian(bytes)
   }
 
-  def columnCountIndicator : Array[Byte] =
-    littleEndian(shortToBytes(cols.length.toShort))
+  private def littleEndian (data: Array[Byte]) = data.reverse
 
-  def columnDefinitionIndicator : Array[Byte] =
-    littleEndian(Array[Byte](0x00,0x01))
+  private def shortToBytes(count: Short): Array[Byte] =
+    ByteBuffer.allocate(2).putShort(count).array()
+}
+
+object ChunkHeader{
 
   def fileFormatIdentifier : Array[Byte] =
-    littleEndian(Array[Byte]('F', 'i', 'l','o','W', 'A', 'L',0x00))
+    Array[Byte]('F', 'i', 'l','o','W', 'A', 'L',0x00)
 
-  private def littleEndian (data: Array[Byte]) = data.reverse
+  def columnDefinitionIndicator : Array[Byte] =
+    Array[Byte](0x00,0x01)
+
+  def columnCountIndicator(cols: Seq[Column]) : Array[Byte] =
+    shortToBytes(cols.length.toShort)
 
   private def shortToBytes(count: Short): Array[Byte] =
     ByteBuffer.allocate(2).putShort(count).array()

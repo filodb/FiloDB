@@ -6,29 +6,26 @@ import java.nio.charset.{Charset, StandardCharsets}
 import filodb.core.GdeltTestData._
 import filodb.core.metadata.{Column, DataColumn}
 
-/**
-  * Created by parekuti on 8/10/16.
-  */
 class ChunkHeaderSpec extends FunSpec with Matchers with BeforeAndAfter {
   val binaryFormatter = new ChunkHeader
 
   it("create UTF8 string with FiloWAL of 8 bytes") {
 
-    binaryFormatter.fileFormatIdentifier should equal (Array[Byte](0x00,'L','A','W','o','l','i','F'))
+    ChunkHeader.fileFormatIdentifier should equal (Array[Byte]('F','i','l','o','W','A','L',0x00))
   }
 
   it("create column identifer in 2 bytes") {
-   binaryFormatter.columnDefinitionIndicator should equal (Array[Byte](0x01,0x00))
+    ChunkHeader.columnDefinitionIndicator should equal (Array[Byte](0x00,0x01))
   }
 
   it("Add no of columns to header of 2 bytes") {
-    new ChunkHeader().columnCountIndicator should equal (Array[Byte](0x00,0x00))
+    ChunkHeader.columnCountIndicator(Seq()) should equal (Array[Byte](0x00,0x00))
 
-    new ChunkHeader(createColumns(2)).columnCountIndicator should equal (Array[Byte](0x02,0x00))
+    ChunkHeader.columnCountIndicator(createColumns(2)) should equal (Array[Byte](0x00,0x02))
 
-    new ChunkHeader(createColumns(250)).columnCountIndicator should equal (Array[Byte](-0x06,0x00))
+    ChunkHeader.columnCountIndicator(createColumns(250)) should equal (Array[Byte](0x00,-0x06))
 
-    new ChunkHeader(createColumns(1000)).columnCountIndicator should equal (Array[Byte](-0x18,0x03))
+    ChunkHeader.columnCountIndicator(createColumns(1000)) should equal (Array[Byte](0x03,-0x18))
   }
 
   it("Single column definition") {

@@ -11,15 +11,14 @@ import filodb.core.metadata.Column
 import org.joda.time.DateTime
 import org.joda.time.format.ISODateTimeFormat
 
-/**
-  * Created by parekuti on 8/10/16.
-  */
 class WriteAheadLog(config: Config, dataset: DatasetRef,
                     version: Int = 0, columns: Seq[Column] = Seq()) {
 
   private val walBuffer = new WriteAheadLogBuffer(config, dataset, version)
 
   val headerLength = writeHeader
+
+  def path : String = walBuffer.walFile.getAbsolutePath
 
   def exists: Boolean = walBuffer.walFile.exists
 
@@ -31,7 +30,7 @@ class WriteAheadLog(config: Config, dataset: DatasetRef,
 
   def writeHeader: Int = {
     val headerBytes = new ChunkHeader(columns).header
-    walBuffer.requireMoreBuffer(headerBytes.length).put(headerBytes)
+    walBuffer.bufferOfSufficientSize(headerBytes.length).put(headerBytes)
     headerBytes.length
   }
 
@@ -42,21 +41,24 @@ class WriteAheadLog(config: Config, dataset: DatasetRef,
     readBuffer
   }
 
+  def close(): Unit = walBuffer.close
+
   def writeChunks(chunkArray: Array[ByteBuffer]): Unit = {
-    walBuffer.requireMoreBuffer(2).put(Array[Byte](0x02,0x00))
+    walBuffer.bufferOfSufficientSize(2).put(Array[Byte](0x02,0x00))
     val chunksSize = chunkArray.length
     for {index <- chunkArray.indices} {
       val chunkBytes = chunkArray(index)
-      walBuffer.requireMoreBuffer(4).put((ByteBuffer.allocate(4).putInt(chunkBytes.limit()).array()).reverse)
-      walBuffer.requireMoreBuffer(chunkBytes.limit()).put(chunkBytes)
+      walBuffer.bufferOfSufficientSize(4).put((ByteBuffer.allocate(4).putInt(chunkBytes.limit()).array()).reverse)
+      walBuffer.bufferOfSufficientSize(chunkBytes.limit()).put(chunkBytes)
       if (index < chunksSize - 1) {
-        walBuffer.requireMoreBuffer(1).put(0x01.toByte)
+        walBuffer.bufferOfSufficientSize(1).put(0x01.toByte)
       }
     }
   }
 }
 
 class WriteAheadLogBuffer(config: Config, dataset: DatasetRef, version: Int = 0) {
+
   private val bufferSize = config.getInt("memtable.mapped-byte-buffer-size")
   private val walDir = config.getString("memtable.memtable-wal-dir")
 
@@ -66,10 +68,12 @@ class WriteAheadLogBuffer(config: Config, dataset: DatasetRef, version: Int = 0)
     new File(s"${walDir}/${dataset}_${version}/${datestr}.wal")
   }
 
+  val channel = new RandomAccessFile(walFile, "rw").getChannel()
+
   var bufferOffSet : Int = 0
   var buffer =  allocateBuffer(bufferSize)
 
-  def requireMoreBuffer(needed: Int): MappedByteBuffer = {
+  def bufferOfSufficientSize(needed: Int): MappedByteBuffer = {
     if (buffer.remaining() < needed) {
       bufferOffSet += buffer.position()
       buffer = allocateBuffer(Math.max(bufferSize, needed))
@@ -77,8 +81,8 @@ class WriteAheadLogBuffer(config: Config, dataset: DatasetRef, version: Int = 0)
     buffer
   }
 
-  def allocateBuffer(bufferSize: Int): MappedByteBuffer = {
-    new RandomAccessFile(walFile, "rw").getChannel()
-      .map(FileChannel.MapMode.READ_WRITE, bufferOffSet,bufferSize )
-  }
+  def allocateBuffer(bufferSize: Int): MappedByteBuffer =
+    channel.map(FileChannel.MapMode.READ_WRITE, bufferOffSet,bufferSize)
+
+  def close(): Unit = channel.close()
 }
