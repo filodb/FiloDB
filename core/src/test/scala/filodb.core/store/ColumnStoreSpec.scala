@@ -3,7 +3,7 @@ package filodb.core.store
 import com.typesafe.config.ConfigFactory
 import java.nio.ByteBuffer
 import scala.concurrent.duration._
-import scala.concurrent.{Await, Future}
+import scala.concurrent.Future
 import scala.language.postfixOps
 
 import filodb.core._
@@ -47,6 +47,10 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
 
   implicit val keyType = SingleKeyTypes.LongKeyType
 
+  private def getState(proj: RichProjection = projection): SegmentState =
+    new SegmentState(projection, schema, Nil, colStore, 0, 15 seconds)(
+                     SegmentInfo("/0", 0).basedOn(projection))
+
   // NOTE: The test below purposefully does not use any of the read APIs so that if only the read code
   // breaks, this test can independently test for write failures
   "appendSegment" should "NOOP if the segment is empty" in {
@@ -82,19 +86,20 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
     }
   }
 
-  ignore should "replace rows to an uncached segment successfully" in {
+  it should "replace rows to a previous chunk successfully" in {
     val state = getState()
     val segment = getWriterSegment()
-    segment.addChunkSet(state, mapper(names drop 1))
+    val sortedNames = names.sortBy(_._3.get)
+    segment.addChunkSet(state, mapper(sortedNames drop 1))
     whenReady(colStore.appendSegment(projection, segment, 0)) { response =>
       response should equal (Success)
     }
 
-    // TODO: remove cache and force read from column store
+    // NOTE: previous row key chunks are not currently cached
 
     // Writing segment2, repeat 1 row and add another row.  Should read orig segment from disk.
     val segment2 = getWriterSegment()
-    segment2.addChunkSet(state, mapper(names take 2))
+    segment2.addChunkSet(state, mapper(sortedNames take 2))
     whenReady(colStore.appendSegment(projection, segment2, 0)) { response =>
       response should equal (Success)
     }
@@ -105,8 +110,9 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
       segments should have length (1)
       val readSeg = segments.head.asInstanceOf[RowReaderSegment]
       readSeg.segInfo.segment should equal (segment.segInfo.segment)
-      readSeg.rowIterator().map(_.getLong(2)).toSeq should equal (Seq(25L, 40L, 39L, 29L, 24L, 28L))
-      readSeg.rowIterator().map(_.getString(0)).toSeq should equal (firstNames)
+      readSeg.rowIterator().map(_.getLong(2)).toSeq should equal (Seq(28L, 29L, 39L, 40L, 24L, 25L))
+      readSeg.rowIterator().map(_.getString(0)).toSeq should equal (sortedFirstNames.drop(2) ++
+                                                                    sortedFirstNames.take(2))
     }
   }
 
@@ -114,7 +120,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
   // source columns works.
   ignore should "replace rows with multi row keys to an uncached segment" in {
     import GdeltTestData._
-    val segmentsStates = getSegments(197901.asInstanceOf[projection2.PK])
+    val segmentsStates = getSegments(colStore, 197901.asInstanceOf[projection2.PK])
     segmentsStates.foreach { case (seg, _) =>
       colStore.appendSegment(projection2, seg, 0).futureValue should equal (Success)
     }
@@ -229,7 +235,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
   }
 
   it should "read back rows written in another database" in {
-    val state = getState()
+    val state = getState(projectionDb2)
     val segment = getWriterSegment()
     segment.addChunkSet(state, mapper(names))
     whenReady(colStore.appendSegment(projectionDb2, segment, 0)) { response =>
@@ -251,7 +257,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
 
   it should "read back rows written with multi-column row keys" in {
     import GdeltTestData._
-    val segmentsStates = getSegments(197901.asInstanceOf[projection2.PK])
+    val segmentsStates = getSegments(colStore, 197901.asInstanceOf[projection2.PK])
     segmentsStates.foreach { case (seg, _) =>
       colStore.appendSegment(projection2, seg, 0).futureValue should equal (Success)
     }
@@ -266,7 +272,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
 
   it should "filter rows written with single partition key" in {
     import GdeltTestData._
-    val segments = getSegmentsByPartKey(projection2)
+    val segments = getSegmentsByPartKey(colStore, projection2)
     segments.foreach { seg =>
       colStore.appendSegment(projection2, seg, 0).futureValue should equal (Success)
     }
@@ -283,7 +289,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
 
   it should "range scan by segment key and filter rows with single partition key" in {
     import GdeltTestData._
-    val segments = getSegmentsByPartKey(projection2)
+    val segments = getSegmentsByPartKey(colStore, projection2)
     segments.foreach { seg =>
       colStore.appendSegment(projection2, seg, 0).futureValue should equal (Success)
     }
@@ -314,7 +320,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
 
   it should "filter rows written with multiple column partition keys" in {
     import GdeltTestData._
-    val segments = getSegmentsByPartKey(projection3)
+    val segments = getSegmentsByPartKey(colStore, projection3)
     segments.foreach { seg =>
       colStore.appendSegment(projection3, seg, 0).futureValue should equal (Success)
     }

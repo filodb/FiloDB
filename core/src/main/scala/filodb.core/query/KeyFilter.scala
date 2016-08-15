@@ -1,7 +1,7 @@
 package filodb.core.query
 
 import org.scalactic._
-import org.velvia.filo.RowReader
+import org.velvia.filo.{RowReader, SingleValueRowReader}
 import scala.language.postfixOps
 import scalaxy.loops._
 
@@ -102,15 +102,4 @@ object KeyFilter {
         funcs.head
     }
   }
-}
-
-case class SingleValueRowReader(value: Any) extends RowReader {
-  def notNull(columnNo: Int): Boolean = Option(value).isDefined
-  def getBoolean(columnNo: Int): Boolean = value.asInstanceOf[Boolean]
-  def getInt(columnNo: Int): Int = value.asInstanceOf[Int]
-  def getLong(columnNo: Int): Long = value.asInstanceOf[Long]
-  def getDouble(columnNo: Int): Double = value.asInstanceOf[Double]
-  def getFloat(columnNo: Int): Float = value.asInstanceOf[Float]
-  def getString(columnNo: Int): String = value.asInstanceOf[String]
-  def getAny(columnNo: Int): Any = value
 }

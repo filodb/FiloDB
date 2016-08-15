@@ -4,7 +4,7 @@ import com.typesafe.config.Config
 import com.typesafe.scalalogging.slf4j.StrictLogging
 import java.nio.ByteBuffer
 import net.ceedubs.ficus.Ficus._
-import org.velvia.filo.{RowToVectorBuilder, RowReader, FiloRowReader, FastFiloRowReader, FiloVector}
+import org.velvia.filo._
 import scala.collection.mutable.ArrayBuffer
 import scalaxy.loops._
 
@@ -83,22 +83,6 @@ class FiloAppendStore(config: Config, columns: Seq[Column]) extends StrictLoggin
     val reader = readers((keyLong >> 32).toInt)
     reader.setRowNo(keyLong.toInt)
     reader
-  }
-
-  // A RowReader that can safely be used in Seqs
-  case class SafeFiloRowReader(reader: FiloRowReader, rowNo: Int) extends FiloRowReader {
-    val parsers = reader.parsers
-    def setRowNo(newRowNo: Int): Unit = {}
-
-    // TODO(velvia): Refactor the filo dependency so we don't have to copy and paste here  :/
-    final def notNull(columnNo: Int): Boolean = parsers(columnNo).isAvailable(rowNo)
-    final def getBoolean(columnNo: Int): Boolean = parsers(columnNo).asInstanceOf[FiloVector[Boolean]](rowNo)
-    final def getInt(columnNo: Int): Int = parsers(columnNo).asInstanceOf[FiloVector[Int]](rowNo)
-    final def getLong(columnNo: Int): Long = parsers(columnNo).asInstanceOf[FiloVector[Long]](rowNo)
-    final def getDouble(columnNo: Int): Double = parsers(columnNo).asInstanceOf[FiloVector[Double]](rowNo)
-    final def getFloat(columnNo: Int): Float = parsers(columnNo).asInstanceOf[FiloVector[Float]](rowNo)
-    final def getString(columnNo: Int): String = parsers(columnNo).asInstanceOf[FiloVector[String]](rowNo)
-    final def getAny(columnNo: Int): Any = parsers(columnNo).boxed(rowNo)
   }
 
   final def safeRowReader(keyLong: Long): RowReader = {

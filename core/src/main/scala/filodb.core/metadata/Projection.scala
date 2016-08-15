@@ -115,10 +115,16 @@ case class RichProjection(projection: Projection,
         extraColStrings.mkString(":")).mkString("\001")
   }
 
+  def rowKeyColumnIds: Seq[ColumnId] = rowKeyColumns.flatMap {
+    case c: ComputedColumn => c.sourceColumns
+    case d: Column => Seq(d.name)
+  }
+
   /**
    * Creates a new RichProjection intended only for ChunkMergingStrategy.mergeSegments...
    * it reads only the source columns needed to recreate the row key, so the row key functions need
    * to be recomputed.
+   * TODO: remove this once we figure out how to handle computed columns in row keys
    */
   def toRowKeyOnlyProjection: RichProjection = {
     // First, reduce set of columns to row key columns (including any computed source columns)

@@ -2,6 +2,7 @@ package filodb.core.reprojector
 
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.slf4j.StrictLogging
+import java.nio.ByteBuffer
 import kamon.Kamon
 import kamon.trace.Tracer
 import net.ceedubs.ficus.Ficus._
@@ -62,7 +63,8 @@ class SegmentStateCache(config: Config, columnStore: ColumnStoreScanner)
       val indexRead = columnStore.scanIndices(projection, version, SinglePartitionRangeScan(range))
       val indexIt = Await.result(indexRead, waitTimeout)
       val infosAndSkips = indexIt.toSeq.headOption.map(_.infosAndSkips).getOrElse(Nil)
-      new SegmentState(projection, schema, infosAndSkips.map(_._1))(segInfo)
+      new SegmentState(projection, schema, infosAndSkips.map(_._1),
+                       columnStore, version, waitTimeout)(segInfo)
     })
   }
 

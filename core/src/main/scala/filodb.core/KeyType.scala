@@ -22,6 +22,8 @@ trait KeyType {
 
   def ordering: Ordering[T] // must be comparable
 
+  def rowReaderOrdering: Ordering[RowReader]
+
   /**
    * Serializes the key to bytes. Preferably, the bytes should themselves be comparable
    * byte by byte as unsigned bytes, like how Cassandra's blob type is comparable.
@@ -74,6 +76,10 @@ abstract class SingleKeyTypeBase[K : Ordering : TypedFieldExtractor] extends Key
 
   def ordering: Ordering[T] = implicitly[Ordering[K]]
 
+  def rowReaderOrdering: Ordering[RowReader] = new Ordering[RowReader] {
+    def compare(a: RowReader, b: RowReader): Int = extractor.compare(a, b, 0)
+  }
+
   def extractor: TypedFieldExtractor[T] = implicitly[TypedFieldExtractor[K]]
 }
 
@@ -92,6 +98,18 @@ case class CompositeOrdering(atomTypes: Seq[SingleKeyType]) extends Ordering[Seq
   }
 }
 
+case class CompositeReaderOrdering(atomTypes: Seq[SingleKeyType]) extends Ordering[RowReader] {
+  private final val extractors = atomTypes.map(_.extractor).toArray
+  private final val numAtoms = atomTypes.length
+  def compare(a: RowReader, b: RowReader): Int = {
+    for { i <- 0 until numAtoms optimized } {
+      val res = extractors(i).compare(a, b, i)
+      if (res != 0) return res
+    }
+    return 0
+  }
+}
+
 /**
  * A generic composite key type which serializes by putting a byte length prefix
  * in front of each element.
@@ -104,6 +122,8 @@ case class CompositeKeyType(atomTypes: Seq[SingleKeyType]) extends KeyType {
   type T = Seq[_]
 
   def ordering: scala.Ordering[Seq[_]] = CompositeOrdering(atomTypes)
+
+  def rowReaderOrdering: Ordering[RowReader] = CompositeReaderOrdering(atomTypes)
 
   def toBytes(key: Seq[_]): ByteVector = {
     (0 until atomTypes.length).map { i =>

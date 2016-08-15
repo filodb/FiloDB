@@ -85,7 +85,7 @@ class DefaultReprojector(config: Config,
         // Group rows into chunk sized bytes and add to segment
         subtrace("add-chunk-set", "ingestion") {
           while (segmentRowsIt.nonEmpty) {
-            segment.addChunkSet(state, segmentRowsIt.take(dataset.options.chunkSize).toSeq)
+            segment.addChunkSet(state, segmentRowsIt.take(dataset.options.chunkSize))
           }
         }
         segment

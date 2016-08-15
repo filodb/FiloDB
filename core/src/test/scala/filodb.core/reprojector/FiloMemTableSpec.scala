@@ -22,7 +22,7 @@ class FiloMemTableSpec extends FunSpec with Matchers with BeforeAndAfter {
   val projWithPartCol = RichProjection(largeDataset, schemaWithPartCol)
 
   val namesWithNullPartCol =
-    util.Random.shuffle(namesWithPartCol ++ namesWithPartCol.take(3)
+    scala.util.Random.shuffle(namesWithPartCol ++ namesWithPartCol.take(3)
                .map { t => (t._1, t._2, t._3, t._4, None) })
 
   // Turn this into a common spec for all memTables

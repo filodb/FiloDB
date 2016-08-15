@@ -34,7 +34,7 @@ trait ColumnStoreScanner extends StrictLogging {
 
   /**
    * Reads back all the chunks from multiple columns of a keyRange at once.  Note that no paging
-   * is performed - so don't ask for too large of a range.  Recommendation is to read the ChunkRowMaps
+   * is performed - so don't ask for too large of a range.  Recommendation is to read the indices
    * first and use the info there to determine how much to read.
    * @param dataset the DatasetRef of the dataset to read chunks from
    * @param columns the columns to read back chunks from
@@ -47,6 +47,41 @@ trait ColumnStoreScanner extends StrictLogging {
                  columns: Set[ColumnId],
                  keyRange: BinaryKeyRange,
                  version: Int)(implicit ec: ExecutionContext): Future[Seq[ChunkedData]]
+
+  /**
+   * Reads back a subset of chunkIds from a single segment, with columns returned in the same order
+   * as passed in.  No paging is performed.  May be used to read back only row keys or part of a large seg.
+   * @param dataset the DatasetRef of the dataset to read chunks from
+   * @param version the version to read back
+   * @param columns the columns to read back chunks from
+   * @param chunkRange the inclusive start and end ChunkID to read from
+   * @return a sequence of ChunkedData, each triple is (segmentId, chunkId, bytes) for each chunk
+   *          must be sorted in order of increasing segmentId
+   */
+  def readChunks(dataset: DatasetRef,
+                 version: Int,
+                 columns: Seq[ColumnId],
+                 partition: Types.BinaryPartition,
+                 segment: Types.SegmentId,
+                 chunkRange: (Types.ChunkID, Types.ChunkID))
+                (implicit ec: ExecutionContext): Future[Seq[ChunkedData]]
+
+  /**
+   * Same as above, but only read back chunks corresponding to columns for row keys for a particular
+   * chunkID in a segment
+   */
+  def readRowKeyChunks(projection: RichProjection,
+                       version: Int,
+                       chunk: Types.ChunkID)
+                      (segInfo: SegmentInfo[projection.PK, projection.SK])
+                      (implicit ec: ExecutionContext): Future[Array[ByteBuffer]] = {
+    val binPartition = projection.partitionType.toBytes(segInfo.partition)
+    val binSegId = projection.segmentType.toBytes(segInfo.segment)
+    readChunks(projection.datasetRef, version, projection.rowKeyColumnIds,
+               binPartition, binSegId, (chunk, chunk)).map { seqChunkedData =>
+      seqChunkedData.map { case ChunkedData(col, segIdChunks) => segIdChunks.head._3 }.toArray
+    }
+  }
 
   /**
    * Scans over indices according to the method.

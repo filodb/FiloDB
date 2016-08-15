@@ -1,15 +1,15 @@
 package filodb.core.store
 
 import filodb.core._
-import scodec.bits._
 
 import org.scalatest.FunSpec
 import org.scalatest.Matchers
 
 class ChunkSetInfoSpec extends FunSpec with Matchers {
   import SingleKeyTypes._
+  import NamesTestData._
 
-  val info1 = ChunkSetInfo(13, 5000, LongKeyType.toBytes(1001L), LongKeyType.toBytes(2002L))
+  val info1 = ChunkSetInfo(13, 5000, firstKey, lastKey)
 
   def skipsShouldEqual(skip1: Seq[ChunkRowSkipIndex], skip2: Seq[ChunkRowSkipIndex]): Unit = {
     skip1 should have length (skip2.length)
@@ -19,9 +19,20 @@ class ChunkSetInfoSpec extends FunSpec with Matchers {
     }
   }
 
+  def infosShouldEqual(info1: ChunkSetInfo, info2: ChunkSetInfo, numCols: Int = 1): Unit = {
+    info1.id should equal (info2.id)
+    info1.numRows should equal (info2.numRows)
+    for { i <- 0 until numCols } {
+      info1.firstKey.getAny(i) should equal (info2.firstKey.getAny(i))
+      info1.lastKey.getAny(i) should equal (info2.lastKey.getAny(i))
+    }
+  }
+
+  val prj = projection
+
   it("should serialize and deserialize ChunkSetInfo and no skips") {
-    val (infoRead1, skips1) = ChunkSetInfo.fromBytes(ChunkSetInfo.toBytes(info1, Nil))
-    infoRead1 should equal (info1)
+    val (infoRead1, skips1) = ChunkSetInfo.fromBytes(prj, ChunkSetInfo.toBytes(prj, info1, Nil))
+    infosShouldEqual(infoRead1, info1)
     skips1 should equal (Nil)
   }
 
@@ -30,12 +41,13 @@ class ChunkSetInfoSpec extends FunSpec with Matchers {
     val skips2 = ChunkRowSkipIndex(9, Array(2, 5))
     val skips3 = ChunkRowSkipIndex(11, Array(10, 11, 12, 20, 25))
 
-    val (infoRead1, skipsRead1) = ChunkSetInfo.fromBytes(ChunkSetInfo.toBytes(info1, Seq(skips1)))
-    infoRead1 should equal (info1)
+    val (infoRead1, skipsRead1) = ChunkSetInfo.fromBytes(prj, ChunkSetInfo.toBytes(prj, info1, Seq(skips1)))
+    infosShouldEqual(infoRead1, info1)
     skipsShouldEqual(skipsRead1, Seq(skips1))
 
-    val (infoRead2, skipsRead2) = ChunkSetInfo.fromBytes(ChunkSetInfo.toBytes(info1, Seq(skips2, skips3)))
-    infoRead2 should equal (info1)
+    val (infoRead2, skipsRead2) = ChunkSetInfo.fromBytes(prj, ChunkSetInfo.toBytes(
+                                                                prj, info1, Seq(skips2, skips3)))
+    infosShouldEqual(infoRead2, info1)
     skipsShouldEqual(skipsRead2, Seq(skips2, skips3))
   }
 

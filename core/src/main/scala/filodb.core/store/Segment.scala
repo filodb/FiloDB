@@ -3,8 +3,10 @@ package filodb.core.store
 import com.typesafe.scalalogging.slf4j.StrictLogging
 import java.nio.ByteBuffer
 import java.util.TreeMap
-import org.velvia.filo.{RowToVectorBuilder, RowReader, FiloRowReader, FastFiloRowReader}
+import org.velvia.filo._
 import scala.collection.mutable.{ArrayBuffer, HashMap}
+import scala.concurrent.{Await, ExecutionContext}
+import scala.concurrent.duration.FiniteDuration
 
 import filodb.core.KeyType
 import filodb.core.Types._
@@ -48,13 +50,33 @@ trait Segment {
 class SegmentState private(projection: RichProjection,
                            segInfo: SegmentInfo[RichProjection#PK, RichProjection#SK],
                            infos: Seq[ChunkSetInfo],
-                           schema: Seq[Column]) {
-  def this(projection: RichProjection, schema: Seq[Column], infos: Seq[ChunkSetInfo])
-          (segInfo: SegmentInfo[projection.PK, projection.SK]) = this(projection, segInfo, infos, schema)
+                           schema: Seq[Column],
+                           rowKeysForChunk: ChunkID => Array[ByteBuffer]) {
+  import collection.JavaConverters._
+
+  def this(projection: RichProjection,
+           schema: Seq[Column],
+           infos: Seq[ChunkSetInfo],
+           rowKeysForChunk: ChunkID => Array[ByteBuffer])
+          (segInfo: SegmentInfo[projection.PK, projection.SK]) =
+    this(projection, segInfo, infos, schema, rowKeysForChunk)
+
+  def this(proj: RichProjection,
+           schema: Seq[Column],
+           infos: Seq[ChunkSetInfo],
+           scanner: ColumnStoreScanner,
+           version: Int,
+           timeout: FiniteDuration)
+          (segInfo: SegmentInfo[proj.PK, proj.SK])
+          (implicit ec: ExecutionContext) =
+    this(proj, segInfo, infos, schema,
+         (chunk: ChunkID) => Await.result(scanner.readRowKeyChunks(proj, version, chunk)
+                                          (segInfo.basedOn(proj)), timeout))
 
   val filoSchema = Column.toFiloSchema(schema)
   val infoMap = new TreeMap[ChunkID, ChunkSetInfo]
   infos.foreach { info => infoMap.put(info.id, info) }
+  val rowKeyColNos = projection.rowKeyColIndices.toArray
 
   // TODO(velvia): Use some TimeUUID for chunkID instead
   var nextChunkId = (infos.foldLeft(-1) { case (chunkId, info) => Math.max(info.id, chunkId) }) + 1
@@ -65,19 +87,32 @@ class SegmentState private(projection: RichProjection,
    * @param rows rows to be chunkified sorted in order of rowkey
    * NOTE: This is not a pure function, it updates the state of this segmentState.
    */
-  def newChunkSet(rows: Seq[RowReader]): ChunkSet = {
+  def newChunkSet(rows: Iterator[RowReader]): ChunkSet = {
     // NOTE: some RowReaders, such as the one from RowReaderSegment, must be iterators
     // since rowNo in FastFiloRowReader is mutated.
     val builder = new RowToVectorBuilder(filoSchema)
-    val rowKeyFunc = projection.rowKeyFunc
-    val info = ChunkSetInfo(nextChunkId, rows.length,
-                            projection.rowKeyType.toBytes(rowKeyFunc(rows.head)),
-                            projection.rowKeyType.toBytes(rowKeyFunc(rows.last)))
+    val infoChunkId = nextChunkId
     nextChunkId = nextChunkId + 1
-    // TODO: how to check for overrides
-    rows.foreach(builder.addRow)
+    var numRows = 0
+    //scalastyle:off
+    var firstKey: RowReader = null
+    var lastKey: RowReader = null
+    //scalastyle:on
+    rows.foreach { row =>
+      builder.addRow(row)
+      val rowKey = RoutingRowReader(row, rowKeyColNos)
+      if (numRows == 0) firstKey = rowKey
+      lastKey = rowKey
+      numRows += 1
+    }
+    val chunkMap = builder.convertToBytes()
+    val info = ChunkSetInfo(infoChunkId, numRows, firstKey, lastKey)
+    val skips = ChunkSetInfo.detectSkips(projection, info,
+                                         projection.rowKeyColumnIds.map(chunkMap).toArray,
+                                         infoMap.values.asScala.toSeq,
+                                         rowKeysForChunk)
     infoMap.put(info.id, info)
-    ChunkSet(info, Nil, builder.convertToBytes())
+    ChunkSet(info, skips, chunkMap)
   }
 }
 
@@ -90,8 +125,10 @@ class ChunkSetSegment(val projection: RichProjection,
 
   def segInfo: SegmentInfo[projection.PK, projection.SK] = _segInfo.basedOn(projection)
 
-  def addChunkSet(state: SegmentState, rows: Seq[RowReader]): Unit =
+  def addChunkSet(state: SegmentState, rows: Iterator[RowReader]): Unit =
     chunkSets.append(state.newChunkSet(rows))
+
+  def addChunkSet(state: SegmentState, rows: Seq[RowReader]): Unit = addChunkSet(state, rows.toIterator)
 
   def infosAndSkips: ChunkSetInfo.ChunkInfosAndSkips =
     chunkSets.map { chunkSet => (chunkSet.info, chunkSet.skips) }

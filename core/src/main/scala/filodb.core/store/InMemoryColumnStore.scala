@@ -162,6 +162,30 @@ trait InMemoryColumnStoreScanner extends ColumnStoreScanner {
     Future.successful(chunks)
   }
 
+  def readChunks(dataset: DatasetRef,
+                 version: Int,
+                 columns: Seq[ColumnId],
+                 partition: Types.BinaryPartition,
+                 segment: Types.SegmentId,
+                 chunkRange: (Types.ChunkID, Types.ChunkID))
+                (implicit ec: ExecutionContext): Future[Seq[ChunkedData]] = {
+    val chunkTree = chunkDb.getOrElse((dataset, partition, version),
+                                      EmptyChunkTree)
+    logger.debug(s"Reading chunks from columns $columns, $partition/$segment, chunks $chunkRange")
+    val chunks = for { column <- columns.toSeq } yield {
+      val startKey = (column, segment, chunkRange._1)
+      val endKey   = (column, segment, chunkRange._2)
+      val it = chunkTree.subMap(startKey, true, endKey, true).entrySet.iterator
+      val chunkList = it.toSeq.map { entry =>
+        val (colId, segmentId, chunkId) = entry.getKey
+        // NOTE: extremely important to duplicate the ByteBuffer, because of mutable state / multi threading
+        (segmentId, chunkId, entry.getValue.duplicate)
+      }
+      ChunkedData(column, chunkList)
+    }
+    Future.successful(chunks)
+  }
+
   def singlePartScan(projection: RichProjection, version: Int, partition: Any):
     Iterator[(BinaryPartition, IndexTreeLike)] = {
     val binPart = projection.partitionType.toBytes(partition.asInstanceOf[projection.PK])
