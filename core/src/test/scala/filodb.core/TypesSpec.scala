@@ -26,10 +26,10 @@ class TypesSpec extends FunSpec with Matchers {
 
   describe("KeyTypes") {
     it("should serialize and unserialize CompositeKeyTypes correctly") {
-      val types = Seq(IntKeyType, StringKeyType)
+      val types = Seq(IntKeyType, StringKeyType, BooleanKeyType)
       val compositeType = CompositeKeyType(types)
 
-      val orig1 = Seq(1001, "AdamAndEve")
+      val orig1 = Seq(1001, "AdamAndEve", true)
       compositeType.fromBytes(compositeType.toBytes(orig1)) should equal (orig1)
     }
 
@@ -70,6 +70,10 @@ class TypesSpec extends FunSpec with Matchers {
       compositeKeyFunc(row1) should equal (Seq("ape", -2))
     }
 
-    it("should binary compare Int and Long key types correctly") (pending)
+    it("should binary compare Int and Long key types correctly") {
+      IntKeyType.toBytes(-1) should be < IntKeyType.toBytes(1)
+      IntKeyType.toBytes(Int.MaxValue) should be > IntKeyType.toBytes(0)
+      LongKeyType.toBytes(10L) should be > LongKeyType.toBytes(-20L)
+    }
   }
 }

@@ -5,10 +5,11 @@ import org.joda.time.DateTime
 import org.velvia.filo.RowReader
 import org.velvia.filo.RowReader._
 import scala.language.postfixOps
+import scala.math.Ordering
 import scalaxy.loops._
 import scodec.bits.{ByteOrdering, ByteVector}
 
-import scala.math.Ordering
+import filodb.core.util.StrideSerialiser
 
 /**
  * A generic typeclass for dealing with keys (partition, sort, segment) of various types.
@@ -42,7 +43,6 @@ trait KeyType {
 
   def isSegmentType: Boolean = false
 
-  def size(key: T): Int
 }
 
 import SingleKeyTypes._
@@ -63,6 +63,14 @@ abstract class SingleKeyTypeBase[K : Ordering : TypedFieldExtractor] extends Key
       }
     }
   }
+
+  // Default implementation assumes we take size bytes and calls the fromBytes method
+  def parseBytes(remainder: ByteVector): (T, ByteVector) = {
+    val chunk = remainder.take(size)
+    (fromBytes(chunk), remainder.drop(size))
+  }
+
+  def size: Int
 
   def ordering: Ordering[T] = implicitly[Ordering[K]]
 
@@ -100,19 +108,16 @@ case class CompositeKeyType(atomTypes: Seq[SingleKeyType]) extends KeyType {
   def toBytes(key: Seq[_]): ByteVector = {
     (0 until atomTypes.length).map { i =>
       val atomType = atomTypes(i)
-      val bytes = atomType.toBytes(key(i).asInstanceOf[atomType.T])
-      ByteVector(bytes.length.toByte) ++ bytes
+      atomType.toBytes(key(i).asInstanceOf[atomType.T])
     }.reduce[ByteVector] { case (a, b) => a ++ b }
   }
 
   def fromBytes(bytes: ByteVector): Seq[_] = {
-    var currentOffset = 0
+    var currentBytes = bytes
     atomTypes.map { atomType =>
-      val length: Int = bytes.get(currentOffset).toInt
-      currentOffset = currentOffset + 1
-      val atomBytes = bytes.slice(currentOffset, currentOffset + length)
-      currentOffset = currentOffset + length
-      atomType.fromBytes(atomBytes)
+      val (atom, nextBytes) = atomType.parseBytes(currentBytes)
+      currentBytes = nextBytes
+      atom
     }
   }
 
@@ -134,10 +139,6 @@ case class CompositeKeyType(atomTypes: Seq[SingleKeyType]) extends KeyType {
 
     toSeq
   }
-
-  override def size(keys: Seq[_]): Int = atomTypes.zip(keys).map {
-    case (t, k) => t.size(k.asInstanceOf[t.T])
-  }.sum
 }
 
 
@@ -147,26 +148,33 @@ case class CompositeKeyType(atomTypes: Seq[SingleKeyType]) extends KeyType {
  * TODO: make byte comparison unsigned
  */
 object SingleKeyTypes {
+  val Int32HighBit = 0x80000000
+  val Long64HighBit = (1L << 63)
+
   trait LongKeyTypeLike extends SingleKeyTypeBase[Long] {
-    def toBytes(key: Long): ByteVector = ByteVector.fromLong(key, ordering = ByteOrdering.BigEndian)
-    def fromBytes(bytes: ByteVector): Long = bytes.toLong(signed = true, ByteOrdering.BigEndian)
+    def toBytes(key: Long): ByteVector =
+      ByteVector.fromLong(key ^ Long64HighBit, ordering = ByteOrdering.BigEndian)
+    def fromBytes(bytes: ByteVector): Long =
+      bytes.toLong(signed = true, ByteOrdering.BigEndian) ^ Long64HighBit
 
     def fromString(str: String): Long = str.toLong
 
     override def isSegmentType: Boolean = true
-    override def size(key: Long): Int = 8
+    val size = 8
   }
 
   implicit case object LongKeyType extends LongKeyTypeLike
 
   trait IntKeyTypeLike extends SingleKeyTypeBase[Int] {
-    def toBytes(key: Int): ByteVector = ByteVector.fromInt(key, ordering = ByteOrdering.BigEndian)
-    def fromBytes(bytes: ByteVector): Int = bytes.toInt(signed = true, ByteOrdering.BigEndian)
+    def toBytes(key: Int): ByteVector =
+      ByteVector.fromInt(key ^ Int32HighBit, ordering = ByteOrdering.BigEndian)
+    def fromBytes(bytes: ByteVector): Int =
+      bytes.toInt(signed = true, ByteOrdering.BigEndian) ^ Int32HighBit
 
     def fromString(str: String): Int = str.toInt
 
     override def isSegmentType: Boolean = true
-    override def size(key: Int): Int = 4
+    val size = 4
   }
 
   implicit case object IntKeyType extends IntKeyTypeLike
@@ -179,19 +187,25 @@ object SingleKeyTypes {
       java.lang.Double.longBitsToDouble(bytes.toLong(signed = true, ByteOrdering.BigEndian))
 
     def fromString(str: String): Double = str.toDouble
-
-    override def size(key: Double): Int = 8
     override def isSegmentType: Boolean = true
+    val size = 8
   }
 
   implicit case object DoubleKeyType extends DoubleKeyTypeLike
 
+  val stringSerde = StrideSerialiser.instance
+
   trait StringKeyTypeLike extends SingleKeyTypeBase[String] {
-    def toBytes(key: String): ByteVector = ByteVector(key.getBytes("UTF-8"))
-    def fromBytes(bytes: ByteVector): String = new String(bytes.toArray, "UTF-8")
+    def toBytes(key: String): ByteVector = ByteVector(stringSerde.toBytes(key))
+    override def parseBytes(remainder: ByteVector): (String, ByteVector) = {
+      val inputBuf = remainder.toByteBuffer
+      val inputStr = stringSerde.fromBytes(inputBuf)
+      (inputStr, remainder.drop(inputBuf.position))
+    }
+    def fromBytes(bytes: ByteVector): String = ""
     def fromString(str: String): String = str
     override def isSegmentType: Boolean = true
-    override def size(key: String): Int = key.getBytes("UTF-8").length
+    val size = 0
   }
 
   implicit case object StringKeyType extends StringKeyTypeLike
@@ -200,7 +214,7 @@ object SingleKeyTypes {
     def toBytes(key: Boolean): ByteVector = ByteVector(if(key) -1.toByte else 0.toByte)
     def fromBytes(bytes: ByteVector): Boolean = bytes(0) != 0
     def fromString(str: String): Boolean = str.toBoolean
-    def size(key: Boolean): Int = 1
+    val size = 1
   }
 
   implicit val timestampOrdering = Ordering.by((t: Timestamp) => t.getTime)
@@ -217,6 +231,6 @@ object SingleKeyTypes {
       }
     }
     override def isSegmentType: Boolean = true
-    def size(key: Timestamp): Int = 8
+    val size = 8
   }
 }
