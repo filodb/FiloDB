@@ -592,6 +592,7 @@ Version 0.3 is the stable, latest released version.  It has been tested on a clu
 * WHERE clauses specifying multiple partition keys now get pushed down.  Should result in much better read performance in those cases.
 * New config `filodb.cassandra.keyspace-replication-options` allows any CQL replication option to be set when FiloDB keyspaces are created with CLI --command init
 * CLI log directory can be easily changed with FILO_LOG_DIR env var
+* CLI analyze command can now analyze segments from multiple partitions up to a configurable maximum # of segments
 * Allow comma-separated list of hosts for `filodb.cassandra.hosts`
 * Fix missing data on read issue with wrapping token ranges in C*
 * Fix actor path uniqueness issue on ingestion
