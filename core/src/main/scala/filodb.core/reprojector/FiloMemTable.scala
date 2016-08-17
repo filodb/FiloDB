@@ -28,7 +28,7 @@ import filodb.core.metadata.{Column, Dataset, RichProjection}
  *   }
  * }}}
  */
-class FiloMemTable(val projection: RichProjection, config: Config) extends MemTable with StrictLogging {
+class FiloMemTable(val projection: RichProjection, config: Config, version: Int) extends MemTable with StrictLogging {
   import collection.JavaConverters._
 
   type PK = projection.partitionType.T
@@ -42,7 +42,7 @@ class FiloMemTable(val projection: RichProjection, config: Config) extends MemTa
   private implicit val partSegOrdering = projection.segmentType.ordering
   private val partSegKeyMap = new TreeMap[(PK, SK), KeyMap](Ordering[(PK, SK)])
 
-  private val appendStore = new FiloAppendStore(config, projection.columns)
+  private val appendStore = new FiloAppendStore(config, projection.columns, projection.datasetRef, version)
 
   // NOTE: No synchronization required, because MemTables are used within an actor.
   // See InMemoryMetaStore for a thread-safe design
@@ -94,4 +94,6 @@ class FiloMemTable(val projection: RichProjection, config: Config) extends MemTa
     partSegKeyMap.clear
     appendStore.reset()
   }
+
+  override def deleteWalFiles(): Unit = appendStore.deleteWalFiles()
 }

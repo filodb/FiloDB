@@ -47,7 +47,7 @@ class ChunkHeaderSpec extends FunSpec with Matchers with BeforeAndAfter {
     val col1 = new DataColumn(0,"column1","testtable",0,Column.ColumnType.StringColumn)
     val cols = Seq (col1)
 
-    val expectedHeader = Array[Byte](0x00,'L','A','W','o','l','i','F') ++ Array[Byte](0x01,0x00) ++
+    val expectedHeader = Array[Byte]('F','i','l','o','W','A','L',0x00) ++ Array[Byte](0x01,0x00) ++
       (Array[Byte](0x01,0x00)) ++ Array[Byte](0x1A,0x00) ++
       "[0,column1,0,StringColumn]".getBytes(StandardCharsets.UTF_8).reverse
 

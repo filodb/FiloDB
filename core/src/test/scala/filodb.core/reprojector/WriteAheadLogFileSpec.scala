@@ -1,14 +1,14 @@
 package filodb.core.reprojector
 
-import java.io.{File, FileOutputStream, FileWriter, RandomAccessFile}
+import java.io.RandomAccessFile
 import java.nio.ByteBuffer
 import java.nio.charset.StandardCharsets
-import java.nio.file.{FileSystems, Files}
+import java.nio.file.Files
 
 import com.typesafe.config.ConfigFactory
 import filodb.core.NamesTestData._
-import filodb.core.{DatasetRef, GdeltTestData, NamesTestData}
 import filodb.core.metadata.{Column, DataColumn}
+import filodb.core.{DatasetRef, GdeltTestData, NamesTestData}
 import org.scalatest.{BeforeAndAfter, FunSpec, Matchers}
 import org.velvia.filo.{ArrayStringRowReader, RowToVectorBuilder, TupleRowReader}
 
@@ -18,6 +18,7 @@ class WriteAheadLogFileSpec extends FunSpec with Matchers with BeforeAndAfter{
 
   before {
     val tempDir = Files.createTempDirectory("wal")
+    // /var/folders/tv/qrqnpyzj0qdfgw122hf1d7zr0000gn/T
 
     config = ConfigFactory.parseString(
       s"""filodb.memtable.memtable-wal-dir = ${tempDir}
@@ -28,26 +29,29 @@ class WriteAheadLogFileSpec extends FunSpec with Matchers with BeforeAndAfter{
   }
 
   it("creates memory mapped file with no data") {
-    val wal = new WriteAheadLog(config, new DatasetRef("test"), 0)
+    val wal = new WriteAheadLog(config, new DatasetRef("test"))
     wal.exists should equal(true)
+    wal.close()
     wal.delete
   }
 
   it("write header to the file") {
-    val wal = new WriteAheadLog(config, new DatasetRef("test"), 0, GdeltTestData.createColumns(2))
-    val expectedHeader = "\000LAWoliF\001\000\002\000\065\000]nmuloCgnirtS,0,1nmuloc,1[\001]nmuloCgnirtS,0,2nmuloc,2["
+    val wal = new WriteAheadLog(config, new DatasetRef("test"), GdeltTestData.createColumns(2))
+    val expectedHeader = "FiloWAL\000\001\000\002\000\065\000]nmuloCgnirtS,0,1nmuloc,1[\001]nmuloCgnirtS,0,2nmuloc,2["
       .getBytes(StandardCharsets.UTF_8)
     wal.readHeader should equal(expectedHeader)
+    wal.close()
     wal.delete
   }
 
   ignore("write filochunks indicator to the file") {
-    val wal = new WriteAheadLog(config, NamesTestData.datasetRef, 0, NamesTestData.schema)
+    val wal = new WriteAheadLog(config, NamesTestData.datasetRef, NamesTestData.schema)
     wal.writeChunks(new Array[ByteBuffer](0))
     val chunksInd = new Array[Byte](2)
     // wal.buffer.position(wal.headerLength)
     // wal.buffer.get(chunksInd)
     chunksInd should equal(Array[Byte](0x02,0x00))
+    wal.close()
     wal.delete
   }
 
@@ -56,27 +60,30 @@ class WriteAheadLogFileSpec extends FunSpec with Matchers with BeforeAndAfter{
   }
 
   it("write filochunks to the file") {
-    val wal = new WriteAheadLog(config, datasetRef, 0, schema)
+    val wal = new WriteAheadLog(config, datasetRef, schema)
     wal.writeChunks(createChunkData)
+    wal.close()
     wal.delete
   }
 
   it("Able to write chunk data greater than the size of the mapped byte buffer") {
-    val wal = new WriteAheadLog(config, datasetRef, 0, schema)
+    val wal = new WriteAheadLog(config, datasetRef, schema)
     wal.writeChunks(createChunkData)
     wal.writeChunks(createChunkData)
+    wal.close()
     wal.delete
   }
 
   it("Able to write large header greater than the size of the mapped byte buffer") {
-    val wal = new WriteAheadLog(config, new DatasetRef(GdeltTestData.dataset1.name), 0, GdeltTestData.schema)
+    val wal = new WriteAheadLog(config, new DatasetRef(GdeltTestData.dataset1.name), GdeltTestData.schema)
     wal.writeChunks(createChunkData(GdeltTestData.schema,GdeltTestData.readers))
     wal.writeChunks(createChunkData(GdeltTestData.schema,GdeltTestData.readers))
+    wal.close()
     wal.delete
   }
 
   it("Valid WAL header"){
-    val wal = new WriteAheadLog(config, datasetRef, 0, schema)
+    val wal = new WriteAheadLog(config, datasetRef, schema)
     wal.writeChunks(createChunkData)
     wal.close
 
@@ -84,10 +91,12 @@ class WriteAheadLogFileSpec extends FunSpec with Matchers with BeforeAndAfter{
     reader.validFile should equal(true)
 
     wal.delete()
+    reader.close()
+    wal.close()
   }
 
   it("Invalid file identifier in header") {
-    val wal = new WriteAheadLog(config, new DatasetRef(GdeltTestData.dataset1.name), 0, GdeltTestData.schema)
+    val wal = new WriteAheadLog(config, new DatasetRef(GdeltTestData.dataset1.name), GdeltTestData.schema)
     replaceBytes(wal, 1, Array[Byte]('X', 'X', 'X'))
     val reader = new WriteAheadLogReader(config, wal.path)
     reader.validFile should equal(false)
@@ -95,27 +104,33 @@ class WriteAheadLogFileSpec extends FunSpec with Matchers with BeforeAndAfter{
   }
 
   it("Invalid column definition header" ){
-    val wal = new WriteAheadLog(config, new DatasetRef(GdeltTestData.dataset1.name), 0, GdeltTestData.schema)
+    val wal = new WriteAheadLog(config, new DatasetRef(GdeltTestData.dataset1.name), GdeltTestData.schema)
     replaceBytes(wal, 8, Array[Byte]('X', 'X'))
     val reader = new WriteAheadLogReader(config,wal.path)
     reader.validFile should equal(false)
     wal.delete()
+    reader.close()
+    wal.close()
   }
 
   it("Invalid column count indicator" ){
-    val wal = new WriteAheadLog(config, new DatasetRef(GdeltTestData.dataset1.name), 0, GdeltTestData.schema)
+    val wal = new WriteAheadLog(config, new DatasetRef(GdeltTestData.dataset1.name), GdeltTestData.schema)
     replaceBytes(wal, 10, Array[Byte](0x11, 0x11))
     val reader = new WriteAheadLogReader(config,wal.path)
     reader.validFile should equal(false)
     wal.delete()
+    reader.close()
+    wal.close()
   }
 
   it("Invalid column definitions size" ){
-    val wal = new WriteAheadLog(config, new DatasetRef(GdeltTestData.dataset1.name), 0, GdeltTestData.schema)
+    val wal = new WriteAheadLog(config, new DatasetRef(GdeltTestData.dataset1.name), GdeltTestData.schema)
     replaceBytes(wal, 12, Array[Byte](0x01, 0x01))
     val reader = new WriteAheadLogReader(config,wal.path)
     reader.validFile should equal(false)
     wal.delete()
+    reader.close()
+    wal.close()
   }
 
 

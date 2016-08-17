@@ -66,6 +66,8 @@ trait CoordinatorSetup {
     system.actorOf(NodeCoordinatorActor.props(metaStore, reprojector, columnStore, config),
                    "coordinator")
 
+  // TODO: Load Dataset coordinators based on ingestion_state table.
+
   lazy val cluster = Cluster(system)
 
   def shutdown(): Unit = {

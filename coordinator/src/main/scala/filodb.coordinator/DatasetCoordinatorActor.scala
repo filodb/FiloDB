@@ -141,7 +141,7 @@ private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
   var mTableWriteTask: Option[Cancellable] = None
   var mTableFlushTask: Option[Cancellable] = None
 
-  def makeNewTable(): MemTable = new FiloMemTable(projection, config)
+  def makeNewTable(): MemTable = new FiloMemTable(projection, config, version)
 
   private def reportStats(): Unit = {
     logger.info(s"MemTable active table rows: $activeRows")
@@ -222,6 +222,7 @@ private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
     mTableFlushTask = None
 
     flushingTable = Some(activeTable)
+    // activeTable.deleteWalFiles
     activeTable = makeNewTable()
     val newTaskFuture = reprojector.reproject(flushingTable.get, version)
     curReprojection = Some(newTaskFuture)
@@ -231,6 +232,7 @@ private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
       case t: Throwable => self ! FlushFailed(t)
     }
     logger.info(s" flush cycle for ($nameVer)... is complete")
+    // TODO: delete wal files after flush completed
   }
 
   private def shouldFlush: Boolean =

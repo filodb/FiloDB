@@ -9,15 +9,15 @@ class WriteAheadLogReader(config: Config, path: String) {
 
   val walFile = new File(path)
 
-  val channel = new RandomAccessFile(walFile, "r").getChannel()
+  val channel = new RandomAccessFile(walFile, "r").getChannel
 
   val buffer = channel.map(FileChannel.MapMode.READ_ONLY, 0,channel.size())
 
   def validFile: Boolean = {
-    validField(8, ChunkHeader.fileFormatIdentifier) &&
-    validField(2, ChunkHeader.columnDefinitionIndicator) &&
+    validField(8, ChunkHeader.fileFormatIdentifier, false) &&
+    validField(2, ChunkHeader.columnDefinitionIndicator, true) &&
     validColumnDefinitions &&
-    validField(2, Array[Byte](0x00,0x02))
+    validField(2, Array[Byte](0x00,0x02), true)
   }
 
   private def validColumnDefinitions: Boolean = {
@@ -27,8 +27,12 @@ class WriteAheadLogReader(config: Config, path: String) {
     columnCount == columnDefinitions.count(_ == 0x01) + 1
   }
 
-  private def validField(size: Int, target: Array[Byte]): Boolean = {
-    getBytes(size).reverse.sameElements(target)
+  private def validField(size: Int, target: Array[Byte],  reverseflag: Boolean): Boolean = {
+    if(reverseflag) {
+      getBytes(size).reverse.sameElements(target)
+    } else {
+      getBytes(size).sameElements(target)
+    }
   }
 
   private def getBytes(size: Int): Array[Byte] = {

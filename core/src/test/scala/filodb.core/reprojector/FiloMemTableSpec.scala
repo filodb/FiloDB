@@ -1,19 +1,32 @@
 package filodb.core.reprojector
 
+import java.nio.file.Files
+
 import com.typesafe.config.ConfigFactory
 import org.velvia.filo.TupleRowReader
-
 import filodb.core._
 import filodb.core.metadata.{Column, Dataset, RichProjection}
 import filodb.core.store.SegmentInfo
-
-import org.scalatest.{FunSpec, Matchers, BeforeAndAfter}
+import org.scalatest.{BeforeAndAfter, FunSpec, Matchers}
 
 class FiloMemTableSpec extends FunSpec with Matchers with BeforeAndAfter {
   import NamesTestData._
+  var config = ConfigFactory.load("application_test.conf").getConfig("filodb")
 
-  val config = ConfigFactory.load("application_test.conf").getConfig("filodb")
+  before {
+    val tempDir = Files.createTempDirectory("wal")
+    // /var/folders/tv/qrqnpyzj0qdfgw122hf1d7zr0000gn/T
+
+    config = ConfigFactory.parseString(
+      s"""filodb.memtable.memtable-wal-dir = ${tempDir}
+          filodb.memtable.mapped-byte-buffer-size = 1024
+       """)
+      .withFallback(ConfigFactory.load("application_test.conf"))
+      .getConfig("filodb")
+  }
+
   val segInfo = SegmentInfo(Dataset.DefaultPartitionKey, 0)
+  val version = 0
 
   val namesWithPartCol = (0 until 50).flatMap { partNum =>
     names.map { t => (t._1, t._2, t._3, t._4, Some(partNum.toString)) }
@@ -28,7 +41,7 @@ class FiloMemTableSpec extends FunSpec with Matchers with BeforeAndAfter {
   // Turn this into a common spec for all memTables
   describe("insertRows, readRows with forced flush") {
     it("should insert out of order rows and read them back in order") {
-      val mTable = new FiloMemTable(projection, config)
+      val mTable = new FiloMemTable(projection, config, version)
       mTable.numRows should be (0)
 
       mTable.ingestRows(names.map(TupleRowReader))
@@ -39,7 +52,7 @@ class FiloMemTableSpec extends FunSpec with Matchers with BeforeAndAfter {
     }
 
     it("should replace rows and read them back in order") {
-      val mTable = new FiloMemTable(projection, config)
+      val mTable = new FiloMemTable(projection, config, version)
       mTable.ingestRows(names.take(4).map(TupleRowReader))
       mTable.ingestRows(names.take(2).map(TupleRowReader))
 
@@ -49,7 +62,7 @@ class FiloMemTableSpec extends FunSpec with Matchers with BeforeAndAfter {
 
     it("should insert/replace rows with multiple partition keys and read them back in order") {
       // Multiple partition keys: Actor2Code, Year
-      val mTable = new FiloMemTable(GdeltTestData.projection1, config)
+      val mTable = new FiloMemTable(GdeltTestData.projection1, config, version)
       mTable.ingestRows(GdeltTestData.readers.take(10))
       mTable.ingestRows(GdeltTestData.readers.take(2))
 
@@ -60,7 +73,7 @@ class FiloMemTableSpec extends FunSpec with Matchers with BeforeAndAfter {
 
     it("should insert/replace rows with multiple row keys and read them back in order") {
       // Multiple row keys: Actor2Code, GLOBALEVENTID
-      val mTable = new FiloMemTable(GdeltTestData.projection2, config)
+      val mTable = new FiloMemTable(GdeltTestData.projection2, config, version)
       mTable.ingestRows(GdeltTestData.readers.take(6))
       mTable.ingestRows(GdeltTestData.readers.take(2))
 
@@ -71,7 +84,7 @@ class FiloMemTableSpec extends FunSpec with Matchers with BeforeAndAfter {
     }
 
     it("should ingest into multiple partitions using partition column") {
-      val memTable = new FiloMemTable(projWithPartCol, config)
+      val memTable = new FiloMemTable(projWithPartCol, config, version)
 
       memTable.ingestRows(namesWithPartCol.map(TupleRowReader))
 
@@ -82,7 +95,7 @@ class FiloMemTableSpec extends FunSpec with Matchers with BeforeAndAfter {
     }
 
     it("should throw error if null partition col value") {
-      val mTable = new FiloMemTable(projWithPartCol, config)
+      val mTable = new FiloMemTable(projWithPartCol, config, version)
 
       intercept[NullKeyValue] {
         mTable.ingestRows(namesWithNullPartCol.map(TupleRowReader))
@@ -92,10 +105,11 @@ class FiloMemTableSpec extends FunSpec with Matchers with BeforeAndAfter {
     it("should not throw error if :getOrElse computed column used with null partition col value") {
       val largeDatasetGetOrElse = largeDataset.copy(partitionColumns = Seq(":getOrElse league --"))
       val projWithPartCol2 = RichProjection(largeDatasetGetOrElse, schemaWithPartCol)
-      val mTable = new FiloMemTable(projWithPartCol2, config)
+      val mTable = new FiloMemTable(projWithPartCol2, config, version)
 
       mTable.ingestRows(namesWithNullPartCol.map(TupleRowReader))
       mTable.numRows should equal (namesWithNullPartCol.length)
     }
   }
+  // TODO: Delete wal temp folders
 }

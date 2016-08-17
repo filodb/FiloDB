@@ -6,8 +6,9 @@ import java.nio.ByteBuffer
 import filodb.core.metadata.Column
 
 class ChunkHeader(cols : Seq[Column] = Seq() ) {
+
   def header: Array[Byte] = {
-    littleEndian(ChunkHeader.fileFormatIdentifier) ++
+    ChunkHeader.fileFormatIdentifier ++
       littleEndian(ChunkHeader.columnDefinitionIndicator) ++
       littleEndian(ChunkHeader.columnCountIndicator(cols)) ++
       columnDefinitions
@@ -17,13 +18,10 @@ class ChunkHeader(cols : Seq[Column] = Seq() ) {
     val colDefinitions =cols.foldLeft("")(_  + _.toString + "\001").dropRight(1)
     val length = colDefinitions.length.toShort
     val bytes = colDefinitions.getBytes(StandardCharsets.UTF_8)
-    littleEndian(shortToBytes(length)) ++ littleEndian(bytes)
+    littleEndian(ChunkHeader.shortToBytes(length)) ++ littleEndian(bytes)
   }
 
   private def littleEndian (data: Array[Byte]) = data.reverse
-
-  private def shortToBytes(count: Short): Array[Byte] =
-    ByteBuffer.allocate(2).putShort(count).array()
 }
 
 object ChunkHeader{

@@ -12,7 +12,7 @@ import org.joda.time.DateTime
 import org.joda.time.format.ISODateTimeFormat
 
 class WriteAheadLog(config: Config, dataset: DatasetRef,
-                    version: Int = 0, columns: Seq[Column] = Seq()) {
+                     columns: Seq[Column] = Seq(),version: Int = 0) {
 
   private val walBuffer = new WriteAheadLogBuffer(config, dataset, version)
 
@@ -68,7 +68,7 @@ class WriteAheadLogBuffer(config: Config, dataset: DatasetRef, version: Int = 0)
     new File(s"${walDir}/${dataset}_${version}/${datestr}.wal")
   }
 
-  val channel = new RandomAccessFile(walFile, "rw").getChannel()
+  val channel = new RandomAccessFile(walFile, "rw").getChannel
 
   var bufferOffSet : Int = 0
   var buffer =  allocateBuffer(bufferSize)

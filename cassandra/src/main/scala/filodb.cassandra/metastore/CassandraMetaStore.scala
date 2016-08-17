@@ -16,18 +16,21 @@ class CassandraMetaStore(config: Config)
                         (implicit val ec: ExecutionContext) extends MetaStore {
   val datasetTable = new DatasetTable(config)
   val columnTable = new ColumnTable(config)
+  val ingestionStateTable = new IngestionStateTable(config)
 
   def initialize(): Future[Response] = {
     datasetTable.createKeyspace(datasetTable.keyspace)
     for { dtResp <- datasetTable.initialize()
-          ctResp <- columnTable.initialize() }
-    yield { ctResp }
+          ctResp <- columnTable.initialize()
+          istResp <- ingestionStateTable.initialize()}
+    yield { istResp }
   }
 
   def clearAllData(): Future[Response] =
     for { dtResp <- datasetTable.clearAll()
-          ctResp <- columnTable.clearAll() }
-    yield { ctResp }
+          ctResp <- columnTable.clearAll()
+          istResp <- ingestionStateTable.clearAll()}
+    yield { istResp }
 
   def newDataset(dataset: Dataset): Future[Response] =
     datasetTable.createNewDataset(dataset)
@@ -52,5 +55,6 @@ class CassandraMetaStore(config: Config)
   def shutdown(): Unit = {
     datasetTable.shutdown()
     columnTable.shutdown()
+    ingestionStateTable.shutdown()
   }
 }

@@ -3,11 +3,13 @@ package filodb.core.reprojector
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.slf4j.StrictLogging
 import java.nio.ByteBuffer
+
+import filodb.core.DatasetRef
 import net.ceedubs.ficus.Ficus._
-import org.velvia.filo.{RowToVectorBuilder, RowReader, FiloRowReader, FastFiloRowReader}
+import org.velvia.filo.{FastFiloRowReader, FiloRowReader, RowReader, RowToVectorBuilder}
+
 import scala.collection.mutable.ArrayBuffer
 import scalaxy.loops._
-
 import filodb.core.metadata.Column
 
 /**
@@ -23,7 +25,8 @@ import filodb.core.metadata.Column
  *   }
  * }}}
  */
-class FiloAppendStore(config: Config, columns: Seq[Column]) extends StrictLogging {
+class FiloAppendStore(config: Config, columns: Seq[Column], dataset: DatasetRef, version: Int) extends StrictLogging {
+
   import RowReader._
 
   val chunkSize = config.as[Option[Int]]("memtable.filo.chunksize").getOrElse(1000)
@@ -40,11 +43,14 @@ class FiloAppendStore(config: Config, columns: Seq[Column]) extends StrictLoggin
 
   private var _numRows = 0
 
+  private val wal = new WriteAheadLog(config, dataset, columns, version)
+
   /**
    * Appends new rows to the row store.  The rows are serialized into Filo vectors and flushed to
    * the WAL as well, so make sure there are a sizeable number of rows, ideally >= chunksize.
    * NOTE: only one chunk is flushed, even if # of rows is much bigger than chunksize.
-   * @param rows the rows to append
+    *
+    * @param rows the rows to append
    * @return the (chunkIndex, starting row #) of the rows just added
    */
   def appendRows(rows: Seq[RowReader]): (Int, Int) = {
@@ -68,6 +74,9 @@ class FiloAppendStore(config: Config, columns: Seq[Column]) extends StrictLoggin
     chunks += chunkAray
     readers += new FastFiloRowReader(chunkAray, clazzes, finalLength)
 
+    // write chunks to WAL
+    wal.writeChunks(chunkAray)
+
     // Reset builder if it was at least chunkSize rows
     if (finalLength >= chunkSize) builder.reset()
 
@@ -77,7 +86,8 @@ class FiloAppendStore(config: Config, columns: Seq[Column]) extends StrictLoggin
   /**
    * Retrieves a single row at a given chunkIndex and row number.  This is meant for speed - so
    * no limit checking is done, and the chunkIndex and rowNo are encoded as a long.
-   * @param keyLong upper 32 bits = chunk #, lower 32 bits = row #
+    *
+    * @param keyLong upper 32 bits = chunk #, lower 32 bits = row #
    */
   final def getRowReader(keyLong: Long): RowReader = {
     val reader = readers((keyLong >> 32).toInt)
@@ -92,4 +102,6 @@ class FiloAppendStore(config: Config, columns: Seq[Column]) extends StrictLoggin
     readers.clear
     builder.reset()
   }
+
+  def deleteWalFiles(): Unit = wal.delete()
 }

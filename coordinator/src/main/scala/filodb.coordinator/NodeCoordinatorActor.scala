@@ -22,7 +22,7 @@ import filodb.core.reprojector.Reprojector
  * - Metadata changes (dataset/column changes)
  * - Caching changes to dataset metadata?
  * - Supervising, spinning up, cleaning up DatasetCoordinatorActors
- * - Forwarding new changes (rows) to other NodeCoordinatorActors if they are not local
+ * - Forwarding new changes (rows) to other NodeCoordinatorActors if they are not localØ
  * - Forwarding rows to DatasetCoordinatorActors
  *
  * It is called by local (eg HTTP) as well as remote (eg Spark ETL) processes.
