@@ -15,7 +15,7 @@ object RowSource {
   case object AllDone
   case object CheckCanIngest
   case class SetupError(err: ErrorResponse)
-  case class IngestionErr(msg: String)
+  case class IngestionErr(msg: String, cause: Option[Throwable] = None)
 }
 
 /**
@@ -122,7 +122,10 @@ trait RowSource extends Actor with StrictLogging {
       schedule(waitingPeriod, CheckCanIngest)
 
     case IngestionCommands.UnknownDataset =>
-        whoStartedMe.foreach(_ ! IngestionErr("Ingestion actors shut down, check error logs"))
+        whoStartedMe.foreach(_ ! IngestionErr("Ingestion actors shut down, check worker error logs"))
+
+    case t: Throwable =>
+        whoStartedMe.foreach(_ ! IngestionErr(t.getMessage, Some(t)))
 
     case e: ErrorResponse =>
         whoStartedMe.foreach(_ ! IngestionErr(e.toString))

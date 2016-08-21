@@ -9,7 +9,7 @@ import scodec.bits._
 
 import filodb.cassandra.FiloCassandraConnector
 import filodb.core._
-import filodb.core.store.ChunkedData
+import filodb.core.store.{ColumnStoreStats, ChunkedData}
 
 /**
  * Represents the table which holds the actual columnar chunks for segments
@@ -52,14 +52,18 @@ sealed class ChunkTable(dataset: DatasetRef, connector: FiloCassandraConnector)
   def writeChunks(partition: Types.BinaryPartition,
                   version: Int,
                   segmentId: Types.SegmentId,
-                  chunks: Iterator[(String, Types.ChunkID, ByteBuffer)]): Future[Response] = {
+                  chunks: Iterator[(String, Types.ChunkID, ByteBuffer)],
+                  stats: ColumnStoreStats): Future[Response] = {
     val partBytes = toBuffer(partition)
     val segKeyBytes = toBuffer(segmentId)
+    var chunkBytes = 0L
     val statements = chunks.map { case (columnName, id, bytes) =>
+      chunkBytes += bytes.capacity.toLong
       writeChunksCql.bind(partBytes, version: java.lang.Integer, segKeyBytes,
                           id: java.lang.Integer, columnName, bytes)
-    }
-    connector.execStmt(unloggedBatch(statements.toSeq))
+    }.toSeq
+    stats.addChunkWriteStats(statements.length, chunkBytes)
+    connector.execStmt(unloggedBatch(statements))
   }
 
   val readChunksCql = s"""SELECT segmentid, chunkid, data FROM $tableString WHERE

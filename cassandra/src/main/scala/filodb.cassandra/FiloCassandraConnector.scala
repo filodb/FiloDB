@@ -57,11 +57,9 @@ trait FiloCassandraConnector {
 
   def keySpaceName(ref: DatasetRef): String = ref.database.getOrElse(defaultKeySpace)
 
-  // This is really intended for unit tests.  Production users should create keyspaces manually,
-  // probably with something like NetworkTopologyStrategy.
-  def createKeyspace(keyspace: String, replicationFactor: Int = 1): Unit = {
-    session.execute(s"CREATE KEYSPACE IF NOT EXISTS $keyspace WITH replication = " +
-                    s"{'class': 'SimpleStrategy', 'replication_factor' : $replicationFactor};")
+  def createKeyspace(keyspace: String): Unit = {
+    val replOptions = config.getString("keyspace-replication-options")
+    session.execute(s"CREATE KEYSPACE IF NOT EXISTS $keyspace WITH replication = $replOptions")
   }
 
   import Util._

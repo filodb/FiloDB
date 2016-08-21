@@ -28,22 +28,6 @@ trait CsvImportExport extends StrictLogging {
   implicit val ec: ExecutionContext
   import scala.collection.JavaConversions._
 
-  protected def parseResponse[B](cmd: => Future[Response])(handler: PartialFunction[Response, B]): B = {
-    Await.result(cmd, 15 seconds) match {
-      case e: ErrorResponse =>
-        println("ERROR: " + e)
-        exitCode = 1
-        null.asInstanceOf[B]
-      case r: Response => handler(r)
-    }
-  }
-
-  protected def awaitSuccess(cmd: => Future[Response]): Unit = {
-    parseResponse(cmd) {
-      case Success =>   println("Succeeded.")
-    }
-  }
-
   def ingestCSV(dataset: DatasetRef,
                 version: Int,
                 csvPath: String,
