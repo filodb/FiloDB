@@ -1,18 +1,18 @@
 package filodb.coordinator
 
-import akka.actor.{ActorSystem, ActorRef, PoisonPill}
+import akka.actor.{ActorRef, ActorSystem, PoisonPill}
+import akka.cluster.Cluster
 import akka.testkit.{EventFilter, TestProbe}
 import akka.pattern.gracefulStop
 import com.typesafe.config.ConfigFactory
+
 import scala.concurrent.Await
 import scala.concurrent.duration._
-
 import filodb.core._
 import filodb.core.store._
 import filodb.core.metadata.{Column, DataColumn, Dataset}
-
 import org.scalatest.concurrent.ScalaFutures
-import org.scalatest.time.{Millis, Span, Seconds}
+import org.scalatest.time.{Millis, Seconds, Span}
 
 object NodeCoordinatorActorSpec extends ActorSpecConfig
 
@@ -46,7 +46,8 @@ with CoordinatorSetup with ScalaFutures {
   before {
     metaStore.clearAllData().futureValue
     columnStore.dropDataset(DatasetRef(dataset1.name)).futureValue
-    coordActor = system.actorOf(NodeCoordinatorActor.props(metaStore, reprojector, columnStore, config))
+    coordActor = system.actorOf(NodeCoordinatorActor.props(metaStore, reprojector,
+                                                    columnStore, config, cluster.selfAddress))
     probe = TestProbe()
   }
 
@@ -92,6 +93,26 @@ with CoordinatorSetup with ScalaFutures {
       val probes = (1 to 8).map { n => TestProbe() }
       probes.foreach { probe => probe.send(coordActor, SetupIngestion(projection1.datasetRef, colNames, 0)) }
       probes.foreach { probe => probe.expectMsg(IngestionReady) }
+    }
+
+    it("should add new entry for ingestion state for a given dataset/version, only first time") {
+      createTable(dataset1, schema)
+      val preSize = metaStore.ingestionstates.size
+
+      probe.send(coordActor, SetupIngestion(projection1.datasetRef, colNames, 1))
+      probe.expectMsg(IngestionReady)
+      metaStore.ingestionstates.size should equal(preSize + 1)
+
+      // second time for the same dataset
+      probe.send(coordActor, SetupIngestion(projection1.datasetRef, colNames, 1))
+      probe.expectMsg(IngestionReady)
+      metaStore.ingestionstates.size should equal(preSize + 1)
+
+      // for a different dataset
+      createTable(NamesTestData.dataset, NamesTestData.schema)
+      probe.send(coordActor, SetupIngestion(NamesTestData.datasetRef, NamesTestData.schema.map(_.name), 0))
+      probe.expectMsg(IngestionReady)
+      metaStore.ingestionstates.size should equal(preSize + 2)
     }
   }
 

@@ -22,6 +22,7 @@
     <orderEntry type="inheritedJdk" />
     <orderEntry type="sourceFolder" forTests="false" />
     <orderEntry type="module" module-name="core" exported="" />
+    <orderEntry type="library" name="SBT: com.typesafe:config:1.0.0:jar" level="project" />
     <orderEntry type="library" name="SBT: org.joda:joda-convert:1.2:jar" level="project" />
     <orderEntry type="library" name="SBT: joda-time:joda-time:2.2:jar" level="project" />
     <orderEntry type="library" name="SBT: io.netty:netty-transport:4.0.33.Final:jar" level="project" />
@@ -30,7 +31,6 @@
     <orderEntry type="library" name="SBT: io.netty:netty-codec:4.0.33.Final:jar" level="project" />
     <orderEntry type="library" name="SBT: io.netty:netty-buffer:4.0.33.Final:jar" level="project" />
     <orderEntry type="library" name="SBT: io.dropwizard.metrics:metrics-core:3.1.2:jar" level="project" />
-    <orderEntry type="library" name="SBT: com.typesafe:config:1.0.0:jar" level="project" />
     <orderEntry type="library" name="SBT: com.datastax.cassandra:cassandra-driver-core:3.0.2:jar" level="project" />
     <orderEntry type="library" scope="TEST" name="SBT: ch.qos.logback:logback-classic:1.0.7:jar" level="project" />
     <orderEntry type="library" scope="TEST" name="SBT: ch.qos.logback:logback-core:1.0.7:jar" level="project" />

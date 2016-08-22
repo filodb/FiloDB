@@ -1,17 +1,17 @@
 package filodb.coordinator
 
-import akka.actor.{Actor, ActorRef, Cancellable, Props}
+import akka.actor.{Actor, ActorRef, Address, Cancellable, Props}
 import akka.event.LoggingReceive
 import com.typesafe.config.Config
 import net.ceedubs.ficus.Ficus._
 import org.velvia.filo.RowReader
+
 import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.duration.FiniteDuration
 import scala.concurrent.Future
-
 import filodb.core.metadata.{Column, Dataset, Projection, RichProjection}
 import filodb.core.store.{ColumnStore, SegmentInfo}
-import filodb.core.reprojector.{MemTable, FiloMemTable, Reprojector}
+import filodb.core.reprojector.{FiloMemTable, MemTable, Reprojector}
 
 object DatasetCoordinatorActor {
   import filodb.core.Types._
@@ -141,7 +141,10 @@ private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
   var mTableWriteTask: Option[Cancellable] = None
   var mTableFlushTask: Option[Cancellable] = None
 
-  def makeNewTable(): MemTable = new FiloMemTable(projection, config, version)
+  val hostname: String = ""
+    // actorAddress.host.getOrElse("None") + ":" + actorAddress.port.getOrElse("None")
+
+  def makeNewTable(): MemTable = new FiloMemTable(projection, config, hostname, version)
 
   private def reportStats(): Unit = {
     logger.info(s"MemTable active table rows: $activeRows")

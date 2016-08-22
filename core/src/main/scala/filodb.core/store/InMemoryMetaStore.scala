@@ -24,6 +24,7 @@ class InMemoryMetaStore(implicit val ec: ExecutionContext) extends MetaStore wit
   type ColumnMap = ConcurrentSkipListMap[(Int, Types.ColumnId), DataColumn]
   val colMapOrdering = math.Ordering[(Int, Types.ColumnId)]
   val columns = new TrieMap[String, ColumnMap]
+  val ingestionstates = new TrieMap[String, String]
 
   def initialize(): Future[Response] = Future.successful(Success)
 
@@ -92,5 +93,20 @@ class InMemoryMetaStore(implicit val ec: ExecutionContext) extends MetaStore wit
     }.getOrElse(Column.EmptySchema)
   }
 
+  /**
+   * ** IngestionState API ***
+   */
+  def insertIngestionState(actorAddress: String, dataset: DatasetRef,
+                           state: String, version: Int): Future[Response] = {
+    val key = actorAddress + dataset.database.getOrElse("None") + dataset.dataset + version
+    ingestionstates.putIfAbsent(key, state) match {
+      case None    => Future.successful(Success)
+      case Some(x) =>
+        logger.info(s"Ignoring ingestion state for dataset($dataset); entry already exists")
+        Future.successful(AlreadyExists)
+    }
+  }
+
   def shutdown(): Unit = {}
+
 }

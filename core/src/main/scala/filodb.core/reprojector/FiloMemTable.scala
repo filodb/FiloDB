@@ -3,10 +3,11 @@ package filodb.core.reprojector
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.slf4j.StrictLogging
 import java.util.TreeMap
+
 import org.velvia.filo.RowReader
+
 import scala.math.Ordered
 import scalaxy.loops._
-
 import filodb.core.KeyRange
 import filodb.core.Types._
 import filodb.core.metadata.{Column, Dataset, RichProjection}
@@ -28,7 +29,8 @@ import filodb.core.metadata.{Column, Dataset, RichProjection}
  *   }
  * }}}
  */
-class FiloMemTable(val projection: RichProjection, config: Config, version: Int) extends MemTable with StrictLogging {
+class FiloMemTable(val projection: RichProjection, config: Config,
+                   actorAddr: String, version: Int) extends MemTable with StrictLogging {
   import collection.JavaConverters._
 
   type PK = projection.partitionType.T
@@ -42,7 +44,7 @@ class FiloMemTable(val projection: RichProjection, config: Config, version: Int)
   private implicit val partSegOrdering = projection.segmentType.ordering
   private val partSegKeyMap = new TreeMap[(PK, SK), KeyMap](Ordering[(PK, SK)])
 
-  private val appendStore = new FiloAppendStore(config, projection.columns, projection.datasetRef, version)
+  private val appendStore = new FiloAppendStore(projection, config, version)
 
   // NOTE: No synchronization required, because MemTables are used within an actor.
   // See InMemoryMetaStore for a thread-safe design

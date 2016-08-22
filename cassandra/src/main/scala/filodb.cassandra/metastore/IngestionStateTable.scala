@@ -34,12 +34,15 @@ sealed class IngestionStateTable(val config: Config)
        | VALUES (?, ?, ?, ?,?) IF NOT EXISTS""".stripMargin
   )
 
-  lazy val ingestionStSelectByDsCql = session.prepare(s"SELECT nodeActor, database, dataset, " +
-    s"version, state, exceptions FROM $tableString WHERE " +
-    s"nodeactor = ? AND database = ? AND dataset = ? AND version = ?")
+  lazy val ingestionStSelectByDsCql = session.prepare(
+    s"""SELECT nodeActor, database, dataset, version, state, exceptions
+       | FROM $tableString WHERE nodeactor = ? AND database = ? AND dataset = ? AND version = ?""".stripMargin
+  )
 
-  lazy val ingestionStSelectByActorCql = session.prepare(s"SELECT nodeActor, database, dataset, " +
-    s"state, exceptions FROM $tableString WHERE nodeactor = ? ")
+  lazy val ingestionStSelectByActorCql = session.prepare(
+    s"""SELECT nodeActor, database, dataset, state, exceptions
+       | FROM $tableString WHERE nodeactor = ? """.stripMargin
+  )
 
   def initialize(): Future[Response] = execCql(createCql)
 
@@ -48,17 +51,26 @@ sealed class IngestionStateTable(val config: Config)
   def dropTable(): Future[Response] = execCql(s"DROP TABLE $tableString")
 
   def insertIngestionState(nodeActor: String, database: String, name: String,
-                           version: Int, state: String): Future[Response] =
-   execStmt(ingestionStateInsertCql.bind(nodeActor, database, name,
-     version: java.lang.Integer, state), AlreadyExists)
+                           version: Int, state: String): Future[Response] = {
+    execStmt(ingestionStateInsertCql.bind(
+              nodeActor, database, name, version: java.lang.Integer, state),
+              AlreadyExists
+            )
+  }
 
   def getIngestionStateByDataset(nodeActor: String, database: String,
                         name: String, version: Int) : Future[Seq[Row]] =
-    session.executeAsync(ingestionStSelectByDsCql.bind(nodeActor, database, name, version: java.lang.Integer))
-      .toIterator.map { it => it.toSeq }
+    session.executeAsync(ingestionStSelectByDsCql.bind(
+                              nodeActor,
+                              database,
+                              name,
+                              version: java.lang.Integer)
+                        ).toIterator.map { it => it.toSeq }
 
   def getIngestionStateByNodeActor(nodeActor: String) : Future[Seq[Row]] =
-    session.executeAsync(ingestionStSelectByActorCql.bind(nodeActor)).toIterator.map { it => it.toSeq}
+    session.executeAsync(ingestionStSelectByActorCql.bind(
+                            nodeActor)
+                        ).toIterator.map { it => it.toSeq}
 
   def deleteIngestionStateByNodeActor(nodeActor: String): Future[Response] =
     execCql(s"DELETE FROM $tableString WHERE nodeactor = '${nodeActor}'")
@@ -66,12 +78,12 @@ sealed class IngestionStateTable(val config: Config)
   def deleteIngestionStateByDataset(nodeActor: String, keyspace: String, name: String,
                                     version: Int): Future[Response] =
     execCql(s"DELETE FROM $tableString WHERE nodeactor = '${nodeActor}' AND " +
-      s"database = '${keyspace}' AND dataset = '${name}' AND version = ${version}")
+            s"database = '${keyspace}' AND dataset = '${name}' AND version = ${version}")
 
   def updateIngestionState(nodeActor: String, keyspace: String, name: String,
                            state: String, exceptions: String, version: Int = 0): Future[Response] =
     execCql(s"UPDATE $tableString SET state = '${state}', exceptions = '${exceptions}' " +
-      s"WHERE nodeactor = '${nodeActor}' AND database = '${keyspace}' AND dataset = '${name}'" +
-      s"AND version = ${version: java.lang.Integer}")
+            s"WHERE nodeactor = '${nodeActor}' AND database = '${keyspace}' AND dataset = '${name}'" +
+            s"AND version = ${version: java.lang.Integer}")
 
 }

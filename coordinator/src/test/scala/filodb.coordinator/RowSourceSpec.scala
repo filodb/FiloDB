@@ -40,7 +40,8 @@ with CoordinatorSetup with ScalaFutures {
   metaStore.newDataset(dataset1).futureValue should equal (Success)
   val ref = DatasetRef(dataset1.name)
   schema.foreach { col => metaStore.newColumn(col, ref).futureValue should equal (Success) }
-  val coordActor = system.actorOf(NodeCoordinatorActor.props(metaStore, reprojector, columnStore, config))
+  val coordActor = system.actorOf(NodeCoordinatorActor.props(metaStore, reprojector,
+                                                      columnStore, config, cluster.selfAddress))
 
   before {
     columnStore.dropDataset(DatasetRef(dataset1.name)).futureValue

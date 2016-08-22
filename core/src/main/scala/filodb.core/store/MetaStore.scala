@@ -130,4 +130,14 @@ trait MetaStore {
    * Shuts down the MetaStore, including any threads that might be hanging around
    */
   def shutdown(): Unit
+
+  /**
+   * Creates an entry into ingestion_state when ingestion process starts for a given dataset
+   * @param actorAddress
+   * @param dataset
+   * @param state
+   * @param version
+   * @return
+   */
+  def insertIngestionState(actorAddress: String, dataset: DatasetRef, state: String, version: Int): Future[Response]
 }

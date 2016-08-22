@@ -1,12 +1,12 @@
 package filodb.coordinator
 
-import akka.actor.{Actor, ActorRef, PoisonPill, Props, SupervisorStrategy, Terminated}
+import akka.actor.{Actor, ActorRef, Address, PoisonPill, Props, SupervisorStrategy, Terminated}
 import akka.event.LoggingReceive
 import com.typesafe.config.Config
 import net.ceedubs.ficus.Ficus._
+
 import scala.concurrent.Future
 import scala.concurrent.duration._
-
 import filodb.core._
 import filodb.core.Types._
 import filodb.core.metadata.{Column, DataColumn, Dataset, Projection, RichProjection}
@@ -39,8 +39,9 @@ object NodeCoordinatorActor {
   def props(metaStore: MetaStore,
             reprojector: Reprojector,
             columnStore: ColumnStore,
-            config: Config): Props =
-    Props(classOf[NodeCoordinatorActor], metaStore, reprojector, columnStore, config)
+            config: Config,
+            actorAddress: Address): Props =
+    Props(classOf[NodeCoordinatorActor], metaStore, reprojector, columnStore, config, actorAddress)
 }
 
 /**
@@ -51,7 +52,8 @@ object NodeCoordinatorActor {
 class NodeCoordinatorActor(metaStore: MetaStore,
                            reprojector: Reprojector,
                            columnStore: ColumnStore,
-                           config: Config) extends BaseActor {
+                           config: Config,
+                           actorAddress: Address) extends BaseActor {
   import NodeCoordinatorActor._
   import DatasetCommands._
   import IngestionCommands._
@@ -131,6 +133,9 @@ class NodeCoordinatorActor(metaStore: MetaStore,
       val props = DatasetCoordinatorActor.props(richProj, version, columnStore, reprojector, config)
       val ref = context.actorOf(props, s"ds-coord-${datasetObj.name}-$version")
       self ! AddDatasetCoord(dataset, version, ref)
+      // Add entry in ingestion_state table for dataset
+      val path = actorAddress.host.getOrElse("None") + ":" + actorAddress.port.getOrElse("None")
+      metaStore.insertIngestionState(path, dataset, "Started", version)
       notify(IngestionReady)
     }
 

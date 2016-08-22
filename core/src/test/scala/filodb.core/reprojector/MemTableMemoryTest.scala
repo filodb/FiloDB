@@ -2,12 +2,10 @@ package filodb.core.reprojector
 
 import com.typesafe.config.ConfigFactory
 import org.velvia.filo.TupleRowReader
-
 import filodb.core.NamesTestData
 import filodb.core.metadata.{Column, Dataset}
 import filodb.core.store.SegmentSpec
-
-import org.scalatest.{FunSpec, Matchers, BeforeAndAfter}
+import org.scalatest.{BeforeAndAfter, FunSpec, Matchers}
 
 class MemTableMemoryTest extends FunSpec with Matchers with BeforeAndAfter {
   import NamesTestData._
@@ -15,7 +13,8 @@ class MemTableMemoryTest extends FunSpec with Matchers with BeforeAndAfter {
   val newSetting = "memtable.max-rows-per-table = 200000"
   val config = ConfigFactory.parseString(newSetting).withFallback(
                  ConfigFactory.load("application_test.conf")).getConfig("filodb")
-  val mTable = new FiloMemTable(projection, config, 0)
+  var actorAddress = "10.1.12.23:1092"
+  val mTable = new FiloMemTable(projection, config, actorAddress,0)
   import scala.concurrent.ExecutionContext.Implicits.global
 
   before {

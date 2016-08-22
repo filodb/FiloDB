@@ -10,7 +10,7 @@ import org.velvia.filo.{FastFiloRowReader, FiloRowReader, RowReader, RowToVector
 
 import scala.collection.mutable.ArrayBuffer
 import scalaxy.loops._
-import filodb.core.metadata.Column
+import filodb.core.metadata.{Column, RichProjection}
 
 /**
  * FiloAppendStore is an append-only store that stores chunks of rows in Filo vector format.
@@ -25,7 +25,7 @@ import filodb.core.metadata.Column
  *   }
  * }}}
  */
-class FiloAppendStore(config: Config, columns: Seq[Column], dataset: DatasetRef, version: Int) extends StrictLogging {
+class FiloAppendStore(val projection: RichProjection, config: Config, version: Int) extends StrictLogging {
 
   import RowReader._
 
@@ -35,7 +35,7 @@ class FiloAppendStore(config: Config, columns: Seq[Column], dataset: DatasetRef,
   private val chunks = new ArrayBuffer[Array[ByteBuffer]]
   private val readers = new ArrayBuffer[FiloRowReader]
 
-  private val filoSchema = Column.toFiloSchema(columns)
+  private val filoSchema = Column.toFiloSchema(projection.columns)
   private val clazzes = filoSchema.map(_.dataType).toArray
   private val colIds = filoSchema.map(_.name).toArray
 
@@ -43,7 +43,7 @@ class FiloAppendStore(config: Config, columns: Seq[Column], dataset: DatasetRef,
 
   private var _numRows = 0
 
-  private val wal = new WriteAheadLog(config, dataset, columns, version)
+  private val wal = new WriteAheadLog(config, projection.datasetRef, projection.columns, version)
 
   /**
    * Appends new rows to the row store.  The rows are serialized into Filo vectors and flushed to

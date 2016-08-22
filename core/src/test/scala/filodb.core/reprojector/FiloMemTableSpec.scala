@@ -27,6 +27,7 @@ class FiloMemTableSpec extends FunSpec with Matchers with BeforeAndAfter {
 
   val segInfo = SegmentInfo(Dataset.DefaultPartitionKey, 0)
   val version = 0
+  val actorAddress = "10.1.10.12" + ":" + "1011"
 
   val namesWithPartCol = (0 until 50).flatMap { partNum =>
     names.map { t => (t._1, t._2, t._3, t._4, Some(partNum.toString)) }
@@ -41,7 +42,7 @@ class FiloMemTableSpec extends FunSpec with Matchers with BeforeAndAfter {
   // Turn this into a common spec for all memTables
   describe("insertRows, readRows with forced flush") {
     it("should insert out of order rows and read them back in order") {
-      val mTable = new FiloMemTable(projection, config, version)
+      val mTable = new FiloMemTable(projection, config, actorAddress, version)
       mTable.numRows should be (0)
 
       mTable.ingestRows(names.map(TupleRowReader))
@@ -52,7 +53,7 @@ class FiloMemTableSpec extends FunSpec with Matchers with BeforeAndAfter {
     }
 
     it("should replace rows and read them back in order") {
-      val mTable = new FiloMemTable(projection, config, version)
+      val mTable = new FiloMemTable(projection, config, actorAddress, version)
       mTable.ingestRows(names.take(4).map(TupleRowReader))
       mTable.ingestRows(names.take(2).map(TupleRowReader))
 
@@ -62,7 +63,7 @@ class FiloMemTableSpec extends FunSpec with Matchers with BeforeAndAfter {
 
     it("should insert/replace rows with multiple partition keys and read them back in order") {
       // Multiple partition keys: Actor2Code, Year
-      val mTable = new FiloMemTable(GdeltTestData.projection1, config, version)
+      val mTable = new FiloMemTable(GdeltTestData.projection1, config, actorAddress, version)
       mTable.ingestRows(GdeltTestData.readers.take(10))
       mTable.ingestRows(GdeltTestData.readers.take(2))
 
@@ -73,7 +74,7 @@ class FiloMemTableSpec extends FunSpec with Matchers with BeforeAndAfter {
 
     it("should insert/replace rows with multiple row keys and read them back in order") {
       // Multiple row keys: Actor2Code, GLOBALEVENTID
-      val mTable = new FiloMemTable(GdeltTestData.projection2, config, version)
+      val mTable = new FiloMemTable(GdeltTestData.projection2, config, actorAddress, version)
       mTable.ingestRows(GdeltTestData.readers.take(6))
       mTable.ingestRows(GdeltTestData.readers.take(2))
 
@@ -84,7 +85,7 @@ class FiloMemTableSpec extends FunSpec with Matchers with BeforeAndAfter {
     }
 
     it("should ingest into multiple partitions using partition column") {
-      val memTable = new FiloMemTable(projWithPartCol, config, version)
+      val memTable = new FiloMemTable(projWithPartCol, config, actorAddress, version)
 
       memTable.ingestRows(namesWithPartCol.map(TupleRowReader))
 
@@ -95,7 +96,7 @@ class FiloMemTableSpec extends FunSpec with Matchers with BeforeAndAfter {
     }
 
     it("should throw error if null partition col value") {
-      val mTable = new FiloMemTable(projWithPartCol, config, version)
+      val mTable = new FiloMemTable(projWithPartCol, config, actorAddress, version)
 
       intercept[NullKeyValue] {
         mTable.ingestRows(namesWithNullPartCol.map(TupleRowReader))
@@ -105,7 +106,7 @@ class FiloMemTableSpec extends FunSpec with Matchers with BeforeAndAfter {
     it("should not throw error if :getOrElse computed column used with null partition col value") {
       val largeDatasetGetOrElse = largeDataset.copy(partitionColumns = Seq(":getOrElse league --"))
       val projWithPartCol2 = RichProjection(largeDatasetGetOrElse, schemaWithPartCol)
-      val mTable = new FiloMemTable(projWithPartCol2, config, version)
+      val mTable = new FiloMemTable(projWithPartCol2, config, actorAddress, version)
 
       mTable.ingestRows(namesWithNullPartCol.map(TupleRowReader))
       mTable.numRows should equal (namesWithNullPartCol.length)
