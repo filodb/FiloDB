@@ -21,7 +21,7 @@ csvDF.write.format("filodb.spark").
              option("dataset", "gdelt").
              option("row_keys", "GLOBALEVENTID").
              option("segment_key", ":round GLOBALEVENTID 10000").
-             option("partition_keys", ":getOrElse MonthYear -1").
+             option("partition_keys", "MonthYear").
              mode(SaveMode.Overwrite).save()
 ```
 

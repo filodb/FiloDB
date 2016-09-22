@@ -109,7 +109,7 @@ Your input is appreciated!
 1. [Java 8](http://www.oracle.com/technetwork/java/javase/downloads/jdk8-downloads-2133151.html)
 2. [SBT](http://www.scala-sbt.org/) to build
 3. [Apache Cassandra](http://cassandra.apache.org/) (We prefer using [CCM](https://github.com/pcmanus/ccm) for local testing) (Optional if you are using the in-memory column store)
-4. [Apache Spark (1.6.x)](http://spark.apache.org/)
+4. [Apache Spark (1.5 or 1.6)](http://spark.apache.org/)
 
 ## Getting Started
 
@@ -163,9 +163,9 @@ Three types of key define the data model of a FiloDB table.
 
 1. **partition key** - decides how data is going to be distributed across the cluster. All data within one partition key is guaranteed to fit on one node. May consist of multiple columns.
 2. **segment key** - groups row values into efficient chunks.  Segments within a partition are sorted by segment key and range scans can be done over segment keys.   
-1. **row key**       - acts as a primary key within each partition and decides how data will be sorted within each segment.  May consist of multiple columns.
+1. **row key**     - acts as a primary key within each partition and decides how data will be sorted within each segment.  May consist of multiple columns.
 
-The PRIMARY KEY for FiloDB consists of (partition key, segment_key, row key).  When choosing the above values you must make sure the combination of the three are unique.  No component of a primary key may be null - see the `:getOrElse` function for a way of dealing with null inputs.
+The PRIMARY KEY for FiloDB consists of (partition key, segment_key, row key).  When choosing the above values you must make sure the combination of the three are unique.  If any component of a primary key contains a null value, then a default value will be substituted.
 
 Specifying the partitioning column is optional.  If a partitioning column is not specified, FiloDB will create a default one with a fixed value, which means everything will be thrown into one node, and is only suitable for small amounts of data.  If you don't specify a partitioning column, then you have to make sure combination of segment key and row key values are all unique.
 
@@ -175,12 +175,12 @@ For additional information refer to Data Modeling and Performance Considerations
 
 ### Computed Columns
 
-You may specify a function, or computed column, for use with any key column.  This is especially useful for working around the non-null requirement for keys, or for computing a good segment key.
+You may specify a function, or computed column, for use with any key column, except for row keys.  This is especially useful for computing a good segment key, or hashing values to generate a good partition key.
 
 | Name      | Description     | Example     |
 | :-------- | :-------------- | :---------- |
 | string    | returns a constant string value | `:string /0` |
-| getOrElse | returns default value if column value is null.  NOTE: do not use the default value null for strings. | `:getOrElse columnA ---` |
+| getOrElse | returns default value if column value is null.  This is not needed most of the time as FiloDB will use a default value in case of null, though `:getOrElse` may help with key uniqueness.   NOTE: do not use the default value null for strings. | `:getOrElse columnA ---` |
 | round     | rounds down a numeric column.  Useful for bucketing by time or bucketing numeric IDs.  | `:round timestamp 10000` |
 | stringPrefix | takes the first N chars of a string; good for partitioning | `:stringPrefix token 4` |
 | hash      | hashes keys of any type to an int between 0 and N | `:hash customerID 400` | 
@@ -285,9 +285,9 @@ The options to use with the data-source api are:
 |------------------|------------------------------------------------------------------|------------|----------|
 | dataset          | name of the dataset                                              | read/write | No       |
 | database         | name of the database to use for the dataset.  For Cassandra, defaults to `filodb.cassandra.keyspace` config.  | read/write | Yes |
-| row_keys         | comma-separated list of column name(s) or computed column functions to use for the row primary key within each partition.  Cannot be null.  Use `:getOrElse` function if null values might be encountered.  | write      | No if mode is OverWrite or creating dataset for first time  |
-| segment_key      | name of the column (could be computed) to use to group rows into segments in a partition.  Cannot be null.  Use `:getOrElse` function if null values might be encountered.  | write      | yes - defaults to `:string /0` |
-| partition_keys   | comma-separated list of column name(s) or computed column functions to use for the partition key.  Cannot be null.  Use `:getOrElse` function if null values might be encountered.  If not specified, defaults to `:string /0` (a single partition).  | write      | Yes      |
+| row_keys         | comma-separated list of column name(s) to use for the row primary key within each partition.  Computed columns are not allowed.  | write      | No if mode is OverWrite or creating dataset for first time  |
+| segment_key      | name of the column (could be computed) to use to group rows into segments in a partition.   | write      | yes - defaults to `:string /0` |
+| partition_keys   | comma-separated list of column name(s) or computed column functions to use for the partition key.  If not specified, defaults to `:string /0` (a single partition).  | write      | Yes      |
 | splits_per_node  | number of read threads per node, defaults to 4 | read | Yes |
 | reset_schema     | If true, allows dataset schema (eg partition keys) to be redefined for an existing dataset when SaveMode.Overwrite is used.  Defaults to false.  | write | Yes |
 | chunk_size       | Max number of rows to put into one chunk.  Note that this only has an effect if the dataset is created for the first time.| write | Yes |
@@ -356,7 +356,7 @@ scala> csvDF.write.format("filodb.spark").
              option("dataset", "gdelt").
              option("row_keys", "GLOBALEVENTID").
              option("segment_key", ":round GLOBALEVENTID 10000").
-             option("partition_keys", ":getOrElse MonthYear -1").
+             option("partition_keys", "MonthYear").
              mode(SaveMode.Overwrite).save()
 ```
 
@@ -367,7 +367,7 @@ scala> csvDF.write.format("filodb.spark").
              option("dataset", "gdelt_by_country_year").
              option("row_keys", "GLOBALEVENTID").
              option("segment_key", ":string 0").
-             option("partition_keys", ":getOrElse Actor2CountryCode NONE,:getOrElse Year -1").
+             option("partition_keys", "Actor2CountryCode,Year").
              mode(SaveMode.Overwrite).save()
 ```
 
@@ -401,7 +401,7 @@ import filodb.spark._
 sqlContext.saveAsFilo(df, "gdelt",
                       rowKeys = Seq("GLOBALEVENTID"),
                       segmentKey = ":round GLOBALEVENTID 10000",
-                      partitionKeys = Seq(":getOrElse MonthYear -1"))
+                      partitionKeys = Seq("MonthYear"))
 ```
 
 The above creates the gdelt table based on the keys above, and also inserts data from the dataframe df.
