@@ -30,7 +30,7 @@ class SegmentSpec extends FunSpec with Matchers with BeforeAndAfter {
   }
 
   private def storeChunkSet(chunkSet: ChunkSet): Unit = {
-    val rowKeyColNames = projection.rowKeyColumnIds
+    val rowKeyColNames = projection.rowKeyColumns.map(_.name)
     val chunkArray = rowKeyColNames.map(chunkSet.chunks).toArray
     rowKeyChunks(chunkSet.info.id) = chunkArray
   }

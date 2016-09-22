@@ -118,7 +118,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
 
   // The first row key column is a computed column, so this test also ensures that retrieving the original
   // source columns works.
-  ignore should "replace rows with multi row keys to an uncached segment" in {
+  it should "replace rows with multi row keys to an uncached segment" in {
     import GdeltTestData._
     val segmentsStates = getSegments(colStore, 197901.asInstanceOf[projection2.PK])
     segmentsStates.foreach { case (seg, _) =>

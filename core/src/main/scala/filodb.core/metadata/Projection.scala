@@ -114,37 +114,6 @@ case class RichProjection(projection: Projection,
         segmentColString,
         extraColStrings.mkString(":")).mkString("\001")
   }
-
-  def rowKeyColumnIds: Seq[ColumnId] = rowKeyColumns.flatMap {
-    case c: ComputedColumn => c.sourceColumns
-    case d: Column => Seq(d.name)
-  }
-
-  /**
-   * Creates a new RichProjection intended only for ChunkMergingStrategy.mergeSegments...
-   * it reads only the source columns needed to recreate the row key, so the row key functions need
-   * to be recomputed.
-   * TODO: remove this once we figure out how to handle computed columns in row keys
-   */
-  def toRowKeyOnlyProjection: RichProjection = {
-    // First, reduce set of columns to row key columns (including any computed source columns)
-    val newColumns: Seq[Column] = rowKeyColumns.flatMap {
-      case c: ComputedColumn => c.sourceColumns.map { srcCol => columns.find(_.name == srcCol).get }
-      case d: Column => Seq(d)
-    }
-    // Recompute any computed columns based on new column indices
-    val rkColumnsIndices = rowKeyColumns.map {
-      case c: ComputedColumn => (ComputedColumn.analyze(c.expr, datasetName, newColumns).get, -1)
-      case d: Column         => (d, newColumns.indexWhere(_.name == d.name))
-    }
-    val newRkColumns = rkColumnsIndices.map(_._1)
-    val newRkIndices = rkColumnsIndices.map(_._2)
-    val newRkType = Column.columnsToKeyType(newRkColumns)
-    this.copy(columns = newColumns,
-              rowKeyColumns = newRkColumns,
-              rowKeyColIndices = newRkIndices,
-              rowKeyType = newRkType)
-  }
 }
 
 object RichProjection extends StrictLogging {
@@ -155,6 +124,7 @@ object RichProjection extends StrictLogging {
   case class NoColumnsSpecified(keyType: String) extends BadSchema
   case class NoSuchProjectionId(id: Int) extends BadSchema
   case class UnsupportedSegmentColumnType(name: String, colType: Column.ColumnType) extends BadSchema
+  case class RowKeyComputedColumns(names: Seq[String]) extends BadSchema
   case class ComputedColumnErrs(errs: Seq[InvalidComputedColumnSpec]) extends BadSchema
 
   case class BadSchemaError(badSchema: BadSchema) extends Exception(badSchema.toString)
@@ -200,7 +170,10 @@ object RichProjection extends StrictLogging {
       if (notFound.nonEmpty) return Bad(MissingColumnNames(notFound, typ))
       val columns = colIndices.map(richColumns)
       val keyType = Column.columnsToKeyType(columns)
-      if (typ == "segment" && !keyType.isSegmentType) {
+      val computedColumns = columns.collect { case c: ComputedColumn => c.name }
+      if (typ == "row" && computedColumns.nonEmpty) {
+        Bad(RowKeyComputedColumns(computedColumns))
+      } else if (typ == "segment" && !keyType.isSegmentType) {
         Bad(UnsupportedSegmentColumnType(columnNames.head, columns.head.columnType))
       } else {
         Good((colIndices, columns, keyType))

@@ -105,7 +105,7 @@ object GdeltTestData {
 
   // Dataset2: Partition key (MonthYear) / Row keys (Actor2Code, GLOBALEVENTID)
   // Segment ID is to group GLOBALEVENTID such that there will be two segments
-  val dataset2 = Dataset("gdelt", Seq(":getOrElse Actor2Code NONE", "GLOBALEVENTID"),
+  val dataset2 = Dataset("gdelt", Seq("Actor2Code", "GLOBALEVENTID"),
                          ":round GLOBALEVENTID 50", Seq("MonthYear"))
   val projection2 = RichProjection(dataset2, schema)
 

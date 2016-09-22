@@ -61,7 +61,7 @@ abstract class SingleKeyTypeBase[K : Ordering : TypedFieldExtractor] extends Key
       if (r.notNull(columnNum)) {
         extractor.getField(r, columnNum)
       } else {
-        throw NullKeyValue(columnNum)
+        defaultValue
       }
     }
   }
@@ -71,6 +71,8 @@ abstract class SingleKeyTypeBase[K : Ordering : TypedFieldExtractor] extends Key
     val chunk = remainder.take(size)
     (fromBytes(chunk), remainder.drop(size))
   }
+
+  def defaultValue: T
 
   def size: Int
 
@@ -171,6 +173,8 @@ object SingleKeyTypes {
   val Int32HighBit = 0x80000000
   val Long64HighBit = (1L << 63)
 
+  import org.velvia.filo.DefaultValues._
+
   trait LongKeyTypeLike extends SingleKeyTypeBase[Long] {
     def toBytes(key: Long): ByteVector =
       ByteVector.fromLong(key ^ Long64HighBit, ordering = ByteOrdering.BigEndian)
@@ -181,6 +185,7 @@ object SingleKeyTypes {
 
     override def isSegmentType: Boolean = true
     val size = 8
+    val defaultValue = DefaultLong
   }
 
   implicit case object LongKeyType extends LongKeyTypeLike
@@ -195,6 +200,7 @@ object SingleKeyTypes {
 
     override def isSegmentType: Boolean = true
     val size = 4
+    val defaultValue = DefaultInt
   }
 
   implicit case object IntKeyType extends IntKeyTypeLike
@@ -209,6 +215,7 @@ object SingleKeyTypes {
     def fromString(str: String): Double = str.toDouble
     override def isSegmentType: Boolean = true
     val size = 8
+    val defaultValue = DefaultDouble
   }
 
   implicit case object DoubleKeyType extends DoubleKeyTypeLike
@@ -226,6 +233,7 @@ object SingleKeyTypes {
     def fromString(str: String): String = str
     override def isSegmentType: Boolean = true
     val size = 0
+    val defaultValue = DefaultString
   }
 
   implicit case object StringKeyType extends StringKeyTypeLike
@@ -235,6 +243,7 @@ object SingleKeyTypes {
     def fromBytes(bytes: ByteVector): Boolean = bytes(0) != 0
     def fromString(str: String): Boolean = str.toBoolean
     val size = 1
+    val defaultValue = DefaultBool
   }
 
   implicit val timestampOrdering = Ordering.by((t: Timestamp) => t.getTime)
@@ -252,5 +261,6 @@ object SingleKeyTypes {
     }
     override def isSegmentType: Boolean = true
     val size = 8
+    val defaultValue = new Timestamp(DefaultLong)
   }
 }

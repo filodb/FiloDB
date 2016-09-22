@@ -43,19 +43,15 @@ class TypesSpec extends FunSpec with Matchers {
       assert(orig1 < orig2)
     }
 
-    it("should check for null keys with getKeyFunc") {
+    it("getKeyFunc should resolve null values to default values") {
       val intKeyFunc = IntKeyType.getKeyFunc(Array(1))
       val row1 = TupleRowReader((Some("ape"), None))
-      intercept[NullKeyValue] {
-        intKeyFunc(row1)
-      }
+      intKeyFunc(row1) should equal (0)
 
       val types = Seq(StringKeyType, IntKeyType)
       val compositeType = CompositeKeyType(types)
       val compositeKeyFunc = compositeType.getKeyFunc(Array(0, 1))
-      intercept[NullKeyValue] {
-        compositeKeyFunc(row1)
-      }
+      compositeKeyFunc(row1) should equal (Seq("ape", 0))
     }
 
     it("CompositeKeyType should use getKeyFunc from individual KeyTypes") {

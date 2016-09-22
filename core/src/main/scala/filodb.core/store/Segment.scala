@@ -105,10 +105,11 @@ class SegmentState private(projection: RichProjection,
       lastKey = rowKey
       numRows += 1
     }
+
     val chunkMap = builder.convertToBytes()
     val info = ChunkSetInfo(infoChunkId, numRows, firstKey, lastKey)
     val skips = ChunkSetInfo.detectSkips(projection, info,
-                                         projection.rowKeyColumnIds.map(chunkMap).toArray,
+                                         projection.rowKeyColumns.map(c => chunkMap(c.name)).toArray,
                                          infoMap.values.asScala.toSeq,
                                          rowKeysForChunk)
     infoMap.put(info.id, info)

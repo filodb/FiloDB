@@ -130,6 +130,9 @@ object ChunkSetInfo extends StrictLogging {
    * @param otherInfos the list of other ChunkSetInfos in the segment to compare against for skips
    * @param rowKeysForChunk a function that retrieves row keys given a chunkID
    */
+  // TODO: further filter using bloom filters
+  // TODO: See if it is more efficient just to do a bloom filter intersection and filter out
+  // non matches rather than hit every key
   def detectSkips(projection: RichProjection,
                   chunkInfo: ChunkSetInfo,
                   chunkKeys: Array[ByteBuffer],
@@ -146,11 +149,9 @@ object ChunkSetInfo extends StrictLogging {
 
     val clazzes = projection.rowKeyColumns.map(_.columnType.clazz).toArray
     val reader = new FastFiloRowReader(chunkKeys, clazzes, chunkInfo.numRows)
+    logger.debug(s"Reader parsers ${reader.parsers.toList}")
 
-    // TODO: further filter using bloom filters
     // Match each key in range over bloom filter and return a list of hit rowkeys for each chunkID
-    // TODO: See if it is more efficient just to do a bloom filter intersection and filter out
-    // non matches rather than hit every key
     val hitKeysByChunk = intersectingRanges.map { case (chunkId, numRows, (key1, key2)) =>
       val (startPos, _) = binarySearchKeyChunks(reader, chunkInfo.numRows, ordering, key1)
 
@@ -158,7 +159,7 @@ object ChunkSetInfo extends StrictLogging {
       // by bloom filter in the future
       val keys = new ArrayBuffer[RowReader]()
       var curKey = SafeFiloRowReader(reader, startPos)
-      while (ordering.lteq(curKey, key2) && curKey.rowNo < chunkInfo.numRows) {
+      while (curKey.rowNo < chunkInfo.numRows && ordering.lteq(curKey, key2)) {
         keys.append(curKey)
         curKey = SafeFiloRowReader(reader, curKey.rowNo + 1)
       }

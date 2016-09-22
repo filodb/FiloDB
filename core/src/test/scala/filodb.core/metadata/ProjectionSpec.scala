@@ -63,6 +63,13 @@ class ProjectionSpec extends FunSpec with Matchers {
       resp.swap.get should equal (ComputedColumnErrs(Seq(NoSuchFunction("notAFunc"))))
     }
 
+    it("should return RowKeyComputedColumns err if try to use computed columns in row key") {
+      val computedRowKeys = Dataset("b", Seq(":round age 2"), "seg", Seq(":string 0"))
+      val resp1 = RichProjection.make(computedRowKeys, schema)
+      resp1.isBad should be (true)
+      resp1.swap.get should equal (RowKeyComputedColumns(Seq(":round age 2")))
+    }
+
     it("should get back partitioning func for default key if partitioning column is default") {
       val resp = RichProjection.make(dataset, schema)
       resp.isGood should be (true)
@@ -119,7 +126,7 @@ class ProjectionSpec extends FunSpec with Matchers {
       resp.segmentType shouldBe a[ComputedStringKeyType]
     }
 
-    it("should create RichProjection properly for String sort key column") {
+    it("should create RichProjection properly for String row key column") {
       val resp = RichProjection(Dataset("a", "first", "seg"), schema)
       resp.rowKeyColumns should equal (Seq(schema(0)))
       resp.rowKeyColIndices should equal (Seq(0))

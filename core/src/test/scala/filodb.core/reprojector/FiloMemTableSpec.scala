@@ -81,12 +81,11 @@ class FiloMemTableSpec extends FunSpec with Matchers with BeforeAndAfter {
       outRows.toSeq.map(_.getString(0)) should equal (sortedFirstNames)
     }
 
-    it("should throw error if null partition col value") {
+    it("should keep ingesting rows with null partition col value") {
       val mTable = new FiloMemTable(projWithPartCol, config)
 
-      intercept[NullKeyValue] {
-        mTable.ingestRows(namesWithNullPartCol.map(TupleRowReader))
-      }
+      mTable.ingestRows(namesWithNullPartCol.map(TupleRowReader))
+      mTable.numRows should equal (50 * names.length + 3)
     }
 
     it("should not throw error if :getOrElse computed column used with null partition col value") {
