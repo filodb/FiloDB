@@ -98,6 +98,7 @@ lazy val coreDeps = commonDeps ++ Seq(
 )
 
 lazy val cassDeps = commonDeps ++ Seq(
+  // other dependencies separated by commas
   "com.datastax.cassandra" % "cassandra-driver-core" % cassDriverVersion,
   "ch.qos.logback"        % "logback-classic"   % "1.0.7" % "test"
 )
@@ -240,7 +241,9 @@ lazy val assemblySettings = Seq(
       oldStrategy(x)
   },
   assemblyShadeRules in assembly := Seq(
-    ShadeRule.rename("com.datastax.driver.**" -> "filodb.datastax.driver.@1").inAll
+    ShadeRule.rename("com.datastax.driver.**" -> "filodb.datastax.driver.@1").inAll,
+    ShadeRule.rename("com.google.common.**" -> "filodb.com.google.common.@1").inAll,
+    ShadeRule.rename("com.google.guava.**" -> "filodb.com.google.guava.@1").inAll
   ),
   test in assembly := {} //noisy for end-user since the jar is not available and user needs to build the project locally
 )
