@@ -83,6 +83,8 @@ class FiloMemTable(val projection: RichProjection, config: Config,
     }
   }
 
+  //TODO: Immitate ingest rows uisng filofastreader - set row no for each row (i <- chunks.length -1)
+
   def readRows(partition: projection.PK, segment: projection.SK): Iterator[(projection.RK, RowReader)] =
     getKeyMap(partition, segment).entrySet.iterator.asScala
       .map { entry => (entry.getKey, appendStore.getRowReader(entry.getValue)) }
@@ -98,4 +100,17 @@ class FiloMemTable(val projection: RichProjection, config: Config,
   }
 
   override def deleteWalFiles(): Unit = appendStore.deleteWalFiles()
+}
+
+
+class FiloMemTable private(chunks: Array[ByteBuffer], ….) {
+
+}
+
+object FiloMemTable {
+  def createNew(…): FiloMemTable = new FiloMemTable(Array.empty)
+  def createFromWAL: FiloMemTable = {
+    // read WAL
+    new FiloMemTable(chunks)
+  }
 }

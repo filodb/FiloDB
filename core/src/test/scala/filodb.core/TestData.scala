@@ -104,6 +104,10 @@ object GdeltTestData {
                          Seq(":getOrElse Actor2Code NONE", ":getOrElse Year -1"))
   val projection3 = RichProjection(dataset3, schema)
 
+  // Dataset3: same as Dataset1 but with :getOrElse to prevent null partition keys
+  val dataset4 = Dataset("gdelt", Seq("GLOBALEVENTID"), "GLOBALEVENTID", Seq("MonthYear"))
+  val projection4 = RichProjection(dataset4, schema)
+
   // Returns projection2 grouped by segment with a fake partition key
   def getSegments(partKey: projection2.PK): Seq[RowWriterSegment] = {
     val inputGroupedBySeg = readers.toSeq.groupBy(projection2.segmentKeyFunc)

@@ -44,6 +44,7 @@ class FiloAppendStore(val projection: RichProjection, config: Config, version: I
   private var _numRows = 0
 
   private val wal = new WriteAheadLog(config, projection.datasetRef, projection.columns, version)
+  logger.info(s"WriteAheadLog created for dataset = ${projection.datasetRef}")
 
   /**
    * Appends new rows to the row store.  The rows are serialized into Filo vectors and flushed to
@@ -70,12 +71,12 @@ class FiloAppendStore(val projection: RichProjection, config: Config, version: I
     // Add chunks
     val finalLength = builder.builders.head.length
     val colIdToBuffers = builder.convertToBytes()
-    val chunkAray = colIds.map(colIdToBuffers)
-    chunks += chunkAray
-    readers += new FastFiloRowReader(chunkAray, clazzes, finalLength)
+    val chunkArray = colIds.map(colIdToBuffers)
+    chunks += chunkArray
+    readers += new FastFiloRowReader(chunkArray, clazzes, finalLength)
 
     // write chunks to WAL
-    wal.writeChunks(chunkAray)
+    wal.writeChunks(chunkArray)
 
     // Reset builder if it was at least chunkSize rows
     if (finalLength >= chunkSize) builder.reset()

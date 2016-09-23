@@ -1,16 +1,15 @@
 package filodb.spark
 
-import akka.actor.{ActorSystem, ActorRef, AddressFromURIString}
+import akka.actor.{ActorRef, ActorSystem, AddressFromURIString}
 import com.typesafe.config.{Config, ConfigFactory}
 import com.typesafe.scalalogging.slf4j.StrictLogging
 import net.ceedubs.ficus.Ficus._
 import org.apache.spark.SparkContext
-
-import filodb.cassandra.columnstore.CassandraColumnStore
-import filodb.cassandra.metastore.CassandraMetaStore
-import filodb.coordinator.{CoordinatorSetup, NodeClusterActor}
-import filodb.coordinator.client.ClusterClient
-import filodb.core.store.{InMemoryMetaStore, InMemoryColumnStore}
+import _root_.filodb.cassandra.columnstore.CassandraColumnStore
+import _root_.filodb.cassandra.metastore.CassandraMetaStore
+import _root_.filodb.coordinator.{CoordinatorSetup, NodeClusterActor, NodeCoordinatorActor}
+import _root_.filodb.coordinator.client.ClusterClient
+import _root_.filodb.core.store.{InMemoryColumnStore, InMemoryMetaStore}
 
 /**
  * FiloSetup handles the Spark side setup of both executors and the driver app, including one-time
@@ -109,10 +108,13 @@ object FiloExecutor extends FiloSetup with StrictLogging {
    * @param role the Akka Cluster role, either "executor" or "driver"
    */
   def init(filoConfig: Config): Unit = synchronized {
+
     _config.getOrElse {
       this.role = "executor"
       _config = Some(filoConfig)
       coordinatorActor       // force coordinator to start
+      // TODO : start reloading WAL files
+      // NodeCoordinatorActor.ReloadDatasetCoordActors
       // get address from config and join cluster.  note: it's ok to join cluster multiple times
       val addr = AddressFromURIString.parse(filoConfig.getString("spark-driver-addr"))
       logger.info(s"Initializing FiloExecutor clustering by joining driver at $addr...")

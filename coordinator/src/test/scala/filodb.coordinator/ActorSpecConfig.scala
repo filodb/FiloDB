@@ -22,7 +22,7 @@ trait ActorSpecConfig {
 
 abstract class ActorTest(system: ActorSystem) extends TestKit(system)
 with FunSpecLike with Matchers with BeforeAndAfterAll with BeforeAndAfter with ImplicitSender {
-  override def afterAll() {
+  override def afterAll():Unit = {
     super.afterAll()
     TestKit.shutdownActorSystem(system)
   }

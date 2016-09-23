@@ -1,27 +1,55 @@
 package filodb.core.reprojector
 
 import java.io.{File, RandomAccessFile}
+import java.nio.ByteBuffer
 import java.nio.channels.FileChannel
 
 import com.typesafe.config.Config
 
-class WriteAheadLogReader(config: Config, path: String) {
+import scala.collection.mutable.ArrayBuffer
 
+class WriteAheadLogReader(config: Config, path: String) {
   val walFile = new File(path)
 
   val channel = new RandomAccessFile(walFile, "r").getChannel
 
   val buffer = channel.map(FileChannel.MapMode.READ_ONLY, 0,channel.size())
 
+  private val chunks = new ArrayBuffer[Array[ByteBuffer]]
+
+  private var columnCount = 0
+
+  //noinspection ScalaStyle
+  def readChunks(): Option[ArrayBuffer[Array[ByteBuffer]]]= {
+    while(buffer.hasRemaining) {
+      val chunkArray = new Array[ByteBuffer](columnCount)
+      for{index <- 0 to columnCount-1}{
+        val bytesForChunk = getLittleEndianBytesAsInt(4)
+        println("bytesForChunk: "+ bytesForChunk)
+        chunkArray(index) = ByteBuffer.wrap(getBytes(bytesForChunk))
+        // read chunk seperator
+        if (index < columnCount - 1) {
+          println(index)
+          validField(1, ChunkHeader.chunkSeperator,true)
+        }
+      }
+      chunks+=chunkArray
+      if(!validField(2, ChunkHeader.chunkStartIndicator, true)){
+        return Some(chunks)
+      }
+    }
+    None
+  }
+
   def validFile: Boolean = {
     validField(8, ChunkHeader.fileFormatIdentifier, false) &&
     validField(2, ChunkHeader.columnDefinitionIndicator, true) &&
     validColumnDefinitions &&
-    validField(2, Array[Byte](0x00,0x02), true)
+    validField(2,ChunkHeader.chunkStartIndicator, true)
   }
 
   private def validColumnDefinitions: Boolean = {
-    val columnCount = getLittleEndianBytesAsInt(2)
+    columnCount = getLittleEndianBytesAsInt(2)
     val columnDefinitionsSize = getLittleEndianBytesAsInt(2)
     val columnDefinitions = getBytes(columnDefinitionsSize)
     columnCount == columnDefinitions.count(_ == 0x01) + 1

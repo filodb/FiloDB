@@ -68,8 +68,6 @@ trait CoordinatorSetup {
     system.actorOf(NodeCoordinatorActor.props(metaStore, reprojector, columnStore, config, cluster.selfAddress),
                    "coordinator")
 
-  // TODO: Load Dataset coordinators based on ingestion_state table.
-
   def shutdown(): Unit = {
     system.shutdown()
     columnStore.shutdown()

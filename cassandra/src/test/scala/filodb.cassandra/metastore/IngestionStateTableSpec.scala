@@ -15,7 +15,7 @@ class IngestionStateTableSpec extends FlatSpec with AsyncTest {
   val ingestionStateTable = new IngestionStateTable(config)
 
   // First create keyspace if not exist
-  override def beforeAll() {
+  override def beforeAll(): Unit = {
     super.beforeAll()
     ingestionStateTable.createKeyspace(ingestionStateTable.keyspace)
   }
@@ -60,8 +60,6 @@ class IngestionStateTableSpec extends FlatSpec with AsyncTest {
       "Failed due to no Host available exception"), timeout) {
       response =>  response should equal (Success)
     }
-
-    // TODO: try with invalid file name or dataset
   }
 
   "getIngestionStateByDataset" should "fetch entry for a given dataset" in {

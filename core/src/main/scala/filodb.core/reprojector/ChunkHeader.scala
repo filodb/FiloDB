@@ -26,6 +26,10 @@ class ChunkHeader(cols : Seq[Column] = Seq() ) {
 
 object ChunkHeader{
 
+  val chunkStartIndicator =  Array[Byte](0x00,0x02)
+
+  val chunkSeperator = Array[Byte](0x01)
+
   def fileFormatIdentifier : Array[Byte] =
     Array[Byte]('F', 'i', 'l','o','W', 'A', 'L',0x00)
 

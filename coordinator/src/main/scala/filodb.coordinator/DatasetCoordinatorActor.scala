@@ -141,7 +141,7 @@ private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
   var mTableWriteTask: Option[Cancellable] = None
   var mTableFlushTask: Option[Cancellable] = None
 
-  val hostname: String = ""
+  val hostname: String = "None"
     // actorAddress.host.getOrElse("None") + ":" + actorAddress.port.getOrElse("None")
 
   def makeNewTable(): MemTable = new FiloMemTable(projection, config, hostname, version)
@@ -235,7 +235,6 @@ private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
       case t: Throwable => self ! FlushFailed(t)
     }
     logger.info(s" flush cycle for ($nameVer)... is complete")
-    // TODO: delete wal files after flush completed
   }
 
   private def shouldFlush: Boolean =
@@ -243,6 +242,8 @@ private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
 
   private def handleFlushDone(): Unit = {
     curReprojection = None
+    // delete wal files after flush completed
+    flushingTable.foreach(_.deleteWalFiles())
     // Close the flushing table and mark it as None
     flushingTable.foreach(_.close())
     flushingTable = None

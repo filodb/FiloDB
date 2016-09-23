@@ -2,11 +2,11 @@ package filodb.core.store
 
 import com.typesafe.scalalogging.slf4j.StrictLogging
 import java.util.concurrent.ConcurrentSkipListMap
+
 import scala.collection.concurrent.TrieMap
 import scala.concurrent.{ExecutionContext, Future}
-
 import filodb.core._
-import filodb.core.metadata.{Column, DataColumn, Dataset}
+import filodb.core.metadata.{Column, DataColumn, Dataset, IngestionStateData}
 
 /**
  * An in-memory MetaStore.  Does not aim to keep data distributed, but is just a
@@ -24,7 +24,7 @@ class InMemoryMetaStore(implicit val ec: ExecutionContext) extends MetaStore wit
   type ColumnMap = ConcurrentSkipListMap[(Int, Types.ColumnId), DataColumn]
   val colMapOrdering = math.Ordering[(Int, Types.ColumnId)]
   val columns = new TrieMap[String, ColumnMap]
-  val ingestionstates = new TrieMap[String, String]
+  val ingestionstates = new TrieMap[String, IngestionStateData]
 
   def initialize(): Future[Response] = Future.successful(Success)
 
@@ -98,13 +98,24 @@ class InMemoryMetaStore(implicit val ec: ExecutionContext) extends MetaStore wit
    */
   def insertIngestionState(actorAddress: String, dataset: DatasetRef,
                            state: String, version: Int): Future[Response] = {
-    val key = actorAddress + dataset.database.getOrElse("None") + dataset.dataset + version
-    ingestionstates.putIfAbsent(key, state) match {
+    // val key = actorAddress + dataset.database.getOrElse("None") + dataset.dataset + version
+    ingestionstates.putIfAbsent(actorAddress,
+      IngestionStateData(actorAddress,
+        dataset.database.getOrElse("None"),
+        dataset.dataset,
+        version,
+        state,
+        ""
+      )) match {
       case None    => Future.successful(Success)
       case Some(x) =>
         logger.info(s"Ignoring ingestion state for dataset($dataset); entry already exists")
         Future.successful(AlreadyExists)
     }
+  }
+
+  def getAllIngestionEntries(actorPath: String): Future[Seq[IngestionStateData]] = {
+    Future.successful(ingestionstates.get(actorPath).toSeq)
   }
 
   def shutdown(): Unit = {}

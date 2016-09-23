@@ -43,12 +43,12 @@ with Matchers with ScalaFutures {
   val metaStore = FiloDriver.metaStore
   val columnStore = FiloDriver.columnStore
 
-  override def beforeAll() {
+  override def beforeAll():Unit = {
     metaStore.initialize().futureValue
     columnStore.initializeProjection(largeDataset.projections.head).futureValue
   }
 
-  override def afterAll() {
+  override def afterAll():Unit = {
     super.afterAll()
     ssc.stop(true, true)
   }

@@ -22,7 +22,9 @@ class WriteAheadLog(config: Config, dataset: DatasetRef,
 
   def exists: Boolean = walBuffer.walFile.exists
 
-  def delete(): Unit = {
+  def delete(): Unit = walBuffer.walFile.delete()
+
+  def deleteTestFiles(): Unit = {
     walBuffer.walFile.delete()
     walBuffer.walFile.getParentFile.delete()
     walBuffer.walFile.getParentFile.getParentFile.delete()
@@ -43,15 +45,17 @@ class WriteAheadLog(config: Config, dataset: DatasetRef,
 
   def close(): Unit = walBuffer.close
 
+  //noinspection ScalaStyle
   def writeChunks(chunkArray: Array[ByteBuffer]): Unit = {
-    walBuffer.bufferOfSufficientSize(2).put(Array[Byte](0x02,0x00))
+    walBuffer.bufferOfSufficientSize(2).put(ChunkHeader.chunkStartIndicator.reverse)
     val chunksSize = chunkArray.length
     for {index <- chunkArray.indices} {
       val chunkBytes = chunkArray(index)
+      println("chunkLength ="+ chunkBytes.limit())
       walBuffer.bufferOfSufficientSize(4).put((ByteBuffer.allocate(4).putInt(chunkBytes.limit()).array()).reverse)
       walBuffer.bufferOfSufficientSize(chunkBytes.limit()).put(chunkBytes)
       if (index < chunksSize - 1) {
-        walBuffer.bufferOfSufficientSize(1).put(0x01.toByte)
+        walBuffer.bufferOfSufficientSize(1).put(ChunkHeader.chunkSeperator)
       }
     }
   }

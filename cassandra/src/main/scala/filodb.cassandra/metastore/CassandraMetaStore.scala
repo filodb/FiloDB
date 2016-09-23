@@ -1,10 +1,10 @@
 package filodb.cassandra.metastore
 
 import com.typesafe.config.Config
-import scala.concurrent.{ExecutionContext, Future}
 
+import scala.concurrent.{ExecutionContext, Future}
 import filodb.core._
-import filodb.core.metadata.{Column, DataColumn, Dataset}
+import filodb.core.metadata.{Column, DataColumn, Dataset, IngestionStateData}
 import filodb.core.store.MetaStore
 
 /**
@@ -66,4 +66,7 @@ class CassandraMetaStore(config: Config)
                                             version,
                                             state)
 
+  def getAllIngestionEntries(actorPath: String): Future[Seq[IngestionStateData]] = {
+    ingestionStateTable.getIngestionStateByNodeActor(actorPath)
+  }
 }

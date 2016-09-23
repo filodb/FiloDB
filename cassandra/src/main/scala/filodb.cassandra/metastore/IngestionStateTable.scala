@@ -3,7 +3,8 @@ package filodb.cassandra.metastore
 import com.datastax.driver.core.Row
 import com.typesafe.config.Config
 import filodb.cassandra.FiloCassandraConnector
-import filodb.core.{AlreadyExists, DatasetRef, Response}
+import filodb.core.metadata.IngestionStateData
+import filodb.core.{AlreadyExists, DatasetRef, NotFoundError, Response}
 
 import scala.concurrent.{ExecutionContext, Future}
 /**
@@ -40,11 +41,19 @@ sealed class IngestionStateTable(val config: Config)
   )
 
   lazy val ingestionStSelectByActorCql = session.prepare(
-    s"""SELECT nodeActor, database, dataset, state, exceptions
+    s"""SELECT nodeActor, database, dataset, version, state, exceptions
        | FROM $tableString WHERE nodeactor = ? """.stripMargin
   )
 
   def initialize(): Future[Response] = execCql(createCql)
+
+  def fromRow(row: Row): IngestionStateData =
+    IngestionStateData(row.getString("nodeActor"),
+      row.getString("database"),
+      row.getString("dataset"),
+      row.getInt("version"),
+      row.getString("state"),
+      row.getString("exceptions"))
 
   def clearAll(): Future[Response] = execCql(s"TRUNCATE $tableString")
 
@@ -67,10 +76,10 @@ sealed class IngestionStateTable(val config: Config)
                               version: java.lang.Integer)
                         ).toIterator.map { it => it.toSeq }
 
-  def getIngestionStateByNodeActor(nodeActor: String) : Future[Seq[Row]] =
+  def getIngestionStateByNodeActor(nodeActor: String) : Future[Seq[IngestionStateData]] =
     session.executeAsync(ingestionStSelectByActorCql.bind(
                             nodeActor)
-                        ).toIterator.map { it => it.toSeq}
+                        ).toIterator.map {_.map(fromRow).toSeq}
 
   def deleteIngestionStateByNodeActor(nodeActor: String): Future[Response] =
     execCql(s"DELETE FROM $tableString WHERE nodeactor = '${nodeActor}'")
