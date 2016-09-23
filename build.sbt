@@ -99,7 +99,6 @@ lazy val coreDeps = commonDeps ++ Seq(
 
 lazy val cassDeps = commonDeps ++ Seq(
   // other dependencies separated by commas
-  "com.google.guava" % "guava" % "17.0",
   "com.datastax.cassandra" % "cassandra-driver-core" % cassDriverVersion,
   "ch.qos.logback"        % "logback-classic"   % "1.0.7" % "test"
 )
