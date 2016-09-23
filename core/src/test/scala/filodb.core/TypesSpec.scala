@@ -25,6 +25,12 @@ class TypesSpec extends FunSpec with Matchers {
   }
 
   describe("KeyTypes") {
+    it("should serialize and deserialize SingleKeyTypes correctly") {
+      IntKeyType.fromBytes(IntKeyType.toBytes(-500)) should equal (-500)
+      LongKeyType.fromBytes(LongKeyType.toBytes(123456789L)) should equal (123456789L)
+      StringKeyType.fromBytes(StringKeyType.toBytes("baz")) should equal ("baz")
+    }
+
     it("should serialize and unserialize CompositeKeyTypes correctly") {
       val types = Seq(IntKeyType, StringKeyType, BooleanKeyType)
       val compositeType = CompositeKeyType(types)

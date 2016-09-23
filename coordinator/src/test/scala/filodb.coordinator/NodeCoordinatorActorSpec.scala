@@ -173,8 +173,8 @@ with CoordinatorSetup with ScalaFutures {
     probe.send(coordActor, SetupIngestion(ref, schema.map(_.name), 0))
     probe.expectMsg(IngestionReady)
 
-    EventFilter[NullKeyValue](occurrences = 1) intercept {
-      probe.send(coordActor, IngestRows(ref, 0, readers, 1L))
+    EventFilter[NumberFormatException](occurrences = 1) intercept {
+      probe.send(coordActor, IngestRows(ref, 0, readers ++ Seq(badLine), 1L))
       // This should trigger an error, and datasetCoordinatorActor will stop, and no ack will be forthcoming.
       probe.expectNoMsg
     }

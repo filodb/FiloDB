@@ -101,5 +101,22 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
     }
   }
 
-  it("should reload segment metadata and replace previous chunk rows successfully") (pending)
+  it("should reload segment metadata and replace previous chunk rows successfully") {
+    import GdeltTestData._
+
+    gdeltMemTable.ingestRows(readers take 60)
+    reprojector.reproject(gdeltMemTable, 0).futureValue
+
+    gdeltMemTable.clearAllData()
+    stateCache.clear()
+    gdeltMemTable.ingestRows(readers drop 57)   // replay 3 rows, see if they get replaced properly
+    reprojector.reproject(gdeltMemTable, 0).futureValue
+
+    val paramSet = colStore.getScanSplits(datasetRef, 1)
+    paramSet should have length (1)
+
+    whenReady(colStore.scanRows(projection3, schema, 0, FilteredPartitionScan(paramSet.head))) { rowIter =>
+      rowIter.map(_.getInt(6)).sum should equal (492)
+    }
+  }
 }

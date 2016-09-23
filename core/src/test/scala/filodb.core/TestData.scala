@@ -80,6 +80,8 @@ object GdeltTestData {
 
   val readers = gdeltLines.map { line => ArrayStringRowReader(line.split(",")) }
 
+  val badLine = ArrayStringRowReader(Array("NotANumber"))   // Will fail
+
   val schema = Seq(DataColumn(0, "GLOBALEVENTID", "gdelt", 0, Column.ColumnType.IntColumn),
                    DataColumn(1, "SQLDATE",       "gdelt", 0, Column.ColumnType.TimestampColumn),
                    DataColumn(2, "MonthYear",     "gdelt", 0, Column.ColumnType.IntColumn),

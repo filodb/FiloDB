@@ -53,6 +53,7 @@ with CoordinatorSetup with ScalaFutures {
     columnStore.dropDataset(ref).futureValue
     columnStore.dropDataset(ref2).futureValue
     coordActor ! NodeCoordinatorActor.Reset
+    stateCache.clear()     // Important!  Clear out cached segment state
   }
 
   override def afterAll(): Unit = {
@@ -60,7 +61,7 @@ with CoordinatorSetup with ScalaFutures {
   }
 
   it("should fail fast if NodeCoordinatorActor bombs at end of ingestion") {
-    val reader = new java.io.InputStreamReader(getClass.getResourceAsStream("/GDELT-sample-test.csv"))
+    val reader = new java.io.InputStreamReader(getClass.getResourceAsStream("/GDELT-sample-test-errors.csv"))
     val csvActor = system.actorOf(CsvSourceActor.props(reader, ref, 0, coordActor,
                                                        ackTimeout = 4.seconds,
                                                        waitPeriod = 2.seconds))
@@ -74,7 +75,7 @@ with CoordinatorSetup with ScalaFutures {
   }
 
   it("should fail fast if NodeCoordinatorActor bombs in middle of ingestion") {
-    val reader = new java.io.InputStreamReader(getClass.getResourceAsStream("/GDELT-sample-test.csv"))
+    val reader = new java.io.InputStreamReader(getClass.getResourceAsStream("/GDELT-sample-test-errors.csv"))
     val csvActor = system.actorOf(CsvSourceActor.props(reader, ref, 0, coordActor,
                                                        maxUnackedBatches = 2,
                                                        rowsToRead = 5,

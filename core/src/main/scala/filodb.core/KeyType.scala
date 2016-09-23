@@ -229,7 +229,7 @@ object SingleKeyTypes {
       val inputStr = stringSerde.fromBytes(inputBuf)
       (inputStr, remainder.drop(inputBuf.position))
     }
-    def fromBytes(bytes: ByteVector): String = ""
+    def fromBytes(bytes: ByteVector): String = parseBytes(bytes)._1
     def fromString(str: String): String = str
     override def isSegmentType: Boolean = true
     val size = 0
