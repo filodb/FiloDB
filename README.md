@@ -50,9 +50,13 @@ See [architecture](doc/architecture.md) and [datasets and reading](doc/datasets_
   - [Running the CLI](#running-the-cli)
   - [CLI Example](#cli-example)
 - [Current Status](#current-status)
+  - [Upcoming version 0.4 change list:](#upcoming-version-04-change-list)
   - [Version 0.3 change list:](#version-03-change-list)
   - [Migrating Metadata from 0.2 Cassandra](#migrating-metadata-from-02-cassandra)
 - [Deploying](#deploying)
+- [Monitoring and Metrics](#monitoring-and-metrics)
+  - [Metrics Sinks](#metrics-sinks)
+  - [Metrics Configuration](#metrics-configuration)
 - [Code Walkthrough](#code-walkthrough)
 - [Building and Testing](#building-and-testing)
 - [You can help!](#you-can-help)
@@ -118,10 +122,11 @@ Your input is appreciated!
     ```
 
 2. Choose either the Cassandra column store (default) or the in-memory column store.
-    - Start a Cassandra Cluster. If its not accessible at `localhost:9042` update it in `core/src/main/resources/application.conf`.
+    - Start a Cassandra Cluster.
+    - Copy `core/src/main/resources/filodb-defaults.conf` and modify the Cassandra settings for your cluster.  This step and passing in a custom config may be skipped for a localhost Cassandra cluster with no auth.
     - Or, use FiloDB's in-memory column store with Spark (does not work with CLI). Pass the `--conf spark.filodb.store=in-memory` to `spark-submit` / `spark-shell`.  This is a great option to test things out, and is really really fast!
 
-3. For Cassandra, run `filo-cli --command init` to initialize the default `filodb_admin` keyspace.   In addition, you should use CQLSH to create any additional keyspaces you desire to store FiloDB datasets in.
+3. For Cassandra, update the `keyspace-replication-options` config, then run `filo-cli -Dconfig.file=/path/to/my/filo.conf --command init` to initialize the default `filodb_admin` keyspace.   In addition, you should use CQLSH to create any additional keyspaces you desire to store FiloDB datasets in.
 4. Dataset creation can be done using `filo-cli` or using Spark Shell / Scala/Java API.
 5. Inserting data can be done using `filo-cli` (CSV only), using Spark SQL/JDBC (INSERT INTO), or the Spark Shell / Scala / Java API.
 6. Querying is done using Spark SQL/JDBC or Scala/Java API.
@@ -176,7 +181,7 @@ You may specify a function, or computed column, for use with any key column.  Th
 | Name      | Description     | Example     |
 | :-------- | :-------------- | :---------- |
 | string    | returns a constant string value | `:string /0` |
-| getOrElse | returns default value if column value is null | `:getOrElse columnA ---` |
+| getOrElse | returns default value if column value is null.  NOTE: do not use the default value null for strings. | `:getOrElse columnA ---` |
 | round     | rounds down a numeric column.  Useful for bucketing by time or bucketing numeric IDs.  | `:round timestamp 10000` |
 | stringPrefix | takes the first N chars of a string; good for partitioning | `:stringPrefix token 4` |
 | timeslice | bucketizes a Long (millisecond) or Timestamp column using duration strings - 500ms, 5s, 10m, 3h, etc. | `:timeslice arrivalTime 30s` |
@@ -309,6 +314,20 @@ Some options must be configured before starting the Spark Shell or Spark applica
 3. It might be easier to pass in an entire configuration file to FiloDB.  Pass the java option `-Dfilodb.config.file=/path/to/my-filodb.conf`, for example using `--java-driver-options`.
 
 Note that if Cassandra is kept as the default column store, the keyspace can be changed on each transaction by specifying the `database` option in the data source API, or the database parameter in the Scala API.
+
+For metrics system configuration, see the metrics section below.
+
+#### Passing Cassandra Authentication Settings
+
+Typically, you have per-environment configuration files, and you do not want to check in username and password information.  Here are ways to pass in authentication settings:
+
+* Pass in the credentials on the command line.
+  - For Spark, `--conf spark.filodb.cassandra.username=XYZ` etc.
+  - For CLI, other apps, pass in JVM args: `-Dfilodb.cassandra.username=XYZ`
+* Put the credentials in a local file on the host, and refer to it from your config file.   In your config file, do `include "/usr/local/filodb-cass-auth.properties"`.  The properties file would look like:
+
+        filodb.cassandra.username=XYZ
+        filodb.cassandra.password=AABBCC
 
 ### Spark Data Source API Example (spark-shell)
 
@@ -510,7 +529,8 @@ The `delete` command is used to delete datasets, like a drop.<br>
 `truncate` truncates data for an existing dataset to 0. |
 | select     | Its value should be a comma-separated string of the columns to be selected,<br/>```./filo-cli --dataset playlist --select album,title```<br/>The result from `select` is printed in the console by default. An output file can be specified with the key `--outfile`. For example,<br/>```./filo-cli --dataset playlist --select album,title --outfile playlist.csv```                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | delimiter  | This is optional key to be used with `importcsv` command. Its value should be the field delimiter character. Default value is comma.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| timeoutMinutes | The number of minutes to time out for CSV ingestion.  Needs to be greater than the max amount of time for ingesting the whole file.  Defaults to 99.  |
+| numSegments | The maximum number of segments to analyze for the analyze command.  Prevents analyze of large tables from taking too long. Defaults to 10000. |
+| timeoutSeconds | The number of seconds for timeout for initialization, table creation, other quick things  |
 
 ### Running the CLI
 
@@ -527,6 +547,8 @@ Individual configuration params may also be changed by passing them on the comma
 All `-D` config options must be passed before any other arguments.
 
 You may also configure CLI logging by copying `cli/src/main/resources/logback.xml` to your deploy folder, customizing it, and passing on the command line `-Dlogback.configurationFile=/path/to/filo-cli-logback.xml`.
+
+You can also change the logging directory by setting the FILO_LOG_DIR environment variable before calling the CLI.
 
 NOTE: The CLI currently only operates on the Cassandra column store.  The `--database` option may be used to specify which keyspace to operate on.  If the keyspace is not initialized, then FiloDB code will automatically create one for you, but you may want to create it yourself to control the options that you want.
 
@@ -560,7 +582,20 @@ Query/export some columns:
 
 ## Current Status
 
-Version 0.2 is the stable, latest released version.  It has been tested on a cluster for a different variety of schemas, has a stable data model and ingestion, and features a huge number of improvements over the previous version.
+Version 0.3 is the stable, latest released version.  It has been tested on a cluster for a different variety of schemas, has a stable data model and ingestion, and features a huge number of improvements over the previous version.
+
+### Upcoming version 0.4 change list:
+
+* Defaults to Spark 1.6.1
+* New metrics and monitoring framework based on Kamon.io, with built in stats logging and statsd output, and tracing of write path
+* Replaced Phantom with direct usage of Java C* driver.  Bonus: use prepared statements, should result in better performance all around especially on ingest; plus should support C* 3.0+
+* WHERE clauses specifying multiple partition keys now get pushed down.  Should result in much better read performance in those cases.
+* New config `filodb.cassandra.keyspace-replication-options` allows any CQL replication option to be set when FiloDB keyspaces are created with CLI --command init
+* CLI log directory can be easily changed with FILO_LOG_DIR env var
+* CLI analyze command can now analyze segments from multiple partitions up to a configurable maximum # of segments
+* Allow comma-separated list of hosts for `filodb.cassandra.hosts`
+* Fix missing data on read issue with wrapping token ranges in C*
+* Fix actor path uniqueness issue on ingestion
 
 ### Version 0.3 change list:
 
@@ -614,6 +649,28 @@ The current version assumes Spark 1.6.x and Cassandra 2.1.x or 2.2.x, though it 
 There is a branch for Datastax Enterprise 4.8 / Spark 1.4.  Note that if you are using DSE or have vnodes enabled, a lower number of vnodes (16 or less) is STRONGLY recommended as higher numbers of vnodes slows down queries substantially and basically prevents subsecond queries from happening.
 
 By default, FiloDB nodes (basically all the Spark executors) talk to each other using a random port and locally assigned hostname.  You may wish to set `filodb.spark.driver.port`, `filodb.spark.executor.port` to assign specific ports (for AWS, for example) or possibly use a different config file on each host and set `akka.remote.netty.tcp.hostname` on each host's config file.
+
+## Monitoring and Metrics
+
+FiloDB uses [Kamon](http://kamon.io) for metrics and Akka/Futures/async tracing.  Not only does this give us summary statistics, but this also gives us Zipkin-style tracing of the ingestion write path in production, which can give a much richer picture than just stats.
+
+### Metrics Sinks
+
+* statsd sink - this is packaged into FiloDB's spark module (but not the CLI module) by default.  All you need to do is stand up [statsd](https://github.com/etsy/statsd), [Statsite](http://armon.github.io/statsite/), or equivalent daemon.  See the Kamon [Statsd module](http://kamon.io/backends/statsd/) guide for configuration.
+* Kamon metrics logger - this is part of the coordinator module and will log all metrics (including segment trace metrics) at every Kamon tick interval, which defaults to 10 seconds.  It is disabled by default but could be enabled with `--conf spark.filodb.metrics-logger.enabled=true` or changing `filodb.metrics-logger.enabled` in your conf file.  Also, which metrics to log including pattern matching on names can be configured.
+* Kamon trace logger - this logs detailed trace information on segment appends and is always on if detailed tracing is on.
+
+### Metrics Configuration
+
+Kamon has many configurable options.  To get more detailed traces on the write / segment append path, for example, here is how you might pass to `spark-submit` or `spark-shell` options to set detailed tracing on and to trace 3% of all segment appends:
+
+    --driver-java-options '-XX:+UseG1GC -XX:MaxGCPauseMillis=500 -Dkamon.trace.level-of-detail=simple-trace -Dkamon.trace.random-sampler.chance=3'
+
+Methods of configuring Kamon (except for the metrics logger):
+
+- The best way to configure Kamon is to pass this Java property: `-Dkamon.config-provider=filodb.coordinator.KamonConfigProvider`.  This lets you configure Kamon through the same mechanisms as the rest of FiloDB: `-Dfilo.config.file` for example, and the configuration is automatically passed to each executor/worker.  Otherwise:
+- Passing Java options on the command line with `-D`, or for Spark, `--driver-java-options` and `--executor-java-options`
+- Passing options in a config file and using `-Dconfig.file`.  NOTE: `-Dfilo.config.file` will not work because Kamon uses a different initialization stack. Need to be done for both drivers and executors.
 
 ## Code Walkthrough
 

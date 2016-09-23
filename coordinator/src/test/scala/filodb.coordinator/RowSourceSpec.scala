@@ -60,7 +60,7 @@ with CoordinatorSetup with ScalaFutures {
 
     // Expect failure message, like soon.  Don't hang!
     expectMsgPF(10.seconds.dilated) {
-      case RowSource.IngestionErr(msg) =>
+      case RowSource.IngestionErr(msg, _) =>
     }
   }
 
@@ -74,7 +74,7 @@ with CoordinatorSetup with ScalaFutures {
 
     // Expect failure message, like soon.  Don't hang!
     expectMsgPF(10.seconds.dilated) {
-      case RowSource.IngestionErr(msg) =>
+      case RowSource.IngestionErr(msg, _) =>
     }
   }
 }

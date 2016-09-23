@@ -2,6 +2,7 @@ package filodb.core.reprojector
 
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.slf4j.StrictLogging
+import kamon.trace.Tracer
 import net.ceedubs.ficus.Ficus._
 import org.velvia.filo.RowReader
 import scala.concurrent.duration.FiniteDuration
@@ -70,19 +71,21 @@ class DefaultReprojector(config: Config, columnStore: ColumnStore)
   def toSegments(memTable: MemTable, segments: Seq[(Any, Any)]): Seq[Segment] = {
     val dataset = memTable.projection.dataset
     segments.map { case (partition, segmentKey) =>
-      // For each segment grouping of rows... set up a Segment
-      val segInfo = SegmentInfo(partition, segmentKey).basedOn(memTable.projection)
-      val segment = new RowWriterSegment(memTable.projection, memTable.projection.columns)(segInfo)
-      val segmentRowsIt = memTable.readRows(segInfo)
-      logger.debug(s"Created new segment ${segment.segInfo} for encoding...")
+      Tracer.withNewContext("serialize-segment", true) {
+        // For each segment grouping of rows... set up a Segment
+        val segInfo = SegmentInfo(partition, segmentKey).basedOn(memTable.projection)
+        val segment = new RowWriterSegment(memTable.projection, memTable.projection.columns)(segInfo)
+        val segmentRowsIt = memTable.readRows(segInfo)
+        logger.debug(s"Created new segment ${segment.segInfo} for encoding...")
 
-      // Group rows into chunk sized bytes and add to segment
-      // NOTE: because RowReaders could be mutable, we need to keep this a pure Iterator.  Turns out
-      // this is also more efficient than Iterator.grouped
-      while (segmentRowsIt.nonEmpty) {
-        segment.addRichRowsAsChunk(segmentRowsIt.take(dataset.options.chunkSize))
+        // Group rows into chunk sized bytes and add to segment
+        // NOTE: because RowReaders could be mutable, we need to keep this a pure Iterator.  Turns out
+        // this is also more efficient than Iterator.grouped
+        while (segmentRowsIt.nonEmpty) {
+          segment.addRichRowsAsChunk(segmentRowsIt.take(dataset.options.chunkSize))
+        }
+        segment
       }
-      segment
     }
   }
 

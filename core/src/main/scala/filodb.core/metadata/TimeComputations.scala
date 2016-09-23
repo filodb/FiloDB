@@ -2,9 +2,11 @@ package filodb.core.metadata
 
 import com.typesafe.config.ConfigFactory
 import java.sql.Timestamp
+import net.ceedubs.ficus.Ficus._
 import org.joda.time.{DateTime, DateTimeZone}
 import org.scalactic._
 import org.velvia.filo.RowReader
+import scala.concurrent.duration.FiniteDuration
 
 import filodb.core._
 import filodb.core.Types._
@@ -28,7 +30,7 @@ object TimeComputations {
     def parseDurationMillis(arg: String): Long Or InvalidComputedColumnSpec = {
       try {
         val config = ConfigFactory.parseString(s"a = $arg")
-        Good(config.getMilliseconds("a"))
+        Good(config.as[FiniteDuration]("a").toMillis)
       } catch {
         case e: Exception => Bad(BadArgument(e.getMessage))
       }

@@ -71,6 +71,7 @@ object FiloDriver extends FiloSetup with StrictLogging {
       role = "driver"
       val filoConfig = configFromSpark(context)
       _config = Some(filoConfig)
+      kamonInit()
       coordinatorActor
 
       // Add in self cluster address, and join cluster ourselves
@@ -112,6 +113,7 @@ object FiloExecutor extends FiloSetup with StrictLogging {
     _config.getOrElse {
       this.role = "executor"
       _config = Some(filoConfig)
+      kamonInit()
       coordinatorActor       // force coordinator to start
       // TODO : start reloading WAL files
       // NodeCoordinatorActor.ReloadDatasetCoordActors

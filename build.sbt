@@ -76,7 +76,13 @@ val excludeZK = ExclusionRule(organization = "org.apache.zookeeper")
 val excludeSlf4jLog4j = ExclusionRule(organization = "org.slf4j", name = "slf4j-log4j12")
 val excludeJersey = ExclusionRule(organization = "com.sun.jersey")
 
-lazy val coreDeps = Seq(
+lazy val commonDeps = Seq(
+  "io.kamon"             %% "kamon-core"        % "0.6.0",
+  "ch.qos.logback"        % "logback-classic"   % "1.0.7" % "test",  // to get good test logs
+  "org.scalatest"        %% "scalatest"         % "2.2.4" % "test"
+)
+
+lazy val coreDeps = commonDeps ++ Seq(
   "com.typesafe.scala-logging" %% "scala-logging-slf4j" % "2.1.2",
   "org.slf4j"             % "slf4j-api"         % "1.7.10",
   "com.beachape"         %% "enumeratum"        % "1.2.1",
@@ -88,23 +94,22 @@ lazy val coreDeps = Seq(
   "org.scodec"           %% "scodec-bits"       % "1.0.10",
   "org.scalactic"        %% "scalactic"         % "2.2.6",
   "com.markatta"         %% "futiles"           % "1.1.3",
-  "com.nativelibs4java"  %% "scalaxy-loops"     % "0.3.3" % "provided",
-  "ch.qos.logback"        % "logback-classic"   % "1.0.7" % "test",  // to get good test logs
-  "org.scalatest"        %% "scalatest"         % "2.2.4" % "test"
+  "com.nativelibs4java"  %% "scalaxy-loops"     % "0.3.3" % "provided"
 )
 
-lazy val cassDeps = Seq(
+lazy val cassDeps = commonDeps ++ Seq(
+  // other dependencies separated by commas
   "com.datastax.cassandra" % "cassandra-driver-core" % cassDriverVersion,
   "ch.qos.logback"        % "logback-classic"   % "1.0.7" % "test"
 )
 
-lazy val coordDeps = Seq(
+lazy val coordDeps = commonDeps ++ Seq(
   "com.typesafe.akka"    %% "akka-slf4j"        % akkaVersion,
   "com.typesafe.akka"    %% "akka-cluster"      % akkaVersion,
+  // Take out the below line if you really don't want statsd metrics enabled
+  "io.kamon"             %% "kamon-statsd"        % "0.6.0",
   "com.opencsv"           % "opencsv"           % "3.3",
-  "com.typesafe.akka"    %% "akka-testkit"      % akkaVersion % "test",
-  "ch.qos.logback"        % "logback-classic"   % "1.0.7" % "test",  // to get good test logs
-  "org.scalatest"        %% "scalatest"         % "2.2.4" % "test"
+  "com.typesafe.akka"    %% "akka-testkit"      % akkaVersion % "test"
 )
 
 lazy val cliDeps = Seq(
@@ -187,22 +192,47 @@ done
 if [ ! -z "$FILO_CONFIG_FILE" ]; then
   config="-Dconfig.file=$FILO_CONFIG_FILE"
 fi
-exec java -Xmx4g -Xms4g $config $allprops -jar "$0" "$@"
+: ${FILO_LOG_DIR:="."}
+exec java -Xmx4g -Xms4g -DLOG_DIR=$FILO_LOG_DIR $config $allprops -jar "$0" "$@"
 """.split("\n")
 
 // Builds cli as a standalone executable to make it easier to launch commands
 lazy val cliAssemblySettings = assemblySettings ++ Seq(
   assemblyOption in assembly := (assemblyOption in assembly).value.copy(
                                   prependShellScript = Some(shellScript)),
-  assemblyJarName in assembly := s"filo-cli-${version.value}",
-  logLevel in assembly := Level.Error
+  assemblyJarName in assembly := s"filo-cli-${version.value}"
 )
+
+// Create a new MergeStrategy for aop.xml files
+// Needed for Kamon.io async / Akka tracing / AspectJ weaving
+val aopMerge = new sbtassembly.MergeStrategy {
+  val name = "aopMerge"
+  import scala.xml._
+  import scala.xml.dtd._
+
+  def apply(tempDir: File, path: String, files: Seq[File]): Either[String, Seq[(File, String)]] = {
+    val dt = DocType("aspectj", PublicID("-//AspectJ//DTD//EN", "http://www.eclipse.org/aspectj/dtd/aspectj.dtd"), Nil)
+    val file = MergeStrategy.createMergeTarget(tempDir, path)
+    val xmls: Seq[Elem] = files.map(XML.loadFile)
+    val aspectsChildren: Seq[Node] = xmls.flatMap(_ \\ "aspectj" \ "aspects" \ "_")
+    val weaverChildren: Seq[Node] = xmls.flatMap(_ \\ "aspectj" \ "weaver" \ "_")
+    val options: String = xmls.map(x => (x \\ "aspectj" \ "weaver" \ "@options").text).mkString(" ").trim
+    val weaverAttr = if (options.isEmpty) Null else new UnprefixedAttribute("options", options, Null)
+    val aspects = new Elem(null, "aspects", Null, TopScope, false, aspectsChildren: _*)
+    val weaver = new Elem(null, "weaver", weaverAttr, TopScope, false, weaverChildren: _*)
+    val aspectj = new Elem(null, "aspectj", Null, TopScope, false, aspects, weaver)
+    XML.save(file.toString, aspectj, "UTF-8", xmlDecl = false, dt)
+    IO.append(file, IO.Newline.getBytes(IO.defaultCharset))
+    Right(Seq(file -> path))
+  }
+}
 
 lazy val assemblySettings = Seq(
   assemblyMergeStrategy in assembly := {
     case m if m.toLowerCase.endsWith("manifest.mf") => MergeStrategy.discard
     case m if m.toLowerCase.matches("meta-inf.*\\.sf$") => MergeStrategy.discard
     case m if m.toLowerCase.matches("meta-inf.*\\.properties") => MergeStrategy.discard
+    case PathList("META-INF", "aop.xml") => aopMerge
     case PathList(ps @ _*) if ps.last endsWith ".txt.1" => MergeStrategy.first
     case "reference.conf"    => MergeStrategy.concat
     case "application.conf"  => MergeStrategy.concat
@@ -211,7 +241,9 @@ lazy val assemblySettings = Seq(
       oldStrategy(x)
   },
   assemblyShadeRules in assembly := Seq(
-    ShadeRule.rename("com.datastax.driver.**" -> "filodb.datastax.driver.@1").inAll
+    ShadeRule.rename("com.datastax.driver.**" -> "filodb.datastax.driver.@1").inAll,
+    ShadeRule.rename("com.google.common.**" -> "filodb.com.google.common.@1").inAll,
+    ShadeRule.rename("com.google.guava.**" -> "filodb.com.google.guava.@1").inAll
   ),
   test in assembly := {} //noisy for end-user since the jar is not available and user needs to build the project locally
 )
