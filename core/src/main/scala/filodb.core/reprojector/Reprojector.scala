@@ -39,6 +39,8 @@ trait Reprojector {
    */
   def toSegments(memTable: MemTable, segments: Seq[(Any, Any)], version: Int): Seq[ChunkSetSegment]
 
+  def clear(): Unit = {}
+
   protected def printSegInfos(infos: Seq[(Any, Any)]): String = {
     val ellipsis = if (infos.length > 3) Seq("...") else Nil
     val infoStrings = (infos.take(3).map(_.toString) ++ ellipsis).mkString(", ")
@@ -121,4 +123,6 @@ class DefaultReprojector(config: Config,
       }
     }
   }
+
+  override def clear(): Unit = { stateCache.clear() }
 }

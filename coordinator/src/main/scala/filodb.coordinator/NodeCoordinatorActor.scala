@@ -30,6 +30,7 @@ import filodb.core.reprojector.Reprojector
 object NodeCoordinatorActor {
   // Internal messages
   case object Reset
+  case class ClearState(dataset: DatasetRef, version: Int)   // Clears the state of a single dataset
   case class AddDatasetCoord(dataset: DatasetRef, version: Int, dsCoordRef: ActorRef)
   case class DatasetCreateNotify(dataset: DatasetRef, version: Int, msg: Any)
 
@@ -207,6 +208,14 @@ class NodeCoordinatorActor(metaStore: MetaStore,
       dsCoordinators.clear()
       dsCoordNotify.clear()
       columnStore.reset()
+      reprojector.clear()
+
+    case ClearState(ref, version) =>
+      dsCoordinators.get((ref, version)).foreach(_ ! PoisonPill)
+      dsCoordinators.remove((ref, version))
+      dsCoordNotify.remove((ref, version))
+      // This is a bit heavy handed, it clears out the entire cache, not just for all datasets
+      reprojector.clear()
 
     case AddDatasetCoord(dataset, version, dsCoordRef) =>
       dsCoordinators((dataset, version)) = dsCoordRef
