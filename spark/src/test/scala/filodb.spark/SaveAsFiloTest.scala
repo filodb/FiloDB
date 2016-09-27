@@ -412,7 +412,7 @@ class SaveAsFiloTest extends SparkTestBase {
     val gdeltDF = sc.parallelize(GdeltTestData.records.toSeq).toDF()
     gdeltDF.write.format("filodb.spark").
                  option("dataset", "gdelt3").
-                 option("row_keys", ":getOrElse actor2Code NONE,eventId").
+                 option("row_keys", "actor2Code,eventId").
                  option("segment_key", ":round eventId 50").
                  mode(SaveMode.Overwrite).
                  save()
@@ -430,7 +430,7 @@ class SaveAsFiloTest extends SparkTestBase {
     val gdeltDF = sc.parallelize(GdeltTestData.records.toSeq).toDF()
     gdeltDF.write.format("filodb.spark").
       option("dataset", "gdelt3").
-      option("row_keys", ":getOrElse actor2Code NONE,eventId").
+      option("row_keys", "actor2Code,eventId").
       option("segment_key", ":round eventId 50").
       mode(SaveMode.Overwrite).
       save()

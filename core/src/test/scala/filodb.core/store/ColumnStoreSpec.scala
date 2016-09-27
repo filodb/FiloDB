@@ -47,7 +47,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
 
   implicit val keyType = SingleKeyTypes.LongKeyType
 
-  private def getState(proj: RichProjection = projection): SegmentState =
+  protected def getState(proj: RichProjection = projection): SegmentState =
     new SegmentState(projection, schema, Nil, colStore, 0, 15 seconds)(
                      SegmentInfo("/0", 0).basedOn(projection))
 
@@ -136,6 +136,23 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
       val readSeg = segments.head.asInstanceOf[RowReaderSegment]
       readSeg.rowIterator().map(_.getInt(6)).sum should equal (288)
     }
+  }
+
+  "readChunks" should "return correct number of chunks in chunkID range" in {
+    val state = getState()
+    val segment = getWriterSegment()
+    segment.addChunkSet(state, mapper(names))
+    colStore.appendSegment(projection, segment, 0).futureValue should equal (Success)
+
+    val chunks1 = colStore.readChunks(datasetRef, 0, Seq("first"),
+                                      segment.binaryPartition, segment.segmentId,
+                                      (1, 2)).futureValue
+    chunks1.head.chunks should equal (Nil)
+
+    val chunks2 = colStore.readChunks(datasetRef, 0, Seq("first"),
+                                      segment.binaryPartition, segment.segmentId,
+                                      (0, 1)).futureValue
+    chunks2.head.chunks should have length (1)
   }
 
   "scanSegments SinglePartitionScan" should "read segments back that were written" in {

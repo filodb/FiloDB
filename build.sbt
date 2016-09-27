@@ -61,8 +61,6 @@ val akkaVersion    = "2.3.15"
 val sparkVersion   = "1.6.1"
 
 lazy val extraRepos = Seq(
-  "twitter-repo" at "http://maven.twttr.com",
-  "Pellucid Bintray" at "http://dl.bintray.com/pellucid/maven",
   "Velvia Bintray" at "https://dl.bintray.com/velvia/maven",
   "spray repo" at "http://repo.spray.io"
 )

@@ -23,7 +23,7 @@ object IntSumReadBenchmark {
   val ref = DatasetRef("dataset")
   val projection = RichProjection(dataset, schema)
 
-  val rowStream = Stream.from(0).map { row => (Some(util.Random.nextInt), Some(row)) }
+  val rowStream = Stream.from(0).map { row => (Some(scala.util.Random.nextInt), Some(row)) }
 
   org.slf4j.LoggerFactory.getLogger("filodb").asInstanceOf[Logger].setLevel(Level.ERROR)
 }

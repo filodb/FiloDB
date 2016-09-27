@@ -61,6 +61,13 @@ class SegmentState private(projection: RichProjection,
           (segInfo: SegmentInfo[projection.PK, projection.SK]) =
     this(projection, segInfo, infos, schema, rowKeysForChunk)
 
+  // Only use this constructor if you are really sure there is no overlap, like for tests
+  def this(projection: RichProjection,
+           schema: Seq[Column],
+           infos: Seq[ChunkSetInfo])
+          (segInfo: SegmentInfo[projection.PK, projection.SK]) =
+    this(projection, segInfo, infos, schema, (x: ChunkID) => Array.empty)
+
   def this(proj: RichProjection,
            schema: Seq[Column],
            infos: Seq[ChunkSetInfo],

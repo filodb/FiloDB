@@ -107,6 +107,29 @@ sealed class ChunkTable(dataset: DatasetRef, connector: FiloCassandraConnector)
     }
   }
 
+  val readChunkRangeCql = session.prepare(
+                            s"""SELECT chunkid, data FROM $tableString WHERE
+                             | columnname = ? AND partition = ? AND version = ? AND
+                             | segmentid = ? AND chunkid >= ? AND chunkid <= ?""".stripMargin)
+
+  def readChunks(partition: Types.BinaryPartition,
+                 version: Int,
+                 column: String,
+                 segmentId: Types.SegmentId,
+                 chunkRange: (Types.ChunkID, Types.ChunkID)): Future[ChunkedData] = {
+    val query = readChunkRangeCql.bind(column, toBuffer(partition), version: java.lang.Integer,
+                                       toBuffer(segmentId),
+                                       chunkRange._1: java.lang.Integer,
+                                       chunkRange._2: java.lang.Integer)
+    session.executeAsync(query).toScalaFuture.map { rs =>
+      val rows = rs.all().asScala
+      val byteVectorChunks = rows.map { row => (segmentId,
+                                                row.getInt(0),
+                                                decompress(row.getBytes(1))) }
+      ChunkedData(column, byteVectorChunks)
+    }
+  }
+
   private def compress(orig: ByteBuffer): ByteBuffer = {
     if (compressChunks) {
       // Fastest decompression method is when giving size of original bytes, so store that as first 4 bytes

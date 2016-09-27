@@ -98,7 +98,7 @@ extends ColumnStore with CassandraColumnStoreScanner with StrictLogging {
       return(Future.successful(NotApplied))
     }
     for { writeChunksResp <- writeChunks(projection.datasetRef, version, segment, ctx)
-          writeIndexResp  <- writeIndices(projection.datasetRef, version, segment, ctx)
+          writeIndexResp  <- writeIndices(projection, version, segment, ctx)
                                if writeChunksResp == Success
     } yield {
       ctx.finish()
@@ -120,14 +120,14 @@ extends ColumnStore with CassandraColumnStoreScanner with StrictLogging {
     }
   }
 
-  private def writeIndices(dataset: DatasetRef,
+  private def writeIndices(projection: RichProjection,
                            version: Int,
                            segment: ChunkSetSegment,
                            ctx: TraceContext): Future[Response] = {
     asyncSubtrace(ctx, "write-index", "ingestion") {
-      val indexTable = getOrCreateIndexTable(dataset)
+      val indexTable = getOrCreateIndexTable(projection.datasetRef)
       val indices = segment.chunkSets.map { case ChunkSet(info, skips, _) =>
-        (info.id, ChunkSetInfo.toBytes(info, skips))
+        (info.id, ChunkSetInfo.toBytes(projection, info, skips))
       }
       indexTable.writeIndices(segment.binaryPartition, version, segment.segmentId, indices, stats)
     }
@@ -225,6 +225,19 @@ trait CassandraColumnStoreScanner extends ColumnStoreScanner with StrictLogging 
                                           keyRange.endExclusive)))
   }
 
+  def readChunks(dataset: DatasetRef,
+                 version: Int,
+                 columns: Seq[ColumnId],
+                 partition: Types.BinaryPartition,
+                 segment: Types.SegmentId,
+                 chunkRange: (Types.ChunkID, Types.ChunkID))
+                (implicit ec: ExecutionContext): Future[Seq[ChunkedData]] = {
+    val chunkTable = getOrCreateChunkTable(dataset)
+    Future.sequence(columns.toSeq.map(
+                    chunkTable.readChunks(partition, version, _,
+                                          segment, chunkRange)))
+  }
+
   def multiPartRangeScan(projection: RichProjection,
                          keyRanges: Seq[KeyRange[_, _]],
                          indexTable: IndexTable,
@@ -286,7 +299,7 @@ trait CassandraColumnStoreScanner extends ColumnStoreScanner with StrictLogging 
       indexIt.sortedGroupBy(index => (index.binPartition, index.segmentId))
              .filter { case ((binPart, _), _) => filterFunc(projection.partitionType.fromBytes(binPart)) }
              .map { case ((binPart, binSeg), records) =>
-               val skips = records.map { r => ChunkSetInfo.fromBytes(r.data.array) }.toSeq
+               val skips = records.map { r => ChunkSetInfo.fromBytes(projection, r.data.array) }.toSeq
                toSegIndex(projection, binPart, binSeg, skips)
              }
     }
