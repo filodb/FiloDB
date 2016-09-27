@@ -61,7 +61,7 @@ val akkaVersion    = "2.3.15"
 val sparkVersion   = "1.6.1"
 
 lazy val extraRepos = Seq(
-  "Typesafe repository releases" at "http://repo.typesafe.com/typesafe/releases/",
+  "Typesafe repository releases" at "http://repo.typesafe.com/typesafe/ivy-releases/",
   "twitter-repo" at "http://maven.twttr.com",
   "Websudos releases" at "https://dl.bintray.com/websudos/oss-releases/",
   "Pellucid Bintray" at "http://dl.bintray.com/pellucid/maven",
