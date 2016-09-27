@@ -181,6 +181,7 @@ object SingleKeyTypes {
     def fromString(str: String): Double = str.toDouble
 
     override def size(key: Double): Int = 8
+    override def isSegmentType: Boolean = true
   }
 
   implicit case object DoubleKeyType extends DoubleKeyTypeLike

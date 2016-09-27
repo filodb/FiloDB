@@ -82,12 +82,12 @@ class ComputedColumnSpec extends FunSpec with Matchers {
     }
 
     it("should round double value") {
-      val dblDataset = Dataset("a", ":round dbl 2.0", ":string /0")
+      val dblDataset = Dataset("a", ":round dbl 2.5", ":string /0")
       val dblColumn = DataColumn(0, "dbl", "a", 0, Column.ColumnType.DoubleColumn)
       val proj = RichProjection(dblDataset, Seq(dblColumn))
-      proj.rowKeyFunc(TupleRowReader((Some(1.999), None))) should equal (0.0)
-      proj.rowKeyFunc(TupleRowReader((Some(3.999), None))) should equal (2.0)
-      proj.rowKeyFunc(TupleRowReader((Some(2.00001), None))) should equal (2.0)
+      proj.rowKeyFunc(TupleRowReader((Some(2.499), None))) should equal (0.0)
+      proj.rowKeyFunc(TupleRowReader((Some(4.999), None))) should equal (2.5)
+      proj.rowKeyFunc(TupleRowReader((Some(2.501), None))) should equal (2.5)
     }
   }
 
