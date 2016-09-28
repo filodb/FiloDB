@@ -36,6 +36,8 @@ object NamesTestData {
 
   def getState(rowKeysForChunk: Types.ChunkID => Array[ByteBuffer], segment: Int = 0): SegmentState =
     new SegmentState(projection, schema, Nil, rowKeysForChunk)(SegmentInfo("/0", segment).basedOn(projection))
+  def getState(segment: Int): SegmentState =
+    new SegmentState(projection, schema, Nil)(SegmentInfo("/0", segment).basedOn(projection))
   def getWriterSegment(segment: Int = 0): ChunkSetSegment =
     new ChunkSetSegment(projection, SegmentInfo("/0", segment).basedOn(projection))
 

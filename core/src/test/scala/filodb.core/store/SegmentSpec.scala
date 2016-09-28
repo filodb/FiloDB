@@ -98,6 +98,25 @@ class SegmentSpec extends FunSpec with Matchers with BeforeAndAfter {
     chunkSet2.skips should equal (Seq(ChunkRowSkipIndex(0, Array(2, 3))))
   }
 
+  it("SegmentState should not add skip lists if detectSkips=false") {
+    val state = getState(0)
+    state.nextChunkId should equal (0)
+
+    val sortedNames = names.sortBy(_._3.get)
+    val chunkSet1 = state.newChunkSet(mapper(sortedNames take 4).toIterator)
+    state.nextChunkId should equal (1)
+    state.infoMap.size should equal (1)
+    chunkSet1.skips should equal (Nil)
+    storeChunkSet(chunkSet1)
+
+    // Add new rows.  These replace two of the previous rows - namely in rows 2, 3
+    val chunkSet2 = state.newChunkSet(mapper(sortedNames drop 2).toIterator)
+    state.nextChunkId should equal (2)
+    chunkSet2.info.id should equal (1)
+    chunkSet2.info.numRows should equal (4)
+    chunkSet2.skips should equal (Nil)
+  }
+
   it("RowWriter and RowReader should work for rows with string row keys") {
     val stringProj = RichProjection(Dataset("a", "first", "seg"), schema)
     val state = new SegmentState(stringProj, schema, Nil, rowKeyChunks.apply _)(segInfo.basedOn(stringProj))

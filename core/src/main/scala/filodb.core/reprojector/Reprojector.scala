@@ -70,6 +70,7 @@ class DefaultReprojector(config: Config,
 
   val retries = config.getInt("reprojector.retries")
   val retryBaseTime = config.as[FiniteDuration]("reprojector.retry-base-timeunit")
+  val detectSkips = !config.getBoolean("reprojector.bulk-write-mode")
 
   def toSegments(memTable: MemTable, segments: Seq[(Any, Any)], version: Int): Seq[ChunkSetSegment] = {
     val dataset = memTable.projection.dataset
@@ -78,7 +79,10 @@ class DefaultReprojector(config: Config,
         // For each segment grouping of rows... set up a Segment
         val segInfo = SegmentInfo(partition, segmentKey).basedOn(memTable.projection)
         val state = subtrace("get-segment-state", "ingestion") {
-          stateCache.getSegmentState(memTable.projection, memTable.projection.columns, version)(segInfo)
+          stateCache.getSegmentState(memTable.projection,
+                                     memTable.projection.columns,
+                                     version,
+                                     detectSkips)(segInfo)
         }
         val segment = new ChunkSetSegment(memTable.projection, segInfo)
         val segmentRowsIt = memTable.safeReadRows(segInfo)

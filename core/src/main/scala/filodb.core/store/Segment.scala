@@ -46,11 +46,19 @@ trait Segment {
  * them as we add rows.  Basically, this class has all the state for adding to a segment.
  * It is meant to be updated as ChunkSets are added and state modified.
  * Its state can be recovered from the index written to ColumnStore.
+ *
+ * @param projection the RichProjection for the dataset to ingest
+ * @param segInfo    the partition and segment
+ * @param infos      previous chunkSets in the segment
+ * @param schema     the columns to ingest
+ * @param detectSkips whether to detect row replacement / skipping of prev rows
+ * @param rowKeysForChunk a function to retrieve row key chunks for a previous chunkID
  */
 class SegmentState private(projection: RichProjection,
                            segInfo: SegmentInfo[RichProjection#PK, RichProjection#SK],
                            infos: Seq[ChunkSetInfo],
                            schema: Seq[Column],
+                           detectSkips: Boolean,
                            rowKeysForChunk: ChunkID => Array[ByteBuffer]) {
   import collection.JavaConverters._
 
@@ -59,24 +67,25 @@ class SegmentState private(projection: RichProjection,
            infos: Seq[ChunkSetInfo],
            rowKeysForChunk: ChunkID => Array[ByteBuffer])
           (segInfo: SegmentInfo[projection.PK, projection.SK]) =
-    this(projection, segInfo, infos, schema, rowKeysForChunk)
+    this(projection, segInfo, infos, schema, true, rowKeysForChunk)
 
   // Only use this constructor if you are really sure there is no overlap, like for tests
   def this(projection: RichProjection,
            schema: Seq[Column],
            infos: Seq[ChunkSetInfo])
           (segInfo: SegmentInfo[projection.PK, projection.SK]) =
-    this(projection, segInfo, infos, schema, (x: ChunkID) => Array.empty)
+    this(projection, segInfo, infos, schema, false, (x: ChunkID) => Array.empty)
 
   def this(proj: RichProjection,
            schema: Seq[Column],
            infos: Seq[ChunkSetInfo],
            scanner: ColumnStoreScanner,
            version: Int,
-           timeout: FiniteDuration)
+           timeout: FiniteDuration,
+           detectSkips: Boolean = true)
           (segInfo: SegmentInfo[proj.PK, proj.SK])
           (implicit ec: ExecutionContext) =
-    this(proj, segInfo, infos, schema,
+    this(proj, segInfo, infos, schema, detectSkips,
          (chunk: ChunkID) => Await.result(scanner.readRowKeyChunks(proj, version, chunk)
                                           (segInfo.basedOn(proj)), timeout))
 
@@ -115,10 +124,12 @@ class SegmentState private(projection: RichProjection,
 
     val chunkMap = builder.convertToBytes()
     val info = ChunkSetInfo(infoChunkId, numRows, firstKey, lastKey)
-    val skips = ChunkSetInfo.detectSkips(projection, info,
-                                         projection.rowKeyColumns.map(c => chunkMap(c.name)).toArray,
-                                         infoMap.values.asScala.toSeq,
-                                         rowKeysForChunk)
+    val skips = if (detectSkips) {
+      ChunkSetInfo.detectSkips(projection, info,
+                               projection.rowKeyColumns.map(c => chunkMap(c.name)).toArray,
+                               infoMap.values.asScala.toSeq,
+                               rowKeysForChunk)
+    } else { Nil }
     infoMap.put(info.id, info)
     ChunkSet(info, skips, chunkMap)
   }

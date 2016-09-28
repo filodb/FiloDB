@@ -51,7 +51,10 @@ class SegmentStateCache(config: Config, columnStore: ColumnStoreScanner)
    * The new one will be recreated from the ColumnStore if that segment exists. If not, then a brand new
    * one is created entirely.
    */
-  def getSegmentState(projection: RichProjection, schema: Seq[Column], version: Int)
+  def getSegmentState(projection: RichProjection,
+                      schema: Seq[Column],
+                      version: Int,
+                      detectSkips: Boolean = true)
                      (segInfo: SegmentInfo[projection.PK, projection.SK]): SegmentState = {
     cacheReads.increment
     val cacheKey = (projection.datasetRef, segInfo)
@@ -64,7 +67,7 @@ class SegmentStateCache(config: Config, columnStore: ColumnStoreScanner)
       val indexIt = Await.result(indexRead, waitTimeout)
       val infosAndSkips = indexIt.toSeq.headOption.map(_.infosAndSkips).getOrElse(Nil)
       new SegmentState(projection, schema, infosAndSkips.map(_._1),
-                       columnStore, version, waitTimeout)(segInfo)
+                       columnStore, version, waitTimeout, detectSkips)(segInfo)
     })
   }
 

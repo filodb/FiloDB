@@ -315,6 +315,8 @@ Some options must be configured before starting the Spark Shell or Spark applica
 
 Note that if Cassandra is kept as the default column store, the keyspace can be changed on each transaction by specifying the `database` option in the data source API, or the database parameter in the Scala API.
 
+For a list of all configuration params as well as a template for a config file, see the `filodb_defaults.conf` file included in the source and packaged with the jar as defaults.
+
 For metrics system configuration, see the metrics section below.
 
 #### Passing Cassandra Authentication Settings
@@ -383,6 +385,8 @@ sourceDataFrame.write.format("filodb.spark").
 
 Note that for efficient columnar encoding, wide rows with fewer partition keys are better for performance.
 
+By default, data is written to replace existing records with the same primary key.  To turn this primary key replacement off for faster ingestion, set `filodb.reprojector.bulk-write-mode` to `true`.
+ 
 Reading the dataset,
 ```
 val df = sqlContext.read.format("filodb.spark").option("dataset", "gdelt").load()
