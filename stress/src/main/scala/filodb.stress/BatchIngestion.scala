@@ -74,5 +74,6 @@ object BatchIngestion extends App {
 
   // clean up!
   FiloDriver.shutdown()
+  FiloExecutor.shutdown()
   sc.stop()
 }
