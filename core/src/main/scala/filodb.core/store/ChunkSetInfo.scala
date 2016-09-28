@@ -204,6 +204,9 @@ object ChunkSetInfo extends StrictLogging {
     binarySearchKeyChunks(reader, chunkLen, ordering, key)
   }
 
+  // NOTE/TODO: The binary search algo below could be turned into a tail-recursive one, but be sure to do
+  // a benchmark comparison first.  This is definitely in the critical path and we don't want a slowdown.
+  // OTOH a tail recursive probably won't be the bottleneck.
   def binarySearchKeyChunks(reader: FiloRowReader,
                             chunkLen: Int,
                             ordering: Ordering[RowReader],
