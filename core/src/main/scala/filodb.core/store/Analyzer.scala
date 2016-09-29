@@ -68,7 +68,9 @@ object Analyzer {
   def analyze(cs: CachedMergingColumnStore,
               metaStore: MetaStore,
               dataset: DatasetRef,
-              version: Int): ColumnStoreAnalysis = {
+              version: Int,
+              splitCombiner: Seq[ScanSplit] => ScanSplit,
+              maxSegments: Int = 10000): ColumnStoreAnalysis = {
     var numSegments = 0
     var rowsInSegment: Histogram = Histogram.empty
     var chunksInSegment: Histogram = Histogram.empty
@@ -78,11 +80,12 @@ object Analyzer {
     val datasetObj = Await.result(metaStore.getDataset(dataset), 1.minutes)
     val schema = Await.result(metaStore.getSchema(dataset, version), 1.minutes)
     val projection = RichProjection(datasetObj, schema.values.toSeq)
-    val splits = cs.getScanSplits(dataset, 1)
-    val indexes = Await.result(cs.scanChunkRowMaps(projection, version,
-                                                   FilteredPartitionScan(splits.head)), 1.minutes)
+    val split = splitCombiner(cs.getScanSplits(dataset, 1))
 
-    indexes.foreach { case SegmentIndex(partKey, _, _, _, rowmap) =>
+    val indexes = Await.result(cs.scanChunkRowMaps(projection, version,
+                                                   FilteredPartitionScan(split)), 1.minutes)
+
+    indexes.take(maxSegments).foreach { case SegmentIndex(partKey, _, _, _, rowmap) =>
       // Figure out # chunks and rows per segment
       val numRows = rowmap.chunkIds.length
       val numChunks = rowmap.nextChunkId

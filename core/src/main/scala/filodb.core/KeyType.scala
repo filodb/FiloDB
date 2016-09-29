@@ -47,7 +47,7 @@ trait KeyType {
 
 import SingleKeyTypes._
 
-case class NullKeyValue(colIndex: Int) extends Exception(s"Null partition value for col index $colIndex")
+case class NullKeyValue(colIndex: Int) extends Exception(s"Null key value for col index $colIndex")
 
 abstract class SingleKeyTypeBase[K : Ordering : TypedFieldExtractor] extends KeyType {
   type T = K
@@ -181,6 +181,7 @@ object SingleKeyTypes {
     def fromString(str: String): Double = str.toDouble
 
     override def size(key: Double): Int = 8
+    override def isSegmentType: Boolean = true
   }
 
   implicit case object DoubleKeyType extends DoubleKeyTypeLike

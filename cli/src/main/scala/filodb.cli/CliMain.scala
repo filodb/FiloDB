@@ -12,14 +12,14 @@ import scala.concurrent.Await
 import scala.concurrent.duration._
 import scala.language.postfixOps
 
-import filodb.cassandra.columnstore.CassandraColumnStore
+import filodb.cassandra.columnstore.{CassandraColumnStore, CassandraTokenRangeSplit}
 import filodb.cassandra.metastore.CassandraMetaStore
 import filodb.coordinator.client.{Client, LocalClient}
 import filodb.coordinator.{DatasetCommands, CoordinatorSetup}
 import filodb.core._
 import filodb.core.metadata.Column.{ColumnType, Schema}
 import filodb.core.metadata.{Column, DataColumn, Dataset, RichProjection}
-import filodb.core.store.{Analyzer, CachedMergingColumnStore, FilteredPartitionScan}
+import filodb.core.store.{Analyzer, CachedMergingColumnStore, FilteredPartitionScan, ScanSplit}
 
 //scalastyle:off
 class Arguments extends FieldArgs {
@@ -31,10 +31,11 @@ class Arguments extends FieldArgs {
   var rowKeys: Seq[String] = Nil
   var segmentKey: Option[String] = None
   var partitionKeys: Seq[String] = Nil
+  var numSegments: Int = 10000
   var version: Option[Int] = None
   var select: Option[Seq[String]] = None
   var limit: Int = 1000
-  var timeoutMinutes: Int = 99
+  var timeoutSeconds: Int = 60
   var outfile: Option[String] = None
   var delimiter: String = ","
 
@@ -79,13 +80,25 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
 
   def getRef(args: Arguments): DatasetRef = DatasetRef(args.dataset.get, args.database)
 
+  def combineSplits(splits: Seq[ScanSplit]): ScanSplit = {
+    val csplits = splits.asInstanceOf[Seq[CassandraTokenRangeSplit]]
+
+    // Compress all the token ranges down into one split
+    csplits.foldLeft(csplits.head.copy(tokens = Nil)) { case (nextSplit, ourSplit) =>
+      ourSplit.copy(tokens = ourSplit.tokens ++ nextSplit.tokens)
+    }
+  }
+
   def main(args: Arguments) {
     try {
       val version = args.version.getOrElse(0)
+      val timeout = args.timeoutSeconds.seconds
       args.command match {
         case Some("init") =>
           println("Initializing FiloDB Admin keyspace and tables...")
-          awaitSuccess(metaStore.initialize())
+          parse(metaStore.initialize(), timeout) {
+            case Success =>   println("Succeeded.")
+          }
 
         case Some("list") =>
           args.dataset.map(ds => dumpDataset(ds, args.database)).getOrElse(dumpAllDatasets(args.database))
@@ -99,7 +112,8 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
                                   args.rowKeys,
                                   args.segmentKey.get,
                                   if (args.partitionKeys.isEmpty) { Seq(Dataset.DefaultPartitionColumn) }
-                                  else { args.partitionKeys })
+                                  else { args.partitionKeys },
+                                  timeout)
 
         case Some("importcsv") =>
           import org.apache.commons.lang3.StringEscapeUtils._
@@ -108,18 +122,20 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
                     version,
                     args.filename.get,
                     delimiter,
-                    args.timeoutMinutes.minutes)
+                    99.minutes)
 
         case Some("analyze") =>
           println(Analyzer.analyze(columnStore.asInstanceOf[CachedMergingColumnStore],
                                    metaStore,
                                    getRef(args),
-                                   version).prettify())
+                                   version,
+                                   combineSplits,
+                                   args.numSegments).prettify())
         case Some("delete") =>
-          client.deleteDataset(getRef(args))
+          client.deleteDataset(getRef(args), timeout)
 
         case Some("truncate") =>
-          client.truncateDataset(getRef(args), version)
+          client.truncateDataset(getRef(args), version, timeout)
 
         case x: Any =>
           args.select.map { selectCols =>
@@ -168,7 +184,8 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
                               columns: Seq[DataColumn],
                               rowKeys: Seq[String],
                               segmentKey: String,
-                              partitionKeys: Seq[String]) {
+                              partitionKeys: Seq[String],
+                              timeout: FiniteDuration) {
     println(s"Creating dataset $dataset...")
     val datasetObj = Dataset(dataset, rowKeys, segmentKey, partitionKeys)
 
@@ -179,7 +196,9 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
         return
     }
 
-    actorAsk(coordinatorActor, DatasetCommands.CreateDataset(datasetObj, columns, dataset.database)) {
+    actorAsk(coordinatorActor,
+             DatasetCommands.CreateDataset(datasetObj, columns, dataset.database),
+             timeout) {
       case DatasetCommands.DatasetCreated =>
         println(s"Dataset $dataset created!")
         exitCode = 0

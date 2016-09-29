@@ -9,6 +9,7 @@ import scodec.bits._
 
 import filodb.cassandra.FiloCassandraConnector
 import filodb.core._
+import filodb.core.store.ColumnStoreStats
 
 case class ChunkRowMapRecord(binPartition: Types.BinaryPartition,
                              segmentId: Types.SegmentId,
@@ -127,11 +128,14 @@ sealed class ChunkRowMapTable(dataset: DatasetRef, connector: FiloCassandraConne
                     segmentId: Types.SegmentId,
                     chunkIds: ByteBuffer,
                     rowNums: ByteBuffer,
-                    nextChunkId: Int): Future[Response] =
+                    nextChunkId: Int,
+                    stats: ColumnStoreStats): Future[Response] = {
+    stats.addIndexWriteStats(chunkIds.capacity.toLong + rowNums.capacity.toLong + 4L)
     connector.execStmt(writeChunkMapCql.bind(toBuffer(partition),
                                              version: java.lang.Integer,
                                              toBuffer(segmentId),
                                              chunkIds,
                                              rowNums,
                                              nextChunkId: java.lang.Integer))
+  }
 }
