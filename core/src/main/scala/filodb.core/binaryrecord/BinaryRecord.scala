@@ -4,6 +4,8 @@ import org.velvia.filo.{RowReader, UnsafeUtils, ZeroCopyBinary, ZeroCopyUTF8Stri
 import scala.language.postfixOps
 import scalaxy.loops._
 
+import filodb.core.metadata.RichProjection
+
 /**
  * BinaryRecord is a record type that supports flexible schemas and reads/writes/usage
  * with no serialization at all for extreme performance and low latency with minimal GC pressure.
@@ -33,11 +35,32 @@ extends ZeroCopyBinary with RowReader {
 
   override final def filoUTF8String(columnNo: Int): ZeroCopyUTF8String =
     fields(columnNo).get[ZeroCopyUTF8String](this)
+
+  /**
+   * Returns an array of bytes for this binary record.  If this BinaryRecord is already a byte array
+   * with exactly numBytes bytes, then just return that, to avoid another copy.  Otherwise, call
+   * asNewByteArray to return a copy.
+   */
+  def bytes: Array[Byte] = {
+    //scalastyle:off
+    if (base != null && base.isInstanceOf[Array[Byte]] && offset == UnsafeUtils.arayOffset) {
+      //scalastyle:on
+      base.asInstanceOf[Array[Byte]]
+    } else {
+      asNewByteArray
+    }
+  }
 }
+
+class ArrayBinaryRecord(schema: RecordSchema, override val bytes: Array[Byte]) extends
+BinaryRecord(schema, bytes, UnsafeUtils.arayOffset, bytes.size)
 
 object BinaryRecord {
   def apply(schema: RecordSchema, bytes: Array[Byte]): BinaryRecord =
-    BinaryRecord(schema, bytes, UnsafeUtils.arayOffset, bytes.size)
+    new ArrayBinaryRecord(schema, bytes)
+
+  def apply(projection: RichProjection, bytes: Array[Byte]): BinaryRecord =
+    apply(projection.rowKeyBinSchema, bytes)
 
   val DefaultMaxRecordSize = 8192
 
@@ -152,7 +175,7 @@ class BinaryRecordBuilder(schema: RecordSchema, val base: Any, val offset: Long,
   def build(copy: Boolean = false): BinaryRecord = if (copy) {
     val newAray = new Array[Byte](numBytes)
     UnsafeUtils.unsafe.copyMemory(base, offset, newAray, UnsafeUtils.arayOffset, numBytes)
-    BinaryRecord(schema, newAray, UnsafeUtils.arayOffset, numBytes)
+    new ArrayBinaryRecord(schema, newAray)
   } else {
     BinaryRecord(schema, base, offset, numBytes)
   }

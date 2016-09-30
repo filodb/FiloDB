@@ -57,4 +57,12 @@ class BinaryRecordSpec extends FunSpec with Matchers {
     binRec1.getLong(1) should equal (0L)
     binRec1.getString(0) should equal ("")
   }
+
+  it("should get bytes out and get back same BinaryRecord") {
+    val bytes = BinaryRecord(schema3_bdt, reader3).bytes
+    val binRec = BinaryRecord(schema3_bdt, bytes)
+    binRec.getBoolean(0) should equal (true)
+    binRec.getDouble(1) should equal (5.7)
+    binRec.as[Timestamp](2) should equal (new Timestamp(1000000L))
+  }
 }

@@ -3,12 +3,13 @@ package filodb.core.store
 import com.typesafe.scalalogging.slf4j.StrictLogging
 import java.nio.ByteBuffer
 import org.boon.primitive.{ByteBuf, InputByteArray}
-import org.velvia.filo.{FastFiloRowReader, FiloRowReader, RowReader, SafeFiloRowReader, SeqRowReader}
+import org.velvia.filo.{FastFiloRowReader, FiloRowReader, RowReader, SafeFiloRowReader}
 import scala.collection.mutable.{ArrayBuffer, HashMap, TreeSet}
 import scala.math.Ordered._
 import scodec.bits._
 
 import filodb.core._
+import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.metadata.RichProjection
 import filodb.core.Types._
 
@@ -73,8 +74,8 @@ object ChunkSetInfo extends StrictLogging {
     val buf = ByteBuf.create(100)
     buf.add(chunkSetInfo.id)
     buf.add(chunkSetInfo.numRows)
-    buf.writeMediumByteArray(rowKeyToBytes(projection, chunkSetInfo.firstKey).toArray)
-    buf.writeMediumByteArray(rowKeyToBytes(projection, chunkSetInfo.lastKey).toArray)
+    buf.writeMediumByteArray(BinaryRecord(projection.rowKeyBinSchema, chunkSetInfo.firstKey).bytes)
+    buf.writeMediumByteArray(BinaryRecord(projection.rowKeyBinSchema, chunkSetInfo.lastKey).bytes)
     skips.foreach { case ChunkRowSkipIndex(id, overrides) =>
       buf.add(id)
       buf.writeMediumIntArray(overrides.toArray)
@@ -86,8 +87,8 @@ object ChunkSetInfo extends StrictLogging {
     val scanner = new InputByteArray(bytes)
     val id = scanner.readInt
     val numRows = scanner.readInt
-    val firstKey = rowKeyFromBytes(projection, scanner.readMediumByteArray)
-    val lastKey = rowKeyFromBytes(projection, scanner.readMediumByteArray)
+    val firstKey = BinaryRecord(projection, scanner.readMediumByteArray)
+    val lastKey = BinaryRecord(projection, scanner.readMediumByteArray)
     val skips = new ArrayBuffer[ChunkRowSkipIndex]
     while (scanner.location < bytes.size) {
       val skipId = scanner.readInt
@@ -95,27 +96,6 @@ object ChunkSetInfo extends StrictLogging {
       skips.append(ChunkRowSkipIndex(skipId, skipList))
     }
     (ChunkSetInfo(id, numRows, firstKey, lastKey), skips)
-  }
-
-  // This is only necessary in the short term while we serialize keys to/from binary
-  // It's super inefficient
-  // In the future we move to BinaryRecord and this problem would be solved
-  private def rowKeyToBytes(projection: RichProjection, key: RowReader): ByteVector = {
-    val keyTyp = projection.rowKeyType
-    key match {
-      case SeqRowReader(Seq(value)) =>
-        keyTyp.toBytes(value.asInstanceOf[keyTyp.T])
-      case SeqRowReader(longSeq)    =>
-        keyTyp.toBytes(longSeq.asInstanceOf[keyTyp.T])
-      case other: Any => ???
-    }
-  }
-
-  private def rowKeyFromBytes(projection: RichProjection, bytes: Array[Byte]): RowReader = {
-    projection.rowKeyType.fromBytes(ByteVector(bytes)) match {
-      case s: Seq[Any] => SeqRowReader(s)
-      case o: Any      => SeqRowReader(Seq(o))
-    }
   }
 
   def collectSkips(infos: ChunkInfosAndSkips): Seq[(ChunkSetInfo, Array[Int])] = {
@@ -156,7 +136,6 @@ object ChunkSetInfo extends StrictLogging {
 
     val clazzes = projection.rowKeyColumns.map(_.columnType.clazz).toArray
     val reader = new FastFiloRowReader(chunkKeys, clazzes, chunkInfo.numRows)
-    logger.debug(s"Reader parsers ${reader.parsers.toList}")
 
     // Match each key in range over bloom filter and return a list of hit rowkeys for each chunkID
     val hitKeysByChunk = intersectingRanges.map { case (chunkId, numRows, (key1, key2)) =>

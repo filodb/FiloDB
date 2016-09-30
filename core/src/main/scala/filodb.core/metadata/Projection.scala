@@ -5,6 +5,7 @@ import org.scalactic._
 import org.velvia.filo.RowReader
 
 import filodb.core.{CompositeKeyType, KeyType, KeyRange, BinaryKeyRange}
+import filodb.core.binaryrecord.RecordSchema
 import filodb.core.Types._
 import filodb.core._
 
@@ -63,6 +64,8 @@ case class RichProjection(projection: Projection,
 
   def datasetName: String = projection.dataset.toString
   def datasetRef: DatasetRef = projection.dataset
+
+  val rowKeyBinSchema = RecordSchema(rowKeyColumns)
 
   /**
    * Returns a new RichProjection with the specified database and everything else kept the same
