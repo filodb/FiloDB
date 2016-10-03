@@ -44,7 +44,7 @@ with Matchers with ScalaFutures {
   }
 
   after {
-    FiloExecutor.stateCache.clear()
+    if (FiloExecutor._config.isDefined) FiloExecutor.stateCache.clear()
   }
 
   implicit lazy val ec = FiloDriver.ec
