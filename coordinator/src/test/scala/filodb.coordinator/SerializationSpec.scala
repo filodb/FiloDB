@@ -1,5 +1,6 @@
 package filodb.coordinator
 
+import akka.actor.{Address, ActorRef}
 import java.io.{ByteArrayInputStream, ObjectInputStream}
 import java.io.{ByteArrayOutputStream, ObjectOutputStream}
 
@@ -24,5 +25,17 @@ class SerializationSpec extends FunSpec with Matchers {
     ois.readObject should equal (UnknownDataset)
     ois.readObject should equal (BadSchema("no match foo blah"))
     ois.readObject should equal (Ack(123L))
+  }
+
+  it("should be able to serialize a PartitionMapper") {
+    val baos = new ByteArrayOutputStream
+    val oos = new ObjectOutputStream(baos)
+    val emptyRef = ActorRef.noSender
+    val addr1 = Address("http", "test", "host1", 1001)
+    val mapper = PartitionMapper.empty.addNode(addr1, emptyRef)
+    oos.writeObject(mapper)
+
+    val ois = new ObjectInputStream(new ByteArrayInputStream(baos.toByteArray))
+    ois.readObject should equal (mapper)
   }
 }
