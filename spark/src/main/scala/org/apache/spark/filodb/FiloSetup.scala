@@ -76,7 +76,7 @@ object SingleJvmInMemoryStore {
 object FiloDriver extends FiloSetup with StrictLogging {
   import collection.JavaConverters._
 
-  lazy val clusterActor = system.actorOf(NodeClusterActor.props(cluster), "cluster-actor")
+  lazy val clusterActor = system.actorOf(NodeClusterActor.props(cluster, "executor"), "cluster-actor")
   lazy val client = new ClusterClient(clusterActor, "executor", "driver")
 
   // The init method called from a SparkContext is going to be from the driver/app.
