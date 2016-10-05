@@ -1,17 +1,10 @@
 package org.apache.spark.filodb
 
-import filodb.cassandra.columnstore.CassandraColumnStore
-import filodb.cassandra.metastore.CassandraMetaStore
-import filodb.coordinator.client.ClusterClient
-import filodb.coordinator.{CoordinatorSetup, NodeClusterActor}
-import filodb.core.store.{InMemoryColumnStore, InMemoryMetaStore}
 import akka.actor.{ActorSystem, AddressFromURIString}
 import akka.pattern.ask
 import akka.util.Timeout
 import com.typesafe.config.{Config, ConfigFactory}
 import com.typesafe.scalalogging.slf4j.StrictLogging
-import filodb.coordinator.IngestionCommands.DCAReady
-import filodb.coordinator.NodeCoordinatorActor.ReloadDCA
 import net.ceedubs.ficus.Ficus._
 import org.apache.spark.{SparkContext, SparkEnv}
 
@@ -20,6 +13,23 @@ import scala.concurrent.duration._
 import scala.language.{implicitConversions, postfixOps}
 import scala.concurrent.ExecutionContext.Implicits.global
 
+import filodb.cassandra.columnstore.CassandraColumnStore
+import filodb.cassandra.metastore.CassandraMetaStore
+import filodb.coordinator.client.ClusterClient
+import filodb.coordinator.IngestionCommands.DCAReady
+import filodb.coordinator.NodeCoordinatorActor.ReloadDCA
+import filodb.coordinator.{CoordinatorSetup, NodeClusterActor}
+import filodb.core.store.{ColumnStore, ColumnStoreScanner, InMemoryMetaStore, InMemoryColumnStore, MetaStore}
+
+/**
+ * A StoreFactory creates instances of ColumnStore and MetaStore one time.  The columnStore and metaStore
+ * methods should return that created instance every time, not create a new instance.  The implementation
+ * should be a class that is passed a single parameter, the config used to create the stores.
+ */
+trait StoreFactory {
+  def columnStore: ColumnStore with ColumnStoreScanner
+  def metaStore: MetaStore
+}
 
 /**
  * FiloSetup handles the Spark side setup of both executors and the driver app, including one-time
@@ -51,14 +61,26 @@ trait FiloSetup extends CoordinatorSetup {
     ActorSystem("filo-spark", configAkka(role, host, port))
   }
 
-  lazy val columnStore = config.getString("store") match {
-    case "cassandra" => new CassandraColumnStore(config, readEc)
-    case "in-memory" => new InMemoryColumnStore(readEc)
+  class CassandraStoreFactory(config: Config) extends StoreFactory {
+    val columnStore = new CassandraColumnStore(config, readEc)
+    val metaStore = new CassandraMetaStore(config.getConfig("cassandra"))
   }
-  lazy val metaStore = config.getString("store") match {
-    case "cassandra" => new CassandraMetaStore(config.getConfig("cassandra"))
-    case "in-memory" => SingleJvmInMemoryStore.metaStore
+
+  class InMemoryStoreFactory(config: Config) extends StoreFactory {
+    val columnStore = new InMemoryColumnStore(readEc)
+    val metaStore = SingleJvmInMemoryStore.metaStore
   }
+
+  lazy val factory = config.getString("store") match {
+    case "cassandra" => new CassandraStoreFactory(config)
+    case "in-memory" => new InMemoryStoreFactory(config)
+    case className: String =>
+      val ctor = Class.forName(className).getConstructors.head
+      ctor.newInstance(config).asInstanceOf[StoreFactory]
+  }
+
+  def columnStore: ColumnStore with ColumnStoreScanner = factory.columnStore
+  def metaStore: MetaStore = factory.metaStore
 
   def configAkka(role: String, host: String, akkaPort: Int): Config =
     ConfigFactory.parseString(s"""akka.cluster.roles=[$role]
