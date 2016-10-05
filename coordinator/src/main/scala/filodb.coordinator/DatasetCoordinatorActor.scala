@@ -72,8 +72,15 @@ object DatasetCoordinatorActor {
             version: Int,
             columnStore: ColumnStore,
             reprojector: Reprojector,
-            config: Config): Props =
-    Props(classOf[DatasetCoordinatorActor], projection, version, columnStore, reprojector, config)
+            config: Config,
+            reloadFlag: Boolean = false): Props =
+    Props(classOf[DatasetCoordinatorActor], projection, version, columnStore, reprojector, config, reloadFlag)
+
+  /**
+   * Creates new Memtable using WAL file
+   */
+  case object InitIngestion
+
 }
 
 /**
@@ -111,7 +118,8 @@ private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
                                               version: Int,
                                               columnStore: ColumnStore,
                                               reprojector: Reprojector,
-                                              config: Config) extends BaseActor {
+                                              config: Config,
+                                              reloadFlag: Boolean = false) extends BaseActor {
   import DatasetCoordinatorActor._
   import context.dispatcher
 
@@ -158,7 +166,7 @@ private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
   val hostname: String = "None"
     // actorAddress.host.getOrElse("None") + ":" + actorAddress.port.getOrElse("None")
 
-  def makeNewTable(): MemTable = new FiloMemTable(projection, config, hostname, version)
+  def makeNewTable(): MemTable = new FiloMemTable(projection, config, hostname, version, reloadFlag)
 
   private def reportStats(): Unit = {
     logger.info(s"MemTable active table rows: $activeRows")
@@ -330,5 +338,8 @@ private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
       logger.error(s"Error in reprojection task ($nameVer)", t)
       reportStats()
       handleFlushErr(t)
+
+    case InitIngestion =>
+      activeTable.reloadMemTable
   }
 }

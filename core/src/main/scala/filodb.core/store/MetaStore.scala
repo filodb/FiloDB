@@ -147,7 +147,8 @@ trait MetaStore {
    * @param version
    * @return
    */
-  def insertIngestionState(actorAddress: String, dataset: DatasetRef, state: String, version: Int): Future[Response]
+  def insertIngestionState(actorAddress: String, dataset: DatasetRef, columns: String,
+                           state: String, version: Int ): Future[Response]
 
 
   def getAllIngestionEntries(actorPath: String): Future[Seq[IngestionStateData]]

@@ -30,20 +30,20 @@ class IngestionStateTableSpec extends FlatSpec with AsyncTest {
 
   "insertIngestionState" should "create an entry into table, then return already exists" in {
     whenReady(ingestionStateTable.insertIngestionState("nodeactor1","test","dataset1",
-      0,"Started"), timeout) { response =>
+      0,"","Started"), timeout) { response =>
       response should equal (Success)
     }
 
     // Second time around, entry for dataset already exists
-    whenReady(ingestionStateTable.insertIngestionState("nodeactor1","test","dataset1", 0,"Started"), timeout) {
+    whenReady(ingestionStateTable.insertIngestionState("nodeactor1","test","dataset1", 0,"","Started"), timeout) {
       response => response should equal (AlreadyExists)
     }
 
-    whenReady(ingestionStateTable.insertIngestionState("nodeactor1","test","dataset2", 0,"Started"), timeout) {
+    whenReady(ingestionStateTable.insertIngestionState("nodeactor1","test","dataset2", 0,"","Started"), timeout) {
       response => response should equal (Success)
     }
 
-    whenReady(ingestionStateTable.insertIngestionState("nodeactor1","test","dataset3", 0,"Started"), timeout) {
+    whenReady(ingestionStateTable.insertIngestionState("nodeactor1","test","dataset3", 0,"","Started"), timeout) {
       response => response should equal (Success)
     }
   }

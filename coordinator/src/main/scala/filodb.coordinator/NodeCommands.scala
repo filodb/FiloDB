@@ -89,4 +89,10 @@ object IngestionCommands {
    * Gets the latest ingestion stats from the DatasetCoordinatorActor
    */
   case class GetIngestionStats(dataset: DatasetRef, version: Int) extends NodeCommand
+
+  /**
+   * Initializes new Memtable and loads it using WAL file.
+   */
+  case class reloadIngestionState(dataset: DatasetRef,
+                                 version: Int) extends NodeCommand
 }

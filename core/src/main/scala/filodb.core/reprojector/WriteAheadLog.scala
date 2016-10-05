@@ -4,17 +4,21 @@ import filodb.core.DatasetRef
 import java.io._
 import java.nio.{ByteBuffer, MappedByteBuffer}
 import java.nio.channels.FileChannel
-import java.nio.file.{FileSystems, Files}
+import java.nio.file.{FileSystems, Files, Path, Paths}
 
 import com.typesafe.config.Config
 import filodb.core.metadata.Column
 import org.joda.time.DateTime
 import org.joda.time.format.ISODateTimeFormat
 
-class WriteAheadLog(config: Config, dataset: DatasetRef,
-                     columns: Seq[Column] = Seq(),version: Int = 0) {
+class WriteAheadLog(config: Config,
+                    dataset: DatasetRef,
+                    columns: Seq[Column] = Seq(),
+                    version: Int = 0,
+                    walFilePath: Path = Paths.get(""),
+                    position: Int = 0) {
 
-  private val walBuffer = new WriteAheadLogBuffer(config, dataset, version)
+  private val walBuffer = new WriteAheadLogBuffer(config, dataset, version, walFilePath, position)
 
   val headerLength = writeHeader
 
@@ -45,13 +49,11 @@ class WriteAheadLog(config: Config, dataset: DatasetRef,
 
   def close(): Unit = walBuffer.close
 
-  //noinspection ScalaStyle
   def writeChunks(chunkArray: Array[ByteBuffer]): Unit = {
     walBuffer.bufferOfSufficientSize(2).put(ChunkHeader.chunkStartIndicator.reverse)
     val chunksSize = chunkArray.length
     for {index <- chunkArray.indices} {
       val chunkBytes = chunkArray(index)
-      println("chunkLength ="+ chunkBytes.limit())
       walBuffer.bufferOfSufficientSize(4).put((ByteBuffer.allocate(4).putInt(chunkBytes.limit()).array()).reverse)
       walBuffer.bufferOfSufficientSize(chunkBytes.limit()).put(chunkBytes)
       if (index < chunksSize - 1) {
@@ -61,20 +63,30 @@ class WriteAheadLog(config: Config, dataset: DatasetRef,
   }
 }
 
-class WriteAheadLogBuffer(config: Config, dataset: DatasetRef, version: Int = 0) {
+class WriteAheadLogBuffer(config: Config,
+                          dataset: DatasetRef,
+                          version: Int = 0,
+                          walFilePath: Path,
+                          position: Int) {
 
   private val bufferSize = config.getInt("memtable.mapped-byte-buffer-size")
   private val walDir = config.getString("memtable.memtable-wal-dir")
 
-   val walFile = {
-    Files.createDirectories(FileSystems.getDefault.getPath(s"${walDir}/${dataset}_${version}"))
-    val datestr = ISODateTimeFormat.dateTime().print(new DateTime())
-    new File(s"${walDir}/${dataset}_${version}/${datestr}.wal")
+  val walFile = initWalFile
+
+  private def initWalFile = {
+     if(walFilePath.compareTo(Paths.get("")) == 0) {
+       Files.createDirectories(FileSystems.getDefault.getPath(s"${walDir}/${dataset}_${version}"))
+       val datestr = ISODateTimeFormat.dateTime().print(new DateTime())
+       new File(s"${walDir}/${dataset}_${version}/${datestr}.wal")
+     }else{
+       walFilePath.toFile
+     }
   }
 
   val channel = new RandomAccessFile(walFile, "rw").getChannel
 
-  var bufferOffSet : Int = 0
+  var bufferOffSet : Int = position
   var buffer =  allocateBuffer(bufferSize)
 
   def bufferOfSufficientSize(needed: Int): MappedByteBuffer = {
@@ -86,7 +98,7 @@ class WriteAheadLogBuffer(config: Config, dataset: DatasetRef, version: Int = 0)
   }
 
   def allocateBuffer(bufferSize: Int): MappedByteBuffer =
-    channel.map(FileChannel.MapMode.READ_WRITE, bufferOffSet,bufferSize)
+    channel.map(FileChannel.MapMode.READ_WRITE, bufferOffSet, bufferSize)
 
   def close(): Unit = channel.close()
 }

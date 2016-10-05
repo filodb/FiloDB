@@ -1,11 +1,14 @@
 package filodb.coordinator
 
+import scalax.file.Path
+
 import akka.actor.{ActorRef, ActorSystem, PoisonPill, Terminated}
 import akka.cluster.Cluster
 import akka.testkit.{EventFilter, TestProbe}
 import akka.pattern.gracefulStop
 import com.typesafe.config.ConfigFactory
-import filodb.coordinator.NodeCoordinatorActor.{ReloadDatasetCoordActors}
+import filodb.coordinator.DatasetCoordinatorActor.InitIngestion
+import filodb.coordinator.NodeCoordinatorActor.ReloadDatasetCoordActors
 import filodb.core.GdeltTestData._
 
 import scala.concurrent.Await
@@ -18,6 +21,7 @@ import org.scalatest.time.{Millis, Seconds, Span}
 import org.velvia.filo.ArrayStringRowReader
 
 import scala.io.Source
+import scala.util.Try
 
 object NodeCoordinatorActorSpec extends ActorSpecConfig
 
@@ -58,6 +62,9 @@ with CoordinatorSetup with ScalaFutures {
 
   after {
     gracefulStop(coordActor, 3.seconds.dilated, PoisonPill).futureValue
+    val walDir = config.getString("memtable.memtable-wal-dir")
+    val path = Path.fromString (walDir)
+    Try(path.deleteRecursively(continueOnFailure = false))
   }
 
   def createTable(dataset: Dataset, columns: Seq[DataColumn]): Unit = {
@@ -104,22 +111,18 @@ with CoordinatorSetup with ScalaFutures {
       createTable(dataset1, schema)
       val preSize = metaStore.ingestionstates.size
 
-      probe.send(coordActor, SetupIngestion(projection1.datasetRef, colNames, 1))
+      probe.send(coordActor, SetupIngestion(projection1.datasetRef, colNames, 0))
       probe.expectMsg(IngestionReady)
       metaStore.ingestionstates.size should equal(preSize + 1)
 
       // second time for the same dataset
-      probe.send(coordActor, SetupIngestion(projection1.datasetRef, colNames, 1))
+      probe.send(coordActor, SetupIngestion(projection1.datasetRef, colNames, 0))
       probe.expectMsg(IngestionReady)
       metaStore.ingestionstates.size should equal(preSize + 1)
 
-      // for a different dataset
-     //  createTable(NamesTestData.dataset, NamesTestData.schema)
-     // probe.send(coordActor, SetupIngestion(NamesTestData.datasetRef, NamesTestData.schema.map(_.name), 0))
-     // probe.expectMsg(IngestionReady)
-     // metaStore.ingestionstates.size should equal(preSize + 2)
     }
   }
+
 
   describe("NodeCoordinatorActor DatasetOps commands") {
     it("should be able to create new dataset") {
@@ -210,7 +213,7 @@ with CoordinatorSetup with ScalaFutures {
     probe.expectMsg(UnknownDataset)
   }
 
-  it("should stop dataset coordinator actors in the middle of ingestion") {
+  it("should reload dataset coordinator actors once the nodes are up") {
     probe.send(coordActor, CreateDataset(dataset4, schema))
     probe.expectMsg(DatasetCreated)
     columnStore.clearProjectionData(dataset4.projections.head).futureValue should equal (Success)
@@ -234,7 +237,7 @@ with CoordinatorSetup with ScalaFutures {
 
     val readers2 = gdeltLines.map { line => ArrayStringRowReader(line.split(",")) }
 
-    EventFilter[NullKeyValue](occurrences = 1) intercept {
+    EventFilter[java.lang.NumberFormatException](occurrences = 1) intercept {
       probe.send(coordActor, IngestRows(ref, 0, readers2, 1L))
       // This should trigger an error, and datasetCoordinatorActor will stop, and no ack will be forthcoming.
       probe.expectNoMsg
@@ -243,17 +246,16 @@ with CoordinatorSetup with ScalaFutures {
     probe.send(coordActor, IngestRows(ref, 0, readers, 1L))
     probe.expectMsg(UnknownDataset)
 
-  }
-
-  it("should reload dataset coordinator actors based on entries from ingestion_state table") {
-    probe.send(coordActor, CreateDataset(dataset4, schema))
-    probe.expectMsg(DatasetCreated)
-    columnStore.clearProjectionData(dataset4.projections.head).futureValue should equal (Success)
-    val projectionDB = projection4.withDatabase("unittest2")
-    val ref = projectionDB.datasetRef
-    metaStore.insertIngestionState("192.168.2.17:2552",ref,"Started",0)
-
     probe.send(coordActor, ReloadDatasetCoordActors)
+    probe.expectMsg(reloadIngestionState(ref, 0))
+
+    probe.send(coordActor, reloadIngestionState(ref, 0))
+
+    probe.send(coordActor, Flush(ref, 0))
+    probe.expectMsg(Flushed)
+
+    probe.send(coordActor, GetIngestionStats(ref, 0))
+    probe.expectMsg(DatasetCoordinatorActor.Stats(1, 1, 0, 0, -1, 0))
   }
 
 }

@@ -1,16 +1,22 @@
 package filodb.core.reprojector
 
+import java.nio.ByteBuffer
+import java.nio.file.{Files, Path, Paths}
+
+import scala.collection.JavaConversions._
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.slf4j.StrictLogging
 import java.util.TreeMap
 
-import org.velvia.filo.RowReader
+import org.velvia.filo.{FastFiloRowReader, RowReader}
 
 import scala.math.Ordered
 import scalaxy.loops._
 import filodb.core.KeyRange
 import filodb.core.Types._
 import filodb.core.metadata.{Column, Dataset, RichProjection}
+
+import scala.collection.mutable.ArrayBuffer
 
 /**
  * A MemTable using Filo vectors to store rows in memory, plus an index to seek into the chunks.
@@ -29,8 +35,11 @@ import filodb.core.metadata.{Column, Dataset, RichProjection}
  *   }
  * }}}
  */
-class FiloMemTable(val projection: RichProjection, config: Config,
-                   actorAddr: String, version: Int) extends MemTable with StrictLogging {
+class FiloMemTable(val projection: RichProjection,
+                   config: Config,
+                   actorAddr: String,
+                   version: Int,
+                   reloadFlag: Boolean = false) extends MemTable with StrictLogging {
   import collection.JavaConverters._
 
   type PK = projection.partitionType.T
@@ -44,7 +53,9 @@ class FiloMemTable(val projection: RichProjection, config: Config,
   private implicit val partSegOrdering = projection.segmentType.ordering
   private val partSegKeyMap = new TreeMap[(PK, SK), KeyMap](Ordering[(PK, SK)])
 
-  private val appendStore = new FiloAppendStore(projection, config, version)
+  private val appendStore = new FiloAppendStore(projection, config, version, reloadFlag)
+
+  val walDir = config.getString("memtable.memtable-wal-dir")
 
   // NOTE: No synchronization required, because MemTables are used within an actor.
   // See InMemoryMetaStore for a thread-safe design
@@ -83,7 +94,37 @@ class FiloMemTable(val projection: RichProjection, config: Config,
     }
   }
 
-  //TODO: Immitate ingest rows uisng filofastreader - set row no for each row (i <- chunks.length -1)
+  def reloadMemTable(): Unit =  {
+    var recentFile: Option[Path] = None
+    var setWalFile: Boolean = true
+    var position: Int = 0
+    for {file <- Files.newDirectoryStream(Paths.get(
+      s"${walDir}/${projection.datasetRef.dataset}_${version}"), "*.wal")} {
+      logger.debug(s"loading WAL file:${file.getFileName}")
+      val walReader = new WriteAheadLogReader(config, projection.columns, file.toString)
+      if (walReader.validFile) {
+        val chunks = walReader.readChunks().getOrElse(new ArrayBuffer[Array[ByteBuffer]])
+        for (chunkArray <- chunks) {
+          val (chunkIndex, rowreader) = appendStore.initWithChunks(chunkArray)
+          // FiloRowReader - set row no for each row
+          for {index <- 0 to rowreader.parsers.head.length - 1} {
+            rowreader.setRowNo(index)
+            val keyMap = getKeyMap(partitionFunc(rowreader), segmentKeyFunc(rowreader))
+            keyMap.put(rowKeyFunc(rowreader), chunkRowIdToLong(chunkIndex, index))
+          }
+        }
+        // TODO: if there is more than one wal file then delete files and keep only the last one
+        recentFile = Some(file)
+        position = walReader.buffer.position()
+      } else{
+        setWalFile = false
+        logger.error(s"Unable to load WAL file: ${file.getFileName} due to invalid WAL header format")
+      }
+    }
+    if(setWalFile) {
+      appendStore.setWalAHeadLogFile(recentFile, position)
+    }
+  }
 
   def readRows(partition: projection.PK, segment: projection.SK): Iterator[(projection.RK, RowReader)] =
     getKeyMap(partition, segment).entrySet.iterator.asScala
@@ -100,17 +141,4 @@ class FiloMemTable(val projection: RichProjection, config: Config,
   }
 
   override def deleteWalFiles(): Unit = appendStore.deleteWalFiles()
-}
-
-
-class FiloMemTable private(chunks: Array[ByteBuffer], ….) {
-
-}
-
-object FiloMemTable {
-  def createNew(…): FiloMemTable = new FiloMemTable(Array.empty)
-  def createFromWAL: FiloMemTable = {
-    // read WAL
-    new FiloMemTable(chunks)
-  }
 }

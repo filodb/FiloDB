@@ -58,12 +58,13 @@ class CassandraMetaStore(config: Config)
     ingestionStateTable.shutdown()
   }
 
-  def insertIngestionState(actorAddress: String, dataset: DatasetRef,
+  def insertIngestionState(actorAddress: String, dataset: DatasetRef, columns: String,
                                     state: String, version: Int): Future[Response] =
     ingestionStateTable.insertIngestionState(actorAddress,
                                             dataset.database.getOrElse(""),
                                             dataset.dataset,
                                             version,
+                                            columns,
                                             state)
 
   def getAllIngestionEntries(actorPath: String): Future[Seq[IngestionStateData]] = {

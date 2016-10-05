@@ -3,12 +3,16 @@ package filodb.core.reprojector
 import java.io.{File, RandomAccessFile}
 import java.nio.ByteBuffer
 import java.nio.channels.FileChannel
+import java.nio.charset.StandardCharsets
 
 import com.typesafe.config.Config
+import filodb.core.metadata.Column
 
 import scala.collection.mutable.ArrayBuffer
 
-class WriteAheadLogReader(config: Config, path: String) {
+class WriteAheadLogReader(config: Config,
+                          cols: Seq[Column],
+                          path: String) {
   val walFile = new File(path)
 
   val channel = new RandomAccessFile(walFile, "r").getChannel
@@ -19,22 +23,21 @@ class WriteAheadLogReader(config: Config, path: String) {
 
   private var columnCount = 0
 
-  //noinspection ScalaStyle
   def readChunks(): Option[ArrayBuffer[Array[ByteBuffer]]]= {
     while(buffer.hasRemaining) {
       val chunkArray = new Array[ByteBuffer](columnCount)
       for{index <- 0 to columnCount-1}{
         val bytesForChunk = getLittleEndianBytesAsInt(4)
-        println("bytesForChunk: "+ bytesForChunk)
         chunkArray(index) = ByteBuffer.wrap(getBytes(bytesForChunk))
         // read chunk seperator
         if (index < columnCount - 1) {
-          println(index)
           validField(1, ChunkHeader.chunkSeperator,true)
         }
       }
       chunks+=chunkArray
-      if(!validField(2, ChunkHeader.chunkStartIndicator, true)){
+
+      if(buffer.position() == channel.size() ||
+        !validField(2, ChunkHeader.chunkStartIndicator, true)){
         return Some(chunks)
       }
     }
@@ -51,8 +54,12 @@ class WriteAheadLogReader(config: Config, path: String) {
   private def validColumnDefinitions: Boolean = {
     columnCount = getLittleEndianBytesAsInt(2)
     val columnDefinitionsSize = getLittleEndianBytesAsInt(2)
-    val columnDefinitions = getBytes(columnDefinitionsSize)
-    columnCount == columnDefinitions.count(_ == 0x01) + 1
+    val actualColDefs = getBytes(columnDefinitionsSize)
+    val expBytes = cols.foldLeft("")(_  + _.toString + "\001")
+                    .dropRight(1)
+                    .getBytes(StandardCharsets.UTF_8)
+    columnCount == actualColDefs.count(_ == 0x01) + 1 &&
+      actualColDefs.reverse.sameElements(expBytes)
   }
 
   private def validField(size: Int, target: Array[Byte],  reverseflag: Boolean): Boolean = {

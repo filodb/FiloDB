@@ -94,7 +94,8 @@ lazy val coreDeps = commonDeps ++ Seq(
   "org.scodec"           %% "scodec-bits"       % "1.0.10",
   "org.scalactic"        %% "scalactic"         % "2.2.6",
   "com.markatta"         %% "futiles"           % "1.1.3",
-  "com.nativelibs4java"  %% "scalaxy-loops"     % "0.3.3" % "provided"
+  "com.nativelibs4java"  %% "scalaxy-loops"     % "0.3.3" % "provided",
+  "com.github.scala-incubator.io" %% "scala-io-file" % "0.4.2"
 )
 
 lazy val cassDeps = commonDeps ++ Seq(

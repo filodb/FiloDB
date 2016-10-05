@@ -3,9 +3,10 @@ package filodb.core.reprojector
 import java.io.RandomAccessFile
 import java.nio.ByteBuffer
 import java.nio.charset.StandardCharsets
-import java.nio.file.Files
+import java.nio.file.{Files, Paths}
 
 import com.typesafe.config.ConfigFactory
+import filodb.core.GdeltTestData.{schema => _, _}
 import filodb.core.NamesTestData._
 import filodb.core.metadata.{Column, DataColumn}
 import filodb.core.{DatasetRef, GdeltTestData, NamesTestData}
@@ -31,6 +32,19 @@ class WriteAheadLogFileSpec extends FunSpec with Matchers with BeforeAndAfter{
     wal.exists should equal(true)
     wal.close()
     wal.deleteTestFiles()
+  }
+
+  it("creates memory mapped buffer for an existing file") {
+
+    val wal = new WriteAheadLog(config, new DatasetRef("test"))
+    wal.exists should equal(true)
+    wal.close()
+
+    val walNew = new WriteAheadLog(config, new DatasetRef("test"),
+              GdeltTestData.createColumns(2), 0, Paths.get(wal.path))
+    walNew.exists should equal(true)
+    walNew.close()
+    walNew.deleteTestFiles()
   }
 
   it("write header to the file") {
@@ -81,7 +95,7 @@ class WriteAheadLogFileSpec extends FunSpec with Matchers with BeforeAndAfter{
     wal.writeChunks(createChunkData)
     wal.close
 
-    val reader = new WriteAheadLogReader(config,wal.path)
+    val reader = new WriteAheadLogReader(config,schema, wal.path)
     reader.validFile should equal(true)
 
     wal.deleteTestFiles()
@@ -92,7 +106,7 @@ class WriteAheadLogFileSpec extends FunSpec with Matchers with BeforeAndAfter{
   it("Invalid file identifier in header") {
     val wal = new WriteAheadLog(config, new DatasetRef(GdeltTestData.dataset1.name), GdeltTestData.schema)
     replaceBytes(wal, 1, Array[Byte]('X', 'X', 'X'))
-    val reader = new WriteAheadLogReader(config, wal.path)
+    val reader = new WriteAheadLogReader(config, GdeltTestData.schema, wal.path)
     reader.validFile should equal(false)
     wal.deleteTestFiles()
   }
@@ -100,7 +114,7 @@ class WriteAheadLogFileSpec extends FunSpec with Matchers with BeforeAndAfter{
   it("Invalid column definition header" ){
     val wal = new WriteAheadLog(config, new DatasetRef(GdeltTestData.dataset1.name), GdeltTestData.schema)
     replaceBytes(wal, 8, Array[Byte]('X', 'X'))
-    val reader = new WriteAheadLogReader(config,wal.path)
+    val reader = new WriteAheadLogReader(config, GdeltTestData.schema, wal.path)
     reader.validFile should equal(false)
     wal.deleteTestFiles()
     reader.close()
@@ -110,7 +124,7 @@ class WriteAheadLogFileSpec extends FunSpec with Matchers with BeforeAndAfter{
   it("Invalid column count indicator" ){
     val wal = new WriteAheadLog(config, new DatasetRef(GdeltTestData.dataset1.name), GdeltTestData.schema)
     replaceBytes(wal, 10, Array[Byte](0x11, 0x11))
-    val reader = new WriteAheadLogReader(config,wal.path)
+    val reader = new WriteAheadLogReader(config,GdeltTestData.schema, wal.path)
     reader.validFile should equal(false)
     wal.deleteTestFiles()
     reader.close()
@@ -120,7 +134,7 @@ class WriteAheadLogFileSpec extends FunSpec with Matchers with BeforeAndAfter{
   it("Invalid column definitions size" ){
     val wal = new WriteAheadLog(config, new DatasetRef(GdeltTestData.dataset1.name), GdeltTestData.schema)
     replaceBytes(wal, 12, Array[Byte](0x01, 0x01))
-    val reader = new WriteAheadLogReader(config,wal.path)
+    val reader = new WriteAheadLogReader(config, GdeltTestData.schema, wal.path)
     reader.validFile should equal(false)
     wal.deleteTestFiles()
     reader.close()
@@ -133,7 +147,7 @@ class WriteAheadLogFileSpec extends FunSpec with Matchers with BeforeAndAfter{
     wal.writeChunks(chunkData)
     wal.close
 
-    val reader = new WriteAheadLogReader(config,wal.path)
+    val reader = new WriteAheadLogReader(config, schema, wal.path)
     reader.validFile should equal(true)
 
     val chunks = reader.readChunks().getOrElse(new ArrayBuffer[Array[ByteBuffer]])
@@ -142,11 +156,56 @@ class WriteAheadLogFileSpec extends FunSpec with Matchers with BeforeAndAfter{
     val colIds = filoSchema.map(_.name).toArray
     val clazzes = filoSchema.map(_.dataType).toArray
     //noinspection ScalaStyle
-    println(clazzes.toString)
+    println(chunks(0).length)
+
+    val chunkArray = chunks(0)
 
     val rowreader = new FastFiloRowReader(chunks(0), clazzes)
+    rowreader.setRowNo(2)
+    println("parsers:"+rowreader.parsers.head.length)
+    val actualStr = rowreader.getString(0) + ";" + rowreader.getString(1) + ";" +
+      rowreader.getLong(2) + ";" + rowreader.getInt(3)
 
-    val actualStr = rowreader.getString(0)
+    println(actualStr)
+
+
+    // val expectedStr = rowreader2.getString(0) +
+    // rowreader2.getString(1) + rowreader2.getLong(2) + rowreader2.getInt(3)
+
+
+   // actualStr should equal (expectedStr)
+
+    wal.deleteTestFiles()
+    reader.close()
+    wal.close()
+  }
+
+  it("Able to read filo chunks for GdeltTestData successfully"){
+    val projectionDB = projection4.withDatabase("unittest2")
+    val ref = projectionDB.datasetRef
+    val wal = new WriteAheadLog(config, ref, GdeltTestData.schema)
+    // val chunkData = createChunkData
+    wal.writeChunks(createChunkData(GdeltTestData.schema,GdeltTestData.readers))
+    wal.close
+
+    val reader = new WriteAheadLogReader(config, GdeltTestData.schema, wal.path)
+    reader.validFile should equal(true)
+
+    val chunks = reader.readChunks().getOrElse(new ArrayBuffer[Array[ByteBuffer]])
+
+    val filoSchema = Column.toFiloSchema(GdeltTestData.schema)
+    val colIds = filoSchema.map(_.name).toArray
+    val clazzes = filoSchema.map(_.dataType).toArray
+    //noinspection ScalaStyle
+    println(chunks(0).length)
+
+    val chunkArray = chunks(0)
+
+    val rowreader = new FastFiloRowReader(chunks(0), clazzes)
+    rowreader.setRowNo(2)
+    println("parsers:"+rowreader.parsers.head.length)
+    val actualStr = rowreader.getInt(0)  + ";" +
+      rowreader.getInt(2) + ";" + rowreader.getInt(3)
 
     println(actualStr)
 
@@ -154,7 +213,7 @@ class WriteAheadLogFileSpec extends FunSpec with Matchers with BeforeAndAfter{
     // val expectedStr = rowreader2.getString(0) + rowreader2.getString(1) + rowreader2.getLong(2) + rowreader2.getInt(3)
 
 
-   // actualStr should equal (expectedStr)
+    // actualStr should equal (expectedStr)
 
     wal.deleteTestFiles()
     reader.close()

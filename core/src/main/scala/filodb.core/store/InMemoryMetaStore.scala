@@ -32,6 +32,7 @@ class InMemoryMetaStore(implicit val ec: ExecutionContext) extends MetaStore wit
     logger.warn("Clearing all data!")
     datasets.clear()
     columns.clear()
+    ingestionstates.clear()
     Success
   }
 
@@ -96,18 +97,24 @@ class InMemoryMetaStore(implicit val ec: ExecutionContext) extends MetaStore wit
   /**
    * ** IngestionState API ***
    */
-  def insertIngestionState(actorAddress: String, dataset: DatasetRef,
-                           state: String, version: Int): Future[Response] = {
+  def insertIngestionState(actorAddress: String,
+                           dataset: DatasetRef,
+                           columns: String,
+                           state: String,
+                           version: Int): Future[Response] = {
     // val key = actorAddress + dataset.database.getOrElse("None") + dataset.dataset + version
     ingestionstates.putIfAbsent(actorAddress,
       IngestionStateData(actorAddress,
         dataset.database.getOrElse("None"),
         dataset.dataset,
         version,
+        columns,
         state,
         ""
       )) match {
-      case None    => Future.successful(Success)
+      case None    =>
+        logger.debug(s"Adding ingestion state entry for dataset($dataset); actorAddress:${actorAddress}")
+        Future.successful(Success)
       case Some(x) =>
         logger.info(s"Ignoring ingestion state for dataset($dataset); entry already exists")
         Future.successful(AlreadyExists)

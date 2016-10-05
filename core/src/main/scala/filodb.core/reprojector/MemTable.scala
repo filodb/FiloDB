@@ -23,6 +23,7 @@ import filodb.core.store.SegmentInfo
  * MemTables are owned by the DatasetCoordinatorActor, so writes do not have to be thread-safe.
  */
 trait MemTable extends StrictLogging {
+
   import RowReader._
 
   def close(): Unit
@@ -43,6 +44,8 @@ trait MemTable extends StrictLogging {
    *        might be extremely inefficient.
    */
   def ingestRows(rows: Seq[RowReader]): Unit
+
+  def reloadMemTable(): Unit
 
   /**
    * Reads rows out from one segment.

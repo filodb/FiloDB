@@ -23,6 +23,7 @@ sealed class IngestionStateTable(val config: Config)
                       |database text,
                       |dataset text,
                       |version int,
+                      |columns text,
                       |state text,
                       |exceptions text,
                       |PRIMARY KEY (nodeactor, database, dataset, version)
@@ -31,17 +32,17 @@ sealed class IngestionStateTable(val config: Config)
   import filodb.cassandra.Util._
 
   lazy val ingestionStateInsertCql = session.prepare(
-    s"""INSERT INTO $tableString (nodeactor, database, dataset, version, state)
-       | VALUES (?, ?, ?, ?,?) IF NOT EXISTS""".stripMargin
+    s"""INSERT INTO $tableString (nodeactor, database, dataset, version, columns, state)
+       | VALUES (?, ?, ?, ?,?, ?) IF NOT EXISTS""".stripMargin
   )
 
   lazy val ingestionStSelectByDsCql = session.prepare(
-    s"""SELECT nodeActor, database, dataset, version, state, exceptions
+    s"""SELECT nodeActor, database, dataset, version, columns, state, exceptions
        | FROM $tableString WHERE nodeactor = ? AND database = ? AND dataset = ? AND version = ?""".stripMargin
   )
 
   lazy val ingestionStSelectByActorCql = session.prepare(
-    s"""SELECT nodeActor, database, dataset, version, state, exceptions
+    s"""SELECT nodeActor, database, dataset, version, columns, state, exceptions
        | FROM $tableString WHERE nodeactor = ? """.stripMargin
   )
 
@@ -52,6 +53,7 @@ sealed class IngestionStateTable(val config: Config)
       row.getString("database"),
       row.getString("dataset"),
       row.getInt("version"),
+      row.getString("columns"),
       row.getString("state"),
       row.getString("exceptions"))
 
@@ -60,9 +62,9 @@ sealed class IngestionStateTable(val config: Config)
   def dropTable(): Future[Response] = execCql(s"DROP TABLE $tableString")
 
   def insertIngestionState(nodeActor: String, database: String, name: String,
-                           version: Int, state: String): Future[Response] = {
+                           version: Int, columns: String, state: String): Future[Response] = {
     execStmt(ingestionStateInsertCql.bind(
-              nodeActor, database, name, version: java.lang.Integer, state),
+              nodeActor, database, name, version: java.lang.Integer, columns, state),
               AlreadyExists
             )
   }

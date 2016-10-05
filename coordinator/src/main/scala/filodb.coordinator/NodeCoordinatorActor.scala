@@ -128,18 +128,21 @@ class NodeCoordinatorActor(metaStore: MetaStore,
   private def setupIngestion(originator: ActorRef,
                              dataset: DatasetRef,
                              columns: Seq[String],
-                             version: Int): Unit = {
+                             version: Int,
+                             reloadFlag: Boolean = false): Unit = {
     def notify(msg: Any): Unit = { self ! DatasetCreateNotify(dataset, version, msg) }
-
     def createDatasetCoordActor(datasetObj: Dataset, richProj: RichProjection): Unit = {
-      val props = DatasetCoordinatorActor.props(richProj, version, columnStore, reprojector, config)
+      val props = DatasetCoordinatorActor.props(richProj, version, columnStore, reprojector, config, reloadFlag)
       val ref = context.actorOf(props, s"ds-coord-${datasetObj.name}-$version")
       self ! AddDatasetCoord(dataset, version, ref)
-      // Add entry in ingestion_state table for dataset
-      metaStore.insertIngestionState(actorPath, dataset, "Started", version)
-      notify(IngestionReady)
+      if (reloadFlag) {
+        notify(reloadIngestionState(dataset,version))
+      } else {
+        val colDefinitions =richProj.columns.foldLeft("")(_  + _.toString + ";").dropRight(1)
+        metaStore.insertIngestionState(actorPath, dataset, colDefinitions, "Started", version)
+        notify(IngestionReady)
+      }
     }
-
     def createProjectionAndActor(datasetObj: Dataset, schema: Option[Column.Schema]): Unit = {
       val columnSeq = columns.map(schema.get(_))
       // Create the RichProjection, and ferret out any errors
@@ -158,16 +161,13 @@ class NodeCoordinatorActor(metaStore: MetaStore,
       // for the final result.
       dsCoordNotify((dataset -> version)) = originator :: dsCoordNotify((dataset -> version))
     } else {
-      logger.debug(s"originator: $originator")
       dsCoordNotify((dataset -> version)) = List(originator)
       // Everything after this point happens in a future, asynchronously from the actor processing.
       // Thus 1) don't modify internal state, and 2) make sure we don't have multiple actor creations
       // happening in parallel, thus the need for dsCoordNotify.
-      logger.debug(s"dataset: ${verifySchema(originator, dataset, version, columns)}")
       (for { datasetObj <- metaStore.getDataset(dataset)
              schema <- verifySchema(originator, dataset, version, columns) if schema.isDefined }
       yield {
-        logger.debug(s"version: $version")
         createProjectionAndActor(datasetObj, schema)
       }).recover {
         case NotFoundError(what) => notify(UnknownDataset)
@@ -177,18 +177,15 @@ class NodeCoordinatorActor(metaStore: MetaStore,
   }
 
   private def reloadDatasetCoordActors(originator: ActorRef) : Unit = {
-    // TODO: self and sender address came different during testing
     logger.debug(s"Reloading dataset coordinator actors is started for path: $actorPath")
     val ingestionEntries = metaStore.getAllIngestionEntries(actorPath)
     ingestionEntries.foreach{ ingestion =>
-      val data = ingestion.toString().split(",")
+      val data = ingestion.toString().split("\001")
       val ref = DatasetRef(data(2),Some(data(1)))
-      val projection = RichProjection(Await.result(metaStore.getDataset(ref), 10.second),
-        Await.result(metaStore.getSchema(ref, data(3).toInt),
-          10.second).values.toSeq)
-      val colNames = projection.columns.map { column => column.toString.split(",")(1) }
-      setupIngestion(originator, ref, colNames, data(3).toInt)
-      //TODO : reload chunks to Memtable
+      val columns = data(4).split(";").map(col => DataColumn.fromString(col,data(2)))
+      val projection = RichProjection(Await.result(metaStore.getDataset(ref), 10.second), columns)
+      val colNames = projection.columns.map(_.name)
+      setupIngestion(originator, ref, colNames, data(3).toInt, true)
     }
   }
 
@@ -224,6 +221,9 @@ class NodeCoordinatorActor(metaStore: MetaStore,
 
     case GetIngestionStats(dataset, version) =>
       withDsCoord(sender, dataset, version) { _.forward(DatasetCoordinatorActor.GetStats) }
+
+    case reloadIngestionState(dataset, version) =>
+      withDsCoord(sender, dataset, version) { _.forward(DatasetCoordinatorActor.InitIngestion) }
   }
 
   def other: Receive = LoggingReceive {
@@ -242,6 +242,8 @@ class NodeCoordinatorActor(metaStore: MetaStore,
                     .foreach { case (key, _) =>
                       logger.warn(s"Actor $childRef has terminated!  Ingestion for $key will stop.")
                       dsCoordinators.remove(key)
+                      // TODO: update ingestion state
+
                     }
 
     case d @ DatasetCreateNotify(dataset, version, msg) =>

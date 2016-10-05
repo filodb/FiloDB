@@ -3,6 +3,7 @@ package filodb.core.reprojector
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.slf4j.StrictLogging
 import java.nio.ByteBuffer
+import java.nio.file.{Path, Paths}
 
 import filodb.core.DatasetRef
 import net.ceedubs.ficus.Ficus._
@@ -25,7 +26,10 @@ import filodb.core.metadata.{Column, RichProjection}
  *   }
  * }}}
  */
-class FiloAppendStore(val projection: RichProjection, config: Config, version: Int) extends StrictLogging {
+class FiloAppendStore(val projection: RichProjection,
+                      config: Config,
+                      version: Int,
+                      reloadFlag: Boolean = false) extends StrictLogging {
 
   import RowReader._
 
@@ -43,8 +47,17 @@ class FiloAppendStore(val projection: RichProjection, config: Config, version: I
 
   private var _numRows = 0
 
-  private val wal = new WriteAheadLog(config, projection.datasetRef, projection.columns, version)
-  logger.info(s"WriteAheadLog created for dataset = ${projection.datasetRef}")
+  private var wal: Option[WriteAheadLog] = createWalAheadLog
+
+  def createWalAheadLog : Option[WriteAheadLog] = {
+    if (!reloadFlag) {
+      logger.info(s"Creating WriteAheadLog for dataset = ${projection.datasetRef}," +
+        s" projection.columns: ${projection.columns}")
+      Some(new WriteAheadLog(config, projection.datasetRef, projection.columns, version))
+    }else{
+      None
+    }
+  }
 
   /**
    * Appends new rows to the row store.  The rows are serialized into Filo vectors and flushed to
@@ -76,12 +89,37 @@ class FiloAppendStore(val projection: RichProjection, config: Config, version: I
     readers += new FastFiloRowReader(chunkArray, clazzes, finalLength)
 
     // write chunks to WAL
-    wal.writeChunks(chunkArray)
+    wal.foreach(_.writeChunks(chunkArray))
 
     // Reset builder if it was at least chunkSize rows
     if (finalLength >= chunkSize) builder.reset()
 
     (nextChunkIndex, baseLength)
+  }
+
+  def initWithChunks(walChunks: Array[ByteBuffer]): (Int, FastFiloRowReader) = {
+    logger.info(s"filoSchema: ${projection.columns}")
+    logger.info(s"clazzes: ${clazzes}")
+
+    for{index <- 0 to clazzes.length-1}{
+      logger.debug(s"class:${clazzes(index)}")
+    }
+    val nextChunkIndex = chunks.length
+
+    // Add chunks
+    chunks += walChunks
+    val rowreader = new FastFiloRowReader(walChunks, clazzes)
+    readers += rowreader
+    _numRows += rowreader.parsers.head.length
+
+    (nextChunkIndex, rowreader)
+  }
+
+  def setWalAHeadLogFile(recentFile: Option[Path], position: Int): Unit = {
+    val pathObj = recentFile.getOrElse(Paths.get(""))
+    logger.info(s"Creating WriteAheadLog for dataset: ${projection.datasetRef}" +
+                s" using path object: ${pathObj.getFileName}")
+    wal = Some(new WriteAheadLog(config, projection.datasetRef, projection.columns, version, pathObj, position))
   }
 
   /**
@@ -104,5 +142,5 @@ class FiloAppendStore(val projection: RichProjection, config: Config, version: I
     builder.reset()
   }
 
-  def deleteWalFiles(): Unit = wal.delete()
+  def deleteWalFiles(): Unit = wal.foreach(_.delete())
 }
