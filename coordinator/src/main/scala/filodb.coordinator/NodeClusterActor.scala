@@ -21,7 +21,8 @@ object NodeClusterActor {
   case class ForwardToAll(role: String, msg: Any)
 
   // Registers sending actor to receive PartitionMapUpdate whenever it changes.  DeathWatch will be used
-  // on the sending actors to watch for updates.
+  // on the sending actors to watch for updates.  Also, will immediately send back the current state
+  // via a PartitionMapUpdate message.
   case object SubscribePartitionUpdates
   case class PartitionMapUpdate(map: PartitionMapper)
 
@@ -134,15 +135,20 @@ private[filodb] class NodeClusterActor(cluster: Cluster,
         everybodyLeftSender = None
       }
 
+    case _: MemberEvent => // ignore
+  }
+
+  def subscriptionHandler: Receive = LoggingReceive {
     case Terminated(ref) =>
       partMapSubscribers -= ref
 
     case SubscribePartitionUpdates =>
       logger.debug(s"Registered $sender to receive updates on partition maps")
+      // Send an immediate current snapshot of partition state
+      // (as ingestion will subscribe usually when cluster is already stable)
+      sender ! PartitionMapUpdate(partMapper)
       partMapSubscribers += sender
       context.watch(sender)
-
-    case _: MemberEvent => // ignore
   }
 
   def routerEvents: Receive = LoggingReceive {
@@ -175,5 +181,5 @@ private[filodb] class NodeClusterActor(cluster: Cluster,
       }
   }
 
-  def receive: Receive = membershipHandler orElse routerEvents
+  def receive: Receive = membershipHandler orElse subscriptionHandler orElse routerEvents
 }
