@@ -258,5 +258,6 @@ with CoordinatorSetup with ScalaFutures {
     probe.expectMsg(DatasetCoordinatorActor.Stats(1, 1, 0, 0, -1, 0))
   }
 
+
 }
 

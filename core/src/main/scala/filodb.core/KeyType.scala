@@ -49,8 +49,6 @@ import SingleKeyTypes._
 
 case class NullKeyValue(colIndex: Int) extends Exception(s"Null key value for col index $colIndex")
 
-case class NumberFormatException(colValue: String) extends Exception(s"""For input string: \'${colValue}\'""")
-
 abstract class SingleKeyTypeBase[K : Ordering : TypedFieldExtractor] extends KeyType {
   type T = K
 

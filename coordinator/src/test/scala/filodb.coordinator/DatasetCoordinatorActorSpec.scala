@@ -30,15 +30,12 @@ with ScalaFutures {
 
   import system.dispatcher
 
-  val tempDir = Files.createTempDirectory("wal")
-
   // Need to force smaller flush interval to ensure acks get back in time
   val config = ConfigFactory.parseString(
                  """filodb.memtable.flush-trigger-rows = 100
                     filodb.memtable.max-rows-per-table = 100
                     filodb.memtable.noactivity.flush.interval = 2 s
                     filodb.memtable.write.interval = 300 ms
-                    filodb.memtable.memtable-wal-dir = ${tempDir}
                     filodb.memtable.mapped-byte-buffer-size = 1024""")
                  .withFallback(ConfigFactory.load("application_test.conf"))
                  .getConfig("filodb")
