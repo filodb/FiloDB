@@ -183,7 +183,7 @@ object SingleKeyTypes {
 
     def fromString(str: String): Long = str.toLong
 
-    override def isSegmentType: Boolean = true
+    override val isSegmentType = true
     val size = 8
     val defaultValue = DefaultLong
   }
@@ -198,7 +198,7 @@ object SingleKeyTypes {
 
     def fromString(str: String): Int = str.toInt
 
-    override def isSegmentType: Boolean = true
+    override val isSegmentType = true
     val size = 4
     val defaultValue = DefaultInt
   }
@@ -213,7 +213,8 @@ object SingleKeyTypes {
       java.lang.Double.longBitsToDouble(bytes.toLong(signed = true, ByteOrdering.BigEndian))
 
     def fromString(str: String): Double = str.toDouble
-    override def isSegmentType: Boolean = true
+
+    override val isSegmentType = true
     val size = 8
     val defaultValue = DefaultDouble
   }
@@ -231,7 +232,7 @@ object SingleKeyTypes {
     }
     def fromBytes(bytes: ByteVector): String = parseBytes(bytes)._1
     def fromString(str: String): String = str
-    override def isSegmentType: Boolean = true
+    override val isSegmentType = true
     val size = 0
     val defaultValue = DefaultString
   }
@@ -259,7 +260,7 @@ object SingleKeyTypes {
         case e: java.lang.IllegalArgumentException => new Timestamp(str.toLong)
       }
     }
-    override def isSegmentType: Boolean = true
+    override val isSegmentType = true
     val size = 8
     val defaultValue = new Timestamp(DefaultLong)
   }
