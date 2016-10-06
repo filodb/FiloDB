@@ -1,3 +1,6 @@
+import com.typesafe.sbt.SbtMultiJvm
+import com.typesafe.sbt.SbtMultiJvm.MultiJvmKeys.MultiJvm
+
 val mySettings = Seq(organization := "org.velvia",
                      scalaVersion := "2.10.4",
                      parallelExecution in Test := false,
@@ -12,7 +15,9 @@ lazy val core = (project in file("core"))
                   .settings(libraryDependencies ++= coreDeps)
 
 lazy val coordinator = (project in file("coordinator"))
+                         .configs(MultiJvm)
                          .settings(mySettings:_*)
+                         .settings(multiJvmSettings:_*)
                          .settings(name := "filodb-coordinator")
                          .settings(libraryDependencies ++= coordDeps)
                          .dependsOn(core % "compile->compile; test->test")
@@ -109,7 +114,8 @@ lazy val coordDeps = commonDeps ++ Seq(
   // Take out the below line if you really don't want statsd metrics enabled
   "io.kamon"             %% "kamon-statsd"        % "0.6.0",
   "com.opencsv"           % "opencsv"           % "3.3",
-  "com.typesafe.akka"    %% "akka-testkit"      % akkaVersion % "test"
+  "com.typesafe.akka"    %% "akka-testkit"      % akkaVersion % "test",
+  "com.typesafe.akka"    %% "akka-multi-node-testkit" % akkaVersion % "test"
 )
 
 lazy val cliDeps = Seq(
@@ -173,6 +179,23 @@ lazy val jvmPerTestSettings = {
 
   Seq(testGrouping in Test <<= (definedTests in Test) map jvmPerTest)
 }
+
+lazy val multiJvmSettings = SbtMultiJvm.multiJvmSettings ++ Seq(
+  compile in MultiJvm <<= (compile in MultiJvm) triggeredBy (compile in Test),
+  // make sure that MultiJvm tests are executed by the default test target,
+  // and combine the results from ordinary test and multi-jvm tests
+  executeTests in Test <<= (executeTests in Test, executeTests in MultiJvm) map {
+    case (testResults, multiNodeResults)  =>
+      val overall =
+        if (testResults.overall.id < multiNodeResults.overall.id)
+          multiNodeResults.overall
+        else
+          testResults.overall
+      Tests.Output(overall,
+        testResults.events ++ multiNodeResults.events,
+        testResults.summaries ++ multiNodeResults.summaries)
+  }
+)
 
 lazy val itSettings = Defaults.itSettings ++ Seq(
   fork in IntegrationTest := true
