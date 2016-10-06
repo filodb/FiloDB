@@ -37,6 +37,7 @@ lazy val spark = (project in file("spark"))
                    .settings(fork in IntegrationTest := true)
                    .settings(mySettings:_*)
                    .settings(libraryDependencies ++= sparkDeps)
+                   .settings(jvmPerTestSettings:_*)
                    .settings(assemblySettings:_*)
                    .settings(assemblyOption in assembly := (assemblyOption in assembly).value.copy(includeScala = false))
                    .dependsOn(core % "compile->compile; test->test; it->test",
@@ -159,6 +160,19 @@ lazy val testSettings = Seq(
       // So, we limit the sum of "Test", "Untagged" tags to 1 concurrent
       Tags.limitSum(1, Tags.Test, Tags.Untagged))
 )
+
+// Fork a separate JVM for each test, instead of one for all tests in a module.
+// This is necessary for Spark tests due to initialization, for example
+lazy val jvmPerTestSettings = {
+  import Tests._
+
+  def jvmPerTest(tests: Seq[TestDefinition]) =
+    tests map { test =>
+      new Group(test.name, Seq(test), SubProcess(Nil))
+    } toSeq
+
+  Seq(testGrouping in Test <<= (definedTests in Test) map jvmPerTest)
+}
 
 lazy val itSettings = Defaults.itSettings ++ Seq(
   fork in IntegrationTest := true
