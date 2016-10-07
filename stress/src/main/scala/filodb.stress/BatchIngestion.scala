@@ -43,9 +43,6 @@ object BatchIngestion extends App {
   val sql = new SQLContext(sc)
   import sql.implicits._
 
-  // Ingest the taxi file two different ways using two Futures
-  // One way is by hour of day - very relaxed and fast
-  // Another is the "stress" schema - very tiny segments, huge amounts of memory churn and I/O bandwidth
   val csvDF = sql.read.format("com.databricks.spark.csv").
                  option("header", "true").option("inferSchema", "true").
                  load(taxiCsvFile)

@@ -30,3 +30,17 @@ Batch based stress ingestion of NYC Taxi dataset with two different schemas, one
 ### BatchIngestion
 
 Not a stress test per se but "normal" ingestion using multi column row key and partition key, very realistic
+
+### RowReplaceStress
+
+Similar to BatchIngestion, but designed to inject repeated rows of a variable "replacement factor" to see what its effect would be.  Some test results:
+
+* MBP laptop, C* 2.1.6, Spark 1.6.2, `local[4]` with 5GB driver/executor memory, first million lines of NYC Taxi dataset:
+* Writing times includes doing a sort (remove sort when routing work is done)
+* Read time is one SQL query, see the source for the query
+
+| Replacement Factor | Injected lines | Write speed(ms) | Read speed(ms) |
+|--------------------|----------------|-----------------|----------------|
+|  0.25              | 1246875        | 15602           |  730           |
+|  0.50              | 1496355        | 15921           |  597           |
+|  0.75              | 1747808        | 15965           |  705           |
