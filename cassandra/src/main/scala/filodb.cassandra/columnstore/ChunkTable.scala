@@ -107,10 +107,10 @@ sealed class ChunkTable(dataset: DatasetRef, connector: FiloCassandraConnector)
     }
   }
 
-  val readChunkRangeCql = session.prepare(
-                            s"""SELECT chunkid, data FROM $tableString WHERE
-                             | columnname = ? AND partition = ? AND version = ? AND
-                             | segmentid = ? AND chunkid >= ? AND chunkid <= ?""".stripMargin)
+  lazy val readChunkRangeCql = session.prepare(
+                                 s"""SELECT chunkid, data FROM $tableString WHERE
+                                  | columnname = ? AND partition = ? AND version = ? AND
+                                  | segmentid = ? AND chunkid >= ? AND chunkid <= ?""".stripMargin)
 
   def readChunks(partition: Types.BinaryPartition,
                  version: Int,
