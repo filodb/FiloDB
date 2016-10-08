@@ -86,6 +86,9 @@ object RowReplaceStress extends App {
   val df = sql.filoDataset(datasetName)
   df.registerTempTable(datasetName)
 
+  puts(s"Waiting a few seconds for ingestion to finish...")
+  Thread sleep 5000
+
   val count = df.count()
   if (count == csvLines) { puts(s"Count matched $count for dataframe $df") }
   else                   { puts(s"Expected $csvLines rows, but actually got $count for dataframe $df") }
