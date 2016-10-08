@@ -69,12 +69,11 @@ object RowReplaceStress extends App {
   val injectedDF = sql.createDataFrame(injectReplaceRdd, csvDF.schema)
   val csvLines = csvDF.count()
   val injectedLines = injectedDF.count()
-  puts(s"Original CSV file of $csvLines lines expanded to $injectedLines lines for testing replacemnent")
 
   val datasetName = "nyc_taxi_replace"
   val ingestMillis = Perftools.timeMillis {
     puts("Starting batch ingestion...")
-    csvDF.sort($"medallion").write.format("filodb.spark").
+    injectedDF.sort($"medallion").write.format("filodb.spark").
       option("dataset", datasetName).
       option("row_keys", "hack_license,medallion,pickup_datetime,pickup_longitude").
       option("segment_key", ":timeslice pickup_datetime 6d").
@@ -89,11 +88,14 @@ object RowReplaceStress extends App {
   puts(s"Waiting a few seconds for ingestion to finish...")
   Thread sleep 5000
 
+  val readMillis = Perftools.timeMillis { sql.sql(s"select avg(passenger_count) from $datasetName").show }
+
   val count = df.count()
+  puts(s"\n\n---------------------\n\n")
   if (count == csvLines) { puts(s"Count matched $count for dataframe $df") }
   else                   { puts(s"Expected $csvLines rows, but actually got $count for dataframe $df") }
 
-  val readMillis = Perftools.timeMillis { sql.sql(s"select avg(passenger_count) from $datasetName").show }
+  puts(s"Original CSV file of $csvLines lines expanded to $injectedLines lines for testing replacemnent")
   puts(s"Ingestion took $ingestMillis ms, reading took $readMillis ms")
 
   // clean up!

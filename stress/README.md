@@ -39,8 +39,15 @@ Similar to BatchIngestion, but designed to inject repeated rows of a variable "r
 * Writing times includes doing a sort (remove sort when routing work is done)
 * Read time is one SQL query, see the source for the query
 
-| Replacement Factor | Injected lines | Write speed(ms) | Read speed(ms) |
+| Replacement Factor | Injected rows  | Write speed(ms) | Read speed(ms) |
 |--------------------|----------------|-----------------|----------------|
-|  0.25              | 1246875        | 15602           |  730           |
-|  0.50              | 1496355        | 15921           |  597           |
-|  0.75              | 1747808        | 15965           |  705           |
+|  0.00              | 1000000        | 19825           |  687           |
+|  0.25              | 1251497        | 22199           |  632           |
+|  0.50              | 1501591        | 22189           |  673           |
+|  0.80              | 1799237        | 26053           |  738           |
+
+To prove that the RowReplaceStress actually appends rows to disk as opposed to just extra rows in the memtable, we run the following command:
+
+    ./filo-cli --command analyze --dataset nyc_taxi_replace --database filostress
+
+which shows that indeed there are skipped rows on disk.  Overall, the write speed corresponds to the number of ingested rows, but the read speed corresponds to the number of extra rows actually written - which may be very different since replaced rows in the MemTable are not written to disk.
