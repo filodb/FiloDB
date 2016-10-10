@@ -25,19 +25,19 @@ class WriteAheadLogReader(config: Config,
 
   def readChunks(): Option[ArrayBuffer[Array[ByteBuffer]]]= {
     while(buffer.hasRemaining) {
-      val chunkArray = new Array[ByteBuffer](columnCount)
-      for{index <- 0 to columnCount-1}{
-        val bytesForChunk = getLittleEndianBytesAsInt(4)
-        chunkArray(index) = ByteBuffer.wrap(getBytes(bytesForChunk))
-        // read chunk seperator
-        if (index < columnCount - 1) {
-          validField(1, ChunkHeader.chunkSeperator,true)
+      if(validField(2,ChunkHeader.chunkStartIndicator, true) &&
+        buffer.position() < channel.size()) {
+        val chunkArray = new Array[ByteBuffer](columnCount)
+        for {index <- 0 to columnCount - 1} {
+          val bytesForChunk = getLittleEndianBytesAsInt(4)
+          chunkArray(index) = ByteBuffer.wrap(getBytes(bytesForChunk))
+          // read chunk seperator
+          if (index < columnCount - 1) {
+            validField(1, ChunkHeader.chunkSeperator, true)
+          }
         }
-      }
-      chunks+=chunkArray
-
-      if(buffer.position() == channel.size() ||
-        !validField(2, ChunkHeader.chunkStartIndicator, true)){
+        chunks += chunkArray
+      }else{
         return Some(chunks)
       }
     }
@@ -47,8 +47,7 @@ class WriteAheadLogReader(config: Config,
   def validFile: Boolean = {
     validField(8, ChunkHeader.fileFormatIdentifier, false) &&
     validField(2, ChunkHeader.columnDefinitionIndicator, true) &&
-    validColumnDefinitions &&
-    validField(2,ChunkHeader.chunkStartIndicator, true)
+    validColumnDefinitions
   }
 
   private def validColumnDefinitions: Boolean = {

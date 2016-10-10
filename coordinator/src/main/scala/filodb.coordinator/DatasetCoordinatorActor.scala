@@ -119,7 +119,7 @@ private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
                                               columnStore: ColumnStore,
                                               reprojector: Reprojector,
                                               config: Config,
-                                              reloadFlag: Boolean = false) extends BaseActor {
+                                              var reloadFlag: Boolean = false) extends BaseActor {
   import DatasetCoordinatorActor._
   import context.dispatcher
 
@@ -250,7 +250,8 @@ private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
     mTableFlushTask = None
 
     flushingTable = Some(activeTable)
-    // activeTable.deleteWalFiles
+    // Reset reload flag to create new WAL file whenever new Memtable is initialised.
+    reloadFlag = false
     activeTable = makeNewTable()
     val newTaskFuture = reprojector.reproject(flushingTable.get, version)
     curReprojection = Some(newTaskFuture)
@@ -300,6 +301,14 @@ private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
     for { flushResult <- curReprojection.getOrElse(Future.successful(Nil))
           resp <- columnStore.clearProjectionData(projection) }
     { originator ! DatasetCommands.ProjectionTruncated }
+  }
+
+  override def preRestart(reason: Throwable, message: Option[Any]): Unit = {
+    logger.debug(s"preRestart called for an exception: $message")
+  }
+
+  override def postStop : Unit = {
+    logger.debug("TestActor: postStop")
   }
 
   def receive: Receive = LoggingReceive {

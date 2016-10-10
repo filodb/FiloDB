@@ -17,6 +17,9 @@ import filodb.core.reprojector.{DefaultReprojector, MemTable, Reprojector}
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
 
+import scala.util.Try
+import scalax.file.Path
+
 object DatasetCoordinatorActorSpec extends ActorSpecConfig
 
 class DatasetCoordinatorActorSpec extends ActorTest(DatasetCoordinatorActorSpec.getNewSystem)
@@ -63,6 +66,9 @@ with ScalaFutures {
 
   after {
     gracefulStop(dsActor, 3.seconds.dilated, PoisonPill).futureValue
+    val walDir = config.getString("memtable.memtable-wal-dir")
+    val path = Path.fromString (walDir)
+    Try(path.deleteRecursively(continueOnFailure = false))
   }
 
   val namesWithPartCol = (0 until 50).flatMap { partNum =>

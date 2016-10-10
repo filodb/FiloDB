@@ -101,8 +101,8 @@ class InMemoryMetaStore(implicit val ec: ExecutionContext) extends MetaStore wit
                            dataset: DatasetRef,
                            columns: String,
                            state: String,
-                           version: Int): Future[Response] = {
-    // val key = actorAddress + dataset.database.getOrElse("None") + dataset.dataset + version
+                           version: Int,
+                           exceptions: String = ""): Future[Response] = {
     ingestionstates.putIfAbsent(actorAddress,
       IngestionStateData(actorAddress,
         dataset.database.getOrElse("None"),
@@ -110,10 +110,9 @@ class InMemoryMetaStore(implicit val ec: ExecutionContext) extends MetaStore wit
         version,
         columns,
         state,
-        ""
+        exceptions
       )) match {
-      case None    =>
-        logger.debug(s"Adding ingestion state entry for dataset($dataset); actorAddress:${actorAddress}")
+      case None =>
         Future.successful(Success)
       case Some(x) =>
         logger.info(s"Ignoring ingestion state for dataset($dataset); entry already exists")
@@ -123,6 +122,13 @@ class InMemoryMetaStore(implicit val ec: ExecutionContext) extends MetaStore wit
 
   def getAllIngestionEntries(actorPath: String): Future[Seq[IngestionStateData]] = {
     Future.successful(ingestionstates.get(actorPath).toSeq)
+  }
+
+  def updateIngestionState(actorAddress: String, dataset: DatasetRef,
+                           state: String, exceptions: String, version: Int ): Future[Response] = {
+    val ingStCols = ingestionstates.get(actorAddress).toString
+    ingestionstates.remove(actorAddress)
+    insertIngestionState(actorAddress, dataset, ingStCols.split("\001")(4), state, version, exceptions)
   }
 
   def shutdown(): Unit = {}

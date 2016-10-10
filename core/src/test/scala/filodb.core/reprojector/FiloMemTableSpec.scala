@@ -9,6 +9,9 @@ import filodb.core.metadata.{Column, Dataset, RichProjection}
 import filodb.core.store.SegmentInfo
 import org.scalatest.{BeforeAndAfter, FunSpec, Matchers}
 
+import scala.util.Try
+import scalax.file.Path
+
 class FiloMemTableSpec extends FunSpec with Matchers with BeforeAndAfter {
   import NamesTestData._
   var config = ConfigFactory.load("application_test.conf").getConfig("filodb")
@@ -38,6 +41,12 @@ class FiloMemTableSpec extends FunSpec with Matchers with BeforeAndAfter {
   val namesWithNullPartCol =
     util.Random.shuffle(namesWithPartCol ++ namesWithPartCol.take(3)
                .map { t => (t._1, t._2, t._3, t._4, None) })
+
+  after{
+    val walDir = config.getString("memtable.memtable-wal-dir")
+    val path = Path.fromString (walDir)
+    Try(path.deleteRecursively(continueOnFailure = false))
+  }
 
   // Turn this into a common spec for all memTables
   describe("insertRows, readRows with forced flush") {
@@ -112,5 +121,5 @@ class FiloMemTableSpec extends FunSpec with Matchers with BeforeAndAfter {
       mTable.numRows should equal (namesWithNullPartCol.length)
     }
   }
-  // TODO: Delete wal temp folders
+
 }

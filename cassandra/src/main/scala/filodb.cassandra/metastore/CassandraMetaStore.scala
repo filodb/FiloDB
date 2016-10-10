@@ -18,6 +18,8 @@ class CassandraMetaStore(config: Config)
   val columnTable = new ColumnTable(config)
   val ingestionStateTable = new IngestionStateTable(config)
 
+  val defaultKeySpace = config.getString("keyspace")
+
   def initialize(): Future[Response] = {
     datasetTable.createKeyspace(datasetTable.keyspace)
     for { dtResp <- datasetTable.initialize()
@@ -59,15 +61,24 @@ class CassandraMetaStore(config: Config)
   }
 
   def insertIngestionState(actorAddress: String, dataset: DatasetRef, columns: String,
-                                    state: String, version: Int): Future[Response] =
+                                    state: String, version: Int, exceptions: String = ""): Future[Response] =
     ingestionStateTable.insertIngestionState(actorAddress,
-                                            dataset.database.getOrElse(""),
+                                            dataset.database.getOrElse(defaultKeySpace),
                                             dataset.dataset,
                                             version,
                                             columns,
                                             state)
 
-  def getAllIngestionEntries(actorPath: String): Future[Seq[IngestionStateData]] = {
+  def getAllIngestionEntries(actorPath: String): Future[Seq[IngestionStateData]] =
     ingestionStateTable.getIngestionStateByNodeActor(actorPath)
-  }
+
+  def updateIngestionState(actorAddress: String, dataset: DatasetRef,
+                           state: String, exceptions: String, version: Int ): Future[Response] =
+    ingestionStateTable.updateIngestionState(actorAddress,
+                                              dataset.database.getOrElse(defaultKeySpace),
+                                              dataset.dataset,
+                                              state,
+                                              exceptions,
+                                              version)
+
 }

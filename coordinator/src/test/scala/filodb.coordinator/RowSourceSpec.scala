@@ -1,18 +1,20 @@
 package filodb.coordinator
 
-import akka.actor.{ActorSystem, ActorRef, PoisonPill}
+import akka.actor.{ActorRef, ActorSystem, PoisonPill}
 import akka.testkit.{EventFilter, TestProbe}
 import akka.pattern.gracefulStop
 import com.typesafe.config.ConfigFactory
+
 import scala.concurrent.Await
 import scala.concurrent.duration._
-
 import filodb.core._
 import filodb.core.store._
 import filodb.core.metadata.{Column, DataColumn, Dataset}
-
 import org.scalatest.concurrent.ScalaFutures
-import org.scalatest.time.{Millis, Span, Seconds}
+import org.scalatest.time.{Millis, Seconds, Span}
+
+import scala.util.Try
+import scalax.file.Path
 
 object RowSourceSpec extends ActorSpecConfig
 
@@ -50,6 +52,9 @@ with CoordinatorSetup with ScalaFutures {
 
   override def afterAll(): Unit = {
     gracefulStop(coordActor, 3.seconds.dilated, PoisonPill).futureValue
+    val walDir = config.getString("memtable.memtable-wal-dir")
+    val path = Path.fromString (walDir)
+    Try(path.deleteRecursively(continueOnFailure = false))
   }
 
   it("should fail fast if NodeCoordinatorActor bombs at end of ingestion") {

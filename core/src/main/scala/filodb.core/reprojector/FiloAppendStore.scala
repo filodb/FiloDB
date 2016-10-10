@@ -51,8 +51,7 @@ class FiloAppendStore(val projection: RichProjection,
 
   def createWalAheadLog : Option[WriteAheadLog] = {
     if (!reloadFlag) {
-      logger.info(s"Creating WriteAheadLog for dataset = ${projection.datasetRef}," +
-        s" projection.columns: ${projection.columns}")
+      logger.info(s"Creating WriteAheadLog for dataset: (${projection.datasetRef}, ${version})")
       Some(new WriteAheadLog(config, projection.datasetRef, projection.columns, version))
     }else{
       None
@@ -98,12 +97,7 @@ class FiloAppendStore(val projection: RichProjection,
   }
 
   def initWithChunks(walChunks: Array[ByteBuffer]): (Int, FastFiloRowReader) = {
-    logger.info(s"filoSchema: ${projection.columns}")
-    logger.info(s"clazzes: ${clazzes}")
 
-    for{index <- 0 to clazzes.length-1}{
-      logger.debug(s"class:${clazzes(index)}")
-    }
     val nextChunkIndex = chunks.length
 
     // Add chunks

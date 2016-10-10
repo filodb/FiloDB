@@ -73,6 +73,8 @@ with Matchers with ScalaFutures {
                 foreach { g => queue += ssc.sparkContext.parallelize(g, 1) }
     val nameChunks = ssc.queueStream(queue)
     import sql.implicits._
+    //noinspection ScalaStyle
+    println(s"largeDataset.name:${largeDataset.name}")
     nameChunks.foreachRDD { rdd =>
       rdd.toDF.write.format("filodb.spark").
           option("dataset", largeDataset.name).

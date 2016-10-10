@@ -22,12 +22,12 @@ with Matchers with ScalaFutures {
   lazy val metaStore = FiloDriver.metaStore
   lazy val columnStore = FiloDriver.columnStore
 
-  override def beforeAll() {
+  override def beforeAll(): Unit = {
     metaStore.initialize().futureValue(defaultPatience)
     testProjections.foreach { p => columnStore.initializeProjection(p).futureValue(defaultPatience) }
   }
 
-  override def afterAll() {
+  override def afterAll(): Unit = {
     super.afterAll()
     sc.stop()
   }

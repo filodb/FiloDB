@@ -177,7 +177,7 @@ class NodeCoordinatorActor(metaStore: MetaStore,
   }
 
   private def reloadDatasetCoordActors(originator: ActorRef) : Unit = {
-    logger.debug(s"Reloading dataset coordinator actors is started for path: $actorPath")
+    logger.debug(s"Reload of dataset coordinator actors has started for path: $actorPath")
     val ingestionEntries = metaStore.getAllIngestionEntries(actorPath)
     ingestionEntries.foreach{ ingestion =>
       val data = ingestion.toString().split("\001")
@@ -226,6 +226,10 @@ class NodeCoordinatorActor(metaStore: MetaStore,
       withDsCoord(sender, dataset, version) { _.forward(DatasetCoordinatorActor.InitIngestion) }
   }
 
+  override def preRestart(reason: Throwable, message: Option[Any]): Unit = {
+    logger.debug(s"preRestart called for an exception: $message")
+  }
+
   def other: Receive = LoggingReceive {
     case Reset =>
       dsCoordinators.values.foreach(_ ! PoisonPill)
@@ -239,11 +243,11 @@ class NodeCoordinatorActor(metaStore: MetaStore,
 
     case Terminated(childRef) =>
       dsCoordinators.find { case (key, ref) => ref == childRef }
-                    .foreach { case (key, _) =>
-                      logger.warn(s"Actor $childRef has terminated!  Ingestion for $key will stop.")
-                      dsCoordinators.remove(key)
+                    .foreach { case ((datasetRef,version), _) =>
+                      logger.warn(s"Actor $childRef has terminated!  Ingestion for ${(datasetRef,version)} will stop.")
+                      dsCoordinators.remove((datasetRef,version))
                       // TODO: update ingestion state
-
+                      metaStore.updateIngestionState(actorPath,datasetRef,"Failed","Error during ingestion",version)
                     }
 
     case d @ DatasetCreateNotify(dataset, version, msg) =>

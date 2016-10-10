@@ -36,7 +36,11 @@ with CoordinatorSetup with ScalaFutures {
   implicit val defaultPatience =
     PatienceConfig(timeout = Span(10, Seconds), interval = Span(50, Millis))
 
-  val config = ConfigFactory.parseString("filodb.memtable.write.interval = 500 ms")
+  val config = ConfigFactory.parseString(
+                            """filodb.memtable.flush-trigger-rows = 100
+                              filodb.memtable.max-rows-per-table = 100
+                              filodb.memtable.noactivity.flush.interval = 2 s
+                              filodb.memtable.write.interval = 500 ms""")
                             .withFallback(ConfigFactory.load("application_test.conf"))
                             .getConfig("filodb")
 
@@ -211,6 +215,13 @@ with CoordinatorSetup with ScalaFutures {
     // Now, if we send more rows, we will get UnknownDataset
     probe.send(coordActor, IngestRows(ref, 0, readers, 1L))
     probe.expectMsg(UnknownDataset)
+
+    val actorPath = cluster.selfAddress.host.getOrElse("None") +
+      ":" + cluster.selfAddress.port.getOrElse("None")
+    val entry = metaStore.ingestionstates.get(actorPath)
+    val result = entry.toString().split("\001")(5)
+
+    result should equal("Failed")
   }
 
   it("should reload dataset coordinator actors once the nodes are up") {
@@ -218,8 +229,55 @@ with CoordinatorSetup with ScalaFutures {
     probe.expectMsg(DatasetCreated)
     columnStore.clearProjectionData(dataset4.projections.head).futureValue should equal (Success)
 
-    val projectionDB = projection4.withDatabase("unittest2")
-    val ref = projectionDB.datasetRef
+    val ref = projection4.withDatabase("unittest2").datasetRef
+
+    generateActorException(ref)
+
+    probe.send(coordActor, ReloadDatasetCoordActors)
+    probe.expectMsg(reloadIngestionState(ref, 0))
+
+    probe.send(coordActor, reloadIngestionState(ref, 0))
+
+    probe.send(coordActor, Flush(ref, 0))
+    probe.expectMsg(Flushed)
+
+    probe.send(coordActor, GetIngestionStats(ref, 0))
+    probe.expectMsg(DatasetCoordinatorActor.Stats(1, 1, 0, 0, -1, 0))
+
+  }
+
+  it("should be able to create new WAL files once the reload and flush is complete") {
+    probe.send(coordActor, CreateDataset(dataset4, schema))
+    probe.expectMsg(DatasetCreated)
+    columnStore.clearProjectionData(dataset4.projections.head).futureValue should equal (Success)
+
+    val ref = projection4.withDatabase("unittest2").datasetRef
+
+    generateActorException(ref)
+
+    probe.send(coordActor, ReloadDatasetCoordActors)
+    probe.expectMsg(reloadIngestionState(ref, 0))
+
+    probe.send(coordActor, reloadIngestionState(ref, 0))
+
+    probe.send(coordActor, GetIngestionStats(ref, 0))
+    probe.expectMsg(DatasetCoordinatorActor.Stats(0, 0, 0, 99, -1, 0))
+
+    // Ingest more rows to create new WAL file
+    probe.send(coordActor, CheckCanIngest(ref, 0))
+    probe.expectMsg(CanIngest(true))
+
+    probe.send(coordActor, IngestRows(ref, 0, readers, 1L))
+    probe.expectMsg(Ack(1L))
+
+    Thread sleep 3000
+
+    probe.send(coordActor, GetIngestionStats(ref, 0))
+    probe.expectMsg(DatasetCoordinatorActor.Stats(1, 1, 0, 0, -1, 99L))
+
+  }
+
+  def generateActorException(ref: DatasetRef): Unit = {
     probe.send(coordActor, SetupIngestion(ref, schema.map(_.name), 0))
     probe.expectMsg(IngestionReady)
 
@@ -233,11 +291,11 @@ with CoordinatorSetup with ScalaFutures {
     probe.expectMsg(DatasetCoordinatorActor.Stats(0, 0, 0, 99, -1, 99L))
 
     val gdeltLines = Source.fromURL(getClass.getResource("/GDELT-sample-test2.csv"))
-      .getLines.toSeq.drop(1)     // drop the header line
+      .getLines.toSeq.drop(1) // drop the header line
 
     val readers2 = gdeltLines.map { line => ArrayStringRowReader(line.split(",")) }
 
-    EventFilter[java.lang.NumberFormatException](occurrences = 1) intercept {
+    EventFilter[NumberFormatException](occurrences = 1) intercept {
       probe.send(coordActor, IngestRows(ref, 0, readers2, 1L))
       // This should trigger an error, and datasetCoordinatorActor will stop, and no ack will be forthcoming.
       probe.expectNoMsg
@@ -245,19 +303,6 @@ with CoordinatorSetup with ScalaFutures {
     // Now, if we send more rows, we will get UnknownDataset
     probe.send(coordActor, IngestRows(ref, 0, readers, 1L))
     probe.expectMsg(UnknownDataset)
-
-    probe.send(coordActor, ReloadDatasetCoordActors)
-    probe.expectMsg(reloadIngestionState(ref, 0))
-
-    probe.send(coordActor, reloadIngestionState(ref, 0))
-
-    probe.send(coordActor, Flush(ref, 0))
-    probe.expectMsg(Flushed)
-
-    probe.send(coordActor, GetIngestionStats(ref, 0))
-    probe.expectMsg(DatasetCoordinatorActor.Stats(1, 1, 0, 0, -1, 0))
   }
-
-
 }
 

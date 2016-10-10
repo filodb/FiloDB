@@ -53,7 +53,7 @@ class FiloMemTable(val projection: RichProjection,
   private implicit val partSegOrdering = projection.segmentType.ordering
   private val partSegKeyMap = new TreeMap[(PK, SK), KeyMap](Ordering[(PK, SK)])
 
-  private val appendStore = new FiloAppendStore(projection, config, version, reloadFlag)
+  private var appendStore = new FiloAppendStore(projection, config, version, reloadFlag)
 
   val walDir = config.getString("memtable.memtable-wal-dir")
 
@@ -95,34 +95,50 @@ class FiloMemTable(val projection: RichProjection,
   }
 
   def reloadMemTable(): Unit =  {
-    var recentFile: Option[Path] = None
-    var setWalFile: Boolean = true
-    var position: Int = 0
-    for {file <- Files.newDirectoryStream(Paths.get(
-      s"${walDir}/${projection.datasetRef.dataset}_${version}"), "*.wal")} {
-      logger.debug(s"loading WAL file:${file.getFileName}")
-      val walReader = new WriteAheadLogReader(config, projection.columns, file.toString)
-      if (walReader.validFile) {
-        val chunks = walReader.readChunks().getOrElse(new ArrayBuffer[Array[ByteBuffer]])
-        for (chunkArray <- chunks) {
-          val (chunkIndex, rowreader) = appendStore.initWithChunks(chunkArray)
-          // FiloRowReader - set row no for each row
-          for {index <- 0 to rowreader.parsers.head.length - 1} {
-            rowreader.setRowNo(index)
-            val keyMap = getKeyMap(partitionFunc(rowreader), segmentKeyFunc(rowreader))
-            keyMap.put(rowKeyFunc(rowreader), chunkRowIdToLong(chunkIndex, index))
-          }
-        }
+    var loadResult: (Int, Boolean) = (0, true)
+
+    val walfiles = Files.newDirectoryStream(Paths.get(
+      s"${walDir}/${projection.datasetRef.dataset}_${version}"), "*.wal").toList
+
+    for {index <- walfiles.indices} {
+      logger.debug(s"loading WAL file:${walfiles(index).getFileName}")
+      loadResult = loadChunks(walfiles(index))
+      if (index < walfiles.length - 1) {
         // TODO: if there is more than one wal file then delete files and keep only the last one
-        recentFile = Some(file)
-        position = walReader.buffer.position()
-      } else{
-        setWalFile = false
-        logger.error(s"Unable to load WAL file: ${file.getFileName} due to invalid WAL header format")
+      } else {
+        initWALLogFile(Some(walfiles(index)), loadResult._2, loadResult._1)
       }
     }
-    if(setWalFile) {
+  }
+
+  private def initWALLogFile(recentFile: Option[Path],
+                      setWalFile: Boolean,
+                      position: Int): Unit = {
+    if (setWalFile) {
       appendStore.setWalAHeadLogFile(recentFile, position)
+    } else {
+      appendStore = new FiloAppendStore(projection, config, version, false)
+    }
+  }
+
+  private def loadChunks(path: Path): (Int, Boolean) = {
+    val walReader = new WriteAheadLogReader(config, projection.columns, path.toString)
+    if (walReader.validFile) {
+      val chunks = walReader.readChunks().getOrElse(new ArrayBuffer[Array[Chunk]])
+      for {chunkArray <- chunks} {
+        val (chunkIndex, rowreader) = appendStore.initWithChunks(chunkArray)
+        // FiloRowReader - set row no for each row
+        for {index <- 0 to rowreader.parsers.head.length - 1} {
+          rowreader.setRowNo(index)
+          val keyMap = getKeyMap(partitionFunc(rowreader), segmentKeyFunc(rowreader))
+          keyMap.put(rowKeyFunc(rowreader), chunkRowIdToLong(chunkIndex, index))
+        }
+      }
+      (walReader.buffer.position(), true)
+    }else{
+      logger.error(s"Unable to load WAL file: ${path.getFileName} due to invalid WAL header format")
+      // TODO: Move invalid WAL file
+      (0, false)
     }
   }
 
