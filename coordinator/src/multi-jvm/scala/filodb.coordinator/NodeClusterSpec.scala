@@ -1,7 +1,6 @@
 package filodb.coordinator
 
 import akka.actor.ActorRef
-import akka.cluster.Cluster
 import akka.remote.testkit.MultiNodeConfig
 import akka.remote.testkit.MultiNodeSpec
 import akka.testkit.ImplicitSender

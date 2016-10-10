@@ -234,5 +234,5 @@ class NodeCoordinatorActor(metaStore: MetaStore,
       dsCoordNotify.remove((dataset -> version))
   }
 
-  def receive: Receive = datasetHandlers orElse ingestHandlers orElse other
+  def receive: Receive = ingestHandlers orElse datasetHandlers orElse other
 }

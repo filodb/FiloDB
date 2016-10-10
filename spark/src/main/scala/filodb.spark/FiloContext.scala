@@ -151,6 +151,13 @@ class FiloContext(val sqlContext: SQLContext) extends AnyVal {
     sparkLogger.info(s"Inserting into ($dataset/$version) with $numPartitions partitions")
     sparkLogger.debug(s"   Dataframe schema = $dfColumns")
 
+    FiloDriver.client.setupIngestion(dataset, columnNames, version) match {
+      case Nil =>
+        sparkLogger.info(s"Ingestion set up on all coordinators for $dataset / $version")
+      case errs: Seq[ErrorResponse] =>
+        throw new RuntimeException(s"Errors setting up ingestion: $errs")
+    }
+
     // For each partition, start the ingestion
     df.rdd.mapPartitionsWithIndex { case (index, rowIter) =>
       // Everything within this function runs on each partition/executor, so need a local datastore & system
