@@ -280,5 +280,5 @@ class NodeCoordinatorActor(metaStore: MetaStore,
       reloadDatasetCoordActors(sender)
   }
 
-  def receive: Receive = datasetHandlers orElse ingestHandlers orElse other
+  def receive: Receive = ingestHandlers orElse datasetHandlers orElse other
 }

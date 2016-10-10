@@ -1,0 +1,12 @@
+sequenceDiagram
+  participant Client
+  participant NodeCoordinator1
+  participant NodeCoordinator2
+  Client->>NodeCoordinator1: NewRows(seqId=1)
+  Client->>NodeCoordinator1: NewRows(seqId=2)
+  Client->>NodeCoordinator2: NewRows(seqId=3)
+  NodeCoordinator1-->Client: Ack(seqId=1)
+  NodeCoordinator2-->Client: Ack(seqId=3)
+  Client->>NodeCoordinator1: NewRows(seqId=4)
+  Note right of Client: If we don't get Acks back...
+  Client->>NodeCoordinator1: Retry(seqId=2)

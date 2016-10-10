@@ -39,6 +39,9 @@ case class Projection(id: Int,
    */
   def withDatabase(database: String): Projection =
     this.copy(dataset = this.dataset.copy(database = Some(database)))
+
+  def withName(name: String): Projection =
+    this.copy(dataset = this.dataset.copy(dataset = name))
 }
 
 /**

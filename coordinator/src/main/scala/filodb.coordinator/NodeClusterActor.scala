@@ -41,6 +41,11 @@ object NodeClusterActor {
             resolveActorTimeout: FiniteDuration = 10.seconds): Props =
     Props(classOf[NodeClusterActor], cluster, nodeCoordRole, resolveActorTimeout)
 
+  /**
+   * Creates a FakeClusterActor with only the supplied coordinatorActor in the partition map.
+   */
+  def singleNodeProps(coordActor: ActorRef): Props = Props(classOf[FakeClusterActor], coordActor)
+
   class RemoteAddressExtensionImpl(system: ExtendedActorSystem) extends Extension {
     def address: Address = system.provider.getDefaultAddress
   }
@@ -182,4 +187,19 @@ private[filodb] class NodeClusterActor(cluster: Cluster,
   }
 
   def receive: Receive = membershipHandler orElse subscriptionHandler orElse routerEvents
+}
+
+/**
+ * A "fake" NodeClusterActor that responds to the same API but just contains a single NodeCoordinatorActor
+ * in the partitionMap.  Great for testing or to use FiloDB in a single JVM without cluster.
+ */
+private[filodb] class FakeClusterActor(coordinator: ActorRef) extends BaseActor {
+  import NodeClusterActor._
+
+  val mapper = PartitionMapper.empty.addNode(Cluster(context.system).selfAddress, coordinator)
+
+  def receive: Receive = LoggingReceive {
+    case SubscribePartitionUpdates =>
+      sender ! PartitionMapUpdate(mapper)
+  }
 }

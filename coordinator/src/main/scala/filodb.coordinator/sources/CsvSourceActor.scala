@@ -8,6 +8,7 @@ import scala.util.Try
 
 import filodb.coordinator.{BaseActor, IngestionCommands, RowSource}
 import filodb.core.DatasetRef
+import filodb.core.metadata.RichProjection
 
 object CsvSourceActor {
   // Needs to be a multiple of chunkSize. Not sure how to have a good default though.
@@ -15,16 +16,16 @@ object CsvSourceActor {
   val RowsToRead = 100
 
   def props(csvStream: java.io.Reader,
-            dataset: DatasetRef,
+            projection: RichProjection,
             version: Int,
-            coordinatorActor: ActorRef,
+            clusterActor: ActorRef,
             maxUnackedBatches: Int = DefaultMaxUnackedBatches,
             rowsToRead: Int = RowsToRead,
             separatorChar: Char = ',',
             ackTimeout: FiniteDuration = 10.seconds,
             waitPeriod: FiniteDuration = 5.seconds): Props =
-  Props(classOf[CsvSourceActor], csvStream, dataset, version,
-        coordinatorActor, maxUnackedBatches, rowsToRead, separatorChar, ackTimeout, waitPeriod)
+  Props(classOf[CsvSourceActor], csvStream, projection, version,
+        clusterActor, maxUnackedBatches, rowsToRead, separatorChar, ackTimeout, waitPeriod)
 }
 
 /**
@@ -37,9 +38,9 @@ object CsvSourceActor {
  * Non-actors can send RowSource.Start message and wait for the AllDone message.
  */
 class CsvSourceActor(csvStream: java.io.Reader,
-                     val dataset: DatasetRef,
+                     val projection: RichProjection,
                      val version: Int,
-                     val coordinatorActor: ActorRef,
+                     val clusterActor: ActorRef,
                      val maxUnackedBatches: Int,
                      rowsToRead: Int,
                      separatorChar: Char,
@@ -53,11 +54,7 @@ class CsvSourceActor(csvStream: java.io.Reader,
   val columns = reader.readNext.toSeq
   logger.info(s"Started CsvSourceActor, ingesting CSV with columns $columns...")
 
-  def getStartMessage(): SetupIngestion = SetupIngestion(dataset, columns, version)
-
-  val seqIds = Iterator.from(1).map(_.toLong)
-  val batchRows: Iterator[Seq[RowReader]] = reader.iterator.asScala
+  val batchIterator: Iterator[Seq[RowReader]] = reader.iterator.asScala
                                                   .map(ArrayStringRowReader)
                                                   .grouped(rowsToRead)
-  val batchIterator = seqIds.zip(batchRows)
 }

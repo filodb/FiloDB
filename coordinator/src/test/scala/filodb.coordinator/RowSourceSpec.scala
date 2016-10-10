@@ -1,20 +1,21 @@
 package filodb.coordinator
 
 import akka.actor.{ActorRef, ActorSystem, PoisonPill}
-import akka.testkit.{EventFilter, TestProbe}
 import akka.pattern.gracefulStop
+import akka.testkit.{EventFilter, TestProbe}
 import com.typesafe.config.ConfigFactory
-
 import scala.concurrent.Await
 import scala.concurrent.duration._
+import scala.util.Try
+import scalax.file.Path
+
 import filodb.core._
 import filodb.core.store._
-import filodb.core.metadata.{Column, DataColumn, Dataset}
+import filodb.core.metadata.{Column, DataColumn, Dataset, RichProjection}
+
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
 
-import scala.util.Try
-import scalax.file.Path
 
 object RowSourceSpec extends ActorSpecConfig
 
@@ -27,6 +28,7 @@ with CoordinatorSetup with ScalaFutures {
   import GdeltTestData._
 
   import sources.CsvSourceActor
+  import IngestionCommands.{IngestionReady, SetupIngestion}
 
   implicit val defaultPatience =
     PatienceConfig(timeout = Span(10, Seconds), interval = Span(50, Millis))
@@ -41,14 +43,17 @@ with CoordinatorSetup with ScalaFutures {
   val columnStore = new InMemoryColumnStore(context)
   val metaStore = new InMemoryMetaStore
 
+  val ref = projection1.datasetRef
+  val columnNames = schema.map(_.name)
   metaStore.newDataset(dataset1).futureValue should equal (Success)
-  val ref = DatasetRef(dataset1.name)
   schema.foreach { col => metaStore.newColumn(col, ref).futureValue should equal (Success) }
   val coordActor = system.actorOf(NodeCoordinatorActor.props(metaStore, reprojector, columnStore, config))
+  val clusterActor = system.actorOf(NodeClusterActor.singleNodeProps(coordActor))
 
-  val dataset33 = dataset3.copy(name = "gdelt2")
+  val dataset33 = dataset3.withName("gdelt2")
   metaStore.newDataset(dataset33).futureValue should equal (Success)
-  val ref2 = DatasetRef(dataset33.name)
+  val proj2 = RichProjection(dataset33, schema)
+  val ref2 = proj2.datasetRef
   schema.foreach { col => metaStore.newColumn(col, ref2).futureValue should equal (Success) }
 
   before {
@@ -60,7 +65,7 @@ with CoordinatorSetup with ScalaFutures {
 
   override def afterAll(): Unit ={
     super.afterAll()
-    gracefulStop(coordActor, 3.seconds.dilated, PoisonPill).futureValue
+    gracefulStop(clusterActor, 3.seconds.dilated, PoisonPill).futureValue
     val walDir = config.getString("write-ahead-log.memtable-wal-dir")
     val path = Path.fromString (walDir)
     Try(path.deleteRecursively(continueOnFailure = false))
@@ -68,10 +73,12 @@ with CoordinatorSetup with ScalaFutures {
 
   it("should fail fast if NodeCoordinatorActor bombs at end of ingestion") {
     val reader = new java.io.InputStreamReader(getClass.getResourceAsStream("/GDELT-sample-test-errors.csv"))
-    val csvActor = system.actorOf(CsvSourceActor.props(reader, ref, 0, coordActor,
+    val csvActor = system.actorOf(CsvSourceActor.props(reader, projection1, 0, clusterActor,
                                                        ackTimeout = 4.seconds,
                                                        waitPeriod = 2.seconds))
 
+    coordActor ! SetupIngestion(ref, columnNames, 0)
+    expectMsg(IngestionReady)
     csvActor ! RowSource.Start
 
     // Expect failure message, like soon.  Don't hang!
@@ -82,12 +89,13 @@ with CoordinatorSetup with ScalaFutures {
 
   it("should fail fast if NodeCoordinatorActor bombs in middle of ingestion") {
     val reader = new java.io.InputStreamReader(getClass.getResourceAsStream("/GDELT-sample-test-errors.csv"))
-    val csvActor = system.actorOf(CsvSourceActor.props(reader, ref, 0, coordActor,
+    val csvActor = system.actorOf(CsvSourceActor.props(reader, projection1, 0, clusterActor,
                                                        maxUnackedBatches = 2,
                                                        rowsToRead = 5,
                                                        ackTimeout = 4.seconds,
                                                        waitPeriod = 2.seconds))
-
+    coordActor ! SetupIngestion(ref, columnNames, 0)
+    expectMsg(IngestionReady)
     csvActor ! RowSource.Start
 
     // Expect failure message, like soon.  Don't hang!
@@ -101,10 +109,12 @@ with CoordinatorSetup with ScalaFutures {
 
     // Note: can only send 20 rows at a time before waiting for acks.  Therefore this tests memtable
     // ack on timer and ability for RowSource to handle waiting for acks repeatedly
-    val csvActor = system.actorOf(CsvSourceActor.props(reader, ref2, 0, coordActor,
+    val csvActor = system.actorOf(CsvSourceActor.props(reader, proj2, 0, clusterActor,
                                                        maxUnackedBatches = 2,
                                                        rowsToRead = 10))
 
+    coordActor ! SetupIngestion(ref2, columnNames, 0)
+    expectMsg(IngestionReady)
     csvActor ! RowSource.Start
     expectMsg(10.seconds.dilated, RowSource.AllDone)
 
@@ -113,16 +123,20 @@ with CoordinatorSetup with ScalaFutures {
     expectMsg(DatasetCoordinatorActor.Stats(1, 1, 0, 19, -1, 99L))
   }
 
+  // NOTE: This tests the replay logic because when memtable is full, it sends back a Nack and
+  // then replay has to be triggered
   it("should ingest all rows and handle memtable full properly") {
     val reader = new java.io.InputStreamReader(getClass.getResourceAsStream("/GDELT-sample-test-200.csv"))
 
     // Note: this tries to send 80 rows, after 70 memtable will be flushed and 10 rows go to new memtable
     // then it will send another 80 rows, this time non flushing memtable will become full, hopefully
     // while flush still happening, and cause Nack to be returned.
-    val csvActor = system.actorOf(CsvSourceActor.props(reader, ref2, 0, coordActor,
+    val csvActor = system.actorOf(CsvSourceActor.props(reader, proj2, 0, clusterActor,
                                                        maxUnackedBatches = 8,
                                                        rowsToRead = 10))
 
+    coordActor ! SetupIngestion(ref2, columnNames, 0)
+    expectMsg(IngestionReady)
     csvActor ! RowSource.Start
     expectMsg(10.seconds.dilated, RowSource.AllDone)
 

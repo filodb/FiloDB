@@ -323,12 +323,13 @@ private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
 
     case CanIngest =>
       val can = canIngest
-      sender ! IngestionCommands.CanIngest(can)
+      // Make it look like this reply came from the NodeCoordinator
+      sender.tell(IngestionCommands.CanIngest(can), context.parent)
       if (can) cannotIngest.remove(sender)
 
     case GetStats =>
-      sender ! Stats(flushesStarted, flushesSucceeded, flushesFailed,
-                     activeRows, flushingRows, rowsIngested)
+      sender.tell(Stats(flushesStarted, flushesSucceeded, flushesFailed,
+                        activeRows, flushingRows, rowsIngested), context.parent)
 
     case MemTableWrite =>
       writeToMemTable()
