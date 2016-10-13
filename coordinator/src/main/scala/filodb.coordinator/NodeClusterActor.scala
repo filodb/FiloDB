@@ -170,6 +170,7 @@ private[filodb] class NodeClusterActor(cluster: Cluster,
       roles.foreach { role => roleToCoords(role) += coordRef }
       if (roles contains nodeCoordRole) {
         partMapper = partMapper.addNode(addr, coordRef)
+        logger.info(s"Adding node with address $addr, coordinator $coordRef")
         logger.info(s"Partition map updated: ${partMapper.numNodes} nodes")
         sendUpdatedPartitionMap()
       }
