@@ -198,6 +198,7 @@ trait RowSource extends Actor with StrictLogging {
       mapper.lookupCoordinator(partKeyFunc(reader).hashCode)
     }
     rowsByNode.foreach { case (nodeRef, readers) =>
+      logger.trace(s"  ==> ($nextSeqId) Processing ${readers.size} rows for node $nodeRef...")
       outstanding(nextSeqId) = (nodeRef, readers)
       outstandingNodes(nodeRef) = outstandingNodes(nodeRef) + nextSeqId
       nodeRef ! IngestionCommands.IngestRows(dataset, version, readers, nextSeqId)
