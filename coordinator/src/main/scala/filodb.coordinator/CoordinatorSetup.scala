@@ -89,11 +89,15 @@ trait CoordinatorSetup {
                 terminationMessage = PoisonPill,
                 role = Some(role)),
                 name = "singleton")
+    getClusterActor(role)
+  }
+
+  // This can be called by clients to get the handle to the cluster actor
+  def getClusterActor(role: String): ActorRef =
     system.actorOf(ClusterSingletonProxy.props(
       singletonPath = "/user/singleton/nodecluster",
       role = Some(role)),
       name = "nodeClusterProxy")
-  }
 
   def shutdown(): Unit = {
     system.shutdown()

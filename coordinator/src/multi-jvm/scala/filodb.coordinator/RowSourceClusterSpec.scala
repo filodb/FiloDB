@@ -60,6 +60,7 @@ abstract class RowSourceClusterSpec extends MultiNodeSpec(RowSourceClusterSpecCo
 
   val dataset33 = dataset3.withName("gdelt2")
   metaStore.newDataset(dataset33).futureValue should equal (Success)
+  val schemaMap = schema.map(c => c.name -> c).toMap
   val proj2 = RichProjection(dataset33, schema)
   val ref2 = proj2.datasetRef
   val columnNames = schema.map(_.name)
@@ -96,7 +97,7 @@ abstract class RowSourceClusterSpec extends MultiNodeSpec(RowSourceClusterSpecCo
 
     // Note: can only send 20 rows at a time before waiting for acks.  Therefore this tests memtable
     // ack on timer and ability for RowSource to handle waiting for acks repeatedly
-    val csvActor = system.actorOf(CsvSourceActor.props(reader, proj2, 0, clusterActor,
+    val csvActor = system.actorOf(CsvSourceActor.props(reader, dataset33, schemaMap, 0, clusterActor,
                                                        maxUnackedBatches = 4,
                                                        rowsToRead = 10))
 

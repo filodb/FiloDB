@@ -76,6 +76,8 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
     println("  OR:  --select col1, col2  [--limit <n>]  [--outfile /tmp/out.csv]")
     println("\nTo change config: pass -Dconfig.file=/path/to/config as first arg or set $FILO_CONFIG_FILE")
     println("  or override any config by passing -Dconfig.path=newvalue as first args")
+    println("\nFor detailed debugging, uncomment the TRACE/DEBUG loggers in logback.xml and add these ")
+    println("  options:  ./filo-cli -Dakka.loglevel=DEBUG -Dakka.actor.debug.receive=on -Dakka.actor.debug.autoreceive=on --command importcsv ...")
   }
 
   def getRef(args: Arguments): DatasetRef = DatasetRef(args.dataset.get, args.database)

@@ -1,10 +1,14 @@
 package filodb.spark
 
 import akka.actor.{ActorSystem, ActorRef, AddressFromURIString}
+import akka.pattern.ask
+import akka.util.Timeout
 import com.typesafe.config.{Config, ConfigFactory}
 import com.typesafe.scalalogging.slf4j.StrictLogging
 import net.ceedubs.ficus.Ficus._
 import org.apache.spark.SparkContext
+import scala.concurrent.Await
+import scala.concurrent.duration._
 
 import filodb.cassandra.columnstore.CassandraColumnStore
 import filodb.cassandra.metastore.CassandraMetaStore
@@ -84,10 +88,11 @@ object SingleJvmInMemoryStore {
 object FiloDriver extends FiloSetup with StrictLogging {
   import collection.JavaConverters._
 
-  lazy val clusterActor = system.actorOf(NodeClusterActor.props(cluster, "executor"), "cluster-actor")
+  lazy val clusterActor = getClusterActor("executor")
   lazy val client = new ClusterClient(clusterActor, "executor", "driver")
 
   // The init method called from a SparkContext is going to be from the driver/app.
+  // It also initializes all executors.
   def init(context: SparkContext): Unit = synchronized {
     _config.getOrElse {
       logger.info("Initializing FiloDriver clustering/coordination...")
@@ -100,11 +105,16 @@ object FiloDriver extends FiloSetup with StrictLogging {
       // Add in self cluster address, and join cluster ourselves
       val selfAddr = cluster.selfAddress
       cluster.join(selfAddr)
-      clusterActor
-      // TODO(velvia): Get rid of thread sleep by using NodeClusterActor to time it
-      Thread sleep 1000   // Wait a little bit for cluster joining to take effect
+
       val finalConfig = ConfigFactory.parseString(s"""spark-driver-addr = "$selfAddr"""")
                                      .withFallback(filoConfig)
+      FiloExecutor.initAllExecutors(finalConfig, context)
+
+      // Because the clusterActor can only be instantiated on an executor/FiloDB node, this works by
+      // waiting for the clusterActor to respond, thus guaranteeing cluster working correctly
+      implicit val timeout = Timeout(9.seconds)
+      Await.result(clusterActor ? NodeClusterActor.GetRefs("executor"), 10.seconds)
+
       _config = Some(finalConfig)
     }
   }
@@ -126,6 +136,18 @@ object FiloDriver extends FiloSetup with StrictLogging {
 }
 
 object FiloExecutor extends FiloSetup with StrictLogging {
+
+  lazy val clusterActor = singletonClusterActor("executor")
+
+  def initAllExecutors(filoConfig: Config, context: SparkContext, numPartitions: Int = 1000): Unit = {
+      logger.info(s"Initializing executors using $numPartitions partitions...")
+      context.parallelize(0 to numPartitions, numPartitions).mapPartitions { it =>
+        init(filoConfig)
+        it
+      }.count()
+      logger.info("Finished initializing executors")
+  }
+
   /**
    * Initializes the config if it is not set, and start things for an executor.
    * @param filoConfig The config within the filodb.** level.
@@ -141,7 +163,7 @@ object FiloExecutor extends FiloSetup with StrictLogging {
       val addr = AddressFromURIString.parse(filoConfig.getString("spark-driver-addr"))
       logger.info(s"Initializing FiloExecutor clustering by joining driver at $addr...")
       cluster.join(addr)
-      Thread sleep 1000
+      clusterActor
     }
   }
 }

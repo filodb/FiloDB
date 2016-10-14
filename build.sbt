@@ -46,7 +46,7 @@ lazy val spark = (project in file("spark"))
                    .settings(assemblySettings:_*)
                    .settings(assemblyOption in assembly := (assemblyOption in assembly).value.copy(includeScala = false))
                    .dependsOn(core % "compile->compile; test->test; it->test",
-                              coordinator,
+                              coordinator % "compile->compile; test->test",
                               cassandra % "compile->compile; test->test; it->test")
 
 lazy val jmh = (project in file("jmh"))
@@ -113,7 +113,7 @@ lazy val coordDeps = commonDeps ++ Seq(
   "com.typesafe.akka"    %% "akka-cluster"      % akkaVersion,
   "com.typesafe.akka"    %% "akka-contrib"      % akkaVersion,
   // Take out the below line if you really don't want statsd metrics enabled
-  "io.kamon"             %% "kamon-statsd"        % "0.6.0",
+  "io.kamon"             %% "kamon-statsd"      % "0.6.0",
   "com.opencsv"           % "opencsv"           % "3.3",
   "com.typesafe.akka"    %% "akka-testkit"      % akkaVersion % "test",
   "com.typesafe.akka"    %% "akka-multi-node-testkit" % akkaVersion % "test"
@@ -126,7 +126,7 @@ lazy val cliDeps = Seq(
 
 lazy val sparkDeps = Seq(
   // We don't want LOG4J.  We want Logback!  The excludeZK is to help with a conflict re Coursier plugin.
-  "org.apache.spark"     %% "spark-hive"         % sparkVersion % "provided" excludeAll(excludeSlf4jLog4j, excludeZK),
+  "org.apache.spark"     %% "spark-hive"        % sparkVersion % "provided" excludeAll(excludeSlf4jLog4j, excludeZK),
   "org.apache.spark"     %% "spark-hive-thriftserver" % sparkVersion % "provided" excludeAll(excludeSlf4jLog4j, excludeZK),
   "org.apache.spark"     %% "spark-streaming"   % sparkVersion % "provided",
   "org.scalatest"        %% "scalatest"         % "2.2.4" % "it"
