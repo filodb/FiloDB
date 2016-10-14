@@ -12,9 +12,10 @@ import scala.language.postfixOps
 
 import filodb.coordinator.client.{Client, LocalClient}
 import filodb.coordinator.sources.CsvSourceActor
-import filodb.coordinator.RowSource
+import filodb.coordinator.{NodeClusterActor, RowSource}
 import filodb.core._
 import filodb.core.store.MetaStore
+import filodb.core.metadata.RichProjection
 
 // Turn off style rules for CLI classes
 //scalastyle:off
@@ -35,24 +36,32 @@ trait CsvImportExport extends StrictLogging {
                 timeout: FiniteDuration): Unit = {
     val fileReader = new java.io.FileReader(csvPath)
 
-    // TODO: consider using a supervisor actor to start these
-    val csvActor = system.actorOf(CsvSourceActor.props(fileReader, dataset, version, coordinatorActor))
+    val datasetObj = Client.parse(metaStore.getDataset(dataset)) { ds => ds }
+    val schema = Client.parse(metaStore.getSchema(dataset, version)) { c => c }
+
+    val (projection, reader, columnNames) =
+      CsvSourceActor.getProjectionFromHeader(fileReader, datasetObj, schema, delimiter)
+    client.setupIngestion(projection.datasetRef, columnNames, version) match {
+      case Nil =>
+        println(s"Ingestion set up for $dataset / $version, starting...")
+      case errs: Seq[ErrorResponse] =>
+        println(s"Errors setting up ingestion: $errs")
+        exitCode = 2
+        return
+    }
+
+    val clusterActor = system.actorOf(NodeClusterActor.singleNodeProps(coordinatorActor))
+    val csvActor = system.actorOf(CsvSourceActor.propsNoHeader(reader, projection, version, clusterActor))
     Client.actorAsk(csvActor, RowSource.Start, timeout) {
-      case RowSource.SetupError(e) =>
-        println(s"Error $e setting up CSV ingestion of $dataset/$version at $csvPath")
+      case RowSource.IngestionErr(msg, optErr) =>
+        println(s"Error $msg setting up CSV ingestion of $dataset/$version at $csvPath")
+        optErr.foreach { e => println(s"Error details:  $e") }
         exitCode = 2
         return
       case RowSource.AllDone =>
     }
 
-    // There might still be rows left after the latest flush is done, so initiate another flush
-    val activeRows = client.ingestionStats(dataset, version).headOption.map(_.numRowsActive).getOrElse(-1)
-    if (activeRows > 0) {
-      logger.info(s"Still $activeRows left to flush in active memTable, triggering flush....")
-      client.flush(dataset, version, timeout)
-    } else if (activeRows < 0) {
-      logger.warn(s"Unable to obtain any stats from ingestion, something is wrong.")
-    }
+    client.flushCompletely(projection.datasetRef, version, timeout)
 
     println(s"Ingestion of $csvPath finished!")
     exitCode = 0
