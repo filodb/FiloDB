@@ -90,6 +90,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
     val state = getState()
     val segment = getWriterSegment()
     val sortedNames = names.sortBy(_._3.get)
+    val sortedAltNames = altNames.sortBy(_._3.get)
     segment.addChunkSet(state, mapper(sortedNames drop 1))
     whenReady(colStore.appendSegment(projection, segment, 0)) { response =>
       response should equal (Success)
@@ -99,7 +100,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
 
     // Writing segment2, repeat 1 row and add another row.  Should read orig segment from disk.
     val segment2 = getWriterSegment()
-    segment2.addChunkSet(state, mapper(sortedNames take 2))
+    segment2.addChunkSet(state, mapper(sortedAltNames take 2))
     whenReady(colStore.appendSegment(projection, segment2, 0)) { response =>
       response should equal (Success)
     }
@@ -112,7 +113,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
       readSeg.segInfo.segment should equal (segment.segInfo.segment)
       readSeg.rowIterator().map(_.getLong(2)).toSeq should equal (Seq(28L, 29L, 39L, 40L, 24L, 25L))
       readSeg.rowIterator().map(_.getString(0)).toSeq should equal (sortedFirstNames.drop(2) ++
-                                                                    sortedFirstNames.take(2))
+                                                                    Seq("Stacy", "Amari"))
     }
   }
 
@@ -127,14 +128,14 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
 
     // TODO: remove cache and force read from column store
     val segment2 = new ChunkSetSegment(projection2, segmentsStates.head._1.segInfo.basedOn(projection2))
-    segment2.addChunkSet(segmentsStates.head._2, readers.take(3))
+    segment2.addChunkSet(segmentsStates.head._2, altReaders.take(3))
     colStore.appendSegment(projection2, segment2, 0).futureValue should equal (Success)
 
     whenReady(colStore.scanSegments(projection2, schema, 0, SinglePartitionScan(197901))) { segIter =>
       val segments = segIter.toSeq
       segments should have length (2)
       val readSeg = segments.head.asInstanceOf[RowReaderSegment]
-      readSeg.rowIterator().map(_.getInt(6)).sum should equal (288)
+      readSeg.rowIterator().map(_.getInt(6)).sum should equal (276)
     }
   }
 

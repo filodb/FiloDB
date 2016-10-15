@@ -30,6 +30,13 @@ object NamesTestData {
                   (Some("Peyton"),    Some("Manning"),  Some(39L), Some(0)),
                   (Some("Terrance"),  Some("Knighton"), Some(29L), Some(0)))
 
+  val altNames = Seq((Some("Stacy"),    Some("McGee"),     Some(24L), Some(0)),
+                  (Some("Bruce"),     Some("Irvin"),    Some(28L), Some(0)),
+                  (Some("Amari"),     Some("Cooper"),   Some(25L), Some(0)),
+                  (Some("Jerry"),     None,             Some(40L), Some(0)),
+                  (Some("Derek"),     Some("Carr"),     Some(39L), Some(0)),
+                  (Some("Karl"),      Some("Joseph"),   Some(29L), Some(0)))
+
   val firstKey = RoutingRowReader(TupleRowReader(names.head), Array(2))
   val lastKey = RoutingRowReader(TupleRowReader(names.last), Array(2))
   def keyForName(rowNo: Int): RowReader = RoutingRowReader(TupleRowReader(names(rowNo)), Array(2))
@@ -83,6 +90,11 @@ object GdeltTestData {
   val readers = gdeltLines.map { line => ArrayStringRowReader(line.split(",")) }
 
   val badLine = ArrayStringRowReader(Array("NotANumber"))   // Will fail
+  val altLines =
+    """0,1979-01-01,197901,1979,AFR,africa,5,5.52631578947368
+      |1,1979-01-01,197901,1979,AGR,farm-yo,6,10.9792284866469
+      |2,1979-01-01,197901,1979,AGR,farm-yo,6,10.9792284866469""".stripMargin.split("\n")
+  val altReaders = altLines.map { line => ArrayStringRowReader(line.split(",")) }
 
   val schema = Seq(DataColumn(0, "GLOBALEVENTID", "gdelt", 0, Column.ColumnType.IntColumn),
                    DataColumn(1, "SQLDATE",       "gdelt", 0, Column.ColumnType.TimestampColumn),

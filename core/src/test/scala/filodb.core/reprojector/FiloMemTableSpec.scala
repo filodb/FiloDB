@@ -41,10 +41,10 @@ class FiloMemTableSpec extends FunSpec with Matchers with BeforeAndAfter {
     it("should replace rows and read them back in order") {
       val mTable = new FiloMemTable(projection, config)
       mTable.ingestRows(names.take(4).map(TupleRowReader))
-      mTable.ingestRows(names.take(2).map(TupleRowReader))
+      mTable.ingestRows(altNames.take(2).map(TupleRowReader))
 
       val outRows = mTable.readRows(segInfo.basedOn(mTable.projection))
-      outRows.toSeq.map(_.getString(0)) should equal (Seq("Khalil", "Rodney", "Ndamukong", "Jerry"))
+      outRows.toSeq.map(_.getString(0)) should equal (Seq("Stacy", "Rodney", "Bruce", "Jerry"))
     }
 
     it("should insert/replace rows with multiple partition keys and read them back in order") {
@@ -62,12 +62,12 @@ class FiloMemTableSpec extends FunSpec with Matchers with BeforeAndAfter {
       // Multiple row keys: Actor2Code, GLOBALEVENTID
       val mTable = new FiloMemTable(GdeltTestData.projection2, config)
       mTable.ingestRows(GdeltTestData.readers.take(6))
-      mTable.ingestRows(GdeltTestData.readers.take(2))
+      mTable.ingestRows(GdeltTestData.altReaders.take(2))
 
       val segInfo = SegmentInfo(197901, 0).basedOn(mTable.projection)
       val outRows = mTable.readRows(segInfo)
       outRows.toSeq.map(_.getString(5)) should equal (
-                 Seq("AFRICA", "FARMER", "FARMER", "CHINA", "POLICE", "IMMIGRANT"))
+                 Seq("africa", "farm-yo", "FARMER", "CHINA", "POLICE", "IMMIGRANT"))
     }
 
     it("should ingest into multiple partitions using partition column") {
