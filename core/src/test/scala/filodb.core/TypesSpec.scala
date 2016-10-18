@@ -37,6 +37,10 @@ class TypesSpec extends FunSpec with Matchers {
 
       val orig1 = Seq(1001, "AdamAndEve", true)
       compositeType.fromBytes(compositeType.toBytes(orig1)) should equal (orig1)
+
+      val orig2 = Seq(2002, "", false)
+      compositeType.fromBytes(compositeType.toBytes(orig2)) should equal (orig2)
+
     }
 
     it("should compare CompositeKeyTypes using ordering trait") {

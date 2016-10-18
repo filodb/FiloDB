@@ -1,7 +1,7 @@
 package filodb.core.store
 
 import filodb.core._
-import org.velvia.filo.RoutingRowReader
+import org.velvia.filo.{RoutingRowReader, SeqRowReader}
 
 import org.scalatest.FunSpec
 import org.scalatest.Matchers
@@ -52,13 +52,12 @@ class ChunkSetInfoSpec extends FunSpec with Matchers {
     skipsShouldEqual(skipsRead2, Seq(skips2, skips3))
   }
 
+  import GdeltTestData._
+  private def getCSI(id: Int, firstLine: Int, lastLine: Int): ChunkSetInfo =
+    ChunkSetInfo(id, 5000, RoutingRowReader(readers(firstLine), Array(4, 0)),
+                           RoutingRowReader(readers(lastLine), Array(4, 0)))
+
   it("should find intersection range of composite keys with strings") {
-    import GdeltTestData._
-
-    def getCSI(id: Int, firstLine: Int, lastLine: Int): ChunkSetInfo =
-      ChunkSetInfo(id, 5000, RoutingRowReader(readers(firstLine), Array(4, 0)),
-                             RoutingRowReader(readers(lastLine), Array(4, 0)))
-
     implicit val ordering = projection2.rowKeyType.rowReaderOrdering
 
     val info1 = getCSI(1, 0, 7)
@@ -67,6 +66,15 @@ class ChunkSetInfoSpec extends FunSpec with Matchers {
     intersect1.get._1 should equal (info1.lastKey)
     intersect1.get._2 should equal (info1.lastKey)
   }
+
+  it("should return None if error with one of the RowReaders") {
+    import GdeltTestData._
+    implicit val ordering = projection2.rowKeyType.rowReaderOrdering
+
+    val info1 = getCSI(1, 0, 7)
+    info1.intersection(ChunkSetInfo(2, 100, null, null)) should be (None)
+  }
+
 
   it("should collectSkips properly even with overlapping skip row numbers") {
     val origInfo = info1.copy(id = 9)

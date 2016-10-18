@@ -24,7 +24,7 @@ case class ChunkSet(info: ChunkSetInfo,
 case class ChunkSetInfo(id: ChunkID,
                         numRows: Int,
                         firstKey: RowReader,
-                        lastKey: RowReader) {
+                        lastKey: RowReader) extends StrictLogging {
   /**
    * Finds intersection key ranges between two ChunkSetInfos.
    * Scenario A:    [       ]
@@ -38,11 +38,17 @@ case class ChunkSetInfo(id: ChunkID,
    */
   def intersection(other: ChunkSetInfo)
                   (implicit ordering: Ordering[RowReader]): Option[(RowReader, RowReader)] = {
-    if (lastKey >= other.firstKey && firstKey <= other.lastKey) {
-      Some((if (firstKey > other.firstKey) firstKey else other.firstKey,
-            if (lastKey < other.lastKey) lastKey else other.lastKey))
-    } else {
-      None
+    try {
+      if (lastKey >= other.firstKey && firstKey <= other.lastKey) {
+        Some((if (firstKey > other.firstKey) firstKey else other.firstKey,
+              if (lastKey < other.lastKey) lastKey else other.lastKey))
+      } else {
+        None
+      }
+    } catch {
+      case e: Exception =>
+        logger.warn(s"Got error comparing $this and $other...", e)
+        None
     }
   }
 }
