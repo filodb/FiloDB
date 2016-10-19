@@ -127,7 +127,7 @@ class SegmentState private(projection: RichProjection,
     val skips = if (detectSkips) {
       ChunkSetInfo.detectSkips(projection, info,
                                projection.rowKeyColumns.map(c => chunkMap(c.name)).toArray,
-                               infoMap.values.asScala.toSeq,
+                               infoMap.values.asScala.toList,
                                rowKeysForChunk)
     } else { Nil }
     infoMap.put(info.id, info)
