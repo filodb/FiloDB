@@ -10,6 +10,7 @@ import scalaxy.loops._
 import filodb.core.KeyRange
 import filodb.core.Types._
 import filodb.core.metadata.{Column, Dataset, RichProjection}
+import filodb.core.store.SegmentInfo
 
 /**
  * A MemTable using Filo vectors to store rows in memory, plus an index to seek into the chunks.
@@ -81,9 +82,13 @@ class FiloMemTable(val projection: RichProjection, config: Config) extends MemTa
     }
   }
 
-  def readRows(partition: projection.PK, segment: projection.SK): Iterator[(projection.RK, RowReader)] =
+  def readRows(partition: projection.PK, segment: projection.SK): Iterator[RowReader] =
     getKeyMap(partition, segment).entrySet.iterator.asScala
-      .map { entry => (entry.getKey, appendStore.getRowReader(entry.getValue)) }
+      .map { entry => appendStore.getRowReader(entry.getValue) }
+
+  def safeReadRows(segInfo: SegmentInfo[projection.PK, projection.SK]): Iterator[RowReader] =
+    getKeyMap(segInfo.partition, segInfo.segment).entrySet.iterator.asScala
+      .map { entry => appendStore.safeRowReader(entry.getValue) }
 
   def getSegments(): Iterator[(projection.PK, projection.SK)] =
     partSegKeyMap.keySet.iterator.asScala

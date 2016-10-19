@@ -43,5 +43,9 @@ with Matchers with ScalaFutures {
     FiloDriver.client.sendAllIngestors(Reset)
   }
 
+  after {
+    FiloExecutor.stateCache.clear()
+  }
+
   implicit lazy val ec = FiloDriver.ec
 }

@@ -19,7 +19,7 @@ import filodb.coordinator.{DatasetCommands, CoordinatorSetup}
 import filodb.core._
 import filodb.core.metadata.Column.{ColumnType, Schema}
 import filodb.core.metadata.{Column, DataColumn, Dataset, RichProjection}
-import filodb.core.store.{Analyzer, CachedMergingColumnStore, FilteredPartitionScan, ScanSplit}
+import filodb.core.store.{Analyzer, FilteredPartitionScan, ScanSplit}
 
 //scalastyle:off
 class Arguments extends FieldArgs {
@@ -125,7 +125,7 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
                     99.minutes)
 
         case Some("analyze") =>
-          println(Analyzer.analyze(columnStore.asInstanceOf[CachedMergingColumnStore],
+          println(Analyzer.analyze(columnStore,
                                    metaStore,
                                    getRef(args),
                                    version,

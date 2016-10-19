@@ -65,7 +65,7 @@ object Analyzer {
 
   import scala.concurrent.ExecutionContext.Implicits.global
 
-  def analyze(cs: CachedMergingColumnStore,
+  def analyze(cs: ColumnStore with ColumnStoreScanner,
               metaStore: MetaStore,
               dataset: DatasetRef,
               version: Int,
@@ -82,13 +82,13 @@ object Analyzer {
     val projection = RichProjection(datasetObj, schema.values.toSeq)
     val split = splitCombiner(cs.getScanSplits(dataset, 1))
 
-    val indexes = Await.result(cs.scanChunkRowMaps(projection, version,
-                                                   FilteredPartitionScan(split)), 1.minutes)
+    val indexes = Await.result(cs.scanIndices(projection, version,
+                                              FilteredPartitionScan(split)), 1.minutes)
 
-    indexes.take(maxSegments).foreach { case SegmentIndex(partKey, _, _, _, rowmap) =>
+    indexes.take(maxSegments).foreach { case SegmentIndex(partKey, _, _, _, infosAndSkips) =>
       // Figure out # chunks and rows per segment
-      val numRows = rowmap.chunkIds.length
-      val numChunks = rowmap.nextChunkId
+      val numRows = infosAndSkips.map(_._1.numRows).sum
+      val numChunks = infosAndSkips.length
 
       numSegments = numSegments + 1
       rowsInSegment = rowsInSegment.add(numRows, NumRowsPerSegmentBucketKeys)

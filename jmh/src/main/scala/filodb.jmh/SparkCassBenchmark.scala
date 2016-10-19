@@ -10,7 +10,7 @@ import scala.concurrent.duration._
 
 import filodb.core._
 import filodb.core.metadata.{Column, Dataset, RichProjection}
-import filodb.core.store.{InMemoryColumnStore, RowReaderSegment, RowWriterSegment}
+import filodb.core.store.{InMemoryColumnStore, RowReaderSegment}
 import filodb.spark.{SparkRowReader, FiloDriver, TypeConverters}
 import org.apache.spark.sql.{DataFrame, Row, SQLContext}
 import org.apache.spark.sql.catalyst.InternalRow

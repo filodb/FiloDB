@@ -55,12 +55,15 @@ with Matchers with ScalaFutures {
 
   before {
     metaStore.clearAllData().futureValue
-    columnStore.clearSegmentCache()
     try {
       columnStore.clearProjectionData(largeDataset.projections.head).futureValue
     } catch {
       case e: Exception =>
     }
+  }
+
+  after {
+    FiloExecutor.stateCache.clear()
   }
 
   implicit val ec = FiloDriver.ec
