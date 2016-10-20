@@ -92,7 +92,7 @@ class SegmentState private(projection: RichProjection,
   val filoSchema = Column.toFiloSchema(schema)
   val infoMap = new TreeMap[ChunkID, ChunkSetInfo]
   infos.foreach { info => infoMap.put(info.id, info) }
-  val rowKeyColNos = projection.rowKeyColIndices.toArray
+  private val rowKeyFunc = projection.rowKeyFunc
 
   // TODO(velvia): Use some TimeUUID for chunkID instead
   var nextChunkId = (infos.foldLeft(-1) { case (chunkId, info) => Math.max(info.id, chunkId) }) + 1
@@ -111,16 +111,17 @@ class SegmentState private(projection: RichProjection,
     nextChunkId = nextChunkId + 1
     var numRows = 0
     //scalastyle:off
-    var firstKey: RowReader = null
-    var lastKey: RowReader = null
+    var firstRow: RowReader = null
+    var lastRow: RowReader = null
     //scalastyle:on
     rows.foreach { row =>
       builder.addRow(row)
-      val rowKey = RoutingRowReader(row, rowKeyColNos)
-      if (numRows == 0) firstKey = rowKey
-      lastKey = rowKey
+      if (numRows == 0) firstRow = row
+      lastRow = row
       numRows += 1
     }
+    val firstKey = makeRowKey(firstRow)
+    val lastKey = makeRowKey(lastRow)
 
     val chunkMap = builder.convertToBytes()
     val info = ChunkSetInfo(infoChunkId, numRows, firstKey, lastKey)
@@ -132,6 +133,17 @@ class SegmentState private(projection: RichProjection,
     } else { Nil }
     infoMap.put(info.id, info)
     ChunkSet(info, skips, chunkMap)
+  }
+
+  // It's good to create a separate RowKey that does not depend on existing RowReaders or chunks, because
+  // the row key metadata gets saved for a long time, and we don't want dangling memory references to
+  // chunks that have been flushed already
+  // TODO: Change this to use BinaryRecord based keys?
+  private def makeRowKey(row: RowReader): RowReader = {
+    rowKeyFunc(row) match {
+      case s: Seq[Any] =>  SeqRowReader(s)
+      case other: Any  =>  SeqRowReader(Seq(other))
+    }
   }
 }
 

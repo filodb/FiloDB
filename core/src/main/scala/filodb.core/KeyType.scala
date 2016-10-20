@@ -59,7 +59,7 @@ abstract class SingleKeyTypeBase[K : Ordering : TypedFieldExtractor] extends Key
     val columnNum = columnNumbers(0)
     (r: RowReader) => {
       if (r.notNull(columnNum)) {
-        extractor.getField(r, columnNum)
+        extractor.getFieldOrDefault(r, columnNum)
       } else {
         defaultValue
       }

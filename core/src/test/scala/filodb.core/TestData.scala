@@ -6,7 +6,7 @@ import filodb.core.store.{ColumnStoreScanner, SegmentInfo, ChunkSetSegment, Segm
 import java.nio.ByteBuffer
 import java.sql.Timestamp
 import org.joda.time.DateTime
-import org.velvia.filo.{RowReader, TupleRowReader, ArrayStringRowReader, RoutingRowReader}
+import org.velvia.filo.{RowReader, TupleRowReader, ArrayStringRowReader, SeqRowReader}
 import scala.io.Source
 import scala.concurrent.ExecutionContext
 import scala.concurrent.duration._
@@ -37,9 +37,9 @@ object NamesTestData {
                   (Some("Derek"),     Some("Carr"),     Some(39L), Some(0)),
                   (Some("Karl"),      Some("Joseph"),   Some(29L), Some(0)))
 
-  val firstKey = RoutingRowReader(TupleRowReader(names.head), Array(2))
-  val lastKey = RoutingRowReader(TupleRowReader(names.last), Array(2))
-  def keyForName(rowNo: Int): RowReader = RoutingRowReader(TupleRowReader(names(rowNo)), Array(2))
+  val firstKey = SeqRowReader(Seq(names.head._3.get))
+  val lastKey = SeqRowReader(Seq(names.last._3.get))
+  def keyForName(rowNo: Int): RowReader = SeqRowReader(Seq(names(rowNo)._3.getOrElse(0)))
 
   def getState(rowKeysForChunk: Types.ChunkID => Array[ByteBuffer], segment: Int = 0): SegmentState =
     new SegmentState(projection, schema, Nil, rowKeysForChunk)(SegmentInfo("/0", segment).basedOn(projection))

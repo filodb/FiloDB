@@ -101,12 +101,13 @@ object ChunkSetInfo extends StrictLogging {
   // It's super inefficient
   // In the future we move to BinaryRecord and this problem would be solved
   private def rowKeyToBytes(projection: RichProjection, key: RowReader): ByteVector = {
-    projection.rowKeyType match {
-      case c @ CompositeKeyType(atomTypes) =>
-        val seq = atomTypes.zipWithIndex.map { case (atomTyp, i) => atomTyp.extractor.getField(key, i) }
-        c.toBytes(seq)
-      case keyTyp: SingleKeyTypeBase[_] =>
-        keyTyp.toBytes(keyTyp.extractor.getField(key, 0))
+    val keyTyp = projection.rowKeyType
+    key match {
+      case SeqRowReader(Seq(value)) =>
+        keyTyp.toBytes(value.asInstanceOf[keyTyp.T])
+      case SeqRowReader(longSeq)    =>
+        keyTyp.toBytes(longSeq.asInstanceOf[keyTyp.T])
+      case other: Any => ???
     }
   }
 
