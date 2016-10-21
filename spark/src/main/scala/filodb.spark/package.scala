@@ -6,6 +6,7 @@ import akka.util.Timeout
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.slf4j.StrictLogging
 import java.util.concurrent.ArrayBlockingQueue
+import net.ceedubs.ficus.Ficus._
 import org.apache.spark.sql.{SQLContext, SaveMode, DataFrame, Row}
 import org.apache.spark.sql.types.StructType
 import scala.concurrent.{Await, Future}
@@ -67,6 +68,8 @@ package object spark extends StrictLogging {
   val sparkLogger = logger
 
   val actorCounter = new java.util.concurrent.atomic.AtomicInteger
+
+  lazy val datasetOpTimeout = FiloDriver.config.as[FiniteDuration]("spark.dataset-ops-timeout")
 
   private[spark] def ingestRddRows(coordinatorActor: ActorRef,
                                    dataset: DatasetRef,
@@ -131,7 +134,7 @@ package object spark extends StrictLogging {
                                         dataset: DatasetRef,
                                         version: Int): Unit = {
     // Pull out existing dataset schema
-    val schema = parse(metaStore.getSchema(dataset, version)) { schema => schema }
+    val schema = parse(metaStore.getSchema(dataset, version), datasetOpTimeout) { schema => schema }
 
     // Translate DF schema to columns, create new ones if needed
     val dfSchemaSeq = dfColumns.map { col => col.name -> col }
@@ -150,7 +153,7 @@ package object spark extends StrictLogging {
 
     if (missingCols.nonEmpty) {
       val newCols = missingCols.map(dfSchema(_).copy(dataset = dataset.dataset, version = version))
-      parse(metaStore.newColumns(newCols.toSeq, dataset)) { resp =>
+      parse(metaStore.newColumns(newCols.toSeq, dataset), datasetOpTimeout) { resp =>
         if (resp != Success) throw new RuntimeException(s"Error $resp creating new columns $newCols")
       }
     }
@@ -178,7 +181,7 @@ package object spark extends StrictLogging {
   // This doesn't create columns, because that's in checkAndAddColumns.
   private[spark] def createNewDataset(dataset: Dataset): Unit = {
     logger.info(s"Creating dataset ${dataset.name}...")
-    actorAsk(FiloDriver.coordinatorActor, CreateDataset(dataset, Nil)) {
+    actorAsk(FiloDriver.coordinatorActor, CreateDataset(dataset, Nil), datasetOpTimeout) {
       case DatasetCreated =>
         logger.info(s"Dataset ${dataset.name} created successfully...")
       case DatasetError(errMsg) =>
@@ -188,7 +191,7 @@ package object spark extends StrictLogging {
 
   private[spark] def deleteDataset(dataset: DatasetRef): Unit = {
     logger.info(s"Deleting dataset $dataset")
-    parse(metaStore.deleteDataset(dataset)) { resp => resp }
+    FiloDriver.client.deleteDataset(dataset, datasetOpTimeout)
   }
 
   implicit def sqlToFiloContext(sql: SQLContext): FiloContext = new FiloContext(sql)
