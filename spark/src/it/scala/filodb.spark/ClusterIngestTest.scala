@@ -25,6 +25,7 @@ class ClusterIngestTest extends SparkTestBase {
                             .set("spark.driver.extraClassPath", currClassPath)
                             .set("spark.executor.extraClassPath", currClassPath)
                             .set("spark.filodb.cassandra.keyspace", "unittest")
+                            .set("spark.filodb.cassandra.admin-keyspace", "unittest")
                             .set("spark.filodb.memtable.min-free-mb", "10")
                             .set("spark.ui.enabled", "false")
   val sc = new SparkContext(conf)
