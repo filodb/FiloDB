@@ -59,6 +59,8 @@ case class ColumnStoreAnalysis(numSegments: Int,
   }
 }
 
+case class ChunkInfo(partKey: Any, segment: Any, chunkInfo: ChunkSetInfo)
+
 /**
  * Analyzes the segments and chunks for a given dataset/version.  Gives useful information
  * about distribution of segments and chunks within segments.  Should be run offline, as could take a while.
@@ -114,5 +116,26 @@ object Analyzer {
 
     ColumnStoreAnalysis(numSegments, partitionSegments.size, totalRows, skippedRows,
                         rowsInSegment, skippedInSegment, chunksInSegment, segmentsInPartition)
+  }
+
+  def getChunkInfos(cs: ColumnStore with ColumnStoreScanner,
+                    metaStore: MetaStore,
+                    dataset: DatasetRef,
+                    version: Int,
+                    splitCombiner: Seq[ScanSplit] => ScanSplit,
+                    maxSegments: Int = 100): Iterator[ChunkInfo] = {
+    val datasetObj = Await.result(metaStore.getDataset(dataset), 1.minutes)
+    val schema = Await.result(metaStore.getSchema(dataset, version), 1.minutes)
+    val projection = RichProjection(datasetObj, schema.values.toSeq)
+    val split = splitCombiner(cs.getScanSplits(dataset, 1))
+
+    val indexes = Await.result(cs.scanIndices(projection, version,
+                                              FilteredPartitionScan(split)), 1.minutes)
+
+    indexes.take(maxSegments).flatMap { case SegmentIndex(_, _, partKey, segKey, infosAndSkips) =>
+      infosAndSkips.map { case (info, skips) =>
+        ChunkInfo(partKey, segKey, info)
+      }
+    }
   }
 }

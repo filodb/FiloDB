@@ -19,7 +19,7 @@ import filodb.coordinator.{DatasetCommands, CoordinatorSetup}
 import filodb.core._
 import filodb.core.metadata.Column.{ColumnType, Schema}
 import filodb.core.metadata.{Column, DataColumn, Dataset, RichProjection}
-import filodb.core.store.{Analyzer, FilteredPartitionScan, ScanSplit}
+import filodb.core.store.{Analyzer, ChunkInfo, ChunkSetInfo, FilteredPartitionScan, ScanSplit}
 
 //scalastyle:off
 class Arguments extends FieldArgs {
@@ -69,7 +69,7 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
 
   def printHelp() {
     println("filo-cli help:")
-    println("  commands: init create importcsv list analyze delete truncate")
+    println("  commands: init create importcsv list analyze dumpinfo delete truncate")
     println("  columns: <colName1>:<type1>,<colName2>:<type2>,... ")
     println("  types:  int,long,double,string,bool,timestamp")
     println("  common options:  --dataset --database")
@@ -131,6 +131,15 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
                                    version,
                                    combineSplits,
                                    args.numSegments).prettify())
+
+        case Some("dumpinfo") =>
+          printChunkInfos(Analyzer.getChunkInfos(columnStore,
+                                   metaStore,
+                                   getRef(args),
+                                   version,
+                                   combineSplits,
+                                   args.numSegments))
+
         case Some("delete") =>
           client.deleteDataset(getRef(args), timeout)
 
@@ -177,6 +186,13 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
   def dumpAllDatasets(database: Option[String]) {
     parse(metaStore.getAllDatasets(database)) { refs =>
       refs.foreach { ref => println("%25s\t%s".format(ref.database.getOrElse(""), ref.dataset)) }
+    }
+  }
+
+  def printChunkInfos(infos: Iterator[ChunkInfo]): Unit = {
+    infos.foreach { case ChunkInfo(partKey, segKey, ChunkSetInfo(id, numRows, firstKey, lastKey)) =>
+      println(" %25s %20s".format(partKey, segKey))
+      println("\t%10d %5d  %40s %s".format(id, numRows, firstKey, lastKey))
     }
   }
 
