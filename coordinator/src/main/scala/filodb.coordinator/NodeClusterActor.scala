@@ -4,42 +4,43 @@ import akka.actor._
 import akka.cluster.Cluster
 import akka.cluster.ClusterEvent._
 import akka.event.LoggingReceive
-import scala.collection.mutable.{HashMap, HashSet}
+import scala.collection.mutable.HashMap
+import scala.collection.immutable.HashSet
 import scala.concurrent.duration._
 
 import filodb.core.ErrorResponse
 
 object NodeClusterActor {
   // Forwards message to one random recipient that has the given role.  Any replies go back to originator.
-  case class ForwardToOne(role: String, msg: Any)
+  final case class ForwardToOne(role: String, msg: Any)
   case object NoSuchRole extends ErrorResponse
 
   // Gets all the ActorRefs for a specific role.  Returns a Set[ActorRef].
-  case class GetRefs(role: String)
+  final case class GetRefs(role: String)
 
   // Forwards message to all recipients with given role.  Sending actor must handle separate replies.
-  case class ForwardToAll(role: String, msg: Any)
+  final case class ForwardToAll(role: String, msg: Any)
 
   // Registers sending actor to receive PartitionMapUpdate whenever it changes.  DeathWatch will be used
   // on the sending actors to watch for updates.  Also, will immediately send back the current state
   // via a PartitionMapUpdate message.
   case object SubscribePartitionUpdates
-  case class PartitionMapUpdate(map: PartitionMapper)
+  final case class PartitionMapUpdate(map: PartitionMapper)
 
   // Internal message
-  case class AddCoordActor(roles: Set[String], addr: Address, ref: ActorRef)
+  final case class AddCoordActor(roles: Set[String], addr: Address, ref: ActorRef)
   case object EverybodyLeave  // Make every member leave, should be used only for testing
 
   /**
    * Creates a new NodeClusterActor.
    * @param cluster the Cluster to subscribe to for membership messages
    * @param nodeCoordRole String, for the role containing the NodeCoordinatorActor or ingestion nodes
-   * @param resolveActorTimeout the timeout to use to resolve NodeCoordinatorActor refs for new nodes
+   * @param resolveActorDuration the timeout to use to resolve NodeCoordinatorActor refs for new nodes
    */
   def props(cluster: Cluster,
             nodeCoordRole: String,
-            resolveActorTimeout: FiniteDuration = 10.seconds): Props =
-    Props(classOf[NodeClusterActor], cluster, nodeCoordRole, resolveActorTimeout)
+            resolveActorDuration: FiniteDuration = 10.seconds): Props =
+    Props(classOf[NodeClusterActor], cluster, nodeCoordRole, resolveActorDuration)
 
   /**
    * Creates a FakeClusterActor with only the supplied coordinatorActor in the partition map.
@@ -72,12 +73,12 @@ object NodeClusterActor {
  */
 private[filodb] class NodeClusterActor(cluster: Cluster,
                                        nodeCoordRole: String,
-                                       resolveActorTimeout: FiniteDuration) extends BaseActor {
+                                       resolveActorDuration: FiniteDuration) extends BaseActor {
   import NodeClusterActor._
 
   val roleToCoords = new HashMap[String, Set[ActorRef]]().withDefaultValue(Set.empty[ActorRef])
   var partMapper = PartitionMapper.empty
-  val partMapSubscribers = new HashSet[ActorRef]
+  var partMapSubscribers = HashSet.empty[ActorRef]
 
   import context.dispatcher
 
@@ -110,13 +111,13 @@ private[filodb] class NodeClusterActor(cluster: Cluster,
     case MemberUp(member) =>
       logger.info(s"Member is Up: ${member.address} with roles ${member.roles}")
       val memberCoordActor = RootActorPath(member.address) / "user" / "coordinator"
-      val fut = context.actorSelection(memberCoordActor).resolveOne(resolveActorTimeout)
-      fut.foreach { ref => self ! AddCoordActor(member.roles, member.address, ref) }
-      fut.recover {
-        case e: Exception =>
-          logger.warn(s"Unable to resolve coordinator at $memberCoordActor, ignoring. " +
-                      "Maybe NodeCoordinatorActor did not start up before node joined cluster.", e)
-      }
+      context.actorSelection(memberCoordActor).resolveOne(resolveActorDuration)
+        .map { ref => self ! AddCoordActor(member.roles, member.address, ref) }
+        .recover {
+          case e: Exception =>
+            logger.warn(s"Unable to resolve coordinator at $memberCoordActor, ignoring. " +
+                        "Maybe NodeCoordinatorActor did not start up before node joined cluster.", e)
+        }
 
     case UnreachableMember(member) =>
       logger.info(s"Member detected as unreachable: $member")
@@ -145,14 +146,14 @@ private[filodb] class NodeClusterActor(cluster: Cluster,
 
   def subscriptionHandler: Receive = LoggingReceive {
     case Terminated(ref) =>
-      partMapSubscribers -= ref
+      partMapSubscribers = partMapSubscribers - ref
 
     case SubscribePartitionUpdates =>
       logger.debug(s"Registered $sender to receive updates on partition maps")
       // Send an immediate current snapshot of partition state
       // (as ingestion will subscribe usually when cluster is already stable)
       sender ! PartitionMapUpdate(partMapper)
-      partMapSubscribers += sender
+      partMapSubscribers = partMapSubscribers + sender
       context.watch(sender)
   }
 

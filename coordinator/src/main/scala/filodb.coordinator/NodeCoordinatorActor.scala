@@ -31,13 +31,13 @@ import filodb.core.reprojector.Reprojector
 object NodeCoordinatorActor {
   // Internal messages
   case object Reset
-  case class ClearState(dataset: DatasetRef, version: Int)   // Clears the state of a single dataset
-  case class AddDatasetCoord(originator: ActorRef,
-                             dataset: DatasetRef,
-                             version: Int,
-                             dsCoordRef: ActorRef,
-                             reloadFlag: Boolean)
-  case class DatasetCreateNotify(dataset: DatasetRef, version: Int, msg: Any)
+  final case class ClearState(dataset: DatasetRef, version: Int)   // Clears the state of a single dataset
+  final case class AddDatasetCoord(originator: ActorRef,
+                                   dataset: DatasetRef,
+                                   version: Int,
+                                   dsCoordRef: ActorRef,
+                                   reloadFlag: Boolean)
+  final case class DatasetCreateNotify(dataset: DatasetRef, version: Int, msg: Any)
   case object ReloadDCA
 
   def invalidColumns(columns: Seq[String], schema: Column.Schema): Set[String] =
