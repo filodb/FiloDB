@@ -68,7 +68,7 @@ trait RowSource extends Actor with StrictLogging {
   private var whoStartedMe: Option[ActorRef] = None
   private val outstanding = new HashMap[Long, (ActorRef, Seq[RowReader])]
   private val outstandingNodes = new HashMap[ActorRef, Set[Long]].withDefaultValue(Set.empty)
-  private var mapper: PartitionMapper = _
+  private var mapper: PartitionMapper = PartitionMapper.empty
   private var nextSeqId = 0L
   private val partKeyFunc = projection.partitionKeyFunc
   private val dataset = projection.datasetRef

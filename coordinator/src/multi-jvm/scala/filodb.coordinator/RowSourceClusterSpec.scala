@@ -1,9 +1,10 @@
 package filodb.coordinator
 
 import akka.actor.{ActorSystem, ActorRef, PoisonPill}
-import akka.testkit.ImplicitSender
 import akka.remote.testkit.{MultiNodeConfig, MultiNodeSpec}
+import akka.testkit.ImplicitSender
 import com.typesafe.config.ConfigFactory
+import com.typesafe.scalalogging.slf4j.StrictLogging
 import scala.concurrent.duration._
 
 import filodb.core._
@@ -34,6 +35,7 @@ object RowSourceClusterSpecConfig extends MultiNodeConfig {
 abstract class RowSourceClusterSpec extends MultiNodeSpec(RowSourceClusterSpecConfig)
   with FunSpecLike with Matchers with BeforeAndAfterAll
   with CoordinatorSetup
+  with StrictLogging
   with ImplicitSender with ScalaFutures {
 
   import akka.testkit._
@@ -50,6 +52,7 @@ abstract class RowSourceClusterSpec extends MultiNodeSpec(RowSourceClusterSpecCo
   override def afterAll() = multiNodeSpecAfterAll()
 
   val config = globalConfig.getConfig("filodb")
+  val settings = CsvSourceActor.CsvSourceSettings()
 
   implicit val context = scala.concurrent.ExecutionContext.Implicits.global
   lazy val columnStore = new InMemoryColumnStore(context)
@@ -98,8 +101,8 @@ abstract class RowSourceClusterSpec extends MultiNodeSpec(RowSourceClusterSpecCo
     // Note: can only send 20 rows at a time before waiting for acks.  Therefore this tests memtable
     // ack on timer and ability for RowSource to handle waiting for acks repeatedly
     val csvActor = system.actorOf(CsvSourceActor.props(reader, dataset33, schemaMap, 0, clusterActor,
-                                                       maxUnackedBatches = 4,
-                                                       rowsToRead = 10))
+                                                       settings = settings.copy(maxUnackedBatches = 4,
+                                                                                rowsToRead = 10)))
 
     coordinatorActor ! SetupIngestion(ref2, columnNames, 0)
     expectMsg(IngestionReady)
@@ -115,21 +118,19 @@ abstract class RowSourceClusterSpec extends MultiNodeSpec(RowSourceClusterSpecCo
       client.flushCompletely(ref2, 0)
     }
 
-    Thread sleep 2000
-
     enterBarrier("all-nodes-flushed")
 
     runOn(second) {
       val numRows = getColStoreRows()
       // Find the test actor of the first node and send our results to it
       val node1testActor = system.actorSelection(node(first) / "system" / "testActor1")
-      println(s"Node2  numRows = $numRows   node1testActor = $node1testActor")
+      logger.debug(s"Node2  numRows = $numRows   node1testActor = $node1testActor")
       node1testActor ! numRows
     }
 
     runOn(first) {
       val numRowsFirst = getColStoreRows()
-      println(s"Node1   numRows = $numRowsFirst")
+      logger.debug(s"Node1   numRows = $numRowsFirst")
       val numRowsSecond = expectMsgPF(5.seconds.dilated) { case i: Int => i }
       (numRowsFirst + numRowsSecond) should equal (99)
     }

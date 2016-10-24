@@ -16,6 +16,11 @@ object CsvSourceActor extends StrictLogging {
   val DefaultMaxUnackedBatches = 50
   val RowsToRead = 100
 
+  final case class CsvSourceSettings(maxUnackedBatches: Int = DefaultMaxUnackedBatches,
+                                     rowsToRead: Int = RowsToRead,
+                                     ackTimeout: FiniteDuration = 10.seconds,
+                                     waitPeriod: FiniteDuration = 5.seconds)
+
   /**
    * The entry point for when your CSV file has a header row.  The projection will be created from the
    * columns in the header row.  Column names not defined in the schema will result in an exception.
@@ -25,15 +30,11 @@ object CsvSourceActor extends StrictLogging {
             schema: Column.Schema,
             version: Int,
             clusterActor: ActorRef,
-            maxUnackedBatches: Int = DefaultMaxUnackedBatches,
-            rowsToRead: Int = RowsToRead,
             separatorChar: Char = ',',
-            ackTimeout: FiniteDuration = 10.seconds,
-            waitPeriod: FiniteDuration = 5.seconds): Props = {
+            settings: CsvSourceSettings = CsvSourceSettings()): Props = {
     val (projection, reader, columns) = getProjectionFromHeader(csvStream, dataset, schema, separatorChar)
     logger.info(s"Ingesting CSV with columns $columns...")
-    Props(classOf[CsvSourceActor], reader, projection, version,
-          clusterActor, maxUnackedBatches, rowsToRead, ackTimeout, waitPeriod)
+    Props(classOf[CsvSourceActor], reader, projection, version, clusterActor, settings)
   }
 
   def getProjectionFromHeader(csvStream: java.io.Reader,
@@ -54,12 +55,8 @@ object CsvSourceActor extends StrictLogging {
                     projection: RichProjection,
                     version: Int,
                     clusterActor: ActorRef,
-                    maxUnackedBatches: Int = DefaultMaxUnackedBatches,
-                    rowsToRead: Int = RowsToRead,
-                    ackTimeout: FiniteDuration = 10.seconds,
-                    waitPeriod: FiniteDuration = 5.seconds): Props = {
-    Props(classOf[CsvSourceActor], csvReader, projection, version,
-          clusterActor, maxUnackedBatches, rowsToRead, ackTimeout, waitPeriod)
+                    settings: CsvSourceSettings = CsvSourceSettings()): Props = {
+    Props(classOf[CsvSourceActor], csvReader, projection, version, clusterActor, settings)
   }
 }
 
@@ -76,14 +73,15 @@ class CsvSourceActor(reader: CSVReader,
                      val projection: RichProjection,
                      val version: Int,
                      val clusterActor: ActorRef,
-                     val maxUnackedBatches: Int,
-                     rowsToRead: Int,
-                     override val ackTimeout: FiniteDuration,
-                     override val waitingPeriod: FiniteDuration) extends BaseActor with RowSource {
+                     settings: CsvSourceActor.CsvSourceSettings) extends BaseActor with RowSource {
   import CsvSourceActor._
   import collection.JavaConverters._
 
+  val maxUnackedBatches = settings.maxUnackedBatches
+  override val waitingPeriod = settings.waitPeriod
+  override val ackTimeout = settings.ackTimeout
+
   val batchIterator: Iterator[Seq[RowReader]] = reader.iterator.asScala
                                                   .map(ArrayStringRowReader)
-                                                  .grouped(rowsToRead)
+                                                  .grouped(settings.rowsToRead)
 }
