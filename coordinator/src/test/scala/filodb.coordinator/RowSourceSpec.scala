@@ -30,6 +30,8 @@ with CoordinatorSetup with ScalaFutures {
   import sources.CsvSourceActor
   import IngestionCommands.{IngestionReady, SetupIngestion}
 
+  val settings = CsvSourceActor.CsvSourceSettings()
+
   implicit val defaultPatience =
     PatienceConfig(timeout = Span(10, Seconds), interval = Span(50, Millis))
 
@@ -75,8 +77,8 @@ with CoordinatorSetup with ScalaFutures {
   it("should fail fast if NodeCoordinatorActor bombs at end of ingestion") {
     val reader = new java.io.InputStreamReader(getClass.getResourceAsStream("/GDELT-sample-test-errors.csv"))
     val csvActor = system.actorOf(CsvSourceActor.props(reader, dataset1, schemaMap, 0, clusterActor,
-                                                       ackTimeout = 4.seconds,
-                                                       waitPeriod = 2.seconds))
+                                                       settings = settings.copy(ackTimeout = 4.seconds,
+                                                                                waitPeriod = 2.seconds)))
 
     coordActor ! SetupIngestion(ref, columnNames, 0)
     expectMsg(IngestionReady)
@@ -90,11 +92,12 @@ with CoordinatorSetup with ScalaFutures {
 
   it("should fail fast if NodeCoordinatorActor bombs in middle of ingestion") {
     val reader = new java.io.InputStreamReader(getClass.getResourceAsStream("/GDELT-sample-test-errors.csv"))
+    val mySettings = settings.copy(maxUnackedBatches = 2,
+                                   rowsToRead = 5,
+                                   ackTimeout = 4.seconds,
+                                   waitPeriod = 2.seconds)
     val csvActor = system.actorOf(CsvSourceActor.props(reader, dataset1, schemaMap, 0, clusterActor,
-                                                       maxUnackedBatches = 2,
-                                                       rowsToRead = 5,
-                                                       ackTimeout = 4.seconds,
-                                                       waitPeriod = 2.seconds))
+                                                       settings = mySettings))
     coordActor ! SetupIngestion(ref, columnNames, 0)
     expectMsg(IngestionReady)
     csvActor ! RowSource.Start
@@ -111,8 +114,8 @@ with CoordinatorSetup with ScalaFutures {
     // Note: can only send 20 rows at a time before waiting for acks.  Therefore this tests memtable
     // ack on timer and ability for RowSource to handle waiting for acks repeatedly
     val csvActor = system.actorOf(CsvSourceActor.props(reader, dataset33, schemaMap, 0, clusterActor,
-                                                       maxUnackedBatches = 2,
-                                                       rowsToRead = 10))
+                                                       settings = settings.copy(maxUnackedBatches = 2,
+                                                                                rowsToRead = 10)))
 
     coordActor ! SetupIngestion(ref2, columnNames, 0)
     expectMsg(IngestionReady)
@@ -133,8 +136,8 @@ with CoordinatorSetup with ScalaFutures {
     // then it will send another 80 rows, this time non flushing memtable will become full, hopefully
     // while flush still happening, and cause Nack to be returned.
     val csvActor = system.actorOf(CsvSourceActor.props(reader, dataset33, schemaMap, 0, clusterActor,
-                                                       maxUnackedBatches = 8,
-                                                       rowsToRead = 10))
+                                                       settings = settings.copy(maxUnackedBatches = 8,
+                                                                                rowsToRead = 10)))
 
     coordActor ! SetupIngestion(ref2, columnNames, 0)
     expectMsg(IngestionReady)

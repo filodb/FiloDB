@@ -14,7 +14,10 @@ import filodb.core.metadata.RichProjection
  *
  * It also implements RowReader, so values can be extracted without another instantiation.
  */
-case class BinaryRecord private[binaryrecord](schema: RecordSchema, base: Any, offset: Long, numBytes: Int)
+class BinaryRecord private[binaryrecord](schema: RecordSchema,
+                                         val base: Any,
+                                         val offset: Long,
+                                         val numBytes: Int)
 extends ZeroCopyBinary with RowReader {
   import BinaryRecord._
   import ZeroCopyBinary._
@@ -71,14 +74,17 @@ class ArrayBinaryRecord(schema: RecordSchema, override val bytes: Array[Byte]) e
 BinaryRecord(schema, bytes, UnsafeUtils.arayOffset, bytes.size)
 
 object BinaryRecord {
+  val DefaultMaxRecordSize = 8192
+  val MaxSmallOffset = 0x7fff
+  val MaxSmallLen    = 0xffff
+
+  val hasher64 = ZeroCopyBinary.xxhashFactory.hash64
+
   def apply(schema: RecordSchema, bytes: Array[Byte]): BinaryRecord =
     new ArrayBinaryRecord(schema, bytes)
 
   def apply(projection: RichProjection, bytes: Array[Byte]): BinaryRecord =
     apply(projection.rowKeyBinSchema, bytes)
-
-  val DefaultMaxRecordSize = 8192
-  val hasher64 = ZeroCopyBinary.xxhashFactory.hash64
 
   def apply(schema: RecordSchema, reader: RowReader, maxBytes: Int = DefaultMaxRecordSize): BinaryRecord = {
     val builder = BinaryRecordBuilder(schema, maxBytes)
@@ -97,9 +103,6 @@ object BinaryRecord {
 
   def apply(projection: RichProjection, items: Seq[Any]): BinaryRecord =
     apply(projection.rowKeyBinSchema, SeqRowReader(items))
-
-  val MaxSmallOffset = 0x7fff
-  val MaxSmallLen    = 0xffff
 
   // Create the fixed-field int for variable length data blobs.  If the result is negative (bit 31 set),
   // then the offset and length are both packed in; otherwise, the fixed int is just an offset to a
@@ -196,7 +199,7 @@ class BinaryRecordBuilder(schema: RecordSchema, val base: Any, val offset: Long,
     UnsafeUtils.unsafe.copyMemory(base, offset, newAray, UnsafeUtils.arayOffset, numBytes)
     new ArrayBinaryRecord(schema, newAray)
   } else {
-    BinaryRecord(schema, base, offset, numBytes)
+    new BinaryRecord(schema, base, offset, numBytes)
   }
 }
 
