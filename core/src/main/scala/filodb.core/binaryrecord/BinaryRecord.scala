@@ -36,6 +36,9 @@ extends ZeroCopyBinary with RowReader {
   override final def filoUTF8String(columnNo: Int): ZeroCopyUTF8String =
     fields(columnNo).get[ZeroCopyUTF8String](this)
 
+  override def toString: String =
+    s"b[${(0 until fields.size).map(getAny).mkString(", ")}]"
+
   /**
    * Returns an array of bytes for this binary record.  If this BinaryRecord is already a byte array
    * with exactly numBytes bytes, then just return that, to avoid another copy.  Otherwise, call
