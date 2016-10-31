@@ -84,6 +84,29 @@ trait ColumnStoreScanner extends StrictLogging {
   }
 
   /**
+   * Reads back a subset of filters for ingestion row replacement / skip detection
+   * @param dataset the DatasetRef of the dataset to read filters from
+   * @param version the version to read back
+   * @param chunkRange the inclusive start and end ChunkID to read from
+   */
+  def readFilters(dataset: DatasetRef,
+                  version: Int,
+                  partition: Types.BinaryPartition,
+                  segment: Types.SegmentId,
+                  chunkRange: (Types.ChunkID, Types.ChunkID))
+                 (implicit ec: ExecutionContext): Future[Iterator[SegmentState.IDAndFilter]]
+
+  def readFilters(projection: RichProjection,
+                  version: Int,
+                  chunkRange: (Types.ChunkID, Types.ChunkID))
+                 (segInfo: SegmentInfo[projection.PK, projection.SK])
+                 (implicit ec: ExecutionContext): Future[Iterator[SegmentState.IDAndFilter]] = {
+    val binPartition = projection.partitionType.toBytes(segInfo.partition)
+    val binSegId = projection.segmentType.toBytes(segInfo.segment)
+    readFilters(projection.datasetRef, version, binPartition, binSegId, chunkRange)
+  }
+
+  /**
    * Scans over indices according to the method.
    * @return an iterator over SegmentIndex.
    */
@@ -102,6 +125,12 @@ trait ColumnStoreScanner extends StrictLogging {
                  projection.segmentType.fromBytes(segmentKey),
                  infosAndSkips)
   }
+
+  def toSegIndexWithFilter(projection: RichProjection, binPart: BinaryPartition, segmentKey: SegmentId,
+                           infosSkipsFilters: ChunkSetInfo.IndexAndFilterSeq):
+        SegmentIndex[projection.PK, projection.SK] =
+    toSegIndex(projection, binPart, segmentKey,
+               infosSkipsFilters.map { case (info, skip, _) => (info, skip) })
 
   // NOTE: this is more or less a single-threaded implementation.  Reads of chunks for multiple columns
   // happen in parallel, but we still block to wait for all of them to come back.

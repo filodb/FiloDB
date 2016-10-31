@@ -71,7 +71,7 @@ extends ColumnStore with InMemoryColumnStoreScanner with StrictLogging {
         indices.getOrElseUpdate(dbKey, new IndexTree(Ordering[SegmentId]))
       }
       val segmentIndex = Option(indexTree.get(segmentId)).getOrElse(Nil)
-      indexTree.put(segmentId, segmentIndex ++ segment.infosAndSkips)
+      indexTree.put(segmentId, segmentIndex ++ segment.infosSkipsFilters)
 
       Success
     }
@@ -131,8 +131,8 @@ trait InMemoryColumnStoreScanner extends ColumnStoreScanner {
 
   type ChunkKey = (ColumnId, SegmentId, ChunkID)
   type ChunkTree = ConcurrentSkipListMap[ChunkKey, ByteBuffer]
-  type IndexTree = ConcurrentSkipListMap[SegmentId, ChunkSetInfo.ChunkInfosAndSkips]
-  type IndexTreeLike = ConcurrentNavigableMap[SegmentId, ChunkSetInfo.ChunkInfosAndSkips]
+  type IndexTree = ConcurrentSkipListMap[SegmentId, ChunkSetInfo.IndexAndFilterSeq]
+  type IndexTreeLike = ConcurrentNavigableMap[SegmentId, ChunkSetInfo.IndexAndFilterSeq]
 
   val EmptyChunkTree = new ChunkTree(Ordering[ChunkKey])
   val EmptyIndexTree = new IndexTree(Ordering[SegmentId])
@@ -184,6 +184,19 @@ trait InMemoryColumnStoreScanner extends ColumnStoreScanner {
       ChunkedData(column, chunkList)
     }
     Future.successful(chunks)
+  }
+
+  def readFilters(dataset: DatasetRef,
+                  version: Int,
+                  partition: Types.BinaryPartition,
+                  segment: Types.SegmentId,
+                  chunkRange: (Types.ChunkID, Types.ChunkID))
+                 (implicit ec: ExecutionContext): Future[Iterator[SegmentState.IDAndFilter]] = {
+    val indexTree = indices.getOrElse((dataset, partition, version), EmptyIndexTree)
+    val indexData = indexTree.get(segment)
+    val it = Option(indexData).map(_.iterator.map { case (info, _, filter) => (info.id, filter) })
+                              .getOrElse(Iterator.empty)
+    Future.successful(it)
   }
 
   def singlePartScan(projection: RichProjection, version: Int, partition: Any):
@@ -254,7 +267,7 @@ trait InMemoryColumnStoreScanner extends ColumnStoreScanner {
     }
     val segIndices = partAndMaps.flatMap { case (binPart, indexTree) =>
       indexTree.entrySet.iterator.map { entry =>
-        toSegIndex(projection, binPart, entry.getKey, entry.getValue)
+        toSegIndexWithFilter(projection, binPart, entry.getKey, entry.getValue)
       }
     }
     Future.successful(segIndices)

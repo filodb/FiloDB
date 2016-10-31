@@ -1,6 +1,6 @@
 package filodb.core.binaryrecord
 
-import org.velvia.filo.{RowReader, UnsafeUtils, ZeroCopyBinary, ZeroCopyUTF8String}
+import org.velvia.filo.{RowReader, SeqRowReader, UnsafeUtils, ZeroCopyBinary, ZeroCopyUTF8String}
 import scala.language.postfixOps
 import scalaxy.loops._
 
@@ -38,6 +38,11 @@ extends ZeroCopyBinary with RowReader {
 
   override def toString: String =
     s"b[${(0 until fields.size).map(getAny).mkString(", ")}]"
+
+  // TODO: use 64-bit hashcode when it's available.  Much more accurate?
+  // Also, for why using lazy val is not that bad: https://dzone.com/articles/cost-laziness
+  // The cost of computing the hash (and say using it in a bloom filter) is much higher.
+  lazy val cachedHash64: Long = hashCode.toLong
 
   /**
    * Returns an array of bytes for this binary record.  If this BinaryRecord is already a byte array
@@ -81,6 +86,9 @@ object BinaryRecord {
     // and keep allocating from that
     builder.build(copy = true)
   }
+
+  def apply(projection: RichProjection, items: Seq[Any]): BinaryRecord =
+    apply(projection.rowKeyBinSchema, SeqRowReader(items))
 
   val MaxSmallOffset = 0x7fff
   val MaxSmallLen    = 0xffff

@@ -1,8 +1,6 @@
 package filodb.core
 
-import filodb.core._
-import filodb.core.metadata.{Column, DataColumn, Dataset, RichProjection}
-import filodb.core.store.{ColumnStoreScanner, SegmentInfo, ChunkSetSegment, SegmentState}
+import bloomfilter.mutable.BloomFilter
 import java.nio.ByteBuffer
 import java.sql.Timestamp
 import org.joda.time.DateTime
@@ -10,6 +8,30 @@ import org.velvia.filo.{RowReader, TupleRowReader, ArrayStringRowReader, SeqRowR
 import scala.io.Source
 import scala.concurrent.ExecutionContext
 import scala.concurrent.duration._
+
+import filodb.core._
+import filodb.core.binaryrecord.BinaryRecord
+import filodb.core.metadata.{Column, DataColumn, Dataset, RichProjection}
+import filodb.core.store._
+
+class TestSegmentState(projection: RichProjection,
+                       schema: Seq[Column],
+                       settings: SegmentStateSettings = SegmentStateSettings())
+extends SegmentState(projection, schema, settings) {
+  val rowKeyChunks = new collection.mutable.HashMap[Types.ChunkID, Array[ByteBuffer]]
+
+  def getRowKeyChunks(chunkId: Types.ChunkID): Array[ByteBuffer] = rowKeyChunks(chunkId)
+
+  def store(chunkSet: ChunkSet): Unit = {
+    val rowKeyColNames = projection.rowKeyColumns.map(_.name)
+    val chunkArray = rowKeyColNames.map(chunkSet.chunks).toArray
+    rowKeyChunks(chunkSet.info.id) = chunkArray
+  }
+
+  def clear(): Unit = {
+    rowKeyChunks.clear
+  }
+}
 
 object NamesTestData {
   val schema = Seq(DataColumn(0, "first", "dataset", 0, Column.ColumnType.StringColumn),
@@ -37,14 +59,15 @@ object NamesTestData {
                   (Some("Derek"),     Some("Carr"),     Some(39L), Some(0)),
                   (Some("Karl"),      Some("Joseph"),   Some(29L), Some(0)))
 
-  val firstKey = SeqRowReader(Seq(names.head._3.get))
-  val lastKey = SeqRowReader(Seq(names.last._3.get))
-  def keyForName(rowNo: Int): RowReader = SeqRowReader(Seq(names(rowNo)._3.getOrElse(0)))
+  val firstKey = BinaryRecord(projection, Seq(names.head._3.get))
+  val lastKey = BinaryRecord(projection, Seq(names.last._3.get))
+  def keyForName(rowNo: Int): RowReader = BinaryRecord(projection, Seq(names(rowNo)._3.getOrElse(0)))
 
-  def getState(rowKeysForChunk: Types.ChunkID => Array[ByteBuffer], segment: Int = 0): SegmentState =
-    new SegmentState(projection, schema, Nil, rowKeysForChunk)(SegmentInfo("/0", segment).basedOn(projection))
-  def getState(segment: Int): SegmentState =
-    new SegmentState(projection, schema, Nil)(SegmentInfo("/0", segment).basedOn(projection))
+  val stateSettings = SegmentStateSettings()
+  val emptyFilter = SegmentState.emptyFilter(stateSettings)
+
+  def getState(segment: Int = 0): TestSegmentState = new TestSegmentState(projection, schema)
+
   def getWriterSegment(segment: Int = 0): ChunkSetSegment =
     new ChunkSetSegment(projection, SegmentInfo("/0", segment).basedOn(projection))
 
@@ -131,32 +154,24 @@ object GdeltTestData {
   val projection3 = RichProjection(dataset3, schema)
 
   // Returns projection2 grouped by segment with a fake partition key
-  def getSegments(store: ColumnStoreScanner,
-                  partKey: projection2.PK)
-                 (implicit ec: ExecutionContext): Seq[(ChunkSetSegment, SegmentState)] = {
+  def getSegments(partKey: projection2.PK): Seq[(ChunkSetSegment, Seq[RowReader])] = {
     val inputGroupedBySeg = readers.toSeq.groupBy(projection2.segmentKeyFunc)
                                    .toSeq.sortBy(_._1.asInstanceOf[Int])
     inputGroupedBySeg.map { case (segmentKey, lines) =>
       val segInfo = SegmentInfo(partKey, segmentKey).basedOn(projection2)
-      val state = new SegmentState(projection2, schema, Nil, store, 0, 15.seconds)(segInfo)
       val seg = new ChunkSetSegment(projection2, segInfo)
-      seg.addChunkSet(state, lines)
-      (seg, state)
+      (seg, lines)
     }
   }
 
   // Returns projection1 or 2 segments grouped by partition and segment key
-  def getSegmentsByPartKey(store: ColumnStoreScanner,
-                           projection: RichProjection)
-                          (implicit ec: ExecutionContext): Seq[ChunkSetSegment] = {
+  def getSegmentsByPartKey(projection: RichProjection): Seq[(ChunkSetSegment, Seq[RowReader])] = {
     val inputGroupedBySeg = readers.toSeq.groupBy(r => (projection.partitionKeyFunc(r),
                                                         projection.segmentKeyFunc(r)))
     inputGroupedBySeg.map { case ((partKey, segKey), lines) =>
       val segInfo = SegmentInfo(partKey, segKey).basedOn(projection)
-      val state = new SegmentState(projection, schema, Nil, store, 0, 15.seconds)(segInfo)
       val seg = new ChunkSetSegment(projection, segInfo)
-      seg.addChunkSet(state, lines)
-      seg
+      (seg, lines)
     }.toSeq
   }
 }

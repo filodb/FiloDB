@@ -81,8 +81,7 @@ class DefaultReprojector(config: Config,
         val state = subtrace("get-segment-state", "ingestion") {
           stateCache.getSegmentState(memTable.projection,
                                      memTable.projection.columns,
-                                     version,
-                                     detectSkips)(segInfo)
+                                     version)(segInfo)
         }
         val segment = new ChunkSetSegment(memTable.projection, segInfo)
         val segmentRowsIt = memTable.safeReadRows(segInfo)
@@ -91,7 +90,7 @@ class DefaultReprojector(config: Config,
         // Group rows into chunk sized bytes and add to segment
         subtrace("add-chunk-set", "ingestion") {
           while (segmentRowsIt.nonEmpty) {
-            segment.addChunkSet(state, segmentRowsIt.take(dataset.options.chunkSize))
+            segment.addChunkSet(state, segmentRowsIt.take(dataset.options.chunkSize), detectSkips)
           }
         }
         segment

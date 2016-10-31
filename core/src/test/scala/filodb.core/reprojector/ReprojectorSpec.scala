@@ -53,7 +53,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
     reprojectedSegInfos.head.segment should equal (0)
 
     val segState = stateCache.getSegmentState(projection, schema, 0)(segInfo)
-    segState.infoMap.size should equal (1)
+    segState.numChunks should equal (1)
 
     whenReady(colStore.scanRows(projection, schema, 0, partScan)) { rowIter =>
       rowIter.map(_.getString(0)).toSeq should equal (sortedFirstNames)
