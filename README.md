@@ -108,8 +108,8 @@ Your input is appreciated!
 
 1. [Java 8](http://www.oracle.com/technetwork/java/javase/downloads/jdk8-downloads-2133151.html)
 2. [SBT](http://www.scala-sbt.org/) to build
-3. [Apache Cassandra](http://cassandra.apache.org/) (We prefer using [CCM](https://github.com/pcmanus/ccm) for local testing) (Optional if you are using the in-memory column store)
-4. [Apache Spark (1.5 or 1.6)](http://spark.apache.org/)
+3. [Apache Cassandra](http://cassandra.apache.org/) 2.x or 3.x (We prefer using [CCM](https://github.com/pcmanus/ccm) for local testing) (Optional if you are using the in-memory column store)
+4. [Apache Spark (1.6.x)](http://spark.apache.org/) - 2.0 coming soon
 
 ## Getting Started
 
