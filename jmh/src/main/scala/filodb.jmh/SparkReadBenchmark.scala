@@ -9,7 +9,7 @@ import scala.concurrent.duration._
 
 import filodb.core._
 import filodb.core.metadata.{Column, Dataset}
-import filodb.core.store.{FilteredPartitionScan, SegmentState, ChunkSetSegment, SegmentInfo}
+import filodb.core.store.{FilteredPartitionScan, ColumnStoreSegmentState, ChunkSetSegment, SegmentInfo}
 import filodb.spark.{FiloDriver, FiloRelation}
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.functions.sum
@@ -73,7 +73,7 @@ class SparkReadBenchmark {
   rowStream.take(NumRows).grouped(10000).foreach { rows =>
     val segKey = projection.segmentKeyFunc(TupleRowReader(rows.head))
     val segInfo = SegmentInfo("/0", segKey).basedOn(projection)
-    val state = new SegmentState(projection, schema, Nil)(segInfo)
+    val state = ColumnStoreSegmentState(projection, schema, 0, FiloDriver.columnStore)(segInfo)
     val writerSeg = new ChunkSetSegment(projection, segInfo)
     writerSeg.addChunkSet(state, rows.map(TupleRowReader))
     Await.result(FiloDriver.columnStore.appendSegment(projection, writerSeg, 0), 10.seconds)

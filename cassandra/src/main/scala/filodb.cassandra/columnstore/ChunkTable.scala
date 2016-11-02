@@ -1,16 +1,13 @@
 package filodb.cassandra.columnstore
 
 import com.datastax.driver.core.Row
-import com.typesafe.config.Config
-import com.typesafe.scalalogging.slf4j.StrictLogging
 import java.nio.ByteBuffer
-import net.jpountz.lz4.LZ4Factory
 import scala.concurrent.{ExecutionContext, Future}
 import scodec.bits._
 
 import filodb.cassandra.FiloCassandraConnector
 import filodb.core._
-import filodb.core.store.{ColumnStoreStats, ChunkedData}
+import filodb.core.store.{ColumnStoreStats, ChunkedData, compress, decompress}
 
 /**
  * Represents the table which holds the actual columnar chunks for segments
@@ -18,19 +15,13 @@ import filodb.core.store.{ColumnStoreStats, ChunkedData}
  * Data is stored in a columnar fashion similar to Parquet -- grouped by column.  Each
  * chunk actually stores many many rows grouped together into one binary chunk for efficiency.
  */
-sealed class ChunkTable(dataset: DatasetRef, connector: FiloCassandraConnector)
-                       (implicit ec: ExecutionContext) extends StrictLogging {
+sealed class ChunkTable(val dataset: DatasetRef, val connector: FiloCassandraConnector)
+                       (implicit ec: ExecutionContext) extends BaseDatasetTable {
   import filodb.cassandra.Util._
   import collection.JavaConverters._
 
-  val keyspace = dataset.database.getOrElse(connector.defaultKeySpace)
-  val tableString = s"${keyspace}.${dataset.dataset + "_chunks"}"
-  val session = connector.session
+  val suffix = "chunks"
 
-  private val lz4Factory = LZ4Factory.fastestInstance()
-  private val compressor = lz4Factory.fastCompressor()
-  private val decompressor = lz4Factory.fastDecompressor()
-  private val sstableCompression = connector.config.getString("sstable-compression")
   private val compressChunks = connector.config.getBoolean("lz4-chunk-compress")
   private val compressBytePrefix = 0xff.toByte
 
@@ -47,12 +38,6 @@ sealed class ChunkTable(dataset: DatasetRef, connector: FiloCassandraConnector)
                     |) WITH COMPACT STORAGE AND compression = {
                     'sstable_compression': '$sstableCompression'}""".stripMargin
 
-  def initialize(): Future[Response] = connector.execCql(createCql)
-
-  def clearAll(): Future[Response] = connector.execCql(s"TRUNCATE $tableString")
-
-  def drop(): Future[Response] = connector.execCql(s"DROP TABLE IF EXISTS $tableString")
-
   lazy val writeChunksCql = session.prepare(
     s"""INSERT INTO $tableString (partition, version, segmentid, chunkid, columnname, data
       |) VALUES (?, ?, ?, ?, ?, ?)""".stripMargin
@@ -68,7 +53,7 @@ sealed class ChunkTable(dataset: DatasetRef, connector: FiloCassandraConnector)
     val segKeyBytes = toBuffer(segmentId)
     var chunkBytes = 0L
     val statements = chunks.map { case (columnName, bytes) =>
-      val finalBytes = compress(bytes)
+      val finalBytes = compressChunk(bytes)
       chunkBytes += finalBytes.capacity.toLong
       writeChunksCql.bind(partBytes, version: java.lang.Integer, segKeyBytes,
                           chunkId: java.lang.Integer, columnName, finalBytes)
@@ -102,7 +87,7 @@ sealed class ChunkTable(dataset: DatasetRef, connector: FiloCassandraConnector)
       val rows = rs.all().asScala
       val byteVectorChunks = rows.map { row => (ByteVector(row.getBytes(0)),
                                                 row.getInt(1),
-                                                decompress(row.getBytes(2))) }
+                                                decompressChunk(row.getBytes(2))) }
       ChunkedData(column, byteVectorChunks)
     }
   }
@@ -125,19 +110,15 @@ sealed class ChunkTable(dataset: DatasetRef, connector: FiloCassandraConnector)
       val rows = rs.all().asScala
       val byteVectorChunks = rows.map { row => (segmentId,
                                                 row.getInt(0),
-                                                decompress(row.getBytes(1))) }
+                                                decompressChunk(row.getBytes(1))) }
       ChunkedData(column, byteVectorChunks)
     }
   }
 
-  private def compress(orig: ByteBuffer): ByteBuffer = {
+  private def compressChunk(orig: ByteBuffer): ByteBuffer = {
     if (compressChunks) {
-      // Fastest decompression method is when giving size of original bytes, so store that as first 4 bytes
-      val compressedBytes = compressor.compress(orig.array)
-      val newBuf = ByteBuffer.allocate(5 + compressedBytes.size)
+      val newBuf = compress(orig, offset = 1)
       newBuf.put(compressBytePrefix)
-      newBuf.putInt(orig.capacity)
-      newBuf.put(compressedBytes)
       newBuf.position(0)
       newBuf
     } else {
@@ -146,11 +127,10 @@ sealed class ChunkTable(dataset: DatasetRef, connector: FiloCassandraConnector)
     }
   }
 
-  private def decompress(compressed: ByteBuffer): ByteBuffer = {
+  private def decompressChunk(compressed: ByteBuffer): ByteBuffer = {
     // Is this compressed?
     if (compressed.get(0) == compressBytePrefix) {
-      val origLength = compressed.getInt(1)
-      ByteBuffer.wrap(decompressor.decompress(compressed.array, 5, origLength))
+      decompress(compressed, offset = 1)
     } else {
       compressed
     }

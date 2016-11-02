@@ -77,9 +77,16 @@ trait ColumnStoreScanner extends StrictLogging {
                       (implicit ec: ExecutionContext): Future[Array[ByteBuffer]] = {
     val binPartition = projection.partitionType.toBytes(segInfo.partition)
     val binSegId = projection.segmentType.toBytes(segInfo.segment)
-    readChunks(projection.datasetRef, version, projection.rowKeyColumns.map(_.name),
+    val rowKeyCols = projection.rowKeyColumns.map(_.name)
+    readChunks(projection.datasetRef, version, rowKeyCols,
                binPartition, binSegId, (chunk, chunk)).map { seqChunkedData =>
-      seqChunkedData.map { case ChunkedData(col, segIdChunks) => segIdChunks.head._3 }.toArray
+      try {
+        seqChunkedData.map { case ChunkedData(col, segIdChunks) => segIdChunks.head._3 }.toArray
+      } catch {
+        case e: NoSuchElementException =>
+          logger.error(s"Error: got back empty chunks for $segInfo, chunk $chunk, columns $rowKeyCols", e)
+          throw e
+      }
     }
   }
 
