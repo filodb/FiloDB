@@ -3,6 +3,7 @@ package filodb.core.store
 import bloomfilter.mutable.BloomFilter
 import com.typesafe.scalalogging.slf4j.StrictLogging
 import java.nio.ByteBuffer
+import kamon.Kamon
 import org.boon.primitive.{ByteBuf, InputByteArray}
 import org.velvia.filo._
 import scala.collection.mutable.{ArrayBuffer, HashMap, TreeSet}
@@ -26,6 +27,12 @@ case class ChunkSet(info: ChunkSetInfo,
                     chunks: Map[ColumnId, ByteBuffer])
 
 object ChunkSet extends StrictLogging {
+  val chunkSetsCreated = Kamon.metrics.counter("chunksets-created")
+  val chunkSetsRowKeyCount = Kamon.metrics.histogram("chunksets-incoming-n-rowkeys")
+  val chunkSetsFilteredKeyCount = Kamon.metrics.histogram("chunksets-filtered-n-rowkeys")
+  val chunkSetsHitKeyCount = Kamon.metrics.histogram("chunksets-hit-n-rowkeys")
+  val chunkSetsNeedReadRowKey = Kamon.metrics.counter("chunksets-need-read-row-keys")
+
   /**
    * Creates a new ChunkSet with empty skipList, based on existing state
    * @param state a SegmentState instance
@@ -42,9 +49,11 @@ object ChunkSet extends StrictLogging {
     }.toArray
 
     require(rowKeys.nonEmpty)
+    chunkSetsCreated.increment
 
     val chunkMap = builder.convertToBytes()
     val info = ChunkSetInfo(state.nextChunkId, rowKeys.size, rowKeys.head, rowKeys.last)
+    chunkSetsRowKeyCount.record(rowKeys.size)
     ChunkSet(info, Nil, state.makeBloomFilter(rowKeys), rowKeys, chunkMap)
   }
 
@@ -57,6 +66,7 @@ object ChunkSet extends StrictLogging {
     val filteredKeys = state.filterRowKeys(initChunkSet.rowKeys)
     logger.debug(s"chunk ${initChunkSet.info}: filtered ${initChunkSet.rowKeys.size} rowKeys to " +
                  s"${filteredKeys.size} bloom hits")
+    chunkSetsFilteredKeyCount.record(filteredKeys.size)
     initChunkSet.copy(skips = ChunkSetInfo.detectSkips(state, filteredKeys))
   }
 }
@@ -109,6 +119,7 @@ object ChunkSetInfo extends StrictLogging {
   type ChunkSkips = Seq[ChunkRowSkipIndex]
   type ChunkInfosAndSkips = Seq[(ChunkSetInfo, ChunkSkips)]
   type IndexAndFilterSeq = Seq[(ChunkSetInfo, ChunkSkips, BloomFilter[Long])]
+  import ChunkSet._
 
   def toBytes(projection: RichProjection, chunkSetInfo: ChunkSetInfo, skips: ChunkSkips): Array[Byte] = {
     val buf = ByteBuf.create(100)
@@ -172,11 +183,13 @@ object ChunkSetInfo extends StrictLogging {
 
       // Check for rowkey range intersection
       // Match each key in range over bloom filter and return a list of hit rowkeys for each chunkID
+      var numHitKeys = 0
       val hitKeysByChunk = state.infosAndFilters.flatMap { case (info, bf) =>
         keyInfo.intersection(info).map { case (key1, key2) =>
           // Ignore the key, it's probably faster to just hit keys against bloom filter
           val hitKeys = rowKeys.filter { k => bf.mightContain(k.cachedHash64) }
           logger.debug(s"Checking chunk $info: ${hitKeys.size} hitKeys")
+          numHitKeys += hitKeys.size
           (info.id, info.numRows, hitKeys)
         }.filter(_._3.nonEmpty)
       }
@@ -186,6 +199,10 @@ object ChunkSetInfo extends StrictLogging {
       // Also, we are assuming there are very few keys that match, so binary search is effective.
       //   ie that (k log n) << n  where k = # of hit keys, and n is size of chunk
       // If above not true, then a linear scan in sort order and compare is more effective
+      if (numHitKeys > 0) {
+        chunkSetsNeedReadRowKey.increment
+        chunkSetsHitKeyCount.record(numHitKeys)
+      }
       hitKeysByChunk.map { case (chunkId, numRows, keys) =>
         val chunkKeys = state.getRowKeyChunks(chunkId)
         val overrides = keys.flatMap { key =>

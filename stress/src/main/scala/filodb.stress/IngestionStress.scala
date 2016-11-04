@@ -59,9 +59,7 @@ object IngestionStress extends App {
   val dfWithHoD = csvDF.withColumn("hourOfDay", hourOfDay(csvDF("pickup_datetime")))
 
   val stressLines = csvDF.count()
-  val hrLines = dfWithHoD.groupBy($"hourOfDay", $"hack_license", $"pickup_datetime").count().count()
-  puts(s"$taxiCsvFile has $stressLines unique lines of data for stress schema, and " +
-       s"$hrLines unique lines of data for hour of day schema")
+  puts(s"$taxiCsvFile has $stressLines unique lines of data")
 
   import scala.concurrent.ExecutionContext.Implicits.global
 
@@ -129,7 +127,7 @@ object IngestionStress extends App {
   val fut = for { stressDf  <- stressIngestor
         hrOfDayDf <- hrOfDayIngestor
         stressCount <- checkDatasetCount(stressDf, stressLines)
-        hrCount   <- checkDatasetCount(hrOfDayDf, hrLines) } yield {
+        hrCount   <- checkDatasetCount(hrOfDayDf, stressLines) } yield {
     puts("Now doing data comparison checking")
 
     // Do something just so we have to depend on both things being done
@@ -141,6 +139,7 @@ object IngestionStress extends App {
 
     // clean up!
     FiloDriver.shutdown()
+    FiloExecutor.shutdown()
     sc.stop()
   }
 
