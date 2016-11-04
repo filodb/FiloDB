@@ -50,7 +50,7 @@ object SegmentState {
     BloomFilter[Long](settings.filterElems, settings.filterFalsePositiveRate)
 }
 
-final case class SegmentStateSettings(filterElems: Int = 2000,
+final case class SegmentStateSettings(filterElems: Int = 5000,
                                       filterFalsePositiveRate: Double = 1E-6,
                                       timeout: FiniteDuration = 30.seconds)
 

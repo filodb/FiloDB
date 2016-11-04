@@ -37,7 +37,7 @@ sealed class FilterTable(val dataset: DatasetRef, val connector: FiloCassandraCo
     s"AND chunkid >= ? AND chunkid <= ?")
 
   def fromRow(row: Row): SegmentState.IDAndFilter = {
-    val buffer = row.getBytes("data")
+    val buffer = decompress(row.getBytes("data"))
     val bais = new ByteArrayInputStream(buffer.array)
     (row.getInt("chunkid"), BloomFilter.readFrom[Long](bais))
   }
