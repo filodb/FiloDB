@@ -19,6 +19,7 @@ trait FiloCassandraConnector {
                  .withAuthProvider(authProvider)
                  .withSocketOptions(socketOptions)
                  .withQueryOptions(queryOptions)
+                 .withCompression(cqlCompression)
                  .build
 
   // Cassandra config with following keys:  keyspace, hosts, port, username, password
@@ -49,6 +50,10 @@ trait FiloCassandraConnector {
     }
     opts
   }
+
+  private[this] lazy val cqlCompression =
+    Try(ProtocolOptions.Compression.valueOf(config.getString("cql-compression")))
+      .getOrElse(ProtocolOptions.Compression.NONE)
 
   lazy val session: Session = cluster.connect()
   implicit def ec: ExecutionContext

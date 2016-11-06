@@ -6,7 +6,7 @@ import scala.util.Random
 import scala.concurrent.duration._
 import scala.concurrent.{Await, Future}
 
-import filodb.core.DatasetRef
+import filodb.core.{DatasetRef, Perftools}
 import filodb.spark._
 
 /**
@@ -27,7 +27,6 @@ import filodb.spark._
  */
 object IngestionStress extends App {
   val taxiCsvFile = args(0)
-  val numRuns = 50    // Make this higher when doing performance profiling
 
   def puts(s: String): Unit = {
     //scalastyle:off
@@ -64,14 +63,18 @@ object IngestionStress extends App {
   import scala.concurrent.ExecutionContext.Implicits.global
 
   val stressIngestor = Future {
-    puts("Starting stressful ingestion...")
-    csvDF.sort($"medallion").write.format("filodb.spark").
-      option("dataset", "taxi_medallion_seg").
-      option("row_keys", "hack_license,pickup_datetime").
-      option("segment_key", ":stringPrefix medallion 3").
-      option("partition_keys", ":stringPrefix medallion 2").
-      mode(SaveMode.Overwrite).save()
-    puts("Stressful ingestion done.")
+    val ingestMillis = Perftools.timeMillis {
+      puts("Starting stressful ingestion...")
+      csvDF.sort($"medallion").write.format("filodb.spark").
+        option("dataset", "taxi_medallion_seg").
+        option("row_keys", "hack_license,pickup_datetime").
+        option("segment_key", ":stringPrefix medallion 3").
+        option("partition_keys", ":stringPrefix medallion 2").
+        mode(SaveMode.Overwrite).save()
+      puts("Stressful ingestion done.")
+    }
+
+    puts(s"\n ==> Stressful ingestion took $ingestMillis ms\n")
 
     val df = sql.filoDataset("taxi_medallion_seg")
     df.registerTempTable("taxi_medallion_seg")
@@ -79,17 +82,21 @@ object IngestionStress extends App {
   }
 
   val hrOfDayIngestor = Future {
-    puts("Starting hour-of-day (easy) ingestion...")
+    val ingestMillis = Perftools.timeMillis {
+      puts("Starting hour-of-day (easy) ingestion...")
 
-    dfWithHoD.sort($"hourOfDay").write.format("filodb.spark").
-      option("dataset", "taxi_hour_of_day").
-      option("row_keys", "hack_license,pickup_datetime").
-      option("segment_key", ":timeslice pickup_datetime 4d").
-      option("partition_keys", "hourOfDay").
-      option("reset_schema", "true").
-      mode(SaveMode.Overwrite).save()
+      dfWithHoD.sort($"hourOfDay").write.format("filodb.spark").
+        option("dataset", "taxi_hour_of_day").
+        option("row_keys", "hack_license,pickup_datetime").
+        option("segment_key", ":timeslice pickup_datetime 4d").
+        option("partition_keys", "hourOfDay").
+        option("reset_schema", "true").
+        mode(SaveMode.Overwrite).save()
 
-    puts("hour-of-day (easy) ingestion done.")
+      puts("hour-of-day (easy) ingestion done.")
+    }
+
+    puts(s"\n ==> hour-of-day (easy) ingestion took $ingestMillis ms\n")
 
     val df = sql.filoDataset("taxi_hour_of_day")
     df.registerTempTable("taxi_hour_of_day")

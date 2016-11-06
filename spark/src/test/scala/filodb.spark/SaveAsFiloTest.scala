@@ -296,10 +296,17 @@ class SaveAsFiloTest extends SparkTestBase {
                  save()
     val df = sql.read.format("filodb.spark").option("dataset", "gdelt3").load()
     df.registerTempTable("gdelt")
+    val readSegments1 = FiloExecutor.columnStore.stats.readSegments
     sql.sql("select sum(numArticles) from gdelt where actor2Code in ('JPN', 'KHM')").collect().
       head(0) should equal (30)
+    // Make sure that the predicate pushdowns actually worked.  We should not have read all the segments-
+    // FiloDB should be reading only the segments corresponding to the filters above
+    (FiloExecutor.columnStore.stats.readSegments - readSegments1) should equal (2)
+
     sql.sql("select sum(numArticles) from gdelt where actor2Code = 'JPN' AND year = 1979").collect().
       head(0) should equal (10)
+    // 3 includes the first read.  The above is single partition and should only return 1 segment
+    (FiloExecutor.columnStore.stats.readSegments - readSegments1) should equal (3)
   }
 
   it("should be able to parse and use partition filters even if partition has computed column") {
@@ -315,8 +322,12 @@ class SaveAsFiloTest extends SparkTestBase {
                  save()
     val df = sql.read.format("filodb.spark").option("dataset", "gdelt3").load()
     df.registerTempTable("gdelt")
+    val readSegments1 = FiloExecutor.columnStore.stats.readSegments
     sql.sql("select sum(numArticles) from gdelt where actor2Code in ('JPN', 'KHM')").collect().
       head(0) should equal (30)
+    // OK, well here we will still be reading two segments, the J partition and K partition
+    (FiloExecutor.columnStore.stats.readSegments - readSegments1) should equal (2)
+
     sql.sql("select sum(numArticles) from gdelt where actor2Code = 'JPN' AND year = 1979").collect().
       head(0) should equal (10)
   }
@@ -370,9 +381,12 @@ class SaveAsFiloTest extends SparkTestBase {
     df.agg(sum("numArticles")).collect().head(0) should equal (492)
 
     df.registerTempTable("gdelt")
+    val readSegments1 = FiloExecutor.columnStore.stats.readSegments
     sql.sql("select sum(numArticles) from gdelt where year=1979 " +
       "and  actor2Code in ('JPN', 'KHM')  and eventId >= 21 AND eventId <= 24").collect().
       head(0) should equal (21)
+    // There is one record with eventId > 50 and KHM, this would be a third segment if it wasn't filtered
+    (FiloExecutor.columnStore.stats.readSegments - readSegments1) should equal (2)
   }
 
   it("should be able do full table scan when all partition keys are not part of the filters") {
@@ -441,5 +455,27 @@ class SaveAsFiloTest extends SparkTestBase {
     selectedRow(0) should equal (1.1)
     selectedRow(1) should equal (new Timestamp(1000000L))
     df.agg(max("time")).collect().head(0) should equal (new Timestamp(1000020L))
+  }
+
+  it("should be able to ingest records using a hash partition key and filter by hashed key") {
+    import sql.implicits._
+
+    val gdeltDF = sc.parallelize(GdeltTestData.records.toSeq).toDF()
+    gdeltDF.write.format("filodb.spark").
+                 option("dataset", "gdelt1").
+                 option("row_keys", "eventId").
+                 option("segment_key", segCol).
+                 option("partition_keys", ":hash actor2Code 8").
+                 mode(SaveMode.Overwrite).
+                 save()
+    val df = sql.read.format("filodb.spark").option("dataset", "gdelt1").load()
+    df.registerTempTable("gdelt")
+    val readSegments1 = FiloExecutor.columnStore.stats.readSegments
+    sql.sql("select sum(numArticles) from gdelt where actor2Code = 'JPN'").collect().
+      head(0) should equal (10)
+    // FiloDB should read only one segment, equal to hash(JPN).  Spark should filter records from that segment
+    // out that don't match actor2code = JPN (other countries will hash to the same code)
+    (FiloExecutor.columnStore.stats.readSegments - readSegments1) should equal (1)
+
   }
 }

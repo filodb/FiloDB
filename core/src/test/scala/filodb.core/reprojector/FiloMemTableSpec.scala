@@ -35,7 +35,7 @@ class FiloMemTableSpec extends FunSpec with Matchers with BeforeAndAfter {
       mTable.numRows should be (names.length)
 
       val outRows = mTable.readRows(segInfo.basedOn(mTable.projection))
-      outRows.toSeq.map(_._2.getString(0)) should equal (firstNames)
+      outRows.toSeq.map(_.getString(0)) should equal (sortedFirstNames)
     }
 
     it("should replace rows and read them back in order") {
@@ -44,7 +44,7 @@ class FiloMemTableSpec extends FunSpec with Matchers with BeforeAndAfter {
       mTable.ingestRows(names.take(2).map(TupleRowReader))
 
       val outRows = mTable.readRows(segInfo.basedOn(mTable.projection))
-      outRows.toSeq.map(_._2.getString(0)) should equal (Seq("Khalil", "Rodney", "Ndamukong", "Jerry"))
+      outRows.toSeq.map(_.getString(0)) should equal (Seq("Khalil", "Rodney", "Ndamukong", "Jerry"))
     }
 
     it("should insert/replace rows with multiple partition keys and read them back in order") {
@@ -55,7 +55,7 @@ class FiloMemTableSpec extends FunSpec with Matchers with BeforeAndAfter {
 
       val segInfo = SegmentInfo(Seq("AGR", 1979), "0").basedOn(mTable.projection)
       val outRows = mTable.readRows(segInfo)
-      outRows.toSeq.map(_._2.getString(5)) should equal (Seq("FARMER", "FARMER"))
+      outRows.toSeq.map(_.getString(5)) should equal (Seq("FARMER", "FARMER"))
     }
 
     it("should insert/replace rows with multiple row keys and read them back in order") {
@@ -66,7 +66,7 @@ class FiloMemTableSpec extends FunSpec with Matchers with BeforeAndAfter {
 
       val segInfo = SegmentInfo(197901, 0).basedOn(mTable.projection)
       val outRows = mTable.readRows(segInfo)
-      outRows.toSeq.map(_._2.getString(5)) should equal (
+      outRows.toSeq.map(_.getString(5)) should equal (
                  Seq("AFRICA", "FARMER", "FARMER", "CHINA", "POLICE", "IMMIGRANT"))
     }
 
@@ -78,7 +78,7 @@ class FiloMemTableSpec extends FunSpec with Matchers with BeforeAndAfter {
       memTable.numRows should equal (50 * names.length)
 
       val outRows = memTable.readRows(segInfo.copy(partition = "5").basedOn(memTable.projection))
-      outRows.toSeq.map(_._2.getString(0)) should equal (firstNames)
+      outRows.toSeq.map(_.getString(0)) should equal (sortedFirstNames)
     }
 
     it("should throw error if null partition col value") {
