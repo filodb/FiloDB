@@ -10,7 +10,7 @@ import scala.concurrent.duration._
 
 import filodb.core._
 import filodb.core.metadata.{Column, Dataset, RichProjection}
-import filodb.core.store.{InMemoryColumnStore, SegmentInfo}
+import filodb.core.store.{InMemoryColumnStore, SegmentInfo, ChunkSetSegment}
 import filodb.core.reprojector.{DefaultReprojector, MemTable, Reprojector}
 
 import org.scalatest.concurrent.ScalaFutures
@@ -81,10 +81,9 @@ with ScalaFutures {
     def reproject(memTable: MemTable, version: Int): Future[Seq[SegmentInfo[_, _]]] = {
       reprojections = reprojections :+ (memTable.projection.datasetRef -> version)
       Future.successful(Seq(dummySegInfo))
-
     }
 
-    def toSegments(memTable: MemTable, segments: Seq[(Any, Any)]): Seq[Segment] = ???
+    def toSegments(memTable: MemTable, segments: Seq[(Any, Any)], version: Int): Seq[ChunkSetSegment] = ???
   }
 
   it("should respond to GetStats with no flushes and no rows") {
@@ -110,15 +109,30 @@ with ScalaFutures {
     reprojections should equal (Seq((DatasetRef("dataset"), 0)))
   }
 
-  it("should not send Ack if over maximum number of rows") {
-    // First one will go through, but make memTable full
+  it("should send back Nack if over maximum number of rows or Nack sent before with no CheckCanIngest") {
+    // First one will go through, but make memTable full.  Flush will happen, new memtable available
     dsActor ! NewRows(probe.ref, namesWithPartCol.take(205).map(TupleRowReader), 0L)
-    // Second one will not go through or get an ack, already over limit
-    // (Hopefully this gets sent before the table is flushed)
-    dsActor ! NewRows(probe.ref, namesWithPartCol.drop(205).take(20).map(TupleRowReader), 1L)
+    // Second one will go through but make memtable full again.  Third one will be denied becuase
+    // hopefully flushing still happening and active memtable is full again
+    dsActor ! NewRows(probe.ref, namesWithPartCol.take(205).map(TupleRowReader), 1L)
+    dsActor ! NewRows(probe.ref, namesWithPartCol.drop(205).take(20).map(TupleRowReader), 2L)
 
     probe.expectMsg(IngestionCommands.Ack(0L))
-    probe.expectNoMsg
+    probe.expectMsg(IngestionCommands.Ack(1L))
+    probe.expectMsg(IngestionCommands.Nack(2L))
+
+    // Now, a flush will be initiated, and DSCoordActor should send us CanIngestAgain
+    probe.expectMsg(IngestionCommands.ResumeIngest)
+
+    // Check that trying to ingest without sending CheckCanIngest results in a Nack
+    dsActor ! NewRows(probe.ref, namesWithPartCol.take(50).map(TupleRowReader), 4L)
+    probe.expectMsg(IngestionCommands.Nack(4L))
+
+    // Send CheckCanIngest, after that will be clear to ingest again
+    probe.send(dsActor, CanIngest)
+    probe.expectMsg(IngestionCommands.CanIngest(true))
+    dsActor ! NewRows(probe.ref, namesWithPartCol.take(50).map(TupleRowReader), 5L)
+    probe.expectMsg(IngestionCommands.Ack(5L))
   }
 
   it("StartFlush should initiate flush even if # rows not reached trigger yet") {

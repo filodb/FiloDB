@@ -3,6 +3,7 @@ package filodb.coordinator.sources
 import akka.actor.{Actor, ActorRef, Props}
 import com.opencsv.CSVReader
 import org.velvia.filo.{ArrayStringRowReader, RowReader}
+import scala.concurrent.duration._
 import scala.util.Try
 
 import filodb.coordinator.{BaseActor, IngestionCommands, RowSource}
@@ -19,9 +20,11 @@ object CsvSourceActor {
             coordinatorActor: ActorRef,
             maxUnackedBatches: Int = DefaultMaxUnackedBatches,
             rowsToRead: Int = RowsToRead,
-            separatorChar: Char = ','): Props =
+            separatorChar: Char = ',',
+            ackTimeout: FiniteDuration = 10.seconds,
+            waitPeriod: FiniteDuration = 5.seconds): Props =
   Props(classOf[CsvSourceActor], csvStream, dataset, version,
-        coordinatorActor, maxUnackedBatches, rowsToRead, separatorChar)
+        coordinatorActor, maxUnackedBatches, rowsToRead, separatorChar, ackTimeout, waitPeriod)
 }
 
 /**
@@ -37,9 +40,11 @@ class CsvSourceActor(csvStream: java.io.Reader,
                      val dataset: DatasetRef,
                      val version: Int,
                      val coordinatorActor: ActorRef,
-                     val maxUnackedBatches: Int = CsvSourceActor.DefaultMaxUnackedBatches,
-                     rowsToRead: Int = CsvSourceActor.RowsToRead,
-                     separatorChar: Char = ',') extends BaseActor with RowSource {
+                     val maxUnackedBatches: Int,
+                     rowsToRead: Int,
+                     separatorChar: Char,
+                     override val ackTimeout: FiniteDuration,
+                     override val waitingPeriod: FiniteDuration) extends BaseActor with RowSource {
   import CsvSourceActor._
   import IngestionCommands._
   import collection.JavaConverters._

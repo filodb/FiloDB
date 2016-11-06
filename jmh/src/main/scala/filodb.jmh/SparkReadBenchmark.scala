@@ -9,7 +9,7 @@ import scala.concurrent.duration._
 
 import filodb.core._
 import filodb.core.metadata.{Column, Dataset}
-import filodb.core.store.{FilteredPartitionScan, RowWriterSegment, SegmentInfo}
+import filodb.core.store.{FilteredPartitionScan, SegmentState, ChunkSetSegment, SegmentInfo}
 import filodb.spark.{FiloDriver, FiloRelation}
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.functions.sum
@@ -51,7 +51,7 @@ class SparkReadBenchmark {
   // Source of rows
   val conf = (new SparkConf).setMaster("local[4]")
                             .setAppName("test")
-                            // .set("spark.sql.tungsten.enabled", "false")
+                            .set("spark.ui.enabled", "false")
                             .set("spark.filodb.store", "in-memory")
   val sc = new SparkContext(conf)
   val sql = new SQLContext(sc)
@@ -72,9 +72,10 @@ class SparkReadBenchmark {
   import scala.concurrent.ExecutionContext.Implicits.global
   rowStream.take(NumRows).grouped(10000).foreach { rows =>
     val segKey = projection.segmentKeyFunc(TupleRowReader(rows.head))
-    val writerSeg = new RowWriterSegment(projection, schema)(
-                                         SegmentInfo("/0", segKey).basedOn(projection))
-    writerSeg.addRowsAsChunk(rows.toIterator.map(TupleRowReader))
+    val segInfo = SegmentInfo("/0", segKey).basedOn(projection)
+    val state = new SegmentState(projection, schema, Nil)(segInfo)
+    val writerSeg = new ChunkSetSegment(projection, segInfo)
+    writerSeg.addChunkSet(state, rows.map(TupleRowReader))
     Await.result(FiloDriver.columnStore.appendSegment(projection, writerSeg, 0), 10.seconds)
   }
 

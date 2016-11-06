@@ -10,7 +10,7 @@ import org.openjdk.jmh.annotations.{Mode, State, Scope}
 import org.velvia.filo.ArrayStringRowReader
 
 import filodb.core.GdeltTestData
-import filodb.core.reprojector.{DefaultReprojector, FiloMemTable}
+import filodb.core.reprojector.{DefaultReprojector, FiloMemTable, SegmentStateCache}
 import filodb.core.store.{InMemoryColumnStore, Segment}
 
 /**
@@ -38,7 +38,8 @@ class ReprojectionBenchmark {
 
   import scala.concurrent.ExecutionContext.Implicits.global
   val colStore = new InMemoryColumnStore(scala.concurrent.ExecutionContext.Implicits.global)
-  val reprojector = new DefaultReprojector(config, colStore)
+  val stateCache = new SegmentStateCache(config, colStore)
+  val reprojector = new DefaultReprojector(config, colStore, stateCache)
 
   // Populate memtable
   mTable.ingestRows(lines)
@@ -52,6 +53,6 @@ class ReprojectionBenchmark {
   @BenchmarkMode(Array(Mode.Throughput))
   @OutputTimeUnit(TimeUnit.SECONDS)
   def toSegments(): Seq[Segment] = {
-    reprojector.toSegments(mTable, segments).toList
+    reprojector.toSegments(mTable, segments, 0).toList
   }
 }

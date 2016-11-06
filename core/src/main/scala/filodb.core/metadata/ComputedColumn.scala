@@ -29,7 +29,8 @@ object ComputedColumn {
                             RoundComputation,
                             TimesliceComputation,
                             MonthOfYearComputation,
-                            StringPrefixComputation)
+                            StringPrefixComputation,
+                            HashComputation)
   val nameToComputation = AllComputations.map { comp => comp.funcName -> comp }.toMap
 
   def isComputedColumn(expr: String): Boolean = expr.startsWith(":")
