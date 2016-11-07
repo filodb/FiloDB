@@ -1,12 +1,12 @@
 package filodb.spark
 
 import org.apache.spark.SparkContext
+
 import scala.concurrent.duration._
-
-import filodb.core.metadata.Projection
-import filodb.coordinator.NodeCoordinatorActor.Reset
-
-import org.scalatest.{FunSpecLike, BeforeAndAfter, BeforeAndAfterAll, Matchers}
+import _root_.filodb.core.metadata.Projection
+import _root_.filodb.coordinator.NodeCoordinatorActor.Reset
+import org.apache.spark.filodb.FiloDriver
+import org.scalatest.{BeforeAndAfter, BeforeAndAfterAll, FunSpecLike, Matchers}
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
 

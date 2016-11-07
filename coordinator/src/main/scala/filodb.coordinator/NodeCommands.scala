@@ -1,9 +1,9 @@
 package filodb.coordinator
 
+import akka.actor.ActorRef
 import org.velvia.filo.RowReader
-
 import filodb.core._
-import filodb.core.metadata.{Dataset, DataColumn, Projection}
+import filodb.core.metadata.{DataColumn, Dataset, Projection}
 
 // Public, external Actor/Akka API for NodeCoordinatorActor, so every incoming command should be a NodeCommand
 sealed trait NodeCommand
@@ -93,6 +93,9 @@ object IngestionCommands {
   /**
    * Initializes new Memtable and loads it using WAL file.
    */
-  case class reloadIngestionState(dataset: DatasetRef,
-                                 version: Int) extends NodeCommand
+  case class ReloadIngestionState(originator: ActorRef,
+                                  dataset: DatasetRef,
+                                  version: Int) extends NodeCommand
+
+  case object DCAReady extends NodeResponse
 }

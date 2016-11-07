@@ -11,14 +11,25 @@ import filodb.core.metadata.Column
 import org.joda.time.DateTime
 import org.joda.time.format.ISODateTimeFormat
 
+/**
+  * Class to create Memtable WAL files for a given dataset.
+  * @param config
+  * @param dataset
+  * @param actorPath
+  * @param columns
+  * @param version
+  * @param walFilePath
+  * @param position
+  */
 class WriteAheadLog(config: Config,
                     dataset: DatasetRef,
+                    actorPath: String,
                     columns: Seq[Column] = Seq(),
                     version: Int = 0,
                     walFilePath: Path = Paths.get(""),
                     position: Int = 0) {
 
-  private val walBuffer = new WriteAheadLogBuffer(config, dataset, version, walFilePath, position)
+  private val walBuffer = new WriteAheadLogBuffer(config, dataset, version, walFilePath, position, actorPath)
 
   val headerLength = writeHeader
 
@@ -36,7 +47,9 @@ class WriteAheadLog(config: Config,
 
   def writeHeader: Int = {
     val headerBytes = new ChunkHeader(columns).header
-    walBuffer.bufferOfSufficientSize(headerBytes.length).put(headerBytes)
+    if(walBuffer.bufferOffSet == 0){
+      walBuffer.bufferOfSufficientSize(headerBytes.length).put(headerBytes)
+    }
     headerBytes.length
   }
 
@@ -67,7 +80,8 @@ class WriteAheadLogBuffer(config: Config,
                           dataset: DatasetRef,
                           version: Int = 0,
                           walFilePath: Path,
-                          position: Int) {
+                          position: Int,
+                          actorPath: String) {
 
   private val bufferSize = config.getInt("memtable.mapped-byte-buffer-size")
   private val walDir = config.getString("memtable.memtable-wal-dir")
@@ -75,13 +89,13 @@ class WriteAheadLogBuffer(config: Config,
   val walFile = initWalFile
 
   private def initWalFile = {
-     if(walFilePath.compareTo(Paths.get("")) == 0) {
-       Files.createDirectories(FileSystems.getDefault.getPath(s"${walDir}/${dataset}_${version}"))
-       val datestr = ISODateTimeFormat.dateTime().print(new DateTime())
-       new File(s"${walDir}/${dataset}_${version}/${datestr}.wal")
-     }else{
-       walFilePath.toFile
-     }
+    if(walFilePath.compareTo(Paths.get("")) == 0) {
+      Files.createDirectories(FileSystems.getDefault.getPath(s"${walDir}/${actorPath}_${dataset}_${version}"))
+      val datestr = ISODateTimeFormat.dateTime().print(new DateTime())
+      new File(s"${walDir}/${actorPath}_${dataset}_${version}/${datestr}.wal")
+    }else{
+      walFilePath.toFile
+    }
   }
 
   val channel = new RandomAccessFile(walFile, "rw").getChannel

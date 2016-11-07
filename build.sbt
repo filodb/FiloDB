@@ -21,6 +21,7 @@ lazy val cassandra = (project in file("cassandra"))
                        .settings(mySettings:_*)
                        .settings(name := "filodb-cassandra")
                        .settings(libraryDependencies ++= cassDeps)
+                       .settings(assemblySettings:_*)
                        .dependsOn(core % "compile->compile; test->test")
 
 lazy val cli = (project in file("cli"))
@@ -63,7 +64,6 @@ val sparkVersion   = "1.6.1"
 lazy val extraRepos = Seq(
   "Typesafe repository releases" at "http://repo.typesafe.com/typesafe/releases/",
   "twitter-repo" at "http://maven.twttr.com",
-  "Websudos releases" at "https://dl.bintray.com/websudos/oss-releases/",
   "Pellucid Bintray" at "http://dl.bintray.com/pellucid/maven",
   "Velvia Bintray" at "https://dl.bintray.com/velvia/maven",
   "spray repo" at "http://repo.spray.io"

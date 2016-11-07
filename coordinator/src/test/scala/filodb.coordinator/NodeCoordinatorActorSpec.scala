@@ -1,14 +1,12 @@
 package filodb.coordinator
 
 import scalax.file.Path
-
 import akka.actor.{ActorRef, ActorSystem, PoisonPill, Terminated}
 import akka.cluster.Cluster
 import akka.testkit.{EventFilter, TestProbe}
 import akka.pattern.gracefulStop
 import com.typesafe.config.ConfigFactory
-import filodb.coordinator.DatasetCoordinatorActor.InitIngestion
-import filodb.coordinator.NodeCoordinatorActor.ReloadDatasetCoordActors
+import filodb.coordinator.NodeCoordinatorActor.{ReloadDCA}
 import filodb.core.GdeltTestData._
 
 import scala.concurrent.Await
@@ -216,8 +214,7 @@ with CoordinatorSetup with ScalaFutures {
     probe.send(coordActor, IngestRows(ref, 0, readers, 1L))
     probe.expectMsg(UnknownDataset)
 
-    val actorPath = cluster.selfAddress.host.getOrElse("None") +
-      ":" + cluster.selfAddress.port.getOrElse("None")
+    val actorPath = cluster.selfAddress.host.getOrElse("None")
     val entry = metaStore.ingestionstates.get(actorPath)
     val result = entry.toString().split("\001")(5)
 
@@ -233,10 +230,8 @@ with CoordinatorSetup with ScalaFutures {
 
     generateActorException(ref)
 
-    probe.send(coordActor, ReloadDatasetCoordActors)
-    probe.expectMsg(reloadIngestionState(ref, 0))
-
-    probe.send(coordActor, reloadIngestionState(ref, 0))
+    probe.send(coordActor, ReloadDCA)
+    probe.expectMsg(DCAReady)
 
     probe.send(coordActor, Flush(ref, 0))
     probe.expectMsg(Flushed)
@@ -255,10 +250,8 @@ with CoordinatorSetup with ScalaFutures {
 
     generateActorException(ref)
 
-    probe.send(coordActor, ReloadDatasetCoordActors)
-    probe.expectMsg(reloadIngestionState(ref, 0))
-
-    probe.send(coordActor, reloadIngestionState(ref, 0))
+    probe.send(coordActor, ReloadDCA)
+    probe.expectMsg(DCAReady)
 
     probe.send(coordActor, GetIngestionStats(ref, 0))
     probe.expectMsg(DatasetCoordinatorActor.Stats(0, 0, 0, 99, -1, 0))

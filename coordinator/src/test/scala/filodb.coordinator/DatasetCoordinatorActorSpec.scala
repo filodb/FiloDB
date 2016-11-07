@@ -60,7 +60,7 @@ with ScalaFutures {
     columnStore.clearProjectionData(myDataset.projections.head).futureValue
     reprojections = Nil
     dsActor = system.actorOf(DatasetCoordinatorActor.props(
-                                  myProjection, 0, columnStore, testReprojector, config))
+                                  myProjection, 0, columnStore, testReprojector, "localhost", config))
     probe = TestProbe()
   }
 

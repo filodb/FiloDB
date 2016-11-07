@@ -3,6 +3,7 @@ package filodb.coordinator
 import akka.actor.{Actor, ActorRef, Address, Cancellable, Props}
 import akka.event.LoggingReceive
 import com.typesafe.config.Config
+import filodb.coordinator.IngestionCommands.DCAReady
 import kamon.Kamon
 import net.ceedubs.ficus.Ficus._
 import org.velvia.filo.RowReader
@@ -72,14 +73,16 @@ object DatasetCoordinatorActor {
             version: Int,
             columnStore: ColumnStore,
             reprojector: Reprojector,
+            actorPath: String,
             config: Config,
             reloadFlag: Boolean = false): Props =
-    Props(classOf[DatasetCoordinatorActor], projection, version, columnStore, reprojector, config, reloadFlag)
+    Props(classOf[DatasetCoordinatorActor], projection, version, columnStore,
+              reprojector,  actorPath, config, reloadFlag)
 
   /**
-   * Creates new Memtable using WAL file
-   */
-  case object InitIngestion
+    * Creates new Memtable using WAL file
+    */
+  case class InitIngestion(replyTo: ActorRef) extends DSCoordinatorMessage
 
 }
 
@@ -118,6 +121,7 @@ private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
                                               version: Int,
                                               columnStore: ColumnStore,
                                               reprojector: Reprojector,
+                                              actorPath: String,
                                               config: Config,
                                               var reloadFlag: Boolean = false) extends BaseActor {
   import DatasetCoordinatorActor._
@@ -163,10 +167,7 @@ private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
   var mTableWriteTask: Option[Cancellable] = None
   var mTableFlushTask: Option[Cancellable] = None
 
-  val hostname: String = "None"
-    // actorAddress.host.getOrElse("None") + ":" + actorAddress.port.getOrElse("None")
-
-  def makeNewTable(): MemTable = new FiloMemTable(projection, config, hostname, version, reloadFlag)
+  def makeNewTable(): MemTable = new FiloMemTable(projection, config, actorPath, version, reloadFlag)
 
   private def reportStats(): Unit = {
     logger.info(s"MemTable active table rows: $activeRows")
@@ -303,14 +304,6 @@ private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
     { originator ! DatasetCommands.ProjectionTruncated }
   }
 
-  override def preRestart(reason: Throwable, message: Option[Any]): Unit = {
-    logger.debug(s"preRestart called for an exception: $message")
-  }
-
-  override def postStop : Unit = {
-    logger.debug("TestActor: postStop")
-  }
-
   def receive: Receive = LoggingReceive {
     case NewRows(ackTo, rows, seqNo) =>
       ingestRows(ackTo, rows, seqNo)
@@ -348,7 +341,8 @@ private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
       reportStats()
       handleFlushErr(t)
 
-    case InitIngestion =>
-      activeTable.reloadMemTable
+    case InitIngestion(replyTo) =>
+      activeTable.reloadMemTable()
+      replyTo ! DCAReady
   }
 }

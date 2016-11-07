@@ -29,12 +29,13 @@ import filodb.core.metadata.{Column, RichProjection}
 class FiloAppendStore(val projection: RichProjection,
                       config: Config,
                       version: Int,
+                      actorPath: String,
                       reloadFlag: Boolean = false) extends StrictLogging {
 
   import RowReader._
 
   val chunkSize = config.as[Option[Int]]("memtable.filo.chunksize").getOrElse(1000)
-  logger.info(s"FiloAppendStore starting with chunkSize = $chunkSize")
+  logger.info(s"FiloAppendStore starting with chunkSize = $chunkSize, reloadFlag=${reloadFlag}")
 
   private val chunks = new ArrayBuffer[Array[ByteBuffer]]
   private val readers = new ArrayBuffer[FiloRowReader]
@@ -51,8 +52,8 @@ class FiloAppendStore(val projection: RichProjection,
 
   def createWalAheadLog : Option[WriteAheadLog] = {
     if (!reloadFlag) {
-      logger.info(s"Creating WriteAheadLog for dataset: (${projection.datasetRef}, ${version})")
-      Some(new WriteAheadLog(config, projection.datasetRef, projection.columns, version))
+      logger.debug(s"Creating WriteAheadLog for dataset: (${projection.datasetRef}, ${version})")
+      Some(new WriteAheadLog(config, projection.datasetRef, actorPath, projection.columns, version))
     }else{
       None
     }
@@ -111,9 +112,10 @@ class FiloAppendStore(val projection: RichProjection,
 
   def setWalAHeadLogFile(recentFile: Option[Path], position: Int): Unit = {
     val pathObj = recentFile.getOrElse(Paths.get(""))
-    logger.info(s"Creating WriteAheadLog for dataset: ${projection.datasetRef}" +
+    logger.debug(s"Creating WriteAheadLog for dataset: ${projection.datasetRef}" +
                 s" using path object: ${pathObj.getFileName}")
-    wal = Some(new WriteAheadLog(config, projection.datasetRef, projection.columns, version, pathObj, position))
+    wal = Some(new WriteAheadLog(config, projection.datasetRef, actorPath,
+                                projection.columns, version, pathObj, position))
   }
 
   /**

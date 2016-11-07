@@ -42,15 +42,16 @@ with CoordinatorSetup with ScalaFutures {
   metaStore.newDataset(dataset1).futureValue should equal (Success)
   val ref = DatasetRef(dataset1.name)
   schema.foreach { col => metaStore.newColumn(col, ref).futureValue should equal (Success) }
-  val coordActor = system.actorOf(NodeCoordinatorActor.props(metaStore, reprojector,
-                                                      columnStore, config, cluster.selfAddress))
+  var coordActor = system.actorOf(NodeCoordinatorActor.props(metaStore, reprojector,
+                                                    columnStore, config, cluster.selfAddress))
 
   before {
     columnStore.dropDataset(DatasetRef(dataset1.name)).futureValue
     coordActor ! NodeCoordinatorActor.Reset
   }
 
-  override def afterAll(): Unit = {
+ override def afterAll(): Unit ={
+    super.afterAll()
     gracefulStop(coordActor, 3.seconds.dilated, PoisonPill).futureValue
     val walDir = config.getString("memtable.memtable-wal-dir")
     val path = Path.fromString (walDir)

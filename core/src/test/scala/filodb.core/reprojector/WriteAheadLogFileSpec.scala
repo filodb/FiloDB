@@ -17,18 +17,18 @@ import scala.collection.mutable.ArrayBuffer
 
 class WriteAheadLogFileSpec extends FunSpec with Matchers with BeforeAndAfter{
 
-    val tempDir = Files.createTempDirectory("wal")
-    // /var/folders/tv/qrqnpyzj0qdfgw122hf1d7zr0000gn/T
+  val tempDir = Files.createTempDirectory("wal")
+  // /var/folders/tv/qrqnpyzj0qdfgw122hf1d7zr0000gn/T
 
-    val config = ConfigFactory.parseString(
-      s"""filodb.memtable.memtable-wal-dir = ${tempDir}
+  val config = ConfigFactory.parseString(
+    s"""filodb.memtable.memtable-wal-dir = ${tempDir}
           filodb.memtable.mapped-byte-buffer-size = 1024
        """)
-      .withFallback(ConfigFactory.load("application_test.conf"))
-      .getConfig("filodb")
+    .withFallback(ConfigFactory.load("application_test.conf"))
+    .getConfig("filodb")
 
   it("creates memory mapped file with no data") {
-    val wal = new WriteAheadLog(config, new DatasetRef("test"))
+    val wal = new WriteAheadLog(config, new DatasetRef("test"),"localhost")
     wal.exists should equal(true)
     wal.close()
     wal.deleteTestFiles()
@@ -36,19 +36,19 @@ class WriteAheadLogFileSpec extends FunSpec with Matchers with BeforeAndAfter{
 
   it("creates memory mapped buffer for an existing file") {
 
-    val wal = new WriteAheadLog(config, new DatasetRef("test"))
+    val wal = new WriteAheadLog(config, new DatasetRef("test"),"localhost")
     wal.exists should equal(true)
     wal.close()
 
-    val walNew = new WriteAheadLog(config, new DatasetRef("test"),
-              GdeltTestData.createColumns(2), 0, Paths.get(wal.path))
+    val walNew = new WriteAheadLog(config, new DatasetRef("test"),"localhost",
+      GdeltTestData.createColumns(2), 0, Paths.get(wal.path))
     walNew.exists should equal(true)
     walNew.close()
     walNew.deleteTestFiles()
   }
 
   it("write header to the file") {
-    val wal = new WriteAheadLog(config, new DatasetRef("test"), GdeltTestData.createColumns(2))
+    val wal = new WriteAheadLog(config, new DatasetRef("test"),"localhost", GdeltTestData.createColumns(2))
     val expectedHeader = "FiloWAL\000\001\000\002\000\065\000]nmuloCgnirtS,0,1nmuloc,1[\001]nmuloCgnirtS,0,2nmuloc,2["
       .getBytes(StandardCharsets.UTF_8)
     wal.readHeader should equal(expectedHeader)
@@ -57,7 +57,7 @@ class WriteAheadLogFileSpec extends FunSpec with Matchers with BeforeAndAfter{
   }
 
   ignore("write filochunks indicator to the file") {
-    val wal = new WriteAheadLog(config, NamesTestData.datasetRef, NamesTestData.schema)
+    val wal = new WriteAheadLog(config, NamesTestData.datasetRef,"localhost", NamesTestData.schema)
     wal.writeChunks(new Array[ByteBuffer](0))
     val chunksInd = new Array[Byte](2)
     // wal.buffer.position(wal.headerLength)
@@ -68,14 +68,14 @@ class WriteAheadLogFileSpec extends FunSpec with Matchers with BeforeAndAfter{
   }
 
   it("write filochunks to the file") {
-    val wal = new WriteAheadLog(config, datasetRef, schema)
+    val wal = new WriteAheadLog(config, datasetRef,"localhost", schema)
     wal.writeChunks(createChunkData)
     wal.close()
     wal.deleteTestFiles
   }
 
   it("Able to write chunk data greater than the size of the mapped byte buffer") {
-    val wal = new WriteAheadLog(config, datasetRef, schema)
+    val wal = new WriteAheadLog(config, datasetRef, "localhost",schema)
     wal.writeChunks(createChunkData)
     wal.writeChunks(createChunkData)
     wal.close()
@@ -83,7 +83,7 @@ class WriteAheadLogFileSpec extends FunSpec with Matchers with BeforeAndAfter{
   }
 
   it("Able to write large header greater than the size of the mapped byte buffer") {
-    val wal = new WriteAheadLog(config, new DatasetRef(GdeltTestData.dataset1.name), GdeltTestData.schema)
+    val wal = new WriteAheadLog(config, new DatasetRef(GdeltTestData.dataset1.name),"localhost", GdeltTestData.schema)
     wal.writeChunks(createChunkData(GdeltTestData.schema,GdeltTestData.readers))
     wal.writeChunks(createChunkData(GdeltTestData.schema,GdeltTestData.readers))
     wal.close()
@@ -91,7 +91,7 @@ class WriteAheadLogFileSpec extends FunSpec with Matchers with BeforeAndAfter{
   }
 
   it("Valid WAL header"){
-    val wal = new WriteAheadLog(config, datasetRef, schema)
+    val wal = new WriteAheadLog(config, datasetRef,"localhost", schema)
     wal.writeChunks(createChunkData)
     wal.close
 
@@ -104,7 +104,7 @@ class WriteAheadLogFileSpec extends FunSpec with Matchers with BeforeAndAfter{
   }
 
   it("Invalid file identifier in header") {
-    val wal = new WriteAheadLog(config, new DatasetRef(GdeltTestData.dataset1.name), GdeltTestData.schema)
+    val wal = new WriteAheadLog(config, new DatasetRef(GdeltTestData.dataset1.name),"localhost", GdeltTestData.schema)
     replaceBytes(wal, 1, Array[Byte]('X', 'X', 'X'))
     val reader = new WriteAheadLogReader(config, GdeltTestData.schema, wal.path)
     reader.validFile should equal(false)
@@ -112,7 +112,7 @@ class WriteAheadLogFileSpec extends FunSpec with Matchers with BeforeAndAfter{
   }
 
   it("Invalid column definition header" ){
-    val wal = new WriteAheadLog(config, new DatasetRef(GdeltTestData.dataset1.name), GdeltTestData.schema)
+    val wal = new WriteAheadLog(config, new DatasetRef(GdeltTestData.dataset1.name),"localhost", GdeltTestData.schema)
     replaceBytes(wal, 8, Array[Byte]('X', 'X'))
     val reader = new WriteAheadLogReader(config, GdeltTestData.schema, wal.path)
     reader.validFile should equal(false)
@@ -122,7 +122,7 @@ class WriteAheadLogFileSpec extends FunSpec with Matchers with BeforeAndAfter{
   }
 
   it("Invalid column count indicator" ){
-    val wal = new WriteAheadLog(config, new DatasetRef(GdeltTestData.dataset1.name), GdeltTestData.schema)
+    val wal = new WriteAheadLog(config, new DatasetRef(GdeltTestData.dataset1.name),"localhost", GdeltTestData.schema)
     replaceBytes(wal, 10, Array[Byte](0x11, 0x11))
     val reader = new WriteAheadLogReader(config,GdeltTestData.schema, wal.path)
     reader.validFile should equal(false)
@@ -132,7 +132,7 @@ class WriteAheadLogFileSpec extends FunSpec with Matchers with BeforeAndAfter{
   }
 
   it("Invalid column definitions size" ){
-    val wal = new WriteAheadLog(config, new DatasetRef(GdeltTestData.dataset1.name), GdeltTestData.schema)
+    val wal = new WriteAheadLog(config, new DatasetRef(GdeltTestData.dataset1.name),"localhost", GdeltTestData.schema)
     replaceBytes(wal, 12, Array[Byte](0x01, 0x01))
     val reader = new WriteAheadLogReader(config, GdeltTestData.schema, wal.path)
     reader.validFile should equal(false)
@@ -142,7 +142,7 @@ class WriteAheadLogFileSpec extends FunSpec with Matchers with BeforeAndAfter{
   }
 
   it("Able to read filo chunks successfully"){
-    val wal = new WriteAheadLog(config, datasetRef, schema)
+    val wal = new WriteAheadLog(config, datasetRef,"localhost", schema)
     val chunkData = createChunkData
     wal.writeChunks(chunkData)
     wal.close
@@ -173,7 +173,7 @@ class WriteAheadLogFileSpec extends FunSpec with Matchers with BeforeAndAfter{
     // rowreader2.getString(1) + rowreader2.getLong(2) + rowreader2.getInt(3)
 
 
-   // actualStr should equal (expectedStr)
+    // actualStr should equal (expectedStr)
 
     wal.deleteTestFiles()
     reader.close()
@@ -183,7 +183,7 @@ class WriteAheadLogFileSpec extends FunSpec with Matchers with BeforeAndAfter{
   it("Able to read filo chunks for GdeltTestData successfully"){
     val projectionDB = projection4.withDatabase("unittest2")
     val ref = projectionDB.datasetRef
-    val wal = new WriteAheadLog(config, ref, GdeltTestData.schema)
+    val wal = new WriteAheadLog(config, ref,"localhost", GdeltTestData.schema)
     // val chunkData = createChunkData
     wal.writeChunks(createChunkData(GdeltTestData.schema,GdeltTestData.readers))
     wal.close
@@ -220,7 +220,7 @@ class WriteAheadLogFileSpec extends FunSpec with Matchers with BeforeAndAfter{
     wal.close()
   }
 
-   private def createChunkData : Array[ByteBuffer] = {
+  private def createChunkData : Array[ByteBuffer] = {
     val filoSchema = Column.toFiloSchema(schema)
     val colIds = filoSchema.map(_.name).toArray
     val builder = new RowToVectorBuilder(filoSchema)

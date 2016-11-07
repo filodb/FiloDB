@@ -37,7 +37,7 @@ import scala.collection.mutable.ArrayBuffer
  */
 class FiloMemTable(val projection: RichProjection,
                    config: Config,
-                   actorAddr: String,
+                   actorPath: String,
                    version: Int,
                    reloadFlag: Boolean = false) extends MemTable with StrictLogging {
   import collection.JavaConverters._
@@ -53,7 +53,7 @@ class FiloMemTable(val projection: RichProjection,
   private implicit val partSegOrdering = projection.segmentType.ordering
   private val partSegKeyMap = new TreeMap[(PK, SK), KeyMap](Ordering[(PK, SK)])
 
-  private var appendStore = new FiloAppendStore(projection, config, version, reloadFlag)
+  private var appendStore = new FiloAppendStore(projection, config, version, actorPath, reloadFlag)
 
   val walDir = config.getString("memtable.memtable-wal-dir")
 
@@ -95,35 +95,50 @@ class FiloMemTable(val projection: RichProjection,
   }
 
   def reloadMemTable(): Unit =  {
+    logger.debug(s"started reload memtable:${walDir}/${actorPath}_${projection.datasetRef}_${version}")
     var loadResult: (Int, Boolean) = (0, true)
 
-    val walfiles = Files.newDirectoryStream(Paths.get(
-      s"${walDir}/${projection.datasetRef.dataset}_${version}"), "*.wal").toList
+    try {
+      val walfiles = Files.newDirectoryStream(Paths.get(
+        s"${walDir}/${actorPath}_${projection.datasetRef}_${version}"), "*.wal").toList
 
-    for {index <- walfiles.indices} {
-      logger.debug(s"loading WAL file:${walfiles(index).getFileName}")
-      loadResult = loadChunks(walfiles(index))
-      if (index < walfiles.length - 1) {
-        // TODO: if there is more than one wal file then delete files and keep only the last one
+      if (!walfiles.isEmpty && walfiles.length > 0) {
+        logger.debug(s"started loading WAL files")
+        for {index <- walfiles.indices} {
+          loadResult = loadChunks(walfiles(index))
+          logger.debug(s"Loaded WAL file successfully into Memtable-2:${loadResult._2}, ${loadResult._1}")
+          if (index < walfiles.length - 1) {
+            // TODO: if there is more than one wal file then delete files and keep only the last one
+          } else {
+            initWALLogFile(Some(walfiles(index)), loadResult._2, loadResult._1)
+          }
+        }
       } else {
-        initWALLogFile(Some(walfiles(index)), loadResult._2, loadResult._1)
+        logger.debug(s"No Memtable WAL files exists")
+        initWALLogFile(None, false, 0)
       }
+    }catch{
+      // TODO: Handle NoSuchFileException errors
+      case e: Exception =>
+        logger.error(s"Error while scanning Memtable WAL folders:${e.getMessage}")
+        throw e
     }
   }
 
   private def initWALLogFile(recentFile: Option[Path],
-                      setWalFile: Boolean,
-                      position: Int): Unit = {
+                             setWalFile: Boolean,
+                             position: Int): Unit = {
     if (setWalFile) {
       appendStore.setWalAHeadLogFile(recentFile, position)
     } else {
-      appendStore = new FiloAppendStore(projection, config, version, false)
+      appendStore = new FiloAppendStore(projection, config, version, actorPath, false)
     }
   }
 
   private def loadChunks(path: Path): (Int, Boolean) = {
     val walReader = new WriteAheadLogReader(config, projection.columns, path.toString)
     if (walReader.validFile) {
+      logger.debug(s"Valid WAL file:${path.toString} and ready to load chunks into Memtable")
       val chunks = walReader.readChunks().getOrElse(new ArrayBuffer[Array[Chunk]])
       for {chunkArray <- chunks} {
         val (chunkIndex, rowreader) = appendStore.initWithChunks(chunkArray)
