@@ -128,11 +128,9 @@ sealed class ChunkTable(val dataset: DatasetRef, val connector: FiloCassandraCon
   }
 
   private def decompressChunk(compressed: ByteBuffer): ByteBuffer = {
-    // Is this compressed?
-    if (compressed.get(0) == compressBytePrefix) {
-      decompress(compressed, offset = 1)
-    } else {
-      compressed
+    compressed.get(0) match {
+      case `compressBytePrefix` => decompress(compressed, offset = 1)
+      case other: Any           => compressed
     }
   }
 }

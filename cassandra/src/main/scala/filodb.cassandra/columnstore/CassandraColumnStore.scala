@@ -62,9 +62,9 @@ extends ColumnStore with CassandraColumnStoreScanner with StrictLogging {
     clusterConnector.createKeyspace(chunkTable.keyspace)
     val indexTable = getOrCreateIndexTable(projection.dataset)
     val filterTable = getOrCreateFilterTable(projection.dataset)
-    for { ctResp                    <- chunkTable.initialize()
-          ftResp                    <- filterTable.initialize()
-          rmtResp                   <- indexTable.initialize() } yield { rmtResp }
+    for { ctResp    <- chunkTable.initialize()
+          ftResp    <- filterTable.initialize()
+          rmtResp   <- indexTable.initialize() } yield rmtResp
   }
 
   /**
@@ -75,18 +75,18 @@ extends ColumnStore with CassandraColumnStoreScanner with StrictLogging {
     val chunkTable = getOrCreateChunkTable(projection.dataset)
     val indexTable = getOrCreateIndexTable(projection.dataset)
     val filterTable = getOrCreateFilterTable(projection.dataset)
-    for { ctResp                    <- chunkTable.clearAll()
-          ftResp                    <- filterTable.clearAll()
-          rmtResp                   <- indexTable.clearAll() } yield { rmtResp }
+    for { ctResp    <- chunkTable.clearAll()
+          ftResp    <- filterTable.clearAll()
+          rmtResp   <- indexTable.clearAll() } yield rmtResp
   }
 
   def dropDataset(dataset: DatasetRef): Future[Response] = {
     val chunkTable = getOrCreateChunkTable(dataset)
     val indexTable = getOrCreateIndexTable(dataset)
     val filterTable = getOrCreateFilterTable(dataset)
-    for { ctResp                    <- chunkTable.drop() if ctResp == Success
-          ftResp                    <- filterTable.drop() if ftResp == Success
-          rmtResp                   <- indexTable.drop() if rmtResp == Success }
+    for { ctResp    <- chunkTable.drop() if ctResp == Success
+          ftResp    <- filterTable.drop() if ftResp == Success
+          rmtResp   <- indexTable.drop() if rmtResp == Success }
     yield {
       chunkTableCache.remove(dataset)
       indexTableCache.remove(dataset)
@@ -101,15 +101,16 @@ extends ColumnStore with CassandraColumnStoreScanner with StrictLogging {
     stats.segmentAppend()
     if (segment.chunkSets.isEmpty) {
       stats.segmentEmpty()
-      return(Future.successful(NotApplied))
-    }
-    for { writeChunksResp <- writeChunks(projection.datasetRef, version, segment, ctx)
-          writeFiltersResp <- writeFilters(projection, version, segment, ctx)
-          writeIndexResp  <- writeIndices(projection, version, segment, ctx)
-                               if writeChunksResp == Success
-    } yield {
-      ctx.finish()
-      writeIndexResp
+      Future.successful(NotApplied)
+    } else {
+      for { writeChunksResp  <- writeChunks(projection.datasetRef, version, segment, ctx)
+            writeFiltersResp <- writeFilters(projection, version, segment, ctx)
+            writeIndexResp   <- writeIndices(projection, version, segment, ctx)
+                                 if writeChunksResp == Success
+      } yield {
+        ctx.finish()
+        writeIndexResp
+      }
     }
   }
 

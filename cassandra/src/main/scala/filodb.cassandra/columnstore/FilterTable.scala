@@ -68,19 +68,22 @@ sealed class FilterTable(val dataset: DatasetRef, val connector: FiloCassandraCo
     val partitionBuf = toBuffer(partition)
     val segmentBuf = toBuffer(segmentId)
     val baos = new ByteArrayOutputStream()
-    val statements = filters.map { case (chunkId, filter) =>
-      baos.reset()
-      filter.writeTo(baos)
-      val filterBuf = compress(ByteBuffer.wrap(baos.toByteArray))
-      filterBytes += filterBuf.capacity
-      writeIndexCql.bind(partitionBuf,
-                         version: java.lang.Integer,
-                         segmentBuf,
-                         chunkId: java.lang.Integer,
-                         filterBuf)
+    val statements = try {
+      filters.map { case (chunkId, filter) =>
+        baos.reset()
+        filter.writeTo(baos)
+        val filterBuf = compress(ByteBuffer.wrap(baos.toByteArray))
+        filterBytes += filterBuf.capacity
+        writeIndexCql.bind(partitionBuf,
+                           version: java.lang.Integer,
+                           segmentBuf,
+                           chunkId: java.lang.Integer,
+                           filterBuf)
+      }
+    } finally {
+      baos.close()
     }
     stats.addFilterWriteStats(filterBytes)
-    baos.close()
     connector.execStmt(unloggedBatch(statements))
   }
 }

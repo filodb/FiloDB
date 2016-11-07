@@ -42,6 +42,8 @@ trait Segment {
   override def toString: String = s"$segInfo"
 }
 
+import SegmentStateSettings._
+
 object SegmentState {
   type IDAndFilter = (ChunkID, BloomFilter[Long])
   type InfoAndFilter = (ChunkSetInfo, BloomFilter[Long])
@@ -50,9 +52,17 @@ object SegmentState {
     BloomFilter[Long](settings.filterElems, settings.filterFalsePositiveRate)
 }
 
-final case class SegmentStateSettings(filterElems: Int = 5000,
-                                      filterFalsePositiveRate: Double = 1E-6,
-                                      timeout: FiniteDuration = 30.seconds)
+/** Companion object */
+object SegmentStateSettings {
+  // It's really important that Bloom Filters are not overstuffed
+  val DefaultFilterElements = 5000
+  val DefaultFilterFalsePositiveRate = 1E-6
+  val DefaultTimeout = 30.seconds
+}
+
+final case class SegmentStateSettings(filterElems: Int = DefaultFilterElements,
+                                      filterFalsePositiveRate: Double = DefaultFilterFalsePositiveRate,
+                                      timeout: FiniteDuration = DefaultTimeout)
 
 /**
  * A Segment class tracking ingestion state.  Automatically increments the chunkId
@@ -63,7 +73,7 @@ final case class SegmentStateSettings(filterElems: Int = 5000,
  * Specific implementations control how rowkeys and bloom filters are retrieved and kept in memory.
  * Only responsible for keeping and updating state; ChunkSet creation is elsewhere.
  *
- * NOTE:  I tried to make this class immutable, but had to revert it as in the future the state will
+ * NOTE:  Tried to make this class immutable, but had to revert it as in the future the state will
  * probably get more complex with interval trees etc., and too many changes elsewhere in code base. TODO.
  *
  * @param projection the RichProjection for the dataset to ingest

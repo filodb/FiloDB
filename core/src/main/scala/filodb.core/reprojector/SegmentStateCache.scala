@@ -29,6 +29,7 @@ import filodb.core.store._
 class SegmentStateCache(config: Config, columnStore: ColumnStoreScanner)
                        (implicit ec: ExecutionContext) extends StrictLogging {
   import Perftools._
+  import SegmentStateSettings._
 
   /**
    * One note on cache concurrency.  SegmentStateCache will be shared by multiple threads and actors
@@ -43,7 +44,7 @@ class SegmentStateCache(config: Config, columnStore: ColumnStoreScanner)
   val waitTimeout = config.as[Option[FiniteDuration]]("reprojector.segment-index-read-timeout")
                           .getOrElse(15 seconds)
 
-  val stateSettings = SegmentStateSettings().copy(timeout = waitTimeout)
+  val stateSettings = SegmentStateSettings(timeout = waitTimeout)
 
   private val cacheReads = Kamon.metrics.counter("segment-cache-reads")
   private val cacheMisses = Kamon.metrics.counter("segment-cache-misses")
