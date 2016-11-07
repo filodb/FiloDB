@@ -41,6 +41,7 @@ See [architecture](doc/architecture.md) and [datasets and reading](doc/datasets_
   - [Distributed Partitioning](#distributed-partitioning)
 - [Using FiloDB Data Source with Spark](#using-filodb-data-source-with-spark)
   - [Configuring FiloDB](#configuring-filodb)
+    - [Passing Cassandra Authentication Settings](#passing-cassandra-authentication-settings)
   - [Spark Data Source API Example (spark-shell)](#spark-data-source-api-example-spark-shell)
   - [Spark/Scala/Java API](#sparkscalajava-api)
   - [Spark Streaming Example](#spark-streaming-example)
@@ -50,9 +51,7 @@ See [architecture](doc/architecture.md) and [datasets and reading](doc/datasets_
   - [Running the CLI](#running-the-cli)
   - [CLI Example](#cli-example)
 - [Current Status](#current-status)
-  - [Upcoming version 0.4 change list:](#upcoming-version-04-change-list)
-  - [Version 0.3 change list:](#version-03-change-list)
-  - [Migrating Metadata from 0.2 Cassandra](#migrating-metadata-from-02-cassandra)
+  - [Version 0.4 change list:](#version-04-change-list)
 - [Deploying](#deploying)
 - [Monitoring and Metrics](#monitoring-and-metrics)
   - [Metrics Sinks](#metrics-sinks)
@@ -99,6 +98,8 @@ To compile the .mermaid source files to .png's, install the [Mermaid CLI](http:/
 
 Your input is appreciated!
 
+* Spark 2.0 and Scala 2.11 - coming soon
+* A new storage format is being worked on, it can be previewed in the `new-storage-format` branch
 * Kafka input API / connector (without needing Spark)
 * In-memory caching for significant query speedup
 * True columnar querying and execution, using late materialization and vectorization techniques.  GPU/SIMD.
@@ -119,6 +120,9 @@ Your input is appreciated!
     $ git clone https://github.com/tuplejump/FiloDB.git
     $ cd FiloDB
     ```
+
+    - It is recommended you use the last stable released version.
+    - To build, run `filo-cli` (see below) and also `sbt spark/assembly`.
 
 2. Choose either the Cassandra column store (default) or the in-memory column store.
     - Start a Cassandra Cluster.
@@ -277,7 +281,7 @@ FiloDB has a Spark data-source module - `filodb.spark`. So, you can use the Spar
    $ ./filo-cli --command init
    $ sbt spark/assembly
    ```
-3. Use the jar `FiloDB/spark/target/scala-2.10/filodb-spark-assembly-0.3.jar` with Spark 1.6.x.
+3. Use the jar `FiloDB/spark/target/scala-2.10/filodb-spark-assembly-0.4.jar` with Spark 1.6.x.
 
 The options to use with the data-source api are:
 
@@ -338,7 +342,7 @@ You can follow along using the [Spark Notebook](http://github.com/andypetrella/s
 Or you can start a spark-shell locally,
 
 ```bash
-bin/spark-shell --jars ../FiloDB/spark/target/scala-2.10/filodb-spark-assembly-0.3.jar --packages com.databricks:spark-csv_2.10:1.2.0 --driver-memory 3G --executor-memory 3G
+bin/spark-shell --jars ../FiloDB/spark/target/scala-2.10/filodb-spark-assembly-0.4.jar --packages com.databricks:spark-csv_2.10:1.4.0 --driver-memory 3G --executor-memory 3G
 ```
 
 Loading CSV file from Spark:
@@ -446,7 +450,7 @@ For an example, see the [StreamingTest](spark/src/test/scala/filodb.spark/Stream
 Start Spark-SQL:
 
 ```bash
-  bin/spark-sql --jars path/to/FiloDB/spark/target/scala-2.10/filodb-spark-assembly-0.3.jar
+  bin/spark-sql --jars path/to/FiloDB/spark/target/scala-2.10/filodb-spark-assembly-0.4.jar
 ```
 
 (NOTE: if you want to connect with a real Hive Metastore, you should probably instead start the thrift server, also adding the `--jars` above, and then start the `spark-beeline` client)
@@ -586,13 +590,13 @@ Query/export some columns:
 
 ## Current Status
 
-Version 0.3 is the stable, latest released version.  It has been tested on a cluster for a different variety of schemas, has a stable data model and ingestion, and features a huge number of improvements over the previous version.
+Version 0.4 is the stable, latest released version.  It has been tested on a cluster for a different variety of schemas, has a stable data model and ingestion, and features a huge number of improvements over the previous version.
 
-### Upcoming version 0.4 change list:
+### Version 0.4 change list:
 
 * Defaults to Spark 1.6.1
 * New metrics and monitoring framework based on Kamon.io, with built in stats logging and statsd output, and tracing of write path
-* Replaced Phantom with direct usage of Java C* driver.  Bonus: use prepared statements, should result in better performance all around especially on ingest; plus should support C* 3.0+
+* Replaced Phantom with direct usage of Java C* driver.  Bonus: use prepared statements, should result in better performance all around especially on ingest; plus supports C* 3.0+
 * WHERE clauses specifying multiple partition keys now get pushed down.  Should result in much better read performance in those cases.
 * New :hash function makes it easier to hash partition key components into smaller cardinality (but specify the full key in WHERE clauses)
 * New config `filodb.cassandra.keyspace-replication-options` allows any CQL replication option to be set when FiloDB keyspaces are created with CLI --command init
@@ -602,45 +606,6 @@ Version 0.3 is the stable, latest released version.  It has been tested on a clu
 * Allow comma-separated list of hosts for `filodb.cassandra.hosts`
 * Fix missing data on read issue with wrapping token ranges in C*
 * Fix actor path uniqueness issue on ingestion
-
-### Version 0.3 change list:
-
-* Read from / write to multiple keyspaces in C*, using the `database` option
-  - All dataset/column metadata is stored in a central keyspace which defaults to `filodb_admin`
-* Stress tests
-* Productionization and robustification all around, especially with `filo-cli`
-* A new clustering mode which ensures all data is flushed at the end of writes (when flush_after_write is true)
-* Issue #77: `flush_after_write` and controlling memtable flushes at end of ETL
-* More efficient reads from DSE and when vnodes are enabled
-* More efficient streaming ingestion: flushes no longer automatically done at end of each partition of data
-* Issue #84: bug with ingesting into FiloDB after doing sort or shuffles using Tungsten Spark 1.5
-* filo-cli delete command now deletes both metadata and data tables
-* new filo-cli truncate command
-* New Akka Cluster-based communication channel between driver and FiloDB coordinators helps ensure that all data is flushed at end of ingestions
-
-### Migrating Metadata from 0.2 Cassandra
-
-The methods for columns and datasets are different, due to special characters and other requirements of the datasets table.
-
-First, run `./filo-cli --command init` to create empty datasets and columns tables in the new admin keyspace.
-
-Column metadata:
-
-1. Assuming the source keyspace is filodb, issue these commands in CQLSH:
-    - `copy filodb.columns to '/tmp/filodb_columns.csv';`
-2. Add the name of the keyspace to the end of each line.
-    - `cat /tmp/filodb_columns.csv  | tr -d '\r' | awk '{ $0=$0",filodb" } 1' >/tmp/new_columns.csv`
-3. In CQLSH:
-    - `COPY filodb_admin.columns (dataset, version, name, columntype, id, isdeleted, database) FROM '/tmp/new_columns.csv';`
-
-Datasets metadata -- use Spark (note: this example is using Datastax Enterprise; if using regular spark, load the spark-cassandra-connector, and use sqlContext instead):
-
-```scala
-import org.apache.spark.sql.{Column, SaveMode}
-import org.apache.spark.sql.catalyst.expressions.Literal
-val oldData = csc.read.format("org.apache.spark.sql.cassandra").option("table", "datasets").option("keyspace", "filodb").load
-oldData.withColumn("database", new Column(Literal("filodb"))).write.format("org.apache.spark.sql.cassandra").option("table", "datasets").option("keyspace", "filodb_admin").mode(SaveMode.Append).save
-```
 
 ## Deploying
 
