@@ -1,18 +1,19 @@
 package filodb.coordinator
 
-import akka.actor.{Actor, ActorRef, Cancellable, Props}
+import akka.actor.{Actor, ActorRef, Address, Cancellable, Props}
 import akka.event.LoggingReceive
 import com.typesafe.config.Config
+import filodb.coordinator.IngestionCommands.DCAReady
 import kamon.Kamon
 import net.ceedubs.ficus.Ficus._
 import org.velvia.filo.RowReader
+
 import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.duration.FiniteDuration
 import scala.concurrent.Future
-
 import filodb.core.metadata.{Column, Dataset, Projection, RichProjection}
 import filodb.core.store.{ColumnStore, SegmentInfo}
-import filodb.core.reprojector.{MemTable, FiloMemTable, Reprojector}
+import filodb.core.reprojector.{FiloMemTable, MemTable, Reprojector}
 
 object DatasetCoordinatorActor {
   import filodb.core.Types._
@@ -72,8 +73,17 @@ object DatasetCoordinatorActor {
             version: Int,
             columnStore: ColumnStore,
             reprojector: Reprojector,
-            config: Config): Props =
-    Props(classOf[DatasetCoordinatorActor], projection, version, columnStore, reprojector, config)
+            actorPath: String,
+            config: Config,
+            reloadFlag: Boolean = false): Props =
+    Props(classOf[DatasetCoordinatorActor], projection, version, columnStore,
+              reprojector,  actorPath, config, reloadFlag)
+
+  /**
+    * Creates new Memtable using WAL file
+    */
+  case class InitIngestion(replyTo: ActorRef) extends DSCoordinatorMessage
+
 }
 
 /**
@@ -111,7 +121,9 @@ private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
                                               version: Int,
                                               columnStore: ColumnStore,
                                               reprojector: Reprojector,
-                                              config: Config) extends BaseActor {
+                                              actorPath: String,
+                                              config: Config,
+                                              var reloadFlag: Boolean = false) extends BaseActor {
   import DatasetCoordinatorActor._
   import context.dispatcher
 
@@ -155,7 +167,7 @@ private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
   var mTableWriteTask: Option[Cancellable] = None
   var mTableFlushTask: Option[Cancellable] = None
 
-  def makeNewTable(): MemTable = new FiloMemTable(projection, config)
+  def makeNewTable(): MemTable = new FiloMemTable(projection, config, actorPath, version, reloadFlag)
 
   private def reportStats(): Unit = {
     logger.info(s"MemTable active table rows: $activeRows")
@@ -239,6 +251,8 @@ private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
     mTableFlushTask = None
 
     flushingTable = Some(activeTable)
+    // Reset reload flag to create new WAL file whenever new Memtable is initialised.
+    reloadFlag = false
     activeTable = makeNewTable()
     val newTaskFuture = reprojector.reproject(flushingTable.get, version)
     curReprojection = Some(newTaskFuture)
@@ -255,6 +269,8 @@ private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
 
   private def handleFlushDone(): Unit = {
     curReprojection = None
+    // delete wal files after flush completed
+    flushingTable.foreach(_.deleteWalFiles())
     // Close the flushing table and mark it as None
     flushingTable.foreach(_.close())
     flushingTable = None
@@ -324,5 +340,9 @@ private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
       logger.error(s"Error in reprojection task ($nameVer)", t)
       reportStats()
       handleFlushErr(t)
+
+    case InitIngestion(replyTo) =>
+      activeTable.reloadMemTable()
+      replyTo ! DCAReady
   }
 }

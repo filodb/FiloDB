@@ -1,20 +1,24 @@
 package filodb.coordinator
 
-import akka.actor.{ActorSystem, ActorRef, PoisonPill}
+import java.nio.file.Files
+
+import akka.actor.{ActorRef, ActorSystem, PoisonPill}
 import akka.testkit.TestProbe
 import akka.pattern.gracefulStop
 import com.typesafe.config.ConfigFactory
 import org.velvia.filo.{RowReader, TupleRowReader}
+
 import scala.concurrent.Future
 import scala.concurrent.duration._
-
 import filodb.core._
 import filodb.core.metadata.{Column, Dataset, RichProjection}
 import filodb.core.store.{InMemoryColumnStore, SegmentInfo}
 import filodb.core.reprojector.{DefaultReprojector, MemTable, Reprojector}
-
 import org.scalatest.concurrent.ScalaFutures
-import org.scalatest.time.{Millis, Span, Seconds}
+import org.scalatest.time.{Millis, Seconds, Span}
+
+import scala.util.Try
+import scalax.file.Path
 
 object DatasetCoordinatorActorSpec extends ActorSpecConfig
 
@@ -34,7 +38,8 @@ with ScalaFutures {
                  """filodb.memtable.flush-trigger-rows = 100
                     filodb.memtable.max-rows-per-table = 100
                     filodb.memtable.noactivity.flush.interval = 2 s
-                    filodb.memtable.write.interval = 300 ms""")
+                    filodb.memtable.write.interval = 300 ms
+                    filodb.memtable.mapped-byte-buffer-size = 1024""")
                  .withFallback(ConfigFactory.load("application_test.conf"))
                  .getConfig("filodb")
 
@@ -46,7 +51,7 @@ with ScalaFutures {
   var probe: TestProbe = _
   var reprojections: Seq[(DatasetRef, Int)] = Nil
 
-  override def beforeAll() {
+  override def beforeAll(): Unit = {
     super.beforeAll()
     columnStore.initializeProjection(myDataset.projections.head).futureValue
   }
@@ -55,12 +60,15 @@ with ScalaFutures {
     columnStore.clearProjectionData(myDataset.projections.head).futureValue
     reprojections = Nil
     dsActor = system.actorOf(DatasetCoordinatorActor.props(
-                                  myProjection, 0, columnStore, testReprojector, config))
+                                  myProjection, 0, columnStore, testReprojector, "localhost", config))
     probe = TestProbe()
   }
 
   after {
     gracefulStop(dsActor, 3.seconds.dilated, PoisonPill).futureValue
+    val walDir = config.getString("memtable.memtable-wal-dir")
+    val path = Path.fromString (walDir)
+    Try(path.deleteRecursively(continueOnFailure = false))
   }
 
   val namesWithPartCol = (0 until 50).flatMap { partNum =>
@@ -68,7 +76,7 @@ with ScalaFutures {
   }
 
 
-  private def ingestRows(numRows: Int) {
+  private def ingestRows(numRows: Int): Unit = {
     dsActor ! NewRows(probe.ref, namesWithPartCol.take(numRows).map(TupleRowReader), 0L)
     probe.expectMsg(IngestionCommands.Ack(0L))
   }
@@ -164,6 +172,17 @@ with ScalaFutures {
     sleepRemaining(start2, 2500)
     probe.send(dsActor, GetStats)
     probe.expectMsg(Stats(1, 1, 0, 0, -1, 90L))
+
+  }
+
+  it("should automatically delete memtable wal files once flush is complete successfully") {
+    ingestRows(100)
+    // Ingest more rows.  These should be ingested into the active table AFTER flush is initiated.
+    Thread sleep 500
+    ingestRows(20)
+    probe.send(dsActor, GetStats)
+    probe.expectMsg(Stats(1, 1, 0, 20, -1, 120L))
+    reprojections should equal (Seq((DatasetRef("dataset"), 0)))
 
   }
 }

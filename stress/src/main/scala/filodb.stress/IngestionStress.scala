@@ -1,13 +1,14 @@
 package filodb.stress
 
-import org.apache.spark.{SparkContext, SparkConf}
-import org.apache.spark.sql.{DataFrame, SaveMode, SQLContext}
+import org.apache.spark.{SparkConf, SparkContext}
+import org.apache.spark.sql.{DataFrame, SQLContext, SaveMode}
+
 import scala.util.Random
 import scala.concurrent.duration._
 import scala.concurrent.{Await, Future}
-
-import filodb.core.DatasetRef
-import filodb.spark._
+import _root_.filodb.core.DatasetRef
+import _root_.filodb.spark._
+import org.apache.spark.filodb.FiloDriver
 
 /**
  * Ingests into two different tables simultaneously, one with small segment size. Tests ingestion pipeline

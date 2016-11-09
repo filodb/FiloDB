@@ -141,7 +141,7 @@ case class RichProjection(projection: Projection,
   }
 }
 
-object RichProjection extends StrictLogging {
+object   RichProjection extends StrictLogging {
   import Accumulation._
 
   sealed trait BadSchema

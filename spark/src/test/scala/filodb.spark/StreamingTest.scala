@@ -1,19 +1,19 @@
 package filodb.spark
 
 import com.typesafe.config.ConfigFactory
-import org.apache.spark.{SparkContext, SparkException, SparkConf}
+import org.apache.spark.{SparkConf, SparkContext, SparkException}
 import org.apache.spark.rdd.RDD
-import org.apache.spark.sql.{SaveMode, SQLContext}
+import org.apache.spark.sql.{SQLContext, SaveMode}
 import org.apache.spark.streaming.{Milliseconds, StreamingContext}
 import org.scalatest.time.{Millis, Seconds, Span}
+
 import scala.collection.mutable
 import scala.concurrent.duration._
-
-import filodb.core._
-import filodb.core.metadata.{Column, Dataset}
-import filodb.core.store.SegmentSpec
-
-import org.scalatest.{FunSpec, BeforeAndAfter, BeforeAndAfterAll, Matchers}
+import _root_.filodb.core._
+import _root_.filodb.core.metadata.{Column, Dataset}
+import _root_.filodb.core.store.SegmentSpec
+import org.apache.spark.filodb.FiloDriver
+import org.scalatest.{BeforeAndAfter, BeforeAndAfterAll, FunSpec, Matchers}
 import org.scalatest.concurrent.ScalaFutures
 
 case class NameRecord(first: Option[String], last: Option[String],
@@ -43,12 +43,12 @@ with Matchers with ScalaFutures {
   val metaStore = FiloDriver.metaStore
   val columnStore = FiloDriver.columnStore
 
-  override def beforeAll() {
+  override def beforeAll():Unit = {
     metaStore.initialize().futureValue
     columnStore.initializeProjection(largeDataset.projections.head).futureValue
   }
 
-  override def afterAll() {
+  override def afterAll():Unit = {
     super.afterAll()
     ssc.stop(true, true)
   }
@@ -73,6 +73,8 @@ with Matchers with ScalaFutures {
                 foreach { g => queue += ssc.sparkContext.parallelize(g, 1) }
     val nameChunks = ssc.queueStream(queue)
     import sql.implicits._
+    //noinspection ScalaStyle
+    println(s"largeDataset.name:${largeDataset.name}")
     nameChunks.foreachRDD { rdd =>
       rdd.toDF.write.format("filodb.spark").
           option("dataset", largeDataset.name).

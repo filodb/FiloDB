@@ -71,12 +71,12 @@ trait CoordinatorSetup {
   val metaStore: MetaStore
   lazy val reprojector = new DefaultReprojector(config, columnStore)
 
+  lazy val cluster = Cluster(system)
+
   // TODO: consider having a root actor supervising everything
   lazy val coordinatorActor =
-    system.actorOf(NodeCoordinatorActor.props(metaStore, reprojector, columnStore, config),
+    system.actorOf(NodeCoordinatorActor.props(metaStore, reprojector, columnStore, config, cluster.selfAddress),
                    "coordinator")
-
-  lazy val cluster = Cluster(system)
 
   def shutdown(): Unit = {
     system.shutdown()

@@ -34,7 +34,7 @@ class ReprojectionBenchmark {
   val newSetting = "memtable.max-rows-per-table = 200000"
   val config = ConfigFactory.parseString(newSetting).withFallback(
                  ConfigFactory.load("application_test.conf")).getConfig("filodb")
-  val mTable = new FiloMemTable(projection2, config)
+  val mTable = new FiloMemTable(projection2, config, "10.1.12.12:1091",0)
 
   import scala.concurrent.ExecutionContext.Implicits.global
   val colStore = new InMemoryColumnStore(scala.concurrent.ExecutionContext.Implicits.global)

@@ -23,6 +23,7 @@ import filodb.core.store.SegmentInfo
  * MemTables are owned by the DatasetCoordinatorActor, so writes do not have to be thread-safe.
  */
 trait MemTable extends StrictLogging {
+
   import RowReader._
 
   def close(): Unit
@@ -37,11 +38,14 @@ trait MemTable extends StrictLogging {
   /**
    * Ingests a bunch of new rows.  When this method returns, the rows will have been comitted to disk
    * such that a crash could be recoverable.
-   * @param rows the rows to ingest.  For now, they must have the exact same columns, in the exact same order,
+    *
+    * @param rows the rows to ingest.  For now, they must have the exact same columns, in the exact same order,
    *        as in the projection.  Also, the caller should do buffering; ingesting a very small number of rows
    *        might be extremely inefficient.
    */
   def ingestRows(rows: Seq[RowReader]): Unit
+
+  def reloadMemTable(): Unit
 
   /**
    * Reads rows out from one segment.
@@ -57,6 +61,8 @@ trait MemTable extends StrictLogging {
   def getSegments(): Iterator[(projection.PK, projection.SK)]
 
   def numRows: Int
+
+  def deleteWalFiles(): Unit
 
   /**
    * Yes, this clears everything!  It's meant for testing only.
