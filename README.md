@@ -592,6 +592,10 @@ Query/export some columns:
 
 Version 0.4 is the stable, latest released version.  It has been tested on a cluster for a different variety of schemas, has a stable data model and ingestion, and features a huge number of improvements over the previous version.
 
+### Upcoming version 0.5 changes:
+
+* creating a function for checking java and another to check sbt (@jenaiz)
+
 ### Version 0.4 change list:
 
 * Defaults to Spark 1.6.1
