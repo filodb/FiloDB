@@ -2,9 +2,9 @@ package filodb.cassandra.metastore
 
 import com.datastax.driver.core.Row
 import com.typesafe.config.Config
-import scala.concurrent.{ExecutionContext, Future}
 
-import filodb.cassandra.FiloCassandraConnector
+import scala.concurrent.{ExecutionContext, Future}
+import filodb.cassandra.{FiloCassandraConnector, FiloSessionProvider}
 import filodb.core.DatasetRef
 import filodb.core.metadata.{Column, DataColumn}
 
@@ -12,8 +12,9 @@ import filodb.core.metadata.{Column, DataColumn}
  * Represents the "columns" Cassandra table tracking column and schema changes for a dataset
  *
  * @param config a Typesafe Config with hosts, port, and keyspace parameters for Cassandra connection
+ * @param sessionProvider if provided, a session provider provides a session for the configuration
  */
-sealed class ColumnTable(val config: Config)
+sealed class ColumnTable(val config: Config, val sessionProvider: FiloSessionProvider)
                         (implicit val ec: ExecutionContext) extends FiloCassandraConnector {
   val keyspace = config.getString("admin-keyspace")
   val tableString = s"${keyspace}.columns"

@@ -2,7 +2,7 @@ package filodb.cassandra.metastore
 
 import com.datastax.driver.core.Row
 import com.typesafe.config.Config
-import filodb.cassandra.FiloCassandraConnector
+import filodb.cassandra.{FiloCassandraConnector, FiloSessionProvider}
 import filodb.core.metadata.IngestionStateData
 import filodb.core.{AlreadyExists, Response}
 
@@ -12,7 +12,7 @@ import scala.concurrent.{ExecutionContext, Future}
   *
   * @param config a Typesafe Config with hosts, port, and keyspace parameters for Cassandra connection
   */
-sealed class IngestionStateTable(val config: Config)
+sealed class IngestionStateTable(val config: Config, val sessionProvider: FiloSessionProvider)
                                 (implicit val ec: ExecutionContext) extends FiloCassandraConnector {
 
   val keyspace = config.getString("admin-keyspace")

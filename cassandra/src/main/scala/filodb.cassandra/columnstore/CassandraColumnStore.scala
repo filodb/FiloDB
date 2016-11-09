@@ -9,7 +9,7 @@ import java.util.HashSet
 import kamon.trace.{TraceContext, Tracer}
 
 import scala.concurrent.{ExecutionContext, Future}
-import filodb.cassandra.FiloCassandraConnector
+import filodb.cassandra.{DefaultFiloSessionProvider, FiloCassandraConnector, FiloSessionProvider}
 import filodb.core._
 import filodb.core.store._
 import filodb.core.metadata.{Column, Projection, RichProjection}
@@ -40,10 +40,12 @@ import filodb.core.metadata.{Column, Projection, RichProjection}
  * ==Constructor Args==
  * @param config see the Configuration section above for the needed config
  * @param readEc An ExecutionContext for reads.  This must be separate from writes to prevent deadlocks.
+ * @param filoSessionProvider if provided, a session provider provides a session for the configuration
  * @param ec An ExecutionContext for futures for writes.  See this for a way to do backpressure with futures:
  *        http://quantifind.com/blog/2015/06/throttling-instantiations-of-scala-futures-1/
  */
-class CassandraColumnStore(val config: Config, val readEc: ExecutionContext)
+class CassandraColumnStore(val config: Config, val readEc: ExecutionContext,
+                           val filoSessionProvider: Option[FiloSessionProvider] = None)
                           (implicit val ec: ExecutionContext)
 extends ColumnStore with CassandraColumnStoreScanner with StrictLogging {
   import filodb.core.store._
@@ -221,6 +223,7 @@ trait CassandraColumnStoreScanner extends ColumnStoreScanner with StrictLogging 
   import Iterators._
 
   def config: Config
+  def filoSessionProvider: Option[FiloSessionProvider]
 
   val cassandraConfig = config.getConfig("cassandra")
   val tableCacheSize = config.getInt("columnstore.tablecache-size")
@@ -232,6 +235,7 @@ trait CassandraColumnStoreScanner extends ColumnStoreScanner with StrictLogging 
   protected val clusterConnector = new FiloCassandraConnector {
     def config: Config = cassandraConfig
     def ec: ExecutionContext = readEc
+    val sessionProvider = filoSessionProvider.getOrElse(new DefaultFiloSessionProvider(cassandraConfig))
   }
 
   def readChunks(dataset: DatasetRef,

@@ -1,18 +1,19 @@
 package filodb.cassandra.metastore
 
 import com.typesafe.config.ConfigFactory
-import filodb.cassandra.AsyncTest
-import filodb.core._
 import org.scalatest.FlatSpec
 import org.scalatest.concurrent.PatienceConfiguration.Timeout
 import scala.language.postfixOps
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.duration._
 
+import filodb.cassandra.{AsyncTest, DefaultFiloSessionProvider}
+import filodb.core._
+
 class IngestionStateTableSpec extends FlatSpec with AsyncTest {
 
   val config = ConfigFactory.load("application_test.conf").getConfig("filodb.cassandra")
-  val ingestionStateTable = new IngestionStateTable(config)
+  val ingestionStateTable = new IngestionStateTable(config, new DefaultFiloSessionProvider(config))
 
   // First create keyspace if not exist
   override def beforeAll(): Unit = {

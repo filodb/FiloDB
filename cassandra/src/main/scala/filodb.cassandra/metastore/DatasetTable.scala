@@ -2,10 +2,10 @@ package filodb.cassandra.metastore
 
 import com.datastax.driver.core.Row
 import com.typesafe.config.Config
+
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.Try
-
-import filodb.cassandra.FiloCassandraConnector
+import filodb.cassandra.{FiloCassandraConnector, FiloSessionProvider}
 import filodb.core.DatasetRef
 import filodb.core.metadata.{Dataset, DatasetOptions, Projection}
 
@@ -13,8 +13,9 @@ import filodb.core.metadata.{Dataset, DatasetOptions, Projection}
  * Represents the "dataset" Cassandra table tracking each dataset and its partitions
  *
  * @param config a Typesafe Config with hosts, port, and keyspace parameters for Cassandra connection
+ * @param sessionProvider if provided, a session provider provides a session for the configuration
  */
-sealed class DatasetTable(val config: Config)
+sealed class DatasetTable(val config: Config, val sessionProvider: FiloSessionProvider)
                          (implicit val ec: ExecutionContext) extends FiloCassandraConnector {
   val keyspace = config.getString("admin-keyspace")
   val tableString = s"${keyspace}.datasets"

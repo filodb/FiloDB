@@ -7,7 +7,7 @@ import scala.concurrent.Await
 import scala.concurrent.duration._
 import scala.language.postfixOps
 
-import filodb.cassandra.AsyncTest
+import filodb.cassandra.{AsyncTest, DefaultFiloSessionProvider}
 import filodb.core._
 import filodb.core.metadata.Dataset
 
@@ -15,7 +15,7 @@ class DatasetTableSpec extends FlatSpec with AsyncTest {
   import scala.concurrent.ExecutionContext.Implicits.global
 
   val config = ConfigFactory.load("application_test.conf").getConfig("filodb.cassandra")
-  val datasetTable = new DatasetTable(config)
+  val datasetTable = new DatasetTable(config, new DefaultFiloSessionProvider(config))
 
   // First create the datasets table
   override def beforeAll() {
