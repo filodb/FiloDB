@@ -14,7 +14,7 @@ import filodb.core.metadata.RichProjection
  *
  * It also implements RowReader, so values can be extracted without another instantiation.
  */
-class BinaryRecord private[binaryrecord](schema: RecordSchema,
+class BinaryRecord private[binaryrecord](val schema: RecordSchema,
                                          val base: Any,
                                          val offset: Long,
                                          val numBytes: Int)

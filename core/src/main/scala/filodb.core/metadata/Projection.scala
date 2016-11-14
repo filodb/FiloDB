@@ -69,6 +69,9 @@ case class RichProjection(projection: Projection,
   def datasetRef: DatasetRef = projection.dataset
 
   val rowKeyBinSchema = RecordSchema(rowKeyColumns)
+  val binSchema = RecordSchema(dataColumns)
+
+  def dataColumns: Seq[Column] = columns.collect { case d: DataColumn => d }
 
   /**
    * Returns a new RichProjection with the specified database and everything else kept the same
