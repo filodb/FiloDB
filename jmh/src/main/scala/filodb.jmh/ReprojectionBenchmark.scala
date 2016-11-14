@@ -14,9 +14,7 @@ import filodb.core.reprojector.{DefaultReprojector, FiloMemTable, SegmentStateCa
 import filodb.core.store.{InMemoryColumnStore, Segment}
 
 /**
- * Microbenchmark of simple integer summing of Filo chunks in FiloDB segments,
- * mostly to see what the theoretical peak output of scanning speeds can be.
- * Does not involve Spark (at least this one doesn't).
+ * Microbenchmark of reprojection (ingestion) pipeline.
  */
 @State(Scope.Thread)
 class ReprojectionBenchmark {

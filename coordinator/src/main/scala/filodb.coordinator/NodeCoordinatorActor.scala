@@ -8,10 +8,11 @@ import scala.concurrent.Future
 import scala.concurrent.duration._
 
 import filodb.core._
-import filodb.core.Types._
+import filodb.core.binaryrecord.RecordSchema
 import filodb.core.metadata.{Column, DataColumn, Dataset, Projection, RichProjection}
-import filodb.core.store.{ColumnStore, MetaStore}
 import filodb.core.reprojector.Reprojector
+import filodb.core.store.{ColumnStore, MetaStore}
+import filodb.core.Types._
 
 /**
  * The NodeCoordinatorActor is the common API entry point for all FiloDB ingestion and metadata operations.
@@ -137,6 +138,7 @@ class NodeCoordinatorActor(metaStore: MetaStore,
 
     def createProjectionAndActor(datasetObj: Dataset, schema: Option[Column.Schema]): Unit = {
       val columnSeq = columns.map(schema.get(_))
+      Serializer.putSchema(RecordSchema(columnSeq))
       // Create the RichProjection, and ferret out any errors
       logger.debug(s"Creating projection from dataset $datasetObj, columns $columnSeq")
       val proj = RichProjection.make(datasetObj, columnSeq)

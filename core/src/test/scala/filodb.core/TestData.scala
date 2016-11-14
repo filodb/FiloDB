@@ -137,6 +137,7 @@ object GdeltTestData {
                 parts(2).toInt, parts(3).toInt,
                 parts(4), parts(5), parts(6).toInt, parts(7).toDouble)
   }
+  val seqReaders = records.map { record => SeqRowReader(record.productIterator.toList) }
 
   // Dataset1: Partition keys (Actor2Code, Year) / Row key GLOBALEVENTID / Seg :string 0
   val dataset1 = Dataset("gdelt", Seq("GLOBALEVENTID"), ":string 0", Seq("Actor2Code", "Year"))

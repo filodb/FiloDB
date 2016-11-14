@@ -10,6 +10,7 @@ import scala.concurrent.duration._
 import scala.language.existentials
 
 import filodb.core._
+import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.metadata.RichProjection
 
 object RowSource {
@@ -199,9 +200,10 @@ trait RowSource extends Actor with StrictLogging {
     }
     rowsByNode.foreach { case (nodeRef, readers) =>
       logger.trace(s"  ==> ($nextSeqId) Processing ${readers.size} rows for node $nodeRef...")
-      outstanding(nextSeqId) = (nodeRef, readers)
+      val binReaders = readers.map { r => BinaryRecord(projection.binSchema, r) }
+      outstanding(nextSeqId) = (nodeRef, binReaders)
       outstandingNodes(nodeRef) = outstandingNodes(nodeRef) + nextSeqId
-      nodeRef ! IngestionCommands.IngestRows(dataset, version, readers, nextSeqId)
+      nodeRef ! IngestionCommands.IngestRows(dataset, version, binReaders, nextSeqId)
       nextSeqId += 1
     }
     rowsIngested.increment(nextBatch.length)
