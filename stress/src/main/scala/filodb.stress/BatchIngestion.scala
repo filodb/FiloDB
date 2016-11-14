@@ -51,7 +51,7 @@ object BatchIngestion extends App {
 
   val ingestMillis = Perftools.timeMillis {
     puts("Starting batch ingestion...")
-    csvDF.sort($"medallion").write.format("filodb.spark").
+    csvDF.write.format("filodb.spark").
       option("dataset", "nyc_taxi").
       option("row_keys", "hack_license,medallion,pickup_datetime,pickup_longitude").
       option("segment_key", ":timeslice pickup_datetime 6d").
