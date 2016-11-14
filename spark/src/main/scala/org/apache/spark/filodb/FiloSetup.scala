@@ -122,8 +122,8 @@ object FiloDriver extends FiloSetup with StrictLogging {
 
       // Because the clusterActor can only be instantiated on an executor/FiloDB node, this works by
       // waiting for the clusterActor to respond, thus guaranteeing cluster working correctly
-      implicit val timeout = Timeout(9.seconds)
-      Await.result(clusterActor ? NodeClusterActor.GetRefs("executor"), 10.seconds)
+      implicit val timeout = Timeout(59.seconds)
+      Await.result(clusterActor ? NodeClusterActor.GetRefs("executor"), 60.seconds)
 
       _config = Some(finalConfig)
     }
