@@ -61,8 +61,10 @@ extends ColumnStore with CassandraColumnStoreScanner with StrictLogging {
     val chunkTable = getOrCreateChunkTable(projection.dataset)
     clusterConnector.createKeyspace(chunkTable.keyspace)
     val indexTable = getOrCreateIndexTable(projection.dataset)
-    for { ctResp                    <- chunkTable.initialize()
-          rmtResp                   <- indexTable.initialize() } yield { rmtResp }
+    val filterTable = getOrCreateFilterTable(projection.dataset)
+    for { ctResp    <- chunkTable.initialize()
+          ftResp    <- filterTable.initialize()
+          rmtResp   <- indexTable.initialize() } yield rmtResp
   }
 
   /**
@@ -72,15 +74,19 @@ extends ColumnStore with CassandraColumnStoreScanner with StrictLogging {
     logger.info(s"Clearing all columnar projection data for dataset ${projection.dataset}")
     val chunkTable = getOrCreateChunkTable(projection.dataset)
     val indexTable = getOrCreateIndexTable(projection.dataset)
-    for { ctResp                    <- chunkTable.clearAll()
-          rmtResp                   <- indexTable.clearAll() } yield { rmtResp }
+    val filterTable = getOrCreateFilterTable(projection.dataset)
+    for { ctResp    <- chunkTable.clearAll()
+          ftResp    <- filterTable.clearAll()
+          rmtResp   <- indexTable.clearAll() } yield rmtResp
   }
 
   def dropDataset(dataset: DatasetRef): Future[Response] = {
     val chunkTable = getOrCreateChunkTable(dataset)
     val indexTable = getOrCreateIndexTable(dataset)
-    for { ctResp                    <- chunkTable.drop() if ctResp == Success
-          rmtResp                   <- indexTable.drop() if rmtResp == Success }
+    val filterTable = getOrCreateFilterTable(dataset)
+    for { ctResp    <- chunkTable.drop() if ctResp == Success
+          ftResp    <- filterTable.drop() if ftResp == Success
+          rmtResp   <- indexTable.drop() if rmtResp == Success }
     yield {
       chunkTableCache.remove(dataset)
       indexTableCache.remove(dataset)
@@ -95,14 +101,16 @@ extends ColumnStore with CassandraColumnStoreScanner with StrictLogging {
     stats.segmentAppend()
     if (segment.chunkSets.isEmpty) {
       stats.segmentEmpty()
-      return(Future.successful(NotApplied))
-    }
-    for { writeChunksResp <- writeChunks(projection.datasetRef, version, segment, ctx)
-          writeIndexResp  <- writeIndices(projection, version, segment, ctx)
-                               if writeChunksResp == Success
-    } yield {
-      ctx.finish()
-      writeIndexResp
+      Future.successful(NotApplied)
+    } else {
+      for { writeChunksResp  <- writeChunks(projection.datasetRef, version, segment, ctx)
+            writeFiltersResp <- writeFilters(projection, version, segment, ctx)
+            writeIndexResp   <- writeIndices(projection, version, segment, ctx)
+                                 if writeChunksResp == Success
+      } yield {
+        ctx.finish()
+        writeIndexResp
+      }
     }
   }
 
@@ -126,10 +134,21 @@ extends ColumnStore with CassandraColumnStoreScanner with StrictLogging {
                            ctx: TraceContext): Future[Response] = {
     asyncSubtrace(ctx, "write-index", "ingestion") {
       val indexTable = getOrCreateIndexTable(projection.datasetRef)
-      val indices = segment.chunkSets.map { case ChunkSet(info, skips, _) =>
+      val indices = segment.chunkSets.map { case ChunkSet(info, skips, _, _, _) =>
         (info.id, ChunkSetInfo.toBytes(projection, info, skips))
       }
       indexTable.writeIndices(segment.binaryPartition, version, segment.segmentId, indices, stats)
+    }
+  }
+
+  private def writeFilters(projection: RichProjection,
+                           version: Int,
+                           segment: ChunkSetSegment,
+                           ctx: TraceContext): Future[Response] = {
+    asyncSubtrace(ctx, "write-filter", "ingestion") {
+      val filterTable = getOrCreateFilterTable(projection.datasetRef)
+      val filters = segment.chunkSets.map { case ChunkSet(info, _, filter, _, _) => (info.id, filter) }
+      filterTable.writeFilters(segment.binaryPartition, version, segment.segmentId, filters, stats)
     }
   }
 
@@ -208,6 +227,7 @@ trait CassandraColumnStoreScanner extends ColumnStoreScanner with StrictLogging 
 
   val chunkTableCache = concurrentCache[DatasetRef, ChunkTable](tableCacheSize)
   val indexTableCache = concurrentCache[DatasetRef, IndexTable](tableCacheSize)
+  val filterTableCache = concurrentCache[DatasetRef, FilterTable](tableCacheSize)
 
   protected val clusterConnector = new FiloCassandraConnector {
     def config: Config = cassandraConfig
@@ -236,6 +256,16 @@ trait CassandraColumnStoreScanner extends ColumnStoreScanner with StrictLogging 
     Future.sequence(columns.toSeq.map(
                     chunkTable.readChunks(partition, version, _,
                                           segment, chunkRange)))
+  }
+
+  def readFilters(dataset: DatasetRef,
+                  version: Int,
+                  partition: Types.BinaryPartition,
+                  segment: Types.SegmentId,
+                  chunkRange: (Types.ChunkID, Types.ChunkID))
+                 (implicit ec: ExecutionContext): Future[Iterator[SegmentState.IDAndFilter]] = {
+    val filterTable = getOrCreateFilterTable(dataset)
+    filterTable.readFilters(partition, version, segment, chunkRange._1, chunkRange._2)
   }
 
   def multiPartRangeScan(projection: RichProjection,
@@ -315,6 +345,12 @@ trait CassandraColumnStoreScanner extends ColumnStoreScanner with StrictLogging 
     indexTableCache.getOrElseUpdate(dataset,
                                     { (dataset: DatasetRef) =>
                                       new IndexTable(dataset, clusterConnector)(readEc) })
+  }
+
+  def getOrCreateFilterTable(dataset: DatasetRef): FilterTable = {
+    filterTableCache.getOrElseUpdate(dataset,
+                                    { (dataset: DatasetRef) =>
+                                      new FilterTable(dataset, clusterConnector)(readEc) })
   }
 
   def reset(): Unit = {}

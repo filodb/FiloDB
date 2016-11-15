@@ -39,7 +39,7 @@ class IntSumReadBenchmark {
   val NumRows = 10000
 
   val segInfo = SegmentInfo("/0", 0).basedOn(projection)
-  val state = new SegmentState(projection, schema, Nil)(segInfo)
+  val state = new TestSegmentState(projection, schema)
   val writerSeg = new ChunkSetSegment(projection, segInfo)
   writerSeg.addChunkSet(state, rowStream.map(TupleRowReader).take(NumRows))
   val readSeg = RowReaderSegment(writerSeg, schema)

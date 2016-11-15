@@ -11,7 +11,7 @@ import scala.concurrent.duration._
 
 import filodb.core._
 import filodb.core.metadata.{RichProjection, Column}
-import filodb.core.store.{ColumnStoreScanner, SegmentInfo, SegmentState, SinglePartitionRangeScan}
+import filodb.core.store._
 
 /**
  * A cache for segment state objects for the write path.
@@ -29,6 +29,7 @@ import filodb.core.store.{ColumnStoreScanner, SegmentInfo, SegmentState, SingleP
 class SegmentStateCache(config: Config, columnStore: ColumnStoreScanner)
                        (implicit ec: ExecutionContext) extends StrictLogging {
   import Perftools._
+  import SegmentStateSettings._
 
   /**
    * One note on cache concurrency.  SegmentStateCache will be shared by multiple threads and actors
@@ -43,6 +44,8 @@ class SegmentStateCache(config: Config, columnStore: ColumnStoreScanner)
   val waitTimeout = config.as[Option[FiniteDuration]]("reprojector.segment-index-read-timeout")
                           .getOrElse(15 seconds)
 
+  val stateSettings = SegmentStateSettings(timeout = waitTimeout)
+
   private val cacheReads = Kamon.metrics.counter("segment-cache-reads")
   private val cacheMisses = Kamon.metrics.counter("segment-cache-misses")
 
@@ -53,21 +56,14 @@ class SegmentStateCache(config: Config, columnStore: ColumnStoreScanner)
    */
   def getSegmentState(projection: RichProjection,
                       schema: Seq[Column],
-                      version: Int,
-                      detectSkips: Boolean = true)
+                      version: Int)
                      (segInfo: SegmentInfo[projection.PK, projection.SK]): SegmentState = {
     cacheReads.increment
     val cacheKey = (projection.datasetRef, segInfo)
     cache.getOrElseUpdate(cacheKey, { case (ref: DatasetRef,
                                             segmentInfo: SegmentInfo[_, _]) =>
       cacheMisses.increment
-      val range = KeyRange(segInfo.partition, segInfo.segment, segInfo.segment, endExclusive = false)
-      logger.debug(s"Retrieving segment state from column store: $range")
-      val indexRead = columnStore.scanIndices(projection, version, SinglePartitionRangeScan(range))
-      val indexIt = Await.result(indexRead, waitTimeout)
-      val infosAndSkips = indexIt.toSeq.headOption.map(_.infosAndSkips).getOrElse(Nil)
-      new SegmentState(projection, schema, infosAndSkips.map(_._1),
-                       columnStore, version, waitTimeout, detectSkips)(segInfo)
+      ColumnStoreSegmentState(projection, schema, version, columnStore, stateSettings)(segInfo)(ec)
     })
   }
 

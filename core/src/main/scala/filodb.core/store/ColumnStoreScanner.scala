@@ -77,10 +77,40 @@ trait ColumnStoreScanner extends StrictLogging {
                       (implicit ec: ExecutionContext): Future[Array[ByteBuffer]] = {
     val binPartition = projection.partitionType.toBytes(segInfo.partition)
     val binSegId = projection.segmentType.toBytes(segInfo.segment)
-    readChunks(projection.datasetRef, version, projection.rowKeyColumns.map(_.name),
+    val rowKeyCols = projection.rowKeyColumns.map(_.name)
+    readChunks(projection.datasetRef, version, rowKeyCols,
                binPartition, binSegId, (chunk, chunk)).map { seqChunkedData =>
-      seqChunkedData.map { case ChunkedData(col, segIdChunks) => segIdChunks.head._3 }.toArray
+      try {
+        seqChunkedData.map { case ChunkedData(col, segIdChunks) => segIdChunks.head._3 }.toArray
+      } catch {
+        case e: NoSuchElementException =>
+          logger.error(s"Error: got back empty chunks for $segInfo, chunk $chunk, columns $rowKeyCols", e)
+          throw e
+      }
     }
+  }
+
+  /**
+   * Reads back a subset of filters for ingestion row replacement / skip detection
+   * @param dataset the DatasetRef of the dataset to read filters from
+   * @param version the version to read back
+   * @param chunkRange the inclusive start and end ChunkID to read from
+   */
+  def readFilters(dataset: DatasetRef,
+                  version: Int,
+                  partition: Types.BinaryPartition,
+                  segment: Types.SegmentId,
+                  chunkRange: (Types.ChunkID, Types.ChunkID))
+                 (implicit ec: ExecutionContext): Future[Iterator[SegmentState.IDAndFilter]]
+
+  def readFilters(projection: RichProjection,
+                  version: Int,
+                  chunkRange: (Types.ChunkID, Types.ChunkID))
+                 (segInfo: SegmentInfo[projection.PK, projection.SK])
+                 (implicit ec: ExecutionContext): Future[Iterator[SegmentState.IDAndFilter]] = {
+    val binPartition = projection.partitionType.toBytes(segInfo.partition)
+    val binSegId = projection.segmentType.toBytes(segInfo.segment)
+    readFilters(projection.datasetRef, version, binPartition, binSegId, chunkRange)
   }
 
   /**
@@ -102,6 +132,12 @@ trait ColumnStoreScanner extends StrictLogging {
                  projection.segmentType.fromBytes(segmentKey),
                  infosAndSkips)
   }
+
+  def toSegIndexWithFilter(projection: RichProjection, binPart: BinaryPartition, segmentKey: SegmentId,
+                           infosSkipsFilters: ChunkSetInfo.IndexAndFilterSeq):
+        SegmentIndex[projection.PK, projection.SK] =
+    toSegIndex(projection, binPart, segmentKey,
+               infosSkipsFilters.map { case (info, skip, _) => (info, skip) })
 
   // NOTE: this is more or less a single-threaded implementation.  Reads of chunks for multiple columns
   // happen in parallel, but we still block to wait for all of them to come back.

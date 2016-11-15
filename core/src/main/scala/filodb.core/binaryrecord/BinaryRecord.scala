@@ -1,6 +1,6 @@
 package filodb.core.binaryrecord
 
-import org.velvia.filo.{RowReader, UnsafeUtils, ZeroCopyBinary, ZeroCopyUTF8String}
+import org.velvia.filo.{RowReader, SeqRowReader, UnsafeUtils, ZeroCopyBinary, ZeroCopyUTF8String}
 import scala.language.postfixOps
 import scalaxy.loops._
 
@@ -16,6 +16,9 @@ import filodb.core.metadata.RichProjection
  */
 case class BinaryRecord private[binaryrecord](schema: RecordSchema, base: Any, offset: Long, numBytes: Int)
 extends ZeroCopyBinary with RowReader {
+  import BinaryRecord._
+  import ZeroCopyBinary._
+
   // private final compiles to a JVM bytecode field, cheaper to access (as opposed to a method)
   private final val fields = schema.fields
 
@@ -38,6 +41,15 @@ extends ZeroCopyBinary with RowReader {
 
   override def toString: String =
     s"b[${(0 until fields.size).map(getAny).mkString(", ")}]"
+
+  // Also, for why using lazy val is not that bad: https://dzone.com/articles/cost-laziness
+  // The cost of computing the hash (and say using it in a bloom filter) is much higher.
+  lazy val cachedHash64: Long = {
+    base match {
+      case a: Array[Byte] => hasher64.hash(a, offset.toInt - UnsafeUtils.arayOffset, numBytes, Seed)
+      case o: Any         => hasher64.hash(asNewByteArray, 0, numBytes, Seed)
+    }
+  }
 
   /**
    * Returns an array of bytes for this binary record.  If this BinaryRecord is already a byte array
@@ -66,6 +78,7 @@ object BinaryRecord {
     apply(projection.rowKeyBinSchema, bytes)
 
   val DefaultMaxRecordSize = 8192
+  val hasher64 = ZeroCopyBinary.xxhashFactory.hash64
 
   def apply(schema: RecordSchema, reader: RowReader, maxBytes: Int = DefaultMaxRecordSize): BinaryRecord = {
     val builder = BinaryRecordBuilder(schema, maxBytes)
@@ -81,6 +94,9 @@ object BinaryRecord {
     // and keep allocating from that
     builder.build(copy = true)
   }
+
+  def apply(projection: RichProjection, items: Seq[Any]): BinaryRecord =
+    apply(projection.rowKeyBinSchema, SeqRowReader(items))
 
   val MaxSmallOffset = 0x7fff
   val MaxSmallLen    = 0xffff

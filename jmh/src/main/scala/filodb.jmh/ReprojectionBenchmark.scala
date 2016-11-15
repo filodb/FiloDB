@@ -53,6 +53,8 @@ class ReprojectionBenchmark {
   @BenchmarkMode(Array(Mode.Throughput))
   @OutputTimeUnit(TimeUnit.SECONDS)
   def toSegments(): Seq[Segment] = {
+    // This is run multiple times, we are not writing to column store, so have to ensure state is reset
+    stateCache.clear()
     reprojector.toSegments(mTable, segments, 0).toList
   }
 }

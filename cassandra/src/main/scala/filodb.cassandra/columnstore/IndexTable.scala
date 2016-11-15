@@ -1,8 +1,6 @@
 package filodb.cassandra.columnstore
 
 import com.datastax.driver.core.Row
-import com.typesafe.config.Config
-import com.typesafe.scalalogging.slf4j.StrictLogging
 import java.nio.ByteBuffer
 import scala.concurrent.{ExecutionContext, Future}
 import scodec.bits._
@@ -22,14 +20,12 @@ case class IndexRecord(binPartition: Types.BinaryPartition,
  * Unlike the previous ChunkRowMap design, the layout is such that new chunks in a segment get written
  * only with its new metadata, previous index bits are not written again.
  */
-sealed class IndexTable(dataset: DatasetRef, connector: FiloCassandraConnector)
-                       (implicit ec: ExecutionContext) extends StrictLogging {
+sealed class IndexTable(val dataset: DatasetRef, val connector: FiloCassandraConnector)
+                       (implicit ec: ExecutionContext) extends BaseDatasetTable {
   import filodb.cassandra.Util._
   import scala.collection.JavaConversions._
 
-  val keyspace = dataset.database.getOrElse(connector.defaultKeySpace)
-  val tableString = s"${keyspace}.${dataset.dataset + "_index"}"
-  val session = connector.session
+  val suffix = "index"
 
   val createCql = s"""CREATE TABLE IF NOT EXISTS $tableString (
                      |    partition blob,
@@ -38,19 +34,14 @@ sealed class IndexTable(dataset: DatasetRef, connector: FiloCassandraConnector)
                      |    chunkid int,
                      |    data blob,
                      |    PRIMARY KEY ((partition, version), segmentid, chunkid)
-                     |) WITH COMPACT STORAGE""".stripMargin
+                     |) WITH COMPACT STORAGE AND compression = {
+                    'sstable_compression': '$sstableCompression'}""".stripMargin
 
 
   def fromRow(row: Row): IndexRecord =
     IndexRecord(ByteVector(row.getBytes("partition")),
                 ByteVector(row.getBytes("segmentid")),
                 row.getBytes("data"))
-
-  def initialize(): Future[Response] = connector.execCql(createCql)
-
-  def clearAll(): Future[Response] = connector.execCql(s"TRUNCATE $tableString")
-
-  def drop(): Future[Response] = connector.execCql(s"DROP TABLE IF EXISTS $tableString")
 
   val selectCql = s"SELECT partition, segmentid, data FROM $tableString WHERE "
   val partVersionFilter = "partition = ? AND version = ? "
