@@ -6,28 +6,36 @@ FILO_VERSION=$(cat version.sbt | sed -e 's/.*"\(.*\)"/\1/g')
 CLI_FILE=`pwd`"/cli/target/scala-$SCALA_VERSION/filo-cli-$FILO_VERSION"
 
 function isJava8(){
-if [[ "$JAVA" ]]; then
-    version=$("$JAVA" -version 2>&1 | awk -F '"' '/version/ {print $2}')
-    if [[ "$version" < "1.8" ]]; then
-        echo "FiloDB requires Java JDK 1.8 and the current version is $version. Please upgrade to continue."
-        exit
+    if [[ "$JAVA" ]]; then
+        version=$("$JAVA" -version 2>&1 | awk -F '"' '/version/ {print $2}')
+        if [[ "$version" < "1.8" ]]; then
+            echo "FiloDB requires Java JDK 1.8 and the current version is $version. Please upgrade to continue."
+            exit
+        fi
     fi
-fi
 }
 
-JAVA=$(type -p java)
-if [ -z "$JAVA" ]; then
-    echo "Failed to find Java in PATH. Please install Java JDK 1.8"
-    exit
-fi
+function check_java {
+    JAVA=$(type -p java)
+    if [ -z "$JAVA" ]; then
+        echo "Failed to find Java in PATH. Please install Java JDK 1.8"
+        exit
+    fi
+}
+
+function check_sbt {
+    if [ -z $1 ]; then
+        echo "Failed to find SBT in PATH. Please install SBT"
+        exit
+    fi
+}
 
 isJava8
+check_java
 
 SBT=$(type -p sbt)
-if [ -z "$SBT" ]; then
-    echo "Failed to find SBT in PATH. Please install SBT"
-    exit
-fi
+
+check_sbt $SBT
 
 if [ ! -f "$CLI_FILE" ];then
     # run assembly if file doesn't exist
