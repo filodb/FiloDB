@@ -27,10 +27,11 @@ class SegmentSpec extends FunSpec with Matchers with BeforeAndAfter {
 
   it("SegmentState should add chunk info properly and update state for append only") {
     val state = getState()
-    state.nextChunkId should equal (0)
+    val origId = state.nextChunkId
+    Thread sleep 10   // Just to be sure the timeUUID will be greater
 
     val chunkSet1 = ChunkSet(state, mapper(names take 4).toIterator)
-    chunkSet1.info.id should equal (0)
+    chunkSet1.info.id should be > (origId)
     chunkSet1.info.numRows should equal (4)
     chunkSet1.info.firstKey should equal (firstKey)
     chunkSet1.info.lastKey should equal (keyForName(3))
@@ -39,75 +40,68 @@ class SegmentSpec extends FunSpec with Matchers with BeforeAndAfter {
     chunkSet1.chunks.keySet should equal (Set("first", "last", "age", "seg"))
     state.store(chunkSet1)
     state.add(chunkSet1)
-    state.nextChunkId should equal (1)
     state.numChunks should equal (1)
 
+    Thread sleep 10   // Just to be sure the timeUUID will be greater
     // Add new rows.  These do not replace previous ones at all.
     val chunkSet2 = ChunkSet(state, mapper(names drop 4).toIterator)
-    chunkSet2.info.id should equal (1)
+    chunkSet2.info.id should be > (chunkSet1.info.id)
     chunkSet2.info.numRows should equal (2)
     chunkSet2.skips should equal (Nil)
     chunkSet2.chunks.size should equal (4)
     state.add(chunkSet2)
-    state.nextChunkId should equal (2)
   }
 
   it("SegmentState should add chunk info properly when SegmentState prepopulated") {
-    val info1 = ChunkSetInfo(4, 10, firstKey, lastKey)
     val state = new TestSegmentState(projection, schema)
+    val info1 = ChunkSetInfo(state.nextChunkId, 10, firstKey, lastKey)
     state.add(Seq((info1, emptyFilter)))
     state.rowKeyChunks(4) = Array.fill[ByteBuffer](projection.rowKeyColumns.length)(null)
-    state.nextChunkId should equal (5)
 
+    Thread sleep 10   // Just to be sure the timeUUID will be greater
     val chunkSet1 = ChunkSet(state, mapper(names take 4).toIterator)
     state.add(chunkSet1)
-    state.nextChunkId should equal (6)
     state.numChunks should equal (2)
-    chunkSet1.info.id should equal (5)
+    chunkSet1.info.id should be > (info1.id)
     chunkSet1.info.numRows should equal (4)
     chunkSet1.skips should have length (0)
   }
 
   it("SegmentState should add skip lists properly when new rows replace previous chunks") {
     val state = getState()
-    state.nextChunkId should equal (0)
 
     val sortedNames = names.sortBy(_._3.get)
     val chunkSet1 = ChunkSet.withSkips(state, mapper(sortedNames take 4).toIterator)
     state.add(chunkSet1)
-    state.nextChunkId should equal (1)
     state.numChunks should equal (1)
-    chunkSet1.info.id should equal (0)
     chunkSet1.info.numRows should equal (4)
     chunkSet1.skips should equal (Nil)
     state.store(chunkSet1)
 
+    Thread sleep 10   // Just to be sure the timeUUID will be greater
     // Add new rows.  These replace two of the previous rows - namely in rows 2, 3
     val chunkSet2 = ChunkSet.withSkips(state, mapper(sortedNames drop 2).toIterator)
     state.add(chunkSet2)
-    state.nextChunkId should equal (2)
-    chunkSet2.info.id should equal (1)
+    chunkSet2.info.id should be > (chunkSet1.info.id)
     chunkSet2.info.numRows should equal (4)
-    chunkSet2.skips should equal (Seq(ChunkRowSkipIndex(0, Array(2, 3))))
+    chunkSet2.skips should equal (Seq(ChunkRowSkipIndex(chunkSet1.info.id, Array(2, 3))))
   }
 
   it("SegmentState should not add skip lists if detectSkips=false") {
     val state = getState(0)
-    state.nextChunkId should equal (0)
 
     val sortedNames = names.sortBy(_._3.get)
     val chunkSet1 = ChunkSet(state, mapper(sortedNames take 4).toIterator)
     state.add(chunkSet1)
-    state.nextChunkId should equal (1)
     state.numChunks should equal (1)
     chunkSet1.skips should equal (Nil)
     state.store(chunkSet1)
 
+    Thread sleep 10   // Just to be sure the timeUUID will be greater
     // Add new rows.  These replace two of the previous rows - namely in rows 2, 3
     val chunkSet2 = ChunkSet(state, mapper(sortedNames drop 2).toIterator)
     state.add(chunkSet2)
-    state.nextChunkId should equal (2)
-    chunkSet2.info.id should equal (1)
+    chunkSet2.info.id should be > (chunkSet1.info.id)
     chunkSet2.info.numRows should equal (4)
     chunkSet2.skips should equal (Nil)
   }

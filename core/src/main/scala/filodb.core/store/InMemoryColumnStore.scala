@@ -93,7 +93,7 @@ extends ColumnStore with InMemoryColumnStoreScanner with StrictLogging {
         for { column <- columns } {
           val colName = column.name
           val chunkTree = chunkDb.getOrElse((projection.datasetRef, binPart, version), EmptyChunkTree)
-          chunkTree.subMap((colName, segId, 0), true, (colName, segId, Int.MaxValue), true)
+          chunkTree.subMap((colName, segId, Long.MinValue), true, (colName, segId, Long.MaxValue), true)
                    .entrySet.iterator.foreach { entry =>
             val (_, _, chunkId) = entry.getKey
             // NOTE: extremely important to duplicate the ByteBuffer, because of mutable state / multi threading
@@ -148,9 +148,9 @@ trait InMemoryColumnStoreScanner extends ColumnStoreScanner {
                                       EmptyChunkTree)
     logger.debug(s"Reading chunks from columns $columns, keyRange $keyRange, version $version")
     val chunks = for { column <- columns.toSeq } yield {
-      val startKey = (column, keyRange.start, 0)
-      val endKey   = if (keyRange.endExclusive) { (column, keyRange.end, 0) }
-                     else                       { (column, keyRange.end, Int.MaxValue) }
+      val startKey = (column, keyRange.start, Long.MinValue)
+      val endKey   = if (keyRange.endExclusive) { (column, keyRange.end, Long.MinValue) }
+                     else                       { (column, keyRange.end, Long.MaxValue) }
       val it = chunkTree.subMap(startKey, true, endKey, !keyRange.endExclusive).entrySet.iterator
       val chunkList = it.toSeq.map { entry =>
         val (colId, segmentId, chunkId) = entry.getKey

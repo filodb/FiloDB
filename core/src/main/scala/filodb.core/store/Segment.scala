@@ -91,8 +91,6 @@ abstract class SegmentState(val projection: RichProjection,
   val filoSchema = Column.toFiloSchema(schema)
   private val rowKeyIndices = projection.rowKeyColIndices.toArray
 
-  // TODO(velvia): Use some TimeUUID for chunkID instead
-  private var _nextChunkId = 0
   private val _infosAndFilters = new ArrayBuffer[SegmentState.InfoAndFilter]
   private var _masterFilter = emptyFilter(settings)
 
@@ -102,7 +100,7 @@ abstract class SegmentState(val projection: RichProjection,
 
   def infosAndFilters: Seq[SegmentState.InfoAndFilter] = _infosAndFilters
   def masterFilter: BloomFilter[Long] = _masterFilter
-  def nextChunkId: ChunkID = _nextChunkId
+  def nextChunkId: ChunkID = timeUUID64
 
   /**
    * Returns the number of chunks kept by this SegmentState instance.
@@ -115,13 +113,11 @@ abstract class SegmentState(val projection: RichProjection,
   def add(chunkSet: ChunkSet): Unit = {
     _infosAndFilters += (chunkSet.info -> chunkSet.bloomFilter)
     _masterFilter = _masterFilter.union(chunkSet.bloomFilter)
-    _nextChunkId = chunkSet.info.id + 1
   }
 
   def add(newInfosFilters: Seq[InfoAndFilter]): Unit = {
     _infosAndFilters ++= newInfosFilters
     _masterFilter = newInfosFilters.foldLeft(_masterFilter) { case (aggBf, (_, bf)) => aggBf.union(bf) }
-    infosAndFilters.lastOption.foreach { case (info, _) => _nextChunkId = info.id + 1 }
   }
 
   def filterRowKeys(rowKeys: Array[BinaryRecord]): Array[BinaryRecord] =

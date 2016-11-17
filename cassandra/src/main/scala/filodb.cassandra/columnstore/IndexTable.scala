@@ -31,7 +31,7 @@ sealed class IndexTable(val dataset: DatasetRef, val connector: FiloCassandraCon
                      |    partition blob,
                      |    version int,
                      |    segmentid blob,
-                     |    chunkid int,
+                     |    chunkid bigint,
                      |    data blob,
                      |    PRIMARY KEY ((partition, version), segmentid, chunkid)
                      |) WITH COMPACT STORAGE AND compression = {
@@ -113,7 +113,7 @@ sealed class IndexTable(val dataset: DatasetRef, val connector: FiloCassandraCon
   def writeIndices(partition: Types.BinaryPartition,
                    version: Int,
                    segmentId: Types.SegmentId,
-                   indices: Seq[(Int, Array[Byte])],
+                   indices: Seq[(Types.ChunkID, Array[Byte])],
                    stats: ColumnStoreStats): Future[Response] = {
     var indexBytes = 0
     val partitionBuf = toBuffer(partition)
@@ -123,7 +123,7 @@ sealed class IndexTable(val dataset: DatasetRef, val connector: FiloCassandraCon
       writeIndexCql.bind(partitionBuf,
                          version: java.lang.Integer,
                          segmentBuf,
-                         chunkId: java.lang.Integer,
+                         chunkId: java.lang.Long,
                          ByteBuffer.wrap(indexData))
     }
     stats.addIndexWriteStats(indexBytes)

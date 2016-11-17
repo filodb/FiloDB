@@ -123,12 +123,12 @@ object ChunkSetInfo extends StrictLogging {
 
   def toBytes(projection: RichProjection, chunkSetInfo: ChunkSetInfo, skips: ChunkSkips): Array[Byte] = {
     val buf = ByteBuf.create(100)
-    buf.add(chunkSetInfo.id)
-    buf.add(chunkSetInfo.numRows)
+    buf.writeLong(chunkSetInfo.id)
+    buf.writeInt(chunkSetInfo.numRows)
     buf.writeMediumByteArray(toRowKeyBytes(projection, chunkSetInfo.firstKey))
     buf.writeMediumByteArray(toRowKeyBytes(projection, chunkSetInfo.lastKey))
     skips.foreach { case ChunkRowSkipIndex(id, overrides) =>
-      buf.add(id)
+      buf.writeLong(id)
       buf.writeMediumIntArray(overrides.toArray)
     }
     buf.toBytes
@@ -141,13 +141,13 @@ object ChunkSetInfo extends StrictLogging {
 
   def fromBytes(projection: RichProjection, bytes: Array[Byte]): (ChunkSetInfo, ChunkSkips) = {
     val scanner = new InputByteArray(bytes)
-    val id = scanner.readInt
+    val id = scanner.readLong
     val numRows = scanner.readInt
     val firstKey = BinaryRecord(projection, scanner.readMediumByteArray)
     val lastKey = BinaryRecord(projection, scanner.readMediumByteArray)
     val skips = new ArrayBuffer[ChunkRowSkipIndex]
     while (scanner.location < bytes.size) {
-      val skipId = scanner.readInt
+      val skipId = scanner.readLong
       val skipList = scanner.readMediumIntArray
       skips.append(ChunkRowSkipIndex(skipId, skipList))
     }

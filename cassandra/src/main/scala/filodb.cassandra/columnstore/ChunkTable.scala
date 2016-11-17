@@ -32,7 +32,7 @@ sealed class ChunkTable(val dataset: DatasetRef, val connector: FiloCassandraCon
                     |    version int,
                     |    columnname text,
                     |    segmentid blob,
-                    |    chunkid int,
+                    |    chunkid bigint,
                     |    data blob,
                     |    PRIMARY KEY ((partition, version), columnname, segmentid, chunkid)
                     |) WITH COMPACT STORAGE AND compression = {
@@ -56,7 +56,7 @@ sealed class ChunkTable(val dataset: DatasetRef, val connector: FiloCassandraCon
       val finalBytes = compressChunk(bytes)
       chunkBytes += finalBytes.capacity.toLong
       writeChunksCql.bind(partBytes, version: java.lang.Integer, segKeyBytes,
-                          chunkId: java.lang.Integer, columnName, finalBytes)
+                          chunkId: java.lang.Long, columnName, finalBytes)
     }.toSeq
     stats.addChunkWriteStats(statements.length, chunkBytes)
     connector.execStmt(unloggedBatch(statements))
@@ -86,7 +86,7 @@ sealed class ChunkTable(val dataset: DatasetRef, val connector: FiloCassandraCon
     session.executeAsync(query).toScalaFuture.map { rs =>
       val rows = rs.all().asScala
       val byteVectorChunks = rows.map { row => (ByteVector(row.getBytes(0)),
-                                                row.getInt(1),
+                                                row.getLong(1),
                                                 decompressChunk(row.getBytes(2))) }
       ChunkedData(column, byteVectorChunks)
     }
@@ -104,12 +104,12 @@ sealed class ChunkTable(val dataset: DatasetRef, val connector: FiloCassandraCon
                  chunkRange: (Types.ChunkID, Types.ChunkID)): Future[ChunkedData] = {
     val query = readChunkRangeCql.bind(column, toBuffer(partition), version: java.lang.Integer,
                                        toBuffer(segmentId),
-                                       chunkRange._1: java.lang.Integer,
-                                       chunkRange._2: java.lang.Integer)
+                                       chunkRange._1: java.lang.Long,
+                                       chunkRange._2: java.lang.Long)
     session.executeAsync(query).toScalaFuture.map { rs =>
       val rows = rs.all().asScala
       val byteVectorChunks = rows.map { row => (segmentId,
-                                                row.getInt(0),
+                                                row.getLong(0),
                                                 decompressChunk(row.getBytes(1))) }
       ChunkedData(column, byteVectorChunks)
     }

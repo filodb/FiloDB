@@ -26,7 +26,7 @@ sealed class FilterTable(val dataset: DatasetRef, val connector: FiloCassandraCo
                     |    partition blob,
                     |    version int,
                     |    segmentid blob,
-                    |    chunkid int,
+                    |    chunkid bigint,
                     |    data blob,
                     |    PRIMARY KEY ((partition, version), segmentid, chunkid)
                     |) WITH COMPACT STORAGE AND compression = {
@@ -39,7 +39,7 @@ sealed class FilterTable(val dataset: DatasetRef, val connector: FiloCassandraCo
   def fromRow(row: Row): SegmentState.IDAndFilter = {
     val buffer = decompress(row.getBytes("data"))
     val bais = new ByteArrayInputStream(buffer.array)
-    (row.getInt("chunkid"), BloomFilter.readFrom[Long](bais))
+    (row.getLong("chunkid"), BloomFilter.readFrom[Long](bais))
   }
 
   def readFilters(partition: Types.BinaryPartition,
@@ -50,8 +50,8 @@ sealed class FilterTable(val dataset: DatasetRef, val connector: FiloCassandraCo
     session.executeAsync(readCql.bind(toBuffer(partition),
                                       version: java.lang.Integer,
                                       toBuffer(segmentId),
-                                      firstChunkId: java.lang.Integer,
-                                      lastChunkId: java.lang.Integer))
+                                      firstChunkId: java.lang.Long,
+                                      lastChunkId: java.lang.Long))
            .toIterator.map(_.map(fromRow))
   }
 
@@ -62,7 +62,7 @@ sealed class FilterTable(val dataset: DatasetRef, val connector: FiloCassandraCo
   def writeFilters(partition: Types.BinaryPartition,
                    version: Int,
                    segmentId: Types.SegmentId,
-                   filters: Seq[(Int, BloomFilter[Long])],
+                   filters: Seq[(Types.ChunkID, BloomFilter[Long])],
                    stats: ColumnStoreStats): Future[Response] = {
     var filterBytes = 0L
     val partitionBuf = toBuffer(partition)
@@ -77,7 +77,7 @@ sealed class FilterTable(val dataset: DatasetRef, val connector: FiloCassandraCo
         writeIndexCql.bind(partitionBuf,
                            version: java.lang.Integer,
                            segmentBuf,
-                           chunkId: java.lang.Integer,
+                           chunkId: java.lang.Long,
                            filterBuf)
       }
     } finally {

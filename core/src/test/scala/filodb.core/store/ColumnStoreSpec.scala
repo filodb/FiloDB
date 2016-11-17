@@ -158,7 +158,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
 
     val chunks2 = colStore.readChunks(datasetRef, 0, Seq("first"),
                                       segment.binaryPartition, segment.segmentId,
-                                      (0, 1)).futureValue
+                                      (Long.MinValue, 0)).futureValue
     chunks2.head.chunks should have length (1)
   }
 
