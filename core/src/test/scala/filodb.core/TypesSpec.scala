@@ -29,7 +29,7 @@ class TypesSpec extends FunSpec with Matchers {
       val types = Seq(IntKeyType, StringKeyType)
       val compositeType = CompositeKeyType(types)
 
-      val orig1 = Seq(1001, "AdamAndEve")
+      val orig1: Seq[Any] = Seq(1001, "AdamAndEve")
       compositeType.fromBytes(compositeType.toBytes(orig1)) should equal (orig1)
     }
 
@@ -37,8 +37,8 @@ class TypesSpec extends FunSpec with Matchers {
       val types = Seq(IntKeyType, StringKeyType)
       val compositeType = CompositeKeyType(types)
 
-      val orig1 = Seq(1001, "AdamAndEve")
-      val orig2 = Seq(1001, "Noah")
+      val orig1: Seq[Any] = Seq(1001, "AdamAndEve")
+      val orig2: Seq[Any] = Seq(1001, "Noah")
       implicit val ordering = compositeType.ordering
       assert(orig1 < orig2)
     }

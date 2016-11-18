@@ -1,13 +1,11 @@
 package filodb.stress
 
-import org.apache.spark.{SparkContext, SparkConf}
-import org.apache.spark.sql.{DataFrame, SaveMode, SQLContext}
-import scala.util.Random
-import scala.concurrent.duration._
-import scala.concurrent.{Await, Future}
-
 import filodb.core.DatasetRef
 import filodb.spark._
+import org.apache.spark.sql.{DataFrame, SaveMode, SparkSession}
+
+import scala.concurrent.duration._
+import scala.concurrent.{Await, Future}
 
 /**
  * Ingests into two different tables simultaneously, one with small segment size. Tests ingestion pipeline
@@ -30,19 +28,21 @@ object IngestionStress extends App {
   val numRuns = 50    // Make this higher when doing performance profiling
 
   def puts(s: String): Unit = {
-    //scalastyle:off
+    // scalastyle:off
     println(s)
-    //scalastyle:on
+    // scalastyle:on
   }
 
-  // Setup SparkContext, etc.
-  val conf = (new SparkConf).setAppName("test")
-                            .set("spark.filodb.cassandra.keyspace", "filostress")
-                            .set("spark.sql.shuffle.partitions", "4")
-                            .set("spark.scheduler.mode", "FAIR")
-  val sc = new SparkContext(conf)
-  val sql = new SQLContext(sc)
-  import sql.implicits._
+  // Setup SparkSession, etc.
+  val sparkSession = SparkSession.builder()
+    .appName("test")
+    .config("spark.filodb.cassandra.keyspace", "filostress")
+    .config("spark.sql.shuffle.partitions", "4")
+    .config("spark.scheduler.mode", "FAIR")
+    .config("spark.ui.enabled", "false")   // No need for UI when doing perf stuff
+    .getOrCreate()
+
+  val sql=sparkSession.sqlContext
 
   // Ingest the taxi file two different ways using two Futures
   // One way is by hour of day - very relaxed and fast
@@ -51,13 +51,15 @@ object IngestionStress extends App {
                  option("header", "true").option("inferSchema", "true").
                  load(taxiCsvFile)
   // Define a hour of day function
-  import org.joda.time.DateTime
   import java.sql.Timestamp
+  import sql.implicits
+
+  import org.joda.time.DateTime
   val hourOfDay = sql.udf.register("hourOfDay", { (t: Timestamp) => new DateTime(t).getHourOfDay })
   val dfWithHoD = csvDF.withColumn("hourOfDay", hourOfDay(csvDF("pickup_datetime")))
 
   val stressLines = csvDF.count()
-  val hrLines = dfWithHoD.groupBy($"hourOfDay", $"hack_license", $"pickup_datetime").count().count()
+  val hrLines = dfWithHoD.groupBy("hourOfDay", "hack_license", "pickup_datetime").count().count()
   puts(s"$taxiCsvFile has $stressLines unique lines of data for stress schema, and " +
        s"$hrLines unique lines of data for hour of day schema")
 
@@ -65,7 +67,7 @@ object IngestionStress extends App {
 
   val stressIngestor = Future {
     puts("Starting stressful ingestion...")
-    csvDF.sort($"medallion").write.format("filodb.spark").
+    csvDF.sort("medallion").write.format("filodb.spark").
       option("dataset", "taxi_medallion_seg").
       option("row_keys", "hack_license,pickup_datetime").
       option("segment_key", ":stringPrefix medallion 3").
@@ -74,14 +76,14 @@ object IngestionStress extends App {
     puts("Stressful ingestion done.")
 
     val df = sql.filoDataset("taxi_medallion_seg")
-    df.registerTempTable("taxi_medallion_seg")
+    df.createOrReplaceTempView("taxi_medallion_seg")
     df
   }
 
   val hrOfDayIngestor = Future {
     puts("Starting hour-of-day (easy) ingestion...")
 
-    dfWithHoD.sort($"hourOfDay").write.format("filodb.spark").
+    dfWithHoD.sort("hourOfDay").write.format("filodb.spark").
       option("dataset", "taxi_hour_of_day").
       option("row_keys", "hack_license,pickup_datetime").
       option("segment_key", ":timeslice pickup_datetime 4d").
@@ -92,7 +94,7 @@ object IngestionStress extends App {
     puts("hour-of-day (easy) ingestion done.")
 
     val df = sql.filoDataset("taxi_hour_of_day")
-    df.registerTempTable("taxi_hour_of_day")
+    df.createOrReplaceTempView("taxi_hour_of_day")
     df
   }
 
@@ -124,7 +126,7 @@ object IngestionStress extends App {
 
     // clean up!
     FiloDriver.shutdown()
-    sc.stop()
+    sparkSession.stop()
   }
 
   Await.result(fut, 99.minutes)

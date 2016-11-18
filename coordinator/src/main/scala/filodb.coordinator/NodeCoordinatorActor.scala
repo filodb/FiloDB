@@ -139,7 +139,7 @@ class NodeCoordinatorActor(metaStore: MetaStore,
       // Create the RichProjection, and ferret out any errors
       logger.debug(s"Creating projection from dataset $datasetObj, columns $columnSeq")
       val proj = RichProjection.make(datasetObj, columnSeq)
-      proj.recover {
+      proj.recover[Any] {
         case err: RichProjection.BadSchema => notify(BadSchema(err.toString))
       }
       for { richProj <- proj } createDatasetCoordActor(datasetObj, richProj)

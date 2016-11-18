@@ -1,5 +1,5 @@
 val mySettings = Seq(organization := "org.velvia",
-                     scalaVersion := "2.10.4",
+                     scalaVersion := "2.11.8",
                      parallelExecution in Test := false,
                      fork in Test := true,
                      resolvers ++= extraRepos,
@@ -58,7 +58,7 @@ lazy val stress = (project in file("stress"))
 
 val cassDriverVersion = "3.0.2"
 val akkaVersion    = "2.3.15"
-val sparkVersion   = "1.6.1"
+val sparkVersion   = "2.0.1"
 
 lazy val extraRepos = Seq(
   "twitter-repo" at "http://maven.twttr.com",
@@ -84,11 +84,11 @@ lazy val coreDeps = commonDeps ++ Seq(
   "com.typesafe.scala-logging" %% "scala-logging-slf4j" % "2.1.2",
   "org.slf4j"             % "slf4j-api"         % "1.7.10",
   "com.beachape"         %% "enumeratum"        % "1.2.1",
-  "org.velvia.filo"      %% "filo-scala"        % "0.2.4",
+  "org.velvia.filo"      %% "filo-scala"        % "0.2.6",
   "joda-time"             % "joda-time"         % "2.2",
   "org.joda"              % "joda-convert"      % "1.2",
   "io.spray"             %% "spray-caching"     % "1.3.2",
-  "net.ceedubs"          %% "ficus"             % "1.0.1",
+  "net.ceedubs"          %% "ficus"             % "1.1.2",
   "org.scodec"           %% "scodec-bits"       % "1.0.10",
   "org.scalactic"        %% "scalactic"         % "2.2.6",
   "com.markatta"         %% "futiles"           % "1.1.3",
