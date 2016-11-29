@@ -1,10 +1,11 @@
 package filodb.core.store
 
-import filodb.core._
 import org.velvia.filo.{RoutingRowReader, SeqRowReader}
-
 import org.scalatest.FunSpec
 import org.scalatest.Matchers
+
+import filodb.core._
+import filodb.core.binaryrecord.BinaryRecord
 
 class ChunkSetInfoSpec extends FunSpec with Matchers {
   import SingleKeyTypes._
@@ -54,8 +55,9 @@ class ChunkSetInfoSpec extends FunSpec with Matchers {
 
   import GdeltTestData._
   private def getCSI(id: Int, firstLine: Int, lastLine: Int): ChunkSetInfo =
-    ChunkSetInfo(id, 5000, RoutingRowReader(readers(firstLine), Array(4, 0)),
-                           RoutingRowReader(readers(lastLine), Array(4, 0)))
+    ChunkSetInfo(id, 5000,
+                 BinaryRecord(projection2.rowKeyBinSchema, RoutingRowReader(readers(firstLine), Array(4, 0))),
+                 BinaryRecord(projection2.rowKeyBinSchema, RoutingRowReader(readers(lastLine), Array(4, 0))))
 
   it("should find intersection range of composite keys with strings") {
     implicit val ordering = projection2.rowKeyType.rowReaderOrdering

@@ -662,7 +662,9 @@ To run benchmarks, from within SBT:
     cd jmh
     jmh:run -i 5 -wi 5 -f3
 
-You can get the huge variety of JMH options by running `jmh:run -help`.
+You can get the huge variety of JMH options by running `jmh:run -help`.  For stack profiling, do this:
+
+    jmh:run -i 5 -wi 5 -f3 -prof stack -jvmArgsAppend -Djmh.stack.lines=3
 
 ## You can help!
 

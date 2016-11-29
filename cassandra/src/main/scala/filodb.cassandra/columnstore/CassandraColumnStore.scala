@@ -11,6 +11,7 @@ import kamon.trace.{TraceContext, Tracer}
 import scala.concurrent.{ExecutionContext, Future}
 import filodb.cassandra.FiloCassandraConnector
 import filodb.core._
+import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.store._
 import filodb.core.metadata.{Column, Projection, RichProjection}
 
@@ -123,7 +124,8 @@ extends ColumnStore with CassandraColumnStoreScanner with StrictLogging {
       val segmentId = segment.segmentId
       val chunkTable = getOrCreateChunkTable(dataset)
       Future.traverse(segment.chunkSets) { chunkSet =>
-        chunkTable.writeChunks(binPartition, version, segmentId, chunkSet.info.id, chunkSet.chunks, stats)
+        chunkTable.writeChunks(binPartition, version, segmentId, chunkSet.info.firstKey.toSortableBytes(),
+                               chunkSet.info.id, chunkSet.chunks, stats)
       }.map { responses => responses.head }
     }
   }
@@ -235,27 +237,18 @@ trait CassandraColumnStoreScanner extends ColumnStoreScanner with StrictLogging 
   }
 
   def readChunks(dataset: DatasetRef,
-                 columns: Set[ColumnId],
-                 keyRange: BinaryKeyRange,
-                 version: Int)(implicit ec: ExecutionContext): Future[Seq[ChunkedData]] = {
-    val chunkTable = getOrCreateChunkTable(dataset)
-    Future.sequence(columns.toSeq.map(
-                    chunkTable.readChunks(keyRange.partition, version, _,
-                                          keyRange.start, keyRange.end,
-                                          keyRange.endExclusive)))
-  }
-
-  def readChunks(dataset: DatasetRef,
                  version: Int,
                  columns: Seq[ColumnId],
                  partition: Types.BinaryPartition,
                  segment: Types.SegmentId,
-                 chunkRange: (Types.ChunkID, Types.ChunkID))
+                 key1: (BinaryRecord, Types.ChunkID),
+                 key2: (BinaryRecord, Types.ChunkID))
                 (implicit ec: ExecutionContext): Future[Seq[ChunkedData]] = {
     val chunkTable = getOrCreateChunkTable(dataset)
     Future.sequence(columns.toSeq.map(
-                    chunkTable.readChunks(partition, version, _,
-                                          segment, chunkRange)))
+                    chunkTable.readChunks(partition, version, _, segment,
+                                          (key1._1.toSortableBytes(), key1._2),
+                                          (key2._1.toSortableBytes(), key2._2))))
   }
 
   def readFilters(dataset: DatasetRef,
@@ -310,6 +303,10 @@ trait CassandraColumnStoreScanner extends ColumnStoreScanner with StrictLogging 
       case SinglePartitionRangeScan(k) =>
         indexTable.getIndices(projection.toBinaryKeyRange(k), version)
 
+      case SinglePartitionRowKeyScan(part, _, _) =>
+        val binPart = projection.partitionType.toBytes(part.asInstanceOf[projection.PK])
+        indexTable.getIndices(binPart, version)
+
       case MultiPartitionScan(partitions) =>
         multiPartScan(projection, partitions, indexTable, version)
 
@@ -329,8 +326,8 @@ trait CassandraColumnStoreScanner extends ColumnStoreScanner with StrictLogging 
       indexIt.sortedGroupBy(index => (index.binPartition, index.segmentId))
              .filter { case ((binPart, _), _) => filterFunc(projection.partitionType.fromBytes(binPart)) }
              .map { case ((binPart, binSeg), records) =>
-               val skips = records.map { r => ChunkSetInfo.fromBytes(projection, r.data.array) }.toSeq
-               toSegIndex(projection, binPart, binSeg, skips)
+               val skips = records.map { r => ChunkSetInfo.fromBytes(projection, r.data.array) }.toArray
+               toSegIndex(projection, binPart, binSeg, filterSkips(projection, skips, method))
              }
     }
   }

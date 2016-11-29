@@ -1,11 +1,12 @@
 package filodb.jmh
 
+import ch.qos.logback.classic.{Level, Logger}
 import java.util.concurrent.TimeUnit
 import org.openjdk.jmh.annotations._
-import scalaxy.loops._
-import scala.language.postfixOps
-import scala.concurrent.{Await, Future}
 import scala.concurrent.duration._
+import scala.concurrent.{Await, Future}
+import scala.language.postfixOps
+import scalaxy.loops._
 
 import filodb.core._
 import filodb.core.metadata.{Column, Dataset}
@@ -47,6 +48,8 @@ import org.velvia.filo.{RowReader, TupleRowReader}
  */
 @State(Scope.Benchmark)
 class SparkReadBenchmark {
+  org.slf4j.LoggerFactory.getLogger("filodb").asInstanceOf[Logger].setLevel(Level.ERROR)
+
   val NumRows = 5000000
   // Source of rows
   val conf = (new SparkConf).setMaster("local[4]")

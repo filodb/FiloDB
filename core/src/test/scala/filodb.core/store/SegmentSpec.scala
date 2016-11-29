@@ -56,7 +56,7 @@ class SegmentSpec extends FunSpec with Matchers with BeforeAndAfter {
     val state = new TestSegmentState(projection, schema)
     val info1 = ChunkSetInfo(state.nextChunkId, 10, firstKey, lastKey)
     state.add(Seq((info1, emptyFilter)))
-    state.rowKeyChunks(4) = Array.fill[ByteBuffer](projection.rowKeyColumns.length)(null)
+    state.rowKeyChunks((firstKey, 4)) = Array.fill[ByteBuffer](projection.rowKeyColumns.length)(null)
 
     Thread sleep 10   // Just to be sure the timeUUID will be greater
     val chunkSet1 = ChunkSet(state, mapper(names take 4).toIterator)

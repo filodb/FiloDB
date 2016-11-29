@@ -76,11 +76,10 @@ extends ZeroCopyBinary with RowReader {
 
   /**
    * Returns an array of bytes which is sortable byte-wise for its contents (which is not the goal of
-   * BinaryRecord).  All the fields of this BinaryRecord must not be null.
+   * BinaryRecord).  Null fields will have default values read out.
    * The produced bytes cannot be deserialized from or extracted, it is strictly for comparison.
    */
   def toSortableBytes(numFields: Int = 2): Array[Byte] = {
-    assert(noneNull, "At least one field is NULL, you cannot use toSortableBytes")
     val fieldsToWrite = Math.min(fields.size, numFields)
     val buf = ByteBuf.create(100)
     for { fieldNo <- 0 until fieldsToWrite optimized } {
@@ -120,6 +119,10 @@ object BinaryRecord {
 
   def apply(projection: RichProjection, items: Seq[Any]): BinaryRecord =
     apply(projection.rowKeyBinSchema, SeqRowReader(items))
+
+  implicit object BinaryRecordOrdering extends Ordering[BinaryRecord] {
+    def compare(x: BinaryRecord, y: BinaryRecord): Int = x.compare(y)
+  }
 
   val MaxSmallOffset = 0x7fff
   val MaxSmallLen    = 0xffff

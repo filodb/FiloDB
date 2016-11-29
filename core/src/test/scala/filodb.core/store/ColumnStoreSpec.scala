@@ -7,6 +7,7 @@ import scala.concurrent.Future
 import scala.language.postfixOps
 
 import filodb.core._
+import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.metadata.{Dataset, Column, DataColumn, Projection, RichProjection}
 import filodb.core.Types
 import filodb.core.query.KeyFilter
@@ -114,9 +115,9 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
       segments should have length (1)
       val readSeg = segments.head.asInstanceOf[RowReaderSegment]
       readSeg.segInfo.segment should equal (segment.segInfo.segment)
-      readSeg.rowIterator().map(_.getLong(2)).toSeq should equal (Seq(28L, 29L, 39L, 40L, 24L, 25L))
-      readSeg.rowIterator().map(_.getString(0)).toSeq should equal (sortedFirstNames.drop(2) ++
-                                                                    Seq("Stacy", "Amari"))
+      readSeg.rowIterator().map(_.getLong(2)).toSeq should equal (Seq(24L, 25L, 28L, 29L, 39L, 40L))
+      readSeg.rowIterator().map(_.getString(0)).toSeq should equal (Seq("Stacy", "Amari") ++
+                                                                    sortedFirstNames.drop(2))
     }
   }
 
@@ -153,12 +154,12 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
 
     val chunks1 = colStore.readChunks(datasetRef, 0, Seq("first"),
                                       segment.binaryPartition, segment.segmentId,
-                                      (1, 2)).futureValue
+                                      (firstKey, 1L), (firstKey, 2L)).futureValue
     chunks1.head.chunks should equal (Nil)
 
     val chunks2 = colStore.readChunks(datasetRef, 0, Seq("first"),
                                       segment.binaryPartition, segment.segmentId,
-                                      (Long.MinValue, 0)).futureValue
+                                      (firstKey, Long.MinValue), (firstKey, 0L)).futureValue
     chunks2.head.chunks should have length (1)
   }
 
@@ -340,6 +341,29 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
     val method2 = FilteredPartitionRangeScan(paramSet.head, SegmentRange(0, 0), filterFunc)
     whenReady(colStore.scanRows(projection2, schema, 0, method2)) { rowIter =>
       rowIter.toSeq.length should equal (0)
+    }
+  }
+
+  it should "range scan by row keys (SinglePartitionRowKeyScan)" in {
+    import GdeltTestData._
+    val segmentsRows = getSegmentsByPartKey(projection4)
+    segmentsRows.foreach { case (seg, rows) =>
+      val segState = ourState(seg)
+      rows.grouped(10).foreach { rowGroup => seg.addChunkSet(segState, rowGroup) }
+      colStore.appendSegment(projection2, seg, 0).futureValue should equal (Success)
+    }
+
+    val paramSet = colStore.getScanSplits(datasetRef, 1)
+    paramSet should have length (1)
+
+    val startKey = BinaryRecord(projection4, Seq(10))
+    val endKey = BinaryRecord(projection4, Seq(18))
+    val method1 = SinglePartitionRowKeyScan(1979, startKey, endKey)
+    whenReady(colStore.scanRows(projection4, schema, 0, method1)) { rowIter =>
+      val rows = rowIter.map(r => (r.getInt(0), r.getInt(2))).toList
+      rows.length should equal (10)   // one chunk from ID=10 to ID=19
+      rows.map(_._2).toSet should equal (Set(197901))
+      rows.map(_._1).max should equal (19)
     }
   }
 

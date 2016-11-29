@@ -8,6 +8,7 @@ import scala.collection.mutable.HashMap
 import scala.concurrent.{ExecutionContext, Future}
 
 import filodb.core._
+import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.metadata.{Column, Projection, RichProjection}
 
 /**
@@ -63,7 +64,7 @@ extends ColumnStore with InMemoryColumnStoreScanner with StrictLogging {
       }
       for { chunkSet       <- segment.chunkSets
             (colId, bytes) <- chunkSet.chunks } {
-        chunkTree.put((colId, segmentId, chunkSet.info.id), bytes)
+        chunkTree.put((colId, segmentId, chunkSet.info.firstKey, chunkSet.info.id), bytes)
       }
 
       // Add index objects - not serialized for speed
@@ -74,34 +75,6 @@ extends ColumnStore with InMemoryColumnStoreScanner with StrictLogging {
       indexTree.put(segmentId, segmentIndex ++ segment.infosSkipsFilters)
 
       Success
-    }
-  }
-
-  // Add an efficient scanSegments implementation here, which can avoid much of the async
-  // cruft unnecessary for in-memory stuff
-  override def scanSegments(projection: RichProjection,
-                            columns: Seq[Column],
-                            version: Int,
-                            method: ScanMethod): Future[Iterator[Segment]] = {
-    for { indices <- scanIndices(projection, version, method) }
-    yield {
-      indices.map { case SegmentIndex(binPart, segId, part, segmentKey, infosAndSkips) =>
-        val segInfo = SegmentInfo(part, segmentKey)
-        val chunkInfos = ChunkSetInfo.collectSkips(infosAndSkips)
-        val segment = new RowReaderSegment(projection, segInfo, chunkInfos, columns)
-        stats.incrReadSegments(1)
-        for { column <- columns } {
-          val colName = column.name
-          val chunkTree = chunkDb.getOrElse((projection.datasetRef, binPart, version), EmptyChunkTree)
-          chunkTree.subMap((colName, segId, Long.MinValue), true, (colName, segId, Long.MaxValue), true)
-                   .entrySet.iterator.foreach { entry =>
-            val (_, _, chunkId) = entry.getKey
-            // NOTE: extremely important to duplicate the ByteBuffer, because of mutable state / multi threading
-            segment.addChunk(chunkId, colName, entry.getValue.duplicate)
-          }
-        }
-        segment
-      }
     }
   }
 
@@ -129,7 +102,7 @@ trait InMemoryColumnStoreScanner extends ColumnStoreScanner {
   import Types._
   import collection.JavaConversions._
 
-  type ChunkKey = (ColumnId, SegmentId, ChunkID)
+  type ChunkKey = (ColumnId, SegmentId, BinaryRecord, ChunkID)
   type ChunkTree = ConcurrentSkipListMap[ChunkKey, ByteBuffer]
   type IndexTree = ConcurrentSkipListMap[SegmentId, ChunkSetInfo.IndexAndFilterSeq]
   type IndexTreeLike = ConcurrentNavigableMap[SegmentId, ChunkSetInfo.IndexAndFilterSeq]
@@ -141,45 +114,24 @@ trait InMemoryColumnStoreScanner extends ColumnStoreScanner {
   def indices: HashMap[(DatasetRef, BinaryPartition, Int), IndexTree]
 
   def readChunks(dataset: DatasetRef,
-                 columns: Set[ColumnId],
-                 keyRange: BinaryKeyRange,
-                 version: Int)(implicit ec: ExecutionContext): Future[Seq[ChunkedData]] = {
-    val chunkTree = chunkDb.getOrElse((dataset, keyRange.partition, version),
-                                      EmptyChunkTree)
-    logger.debug(s"Reading chunks from columns $columns, keyRange $keyRange, version $version")
-    val chunks = for { column <- columns.toSeq } yield {
-      val startKey = (column, keyRange.start, Long.MinValue)
-      val endKey   = if (keyRange.endExclusive) { (column, keyRange.end, Long.MinValue) }
-                     else                       { (column, keyRange.end, Long.MaxValue) }
-      val it = chunkTree.subMap(startKey, true, endKey, !keyRange.endExclusive).entrySet.iterator
-      val chunkList = it.toSeq.map { entry =>
-        val (colId, segmentId, chunkId) = entry.getKey
-        // NOTE: extremely important to duplicate the ByteBuffer, because of mutable state / multi threading
-        (segmentId, chunkId, entry.getValue.duplicate)
-      }
-      ChunkedData(column, chunkList)
-    }
-    Future.successful(chunks)
-  }
-
-  def readChunks(dataset: DatasetRef,
                  version: Int,
                  columns: Seq[ColumnId],
                  partition: Types.BinaryPartition,
                  segment: Types.SegmentId,
-                 chunkRange: (Types.ChunkID, Types.ChunkID))
+                 key1: (BinaryRecord, Types.ChunkID),
+                 key2: (BinaryRecord, Types.ChunkID))
                 (implicit ec: ExecutionContext): Future[Seq[ChunkedData]] = {
     val chunkTree = chunkDb.getOrElse((dataset, partition, version),
                                       EmptyChunkTree)
-    logger.debug(s"Reading chunks from columns $columns, $partition/$segment, chunks $chunkRange")
+    logger.debug(s"Reading chunks from columns $columns, $partition/$segment, ($key1, $key2)")
     val chunks = for { column <- columns.toSeq } yield {
-      val startKey = (column, segment, chunkRange._1)
-      val endKey   = (column, segment, chunkRange._2)
+      val startKey = (column, segment, key1._1, key1._2)
+      val endKey   = (column, segment, key2._1, key2._2)
       val it = chunkTree.subMap(startKey, true, endKey, true).entrySet.iterator
       val chunkList = it.toSeq.map { entry =>
-        val (colId, segmentId, chunkId) = entry.getKey
+        val (colId, _, _, chunkId) = entry.getKey
         // NOTE: extremely important to duplicate the ByteBuffer, because of mutable state / multi threading
-        (segmentId, chunkId, entry.getValue.duplicate)
+        (chunkId, entry.getValue.duplicate)
       }
       ChunkedData(column, chunkList)
     }
@@ -252,6 +204,7 @@ trait InMemoryColumnStoreScanner extends ColumnStoreScanner {
     val partAndMaps = method match {
       case SinglePartitionScan(partition) => singlePartScan(projection, version, partition)
       case SinglePartitionRangeScan(k)    => singlePartRangeScan(projection, version, k)
+      case SinglePartitionRowKeyScan(part, _, _) => singlePartScan(projection, version, part)
 
       case MultiPartitionScan(partitions) => multiPartScan(projection, version, partitions)
       case MultiPartitionRangeScan(keyRanges) => multiPartRangeScan(projection, version, keyRanges)
@@ -267,7 +220,8 @@ trait InMemoryColumnStoreScanner extends ColumnStoreScanner {
     }
     val segIndices = partAndMaps.flatMap { case (binPart, indexTree) =>
       indexTree.entrySet.iterator.map { entry =>
-        toSegIndexWithFilter(projection, binPart, entry.getKey, entry.getValue)
+        val infosSkips = entry.getValue.map { case (info, skips, _) => (info, skips) }.toArray
+        toSegIndex(projection, binPart, entry.getKey, filterSkips(projection, infosSkips, method))
       }
     }
     Future.successful(segIndices)

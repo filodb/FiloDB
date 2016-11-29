@@ -9,10 +9,10 @@ import scala.collection.mutable.{ArrayBuffer, HashMap}
 import scala.concurrent.{Await, ExecutionContext}
 import scala.concurrent.duration._
 
-import filodb.core.{KeyType, KeyRange}
-import filodb.core.Types._
-import filodb.core.metadata.{Column, RichProjection}
 import filodb.core.binaryrecord.BinaryRecord
+import filodb.core.metadata.{Column, RichProjection}
+import filodb.core.Types._
+import filodb.core.{KeyType, KeyRange}
 
 //scalastyle:off
 case class SegmentInfo[+PK, +SK](partition: PK, segment: SK) {
@@ -96,7 +96,7 @@ abstract class SegmentState(val projection: RichProjection,
 
 
   // == Abstract methods ==
-  def getRowKeyChunks(chunkID: ChunkID): Array[ByteBuffer]
+  def getRowKeyChunks(key: BinaryRecord, chunkID: ChunkID): Array[ByteBuffer]
 
   def infosAndFilters: Seq[SegmentState.InfoAndFilter] = _infosAndFilters
   def masterFilter: BloomFilter[Long] = _masterFilter
@@ -144,8 +144,8 @@ class ColumnStoreSegmentState private(proj: RichProjection,
                                       settings: SegmentStateSettings)
                                      (implicit ec: ExecutionContext)
 extends SegmentState(proj, schema, settings) {
-  def getRowKeyChunks(chunkID: ChunkID): Array[ByteBuffer] =
-    Await.result(scanner.readRowKeyChunks(proj, version, chunkID)(segInfo.basedOn(proj)),
+  def getRowKeyChunks(key: BinaryRecord, chunkID: ChunkID): Array[ByteBuffer] =
+    Await.result(scanner.readRowKeyChunks(proj, version, key, chunkID)(segInfo.basedOn(proj)),
                  settings.timeout)
 }
 
@@ -164,7 +164,7 @@ object ColumnStoreSegmentState extends StrictLogging {
     logger.debug(s"Retrieving segment indexes and filters from column store: $range")
     val indexRead = scanner.scanIndices(proj, version, SinglePartitionRangeScan(range))
     val indexIt = Await.result(indexRead, settings.timeout)
-    val infos = indexIt.toSeq.headOption.map(_.infosAndSkips).getOrElse(Nil).map(_._1)
+    val infos = indexIt.toSeq.headOption.map(_.infosAndSkips.toSeq).getOrElse(Nil).map(_._1)
     val filterMap = if (infos.nonEmpty) {
      Await.result(scanner.readFilters(proj, version, (infos.head.id, infos.last.id))
                   (segInfo)(ec), settings.timeout).toMap
@@ -208,8 +208,6 @@ class ChunkSetSegment(val projection: RichProjection,
  * A segment optimized for reading and iterating rows of data out of the chunks.
  * addChunks is only intended for filling in chunk data
  * as it is read from the ColumnStore.  Then, you call rowIterator.
- * It assumes that the ChunkID is a counter with low cardinality, and stores everything
- * as arrays for extremely fast access.
  */
 class RowReaderSegment(val projection: RichProjection,
                        _segInfo: SegmentInfo[_, _],
@@ -241,13 +239,14 @@ class RowReaderSegment(val projection: RichProjection,
     chunkInfos
       .filter { case (info, _) => chunks contains info.id }
       .map { case (ChunkSetInfo(id, numRows, _, _), skipArray) =>
-      val reader = readerFactory(chunks(id), clazzes, numRows)
-      // Cheap check for empty chunks
-      if (clazzes.nonEmpty && reader.parsers(0).length == 0) {
-        logger.warn(s"empty chunk detected!  chunkId=$id in $segInfo")
-      }
-      (reader, numRows, skipArray)
-    }.toArray
+        val reader = readerFactory(chunks(id), clazzes, numRows)
+        // Cheap check for empty chunks
+        if (clazzes.nonEmpty && reader.parsers(0).length == 0) {
+          logger.warn(s"empty chunk detected!  chunkId=$id in $segInfo")
+        }
+        logger.trace(s"XX: reader for chunk id=$id with $numRows rows, skipArray=${skipArray.toList}")
+        (reader, numRows, skipArray)
+      }.toArray
   } else {
     // No columns, probably a select count(*) query
     // Return an empty vector of the exact length, to allow proper counting of records

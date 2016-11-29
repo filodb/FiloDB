@@ -9,11 +9,14 @@ import scala.concurrent.duration._
 import scala.language.existentials
 
 import filodb.core._
+import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.metadata.{Column, Projection, RichProjection}
 
 sealed trait ScanMethod
 case class SinglePartitionScan(partition: Any) extends ScanMethod
 case class SinglePartitionRangeScan(keyRange: KeyRange[_, _]) extends ScanMethod
+case class SinglePartitionRowKeyScan(partition: Any, startKey: BinaryRecord, endKey: BinaryRecord)
+  extends ScanMethod
 case class FilteredPartitionScan(split: ScanSplit,
                                  filter: Any => Boolean = (a: Any) => true) extends ScanMethod
 case class FilteredPartitionRangeScan(split: ScanSplit,

@@ -8,7 +8,7 @@ import org.boon.primitive.{ByteBuf, InputByteArray}
 import org.velvia.filo._
 import scala.collection.mutable.{ArrayBuffer, HashMap, TreeSet}
 import scala.math.Ordered._
-import scodec.bits._
+import scodec.bits.ByteVector
 
 import filodb.core._
 import filodb.core.binaryrecord.BinaryRecord
@@ -73,8 +73,10 @@ object ChunkSet extends StrictLogging {
 
 case class ChunkSetInfo(id: ChunkID,
                         numRows: Int,
-                        firstKey: RowReader,
-                        lastKey: RowReader) extends StrictLogging {
+                        firstKey: BinaryRecord,
+                        lastKey: BinaryRecord) extends StrictLogging {
+  def keyAndId: (BinaryRecord, ChunkID) = (firstKey, id)
+
   /**
    * Finds intersection key ranges between two ChunkSetInfos.
    * Scenario A:    [       ]
@@ -87,18 +89,25 @@ case class ChunkSetInfo(id: ChunkID,
    *                 [  other      ]
    */
   def intersection(other: ChunkSetInfo)
-                  (implicit ordering: Ordering[RowReader]): Option[(RowReader, RowReader)] = {
+                  (implicit ordering: Ordering[RowReader]): Option[(BinaryRecord, BinaryRecord)] =
     try {
-      if (lastKey >= other.firstKey && firstKey <= other.lastKey) {
-        Some((if (firstKey > other.firstKey) firstKey else other.firstKey,
-              if (lastKey < other.lastKey) lastKey else other.lastKey))
-      } else {
-        None
-      }
+      intersection(other.firstKey, other.lastKey)
     } catch {
       case e: Exception =>
         logger.warn(s"Got error comparing $this and $other...", e)
         None
+    }
+
+  /**
+   * Finds the intersection between this ChunkSetInfo and a range of keys (key1, key2)
+   */
+  def intersection(key1: BinaryRecord, key2: BinaryRecord)
+                  (implicit ordering: Ordering[RowReader]): Option[(BinaryRecord, BinaryRecord)] = {
+    if (lastKey >= key1 && firstKey <= key2) {
+      Some((if (firstKey > key1) firstKey else key1,
+            if (lastKey < key2) lastKey else key2))
+    } else {
+      None
     }
   }
 }
@@ -125,18 +134,13 @@ object ChunkSetInfo extends StrictLogging {
     val buf = ByteBuf.create(100)
     buf.writeLong(chunkSetInfo.id)
     buf.writeInt(chunkSetInfo.numRows)
-    buf.writeMediumByteArray(toRowKeyBytes(projection, chunkSetInfo.firstKey))
-    buf.writeMediumByteArray(toRowKeyBytes(projection, chunkSetInfo.lastKey))
+    buf.writeMediumByteArray(chunkSetInfo.firstKey.bytes)
+    buf.writeMediumByteArray(chunkSetInfo.lastKey.bytes)
     skips.foreach { case ChunkRowSkipIndex(id, overrides) =>
       buf.writeLong(id)
       buf.writeMediumIntArray(overrides.toArray)
     }
     buf.toBytes
-  }
-
-  private def toRowKeyBytes(projection: RichProjection, rowKey: RowReader): Array[Byte] = rowKey match {
-    case b: BinaryRecord  => b.bytes
-    case other: RowReader => BinaryRecord(projection.rowKeyBinSchema, rowKey).bytes
   }
 
   def fromBytes(projection: RichProjection, bytes: Array[Byte]): (ChunkSetInfo, ChunkSkips) = {
@@ -190,8 +194,8 @@ object ChunkSetInfo extends StrictLogging {
           val hitKeys = rowKeys.filter { k => bf.mightContain(k.cachedHash64) }
           logger.debug(s"Checking chunk $info: ${hitKeys.size} hitKeys")
           numHitKeys += hitKeys.size
-          (info.id, info.numRows, hitKeys)
-        }.filter(_._3.nonEmpty)
+          (info, hitKeys)
+        }.filter(_._2.nonEmpty)
       }
 
       // For each matching chunkId and set of hit keys, find possible position to skip
@@ -203,8 +207,8 @@ object ChunkSetInfo extends StrictLogging {
         chunkSetsNeedReadRowKey.increment
         chunkSetsHitKeyCount.record(numHitKeys)
       }
-      hitKeysByChunk.map { case (chunkId, numRows, keys) =>
-        val chunkKeys = state.getRowKeyChunks(chunkId)
+      hitKeysByChunk.map { case (ChunkSetInfo(chunkId, numRows, startKey, _), keys) =>
+        val chunkKeys = state.getRowKeyChunks(startKey, chunkId)
         val overrides = keys.flatMap { key =>
           binarySearchKeyChunks(state.projection, chunkKeys, numRows, key) match {
             case (pos, true) => Some(pos)
