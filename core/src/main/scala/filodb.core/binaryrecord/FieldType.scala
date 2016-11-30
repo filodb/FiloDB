@@ -1,8 +1,11 @@
 package filodb.core.binaryrecord
 
 import java.sql.Timestamp
+import org.boon.primitive.ByteBuf
 import org.velvia.filo.{RowReader, UnsafeUtils, ZeroCopyUTF8String}
 import org.velvia.filo.RowReader._
+
+import filodb.core.SingleKeyTypes.{Int32HighBit, Long64HighBit}
 import filodb.core.metadata.Column.ColumnType
 
 trait FieldType[@specialized T] {
@@ -19,6 +22,8 @@ trait FieldType[@specialized T] {
   def addFromReader(builder: BinaryRecordBuilder,
                     field: Field,
                     reader: RowReader): Unit
+
+  def writeSortable(data: BinaryRecord, field: Field, buf: ByteBuf): Unit
 }
 
 abstract class SimpleFieldType[@specialized T: TypedFieldExtractor] extends FieldType[T] {
@@ -51,6 +56,9 @@ object IntFieldType extends SimpleFieldType[Int] {
     UnsafeUtils.setInt(builder.base, builder.offset + field.fixedDataOffset, data)
     builder.setNotNull(field.num)
   }
+
+  final def writeSortable(data: BinaryRecord, field: Field, buf: ByteBuf): Unit =
+    buf.writeInt(extract(data, field) ^ Int32HighBit)
 }
 
 object LongFieldType extends SimpleFieldType[Long] {
@@ -62,6 +70,9 @@ object LongFieldType extends SimpleFieldType[Long] {
     UnsafeUtils.setLong(builder.base, builder.offset + field.fixedDataOffset, data)
     builder.setNotNull(field.num)
   }
+
+  final def writeSortable(data: BinaryRecord, field: Field, buf: ByteBuf): Unit =
+    buf.writeLong(extract(data, field) ^ Long64HighBit)
 }
 
 object BooleanFieldType extends SimpleFieldType[Boolean] {
@@ -71,6 +82,9 @@ object BooleanFieldType extends SimpleFieldType[Boolean] {
 
   final def add(builder: BinaryRecordBuilder, field: Field, data: Boolean): Unit =
     IntFieldType.add(builder, field, if (data) 1 else 0)
+
+  final def writeSortable(data: BinaryRecord, field: Field, buf: ByteBuf): Unit =
+    buf.writeByte(if (extract(data, field)) 1 else 0)
 }
 
 object DoubleFieldType extends SimpleFieldType[Double] {
@@ -82,6 +96,9 @@ object DoubleFieldType extends SimpleFieldType[Double] {
     UnsafeUtils.setDouble(builder.base, builder.offset + field.fixedDataOffset, data)
     builder.setNotNull(field.num)
   }
+
+  final def writeSortable(data: BinaryRecord, field: Field, buf: ByteBuf): Unit =
+    buf.writeDouble(extract(data, field))
 }
 
 object TimestampFieldType extends SimpleFieldType[Timestamp] {
@@ -91,6 +108,9 @@ object TimestampFieldType extends SimpleFieldType[Timestamp] {
 
   final def add(builder: BinaryRecordBuilder, field: Field, data: Timestamp): Unit =
     LongFieldType.add(builder, field, data.getTime)
+
+  final def writeSortable(data: BinaryRecord, field: Field, buf: ByteBuf): Unit =
+    LongFieldType.writeSortable(data, field, buf)
 }
 
 object UTF8StringFieldType extends SimpleFieldType[ZeroCopyUTF8String] {
@@ -110,5 +130,21 @@ object UTF8StringFieldType extends SimpleFieldType[ZeroCopyUTF8String] {
   override final def addNull(builder: BinaryRecordBuilder, field: Field): Unit = {
     // A string with offset 0 and length 0 -> ""
     UnsafeUtils.setInt(builder.base, builder.offset + field.fixedDataOffset, 0x80000000)
+  }
+
+  // Only write first 8 bytes of string, padded to 8 with 0's if needed
+  final def writeSortable(data: BinaryRecord, field: Field, buf: ByteBuf): Unit = {
+    val first8bytes = new Array[Byte](8)
+    val utf8str = extract(data, field)
+    if (utf8str.length < 8) {
+      UnsafeUtils.unsafe.copyMemory(utf8str.base, utf8str.offset,
+                                    first8bytes, UnsafeUtils.arayOffset, utf8str.length)
+      UnsafeUtils.unsafe.setMemory(first8bytes, UnsafeUtils.arayOffset + utf8str.length,
+                                   8 - utf8str.length, 0)
+    } else {
+      UnsafeUtils.unsafe.copyMemory(utf8str.base, utf8str.offset,
+                                    first8bytes, UnsafeUtils.arayOffset, 8)
+    }
+    buf.add(first8bytes)
   }
 }

@@ -1,5 +1,6 @@
 package filodb.core.binaryrecord
 
+import org.boon.primitive.ByteBuf
 import scala.language.existentials
 
 import filodb.core.metadata.Column
@@ -8,6 +9,8 @@ import filodb.core.metadata.Column.ColumnType
 final case class Field(num: Int, colType: ColumnType, fixedDataOffset: Int, fieldType: FieldType[_]) {
   final def get[T](record: BinaryRecord): T = fieldType.asInstanceOf[FieldType[T]].extract(record, this)
   final def getAny(record: BinaryRecord): Any = fieldType.extract(record, this)
+  final def writeSortable(record: BinaryRecord, buf: ByteBuf): Unit =
+    fieldType.writeSortable(record, this, buf)
 }
 
 /**

@@ -1,5 +1,6 @@
 package filodb.core.binaryrecord
 
+import org.boon.primitive.ByteBuf
 import org.velvia.filo.{RowReader, SeqRowReader, UnsafeUtils, ZeroCopyBinary, ZeroCopyUTF8String}
 import scala.language.postfixOps
 import scalaxy.loops._
@@ -25,6 +26,13 @@ extends ZeroCopyBinary with RowReader {
   final def notNull(fieldNo: Int): Boolean = {
     val word = fieldNo / 32
     ((UnsafeUtils.getInt(base, offset + word * 4) >> (fieldNo % 32)) & 1) == 0
+  }
+
+  final def noneNull: Boolean = {
+    for { field <- 0 until fields.size optimized } {
+      if (!notNull(field)) return false
+    }
+    true
   }
 
   final def getBoolean(columnNo: Int): Boolean = fields(columnNo).get[Boolean](this)
@@ -64,6 +72,21 @@ extends ZeroCopyBinary with RowReader {
     } else {
       asNewByteArray
     }
+  }
+
+  /**
+   * Returns an array of bytes which is sortable byte-wise for its contents (which is not the goal of
+   * BinaryRecord).  All the fields of this BinaryRecord must not be null.
+   * The produced bytes cannot be deserialized from or extracted, it is strictly for comparison.
+   */
+  def toSortableBytes(numFields: Int = 2): Array[Byte] = {
+    assert(noneNull, "At least one field is NULL, you cannot use toSortableBytes")
+    val fieldsToWrite = Math.min(fields.size, numFields)
+    val buf = ByteBuf.create(100)
+    for { fieldNo <- 0 until fieldsToWrite optimized } {
+      fields(fieldNo).writeSortable(this, buf)
+    }
+    buf.toBytes
   }
 }
 
