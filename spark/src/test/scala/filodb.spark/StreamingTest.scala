@@ -9,7 +9,7 @@ import org.scalatest.time.{Millis, Seconds, Span}
 
 import scala.collection.mutable
 import scala.concurrent.duration._
-import _root_.filodb.core._
+import filodb.core._
 import org.apache.spark.filodb.FiloDriver
 import org.scalatest.{BeforeAndAfter, BeforeAndAfterAll, FunSpec, Matchers}
 import org.scalatest.concurrent.ScalaFutures
