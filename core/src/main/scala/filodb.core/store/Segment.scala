@@ -273,34 +273,38 @@ class RowReaderSegment(val projection: RichProjection,
       new Iterator[RowReader] {
         var curChunk = 0
         var (curReader, curChunkLen, curSkiplist) = readers(curChunk)
-        private var i = 0
+        private var i = -1
         private var skipIndex = 0
 
         // NOTE: manually iterate over the chunkIds / rowNums FiloVectors, instead of using the
         // iterator methods, which are extremely slow and boxes everything
         final def hasNext: Boolean = {
-          // Skip past any rows that need skipping, then determine if we have rows left
-          while (skipIndex < curSkiplist.size && i == curSkiplist(skipIndex)) {
+          var skipped = false
+          // Keep advancing until we hit a row we are not skipping
+          do {
+            // advance one, including next chunk
             i += 1
-            skipIndex += 1
-          }
-          if (i < curChunkLen) return true
-          // So at this point we've reached end of current chunk.  See if more chunks
-          if (curChunk < readers.size - 1) {
-            // At end of current chunk, but more chunks to go
-            curChunk += 1
-            curReader = readers(curChunk)._1
-            curSkiplist = readers(curChunk)._3
-            curChunkLen = readers(curChunk)._2
-            i = 0
-            skipIndex = 0
-            true
-          } else { false }
+            if (i >= curChunkLen) {
+              // So at this point we've reached end of current chunk.  See if more chunks
+              if (curChunk < readers.size - 1) {
+                // At end of current chunk, but more chunks to go
+                curChunk += 1
+                curReader = readers(curChunk)._1
+                curSkiplist = readers(curChunk)._3
+                curChunkLen = readers(curChunk)._2
+                i = 0
+                skipIndex = 0
+              } else { return false }
+            }
+            // skip?  If so, go to next skip index
+            skipped = skipIndex < curSkiplist.size && i == curSkiplist(skipIndex)
+            if (skipped) skipIndex += 1
+          } while (skipped)
+          true
         }
 
         final def next: RowReader = {
           curReader.setRowNo(i)
-          i += 1
           curReader
         }
       }
