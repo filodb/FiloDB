@@ -4,7 +4,7 @@ import com.datastax.driver.core.Row
 import com.typesafe.config.Config
 import filodb.cassandra.FiloCassandraConnector
 import filodb.core.metadata.IngestionStateData
-import filodb.core.{AlreadyExists, DatasetRef, NotFoundError, Response}
+import filodb.core.{AlreadyExists, Response}
 
 import scala.concurrent.{ExecutionContext, Future}
 /**
@@ -76,12 +76,12 @@ sealed class IngestionStateTable(val config: Config)
                               database,
                               name,
                               version: java.lang.Integer)
-                        ).toIterator.map { it => it.toSeq }
+                        ).toIterator.map(_.toSeq)
 
   def getIngestionStateByNodeActor(nodeActor: String) : Future[Seq[IngestionStateData]] =
     session.executeAsync(ingestionStSelectByActorCql.bind(
                             nodeActor)
-                        ).toIterator.map {_.map(fromRow).toSeq}
+                        ).toIterator.map(_.map(fromRow).toSeq)
 
   def deleteIngestionStateByNodeActor(nodeActor: String): Future[Response] =
     execCql(s"DELETE FROM $tableString WHERE nodeactor = '${nodeActor}'")
@@ -95,6 +95,6 @@ sealed class IngestionStateTable(val config: Config)
                            state: String, exceptions: String, version: Int = 0): Future[Response] =
     execCql(s"UPDATE $tableString SET state = '${state}', exceptions = '${exceptions}' " +
             s"WHERE nodeactor = '${nodeActor}' AND database = '${keyspace}' AND dataset = '${name}'" +
-            s"AND version = ${version: java.lang.Integer}")
+            s"AND version = $version")
 
 }

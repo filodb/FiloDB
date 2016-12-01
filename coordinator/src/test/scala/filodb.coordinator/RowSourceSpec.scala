@@ -43,7 +43,7 @@ with CoordinatorSetup with ScalaFutures {
   val ref = DatasetRef(dataset1.name)
   schema.foreach { col => metaStore.newColumn(col, ref).futureValue should equal (Success) }
   var coordActor = system.actorOf(NodeCoordinatorActor.props(metaStore, reprojector,
-                                                    columnStore, config, cluster.selfAddress))
+                                                    columnStore, config))
 
   before {
     columnStore.dropDataset(DatasetRef(dataset1.name)).futureValue
@@ -53,7 +53,7 @@ with CoordinatorSetup with ScalaFutures {
  override def afterAll(): Unit ={
     super.afterAll()
     gracefulStop(coordActor, 3.seconds.dilated, PoisonPill).futureValue
-    val walDir = config.getString("memtable.memtable-wal-dir")
+    val walDir = config.getString("write-ahead-log.memtable-wal-dir")
     val path = Path.fromString (walDir)
     Try(path.deleteRecursively(continueOnFailure = false))
   }

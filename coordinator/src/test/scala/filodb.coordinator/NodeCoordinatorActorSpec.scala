@@ -58,13 +58,13 @@ with CoordinatorSetup with ScalaFutures {
     metaStore.clearAllData().futureValue
     columnStore.dropDataset(DatasetRef(dataset1.name)).futureValue
     coordActor = system.actorOf(NodeCoordinatorActor.props(metaStore, reprojector,
-                                                    columnStore, config, cluster.selfAddress))
+                                                    columnStore, config))
     probe = TestProbe()
   }
 
   after {
     gracefulStop(coordActor, 3.seconds.dilated, PoisonPill).futureValue
-    val walDir = config.getString("memtable.memtable-wal-dir")
+    val walDir = config.getString("write-ahead-log.memtable-wal-dir")
     val path = Path.fromString (walDir)
     Try(path.deleteRecursively(continueOnFailure = false))
   }
@@ -253,8 +253,12 @@ with CoordinatorSetup with ScalaFutures {
     probe.send(coordActor, ReloadDCA)
     probe.expectMsg(DCAReady)
 
+    var numRows = 0
+    if(config.getBoolean("write-ahead-log.write-ahead-log-enabled")){
+      numRows = 99
+    }
     probe.send(coordActor, GetIngestionStats(ref, 0))
-    probe.expectMsg(DatasetCoordinatorActor.Stats(0, 0, 0, 99, -1, 0))
+    probe.expectMsg(DatasetCoordinatorActor.Stats(0, 0, 0, numRows, -1, 0))
 
     // Ingest more rows to create new WAL file
     probe.send(coordActor, CheckCanIngest(ref, 0))

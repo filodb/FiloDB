@@ -75,7 +75,7 @@ trait CoordinatorSetup {
 
   // TODO: consider having a root actor supervising everything
   lazy val coordinatorActor =
-    system.actorOf(NodeCoordinatorActor.props(metaStore, reprojector, columnStore, config, cluster.selfAddress),
+    system.actorOf(NodeCoordinatorActor.props(metaStore, reprojector, columnStore, config),
                    "coordinator")
 
   def shutdown(): Unit = {

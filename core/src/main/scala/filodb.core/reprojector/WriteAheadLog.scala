@@ -83,8 +83,8 @@ class WriteAheadLogBuffer(config: Config,
                           position: Int,
                           actorPath: String) {
 
-  private val bufferSize = config.getInt("memtable.mapped-byte-buffer-size")
-  private val walDir = config.getString("memtable.memtable-wal-dir")
+  private val bufferSize = config.getInt("write-ahead-log.mapped-byte-buffer-size")
+  private val walDir = config.getString("write-ahead-log.memtable-wal-dir")
 
   val walFile = initWalFile
 

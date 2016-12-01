@@ -9,6 +9,9 @@ import _root_.filodb.core._
 import _root_.filodb.core.metadata.{Column, DataColumn, Dataset}
 import org.apache.spark.filodb.FiloDriver
 
+import scala.util.Try
+import scalax.file.Path
+
 /**
  * Test the InMemoryColumnStore
  */
@@ -22,6 +25,7 @@ class InMemoryStoreTest extends SparkTestBase {
                             .set("spark.filodb.store", "in-memory")
                             .set("spark.filodb.memtable.min-free-mb", "10")
                             .set("spark.ui.enabled", "false")
+                            .set("write-ahead-log.memtable-wal-dir","/tmp/filodb/wal")
   val sc = new SparkContext(conf)
   val sql = new SQLContext(sc)
   FiloDriver.init(sc)
@@ -31,6 +35,12 @@ class InMemoryStoreTest extends SparkTestBase {
 
   val segCol = ":string 0"
   val testProjections = Seq(dataset1.projections.head)
+
+  after {
+    val walDir = conf.get("write-ahead-log.memtable-wal-dir")
+    val path = Path.fromString (walDir)
+    Try(path.deleteRecursively(continueOnFailure = false))
+  }
 
   it("should be able to write to InMemoryColumnStore with multi-column partition keys") {
     import sql.implicits._

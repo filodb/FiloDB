@@ -55,7 +55,7 @@ class FiloMemTable(val projection: RichProjection,
 
   private var appendStore = new FiloAppendStore(projection, config, version, actorPath, reloadFlag)
 
-  val walDir = config.getString("memtable.memtable-wal-dir")
+  val walDir = config.getString("write-ahead-log.memtable-wal-dir")
 
   // NOTE: No synchronization required, because MemTables are used within an actor.
   // See InMemoryMetaStore for a thread-safe design
@@ -108,7 +108,7 @@ class FiloMemTable(val projection: RichProjection,
           loadResult = loadChunks(walfiles(index))
           logger.debug(s"Loaded WAL file successfully into Memtable-2:${loadResult._2}, ${loadResult._1}")
           if (index < walfiles.length - 1) {
-            // TODO: if there is more than one wal file then delete files and keep only the last one
+            // TODO @parekuti: if there is more than one wal file then delete files and keep only the last one
           } else {
             initWALLogFile(Some(walfiles(index)), loadResult._2, loadResult._1)
           }
@@ -117,8 +117,8 @@ class FiloMemTable(val projection: RichProjection,
         logger.debug(s"No Memtable WAL files exists")
         initWALLogFile(None, false, 0)
       }
-    }catch{
-      // TODO: Handle NoSuchFileException errors
+    } catch {
+      // TODO @parekuti: Handle NoSuchFileException errors
       case e: Exception =>
         logger.error(s"Error while scanning Memtable WAL folders:${e.getMessage}")
         throw e
@@ -129,7 +129,7 @@ class FiloMemTable(val projection: RichProjection,
                              setWalFile: Boolean,
                              position: Int): Unit = {
     if (setWalFile) {
-      appendStore.setWalAHeadLogFile(recentFile, position)
+      appendStore.setWriteAheadLogFile(recentFile, position)
     } else {
       appendStore = new FiloAppendStore(projection, config, version, actorPath, false)
     }
@@ -150,9 +150,9 @@ class FiloMemTable(val projection: RichProjection,
         }
       }
       (walReader.buffer.position(), true)
-    }else{
+    } else {
       logger.error(s"Unable to load WAL file: ${path.getFileName} due to invalid WAL header format")
-      // TODO: Move invalid WAL file
+      // TODO @parekuti: Move invalid WAL file
       (0, false)
     }
   }

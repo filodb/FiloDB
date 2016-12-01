@@ -24,7 +24,7 @@ class CassandraMetaStore(config: Config)
     datasetTable.createKeyspace(datasetTable.keyspace)
     for { dtResp <- datasetTable.initialize()
           ctResp <- columnTable.initialize()
-          istResp <- ingestionStateTable.initialize()}
+          istResp <- ingestionStateTable.initialize() }
     yield { istResp }
   }
 

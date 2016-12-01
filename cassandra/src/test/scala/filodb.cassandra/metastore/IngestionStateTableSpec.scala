@@ -29,21 +29,21 @@ class IngestionStateTableSpec extends FlatSpec with AsyncTest {
   }
 
   "insertIngestionState" should "create an entry into table, then return already exists" in {
-    whenReady(ingestionStateTable.insertIngestionState("nodeactor1","test","dataset1",
-      0,"","Started"), timeout) { response =>
+    whenReady(ingestionStateTable.insertIngestionState("nodeactor1", "test", "dataset1",
+      0, "", "Started"), timeout) { response =>
       response should equal (Success)
     }
 
     // Second time around, entry for dataset already exists
-    whenReady(ingestionStateTable.insertIngestionState("nodeactor1","test","dataset1", 0,"","Started"), timeout) {
+    whenReady(ingestionStateTable.insertIngestionState("nodeactor1", "test", "dataset1", 0, "", "Started"), timeout) {
       response => response should equal (AlreadyExists)
     }
 
-    whenReady(ingestionStateTable.insertIngestionState("nodeactor1","test","dataset2", 0,"","Started"), timeout) {
+    whenReady(ingestionStateTable.insertIngestionState("nodeactor1", "test", "dataset2", 0, "", "Started"), timeout) {
       response => response should equal (Success)
     }
 
-    whenReady(ingestionStateTable.insertIngestionState("nodeactor1","test","dataset3", 0,"","Started"), timeout) {
+    whenReady(ingestionStateTable.insertIngestionState("nodeactor1", "test", "dataset3", 0, "", "Started"), timeout) {
       response => response should equal (Success)
     }
   }
@@ -64,12 +64,14 @@ class IngestionStateTableSpec extends FlatSpec with AsyncTest {
 
   "getIngestionStateByDataset" should "fetch entry for a given dataset" in {
     // valid dataset
-    whenReady(ingestionStateTable.getIngestionStateByDataset("nodeactor1","test","dataset1",0), timeout) { response =>
+    whenReady(ingestionStateTable.getIngestionStateByDataset("nodeactor1", "test", "dataset1", 0),
+      timeout) { response =>
       response.length should equal(1)
     }
 
     // invalid dataset
-    whenReady(ingestionStateTable.getIngestionStateByDataset("nodeactor1","test","invalidds",0), timeout) { response =>
+    whenReady(ingestionStateTable.getIngestionStateByDataset("nodeactor1", "test", "invalidds", 0),
+      timeout) { response =>
       response.length should equal(0)
     }
   }
@@ -87,12 +89,12 @@ class IngestionStateTableSpec extends FlatSpec with AsyncTest {
 
   "deleteIngestationStateByDataset" should "fetch entry for a given dataset" in {
     // valid dataset
-    whenReady(ingestionStateTable.deleteIngestionStateByDataset("nodeactor1","test","dataset1",0), timeout) {
+    whenReady(ingestionStateTable.deleteIngestionStateByDataset("nodeactor1", "test", "dataset1", 0), timeout) {
       response => response should equal(Success)
     }
 
     // invalid dataset
-    whenReady(ingestionStateTable.deleteIngestionStateByDataset("nodeactor1","test","invalidds",0), timeout) {
+    whenReady(ingestionStateTable.deleteIngestionStateByDataset("nodeactor1", "test", "invalidds", 0), timeout) {
       response => response should equal(Success)
     }
   }
@@ -102,7 +104,7 @@ class IngestionStateTableSpec extends FlatSpec with AsyncTest {
     whenReady(ingestionStateTable.deleteIngestionStateByNodeActor("nodeactor1"), timeout) { response =>
       response should equal(Success)
     }
-    // TODO: Fix this invalid node actor path
+    // TODO @parekuti: Fix this invalid node actor path
     whenReady(ingestionStateTable.deleteIngestionStateByNodeActor("invalidactor"), timeout) { response =>
       response should equal(Success)
     }
@@ -119,7 +121,7 @@ class IngestionStateTableSpec extends FlatSpec with AsyncTest {
       response should equal (Success)
     }
 
-    // TODO: Drop table for second time
+    // TODO @parekuti: Drop table for second time
   }
 
 }

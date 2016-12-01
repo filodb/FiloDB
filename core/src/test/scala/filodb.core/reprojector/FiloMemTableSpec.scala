@@ -21,8 +21,9 @@ class FiloMemTableSpec extends FunSpec with Matchers with BeforeAndAfter {
     // /var/folders/tv/qrqnpyzj0qdfgw122hf1d7zr0000gn/T
 
     config = ConfigFactory.parseString(
-      s"""filodb.memtable.memtable-wal-dir = ${tempDir}
-          filodb.memtable.mapped-byte-buffer-size = 1024
+      s"""filodb.write-ahead-log.memtable-wal-dir = ${tempDir}
+          filodb.write-ahead-log.mapped-byte-buffer-size = 2048
+          filodb.write-ahead-log.write-ahead-log-enabled = false
        """)
       .withFallback(ConfigFactory.load("application_test.conf"))
       .getConfig("filodb")
@@ -30,7 +31,7 @@ class FiloMemTableSpec extends FunSpec with Matchers with BeforeAndAfter {
 
   val segInfo = SegmentInfo(Dataset.DefaultPartitionKey, 0)
   val version = 0
-  val actorAddress = "10.1.10.12" + ":" + "1011"
+  val actorAddress = "localhost"
 
   val namesWithPartCol = (0 until 50).flatMap { partNum =>
     names.map { t => (t._1, t._2, t._3, t._4, Some(partNum.toString)) }
@@ -42,10 +43,10 @@ class FiloMemTableSpec extends FunSpec with Matchers with BeforeAndAfter {
     util.Random.shuffle(namesWithPartCol ++ namesWithPartCol.take(3)
                .map { t => (t._1, t._2, t._3, t._4, None) })
 
-  after{
-    val walDir = config.getString("memtable.memtable-wal-dir")
+  after {
+    val walDir = config.getString("write-ahead-log.memtable-wal-dir")
     val path = Path.fromString (walDir)
-    Try(path.deleteRecursively(continueOnFailure = false))
+    Try (path.deleteRecursively(continueOnFailure = false))
   }
 
   // Turn this into a common spec for all memTables

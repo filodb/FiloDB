@@ -1,6 +1,7 @@
 package filodb.coordinator
 
 import akka.actor.{ActorRef, Address, PoisonPill, Props, SupervisorStrategy, Terminated}
+import akka.cluster.Cluster
 import akka.event.LoggingReceive
 import com.typesafe.config.Config
 import net.ceedubs.ficus.Ficus._
@@ -22,7 +23,7 @@ import filodb.core.reprojector.Reprojector
  * - Metadata changes (dataset/column changes)
  * - Caching changes to dataset metadata?
  * - Supervising, spinning up, cleaning up DatasetCoordinatorActors
- * - Forwarding new changes (rows) to other NodeCoordinatorActors if they are not localØ
+ * - Forwarding new changes (rows) to other NodeCoordinatorActors if they are not local
  * - Forwarding rows to DatasetCoordinatorActors
  *
  * It is called by local (eg HTTP) as well as remote (eg Spark ETL) processes.
@@ -44,9 +45,8 @@ object NodeCoordinatorActor {
   def props(metaStore: MetaStore,
             reprojector: Reprojector,
             columnStore: ColumnStore,
-            config: Config,
-            actorAddress: Address): Props =
-    Props(classOf[NodeCoordinatorActor], metaStore, reprojector, columnStore, config, actorAddress)
+            config: Config): Props =
+    Props(classOf[NodeCoordinatorActor], metaStore, reprojector, columnStore, config)
 }
 
 /**
@@ -57,8 +57,7 @@ object NodeCoordinatorActor {
 class NodeCoordinatorActor(metaStore: MetaStore,
                            reprojector: Reprojector,
                            columnStore: ColumnStore,
-                           config: Config,
-                           actorAddress: Address) extends BaseActor {
+                           config: Config) extends BaseActor {
   import NodeCoordinatorActor._
   import DatasetCommands._
   import IngestionCommands._
@@ -66,7 +65,8 @@ class NodeCoordinatorActor(metaStore: MetaStore,
 
   val dsCoordinators = new collection.mutable.HashMap[(DatasetRef, Int), ActorRef]
   val dsCoordNotify = new collection.mutable.HashMap[(DatasetRef, Int), List[ActorRef]]
-  val actorPath = actorAddress.host.getOrElse("None")
+  val clusterSelfAddr = Cluster(context.system).selfAddress
+  val actorPath = clusterSelfAddr.host.getOrElse("None")
   // By default, stop children DatasetCoordinatorActors when something goes wrong.
   override val supervisorStrategy = SupervisorStrategy.stoppingStrategy
 
@@ -137,11 +137,11 @@ class NodeCoordinatorActor(metaStore: MetaStore,
     def notify(msg: Any): Unit = { self ! DatasetCreateNotify(dataset, version, msg) }
     def createDatasetCoordActor(datasetObj: Dataset, richProj: RichProjection): Unit = {
       val props = DatasetCoordinatorActor.props(richProj, version, columnStore,
-                                                reprojector, actorPath, config, reloadFlag)
+                                                reprojector, config, reloadFlag)
       val ref = context.actorOf(props, s"ds-coord-${datasetObj.name}-$version")
       self ! AddDatasetCoord(originator,dataset, version, ref, reloadFlag)
       if (!reloadFlag) {
-        val colDefinitions =richProj.columns.foldLeft("")(_  + _.toString + ";").dropRight(1)
+        val colDefinitions =richProj.getDataColumns.map(_.toString).mkString("\002")
         metaStore.insertIngestionState(actorPath, dataset, colDefinitions, "Started", version)
         notify(IngestionReady)
       }
@@ -181,24 +181,24 @@ class NodeCoordinatorActor(metaStore: MetaStore,
 
   private def reloadDatasetCoordActors(originator: ActorRef) : Unit = {
     logger.debug(s"Reload of dataset coordinator actors has started for path: $actorPath")
-    val ingestionEntries = metaStore.getAllIngestionEntries(actorPath)
-    ingestionEntries.onComplete{
-      case scala.util.Success(entries) =>
-        if(entries.length > 0 ) {
-          entries.foreach { ingestion =>
-            val data = ingestion.toString().split("\001")
-            val ref = DatasetRef(data(2), Some(data(1)))
-            val columns = data(4).split(";").map(col => DataColumn.fromString(col, data(2)))
-            val projection = RichProjection(Await.result(metaStore.getDataset(ref), 10.second), columns)
-            val colNames = projection.columns.map(_.name)
-            setupIngestion(originator, ref, colNames, data(3).toInt, true)
-          }
-        }else{
-          originator ! DCAReady
+
+    metaStore.getAllIngestionEntries(actorPath).map { entries =>
+      if(entries.length > 0 ) {
+        entries.foreach { ingestion =>
+          val data = ingestion.toString().split("\001")
+          val ref = DatasetRef(data(2), Some(data(1)))
+          val columns = data(4).split("\002").map(col => DataColumn.fromString(col, data(2)))
+          val projection = RichProjection(Await.result(metaStore.getDataset(ref), 10.second), columns)
+          val colNames = projection.getDataColumns.map(_.name)
+          setupIngestion(originator, ref, colNames, data(3).toInt, true)
         }
-      case scala.util.Failure(error) =>
-        originator ! StorageEngineException(error)
+      }else{
+        originator ! DCAReady
+      }
+    }.recover { case e: Exception =>
+      originator ! StorageEngineException(e)
     }
+
   }
 
   def datasetHandlers: Receive = LoggingReceive {
@@ -257,7 +257,7 @@ class NodeCoordinatorActor(metaStore: MetaStore,
                     .foreach { case ((datasetRef,version), _) =>
                       logger.warn(s"Actor $childRef has terminated!  Ingestion for ${(datasetRef,version)} will stop.")
                       dsCoordinators.remove((datasetRef,version))
-                      // TODO: update ingestion state
+                      // TODO @parekuti: update ingestion state
                       metaStore.updateIngestionState(actorPath,datasetRef,"Failed","Error during ingestion",version)
                     }
 

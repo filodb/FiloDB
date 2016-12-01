@@ -51,9 +51,9 @@ class FiloAppendStore(val projection: RichProjection,
   private var wal: Option[WriteAheadLog] = createWalAheadLog
 
   def createWalAheadLog : Option[WriteAheadLog] = {
-    if (!reloadFlag) {
+    if (!reloadFlag && config.getBoolean("write-ahead-log.write-ahead-log-enabled")) {
       logger.debug(s"Creating WriteAheadLog for dataset: (${projection.datasetRef}, ${version})")
-      Some(new WriteAheadLog(config, projection.datasetRef, actorPath, projection.columns, version))
+      Some(new WriteAheadLog(config, projection.datasetRef, actorPath, projection.getDataColumns, version))
     }else{
       None
     }
@@ -89,7 +89,9 @@ class FiloAppendStore(val projection: RichProjection,
     readers += new FastFiloRowReader(chunkArray, clazzes, finalLength)
 
     // write chunks to WAL
-    wal.foreach(_.writeChunks(chunkArray))
+    if (config.getBoolean("write-ahead-log.write-ahead-log-enabled")) {
+      wal.foreach(_.writeChunks(chunkArray))
+    }
 
     // Reset builder if it was at least chunkSize rows
     if (finalLength >= chunkSize) builder.reset()
@@ -110,12 +112,12 @@ class FiloAppendStore(val projection: RichProjection,
     (nextChunkIndex, rowreader)
   }
 
-  def setWalAHeadLogFile(recentFile: Option[Path], position: Int): Unit = {
+  def setWriteAheadLogFile(recentFile: Option[Path], position: Int): Unit = {
     val pathObj = recentFile.getOrElse(Paths.get(""))
     logger.debug(s"Creating WriteAheadLog for dataset: ${projection.datasetRef}" +
                 s" using path object: ${pathObj.getFileName}")
     wal = Some(new WriteAheadLog(config, projection.datasetRef, actorPath,
-                                projection.columns, version, pathObj, position))
+                                projection.getDataColumns, version, pathObj, position))
   }
 
   /**

@@ -124,7 +124,7 @@ object FiloExecutor extends FiloSetup with StrictLogging {
    * @param role the Akka Cluster role, either "executor" or "driver"
    */
   def init(filoConfig: Config): Unit = synchronized {
-    var startIngestion = true
+
     _config.getOrElse {
       this.role = "executor"
       _config = Some(filoConfig)
@@ -132,34 +132,42 @@ object FiloExecutor extends FiloSetup with StrictLogging {
 
       coordinatorActor       // force coordinator to start
 
-      // start reloading WAL files
-      implicit val timeout = Timeout(FiniteDuration(10, SECONDS))
-      val resp = coordinatorActor ? ReloadDCA
-      try {
-        Await.result(resp, timeout.duration) match {
-          case DCAReady =>
-            logger.debug("Reload of dataset coordinator actors is completed")
-          case _ =>
-            logger.debug("Reload is not complete")
-        }
-      } catch {
-        case e: Throwable =>
-          e.printStackTrace()
-          logger.error(s"Exception occurred while reloading dataset cordinator actors:${e.getMessage}")
-          startIngestion = false
-      }
-
-      if(startIngestion) {
+      // start ingesting data once reload DCA process is complete
+      if (startReloadDCA()) {
         // get address from config and join cluster.  note: it's ok to join cluster multiple times
         val addr = AddressFromURIString.parse(filoConfig.getString("spark-driver-addr"))
         logger.info(s"Initializing FiloExecutor clustering by joining driver at $addr...")
         cluster.join(addr)
         Thread sleep 1000
-      }else{
+      } else {
+        // Stop ingestion if there is an exception occurs during reload DCA
         shutdown()
         FiloDriver.shutdown()
         sys.exit(2)
       }
     }
+  }
+
+  def startReloadDCA(): Boolean = {
+    implicit val timeout = Timeout(FiniteDuration(10, SECONDS))
+    val resp = coordinatorActor ? ReloadDCA
+    var isContinue = true
+    // start reloading WAL files if reload-wal-enabled is set to true
+    if (config.getBoolean("write-ahead-log.reload-wal-enabled")) {
+      try {
+        Await.result(resp, timeout.duration) match {
+          case DCAReady =>
+            logger.debug("Reload of dataset coordinator actors is completed")
+          case _ =>
+            logger.debug("Reload is not complete, and received wrong acknowledgement")
+            isContinue = false
+        }
+      } catch {
+        case e: Exception =>
+          logger.error(s"Exception occurred while reloading dataset coordinator actors:${e.printStackTrace()}")
+          isContinue = false
+      }
+    }
+    isContinue
   }
 }

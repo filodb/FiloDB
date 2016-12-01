@@ -1,6 +1,7 @@
 package filodb.coordinator
 
 import akka.actor.{Actor, ActorRef, Address, Cancellable, Props}
+import akka.cluster.Cluster
 import akka.event.LoggingReceive
 import com.typesafe.config.Config
 import filodb.coordinator.IngestionCommands.DCAReady
@@ -73,16 +74,15 @@ object DatasetCoordinatorActor {
             version: Int,
             columnStore: ColumnStore,
             reprojector: Reprojector,
-            actorPath: String,
             config: Config,
             reloadFlag: Boolean = false): Props =
     Props(classOf[DatasetCoordinatorActor], projection, version, columnStore,
-              reprojector,  actorPath, config, reloadFlag)
+              reprojector,  config, reloadFlag)
 
   /**
     * Creates new Memtable using WAL file
     */
-  case class InitIngestion(replyTo: ActorRef) extends DSCoordinatorMessage
+  final case class InitIngestion(replyTo: ActorRef) extends DSCoordinatorMessage
 
 }
 
@@ -121,7 +121,6 @@ private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
                                               version: Int,
                                               columnStore: ColumnStore,
                                               reprojector: Reprojector,
-                                              actorPath: String,
                                               config: Config,
                                               var reloadFlag: Boolean = false) extends BaseActor {
   import DatasetCoordinatorActor._
@@ -166,6 +165,9 @@ private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
   val ackTos = new ArrayBuffer[(ActorRef, Long)]
   var mTableWriteTask: Option[Cancellable] = None
   var mTableFlushTask: Option[Cancellable] = None
+
+  val clusterSelfAddr = Cluster(context.system).selfAddress
+  val actorPath = clusterSelfAddr.host.getOrElse("None")
 
   def makeNewTable(): MemTable = new FiloMemTable(projection, config, actorPath, version, reloadFlag)
 
@@ -342,7 +344,14 @@ private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
       handleFlushErr(t)
 
     case InitIngestion(replyTo) =>
-      activeTable.reloadMemTable()
-      replyTo ! DCAReady
+      try {
+        activeTable.reloadMemTable()
+        replyTo ! DCAReady
+      } catch {
+        case ne: java.nio.file.NoSuchFileException =>
+          // Send DCAReady message When no WAL files exist for this dataset
+          replyTo ! DCAReady
+        case e: Exception=> throw e
+      }
   }
 }

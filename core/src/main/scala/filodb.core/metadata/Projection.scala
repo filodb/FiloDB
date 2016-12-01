@@ -139,9 +139,13 @@ case class RichProjection(projection: Projection,
               rowKeyColIndices = newRkIndices,
               rowKeyType = newRkType)
   }
+
+  def getDataColumns(): Seq[Column] = {
+    columns.collect { case d: DataColumn => d }
+  }
 }
 
-object   RichProjection extends StrictLogging {
+object  RichProjection extends StrictLogging {
   import Accumulation._
 
   sealed trait BadSchema

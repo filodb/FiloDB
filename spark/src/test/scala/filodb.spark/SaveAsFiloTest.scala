@@ -2,15 +2,17 @@ package filodb.spark
 
 import java.sql.Timestamp
 
-import org.apache.spark.{SparkConf, SparkContext, SparkException}
+import org.apache.spark.{SparkConf, SparkContext}
 import org.apache.spark.sql.SaveMode
 import org.apache.spark.sql.hive.HiveContext
-import org.scalatest.time.{Millis, Seconds, Span}
 
 import scala.concurrent.duration._
 import _root_.filodb.core._
 import _root_.filodb.core.metadata.{Column, DataColumn, Dataset}
 import org.apache.spark.filodb.FiloDriver
+
+import scala.util.Try
+import scalax.file.Path
 
 object SaveAsFiloTest {
   case class TSData(machine: String, metric: Double, time: Timestamp)
@@ -36,6 +38,7 @@ class SaveAsFiloTest extends SparkTestBase {
                             .set("spark.filodb.cassandra.admin-keyspace", "unittest")
                             .set("spark.filodb.memtable.min-free-mb", "10")
                             .set("spark.ui.enabled", "false")
+                            .set("write-ahead-log.memtable-wal-dir","/tmp/filodb/wal")
   val sc = new SparkContext(conf)
   val sql = new HiveContext(sc)
 
@@ -61,6 +64,12 @@ class SaveAsFiloTest extends SparkTestBase {
   val dataDF = sql.read.json(sc.parallelize(jsonRows, 1))
 
   import org.apache.spark.sql.functions._
+
+  after {
+    val walDir = conf.get("write-ahead-log.memtable-wal-dir")
+    val path = Path.fromString (walDir)
+    Try(path.deleteRecursively(continueOnFailure = false))
+  }
 
   it("should create missing columns and partitions and write table") {
     sql.saveAsFilo(dataDF, "gdelt1", Seq("id"), segCol, partKeys,

@@ -10,11 +10,12 @@ import org.scalatest.time.{Millis, Seconds, Span}
 import scala.collection.mutable
 import scala.concurrent.duration._
 import _root_.filodb.core._
-import _root_.filodb.core.metadata.{Column, Dataset}
-import _root_.filodb.core.store.SegmentSpec
 import org.apache.spark.filodb.FiloDriver
 import org.scalatest.{BeforeAndAfter, BeforeAndAfterAll, FunSpec, Matchers}
 import org.scalatest.concurrent.ScalaFutures
+
+import scala.util.Try
+import scalax.file.Path
 
 case class NameRecord(first: Option[String], last: Option[String],
                       age: Option[Long], league: Option[String])
@@ -33,6 +34,7 @@ with Matchers with ScalaFutures {
                             .set("spark.filodb.cassandra.admin-keyspace", "unittest")
                             .set("spark.filodb.memtable.min-free-mb", "10")
                             .set("spark.ui.enabled", "false")
+                            .set("write-ahead-log.memtable-wal-dir","/tmp/filodb/wal")
   val ssc = new StreamingContext(conf, Milliseconds(700))
   val sql = new SQLContext(ssc.sparkContext)
 
@@ -63,6 +65,12 @@ with Matchers with ScalaFutures {
     }
   }
 
+  after {
+    val walDir = conf.get("write-ahead-log.memtable-wal-dir")
+    val path = Path.fromString (walDir)
+    Try(path.deleteRecursively(continueOnFailure = false))
+  }
+
   implicit val ec = FiloDriver.ec
 
   it("should ingest successive streaming RDDs as DataFrames...") {
@@ -73,7 +81,7 @@ with Matchers with ScalaFutures {
                 foreach { g => queue += ssc.sparkContext.parallelize(g, 1) }
     val nameChunks = ssc.queueStream(queue)
     import sql.implicits._
-    //noinspection ScalaStyle
+    // noinspection ScalaStyle
     println(s"largeDataset.name:${largeDataset.name}")
     nameChunks.foreachRDD { rdd =>
       rdd.toDF.write.format("filodb.spark").

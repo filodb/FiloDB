@@ -60,13 +60,13 @@ with ScalaFutures {
     columnStore.clearProjectionData(myDataset.projections.head).futureValue
     reprojections = Nil
     dsActor = system.actorOf(DatasetCoordinatorActor.props(
-                                  myProjection, 0, columnStore, testReprojector, "localhost", config))
+                                  myProjection, 0, columnStore, testReprojector, config))
     probe = TestProbe()
   }
 
   after {
     gracefulStop(dsActor, 3.seconds.dilated, PoisonPill).futureValue
-    val walDir = config.getString("memtable.memtable-wal-dir")
+    val walDir = config.getString("write-ahead-log.memtable-wal-dir")
     val path = Path.fromString (walDir)
     Try(path.deleteRecursively(continueOnFailure = false))
   }

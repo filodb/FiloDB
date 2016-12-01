@@ -21,8 +21,8 @@ class WriteAheadLogFileSpec extends FunSpec with Matchers with BeforeAndAfter{
   // /var/folders/tv/qrqnpyzj0qdfgw122hf1d7zr0000gn/T
 
   val config = ConfigFactory.parseString(
-    s"""filodb.memtable.memtable-wal-dir = ${tempDir}
-          filodb.memtable.mapped-byte-buffer-size = 1024
+    s"""filodb.write-ahead-log.memtable-wal-dir = ${tempDir}
+          filodb.write-ahead-log.mapped-byte-buffer-size = 2048
        """)
     .withFallback(ConfigFactory.load("application_test.conf"))
     .getConfig("filodb")
