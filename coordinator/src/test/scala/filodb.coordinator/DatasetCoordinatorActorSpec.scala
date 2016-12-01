@@ -39,7 +39,7 @@ with ScalaFutures {
                     filodb.memtable.max-rows-per-table = 100
                     filodb.memtable.noactivity.flush.interval = 2 s
                     filodb.memtable.write.interval = 300 ms
-                    filodb.memtable.mapped-byte-buffer-size = 1024""")
+                    filodb.write-ahead-log.mapped-byte-buffer-size = 1024""")
                  .withFallback(ConfigFactory.load("application_test.conf"))
                  .getConfig("filodb")
 

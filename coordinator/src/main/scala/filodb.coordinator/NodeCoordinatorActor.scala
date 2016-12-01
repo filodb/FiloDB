@@ -141,7 +141,7 @@ class NodeCoordinatorActor(metaStore: MetaStore,
       val ref = context.actorOf(props, s"ds-coord-${datasetObj.name}-$version")
       self ! AddDatasetCoord(originator,dataset, version, ref, reloadFlag)
       if (!reloadFlag) {
-        val colDefinitions =richProj.getDataColumns.map(_.toString).mkString("\002")
+        val colDefinitions =richProj.dataColumns.map(_.toString).mkString("\002")
         metaStore.insertIngestionState(actorPath, dataset, colDefinitions, "Started", version)
         notify(IngestionReady)
       }
@@ -189,7 +189,7 @@ class NodeCoordinatorActor(metaStore: MetaStore,
           val ref = DatasetRef(data(2), Some(data(1)))
           val columns = data(4).split("\002").map(col => DataColumn.fromString(col, data(2)))
           val projection = RichProjection(Await.result(metaStore.getDataset(ref), 10.second), columns)
-          val colNames = projection.getDataColumns.map(_.name)
+          val colNames = projection.dataColumns.map(_.name)
           setupIngestion(originator, ref, colNames, data(3).toInt, true)
         }
       }else{

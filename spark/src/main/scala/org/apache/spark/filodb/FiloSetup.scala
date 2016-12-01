@@ -151,23 +151,23 @@ object FiloExecutor extends FiloSetup with StrictLogging {
   def startReloadDCA(): Boolean = {
     implicit val timeout = Timeout(FiniteDuration(10, SECONDS))
     val resp = coordinatorActor ? ReloadDCA
-    var isContinue = true
     // start reloading WAL files if reload-wal-enabled is set to true
     if (config.getBoolean("write-ahead-log.reload-wal-enabled")) {
       try {
         Await.result(resp, timeout.duration) match {
           case DCAReady =>
-            logger.debug("Reload of dataset coordinator actors is completed")
+            logger.info("Reload of dataset coordinator actors is completed")
+            return true
           case _ =>
-            logger.debug("Reload is not complete, and received wrong acknowledgement")
-            isContinue = false
+            logger.info("Reload is not complete, and received a wrong acknowledgement")
+            return false
         }
       } catch {
         case e: Exception =>
           logger.error(s"Exception occurred while reloading dataset coordinator actors:${e.printStackTrace()}")
-          isContinue = false
+         return false
       }
     }
-    isContinue
+    return true
   }
 }

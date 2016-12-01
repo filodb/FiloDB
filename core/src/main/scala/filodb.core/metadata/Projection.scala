@@ -140,9 +140,7 @@ case class RichProjection(projection: Projection,
               rowKeyType = newRkType)
   }
 
-  def getDataColumns(): Seq[Column] = {
-    columns.collect { case d: DataColumn => d }
-  }
+  def dataColumns(): Seq[Column] = columns.collect { case d: DataColumn => d }
 }
 
 object  RichProjection extends StrictLogging {
