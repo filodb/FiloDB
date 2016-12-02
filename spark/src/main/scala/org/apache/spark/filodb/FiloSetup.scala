@@ -1,12 +1,12 @@
 package org.apache.spark.filodb
 
-import _root_.filodb.cassandra.columnstore.CassandraColumnStore
-import _root_.filodb.cassandra.metastore.CassandraMetaStore
-import _root_.filodb.coordinator.IngestionCommands.DCAReady
-import _root_.filodb.coordinator.NodeCoordinatorActor.ReloadDCA
-import _root_.filodb.coordinator.client.ClusterClient
-import _root_.filodb.coordinator.{CoordinatorSetup, NodeClusterActor}
-import _root_.filodb.core.store.{InMemoryColumnStore, InMemoryMetaStore}
+import filodb.cassandra.columnstore.CassandraColumnStore
+import filodb.cassandra.metastore.CassandraMetaStore
+import filodb.coordinator.IngestionCommands.DCAReady
+import filodb.coordinator.NodeCoordinatorActor.ReloadDCA
+import filodb.coordinator.client.ClusterClient
+import filodb.coordinator.{CoordinatorSetup, NodeClusterActor}
+import filodb.core.store.{InMemoryColumnStore, InMemoryMetaStore}
 import akka.actor.{ActorSystem, AddressFromURIString}
 import akka.pattern.ask
 import akka.util.Timeout

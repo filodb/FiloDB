@@ -7,8 +7,8 @@ import org.apache.spark.sql.SaveMode
 import org.apache.spark.sql.hive.HiveContext
 
 import scala.concurrent.duration._
-import _root_.filodb.core._
-import _root_.filodb.core.metadata.{Column, DataColumn, Dataset}
+import filodb.core._
+import filodb.core.metadata.{Column, DataColumn, Dataset}
 import org.apache.spark.filodb.FiloDriver
 
 import scala.util.Try

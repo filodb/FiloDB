@@ -8,10 +8,10 @@ import scalaxy.loops._
 import scala.language.postfixOps
 import scala.concurrent.{Await, Future}
 import scala.concurrent.duration._
-import _root_.filodb.core._
-import _root_.filodb.core.metadata.{Column, Dataset}
-import _root_.filodb.core.store.{FilteredPartitionScan, RowWriterSegment, SegmentInfo}
-import _root_.filodb.spark.FiloRelation
+import filodb.core._
+import filodb.core.metadata.{Column, Dataset}
+import filodb.core.store.{FilteredPartitionScan, RowWriterSegment, SegmentInfo}
+import filodb.spark.FiloRelation
 import org.apache.spark.filodb.FiloDriver
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.functions.sum

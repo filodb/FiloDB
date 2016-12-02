@@ -31,7 +31,7 @@ class CassandraMetaStore(config: Config)
   def clearAllData(): Future[Response] =
     for { dtResp <- datasetTable.clearAll()
           ctResp <- columnTable.clearAll()
-          istResp <- ingestionStateTable.clearAll()}
+          istResp <- ingestionStateTable.clearAll() }
     yield { istResp }
 
   def newDataset(dataset: Dataset): Future[Response] =

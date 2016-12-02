@@ -5,10 +5,10 @@ import org.apache.spark.sql.types.StructType
 
 import scala.concurrent.duration._
 import scala.language.postfixOps
-import _root_.filodb.core._
-import _root_.filodb.core.metadata.{Column, DataColumn, Dataset}
-import _root_.filodb.coordinator.client.ClientException
-import _root_.filodb.coordinator.IngestionCommands
+import filodb.core._
+import filodb.core.metadata.{Column, DataColumn, Dataset}
+import filodb.coordinator.client.ClientException
+import filodb.coordinator.IngestionCommands
 import org.apache.spark.filodb.{FiloDriver, FiloExecutor}
 
 /**

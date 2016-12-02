@@ -9,10 +9,10 @@ import scalaxy.loops._
 import scala.language.postfixOps
 import scala.concurrent.Await
 import scala.concurrent.duration._
-import _root_.filodb.core._
-import _root_.filodb.core.metadata.{Column, Dataset, RichProjection}
-import _root_.filodb.core.store.{InMemoryColumnStore, RowReaderSegment, RowWriterSegment}
-import _root_.filodb.spark.{SparkRowReader, TypeConverters}
+import filodb.core._
+import filodb.core.metadata.{Column, Dataset, RichProjection}
+import filodb.core.store.{InMemoryColumnStore, RowReaderSegment, RowWriterSegment}
+import filodb.spark.{SparkRowReader, TypeConverters}
 import org.apache.spark.filodb.FiloDriver
 import org.apache.spark.sql.{DataFrame, Row, SQLContext}
 import org.apache.spark.sql.catalyst.InternalRow

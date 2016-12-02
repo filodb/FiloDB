@@ -22,11 +22,11 @@ import org.apache.spark.sql.sources._
 import org.apache.spark.sql.types._
 import org.apache.spark.sql.{DataFrame, Row, SQLContext}
 import org.apache.spark.unsafe.types.UTF8String
-import _root_.filodb.coordinator.client.Client.parse
-import _root_.filodb.core._
-import _root_.filodb.core.query.KeyFilter
-import _root_.filodb.core.metadata.{Column, Dataset, RichProjection}
-import _root_.filodb.core.store._
+import filodb.coordinator.client.Client.parse
+import filodb.core._
+import filodb.core.query.KeyFilter
+import filodb.core.metadata.{Column, Dataset, RichProjection}
+import filodb.core.store._
 import org.apache.spark.filodb.{FiloDriver, FiloExecutor}
 
 object FiloRelation extends StrictLogging {

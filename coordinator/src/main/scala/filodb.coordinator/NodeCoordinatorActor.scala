@@ -67,6 +67,7 @@ class NodeCoordinatorActor(metaStore: MetaStore,
   val dsCoordNotify = new collection.mutable.HashMap[(DatasetRef, Int), List[ActorRef]]
   val clusterSelfAddr = Cluster(context.system).selfAddress
   val actorPath = clusterSelfAddr.host.getOrElse("None")
+
   // By default, stop children DatasetCoordinatorActors when something goes wrong.
   override val supervisorStrategy = SupervisorStrategy.stoppingStrategy
 

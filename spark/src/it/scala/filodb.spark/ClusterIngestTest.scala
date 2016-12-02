@@ -5,8 +5,8 @@ import org.apache.spark.sql.{SQLContext, SaveMode}
 import org.scalatest.time.{Millis, Seconds, Span}
 
 import scala.concurrent.duration._
-import _root_.filodb.core._
-import _root_.filodb.core.metadata.{Column, DataColumn, Dataset}
+import filodb.core._
+import filodb.core.metadata.{Column, DataColumn, Dataset}
 import org.apache.spark.filodb.FiloDriver
 
 /**

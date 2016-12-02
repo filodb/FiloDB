@@ -1,19 +1,15 @@
 package filodb.coordinator
 
 import scalax.file.Path
-import akka.actor.{ActorRef, ActorSystem, PoisonPill, Terminated}
-import akka.cluster.Cluster
-import akka.testkit.{EventFilter, TestProbe}
+import akka.actor.{ActorRef, PoisonPill}
 import akka.pattern.gracefulStop
 import com.typesafe.config.ConfigFactory
 import filodb.coordinator.NodeCoordinatorActor.{ReloadDCA}
-import filodb.core.GdeltTestData._
 
-import scala.concurrent.Await
 import scala.concurrent.duration._
 import filodb.core._
 import filodb.core.store._
-import filodb.core.metadata.{Column, DataColumn, Dataset}
+import filodb.core.metadata.{DataColumn, Dataset}
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
 import org.velvia.filo.ArrayStringRowReader

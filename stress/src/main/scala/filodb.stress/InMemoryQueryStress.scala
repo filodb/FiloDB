@@ -6,7 +6,7 @@ import org.apache.spark.sql.{DataFrame, SQLContext, SaveMode}
 import scala.util.Random
 import scala.concurrent.duration.Duration
 import scala.concurrent.{Await, Future}
-import _root_.filodb.spark._
+import filodb.spark._
 import org.apache.spark.filodb.FiloDriver
 
 /**

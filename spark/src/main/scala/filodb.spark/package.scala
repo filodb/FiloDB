@@ -14,9 +14,9 @@ import scala.concurrent.{Await, Future}
 import scala.concurrent.duration._
 import scala.language.implicitConversions
 import scala.language.postfixOps
-import _root_.filodb.core._
-import _root_.filodb.core.metadata.{Column, DataColumn, Dataset, RichProjection}
-import _root_.filodb.coordinator.{DatasetCommands, DatasetCoordinatorActor, IngestionCommands, RowSource}
+import filodb.core._
+import filodb.core.metadata.{Column, DataColumn, Dataset, RichProjection}
+import filodb.coordinator.{DatasetCommands, DatasetCoordinatorActor, IngestionCommands, RowSource}
 import org.apache.spark.filodb.{FiloDriver, FiloExecutor}
 import org.apache.spark.sql.hive.filodb.MetaStoreSync
 
