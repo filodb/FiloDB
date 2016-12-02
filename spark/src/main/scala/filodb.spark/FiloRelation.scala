@@ -6,14 +6,15 @@ import akka.util.Timeout
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.slf4j.StrictLogging
 import java.nio.ByteBuffer
+
 import kamon.Kamon
 import net.ceedubs.ficus.Ficus._
 import org.joda.time.DateTime
 import org.velvia.filo.{FiloRowReader, FiloVector, RowReader, VectorReader}
+
 import scala.concurrent.{Await, Future}
 import scala.concurrent.duration._
 import scala.language.postfixOps
-
 import org.apache.spark.rdd.RDD
 import org.apache.spark.SparkContext
 import org.apache.spark.sql.catalyst.InternalRow
@@ -22,12 +23,12 @@ import org.apache.spark.sql.sources._
 import org.apache.spark.sql.types._
 import org.apache.spark.sql.{DataFrame, Row, SQLContext}
 import org.apache.spark.unsafe.types.UTF8String
-
 import filodb.coordinator.client.Client.parse
 import filodb.core._
 import filodb.core.query.KeyFilter
 import filodb.core.metadata.{Column, Dataset, RichProjection}
 import filodb.core.store._
+import org.apache.spark.filodb.{FiloDriver, FiloExecutor}
 
 object FiloRelation extends StrictLogging {
   import TypeConverters._

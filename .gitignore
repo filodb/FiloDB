@@ -19,7 +19,9 @@ project/plugins/project/
 .worksheet
 
 # IntelliJ Settings per https://intellij-support.jetbrains.com/hc/en-us/articles/206544839
-.idea
+.idea/
+.idea/uiDesigner.xml
+.idea/modules/
 *.ipr
 *.iws
 *.iml
