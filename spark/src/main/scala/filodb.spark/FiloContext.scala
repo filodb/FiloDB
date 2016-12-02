@@ -1,14 +1,15 @@
 package filodb.spark
 
-import org.apache.spark.sql.{SQLContext, SaveMode, DataFrame, Row}
+import org.apache.spark.sql.{DataFrame, Row, SQLContext, SaveMode}
 import org.apache.spark.sql.types.StructType
+
 import scala.concurrent.duration._
 import scala.language.postfixOps
-
 import filodb.core._
 import filodb.core.metadata.{Column, DataColumn, Dataset}
 import filodb.coordinator.client.ClientException
 import filodb.coordinator.IngestionCommands
+import org.apache.spark.filodb.{FiloDriver, FiloExecutor}
 
 /**
  * Class implementing insert and save Scala APIs.

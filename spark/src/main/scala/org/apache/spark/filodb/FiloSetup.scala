@@ -1,16 +1,25 @@
-package filodb.spark
-
-import akka.actor.{ActorSystem, ActorRef, AddressFromURIString}
-import com.typesafe.config.{Config, ConfigFactory}
-import com.typesafe.scalalogging.slf4j.StrictLogging
-import net.ceedubs.ficus.Ficus._
-import org.apache.spark.SparkContext
+package org.apache.spark.filodb
 
 import filodb.cassandra.columnstore.CassandraColumnStore
 import filodb.cassandra.metastore.CassandraMetaStore
-import filodb.coordinator.{CoordinatorSetup, NodeClusterActor}
 import filodb.coordinator.client.ClusterClient
-import filodb.core.store.{InMemoryMetaStore, InMemoryColumnStore}
+import filodb.coordinator.{CoordinatorSetup, NodeClusterActor}
+import filodb.core.store.{InMemoryColumnStore, InMemoryMetaStore}
+import akka.actor.{ActorSystem, AddressFromURIString}
+import akka.pattern.ask
+import akka.util.Timeout
+import com.typesafe.config.{Config, ConfigFactory}
+import com.typesafe.scalalogging.slf4j.StrictLogging
+import filodb.coordinator.IngestionCommands.DCAReady
+import filodb.coordinator.NodeCoordinatorActor.ReloadDCA
+import net.ceedubs.ficus.Ficus._
+import org.apache.spark.{SparkContext, SparkEnv}
+
+import scala.concurrent.Await
+import scala.concurrent.duration._
+import scala.language.{implicitConversions, postfixOps}
+import scala.concurrent.ExecutionContext.Implicits.global
+
 
 /**
  * FiloSetup handles the Spark side setup of both executors and the driver app, including one-time
@@ -34,7 +43,12 @@ trait FiloSetup extends CoordinatorSetup {
 
   lazy val system = {
     val port = systemConfig.as[Option[Int]](s"filodb.spark.$role.port").getOrElse(0)
-    ActorSystem("filo-spark", configAkka(role, port))
+    // value actorSystem in class SparkEnv is deprecated: and actor system is no longer supported as of 1.4.0
+    // When you have DSE set up on mutlinodes(each node is assigned it's own ip address) in one physical machine,
+    // it's hard to identify Memtable WAL files created for each node. So to address this issue require to pass
+    // Hostname to the akka configuration
+    val host = SparkEnv.get.rpcEnv.address.host
+    ActorSystem("filo-spark", configAkka(role, host, port))
   }
 
   lazy val columnStore = config.getString("store") match {
@@ -46,16 +60,16 @@ trait FiloSetup extends CoordinatorSetup {
     case "in-memory" => SingleJvmInMemoryStore.metaStore
   }
 
-  def configAkka(role: String, akkaPort: Int): Config =
+  def configAkka(role: String, host: String, akkaPort: Int): Config =
     ConfigFactory.parseString(s"""akka.cluster.roles=[$role]
-                                 |akka.remote.netty.tcp.port=$akkaPort""".stripMargin)
-                 .withFallback(systemConfig)
+                                  |akka.remote.netty.tcp.hostname=$host
+                                  |akka.remote.netty.tcp.port=$akkaPort""".stripMargin)
+              .withFallback(systemConfig)
 }
 
 // TODO: make the InMemoryMetaStore either distributed (using clustering to forward and distribute updates)
 // or, perhaps modify NodeCoordinator to not need metastore.
 object SingleJvmInMemoryStore {
-  import scala.concurrent.ExecutionContext.Implicits.global
   lazy val metaStore = new InMemoryMetaStore
 }
 
@@ -115,11 +129,43 @@ object FiloExecutor extends FiloSetup with StrictLogging {
       _config = Some(filoConfig)
       kamonInit()
       coordinatorActor       // force coordinator to start
-      // get address from config and join cluster.  note: it's ok to join cluster multiple times
-      val addr = AddressFromURIString.parse(filoConfig.getString("spark-driver-addr"))
-      logger.info(s"Initializing FiloExecutor clustering by joining driver at $addr...")
-      cluster.join(addr)
-      Thread sleep 1000
+
+      // start ingesting data once reload DCA process is complete
+      if (startReloadDCA()) {
+        // get address from config and join cluster.  note: it's ok to join cluster multiple times
+        val addr = AddressFromURIString.parse(filoConfig.getString("spark-driver-addr"))
+        logger.info(s"Initializing FiloExecutor clustering by joining driver at $addr...")
+        cluster.join(addr)
+        Thread sleep 1000
+      } else {
+        // Stop ingestion if there is an exception occurs during reload DCA
+        shutdown()
+        FiloDriver.shutdown()
+        sys.exit(2)
+      }
     }
+  }
+
+  def startReloadDCA(): Boolean = {
+    implicit val timeout = Timeout(FiniteDuration(10, SECONDS))
+    val resp = coordinatorActor ? ReloadDCA
+    // start reloading WAL files if reload-wal-enabled is set to true
+    if (config.getBoolean("write-ahead-log.reload-wal-enabled")) {
+      try {
+        Await.result(resp, timeout.duration) match {
+          case DCAReady =>
+            logger.info("Reload of dataset coordinator actors is completed")
+            return true
+          case _ =>
+            logger.info("Reload is not complete, and received a wrong acknowledgement")
+            return false
+        }
+      } catch {
+        case e: Exception =>
+          logger.error(s"Exception occurred while reloading dataset coordinator actors:${e.printStackTrace()}")
+          return false
+      }
+    }
+    return true
   }
 }
