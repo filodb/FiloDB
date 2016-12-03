@@ -52,11 +52,12 @@ class CassandraQueryBenchmark {
     metaStore.shutdown()
   }
 
+  val hodPartScan = SinglePartitionScan(9)   // 9am - peak time - lots of records, around 700k
+
   @Benchmark
   @BenchmarkMode(Array(Mode.AverageTime))
   @OutputTimeUnit(TimeUnit.MICROSECONDS)
   def wholePartitionScanHOD(): Int = {
-    val hodPartScan = SinglePartitionScan(9)   // 9am - peak time - lots of records, around 700k
     parse(colStore.scanRows(hodProj, Seq("passenger_count").map(hodSchema), 0, hodPartScan)) {
       rowIter => rowIter.length }
   }
@@ -66,9 +67,29 @@ class CassandraQueryBenchmark {
   @BenchmarkMode(Array(Mode.AverageTime))
   @OutputTimeUnit(TimeUnit.MICROSECONDS)
   def wholePartitionReadOnlyHOD(): Int = {
-    val hodPartScan = SinglePartitionScan(9)   // 9am - peak time - lots of records, around 700k
     parse(colStore.scanSegments(hodProj, Seq("passenger_count").map(hodSchema), 0, hodPartScan)) {
       segIter => segIter.length }
+  }
+
+  // How fast is it only to read the indices of a partition?  This is a constant cost no matter
+  // the number of chunks read
+  @Benchmark
+  @BenchmarkMode(Array(Mode.AverageTime))
+  @OutputTimeUnit(TimeUnit.MICROSECONDS)
+  def wholePartitionIndicesOnlyHOD(): Int = {
+    parse(colStore.scanIndices(hodProj, 0, hodPartScan)) { indexIter => indexIter.length }
+  }
+
+  val hodIndex = parse(colStore.scanIndices(hodProj, 0, hodPartScan)) { it => it.toSeq.head }
+
+  @Benchmark
+  @BenchmarkMode(Array(Mode.AverageTime))
+  @OutputTimeUnit(TimeUnit.MICROSECONDS)
+  def wholePartitionReadChunksOnlyHOD(): Int = {
+    parse(colStore.readChunks(hodProj.datasetRef, 0, Seq("passenger_count"),
+                              hodIndex.binPartition, hodIndex.segmentId,
+                              hodIndex.infosAndSkips.head._1.keyAndId,
+                              hodIndex.infosAndSkips.last._1.keyAndId)) { chunks => chunks.length }
   }
 
   @Benchmark
