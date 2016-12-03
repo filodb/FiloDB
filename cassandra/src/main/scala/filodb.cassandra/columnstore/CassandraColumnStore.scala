@@ -245,6 +245,7 @@ trait CassandraColumnStoreScanner extends ColumnStoreScanner with StrictLogging 
                  key2: (BinaryRecord, Types.ChunkID))
                 (implicit ec: ExecutionContext): Future[Seq[ChunkedData]] = {
     val chunkTable = getOrCreateChunkTable(dataset)
+    logger.debug(s"  Reading from $key1 to $key2...")
     Future.sequence(columns.toSeq.map(
                     chunkTable.readChunks(partition, version, _, segment,
                                           (key1._1.toSortableBytes(), key1._2),

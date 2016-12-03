@@ -120,10 +120,6 @@ object BinaryRecord {
   def apply(projection: RichProjection, items: Seq[Any]): BinaryRecord =
     apply(projection.rowKeyBinSchema, SeqRowReader(items))
 
-  implicit object BinaryRecordOrdering extends Ordering[BinaryRecord] {
-    def compare(x: BinaryRecord, y: BinaryRecord): Int = x.compare(y)
-  }
-
   val MaxSmallOffset = 0x7fff
   val MaxSmallLen    = 0xffff
 

@@ -349,21 +349,41 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
     val segmentsRows = getSegmentsByPartKey(projection4)
     segmentsRows.foreach { case (seg, rows) =>
       val segState = ourState(seg)
-      rows.grouped(10).foreach { rowGroup => seg.addChunkSet(segState, rowGroup) }
+      rows.grouped(10).foreach { rowGroup =>
+        val sorted = rowGroup.sortBy(r => (r.getString(4), r.getInt(0)))
+        seg.addChunkSet(segState, sorted)
+      }
       colStore.appendSegment(projection2, seg, 0).futureValue should equal (Success)
     }
 
     val paramSet = colStore.getScanSplits(datasetRef, 1)
     paramSet should have length (1)
 
-    val startKey = BinaryRecord(projection4, Seq(10))
-    val endKey = BinaryRecord(projection4, Seq(18))
+    // This should span multiple chunks and properly test comparison of binary row keys
+    // Matching chunks (each one 10 lines):
+    // AFR/0-GOV/9, GOV/10-IRN/19, /53-ZMB/57, /65-VATGOV/61, /70-KHM/73, CHL/88-ITA/87, /91-GOV/90
+    val startKey = BinaryRecord(projection4, Seq("F", -1))
+    val endKey = BinaryRecord(projection4, Seq("H", 100))
     val method1 = SinglePartitionRowKeyScan(1979, startKey, endKey)
     whenReady(colStore.scanRows(projection4, schema, 0, method1)) { rowIter =>
       val rows = rowIter.map(r => (r.getInt(0), r.getInt(2))).toList
-      rows.length should equal (10)   // one chunk from ID=10 to ID=19
-      rows.map(_._2).toSet should equal (Set(197901))
-      rows.map(_._1).max should equal (19)
+      rows.length should equal (69)   // 7 chunks, last one only has 9 rows
+      rows.map(_._2).toSet should equal (Set(197901, 197902))
+      // Verify every chunk that should be there is actually there
+      rows.map(_._1).toSet.intersect(Set(0, 10, 20, 30, 40, 53, 65, 70, 88, 91)) should equal (
+                                     Set(0, 10, 53, 65, 70, 88, 91))
+    }
+
+    val emptyScan = SinglePartitionRowKeyScan(1979, endKey, startKey)
+    whenReady(colStore.scanRows(projection4, schema, 0, emptyScan)) { rowIter =>
+      rowIter.length should equal (0)
+    }
+
+    val key0 = BinaryRecord(projection4, Seq("a", -1))  // All the Actor2Codes are uppercase, last one is Z
+    val key1 = BinaryRecord(projection4, Seq("b", 100))
+    val emptyScan2 = SinglePartitionRowKeyScan(1979, key0, key1)
+    whenReady(colStore.scanRows(projection4, schema, 0, emptyScan2)) { rowIter =>
+      rowIter.length should equal (0)
     }
   }
 

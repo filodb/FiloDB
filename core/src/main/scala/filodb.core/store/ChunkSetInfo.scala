@@ -103,9 +103,9 @@ case class ChunkSetInfo(id: ChunkID,
    */
   def intersection(key1: BinaryRecord, key2: BinaryRecord)
                   (implicit ordering: Ordering[RowReader]): Option[(BinaryRecord, BinaryRecord)] = {
-    if (lastKey >= key1 && firstKey <= key2) {
-      Some((if (firstKey > key1) firstKey else key1,
-            if (lastKey < key2) lastKey else key2))
+    if (ordering.gteq(lastKey, key1) && ordering.lteq(firstKey, key2)) {
+      Some((if (ordering.gt(firstKey, key1)) firstKey else key1,
+            if (ordering.lt(lastKey,  key2)) lastKey else key2))
     } else {
       None
     }

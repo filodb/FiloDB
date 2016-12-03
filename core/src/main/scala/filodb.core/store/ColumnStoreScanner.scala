@@ -122,6 +122,8 @@ trait ColumnStoreScanner extends StrictLogging {
   def toSegIndex(projection: RichProjection, binPart: BinaryPartition, segmentKey: SegmentId,
                  infosAndSkips: Array[(ChunkSetInfo, ChunkSkips)]):
         SegmentIndex[projection.PK, projection.SK] = {
+    // unfortunately, Ordering is invariant in type, even though BinaryRecord mixes in RowReader
+    implicit val keyOrder = projection.rowKeyType.rowReaderOrdering.asInstanceOf[Ordering[BinaryRecord]]
     val sortedInfos = infosAndSkips.sortBy(_._1.keyAndId)
     SegmentIndex(binPart,
                  segmentKey,
@@ -135,7 +137,11 @@ trait ColumnStoreScanner extends StrictLogging {
                             method: ScanMethod): Array[(ChunkSetInfo, ChunkSkips)] = method match {
     case SinglePartitionRowKeyScan(_, startKey, endKey) =>
       implicit val ordering = projection.rowKeyType.rowReaderOrdering
-      skips.filter { case (info, skips) => info.intersection(startKey, endKey).isDefined }
+      if (ordering.lteq(startKey, endKey)) {
+        skips.filter { case (info, skips) => info.intersection(startKey, endKey).isDefined }
+      } else {  // If keys are reversed, do not even try!
+        Array.empty
+      }
     case other: Any =>
       skips
   }
@@ -157,12 +163,18 @@ trait ColumnStoreScanner extends StrictLogging {
       stats.incrReadSegments(1)
       logger.trace(s"Chunk infos: ${index.infosAndSkips.map(_._1).toList}")
       val columnNames = columns.map(_.name)
-      logger.debug(s"Reading partition ${index.partition} / ${index.segment}, columns $columnNames")
-      val chunks = Await.result(readChunks(projection.datasetRef, version, columnNames,
-                                           index.binPartition, index.segmentId,
-                                           index.infosAndSkips.head._1.keyAndId,
-                                           index.infosAndSkips.last._1.keyAndId), 5.minutes)
-      buildSegment(projection, index, chunks, columns)
+      logger.debug(s"Reading partition ${index.partition} / ${index.segment}, " +
+                   s"  ${index.infosAndSkips.size} ChunkInfos")
+      if (index.infosAndSkips.isEmpty) {
+        val segInfo = SegmentInfo(index.partition, index.segment)
+        new RowReaderSegment(projection, segInfo, Nil, columns)
+      } else {
+        val chunks = Await.result(readChunks(projection.datasetRef, version, columnNames,
+                                             index.binPartition, index.segmentId,
+                                             index.infosAndSkips.head._1.keyAndId,
+                                             index.infosAndSkips.last._1.keyAndId), 5.minutes)
+        buildSegment(projection, index, chunks, columns)
+      }
     })
   }
 

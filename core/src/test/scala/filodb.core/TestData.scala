@@ -154,9 +154,9 @@ object GdeltTestData {
                          Seq(":getOrElse Actor2Code NONE", ":getOrElse Year -1"))
   val projection3 = RichProjection(dataset3, schema)
 
-  // Dataset4: One big partition (Year) and segment (:string 0) with (GLOBALEVENTID) rowkey
+  // Dataset4: One big partition (Year) and segment (:string 0) with (Actor2Code, GLOBALEVENTID) rowkey
   // to easily test row key scans
-  val dataset4 = Dataset("gdelt", Seq("GLOBALEVENTID"), ":string 0", Seq("Year"))
+  val dataset4 = Dataset("gdelt", Seq("Actor2Code", "GLOBALEVENTID"), ":string 0", Seq("Year"))
   val projection4 = RichProjection(dataset4, schema)
 
   // Returns projection2 grouped by segment with a fake partition key

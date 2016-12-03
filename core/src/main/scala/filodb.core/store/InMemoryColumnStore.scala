@@ -6,6 +6,7 @@ import java.util.concurrent.{ConcurrentSkipListMap, ConcurrentNavigableMap}
 import javax.xml.bind.DatatypeConverter
 import scala.collection.mutable.HashMap
 import scala.concurrent.{ExecutionContext, Future}
+import scodec.bits.ByteVector
 
 import filodb.core._
 import filodb.core.binaryrecord.BinaryRecord
@@ -64,7 +65,8 @@ extends ColumnStore with InMemoryColumnStoreScanner with StrictLogging {
       }
       for { chunkSet       <- segment.chunkSets
             (colId, bytes) <- chunkSet.chunks } {
-        chunkTree.put((colId, segmentId, chunkSet.info.firstKey, chunkSet.info.id), bytes)
+        val keyBytes = keyToVector(chunkSet.info.firstKey)
+        chunkTree.put((colId, segmentId, keyBytes, chunkSet.info.id), bytes)
       }
 
       // Add index objects - not serialized for speed
@@ -102,7 +104,7 @@ trait InMemoryColumnStoreScanner extends ColumnStoreScanner {
   import Types._
   import collection.JavaConversions._
 
-  type ChunkKey = (ColumnId, SegmentId, BinaryRecord, ChunkID)
+  type ChunkKey = (ColumnId, SegmentId, ByteVector, ChunkID)
   type ChunkTree = ConcurrentSkipListMap[ChunkKey, ByteBuffer]
   type IndexTree = ConcurrentSkipListMap[SegmentId, ChunkSetInfo.IndexAndFilterSeq]
   type IndexTreeLike = ConcurrentNavigableMap[SegmentId, ChunkSetInfo.IndexAndFilterSeq]
@@ -112,6 +114,8 @@ trait InMemoryColumnStoreScanner extends ColumnStoreScanner {
 
   def chunkDb: HashMap[(DatasetRef, BinaryPartition, Int), ChunkTree]
   def indices: HashMap[(DatasetRef, BinaryPartition, Int), IndexTree]
+
+  protected def keyToVector(binRec: BinaryRecord): ByteVector = ByteVector(binRec.toSortableBytes())
 
   def readChunks(dataset: DatasetRef,
                  version: Int,
@@ -125,8 +129,8 @@ trait InMemoryColumnStoreScanner extends ColumnStoreScanner {
                                       EmptyChunkTree)
     logger.debug(s"Reading chunks from columns $columns, $partition/$segment, ($key1, $key2)")
     val chunks = for { column <- columns.toSeq } yield {
-      val startKey = (column, segment, key1._1, key1._2)
-      val endKey   = (column, segment, key2._1, key2._2)
+      val startKey = (column, segment, keyToVector(key1._1), key1._2)
+      val endKey   = (column, segment, keyToVector(key2._1), key2._2)
       val it = chunkTree.subMap(startKey, true, endKey, true).entrySet.iterator
       val chunkList = it.toSeq.map { entry =>
         val (colId, _, _, chunkId) = entry.getKey
