@@ -53,12 +53,13 @@ class CassandraQueryBenchmark {
   }
 
   val hodPartScan = SinglePartitionScan(9)   // 9am - peak time - lots of records, around 700k
+  val columns = Seq("passenger_count", "pickup_datetime", "medallion")
 
   @Benchmark
   @BenchmarkMode(Array(Mode.AverageTime))
   @OutputTimeUnit(TimeUnit.MICROSECONDS)
   def wholePartitionScanHOD(): Int = {
-    parse(colStore.scanRows(hodProj, Seq("passenger_count").map(hodSchema), 0, hodPartScan)) {
+    parse(colStore.scanRows(hodProj, columns.map(hodSchema), 0, hodPartScan)) {
       rowIter => rowIter.length }
   }
 
@@ -67,7 +68,7 @@ class CassandraQueryBenchmark {
   @BenchmarkMode(Array(Mode.AverageTime))
   @OutputTimeUnit(TimeUnit.MICROSECONDS)
   def wholePartitionReadOnlyHOD(): Int = {
-    parse(colStore.scanSegments(hodProj, Seq("passenger_count").map(hodSchema), 0, hodPartScan)) {
+    parse(colStore.scanSegments(hodProj, columns.map(hodSchema), 0, hodPartScan)) {
       segIter => segIter.length }
   }
 
@@ -86,7 +87,7 @@ class CassandraQueryBenchmark {
   @BenchmarkMode(Array(Mode.AverageTime))
   @OutputTimeUnit(TimeUnit.MICROSECONDS)
   def wholePartitionReadChunksOnlyHOD(): Int = {
-    parse(colStore.readChunks(hodProj.datasetRef, 0, Seq("passenger_count"),
+    parse(colStore.readChunks(hodProj.datasetRef, 0, columns,
                               hodIndex.binPartition, hodIndex.segmentId,
                               hodIndex.infosAndSkips.head._1.keyAndId,
                               hodIndex.infosAndSkips.last._1.keyAndId)) { chunks => chunks.length }
@@ -97,7 +98,7 @@ class CassandraQueryBenchmark {
   @OutputTimeUnit(TimeUnit.MICROSECONDS)
   def wholePartitionScanMed(): Int = {
     val medPartScan = SinglePartitionScan("AA")
-    parse(colStore.scanRows(medProj, Seq("passenger_count").map(medSchema), 0, medPartScan)) {
+    parse(colStore.scanRows(medProj, columns.map(medSchema), 0, medPartScan)) {
       rowIter => rowIter.length }
   }
 
@@ -111,7 +112,7 @@ class CassandraQueryBenchmark {
   @OutputTimeUnit(TimeUnit.MICROSECONDS)
   def earlyTwoDaysRangeScanHOD(): Int = {
     val method = SinglePartitionRowKeyScan(9, hodKey1, hodKey2)
-    parse(colStore.scanRows(hodProj, Seq("passenger_count").map(hodSchema), 0, method)) {
+    parse(colStore.scanRows(hodProj, columns.map(hodSchema), 0, method)) {
       rowIter => rowIter.length }
   }
 
@@ -120,7 +121,7 @@ class CassandraQueryBenchmark {
   @OutputTimeUnit(TimeUnit.MICROSECONDS)
   def lateTwoDaysRangeScanHOD(): Int = {
     val method = SinglePartitionRowKeyScan(9, hodKey3, hodKey4)
-    parse(colStore.scanRows(hodProj, Seq("passenger_count").map(hodSchema), 0, method)) {
+    parse(colStore.scanRows(hodProj, columns.map(hodSchema), 0, method)) {
       rowIter => rowIter.length }
   }
 
@@ -132,7 +133,7 @@ class CassandraQueryBenchmark {
   @OutputTimeUnit(TimeUnit.MICROSECONDS)
   def middleMedallionRangeScan(): Int = {
     val method = SinglePartitionRowKeyScan("AA", medKey1, medKey2)
-    parse(colStore.scanRows(medProj, Seq("passenger_count").map(medSchema), 0, method)) {
+    parse(colStore.scanRows(medProj, columns.map(medSchema), 0, method)) {
       rowIter => rowIter.length }
   }
 }
