@@ -30,7 +30,11 @@ with CoordinatorSetup with ScalaFutures {
   implicit val defaultPatience =
     PatienceConfig(timeout = Span(10, Seconds), interval = Span(50, Millis))
 
-  val config = ConfigFactory.parseString("filodb.memtable.write.interval = 500 ms")
+  val config = ConfigFactory.parseString(
+                      """filodb.memtable.flush-trigger-rows = 100
+                         filodb.memtable.max-rows-per-table = 100
+                         filodb.memtable.noactivity.flush.interval = 2 s
+                         filodb.memtable.write.interval = 500 ms""")
                             .withFallback(ConfigFactory.load("application_test.conf"))
                             .getConfig("filodb")
 
@@ -250,7 +254,7 @@ with CoordinatorSetup with ScalaFutures {
     probe.send(coordActor, IngestRows(ref, 0, readers, 1L))
     probe.expectMsg(Ack(1L))
 
-    Thread sleep 3000
+    Thread sleep 1000
 
     probe.send(coordActor, GetIngestionStats(ref, 0))
     probe.expectMsg(DatasetCoordinatorActor.Stats(1, 1, 0, 0, -1, 99L))

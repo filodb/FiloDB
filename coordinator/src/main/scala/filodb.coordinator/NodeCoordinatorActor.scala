@@ -140,7 +140,7 @@ class NodeCoordinatorActor(metaStore: MetaStore,
     def createDatasetCoordActor(datasetObj: Dataset, richProj: RichProjection): Unit = {
       val props = DatasetCoordinatorActor.props(richProj, version, columnStore, reprojector, config, reloadFlag)
       val ref = context.actorOf(props, s"ds-coord-${datasetObj.name}-$version")
-      self ! AddDatasetCoord(originator,dataset, version, ref, reloadFlag)
+      self ! AddDatasetCoord(originator, dataset, version, ref, reloadFlag)
       if (!reloadFlag) {
         val colDefinitions =richProj.dataColumns.map(_.toString).mkString("\002")
         metaStore.insertIngestionState(actorPath, dataset, colDefinitions, "Started", version)
@@ -182,7 +182,7 @@ class NodeCoordinatorActor(metaStore: MetaStore,
   }
 
   private def reloadDatasetCoordActors(originator: ActorRef) : Unit = {
-    logger.debug(s"Reload of dataset coordinator actors has started for path: $actorPath")
+    logger.info(s"Reload of dataset coordinator actors has started for path: $actorPath")
 
     metaStore.getAllIngestionEntries(actorPath).map { entries =>
       if(entries.length > 0 ) {

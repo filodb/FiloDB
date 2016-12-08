@@ -50,7 +50,7 @@ class FiloAppendStore(val projection: RichProjection,
 
   def createWalAheadLog : Option[WriteAheadLog] = {
     if (!reloadFlag && config.getBoolean("write-ahead-log.write-ahead-log-enabled")) {
-      logger.debug(s"Creating WriteAheadLog for dataset: (${projection.datasetRef}, ${version})")
+      logger.info(s"Creating WriteAheadLog for dataset: (${projection.datasetRef}, ${version})")
       Some(new WriteAheadLog(config, projection.datasetRef, actorPath, projection.dataColumns, version))
     }else{
       None
@@ -111,7 +111,7 @@ class FiloAppendStore(val projection: RichProjection,
 
   def setWriteAheadLogFile(recentFile: Option[Path], position: Int): Unit = {
     val pathObj = recentFile.getOrElse(Paths.get(""))
-    logger.debug(s"Creating WriteAheadLog for dataset: ${projection.datasetRef}" +
+    logger.info(s"Creating WriteAheadLog for dataset: ${projection.datasetRef}" +
       s" using path object: ${pathObj.getFileName}")
     wal = Some(new WriteAheadLog(config, projection.datasetRef, actorPath,
       projection.dataColumns, version, pathObj, position))
