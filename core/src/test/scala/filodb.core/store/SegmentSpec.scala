@@ -1,29 +1,17 @@
 package filodb.core.store
 
-import filodb.core._
-import filodb.core.metadata.{Column, Dataset, RichProjection}
 import java.nio.ByteBuffer
-import org.velvia.filo.{RowReader, TupleRowReader}
 import scodec.bits._
 
 import org.scalatest.{BeforeAndAfter, FunSpec, Matchers}
 
+import filodb.core._
+import filodb.core.metadata.{Column, Dataset, RichProjection}
+import filodb.core.query.{ChunkSetReader, RowkeyPartitionChunkIndex}
+
+// TODO: probably all of these tests can be migrated to PartitionChunkIndexSpec and ChunkSetReaderSpec
 class SegmentSpec extends FunSpec with Matchers with BeforeAndAfter {
   import NamesTestData._
-
-  val segInfo = SegmentInfo("partition", 0)
-
-  def rowReaderSegFromChunkSet(projection: RichProjection,
-                               _segInfo: SegmentInfo[_, _],
-                               chunkSet: ChunkSet,
-                               schema: Seq[Column]): RowReaderSegment = {
-    val seg = new RowReaderSegment(projection, _segInfo,
-                                   Seq((chunkSet.info, Array[Int]())), schema)
-    chunkSet.chunks.foreach { case (colId, bytes) => seg.addChunk(chunkSet.info.id, colId, bytes) }
-    seg
-  }
-
-  import SingleKeyTypes._
 
   it("SegmentState should add chunk info properly and update state for append only") {
     val state = getState()
@@ -53,9 +41,10 @@ class SegmentSpec extends FunSpec with Matchers with BeforeAndAfter {
   }
 
   it("SegmentState should add chunk info properly when SegmentState prepopulated") {
-    val state = new TestSegmentState(projection, schema)
+    val index = new RowkeyPartitionChunkIndex(ByteVector(0), projection)
+    val state = new TestSegmentState(projection, index, schema, SegmentStateSettings())
     val info1 = ChunkSetInfo(state.nextChunkId, 10, firstKey, lastKey)
-    state.add(Seq((info1, emptyFilter)))
+    index.add(info1, Nil)
     state.rowKeyChunks((firstKey, 4)) = Array.fill[ByteBuffer](projection.rowKeyColumns.length)(null)
 
     Thread sleep 10   // Just to be sure the timeUUID will be greater
@@ -110,19 +99,18 @@ class SegmentSpec extends FunSpec with Matchers with BeforeAndAfter {
     val stringProj = RichProjection(Dataset("a", "first", "seg"), schema)
     val state = new TestSegmentState(stringProj, schema)
     val chunkSet = ChunkSet(state, mapper(names).toIterator)
-    val readSeg = rowReaderSegFromChunkSet(stringProj, segInfo, chunkSet, schema)
+    val reader = ChunkSetReader(chunkSet, schema)
 
-    readSeg.rowIterator().map(_.getString(0)).toSeq should equal (names.map(_._1.get))
+    reader.rowIterator().map(_.getString(0)).toSeq should equal (names.map(_._1.get))
   }
 
   it("RowWriter and RowReader should work for rows with multi-column row keys") {
     import GdeltTestData._
-    val segInfo = SegmentInfo(197901, "0").basedOn(projection2)
-    val state = new TestSegmentState(projection2, schema)
+    val state = new TestSegmentState(projection2, schema, 197901)
     val chunkSet = ChunkSet(state, readers.take(20).toIterator)
-    val readSeg = rowReaderSegFromChunkSet(projection2, segInfo, chunkSet, schema)
+    val reader = ChunkSetReader(chunkSet, schema)
 
     // Sum up all the NumArticles for first 20 rows
-    readSeg.rowIterator().map(_.getInt(6)).sum should equal (127)
+    reader.rowIterator().map(_.getInt(6)).sum should equal (127)
   }
 }

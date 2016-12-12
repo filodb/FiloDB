@@ -1,5 +1,6 @@
 package filodb.core.store
 
+import monix.reactive.Observable
 import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.concurrent.duration._
 import scala.util.Try
@@ -41,25 +42,24 @@ object Histogram {
   val empty: Histogram = Histogram(Int.MaxValue, Int.MinValue, 0, 0, Map.empty)
 }
 
-case class ColumnStoreAnalysis(numSegments: Int,
-                               numPartitions: Int,
+case class ColumnStoreAnalysis(numPartitions: Int,
                                totalRows: Int,
                                skippedRows: Int,
-                               rowsInSegment: Histogram,
-                               skippedRowsInSegment: Histogram,
-                               chunksInSegment: Histogram,
-                               segmentsInPartition: Histogram) {
+                               rowsInPartition: Histogram,
+                               skippedRowsInPartition: Histogram,
+                               chunksInPartition: Histogram,
+                               rowsPerChunk: Histogram) {
   def prettify(): String = {
-    s"ColumnStoreAnalysis\n  numSegments: $numSegments\n  numPartitions: $numPartitions\n" +
+    s"ColumnStoreAnalysis\n  numPartitions: $numPartitions\n" +
     s"  total rows: $totalRows\n  skipped rows: $skippedRows\n" +
-    rowsInSegment.prettify("# Rows in a segment") +
-    skippedRowsInSegment.prettify("# Skipped Rows in a segment") +
-    chunksInSegment.prettify("# Chunks in a segment") +
-    segmentsInPartition.prettify("# Segments in a partition")
+    rowsInPartition.prettify("# Rows in a partition") +
+    skippedRowsInPartition.prettify("# Skipped Rows in a partition") +
+    chunksInPartition.prettify("# Chunks in a partition") +
+    rowsPerChunk.prettify("# Rows Per Chunk")
   }
 }
 
-case class ChunkInfo(partKey: Any, segment: Any, chunkInfo: ChunkSetInfo)
+case class ChunkInfo(partKey: BinaryPartition, chunkInfo: ChunkSetInfo)
 
 /**
  * Analyzes the segments and chunks for a given dataset/version.  Gives useful information
@@ -70,52 +70,46 @@ object Analyzer {
   val NumChunksPerSegmentBucketKeys = Array(0, 5, 10, 25, 50, 100)
   val NumRowsPerSegmentBucketKeys = Array(0, 10, 100, 1000, 5000, 10000, 50000)
 
-  import scala.concurrent.ExecutionContext.Implicits.global
+  import monix.execution.Scheduler.Implicits.global
 
   def analyze(cs: ColumnStore with ColumnStoreScanner,
               metaStore: MetaStore,
               dataset: DatasetRef,
               version: Int,
               splitCombiner: Seq[ScanSplit] => ScanSplit,
-              maxSegments: Int = 10000): ColumnStoreAnalysis = {
-    var numSegments = 0
+              maxPartitions: Int = 10000): ColumnStoreAnalysis = {
+    var numPartitions = 0
     var totalRows = 0
     var skippedRows = 0
-    var rowsInSegment: Histogram = Histogram.empty
-    var skippedInSegment: Histogram = Histogram.empty
-    var chunksInSegment: Histogram = Histogram.empty
-    var segmentsInPartition: Histogram = Histogram.empty
-    val partitionSegments = (new collection.mutable.HashMap[BinaryPartition, Int]).withDefaultValue(0)
+    var rowsInPartition: Histogram = Histogram.empty
+    var skippedInPart: Histogram = Histogram.empty
+    var chunksInPartition: Histogram = Histogram.empty
+    var rowsPerChunk: Histogram = Histogram.empty
 
     val datasetObj = Await.result(metaStore.getDataset(dataset), 1.minutes)
     val schema = Await.result(metaStore.getSchema(dataset, version), 1.minutes)
     val projection = RichProjection(datasetObj, schema.values.toSeq)
     val split = splitCombiner(cs.getScanSplits(dataset, 1))
 
-    val indexes = Await.result(cs.scanIndices(projection, version,
-                                              FilteredPartitionScan(split)), 1.minutes)
+    cs.scanPartitions(projection, version, FilteredPartitionScan(split))
+      .take(maxPartitions)
+      .foreach { chunkIndex =>
+      // Figure out # chunks and rows per partition
+      val numRows = chunkIndex.allChunks.map(_._1.numRows).sum
+      val numSkipped = chunkIndex.allChunks.map(_._2.size).sum
+      val numChunks = chunkIndex.numChunks
 
-    indexes.take(maxSegments).foreach { case SegmentIndex(partKey, _, _, _, infosAndSkips) =>
-      // Figure out # chunks and rows per segment
-      val numRows = infosAndSkips.map(_._1.numRows).sum
-      val numSkipped = ChunkSetInfo.collectSkips(infosAndSkips).map(_._2.size).sum
-      val numChunks = infosAndSkips.length
-
-      numSegments = numSegments + 1
+      numPartitions = numPartitions + 1
       totalRows += numRows
       skippedRows += numSkipped
-      rowsInSegment = rowsInSegment.add(numRows, NumRowsPerSegmentBucketKeys)
-      skippedInSegment = skippedInSegment.add(numSkipped, NumRowsPerSegmentBucketKeys)
-      chunksInSegment = chunksInSegment.add(numChunks, NumChunksPerSegmentBucketKeys)
-      partitionSegments(partKey) += 1
+      rowsInPartition = rowsInPartition.add(numRows, NumRowsPerSegmentBucketKeys)
+      skippedInPart = skippedInPart.add(numSkipped, NumRowsPerSegmentBucketKeys)
+      chunksInPartition = chunksInPartition.add(numChunks, NumChunksPerSegmentBucketKeys)
+      rowsPerChunk = rowsPerChunk.add(numRows / numChunks, NumRowsPerSegmentBucketKeys)
     }
 
-    for { (partKey, numSegments) <- partitionSegments } {
-      segmentsInPartition = segmentsInPartition.add(numSegments, NumSegmentsBucketKeys)
-    }
-
-    ColumnStoreAnalysis(numSegments, partitionSegments.size, totalRows, skippedRows,
-                        rowsInSegment, skippedInSegment, chunksInSegment, segmentsInPartition)
+    ColumnStoreAnalysis(numPartitions, totalRows, skippedRows,
+                        rowsInPartition, skippedInPart, chunksInPartition, rowsPerChunk)
   }
 
   def getChunkInfos(cs: ColumnStore with ColumnStoreScanner,
@@ -123,19 +117,17 @@ object Analyzer {
                     dataset: DatasetRef,
                     version: Int,
                     splitCombiner: Seq[ScanSplit] => ScanSplit,
-                    maxSegments: Int = 100): Iterator[ChunkInfo] = {
+                    maxPartitions: Int = 100): Observable[ChunkInfo] = {
     val datasetObj = Await.result(metaStore.getDataset(dataset), 1.minutes)
     val schema = Await.result(metaStore.getSchema(dataset, version), 1.minutes)
     val projection = RichProjection(datasetObj, schema.values.toSeq)
     val split = splitCombiner(cs.getScanSplits(dataset, 1))
 
-    val indexes = Await.result(cs.scanIndices(projection, version,
-                                              FilteredPartitionScan(split)), 1.minutes)
-
-    indexes.take(maxSegments).flatMap { case SegmentIndex(_, _, partKey, segKey, infosAndSkips) =>
-      infosAndSkips.map { case (info, skips) =>
-        ChunkInfo(partKey, segKey, info)
+    cs.scanPartitions(projection, version, FilteredPartitionScan(split))
+      .take(maxPartitions)
+      .flatMap { index =>
+        val it = index.allChunks.map { case (info, skips) => ChunkInfo(index.binPartition, info) }
+        Observable.fromIterator(it)
       }
-    }
   }
 }

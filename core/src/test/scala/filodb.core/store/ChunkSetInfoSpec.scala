@@ -94,6 +94,13 @@ class ChunkSetInfoSpec extends FunSpec with Matchers {
     info1.intersection(getCSI(5, 28, 30)) should equal (None)
   }
 
+  it("should not find intersection if key1 is greater than key2") {
+    import GdeltTestData._
+    val info1 = getCSI(1, 0, 7)
+    implicit val ordering = projection2.rowKeyType.rowReaderOrdering
+    info1.intersection(info1.lastKey, info1.firstKey) should equal (None)
+  }
+
   it("should find intersection range of keys with timestamps") {
     import GdeltTestData._
     // Timestamp, String, String for rowkey / 0 seg / Year partition

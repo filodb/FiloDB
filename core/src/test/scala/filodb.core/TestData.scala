@@ -12,12 +12,25 @@ import scala.concurrent.duration._
 import filodb.core._
 import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.metadata.{Column, DataColumn, Dataset, RichProjection}
+import filodb.core.query.{PartitionChunkIndex, RowkeyPartitionChunkIndex}
 import filodb.core.store._
 
 class TestSegmentState(projection: RichProjection,
+                       index: PartitionChunkIndex,
                        schema: Seq[Column],
-                       settings: SegmentStateSettings = SegmentStateSettings())
-extends SegmentState(projection, schema, settings) {
+                       settings: SegmentStateSettings)
+extends SegmentState(projection, index, schema, settings) {
+
+  def this(projection: RichProjection,
+           schema: Seq[Column],
+           partition: Any = "/0",
+           settings: SegmentStateSettings = SegmentStateSettings()) =
+    this(projection,
+         new RowkeyPartitionChunkIndex(projection.partitionType.toBytes(
+                                         partition.asInstanceOf[projection.PK]), projection),
+         schema,
+         settings)
+
   val rowKeyChunks = new collection.mutable.HashMap[(BinaryRecord, Types.ChunkID), Array[ByteBuffer]]
 
   def getRowKeyChunks(key: BinaryRecord, chunkId: Types.ChunkID): Array[ByteBuffer] =
@@ -62,7 +75,7 @@ object NamesTestData {
 
   val firstKey = BinaryRecord(projection, Seq(names.head._3.get))
   val lastKey = BinaryRecord(projection, Seq(names.last._3.get))
-  def keyForName(rowNo: Int): RowReader = BinaryRecord(projection, Seq(names(rowNo)._3.getOrElse(0)))
+  def keyForName(rowNo: Int): BinaryRecord = BinaryRecord(projection, Seq(names(rowNo)._3.getOrElse(0)))
 
   val stateSettings = SegmentStateSettings()
   val emptyFilter = SegmentState.emptyFilter(stateSettings)

@@ -2,6 +2,7 @@ package filodb.core.store
 
 import com.typesafe.scalalogging.slf4j.StrictLogging
 import java.nio.ByteBuffer
+import monix.reactive.Observable
 import org.velvia.filo.RowReader
 import org.velvia.filo.RowReader.TypedFieldExtractor
 import scala.concurrent.{Await, ExecutionContext, Future}
@@ -11,19 +12,18 @@ import scala.language.existentials
 import filodb.core._
 import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.metadata.{Column, Projection, RichProjection}
+import filodb.core.query.ChunkSetReader
 
-sealed trait ScanMethod
-case class SinglePartitionScan(partition: Any) extends ScanMethod
-case class SinglePartitionRangeScan(keyRange: KeyRange[_, _]) extends ScanMethod
-case class SinglePartitionRowKeyScan(partition: Any, startKey: BinaryRecord, endKey: BinaryRecord)
-  extends ScanMethod
-case class FilteredPartitionScan(split: ScanSplit,
-                                 filter: Any => Boolean = (a: Any) => true) extends ScanMethod
-case class FilteredPartitionRangeScan(split: ScanSplit,
-                                      segmentRange: SegmentRange[_],
-                                      filter: Any => Boolean = (a: Any) => true) extends ScanMethod
-case class MultiPartitionScan(partitions: Seq[Any]) extends ScanMethod
-case class MultiPartitionRangeScan(keyRanges: Seq[KeyRange[_, _]]) extends ScanMethod
+sealed trait PartitionScanMethod
+final case class SinglePartitionScan(partition: Any) extends PartitionScanMethod
+final case class MultiPartitionScan(partitions: Seq[Any]) extends PartitionScanMethod
+final case class FilteredPartitionScan(split: ScanSplit,
+                                       filter: Any => Boolean = (a: Any) => true) extends PartitionScanMethod
+
+sealed trait ChunkScanMethod
+case object AllChunkScan extends ChunkScanMethod
+final case class RowKeyChunkScan(startKey: BinaryRecord, endKey: BinaryRecord) extends ChunkScanMethod
+final case class SingleChunkScan(startKey: BinaryRecord, chunkId: Types.ChunkID) extends ChunkScanMethod
 
 trait ScanSplit {
   // Should return a set of hostnames or IP addresses describing the preferred hosts for that scan split
@@ -31,13 +31,14 @@ trait ScanSplit {
 }
 
 /**
- * High-level interface of a column store.  Writes and reads segments, which are pretty high level.
- * Most implementations will probably want to use the ColumnStoreScanner, which implements much
- * of the read logic and gives lower level primitives.
+ * High-level interface of a column store.  Writes and reads chunks, which are pretty high level.
+ * Most implementations will probably want to use the ColumnStoreScanner, which implements the high level
+ * read logic and offers useful lower level primitives.
  */
-trait ColumnStore {
+trait ColumnStore extends StrictLogging {
   import filodb.core.Types._
-  import RowReaderSegment._
+  import ChunkSetReader._
+  import Iterators._
 
   def ec: ExecutionContext
   implicit val execContext = ec
@@ -72,63 +73,103 @@ trait ColumnStore {
                     version: Int): Future[Response]
 
   /**
-   * Scans segments from a dataset.  ScanMethod determines what gets scanned.
-   * Not required to return entire segments - if the segment is too big this may break things up
+   * Internal method.  Reads chunks from a dataset and returns an Observable of chunk readers.
+   * The implementation should do the work concurrently so that the current thread can be
+   * used mostly for processing data.
    *
    * @param projection the Projection to read from
    * @param columns the set of columns to read back.  Order determines the order of columns read back
    *                in each row
    * @param version the version # to read from
-   * @param method ScanMethod determining what to read from
-   * @return An iterator over RowReaderSegment's
+   * @param partMethod which partitions to scan
+   * @param chunkMethod which chunks within a partition to scan
+   * @return an Observable of ChunkSetReaders
    */
-  def scanSegments(projection: RichProjection,
-                   columns: Seq[Column],
-                   version: Int,
-                   method: ScanMethod): Future[Iterator[Segment]]
+  def readChunks(projection: RichProjection,
+                 columns: Seq[Column],
+                 version: Int,
+                 partMethod: PartitionScanMethod,
+                 chunkMethod: ChunkScanMethod = AllChunkScan): Observable[ChunkSetReader]
 
   /**
-   * Scans over segments, just like scanSegments, but returns an iterator of RowReader
+   * Scans chunks from a dataset.  ScanMethod params determines what gets scanned.
+   *
+   * @param projection the Projection to read from
+   * @param columns the set of columns to read back.  Order determines the order of columns read back
+   *                in each row
+   * @param version the version # to read from
+   * @param partMethod which partitions to scan
+   * @param chunkMethod which chunks within a partition to scan
+   * @return An iterator over ChunkSetReaders
+   */
+  def scanChunks(projection: RichProjection,
+                 columns: Seq[Column],
+                 version: Int,
+                 partMethod: PartitionScanMethod,
+                 chunkMethod: ChunkScanMethod = AllChunkScan): Iterator[ChunkSetReader] =
+    readChunks(projection, columns, version, partMethod, chunkMethod).toIterator()
+
+  /**
+   * Scans over chunks, just like scanChunks, but returns an iterator of RowReader
    * for all of those row-oriented applications.  Contains a high performance iterator
    * implementation, probably faster than trying to do it yourself.  :)
    */
   def scanRows(projection: RichProjection,
                columns: Seq[Column],
                version: Int,
-               method: ScanMethod,
-               readerFactory: RowReaderFactory = DefaultReaderFactory): Future[Iterator[RowReader]] = {
-    for { segmentIt <- scanSegments(projection, columns, version, method) }
-    yield {
-      if (segmentIt.hasNext) {
-        // TODO: fork this kind of code into a macro, called fastFlatMap.
-        // That's what we really need...  :-p
-        new Iterator[RowReader] {
-          final def getNextRowIt: Iterator[RowReader] = {
-            val readerSeg = segmentIt.next.asInstanceOf[RowReaderSegment]
-            readerSeg.rowIterator(readerFactory)
-          }
-
-          var rowIt: Iterator[RowReader] = getNextRowIt
-
-          final def hasNext: Boolean = {
-            var _hasNext = rowIt.hasNext
-            while (!_hasNext) {
-              if (segmentIt.hasNext) {
-                rowIt = getNextRowIt
-                _hasNext = rowIt.hasNext
-              } else {
-                // all done. No more segments.
-                return false
-              }
-            }
-            _hasNext
-          }
-
-          final def next: RowReader = rowIt.next.asInstanceOf[RowReader]
+               partMethod: PartitionScanMethod,
+               chunkMethod: ChunkScanMethod = AllChunkScan,
+               readerFactory: RowReaderFactory = DefaultReaderFactory): Iterator[RowReader] = {
+    val chunkIt = scanChunks(projection, columns, version, partMethod, chunkMethod)
+    if (chunkIt.hasNext) {
+      // TODO: fork this kind of code into a macro, called fastFlatMap.
+      // That's what we really need...  :-p
+      new Iterator[RowReader] {
+        final def getNextRowIt: Iterator[RowReader] = {
+          val chunkReader = chunkIt.next
+          chunkReader.rowIterator(readerFactory)
         }
-      } else {
-        Iterator.empty
+
+        var rowIt: Iterator[RowReader] = getNextRowIt
+
+        final def hasNext: Boolean = {
+          var _hasNext = rowIt.hasNext
+          while (!_hasNext) {
+            if (chunkIt.hasNext) {
+              rowIt = getNextRowIt
+              _hasNext = rowIt.hasNext
+            } else {
+              // all done. No more chunks.
+              return false
+            }
+          }
+          _hasNext
+        }
+
+        final def next: RowReader = rowIt.next.asInstanceOf[RowReader]
       }
+    } else {
+      Iterator.empty
+    }
+  }
+
+  /**
+   * Only read chunks corresponding to the row key columns.
+   */
+  def readRowKeyChunks(projection: RichProjection,
+                       version: Int,
+                       partition: Any,
+                       startKey: BinaryRecord,
+                       chunkId: Types.ChunkID): Array[ByteBuffer] = {
+    val chunkReaderIt = scanChunks(projection, projection.rowKeyColumns, version,
+                                   SinglePartitionScan(partition),
+                                   SingleChunkScan(startKey, chunkId))
+    try {
+      chunkReaderIt.toSeq.head.chunks
+    } catch {
+      case e: NoSuchElementException =>
+        logger.error(s"Error: no row key chunks for $partition / ($startKey, $chunkId)", e)
+        throw e
     }
   }
 
