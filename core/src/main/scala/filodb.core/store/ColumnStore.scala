@@ -224,11 +224,11 @@ trait CachedMergingColumnStore extends ColumnStore with ColumnStoreScanner with 
       return(Future.successful(NotApplied))
     }
     for { oldSegment <- getSegFromCache(projection.toRowKeyOnlyProjection, segment, version)
-          mergedSegment = subtrace(ctx, "segment-index-merge", "ingestion") {
+          mergedSegment = subtrace( "segment-index-merge", "ingestion",ctx=Option(ctx)) {
                             mergingStrategy.mergeSegments(oldSegment, segment) }
           writeChunksResp <- writeBatchedChunks(projection.datasetRef, version, mergedSegment, ctx)
             if writeChunksResp == Success
-          writeCRMapResp <- asyncSubtrace(ctx, "write-index", "ingest-io") {
+          writeCRMapResp <- asyncSubtrace( "write-index", "ingest-io",ctx=Option(ctx)) {
                               writeChunkRowMap(projection.datasetRef, segment.binaryPartition, version,
                                                segment.segmentId, mergedSegment.index) }
     } yield {
@@ -246,7 +246,7 @@ trait CachedMergingColumnStore extends ColumnStore with ColumnStoreScanner with 
                                  segment: Segment,
                                  ctx: TraceContext): Future[Response] = {
     val binPartition = segment.binaryPartition
-    asyncSubtrace(ctx, "write-chunks", "ingest-io") {
+    asyncSubtrace("write-chunks", "ingest-io", ctx=Option(ctx)) {
       Future.traverse(segment.getChunks.grouped(chunkBatchSize).toSeq) { chunks =>
         writeChunks(dataset, binPartition, version, segment.segmentId, chunks.toIterator)
       }.map { responses => responses.head }
@@ -255,7 +255,8 @@ trait CachedMergingColumnStore extends ColumnStore with ColumnStoreScanner with 
 
   private def getSegFromCache(projection: RichProjection,
                               segment: Segment,
-                              version: Int): Future[Segment] = asyncSubtrace("index-read", "ingest-io") {
+                              version: Int): Future[Segment] =
+    asyncSubtrace(name="index-read", category="ingest-io") {
     segmentCache((projection.datasetName, segment.binaryPartition, version, segment.segmentId)) {
       val newSegInfo = segment.segInfo.basedOn(projection)
       stats.segmentIndexMissingRead()

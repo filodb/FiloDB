@@ -109,10 +109,8 @@ package object spark extends StrictLogging {
   def syncToHive(sqlContext: SQLContext): Unit = {
     val config = FiloDriver.initAndGetConfig(sqlContext.sparkContext)
     if (config.hasPath("hive.database-name")) {
-      MetaStoreSync.getHiveContext(sqlContext).foreach { hiveContext =>
-        MetaStoreSync.syncFiloTables(config.getString("hive.database-name"),
-                                     metaStore,
-                                     hiveContext)
+      MetaStoreSync.getSparkSession(sqlContext).foreach { sparkSession  =>
+        MetaStoreSync.syncFiloTables(config.getString("hive.database-name"), metaStore, sparkSession )
       }
     }
   }

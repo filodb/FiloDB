@@ -228,7 +228,7 @@ private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
     logger.info(s"Starting new flush cycle for ($nameVer)...")
 
     if (curReprojection.isDefined || flushingTable.isDefined) {
-      logger.warn("This should not happen. Not starting flush; $curReprojection; $flushingTable")
+      logger.warn(s"This should not happen. Not starting flush; $curReprojection; $flushingTable")
       return
     }
     writeToMemTable()

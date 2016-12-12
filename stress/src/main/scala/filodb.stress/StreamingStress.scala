@@ -2,14 +2,14 @@ package filodb.stress
 
 import com.opencsv.CSVReader
 import org.apache.spark.rdd.RDD
-import org.apache.spark.sql.{DataFrame, SaveMode, SQLContext}
+import org.apache.spark.sql.{DataFrame, SQLContext, SaveMode, SparkSession}
 import org.apache.spark.streaming.{Milliseconds, StreamingContext}
-import org.apache.spark.{SparkContext, SparkConf}
+import org.apache.spark.{SparkConf, SparkContext}
 import org.joda.time.DateTime
+
 import scala.concurrent.duration._
 import scala.concurrent.{Await, Future}
 import scala.util.Try
-
 import filodb.core.DatasetRef
 import filodb.spark._
 
@@ -31,18 +31,21 @@ object StreamingStress extends App {
   val numRuns = 250    // Make this higher when doing performance profiling
 
   def puts(s: String): Unit = {
-    //scalastyle:off
+    // scalastyle:off
     println(s)
-    //scalastyle:on
+    // scalastyle:on
   }
 
-  // Setup SparkContext, etc.
-  val conf = (new SparkConf).setAppName("stream-test")
-                            .set("spark.filodb.cassandra.keyspace", "filostress")
-                            .set("spark.sql.shuffle.partitions", "4")
-                            .set("spark.scheduler.mode", "FAIR")
-  val sc = new SparkContext(conf)
-  val sql = new SQLContext(sc)
+  // Setup SparkSession, etc.
+  val sparkSession = SparkSession.builder()
+    .appName("stream-test")
+    .config("spark.filodb.cassandra.keyspace", "filostress")
+    .config("spark.sql.shuffle.partitions", "4")
+    .config("spark.scheduler.mode", "FAIR")
+    .getOrCreate()
+
+  val sc= sparkSession.sparkContext
+  val sql=sparkSession.sqlContext
   val ssc = new StreamingContext(sc, Milliseconds(1000))
   val ref = DatasetRef("taxi_streaming")
 

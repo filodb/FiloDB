@@ -1,12 +1,15 @@
 package filodb.spark
 
 import java.sql.Timestamp
-import org.apache.spark.{SparkContext, SparkException, SparkConf}
-import org.apache.spark.sql.SaveMode
+
+import org.apache.spark.sql.catalyst.encoders.ExpressionEncoder
+import org.apache.spark.sql.Encoder
+import org.apache.spark.{SparkConf, SparkContext, SparkException}
+import org.apache.spark.sql.{SaveMode, SparkSession}
 import org.apache.spark.sql.hive.HiveContext
 import org.scalatest.time.{Millis, Seconds, Span}
-import scala.concurrent.duration._
 
+import scala.concurrent.duration._
 import filodb.core._
 import filodb.core.metadata.{Column, DataColumn, Dataset}
 
@@ -27,15 +30,19 @@ class SaveAsFiloTest extends SparkTestBase {
   // implicit val defaultPatience =
   //   PatienceConfig(timeout = Span(15, Seconds), interval = Span(250, Millis))
 
-  // Setup SQLContext and a sample DataFrame
-  val conf = (new SparkConf).setMaster("local[4]")
-                            .setAppName("test")
-                            .set("spark.filodb.cassandra.keyspace", "unittest")
-                            .set("spark.filodb.cassandra.admin-keyspace", "unittest")
-                            .set("spark.filodb.memtable.min-free-mb", "10")
-                            .set("spark.ui.enabled", "false")
-  val sc = new SparkContext(conf)
-  val sql = new HiveContext(sc)
+  // Setup SparkSession, etc.
+  val sparkSession = SparkSession.builder()
+    .master("local[4]")
+    .appName("test")
+    .config("spark.filodb.cassandra.keyspace", "unittest")
+    .config("spark.filodb.cassandra.admin-keyspace", "unittest")
+    .config("spark.filodb.memtable.min-free-mb", "10")
+    .config("spark.ui.enabled", "false")   // No need for UI when doing perf stuff
+    .getOrCreate()
+
+  val sql=sparkSession.sqlContext
+  val sc=sparkSession.sparkContext
+
 
   val segCol = ":string 0"
   val partKeys = Seq(":string part0")
@@ -56,9 +63,10 @@ class SaveAsFiloTest extends SparkTestBase {
     """{"id":1,"sqlDate":"2015/03/15T16:00Z","monthYear":42015}""",
     """{"id":2,"sqlDate":"2015/03/15T17:00Z",                  "year":2015}"""
   )
-  val dataDF = sql.read.json(sc.parallelize(jsonRows, 1))
+  val dataDF = sparkSession.read.json(sc.parallelize(jsonRows, 1))
 
   import org.apache.spark.sql.functions._
+  import sparkSession.implicits._
 
   it("should create missing columns and partitions and write table") {
     sql.saveAsFilo(dataDF, "gdelt1", Seq("id"), segCol, partKeys,
@@ -66,7 +74,7 @@ class SaveAsFiloTest extends SparkTestBase {
 
     // Now read stuff back and ensure it got written
     val df = sql.filoDataset("gdelt1")
-    df.select(count("id")).collect().head(0) should equal (3)
+    df.select(count("id")).collect().head should equal (3)
     df.agg(sum("year")).collect().head(0) should equal (4030)
     val row = df.select("id", "sqlDate", "monthYear").limit(1).collect.head
     row(0) should equal (0)
@@ -134,7 +142,7 @@ class SaveAsFiloTest extends SparkTestBase {
 
     // Now read stuff back and ensure it got written
     val df = sql.filoDataset("gdelt1")
-    df.select(count("id")).collect().head(0) should equal (3)
+    df.select(count("id")).collect().head should equal (3)
   }
 
   it("should throw error in ErrorIfExists mode if dataset already exists") {
@@ -246,8 +254,8 @@ class SaveAsFiloTest extends SparkTestBase {
 
     val gdelt1 = sql.filoDataset("gdelt1")
     val gdelt2 = sql.filoDataset("gdelt2")
-    gdelt1.registerTempTable("gdelt1")
-    gdelt2.registerTempTable("gdelt2")
+    gdelt1.createOrReplaceTempView("gdelt1")
+    gdelt2.createOrReplaceTempView("gdelt2")
     sql.sql("INSERT INTO table gdelt2 SELECT * FROM gdelt1").count()
     gdelt2.agg(sum("year")).collect().head(0) should equal (8062)
   }
@@ -263,7 +271,7 @@ class SaveAsFiloTest extends SparkTestBase {
                  save()
     val df = sql.read.format("filodb.spark").option("dataset", "test1").load()
     df.agg(sum("id")).collect().head(0) should equal (3)
-    df.registerTempTable("test1")
+    df.createOrReplaceTempView("test1")
     sql.sql("SELECT sum(id) FROM test1 WHERE year = 2015").collect.head(0) should equal (2)
     sql.sql("SELECT count(*) FROM test1").collect.head(0) should equal (3)
   }
@@ -295,7 +303,7 @@ class SaveAsFiloTest extends SparkTestBase {
                  mode(SaveMode.Overwrite).
                  save()
     val df = sql.read.format("filodb.spark").option("dataset", "gdelt3").load()
-    df.registerTempTable("gdelt")
+    df.createOrReplaceTempView("gdelt")
     sql.sql("select sum(numArticles) from gdelt where actor2Code in ('JPN', 'KHM')").collect().
       head(0) should equal (30)
     sql.sql("select sum(numArticles) from gdelt where actor2Code = 'JPN' AND year = 1979").collect().
@@ -314,7 +322,7 @@ class SaveAsFiloTest extends SparkTestBase {
                  mode(SaveMode.Overwrite).
                  save()
     val df = sql.read.format("filodb.spark").option("dataset", "gdelt3").load()
-    df.registerTempTable("gdelt")
+    df.createOrReplaceTempView("gdelt")
     sql.sql("select sum(numArticles) from gdelt where actor2Code in ('JPN', 'KHM')").collect().
       head(0) should equal (30)
     sql.sql("select sum(numArticles) from gdelt where actor2Code = 'JPN' AND year = 1979").collect().
@@ -333,7 +341,7 @@ class SaveAsFiloTest extends SparkTestBase {
       mode(SaveMode.Overwrite).
       save()
     val df = sql.read.format("filodb.spark").option("dataset", "gdelt3").load()
-    df.registerTempTable("gdelt")
+    df.createOrReplaceTempView("gdelt")
     sql.sql("select sum(numArticles) from gdelt where actor2Code = 'JPN' AND year = 1979").collect().
       head(0) should equal (10)
   }
@@ -350,7 +358,7 @@ class SaveAsFiloTest extends SparkTestBase {
       mode(SaveMode.Overwrite).
       save()
     val df = sql.read.format("filodb.spark").option("dataset", "gdelt3").load()
-    df.registerTempTable("gdelt")
+    df.createOrReplaceTempView("gdelt")
     sql.sql("select sum(numArticles) from gdelt where actor2Code in ('JPN', 'KHM')").collect().
       head(0) should equal (30)
   }
@@ -369,7 +377,7 @@ class SaveAsFiloTest extends SparkTestBase {
     val df = sql.read.format("filodb.spark").option("dataset", "gdelt3").load()
     df.agg(sum("numArticles")).collect().head(0) should equal (492)
 
-    df.registerTempTable("gdelt")
+    df.createOrReplaceTempView("gdelt")
     sql.sql("select sum(numArticles) from gdelt where year=1979 " +
       "and  actor2Code in ('JPN', 'KHM')  and eventId >= 21 AND eventId <= 24").collect().
       head(0) should equal (21)
@@ -387,7 +395,7 @@ class SaveAsFiloTest extends SparkTestBase {
       mode(SaveMode.Overwrite).
       save()
     val df = sql.read.format("filodb.spark").option("dataset", "gdelt3").load()
-    df.registerTempTable("gdelt")
+    df.createOrReplaceTempView("gdelt")
     sql.sql("select sum(numArticles) from gdelt where actor2Code ='JPN'  ").collect().
       head(0) should equal (10)
   }
@@ -405,7 +413,7 @@ class SaveAsFiloTest extends SparkTestBase {
     val df = sql.read.format("filodb.spark").option("dataset", "gdelt3").load()
     df.agg(sum("numArticles")).collect().head(0) should equal (492)
 
-    df.registerTempTable("gdelt")
+    df.createOrReplaceTempView("gdelt")
     sql.sql("select sum(numArticles) from gdelt where eventId >= 78 AND eventId <= 85").collect().
       head(0) should equal (15)
   }
@@ -423,7 +431,7 @@ class SaveAsFiloTest extends SparkTestBase {
     val df = sql.read.format("filodb.spark").option("dataset", "gdelt3").load()
     df.agg(sum("numArticles")).collect().head(0) should equal (492)
 
-    df.registerTempTable("gdelt")
+    df.createOrReplaceTempView("gdelt")
     sql.sql("select sum(numArticles) from gdelt where eventId = 21").collect().
       head(0) should equal (10)
   }

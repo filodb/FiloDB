@@ -67,7 +67,7 @@ object FiloDriver extends FiloSetup with StrictLogging {
 
   // The init method called from a SparkContext is going to be from the driver/app.
   def init(context: SparkContext): Unit = synchronized {
-    _config.getOrElse {
+    _config.getOrElse[Any] {
       logger.info("Initializing FiloDriver clustering/coordination...")
       role = "driver"
       val filoConfig = configFromSpark(context)
@@ -107,10 +107,9 @@ object FiloExecutor extends FiloSetup with StrictLogging {
   /**
    * Initializes the config if it is not set, and start things for an executor.
    * @param filoConfig The config within the filodb.** level.
-   * @param role the Akka Cluster role, either "executor" or "driver"
    */
   def init(filoConfig: Config): Unit = synchronized {
-    _config.getOrElse {
+    _config.getOrElse[Any] {
       this.role = "executor"
       _config = Some(filoConfig)
       kamonInit()

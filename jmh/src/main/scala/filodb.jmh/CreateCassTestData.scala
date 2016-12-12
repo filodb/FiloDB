@@ -1,8 +1,8 @@
 package filodb.jmh
 
 import filodb.spark.FiloDriver
-import org.apache.spark.sql.{DataFrame, SaveMode, SQLContext}
-import org.apache.spark.{SparkContext, SparkException, SparkConf}
+import org.apache.spark.sql.{DataFrame, SQLContext, SaveMode, SparkSession}
+import org.apache.spark.{SparkConf, SparkContext, SparkException}
 
 /**
  * Creates Cassandra test data for the SparkReadBenchmark.  Note that only 1 partition
@@ -12,20 +12,21 @@ import org.apache.spark.{SparkContext, SparkException, SparkConf}
 object CreateCassTestData extends App {
   val NumRows = 5000000
 
-  val conf = (new SparkConf).setMaster("local[4]")
-                            .setAppName("test")
-                            .set("filodb.cassandra.keyspace", "filodb")
-                            .set("filodb.memtable.min-free-mb", "10")
-                            .set("spark.driver.memory", "3g")
-                            .set("spark.executor.memory", "5g")
-  val sc = new SparkContext(conf)
-  val sql = new SQLContext(sc)
+  // Setup SparkSession, etc.
+  val sparkSession = SparkSession.builder()
+    .master("Local[4]")
+    .appName("test")
+    .config("spark.filodb.cassandra.keyspace", "filodb")
+    .config("filodb.memtable.min-free-mb", "10")
+    .config("spark.driver.memory", "3g")
+    .config("spark.executor.memory", "5g")
+    .getOrCreate()
 
   case class DummyRow(data: Int, rownum: Int)
 
   //scalastyle:off
-  val randomIntsRdd = sc.parallelize((1 to NumRows).map { n => DummyRow(util.Random.nextInt, n)})
-  import sql.implicits._
+  val randomIntsRdd = sparkSession.sparkContext.parallelize((1 to NumRows).map { n => DummyRow(util.Random.nextInt, n)})
+  import sparkSession.implicits._
   val randomDF = randomIntsRdd.toDF()
   println(s"randomDF: $randomDF")
 
@@ -42,7 +43,7 @@ object CreateCassTestData extends App {
 
   println("Done!")
 
-  sc.stop()
+  sparkSession.stop()
   FiloDriver.shutdown()
   sys.exit(0)
 }

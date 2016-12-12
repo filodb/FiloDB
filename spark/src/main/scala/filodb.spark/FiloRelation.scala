@@ -120,7 +120,7 @@ object FiloRelation extends StrictLogging {
           case Seq(EqualTo(_, filterValue)) =>
             val equalVal = KeyFilter.parseSingleValue(keyType)(filterValue)
             logger.info(s"Pushing down segment range [$equalVal,$equalVal] on column $colName...")
-            Some(SegmentRange(equalVal, equalVal).basedOn(projection))
+            Some(SegmentRange(equalVal, equalVal).basedOn(projection).asInstanceOf[SegmentRange[projection.SK]])
           case other: Any => None
         }
       } else if (filters.length == 2) {
@@ -137,7 +137,7 @@ object FiloRelation extends StrictLogging {
             val leftValue = KeyFilter.parseSingleValue(keyType)(lVal)
             val rightValue = KeyFilter.parseSingleValue(keyType)(rVal)
             logger.info(s"Pushing down segment range [$leftValue, $rightValue] on column $colName...")
-            Some(SegmentRange(leftValue, rightValue).basedOn(projection))
+            Option(SegmentRange(leftValue, rightValue).basedOn(projection).asInstanceOf[SegmentRange[projection.SK]])
           case None =>
             logger.info(s"Segment column $colName matches, but cannot push down filters $filters")
             None
@@ -221,9 +221,9 @@ object FiloRelation extends StrictLogging {
  * parallelize reads from different columns.
  *
  * @constructor
- * @param sparkContext the spark context to pull config from
  * @param dataset the DatasetRef with name and database/keyspace of the dataset to read from
- * @param the version of the dataset data to read
+ * @param version the version of the dataset data to read
+ * @param splitsPerNode the number of split per nodes
  */
 case class FiloRelation(dataset: DatasetRef,
                         version: Int = 0,

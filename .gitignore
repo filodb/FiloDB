@@ -19,10 +19,10 @@ project/plugins/project/
 .worksheet
 
 # IntelliJ Settings per https://intellij-support.jetbrains.com/hc/en-us/articles/206544839
-.idea
-*.ipr
-*.iws
-*.iml
+-.idea/workspace.xml
+-.idea/tasks.xml
+-.idea/libraries/
+-.idea/dictionaries/
 
 # HIVE
 metastore_db/
