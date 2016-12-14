@@ -22,11 +22,10 @@ SegmentStateCache(config, columnStore)(ec) {
   var shouldThrow = false
   override def getSegmentState(projection: RichProjection,
                       schema: Seq[Column],
-                      version: Int,
-                      detectSkips: Boolean = true)
+                      version: Int)
                      (segInfo: SegmentInfo[projection.PK, projection.SK]): SegmentState = {
     if (shouldThrow) { throw new RuntimeException("foo!") }
-    else { super.getSegmentState(projection, schema, version, detectSkips)(segInfo) }
+    else { super.getSegmentState(projection, schema, version)(segInfo) }
   }
 }
 

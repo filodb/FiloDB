@@ -51,6 +51,7 @@ See [architecture](doc/architecture.md) and [datasets and reading](doc/datasets_
   - [Running the CLI](#running-the-cli)
   - [CLI Example](#cli-example)
 - [Current Status](#current-status)
+  - [Upcoming version 0.5 changes:](#upcoming-version-05-changes)
   - [Version 0.4 change list:](#version-04-change-list)
 - [Deploying](#deploying)
 - [Monitoring and Metrics](#monitoring-and-metrics)
@@ -265,10 +266,7 @@ Another possible layout is something like this:
 
 ### Distributed Partitioning
 
-Currently, FiloDB is a library in Spark and requires the user to distribute data such that no two nodes have rows with the same partition key.
-
-* The easiest strategy to accomplish this is to have data partitioned via a queue such as Kafka.  That way, when the data comes into Spark Streaming, it is already partitioned correctly.
-* Another way of accomplishing this is to use a DataFrame's `sort` method before using the DataFrame write API.
+FiloDB will automatically form a cluster (via Akka Cluster), divide the range of partition keys amongst the nodes using a consistent-hashing algorithm, and re-route incoming records to the right ingestion node.  Thus, users no longer need to sort their incoming data in Spark.
 
 ## Using FiloDB Data Source with Spark
 
@@ -594,6 +592,8 @@ Version 0.4 is the stable, latest released version.  It has been tested on a clu
 
 ### Upcoming version 0.5 changes:
 
+* NEW storage layout with incremental indices, provides much better ingestion for large partitions and skewed data 
+* Automatic routing of ingestion records across the network - no need to `sort` your DataFrame in Spark
 * creating a function for checking java and another to check sbt (@jenaiz)
 
 ### Version 0.4 change list:
@@ -612,8 +612,6 @@ Version 0.4 is the stable, latest released version.  It has been tested on a clu
 * Fix actor path uniqueness issue on ingestion
 
 ## Deploying
-
-The current version assumes Spark 1.6.x and Cassandra 2.1.x or 2.2.x, though it seems to work on Spark 1.5.x as well.
 
 - sbt spark/assembly
 - sbt cli/assembly
@@ -664,12 +662,8 @@ To run benchmarks, from within SBT:
 
 You can get the huge variety of JMH options by running `jmh:run -help`.
 
+There are also stress tests in the stress module.  See the [Stress README](stress/README.md).
+
 ## You can help!
 
-- Send your use cases for OLAP on Cassandra and Spark
-    + Especially IoT and Geospatial
-- Email if you want to contribute
-
-Your feedback will help decide the next batch of features, such as:
-    - which data types to add support for
-    - what architecture is best supported
+Contributions are welcome!
