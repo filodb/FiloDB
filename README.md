@@ -621,6 +621,8 @@ Version 0.4 is the stable, latest released version.  It has been tested on a clu
 
 There is a branch for Datastax Enterprise 4.8 / Spark 1.4.  Note that if you are using DSE or have vnodes enabled, a lower number of vnodes (16 or less) is STRONGLY recommended as higher numbers of vnodes slows down queries substantially and basically prevents subsecond queries from happening.
 
+If you are using DSE 5.0, you need to shade the hdrhistogram jar when building the FiloDB assembly due to a version conflict.
+
 By default, FiloDB nodes (basically all the Spark executors) talk to each other using a random port and locally assigned hostname.  You may wish to set `filodb.spark.driver.port`, `filodb.spark.executor.port` to assign specific ports (for AWS, for example) or possibly use a different config file on each host and set `akka.remote.netty.tcp.hostname` on each host's config file.
 
 ## Monitoring and Metrics
