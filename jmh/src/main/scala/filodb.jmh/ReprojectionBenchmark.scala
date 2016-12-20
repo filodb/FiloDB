@@ -36,7 +36,7 @@ class ReprojectionBenchmark {
                  ConfigFactory.load("application_test.conf")).getConfig("filodb")
   val mTable = new FiloMemTable(projection2, config)
 
-  import scala.concurrent.ExecutionContext.Implicits.global
+  import monix.execution.Scheduler.Implicits.global
   val colStore = new InMemoryColumnStore(scala.concurrent.ExecutionContext.Implicits.global)
   val stateCache = new SegmentStateCache(config, colStore)
   val reprojector = new DefaultReprojector(config, colStore, stateCache)

@@ -3,17 +3,11 @@ package filodb.jmh
 import ch.qos.logback.classic.{Level, Logger}
 import java.util.concurrent.TimeUnit
 import org.openjdk.jmh.annotations._
-import scalaxy.loops._
-import scala.language.postfixOps
-import scala.concurrent.Await
-import scala.concurrent.duration._
 
 import filodb.core._
 import filodb.core.metadata.{Column, Dataset, RichProjection}
-import filodb.core.store.{InMemoryColumnStore, RowReaderSegment}
 import filodb.spark.{SparkRowReader, FiloDriver, TypeConverters}
 import org.apache.spark.sql.{DataFrame, Row, SQLContext}
-import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.types._
 import org.apache.spark.sql.functions.sum
 import org.apache.spark.{SparkContext, SparkException, SparkConf}

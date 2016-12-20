@@ -149,19 +149,14 @@ with CoordinatorSetup with ScalaFutures {
 
     // Now, read stuff back from the column store and check that it's all there
     val scanMethod = SinglePartitionScan(Seq("GOV", 1979))
-    whenReady(columnStore.scanSegments(projection3, schema, 0, scanMethod)) { segIter =>
-      val segments = segIter.toSeq
-      segments should have length (1)
-      val readSeg = segments.head.asInstanceOf[RowReaderSegment]
-      readSeg.segInfo.segment should equal ("0")
-      readSeg.rowIterator().map(_.getInt(6)).sum should equal (80)
-    }
+    val chunks = columnStore.scanChunks(projection3, schema, 0, scanMethod).toSeq
+    chunks should have length (1)
+    chunks.head.rowIterator().map(_.getInt(6)).sum should equal (80)
 
     val splits = columnStore.getScanSplits(ref, 1)
     splits should have length (1)
-    whenReady(columnStore.scanRows(projection3, schema, 0, FilteredPartitionScan(splits.head))) { rowIter =>
-      rowIter.map(_.getInt(6)).sum should equal (492)
-    }
+    val rowIt = columnStore.scanRows(projection3, schema, 0, FilteredPartitionScan(splits.head))
+    rowIt.map(_.getInt(6)).sum should equal (492)
   }
 
   it("should stop datasetActor if error occurs and prevent further ingestion") {

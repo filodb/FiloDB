@@ -7,6 +7,7 @@ import akka.actor.ActorSystem
 import com.opencsv.CSVWriter
 import com.quantifind.sumac.{ArgMain, FieldArgs}
 import com.typesafe.config.ConfigFactory
+import monix.reactive.Observable
 import org.velvia.filo.{RowReader, FastFiloRowReader}
 import scala.concurrent.Await
 import scala.concurrent.duration._
@@ -189,11 +190,11 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
     }
   }
 
-  def printChunkInfos(infos: Iterator[ChunkInfo]): Unit = {
-    infos.foreach { case ChunkInfo(partKey, segKey, ChunkSetInfo(id, numRows, firstKey, lastKey)) =>
-      println(" %25s %20s".format(partKey, segKey))
-      println("\t%10d %5d  %40s %s".format(id, numRows, firstKey, lastKey))
+  def printChunkInfos(infos: Observable[ChunkInfo]): Unit = {
+    val fut = infos.foreach { case ChunkInfo(partKey, ChunkSetInfo(id, numRows, firstKey, lastKey)) =>
+      println(" %25s\t%10d %5d  %40s %s".format(partKey, id, numRows, firstKey, lastKey))
     }
+    parse(fut) { x => x }
   }
 
   def createDatasetAndColumns(dataset: DatasetRef,
@@ -291,9 +292,8 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
 
     // NOTE: we will only return data from the first split!
     val splits = columnStore.getScanSplits(dataset)
-    val requiredRows = parse(columnStore.scanRows(richProj, columns, version,
-                                                  FilteredPartitionScan(splits.head))) {
-                         x => x.take(limit) }
+    val requiredRows = columnStore.scanRows(richProj, columns, version, FilteredPartitionScan(splits.head))
+                                  .take(limit)
     writeResult(dataset.dataset, requiredRows, columnNames, columns, outFile)
   }
 }

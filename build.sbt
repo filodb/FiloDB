@@ -54,6 +54,7 @@ lazy val stress = (project in file("stress"))
                     .settings(mySettings:_*)
                     .settings(libraryDependencies ++= stressDeps)
                     .settings(assemblySettings:_*)
+                    .settings(assemblyOption in assembly := (assemblyOption in assembly).value.copy(includeScala = false))
                     .dependsOn(spark)
 
 val cassDriverVersion = "3.0.2"

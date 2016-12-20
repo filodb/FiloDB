@@ -3,14 +3,14 @@ package filodb.core.store
 import com.typesafe.scalalogging.slf4j.StrictLogging
 import java.nio.ByteBuffer
 import monix.reactive.Observable
-import scala.collection.mutable.HashMap
+import scala.collection.mutable.{HashMap, ArrayBuffer}
 import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.concurrent.duration._
 
 import filodb.core._
 import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.metadata.{Column, Projection, RichProjection}
-import filodb.core.query.{ChunkSetReader, PartitionChunkIndex}
+import filodb.core.query.{ChunkSetReader, PartitionChunkIndex, RowkeyPartitionChunkIndex}
 
 case class SingleChunkInfo(info: ChunkSetInfo, skips: Array[Int], colNo: Int, bytes: ByteBuffer)
 
@@ -69,7 +69,7 @@ trait ColumnStoreScanner extends StrictLogging {
 
   /**
    * Scans over indices according to the method.
-   * @return an iterator over SegmentIndex.
+   * @return an Observable over PartitionChunkIndex
    */
   def scanPartitions(projection: RichProjection,
                      version: Int,
@@ -87,7 +87,6 @@ trait ColumnStoreScanner extends StrictLogging {
       // Partitions to pipeline of single chunks
       .flatMap { partIndex =>
         stats.incrReadPartitions(1)
-        logger.debug(s"Now scanning chunks for partition ${partIndex.binPartition}")
         readPartitionChunks(projection.datasetRef, version, columns, partIndex, chunkMethod)
       // Collate single chunks to ChunkSetReaders
       }.flatMap { case SingleChunkInfo(info, skips, colNo, buf) =>
@@ -101,4 +100,3 @@ trait ColumnStoreScanner extends StrictLogging {
       }
   }
 }
-

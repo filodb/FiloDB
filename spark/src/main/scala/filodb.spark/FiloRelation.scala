@@ -39,13 +39,9 @@ object FiloRelation extends StrictLogging {
   // TODO(velvia): Make them per-table?
   val totalQueries             = Kamon.metrics.counter("spark-queries-total")
   val singlePartQueries        = Kamon.metrics.counter("spark-queries-single-partition")
-  val singlePartRangeQueries   = Kamon.metrics.counter("spark-queries-single-partition-range")
   val multiPartQueries         = Kamon.metrics.counter("spark-queries-multi-partition")
-  val multiPartRangeQueries    = Kamon.metrics.counter("spark-queries-multi-partition-range")
   val fullFilteredQueries      = Kamon.metrics.counter("spark-queries-full-filtered")
-  val fullFilteredRangeQueries = Kamon.metrics.counter("spark-queries-full-filtered-range")
   val fullTableQueries         = Kamon.metrics.counter("spark-queries-full-table")
-  val fullTableRangeQueries    = Kamon.metrics.counter("spark-queries-full-table-range")
 
   def getDatasetObj(dataset: DatasetRef): Dataset =
     parse(FiloDriver.metaStore.getDataset(dataset)) { ds => ds }
@@ -195,7 +191,8 @@ object FiloRelation extends StrictLogging {
                   splitsPerNode: Int,
                   config: Config,
                   readOnlyProjStr: String,
-                  version: Int)(f: ScanSplit => ScanMethod): RDD[Row] = {
+                  chunkMethod: ChunkScanMethod,
+                  version: Int)(f: ScanSplit => PartitionScanMethod): RDD[Row] = {
     val splits = FiloDriver.columnStore.getScanSplits(dataset, splitsPerNode)
     logger.info(s"${splits.length} splits: [${splits.take(3).mkString(", ")}...]")
 
@@ -206,31 +203,8 @@ object FiloRelation extends StrictLogging {
     // Also, each partition should only need one param.
     sqlContext.sparkContext.makeRDD(splitsWithLocations)
       .mapPartitions { splitIter =>
-        perPartitionRowScanner(config, readOnlyProjStr, version, f(splitIter.next))
+        perPartitionRowScanner(config, readOnlyProjStr, version, f(splitIter.next), chunkMethod)
       }
-  }
-
-  def filteredFullScan(sqlContext: SQLContext,
-                       dataset: DatasetRef,
-                       splitsPerNode: Int,
-                       projection: RichProjection,
-                       partitionFilters: Seq[(Int, KeyType, Seq[Filter])],
-                       config: Config,
-                       version: Int,
-                       readOnlyProjStr: String)
-                      (segRangeOpt: Option[SegmentRange[projection.SK]]): RDD[Row] = {
-    val (filterFunc, isFiltered) = filtersToFunc(projection, partitionFilters)
-    segRangeOpt.map { segRange =>
-      if (isFiltered) fullFilteredRangeQueries.increment else fullTableRangeQueries.increment
-      splitsQuery(sqlContext, dataset, splitsPerNode, config, readOnlyProjStr, version) { s =>
-        FilteredPartitionRangeScan(s, segRange, filterFunc)
-      }
-    }.getOrElse {
-      if (isFiltered) fullFilteredQueries.increment else fullTableQueries.increment
-      splitsQuery(sqlContext, dataset, splitsPerNode, config, readOnlyProjStr, version) { s =>
-        FilteredPartitionScan(s, filterFunc)
-      }
-    }
   }
 
   // It's good to put complex functions inside an object, to be sure that everything
@@ -238,16 +212,16 @@ object FiloRelation extends StrictLogging {
   def perPartitionRowScanner(config: Config,
                              readOnlyProjectionString: String,
                              version: Int,
-                             method: ScanMethod): Iterator[Row] = {
+                             partMethod: PartitionScanMethod,
+                             chunkMethod: ChunkScanMethod): Iterator[Row] = {
     // NOTE: all the code inside here runs distributed on each node.  So, create my own datastore, etc.
     FiloExecutor.init(config)
     FiloExecutor.columnStore    // force startup
     val readOnlyProjection = RichProjection.readOnlyFromString(readOnlyProjectionString)
 
-    parse(FiloExecutor.columnStore.scanRows(
-            readOnlyProjection, readOnlyProjection.columns, version, method,
-            (bytes, clazzes, len) => new SparkRowReader(bytes, clazzes, len)),
-          10 minutes) { rowIt => rowIt.asInstanceOf[Iterator[Row]] }
+    FiloExecutor.columnStore.scanRows(
+      readOnlyProjection, readOnlyProjection.columns, version, partMethod, chunkMethod,
+      (bytes, clazzes, len) => new SparkRowReader(bytes, clazzes, len)).asInstanceOf[Iterator[Row]]
   }
 }
 
@@ -297,44 +271,33 @@ case class FiloRelation(dataset: DatasetRef,
     val _config = this.filoConfig
     val _version = this.version
     totalQueries.increment
-    val segmentRange = segmentRangeScan(projection, groupedFilters)
-    (partitionQuery(_config,projection, partitionFilters), segmentRange) match {
-      // single partition query, no range scan
-      case (Seq(partitionKey), None) =>
+    val chunkMethod = segmentRangeScan(projection, groupedFilters) match {
+      case None           => AllChunkScan
+      case Some(segRange) => ???
+    }
+    partitionQuery(_config, projection, partitionFilters) match {
+      // single partition query
+      case Seq(partitionKey) =>
         singlePartQueries.increment
         sqlContext.sparkContext.parallelize(Seq(partitionKey), 1).mapPartitions { partKeyIter =>
           perPartitionRowScanner(_config, readOnlyProjStr, _version,
-            SinglePartitionScan(partKeyIter.next))
-        }
-      // single partition query, with range scan
-      case (Seq(partitionKey), Some(segRange)) =>
-        singlePartRangeQueries.increment
-        val keyRange = KeyRange(partitionKey, segRange.start, segRange.end, endExclusive = false)
-        sqlContext.sparkContext.parallelize(Seq(keyRange), 1).mapPartitions { keyRangeIter =>
-          perPartitionRowScanner(_config, readOnlyProjStr, _version,
-            SinglePartitionRangeScan(keyRangeIter.next))
+                                 SinglePartitionScan(partKeyIter.next), chunkMethod)
         }
 
       // filtered partition full table scan, with or without range scanning
-      case (Nil, segRangeOpt) => filteredFullScan(sqlContext, dataset, splitsPerNode,
-                                                  projection, partitionFilters,
-                                                  _config, _version, readOnlyProjStr)(segRangeOpt)
+      case Nil =>
+        val (filterFunc, isFiltered) = filtersToFunc(projection, partitionFilters)
+        if (isFiltered) fullFilteredQueries.increment else fullTableQueries.increment
+        splitsQuery(sqlContext, dataset, splitsPerNode, _config, readOnlyProjStr, chunkMethod, version) { s =>
+          FilteredPartitionScan(s, filterFunc)
+        }
 
       // multi partition query, no range scan
-      case (partitionKeys, None) =>
+      case partitionKeys: Seq[Any] =>
         multiPartQueries.increment
         sqlContext.sparkContext.parallelize(partitionKeys, 1).mapPartitions { partKeyIter =>
           perPartitionRowScanner(_config, readOnlyProjStr, _version,
-            MultiPartitionScan(partKeyIter.toSeq))
-        }
-      // multi partition query, with range scan
-      case (partitionKeys, Some(segRange)) =>
-        multiPartRangeQueries.increment
-        val keyRanges = partitionKeys.map { partitionKey =>
-          KeyRange(partitionKey, segRange.start, segRange.end, endExclusive = false) }
-        sqlContext.sparkContext.parallelize(keyRanges, 1).mapPartitions { keyRangeIter =>
-          perPartitionRowScanner(_config, readOnlyProjStr, _version,
-            MultiPartitionRangeScan(keyRangeIter.toSeq))
+                                 MultiPartitionScan(partKeyIter.toSeq), chunkMethod)
         }
     }
   }

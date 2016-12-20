@@ -3,14 +3,11 @@ package filodb.jmh
 import ch.qos.logback.classic.{Level, Logger}
 import java.util.concurrent.TimeUnit
 import org.openjdk.jmh.annotations._
-import scala.concurrent.duration._
-import scala.concurrent.{Await, Future}
-import scala.language.postfixOps
-import scalaxy.loops._
+import scala.concurrent.Future
 
 import filodb.core._
 import filodb.core.metadata.{Column, Dataset}
-import filodb.core.store.{FilteredPartitionScan, ColumnStoreSegmentState, ChunkSetSegment, SegmentInfo}
+import filodb.core.store._
 import filodb.spark.{FiloDriver, FiloRelation}
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.functions.sum
@@ -65,21 +62,20 @@ class SparkReadBenchmark {
   import IntSumReadBenchmark._
 
   // Initialize metastore
-  import scala.concurrent.ExecutionContext.Implicits.global
-  Await.result(FiloDriver.metaStore.newDataset(dataset), 3.seconds)
+  import filodb.coordinator.client.Client._
+  parse(FiloDriver.metaStore.newDataset(dataset)) { x => x }
   val createColumns = schema.map { col => FiloDriver.metaStore.newColumn(col, ref) }
-  Await.result(Future.sequence(createColumns), 3.seconds)
+  parse(Future.sequence(createColumns)) { x => x }
   val split = FiloDriver.columnStore.getScanSplits(ref).head
 
   // Merge segments into InMemoryColumnStore
-  import scala.concurrent.ExecutionContext.Implicits.global
-  rowStream.take(NumRows).grouped(10000).foreach { rows =>
+  rowIt.toSeq.take(NumRows).grouped(10000).foreach { rows =>
     val segKey = projection.segmentKeyFunc(TupleRowReader(rows.head))
     val segInfo = SegmentInfo("/0", segKey).basedOn(projection)
     val state = ColumnStoreSegmentState(projection, schema, 0, FiloDriver.columnStore)(segInfo)
     val writerSeg = new ChunkSetSegment(projection, segInfo)
     writerSeg.addChunkSet(state, rows.map(TupleRowReader))
-    Await.result(FiloDriver.columnStore.appendSegment(projection, writerSeg, 0), 10.seconds)
+    parse(FiloDriver.columnStore.appendSegment(projection, writerSeg, 0)) { x => x }
   }
 
   @TearDown
@@ -107,7 +103,7 @@ class SparkReadBenchmark {
   @OutputTimeUnit(TimeUnit.SECONDS)
   def inMemoryColStoreOnly(): Any = {
     val it = FiloRelation.perPartitionRowScanner(filoConfig, readOnlyProjStr, 0,
-                            FilteredPartitionScan(split)).asInstanceOf[Iterator[InternalRow]]
+                            FilteredPartitionScan(split), AllChunkScan).asInstanceOf[Iterator[InternalRow]]
     var sum = 0
     while (it.hasNext) {
       val row = it.next

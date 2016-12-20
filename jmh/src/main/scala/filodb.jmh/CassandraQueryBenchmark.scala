@@ -11,7 +11,7 @@ import org.openjdk.jmh.annotations.{Mode, State, Scope}
 import filodb.core._
 import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.metadata.RichProjection
-import filodb.core.store.{SinglePartitionScan, SinglePartitionRowKeyScan}
+import filodb.core.store.{SinglePartitionScan, RowKeyChunkScan}
 import filodb.cassandra.columnstore.CassandraColumnStore
 import filodb.cassandra.metastore.CassandraMetaStore
 
@@ -59,8 +59,7 @@ class CassandraQueryBenchmark {
   @BenchmarkMode(Array(Mode.AverageTime))
   @OutputTimeUnit(TimeUnit.MICROSECONDS)
   def wholePartitionScanHOD(): Int = {
-    parse(colStore.scanRows(hodProj, columns.map(hodSchema), 0, hodPartScan)) {
-      rowIter => rowIter.length }
+    colStore.scanRows(hodProj, columns.map(hodSchema), 0, hodPartScan).length
   }
 
   // Like the previous one, but does not actually iterate through the rows... so just count the read perf
@@ -68,8 +67,7 @@ class CassandraQueryBenchmark {
   @BenchmarkMode(Array(Mode.AverageTime))
   @OutputTimeUnit(TimeUnit.MICROSECONDS)
   def wholePartitionReadOnlyHOD(): Int = {
-    parse(colStore.scanSegments(hodProj, columns.map(hodSchema), 0, hodPartScan)) {
-      segIter => segIter.length }
+    colStore.scanChunks(hodProj, columns.map(hodSchema), 0, hodPartScan).length
   }
 
   // How fast is it only to read the indices of a partition?  This is a constant cost no matter
@@ -78,28 +76,17 @@ class CassandraQueryBenchmark {
   @BenchmarkMode(Array(Mode.AverageTime))
   @OutputTimeUnit(TimeUnit.MICROSECONDS)
   def wholePartitionIndicesOnlyHOD(): Int = {
-    parse(colStore.scanIndices(hodProj, 0, hodPartScan)) { indexIter => indexIter.length }
+    parse(colStore.scanPartitions(hodProj, 0, hodPartScan).countL.runAsync) { l => l.toInt }
   }
 
-  val hodIndex = parse(colStore.scanIndices(hodProj, 0, hodPartScan)) { it => it.toSeq.head }
-
-  @Benchmark
-  @BenchmarkMode(Array(Mode.AverageTime))
-  @OutputTimeUnit(TimeUnit.MICROSECONDS)
-  def wholePartitionReadChunksOnlyHOD(): Int = {
-    parse(colStore.readChunks(hodProj.datasetRef, 0, columns,
-                              hodIndex.binPartition, hodIndex.segmentId,
-                              hodIndex.infosAndSkips.head._1.keyAndId,
-                              hodIndex.infosAndSkips.last._1.keyAndId)) { chunks => chunks.length }
-  }
+  // We no longer break down components of the read because everything is pipelined
 
   @Benchmark
   @BenchmarkMode(Array(Mode.AverageTime))
   @OutputTimeUnit(TimeUnit.MICROSECONDS)
   def wholePartitionScanMed(): Int = {
     val medPartScan = SinglePartitionScan("AA")
-    parse(colStore.scanRows(medProj, columns.map(medSchema), 0, medPartScan)) {
-      rowIter => rowIter.length }
+    colStore.scanRows(medProj, columns.map(medSchema), 0, medPartScan).length
   }
 
   val hodKey1 = BinaryRecord(hodProj, Seq(Timestamp.valueOf("2013-01-02 08:00:00"), "0", "0"))
@@ -111,18 +98,18 @@ class CassandraQueryBenchmark {
   @BenchmarkMode(Array(Mode.AverageTime))
   @OutputTimeUnit(TimeUnit.MICROSECONDS)
   def earlyTwoDaysRangeScanHOD(): Int = {
-    val method = SinglePartitionRowKeyScan(9, hodKey1, hodKey2)
-    parse(colStore.scanRows(hodProj, columns.map(hodSchema), 0, method)) {
-      rowIter => rowIter.length }
+    val pmethod = SinglePartitionScan(9)
+    val cmethod = RowKeyChunkScan(hodKey1, hodKey2)
+    colStore.scanRows(hodProj, columns.map(hodSchema), 0, pmethod, cmethod).length
   }
 
   @Benchmark
   @BenchmarkMode(Array(Mode.AverageTime))
   @OutputTimeUnit(TimeUnit.MICROSECONDS)
   def lateTwoDaysRangeScanHOD(): Int = {
-    val method = SinglePartitionRowKeyScan(9, hodKey3, hodKey4)
-    parse(colStore.scanRows(hodProj, columns.map(hodSchema), 0, method)) {
-      rowIter => rowIter.length }
+    val pmethod = SinglePartitionScan(9)
+    val cmethod = RowKeyChunkScan(hodKey3, hodKey4)
+    colStore.scanRows(hodProj, columns.map(hodSchema), 0, pmethod, cmethod).length
   }
 
   val medKey1 = BinaryRecord(medProj, Seq("AAF", "", Timestamp.valueOf("2013-01-02 08:00:00")))
@@ -132,8 +119,8 @@ class CassandraQueryBenchmark {
   @BenchmarkMode(Array(Mode.AverageTime))
   @OutputTimeUnit(TimeUnit.MICROSECONDS)
   def middleMedallionRangeScan(): Int = {
-    val method = SinglePartitionRowKeyScan("AA", medKey1, medKey2)
-    parse(colStore.scanRows(medProj, columns.map(medSchema), 0, method)) {
-      rowIter => rowIter.length }
+    val pmethod = SinglePartitionScan("AA")
+    val cmethod = RowKeyChunkScan(medKey1, medKey2)
+    colStore.scanRows(medProj, columns.map(medSchema), 0, pmethod, cmethod).length
   }
 }

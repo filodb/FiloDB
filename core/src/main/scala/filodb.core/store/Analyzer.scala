@@ -94,19 +94,19 @@ object Analyzer {
     cs.scanPartitions(projection, version, FilteredPartitionScan(split))
       .take(maxPartitions)
       .foreach { chunkIndex =>
-      // Figure out # chunks and rows per partition
-      val numRows = chunkIndex.allChunks.map(_._1.numRows).sum
-      val numSkipped = chunkIndex.allChunks.map(_._2.size).sum
-      val numChunks = chunkIndex.numChunks
+        // Figure out # chunks and rows per partition
+        val numRows = chunkIndex.allChunks.map(_._1.numRows).sum
+        val numSkipped = chunkIndex.allChunks.map(_._2.size).sum
+        val numChunks = chunkIndex.numChunks
 
-      numPartitions = numPartitions + 1
-      totalRows += numRows
-      skippedRows += numSkipped
-      rowsInPartition = rowsInPartition.add(numRows, NumRowsPerSegmentBucketKeys)
-      skippedInPart = skippedInPart.add(numSkipped, NumRowsPerSegmentBucketKeys)
-      chunksInPartition = chunksInPartition.add(numChunks, NumChunksPerSegmentBucketKeys)
-      rowsPerChunk = rowsPerChunk.add(numRows / numChunks, NumRowsPerSegmentBucketKeys)
-    }
+        numPartitions = numPartitions + 1
+        totalRows += numRows
+        skippedRows += numSkipped
+        rowsInPartition = rowsInPartition.add(numRows, NumRowsPerSegmentBucketKeys)
+        skippedInPart = skippedInPart.add(numSkipped, NumRowsPerSegmentBucketKeys)
+        chunksInPartition = chunksInPartition.add(numChunks, NumChunksPerSegmentBucketKeys)
+        rowsPerChunk = rowsPerChunk.add(numRows / numChunks, NumRowsPerSegmentBucketKeys)
+      }
 
     ColumnStoreAnalysis(numPartitions, totalRows, skippedRows,
                         rowsInPartition, skippedInPart, chunksInPartition, rowsPerChunk)

@@ -12,7 +12,7 @@ import filodb.core._
 import filodb.coordinator.NodeClusterActor
 
 object Client {
-  implicit val context = scala.concurrent.ExecutionContext.Implicits.global
+  implicit val context = monix.execution.Scheduler.Implicits.global
 
   def parse[T, B](cmd: => Future[T], awaitTimeout: FiniteDuration = 30 seconds)(func: T => B): B = {
     func(Await.result(cmd, awaitTimeout))
