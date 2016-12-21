@@ -3,16 +3,18 @@ package filodb.core.store
 import com.typesafe.scalalogging.slf4j.StrictLogging
 import java.nio.ByteBuffer
 import monix.reactive.Observable
-import scala.collection.mutable.{HashMap, ArrayBuffer}
-import scala.concurrent.{Await, ExecutionContext, Future}
+import org.jctools.maps.NonBlockingHashMapLong
 import scala.concurrent.duration._
+import scala.concurrent.{ExecutionContext, Future}
 
 import filodb.core._
 import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.metadata.{Column, Projection, RichProjection}
-import filodb.core.query.{ChunkSetReader, PartitionChunkIndex, RowkeyPartitionChunkIndex}
+import filodb.core.query.{ChunkSetReader, PartitionChunkIndex}
 
-case class SingleChunkInfo(info: ChunkSetInfo, skips: Array[Int], colNo: Int, bytes: ByteBuffer)
+trait ChunkPipeItem
+case class ChunkPipeInfos(infosAndSkips: Seq[(ChunkSetInfo, Array[Int])]) extends ChunkPipeItem
+case class SingleChunkInfo(id: Types.ChunkID, colNo: Int, bytes: ByteBuffer) extends ChunkPipeItem
 
 /**
  * Encapsulates the reading and scanning logic of the ColumnStore.
@@ -30,7 +32,8 @@ trait ColumnStoreScanner extends StrictLogging {
 
   /**
    * Reads back chunks from a partition as an observable of SingleChunkInfos
-   * Must not feed extraneous chunks (say from a range scan).
+   * Before the SingleChunkInfos for a given ID, a ChunkPipeInfos must be sent to set up the readers,
+   * otherwise the SingleChunkInfos will be discarded.
    * Think carefully about concurrency here - do work on other threads to be nonblocking
    * @param dataset the DatasetRef of the dataset to read chunks from
    * @param version the version to read back
@@ -42,7 +45,7 @@ trait ColumnStoreScanner extends StrictLogging {
                           version: Int,
                           columns: Seq[Column],
                           partitionIndex: PartitionChunkIndex,
-                          chunkMethod: ChunkScanMethod): Observable[SingleChunkInfo]
+                          chunkMethod: ChunkScanMethod): Observable[ChunkPipeItem]
 
   /**
    * Reads back a subset of filters for ingestion row replacement / skip detection
@@ -80,23 +83,52 @@ trait ColumnStoreScanner extends StrictLogging {
                  version: Int,
                  partMethod: PartitionScanMethod,
                  chunkMethod: ChunkScanMethod = AllChunkScan): Observable[ChunkSetReader] = {
-    val readers = new HashMap[ChunkID, ChunkSetReader]
-    val clazzes = columns.map(_.columnType.clazz).toArray
-
     scanPartitions(projection, version, partMethod)
       // Partitions to pipeline of single chunks
       .flatMap { partIndex =>
         stats.incrReadPartitions(1)
         readPartitionChunks(projection.datasetRef, version, columns, partIndex, chunkMethod)
       // Collate single chunks to ChunkSetReaders
-      }.flatMap { case SingleChunkInfo(info, skips, colNo, buf) =>
-        // TODO: use an Operator if this turns out to be a bottleneck
-        val reader = readers.getOrElseUpdate(info.id, new ChunkSetReader(info, skips, clazzes))
-        reader.addChunk(colNo, buf)
-        if (reader.isFull) {
-          readers.remove(info.id)
-          Observable.now(reader)
-        } else { Observable.empty }
-      }
+      }.scan(new ChunkSetReaderAggregator(columns, stats)) { _ add _ }
+      .collect { case agg: ChunkSetReaderAggregator if agg.canEmit => agg.emit() }
   }
 }
+
+private[store] class ChunkSetReaderAggregator(schema: Seq[Column], stats: ColumnStoreStats) {
+  val readers = new NonBlockingHashMapLong[ChunkSetReader](32, false)
+  val clazzes = schema.map(_.columnType.clazz).toArray
+  var emitReader: Option[ChunkSetReader] = None
+
+  def canEmit: Boolean = emitReader.isDefined
+
+  def emit(): ChunkSetReader = {
+    val reader = emitReader.get
+    emitReader = None
+    reader
+  }
+
+  def add(pipeItem: ChunkPipeItem): ChunkSetReaderAggregator = {
+    pipeItem match {
+      case SingleChunkInfo(id, colNo, buf) =>
+        readers.get(id) match {
+          //scalastyle:off
+          case null =>
+          //scalastyle:on
+            stats.incrChunkWithNoInfo()
+          case reader: ChunkSetReader =>
+            reader.addChunk(colNo, buf)
+            if (reader.isFull) {
+              readers.remove(id)
+              stats.incrReadChunksets()
+              emitReader = Some(reader)
+            }
+        }
+      case ChunkPipeInfos(infos) =>
+        infos.foreach { case (info, skips) =>
+          readers.put(info.id, new ChunkSetReader(info, skips, clazzes))
+        }
+    }
+    this
+  }
+}
+

@@ -127,19 +127,21 @@ trait InMemoryColumnStoreScanner extends ColumnStoreScanner {
                           version: Int,
                           columns: Seq[Column],
                           partitionIndex: PartitionChunkIndex,
-                          chunkMethod: ChunkScanMethod): Observable[SingleChunkInfo] = {
+                          chunkMethod: ChunkScanMethod): Observable[ChunkPipeItem] = {
     chunkDb.get((dataset, partitionIndex.binPartition, version)).map { chunkStore =>
       logger.debug(s"Reading chunks from columns $columns, ${partitionIndex.binPartition}, method $chunkMethod")
-      val infosSkips = chunkMethod match {
+      val infosSkips = (chunkMethod match {
         case AllChunkScan            => partitionIndex.allChunks
         case RowKeyChunkScan(k1, k2) => partitionIndex.rowKeyRange(k1, k2)
         case SingleChunkScan(key, id) => partitionIndex.singleChunk(key, id)
-      }
+      }).toBuffer
       val colIndex = columns.map { col => chunkStore.columnMap.getOrElse(col.name, Int.MaxValue) }.toArray
 
-      Observable.fromIterator(infosSkips).flatMap { case (info, skips) =>
+      val infoStream = Observable.now(ChunkPipeInfos(infosSkips))
+
+      infoStream ++ Observable.fromIterable(infosSkips).flatMap { case (info, skips) =>
         val chunks = (0 until colIndex.size).map { i =>
-          SingleChunkInfo(info, skips, i, chunkStore.getChunk(info.id, colIndex(i)))
+          SingleChunkInfo(info.id, i, chunkStore.getChunk(info.id, colIndex(i)))
         }
         Observable.fromIterable(chunks)
       }

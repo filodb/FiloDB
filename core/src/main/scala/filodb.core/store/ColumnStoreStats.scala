@@ -27,6 +27,9 @@ trait ColumnStoreStats {
 
   def incrReadPartitions(numSegments: Int): Unit
   def readPartitions: Int
+
+  def incrReadChunksets(): Unit
+  def incrChunkWithNoInfo(): Unit
 }
 
 object ColumnStoreStats {
@@ -47,7 +50,8 @@ private[store] class KamonColumnStoreStats extends ColumnStoreStats {
   private val segmentCacheMisses = Kamon.metrics.counter("segment-cache-misses")
 
   private val readPartitionsCtr  = Kamon.metrics.counter("read-partitions")
-  private val readChunksCtr      = Kamon.metrics.counter("read-chunks")
+  private val readChunksetsCtr   = Kamon.metrics.counter("read-chunksets")
+  private val chunkNoInfoCtr     = Kamon.metrics.counter("read-chunks-with-no-info")
   var readPartitions: Int = 0
 
   def addChunkWriteStats(numChunks: Int, totalChunkBytes: Long): Unit = {
@@ -75,4 +79,7 @@ private[store] class KamonColumnStoreStats extends ColumnStoreStats {
     readPartitionsCtr.increment(numPartitions)
     readPartitions += numPartitions
   }
+
+  def incrReadChunksets(): Unit = { readChunksetsCtr.increment }
+  def incrChunkWithNoInfo(): Unit = { chunkNoInfoCtr.increment }
 }
