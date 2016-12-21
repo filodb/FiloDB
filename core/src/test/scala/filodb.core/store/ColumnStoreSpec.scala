@@ -105,11 +105,11 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
       response should equal (Success)
     }
 
-    // First row (names(1)) should be skipped, and last rows should be from second chunk
+    // First row (names(1)) should be skipped, and last rows should be from second chunk (chunkID order)
     val rows = colStore.scanRows(projection, schema, 0, partScan)
                        .map(r => (r.getLong(2), r.getString(0))).toSeq
-    rows.map(_._1) should equal (Seq(24L, 25L, 28L, 29L, 39L, 40L))
-    rows.map(_._2) should equal (Seq("Stacy", "Amari") ++ sortedFirstNames.drop(2))
+    rows.map(_._1) should equal (Seq(28L, 29L, 39L, 40L, 24L, 25L))
+    rows.map(_._2) should equal (sortedFirstNames.drop(2) ++ Seq("Stacy", "Amari"))
   }
 
   // The first row key column is a computed column, so this test also ensures that retrieving the original

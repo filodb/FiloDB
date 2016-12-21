@@ -15,7 +15,7 @@ import filodb.core._
 import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.store._
 import filodb.core.metadata.{Column, Projection, RichProjection}
-import filodb.core.query.{PartitionChunkIndex, RowkeyPartitionChunkIndex}
+import filodb.core.query.{PartitionChunkIndex, ChunkIDPartitionChunkIndex}
 
 /**
  * Implementation of a column store using Apache Cassandra tables.
@@ -125,8 +125,7 @@ extends ColumnStore with CassandraColumnStoreScanner with StrictLogging {
       val binPartition = segment.binaryPartition
       val chunkTable = getOrCreateChunkTable(dataset)
       Future.traverse(segment.chunkSets) { chunkSet =>
-        chunkTable.writeChunks(binPartition, version, chunkSet.info.firstKey.toSortableBytes(),
-                               chunkSet.info.id, chunkSet.chunks, stats)
+        chunkTable.writeChunks(binPartition, version, chunkSet.info.id, chunkSet.chunks, stats)
       }.map { responses => responses.head }
     }
   }
@@ -242,7 +241,7 @@ trait CassandraColumnStoreScanner extends ColumnStoreScanner with StrictLogging 
     Observable[SingleChunkInfo] =
     Observable.fromIterator(infosSkips.toIterator.map { case (info, skips) =>
       //scalastyle:off
-      SingleChunkInfo(info, skips, colNo, null.asInstanceOf[ByteBuffer])
+      SingleChunkInfo(info.id, colNo, null.asInstanceOf[ByteBuffer])
       //scalastyle:on
     })
 
@@ -250,7 +249,7 @@ trait CassandraColumnStoreScanner extends ColumnStoreScanner with StrictLogging 
                           version: Int,
                           columns: Seq[Column],
                           partitionIndex: PartitionChunkIndex,
-                          chunkMethod: ChunkScanMethod): Observable[SingleChunkInfo] = {
+                          chunkMethod: ChunkScanMethod): Observable[ChunkPipeItem] = {
     val chunkTable = getOrCreateChunkTable(dataset)
     val colsWithIndex = columns.map(_.name).zipWithIndex
 
@@ -266,10 +265,11 @@ trait CassandraColumnStoreScanner extends ColumnStoreScanner with StrictLogging 
     val groupedInfos = infosSkips.grouped(10)  // TODO: group by # of rows read
 
     Observable.fromIterator(groupedInfos).flatMap { infosSkipsGroup =>
+      val groupedIds = infosSkipsGroup.map(_._1.id)
       val chunkStreams = colsWithIndex.map { case (col, index) =>
-        chunkTable.readChunks(partitionIndex.binPartition, version, col, index, infosSkipsGroup)
+        chunkTable.readChunks(partitionIndex.binPartition, version, col, index, groupedIds)
                   .switchIfEmpty(emptyChunkStream(infosSkipsGroup, index)) }
-      Observable.merge(chunkStreams:_*)
+      Observable.now(ChunkPipeInfos(infosSkipsGroup)) ++ Observable.merge(chunkStreams:_*)
     }
   }
 
@@ -316,7 +316,7 @@ trait CassandraColumnStoreScanner extends ColumnStoreScanner with StrictLogging 
     indexRecords.sortedGroupBy(_.binPartition)
                 .collect { case (binPart, binIndices)
                            if filterFunc(projection.partitionType.fromBytes(binPart)) =>
-                  val newIndex = new RowkeyPartitionChunkIndex(binPart, projection)
+                  val newIndex = new ChunkIDPartitionChunkIndex(binPart, projection)
                   binIndices.foreach { binIndex =>
                     val (info, skips) = ChunkSetInfo.fromBytes(projection, binIndex.data.array)
                     newIndex.add(info, skips)

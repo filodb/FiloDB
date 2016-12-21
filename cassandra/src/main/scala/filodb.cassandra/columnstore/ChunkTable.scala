@@ -33,68 +33,53 @@ sealed class ChunkTable(val dataset: DatasetRef, val connector: FiloCassandraCon
                     |    partition blob,
                     |    version int,
                     |    columnname text,
-                    |    startkey blob,
                     |    chunkid bigint,
                     |    data blob,
-                    |    PRIMARY KEY ((partition, version), columnname, startkey, chunkid)
+                    |    PRIMARY KEY ((partition, version), columnname, chunkid)
                     |) WITH COMPACT STORAGE AND compression = {
                     'sstable_compression': '$sstableCompression'}""".stripMargin
 
   lazy val writeChunksCql = session.prepare(
-    s"""INSERT INTO $tableString (partition, version, startkey, chunkid, columnname, data
-      |) VALUES (?, ?, ?, ?, ?, ?)""".stripMargin
+    s"""INSERT INTO $tableString (partition, version, chunkid, columnname, data
+      |) VALUES (?, ?, ?, ?, ?)""".stripMargin
   )
 
   def writeChunks(partition: Types.BinaryPartition,
                   version: Int,
-                  startKey: Array[Byte],
                   chunkId: Types.ChunkID,
                   chunks: Map[String, ByteBuffer],
                   stats: ColumnStoreStats): Future[Response] = {
     val partBytes = toBuffer(partition)
-    val startKeyBuf = ByteBuffer.wrap(startKey)
     var chunkBytes = 0L
     val statements = chunks.map { case (columnName, bytes) =>
       val finalBytes = compressChunk(bytes)
       chunkBytes += finalBytes.capacity.toLong
-      writeChunksCql.bind(partBytes, version: jlInt, startKeyBuf,
-                          chunkId: jlLong, columnName, finalBytes)
+      writeChunksCql.bind(partBytes, version: jlInt, chunkId: jlLong, columnName, finalBytes)
     }.toSeq
     stats.addChunkWriteStats(statements.length, chunkBytes)
     connector.execStmt(unloggedBatch(statements))
   }
 
-  lazy val readChunkRangeCql = session.prepare(
+  lazy val readChunkInCql = session.prepare(
                                  s"""SELECT chunkid, data FROM $tableString WHERE
                                   | columnname = ? AND partition = ? AND version = ?
-                                  | AND (startkey, chunkid) >= (?, ?)
-                                  | AND (startkey, chunkid) <= (?, ?)""".stripMargin)
+                                  | AND chunkid IN ?""".stripMargin)
 
   def readChunks(partition: Types.BinaryPartition,
                  version: Int,
                  column: String,
                  colNo: Int,
-                 infosAndSkips: Seq[(ChunkSetInfo, Array[Int])]): Observable[SingleChunkInfo] = {
-    val firstInfo = infosAndSkips.head._1
-    val lastInfo = infosAndSkips.last._1
-
-    val query = readChunkRangeCql.bind(column, toBuffer(partition), version: jlInt,
-                                       ByteBuffer.wrap(firstInfo.firstKey.toSortableBytes()), firstInfo.id: jlLong,
-                                       ByteBuffer.wrap(lastInfo.firstKey.toSortableBytes()), lastInfo.id: jlLong)
-    Observable.fromFuture(execReadChunk(infosAndSkips, colNo, query))
+                 chunkIds: Seq[Types.ChunkID]): Observable[SingleChunkInfo] = {
+    val query = readChunkInCql.bind(column, toBuffer(partition), version: jlInt, chunkIds.asJava)
+    Observable.fromFuture(execReadChunk(colNo, query))
               .flatMap(it => Observable.fromIterator(it))
   }
 
-  private def execReadChunk(infosAndSkips: Seq[(ChunkSetInfo, Array[Int])],
-                            colNo: Int,
+  private def execReadChunk(colNo: Int,
                             query: BoundStatement): Future[Iterator[SingleChunkInfo]] = {
     session.executeAsync(query).toIterator.map { rowIt =>
-      // NOTE: this assumes that infosAndSkips occur in exact same order as chunks read back.
-      // TODO: find a way to skip a chunk or something
-      rowIt.zip(infosAndSkips.toIterator).map { case (row, (info, skips)) =>
-        val chunkID = row.getLong(0)
-        assert(chunkID == info.id)
-        SingleChunkInfo(info, skips, colNo, decompressChunk(row.getBytes(1)))
+      rowIt.map { row =>
+        SingleChunkInfo(row.getLong(0), colNo, decompressChunk(row.getBytes(1)))
       }
     }
   }

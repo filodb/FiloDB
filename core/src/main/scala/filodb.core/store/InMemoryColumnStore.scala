@@ -13,7 +13,7 @@ import scalaxy.loops._
 import filodb.core._
 import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.metadata.{Column, Projection, RichProjection}
-import filodb.core.query.{PartitionChunkIndex, RowkeyPartitionChunkIndex}
+import filodb.core.query.{PartitionChunkIndex, ChunkIDPartitionChunkIndex}
 import filodb.core.Types._
 
 /**
@@ -75,7 +75,7 @@ extends ColumnStore with InMemoryColumnStoreScanner with StrictLogging {
 
       // Add chunk infos, skips, and filter
       val partIndex = indices.synchronized {
-        indices.getOrElseUpdate(dbKey, new RowkeyPartitionChunkIndex(segment.binaryPartition,
+        indices.getOrElseUpdate(dbKey, new ChunkIDPartitionChunkIndex(segment.binaryPartition,
                                                                      projection))
       }
       val filterTree = filters.synchronized {

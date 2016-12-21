@@ -92,3 +92,41 @@ extends PartitionChunkIndex {
       (info, skipRows(info.id).toArray)
     }
 }
+
+/**
+ * A PartitionChunkIndex which is ordered by increasing ChunkID
+ */
+class ChunkIDPartitionChunkIndex(val binPartition: BinaryPartition, val projection: RichProjection)
+extends PartitionChunkIndex {
+  import collection.JavaConverters._
+  implicit val ordering = projection.rowKeyType.rowReaderOrdering
+
+  val skipRows = new HashMap[ChunkID, TreeSet[Int]].withDefaultValue(TreeSet[Int]())
+  val infosSkips = new java.util.TreeMap[ChunkID, (ChunkSetInfo, Array[Int])]
+
+  def add(info: ChunkSetInfo, skips: Seq[ChunkRowSkipIndex]): Unit = {
+    infosSkips.put(info.id, (info, Array[Int]()))
+    for { skipIndex <- skips } {
+      skipRows(skipIndex.id) = skipRows(skipIndex.id) ++ skipIndex.overrides
+      Option(infosSkips.get(skipIndex.id)) match {
+        case Some((origInfo, _)) => infosSkips.put(skipIndex.id, (origInfo, skipRows(skipIndex.id).toArray))
+        case None                =>
+      }
+    }
+  }
+
+  def numChunks: Int = infosSkips.size
+
+  def rowKeyRange(startKey: BinaryRecord, endKey: BinaryRecord): Iterator[(ChunkSetInfo, Array[Int])] = {
+    // Linear search through all infos to find intersections
+    // TODO: use an interval tree to speed this up?
+    infosSkips.values.iterator.asScala.filter {
+      case (info, skips) => info.intersection(startKey, endKey).isDefined
+    }
+  }
+
+  def allChunks: Iterator[(ChunkSetInfo, Array[Int])] = infosSkips.values.iterator.asScala
+
+  def singleChunk(startKey: BinaryRecord, id: ChunkID): Iterator[(ChunkSetInfo, Array[Int])] =
+    infosSkips.subMap(id, true, id, true).values.iterator.asScala
+}
