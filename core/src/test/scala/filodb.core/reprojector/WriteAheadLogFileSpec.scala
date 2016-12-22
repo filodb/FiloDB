@@ -176,7 +176,7 @@ class WriteAheadLogFileSpec extends FunSpec with Matchers with BeforeAndAfter{
   }
 
   it("Able to read filo chunks for GdeltTestData successfully"){
-    val projectionDB = projection4.withDatabase("unittest2")
+    val projectionDB = projection2.withDatabase("unittest")
     val ref = projectionDB.datasetRef
     val wal = new WriteAheadLog(config, ref,"localhost", GdeltTestData.schema)
     // val chunkData = createChunkData

@@ -66,12 +66,6 @@ class SaveAsFiloTest extends SparkTestBase {
 
   import org.apache.spark.sql.functions._
 
-  after {
-    val walDir = conf.get("write-ahead-log.memtable-wal-dir")
-    val path = Path.fromString (walDir)
-    Try(path.deleteRecursively(continueOnFailure = false))
-  }
-
   it("should create missing columns and partitions and write table") {
     sql.saveAsFilo(dataDF, "gdelt1", Seq("id"), segCol, partKeys,
                    options = ingestOptions)

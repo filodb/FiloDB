@@ -1,15 +1,17 @@
 package filodb.coordinator
 
-import akka.actor.{ActorRef, ActorSystem, PoisonPill}
-import akka.testkit.{EventFilter, TestProbe}
+import akka.actor.PoisonPill
 import akka.pattern.gracefulStop
-import com.typesafe.config.ConfigFactory
-
-import scala.concurrent.Await
+import com.typesafe.config.{Config, ConfigFactory}
 import scala.concurrent.duration._
+import scala.concurrent.ExecutionContext
+
+
 import filodb.core._
+import filodb.core.metadata.{Column, RichProjection}
+import filodb.core.reprojector.SegmentStateCache
 import filodb.core.store._
-import filodb.core.metadata.{Column, DataColumn, Dataset}
+
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
 
@@ -17,6 +19,21 @@ import scala.util.Try
 import scalax.file.Path
 
 object RowSourceSpec extends ActorSpecConfig
+
+class TestSegmentStateCache(config: Config, columnStore: ColumnStoreScanner)(implicit ec: ExecutionContext)
+extends
+SegmentStateCache(config, columnStore)(ec) {
+  var shouldThrow = false
+   override def getSegmentState(projection: RichProjection,
+                      schema: Seq[Column],
+                      version: Int)
+                     (segInfo: SegmentInfo[projection.PK, projection.SK]): SegmentState = {
+    logger.debug("Fetching segment cache")
+    if (shouldThrow) { throw new RuntimeException("foo!") }
+    else { super.getSegmentState(projection, schema, version)(segInfo) }
+
+  }
+}
 
 // This is really an end to end ingestion test, it's what a client talking to a FiloDB node would do
 class RowSourceSpec extends ActorTest(RowSourceSpec.getNewSystem)
@@ -27,6 +44,9 @@ with CoordinatorSetup with ScalaFutures {
   import GdeltTestData._
 
   import sources.CsvSourceActor
+  import IngestionCommands.{IngestionReady, SetupIngestion}
+
+  val settings = CsvSourceActor.CsvSourceSettings()
 
   implicit val defaultPatience =
     PatienceConfig(timeout = Span(10, Seconds), interval = Span(50, Millis))
@@ -40,15 +60,20 @@ with CoordinatorSetup with ScalaFutures {
   implicit val context = scala.concurrent.ExecutionContext.Implicits.global
   val columnStore = new InMemoryColumnStore(context)
   val metaStore = new InMemoryMetaStore
+  override lazy val stateCache = new TestSegmentStateCache(config, columnStore)
 
+  val ref = projection1.datasetRef
+  val columnNames = schema.map(_.name)
+  val schemaMap = schema.map(c => c.name -> c).toMap
   metaStore.newDataset(dataset1).futureValue should equal (Success)
-  val ref = DatasetRef(dataset1.name)
   schema.foreach { col => metaStore.newColumn(col, ref).futureValue should equal (Success) }
   val coordActor = system.actorOf(NodeCoordinatorActor.props(metaStore, reprojector, columnStore, config))
+  val clusterActor = system.actorOf(NodeClusterActor.singleNodeProps(coordActor))
 
-  val dataset33 = dataset3.copy(name = "gdelt2")
+  val dataset33 = dataset3.withName("gdelt2")
   metaStore.newDataset(dataset33).futureValue should equal (Success)
-  val ref2 = DatasetRef(dataset33.name)
+  val proj2 = RichProjection(dataset33, schema)
+  val ref2 = proj2.datasetRef
   schema.foreach { col => metaStore.newColumn(col, ref2).futureValue should equal (Success) }
 
   before {
@@ -56,6 +81,7 @@ with CoordinatorSetup with ScalaFutures {
     columnStore.dropDataset(ref2).futureValue
     coordActor ! NodeCoordinatorActor.Reset
     stateCache.clear()     // Important!  Clear out cached segment state
+    stateCache.shouldThrow = false
   }
 
   override def afterAll(): Unit ={
@@ -66,28 +92,29 @@ with CoordinatorSetup with ScalaFutures {
     Try(path.deleteRecursively(continueOnFailure = false))
   }
 
-  it("should fail fast if NodeCoordinatorActor bombs at end of ingestion") {
+  it("should fail if cannot parse input RowReader") {
     val reader = new java.io.InputStreamReader(getClass.getResourceAsStream("/GDELT-sample-test-errors.csv"))
-    val csvActor = system.actorOf(CsvSourceActor.props(reader, ref, 0, coordActor,
-                                                       ackTimeout = 4.seconds,
-                                                       waitPeriod = 2.seconds))
-
-    csvActor ! RowSource.Start
-
-    // Expect failure message, like soon.  Don't hang!
-    expectMsgPF(10.seconds.dilated) {
-      case RowSource.IngestionErr(msg, _) =>
+    val csvActor = system.actorOf(CsvSourceActor.props(reader, dataset1, schemaMap, 0, clusterActor,
+                                                       settings = settings.copy(ackTimeout = 4.seconds,
+                                                                                waitPeriod = 2.seconds)))
+    // We don't even need to send a SetupIngestion to the node coordinator.  The RowSource should fail with
+    // no interaction with the NodeCoordinatorActor at all needed - this is purely a client side failure
+    EventFilter[NumberFormatException](occurrences = 1) intercept {
+      csvActor ! RowSource.Start
     }
   }
 
   it("should fail fast if NodeCoordinatorActor bombs in middle of ingestion") {
-    val reader = new java.io.InputStreamReader(getClass.getResourceAsStream("/GDELT-sample-test-errors.csv"))
-    val csvActor = system.actorOf(CsvSourceActor.props(reader, ref, 0, coordActor,
-                                                       maxUnackedBatches = 2,
-                                                       rowsToRead = 5,
-                                                       ackTimeout = 4.seconds,
-                                                       waitPeriod = 2.seconds))
-
+    val reader = new java.io.InputStreamReader(getClass.getResourceAsStream("/GDELT-sample-test.csv"))
+    val mySettings = settings.copy(maxUnackedBatches = 2,
+                                   rowsToRead = 5,
+                                   ackTimeout = 4.seconds,
+                                   waitPeriod = 2.seconds)
+    val csvActor = system.actorOf(CsvSourceActor.props(reader, dataset1, schemaMap, 0, clusterActor,
+                                                       settings = mySettings))
+    stateCache.shouldThrow = true
+    coordActor ! SetupIngestion(ref, columnNames, 0)
+    expectMsg(IngestionReady)
     csvActor ! RowSource.Start
 
     // Expect failure message, like soon.  Don't hang!
@@ -101,10 +128,12 @@ with CoordinatorSetup with ScalaFutures {
 
     // Note: can only send 20 rows at a time before waiting for acks.  Therefore this tests memtable
     // ack on timer and ability for RowSource to handle waiting for acks repeatedly
-    val csvActor = system.actorOf(CsvSourceActor.props(reader, ref2, 0, coordActor,
-                                                       maxUnackedBatches = 2,
-                                                       rowsToRead = 10))
+    val csvActor = system.actorOf(CsvSourceActor.props(reader, dataset33, schemaMap, 0, clusterActor,
+                                                       settings = settings.copy(maxUnackedBatches = 2,
+                                                                                rowsToRead = 10)))
 
+    coordActor ! SetupIngestion(ref2, columnNames, 0)
+    expectMsg(IngestionReady)
     csvActor ! RowSource.Start
     expectMsg(10.seconds.dilated, RowSource.AllDone)
 
@@ -113,16 +142,20 @@ with CoordinatorSetup with ScalaFutures {
     expectMsg(DatasetCoordinatorActor.Stats(1, 1, 0, 19, -1, 99L))
   }
 
+  // NOTE: This tests the replay logic because when memtable is full, it sends back a Nack and
+  // then replay has to be triggered
   it("should ingest all rows and handle memtable full properly") {
     val reader = new java.io.InputStreamReader(getClass.getResourceAsStream("/GDELT-sample-test-200.csv"))
 
     // Note: this tries to send 80 rows, after 70 memtable will be flushed and 10 rows go to new memtable
     // then it will send another 80 rows, this time non flushing memtable will become full, hopefully
     // while flush still happening, and cause Nack to be returned.
-    val csvActor = system.actorOf(CsvSourceActor.props(reader, ref2, 0, coordActor,
-                                                       maxUnackedBatches = 8,
-                                                       rowsToRead = 10))
+    val csvActor = system.actorOf(CsvSourceActor.props(reader, dataset33, schemaMap, 0, clusterActor,
+                                                       settings = settings.copy(maxUnackedBatches = 8,
+                                                                                rowsToRead = 10)))
 
+    coordActor ! SetupIngestion(ref2, columnNames, 0)
+    expectMsg(IngestionReady)
     csvActor ! RowSource.Start
     expectMsg(10.seconds.dilated, RowSource.AllDone)
 

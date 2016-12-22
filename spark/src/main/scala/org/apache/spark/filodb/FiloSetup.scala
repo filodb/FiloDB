@@ -1,10 +1,6 @@
 package org.apache.spark.filodb
 
-import filodb.cassandra.columnstore.CassandraColumnStore
-import filodb.cassandra.metastore.CassandraMetaStore
-import filodb.coordinator.client.ClusterClient
-import filodb.coordinator.{CoordinatorSetup, NodeClusterActor}
-import filodb.core.store.{InMemoryColumnStore, InMemoryMetaStore}
+
 import akka.actor.{ActorSystem, AddressFromURIString}
 import akka.pattern.ask
 import akka.util.Timeout
@@ -13,13 +9,27 @@ import com.typesafe.scalalogging.slf4j.StrictLogging
 import filodb.coordinator.IngestionCommands.DCAReady
 import filodb.coordinator.NodeCoordinatorActor.ReloadDCA
 import net.ceedubs.ficus.Ficus._
-import org.apache.spark.{SparkContext, SparkEnv}
+import org.apache.spark.SparkEnv
 
+import org.apache.spark.SparkContext
 import scala.concurrent.Await
 import scala.concurrent.duration._
-import scala.language.{implicitConversions, postfixOps}
-import scala.concurrent.ExecutionContext.Implicits.global
 
+import filodb.cassandra.columnstore.CassandraColumnStore
+import filodb.cassandra.metastore.CassandraMetaStore
+import filodb.coordinator.{CoordinatorSetup, NodeClusterActor}
+import filodb.coordinator.client.ClusterClient
+import filodb.core.store.{ColumnStore, ColumnStoreScanner, InMemoryMetaStore, InMemoryColumnStore, MetaStore}
+import scala.concurrent.ExecutionContext.Implicits.global
+/**
+ * A StoreFactory creates instances of ColumnStore and MetaStore one time.  The columnStore and metaStore
+ * methods should return that created instance every time, not create a new instance.  The implementation
+ * should be a class that is passed a single parameter, the config used to create the stores.
+ */
+trait StoreFactory {
+  def columnStore: ColumnStore with ColumnStoreScanner
+  def metaStore: MetaStore
+}
 
 /**
  * FiloSetup handles the Spark side setup of both executors and the driver app, including one-time
@@ -51,14 +61,27 @@ trait FiloSetup extends CoordinatorSetup {
     ActorSystem("filo-spark", configAkka(role, host, port))
   }
 
-  lazy val columnStore = config.getString("store") match {
-    case "cassandra" => new CassandraColumnStore(config, readEc)
-    case "in-memory" => new InMemoryColumnStore(readEc)
+  class CassandraStoreFactory(config: Config) extends StoreFactory {
+    val columnStore = new CassandraColumnStore(config, readEc)
+    val metaStore = new CassandraMetaStore(config.getConfig("cassandra"))
   }
-  lazy val metaStore = config.getString("store") match {
-    case "cassandra" => new CassandraMetaStore(config.getConfig("cassandra"))
-    case "in-memory" => SingleJvmInMemoryStore.metaStore
+
+  class InMemoryStoreFactory(config: Config) extends StoreFactory {
+    val columnStore = new InMemoryColumnStore(readEc)
+    val metaStore = SingleJvmInMemoryStore.metaStore
   }
+
+
+  lazy val factory = config.getString("store") match {
+    case "cassandra" => new CassandraStoreFactory(config)
+    case "in-memory" => new InMemoryStoreFactory(config)
+    case className: String =>
+      val ctor = Class.forName(className).getConstructors.head
+      ctor.newInstance(config).asInstanceOf[StoreFactory]
+  }
+
+  def columnStore: ColumnStore with ColumnStoreScanner = factory.columnStore
+  def metaStore: MetaStore = factory.metaStore
 
   def configAkka(role: String, host: String, akkaPort: Int): Config =
     ConfigFactory.parseString(s"""akka.cluster.roles=[$role]
@@ -76,10 +99,11 @@ object SingleJvmInMemoryStore {
 object FiloDriver extends FiloSetup with StrictLogging {
   import collection.JavaConverters._
 
-  lazy val clusterActor = system.actorOf(NodeClusterActor.props(cluster), "cluster-actor")
+  lazy val clusterActor = getClusterActor("executor")
   lazy val client = new ClusterClient(clusterActor, "executor", "driver")
 
   // The init method called from a SparkContext is going to be from the driver/app.
+  // It also initializes all executors.
   def init(context: SparkContext): Unit = synchronized {
     _config.getOrElse {
       logger.info("Initializing FiloDriver clustering/coordination...")
@@ -92,11 +116,16 @@ object FiloDriver extends FiloSetup with StrictLogging {
       // Add in self cluster address, and join cluster ourselves
       val selfAddr = cluster.selfAddress
       cluster.join(selfAddr)
-      clusterActor
-      // TODO(velvia): Get rid of thread sleep by using NodeClusterActor to time it
-      Thread sleep 1000   // Wait a little bit for cluster joining to take effect
+
       val finalConfig = ConfigFactory.parseString(s"""spark-driver-addr = "$selfAddr"""")
                                      .withFallback(filoConfig)
+      FiloExecutor.initAllExecutors(finalConfig, context)
+
+      // Because the clusterActor can only be instantiated on an executor/FiloDB node, this works by
+      // waiting for the clusterActor to respond, thus guaranteeing cluster working correctly
+      implicit val timeout = Timeout(59.seconds)
+      Await.result(clusterActor ? NodeClusterActor.GetRefs("executor"), 60.seconds)
+
       _config = Some(finalConfig)
     }
   }
@@ -118,6 +147,18 @@ object FiloDriver extends FiloSetup with StrictLogging {
 }
 
 object FiloExecutor extends FiloSetup with StrictLogging {
+
+  lazy val clusterActor = singletonClusterActor("executor")
+
+  def initAllExecutors(filoConfig: Config, context: SparkContext, numPartitions: Int = 1000): Unit = {
+      logger.info(s"Initializing executors using $numPartitions partitions...")
+      context.parallelize(0 to numPartitions, numPartitions).mapPartitions { it =>
+        init(filoConfig)
+        it
+      }.count()
+      logger.info("Finished initializing executors")
+  }
+
   /**
    * Initializes the config if it is not set, and start things for an executor.
    * @param filoConfig The config within the filodb.** level.
@@ -136,7 +177,7 @@ object FiloExecutor extends FiloSetup with StrictLogging {
         val addr = AddressFromURIString.parse(filoConfig.getString("spark-driver-addr"))
         logger.info(s"Initializing FiloExecutor clustering by joining driver at $addr...")
         cluster.join(addr)
-        Thread sleep 1000
+        clusterActor
       } else {
         // Stop ingestion if there is an exception occurs during reload DCA
         shutdown()
@@ -151,6 +192,7 @@ object FiloExecutor extends FiloSetup with StrictLogging {
     val resp = coordinatorActor ? ReloadDCA
     // start reloading WAL files if reload-wal-enabled is set to true
     if (config.getBoolean("write-ahead-log.reload-wal-enabled")) {
+      stateCache.clear()
       try {
         Await.result(resp, timeout.duration) match {
           case DCAReady =>
@@ -165,6 +207,7 @@ object FiloExecutor extends FiloSetup with StrictLogging {
           logger.error(s"Exception occurred while reloading dataset coordinator actors:${e.printStackTrace()}")
           return false
       }
+
     }
     return true
   }

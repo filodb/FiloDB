@@ -1,7 +1,8 @@
 package filodb.coordinator
 
-import akka.actor.ActorSystem
+import akka.actor.{ActorSystem, ActorRef, PoisonPill}
 import akka.cluster.Cluster
+import akka.contrib.pattern.{ClusterSingletonManager, ClusterSingletonProxy}
 import com.typesafe.config.{Config, ConfigFactory}
 import scala.concurrent.ExecutionContext
 
@@ -78,6 +79,25 @@ trait CoordinatorSetup {
                    "coordinator")
 
   lazy val cluster = Cluster(system)
+
+  // Creates a singleton NodeClusterActor via ClusterSingletonManager and returns a proxy ActorRef to it
+  // This should be called on every FiloDB Coordinator/ingestion node
+  def singletonClusterActor(role: String): ActorRef = {
+    val mgr = system.actorOf(ClusterSingletonManager.props(
+                singletonProps = NodeClusterActor.props(cluster, role),
+                singletonName = "nodecluster",
+                terminationMessage = PoisonPill,
+                role = Some(role)),
+                name = "singleton")
+    getClusterActor(role)
+  }
+
+  // This can be called by clients to get the handle to the cluster actor
+  def getClusterActor(role: String): ActorRef =
+    system.actorOf(ClusterSingletonProxy.props(
+      singletonPath = "/user/singleton/nodecluster",
+      role = Some(role)),
+      name = "nodeClusterProxy")
 
   def shutdown(): Unit = {
     system.shutdown()

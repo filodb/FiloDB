@@ -65,4 +65,9 @@ class BinaryRecordSpec extends FunSpec with Matchers {
     binRec.getDouble(1) should equal (5.7)
     binRec.as[Timestamp](2) should equal (new Timestamp(1000000L))
   }
+
+  it("should generate same hashcode for different instances of the same RecordSchema") {
+    val schema3_is = new RecordSchema(Seq(IntColumn, StringColumn))
+    schema2_is.hashCode should equal (schema3_is.hashCode)
+  }
 }

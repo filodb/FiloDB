@@ -5,9 +5,9 @@ import org.apache.spark.sql.{SQLContext, SaveMode}
 import org.scalatest.time.{Millis, Seconds, Span}
 
 import scala.concurrent.duration._
-import filodb.core._
-import filodb.core.metadata.{Column, DataColumn, Dataset}
-import org.apache.spark.filodb.FiloDriver
+import _root_.filodb.core._
+import _root_.filodb.core.metadata.{Column, DataColumn, Dataset}
+import org.apache.spark.filodb.{FiloDriver, FiloExecutor}
 
 import scala.util.Try
 import scalax.file.Path
@@ -36,11 +36,7 @@ class InMemoryStoreTest extends SparkTestBase {
   val segCol = ":string 0"
   val testProjections = Seq(dataset1.projections.head)
 
-  after {
-    val walDir = conf.get("write-ahead-log.memtable-wal-dir")
-    val path = Path.fromString (walDir)
-    Try(path.deleteRecursively(continueOnFailure = false))
-  }
+
   it("should be able to write to InMemoryColumnStore with multi-column partition keys") {
     import sql.implicits._
 

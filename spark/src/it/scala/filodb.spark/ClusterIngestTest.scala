@@ -5,9 +5,9 @@ import org.apache.spark.sql.{SQLContext, SaveMode}
 import org.scalatest.time.{Millis, Seconds, Span}
 
 import scala.concurrent.duration._
-import filodb.core._
-import filodb.core.metadata.{Column, DataColumn, Dataset}
-import org.apache.spark.filodb.FiloDriver
+import _root_.filodb.core._
+import _root_.filodb.core.metadata.{Column, DataColumn, Dataset}
+import org.apache.spark.filodb.{FiloDriver, FiloExecutor}
 
 /**
  * Use local-cluster mode to test the finer points of ingestion on a cluster, especially

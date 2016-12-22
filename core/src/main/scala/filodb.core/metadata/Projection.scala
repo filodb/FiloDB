@@ -39,6 +39,9 @@ case class Projection(id: Int,
    */
   def withDatabase(database: String): Projection =
     this.copy(dataset = this.dataset.copy(database = Some(database)))
+
+  def withName(name: String): Projection =
+    this.copy(dataset = this.dataset.copy(dataset = name))
 }
 
 /**
@@ -66,6 +69,7 @@ case class RichProjection(projection: Projection,
   def datasetRef: DatasetRef = projection.dataset
 
   val rowKeyBinSchema = RecordSchema(rowKeyColumns)
+  val binSchema = RecordSchema(dataColumns)
 
   /**
    * Returns a new RichProjection with the specified database and everything else kept the same

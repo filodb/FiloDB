@@ -9,10 +9,11 @@ import net.ceedubs.ficus.Ficus._
 import scala.concurrent.{Await, Future}
 import scala.concurrent.duration._
 import filodb.core._
-import filodb.core.Types._
+import filodb.core.binaryrecord.RecordSchema
 import filodb.core.metadata.{Column, DataColumn, Dataset, Projection, RichProjection}
-import filodb.core.store.{ColumnStore, MetaStore}
 import filodb.core.reprojector.Reprojector
+import filodb.core.store.{ColumnStore, MetaStore}
+import filodb.core.Types._
 
 /**
  * The NodeCoordinatorActor is the common API entry point for all FiloDB ingestion and metadata operations.
@@ -68,6 +69,7 @@ class NodeCoordinatorActor(metaStore: MetaStore,
   val dsCoordNotify = new collection.mutable.HashMap[(DatasetRef, Int), List[ActorRef]]
   val clusterSelfAddr = Cluster(context.system).selfAddress
   val actorPath = clusterSelfAddr.host.getOrElse("None")
+  val defaultKeySpace = config.getString("cassandra.keyspace")
 
   // By default, stop children DatasetCoordinatorActors when something goes wrong.
   override val supervisorStrategy = SupervisorStrategy.stoppingStrategy
@@ -150,6 +152,7 @@ class NodeCoordinatorActor(metaStore: MetaStore,
 
     def createProjectionAndActor(datasetObj: Dataset, schema: Option[Column.Schema]): Unit = {
       val columnSeq = columns.map(schema.get(_))
+      Serializer.putSchema(RecordSchema(columnSeq))
       // Create the RichProjection, and ferret out any errors
       logger.debug(s"Creating projection from dataset $datasetObj, columns $columnSeq")
       val proj = RichProjection.make(datasetObj, columnSeq)
@@ -188,7 +191,11 @@ class NodeCoordinatorActor(metaStore: MetaStore,
       if(entries.length > 0 ) {
         entries.foreach { ingestion =>
           val data = ingestion.toString().split("\001")
-          val ref = DatasetRef(data(2), Some(data(1)))
+          val databaseOpt = if (data(1).isEmpty || data(1).equals("None")) None else Some(data(1))
+          var ref = DatasetRef(data(2), databaseOpt)
+          if(ref.database.getOrElse("") == "") {
+            ref = DatasetRef(data(2))
+          }
           val columns = data(4).split("\002").map(col => DataColumn.fromString(col, data(2)))
           val projection = RichProjection(Await.result(metaStore.getDataset(ref), 10.second), columns)
           val colNames = projection.dataColumns.map(_.name)
@@ -280,5 +287,5 @@ class NodeCoordinatorActor(metaStore: MetaStore,
       reloadDatasetCoordActors(sender)
   }
 
-  def receive: Receive = datasetHandlers orElse ingestHandlers orElse other
+  def receive: Receive = ingestHandlers orElse datasetHandlers orElse other
 }

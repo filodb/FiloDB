@@ -116,13 +116,6 @@ class IngestionStateTableSpec extends FlatSpec with AsyncTest {
     }
   }
 
-  "dropTable" should "delete ingestion_state table successfully" in {
-    whenReady(ingestionStateTable.dropTable(), timeout) { response =>
-      response should equal (Success)
-    }
-
-    // TODO @parekuti: Drop table for second time
-  }
 
 }
 

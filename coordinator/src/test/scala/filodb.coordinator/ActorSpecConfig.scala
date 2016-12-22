@@ -14,7 +14,8 @@ trait ActorSpecConfig {
   // Making this lazy is needed for overrides to work successfully
   lazy val configString = defaultConfig
   // Allow Java system properties to set config options like akka.test.timefactor
-  lazy val config = ConfigFactory.parseString(configString).withFallback(ConfigFactory.defaultOverrides())
+  lazy val config = ConfigFactory.parseString(configString)
+                                 .withFallback(ConfigFactory.load("application_test.conf"))
   def getNewSystem = ActorSystem("test", config)
 }
 

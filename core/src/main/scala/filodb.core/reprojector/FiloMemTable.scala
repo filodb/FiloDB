@@ -106,7 +106,7 @@ class FiloMemTable(val projection: RichProjection,
         logger.debug(s"started loading WAL files")
         for {index <- walfiles.indices} {
           loadResult = loadChunks(walfiles(index))
-          logger.debug(s"Loaded WAL file successfully into Memtable-2:${loadResult._2}, ${loadResult._1}")
+          logger.debug(s"Loaded WAL file successfully into Memtable:${loadResult._2}, ${loadResult._1}")
           if (index < walfiles.length - 1) {
             // TODO @parekuti: if there is more than one wal file then delete files and keep only the last one
           } else {
@@ -136,7 +136,7 @@ class FiloMemTable(val projection: RichProjection,
   }
 
   private def loadChunks(path: Path): (Int, Boolean) = {
-    val walReader = new WriteAheadLogReader(config, projection.columns, path.toString)
+    val walReader = new WriteAheadLogReader(config, projection.dataColumns, path.toString)
     if (walReader.validFile) {
       logger.debug(s"Valid WAL file:${path.toString} and ready to load chunks into Memtable")
       val chunks = walReader.readChunks().getOrElse(new ArrayBuffer[Array[Chunk]])

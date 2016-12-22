@@ -50,7 +50,7 @@
     </check>
     <check level="error" class="org.scalastyle.scalariform.DeprecatedJavaChecker" enabled="true"></check>
     <check level="error" class="org.scalastyle.scalariform.EmptyClassChecker" enabled="true"></check>
-    <check level="error" class="org.scalastyle.scalariform.EqualsHashCodeChecker" enabled="true"></check>
+    <check level="error" class="org.scalastyle.scalariform.EqualsHashCodeChecker" enabled="false"></check>
     <check level="error" class="org.scalastyle.scalariform.ForBraceChecker" enabled="true"></check>
     <check level="error" class="org.scalastyle.scalariform.ImportGroupingChecker" enabled="false"></check>
     <check level="error" class="org.scalastyle.scalariform.LowercasePatternMatchChecker" enabled="true"></check>

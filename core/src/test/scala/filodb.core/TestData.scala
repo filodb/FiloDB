@@ -137,6 +137,7 @@ object GdeltTestData {
                 parts(2).toInt, parts(3).toInt,
                 parts(4), parts(5), parts(6).toInt, parts(7).toDouble)
   }
+  val seqReaders = records.map { record => SeqRowReader(record.productIterator.toList) }
 
   // Dataset1: Partition keys (Actor2Code, Year) / Row key GLOBALEVENTID / Seg :string 0
   val dataset1 = Dataset("gdelt", Seq("GLOBALEVENTID"), ":string 0", Seq("Actor2Code", "Year"))
@@ -152,10 +153,6 @@ object GdeltTestData {
   val dataset3 = Dataset("gdelt", Seq("GLOBALEVENTID"), ":string 0",
                          Seq(":getOrElse Actor2Code NONE", ":getOrElse Year -1"))
   val projection3 = RichProjection(dataset3, schema)
-
-  // Dataset4: same as Dataset1 but with :getOrElse to prevent null partition keys
-  val dataset4 = Dataset("gdelt", Seq("GLOBALEVENTID"), "GLOBALEVENTID", Seq("MonthYear"))
-  val projection4 = RichProjection(dataset4, schema)
 
   // Returns projection2 grouped by segment with a fake partition key
   def getSegments(partKey: projection2.PK): Seq[(ChunkSetSegment, Seq[RowReader])] = {

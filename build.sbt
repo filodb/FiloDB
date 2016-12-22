@@ -1,3 +1,6 @@
+import com.typesafe.sbt.SbtMultiJvm
+import com.typesafe.sbt.SbtMultiJvm.MultiJvmKeys.MultiJvm
+
 val mySettings = Seq(organization := "org.velvia",
                      scalaVersion := "2.10.4",
                      parallelExecution in Test := false,
@@ -12,7 +15,9 @@ lazy val core = (project in file("core"))
                   .settings(libraryDependencies ++= coreDeps)
 
 lazy val coordinator = (project in file("coordinator"))
+                         .configs(MultiJvm)
                          .settings(mySettings:_*)
+                         .settings(multiJvmSettings:_*)
                          .settings(name := "filodb-coordinator")
                          .settings(libraryDependencies ++= coordDeps)
                          .dependsOn(core % "compile->compile; test->test")
@@ -37,10 +42,11 @@ lazy val spark = (project in file("spark"))
                    .settings(fork in IntegrationTest := true)
                    .settings(mySettings:_*)
                    .settings(libraryDependencies ++= sparkDeps)
+                   .settings(jvmPerTestSettings:_*)
                    .settings(assemblySettings:_*)
                    .settings(assemblyOption in assembly := (assemblyOption in assembly).value.copy(includeScala = false))
                    .dependsOn(core % "compile->compile; test->test; it->test",
-                              coordinator,
+                              coordinator % "compile->compile; test->test",
                               cassandra % "compile->compile; test->test; it->test")
 
 lazy val jmh = (project in file("jmh"))
@@ -106,10 +112,12 @@ lazy val cassDeps = commonDeps ++ Seq(
 lazy val coordDeps = commonDeps ++ Seq(
   "com.typesafe.akka"    %% "akka-slf4j"        % akkaVersion,
   "com.typesafe.akka"    %% "akka-cluster"      % akkaVersion,
+  "com.typesafe.akka"    %% "akka-contrib"      % akkaVersion,
   // Take out the below line if you really don't want statsd metrics enabled
-  "io.kamon"             %% "kamon-statsd"        % "0.6.0",
+  "io.kamon"             %% "kamon-statsd"      % "0.6.0",
   "com.opencsv"           % "opencsv"           % "3.3",
-  "com.typesafe.akka"    %% "akka-testkit"      % akkaVersion % "test"
+  "com.typesafe.akka"    %% "akka-testkit"      % akkaVersion % "test",
+  "com.typesafe.akka"    %% "akka-multi-node-testkit" % akkaVersion % "test"
 )
 
 lazy val cliDeps = Seq(
@@ -119,7 +127,7 @@ lazy val cliDeps = Seq(
 
 lazy val sparkDeps = Seq(
   // We don't want LOG4J.  We want Logback!  The excludeZK is to help with a conflict re Coursier plugin.
-  "org.apache.spark"     %% "spark-hive"         % sparkVersion % "provided" excludeAll(excludeSlf4jLog4j, excludeZK),
+  "org.apache.spark"     %% "spark-hive"        % sparkVersion % "provided" excludeAll(excludeSlf4jLog4j, excludeZK),
   "org.apache.spark"     %% "spark-hive-thriftserver" % sparkVersion % "provided" excludeAll(excludeSlf4jLog4j, excludeZK),
   "org.apache.spark"     %% "spark-streaming"   % sparkVersion % "provided",
   "org.scalatest"        %% "scalatest"         % "2.2.4" % "it"
@@ -159,6 +167,36 @@ lazy val testSettings = Seq(
       // Note: some components of tests seem to have the "Untagged" tag rather than "Test" tag.
       // So, we limit the sum of "Test", "Untagged" tags to 1 concurrent
       Tags.limitSum(1, Tags.Test, Tags.Untagged))
+)
+
+// Fork a separate JVM for each test, instead of one for all tests in a module.
+// This is necessary for Spark tests due to initialization, for example
+lazy val jvmPerTestSettings = {
+  import Tests._
+
+  def jvmPerTest(tests: Seq[TestDefinition]) =
+    tests map { test =>
+      new Group(test.name, Seq(test), SubProcess(Nil))
+    } toSeq
+
+  Seq(testGrouping in Test <<= (definedTests in Test) map jvmPerTest)
+}
+
+lazy val multiJvmSettings = SbtMultiJvm.multiJvmSettings ++ Seq(
+  compile in MultiJvm <<= (compile in MultiJvm) triggeredBy (compile in Test),
+  // make sure that MultiJvm tests are executed by the default test target,
+  // and combine the results from ordinary test and multi-jvm tests
+  executeTests in Test <<= (executeTests in Test, executeTests in MultiJvm) map {
+    case (testResults, multiNodeResults)  =>
+      val overall =
+        if (testResults.overall.id < multiNodeResults.overall.id)
+          multiNodeResults.overall
+        else
+          testResults.overall
+      Tests.Output(overall,
+        testResults.events ++ multiNodeResults.events,
+        testResults.summaries ++ multiNodeResults.summaries)
+  }
 )
 
 lazy val itSettings = Defaults.itSettings ++ Seq(
