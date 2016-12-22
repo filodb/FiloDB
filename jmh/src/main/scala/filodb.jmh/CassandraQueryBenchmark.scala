@@ -70,6 +70,13 @@ class CassandraQueryBenchmark {
     colStore.scanChunks(hodProj, columns.map(hodSchema), 0, hodPartScan).length
   }
 
+  @Benchmark
+  @BenchmarkMode(Array(Mode.AverageTime))
+  @OutputTimeUnit(TimeUnit.MICROSECONDS)
+  def oneColumnPartitionScanHOD(): Int = {
+    colStore.scanRows(hodProj, columns.take(1).map(hodSchema), 0, hodPartScan).length
+  }
+
   // How fast is it only to read the indices of a partition?  This is a constant cost no matter
   // the number of chunks read
   @Benchmark

@@ -65,12 +65,23 @@ sealed class ChunkTable(val dataset: DatasetRef, val connector: FiloCassandraCon
                                   | columnname = ? AND partition = ? AND version = ?
                                   | AND chunkid IN ?""".stripMargin)
 
+  lazy val readChunkRangeCql = session.prepare(
+                                 s"""SELECT chunkid, data FROM $tableString WHERE
+                                  | columnname = ? AND partition = ? AND version = ?
+                                  | AND chunkid >= ? AND chunkid <= ?""".stripMargin)
+
   def readChunks(partition: Types.BinaryPartition,
                  version: Int,
                  column: String,
                  colNo: Int,
-                 chunkIds: Seq[Types.ChunkID]): Observable[SingleChunkInfo] = {
-    val query = readChunkInCql.bind(column, toBuffer(partition), version: jlInt, chunkIds.asJava)
+                 chunkIds: Seq[Types.ChunkID],
+                 rangeQuery: Boolean = false): Observable[SingleChunkInfo] = {
+    val query = if (rangeQuery) {
+        readChunkRangeCql.bind(column, toBuffer(partition), version: jlInt,
+                               chunkIds.head: jlLong, chunkIds.last: jlLong)
+      } else {
+        readChunkInCql.bind(column, toBuffer(partition), version: jlInt, chunkIds.asJava)
+      }
     Observable.fromFuture(execReadChunk(colNo, query))
               .flatMap(it => Observable.fromIterator(it))
   }
