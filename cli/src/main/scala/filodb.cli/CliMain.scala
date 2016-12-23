@@ -32,7 +32,7 @@ class Arguments extends FieldArgs {
   var rowKeys: Seq[String] = Nil
   var segmentKey: Option[String] = None
   var partitionKeys: Seq[String] = Nil
-  var numSegments: Int = 10000
+  var numPartitions: Int = 1000
   var version: Option[Int] = None
   var select: Option[Seq[String]] = None
   var limit: Int = 1000
@@ -126,12 +126,12 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
                     99.minutes)
 
         case Some("analyze") =>
-          println(Analyzer.analyze(columnStore,
-                                   metaStore,
-                                   getRef(args),
-                                   version,
-                                   combineSplits,
-                                   args.numSegments).prettify())
+          parse(Analyzer.analyze(columnStore,
+                                 metaStore,
+                                 getRef(args),
+                                 version,
+                                 combineSplits,
+                                 args.numPartitions), 30.minutes)(a => println(a.prettify()))
 
         case Some("dumpinfo") =>
           printChunkInfos(Analyzer.getChunkInfos(columnStore,
@@ -139,7 +139,7 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
                                    getRef(args),
                                    version,
                                    combineSplits,
-                                   args.numSegments))
+                                   args.numPartitions))
 
         case Some("delete") =>
           client.deleteDataset(getRef(args), timeout)
