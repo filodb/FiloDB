@@ -75,6 +75,24 @@ extends ZeroCopyBinary with RowReader {
   }
 
   /**
+   * Does a field-by-field (semantic) comparison of this BinaryRecord against another BinaryRecord.
+   * It is assumed that the other BinaryRecord has the exact same schema, at least for all of the fields
+   * present in this BinaryRecord (other.schema.numFields >= this.schema.numFields)
+   * It is pretty fast as the field by field comparison involves no deserialization and uses intrinsics
+   * in many places.
+   */
+  override final def compare(other: ZeroCopyBinary): Int = other match {
+    case rec2: BinaryRecord =>
+      for { field <- 0 until fields.size optimized } {
+        val cmp = fields(field).cmpRecords(this, rec2)
+        if (cmp != 0) return cmp
+      }
+      fields.size - rec2.schema.numFields
+    case zcb: ZeroCopyBinary =>
+      super.compare(zcb)
+  }
+
+  /**
    * Returns an array of bytes which is sortable byte-wise for its contents (which is not the goal of
    * BinaryRecord).  Null fields will have default values read out.
    * The produced bytes cannot be deserialized from or extracted, it is strictly for comparison.
@@ -118,10 +136,18 @@ object BinaryRecord {
   }
 
   def apply(projection: RichProjection, items: Seq[Any]): BinaryRecord =
-    apply(projection.rowKeyBinSchema, SeqRowReader(items))
+    if (items.length < projection.rowKeyColumns.length) {
+      apply(RecordSchema(projection.rowKeyColumns.take(items.length)), SeqRowReader(items))
+    } else {
+      apply(projection.rowKeyBinSchema, SeqRowReader(items))
+    }
 
   val MaxSmallOffset = 0x7fff
   val MaxSmallLen    = 0xffff
+
+  implicit val ordering = new Ordering[BinaryRecord] {
+    def compare(a: BinaryRecord, b: BinaryRecord): Int = a.compare(b)
+  }
 
   // Create the fixed-field int for variable length data blobs.  If the result is negative (bit 31 set),
   // then the offset and length are both packed in; otherwise, the fixed int is just an offset to a

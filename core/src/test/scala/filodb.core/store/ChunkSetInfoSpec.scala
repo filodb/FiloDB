@@ -64,7 +64,6 @@ class ChunkSetInfoSpec extends FunSpec with Matchers {
 
   it("should find intersection range of composite keys with strings") {
     import GdeltTestData._
-    implicit val ordering = projection2.rowKeyType.rowReaderOrdering
 
     val info1 = getCSI(1, 0, 7)
     val intersect1 = info1.intersection(getCSI(2, 7, 17))
@@ -97,7 +96,6 @@ class ChunkSetInfoSpec extends FunSpec with Matchers {
   it("should not find intersection if key1 is greater than key2") {
     import GdeltTestData._
     val info1 = getCSI(1, 0, 7)
-    implicit val ordering = projection2.rowKeyType.rowReaderOrdering
     info1.intersection(info1.lastKey, info1.firstKey) should equal (None)
   }
 
@@ -116,8 +114,6 @@ class ChunkSetInfoSpec extends FunSpec with Matchers {
 
     val info1 = ChunkSetInfo(1, 1, key2, key4)
 
-    implicit val ordering = proj5.rowKeyType.rowReaderOrdering
-
     // wholly inside
     info1.intersection(key3, key3) should equal (Some((key3, key3)))
 
@@ -129,11 +125,15 @@ class ChunkSetInfoSpec extends FunSpec with Matchers {
 
     // wholly outside
     info1.intersection(key5, key6) should equal (None)
+
+    // Query with shortened keys
+    val keyA = BinaryRecord(proj5, Seq(Timestamp.valueOf("2013-01-05 17:30:00")))
+    val keyB = BinaryRecord(proj5, Seq(Timestamp.valueOf("2013-01-10 12:00:00")))
+    info1.intersection(keyA, keyB) should equal (Some((key2, keyB)))
   }
 
   it("should return None if error with one of the RowReaders") {
     import GdeltTestData._
-    implicit val ordering = projection2.rowKeyType.rowReaderOrdering
 
     val info1 = getCSI(1, 0, 7)
     info1.intersection(ChunkSetInfo(2, 100, null, null)) should be (None)

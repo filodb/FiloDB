@@ -72,6 +72,26 @@ class BinaryRecordSpec extends FunSpec with Matchers {
     binRec.as[Timestamp](2) should equal (new Timestamp(1000000L))
   }
 
+  it("should produce shorter BinaryRecords if smaller number of items fed") {
+    import filodb.core.GdeltTestData._
+
+    val shortBR1 = BinaryRecord(projection2, Seq("USA"))
+    shortBR1.schema.numFields should equal (1)
+  }
+
+  it("should semantically compare BinaryRecords field by field") {
+    import filodb.core.GdeltTestData._
+
+    // Should compare semantically rather than by binary.  Int occurs first byte-wise, but 2nd semantically
+    val rec1 = BinaryRecord(projection2, Seq("FRA", 55))
+    rec1 should be > (BinaryRecord(projection2, Seq("CHL", 60)))
+    rec1 should equal (BinaryRecord(projection2, Seq("FRA", 55)))
+
+    // Should be able to compare shorter record with longer one
+    BinaryRecord(projection2, Seq("FRA")) should be < (rec1)
+    BinaryRecord(projection2, Seq("GA")) should be > (rec1)
+  }
+
   it("should produce sortable ByteArrays from BinaryRecords") {
     val binRec1 = BinaryRecord(schema2_is, reader2)
     val reader5 = TupleRowReader((Some(1234), Some("two3")))

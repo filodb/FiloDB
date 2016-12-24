@@ -59,11 +59,10 @@ object PartitionChunkIndex {
 class RowkeyPartitionChunkIndex(val binPartition: BinaryPartition, val projection: RichProjection)
 extends PartitionChunkIndex {
   import collection.JavaConverters._
-  implicit val ordering = projection.rowKeyType.rowReaderOrdering
 
   val skipRows = new HashMap[ChunkID, TreeSet[Int]].withDefaultValue(TreeSet[Int]())
-  val infos = new java.util.TreeMap[(RowReader, ChunkID), ChunkSetInfo](
-                                    Ordering[(RowReader, ChunkID)])
+  val infos = new java.util.TreeMap[(BinaryRecord, ChunkID), ChunkSetInfo](
+                                    Ordering[(BinaryRecord, ChunkID)])
 
   def add(info: ChunkSetInfo, skips: Seq[ChunkRowSkipIndex]): Unit = {
     infos.put((info.firstKey, info.id), info)
@@ -99,7 +98,6 @@ extends PartitionChunkIndex {
 class ChunkIDPartitionChunkIndex(val binPartition: BinaryPartition, val projection: RichProjection)
 extends PartitionChunkIndex {
   import collection.JavaConverters._
-  implicit val ordering = projection.rowKeyType.rowReaderOrdering
 
   val skipRows = new HashMap[ChunkID, TreeSet[Int]].withDefaultValue(TreeSet[Int]())
   val infosSkips = new java.util.TreeMap[ChunkID, (ChunkSetInfo, Array[Int])]

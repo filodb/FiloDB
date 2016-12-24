@@ -11,6 +11,7 @@ import filodb.core.metadata.Column.ColumnType
 trait FieldType[@specialized T] {
   def numFixedBytes: Int = numFixedWords * 4
   def numFixedWords: Int
+
   def extract(data: BinaryRecord, field: Field): T
 
   // NOTE: the add method modifies the state of the BinaryRecordBuilder.  Don't call more than once if
@@ -24,10 +25,12 @@ trait FieldType[@specialized T] {
                     reader: RowReader): Unit
 
   def writeSortable(data: BinaryRecord, field: Field, buf: ByteBuf): Unit
+
+  def compare(rec1: BinaryRecord, rec2: BinaryRecord, field: Field): Int
 }
 
 abstract class SimpleFieldType[@specialized T: TypedFieldExtractor] extends FieldType[T] {
-  val extractor = implicitly[TypedFieldExtractor[T]]
+  private final val extractor = implicitly[TypedFieldExtractor[T]]
   final def addFromReader(builder: BinaryRecordBuilder,
                           field: Field,
                           reader: RowReader): Unit =
@@ -59,6 +62,10 @@ object IntFieldType extends SimpleFieldType[Int] {
 
   final def writeSortable(data: BinaryRecord, field: Field, buf: ByteBuf): Unit =
     buf.writeInt(extract(data, field) ^ Int32HighBit)
+
+  final def compare(rec1: BinaryRecord, rec2: BinaryRecord, field: Field): Int =
+    UnsafeUtils.getInt(rec1.base, rec1.offset + field.fixedDataOffset) -
+    UnsafeUtils.getInt(rec2.base, rec2.offset + field.fixedDataOffset)
 }
 
 object LongFieldType extends SimpleFieldType[Long] {
@@ -73,6 +80,10 @@ object LongFieldType extends SimpleFieldType[Long] {
 
   final def writeSortable(data: BinaryRecord, field: Field, buf: ByteBuf): Unit =
     buf.writeLong(extract(data, field) ^ Long64HighBit)
+
+  final def compare(rec1: BinaryRecord, rec2: BinaryRecord, field: Field): Int =
+    java.lang.Long.compare(UnsafeUtils.getLong(rec1.base, rec1.offset + field.fixedDataOffset),
+                           UnsafeUtils.getLong(rec2.base, rec2.offset + field.fixedDataOffset))
 }
 
 object BooleanFieldType extends SimpleFieldType[Boolean] {
@@ -85,6 +96,9 @@ object BooleanFieldType extends SimpleFieldType[Boolean] {
 
   final def writeSortable(data: BinaryRecord, field: Field, buf: ByteBuf): Unit =
     buf.writeByte(if (extract(data, field)) 1 else 0)
+
+  final def compare(rec1: BinaryRecord, rec2: BinaryRecord, field: Field): Int =
+    java.lang.Boolean.compare(extract(rec1, field), extract(rec2, field))
 }
 
 object DoubleFieldType extends SimpleFieldType[Double] {
@@ -99,6 +113,9 @@ object DoubleFieldType extends SimpleFieldType[Double] {
 
   final def writeSortable(data: BinaryRecord, field: Field, buf: ByteBuf): Unit =
     buf.writeDouble(extract(data, field))
+
+  final def compare(rec1: BinaryRecord, rec2: BinaryRecord, field: Field): Int =
+    java.lang.Double.compare(extract(rec1, field), extract(rec2, field))
 }
 
 object TimestampFieldType extends SimpleFieldType[Timestamp] {
@@ -111,6 +128,10 @@ object TimestampFieldType extends SimpleFieldType[Timestamp] {
 
   final def writeSortable(data: BinaryRecord, field: Field, buf: ByteBuf): Unit =
     LongFieldType.writeSortable(data, field, buf)
+
+  final def compare(rec1: BinaryRecord, rec2: BinaryRecord, field: Field): Int =
+    java.lang.Long.compare(UnsafeUtils.getLong(rec1.base, rec1.offset + field.fixedDataOffset),
+                           UnsafeUtils.getLong(rec2.base, rec2.offset + field.fixedDataOffset))
 }
 
 object UTF8StringFieldType extends SimpleFieldType[ZeroCopyUTF8String] {
@@ -147,4 +168,7 @@ object UTF8StringFieldType extends SimpleFieldType[ZeroCopyUTF8String] {
     }
     buf.add(first8bytes)
   }
+
+  final def compare(rec1: BinaryRecord, rec2: BinaryRecord, field: Field): Int =
+    extract(rec1, field).compare(extract(rec2, field))
 }

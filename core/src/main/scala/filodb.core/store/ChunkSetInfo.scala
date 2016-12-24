@@ -88,8 +88,7 @@ case class ChunkSetInfo(id: ChunkID,
    * Scenario D:        [        ]
    *                 [  other      ]
    */
-  def intersection(other: ChunkSetInfo)
-                  (implicit ordering: Ordering[RowReader]): Option[(BinaryRecord, BinaryRecord)] =
+  def intersection(other: ChunkSetInfo): Option[(BinaryRecord, BinaryRecord)] =
     try {
       intersection(other.firstKey, other.lastKey)
     } catch {
@@ -99,15 +98,16 @@ case class ChunkSetInfo(id: ChunkID,
     }
 
   /**
-   * Finds the intersection between this ChunkSetInfo and a range of keys (key1, key2)
+   * Finds the intersection between this ChunkSetInfo and a range of keys (key1, key2).
+   * Note that key1 and key2 do not need to contain all the fields of firstKey and lastKey, but
+   * must be a strict subset of the first fields.
    */
-  def intersection(key1: BinaryRecord, key2: BinaryRecord)
-                  (implicit ordering: Ordering[RowReader]): Option[(BinaryRecord, BinaryRecord)] = {
-    if (ordering.gt(key1, key2)) {
+  def intersection(key1: BinaryRecord, key2: BinaryRecord): Option[(BinaryRecord, BinaryRecord)] = {
+    if (key1 > key2) {
       None
-    } else if (ordering.gteq(lastKey, key1) && ordering.lteq(firstKey, key2)) {
-      Some((if (ordering.gt(firstKey, key1)) firstKey else key1,
-            if (ordering.lt(lastKey,  key2)) lastKey else key2))
+    } else if (key1 <= lastKey && key2 >= firstKey) {
+      Some((if (key1 < firstKey) firstKey else key1,
+            if (key2 > lastKey) lastKey else key2))
     } else {
       None
     }
