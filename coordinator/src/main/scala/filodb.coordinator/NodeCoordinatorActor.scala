@@ -69,7 +69,6 @@ class NodeCoordinatorActor(metaStore: MetaStore,
   val dsCoordNotify = new collection.mutable.HashMap[(DatasetRef, Int), List[ActorRef]]
   val clusterSelfAddr = Cluster(context.system).selfAddress
   val actorPath = clusterSelfAddr.host.getOrElse("None")
-  val defaultKeySpace = config.getString("cassandra.keyspace")
 
   // By default, stop children DatasetCoordinatorActors when something goes wrong.
   override val supervisorStrategy = SupervisorStrategy.stoppingStrategy
@@ -192,10 +191,7 @@ class NodeCoordinatorActor(metaStore: MetaStore,
         entries.foreach { ingestion =>
           val data = ingestion.toString().split("\001")
           val databaseOpt = if (data(1).isEmpty || data(1).equals("None")) None else Some(data(1))
-          var ref = DatasetRef(data(2), databaseOpt)
-          if(ref.database.getOrElse("") == "") {
-            ref = DatasetRef(data(2))
-          }
+          val ref = DatasetRef(data(2), databaseOpt)
           val columns = data(4).split("\002").map(col => DataColumn.fromString(col, data(2)))
           val projection = RichProjection(Await.result(metaStore.getDataset(ref), 10.second), columns)
           val colNames = projection.dataColumns.map(_.name)

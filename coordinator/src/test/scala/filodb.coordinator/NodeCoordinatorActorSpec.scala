@@ -278,13 +278,13 @@ with CoordinatorSetup with ScalaFutures {
     probe.send(coordActor, GetIngestionStats(ref, 0))
     probe.expectMsg(DatasetCoordinatorActor.Stats(0, 0, 0, 99, -1, 99L))
 
-//    val gdeltLines = Source.fromURL(getClass.getResource("/GDELT-sample-test2.csv"))
-//      .getLines.toSeq.drop(1) // drop the header line
-//
-//    val readers2 = gdeltLines.map { line => ArrayStringRowReader(line.split(",")) }
+    val gdeltLines = Source.fromURL(getClass.getResource("/GDELT-sample-test2.csv"))
+      .getLines.toSeq.drop(1) // drop the header line
+
+    val readers2 = gdeltLines.map { line => ArrayStringRowReader(line.split(",")) }
 
     EventFilter[NumberFormatException](occurrences = 1) intercept {
-      probe.send(coordActor, IngestRows(ref, 0, readers ++ Seq(badLine), 1L))
+      probe.send(coordActor, IngestRows(ref, 0, readers2, 1L))
       // This should trigger an error, and datasetCoordinatorActor will stop, and no ack will be forthcoming.
       probe.expectNoMsg
     }

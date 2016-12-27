@@ -1,16 +1,10 @@
 package filodb.spark
 
-import org.apache.spark.{SparkConf, SparkContext, SparkException}
+import org.apache.spark.{SparkConf, SparkContext}
 import org.apache.spark.sql.{SQLContext, SaveMode}
-import org.scalatest.time.{Millis, Seconds, Span}
 
-import scala.concurrent.duration._
-import _root_.filodb.core._
-import _root_.filodb.core.metadata.{Column, DataColumn, Dataset}
-import org.apache.spark.filodb.{FiloDriver, FiloExecutor}
+import org.apache.spark.filodb.{FiloDriver}
 
-import scala.util.Try
-import scalax.file.Path
 
 /**
  * Test the InMemoryColumnStore
