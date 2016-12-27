@@ -71,8 +71,6 @@ case class RichProjection(projection: Projection,
   val rowKeyBinSchema = RecordSchema(rowKeyColumns)
   val binSchema = RecordSchema(dataColumns)
 
-  def dataColumns: Seq[Column] = columns.collect { case d: DataColumn => d }
-
   /**
    * Returns a new RichProjection with the specified database and everything else kept the same
    */
@@ -123,6 +121,8 @@ case class RichProjection(projection: Projection,
         segmentColString,
         extraColStrings.mkString(":")).mkString("\001")
   }
+
+  def dataColumns(): Seq[Column] = columns.collect { case d: DataColumn => d }
 }
 
 object RichProjection extends StrictLogging {

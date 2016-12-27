@@ -1,18 +1,21 @@
 package filodb.coordinator
 
-import akka.actor.{ActorSystem, ActorRef, PoisonPill}
-import akka.testkit.{EventFilter, TestProbe}
+import akka.actor.{ActorRef, PoisonPill}
 import akka.pattern.gracefulStop
 import com.typesafe.config.ConfigFactory
-import scala.concurrent.Await
-import scala.concurrent.duration._
+import filodb.coordinator.NodeCoordinatorActor.ReloadDCA
 
+import scala.concurrent.duration._
 import filodb.core._
 import filodb.core.store._
-import filodb.core.metadata.{Column, DataColumn, Dataset}
-
+import filodb.core.metadata.{DataColumn, Dataset}
 import org.scalatest.concurrent.ScalaFutures
-import org.scalatest.time.{Millis, Span, Seconds}
+import org.scalatest.time.{Millis, Seconds, Span}
+import org.velvia.filo.ArrayStringRowReader
+
+import scala.io.Source
+import scala.util.Try
+import scalax.file.Path
 
 object NodeCoordinatorActorSpec extends ActorSpecConfig
 
@@ -27,7 +30,11 @@ with CoordinatorSetup with ScalaFutures {
   implicit val defaultPatience =
     PatienceConfig(timeout = Span(10, Seconds), interval = Span(50, Millis))
 
-  val config = ConfigFactory.parseString("filodb.memtable.write.interval = 500 ms")
+  val config = ConfigFactory.parseString(
+                      """filodb.memtable.flush-trigger-rows = 100
+                         filodb.memtable.max-rows-per-table = 100
+                         filodb.memtable.noactivity.flush.interval = 2 s
+                         filodb.memtable.write.interval = 500 ms""")
                             .withFallback(ConfigFactory.load("application_test.conf"))
                             .getConfig("filodb")
 
@@ -35,7 +42,7 @@ with CoordinatorSetup with ScalaFutures {
   lazy val columnStore = new InMemoryColumnStore(context)
   lazy val metaStore = new InMemoryMetaStore
 
-  override def beforeAll() {
+  override def beforeAll() : Unit = {
     super.beforeAll()
     metaStore.initialize().futureValue
   }
@@ -51,7 +58,11 @@ with CoordinatorSetup with ScalaFutures {
   }
 
   after {
+
     gracefulStop(coordActor, 3.seconds.dilated, PoisonPill).futureValue
+    val walDir = config.getString("write-ahead-log.memtable-wal-dir")
+    val path = Path.fromString (walDir)
+    Try(path.deleteRecursively(continueOnFailure = false))
   }
 
   def createTable(dataset: Dataset, columns: Seq[DataColumn]): Unit = {
@@ -92,6 +103,20 @@ with CoordinatorSetup with ScalaFutures {
       val probes = (1 to 8).map { n => TestProbe() }
       probes.foreach { probe => probe.send(coordActor, SetupIngestion(projection1.datasetRef, colNames, 0)) }
       probes.foreach { probe => probe.expectMsg(IngestionReady) }
+    }
+
+    it("should add new entry for ingestion state for a given dataset/version, only first time") {
+      createTable(dataset1, schema)
+      val preSize = metaStore.ingestionstates.size
+
+      probe.send(coordActor, SetupIngestion(projection1.datasetRef, colNames, 0))
+      probe.expectMsg(IngestionReady)
+      metaStore.ingestionstates.size should equal(preSize + 1)
+
+      // second time for the same dataset
+      probe.send(coordActor, SetupIngestion(projection1.datasetRef, colNames, 0))
+      probe.expectMsg(IngestionReady)
+      metaStore.ingestionstates.size should equal(preSize + 1)
     }
   }
 
@@ -179,6 +204,90 @@ with CoordinatorSetup with ScalaFutures {
       probe.expectNoMsg
     }
 
+    // Now, if we send more rows, we will get UnknownDataset
+    probe.send(coordActor, IngestRows(ref, 0, readers, 1L))
+    probe.expectMsg(UnknownDataset)
+  }
+
+  it("should reload dataset coordinator actors once the nodes are up") {
+    probe.send(coordActor, CreateDataset(dataset2, schema))
+    probe.expectMsg(DatasetCreated)
+    columnStore.clearProjectionData(dataset2.projections.head).futureValue should equal (Success)
+
+    val ref = projection2.datasetRef
+
+    generateActorException(ref)
+
+    probe.send(coordActor, ReloadDCA)
+    probe.expectMsg(DCAReady)
+
+    probe.send(coordActor, Flush(ref, 0))
+    probe.expectMsg(Flushed)
+
+    probe.send(coordActor, GetIngestionStats(ref, 0))
+    probe.expectMsg(DatasetCoordinatorActor.Stats(1, 1, 0, 0, -1, 0))
+
+  }
+
+  // This test fails because for some reason the SegmentState / SegmentStateCache is not being cleared
+  // Thus on reload and retry of memtable flush, the bloom filter and chunkID state is retained
+  // and it thinks it needs to overwrite existing chunk but there is no existing chunk!
+  ignore("should be able to create new WAL files once the reload and flush is complete") {
+    probe.send(coordActor, CreateDataset(dataset2, schema))
+    probe.expectMsg(DatasetCreated)
+    columnStore.clearProjectionData(dataset2.projections.head).futureValue should equal (Success)
+
+    val ref = projection2.datasetRef
+
+    generateActorException(ref)
+
+    probe.send(coordActor, ReloadDCA)
+    probe.expectMsg(DCAReady)
+
+    var numRows = 0
+    if(config.getBoolean("write-ahead-log.write-ahead-log-enabled")){
+      numRows = 99
+    }
+    probe.send(coordActor, GetIngestionStats(ref, 0))
+    probe.expectMsg(DatasetCoordinatorActor.Stats(0, 0, 0, numRows, -1, 0))
+
+    // Ingest more rows to create new WAL file
+    probe.send(coordActor, CheckCanIngest(ref, 0))
+    probe.expectMsg(CanIngest(true))
+
+    probe.send(coordActor, IngestRows(ref, 0, readers, 1L))
+    probe.expectMsg(Ack(1L))
+
+    Thread sleep 1000
+
+    probe.send(coordActor, GetIngestionStats(ref, 0))
+    probe.expectMsg(DatasetCoordinatorActor.Stats(1, 1, 0, 0, -1, 99L))
+
+  }
+
+  def generateActorException(ref: DatasetRef): Unit = {
+    probe.send(coordActor, SetupIngestion(ref, schema.map(_.name), 0))
+    probe.expectMsg(IngestionReady)
+
+    probe.send(coordActor, CheckCanIngest(ref, 0))
+    probe.expectMsg(CanIngest(true))
+
+    probe.send(coordActor, IngestRows(ref, 0, readers, 1L))
+    probe.expectMsg(Ack(1L))
+
+    probe.send(coordActor, GetIngestionStats(ref, 0))
+    probe.expectMsg(DatasetCoordinatorActor.Stats(0, 0, 0, 99, -1, 99L))
+
+    val gdeltLines = Source.fromURL(getClass.getResource("/GDELT-sample-test2.csv"))
+      .getLines.toSeq.drop(1) // drop the header line
+
+    val readers2 = gdeltLines.map { line => ArrayStringRowReader(line.split(",")) }
+
+    EventFilter[NumberFormatException](occurrences = 1) intercept {
+      probe.send(coordActor, IngestRows(ref, 0, readers2, 1L))
+      // This should trigger an error, and datasetCoordinatorActor will stop, and no ack will be forthcoming.
+      probe.expectNoMsg
+    }
     // Now, if we send more rows, we will get UnknownDataset
     probe.send(coordActor, IngestRows(ref, 0, readers, 1L))
     probe.expectMsg(UnknownDataset)

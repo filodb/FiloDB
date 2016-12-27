@@ -1,24 +1,31 @@
 package filodb
 
-import akka.actor.{ActorRef}
+import akka.actor.ActorRef
 import akka.pattern.ask
 import akka.util.Timeout
-import com.typesafe.config.Config
 import com.typesafe.scalalogging.slf4j.StrictLogging
 import java.util.concurrent.ArrayBlockingQueue
+
 import net.ceedubs.ficus.Ficus._
-import org.apache.spark.sql.hive.filodb.MetaStoreSync
-import org.apache.spark.sql.{SQLContext, SaveMode, DataFrame, Row}
+
+import org.apache.spark.sql.{SQLContext, DataFrame, Row}
 import org.apache.spark.sql.types.StructType
-import scala.concurrent.{Await, Future}
+
+import scala.concurrent.Await
 import scala.concurrent.duration._
 import scala.language.implicitConversions
 import scala.language.postfixOps
 
+
+import org.apache.spark.filodb.{FiloDriver, FiloExecutor}
+import org.apache.spark.sql.hive.filodb.MetaStoreSync
+
+
 import filodb.coordinator.client.ClientException
-import filodb.coordinator.{IngestionCommands, DatasetCommands, RowSource, DatasetCoordinatorActor}
+import filodb.coordinator.{IngestionCommands, DatasetCommands, RowSource}
 import filodb.core._
 import filodb.core.metadata.{Column, DataColumn, Dataset, RichProjection}
+
 
 package spark {
   case class DatasetNotFound(dataset: String) extends Exception(s"Dataset $dataset not found")

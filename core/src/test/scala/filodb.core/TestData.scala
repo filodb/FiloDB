@@ -175,4 +175,13 @@ object GdeltTestData {
       (seg, lines)
     }.toSeq
   }
+
+  def createColumns(count: Int) : Seq[Column] = {
+    if (count == 0){
+      Nil
+    } else{
+      val fieldName = s"column$count"
+      new DataColumn(count,fieldName,"testtable",0,Column.ColumnType.StringColumn) +: createColumns(count - 1)
+    }
+  }
 }

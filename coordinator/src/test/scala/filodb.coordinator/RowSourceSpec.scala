@@ -1,18 +1,22 @@
 package filodb.coordinator
 
-import akka.actor.{ActorSystem, ActorRef, PoisonPill}
+import akka.actor.PoisonPill
 import akka.pattern.gracefulStop
 import com.typesafe.config.{Config, ConfigFactory}
 import scala.concurrent.duration._
 import scala.concurrent.ExecutionContext
 
+
 import filodb.core._
-import filodb.core.metadata.{Column, DataColumn, Dataset, RichProjection}
+import filodb.core.metadata.{Column, RichProjection}
 import filodb.core.reprojector.SegmentStateCache
 import filodb.core.store._
 
 import org.scalatest.concurrent.ScalaFutures
-import org.scalatest.time.{Millis, Span, Seconds}
+import org.scalatest.time.{Millis, Seconds, Span}
+
+import scala.util.Try
+import scalax.file.Path
 
 object RowSourceSpec extends ActorSpecConfig
 
@@ -20,12 +24,14 @@ class TestSegmentStateCache(config: Config, columnStore: ColumnStoreScanner)(imp
 extends
 SegmentStateCache(config, columnStore)(ec) {
   var shouldThrow = false
-  override def getSegmentState(projection: RichProjection,
+   override def getSegmentState(projection: RichProjection,
                       schema: Seq[Column],
                       version: Int)
                      (segInfo: SegmentInfo[projection.PK, projection.SK]): SegmentState = {
+    logger.debug("Fetching segment cache")
     if (shouldThrow) { throw new RuntimeException("foo!") }
     else { super.getSegmentState(projection, schema, version)(segInfo) }
+
   }
 }
 
@@ -78,9 +84,12 @@ with CoordinatorSetup with ScalaFutures {
     stateCache.shouldThrow = false
   }
 
-  override def afterAll(): Unit = {
-    gracefulStop(clusterActor, 3.seconds.dilated, PoisonPill).futureValue
+  override def afterAll(): Unit ={
+    super.afterAll()
     gracefulStop(coordActor, 3.seconds.dilated, PoisonPill).futureValue
+    val walDir = config.getString("write-ahead-log.memtable-wal-dir")
+    val path = Path.fromString (walDir)
+    Try(path.deleteRecursively(continueOnFailure = false))
   }
 
   it("should fail if cannot parse input RowReader") {

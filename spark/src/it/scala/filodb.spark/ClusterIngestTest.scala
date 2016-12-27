@@ -1,12 +1,9 @@
 package filodb.spark
 
-import org.apache.spark.{SparkContext, SparkException, SparkConf}
-import org.apache.spark.sql.{SaveMode, SQLContext}
-import org.scalatest.time.{Millis, Seconds, Span}
-import scala.concurrent.duration._
+import org.apache.spark.{SparkConf, SparkContext}
+import org.apache.spark.sql.{SQLContext, SaveMode}
 
-import filodb.core._
-import filodb.core.metadata.{Column, DataColumn, Dataset}
+import org.apache.spark.filodb.{FiloDriver}
 
 /**
  * Use local-cluster mode to test the finer points of ingestion on a cluster, especially

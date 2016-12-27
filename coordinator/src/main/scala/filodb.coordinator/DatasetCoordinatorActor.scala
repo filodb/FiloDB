@@ -1,18 +1,20 @@
 package filodb.coordinator
 
 import akka.actor.{Actor, ActorRef, Cancellable, Props}
+import akka.cluster.Cluster
 import akka.event.LoggingReceive
 import com.typesafe.config.Config
+import filodb.coordinator.IngestionCommands.DCAReady
 import kamon.Kamon
 import net.ceedubs.ficus.Ficus._
 import org.velvia.filo.RowReader
+
 import scala.collection.mutable.{ArrayBuffer, HashSet}
 import scala.concurrent.duration.FiniteDuration
 import scala.concurrent.Future
-
 import filodb.core.metadata.{Column, Dataset, Projection, RichProjection}
 import filodb.core.store.{ColumnStore, SegmentInfo}
-import filodb.core.reprojector.{MemTable, FiloMemTable, Reprojector}
+import filodb.core.reprojector.{FiloMemTable, MemTable, Reprojector}
 
 object DatasetCoordinatorActor {
   import filodb.core.Types._
@@ -68,12 +70,18 @@ object DatasetCoordinatorActor {
   case class FlushDone(result: Seq[SegmentInfo[_, _]]) extends DSCoordinatorMessage
   case class FlushFailed(t: Throwable) extends DSCoordinatorMessage
 
+  /**
+    * Creates new Memtable using WAL file
+    */
+  final case class InitIngestion(replyTo: ActorRef) extends DSCoordinatorMessage
+
   def props(projection: RichProjection,
             version: Int,
             columnStore: ColumnStore,
             reprojector: Reprojector,
-            config: Config): Props =
-    Props(classOf[DatasetCoordinatorActor], projection, version, columnStore, reprojector, config)
+            config: Config,
+            reloadFlag: Boolean = false): Props =
+    Props(classOf[DatasetCoordinatorActor], projection, version, columnStore, reprojector, config, reloadFlag)
 }
 
 /**
@@ -110,7 +118,8 @@ private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
                                               version: Int,
                                               columnStore: ColumnStore,
                                               reprojector: Reprojector,
-                                              config: Config) extends BaseActor {
+                                              config: Config,
+                                              var reloadFlag: Boolean = false) extends BaseActor {
   import DatasetCoordinatorActor._
   import context.dispatcher
 
@@ -155,7 +164,10 @@ private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
   var mTableWriteTask: Option[Cancellable] = None
   var mTableFlushTask: Option[Cancellable] = None
 
-  def makeNewTable(): MemTable = new FiloMemTable(projection, config)
+  val clusterSelfAddr = Cluster(context.system).selfAddress
+  val actorPath = clusterSelfAddr.host.getOrElse("None")
+
+  def makeNewTable(): MemTable = new FiloMemTable(projection, config, actorPath, version, reloadFlag)
 
   private def reportStats(): Unit = {
     logger.info(s"MemTable active table rows: $activeRows")
@@ -239,6 +251,8 @@ private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
     mTableFlushTask = None
 
     flushingTable = Some(activeTable)
+    // Reset reload flag to create new WAL file whenever new Memtable is initialised.
+    reloadFlag = false
     activeTable = makeNewTable()
     val newTaskFuture = reprojector.reproject(flushingTable.get, version)
     curReprojection = Some(newTaskFuture)
@@ -257,6 +271,8 @@ private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
 
   private def handleFlushDone(): Unit = {
     curReprojection = None
+    // delete wal files after flush completed
+    flushingTable.foreach(_.deleteWalFiles())
     // Close the flushing table and mark it as None
     flushingTable.foreach(_.close())
     flushingTable = None
@@ -329,5 +345,16 @@ private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
       logger.error(s"Error in reprojection task ($nameVer)", t)
       reportStats()
       handleFlushErr(t)
+    case InitIngestion(replyTo) =>
+      try {
+        activeTable.reloadMemTable()
+        replyTo ! DCAReady
+      } catch {
+        case ne: java.nio.file.NoSuchFileException =>
+          logger.info("There are no WAL files exist for this dataset and will proceed to start ingestion")
+          // Send DCAReady message When no WAL files exist for this dataset
+          replyTo ! DCAReady
+        case e: Exception=> throw e
+      }
   }
 }

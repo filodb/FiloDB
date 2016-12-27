@@ -1,14 +1,19 @@
 package filodb.spark
 
 import java.sql.Timestamp
-import org.apache.spark.{SparkContext, SparkException, SparkConf}
+
+import org.apache.spark.{SparkConf, SparkContext, SparkException}
 import org.apache.spark.sql.SaveMode
 import org.apache.spark.sql.hive.HiveContext
 import org.scalatest.time.{Millis, Seconds, Span}
-import scala.concurrent.duration._
 
+import scala.concurrent.duration._
 import filodb.core._
 import filodb.core.metadata.{Column, DataColumn, Dataset}
+import org.apache.spark.filodb.{FiloDriver, FiloExecutor}
+
+import scala.util.Try
+import scalax.file.Path
 
 object SaveAsFiloTest {
   case class TSData(machine: String, metric: Double, time: Timestamp)
@@ -34,6 +39,7 @@ class SaveAsFiloTest extends SparkTestBase {
                             .set("spark.filodb.cassandra.admin-keyspace", "unittest")
                             .set("spark.filodb.memtable.min-free-mb", "10")
                             .set("spark.ui.enabled", "false")
+                            .set("write-ahead-log.memtable-wal-dir","/tmp/filodb/wal")
   val sc = new SparkContext(conf)
   val sql = new HiveContext(sc)
 
