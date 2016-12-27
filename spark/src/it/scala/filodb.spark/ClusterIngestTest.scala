@@ -1,10 +1,9 @@
 package filodb.spark
 
-import org.apache.spark.{SparkConf, SparkContext, SparkException}
+import org.apache.spark.{SparkConf, SparkContext}
 import org.apache.spark.sql.{SQLContext, SaveMode}
-import org.scalatest.time.{Millis, Seconds, Span}
-
 import scala.concurrent.duration._
+
 import filodb.core._
 import filodb.core.metadata.{Column, DataColumn, Dataset}
 import org.apache.spark.filodb.FiloDriver

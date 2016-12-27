@@ -187,16 +187,17 @@ class NodeCoordinatorActor(metaStore: MetaStore,
     logger.info(s"Reload of dataset coordinator actors has started for path: $actorPath")
 
     metaStore.getAllIngestionEntries(actorPath).map { entries =>
-      if(entries.length > 0 ) {
+      if (entries.length > 0) {
         entries.foreach { ingestion =>
           val data = ingestion.toString().split("\001")
-          val ref = DatasetRef(data(2), Some(data(1)))
+          val databaseOpt = if (data(1).isEmpty || data(1).equals("None")) None else Some(data(1))
+          val ref = DatasetRef(data(2), databaseOpt)
           val columns = data(4).split("\002").map(col => DataColumn.fromString(col, data(2)))
           val projection = RichProjection(Await.result(metaStore.getDataset(ref), 10.second), columns)
           val colNames = projection.dataColumns.map(_.name)
           setupIngestion(originator, ref, colNames, data(3).toInt, true)
         }
-      }else{
+      } else {
         originator ! DCAReady
       }
     }.recover { case e: Exception =>
