@@ -10,7 +10,7 @@ import scala.concurrent.duration._
 import scala.language.existentials
 
 import filodb.core._
-import filodb.core.binaryrecord.BinaryRecord
+import filodb.core.binaryrecord.{BinaryRecord, BinaryRecordWrapper}
 import filodb.core.metadata.{Column, Projection, RichProjection}
 import filodb.core.query.ChunkSetReader
 
@@ -22,8 +22,21 @@ final case class FilteredPartitionScan(split: ScanSplit,
 
 sealed trait ChunkScanMethod
 case object AllChunkScan extends ChunkScanMethod
-final case class RowKeyChunkScan(startKey: BinaryRecord, endKey: BinaryRecord) extends ChunkScanMethod
-final case class SingleChunkScan(startKey: BinaryRecord, chunkId: Types.ChunkID) extends ChunkScanMethod
+// NOTE: BinaryRecordWrapper must be used as this case class might be Java Serialized
+final case class RowKeyChunkScan(firstBinKey: BinaryRecordWrapper,
+                                 lastBinKey: BinaryRecordWrapper) extends ChunkScanMethod {
+  def startkey: BinaryRecord = firstBinKey.binRec
+  def endKey: BinaryRecord = lastBinKey.binRec
+}
+final case class SingleChunkScan(firstBinKey: BinaryRecordWrapper,
+                                 chunkId: Types.ChunkID) extends ChunkScanMethod {
+  def startkey: BinaryRecord = firstBinKey.binRec
+}
+
+object RowKeyChunkScan {
+  def apply(startKey: BinaryRecord, endKey: BinaryRecord): RowKeyChunkScan =
+    RowKeyChunkScan(BinaryRecordWrapper(startKey), BinaryRecordWrapper(endKey))
+}
 
 trait ScanSplit {
   // Should return a set of hostnames or IP addresses describing the preferred hosts for that scan split
@@ -163,7 +176,7 @@ trait ColumnStore extends StrictLogging {
                        chunkId: Types.ChunkID): Array[ByteBuffer] = {
     val chunkReaderIt = scanChunks(projection, projection.rowKeyColumns, version,
                                    SinglePartitionScan(partition),
-                                   SingleChunkScan(startKey, chunkId))
+                                   SingleChunkScan(BinaryRecordWrapper(startKey), chunkId))
     try {
       chunkReaderIt.toSeq.head.chunks
     } catch {

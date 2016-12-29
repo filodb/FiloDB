@@ -80,6 +80,9 @@ extends ZeroCopyBinary with RowReader {
    * present in this BinaryRecord (other.schema.numFields >= this.schema.numFields)
    * It is pretty fast as the field by field comparison involves no deserialization and uses intrinsics
    * in many places.
+   * NOTE: if all fields in this BinaryRecord compare the same as the same fields in the other, then the
+   * comparison returns equal (0).  This semantic is needed for row key range scans to work where only the
+   * first few fields may be compared.
    */
   override final def compare(other: ZeroCopyBinary): Int = other match {
     case rec2: BinaryRecord =>
@@ -87,7 +90,7 @@ extends ZeroCopyBinary with RowReader {
         val cmp = fields(field).cmpRecords(this, rec2)
         if (cmp != 0) return cmp
       }
-      fields.size - rec2.schema.numFields
+      0
     case zcb: ZeroCopyBinary =>
       super.compare(zcb)
   }
@@ -166,6 +169,31 @@ object BinaryRecord {
       (binRecord.offset + fixedData + 4,
        UnsafeUtils.getInt(binRecord.base, binRecord.offset + fixedData))
     }
+  }
+}
+
+/**
+ * Instead of trying to somehow make BinaryRecord itself Java-Serialization friendly, and supporting
+ * horrible mutable fields in a class that already uses Unsafe, we keep BinaryRecord itself with an
+ * immutable API, and delegate Java Serialization support to this wrapper class.  NOTE: for high-volume
+ * BinaryRecord transfers, transfer the schema separately and just transmit the bytes from the BinaryRecord.
+ * This class is meant for low-volume use cases and always transfers the schema with every record.
+ */
+@SerialVersionUID(1009L)
+case class BinaryRecordWrapper(var binRec: BinaryRecord) extends java.io.Externalizable {
+  //scalastyle:off
+  def this() = this(null)
+  //scalastyle:on
+  def writeExternal(out: java.io.ObjectOutput): Unit = {
+    out.writeUTF(binRec.schema.toString)
+    out.writeInt(binRec.length)
+    out.write(binRec.bytes)
+  }
+  def readExternal(in: java.io.ObjectInput): Unit = {
+    val schema = RecordSchema(in.readUTF())
+    val recordBytes = new Array[Byte](in.readInt())
+    in.readFully(recordBytes, 0, recordBytes.size)
+    binRec = BinaryRecord(schema, recordBytes)
   }
 }
 

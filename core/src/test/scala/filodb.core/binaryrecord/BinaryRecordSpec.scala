@@ -1,8 +1,10 @@
 package filodb.core.binaryrecord
 
+import java.io.{ByteArrayInputStream, ObjectInputStream}
+import java.io.{ByteArrayOutputStream, ObjectOutputStream}
 import java.sql.Timestamp
-import org.velvia.filo.{RowReader, TupleRowReader, ZeroCopyUTF8String}
 import org.scalatest.{Matchers, FunSpec}
+import org.velvia.filo.{RowReader, TupleRowReader, ZeroCopyUTF8String}
 import scodec.bits.ByteVector
 
 class BinaryRecordSpec extends FunSpec with Matchers {
@@ -88,7 +90,7 @@ class BinaryRecordSpec extends FunSpec with Matchers {
     rec1 should equal (BinaryRecord(projection2, Seq("FRA", 55)))
 
     // Should be able to compare shorter record with longer one
-    BinaryRecord(projection2, Seq("FRA")) should be < (rec1)
+    BinaryRecord(projection2, Seq("FRA")) should equal (rec1)
     BinaryRecord(projection2, Seq("GA")) should be > (rec1)
   }
 
@@ -104,5 +106,18 @@ class BinaryRecordSpec extends FunSpec with Matchers {
 
     ByteVector(binRec1.toSortableBytes()) should be < (ByteVector(binRec2.toSortableBytes()))
     ByteVector(binRec1.toSortableBytes()) should be > (ByteVector(binRec3.toSortableBytes()))
+  }
+
+  it("should serialize and deserialize RecordSchema and BinaryRecordWrapper") {
+    RecordSchema(schema3_bdt.toString).fields should equal (schema3_bdt.fields)
+
+    val binRec1 = BinaryRecord(schema2_is, reader2)
+    val baos = new ByteArrayOutputStream
+    val oos = new ObjectOutputStream(baos)
+    oos.writeObject(BinaryRecordWrapper(binRec1))
+
+    val ois = new ObjectInputStream(new ByteArrayInputStream(baos.toByteArray))
+    val readWrapper = ois.readObject().asInstanceOf[BinaryRecordWrapper]
+    readWrapper.binRec should equal (binRec1)
   }
 }

@@ -34,8 +34,15 @@ final class RecordSchema(columnTypes: Seq[ColumnType]) {
   }.toArray
 
   val variableDataStartOffset = curOffset
+
+  override def toString: String = columnTypes.map(_.toString).mkString(":")
 }
 
 object RecordSchema {
   def apply(columns: Seq[Column]): RecordSchema = new RecordSchema(columns.map(_.columnType))
+
+  def apply(schemaStr: String): RecordSchema = {
+    val types = schemaStr.split(':').toSeq.map(s => ColumnType.withName(s))
+    new RecordSchema(types)
+  }
 }

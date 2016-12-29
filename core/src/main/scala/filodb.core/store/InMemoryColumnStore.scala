@@ -131,9 +131,9 @@ trait InMemoryColumnStoreScanner extends ColumnStoreScanner {
     chunkDb.get((dataset, partitionIndex.binPartition, version)).map { chunkStore =>
       logger.debug(s"Reading chunks from columns $columns, ${partitionIndex.binPartition}, method $chunkMethod")
       val infosSkips = (chunkMethod match {
-        case AllChunkScan            => partitionIndex.allChunks
-        case RowKeyChunkScan(k1, k2) => partitionIndex.rowKeyRange(k1, k2)
-        case SingleChunkScan(key, id) => partitionIndex.singleChunk(key, id)
+        case AllChunkScan             => partitionIndex.allChunks
+        case RowKeyChunkScan(k1, k2)  => partitionIndex.rowKeyRange(k1.binRec, k2.binRec)
+        case SingleChunkScan(key, id) => partitionIndex.singleChunk(key.binRec, id)
       }).toBuffer
       val colIndex = columns.map { col => chunkStore.columnMap.getOrElse(col.name, Int.MaxValue) }.toArray
 

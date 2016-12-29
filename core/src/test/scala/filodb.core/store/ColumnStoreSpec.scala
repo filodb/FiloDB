@@ -287,6 +287,12 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
                                     BinaryRecord(projection2, Seq("", 2)))
     val rowIter2 = colStore.scanRows(projection2, schema, 0, method2, rowRange2)
     rowIter2.toSeq.length should equal (0)
+
+    // Should be able to filter chunks by just the first rowkey column. First V is id=51
+    val rowRange3 = RowKeyChunkScan(BinaryRecord(projection2, Seq("V")),
+                                    BinaryRecord(projection2, Seq("Z")))
+    val rowIter3 = colStore.scanRows(projection2, schema, 0, method1, rowRange3)
+    rowIter3.length should equal (41)
   }
 
   it should "range scan by row keys (SinglePartitionRowKeyScan)" in {

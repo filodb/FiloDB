@@ -38,7 +38,7 @@ class ChunkSetReader(val info: ChunkSetInfo, skips: Array[Int], classes: Array[C
   def rowIterator(readerFactory: RowReaderFactory = DefaultReaderFactory): Iterator[RowReader] = {
     val reader = readerFactory(bufs, classes, len)
     new Iterator[RowReader] {
-      private var i = -1
+      private var i = 0
       private var skipIndex = 0
 
       final def hasNext: Boolean = {
@@ -46,18 +46,18 @@ class ChunkSetReader(val info: ChunkSetInfo, skips: Array[Int], classes: Array[C
         // Keep advancing until we hit a row we are not skipping
         do {
           // advance one row
-          i += 1
           if (i >= len) { return false }
 
           // skip?  If so, go to next skip index
           skipped = skipIndex < skips.size && i == skips(skipIndex)
-          if (skipped) skipIndex += 1
+          if (skipped) { skipIndex += 1; i += 1 }
         } while (skipped)
         true
       }
 
       final def next: RowReader = {
         reader.setRowNo(i)
+        i += 1
         reader
       }
     }

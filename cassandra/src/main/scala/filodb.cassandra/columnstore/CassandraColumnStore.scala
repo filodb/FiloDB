@@ -258,8 +258,8 @@ trait CassandraColumnStoreScanner extends ColumnStoreScanner with StrictLogging 
     logger.debug(s"Reading chunks from columns $columns, ${partitionIndex.binPartition}, method $chunkMethod")
     val (rangeQuery, infosSkips) = chunkMethod match {
       case AllChunkScan             => (true, partitionIndex.allChunks)
-      case RowKeyChunkScan(k1, k2)  => (false, partitionIndex.rowKeyRange(k1, k2))
-      case SingleChunkScan(key, id) => (false, partitionIndex.singleChunk(key, id))
+      case RowKeyChunkScan(k1, k2)  => (false, partitionIndex.rowKeyRange(k1.binRec, k2.binRec))
+      case SingleChunkScan(key, id) => (false, partitionIndex.singleChunk(key.binRec, id))
     }
 
     val groupedInfos = infosSkips.grouped(10)  // TODO: group by # of rows read
