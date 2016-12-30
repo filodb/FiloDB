@@ -1,5 +1,6 @@
 package filodb.core.query
 
+import com.googlecode.javaewah.EWAHCompressedBitmap
 import java.nio.ByteBuffer
 import org.velvia.filo._
 import scala.collection.mutable.BitSet
@@ -37,34 +38,49 @@ class ChunkSetReader(val info: ChunkSetInfo, skips: Array[Int], classes: Array[C
    */
   def rowIterator(readerFactory: RowReaderFactory = DefaultReaderFactory): Iterator[RowReader] = {
     val reader = readerFactory(bufs, classes, len)
-    new Iterator[RowReader] {
-      private var i = 0
-      private var skipIndex = 0
-
-      final def hasNext: Boolean = {
-        var skipped = false
-        // Keep advancing until we hit a row we are not skipping
-        do {
-          // advance one row
-          if (i >= len) { return false }
-
-          // skip?  If so, go to next skip index
-          skipped = skipIndex < skips.size && i == skips(skipIndex)
-          if (skipped) { skipIndex += 1; i += 1 }
-        } while (skipped)
-        true
+    if (skips.isEmpty) {
+      // This simplified iterator is MUCH faster than the skip-checking one
+      new Iterator[RowReader] {
+        private var i = 0
+        final def hasNext: Boolean = i < len
+        final def next: RowReader = {
+          reader.setRowNo(i)
+          i += 1
+          reader
+        }
       }
+    } else {
+      new Iterator[RowReader] {
+        private var i = 0
+        private var skipIndex = 0
 
-      final def next: RowReader = {
-        reader.setRowNo(i)
-        i += 1
-        reader
+        final def hasNext: Boolean = {
+          var skipped = false
+          // Keep advancing until we hit a row we are not skipping
+          do {
+            // advance one row
+            if (i >= len) { return false }
+
+            // skip?  If so, go to next skip index
+            skipped = skipIndex < skips.size && i == skips(skipIndex)
+            if (skipped) { skipIndex += 1; i += 1 }
+          } while (skipped)
+          true
+        }
+
+        final def next: RowReader = {
+          reader.setRowNo(i)
+          i += 1
+          reader
+        }
       }
     }
   }
 }
 
 object ChunkSetReader {
+  import PartitionChunkIndex.emptySkips
+
   type RowReaderFactory = (Array[ByteBuffer], Array[Class[_]], Int) => FiloRowReader
 
   val DefaultReaderFactory: RowReaderFactory =
@@ -73,10 +89,10 @@ object ChunkSetReader {
   val EndChunkSetReader = new ChunkSetReader(ChunkSetInfo.dummyInfo(0),
                                              Array.empty, Array.empty)
 
-  def apply(chunkSet: ChunkSet, schema: Seq[Column]): ChunkSetReader = {
+  def apply(chunkSet: ChunkSet, schema: Seq[Column], skips: Array[Int] = emptySkips): ChunkSetReader = {
     val clazzes = schema.map(_.columnType.clazz).toArray
     val nameToPos = schema.zipWithIndex.map { case (c, i) => (c.name -> i) }.toMap
-    val reader = new ChunkSetReader(chunkSet.info, Array[Int](), clazzes)
+    val reader = new ChunkSetReader(chunkSet.info, skips, clazzes)
     chunkSet.chunks.foreach { case (colName, bytes) => reader.addChunk(nameToPos(colName), bytes) }
     reader
   }

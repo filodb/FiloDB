@@ -7,6 +7,7 @@ import org.openjdk.jmh.annotations.{Mode, State, Scope}
 import org.openjdk.jmh.annotations.OutputTimeUnit
 import scalaxy.loops._
 import scala.language.postfixOps
+import scala.util.Random
 
 import filodb.core._
 import filodb.core.metadata.{Column, DataColumn, Dataset, RichProjection}
@@ -43,6 +44,10 @@ class IntSumReadBenchmark {
   val chunkSet = ChunkSet(state, rowIt.map(TupleRowReader).take(NumRows))
   val reader = ChunkSetReader(chunkSet, schema)
 
+  val NumSkips = 300  // 3% skips - not that much really
+  val skips = (0 until NumSkips).map { i => Random.nextInt(NumRows) }.sorted.distinct.toArray
+  val readerWithSkips = ChunkSetReader(chunkSet, schema, skips)
+
   /**
    * Simulation of a columnar query engine scanning the segment chunks columnar wise
    */
@@ -59,7 +64,7 @@ class IntSumReadBenchmark {
   }
 
   /**
-   * Simulation of ideal row-wise scanning speed with no boxing (Spark 1.5+ w Tungsten?)
+   * Simulation of ideal row-wise scanning speed with no boxing (Spark 1.5+ w Tungsten?) and no rows to skip
    */
   @Benchmark
   @BenchmarkMode(Array(Mode.Throughput))
@@ -81,6 +86,22 @@ class IntSumReadBenchmark {
   @OutputTimeUnit(TimeUnit.SECONDS)
   def rowWiseChunkScanNullCheck(): Int = {
     val it = reader.rowIterator()
+    var sum = 0
+    while(it.hasNext) {
+      val row = it.next
+      if (row.notNull(0)) sum += row.getInt(0)
+    }
+    sum
+  }
+
+  /**
+   * Row-wise scanning with null/isAvailable check and rows to skip
+   */
+  @Benchmark
+  @BenchmarkMode(Array(Mode.Throughput))
+  @OutputTimeUnit(TimeUnit.SECONDS)
+  def rowWiseChunkScanNullWithSkips(): Int = {
+    val it = readerWithSkips.rowIterator()
     var sum = 0
     while(it.hasNext) {
       val row = it.next
