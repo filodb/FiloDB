@@ -355,7 +355,6 @@ private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
           logger.info("There are no WAL files exist for this dataset and will proceed to start ingestion")
           // Send DCAReady message When no WAL files exist for this dataset
           replyTo ! DCAReady
-        case e: Exception=> throw e
       }
   }
 }

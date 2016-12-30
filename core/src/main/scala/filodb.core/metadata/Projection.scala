@@ -123,8 +123,6 @@ case class RichProjection(projection: Projection,
         segmentColString,
         extraColStrings.mkString(":")).mkString("\001")
   }
-
-  def dataColumns(): Seq[Column] = columns.collect { case d: DataColumn => d }
 }
 
 object RichProjection extends StrictLogging {
