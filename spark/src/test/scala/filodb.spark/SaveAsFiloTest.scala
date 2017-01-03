@@ -61,7 +61,7 @@ class SaveAsFiloTest extends SparkTestBase {
   import org.apache.spark.sql.functions._
 
   it("should create missing columns and partitions and write table") {
-    sql.saveAsFilo(dataDF, "gdelt1", Seq("id"), segCol, partKeys,
+    sql.saveAsFilo(dataDF, "gdelt1", Seq("id"), partKeys,
                    options = ingestOptions)
 
     // Now read stuff back and ensure it got written
@@ -80,7 +80,7 @@ class SaveAsFiloTest extends SparkTestBase {
     metaStore.newColumn(idStrCol, DatasetRef("gdelt2")).futureValue should equal (Success)
 
     intercept[ColumnTypeMismatch] {
-      sql.saveAsFilo(dataDF, "gdelt2", Seq("id"), segCol, partKeys)
+      sql.saveAsFilo(dataDF, "gdelt2", Seq("id"), partKeys)
     }
   }
 
@@ -90,7 +90,6 @@ class SaveAsFiloTest extends SparkTestBase {
       dataDF.write.format("filodb.spark").
                    option("dataset", "test1").
                    option("row_keys", "id").
-                   option("segment_key", segCol).
                    option("partition_keys", ":getOrElse year <none>").
                    mode(SaveMode.Overwrite).
                    save()
@@ -100,7 +99,6 @@ class SaveAsFiloTest extends SparkTestBase {
       dataDF.write.format("filodb.spark").
                    option("dataset", "test1").
                    option("row_keys", "not_a_col").
-                   option("segment_key", segCol).
                    option("partition_keys", ":fooMucnhkin 123").
                    mode(SaveMode.Overwrite).
                    save()
@@ -108,13 +106,12 @@ class SaveAsFiloTest extends SparkTestBase {
   }
 
   it("should not delete original metadata if overwrite with bad schema definition") {
-    sql.saveAsFilo(dataDF, "gdelt1", Seq("id"), segCol, partKeys, options = ingestOptions)
+    sql.saveAsFilo(dataDF, "gdelt1", Seq("id"), partKeys, options = ingestOptions)
 
     intercept[BadSchemaError] {
       dataDF.write.format("filodb.spark").
                    option("dataset", "gdelt1").
                    option("row_keys", "not_a_col").
-                   option("segment_key", segCol).
                    option("partition_keys", ":fooMucnhkin 123").
                    option("reset_schema", "true").
                    mode(SaveMode.Overwrite).
@@ -130,7 +127,7 @@ class SaveAsFiloTest extends SparkTestBase {
     val idStrCol = DataColumn(0, "id", "gdelt1", 0, Column.ColumnType.LongColumn)
     metaStore.newColumn(idStrCol, DatasetRef("gdelt1")).futureValue should equal (Success)
 
-    sql.saveAsFilo(dataDF, "gdelt1", Seq("id"), segCol, partKeys, options = ingestOptions)
+    sql.saveAsFilo(dataDF, "gdelt1", Seq("id"), partKeys, options = ingestOptions)
 
     // Now read stuff back and ensure it got written
     val df = sql.filoDataset("gdelt1")
@@ -138,14 +135,13 @@ class SaveAsFiloTest extends SparkTestBase {
   }
 
   it("should throw error in ErrorIfExists mode if dataset already exists") {
-    sql.saveAsFilo(dataDF, "gdelt2", Seq("id"), segCol, partKeys, options = ingestOptions)
+    sql.saveAsFilo(dataDF, "gdelt2", Seq("id"), partKeys, options = ingestOptions)
 
     intercept[RuntimeException] {
       // The default mode is ErrorIfExists
       dataDF.write.format("filodb.spark").
                    option("dataset", "gdelt2").
                    option("row_keys", "id").
-                   option("segment_key", segCol).
                    save()
     }
   }
@@ -154,7 +150,6 @@ class SaveAsFiloTest extends SparkTestBase {
     dataDF.write.format("filodb.spark").
                  option("dataset", "test1").
                  option("row_keys", "id").
-                 option("segment_key", segCol).
                  mode(SaveMode.Overwrite).
                  save()
     val df = sql.read.format("filodb.spark").option("dataset", "test1").load()
@@ -167,7 +162,6 @@ class SaveAsFiloTest extends SparkTestBase {
                  option("dataset", "test1").
                  option("database", "unittest2").
                  option("row_keys", "id").
-                 option("segment_key", segCol).
                  mode(SaveMode.Overwrite).
                  save()
     val df = sql.read.format("filodb.spark").option("dataset", "test1").
@@ -197,16 +191,13 @@ class SaveAsFiloTest extends SparkTestBase {
     dataDF.sort("id").write.format("filodb.spark").
                  option("dataset", "gdelt1").
                  option("row_keys", "id").
-                 option("segment_key", segCol).
                  save()
 
     // Data is different, should not append, should overwrite
     // Also try changing one of the keys.  If no reset_schema, then seg key not changed.
-    val newSegCol = ":string AA"
     dataDF2.write.format("filodb.spark").
                  option("dataset", "gdelt1").
-                 option("row_keys", "id").
-                 option("segment_key", newSegCol).
+                 option("row_keys", "sqlDate").
                  mode(SaveMode.Overwrite).
                  save()
 
@@ -214,18 +205,17 @@ class SaveAsFiloTest extends SparkTestBase {
     df.agg(sum("year")).collect().head(0) should equal (4032)
 
     val dsObj = metaStore.getDataset(DatasetRef("gdelt1")).futureValue
-    dsObj.projections.head.segmentColId should equal (segCol)
+    dsObj.projections.head.keyColIds should equal (Seq("id"))
 
     dataDF2.write.format("filodb.spark").
                  option("dataset", "gdelt1").
-                 option("row_keys", "id").
-                 option("segment_key", newSegCol).
+                 option("row_keys", "sqlDate").
                  option("reset_schema", "true").
                  mode(SaveMode.Overwrite).
                  save()
 
     val dsObj2 = metaStore.getDataset(DatasetRef("gdelt1")).futureValue
-    dsObj2.projections.head.segmentColId should equal (newSegCol)
+    dsObj2.projections.head.keyColIds should equal (Seq("sqlDate"))
 
     // Also try overwriting with insert API
     sql.insertIntoFilo(dataDF2, "gdelt1", overwrite = true)
@@ -236,7 +226,6 @@ class SaveAsFiloTest extends SparkTestBase {
     dataDF.write.format("filodb.spark").
                  option("dataset", "gdelt2").
                  option("row_keys", "id").
-                 option("segment_key", segCol).
                  mode(SaveMode.Append).
                  save()
 
@@ -247,8 +236,8 @@ class SaveAsFiloTest extends SparkTestBase {
   }
 
   it("should append data using SQL INSERT INTO statements") {
-    sql.saveAsFilo(dataDF2, "gdelt1", Seq("id"), segCol, partKeys, options = ingestOptions)
-    sql.saveAsFilo(dataDF, "gdelt2", Seq("id"), segCol, partKeys, options = ingestOptions)
+    sql.saveAsFilo(dataDF2, "gdelt1", Seq("id"), partKeys, options = ingestOptions)
+    sql.saveAsFilo(dataDF, "gdelt2", Seq("id"), partKeys, options = ingestOptions)
 
     val gdelt1 = sql.filoDataset("gdelt1")
     val gdelt2 = sql.filoDataset("gdelt2")
@@ -263,7 +252,6 @@ class SaveAsFiloTest extends SparkTestBase {
     dataDF.write.format("filodb.spark").
                  option("dataset", "test1").
                  option("row_keys", "id").
-                 option("segment_key", segCol).
                  option("partition_keys", ":getOrElse year 9999").
                  mode(SaveMode.Overwrite).
                  save()
@@ -281,7 +269,6 @@ class SaveAsFiloTest extends SparkTestBase {
     gdeltDF.write.format("filodb.spark").
                  option("dataset", "gdelt3").
                  option("row_keys", "eventId").
-                 option("segment_key", segCol).
                  option("partition_keys", ":getOrElse actor2Code --,:getOrElse year -1").
                  mode(SaveMode.Overwrite).
                  save()
@@ -296,7 +283,6 @@ class SaveAsFiloTest extends SparkTestBase {
     gdeltDF.write.format("filodb.spark").
                  option("dataset", "gdelt3").
                  option("row_keys", "eventId").
-                 option("segment_key", segCol).
                  option("partition_keys", ":getOrElse actor2Code --,:getOrElse year -1").
                  mode(SaveMode.Overwrite).
                  save()
@@ -307,6 +293,7 @@ class SaveAsFiloTest extends SparkTestBase {
       head(0) should equal (30)
     // Make sure that the predicate pushdowns actually worked.  We should not have read all the segments-
     // FiloDB should be reading only the segments corresponding to the filters above
+    Thread sleep 500  // It seems some timing trick to readPartitions changing  :-p
     (FiloExecutor.columnStore.stats.readPartitions - readPartitions) should equal (2)
 
     sql.sql("select sum(numArticles) from gdelt where actor2Code = 'JPN' AND year = 1979").collect().
@@ -322,7 +309,6 @@ class SaveAsFiloTest extends SparkTestBase {
     gdeltDF.write.format("filodb.spark").
                  option("dataset", "gdelt3").
                  option("row_keys", "eventId").
-                 option("segment_key", segCol).
                  option("partition_keys", ":stringPrefix actor2Code 1,:getOrElse year -1").
                  mode(SaveMode.Overwrite).
                  save()
@@ -345,7 +331,6 @@ class SaveAsFiloTest extends SparkTestBase {
     gdeltDF.write.format("filodb.spark").
       option("dataset", "gdelt3").
       option("row_keys", "eventId").
-      option("segment_key", segCol).
       option("partition_keys", ":getOrElse actor2Code --,:getOrElse year -1").
       mode(SaveMode.Overwrite).
       save()
@@ -362,7 +347,6 @@ class SaveAsFiloTest extends SparkTestBase {
     gdeltDF.write.format("filodb.spark").
       option("dataset", "gdelt3").
       option("row_keys", "eventId").
-      option("segment_key", segCol).
       option("partition_keys", ":stringPrefix actor2Code 1").
       mode(SaveMode.Overwrite).
       save()
@@ -380,7 +364,6 @@ class SaveAsFiloTest extends SparkTestBase {
       option("dataset", "gdelt3").
       option("row_keys", "eventId").
       option("partition_keys", ":getOrElse actor2Code --,:getOrElse year -1").
-      option("segment_key", ":string 0").
       option("chunk_size", "50").
       mode(SaveMode.Overwrite).
       save()
@@ -414,7 +397,6 @@ class SaveAsFiloTest extends SparkTestBase {
     gdeltDF.write.format("filodb.spark").
       option("dataset", "gdelt3").
       option("row_keys", "eventId").
-      option("segment_key", segCol).
       option("partition_keys", ":getOrElse actor2Code 1,:getOrElse year -1").
       mode(SaveMode.Overwrite).
       save()
@@ -431,7 +413,6 @@ class SaveAsFiloTest extends SparkTestBase {
     gdeltDF.write.format("filodb.spark").
                  option("dataset", "gdelt3").
                  option("row_keys", "actor2Code,eventId").
-                 option("segment_key", ":string 0").
                  option("chunk_size", "50").
                  mode(SaveMode.Overwrite).
                  save()
@@ -475,7 +456,6 @@ class SaveAsFiloTest extends SparkTestBase {
     tsDF.write.format("filodb.spark").
                option("dataset", "test1").
                option("row_keys", "time").
-               option("segment_key", ":string 0").
                mode(SaveMode.Overwrite).save()
     val df = sql.read.format("filodb.spark").option("dataset", "test1").load()
     val selectedRow = df.select("metric", "time").limit(1).collect.head
@@ -491,7 +471,6 @@ class SaveAsFiloTest extends SparkTestBase {
     gdeltDF.write.format("filodb.spark").
                  option("dataset", "gdelt1").
                  option("row_keys", "eventId").
-                 option("segment_key", segCol).
                  option("partition_keys", ":hash actor2Code 8").
                  mode(SaveMode.Overwrite).
                  save()

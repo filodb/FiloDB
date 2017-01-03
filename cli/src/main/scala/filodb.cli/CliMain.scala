@@ -30,7 +30,6 @@ class Arguments extends FieldArgs {
   var filename: Option[String] = None
   var columns: Option[Map[String, String]] = None
   var rowKeys: Seq[String] = Nil
-  var segmentKey: Option[String] = None
   var partitionKeys: Seq[String] = Nil
   var numPartitions: Int = 1000
   var version: Option[Int] = None
@@ -106,12 +105,10 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
 
         case Some("create") =>
           require(args.dataset.isDefined && args.columns.isDefined, "Need to specify dataset and columns")
-          require(args.segmentKey.isDefined, "--segmentKey must be defined")
           require(args.rowKeys.nonEmpty, "--rowKeys must be defined")
           val datasetName = args.dataset.get
           createDatasetAndColumns(getRef(args), args.toColumns(datasetName, version),
                                   args.rowKeys,
-                                  args.segmentKey.get,
                                   if (args.partitionKeys.isEmpty) { Seq(Dataset.DefaultPartitionColumn) }
                                   else { args.partitionKeys },
                                   timeout)
@@ -200,11 +197,10 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
   def createDatasetAndColumns(dataset: DatasetRef,
                               columns: Seq[DataColumn],
                               rowKeys: Seq[String],
-                              segmentKey: String,
                               partitionKeys: Seq[String],
                               timeout: FiniteDuration) {
     println(s"Creating dataset $dataset...")
-    val datasetObj = Dataset(dataset, rowKeys, segmentKey, partitionKeys)
+    val datasetObj = Dataset(dataset, rowKeys, partitionKeys)
 
     RichProjection.make(datasetObj, columns).recover {
       case err: RichProjection.BadSchema =>

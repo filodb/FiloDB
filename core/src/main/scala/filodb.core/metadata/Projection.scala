@@ -31,7 +31,6 @@ case class Projection(id: Int,
   def detailedString: String =
     s"Projection $id from dataset $dataset:\n" +
     s"  Key columns: ${keyColIds.mkString(", ")}\n" +
-    s"  Segment column: $segmentColId\n" +
     s"  Projection columns: ${columns.mkString(", ")}"
 
   /**

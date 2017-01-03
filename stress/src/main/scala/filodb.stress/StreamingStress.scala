@@ -85,8 +85,7 @@ object StreamingStress extends App {
                else {
                  rdd.toDF.write.format("filodb.spark").
                     option("dataset", "taxi_streaming").
-                    option("row_keys", "hack_license,pickup_datetime").
-                    option("segment_key", ":timeslice pickup_datetime 6d").
+                    option("row_keys", "pickup_datetime,hack_license").
                     option("partition_keys", ":stringPrefix medallion 2").
                     // Flushing after each small batch would be very inefficient...
                     option("flush_after_write", "false").

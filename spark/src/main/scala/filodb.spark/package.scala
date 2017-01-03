@@ -162,13 +162,12 @@ package object spark extends StrictLogging {
   // Checks for schema errors via RichProjection.make, and returns created Dataset object
   private[spark] def makeAndVerifyDataset(datasetRef: DatasetRef,
                                           rowKeys: Seq[String],
-                                          segmentKey: String,
                                           partitionKeys: Seq[String],
                                           chunkSize: Option[Int],
                                           dfColumns: Seq[Column]): Dataset = {
     val options = Dataset.DefaultOptions
     val options2 = chunkSize.map { newSize => options.copy(chunkSize = newSize) }.getOrElse(options)
-    val dataset = Dataset(datasetRef, rowKeys, segmentKey, partitionKeys).copy(options = options2)
+    val dataset = Dataset(datasetRef, rowKeys, partitionKeys).copy(options = options2)
 
     // validate against schema.  Checks key names, computed columns, etc.
     RichProjection.make(dataset, dfColumns).recover {
