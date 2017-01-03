@@ -6,7 +6,7 @@ import org.openjdk.jmh.annotations._
 
 import filodb.core._
 import filodb.core.metadata.{Column, Dataset, RichProjection}
-import filodb.spark.{SparkRowReader, FiloDriver, TypeConverters}
+import filodb.spark.{SparkRowReader, FiloDriver, FiloExecutor, TypeConverters}
 import org.apache.spark.sql.{DataFrame, Row, SQLContext}
 import org.apache.spark.sql.types._
 import org.apache.spark.sql.functions.sum
@@ -23,7 +23,7 @@ class SparkCassBenchmark {
   // Now create an RDD[Row] out of it, and a Schema, -> DataFrame
   val conf = (new SparkConf).setMaster("local[4]")
                             .setAppName("test")
-                            // .set("spark.sql.tungsten.enabled", "false")
+                            .set("spark.ui.enabled", "false")
                             .set("spark.filodb.cassandra.keyspace", "filodb")
   val sc = new SparkContext(conf)
   val sql = new SQLContext(sc)
@@ -34,6 +34,7 @@ class SparkCassBenchmark {
   @TearDown
   def shutdownFiloActors(): Unit = {
     FiloDriver.shutdown()
+    FiloExecutor.shutdown()
     sc.stop()
   }
 

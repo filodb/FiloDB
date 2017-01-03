@@ -1,6 +1,6 @@
 package filodb.jmh
 
-import filodb.spark.FiloDriver
+import filodb.spark.{FiloDriver, FiloExecutor}
 import org.apache.spark.sql.{DataFrame, SaveMode, SQLContext}
 import org.apache.spark.{SparkContext, SparkException, SparkConf}
 
@@ -16,6 +16,7 @@ object CreateCassTestData extends App {
                             .setAppName("test")
                             .set("filodb.cassandra.keyspace", "filodb")
                             .set("filodb.memtable.min-free-mb", "10")
+                            .set("spark.ui.enabled", "false")
                             .set("spark.driver.memory", "3g")
                             .set("spark.executor.memory", "5g")
   val sc = new SparkContext(conf)
@@ -44,5 +45,6 @@ object CreateCassTestData extends App {
 
   sc.stop()
   FiloDriver.shutdown()
+  FiloExecutor.shutdown()
   sys.exit(0)
 }

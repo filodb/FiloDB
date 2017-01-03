@@ -1,13 +1,14 @@
 package filodb.jmh
 
 import ch.qos.logback.classic.{Level, Logger}
+import com.googlecode.javaewah.EWAHCompressedBitmap
 import org.openjdk.jmh.annotations.Benchmark
 import org.openjdk.jmh.annotations.BenchmarkMode
-import org.openjdk.jmh.annotations.{Mode, State, Scope}
 import org.openjdk.jmh.annotations.OutputTimeUnit
-import scalaxy.loops._
+import org.openjdk.jmh.annotations.{Mode, State, Scope}
 import scala.language.postfixOps
 import scala.util.Random
+import scalaxy.loops._
 
 import filodb.core._
 import filodb.core.metadata.{Column, DataColumn, Dataset, RichProjection}
@@ -45,8 +46,8 @@ class IntSumReadBenchmark {
   val reader = ChunkSetReader(chunkSet, schema)
 
   val NumSkips = 300  // 3% skips - not that much really
-  val skips = (0 until NumSkips).map { i => Random.nextInt(NumRows) }.sorted.distinct.toArray
-  val readerWithSkips = ChunkSetReader(chunkSet, schema, skips)
+  val skips = (0 until NumSkips).map { i => Random.nextInt(NumRows) }.sorted.distinct
+  val readerWithSkips = ChunkSetReader(chunkSet, schema, EWAHCompressedBitmap.bitmapOf(skips :_*))
 
   /**
    * Simulation of a columnar query engine scanning the segment chunks columnar wise

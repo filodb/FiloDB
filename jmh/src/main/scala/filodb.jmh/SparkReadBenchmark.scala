@@ -8,7 +8,7 @@ import scala.concurrent.Future
 import filodb.core._
 import filodb.core.metadata.{Column, Dataset}
 import filodb.core.store._
-import filodb.spark.{FiloDriver, FiloRelation}
+import filodb.spark.{FiloDriver, FiloExecutor, FiloRelation}
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.functions.sum
 import org.apache.spark.sql.types._
@@ -31,17 +31,18 @@ import org.velvia.filo.{RowReader, TupleRowReader}
  * To get the scan speed, one needs to subtract the baseline from the total time of sparkSum/sparkCassSum.
  * For example, on my laptop, here is the JMH output:
  * {{{
- *  Benchmark                         Mode  Cnt  Score   Error  Units
- *  SparkReadBenchmark.sparkBaseline    ss   15  0.018 ± 0.007   s/op
- *  SparkReadBenchmark.sparkSum         ss   15  0.218 ± 0.007   s/op
- *  SparkCassBenchmark.sparkCassSum     ss   15  0.541 ± 0.054   s/op
+ *  Benchmark                              Mode  Cnt  Score   Error  Units
+ *  SparkReadBenchmark.inMemoryColStoreOnly  ss   15  ≈ 10⁻³            s/op
+ *  SparkReadBenchmark.sparkBaseline         ss   15   0.013 ±  0.001   s/op
+ *  SparkReadBenchmark.sparkSum              ss   15   0.045 ±  0.002   s/op
+ *  SparkCassBenchmark.sparkCassSum          ss   15   0.226 ± 0.035   s/op
  * }}}
  *
  * (The above run against Cassandra 2.1.6, 5GB heap, with jmh:run -i 3 -wi 3 -f3 filodb.jmh.SparkReadBenchmark)
  *
  * Thus:
- * - Cassandra scan speed = 5000000 / (0.541 - 0.018) =  9,689,922 ops/sec
- * - InMemory scan speed  = 5000000 / (0.218 - 0.018) = 25,000,000 ops/sec
+ * - Cassandra scan speed = 5000000 / (0.226 - 0.013) =  23.47 million ops/sec
+ * - InMemory scan speed  = 5000000 / (0.045 - 0.013) = 156.25 million ops/sec
  */
 @State(Scope.Benchmark)
 class SparkReadBenchmark {
@@ -81,6 +82,7 @@ class SparkReadBenchmark {
   @TearDown
   def shutdownFiloActors(): Unit = {
     FiloDriver.shutdown()
+    FiloExecutor.shutdown()
     sc.stop()
   }
 
