@@ -237,7 +237,7 @@ trait CassandraColumnStoreScanner extends ColumnStoreScanner with StrictLogging 
   }
 
   // Produce an empty stream of chunks so that results can still be returned correctly
-  private def emptyChunkStream(infosSkips: Seq[(ChunkSetInfo, Array[Int])], colNo: Int):
+  private def emptyChunkStream(infosSkips: ChunkSetInfo.ChunkInfosAndSkips, colNo: Int):
     Observable[SingleChunkInfo] =
     Observable.fromIterator(infosSkips.toIterator.map { case (info, skips) =>
       //scalastyle:off

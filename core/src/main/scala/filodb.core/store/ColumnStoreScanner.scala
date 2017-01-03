@@ -13,7 +13,7 @@ import filodb.core.metadata.{Column, Projection, RichProjection}
 import filodb.core.query.{ChunkSetReader, PartitionChunkIndex}
 
 trait ChunkPipeItem
-case class ChunkPipeInfos(infosAndSkips: Seq[(ChunkSetInfo, Array[Int])]) extends ChunkPipeItem
+case class ChunkPipeInfos(infosAndSkips: ChunkSetInfo.ChunkInfosAndSkips) extends ChunkPipeItem
 case class SingleChunkInfo(id: Types.ChunkID, colNo: Int, bytes: ByteBuffer) extends ChunkPipeItem
 
 /**

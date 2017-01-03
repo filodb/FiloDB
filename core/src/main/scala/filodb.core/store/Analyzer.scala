@@ -100,7 +100,7 @@ object Analyzer {
                           .foldLeftL(ColumnStoreAnalysis.empty) { case (analysis, chunkIndex) =>
                             // Figure out # chunks and rows per partition
                             val numRows = chunkIndex.allChunks.map(_._1.numRows).sum
-                            val numSkipped = chunkIndex.allChunks.map(_._2.size).sum
+                            val numSkipped = chunkIndex.allChunks.map(_._2.cardinality).sum
                             val numChunks = chunkIndex.numChunks
                             analysis.addPartitionStats(numRows, numSkipped, numChunks)
                           }.runAsync

@@ -15,14 +15,6 @@ class ChunkSetInfoSpec extends FunSpec with Matchers {
 
   val info1 = ChunkSetInfo(13, 5000, firstKey, lastKey)
 
-  def skipsShouldEqual(skip1: Seq[ChunkRowSkipIndex], skip2: Seq[ChunkRowSkipIndex]): Unit = {
-    skip1 should have length (skip2.length)
-    skip1.zip(skip2).foreach { case (ChunkRowSkipIndex(id1, aray1), ChunkRowSkipIndex(id2, aray2)) =>
-      id1 should equal (id2)
-      aray1 should equal (aray2)
-    }
-  }
-
   def infosShouldEqual(info1: ChunkSetInfo, info2: ChunkSetInfo, numCols: Int = 1): Unit = {
     info1.id should equal (info2.id)
     info1.numRows should equal (info2.numRows)
@@ -38,6 +30,10 @@ class ChunkSetInfoSpec extends FunSpec with Matchers {
     val (infoRead1, skips1) = ChunkSetInfo.fromBytes(prj, ChunkSetInfo.toBytes(prj, info1, Nil))
     infosShouldEqual(infoRead1, info1)
     skips1 should equal (Nil)
+
+    intercept[AssertionError] {
+      ChunkSetInfo.fromBytes(prj, Array[Byte](2, 3, 4))
+    }
   }
 
   it("should serialize and deserialize ChunkSetInfo and skips") {
@@ -47,12 +43,12 @@ class ChunkSetInfoSpec extends FunSpec with Matchers {
 
     val (infoRead1, skipsRead1) = ChunkSetInfo.fromBytes(prj, ChunkSetInfo.toBytes(prj, info1, Seq(skips1)))
     infosShouldEqual(infoRead1, info1)
-    skipsShouldEqual(skipsRead1, Seq(skips1))
+    skipsRead1 should equal (Seq(skips1))
 
     val (infoRead2, skipsRead2) = ChunkSetInfo.fromBytes(prj, ChunkSetInfo.toBytes(
                                                                 prj, info1, Seq(skips2, skips3)))
     infosShouldEqual(infoRead2, info1)
-    skipsShouldEqual(skipsRead2, Seq(skips2, skips3))
+    skipsRead2 should equal (Seq(skips2, skips3))
   }
 
   private def getCSI(id: Int, firstLine: Int, lastLine: Int): ChunkSetInfo = {
@@ -137,19 +133,5 @@ class ChunkSetInfoSpec extends FunSpec with Matchers {
 
     val info1 = getCSI(1, 0, 7)
     info1.intersection(ChunkSetInfo(2, 100, null, null)) should be (None)
-  }
-
-
-  it("should collectSkips properly even with overlapping skip row numbers") {
-    val origInfo = info1.copy(id = 9)
-    val info2 = info1.copy(id = 14)
-    val skips1 = ChunkRowSkipIndex(9, Array(2, 5))
-    val skips2 = ChunkRowSkipIndex(9, Array(3, 5, 8))
-    val infoAndSkips = ChunkSetInfo.collectSkips(Seq((origInfo, Nil),
-                                                     (info1, Seq(skips1)),
-                                                     (info2, Seq(skips2))))
-    infoAndSkips should have length (3)
-    infoAndSkips(0)._1.id should equal (9)
-    infoAndSkips(0)._2.toList should equal (Seq(2, 3, 5, 8))
   }
 }

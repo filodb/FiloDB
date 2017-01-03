@@ -1,6 +1,6 @@
 package filodb.core.query
 
-import filodb.core.store.ChunkSetInfo
+import filodb.core.store.{ChunkSetInfo, ChunkRowSkipIndex}
 import scodec.bits._
 
 import org.scalatest.{FunSpec, Matchers}
@@ -8,6 +8,7 @@ import org.scalatest.{FunSpec, Matchers}
 class PartitionChunkIndexSpec extends FunSpec with Matchers {
   import filodb.core.NamesTestData._
   import PartitionChunkIndex.emptySkips
+  import collection.JavaConverters._
 
   val info1 = ChunkSetInfo(100L, 3, firstKey, lastKey)
   val info2 = ChunkSetInfo(99L, 3, keyForName(1), lastKey)
@@ -38,8 +39,6 @@ class PartitionChunkIndexSpec extends FunSpec with Matchers {
 
       newIndex.rowKeyRange(lastKey, firstKey).toList.map(_._1) should equal (Nil)
     }
-
-    it("should handle skips") (pending)
   }
 
   describe("ChunkIDPartitionChunkIndex") {
@@ -59,6 +58,20 @@ class PartitionChunkIndexSpec extends FunSpec with Matchers {
       newIndex.allChunks.toList.map(_._1) should equal (List(info2, info1))
 
       newIndex.rowKeyRange(firstKey, firstKey).toList.map(_._1) should equal (List(info1))
+    }
+
+    it("should handle skips") {
+      val newIndex = new ChunkIDPartitionChunkIndex(ByteVector(0), projection)
+      val origInfo = info1.copy(id = 9)
+      val info2 = info1.copy(id = 14)
+      newIndex.add(origInfo, Nil)
+      newIndex.add(info1, Seq(ChunkRowSkipIndex(9, Array(2, 5))))
+      newIndex.add(info2, Seq(ChunkRowSkipIndex(9, Array(3, 5, 8))))
+
+      val infosAndSkips = newIndex.allChunks.toList
+      infosAndSkips should have length (3)
+      infosAndSkips(0)._1.id should equal (9)
+      infosAndSkips(0)._2.toList.asScala should equal (Seq(2, 3, 5, 8))
     }
   }
 }

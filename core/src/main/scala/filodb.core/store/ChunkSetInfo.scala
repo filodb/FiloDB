@@ -1,14 +1,15 @@
 package filodb.core.store
 
 import bloomfilter.mutable.BloomFilter
+import com.googlecode.javaewah.EWAHCompressedBitmap
 import com.typesafe.scalalogging.slf4j.StrictLogging
+import java.io.{DataOutputStream, ByteArrayOutputStream}
 import java.nio.ByteBuffer
 import kamon.Kamon
 import org.boon.primitive.{ByteBuf, InputByteArray}
 import org.velvia.filo._
-import scala.collection.mutable.{ArrayBuffer, HashMap, TreeSet}
+import scala.collection.mutable.ArrayBuffer
 import scala.math.Ordered._
-import scodec.bits.ByteVector
 
 import filodb.core._
 import filodb.core.binaryrecord.{BinaryRecord, RecordSchema}
@@ -114,70 +115,68 @@ case class ChunkSetInfo(id: ChunkID,
   }
 }
 
-case class ChunkRowSkipIndex(id: ChunkID, overrides: Array[Int]) {
-  // Unfortunately Arrays don't compare, we have to implement our own equality  :(
-  override def equals(that: Any): Boolean = that match {
-    case ChunkRowSkipIndex(otherId, otherOverrides) =>
-      otherId == id && otherOverrides.sameElements(overrides)
-    case other: Any =>
-      false
-  }
+case class ChunkRowSkipIndex(id: ChunkID, overrides: EWAHCompressedBitmap)
 
-  override def hashCode: Int = super.hashCode
+object ChunkRowSkipIndex {
+  def apply(id: ChunkID, overrides: Array[Int]): ChunkRowSkipIndex =
+    ChunkRowSkipIndex(id, EWAHCompressedBitmap.bitmapOf(overrides.sorted :_*))
 }
 
 object ChunkSetInfo extends StrictLogging {
   type ChunkSkips = Seq[ChunkRowSkipIndex]
-  type ChunkInfosAndSkips = Seq[(ChunkSetInfo, ChunkSkips)]
+  type SkipMap    = EWAHCompressedBitmap
+  type ChunkInfosAndSkips = Seq[(ChunkSetInfo, SkipMap)]
   type IndexAndFilterSeq = Seq[(ChunkSetInfo, ChunkSkips, BloomFilter[Long])]
   import ChunkSet._
 
-  val DummyKey = BinaryRecord(RecordSchema(Nil), Array[Byte]())
-
-  /**
-   * Designed only for special, non-functional ChunkSetInfos, such as special markers
-   */
-  def dummyInfo(id: ChunkID): ChunkSetInfo = ChunkSetInfo(id, -1, DummyKey, DummyKey)
-
   val missingBloomFilters = Kamon.metrics.counter("chunks-missing-bloom-filter")
 
+  /**
+   * Serializes ChunkSetInfo into bytes for persistence.
+   *
+   * Defined format:
+   *   version  - byte  - 0x01
+   *   chunkId  - long
+   *   numRows  - int32
+   *   firstKey - med. byte array (BinaryRecord)
+   *   lastKey  - med. byte array (BinaryRecord)
+   *   maxConsideredChunkID - long
+   *   repeated - id: long, med. byte array (EWAHCompressedBitmap) - ChunkRowSkipIndex
+   */
   def toBytes(projection: RichProjection, chunkSetInfo: ChunkSetInfo, skips: ChunkSkips): Array[Byte] = {
     val buf = ByteBuf.create(100)
+    buf.writeByte(0x01)
     buf.writeLong(chunkSetInfo.id)
     buf.writeInt(chunkSetInfo.numRows)
     buf.writeMediumByteArray(chunkSetInfo.firstKey.bytes)
     buf.writeMediumByteArray(chunkSetInfo.lastKey.bytes)
+    buf.writeLong(-1L)   // TODO: add maxConsideredChunkID
     skips.foreach { case ChunkRowSkipIndex(id, overrides) =>
       buf.writeLong(id)
-      buf.writeMediumIntArray(overrides.toArray)
+      val baos = new ByteArrayOutputStream
+      val dos = new DataOutputStream(baos)
+      overrides.serialize(dos)
+      buf.writeMediumByteArray(baos.toByteArray)
     }
     buf.toBytes
   }
 
   def fromBytes(projection: RichProjection, bytes: Array[Byte]): (ChunkSetInfo, ChunkSkips) = {
     val scanner = new InputByteArray(bytes)
+    val versionByte = scanner.readByte
+    assert(versionByte == 0x01, s"Incompatible ChunkSetInfo version $versionByte")
     val id = scanner.readLong
     val numRows = scanner.readInt
     val firstKey = BinaryRecord(projection, scanner.readMediumByteArray)
     val lastKey = BinaryRecord(projection, scanner.readMediumByteArray)
+    scanner.readLong    // throw away maxConsideredChunkID for now
     val skips = new ArrayBuffer[ChunkRowSkipIndex]
     while (scanner.location < bytes.size) {
       val skipId = scanner.readLong
-      val skipList = scanner.readMediumIntArray
+      val skipList = new EWAHCompressedBitmap(ByteBuffer.wrap(scanner.readMediumByteArray))
       skips.append(ChunkRowSkipIndex(skipId, skipList))
     }
     (ChunkSetInfo(id, numRows, firstKey, lastKey), skips)
-  }
-
-  def collectSkips(infos: ChunkInfosAndSkips): Seq[(ChunkSetInfo, Array[Int])] = {
-    val skipRows = new HashMap[ChunkID, TreeSet[Int]].withDefaultValue(TreeSet[Int]())
-    for { (info, skips) <- infos
-          skipIndex     <- skips } {
-      skipRows(skipIndex.id) = skipRows(skipIndex.id) ++ skipIndex.overrides
-    }
-    infos.map { case (info, _) =>
-      (info, skipRows(info.id).toArray)
-    }
   }
 
   /**
@@ -231,9 +230,9 @@ object ChunkSetInfo extends StrictLogging {
             case (pos, true) => Some(pos)
             case (_,  false) => None
           }
-        }.toArray
-        ChunkRowSkipIndex(chunkId, overrides)
-      }.filter(_.overrides.size > 0)
+        }
+        ChunkRowSkipIndex(chunkId, EWAHCompressedBitmap.bitmapOf(overrides.sorted :_*))
+      }.filterNot(_.overrides.isEmpty)
     }
   }
 

@@ -91,6 +91,7 @@ lazy val coreDeps = commonDeps ++ Seq(
   "net.ceedubs"          %% "ficus"             % "1.0.1",
   "org.scodec"           %% "scodec-bits"       % "1.0.10",
   "io.fastjson"           % "boon"              % "0.33",
+  "com.googlecode.javaewah" % "JavaEWAH"        % "1.1.6",
   "com.github.alexandrnikitin" %% "bloom-filter" % "0.7.0",
   "com.github.rholder.fauxflake" % "fauxflake-core" % "1.1.0",
   "org.scalactic"        %% "scalactic"         % "2.2.6",

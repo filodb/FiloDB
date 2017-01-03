@@ -16,12 +16,14 @@ import filodb.core.Types.ColumnId
  *
  * TODO: create readers for the chunks as they come in, instead of when rowIterator is called
  */
-class ChunkSetReader(val info: ChunkSetInfo, skips: Array[Int], classes: Array[Class[_]]) {
+class ChunkSetReader(val info: ChunkSetInfo, skips: EWAHCompressedBitmap, classes: Array[Class[_]]) {
   import ChunkSetReader._
 
   private final val bufs = new Array[ByteBuffer](classes.size)
   private final val len = info.numRows
   private final val bitset = new BitSet
+
+  skips.setSizeInBits(len, false)
 
   def addChunk(colNo: Int, bytes: ByteBuffer): Unit = {
     bufs(colNo) = bytes
@@ -51,26 +53,10 @@ class ChunkSetReader(val info: ChunkSetInfo, skips: Array[Int], classes: Array[C
       }
     } else {
       new Iterator[RowReader] {
-        private var i = 0
-        private var skipIndex = 0
-
-        final def hasNext: Boolean = {
-          var skipped = false
-          // Keep advancing until we hit a row we are not skipping
-          do {
-            // advance one row
-            if (i >= len) { return false }
-
-            // skip?  If so, go to next skip index
-            skipped = skipIndex < skips.size && i == skips(skipIndex)
-            if (skipped) { skipIndex += 1; i += 1 }
-          } while (skipped)
-          true
-        }
-
+        private final val rowNumIterator = skips.clearIntIterator()
+        final def hasNext: Boolean = rowNumIterator.hasNext
         final def next: RowReader = {
-          reader.setRowNo(i)
-          i += 1
+          reader.setRowNo(rowNumIterator.next)
           reader
         }
       }
@@ -86,10 +72,9 @@ object ChunkSetReader {
   val DefaultReaderFactory: RowReaderFactory =
     (bytes, clazzes, len) => new FastFiloRowReader(bytes, clazzes, len)
 
-  val EndChunkSetReader = new ChunkSetReader(ChunkSetInfo.dummyInfo(0),
-                                             Array.empty, Array.empty)
-
-  def apply(chunkSet: ChunkSet, schema: Seq[Column], skips: Array[Int] = emptySkips): ChunkSetReader = {
+  def apply(chunkSet: ChunkSet,
+            schema: Seq[Column],
+            skips: EWAHCompressedBitmap = emptySkips): ChunkSetReader = {
     val clazzes = schema.map(_.columnType.clazz).toArray
     val nameToPos = schema.zipWithIndex.map { case (c, i) => (c.name -> i) }.toMap
     val reader = new ChunkSetReader(chunkSet.info, skips, clazzes)
