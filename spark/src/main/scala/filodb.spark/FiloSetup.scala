@@ -7,11 +7,10 @@ import com.typesafe.config.{Config, ConfigFactory}
 import com.typesafe.scalalogging.slf4j.StrictLogging
 import net.ceedubs.ficus.Ficus._
 import org.apache.spark.SparkContext
-
 import scala.concurrent.Await
 import scala.concurrent.duration._
-import scala.language.{implicitConversions, postfixOps}
 import scala.concurrent.ExecutionContext.Implicits.global
+import scala.language.{implicitConversions, postfixOps}
 
 import filodb.cassandra.columnstore.CassandraColumnStore
 import filodb.cassandra.metastore.CassandraMetaStore
