@@ -2,13 +2,10 @@ package filodb.stress
 
 import org.apache.spark.{SparkConf, SparkContext}
 import org.apache.spark.sql.{DataFrame, Row, SQLContext, SaveMode}
-
 import scala.util.Random
-import scala.concurrent.duration._
-import scala.concurrent.{Await, Future}
+
 import filodb.core.{DatasetRef, Perftools}
 import filodb.spark._
-import org.apache.spark.filodb.{FiloDriver, FiloExecutor}
 
 /**
  * Similar to BatchIngestion, it reads in the NYC Taxi dataset.  However, it is designed to test both

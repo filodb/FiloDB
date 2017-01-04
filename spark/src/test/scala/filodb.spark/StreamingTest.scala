@@ -6,18 +6,18 @@ import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.{SQLContext, SaveMode}
 import org.apache.spark.streaming.{Milliseconds, StreamingContext}
 import org.scalatest.time.{Millis, Seconds, Span}
-
 import scala.collection.mutable
 import scala.concurrent.duration._
+import scala.util.Try
+import scalax.file.Path
+
 import filodb.core._
 import filodb.core.metadata.{Column, Dataset}
 import filodb.core.store.SegmentSpec
-import org.apache.spark.filodb.{FiloDriver, FiloExecutor}
+
 import org.scalatest.{BeforeAndAfter, BeforeAndAfterAll, FunSpec, Matchers}
 import org.scalatest.concurrent.ScalaFutures
 
-import scala.util.Try
-import scalax.file.Path
 
 case class NameRecord(first: Option[String], last: Option[String],
                       age: Option[Long], league: Option[String])
@@ -36,7 +36,6 @@ with Matchers with ScalaFutures {
                             .set("spark.filodb.cassandra.admin-keyspace", "unittest")
                             .set("spark.filodb.memtable.min-free-mb", "10")
                             .set("spark.ui.enabled", "false")
-                            .set("write-ahead-log.memtable-wal-dir","/tmp/filodb/wal")
 
   val ssc = new StreamingContext(conf, Milliseconds(700))
   val sql = new SQLContext(ssc.sparkContext)
@@ -69,7 +68,7 @@ with Matchers with ScalaFutures {
 
   after {
     FiloExecutor.stateCache.clear()
-    val walDir = conf.get("write-ahead-log.memtable-wal-dir")
+    val walDir = FiloExecutor.config.getString("write-ahead-log.memtable-wal-dir")
     val path = Path.fromString (walDir)
     Try(path.deleteRecursively(continueOnFailure = false))
   }

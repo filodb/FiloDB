@@ -2,12 +2,11 @@ package filodb.stress
 
 import org.apache.spark.{SparkConf, SparkContext}
 import org.apache.spark.sql.{DataFrame, SQLContext, SaveMode}
-
 import scala.util.Random
 import scala.concurrent.duration.Duration
 import scala.concurrent.{Await, Future}
+
 import filodb.spark._
-import org.apache.spark.filodb.FiloDriver
 
 /**
  * An in-memory concurrency and query stress tester

@@ -1,4 +1,4 @@
-package org.apache.spark.filodb
+package filodb.spark
 
 import akka.actor.{ActorSystem, AddressFromURIString}
 import akka.pattern.ask
@@ -6,7 +6,7 @@ import akka.util.Timeout
 import com.typesafe.config.{Config, ConfigFactory}
 import com.typesafe.scalalogging.slf4j.StrictLogging
 import net.ceedubs.ficus.Ficus._
-import org.apache.spark.{SparkContext, SparkEnv}
+import org.apache.spark.SparkContext
 
 import scala.concurrent.Await
 import scala.concurrent.duration._
@@ -20,6 +20,7 @@ import filodb.coordinator.IngestionCommands.DCAReady
 import filodb.coordinator.NodeCoordinatorActor.ReloadDCA
 import filodb.coordinator.{CoordinatorSetup, NodeClusterActor}
 import filodb.core.store.{ColumnStore, ColumnStoreScanner, InMemoryMetaStore, InMemoryColumnStore, MetaStore}
+import org.apache.spark.sql.hive.filodb.MetaStoreSync
 
 /**
  * A StoreFactory creates instances of ColumnStore and MetaStore one time.  The columnStore and metaStore
@@ -57,7 +58,7 @@ trait FiloSetup extends CoordinatorSetup {
     // When you have DSE set up on mutlinodes(each node is assigned it's own ip address) in one physical machine,
     // it's hard to identify Memtable WAL files created for each node. So to address this issue require to pass
     // Hostname to the akka configuration
-    val host = SparkEnv.get.rpcEnv.address.host
+    val host = MetaStoreSync.sparkHost
     ActorSystem("filo-spark", configAkka(role, host, port))
   }
 
@@ -118,6 +119,7 @@ object FiloDriver extends FiloSetup with StrictLogging {
 
       val finalConfig = ConfigFactory.parseString(s"""spark-driver-addr = "$selfAddr"""")
                                      .withFallback(filoConfig)
+      metaStore.initialize()
       FiloExecutor.initAllExecutors(finalConfig, context)
 
       // Because the clusterActor can only be instantiated on an executor/FiloDB node, this works by

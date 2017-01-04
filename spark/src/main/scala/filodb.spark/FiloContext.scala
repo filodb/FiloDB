@@ -8,7 +8,6 @@ import scala.language.postfixOps
 import filodb.core._
 import filodb.core.metadata.{Column, DataColumn, Dataset, RichProjection}
 import filodb.coordinator.IngestionCommands
-import org.apache.spark.filodb.{FiloDriver, FiloExecutor}
 
 /**
  * Class implementing insert and save Scala APIs.

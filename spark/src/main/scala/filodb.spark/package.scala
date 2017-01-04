@@ -14,7 +14,6 @@ import scala.concurrent.{Await, Future}
 import scala.language.implicitConversions
 import scala.language.postfixOps
 
-import org.apache.spark.filodb.{FiloDriver, FiloExecutor}
 import org.apache.spark.sql.hive.filodb.MetaStoreSync
 
 import filodb.coordinator.client.ClientException
