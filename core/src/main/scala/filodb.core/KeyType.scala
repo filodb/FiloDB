@@ -36,8 +36,7 @@ trait KeyType {
 
   /**
    * Extracts the type T from a RowReader.
-   * @params columnNumbers an array of column numbers to extract from.  Sorry, must be
-   *                       an array for speed.
+   * @param columnNumbers an array of column numbers to extract from.  Sorry, must be an array for speed.
    * @throws a NullKeyValue exception if nulls are found.  Nulls cannot be injected into
    *         keys.
    */

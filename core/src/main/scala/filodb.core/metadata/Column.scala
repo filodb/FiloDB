@@ -105,7 +105,7 @@ object Column extends StrictLogging {
 
   /**
    * Converts a list of columns to the appropriate KeyType.
-   * @returns a KeyType
+   * @return a KeyType
    */
   def columnsToKeyType(columns: Seq[Column]): KeyType = columns match {
     case Nil      => throw new IllegalArgumentException("Empty columns supplied")

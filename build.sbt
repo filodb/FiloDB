@@ -8,6 +8,8 @@ val mySettings = Seq(organization := "org.velvia",
                      resolvers ++= extraRepos,
                      ivyScala := ivyScala.value map { _.copy(overrideScalaVersion = true) }) ++ universalSettings
 
+publishTo      := Some(Resolver.file("Unused repo", file("target/unusedrepo")))
+
 lazy val core = (project in file("core"))
                   .settings(mySettings:_*)
                   .settings(name := "filodb-core")
@@ -53,6 +55,7 @@ lazy val jmh = (project in file("jmh"))
                  .settings(mySettings:_*)
                  .settings(name := "filodb-jmh")
                  .settings(libraryDependencies ++= jmhDeps)
+                 .settings(publish := {})
                  .enablePlugins(JmhPlugin)
                  .dependsOn(core % "compile->compile; compile->test", spark)
 
@@ -203,7 +206,7 @@ lazy val itSettings = Defaults.itSettings ++ Seq(
   fork in IntegrationTest := true
 )
 
-lazy val universalSettings = coreSettings ++ styleSettings ++ testSettings
+lazy val universalSettings = coreSettings ++ styleSettings ++ testSettings ++ publishSettings
 
 // Create a default Scala style task to run with tests
 lazy val testScalastyle = taskKey[Unit]("testScalastyle")
@@ -281,7 +284,17 @@ lazy val assemblySettings = Seq(
   assemblyShadeRules in assembly := Seq(
     ShadeRule.rename("com.datastax.driver.**" -> "filodb.datastax.driver.@1").inAll,
     ShadeRule.rename("com.google.common.**" -> "filodb.com.google.common.@1").inAll,
+    ShadeRule.rename("org.apache.http.**" -> "filodb.org.apache.http.@1").inAll,
     ShadeRule.rename("com.google.guava.**" -> "filodb.com.google.guava.@1").inAll
   ),
   test in assembly := {} //noisy for end-user since the jar is not available and user needs to build the project locally
+)
+
+lazy val publishSettings = Seq(
+  organizationName := "FiloDB",
+  publishMavenStyle := true,
+  publishArtifact in Test := false,
+  publishArtifact in IntegrationTest := false,
+  licenses += ("Apache-2.0", url("http://choosealicense.com/licenses/apache/")),
+  pomIncludeRepository := { x => false }
 )

@@ -26,7 +26,7 @@ import filodb.spark._
  *
  * Also, if you run this locally, run it using local-cluster to test clustering effects.
  *
- * TODO: randomize number of lines to ingest.  Maybe $numOfLines - util.Random.nextInt(10000)....
+ * TODO: randomize number of lines to ingest.  Maybe numOfLines - util.Random.nextInt(10000)....
  */
 object IngestionStress extends App {
   val taxiCsvFile = args(0)
