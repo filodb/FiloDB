@@ -61,6 +61,7 @@ lazy val jmh = (project in file("jmh"))
 
 lazy val stress = (project in file("stress"))
                     .settings(mySettings:_*)
+                    .settings(name := "filodb-stress")
                     .settings(libraryDependencies ++= stressDeps)
                     .settings(assemblySettings:_*)
                     .dependsOn(spark)
