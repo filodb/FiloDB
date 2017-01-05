@@ -99,8 +99,9 @@ To compile the .mermaid source files to .png's, install the [Mermaid CLI](http:/
 
 Your input is appreciated!
 
+NOTE: Please beware that significant storage-layer changes are taking place.  For a stable version, please use the `v0.4` release/tag. At the next release, the storage layer should be stable for production use. 
+
 * Spark 2.0 and Scala 2.11 - coming soon
-* A new storage format is being worked on, it can be previewed in the `new-storage-format` branch
 * Kafka input API / connector (without needing Spark)
 * In-memory caching for significant query speedup
 * True columnar querying and execution, using late materialization and vectorization techniques.  GPU/SIMD.
