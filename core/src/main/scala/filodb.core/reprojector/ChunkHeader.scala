@@ -15,7 +15,7 @@ class ChunkHeader(cols : Seq[Column] = Seq() ) {
   }
 
   def columnDefinitions : Array[Byte] = {
-    val colDefinitions =cols.foldLeft("")(_  + _.toString + "\001").dropRight(1)
+    val colDefinitions =cols.foldLeft("")(_  + _.toString + "\u0001").dropRight(1)
     val length = colDefinitions.length.toShort
     val bytes = colDefinitions.getBytes(StandardCharsets.UTF_8)
     littleEndian(ChunkHeader.shortToBytes(length)) ++ littleEndian(bytes)

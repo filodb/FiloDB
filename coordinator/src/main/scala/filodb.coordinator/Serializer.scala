@@ -56,7 +56,7 @@ object Serializer extends StrictLogging {
     val rows = new collection.mutable.ArrayBuffer[BinaryRecord]()
     if (numRows > 0) {
       val schema = schemaMap.get(schemaHash)
-      Option(schema).getOrElse(logger.error(s"Schema with hash $schemaHash not found!"))
+      if (Option(schema).isEmpty) { logger.error(s"Schema with hash $schemaHash not found!") }
       for { i <- 0 until numRows } {
         rows += BinaryRecord(schema, scanner.readMediumByteArray)
       }

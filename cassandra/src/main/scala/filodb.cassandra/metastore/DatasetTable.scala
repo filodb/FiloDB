@@ -45,13 +45,13 @@ sealed class DatasetTable(val config: Config, val sessionProvider: FiloSessionPr
                row.getBool("projectionreverse"),
                splitCString(Try(row.getString("projectioncolumns")).getOrElse("")))
 
-  // We use \001 to split and demarcate column name strings, because
+  // We use \u0001 to split and demarcate column name strings, because
   // 1) this char is not allowed,
   // 2) spaces, : () are used in function definitions
   // 3) Cassandra CQLSH will highlight weird unicode chars in diff color so it's easy to see :)
-  private def stringsToStr(strings: Seq[String]): String = strings.mkString("\001")
+  private def stringsToStr(strings: Seq[String]): String = strings.mkString("\u0001")
   private def splitCString(string: String): Seq[String] =
-    if (string.isEmpty) Nil else string.split('\001').toSeq
+    if (string.isEmpty) Nil else string.split('\u0001').toSeq
 
   def initialize(): Future[Response] = execCql(createCql)
 

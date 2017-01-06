@@ -15,7 +15,7 @@ class ComputedColumnSpec extends FunSpec with Matchers {
     it("should return WrongNumberArguments when # args not 2") {
       val resp = RichProjection.make(dataset.copy(partitionColumns = Seq(":getOrElse 1")), schema)
       resp.isBad should be (true)
-      resp.recover {
+      resp.recover[Any] {
         case ComputedColumnErrs(Seq(WrongNumberArguments(given, expected))) =>
           given should equal (1)
           expected should equal (2)
@@ -25,7 +25,7 @@ class ComputedColumnSpec extends FunSpec with Matchers {
     it("should return BadArgument if source column not found") {
       val resp = RichProjection.make(dataset.copy(partitionColumns = Seq(":getOrElse xx 1")), schema)
       resp.isBad should be (true)
-      resp.recover {
+      resp.recover[Any] {
         case ComputedColumnErrs(Seq(BadArgument(reason))) =>
           reason should include ("Could not find source column")
       }
@@ -34,7 +34,7 @@ class ComputedColumnSpec extends FunSpec with Matchers {
     it("should return BadArgument if cannot parse non-string default value") {
       val resp = RichProjection.make(dataset.copy(partitionColumns = Seq(":getOrElse age notInt")), schema)
       resp.isBad should be (true)
-      resp.recover {
+      resp.recover[Any] {
         case ComputedColumnErrs(Seq(BadArgument(reason))) =>
           reason should include ("Could not parse")
       }
@@ -59,7 +59,7 @@ class ComputedColumnSpec extends FunSpec with Matchers {
     it("should return BadArgument if rounding value different type than source column") {
       val resp = RichProjection.make(dataset.copy(partitionColumns = Seq(":round age 1.23")), schema)
       resp.isBad should be (true)
-      resp.recover {
+      resp.recover[Any] {
         case ComputedColumnErrs(Seq(BadArgument(reason))) =>
           reason should include ("Could not parse")
       }
@@ -68,7 +68,7 @@ class ComputedColumnSpec extends FunSpec with Matchers {
     it("should return BadArgument if attempt to use :round with unsupported type") {
       val resp = RichProjection.make(dataset.copy(partitionColumns = Seq(":round first 10")), schema)
       resp.isBad should be (true)
-      resp.recover {
+      resp.recover[Any] {
         case ComputedColumnErrs(Seq(BadArgument(reason))) =>
           reason should include ("not in allowed")
       }
@@ -96,7 +96,7 @@ class ComputedColumnSpec extends FunSpec with Matchers {
       val resp = RichProjection.make(dataset.copy(
                                        partitionColumns = Seq(":timeslice age 2zz")), schema)
       resp.isBad should be (true)
-      resp.recover {
+      resp.recover[Any] {
         case ComputedColumnErrs(Seq(BadArgument(reason))) =>
           reason should include ("Could not parse time unit")
       }
