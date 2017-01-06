@@ -9,8 +9,8 @@ case class IngestionStateData(nodeactor: String,
                               version: Int,
                               columns: String,
                               state: String,
-                              exceptions: String){
-
+                              exceptions: String) {
   override def toString: String =
-    s"[$nodeactor\001$database\001$dataset\001$version\001${columns}\001${state}\001${exceptions}]"
+    s"[${nodeactor}\u0001${database}\u0001${dataset}\u0001${version}" +
+    s"\u0001${columns}\u0001${state}\u0001${exceptions}]"
 }

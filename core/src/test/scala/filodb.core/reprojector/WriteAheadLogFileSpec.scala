@@ -49,7 +49,7 @@ class WriteAheadLogFileSpec extends FunSpec with Matchers with BeforeAndAfter{
 
   it("write header to the file") {
     val wal = new WriteAheadLog(config, new DatasetRef("test"),"localhost", GdeltTestData.createColumns(2))
-    val expectedHeader = "FiloWAL\000\001\000\002\000\065\000]nmuloCgnirtS,0,1nmuloc,1[\001]nmuloCgnirtS,0,2nmuloc,2["
+    val expectedHeader = "FiloWAL\u0000\u0001\u0000\u0002\u0000\u0035\u0000]nmuloCgnirtS,0,1nmuloc,1[\u0001]nmuloCgnirtS,0,2nmuloc,2["
       .getBytes(StandardCharsets.UTF_8)
     wal.readHeader should equal(expectedHeader)
     wal.close()

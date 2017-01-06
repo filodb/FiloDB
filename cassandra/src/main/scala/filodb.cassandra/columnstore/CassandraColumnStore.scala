@@ -120,7 +120,7 @@ extends ColumnStore with CassandraColumnStoreScanner with StrictLogging {
                           version: Int,
                           segment: ChunkSetSegment,
                           ctx: TraceContext): Future[Response] = {
-    asyncSubtrace(ctx, "write-chunks", "ingestion") {
+    asyncSubtrace("write-chunks", "ingestion", Some(ctx)) {
       val binPartition = segment.binaryPartition
       val segmentId = segment.segmentId
       val chunkTable = getOrCreateChunkTable(dataset)
@@ -134,7 +134,7 @@ extends ColumnStore with CassandraColumnStoreScanner with StrictLogging {
                            version: Int,
                            segment: ChunkSetSegment,
                            ctx: TraceContext): Future[Response] = {
-    asyncSubtrace(ctx, "write-index", "ingestion") {
+    asyncSubtrace("write-index", "ingestion", Some(ctx)) {
       val indexTable = getOrCreateIndexTable(projection.datasetRef)
       val indices = segment.chunkSets.map { case ChunkSet(info, skips, _, _, _) =>
         (info.id, ChunkSetInfo.toBytes(projection, info, skips))
@@ -147,7 +147,7 @@ extends ColumnStore with CassandraColumnStoreScanner with StrictLogging {
                            version: Int,
                            segment: ChunkSetSegment,
                            ctx: TraceContext): Future[Response] = {
-    asyncSubtrace(ctx, "write-filter", "ingestion") {
+    asyncSubtrace("write-filter", "ingestion", Some(ctx)) {
       val filterTable = getOrCreateFilterTable(projection.datasetRef)
       val filters = segment.chunkSets.map { case ChunkSet(info, _, filter, _, _) => (info.id, filter) }
       filterTable.writeFilters(segment.binaryPartition, version, segment.segmentId, filters, stats)
@@ -333,7 +333,7 @@ trait CassandraColumnStoreScanner extends ColumnStoreScanner with StrictLogging 
       indexIt.sortedGroupBy(index => (index.binPartition, index.segmentId))
              .filter { case ((binPart, _), _) => filterFunc(projection.partitionType.fromBytes(binPart)) }
              .map { case ((binPart, binSeg), records) =>
-               val skips = records.map { r => ChunkSetInfo.fromBytes(projection, r.data.array) }.toSeq
+               val skips = records.map { r => ChunkSetInfo.fromBytes(projection, r.data.array) }.toBuffer
                toSegIndex(projection, binPart, binSeg, skips)
              }
     }

@@ -44,7 +44,7 @@ class ColumnSpec extends FunSpec with Matchers {
 
       checkIsIllegal("ille gal")
       checkIsIllegal("(illegal)")
-      checkIsIllegal("ille\001gal")
+      checkIsIllegal("ille\u0001gal")
     }
 
     it("should check that cannot add columns at lower versions") {
