@@ -55,7 +55,7 @@ class WriteAheadLogReader(config: Config,
     columnCount = getLittleEndianBytesAsInt(2)
     val columnDefinitionsSize = getLittleEndianBytesAsInt(2)
     val actualColDefs = getBytes(columnDefinitionsSize)
-    val expBytes = cols.foldLeft("")(_  + _.toString + "\001")
+    val expBytes = cols.foldLeft("")(_  + _.toString + "\u0001")
       .dropRight(1)
       .getBytes(StandardCharsets.UTF_8)
     columnCount == actualColDefs.count(_ == 0x01) + 1 &&

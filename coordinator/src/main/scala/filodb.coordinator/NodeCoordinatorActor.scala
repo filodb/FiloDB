@@ -143,7 +143,7 @@ class NodeCoordinatorActor(metaStore: MetaStore,
       val ref = context.actorOf(props, s"ds-coord-${datasetObj.name}-$version")
       self ! AddDatasetCoord(originator, dataset, version, ref, reloadFlag)
       if (!reloadFlag) {
-        val colDefinitions =richProj.dataColumns.map(_.toString).mkString("\002")
+        val colDefinitions = richProj.dataColumns.map(_.toString).mkString("\u0002")
         metaStore.insertIngestionState(actorPath, dataset, colDefinitions, "Started", version)
         notify(IngestionReady)
       }
@@ -155,7 +155,7 @@ class NodeCoordinatorActor(metaStore: MetaStore,
       // Create the RichProjection, and ferret out any errors
       logger.debug(s"Creating projection from dataset $datasetObj, columns $columnSeq")
       val proj = RichProjection.make(datasetObj, columnSeq)
-      proj.recover {
+      proj.recover[Any] {
         case err: RichProjection.BadSchema => notify(BadSchema(err.toString))
       }
       for { richProj <- proj } createDatasetCoordActor(datasetObj, richProj)
@@ -189,10 +189,10 @@ class NodeCoordinatorActor(metaStore: MetaStore,
     metaStore.getAllIngestionEntries(actorPath).map { entries =>
       if (entries.length > 0) {
         entries.foreach { ingestion =>
-          val data = ingestion.toString().split("\001")
+          val data = ingestion.toString().split("\u0001")
           val databaseOpt = if (data(1).isEmpty || data(1).equals("None")) None else Some(data(1))
           val ref = DatasetRef(data(2), databaseOpt)
-          val columns = data(4).split("\002").map(col => DataColumn.fromString(col, data(2)))
+          val columns = data(4).split("\u0002").map(col => DataColumn.fromString(col, data(2)))
           val projection = RichProjection(Await.result(metaStore.getDataset(ref), 10.second), columns)
           val colNames = projection.dataColumns.map(_.name)
           setupIngestion(originator, ref, colNames, data(3).toInt, true)

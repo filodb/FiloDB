@@ -128,7 +128,7 @@ class InMemoryMetaStore(implicit val ec: ExecutionContext) extends MetaStore wit
                            state: String, exceptions: String, version: Int ): Future[Response] = {
     val ingStCols = ingestionstates.get(actorAddress).toString
     ingestionstates.remove(actorAddress)
-    insertIngestionState(actorAddress, dataset, ingStCols.split("\001")(4), state, version, exceptions)
+    insertIngestionState(actorAddress, dataset, ingStCols.split("\u0001")(4), state, version, exceptions)
   }
 
   def shutdown(): Unit = {}
