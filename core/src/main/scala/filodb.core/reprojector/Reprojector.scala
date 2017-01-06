@@ -9,13 +9,13 @@ import scala.concurrent.duration.FiniteDuration
 import scala.concurrent.{ExecutionContext, Future}
 
 import filodb.core._
-import filodb.core.store.{ColumnStore, RowWriterSegment, Segment, SegmentInfo}
+import filodb.core.store.{ColumnStore, ChunkSetSegment, Segment, SegmentInfo}
 import filodb.core.metadata.{Dataset, Column, RichProjection}
 
 /**
  * The Reprojector flushes rows out of the MemTable and writes out Segments to the ColumnStore.
  * All of the work should be done asynchronously.
- * The reprojector should be stateless.  It takes MemTables and creates Futures for reprojection tasks.
+ * It takes MemTables and creates Futures for reprojection tasks.
  */
 trait Reprojector {
   import RowReader._
@@ -37,7 +37,9 @@ trait Reprojector {
    * A simple function that reads rows out of a memTable and converts them to segments.
    * Used by reproject(), separated out for ease of testing.
    */
-  def toSegments(memTable: MemTable, segments: Seq[(Any, Any)]): Seq[Segment]
+  def toSegments(memTable: MemTable, segments: Seq[(Any, Any)], version: Int): Seq[ChunkSetSegment]
+
+  def clear(): Unit = {}
 
   protected def printSegInfos(infos: Seq[(Any, Any)]): String = {
     val ellipsis = if (infos.length > 3) Seq("...") else Nil
@@ -55,34 +57,41 @@ trait Reprojector {
  *   reprojector {
  *     retries = 3
  *     retry-base-timeunit = 5 s
- *     segment-batch-size = 64
  *   }
  * }}}
  */
-class DefaultReprojector(config: Config, columnStore: ColumnStore)
+class DefaultReprojector(config: Config,
+                         columnStore: ColumnStore,
+                         stateCache: SegmentStateCache)
                         (implicit ec: ExecutionContext) extends Reprojector with StrictLogging {
   import Types._
   import RowReader._
+  import Perftools._
 
   val retries = config.getInt("reprojector.retries")
   val retryBaseTime = config.as[FiniteDuration]("reprojector.retry-base-timeunit")
-  val segmentBatchSize = config.getInt("reprojector.segment-batch-size")
+  val detectSkips = !config.getBoolean("reprojector.bulk-write-mode")
 
-  def toSegments(memTable: MemTable, segments: Seq[(Any, Any)]): Seq[Segment] = {
+  def toSegments(memTable: MemTable, segments: Seq[(Any, Any)], version: Int): Seq[ChunkSetSegment] = {
     val dataset = memTable.projection.dataset
     segments.map { case (partition, segmentKey) =>
       Tracer.withNewContext("serialize-segment", true) {
         // For each segment grouping of rows... set up a Segment
         val segInfo = SegmentInfo(partition, segmentKey).basedOn(memTable.projection)
-        val segment = new RowWriterSegment(memTable.projection, memTable.projection.columns)(segInfo)
-        val segmentRowsIt = memTable.readRows(segInfo)
+        val state = subtrace("get-segment-state", "ingestion") {
+          stateCache.getSegmentState(memTable.projection,
+                                     memTable.projection.columns,
+                                     version)(segInfo)
+        }
+        val segment = new ChunkSetSegment(memTable.projection, segInfo)
+        val segmentRowsIt = memTable.safeReadRows(segInfo)
         logger.debug(s"Created new segment ${segment.segInfo} for encoding...")
 
         // Group rows into chunk sized bytes and add to segment
-        // NOTE: because RowReaders could be mutable, we need to keep this a pure Iterator.  Turns out
-        // this is also more efficient than Iterator.grouped
-        while (segmentRowsIt.nonEmpty) {
-          segment.addRichRowsAsChunk(segmentRowsIt.take(dataset.options.chunkSize))
+        subtrace("add-chunk-set", "ingestion") {
+          while (segmentRowsIt.nonEmpty) {
+            segment.addChunkSet(state, segmentRowsIt.take(dataset.options.chunkSize), detectSkips)
+          }
         }
         segment
       }
@@ -96,22 +105,27 @@ class DefaultReprojector(config: Config, columnStore: ColumnStore)
     val projection = memTable.projection
     val datasetName = projection.datasetName
 
-    // First, group the segments into batches for throttling
-    val batches = memTable.getSegments.grouped(segmentBatchSize).toSeq
+    val segments = memTable.getSegments.toSeq
+    val segInfos = printSegInfos(segments)
+    logger.info(s"Reprojecting dataset ($datasetName, $version): $segInfos")
 
-    // Now, flush each batch sequentially.  Nice thing is this returns after at most one batch.
-    foldLeftSequentially(batches)(Seq.empty[SegmentInfo[_, _]]) { case (acc, segmentBatch) =>
-      val segInfos = printSegInfos(segmentBatch)
-      logger.info(s"Reprojecting dataset ($datasetName, $version): $segInfos")
-      val futures = toSegments(memTable, segmentBatch).map { segment =>
+    // Serialize one segment at a time.  This takes longer than the actual column flush, which is async,
+    // so basically this future thread will intersperse writes in between serializations.
+    // At same time, do everything in a separate thread so caller won't be blocked
+    Future {
+      segments.map { partitionSegment =>
+        val segment = toSegments(memTable, Seq(partitionSegment), version).head
         retryWithBackOff(retries, retryBaseTime) {
           columnStore.appendSegment(projection, segment, version)
         }.map { resp => segment.segInfo.asInstanceOf[SegmentInfo[_, _]] }
       }
+    }.flatMap { futures =>
       Future.sequence(futures).map { successSegs =>
         logger.info(s"  >> Succeeded ($datasetName, $version): $segInfos")
-        acc ++ successSegs
+        successSegs
       }
     }
   }
+
+  override def clear(): Unit = { stateCache.clear() }
 }

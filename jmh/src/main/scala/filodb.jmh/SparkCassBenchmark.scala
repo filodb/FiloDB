@@ -2,22 +2,22 @@ package filodb.jmh
 
 import ch.qos.logback.classic.{Level, Logger}
 import java.util.concurrent.TimeUnit
+import org.apache.spark.sql.catalyst.InternalRow
+import org.apache.spark.sql.functions.sum
+import org.apache.spark.sql.types._
+import org.apache.spark.sql.{DataFrame, Row, SQLContext}
+import org.apache.spark.{SparkConf, SparkContext, SparkException}
 import org.openjdk.jmh.annotations._
-import scalaxy.loops._
-import scala.language.postfixOps
+import org.velvia.filo.{RowReader, TupleRowReader}
 import scala.concurrent.Await
 import scala.concurrent.duration._
+import scala.language.postfixOps
+import scalaxy.loops._
 
 import filodb.core._
 import filodb.core.metadata.{Column, Dataset, RichProjection}
-import filodb.core.store.{InMemoryColumnStore, RowReaderSegment, RowWriterSegment}
-import filodb.spark.{SparkRowReader, FiloDriver, TypeConverters}
-import org.apache.spark.sql.{DataFrame, Row, SQLContext}
-import org.apache.spark.sql.catalyst.InternalRow
-import org.apache.spark.sql.types._
-import org.apache.spark.sql.functions.sum
-import org.apache.spark.{SparkContext, SparkException, SparkConf}
-import org.velvia.filo.{RowReader, TupleRowReader}
+import filodb.core.store.{InMemoryColumnStore, RowReaderSegment}
+import filodb.spark.{SparkRowReader, TypeConverters, FiloDriver}
 
 // Spark CassandraColumnStore benchmark
 // NOTE: before running this test, MUST do sbt jmh/run on CreateCassTestData to populate

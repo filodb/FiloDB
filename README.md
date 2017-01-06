@@ -51,6 +51,7 @@ See [architecture](doc/architecture.md) and [datasets and reading](doc/datasets_
   - [Running the CLI](#running-the-cli)
   - [CLI Example](#cli-example)
 - [Current Status](#current-status)
+  - [Upcoming version 0.7 changes:](#upcoming-version-07-changes)
   - [Version 0.4 change list:](#version-04-change-list)
 - [Deploying](#deploying)
 - [Monitoring and Metrics](#monitoring-and-metrics)
@@ -98,8 +99,9 @@ To compile the .mermaid source files to .png's, install the [Mermaid CLI](http:/
 
 Your input is appreciated!
 
+NOTE: Please beware that significant storage-layer changes are taking place.  For a stable version, please use the `v0.4` release/tag. At the next release, the storage layer should be stable for production use. 
+
 * Spark 2.0 and Scala 2.11 - coming soon
-* A new storage format is being worked on, it can be previewed in the `new-storage-format` branch
 * Kafka input API / connector (without needing Spark)
 * In-memory caching for significant query speedup
 * True columnar querying and execution, using late materialization and vectorization techniques.  GPU/SIMD.
@@ -167,9 +169,9 @@ Three types of key define the data model of a FiloDB table.
 
 1. **partition key** - decides how data is going to be distributed across the cluster. All data within one partition key is guaranteed to fit on one node. May consist of multiple columns.
 2. **segment key** - groups row values into efficient chunks.  Segments within a partition are sorted by segment key and range scans can be done over segment keys.   
-1. **row key**       - acts as a primary key within each partition and decides how data will be sorted within each segment.  May consist of multiple columns.
+1. **row key**     - acts as a primary key within each partition and decides how data will be sorted within each segment.  May consist of multiple columns.
 
-The PRIMARY KEY for FiloDB consists of (partition key, segment_key, row key).  When choosing the above values you must make sure the combination of the three are unique.  No component of a primary key may be null - see the `:getOrElse` function for a way of dealing with null inputs.
+The PRIMARY KEY for FiloDB consists of (partition key, segment_key, row key).  When choosing the above values you must make sure the combination of the three are unique.  If any component of a primary key contains a null value, then a default value will be substituted.
 
 Specifying the partitioning column is optional.  If a partitioning column is not specified, FiloDB will create a default one with a fixed value, which means everything will be thrown into one node, and is only suitable for small amounts of data.  If you don't specify a partitioning column, then you have to make sure combination of segment key and row key values are all unique.
 
@@ -179,14 +181,15 @@ For additional information refer to Data Modeling and Performance Considerations
 
 ### Computed Columns
 
-You may specify a function, or computed column, for use with any key column.  This is especially useful for working around the non-null requirement for keys, or for computing a good segment key.
+You may specify a function, or computed column, for use with any key column, except for row keys.  This is especially useful for computing a good segment key, or hashing values to generate a good partition key.
 
 | Name      | Description     | Example     |
 | :-------- | :-------------- | :---------- |
 | string    | returns a constant string value | `:string /0` |
-| getOrElse | returns default value if column value is null.  NOTE: do not use the default value null for strings. | `:getOrElse columnA ---` |
+| getOrElse | returns default value if column value is null.  This is not needed most of the time as FiloDB will use a default value in case of null, though `:getOrElse` may help with key uniqueness.   NOTE: do not use the default value null for strings. | `:getOrElse columnA ---` |
 | round     | rounds down a numeric column.  Useful for bucketing by time or bucketing numeric IDs.  | `:round timestamp 10000` |
 | stringPrefix | takes the first N chars of a string; good for partitioning | `:stringPrefix token 4` |
+| hash      | hashes keys of any type to an int between 0 and N | `:hash customerID 400` | 
 | timeslice | bucketizes a Long (millisecond) or Timestamp column using duration strings - 500ms, 5s, 10m, 3h, etc. | `:timeslice arrivalTime 30s` |
 | monthOfYear | return 1 to 12 (IntColumn) for the month number of a Long (millisecond) or Timestamp column | `:monthOfYear pickup_datetime` |
 
@@ -264,10 +267,7 @@ Another possible layout is something like this:
 
 ### Distributed Partitioning
 
-Currently, FiloDB is a library in Spark and requires the user to distribute data such that no two nodes have rows with the same partition key.
-
-* The easiest strategy to accomplish this is to have data partitioned via a queue such as Kafka.  That way, when the data comes into Spark Streaming, it is already partitioned correctly.
-* Another way of accomplishing this is to use a DataFrame's `sort` method before using the DataFrame write API.
+FiloDB will automatically form a cluster (via Akka Cluster), divide the range of partition keys amongst the nodes using a consistent-hashing algorithm, and re-route incoming records to the right ingestion node.  Thus, users no longer need to sort their incoming data in Spark.
 
 ## Using FiloDB Data Source with Spark
 
@@ -288,9 +288,9 @@ The options to use with the data-source api are:
 |------------------|------------------------------------------------------------------|------------|----------|
 | dataset          | name of the dataset                                              | read/write | No       |
 | database         | name of the database to use for the dataset.  For Cassandra, defaults to `filodb.cassandra.keyspace` config.  | read/write | Yes |
-| row_keys         | comma-separated list of column name(s) or computed column functions to use for the row primary key within each partition.  Cannot be null.  Use `:getOrElse` function if null values might be encountered.  | write      | No if mode is OverWrite or creating dataset for first time  |
-| segment_key      | name of the column (could be computed) to use to group rows into segments in a partition.  Cannot be null.  Use `:getOrElse` function if null values might be encountered.  | write      | yes - defaults to `:string /0` |
-| partition_keys   | comma-separated list of column name(s) or computed column functions to use for the partition key.  Cannot be null.  Use `:getOrElse` function if null values might be encountered.  If not specified, defaults to `:string /0` (a single partition).  | write      | Yes      |
+| row_keys         | comma-separated list of column name(s) to use for the row primary key within each partition.  Computed columns are not allowed.  | write      | No if mode is OverWrite or creating dataset for first time  |
+| segment_key      | name of the column (could be computed) to use to group rows into segments in a partition.   | write      | yes - defaults to `:string /0` |
+| partition_keys   | comma-separated list of column name(s) or computed column functions to use for the partition key.  If not specified, defaults to `:string /0` (a single partition).  | write      | Yes      |
 | splits_per_node  | number of read threads per node, defaults to 4 | read | Yes |
 | reset_schema     | If true, allows dataset schema (eg partition keys) to be redefined for an existing dataset when SaveMode.Overwrite is used.  Defaults to false.  | write | Yes |
 | chunk_size       | Max number of rows to put into one chunk.  Note that this only has an effect if the dataset is created for the first time.| write | Yes |
@@ -317,6 +317,8 @@ Some options must be configured before starting the Spark Shell or Spark applica
 3. It might be easier to pass in an entire configuration file to FiloDB.  Pass the java option `-Dfilodb.config.file=/path/to/my-filodb.conf`, for example using `--java-driver-options`.
 
 Note that if Cassandra is kept as the default column store, the keyspace can be changed on each transaction by specifying the `database` option in the data source API, or the database parameter in the Scala API.
+
+For a list of all configuration params as well as a template for a config file, see the `filodb_defaults.conf` file included in the source and packaged with the jar as defaults.
 
 For metrics system configuration, see the metrics section below.
 
@@ -359,7 +361,7 @@ scala> csvDF.write.format("filodb.spark").
              option("dataset", "gdelt").
              option("row_keys", "GLOBALEVENTID").
              option("segment_key", ":round GLOBALEVENTID 10000").
-             option("partition_keys", ":getOrElse MonthYear -1").
+             option("partition_keys", "MonthYear").
              mode(SaveMode.Overwrite).save()
 ```
 
@@ -370,7 +372,7 @@ scala> csvDF.write.format("filodb.spark").
              option("dataset", "gdelt_by_country_year").
              option("row_keys", "GLOBALEVENTID").
              option("segment_key", ":string 0").
-             option("partition_keys", ":getOrElse Actor2CountryCode NONE,:getOrElse Year -1").
+             option("partition_keys", "Actor2CountryCode,Year").
              mode(SaveMode.Overwrite).save()
 ```
 
@@ -386,6 +388,8 @@ sourceDataFrame.write.format("filodb.spark").
 
 Note that for efficient columnar encoding, wide rows with fewer partition keys are better for performance.
 
+By default, data is written to replace existing records with the same primary key.  To turn this primary key replacement off for faster ingestion, set `filodb.reprojector.bulk-write-mode` to `true`.
+ 
 Reading the dataset,
 ```
 val df = sqlContext.read.format("filodb.spark").option("dataset", "gdelt").load()
@@ -404,7 +408,7 @@ import filodb.spark._
 sqlContext.saveAsFilo(df, "gdelt",
                       rowKeys = Seq("GLOBALEVENTID"),
                       segmentKey = ":round GLOBALEVENTID 10000",
-                      partitionKeys = Seq(":getOrElse MonthYear -1"))
+                      partitionKeys = Seq("MonthYear"))
 ```
 
 The above creates the gdelt table based on the keys above, and also inserts data from the dataframe df.
@@ -587,8 +591,10 @@ Query/export some columns:
 
 Version 0.4 is the stable, latest released version.  It has been tested on a cluster for a different variety of schemas, has a stable data model and ingestion, and features a huge number of improvements over the previous version.
 
-### Upcoming version 0.5 changes:
+### Upcoming version 0.7 changes:
 
+* NEW storage layout with incremental indices, provides much better ingestion for large partitions and skewed data 
+* Automatic routing of ingestion records across the network - no need to `sort` your DataFrame in Spark
 * creating a function for checking java and another to check sbt (@jenaiz)
 
 ### Version 0.4 change list:
@@ -597,7 +603,9 @@ Version 0.4 is the stable, latest released version.  It has been tested on a clu
 * New metrics and monitoring framework based on Kamon.io, with built in stats logging and statsd output, and tracing of write path
 * Replaced Phantom with direct usage of Java C* driver.  Bonus: use prepared statements, should result in better performance all around especially on ingest; plus supports C* 3.0+
 * WHERE clauses specifying multiple partition keys now get pushed down.  Should result in much better read performance in those cases.
+* New :hash function makes it easier to hash partition key components into smaller cardinality (but specify the full key in WHERE clauses)
 * New config `filodb.cassandra.keyspace-replication-options` allows any CQL replication option to be set when FiloDB keyspaces are created with CLI --command init
+* A few new configs for Cassandra CQL / chunk / sstable compression; can help improve remote read performance
 * CLI log directory can be easily changed with FILO_LOG_DIR env var
 * CLI analyze command can now analyze segments from multiple partitions up to a configurable maximum # of segments
 * Allow comma-separated list of hosts for `filodb.cassandra.hosts`
@@ -605,8 +613,6 @@ Version 0.4 is the stable, latest released version.  It has been tested on a clu
 * Fix actor path uniqueness issue on ingestion
 
 ## Deploying
-
-The current version assumes Spark 1.6.x and Cassandra 2.1.x or 2.2.x, though it seems to work on Spark 1.5.x as well.
 
 - sbt spark/assembly
 - sbt cli/assembly
@@ -634,6 +640,8 @@ Kamon has many configurable options.  To get more detailed traces on the write /
 
     --driver-java-options '-XX:+UseG1GC -XX:MaxGCPauseMillis=500 -Dkamon.trace.level-of-detail=simple-trace -Dkamon.trace.random-sampler.chance=3'
 
+To change the metrics flush interval, you can set `kamon.metric.tick-interval` and `kamon.statsd.flush-interval`.  The statsd flush-interval must be equal to or greater than the tick-interval.
+
 Methods of configuring Kamon (except for the metrics logger):
 
 - The best way to configure Kamon is to pass this Java property: `-Dkamon.config-provider=filodb.coordinator.KamonConfigProvider`.  This lets you configure Kamon through the same mechanisms as the rest of FiloDB: `-Dfilo.config.file` for example, and the configuration is automatically passed to each executor/worker.  Otherwise:
@@ -655,12 +663,8 @@ To run benchmarks, from within SBT:
 
 You can get the huge variety of JMH options by running `jmh:run -help`.
 
+There are also stress tests in the stress module.  See the [Stress README](stress/README.md).
+
 ## You can help!
 
-- Send your use cases for OLAP on Cassandra and Spark
-    + Especially IoT and Geospatial
-- Email if you want to contribute
-
-Your feedback will help decide the next batch of features, such as:
-    - which data types to add support for
-    - what architecture is best supported
+Contributions are welcome!

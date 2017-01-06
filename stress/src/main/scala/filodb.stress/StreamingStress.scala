@@ -2,9 +2,9 @@ package filodb.stress
 
 import com.opencsv.CSVReader
 import org.apache.spark.rdd.RDD
-import org.apache.spark.sql.{DataFrame, SaveMode, SQLContext}
+import org.apache.spark.sql.{DataFrame, SQLContext, SaveMode}
 import org.apache.spark.streaming.{Milliseconds, StreamingContext}
-import org.apache.spark.{SparkContext, SparkConf}
+import org.apache.spark.{SparkConf, SparkContext}
 import org.joda.time.DateTime
 import scala.concurrent.duration._
 import scala.concurrent.{Await, Future}

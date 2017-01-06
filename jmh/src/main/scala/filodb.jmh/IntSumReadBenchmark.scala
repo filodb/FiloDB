@@ -10,7 +10,7 @@ import scala.language.postfixOps
 
 import filodb.core._
 import filodb.core.metadata.{Column, DataColumn, Dataset, RichProjection}
-import filodb.core.store.{RowReaderSegment, RowWriterSegment, SegmentInfo}
+import filodb.core.store.{RowReaderSegment, SegmentState, ChunkSetSegment, SegmentInfo}
 import org.velvia.filo.{FiloVector, FastFiloRowReader, RowReader, TupleRowReader}
 
 import java.util.concurrent.TimeUnit
@@ -23,7 +23,7 @@ object IntSumReadBenchmark {
   val ref = DatasetRef("dataset")
   val projection = RichProjection(dataset, schema)
 
-  val rowStream = Iterator.from(0).map { row => (Some(util.Random.nextInt), Some(row)) }
+  val rowStream = Stream.from(0).map { row => (Some(scala.util.Random.nextInt), Some(row)) }
 
   org.slf4j.LoggerFactory.getLogger("filodb").asInstanceOf[Logger].setLevel(Level.ERROR)
 }
@@ -38,9 +38,10 @@ class IntSumReadBenchmark {
   import IntSumReadBenchmark._
   val NumRows = 10000
 
-  val writerSeg = new RowWriterSegment(projection, schema)(
-                                       SegmentInfo("/0", 0).basedOn(projection))
-  writerSeg.addRowsAsChunk(rowStream.map(TupleRowReader).take(NumRows))
+  val segInfo = SegmentInfo("/0", 0).basedOn(projection)
+  val state = new TestSegmentState(projection, schema)
+  val writerSeg = new ChunkSetSegment(projection, segInfo)
+  writerSeg.addChunkSet(state, rowStream.map(TupleRowReader).take(NumRows))
   val readSeg = RowReaderSegment(writerSeg, schema)
 
   /**

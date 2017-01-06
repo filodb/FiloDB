@@ -43,13 +43,19 @@ trait MemTable extends StrictLogging {
    */
   def ingestRows(rows: Seq[RowReader]): Unit
 
+  def reloadMemTable(): Unit
+
   /**
    * Reads rows out from one segment.
+   * readRows is an unsafe read - it uses a fast FiloRowReader with mutable state so cannot be used in Seqs
+   * but only Iterators.  safeReadRows is safe for use in Seqs but slower.
    */
-  def readRows(partition: projection.PK, segment: projection.SK): Iterator[(projection.RK, RowReader)]
+  def readRows(partition: projection.PK, segment: projection.SK): Iterator[RowReader]
 
-  def readRows(segInfo: SegmentInfo[projection.PK, projection.SK]): Iterator[(projection.RK, RowReader)] =
+  def readRows(segInfo: SegmentInfo[projection.PK, projection.SK]): Iterator[RowReader] =
     readRows(segInfo.partition, segInfo.segment)
+
+  def safeReadRows(segInfo: SegmentInfo[projection.PK, projection.SK]): Iterator[RowReader]
 
   /**
    * Reads all segments contained in the MemTable.  No particular order is guaranteed.
@@ -57,6 +63,8 @@ trait MemTable extends StrictLogging {
   def getSegments(): Iterator[(projection.PK, projection.SK)]
 
   def numRows: Int
+
+  def deleteWalFiles(): Unit
 
   /**
    * Yes, this clears everything!  It's meant for testing only.

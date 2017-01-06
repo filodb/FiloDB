@@ -1,20 +1,23 @@
 package filodb.spark
 
 import com.typesafe.config.ConfigFactory
-import org.apache.spark.{SparkContext, SparkException, SparkConf}
+import org.apache.spark.{SparkConf, SparkContext, SparkException}
 import org.apache.spark.rdd.RDD
-import org.apache.spark.sql.{SaveMode, SQLContext}
+import org.apache.spark.sql.{SQLContext, SaveMode}
 import org.apache.spark.streaming.{Milliseconds, StreamingContext}
 import org.scalatest.time.{Millis, Seconds, Span}
 import scala.collection.mutable
 import scala.concurrent.duration._
+import scala.util.Try
+import scalax.file.Path
 
 import filodb.core._
 import filodb.core.metadata.{Column, Dataset}
 import filodb.core.store.SegmentSpec
 
-import org.scalatest.{FunSpec, BeforeAndAfter, BeforeAndAfterAll, Matchers}
+import org.scalatest.{BeforeAndAfter, BeforeAndAfterAll, FunSpec, Matchers}
 import org.scalatest.concurrent.ScalaFutures
+
 
 case class NameRecord(first: Option[String], last: Option[String],
                       age: Option[Long], league: Option[String])
@@ -33,6 +36,7 @@ with Matchers with ScalaFutures {
                             .set("spark.filodb.cassandra.admin-keyspace", "unittest")
                             .set("spark.filodb.memtable.min-free-mb", "10")
                             .set("spark.ui.enabled", "false")
+
   val ssc = new StreamingContext(conf, Milliseconds(700))
   val sql = new SQLContext(ssc.sparkContext)
 
@@ -43,24 +47,30 @@ with Matchers with ScalaFutures {
   val metaStore = FiloDriver.metaStore
   val columnStore = FiloDriver.columnStore
 
-  override def beforeAll() {
+  override def beforeAll(): Unit = {
     metaStore.initialize().futureValue
     columnStore.initializeProjection(largeDataset.projections.head).futureValue
   }
 
-  override def afterAll() {
+  override def afterAll(): Unit = {
     super.afterAll()
     ssc.stop(true, true)
   }
 
   before {
     metaStore.clearAllData().futureValue
-    columnStore.clearSegmentCache()
     try {
       columnStore.clearProjectionData(largeDataset.projections.head).futureValue
     } catch {
       case e: Exception =>
     }
+  }
+
+  after {
+    FiloExecutor.stateCache.clear()
+    val walDir = FiloExecutor.config.getString("write-ahead-log.memtable-wal-dir")
+    val path = Path.fromString (walDir)
+    Try(path.deleteRecursively(continueOnFailure = false))
   }
 
   implicit val ec = FiloDriver.ec
@@ -88,7 +98,7 @@ with Matchers with ScalaFutures {
 
     // Flush after end of stream.  This is only needed for this test to get definitive results; in a real
     // streaming app this would not be needed, ever....
-    FiloDriver.client.flushByName(largeDataset.name)
+    FiloDriver.client.flushByName(largeDataset.name, Some("unittest"))
 
     import org.apache.spark.sql.functions._
 

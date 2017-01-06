@@ -25,12 +25,22 @@ class TypesSpec extends FunSpec with Matchers {
   }
 
   describe("KeyTypes") {
+    it("should serialize and deserialize SingleKeyTypes correctly") {
+      IntKeyType.fromBytes(IntKeyType.toBytes(-500)) should equal (-500)
+      LongKeyType.fromBytes(LongKeyType.toBytes(123456789L)) should equal (123456789L)
+      StringKeyType.fromBytes(StringKeyType.toBytes("baz")) should equal ("baz")
+    }
+
     it("should serialize and unserialize CompositeKeyTypes correctly") {
-      val types = Seq(IntKeyType, StringKeyType)
+      val types = Seq(StringKeyType, IntKeyType, BooleanKeyType)
       val compositeType = CompositeKeyType(types)
 
-      val orig1 = Seq(1001, "AdamAndEve")
+      val orig1 = Seq("AdamAndEve", 1001, true)
       compositeType.fromBytes(compositeType.toBytes(orig1)) should equal (orig1)
+
+      val orig2 = Seq("", 2002, false)
+      compositeType.fromBytes(compositeType.toBytes(orig2)) should equal (orig2)
+
     }
 
     it("should compare CompositeKeyTypes using ordering trait") {
@@ -43,19 +53,15 @@ class TypesSpec extends FunSpec with Matchers {
       assert(orig1 < orig2)
     }
 
-    it("should check for null keys with getKeyFunc") {
+    it("getKeyFunc should resolve null values to default values") {
       val intKeyFunc = IntKeyType.getKeyFunc(Array(1))
       val row1 = TupleRowReader((Some("ape"), None))
-      intercept[NullKeyValue] {
-        intKeyFunc(row1)
-      }
+      intKeyFunc(row1) should equal (0)
 
       val types = Seq(StringKeyType, IntKeyType)
       val compositeType = CompositeKeyType(types)
       val compositeKeyFunc = compositeType.getKeyFunc(Array(0, 1))
-      intercept[NullKeyValue] {
-        compositeKeyFunc(row1)
-      }
+      compositeKeyFunc(row1) should equal (Seq("ape", 0))
     }
 
     it("CompositeKeyType should use getKeyFunc from individual KeyTypes") {
@@ -70,6 +76,10 @@ class TypesSpec extends FunSpec with Matchers {
       compositeKeyFunc(row1) should equal (Seq("ape", -2))
     }
 
-    it("should binary compare Int and Long key types correctly") (pending)
+    it("should binary compare Int and Long key types correctly") {
+      IntKeyType.toBytes(-1) should be < IntKeyType.toBytes(1)
+      IntKeyType.toBytes(Int.MaxValue) should be > IntKeyType.toBytes(0)
+      LongKeyType.toBytes(10L) should be > LongKeyType.toBytes(-20L)
+    }
   }
 }

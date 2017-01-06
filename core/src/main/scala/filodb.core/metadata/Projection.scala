@@ -5,6 +5,7 @@ import org.scalactic._
 import org.velvia.filo.RowReader
 
 import filodb.core.{CompositeKeyType, KeyType, KeyRange, BinaryKeyRange}
+import filodb.core.binaryrecord.RecordSchema
 import filodb.core.Types._
 import filodb.core._
 
@@ -38,6 +39,9 @@ case class Projection(id: Int,
    */
   def withDatabase(database: String): Projection =
     this.copy(dataset = this.dataset.copy(database = Some(database)))
+
+  def withName(name: String): Projection =
+    this.copy(dataset = this.dataset.copy(dataset = name))
 }
 
 /**
@@ -63,6 +67,11 @@ case class RichProjection(projection: Projection,
 
   def datasetName: String = projection.dataset.toString
   def datasetRef: DatasetRef = projection.dataset
+
+  val rowKeyBinSchema = RecordSchema(rowKeyColumns)
+  val binSchema = RecordSchema(dataColumns)
+
+  def dataColumns: Seq[Column] = columns.collect { case d: DataColumn => d }
 
   /**
    * Returns a new RichProjection with the specified database and everything else kept the same
@@ -114,31 +123,6 @@ case class RichProjection(projection: Projection,
         segmentColString,
         extraColStrings.mkString(":")).mkString("\001")
   }
-
-  /**
-   * Creates a new RichProjection intended only for ChunkMergingStrategy.mergeSegments...
-   * it reads only the source columns needed to recreate the row key, so the row key functions need
-   * to be recomputed.
-   */
-  def toRowKeyOnlyProjection: RichProjection = {
-    // First, reduce set of columns to row key columns (including any computed source columns)
-    val newColumns: Seq[Column] = rowKeyColumns.flatMap {
-      case c: ComputedColumn => c.sourceColumns.map { srcCol => columns.find(_.name == srcCol).get }
-      case d: Column => Seq(d)
-    }
-    // Recompute any computed columns based on new column indices
-    val rkColumnsIndices = rowKeyColumns.map {
-      case c: ComputedColumn => (ComputedColumn.analyze(c.expr, datasetName, newColumns).get, -1)
-      case d: Column         => (d, newColumns.indexWhere(_.name == d.name))
-    }
-    val newRkColumns = rkColumnsIndices.map(_._1)
-    val newRkIndices = rkColumnsIndices.map(_._2)
-    val newRkType = Column.columnsToKeyType(newRkColumns)
-    this.copy(columns = newColumns,
-              rowKeyColumns = newRkColumns,
-              rowKeyColIndices = newRkIndices,
-              rowKeyType = newRkType)
-  }
 }
 
 object RichProjection extends StrictLogging {
@@ -149,6 +133,7 @@ object RichProjection extends StrictLogging {
   case class NoColumnsSpecified(keyType: String) extends BadSchema
   case class NoSuchProjectionId(id: Int) extends BadSchema
   case class UnsupportedSegmentColumnType(name: String, colType: Column.ColumnType) extends BadSchema
+  case class RowKeyComputedColumns(names: Seq[String]) extends BadSchema
   case class ComputedColumnErrs(errs: Seq[InvalidComputedColumnSpec]) extends BadSchema
 
   case class BadSchemaError(badSchema: BadSchema) extends Exception(badSchema.toString)
@@ -194,7 +179,10 @@ object RichProjection extends StrictLogging {
       if (notFound.nonEmpty) return Bad(MissingColumnNames(notFound, typ))
       val columns = colIndices.map(richColumns)
       val keyType = Column.columnsToKeyType(columns)
-      if (typ == "segment" && !keyType.isSegmentType) {
+      val computedColumns = columns.collect { case c: ComputedColumn => c.name }
+      if (typ == "row" && computedColumns.nonEmpty) {
+        Bad(RowKeyComputedColumns(computedColumns))
+      } else if (typ == "segment" && !keyType.isSegmentType) {
         Bad(UnsupportedSegmentColumnType(columnNames.head, columns.head.columnType))
       } else {
         Good((colIndices, columns, keyType))

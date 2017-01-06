@@ -10,13 +10,11 @@ import org.openjdk.jmh.annotations.{Mode, State, Scope}
 import org.velvia.filo.ArrayStringRowReader
 
 import filodb.core.GdeltTestData
-import filodb.core.reprojector.{DefaultReprojector, FiloMemTable}
+import filodb.core.reprojector.{DefaultReprojector, FiloMemTable, SegmentStateCache}
 import filodb.core.store.{InMemoryColumnStore, Segment}
 
 /**
- * Microbenchmark of simple integer summing of Filo chunks in FiloDB segments,
- * mostly to see what the theoretical peak output of scanning speeds can be.
- * Does not involve Spark (at least this one doesn't).
+ * Microbenchmark of reprojection (ingestion) pipeline.
  */
 @State(Scope.Thread)
 class ReprojectionBenchmark {
@@ -34,11 +32,12 @@ class ReprojectionBenchmark {
   val newSetting = "memtable.max-rows-per-table = 200000"
   val config = ConfigFactory.parseString(newSetting).withFallback(
                  ConfigFactory.load("application_test.conf")).getConfig("filodb")
-  val mTable = new FiloMemTable(projection2, config)
+  val mTable = new FiloMemTable(projection2, config, "localhost", 0)
 
   import scala.concurrent.ExecutionContext.Implicits.global
   val colStore = new InMemoryColumnStore(scala.concurrent.ExecutionContext.Implicits.global)
-  val reprojector = new DefaultReprojector(config, colStore)
+  val stateCache = new SegmentStateCache(config, colStore)
+  val reprojector = new DefaultReprojector(config, colStore, stateCache)
 
   // Populate memtable
   mTable.ingestRows(lines)
@@ -52,6 +51,8 @@ class ReprojectionBenchmark {
   @BenchmarkMode(Array(Mode.Throughput))
   @OutputTimeUnit(TimeUnit.SECONDS)
   def toSegments(): Seq[Segment] = {
-    reprojector.toSegments(mTable, segments).toList
+    // This is run multiple times, we are not writing to column store, so have to ensure state is reset
+    stateCache.clear()
+    reprojector.toSegments(mTable, segments, 0).toList
   }
 }

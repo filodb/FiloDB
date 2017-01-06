@@ -57,6 +57,11 @@ trait ClientBase {
    */
   def askAllCoordinators[B](msg: Any, askTimeout: FiniteDuration = 30 seconds)(f: PartialFunction[Any, B]):
     Seq[B]
+
+  /**
+   * Sends a message to ALL coordinators without waiting for a response
+   */
+  def sendAllIngestors(msg: Any): Unit
 }
 
 /**
@@ -69,6 +74,8 @@ class LocalClient(val nodeCoordinator: ActorRef) extends IngestionOps with Datas
 
   def askAllCoordinators[B](msg: Any, askTimeout: FiniteDuration = 30 seconds)(f: PartialFunction[Any, B]):
     Seq[B] = Seq(askCoordinator(msg, askTimeout)(f))
+
+  def sendAllIngestors(msg: Any): Unit = { nodeCoordinator ! msg }
 }
 
 /**

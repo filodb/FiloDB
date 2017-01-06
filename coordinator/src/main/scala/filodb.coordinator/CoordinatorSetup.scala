@@ -1,13 +1,14 @@
 package filodb.coordinator
 
-import akka.actor.ActorSystem
+import akka.actor.{ActorSystem, ActorRef, PoisonPill}
 import akka.cluster.Cluster
+import akka.contrib.pattern.{ClusterSingletonManager, ClusterSingletonProxy}
 import com.typesafe.config.{Config, ConfigFactory}
 import scala.concurrent.ExecutionContext
 
 import filodb.core.FutureUtils
 import filodb.core.reprojector._
-import filodb.core.store.{ColumnStore, MetaStore}
+import filodb.core.store.{ColumnStore, ColumnStoreScanner, MetaStore}
 
 object GlobalConfig {
   // Loads the overall configuration in a specific order:
@@ -67,9 +68,10 @@ trait CoordinatorSetup {
   lazy val readEc = ec
 
   // These should be implemented as lazy val's, though tests might want to reset them
-  val columnStore: ColumnStore
-  val metaStore: MetaStore
-  lazy val reprojector = new DefaultReprojector(config, columnStore)
+  def columnStore: ColumnStore with ColumnStoreScanner
+  def metaStore: MetaStore
+  lazy val stateCache = new SegmentStateCache(config, columnStore)
+  lazy val reprojector = new DefaultReprojector(config, columnStore, stateCache)
 
   // TODO: consider having a root actor supervising everything
   lazy val coordinatorActor =
@@ -77,6 +79,25 @@ trait CoordinatorSetup {
                    "coordinator")
 
   lazy val cluster = Cluster(system)
+
+  // Creates a singleton NodeClusterActor via ClusterSingletonManager and returns a proxy ActorRef to it
+  // This should be called on every FiloDB Coordinator/ingestion node
+  def singletonClusterActor(role: String): ActorRef = {
+    val mgr = system.actorOf(ClusterSingletonManager.props(
+                singletonProps = NodeClusterActor.props(cluster, role),
+                singletonName = "nodecluster",
+                terminationMessage = PoisonPill,
+                role = Some(role)),
+                name = "singleton")
+    getClusterActor(role)
+  }
+
+  // This can be called by clients to get the handle to the cluster actor
+  def getClusterActor(role: String): ActorRef =
+    system.actorOf(ClusterSingletonProxy.props(
+      singletonPath = "/user/singleton/nodecluster",
+      role = Some(role)),
+      name = "nodeClusterProxy")
 
   def shutdown(): Unit = {
     system.shutdown()

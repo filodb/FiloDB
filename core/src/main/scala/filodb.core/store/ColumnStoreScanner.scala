@@ -14,7 +14,9 @@ case class SegmentIndex[P, S](binPartition: Types.BinaryPartition,
                               segmentId: Types.SegmentId,
                               partition: P,
                               segment: S,
-                              chunkMap: BinaryChunkRowMap)
+                              infosAndSkips: ChunkSetInfo.ChunkInfosAndSkips)
+
+case class ChunkedData(column: Types.ColumnId, chunks: Seq[(Types.SegmentId, Types.ChunkID, ByteBuffer)])
 
 /**
  * Encapsulates the reading and scanning logic of the ColumnStore.
@@ -28,9 +30,11 @@ trait ColumnStoreScanner extends StrictLogging {
   // Also, we do not make this implicit so that this trait can be mixed in elsewhere.
   def readEc: ExecutionContext
 
+  val stats = ColumnStoreStats()
+
   /**
    * Reads back all the chunks from multiple columns of a keyRange at once.  Note that no paging
-   * is performed - so don't ask for too large of a range.  Recommendation is to read the ChunkRowMaps
+   * is performed - so don't ask for too large of a range.  Recommendation is to read the indices
    * first and use the info there to determine how much to read.
    * @param dataset the DatasetRef of the dataset to read chunks from
    * @param columns the columns to read back chunks from
@@ -44,26 +48,96 @@ trait ColumnStoreScanner extends StrictLogging {
                  keyRange: BinaryKeyRange,
                  version: Int)(implicit ec: ExecutionContext): Future[Seq[ChunkedData]]
 
-  type ChunkMapInfo = (BinaryPartition, SegmentId, BinaryChunkRowMap)
+  /**
+   * Reads back a subset of chunkIds from a single segment, with columns returned in the same order
+   * as passed in.  No paging is performed.  May be used to read back only row keys or part of a large seg.
+   * @param dataset the DatasetRef of the dataset to read chunks from
+   * @param version the version to read back
+   * @param columns the columns to read back chunks from
+   * @param chunkRange the inclusive start and end ChunkID to read from
+   * @return a sequence of ChunkedData, each triple is (segmentId, chunkId, bytes) for each chunk
+   *          must be sorted in order of increasing segmentId
+   */
+  def readChunks(dataset: DatasetRef,
+                 version: Int,
+                 columns: Seq[ColumnId],
+                 partition: Types.BinaryPartition,
+                 segment: Types.SegmentId,
+                 chunkRange: (Types.ChunkID, Types.ChunkID))
+                (implicit ec: ExecutionContext): Future[Seq[ChunkedData]]
 
   /**
-   * Scans over ChunkRowMaps according to the method.
+   * Same as above, but only read back chunks corresponding to columns for row keys for a particular
+   * chunkID in a segment
+   */
+  def readRowKeyChunks(projection: RichProjection,
+                       version: Int,
+                       chunk: Types.ChunkID)
+                      (segInfo: SegmentInfo[projection.PK, projection.SK])
+                      (implicit ec: ExecutionContext): Future[Array[ByteBuffer]] = {
+    val binPartition = projection.partitionType.toBytes(segInfo.partition)
+    val binSegId = projection.segmentType.toBytes(segInfo.segment)
+    val rowKeyCols = projection.rowKeyColumns.map(_.name)
+    readChunks(projection.datasetRef, version, rowKeyCols,
+               binPartition, binSegId, (chunk, chunk)).map { seqChunkedData =>
+      try {
+        seqChunkedData.map { case ChunkedData(col, segIdChunks) => segIdChunks.head._3 }.toArray
+      } catch {
+        case e: NoSuchElementException =>
+          logger.error(s"Error: got back empty chunks for $segInfo, chunk $chunk, columns $rowKeyCols", e)
+          throw e
+      }
+    }
+  }
+
+  /**
+   * Reads back a subset of filters for ingestion row replacement / skip detection
+   * @param dataset the DatasetRef of the dataset to read filters from
+   * @param version the version to read back
+   * @param chunkRange the inclusive start and end ChunkID to read from
+   */
+  def readFilters(dataset: DatasetRef,
+                  version: Int,
+                  partition: Types.BinaryPartition,
+                  segment: Types.SegmentId,
+                  chunkRange: (Types.ChunkID, Types.ChunkID))
+                 (implicit ec: ExecutionContext): Future[Iterator[SegmentState.IDAndFilter]]
+
+  def readFilters(projection: RichProjection,
+                  version: Int,
+                  chunkRange: (Types.ChunkID, Types.ChunkID))
+                 (segInfo: SegmentInfo[projection.PK, projection.SK])
+                 (implicit ec: ExecutionContext): Future[Iterator[SegmentState.IDAndFilter]] = {
+    val binPartition = projection.partitionType.toBytes(segInfo.partition)
+    val binSegId = projection.segmentType.toBytes(segInfo.segment)
+    readFilters(projection.datasetRef, version, binPartition, binSegId, chunkRange)
+  }
+
+  /**
+   * Scans over indices according to the method.
    * @return an iterator over SegmentIndex.
    */
-  def scanChunkRowMaps(projection: RichProjection,
-                       version: Int,
-                       method: ScanMethod)
-                      (implicit ec: ExecutionContext):
+  def scanIndices(projection: RichProjection,
+                  version: Int,
+                  method: ScanMethod)
+                 (implicit ec: ExecutionContext):
     Future[Iterator[SegmentIndex[projection.PK, projection.SK]]]
 
-  def toSegIndex(projection: RichProjection, chunkMapInfo: ChunkMapInfo):
+  def toSegIndex(projection: RichProjection, binPart: BinaryPartition, segmentKey: SegmentId,
+                 infosAndSkips: ChunkSetInfo.ChunkInfosAndSkips):
         SegmentIndex[projection.PK, projection.SK] = {
-    SegmentIndex(chunkMapInfo._1,
-                 chunkMapInfo._2,
-                 projection.partitionType.fromBytes(chunkMapInfo._1),
-                 projection.segmentType.fromBytes(chunkMapInfo._2),
-                 chunkMapInfo._3)
+    SegmentIndex(binPart,
+                 segmentKey,
+                 projection.partitionType.fromBytes(binPart),
+                 projection.segmentType.fromBytes(segmentKey),
+                 infosAndSkips)
   }
+
+  def toSegIndexWithFilter(projection: RichProjection, binPart: BinaryPartition, segmentKey: SegmentId,
+                           infosSkipsFilters: ChunkSetInfo.IndexAndFilterSeq):
+        SegmentIndex[projection.PK, projection.SK] =
+    toSegIndex(projection, binPart, segmentKey,
+               infosSkipsFilters.map { case (info, skip, _) => (info, skip) })
 
   // NOTE: this is more or less a single-threaded implementation.  Reads of chunks for multiple columns
   // happen in parallel, but we still block to wait for all of them to come back.
@@ -74,46 +148,48 @@ trait ColumnStoreScanner extends StrictLogging {
     implicit val ec = readEc
     val segmentGroupSize = 3
 
-    for { segmentIndexIt <- scanChunkRowMaps(projection, version, method) }
+    for { segmentIndexIt <- scanIndices(projection, version, method) }
     yield
     (for { // Group by partition key first
           (part, partChunkMaps) <- segmentIndexIt
                                      .sortedGroupBy { case SegmentIndex(part, _, _, _, _) => part }
           // Subdivide chunk row maps in each partition so we don't read more than we can chew
           // TODO: make a custom grouping function based on # of rows accumulated
-          groupChunkMaps <- partChunkMaps.grouped(segmentGroupSize) }
+          groupIndices <- partChunkMaps.grouped(segmentGroupSize) }
     yield {
-      val chunkMaps = groupChunkMaps.toSeq
+      val indices = groupIndices.toSeq
+      stats.incrReadSegments(indices.length)
       val binKeyRange = BinaryKeyRange(part,
-                                       chunkMaps.head.segmentId,
-                                       chunkMaps.last.segmentId,
+                                       indices.head.segmentId,
+                                       indices.last.segmentId,
                                        endExclusive = false)
       val chunks = Await.result(readChunks(projection.datasetRef, columns.map(_.name).toSet,
                                            binKeyRange, version), 5.minutes)
-      buildSegments(projection, chunkMaps, chunks, columns).toIterator
+      buildSegments(projection, indices, chunks, columns).toIterator
     }).flatten
   }
 
   import scala.util.control.Breaks._
 
   private def buildSegments[P, S](projection: RichProjection,
-                                  rowMaps: Seq[SegmentIndex[P, S]],
+                                  indices: Seq[SegmentIndex[P, S]],
                                   chunks: Seq[ChunkedData],
                                   schema: Seq[Column]): Seq[Segment] = {
-    val segments = rowMaps.map { case SegmentIndex(_, _, partition, segStart, rowMap) =>
+    val segments = indices.map { case SegmentIndex(_, _, partition, segStart, infosAndSkips) =>
       val segInfo = SegmentInfo(partition, segStart)
-      new RowReaderSegment(projection, segInfo, rowMap, schema)
+      val chunkInfos = ChunkSetInfo.collectSkips(infosAndSkips)
+      new RowReaderSegment(projection, segInfo, chunkInfos, schema)
     }
     chunks.foreach { case ChunkedData(columnName, chunkTriples) =>
       var segIndex = 0
       breakable {
         chunkTriples.foreach { case (segmentId, chunkId, chunkBytes) =>
-          // Rely on the fact that chunks are sorted by segmentId, in the same order as the rowMaps
-          while (segmentId != rowMaps(segIndex).segmentId) {
+          // Rely on the fact that chunks are sorted by segmentId, in the same order as the indices
+          while (segmentId != indices(segIndex).segmentId) {
             segIndex += 1
             if (segIndex >= segments.length) {
-              logger.warn(s"Chunks with segmentId=$segmentId (part ${rowMaps.head.partition})" +
-                           " with no rowmap; corruption?")
+              logger.warn(s"Chunks with segmentId=$segmentId (part ${indices.head.partition})" +
+                           " with no index; corruption?")
               break
             }
           }

@@ -27,6 +27,9 @@ case class Dataset(name: String,
                    options: DatasetOptions = Dataset.DefaultOptions) {
   def withDatabase(database: String): Dataset =
     this.copy(projections = projections.map(_.withDatabase(database)))
+
+  def withName(newName: String): Dataset =
+    this.copy(name = newName, projections = this.projections.map(_.withName(newName)))
 }
 
 /**

@@ -1,13 +1,12 @@
 package filodb.spark
 
-import org.apache.spark.sql.{SQLContext, SaveMode, DataFrame, Row}
+import org.apache.spark.sql.{DataFrame, Row, SQLContext, SaveMode}
 import org.apache.spark.sql.types.StructType
+
 import scala.concurrent.duration._
 import scala.language.postfixOps
-
 import filodb.core._
-import filodb.core.metadata.{Column, DataColumn, Dataset}
-import filodb.coordinator.client.ClientException
+import filodb.core.metadata.{Column, DataColumn, Dataset, RichProjection}
 import filodb.coordinator.IngestionCommands
 
 /**
@@ -137,10 +136,12 @@ class FiloContext(val sqlContext: SQLContext) extends AnyVal {
                      database: Option[String] = None,
                      writeTimeout: FiniteDuration = DefaultWriteTimeout,
                      flushAfterInsert: Boolean = true): Unit = {
-    val filoConfig = FiloDriver.initAndGetConfig(sqlContext.sparkContext)
+    FiloDriver.init(sqlContext.sparkContext)
     val dfColumns = dfToFiloColumns(df)
     val columnNames = dfColumns.map(_.name)
-    val dataset = DatasetRef(datasetName, database)
+    val datasetObj = getDatasetObj(DatasetRef(datasetName, database))
+    // NOTE: This ensures the datasetRef contains a valid database, at least in Cassandra
+    val dataset = datasetObj.projections.head.dataset
     checkAndAddColumns(dfColumns, dataset, version)
 
     if (overwrite) {
@@ -151,28 +152,29 @@ class FiloContext(val sqlContext: SQLContext) extends AnyVal {
     sparkLogger.info(s"Inserting into ($dataset/$version) with $numPartitions partitions")
     sparkLogger.debug(s"   Dataframe schema = $dfColumns")
 
+    FiloDriver.client.setupIngestion(dataset, columnNames, version) match {
+      case Nil =>
+        sparkLogger.info(s"Ingestion set up on all coordinators for $dataset / $version")
+      case errs: Seq[ErrorResponse] =>
+        throw new RuntimeException(s"Errors setting up ingestion: $errs")
+    }
+
+    // Cannot serialize raw columns
+    val colStrings = dfColumns.map(_.toString)
+
     // For each partition, start the ingestion
     df.rdd.mapPartitionsWithIndex { case (index, rowIter) =>
       // Everything within this function runs on each partition/executor, so need a local datastore & system
-      FiloExecutor.init(filoConfig)
+      val _columns = colStrings.map(s => DataColumn.fromString(s, dataset.dataset))
+      val proj = RichProjection(datasetObj, _columns)
       sparkLogger.info(s"Starting ingestion of DataFrame for dataset $dataset, partition $index...")
-      ingestRddRows(FiloExecutor.coordinatorActor, dataset, columnNames, version, rowIter,
+      ingestRddRows(FiloExecutor.clusterActor, proj, version, rowIter,
                     writeTimeout, index)
       Iterator.empty
     }.count()
 
     // This is the only time that flush is explicitly called
-    if (flushAfterInsert) {
-      try {
-        val nodesFlushed = FiloDriver.client.flushCompletely(dataset, version)
-        sparkLogger.info(s"Flush completed on $nodesFlushed nodes for dataset $dataset")
-      } catch {
-        case ClientException(msg) =>
-          sparkLogger.warn(s"Could not flush due to client exception $msg on dataset $dataset...")
-        case e: Exception =>
-          sparkLogger.warn(s"Exception from flushing nodes for $dataset/$version", e)
-      }
-    }
+    if (flushAfterInsert) flushAndLog(dataset, version)
 
     syncToHive(sqlContext)
   }

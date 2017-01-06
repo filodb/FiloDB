@@ -82,12 +82,12 @@ class ComputedColumnSpec extends FunSpec with Matchers {
     }
 
     it("should round double value") {
-      val dblDataset = Dataset("a", ":round dbl 2.5", ":string /0")
+      val dblDataset = Dataset("a", "dbl", ":round dbl 2.5")
       val dblColumn = DataColumn(0, "dbl", "a", 0, Column.ColumnType.DoubleColumn)
       val proj = RichProjection(dblDataset, Seq(dblColumn))
-      proj.rowKeyFunc(TupleRowReader((Some(2.499), None))) should equal (0.0)
-      proj.rowKeyFunc(TupleRowReader((Some(4.999), None))) should equal (2.5)
-      proj.rowKeyFunc(TupleRowReader((Some(2.501), None))) should equal (2.5)
+      proj.segmentKeyFunc(TupleRowReader((Some(2.499), None))) should equal (0.0)
+      proj.segmentKeyFunc(TupleRowReader((Some(4.999), None))) should equal (2.5)
+      proj.segmentKeyFunc(TupleRowReader((Some(2.501), None))) should equal (2.5)
     }
   }
 
@@ -111,21 +111,21 @@ class ComputedColumnSpec extends FunSpec with Matchers {
     }
 
     it("should timeslice Timestamp values") {
-      val tsDataset = Dataset("a", ":timeslice ts 5m", ":string /0")
+      val tsDataset = Dataset("a", "ts", ":timeslice ts 5m")
       val tsColumn = DataColumn(0, "ts", "a", 0, Column.ColumnType.TimestampColumn)
       val proj = RichProjection(tsDataset, Seq(tsColumn))
 
-      proj.rowKeyFunc(TupleRowReader((Some(new Timestamp(300001L)), None))) should equal (300000L)
+      proj.segmentKeyFunc(TupleRowReader((Some(new Timestamp(300001L)), None))) should equal (300000L)
     }
   }
 
   describe(":monthOfYear") {
     it("should return month of year for timestamp column") {
-      val tsDataset = Dataset("a", ":monthOfYear ts", ":string /0")
+      val tsDataset = Dataset("a", "ts", ":monthOfYear ts")
       val tsColumn = DataColumn(0, "ts", "a", 0, Column.ColumnType.TimestampColumn)
       val proj = RichProjection(tsDataset, Seq(tsColumn))
 
-      proj.rowKeyFunc(TupleRowReader((Some(new Timestamp(300001L)), None))) should equal (1)
+      proj.segmentKeyFunc(TupleRowReader((Some(new Timestamp(300001L)), None))) should equal (1)
     }
   }
 
@@ -142,6 +142,30 @@ class ComputedColumnSpec extends FunSpec with Matchers {
       val partFunc = proj.partitionKeyFunc
 
       partFunc(TupleRowReader(names(3))) should equal ("")
+    }
+  }
+
+  describe(":hash") {
+    it("should hash different string values to int between 0 and N") {
+      val proj = RichProjection(dataset.copy(partitionColumns = Seq(":hash first 10")), schema)
+      val partFunc = proj.partitionKeyFunc
+
+      partFunc(TupleRowReader(names(1))) should equal (4)
+      partFunc(TupleRowReader(names(2))) should equal (1)
+    }
+
+    it("should hash long values to int between 0 and N") {
+      val proj = RichProjection(dataset.copy(partitionColumns = Seq(":hash age 8")), schema)
+      val partFunc = proj.partitionKeyFunc
+
+      partFunc(TupleRowReader(names(1))) should equal (4)
+    }
+
+    it("should hash unknown string to -1") {
+      val proj = RichProjection(dataset.copy(partitionColumns = Seq(":hash last 10")), schema)
+      val partFunc = proj.partitionKeyFunc
+
+      partFunc(TupleRowReader(names(3))) should equal (-1)
     }
   }
 }

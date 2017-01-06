@@ -13,15 +13,20 @@ trait ColumnStoreStats {
   def addChunkWriteStats(numChunks: Int, totalChunkBytes: Long): Unit
 
   /**
-   * Call this for each invocation of index read method
+   * Call this for each invocation of index write method
    */
   def addIndexWriteStats(totalIndexBytes: Long): Unit
+
+  def addFilterWriteStats(totalFilterBytes: Long): Unit
 
   def segmentAppend(): Unit
 
   def segmentEmpty(): Unit
 
   def segmentIndexMissingRead(): Unit
+
+  def incrReadSegments(numSegments: Int): Unit
+  def readSegments: Int
 }
 
 object ColumnStoreStats {
@@ -35,10 +40,14 @@ private[store] class KamonColumnStoreStats extends ColumnStoreStats {
 
   private val numIndexWriteCalls = Kamon.metrics.counter("index-write-calls-num")
   private val indexBytesHist     = Kamon.metrics.histogram("index-bytes-per-call")
+  private val filterBytesHist    = Kamon.metrics.histogram("filter-bytes-per-call")
 
   private val segmentAppends     = Kamon.metrics.counter("segment-appends")
   private val segmentEmpties     = Kamon.metrics.counter("segment-empties")
   private val segmentCacheMisses = Kamon.metrics.counter("segment-cache-misses")
+
+  private val readSegmentsCtr    = Kamon.metrics.counter("read-segments")
+  var readSegments: Int = 0
 
   def addChunkWriteStats(numChunks: Int, totalChunkBytes: Long): Unit = {
     numChunkWriteCalls.increment
@@ -46,12 +55,13 @@ private[store] class KamonColumnStoreStats extends ColumnStoreStats {
     chunkBytesHist.record(totalChunkBytes)
   }
 
-  /**
-   * Call this for each invocation of index read method
-   */
   def addIndexWriteStats(totalIndexBytes: Long): Unit = {
     numIndexWriteCalls.increment
     indexBytesHist.record(totalIndexBytes)
+  }
+
+  def addFilterWriteStats(totalFilterBytes: Long): Unit = {
+    filterBytesHist.record(totalFilterBytes)
   }
 
   def segmentAppend(): Unit = { segmentAppends.increment }
@@ -59,4 +69,9 @@ private[store] class KamonColumnStoreStats extends ColumnStoreStats {
   def segmentEmpty(): Unit = { segmentEmpties.increment }
 
   def segmentIndexMissingRead(): Unit = { segmentCacheMisses.increment }
+
+  def incrReadSegments(numSegments: Int): Unit = {
+    readSegmentsCtr.increment(numSegments)
+    readSegments += numSegments
+  }
 }

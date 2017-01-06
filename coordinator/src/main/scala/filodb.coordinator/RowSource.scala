@@ -1,19 +1,24 @@
 package filodb.coordinator
 
-import akka.actor.{Actor, ActorRef, Cancellable, PoisonPill}
+import akka.actor.{Actor, ActorRef, Cancellable}
 import akka.event.LoggingReceive
 import com.typesafe.scalalogging.slf4j.StrictLogging
+import kamon.Kamon
 import org.velvia.filo.RowReader
 import scala.collection.mutable.HashMap
 import scala.concurrent.duration._
+import scala.language.existentials
 
 import filodb.core._
+import filodb.core.binaryrecord.BinaryRecord
+import filodb.core.metadata.RichProjection
 
 object RowSource {
   case object Start
   case object GetMoreRows
   case object AllDone
   case object CheckCanIngest
+  case object AckTimeout
   case class SetupError(err: ErrorResponse)
   case class IngestionErr(msg: String, cause: Option[Throwable] = None)
 }
@@ -22,16 +27,24 @@ object RowSource {
  * RowSource is a trait to make it easy to write sources (Actors) for specific
  * input methods - eg from HTTP JSON, or CSV, or Kafka, etc.
  * It has logic to handle flow control/backpressure.
- * It talks to a NodeCoordinatorActor of a FiloDB node.  RowSource may be remote.
+ * It is responsible for reading rows from the source and sending it to different FiloDB nodes and
+ * their NodeCoordinator's, routing the data according to the latest PartitionMap.
  *
- * To start initialization and reading from source, send the Start message.
+ * To start reading from source, send the Start message.  Note that sending SetupIngestion to all the
+ * different NodeCoordinators must be done in a separate step, as it does not make sense for every single
+ * RowSource (and there might be multiple ones per JVM) to coordinate with every single NodeCoordinator
+ * (which would be n * n messages).
  *
  * Backpressure and at least once mechanism:  RowSource sends batches of rows to the NodeCoordinator,
  * but does not send more than maxUnackedBatches before getting an ack back.  As long as it receives
- * acks it will keep sending, but will stop once maxUnackedBatches is reached.  It then goes into a waiting
- * state, waiting for Acks to come back.  Once waitingPeriod has elapsed, if it is allowed to ingest again,
- * then it will replay unacked messages, hopefully get acks back, and once all messages are acked will go
- * back into regular ingestion mode.  This ensures that we do not skip any incoming messages.
+ * acks it will keep sending. If no acks are received in ackTimeout, it goes into a waiting state, checking
+ * if it can replay messages, replaying them, and waiting for acks for all of them to be received.
+ * At that point it will go back into regular reading mode.
+ * If the memtable is full, then we receive a Nack, and also go into waiting mode, but the coordinator will
+ * send us a ResumeIngest message so we know when to start sending again.
+ *
+ * ackTimeouts should be an exceptional event, not a regular occurrence.  Make sure to adjust for network
+ * response times.
  */
 trait RowSource extends Actor with StrictLogging {
   import RowSource._
@@ -40,89 +53,66 @@ trait RowSource extends Actor with StrictLogging {
   def maxUnackedBatches: Int
 
   def waitingPeriod: FiniteDuration = 5.seconds
+  def ackTimeout: FiniteDuration = 20.seconds
 
-  def coordinatorActor: ActorRef
+  def clusterActor: ActorRef
 
-  // Returns the SetupIngestion message needed for initialization
-  def getStartMessage(): IngestionCommands.SetupIngestion
-
-  def dataset: DatasetRef
+  def projection: RichProjection
   def version: Int
 
   // Returns newer batches of rows.
-  // The seqIDs should be increasing and unique per batch.
-  def batchIterator: Iterator[(Long, Seq[RowReader])]
+  def batchIterator: Iterator[Seq[RowReader]]
 
   // Anything additional to do when we hit end of data and it's all acked, before killing oneself
   def allDoneAndGood(): Unit = {}
 
   private var whoStartedMe: Option[ActorRef] = None
-  private val outstanding = new HashMap[Long, Seq[RowReader]]
+  private val outstanding = new HashMap[Long, (ActorRef, Seq[RowReader])]
+  private val outstandingNodes = new HashMap[ActorRef, Set[Long]].withDefaultValue(Set.empty)
+  private var mapper: PartitionMapper = PartitionMapper.empty
+  private var nextSeqId = 0L
+  private val partKeyFunc = projection.partitionKeyFunc
+  private val dataset = projection.datasetRef
+
+  // *** Metrics ***
+  private val kamonTags = Map("dataset" -> dataset.dataset, "version" -> version.toString)
+  private val rowsIngested = Kamon.metrics.counter("source-rows-ingested", kamonTags)
+  private val rowsReplayed = Kamon.metrics.counter("source-rows-replayed", kamonTags)
+  private val unneededAcks = Kamon.metrics.counter("source-unneeded-acks", kamonTags)
 
   import context.dispatcher
 
   def start: Receive = LoggingReceive {
     case Start =>
       whoStartedMe = Some(sender)
-      coordinatorActor ! getStartMessage()
+      clusterActor ! NodeClusterActor.SubscribePartitionUpdates
 
-    case IngestionCommands.IngestionReady =>
+    case NodeClusterActor.PartitionMapUpdate(newMap) =>
+      logger.info(s"Received initial partition map with ${newMap.numNodes} nodes")
+      mapper = newMap
       self ! GetMoreRows
-      logger.info(s" ==> Setup is all done, starting ingestion...")
+      logger.info(s" ==> Starting ingestion...")
       context.become(reading)
-
-    case e: ErrorResponse =>
-      whoStartedMe.foreach(_ ! SetupError(e))
   }
 
-  def reading: Receive = LoggingReceive {
-    case GetMoreRows if batchIterator.hasNext => sendRows()
-    case GetMoreRows =>
-      if (outstanding.isEmpty)  { finish() }
-      else                      {
-        logger.info(s" ==> (${self.path.name}) doneReading: outstanding seqIds = ${outstanding.keys}")
-        schedule(waitingPeriod, CheckCanIngest)
-        context.become(doneReading)
+  private def handleAck(seqNo: Long): Unit = {
+    if (outstanding contains seqNo) {
+      outstanding.remove(seqNo) foreach { case (nodeRef, _) =>
+        outstandingNodes(nodeRef) = outstandingNodes(nodeRef) - seqNo
+        if (outstandingNodes(nodeRef).isEmpty) outstandingNodes.remove(nodeRef)
       }
+    } else { unneededAcks.increment }
+  }
 
-    case IngestionCommands.Ack(lastSequenceNo) =>
-      if (outstanding contains lastSequenceNo) outstanding.remove(lastSequenceNo)
+  def mapUpdate: Receive = LoggingReceive {
+    case NodeClusterActor.PartitionMapUpdate(newMap) =>
+      logger.info(s"Received new partition map with ${newMap.numNodes} nodes")
+      mapper = newMap
+  }
 
+  def errorCatcher: Receive = LoggingReceive {
     case IngestionCommands.UnknownDataset =>
-        whoStartedMe.foreach(_ ! IngestionErr("Ingestion actors shut down, check error logs"))
-
-    case CheckCanIngest =>
-  }
-
-  def waitingAck: Receive = LoggingReceive {
-    case IngestionCommands.Ack(lastSequenceNo) =>
-      if (outstanding contains lastSequenceNo) outstanding.remove(lastSequenceNo)
-      if (outstanding.isEmpty) {
-        logger.debug(s" ==> reading, all unacked messages acked")
-        self ! GetMoreRows
-        context.become(reading)
-      }
-  }
-
-  def waiting: Receive = waitingAck orElse replay
-
-  val replay: Receive = LoggingReceive {
-    case CheckCanIngest =>
-      logger.debug(s"Checking if dataset $dataset can ingest...")
-      coordinatorActor ! IngestionCommands.CheckCanIngest(dataset, version)
-
-    case IngestionCommands.CanIngest(can) =>
-      if (can) {
-        logger.debug(s"Yay, we're allowed to ingest again!  Replaying unacked messages")
-        outstanding.foreach { case (seqId, batch) =>
-          coordinatorActor ! IngestionCommands.IngestRows(dataset, version, batch, seqId)
-        }
-      }
-      logger.debug(s"Scheduling another CheckCanIngest in case any unacked messages left")
-      schedule(waitingPeriod, CheckCanIngest)
-
-    case IngestionCommands.UnknownDataset =>
-        whoStartedMe.foreach(_ ! IngestionErr("Ingestion actors shut down, check worker error logs"))
+      whoStartedMe.foreach(_ ! IngestionErr("Ingestion actors shut down, check error logs"))
 
     case t: Throwable =>
         whoStartedMe.foreach(_ ! IngestionErr(t.getMessage, Some(t)))
@@ -131,33 +121,100 @@ trait RowSource extends Actor with StrictLogging {
         whoStartedMe.foreach(_ ! IngestionErr(e.toString))
   }
 
-  def doneReadingAck: Receive = LoggingReceive {
+  def reading: Receive = (LoggingReceive {
+    case GetMoreRows if batchIterator.hasNext => sendRows()
+    case GetMoreRows =>
+      if (outstanding.isEmpty)  { finish() }
+
     case IngestionCommands.Ack(lastSequenceNo) =>
-      if (outstanding contains lastSequenceNo) outstanding.remove(lastSequenceNo)
-      if (outstanding.isEmpty) finish()
+      handleAck(lastSequenceNo)
+      scheduledTask.foreach(_.cancel)
+      if (outstanding.nonEmpty) schedule(ackTimeout, AckTimeout)
+      // Keep ingestion going if below half of maxOutstanding items
+      if (outstanding.size < (maxUnackedBatches / 2)) self ! GetMoreRows
+
+    case IngestionCommands.Nack(seqNo) =>
+      goToWaiting()
+
+    case AckTimeout =>
+      logger.warn(s" ==> (${self.path.name}) No Acks received for last $ackTimeout")
+      goToWaiting()
+  }) orElse mapUpdate orElse errorCatcher
+
+  private def goToWaiting(): Unit = {
+    logger.info(s" ==> (${self.path.name}) waiting: outstanding seqIds = ${outstanding.keys}")
+    logger.info(s" ==>   outstanding nodes = ${outstandingNodes.keys}")
+    schedule(waitingPeriod, CheckCanIngest)
+    context.become(waiting)
   }
 
-  // If we don't get acks back, need to keep trying
-  def doneReading: Receive = doneReadingAck orElse replay
+  def waitingAck: Receive = LoggingReceive {
+    case IngestionCommands.Ack(lastSequenceNo) =>
+      handleAck(lastSequenceNo)
+      if (outstanding.isEmpty) {
+        logger.info(s" ==> (${self.path.name}) reading, all unacked messages acked")
+        self ! GetMoreRows
+        scheduledTask.foreach(_.cancel)
+        context.become(reading)
+      }
+  }
+
+  def waiting: Receive = waitingAck orElse replay orElse mapUpdate orElse errorCatcher
+
+  private def checkIngest(): Unit = {
+    logger.debug(s"Checking if dataset $dataset can ingest...")
+    outstandingNodes.keys.foreach(_ ! IngestionCommands.CheckCanIngest(dataset, version))
+  }
+
+  val replay: Receive = LoggingReceive {
+    case GetMoreRows =>
+
+    case IngestionCommands.ResumeIngest => checkIngest()
+    case CheckCanIngest                 => checkIngest()
+
+    case IngestionCommands.CanIngest(can) =>
+      if (can) {
+        val nodeRef = sender
+        logger.debug(s" ==> (${self.path.name}) Replaying unacked messages with ids=${outstanding.keys}" +
+                     s" from node $nodeRef")
+        outstandingNodes(nodeRef).foreach { seqId =>
+          val batch = outstanding(seqId)._2
+          nodeRef ! IngestionCommands.IngestRows(dataset, version, batch, seqId)
+          rowsReplayed.increment(batch.length)
+        }
+      }
+      schedule(waitingPeriod, CheckCanIngest)
+  }
 
   // Gets the next batch of data from the batchIterator, then determine if we can get more rows
   // or need to wait.
   def sendRows(): Unit = {
-    val (nextSeqId, nextBatch) = batchIterator.next
-    outstanding(nextSeqId) = nextBatch
-    coordinatorActor ! IngestionCommands.IngestRows(dataset, version, nextBatch, nextSeqId)
-    // Go get more rows
-    if (outstanding.size < maxUnackedBatches) {
-      self ! GetMoreRows
-    } else {
-      logger.debug(s" ==> waiting: outstanding seqIds = ${outstanding.keys}")
-      schedule(waitingPeriod, CheckCanIngest)
-      context.become(waiting)
+    val nextBatch: Seq[RowReader] = batchIterator.next
+
+    // Now, compute a partition key hash for each row and group all the rows by the coordinator ref
+    // returned from the partitionMapper
+    val rowsByNode = nextBatch.groupBy { reader =>
+      // For now, just use the hash from the partitionKey which is a Seq[Any]. In future use BinaryRecord
+      // TODO: optimize performance
+      mapper.lookupCoordinator(partKeyFunc(reader).hashCode)
     }
+    rowsByNode.foreach { case (nodeRef, readers) =>
+      logger.trace(s"  ==> ($nextSeqId) Processing ${readers.size} rows for node $nodeRef...")
+      val binReaders = readers.map { r => BinaryRecord(projection.binSchema, r) }
+      outstanding(nextSeqId) = (nodeRef, binReaders)
+      outstandingNodes(nodeRef) = outstandingNodes(nodeRef) + nextSeqId
+      nodeRef ! IngestionCommands.IngestRows(dataset, version, binReaders, nextSeqId)
+      nextSeqId += 1
+    }
+    rowsIngested.increment(nextBatch.length)
+    if (scheduledTask.isEmpty || scheduledTask.get.isCancelled) schedule(ackTimeout, AckTimeout)
+    // Go get more rows
+    if (outstanding.size < maxUnackedBatches) self ! GetMoreRows
   }
 
   private var scheduledTask: Option[Cancellable] = None
   def schedule(delay: FiniteDuration, msg: Any): Unit = {
+    scheduledTask.foreach(_.cancel)
     val task = context.system.scheduler.scheduleOnce(delay, self, msg)
     scheduledTask = Some(task)
   }
@@ -167,7 +224,9 @@ trait RowSource extends Actor with StrictLogging {
     allDoneAndGood()
     whoStartedMe.foreach(_ ! AllDone)
     scheduledTask.foreach(_.cancel)
-    self ! PoisonPill
+    // context.stop() stops remaining incoming messages, ensuring that we won't call finish() here multiple
+    // times
+    context.stop(self)
   }
 
   val receive = start

@@ -19,7 +19,7 @@ import filodb.coordinator.{DatasetCommands, CoordinatorSetup}
 import filodb.core._
 import filodb.core.metadata.Column.{ColumnType, Schema}
 import filodb.core.metadata.{Column, DataColumn, Dataset, RichProjection}
-import filodb.core.store.{Analyzer, CachedMergingColumnStore, FilteredPartitionScan, ScanSplit}
+import filodb.core.store.{Analyzer, ChunkInfo, ChunkSetInfo, FilteredPartitionScan, ScanSplit}
 
 //scalastyle:off
 class Arguments extends FieldArgs {
@@ -69,13 +69,15 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
 
   def printHelp() {
     println("filo-cli help:")
-    println("  commands: init create importcsv list analyze delete truncate")
+    println("  commands: init create importcsv list analyze dumpinfo delete truncate")
     println("  columns: <colName1>:<type1>,<colName2>:<type2>,... ")
     println("  types:  int,long,double,string,bool,timestamp")
     println("  common options:  --dataset --database")
     println("  OR:  --select col1, col2  [--limit <n>]  [--outfile /tmp/out.csv]")
     println("\nTo change config: pass -Dconfig.file=/path/to/config as first arg or set $FILO_CONFIG_FILE")
     println("  or override any config by passing -Dconfig.path=newvalue as first args")
+    println("\nFor detailed debugging, uncomment the TRACE/DEBUG loggers in logback.xml and add these ")
+    println("  options:  ./filo-cli -Dakka.loglevel=DEBUG -Dakka.actor.debug.receive=on -Dakka.actor.debug.autoreceive=on --command importcsv ...")
   }
 
   def getRef(args: Arguments): DatasetRef = DatasetRef(args.dataset.get, args.database)
@@ -125,12 +127,21 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
                     99.minutes)
 
         case Some("analyze") =>
-          println(Analyzer.analyze(columnStore.asInstanceOf[CachedMergingColumnStore],
+          println(Analyzer.analyze(columnStore,
                                    metaStore,
                                    getRef(args),
                                    version,
                                    combineSplits,
                                    args.numSegments).prettify())
+
+        case Some("dumpinfo") =>
+          printChunkInfos(Analyzer.getChunkInfos(columnStore,
+                                   metaStore,
+                                   getRef(args),
+                                   version,
+                                   combineSplits,
+                                   args.numSegments))
+
         case Some("delete") =>
           client.deleteDataset(getRef(args), timeout)
 
@@ -177,6 +188,13 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
   def dumpAllDatasets(database: Option[String]) {
     parse(metaStore.getAllDatasets(database)) { refs =>
       refs.foreach { ref => println("%25s\t%s".format(ref.database.getOrElse(""), ref.dataset)) }
+    }
+  }
+
+  def printChunkInfos(infos: Iterator[ChunkInfo]): Unit = {
+    infos.foreach { case ChunkInfo(partKey, segKey, ChunkSetInfo(id, numRows, firstKey, lastKey)) =>
+      println(" %25s %20s".format(partKey, segKey))
+      println("\t%10d %5d  %40s %s".format(id, numRows, firstKey, lastKey))
     }
   }
 

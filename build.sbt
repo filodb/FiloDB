@@ -1,9 +1,14 @@
+import com.typesafe.sbt.SbtMultiJvm
+import com.typesafe.sbt.SbtMultiJvm.MultiJvmKeys.MultiJvm
+
 val mySettings = Seq(organization := "org.velvia",
                      scalaVersion := "2.10.4",
                      parallelExecution in Test := false,
                      fork in Test := true,
                      resolvers ++= extraRepos,
                      ivyScala := ivyScala.value map { _.copy(overrideScalaVersion = true) }) ++ universalSettings
+
+publishTo      := Some(Resolver.file("Unused repo", file("target/unusedrepo")))
 
 lazy val core = (project in file("core"))
                   .settings(mySettings:_*)
@@ -12,7 +17,9 @@ lazy val core = (project in file("core"))
                   .settings(libraryDependencies ++= coreDeps)
 
 lazy val coordinator = (project in file("coordinator"))
+                         .configs(MultiJvm)
                          .settings(mySettings:_*)
+                         .settings(multiJvmSettings:_*)
                          .settings(name := "filodb-coordinator")
                          .settings(libraryDependencies ++= coordDeps)
                          .dependsOn(core % "compile->compile; test->test")
@@ -37,21 +44,24 @@ lazy val spark = (project in file("spark"))
                    .settings(fork in IntegrationTest := true)
                    .settings(mySettings:_*)
                    .settings(libraryDependencies ++= sparkDeps)
+                   .settings(jvmPerTestSettings:_*)
                    .settings(assemblySettings:_*)
                    .settings(assemblyOption in assembly := (assemblyOption in assembly).value.copy(includeScala = false))
                    .dependsOn(core % "compile->compile; test->test; it->test",
-                              coordinator,
+                              coordinator % "compile->compile; test->test",
                               cassandra % "compile->compile; test->test; it->test")
 
 lazy val jmh = (project in file("jmh"))
                  .settings(mySettings:_*)
                  .settings(name := "filodb-jmh")
                  .settings(libraryDependencies ++= jmhDeps)
+                 .settings(publish := {})
                  .enablePlugins(JmhPlugin)
                  .dependsOn(core % "compile->compile; compile->test", spark)
 
 lazy val stress = (project in file("stress"))
                     .settings(mySettings:_*)
+                    .settings(name := "filodb-stress")
                     .settings(libraryDependencies ++= stressDeps)
                     .settings(assemblySettings:_*)
                     .dependsOn(spark)
@@ -61,8 +71,6 @@ val akkaVersion    = "2.3.15"
 val sparkVersion   = "1.6.1"
 
 lazy val extraRepos = Seq(
-  "twitter-repo" at "http://maven.twttr.com",
-  "Pellucid Bintray" at "http://dl.bintray.com/pellucid/maven",
   "Velvia Bintray" at "https://dl.bintray.com/velvia/maven",
   "spray repo" at "http://repo.spray.io"
 )
@@ -84,19 +92,23 @@ lazy val coreDeps = commonDeps ++ Seq(
   "com.typesafe.scala-logging" %% "scala-logging-slf4j" % "2.1.2",
   "org.slf4j"             % "slf4j-api"         % "1.7.10",
   "com.beachape"         %% "enumeratum"        % "1.2.1",
-  "org.velvia.filo"      %% "filo-scala"        % "0.2.4",
+  "org.velvia.filo"      %% "filo-scala"        % "0.2.6",
   "joda-time"             % "joda-time"         % "2.2",
   "org.joda"              % "joda-convert"      % "1.2",
   "io.spray"             %% "spray-caching"     % "1.3.2",
   "net.ceedubs"          %% "ficus"             % "1.0.1",
   "org.scodec"           %% "scodec-bits"       % "1.0.10",
+  "io.fastjson"           % "boon"              % "0.33",
+  "com.github.alexandrnikitin" %% "bloom-filter" % "0.7.0",
   "org.scalactic"        %% "scalactic"         % "2.2.6",
   "com.markatta"         %% "futiles"           % "1.1.3",
-  "com.nativelibs4java"  %% "scalaxy-loops"     % "0.3.3" % "provided"
+  "com.nativelibs4java"  %% "scalaxy-loops"     % "0.3.3" % "provided",
+  "com.github.scala-incubator.io" %% "scala-io-file" % "0.4.2" % "test"
 )
 
 lazy val cassDeps = commonDeps ++ Seq(
   // other dependencies separated by commas
+  "net.jpountz.lz4"       % "lz4"               % "1.3.0",
   "com.datastax.cassandra" % "cassandra-driver-core" % cassDriverVersion,
   "ch.qos.logback"        % "logback-classic"   % "1.0.7" % "test"
 )
@@ -104,10 +116,12 @@ lazy val cassDeps = commonDeps ++ Seq(
 lazy val coordDeps = commonDeps ++ Seq(
   "com.typesafe.akka"    %% "akka-slf4j"        % akkaVersion,
   "com.typesafe.akka"    %% "akka-cluster"      % akkaVersion,
+  "com.typesafe.akka"    %% "akka-contrib"      % akkaVersion,
   // Take out the below line if you really don't want statsd metrics enabled
-  "io.kamon"             %% "kamon-statsd"        % "0.6.0",
+  "io.kamon"             %% "kamon-statsd"      % "0.6.0",
   "com.opencsv"           % "opencsv"           % "3.3",
-  "com.typesafe.akka"    %% "akka-testkit"      % akkaVersion % "test"
+  "com.typesafe.akka"    %% "akka-testkit"      % akkaVersion % "test",
+  "com.typesafe.akka"    %% "akka-multi-node-testkit" % akkaVersion % "test"
 )
 
 lazy val cliDeps = Seq(
@@ -117,7 +131,7 @@ lazy val cliDeps = Seq(
 
 lazy val sparkDeps = Seq(
   // We don't want LOG4J.  We want Logback!  The excludeZK is to help with a conflict re Coursier plugin.
-  "org.apache.spark"     %% "spark-hive"         % sparkVersion % "provided" excludeAll(excludeSlf4jLog4j, excludeZK),
+  "org.apache.spark"     %% "spark-hive"        % sparkVersion % "provided" excludeAll(excludeSlf4jLog4j, excludeZK),
   "org.apache.spark"     %% "spark-hive-thriftserver" % sparkVersion % "provided" excludeAll(excludeSlf4jLog4j, excludeZK),
   "org.apache.spark"     %% "spark-streaming"   % sparkVersion % "provided",
   "org.scalatest"        %% "scalatest"         % "2.2.4" % "it"
@@ -159,11 +173,41 @@ lazy val testSettings = Seq(
       Tags.limitSum(1, Tags.Test, Tags.Untagged))
 )
 
+// Fork a separate JVM for each test, instead of one for all tests in a module.
+// This is necessary for Spark tests due to initialization, for example
+lazy val jvmPerTestSettings = {
+  import Tests._
+
+  def jvmPerTest(tests: Seq[TestDefinition]) =
+    tests map { test =>
+      new Group(test.name, Seq(test), SubProcess(Nil))
+    } toSeq
+
+  Seq(testGrouping in Test <<= (definedTests in Test) map jvmPerTest)
+}
+
+lazy val multiJvmSettings = SbtMultiJvm.multiJvmSettings ++ Seq(
+  compile in MultiJvm <<= (compile in MultiJvm) triggeredBy (compile in Test),
+  // make sure that MultiJvm tests are executed by the default test target,
+  // and combine the results from ordinary test and multi-jvm tests
+  executeTests in Test <<= (executeTests in Test, executeTests in MultiJvm) map {
+    case (testResults, multiNodeResults)  =>
+      val overall =
+        if (testResults.overall.id < multiNodeResults.overall.id)
+          multiNodeResults.overall
+        else
+          testResults.overall
+      Tests.Output(overall,
+        testResults.events ++ multiNodeResults.events,
+        testResults.summaries ++ multiNodeResults.summaries)
+  }
+)
+
 lazy val itSettings = Defaults.itSettings ++ Seq(
   fork in IntegrationTest := true
 )
 
-lazy val universalSettings = coreSettings ++ styleSettings ++ testSettings
+lazy val universalSettings = coreSettings ++ styleSettings ++ testSettings ++ publishSettings
 
 // Create a default Scala style task to run with tests
 lazy val testScalastyle = taskKey[Unit]("testScalastyle")
@@ -241,7 +285,17 @@ lazy val assemblySettings = Seq(
   assemblyShadeRules in assembly := Seq(
     ShadeRule.rename("com.datastax.driver.**" -> "filodb.datastax.driver.@1").inAll,
     ShadeRule.rename("com.google.common.**" -> "filodb.com.google.common.@1").inAll,
+    ShadeRule.rename("org.apache.http.**" -> "filodb.org.apache.http.@1").inAll,
     ShadeRule.rename("com.google.guava.**" -> "filodb.com.google.guava.@1").inAll
   ),
   test in assembly := {} //noisy for end-user since the jar is not available and user needs to build the project locally
+)
+
+lazy val publishSettings = Seq(
+  organizationName := "FiloDB",
+  publishMavenStyle := true,
+  publishArtifact in Test := false,
+  publishArtifact in IntegrationTest := false,
+  licenses += ("Apache-2.0", url("http://choosealicense.com/licenses/apache/")),
+  pomIncludeRepository := { x => false }
 )

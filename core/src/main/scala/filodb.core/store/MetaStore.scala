@@ -1,9 +1,8 @@
 package filodb.core.store
 
 import scala.concurrent.{ExecutionContext, Future}
-
 import filodb.core._
-import filodb.core.metadata.{Column, DataColumn, Dataset}
+import filodb.core.metadata.{Column, DataColumn, Dataset, IngestionStateData}
 
 object MetaStore {
   case class IllegalColumnChange(reasons: Seq[String]) extends Exception {
@@ -130,4 +129,22 @@ trait MetaStore {
    * Shuts down the MetaStore, including any threads that might be hanging around
    */
   def shutdown(): Unit
+
+  /**
+    * Creates an entry into ingestion_state when ingestion process starts for a given dataset
+    *
+    * @param actorAddress
+    * @param dataset
+    * @param state
+    * @param version
+    * @return
+    */
+  def insertIngestionState(actorAddress: String, dataset: DatasetRef, columns: String,
+                           state: String, version: Int, exceptions: String = ""): Future[Response]
+
+
+  def getAllIngestionEntries(actorPath: String): Future[Seq[IngestionStateData]]
+
+  def updateIngestionState(actorAddress: String, dataset: DatasetRef,
+                           state: String, exceptions: String, version: Int ): Future[Response]
 }

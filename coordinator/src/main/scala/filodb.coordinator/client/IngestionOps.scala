@@ -11,6 +11,21 @@ trait IngestionOps extends ClientBase with StrictLogging {
   import DatasetCoordinatorActor.Stats
 
   /**
+   * Sends a message to all coordinators or FiloDB nodes to set up ingestion flow.
+   * @param dataset the DatasetRef of the dataset to start ingesting
+   * @param schema the column names in the exact order they will be presented in RowReaders sent to nodes
+   * @param version the version of the dataset to start ingesting
+   * @return a sequence of error responses. Nil means success
+   */
+  def setupIngestion(dataset: DatasetRef,
+                     schema: Seq[String],
+                     version: Int,
+                     timeout: FiniteDuration = 30.seconds): Seq[ErrorResponse] = {
+    askAllCoordinators(SetupIngestion(dataset, schema, version), timeout) { case x: NodeResponse => x
+    }.collect { case e: ErrorResponse => e }
+  }
+
+  /**
    * Flushes the active memtable of the given dataset and version, no matter how much is in the memtable.
    * This should really only be done at the end of batch ingestions, to ensure that all data is finished
    * ingesting.  Calling this prematurely results in smaller chunks and less efficient storage.

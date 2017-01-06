@@ -1,18 +1,20 @@
 package filodb.coordinator
 
 import akka.actor.{Actor, ActorRef, Cancellable, Props}
+import akka.cluster.Cluster
 import akka.event.LoggingReceive
 import com.typesafe.config.Config
+import filodb.coordinator.IngestionCommands.DCAReady
 import kamon.Kamon
 import net.ceedubs.ficus.Ficus._
 import org.velvia.filo.RowReader
-import scala.collection.mutable.ArrayBuffer
+
+import scala.collection.mutable.{ArrayBuffer, HashSet}
 import scala.concurrent.duration.FiniteDuration
 import scala.concurrent.Future
-
 import filodb.core.metadata.{Column, Dataset, Projection, RichProjection}
 import filodb.core.store.{ColumnStore, SegmentInfo}
-import filodb.core.reprojector.{MemTable, FiloMemTable, Reprojector}
+import filodb.core.reprojector.{FiloMemTable, MemTable, Reprojector}
 
 object DatasetCoordinatorActor {
   import filodb.core.Types._
@@ -68,12 +70,18 @@ object DatasetCoordinatorActor {
   case class FlushDone(result: Seq[SegmentInfo[_, _]]) extends DSCoordinatorMessage
   case class FlushFailed(t: Throwable) extends DSCoordinatorMessage
 
+  /**
+    * Creates new Memtable using WAL file
+    */
+  final case class InitIngestion(replyTo: ActorRef) extends DSCoordinatorMessage
+
   def props(projection: RichProjection,
             version: Int,
             columnStore: ColumnStore,
             reprojector: Reprojector,
-            config: Config): Props =
-    Props(classOf[DatasetCoordinatorActor], projection, version, columnStore, reprojector, config)
+            config: Config,
+            reloadFlag: Boolean = false): Props =
+    Props(classOf[DatasetCoordinatorActor], projection, version, columnStore, reprojector, config, reloadFlag)
 }
 
 /**
@@ -84,12 +92,11 @@ object DatasetCoordinatorActor {
  * Responsible for:
  * - Owning and setting up MemTables for ingestion
  * - Feeding rows into the MemTable, and knowing when not to feed the memTable
- * - Forwarding acks back to client
+ * - Forwarding acks and Nacks back to client
  * - Scheduling memtable flushes, “flipping” MemTables, and
  *   calling Reprojector to convert MemTable rows to Segments and flush them to disk
  *
- * Scheduling is reactive and not done on a schedule right now.  Flushes are checked and initiated after
- * rows are inserted and after flushes are done.
+ * Flushes are done when memtable is full or when noActivityFlushInterval has elapsed with no writes.
  *
  * There are usually two MemTables held by this actor.  One, the activeMemTable, ingests incoming rows.
  * The other, the flushingMemTable, is immutable and holds rows for flushing.  The two are switched.
@@ -111,15 +118,16 @@ private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
                                               version: Int,
                                               columnStore: ColumnStore,
                                               reprojector: Reprojector,
-                                              config: Config) extends BaseActor {
+                                              config: Config,
+                                              var reloadFlag: Boolean = false) extends BaseActor {
   import DatasetCoordinatorActor._
   import context.dispatcher
 
   val datasetName = projection.datasetName
   val nameVer = s"$datasetName/$version"
   // TODO: consider passing in a DatasetCoordinatorSettings class, so config doesn't have to be reparsed
-  val flushTriggerRows = config.getLong("memtable.flush-trigger-rows")
   val maxRowsPerTable = config.getInt("memtable.max-rows-per-table")
+  val flushTriggerRows = Math.min(config.getLong("memtable.flush-trigger-rows"), maxRowsPerTable.toLong)
   val minFreeMb = config.as[Option[Int]]("memtable.min-free-mb").getOrElse(DefaultMinFreeMb)
   val chunkSize = config.as[Option[Int]]("memtable.filo.chunksize").getOrElse(1000)
   val mTableWriteInterval = config.as[FiniteDuration]("memtable.write.interval")
@@ -152,10 +160,14 @@ private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
   // Holds temporary rows before being flushed to MemTable
   val tempRows = new ArrayBuffer[RowReader]
   val ackTos = new ArrayBuffer[(ActorRef, Long)]
+  val cannotIngest = new HashSet[ActorRef]
   var mTableWriteTask: Option[Cancellable] = None
   var mTableFlushTask: Option[Cancellable] = None
 
-  def makeNewTable(): MemTable = new FiloMemTable(projection, config)
+  val clusterSelfAddr = Cluster(context.system).selfAddress
+  val actorPath = clusterSelfAddr.host.getOrElse("None")
+
+  def makeNewTable(): MemTable = new FiloMemTable(projection, config, actorPath, version, reloadFlag)
 
   private def reportStats(): Unit = {
     logger.info(s"MemTable active table rows: $activeRows")
@@ -165,19 +177,13 @@ private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
   var flushedCallbacks: List[ActorRef] = Nil
 
   private def ingestRows(ackTo: ActorRef, rows: Seq[RowReader], seqNo: Long): Unit = {
-    if (canIngest) {
-
-      if (mTableFlushTask.isDefined) {
-        logger.debug("Cancelling scheduled memtable flush task when there is a write activity going on.")
-        mTableFlushTask.foreach(_.cancel)
-      }
-
+    if (canIngest && !cannotIngest.contains(ackTo)) {
+      mTableFlushTask.foreach(_.cancel)
       mTableFlushTask = Some(context.system.scheduler.scheduleOnce
         (mTableNoActivityFlushInterval,self, StartFlush(None)))
 
-      logger.debug("Scheduled new memtable flush task")
       tempRows ++= rows
-      ackTos += ackTo -> seqNo
+      ackTos.append((ackTo, seqNo))
       if (tempRows.length >= chunkSize) {
         mTableWriteTask.foreach(_.cancel)
         writeToMemTable()
@@ -185,9 +191,10 @@ private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
         // schedule future write to memtable, don't have enough rows yet
         mTableWriteTask = Some(context.system.scheduler.scheduleOnce(mTableWriteInterval, self, MemTableWrite))
       }
-
-      // Now, check how full the memtable is, and if it needs to be flipped, and a flush started
-      if (shouldFlush) self ! StartFlush()
+    } else {
+      ackTo ! IngestionCommands.Nack(seqNo)
+      logger.debug(s"Cannot ingest rows with seqNo=$seqNo")
+      cannotIngest += ackTo
     }
   }
 
@@ -200,6 +207,11 @@ private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
     tempRows.clear()
     ackTos.clear()
     mTableWriteTask = None
+
+    // Now, check how full the memtable is, and if it needs to be flipped, and a flush started
+    // Note: running startFlush right away helps avoid situation where some ingest messages come in
+    // between and get rejected prematurely while new memtable becomes available
+    if (shouldFlush) startFlush()
   }
 
   private def canIngest: Boolean = {
@@ -239,6 +251,8 @@ private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
     mTableFlushTask = None
 
     flushingTable = Some(activeTable)
+    // Reset reload flag to create new WAL file whenever new Memtable is initialised.
+    reloadFlag = false
     activeTable = makeNewTable()
     val newTaskFuture = reprojector.reproject(flushingTable.get, version)
     curReprojection = Some(newTaskFuture)
@@ -247,6 +261,8 @@ private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
     newTaskFuture.recover {
       case t: Throwable => self ! FlushFailed(t)
     }
+    // Important: Tell RowSource/ingesters there is a new memtable for them to ingest
+    for { ingester <- cannotIngest } ingester ! IngestionCommands.ResumeIngest
     logger.info(s" flush cycle for ($nameVer)... is complete")
   }
 
@@ -255,6 +271,8 @@ private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
 
   private def handleFlushDone(): Unit = {
     curReprojection = None
+    // delete wal files after flush completed
+    flushingTable.foreach(_.deleteWalFiles())
     // Close the flushing table and mark it as None
     flushingTable.foreach(_.close())
     flushingTable = None
@@ -304,11 +322,14 @@ private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
       clearProjection(replyTo, projection)
 
     case CanIngest =>
-      sender ! IngestionCommands.CanIngest(canIngest)
+      val can = canIngest
+      // Make it look like this reply came from the NodeCoordinator
+      sender.tell(IngestionCommands.CanIngest(can), context.parent)
+      if (can) cannotIngest.remove(sender)
 
     case GetStats =>
-      sender ! Stats(flushesStarted, flushesSucceeded, flushesFailed,
-                     activeRows, flushingRows, rowsIngested)
+      sender.tell(Stats(flushesStarted, flushesSucceeded, flushesFailed,
+                        activeRows, flushingRows, rowsIngested), context.parent)
 
     case MemTableWrite =>
       writeToMemTable()
@@ -324,5 +345,16 @@ private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
       logger.error(s"Error in reprojection task ($nameVer)", t)
       reportStats()
       handleFlushErr(t)
+
+    case InitIngestion(replyTo) =>
+      try {
+        activeTable.reloadMemTable()
+        replyTo ! DCAReady
+      } catch {
+        case ne: java.nio.file.NoSuchFileException =>
+          logger.info("There are no WAL files exist for this dataset and will proceed to start ingestion")
+          // Send DCAReady message When no WAL files exist for this dataset
+          replyTo ! DCAReady
+      }
   }
 }

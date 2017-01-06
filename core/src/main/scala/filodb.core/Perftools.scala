@@ -7,6 +7,12 @@ import scala.concurrent.Future
  * Helpers for performance measurement and tracing.
  */
 object Perftools {
+  def timeMillis(f: => Unit): Long = {
+    val start = System.currentTimeMillis
+    f
+    System.currentTimeMillis - start
+  }
+
   /**
    * Starts a new Kamon tracer segment for sync code.  Note that if you use this within futures
    * or for-comprehensions that run in different threads, you need the kamon-scala module so that the proper
