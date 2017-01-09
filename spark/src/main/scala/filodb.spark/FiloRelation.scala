@@ -165,9 +165,13 @@ object FiloRelation extends StrictLogging {
     import KeyFilter._
 
     def toFunc(keyType: KeyType, f: Filter): Any => Boolean = f match {
-      case EqualTo(_, value) => equalsFunc(keyType)(parseSingleValue(keyType)(value))
-      case In(_, values)     => inFunc(keyType)(parseValues(keyType)(values.toSet).toSet)
-      case other: Filter     => throw new IllegalArgumentException(s"Sorry, filter $other not supported")
+      case EqualTo(_, value)            => equalsFunc(keyType)(parseSingleValue(keyType)(value))
+      case In(_, values)                => inFunc(keyType)(parseValues(keyType)(values.toSet).toSet)
+      case GreaterThan(_, value)        => greaterOrEqualFunc(keyType)(parseSingleValue(keyType)(value))
+      case GreaterThanOrEqual(_, value) => greaterOrEqualFunc(keyType)(parseSingleValue(keyType)(value))
+      case LessThan(_, value)           => lessOrEqualFunc(keyType)(parseSingleValue(keyType)(value))
+      case LessThanOrEqual(_, value)    => lessOrEqualFunc(keyType)(parseSingleValue(keyType)(value))
+      case other: Filter                => throw new IllegalArgumentException(s"Sorry, filter $other not supported")
     }
 
     // Compute one func per column/position

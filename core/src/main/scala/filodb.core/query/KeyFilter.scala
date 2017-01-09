@@ -22,6 +22,26 @@ object KeyFilter {
   def equalsFunc(kt: KeyType)(value: kt.T): Any => Boolean =
     (item: Any) => item == value
 
+  def greaterOrEqualFunc(kt: KeyType)(value: kt.T): Any => Boolean =
+    (item: Any) => item match {
+        case item: Int    => item >= value.asInstanceOf[Int]
+        case item: Long   => item >= value.asInstanceOf[Long]
+        case item: Double => item >= value.asInstanceOf[Double]
+        case item: Float  => item >= value.asInstanceOf[Float]
+        case item: String => item >= value.asInstanceOf[String]
+        case item: Any    => throw new IllegalArgumentException(s"Sorry, >= $item type Any not supported")
+    }
+
+  def lessOrEqualFunc(kt: KeyType)(value: kt.T): Any => Boolean =
+    (item: Any) => item match {
+        case item: Int    => item <= value.asInstanceOf[Int]
+        case item: Long   => item <= value.asInstanceOf[Long]
+        case item: Double => item <= value.asInstanceOf[Double]
+        case item: Float  => item <= value.asInstanceOf[Float]
+        case item: String => item <= value.asInstanceOf[String]
+        case item: Any    => throw new IllegalArgumentException(s"Sorry, <= $item type Any not supported")
+    }
+
   def inFunc(kt: KeyType)(values: Set[kt.T]): Any => Boolean =
     (item: Any) => values.contains(item.asInstanceOf[kt.T])
 
