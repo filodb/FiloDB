@@ -55,8 +55,7 @@ trait ColumnStoreScanner extends StrictLogging {
    */
   def readFilters(dataset: DatasetRef,
                   version: Int,
-                  partition: Types.BinaryPartition,
-                  segment: Types.SegmentId,
+                  partition: Types.PartitionKey,
                   chunkRange: (Types.ChunkID, Types.ChunkID))
                  (implicit ec: ExecutionContext): Future[Iterator[SegmentState.IDAndFilter]]
 
@@ -65,9 +64,7 @@ trait ColumnStoreScanner extends StrictLogging {
                   chunkRange: (Types.ChunkID, Types.ChunkID))
                  (segInfo: SegmentInfo[projection.PK, projection.SK])
                  (implicit ec: ExecutionContext): Future[Iterator[SegmentState.IDAndFilter]] = {
-    val binPartition = projection.partitionType.toBytes(segInfo.partition)
-    val binSegId = projection.segmentType.toBytes(segInfo.segment)
-    readFilters(projection.datasetRef, version, binPartition, binSegId, chunkRange)
+    readFilters(projection.datasetRef, version, segInfo.partition, chunkRange)
   }
 
   /**

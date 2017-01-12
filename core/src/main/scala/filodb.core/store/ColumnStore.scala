@@ -10,15 +10,17 @@ import scala.concurrent.duration._
 import scala.language.existentials
 
 import filodb.core._
+import filodb.core.Types.PartitionKey
 import filodb.core.binaryrecord.{BinaryRecord, BinaryRecordWrapper}
 import filodb.core.metadata.{Column, Projection, RichProjection}
 import filodb.core.query.ChunkSetReader
 
 sealed trait PartitionScanMethod
-final case class SinglePartitionScan(partition: Any) extends PartitionScanMethod
-final case class MultiPartitionScan(partitions: Seq[Any]) extends PartitionScanMethod
+final case class SinglePartitionScan(partition: PartitionKey) extends PartitionScanMethod
+final case class MultiPartitionScan(partitions: Seq[PartitionKey]) extends PartitionScanMethod
 final case class FilteredPartitionScan(split: ScanSplit,
-                                       filter: Any => Boolean = (a: Any) => true) extends PartitionScanMethod
+                                       filter: PartitionKey => Boolean = (a: PartitionKey) => true)
+    extends PartitionScanMethod
 
 sealed trait ChunkScanMethod
 case object AllChunkScan extends ChunkScanMethod
@@ -171,7 +173,7 @@ trait ColumnStore extends StrictLogging {
    */
   def readRowKeyChunks(projection: RichProjection,
                        version: Int,
-                       partition: Any,
+                       partition: PartitionKey,
                        startKey: BinaryRecord,
                        chunkId: Types.ChunkID): Array[ByteBuffer] = {
     val chunkReaderIt = scanChunks(projection, projection.rowKeyColumns, version,

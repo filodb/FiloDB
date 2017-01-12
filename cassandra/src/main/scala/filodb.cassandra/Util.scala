@@ -4,7 +4,6 @@ import com.datastax.driver.core.exceptions.DriverException
 import com.datastax.driver.core._
 import java.nio.ByteBuffer
 import scala.concurrent.{Future, Promise}
-import scodec.bits.ByteVector
 
 import filodb.core._
 
@@ -61,7 +60,7 @@ object Util {
   }
 
   // Creates a writeable ByteBuffer, which is what the java driver expects
-  def toBuffer(bv: ByteVector): ByteBuffer = ByteBuffer.wrap(bv.toArray)
+  def toBuffer(key: Types.PartitionKey): ByteBuffer = ByteBuffer.wrap(key.bytes)
 
   def toHex(bb: ByteBuffer): String = com.datastax.driver.core.utils.Bytes.toHexString(bb)
 }

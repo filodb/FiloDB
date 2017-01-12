@@ -1,7 +1,9 @@
 package filodb.core.binaryrecord
 
+import java.nio.ByteBuffer
 import org.boon.primitive.ByteBuf
 import org.velvia.filo.{RowReader, SeqRowReader, UnsafeUtils, ZeroCopyBinary, ZeroCopyUTF8String}
+import org.velvia.filo.RowReader.TypedFieldExtractor
 import scala.language.postfixOps
 import scalaxy.loops._
 
@@ -50,30 +52,6 @@ extends ZeroCopyBinary with RowReader {
   override def toString: String =
     s"b[${(0 until fields.size).map(getAny).mkString(", ")}]"
 
-  // Also, for why using lazy val is not that bad: https://dzone.com/articles/cost-laziness
-  // The cost of computing the hash (and say using it in a bloom filter) is much higher.
-  lazy val cachedHash64: Long = {
-    base match {
-      case a: Array[Byte] => hasher64.hash(a, offset.toInt - UnsafeUtils.arayOffset, numBytes, Seed)
-      case o: Any         => hasher64.hash(asNewByteArray, 0, numBytes, Seed)
-    }
-  }
-
-  /**
-   * Returns an array of bytes for this binary record.  If this BinaryRecord is already a byte array
-   * with exactly numBytes bytes, then just return that, to avoid another copy.  Otherwise, call
-   * asNewByteArray to return a copy.
-   */
-  def bytes: Array[Byte] = {
-    //scalastyle:off
-    if (base != null && base.isInstanceOf[Array[Byte]] && offset == UnsafeUtils.arayOffset) {
-      //scalastyle:on
-      base.asInstanceOf[Array[Byte]]
-    } else {
-      asNewByteArray
-    }
-  }
-
   /**
    * Does a field-by-field (semantic) comparison of this BinaryRecord against another BinaryRecord.
    * It is assumed that the other BinaryRecord has the exact same schema, at least for all of the fields
@@ -93,6 +71,12 @@ extends ZeroCopyBinary with RowReader {
       0
     case zcb: ZeroCopyBinary =>
       super.compare(zcb)
+  }
+
+  override final def equals(other: Any): Boolean = other match {
+    case rec2: BinaryRecord => this.compare(rec2) == 0
+    case zcb: ZeroCopyBinary => zcb.equals(this)
+    case other: Any         => false
   }
 
   /**
@@ -120,8 +104,16 @@ object BinaryRecord {
   def apply(projection: RichProjection, bytes: Array[Byte]): BinaryRecord =
     apply(projection.rowKeyBinSchema, bytes)
 
+  def apply(schema: RecordSchema, buffer: ByteBuffer): BinaryRecord =
+    if (buffer.hasArray) { apply(schema, buffer.array) }
+    else if (buffer.isDirect) {
+      val addr: Long = buffer.asInstanceOf[sun.nio.ch.DirectBuffer].address
+      //scalastyle:off
+      new BinaryRecord(schema, null, addr, buffer.capacity)
+      //scalastyle:on
+    } else { throw new IllegalArgumentException("Buffer is neither array or direct") }
+
   val DefaultMaxRecordSize = 8192
-  val hasher64 = ZeroCopyBinary.xxhashFactory.hash64
 
   def apply(schema: RecordSchema, reader: RowReader, maxBytes: Int = DefaultMaxRecordSize): BinaryRecord = {
     val builder = BinaryRecordBuilder(schema, maxBytes)
@@ -135,6 +127,17 @@ object BinaryRecord {
     }
     // TODO: Someday, instead of allocating a new buffer every time, just use a giant chunk of offheap memory
     // and keep allocating from that
+    builder.build(copy = true)
+  }
+
+  // This is designed for creating partition keys. No nulls, custom extractors for computed columns
+  def apply(schema: RecordSchema, reader: RowReader, extractors: Array[TypedFieldExtractor[_]]):
+    BinaryRecord = {
+    val builder = BinaryRecordBuilder(schema, DefaultMaxRecordSize)
+    for { i <- 0 until schema.fields.size optimized } {
+      val field = schema.fields(i)
+      field.fieldType.addWithExtractor(builder, field, reader, extractors(i))
+    }
     builder.build(copy = true)
   }
 
@@ -169,6 +172,11 @@ object BinaryRecord {
       (binRecord.offset + fixedData + 4,
        UnsafeUtils.getInt(binRecord.base, binRecord.offset + fixedData))
     }
+  }
+
+  final def getBlobOffsetLen(binRec: BinaryRecord, field: Field): (Long, Int) = {
+    val fixedData = UnsafeUtils.getInt(binRec.base, binRec.offset + field.fixedDataOffset)
+    getBlobOffsetLen(binRec, fixedData)
   }
 }
 

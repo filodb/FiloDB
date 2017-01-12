@@ -5,7 +5,7 @@ import org.jctools.maps.NonBlockingHashMapLong
 import scala.collection.immutable.TreeSet
 import scala.collection.mutable.HashMap
 
-import filodb.core.Types.{BinaryPartition, ChunkID}
+import filodb.core.Types.{PartitionKey, ChunkID}
 import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.metadata.RichProjection
 import filodb.core.store.{ChunkSetInfo, ChunkRowSkipIndex}
@@ -20,7 +20,7 @@ import ChunkSetInfo._
  */
 trait PartitionChunkIndex {
   def projection: RichProjection
-  def binPartition: BinaryPartition
+  def binPartition: PartitionKey
 
   /**
    * Adds a ChunkSetInfo and the skips to the index
@@ -60,7 +60,7 @@ object PartitionChunkIndex {
 
  * TODO: improve this implementation with binary bit indices such as JavaEWAH.
  */
-class RowkeyPartitionChunkIndex(val binPartition: BinaryPartition, val projection: RichProjection)
+class RowkeyPartitionChunkIndex(val binPartition: PartitionKey, val projection: RichProjection)
 extends PartitionChunkIndex {
   import collection.JavaConverters._
   import PartitionChunkIndex._
@@ -101,7 +101,7 @@ extends PartitionChunkIndex {
 /**
  * A PartitionChunkIndex which is ordered by increasing ChunkID
  */
-class ChunkIDPartitionChunkIndex(val binPartition: BinaryPartition, val projection: RichProjection)
+class ChunkIDPartitionChunkIndex(val binPartition: PartitionKey, val projection: RichProjection)
 extends PartitionChunkIndex {
   import collection.JavaConverters._
   import PartitionChunkIndex._

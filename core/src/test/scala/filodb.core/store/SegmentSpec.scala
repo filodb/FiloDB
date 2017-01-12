@@ -1,7 +1,6 @@
 package filodb.core.store
 
 import java.nio.ByteBuffer
-import scodec.bits._
 
 import org.scalatest.{BeforeAndAfter, FunSpec, Matchers}
 
@@ -41,7 +40,7 @@ class SegmentSpec extends FunSpec with Matchers with BeforeAndAfter {
   }
 
   it("SegmentState should add chunk info properly when SegmentState prepopulated") {
-    val index = new RowkeyPartitionChunkIndex(ByteVector(0), projection)
+    val index = new RowkeyPartitionChunkIndex(defaultPartKey, projection)
     val state = new TestSegmentState(projection, index, schema, SegmentStateSettings())
     val info1 = ChunkSetInfo(state.nextChunkId, 10, firstKey, lastKey)
     index.add(info1, Nil)
@@ -101,12 +100,12 @@ class SegmentSpec extends FunSpec with Matchers with BeforeAndAfter {
     val chunkSet = ChunkSet(state, mapper(names).toIterator)
     val reader = ChunkSetReader(chunkSet, schema)
 
-    reader.rowIterator().map(_.getString(0)).toSeq should equal (names.map(_._1.get))
+    reader.rowIterator().map(_.filoUTF8String(0)).toSeq should equal (utf8FirstNames)
   }
 
   it("RowWriter and RowReader should work for rows with multi-column row keys") {
     import GdeltTestData._
-    val state = new TestSegmentState(projection2, schema, 197901)
+    val state = new TestSegmentState(projection2, schema, projection2.partKey(197901))
     val chunkSet = ChunkSet(state, readers.take(20).toIterator)
     val reader = ChunkSetReader(chunkSet, schema)
 

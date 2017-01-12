@@ -14,10 +14,10 @@ import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.metadata.{Column, RichProjection}
 import filodb.core.query.{PartitionChunkIndex, RowkeyPartitionChunkIndex}
 import filodb.core.Types._
-import filodb.core.{KeyType, KeyRange}
+import filodb.core.KeyType
 
 //scalastyle:off
-case class SegmentInfo[+PK, +SK](partition: PK, segment: SK) {
+case class SegmentInfo[+PK, +SK](partition: PartitionKey, segment: SK) {
 //scalastyle:on
   /**
    * Recast this SegmentInfo in the PK and SK types of another projection object.
@@ -38,8 +38,7 @@ trait Segment {
   val projection: RichProjection
   def segInfo: SegmentInfo[projection.PK, projection.SK]
 
-  def binaryPartition: BinaryPartition = projection.partitionType.toBytes(segInfo.partition)
-  def segmentId: SegmentId = projection.segmentType.toBytes(segInfo.segment)
+  def partition: PartitionKey = segInfo.partition
 
   override def toString: String = s"$segInfo"
 }
@@ -163,9 +162,8 @@ object ColumnStoreSegmentState extends StrictLogging {
            (segInfo: SegmentInfo[proj.PK, proj.SK])
            (implicit ec: Scheduler): ColumnStoreSegmentState = {
     logger.debug(s"Retrieving partition indexes and filters from column store: $segInfo")
-    val binPart = proj.partitionType.toBytes(segInfo.partition)
     val indexObs = scanner.scanPartitions(proj, version, SinglePartitionScan(segInfo.partition))
-                          .firstOrElseL(new RowkeyPartitionChunkIndex(binPart, proj))
+                          .firstOrElseL(new RowkeyPartitionChunkIndex(segInfo.partition, proj))
     val index = Await.result(indexObs.runAsync, settings.timeout)
     val filterMap = if (index.numChunks > 0) {
       Await.result(scanner.readFilters(proj, version, (Long.MinValue, Long.MaxValue))

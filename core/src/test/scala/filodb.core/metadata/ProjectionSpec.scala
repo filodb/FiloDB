@@ -1,7 +1,8 @@
 package filodb.core.metadata
 
 import org.scalactic._
-import org.velvia.filo.TupleRowReader
+import org.velvia.filo.RowReader._
+import org.velvia.filo.{TupleRowReader, ZeroCopyUTF8String}
 import scala.language.existentials
 
 import filodb.core._
@@ -10,7 +11,6 @@ import org.scalatest.{FunSpec, Matchers, BeforeAndAfter}
 class ProjectionSpec extends FunSpec with Matchers {
   import NamesTestData._
   import RichProjection._
-  import ComputedKeyTypes._
   import SingleKeyTypes._
 
   describe("RichProjection") {
@@ -22,13 +22,6 @@ class ProjectionSpec extends FunSpec with Matchers {
       val resp2 = RichProjection.make(Dataset("a", "age", "bar"), schema)
       resp2.isBad should be (true)
       resp2.swap.get should equal (MissingColumnNames(Seq("bar"), "segment"))
-    }
-
-    it("should get UnsupportedSegmentColumnType if segment key is not supported type") {
-      val schema2 = schema ++ Seq(DataColumn(99, "bool", "a", 0, Column.ColumnType.BitmapColumn))
-      val resp = RichProjection.make(Dataset("a", "age", "bool"), schema2)
-      resp.isBad should be (true)
-      resp.swap.get should equal (UnsupportedSegmentColumnType("bool", Column.ColumnType.BitmapColumn))
     }
 
     it("should get MissingColumnNames if projection columns are missing from schema") {
@@ -75,7 +68,7 @@ class ProjectionSpec extends FunSpec with Matchers {
       resp.isGood should be (true)
       val partFunc = resp.get.partitionKeyFunc
 
-      partFunc(names.map(TupleRowReader).head) should equal (Dataset.DefaultPartitionKey)
+      partFunc(names.map(TupleRowReader).head) should equal (defaultPartKey)
     }
 
     it("should change database with withDatabase") {
@@ -115,15 +108,8 @@ class ProjectionSpec extends FunSpec with Matchers {
       resp.segmentColumn should equal (schema(3))
       resp.segmentType should equal (IntKeyType)
       resp.partitionColIndices should equal (Seq(0, 1))
-      resp.partitionType shouldBe a[CompositeKeyType]
-    }
-
-    it("should handle ComputedColumn in segment key") {
-      val resp = RichProjection(Dataset("foo", "age", ":string 1"), schema)
-      resp.columns should have length (schema.length + 2)    // extra 2 computed columns: partition and seg
-      resp.segmentColumn shouldBe a[ComputedColumn]
-      resp.segmentColIndex should equal (5)
-      resp.segmentType shouldBe a[ComputedStringKeyType]
+      resp.partitionColumns should equal (schema take 2)
+      resp.partExtractors.toSeq should equal (Seq(UTF8StringFieldExtractor, UTF8StringFieldExtractor))
     }
 
     it("should create RichProjection properly for String row key column") {
@@ -133,7 +119,7 @@ class ProjectionSpec extends FunSpec with Matchers {
       resp.columns.take(4) should equal (schema)
       resp.rowKeyType should equal (StringKeyType)
       names.take(3).map(TupleRowReader).map(resp.rowKeyFunc) should equal (
-                     Seq("Khalil", "Ndamukong", "Rodney"))
+                     Seq("Khalil", "Ndamukong", "Rodney").map(ZeroCopyUTF8String.apply))
     }
 
     it("should (de)serialize to/from readOnlyProjectionStrings") {
@@ -145,9 +131,8 @@ class ProjectionSpec extends FunSpec with Matchers {
       readOnlyProj.datasetName should equal (proj.datasetName)
       readOnlyProj.segmentType should equal (StringKeyType)
       readOnlyProj.columns.map(_.name) should equal (Seq("first", "age", "last"))
-      readOnlyProj.partitionType shouldBe a[CompositeKeyType]
-      readOnlyProj.partitionType.asInstanceOf[CompositeKeyType].atomTypes should equal (
-                                               Seq(StringKeyType, StringKeyType))
+      readOnlyProj.partitionColumns.head should equal (schema(0).copy(dataset = proj.datasetName))
+      readOnlyProj.partExtractors.toSeq should equal (Seq(UTF8StringFieldExtractor, UTF8StringFieldExtractor))
       readOnlyProj.rowKeyType should equal (LongKeyType)
       readOnlyProj.rowKeyColumns.map(_.name) should equal (Seq("age"))
     }

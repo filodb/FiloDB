@@ -4,14 +4,17 @@ import com.datastax.driver.core.Row
 import java.nio.ByteBuffer
 import monix.reactive.Observable
 import scala.concurrent.{ExecutionContext, Future}
-import scodec.bits._
 
 import filodb.cassandra.FiloCassandraConnector
 import filodb.core._
+import filodb.core.binaryrecord.BinaryRecord
+import filodb.core.metadata.RichProjection
 import filodb.core.store.ColumnStoreStats
 
 // Typical record read from serialized incremental index (ChunkInfo + Skips) entries
-case class IndexRecord(binPartition: Types.BinaryPartition, data: ByteBuffer)
+case class IndexRecord(binPartition: ByteBuffer, data: ByteBuffer) {
+  def partition(proj: RichProjection): Types.PartitionKey = BinaryRecord(proj.partKeyBinSchema, binPartition)
+}
 
 /**
  * Represents the table which holds the incremental chunk metadata or indexes for each segment
@@ -44,7 +47,7 @@ sealed class IndexTable(val dataset: DatasetRef, val connector: FiloCassandraCon
 
 
   def fromRow(row: Row): IndexRecord =
-    IndexRecord(ByteVector(row.getBytes("partition")), row.getBytes("data"))
+    IndexRecord(row.getBytes("partition"), row.getBytes("data"))
 
   val selectCql = s"SELECT partition, data FROM $tableString WHERE "
   val partVersionFilter = "partition = ? AND version = ? AND indextype = 1"
@@ -53,7 +56,7 @@ sealed class IndexTable(val dataset: DatasetRef, val connector: FiloCassandraCon
   /**
    * Retrieves all indices from a single partition.
    */
-  def getIndices(binPartition: Types.BinaryPartition,
+  def getIndices(binPartition: Types.PartitionKey,
                  version: Int): Observable[IndexRecord] = {
     val it = session.execute(allPartReadCql.bind(toBuffer(binPartition),
                                                  version: java.lang.Integer))
@@ -84,7 +87,7 @@ sealed class IndexTable(val dataset: DatasetRef, val connector: FiloCassandraCon
    * Writes new indices to the index table
    * @return Success, or an exception as a Future.failure
    */
-  def writeIndices(partition: Types.BinaryPartition,
+  def writeIndices(partition: Types.PartitionKey,
                    version: Int,
                    indices: Seq[(Types.ChunkID, Array[Byte])],
                    stats: ColumnStoreStats): Future[Response] = {

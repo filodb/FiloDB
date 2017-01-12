@@ -94,6 +94,8 @@ class BinaryRecordSpec extends FunSpec with Matchers {
     BinaryRecord(projection2, Seq("GA")) should be > (rec1)
   }
 
+  it("should semantically compare BinaryRecord Int and Long fields correctly") (pending)
+
   it("should produce sortable ByteArrays from BinaryRecords") {
     val binRec1 = BinaryRecord(schema2_is, reader2)
     val reader5 = TupleRowReader((Some(1234), Some("two3")))

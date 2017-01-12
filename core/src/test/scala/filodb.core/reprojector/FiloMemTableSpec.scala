@@ -2,8 +2,10 @@ package filodb.core.reprojector
 
 import com.typesafe.config.ConfigFactory
 import org.velvia.filo.TupleRowReader
+import org.velvia.filo.ZeroCopyUTF8String._
 
 import filodb.core._
+import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.metadata.{Column, Dataset, RichProjection}
 import filodb.core.store.SegmentInfo
 
@@ -13,7 +15,6 @@ class FiloMemTableSpec extends FunSpec with Matchers with BeforeAndAfter {
   import NamesTestData._
 
   val config = ConfigFactory.load("application_test.conf").getConfig("filodb")
-  val segInfo = SegmentInfo(Dataset.DefaultPartitionKey, 0)
 
   val namesWithPartCol = (0 until 50).flatMap { partNum =>
     names.map { t => (t._1, t._2, t._3, t._4, Some(partNum.toString)) }
@@ -34,8 +35,8 @@ class FiloMemTableSpec extends FunSpec with Matchers with BeforeAndAfter {
       mTable.ingestRows(names.map(TupleRowReader))
       mTable.numRows should be (names.length)
 
-      val outRows = mTable.readRows(segInfo.basedOn(mTable.projection))
-      outRows.toSeq.map(_.getString(0)) should equal (sortedFirstNames)
+      val outRows = mTable.readRows(defaultPartKey)
+      outRows.toSeq.map(_.filoUTF8String(0)) should equal (sortedUtf8Firsts)
     }
 
     it("should replace rows and read them back in order") {
@@ -43,8 +44,9 @@ class FiloMemTableSpec extends FunSpec with Matchers with BeforeAndAfter {
       mTable.ingestRows(names.take(4).map(TupleRowReader))
       mTable.ingestRows(altNames.take(2).map(TupleRowReader))
 
-      val outRows = mTable.readRows(segInfo.basedOn(mTable.projection))
-      outRows.toSeq.map(_.getString(0)) should equal (Seq("Stacy", "Rodney", "Bruce", "Jerry"))
+      val outRows = mTable.readRows(defaultPartKey)
+      outRows.toSeq.map(_.filoUTF8String(0)) should equal (
+                                               Seq("Stacy", "Rodney", "Bruce", "Jerry").map(_.utf8))
     }
 
     it("should insert/replace rows with multiple partition keys and read them back in order") {
@@ -53,9 +55,8 @@ class FiloMemTableSpec extends FunSpec with Matchers with BeforeAndAfter {
       mTable.ingestRows(GdeltTestData.readers.take(10))
       mTable.ingestRows(GdeltTestData.readers.take(2))
 
-      val segInfo = SegmentInfo(Seq("AGR", 1979), "0").basedOn(mTable.projection)
-      val outRows = mTable.readRows(segInfo)
-      outRows.toSeq.map(_.getString(5)) should equal (Seq("FARMER", "FARMER"))
+      val outRows = mTable.readRows(GdeltTestData.projection1.partKey("AGR", 1979))
+      outRows.toSeq.map(_.filoUTF8String(5)) should equal (Seq("FARMER", "FARMER").map(_.utf8))
     }
 
     it("should insert/replace rows with multiple row keys and read them back in order") {
@@ -63,11 +64,11 @@ class FiloMemTableSpec extends FunSpec with Matchers with BeforeAndAfter {
       val mTable = new FiloMemTable(GdeltTestData.projection2, config)
       mTable.ingestRows(GdeltTestData.readers.take(6))
       mTable.ingestRows(GdeltTestData.altReaders.take(2))
+      mTable.numRows should equal (8)
 
-      val segInfo = SegmentInfo(197901, 0).basedOn(mTable.projection)
-      val outRows = mTable.readRows(segInfo)
-      outRows.toSeq.map(_.getString(5)) should equal (
-                 Seq("africa", "farm-yo", "FARMER", "CHINA", "POLICE", "IMMIGRANT"))
+      val outRows = mTable.readRows(GdeltTestData.projection2.partKey(197901))
+      outRows.toSeq.map(_.filoUTF8String(5)) should equal (
+                 Seq("africa", "farm-yo", "FARMER", "CHINA", "POLICE", "IMMIGRANT").map(_.utf8))
     }
 
     it("should ingest into multiple partitions using partition column") {
@@ -77,8 +78,9 @@ class FiloMemTableSpec extends FunSpec with Matchers with BeforeAndAfter {
 
       memTable.numRows should equal (50 * names.length)
 
-      val outRows = memTable.readRows(segInfo.copy(partition = "5").basedOn(memTable.projection))
-      outRows.toSeq.map(_.getString(0)) should equal (sortedFirstNames)
+      val partKey = projWithPartCol.partKey("5")
+      val outRows = memTable.readRows(partKey)
+      outRows.toSeq.map(_.filoUTF8String(0)) should equal (sortedUtf8Firsts)
     }
 
     it("should keep ingesting rows with null partition col value") {

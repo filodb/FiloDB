@@ -3,20 +3,20 @@ package filodb.core.metadata
 import org.scalactic._
 import org.velvia.filo.RowReader
 import org.velvia.filo.RowReader._
+import scala.language.existentials
 
 import filodb.core.{KeyType, SingleKeyTypeBase}
 import filodb.core.Types._
 
 /**
  * Represents a computed or generated column.
- * @param keyType a custom KeyType which returns the computation via the getKeyFunc function.
  */
 case class ComputedColumn(id: Int,
                           expr: String,   // The original computation expression
                           dataset: String,
                           columnType: Column.ColumnType,
-                          sourceColumns: Seq[String],    // names of source columns
-                          keyType: KeyType) extends Column {
+                          sourceIndices: Seq[Int],    // index into schema of source column
+                          val extractor: TypedFieldExtractor[_]) extends Column {
   def name: String = expr
 }
 
@@ -141,32 +141,22 @@ trait SingleColumnComputation extends ColumnComputation {
 
   def computedColumn(expr: String,
                      dataset: String,
-                     sourceColumns: Seq[String],
+                     sourceIndices: Seq[Int],
                      colType: Column.ColumnType,
-                     keyType: KeyType)
-                    (readerFunc: RowReader => keyType.T): ComputedColumn = {
-    val computedKeyType = ComputedKeyTypes.getComputedType(keyType)(readerFunc)
-    ComputedColumn(0, expr, dataset, colType, sourceColumns, computedKeyType)
+                     extractor: TypedFieldExtractor[_]): ComputedColumn = {
+    ComputedColumn(0, expr, dataset, colType, sourceIndices, extractor)
   }
 
-  def computedColumnWithDefault(expr: String, dataset: String, c: SingleColumnInfo)
-                    (default: c.keyType.T)(valueFunc: c.keyType.T => c.keyType.T): ComputedColumn =
-    computedColumnWithDefault(expr, dataset, c, c.colType, c.keyType)(default)(valueFunc)
+  def wrap[F: TypedFieldExtractor, T](func: F => T): WrappedExtractor[T, F] = new WrappedExtractor(func)
 
-  def computedColumnWithDefault(expr: String,
-                                dataset: String,
-                                sourceColInfo: SingleColumnInfo,
-                                colType: Column.ColumnType,
-                                destKeyType: KeyType)
-                               (default: destKeyType.T)
-                               (valueFunc: sourceColInfo.keyType.T => destKeyType.T): ComputedColumn = {
-    val extractor = sourceColInfo.keyType.asInstanceOf[SingleKeyTypeBase[sourceColInfo.keyType.T]].extractor
-    val colIndex = sourceColInfo.colIndex
-    computedColumn(expr, dataset, Seq(sourceColInfo.sourceColumn), colType, destKeyType) {
-    (r: RowReader) =>
-      if (r.notNull(colIndex)) {
-        valueFunc(extractor.getField(r, colIndex))
-      } else { default }
-    }
-  }
+  def computedColumn(expr: String, dataset: String, c: SingleColumnInfo,
+                     extractor: TypedFieldExtractor[_]): ComputedColumn =
+    computedColumn(expr, dataset, Seq(c.colIndex), c.colType, extractor)
+
+  def computedColumn(expr: String,
+                     dataset: String,
+                     c: SingleColumnInfo,
+                     colType: Column.ColumnType,
+                     extractor: TypedFieldExtractor[_]): ComputedColumn =
+    computedColumn(expr, dataset, Seq(c.colIndex), colType, extractor)
 }

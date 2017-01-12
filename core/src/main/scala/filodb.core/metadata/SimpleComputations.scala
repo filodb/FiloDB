@@ -3,16 +3,16 @@ package filodb.core.metadata
 import com.typesafe.config.ConfigFactory
 import java.sql.Timestamp
 import org.scalactic._
-import org.velvia.filo.RowReader
+import org.velvia.filo.{RowReader, ZeroCopyUTF8String => UTF8Str}
 
 import filodb.core._
 import filodb.core.Types._
 
 
 object SimpleComputations {
-  import ComputedKeyTypes._
   import SingleKeyTypes._
   import Column.ColumnType._
+  import RowReader.TypedFieldExtractor
 
   /**
    * Syntax: :string <constStringValue>
@@ -27,7 +27,10 @@ object SimpleComputations {
       for { args <- fixedNumArgs(expr, 1) }
       yield {
         ComputedColumn(0, expr, dataset, StringColumn, Nil,
-                       new ComputedStringKeyType((x: RowReader) => args.head))
+                       new TypedFieldExtractor[UTF8Str] {
+                         def getField(reader: RowReader, columnNo: Int): UTF8Str = UTF8Str(args.head)
+                         def compare(reader: RowReader, other: RowReader, columnNo: Int): Int = ???
+                       })
       }
     }
   }
@@ -44,7 +47,17 @@ object SimpleComputations {
                 schema: Seq[Column]): ComputedColumn Or InvalidComputedColumnSpec = {
       for { info <- parse(expr, schema)
             defaultValue <- parseParam(info.keyType, info.param) }
-      yield { computedColumnWithDefault(expr, dataset, info)(defaultValue)(x => x) }
+      yield {
+        val origExtractor = info.keyType.extractor
+        val extractor = new TypedFieldExtractor[Any] {
+          def getField(reader: RowReader, columnNo: Int): Any = {
+            if (reader.notNull(columnNo)) { origExtractor.getField(reader, columnNo) }
+            else { defaultValue }
+          }
+          def compare(reader: RowReader, other: RowReader, columnNo: Int): Int = ???
+        }
+        computedColumn(expr, dataset, info, extractor)
+      }
     }
   }
 
@@ -68,19 +81,19 @@ object SimpleComputations {
       for { info <- parse(expr, schema, Set(IntColumn, LongColumn, DoubleColumn))
             roundingValue <- parseParam(info.keyType, info.param) }
       yield {
-        val func = (info.colType match {
+        val extractor = info.colType match {
           case IntColumn =>
             val round = roundingValue.asInstanceOf[Int]
-            (i: Int) => i / round * round
+            wrap((i: Int) => i / round * round)
           case LongColumn =>
             val round = roundingValue.asInstanceOf[Long]
-            (i: Long) => i / round * round
+            wrap((i: Long) => i / round * round)
           case DoubleColumn =>
             val round = roundingValue.asInstanceOf[Double]
-            (i: Double) => Math.floor(i / round) * round
+            wrap((i: Double) => Math.floor(i / round) * round)
           case o: Column.ColumnType => ???
-        }).asInstanceOf[info.keyType.T => info.keyType.T]
-        computedColumnWithDefault(expr, dataset, info)(roundingValue)(func)
+        }
+        computedColumn(expr, dataset, info, extractor)
       }
     }
   }
@@ -98,16 +111,14 @@ object SimpleComputations {
       for { info <- parse(expr, schema, Set(StringColumn))
             numChars <- parseParam(SingleKeyTypes.IntKeyType, info.param) }
       yield {
-        computedColumnWithDefault(expr, dataset, info)("".asInstanceOf[info.keyType.T]){
-          ((s: String) => s.take(numChars)).asInstanceOf[info.keyType.T => info.keyType.T]
-        }
+        computedColumn(expr, dataset, info, wrap((s: UTF8Str) => s.substring(0, numChars)))
       }
     }
   }
 
   /**
    * :hash columnName numBuckets - for an int, long, or string column
-   * returns an int between 0 and (numBuckets - 1), or -1 if cannot hash
+   * returns an int between 0 and (numBuckets - 1)
    */
   object HashComputation extends SingleColumnComputation {
     def funcName: String = "hash"
@@ -118,12 +129,15 @@ object SimpleComputations {
       for { info <- parse(expr, schema, Set(IntColumn, LongColumn, StringColumn))
             numBuckets <- parseParam(SingleKeyTypes.IntKeyType, info.param) }
       yield {
-        val func = (info.colType match {
-          case IntColumn  => (i: Int) => Math.abs(i % numBuckets)
-          case LongColumn => (l: Long) => Math.abs(l % numBuckets).toInt
-          case o: Column.ColumnType => (o: AnyRef) => Math.abs(o.hashCode % numBuckets)
-        }).asInstanceOf[info.keyType.T => Int]
-        computedColumnWithDefault(expr, dataset, info, IntColumn, IntKeyType)(-1)(func)
+        val extractor = info.colType match {
+          case IntColumn  => wrap((i: Int) => Math.abs(i % numBuckets))
+          case LongColumn => wrap((l: Long) => Math.abs(l % numBuckets).toInt)
+          case DoubleColumn => wrap((d: Double) => Math.abs(d % numBuckets).toInt)
+          case StringColumn => wrap((s: UTF8Str) => Math.abs(s.hashCode % numBuckets))
+          case BitmapColumn => wrap((b: Boolean) => (if (b) 1 else 0) % numBuckets)
+          case TimestampColumn => wrap((l: Long) => Math.abs(l % numBuckets).toInt)
+        }
+        computedColumn(expr, dataset, info, IntColumn, extractor)
       }
     }
   }
