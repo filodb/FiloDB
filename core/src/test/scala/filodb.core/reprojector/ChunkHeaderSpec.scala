@@ -37,7 +37,7 @@ class ChunkHeaderSpec extends FunSpec with Matchers with BeforeAndAfter {
   }
 
   it("Multi column definitions") {
-    val expectedStr = "[2,column2,0,StringColumn]\001[1,column1,0,StringColumn]"
+    val expectedStr = "[2,column2,0,StringColumn]\u0001[1,column1,0,StringColumn]"
       .getBytes(StandardCharsets.UTF_8).reverse
     new ChunkHeader(createColumns(2)).
       columnDefinitions should equal (Array[Byte](0x35,0x00) ++ expectedStr)

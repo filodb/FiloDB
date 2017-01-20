@@ -1,7 +1,6 @@
 package filodb.stress
 
-import org.apache.spark.{SparkConf, SparkContext}
-import org.apache.spark.sql.{DataFrame, Row, SQLContext, SaveMode}
+import org.apache.spark.sql.{DataFrame, Row, SparkSession, SaveMode}
 import scala.util.Random
 
 import filodb.core.{DatasetRef, Perftools}
@@ -33,17 +32,17 @@ object RowReplaceStress extends App {
   }
 
   // Setup SparkContext, etc.
-  val conf = (new SparkConf).setAppName("test")
-                            .set("spark.filodb.cassandra.keyspace", "filostress")
-                            .set("spark.sql.shuffle.partitions", "4")
-                            .set("spark.scheduler.mode", "FAIR")
-  val sc = new SparkContext(conf)
-  val sql = new SQLContext(sc)
-  import sql.implicits._
+  val sess = SparkSession.builder.appName("test")
+                                 .config("spark.filodb.cassandra.keyspace", "filostress")
+                                 .config("spark.sql.shuffle.partitions", "4")
+                                 .config("spark.scheduler.mode", "FAIR")
+                                 .getOrCreate
+  val sc = sess.sparkContext
+  import sess.implicits._
 
-  val csvDF = sql.read.format("com.databricks.spark.csv").
-                 option("header", "true").option("inferSchema", "true").
-                 load(taxiCsvFile)
+  val csvDF = sess.read.format("com.databricks.spark.csv").
+                   option("header", "true").option("inferSchema", "true").
+                   load(taxiCsvFile)
 
   // Now, need to transform csvDF and insert replacement rows.
   // Convert to RDD and insert that way.
@@ -64,7 +63,7 @@ object RowReplaceStress extends App {
       newRows
     }.flatten
   }
-  val injectedDF = sql.createDataFrame(injectReplaceRdd, csvDF.schema)
+  val injectedDF = sess.createDataFrame(injectReplaceRdd, csvDF.schema)
   val csvLines = csvDF.count()
   val injectedLines = injectedDF.count()
 
@@ -80,13 +79,13 @@ object RowReplaceStress extends App {
     puts("Batch ingestion done.")
   }
 
-  val df = sql.filoDataset(datasetName)
-  df.registerTempTable(datasetName)
+  val df = sess.filoDataset(datasetName)
+  df.createOrReplaceTempView(datasetName)
 
   puts(s"Waiting a few seconds for ingestion to finish...")
   Thread sleep 5000
 
-  val readMillis = Perftools.timeMillis { sql.sql(s"select avg(passenger_count) from $datasetName").show }
+  val readMillis = Perftools.timeMillis { sess.sql(s"select avg(passenger_count) from $datasetName").show }
 
   val count = df.count()
   puts(s"\n\n---------------------\n\n")

@@ -104,7 +104,7 @@ object FiloDriver extends FiloSetup with StrictLogging {
   // The init method called from a SparkContext is going to be from the driver/app.
   // It also initializes all executors.
   def init(context: SparkContext): Unit = synchronized {
-    _config.getOrElse {
+    if (_config.isEmpty) {
       logger.info("Initializing FiloDriver clustering/coordination...")
       role = "driver"
       val filoConfig = configFromSpark(context)
@@ -118,12 +118,12 @@ object FiloDriver extends FiloSetup with StrictLogging {
 
       val finalConfig = ConfigFactory.parseString(s"""spark-driver-addr = "$selfAddr"""")
                                      .withFallback(filoConfig)
-      metaStore.initialize()
+      implicit val timeout = Timeout(59.seconds)
+      Await.result(metaStore.initialize(), 60.seconds)
       FiloExecutor.initAllExecutors(finalConfig, context)
 
       // Because the clusterActor can only be instantiated on an executor/FiloDB node, this works by
       // waiting for the clusterActor to respond, thus guaranteeing cluster working correctly
-      implicit val timeout = Timeout(59.seconds)
       Await.result(clusterActor ? NodeClusterActor.GetRefs("executor"), 60.seconds)
 
       _config = Some(finalConfig)

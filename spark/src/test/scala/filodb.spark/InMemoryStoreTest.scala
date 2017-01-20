@@ -1,7 +1,6 @@
 package filodb.spark
 
-import org.apache.spark.{SparkConf, SparkContext}
-import org.apache.spark.sql.{SQLContext, SaveMode}
+import org.apache.spark.sql.{SparkSession, SaveMode}
 import scala.concurrent.duration._
 
 import filodb.core._
@@ -16,13 +15,13 @@ class InMemoryStoreTest extends SparkTestBase {
   val currClassPath = sys.props("java.class.path")
 
   // Setup SQLContext and a sample DataFrame
-  val conf = (new SparkConf).setMaster("local[4]")
-                            .setAppName("test")
-                            .set("spark.filodb.store", "in-memory")
-                            .set("spark.filodb.memtable.min-free-mb", "10")
-                            .set("spark.ui.enabled", "false")
-  val sc = new SparkContext(conf)
-  val sql = new SQLContext(sc)
+  val sess = SparkSession.builder.master("local[4]")
+                                 .appName("test")
+                                 .config("spark.filodb.store", "in-memory")
+                                 .config("spark.filodb.memtable.min-free-mb", "10")
+                                 .config("spark.ui.enabled", "false")
+                                 .getOrCreate
+  val sc = sess.sparkContext
   FiloDriver.init(sc)
 
   import filodb.core.GdeltTestData._
@@ -32,7 +31,7 @@ class InMemoryStoreTest extends SparkTestBase {
   val testProjections = Seq(dataset1.projections.head)
 
   it("should be able to write to InMemoryColumnStore with multi-column partition keys") {
-    import sql.implicits._
+    import sess.implicits._
 
     val gdeltDF = sc.parallelize(records.toSeq).toDF()
     // Note: we need to sort to ensure all keys for a given partition key are on same node
@@ -46,7 +45,7 @@ class InMemoryStoreTest extends SparkTestBase {
 
     // TODO: test getting ingestion stats from all nodes
 
-    val df = sql.read.format("filodb.spark").option("dataset", dataset1.name).load()
+    val df = sess.read.format("filodb.spark").option("dataset", dataset1.name).load()
     df.agg(sum("numArticles")).collect().head(0) should equal (492)
   }
 }

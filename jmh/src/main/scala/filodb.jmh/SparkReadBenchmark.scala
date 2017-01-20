@@ -4,8 +4,7 @@ import java.util.concurrent.TimeUnit
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.functions.sum
 import org.apache.spark.sql.types._
-import org.apache.spark.sql.{DataFrame, Row, SQLContext}
-import org.apache.spark.{SparkConf, SparkContext, SparkException}
+import org.apache.spark.sql.{DataFrame, Row, SparkSession}
 import org.openjdk.jmh.annotations._
 import org.velvia.filo.{RowReader, TupleRowReader}
 import scala.concurrent.duration._
@@ -49,12 +48,12 @@ import filodb.spark.{FiloRelation, FiloDriver}
 class SparkReadBenchmark {
   val NumRows = 5000000
   // Source of rows
-  val conf = (new SparkConf).setMaster("local[4]")
-                            .setAppName("test")
-                            .set("spark.ui.enabled", "false")
-                            .set("spark.filodb.store", "in-memory")
-  val sc = new SparkContext(conf)
-  val sql = new SQLContext(sc)
+  val sess = SparkSession.builder.master("local[4]")
+                                 .appName("test")
+                                 .config("spark.ui.enabled", "false")
+                                 .config("spark.filodb.store", "in-memory")
+                                 .getOrCreate
+  val sc = sess.sparkContext
   // Below is to make sure that Filo actor system stuff is run before test code
   // so test code is not hit with unnecessary slowdown
   val filoConfig = FiloDriver.initAndGetConfig(sc)
@@ -85,7 +84,7 @@ class SparkReadBenchmark {
     sc.stop()
   }
 
-  val df = sql.read.format("filodb.spark").option("dataset", dataset.name).load
+  val df = sess.read.format("filodb.spark").option("dataset", dataset.name).load
 
   // How long does it take to iterate through all the rows
   @Benchmark

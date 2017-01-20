@@ -8,7 +8,7 @@ import com.typesafe.scalalogging.slf4j.StrictLogging
 import java.util.concurrent.ArrayBlockingQueue
 import net.ceedubs.ficus.Ficus._
 import org.apache.spark.sql.types.StructType
-import org.apache.spark.sql.{DataFrame, Row, SQLContext, SaveMode}
+import org.apache.spark.sql.{DataFrame, Row, SQLContext, SparkSession, SaveMode}
 import scala.concurrent.duration._
 import scala.concurrent.{Await, Future}
 import scala.language.implicitConversions
@@ -114,10 +114,10 @@ package object spark extends StrictLogging {
   def syncToHive(sqlContext: SQLContext): Unit = {
     val config = FiloDriver.initAndGetConfig(sqlContext.sparkContext)
     if (config.hasPath("hive.database-name")) {
-      MetaStoreSync.getHiveContext(sqlContext).foreach { hiveContext =>
+      MetaStoreSync.getSparkSession(sqlContext).foreach { sparkSession =>
         MetaStoreSync.syncFiloTables(config.getString("hive.database-name"),
                                      metaStore,
-                                     hiveContext)
+                                     sparkSession)
       }
     }
   }
@@ -209,4 +209,6 @@ package object spark extends StrictLogging {
   }
 
   implicit def sqlToFiloContext(sql: SQLContext): FiloContext = new FiloContext(sql)
+
+  implicit def sessionToFiloContext(sess: SparkSession): FiloContext = new FiloContext(sess.sqlContext)
 }

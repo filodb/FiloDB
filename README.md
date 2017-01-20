@@ -101,7 +101,6 @@ Your input is appreciated!
 
 NOTE: Please beware that significant storage-layer changes are taking place.  For a stable version, please use the `v0.4` release/tag. At the next release, the storage layer should be stable for production use. 
 
-* Spark 2.0 and Scala 2.11 - coming soon
 * Kafka input API / connector (without needing Spark)
 * In-memory caching for significant query speedup
 * True columnar querying and execution, using late materialization and vectorization techniques.  GPU/SIMD.
@@ -112,7 +111,9 @@ NOTE: Please beware that significant storage-layer changes are taking place.  Fo
 1. [Java 8](http://www.oracle.com/technetwork/java/javase/downloads/jdk8-downloads-2133151.html)
 2. [SBT](http://www.scala-sbt.org/) to build
 3. [Apache Cassandra](http://cassandra.apache.org/) 2.x or 3.x (We prefer using [CCM](https://github.com/pcmanus/ccm) for local testing) (Optional if you are using the in-memory column store)
-4. [Apache Spark (1.6.x)](http://spark.apache.org/) - 2.0 coming soon
+4. [Apache Spark (2.0)](http://spark.apache.org/)
+
+NOTE: Please check out the `spark1.6` branch for Spark 1.6 version.
 
 ## Getting Started
 
@@ -341,13 +342,13 @@ You can follow along using the [Spark Notebook](http://github.com/andypetrella/s
 Or you can start a spark-shell locally,
 
 ```bash
-bin/spark-shell --jars ../FiloDB/spark/target/scala-2.10/filodb-spark-assembly-0.4.jar --packages com.databricks:spark-csv_2.10:1.4.0 --driver-memory 3G --executor-memory 3G
+bin/spark-shell --jars ../FiloDB/spark/target/scala-2.11/filodb-spark-assembly-0.7.0.spark20-SNAPSHOT.jar --packages com.databricks:spark-csv_2.11:1.4.0 --driver-memory 3G --executor-memory 3G
 ```
 
 Loading CSV file from Spark:
 
 ```scala
-scala> val csvDF = sqlContext.read.format("com.databricks.spark.csv").
+scala> val csvDF = spark.read.format("com.databricks.spark.csv").
            option("header", "true").option("inferSchema", "true").
            load("../FiloDB/GDELT-1979-1984-100000.csv")
 ```
@@ -392,7 +393,7 @@ By default, data is written to replace existing records with the same primary ke
  
 Reading the dataset,
 ```
-val df = sqlContext.read.format("filodb.spark").option("dataset", "gdelt").load()
+val df = spark.read.format("filodb.spark").option("dataset", "gdelt").load()
 ```
 
 The dataset can be queried using the DataFrame DSL. See the section [Querying Datasets](#querying-datasets) for examples.
@@ -405,7 +406,7 @@ There is a more typesafe API than the Spark Data Source API.
 
 ```scala
 import filodb.spark._
-sqlContext.saveAsFilo(df, "gdelt",
+spark.saveAsFilo(df, "gdelt",
                       rowKeys = Seq("GLOBALEVENTID"),
                       segmentKey = ":round GLOBALEVENTID 10000",
                       partitionKeys = Seq("MonthYear"))
@@ -421,20 +422,20 @@ There is also an API purely for inserting data... after all, specifying the keys
 
 ```scala
 import filodb.spark._
-sqlContext.insertIntoFilo(df, "gdelt")
+spark.insertIntoFilo(df, "gdelt")
 ```
 
 The API for creating a DataFrame is also much more concise:
 
 ```scala
-val df = sqlContext.filoDataset("gdelt")
-val df2 = sqlContext.filoDataset("gdelt", database = Some("keyspace2"))
+val df = spark.filoDataset("gdelt")
+val df2 = spark.filoDataset("gdelt", database = Some("keyspace2"))
 ```
 
 The above method calls rely on an implicit conversion. From Java, you would need to create a new `FiloContext` first:
 
 ```java
-FiloContext fc = new filodb.spark.FiloContext(sqlContext);
+FiloContext fc = new filodb.spark.FiloContext(sparkSession.sqlContext);
 fc.insertIntoFilo(df, "gdelt");
 ```
 
@@ -594,6 +595,7 @@ Version 0.4 is the stable, latest released version.  It has been tested on a clu
 ### Upcoming version 0.7 changes:
 
 * NEW storage layout with incremental indices, provides much better ingestion for large partitions and skewed data 
+* Spark 2.0 and Scala 2.11 (master branch)
 * Automatic routing of ingestion records across the network - no need to `sort` your DataFrame in Spark
 * creating a function for checking java and another to check sbt (@jenaiz)
 
@@ -620,7 +622,7 @@ Version 0.4 is the stable, latest released version.  It has been tested on a clu
 - Set FILO_CONFIG_FILE to the path to your custom config
 - Run the cli jar as the filo CLI command line tool and initialize keyspaces if using Cassandra: `filo-cli-*.jar --command init`
 
-There is a branch for Datastax Enterprise 4.8 / Spark 1.4.  Note that if you are using DSE or have vnodes enabled, a lower number of vnodes (16 or less) is STRONGLY recommended as higher numbers of vnodes slows down queries substantially and basically prevents subsecond queries from happening.
+Note that if you are using DSE or have vnodes enabled, a lower number of vnodes (16 or less) is STRONGLY recommended as higher numbers of vnodes slows down queries substantially and basically prevents subsecond queries from happening.
 
 By default, FiloDB nodes (basically all the Spark executors) talk to each other using a random port and locally assigned hostname.  You may wish to set `filodb.spark.driver.port`, `filodb.spark.executor.port` to assign specific ports (for AWS, for example) or possibly use a different config file on each host and set `akka.remote.netty.tcp.hostname` on each host's config file.
 
