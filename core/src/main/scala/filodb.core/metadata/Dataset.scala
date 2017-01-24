@@ -18,11 +18,6 @@ import filodb.core.Types._
  */
 case class Dataset(name: String,
                    projections: Seq[Projection],
-                   /**
-                    *  Defines the columns to be used for partitioning.
-                    *  If one is not defined, then assume a single global partition, with a special
-                    *  column name.
-                    */
                    partitionColumns: Seq[ColumnId] = Seq(Dataset.DefaultPartitionColumn),
                    options: DatasetOptions = Dataset.DefaultOptions) {
   def withDatabase(database: String): Dataset =
