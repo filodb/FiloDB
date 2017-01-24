@@ -70,9 +70,6 @@ object ChunkSetReader {
   val DefaultReaderFactory: RowReaderFactory =
     (bytes, clazzes, len) => new FastFiloRowReader(bytes, clazzes, len)
 
-  val EndChunkSetReader = new ChunkSetReader(ChunkSetInfo.dummyInfo(0),
-                                             Array.empty, Array.empty)
-
   def apply(chunkSet: ChunkSet, schema: Seq[Column]): ChunkSetReader = {
     val clazzes = schema.map(_.columnType.clazz).toArray
     val nameToPos = schema.zipWithIndex.map { case (c, i) => (c.name -> i) }.toMap

@@ -132,13 +132,6 @@ object ChunkSetInfo extends StrictLogging {
   type IndexAndFilterSeq = Seq[(ChunkSetInfo, ChunkSkips, BloomFilter[Long])]
   import ChunkSet._
 
-  val DummyKey = BinaryRecord(RecordSchema(Nil), Array[Byte]())
-
-  /**
-   * Designed only for special, non-functional ChunkSetInfos, such as special markers
-   */
-  def dummyInfo(id: ChunkID): ChunkSetInfo = ChunkSetInfo(id, -1, DummyKey, DummyKey)
-
   val missingBloomFilters = Kamon.metrics.counter("chunks-missing-bloom-filter")
 
   def toBytes(projection: RichProjection, chunkSetInfo: ChunkSetInfo, skips: ChunkSkips): Array[Byte] = {
@@ -206,7 +199,7 @@ object ChunkSetInfo extends StrictLogging {
           val hitKeys = bfOpt.map { bf => rowKeys.filter { k => bf.mightContain(k.cachedHash64) } }
                              .getOrElse {
                                missingBloomFilters.increment
-                               logger.info(s"OUCH!  Missing bloom filter for chunk $info...")
+                               logger.info(s"Missing bloom filter for chunk $info...")
                                rowKeys
                              }
           logger.debug(s"Checking chunk $info: ${hitKeys.size} hitKeys")

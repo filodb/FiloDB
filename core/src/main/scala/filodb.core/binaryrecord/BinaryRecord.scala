@@ -105,7 +105,7 @@ extends ZeroCopyBinary with RowReader {
    */
   def toSortableBytes(numFields: Int = 2): Array[Byte] = {
     val fieldsToWrite = Math.min(fields.size, numFields)
-    val buf = ByteBuf.create(100)
+    val buf = ByteBuf.create(SortableByteBufSize)
     for { fieldNo <- 0 until fieldsToWrite optimized } {
       fields(fieldNo).writeSortable(this, buf)
     }
@@ -120,6 +120,7 @@ object BinaryRecord {
   val DefaultMaxRecordSize = 8192
   val MaxSmallOffset = 0x7fff
   val MaxSmallLen    = 0xffff
+  val SortableByteBufSize = 100
 
   val hasher64 = ZeroCopyBinary.xxhashFactory.hash64
 
