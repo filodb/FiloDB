@@ -86,6 +86,10 @@ trait FiloSetup extends CoordinatorSetup {
                                   |akka.remote.netty.tcp.hostname=$host
                                   |akka.remote.netty.tcp.port=$akkaPort""".stripMargin)
               .withFallback(systemConfig)
+
+  override def shutdown(): Unit = {
+    _config.foreach(c => super.shutdown())
+  }
 }
 
 // TODO: make the InMemoryMetaStore either distributed (using clustering to forward and distribute updates)
