@@ -5,8 +5,9 @@ import com.typesafe.scalalogging.slf4j.StrictLogging
 import java.nio.ByteBuffer
 import kamon.Kamon
 import kamon.trace.Tracer
+import monix.execution.Scheduler
 import net.ceedubs.ficus.Ficus._
-import scala.concurrent.{Await, ExecutionContext}
+import scala.concurrent.Await
 import scala.concurrent.duration._
 
 import filodb.core._
@@ -26,8 +27,8 @@ import filodb.core.store._
  *   }
  * }}}
  */
-class SegmentStateCache(config: Config, columnStore: ColumnStoreScanner)
-                       (implicit ec: ExecutionContext) extends StrictLogging {
+class SegmentStateCache(config: Config, columnStore: ColumnStore with ColumnStoreScanner)
+                       (implicit ec: Scheduler) extends StrictLogging {
   import Perftools._
   import SegmentStateSettings._
 

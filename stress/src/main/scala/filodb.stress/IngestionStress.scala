@@ -65,13 +65,9 @@ object IngestionStress extends App {
   val stressIngestor = Future {
     val ingestMillis = Perftools.timeMillis {
       puts("Starting stressful ingestion...")
-      // csvDF.sort($"medallion").write.format("filodb.spark").
       csvDF.write.format("filodb.spark").
         option("dataset", "taxi_medallion_seg").
-        // option("row_keys", "hack_license,pickup_datetime").
-        // option("segment_key", ":stringPrefix medallion 3").
         option("row_keys", "medallion,hack_license,pickup_datetime").
-        option("segment_key", ":string /0").
         option("partition_keys", ":stringPrefix medallion 2").
         option("reset_schema", "true").
         mode(SaveMode.Overwrite).save()
@@ -89,13 +85,9 @@ object IngestionStress extends App {
     val ingestMillis = Perftools.timeMillis {
       puts("Starting hour-of-day (easy) ingestion...")
 
-      // dfWithHoD.sort($"hourOfDay").write.format("filodb.spark").
       dfWithHoD.write.format("filodb.spark").
         option("dataset", "taxi_hour_of_day").
-        // option("row_keys", "hack_license,pickup_datetime").
-        // option("segment_key", ":timeslice pickup_datetime 4d").
         option("row_keys", "pickup_datetime,medallion,hack_license").
-        option("segment_key", ":string /0").
         option("partition_keys", "hourOfDay").
         option("reset_schema", "true").
         mode(SaveMode.Overwrite).save()

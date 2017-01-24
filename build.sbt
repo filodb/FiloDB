@@ -64,6 +64,7 @@ lazy val stress = (project in file("stress"))
                     .settings(name := "filodb-stress")
                     .settings(libraryDependencies ++= stressDeps)
                     .settings(assemblySettings:_*)
+                    .settings(assemblyOption in assembly := (assemblyOption in assembly).value.copy(includeScala = false))
                     .dependsOn(spark)
 
 val cassDriverVersion = "3.0.2"
@@ -93,13 +94,15 @@ lazy val coreDeps = commonDeps ++ Seq(
   "org.slf4j"             % "slf4j-api"         % "1.7.10",
   "com.beachape"         %% "enumeratum"        % "1.2.1",
   "org.velvia.filo"      %% "filo-scala"        % "0.2.6",
+  "io.monix"             %% "monix"             % "2.1.1",
   "joda-time"             % "joda-time"         % "2.2",
   "org.joda"              % "joda-convert"      % "1.2",
-  "io.spray"             %% "spray-caching"     % "1.3.2",
+  "com.googlecode.concurrentlinkedhashmap" % "concurrentlinkedhashmap-lru" % "1.4",
   "net.ceedubs"          %% "ficus"             % "1.1.2",
   "org.scodec"           %% "scodec-bits"       % "1.0.10",
   "io.fastjson"           % "boon"              % "0.33",
   "com.github.alexandrnikitin" %% "bloom-filter" % "0.7.0",
+  "com.github.rholder.fauxflake" % "fauxflake-core" % "1.1.0",
   "org.scalactic"        %% "scalactic"         % "2.2.6",
   "com.markatta"         %% "futiles"           % "1.1.3",
   "com.nativelibs4java"  %% "scalaxy-loops"     % "0.3.3" % "provided",

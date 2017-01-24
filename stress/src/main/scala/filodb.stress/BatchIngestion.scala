@@ -51,8 +51,7 @@ object BatchIngestion extends App {
     puts("Starting batch ingestion...")
     csvDF.write.format("filodb.spark").
       option("dataset", "nyc_taxi").
-      option("row_keys", "hack_license,medallion,pickup_datetime,pickup_longitude").
-      option("segment_key", ":timeslice pickup_datetime 6d").
+      option("row_keys", "pickup_datetime,hack_license,medallion,pickup_longitude").
       option("partition_keys", ":monthOfYear pickup_datetime,:stringPrefix medallion 2").
       mode(SaveMode.Overwrite).save()
     puts("Batch ingestion done.")

@@ -5,6 +5,7 @@ import org.apache.spark.SparkEnv
 import org.apache.spark.sql.catalyst.TableIdentifier
 import org.apache.spark.sql.execution.command.CreateDataSourceTableUtils
 import org.apache.spark.sql.{SQLContext, SparkSession}
+import scala.util.Try
 
 import filodb.core.store.MetaStore
 import filodb.spark.FiloRelation
@@ -13,10 +14,11 @@ import filodb.spark.FiloRelation
 object MetaStoreSync extends StrictLogging {
   import filodb.coordinator.client.Client.parse
 
-  def sparkHost: String = SparkEnv.get.rpcEnv.address.host
+  def sparkHost: String =
+    Try(SparkEnv.get.rpcEnv.address.host).getOrElse(java.net.InetAddress.getLocalHost.getHostAddress)
 
   /**
-   * Tries to get a HiveContext either from a running ThriftServer or from the sqlcontext that's
+   * Tries to get a SparkSession either from a running ThriftServer or from the sqlcontext that's
    * passed in.
    */
   def getSparkSession(sqlContext: SQLContext): Option[SparkSession] = {
@@ -29,7 +31,7 @@ object MetaStoreSync extends StrictLogging {
    * configuration.
    * @param databaseName the Hive MetaStore database name to sync with
    * @param metastore FiloDB MetaStore
-   * @param sparkSession the HiveContext containing the catalog to sync to
+   * @param sparkSession the SparkSession containing the catalog to sync to
    */
   def syncFiloTables(databaseName: String, metastore: MetaStore, sparkSession: SparkSession): Int = {
     val catalog = sparkSession.catalog

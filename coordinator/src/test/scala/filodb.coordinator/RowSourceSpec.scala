@@ -4,8 +4,9 @@ import akka.actor.{ActorRef, ActorSystem, PoisonPill}
 import akka.pattern.gracefulStop
 import akka.testkit.{EventFilter, TestProbe}
 import com.typesafe.config.{Config, ConfigFactory}
+import monix.execution.Scheduler
 import scala.concurrent.duration._
-import scala.concurrent.{Await, ExecutionContext}
+import scala.concurrent.Await
 import scala.util.Try
 import scalax.file.Path
 
@@ -20,9 +21,9 @@ import org.scalatest.time.{Millis, Seconds, Span}
 
 object RowSourceSpec extends ActorSpecConfig
 
-class TestSegmentStateCache(config: Config, columnStore: ColumnStoreScanner)(implicit ec: ExecutionContext)
-extends
-SegmentStateCache(config, columnStore)(ec) {
+class TestSegmentStateCache(config: Config, columnStore: ColumnStore with ColumnStoreScanner)
+                           (implicit sched: Scheduler) extends
+                           SegmentStateCache(config, columnStore)(sched) {
   var shouldThrow = false
   override def getSegmentState(projection: RichProjection,
                       schema: Seq[Column],

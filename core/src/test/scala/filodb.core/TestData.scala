@@ -12,20 +12,34 @@ import scala.concurrent.duration._
 import filodb.core._
 import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.metadata.{Column, DataColumn, Dataset, RichProjection}
+import filodb.core.query.{PartitionChunkIndex, RowkeyPartitionChunkIndex}
 import filodb.core.store._
 
 class TestSegmentState(projection: RichProjection,
+                       index: PartitionChunkIndex,
                        schema: Seq[Column],
-                       settings: SegmentStateSettings = SegmentStateSettings())
-extends SegmentState(projection, schema, settings) {
-  val rowKeyChunks = new collection.mutable.HashMap[Types.ChunkID, Array[ByteBuffer]]
+                       settings: SegmentStateSettings)
+extends SegmentState(projection, index, schema, settings) {
 
-  def getRowKeyChunks(chunkId: Types.ChunkID): Array[ByteBuffer] = rowKeyChunks(chunkId)
+  def this(projection: RichProjection,
+           schema: Seq[Column],
+           partition: Any = "/0",
+           settings: SegmentStateSettings = SegmentStateSettings()) =
+    this(projection,
+         new RowkeyPartitionChunkIndex(projection.partitionType.toBytes(
+                                         partition.asInstanceOf[projection.PK]), projection),
+         schema,
+         settings)
+
+  val rowKeyChunks = new collection.mutable.HashMap[(BinaryRecord, Types.ChunkID), Array[ByteBuffer]]
+
+  def getRowKeyChunks(key: BinaryRecord, chunkId: Types.ChunkID): Array[ByteBuffer] =
+    rowKeyChunks((key, chunkId))
 
   def store(chunkSet: ChunkSet): Unit = {
     val rowKeyColNames = projection.rowKeyColumns.map(_.name)
     val chunkArray = rowKeyColNames.map(chunkSet.chunks).toArray
-    rowKeyChunks(chunkSet.info.id) = chunkArray
+    rowKeyChunks((chunkSet.info.firstKey, chunkSet.info.id)) = chunkArray
   }
 
   def clear(): Unit = {
@@ -61,7 +75,7 @@ object NamesTestData {
 
   val firstKey = BinaryRecord(projection, Seq(names.head._3.get))
   val lastKey = BinaryRecord(projection, Seq(names.last._3.get))
-  def keyForName(rowNo: Int): RowReader = BinaryRecord(projection, Seq(names(rowNo)._3.getOrElse(0)))
+  def keyForName(rowNo: Int): BinaryRecord = BinaryRecord(projection, Seq(names(rowNo)._3.getOrElse(0)))
 
   val stateSettings = SegmentStateSettings()
   val emptyFilter = SegmentState.emptyFilter(stateSettings)
@@ -154,8 +168,9 @@ object GdeltTestData {
                          Seq(":getOrElse Actor2Code NONE", ":getOrElse Year -1"))
   val projection3 = RichProjection(dataset3, schema)
 
-  // Dataset4: same as Dataset1 but with :getOrElse to prevent null partition keys
-  val dataset4 = Dataset("gdelt", Seq("GLOBALEVENTID"), "GLOBALEVENTID", Seq("MonthYear"))
+  // Dataset4: One big partition (Year) and segment (:string 0) with (Actor2Code, GLOBALEVENTID) rowkey
+  // to easily test row key scans
+  val dataset4 = Dataset("gdelt", Seq("Actor2Code", "GLOBALEVENTID"), ":string 0", Seq("Year"))
   val projection4 = RichProjection(dataset4, schema)
 
   // Returns projection2 grouped by segment with a fake partition key

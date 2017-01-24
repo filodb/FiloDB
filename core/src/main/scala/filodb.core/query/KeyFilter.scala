@@ -76,8 +76,8 @@ object KeyFilter {
   def mapPartitionColumns(proj: RichProjection, columnNames: Seq[String]): Map[String, (Int, KeyType)] =
     mapColumns(proj.partitionColumns, columnNames)
 
-  def mapSegmentColumn(proj: RichProjection, columnNames: Seq[String]): Map[String, (Int, KeyType)] =
-    mapColumns(Seq(proj.segmentColumn), columnNames)
+  def mapRowKeyColumns(proj: RichProjection, columnNames: Seq[String]): Map[String, (Int, KeyType)] =
+    mapColumns(proj.rowKeyColumns, columnNames)
 
   def mapColumns(columns: Seq[Column], columnNames: Seq[String]): Map[String, (Int, KeyType)] = {
     columns.zipWithIndex.collect {

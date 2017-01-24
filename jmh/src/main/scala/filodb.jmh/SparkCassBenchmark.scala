@@ -15,7 +15,7 @@ import scalaxy.loops._
 
 import filodb.core._
 import filodb.core.metadata.{Column, Dataset, RichProjection}
-import filodb.core.store.{InMemoryColumnStore, RowReaderSegment}
+import filodb.core.store.InMemoryColumnStore
 import filodb.spark.{SparkRowReader, TypeConverters, FiloDriver}
 
 // Spark CassandraColumnStore benchmark

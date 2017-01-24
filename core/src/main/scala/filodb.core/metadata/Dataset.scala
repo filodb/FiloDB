@@ -56,6 +56,7 @@ object Dataset {
   // the dataset must fit in one node.
   val DefaultPartitionKey = "/0"
   val DefaultPartitionColumn = s":string $DefaultPartitionKey"
+  val DefaultSegment = ":string 0"
 
   val DefaultOptions = DatasetOptions(chunkSize = 5000)
 
@@ -81,6 +82,13 @@ object Dataset {
             partitionColumns: Seq[String]): Dataset =
     Dataset(ref.dataset,
             Seq(Projection(0, ref, keyColumns, segmentColumn)),
+            partitionColumns)
+
+  def apply(ref: DatasetRef,
+            keyColumns: Seq[String],
+            partitionColumns: Seq[String]): Dataset =
+    Dataset(ref.dataset,
+            Seq(Projection(0, ref, keyColumns, DefaultSegment)),
             partitionColumns)
 
   def apply(name: String, keyColumn: String, segmentColumn: String): Dataset =

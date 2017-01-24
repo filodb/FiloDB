@@ -2,6 +2,7 @@ package filodb.cassandra.columnstore
 
 import com.datastax.driver.core.Row
 import java.nio.ByteBuffer
+import monix.reactive.Observable
 import scala.concurrent.{ExecutionContext, Future}
 import scodec.bits._
 
@@ -9,9 +10,8 @@ import filodb.cassandra.FiloCassandraConnector
 import filodb.core._
 import filodb.core.store.ColumnStoreStats
 
-case class IndexRecord(binPartition: Types.BinaryPartition,
-                       segmentId: Types.SegmentId,
-                       data: ByteBuffer)
+// Typical record read from serialized incremental index (ChunkInfo + Skips) entries
+case class IndexRecord(binPartition: Types.BinaryPartition, data: ByteBuffer)
 
 /**
  * Represents the table which holds the incremental chunk metadata or indexes for each segment
@@ -19,6 +19,11 @@ case class IndexRecord(binPartition: Types.BinaryPartition,
  * any records in previous chunks.  Each new chunkSet that is written results in a tiny bit more metadata.
  * Unlike the previous ChunkRowMap design, the layout is such that new chunks in a segment get written
  * only with its new metadata, previous index bits are not written again.
+ *
+ * There is an indextype field.
+ *  1 = incremental indices
+ * In the future there may be other types.  For example, for aggregated indices or extra metadata
+ * representing keys to replace.
  */
 sealed class IndexTable(val dataset: DatasetRef, val connector: FiloCassandraConnector)
                        (implicit ec: ExecutionContext) extends BaseDatasetTable {
@@ -30,81 +35,50 @@ sealed class IndexTable(val dataset: DatasetRef, val connector: FiloCassandraCon
   val createCql = s"""CREATE TABLE IF NOT EXISTS $tableString (
                      |    partition blob,
                      |    version int,
-                     |    segmentid blob,
-                     |    chunkid int,
+                     |    indextype int,
+                     |    chunkid bigint,
                      |    data blob,
-                     |    PRIMARY KEY ((partition, version), segmentid, chunkid)
+                     |    PRIMARY KEY ((partition, version), indextype, chunkid)
                      |) WITH COMPACT STORAGE AND compression = {
                     'sstable_compression': '$sstableCompression'}""".stripMargin
 
 
   def fromRow(row: Row): IndexRecord =
-    IndexRecord(ByteVector(row.getBytes("partition")),
-                ByteVector(row.getBytes("segmentid")),
-                row.getBytes("data"))
+    IndexRecord(ByteVector(row.getBytes("partition")), row.getBytes("data"))
 
-  val selectCql = s"SELECT partition, segmentid, data FROM $tableString WHERE "
-  val partVersionFilter = "partition = ? AND version = ? "
+  val selectCql = s"SELECT partition, data FROM $tableString WHERE "
+  val partVersionFilter = "partition = ? AND version = ? AND indextype = 1"
   lazy val allPartReadCql = session.prepare(selectCql + partVersionFilter)
-  lazy val rangeReadCql = session.prepare(selectCql + partVersionFilter +
-                                          "AND segmentid >= ? AND segmentid <= ?")
-  lazy val rangeReadExclCql = session.prepare(selectCql + partVersionFilter +
-                                              "AND segmentid >= ? AND segmentid < ?")
 
   /**
    * Retrieves all indices from a single partition.
    */
   def getIndices(binPartition: Types.BinaryPartition,
-                 version: Int): Future[Iterator[IndexRecord]] =
-    session.executeAsync(allPartReadCql.bind(toBuffer(binPartition),
-                                             version: java.lang.Integer))
-           .toIterator.map(_.map(fromRow))
-
-  /**
-   * Retrieves a whole series of indices, in the range [startSegmentId, untilSegmentId)
-   * End is exclusive or not depending on keyRange.endExclusive flag
-   */
-  def getIndices(keyRange: BinaryKeyRange,
-                 version: Int): Future[Iterator[IndexRecord]] = {
-    val cql = if (keyRange.endExclusive) rangeReadExclCql else rangeReadCql
-    session.executeAsync(cql.bind(toBuffer(keyRange.partition),
-                                  version: java.lang.Integer,
-                                  toBuffer(keyRange.start), toBuffer(keyRange.end)))
-           .toIterator.map(_.map(fromRow))
+                 version: Int): Observable[IndexRecord] = {
+    val it = session.execute(allPartReadCql.bind(toBuffer(binPartition),
+                                                 version: java.lang.Integer))
+                    .toIterator.map(fromRow)
+    Observable.fromIterator(it)
   }
 
   val tokenQ = "TOKEN(partition, version)"
 
   def scanIndices(version: Int,
-                  tokens: Seq[(String, String)],
-                  segmentClause: String = ""): Future[Iterator[IndexRecord]] = {
+                  tokens: Seq[(String, String)]): Observable[IndexRecord] = {
     def cql(start: String, end: String): String =
-      s"SELECT * FROM $tableString WHERE $tokenQ >= $start AND $tokenQ < $end $segmentClause"
-    Future {
-      tokens.iterator.flatMap { case (start, end) =>
+      s"SELECT * FROM $tableString WHERE $tokenQ >= $start AND $tokenQ < $end AND indextype = 1 " +
+      s"ALLOW FILTERING"
+    val it = tokens.iterator.flatMap { case (start, end) =>
         session.execute(cql(start, end)).iterator
                .filter(_.getInt("version") == version)
                .map { row => fromRow(row) }
       }
-    }
-  }
-
-  /**
-   * Retrieves a series of indices from all partitions in the given token range,
-   * filtered by startSegment until endSegment inclusive.
-   */
-  def scanIndicesRange(version: Int,
-                       tokens: Seq[(String, String)],
-                       startSegment: Types.SegmentId,
-                       endSegment: Types.SegmentId): Future[Iterator[IndexRecord]] = {
-    val clause = s"AND segmentid >= 0x${startSegment.toHex} AND segmentid <= 0x${endSegment.toHex} " +
-                  "ALLOW FILTERING"
-    scanIndices(version, tokens, clause)
+    Observable.fromIterator(it)
   }
 
   lazy val writeIndexCql = session.prepare(
-    s"INSERT INTO $tableString (partition, version, segmentid, chunkid, data) " +
-    "VALUES (?, ?, ?, ?, ?)")
+    s"INSERT INTO $tableString (partition, version, indextype, chunkid, data) " +
+    "VALUES (?, ?, 1, ?, ?)")
 
   /**
    * Writes new indices to the index table
@@ -112,18 +86,15 @@ sealed class IndexTable(val dataset: DatasetRef, val connector: FiloCassandraCon
    */
   def writeIndices(partition: Types.BinaryPartition,
                    version: Int,
-                   segmentId: Types.SegmentId,
-                   indices: Seq[(Int, Array[Byte])],
+                   indices: Seq[(Types.ChunkID, Array[Byte])],
                    stats: ColumnStoreStats): Future[Response] = {
     var indexBytes = 0
     val partitionBuf = toBuffer(partition)
-    val segmentBuf = toBuffer(segmentId)
     val statements = indices.map { case (chunkId, indexData) =>
       indexBytes += indexData.size
       writeIndexCql.bind(partitionBuf,
                          version: java.lang.Integer,
-                         segmentBuf,
-                         chunkId: java.lang.Integer,
+                         chunkId: java.lang.Long,
                          ByteBuffer.wrap(indexData))
     }
     stats.addIndexWriteStats(indexBytes)

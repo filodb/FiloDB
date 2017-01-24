@@ -10,7 +10,8 @@ import scala.language.postfixOps
 
 import filodb.core._
 import filodb.core.metadata.{Column, DataColumn, Dataset, RichProjection}
-import filodb.core.store.{RowReaderSegment, SegmentState, ChunkSetSegment, SegmentInfo}
+import filodb.core.query.ChunkSetReader
+import filodb.core.store.{ChunkSet}
 import org.velvia.filo.{FiloVector, FastFiloRowReader, RowReader, TupleRowReader}
 
 import java.util.concurrent.TimeUnit
@@ -23,7 +24,7 @@ object IntSumReadBenchmark {
   val ref = DatasetRef("dataset")
   val projection = RichProjection(dataset, schema)
 
-  val rowStream = Stream.from(0).map { row => (Some(scala.util.Random.nextInt), Some(row)) }
+  val rowIt = Iterator.from(0).map { row => (Some(scala.util.Random.nextInt), Some(row)) }
 
   org.slf4j.LoggerFactory.getLogger("filodb").asInstanceOf[Logger].setLevel(Level.ERROR)
 }
@@ -38,11 +39,9 @@ class IntSumReadBenchmark {
   import IntSumReadBenchmark._
   val NumRows = 10000
 
-  val segInfo = SegmentInfo("/0", 0).basedOn(projection)
   val state = new TestSegmentState(projection, schema)
-  val writerSeg = new ChunkSetSegment(projection, segInfo)
-  writerSeg.addChunkSet(state, rowStream.map(TupleRowReader).take(NumRows))
-  val readSeg = RowReaderSegment(writerSeg, schema)
+  val chunkSet = ChunkSet(state, rowIt.map(TupleRowReader).take(NumRows))
+  val reader = ChunkSetReader(chunkSet, schema)
 
   /**
    * Simulation of a columnar query engine scanning the segment chunks columnar wise
@@ -50,8 +49,8 @@ class IntSumReadBenchmark {
   @Benchmark
   @BenchmarkMode(Array(Mode.Throughput))
   @OutputTimeUnit(TimeUnit.SECONDS)
-  def columnarSegmentScan(): Int = {
-    val intVector = FiloVector[Int](readSeg.chunks(0)(0))
+  def columnarChunkScan(): Int = {
+    val intVector = FiloVector[Int](reader.chunks(0))
     var total = 0
     for { i <- 0 until NumRows optimized } {
       total += intVector(i)
@@ -65,8 +64,8 @@ class IntSumReadBenchmark {
   @Benchmark
   @BenchmarkMode(Array(Mode.Throughput))
   @OutputTimeUnit(TimeUnit.SECONDS)
-  def rowWiseSegmentScan(): Int = {
-    val it = readSeg.rowIterator()
+  def rowWiseChunkScan(): Int = {
+    val it = reader.rowIterator()
     var sum = 0
     while(it.hasNext) {
       sum += it.next.getInt(0)
@@ -80,8 +79,8 @@ class IntSumReadBenchmark {
   @Benchmark
   @BenchmarkMode(Array(Mode.Throughput))
   @OutputTimeUnit(TimeUnit.SECONDS)
-  def rowWiseSegmentScanNullCheck(): Int = {
-    val it = readSeg.rowIterator()
+  def rowWiseChunkScanNullCheck(): Int = {
+    val it = reader.rowIterator()
     var sum = 0
     while(it.hasNext) {
       val row = it.next
@@ -96,8 +95,8 @@ class IntSumReadBenchmark {
   @Benchmark
   @BenchmarkMode(Array(Mode.Throughput))
   @OutputTimeUnit(TimeUnit.SECONDS)
-  def rowWiseBoxedSegmentScan(): Int = {
-    val it = readSeg.rowIterator()
+  def rowWiseBoxedChunkScan(): Int = {
+    val it = reader.rowIterator()
     var sum = 0
     while(it.hasNext) {
       sum += it.next.asInstanceOf[FastFiloRowReader].getAny(0).asInstanceOf[Int]

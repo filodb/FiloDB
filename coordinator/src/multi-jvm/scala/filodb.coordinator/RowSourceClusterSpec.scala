@@ -85,7 +85,7 @@ abstract class RowSourceClusterSpec extends MultiNodeSpec(RowSourceClusterSpecCo
 
   private def getColStoreRows(): Int = {
     val paramSet = columnStore.getScanSplits(ref2, 1)
-    val rowIt = columnStore.scanRows(proj2, schema, 0, FilteredPartitionScan(paramSet.head)).futureValue
+    val rowIt = columnStore.scanRows(proj2, schema, 0, FilteredPartitionScan(paramSet.head))
     rowIt.toSeq.length
   }
 

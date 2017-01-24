@@ -18,7 +18,7 @@ object Types {
   type SegmentId = ByteVector
   // TODO: Change ColumnId to an Int.  Would be more efficient, and allow renaming columns.
   type ColumnId = String
-  type ChunkID = Int    // Each chunk is identified by segmentID and a long timestamp
+  type ChunkID = Long     // Each chunk is identified by segmentID and a long timestamp
 
   type BinaryPartition = ByteVector
 
