@@ -151,29 +151,28 @@ Perhaps it's easiest by starting with a diagram of how FiloDB stores data.
   </tr>
   <tr>
     <td>Partition key 1</td>
-    <td>Segment 1</td>
-    <td>Segment 2</td>
-    <td>Segment 1</td>
-    <td>Segment 2</td>
+    <td>Chunk 1</td>
+    <td>Chunk 2</td>
+    <td>Chunk 1</td>
+    <td>Chunk 2</td>
   </tr>
   <tr>
     <td>Partition key 2</td>
-    <td>Segment 1</td>
-    <td>Segment 2</td>
-    <td>Segment 1</td>
-    <td>Segment 2</td>
+    <td>Chunk 1</td>
+    <td>Chunk 2</td>
+    <td>Chunk 1</td>
+    <td>Chunk 2</td>
   </tr>
 </table>
 
-Three types of key define the data model of a FiloDB table.
+Data is modeled and ingested using the two different parts of a record's primary key: the **partition key** and the **row key**.
 
-1. **partition key** - decides how data is going to be distributed across the cluster. All data within one partition key is guaranteed to fit on one node. May consist of multiple columns.
-2. **segment key** - groups row values into efficient chunks.  Segments within a partition are sorted by segment key and range scans can be done over segment keys.   
-1. **row key**     - acts as a primary key within each partition and decides how data will be sorted within each segment.  May consist of multiple columns.
+1. **partition key** - decides how data is going to be distributed across the cluster. All data within one partition key is guaranteed to fit on one node. Similar to the partition key in Cassandra.  May consist of multiple columns with computed columns.
+1. **row key**     - acts as a primary key within each partition. Records with the same row key will replace previous ones. Within each chunkset, records are sorted by row key.  Row keys also facilitate range scans within a partition.
 
-The PRIMARY KEY for FiloDB consists of (partition key, segment_key, row key).  When choosing the above values you must make sure the combination of the three are unique.  If any component of a primary key contains a null value, then a default value will be substituted.
+The PRIMARY KEY for FiloDB consists of (partition key, row key).  When choosing the above values you must make sure the combination of the two are unique.  If any component of a primary key contains a null value, then a default value will be substituted.
 
-Specifying the partitioning column is optional.  If a partitioning column is not specified, FiloDB will create a default one with a fixed value, which means everything will be thrown into one node, and is only suitable for small amounts of data.  If you don't specify a partitioning column, then you have to make sure combination of segment key and row key values are all unique.
+Specifying the partition key is optional.  If a partition key is not specified, FiloDB will create a default one with a fixed value, which means everything will be thrown into one node, and is only suitable for small amounts of data.  The usual strategy is to find partition keys that distribute data in the cluster and over time.
 
 For examples of data modeling and choosing keys, see the examples below as well as [datasets](doc/datasets_reading.md).
 
@@ -181,7 +180,7 @@ For additional information refer to Data Modeling and Performance Considerations
 
 ### Computed Columns
 
-You may specify a function, or computed column, for use with any key column, except for row keys.  This is especially useful for computing a good segment key, or hashing values to generate a good partition key.
+You may specify a function, or computed column, for use with partition keys.  This is especially useful for hashing values or time bucketing.
 
 | Name      | Description     | Example     |
 | :-------- | :-------------- | :---------- |
@@ -195,36 +194,45 @@ You may specify a function, or computed column, for use with any key column, exc
 
 ### FiloDB vs Cassandra Data Modelling
 
-* Like Cassandra, partitions (physical rows) distribute data and clustering keys act as a primary key within a partition
+* Like Cassandra, partitions (physical rows) distribute data
 * Like Cassandra, a single partition is the smallest unit of parallelism when querying from Spark
+* Row keys are like Cassandra clustering keys -- they act as primary key within a partition, but sorting works differently due to chunks
 * Wider rows work better for FiloDB (bigger chunk/segment size)
 * FiloDB does not have Cassandra's restrictions for partition key filtering. You can filter by any partition keys with most operators.  This means less tables in FiloDB can match more query patterns.
-* Cassandra range scans over clustering keys is available over the segment key
+* Cassandra range scans within a partition is available via row keys
 
 ### Data Modelling and Performance Considerations
 
 **Choosing Partition Keys**.
 
+- A good start for a partition key is a hash of an ID or columns that distribute well, plus a time bucket.  This spreads data around but also prevents too much data from piling up in a single partition.
 - Partition keys are the most efficient way to filter data.  Remember that, unlike Cassandra, FiloDB is able to efficiently filter any column in a partition key -- even string contains, IN on only one column.  It can do this because FiloDB pre-scans a much smaller table ahead of scanning the main columnar chunk table.  This flexibility means that there is no need to populate different tables with different orders of partition keys just to optimize for different queries.
-- If there are too few partitions, then FiloDB will not be able to distribute and parallelize reads.
+- Target between 10-100 active partitions per node in a cluster during ingestion.  This leads to big chunk sizes that are efficient for reading.  This does not mean that there can only be 100 partitions total; rather that at any one time during ingestion the number of active partitions are limited (another reason why time bucketing is important).
 - If the numer of rows in each partition is too few, then the storage will not be efficient.
-- If the partition key is time based, there may be a hotspot in the cluster as recent data is all written into the same set of replicas, and likewise for read patterns as well.
 - Consider picking a column or group of columns with low cardinality, and has good distribution so that data is distributed across the cluster.
 - Consider only those columns that do not get updated. Since partition key is part of primary key, partition key columns cannot get updated.
+- For Cassandra, each partition cannot be too big, target 500MB-1GB as a maximum size
 
-**Segment Key and Chunk Size**.
+**Row Keys and Chunk Size**.
 
-Within each partition, data is delineated by the segment key into *segments*.  Within each segment, successive flushes of the MemTable writes data in *chunks*.  The segmentation is key to sorting and filtering data within partitions, and the chunk size (which depends on segmentation) also affects performance.  The smaller the chunk size, the higher the overhead of scanning data becomes.
+Within a partition, data is divided into chunks.  The relationship between partitions, chunks, and row keys are as follows:
 
-Segmentation and chunk size distribution may be checked by the CLI `analyze` command.  In addition, the following configuration affects segmentation and chunk size:
+* During ingestion, all the rows for a partition are sorted by row key in a memtable, then chunked (with the max chunk size configurable). Thus all chunks are internally in row key sorted order.
+* Filtering within a partition by row key ranges is available.  This results in only chunks that intersect with the row key range being read.
+* The choice of row key does not affect chunk size, but does affect row key range scanning.  Choose a row key according to how you want to filter partition data -- put the most important filtering key first in the row key.
+
+Bigger chunks are better.  The chunk size can be predicted as follows:
+
+    Math.min(`chunk_size`, MemtableSize / (AverageActiveNumberOfPartitions))
+
+For example, with the default `max-rows-per-table` of 200000, and 100 active partitions (let's say the time bucket is a day, and on average the other partition keys are hashed into 100 buckets), then the average chunk size will be 200000/100 = 2000 rows per chunk.
+
+Chunk size distribution may be checked by the CLI `analyze` command.  In addition, the following configuration affects chunk size:
 * `memtable.max-rows-per-table`, `memtable.flush-trigger-rows` affects how many rows are kept in the MemTable at a time, and this along with how many partitions are in the MemTable directly leads to the chunk size upon flushing.
-* The segment size is directly controlled by the segment key.  Choosing a segment key that groups data into big enough chunks (at least 1000 is a good guide) is highly recommended.  Experimentation along with running `filo-cli analyze` is recommended to come up with a good segment key.  See the Spark ingestion of GDELT below on an example... choosing an inappropriate segment key leads to MUCH slower ingest and read performance.
-* `chunk_size` option when creating a dataset caps the size of a single chunk.
-* Avoid picking any column that has the possibility of getting updated as a segment key column.
-* Consider a low cardinal column within partition for segment key. Ideal segment key will hold at least 1000 values in a chunk as explained above. Use a computed column like `:string /0` as the segment key if there are no good candidates available or your chosen segment key has potential to hold very few values in chunks under each segment key.
-* Consider moving one of the partition keys as segment keys if your partition is not too wide.  Use the `analyze` filo-cli command to discover partition size.
-* Cosider creating computed columns to make good segment key. Ex: Rounding date to month etc.
-* Ideal segment key would have chunks filled with thousands of values and frequently gets used as filter in queries.
+* `chunk_size` option when creating a dataset caps the size of a single chunk.  Smaller chunk sizes lead to slower reads, but more even distribution of chunks (ie better range scanning)
+* Row keys are immutable.  Don't pick columns that might change.
+* Consider moving one of the partition keys as a part of a row key if your chunk sizes/partitions are too small.  Use the `analyze` filo-cli command to discover partition size.
+* Less partitions and smaller chunk sizes leads to more chunks being written with each flush, which leads to better range scanning
 
 ### Predicate Pushdowns
 
@@ -234,8 +242,16 @@ To help with planning, here is an exact list of the predicate pushdowns (in Spar
   * = on every partition key results in a **single-partition** query
   * = or IN on every partition key results in a **multi-partition** query, still faster than full table scan
   * Otherwise, a filtered full table scan results - partitions not matching predicates will not be scanned
-* Segment key:  must be of the form `segmentKey >/>= value AND segmentKey </<= value` or `segmentKey = value`
-  Segment Key predicates will pushdown to cassandra if your storage engine is in Cassandra. FiloDB segment keys map to cluster key of the underlying cassandra storage.
+* Rowkey Range Scan:
+  * Range scans are available for matching either the entire row key or the first N components of the row key
+  * The last component compared must be either = or a range, and all other components must be = comparison
+  * For example, if a row key consists of colA, colB, colC, then the following predicates are valid for push down:
+    - `colA = value`
+    - `colA >/>= value AND colA </<= value`
+    - `colA = value AND colB = val2`
+    - `colA = value AND (colB >/>= val1 AND colB </<= val2)`
+    - `colA = valA AND colB = valB AND colC = valC`
+    - `colA = valA AND colB = valB AND (colC >/>= val1 AND colC </<= val2)`
 
 Note: You can see predicate pushdown filters in application logs by setting logging level to INFO.
 
@@ -245,25 +261,16 @@ This is one way I would recommend setting things up to take advantage of FiloDB.
 
 The metric names are the column names.  This lets you select on just one metric and effectively take advantage of columnar layout.
 
-* Partition key = hostname
-* Row key = timestamp (say millis)
-* Segment key = `:round timestamp 10000` (Timestamp rounded to nearest 10000 millis or 10 seconds)
+* Partition key = `:hash hostname 100,:timeslice timestamp 1d`
+* Row key = `timestamp,hostname`
 * Columns: hostname, timestamp, CPU, load_avg, disk_usage, etc.
 
 You can add more metrics/columns over time, but storing each metric in its own column is FAR FAR more efficient, at least in FiloDB.   For example, disk usage metrics are likely to have very different numbers than load_avg, and so Filo can optimize the storage of each one independently.  Right now I would store them as ints and longs if possible.
 
-With the above layout, as long as there aren’t too many hostnames, set the memtable max size and flush trigger to both high numbers, you should get good read performance.  Queries that would work well for the above layout:
+Queries that would work well for the above layout:
 
 - SELECT avg(load_avg), min(load_avg), max(load_avg) FROM metrics WHERE timestamp > t1 AND timestamp < t2
-etc.
-
-Queries that would work well once we expose a local Cassandra query interface:
-- Select metrics from one individual host
-
-Another possible layout is something like this:
-
-* Partition key = hostname % 1024 (or pick your # of shards)
-* Row key = hostname, timestamp
+- The above with filter on a specific hostname (would be single partition read)
 
 ### Distributed Partitioning
 
@@ -288,8 +295,7 @@ The options to use with the data-source api are:
 |------------------|------------------------------------------------------------------|------------|----------|
 | dataset          | name of the dataset                                              | read/write | No       |
 | database         | name of the database to use for the dataset.  For Cassandra, defaults to `filodb.cassandra.keyspace` config.  | read/write | Yes |
-| row_keys         | comma-separated list of column name(s) to use for the row primary key within each partition.  Computed columns are not allowed.  | write      | No if mode is OverWrite or creating dataset for first time  |
-| segment_key      | name of the column (could be computed) to use to group rows into segments in a partition.   | write      | yes - defaults to `:string /0` |
+| row_keys         | comma-separated list of column name(s) to use for the row primary key within each partition.  Computed columns are not allowed.  May be used for range queries within partitions and chunks are sorted by row keys. | write      | No if mode is OverWrite or creating dataset for first time  |
 | partition_keys   | comma-separated list of column name(s) or computed column functions to use for the partition key.  If not specified, defaults to `:string /0` (a single partition).  | write      | Yes      |
 | splits_per_node  | number of read threads per node, defaults to 4 | read | Yes |
 | reset_schema     | If true, allows dataset schema (eg partition keys) to be redefined for an existing dataset when SaveMode.Overwrite is used.  Defaults to false.  | write | Yes |
@@ -360,23 +366,21 @@ import org.apache.spark.sql.SaveMode
 scala> csvDF.write.format("filodb.spark").
              option("dataset", "gdelt").
              option("row_keys", "GLOBALEVENTID").
-             option("segment_key", ":round GLOBALEVENTID 10000").
              option("partition_keys", "MonthYear").
              mode(SaveMode.Overwrite).save()
 ```
 
-Above, we partition the GDELT dataset by MonthYear, creating roughly 72 partitions for 1979-1984, with the unique GLOBALEVENTID used as a row key.  We group every 10000 eventIDs into a segment using the convenient `:round` computed column (GLOBALEVENTID is correlated with time, so in this case we could pack segments with consecutive EVENTIDs). You could use multiple columns for the partition or row keys, of course.  For example, to partition by country code and year instead:
+Above, we partition the GDELT dataset by MonthYear, creating roughly 72 partitions for 1979-1984, with the unique GLOBALEVENTID used as a row key.  You could use multiple columns for the partition or row keys, of course.  For example, to partition by country code and year instead:
 
 ```scala
 scala> csvDF.write.format("filodb.spark").
              option("dataset", "gdelt_by_country_year").
              option("row_keys", "GLOBALEVENTID").
-             option("segment_key", ":string 0").
              option("partition_keys", "Actor2CountryCode,Year").
              mode(SaveMode.Overwrite).save()
 ```
 
-Note that in the above case, since events are spread over a much larger number of partitions, it no longer makes sense to use GLOBALEVENTID as a segment key - at least with the original 10000 as a rounding factor.  There are very few events for a given country and year within the space of 10000 event IDs, leading to inefficient storage.  Instead, we use a single segment for each partition.  We probably could have used `:round GLOBALEVENTID 500000` or some other bigger factor as well.  Using `:round GLOBALEVENT 10000` lead to 3x slower ingest and at least 5x slower reads.
+In both cases, the use of `GLOBALEVENTID` as a row key would allow for range queries within partitions by the `GLOBALEVENTID`.
 
 The key definitions can be left out for appends:
 
@@ -397,8 +401,6 @@ val df = sqlContext.read.format("filodb.spark").option("dataset", "gdelt").load(
 
 The dataset can be queried using the DataFrame DSL. See the section [Querying Datasets](#querying-datasets) for examples.
 
-Note: For your production data loads sort the data frame before saving to FiloDB when the data source is not Cassandra. This will ensure to efficiently load segment chunks. Refer to [Distributed Partitioning](#distributed-partitioning) for additional info.
-
 ### Spark/Scala/Java API
 
 There is a more typesafe API than the Spark Data Source API.
@@ -407,7 +409,6 @@ There is a more typesafe API than the Spark Data Source API.
 import filodb.spark._
 sqlContext.saveAsFilo(df, "gdelt",
                       rowKeys = Seq("GLOBALEVENTID"),
-                      segmentKey = ":round GLOBALEVENTID 10000",
                       partitionKeys = Seq("MonthYear"))
 ```
 
@@ -528,15 +529,14 @@ The `filo-cli` accepts arguments as key-value pairs. The following keys are supp
 | database   | Specifies the "database" the dataset should operate in.  For Cassandra, this is the keyspace.  If not specified, uses config value.  |
 | limit      | This is optional key to be used with `select`. Its value should be the number of rows required.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | columns    | This is required for defining the schema of a dataset. Its value should be a comma-separated string of the format, `column1:typeOfColumn1,column2:typeOfColumn2` where column1 and column2 are the names of the columns and typeOfColumn1 and typeOfColumn2 are one of `int`,`long`,`double`,`string`,`bool`                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| rowKeys | This is required for defining the row keys. Its value should be comma-separated list of column names or computed column functions to make up the row key                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| segmentKey | The column name or computed column for the segment key |
+| rowKeys | This is required for defining the row keys. Its value should be a comma-separated list of column names to make up the row key                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | partitionKeys | Comma-separated list of column names or computed columns to make up the partition key |
 | command    | Its value can be either of `init`, `create`, `importcsv`, `analyze`, `delete`, `truncate` or `list`.<br/><br/>The `init` command is used to create the FiloDB schema.<br/><br/>The `create` command is used to define new a dataset. For example,<br/>```./filo-cli --command create --dataset playlist --columns id:int,album:string,artist:string,title:string --rowKeys id --segmentKey ':string /0' ``` <br/>Note: The sort column is not optional.<br/><br/>The `list` command can be used to view the schema of a dataset. For example, <br/>```./filo-cli --command list --dataset playlist```<br/><br/>The `importcsv` command can be used to load data from a CSV file into a dataset. For example,<br/>```./filo-cli --command importcsv --dataset playlist --filename playlist.csv```<br/>Note: The CSV file should be delimited with comma and have a header row. The column names must match those specified when creating the schema for that dataset.<br>
 The `delete` command is used to delete datasets, like a drop.<br>
 `truncate` truncates data for an existing dataset to 0. |
 | select     | Its value should be a comma-separated string of the columns to be selected,<br/>```./filo-cli --dataset playlist --select album,title```<br/>The result from `select` is printed in the console by default. An output file can be specified with the key `--outfile`. For example,<br/>```./filo-cli --dataset playlist --select album,title --outfile playlist.csv```                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | delimiter  | This is optional key to be used with `importcsv` command. Its value should be the field delimiter character. Default value is comma.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| numSegments | The maximum number of segments to analyze for the analyze command.  Prevents analyze of large tables from taking too long. Defaults to 10000. |
+| numPartitions | The maximum number of partitions to analyze for the analyze command.  Prevents analyze of large tables from taking too long. Defaults to 1000. |
 | timeoutSeconds | The number of seconds for timeout for initialization, table creation, other quick things  |
 
 ### Running the CLI
@@ -565,8 +565,7 @@ The following examples use the [GDELT public dataset](http://data.gdeltproject.o
 Create a dataset with all the columns :
 
 ```
-./filo-cli --command create --dataset gdelt --columns GLOBALEVENTID:int,SQLDATE:string,MonthYear:int,Year:int,FractionDate:double,Actor1Code:string,Actor1Name:string,Actor1CountryCode:string,Actor1KnownGroupCode:string,Actor1EthnicCode:string,Actor1Religion1Code:string,Actor1Religion2Code:string,Actor1Type1Code:string,Actor1Type2Code:string,Actor1Type3Code:string,Actor2Code:string,Actor2Name:string,Actor2CountryCode:string,Actor2KnownGroupCode:string,Actor2EthnicCode:string,Actor2Religion1Code:string,Actor2Religion2Code:string,Actor2Type1Code:string,Actor2Type2Code:string,Actor2Type3Code:string,IsRootEvent:int,EventCode:string,EventBaseCode:string,EventRootCode:string,QuadClass:int,GoldsteinScale:double,NumMentions:int,NumSources:int,NumArticles:int,AvgTone:double,Actor1Geo_Type:int,Actor1Geo_FullName:string,Actor1Geo_CountryCode:string,Actor1Geo_ADM1Code:string,Actor1Geo_Lat:double,Actor1Geo_Long:double,Actor1Geo_FeatureID:int,Actor2Geo_Type:int,Actor2Geo_FullName:string,Actor2Geo_CountryCode:string,Actor2Geo_ADM1Code:string,Actor2Geo_Lat:double,Actor2Geo_Long:double,Actor2Geo_FeatureID:int,ActionGeo_Type:int,ActionGeo_FullName:string,ActionGeo_CountryCode:string,ActionGeo_ADM1Code:string,ActionGeo_Lat:double,ActionGeo_Long:double,ActionGeo_FeatureID:int,DATEADDED:string,Actor1Geo_FullLocation:string,Actor2Geo_FullLocation:string,ActionGeo_FullLocation:string --rowKeys GLOBALEVENTID --segmentKey ':string 0'
-```
+./filo-cli --command create --dataset gdelt --columns GLOBALEVENTID:int,SQLDATE:string,MonthYear:int,Year:int,FractionDate:double,Actor1Code:string,Actor1Name:string,Actor1CountryCode:string,Actor1KnownGroupCode:string,Actor1EthnicCode:string,Actor1Religion1Code:string,Actor1Religion2Code:string,Actor1Type1Code:string,Actor1Type2Code:string,Actor1Type3Code:string,Actor2Code:string,Actor2Name:string,Actor2CountryCode:string,Actor2KnownGroupCode:string,Actor2EthnicCode:string,Actor2Religion1Code:string,Actor2Religion2Code:string,Actor2Type1Code:string,Actor2Type2Code:string,Actor2Type3Code:string,IsRootEvent:int,EventCode:string,EventBaseCode:string,EventRootCode:string,QuadClass:int,GoldsteinScale:double,NumMentions:int,NumSources:int,NumArticles:int,AvgTone:double,Actor1Geo_Type:int,Actor1Geo_FullName:string,Actor1Geo_CountryCode:string,Actor1Geo_ADM1Code:string,Actor1Geo_Lat:double,Actor1Geo_Long:double,Actor1Geo_FeatureID:int,Actor2Geo_Type:int,Actor2Geo_FullName:string,Actor2Geo_CountryCode:string,Actor2Geo_ADM1Code:string,Actor2Geo_Lat:double,Actor2Geo_Long:double,Actor2Geo_FeatureID:int,ActionGeo_Type:int,ActionGeo_FullName:string,ActionGeo_CountryCode:string,ActionGeo_ADM1Code:string,ActionGeo_Lat:double,ActionGeo_Long:double,ActionGeo_FeatureID:int,DATEADDED:string,Actor1Geo_FullLocation:string,Actor2Geo_FullLocation:string,ActionGeo_FullLocation:string --rowKeys GLOBALEVENTID```
 
 Verify the dataset metadata:
 
@@ -593,6 +592,9 @@ Version 0.4 is the stable, latest released version.  It has been tested on a clu
 
 ### Upcoming version 0.7 changes:
 
+* ALL NEW segmentless data model, much simpler to ingest data efficiently without as much guesswork (no need to determine segment key), especially for streaming apps
+* Range scans over one or more row keys, instead of over segment keys
+* Completely revised, more efficient read path
 * NEW storage layout with incremental indices, provides much better ingestion for large partitions and skewed data 
 * Automatic routing of ingestion records across the network - no need to `sort` your DataFrame in Spark
 * creating a function for checking java and another to check sbt (@jenaiz)
@@ -661,7 +663,9 @@ To run benchmarks, from within SBT:
     cd jmh
     jmh:run -i 5 -wi 5 -f3
 
-You can get the huge variety of JMH options by running `jmh:run -help`.
+You can get the huge variety of JMH options by running `jmh:run -help`.  For stack profiling, do this:
+
+    jmh:run -i 5 -wi 5 -f3 -prof stack -jvmArgsAppend -Djmh.stack.lines=3
 
 There are also stress tests in the stress module.  See the [Stress README](stress/README.md).
 

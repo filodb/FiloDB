@@ -48,7 +48,6 @@ class FiloContext(val sqlContext: SQLContext) extends AnyVal {
   private[spark] def createOrUpdateDataset(schema: StructType,
                                            dataset: DatasetRef,
                                            rowKeys: Seq[String],
-                                           segmentKey: String,
                                            partitionKeys: Seq[String],
                                            chunkSize: Option[Int] = None,
                                            resetSchema: Boolean = false,
@@ -64,12 +63,12 @@ class FiloContext(val sqlContext: SQLContext) extends AnyVal {
     }
     (datasetObj, mode) match {
       case (None, SaveMode.Append) | (None, SaveMode.Overwrite) | (None, SaveMode.ErrorIfExists) =>
-        val ds = makeAndVerifyDataset(dataset, rowKeys, segmentKey, partKeys, chunkSize, dfColumns)
+        val ds = makeAndVerifyDataset(dataset, rowKeys, partKeys, chunkSize, dfColumns)
         createNewDataset(ds)
       case (Some(dsObj), SaveMode.ErrorIfExists) =>
         throw new RuntimeException(s"Dataset $dataset already exists!")
       case (Some(dsObj), SaveMode.Overwrite) if resetSchema =>
-        val ds = makeAndVerifyDataset(dataset, rowKeys, segmentKey, partKeys, chunkSize, dfColumns)
+        val ds = makeAndVerifyDataset(dataset, rowKeys, partKeys, chunkSize, dfColumns)
         deleteDataset(dataset)
         createNewDataset(ds)
       case (_, _) =>
@@ -84,9 +83,7 @@ class FiloContext(val sqlContext: SQLContext) extends AnyVal {
    * @param df the DataFrame to write to FiloDB
    * @param dataset the name of the FiloDB table/dataset to read from
    * @param rowKeys the name of the column(s) used as the row primary key within each partition.
-   *                May be computed functions. Only used if mode is Overwrite and
-   * @param segmentKey the name of the column or computed function used to group rows into segments and
-   *                   to sort the partition by.
+   *                Cannot be computed.  May be used for range queries within partitions.
    * @param partitionKeys column name(s) used for partition key.  If empty, then the default Dataset
    *                      partition key of `:string /0` (a constant) will be used.
    *
@@ -110,7 +107,6 @@ class FiloContext(val sqlContext: SQLContext) extends AnyVal {
   def saveAsFilo(df: DataFrame,
                  dataset: String,
                  rowKeys: Seq[String],
-                 segmentKey: String,
                  partitionKeys: Seq[String],
                  database: Option[String] = None,
                  mode: SaveMode = SaveMode.Append,
@@ -118,7 +114,7 @@ class FiloContext(val sqlContext: SQLContext) extends AnyVal {
     val IngestionOptions(version, chunkSize, writeTimeout,
                          flushAfterInsert, resetSchema) = options
     val ref = DatasetRef(dataset, database)
-    createOrUpdateDataset(df.schema, ref, rowKeys, segmentKey, partitionKeys, chunkSize, resetSchema, mode)
+    createOrUpdateDataset(df.schema, ref, rowKeys, partitionKeys, chunkSize, resetSchema, mode)
     insertIntoFilo(df, dataset, version, mode == SaveMode.Overwrite,
                    database, writeTimeout, flushAfterInsert)
   }

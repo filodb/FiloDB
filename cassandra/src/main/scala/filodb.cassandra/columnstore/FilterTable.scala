@@ -25,48 +25,43 @@ sealed class FilterTable(val dataset: DatasetRef, val connector: FiloCassandraCo
   val createCql = s"""CREATE TABLE IF NOT EXISTS $tableString (
                     |    partition blob,
                     |    version int,
-                    |    segmentid blob,
-                    |    chunkid int,
+                    |    chunkid bigint,
                     |    data blob,
-                    |    PRIMARY KEY ((partition, version), segmentid, chunkid)
+                    |    PRIMARY KEY ((partition, version), chunkid)
                     |) WITH COMPACT STORAGE AND compression = {
                     'sstable_compression': '$sstableCompression'}""".stripMargin
 
   lazy val readCql = session.prepare(
-    s"SELECT chunkid, data FROM $tableString WHERE partition = ? AND version = ? AND segmentid = ? " +
+    s"SELECT chunkid, data FROM $tableString WHERE partition = ? AND version = ? " +
     s"AND chunkid >= ? AND chunkid <= ?")
 
   def fromRow(row: Row): SegmentState.IDAndFilter = {
     val buffer = decompress(row.getBytes("data"))
     val bais = new ByteArrayInputStream(buffer.array)
-    (row.getInt("chunkid"), BloomFilter.readFrom[Long](bais))
+    (row.getLong("chunkid"), BloomFilter.readFrom[Long](bais))
   }
 
   def readFilters(partition: Types.BinaryPartition,
                   version: Int,
-                  segmentId: Types.SegmentId,
                   firstChunkId: Types.ChunkID,
                   lastChunkId: Types.ChunkID): Future[Iterator[SegmentState.IDAndFilter]] = {
     session.executeAsync(readCql.bind(toBuffer(partition),
                                       version: java.lang.Integer,
-                                      toBuffer(segmentId),
-                                      firstChunkId: java.lang.Integer,
-                                      lastChunkId: java.lang.Integer))
+                                      firstChunkId: java.lang.Long,
+                                      lastChunkId: java.lang.Long))
            .toIterator.map(_.map(fromRow))
   }
 
   lazy val writeIndexCql = session.prepare(
-    s"INSERT INTO $tableString (partition, version, segmentid, chunkid, data) " +
-    "VALUES (?, ?, ?, ?, ?)")
+    s"INSERT INTO $tableString (partition, version, chunkid, data) " +
+    "VALUES (?, ?, ?, ?)")
 
   def writeFilters(partition: Types.BinaryPartition,
                    version: Int,
-                   segmentId: Types.SegmentId,
-                   filters: Seq[(Int, BloomFilter[Long])],
+                   filters: Seq[(Types.ChunkID, BloomFilter[Long])],
                    stats: ColumnStoreStats): Future[Response] = {
     var filterBytes = 0L
     val partitionBuf = toBuffer(partition)
-    val segmentBuf = toBuffer(segmentId)
     val baos = new ByteArrayOutputStream()
     val statements = try {
       filters.map { case (chunkId, filter) =>
@@ -76,8 +71,7 @@ sealed class FilterTable(val dataset: DatasetRef, val connector: FiloCassandraCo
         filterBytes += filterBuf.capacity
         writeIndexCql.bind(partitionBuf,
                            version: java.lang.Integer,
-                           segmentBuf,
-                           chunkId: java.lang.Integer,
+                           chunkId: java.lang.Long,
                            filterBuf)
       }
     } finally {

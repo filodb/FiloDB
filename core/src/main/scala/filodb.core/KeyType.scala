@@ -75,9 +75,8 @@ abstract class SingleKeyTypeBase[K : Ordering : TypedFieldExtractor] extends Key
 
   def size: Int
 
-  def ordering: Ordering[T] = implicitly[Ordering[K]]
-
-  def rowReaderOrdering: Ordering[RowReader] = new Ordering[RowReader] {
+  val ordering: Ordering[T] = implicitly[Ordering[K]]
+  val rowReaderOrdering = new Ordering[RowReader] {
     def compare(a: RowReader, b: RowReader): Int = extractor.compare(a, b, 0)
   }
 
@@ -122,9 +121,8 @@ case class CompositeReaderOrdering(atomTypes: Seq[SingleKeyType]) extends Orderi
 case class CompositeKeyType(atomTypes: Seq[SingleKeyType]) extends KeyType {
   type T = Seq[_]
 
-  def ordering: scala.Ordering[Seq[_]] = CompositeOrdering(atomTypes)
-
-  def rowReaderOrdering: Ordering[RowReader] = CompositeReaderOrdering(atomTypes)
+  val ordering = CompositeOrdering(atomTypes)
+  val rowReaderOrdering: Ordering[RowReader] = CompositeReaderOrdering(atomTypes)
 
   def toBytes(key: Seq[_]): ByteVector = {
     (0 until atomTypes.length).map { i =>

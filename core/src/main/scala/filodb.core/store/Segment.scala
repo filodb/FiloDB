@@ -4,15 +4,17 @@ import bloomfilter.mutable.BloomFilter
 import com.typesafe.scalalogging.slf4j.StrictLogging
 import java.nio.ByteBuffer
 import java.util.TreeMap
+import monix.execution.Scheduler
 import org.velvia.filo._
 import scala.collection.mutable.{ArrayBuffer, HashMap}
-import scala.concurrent.{Await, ExecutionContext}
+import scala.concurrent.Await
 import scala.concurrent.duration._
 
-import filodb.core.{KeyType, KeyRange}
-import filodb.core.Types._
-import filodb.core.metadata.{Column, RichProjection}
 import filodb.core.binaryrecord.BinaryRecord
+import filodb.core.metadata.{Column, RichProjection}
+import filodb.core.query.{PartitionChunkIndex, RowkeyPartitionChunkIndex}
+import filodb.core.Types._
+import filodb.core.{KeyType, KeyRange}
 
 //scalastyle:off
 case class SegmentInfo[+PK, +SK](partition: PK, segment: SK) {
@@ -83,6 +85,7 @@ final case class SegmentStateSettings(filterElems: Int = DefaultFilterElements,
  * @param settings   the SegmentStateSettings
  */
 abstract class SegmentState(val projection: RichProjection,
+                            chunkIndex: PartitionChunkIndex,
                             schema: Seq[Column],
                             settings: SegmentStateSettings) extends StrictLogging {
   import collection.JavaConverters._
@@ -90,38 +93,34 @@ abstract class SegmentState(val projection: RichProjection,
 
   val filoSchema = Column.toFiloSchema(schema)
   private val rowKeyIndices = projection.rowKeyColIndices.toArray
-
-  // TODO(velvia): Use some TimeUUID for chunkID instead
-  private var _nextChunkId = 0
-  private val _infosAndFilters = new ArrayBuffer[SegmentState.InfoAndFilter]
+  private val _filterMap = new HashMap[ChunkID, BloomFilter[Long]]
   private var _masterFilter = emptyFilter(settings)
 
-
   // == Abstract methods ==
-  def getRowKeyChunks(chunkID: ChunkID): Array[ByteBuffer]
+  def getRowKeyChunks(key: BinaryRecord, chunkID: ChunkID): Array[ByteBuffer]
 
-  def infosAndFilters: Seq[SegmentState.InfoAndFilter] = _infosAndFilters
+  def infos: Iterator[ChunkSetInfo] = chunkIndex.allChunks.map(_._1)
+  def filter(id: ChunkID): Option[BloomFilter[Long]] = _filterMap.get(id)
   def masterFilter: BloomFilter[Long] = _masterFilter
-  def nextChunkId: ChunkID = _nextChunkId
+  def nextChunkId: ChunkID = timeUUID64
 
   /**
    * Returns the number of chunks kept by this SegmentState instance.
    */
-  def numChunks: Int = _infosAndFilters.length
+  def numChunks: Int = chunkIndex.numChunks
 
   /**
    * Methods to append new ChunkSets or infos/filters to the current state
    */
   def add(chunkSet: ChunkSet): Unit = {
-    _infosAndFilters += (chunkSet.info -> chunkSet.bloomFilter)
+    chunkIndex.add(chunkSet.info, chunkSet.skips)
+    _filterMap(chunkSet.info.id) = chunkSet.bloomFilter
     _masterFilter = _masterFilter.union(chunkSet.bloomFilter)
-    _nextChunkId = chunkSet.info.id + 1
   }
 
-  def add(newInfosFilters: Seq[InfoAndFilter]): Unit = {
-    _infosAndFilters ++= newInfosFilters
-    _masterFilter = newInfosFilters.foldLeft(_masterFilter) { case (aggBf, (_, bf)) => aggBf.union(bf) }
-    infosAndFilters.lastOption.foreach { case (info, _) => _nextChunkId = info.id + 1 }
+  def addFilters(filters: Map[ChunkID, BloomFilter[Long]]): Unit = {
+    _filterMap ++= filters
+    _masterFilter = filters.foldLeft(_masterFilter) { case (aggBf, (id, bf)) => aggBf.union(bf) }
   }
 
   def filterRowKeys(rowKeys: Array[BinaryRecord]): Array[BinaryRecord] =
@@ -142,15 +141,14 @@ abstract class SegmentState(val projection: RichProjection,
 
 class ColumnStoreSegmentState private(proj: RichProjection,
                                       segInfo: SegmentInfo[RichProjection#PK, RichProjection#SK],
+                                      chunkIndex: PartitionChunkIndex,
                                       schema: Seq[Column],
                                       version: Int,
-                                      scanner: ColumnStoreScanner,
+                                      scanner: ColumnStore with ColumnStoreScanner,
                                       settings: SegmentStateSettings)
-                                     (implicit ec: ExecutionContext)
-extends SegmentState(proj, schema, settings) {
-  def getRowKeyChunks(chunkID: ChunkID): Array[ByteBuffer] =
-    Await.result(scanner.readRowKeyChunks(proj, version, chunkID)(segInfo.basedOn(proj)),
-                 settings.timeout)
+extends SegmentState(proj, chunkIndex, schema, settings) {
+  def getRowKeyChunks(key: BinaryRecord, chunkID: ChunkID): Array[ByteBuffer] =
+    scanner.readRowKeyChunks(proj, version, segInfo.partition, key, chunkID)
 }
 
 object ColumnStoreSegmentState extends StrictLogging {
@@ -160,22 +158,21 @@ object ColumnStoreSegmentState extends StrictLogging {
   def apply(proj: RichProjection,
             schema: Seq[Column],
             version: Int,
-            scanner: ColumnStoreScanner,
+            scanner: ColumnStore with ColumnStoreScanner,
             settings: SegmentStateSettings = SegmentStateSettings())
            (segInfo: SegmentInfo[proj.PK, proj.SK])
-           (implicit ec: ExecutionContext): ColumnStoreSegmentState = {
-    val range = KeyRange(segInfo.partition, segInfo.segment, segInfo.segment, endExclusive = false)
-    logger.debug(s"Retrieving segment indexes and filters from column store: $range")
-    val indexRead = scanner.scanIndices(proj, version, SinglePartitionRangeScan(range))
-    val indexIt = Await.result(indexRead, settings.timeout)
-    val infos = indexIt.toSeq.headOption.map(_.infosAndSkips).getOrElse(Nil).map(_._1)
-    val filterMap = if (infos.nonEmpty) {
-     Await.result(scanner.readFilters(proj, version, (infos.head.id, infos.last.id))
-                  (segInfo)(ec), settings.timeout).toMap
+           (implicit ec: Scheduler): ColumnStoreSegmentState = {
+    logger.debug(s"Retrieving partition indexes and filters from column store: $segInfo")
+    val binPart = proj.partitionType.toBytes(segInfo.partition)
+    val indexObs = scanner.scanPartitions(proj, version, SinglePartitionScan(segInfo.partition))
+                          .firstOrElseL(new RowkeyPartitionChunkIndex(binPart, proj))
+    val index = Await.result(indexObs.runAsync, settings.timeout)
+    val filterMap = if (index.numChunks > 0) {
+      Await.result(scanner.readFilters(proj, version, (Long.MinValue, Long.MaxValue))
+                   (segInfo)(ec), settings.timeout).toMap
     } else { Map.empty[ChunkID, BloomFilter[Long]] }
-    val emptyFilter = SegmentState.emptyFilter(settings)
-    val state = new ColumnStoreSegmentState(proj, segInfo, schema, version, scanner, settings)(ec)
-    state.add(infos.map { info => (info, filterMap.getOrElse(info.id, emptyFilter)) })
+    val state = new ColumnStoreSegmentState(proj, segInfo, index, schema, version, scanner, settings)
+    state.addFilters(filterMap)
     state
   }
 }
@@ -208,123 +205,3 @@ class ChunkSetSegment(val projection: RichProjection,
     chunkSets.map { chunkSet => (chunkSet.info, chunkSet.skips, chunkSet.bloomFilter) }
 }
 
-/**
- * A segment optimized for reading and iterating rows of data out of the chunks.
- * addChunks is only intended for filling in chunk data
- * as it is read from the ColumnStore.  Then, you call rowIterator.
- * It assumes that the ChunkID is a counter with low cardinality, and stores everything
- * as arrays for extremely fast access.
- */
-class RowReaderSegment(val projection: RichProjection,
-                       _segInfo: SegmentInfo[_, _],
-                       chunkInfos: Seq[(ChunkSetInfo, Array[Int])],
-                       columns: Seq[Column]) extends Segment with StrictLogging {
-  import RowReaderSegment._
-
-  def segInfo: SegmentInfo[projection.PK, projection.SK] = _segInfo.basedOn(projection)
-
-  val chunks = new HashMap[ChunkID, Array[ByteBuffer]]
-  val clazzes = columns.map(_.columnType.clazz).toArray
-
-  val colIdToNumber = columns.zipWithIndex.map { case (col, idx) => (col.name, idx) }.toMap
-
-  def addChunk(id: ChunkID, column: ColumnId, bytes: Chunk): Unit = {
-    //scalastyle:off
-    if (bytes == null) logger.warn(s"null chunk detected! id=$id column=$column in $segInfo")
-    //scalastyle:on
-    val chunkArray = chunks.getOrElseUpdate(id, new Array[ByteBuffer](columns.length))
-    chunkArray(colIdToNumber(column)) = bytes
-  }
-
-  def getColumns: collection.Set[ColumnId] = columns.map(_.name).toSet
-
-  // TODO: Detect when no chunks corresponding to chunkInfos.  Either missing column or
-  // inconsistency in data.  When inconsistency, should try reading again.
-  private def getReaders(readerFactory: RowReaderFactory): Array[(FiloRowReader, Int, Array[Int])] =
-  if (columns.nonEmpty) {
-    chunkInfos
-      .filter { case (info, _) => chunks contains info.id }
-      .map { case (ChunkSetInfo(id, numRows, _, _), skipArray) =>
-      val reader = readerFactory(chunks(id), clazzes, numRows)
-      // Cheap check for empty chunks
-      if (clazzes.nonEmpty && reader.parsers(0).length == 0) {
-        logger.warn(s"empty chunk detected!  chunkId=$id in $segInfo")
-      }
-      (reader, numRows, skipArray)
-    }.toArray
-  } else {
-    // No columns, probably a select count(*) query
-    // Return an empty vector of the exact length, to allow proper counting of records
-    chunkInfos.map { case (ChunkSetInfo(id, numRows, _, _), skipArray) =>
-      //scalastyle:off
-      (readerFactory(Array[ByteBuffer](null), Array(classOf[Int]), numRows), numRows, skipArray)
-      //scalastyle:on
-    }.toArray
-  }
-
-  /**
-   * Iterates over rows in this segment, chunkset by chunkset, skipping over any rows
-   * defined in skiplist.
-   * Creates new RowReaders every time, so that multiple calls could be made and original
-   * state in the Segment is not mutated.
-   */
-  def rowIterator(readerFactory: RowReaderFactory = DefaultReaderFactory): Iterator[RowReader] = {
-    val readers = getReaders(readerFactory)
-    if (readers.isEmpty) { Iterator.empty }
-    else {
-      // yes I know you can do Iterator.flatMap, but this is a very tight inner loop and we must write
-      // high performance ugly Java code
-      new Iterator[RowReader] {
-        var curChunk = 0
-        var (curReader, curChunkLen, curSkiplist) = readers(curChunk)
-        private var i = 0
-        private var skipIndex = 0
-
-        // NOTE: manually iterate over the chunkIds / rowNums FiloVectors, instead of using the
-        // iterator methods, which are extremely slow and boxes everything
-        final def hasNext: Boolean = {
-          // Skip past any rows that need skipping, then determine if we have rows left
-          while (skipIndex < curSkiplist.size && i == curSkiplist(skipIndex)) {
-            i += 1
-            skipIndex += 1
-          }
-          if (i < curChunkLen) return true
-          // So at this point we've reached end of current chunk.  See if more chunks
-          if (curChunk < readers.size - 1) {
-            // At end of current chunk, but more chunks to go
-            curChunk += 1
-            curReader = readers(curChunk)._1
-            curSkiplist = readers(curChunk)._3
-            curChunkLen = readers(curChunk)._2
-            i = 0
-            skipIndex = 0
-            true
-          } else { false }
-        }
-
-        final def next: RowReader = {
-          curReader.setRowNo(i)
-          i += 1
-          curReader
-        }
-      }
-    }
-  }
-}
-
-object RowReaderSegment {
-  type RowReaderFactory = (Array[ByteBuffer], Array[Class[_]], Int) => FiloRowReader
-
-  val DefaultReaderFactory: RowReaderFactory =
-    (bytes, clazzes, len) => new FastFiloRowReader(bytes, clazzes, len)
-
-  def apply(cs: ChunkSetSegment, schema: Seq[Column]): RowReaderSegment = {
-    val infosSkips = cs.chunkSets.map { cs => (cs.info, cs.skips) }
-    val seg = new RowReaderSegment(cs.projection, cs.segInfo, ChunkSetInfo.collectSkips(infosSkips), schema)
-    for { chunkSet <- cs.chunkSets
-          (colId, bytes) <- chunkSet.chunks } {
-      seg.addChunk(chunkSet.info.id, colId, bytes)
-    }
-    seg
-  }
-}
