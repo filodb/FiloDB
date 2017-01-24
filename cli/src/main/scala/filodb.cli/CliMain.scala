@@ -7,6 +7,7 @@ import akka.actor.ActorSystem
 import com.opencsv.CSVWriter
 import com.quantifind.sumac.{ArgMain, FieldArgs}
 import com.typesafe.config.ConfigFactory
+import monix.reactive.Observable
 import org.velvia.filo.{RowReader, FastFiloRowReader}
 import scala.concurrent.Await
 import scala.concurrent.duration._
@@ -29,9 +30,8 @@ class Arguments extends FieldArgs {
   var filename: Option[String] = None
   var columns: Option[Map[String, String]] = None
   var rowKeys: Seq[String] = Nil
-  var segmentKey: Option[String] = None
   var partitionKeys: Seq[String] = Nil
-  var numSegments: Int = 10000
+  var numPartitions: Int = 1000
   var version: Option[Int] = None
   var select: Option[Seq[String]] = None
   var limit: Int = 1000
@@ -107,12 +107,10 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
 
         case Some("create") =>
           require(args.dataset.isDefined && args.columns.isDefined, "Need to specify dataset and columns")
-          require(args.segmentKey.isDefined, "--segmentKey must be defined")
           require(args.rowKeys.nonEmpty, "--rowKeys must be defined")
           val datasetName = args.dataset.get
           createDatasetAndColumns(getRef(args), args.toColumns(datasetName, version),
                                   args.rowKeys,
-                                  args.segmentKey.get,
                                   if (args.partitionKeys.isEmpty) { Seq(Dataset.DefaultPartitionColumn) }
                                   else { args.partitionKeys },
                                   timeout)
@@ -127,12 +125,12 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
                     99.minutes)
 
         case Some("analyze") =>
-          println(Analyzer.analyze(columnStore,
-                                   metaStore,
-                                   getRef(args),
-                                   version,
-                                   combineSplits,
-                                   args.numSegments).prettify())
+          parse(Analyzer.analyze(columnStore,
+                                 metaStore,
+                                 getRef(args),
+                                 version,
+                                 combineSplits,
+                                 args.numPartitions), 30.minutes)(a => println(a.prettify()))
 
         case Some("dumpinfo") =>
           printChunkInfos(Analyzer.getChunkInfos(columnStore,
@@ -140,7 +138,7 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
                                    getRef(args),
                                    version,
                                    combineSplits,
-                                   args.numSegments))
+                                   args.numPartitions))
 
         case Some("delete") =>
           client.deleteDataset(getRef(args), timeout)
@@ -191,21 +189,20 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
     }
   }
 
-  def printChunkInfos(infos: Iterator[ChunkInfo]): Unit = {
-    infos.foreach { case ChunkInfo(partKey, segKey, ChunkSetInfo(id, numRows, firstKey, lastKey)) =>
-      println(" %25s %20s".format(partKey, segKey))
-      println("\t%10d %5d  %40s %s".format(id, numRows, firstKey, lastKey))
+  def printChunkInfos(infos: Observable[ChunkInfo]): Unit = {
+    val fut = infos.foreach { case ChunkInfo(partKey, ChunkSetInfo(id, numRows, firstKey, lastKey)) =>
+      println(" %25s\t%10d %5d  %40s %s".format(partKey, id, numRows, firstKey, lastKey))
     }
+    parse(fut) { x => x }
   }
 
   def createDatasetAndColumns(dataset: DatasetRef,
                               columns: Seq[DataColumn],
                               rowKeys: Seq[String],
-                              segmentKey: String,
                               partitionKeys: Seq[String],
                               timeout: FiniteDuration) {
     println(s"Creating dataset $dataset...")
-    val datasetObj = Dataset(dataset, rowKeys, segmentKey, partitionKeys)
+    val datasetObj = Dataset(dataset, rowKeys, partitionKeys)
 
     RichProjection.make(datasetObj, columns).recover {
       case err: RichProjection.BadSchema =>
@@ -293,9 +290,8 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
 
     // NOTE: we will only return data from the first split!
     val splits = columnStore.getScanSplits(dataset)
-    val requiredRows = parse(columnStore.scanRows(richProj, columns, version,
-                                                  FilteredPartitionScan(splits.head))) {
-                         x => x.take(limit) }
+    val requiredRows = columnStore.scanRows(richProj, columns, version, FilteredPartitionScan(splits.head))
+                                  .take(limit)
     writeResult(dataset.dataset, requiredRows, columnNames, columns, outFile)
   }
 }

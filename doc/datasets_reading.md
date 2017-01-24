@@ -20,16 +20,14 @@ import org.apache.spark.sql.SaveMode
 csvDF.write.format("filodb.spark").
              option("dataset", "gdelt").
              option("row_keys", "GLOBALEVENTID").
-             option("segment_key", ":round GLOBALEVENTID 10000").
              option("partition_keys", "MonthYear").
              mode(SaveMode.Overwrite).save()
 ```
 
 * [NYC Taxi Trip and Fare Info](http://www.andresmh.com/nyctaxitrips/) - really interesting geospatial-temporal public time series data.  Contains New York City taxi transactions, and an example of how to handle time series / IoT with many entities. Trip data is 2.4GB for one part, ~ 15 million rows, and there are 12 parts.
-    - `select(count("medallion")).show` should result in 14776615 records for the `trip_data_1.csv` (Part 1).   CSV takes around 25 secs on my machine.
+    - `select(count("medallion")).show` should result in 14776615 records for the `trip_data_1.csv` (Part 1). 
     - Partition by string prefix of medallion gives a pretty even distribution, into 676 shards, of all taxi transactions.  Note that even with this level of sharding, reading data for one taxi/medallion for a given time range is still pretty fast.
-    - Segment by pickup_datetime allows range queries by time.
-      + 14.766 million records divided by (676 partitions * 6 days per segment) =~ rouhgly 4000 records per segment, which is about right
+    - Putting `pickup_datetime` first in row key allows range queries by time.
 
 ```scala
 val taxiDF = sqlContext.read.format("com.databricks.spark.csv").
@@ -38,15 +36,12 @@ val taxiDF = sqlContext.read.format("com.databricks.spark.csv").
 import org.apache.spark.sql.SaveMode
 taxiDF.write.format("filodb.spark").
   option("dataset", "nyc_taxi").
-  option("row_keys", "hack_license,pickup_datetime").
-  option("segment_key", ":timeslice pickup_datetime 6d").
+  option("row_keys", "pickup_datetime,medallion,hack_license").
   option("partition_keys", ":stringPrefix medallion 2").
   mode(SaveMode.Overwrite).save()
 ```
 
 There is a [Spark Notebook](FiloDB_Taxi_Geo_demo.snb) to analyze the NYC Taxi dataset.
-
-NOTE: for a stress testing scenario use `:stringPrefix medallion 3` as a segment key.  It creates really tiny segments and a massive amount of Futures and massive amount of (unnecessary) I/O.
 
 * [Weather Datasets and APIs](https://github.com/killrweather/killrweather/wiki/9.-Weather-Data-Sources-and-APIs)
     - Also see the [KillrWeather](https://github.com/killrweather/killrweather/tree/master/data/load) data sets

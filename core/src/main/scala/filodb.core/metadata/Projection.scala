@@ -31,7 +31,6 @@ case class Projection(id: Int,
   def detailedString: String =
     s"Projection $id from dataset $dataset:\n" +
     s"  Key columns: ${keyColIds.mkString(", ")}\n" +
-    s"  Segment column: $segmentColId\n" +
     s"  Projection columns: ${columns.mkString(", ")}"
 
   /**
@@ -100,11 +99,10 @@ case class RichProjection(projection: Projection,
 
   /**
    * Serializes this RichProjection into the minimal string needed to recover a "read-only" RichProjection,
-   * ie the minimal RichProjection needed for segment reads and scans.  This means:
-   * - Row key columns are not preserved
-   * - Any ComputedColumns in partition / segment keys are converted to a DataColumn with same type
+   * ie the minimal RichProjection needed for reads and scans.  This means:
+   * - Any ComputedColumns in partition keys are converted to a DataColumn with same type
    * - Any ComputedKeyType is converted to a regular KeyType of the same type
-   * - Only readColumns (+ partition and segment columns) are left in columns
+   * - Only readColumns (+ partition and rowkey columns) are left in columns
    * - Most Projection and Dataset info is discarded
    */
   def toReadOnlyProjString(readColumns: Seq[String]): String = {
@@ -112,15 +110,12 @@ case class RichProjection(projection: Projection,
       case (ComputedColumn(id, _, _, colType, _, _), i) => DataColumn(id, s"part_$i", "", 0, colType).toString
       case (d: Column, i)                               => d.toString
     }
-    val segmentColString = segmentColumn match {
-      case ComputedColumn(id, _, _, colType, _, _) => DataColumn(id, "segCol", "", 0, colType).toString
-      case d: Column                               => d.toString
-    }
+    val rowkeyColStrings = rowKeyColumns.map(_.toString)
     val extraColStrings = readColumns.map { colName => columns.find(_.name == colName).get.toString }
     Seq(datasetName,
         projection.reverse.toString,
         partitionColStrings.mkString(":"),
-        segmentColString,
+        rowkeyColStrings.mkString(":"),
         extraColStrings.mkString(":")).mkString("\u0001")
   }
 }
@@ -225,14 +220,16 @@ object RichProjection extends StrictLogging {
    */
   def readOnlyFromString(serialized: String): RichProjection = {
     val parts = serialized.split('\u0001')
-    val Array(dsName, revStr, partColStr, segStr) = parts.take(4)
+    val Array(dsName, revStr, partColStr, rowKeyStr) = parts.take(4)
     val partitionColumns = partColStr.split(':').toSeq.map(raw => DataColumn.fromString(raw, dsName))
     val extraColumns = if (parts.size > 4) {
       parts(4).split(':').toSeq.map(raw => DataColumn.fromString(raw, dsName))
     } else {
       Nil
     }
-    val segmentColumn = DataColumn.fromString(segStr, dsName)
+    val rowKeyColumns = rowKeyStr.split(':').toSeq.map(DataColumn.fromString(_, dsName))
+    val segmentColumn = ComputedColumn(-1, ":string 0", dsName, Column.ColumnType.StringColumn,
+                                       Nil, SingleKeyTypes.StringKeyType)
     val dsNameParts = dsName.split('.').toSeq
     val ref = dsNameParts match {
       case Seq(db, ds) => DatasetRef(ds, Some(db))
@@ -241,8 +238,8 @@ object RichProjection extends StrictLogging {
     val dataset = Dataset(ref, Nil, segmentColumn.name, partitionColumns.map(_.name))
 
     RichProjection(dataset.projections.head, dataset, extraColumns,
-                   segmentColumn, -1, Column.columnsToKeyType(Seq(segmentColumn)),
-                   Nil, Nil, CompositeKeyType(Nil),
+                   segmentColumn, -1, segmentColumn.keyType,
+                   rowKeyColumns, Nil, Column.columnsToKeyType(rowKeyColumns),
                    partitionColumns, Nil, Column.columnsToKeyType(partitionColumns))
   }
 }

@@ -9,7 +9,6 @@ import net.ceedubs.ficus.Ficus._
 import org.apache.spark.SparkContext
 import scala.concurrent.Await
 import scala.concurrent.duration._
-import scala.concurrent.ExecutionContext.Implicits.global
 import scala.language.{implicitConversions, postfixOps}
 
 import filodb.cassandra.columnstore.CassandraColumnStore
@@ -92,6 +91,7 @@ trait FiloSetup extends CoordinatorSetup {
 // TODO: make the InMemoryMetaStore either distributed (using clustering to forward and distribute updates)
 // or, perhaps modify NodeCoordinator to not need metastore.
 object SingleJvmInMemoryStore {
+  import scala.concurrent.ExecutionContext.Implicits.global
   lazy val metaStore = new InMemoryMetaStore
 }
 

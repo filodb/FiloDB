@@ -17,7 +17,7 @@ import org.scalatest.concurrent.ScalaFutures
  */
 class ReprojectorSpec extends FunSpec with Matchers
 with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
-  import scala.concurrent.ExecutionContext.Implicits.global
+  import monix.execution.Scheduler.Implicits.global
   import NamesTestData._
 
   implicit val defaultPatience =
@@ -55,9 +55,8 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
     val segState = stateCache.getSegmentState(projection, schema, 0)(segInfo)
     segState.numChunks should equal (1)
 
-    whenReady(colStore.scanRows(projection, schema, 0, partScan)) { rowIter =>
-      rowIter.map(_.getString(0)).toSeq should equal (sortedFirstNames)
-    }
+    val rowIter = colStore.scanRows(projection, schema, 0, partScan)
+    rowIter.map(_.getString(0)).toSeq should equal (sortedFirstNames)
   }
 
   val gdeltMemTable = new FiloMemTable(GdeltTestData.projection3, config, "localhost", 0)
@@ -77,9 +76,8 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
     val paramSet = colStore.getScanSplits(datasetRef, 1)
     paramSet should have length (1)
 
-    whenReady(colStore.scanRows(projection3, schema, 0, FilteredPartitionScan(paramSet.head))) { rowIter =>
-      rowIter.map(_.getInt(6)).sum should equal (492)
-    }
+    val rowIter = colStore.scanRows(projection3, schema, 0, FilteredPartitionScan(paramSet.head))
+    rowIter.map(_.getInt(6)).sum should equal (492)
   }
 
   it("should reload segment metadata if state no longer in cache") {
@@ -96,9 +94,8 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
     val paramSet = colStore.getScanSplits(datasetRef, 1)
     paramSet should have length (1)
 
-    whenReady(colStore.scanRows(projection3, schema, 0, FilteredPartitionScan(paramSet.head))) { rowIter =>
-      rowIter.map(_.getInt(6)).sum should equal (492)
-    }
+    val rowIter = colStore.scanRows(projection3, schema, 0, FilteredPartitionScan(paramSet.head))
+    rowIter.map(_.getInt(6)).sum should equal (492)
   }
 
   it("should reload segment metadata and replace previous chunk rows successfully") {
@@ -115,8 +112,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
     val paramSet = colStore.getScanSplits(datasetRef, 1)
     paramSet should have length (1)
 
-    whenReady(colStore.scanRows(projection3, schema, 0, FilteredPartitionScan(paramSet.head))) { rowIter =>
-      rowIter.map(_.getInt(6)).sum should equal (492)
-    }
+    val rowIter = colStore.scanRows(projection3, schema, 0, FilteredPartitionScan(paramSet.head))
+    rowIter.map(_.getInt(6)).sum should equal (492)
   }
 }

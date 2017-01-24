@@ -45,21 +45,9 @@ class CassandraColumnStoreSpec extends ColumnStoreSpec {
       response should equal (Success)
     }
 
-    // Writing segment2, last 3 rows, should get appended to first 3 in same segment
-    val segment2 = getWriterSegment()
-    segment2.addChunkSet(state, mapper(names drop 3))
-    whenReady(lz4ColStore.appendSegment(projection, segment2, 0)) { response =>
-      response should equal (Success)
-    }
-
-    whenReady(lz4ColStore.scanSegments(projection, schema, 0, partScan)) { segIter =>
-      val segments = segIter.toSeq
-      segments should have length (1)
-      val readSeg = segments.head.asInstanceOf[RowReaderSegment]
-      readSeg.segInfo.segment should equal (segment.segInfo.segment)
-      readSeg.rowIterator().map(_.getLong(2)).toSeq should equal (Seq(24L, 28L, 25L, 40L, 39L, 29L))
-      readSeg.rowIterator().map(_.getString(0)).toSeq should equal (firstNames)
-    }
+    val chunk = lz4ColStore.scanChunks(projection, schema, 0, partScan).toSeq.head
+    chunk.rowIterator().map(_.getLong(2)).toSeq should equal (Seq(24L, 28L, 25L))
+    chunk.rowIterator().map(_.getString(0)).toSeq should equal (firstNames take 3)
   }
 
 

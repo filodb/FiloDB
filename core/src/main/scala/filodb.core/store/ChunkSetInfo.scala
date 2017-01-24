@@ -8,10 +8,10 @@ import org.boon.primitive.{ByteBuf, InputByteArray}
 import org.velvia.filo._
 import scala.collection.mutable.{ArrayBuffer, HashMap, TreeSet}
 import scala.math.Ordered._
-import scodec.bits._
+import scodec.bits.ByteVector
 
 import filodb.core._
-import filodb.core.binaryrecord.BinaryRecord
+import filodb.core.binaryrecord.{BinaryRecord, RecordSchema}
 import filodb.core.metadata.RichProjection
 import filodb.core.Types._
 
@@ -40,7 +40,7 @@ object ChunkSet extends StrictLogging {
    * Pure, does not modify existing state.  User is responsible for updating the SegmentState.
    */
   def apply(state: SegmentState, rows: Iterator[RowReader]): ChunkSet = {
-    // NOTE: some RowReaders, such as the one from RowReaderSegment, must be iterators
+    // NOTE: some RowReaders, such as FastFiloRowReader, must be iterators
     // since rowNo in FastFiloRowReader is mutated.
     val builder = new RowToVectorBuilder(state.filoSchema)
     val rowKeys = rows.map { row =>
@@ -73,8 +73,10 @@ object ChunkSet extends StrictLogging {
 
 case class ChunkSetInfo(id: ChunkID,
                         numRows: Int,
-                        firstKey: RowReader,
-                        lastKey: RowReader) extends StrictLogging {
+                        firstKey: BinaryRecord,
+                        lastKey: BinaryRecord) extends StrictLogging {
+  def keyAndId: (BinaryRecord, ChunkID) = (firstKey, id)
+
   /**
    * Finds intersection key ranges between two ChunkSetInfos.
    * Scenario A:    [       ]
@@ -86,19 +88,28 @@ case class ChunkSetInfo(id: ChunkID,
    * Scenario D:        [        ]
    *                 [  other      ]
    */
-  def intersection(other: ChunkSetInfo)
-                  (implicit ordering: Ordering[RowReader]): Option[(RowReader, RowReader)] = {
+  def intersection(other: ChunkSetInfo): Option[(BinaryRecord, BinaryRecord)] =
     try {
-      if (lastKey >= other.firstKey && firstKey <= other.lastKey) {
-        Some((if (firstKey > other.firstKey) firstKey else other.firstKey,
-              if (lastKey < other.lastKey) lastKey else other.lastKey))
-      } else {
-        None
-      }
+      intersection(other.firstKey, other.lastKey)
     } catch {
       case e: Exception =>
         logger.warn(s"Got error comparing $this and $other...", e)
         None
+    }
+
+  /**
+   * Finds the intersection between this ChunkSetInfo and a range of keys (key1, key2).
+   * Note that key1 and key2 do not need to contain all the fields of firstKey and lastKey, but
+   * must be a strict subset of the first fields.
+   */
+  def intersection(key1: BinaryRecord, key2: BinaryRecord): Option[(BinaryRecord, BinaryRecord)] = {
+    if (key1 > key2) {
+      None
+    } else if (key1 <= lastKey && key2 >= firstKey) {
+      Some((if (key1 < firstKey) firstKey else key1,
+            if (key2 > lastKey) lastKey else key2))
+    } else {
+      None
     }
   }
 }
@@ -121,33 +132,37 @@ object ChunkSetInfo extends StrictLogging {
   type IndexAndFilterSeq = Seq[(ChunkSetInfo, ChunkSkips, BloomFilter[Long])]
   import ChunkSet._
 
+  val DummyKey = BinaryRecord(RecordSchema(Nil), Array[Byte]())
+
+  /**
+   * Designed only for special, non-functional ChunkSetInfos, such as special markers
+   */
+  def dummyInfo(id: ChunkID): ChunkSetInfo = ChunkSetInfo(id, -1, DummyKey, DummyKey)
+
+  val missingBloomFilters = Kamon.metrics.counter("chunks-missing-bloom-filter")
+
   def toBytes(projection: RichProjection, chunkSetInfo: ChunkSetInfo, skips: ChunkSkips): Array[Byte] = {
     val buf = ByteBuf.create(100)
-    buf.add(chunkSetInfo.id)
-    buf.add(chunkSetInfo.numRows)
-    buf.writeMediumByteArray(toRowKeyBytes(projection, chunkSetInfo.firstKey))
-    buf.writeMediumByteArray(toRowKeyBytes(projection, chunkSetInfo.lastKey))
+    buf.writeLong(chunkSetInfo.id)
+    buf.writeInt(chunkSetInfo.numRows)
+    buf.writeMediumByteArray(chunkSetInfo.firstKey.bytes)
+    buf.writeMediumByteArray(chunkSetInfo.lastKey.bytes)
     skips.foreach { case ChunkRowSkipIndex(id, overrides) =>
-      buf.add(id)
+      buf.writeLong(id)
       buf.writeMediumIntArray(overrides.toArray)
     }
     buf.toBytes
   }
 
-  private def toRowKeyBytes(projection: RichProjection, rowKey: RowReader): Array[Byte] = rowKey match {
-    case b: BinaryRecord  => b.bytes
-    case other: RowReader => BinaryRecord(projection.rowKeyBinSchema, rowKey).bytes
-  }
-
   def fromBytes(projection: RichProjection, bytes: Array[Byte]): (ChunkSetInfo, ChunkSkips) = {
     val scanner = new InputByteArray(bytes)
-    val id = scanner.readInt
+    val id = scanner.readLong
     val numRows = scanner.readInt
     val firstKey = BinaryRecord(projection, scanner.readMediumByteArray)
     val lastKey = BinaryRecord(projection, scanner.readMediumByteArray)
     val skips = new ArrayBuffer[ChunkRowSkipIndex]
     while (scanner.location < bytes.size) {
-      val skipId = scanner.readInt
+      val skipId = scanner.readLong
       val skipList = scanner.readMediumIntArray
       skips.append(ChunkRowSkipIndex(skipId, skipList))
     }
@@ -184,15 +199,21 @@ object ChunkSetInfo extends StrictLogging {
       // Check for rowkey range intersection
       // Match each key in range over bloom filter and return a list of hit rowkeys for each chunkID
       var numHitKeys = 0
-      val hitKeysByChunk = state.infosAndFilters.flatMap { case (info, bf) =>
+      val hitKeysByChunk = state.infos.flatMap { info =>
+        val bfOpt = state.filter(info.id)
         keyInfo.intersection(info).map { case (key1, key2) =>
           // Ignore the key, it's probably faster to just hit keys against bloom filter
-          val hitKeys = rowKeys.filter { k => bf.mightContain(k.cachedHash64) }
+          val hitKeys = bfOpt.map { bf => rowKeys.filter { k => bf.mightContain(k.cachedHash64) } }
+                             .getOrElse {
+                               missingBloomFilters.increment
+                               logger.info(s"OUCH!  Missing bloom filter for chunk $info...")
+                               rowKeys
+                             }
           logger.debug(s"Checking chunk $info: ${hitKeys.size} hitKeys")
           numHitKeys += hitKeys.size
-          (info.id, info.numRows, hitKeys)
-        }.filter(_._3.nonEmpty)
-      }
+          (info, hitKeys)
+        }.filter(_._2.nonEmpty)
+      }.toBuffer
 
       // For each matching chunkId and set of hit keys, find possible position to skip
       // NOTE: This will be very slow as will probably need to read back row keys from disk
@@ -203,8 +224,8 @@ object ChunkSetInfo extends StrictLogging {
         chunkSetsNeedReadRowKey.increment
         chunkSetsHitKeyCount.record(numHitKeys)
       }
-      hitKeysByChunk.map { case (chunkId, numRows, keys) =>
-        val chunkKeys = state.getRowKeyChunks(chunkId)
+      hitKeysByChunk.map { case (ChunkSetInfo(chunkId, numRows, startKey, _), keys) =>
+        val chunkKeys = state.getRowKeyChunks(startKey, chunkId)
         val overrides = keys.flatMap { key =>
           binarySearchKeyChunks(state.projection, chunkKeys, numRows, key) match {
             case (pos, true) => Some(pos)

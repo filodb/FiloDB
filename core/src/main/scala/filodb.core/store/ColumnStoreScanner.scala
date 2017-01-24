@@ -2,21 +2,19 @@ package filodb.core.store
 
 import com.typesafe.scalalogging.slf4j.StrictLogging
 import java.nio.ByteBuffer
-import org.velvia.filo.RowReader
-import org.velvia.filo.RowReader.TypedFieldExtractor
-import scala.concurrent.{Await, ExecutionContext, Future}
+import monix.reactive.Observable
+import org.jctools.maps.NonBlockingHashMapLong
 import scala.concurrent.duration._
+import scala.concurrent.{ExecutionContext, Future}
 
 import filodb.core._
+import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.metadata.{Column, Projection, RichProjection}
+import filodb.core.query.{ChunkSetReader, PartitionChunkIndex}
 
-case class SegmentIndex[P, S](binPartition: Types.BinaryPartition,
-                              segmentId: Types.SegmentId,
-                              partition: P,
-                              segment: S,
-                              infosAndSkips: ChunkSetInfo.ChunkInfosAndSkips)
-
-case class ChunkedData(column: Types.ColumnId, chunks: Seq[(Types.SegmentId, Types.ChunkID, ByteBuffer)])
+trait ChunkPipeItem
+case class ChunkPipeInfos(infosAndSkips: Seq[(ChunkSetInfo, Array[Int])]) extends ChunkPipeItem
+case class SingleChunkInfo(id: Types.ChunkID, colNo: Int, bytes: ByteBuffer) extends ChunkPipeItem
 
 /**
  * Encapsulates the reading and scanning logic of the ColumnStore.
@@ -33,62 +31,21 @@ trait ColumnStoreScanner extends StrictLogging {
   val stats = ColumnStoreStats()
 
   /**
-   * Reads back all the chunks from multiple columns of a keyRange at once.  Note that no paging
-   * is performed - so don't ask for too large of a range.  Recommendation is to read the indices
-   * first and use the info there to determine how much to read.
-   * @param dataset the DatasetRef of the dataset to read chunks from
-   * @param columns the columns to read back chunks from
-   * @param keyRange the binary range of segments to read from.  Note endExclusive flag.
-   * @param version the version to read back
-   * @return a sequence of ChunkedData, each triple is (segmentId, chunkId, bytes) for each chunk
-   *          must be sorted in order of increasing segmentId
-   */
-  def readChunks(dataset: DatasetRef,
-                 columns: Set[ColumnId],
-                 keyRange: BinaryKeyRange,
-                 version: Int)(implicit ec: ExecutionContext): Future[Seq[ChunkedData]]
-
-  /**
-   * Reads back a subset of chunkIds from a single segment, with columns returned in the same order
-   * as passed in.  No paging is performed.  May be used to read back only row keys or part of a large seg.
+   * Reads back chunks from a partition as an observable of SingleChunkInfos
+   * Before the SingleChunkInfos for a given ID, a ChunkPipeInfos must be sent to set up the readers,
+   * otherwise the SingleChunkInfos will be discarded.
+   * Think carefully about concurrency here - do work on other threads to be nonblocking
    * @param dataset the DatasetRef of the dataset to read chunks from
    * @param version the version to read back
    * @param columns the columns to read back chunks from
-   * @param chunkRange the inclusive start and end ChunkID to read from
-   * @return a sequence of ChunkedData, each triple is (segmentId, chunkId, bytes) for each chunk
-   *          must be sorted in order of increasing segmentId
+   * @param partitionIndex the PartitionChunkIndex containing chunk metadata for the partition
+   * @param chunkMethod the method or filter for scanning the partition
    */
-  def readChunks(dataset: DatasetRef,
-                 version: Int,
-                 columns: Seq[ColumnId],
-                 partition: Types.BinaryPartition,
-                 segment: Types.SegmentId,
-                 chunkRange: (Types.ChunkID, Types.ChunkID))
-                (implicit ec: ExecutionContext): Future[Seq[ChunkedData]]
-
-  /**
-   * Same as above, but only read back chunks corresponding to columns for row keys for a particular
-   * chunkID in a segment
-   */
-  def readRowKeyChunks(projection: RichProjection,
-                       version: Int,
-                       chunk: Types.ChunkID)
-                      (segInfo: SegmentInfo[projection.PK, projection.SK])
-                      (implicit ec: ExecutionContext): Future[Array[ByteBuffer]] = {
-    val binPartition = projection.partitionType.toBytes(segInfo.partition)
-    val binSegId = projection.segmentType.toBytes(segInfo.segment)
-    val rowKeyCols = projection.rowKeyColumns.map(_.name)
-    readChunks(projection.datasetRef, version, rowKeyCols,
-               binPartition, binSegId, (chunk, chunk)).map { seqChunkedData =>
-      try {
-        seqChunkedData.map { case ChunkedData(col, segIdChunks) => segIdChunks.head._3 }.toArray
-      } catch {
-        case e: NoSuchElementException =>
-          logger.error(s"Error: got back empty chunks for $segInfo, chunk $chunk, columns $rowKeyCols", e)
-          throw e
-      }
-    }
-  }
+  def readPartitionChunks(dataset: DatasetRef,
+                          version: Int,
+                          columns: Seq[Column],
+                          partitionIndex: PartitionChunkIndex,
+                          chunkMethod: ChunkScanMethod): Observable[ChunkPipeItem]
 
   /**
    * Reads back a subset of filters for ingestion row replacement / skip detection
@@ -115,88 +72,63 @@ trait ColumnStoreScanner extends StrictLogging {
 
   /**
    * Scans over indices according to the method.
-   * @return an iterator over SegmentIndex.
+   * @return an Observable over PartitionChunkIndex
    */
-  def scanIndices(projection: RichProjection,
-                  version: Int,
-                  method: ScanMethod)
-                 (implicit ec: ExecutionContext):
-    Future[Iterator[SegmentIndex[projection.PK, projection.SK]]]
+  def scanPartitions(projection: RichProjection,
+                     version: Int,
+                     partMethod: PartitionScanMethod): Observable[PartitionChunkIndex]
 
-  def toSegIndex(projection: RichProjection, binPart: BinaryPartition, segmentKey: SegmentId,
-                 infosAndSkips: ChunkSetInfo.ChunkInfosAndSkips):
-        SegmentIndex[projection.PK, projection.SK] = {
-    SegmentIndex(binPart,
-                 segmentKey,
-                 projection.partitionType.fromBytes(binPart),
-                 projection.segmentType.fromBytes(segmentKey),
-                 infosAndSkips)
-  }
-
-  def toSegIndexWithFilter(projection: RichProjection, binPart: BinaryPartition, segmentKey: SegmentId,
-                           infosSkipsFilters: ChunkSetInfo.IndexAndFilterSeq):
-        SegmentIndex[projection.PK, projection.SK] =
-    toSegIndex(projection, binPart, segmentKey,
-               infosSkipsFilters.map { case (info, skip, _) => (info, skip) })
-
-  // NOTE: this is more or less a single-threaded implementation.  Reads of chunks for multiple columns
-  // happen in parallel, but we still block to wait for all of them to come back.
-  def scanSegments(projection: RichProjection,
-                   columns: Seq[Column],
-                   version: Int,
-                   method: ScanMethod): Future[Iterator[Segment]] = {
-    implicit val ec = readEc
-    val segmentGroupSize = 3
-
-    for { segmentIndexIt <- scanIndices(projection, version, method) }
-    yield
-    (for { // Group by partition key first
-          (part, partChunkMaps) <- segmentIndexIt
-                                     .sortedGroupBy { case SegmentIndex(part, _, _, _, _) => part }
-          // Subdivide chunk row maps in each partition so we don't read more than we can chew
-          // TODO: make a custom grouping function based on # of rows accumulated
-          groupIndices <- partChunkMaps.grouped(segmentGroupSize) }
-    yield {
-      val indices = groupIndices.toSeq
-      stats.incrReadSegments(indices.length)
-      val binKeyRange = BinaryKeyRange(part,
-                                       indices.head.segmentId,
-                                       indices.last.segmentId,
-                                       endExclusive = false)
-      val chunks = Await.result(readChunks(projection.datasetRef, columns.map(_.name).toSet,
-                                           binKeyRange, version), 5.minutes)
-      buildSegments(projection, indices, chunks, columns).toIterator
-    }).flatten
-  }
-
-  import scala.util.control.Breaks._
-
-  private def buildSegments[P, S](projection: RichProjection,
-                                  indices: Seq[SegmentIndex[P, S]],
-                                  chunks: Seq[ChunkedData],
-                                  schema: Seq[Column]): Seq[Segment] = {
-    val segments = indices.map { case SegmentIndex(_, _, partition, segStart, infosAndSkips) =>
-      val segInfo = SegmentInfo(partition, segStart)
-      val chunkInfos = ChunkSetInfo.collectSkips(infosAndSkips)
-      new RowReaderSegment(projection, segInfo, chunkInfos, schema)
-    }
-    chunks.foreach { case ChunkedData(columnName, chunkTriples) =>
-      var segIndex = 0
-      breakable {
-        chunkTriples.foreach { case (segmentId, chunkId, chunkBytes) =>
-          // Rely on the fact that chunks are sorted by segmentId, in the same order as the indices
-          while (segmentId != indices(segIndex).segmentId) {
-            segIndex += 1
-            if (segIndex >= segments.length) {
-              logger.warn(s"Chunks with segmentId=$segmentId (part ${indices.head.partition})" +
-                           " with no index; corruption?")
-              break
-            }
-          }
-          segments(segIndex).addChunk(chunkId, columnName, chunkBytes)
-        }
-      }
-    }
-    segments
+  def readChunks(projection: RichProjection,
+                 columns: Seq[Column],
+                 version: Int,
+                 partMethod: PartitionScanMethod,
+                 chunkMethod: ChunkScanMethod = AllChunkScan): Observable[ChunkSetReader] = {
+    scanPartitions(projection, version, partMethod)
+      // Partitions to pipeline of single chunks
+      .flatMap { partIndex =>
+        stats.incrReadPartitions(1)
+        readPartitionChunks(projection.datasetRef, version, columns, partIndex, chunkMethod)
+      // Collate single chunks to ChunkSetReaders
+      }.scan(new ChunkSetReaderAggregator(columns, stats)) { _ add _ }
+      .collect { case agg: ChunkSetReaderAggregator if agg.canEmit => agg.emit() }
   }
 }
+
+private[store] class ChunkSetReaderAggregator(schema: Seq[Column], stats: ColumnStoreStats) {
+  val readers = new NonBlockingHashMapLong[ChunkSetReader](32, false)
+  val clazzes = schema.map(_.columnType.clazz).toArray
+  var emitReader: Option[ChunkSetReader] = None
+
+  def canEmit: Boolean = emitReader.isDefined
+
+  def emit(): ChunkSetReader = {
+    val reader = emitReader.get
+    emitReader = None
+    reader
+  }
+
+  def add(pipeItem: ChunkPipeItem): ChunkSetReaderAggregator = {
+    pipeItem match {
+      case SingleChunkInfo(id, colNo, buf) =>
+        readers.get(id) match {
+          //scalastyle:off
+          case null =>
+          //scalastyle:on
+            stats.incrChunkWithNoInfo()
+          case reader: ChunkSetReader =>
+            reader.addChunk(colNo, buf)
+            if (reader.isFull) {
+              readers.remove(id)
+              stats.incrReadChunksets()
+              emitReader = Some(reader)
+            }
+        }
+      case ChunkPipeInfos(infos) =>
+        infos.foreach { case (info, skips) =>
+          readers.put(info.id, new ChunkSetReader(info, skips, clazzes))
+        }
+    }
+    this
+  }
+}
+

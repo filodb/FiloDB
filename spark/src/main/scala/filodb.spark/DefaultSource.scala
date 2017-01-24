@@ -39,7 +39,6 @@ class DefaultSource extends RelationProvider with CreatableRelationProvider {
    *   database         defaults to filodb.cassandra.keyspace
    *   version          defaults to 0
    *   row_keys         comma-separated list of row keys
-   *   segment_key
    *   partition_keys   comma-separated list of partition keys
    *   chunk_size       defaults to 5000
    *   flush_after_write  defaults to true
@@ -54,7 +53,6 @@ class DefaultSource extends RelationProvider with CreatableRelationProvider {
     val database = parameters.get("database")
     val version = parameters.getOrElse("version", "0").toInt
     val rowKeys = parameters.get("row_keys").map(_.split(',').toSeq).getOrElse(Nil)
-    val segKey  = parameters.getOrElse("segment_key", ":string /0")
     val partitionKeys = parameters.get("partition_keys").map(_.split(',').toSeq).getOrElse(Nil)
     val chunkSize = parameters.get("chunk_size").map(_.toInt)
     val flushAfter = parameters.get("flush_after_write").map(_.toBoolean).getOrElse(true)
@@ -62,7 +60,7 @@ class DefaultSource extends RelationProvider with CreatableRelationProvider {
 
     val options = IngestionOptions(version, chunkSize, flushAfterInsert = flushAfter,
                                    resetSchema = resetSchema)
-    sqlContext.saveAsFilo(data, dataset, rowKeys, segKey, partitionKeys, database, mode, options)
+    sqlContext.saveAsFilo(data, dataset, rowKeys, partitionKeys, database, mode, options)
 
     // The below is inefficient as it reads back the schema that was written earlier - though it shouldn't
     // take very long

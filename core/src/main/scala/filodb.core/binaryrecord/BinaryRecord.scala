@@ -1,5 +1,6 @@
 package filodb.core.binaryrecord
 
+import org.boon.primitive.ByteBuf
 import org.velvia.filo.{RowReader, SeqRowReader, UnsafeUtils, ZeroCopyBinary, ZeroCopyUTF8String}
 import scala.language.postfixOps
 import scalaxy.loops._
@@ -28,6 +29,13 @@ extends ZeroCopyBinary with RowReader {
   final def notNull(fieldNo: Int): Boolean = {
     val word = fieldNo / 32
     ((UnsafeUtils.getInt(base, offset + word * 4) >> (fieldNo % 32)) & 1) == 0
+  }
+
+  final def noneNull: Boolean = {
+    for { field <- 0 until fields.size optimized } {
+      if (!notNull(field)) return false
+    }
+    true
   }
 
   final def getBoolean(columnNo: Int): Boolean = fields(columnNo).get[Boolean](this)
@@ -68,6 +76,41 @@ extends ZeroCopyBinary with RowReader {
       asNewByteArray
     }
   }
+
+  /**
+   * Does a field-by-field (semantic) comparison of this BinaryRecord against another BinaryRecord.
+   * It is assumed that the other BinaryRecord has the exact same schema, at least for all of the fields
+   * present in this BinaryRecord (other.schema.numFields >= this.schema.numFields)
+   * It is pretty fast as the field by field comparison involves no deserialization and uses intrinsics
+   * in many places.
+   * NOTE: if all fields in this BinaryRecord compare the same as the same fields in the other, then the
+   * comparison returns equal (0).  This semantic is needed for row key range scans to work where only the
+   * first few fields may be compared.
+   */
+  override final def compare(other: ZeroCopyBinary): Int = other match {
+    case rec2: BinaryRecord =>
+      for { field <- 0 until fields.size optimized } {
+        val cmp = fields(field).cmpRecords(this, rec2)
+        if (cmp != 0) return cmp
+      }
+      0
+    case zcb: ZeroCopyBinary =>
+      super.compare(zcb)
+  }
+
+  /**
+   * Returns an array of bytes which is sortable byte-wise for its contents (which is not the goal of
+   * BinaryRecord).  Null fields will have default values read out.
+   * The produced bytes cannot be deserialized from or extracted, it is strictly for comparison.
+   */
+  def toSortableBytes(numFields: Int = 2): Array[Byte] = {
+    val fieldsToWrite = Math.min(fields.size, numFields)
+    val buf = ByteBuf.create(100)
+    for { fieldNo <- 0 until fieldsToWrite optimized } {
+      fields(fieldNo).writeSortable(this, buf)
+    }
+    buf.toBytes
+  }
 }
 
 class ArrayBinaryRecord(schema: RecordSchema, override val bytes: Array[Byte]) extends
@@ -102,7 +145,15 @@ object BinaryRecord {
   }
 
   def apply(projection: RichProjection, items: Seq[Any]): BinaryRecord =
-    apply(projection.rowKeyBinSchema, SeqRowReader(items))
+    if (items.length < projection.rowKeyColumns.length) {
+      apply(RecordSchema(projection.rowKeyColumns.take(items.length)), SeqRowReader(items))
+    } else {
+      apply(projection.rowKeyBinSchema, SeqRowReader(items))
+    }
+
+  implicit val ordering = new Ordering[BinaryRecord] {
+    def compare(a: BinaryRecord, b: BinaryRecord): Int = a.compare(b)
+  }
 
   // Create the fixed-field int for variable length data blobs.  If the result is negative (bit 31 set),
   // then the offset and length are both packed in; otherwise, the fixed int is just an offset to a
@@ -121,6 +172,31 @@ object BinaryRecord {
       (binRecord.offset + fixedData + 4,
        UnsafeUtils.getInt(binRecord.base, binRecord.offset + fixedData))
     }
+  }
+}
+
+/**
+ * Instead of trying to somehow make BinaryRecord itself Java-Serialization friendly, and supporting
+ * horrible mutable fields in a class that already uses Unsafe, we keep BinaryRecord itself with an
+ * immutable API, and delegate Java Serialization support to this wrapper class.  NOTE: for high-volume
+ * BinaryRecord transfers, transfer the schema separately and just transmit the bytes from the BinaryRecord.
+ * This class is meant for low-volume use cases and always transfers the schema with every record.
+ */
+@SerialVersionUID(1009L)
+case class BinaryRecordWrapper(var binRec: BinaryRecord) extends java.io.Externalizable {
+  //scalastyle:off
+  def this() = this(null)
+  //scalastyle:on
+  def writeExternal(out: java.io.ObjectOutput): Unit = {
+    out.writeUTF(binRec.schema.toString)
+    out.writeInt(binRec.length)
+    out.write(binRec.bytes)
+  }
+  def readExternal(in: java.io.ObjectInput): Unit = {
+    val schema = RecordSchema(in.readUTF())
+    val recordBytes = new Array[Byte](in.readInt())
+    in.readFully(recordBytes, 0, recordBytes.size)
+    binRec = BinaryRecord(schema, recordBytes)
   }
 }
 

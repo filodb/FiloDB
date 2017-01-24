@@ -4,6 +4,7 @@ import akka.actor.{ActorSystem, ActorRef, PoisonPill}
 import akka.cluster.Cluster
 import akka.contrib.pattern.{ClusterSingletonManager, ClusterSingletonProxy}
 import com.typesafe.config.{Config, ConfigFactory}
+import monix.execution.Scheduler
 import scala.concurrent.ExecutionContext
 
 import filodb.core.FutureUtils
@@ -59,7 +60,7 @@ trait CoordinatorSetup {
                                                   config.getInt("core-futures-pool-size"),
                                                   config.getInt("core-futures-max-pool-size"))
 
-  implicit lazy val ec: ExecutionContext = ExecutionContext.fromExecutorService(threadPool)
+  implicit lazy val ec = Scheduler(ExecutionContext.fromExecutorService(threadPool))
 
   // A separate ExecutionContext can optionally be used for reads, to control read task queue length
   // separately perhaps.  I have found this is not really necessary.  This was originally created to
