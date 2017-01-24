@@ -37,7 +37,7 @@ trait KeyType {
   /**
    * Extracts the type T from a RowReader.
    * @param columnNumbers an array of column numbers to extract from.  Sorry, must be an array for speed.
-   * @throws a NullKeyValue exception if nulls are found.  Nulls cannot be injected into
+   * @throws NullKeyValue exception if nulls are found.  Nulls cannot be injected into
    *         keys.
    */
   def getKeyFunc(columnNumbers: Array[Int]): RowReader => T
