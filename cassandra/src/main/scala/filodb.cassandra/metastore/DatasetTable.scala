@@ -2,10 +2,10 @@ package filodb.cassandra.metastore
 
 import com.datastax.driver.core.Row
 import com.typesafe.config.Config
+
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.Try
-
-import filodb.cassandra.FiloCassandraConnector
+import filodb.cassandra.{FiloCassandraConnector, FiloSessionProvider}
 import filodb.core.DatasetRef
 import filodb.core.metadata.{Dataset, DatasetOptions, Projection}
 
@@ -13,8 +13,9 @@ import filodb.core.metadata.{Dataset, DatasetOptions, Projection}
  * Represents the "dataset" Cassandra table tracking each dataset and its partitions
  *
  * @param config a Typesafe Config with hosts, port, and keyspace parameters for Cassandra connection
+ * @param sessionProvider if provided, a session provider provides a session for the configuration
  */
-sealed class DatasetTable(val config: Config)
+sealed class DatasetTable(val config: Config, val sessionProvider: FiloSessionProvider)
                          (implicit val ec: ExecutionContext) extends FiloCassandraConnector {
   val keyspace = config.getString("admin-keyspace")
   val tableString = s"${keyspace}.datasets"
@@ -44,13 +45,13 @@ sealed class DatasetTable(val config: Config)
                row.getBool("projectionreverse"),
                splitCString(Try(row.getString("projectioncolumns")).getOrElse("")))
 
-  // We use \001 to split and demarcate column name strings, because
+  // We use \u0001 to split and demarcate column name strings, because
   // 1) this char is not allowed,
   // 2) spaces, : () are used in function definitions
   // 3) Cassandra CQLSH will highlight weird unicode chars in diff color so it's easy to see :)
-  private def stringsToStr(strings: Seq[String]): String = strings.mkString("\001")
+  private def stringsToStr(strings: Seq[String]): String = strings.mkString("\u0001")
   private def splitCString(string: String): Seq[String] =
-    if (string.isEmpty) Nil else string.split('\001').toSeq
+    if (string.isEmpty) Nil else string.split('\u0001').toSeq
 
   def initialize(): Future[Response] = execCql(createCql)
 

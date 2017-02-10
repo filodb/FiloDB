@@ -156,6 +156,7 @@ object GdeltTestData {
                 parts(2).toInt, parts(3).toInt,
                 parts(4), parts(5), parts(6).toInt, parts(7).toDouble)
   }
+  val seqReaders = records.map { record => SeqRowReader(record.productIterator.toList) }
 
   // Dataset1: Partition keys (Actor2Code, Year) / Row key GLOBALEVENTID / Seg :string 0
   val dataset1 = Dataset("gdelt", Seq("GLOBALEVENTID"), ":string 0", Seq("Actor2Code", "Year"))
@@ -191,5 +192,14 @@ object GdeltTestData {
       val seg = new ChunkSetSegment(projection, segInfo)
       (seg, lines)
     }.toSeq
+  }
+
+  def createColumns(count: Int) : Seq[Column] = {
+    if (count == 0){
+      Nil
+    } else{
+      val fieldName = s"column$count"
+      new DataColumn(count,fieldName,"testtable",0,Column.ColumnType.StringColumn) +: createColumns(count - 1)
+    }
   }
 }

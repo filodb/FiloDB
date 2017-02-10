@@ -14,9 +14,7 @@ import filodb.core.reprojector.{DefaultReprojector, FiloMemTable, SegmentStateCa
 import filodb.core.store.{InMemoryColumnStore, Segment}
 
 /**
- * Microbenchmark of simple integer summing of Filo chunks in FiloDB segments,
- * mostly to see what the theoretical peak output of scanning speeds can be.
- * Does not involve Spark (at least this one doesn't).
+ * Microbenchmark of reprojection (ingestion) pipeline.
  */
 @State(Scope.Thread)
 class ReprojectionBenchmark {
@@ -34,7 +32,7 @@ class ReprojectionBenchmark {
   val newSetting = "memtable.max-rows-per-table = 200000"
   val config = ConfigFactory.parseString(newSetting).withFallback(
                  ConfigFactory.load("application_test.conf")).getConfig("filodb")
-  val mTable = new FiloMemTable(projection2, config)
+  val mTable = new FiloMemTable(projection2, config, "localhost", 0)
 
   import monix.execution.Scheduler.Implicits.global
   val colStore = new InMemoryColumnStore(scala.concurrent.ExecutionContext.Implicits.global)

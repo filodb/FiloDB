@@ -1,15 +1,23 @@
 package org.apache.spark.sql.hive.filodb
 
 import com.typesafe.scalalogging.slf4j.StrictLogging
+import org.apache.spark.SparkEnv
 import org.apache.spark.sql.catalyst.TableIdentifier
 import org.apache.spark.sql.hive.HiveContext
 import org.apache.spark.sql.SQLContext
+import scala.util.Try
 
 import filodb.core.store.MetaStore
 import filodb.spark.FiloRelation
 
+/**
+ * Things that really need Spark package access, including Hive Metastore stuff
+ */
 object MetaStoreSync extends StrictLogging {
   import filodb.coordinator.client.Client.parse
+
+  def sparkHost: String =
+    Try(SparkEnv.get.rpcEnv.address.host).getOrElse(java.net.InetAddress.getLocalHost.getHostAddress)
 
   /**
    * Tries to get a HiveContext either from a running ThriftServer or from the sqlcontext that's

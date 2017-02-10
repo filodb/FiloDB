@@ -28,12 +28,12 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
   val colStore = new InMemoryColumnStore(global)
   val stateCache = new SegmentStateCache(config, colStore)
   val reprojector = new DefaultReprojector(config, colStore, stateCache)
-  val memTable = new FiloMemTable(projection, config)
+  val memTable = new FiloMemTable(projection, config, "localhost", 0)
 
   val partScan = SinglePartitionScan(defaultPartKey)
   val segInfo = SegmentInfo(defaultPartKey, 0).basedOn(projection)
 
-  override def beforeAll() {
+  override def beforeAll(): Unit = {
     super.beforeAll()
     colStore.initializeProjection(dataset.projections.head).futureValue
   }
@@ -60,7 +60,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
     rowIter.map(_.filoUTF8String(0)).toSeq should equal (sortedUtf8Firsts)
   }
 
-  val gdeltMemTable = new FiloMemTable(GdeltTestData.projection3, config)
+  val gdeltMemTable = new FiloMemTable(GdeltTestData.projection3, config, "localhost", 0)
 
   it("should reuse segment metadata on successive flushes") {
     import GdeltTestData._

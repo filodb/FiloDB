@@ -18,15 +18,13 @@ import filodb.core.Types._
  */
 case class Dataset(name: String,
                    projections: Seq[Projection],
-                   /**
-                    *  Defines the columns to be used for partitioning.
-                    *  If one is not defined, then assume a single global partition, with a special
-                    *  column name.
-                    */
                    partitionColumns: Seq[ColumnId] = Seq(Dataset.DefaultPartitionColumn),
                    options: DatasetOptions = Dataset.DefaultOptions) {
   def withDatabase(database: String): Dataset =
     this.copy(projections = projections.map(_.withDatabase(database)))
+
+  def withName(newName: String): Dataset =
+    this.copy(name = newName, projections = this.projections.map(_.withName(newName)))
 }
 
 /**
@@ -58,6 +56,7 @@ object Dataset {
   // the dataset must fit in one node.
   val DefaultPartitionKey = "/0"
   val DefaultPartitionColumn = s":string $DefaultPartitionKey"
+  val DefaultSegment = ":string 0"
 
   val DefaultOptions = DatasetOptions(chunkSize = 5000)
 
@@ -83,6 +82,13 @@ object Dataset {
             partitionColumns: Seq[String]): Dataset =
     Dataset(ref.dataset,
             Seq(Projection(0, ref, keyColumns, segmentColumn)),
+            partitionColumns)
+
+  def apply(ref: DatasetRef,
+            keyColumns: Seq[String],
+            partitionColumns: Seq[String]): Dataset =
+    Dataset(ref.dataset,
+            Seq(Projection(0, ref, keyColumns, DefaultSegment)),
             partitionColumns)
 
   def apply(name: String, keyColumn: String, segmentColumn: String): Dataset =

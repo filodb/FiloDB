@@ -205,7 +205,7 @@ object ChunkSetInfo extends StrictLogging {
           val hitKeys = bfOpt.map { bf => rowKeys.filter { k => bf.mightContain(k.cachedHash64) } }
                              .getOrElse {
                                missingBloomFilters.increment
-                               logger.info(s"OUCH!  Missing bloom filter for chunk $info...")
+                               logger.info(s"Missing bloom filter for chunk $info...")
                                rowKeys
                              }
           logger.debug(s"Checking chunk $info: ${hitKeys.size} hitKeys")

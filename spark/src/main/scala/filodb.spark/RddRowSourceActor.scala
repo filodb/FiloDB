@@ -9,8 +9,10 @@ import org.apache.spark.sql.{SQLContext, DataFrame, Row}
 import org.joda.time.DateTime
 import org.velvia.filo.RowReader
 
+import filodb.coordinator.{BaseActor, RowSource}
+import filodb.core.metadata.RichProjection
 import filodb.core.{DatasetRef, Types}
-import filodb.coordinator.{BaseActor, IngestionCommands, RowSource}
+
 
 object RddRowSourceActor {
   // Needs to be a multiple of chunkSize. Not sure how to have a good default though.
@@ -18,37 +20,28 @@ object RddRowSourceActor {
   val DefaultRowsToRead = 1000
 
   def props(queue: BlockingQueue[Seq[Row]],
-            columns: Seq[String],
-            dataset: DatasetRef,
+            projection: RichProjection,
             version: Int,
-            coordinatorActor: ActorRef,
+            clusterActor: ActorRef,
             maxUnackedBatches: Int = RddRowSourceActor.DefaultMaxUnackedBatches): Props =
-    Props(classOf[RddRowSourceActor], queue, columns, dataset, version,
-          coordinatorActor, maxUnackedBatches)
+    Props(classOf[RddRowSourceActor], queue, projection, version,
+          clusterActor, maxUnackedBatches)
 }
 
 /**
  * A source actor for ingesting from one partition of a Spark DataFrame/SchemaRDD.
  * Assumes that the columns in the DataFrame have already been verified to be supported
  * by FiloDB and exist in the dataset already.
- *
- * TODO: implement the rewind() function, store unacked rows so we can replay them
  */
 class RddRowSourceActor(queue: BlockingQueue[Seq[Row]],
-                        columns: Seq[String],
-                        val dataset: DatasetRef,
+                        val projection: RichProjection,
                         val version: Int,
-                        val coordinatorActor: ActorRef,
+                        val clusterActor: ActorRef,
                         val maxUnackedBatches: Int = RddRowSourceActor.DefaultMaxUnackedBatches)
 extends BaseActor with RowSource {
-  import IngestionCommands._
   import RddRowSourceActor._
 
-  def getStartMessage(): SetupIngestion = SetupIngestion(dataset, columns, version)
-
-  val seqIds = Iterator.from(0).map { id => id.toLong }
-
-  val groupedRows = new Iterator[Seq[RowReader]] {
+  val batchIterator = new Iterator[Seq[RowReader]] {
     var done = false
     var current: Seq[Row] = Seq.empty
     def hasNext: Boolean = {
@@ -65,7 +58,6 @@ extends BaseActor with RowSource {
       readers
     }
   }
-  val batchIterator = seqIds.zip(groupedRows)
 }
 
 case class RddRowReader(row: Row) extends RowReader {

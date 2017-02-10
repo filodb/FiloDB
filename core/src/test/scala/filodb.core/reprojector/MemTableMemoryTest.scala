@@ -16,7 +16,7 @@ class MemTableMemoryTest extends FunSpec with Matchers with BeforeAndAfter {
   val newSetting = "memtable.max-rows-per-table = 200000"
   val config = ConfigFactory.parseString(newSetting).withFallback(
                  ConfigFactory.load("application_test.conf")).getConfig("filodb")
-  val mTable = new FiloMemTable(projection, config)
+  val mTable = new FiloMemTable(projection, config, "localhost", 0)
   import scala.concurrent.ExecutionContext.Implicits.global
 
   before {
@@ -32,8 +32,9 @@ class MemTableMemoryTest extends FunSpec with Matchers with BeforeAndAfter {
   val binSchema = RecordSchema(schema)
   val records = lotsOfNames.map(r => BinaryRecord(binSchema, TupleRowReader(r)))
 
-  private def printDetailedMemUsage() {
+  private def printDetailedMemUsage(): Unit = {
     val mxBean = java.lang.management.ManagementFactory.getMemoryMXBean
+    //noinspection ScalaStyle
     println(mxBean.getNonHeapMemoryUsage)
   }
 

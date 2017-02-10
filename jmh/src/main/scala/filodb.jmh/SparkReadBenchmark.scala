@@ -7,15 +7,18 @@ import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.functions.sum
 import org.apache.spark.sql.types._
 import org.apache.spark.sql.{DataFrame, Row, SQLContext}
-import org.apache.spark.{SparkContext, SparkConf}
+import org.apache.spark.{SparkConf, SparkContext, SparkException}
 import org.openjdk.jmh.annotations._
-import scala.concurrent.Future
+import org.velvia.filo.{RowReader, TupleRowReader}
+import scala.concurrent.duration._
+import scala.concurrent.{Await, Future}
+import scala.language.postfixOps
+import scalaxy.loops._
 
 import filodb.core._
 import filodb.core.metadata.{Column, Dataset}
 import filodb.core.store._
 import filodb.spark.{FiloDriver, FiloExecutor, FiloRelation}
-import org.velvia.filo.{RowReader, TupleRowReader}
 
 /**
  * A benchmark to compare performance of FiloRelation against different scenarios,

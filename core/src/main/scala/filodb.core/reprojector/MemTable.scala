@@ -41,6 +41,8 @@ trait MemTable extends StrictLogging {
    */
   def ingestRows(rows: Seq[RowReader]): Unit
 
+  def reloadMemTable(): Unit
+
   /**
    * Reads rows out from one partition.
    */
@@ -55,6 +57,8 @@ trait MemTable extends StrictLogging {
   def partitions: Iterator[PartitionKey]
 
   def numRows: Int
+
+  def deleteWalFiles(): Unit
 
   /**
    * Yes, this clears everything!  It's meant for testing only.

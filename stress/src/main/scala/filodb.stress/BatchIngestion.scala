@@ -1,10 +1,9 @@
 package filodb.stress
 
-import org.apache.spark.{SparkContext, SparkConf}
-import org.apache.spark.sql.{DataFrame, SaveMode, SQLContext}
+import org.apache.spark.{SparkConf, SparkContext}
+import org.apache.spark.sql.{DataFrame, SQLContext, SaveMode}
 import scala.util.Random
 import scala.concurrent.duration._
-import scala.concurrent.{Await, Future}
 
 import filodb.core.{DatasetRef, Perftools}
 import filodb.spark._
@@ -51,10 +50,9 @@ object BatchIngestion extends App {
 
   val ingestMillis = Perftools.timeMillis {
     puts("Starting batch ingestion...")
-    csvDF.sort($"medallion").write.format("filodb.spark").
+    csvDF.write.format("filodb.spark").
       option("dataset", "nyc_taxi").
-      option("row_keys", "hack_license,medallion,pickup_datetime,pickup_longitude").
-      option("segment_key", ":timeslice pickup_datetime 6d").
+      option("row_keys", "pickup_datetime,hack_license,medallion,pickup_longitude").
       option("partition_keys", ":monthOfYear pickup_datetime,:stringPrefix medallion 2").
       mode(SaveMode.Overwrite).save()
     puts("Batch ingestion done.")

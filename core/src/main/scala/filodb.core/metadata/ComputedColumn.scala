@@ -37,8 +37,8 @@ object ComputedColumn {
 
   /**
    * Analyzes a computed column expression, matching it with the correct ColumnComputation.
-   * @returns NoSuchFunction if a ColumnComputation is not found; if found,
-   *          then the return value from the analyze() method of the computation
+   * @return NoSuchFunction if a ColumnComputation is not found; if found,
+   *         then the return value from the analyze() method of the computation
    */
   def analyze(expr: String,
               dataset: String,
@@ -72,8 +72,8 @@ trait ColumnComputation {
 
   /**
    * Attempt to analyze the user arguments and produce a ComputedColumn.
-   * @returns either a ComputedColumn with valid ComputedKeyType, or one of the InvalidComputedColumnSpec
-   *          values.  NOTE: does not need to fill in id, which will be generated/replaced later.
+   * @return either a ComputedColumn with valid ComputedKeyType, or one of the InvalidComputedColumnSpec
+   *         values.  NOTE: does not need to fill in id, which will be generated/replaced later.
    */
   def analyze(expr: String,
               dataset: String,

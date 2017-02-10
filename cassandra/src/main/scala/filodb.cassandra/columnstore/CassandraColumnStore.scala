@@ -10,7 +10,7 @@ import kamon.trace.{TraceContext, Tracer}
 import monix.reactive.Observable
 
 import scala.concurrent.{ExecutionContext, Future}
-import filodb.cassandra.FiloCassandraConnector
+import filodb.cassandra.{DefaultFiloSessionProvider, FiloCassandraConnector, FiloSessionProvider}
 import filodb.core._
 import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.store._
@@ -43,10 +43,12 @@ import filodb.core.query.{PartitionChunkIndex, ChunkIDPartitionChunkIndex}
  * ==Constructor Args==
  * @param config see the Configuration section above for the needed config
  * @param readEc An ExecutionContext for reads.  This must be separate from writes to prevent deadlocks.
+ * @param filoSessionProvider if provided, a session provider provides a session for the configuration
  * @param ec An ExecutionContext for futures for writes.  See this for a way to do backpressure with futures:
  *        http://quantifind.com/blog/2015/06/throttling-instantiations-of-scala-futures-1/
  */
-class CassandraColumnStore(val config: Config, val readEc: ExecutionContext)
+class CassandraColumnStore(val config: Config, val readEc: ExecutionContext,
+                           val filoSessionProvider: Option[FiloSessionProvider] = None)
                           (implicit val ec: ExecutionContext)
 extends ColumnStore with CassandraColumnStoreScanner with StrictLogging {
   import filodb.core.store._
@@ -121,7 +123,7 @@ extends ColumnStore with CassandraColumnStoreScanner with StrictLogging {
                           version: Int,
                           segment: ChunkSetSegment,
                           ctx: TraceContext): Future[Response] = {
-    asyncSubtrace(ctx, "write-chunks", "ingestion") {
+    asyncSubtrace("write-chunks", "ingestion", Some(ctx)) {
       val chunkTable = getOrCreateChunkTable(dataset)
       Future.traverse(segment.chunkSets) { chunkSet =>
         chunkTable.writeChunks(segment.partition, version, chunkSet.info.id, chunkSet.chunks, stats)
@@ -133,7 +135,7 @@ extends ColumnStore with CassandraColumnStoreScanner with StrictLogging {
                            version: Int,
                            segment: ChunkSetSegment,
                            ctx: TraceContext): Future[Response] = {
-    asyncSubtrace(ctx, "write-index", "ingestion") {
+    asyncSubtrace("write-index", "ingestion", Some(ctx)) {
       val indexTable = getOrCreateIndexTable(projection.datasetRef)
       val indices = segment.chunkSets.map { case ChunkSet(info, skips, _, _, _) =>
         (info.id, ChunkSetInfo.toBytes(projection, info, skips))
@@ -146,7 +148,7 @@ extends ColumnStore with CassandraColumnStoreScanner with StrictLogging {
                            version: Int,
                            segment: ChunkSetSegment,
                            ctx: TraceContext): Future[Response] = {
-    asyncSubtrace(ctx, "write-filter", "ingestion") {
+    asyncSubtrace("write-filter", "ingestion", Some(ctx)) {
       val filterTable = getOrCreateFilterTable(projection.datasetRef)
       val filters = segment.chunkSets.map { case ChunkSet(info, _, filter, _, _) => (info.id, filter) }
       filterTable.writeFilters(segment.partition, version, filters, stats)
@@ -222,6 +224,7 @@ trait CassandraColumnStoreScanner extends ColumnStoreScanner with StrictLogging 
   import Iterators._
 
   def config: Config
+  def filoSessionProvider: Option[FiloSessionProvider]
 
   val cassandraConfig = config.getConfig("cassandra")
   val tableCacheSize = config.getInt("columnstore.tablecache-size")
@@ -233,6 +236,7 @@ trait CassandraColumnStoreScanner extends ColumnStoreScanner with StrictLogging 
   protected val clusterConnector = new FiloCassandraConnector {
     def config: Config = cassandraConfig
     def ec: ExecutionContext = readEc
+    val sessionProvider = filoSessionProvider.getOrElse(new DefaultFiloSessionProvider(cassandraConfig))
   }
 
   // Produce an empty stream of chunks so that results can still be returned correctly

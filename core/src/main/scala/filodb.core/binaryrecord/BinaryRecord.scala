@@ -17,7 +17,10 @@ import filodb.core.metadata.RichProjection
  *
  * It also implements RowReader, so values can be extracted without another instantiation.
  */
-case class BinaryRecord private[binaryrecord](schema: RecordSchema, base: Any, offset: Long, numBytes: Int)
+class BinaryRecord private[binaryrecord](val schema: RecordSchema,
+                                         val base: Any,
+                                         val offset: Long,
+                                         val numBytes: Int)
 extends ZeroCopyBinary with RowReader {
   import BinaryRecord._
   import ZeroCopyBinary._
@@ -86,7 +89,7 @@ extends ZeroCopyBinary with RowReader {
    */
   def toSortableBytes(numFields: Int = 2): Array[Byte] = {
     val fieldsToWrite = Math.min(fields.size, numFields)
-    val buf = ByteBuf.create(100)
+    val buf = ByteBuf.create(SortableByteBufSize)
     for { fieldNo <- 0 until fieldsToWrite optimized } {
       fields(fieldNo).writeSortable(this, buf)
     }
@@ -98,6 +101,11 @@ class ArrayBinaryRecord(schema: RecordSchema, override val bytes: Array[Byte]) e
 BinaryRecord(schema, bytes, UnsafeUtils.arayOffset, bytes.size)
 
 object BinaryRecord {
+  val DefaultMaxRecordSize = 8192
+  val MaxSmallOffset = 0x7fff
+  val MaxSmallLen    = 0xffff
+  val SortableByteBufSize = 100
+
   def apply(schema: RecordSchema, bytes: Array[Byte]): BinaryRecord =
     new ArrayBinaryRecord(schema, bytes)
 
@@ -112,8 +120,6 @@ object BinaryRecord {
       new BinaryRecord(schema, null, addr, buffer.capacity)
       //scalastyle:on
     } else { throw new IllegalArgumentException("Buffer is neither array or direct") }
-
-  val DefaultMaxRecordSize = 8192
 
   def apply(schema: RecordSchema, reader: RowReader, maxBytes: Int = DefaultMaxRecordSize): BinaryRecord = {
     val builder = BinaryRecordBuilder(schema, maxBytes)
@@ -147,9 +153,6 @@ object BinaryRecord {
     } else {
       apply(projection.rowKeyBinSchema, SeqRowReader(items))
     }
-
-  val MaxSmallOffset = 0x7fff
-  val MaxSmallLen    = 0xffff
 
   implicit val ordering = new Ordering[BinaryRecord] {
     def compare(a: BinaryRecord, b: BinaryRecord): Int = a.compare(b)
@@ -280,7 +283,7 @@ class BinaryRecordBuilder(schema: RecordSchema, val base: Any, val offset: Long,
     UnsafeUtils.unsafe.copyMemory(base, offset, newAray, UnsafeUtils.arayOffset, numBytes)
     new ArrayBinaryRecord(schema, newAray)
   } else {
-    BinaryRecord(schema, base, offset, numBytes)
+    new BinaryRecord(schema, base, offset, numBytes)
   }
 }
 

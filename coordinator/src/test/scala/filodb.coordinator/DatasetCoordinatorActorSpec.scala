@@ -1,20 +1,22 @@
 package filodb.coordinator
 
-import akka.actor.{ActorSystem, ActorRef, PoisonPill}
+import akka.actor.{ActorRef, ActorSystem, PoisonPill}
 import akka.testkit.TestProbe
 import akka.pattern.gracefulStop
 import com.typesafe.config.ConfigFactory
 import org.velvia.filo.{RowReader, TupleRowReader}
+
 import scala.concurrent.Future
 import scala.concurrent.duration._
-
 import filodb.core._
 import filodb.core.metadata.{Column, Dataset, RichProjection}
-import filodb.core.store.{InMemoryColumnStore, SegmentInfo, ChunkSetSegment}
+import filodb.core.store.{ChunkSetSegment, InMemoryColumnStore, SegmentInfo}
 import filodb.core.reprojector.{DefaultReprojector, MemTable, Reprojector}
-
 import org.scalatest.concurrent.ScalaFutures
-import org.scalatest.time.{Millis, Span, Seconds}
+import org.scalatest.time.{Millis, Seconds, Span}
+
+import scala.util.Try
+import scalax.file.Path
 
 object DatasetCoordinatorActorSpec extends ActorSpecConfig
 
@@ -46,7 +48,7 @@ with ScalaFutures {
   var probe: TestProbe = _
   var reprojections: Seq[(DatasetRef, Int)] = Nil
 
-  override def beforeAll() {
+  override def beforeAll(): Unit = {
     super.beforeAll()
     columnStore.initializeProjection(myDataset.projections.head).futureValue
   }
@@ -61,6 +63,9 @@ with ScalaFutures {
 
   after {
     gracefulStop(dsActor, 3.seconds.dilated, PoisonPill).futureValue
+    val walDir = config.getString("write-ahead-log.memtable-wal-dir")
+    val path = Path.fromString (walDir)
+    Try(path.deleteRecursively(continueOnFailure = false))
   }
 
   val namesWithPartCol = (0 until 50).flatMap { partNum =>
@@ -68,7 +73,7 @@ with ScalaFutures {
   }
 
 
-  private def ingestRows(numRows: Int) {
+  private def ingestRows(numRows: Int): Unit = {
     dsActor ! NewRows(probe.ref, namesWithPartCol.take(numRows).map(TupleRowReader), 0L)
     probe.expectMsg(IngestionCommands.Ack(0L))
   }
@@ -180,6 +185,17 @@ with ScalaFutures {
     sleepRemaining(start2, 2500)
     probe.send(dsActor, GetStats)
     probe.expectMsg(Stats(1, 1, 0, 0, -1, 90L))
+
+  }
+
+  it("should automatically delete memtable wal files once flush is complete successfully") {
+    ingestRows(100)
+    // Ingest more rows.  These should be ingested into the active table AFTER flush is initiated.
+    Thread sleep 500
+    ingestRows(20)
+    probe.send(dsActor, GetStats)
+    probe.expectMsg(Stats(1, 1, 0, 20, -1, 120L))
+    reprojections should equal (Seq((DatasetRef("dataset"), 0)))
 
   }
 }

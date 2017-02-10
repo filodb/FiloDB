@@ -7,7 +7,7 @@ import scala.concurrent.Await
 import scala.concurrent.duration._
 import scala.language.postfixOps
 
-import filodb.cassandra.AsyncTest
+import filodb.cassandra.{AsyncTest, DefaultFiloSessionProvider}
 import filodb.core._
 import filodb.core.metadata.{Column, DataColumn}
 
@@ -19,7 +19,7 @@ class ColumnTableSpec extends FlatSpec with AsyncTest {
   val fooRef = DatasetRef("foo", Some("unittest2"))
 
   val config = ConfigFactory.load("application_test.conf").getConfig("filodb.cassandra")
-  val columnTable = new ColumnTable(config)
+  val columnTable = new ColumnTable(config, new DefaultFiloSessionProvider(config))
   val timeout = Timeout(30 seconds)
   // First create the columns table
   override def beforeAll() {

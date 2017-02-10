@@ -1,12 +1,14 @@
 package filodb.spark
 
-import org.apache.spark.SparkContext
+import org.apache.spark.{SparkContext, SparkConf}
 import scala.concurrent.duration._
+import scala.util.Try
+import scalax.file.Path
 
 import filodb.core.metadata.Projection
 import filodb.coordinator.NodeCoordinatorActor.Reset
 
-import org.scalatest.{FunSpecLike, BeforeAndAfter, BeforeAndAfterAll, Matchers}
+import org.scalatest.{BeforeAndAfter, BeforeAndAfterAll, FunSpecLike, Matchers}
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
 
@@ -22,12 +24,11 @@ with Matchers with ScalaFutures {
   lazy val metaStore = FiloDriver.metaStore
   lazy val columnStore = FiloDriver.columnStore
 
-  override def beforeAll() {
-    metaStore.initialize().futureValue(defaultPatience)
+  override def beforeAll(): Unit = {
     testProjections.foreach { p => columnStore.initializeProjection(p).futureValue(defaultPatience) }
   }
 
-  override def afterAll() {
+  override def afterAll(): Unit = {
     super.afterAll()
     sc.stop()
   }
@@ -44,7 +45,12 @@ with Matchers with ScalaFutures {
   }
 
   after {
-    FiloExecutor.stateCache.clear()
+    FiloExecutor._config.map { config =>
+      FiloExecutor.stateCache.clear()
+      val walDir = config.getString("write-ahead-log.memtable-wal-dir")
+      val path = Path.fromString(walDir)
+      Try(path.deleteRecursively(continueOnFailure = false))
+    }
   }
 
   implicit lazy val ec = FiloDriver.ec

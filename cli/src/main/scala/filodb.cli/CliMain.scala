@@ -31,7 +31,6 @@ class Arguments extends FieldArgs {
   var filename: Option[String] = None
   var columns: Option[Map[String, String]] = None
   var rowKeys: Seq[String] = Nil
-  var segmentKey: Option[String] = None
   var partitionKeys: Seq[String] = Nil
   var numPartitions: Int = 1000
   var version: Option[Int] = None
@@ -78,6 +77,8 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
     println("  OR:  --select col1, col2  [--limit <n>]  [--outfile /tmp/out.csv]")
     println("\nTo change config: pass -Dconfig.file=/path/to/config as first arg or set $FILO_CONFIG_FILE")
     println("  or override any config by passing -Dconfig.path=newvalue as first args")
+    println("\nFor detailed debugging, uncomment the TRACE/DEBUG loggers in logback.xml and add these ")
+    println("  options:  ./filo-cli -Dakka.loglevel=DEBUG -Dakka.actor.debug.receive=on -Dakka.actor.debug.autoreceive=on --command importcsv ...")
   }
 
   def getRef(args: Arguments): DatasetRef = DatasetRef(args.dataset.get, args.database)
@@ -107,12 +108,10 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
 
         case Some("create") =>
           require(args.dataset.isDefined && args.columns.isDefined, "Need to specify dataset and columns")
-          require(args.segmentKey.isDefined, "--segmentKey must be defined")
           require(args.rowKeys.nonEmpty, "--rowKeys must be defined")
           val datasetName = args.dataset.get
           createDatasetAndColumns(getRef(args), args.toColumns(datasetName, version),
                                   args.rowKeys,
-                                  args.segmentKey.get,
                                   if (args.partitionKeys.isEmpty) { Seq(Dataset.DefaultPartitionColumn) }
                                   else { args.partitionKeys },
                                   timeout)
@@ -201,11 +200,10 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
   def createDatasetAndColumns(dataset: DatasetRef,
                               columns: Seq[DataColumn],
                               rowKeys: Seq[String],
-                              segmentKey: String,
                               partitionKeys: Seq[String],
                               timeout: FiniteDuration) {
     println(s"Creating dataset $dataset...")
-    val datasetObj = Dataset(dataset, rowKeys, segmentKey, partitionKeys)
+    val datasetObj = Dataset(dataset, rowKeys, partitionKeys)
 
     RichProjection.make(datasetObj, columns).recover {
       case err: RichProjection.BadSchema =>

@@ -1,23 +1,25 @@
 package filodb
 
-import akka.actor.{ActorRef}
+import akka.actor.ActorRef
 import akka.pattern.ask
 import akka.util.Timeout
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.slf4j.StrictLogging
 import java.util.concurrent.ArrayBlockingQueue
 import net.ceedubs.ficus.Ficus._
-import org.apache.spark.sql.{SQLContext, SaveMode, DataFrame, Row}
 import org.apache.spark.sql.types.StructType
-import scala.concurrent.{Await, Future}
+import org.apache.spark.sql.{DataFrame, Row, SQLContext, SaveMode}
 import scala.concurrent.duration._
+import scala.concurrent.{Await, Future}
 import scala.language.implicitConversions
 import scala.language.postfixOps
 
+import org.apache.spark.sql.hive.filodb.MetaStoreSync
+
+import filodb.coordinator.client.ClientException
+import filodb.coordinator.{DatasetCommands, DatasetCoordinatorActor, IngestionCommands, RowSource}
 import filodb.core._
 import filodb.core.metadata.{Column, DataColumn, Dataset, RichProjection}
-import filodb.coordinator.{IngestionCommands, DatasetCommands, RowSource, DatasetCoordinatorActor}
-import org.apache.spark.sql.hive.filodb.MetaStoreSync
 
 package spark {
   case class DatasetNotFound(dataset: String) extends Exception(s"Dataset $dataset not found")
@@ -71,9 +73,8 @@ package object spark extends StrictLogging {
 
   lazy val datasetOpTimeout = FiloDriver.config.as[FiniteDuration]("spark.dataset-ops-timeout")
 
-  private[spark] def ingestRddRows(coordinatorActor: ActorRef,
-                                   dataset: DatasetRef,
-                                   columns: Seq[String],
+  private[spark] def ingestRddRows(clusterActor: ActorRef,
+                                   projection: RichProjection,
                                    version: Int,
                                    rows: Iterator[Row],
                                    writeTimeout: FiniteDuration,
@@ -81,9 +82,10 @@ package object spark extends StrictLogging {
     // Use a queue and read off of iterator in this, the Spark thread.  Due to the presence of ThreadLocals
     // it is not safe for us to read off of this iterator in another (ie Actor) thread
     val queue = new ArrayBlockingQueue[Seq[Row]](32)
-    val props = RddRowSourceActor.props(queue, columns, dataset, version, coordinatorActor)
+    val props = RddRowSourceActor.props(queue, projection, version, clusterActor)
     val actorId = actorCounter.getAndIncrement()
-    val rddRowActor = FiloExecutor.system.actorOf(props, s"${dataset}_${version}_${partitionIndex}_${actorId}")
+    val ref = projection.datasetRef
+    val rddRowActor = FiloExecutor.system.actorOf(props, s"${ref}_${version}_${partitionIndex}_${actorId}")
     implicit val timeout = Timeout(writeTimeout)
     val resp = rddRowActor ? Start
     val rowChunks = rows.grouped(1000)
@@ -96,7 +98,7 @@ package object spark extends StrictLogging {
     queue.put(Nil)    // Final marker that there are no more rows
     Await.result(resp, writeTimeout) match {
       case AllDone =>
-      case SetupError(UnknownDataset)    => throw DatasetNotFound(dataset.dataset)
+      case SetupError(UnknownDataset)    => throw DatasetNotFound(ref.toString)
       case SetupError(BadSchema(reason)) => throw BadSchemaError(reason)
       case SetupError(other)             => throw new RuntimeException(other.toString)
       case IngestionErr(errString, None) => throw new RuntimeException(errString)
@@ -159,16 +161,27 @@ package object spark extends StrictLogging {
     }
   }
 
+  private[spark] def flushAndLog(dataset: DatasetRef, version: Int): Unit = {
+    try {
+      val nodesFlushed = FiloDriver.client.flushCompletely(dataset, version)
+      sparkLogger.info(s"Flush completed on $nodesFlushed nodes for dataset $dataset")
+    } catch {
+      case ClientException(msg) =>
+        sparkLogger.warn(s"Could not flush due to client exception $msg on dataset $dataset...")
+      case e: Exception =>
+        sparkLogger.warn(s"Exception from flushing nodes for $dataset/$version", e)
+    }
+  }
+
   // Checks for schema errors via RichProjection.make, and returns created Dataset object
   private[spark] def makeAndVerifyDataset(datasetRef: DatasetRef,
                                           rowKeys: Seq[String],
-                                          segmentKey: String,
                                           partitionKeys: Seq[String],
                                           chunkSize: Option[Int],
                                           dfColumns: Seq[Column]): Dataset = {
     val options = Dataset.DefaultOptions
     val options2 = chunkSize.map { newSize => options.copy(chunkSize = newSize) }.getOrElse(options)
-    val dataset = Dataset(datasetRef, rowKeys, segmentKey, partitionKeys).copy(options = options2)
+    val dataset = Dataset(datasetRef, rowKeys, partitionKeys).copy(options = options2)
 
     // validate against schema.  Checks key names, computed columns, etc.
     RichProjection.make(dataset, dfColumns).recover {

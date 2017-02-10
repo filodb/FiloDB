@@ -1,7 +1,7 @@
 package filodb.stress
 
-import org.apache.spark.{SparkContext, SparkConf}
-import org.apache.spark.sql.{DataFrame, SaveMode, SQLContext}
+import org.apache.spark.{SparkConf, SparkContext}
+import org.apache.spark.sql.{DataFrame, SQLContext, SaveMode}
 import scala.util.Random
 import scala.concurrent.duration._
 import scala.concurrent.{Await, Future}
@@ -26,7 +26,7 @@ import filodb.spark._
  *
  * Also, if you run this locally, run it using local-cluster to test clustering effects.
  *
- * TODO: randomize number of lines to ingest.  Maybe $numOfLines - util.Random.nextInt(10000)....
+ * TODO: randomize number of lines to ingest.  Maybe numOfLines - util.Random.nextInt(10000)....
  */
 object IngestionStress extends App {
   val taxiCsvFile = args(0)
@@ -66,13 +66,9 @@ object IngestionStress extends App {
   val stressIngestor = Future {
     val ingestMillis = Perftools.timeMillis {
       puts("Starting stressful ingestion...")
-      // csvDF.sort($"medallion").write.format("filodb.spark").
       csvDF.write.format("filodb.spark").
         option("dataset", "taxi_medallion_seg").
-        // option("row_keys", "hack_license,pickup_datetime").
-        // option("segment_key", ":stringPrefix medallion 3").
         option("row_keys", "medallion,hack_license,pickup_datetime").
-        option("segment_key", ":string /0").
         option("partition_keys", ":stringPrefix medallion 2").
         option("reset_schema", "true").
         mode(SaveMode.Overwrite).save()
@@ -90,13 +86,9 @@ object IngestionStress extends App {
     val ingestMillis = Perftools.timeMillis {
       puts("Starting hour-of-day (easy) ingestion...")
 
-      // dfWithHoD.sort($"hourOfDay").write.format("filodb.spark").
       dfWithHoD.write.format("filodb.spark").
         option("dataset", "taxi_hour_of_day").
-        // option("row_keys", "hack_license,pickup_datetime").
-        // option("segment_key", ":timeslice pickup_datetime 4d").
         option("row_keys", "pickup_datetime,medallion,hack_license").
-        option("segment_key", ":string /0").
         option("partition_keys", "hourOfDay").
         option("reset_schema", "true").
         mode(SaveMode.Overwrite).save()
