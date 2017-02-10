@@ -122,4 +122,8 @@ object FiloExecutor extends FiloSetup with StrictLogging {
       Thread sleep 1000
     }
   }
+
+  def init(confStr: String): Unit = if (_config.isEmpty) {
+    init(ConfigFactory.parseString(confStr))
+  }
 }

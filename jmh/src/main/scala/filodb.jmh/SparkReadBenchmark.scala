@@ -1,7 +1,13 @@
 package filodb.jmh
 
 import ch.qos.logback.classic.{Level, Logger}
+import com.typesafe.config.ConfigRenderOptions
 import java.util.concurrent.TimeUnit
+import org.apache.spark.sql.catalyst.InternalRow
+import org.apache.spark.sql.functions.sum
+import org.apache.spark.sql.types._
+import org.apache.spark.sql.{DataFrame, Row, SQLContext}
+import org.apache.spark.{SparkContext, SparkConf}
 import org.openjdk.jmh.annotations._
 import scala.concurrent.Future
 
@@ -9,11 +15,6 @@ import filodb.core._
 import filodb.core.metadata.{Column, Dataset}
 import filodb.core.store._
 import filodb.spark.{FiloDriver, FiloExecutor, FiloRelation}
-import org.apache.spark.sql.catalyst.InternalRow
-import org.apache.spark.sql.functions.sum
-import org.apache.spark.sql.types._
-import org.apache.spark.sql.{DataFrame, Row, SQLContext}
-import org.apache.spark.{SparkContext, SparkException, SparkConf}
 import org.velvia.filo.{RowReader, TupleRowReader}
 
 /**
@@ -71,8 +72,7 @@ class SparkReadBenchmark {
 
   // Merge segments into InMemoryColumnStore
   rowIt.toSeq.take(NumRows).grouped(10000).foreach { rows =>
-    val segKey = projection.segmentKeyFunc(TupleRowReader(rows.head))
-    val segInfo = SegmentInfo("/0", segKey).basedOn(projection)
+    val segInfo = SegmentInfo(projection.partKey("/0"), "").basedOn(projection)
     val state = ColumnStoreSegmentState(projection, schema, 0, FiloDriver.columnStore)(segInfo)
     val writerSeg = new ChunkSetSegment(projection, segInfo)
     writerSeg.addChunkSet(state, rows.map(TupleRowReader))
@@ -97,6 +97,7 @@ class SparkReadBenchmark {
   }
 
   val readOnlyProjStr = projection.toReadOnlyProjString(Seq("int"))
+  val configStr = filoConfig.root.render(ConfigRenderOptions.concise)
 
   // Measure the speed of InMemoryColumnStore's ScanSegments over many segments
   // Including null check
@@ -104,7 +105,7 @@ class SparkReadBenchmark {
   @BenchmarkMode(Array(Mode.SingleShotTime))
   @OutputTimeUnit(TimeUnit.SECONDS)
   def inMemoryColStoreOnly(): Any = {
-    val it = FiloRelation.perPartitionRowScanner(filoConfig, readOnlyProjStr, 0,
+    val it = FiloRelation.perPartitionRowScanner(configStr, readOnlyProjStr, 0,
                             FilteredPartitionScan(split), AllChunkScan).asInstanceOf[Iterator[InternalRow]]
     var sum = 0
     while (it.hasNext) {
