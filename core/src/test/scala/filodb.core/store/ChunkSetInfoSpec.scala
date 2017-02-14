@@ -101,12 +101,12 @@ class ChunkSetInfoSpec extends FunSpec with Matchers {
     val dataset5 = Dataset("gdelt", Seq("SQLDATE", "Actor2Code", "Actor2Name"), ":string 0", Seq("Year"))
     val proj5 = RichProjection(dataset5, schema)
 
-    val key1 = BinaryRecord(proj5, Seq(Timestamp.valueOf("2013-01-02 08:00:00"), "0", "0"))
-    val key2 = BinaryRecord(proj5, Seq(Timestamp.valueOf("2013-01-05 17:30:00"), "0", "0"))
-    val key3 = BinaryRecord(proj5, Seq(Timestamp.valueOf("2013-01-10 12:00:00"), "AABCDE", "0"))
-    val key4 = BinaryRecord(proj5, Seq(Timestamp.valueOf("2013-01-10 12:00:00"), "GHTI", "0"))
-    val key5 = BinaryRecord(proj5, Seq(Timestamp.valueOf("2013-01-18 20:59:00"), "0", "0"))
-    val key6 = BinaryRecord(proj5, Seq(Timestamp.valueOf("2013-01-21 23:59:59"), "0", "0"))
+    val key1 = BinaryRecord(proj5, Seq(Timestamp.valueOf("2013-01-02 08:00:00").getTime, "0", "0"))
+    val key2 = BinaryRecord(proj5, Seq(Timestamp.valueOf("2013-01-05 17:30:00").getTime, "0", "0"))
+    val key3 = BinaryRecord(proj5, Seq(Timestamp.valueOf("2013-01-10 12:00:00").getTime, "AABCDE", "0"))
+    val key4 = BinaryRecord(proj5, Seq(Timestamp.valueOf("2013-01-10 12:00:00").getTime, "GHTI", "0"))
+    val key5 = BinaryRecord(proj5, Seq(Timestamp.valueOf("2013-01-18 20:59:00").getTime, "0", "0"))
+    val key6 = BinaryRecord(proj5, Seq(Timestamp.valueOf("2013-01-21 23:59:59").getTime, "0", "0"))
 
     val info1 = ChunkSetInfo(1, 1, key2, key4)
 
@@ -123,8 +123,8 @@ class ChunkSetInfoSpec extends FunSpec with Matchers {
     info1.intersection(key5, key6) should equal (None)
 
     // Query with shortened keys
-    val keyA = BinaryRecord(proj5, Seq(Timestamp.valueOf("2013-01-05 17:30:00")))
-    val keyB = BinaryRecord(proj5, Seq(Timestamp.valueOf("2013-01-10 12:00:00")))
+    val keyA = BinaryRecord(proj5, Seq(Timestamp.valueOf("2013-01-05 17:30:00").getTime))
+    val keyB = BinaryRecord(proj5, Seq(Timestamp.valueOf("2013-01-10 12:00:00").getTime))
     info1.intersection(keyA, keyB) should equal (Some((key2, keyB)))
   }
 

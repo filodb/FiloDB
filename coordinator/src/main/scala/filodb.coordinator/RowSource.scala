@@ -200,7 +200,15 @@ trait RowSource extends Actor with StrictLogging {
     }
     rowsByNode.foreach { case (nodeRef, readers) =>
       logger.trace(s"  ==> ($nextSeqId) Processing ${readers.size} rows for node $nodeRef...")
-      val binReaders = readers.map { r => BinaryRecord(projection.binSchema, r) }
+      val binReaders = readers.map { r =>
+        try {
+          BinaryRecord(projection.binSchema, r)
+        } catch {
+          case e: Exception =>
+            logger.error(s"Could not convert source row $r to BinaryRecord", e)
+            throw e
+        }
+      }
       outstanding(nextSeqId) = (nodeRef, binReaders)
       outstandingNodes(nodeRef) = outstandingNodes(nodeRef) + nextSeqId
       nodeRef ! IngestionCommands.IngestRows(dataset, version, binReaders, nextSeqId)

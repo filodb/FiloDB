@@ -22,7 +22,7 @@ import scala.language.postfixOps
 import filodb.coordinator.client.Client.parse
 import filodb.core._
 import filodb.core.binaryrecord.{BinaryRecord, BinaryRecordWrapper}
-import filodb.core.query.KeyFilter
+import filodb.core.query.{ChunkSetReader, KeyFilter}
 import filodb.core.metadata.{Column, DataColumn, Dataset, RichProjection}
 import filodb.core.store._
 
@@ -243,7 +243,8 @@ object FiloRelation extends StrictLogging {
 
     FiloExecutor.columnStore.scanRows(
       readOnlyProjection, readOnlyProjection.columns, version, partMethod, chunkMethod,
-      (bytes, clazzes, len) => new SparkRowReader(bytes, clazzes, len)).asInstanceOf[Iterator[Row]]
+      SparkRowReader.sparkColToMaker,
+      (vectors) => new SparkRowReader(vectors)).asInstanceOf[Iterator[Row]]
   }
 }
 
@@ -345,19 +346,15 @@ case class FiloRelation(dataset: DatasetRef,
 }
 
 object SparkRowReader {
-  import VectorReader._
   import FiloVector._
+  import ChunkSetReader._
+  import Column.ColumnType.TimestampColumn
 
-  val TimestampClass = classOf[java.sql.Timestamp]
-
-  // Customize the Filo vector maker to return Long vectors for Timestamp columns.
-  // This is because Spark 1.5's InternalRow expects Long primitives for that type.
-  val timestampVectorMaker: VectorMaker = {
-    case TimestampClass => ((b: ByteBuffer, len: Int) =>
+  def sparkColToMaker(col: Column): VectorFactory = col.columnType match {
+    case TimestampColumn => ((b: ByteBuffer, len: Int) =>
                              new SparkTimestampFiloVector(FiloVector[Long](b, len)))
+    case c: Column.ColumnType => defaultColumnToMaker(col)
   }
-
-  val spark15vectorMaker = timestampVectorMaker orElse defaultVectorMaker
 }
 
 /**
@@ -373,18 +370,13 @@ class SparkTimestampFiloVector(innerVector: FiloVector[Long]) extends FiloVector
 /**
  * Base the SparkRowReader on Spark's InternalRow.  Scans are much faster because
  * sources that return RDD[Row] need to be converted to RDD[InternalRow], and the
- * conversion is horribly expensive, especially for primitives.
+ * conversion is horribly expensive, especially for primitives and strings.
  * The only downside is that the API is not stable.  :/
- * TODO: get UTF8String's out of Filo as well, so no string conversion needed :D
  */
-class SparkRowReader(chunks: Array[ByteBuffer],
-                     classes: Array[Class[_]],
-                     emptyLen: Int = 0)
+class SparkRowReader(val parsers: Array[FiloVector[_]])
 extends BaseGenericInternalRow with FiloRowReader {
   var rowNo: Int = -1
   final def setRowNo(newRowNo: Int): Unit = { rowNo = newRowNo }
-
-  val parsers = FiloVector.makeVectors(chunks, classes, emptyLen, SparkRowReader.spark15vectorMaker)
 
   final def notNull(columnNo: Int): Boolean = parsers(columnNo).isAvailable(rowNo)
 
@@ -405,9 +397,13 @@ extends BaseGenericInternalRow with FiloRowReader {
   }
 
   final def getAny(columnNo: Int): Any = genericGet(columnNo)
-  final def genericGet(columnNo: Int): Any =
-    if (classes(columnNo) == classOf[ZeroCopyUTF8String]) { getUTF8String(columnNo) }
-    else { parsers(columnNo).boxed(rowNo) }
+  final def genericGet(columnNo: Int): Any = parsers(columnNo).boxed(rowNo) match {
+    case z: ZeroCopyUTF8String => UTF8String.fromAddress(z.base, z.offset, z.numBytes)
+    case o: Any                => o
+    //scalastyle:off
+    case null                  => null
+    //scalastyle:on
+  }
 
   override final def isNullAt(i: Int): Boolean = !notNull(i)
   def numFields: Int = parsers.length

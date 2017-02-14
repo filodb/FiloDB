@@ -110,6 +110,14 @@ class FiloMemTableSpec extends FunSpec with Matchers with BeforeAndAfter {
       outRows.toSeq.map(_.filoUTF8String(0)) should equal (sortedUtf8Firsts)
     }
 
+    it("should ingest BinaryRecords with Timestamp partition column") {
+      import GdeltTestData._
+      val mTable = new FiloMemTable(projection5, config, actorAddress, version)
+      val records = readers.take(6).map { r => BinaryRecord(binSchema, r) }
+      mTable.ingestRows(records)
+      mTable.numRows should equal (6)
+    }
+
     it("should keep ingesting rows with null partition col value") {
       val mTable = new FiloMemTable(projWithPartCol, config, actorAddress, version)
 

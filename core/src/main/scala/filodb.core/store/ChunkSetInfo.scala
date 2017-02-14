@@ -5,6 +5,7 @@ import com.googlecode.javaewah.EWAHCompressedBitmap
 import com.typesafe.scalalogging.slf4j.StrictLogging
 import java.io.{DataOutputStream, ByteArrayOutputStream}
 import java.nio.ByteBuffer
+import java.sql.Timestamp
 import kamon.Kamon
 import org.boon.primitive.{ByteBuf, InputByteArray}
 import org.velvia.filo._
@@ -34,6 +35,10 @@ object ChunkSet extends StrictLogging {
   val chunkSetsHitKeyCount = Kamon.metrics.histogram("chunksets-hit-n-rowkeys")
   val chunkSetsNeedReadRowKey = Kamon.metrics.counter("chunksets-need-read-row-keys")
 
+  val builderMap = VectorBuilder.defaultBuilderMap ++ Map(
+                     classOf[Timestamp] -> (() => new LongVectorBuilder)
+                   )
+
   /**
    * Creates a new ChunkSet with empty skipList, based on existing state
    * @param state a SegmentState instance
@@ -43,7 +48,7 @@ object ChunkSet extends StrictLogging {
   def apply(state: SegmentState, rows: Iterator[RowReader]): ChunkSet = {
     // NOTE: some RowReaders, such as FastFiloRowReader, must be iterators
     // since rowNo in FastFiloRowReader is mutated.
-    val builder = new RowToVectorBuilder(state.filoSchema)
+    val builder = new RowToVectorBuilder(state.filoSchema, builderMap)
     val rowKeys = rows.map { row =>
       builder.addRow(row)
       state.makeRowKey(row)
@@ -224,9 +229,9 @@ object ChunkSetInfo extends StrictLogging {
         chunkSetsHitKeyCount.record(numHitKeys)
       }
       hitKeysByChunk.map { case (ChunkSetInfo(chunkId, numRows, startKey, _), keys) =>
-        val chunkKeys = state.getRowKeyChunks(startKey, chunkId)
+        val keyVectors = state.getRowKeyVectors(startKey, chunkId)
         val overrides = keys.flatMap { key =>
-          binarySearchKeyChunks(state.projection, chunkKeys, numRows, key) match {
+          binarySearchKeyChunks(state.projection, keyVectors, numRows, key) match {
             case (pos, true) => Some(pos)
             case (_,  false) => None
           }
@@ -237,22 +242,21 @@ object ChunkSetInfo extends StrictLogging {
   }
 
   /**
-   * Does a binary search through the chunks representing row keys in a segment, finding the position
+   * Does a binary search through the vectors representing row keys in a segment, finding the position
    * equal to the given key or just greater than the given key, if the key is not matched
    * (ie where the nonmatched item would be inserted).
    * Note: we take advantage of the fact that row keys cannot have null values, so no need to null check.
    *
-   * @param chunks an array of Filo Vector chunk bytes, in order of the projection.rowKeyColumns.
+   * @param vectors an array of FiloVectors, in order of the projection.rowKeyColumns.
    * @param key    a RowReader representing the key to search for.  Must also have rowKeyColumns elements.
    * @return (position, true if exact match is found)  position might be equal to the number of rows in chunk
    *            if exact match not found and item compares greater than last item
    */
   def binarySearchKeyChunks(projection: RichProjection,
-                            chunks: Array[ByteBuffer],
+                            vectors: Array[FiloVector[_]],
                             chunkLen: Int,
                             key: RowReader): (Int, Boolean) = {
-    val clazzes = projection.rowKeyColumns.map(_.columnType.clazz).toArray
-    val reader = new FastFiloRowReader(chunks, clazzes, chunkLen)
+    val reader = new FastFiloRowReader(vectors)
     val ordering = projection.rowKeyType.rowReaderOrdering
     binarySearchKeyChunks(reader, chunkLen, ordering, key)
   }

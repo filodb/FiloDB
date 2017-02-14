@@ -96,7 +96,7 @@ abstract class SegmentState(val projection: RichProjection,
   private var _masterFilter = emptyFilter(settings)
 
   // == Abstract methods ==
-  def getRowKeyChunks(key: BinaryRecord, chunkID: ChunkID): Array[ByteBuffer]
+  def getRowKeyVectors(key: BinaryRecord, chunkID: ChunkID): Array[FiloVector[_]]
 
   def infos: Iterator[ChunkSetInfo] = chunkIndex.allChunks.map(_._1)
   def filter(id: ChunkID): Option[BloomFilter[Long]] = _filterMap.get(id)
@@ -146,8 +146,8 @@ class ColumnStoreSegmentState private(proj: RichProjection,
                                       scanner: ColumnStore with ColumnStoreScanner,
                                       settings: SegmentStateSettings)
 extends SegmentState(proj, chunkIndex, schema, settings) {
-  def getRowKeyChunks(key: BinaryRecord, chunkID: ChunkID): Array[ByteBuffer] =
-    scanner.readRowKeyChunks(proj, version, segInfo.partition, key, chunkID)
+  def getRowKeyVectors(key: BinaryRecord, chunkID: ChunkID): Array[FiloVector[_]] =
+    scanner.readRowKeyVectors(proj, version, segInfo.partition, key, chunkID)
 }
 
 object ColumnStoreSegmentState extends StrictLogging {

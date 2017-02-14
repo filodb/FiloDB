@@ -57,7 +57,7 @@ object FieldType {
     StringColumn  -> UTF8StringFieldType,
     BitmapColumn  -> BooleanFieldType,
     DoubleColumn  -> DoubleFieldType,
-    TimestampColumn -> TimestampFieldType
+    TimestampColumn -> LongFieldType  // default to long handling due to BinaryRecord
   )
 }
 

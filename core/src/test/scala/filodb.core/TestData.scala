@@ -4,16 +4,16 @@ import bloomfilter.mutable.BloomFilter
 import java.nio.ByteBuffer
 import java.sql.Timestamp
 import org.joda.time.DateTime
-import org.velvia.filo.{RowReader, TupleRowReader, ArrayStringRowReader, SeqRowReader}
+import org.velvia.filo.{FiloVector, RowReader, TupleRowReader, ArrayStringRowReader, SeqRowReader}
 import org.velvia.filo.ZeroCopyUTF8String._
 import scala.io.Source
 import scala.concurrent.ExecutionContext
 import scala.concurrent.duration._
 
 import filodb.core._
-import filodb.core.binaryrecord.BinaryRecord
+import filodb.core.binaryrecord.{BinaryRecord, RecordSchema}
 import filodb.core.metadata.{Column, DataColumn, Dataset, RichProjection}
-import filodb.core.query.{PartitionChunkIndex, RowkeyPartitionChunkIndex}
+import filodb.core.query.{ChunkSetReader, PartitionChunkIndex, RowkeyPartitionChunkIndex}
 import filodb.core.store._
 import filodb.core.Types.PartitionKey
 
@@ -32,10 +32,12 @@ extends SegmentState(projection, index, schema, settings) {
          schema,
          settings)
 
+  val makers = projection.rowKeyColumns.map(ChunkSetReader.defaultColumnToMaker).toArray
+
   val rowKeyChunks = new collection.mutable.HashMap[(BinaryRecord, Types.ChunkID), Array[ByteBuffer]]
 
-  def getRowKeyChunks(key: BinaryRecord, chunkId: Types.ChunkID): Array[ByteBuffer] =
-    rowKeyChunks((key, chunkId))
+  def getRowKeyVectors(key: BinaryRecord, chunkId: Types.ChunkID): Array[FiloVector[_]] =
+    rowKeyChunks((key, chunkId)).zip(makers).map { case (buf, maker) => maker(buf, 5000) }
 
   def store(chunkSet: ChunkSet): Unit = {
     val rowKeyColNames = projection.rowKeyColumns.map(_.name)
@@ -146,6 +148,7 @@ object GdeltTestData {
                    DataColumn(5, "Actor2Name",    "gdelt", 0, Column.ColumnType.StringColumn),
                    DataColumn(6, "NumArticles",   "gdelt", 0, Column.ColumnType.IntColumn),
                    DataColumn(7, "AvgTone",       "gdelt", 0, Column.ColumnType.DoubleColumn))
+  val binSchema = RecordSchema(schema)
 
   case class GdeltRecord(eventId: Int, sqlDate: Timestamp, monthYear: Int, year: Int,
                          actor2Code: String, actor2Name: String, numArticles: Int, avgTone: Double)
@@ -177,6 +180,12 @@ object GdeltTestData {
   // to easily test row key scans
   val dataset4 = Dataset("gdelt", Seq("Actor2Code", "GLOBALEVENTID"), ":string 0", Seq("Year"))
   val projection4 = RichProjection(dataset4, schema)
+
+  // Dataset 5: partition :monthYear SQLDATE, rowkey (Actor2Code, GLOBALEVENTID)
+  // to test timestamp processing
+  val dataset5 = Dataset("gdelt", Seq("Actor2Code", "GLOBALEVENTID"), ":string 0",
+                                  Seq(":monthOfYear SQLDATE"))
+  val projection5 = RichProjection(dataset5, schema)
 
   def getSegments(partKey: PartitionKey): Seq[(ChunkSetSegment, Seq[RowReader])] = {
     val segInfo = SegmentInfo(partKey, "").basedOn(projection2)

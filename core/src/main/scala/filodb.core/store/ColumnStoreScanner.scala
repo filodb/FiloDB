@@ -11,6 +11,8 @@ import filodb.core._
 import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.metadata.{Column, Projection, RichProjection}
 import filodb.core.query.{ChunkSetReader, PartitionChunkIndex}
+import ChunkSetReader._
+
 
 trait ChunkPipeItem
 case class ChunkPipeInfos(infosAndSkips: ChunkSetInfo.ChunkInfosAndSkips) extends ChunkPipeItem
@@ -79,21 +81,24 @@ trait ColumnStoreScanner extends StrictLogging {
                  columns: Seq[Column],
                  version: Int,
                  partMethod: PartitionScanMethod,
-                 chunkMethod: ChunkScanMethod = AllChunkScan): Observable[ChunkSetReader] = {
+                 chunkMethod: ChunkScanMethod = AllChunkScan,
+                 colToMaker: ColumnToMaker = defaultColumnToMaker): Observable[ChunkSetReader] = {
     scanPartitions(projection, version, partMethod)
       // Partitions to pipeline of single chunks
       .flatMap { partIndex =>
         stats.incrReadPartitions(1)
         readPartitionChunks(projection.datasetRef, version, columns, partIndex, chunkMethod)
       // Collate single chunks to ChunkSetReaders
-      }.scan(new ChunkSetReaderAggregator(columns, stats)) { _ add _ }
+      }.scan(new ChunkSetReaderAggregator(columns, stats, colToMaker)) { _ add _ }
       .collect { case agg: ChunkSetReaderAggregator if agg.canEmit => agg.emit() }
   }
 }
 
-private[store] class ChunkSetReaderAggregator(schema: Seq[Column], stats: ColumnStoreStats) {
+private[store] class ChunkSetReaderAggregator(schema: Seq[Column],
+                                              stats: ColumnStoreStats,
+                                              colToMaker: ColumnToMaker = defaultColumnToMaker) {
   val readers = new NonBlockingHashMapLong[ChunkSetReader](32, false)
-  val clazzes = schema.map(_.columnType.clazz).toArray
+  val makers = schema.map(colToMaker).toArray
   var emitReader: Option[ChunkSetReader] = None
 
   def canEmit: Boolean = emitReader.isDefined
@@ -122,7 +127,7 @@ private[store] class ChunkSetReaderAggregator(schema: Seq[Column], stats: Column
         }
       case ChunkPipeInfos(infos) =>
         infos.foreach { case (info, skips) =>
-          readers.put(info.id, new ChunkSetReader(info, skips, clazzes))
+          readers.put(info.id, new ChunkSetReader(info, skips, makers))
         }
     }
     this

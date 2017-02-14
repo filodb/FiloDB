@@ -56,7 +56,7 @@ class IntSumReadBenchmark {
   @BenchmarkMode(Array(Mode.Throughput))
   @OutputTimeUnit(TimeUnit.SECONDS)
   def columnarChunkScan(): Int = {
-    val intVector = FiloVector[Int](reader.chunks(0))
+    val intVector = reader.vectors(0).asInstanceOf[FiloVector[Int]]
     var total = 0
     for { i <- 0 until NumRows optimized } {
       total += intVector(i)
