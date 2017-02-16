@@ -33,7 +33,7 @@ object RowReplaceStress extends App {
   }
 
   // Setup SparkContext, etc.
-  val conf = (new SparkConf).setAppName("test")
+  val conf = (new SparkConf).setAppName("RowReplaceStress")
                             .set("spark.filodb.cassandra.keyspace", "filostress")
                             .set("spark.sql.shuffle.partitions", "4")
                             .set("spark.scheduler.mode", "FAIR")

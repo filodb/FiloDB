@@ -53,7 +53,7 @@ object InMemoryQueryStress extends App {
 
   // Setup SparkContext, etc.
   val conf = (new SparkConf).setMaster("local[8]")
-                            .setAppName("test")
+                            .setAppName("InMemoryQueryStress")
                             .set("spark.filodb.store", "in-memory")
                             .set("spark.sql.shuffle.partitions", "4")
                             .set("spark.scheduler.mode", "FAIR")
