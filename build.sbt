@@ -28,7 +28,8 @@ lazy val cassandra = (project in file("cassandra"))
                        .settings(mySettings:_*)
                        .settings(name := "filodb-cassandra")
                        .settings(libraryDependencies ++= cassDeps)
-                       .dependsOn(core % "compile->compile; test->test")
+                       .dependsOn(core % "compile->compile; test->test",
+                                  coordinator)
 
 lazy val cli = (project in file("cli"))
                  .settings(mySettings:_*)

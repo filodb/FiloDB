@@ -21,7 +21,7 @@ import filodb.core.metadata.RichProjection
 //scalastyle:off
 trait CsvImportExport extends StrictLogging {
   def system: ActorSystem
-  val metaStore: MetaStore
+  def metaStore: MetaStore
   def coordinatorActor: ActorRef
   def client: LocalClient
   var exitCode = 0

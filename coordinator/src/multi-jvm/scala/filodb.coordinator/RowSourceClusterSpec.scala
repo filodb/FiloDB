@@ -8,7 +8,7 @@ import com.typesafe.scalalogging.slf4j.StrictLogging
 import scala.concurrent.duration._
 
 import filodb.core._
-import filodb.core.store.{InMemoryColumnStore, InMemoryMetaStore, FilteredPartitionScan}
+import filodb.core.store.FilteredPartitionScan
 import filodb.core.metadata.{Column, DataColumn, Dataset, RichProjection}
 import filodb.coordinator.client.ClusterClient
 
@@ -34,7 +34,7 @@ object RowSourceClusterSpecConfig extends MultiNodeConfig {
 // A multi-JVM RowSource spec to test out sending to multiple nodes
 abstract class RowSourceClusterSpec extends MultiNodeSpec(RowSourceClusterSpecConfig)
   with FunSpecLike with Matchers with BeforeAndAfterAll
-  with CoordinatorSetup
+  with CoordinatorSetupWithFactory
   with StrictLogging
   with ImplicitSender with ScalaFutures {
 
@@ -53,10 +53,6 @@ abstract class RowSourceClusterSpec extends MultiNodeSpec(RowSourceClusterSpecCo
 
   val config = globalConfig.getConfig("filodb")
   val settings = CsvSourceActor.CsvSourceSettings()
-
-  implicit val context = scala.concurrent.ExecutionContext.Implicits.global
-  lazy val columnStore = new InMemoryColumnStore(context)
-  lazy val metaStore = new InMemoryMetaStore
 
   val address1 = node(first).address
   val address2 = node(second).address

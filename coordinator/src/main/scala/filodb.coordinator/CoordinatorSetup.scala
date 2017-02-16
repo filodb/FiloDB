@@ -9,7 +9,7 @@ import scala.concurrent.ExecutionContext
 
 import filodb.core.FutureUtils
 import filodb.core.reprojector._
-import filodb.core.store.{ColumnStore, ColumnStoreScanner, MetaStore}
+import filodb.core.store.{ColumnStore, ColumnStoreScanner, InMemoryMetaStore, InMemoryColumnStore, MetaStore}
 
 object GlobalConfig {
   // Loads the overall configuration in a specific order:
@@ -117,4 +117,44 @@ trait CoordinatorSetup {
  */
 class KamonConfigProvider extends kamon.ConfigProvider {
   def config: Config = GlobalConfig.systemConfig
+}
+
+/**
+ * A StoreFactory creates instances of ColumnStore and MetaStore one time.  The columnStore and metaStore
+ * methods should return that created instance every time, not create a new instance.  The implementation
+ * should be a class that is passed a single parameter, the CoordinatorSetup instance with config,
+ * ExecutionContext, etc.
+ */
+trait StoreFactory {
+  def columnStore: ColumnStore with ColumnStoreScanner
+  def metaStore: MetaStore
+}
+
+class InMemoryStoreFactory(setup: CoordinatorSetup) extends StoreFactory {
+  import setup.ec
+
+  val columnStore = new InMemoryColumnStore(setup.readEc)
+  val metaStore = SingleJvmInMemoryStore.metaStore
+}
+
+// TODO: make the InMemoryMetaStore either distributed (using clustering to forward and distribute updates)
+// or, perhaps modify NodeCoordinator to not need metastore.
+object SingleJvmInMemoryStore {
+  import scala.concurrent.ExecutionContext.Implicits.global
+  lazy val metaStore = new InMemoryMetaStore
+}
+
+/**
+ * A CoordinatorSetup which initializes columnStore and metaStore using the factory setting from config
+ */
+trait CoordinatorSetupWithFactory extends CoordinatorSetup {
+  lazy val factory = config.getString("store") match {
+    case "in-memory" => new InMemoryStoreFactory(this)
+    case className: String =>
+      val ctor = Class.forName(className).getConstructors.head
+      ctor.newInstance(this).asInstanceOf[StoreFactory]
+  }
+
+  def columnStore: ColumnStore with ColumnStoreScanner = factory.columnStore
+  def metaStore: MetaStore = factory.metaStore
 }
