@@ -208,7 +208,8 @@ case class BinaryRecordWrapper(var binRec: BinaryRecord) extends java.io.Externa
   }
 }
 
-case object OutOfBytesException extends Exception("BinaryRecordBuilder: no more space to add blob")
+case class OutOfBytesException(needed: Int, max: Int) extends
+Exception(s"BinaryRecordBuilder: needed $needed bytes, but only had $max.")
 
 class BinaryRecordBuilder(schema: RecordSchema, val base: Any, val offset: Long, maxBytes: Int) {
   var numBytes = schema.variableDataStartOffset
@@ -261,15 +262,16 @@ class BinaryRecordBuilder(schema: RecordSchema, val base: Any, val offset: Long,
   def appendBlob(blob: ZeroCopyBinary): Int = {
     // First, get the fixed int which encodes offset and len and see if we need another 4 bytes for offset
     val fixedData = BinaryRecord.blobFixedInt(numBytes, blob.length)
+    val neededBytes = blob.length + (if (fixedData < 0) 0 else 4)
 
-    reserveVarBytes(blob.length + (if (fixedData < 0) 0 else 4)).map { destOffset =>
+    reserveVarBytes(neededBytes).map { destOffset =>
       if (fixedData < 0) {
         blob.copyTo(base, destOffset)
       } else {
         UnsafeUtils.setInt(base, destOffset, blob.length)
         blob.copyTo(base, destOffset + 4)
       }
-    }.getOrElse(throw OutOfBytesException)
+    }.getOrElse(throw OutOfBytesException(neededBytes, maxBytes))
     fixedData
   }
 
