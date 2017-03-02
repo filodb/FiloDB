@@ -37,9 +37,13 @@ object IngestionStress extends App {
     //scalastyle:on
   }
 
+  val stressName = sys.props.getOrElse("stress.table1name", "taxi_medallion_seg")
+  val hrOfDayName = sys.props.getOrElse("stress.table2name", "taxi_hour_of_day")
+  val keyspaceName = sys.props.getOrElse("stress.keyspace", "filostress")
+
   // Setup SparkContext, etc.
-  val conf = (new SparkConf).setAppName("test")
-                            .set("spark.filodb.cassandra.keyspace", "filostress")
+  val conf = (new SparkConf).setAppName("IngestionStress")
+                            .set("spark.filodb.cassandra.keyspace", keyspaceName)
                             .set("spark.sql.shuffle.partitions", "4")
                             .set("spark.scheduler.mode", "FAIR")
   val sc = new SparkContext(conf)
@@ -67,7 +71,7 @@ object IngestionStress extends App {
     val ingestMillis = Perftools.timeMillis {
       puts("Starting stressful ingestion...")
       csvDF.write.format("filodb.spark").
-        option("dataset", "taxi_medallion_seg").
+        option("dataset", stressName).
         option("row_keys", "medallion,hack_license,pickup_datetime").
         option("partition_keys", ":stringPrefix medallion 2").
         option("reset_schema", "true").
@@ -77,8 +81,8 @@ object IngestionStress extends App {
 
     puts(s"\n ==> Stressful ingestion took $ingestMillis ms\n")
 
-    val df = sql.filoDataset("taxi_medallion_seg")
-    df.registerTempTable("taxi_medallion_seg")
+    val df = sql.filoDataset(stressName)
+    df.registerTempTable(stressName)
     df
   }
 
@@ -87,7 +91,7 @@ object IngestionStress extends App {
       puts("Starting hour-of-day (easy) ingestion...")
 
       dfWithHoD.write.format("filodb.spark").
-        option("dataset", "taxi_hour_of_day").
+        option("dataset", hrOfDayName).
         option("row_keys", "pickup_datetime,medallion,hack_license").
         option("partition_keys", "hourOfDay").
         option("reset_schema", "true").
@@ -98,8 +102,8 @@ object IngestionStress extends App {
 
     puts(s"\n ==> hour-of-day (easy) ingestion took $ingestMillis ms\n")
 
-    val df = sql.filoDataset("taxi_hour_of_day")
-    df.registerTempTable("taxi_hour_of_day")
+    val df = sql.filoDataset(hrOfDayName)
+    df.registerTempTable(hrOfDayName)
     df
   }
 
@@ -126,8 +130,8 @@ object IngestionStress extends App {
     puts(s"Counts: $stressCount $hrCount")
 
     puts("\nStats for each dataset:")
-    printIngestionStats("taxi_medallion_seg")
-    printIngestionStats("taxi_hour_of_day")
+    printIngestionStats(stressName)
+    printIngestionStats(hrOfDayName)
 
     // clean up!
     FiloDriver.shutdown()
