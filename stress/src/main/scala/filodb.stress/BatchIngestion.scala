@@ -32,9 +32,12 @@ object BatchIngestion extends App {
     //scalastyle:on
   }
 
+  val tableName = sys.props.getOrElse("stress.tablename", "nyc_taxi")
+  val keyspaceName = sys.props.getOrElse("stress.keyspace", "filostress")
+
   // Setup SparkContext, etc.
-  val sess = SparkSession.builder.appName("test")
-                                 .config("spark.filodb.cassandra.keyspace", "filostress")
+  val sess = SparkSession.builder.appName("FiloDB BatchIngestion")
+                                 .config("spark.filodb.cassandra.keyspace", keyspaceName)
                                  .config("spark.sql.shuffle.partitions", "4")
                                  .config("spark.scheduler.mode", "FAIR")
                                  .getOrCreate
@@ -50,7 +53,7 @@ object BatchIngestion extends App {
   val ingestMillis = Perftools.timeMillis {
     puts("Starting batch ingestion...")
     csvDF.write.format("filodb.spark").
-      option("dataset", "nyc_taxi").
+      option("dataset", tableName).
       option("row_keys", "pickup_datetime,hack_license,medallion,pickup_longitude").
       option("partition_keys", ":monthOfYear pickup_datetime,:stringPrefix medallion 2").
       mode(SaveMode.Overwrite).save()
@@ -59,8 +62,8 @@ object BatchIngestion extends App {
 
   puts(s"\n ==> Batch ingestion took $ingestMillis ms\n")
 
-  val df = sess.filoDataset("nyc_taxi")
-  df.createOrReplaceTempView("nyc_taxi")
+  val df = sess.filoDataset(tableName)
+  df.createOrReplaceTempView(tableName)
 
   val count = df.count()
   if (count == csvLines) { puts(s"Count matched $count for dataframe $df") }

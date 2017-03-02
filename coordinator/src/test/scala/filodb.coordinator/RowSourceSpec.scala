@@ -36,7 +36,7 @@ class TestSegmentStateCache(config: Config, columnStore: ColumnStore with Column
 
 // This is really an end to end ingestion test, it's what a client talking to a FiloDB node would do
 class RowSourceSpec extends ActorTest(RowSourceSpec.getNewSystem)
-with CoordinatorSetup with ScalaFutures {
+with CoordinatorSetupWithFactory with ScalaFutures {
   import akka.testkit._
   import DatasetCommands._
   import IngestionCommands._
@@ -56,9 +56,6 @@ with CoordinatorSetup with ScalaFutures {
                             .withFallback(ConfigFactory.load("application_test.conf"))
                             .getConfig("filodb")
 
-  implicit val context = scala.concurrent.ExecutionContext.Implicits.global
-  val columnStore = new InMemoryColumnStore(context)
-  val metaStore = new InMemoryMetaStore
   override lazy val stateCache = new TestSegmentStateCache(config, columnStore)
 
   val ref = projection1.datasetRef

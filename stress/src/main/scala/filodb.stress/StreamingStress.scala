@@ -36,7 +36,7 @@ object StreamingStress extends App {
   }
 
   // Setup SparkContext, etc.
-  val sess = SparkSession.builder.appName("stream-test")
+  val sess = SparkSession.builder.appName("FiloDB StreamingStress")
                                  .config("spark.filodb.cassandra.keyspace", "filostress")
                                  .config("spark.sql.shuffle.partitions", "4")
                                  .config("spark.scheduler.mode", "FAIR")

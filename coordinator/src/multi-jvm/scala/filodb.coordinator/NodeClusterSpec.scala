@@ -7,8 +7,6 @@ import akka.testkit.ImplicitSender
 import com.typesafe.config.ConfigFactory
 import org.scalatest.{BeforeAndAfterAll, FunSpecLike, Matchers}
 
-import filodb.core.store.{InMemoryColumnStore, InMemoryMetaStore}
-
 object NodeClusterSpecConfig extends MultiNodeConfig {
   // register the named roles (nodes) of the test
   val first = role("first")
@@ -22,7 +20,7 @@ object NodeClusterSpecConfig extends MultiNodeConfig {
 
 abstract class NodeClusterSpec extends MultiNodeSpec(NodeClusterSpecConfig)
   with FunSpecLike with Matchers with BeforeAndAfterAll
-  with CoordinatorSetup
+  with CoordinatorSetupWithFactory
   with ImplicitSender {
 
   import NodeClusterSpecConfig._
@@ -35,10 +33,6 @@ abstract class NodeClusterSpec extends MultiNodeSpec(NodeClusterSpecConfig)
   override def afterAll() = multiNodeSpecAfterAll()
 
   val config = globalConfig.getConfig("filodb")
-
-  implicit val context = scala.concurrent.ExecutionContext.Implicits.global
-  lazy val columnStore = new InMemoryColumnStore(context)
-  lazy val metaStore = new InMemoryMetaStore
 
   val address1 = node(first).address
   val address2 = node(second).address

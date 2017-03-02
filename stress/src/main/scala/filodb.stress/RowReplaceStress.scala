@@ -31,9 +31,12 @@ object RowReplaceStress extends App {
     //scalastyle:on
   }
 
+  val datasetName = sys.props.getOrElse("stress.tablename", "nyc_taxi_replace")
+  val keyspaceName = sys.props.getOrElse("stress.keyspace", "filostress")
+
   // Setup SparkContext, etc.
-  val sess = SparkSession.builder.appName("test")
-                                 .config("spark.filodb.cassandra.keyspace", "filostress")
+  val sess = SparkSession.builder.appName("RowReplaceStress")
+                                 .config("spark.filodb.cassandra.keyspace", keyspaceName)
                                  .config("spark.sql.shuffle.partitions", "4")
                                  .config("spark.scheduler.mode", "FAIR")
                                  .getOrCreate
@@ -67,7 +70,6 @@ object RowReplaceStress extends App {
   val csvLines = csvDF.count()
   val injectedLines = injectedDF.count()
 
-  val datasetName = "nyc_taxi_replace"
   val ingestMillis = Perftools.timeMillis {
     puts("Starting batch ingestion...")
     injectedDF.sort($"medallion").write.format("filodb.spark").
