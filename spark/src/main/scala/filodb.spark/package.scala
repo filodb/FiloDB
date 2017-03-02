@@ -72,6 +72,7 @@ package object spark extends StrictLogging {
   val actorCounter = new java.util.concurrent.atomic.AtomicInteger
 
   lazy val datasetOpTimeout = FiloDriver.config.as[FiniteDuration]("spark.dataset-ops-timeout")
+  lazy val flushTimeout     = FiloDriver.config.as[FiniteDuration]("spark.flush-timeout")
 
   private[spark] def ingestRddRows(clusterActor: ActorRef,
                                    projection: RichProjection,
@@ -163,7 +164,7 @@ package object spark extends StrictLogging {
 
   private[spark] def flushAndLog(dataset: DatasetRef, version: Int): Unit = {
     try {
-      val nodesFlushed = FiloDriver.client.flushCompletely(dataset, version)
+      val nodesFlushed = FiloDriver.client.flushCompletely(dataset, version, flushTimeout)
       sparkLogger.info(s"Flush completed on $nodesFlushed nodes for dataset $dataset")
     } catch {
       case ClientException(msg) =>
