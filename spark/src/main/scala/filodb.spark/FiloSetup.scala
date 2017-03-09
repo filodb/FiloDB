@@ -11,24 +11,11 @@ import scala.concurrent.Await
 import scala.concurrent.duration._
 import scala.language.{implicitConversions, postfixOps}
 
-import filodb.cassandra.columnstore.CassandraColumnStore
-import filodb.cassandra.metastore.CassandraMetaStore
 import filodb.coordinator.client.ClusterClient
 import filodb.coordinator.IngestionCommands.DCAReady
 import filodb.coordinator.NodeCoordinatorActor.ReloadDCA
-import filodb.coordinator.{CoordinatorSetup, NodeClusterActor}
-import filodb.core.store.{ColumnStore, ColumnStoreScanner, InMemoryMetaStore, InMemoryColumnStore, MetaStore}
+import filodb.coordinator.{CoordinatorSetupWithFactory, NodeClusterActor}
 import org.apache.spark.sql.hive.filodb.MetaStoreSync
-
-/**
- * A StoreFactory creates instances of ColumnStore and MetaStore one time.  The columnStore and metaStore
- * methods should return that created instance every time, not create a new instance.  The implementation
- * should be a class that is passed a single parameter, the config used to create the stores.
- */
-trait StoreFactory {
-  def columnStore: ColumnStore with ColumnStoreScanner
-  def metaStore: MetaStore
-}
 
 /**
  * FiloSetup handles the Spark side setup of both executors and the driver app, including one-time
@@ -44,7 +31,7 @@ trait StoreFactory {
  * the same JVM.  The benefit is that local mode works exactly the same as distributed cluster mode, making
  * the code simpler.
  */
-trait FiloSetup extends CoordinatorSetup {
+trait FiloSetup extends CoordinatorSetupWithFactory {
   // The global config of filodb with cassandra, columnstore, etc. sections
   def config: Config = _config.get
   var _config: Option[Config] = None
@@ -60,27 +47,6 @@ trait FiloSetup extends CoordinatorSetup {
     ActorSystem("filo-spark", configAkka(role, host, port))
   }
 
-  class CassandraStoreFactory(config: Config) extends StoreFactory {
-    val columnStore = new CassandraColumnStore(config, readEc)
-    val metaStore = new CassandraMetaStore(config.getConfig("cassandra"))
-  }
-
-  class InMemoryStoreFactory(config: Config) extends StoreFactory {
-    val columnStore = new InMemoryColumnStore(readEc)
-    val metaStore = SingleJvmInMemoryStore.metaStore
-  }
-
-  lazy val factory = config.getString("store") match {
-    case "cassandra" => new CassandraStoreFactory(config)
-    case "in-memory" => new InMemoryStoreFactory(config)
-    case className: String =>
-      val ctor = Class.forName(className).getConstructors.head
-      ctor.newInstance(config).asInstanceOf[StoreFactory]
-  }
-
-  def columnStore: ColumnStore with ColumnStoreScanner = factory.columnStore
-  def metaStore: MetaStore = factory.metaStore
-
   def configAkka(role: String, host: String, akkaPort: Int): Config =
     ConfigFactory.parseString(s"""akka.cluster.roles=[$role]
                                   |akka.remote.netty.tcp.hostname=$host
@@ -90,13 +56,6 @@ trait FiloSetup extends CoordinatorSetup {
   override def shutdown(): Unit = {
     _config.foreach(c => super.shutdown())
   }
-}
-
-// TODO: make the InMemoryMetaStore either distributed (using clustering to forward and distribute updates)
-// or, perhaps modify NodeCoordinator to not need metastore.
-object SingleJvmInMemoryStore {
-  import scala.concurrent.ExecutionContext.Implicits.global
-  lazy val metaStore = new InMemoryMetaStore
 }
 
 object FiloDriver extends FiloSetup with StrictLogging {

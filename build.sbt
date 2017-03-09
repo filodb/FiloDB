@@ -28,7 +28,8 @@ lazy val cassandra = (project in file("cassandra"))
                        .settings(mySettings:_*)
                        .settings(name := "filodb-cassandra")
                        .settings(libraryDependencies ++= cassDeps)
-                       .dependsOn(core % "compile->compile; test->test")
+                       .dependsOn(core % "compile->compile; test->test",
+                                  coordinator)
 
 lazy val cli = (project in file("cli"))
                  .settings(mySettings:_*)
@@ -297,6 +298,8 @@ lazy val assemblySettings = Seq(
 
 lazy val publishSettings = Seq(
   organizationName := "FiloDB",
+  organization := "com.apple.pie.filodb",
+  publishTo := Some(Resolver.file("rio publish", file(".dist/publishable"))),
   publishMavenStyle := true,
   publishArtifact in Test := false,
   publishArtifact in IntegrationTest := false,

@@ -14,10 +14,9 @@ import scala.concurrent.Await
 import scala.concurrent.duration._
 import scala.language.postfixOps
 
-import filodb.cassandra.columnstore.{CassandraColumnStore, CassandraTokenRangeSplit}
-import filodb.cassandra.metastore.CassandraMetaStore
+import filodb.cassandra.columnstore.CassandraTokenRangeSplit
 import filodb.coordinator.client.{Client, LocalClient}
-import filodb.coordinator.{DatasetCommands, CoordinatorSetup}
+import filodb.coordinator.{DatasetCommands, CoordinatorSetupWithFactory}
 import filodb.core._
 import filodb.core.metadata.Column.{ColumnType, Schema}
 import filodb.core.metadata.{Column, DataColumn, Dataset, RichProjection}
@@ -58,12 +57,10 @@ class Arguments extends FieldArgs {
   }
 }
 
-object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorSetup {
+object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorSetupWithFactory {
 
   val system = ActorSystem("filo-cli", systemConfig)
   val config = systemConfig.getConfig("filodb")
-  lazy val columnStore = new CassandraColumnStore(config, readEc)
-  lazy val metaStore = new CassandraMetaStore(config.getConfig("cassandra"))
   val client = new LocalClient(coordinatorActor)
 
   import Client.{actorAsk, parse}
