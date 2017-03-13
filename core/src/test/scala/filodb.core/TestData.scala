@@ -150,12 +150,12 @@ object GdeltTestData {
                    DataColumn(7, "AvgTone",       "gdelt", 0, Column.ColumnType.DoubleColumn))
   val binSchema = RecordSchema(schema)
 
-  case class GdeltRecord(eventId: Int, sqlDate: Timestamp, monthYear: Int, year: Int,
+  case class GdeltRecord(eventId: Int, sqlDate: Long, monthYear: Int, year: Int,
                          actor2Code: String, actor2Name: String, numArticles: Int, avgTone: Double)
 
   val records = gdeltLines.map { line =>
     val parts = line.split(',')
-    GdeltRecord(parts(0).toInt, new Timestamp(DateTime.parse(parts(1)).getMillis),
+    GdeltRecord(parts(0).toInt, DateTime.parse(parts(1)).getMillis,
                 parts(2).toInt, parts(3).toInt,
                 parts(4), parts(5), parts(6).toInt, parts(7).toDouble)
   }
