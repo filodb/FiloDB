@@ -70,7 +70,7 @@ sealed class ChunkRowMapTable(dataset: DatasetRef, connector: FiloCassandraConne
                    version: Int): Future[Iterator[ChunkRowMapRecord]] =
     session.executeAsync(allPartReadCql.bind(toBuffer(binPartition),
                                              version: java.lang.Integer))
-           .toIterator.map(_.map(fromRow))
+           .toIterator.map(_.map(fromRow)).handleErrors
 
   /**
    * Retrieves a whole series of chunk maps, in the range [startSegmentId, untilSegmentId)
@@ -83,7 +83,7 @@ sealed class ChunkRowMapTable(dataset: DatasetRef, connector: FiloCassandraConne
     session.executeAsync(cql.bind(toBuffer(keyRange.partition),
                                   version: java.lang.Integer,
                                   toBuffer(keyRange.start), toBuffer(keyRange.end)))
-           .toIterator.map(_.map(fromRow))
+           .toIterator.map(_.map(fromRow)).handleErrors
   }
 
   val tokenQ = "TOKEN(partition, version)"
@@ -99,7 +99,7 @@ sealed class ChunkRowMapTable(dataset: DatasetRef, connector: FiloCassandraConne
                .filter(_.getInt("version") == version)
                .map { row => fromRow(row) }
       }
-    }
+    }.handleErrors
   }
 
   /**
