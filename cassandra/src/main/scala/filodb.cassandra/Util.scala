@@ -20,7 +20,7 @@ object Util {
         if (resultSet.wasApplied) Success else notAppliedResponse
       }.recover {
         case e: DriverException => throw StorageEngineException(e)
-        case e: Exception       => throw e
+        case e: Exception       => throw StorageEngineException(e)
       }
     }
   }
@@ -31,7 +31,7 @@ object Util {
       // from invalid Enum strings, which should never happen, or some other parsing error
       case e: NoSuchElementException   => throw MetadataException(e)
       case e: IllegalArgumentException => throw MetadataException(e)
-      case e: Exception                => throw e
+      case e: Exception                => throw StorageEngineException(e)
     }
   }
 
