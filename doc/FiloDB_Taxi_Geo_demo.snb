@@ -31,7 +31,7 @@
       "id" : "B3641CCECB6B45F2A885DC4A03E7B0E6"
     },
     "cell_type" : "markdown",
-    "source" : "The public [NYC Taxi Dataset](http://www.andresmh.com/nyctaxitrips/) contains telemetry (pickup, dropoff locations, times) info on millions of taxi rides in NYC.\n\n| Medallion prefix  | 1/1 - 1/6   |  1/7 - 1/12  |\n| ----------------- | ----------- | ------------ |\n| AA             | records     |  records     |\n| AB             | records     |  records     |\n\n* Partition key - `:stringPrefix medallion 2` - hash multiple drivers trips into ~300 partitions\n* Segment key - `:timeslice pickup_datetime 6d`\n\nAllows for easy filtering by individual drivers, and slicing by time.\n\nThis Notebook assumes the user has followed the FiloDB NYC Taxi [ingestion instructions](https://github.com/tuplejump/FiloDB/blob/master/doc/datasets_reading.md) first."
+    "source" : "The public [NYC Taxi Dataset](http://www.andresmh.com/nyctaxitrips/) contains telemetry (pickup, dropoff locations, times) info on millions of taxi rides in NYC.\n\n| Medallion prefix  | 1/1 - 1/6   |  1/7 - 1/12  |\n| ----------------- | ----------- | ------------ |\n| AA             | records     |  records     |\n| AB             | records     |  records     |\n\n* Partition key - `:stringPrefix medallion 2` - hash multiple drivers trips into ~300 partitions\n* Segment key - `:timeslice pickup_datetime 6d`\n\nAllows for easy filtering by individual drivers, and slicing by time.\n\nThis Notebook assumes the user has followed the FiloDB NYC Taxi [ingestion instructions](https://github.com/filodb/FiloDB/blob/master/doc/datasets_reading.md) first."
   }, {
     "metadata" : {
       "id" : "C0F7DF68B6FA4C2D86BA6C5A96EFD1E9"

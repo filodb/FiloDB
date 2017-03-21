@@ -119,7 +119,7 @@ NOTE: Please beware that significant storage-layer changes are taking place.  Fo
 1. Clone the project and cd into the project directory,
 
     ```
-    $ git clone https://github.com/tuplejump/FiloDB.git
+    $ git clone https://github.com/filodb/FiloDB.git
     $ cd FiloDB
     ```
 
