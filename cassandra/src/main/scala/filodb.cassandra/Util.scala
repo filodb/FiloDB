@@ -20,6 +20,7 @@ object Util {
         if (resultSet.wasApplied) Success else notAppliedResponse
       }.recover {
         case e: DriverException => throw StorageEngineException(e)
+        case e: Exception       => throw e
       }
     }
   }
