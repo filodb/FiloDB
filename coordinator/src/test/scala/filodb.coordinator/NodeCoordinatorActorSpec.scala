@@ -32,7 +32,8 @@ with CoordinatorSetup with ScalaFutures {
                             .getConfig("filodb")
 
   implicit val context = scala.concurrent.ExecutionContext.Implicits.global
-  lazy val columnStore = new InMemoryColumnStore(context)
+  val kamonEnabled = config.getBoolean("kamon-metrics-flag-enabled")
+  val columnStore = new InMemoryColumnStore(kamonEnabled, context)
   lazy val metaStore = new InMemoryMetaStore
 
   override def beforeAll() {

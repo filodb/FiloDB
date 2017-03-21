@@ -84,7 +84,10 @@ trait CoordinatorSetup {
     metaStore.shutdown()
     // Important: shut down executioncontext as well
     threadPool.shutdown()
-    kamon.Kamon.shutdown()
+    val kamonEnabled = config.getBoolean("kamon-metrics-flag-enabled")
+    if(kamonEnabled) {
+      kamon.Kamon.shutdown()
+    }
   }
 }
 

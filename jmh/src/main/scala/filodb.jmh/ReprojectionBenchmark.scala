@@ -37,7 +37,8 @@ class ReprojectionBenchmark {
   val mTable = new FiloMemTable(projection2, config)
 
   import scala.concurrent.ExecutionContext.Implicits.global
-  val colStore = new InMemoryColumnStore(scala.concurrent.ExecutionContext.Implicits.global)
+  val kamonEnabled = config.getBoolean("filodb.kamon-metrics-flag-enabled")
+  val colStore = new InMemoryColumnStore(kamonEnabled, scala.concurrent.ExecutionContext.Implicits.global)
   val reprojector = new DefaultReprojector(config, colStore)
 
   // Populate memtable

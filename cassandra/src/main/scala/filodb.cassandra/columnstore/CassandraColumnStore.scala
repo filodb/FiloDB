@@ -61,6 +61,9 @@ extends CachedMergingColumnStore with CassandraColumnStoreScanner with StrictLog
 
   val mergingStrategy = new AppendingChunkMergingStrategy(this)
 
+  val kamonEnabled = config.getBoolean("kamon-metrics-flag-enabled")
+  val stats = ColumnStoreStats(kamonEnabled)
+
   /**
    * Initializes the column store for a given dataset projection.  Must be called once before appending
    * segments to that projection.

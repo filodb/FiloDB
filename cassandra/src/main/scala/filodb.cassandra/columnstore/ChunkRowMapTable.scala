@@ -75,7 +75,8 @@ sealed class ChunkRowMapTable(dataset: DatasetRef, connector: FiloCassandraConne
   /**
    * Retrieves a whole series of chunk maps, in the range [startSegmentId, untilSegmentId)
    * End is exclusive or not depending on keyRange.endExclusive flag
-   * @return ChunkMaps(...), if nothing found will return ChunkMaps(Nil).
+    *
+    * @return ChunkMaps(...), if nothing found will return ChunkMaps(Nil).
    */
   def getChunkMaps(keyRange: BinaryKeyRange,
                    version: Int): Future[Iterator[ChunkRowMapRecord]] = {
@@ -121,7 +122,8 @@ sealed class ChunkRowMapTable(dataset: DatasetRef, connector: FiloCassandraConne
 
   /**
    * Writes a new chunk map to the chunkRowTable.
-   * @return Success, or an exception as a Future.failure
+    *
+    * @return Success, or an exception as a Future.failure
    */
   def writeChunkMap(partition: Types.BinaryPartition,
                     version: Int,
@@ -129,8 +131,10 @@ sealed class ChunkRowMapTable(dataset: DatasetRef, connector: FiloCassandraConne
                     chunkIds: ByteBuffer,
                     rowNums: ByteBuffer,
                     nextChunkId: Int,
-                    stats: ColumnStoreStats): Future[Response] = {
-    stats.addIndexWriteStats(chunkIds.capacity.toLong + rowNums.capacity.toLong + 4L)
+                    stats: Option[ColumnStoreStats]): Future[Response] = {
+    if(stats.nonEmpty) {
+      stats.get.addIndexWriteStats(chunkIds.capacity.toLong + rowNums.capacity.toLong + 4L)
+    }
     connector.execStmt(writeChunkMapCql.bind(toBuffer(partition),
                                              version: java.lang.Integer,
                                              toBuffer(segmentId),

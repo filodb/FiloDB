@@ -25,7 +25,13 @@ trait ColumnStoreStats {
 }
 
 object ColumnStoreStats {
-  def apply(): ColumnStoreStats = new KamonColumnStoreStats
+  def apply(kamonEnabled: Boolean):Option[ColumnStoreStats] = {
+    if(kamonEnabled) {
+      Some(new KamonColumnStoreStats)
+    }else{
+      None
+    }
+  }
 }
 
 private[store] class KamonColumnStoreStats extends ColumnStoreStats {
