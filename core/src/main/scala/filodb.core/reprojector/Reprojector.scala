@@ -67,26 +67,38 @@ class DefaultReprojector(config: Config, columnStore: ColumnStore)
   val retries = config.getInt("reprojector.retries")
   val retryBaseTime = config.as[FiniteDuration]("reprojector.retry-base-timeunit")
   val segmentBatchSize = config.getInt("reprojector.segment-batch-size")
+  val kamonEnabled = config.getBoolean("kamon-metrics-flag-enabled")
 
   def toSegments(memTable: MemTable, segments: Seq[(Any, Any)]): Seq[Segment] = {
     val dataset = memTable.projection.dataset
     segments.map { case (partition, segmentKey) =>
-      Tracer.withNewContext("serialize-segment", true) {
-        // For each segment grouping of rows... set up a Segment
-        val segInfo = SegmentInfo(partition, segmentKey).basedOn(memTable.projection)
-        val segment = new RowWriterSegment(memTable.projection, memTable.projection.columns)(segInfo)
-        val segmentRowsIt = memTable.readRows(segInfo)
-        logger.debug(s"Created new segment ${segment.segInfo} for encoding...")
-
-        // Group rows into chunk sized bytes and add to segment
-        // NOTE: because RowReaders could be mutable, we need to keep this a pure Iterator.  Turns out
-        // this is also more efficient than Iterator.grouped
-        while (segmentRowsIt.nonEmpty) {
-          segment.addRichRowsAsChunk(segmentRowsIt.take(dataset.options.chunkSize))
+      if(kamonEnabled) {
+        Tracer.withNewContext("serialize-segment", true) {
+          createSegment(memTable, dataset, partition, segmentKey)
         }
-        segment
+      } else{
+        createSegment(memTable, dataset, partition, segmentKey)
       }
     }
+  }
+
+  def createSegment(memTable: MemTable,
+                    dataset: Dataset,
+                    partition: Any,
+                    segmentKey: Any): RowWriterSegment = {
+    // For each segment grouping of rows... set up a Segment
+    val segInfo = SegmentInfo(partition, segmentKey).basedOn(memTable.projection)
+    val segment = new RowWriterSegment(memTable.projection, memTable.projection.columns)(segInfo)
+    val segmentRowsIt = memTable.readRows(segInfo)
+    logger.debug(s"Created new segment ${segment.segInfo} for encoding...")
+
+    // Group rows into chunk sized bytes and add to segment
+    // NOTE: because RowReaders could be mutable, we need to keep this a pure Iterator.  Turns out
+    // this is also more efficient than Iterator.grouped
+    while (segmentRowsIt.nonEmpty) {
+      segment.addRichRowsAsChunk(segmentRowsIt.take(dataset.options.chunkSize))
+    }
+    segment
   }
 
   import markatta.futiles.Retry._
