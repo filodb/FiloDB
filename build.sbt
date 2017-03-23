@@ -298,8 +298,6 @@ lazy val assemblySettings = Seq(
 
 lazy val publishSettings = Seq(
   organizationName := "FiloDB",
-  organization := "com.apple.pie.filodb",
-  publishTo := Some(Resolver.file("rio publish", file(".dist/publishable"))),
   publishMavenStyle := true,
   publishArtifact in Test := false,
   publishArtifact in IntegrationTest := false,
