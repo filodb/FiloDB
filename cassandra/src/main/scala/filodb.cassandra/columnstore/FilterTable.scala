@@ -49,7 +49,7 @@ sealed class FilterTable(val dataset: DatasetRef, val connector: FiloCassandraCo
                                       version: java.lang.Integer,
                                       firstChunkId: java.lang.Long,
                                       lastChunkId: java.lang.Long))
-           .toIterator.map(_.map(fromRow))
+           .toIterator.map(_.map(fromRow)).handleErrors
   }
 
   lazy val writeIndexCql = session.prepare(
