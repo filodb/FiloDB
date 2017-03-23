@@ -88,7 +88,7 @@ sealed class ChunkTable(val dataset: DatasetRef, val connector: FiloCassandraCon
 
   private def execReadChunk(colNo: Int,
                             query: BoundStatement): Future[Iterator[SingleChunkInfo]] = {
-    session.executeAsync(query).toIterator.map { rowIt =>
+    session.executeAsync(query).toIterator.handleErrors.map { rowIt =>
       rowIt.map { row =>
         SingleChunkInfo(row.getLong(0), colNo, decompressChunk(row.getBytes(1)))
       }
