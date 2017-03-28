@@ -6,8 +6,9 @@ import java.nio.ByteBuffer
 
 import scala.concurrent.{Future, Promise}
 import scodec.bits.ByteVector
-import filodb.core._
 import monix.reactive.Observable
+
+import filodb.core._
 
 /**
  * Utilities for dealing with Cassandra Java Driver
