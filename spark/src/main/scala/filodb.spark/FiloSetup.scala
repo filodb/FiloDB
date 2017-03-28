@@ -75,7 +75,7 @@ object FiloDriver extends FiloSetup with StrictLogging {
       val filoConfig = configFromSpark(context)
       _config = Some(filoConfig)
       val kamonEnabled = filoConfig.getBoolean("kamon-metrics-flag-enabled")
-      if(kamonEnabled) {
+      if (kamonEnabled) {
         kamonInit()
       }
       coordinatorActor
@@ -120,7 +120,7 @@ object FiloExecutor extends FiloSetup with StrictLogging {
       this.role = "executor"
       _config = Some(filoConfig)
       val kamonEnabled = filoConfig.getBoolean("kamon-metrics-flag-enabled")
-      if(kamonEnabled) {
+      if (kamonEnabled) {
         kamonInit()
       }
       coordinatorActor       // force coordinator to start

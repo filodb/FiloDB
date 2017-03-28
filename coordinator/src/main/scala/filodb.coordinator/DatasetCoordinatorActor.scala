@@ -140,7 +140,7 @@ private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
   // ==== Kamon metrics ====
   val kamonEnabled = config.getBoolean("kamon-metrics-flag-enabled")
   private val kamonTags = {
-    if(kamonEnabled) {
+    if (kamonEnabled) {
       Some(Map("dataset" -> datasetName, "version" -> version.toString))
     }else{
       None
@@ -148,14 +148,14 @@ private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
   }
 
   val kamonRowsIngested =
-    if(kamonEnabled) {
+    if (kamonEnabled) {
       Some(Kamon.metrics.counter("dca-rows-ingested", kamonTags.get))
     } else{
       None
     }
 
   val kamonActiveRows =
-    if(kamonEnabled) {
+    if (kamonEnabled) {
       Some(Kamon.metrics.gauge("dca-active-rows", kamonTags.get) {
         activeRows.toLong
       })
@@ -163,7 +163,7 @@ private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
       None
     }
   val kamonFlushingRows =
-    if(kamonEnabled) {
+    if (kamonEnabled) {
       Some(Kamon.metrics.gauge("dca-flushing-rows", kamonTags.get) {
         Math.max(flushingRows, 0).toLong
       })
@@ -171,10 +171,10 @@ private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
       None
     }
 
-  val kamonFlushesDone =  if(kamonEnabled) Some(Kamon.metrics.counter("dca-flushes-done", kamonTags.get)) else None
-  val kamonFlushesFailed = if(kamonEnabled) Some(Kamon.metrics.counter("dca-flushes-failed", kamonTags.get)) else None
-  val kamonOOMCount = if(kamonEnabled) Some(Kamon.metrics.counter("dca-out-of-memory", kamonTags.get)) else None
-  val kamonMemtableFull = if(kamonEnabled) Some(Kamon.metrics.counter("dca-memtable-full", kamonTags.get)) else None
+  val kamonFlushesDone =  if (kamonEnabled) Some(Kamon.metrics.counter("dca-flushes-done", kamonTags.get)) else None
+  val kamonFlushesFailed = if (kamonEnabled) Some(Kamon.metrics.counter("dca-flushes-failed", kamonTags.get)) else None
+  val kamonOOMCount = if (kamonEnabled) Some(Kamon.metrics.counter("dca-out-of-memory", kamonTags.get)) else None
+  val kamonMemtableFull = if (kamonEnabled) Some(Kamon.metrics.counter("dca-memtable-full", kamonTags.get)) else None
 
   // Holds temporary rows before being flushed to MemTable
   val tempRows = new ArrayBuffer[RowReader]
@@ -222,7 +222,7 @@ private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
     logger.debug(s"Flushing ${tempRows.length} rows to MemTable...")
     rowsIngested += tempRows.length
     if (kamonEnabled) {
-      kamonRowsIngested.get.increment(tempRows.length)
+      kamonRowsIngested.foreach(_.increment(tempRows.length))
     }
     activeTable.ingestRows(tempRows)
     ackTos.foreach { case (ackTo, seqNo) => ackTo ! IngestionCommands.Ack(seqNo) }
@@ -236,7 +236,7 @@ private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
     if (activeRows >= maxRowsPerTable) {
       logger.debug(s"MemTable ($nameVer) is at $activeRows rows, cannot accept writes...")
       if (kamonEnabled) {
-        kamonMemtableFull.get.increment
+        kamonMemtableFull.foreach(_.increment)
       }
       false
     } else {
@@ -245,7 +245,7 @@ private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
         logger.info(s"Only $freeMB MB memory left, cannot accept more writes...")
         logger.info(s"Active table ($nameVer) has $activeRows rows")
         if (kamonEnabled) {
-          kamonOOMCount.get.increment
+          kamonOOMCount.foreach(_.increment)
         }
         sys.runtime.gc()
         false
@@ -295,7 +295,7 @@ private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
     flushedCallbacks = Nil
     flushesSucceeded += 1
     if (kamonEnabled) {
-      kamonFlushesDone.get.increment
+      kamonFlushesDone.foreach(_.increment)
     }
     // See if another flush needs to be initiated
     if (shouldFlush) self ! StartFlush()
@@ -306,7 +306,7 @@ private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
     flushedCallbacks = Nil
     flushesFailed += 1
     if (kamonEnabled) {
-      kamonFlushesFailed.get.increment
+      kamonFlushesFailed.foreach(_.increment)
     }
     // At this point, we can attempt a couple different things.
     //  1. Retry the segments that did not succeed writing (how do we know what they are?)

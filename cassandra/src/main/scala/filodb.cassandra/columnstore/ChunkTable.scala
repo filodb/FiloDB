@@ -62,7 +62,7 @@ sealed class ChunkTable(dataset: DatasetRef, connector: FiloCassandraConnector)
       writeChunksCql.bind(partBytes, version: java.lang.Integer, segKeyBytes,
                           id: java.lang.Integer, columnName, bytes)
     }.toSeq
-    if(stats.nonEmpty) {
+    if (stats.nonEmpty) {
       stats.get.addChunkWriteStats(statements.length, chunkBytes)
     }
     connector.execStmt(unloggedBatch(statements))

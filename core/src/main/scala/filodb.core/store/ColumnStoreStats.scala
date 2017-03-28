@@ -26,9 +26,9 @@ trait ColumnStoreStats {
 
 object ColumnStoreStats {
   def apply(kamonEnabled: Boolean):Option[ColumnStoreStats] = {
-    if(kamonEnabled) {
+    if (kamonEnabled) {
       Some(new KamonColumnStoreStats)
-    }else{
+    } else {
       None
     }
   }

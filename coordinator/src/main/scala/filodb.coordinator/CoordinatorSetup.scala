@@ -85,7 +85,7 @@ trait CoordinatorSetup {
     // Important: shut down executioncontext as well
     threadPool.shutdown()
     val kamonEnabled = config.getBoolean("kamon-metrics-flag-enabled")
-    if(kamonEnabled) {
+    if (kamonEnabled) {
       kamon.Kamon.shutdown()
     }
   }

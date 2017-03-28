@@ -222,11 +222,11 @@ trait CachedMergingColumnStore extends ColumnStore with ColumnStoreScanner with 
                                      segment: Segment,
                                      version: Int): Future[Response] = Tracer.withNewContext("append-segment") {
     val ctx = Tracer.currentContext
-    if(stats.nonEmpty) {
+    if (stats.nonEmpty) {
       stats.get.segmentAppend()
     }
     if (segment.isEmpty) {
-      if(stats.nonEmpty) {
+      if (stats.nonEmpty) {
         stats.get.segmentEmpty()
       }
       return(Future.successful(NotApplied))
@@ -271,9 +271,9 @@ trait CachedMergingColumnStore extends ColumnStore with ColumnStoreScanner with 
   def appendSegment(projection: RichProjection,
                     segment: Segment,
                     version: Int): Future[Response] = {
-    if(stats.isEmpty){
+    if (stats.isEmpty){
       appendSegmentWithoutTrace(projection, segment, version)
-    }else{
+    } else {
       appendSegmentWithTrace(projection, segment, version)
     }
   }
@@ -285,13 +285,13 @@ trait CachedMergingColumnStore extends ColumnStore with ColumnStoreScanner with 
                                  segment: Segment,
                                  ctx: Option[TraceContext]): Future[Response] = {
     val binPartition = segment.binaryPartition
-    if(ctx.nonEmpty) {
+    if (ctx.nonEmpty) {
       asyncSubtrace(ctx.get, "write-chunks", "ingest-io") {
         Future.traverse(segment.getChunks.grouped(chunkBatchSize).toSeq) { chunks =>
           writeChunks(dataset, binPartition, version, segment.segmentId, chunks.toIterator)
         }.map { responses => responses.head }
       }
-    }else{
+    } else {
       Future.traverse(segment.getChunks.grouped(chunkBatchSize).toSeq) { chunks =>
         writeChunks(dataset, binPartition, version, segment.segmentId, chunks.toIterator)
       }.map { responses => responses.head }
@@ -303,7 +303,7 @@ trait CachedMergingColumnStore extends ColumnStore with ColumnStoreScanner with 
                               version: Int): Future[Segment] = asyncSubtrace("index-read", "ingest-io") {
     segmentCache((projection.datasetName, segment.binaryPartition, version, segment.segmentId)) {
       val newSegInfo = segment.segInfo.basedOn(projection)
-      if(stats.nonEmpty) {
+      if (stats.nonEmpty) {
         stats.get.segmentIndexMissingRead()
       }
       mergingStrategy.readSegmentForCache(projection, version)(newSegInfo)(readEc)

@@ -72,7 +72,7 @@ class DefaultReprojector(config: Config, columnStore: ColumnStore)
   def toSegments(memTable: MemTable, segments: Seq[(Any, Any)]): Seq[Segment] = {
     val dataset = memTable.projection.dataset
     segments.map { case (partition, segmentKey) =>
-      if(kamonEnabled) {
+      if (kamonEnabled) {
         Tracer.withNewContext("serialize-segment", true) {
           createSegment(memTable, dataset, partition, segmentKey)
         }

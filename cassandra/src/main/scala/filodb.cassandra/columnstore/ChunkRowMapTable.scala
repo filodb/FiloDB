@@ -132,7 +132,7 @@ sealed class ChunkRowMapTable(dataset: DatasetRef, connector: FiloCassandraConne
                     rowNums: ByteBuffer,
                     nextChunkId: Int,
                     stats: Option[ColumnStoreStats]): Future[Response] = {
-    if(stats.nonEmpty) {
+    if (stats.nonEmpty) {
       stats.get.addIndexWriteStats(chunkIds.capacity.toLong + rowNums.capacity.toLong + 4L)
     }
     connector.execStmt(writeChunkMapCql.bind(toBuffer(partition),
