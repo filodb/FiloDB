@@ -42,7 +42,7 @@ class ReprojectionBenchmark {
   // Populate memtable
   mTable.ingestRows(lines)
 
-  val segments = mTable.getSegments.toSeq
+  val partitions = mTable.partitions.toSeq
 
   /**
    * Simulation of a columnar query engine scanning the segment chunks columnar wise
@@ -53,6 +53,6 @@ class ReprojectionBenchmark {
   def toSegments(): Seq[Segment] = {
     // This is run multiple times, we are not writing to column store, so have to ensure state is reset
     stateCache.clear()
-    reprojector.toSegments(mTable, segments, 0).toList
+    reprojector.toSegments(mTable, partitions, 0).toList
   }
 }

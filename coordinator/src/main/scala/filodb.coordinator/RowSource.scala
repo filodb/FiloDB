@@ -79,6 +79,7 @@ trait RowSource extends Actor with StrictLogging {
   private val rowsIngested = Kamon.metrics.counter("source-rows-ingested", kamonTags)
   private val rowsReplayed = Kamon.metrics.counter("source-rows-replayed", kamonTags)
   private val unneededAcks = Kamon.metrics.counter("source-unneeded-acks", kamonTags)
+  private val nodeHist     = Kamon.metrics.histogram("source-nodes-distributed", kamonTags)
 
   import context.dispatcher
 
@@ -112,13 +113,13 @@ trait RowSource extends Actor with StrictLogging {
 
   def errorCatcher: Receive = LoggingReceive {
     case IngestionCommands.UnknownDataset =>
-      whoStartedMe.foreach(_ ! IngestionErr("Ingestion actors shut down, check error logs"))
+      whoStartedMe.foreach(_ ! IngestionErr(s"Ingestion actors shut down from ref $sender, check error logs"))
 
     case t: Throwable =>
-        whoStartedMe.foreach(_ ! IngestionErr(t.getMessage, Some(t)))
+      whoStartedMe.foreach(_ ! IngestionErr(s"Error from $sender, " + t.getMessage, Some(t)))
 
     case e: ErrorResponse =>
-        whoStartedMe.foreach(_ ! IngestionErr(e.toString))
+      whoStartedMe.foreach(_ ! IngestionErr(s"Error from $sender, " + e.toString))
   }
 
   def reading: Receive = (LoggingReceive {
@@ -191,19 +192,30 @@ trait RowSource extends Actor with StrictLogging {
   def sendRows(): Unit = {
     val nextBatch: Seq[RowReader] = batchIterator.next
 
+    // Convert rows to BinaryRecord first.  This takes care of handling any null inputs.
+    logger.trace(s"  ==> BinaryRecord conversion for ${nextBatch.size} rows...")
+    val binReaders = nextBatch.map { r =>
+      try {
+        BinaryRecord(projection.binSchema, r)
+      } catch {
+        case e: Exception =>
+          logger.error(s"Could not convert source row $r to BinaryRecord", e)
+          throw e
+      }
+    }
+
     // Now, compute a partition key hash for each row and group all the rows by the coordinator ref
-    // returned from the partitionMapper
-    val rowsByNode = nextBatch.groupBy { reader =>
-      // For now, just use the hash from the partitionKey which is a Seq[Any]. In future use BinaryRecord
-      // TODO: optimize performance
+    // returned from the partitionMapper.  It is important this happens after BinaryRecord conversion,
+    // because the partKeyFunc does not check for nulls.
+    val rowsByNode = binReaders.groupBy { reader =>
       mapper.lookupCoordinator(partKeyFunc(reader).hashCode)
     }
+    nodeHist.record(rowsByNode.size)
     rowsByNode.foreach { case (nodeRef, readers) =>
-      logger.trace(s"  ==> ($nextSeqId) Processing ${readers.size} rows for node $nodeRef...")
-      val binReaders = readers.map { r => BinaryRecord(projection.binSchema, r) }
-      outstanding(nextSeqId) = (nodeRef, binReaders)
+      logger.trace(s"  ==> ($nextSeqId) Sending ${readers.size} records to node $nodeRef...")
+      outstanding(nextSeqId) = (nodeRef, readers)
       outstandingNodes(nodeRef) = outstandingNodes(nodeRef) + nextSeqId
-      nodeRef ! IngestionCommands.IngestRows(dataset, version, binReaders, nextSeqId)
+      nodeRef ! IngestionCommands.IngestRows(dataset, version, readers, nextSeqId)
       nextSeqId += 1
     }
     rowsIngested.increment(nextBatch.length)

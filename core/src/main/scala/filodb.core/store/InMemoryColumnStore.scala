@@ -32,9 +32,9 @@ extends ColumnStore with InMemoryColumnStoreScanner with StrictLogging {
 
   logger.info("Starting InMemoryColumnStore...")
 
-  val chunkDb = new HashMap[(DatasetRef, BinaryPartition, Int), InMemoryChunkStore]
-  val indices = new HashMap[(DatasetRef, BinaryPartition, Int), PartitionChunkIndex]
-  val filters = new HashMap[(DatasetRef, BinaryPartition, Int), FilterTree]
+  val chunkDb = new HashMap[(DatasetRef, PartitionKey, Int), InMemoryChunkStore]
+  val indices = new HashMap[(DatasetRef, PartitionKey, Int), PartitionChunkIndex]
+  val filters = new HashMap[(DatasetRef, PartitionKey, Int), FilterTree]
 
   def initializeProjection(projection: Projection): Future[Response] = Future.successful(Success)
 
@@ -61,7 +61,7 @@ extends ColumnStore with InMemoryColumnStoreScanner with StrictLogging {
   def appendSegment(projection: RichProjection,
                     segment: ChunkSetSegment,
                     version: Int): Future[Response] = Future {
-    val dbKey = (projection.datasetRef, segment.binaryPartition, version)
+    val dbKey = (projection.datasetRef, segment.partition, version)
 
     if (segment.chunkSets.isEmpty) { NotApplied }
     else {
@@ -75,7 +75,7 @@ extends ColumnStore with InMemoryColumnStoreScanner with StrictLogging {
 
       // Add chunk infos, skips, and filter
       val partIndex = indices.synchronized {
-        indices.getOrElseUpdate(dbKey, new ChunkIDPartitionChunkIndex(segment.binaryPartition,
+        indices.getOrElseUpdate(dbKey, new ChunkIDPartitionChunkIndex(segment.partition,
                                                                      projection))
       }
       val filterTree = filters.synchronized {
@@ -119,9 +119,9 @@ trait InMemoryColumnStoreScanner extends ColumnStoreScanner {
   type FilterTree = ConcurrentSkipListMap[ChunkID, BloomFilter[Long]]
   val EmptyFilterTree = new FilterTree
 
-  def chunkDb: HashMap[(DatasetRef, BinaryPartition, Int), InMemoryChunkStore]
-  def indices: HashMap[(DatasetRef, BinaryPartition, Int), PartitionChunkIndex]
-  def filters: HashMap[(DatasetRef, BinaryPartition, Int), FilterTree]
+  def chunkDb: HashMap[(DatasetRef, PartitionKey, Int), InMemoryChunkStore]
+  def indices: HashMap[(DatasetRef, PartitionKey, Int), PartitionChunkIndex]
+  def filters: HashMap[(DatasetRef, PartitionKey, Int), FilterTree]
 
   def readPartitionChunks(dataset: DatasetRef,
                           version: Int,
@@ -150,8 +150,7 @@ trait InMemoryColumnStoreScanner extends ColumnStoreScanner {
 
   def readFilters(dataset: DatasetRef,
                   version: Int,
-                  partition: Types.BinaryPartition,
-                  segment: Types.SegmentId,
+                  partition: Types.PartitionKey,
                   chunkRange: (Types.ChunkID, Types.ChunkID))
                  (implicit ec: ExecutionContext): Future[Iterator[SegmentState.IDAndFilter]] = {
     val filterTree = filters.getOrElse((dataset, partition, version), EmptyFilterTree)
@@ -161,28 +160,26 @@ trait InMemoryColumnStoreScanner extends ColumnStoreScanner {
     Future.successful(it)
   }
 
-  def singlePartScan(projection: RichProjection, version: Int, partition: Any):
+  def singlePartScan(projection: RichProjection, version: Int, partition: PartitionKey):
     Iterator[PartitionChunkIndex] = {
-    val binPart = projection.partitionType.toBytes(partition.asInstanceOf[projection.PK])
-    indices.get((projection.datasetRef, binPart, version)).toIterator
+    indices.get((projection.datasetRef, partition, version)).toIterator
   }
 
-  def multiPartScan(projection: RichProjection, version: Int, partitions: Seq[Any]):
+  def multiPartScan(projection: RichProjection, version: Int, partitions: Seq[PartitionKey]):
     Iterator[PartitionChunkIndex] = {
     partitions.flatMap { partition =>
-      val binPart = projection.partitionType.toBytes(partition.asInstanceOf[projection.PK])
-      indices.get((projection.datasetRef, binPart, version)).toSeq
+      indices.get((projection.datasetRef, partition, version)).toSeq
     }.toIterator
   }
 
   def filteredPartScan(projection: RichProjection,
                        version: Int,
                        split: ScanSplit,
-                       filterFunc: Any => Boolean): Iterator[PartitionChunkIndex] = {
-    val binParts = indices.keysIterator.collect { case (ds, binPart, ver) if
-      ds == projection.datasetRef && ver == version => binPart }
-    binParts.filter { binPart => filterFunc(projection.partitionType.fromBytes(binPart))
-            }.map { binPart => indices((projection.datasetRef, binPart, version)) }
+                       filterFunc: PartitionKey => Boolean): Iterator[PartitionChunkIndex] = {
+    val partitions = indices.keysIterator.collect { case (ds, partition, ver) if
+      ds == projection.datasetRef && ver == version => partition }
+    partitions.filter(filterFunc)
+              .map { partition => indices((projection.datasetRef, partition, version)) }
   }
 
   def scanPartitions(projection: RichProjection,

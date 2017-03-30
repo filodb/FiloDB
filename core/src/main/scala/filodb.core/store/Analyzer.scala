@@ -78,7 +78,7 @@ object ColumnStoreAnalysis {
   val NumRowsPerPartBucketKeys = Array(0, 100, 10000, 100000, 500000, 1000000, 5000000)
 }
 
-case class ChunkInfo(partKey: BinaryPartition, chunkInfo: ChunkSetInfo)
+case class ChunkInfo(partKey: PartitionKey, chunkInfo: ChunkSetInfo)
 
 /**
  * Analyzes the segments and chunks for a given dataset/version.  Gives useful information
@@ -100,7 +100,7 @@ object Analyzer {
                           .foldLeftL(ColumnStoreAnalysis.empty) { case (analysis, chunkIndex) =>
                             // Figure out # chunks and rows per partition
                             val numRows = chunkIndex.allChunks.map(_._1.numRows).sum
-                            val numSkipped = chunkIndex.allChunks.map(_._2.size).sum
+                            val numSkipped = chunkIndex.allChunks.map(_._2.cardinality).sum
                             val numChunks = chunkIndex.numChunks
                             analysis.addPartitionStats(numRows, numSkipped, numChunks)
                           }.runAsync

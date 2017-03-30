@@ -1,7 +1,7 @@
 package filodb.spark
 
 import akka.actor.ActorRef
-import com.typesafe.config.Config
+import com.typesafe.config.{Config, ConfigFactory, ConfigRenderOptions}
 import com.typesafe.scalalogging.slf4j.StrictLogging
 import java.nio.ByteBuffer
 import kamon.Kamon
@@ -15,19 +15,20 @@ import org.apache.spark.sql.types._
 import org.apache.spark.sql.{DataFrame, Row, SQLContext}
 import org.apache.spark.unsafe.types.UTF8String
 import org.joda.time.DateTime
-import org.velvia.filo.{FiloRowReader, FiloVector, RowReader, VectorReader}
+import org.velvia.filo.{FiloRowReader, FiloVector, RowReader, VectorReader, ZeroCopyUTF8String}
 import scala.concurrent.duration._
 import scala.language.postfixOps
 
 import filodb.coordinator.client.Client.parse
 import filodb.core._
-import filodb.core.binaryrecord.BinaryRecord
-import filodb.core.query.KeyFilter
+import filodb.core.binaryrecord.{BinaryRecord, BinaryRecordWrapper}
+import filodb.core.query.{ChunkSetReader, KeyFilter}
 import filodb.core.metadata.{Column, DataColumn, Dataset, RichProjection}
 import filodb.core.store._
 
 object FiloRelation extends StrictLogging {
   import TypeConverters._
+  import Types.PartitionKey
 
   implicit val context = scala.concurrent.ExecutionContext.Implicits.global
 
@@ -60,30 +61,30 @@ object FiloRelation extends StrictLogging {
   }
 
   // Parses the Spark filters, matching them to partition key columns, and returning
-  // tuples of (position, keytype, applicable filters).
+  // tuples of (position, column, applicable filters).
   // NOTE: for now support just one filter per column
   def parsePartitionFilters(projection: RichProjection,
-                            groupedFilters: Map[String, Seq[Filter]]): Seq[(Int, KeyType, Seq[Filter])] = {
+                            groupedFilters: Map[String, Seq[Filter]]): Seq[(Int, Column, Seq[Filter])] = {
     val columnIdxTypeMap = KeyFilter.mapPartitionColumns(projection, groupedFilters.keys.toSeq)
 
-    columnIdxTypeMap.map { case (colName, (pos, keyType)) =>
+    columnIdxTypeMap.map { case (colName, (pos, column)) =>
       logger.info(s"Pushing down partition column $colName, filters ${groupedFilters(colName)}")
-      (pos, keyType, groupedFilters(colName))
+      (pos, column, groupedFilters(colName))
     }.toSeq
   }
 
   // Partition Query?
   def partitionQuery(config: Config,
                      projection: RichProjection,
-                     filterStuff: Seq[(Int, KeyType, Seq[Filter])]): Seq[Any] = {
+                     filterStuff: Seq[(Int, Column, Seq[Filter])]): Seq[PartitionKey] = {
     val inqueryPartitionsLimit = config.getInt("columnstore.inquery-partitions-limit")
     // Are all the partition keys given in filters?
     // Are the filters EqualTo, In?
     val predicateValues = filterStuff.collect {
-      case (pos, keyType, Seq(EqualTo(_, equalValue))) =>
-        Set(KeyFilter.parseSingleValue(keyType)(equalValue))
-      case (pos, keyType, Seq(In(_, inValues))) =>
-        (KeyFilter.parseValues(keyType)(inValues.toSet))
+      case (pos, column, Seq(EqualTo(_, equalValue))) =>
+        Set(conv(equalValue))
+      case (pos, column, Seq(In(_, inValues))) =>
+        inValues.map(conv).toSet
     }
     logger.info(s"Push down partition predicates: ${predicateValues.toString()}")
     // 1. Verify if all partition keys are part of the filters or not.
@@ -91,12 +92,8 @@ object FiloRelation extends StrictLogging {
     // 3. If number of partition key combinations are more than inqueryPartitionsLimit then
     // run full table scan otherwise run multipartition scan.
     if (predicateValues.length == projection.partitionColumns.length) {
-      if (predicateValues.length == 1) {
-        predicateValues.flatten
-      } else {
-        val predList = combine(predicateValues)
-        if (predList.size <= inqueryPartitionsLimit) predList else Nil
-      }
+      val partKeys = combine(predicateValues).map(projection.partKey)
+      if (partKeys.size <= inqueryPartitionsLimit) partKeys else Nil
     } else {
       Nil
     }
@@ -114,18 +111,18 @@ object FiloRelation extends StrictLogging {
     }
 
   // PFs for evaluating range scans
-  val equalsRangePF: PartialFunction[(KeyType, Seq[Filter]), Option[(Any, Any)]] = {
+  val equalsRangePF: PartialFunction[(Column, Seq[Filter]), Option[(Any, Any)]] = {
     case (_, Seq(EqualTo(_, filterValue))) => Some((filterValue, filterValue))
   }
 
-  val betweenRangePF: PartialFunction[(KeyType, Seq[Filter]), Option[(Any, Any)]] = {
+  val betweenRangePF: PartialFunction[(Column, Seq[Filter]), Option[(Any, Any)]] = {
     case (_, Seq(GreaterThan(_, lVal),        LessThan(_, rVal))) => Some((lVal, rVal))
     case (_, Seq(GreaterThanOrEqual(_, lVal), LessThan(_, rVal))) => Some((lVal, rVal))
     case (_, Seq(GreaterThan(_, lVal),        LessThanOrEqual(_, rVal))) => Some((lVal, rVal))
     case (_, Seq(GreaterThanOrEqual(_, lVal), LessThanOrEqual(_, rVal))) => Some((lVal, rVal))
   }
 
-  val defaultRangePF: PartialFunction[(KeyType, Seq[Filter]), Option[(Any, Any)]] = {
+  val defaultRangePF: PartialFunction[(Column, Seq[Filter]), Option[(Any, Any)]] = {
     case other: Any                        => None
   }
 
@@ -139,9 +136,9 @@ object FiloRelation extends StrictLogging {
                      groupedFilters: Map[String, Seq[Filter]]): ChunkScanMethod = {
     val columnIdxTypeMap = KeyFilter.mapRowKeyColumns(projection, groupedFilters.keys.toSeq)
 
-    val posTypeFilters = columnIdxTypeMap.map { case (colName, (pos, keyType)) =>
+    val posTypeFilters = columnIdxTypeMap.map { case (colName, (pos, col)) =>
       logger.debug(s"For row key column $colName, filters are ${groupedFilters(colName)}")
-      pos -> (keyType -> groupedFilters(colName))
+      pos -> (col -> groupedFilters(colName))
     }
 
     val sortedPositions = posTypeFilters.keys.toBuffer.sorted
@@ -177,14 +174,21 @@ object FiloRelation extends StrictLogging {
     }
   }
 
+  // Convert values if needed, in particular strings
+  private def conv(value: Any): Any = value match {
+    case s: String     => ZeroCopyUTF8String(s)
+    case u: UTF8String => new ZeroCopyUTF8String(u.getBaseObject, u.getBaseOffset, u.numBytes)
+    case o: Any        => o
+  }
+
   // Returns filter function, and true if function is doing any filtering
   def filtersToFunc(projection: RichProjection,
-                    filterStuff: Seq[(Int, KeyType, Seq[Filter])]): (Any => Boolean, Boolean) = {
+                    filterStuff: Seq[(Int, Column, Seq[Filter])]): (PartitionKey => Boolean, Boolean) = {
     import KeyFilter._
 
-    def toFunc(keyType: KeyType, f: Filter): Any => Boolean = f match {
-      case EqualTo(_, value) => equalsFunc(keyType)(parseSingleValue(keyType)(value))
-      case In(_, values)     => inFunc(keyType)(parseValues(keyType)(values.toSet).toSet)
+    def toFunc(col: Column, f: Filter): Any => Boolean = f match {
+      case EqualTo(_, value) => equalsFunc(parseSingleValue(col, conv(value)))
+      case In(_, values)     => inFunc(parseValues(col, values.map(conv)).toSet)
       case other: Filter     => throw new IllegalArgumentException(s"Sorry, filter $other not supported")
     }
 
@@ -200,14 +204,14 @@ object FiloRelation extends StrictLogging {
       logger.info(s"Scanning all partitions with no partition key filtering")
       ((a: Any) => true, false)
     } else {
-      (makePartitionFilterFunc(projection, filterStuff.map(_._1), funcs), true)
+      (makePartitionFilterFunc(projection, filterStuff.map(_._1).toArray, funcs.toArray), true)
     }
   }
 
   def splitsQuery(sqlContext: SQLContext,
                   dataset: DatasetRef,
                   splitsPerNode: Int,
-                  config: Config,
+                  confStr: String,
                   readOnlyProjStr: String,
                   chunkMethod: ChunkScanMethod,
                   version: Int)(f: ScanSplit => PartitionScanMethod): RDD[Row] = {
@@ -221,25 +225,26 @@ object FiloRelation extends StrictLogging {
     // Also, each partition should only need one param.
     sqlContext.sparkContext.makeRDD(splitsWithLocations)
       .mapPartitions { splitIter =>
-        perPartitionRowScanner(config, readOnlyProjStr, version, f(splitIter.next), chunkMethod)
+        perPartitionRowScanner(confStr, readOnlyProjStr, version, f(splitIter.next), chunkMethod)
       }
   }
 
   // It's good to put complex functions inside an object, to be sure that everything
   // inside the function does not depend on an explicit outer class and can be serializable
-  def perPartitionRowScanner(config: Config,
+  def perPartitionRowScanner(confStr: String,
                              readOnlyProjectionString: String,
                              version: Int,
                              partMethod: PartitionScanMethod,
                              chunkMethod: ChunkScanMethod): Iterator[Row] = {
     // NOTE: all the code inside here runs distributed on each node.  So, create my own datastore, etc.
-    FiloExecutor.init(config)
+    FiloExecutor.init(confStr)
     FiloExecutor.columnStore    // force startup
     val readOnlyProjection = RichProjection.readOnlyFromString(readOnlyProjectionString)
 
     FiloExecutor.columnStore.scanRows(
       readOnlyProjection, readOnlyProjection.columns, version, partMethod, chunkMethod,
-      (bytes, clazzes, len) => new SparkRowReader(bytes, clazzes, len)).asInstanceOf[Iterator[Row]]
+      SparkRowReader.sparkColToMaker,
+      (vectors) => new SparkRowReader(vectors)).asInstanceOf[Iterator[Row]]
   }
 }
 
@@ -282,11 +287,15 @@ case class FiloRelation(dataset: DatasetRef,
   def buildScan(requiredColumns: Array[String]): RDD[Row] =
     buildScan(requiredColumns, Array.empty)
 
+  def parallelizePartKeys(keys: Seq[Types.PartitionKey], nPartitions: Int): RDD[BinaryRecordWrapper] =
+    sqlContext.sparkContext.parallelize(keys.map(BinaryRecordWrapper.apply), nPartitions)
+
   def scanByPartitions(projection: RichProjection,
                        groupedFilters: Map[String, Seq[Filter]],
-                       partitionFilters: Seq[(Int, KeyType, Seq[Filter])],
+                       partitionFilters: Seq[(Int, Column, Seq[Filter])],
                        readOnlyProjStr: String): RDD[Row] = {
     val _config = this.filoConfig
+    val _confStr = _config.root.render(ConfigRenderOptions.concise)
     val _version = this.version
     totalQueries.increment
     val chunkMethod = chunkRangeScan(projection, groupedFilters)
@@ -294,25 +303,25 @@ case class FiloRelation(dataset: DatasetRef,
       // single partition query
       case Seq(partitionKey) =>
         singlePartQueries.increment
-        sqlContext.sparkContext.parallelize(Seq(partitionKey), 1).mapPartitions { partKeyIter =>
-          perPartitionRowScanner(_config, readOnlyProjStr, _version,
-                                 SinglePartitionScan(partKeyIter.next), chunkMethod)
+        parallelizePartKeys(Seq(partitionKey), 1).mapPartitions { partKeyIter =>
+          perPartitionRowScanner(_confStr, readOnlyProjStr, _version,
+                                 SinglePartitionScan(partKeyIter.next.binRec), chunkMethod)
         }
 
       // filtered partition full table scan, with or without range scanning
       case Nil =>
         val (filterFunc, isFiltered) = filtersToFunc(projection, partitionFilters)
         if (isFiltered) fullFilteredQueries.increment else fullTableQueries.increment
-        splitsQuery(sqlContext, dataset, splitsPerNode, _config, readOnlyProjStr, chunkMethod, version) { s =>
+        splitsQuery(sqlContext, dataset, splitsPerNode, _confStr, readOnlyProjStr, chunkMethod, version) { s =>
           FilteredPartitionScan(s, filterFunc)
         }
 
       // multi partition query, no range scan
       case partitionKeys: Seq[Any] =>
         multiPartQueries.increment
-        sqlContext.sparkContext.parallelize(partitionKeys, 1).mapPartitions { partKeyIter =>
-          perPartitionRowScanner(_config, readOnlyProjStr, _version,
-                                 MultiPartitionScan(partKeyIter.toSeq), chunkMethod)
+        parallelizePartKeys(partitionKeys, 1).mapPartitions { partKeyIter =>
+          perPartitionRowScanner(_confStr, readOnlyProjStr, _version,
+                                 MultiPartitionScan(partKeyIter.map(_.binRec).toSeq), chunkMethod)
         }
     }
   }
@@ -337,18 +346,15 @@ case class FiloRelation(dataset: DatasetRef,
 }
 
 object SparkRowReader {
-  import VectorReader._
   import FiloVector._
+  import ChunkSetReader._
+  import Column.ColumnType.TimestampColumn
 
-  val TimestampClass = classOf[java.sql.Timestamp]
-
-  // Customize the Filo vector maker to return Long vectors for Timestamp columns.
-  // This is because Spark 1.5's InternalRow expects Long primitives for that type.
-  val timestampVectorMaker: VectorMaker = {
-    case TimestampClass => ((b: ByteBuffer, len: Int) => FiloVector[Long](b, len))
+  def sparkColToMaker(col: Column): VectorFactory = col.columnType match {
+    case TimestampColumn => ((b: ByteBuffer, len: Int) =>
+                             new SparkTimestampFiloVector(FiloVector[Long](b, len)))
+    case c: Column.ColumnType => defaultColumnToMaker(col)
   }
-
-  val spark15vectorMaker = timestampVectorMaker orElse defaultVectorMaker
 }
 
 /**
@@ -357,7 +363,6 @@ object SparkRowReader {
  */
 class SparkTimestampFiloVector(innerVector: FiloVector[Long]) extends FiloVector[Long] {
   final def isAvailable(index: Int): Boolean = innerVector.isAvailable(index)
-  final def foreach[B](fn: Long => B): Unit = innerVector.foreach(fn)
   final def apply(index: Int): Long = innerVector(index) * 1000
   final def length: Int = innerVector.length
 }
@@ -365,25 +370,13 @@ class SparkTimestampFiloVector(innerVector: FiloVector[Long]) extends FiloVector
 /**
  * Base the SparkRowReader on Spark's InternalRow.  Scans are much faster because
  * sources that return RDD[Row] need to be converted to RDD[InternalRow], and the
- * conversion is horribly expensive, especially for primitives.
+ * conversion is horribly expensive, especially for primitives and strings.
  * The only downside is that the API is not stable.  :/
- * TODO: get UTF8String's out of Filo as well, so no string conversion needed :D
  */
-class SparkRowReader(chunks: Array[ByteBuffer],
-                     classes: Array[Class[_]],
-                     emptyLen: Int = 0)
+class SparkRowReader(val parsers: Array[FiloVector[_]])
 extends BaseGenericInternalRow with FiloRowReader {
   var rowNo: Int = -1
   final def setRowNo(newRowNo: Int): Unit = { rowNo = newRowNo }
-
-  val parsers = FiloVector.makeVectors(chunks, classes, emptyLen, SparkRowReader.spark15vectorMaker)
-
-  // Hack: wrap timestamp FiloVectors to give correct representation (microsecond-based)
-  for { i <- 0 until chunks.size } {
-    if (classes(i) == classOf[java.sql.Timestamp]) {
-      parsers(i) = new SparkTimestampFiloVector(parsers(i).asInstanceOf[FiloVector[Long]])
-    }
-  }
 
   final def notNull(columnNo: Int): Boolean = parsers(columnNo).isAvailable(rowNo)
 
@@ -398,18 +391,19 @@ extends BaseGenericInternalRow with FiloRowReader {
   override final def getFloat(columnNo: Int): Float =
     parsers(columnNo).asInstanceOf[FiloVector[Float]](rowNo)
 
-  // NOTE: This is horribly slow as it decodes a String from Filo's UTF8, then has
-  // to convert back to string.  When Filo gets UTF8 support then use
-  // UTF8String.fromAddress(object, offset, numBytes)... might enable zero copy strings
   override final def getUTF8String(columnNo: Int): UTF8String = {
-    val str = parsers(columnNo).asInstanceOf[FiloVector[String]](rowNo)
-    UTF8String.fromString(str)
+    val utf8 = parsers(columnNo).asInstanceOf[FiloVector[ZeroCopyUTF8String]](rowNo)
+    UTF8String.fromAddress(utf8.base, utf8.offset, utf8.numBytes)
   }
 
   final def getAny(columnNo: Int): Any = genericGet(columnNo)
-  final def genericGet(columnNo: Int): Any =
-    if (classes(columnNo) == classOf[String]) { getUTF8String(columnNo) }
-    else { parsers(columnNo).boxed(rowNo) }
+  final def genericGet(columnNo: Int): Any = parsers(columnNo).boxed(rowNo) match {
+    case z: ZeroCopyUTF8String => UTF8String.fromAddress(z.base, z.offset, z.numBytes)
+    case o: Any                => o
+    //scalastyle:off
+    case null                  => null
+    //scalastyle:on
+  }
 
   override final def isNullAt(i: Int): Boolean = !notNull(i)
   def numFields: Int = parsers.length

@@ -1,11 +1,12 @@
 package filodb.core.query
 
 import org.scalactic._
-import org.velvia.filo.{RowReader, SingleValueRowReader}
+import org.velvia.filo.{RowReader, SingleValueRowReader, ZeroCopyUTF8String, UTF8Wrapper}
 import scala.language.postfixOps
 import scalaxy.loops._
 
 import filodb.core._
+import filodb.core.Types.PartitionKey
 import filodb.core.metadata.{Column, DataColumn, ComputedColumn, RichProjection}
 
 /**
@@ -19,11 +20,9 @@ object KeyFilter {
     case t: Any    => t.asInstanceOf[kt.T]
   }
 
-  def equalsFunc(kt: KeyType)(value: kt.T): Any => Boolean =
-    (item: Any) => item == value
+  def equalsFunc(value: Any): Any => Boolean = (item: Any) => value == item
 
-  def inFunc(kt: KeyType)(values: Set[kt.T]): Any => Boolean =
-    (item: Any) => values.contains(item.asInstanceOf[kt.T])
+  def inFunc(values: Set[Any]): Any => Boolean = (item: Any) => values.contains(item)
 
   def andFunc(left: Any => Boolean, right: Any => Boolean): Any => Boolean =
     (item: Any) => left(item) && right(item)
@@ -31,39 +30,14 @@ object KeyFilter {
   // Parses the literal in an expression through a KeyType's key function... intended mostly for
   // ComputedColumns so that proper transformation of a value can happen for predicate pushdowns.
   // For example, if a partition column uses :stringPrefix, then apply that first to a value.
-  def parseSingleValue(kt: KeyType)(value: Any): kt.T = {
-    val keyFunc = kt.getKeyFunc(Array(0))
-    keyFunc(SingleValueRowReader(value)).asInstanceOf[kt.T]
-  }
-
-  def parseValues(kt: KeyType)(values: Iterable[Any]): Iterable[kt.T] = {
-    val keyFunc = kt.getKeyFunc(Array(0))
-    values.map(v => keyFunc(SingleValueRowReader(v)).asInstanceOf[kt.T])
-  }
-
-  /**
-   * Generates a filter func for a composite key type.
-   * @param kt the CompositeKeyType
-   * @param positions an array of 0-based positions, first column in key = 0, second = 1 etc.
-   * @param funcs an array of filter functions corresponding to each position
-   */
-  def compositeFilterFunc(kt: CompositeKeyType)
-                         (positions: Array[Int], funcs: Array[Any => Boolean]): Any => Boolean = {
-    require(positions.max < kt.atomTypes.length)
-    require(positions.size == funcs.size)
-
-    def filterFunc(item: Any): Boolean = {
-      val items = item.asInstanceOf[Seq[_]]
-      for { i <- 0 until positions.size optimized } {
-        val bool = funcs(i)(items(positions(i)))
-        // Short circuit when any filter returns false
-        if (!bool) return false
-      }
-      true
+  def parseSingleValue(col: Column, value: Any): Any =
+    col.extractor.getField(SingleValueRowReader(value), 0) match {
+      case z: ZeroCopyUTF8String => UTF8Wrapper(z)
+      case o: Any                => o
     }
 
-    filterFunc
-  }
+  def parseValues(col: Column, values: Iterable[Any]): Iterable[Any] =
+    values.map(v => parseSingleValue(col, v))
 
   /**
    * Identifies column names belonging to a projection's partition key columns and their positions within
@@ -71,18 +45,20 @@ object KeyFilter {
    * Computed columns with multiple source columns are ignored.
    * @param proj a full RichProjection - don't try passing in a rowKeyOnlyProjection or readOnlyProjection
    * @param columnNames the names of columns to match
-   * @return a Map(column name -> (position, keyType)) of identified partition columns
+   * @return a Map(column name -> (position, Column)) of identified partition columns
    */
-  def mapPartitionColumns(proj: RichProjection, columnNames: Seq[String]): Map[String, (Int, KeyType)] =
-    mapColumns(proj.partitionColumns, columnNames)
+  def mapPartitionColumns(proj: RichProjection, columnNames: Seq[String]): Map[String, (Int, Column)] =
+    mapColumns(proj.partitionColumns, proj.columns, columnNames)
 
-  def mapRowKeyColumns(proj: RichProjection, columnNames: Seq[String]): Map[String, (Int, KeyType)] =
-    mapColumns(proj.rowKeyColumns, columnNames)
+  def mapRowKeyColumns(proj: RichProjection, columnNames: Seq[String]): Map[String, (Int, Column)] =
+    mapColumns(proj.rowKeyColumns, proj.columns, columnNames)
 
-  def mapColumns(columns: Seq[Column], columnNames: Seq[String]): Map[String, (Int, KeyType)] = {
+  def mapColumns(columns: Seq[Column],
+                 allCols: Seq[Column],
+                 columnNames: Seq[String]): Map[String, (Int, Column)] = {
     columns.zipWithIndex.collect {
-      case (DataColumn(_, name, _, _, columnType, _), idx) => name -> (idx -> columnType.keyType)
-      case (ComputedColumn(_, _, _, _, Seq(srcColumn), keyType), idx) => srcColumn -> (idx -> keyType)
+      case d @ (DataColumn(_, name, _, _, _, _), idx)           => name -> (idx -> d._1)
+      case d @ (ComputedColumn(_, _, _, _, Seq(index), _), idx) => allCols(index).name -> (idx -> d._1)
     }.toMap.filterKeys { name => columnNames.contains(name) }
   }
 
@@ -92,14 +68,20 @@ object KeyFilter {
    * If it is a CompositeKeyType, then compositeFilterFunc will be called to create the final func.
    */
   def makePartitionFilterFunc(proj: RichProjection,
-                              positions: Seq[Int],
-                              funcs: Seq[Any => Boolean]): Any => Boolean = {
-    proj.partitionType match {
-      case c: CompositeKeyType =>
-        compositeFilterFunc(c)(positions.toArray, funcs.toArray)
-      case p: KeyType =>
-        require(positions.size == 1)
-        funcs.head
+                              positions: Array[Int],
+                              funcs: Array[Any => Boolean]): PartitionKey => Boolean = {
+    require(positions.size == funcs.size)
+    def partFunc(p: PartitionKey): Boolean = {
+      for { i <- 0 until positions.size optimized } {
+        val bool = funcs(i)(p.getAny(positions(i)))
+        // Short circuit when any filter returns false
+        if (!bool) return false
+      }
+      true
     }
+    partFunc
   }
+
+  def makePartitionFilterFunc(proj: RichProjection, func: Any => Boolean): PartitionKey => Boolean =
+    makePartitionFilterFunc(proj, Array(0), Array(func))
 }

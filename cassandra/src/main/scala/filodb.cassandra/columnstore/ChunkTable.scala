@@ -44,7 +44,7 @@ sealed class ChunkTable(val dataset: DatasetRef, val connector: FiloCassandraCon
       |) VALUES (?, ?, ?, ?, ?)""".stripMargin
   )
 
-  def writeChunks(partition: Types.BinaryPartition,
+  def writeChunks(partition: Types.PartitionKey,
                   version: Int,
                   chunkId: Types.ChunkID,
                   chunks: Map[String, ByteBuffer],
@@ -70,7 +70,7 @@ sealed class ChunkTable(val dataset: DatasetRef, val connector: FiloCassandraCon
                                   | columnname = ? AND partition = ? AND version = ?
                                   | AND chunkid >= ? AND chunkid <= ?""".stripMargin)
 
-  def readChunks(partition: Types.BinaryPartition,
+  def readChunks(partition: Types.PartitionKey,
                  version: Int,
                  column: String,
                  colNo: Int,

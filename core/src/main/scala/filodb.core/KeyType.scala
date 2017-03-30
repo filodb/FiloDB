@@ -2,14 +2,11 @@ package filodb.core
 
 import java.sql.Timestamp
 import org.joda.time.DateTime
-import org.velvia.filo.RowReader
+import org.velvia.filo.{RowReader, ZeroCopyUTF8String}
 import org.velvia.filo.RowReader._
 import scala.language.postfixOps
 import scala.math.Ordering
 import scalaxy.loops._
-import scodec.bits.{ByteOrdering, ByteVector}
-
-import filodb.core.util.StrideSerialiser
 
 /**
  * A generic typeclass for dealing with keys (partition, sort, segment) of various types.
@@ -24,14 +21,6 @@ trait KeyType {
 
   def rowReaderOrdering: Ordering[RowReader]
 
-  /**
-   * Serializes the key to bytes. Preferably, the bytes should themselves be comparable
-   * byte by byte as unsigned bytes, like how Cassandra's blob type is comparable.
-   */
-  def toBytes(key: T): ByteVector
-
-  def fromBytes(bytes: ByteVector): T
-
   def fromString(str: String): T
 
   /**
@@ -41,8 +30,6 @@ trait KeyType {
    *         keys.
    */
   def getKeyFunc(columnNumbers: Array[Int]): RowReader => T
-
-  def isSegmentType: Boolean = false
 
 }
 
@@ -57,23 +44,9 @@ abstract class SingleKeyTypeBase[K : Ordering : TypedFieldExtractor] extends Key
     require(columnNumbers.size == 1)
     val columnNum = columnNumbers(0)
     (r: RowReader) => {
-      if (r.notNull(columnNum)) {
-        extractor.getFieldOrDefault(r, columnNum)
-      } else {
-        defaultValue
-      }
+      extractor.getFieldOrDefault(r, columnNum)
     }
   }
-
-  // Default implementation assumes we take size bytes and calls the fromBytes method
-  def parseBytes(remainder: ByteVector): (T, ByteVector) = {
-    val chunk = remainder.take(size)
-    (fromBytes(chunk), remainder.drop(size))
-  }
-
-  def defaultValue: T
-
-  def size: Int
 
   val ordering: Ordering[T] = implicitly[Ordering[K]]
   val rowReaderOrdering = new Ordering[RowReader] {
@@ -124,22 +97,6 @@ case class CompositeKeyType(atomTypes: Seq[SingleKeyType]) extends KeyType {
   val ordering = CompositeOrdering(atomTypes)
   val rowReaderOrdering: Ordering[RowReader] = CompositeReaderOrdering(atomTypes)
 
-  def toBytes(key: Seq[_]): ByteVector = {
-    (0 until atomTypes.length).map { i =>
-      val atomType = atomTypes(i)
-      atomType.toBytes(key(i).asInstanceOf[atomType.T])
-    }.reduce[ByteVector] { case (a, b) => a ++ b }
-  }
-
-  def fromBytes(bytes: ByteVector): Seq[_] = {
-    var currentBytes = bytes
-    atomTypes.map { atomType =>
-      val (atom, nextBytes) = atomType.parseBytes(currentBytes)
-      currentBytes = nextBytes
-      atom
-    }
-  }
-
   def fromString(str: String): T = {
     val components = str.split(",")
     (0 until atomTypes.length).map { i =>
@@ -173,82 +130,36 @@ object SingleKeyTypes {
   import org.velvia.filo.DefaultValues._
 
   trait LongKeyTypeLike extends SingleKeyTypeBase[Long] {
-    def toBytes(key: Long): ByteVector =
-      ByteVector.fromLong(key ^ Long64HighBit, ordering = ByteOrdering.BigEndian)
-    def fromBytes(bytes: ByteVector): Long =
-      bytes.toLong(signed = true, ByteOrdering.BigEndian) ^ Long64HighBit
-
     def fromString(str: String): Long = str.toLong
-
-    override val isSegmentType = true
-    val size = 8
-    val defaultValue = DefaultLong
   }
 
   implicit case object LongKeyType extends LongKeyTypeLike
 
   trait IntKeyTypeLike extends SingleKeyTypeBase[Int] {
-    def toBytes(key: Int): ByteVector =
-      ByteVector.fromInt(key ^ Int32HighBit, ordering = ByteOrdering.BigEndian)
-    def fromBytes(bytes: ByteVector): Int =
-      bytes.toInt(signed = true, ByteOrdering.BigEndian) ^ Int32HighBit
-
     def fromString(str: String): Int = str.toInt
-
-    override val isSegmentType = true
-    val size = 4
-    val defaultValue = DefaultInt
   }
 
   implicit case object IntKeyType extends IntKeyTypeLike
 
   trait DoubleKeyTypeLike extends SingleKeyTypeBase[Double] {
-    def toBytes(key: Double): ByteVector =
-      ByteVector.fromLong(java.lang.Double.doubleToLongBits(key), ordering = ByteOrdering.BigEndian)
-
-    def fromBytes(bytes: ByteVector): Double =
-      java.lang.Double.longBitsToDouble(bytes.toLong(signed = true, ByteOrdering.BigEndian))
-
     def fromString(str: String): Double = str.toDouble
-
-    override val isSegmentType = true
-    val size = 8
-    val defaultValue = DefaultDouble
   }
 
   implicit case object DoubleKeyType extends DoubleKeyTypeLike
 
-  val stringSerde = StrideSerialiser.instance
-
-  trait StringKeyTypeLike extends SingleKeyTypeBase[String] {
-    def toBytes(key: String): ByteVector = ByteVector(stringSerde.toBytes(key))
-    override def parseBytes(remainder: ByteVector): (String, ByteVector) = {
-      val inputBuf = remainder.toByteBuffer
-      val inputStr = stringSerde.fromBytes(inputBuf)
-      (inputStr, remainder.drop(inputBuf.position))
-    }
-    def fromBytes(bytes: ByteVector): String = parseBytes(bytes)._1
-    def fromString(str: String): String = str
-    override val isSegmentType = true
-    val size = 0
-    val defaultValue = DefaultString
+  trait StringKeyTypeLike extends SingleKeyTypeBase[ZeroCopyUTF8String] {
+    def fromString(str: String): ZeroCopyUTF8String = ZeroCopyUTF8String(str)
   }
 
   implicit case object StringKeyType extends StringKeyTypeLike
 
   implicit case object BooleanKeyType extends SingleKeyTypeBase[Boolean] {
-    def toBytes(key: Boolean): ByteVector = ByteVector(if(key) -1.toByte else 0.toByte)
-    def fromBytes(bytes: ByteVector): Boolean = bytes(0) != 0
     def fromString(str: String): Boolean = str.toBoolean
-    val size = 1
-    val defaultValue = DefaultBool
   }
 
   implicit val timestampOrdering = Ordering.by((t: Timestamp) => t.getTime)
 
   implicit case object TimestampKeyType extends SingleKeyTypeBase[Timestamp] {
-    def toBytes(key: Timestamp): ByteVector = LongKeyType.toBytes(key.getTime)
-    def fromBytes(bytes: ByteVector): Timestamp = new Timestamp(LongKeyType.fromBytes(bytes))
     // Assume that most Timestamp string args are ISO8601-style date time strings.  Fallback to long ms.
     override def fromString(str: String): Timestamp = {
       try {
@@ -257,8 +168,5 @@ object SingleKeyTypes {
         case e: java.lang.IllegalArgumentException => new Timestamp(str.toLong)
       }
     }
-    override val isSegmentType = true
-    val size = 8
-    val defaultValue = new Timestamp(DefaultLong)
   }
 }

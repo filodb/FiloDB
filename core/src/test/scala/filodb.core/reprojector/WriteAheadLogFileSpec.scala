@@ -12,6 +12,7 @@ import filodb.core.metadata.{Column, DataColumn}
 import filodb.core.{DatasetRef, GdeltTestData, NamesTestData}
 import org.scalatest.{BeforeAndAfter, FunSpec, Matchers}
 import org.velvia.filo.{ArrayStringRowReader, FastFiloRowReader, RowToVectorBuilder, TupleRowReader}
+import org.velvia.filo.ZeroCopyUTF8String._
 
 import scala.collection.mutable.ArrayBuffer
 
@@ -142,7 +143,7 @@ class WriteAheadLogFileSpec extends FunSpec with Matchers with BeforeAndAfter{
   }
 
   it("Able to read filo chunks successfully"){
-    val wal = new WriteAheadLog(config, datasetRef,"localhost", schema)
+    val wal = new WriteAheadLog(config, datasetRef, "localhost", schema)
     val chunkData = createChunkData
     wal.writeChunks(chunkData)
     wal.close
@@ -161,14 +162,8 @@ class WriteAheadLogFileSpec extends FunSpec with Matchers with BeforeAndAfter{
     val rowreader = new FastFiloRowReader(chunks(0), clazzes)
     rowreader.setRowNo(2)
 
-    val actualStr = rowreader.getString(0) + ";" + rowreader.getString(1) + ";" +
-      rowreader.getLong(2) + ";" + rowreader.getInt(3)
-
-    // val expectedStr = rowreader2.getString(0) +
-    // rowreader2.getString(1) + rowreader2.getLong(2) + rowreader2.getInt(3)
-
-
-    // actualStr should equal (expectedStr)
+    rowreader.filoUTF8String(0) should equal ("Rodney".utf8)
+    rowreader.getLong(2) should equal (25L)
 
     wal.deleteTestFiles()
     reader.close()
@@ -179,8 +174,7 @@ class WriteAheadLogFileSpec extends FunSpec with Matchers with BeforeAndAfter{
     val projectionDB = projection4.withDatabase("unittest2")
     val ref = projectionDB.datasetRef
     val wal = new WriteAheadLog(config, ref,"localhost", GdeltTestData.schema)
-    // val chunkData = createChunkData
-    wal.writeChunks(createChunkData(GdeltTestData.schema,GdeltTestData.readers))
+    wal.writeChunks(createChunkData(GdeltTestData.schema, GdeltTestData.readers))
     wal.close
 
     val reader = new WriteAheadLogReader(config, GdeltTestData.schema, wal.path)
@@ -191,24 +185,11 @@ class WriteAheadLogFileSpec extends FunSpec with Matchers with BeforeAndAfter{
     val filoSchema = Column.toFiloSchema(GdeltTestData.schema)
     val colIds = filoSchema.map(_.name).toArray
     val clazzes = filoSchema.map(_.dataType).toArray
-    //noinspection ScalaStyle
-    println(chunks(0).length)
-
-    val chunkArray = chunks(0)
+    chunks(0) should have length (8)
 
     val rowreader = new FastFiloRowReader(chunks(0), clazzes)
     rowreader.setRowNo(2)
-    println("parsers:"+rowreader.parsers.head.length)
-    val actualStr = rowreader.getInt(0)  + ";" +
-      rowreader.getInt(2) + ";" + rowreader.getInt(3)
-
-    println(actualStr)
-
-
-    // val expectedStr = rowreader2.getString(0) + rowreader2.getString(1) + rowreader2.getLong(2) + rowreader2.getInt(3)
-
-
-    // actualStr should equal (expectedStr)
+    rowreader.getInt(2) should equal (197901)
 
     wal.deleteTestFiles()
     reader.close()

@@ -41,7 +41,7 @@ sealed class FilterTable(val dataset: DatasetRef, val connector: FiloCassandraCo
     (row.getLong("chunkid"), BloomFilter.readFrom[Long](bais))
   }
 
-  def readFilters(partition: Types.BinaryPartition,
+  def readFilters(partition: Types.PartitionKey,
                   version: Int,
                   firstChunkId: Types.ChunkID,
                   lastChunkId: Types.ChunkID): Future[Iterator[SegmentState.IDAndFilter]] = {
@@ -56,7 +56,7 @@ sealed class FilterTable(val dataset: DatasetRef, val connector: FiloCassandraCo
     s"INSERT INTO $tableString (partition, version, chunkid, data) " +
     "VALUES (?, ?, ?, ?)")
 
-  def writeFilters(partition: Types.BinaryPartition,
+  def writeFilters(partition: Types.PartitionKey,
                    version: Int,
                    filters: Seq[(Types.ChunkID, BloomFilter[Long])],
                    stats: ColumnStoreStats): Future[Response] = {

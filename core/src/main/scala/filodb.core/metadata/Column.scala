@@ -2,7 +2,8 @@ package filodb.core.metadata
 
 import com.typesafe.scalalogging.slf4j.StrictLogging
 import enumeratum.{Enum, EnumEntry}
-import org.velvia.filo.VectorInfo
+import org.velvia.filo.{VectorInfo, ZeroCopyUTF8String}
+import org.velvia.filo.RowReader.TypedFieldExtractor
 import scala.reflect.ClassTag
 
 import filodb.core.{CompositeKeyType, KeyType, SingleKeyType, SingleKeyTypeBase}
@@ -32,6 +33,7 @@ trait Column {
   def name: String
   def dataset: String
   def columnType: Column.ColumnType
+  def extractor: TypedFieldExtractor[_]
 
   // More type safe than just using ==, if we ever change the type of ColumnId
   // TODO(velvia): remove this and just use id
@@ -61,6 +63,8 @@ case class DataColumn(id: Int,
   // NOTE: this is one reason why column names cannot have commas
   override def toString: String =
     s"[$id,$name,$version,$columnType${if (isDeleted) ",t" else ""}]"
+
+  def extractor: TypedFieldExtractor[_] = columnType.keyType.extractor
 }
 
 object DataColumn {
@@ -80,12 +84,12 @@ object Column extends StrictLogging {
     // NOTE: due to a Spark serialization bug, this cannot be a val
     // (https://github.com/apache/spark/pull/7122)
     def clazz: Class[_]
-    def keyType: KeyType
+    def keyType: SingleKeyTypeBase[_]
   }
 
   sealed abstract class RichColumnType[T : ClassTag : SingleKeyTypeBase] extends ColumnType {
     def clazz: Class[_] = implicitly[ClassTag[T]].runtimeClass
-    def keyType: KeyType = implicitly[SingleKeyTypeBase[T]]
+    def keyType: SingleKeyTypeBase[_] = implicitly[SingleKeyTypeBase[T]]
   }
 
   object ColumnType extends Enum[ColumnType] {
@@ -95,9 +99,9 @@ object Column extends StrictLogging {
     case object IntColumn extends RichColumnType[Int]
     case object LongColumn extends RichColumnType[Long]
     case object DoubleColumn extends RichColumnType[Double]
-    case object StringColumn extends RichColumnType[String]
+    case object StringColumn extends RichColumnType[ZeroCopyUTF8String]
     case object BitmapColumn extends RichColumnType[Boolean]
-    case object TimestampColumn extends RichColumnType[java.sql.Timestamp]
+    case object TimestampColumn extends RichColumnType[Long]
   }
 
   type Schema = Map[String, DataColumn]
@@ -110,7 +114,7 @@ object Column extends StrictLogging {
   def columnsToKeyType(columns: Seq[Column]): KeyType = columns match {
     case Nil      => throw new IllegalArgumentException("Empty columns supplied")
     case Seq(DataColumn(_, _, _, _, columnType, _))  => columnType.keyType
-    case Seq(ComputedColumn(_, _, _, _, _, keyType)) => keyType
+    case Seq(ComputedColumn(_, _, _, columnType, _, _)) => columnType.keyType
     case cols: Seq[Column] =>
       val keyTypes = cols.map { col => columnsToKeyType(Seq(col)).asInstanceOf[SingleKeyType] }
       CompositeKeyType(keyTypes)

@@ -1,24 +1,26 @@
 package filodb.core.store
 
 import com.typesafe.scalalogging.slf4j.StrictLogging
-import java.nio.ByteBuffer
 import monix.reactive.Observable
-import org.velvia.filo.RowReader
+import org.velvia.filo.{RowReader, FiloVector}
 import org.velvia.filo.RowReader.TypedFieldExtractor
 import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.concurrent.duration._
 import scala.language.existentials
 
 import filodb.core._
+import filodb.core.Types.PartitionKey
 import filodb.core.binaryrecord.{BinaryRecord, BinaryRecordWrapper}
 import filodb.core.metadata.{Column, Projection, RichProjection}
 import filodb.core.query.ChunkSetReader
+import filodb.core.query.ChunkSetReader._
 
 sealed trait PartitionScanMethod
-final case class SinglePartitionScan(partition: Any) extends PartitionScanMethod
-final case class MultiPartitionScan(partitions: Seq[Any]) extends PartitionScanMethod
+final case class SinglePartitionScan(partition: PartitionKey) extends PartitionScanMethod
+final case class MultiPartitionScan(partitions: Seq[PartitionKey]) extends PartitionScanMethod
 final case class FilteredPartitionScan(split: ScanSplit,
-                                       filter: Any => Boolean = (a: Any) => true) extends PartitionScanMethod
+                                       filter: PartitionKey => Boolean = (a: PartitionKey) => true)
+    extends PartitionScanMethod
 
 sealed trait ChunkScanMethod
 case object AllChunkScan extends ChunkScanMethod
@@ -96,13 +98,15 @@ trait ColumnStore extends StrictLogging {
    * @param version the version # to read from
    * @param partMethod which partitions to scan
    * @param chunkMethod which chunks within a partition to scan
+   * @param colToMaker a function to translate a Column to a VectorFactory
    * @return an Observable of ChunkSetReaders
    */
   def readChunks(projection: RichProjection,
                  columns: Seq[Column],
                  version: Int,
                  partMethod: PartitionScanMethod,
-                 chunkMethod: ChunkScanMethod = AllChunkScan): Observable[ChunkSetReader]
+                 chunkMethod: ChunkScanMethod = AllChunkScan,
+                 colToMaker: ColumnToMaker = defaultColumnToMaker): Observable[ChunkSetReader]
 
   /**
    * Scans chunks from a dataset.  ScanMethod params determines what gets scanned.
@@ -119,8 +123,9 @@ trait ColumnStore extends StrictLogging {
                  columns: Seq[Column],
                  version: Int,
                  partMethod: PartitionScanMethod,
-                 chunkMethod: ChunkScanMethod = AllChunkScan): Iterator[ChunkSetReader] =
-    readChunks(projection, columns, version, partMethod, chunkMethod).toIterator()
+                 chunkMethod: ChunkScanMethod = AllChunkScan,
+                 colToMaker: ColumnToMaker = defaultColumnToMaker): Iterator[ChunkSetReader] =
+    readChunks(projection, columns, version, partMethod, chunkMethod, colToMaker).toIterator()
 
   /**
    * Scans over chunks, just like scanChunks, but returns an iterator of RowReader
@@ -132,8 +137,9 @@ trait ColumnStore extends StrictLogging {
                version: Int,
                partMethod: PartitionScanMethod,
                chunkMethod: ChunkScanMethod = AllChunkScan,
+               colToMaker: ColumnToMaker = defaultColumnToMaker,
                readerFactory: RowReaderFactory = DefaultReaderFactory): Iterator[RowReader] = {
-    val chunkIt = scanChunks(projection, columns, version, partMethod, chunkMethod)
+    val chunkIt = scanChunks(projection, columns, version, partMethod, chunkMethod, colToMaker)
     if (chunkIt.hasNext) {
       // TODO: fork this kind of code into a macro, called fastFlatMap.
       // That's what we really need...  :-p
@@ -169,16 +175,16 @@ trait ColumnStore extends StrictLogging {
   /**
    * Only read chunks corresponding to the row key columns.
    */
-  def readRowKeyChunks(projection: RichProjection,
-                       version: Int,
-                       partition: Any,
-                       startKey: BinaryRecord,
-                       chunkId: Types.ChunkID): Array[ByteBuffer] = {
+  def readRowKeyVectors(projection: RichProjection,
+                        version: Int,
+                        partition: PartitionKey,
+                        startKey: BinaryRecord,
+                        chunkId: Types.ChunkID): Array[FiloVector[_]] = {
     val chunkReaderIt = scanChunks(projection, projection.rowKeyColumns, version,
                                    SinglePartitionScan(partition),
                                    SingleChunkScan(BinaryRecordWrapper(startKey), chunkId))
     try {
-      chunkReaderIt.toSeq.head.chunks
+      chunkReaderIt.toSeq.head.vectors
     } catch {
       case e: NoSuchElementException =>
         logger.error(s"Error: no row key chunks for $partition / ($startKey, $chunkId)", e)

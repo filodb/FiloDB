@@ -2,7 +2,7 @@ package filodb.jmh
 
 import org.apache.spark.sql.{DataFrame, SparkSession, SaveMode}
 
-import filodb.spark.FiloDriver
+import filodb.spark.{FiloDriver, FiloExecutor}
 
 /**
  * Creates Cassandra test data for the SparkReadBenchmark.  Note that only 1 partition
@@ -16,6 +16,7 @@ object CreateCassTestData extends App {
                                  .appName("test")
                                  .config("filodb.cassandra.keyspace", "filodb")
                                  .config("filodb.memtable.min-free-mb", "10")
+                                 .config("spark.ui.enabled", "false")
                                  .config("spark.driver.memory", "3g")
                                  .config("spark.executor.memory", "5g")
                                  .getOrCreate
@@ -44,5 +45,6 @@ object CreateCassTestData extends App {
 
   sc.stop()
   FiloDriver.shutdown()
+  FiloExecutor.shutdown()
   sys.exit(0)
 }

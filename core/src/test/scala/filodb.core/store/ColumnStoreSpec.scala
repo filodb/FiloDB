@@ -2,6 +2,7 @@ package filodb.core.store
 
 import com.typesafe.config.ConfigFactory
 import java.nio.ByteBuffer
+import org.velvia.filo.ZeroCopyUTF8String._
 import scala.concurrent.duration._
 import scala.concurrent.Future
 import scala.language.postfixOps
@@ -44,12 +45,12 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
     colStore.reset()
   }
 
-  val partScan = SinglePartitionScan("/0")
+  val partScan = SinglePartitionScan(defaultPartKey)
 
   implicit val keyType = SingleKeyTypes.LongKeyType
 
   protected def ourState(proj: RichProjection = projection): SegmentState =
-    ColumnStoreSegmentState(proj, schema, 0, colStore)(SegmentInfo("/0", 0).basedOn(proj))
+    ColumnStoreSegmentState(proj, schema, 0, colStore)(SegmentInfo(defaultPartKey, 0).basedOn(proj))
 
   protected def ourState(segment: ChunkSetSegment): SegmentState =
     ColumnStoreSegmentState(segment.projection, segment.projection.columns, 0, colStore)(segment.segInfo)
@@ -81,9 +82,9 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
     }
 
     val rows = colStore.scanRows(projection, schema, 0, partScan)
-                       .map(r => (r.getLong(2), r.getString(0))).toSeq
+                       .map(r => (r.getLong(2), r.filoUTF8String(0))).toSeq
     rows.map(_._1) should equal (Seq(24L, 28L, 25L, 40L, 39L, 29L))
-    rows.map(_._2) should equal (firstNames)
+    rows.map(_._2) should equal (utf8FirstNames)
   }
 
   it should "replace rows to a previous chunk successfully" in {
@@ -107,19 +108,19 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
 
     // First row (names(1)) should be skipped, and last rows should be from second chunk (chunkID order)
     val rows = colStore.scanRows(projection, schema, 0, partScan)
-                       .map(r => (r.getLong(2), r.getString(0))).toSeq
+                       .map(r => (r.getLong(2), r.filoUTF8String(0))).toSeq
     rows.map(_._1) should equal (Seq(28L, 29L, 39L, 40L, 24L, 25L))
-    rows.map(_._2) should equal (sortedFirstNames.drop(2) ++ Seq("Stacy", "Amari"))
+    rows.map(_._2) should equal (sortedUtf8Firsts.drop(2) ++ Seq("Stacy".utf8, "Amari".utf8))
   }
 
   // The first row key column is a computed column, so this test also ensures that retrieving the original
   // source columns works.
   it should "replace rows with multi row keys to an uncached segment" in {
     import GdeltTestData._
-    val segmentsRows = getSegments(197901.asInstanceOf[projection2.PK])
+    val segmentsRows = getSegments(projection2.partKey(197901))
     val segs = segmentsRows.map { case (seg, lines) =>
       val state = ourState(seg)
-      seg.addChunkSet(state, lines)
+      seg.addChunkSet(state, lines.sortBy(_.getString(4)))
       colStore.appendSegment(projection2, seg, 0).futureValue should equal (Success)
       seg
     }
@@ -129,7 +130,8 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
     segment2.addChunkSet(ourState(segs.head), altReaders.take(3))
     colStore.appendSegment(projection2, segment2, 0).futureValue should equal (Success)
 
-    val ints = colStore.scanRows(projection2, schema, 0, SinglePartitionScan(197901)).map(_.getInt(6)).toSeq
+    val method = SinglePartitionScan(projection2.partKey(197901))
+    val ints = colStore.scanRows(projection2, schema, 0, method).map(_.getInt(6)).toSeq
     ints should have length 99
     ints.sum should equal (492 - 12)    // 492 is original sum of #Articles all lines, minus diff in alt lines
   }
@@ -226,7 +228,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
 
   it should "read back rows written with multi-column row keys" in {
     import GdeltTestData._
-    val segmentsRows = getSegments(197901.asInstanceOf[projection2.PK])
+    val segmentsRows = getSegments(projection2.partKey(197901))
     segmentsRows.foreach { case (seg, rows) =>
       seg.addChunkSet(ourState(seg), rows)
       colStore.appendSegment(projection2, seg, 0).futureValue should equal (Success)
@@ -250,7 +252,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
     val paramSet = colStore.getScanSplits(datasetRef, 1)
     paramSet should have length (1)
 
-    val filterFunc = KeyFilter.equalsFunc(projection2.partitionType)(197902.asInstanceOf[projection2.PK])
+    val filterFunc = KeyFilter.makePartitionFilterFunc(projection2, KeyFilter.equalsFunc(197902))
     val method = FilteredPartitionScan(paramSet.head, filterFunc)
     val rowIt = colStore.scanRows(projection2, schema, 0, method)
     rowIt.map(_.getInt(6)).sum should equal (22)
@@ -261,8 +263,10 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
     // Requirement: Must ingest 50 rows per chunk
     val segmentsRows = getSegmentsByPartKey(projection2)
     segmentsRows.foreach { case (seg, rows) =>
-      val sorted = rows.sortBy(r => (r.getString(4), r.getInt(0)))
-      seg.addChunkSet(ourState(seg), sorted)
+      rows.grouped(50).foreach { rowset =>
+        val sorted = rowset.sortBy(r => (r.getString(4), r.getInt(0)))
+        seg.addChunkSet(ourState(seg), sorted)
+      }
       colStore.appendSegment(projection2, seg, 0).futureValue should equal (Success)
     }
 
@@ -281,7 +285,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
     rows.map(_._1).min should equal (50)
 
     // Ask for only partition 197902 and row keys that don't exist, there should be no rows
-    val filterFunc = KeyFilter.equalsFunc(projection2.partitionType)(197902.asInstanceOf[projection2.PK])
+    val filterFunc = KeyFilter.equalsFunc(197902)
     val method2 = FilteredPartitionScan(paramSet.head, filterFunc)
     val rowRange2 = RowKeyChunkScan(BinaryRecord(projection2, Seq("", 0)),
                                     BinaryRecord(projection2, Seq("", 2)))
@@ -302,7 +306,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
       val segState = ourState(seg)
       // TODO: move grouping and sorting to TestData
       rows.grouped(10).foreach { rowGroup =>
-        val sorted = rowGroup.sortBy(r => (r.getString(4), r.getInt(0)))
+        val sorted = rowGroup.sortBy(r => (r.filoUTF8String(4), r.getInt(0)))
         seg.addChunkSet(segState, sorted)
       }
       colStore.appendSegment(projection2, seg, 0).futureValue should equal (Success)
@@ -316,7 +320,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
     // AFR/0-GOV/9, GOV/10-IRN/19, /53-ZMB/57, /65-VATGOV/61, /70-KHM/73, CHL/88-ITA/87, /91-GOV/90
     val startKey = BinaryRecord(projection4, Seq("F", -1))
     val endKey = BinaryRecord(projection4, Seq("H", 100))
-    val method = SinglePartitionScan(1979)
+    val method = SinglePartitionScan(projection4.partKey(1979))
     val range1 = RowKeyChunkScan(startKey, endKey)
     val rowIt = colStore.scanRows(projection4, schema, 0, method, range1)
     val rows = rowIt.map(r => (r.getInt(0), r.getInt(2))).toList
@@ -349,20 +353,20 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
     paramSet should have length (1)
 
     // Test 1:  IN query on first column only
-    val inFilter = KeyFilter.inFunc(StringKeyType)(Set("JPN", "KHM"))
-    val filter1 = KeyFilter.makePartitionFilterFunc(projection3, Seq(0), Seq(inFilter))
+    val inFilter = KeyFilter.inFunc(Set("JPN".utf8, "KHM".utf8))
+    val filter1 = KeyFilter.makePartitionFilterFunc(projection3, inFilter)
     val method1 = FilteredPartitionScan(paramSet.head, filter1)
 
     val readSegs1 = colStore.stats.readPartitions
     val rows = colStore.scanRows(projection3, schema, 0, method1).toSeq
     rows.map(_.getInt(6)).sum should equal (30)
-    rows.map(_.getString(4)).toSet should equal (Set("JPN", "KHM"))
+    rows.map(_.filoUTF8String(4)).toSet should equal (Set("JPN".utf8, "KHM".utf8))
     (colStore.stats.readPartitions - readSegs1) should equal (2)
 
     // Test 2: = filter on both partition columns
-    val eqFilters = Seq(KeyFilter.equalsFunc(StringKeyType)("JPN"),
-                        KeyFilter.equalsFunc(IntKeyType)(1979))
-    val filter2 = KeyFilter.makePartitionFilterFunc(projection3, Seq(0, 1), eqFilters)
+    val eqFilters = Array(KeyFilter.equalsFunc("JPN".utf8),
+                          KeyFilter.equalsFunc(1979))
+    val filter2 = KeyFilter.makePartitionFilterFunc(projection3, Array(0, 1), eqFilters)
     val method2 = FilteredPartitionScan(paramSet.head, filter2)
     val rowIt = colStore.scanRows(projection3, schema, 0, method2)
     rowIt.map(_.getInt(6)).sum should equal (10)

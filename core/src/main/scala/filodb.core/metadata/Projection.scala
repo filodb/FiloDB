@@ -2,10 +2,10 @@ package filodb.core.metadata
 
 import com.typesafe.scalalogging.slf4j.StrictLogging
 import org.scalactic._
-import org.velvia.filo.RowReader
+import org.velvia.filo.{RowReader, RoutingRowReader, SeqRowReader}
 
-import filodb.core.{CompositeKeyType, KeyType, KeyRange, BinaryKeyRange}
-import filodb.core.binaryrecord.RecordSchema
+import filodb.core.{CompositeKeyType, KeyType}
+import filodb.core.binaryrecord.{RecordSchema, BinaryRecord}
 import filodb.core.Types._
 import filodb.core._
 
@@ -51,18 +51,17 @@ case class Projection(id: Int,
 case class RichProjection(projection: Projection,
                           dataset: Dataset,
                           columns: Seq[Column],
-                          segmentColumn: Column,
+                          segmentColumn: Column, // get rid of segment*
                           segmentColIndex: Int,
                           segmentType: KeyType,
                           rowKeyColumns: Seq[Column],
                           rowKeyColIndices: Seq[Int],
-                          rowKeyType: KeyType,
+                          rowKeyType: KeyType,    // get rid of this too
                           partitionColumns: Seq[Column],
-                          partitionColIndices: Seq[Int],
-                          partitionType: KeyType) {
+                          partitionColIndices: Seq[Int]) {
   type SK = segmentType.T
   type RK = rowKeyType.T
-  type PK = partitionType.T
+  type PK = PartitionKey
 
   def datasetName: String = projection.dataset.toString
   def datasetRef: DatasetRef = projection.dataset
@@ -78,24 +77,31 @@ case class RichProjection(projection: Projection,
   def withDatabase(database: String): RichProjection =
     this.copy(projection = this.projection.withDatabase(database))
 
-  def segmentKeyFunc: RowReader => SK =
-    segmentType.getKeyFunc(Array(segmentColIndex))
-
   def rowKeyFunc: RowReader => RK =
     rowKeyType.getKeyFunc(rowKeyColIndices.toArray)
 
-  def partitionKeyFunc: RowReader => PK =
-    partitionType.getKeyFunc(partitionColIndices.toArray)
+  val partKeyBinSchema = RecordSchema(partitionColumns)
+  val partExtractors = partitionColumns.map(_.extractor).toArray
 
-  def toBinaryKeyRange[P, S](keyRange: KeyRange[P, S]): BinaryKeyRange =
-    BinaryKeyRange(partitionType.toBytes(keyRange.partition.asInstanceOf[partitionType.T]),
-                   segmentType.toBytes(keyRange.start.asInstanceOf[segmentType.T]),
-                   segmentType.toBytes(keyRange.end.asInstanceOf[segmentType.T]),
-                   keyRange.endExclusive)
+  // Get the _source_ column index to transform, not the index of computed column definition
+  val partIndices = partitionColIndices.map { idx =>
+    columns(idx) match {
+      case d: DataColumn => idx
+      case ComputedColumn(_, _, _, _, Seq(srcIndex), _) => srcIndex
+      case other: Column => -1
+    }
+  }.toArray
 
-  def toBinarySegRange[S](segmentRange: SegmentRange[S]): BinarySegmentRange =
-    BinarySegmentRange(segmentType.toBytes(segmentRange.start.asInstanceOf[segmentType.T]),
-                       segmentType.toBytes(segmentRange.end.asInstanceOf[segmentType.T]))
+  val partitionKeyFunc: RowReader => PartitionKey = { (r: RowReader) =>
+    val routedReader = RoutingRowReader(r, partIndices)
+    BinaryRecord(partKeyBinSchema, routedReader, partExtractors)
+  }
+
+  /**
+   * Convenience function to create a BinaryRecord PartitionKey from a Seq of Any.  Handles computed columns.
+   */
+  def partKey(parts: Any*): PartitionKey =
+    BinaryRecord(partKeyBinSchema, SeqRowReader(parts), partExtractors)
 
   /**
    * Serializes this RichProjection into the minimal string needed to recover a "read-only" RichProjection,
@@ -177,8 +183,6 @@ object RichProjection extends StrictLogging {
       val computedColumns = columns.collect { case c: ComputedColumn => c.name }
       if (typ == "row" && computedColumns.nonEmpty) {
         Bad(RowKeyComputedColumns(computedColumns))
-      } else if (typ == "segment" && !keyType.isSegmentType) {
-        Bad(UnsupportedSegmentColumnType(columnNames.head, columns.head.columnType))
       } else {
         Good((colIndices, columns, keyType))
       }
@@ -211,7 +215,7 @@ object RichProjection extends StrictLogging {
       RichProjection(normProjection, dataset, richColumns,
                      segCols.head, segColIdx.head, segType,
                      keyStuff._2, keyStuff._1, keyStuff._3,
-                     partStuff._2, partStuff._1, partStuff._3)
+                     partStuff._2, partStuff._1)
     }
   }
 
@@ -229,7 +233,7 @@ object RichProjection extends StrictLogging {
     }
     val rowKeyColumns = rowKeyStr.split(':').toSeq.map(DataColumn.fromString(_, dsName))
     val segmentColumn = ComputedColumn(-1, ":string 0", dsName, Column.ColumnType.StringColumn,
-                                       Nil, SingleKeyTypes.StringKeyType)
+                                       Nil, SingleKeyTypes.StringKeyType.extractor)
     val dsNameParts = dsName.split('.').toSeq
     val ref = dsNameParts match {
       case Seq(db, ds) => DatasetRef(ds, Some(db))
@@ -238,8 +242,8 @@ object RichProjection extends StrictLogging {
     val dataset = Dataset(ref, Nil, segmentColumn.name, partitionColumns.map(_.name))
 
     RichProjection(dataset.projections.head, dataset, extraColumns,
-                   segmentColumn, -1, segmentColumn.keyType,
+                   segmentColumn, -1, segmentColumn.columnType.keyType,
                    rowKeyColumns, Nil, Column.columnsToKeyType(rowKeyColumns),
-                   partitionColumns, Nil, Column.columnsToKeyType(partitionColumns))
+                   partitionColumns, Nil)
   }
 }

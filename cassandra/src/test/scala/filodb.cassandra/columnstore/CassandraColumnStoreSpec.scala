@@ -47,7 +47,7 @@ class CassandraColumnStoreSpec extends ColumnStoreSpec {
 
     val chunk = lz4ColStore.scanChunks(projection, schema, 0, partScan).toSeq.head
     chunk.rowIterator().map(_.getLong(2)).toSeq should equal (Seq(24L, 28L, 25L))
-    chunk.rowIterator().map(_.getString(0)).toSeq should equal (firstNames take 3)
+    chunk.rowIterator().map(_.filoUTF8String(0)).toSeq should equal (utf8FirstNames take 3)
   }
 
 

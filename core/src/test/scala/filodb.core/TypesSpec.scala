@@ -1,6 +1,7 @@
 package filodb.core
 
 import org.velvia.filo.{RowReader, TupleRowReader}
+import org.velvia.filo.ZeroCopyUTF8String._
 import scodec.bits._
 
 import org.scalatest.{FunSpec, Matchers}
@@ -25,30 +26,12 @@ class TypesSpec extends FunSpec with Matchers {
   }
 
   describe("KeyTypes") {
-    it("should serialize and deserialize SingleKeyTypes correctly") {
-      IntKeyType.fromBytes(IntKeyType.toBytes(-500)) should equal (-500)
-      LongKeyType.fromBytes(LongKeyType.toBytes(123456789L)) should equal (123456789L)
-      StringKeyType.fromBytes(StringKeyType.toBytes("baz")) should equal ("baz")
-    }
-
-    it("should serialize and unserialize CompositeKeyTypes correctly") {
-      val types = Seq(StringKeyType, IntKeyType, BooleanKeyType)
-      val compositeType = CompositeKeyType(types)
-
-      val orig1 = Seq[Any]("AdamAndEve", 1001, true)
-      compositeType.fromBytes(compositeType.toBytes(orig1)) should equal (orig1)
-
-      val orig2 = Seq[Any]("", 2002, false)
-      compositeType.fromBytes(compositeType.toBytes(orig2)) should equal (orig2)
-
-    }
-
     it("should compare CompositeKeyTypes using ordering trait") {
       val types = Seq(IntKeyType, StringKeyType)
       val compositeType = CompositeKeyType(types)
 
-      val orig1 = Seq[Any](1001, "AdamAndEve")
-      val orig2 = Seq[Any](1001, "Noah")
+      val orig1 = Seq[Any](1001, "AdamAndEve".utf8)
+      val orig2 = Seq[Any](1001, "Noah".utf8)
       implicit val ordering = compositeType.ordering
       assert(orig1 < orig2)
     }
@@ -61,25 +44,7 @@ class TypesSpec extends FunSpec with Matchers {
       val types = Seq(StringKeyType, IntKeyType)
       val compositeType = CompositeKeyType(types)
       val compositeKeyFunc = compositeType.getKeyFunc(Array(0, 1))
-      compositeKeyFunc(row1) should equal (Seq("ape", 0))
-    }
-
-    it("CompositeKeyType should use getKeyFunc from individual KeyTypes") {
-      val row1 = TupleRowReader((Some("ape"), None))
-
-      import filodb.core.metadata.ComputedKeyTypes.ComputedIntKeyType
-      val intKeyType = new ComputedIntKeyType((r: RowReader) => -2)
-      val types = Seq(StringKeyType, intKeyType)
-      val compositeType = CompositeKeyType(types)
-      val compositeKeyFunc = compositeType.getKeyFunc(Array(0, 1))
-      // Should not throw NullKeyValue anymore, since ComputedIntKeyType should always return -2
-      compositeKeyFunc(row1) should equal (Seq("ape", -2))
-    }
-
-    it("should binary compare Int and Long key types correctly") {
-      IntKeyType.toBytes(-1) should be < IntKeyType.toBytes(1)
-      IntKeyType.toBytes(Int.MaxValue) should be > IntKeyType.toBytes(0)
-      LongKeyType.toBytes(10L) should be > LongKeyType.toBytes(-20L)
+      compositeKeyFunc(row1) should equal (Seq("ape".utf8, 0))
     }
   }
 }

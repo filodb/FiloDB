@@ -1,6 +1,7 @@
 package filodb.jmh
 
 import ch.qos.logback.classic.{Level, Logger}
+import com.typesafe.config.ConfigRenderOptions
 import java.util.concurrent.TimeUnit
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.functions.sum
@@ -16,7 +17,7 @@ import scalaxy.loops._
 import filodb.core._
 import filodb.core.metadata.{Column, Dataset}
 import filodb.core.store._
-import filodb.spark.{FiloRelation, FiloDriver}
+import filodb.spark.{FiloDriver, FiloExecutor, FiloRelation}
 
 /**
  * A benchmark to compare performance of FiloRelation against different scenarios,
@@ -33,17 +34,18 @@ import filodb.spark.{FiloRelation, FiloDriver}
  * To get the scan speed, one needs to subtract the baseline from the total time of sparkSum/sparkCassSum.
  * For example, on my laptop, here is the JMH output:
  * {{{
- *  Benchmark                         Mode  Cnt  Score   Error  Units
- *  SparkReadBenchmark.sparkBaseline    ss   15  0.018 ± 0.007   s/op
- *  SparkReadBenchmark.sparkSum         ss   15  0.218 ± 0.007   s/op
- *  SparkCassBenchmark.sparkCassSum     ss   15  0.541 ± 0.054   s/op
+ *  Benchmark                              Mode  Cnt  Score   Error  Units
+ *  SparkReadBenchmark.inMemoryColStoreOnly  ss   15  ≈ 10⁻³            s/op
+ *  SparkReadBenchmark.sparkBaseline         ss   15   0.013 ±  0.001   s/op
+ *  SparkReadBenchmark.sparkSum              ss   15   0.045 ±  0.002   s/op
+ *  SparkCassBenchmark.sparkCassSum          ss   15   0.226 ± 0.035   s/op
  * }}}
  *
  * (The above run against Cassandra 2.1.6, 5GB heap, with jmh:run -i 3 -wi 3 -f3 filodb.jmh.SparkReadBenchmark)
  *
  * Thus:
- * - Cassandra scan speed = 5000000 / (0.541 - 0.018) =  9,689,922 ops/sec
- * - InMemory scan speed  = 5000000 / (0.218 - 0.018) = 25,000,000 ops/sec
+ * - Cassandra scan speed = 5000000 / (0.226 - 0.013) =  23.47 million ops/sec
+ * - InMemory scan speed  = 5000000 / (0.045 - 0.013) = 156.25 million ops/sec
  */
 @State(Scope.Benchmark)
 class SparkReadBenchmark {
@@ -72,8 +74,7 @@ class SparkReadBenchmark {
 
   // Merge segments into InMemoryColumnStore
   rowIt.toSeq.take(NumRows).grouped(10000).foreach { rows =>
-    val segKey = projection.segmentKeyFunc(TupleRowReader(rows.head))
-    val segInfo = SegmentInfo("/0", segKey).basedOn(projection)
+    val segInfo = SegmentInfo(projection.partKey("/0"), "").basedOn(projection)
     val state = ColumnStoreSegmentState(projection, schema, 0, FiloDriver.columnStore)(segInfo)
     val writerSeg = new ChunkSetSegment(projection, segInfo)
     writerSeg.addChunkSet(state, rows.map(TupleRowReader))
@@ -83,6 +84,7 @@ class SparkReadBenchmark {
   @TearDown
   def shutdownFiloActors(): Unit = {
     FiloDriver.shutdown()
+    FiloExecutor.shutdown()
     sc.stop()
   }
 
@@ -97,6 +99,7 @@ class SparkReadBenchmark {
   }
 
   val readOnlyProjStr = projection.toReadOnlyProjString(Seq("int"))
+  val configStr = filoConfig.root.render(ConfigRenderOptions.concise)
 
   // Measure the speed of InMemoryColumnStore's ScanSegments over many segments
   // Including null check
@@ -104,7 +107,7 @@ class SparkReadBenchmark {
   @BenchmarkMode(Array(Mode.SingleShotTime))
   @OutputTimeUnit(TimeUnit.SECONDS)
   def inMemoryColStoreOnly(): Any = {
-    val it = FiloRelation.perPartitionRowScanner(filoConfig, readOnlyProjStr, 0,
+    val it = FiloRelation.perPartitionRowScanner(configStr, readOnlyProjStr, 0,
                             FilteredPartitionScan(split), AllChunkScan).asInstanceOf[Iterator[InternalRow]]
     var sum = 0
     while (it.hasNext) {

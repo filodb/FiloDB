@@ -9,6 +9,7 @@ import scala.concurrent.duration.FiniteDuration
 import scala.concurrent.{ExecutionContext, Future}
 
 import filodb.core._
+import filodb.core.Types.PartitionKey
 import filodb.core.store.{ColumnStore, ChunkSetSegment, Segment, SegmentInfo}
 import filodb.core.metadata.{Dataset, Column, RichProjection}
 
@@ -37,14 +38,14 @@ trait Reprojector {
    * A simple function that reads rows out of a memTable and converts them to segments.
    * Used by reproject(), separated out for ease of testing.
    */
-  def toSegments(memTable: MemTable, segments: Seq[(Any, Any)], version: Int): Seq[ChunkSetSegment]
+  def toSegments(memTable: MemTable, partitions: Seq[PartitionKey], version: Int): Seq[ChunkSetSegment]
 
   def clear(): Unit = {}
 
-  protected def printSegInfos(infos: Seq[(Any, Any)]): String = {
-    val ellipsis = if (infos.length > 3) Seq("...") else Nil
-    val infoStrings = (infos.take(3).map(_.toString) ++ ellipsis).mkString(", ")
-    s"${infos.length} segments: [$infoStrings]"
+  protected def printPartitions(parts: Seq[PartitionKey]): String = {
+    val ellipsis = if (parts.length > 3) Seq("...") else Nil
+    val infoStrings = (parts.take(3).map(_.toString) ++ ellipsis).mkString(", ")
+    s"${parts.length} partitions: [$infoStrings]"
   }
 }
 
@@ -72,19 +73,19 @@ class DefaultReprojector(config: Config,
   val retryBaseTime = config.as[FiniteDuration]("reprojector.retry-base-timeunit")
   val detectSkips = !config.getBoolean("reprojector.bulk-write-mode")
 
-  def toSegments(memTable: MemTable, segments: Seq[(Any, Any)], version: Int): Seq[ChunkSetSegment] = {
+  def toSegments(memTable: MemTable, partitions: Seq[PartitionKey], version: Int): Seq[ChunkSetSegment] = {
     val dataset = memTable.projection.dataset
-    segments.map { case (partition, segmentKey) =>
+    partitions.map { partition =>
       Tracer.withNewContext("serialize-segment", true) {
         // For each segment grouping of rows... set up a Segment
-        val segInfo = SegmentInfo(partition, segmentKey).basedOn(memTable.projection)
+        val segInfo = SegmentInfo(partition, "").basedOn(memTable.projection)
         val state = subtrace("get-segment-state", "ingestion") {
           stateCache.getSegmentState(memTable.projection,
                                      memTable.projection.columns,
                                      version)(segInfo)
         }
         val segment = new ChunkSetSegment(memTable.projection, segInfo)
-        val segmentRowsIt = memTable.safeReadRows(segInfo)
+        val segmentRowsIt = memTable.safeReadRows(partition)
         logger.debug(s"Created new segment ${segment.segInfo} for encoding...")
 
         // Group rows into chunk sized bytes and add to segment
@@ -105,16 +106,16 @@ class DefaultReprojector(config: Config,
     val projection = memTable.projection
     val datasetName = projection.datasetName
 
-    val segments = memTable.getSegments.toSeq
-    val segInfos = printSegInfos(segments)
+    val partitions = memTable.partitions.toBuffer
+    val segInfos = printPartitions(partitions)
     logger.info(s"Reprojecting dataset ($datasetName, $version): $segInfos")
 
     // Serialize one segment at a time.  This takes longer than the actual column flush, which is async,
     // so basically this future thread will intersperse writes in between serializations.
     // At same time, do everything in a separate thread so caller won't be blocked
     Future {
-      segments.map { partitionSegment =>
-        val segment = toSegments(memTable, Seq(partitionSegment), version).head
+      partitions.map { partition =>
+        val segment = toSegments(memTable, Seq(partition), version).head
         retryWithBackOff(retries, retryBaseTime) {
           columnStore.appendSegment(projection, segment, version)
         }.map { resp => segment.segInfo.asInstanceOf[SegmentInfo[_, _]] }

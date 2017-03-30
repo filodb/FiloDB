@@ -24,6 +24,11 @@ trait FieldType[@specialized T] {
                     field: Field,
                     reader: RowReader): Unit
 
+  def addWithExtractor(builder: BinaryRecordBuilder,
+                       field: Field,
+                       reader: RowReader,
+                       extractor: TypedFieldExtractor[_]): Unit
+
   def writeSortable(data: BinaryRecord, field: Field, buf: ByteBuf): Unit
 
   def compare(rec1: BinaryRecord, rec2: BinaryRecord, field: Field): Int
@@ -35,6 +40,12 @@ abstract class SimpleFieldType[@specialized T: TypedFieldExtractor] extends Fiel
                           field: Field,
                           reader: RowReader): Unit =
     add(builder, field, extractor.getField(reader, field.num))
+
+  final def addWithExtractor(builder: BinaryRecordBuilder,
+                             field: Field,
+                             reader: RowReader,
+                             customExtractor: TypedFieldExtractor[_]): Unit =
+    add(builder, field, customExtractor.asInstanceOf[TypedFieldExtractor[T]].getField(reader, field.num))
 }
 
 object FieldType {
@@ -46,7 +57,7 @@ object FieldType {
     StringColumn  -> UTF8StringFieldType,
     BitmapColumn  -> BooleanFieldType,
     DoubleColumn  -> DoubleFieldType,
-    TimestampColumn -> TimestampFieldType
+    TimestampColumn -> LongFieldType  // default to long handling due to BinaryRecord
   )
 }
 
@@ -137,8 +148,7 @@ object TimestampFieldType extends SimpleFieldType[Timestamp] {
 object UTF8StringFieldType extends SimpleFieldType[ZeroCopyUTF8String] {
   val numFixedWords: Int = 1
   final def extract(data: BinaryRecord, field: Field): ZeroCopyUTF8String = {
-    val fixedData = UnsafeUtils.getInt(data.base, data.offset + field.fixedDataOffset)
-    val (offset, len) = BinaryRecord.getBlobOffsetLen(data, fixedData)
+    val (offset, len) = BinaryRecord.getBlobOffsetLen(data, field)
     new ZeroCopyUTF8String(data.base, offset, len)
   }
 
@@ -158,17 +168,20 @@ object UTF8StringFieldType extends SimpleFieldType[ZeroCopyUTF8String] {
     val first8bytes = new Array[Byte](8)
     val utf8str = extract(data, field)
     if (utf8str.length < 8) {
-      UnsafeUtils.unsafe.copyMemory(utf8str.base, utf8str.offset,
-                                    first8bytes, UnsafeUtils.arayOffset, utf8str.length)
+      utf8str.copyTo(first8bytes, UnsafeUtils.arayOffset)
       UnsafeUtils.unsafe.setMemory(first8bytes, UnsafeUtils.arayOffset + utf8str.length,
                                    8 - utf8str.length, 0)
     } else {
-      UnsafeUtils.unsafe.copyMemory(utf8str.base, utf8str.offset,
-                                    first8bytes, UnsafeUtils.arayOffset, 8)
+      utf8str.copyTo(first8bytes, UnsafeUtils.arayOffset, n=8)
     }
     buf.add(first8bytes)
   }
 
-  final def compare(rec1: BinaryRecord, rec2: BinaryRecord, field: Field): Int =
-    extract(rec1, field).compare(extract(rec2, field))
+  // Very efficient compare method does not even need to allocate new ZeroCopyUTF8String instances
+  final def compare(rec1: BinaryRecord, rec2: BinaryRecord, field: Field): Int = {
+    val (off1, len1) = BinaryRecord.getBlobOffsetLen(rec1, field)
+    val (off2, len2) = BinaryRecord.getBlobOffsetLen(rec2, field)
+    val wordCmp = UnsafeUtils.wordCompare(rec1.base, off1, rec2.base, off2, Math.min(len1, len2))
+    if (wordCmp != 0) wordCmp else len1 - len2
+  }
 }

@@ -52,7 +52,7 @@ class CassandraQueryBenchmark {
     metaStore.shutdown()
   }
 
-  val hodPartScan = SinglePartitionScan(9)   // 9am - peak time - lots of records, around 700k
+  val hodPartScan = SinglePartitionScan(hodProj.partKey(9))   // 9am - peak time - lots of records, around 700k
   val columns = Seq("passenger_count", "pickup_datetime", "medallion")
 
   @Benchmark
@@ -92,7 +92,7 @@ class CassandraQueryBenchmark {
   @BenchmarkMode(Array(Mode.AverageTime))
   @OutputTimeUnit(TimeUnit.MICROSECONDS)
   def wholePartitionScanMed(): Int = {
-    val medPartScan = SinglePartitionScan("AA")
+    val medPartScan = SinglePartitionScan(medProj.partKey("AA"))
     colStore.scanRows(medProj, columns.map(medSchema), 0, medPartScan).length
   }
 
@@ -105,7 +105,7 @@ class CassandraQueryBenchmark {
   @BenchmarkMode(Array(Mode.AverageTime))
   @OutputTimeUnit(TimeUnit.MICROSECONDS)
   def earlyTwoDaysRangeScanHOD(): Int = {
-    val pmethod = SinglePartitionScan(9)
+    val pmethod = SinglePartitionScan(hodProj.partKey(9))
     val cmethod = RowKeyChunkScan(hodKey1, hodKey2)
     colStore.scanRows(hodProj, columns.map(hodSchema), 0, pmethod, cmethod).length
   }
@@ -114,7 +114,7 @@ class CassandraQueryBenchmark {
   @BenchmarkMode(Array(Mode.AverageTime))
   @OutputTimeUnit(TimeUnit.MICROSECONDS)
   def lateTwoDaysRangeScanHOD(): Int = {
-    val pmethod = SinglePartitionScan(9)
+    val pmethod = SinglePartitionScan(hodProj.partKey(9))
     val cmethod = RowKeyChunkScan(hodKey3, hodKey4)
     colStore.scanRows(hodProj, columns.map(hodSchema), 0, pmethod, cmethod).length
   }
@@ -126,7 +126,7 @@ class CassandraQueryBenchmark {
   @BenchmarkMode(Array(Mode.AverageTime))
   @OutputTimeUnit(TimeUnit.MICROSECONDS)
   def middleMedallionRangeScan(): Int = {
-    val pmethod = SinglePartitionScan("AA")
+    val pmethod = SinglePartitionScan(medProj.partKey("AA"))
     val cmethod = RowKeyChunkScan(medKey1, medKey2)
     colStore.scanRows(medProj, columns.map(medSchema), 0, pmethod, cmethod).length
   }

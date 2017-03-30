@@ -4,13 +4,13 @@ import com.typesafe.config.Config
 import com.typesafe.scalalogging.slf4j.StrictLogging
 import java.nio.ByteBuffer
 import java.nio.file.{Path, Paths}
-
 import net.ceedubs.ficus.Ficus._
 import org.velvia.filo._
-
 import scala.collection.mutable.ArrayBuffer
 import scalaxy.loops._
+
 import filodb.core.metadata.{Column, RichProjection}
+import filodb.core.store.ChunkSet
 
 /**
  * FiloAppendStore is an append-only store that stores chunks of rows in Filo vector format.
@@ -42,7 +42,7 @@ class FiloAppendStore(val projection: RichProjection,
   private val clazzes = filoSchema.map(_.dataType).toArray
   private val colIds = filoSchema.map(_.name).toArray
 
-  private val builder = new RowToVectorBuilder(filoSchema)
+  private val builder = new RowToVectorBuilder(filoSchema, ChunkSet.builderMap)
 
   private var _numRows = 0
 

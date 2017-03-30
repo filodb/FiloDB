@@ -1,13 +1,15 @@
 package filodb.core.query
 
-import org.velvia.filo.RowReader
+import com.googlecode.javaewah.EWAHCompressedBitmap
+import org.jctools.maps.NonBlockingHashMapLong
 import scala.collection.immutable.TreeSet
 import scala.collection.mutable.HashMap
 
-import filodb.core.Types.{BinaryPartition, ChunkID}
+import filodb.core.Types.{PartitionKey, ChunkID}
 import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.metadata.RichProjection
 import filodb.core.store.{ChunkSetInfo, ChunkRowSkipIndex}
+import ChunkSetInfo._
 
 /**
  * A trait providing facilities to search through the chunks of a partition, as well as maintain the skiplist
@@ -18,7 +20,7 @@ import filodb.core.store.{ChunkSetInfo, ChunkRowSkipIndex}
  */
 trait PartitionChunkIndex {
   def projection: RichProjection
-  def binPartition: BinaryPartition
+  def binPartition: PartitionKey
 
   /**
    * Adds a ChunkSetInfo and the skips to the index
@@ -31,23 +33,25 @@ trait PartitionChunkIndex {
    * Obtains a sequence of chunks where at least some of the rowkeys inside are within (startKey, endKey)
    * The ordering of the chunks returned depends on implementation.
    */
-  def rowKeyRange(startKey: BinaryRecord, endKey: BinaryRecord): Iterator[(ChunkSetInfo, Array[Int])]
+  def rowKeyRange(startKey: BinaryRecord, endKey: BinaryRecord): Iterator[(ChunkSetInfo, SkipMap)]
 
   /**
    * Returns all chunks in some order which is implementation-specific
    */
-  def allChunks: Iterator[(ChunkSetInfo, Array[Int])]
+  def allChunks: Iterator[(ChunkSetInfo, SkipMap)]
 
   /**
    * Returns the ChunkSetInfo and skips for a single chunk with startKey and id.
    * Depending on implementation, either only the id (which should be unique) or both may be used.
    * @return an iterator with a single item (ChunkSetInfo, skipArray) or empty iterator if not found
    */
-  def singleChunk(startKey: BinaryRecord, id: ChunkID): Iterator[(ChunkSetInfo, Array[Int])]
+  def singleChunk(startKey: BinaryRecord, id: ChunkID): Iterator[(ChunkSetInfo, SkipMap)]
 }
 
 object PartitionChunkIndex {
-  val emptySkips = Array[Int]()
+  val emptySkips = new SkipMap()
+
+  def newSkip(key: java.lang.Long): SkipMap = new SkipMap()
 }
 
 /**
@@ -56,58 +60,63 @@ object PartitionChunkIndex {
 
  * TODO: improve this implementation with binary bit indices such as JavaEWAH.
  */
-class RowkeyPartitionChunkIndex(val binPartition: BinaryPartition, val projection: RichProjection)
+class RowkeyPartitionChunkIndex(val binPartition: PartitionKey, val projection: RichProjection)
 extends PartitionChunkIndex {
   import collection.JavaConverters._
+  import PartitionChunkIndex._
+  import filodb.core._
 
-  val skipRows = new HashMap[ChunkID, TreeSet[Int]].withDefaultValue(TreeSet[Int]())
+  val skipRows = new NonBlockingHashMapLong[SkipMap](64)
   val infos = new java.util.TreeMap[(BinaryRecord, ChunkID), ChunkSetInfo](
                                     Ordering[(BinaryRecord, ChunkID)])
 
   def add(info: ChunkSetInfo, skips: Seq[ChunkRowSkipIndex]): Unit = {
     infos.put((info.firstKey, info.id), info)
-    for { skipIndex <- skips } {
-      skipRows(skipIndex.id) = skipRows(skipIndex.id) ++ skipIndex.overrides
+    for { skip <- skips } {
+      skipRows.put(skip.id, skipRows.getOrElseUpdate(skip.id, newSkip).or(skip.overrides))
     }
   }
 
   def numChunks: Int = infos.size
 
-  def rowKeyRange(startKey: BinaryRecord, endKey: BinaryRecord): Iterator[(ChunkSetInfo, Array[Int])] = {
+  def rowKeyRange(startKey: BinaryRecord, endKey: BinaryRecord): Iterator[(ChunkSetInfo, SkipMap)] = {
     // Exclude chunks which start after the end search range
     infos.headMap((endKey, Long.MaxValue)).values.iterator.asScala.collect {
       case c @ ChunkSetInfo(id, _, k1, k2) if c.intersection(startKey, endKey).isDefined =>
-        (c, skipRows(id).toArray)
+        (c, skipRows.get(id))
     }
   }
 
-  def allChunks: Iterator[(ChunkSetInfo, Array[Int])] =
+  def allChunks: Iterator[(ChunkSetInfo, SkipMap)] =
     infos.values.iterator.asScala.map { info =>
-      (info, skipRows(info.id).toArray)
+      (info, skipRows.get(info.id))
     }
 
-  def singleChunk(startKey: BinaryRecord, id: ChunkID): Iterator[(ChunkSetInfo, Array[Int])] =
+  def singleChunk(startKey: BinaryRecord, id: ChunkID): Iterator[(ChunkSetInfo, SkipMap)] =
     infos.subMap((startKey, id), true, (startKey, id), true).values.iterator.asScala.map { info =>
-      (info, skipRows(info.id).toArray)
+      (info, skipRows.get(info.id))
     }
 }
 
 /**
  * A PartitionChunkIndex which is ordered by increasing ChunkID
  */
-class ChunkIDPartitionChunkIndex(val binPartition: BinaryPartition, val projection: RichProjection)
+class ChunkIDPartitionChunkIndex(val binPartition: PartitionKey, val projection: RichProjection)
 extends PartitionChunkIndex {
   import collection.JavaConverters._
+  import PartitionChunkIndex._
+  import filodb.core._
 
-  val skipRows = new HashMap[ChunkID, TreeSet[Int]].withDefaultValue(TreeSet[Int]())
-  val infosSkips = new java.util.TreeMap[ChunkID, (ChunkSetInfo, Array[Int])]
+  val skipRows = new NonBlockingHashMapLong[SkipMap](64)
+  val infosSkips = new java.util.TreeMap[ChunkID, (ChunkSetInfo, SkipMap)]
 
   def add(info: ChunkSetInfo, skips: Seq[ChunkRowSkipIndex]): Unit = {
-    infosSkips.put(info.id, (info, Array[Int]()))
-    for { skipIndex <- skips } {
-      skipRows(skipIndex.id) = skipRows(skipIndex.id) ++ skipIndex.overrides
-      Option(infosSkips.get(skipIndex.id)) match {
-        case Some((origInfo, _)) => infosSkips.put(skipIndex.id, (origInfo, skipRows(skipIndex.id).toArray))
+    infosSkips.put(info.id, (info, PartitionChunkIndex.emptySkips))
+    for { skip <- skips } {
+      val newSkips = skipRows.getOrElseUpdate(skip.id, newSkip).or(skip.overrides)
+      skipRows.put(skip.id, newSkips)
+      Option(infosSkips.get(skip.id)) match {
+        case Some((origInfo, _)) => infosSkips.put(skip.id, (origInfo, newSkips))
         case None                =>
       }
     }
@@ -115,7 +124,7 @@ extends PartitionChunkIndex {
 
   def numChunks: Int = infosSkips.size
 
-  def rowKeyRange(startKey: BinaryRecord, endKey: BinaryRecord): Iterator[(ChunkSetInfo, Array[Int])] = {
+  def rowKeyRange(startKey: BinaryRecord, endKey: BinaryRecord): Iterator[(ChunkSetInfo, SkipMap)] = {
     // Linear search through all infos to find intersections
     // TODO: use an interval tree to speed this up?
     infosSkips.values.iterator.asScala.filter {
@@ -123,8 +132,8 @@ extends PartitionChunkIndex {
     }
   }
 
-  def allChunks: Iterator[(ChunkSetInfo, Array[Int])] = infosSkips.values.iterator.asScala
+  def allChunks: Iterator[(ChunkSetInfo, SkipMap)] = infosSkips.values.iterator.asScala
 
-  def singleChunk(startKey: BinaryRecord, id: ChunkID): Iterator[(ChunkSetInfo, Array[Int])] =
+  def singleChunk(startKey: BinaryRecord, id: ChunkID): Iterator[(ChunkSetInfo, SkipMap)] =
     infosSkips.subMap(id, true, id, true).values.iterator.asScala
 }

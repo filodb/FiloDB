@@ -124,10 +124,9 @@ extends ColumnStore with CassandraColumnStoreScanner with StrictLogging {
                           segment: ChunkSetSegment,
                           ctx: TraceContext): Future[Response] = {
     asyncSubtrace("write-chunks", "ingestion", Some(ctx)) {
-      val binPartition = segment.binaryPartition
       val chunkTable = getOrCreateChunkTable(dataset)
       Future.traverse(segment.chunkSets) { chunkSet =>
-        chunkTable.writeChunks(binPartition, version, chunkSet.info.id, chunkSet.chunks, stats)
+        chunkTable.writeChunks(segment.partition, version, chunkSet.info.id, chunkSet.chunks, stats)
       }.map { responses => responses.head }
     }
   }
@@ -141,7 +140,7 @@ extends ColumnStore with CassandraColumnStoreScanner with StrictLogging {
       val indices = segment.chunkSets.map { case ChunkSet(info, skips, _, _, _) =>
         (info.id, ChunkSetInfo.toBytes(projection, info, skips))
       }
-      indexTable.writeIndices(segment.binaryPartition, version, indices, stats)
+      indexTable.writeIndices(segment.partition, version, indices, stats)
     }
   }
 
@@ -152,7 +151,7 @@ extends ColumnStore with CassandraColumnStoreScanner with StrictLogging {
     asyncSubtrace("write-filter", "ingestion", Some(ctx)) {
       val filterTable = getOrCreateFilterTable(projection.datasetRef)
       val filters = segment.chunkSets.map { case ChunkSet(info, _, filter, _, _) => (info.id, filter) }
-      filterTable.writeFilters(segment.binaryPartition, version, filters, stats)
+      filterTable.writeFilters(segment.partition, version, filters, stats)
     }
   }
 
@@ -241,7 +240,7 @@ trait CassandraColumnStoreScanner extends ColumnStoreScanner with StrictLogging 
   }
 
   // Produce an empty stream of chunks so that results can still be returned correctly
-  private def emptyChunkStream(infosSkips: Seq[(ChunkSetInfo, Array[Int])], colNo: Int):
+  private def emptyChunkStream(infosSkips: ChunkSetInfo.ChunkInfosAndSkips, colNo: Int):
     Observable[SingleChunkInfo] =
     Observable.fromIterator(infosSkips.toIterator.map { case (info, skips) =>
       //scalastyle:off
@@ -279,8 +278,7 @@ trait CassandraColumnStoreScanner extends ColumnStoreScanner with StrictLogging 
 
   def readFilters(dataset: DatasetRef,
                   version: Int,
-                  partition: Types.BinaryPartition,
-                  segment: Types.SegmentId,
+                  partition: Types.PartitionKey,
                   chunkRange: (Types.ChunkID, Types.ChunkID))
                  (implicit ec: ExecutionContext): Future[Iterator[SegmentState.IDAndFilter]] = {
     val filterTable = getOrCreateFilterTable(dataset)
@@ -288,13 +286,12 @@ trait CassandraColumnStoreScanner extends ColumnStoreScanner with StrictLogging 
   }
 
   def multiPartScan(projection: RichProjection,
-                    partitions: Seq[Any],
+                    partitions: Seq[Types.PartitionKey],
                     indexTable: IndexTable,
                     version: Int): Observable[IndexRecord] = {
     // Get each partition index observable concurrently.  As observables they are lazy
     val its = partitions.map { partition =>
-      val binPart = projection.partitionType.toBytes(partition.asInstanceOf[projection.PK])
-      indexTable.getIndices(binPart, version)
+      indexTable.getIndices(partition, version)
     }
     Observable.concat(its :_*)
   }
@@ -306,8 +303,7 @@ trait CassandraColumnStoreScanner extends ColumnStoreScanner with StrictLogging 
     logger.debug(s"Scanning partitions for ${projection.datasetRef} with method $partMethod...")
     val (filterFunc, indexRecords) = partMethod match {
       case SinglePartitionScan(partition) =>
-        val binPart = projection.partitionType.toBytes(partition.asInstanceOf[projection.PK])
-        ((x: Any) => true, indexTable.getIndices(binPart, version))
+        ((x: Any) => true, indexTable.getIndices(partition, version))
 
       case MultiPartitionScan(partitions) =>
         ((x: Any) => true, multiPartScan(projection, partitions, indexTable, version))
@@ -317,9 +313,8 @@ trait CassandraColumnStoreScanner extends ColumnStoreScanner with StrictLogging 
 
       case other: PartitionScanMethod =>  ???
     }
-    indexRecords.sortedGroupBy(_.binPartition)
-                .collect { case (binPart, binIndices)
-                           if filterFunc(projection.partitionType.fromBytes(binPart)) =>
+    indexRecords.sortedGroupBy(_.partition(projection))
+                .collect { case (binPart, binIndices) if filterFunc(binPart) =>
                   val newIndex = new ChunkIDPartitionChunkIndex(binPart, projection)
                   binIndices.foreach { binIndex =>
                     val (info, skips) = ChunkSetInfo.fromBytes(projection, binIndex.data.array)

@@ -45,7 +45,7 @@ class BinaryRecordSpec extends FunSpec with Matchers {
     val binRec5 = BinaryRecord(schema3_bdt, reader3)
     binRec5.getBoolean(0) should equal (true)
     binRec5.getDouble(1) should equal (5.7)
-    binRec5.as[Timestamp](2) should equal (new Timestamp(1000000L))
+    binRec5.getLong(2) should equal (1000000L)
     binRec5.noneNull should equal (true)
   }
 
@@ -71,7 +71,7 @@ class BinaryRecordSpec extends FunSpec with Matchers {
     val binRec = BinaryRecord(schema3_bdt, bytes)
     binRec.getBoolean(0) should equal (true)
     binRec.getDouble(1) should equal (5.7)
-    binRec.as[Timestamp](2) should equal (new Timestamp(1000000L))
+    binRec.getLong(2) should equal (1000000L)
   }
 
   it("should generate same hashcode for different instances of the same RecordSchema") {
@@ -98,6 +98,8 @@ class BinaryRecordSpec extends FunSpec with Matchers {
     BinaryRecord(projection2, Seq("FRA")) should equal (rec1)
     BinaryRecord(projection2, Seq("GA")) should be > (rec1)
   }
+
+  it("should semantically compare BinaryRecord Int and Long fields correctly") (pending)
 
   it("should produce sortable ByteArrays from BinaryRecords") {
     val binRec1 = BinaryRecord(schema2_is, reader2)

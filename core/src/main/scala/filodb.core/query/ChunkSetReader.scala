@@ -1,79 +1,92 @@
 package filodb.core.query
 
+import com.googlecode.javaewah.EWAHCompressedBitmap
 import java.nio.ByteBuffer
 import org.velvia.filo._
 import scala.collection.mutable.BitSet
 
 import filodb.core.binaryrecord.{BinaryRecord, RecordSchema}
 import filodb.core.metadata.Column
+import filodb.core.metadata.Column.ColumnType
 import filodb.core.store.{ChunkSet, ChunkSetInfo}
 import filodb.core.Types.ColumnId
 
 /**
  * ChunkSetReader aggregates incoming chunks during query/read time and provides an Iterator[RowReader]
  * for iterating through the chunkset row-wise, or individual chunks can also be accessed.
+ * It creates the FiloVectors once, when chunks are added, so that repeated gets of the Iterator avoid
+ * the parsing and allocation overhead.
  *
  * TODO: create readers for the chunks as they come in, instead of when rowIterator is called
  */
-class ChunkSetReader(val info: ChunkSetInfo, skips: Array[Int], classes: Array[Class[_]]) {
+class ChunkSetReader(val info: ChunkSetInfo,
+                     skips: EWAHCompressedBitmap,
+                     makers: Array[ChunkSetReader.VectorFactory]) {
   import ChunkSetReader._
 
-  private final val bufs = new Array[ByteBuffer](classes.size)
   private final val len = info.numRows
   private final val bitset = new BitSet
+  private final val parsers = new Array[FiloVector[_]](makers.size)
 
-  def addChunk(colNo: Int, bytes: ByteBuffer): Unit = {
-    bufs(colNo) = bytes
+  skips.setSizeInBits(len, false)
+
+  final def addChunk(colNo: Int, bytes: ByteBuffer): Unit = {
+    parsers(colNo) = makers(colNo)(bytes, len)
     bitset += colNo
   }
 
-  def chunks: Array[ByteBuffer] = bufs
+  def vectors: Array[FiloVector[_]] = parsers
 
-  def isFull: Boolean = bitset.size >= bufs.size
+  final def isFull: Boolean = bitset.size >= parsers.size
 
   /**
    * Iterates over rows in this chunkset, skipping over any rows defined in skiplist.
    * Creates new RowReaders every time, so that multiple calls could be made.
    */
-  def rowIterator(readerFactory: RowReaderFactory = DefaultReaderFactory): Iterator[RowReader] = {
-    val reader = readerFactory(bufs, classes, len)
-    new Iterator[RowReader] {
-      private var i = 0
-      private var skipIndex = 0
-
-      final def hasNext: Boolean = {
-        var skipped = false
-        // Keep advancing until we hit a row we are not skipping
-        do {
-          // advance one row
-          if (i >= len) { return false }
-
-          // skip?  If so, go to next skip index
-          skipped = skipIndex < skips.size && i == skips(skipIndex)
-          if (skipped) { skipIndex += 1; i += 1 }
-        } while (skipped)
-        true
+  final def rowIterator(readerFactory: RowReaderFactory = DefaultReaderFactory): Iterator[RowReader] = {
+    val reader = readerFactory(parsers)
+    if (skips.isEmpty) {
+      // This simplified iterator is MUCH faster than the skip-checking one
+      new Iterator[RowReader] {
+        private var i = 0
+        final def hasNext: Boolean = i < len
+        final def next: RowReader = {
+          reader.setRowNo(i)
+          i += 1
+          reader
+        }
       }
-
-      final def next: RowReader = {
-        reader.setRowNo(i)
-        i += 1
-        reader
+    } else {
+      new Iterator[RowReader] {
+        private final val rowNumIterator = skips.clearIntIterator()
+        final def hasNext: Boolean = rowNumIterator.hasNext
+        final def next: RowReader = {
+          reader.setRowNo(rowNumIterator.next)
+          reader
+        }
       }
     }
   }
 }
 
 object ChunkSetReader {
-  type RowReaderFactory = (Array[ByteBuffer], Array[Class[_]], Int) => FiloRowReader
+  import PartitionChunkIndex.emptySkips
 
-  val DefaultReaderFactory: RowReaderFactory =
-    (bytes, clazzes, len) => new FastFiloRowReader(bytes, clazzes, len)
+  type VectorFactory = (ByteBuffer, Int) => FiloVector[_]
+  type RowReaderFactory = Array[FiloVector[_]] => FiloRowReader
 
-  def apply(chunkSet: ChunkSet, schema: Seq[Column]): ChunkSetReader = {
-    val clazzes = schema.map(_.columnType.clazz).toArray
+  val DefaultReaderFactory: RowReaderFactory = (vectors) => new FastFiloRowReader(vectors)
+
+  type ColumnToMaker = Column => VectorFactory
+  val defaultColumnToMaker: ColumnToMaker =
+    (col: Column) => FiloVector.defaultVectorMaker(col.columnType.clazz)
+
+  def apply(chunkSet: ChunkSet,
+            schema: Seq[Column],
+            skips: EWAHCompressedBitmap = emptySkips): ChunkSetReader = {
     val nameToPos = schema.zipWithIndex.map { case (c, i) => (c.name -> i) }.toMap
-    val reader = new ChunkSetReader(chunkSet.info, Array[Int](), clazzes)
+    val makers = schema.map(defaultColumnToMaker).toArray
+    val reader = new ChunkSetReader(chunkSet.info, skips, makers)
     chunkSet.chunks.foreach { case (colName, bytes) => reader.addChunk(nameToPos(colName), bytes) }
     reader
   }

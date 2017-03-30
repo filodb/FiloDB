@@ -172,4 +172,8 @@ object FiloExecutor extends FiloSetup with StrictLogging {
     }
     return true
   }
+
+  def init(confStr: String): Unit = if (_config.isEmpty) {
+    init(ConfigFactory.parseString(confStr))
+  }
 }

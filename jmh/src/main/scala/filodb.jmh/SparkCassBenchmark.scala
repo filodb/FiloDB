@@ -16,7 +16,7 @@ import scalaxy.loops._
 import filodb.core._
 import filodb.core.metadata.{Column, Dataset, RichProjection}
 import filodb.core.store.InMemoryColumnStore
-import filodb.spark.{SparkRowReader, TypeConverters, FiloDriver}
+import filodb.spark.{SparkRowReader, FiloDriver, FiloExecutor, TypeConverters}
 
 // Spark CassandraColumnStore benchmark
 // NOTE: before running this test, MUST do sbt jmh/run on CreateCassTestData to populate
@@ -28,10 +28,11 @@ class SparkCassBenchmark {
   // Now create an RDD[Row] out of it, and a Schema, -> DataFrame
   val sess = SparkSession.builder.master("local[4]")
                                  .appName("test")
-                                 // .config("spark.sql.tungsten.enabled", "false")
+                                 .config("spark.ui.enabled", "false")
                                  .config("spark.filodb.cassandra.keyspace", "filodb")
                                  .getOrCreate
   val sc = sess.sparkContext
+
   // Below is to make sure that Filo actor system stuff is run before test code
   // so test code is not hit with unnecessary slowdown
   val filoConfig = FiloDriver.initAndGetConfig(sc)
@@ -39,6 +40,7 @@ class SparkCassBenchmark {
   @TearDown
   def shutdownFiloActors(): Unit = {
     FiloDriver.shutdown()
+    FiloExecutor.shutdown()
     sc.stop()
   }
 

@@ -1,12 +1,14 @@
 package filodb.jmh
 
 import ch.qos.logback.classic.{Level, Logger}
+import com.googlecode.javaewah.EWAHCompressedBitmap
 import org.openjdk.jmh.annotations.Benchmark
 import org.openjdk.jmh.annotations.BenchmarkMode
-import org.openjdk.jmh.annotations.{Mode, State, Scope}
 import org.openjdk.jmh.annotations.OutputTimeUnit
-import scalaxy.loops._
+import org.openjdk.jmh.annotations.{Mode, State, Scope}
 import scala.language.postfixOps
+import scala.util.Random
+import scalaxy.loops._
 
 import filodb.core._
 import filodb.core.metadata.{Column, DataColumn, Dataset, RichProjection}
@@ -43,6 +45,10 @@ class IntSumReadBenchmark {
   val chunkSet = ChunkSet(state, rowIt.map(TupleRowReader).take(NumRows))
   val reader = ChunkSetReader(chunkSet, schema)
 
+  val NumSkips = 300  // 3% skips - not that much really
+  val skips = (0 until NumSkips).map { i => Random.nextInt(NumRows) }.sorted.distinct
+  val readerWithSkips = ChunkSetReader(chunkSet, schema, EWAHCompressedBitmap.bitmapOf(skips :_*))
+
   /**
    * Simulation of a columnar query engine scanning the segment chunks columnar wise
    */
@@ -50,7 +56,7 @@ class IntSumReadBenchmark {
   @BenchmarkMode(Array(Mode.Throughput))
   @OutputTimeUnit(TimeUnit.SECONDS)
   def columnarChunkScan(): Int = {
-    val intVector = FiloVector[Int](reader.chunks(0))
+    val intVector = reader.vectors(0).asInstanceOf[FiloVector[Int]]
     var total = 0
     for { i <- 0 until NumRows optimized } {
       total += intVector(i)
@@ -59,7 +65,7 @@ class IntSumReadBenchmark {
   }
 
   /**
-   * Simulation of ideal row-wise scanning speed with no boxing (Spark 1.5+ w Tungsten?)
+   * Simulation of ideal row-wise scanning speed with no boxing (Spark 1.5+ w Tungsten?) and no rows to skip
    */
   @Benchmark
   @BenchmarkMode(Array(Mode.Throughput))
@@ -81,6 +87,22 @@ class IntSumReadBenchmark {
   @OutputTimeUnit(TimeUnit.SECONDS)
   def rowWiseChunkScanNullCheck(): Int = {
     val it = reader.rowIterator()
+    var sum = 0
+    while(it.hasNext) {
+      val row = it.next
+      if (row.notNull(0)) sum += row.getInt(0)
+    }
+    sum
+  }
+
+  /**
+   * Row-wise scanning with null/isAvailable check and rows to skip
+   */
+  @Benchmark
+  @BenchmarkMode(Array(Mode.Throughput))
+  @OutputTimeUnit(TimeUnit.SECONDS)
+  def rowWiseChunkScanNullWithSkips(): Int = {
+    val it = readerWithSkips.rowIterator()
     var sum = 0
     while(it.hasNext) {
       val row = it.next

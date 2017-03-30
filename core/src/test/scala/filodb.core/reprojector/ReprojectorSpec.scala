@@ -2,6 +2,7 @@ package filodb.core.reprojector
 
 import com.typesafe.config.ConfigFactory
 import org.scalatest.time.{Millis, Seconds, Span}
+import org.velvia.filo.ZeroCopyUTF8String
 
 import filodb.core._
 import filodb.core.metadata.{Dataset, Column, DataColumn, Projection, RichProjection}
@@ -29,8 +30,8 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
   val reprojector = new DefaultReprojector(config, colStore, stateCache)
   val memTable = new FiloMemTable(projection, config, "localhost", 0)
 
-  val partScan = SinglePartitionScan("/0")
-  val segInfo = SegmentInfo("/0", 0).basedOn(projection)
+  val partScan = SinglePartitionScan(defaultPartKey)
+  val segInfo = SegmentInfo(defaultPartKey, 0).basedOn(projection)
 
   override def beforeAll(): Unit = {
     super.beforeAll()
@@ -50,13 +51,13 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
     val reprojectedSegInfos = reprojector.reproject(memTable, 0).futureValue
 
     reprojectedSegInfos should have length (1)
-    reprojectedSegInfos.head.segment should equal (0)
+    reprojectedSegInfos.head.segment should equal ("")
 
     val segState = stateCache.getSegmentState(projection, schema, 0)(segInfo)
     segState.numChunks should equal (1)
 
     val rowIter = colStore.scanRows(projection, schema, 0, partScan)
-    rowIter.map(_.getString(0)).toSeq should equal (sortedFirstNames)
+    rowIter.map(_.filoUTF8String(0)).toSeq should equal (sortedUtf8Firsts)
   }
 
   val gdeltMemTable = new FiloMemTable(GdeltTestData.projection3, config, "localhost", 0)

@@ -1,6 +1,7 @@
 package filodb.cli
 
 import java.io.OutputStream
+import java.sql.Timestamp
 import javax.activation.UnsupportedDataTypeException
 
 import akka.actor.ActorSystem
@@ -239,7 +240,9 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
         case IntColumn => rowReader.getInt(position).toString
         case LongColumn => rowReader.getLong(position).toString
         case DoubleColumn => rowReader.getDouble(position).toString
-        case StringColumn => rowReader.getString(position)
+        case StringColumn => rowReader.filoUTF8String(position).toString
+        case BitmapColumn => rowReader.getBoolean(position).toString
+        case TimestampColumn => rowReader.as[Timestamp](position).toString
         case _ => throw new UnsupportedDataTypeException
       }
       content.update(position,value)

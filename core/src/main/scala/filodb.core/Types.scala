@@ -5,6 +5,7 @@ import scalaxy.loops._
 import scodec.bits.ByteVector
 
 import filodb.core.metadata.RichProjection
+import filodb.core.binaryrecord.BinaryRecord
 
 /**
  * Temporary home for new FiloDB API definitions, including column store and memtable etc.
@@ -20,7 +21,7 @@ object Types {
   type ColumnId = String
   type ChunkID = Long     // Each chunk is identified by segmentID and a long timestamp
 
-  type BinaryPartition = ByteVector
+  type PartitionKey = BinaryRecord
 
   // TODO: contribute this Ordering back to ByteVector
   // Assumes unsigned comparison, big endian, meaning that the first byte in a vector
@@ -43,23 +44,3 @@ case class DatasetRef(dataset: String, database: Option[String] = None) {
   override def toString: String =
     database.map { db => s"$db.$dataset" }.getOrElse(dataset)
 }
-
-// A range of keys, used for describing ingest rows as well as queries
-// Right now this describes a range of segments, not row keys.
-case class KeyRange[PK, SK](partition: PK,
-                            start: SK, end: SK,
-                            endExclusive: Boolean = true) {
-  def basedOn(projection: RichProjection): KeyRange[projection.PK, projection.SK] =
-    this.asInstanceOf[KeyRange[projection.PK, projection.SK]]
-}
-
-case class BinaryKeyRange(partition: Types.BinaryPartition,
-                          start: Types.SegmentId, end: Types.SegmentId,
-                          endExclusive: Boolean = true)
-
-case class SegmentRange[SK](start: SK, end: SK) {
-  def basedOn(projection: RichProjection): SegmentRange[projection.SK] =
-    this.asInstanceOf[SegmentRange[projection.SK]]
-}
-
-case class BinarySegmentRange(start: Types.SegmentId, end: Types.SegmentId)

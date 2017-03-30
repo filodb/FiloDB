@@ -23,7 +23,7 @@
   "cells" : [ {
     "metadata" : { },
     "cell_type" : "markdown",
-    "source" : "## Querying the GDELT dataset using FiloDB\n1. Start Cassandra\n2. Ingest the GDELT dataset, according to the [FiloDB README](https://github.com/tuplejump/FiloDB#spark-data-source-api-example-spark-shell) \n\nNote that the GDELT dataset is partitioned by YearMonth."
+    "source" : "## Querying the GDELT dataset using FiloDB\n1. Start Cassandra\n2. Ingest the GDELT dataset, according to the [FiloDB README](https://github.com/filodb/FiloDB#spark-data-source-api-example-spark-shell) \n\nNote that the GDELT dataset is partitioned by YearMonth."
   }, {
     "metadata" : {
       "trusted" : true,

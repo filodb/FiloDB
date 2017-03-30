@@ -1,6 +1,7 @@
 package filodb
 
 import com.googlecode.concurrentlinkedhashmap.ConcurrentLinkedHashMap
+import java.util.concurrent.ConcurrentMap
 import scala.language.implicitConversions
 
 package object core {
@@ -8,7 +9,7 @@ package object core {
 
   import SingleKeyTypes._
 
-  implicit class RichCLHM[K, V](orig: ConcurrentLinkedHashMap[K, V]) {
+  implicit class RichCMap[K, V](orig: ConcurrentMap[K, V]) {
     import java.util.function.{Function => JFunction}
 
     implicit def scalaFuncToJavaFunc[T, R](func1: Function[T, R]): JFunction[T, R] =

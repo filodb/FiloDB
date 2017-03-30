@@ -3,8 +3,9 @@ package filodb.core.reprojector
 import com.typesafe.config.ConfigFactory
 import org.velvia.filo.TupleRowReader
 
-import filodb.core.NamesTestData
+import filodb.core.binaryrecord.{BinaryRecord, RecordSchema}
 import filodb.core.metadata.{Column, Dataset}
+import filodb.core.NamesTestData
 import filodb.core.store.SegmentSpec
 
 import org.scalatest.{FunSpec, Matchers, BeforeAndAfter}
@@ -28,6 +29,9 @@ class MemTableMemoryTest extends FunSpec with Matchers with BeforeAndAfter {
     names.map { t => (t._1, t._2, t._3, t._4, Some(partNum.toString)) }.toIterator
   }
 
+  val binSchema = RecordSchema(schema)
+  val records = lotsOfNames.map(r => BinaryRecord(binSchema, TupleRowReader(r)))
+
   private def printDetailedMemUsage(): Unit = {
     val mxBean = java.lang.management.ManagementFactory.getMemoryMXBean
     //noinspection ScalaStyle
@@ -43,7 +47,7 @@ class MemTableMemoryTest extends FunSpec with Matchers with BeforeAndAfter {
     printDetailedMemUsage()
 
     var numRows = 0
-    lotsOfNames.map(TupleRowReader).grouped(2000).foreach { rows =>
+    records.grouped(2000).foreach { rows =>
       mTable.ingestRows(rows.toSeq)
       numRows += rows.length
       // println(s"Ingested $numRows rows")

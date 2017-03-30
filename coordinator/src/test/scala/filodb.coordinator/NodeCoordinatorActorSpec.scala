@@ -172,7 +172,7 @@ with CoordinatorSetup with ScalaFutures {
     probe.expectMsg(DatasetCoordinatorActor.Stats(1, 1, 0, 0, -1, 99L))
 
     // Now, read stuff back from the column store and check that it's all there
-    val scanMethod = SinglePartitionScan(Seq("GOV", 1979))
+    val scanMethod = SinglePartitionScan(projection3.partKey("GOV", 1979))
     val chunks = columnStore.scanChunks(projection3, schema, 0, scanMethod).toSeq
     chunks should have length (1)
     chunks.head.rowIterator().map(_.getInt(6)).sum should equal (80)

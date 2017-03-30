@@ -4,10 +4,8 @@ import com.typesafe.scalalogging.slf4j.StrictLogging
 import org.velvia.filo.RowReader
 import scala.collection.mutable.HashMap
 
-import filodb.core.KeyRange
 import filodb.core.Types._
 import filodb.core.metadata.{Column, Dataset, RichProjection}
-import filodb.core.store.SegmentInfo
 
 /**
  * The MemTable serves these purposes:
@@ -46,21 +44,17 @@ trait MemTable extends StrictLogging {
   def reloadMemTable(): Unit
 
   /**
-   * Reads rows out from one segment.
-   * readRows is an unsafe read - it uses a fast FiloRowReader with mutable state so cannot be used in Seqs
-   * but only Iterators.  safeReadRows is safe for use in Seqs but slower.
+   * Reads rows out from one partition.
    */
-  def readRows(partition: projection.PK, segment: projection.SK): Iterator[RowReader]
+  def readRows(partition: PartitionKey): Iterator[RowReader]
 
-  def readRows(segInfo: SegmentInfo[projection.PK, projection.SK]): Iterator[RowReader] =
-    readRows(segInfo.partition, segInfo.segment)
-
-  def safeReadRows(segInfo: SegmentInfo[projection.PK, projection.SK]): Iterator[RowReader]
+  // TODO: remove distinction between safeReadRows and readRows
+  def safeReadRows(partition: PartitionKey): Iterator[RowReader]
 
   /**
-   * Reads all segments contained in the MemTable.  No particular order is guaranteed.
+   * Reads all partitions contained in the MemTable.  No particular order is guaranteed.
    */
-  def getSegments(): Iterator[(projection.PK, projection.SK)]
+  def partitions: Iterator[PartitionKey]
 
   def numRows: Int
 

@@ -78,7 +78,7 @@ with ScalaFutures {
     probe.expectMsg(IngestionCommands.Ack(0L))
   }
 
-  val dummySegInfo = SegmentInfo("Success", 0)
+  val dummySegInfo = SegmentInfo(myProjection.partKey("Success"), 0)
 
   val testReprojector = new Reprojector {
     import filodb.core.store.Segment
@@ -88,7 +88,9 @@ with ScalaFutures {
       Future.successful(Seq(dummySegInfo))
     }
 
-    def toSegments(memTable: MemTable, segments: Seq[(Any, Any)], version: Int): Seq[ChunkSetSegment] = ???
+    def toSegments(memTable: MemTable,
+                   partitions: Seq[Types.PartitionKey],
+                   version: Int): Seq[ChunkSetSegment] = ???
   }
 
   it("should respond to GetStats with no flushes and no rows") {

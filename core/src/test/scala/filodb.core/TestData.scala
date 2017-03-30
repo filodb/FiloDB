@@ -4,16 +4,18 @@ import bloomfilter.mutable.BloomFilter
 import java.nio.ByteBuffer
 import java.sql.Timestamp
 import org.joda.time.DateTime
-import org.velvia.filo.{RowReader, TupleRowReader, ArrayStringRowReader, SeqRowReader}
+import org.velvia.filo.{FiloVector, RowReader, TupleRowReader, ArrayStringRowReader, SeqRowReader}
+import org.velvia.filo.ZeroCopyUTF8String._
 import scala.io.Source
 import scala.concurrent.ExecutionContext
 import scala.concurrent.duration._
 
 import filodb.core._
-import filodb.core.binaryrecord.BinaryRecord
+import filodb.core.binaryrecord.{BinaryRecord, RecordSchema}
 import filodb.core.metadata.{Column, DataColumn, Dataset, RichProjection}
-import filodb.core.query.{PartitionChunkIndex, RowkeyPartitionChunkIndex}
+import filodb.core.query.{ChunkSetReader, PartitionChunkIndex, RowkeyPartitionChunkIndex}
 import filodb.core.store._
+import filodb.core.Types.PartitionKey
 
 class TestSegmentState(projection: RichProjection,
                        index: PartitionChunkIndex,
@@ -23,18 +25,19 @@ extends SegmentState(projection, index, schema, settings) {
 
   def this(projection: RichProjection,
            schema: Seq[Column],
-           partition: Any = "/0",
+           partition: PartitionKey = NamesTestData.defaultPartKey,
            settings: SegmentStateSettings = SegmentStateSettings()) =
     this(projection,
-         new RowkeyPartitionChunkIndex(projection.partitionType.toBytes(
-                                         partition.asInstanceOf[projection.PK]), projection),
+         new RowkeyPartitionChunkIndex(partition, projection),
          schema,
          settings)
 
+  val makers = projection.rowKeyColumns.map(ChunkSetReader.defaultColumnToMaker).toArray
+
   val rowKeyChunks = new collection.mutable.HashMap[(BinaryRecord, Types.ChunkID), Array[ByteBuffer]]
 
-  def getRowKeyChunks(key: BinaryRecord, chunkId: Types.ChunkID): Array[ByteBuffer] =
-    rowKeyChunks((key, chunkId))
+  def getRowKeyVectors(key: BinaryRecord, chunkId: Types.ChunkID): Array[FiloVector[_]] =
+    rowKeyChunks((key, chunkId)).zip(makers).map { case (buf, maker) => maker(buf, 5000) }
 
   def store(chunkSet: ChunkSet): Unit = {
     val rowKeyColNames = projection.rowKeyColumns.map(_.name)
@@ -77,16 +80,20 @@ object NamesTestData {
   val lastKey = BinaryRecord(projection, Seq(names.last._3.get))
   def keyForName(rowNo: Int): BinaryRecord = BinaryRecord(projection, Seq(names(rowNo)._3.getOrElse(0)))
 
+  val defaultPartKey = BinaryRecord(projection.partKeyBinSchema, SeqRowReader(Seq("/0")))
+
   val stateSettings = SegmentStateSettings()
   val emptyFilter = SegmentState.emptyFilter(stateSettings)
 
   def getState(segment: Int = 0): TestSegmentState = new TestSegmentState(projection, schema)
 
   def getWriterSegment(segment: Int = 0): ChunkSetSegment =
-    new ChunkSetSegment(projection, SegmentInfo("/0", segment).basedOn(projection))
+    new ChunkSetSegment(projection, SegmentInfo(defaultPartKey, segment).basedOn(projection))
 
   val firstNames = names.map(_._1.get)
+  val utf8FirstNames = firstNames.map(_.utf8)
   val sortedFirstNames = Seq("Khalil", "Rodney", "Ndamukong", "Terrance", "Peyton", "Jerry")
+  val sortedUtf8Firsts = sortedFirstNames.map(_.utf8)
 
   // OK, what we want is to test multiple partitions, segments, multiple chunks per segment too.
   // With default segmentSize of 10000, change chunkSize to say 100.
@@ -141,13 +148,14 @@ object GdeltTestData {
                    DataColumn(5, "Actor2Name",    "gdelt", 0, Column.ColumnType.StringColumn),
                    DataColumn(6, "NumArticles",   "gdelt", 0, Column.ColumnType.IntColumn),
                    DataColumn(7, "AvgTone",       "gdelt", 0, Column.ColumnType.DoubleColumn))
+  val binSchema = RecordSchema(schema)
 
-  case class GdeltRecord(eventId: Int, sqlDate: Timestamp, monthYear: Int, year: Int,
+  case class GdeltRecord(eventId: Int, sqlDate: Long, monthYear: Int, year: Int,
                          actor2Code: String, actor2Name: String, numArticles: Int, avgTone: Double)
 
   val records = gdeltLines.map { line =>
     val parts = line.split(',')
-    GdeltRecord(parts(0).toInt, new Timestamp(DateTime.parse(parts(1)).getMillis),
+    GdeltRecord(parts(0).toInt, DateTime.parse(parts(1)).getMillis,
                 parts(2).toInt, parts(3).toInt,
                 parts(4), parts(5), parts(6).toInt, parts(7).toDouble)
   }
@@ -173,23 +181,23 @@ object GdeltTestData {
   val dataset4 = Dataset("gdelt", Seq("Actor2Code", "GLOBALEVENTID"), ":string 0", Seq("Year"))
   val projection4 = RichProjection(dataset4, schema)
 
-  // Returns projection2 grouped by segment with a fake partition key
-  def getSegments(partKey: projection2.PK): Seq[(ChunkSetSegment, Seq[RowReader])] = {
-    val inputGroupedBySeg = readers.toSeq.groupBy(projection2.segmentKeyFunc)
-                                   .toSeq.sortBy(_._1.asInstanceOf[Int])
-    inputGroupedBySeg.map { case (segmentKey, lines) =>
-      val segInfo = SegmentInfo(partKey, segmentKey).basedOn(projection2)
-      val seg = new ChunkSetSegment(projection2, segInfo)
-      (seg, lines)
-    }
+  // Dataset 5: partition :monthYear SQLDATE, rowkey (Actor2Code, GLOBALEVENTID)
+  // to test timestamp processing
+  val dataset5 = Dataset("gdelt", Seq("Actor2Code", "GLOBALEVENTID"), ":string 0",
+                                  Seq(":monthOfYear SQLDATE"))
+  val projection5 = RichProjection(dataset5, schema)
+
+  def getSegments(partKey: PartitionKey): Seq[(ChunkSetSegment, Seq[RowReader])] = {
+    val segInfo = SegmentInfo(partKey, "").basedOn(projection2)
+    val seg = new ChunkSetSegment(projection2, segInfo)
+    Seq((seg, readers.toBuffer))
   }
 
-  // Returns projection1 or 2 segments grouped by partition and segment key
+  // Returns projection1 or 2 segments grouped by partition
   def getSegmentsByPartKey(projection: RichProjection): Seq[(ChunkSetSegment, Seq[RowReader])] = {
-    val inputGroupedBySeg = readers.toSeq.groupBy(r => (projection.partitionKeyFunc(r),
-                                                        projection.segmentKeyFunc(r)))
-    inputGroupedBySeg.map { case ((partKey, segKey), lines) =>
-      val segInfo = SegmentInfo(partKey, segKey).basedOn(projection)
+    val inputGroupedBySeg = readers.toSeq.groupBy(projection.partitionKeyFunc)
+    inputGroupedBySeg.map { case (partKey, lines) =>
+      val segInfo = SegmentInfo(partKey, "").basedOn(projection)
       val seg = new ChunkSetSegment(projection, segInfo)
       (seg, lines)
     }.toSeq
