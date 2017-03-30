@@ -10,8 +10,8 @@ import scala.concurrent.{Await, Future}
 import scala.concurrent.duration._
 import filodb.core._
 import filodb.core.binaryrecord.RecordSchema
+import filodb.core.memstore.MemStore
 import filodb.core.metadata.{Column, DataColumn, Dataset, Projection, RichProjection}
-import filodb.core.reprojector.Reprojector
 import filodb.core.store.{ColumnStore, MetaStore}
 import filodb.core.Types._
 
@@ -45,10 +45,10 @@ object NodeCoordinatorActor {
     (columns.toSet -- schema.keys)
 
   def props(metaStore: MetaStore,
-            reprojector: Reprojector,
+            memStore: MemStore,
             columnStore: ColumnStore,
             config: Config): Props =
-    Props(classOf[NodeCoordinatorActor], metaStore, reprojector, columnStore, config)
+    Props(classOf[NodeCoordinatorActor], metaStore, memStore, columnStore, config)
 }
 
 /**
@@ -57,7 +57,7 @@ object NodeCoordinatorActor {
  * }}}
  */
 class NodeCoordinatorActor(metaStore: MetaStore,
-                           reprojector: Reprojector,
+                           memStore: MemStore,
                            columnStore: ColumnStore,
                            config: Config) extends BaseActor {
   import NodeCoordinatorActor._
@@ -139,7 +139,7 @@ class NodeCoordinatorActor(metaStore: MetaStore,
     def notify(msg: Any): Unit = { self ! DatasetCreateNotify(dataset, version, msg) }
 
     def createDatasetCoordActor(datasetObj: Dataset, richProj: RichProjection): Unit = {
-      val props = DatasetCoordinatorActor.props(richProj, version, columnStore, reprojector, config, reloadFlag)
+      val props = MemStoreCoordActor.props(richProj, memStore)
       val ref = context.actorOf(props, s"ds-coord-${datasetObj.name}-$version")
       self ! AddDatasetCoord(originator, dataset, version, ref, reloadFlag)
       if (!reloadFlag) {
@@ -249,14 +249,14 @@ class NodeCoordinatorActor(metaStore: MetaStore,
       dsCoordinators.clear()
       dsCoordNotify.clear()
       columnStore.reset()
-      reprojector.clear()
+      memStore.reset()
 
     case ClearState(ref, version) =>
       dsCoordinators.get((ref, version)).foreach(_ ! PoisonPill)
       dsCoordinators.remove((ref, version))
       dsCoordNotify.remove((ref, version))
       // This is a bit heavy handed, it clears out the entire cache, not just for all datasets
-      reprojector.clear()
+      memStore.reset()
 
     case AddDatasetCoord(originator, dataset, version, dsCoordRef, reloadFlag) =>
       dsCoordinators((dataset, version)) = dsCoordRef

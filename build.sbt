@@ -90,11 +90,13 @@ lazy val commonDeps = Seq(
   "org.scalatest"        %% "scalatest"         % "2.2.4" % "test"
 )
 
+lazy val scalaxyDep = "com.nativelibs4java"  %% "scalaxy-loops"     % "0.3.3" % "provided"
+
 lazy val coreDeps = commonDeps ++ Seq(
   "com.typesafe.scala-logging" %% "scala-logging-slf4j" % "2.1.2",
   "org.slf4j"             % "slf4j-api"         % "1.7.10",
   "com.beachape"         %% "enumeratum"        % "1.2.1",
-  "org.velvia.filo"      %% "filo-scala"        % "0.3.2",
+  "org.velvia.filo"      %% "filo-scala"        % "0.3.4-SNAPSHOT",
   "io.monix"             %% "monix"             % "2.1.1",
   "joda-time"             % "joda-time"         % "2.2",
   "org.joda"              % "joda-convert"      % "1.2",
@@ -107,7 +109,7 @@ lazy val coreDeps = commonDeps ++ Seq(
   "com.github.rholder.fauxflake" % "fauxflake-core" % "1.1.0",
   "org.scalactic"        %% "scalactic"         % "2.2.6",
   "com.markatta"         %% "futiles"           % "1.1.3",
-  "com.nativelibs4java"  %% "scalaxy-loops"     % "0.3.3" % "provided",
+  scalaxyDep,
   "com.github.scala-incubator.io" %% "scala-io-file" % "0.4.2" % "test"
 )
 
@@ -143,13 +145,14 @@ lazy val sparkDeps = Seq(
 )
 
 lazy val jmhDeps = Seq(
-  "com.nativelibs4java"  %% "scalaxy-loops"     % "0.3.3" % "provided",
+  scalaxyDep,
   "org.apache.spark"     %% "spark-sql"         % sparkVersion excludeAll(
                                                     excludeSlf4jLog4j, excludeZK, excludeJersey)
 )
 
 lazy val stressDeps = Seq(
   "com.databricks"       %% "spark-csv"         % "1.3.0",
+  scalaxyDep,
   "org.apache.spark"     %% "spark-sql"         % sparkVersion % "provided" excludeAll(excludeZK),
   "org.apache.spark"     %% "spark-streaming"   % sparkVersion % "provided" excludeAll(excludeZK)
 )

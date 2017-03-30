@@ -13,12 +13,12 @@ import scala.concurrent.duration._
 import filodb.core._
 import filodb.core.binaryrecord.{BinaryRecord, RecordSchema}
 import filodb.core.metadata.{Column, DataColumn, Dataset, RichProjection}
-import filodb.core.query.{ChunkSetReader, PartitionChunkIndex, RowkeyPartitionChunkIndex}
+import filodb.core.query.{ChunkSetReader, MutablePartitionChunkIndex, RowkeyPartitionChunkIndex}
 import filodb.core.store._
 import filodb.core.Types.PartitionKey
 
 class TestSegmentState(projection: RichProjection,
-                       index: PartitionChunkIndex,
+                       index: MutablePartitionChunkIndex,
                        schema: Seq[Column],
                        settings: SegmentStateSettings)
 extends SegmentState(projection, index, schema, settings) {
@@ -209,6 +209,53 @@ object GdeltTestData {
     } else{
       val fieldName = s"column$count"
       new DataColumn(count,fieldName,"testtable",0,Column.ColumnType.StringColumn) +: createColumns(count - 1)
+    }
+  }
+}
+
+// A simulation of machine metrics data
+object MachineMetricsData {
+  import scala.util.Random.nextInt
+
+  val schema = Seq(DataColumn(0, "timestamp", "metrics", 0, Column.ColumnType.TimestampColumn),
+                   DataColumn(1, "min",       "metrics", 0, Column.ColumnType.DoubleColumn),
+                   DataColumn(2, "avg",       "metrics", 0, Column.ColumnType.DoubleColumn),
+                   DataColumn(3, "max",       "metrics", 0, Column.ColumnType.DoubleColumn),
+                   DataColumn(4, "p90",       "metrics", 0, Column.ColumnType.DoubleColumn))
+
+  def mapper(rows: Stream[Product]): Stream[RowReader] = rows.map(TupleRowReader)
+
+  val dataset = Dataset("metrics", "timestamp", ":string 0")
+  val datasetRef = DatasetRef(dataset.name)
+  val projection = RichProjection(dataset, schema)
+  val defaultPartKey = BinaryRecord(projection.partKeyBinSchema, SeqRowReader(Seq("/0")))
+
+  def singleSeriesData(): Stream[Product] = {
+    val initTs = System.currentTimeMillis
+    Stream.from(0).map { n =>
+      (Some(initTs + n * 1000),
+       Some((45 + nextInt(10)).toDouble),
+       Some((60 + nextInt(25)).toDouble),
+       Some((100 + nextInt(15)).toDouble),
+       Some((85 + nextInt(12)).toDouble))
+    }
+  }
+
+  val schemaWithSeries = schema :+ DataColumn(5, "series",    "metrics", 0, Column.ColumnType.StringColumn)
+
+  // Dataset1: Partition keys (series) / Row key timestamp / Seg :string 0
+  val dataset1 = Dataset("gdelt", Seq("timestamp"), ":string 0", Seq("series"))
+  val projection1 = RichProjection(dataset1, schemaWithSeries)
+
+  def multiSeriesData(): Stream[Product] = {
+    val initTs = System.currentTimeMillis
+    Stream.from(0).map { n =>
+      (Some(initTs + n * 1000),
+       Some((45 + nextInt(10)).toDouble),
+       Some((60 + nextInt(25)).toDouble),
+       Some((100 + nextInt(15)).toDouble),
+       Some((85 + nextInt(12)).toDouble),
+       Some("Series " + (n % 10)))
     }
   }
 }

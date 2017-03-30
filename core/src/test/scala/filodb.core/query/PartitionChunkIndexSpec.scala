@@ -7,7 +7,7 @@ import org.scalatest.{FunSpec, Matchers}
 
 class PartitionChunkIndexSpec extends FunSpec with Matchers {
   import filodb.core.NamesTestData._
-  import PartitionChunkIndex.emptySkips
+  import ChunkSetInfo.emptySkips
   import collection.JavaConverters._
 
   val info1 = ChunkSetInfo(100L, 3, firstKey, lastKey)

@@ -45,6 +45,8 @@ final class RecordSchema(columnTypes: Seq[ColumnType]) {
 }
 
 object RecordSchema {
+  val empty = new RecordSchema(Nil)
+
   def apply(columns: Seq[Column]): RecordSchema = new RecordSchema(columns.map(_.columnType))
 
   def apply(schemaStr: String): RecordSchema = {

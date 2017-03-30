@@ -46,46 +46,15 @@ trait ScanSplit {
 }
 
 /**
- * High-level interface of a column store.  Writes and reads chunks, which are pretty high level.
- * Most implementations will probably want to use the ColumnStoreScanner, which implements the high level
- * read logic and offers useful lower level primitives.
+ * BaseColumnStore defines all of the read/query methods for a ColumnStore but not how to ingest data.
  */
-trait ColumnStore extends StrictLogging {
+trait BaseColumnStore extends StrictLogging {
   import filodb.core.Types._
   import ChunkSetReader._
   import Iterators._
 
   def ec: ExecutionContext
   implicit val execContext = ec
-
-  /**
-   * Initializes the column store for a given dataset projection.  Must be called once before appending
-   * segments to that projection.
-   */
-  def initializeProjection(projection: Projection): Future[Response]
-
-  /**
-   * Clears all data from the column store for that given projection, for all versions.
-   * More like a truncation, not a drop.
-   * NOTE: please make sure there are no reprojections or writes going on before calling this
-   */
-  def clearProjectionData(projection: Projection): Future[Response]
-
-  /**
-   * Completely and permanently drops the dataset from the column store.
-   * @param dataset the DatasetRef for the dataset to drop.
-   */
-  def dropDataset(dataset: DatasetRef): Future[Response]
-
-  /**
-   * Appends the ChunkSets and incremental indices in the segment to the column store.
-   * @param segment the ChunkSetSegment to write / merge to the columnar store
-   * @param version the version # to write the segment to
-   * @return Success. Future.failure(exception) otherwise.
-   */
-  def appendSegment(projection: RichProjection,
-                    segment: ChunkSetSegment,
-                    version: Int): Future[Response]
 
   /**
    * Internal method.  Reads chunks from a dataset and returns an Observable of chunk readers.
@@ -209,4 +178,40 @@ trait ColumnStore extends StrictLogging {
    * Shuts down the ColumnStore, including any threads that might be hanging around
    */
   def shutdown(): Unit
+}
+
+/**
+ * High-level interface of a column store.  Writes and reads chunks, which are pretty high level.
+ * Most implementations will probably want to use the ColumnStoreScanner, which implements the high level
+ * read logic and offers useful lower level primitives.
+ */
+trait ColumnStore extends BaseColumnStore {
+  /**
+   * Initializes the column store for a given dataset projection.  Must be called once before appending
+   * segments to that projection.
+   */
+  def initializeProjection(projection: Projection): Future[Response]
+
+  /**
+   * Clears all data from the column store for that given projection, for all versions.
+   * More like a truncation, not a drop.
+   * NOTE: please make sure there are no reprojections or writes going on before calling this
+   */
+  def clearProjectionData(projection: Projection): Future[Response]
+
+  /**
+   * Completely and permanently drops the dataset from the column store.
+   * @param dataset the DatasetRef for the dataset to drop.
+   */
+  def dropDataset(dataset: DatasetRef): Future[Response]
+
+  /**
+   * Appends the ChunkSets and incremental indices in the segment to the column store.
+   * @param segment the ChunkSetSegment to write / merge to the columnar store
+   * @param version the version # to write the segment to
+   * @return Success. Future.failure(exception) otherwise.
+   */
+  def appendSegment(projection: RichProjection,
+                    segment: ChunkSetSegment,
+                    version: Int): Future[Response]
 }

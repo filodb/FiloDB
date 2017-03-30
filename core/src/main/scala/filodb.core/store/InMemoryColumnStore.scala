@@ -13,7 +13,7 @@ import scalaxy.loops._
 import filodb.core._
 import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.metadata.{Column, Projection, RichProjection}
-import filodb.core.query.{PartitionChunkIndex, ChunkIDPartitionChunkIndex}
+import filodb.core.query.{PartitionChunkIndex, MutablePartitionChunkIndex, ChunkIDPartitionChunkIndex}
 import filodb.core.Types._
 
 /**
@@ -33,7 +33,7 @@ extends ColumnStore with InMemoryColumnStoreScanner with StrictLogging {
   logger.info("Starting InMemoryColumnStore...")
 
   val chunkDb = new HashMap[(DatasetRef, PartitionKey, Int), InMemoryChunkStore]
-  val indices = new HashMap[(DatasetRef, PartitionKey, Int), PartitionChunkIndex]
+  val indices = new HashMap[(DatasetRef, PartitionKey, Int), MutablePartitionChunkIndex]
   val filters = new HashMap[(DatasetRef, PartitionKey, Int), FilterTree]
 
   def initializeProjection(projection: Projection): Future[Response] = Future.successful(Success)
@@ -120,7 +120,7 @@ trait InMemoryColumnStoreScanner extends ColumnStoreScanner {
   val EmptyFilterTree = new FilterTree
 
   def chunkDb: HashMap[(DatasetRef, PartitionKey, Int), InMemoryChunkStore]
-  def indices: HashMap[(DatasetRef, PartitionKey, Int), PartitionChunkIndex]
+  def indices: HashMap[(DatasetRef, PartitionKey, Int), MutablePartitionChunkIndex]
   def filters: HashMap[(DatasetRef, PartitionKey, Int), FilterTree]
 
   def readPartitionChunks(dataset: DatasetRef,
@@ -130,11 +130,7 @@ trait InMemoryColumnStoreScanner extends ColumnStoreScanner {
                           chunkMethod: ChunkScanMethod): Observable[ChunkPipeItem] = {
     chunkDb.get((dataset, partitionIndex.binPartition, version)).map { chunkStore =>
       logger.debug(s"Reading chunks from columns $columns, ${partitionIndex.binPartition}, method $chunkMethod")
-      val infosSkips = (chunkMethod match {
-        case AllChunkScan             => partitionIndex.allChunks
-        case RowKeyChunkScan(k1, k2)  => partitionIndex.rowKeyRange(k1.binRec, k2.binRec)
-        case SingleChunkScan(key, id) => partitionIndex.singleChunk(key.binRec, id)
-      }).toBuffer
+      val infosSkips = partitionIndex.findByMethod(chunkMethod).toBuffer
       val colIndex = columns.map { col => chunkStore.columnMap.getOrElse(col.name, Int.MaxValue) }.toArray
 
       val infoStream = Observable.now(ChunkPipeInfos(infosSkips))

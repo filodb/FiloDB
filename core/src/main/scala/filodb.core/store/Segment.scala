@@ -12,7 +12,7 @@ import scala.concurrent.duration._
 
 import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.metadata.{Column, RichProjection}
-import filodb.core.query.{PartitionChunkIndex, RowkeyPartitionChunkIndex}
+import filodb.core.query.{MutablePartitionChunkIndex, ChunkIDPartitionChunkIndex}
 import filodb.core.Types._
 import filodb.core.KeyType
 
@@ -84,7 +84,7 @@ final case class SegmentStateSettings(filterElems: Int = DefaultFilterElements,
  * @param settings   the SegmentStateSettings
  */
 abstract class SegmentState(val projection: RichProjection,
-                            chunkIndex: PartitionChunkIndex,
+                            chunkIndex: MutablePartitionChunkIndex,
                             schema: Seq[Column],
                             settings: SegmentStateSettings) extends StrictLogging {
   import collection.JavaConverters._
@@ -140,7 +140,7 @@ abstract class SegmentState(val projection: RichProjection,
 
 class ColumnStoreSegmentState private(proj: RichProjection,
                                       segInfo: SegmentInfo[RichProjection#PK, RichProjection#SK],
-                                      chunkIndex: PartitionChunkIndex,
+                                      chunkIndex: MutablePartitionChunkIndex,
                                       schema: Seq[Column],
                                       version: Int,
                                       scanner: ColumnStore with ColumnStoreScanner,
@@ -163,8 +163,8 @@ object ColumnStoreSegmentState extends StrictLogging {
            (implicit ec: Scheduler): ColumnStoreSegmentState = {
     logger.debug(s"Retrieving partition indexes and filters from column store: $segInfo")
     val indexObs = scanner.scanPartitions(proj, version, SinglePartitionScan(segInfo.partition))
-                          .firstOrElseL(new RowkeyPartitionChunkIndex(segInfo.partition, proj))
-    val index = Await.result(indexObs.runAsync, settings.timeout)
+                          .firstOrElseL(new ChunkIDPartitionChunkIndex(segInfo.partition, proj))
+    val index = Await.result(indexObs.runAsync, settings.timeout).asInstanceOf[MutablePartitionChunkIndex]
     val filterMap = if (index.numChunks > 0) {
       Await.result(scanner.readFilters(proj, version, (Long.MinValue, Long.MaxValue))
                    (segInfo)(ec), settings.timeout).toMap

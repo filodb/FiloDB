@@ -66,10 +66,11 @@ case class RichProjection(projection: Projection,
   def datasetName: String = projection.dataset.toString
   def datasetRef: DatasetRef = projection.dataset
 
+  val dataColumns: Seq[Column] = columns.collect { case d: DataColumn => d }
+
   val rowKeyBinSchema = RecordSchema(rowKeyColumns)
   val binSchema = RecordSchema(dataColumns)
 
-  def dataColumns: Seq[Column] = columns.collect { case d: DataColumn => d }
 
   /**
    * Returns a new RichProjection with the specified database and everything else kept the same
@@ -91,6 +92,12 @@ case class RichProjection(projection: Projection,
       case other: Column => -1
     }
   }.toArray
+
+  // The non-computed partition column indices - they are "static" within a partition, and this could be
+  // used for optimization in both ingest and query (push down predicates)
+  val staticPartIndices = partitionColIndices.map(n => (n, columns(n))).collect {
+    case (n, d: DataColumn) => n
+  }
 
   val partitionKeyFunc: RowReader => PartitionKey = { (r: RowReader) =>
     val routedReader = RoutingRowReader(r, partIndices)

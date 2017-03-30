@@ -10,6 +10,7 @@ import scala.concurrent.ExecutionContext
 import filodb.core.FutureUtils
 import filodb.core.reprojector._
 import filodb.core.store.{ColumnStore, ColumnStoreScanner, InMemoryMetaStore, InMemoryColumnStore, MetaStore}
+import filodb.core.memstore.TimeSeriesMemStore
 
 object GlobalConfig {
   // Loads the overall configuration in a specific order:
@@ -72,11 +73,11 @@ trait CoordinatorSetup {
   def columnStore: ColumnStore with ColumnStoreScanner
   def metaStore: MetaStore
   lazy val stateCache = new SegmentStateCache(config, columnStore)
-  lazy val reprojector = new DefaultReprojector(config, columnStore, stateCache)
+  lazy val memStore = new TimeSeriesMemStore(config)
 
   // TODO: consider having a root actor supervising everything
   lazy val coordinatorActor =
-    system.actorOf(NodeCoordinatorActor.props(metaStore, reprojector, columnStore, config),
+    system.actorOf(NodeCoordinatorActor.props(metaStore, memStore, columnStore, config),
                    "coordinator")
 
   lazy val cluster = Cluster(system)

@@ -10,7 +10,7 @@ import scala.concurrent.{ExecutionContext, Future}
 import filodb.core._
 import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.metadata.{Column, Projection, RichProjection}
-import filodb.core.query.{ChunkSetReader, PartitionChunkIndex}
+import filodb.core.query.{ChunkSetReader, MutableChunkSetReader, PartitionChunkIndex}
 import ChunkSetReader._
 
 
@@ -117,7 +117,7 @@ private[store] class ChunkSetReaderAggregator(schema: Seq[Column],
           case null =>
           //scalastyle:on
             stats.incrChunkWithNoInfo()
-          case reader: ChunkSetReader =>
+          case reader: MutableChunkSetReader =>
             reader.addChunk(colNo, buf)
             if (reader.isFull) {
               readers.remove(id)
@@ -127,7 +127,7 @@ private[store] class ChunkSetReaderAggregator(schema: Seq[Column],
         }
       case ChunkPipeInfos(infos) =>
         infos.foreach { case (info, skips) =>
-          readers.put(info.id, new ChunkSetReader(info, skips, makers))
+          readers.put(info.id, new MutableChunkSetReader(info, skips, makers))
         }
     }
     this

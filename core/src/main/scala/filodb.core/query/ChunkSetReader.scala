@@ -16,28 +16,33 @@ import filodb.core.Types.ColumnId
  * for iterating through the chunkset row-wise, or individual chunks can also be accessed.
  * It creates the FiloVectors once, when chunks are added, so that repeated gets of the Iterator avoid
  * the parsing and allocation overhead.
- *
- * TODO: create readers for the chunks as they come in, instead of when rowIterator is called
  */
-class ChunkSetReader(val info: ChunkSetInfo,
-                     skips: EWAHCompressedBitmap,
-                     makers: Array[ChunkSetReader.VectorFactory]) {
-  import ChunkSetReader._
-
-  private final val len = info.numRows
+class MutableChunkSetReader(info: ChunkSetInfo,
+                            skips: EWAHCompressedBitmap,
+                            makers: Array[ChunkSetReader.VectorFactory])
+extends ChunkSetReader(info, skips, new Array[FiloVector[_]](makers.size)) {
   private final val bitset = new BitSet
-  private final val parsers = new Array[FiloVector[_]](makers.size)
-
-  skips.setSizeInBits(len, false)
 
   final def addChunk(colNo: Int, bytes: ByteBuffer): Unit = {
-    parsers(colNo) = makers(colNo)(bytes, len)
+    vectors(colNo) = makers(colNo)(bytes, length)
     bitset += colNo
   }
 
-  def vectors: Array[FiloVector[_]] = parsers
+  final def isFull: Boolean = bitset.size >= makers.size
+}
 
-  final def isFull: Boolean = bitset.size >= parsers.size
+/**
+ * ChunkSetReader provides a way to iterate through FiloVectors as rows, including skipping of rows.
+ */
+class ChunkSetReader(val info: ChunkSetInfo,
+                     skips: EWAHCompressedBitmap,
+                     parsers: Array[FiloVector[_]]) {
+  import ChunkSetReader._
+  private final val len = info.numRows
+  skips.setSizeInBits(len, false)
+
+  def vectors: Array[FiloVector[_]] = parsers
+  def length: Int = len
 
   /**
    * Iterates over rows in this chunkset, skipping over any rows defined in skiplist.
@@ -70,7 +75,7 @@ class ChunkSetReader(val info: ChunkSetInfo,
 }
 
 object ChunkSetReader {
-  import PartitionChunkIndex.emptySkips
+  import ChunkSetInfo.emptySkips
 
   type VectorFactory = (ByteBuffer, Int) => FiloVector[_]
   type RowReaderFactory = Array[FiloVector[_]] => FiloRowReader
@@ -86,7 +91,7 @@ object ChunkSetReader {
             skips: EWAHCompressedBitmap = emptySkips): ChunkSetReader = {
     val nameToPos = schema.zipWithIndex.map { case (c, i) => (c.name -> i) }.toMap
     val makers = schema.map(defaultColumnToMaker).toArray
-    val reader = new ChunkSetReader(chunkSet.info, skips, makers)
+    val reader = new MutableChunkSetReader(chunkSet.info, skips, makers)
     chunkSet.chunks.foreach { case (colName, bytes) => reader.addChunk(nameToPos(colName), bytes) }
     reader
   }

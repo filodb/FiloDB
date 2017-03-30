@@ -106,6 +106,11 @@ object BinaryRecord {
   val MaxSmallLen    = 0xffff
   val SortableByteBufSize = 100
 
+  val empty = {
+    val emptyArray = Array[Byte]()
+    apply(RecordSchema.empty, emptyArray)
+  }
+
   def apply(schema: RecordSchema, bytes: Array[Byte]): BinaryRecord =
     new ArrayBinaryRecord(schema, bytes)
 

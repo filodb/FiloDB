@@ -122,6 +122,14 @@ class ProjectionSpec extends FunSpec with Matchers {
                      Seq("Khalil", "Ndamukong", "Rodney").map(ZeroCopyUTF8String.apply))
     }
 
+    it("should calculate staticPartIndices correctly") {
+      val multiDataset = Dataset("a", Seq("age"), ":string 0", Seq("first", ":getOrElse last --"))
+      val proj = RichProjection(multiDataset, schema)
+      proj.partitionColIndices should equal (Seq(0, 4))
+      proj.partIndices should equal (Seq(0, 1))
+      proj.staticPartIndices should equal (Seq(0))
+    }
+
     it("should (de)serialize to/from readOnlyProjectionStrings") {
       val multiDataset = Dataset("a", Seq("age"), ":string 0", Seq("first", ":getOrElse last --"))
       val proj = RichProjection(multiDataset, schema)

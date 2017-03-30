@@ -131,8 +131,11 @@ object ChunkSetInfo extends StrictLogging {
   type ChunkSkips = Seq[ChunkRowSkipIndex]
   type SkipMap    = EWAHCompressedBitmap
   type ChunkInfosAndSkips = Seq[(ChunkSetInfo, SkipMap)]
+  type InfosSkipsIt = Iterator[(ChunkSetInfo, SkipMap)]
   type IndexAndFilterSeq = Seq[(ChunkSetInfo, ChunkSkips, BloomFilter[Long])]
   import ChunkSet._
+
+  val emptySkips = new SkipMap()
 
   val missingBloomFilters = Kamon.metrics.counter("chunks-missing-bloom-filter")
 
