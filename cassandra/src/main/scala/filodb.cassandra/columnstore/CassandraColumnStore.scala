@@ -149,9 +149,8 @@ extends CachedMergingColumnStore with CassandraColumnStoreScanner with StrictLog
         // If token ranges can be merged (adjacent), merge them and divide evenly into splitsPerNode
         try {
           // There is no "empty" or "zero" TokenRange, so we have to treat single range separately.
-          val singleRange =
-            if (sortedRanges.length > 1) { sortedRanges.reduceLeft(_.mergeWith(_)) }
-            else                         { sortedRanges.head }
+          val singleRange = mergeTokenRanges(sortedRanges, splitsPerNode)
+
           // We end up with splitsPerNode sets of single token ranges
           singleRange.splitEvenly(splitsPerNode).asScala.map(Seq(_))
 
@@ -171,6 +170,26 @@ extends CachedMergingColumnStore with CassandraColumnStoreScanner with StrictLog
       CassandraTokenRangeSplit(tokenRanges.map { range => (range.getStart.toString, range.getEnd.toString) },
                                replicas.map(_.getSocketAddress).toSet)
     }
+  }
+
+  def mergeTokenRanges(sortedRanges: Seq[TokenRange],
+                       splitsPerNode: Int): TokenRange = {
+    if (sortedRanges.length > 1) {
+      canMergeRanges(sortedRanges)
+      sortedRanges.reduceLeft(_.mergeWith(_))
+    } else {
+      sortedRanges.head
+    }
+  }
+
+  def canMergeRanges(sortedRanges: Seq[TokenRange]): Unit = {
+    sortedRanges.foreach(range =>
+      if (range.getStart.toString.compareTo("-9223372036854775808") == 0 ||
+        range.getEnd.toString.compareTo("-9223372036854775808") == 0) {
+        logger.warn(s"Last token range can't merge")
+        throw new IllegalArgumentException(s"Can't merge token ranges, ${sortedRanges}")
+      }
+    )
   }
 
   def unwrapTokenRanges(wrappedRanges : Seq[TokenRange]): Seq[TokenRange] =
