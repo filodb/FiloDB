@@ -26,7 +26,7 @@ object TimeComputations {
   object TimesliceComputation extends SingleColumnComputation {
     def funcName: String = "timeslice"
 
-    def parseDurationMillis(arg: String): Long Or InvalidComputedColumnSpec = {
+    def parseDurationMillis(arg: String): Long Or InvalidFunctionSpec = {
       try {
         val config = ConfigFactory.parseString(s"a = $arg")
         Good(config.as[FiniteDuration]("a").toMillis)
@@ -37,7 +37,7 @@ object TimeComputations {
 
     def analyze(expr: String,
                 dataset: String,
-                schema: Seq[Column]): ComputedColumn Or InvalidComputedColumnSpec = {
+                schema: Seq[Column]): ComputedColumn Or InvalidFunctionSpec = {
       for { info <- parse(expr, schema, Set(LongColumn, TimestampColumn))
             duration <- parseDurationMillis(info.param) }
       yield {
@@ -57,7 +57,7 @@ object TimeComputations {
 
     def analyze(expr: String,
                 dataset: String,
-                schema: Seq[Column]): ComputedColumn Or InvalidComputedColumnSpec = {
+                schema: Seq[Column]): ComputedColumn Or InvalidFunctionSpec = {
       for { args <- fixedNumArgs(expr, 1)
             sourceColIndex <- columnIndex(schema, args(0))
             sourceColType <- validatedColumnType(schema, sourceColIndex, Set(LongColumn, TimestampColumn)) }

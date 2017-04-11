@@ -2,12 +2,17 @@ package filodb.coordinator
 
 import akka.actor.ActorRef
 import org.velvia.filo.RowReader
+
 import filodb.core._
 import filodb.core.metadata.{DataColumn, Dataset, Projection}
 
 // Public, external Actor/Akka API for NodeCoordinatorActor, so every incoming command should be a NodeCommand
 sealed trait NodeCommand
 sealed trait NodeResponse
+trait QueryCommand extends NodeCommand {
+  def dataset: DatasetRef
+}
+trait QueryResponse extends NodeResponse
 
 object DatasetCommands {
   /**
@@ -102,3 +107,4 @@ object IngestionCommands {
 
   case object DCAReady extends NodeResponse
 }
+

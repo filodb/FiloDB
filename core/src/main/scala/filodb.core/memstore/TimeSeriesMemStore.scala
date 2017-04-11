@@ -1,6 +1,7 @@
 package filodb.core.memstore
 
 import com.typesafe.config.Config
+import com.typesafe.scalalogging.slf4j.StrictLogging
 import monix.reactive.Observable
 import scala.collection.mutable.HashMap
 import scala.concurrent.{ExecutionContext, Future}
@@ -13,7 +14,8 @@ import filodb.core.Types.{PartitionKey, ChunkID}
 
 final case class DatasetAlreadySetup(dataset: DatasetRef) extends Exception(s"Dataset $dataset already setup")
 
-class TimeSeriesMemStore(config: Config)(implicit val ec: ExecutionContext) extends MemStore {
+class TimeSeriesMemStore(config: Config)(implicit val ec: ExecutionContext) extends MemStore
+with StrictLogging {
   import ChunkSetReader._
 
   private val datasets = new HashMap[DatasetRef, TimeSeriesDataset]
@@ -36,7 +38,7 @@ class TimeSeriesMemStore(config: Config)(implicit val ec: ExecutionContext) exte
     datasets(projection.datasetRef).scanPartitions(partMethod)
 
   // Use our own readChunks implementation, because it is faster for us to directly create readers
-  override def readChunks(projection: RichProjection,
+  def readChunks(projection: RichProjection,
                  columns: Seq[Column],
                  version: Int,
                  partMethod: PartitionScanMethod,
@@ -59,7 +61,7 @@ class TimeSeriesMemStore(config: Config)(implicit val ec: ExecutionContext) exte
 }
 
 // TODO for scalability: get rid of stale partitions?
-class TimeSeriesDataset(projection: RichProjection, config: Config) {
+class TimeSeriesDataset(projection: RichProjection, config: Config) extends StrictLogging {
   private val partitions = new HashMap[PartitionKey, TimeSeriesPartition]
   private final val partKeyFunc = projection.partitionKeyFunc
 

@@ -63,7 +63,7 @@ with CoordinatorSetupWithFactory with ScalaFutures {
   val schemaMap = schema.map(c => c.name -> c).toMap
   metaStore.newDataset(dataset1).futureValue should equal (Success)
   schema.foreach { col => metaStore.newColumn(col, ref).futureValue should equal (Success) }
-  val coordActor = system.actorOf(NodeCoordinatorActor.props(metaStore, reprojector, columnStore, config))
+  val coordActor = system.actorOf(NodeCoordinatorActor.props(metaStore, memStore, columnStore, config))
   val clusterActor = system.actorOf(NodeClusterActor.singleNodeProps(coordActor))
 
   val dataset33 = dataset3.withName("gdelt2")
@@ -73,8 +73,7 @@ with CoordinatorSetupWithFactory with ScalaFutures {
   schema.foreach { col => metaStore.newColumn(col, ref2).futureValue should equal (Success) }
 
   before {
-    columnStore.dropDataset(ref).futureValue
-    columnStore.dropDataset(ref2).futureValue
+    memStore.reset()
     coordActor ! NodeCoordinatorActor.Reset
     stateCache.clear()     // Important!  Clear out cached segment state
     stateCache.shouldThrow = false

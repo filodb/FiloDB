@@ -629,6 +629,10 @@ If you are using DSE 5.0, you need to shade the hdrhistogram jar when building t
 
 By default, FiloDB nodes (basically all the Spark executors) talk to each other using a random port and locally assigned hostname.  You may wish to set `filodb.spark.driver.port`, `filodb.spark.executor.port` to assign specific ports (for AWS, for example) or possibly use a different config file on each host and set `akka.remote.netty.tcp.hostname` on each host's config file.
 
+Recommended flags:
+
+- `-XX:MaxInlineLevel=20`
+
 ## Monitoring and Metrics
 
 FiloDB uses [Kamon](http://kamon.io) for metrics and Akka/Futures/async tracing.  Not only does this give us summary statistics, but this also gives us Zipkin-style tracing of the ingestion write path in production, which can give a much richer picture than just stats.

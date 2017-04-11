@@ -45,7 +45,22 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     q.toBuffer.length should equal (0)
   }
 
-  it("should ingest into multiple series and be able to query on one partition in real time") (pending)
+  it("should ingest into multiple series and be able to query on one partition in real time") {
+    memStore.setup(projection1)
+    val data = mapper(multiSeriesData()).take(20)   // 2 records per series x 10 series
+    val rows = data.zipWithIndex.map { case (reader, n) => RowWithOffset(reader, n) }
+    memStore.ingest(projection1.datasetRef, rows)
+
+    val minSeries0 = data(0).getDouble(1)
+    val partKey0 = projection1.partKey(data(0).filoUTF8String(5))
+    val q = memStore.scanRows(projection1, Seq(schema(1)), 0, SinglePartitionScan(partKey0))
+    q.map(_.getDouble(0)).toSeq.head should equal (minSeries0)
+
+    val minSeries1 = data(1).getDouble(1)
+    val partKey1 = projection1.partKey("Series 1")
+    val q2 = memStore.scanRows(projection1, Seq(schema(1)), 0, SinglePartitionScan(partKey1))
+    q2.map(_.getDouble(0)).toSeq.head should equal (minSeries1)
+  }
 
   it("should ingest into multiple series and flush older chunks") (pending)
 }

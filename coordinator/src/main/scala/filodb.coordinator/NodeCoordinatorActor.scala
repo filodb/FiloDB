@@ -5,9 +5,10 @@ import akka.cluster.Cluster
 import akka.event.LoggingReceive
 import com.typesafe.config.Config
 import net.ceedubs.ficus.Ficus._
-
-import scala.concurrent.{Await, Future}
+import scala.collection.mutable.HashMap
 import scala.concurrent.duration._
+import scala.concurrent.{Await, Future}
+
 import filodb.core._
 import filodb.core.binaryrecord.RecordSchema
 import filodb.core.memstore.MemStore
@@ -16,16 +17,19 @@ import filodb.core.store.{ColumnStore, MetaStore}
 import filodb.core.Types._
 
 /**
- * The NodeCoordinatorActor is the common API entry point for all FiloDB ingestion and metadata operations.
+ * The NodeCoordinatorActor is the common external API entry point for all FiloDB operations.
  * It is a singleton - there should be exactly one such actor per node/JVM process.
  * It is responsible for:
  * - Overall external FiloDB API.
  * - Staying aware of status of other NodeCoordinators around the ring
  * - Metadata changes (dataset/column changes)
  * - Caching changes to dataset metadata?
- * - Supervising, spinning up, cleaning up DatasetCoordinatorActors
+ * - Supervising, spinning up, cleaning up DatasetCoordinatorActors, QueryActors
  * - Forwarding new changes (rows) to other NodeCoordinatorActors if they are not local
  * - Forwarding rows to DatasetCoordinatorActors
+ *
+ * Since it is the API entry point its work should be very lightweight, mostly forwarding things to
+ * other actors to do the real work.
  *
  * It is called by local (eg HTTP) as well as remote (eg Spark ETL) processes.
  */
@@ -63,10 +67,13 @@ class NodeCoordinatorActor(metaStore: MetaStore,
   import NodeCoordinatorActor._
   import DatasetCommands._
   import IngestionCommands._
+  import QueryCommands._
   import context.dispatcher
 
-  val dsCoordinators = new collection.mutable.HashMap[(DatasetRef, Int), ActorRef]
-  val dsCoordNotify = new collection.mutable.HashMap[(DatasetRef, Int), List[ActorRef]]
+  val dsCoordinators = new HashMap[(DatasetRef, Int), ActorRef]
+  val dsCoordNotify = new HashMap[(DatasetRef, Int), List[ActorRef]]
+  val queryActors = new HashMap[DatasetRef, ActorRef]
+  private val projections = new HashMap[(DatasetRef, Int), Future[RichProjection]]
   val clusterSelfAddr = Cluster(context.system).selfAddress
   val actorPath = clusterSelfAddr.host.getOrElse("None")
 
@@ -77,6 +84,27 @@ class NodeCoordinatorActor(metaStore: MetaStore,
                          (func: ActorRef => Unit): Unit = {
     dsCoordinators.get((dataset, version)).map(func).getOrElse(originator ! UnknownDataset)
   }
+
+  // Executes the func with the ActorReference of the QueryActor, creating it if needed.
+  // The func may be executed asynchronously so please don't use forward or implicit sender
+  private def withQueryActor(originator: ActorRef, dataset: DatasetRef)(func: ActorRef => Unit): Unit =
+    // ingestion must have been set up first
+    // TODO: make this work for cases even when data is not ingested
+    queryActors.get(dataset).map(func)
+      .getOrElse {
+        projections.get((dataset, 0)).map { projFut =>
+          logger.info(s"Creating QueryActor for dataset $dataset")
+          // Don't allow anybody else to create a queryactor in the meantime.  This is a synchronized deal
+          // I know everybody hates Await's, but not using it would mean much more complicated sync logic
+          val proj = Await.result(projFut, 30.seconds)
+          val ref = context.actorOf(QueryActor.props(memStore, proj), s"query-$dataset")
+          queryActors(dataset) = ref
+          func(ref)
+        }.getOrElse {
+          logger.warn(s"Cannot set up QueryActor for dataset $dataset as no ingestion has been setup")
+          originator ! UnknownDataset
+        }
+      }
 
   private def verifySchema(originator: ActorRef, dataset: DatasetRef, version: Int, columns: Seq[String]):
       Future[Option[Column.Schema]] = {
@@ -129,6 +157,28 @@ class NodeCoordinatorActor(metaStore: MetaStore,
     }
   }
 
+  // This is a poor man's version of spray-cache.  It must be called from the receive thread of this actor,
+  // and not from a Future or async thread, for correct operation.
+  private def getProjection(originator: ActorRef,
+                            dataset: DatasetRef,
+                            columns: Seq[String],
+                            version: Int): Future[RichProjection] = {
+    projections.getOrElseUpdate((dataset, version), {
+      val fut = for { datasetObj <- metaStore.getDataset(dataset)
+                      schema <- verifySchema(originator, dataset, version, columns) if schema.isDefined }
+                yield {
+                  val columnSeq = columns.map(schema.get(_))
+                  Serializer.putSchema(RecordSchema(columnSeq))
+                  // Create the RichProjection, and ferret out any errors
+                  logger.debug(s"Creating projection from dataset $datasetObj, columns $columnSeq")
+                  RichProjection(datasetObj, columnSeq)
+                }
+      fut.onFailure { case t: Exception => projections.remove((dataset, version)) }
+      fut
+    })
+  }
+
+
   // If the coordinator is already set up, then everything is already fine.
   // Otherwise get the dataset object and create a new actor, re-initializing state.
   private def setupIngestion(originator: ActorRef,
@@ -136,29 +186,17 @@ class NodeCoordinatorActor(metaStore: MetaStore,
                              columns: Seq[String],
                              version: Int,
                              reloadFlag: Boolean = false): Unit = {
-    def notify(msg: Any): Unit = { self ! DatasetCreateNotify(dataset, version, msg) }
+    def notify(msg: Any): Unit = self ! DatasetCreateNotify(dataset, version, msg)
 
-    def createDatasetCoordActor(datasetObj: Dataset, richProj: RichProjection): Unit = {
+    def createDatasetCoordActor(richProj: RichProjection): Unit = {
       val props = MemStoreCoordActor.props(richProj, memStore)
-      val ref = context.actorOf(props, s"ds-coord-${datasetObj.name}-$version")
+      val ref = context.actorOf(props, s"ds-coord-${richProj.dataset.name}-$version")
       self ! AddDatasetCoord(originator, dataset, version, ref, reloadFlag)
       if (!reloadFlag) {
         val colDefinitions = richProj.dataColumns.map(_.toString).mkString("\u0002")
         metaStore.insertIngestionState(actorPath, dataset, colDefinitions, "Started", version)
         notify(IngestionReady)
       }
-    }
-
-    def createProjectionAndActor(datasetObj: Dataset, schema: Option[Column.Schema]): Unit = {
-      val columnSeq = columns.map(schema.get(_))
-      Serializer.putSchema(RecordSchema(columnSeq))
-      // Create the RichProjection, and ferret out any errors
-      logger.debug(s"Creating projection from dataset $datasetObj, columns $columnSeq")
-      val proj = RichProjection.make(datasetObj, columnSeq)
-      proj.recover[Any] {
-        case err: RichProjection.BadSchema => notify(BadSchema(err.toString))
-      }
-      for { richProj <- proj } createDatasetCoordActor(datasetObj, richProj)
     }
 
     if (dsCoordinators contains (dataset -> version)) {
@@ -172,11 +210,11 @@ class NodeCoordinatorActor(metaStore: MetaStore,
       // Everything after this point happens in a future, asynchronously from the actor processing.
       // Thus 1) don't modify internal state, and 2) make sure we don't have multiple actor creations
       // happening in parallel, thus the need for dsCoordNotify.
-      (for { datasetObj <- metaStore.getDataset(dataset)
-             schema <- verifySchema(originator, dataset, version, columns) if schema.isDefined }
-      yield {
-        createProjectionAndActor(datasetObj, schema)
+      (for { richProj <- getProjection(originator, dataset, columns, version) }
+       yield {
+        createDatasetCoordActor(richProj)
       }).recover {
+        case err: RichProjection.BadSchema => notify(BadSchema(err.toString))
         case NotFoundError(what) => notify(UnknownDataset)
         case t: Throwable        => notify(MetadataException(t))
       }
@@ -243,6 +281,12 @@ class NodeCoordinatorActor(metaStore: MetaStore,
       withDsCoord(sender, dataset, version) { _.forward(DatasetCoordinatorActor.InitIngestion(originator)) }
   }
 
+  def queryHandlers: Receive = LoggingReceive {
+    case q: QueryCommand =>
+      val originator = sender
+      withQueryActor(originator, q.dataset) { _.tell(q, originator) }
+  }
+
   def other: Receive = LoggingReceive {
     case Reset =>
       dsCoordinators.values.foreach(_ ! PoisonPill)
@@ -283,5 +327,5 @@ class NodeCoordinatorActor(metaStore: MetaStore,
       reloadDatasetCoordActors(sender)
   }
 
-  def receive: Receive = ingestHandlers orElse datasetHandlers orElse other
+  def receive: Receive = queryHandlers orElse ingestHandlers orElse datasetHandlers orElse other
 }

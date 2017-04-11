@@ -258,4 +258,16 @@ object MachineMetricsData {
        Some("Series " + (n % 10)))
     }
   }
+
+  // Everything increments by 1 for simple predictability and testing
+  def linearMultiSeries(startTs: Long = 100000L, numSeries: Int = 10): Stream[Product] = {
+    Stream.from(0).map { n =>
+      (Some(startTs + n * 1000),
+       Some((1 + n).toDouble),
+       Some((20 + n).toDouble),
+       Some((100 + n).toDouble),
+       Some((85 + n).toDouble),
+       Some("Series " + (n % 10)))
+    }
+  }
 }

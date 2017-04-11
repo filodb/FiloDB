@@ -23,7 +23,7 @@ object SimpleComputations {
 
     def analyze(expr: String,
                 dataset: String,
-                schema: Seq[Column]): ComputedColumn Or InvalidComputedColumnSpec = {
+                schema: Seq[Column]): ComputedColumn Or InvalidFunctionSpec = {
       for { args <- fixedNumArgs(expr, 1) }
       yield {
         ComputedColumn(0, expr, dataset, StringColumn, Nil,
@@ -44,7 +44,7 @@ object SimpleComputations {
 
     def analyze(expr: String,
                 dataset: String,
-                schema: Seq[Column]): ComputedColumn Or InvalidComputedColumnSpec = {
+                schema: Seq[Column]): ComputedColumn Or InvalidFunctionSpec = {
       for { info <- parse(expr, schema)
             defaultValue <- parseParam(info.keyType, info.param) }
       yield {
@@ -77,7 +77,7 @@ object SimpleComputations {
 
     def analyze(expr: String,
                 dataset: String,
-                schema: Seq[Column]): ComputedColumn Or InvalidComputedColumnSpec = {
+                schema: Seq[Column]): ComputedColumn Or InvalidFunctionSpec = {
       for { info <- parse(expr, schema, Set(IntColumn, LongColumn, DoubleColumn))
             roundingValue <- parseParam(info.keyType, info.param) }
       yield {
@@ -107,7 +107,7 @@ object SimpleComputations {
 
     def analyze(expr: String,
                 dataset: String,
-                schema: Seq[Column]): ComputedColumn Or InvalidComputedColumnSpec = {
+                schema: Seq[Column]): ComputedColumn Or InvalidFunctionSpec = {
       for { info <- parse(expr, schema, Set(StringColumn))
             numChars <- parseParam(SingleKeyTypes.IntKeyType, info.param) }
       yield {
@@ -125,7 +125,7 @@ object SimpleComputations {
 
     def analyze(expr: String,
                 dataset: String,
-                schema: Seq[Column]): ComputedColumn Or InvalidComputedColumnSpec = {
+                schema: Seq[Column]): ComputedColumn Or InvalidFunctionSpec = {
       for { info <- parse(expr, schema, Set(IntColumn, LongColumn, StringColumn))
             numBuckets <- parseParam(SingleKeyTypes.IntKeyType, info.param) }
       yield {

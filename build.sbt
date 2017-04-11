@@ -95,7 +95,7 @@ lazy val scalaxyDep = "com.nativelibs4java"  %% "scalaxy-loops"     % "0.3.3" % 
 lazy val coreDeps = commonDeps ++ Seq(
   "com.typesafe.scala-logging" %% "scala-logging-slf4j" % "2.1.2",
   "org.slf4j"             % "slf4j-api"         % "1.7.10",
-  "com.beachape"         %% "enumeratum"        % "1.2.1",
+  "com.beachape"         %% "enumeratum"        % "1.5.10",
   "org.velvia.filo"      %% "filo-scala"        % "0.3.4-SNAPSHOT",
   "io.monix"             %% "monix"             % "2.1.1",
   "joda-time"             % "joda-time"         % "2.2",

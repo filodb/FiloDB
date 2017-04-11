@@ -1,16 +1,19 @@
 package filodb.stress
 
+import akka.pattern.ask
+import akka.util.Timeout
 import org.apache.spark.{SparkConf, SparkContext}
 import org.apache.spark.sql.{DataFrame, SQLContext, SaveMode}
+import monix.eval.Task
+import monix.reactive.Observable
 import scala.util.Random
 import scala.concurrent.duration._
 import scala.concurrent.{Await, Future}
 import scala.language.postfixOps
 import scalaxy.loops._
 
-import filodb.core.metadata.{Column, RichProjection}
-import filodb.core.store.SinglePartitionScan
 import filodb.core.{Perftools, DatasetRef}
+import filodb.coordinator.QueryCommands._
 import filodb.spark.{FiloDriver, FiloRelation, FiloExecutor}
 
 /**
@@ -31,7 +34,7 @@ object MemStoreStress extends App {
   import monix.execution.Scheduler.Implicits.global
 
   val taxiCsvFile = args(0)
-  val queriesPerThread = 200000
+  val nQueries = 50000
   val queryThreads = 4
 
   def puts(s: String): Unit = {
@@ -62,26 +65,24 @@ object MemStoreStress extends App {
                  load(taxiCsvFile).
                  select("medallion", "rate_code", "pickup_datetime", "dropoff_datetime", "passenger_count", "trip_time_in_secs", "trip_distance", "pickup_longitude", "pickup_latitude")
 
-  def getProjAndColumn: (RichProjection, Seq[Column]) = {
-    val ref = DatasetRef("nyc_taxi")
-    val datasetObj = FiloRelation.getDatasetObj(ref)
-    val schema = FiloRelation.getSchema(ref, 0)
-    (RichProjection(datasetObj, schema.values.toSeq), Seq(schema("rate_code")))
-  }
-
-  // fork thread to do queries
-  val queryMillisFut = Future.sequence((0 until queryThreads).map(n => Future {
-    // Wait a little bit for ingestion to get going
-    Thread sleep 8000
-    val (proj, queryColumns) = getProjAndColumn
-    puts(s"Starting concurrent querying on columns $queryColumns")
-    Perftools.timeMillis {
-      for { i <- 0 until queriesPerThread optimized } {
-        val partMethod = SinglePartitionScan(proj.partKey(medallions(i % numKeys)))
-        FiloExecutor.memStore.scanChunks(proj, queryColumns, 0, partMethod).length
-      }
-    }
-  }))
+  // use observables (a stream of queries) to handle queries
+  val queryArgs = QueryArgs("time_group_avg", Seq("pickup_datetime", "trip_distance", "2013-01-01T00Z",
+                                                  "2013-02-01T00Z", "90"))
+  val ref = DatasetRef("nyc_taxi")
+  var startMs = 0L
+  var endMs = 0L
+  implicit val timeout = Timeout(10 seconds)
+  val queryFut = Observable.fromIterable((0 until nQueries))
+                   .map { n =>
+                     val startIndex = n % (medallions.size - 10)
+                     val keys = medallions.slice(startIndex, startIndex + 10).toSeq.map(k => Seq(k))
+                     AggregateQuery(ref, 0, queryArgs, MultiPartitionQuery(keys))
+                   }.mapAsync(queryThreads) { qMessage =>
+                     Task.fromFuture(FiloExecutor.coordinatorActor ? qMessage)
+                   }.delaySubscription(8 seconds)
+                   .doOnStart { x => startMs = System.currentTimeMillis }
+                   .countL.runAsync
+  queryFut.onComplete { case x: Any => endMs = System.currentTimeMillis }
 
   puts("Starting memStore ingestion...")
   val ingestMillis = Perftools.timeMillis {
@@ -97,9 +98,9 @@ object MemStoreStress extends App {
 
   // Output results
   puts(s"\n\n==> memStore ingestion was complete in ${ingestMillis/1000.0} seconds")
-  val queryMillis = Await.result(queryMillisFut, 1 minute).sum / queryThreads
-  val queryThroughput = queriesPerThread * queryThreads * 1000 / queryMillis
-  puts(s"\n==> Concurrent querying of $queriesPerThread x $queryThreads threads over $queryMillis ms = $queryThroughput QPS")
+  val queryCount = Await.result(queryFut, 1 minute)
+  val queryThroughput = nQueries * 1000 / (endMs - startMs)
+  puts(s"\n==> Concurrent querying of $nQueries queries ($queryThreads threads) over ${endMs - startMs} ms = $queryThroughput QPS")
 
   FiloDriver.shutdown()
   FiloExecutor.shutdown()

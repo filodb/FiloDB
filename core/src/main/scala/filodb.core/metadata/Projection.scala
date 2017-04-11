@@ -71,7 +71,6 @@ case class RichProjection(projection: Projection,
   val rowKeyBinSchema = RecordSchema(rowKeyColumns)
   val binSchema = RecordSchema(dataColumns)
 
-
   /**
    * Returns a new RichProjection with the specified database and everything else kept the same
    */
@@ -142,7 +141,7 @@ object RichProjection extends StrictLogging {
   case class NoSuchProjectionId(id: Int) extends BadSchema
   case class UnsupportedSegmentColumnType(name: String, colType: Column.ColumnType) extends BadSchema
   case class RowKeyComputedColumns(names: Seq[String]) extends BadSchema
-  case class ComputedColumnErrs(errs: Seq[InvalidComputedColumnSpec]) extends BadSchema
+  case class ComputedColumnErrs(errs: Seq[InvalidFunctionSpec]) extends BadSchema
 
   case class BadSchemaError(badSchema: BadSchema) extends Exception(badSchema.toString)
 
@@ -163,7 +162,7 @@ object RichProjection extends StrictLogging {
                .combined.badMap { errs => ComputedColumnErrs(errs.toSeq) }
   }
 
-  private def getColumnsFromNames(allColumns: Seq[Column],
+  def getColumnsFromNames(allColumns: Seq[Column],
                                   columnNames: Seq[String]): Seq[Column] Or BadSchema = {
     if (columnNames.isEmpty) {
       Good(allColumns)

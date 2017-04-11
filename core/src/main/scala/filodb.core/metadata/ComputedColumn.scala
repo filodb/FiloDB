@@ -42,7 +42,7 @@ object ComputedColumn {
    */
   def analyze(expr: String,
               dataset: String,
-              schema: Seq[Column]): ComputedColumn Or One[InvalidComputedColumnSpec] = {
+              schema: Seq[Column]): ComputedColumn Or One[InvalidFunctionSpec] = {
     if (isComputedColumn(expr)) {
       val exprFunction = expr.split(' ').head.drop(1)
       nameToComputation.get(exprFunction).map { computation =>
@@ -54,30 +54,28 @@ object ComputedColumn {
   }
 }
 
-trait InvalidComputedColumnSpec
-case class BadArgument(reason: String) extends InvalidComputedColumnSpec
-case class WrongNumberArguments(given: Int, expected: Int) extends InvalidComputedColumnSpec
-case class NoSuchFunction(func: String) extends InvalidComputedColumnSpec
-case object NotComputedColumn extends InvalidComputedColumnSpec
+trait InvalidFunctionSpec
+case class BadArgument(reason: String) extends InvalidFunctionSpec
+case class WrongNumberArguments(given: Int, expected: Int) extends InvalidFunctionSpec
+case class NoSuchFunction(func: String) extends InvalidFunctionSpec
+case object NotComputedColumn extends InvalidFunctionSpec
 
 /**
  * A ColumnComputation analyzes the user computed column input (eg ":getOrElse someCol 100")
  * and attempts to return a ComputedColumn with keyType with the computation function.
  */
-trait ColumnComputation {
-  import TypeCheckedTripleEquals._
-
+trait ColumnComputation extends FunctionValidationHelpers {
   // The name of the computation function, without the leading ":"
   def funcName: String
 
   /**
    * Attempt to analyze the user arguments and produce a ComputedColumn.
-   * @return either a ComputedColumn with valid ComputedKeyType, or one of the InvalidComputedColumnSpec
+   * @return either a ComputedColumn with valid ComputedKeyType, or one of the InvalidFunctionSpec
    *         values.  NOTE: does not need to fill in id, which will be generated/replaced later.
    */
   def analyze(expr: String,
               dataset: String,
-              schema: Seq[Column]): ComputedColumn Or InvalidComputedColumnSpec
+              schema: Seq[Column]): ComputedColumn Or InvalidFunctionSpec
 
   def userArgs(expr: String): Seq[String] = expr.split(" ").toSeq.drop(1)
 
@@ -87,25 +85,30 @@ trait ColumnComputation {
    * @param numArgs expected number of arguments
    * @return Good(Seq[String]) if number of args matches numArgs, or Bad(WrongNumberArguments)
    */
-  def fixedNumArgs(expr: String, numArgs: Int): Seq[String] Or InvalidComputedColumnSpec = {
-    val args = userArgs(expr)
-    if (args.length == numArgs) Good(args) else Bad(WrongNumberArguments(args.length, numArgs))
-  }
+  def fixedNumArgs(expr: String, numArgs: Int): Seq[String] Or InvalidFunctionSpec =
+    validateNumArgs(userArgs(expr), numArgs)
+}
 
-  def columnIndex(schema: Seq[Column], colName: String): Int Or InvalidComputedColumnSpec = {
+trait FunctionValidationHelpers {
+  import TypeCheckedTripleEquals._
+
+  def validateNumArgs(args: Seq[String], numArgs: Int): Seq[String] Or InvalidFunctionSpec =
+    if (args.length == numArgs) Good(args) else Bad(WrongNumberArguments(args.length, numArgs))
+
+  def columnIndex(schema: Seq[Column], colName: String): Int Or InvalidFunctionSpec = {
     val sourceColIndex = schema.indexWhere(_.name === colName)
     if (sourceColIndex < 0) { Bad(BadArgument(s"Could not find source column $colName")) }
     else                    { Good(sourceColIndex) }
   }
 
   def validatedColumnType(schema: Seq[Column], colIndex: Int, allowedTypes: Set[Column.ColumnType]):
-      Column.ColumnType Or InvalidComputedColumnSpec = {
+      Column.ColumnType Or InvalidFunctionSpec = {
     val colType = schema(colIndex).columnType
     if (allowedTypes.contains(colType)) { Good(colType) }
     else { Bad(BadArgument(s"$colType not in allowed set $allowedTypes")) }
   }
 
-  def parseParam(keyType: KeyType, arg: String): keyType.T Or InvalidComputedColumnSpec = {
+  def parseParam(keyType: KeyType, arg: String): keyType.T Or InvalidFunctionSpec = {
     try { Good(keyType.fromString(arg)) }
     catch {
       case t: Throwable => Bad(BadArgument(s"Could not parse [$arg]: ${t.getMessage}"))
@@ -124,7 +127,7 @@ case class SingleColumnInfo(sourceColumn: String,
 }
 
 trait SingleColumnComputation extends ColumnComputation {
-  def parse(expr: String, schema: Seq[Column]): SingleColumnInfo Or InvalidComputedColumnSpec = {
+  def parse(expr: String, schema: Seq[Column]): SingleColumnInfo Or InvalidFunctionSpec = {
     for { args <- fixedNumArgs(expr, 2)
           sourceColIndex <- columnIndex(schema, args(0))
           sourceColType = schema(sourceColIndex).columnType }
@@ -132,7 +135,7 @@ trait SingleColumnComputation extends ColumnComputation {
   }
 
   def parse(expr: String, schema: Seq[Column], allowedTypes: Set[Column.ColumnType]):
-      SingleColumnInfo Or InvalidComputedColumnSpec = {
+      SingleColumnInfo Or InvalidFunctionSpec = {
     for { args <- fixedNumArgs(expr, 2)
           sourceColIndex <- columnIndex(schema, args(0))
           sourceColType <- validatedColumnType(schema, sourceColIndex, allowedTypes) }
