@@ -196,15 +196,24 @@ extends CachedMergingColumnStore with StrictLogging {
     val metadata = clusterConnector.session.getCluster.getMetadata
     val splitsPerNode = params.getOrElse("splits_per_node", "1").toInt
     require(splitsPerNode >= 1, s"Must specify at least 1 splits_per_node, got $splitsPerNode")
-
     val tokenRanges = metadata.getTokenRanges.asScala.toSeq.flatMap { range =>
       range.splitEvenly(splitsPerNode).asScala
     }
-    tokenRanges.map { tokenRange =>
-      val replicas = metadata.getReplicas(clusterConnector.keySpace.name, tokenRange).asScala
-      Map("token_start" -> tokenRange.getStart.toString,
-          "token_end"   -> tokenRange.getEnd.toString,
-          "replicas"    -> replicas.map(_.toString).mkString(","))
+    if (params.getOrElse("total_splits", "0").toInt == 1) {
+      val tokenRangeMerge = tokenRanges.reduceLeft { (tokenLeft, tokenRight) =>
+        tokenLeft.mergeWith(tokenRight)
+      }
+      val replicas = metadata.getReplicas(clusterConnector.keySpace.name, tokenRangeMerge).asScala
+      Seq(Map("token_start" -> tokenRangeMerge.getStart.toString, "token_end" -> tokenRangeMerge.getEnd.toString,
+        "replicas" -> replicas.map(_.toString).mkString(",")))
+    }
+    else {
+      tokenRanges.map { tokenRange =>
+        val replicas = metadata.getReplicas(clusterConnector.keySpace.name, tokenRange).asScala
+        Map("token_start" -> tokenRange.getStart.toString,
+          "token_end" -> tokenRange.getEnd.toString,
+          "replicas" -> replicas.map(_.toString).mkString(","))
+      }
     }
   }
 

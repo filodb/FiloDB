@@ -103,7 +103,7 @@ with CoordinatorSetup with AllTablesTest {
       readSeg.rowIterator().map(_.getLong(2)).toSeq.take(100) should equal ((0 to 99).map(_.toLong))
     }
 
-    val splits = columnStore.getScanSplits(largeDataset.name)
+    val splits = columnStore.getScanSplits(largeDataset.name,Map("total_splits" -> "1"))
     splits should have length (1)
     whenReady(columnStore.scanSegments[Long](schema, largeDataset.name, 0,
                                              params = splits.head)) { segIter =>

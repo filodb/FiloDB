@@ -3,6 +3,7 @@ package filodb.cassandra.metastore
 import com.datastax.driver.core.Row
 import com.typesafe.config.Config
 import com.websudos.phantom.dsl._
+import filodb.core
 import scala.concurrent.Future
 
 import filodb.cassandra.FiloCassandraConnector
