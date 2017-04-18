@@ -92,6 +92,11 @@ case class RichProjection(projection: Projection,
     }
   }.toArray
 
+  // A map from column name to index into partitionColumns
+  val nameToPartColIndex = partIndices.zipWithIndex.collect {
+    case (sourceColIndex, partIndex) if sourceColIndex >= 0 => columns(sourceColIndex).name -> partIndex
+  }.toMap
+
   // The non-computed partition column indices - they are "static" within a partition, and this could be
   // used for optimization in both ingest and query (push down predicates)
   val staticPartIndices = partitionColIndices.map(n => (n, columns(n))).collect {

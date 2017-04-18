@@ -1,6 +1,8 @@
 package filodb.core
 
+import kamon.Kamon
 import kamon.trace.{TraceContext, Tracer}
+import monix.eval.Task
 import scala.concurrent.Future
 
 /**
@@ -12,6 +14,12 @@ object Perftools {
     f
     System.currentTimeMillis - start
   }
+
+  def withTrace[A](source: Task[A], traceName: String): Task[A] =
+    Task.defer {
+      val ctx = Kamon.tracer.newContext(traceName)
+      source.doOnFinish(_ => Task.eval(ctx.finish()))
+    }
 
   /**
    * Starts a new Kamon tracer segment for sync code.  Note that if you use this within futures

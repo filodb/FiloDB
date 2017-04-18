@@ -13,7 +13,7 @@ import scalaxy.loops._
 import filodb.core._
 import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.metadata.{Column, Projection, RichProjection}
-import filodb.core.query.{PartitionChunkIndex, MutablePartitionChunkIndex, ChunkIDPartitionChunkIndex}
+import filodb.core.query._
 import filodb.core.Types._
 
 /**
@@ -171,7 +171,8 @@ trait InMemoryColumnStoreScanner extends ColumnStoreScanner {
   def filteredPartScan(projection: RichProjection,
                        version: Int,
                        split: ScanSplit,
-                       filterFunc: PartitionKey => Boolean): Iterator[PartitionChunkIndex] = {
+                       filters: Seq[ColumnFilter]): Iterator[PartitionChunkIndex] = {
+    val filterFunc = KeyFilter.makePartitionFilterFunc(projection, filters)
     val partitions = indices.keysIterator.collect { case (ds, partition, ver) if
       ds == projection.datasetRef && ver == version => partition }
     partitions.filter(filterFunc)
@@ -184,8 +185,8 @@ trait InMemoryColumnStoreScanner extends ColumnStoreScanner {
     val indexIt = partMethod match {
       case SinglePartitionScan(partition) => singlePartScan(projection, version, partition)
       case MultiPartitionScan(partitions) => multiPartScan(projection, version, partitions)
-      case FilteredPartitionScan(split, filterFunc) =>
-        filteredPartScan(projection, version, split, filterFunc)
+      case FilteredPartitionScan(split, filters) =>
+        filteredPartScan(projection, version, split, filters)
     }
     Observable.fromIterator(indexIt)
   }

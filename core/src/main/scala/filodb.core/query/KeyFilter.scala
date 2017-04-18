@@ -9,6 +9,28 @@ import filodb.core._
 import filodb.core.Types.PartitionKey
 import filodb.core.metadata.{Column, DataColumn, ComputedColumn, RichProjection}
 
+sealed trait Filter {
+  def filterFunc: Any => Boolean
+}
+
+object Filter {
+  final case class Equals(value: Any) extends Filter {
+    val filterFunc = (item: Any) => value == item
+  }
+
+  final case class In(values: Set[Any]) extends Filter {
+    val filterFunc = (item: Any) => values.contains(item)
+  }
+
+  final case class And(left: Filter, right: Filter) extends Filter {
+    private val leftFunc = left.filterFunc
+    private val rightFunc = right.filterFunc
+    val filterFunc = (item: Any) => leftFunc(item) && rightFunc(item)
+  }
+}
+
+final case class ColumnFilter(column: String, filter: Filter)
+
 /**
  * Utilities to generate functions to filter keys.
  */
@@ -19,13 +41,6 @@ object KeyFilter {
     case s: String => kt.fromString(s)
     case t: Any    => t.asInstanceOf[kt.T]
   }
-
-  def equalsFunc(value: Any): Any => Boolean = (item: Any) => value == item
-
-  def inFunc(values: Set[Any]): Any => Boolean = (item: Any) => values.contains(item)
-
-  def andFunc(left: Any => Boolean, right: Any => Boolean): Any => Boolean =
-    (item: Any) => left(item) && right(item)
 
   // Parses the literal in an expression through a KeyType's key function... intended mostly for
   // ComputedColumns so that proper transformation of a value can happen for predicate pushdowns.
@@ -63,14 +78,18 @@ object KeyFilter {
   }
 
   /**
-   * Creates a final filter function, checking against the partition keyType.
-   * If it is a SingleKeyType, only a single position and func are allowed.
-   * If it is a CompositeKeyType, then compositeFilterFunc will be called to create the final func.
+   * Creates a filter function that returns boolean given a PartitionKey.
+   * @param proj the RichProjection describing the dataset schema
+   * @param filters one ColumnFilter per column to filter on.  If multiple filters are desired on that
+   *                column they should be combined using And.
    */
   def makePartitionFilterFunc(proj: RichProjection,
-                              positions: Array[Int],
-                              funcs: Array[Any => Boolean]): PartitionKey => Boolean = {
-    require(positions.size == funcs.size)
+                              filters: Seq[ColumnFilter]): PartitionKey => Boolean = {
+    val positionsAndFuncs = filters.map {
+      case ColumnFilter(col, filter) => (proj.nameToPartColIndex.getOrElse(col, -1), filter.filterFunc) }
+    val positions = positionsAndFuncs.collect { case (pos, func) if pos >= 0 => pos }.toArray
+    val funcs = positionsAndFuncs.collect { case (pos, func) if pos >= 0 => func }.toArray
+
     def partFunc(p: PartitionKey): Boolean = {
       for { i <- 0 until positions.size optimized } {
         val bool = funcs(i)(p.getAny(positions(i)))
@@ -82,6 +101,6 @@ object KeyFilter {
     partFunc
   }
 
-  def makePartitionFilterFunc(proj: RichProjection, func: Any => Boolean): PartitionKey => Boolean =
-    makePartitionFilterFunc(proj, Array(0), Array(func))
+  def makePartitionFilterFunc(proj: RichProjection, filter: ColumnFilter): PartitionKey => Boolean =
+    makePartitionFilterFunc(proj, Seq(filter))
 }

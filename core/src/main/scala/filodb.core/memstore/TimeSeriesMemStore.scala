@@ -1,14 +1,15 @@
 package filodb.core.memstore
 
+import com.googlecode.javaewah.IntIterator
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.slf4j.StrictLogging
 import monix.reactive.Observable
-import scala.collection.mutable.HashMap
+import scala.collection.mutable.{ArrayBuffer, HashMap}
 import scala.concurrent.{ExecutionContext, Future}
 
 import filodb.core.DatasetRef
 import filodb.core.metadata.{Column, RichProjection}
-import filodb.core.query.{ChunkSetReader, PartitionChunkIndex}
+import filodb.core.query.{ChunkSetReader, KeyFilter, PartitionChunkIndex, PartitionKeyIndex}
 import filodb.core.store._
 import filodb.core.Types.{PartitionKey, ChunkID}
 
@@ -60,25 +61,48 @@ with StrictLogging {
   def shutdown(): Unit = {}
 }
 
+
 // TODO for scalability: get rid of stale partitions?
+// This would involve something like this:
+//    - Go through oldest (lowest index number) partitions
+//    - If partition still used, move it to a higher (latest) index
+//    - Re-use number for newer partition?  Something like a ring index
 class TimeSeriesDataset(projection: RichProjection, config: Config) extends StrictLogging {
-  private val partitions = new HashMap[PartitionKey, TimeSeriesPartition]
+  private final val partitions = new ArrayBuffer[TimeSeriesPartition]
+  private final val keyMap = new HashMap[PartitionKey, Int]
+  private final val keyIndex = new PartitionKeyIndex(projection)
   private final val partKeyFunc = projection.partitionKeyFunc
 
   private val chunksToKeep = config.getInt("memstore.chunks-to-keep")
   private val maxChunksSize = config.getInt("memstore.max-chunks-size")
+
+  class PartitionIterator(intIt: IntIterator) extends Iterator[TimeSeriesPartition] {
+    def hasNext: Boolean = intIt.hasNext
+    def next: TimeSeriesPartition = partitions(intIt.next)
+  }
 
   // TODO(velvia): Make this multi threaded
   def ingest(rows: Seq[RowWithOffset]): Unit = {
     // now go through each row, find the partition and call partition ingest
     rows.foreach { case RowWithOffset(reader, offset) =>
       val partKey = partKeyFunc(reader)
-      val partition = partitions.getOrElseUpdate(partKey, {
-        new TimeSeriesPartition(projection, partKey, chunksToKeep, maxChunksSize)
-      })
+      val partIndex = keyMap.getOrElseUpdate(partKey, addPartition(partKey))
+      val partition = partitions(partIndex)
       partition.ingest(reader, offset)
     }
   }
+
+  // Creates a new TimeSeriesPartition, updating indexes
+  private def addPartition(newPartKey: PartitionKey): Int = {
+    val newPart = new TimeSeriesPartition(projection, newPartKey, chunksToKeep, maxChunksSize)
+    val newIndex = partitions.length
+    keyIndex.addKey(newPartKey, newIndex)
+    partitions += newPart
+    newIndex
+  }
+
+  private def getPartition(partKey: PartitionKey): Option[PartitionChunkIndex] =
+    keyMap.get(partKey).map(partitions.apply)
 
   def getPositions(columns: Seq[Column]): Array[Int] =
     columns.map { c =>
@@ -90,11 +114,17 @@ class TimeSeriesDataset(projection: RichProjection, config: Config) extends Stri
   def scanPartitions(partMethod: PartitionScanMethod): Observable[PartitionChunkIndex] = {
     val indexIt = partMethod match {
       case SinglePartitionScan(partition) =>
-        partitions.get(partition).map(Iterator.single).getOrElse(Iterator.empty)
+        getPartition(partition).map(Iterator.single).getOrElse(Iterator.empty)
       case MultiPartitionScan(partKeys)   =>
-        partKeys.toIterator.flatMap(partitions.get)
-      case FilteredPartitionScan(split, filterFunc) =>
-        partitions.toIterator.collect { case (part, index) if filterFunc(part) => index }
+        partKeys.toIterator.flatMap(getPartition)
+      case FilteredPartitionScan(split, filters) =>
+        // TODO: Use filter func for columns not in index
+        if (filters.nonEmpty) {
+          val (indexIt, _) = keyIndex.parseFilters(filters)
+          new PartitionIterator(indexIt)
+        } else {
+          partitions.toIterator
+        }
     }
     Observable.fromIterator(indexIt)
   }

@@ -11,7 +11,7 @@ import filodb.core._
 import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.metadata.{Dataset, Column, DataColumn, Projection, RichProjection}
 import filodb.core.Types
-import filodb.core.query.KeyFilter
+import filodb.core.query.{KeyFilter, Filter, ColumnFilter}
 
 import org.scalatest.{FlatSpec, Matchers, BeforeAndAfter, BeforeAndAfterAll}
 import org.scalatest.concurrent.ScalaFutures
@@ -252,8 +252,8 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
     val paramSet = colStore.getScanSplits(datasetRef, 1)
     paramSet should have length (1)
 
-    val filterFunc = KeyFilter.makePartitionFilterFunc(projection2, KeyFilter.equalsFunc(197902))
-    val method = FilteredPartitionScan(paramSet.head, filterFunc)
+    val filter = ColumnFilter("MonthYear", Filter.Equals(197902))
+    val method = FilteredPartitionScan(paramSet.head, Seq(filter))
     val rowIt = colStore.scanRows(projection2, schema, 0, method)
     rowIt.map(_.getInt(6)).sum should equal (22)
   }
@@ -285,8 +285,8 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
     rows.map(_._1).min should equal (50)
 
     // Ask for only partition 197902 and row keys that don't exist, there should be no rows
-    val filterFunc = KeyFilter.equalsFunc(197902)
-    val method2 = FilteredPartitionScan(paramSet.head, filterFunc)
+    val filter2 = ColumnFilter("MonthYear", Filter.Equals(197902))
+    val method2 = FilteredPartitionScan(paramSet.head, Seq(filter2))
     val rowRange2 = RowKeyChunkScan(BinaryRecord(projection2, Seq("", 0)),
                                     BinaryRecord(projection2, Seq("", 2)))
     val rowIter2 = colStore.scanRows(projection2, schema, 0, method2, rowRange2)
@@ -353,9 +353,8 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
     paramSet should have length (1)
 
     // Test 1:  IN query on first column only
-    val inFilter = KeyFilter.inFunc(Set("JPN".utf8, "KHM".utf8))
-    val filter1 = KeyFilter.makePartitionFilterFunc(projection3, inFilter)
-    val method1 = FilteredPartitionScan(paramSet.head, filter1)
+    val filter1 = ColumnFilter("Actor2Code", Filter.In(Set("JPN".utf8, "KHM".utf8)))
+    val method1 = FilteredPartitionScan(paramSet.head, Seq(filter1))
 
     val readSegs1 = colStore.stats.readPartitions
     val rows = colStore.scanRows(projection3, schema, 0, method1).toSeq
@@ -364,10 +363,9 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
     (colStore.stats.readPartitions - readSegs1) should equal (2)
 
     // Test 2: = filter on both partition columns
-    val eqFilters = Array(KeyFilter.equalsFunc("JPN".utf8),
-                          KeyFilter.equalsFunc(1979))
-    val filter2 = KeyFilter.makePartitionFilterFunc(projection3, Array(0, 1), eqFilters)
-    val method2 = FilteredPartitionScan(paramSet.head, filter2)
+    val filters = Seq(ColumnFilter("Actor2Code", Filter.Equals("JPN".utf8)),
+                      ColumnFilter("Year",       Filter.Equals(1979)))
+    val method2 = FilteredPartitionScan(paramSet.head, filters)
     val rowIt = colStore.scanRows(projection3, schema, 0, method2)
     rowIt.map(_.getInt(6)).sum should equal (10)
   }

@@ -3,19 +3,21 @@ package filodb.coordinator
 import akka.actor.{ActorRef, PoisonPill}
 import akka.pattern.gracefulStop
 import com.typesafe.config.ConfigFactory
-import filodb.coordinator.NodeCoordinatorActor.ReloadDCA
-
+import org.velvia.filo.{ArrayStringRowReader, ZeroCopyUTF8String}
 import scala.concurrent.duration._
-import filodb.core._
-import filodb.core.store._
-import filodb.core.metadata.{DataColumn, Dataset}
-import org.scalatest.concurrent.ScalaFutures
-import org.scalatest.time.{Millis, Seconds, Span}
-import org.velvia.filo.ArrayStringRowReader
-
 import scala.io.Source
 import scala.util.Try
 import scalax.file.Path
+
+import filodb.coordinator.NodeCoordinatorActor.ReloadDCA
+import filodb.core._
+import filodb.core.metadata.{DataColumn, Dataset}
+import filodb.core.query.{ColumnFilter, Filter}
+import filodb.core.store._
+
+import org.scalatest.concurrent.ScalaFutures
+import org.scalatest.time.{Millis, Seconds, Span}
+
 
 object NodeCoordinatorActorSpec extends ActorSpecConfig
 
@@ -252,6 +254,16 @@ with CoordinatorSetup with ScalaFutures {
       val answer = probe.expectMsgClass(classOf[AggregateResponse[Double]])
       answer.elementClass should equal (classOf[Double])
       answer.elements should equal (Array(13.0, 23.0))
+
+      // Try a filtered partition query
+      import ZeroCopyUTF8String._
+      val series2 = (2 to 4).map(n => s"Series $n".utf8).toSet.asInstanceOf[Set[Any]]
+      val multiFilter = Seq(ColumnFilter("series", Filter.In(series2)))
+      val q2 = AggregateQuery(ref, 0, args, FilteredPartitionQuery(multiFilter))
+      probe.send(coordActor, q2)
+      val answer2 = probe.expectMsgClass(classOf[AggregateResponse[Double]])
+      answer2.elementClass should equal (classOf[Double])
+      answer2.elements should equal (Array(14.0, 24.0))
     }
   }
 

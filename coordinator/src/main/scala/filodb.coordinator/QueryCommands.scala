@@ -4,6 +4,8 @@ import akka.actor.ActorRef
 import java.nio.ByteBuffer
 import scala.language.existentials
 
+import filodb.core.query.ColumnFilter
+
 object QueryCommands {
   import filodb.core._
   import filodb.core.Types._
@@ -13,6 +15,7 @@ object QueryCommands {
   sealed trait PartitionQuery
   final case class SinglePartitionQuery(key: Seq[Any]) extends PartitionQuery
   final case class MultiPartitionQuery(keys: Seq[Seq[Any]]) extends PartitionQuery
+  final case class FilteredPartitionQuery(filters: Seq[ColumnFilter]) extends PartitionQuery
 
   // Which data within a partition should I query?
   sealed trait DataQuery

@@ -10,6 +10,7 @@ import org.scalatest.{Matchers, FunSpec}
 class KeyFilterSpec extends FunSpec with Matchers {
   import SingleKeyTypes._
   import NamesTestData._
+  import Filter._
 
   it("should parse values for regular KeyTypes") {
     KeyFilter.parseSingleValue(schema(0), "abc") should equal ("abc".utf8)
@@ -20,20 +21,40 @@ class KeyFilterSpec extends FunSpec with Matchers {
   }
 
   it("should validate equalsFunc for string and other types") {
-    val eqFunc1 = KeyFilter.equalsFunc(KeyFilter.parseSingleValue(schema(0), "abc"))
+    val eqFunc1 = Equals(KeyFilter.parseSingleValue(schema(0), "abc")).filterFunc
     eqFunc1("abc".utf8) should equal (true)
     eqFunc1("abc") should equal (false)
     eqFunc1(15) should equal (false)
 
-    val eqFunc2 = KeyFilter.equalsFunc(KeyFilter.parseSingleValue(schema(3), 12))
+    val eqFunc2 = Equals(KeyFilter.parseSingleValue(schema(3), 12)).filterFunc
     eqFunc2(12) should equal (true)
   }
 
   it("should validate inFunc for string and other types") {
-    val inFunc1 = KeyFilter.inFunc(KeyFilter.parseValues(schema(0), Set("abc", "def")).toSet)
+    val inFunc1 = In(KeyFilter.parseValues(schema(0), Set("abc", "def")).toSet).filterFunc
     inFunc1("abc".utf8) should equal (true)
     inFunc1("aaa".utf8) should equal (false)
     inFunc1(15) should equal (false)
+  }
+
+  it("should produce a multi-column partition filtering func from ColumnFilters") {
+    import GdeltTestData._
+
+    val filters = Seq(ColumnFilter("Actor2Code", Equals("JPN".utf8)),
+                      ColumnFilter("Year", In(Set(1979, 1980))))
+    val partFunc = KeyFilter.makePartitionFilterFunc(projection1, filters)
+
+    partFunc(projection1.partKey("JPN", 1979)) should equal (true)
+    partFunc(projection1.partKey("JPN", 1980)) should equal (true)
+
+    partFunc(projection1.partKey("CAN", 1979)) should equal (false)
+    partFunc(projection1.partKey("JPN", 2003)) should equal (false)
+
+    // It should work for computed columns as well
+    val partFunc2 = KeyFilter.makePartitionFilterFunc(projection3, filters)
+
+    partFunc2(projection3.partKey("JPN", 1979)) should equal (true)
+    partFunc2(projection3.partKey("CAN", 1979)) should equal (false)
   }
 
   val prefixCol = ComputedColumn(0, ":stringPrefix 3", datasetRef.dataset,

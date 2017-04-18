@@ -15,7 +15,7 @@ import filodb.core._
 import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.store._
 import filodb.core.metadata.{Column, Projection, RichProjection}
-import filodb.core.query.{PartitionChunkIndex, ChunkIDPartitionChunkIndex}
+import filodb.core.query.{PartitionChunkIndex, ChunkIDPartitionChunkIndex, KeyFilter}
 
 /**
  * Implementation of a column store using Apache Cassandra tables.
@@ -301,18 +301,19 @@ trait CassandraColumnStoreScanner extends ColumnStoreScanner with StrictLogging 
                      partMethod: PartitionScanMethod): Observable[PartitionChunkIndex] = {
     val indexTable = getOrCreateIndexTable(projection.datasetRef)
     logger.debug(s"Scanning partitions for ${projection.datasetRef} with method $partMethod...")
-    val (filterFunc, indexRecords) = partMethod match {
+    val (filters, indexRecords) = partMethod match {
       case SinglePartitionScan(partition) =>
-        ((x: Any) => true, indexTable.getIndices(partition, version))
+        (Nil, indexTable.getIndices(partition, version))
 
       case MultiPartitionScan(partitions) =>
-        ((x: Any) => true, multiPartScan(projection, partitions, indexTable, version))
+        (Nil, multiPartScan(projection, partitions, indexTable, version))
 
-      case FilteredPartitionScan(CassandraTokenRangeSplit(tokens, _), func) =>
-        (func, indexTable.scanIndices(version, tokens))
+      case FilteredPartitionScan(CassandraTokenRangeSplit(tokens, _), filters) =>
+        (filters, indexTable.scanIndices(version, tokens))
 
       case other: PartitionScanMethod =>  ???
     }
+    val filterFunc = KeyFilter.makePartitionFilterFunc(projection, filters)
     indexRecords.sortedGroupBy(_.partition(projection))
                 .collect { case (binPart, binIndices) if filterFunc(binPart) =>
                   val newIndex = new ChunkIDPartitionChunkIndex(binPart, projection)

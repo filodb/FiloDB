@@ -187,6 +187,11 @@ object GdeltTestData {
                                   Seq(":monthOfYear SQLDATE"))
   val projection5 = RichProjection(dataset5, schema)
 
+  // Proj 6: partition Actor2Code,Actor2Name to test partition key bitmap indexing
+  val dataset6 = Dataset("gdelt", Seq("GLOBALEVENTID"), ":string 0",
+                                  Seq("Actor2Code", "Actor2Name"))
+  val projection6 = RichProjection(dataset6, schema)
+
   def getSegments(partKey: PartitionKey): Seq[(ChunkSetSegment, Seq[RowReader])] = {
     val segInfo = SegmentInfo(partKey, "").basedOn(projection2)
     val seg = new ChunkSetSegment(projection2, segInfo)

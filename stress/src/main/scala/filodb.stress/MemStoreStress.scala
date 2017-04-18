@@ -78,7 +78,8 @@ object MemStoreStress extends App {
                      val keys = medallions.slice(startIndex, startIndex + 10).toSeq.map(k => Seq(k))
                      AggregateQuery(ref, 0, queryArgs, MultiPartitionQuery(keys))
                    }.mapAsync(queryThreads) { qMessage =>
-                     Task.fromFuture(FiloExecutor.coordinatorActor ? qMessage)
+                     Perftools.withTrace(Task.fromFuture(FiloExecutor.coordinatorActor ? qMessage),
+                                         "time-series-query")
                    }.delaySubscription(8 seconds)
                    .doOnStart { x => startMs = System.currentTimeMillis }
                    .countL.runAsync
@@ -89,7 +90,6 @@ object MemStoreStress extends App {
     csvDF.write.format("filodb.spark").
       option("dataset", "nyc_taxi").
       option("row_keys", "pickup_datetime").
-      option("segment_key", ":string 0").
       option("partition_keys", "medallion").
       // This is needed for now because memstore write path doesn't handle flush - flushes are N/A to memstore
       option("flush_after_write", "false").

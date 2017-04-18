@@ -12,15 +12,15 @@ import filodb.core._
 import filodb.core.Types.PartitionKey
 import filodb.core.binaryrecord.{BinaryRecord, BinaryRecordWrapper}
 import filodb.core.metadata.{Column, Projection, RichProjection}
-import filodb.core.query.ChunkSetReader
+import filodb.core.query.{ChunkSetReader, ColumnFilter}
 import filodb.core.query.ChunkSetReader._
 
 sealed trait PartitionScanMethod
 final case class SinglePartitionScan(partition: PartitionKey) extends PartitionScanMethod
 final case class MultiPartitionScan(partitions: Seq[PartitionKey]) extends PartitionScanMethod
+// NOTE: One ColumnFilter per column please.
 final case class FilteredPartitionScan(split: ScanSplit,
-                                       filter: PartitionKey => Boolean = (a: PartitionKey) => true)
-    extends PartitionScanMethod
+                                       filters: Seq[ColumnFilter] = Nil) extends PartitionScanMethod
 
 sealed trait ChunkScanMethod
 case object AllChunkScan extends ChunkScanMethod

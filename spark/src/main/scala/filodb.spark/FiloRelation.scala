@@ -22,7 +22,7 @@ import scala.language.postfixOps
 import filodb.coordinator.client.Client.parse
 import filodb.core._
 import filodb.core.binaryrecord.{BinaryRecord, BinaryRecordWrapper}
-import filodb.core.query.{ChunkSetReader, KeyFilter}
+import filodb.core.query.{ChunkSetReader, KeyFilter, Filter => FF, ColumnFilter}
 import filodb.core.metadata.{Column, DataColumn, Dataset, RichProjection}
 import filodb.core.store._
 
@@ -64,26 +64,26 @@ object FiloRelation extends StrictLogging {
   // tuples of (position, column, applicable filters).
   // NOTE: for now support just one filter per column
   def parsePartitionFilters(projection: RichProjection,
-                            groupedFilters: Map[String, Seq[Filter]]): Seq[(Int, Column, Seq[Filter])] = {
+                            groupedFilters: Map[String, Seq[Filter]]): Seq[(String, Column, Seq[Filter])] = {
     val columnIdxTypeMap = KeyFilter.mapPartitionColumns(projection, groupedFilters.keys.toSeq)
 
     columnIdxTypeMap.map { case (colName, (pos, column)) =>
       logger.info(s"Pushing down partition column $colName, filters ${groupedFilters(colName)}")
-      (pos, column, groupedFilters(colName))
+      (colName, column, groupedFilters(colName))
     }.toSeq
   }
 
   // Partition Query?
   def partitionQuery(config: Config,
                      projection: RichProjection,
-                     filterStuff: Seq[(Int, Column, Seq[Filter])]): Seq[PartitionKey] = {
+                     filterStuff: Seq[(String, Column, Seq[Filter])]): Seq[PartitionKey] = {
     val inqueryPartitionsLimit = config.getInt("columnstore.inquery-partitions-limit")
     // Are all the partition keys given in filters?
     // Are the filters EqualTo, In?
     val predicateValues = filterStuff.collect {
-      case (pos, column, Seq(EqualTo(_, equalValue))) =>
+      case (_, column, Seq(EqualTo(_, equalValue))) =>
         Set(conv(equalValue))
-      case (pos, column, Seq(In(_, inValues))) =>
+      case (_, column, Seq(In(_, inValues))) =>
         inValues.map(conv).toSet
     }
     logger.info(s"Push down partition predicates: ${predicateValues.toString()}")
@@ -181,31 +181,28 @@ object FiloRelation extends StrictLogging {
     case o: Any        => o
   }
 
-  // Returns filter function, and true if function is doing any filtering
-  def filtersToFunc(projection: RichProjection,
-                    filterStuff: Seq[(Int, Column, Seq[Filter])]): (PartitionKey => Boolean, Boolean) = {
+  // Returns ColumnFilters for partition column filters
+  def getPartitionFilters(projection: RichProjection,
+                          partFilters: Seq[(String, Column, Seq[Filter])]): Seq[ColumnFilter] = {
     import KeyFilter._
 
-    def toFunc(col: Column, f: Filter): Any => Boolean = f match {
-      case EqualTo(_, value) => equalsFunc(parseSingleValue(col, conv(value)))
-      case In(_, values)     => inFunc(parseValues(col, values.map(conv)).toSet)
+    def toFilter(col: Column, f: Filter): FF = f match {
+      case EqualTo(_, value) => FF.Equals(parseSingleValue(col, conv(value)))
+      case In(_, values)     => FF.In(parseValues(col, values.map(conv)).toSet)
       case other: Filter     => throw new IllegalArgumentException(s"Sorry, filter $other not supported")
     }
 
     // Compute one func per column/position
-    logger.debug(s"Filters by position: $filterStuff")
-    val funcs = filterStuff.map { case (pos, keyType, filters) =>
-      filters.tail.foldLeft(toFunc(keyType, filters.head)) { case (curFunc, newFilter) =>
-        andFunc(curFunc, toFunc(keyType, newFilter))
+    logger.debug(s"Filters by position: $partFilters")
+    val colFilters = partFilters.map { case (name, col, filters) =>
+      val filoFilter = filters.tail.foldLeft(toFilter(col, filters.head)) { case (curFilter, newFilter) =>
+        FF.And(curFilter, toFilter(col, newFilter))
       }
+      ColumnFilter(name, filoFilter)
     }
 
-    if (funcs.isEmpty) {
-      logger.info(s"Scanning all partitions with no partition key filtering")
-      ((a: Any) => true, false)
-    } else {
-      (makePartitionFilterFunc(projection, filterStuff.map(_._1).toArray, funcs.toArray), true)
-    }
+    if (colFilters.isEmpty) logger.info(s"Scanning all partitions with no partition key filtering")
+    colFilters
   }
 
   def splitsQuery(sqlContext: SQLContext,
@@ -292,7 +289,7 @@ case class FiloRelation(dataset: DatasetRef,
 
   def scanByPartitions(projection: RichProjection,
                        groupedFilters: Map[String, Seq[Filter]],
-                       partitionFilters: Seq[(Int, Column, Seq[Filter])],
+                       partitionFilters: Seq[(String, Column, Seq[Filter])],
                        readOnlyProjStr: String): RDD[Row] = {
     val _config = this.filoConfig
     val _confStr = _config.root.render(ConfigRenderOptions.concise)
@@ -310,10 +307,10 @@ case class FiloRelation(dataset: DatasetRef,
 
       // filtered partition full table scan, with or without range scanning
       case Nil =>
-        val (filterFunc, isFiltered) = filtersToFunc(projection, partitionFilters)
-        if (isFiltered) fullFilteredQueries.increment else fullTableQueries.increment
+        val colFilters = getPartitionFilters(projection, partitionFilters)
+        if (colFilters.nonEmpty) fullFilteredQueries.increment else fullTableQueries.increment
         splitsQuery(sqlContext, dataset, splitsPerNode, _confStr, readOnlyProjStr, chunkMethod, version) { s =>
-          FilteredPartitionScan(s, filterFunc)
+          FilteredPartitionScan(s, colFilters)
         }
 
       // multi partition query, no range scan

@@ -57,6 +57,12 @@ class QueryActor(colStore: BaseColumnStore,
       case MultiPartitionQuery(keys) =>
         val partKeys = keys.map { k => projection.partKey(k :_*) }
         MultiPartitionScan(partKeys)
+      case FilteredPartitionQuery(filters) =>
+        // TODO: in the future, parse filters to determine which splits to query
+        // Depending on distribution strategy -> or just spread to all nodes
+        // For now, just get the single split and scan everything
+        val split = colStore.getScanSplits(projection.datasetRef, 1).head
+        FilteredPartitionScan(split, filters)
     }).toOr.badMap {
       case m: MatchError => BadQuery(s"Could not parse $partQuery: " + m.getMessage)
       case e: Exception => BadArgument(e.getMessage)

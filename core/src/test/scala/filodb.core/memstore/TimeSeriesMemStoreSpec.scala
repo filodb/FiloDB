@@ -1,18 +1,20 @@
 package filodb.core.memstore
 
 import com.typesafe.config.ConfigFactory
-import org.velvia.filo.BinaryVector
+import org.velvia.filo.{BinaryVector, ZeroCopyUTF8String}
 
 import org.scalatest.{FunSpec, Matchers, BeforeAndAfter}
 import org.scalatest.concurrent.ScalaFutures
 
 import filodb.core._
 import filodb.core.binaryrecord.BinaryRecord
+import filodb.core.query.{ColumnFilter, Filter}
 import filodb.core.store.{FilteredPartitionScan, SinglePartitionScan}
 
 class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter with ScalaFutures {
   import monix.execution.Scheduler.Implicits.global
   import MachineMetricsData._
+  import ZeroCopyUTF8String._
 
   val config = ConfigFactory.load("application_test.conf").getConfig("filodb")
   val memStore = new TimeSeriesMemStore(config)
@@ -60,6 +62,18 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     val partKey1 = projection1.partKey("Series 1")
     val q2 = memStore.scanRows(projection1, Seq(schema(1)), 0, SinglePartitionScan(partKey1))
     q2.map(_.getDouble(0)).toSeq.head should equal (minSeries1)
+  }
+
+  it("should query on multiple partitions using filters") {
+    memStore.setup(projection1)
+    val data = mapper(linearMultiSeries()).take(20)   // 2 records per series x 10 series
+    val rows = data.zipWithIndex.map { case (reader, n) => RowWithOffset(reader, n) }
+    memStore.ingest(projection1.datasetRef, rows)
+
+    val filter = ColumnFilter("series", Filter.In(Set("Series 1".utf8, "Series 2".utf8)))
+    val split = memStore.getScanSplits(projection1.datasetRef, 1).head
+    val q2 = memStore.scanRows(projection1, Seq(schema(1)), 0, FilteredPartitionScan(split, Seq(filter)))
+    q2.map(_.getDouble(0)).toSeq should equal (Seq(2.0, 12.0, 3.0, 13.0))
   }
 
   it("should ingest into multiple series and flush older chunks") (pending)
