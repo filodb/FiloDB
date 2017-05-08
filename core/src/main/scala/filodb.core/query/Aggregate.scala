@@ -24,6 +24,15 @@ abstract class Aggregate[R: ClassTag] {
   def chunkScan(projection: RichProjection): Option[ChunkScanMethod] = None
 }
 
+class PartitionKeysAggregate extends Aggregate[String] {
+  private final val partkeys = new collection.mutable.HashSet[String]
+  def add(reader: ChunkSetReader): Aggregate[String] = {
+    partkeys += reader.partition.toString
+    this
+  }
+  def result: Array[String] = partkeys.toArray
+}
+
 /**
  * An AggregationFunction validates input arguments and produces an Aggregate for computation
  * It is also an EnumEntry and the name of the function is the class name in "snake_case" ie underscores
@@ -65,7 +74,7 @@ trait SingleColumnAggFunction extends AggregationFunction {
 /**
  * Time grouping aggregates take 5 arguments:
  *   <timeColumn> <valueColumn> <startTs> <endTs> <numBuckets>
- *   <startTs> and <endTs> may either be Longs representing time since epoch, or ISO8601 formatted datetimes.
+ *   <startTs> and <endTs> may either be Longs representing millis since epoch, or ISO8601 formatted datetimes.
  */
 trait TimeGroupingAggFunction extends AggregationFunction {
   import Column.ColumnType._
@@ -96,6 +105,12 @@ trait TimeGroupingAggFunction extends AggregationFunction {
 object AggregationFunction extends Enum[AggregationFunction] {
   import Column.ColumnType._
   val values = findValues
+
+  // partition_keys returns all the partition keys (or time series) in a query
+  case object PartitionKeys extends AggregationFunction {
+    def validate(args: Seq[String], proj: RichProjection): (Aggregate[_], Seq[Int]) Or InvalidFunctionSpec =
+      Good((new PartitionKeysAggregate, Nil))
+  }
 
   case object Sum extends SingleColumnAggFunction {
     val allowedTypes: Set[Column.ColumnType] = Set(DoubleColumn)

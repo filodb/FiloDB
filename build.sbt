@@ -22,6 +22,10 @@ lazy val coordinator = (project in file("coordinator"))
                          .settings(multiJvmSettings:_*)
                          .settings(name := "filodb-coordinator")
                          .settings(libraryDependencies ++= coordDeps)
+                         // Unfortunately, Scala deps are hard to exclude unless they are put in settings
+                         .settings(libraryDependencies +=
+                                    "com.typesafe.akka" %% "akka-contrib" % akkaVersion exclude(
+                                      "com.typesafe.akka", s"akka-persistence-experimental_${scalaBinaryVersion.value}"))
                          .dependsOn(core % "compile->compile; test->test")
 
 lazy val cassandra = (project in file("cassandra"))
@@ -36,7 +40,8 @@ lazy val cli = (project in file("cli"))
                  .settings(name := "filodb-cli")
                  .settings(libraryDependencies ++= cliDeps)
                  .settings(cliAssemblySettings:_*)
-                 .dependsOn(core, coordinator, cassandra)
+                 .dependsOn(core % "compile->compile; test->test",
+                            coordinator, cassandra)
 
 lazy val spark = (project in file("spark"))
                    .settings(name := "filodb-spark")
@@ -68,6 +73,13 @@ lazy val stress = (project in file("stress"))
                     .settings(assemblyOption in assembly := (assemblyOption in assembly).value.copy(includeScala = false))
                     .dependsOn(spark)
 
+lazy val standalone = (project in file("standalone"))
+                        .settings(mySettings:_*)
+                        .settings(publish := {})
+                        .settings(assemblySettings:_*)
+                        .settings(libraryDependencies += log4jDep)
+                        .dependsOn(core, coordinator, cassandra)
+
 val cassDriverVersion = "3.0.2"
 val akkaVersion    = "2.3.15"
 val sparkVersion   = "1.6.1"
@@ -84,9 +96,12 @@ val excludeZK = ExclusionRule(organization = "org.apache.zookeeper")
 val excludeSlf4jLog4j = ExclusionRule(organization = "org.slf4j", name = "slf4j-log4j12")
 val excludeJersey = ExclusionRule(organization = "com.sun.jersey")
 
+val logbackDep = "ch.qos.logback"        % "logback-classic"   % "1.0.7"
+val log4jDep   = "log4j"                 % "log4j"             % "1.2.17"
+
 lazy val commonDeps = Seq(
   "io.kamon"             %% "kamon-core"        % "0.6.0",
-  "ch.qos.logback"        % "logback-classic"   % "1.0.7" % "test",  // to get good test logs
+  logbackDep % "test",  // to get good test logs
   "org.scalatest"        %% "scalatest"         % "2.2.4" % "test"
 )
 
@@ -117,13 +132,12 @@ lazy val cassDeps = commonDeps ++ Seq(
   // other dependencies separated by commas
   "net.jpountz.lz4"       % "lz4"               % "1.3.0",
   "com.datastax.cassandra" % "cassandra-driver-core" % cassDriverVersion,
-  "ch.qos.logback"        % "logback-classic"   % "1.0.7" % "test"
+  logbackDep % "test"
 )
 
 lazy val coordDeps = commonDeps ++ Seq(
   "com.typesafe.akka"    %% "akka-slf4j"        % akkaVersion,
   "com.typesafe.akka"    %% "akka-cluster"      % akkaVersion,
-  "com.typesafe.akka"    %% "akka-contrib"      % akkaVersion,
   // Take out the below line if you really don't want statsd metrics enabled
   "io.kamon"             %% "kamon-statsd"      % "0.6.0",
   "com.opencsv"           % "opencsv"           % "3.3",
@@ -132,8 +146,9 @@ lazy val coordDeps = commonDeps ++ Seq(
 )
 
 lazy val cliDeps = Seq(
-  "ch.qos.logback"        % "logback-classic"   % "1.0.7",
-  "com.quantifind"       %% "sumac"             % "0.3.0"
+  logbackDep,
+  "com.quantifind"       %% "sumac"             % "0.3.0",
+  "org.parboiled"        %% "parboiled"         % "2.1.3"
 )
 
 lazy val sparkDeps = Seq(
@@ -233,17 +248,24 @@ lazy val styleSettings = Seq(
   (compile in Test) <<= (compile in Test) dependsOn compileScalastyle
 )
 
+// NOTE: The -Xms1g and using RemoteActorRefProvider (no Cluster startup) both help CLI startup times
 lazy val shellScript = """#!/bin/bash
+allprops="-Dakka.actor.provider=akka.remote.RemoteActorRefProvider"
 while [ "${1:0:2}" = "-D" ]
 do
   allprops="$allprops $1"
   shift
 done
+if [ ! -z "$JAVA_HOME" ]; then
+  CMD="$JAVA_HOME/bin/java"
+else
+  CMD="java"
+fi
 if [ ! -z "$FILO_CONFIG_FILE" ]; then
   config="-Dconfig.file=$FILO_CONFIG_FILE"
 fi
-: ${FILO_LOG_DIR:="."}
-exec java -Xmx4g -Xms4g -DLOG_DIR=$FILO_LOG_DIR $config $allprops -jar "$0" "$@"
+: ${FILOLOG:="."}
+exec $CMD -Xmx4g -Xms1g -DLOG_DIR=$FILOLOG $config $allprops -jar "$0" $@  ;
 """.split("\n")
 
 // Builds cli as a standalone executable to make it easier to launch commands

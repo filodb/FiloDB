@@ -3,8 +3,12 @@ package filodb.core.memstore
 import com.googlecode.javaewah.IntIterator
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.slf4j.StrictLogging
+import kamon.Kamon
+import kamon.metric.instrument.Gauge
 import monix.reactive.Observable
+import org.velvia.filo.ZeroCopyUTF8String
 import scala.collection.mutable.{ArrayBuffer, HashMap}
+import scala.concurrent.duration._
 import scala.concurrent.{ExecutionContext, Future}
 
 import filodb.core.DatasetRef
@@ -32,6 +36,12 @@ with StrictLogging {
   }
 
   def ingest(dataset: DatasetRef, rows: Seq[RowWithOffset]): Unit = datasets(dataset).ingest(rows)
+
+  def indexNames(dataset: DatasetRef): Iterator[String] =
+    datasets.get(dataset).map(d => d.indexNames).getOrElse(Iterator.empty)
+
+  def indexValues(dataset: DatasetRef, indexName: String): Iterator[ZeroCopyUTF8String] =
+    datasets.get(dataset).map(d => d.indexValues(indexName)).getOrElse(Iterator.empty)
 
   def scanPartitions(projection: RichProjection,
                      version: Int,
@@ -61,6 +71,10 @@ with StrictLogging {
   def shutdown(): Unit = {}
 }
 
+object TimeSeriesDataset {
+  val rowsIngested = Kamon.metrics.counter("memstore-rows-ingested")
+  val partitionsCreated = Kamon.metrics.counter("memstore-partitions-created")
+}
 
 // TODO for scalability: get rid of stale partitions?
 // This would involve something like this:
@@ -68,6 +82,8 @@ with StrictLogging {
 //    - If partition still used, move it to a higher (latest) index
 //    - Re-use number for newer partition?  Something like a ring index
 class TimeSeriesDataset(projection: RichProjection, config: Config) extends StrictLogging {
+  import TimeSeriesDataset._
+
   private final val partitions = new ArrayBuffer[TimeSeriesPartition]
   private final val keyMap = new HashMap[PartitionKey, Int]
   private final val keyIndex = new PartitionKeyIndex(projection)
@@ -75,6 +91,10 @@ class TimeSeriesDataset(projection: RichProjection, config: Config) extends Stri
 
   private val chunksToKeep = config.getInt("memstore.chunks-to-keep")
   private val maxChunksSize = config.getInt("memstore.max-chunks-size")
+  private val numPartitions = Kamon.metrics.gauge(s"num-partitions-${projection.datasetRef.dataset}",
+                                                  5.seconds)(new Gauge.CurrentValueCollector {
+                                                   def currentValue: Long = partitions.size.toLong
+                                                  })
 
   class PartitionIterator(intIt: IntIterator) extends Iterator[TimeSeriesPartition] {
     def hasNext: Boolean = intIt.hasNext
@@ -83,6 +103,7 @@ class TimeSeriesDataset(projection: RichProjection, config: Config) extends Stri
 
   // TODO(velvia): Make this multi threaded
   def ingest(rows: Seq[RowWithOffset]): Unit = {
+    rowsIngested.increment(rows.length)
     // now go through each row, find the partition and call partition ingest
     rows.foreach { case RowWithOffset(reader, offset) =>
       val partKey = partKeyFunc(reader)
@@ -92,12 +113,17 @@ class TimeSeriesDataset(projection: RichProjection, config: Config) extends Stri
     }
   }
 
+  def indexNames: Iterator[String] = keyIndex.indexNames
+
+  def indexValues(indexName: String): Iterator[ZeroCopyUTF8String] = keyIndex.indexValues(indexName)
+
   // Creates a new TimeSeriesPartition, updating indexes
   private def addPartition(newPartKey: PartitionKey): Int = {
     val newPart = new TimeSeriesPartition(projection, newPartKey, chunksToKeep, maxChunksSize)
     val newIndex = partitions.length
     keyIndex.addKey(newPartKey, newIndex)
     partitions += newPart
+    partitionsCreated.increment
     newIndex
   }
 

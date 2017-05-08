@@ -4,11 +4,30 @@ import com.typesafe.scalalogging.slf4j.StrictLogging
 import scala.concurrent.duration._
 
 import filodb.core._
-import filodb.core.metadata.Projection
+import filodb.core.metadata.{DataColumn, Dataset, Projection}
 import filodb.coordinator._
 
 trait DatasetOps extends ClientBase with StrictLogging {
   import DatasetCommands._
+
+  /**
+   * Creates a new dataset, defining both columns and the dataset itself, and persisting it
+   * in the MetaStore.
+   */
+  def createNewDataset(dataset: Dataset,
+                       columns: Seq[DataColumn],
+                       database: Option[String] = None,
+                       timeout: FiniteDuration = 30.seconds): Unit = {
+    logger.info(s"Creating dataset ${dataset.name}...")
+    askCoordinator(CreateDataset(dataset, columns, database), timeout) {
+      case DatasetCreated =>
+        logger.info(s"Dataset ${dataset.name} created successfully...")
+      case DatasetAlreadyExists =>
+        throw new RuntimeException(s"Dataset $dataset already exists!")
+      case DatasetError(errMsg) =>
+        throw new RuntimeException(s"Error creating dataset: $errMsg")
+    }
+  }
 
   /**
    * Deletes both the metadata (dataset, columns) as well as drops the column store tables for a dataset.

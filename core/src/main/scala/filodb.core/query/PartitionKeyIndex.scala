@@ -15,6 +15,7 @@ import filodb.core.Types.PartitionKey
  */
 class PartitionKeyIndex(proj: RichProjection) {
   import filodb.core._
+  import collection.JavaConverters._
 
   require(proj.partitionColumns.forall(_.columnType == Column.ColumnType.StringColumn))
   private final val numPartColumns = proj.partitionColumns.length
@@ -46,6 +47,18 @@ class PartitionKeyIndex(proj: RichProjection) {
     val andedBitmap = if (bitmaps.isEmpty) emptySkips else EWAHCompressedBitmap.and(bitmaps :_*)
     (andedBitmap.intIterator, unfoundColumns)
   }
+
+  /**
+   * Obtains an Iterator over the key/tag names in the index
+   */
+  def indexNames: Iterator[String] = indices.keySet.iterator.asScala
+
+  /**
+   * Obtains an Iterator over the specific values or entries for a given key/tag name
+   */
+  def indexValues(indexName: String): Iterator[ZeroCopyUTF8String] =
+    Option(indices.get(indexName)).map { bitmapIndex => bitmapIndex.keys }
+                                  .getOrElse(Iterator.empty)
 
   def reset(): Unit = {
     indices.clear()

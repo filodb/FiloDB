@@ -133,7 +133,7 @@ trait InMemoryColumnStoreScanner extends ColumnStoreScanner {
       val infosSkips = partitionIndex.findByMethod(chunkMethod).toBuffer
       val colIndex = columns.map { col => chunkStore.columnMap.getOrElse(col.name, Int.MaxValue) }.toArray
 
-      val infoStream = Observable.now(ChunkPipeInfos(infosSkips))
+      val infoStream = Observable.now(ChunkPipeInfos(partitionIndex.binPartition, infosSkips))
 
       infoStream ++ Observable.fromIterable(infosSkips).flatMap { case (info, skips) =>
         val chunks = (0 until colIndex.size).map { i =>

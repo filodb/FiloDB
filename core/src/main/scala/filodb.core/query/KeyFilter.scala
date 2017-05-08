@@ -37,11 +37,6 @@ final case class ColumnFilter(column: String, filter: Filter)
 object KeyFilter {
   import Requirements._
 
-  def forceType(kt: KeyType, item: Any): kt.T = item match {
-    case s: String => kt.fromString(s)
-    case t: Any    => t.asInstanceOf[kt.T]
-  }
-
   // Parses the literal in an expression through a KeyType's key function... intended mostly for
   // ComputedColumns so that proper transformation of a value can happen for predicate pushdowns.
   // For example, if a partition column uses :stringPrefix, then apply that first to a value.
@@ -53,6 +48,13 @@ object KeyFilter {
 
   def parseValues(col: Column, values: Iterable[Any]): Iterable[Any] =
     values.map(v => parseSingleValue(col, v))
+
+  // Decodes wrapped values for parsing, esp for UTF8
+  def decode(value: Any): Any = value match {
+    case UTF8Wrapper(z) => z
+    case s: String      => ZeroCopyUTF8String(s)
+    case o: Any         => o
+  }
 
   /**
    * Identifies column names belonging to a projection's partition key columns and their positions within

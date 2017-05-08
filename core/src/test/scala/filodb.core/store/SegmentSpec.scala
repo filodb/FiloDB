@@ -98,7 +98,7 @@ class SegmentSpec extends FunSpec with Matchers with BeforeAndAfter {
     val stringProj = RichProjection(Dataset("a", "first", "seg"), schema)
     val state = new TestSegmentState(stringProj, schema)
     val chunkSet = ChunkSet(state, mapper(names).toIterator)
-    val reader = ChunkSetReader(chunkSet, schema)
+    val reader = ChunkSetReader(chunkSet, defaultPartKey, schema)
 
     reader.rowIterator().map(_.filoUTF8String(0)).toSeq should equal (utf8FirstNames)
   }
@@ -107,7 +107,7 @@ class SegmentSpec extends FunSpec with Matchers with BeforeAndAfter {
     import GdeltTestData._
     val state = new TestSegmentState(projection2, schema, projection2.partKey(197901))
     val chunkSet = ChunkSet(state, readers.take(20).toIterator)
-    val reader = ChunkSetReader(chunkSet, schema)
+    val reader = ChunkSetReader(chunkSet, defaultPartKey, schema)
 
     // Sum up all the NumArticles for first 20 rows
     reader.rowIterator().map(_.getInt(6)).sum should equal (127)

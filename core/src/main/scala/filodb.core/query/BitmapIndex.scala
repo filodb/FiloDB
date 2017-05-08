@@ -14,6 +14,7 @@ import filodb.core.store.ChunkSetInfo.emptySkips
  */
 class BitmapIndex[K](indexName: String) {
   import Filter._
+  import KeyFilter.decode
   import collection.JavaConverters._
 
   private final val bitmaps = new ConcurrentSkipListMap[K, EWAHCompressedBitmap]()
@@ -29,6 +30,18 @@ class BitmapIndex[K](indexName: String) {
     val bitmap = bitmaps.getOrElseUpdate(indexValue, { k => new EWAHCompressedBitmap() })
     bitmap.set(n)
   }
+
+  /**
+   * Returns an iterator over all the keys in this BitmapIndex
+   */
+  def keys: Iterator[K] = bitmaps.keySet.iterator.asScala
+
+  /**
+   * Returns an iterator over all the keys in this BitmapIndex within a range.  By default it is
+   * [start, end) <-- end is exclusive
+   */
+  def keysInRange(start: K, end: K, endExclusive: Boolean = true): Iterator[K] =
+    bitmaps.subMap(start, true, end, !endExclusive).keySet.iterator.asScala
 
   /**
    * Obtains the bitmap from a single value in the index
@@ -56,8 +69,8 @@ class BitmapIndex[K](indexName: String) {
    * Parses the query Filter to produce a bitmap
    */
   def parseFilter(f: Filter): EWAHCompressedBitmap = f match {
-    case Equals(k: K @unchecked) => get(k).getOrElse(emptySkips)
-    case In(values: Set[Any]) => in(values.asInstanceOf[Set[K]])
+    case Equals(v: Any) => get(decode(v).asInstanceOf[K]).getOrElse(emptySkips)
+    case In(values: Set[Any]) => in(values.map(decode).asInstanceOf[Set[K]])
     case And(left, right)     => parseFilter(left).or(parseFilter(right))
     case o: Any               => ???
   }

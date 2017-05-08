@@ -258,7 +258,8 @@ trait CassandraColumnStoreScanner extends ColumnStoreScanner with StrictLogging 
 
     // For now, use a rowkey-sorted PartitionChunkIndex.  If storage layout changes to chunkID order,
     // then we'd have to do something else.
-    logger.debug(s"Reading chunks from columns $columns, ${partitionIndex.binPartition}, method $chunkMethod")
+    val partKey = partitionIndex.binPartition
+    logger.debug(s"Reading chunks from columns $columns, $partKey, method $chunkMethod")
     val (rangeQuery, infosSkips) = chunkMethod match {
       case AllChunkScan             => (true, partitionIndex.allChunks)
       case RowKeyChunkScan(k1, k2)  => (false, partitionIndex.rowKeyRange(k1.binRec, k2.binRec))
@@ -270,9 +271,9 @@ trait CassandraColumnStoreScanner extends ColumnStoreScanner with StrictLogging 
     Observable.fromIterator(groupedInfos).flatMap { infosSkipsGroup =>
       val groupedIds = infosSkipsGroup.map(_._1.id)
       val chunkStreams = colsWithIndex.map { case (col, index) =>
-        chunkTable.readChunks(partitionIndex.binPartition, version, col, index, groupedIds, rangeQuery)
+        chunkTable.readChunks(partKey, version, col, index, groupedIds, rangeQuery)
                   .switchIfEmpty(emptyChunkStream(infosSkipsGroup, index)) }
-      Observable.now(ChunkPipeInfos(infosSkipsGroup)) ++ Observable.merge(chunkStreams:_*)
+      Observable.now(ChunkPipeInfos(partKey, infosSkipsGroup)) ++ Observable.merge(chunkStreams:_*)
     }
   }
 

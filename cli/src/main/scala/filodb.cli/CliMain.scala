@@ -9,17 +9,20 @@ import com.opencsv.CSVWriter
 import com.quantifind.sumac.{ArgMain, FieldArgs}
 import com.typesafe.config.ConfigFactory
 import monix.reactive.Observable
+import org.parboiled2.ParseError
 import org.velvia.filo.{RowReader, FastFiloRowReader}
 import scala.concurrent.Await
 import scala.concurrent.duration._
 import scala.language.postfixOps
+import scala.util.{Try, Success => SSuccess, Failure}
 
 import filodb.cassandra.columnstore.CassandraTokenRangeSplit
-import filodb.coordinator.client.{Client, LocalClient}
-import filodb.coordinator.{DatasetCommands, CoordinatorSetupWithFactory}
+import filodb.coordinator.client.{Client, ClientException, LocalClient}
+import filodb.coordinator.{DatasetCommands, QueryCommands, CoordinatorSetupWithFactory}
 import filodb.core._
 import filodb.core.metadata.Column.{ColumnType, Schema}
 import filodb.core.metadata.{Column, DataColumn, Dataset, RichProjection}
+import filodb.core.query.{ColumnFilter, Filter}
 import filodb.core.store.{Analyzer, ChunkInfo, ChunkSetInfo, FilteredPartitionScan, ScanSplit}
 
 //scalastyle:off
@@ -38,6 +41,11 @@ class Arguments extends FieldArgs {
   var timeoutSeconds: Int = 60
   var outfile: Option[String] = None
   var delimiter: String = ","
+  var indexName: Option[String] = None
+  var host: Option[String] = None
+  var port: Int = 2552
+  var promql: Option[String] = None
+  var metricColumn: String = "kpi"
 
   import Column.ColumnType._
 
@@ -61,7 +69,7 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
 
   val system = ActorSystem("filo-cli", systemConfig)
   val config = systemConfig.getConfig("filodb")
-  val client = new LocalClient(coordinatorActor)
+  lazy val client = new LocalClient(coordinatorActor)
 
   import Client.{actorAsk, parse}
 
@@ -72,6 +80,10 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
     println("  types:  int,long,double,string,bool,timestamp")
     println("  common options:  --dataset --database")
     println("  OR:  --select col1, col2  [--limit <n>]  [--outfile /tmp/out.csv]")
+    println("\nStandalone client commands:")
+    println("  --host <hostname/IP> [--port ...] --command indexnames --dataset <dataset>")
+    println("  --host <hostname/IP> [--port ...] --command indexvalues --indexname <index> --dataset <dataset>")
+    println("  --host <hostname/IP> [--port ...] [--metricColumn <col>] --dataset <dataset> --promql <query>")
     println("\nTo change config: pass -Dconfig.file=/path/to/config as first arg or set $FILO_CONFIG_FILE")
     println("  or override any config by passing -Dconfig.path=newvalue as first args")
     println("\nFor detailed debugging, uncomment the TRACE/DEBUG loggers in logback.xml and add these ")
@@ -144,14 +156,33 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
         case Some("truncate") =>
           client.truncateDataset(getRef(args), version, timeout)
 
+        case Some("indexnames") =>
+          require(args.host.nonEmpty && args.dataset.nonEmpty, "--host and --dataset must be defined")
+          val remote = Client.standaloneClient(system, args.host.get, args.port)
+          val names = remote.getIndexNames(DatasetRef(args.dataset.get))
+          names.foreach(println)
+
+        case Some("indexvalues") =>
+          require(args.host.nonEmpty && args.dataset.nonEmpty, "--host and --dataset must be defined")
+          require(args.indexName.nonEmpty, "--indexName required")
+          val remote = Client.standaloneClient(system, args.host.get, args.port)
+          val values = remote.getIndexValues(DatasetRef(args.dataset.get), args.indexName.get)
+          values.foreach(println)
+
         case x: Any =>
-          args.select.map { selectCols =>
-            exportCSV(getRef(args),
-                      version,
-                      selectCols,
-                      args.limit,
-                      args.outfile)
-          }.getOrElse(printHelp)
+          args.promql.map { query =>
+            require(args.host.nonEmpty && args.dataset.nonEmpty, "--host and --dataset must be defined")
+            val remote = Client.standaloneClient(system, args.host.get, args.port)
+            executePromQuery(remote, query, args.dataset.get, args.metricColumn)
+          }.getOrElse {
+            args.select.map { selectCols =>
+              exportCSV(getRef(args),
+                        version,
+                        selectCols,
+                        args.limit,
+                        args.outfile)
+            }.getOrElse(printHelp)
+          }
       }
     } catch {
       case e: Throwable =>
@@ -209,22 +240,65 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
         return
     }
 
-    actorAsk(coordinatorActor,
-             DatasetCommands.CreateDataset(datasetObj, columns, dataset.database),
-             timeout) {
-      case DatasetCommands.DatasetCreated =>
-        println(s"Dataset $dataset created!")
-        exitCode = 0
-      case DatasetCommands.DatasetAlreadyExists =>
-        println(s"Dataset $dataset already exists!")
-        exitCode = 0
-      case DatasetCommands.DatasetError(errMsg) =>
-        println(s"Error creating dataset $dataset: $errMsg")
-        exitCode = 2
-      case other: Any =>
-        println(s"Error: $other")
+    try {
+      client.createNewDataset(datasetObj, columns, dataset.database)
+      exitCode = 0
+    } catch {
+      case r: RuntimeException =>
+        println(r.getMessage)
         exitCode = 2
     }
+  }
+
+  import QueryCommands.AggregateResponse
+
+  def executePromQuery(client: LocalClient, query: String, dataset: String, metricCol: String): Unit = {
+    val parser = new PromQLParser(query)
+    parser.Query.run() match {
+      case SSuccess(VectorExprOnlyQuery(partSpec)) =>
+        println(s"Sorry, queries returning only raw vectors are not supported right now.")
+        exitCode = 1
+      case SSuccess(FunctionQuery(funcName, paramOpt, partSpec)) =>
+        evalArgs(funcName, paramOpt, partSpec).map { args =>
+          val ref = DatasetRef(dataset)
+          val filters = partSpec.filters :+ ColumnFilter(metricCol, Filter.Equals(partSpec.metricName))
+          println(s"Sending aggregation command to server for $ref... $funcName($paramOpt)")
+          println(s"Args: $args\nFilters: $filters")
+          try {
+            printAggregate(client.partitionFilterAggregate(ref, funcName, args, filters))
+          } catch {
+            case e: ClientException =>
+              println(s"ERROR: ${e.getMessage}")
+              exitCode = 2
+          }
+        }.getOrElse {
+          println(s"Unable to parse function $funcName with option $paramOpt")
+          exitCode = 2
+        }
+      case Failure(e: ParseError) =>
+        println(s"Failure parsing $query:\n${parser.formatError(e)}")
+        exitCode = 2
+      case Failure(t: Throwable) => throw t
+    }
+  }
+
+  def evalArgs(func: String, paramOpt: Option[String], spec: PartitionSpec): Option[Seq[String]] = {
+    // For now, only parse the time aggregate functions
+    if (func.startsWith("time_group")) {
+      // arguments:  <timeColumn> <valueColumn> <startTs> <endTs> <numBuckets>
+      val numBuckets = paramOpt.map(_.toInt).getOrElse(50)
+      val endTs = System.currentTimeMillis
+      val startTs = endTs - (spec.range * 1000)
+      Some(Seq("timestamp", spec.column, startTs.toString, endTs.toString, numBuckets.toString))
+    } else {
+      // Assume a single-column function
+      Some(Seq(spec.column))
+    }
+  }
+
+  def printAggregate(agg: AggregateResponse[_]): Unit = agg match {
+    case AggregateResponse(_, _, array) =>
+      println(s"[${array.mkString(",")}]")
   }
 
   import scala.language.existentials

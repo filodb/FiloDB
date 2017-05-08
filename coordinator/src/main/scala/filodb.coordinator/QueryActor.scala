@@ -9,6 +9,7 @@ import scala.util.Try
 
 import filodb.core._
 import filodb.core.binaryrecord.BinaryRecord
+import filodb.core.memstore.MemStore
 import filodb.core.metadata.{Column, RichProjection, BadArgument => BadArg, WrongNumberArguments}
 import filodb.core.query.{Aggregate, AggregationFunction}
 import filodb.core.store._
@@ -40,6 +41,11 @@ class QueryActor(colStore: BaseColumnStore,
     case LongColumn           => true
     case TimestampColumn      => true
     case x: Column.ColumnType => false
+  }
+
+  private val memStore: Option[MemStore] = colStore match {
+    case m: MemStore => Some(m)
+    case o: Any      => None
   }
 
   def validateColumns(colStrs: Seq[String]): Seq[Column] Or ErrorResponse =
@@ -147,5 +153,9 @@ class QueryActor(colStore: BaseColumnStore,
   def receive: Receive = {
     case q: RawQuery       => handleRawQuery(q)
     case q: AggregateQuery => handleAggQuery(q)
+    case GetIndexNames(ref, limit) if memStore.isDefined =>
+      sender ! memStore.get.indexNames(ref).take(limit).toBuffer
+    case GetIndexValues(ref, index, limit) if memStore.isDefined =>
+      sender ! memStore.get.indexValues(ref, index).take(limit).map(_.toString).toBuffer
   }
 }

@@ -1,7 +1,7 @@
 package filodb.core.memstore
 
 import org.velvia.filo.{IntReaderAppender, LongReaderAppender, DoubleReaderAppender, ConstAppender}
-import org.velvia.filo.{vectors => bv, RowReaderAppender, RowReader}
+import org.velvia.filo.{vectors => bv, RowReaderAppender, RowReader, ZeroCopyUTF8String}
 
 import filodb.core.DatasetRef
 import filodb.core.metadata.{Column, RichProjection}
@@ -34,6 +34,16 @@ trait MemStore extends BaseColumnStore {
    * @param rows the input rows, each one with an offset, and conforming to the schema used in setup()
    */
   def ingest(dataset: DatasetRef, rows: Seq[RowWithOffset]): Unit
+
+  /**
+   * Returns the names of tags or columns that are indexed at the partition level
+   */
+  def indexNames(dataset: DatasetRef): Iterator[String]
+
+  /**
+   * Returns values for a given index name for a dataset
+   */
+  def indexValues(dataset: DatasetRef, indexName: String): Iterator[ZeroCopyUTF8String]
 }
 
 import Column.ColumnType._

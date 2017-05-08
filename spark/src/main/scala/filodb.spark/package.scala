@@ -195,12 +195,7 @@ package object spark extends StrictLogging {
   // This doesn't create columns, because that's in checkAndAddColumns.
   private[spark] def createNewDataset(dataset: Dataset): Unit = {
     logger.info(s"Creating dataset ${dataset.name}...")
-    actorAsk(FiloDriver.coordinatorActor, CreateDataset(dataset, Nil), datasetOpTimeout) {
-      case DatasetCreated =>
-        logger.info(s"Dataset ${dataset.name} created successfully...")
-      case DatasetError(errMsg) =>
-        throw new RuntimeException(s"Error creating dataset: $errMsg")
-    }
+    FiloDriver.client.createNewDataset(dataset, Nil, timeout = datasetOpTimeout)
   }
 
   private[spark] def deleteDataset(dataset: DatasetRef): Unit = {

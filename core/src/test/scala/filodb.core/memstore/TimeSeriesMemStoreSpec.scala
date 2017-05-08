@@ -30,6 +30,8 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     val rows = data.zipWithIndex.map { case (reader, n) => RowWithOffset(reader, n) }
     memStore.ingest(projection1.datasetRef, rows)
 
+    memStore.indexNames(projection1.datasetRef).toSeq should equal (Seq("series"))
+
     val minSet = data.map(_.getDouble(1)).toSet
     val split = memStore.getScanSplits(projection1.datasetRef, 1).head
     val q = memStore.scanRows(projection1, Seq(schema(1)), 0, FilteredPartitionScan(split))

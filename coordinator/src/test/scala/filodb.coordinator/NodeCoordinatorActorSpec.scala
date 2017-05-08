@@ -257,13 +257,48 @@ with CoordinatorSetup with ScalaFutures {
 
       // Try a filtered partition query
       import ZeroCopyUTF8String._
-      val series2 = (2 to 4).map(n => s"Series $n".utf8).toSet.asInstanceOf[Set[Any]]
+      val series2 = (2 to 4).map(n => s"Series $n").toSet.asInstanceOf[Set[Any]]
       val multiFilter = Seq(ColumnFilter("series", Filter.In(series2)))
       val q2 = AggregateQuery(ref, 0, args, FilteredPartitionQuery(multiFilter))
       probe.send(coordActor, q2)
       val answer2 = probe.expectMsgClass(classOf[AggregateResponse[Double]])
       answer2.elementClass should equal (classOf[Double])
       answer2.elements should equal (Array(14.0, 24.0))
+
+      // What if filter returns no results?
+      val filter3 = Seq(ColumnFilter("series", Filter.Equals("foobar".utf8)))
+      val q3 = AggregateQuery(ref, 0, args, FilteredPartitionQuery(filter3))
+      probe.send(coordActor, q3)
+      val answer3 = probe.expectMsgClass(classOf[AggregateResponse[Double]])
+      answer3.elementClass should equal (classOf[Double])
+      answer3.elements.length should equal (2)
+    }
+
+    it("should query partitions in AggregateQuery") {
+      val ref = setupTimeSeries()
+      probe.send(coordActor, IngestRows(ref, 0, mapper(linearMultiSeries()).take(30), 1L))
+      probe.expectMsg(Ack(1L))
+
+      val args = QueryArgs("partition_keys", Seq("foo"))  // Doesn't matter what the column name is
+      val series2 = (2 to 4).map(n => s"Series $n").toSet
+      val multiFilter = Seq(ColumnFilter("series", Filter.In(series2.asInstanceOf[Set[Any]])))
+      val q2 = AggregateQuery(ref, 0, args, FilteredPartitionQuery(multiFilter))
+      probe.send(coordActor, q2)
+      val answer2 = probe.expectMsgClass(classOf[AggregateResponse[String]])
+      answer2.elementClass should equal (classOf[String])
+      answer2.elements.toSet should equal (series2.map(s => s"b[$s]"))
+    }
+
+    it("should respond to GetIndexNames and GetIndexValues") {
+      val ref = setupTimeSeries()
+      probe.send(coordActor, IngestRows(ref, 0, mapper(linearMultiSeries()).take(30), 1L))
+      probe.expectMsg(Ack(1L))
+
+      probe.send(coordActor, GetIndexNames(ref))
+      probe.expectMsg(Seq("series"))
+
+      probe.send(coordActor, GetIndexValues(ref, "series", limit=4))
+      probe.expectMsg(Seq("Series 0", "Series 1", "Series 2", "Series 3"))
     }
   }
 

@@ -10,6 +10,7 @@ class PartitionKeyIndexSpec extends FunSpec with Matchers with BeforeAndAfter {
   import GdeltTestData._
   import Filter._
   import org.velvia.filo.ZeroCopyUTF8String._
+  import org.velvia.filo.UTF8Wrapper
 
   val keyIndex = new PartitionKeyIndex(projection6)
 
@@ -45,6 +46,36 @@ class PartitionKeyIndexSpec extends FunSpec with Matchers with BeforeAndAfter {
     val (partNums3, unFounded3) = keyIndex.parseFilters(Seq(filter3))
     partNums3.toSeq should equal (Seq(8, 9))
     unFounded3.toSeq should equal (Nil)
+  }
+
+  it("should parse filters with UTF8Wrapper and string correctly") {
+    // Add the first nine keys and row numbers
+    readers.zipWithIndex.take(10).foreach { case (row, index) =>
+      keyIndex.addKey(projection6.partitionKeyFunc(row), index)
+    }
+
+    val filter2 = ColumnFilter("Actor2Name", Equals(UTF8Wrapper("REGIME".utf8)))
+    val (partNums2, unFounded2) = keyIndex.parseFilters(Seq(filter2))
+    partNums2.toSeq should equal (Seq(8, 9))
+    unFounded2.toSeq should equal (Nil)
+
+    val filter3 = ColumnFilter("Actor2Name", Equals("REGIME"))
+    val (partNums3, unFounded3) = keyIndex.parseFilters(Seq(filter3))
+    partNums3.toSeq should equal (Seq(8, 9))
+    unFounded3.toSeq should equal (Nil)
+  }
+
+  it("should obtain indexed names and values") {
+    // Add the first nine keys and row numbers
+    readers.zipWithIndex.take(10).foreach { case (row, index) =>
+      keyIndex.addKey(projection6.partitionKeyFunc(row), index)
+    }
+
+    keyIndex.indexNames.toSet should equal (Set("Actor2Code", "Actor2Name"))
+    keyIndex.indexValues("not_found").toSeq should equal (Nil)
+
+    val codes = Seq("AFR", "AGR", "CHN", "COP", "CVL", "EGYEDU", "GOV").map(_.utf8)
+    keyIndex.indexValues("Actor2Code").toSeq should equal (codes)
   }
 
   it("should be able to AND multiple filters together") {

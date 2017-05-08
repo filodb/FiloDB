@@ -26,6 +26,21 @@ object QueryCommands {
   final case class MostRecentTime(lastMillis: Long) extends DataQuery
 
   /**
+   * Returns a Seq[String] of the first *limit* tags or columns indexed
+   * Or Nil if the dataset is not found.
+   */
+  final case class GetIndexNames(dataset: DatasetRef,
+                                 limit: Int = 10) extends QueryCommand
+
+  /**
+   * Returns a Seq[String] of the first *limit* values indexed for a given tag/column.
+   * Or Nil if the dataset or indexName is not found.
+   */
+  final case class GetIndexValues(dataset: DatasetRef,
+                                  indexName: String,
+                                  limit: Int = 100) extends QueryCommand
+
+  /**
    * Executes a query which returns the raw FiloVectors for the client to process
    * @param dataset the dataset (and possibly database) to query
    * @param columns the name of the columns to query.  Data will be returned for each chunkset in the same

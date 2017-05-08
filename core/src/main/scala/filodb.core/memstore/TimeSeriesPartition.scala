@@ -142,7 +142,7 @@ class TimeSeriesPartition(val projection: RichProjection,
   def streamReaders(infosSkips: InfosSkipsIt, positions: Array[Int]): Observable[ChunkSetReader] =
     Observable.fromIterator(infosSkips).map { case (info, skips) =>
       val vectArray = vectors.get(info.id)
-      new ChunkSetReader(info, skips, positions.map(vectArray))
+      new ChunkSetReader(info, binPartition, skips, positions.map(vectArray))
     }
 
   // Initializes vectors, chunkIDs for a new chunkset/chunkID

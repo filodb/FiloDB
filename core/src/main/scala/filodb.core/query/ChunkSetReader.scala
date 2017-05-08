@@ -9,7 +9,7 @@ import filodb.core.binaryrecord.{BinaryRecord, RecordSchema}
 import filodb.core.metadata.Column
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.store.{ChunkSet, ChunkSetInfo}
-import filodb.core.Types.ColumnId
+import filodb.core.Types.{ColumnId, PartitionKey}
 
 /**
  * ChunkSetReader aggregates incoming chunks during query/read time and provides an Iterator[RowReader]
@@ -18,9 +18,10 @@ import filodb.core.Types.ColumnId
  * the parsing and allocation overhead.
  */
 class MutableChunkSetReader(info: ChunkSetInfo,
+                            partition: PartitionKey,
                             skips: EWAHCompressedBitmap,
                             makers: Array[ChunkSetReader.VectorFactory])
-extends ChunkSetReader(info, skips, new Array[FiloVector[_]](makers.size)) {
+extends ChunkSetReader(info, partition, skips, new Array[FiloVector[_]](makers.size)) {
   private final val bitset = new BitSet
 
   final def addChunk(colNo: Int, bytes: ByteBuffer): Unit = {
@@ -35,6 +36,7 @@ extends ChunkSetReader(info, skips, new Array[FiloVector[_]](makers.size)) {
  * ChunkSetReader provides a way to iterate through FiloVectors as rows, including skipping of rows.
  */
 class ChunkSetReader(val info: ChunkSetInfo,
+                     val partition: PartitionKey,
                      skips: EWAHCompressedBitmap,
                      parsers: Array[FiloVector[_]]) {
   import ChunkSetReader._
@@ -87,11 +89,12 @@ object ChunkSetReader {
     (col: Column) => FiloVector.defaultVectorMaker(col.columnType.clazz)
 
   def apply(chunkSet: ChunkSet,
+            partition: PartitionKey,
             schema: Seq[Column],
             skips: EWAHCompressedBitmap = emptySkips): ChunkSetReader = {
     val nameToPos = schema.zipWithIndex.map { case (c, i) => (c.name -> i) }.toMap
     val makers = schema.map(defaultColumnToMaker).toArray
-    val reader = new MutableChunkSetReader(chunkSet.info, skips, makers)
+    val reader = new MutableChunkSetReader(chunkSet.info, partition, skips, makers)
     chunkSet.chunks.foreach { case (colName, bytes) => reader.addChunk(nameToPos(colName), bytes) }
     reader
   }

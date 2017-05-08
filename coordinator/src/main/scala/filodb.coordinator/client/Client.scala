@@ -1,6 +1,6 @@
 package filodb.coordinator.client
 
-import akka.actor.{ActorRef, ActorSystem}
+import akka.actor.{ActorRef, ActorSystem, Address, RootActorPath}
 import akka.pattern.ask
 import akka.util.Timeout
 import com.typesafe.scalalogging.slf4j.StrictLogging
@@ -36,6 +36,22 @@ object Client {
     val fut = Future.sequence(actors.map(_ ? msg))
     Await.result(fut, askTimeout).map(f)
   }
+
+  /**
+   * Creates a LocalClient that remotely connects to a standalone FiloDB node NodeCoordinator.
+   * @param host the full host string (without port) or IP address where the FiloDB standalone node resides
+   * @param port the Akka port number for remote connectivity
+   * @param systemName the ActorSystem name to connect to
+   */
+  def standaloneClient(system: ActorSystem,
+                       host: String,
+                       port: Int = 2552,
+                       askTimeout: FiniteDuration = 30 seconds): LocalClient = {
+    val addr = Address("akka.tcp", "filo-standalone", host, port)
+    val refFuture = system.actorSelection(RootActorPath(addr) / "user" / "coordinator")
+                          .resolveOne(askTimeout)
+    new LocalClient(Await.result(refFuture, askTimeout))
+  }
 }
 
 case class ClientException(error: ErrorResponse) extends Exception(error.toString)
@@ -64,11 +80,13 @@ trait ClientBase {
   def sendAllIngestors(msg: Any): Unit
 }
 
+trait AllClientOps extends IngestionOps with DatasetOps with QueryOps
+
 /**
  * Standard client for a local FiloDB coordinator actor, which takes reference to a single NodeCoordinator
  * For example, this would be used by the CLI.
  */
-class LocalClient(val nodeCoordinator: ActorRef) extends IngestionOps with DatasetOps {
+class LocalClient(val nodeCoordinator: ActorRef) extends AllClientOps {
   def askCoordinator[B](msg: Any, askTimeout: FiniteDuration = 30 seconds)(f: PartialFunction[Any, B]): B =
     Client.actorAsk(nodeCoordinator, msg, askTimeout)(Client.standardResponse(f))
 
@@ -86,8 +104,7 @@ class LocalClient(val nodeCoordinator: ActorRef) extends IngestionOps with Datas
  */
 class ClusterClient(nodeClusterActor: ActorRef,
                     ingestionRole: String,
-                    metadataRole: String) extends IngestionOps with DatasetOps
-with StrictLogging {
+                    metadataRole: String) extends AllClientOps with StrictLogging {
   import NodeClusterActor._
 
   def askCoordinator[B](msg: Any, askTimeout: FiniteDuration = 30 seconds)(f: PartialFunction[Any, B]): B =

@@ -674,6 +674,10 @@ You can get the huge variety of JMH options by running `jmh:run -help`.  For sta
 
     jmh:run -i 5 -wi 5 -f3 -prof stack -jvmArgsAppend -Djmh.stack.lines=3
 
+Stack profiling isn't as great as JVM Flight Recorder though.  To use that, set a really high number of repetitions then get data through JMC:
+
+    jmh:run -i 1000 -wi 20 -f 3  -jvmArgsAppend -XX:MaxInlineLevel=20 -jvmArgsAppend -XX:+UnlockCommercialFeatures -jvmArgsAppend -XX:+FlightRecorder -jvmArgsAppend -Xmx2g
+
 There are also stress tests in the stress module.  See the [Stress README](stress/README.md).
 
 ## You can help!

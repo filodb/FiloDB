@@ -102,12 +102,18 @@ trait CoordinatorSetup {
       name = "nodeClusterProxy")
 
   def shutdown(): Unit = {
-    system.shutdown()
-    columnStore.shutdown()
-    metaStore.shutdown()
-    // Important: shut down executioncontext as well
-    threadPool.shutdown()
-    kamon.Kamon.shutdown()
+    try {
+      system.shutdown()
+      columnStore.shutdown()
+      metaStore.shutdown()
+      // Important: shut down executioncontext as well
+      threadPool.shutdown()
+      kamon.Kamon.shutdown()
+    } catch {
+      case e: Exception =>
+        system.shutdown()
+        threadPool.shutdown()
+    }
   }
 }
 

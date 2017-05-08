@@ -11,11 +11,13 @@ import filodb.core._
 import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.metadata.{Column, Projection, RichProjection}
 import filodb.core.query.{ChunkSetReader, MutableChunkSetReader, PartitionChunkIndex}
+import filodb.core.Types._
 import ChunkSetReader._
 
 
 trait ChunkPipeItem
-case class ChunkPipeInfos(infosAndSkips: ChunkSetInfo.ChunkInfosAndSkips) extends ChunkPipeItem
+case class ChunkPipeInfos(partition: PartitionKey,
+                          infosAndSkips: ChunkSetInfo.ChunkInfosAndSkips) extends ChunkPipeItem
 case class SingleChunkInfo(id: Types.ChunkID, colNo: Int, bytes: ByteBuffer) extends ChunkPipeItem
 
 /**
@@ -23,7 +25,6 @@ case class SingleChunkInfo(id: Types.ChunkID, colNo: Int, bytes: ByteBuffer) ext
  * We are careful to separate out ExecutionContext for reading only.
  */
 trait ColumnStoreScanner extends StrictLogging {
-  import filodb.core.Types._
   import filodb.core.Iterators._
 
   // Use a separate ExecutionContext for reading.  This is important to prevent deadlocks.
@@ -125,9 +126,9 @@ private[store] class ChunkSetReaderAggregator(schema: Seq[Column],
               emitReader = Some(reader)
             }
         }
-      case ChunkPipeInfos(infos) =>
+      case ChunkPipeInfos(partition, infos) =>
         infos.foreach { case (info, skips) =>
-          readers.put(info.id, new MutableChunkSetReader(info, skips, makers))
+          readers.put(info.id, new MutableChunkSetReader(info, partition, skips, makers))
         }
     }
     this

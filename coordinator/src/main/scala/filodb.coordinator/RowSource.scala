@@ -9,9 +9,11 @@ import scala.collection.mutable.HashMap
 import scala.concurrent.duration._
 import scala.language.existentials
 
+import filodb.coordinator.client.DatasetOps
 import filodb.core._
 import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.metadata.RichProjection
+import filodb.core.memstore.{MemStore, RowWithOffset, DatasetAlreadySetup}
 
 object RowSource {
   case object Start
@@ -21,6 +23,19 @@ object RowSource {
   case object AckTimeout
   case class SetupError(err: ErrorResponse)
   case class IngestionErr(msg: String, cause: Option[Throwable] = None)
+}
+
+/**
+ * A zero-arg constructor class that knows how to create and return an ActorRef for a given RowSource.
+ */
+trait RowSourceFactory {
+  // Get or create the projection. Usually the user would set up the ingestion projection first, so this
+  // usually just reads the projection out of the MetaStore.
+  // The projection should have the columns to ingest in the right order.
+  // The dataset to read could come out of the config.
+  def getProjection(setup: CoordinatorSetup, client: DatasetOps): RichProjection
+  // Create the RowSource actor
+  def create(setup: CoordinatorSetup, projection: RichProjection, clusterActor: ActorRef): ActorRef
 }
 
 /**
@@ -224,7 +239,7 @@ trait RowSource extends Actor with StrictLogging {
     if (outstanding.size < maxUnackedBatches) self ! GetMoreRows
   }
 
-  private var scheduledTask: Option[Cancellable] = None
+  protected var scheduledTask: Option[Cancellable] = None
   def schedule(delay: FiniteDuration, msg: Any): Unit = {
     scheduledTask.foreach(_.cancel)
     val task = context.system.scheduler.scheduleOnce(delay, self, msg)
@@ -242,4 +257,38 @@ trait RowSource extends Actor with StrictLogging {
   }
 
   val receive = start
+}
+
+/**
+ * A RowSource which is designed for direct ingestion into the MemStore.  No BinaryRecord, no Akka.
+ */
+trait DirectRowSource extends Actor with StrictLogging {
+  import RowSource._
+
+  def memStore: MemStore
+  def projection: RichProjection
+
+  def batchIterator: Iterator[Seq[RowWithOffset]]
+
+  private val rowsIngested = Kamon.metrics.counter("source-rows-ingested")
+
+  def receive: Receive = LoggingReceive {
+    case Start =>
+      try {
+        memStore.setup(projection)
+      } catch {
+        case DatasetAlreadySetup(dataset) =>
+          logger.warn(s"Ignoring DatasetAlreadySetup with dataset $dataset....")
+      }
+      val ref = projection.datasetRef
+      logger.info(s"Starting direct ingestion for dataset $ref...")
+
+      batchIterator.foreach { batch =>
+        memStore.ingest(ref, batch)
+        rowsIngested.increment(batch.length)
+      }
+
+      sender ! AllDone
+      context.stop(self)
+  }
 }
