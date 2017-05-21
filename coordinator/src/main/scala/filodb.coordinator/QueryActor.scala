@@ -36,6 +36,7 @@ class QueryActor(colStore: BaseColumnStore,
   import Column.ColumnType._
 
   implicit val scheduler = monix.execution.Scheduler(context.dispatcher)
+  var shardMap = ShardMapper.empty
 
   private val isTimeSeries = projection.rowKeyColumns.head.columnType match {
     case LongColumn           => true
@@ -52,7 +53,7 @@ class QueryActor(colStore: BaseColumnStore,
     RichProjection.getColumnsFromNames(projection.columns, colStrs)
                   .badMap {
                     case RichProjection.MissingColumnNames(missing, _) =>
-                      IngestionCommands.UndefinedColumns(missing.toSet)
+                      NodeClusterActor.UndefinedColumns(missing.toSet)
                     case x: Any =>
                       DatasetCommands.DatasetError(x.toString)
                   }
@@ -157,5 +158,7 @@ class QueryActor(colStore: BaseColumnStore,
       sender ! memStore.get.indexNames(ref).take(limit).toBuffer
     case GetIndexValues(ref, index, limit) if memStore.isDefined =>
       sender ! memStore.get.indexValues(ref, index).take(limit).map(_.toString).toBuffer
+    case NodeClusterActor.ShardMapUpdate(ref, newMap) =>
+      shardMap = newMap
   }
 }

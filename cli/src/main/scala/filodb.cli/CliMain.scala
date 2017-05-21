@@ -7,8 +7,9 @@ import javax.activation.UnsupportedDataTypeException
 import akka.actor.ActorSystem
 import com.opencsv.CSVWriter
 import com.quantifind.sumac.{ArgMain, FieldArgs}
-import com.typesafe.config.ConfigFactory
+import com.typesafe.config.{Config, ConfigFactory}
 import monix.reactive.Observable
+import net.ceedubs.ficus.Ficus._
 import org.parboiled2.ParseError
 import org.velvia.filo.{RowReader, FastFiloRowReader}
 import scala.concurrent.Await
@@ -18,7 +19,7 @@ import scala.util.{Try, Success => SSuccess, Failure}
 
 import filodb.cassandra.columnstore.CassandraTokenRangeSplit
 import filodb.coordinator.client.{Client, ClientException, LocalClient}
-import filodb.coordinator.{DatasetCommands, QueryCommands, CoordinatorSetupWithFactory}
+import filodb.coordinator.{DatasetCommands, QueryCommands, CoordinatorSetupWithFactory, NodeClusterActor}
 import filodb.core._
 import filodb.core.metadata.Column.{ColumnType, Schema}
 import filodb.core.metadata.{Column, DataColumn, Dataset, RichProjection}
@@ -31,6 +32,7 @@ class Arguments extends FieldArgs {
   var database: Option[String] = None
   var command: Option[String] = None
   var filename: Option[String] = None
+  var configPath: Option[String] = None
   var columns: Option[Map[String, String]] = None
   var rowKeys: Seq[String] = Nil
   var partitionKeys: Seq[String] = Nil
@@ -84,6 +86,7 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
     println("  --host <hostname/IP> [--port ...] --command indexnames --dataset <dataset>")
     println("  --host <hostname/IP> [--port ...] --command indexvalues --indexname <index> --dataset <dataset>")
     println("  --host <hostname/IP> [--port ...] [--metricColumn <col>] --dataset <dataset> --promql <query>")
+    println("  --host <hostname/IP> [--port ...] --command setup --filename <configFile> | --configPath <path>")
     println("\nTo change config: pass -Dconfig.file=/path/to/config as first arg or set $FILO_CONFIG_FILE")
     println("  or override any config by passing -Dconfig.path=newvalue as first args")
     println("\nFor detailed debugging, uncomment the TRACE/DEBUG loggers in logback.xml and add these ")
@@ -169,6 +172,19 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
           val values = remote.getIndexValues(DatasetRef(args.dataset.get), args.indexName.get)
           values.foreach(println)
 
+        case Some("setup") =>
+          require(args.host.nonEmpty, "--host must be defined")
+          val remote = Client.standaloneClient(system, args.host.get, args.port)
+          (args.filename, args.configPath) match {
+            case (Some(configFile), _) =>
+              setupDataset(remote, ConfigFactory.parseFile(new java.io.File(configFile)))
+            case (None, Some(configPath)) =>
+              setupDataset(remote, systemConfig.getConfig(configPath))
+            case (None, None) =>
+              println("Either --filename or --configPath must be specified for setup")
+              exitCode = 1
+          }
+
         case x: Any =>
           args.promql.map { query =>
             require(args.host.nonEmpty && args.dataset.nonEmpty, "--host and --dataset must be defined")
@@ -246,6 +262,39 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
     } catch {
       case r: RuntimeException =>
         println(r.getMessage)
+        exitCode = 2
+    }
+  }
+
+  import NodeClusterActor._
+
+  /**
+   * setup command configuration example:
+   * {{{
+   *   dataset = "gdelt"
+   *   columns = ["GLOBALEVENTID", "MonthYear", "Year", "Actor2Code", "Actor2Name", "Code"]
+   *   numshards = 30   # for Kafka this should match the number of partitions
+   *   min-num-nodes = 10     # This many nodes needed to ingest all shards
+   *   sourcefactory = "filodb.kafka.KafkaSourceFactory"
+   *   sourceconfig {
+   *     brokers = ["10.11.12.13", "10.11.12.14"]
+   *     topic = "gdelt-events.production"
+   *   }
+   * }}}
+   * sourcefactory and sourceconfig is optional.  If omitted, a NoOpFactory will be used, which means
+   * no automatic pull ingestion will be started.  New data can always be pushed into any Filo node.
+   */
+  def setupDataset(client: LocalClient, config: Config): Unit = {
+    val dataset = DatasetRef(config.getString("dataset"))
+    val columns = config.as[Seq[String]]("columns")
+    val resourceSpec = DatasetResourceSpec(config.getInt("numshards"),
+                                           config.getInt("min-num-nodes"))
+    val sourceSpec = config.as[Option[String]]("sourcefactory").map { factory =>
+                       IngestionSource(factory, config.getConfig("sourceconfig"))
+                     }.getOrElse(noOpSource)
+    client.setupDataset(dataset, columns, resourceSpec, sourceSpec).foreach {
+      case e: ErrorResponse =>
+        println(s"Errors setting up dataset $dataset: $e")
         exitCode = 2
     }
   }

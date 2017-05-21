@@ -44,21 +44,34 @@ object DatasetCommands {
   case object DatasetDropped extends NodeResponse
 }
 
-object IngestionCommands {
+object MiscCommands {
   /**
-   * Sets up ingestion for a given dataset, version, and schema of columns.
-   * The dataset and columns must have been previously defined.
-   *
-   * @return BadSchema if the partition column is unsupported, sort column invalid, etc.
+   * Asks for the NodeClusterActor ActorRef.  Sends back Option[ActorRef].
    */
-  final case class SetupIngestion(dataset: DatasetRef,
-                                  schema: Seq[String],
-                                  version: Int) extends NodeCommand
+  case object GetClusterActor extends NodeCommand
+}
 
-  case object IngestionReady extends NodeResponse
-  case object UnknownDataset extends ErrorResponse with NodeResponse
-  final case class UndefinedColumns(undefined: Set[String]) extends ErrorResponse with NodeResponse
-  final case class BadSchema(message: String) extends ErrorResponse with NodeResponse
+object IngestionCommands {
+  import NodeClusterActor._
+
+  /**
+   * Sets up ingestion and querying for a given dataset, version, and schema of columns.
+   * The dataset and columns must have been previously defined.
+   * Internally creates the projection and sets up DatasetCoordinatorActors and QueryActors
+   * and also starts up a RowSource to start ingestion for current dataset.
+   * NOTE: this is not meant for external APIs but an internal one.  It is sent by the NodeClusterActor
+   * after verifying the dataset.
+   *
+   * @param encodedColumns a list of strings as returned by Column.toString (encoded string of all fields)
+   * @param source the IngestionSource on each node.  Use noOpSource to not start ingestion and
+   *               manually push records into NodeCoordinator.
+   * @return no response. Instead the ClusterActor will get an update to the node status when ingestion
+   *                      and querying are ready.
+   */
+  final case class DatasetSetup(dataset: Dataset,
+                                encodedColumns: Seq[String],
+                                version: Int,
+                                source: IngestionSource = noOpSource) extends NodeCommand
 
   /**
    * Ingests a new set of rows for a given dataset and version.
@@ -73,6 +86,7 @@ object IngestionCommands {
                               seqNo: Long) extends NodeCommand
 
   final case class Ack(seqNo: Long) extends NodeResponse
+  case object UnknownDataset extends NodeResponse with ErrorResponse
   // If ingestion cannot proceed, Nack is sent, then ResumeIngest is sent if things open up.
   final case class Nack(seqNo: Long) extends NodeResponse
   case object ResumeIngest extends NodeResponse

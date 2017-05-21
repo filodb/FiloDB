@@ -92,6 +92,16 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
       } (patienceConfig)
     }
 
+    it("should getColumns and return valid list of columns or UndefinedColumns") {
+      val firstColumn = DataColumn(0, "first", "foo", 1, Column.ColumnType.StringColumn)
+      val secondColumn = DataColumn(1, "second", "foo", 1, Column.ColumnType.IntColumn)
+      metaStore.newColumns(Seq(firstColumn, secondColumn), fooRef).futureValue should equal (Success)
+
+      metaStore.getColumns(fooRef, 1, Seq("second", "first")).futureValue should equal (
+                                                                      Seq(secondColumn, firstColumn))
+      metaStore.getColumns(fooRef, 1, Seq("second", "baz")).failed.futureValue shouldBe an [UndefinedColumns]
+    }
+
     it("should be able to add many new columns at once") {
       val columns = (0 to 129).map { i => DataColumn(i, i.toString, "foo", 1, Column.ColumnType.IntColumn) }
       metaStore.newColumns(columns, fooRef).futureValue should equal (Success)

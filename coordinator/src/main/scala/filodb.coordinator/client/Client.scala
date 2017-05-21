@@ -9,7 +9,7 @@ import scala.concurrent.{Await, Future}
 import scala.language.postfixOps
 
 import filodb.core._
-import filodb.coordinator.NodeClusterActor
+import filodb.coordinator.{NodeClusterActor, MiscCommands}
 
 object Client {
   implicit val context = monix.execution.Scheduler.Implicits.global
@@ -78,9 +78,11 @@ trait ClientBase {
    * Sends a message to ALL coordinators without waiting for a response
    */
   def sendAllIngestors(msg: Any): Unit
+
+  def clusterActor: Option[ActorRef]
 }
 
-trait AllClientOps extends IngestionOps with DatasetOps with QueryOps
+trait AllClientOps extends IngestionOps with DatasetOps with QueryOps with ClusterOps
 
 /**
  * Standard client for a local FiloDB coordinator actor, which takes reference to a single NodeCoordinator
@@ -94,6 +96,13 @@ class LocalClient(val nodeCoordinator: ActorRef) extends AllClientOps {
     Seq[B] = Seq(askCoordinator(msg, askTimeout)(f))
 
   def sendAllIngestors(msg: Any): Unit = { nodeCoordinator ! msg }
+
+  private var clusterRef: Option[ActorRef] = None
+  def clusterActor: Option[ActorRef] = clusterRef.orElse {
+    val newRef = askCoordinator(MiscCommands.GetClusterActor) { case x: Option[ActorRef] @unchecked => x }
+    clusterRef = newRef
+    newRef
+  }
 }
 
 /**
@@ -123,4 +132,6 @@ class ClusterClient(nodeClusterActor: ActorRef,
   }
 
   def sendAllIngestors(msg: Any): Unit = nodeClusterActor ! ForwardToAll(ingestionRole, msg)
+
+  val clusterActor = Some(nodeClusterActor)
 }

@@ -81,12 +81,13 @@ trait CoordinatorSetup {
                    "coordinator")
 
   lazy val cluster = Cluster(system)
+  lazy val assignmentStrategy = new DefaultShardAssignmentStrategy
 
   // Creates a singleton NodeClusterActor via ClusterSingletonManager and returns a proxy ActorRef to it
   // This should be called on every FiloDB Coordinator/ingestion node
   def singletonClusterActor(role: String): ActorRef = {
     val mgr = system.actorOf(ClusterSingletonManager.props(
-                singletonProps = NodeClusterActor.props(cluster, role),
+                singletonProps = NodeClusterActor.props(cluster, role, metaStore, assignmentStrategy),
                 singletonName = "nodecluster",
                 terminationMessage = PoisonPill,
                 role = Some(role)),

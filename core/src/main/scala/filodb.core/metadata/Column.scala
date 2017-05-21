@@ -128,6 +128,11 @@ object Column extends StrictLogging {
   }
 
   /**
+   * Returns string column names with no match in the schema
+   */
+  def invalidColumns(columns: Seq[String], schema: Schema): Set[String] = (columns.toSet -- schema.keys)
+
+  /**
    * Fold function used to compute a schema up from a list of DataColumn instances.
    * Assumes the list of columns is sorted in increasing version.
    * Contains the business rules above.

@@ -3,16 +3,16 @@ package filodb.cli
 import akka.actor.{ActorRef, ActorSystem}
 import akka.pattern.ask
 import akka.util.Timeout
-import com.opencsv.{CSVReader, CSVWriter}
+import com.typesafe.config.ConfigFactory
 import com.typesafe.scalalogging.slf4j.StrictLogging
 import org.velvia.filo.{ArrayStringRowReader, RowReader}
-import scala.concurrent.{Await, Future, ExecutionContext}
+import scala.concurrent.ExecutionContext
 import scala.concurrent.duration._
 import scala.language.postfixOps
 
 import filodb.coordinator.client.{Client, LocalClient}
-import filodb.coordinator.sources.CsvSourceActor
-import filodb.coordinator.{NodeClusterActor, RowSource}
+import filodb.coordinator.sources.{CsvSourceActor, CsvSourceFactory}
+import filodb.coordinator.NodeClusterActor
 import filodb.core._
 import filodb.core.store.MetaStore
 import filodb.core.metadata.RichProjection
@@ -28,6 +28,7 @@ trait CsvImportExport extends StrictLogging {
 
   implicit val ec: ExecutionContext
   import scala.collection.JavaConversions._
+  import NodeClusterActor._
 
   def ingestCSV(dataset: DatasetRef,
                 version: Int,
@@ -35,33 +36,24 @@ trait CsvImportExport extends StrictLogging {
                 delimiter: Char,
                 timeout: FiniteDuration): Unit = {
     val fileReader = new java.io.FileReader(csvPath)
+    val headerCols = CsvSourceActor.getHeaderColumns(fileReader)
 
-    val datasetObj = Client.parse(metaStore.getDataset(dataset)) { ds => ds }
-    val schema = Client.parse(metaStore.getSchema(dataset, version)) { c => c }
-
-    val (projection, reader, columnNames) =
-      CsvSourceActor.getProjectionFromHeader(fileReader, datasetObj, schema, delimiter)
-    client.setupIngestion(projection.datasetRef, columnNames, version) match {
-      case Nil =>
-        println(s"Ingestion set up for $dataset / $version, starting...")
-      case errs: Seq[ErrorResponse] =>
-        println(s"Errors setting up ingestion: $errs")
+    val config = ConfigFactory.parseString(s"""header = true
+                                           file = $csvPath
+                                           """)
+    client.setupDataset(dataset,
+                        headerCols,
+                        DatasetResourceSpec(1, 1),
+                        IngestionSource(classOf[CsvSourceFactory].getName, config)).foreach {
+      case e: ErrorResponse =>
+        println(s"Errors setting up ingestion: $e")
         exitCode = 2
         return
     }
 
-    val clusterActor = system.actorOf(NodeClusterActor.singleNodeProps(coordinatorActor))
-    val csvActor = system.actorOf(CsvSourceActor.propsNoHeader(reader, projection, version, clusterActor))
-    Client.actorAsk(csvActor, RowSource.Start, timeout) {
-      case RowSource.IngestionErr(msg, optErr) =>
-        println(s"Error $msg setting up CSV ingestion of $dataset/$version at $csvPath")
-        optErr.foreach { e => println(s"Error details:  $e") }
-        exitCode = 2
-        return
-      case RowSource.AllDone =>
-    }
+    // TODO: now we just have to wait.
 
-    client.flushCompletely(projection.datasetRef, version, timeout)
+    client.flushCompletely(dataset, version, timeout)
 
     println(s"Ingestion of $csvPath finished!")
     exitCode = 0

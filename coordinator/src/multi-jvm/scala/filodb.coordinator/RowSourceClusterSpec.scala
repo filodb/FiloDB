@@ -40,10 +40,10 @@ abstract class RowSourceClusterSpec extends MultiNodeSpec(RowSourceClusterSpecCo
 
   import akka.testkit._
   import DatasetCommands._
-  import IngestionCommands._
   import GdeltTestData._
+  import NodeClusterActor._
   import RowSourceClusterSpecConfig._
-  import sources.CsvSourceActor
+  import sources.{CsvSourceActor, CsvSourceFactory}
 
   override def initialParticipants = roles.size
 
@@ -57,20 +57,20 @@ abstract class RowSourceClusterSpec extends MultiNodeSpec(RowSourceClusterSpecCo
   val address1 = node(first).address
   val address2 = node(second).address
 
-  val dataset33 = dataset3.withName("gdelt2")
-  metaStore.newDataset(dataset33).futureValue should equal (Success)
-  val schemaMap = schema.map(c => c.name -> c).toMap
-  val proj2 = RichProjection(dataset33, schema)
+  metaStore.newDataset(dataset6).futureValue should equal (Success)
+  val proj2 = RichProjection(dataset6, schema)
   val ref2 = proj2.datasetRef
-  val columnNames = schema.map(_.name)
   schema.foreach { col => metaStore.newColumn(col, ref2).futureValue should equal (Success) }
 
   var clusterActor: ActorRef = _
 
+  val sampleReader = new java.io.InputStreamReader(getClass.getResourceAsStream("/GDELT-sample-test.csv"))
+  val headerCols = CsvSourceActor.getHeaderColumns(sampleReader)
+
   it("should start NodeClusterActor, CoordActors, join cluster, and wait for all nodes to enter barrier") {
     // Start NodeCoordinator on all nodes so the ClusterActor will register them
     coordinatorActor
-    clusterActor = singletonClusterActor("executor")
+    clusterActor = singletonClusterActor("worker")
 
     enterBarrier("cluster-actor-started")
 
@@ -92,25 +92,31 @@ abstract class RowSourceClusterSpec extends MultiNodeSpec(RowSourceClusterSpecCo
    * If the routing does not work, or is turned off, then each node will get all the input rows.
    */
   it("should start ingestion and route rows to the right node") {
-    val reader = new java.io.InputStreamReader(getClass.getResourceAsStream("/GDELT-sample-test.csv"))
-
     // Note: can only send 20 rows at a time before waiting for acks.  Therefore this tests memtable
     // ack on timer and ability for RowSource to handle waiting for acks repeatedly
-    val csvActor = system.actorOf(CsvSourceActor.props(reader, dataset33, schemaMap, 0, clusterActor,
-                                                       settings = settings.copy(maxUnackedBatches = 4,
-                                                                                rowsToRead = 10)))
+    runOn(first) {
+      val config = ConfigFactory.parseString(s"""header = true
+                                             rows-to-read = 10
+                                             max-unacked-batches = 4
+                                             resource = "/GDELT-sample-test.csv"
+                                             """)
+      val msg = SetupDataset(dataset6.projections.head.dataset,
+                             headerCols,
+                             DatasetResourceSpec(1, 1),
+                             IngestionSource(classOf[CsvSourceFactory].getName, config))
+      clusterActor ! msg
+      expectMsg(DatasetVerified)
+    }
 
-    coordinatorActor ! SetupIngestion(ref2, columnNames, 0)
-    expectMsg(IngestionReady)
     enterBarrier("ingestion-ready")
 
-    csvActor ! RowSource.Start
-    expectMsg(60.seconds.dilated, RowSource.AllDone)
+    // TODO: find a way to wait for ingestion to be done via subscribing to node events
+    Thread sleep 6000
     enterBarrier("ingestion-done")
 
     // Flush all nodes and get the final count from each ColumnStore...
     runOn(first) {
-      val client = new ClusterClient(clusterActor, "executor", "executor")
+      val client = new ClusterClient(clusterActor, "worker", "worker")
       client.flushCompletely(ref2, 0)
     }
 

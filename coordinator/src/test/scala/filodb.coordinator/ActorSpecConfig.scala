@@ -1,4 +1,4 @@
-package filodb.core
+package filodb.coordinator
 
 import akka.actor.ActorSystem
 import akka.testkit.{ImplicitSender, TestKit}

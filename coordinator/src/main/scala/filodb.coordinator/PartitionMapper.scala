@@ -28,6 +28,8 @@ object PartitionMapper {
  * http://www.tom-e-white.com/2007/11/consistent-hashing.html
  *
  * TODO: make the lookup more performant by filling an array of virtual nodes so lookup is O(1) not O(lg n)
+ *
+ * NOTE: DEPRECATION WARNING this is likely to be deprecated in favor of the ShardMapper.
  */
 case class PartitionMapper private[coordinator](map: PartitionMapper.PartitionMap) {
   import PartitionMapper._

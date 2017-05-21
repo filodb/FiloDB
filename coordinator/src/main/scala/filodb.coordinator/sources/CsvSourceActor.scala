@@ -2,13 +2,15 @@ package filodb.coordinator.sources
 
 import akka.actor.{Actor, ActorRef, Props}
 import com.opencsv.CSVReader
+import com.typesafe.config.Config
 import com.typesafe.scalalogging.slf4j.StrictLogging
+import net.ceedubs.ficus.Ficus._
 import org.velvia.filo.{ArrayStringRowReader, RowReader}
 import scala.concurrent.duration._
-import scala.util.Try
 
-import filodb.coordinator.{BaseActor, IngestionCommands, RowSource}
+import filodb.coordinator.{BaseActor, IngestionCommands, RowSource, RowSourceFactory}
 import filodb.core.DatasetRef
+import filodb.core.memstore.MemStore
 import filodb.core.metadata.{Dataset, RichProjection, Column}
 
 object CsvSourceActor extends StrictLogging {
@@ -16,47 +18,58 @@ object CsvSourceActor extends StrictLogging {
   val DefaultMaxUnackedBatches = 50
   val RowsToRead = 100
 
-  final case class CsvSourceSettings(maxUnackedBatches: Int = DefaultMaxUnackedBatches,
+  final case class CsvSourceSettings(header: Boolean = true,
+                                     maxUnackedBatches: Int = DefaultMaxUnackedBatches,
                                      rowsToRead: Int = RowsToRead,
                                      ackTimeout: FiniteDuration = 10.seconds,
                                      waitPeriod: FiniteDuration = 5.seconds)
 
-  /**
-   * The entry point for when your CSV file has a header row.  The projection will be created from the
-   * columns in the header row.  Column names not defined in the schema will result in an exception.
-   */
-  def props(csvStream: java.io.Reader,
-            dataset: Dataset,
-            schema: Column.Schema,
-            version: Int,
-            clusterActor: ActorRef,
-            separatorChar: Char = ',',
-            settings: CsvSourceSettings = CsvSourceSettings()): Props = {
-    val (projection, reader, columns) = getProjectionFromHeader(csvStream, dataset, schema, separatorChar)
-    logger.info(s"Ingesting CSV with columns $columns...")
-    Props(classOf[CsvSourceActor], reader, projection, version, clusterActor, settings)
-  }
-
-  def getProjectionFromHeader(csvStream: java.io.Reader,
-                              dataset: Dataset,
-                              schema: Column.Schema,
-                              separatorChar: Char = ','): (RichProjection, CSVReader, Seq[String]) = {
+  def getHeaderColumns(csvStream: java.io.Reader,
+                       separatorChar: Char = ','): Seq[String] = {
     val reader = new CSVReader(csvStream, separatorChar)
-    val columns = reader.readNext.toSeq
-    val projection = RichProjection(dataset, columns.map(schema))
-    (projection, reader, columns)
+    reader.readNext.toSeq
+  }
+
+  def getHeaderColumns(csvPath: String): Seq[String] = {
+    val fileReader = new java.io.FileReader(csvPath)
+    getHeaderColumns(fileReader)
   }
 
   /**
-   * The entry point for CSV files with no headers.  The projection must be passed in and match the column
-   * order in the file.
+   * The entry point for CSV files.  The projection must be passed in and match the column
+   * order in the file.  Set header to true to skip over the header - columns must match projection
    */
-  def propsNoHeader(csvReader: CSVReader,
-                    projection: RichProjection,
-                    version: Int,
-                    clusterActor: ActorRef,
-                    settings: CsvSourceSettings = CsvSourceSettings()): Props = {
-    Props(classOf[CsvSourceActor], csvReader, projection, version, clusterActor, settings)
+  def props(csvReader: CSVReader,
+            projection: RichProjection,
+            version: Int,
+            settings: CsvSourceSettings = CsvSourceSettings()): Props = {
+    Props(classOf[CsvSourceActor], csvReader, projection, version, settings)
+  }
+}
+
+/**
+ * Config for CSV ingestion:
+ * {{{
+ *   file = "/path/to/file.csv"
+ *   header = true
+ *   rows-to-read = 100
+ *   max-unacked-batches = 2
+ * }}}
+ * Instead of file one can put "resource"
+ */
+class CsvSourceFactory extends RowSourceFactory {
+  import CsvSourceActor._
+
+  def create(config: Config, projection: RichProjection, memStore: MemStore): Props = {
+    val settings = CsvSourceSettings(config.getBoolean("header"),
+                     config.as[Option[Int]]("max-unacked-batches").getOrElse(DefaultMaxUnackedBatches),
+                     config.as[Option[Int]]("rows-to-read").getOrElse(RowsToRead))
+    val reader = config.as[Option[String]]("file").map { filePath =>
+                   new java.io.FileReader(filePath)
+                 }.getOrElse {
+                   new java.io.InputStreamReader(getClass.getResourceAsStream(config.getString("resource")))
+                 }
+    props(new CSVReader(reader), projection, 0, settings)
   }
 }
 
@@ -72,7 +85,6 @@ object CsvSourceActor extends StrictLogging {
 class CsvSourceActor(reader: CSVReader,
                      val projection: RichProjection,
                      val version: Int,
-                     val clusterActor: ActorRef,
                      settings: CsvSourceActor.CsvSourceSettings) extends BaseActor with RowSource {
   import CsvSourceActor._
   import collection.JavaConverters._
@@ -80,6 +92,8 @@ class CsvSourceActor(reader: CSVReader,
   val maxUnackedBatches = settings.maxUnackedBatches
   override val waitingPeriod = settings.waitPeriod
   override val ackTimeout = settings.ackTimeout
+
+  if (settings.header) reader.readNext
 
   val batchIterator: Iterator[Seq[RowReader]] = reader.iterator.asScala
                                                   .map(ArrayStringRowReader)

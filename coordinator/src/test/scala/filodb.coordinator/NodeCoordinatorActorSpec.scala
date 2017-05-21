@@ -11,7 +11,7 @@ import scalax.file.Path
 
 import filodb.coordinator.NodeCoordinatorActor.ReloadDCA
 import filodb.core._
-import filodb.core.metadata.{DataColumn, Dataset}
+import filodb.core.metadata.{DataColumn, Dataset, RichProjection}
 import filodb.core.query.{ColumnFilter, Filter}
 import filodb.core.store._
 
@@ -74,53 +74,6 @@ with CoordinatorSetup with ScalaFutures {
 
   val colNames = schema.map(_.name)
 
-  describe("NodeCoordinatorActor SetupIngestion verification") {
-    it("should return UnknownDataset when dataset missing or no columns defined") {
-      createTable(Dataset("noColumns", "noSort", "seg"), Nil)
-
-      coordActor ! SetupIngestion(DatasetRef("none"), colNames, 0)
-      expectMsg(UnknownDataset)
-
-      coordActor ! SetupIngestion(DatasetRef("noColumns"), colNames, 0)
-      expectMsg(UndefinedColumns(colNames.toSet))
-    }
-
-    it("should return UndefinedColumns if trying to ingest undefined columns") {
-      createTable(dataset1, schema)
-
-      probe.send(coordActor, SetupIngestion(projection1.datasetRef, Seq("MonthYear", "last"), 0))
-      probe.expectMsg(UndefinedColumns(Set("last")))
-    }
-
-    it("should return BadSchema if dataset definition bazooka") {
-      createTable(dataset1.copy(partitionColumns = Seq("foo")), schema)
-      probe.send(coordActor, SetupIngestion(projection1.datasetRef, colNames, 0))
-      probe.expectMsgClass(classOf[BadSchema])
-    }
-
-    it("should get IngestionReady if try to set up concurrently for same dataset/version") {
-      createTable(dataset1, schema)
-
-      val probes = (1 to 8).map { n => TestProbe() }
-      probes.foreach { probe => probe.send(coordActor, SetupIngestion(projection1.datasetRef, colNames, 0)) }
-      probes.foreach { probe => probe.expectMsg(IngestionReady) }
-    }
-
-    it("should add new entry for ingestion state for a given dataset/version, only first time") {
-      createTable(dataset1, schema)
-      val preSize = metaStore.ingestionstates.size
-
-      probe.send(coordActor, SetupIngestion(projection1.datasetRef, colNames, 0))
-      probe.expectMsg(IngestionReady)
-      metaStore.ingestionstates.size should equal(preSize + 1)
-
-      // second time for the same dataset
-      probe.send(coordActor, SetupIngestion(projection1.datasetRef, colNames, 0))
-      probe.expectMsg(IngestionReady)
-      metaStore.ingestionstates.size should equal(preSize + 1)
-    }
-  }
-
   describe("NodeCoordinatorActor DatasetOps commands") {
     it("should be able to create new dataset") {
       probe.send(coordActor, CreateDataset(dataset1, schema))
@@ -150,6 +103,10 @@ with CoordinatorSetup with ScalaFutures {
     }
   }
 
+  import NodeClusterActor.ShardMapUpdate
+  val shardMap = new ShardMapper(1)
+  shardMap.registerNode(Seq(0), coordActor)
+
   describe("QueryActor commands and responses") {
     import MachineMetricsData._
     import QueryCommands._
@@ -158,10 +115,10 @@ with CoordinatorSetup with ScalaFutures {
       probe.send(coordActor, CreateDataset(dataset1, schemaWithSeries))
       probe.expectMsg(DatasetCreated)
 
-      val ref = projection1.datasetRef
-      probe.send(coordActor, SetupIngestion(ref, schemaWithSeries.map(_.name), 0))
-      probe.expectMsg(IngestionReady)
-      ref
+      probe.send(coordActor, ShardMapUpdate(dataset1.projections.head.dataset, shardMap))
+
+      probe.send(coordActor, DatasetSetup(dataset1, schemaWithSeries.map(_.toString), 0))
+      dataset1.projections.head.dataset
     }
 
     it("should return UnknownDataset if attempting to query before ingestion set up") {
@@ -303,12 +260,12 @@ with CoordinatorSetup with ScalaFutures {
   }
 
   it("should be able to start ingestion, send rows, and get an ack back") {
-    probe.send(coordActor, CreateDataset(dataset1, schema))
+    probe.send(coordActor, CreateDataset(dataset6, schema))
     probe.expectMsg(DatasetCreated)
 
-    val ref = projection1.datasetRef
-    probe.send(coordActor, SetupIngestion(ref, schema.map(_.name), 0))
-    probe.expectMsg(IngestionReady)
+    val ref = projection6.datasetRef
+    probe.send(coordActor, ShardMapUpdate(ref, shardMap))
+    probe.send(coordActor, DatasetSetup(projection6.dataset, schema.map(_.toString), 0))
 
     probe.send(coordActor, CheckCanIngest(ref, 0))
     probe.expectMsg(CanIngest(true))
@@ -321,18 +278,19 @@ with CoordinatorSetup with ScalaFutures {
     probe.send(coordActor, Flush(ref, 0))
     probe.expectMsg(Flushed)
 
+    // TODO: fix this.  Stats are not in the MemStoreCoordActor yet.
     probe.send(coordActor, GetIngestionStats(ref, 0))
     probe.expectMsg(DatasetCoordinatorActor.Stats(1, 1, 0, 0, -1, 99L))
 
     // Now, read stuff back from the column store and check that it's all there
-    val scanMethod = SinglePartitionScan(projection1.partKey("GOV", 1979))
-    val chunks = memStore.scanChunks(projection1, schema, 0, scanMethod).toSeq
+    val scanMethod = SinglePartitionScan(projection6.partKey("GOV", 1979))
+    val chunks = memStore.scanChunks(projection6, schema, 0, scanMethod).toSeq
     chunks should have length (1)
     chunks.head.rowIterator().map(_.getInt(6)).sum should equal (80)
 
     val splits = memStore.getScanSplits(ref, 1)
     splits should have length (1)
-    val rowIt = memStore.scanRows(projection1, schema, 0, FilteredPartitionScan(splits.head))
+    val rowIt = memStore.scanRows(projection6, schema, 0, FilteredPartitionScan(splits.head))
     rowIt.map(_.getInt(6)).sum should equal (492)
   }
 
@@ -341,8 +299,8 @@ with CoordinatorSetup with ScalaFutures {
     probe.expectMsg(DatasetCreated)
 
     val ref = projection1.datasetRef
-    probe.send(coordActor, SetupIngestion(ref, schema.map(_.name), 0))
-    probe.expectMsg(IngestionReady)
+    probe.send(coordActor, ShardMapUpdate(ref, shardMap))
+    probe.send(coordActor, DatasetSetup(projection1.dataset, schema.map(_.toString), 0))
 
     EventFilter[NumberFormatException](occurrences = 1) intercept {
       probe.send(coordActor, IngestRows(ref, 0, readers ++ Seq(badLine), 1L))
@@ -355,13 +313,14 @@ with CoordinatorSetup with ScalaFutures {
     probe.expectMsg(UnknownDataset)
   }
 
-  it("should reload dataset coordinator actors once the nodes are up") {
+  ignore("should reload dataset coordinator actors once the nodes are up") {
     probe.send(coordActor, CreateDataset(dataset4, schema))
     probe.expectMsg(DatasetCreated)
 
-    val ref = projection4.withDatabase("unittest2").datasetRef
+    val proj = projection4.withDatabase("unittest2")
+    val ref = proj.datasetRef
 
-    generateActorException(ref)
+    generateActorException(proj)
 
     probe.send(coordActor, ReloadDCA)
     probe.expectMsg(DCAReady)
@@ -378,9 +337,10 @@ with CoordinatorSetup with ScalaFutures {
     probe.send(coordActor, CreateDataset(dataset4, schema))
     probe.expectMsg(DatasetCreated)
 
-    val ref = projection4.withDatabase("unittest2").datasetRef
+    val proj = projection4.withDatabase("unittest2")
+    val ref = proj.datasetRef
 
-    generateActorException(ref)
+    generateActorException(proj)
 
     probe.send(coordActor, ReloadDCA)
     probe.expectMsg(DCAReady)
@@ -406,9 +366,9 @@ with CoordinatorSetup with ScalaFutures {
 
   }
 
-  def generateActorException(ref: DatasetRef): Unit = {
-    probe.send(coordActor, SetupIngestion(ref, schema.map(_.name), 0))
-    probe.expectMsg(IngestionReady)
+  def generateActorException(proj: RichProjection): Unit = {
+    val ref = proj.datasetRef
+    probe.send(coordActor, DatasetSetup(proj.dataset, schema.map(_.toString), 0))
 
     probe.send(coordActor, CheckCanIngest(ref, 0))
     probe.expectMsg(CanIngest(true))

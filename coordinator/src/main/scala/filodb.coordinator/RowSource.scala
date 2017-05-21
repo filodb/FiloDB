@@ -1,7 +1,8 @@
 package filodb.coordinator
 
-import akka.actor.{Actor, ActorRef, Cancellable}
+import akka.actor.{Actor, ActorRef, Cancellable, Props}
 import akka.event.LoggingReceive
+import com.typesafe.config.Config
 import com.typesafe.scalalogging.slf4j.StrictLogging
 import kamon.Kamon
 import org.velvia.filo.RowReader
@@ -16,7 +17,6 @@ import filodb.core.metadata.RichProjection
 import filodb.core.memstore.{MemStore, RowWithOffset, DatasetAlreadySetup}
 
 object RowSource {
-  case object Start
   case object GetMoreRows
   case object AllDone
   case object CheckCanIngest
@@ -26,16 +26,18 @@ object RowSource {
 }
 
 /**
- * A zero-arg constructor class that knows how to create and return an ActorRef for a given RowSource.
+ * A zero-arg constructor class that knows how to create a RowSource.
  */
 trait RowSourceFactory {
-  // Get or create the projection. Usually the user would set up the ingestion projection first, so this
-  // usually just reads the projection out of the MetaStore.
-  // The projection should have the columns to ingest in the right order.
-  // The dataset to read could come out of the config.
-  def getProjection(setup: CoordinatorSetup, client: DatasetOps): RichProjection
-  // Create the RowSource actor
-  def create(setup: CoordinatorSetup, projection: RichProjection, clusterActor: ActorRef): ActorRef
+  /**
+   * Returns the Props for creating a RowSource actor
+   * @param config the configuration for the data source
+   * @param projection
+   * @param memStore
+   */
+  def create(config: Config,
+             projection: RichProjection,
+             memStore: MemStore): Props
 }
 
 /**
@@ -43,12 +45,11 @@ trait RowSourceFactory {
  * input methods - eg from HTTP JSON, or CSV, or Kafka, etc.
  * It has logic to handle flow control/backpressure.
  * It is responsible for reading rows from the source and sending it to different FiloDB nodes and
- * their NodeCoordinator's, routing the data according to the latest PartitionMap.
+ * their NodeCoordinator's, routing the data according to the latest ShardMap.
  *
- * To start reading from source, send the Start message.  Note that sending SetupIngestion to all the
- * different NodeCoordinators must be done in a separate step, as it does not make sense for every single
- * RowSource (and there might be multiple ones per JVM) to coordinate with every single NodeCoordinator
- * (which would be n * n messages).
+ * It is started by sending it an initial ShardMap.  This normally does not need to be done by the user,
+ * as RowSources are normally started by MemStoreCoordActors which will feed it ShardMap updates.
+ * Start ingestion on all nodes by sending SetupDataset to NodeClusterActor.
  *
  * Backpressure and at least once mechanism:  RowSource sends batches of rows to the NodeCoordinator,
  * but does not send more than maxUnackedBatches before getting an ack back.  As long as it receives
@@ -70,8 +71,6 @@ trait RowSource extends Actor with StrictLogging {
   def waitingPeriod: FiniteDuration = 5.seconds
   def ackTimeout: FiniteDuration = 20.seconds
 
-  def clusterActor: ActorRef
-
   def projection: RichProjection
   def version: Int
 
@@ -84,7 +83,7 @@ trait RowSource extends Actor with StrictLogging {
   private var whoStartedMe: Option[ActorRef] = None
   private val outstanding = new HashMap[Long, (ActorRef, Seq[RowReader])]
   private val outstandingNodes = new HashMap[ActorRef, Set[Long]].withDefaultValue(Set.empty)
-  private var mapper: PartitionMapper = PartitionMapper.empty
+  private var mapper: ShardMapper = ShardMapper.empty
   private var nextSeqId = 0L
   private val partKeyFunc = projection.partitionKeyFunc
   private val dataset = projection.datasetRef
@@ -99,12 +98,9 @@ trait RowSource extends Actor with StrictLogging {
   import context.dispatcher
 
   def start: Receive = LoggingReceive {
-    case Start =>
+    case NodeClusterActor.ShardMapUpdate(_, newMap) =>
       whoStartedMe = Some(sender)
-      clusterActor ! NodeClusterActor.SubscribePartitionUpdates
-
-    case NodeClusterActor.PartitionMapUpdate(newMap) =>
-      logger.info(s"Received initial partition map with ${newMap.numNodes} nodes")
+      logger.info(s"Starting, received initial shard map with ${newMap.numShards} shards")
       mapper = newMap
       self ! GetMoreRows
       logger.info(s" ==> Starting ingestion...")
@@ -121,8 +117,8 @@ trait RowSource extends Actor with StrictLogging {
   }
 
   def mapUpdate: Receive = LoggingReceive {
-    case NodeClusterActor.PartitionMapUpdate(newMap) =>
-      logger.info(s"Received new partition map with ${newMap.numNodes} nodes")
+    case NodeClusterActor.ShardMapUpdate(_, newMap) =>
+      logger.info(s"Received new partition map")
       mapper = newMap
   }
 
@@ -220,10 +216,10 @@ trait RowSource extends Actor with StrictLogging {
     }
 
     // Now, compute a partition key hash for each row and group all the rows by the coordinator ref
-    // returned from the partitionMapper.  It is important this happens after BinaryRecord conversion,
+    // returned from the shardMapper.  It is important this happens after BinaryRecord conversion,
     // because the partKeyFunc does not check for nulls.
     val rowsByNode = binReaders.groupBy { reader =>
-      mapper.lookupCoordinator(partKeyFunc(reader).hashCode)
+      mapper.partitionToShardNode(partKeyFunc(reader).hashCode).coord
     }
     nodeHist.record(rowsByNode.size)
     rowsByNode.foreach { case (nodeRef, readers) =>
@@ -273,13 +269,7 @@ trait DirectRowSource extends Actor with StrictLogging {
   private val rowsIngested = Kamon.metrics.counter("source-rows-ingested")
 
   def receive: Receive = LoggingReceive {
-    case Start =>
-      try {
-        memStore.setup(projection)
-      } catch {
-        case DatasetAlreadySetup(dataset) =>
-          logger.warn(s"Ignoring DatasetAlreadySetup with dataset $dataset....")
-      }
+    case NodeClusterActor.ShardMapUpdate(_, newMap) =>
       val ref = projection.datasetRef
       logger.info(s"Starting direct ingestion for dataset $ref...")
 
@@ -291,4 +281,20 @@ trait DirectRowSource extends Actor with StrictLogging {
       sender ! AllDone
       context.stop(self)
   }
+}
+
+class NoOpRowSource extends Actor with StrictLogging {
+  def receive: Receive = {
+    case NodeClusterActor.ShardMapUpdate(_, newMap) =>
+      logger.info(s"Duh.....")
+  }
+}
+
+/**
+ * A RowSourceFactory to use when you want to just push and not pull any data.  It instantiates
+ * NoOpRowSource which doesn't do anything.
+ */
+class NoOpSourceFactory extends RowSourceFactory {
+  def create(config: Config, projection: RichProjection, memStore: MemStore): Props =
+    Props(classOf[NoOpRowSource])
 }

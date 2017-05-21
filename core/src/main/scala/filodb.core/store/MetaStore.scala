@@ -1,13 +1,16 @@
 package filodb.core.store
 
 import scala.concurrent.{ExecutionContext, Future}
+
 import filodb.core._
 import filodb.core.metadata.{Column, DataColumn, Dataset, IngestionStateData}
 
+abstract class MetaStoreError(msg: String) extends Exception(msg)
+
 object MetaStore {
-  case class IllegalColumnChange(reasons: Seq[String]) extends Exception {
-    override def getMessage: String = reasons.mkString(", ")
-  }
+  final case class IllegalColumnChange(reasons: Seq[String]) extends MetaStoreError(reasons.mkString(", "))
+  final case class UndefinedColumns(undefined: Set[String]) extends MetaStoreError(
+                     s"Undefined columns: ${undefined.mkString(", ")}")
 }
 
 /**
@@ -119,11 +122,29 @@ trait MetaStore {
    * Get the schema for a version of a dataset.  This scans all defined columns from the first version
    * on up to figure out the changes. Deleted columns are not returned.
    * Implementations should use Column.foldSchema.
-   * @param ref the DatasetRef defining the dataset to retrieve the schema for
+   * @param dataset the DatasetRef defining the dataset to retrieve the schema for
    * @param version the version of the dataset to return the schema for
    * @return a Schema, column name -> Column definition, or ErrorResponse
    */
   def getSchema(dataset: DatasetRef, version: Int): Future[Column.Schema]
+
+  /**
+   * A version of getSchema that validates and returns a list of Columns by name
+   * @param dataset the DatasetRef defining the dataset to retrieve the schema for
+   * @param version the version of the dataset to return the schema for
+   * @param columns the string names of the columns to retrieve
+   * @return a Seq[Column] coresponding to input columns or a MetaStoreError
+   */
+  def getColumns(dataset: DatasetRef, version: Int, columns: Seq[String]): Future[Seq[Column]] = {
+    getSchema(dataset, version).map { schema =>
+      val undefinedCols = Column.invalidColumns(columns, schema)
+      if (undefinedCols.nonEmpty) {
+        throw UndefinedColumns(undefinedCols)
+      } else {
+        columns.map(schema)
+      }
+    }
+  }
 
   /**
    * Shuts down the MetaStore, including any threads that might be hanging around
