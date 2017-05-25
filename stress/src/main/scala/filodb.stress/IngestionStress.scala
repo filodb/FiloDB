@@ -32,9 +32,9 @@ object IngestionStress extends App {
   val taxiCsvFile = args(0)
 
   def puts(s: String): Unit = {
-    //scalastyle:off
+    // scalastyle:off
     println(s)
-    //scalastyle:on
+    // scalastyle:on
   }
 
   val stressName = sys.props.getOrElse("stress.table1name", "taxi_medallion_seg")

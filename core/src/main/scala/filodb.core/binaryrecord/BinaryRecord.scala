@@ -9,6 +9,7 @@ import scalaxy.loops._
 
 import filodb.core.metadata.RichProjection
 
+// scalastyle:off equals.hash.code
 /**
  * BinaryRecord is a record type that supports flexible schemas and reads/writes/usage
  * with no serialization at all for extreme performance and low latency with minimal GC pressure.
@@ -121,9 +122,9 @@ object BinaryRecord {
     if (buffer.hasArray) { apply(schema, buffer.array) }
     else if (buffer.isDirect) {
       val addr: Long = buffer.asInstanceOf[sun.nio.ch.DirectBuffer].address
-      //scalastyle:off
+      // scalastyle:off null
       new BinaryRecord(schema, null, addr, buffer.capacity)
-      //scalastyle:on
+      // scalastyle:on null
     } else { throw new IllegalArgumentException("Buffer is neither array or direct") }
 
   def apply(schema: RecordSchema, reader: RowReader, maxBytes: Int = DefaultMaxRecordSize): BinaryRecord = {
@@ -197,9 +198,9 @@ object BinaryRecord {
  */
 @SerialVersionUID(1009L)
 case class BinaryRecordWrapper(var binRec: BinaryRecord) extends java.io.Externalizable {
-  //scalastyle:off
+  // scalastyle:off null
   def this() = this(null)
-  //scalastyle:on
+  // scalastyle:on null
   def writeExternal(out: java.io.ObjectOutput): Unit = {
     out.writeUTF(binRec.schema.toString)
     out.writeInt(binRec.length)

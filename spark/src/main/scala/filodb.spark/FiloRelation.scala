@@ -397,9 +397,9 @@ extends BaseGenericInternalRow with FiloRowReader {
   final def genericGet(columnNo: Int): Any = parsers(columnNo).boxed(rowNo) match {
     case z: ZeroCopyUTF8String => UTF8String.fromAddress(z.base, z.offset, z.numBytes)
     case o: Any                => o
-    //scalastyle:off
+    // scalastyle:off
     case null                  => null
-    //scalastyle:on
+    // scalastyle:on
   }
 
   override final def isNullAt(i: Int): Boolean = !notNull(i)

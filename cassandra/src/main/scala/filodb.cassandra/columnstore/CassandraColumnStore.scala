@@ -243,9 +243,9 @@ trait CassandraColumnStoreScanner extends ColumnStoreScanner with StrictLogging 
   private def emptyChunkStream(infosSkips: ChunkSetInfo.ChunkInfosAndSkips, colNo: Int):
     Observable[SingleChunkInfo] =
     Observable.fromIterator(infosSkips.toIterator.map { case (info, skips) =>
-      //scalastyle:off
+      // scalastyle:off
       SingleChunkInfo(info.id, colNo, null.asInstanceOf[ByteBuffer])
-      //scalastyle:on
+      // scalastyle:on
     })
 
   def readPartitionChunks(dataset: DatasetRef,

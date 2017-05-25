@@ -31,9 +31,9 @@ object StreamingStress extends App {
   val numRuns = 250    // Make this higher when doing performance profiling
 
   def puts(s: String): Unit = {
-    //scalastyle:off
+    // scalastyle:off
     println(s)
-    //scalastyle:on
+    // scalastyle:on
   }
 
   // Setup SparkContext, etc.

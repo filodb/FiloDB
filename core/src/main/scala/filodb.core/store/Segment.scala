@@ -16,9 +16,9 @@ import filodb.core.query.{MutablePartitionChunkIndex, ChunkIDPartitionChunkIndex
 import filodb.core.Types._
 import filodb.core.KeyType
 
-//scalastyle:off
+// scalastyle:off
 case class SegmentInfo[+PK, +SK](partition: PartitionKey, segment: SK) {
-//scalastyle:on
+// scalastyle:on
   /**
    * Recast this SegmentInfo in the PK and SK types of another projection object.
    * Be careful using this.  This is needed because dependent-path types in Scala are not that smart.

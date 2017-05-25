@@ -49,6 +49,7 @@ trait MemStore extends BaseColumnStore {
 import Column.ColumnType._
 
 object MemStore {
+  // scalastyle:off cyclomatic.complexity
   /**
    * Figures out the RowReaderAppenders for each column, depending on type and whether it is a static/
    * constant column for each partition.

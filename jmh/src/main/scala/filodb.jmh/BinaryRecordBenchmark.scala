@@ -50,10 +50,10 @@ class BinaryRecordBenchmark {
 
   import Serializer._
 
-  //scalastyle:off
+  // scalastyle:off
   println(s"   Java Serialization IngestRows size:  ${serializeJavaRows.size} bytes")
   println(s"   BinaryRecord-based IngestRows size:  ${getBinRecordRows.toBytes.size} bytes")
-  //scalastyle:on
+  // scalastyle:on
 
   /**
    * Java Serialization of a non-BinaryRecord IngestRows

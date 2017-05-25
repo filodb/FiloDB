@@ -25,7 +25,7 @@ object CreateCassTestData extends App {
 
   case class DummyRow(data: Int, rownum: Int)
 
-  //scalastyle:off
+  // scalastyle:off
   val randomIntsRdd = sc.parallelize((1 to NumRows).map { n => DummyRow(util.Random.nextInt, n)})
   import sql.implicits._
   val randomDF = randomIntsRdd.toDF()

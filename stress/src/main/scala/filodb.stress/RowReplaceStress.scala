@@ -27,9 +27,9 @@ object RowReplaceStress extends App {
   val replacementFactor = if (args.size > 1) args(1).toDouble else 0.0
 
   def puts(s: String): Unit = {
-    //scalastyle:off
+    // scalastyle:off
     println(s)
-    //scalastyle:on
+    // scalastyle:on
   }
 
   val datasetName = sys.props.getOrElse("stress.tablename", "nyc_taxi_replace")

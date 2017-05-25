@@ -28,9 +28,9 @@ object BatchIngestion extends App {
   val taxiCsvFile = args(0)
 
   def puts(s: String): Unit = {
-    //scalastyle:off
+    // scalastyle:off
     println(s)
-    //scalastyle:on
+    // scalastyle:on
   }
 
   val tableName = sys.props.getOrElse("stress.tablename", "nyc_taxi")

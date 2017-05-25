@@ -18,7 +18,7 @@ import filodb.core.store.MetaStore
 import filodb.core.metadata.RichProjection
 
 // Turn off style rules for CLI classes
-//scalastyle:off
+// scalastyle:off
 trait CsvImportExport extends StrictLogging {
   def system: ActorSystem
   def metaStore: MetaStore

@@ -6,6 +6,8 @@ import scala.language.existentials
 import filodb.core.metadata.Column
 import filodb.core.metadata.Column.ColumnType
 
+// scalastyle:off equals.hash.code
+// Case classes already have equals, but we need to customize hash code
 final case class Field(num: Int, colType: ColumnType, fixedDataOffset: Int, fieldType: FieldType[_]) {
   final def get[T](record: BinaryRecord): T = fieldType.asInstanceOf[FieldType[T]].extract(record, this)
   final def getAny(record: BinaryRecord): Any = fieldType.extract(record, this)

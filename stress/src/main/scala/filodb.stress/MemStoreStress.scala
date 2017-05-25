@@ -38,9 +38,9 @@ object MemStoreStress extends App {
   val queryThreads = 4
 
   def puts(s: String): Unit = {
-    //scalastyle:off
+    // scalastyle:off
     println(s)
-    //scalastyle:on
+    // scalastyle:on
   }
 
   // read in medallions

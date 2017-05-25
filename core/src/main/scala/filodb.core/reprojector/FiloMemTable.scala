@@ -54,9 +54,9 @@ class FiloMemTable(val projection: RichProjection,
   // See InMemoryMetaStore for a thread-safe design
   private def getKeyMap(partition: PartitionKey): KeyMap = {
     partKeyMap.get(partition) match {
-      //scalastyle:off
+      // scalastyle:off
       case null =>
-        //scalastyle:on
+        // scalastyle:on
         val newMap = new KeyMap(projection.rowKeyType.ordering)
         partKeyMap.put(partition, newMap)
         newMap
