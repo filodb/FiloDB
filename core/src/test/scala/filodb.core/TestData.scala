@@ -272,7 +272,7 @@ object MachineMetricsData {
        Some((20 + n).toDouble),
        Some((100 + n).toDouble),
        Some((85 + n).toDouble),
-       Some("Series " + (n % 10)))
+       Some("Series " + (n % numSeries)))
     }
   }
 }

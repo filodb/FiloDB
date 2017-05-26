@@ -42,13 +42,11 @@ trait QueryOps extends ClientBase with StrictLogging {
    * Asks the FiloDB node to perform an aggregation query with a partition filter.
    */
   def partitionFilterAggregate(dataset: DatasetRef,
-                               function: String,
-                               args: Seq[String],
+                               query: QueryArgs,
                                filters: Seq[ColumnFilter],
                                version: Int = 0,
                                timeout: FiniteDuration = 60.seconds): AggregateResponse[_] = {
-    val aggCmd = AggregateQuery(dataset, version, QueryArgs(function, args),
-                                FilteredPartitionQuery(filters))
+    val aggCmd = AggregateQuery(dataset, version, query, FilteredPartitionQuery(filters))
     askCoordinator(aggCmd, timeout) { case r: AggregateResponse[_] => r }
   }
 }

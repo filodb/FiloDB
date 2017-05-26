@@ -26,7 +26,7 @@ import filodb.core.metadata.{Column, DataColumn, Dataset, RichProjection}
 import filodb.core.query.{ColumnFilter, Filter}
 import filodb.core.store.{Analyzer, ChunkInfo, ChunkSetInfo, FilteredPartitionScan, ScanSplit}
 
-//scalastyle:off
+// scalastyle:off
 class Arguments extends FieldArgs {
   var dataset: Option[String] = None
   var database: Option[String] = None
@@ -189,7 +189,7 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
           args.promql.map { query =>
             require(args.host.nonEmpty && args.dataset.nonEmpty, "--host and --dataset must be defined")
             val remote = Client.standaloneClient(system, args.host.get, args.port)
-            executePromQuery(remote, query, args.dataset.get, args.metricColumn)
+            parsePromQuery(remote, query, args.dataset.get, args.metricColumn)
           }.getOrElse {
             args.select.map { selectCols =>
               exportCSV(getRef(args),
@@ -299,36 +299,59 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
     }
   }
 
-  import QueryCommands.AggregateResponse
+  import QueryCommands.{AggregateResponse, QueryArgs}
 
-  def executePromQuery(client: LocalClient, query: String, dataset: String, metricCol: String): Unit = {
+  def parsePromQuery(client: LocalClient, query: String, dataset: String, metricCol: String): Unit = {
     val parser = new PromQLParser(query)
     parser.Query.run() match {
-      case SSuccess(VectorExprOnlyQuery(partSpec)) =>
-        println(s"Sorry, queries returning only raw vectors are not supported right now.")
-        exitCode = 1
-      case SSuccess(FunctionQuery(funcName, paramOpt, partSpec)) =>
+      // Single level of function
+      case SSuccess(FunctionQuery(funcName, paramOpt, partSpec: PartitionSpec)) =>
         evalArgs(funcName, paramOpt, partSpec).map { args =>
-          val ref = DatasetRef(dataset)
-          val filters = partSpec.filters :+ ColumnFilter(metricCol, Filter.Equals(partSpec.metricName))
-          println(s"Sending aggregation command to server for $ref... $funcName($paramOpt)")
-          println(s"Args: $args\nFilters: $filters")
-          try {
-            printAggregate(client.partitionFilterAggregate(ref, funcName, args, filters))
-          } catch {
-            case e: ClientException =>
-              println(s"ERROR: ${e.getMessage}")
-              exitCode = 2
-          }
+          val spec = QueryArgs(funcName, args)
+          executeQuery(client, dataset, spec, partSpec.metricName, partSpec.filters, metricCol)
         }.getOrElse {
           println(s"Unable to parse function $funcName with option $paramOpt")
           exitCode = 2
         }
+
+      // Two levels of functions.  Assume outer one is combiner.
+      // For now, only support a single combiner parameter.
+      case SSuccess(FunctionQuery(combName, combParam,
+                      FunctionQuery(funcName, paramOpt, partSpec: PartitionSpec))) =>
+        evalArgs(funcName, paramOpt, partSpec).map { args =>
+          val spec = QueryArgs(funcName, args, combName, combParam.toSeq)
+          executeQuery(client, dataset, spec, partSpec.metricName, partSpec.filters, metricCol)
+        }.getOrElse {
+          println(s"Unable to parse function $funcName with option $paramOpt")
+          exitCode = 2
+        }
+
+      case SSuccess(otherExpr) =>
+        println(s"Sorry, query with AST $otherExpr cannot be supported right now.")
+        exitCode = 1
       case Failure(e: ParseError) =>
         println(s"Failure parsing $query:\n${parser.formatError(e)}")
         exitCode = 2
       case Failure(t: Throwable) => throw t
     }
+  }
+
+  def executeQuery(client: LocalClient, dataset: String, query: QueryArgs,
+                   metricName: String, filters: Seq[ColumnFilter], metricCol: String): Unit = {
+    val ref = DatasetRef(dataset)
+    val filtersWithMetric =
+      if (metricName == PromQLParser.ScanEverythingMetric) { filters }
+      else { filters :+ ColumnFilter(metricCol, Filter.Equals(metricName)) }
+    println(s"Sending aggregation command to server for $ref...")
+    println(s"Query: $query\nFilters: $filtersWithMetric")
+    try {
+      printAggregate(client.partitionFilterAggregate(ref, query, filtersWithMetric))
+    } catch {
+      case e: ClientException =>
+        println(s"ERROR: ${e.getMessage}")
+        exitCode = 2
+    }
+
   }
 
   def evalArgs(func: String, paramOpt: Option[String], spec: PartitionSpec): Option[Seq[String]] = {

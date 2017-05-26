@@ -27,47 +27,62 @@ import filodb.core.store.{ChunkScanMethod, RowKeyChunkScan}
  * TODO: Take advantage of DeltaDelta vectors and estimate filtering
  * TODO: It's faster to run multiple aggregations together
  */
-abstract class TimeGroupingAggregate[@specialized(Int, Long, Double) T, R: ClassTag]
+abstract class TimeGroupingBaseAggregator[T]
   (timeVectPos: Int, valueVectPos: Int, startTime: Long, endTime: Long, numBuckets: Int)
-extends Aggregate[R] {
+extends ChunkAggregator {
   require(numBuckets > 0, s"The number of buckets must be positive")
-  private final val bucketWidth = (endTime - startTime) / numBuckets
+  protected final val bucketWidth = (endTime - startTime) / numBuckets
 
-  final def add(reader: ChunkSetReader): Aggregate[R] = {
+  val positions = Array(timeVectPos, valueVectPos)
+
+  final def add(orig: A, reader: ChunkSetReader): A = {
     val numRows = reader.info.numRows
-    reader.vectors(timeVectPos) match {
+    reader.vectors(0) match {
       case tv: BinaryVector[Long] @unchecked if !tv.maybeNAs =>
-        reader.vectors(valueVectPos) match {
-          case vv: BinaryVector[T] if !vv.maybeNAs => aggNoNAs(tv, vv, numRows)
-          case v: FiloVector[T] =>                    aggWithNAs(tv, v, numRows)
+        reader.vectors(1) match {
+          case vv: BinaryVector[T] if !vv.maybeNAs => aggNoNAs(orig, tv, vv, numRows)
+          case v: FiloVector[T] =>                    aggWithNAs(orig, tv, v, numRows)
         }
       case tv: FiloVector[Long] @unchecked =>
-        aggWithNAs(tv, reader.vectors(valueVectPos).asInstanceOf[FiloVector[T]], numRows)
+        aggWithNAs(orig, tv, reader.vectors(1).asInstanceOf[FiloVector[T]], numRows)
     }
-    this
+    orig
   }
 
   override def chunkScan(projection: RichProjection): Option[ChunkScanMethod] =
     Some(RowKeyChunkScan(BinaryRecord(projection, Seq(startTime)), BinaryRecord(projection, Seq(endTime))))
 
+  def aggNoNAs(agg: A, tv: BinaryVector[Long], vv: BinaryVector[T], numRows: Int): Unit
+  def aggWithNAs(agg: A, tv: FiloVector[Long], vv: FiloVector[T], numRows: Int): Unit
+}
+
+abstract class TimeGroupingAggregator[@specialized(Int, Long, Double) T: ClassTag]
+  (timeVectPos: Int, valueVectPos: Int, startTime: Long, endTime: Long, numBuckets: Int)
+extends TimeGroupingBaseAggregator[T](timeVectPos, valueVectPos, startTime, endTime, numBuckets) {
+  type A = ArrayAggregate[T]
+
   // It is really important that this tight inner loop be in a separate method with the BinaryVector[T]
   // in the param signature.  This forces scalac to generate specialized methods so that the specialized
   // instead of boxed/j.l.Object method of aggregateOne is called.
-  final def aggNoNAs(tv: BinaryVector[Long], vv: BinaryVector[T], numRows: Int): Unit =
+  final def aggNoNAs(agg: ArrayAggregate[T], tv: BinaryVector[Long], vv: BinaryVector[T], numRows: Int): Unit =
     for { i <- 0 until numRows optimized } {
       val ts = tv(i)
-      if (ts >= startTime && ts < endTime) aggregateOne(vv(i), ((ts - startTime) / bucketWidth).toInt)
-    }
-
-  final def aggWithNAs(tv: FiloVector[Long], vv: FiloVector[T], numRows: Int): Unit =
-    for { i <- 0 until numRows optimized } {
-      if (tv.isAvailable(i) && vv.isAvailable(i)) {
-        val ts = tv(i)
-        if (ts >= startTime && ts <= endTime) aggregateOne(vv(i), ((ts - startTime) / bucketWidth).toInt)
+      if (ts >= startTime && ts < endTime) {
+        aggregateOne(agg.result, vv(i), ((ts - startTime) / bucketWidth).toInt)
       }
     }
 
-  def aggregateOne(value: T, bucketNo: Int): Unit
+  final def aggWithNAs(agg: ArrayAggregate[T], tv: FiloVector[Long], vv: FiloVector[T], numRows: Int): Unit =
+    for { i <- 0 until numRows optimized } {
+      if (tv.isAvailable(i) && vv.isAvailable(i)) {
+        val ts = tv(i)
+        if (ts >= startTime && ts <= endTime) {
+          aggregateOne(agg.result, vv(i), ((ts - startTime) / bucketWidth).toInt)
+        }
+      }
+    }
+
+  def aggregateOne(buckets: Array[T], value: T, bucketNo: Int): Unit
 }
 
 class TimeGroupingMinDoubleAgg(timeVectPos: Int,
@@ -75,12 +90,16 @@ class TimeGroupingMinDoubleAgg(timeVectPos: Int,
                                startTime: Long,
                                endTime: Long,
                                numBuckets: Int) extends
-TimeGroupingAggregate[Double, Double](timeVectPos, valueVectPos, startTime, endTime, numBuckets) {
-  private final val buckets = Array.fill(numBuckets)(Double.MaxValue)
-  def result: Array[Double] = buckets
+TimeGroupingAggregator[Double](timeVectPos, valueVectPos, startTime, endTime, numBuckets) {
+  def emptyAggregate: A = new ArrayAggregate(numBuckets, Double.MaxValue)
 
-  final def aggregateOne(value: Double, bucketNo: Int): Unit =
+  final def aggregateOne(buckets: Array[Double], value: Double, bucketNo: Int): Unit =
     buckets(bucketNo) = Math.min(buckets(bucketNo), value)
+
+  final def combine(first: ArrayAggregate[Double], second: ArrayAggregate[Double]): ArrayAggregate[Double] = {
+    for { i <- 0 until numBuckets optimized } { first.result(i) = Math.min(first.result(i), second.result(i)) }
+    first
+  }
 }
 
 class TimeGroupingMaxDoubleAgg(timeVectPos: Int,
@@ -88,12 +107,29 @@ class TimeGroupingMaxDoubleAgg(timeVectPos: Int,
                                startTime: Long,
                                endTime: Long,
                                numBuckets: Int) extends
-TimeGroupingAggregate[Double, Double](timeVectPos, valueVectPos, startTime, endTime, numBuckets) {
-  private final val buckets = Array.fill(numBuckets)(Double.MinValue)
-  def result: Array[Double] = buckets
+TimeGroupingAggregator[Double](timeVectPos, valueVectPos, startTime, endTime, numBuckets) {
+  def emptyAggregate: A = new ArrayAggregate(numBuckets, Double.MinValue)
 
-  final def aggregateOne(value: Double, bucketNo: Int): Unit =
+  final def aggregateOne(buckets: Array[Double], value: Double, bucketNo: Int): Unit =
     buckets(bucketNo) = Math.max(buckets(bucketNo), value)
+
+  final def combine(first: ArrayAggregate[Double], second: ArrayAggregate[Double]): ArrayAggregate[Double] = {
+    for { i <- 0 until numBuckets optimized } { first.result(i) = Math.max(first.result(i), second.result(i)) }
+    first
+  }
+}
+
+class AverageDoubleArrayAgg(size: Int) extends Aggregate[Double] {
+  val sums = new Array[Double](size)
+  val counts = new Array[Int](size)
+  def result: Array[Double] = (0 until size).map(i => sums(i)/counts(i)).toArray
+
+  def merge(other: AverageDoubleArrayAgg): Unit = {
+    for { i <- 0 until size optimized } {
+      sums(i) += other.sums(i)
+      counts(i) += other.counts(i)
+    }
+  }
 }
 
 class TimeGroupingAvgDoubleAgg(timeVectPos: Int,
@@ -101,13 +137,46 @@ class TimeGroupingAvgDoubleAgg(timeVectPos: Int,
                                startTime: Long,
                                endTime: Long,
                                numBuckets: Int) extends
-TimeGroupingAggregate[Double, Double](timeVectPos, valueVectPos, startTime, endTime, numBuckets) {
-  private final val sums = new Array[Double](numBuckets)
-  private final val counts = new Array[Int](numBuckets)
-  def result: Array[Double] = (0 until numBuckets).map(i => sums(i)/counts(i)).toArray
+TimeGroupingBaseAggregator[Double](timeVectPos, valueVectPos, startTime, endTime, numBuckets) {
+  type A = AverageDoubleArrayAgg
+  def emptyAggregate: A = new AverageDoubleArrayAgg(numBuckets)
 
-  final def aggregateOne(value: Double, bucketNo: Int): Unit = {
-    sums(bucketNo) += value
-    counts(bucketNo) += 1
+  final def aggNoNAs(agg: AverageDoubleArrayAgg,
+                     tv: BinaryVector[Long],
+                     vv: BinaryVector[Double],
+                     numRows: Int): Unit = {
+    val sums = agg.sums
+    val counts = agg.counts
+    for { i <- 0 until numRows optimized } {
+      val ts = tv(i)
+      if (ts >= startTime && ts < endTime) {
+        val bucket = ((ts - startTime) / bucketWidth).toInt
+        sums(bucket) += vv(i)
+        counts(bucket) += 1
+      }
+    }
+  }
+
+  final def aggWithNAs(agg: AverageDoubleArrayAgg,
+                       tv: FiloVector[Long],
+                       vv: FiloVector[Double],
+                       numRows: Int): Unit = {
+    val sums = agg.sums
+    val counts = agg.counts
+    for { i <- 0 until numRows optimized } {
+      if (tv.isAvailable(i) && vv.isAvailable(i)) {
+        val ts = tv(i)
+        if (ts >= startTime && ts <= endTime) {
+          val bucket = ((ts - startTime) / bucketWidth).toInt
+          sums(bucket) += vv(i)
+          counts(bucket) += 1
+        }
+      }
+    }
+  }
+
+  final def combine(first: AverageDoubleArrayAgg, second: AverageDoubleArrayAgg): AverageDoubleArrayAgg = {
+    first.merge(second)
+    first
   }
 }

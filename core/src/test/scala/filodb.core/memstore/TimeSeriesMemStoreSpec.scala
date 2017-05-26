@@ -8,8 +8,8 @@ import org.scalatest.concurrent.ScalaFutures
 
 import filodb.core._
 import filodb.core.binaryrecord.BinaryRecord
-import filodb.core.query.{ColumnFilter, Filter}
-import filodb.core.store.{FilteredPartitionScan, SinglePartitionScan}
+import filodb.core.query.{ColumnFilter, Filter, AggregationFunction}
+import filodb.core.store.{FilteredPartitionScan, SinglePartitionScan, QuerySpec}
 
 class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter with ScalaFutures {
   import monix.execution.Scheduler.Implicits.global
@@ -40,6 +40,19 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     // query the series name string column as well
     val q2 = memStore.scanRows(projection1, schemaWithSeries.takeRight(1), 0, FilteredPartitionScan(split))
     q2.map(_.filoUTF8String(0)).toSet should equal (data.map(_.filoUTF8String(5)).toSet)
+  }
+
+  it("should ingest into multiple series and aggregate across partitions") {
+    memStore.setup(projection1)
+    val data = mapper(linearMultiSeries()).take(20)   // 2 records per series x 10 series
+    val rows = data.zipWithIndex.map { case (reader, n) => RowWithOffset(reader, n) }
+    memStore.ingest(projection1.datasetRef, rows)
+
+    val split = memStore.getScanSplits(projection1.datasetRef, 1).head
+    val query = QuerySpec(AggregationFunction.Sum, Seq("min"))
+    val agg1 = memStore.aggregate(projection1, 0, query, FilteredPartitionScan(split))
+                       .get.runAsync.futureValue
+    agg1.result should equal (Array((1 to 20).map(_.toDouble).sum))
   }
 
   it("should be able to handle nonexistent partition keys") {

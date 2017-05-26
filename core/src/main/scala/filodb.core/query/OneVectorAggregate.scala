@@ -5,56 +5,73 @@ import scala.language.postfixOps
 import scala.reflect.ClassTag
 import scalaxy.loops._
 
-abstract class OneVectorAggregate[@specialized(Int, Long, Double) T, R: ClassTag](vectorPos: Int)
-extends Aggregate[R] {
-  final def add(reader: ChunkSetReader): Aggregate[R] = {
-    reader.vectors(vectorPos) match {
+/**
+ * An Aggregator for a single vector.
+ * @param vectorPos the position of the vector within the input projection.  This tells the ChunkSetReader
+ *                  which vector to pull.  The resulting ChunkSetReader passed into add() will have 1 vect
+ */
+abstract class OneVectorAggregator[@specialized(Int, Long, Double) T](vectorPos: Int)
+extends ChunkAggregator {
+  val positions = Array(vectorPos)
+
+  final def add(orig: A, reader: ChunkSetReader): A = {
+    reader.vectors(0) match {
       case bv: BinaryVector[T] if !bv.maybeNAs =>
-        aggregateNoNAs(bv, reader.info.numRows)
+        aggregateNoNAs(orig, bv)
       case f: FiloVector[T] =>
-        aggregate(f, reader.info.numRows)
+        aggregate(orig, f)
     }
-    this
   }
 
-  def aggregateNoNAs(v: BinaryVector[T], length: Int): Unit
-  def aggregate(v: FiloVector[T], length: Int): Unit
+  def aggregateNoNAs(orig: A, v: BinaryVector[T]): A
+  def aggregate(orig: A, v: FiloVector[T]): A
 }
 
 /**
  * Just an example of aggregation by summing doubles
  * TODO: while this should be fast, try SIMD  :D :D :D
  */
-class SumDoublesAggregate(vectorPos: Int = 0) extends OneVectorAggregate[Double, Double](vectorPos) {
-  var sum = 0.0
-  final def aggregateNoNAs(v: BinaryVector[Double], length: Int): Unit = {
-    var localSum = 0.0
-    for { i <- 0 until length optimized } {
+class SumDoublesAggregator(vectorPos: Int = 0) extends OneVectorAggregator[Double](vectorPos) {
+  type A = DoubleAggregate
+  val emptyAggregate = DoubleAggregate(0.0)
+
+  final def aggregateNoNAs(orig: DoubleAggregate, v: BinaryVector[Double]): DoubleAggregate = {
+    var localSum: Double = orig.value
+    for { i <- 0 until v.length optimized } {
       localSum += v(i)
     }
-    sum += localSum
+    DoubleAggregate(localSum)
   }
 
-  final def aggregate(v: FiloVector[Double], length: Int): Unit =
-    for { i <- 0 until length optimized } {
-      if (v.isAvailable(i)) sum += v(i)
+  final def aggregate(orig: DoubleAggregate, v: FiloVector[Double]): DoubleAggregate = {
+    var localSum: Double = orig.value
+    for { i <- 0 until v.length optimized } {
+      if (v.isAvailable(i)) localSum += v(i)
     }
+    DoubleAggregate(localSum)
+  }
 
-  def result: Array[Double] = Array(sum)
+  def combine(first: DoubleAggregate, second: DoubleAggregate): DoubleAggregate =
+    DoubleAggregate(first.value + second.value)
 }
 
 /**
  * Counts the number of defined elements.  This should be super fast if the vector does not have NAs.
  */
-class CountingAggregate(vectorPos: Int = 0) extends OneVectorAggregate[Any, Int](vectorPos) {
-  var count = 0
-  final def aggregateNoNAs(v: BinaryVector[Any], length: Int): Unit =
-    count += length
+class CountingAggregator(vectorPos: Int = 0) extends OneVectorAggregator[Any](vectorPos) {
+  type A = IntAggregate
+  val emptyAggregate = IntAggregate(0)
 
-  final def aggregate(v: FiloVector[Any], length: Int): Unit =
-    for { i <- 0 until length optimized } {
-      if (v.isAvailable(i)) count += 1
-    }
+  final def aggregateNoNAs(orig: IntAggregate, v: BinaryVector[Any]): IntAggregate =
+    IntAggregate(orig.value + v.length)
 
-  def result: Array[Int] = Array(count)
+  final def aggregate(orig: IntAggregate, v: FiloVector[Any]): IntAggregate = {
+    // TODO: Replace this with a much more efficient, NA bit counting method inlined into FiloVector itself
+    var localCount = orig.value
+    for { i <- 0 until v.length optimized } if (v.isAvailable(i)) localCount += 1
+    IntAggregate(localCount)
+  }
+
+  def combine(first: IntAggregate, second: IntAggregate): IntAggregate =
+    IntAggregate(first.value + second.value)
 }

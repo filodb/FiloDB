@@ -44,9 +44,16 @@ class PromQLParserSpec extends FunSpec with Matchers {
     val filters = Seq(filter1, ColumnFilter("app", Filter.Equals("myApp")))
     validate("""sum(50, http-requests-total#avg{method="GET", app="myApp"}[5m])""") should equal (
       FunctionQuery("sum", Some("50"), PartitionSpec("http-requests-total", "avg", filters, 300)))
+
+    validate("""topk(5, sum(http-requests-total#avg[5m]))""") should equal (
+      FunctionQuery("topk", Some("5"),
+        FunctionQuery("sum", None, PartitionSpec("http-requests-total", "avg", Nil, 300))))
   }
 
   it("should return ParseError for invalid input") {
     parse("""abasdfasd""") should be ('failure)
+
+    // missing parenthesis
+    parse("""topk(5, sum(http-requests-total#avg[5m])""") should be ('failure)
   }
 }

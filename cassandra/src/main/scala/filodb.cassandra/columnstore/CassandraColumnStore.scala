@@ -15,7 +15,7 @@ import filodb.core._
 import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.store._
 import filodb.core.metadata.{Column, Projection, RichProjection}
-import filodb.core.query.{PartitionChunkIndex, ChunkIDPartitionChunkIndex, KeyFilter}
+import filodb.core.query._
 
 /**
  * Implementation of a column store using Apache Cassandra tables.
@@ -240,7 +240,7 @@ trait CassandraColumnStoreScanner extends ColumnStoreScanner with StrictLogging 
   }
 
   // Produce an empty stream of chunks so that results can still be returned correctly
-  private def emptyChunkStream(infosSkips: ChunkSetInfo.ChunkInfosAndSkips, colNo: Int):
+  def emptyChunkStream(infosSkips: ChunkSetInfo.ChunkInfosAndSkips, colNo: Int):
     Observable[SingleChunkInfo] =
     Observable.fromIterator(infosSkips.toIterator.map { case (info, skips) =>
       // scalastyle:off
@@ -317,13 +317,17 @@ trait CassandraColumnStoreScanner extends ColumnStoreScanner with StrictLogging 
     val filterFunc = KeyFilter.makePartitionFilterFunc(projection, filters)
     indexRecords.sortedGroupBy(_.partition(projection))
                 .collect { case (binPart, binIndices) if filterFunc(binPart) =>
-                  val newIndex = new ChunkIDPartitionChunkIndex(binPart, projection)
+                  val newIndex = new CassandraPartition(binPart, projection, this)
                   binIndices.foreach { binIndex =>
                     val (info, skips) = ChunkSetInfo.fromBytes(projection, binIndex.data.array)
                     newIndex.add(info, skips)
                   }
                   newIndex
                 }
+  }
+
+  def indexToPartition(index: PartitionChunkIndex): FiloPartition = index match {
+    case p: CassandraPartition => p
   }
 
   def getOrCreateChunkTable(dataset: DatasetRef): ChunkTable = {
@@ -345,4 +349,33 @@ trait CassandraColumnStoreScanner extends ColumnStoreScanner with StrictLogging 
   }
 
   def reset(): Unit = {}
+}
+
+class CassandraPartition(binPartition: Types.PartitionKey,
+                         projection: RichProjection,
+                         scanner: CassandraColumnStoreScanner)
+extends ChunkIDPartitionChunkIndex(binPartition, projection) with FiloPartition {
+  import ChunkSetInfo._
+  import ChunkSetReader.defaultColumnToMaker
+  import Iterators._
+
+  def latestChunkLen: Int = latestN(1).toSeq.headOption.map(_._1.numRows).getOrElse(0)
+
+  override def streamReaders(infosSkips: InfosSkipsIt, positions: Array[Int]): Observable[ChunkSetReader] = {
+    val chunkTable = scanner.getOrCreateChunkTable(projection.datasetRef)
+    val columns = positions.map(projection.columns)
+    val groupedInfos = infosSkips.grouped(10)  // TODO: group by # of rows read
+    Observable.fromIterator(groupedInfos).flatMap { infosSkipsGroup =>
+      val groupedIds = infosSkipsGroup.map(_._1.id)
+      val chunkStreams = positions.map { index =>
+        val col = projection.columns(index).name
+        chunkTable.readChunks(binPartition, 0, col, index, groupedIds, false)
+                  .switchIfEmpty(scanner.emptyChunkStream(infosSkipsGroup, index)) }
+      Observable.now(ChunkPipeInfos(binPartition, infosSkipsGroup)) ++ Observable.merge(chunkStreams:_*)
+    }.scan(new ChunkSetReaderAggregator(columns, scanner.stats, defaultColumnToMaker)) { _ add _ }
+     .collect { case agg: ChunkSetReaderAggregator if agg.canEmit => agg.emit() }
+  }
+
+  def readers(infosSkips: InfosSkipsIt, positions: Array[Int]): Iterator[ChunkSetReader] =
+    streamReaders(infosSkips, positions).toIterator()
 }

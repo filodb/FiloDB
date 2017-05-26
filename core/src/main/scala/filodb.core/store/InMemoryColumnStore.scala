@@ -190,6 +190,9 @@ trait InMemoryColumnStoreScanner extends ColumnStoreScanner {
     }
     Observable.fromIterator(indexIt)
   }
+
+  // NOTE: This ColumnStore is going to be deprecated soon anyways.  Don't waste time on it.
+  def indexToPartition(index: PartitionChunkIndex): FiloPartition = ???
 }
 
 class InMemoryChunkStore extends StrictLogging {

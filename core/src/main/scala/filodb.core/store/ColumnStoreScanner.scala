@@ -2,15 +2,17 @@ package filodb.core.store
 
 import com.typesafe.scalalogging.slf4j.StrictLogging
 import java.nio.ByteBuffer
+import monix.eval.Task
 import monix.reactive.Observable
 import org.jctools.maps.NonBlockingHashMapLong
+import org.scalactic._
 import scala.concurrent.duration._
 import scala.concurrent.{ExecutionContext, Future}
 
 import filodb.core._
 import filodb.core.binaryrecord.BinaryRecord
-import filodb.core.metadata.{Column, Projection, RichProjection}
-import filodb.core.query.{ChunkSetReader, MutableChunkSetReader, PartitionChunkIndex}
+import filodb.core.metadata.{Column, Projection, RichProjection, InvalidFunctionSpec}
+import filodb.core.query._
 import filodb.core.Types._
 import ChunkSetReader._
 
@@ -24,7 +26,7 @@ case class SingleChunkInfo(id: Types.ChunkID, colNo: Int, bytes: ByteBuffer) ext
  * Encapsulates the reading and scanning logic of the ColumnStore.
  * We are careful to separate out ExecutionContext for reading only.
  */
-trait ColumnStoreScanner extends StrictLogging {
+trait ColumnStoreScanner extends ColumnStoreAggregator with StrictLogging {
   import filodb.core.Iterators._
 
   // Use a separate ExecutionContext for reading.  This is important to prevent deadlocks.
@@ -70,14 +72,6 @@ trait ColumnStoreScanner extends StrictLogging {
     readFilters(projection.datasetRef, version, segInfo.partition, chunkRange)
   }
 
-  /**
-   * Scans over indices according to the method.
-   * @return an Observable over PartitionChunkIndex
-   */
-  def scanPartitions(projection: RichProjection,
-                     version: Int,
-                     partMethod: PartitionScanMethod): Observable[PartitionChunkIndex]
-
   def readChunks(projection: RichProjection,
                  columns: Seq[Column],
                  version: Int,
@@ -95,9 +89,39 @@ trait ColumnStoreScanner extends StrictLogging {
   }
 }
 
-private[store] class ChunkSetReaderAggregator(schema: Seq[Column],
-                                              stats: ColumnStoreStats,
-                                              colToMaker: ColumnToMaker = defaultColumnToMaker) {
+trait ColumnStoreAggregator {
+  /**
+   * Scans over indices according to the method.
+   * @return an Observable over PartitionChunkIndex
+   */
+  def scanPartitions(projection: RichProjection,
+                     version: Int,
+                     partMethod: PartitionScanMethod): Observable[PartitionChunkIndex]
+
+  def indexToPartition(index: PartitionChunkIndex): FiloPartition
+
+  def aggregate(projection: RichProjection,
+                version: Int,
+                query: QuerySpec,
+                partMethod: PartitionScanMethod,
+                chunkMethod: ChunkScanMethod = AllChunkScan): Task[Aggregate[_]] Or InvalidFunctionSpec = {
+    for { aggregator <- query.aggregateFunc.validate(query.aggregateArgs, projection)
+          combiner   <- query.combinerFunc.validate(aggregator, query.combinerArgs) }
+    yield {
+      val chunkScan = aggregator.chunkScan(projection).getOrElse(chunkMethod)
+      val aggStream = scanPartitions(projection, version, partMethod)
+                        .map { index =>
+                          aggregator.aggPartition(index.findByMethod(chunkScan),
+                                                  indexToPartition(index))
+                        }
+      combiner.fold(aggStream)
+    }
+  }
+}
+
+class ChunkSetReaderAggregator(schema: Seq[Column],
+                               stats: ColumnStoreStats,
+                               colToMaker: ColumnToMaker = defaultColumnToMaker) {
   val readers = new NonBlockingHashMapLong[ChunkSetReader](32, false)
   val makers = schema.map(colToMaker).toArray
   var emitReader: Option[ChunkSetReader] = None
@@ -114,9 +138,9 @@ private[store] class ChunkSetReaderAggregator(schema: Seq[Column],
     pipeItem match {
       case SingleChunkInfo(id, colNo, buf) =>
         readers.get(id) match {
-          //scalastyle:off
+          // scalastyle:off
           case null =>
-          //scalastyle:on
+          // scalastyle:on
             stats.incrChunkWithNoInfo()
           case reader: MutableChunkSetReader =>
             reader.addChunk(colNo, buf)

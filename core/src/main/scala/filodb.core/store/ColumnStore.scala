@@ -1,7 +1,9 @@
 package filodb.core.store
 
 import com.typesafe.scalalogging.slf4j.StrictLogging
+import monix.eval.Task
 import monix.reactive.Observable
+import org.scalactic._
 import org.velvia.filo.{RowReader, FiloVector}
 import org.velvia.filo.RowReader.TypedFieldExtractor
 import scala.concurrent.{Await, ExecutionContext, Future}
@@ -11,8 +13,8 @@ import scala.language.existentials
 import filodb.core._
 import filodb.core.Types.PartitionKey
 import filodb.core.binaryrecord.{BinaryRecord, BinaryRecordWrapper}
-import filodb.core.metadata.{Column, Projection, RichProjection}
-import filodb.core.query.{ChunkSetReader, ColumnFilter}
+import filodb.core.metadata.{Column, Projection, RichProjection, InvalidFunctionSpec}
+import filodb.core.query._
 import filodb.core.query.ChunkSetReader._
 
 sealed trait PartitionScanMethod
@@ -39,6 +41,11 @@ object RowKeyChunkScan {
   def apply(startKey: BinaryRecord, endKey: BinaryRecord): RowKeyChunkScan =
     RowKeyChunkScan(BinaryRecordWrapper(startKey), BinaryRecordWrapper(endKey))
 }
+
+final case class QuerySpec(aggregateFunc: AggregationFunction,
+                           aggregateArgs: Seq[String],
+                           combinerFunc: CombinerFunction = CombinerFunction.Simple,
+                           combinerArgs: Seq[String] = Nil)
 
 trait ScanSplit {
   // Should return a set of hostnames or IP addresses describing the preferred hosts for that scan split
@@ -76,6 +83,21 @@ trait BaseColumnStore extends StrictLogging {
                  partMethod: PartitionScanMethod,
                  chunkMethod: ChunkScanMethod = AllChunkScan,
                  colToMaker: ColumnToMaker = defaultColumnToMaker): Observable[ChunkSetReader]
+
+  /**
+   * Aggregates data from dataset chunks.
+   * @param projection the Projection to read from
+   * @param version the version # to read from
+   * @param query the QuerySpec defining the aggregation/combiner functions and arguments
+   * @param partMethod which partitions to aggregate
+   * @param chunkMethod which chunks within a partition to aggregate
+   * @return either a Task for an async Aggregate, or an error parsing args
+   */
+  def aggregate(projection: RichProjection,
+                version: Int,
+                query: QuerySpec,
+                partMethod: PartitionScanMethod,
+                chunkMethod: ChunkScanMethod = AllChunkScan): Task[Aggregate[_]] Or InvalidFunctionSpec
 
   /**
    * Scans chunks from a dataset.  ScanMethod params determines what gets scanned.

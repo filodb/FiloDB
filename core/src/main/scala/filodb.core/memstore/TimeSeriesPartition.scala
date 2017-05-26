@@ -1,13 +1,12 @@
 package filodb.core.memstore
 
-import monix.reactive.Observable
 import org.jctools.maps.NonBlockingHashMapLong
 import org.velvia.filo.{BinaryAppendableVector, BinaryVector, RowReader, RoutingRowReader}
 import scalaxy.loops._
 
 import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.metadata.RichProjection
-import filodb.core.query.{PartitionChunkIndex, ChunkIDPartitionChunkIndex, ChunkSetReader}
+import filodb.core.query.{PartitionChunkIndex, ChunkIDPartitionChunkIndex, ChunkSetReader, FiloPartition}
 import filodb.core.store.{ChunkSetInfo, timeUUID64}
 import filodb.core.Types._
 
@@ -35,7 +34,7 @@ import filodb.core.Types._
 class TimeSeriesPartition(val projection: RichProjection,
                           val binPartition: PartitionKey,
                           chunksToKeep: Int,
-                          maxChunkSize: Int) extends PartitionChunkIndex {
+                          maxChunkSize: Int) extends PartitionChunkIndex with FiloPartition {
   import ChunkSetInfo._
 
   // NOTE: private final compiles down to a field in bytecode, faster than method invocation
@@ -112,6 +111,7 @@ class TimeSeriesPartition(val projection: RichProjection,
     index.singleChunk(startKey, id)
 
   def numChunks: Int = chunkIDs.size
+  def latestChunkLen: Int = currentChunkLen
 
   /**
    * Gets the most recent n ChunkSetInfos and skipMaps (which will be empty)
@@ -134,13 +134,13 @@ class TimeSeriesPartition(val projection: RichProjection,
     BinaryRecord(projection.rowKeyBinSchema, RoutingRowReader(row, rowKeyIndices))
 
   /**
-   * Streams back ChunkSetReaders from this Partition as an observable of readers by chunkID
+   * Streams back ChunkSetReaders from this Partition as an iterator of readers by chunkID
    * @param infosSkips ChunkSetInfos and skips, as returned by one of the index search methods
    * @param positions an array of the column positions according to projection.dataColumns, ie 0 for the first
    *                  column, up to projection.dataColumns.length - 1
    */
-  def streamReaders(infosSkips: InfosSkipsIt, positions: Array[Int]): Observable[ChunkSetReader] =
-    Observable.fromIterator(infosSkips).map { case (info, skips) =>
+  def readers(infosSkips: InfosSkipsIt, positions: Array[Int]): Iterator[ChunkSetReader] =
+    infosSkips.map { case (info, skips) =>
       val vectArray = vectors.get(info.id)
       new ChunkSetReader(info, binPartition, skips, positions.map(vectArray))
     }

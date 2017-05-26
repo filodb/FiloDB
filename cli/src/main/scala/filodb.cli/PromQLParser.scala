@@ -9,17 +9,23 @@ object PromQLParser {
   val Quote = "\""
   val Space = " "
 
+  // We don't really want users to be able to scan every metric. Make this obscure.
+  val ScanEverythingMetric = ":_really_scan_everything"
+
   val SecsInMinute = 60
   val SecsInHour   = 3600
   val SecsInDay    = SecsInHour * 24
   val SecsInWeek   = SecsInDay * 7
 }
 
+sealed trait Expr
 final case class PartitionSpec(metricName: String, column: String, filters: Seq[ColumnFilter], range: Int)
+    extends Expr
 
 sealed trait PromQuery
 final case class VectorExprOnlyQuery(spec: PartitionSpec) extends PromQuery
-final case class FunctionQuery(functionName: String, param: Option[String], spec: PartitionSpec) extends PromQuery
+final case class FunctionQuery(functionName: String, param: Option[String], expr: Expr)
+    extends PromQuery with Expr
 
 /**
  * A Prometheus PromQL-like query syntax parser
@@ -29,8 +35,7 @@ final case class FunctionQuery(functionName: String, param: Option[String], spec
  * - FiloDB has flexible schemas, so #columnName needs to be appended to the metrics name
  * - What column does the metric name map to?  TODO: allow filtering on metric name too
  * - For now very strict subset supported
- * - avg, min, max functions take an optional parameter, the number of buckets, which has a default.
- *   They are not point-by-point functions.
+ *   - nested functions can be parsed now
  */
 class PromQLParser(val input: ParserInput) extends Parser {
   import Filter._
@@ -66,7 +71,9 @@ class PromQLParser(val input: ParserInput) extends Parser {
             PartitionSpec(metric, column, filters.getOrElse(Nil), duration.getOrElse(DefaultRange))) }
 
   def FunctionParam = rule { NameString ~ ',' ~ Space.? }
-  def FunctionExpr = rule { NameString ~ '(' ~ FunctionParam.? ~ VectorSelector ~ ')' ~> FunctionQuery }
+  def FunctionExpr = rule { NameString ~ '(' ~ FunctionParam.? ~ FunctionOrSelector ~ ')' ~> FunctionQuery }
+
+  def FunctionOrSelector: Rule1[Expr] = rule { VectorSelector | FunctionExpr }
 
   def VectorExpr = rule { VectorSelector ~> VectorExprOnlyQuery }
   def Query: Rule1[PromQuery] = rule { (FunctionExpr | VectorExpr) ~ EOI }

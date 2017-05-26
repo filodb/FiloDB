@@ -34,6 +34,8 @@ class ShardMapper(val numShards: Int) extends Serializable {
     case o: Any         => false
   }
 
+  override def hashCode: Int = shardValues.hashCode
+
   override def toString: String = s"ShardMapper {${shardValues.zipWithIndex}}"
 
   def shardValues: Seq[ActorRef] = shardMap.toBuffer

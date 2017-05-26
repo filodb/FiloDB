@@ -16,6 +16,7 @@ class TimeSeriesPartitionSpec extends FunSpec with Matchers with ScalaFutures {
     val data = mapper(singleSeriesData()).take(5)
     part.ingest(data(0), 1000L)
     part.numChunks should equal (1)
+    part.latestChunkLen should equal (1)
     val minData = data.map(_.getDouble(1)).take(1)
     val chunk1 = part.streamReaders(part.newestChunkIds(1), Array(1)).headL.runAsync.futureValue
     chunk1.vectors(0).toSeq should equal (minData)
@@ -29,6 +30,7 @@ class TimeSeriesPartitionSpec extends FunSpec with Matchers with ScalaFutures {
 
     // there should be a frozen chunk of 10 records plus 1 record in currently appending chunks
     part.numChunks should equal (2)
+    part.latestChunkLen should equal (1)
     val chunks = part.streamReaders(part.newestChunkIds(2), Array(1))
                      .map(_.vectors(0).toSeq).toListL.runAsync
     chunks.futureValue should equal (Seq(minData take 10, minData drop 10))

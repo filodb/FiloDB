@@ -12,7 +12,7 @@ import scalax.file.Path
 import filodb.coordinator.NodeCoordinatorActor.ReloadDCA
 import filodb.core._
 import filodb.core.metadata.{DataColumn, Dataset, RichProjection}
-import filodb.core.query.{ColumnFilter, Filter}
+import filodb.core.query.{ColumnFilter, Filter, HistogramBucket}
 import filodb.core.store._
 
 import org.scalatest.concurrent.ScalaFutures
@@ -229,6 +229,21 @@ with CoordinatorSetup with ScalaFutures {
       val answer3 = probe.expectMsgClass(classOf[AggregateResponse[Double]])
       answer3.elementClass should equal (classOf[Double])
       answer3.elements.length should equal (2)
+    }
+
+    it("should aggregate using histogram combiner") {
+      val ref = setupTimeSeries()
+      probe.send(coordActor, IngestRows(ref, 0, mapper(linearMultiSeries()).take(30), 1L))
+      probe.expectMsg(Ack(1L))
+
+      val args = QueryArgs("sum", Seq("min"), "histogram", Seq("2000"))
+      val q1 = AggregateQuery(ref, 0, args, FilteredPartitionQuery(Nil))
+      probe.send(coordActor, q1)
+      val answer = probe.expectMsgClass(classOf[AggregateResponse[HistogramBucket]])
+      answer.elementClass should equal (classOf[HistogramBucket])
+      val buckets = answer.elements.toSeq
+      buckets should have length (10)
+      buckets.map(_.count) should equal (Seq(0, 0, 0, 0, 4, 6, 0, 0, 0, 0))
     }
 
     it("should query partitions in AggregateQuery") {

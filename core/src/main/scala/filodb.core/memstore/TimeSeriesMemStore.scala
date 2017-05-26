@@ -13,14 +13,14 @@ import scala.concurrent.{ExecutionContext, Future}
 
 import filodb.core.DatasetRef
 import filodb.core.metadata.{Column, RichProjection}
-import filodb.core.query.{ChunkSetReader, KeyFilter, PartitionChunkIndex, PartitionKeyIndex}
+import filodb.core.query.{ChunkSetReader, KeyFilter, PartitionChunkIndex, PartitionKeyIndex, FiloPartition}
 import filodb.core.store._
 import filodb.core.Types.{PartitionKey, ChunkID}
 
 final case class DatasetAlreadySetup(dataset: DatasetRef) extends Exception(s"Dataset $dataset already setup")
 
-class TimeSeriesMemStore(config: Config)(implicit val ec: ExecutionContext) extends MemStore
-with StrictLogging {
+class TimeSeriesMemStore(config: Config)(implicit val ec: ExecutionContext)
+extends MemStore with ColumnStoreAggregator with StrictLogging {
   import ChunkSetReader._
 
   private val datasets = new HashMap[DatasetRef, TimeSeriesDataset]
@@ -57,9 +57,13 @@ with StrictLogging {
                  colToMaker: ColumnToMaker = defaultColumnToMaker): Observable[ChunkSetReader] = {
     val positions = datasets(projection.datasetRef).getPositions(columns)
     scanPartitions(projection, version, partMethod)
-      .flatMap { case p: TimeSeriesPartition =>
+      .flatMap { case p: PartitionChunkIndex with FiloPartition =>
         p.streamReaders(p.findByMethod(chunkMethod), positions)
       }
+  }
+
+  def indexToPartition(index: PartitionChunkIndex): FiloPartition = index match {
+    case p: TimeSeriesPartition => p
   }
 
   def getScanSplits(dataset: DatasetRef, splitsPerNode: Int = 1): Seq[ScanSplit] = Seq(InMemoryWholeSplit)

@@ -306,6 +306,7 @@ private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
     { originator ! DatasetCommands.ProjectionTruncated }
   }
 
+  // scalastyle:off cyclomatic.complexity
   def receive: Receive = LoggingReceive {
     case NewRows(ackTo, rows, seqNo) =>
       ingestRows(ackTo, rows, seqNo)

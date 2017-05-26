@@ -11,7 +11,7 @@ import filodb.core._
 import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.memstore.MemStore
 import filodb.core.metadata.{Column, RichProjection, BadArgument => BadArg, WrongNumberArguments}
-import filodb.core.query.{Aggregate, AggregationFunction}
+import filodb.core.query.{Aggregate, AggregationFunction, CombinerFunction}
 import filodb.core.store._
 
 object QueryActor {
@@ -96,14 +96,9 @@ class QueryActor(colStore: BaseColumnStore,
     AggregationFunction.withNameInsensitiveOption(funcName)
                        .toOr(BadQuery(s"No such aggregation function $funcName"))
 
-  def aggregateOrUserDataQuery(aggregate: Aggregate[_], dataQueryOpt: Option[DataQuery]):
-    ChunkScanMethod Or ErrorResponse = aggregate.chunkScan(projection) match {
-    // See if aggregate has a chunkScanMethod
-    case Some(scanMethod) => Good(scanMethod)
-    // If not, get dataQueryOpt and run it through validateDataQuery
-    case None =>
-      validateDataQuery(dataQueryOpt.getOrElse(AllPartitionData))
-  }
+  def validateCombiner(combinerName: String): CombinerFunction Or ErrorResponse =
+    CombinerFunction.withNameInsensitiveOption(combinerName)
+                    .toOr(BadQuery(s"No such combiner function $combinerName"))
 
   def handleRawQuery(q: RawQuery): Unit = {
     val RawQuery(dataset, version, colStrs, partQuery, dataQuery) = q
@@ -132,22 +127,21 @@ class QueryActor(colStore: BaseColumnStore,
   def handleAggQuery(q: AggregateQuery): Unit = {
     val originator = sender
     (for { aggFunc    <- validateFunction(q.query.functionName)
+           combinerFunc <- validateCombiner(q.query.combinerName)
+           qSpec = QuerySpec(aggFunc, q.query.args, combinerFunc, q.query.combinerArgs)
            partMethod <- validatePartQuery(q.partitionQuery)
-           aggAndIndices <- aggFunc.validate(q.query.args, projection)
-           (aggregator, indices) = aggAndIndices
-           chunkMethod <- aggregateOrUserDataQuery(aggregator, q.dataQuery) }
+           chunkMethod <- validateDataQuery(q.dataQuery.getOrElse(AllPartitionData))
+           aggregateTask <- colStore.aggregate(projection, q.version, qSpec, partMethod, chunkMethod) }
     yield {
       val queryId = QueryActor.nextQueryId
-      val colSeq = indices.map(projection.columns)
-      colStore.readChunks(projection, colSeq, q.version, partMethod, chunkMethod)
-        .foldLeftL(aggregator)(_ add _)
-        .runAsync
+      aggregateTask.runAsync
         .map { agg => originator ! AggregateResponse(queryId, agg.clazz, agg.result) }
         .recover { case err: Exception => originator ! QueryError(queryId, err) }
     }).recover {
       case resp: ErrorResponse => originator ! resp
       case WrongNumberArguments(given, expected) => originator ! WrongNumberOfArgs(given, expected)
       case BadArg(reason) => originator ! BadArgument(reason)
+      case other: Any     => originator ! BadQuery(other.toString)
     }
   }
 

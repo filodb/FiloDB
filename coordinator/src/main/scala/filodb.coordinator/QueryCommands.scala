@@ -4,7 +4,7 @@ import akka.actor.ActorRef
 import java.nio.ByteBuffer
 import scala.language.existentials
 
-import filodb.core.query.ColumnFilter
+import filodb.core.query.{ColumnFilter, CombinerFunction}
 
 object QueryCommands {
   import filodb.core._
@@ -55,7 +55,16 @@ object QueryCommands {
                             partitionQuery: PartitionQuery,
                             dataQuery: DataQuery) extends QueryCommand
 
-  final case class QueryArgs(functionName: String, args: Seq[String] = Nil)
+  /**
+   * Specifies details about the aggregation query to execute on the FiloDB server.
+   * @param functionName the name of the function for aggregating raw data
+   * @param combinerName the name of a "combiner" which combines results from first level functions, such
+   *                     as topk, bottomk, histogram, etc.
+   */
+  final case class QueryArgs(functionName: String,
+                             args: Seq[String] = Nil,
+                             combinerName: String = CombinerFunction.default,
+                             combinerArgs: Seq[String] = Nil)
 
   /**
    * Executes a query which performs aggregation and returns the result as one message to the client
@@ -85,8 +94,11 @@ object QueryCommands {
    * @param columnStrings serialized version of Column objects, use DataColumn.fromString()
    */
   final case class QueryInfo(id: Long, dataset: DatasetRef, columnStrings: Seq[String]) extends QueryResponse
-  final case class QueryEndRaw(id: Long)
-  final case class QueryError(id: Long, t: Throwable)
+  final case class QueryEndRaw(id: Long) extends QueryResponse
+  final case class QueryError(id: Long, t: Throwable) extends ErrorResponse with QueryResponse {
+    override def toString: String = s"QueryError id=$id ${t.getClass.getName} ${t.getMessage}\n" +
+                                    t.getStackTrace.map(_.toString).mkString("\n")
+  }
 
   final case class QueryRawChunks(queryID: Long,
                                   chunkID: ChunkID,
