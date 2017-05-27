@@ -46,7 +46,9 @@ class TimeSeriesPartition(val projection: RichProjection,
   private var firstRowKey = BinaryRecord.empty
 
   private final val numColumns = projection.dataColumns.size
-  private final val appenders = MemStore.getAppendables(projection, binPartition, maxChunkSize)
+  // Set initial size to a fraction of the max chunk size, so that partitions with sparse amount of data
+  // will not cause too much memory bloat.  GrowableVector allows vectors to grow, so this should be OK
+  private final val appenders = MemStore.getAppendables(projection, binPartition, maxChunkSize / 8)
   private final val currentChunks = appenders.map(_.appender)
   private final val rowKeyIndices = projection.rowKeyColIndices.toArray
 
