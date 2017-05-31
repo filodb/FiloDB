@@ -5,6 +5,7 @@ import java.io.{ByteArrayInputStream, ObjectInputStream}
 import java.io.{ByteArrayOutputStream, ObjectOutputStream}
 
 import filodb.core.binaryrecord.{BinaryRecord, RecordSchema}
+import filodb.core.memstore.IngestRecord
 import filodb.core.NamesTestData
 
 import org.scalatest.{FunSpec, Matchers, BeforeAndAfter, BeforeAndAfterAll}
@@ -46,9 +47,13 @@ class SerializationSpec extends FunSpec with Matchers {
     import filodb.core.NamesTestData._
     import Serializer._
 
-    val binSchema = RecordSchema(schema)
-    putSchema(binSchema)
-    val records = mapper(names).map { r => BinaryRecord(binSchema, r) }
+    putPartitionSchema(projection.partKeyBinSchema)
+    putDataSchema(projection.binSchema)
+    val records = mapper(names).zipWithIndex.map { case (r, idx) =>
+      val record = IngestRecord(projection, r, idx)
+      record.copy(partition = BinaryRecord(projection.partKeyBinSchema, record.partition),
+                  data = BinaryRecord(projection.binSchema, record.data))
+    }
     val cmd = IngestRows(datasetRef, 0, records, 100L)
     fromBinaryIngestRows(cmd.toBytes()) should equal (cmd)
   }

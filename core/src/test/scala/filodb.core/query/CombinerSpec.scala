@@ -8,7 +8,7 @@ import org.scalatest.concurrent.ScalaFutures
 
 import filodb.core._
 import filodb.core.metadata._
-import filodb.core.memstore.{RowWithOffset, TimeSeriesMemStore}
+import filodb.core.memstore.{IngestRecord, TimeSeriesMemStore}
 import filodb.core.store.{QuerySpec, FilteredPartitionScan}
 
 class CombinerSpec extends FunSpec with Matchers with BeforeAndAfter with ScalaFutures {
@@ -61,9 +61,8 @@ class CombinerSpec extends FunSpec with Matchers with BeforeAndAfter with ScalaF
 
     it("should compute histogram correctly") {
       memStore.setup(projection1)
-      val data = mapper(linearMultiSeries()).take(30)   // 3 records per series x 10 series
-      val rows = data.zipWithIndex.map { case (reader, n) => RowWithOffset(reader, n) }
-      memStore.ingest(projection1.datasetRef, rows)
+      val data = records(linearMultiSeries()).take(30)   // 3 records per series x 10 series
+      memStore.ingest(projection1.datasetRef, data)
 
       val agg = memStore.aggregate(projection1, 0, baseQuery, FilteredPartitionScan(split))
                   .get.runAsync.futureValue

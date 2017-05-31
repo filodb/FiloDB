@@ -44,9 +44,8 @@ private[filodb] class MemStoreCoordActor(projection: RichProjection,
   val sourceActor = context.actorOf(sourceProps, s"source-${projection.datasetRef}")
 
   def receive: Receive = LoggingReceive {
-    case NewRows(ackTo, rows, seqNo) =>
-      val withOffsets = rows.map(RowWithOffset(_, seqNo))
-      memStore.ingest(projection.datasetRef, withOffsets)
+    case NewRows(ackTo, records, seqNo) =>
+      memStore.ingest(projection.datasetRef, records)
       ackTo ! IngestionCommands.Ack(seqNo)
 
     case StartFlush(originator) =>

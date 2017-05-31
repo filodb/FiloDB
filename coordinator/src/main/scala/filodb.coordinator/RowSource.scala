@@ -14,7 +14,7 @@ import filodb.coordinator.client.DatasetOps
 import filodb.core._
 import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.metadata.RichProjection
-import filodb.core.memstore.{MemStore, RowWithOffset, DatasetAlreadySetup}
+import filodb.core.memstore.{MemStore, IngestRecord, DatasetAlreadySetup}
 
 object RowSource {
   case object GetMoreRows
@@ -75,17 +75,16 @@ trait RowSource extends Actor with StrictLogging {
   def version: Int
 
   // Returns newer batches of rows.
-  def batchIterator: Iterator[Seq[RowReader]]
+  def batchIterator: Iterator[Seq[IngestRecord]]
 
   // Anything additional to do when we hit end of data and it's all acked, before killing oneself
   def allDoneAndGood(): Unit = {}
 
   private var whoStartedMe: Option[ActorRef] = None
-  private val outstanding = new HashMap[Long, (ActorRef, Seq[RowReader])]
+  private val outstanding = new HashMap[Long, (ActorRef, Seq[IngestRecord])]
   private val outstandingNodes = new HashMap[ActorRef, Set[Long]].withDefaultValue(Set.empty)
   private var mapper: ShardMapper = ShardMapper.empty
   private var nextSeqId = 0L
-  private val partKeyFunc = projection.partitionKeyFunc
   private val dataset = projection.datasetRef
 
   // *** Metrics ***
@@ -201,13 +200,14 @@ trait RowSource extends Actor with StrictLogging {
   // Gets the next batch of data from the batchIterator, then determine if we can get more rows
   // or need to wait.
   def sendRows(): Unit = {
-    val nextBatch: Seq[RowReader] = batchIterator.next
+    val nextBatch = batchIterator.next
 
     // Convert rows to BinaryRecord first.  This takes care of handling any null inputs.
     logger.trace(s"  ==> BinaryRecord conversion for ${nextBatch.size} rows...")
-    val binReaders = nextBatch.map { r =>
+    val binRecords = nextBatch.map { r =>
       try {
-        BinaryRecord(projection.binSchema, r)
+        r.copy(partition = BinaryRecord(projection.partKeyBinSchema, r.partition),
+               data = BinaryRecord(projection.binSchema, r.data))
       } catch {
         case e: Exception =>
           logger.error(s"Could not convert source row $r to BinaryRecord", e)
@@ -218,15 +218,15 @@ trait RowSource extends Actor with StrictLogging {
     // Now, compute a partition key hash for each row and group all the rows by the coordinator ref
     // returned from the shardMapper.  It is important this happens after BinaryRecord conversion,
     // because the partKeyFunc does not check for nulls.
-    val rowsByNode = binReaders.groupBy { reader =>
-      mapper.partitionToShardNode(partKeyFunc(reader).hashCode).coord
+    val rowsByNode = binRecords.groupBy { case IngestRecord(partition, _, _) =>
+      mapper.partitionToShardNode(partition.hashCode).coord
     }
     nodeHist.record(rowsByNode.size)
-    rowsByNode.foreach { case (nodeRef, readers) =>
-      logger.trace(s"  ==> ($nextSeqId) Sending ${readers.size} records to node $nodeRef...")
-      outstanding(nextSeqId) = (nodeRef, readers)
+    rowsByNode.foreach { case (nodeRef, records) =>
+      logger.trace(s"  ==> ($nextSeqId) Sending ${records.size} records to node $nodeRef...")
+      outstanding(nextSeqId) = (nodeRef, records)
       outstandingNodes(nodeRef) = outstandingNodes(nodeRef) + nextSeqId
-      nodeRef ! IngestionCommands.IngestRows(dataset, version, readers, nextSeqId)
+      nodeRef ! IngestionCommands.IngestRows(dataset, version, records, nextSeqId)
       nextSeqId += 1
     }
     rowsIngested.increment(nextBatch.length)
@@ -264,7 +264,7 @@ trait DirectRowSource extends Actor with StrictLogging {
   def memStore: MemStore
   def projection: RichProjection
 
-  def batchIterator: Iterator[Seq[RowWithOffset]]
+  def batchIterator: Iterator[Seq[IngestRecord]]
 
   private val rowsIngested = Kamon.metrics.counter("source-rows-ingested")
 

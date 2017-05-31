@@ -4,9 +4,10 @@ import com.typesafe.scalalogging.slf4j.StrictLogging
 import org.boon.primitive.{ByteBuf, InputByteArray}
 import org.velvia.filo.RowReader
 
+import filodb.coordinator.IngestionCommands.IngestRows
 import filodb.core._
 import filodb.core.binaryrecord.{BinaryRecord, RecordSchema}
-import filodb.coordinator.IngestionCommands.IngestRows
+import filodb.core.memstore.IngestRecord
 
 /**
  * Utilities for special serializers for row data (for efficient record routing).
@@ -27,11 +28,13 @@ object Serializer extends StrictLogging {
 
   def serializeIngestRows(data: IngestRows): Array[Byte] = {
     val buf = ByteBuf.create(1000)
-    val schemaHash = data.rows.headOption match {
-      case Some(b: BinaryRecord) => b.schema.hashCode
-      case other: Any            => -1
+    val (partSchemaHash, dataSchemaHash) = data.rows.headOption match {
+      case Some(IngestRecord(p: BinaryRecord, d: BinaryRecord, _)) =>
+        (p.schema.hashCode, d.schema.hashCode)
+      case other: Any            => (-1, -1)
     }
-    buf.writeInt(schemaHash)
+    buf.writeInt(partSchemaHash)
+    buf.writeInt(dataSchemaHash)
     buf.writeMediumString(data.dataset.dataset)
     buf.writeMediumString(data.dataset.database.getOrElse(""))
     buf.writeInt(data.version)
@@ -39,7 +42,10 @@ object Serializer extends StrictLogging {
     buf.writeInt(data.rows.length)
     for { record <- data.rows } {
       record match {
-        case b: BinaryRecord => buf.writeMediumByteArray(b.bytes)
+        case IngestRecord(p: BinaryRecord, d: BinaryRecord, offset) =>
+          buf.writeMediumByteArray(p.bytes)
+          buf.writeMediumByteArray(d.bytes)
+          buf.writeLong(offset)
       }
     }
     buf.toBytes
@@ -47,28 +53,38 @@ object Serializer extends StrictLogging {
 
   def fromBinaryIngestRows(bytes: Array[Byte]): IngestRows = {
     val scanner = new InputByteArray(bytes)
-    val schemaHash = scanner.readInt
+    val partSchemaHash = scanner.readInt
+    val dataSchemaHash = scanner.readInt
     val dataset = scanner.readMediumString
     val db = Option(scanner.readMediumString).filter(_.length > 0)
     val version = scanner.readInt
     val seqNo = scanner.readLong
     val numRows = scanner.readInt
-    val rows = new collection.mutable.ArrayBuffer[BinaryRecord]()
+    val rows = new collection.mutable.ArrayBuffer[IngestRecord]()
     if (numRows > 0) {
-      val schema = schemaMap.get(schemaHash)
-      if (Option(schema).isEmpty) { logger.error(s"Schema with hash $schemaHash not found!") }
+      val partSchema = partSchemaMap.get(partSchemaHash)
+      val dataSchema = dataSchemaMap.get(dataSchemaHash)
+      if (Option(partSchema).isEmpty) { logger.error(s"Schema with hash $partSchemaHash not found!") }
       for { i <- 0 until numRows } {
-        rows += BinaryRecord(schema, scanner.readMediumByteArray)
+        rows += IngestRecord(BinaryRecord(partSchema, scanner.readMediumByteArray),
+                             BinaryRecord(dataSchema, scanner.readMediumByteArray),
+                             scanner.readLong)
       }
     }
     IngestionCommands.IngestRows(DatasetRef(dataset, db), version, rows, seqNo)
   }
 
-  private val schemaMap = new java.util.concurrent.ConcurrentHashMap[Int, RecordSchema]
+  private val partSchemaMap = new java.util.concurrent.ConcurrentHashMap[Int, RecordSchema]
+  private val dataSchemaMap = new java.util.concurrent.ConcurrentHashMap[Int, RecordSchema]
 
-  def putSchema(schema: RecordSchema): Unit = {
-    logger.debug(s"Saving schema with fields ${schema.fields.toList} and hash ${schema.hashCode}...")
-    schemaMap.put(schema.hashCode, schema)
+  def putPartitionSchema(schema: RecordSchema): Unit = {
+    logger.debug(s"Saving partition schema with fields ${schema.fields.toList} and hash ${schema.hashCode}...")
+    partSchemaMap.put(schema.hashCode, schema)
+  }
+
+  def putDataSchema(schema: RecordSchema): Unit = {
+    logger.debug(s"Saving data schema with fields ${schema.fields.toList} and hash ${schema.hashCode}...")
+    dataSchemaMap.put(schema.hashCode, schema)
   }
 }
 

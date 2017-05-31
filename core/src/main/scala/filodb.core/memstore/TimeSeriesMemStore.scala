@@ -6,7 +6,7 @@ import com.typesafe.scalalogging.slf4j.StrictLogging
 import kamon.Kamon
 import kamon.metric.instrument.Gauge
 import monix.reactive.Observable
-import org.velvia.filo.ZeroCopyUTF8String
+import org.velvia.filo.{SchemaRowReader, ZeroCopyUTF8String}
 import scala.collection.mutable.{ArrayBuffer, HashMap}
 import scala.concurrent.duration._
 import scala.concurrent.{ExecutionContext, Future}
@@ -35,13 +35,16 @@ extends MemStore with ColumnStoreAggregator with StrictLogging {
     }
   }
 
-  def ingest(dataset: DatasetRef, rows: Seq[RowWithOffset]): Unit = datasets(dataset).ingest(rows)
+  def ingest(dataset: DatasetRef, rows: Seq[IngestRecord]): Unit = datasets(dataset).ingest(rows)
 
   def indexNames(dataset: DatasetRef): Iterator[String] =
     datasets.get(dataset).map(d => d.indexNames).getOrElse(Iterator.empty)
 
   def indexValues(dataset: DatasetRef, indexName: String): Iterator[ZeroCopyUTF8String] =
     datasets.get(dataset).map(d => d.indexValues(indexName)).getOrElse(Iterator.empty)
+
+  def numPartitions(dataset: DatasetRef): Int =
+    datasets.get(dataset).map(_.numActivePartitions).getOrElse(-1)
 
   def scanPartitions(projection: RichProjection,
                      version: Int,
@@ -55,7 +58,7 @@ extends MemStore with ColumnStoreAggregator with StrictLogging {
                  partMethod: PartitionScanMethod,
                  chunkMethod: ChunkScanMethod = AllChunkScan,
                  colToMaker: ColumnToMaker = defaultColumnToMaker): Observable[ChunkSetReader] = {
-    val positions = datasets(projection.datasetRef).getPositions(columns)
+    val positions = projection.getPositions(columns)
     scanPartitions(projection, version, partMethod)
       .flatMap { case p: PartitionChunkIndex with FiloPartition =>
         p.streamReaders(p.findByMethod(chunkMethod), positions)
@@ -89,9 +92,8 @@ class TimeSeriesDataset(projection: RichProjection, config: Config) extends Stri
   import TimeSeriesDataset._
 
   private final val partitions = new ArrayBuffer[TimeSeriesPartition]
-  private final val keyMap = new HashMap[PartitionKey, Int]
+  private final val keyMap = new HashMap[SchemaRowReader, TimeSeriesPartition]
   private final val keyIndex = new PartitionKeyIndex(projection)
-  private final val partKeyFunc = projection.partitionKeyFunc
 
   private val chunksToKeep = config.getInt("memstore.chunks-to-keep")
   private val maxChunksSize = config.getInt("memstore.max-chunks-size")
@@ -106,14 +108,13 @@ class TimeSeriesDataset(projection: RichProjection, config: Config) extends Stri
   }
 
   // TODO(velvia): Make this multi threaded
-  def ingest(rows: Seq[RowWithOffset]): Unit = {
+  // TODO(velvia): OR, for efficiency, allow multiple data records for each partition key
+  def ingest(rows: Seq[IngestRecord]): Unit = {
     rowsIngested.increment(rows.length)
     // now go through each row, find the partition and call partition ingest
-    rows.foreach { case RowWithOffset(reader, offset) =>
-      val partKey = partKeyFunc(reader)
-      val partIndex = keyMap.getOrElseUpdate(partKey, addPartition(partKey))
-      val partition = partitions(partIndex)
-      partition.ingest(reader, offset)
+    rows.foreach { case IngestRecord(partKey, data, offset) =>
+      val partition = keyMap.getOrElse(partKey, addPartition(partKey))
+      partition.ingest(data, offset)
     }
   }
 
@@ -121,25 +122,26 @@ class TimeSeriesDataset(projection: RichProjection, config: Config) extends Stri
 
   def indexValues(indexName: String): Iterator[ZeroCopyUTF8String] = keyIndex.indexValues(indexName)
 
+  def numActivePartitions: Int = keyMap.size
+
   // Creates a new TimeSeriesPartition, updating indexes
-  private def addPartition(newPartKey: PartitionKey): Int = {
-    val newPart = new TimeSeriesPartition(projection, newPartKey, chunksToKeep, maxChunksSize)
+  // NOTE: it's important to use an actual BinaryRecord instead of just a RowReader in the internal
+  // data structures.  The translation to BinaryRecord only happens here (during first time creation
+  // of a partition) and keeps internal data structures from having to keep copies of incoming records
+  // around, which might be much more expensive memory wise.  One consequence though is that internal
+  // and external partition key components need to yield the same hashCode.  IE, use UTF8Strings everywhere.
+  private def addPartition(newPartKey: SchemaRowReader): TimeSeriesPartition = {
+    val binPartKey = projection.partKey(newPartKey)
+    val newPart = new TimeSeriesPartition(projection, binPartKey, chunksToKeep, maxChunksSize)
     val newIndex = partitions.length
-    keyIndex.addKey(newPartKey, newIndex)
+    keyIndex.addKey(binPartKey, newIndex)
     partitions += newPart
     partitionsCreated.increment
-    newIndex
+    keyMap(binPartKey) = newPart
+    newPart
   }
 
-  private def getPartition(partKey: PartitionKey): Option[PartitionChunkIndex] =
-    keyMap.get(partKey).map(partitions.apply)
-
-  def getPositions(columns: Seq[Column]): Array[Int] =
-    columns.map { c =>
-      val pos = projection.dataColumns.indexOf(c)
-      if (pos < 0) throw new IllegalArgumentException(s"Column $c not found in dataset ${projection.datasetRef}")
-      pos
-    }.toArray
+  private def getPartition(partKey: PartitionKey): Option[PartitionChunkIndex] = keyMap.get(partKey)
 
   def scanPartitions(partMethod: PartitionScanMethod): Observable[PartitionChunkIndex] = {
     val indexIt = partMethod match {

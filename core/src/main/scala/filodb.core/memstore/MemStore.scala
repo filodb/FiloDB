@@ -1,15 +1,26 @@
 package filodb.core.memstore
 
-import org.velvia.filo.{IntReaderAppender, LongReaderAppender, DoubleReaderAppender, ConstAppender}
-import org.velvia.filo.{vectors => bv, RowReaderAppender, RowReader, ZeroCopyUTF8String}
+import org.velvia.filo._
+import org.velvia.filo.{vectors => bv}
+import scalaxy.loops._
 
 import filodb.core.DatasetRef
 import filodb.core.metadata.{Column, RichProjection}
 import filodb.core.store.BaseColumnStore
 import filodb.core.Types.PartitionKey
 
-final case class RowWithOffset(row: RowReader, offset: Long)
+// partition key is separated from the other data columns, as the partition key does not need
+// to be stored, but is needed for routing and other purposes... = less extraction time
+// This allows a partition key to be reused across multiple records also, for efficiency :)
+final case class IngestRecord(partition: SchemaRowReader, data: RowReader, offset: Long)
 
+object IngestRecord {
+  // Creates an IngestRecord from a reader spanning a single entire record, such as that from a CSV file
+  def apply(proj: RichProjection, reader: RowReader, offset: Long): IngestRecord =
+    IngestRecord(SchemaRoutingRowReader(reader, proj.partIndices, proj.partExtractors),
+                 RoutingRowReader(reader, proj.nonPartColIndices),
+                 offset)
+}
 /**
  * A MemStore is an in-memory ColumnStore that ingests data not in chunks but as new records, potentially
  * spread over many partitions.  It supports the BaseColumnStore API, and should support real-time reads
@@ -33,7 +44,7 @@ trait MemStore extends BaseColumnStore {
    * @param dataset the dataset to ingest into
    * @param rows the input rows, each one with an offset, and conforming to the schema used in setup()
    */
-  def ingest(dataset: DatasetRef, rows: Seq[RowWithOffset]): Unit
+  def ingest(dataset: DatasetRef, rows: Seq[IngestRecord]): Unit
 
   /**
    * Returns the names of tags or columns that are indexed at the partition level
@@ -44,12 +55,18 @@ trait MemStore extends BaseColumnStore {
    * Returns values for a given index name for a dataset
    */
   def indexValues(dataset: DatasetRef, indexName: String): Iterator[ZeroCopyUTF8String]
+
+  /**
+   * Returns the number of partitions being maintained in the memtable.
+   * TODO: add shard number
+   * @Return -1 if dataset not found, otherwise number of active partitions
+   */
+  def numPartitions(dataset: DatasetRef): Int
 }
 
 import Column.ColumnType._
 
 object MemStore {
-  // scalastyle:off cyclomatic.complexity
   /**
    * Figures out the RowReaderAppenders for each column, depending on type and whether it is a static/
    * constant column for each partition.
@@ -57,35 +74,17 @@ object MemStore {
   def getAppendables(proj: RichProjection,
                      partition: PartitionKey,
                      maxElements: Int): Array[RowReaderAppender] =
-    proj.dataColumns.zipWithIndex.map { case (col, index) =>
-      val partCol = proj.staticPartIndices.indexOf(index)
-      if (partCol >= 0) {
-        // This column is a static part of partition key. Use ConstVectorAppenders for efficiency.
-        col.columnType match {
-          case IntColumn       =>
-            ConstAppender(new bv.IntConstAppendingVect(partition.getInt(partCol)), index)
-          case LongColumn      =>
-            ConstAppender(new bv.LongConstAppendingVect(partition.getLong(partCol)), index)
-          case DoubleColumn    =>
-            ConstAppender(new bv.DoubleConstAppendingVect(partition.getDouble(partCol)), index)
-          case TimestampColumn =>
-            ConstAppender(new bv.LongConstAppendingVect(partition.getLong(partCol)), index)
-          case StringColumn    =>
-            ConstAppender(new bv.UTF8ConstAppendingVect(partition.filoUTF8String(partCol)), index)
-          case other: Column.ColumnType => ???
-        }
-      } else {
-        col.columnType match {
-          case IntColumn       =>
-            new IntReaderAppender(bv.IntBinaryVector.appendingVector(maxElements), index)
-          case LongColumn      =>
-            new LongReaderAppender(bv.LongBinaryVector.appendingVector(maxElements), index)
-          case DoubleColumn    =>
-            new DoubleReaderAppender(bv.DoubleVector.appendingVector(maxElements), index)
-          case TimestampColumn =>
-            new LongReaderAppender(bv.LongBinaryVector.appendingVector(maxElements), index)
-          case other: Column.ColumnType => ???
-        }
+    proj.nonPartitionColumns.zipWithIndex.map { case (col, index) =>
+      col.columnType match {
+        case IntColumn       =>
+          new IntReaderAppender(bv.IntBinaryVector.appendingVector(maxElements), index)
+        case LongColumn      =>
+          new LongReaderAppender(bv.LongBinaryVector.appendingVector(maxElements), index)
+        case DoubleColumn    =>
+          new DoubleReaderAppender(bv.DoubleVector.appendingVector(maxElements), index)
+        case TimestampColumn =>
+          new LongReaderAppender(bv.LongBinaryVector.appendingVector(maxElements), index)
+        case other: Column.ColumnType => ???
       }
     }.toArray
 }

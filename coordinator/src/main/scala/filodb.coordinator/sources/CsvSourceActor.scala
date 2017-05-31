@@ -5,12 +5,12 @@ import com.opencsv.CSVReader
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.slf4j.StrictLogging
 import net.ceedubs.ficus.Ficus._
-import org.velvia.filo.{ArrayStringRowReader, RowReader}
+import org.velvia.filo.ArrayStringRowReader
 import scala.concurrent.duration._
 
 import filodb.coordinator.{BaseActor, IngestionCommands, RowSource, RowSourceFactory}
 import filodb.core.DatasetRef
-import filodb.core.memstore.MemStore
+import filodb.core.memstore.{MemStore, IngestRecord}
 import filodb.core.metadata.{Dataset, RichProjection, Column}
 
 object CsvSourceActor extends StrictLogging {
@@ -95,7 +95,9 @@ class CsvSourceActor(reader: CSVReader,
 
   if (settings.header) reader.readNext
 
-  val batchIterator: Iterator[Seq[RowReader]] = reader.iterator.asScala
-                                                  .map(ArrayStringRowReader)
-                                                  .grouped(settings.rowsToRead)
+  val batchIterator = reader.iterator.asScala
+                        .zipWithIndex
+                        .map { case (tokens, idx) =>
+                          IngestRecord(projection, ArrayStringRowReader(tokens), idx)
+                        }.grouped(settings.rowsToRead)
 }

@@ -5,15 +5,17 @@ import akka.testkit.TestProbe
 import akka.pattern.gracefulStop
 import com.typesafe.config.ConfigFactory
 import org.velvia.filo.{RowReader, TupleRowReader}
-
 import scala.concurrent.Future
 import scala.concurrent.duration._
-import filodb.core._
-import filodb.core.metadata.{Column, Dataset, RichProjection}
-import filodb.core.store.{ChunkSetSegment, InMemoryColumnStore, SegmentInfo}
-import filodb.core.reprojector.{DefaultReprojector, MemTable, Reprojector}
+
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
+
+import filodb.core._
+import filodb.core.metadata.{Column, Dataset, RichProjection}
+import filodb.core.memstore.IngestRecord
+import filodb.core.store.{ChunkSetSegment, InMemoryColumnStore, SegmentInfo}
+import filodb.core.reprojector.{DefaultReprojector, MemTable, Reprojector}
 
 import scala.util.Try
 import scalax.file.Path
@@ -72,9 +74,13 @@ with ScalaFutures {
     names.map { t => (t._1, t._2, t._3, t._4, Some(partNum.toString)) }
   }
 
+  def toRecords(data: Seq[Product]): Seq[IngestRecord] =
+    data.zipWithIndex.map { case (tuples, idx) =>
+      IngestRecord(projection, TupleRowReader(tuples), idx)
+    }
 
   private def ingestRows(numRows: Int): Unit = {
-    dsActor ! NewRows(probe.ref, namesWithPartCol.take(numRows).map(TupleRowReader), 0L)
+    dsActor ! NewRows(probe.ref, toRecords(namesWithPartCol.take(numRows)), 0L)
     probe.expectMsg(IngestionCommands.Ack(0L))
   }
 
@@ -118,11 +124,11 @@ with ScalaFutures {
 
   it("should send back Nack if over maximum number of rows or Nack sent before with no CheckCanIngest") {
     // First one will go through, but make memTable full.  Flush will happen, new memtable available
-    dsActor ! NewRows(probe.ref, namesWithPartCol.take(205).map(TupleRowReader), 0L)
+    dsActor ! NewRows(probe.ref, toRecords(namesWithPartCol.take(205)), 0L)
     // Second one will go through but make memtable full again.  Third one will be denied becuase
     // hopefully flushing still happening and active memtable is full again
-    dsActor ! NewRows(probe.ref, namesWithPartCol.take(205).map(TupleRowReader), 1L)
-    dsActor ! NewRows(probe.ref, namesWithPartCol.drop(205).take(20).map(TupleRowReader), 2L)
+    dsActor ! NewRows(probe.ref, toRecords(namesWithPartCol.take(205)), 1L)
+    dsActor ! NewRows(probe.ref, toRecords(namesWithPartCol.drop(205).take(20)), 2L)
 
     probe.expectMsg(IngestionCommands.Ack(0L))
     probe.expectMsg(IngestionCommands.Ack(1L))
@@ -132,13 +138,13 @@ with ScalaFutures {
     probe.expectMsg(IngestionCommands.ResumeIngest)
 
     // Check that trying to ingest without sending CheckCanIngest results in a Nack
-    dsActor ! NewRows(probe.ref, namesWithPartCol.take(50).map(TupleRowReader), 4L)
+    dsActor ! NewRows(probe.ref, toRecords(namesWithPartCol.take(50)), 4L)
     probe.expectMsg(IngestionCommands.Nack(4L))
 
     // Send CheckCanIngest, after that will be clear to ingest again
     probe.send(dsActor, CanIngest)
     probe.expectMsg(IngestionCommands.CanIngest(true))
-    dsActor ! NewRows(probe.ref, namesWithPartCol.take(50).map(TupleRowReader), 5L)
+    dsActor ! NewRows(probe.ref, toRecords(namesWithPartCol.take(50)), 5L)
     probe.expectMsg(IngestionCommands.Ack(5L))
   }
 

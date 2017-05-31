@@ -1,7 +1,7 @@
 package filodb.core.memstore
 
 import org.jctools.maps.NonBlockingHashMapLong
-import org.velvia.filo.{BinaryAppendableVector, BinaryVector, RowReader, RoutingRowReader}
+import org.velvia.filo.{BinaryAppendableVector, BinaryVector, FiloVector, RowReader, RoutingRowReader}
 import scalaxy.loops._
 
 import filodb.core.binaryrecord.BinaryRecord
@@ -45,11 +45,13 @@ class TimeSeriesPartition(val projection: RichProjection,
   private var currentChunkLen = 0
   private var firstRowKey = BinaryRecord.empty
 
-  private final val numColumns = projection.dataColumns.size
   // Set initial size to a fraction of the max chunk size, so that partitions with sparse amount of data
   // will not cause too much memory bloat.  GrowableVector allows vectors to grow, so this should be OK
   private final val appenders = MemStore.getAppendables(projection, binPartition, maxChunkSize / 8)
+  private final val numColumns = appenders.size
+  private final val partitionVectors = new Array[FiloVector[_]](projection.partitionColumns.length)
   private final val currentChunks = appenders.map(_.appender)
+  // TODO(velvia): These are not correct, needs to be adjusted for non-partition columns
   private final val rowKeyIndices = projection.rowKeyColIndices.toArray
 
   // The highest offset of a row that has been committed to disk
@@ -135,6 +137,30 @@ class TimeSeriesPartition(val projection: RichProjection,
   private def makeRowKey(row: RowReader): BinaryRecord =
     BinaryRecord(projection.rowKeyBinSchema, RoutingRowReader(row, rowKeyIndices))
 
+  private def getVectors(positions: Array[Int],
+                         vectors: Array[BinaryVector[_]],
+                         vectLength: Int): Array[FiloVector[_]] = {
+    val finalVectors = new Array[FiloVector[_]](positions.size)
+    for { i <- 0 until positions.size optimized } {
+      finalVectors(i) = if (positions(i) >= 0) { vectors(positions(i)) }
+                        else {
+                          // Create const vectors for partition key columns on demand, since they are
+                          // rarely queried.  Cache them in partitionVectors.
+                          // scalastyle:off null
+                          val partVectPos = -positions(i) - 1
+                          val partVect = partitionVectors(partVectPos)
+                          if (partVect == null) {
+                            val constVect = projection.partExtractors(partVectPos).
+                                              constVector(binPartition, partVectPos, vectLength)
+                            partitionVectors(partVectPos) = constVect
+                            constVect
+                          } else { partVect }
+                          // scalastyle:on null
+                        }
+    }
+    finalVectors
+  }
+
   /**
    * Streams back ChunkSetReaders from this Partition as an iterator of readers by chunkID
    * @param infosSkips ChunkSetInfos and skips, as returned by one of the index search methods
@@ -144,7 +170,7 @@ class TimeSeriesPartition(val projection: RichProjection,
   def readers(infosSkips: InfosSkipsIt, positions: Array[Int]): Iterator[ChunkSetReader] =
     infosSkips.map { case (info, skips) =>
       val vectArray = vectors.get(info.id)
-      new ChunkSetReader(info, binPartition, skips, positions.map(vectArray))
+      new ChunkSetReader(info, binPartition, skips, getVectors(positions, vectArray, info.numRows))
     }
 
   // Initializes vectors, chunkIDs for a new chunkset/chunkID

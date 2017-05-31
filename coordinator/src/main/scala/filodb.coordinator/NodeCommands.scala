@@ -4,6 +4,7 @@ import akka.actor.ActorRef
 import org.velvia.filo.RowReader
 
 import filodb.core._
+import filodb.core.memstore.IngestRecord
 import filodb.core.metadata.{DataColumn, Dataset, Projection}
 
 // Public, external Actor/Akka API for NodeCoordinatorActor, so every incoming command should be a NodeCommand
@@ -82,7 +83,7 @@ object IngestionCommands {
    */
   final case class IngestRows(dataset: DatasetRef,
                               version: Int,
-                              rows: Seq[RowReader],
+                              rows: Seq[IngestRecord],
                               seqNo: Long) extends NodeCommand
 
   final case class Ack(seqNo: Long) extends NodeResponse

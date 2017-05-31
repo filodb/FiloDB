@@ -4,14 +4,15 @@ import akka.actor.{Actor, ActorRef, Cancellable, Props}
 import akka.cluster.Cluster
 import akka.event.LoggingReceive
 import com.typesafe.config.Config
-import filodb.coordinator.IngestionCommands.DCAReady
 import kamon.Kamon
 import net.ceedubs.ficus.Ficus._
 import org.velvia.filo.RowReader
-
 import scala.collection.mutable.{ArrayBuffer, HashSet}
 import scala.concurrent.duration.FiniteDuration
 import scala.concurrent.Future
+
+import filodb.coordinator.IngestionCommands.DCAReady
+import filodb.core.memstore.IngestRecord
 import filodb.core.metadata.{Column, Dataset, Projection, RichProjection}
 import filodb.core.store.{ColumnStore, SegmentInfo}
 import filodb.core.reprojector.{FiloMemTable, MemTable, Reprojector}
@@ -30,7 +31,7 @@ object DatasetCoordinatorActor {
    *        when the ingestion was set up.
    * @return Ack(seqNo)
    */
-  case class NewRows(ackTo: ActorRef, rows: Seq[RowReader], seqNo: Long) extends DSCoordinatorMessage
+  case class NewRows(ackTo: ActorRef, rows: Seq[IngestRecord], seqNo: Long) extends DSCoordinatorMessage
 
   // The default minimum amt of memory in MB to allow ingesting more data
   val DefaultMinFreeMb = 512
@@ -158,7 +159,7 @@ private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
   val kamonMemtableFull = Kamon.metrics.counter("dca-memtable-full", kamonTags)
 
   // Holds temporary rows before being flushed to MemTable
-  val tempRows = new ArrayBuffer[RowReader]
+  val tempRows = new ArrayBuffer[IngestRecord]
   val ackTos = new ArrayBuffer[(ActorRef, Long)]
   val cannotIngest = new HashSet[ActorRef]
   var mTableWriteTask: Option[Cancellable] = None
@@ -176,7 +177,7 @@ private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
 
   var flushedCallbacks: List[ActorRef] = Nil
 
-  private def ingestRows(ackTo: ActorRef, rows: Seq[RowReader], seqNo: Long): Unit = {
+  private def ingestRows(ackTo: ActorRef, rows: Seq[IngestRecord], seqNo: Long): Unit = {
     if (canIngest && !cannotIngest.contains(ackTo)) {
       mTableFlushTask.foreach(_.cancel)
       mTableFlushTask = Some(context.system.scheduler.scheduleOnce
@@ -202,7 +203,8 @@ private[filodb] class DatasetCoordinatorActor(projection: RichProjection,
     logger.debug(s"Flushing ${tempRows.length} rows to MemTable...")
     rowsIngested += tempRows.length
     kamonRowsIngested.increment(tempRows.length)
-    activeTable.ingestRows(tempRows)
+    // This is not correct, but this logic is about to be ripped out anyways.
+    activeTable.ingestRows(tempRows.map(_.data))
     ackTos.foreach { case (ackTo, seqNo) => ackTo ! IngestionCommands.Ack(seqNo) }
     tempRows.clear()
     ackTos.clear()

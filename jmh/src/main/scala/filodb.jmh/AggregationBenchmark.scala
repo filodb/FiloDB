@@ -13,7 +13,7 @@ import scala.concurrent.Await
 import scala.concurrent.duration._
 
 import filodb.core._
-import filodb.core.memstore.{RowWithOffset, TimeSeriesMemStore}
+import filodb.core.memstore.{IngestRecord, TimeSeriesMemStore}
 import filodb.core.query._
 import filodb.core.store.FilteredPartitionScan
 
@@ -39,7 +39,7 @@ class AggregationBenchmark {
   // Ingest raw data
   memStore.setup(projection1)
   val data = mapper(linearMultiSeries(startTs)).take(numPoints)
-  val rows = data.zipWithIndex.map { case (reader, n) => RowWithOffset(reader, n) }
+  val rows = data.zipWithIndex.map { case (reader, n) => IngestRecord(reader, n) }
   memStore.ingest(projection1.datasetRef, rows)
   val split = memStore.getScanSplits(projection1.datasetRef, 1).head
 

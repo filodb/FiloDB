@@ -115,12 +115,14 @@ class NodeCoordinatorActor(metaStore: MetaStore,
   // Initializes both a DatasetCoordinatorActor as well as a QueryActor
   private def setupDataset(originator: ActorRef, ds: DatasetSetup): Unit = {
     val columns = ds.encodedColumns.map(s => DataColumn.fromString(s, ds.dataset.name))
-    Serializer.putSchema(RecordSchema(columns))
 
     logger.debug(s"Creating projection from dataset ${ds.dataset}, columns $columns")
     // This should not fail, it should have been ferreted out by NodeClusterActor first
     val proj = RichProjection(ds.dataset, columns)
     val ref = proj.datasetRef
+    Serializer.putPartitionSchema(RecordSchema(proj.partitionColumns))
+    Serializer.putDataSchema(RecordSchema(proj.nonPartitionColumns))
+
     val props = MemStoreCoordActor.props(proj, memStore, ds.source)
     val ingestRef = context.actorOf(props, s"ms-coord-${proj.dataset.name}-${ds.version}")
     dsCoordinators((ref, ds.version)) = ingestRef

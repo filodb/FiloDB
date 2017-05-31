@@ -111,8 +111,8 @@ trait SingleColumnAggFunction extends AggregationFunction {
 
   def validate(args: Seq[String], proj: RichProjection): Aggregator Or InvalidFunctionSpec = {
     for { args <- validateNumArgs(args, 1)
-          sourceColIndex <- columnIndex(proj.columns, args(0))
-          sourceColType <- validatedColumnType(proj.columns, sourceColIndex, allowedTypes) }
+          sourceColIndex <- columnIndex(proj.nonPartitionColumns, args(0))
+          sourceColType <- validatedColumnType(proj.nonPartitionColumns, sourceColIndex, allowedTypes) }
     yield {
       makeAggregator(sourceColIndex, sourceColType)
     }
@@ -134,10 +134,10 @@ trait TimeGroupingAggFunction extends AggregationFunction {
 
   def validate(args: Seq[String], proj: RichProjection): Aggregator Or InvalidFunctionSpec = {
     for { args <- validateNumArgs(args, 5)
-          timeColIndex <- columnIndex(proj.columns, args(0))
-          timeColType  <- validatedColumnType(proj.columns, timeColIndex, Set(LongColumn, TimestampColumn))
-          valueColIndex <- columnIndex(proj.columns, args(1))
-          valueColType  <- validatedColumnType(proj.columns, valueColIndex, allowedTypes)
+          timeColIndex <- columnIndex(proj.nonPartitionColumns, args(0))
+          timeColType  <- validatedColumnType(proj.nonPartitionColumns, timeColIndex, Set(LongColumn, TimestampColumn))
+          valueColIndex <- columnIndex(proj.nonPartitionColumns, args(1))
+          valueColType  <- validatedColumnType(proj.nonPartitionColumns, valueColIndex, allowedTypes)
           startTs      <- parseParam(LongKeyType, args(2))
           endTs        <- parseParam(LongKeyType, args(3))
           numBuckets   <- parseParam(IntKeyType, args(4)) }
