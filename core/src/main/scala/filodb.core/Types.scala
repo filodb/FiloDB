@@ -1,6 +1,7 @@
 package filodb.core
 
 import java.nio.ByteBuffer
+import org.velvia.filo.ZeroCopyUTF8String
 import scalaxy.loops._
 import scodec.bits.ByteVector
 
@@ -22,6 +23,14 @@ object Types {
   type ChunkID = Long     // Each chunk is identified by segmentID and a long timestamp
 
   type PartitionKey = BinaryRecord
+
+  // Hashcodes are cached in a UTF8String, so it is strongly recommended to use a cache of map keys and
+  // reuse instances of UTF8MapKey
+  type UTF8MapKey = ZeroCopyUTF8String
+
+  type UTF8Map = Map[UTF8MapKey, ZeroCopyUTF8String]
+
+  val emptyUTF8Map = Map.empty[UTF8MapKey, ZeroCopyUTF8String]
 
   // TODO: contribute this Ordering back to ByteVector
   // Assumes unsigned comparison, big endian, meaning that the first byte in a vector

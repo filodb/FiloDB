@@ -6,7 +6,7 @@ import org.velvia.filo.{VectorInfo, ZeroCopyUTF8String}
 import org.velvia.filo.RowReader.TypedFieldExtractor
 import scala.reflect.ClassTag
 
-import filodb.core.{CompositeKeyType, KeyType, SingleKeyType, SingleKeyTypeBase}
+import filodb.core._
 import filodb.core.Types._
 
 /**
@@ -102,6 +102,7 @@ object Column extends StrictLogging {
     case object StringColumn extends RichColumnType[ZeroCopyUTF8String]
     case object BitmapColumn extends RichColumnType[Boolean]
     case object TimestampColumn extends RichColumnType[Long]
+    case object MapColumn extends RichColumnType[UTF8Map]
   }
 
   type Schema = Map[String, DataColumn]

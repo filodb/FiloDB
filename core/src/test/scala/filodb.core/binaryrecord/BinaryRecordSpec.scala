@@ -4,11 +4,14 @@ import java.io.{ByteArrayInputStream, ObjectInputStream}
 import java.io.{ByteArrayOutputStream, ObjectOutputStream}
 import java.sql.Timestamp
 import org.scalatest.{Matchers, FunSpec}
-import org.velvia.filo.{RowReader, TupleRowReader, ZeroCopyUTF8String}
+import org.velvia.filo.{RowReader, SeqRowReader, TupleRowReader, ZeroCopyUTF8String}
 import scodec.bits.ByteVector
+
+import filodb.core.Types._
 
 class BinaryRecordSpec extends FunSpec with Matchers {
   import filodb.core.metadata.Column.ColumnType._
+  import ZeroCopyUTF8String._
 
   val schema1_i = new RecordSchema(Seq(IntColumn))
   val schema1_s = new RecordSchema(Seq(StringColumn))
@@ -17,6 +20,8 @@ class BinaryRecordSpec extends FunSpec with Matchers {
   val schema2_is = new RecordSchema(Seq(IntColumn, StringColumn))
 
   val schema3_bdt = new RecordSchema(Seq(BitmapColumn, DoubleColumn, TimestampColumn))
+
+  val schema4 = new RecordSchema(Seq(StringColumn, MapColumn))
 
   val reader1 = TupleRowReader((Some("data"), Some(-15L)))
   val reader2 = TupleRowReader((Some(1234),   Some("one-two-three")))
@@ -100,6 +105,16 @@ class BinaryRecordSpec extends FunSpec with Matchers {
   }
 
   it("should semantically compare BinaryRecord Int and Long fields correctly") (pending)
+
+  it("should read, write, and compare Map fields") {
+    val map1 = Map("application".utf8 -> "FiloDB".utf8, "env".utf8 -> "staging".utf8)
+    val binRec1 = BinaryRecord(schema4, SeqRowReader(Seq("400s", map1)))
+    binRec1.as[UTF8Map](1) should equal (map1)
+
+    val binRec2 = BinaryRecord(schema4, binRec1.bytes)
+    binRec2 should equal (binRec1)
+    binRec2.as[UTF8Map](1) should equal (map1)
+  }
 
   it("should produce sortable ByteArrays from BinaryRecords") {
     val binRec1 = BinaryRecord(schema2_is, reader2)

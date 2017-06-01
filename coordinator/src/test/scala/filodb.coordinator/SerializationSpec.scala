@@ -51,7 +51,7 @@ class SerializationSpec extends FunSpec with Matchers {
     putDataSchema(projection.binSchema)
     val records = mapper(names).zipWithIndex.map { case (r, idx) =>
       val record = IngestRecord(projection, r, idx)
-      record.copy(partition = BinaryRecord(projection.partKeyBinSchema, record.partition),
+      record.copy(partition = projection.partKey(record.partition),
                   data = BinaryRecord(projection.binSchema, record.data))
     }
     val cmd = IngestRows(datasetRef, 0, records, 100L)

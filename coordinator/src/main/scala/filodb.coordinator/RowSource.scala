@@ -206,7 +206,7 @@ trait RowSource extends Actor with StrictLogging {
     logger.trace(s"  ==> BinaryRecord conversion for ${nextBatch.size} rows...")
     val binRecords = nextBatch.map { r =>
       try {
-        r.copy(partition = BinaryRecord(projection.partKeyBinSchema, r.partition),
+        r.copy(partition = projection.partKey(r.partition),
                data = BinaryRecord(projection.binSchema, r.data))
       } catch {
         case e: Exception =>

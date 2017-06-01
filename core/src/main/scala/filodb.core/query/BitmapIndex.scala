@@ -2,6 +2,7 @@ package filodb.core.query
 
 import com.googlecode.javaewah.EWAHCompressedBitmap
 import java.util.concurrent.ConcurrentSkipListMap
+import org.velvia.filo.ZeroCopyUTF8String
 
 import filodb.core._
 import filodb.core.store.ChunkSetInfo.emptySkips
@@ -12,7 +13,7 @@ import filodb.core.store.ChunkSetInfo.emptySkips
  * with an Int/Long.
  * Suitable for multithreaded adds and queries.
  */
-class BitmapIndex[K](indexName: String) {
+class BitmapIndex[K](indexName: ZeroCopyUTF8String) {
   import Filter._
   import KeyFilter.decode
   import collection.JavaConverters._

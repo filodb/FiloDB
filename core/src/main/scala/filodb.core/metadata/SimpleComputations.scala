@@ -136,6 +136,7 @@ object SimpleComputations {
           case StringColumn => wrap((s: UTF8Str) => Math.abs(s.hashCode % numBuckets))
           case BitmapColumn => wrap((b: Boolean) => (if (b) 1 else 0) % numBuckets)
           case TimestampColumn => wrap((l: Long) => Math.abs(l % numBuckets).toInt)
+          case MapColumn => wrap((m: UTF8Map) => Math.abs(m.hashCode % numBuckets))
         }
         computedColumn(expr, dataset, info, IntColumn, extractor)
       }

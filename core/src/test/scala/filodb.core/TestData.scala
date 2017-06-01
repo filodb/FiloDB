@@ -4,7 +4,7 @@ import bloomfilter.mutable.BloomFilter
 import java.nio.ByteBuffer
 import java.sql.Timestamp
 import org.joda.time.DateTime
-import org.velvia.filo.{FiloVector, RowReader, TupleRowReader, ArrayStringRowReader, SeqRowReader}
+import org.velvia.filo._
 import org.velvia.filo.ZeroCopyUTF8String._
 import scala.io.Source
 import scala.concurrent.ExecutionContext
@@ -12,6 +12,7 @@ import scala.concurrent.duration._
 
 import filodb.core._
 import filodb.core.binaryrecord.{BinaryRecord, RecordSchema}
+import filodb.core.memstore.IngestRecord
 import filodb.core.metadata.{Column, DataColumn, Dataset, RichProjection}
 import filodb.core.query.{ChunkSetReader, MutablePartitionChunkIndex, RowkeyPartitionChunkIndex}
 import filodb.core.store._
@@ -133,6 +134,9 @@ object GdeltTestData {
 
   val readers = gdeltLines.map { line => ArrayStringRowReader(line.split(",")) }
 
+  def records(proj: RichProjection, readerSeq: Seq[RowReader] = readers): Seq[IngestRecord] =
+    readerSeq.zipWithIndex.map { case (reader, idx) => IngestRecord(proj, reader, idx) }
+
   val badLine = ArrayStringRowReader(Array("NotANumber"))   // Will fail
   val altLines =
     """0,1979-01-01,197901,1979,AFR,africa,5,5.52631578947368
@@ -221,14 +225,13 @@ object GdeltTestData {
 // A simulation of machine metrics data
 object MachineMetricsData {
   import scala.util.Random.nextInt
+  import Column.ColumnType._
 
-  val schema = Seq(DataColumn(0, "timestamp", "metrics", 0, Column.ColumnType.TimestampColumn),
-                   DataColumn(1, "min",       "metrics", 0, Column.ColumnType.DoubleColumn),
-                   DataColumn(2, "avg",       "metrics", 0, Column.ColumnType.DoubleColumn),
-                   DataColumn(3, "max",       "metrics", 0, Column.ColumnType.DoubleColumn),
-                   DataColumn(4, "p90",       "metrics", 0, Column.ColumnType.DoubleColumn))
-
-  def mapper(rows: Stream[Product]): Stream[RowReader] = rows.map(TupleRowReader)
+  val schema = Seq(DataColumn(0, "timestamp", "metrics", 0, TimestampColumn),
+                   DataColumn(1, "min",       "metrics", 0, DoubleColumn),
+                   DataColumn(2, "avg",       "metrics", 0, DoubleColumn),
+                   DataColumn(3, "max",       "metrics", 0, DoubleColumn),
+                   DataColumn(4, "p90",       "metrics", 0, DoubleColumn))
 
   val dataset = Dataset("metrics", "timestamp", ":string 0")
   val datasetRef = DatasetRef(dataset.name)
@@ -246,33 +249,50 @@ object MachineMetricsData {
     }
   }
 
-  val schemaWithSeries = schema :+ DataColumn(5, "series",    "metrics", 0, Column.ColumnType.StringColumn)
+  def singleSeriesReaders(): Stream[RowReader] = singleSeriesData().map(TupleRowReader)
+
+  val schemaWithSeries = schema :+ DataColumn(5, "series",    "metrics", 0, StringColumn)
 
   // Dataset1: Partition keys (series) / Row key timestamp / Seg :string 0
   val dataset1 = Dataset("gdelt", Seq("timestamp"), ":string 0", Seq("series"))
   val projection1 = RichProjection(dataset1, schemaWithSeries)
 
-  def multiSeriesData(): Stream[Product] = {
+  // Turns either multiSeriesData() or linearMultiSeries() into IngestRecord's
+  def records(stream: Stream[Seq[Any]]): Stream[IngestRecord] =
+    stream.zipWithIndex.map { case (values, index) =>
+      IngestRecord(SchemaSeqRowReader(values drop 5, Array(StringColumn.keyType.extractor)),
+                   SeqRowReader(values take 5),
+                   index)
+    }
+
+  def multiSeriesData(): Stream[Seq[Any]] = {
     val initTs = System.currentTimeMillis
     Stream.from(0).map { n =>
-      (Some(initTs + n * 1000),
-       Some((45 + nextInt(10)).toDouble),
-       Some((60 + nextInt(25)).toDouble),
-       Some((100 + nextInt(15)).toDouble),
-       Some((85 + nextInt(12)).toDouble),
-       Some("Series " + (n % 10)))
+      Seq(initTs + n * 1000,
+         (45 + nextInt(10)).toDouble,
+         (60 + nextInt(25)).toDouble,
+         (100 + nextInt(15)).toDouble,
+         (85 + nextInt(12)).toDouble,
+         "Series " + (n % 10))
     }
   }
 
   // Everything increments by 1 for simple predictability and testing
-  def linearMultiSeries(startTs: Long = 100000L, numSeries: Int = 10): Stream[Product] = {
+  def linearMultiSeries(startTs: Long = 100000L, numSeries: Int = 10): Stream[Seq[Any]] = {
     Stream.from(0).map { n =>
-      (Some(startTs + n * 1000),
-       Some((1 + n).toDouble),
-       Some((20 + n).toDouble),
-       Some((100 + n).toDouble),
-       Some((85 + n).toDouble),
-       Some("Series " + (n % numSeries)))
+      Seq(startTs + n * 1000,
+         (1 + n).toDouble,
+         (20 + n).toDouble,
+         (100 + n).toDouble,
+         (85 + n).toDouble,
+         "Series " + (n % numSeries))
     }
   }
+
+  val schemaWithMap = schemaWithSeries :+ DataColumn(6, "tags", "metrics", 0, MapColumn)
+  val dataset2 = dataset1.copy(partitionColumns = Seq("series", "tags"))
+  val projection2 = RichProjection(dataset2, schemaWithMap)
+
+  def withMap(data: Stream[Seq[Any]]): Stream[Seq[Any]] =
+    data.zipWithIndex.map { case (row, idx) => row :+ Map("n".utf8 -> (idx % 5).toString.utf8) }
 }

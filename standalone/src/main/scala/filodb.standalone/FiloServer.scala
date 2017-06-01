@@ -72,7 +72,8 @@ object FiloServer extends App with CoordinatorSetupWithFactory with StrictLoggin
       config.as[Seq[String]]("string-columns").map(n => DataColumn(0, n, datasetName, 0, StringColumn)) ++
       config.as[Seq[String]]("double-columns").map(n => DataColumn(0, n, datasetName, 0, DoubleColumn)) ++
       config.as[Seq[String]]("long-columns").map(n => DataColumn(0, n, datasetName, 0, LongColumn)) ++
-      config.as[Seq[String]]("int-columns").map(n => DataColumn(0, n, datasetName, 0, IntColumn))
+      config.as[Seq[String]]("int-columns").map(n => DataColumn(0, n, datasetName, 0, IntColumn)) ++
+      config.as[Seq[String]]("map-columns").map(n => DataColumn(0, n, datasetName, 0, MapColumn))
 
     val dataset = Dataset(datasetName, rowKeys, ":string 0", partKeys)
     logger.info(s"Creating dataset $dataset with columns $columns...")

@@ -66,10 +66,16 @@ case class RichProjection(projection: Projection,
   def datasetName: String = projection.dataset.toString
   def datasetRef: DatasetRef = projection.dataset
 
+  // These are all the non-computed columns, ie columns which contain real data
   val dataColumns: Seq[Column] = columns.collect { case d: DataColumn => d }
 
+  // These are all the data columns which don't belong to part of partition key
+  val nonPartitionColumns: Seq[Column] = dataColumns.filterNot(partitionColumns.contains)
+
+  val nonPartColIndices = nonPartitionColumns.map { c => columns.indexOf(c) }.toArray
+
   val rowKeyBinSchema = RecordSchema(rowKeyColumns)
-  val binSchema = RecordSchema(dataColumns)
+  val binSchema = RecordSchema(nonPartitionColumns)
 
   /**
    * Returns a new RichProjection with the specified database and everything else kept the same
@@ -111,8 +117,29 @@ case class RichProjection(projection: Projection,
   /**
    * Convenience function to create a BinaryRecord PartitionKey from a Seq of Any.  Handles computed columns.
    */
-  def partKey(parts: Any*): PartitionKey =
-    BinaryRecord(partKeyBinSchema, SeqRowReader(parts), partExtractors)
+  final def partKey(parts: Any*): PartitionKey = partKey(SeqRowReader(parts))
+  final def partKey(reader: RowReader): PartitionKey =
+    BinaryRecord(partKeyBinSchema, reader, partExtractors)
+
+  /**
+   * Returns the positions within nonPartitionColumns or partitionColumns of the input columns.
+   * @return an Array, each integer if 0 or positive is the index within nonPartitionColumns;
+   *                   if negative, is the index within partitionColumns - 1 (eg -1 is the first partition
+   *                   column)
+   *                   if not found, throws IllegalArgumentException
+   */
+  def getPositions(columns: Seq[Column]): Array[Int] =
+    columns.map { c =>
+      val pos = nonPartitionColumns.indexOf(c)
+      if (pos < 0) {
+        val partitionPos = partitionColumns.indexOf(c)
+        if (partitionPos < 0) {
+          throw new IllegalArgumentException(s"Column $c not found amongst columns $columns")
+        } else {
+          -partitionPos - 1
+        }
+      } else { pos }
+    }.toArray
 
   /**
    * Serializes this RichProjection into the minimal string needed to recover a "read-only" RichProjection,
@@ -147,6 +174,7 @@ object RichProjection extends StrictLogging {
   case class UnsupportedSegmentColumnType(name: String, colType: Column.ColumnType) extends BadSchema
   case class RowKeyComputedColumns(names: Seq[String]) extends BadSchema
   case class ComputedColumnErrs(errs: Seq[InvalidFunctionSpec]) extends BadSchema
+  case class IllegalMapColumn(reason: String) extends BadSchema
 
   case class BadSchemaError(badSchema: BadSchema) extends Exception(badSchema.toString)
 
@@ -167,8 +195,7 @@ object RichProjection extends StrictLogging {
                .combined.badMap { errs => ComputedColumnErrs(errs.toSeq) }
   }
 
-  def getColumnsFromNames(allColumns: Seq[Column],
-                                  columnNames: Seq[String]): Seq[Column] Or BadSchema = {
+  def getColumnsFromNames(allColumns: Seq[Column], columnNames: Seq[String]): Seq[Column] Or BadSchema = {
     if (columnNames.isEmpty) {
       Good(allColumns)
     } else {
@@ -176,6 +203,24 @@ object RichProjection extends StrictLogging {
       val missing = columnNames.toSet -- columnMap.keySet
       if (missing.nonEmpty) { Bad(MissingColumnNames(missing.toSeq, "projection")) }
       else                  { Good(columnNames.map(columnMap)) }
+    }
+  }
+
+  def validateMapColumn(allColumns: Seq[Column], dataset: Dataset): Unit Or BadSchema = {
+    val mapCols = allColumns.filter(_.columnType == Column.ColumnType.MapColumn)
+    if (mapCols.length > 1) {
+      Bad(IllegalMapColumn("Cannot have more than 1 map column"))
+    } else if (mapCols.length == 0) {
+      Good(())
+    } else {
+      val partIndex = dataset.partitionColumns.indexOf(mapCols.head.name)
+      if (partIndex < 0) {
+        Bad(IllegalMapColumn("Map column not in partition columns"))
+      } else if (partIndex != dataset.partitionColumns.length - 1) {
+        Bad(IllegalMapColumn(s"Map column found in partition key pos $partIndex, but needs to be last"))
+      } else {
+        Good(())
+      }
     }
   }
 
@@ -216,6 +261,7 @@ object RichProjection extends StrictLogging {
 
     for { computedColumns <- getComputedColumns(dataset.name, allColIds, columns)
           dataColumns <- getColumnsFromNames(columns, normProjection.columns)
+          nothing     <- validateMapColumn(columns, dataset)
           richColumns = dataColumns ++ computedColumns
           // scalac has problems dealing with (a, b, c) <- getColIndicesAndType... apparently
           segStuff <- getColIndicesAndType(richColumns, Seq(normProjection.segmentColId), "segment")

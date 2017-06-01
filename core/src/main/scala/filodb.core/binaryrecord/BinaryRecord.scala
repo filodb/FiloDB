@@ -2,12 +2,13 @@ package filodb.core.binaryrecord
 
 import java.nio.ByteBuffer
 import org.boon.primitive.ByteBuf
-import org.velvia.filo.{RowReader, SeqRowReader, UnsafeUtils, ZeroCopyBinary, ZeroCopyUTF8String}
+import org.velvia.filo._
 import org.velvia.filo.RowReader.TypedFieldExtractor
 import scala.language.postfixOps
 import scalaxy.loops._
 
 import filodb.core.metadata.RichProjection
+import filodb.core.Types._
 
 // scalastyle:off equals.hash.code
 /**
@@ -16,18 +17,22 @@ import filodb.core.metadata.RichProjection
  * It will be used within FiloDB for very quick sorting of partition/segment/rowkeys and routing
  * between nodes.
  *
+ * It also supports a map type at the end of the record only.
+ *
  * It also implements RowReader, so values can be extracted without another instantiation.
  */
 class BinaryRecord private[binaryrecord](val schema: RecordSchema,
                                          val base: Any,
                                          val offset: Long,
                                          val numBytes: Int)
-extends ZeroCopyBinary with RowReader {
+extends ZeroCopyBinary with SchemaRowReader {
   import BinaryRecord._
   import ZeroCopyBinary._
 
   // private final compiles to a JVM bytecode field, cheaper to access (as opposed to a method)
   private final val fields = schema.fields
+
+  final def extractors: Array[TypedFieldExtractor[_]] = schema.extractors
 
   final def notNull(fieldNo: Int): Boolean = {
     val word = fieldNo / 32
@@ -77,11 +82,11 @@ extends ZeroCopyBinary with RowReader {
       super.compare(zcb)
   }
 
-  override final def equals(other: Any): Boolean = other match {
-    case rec2: BinaryRecord => this.compare(rec2) == 0
-    case zcb: ZeroCopyBinary => zcb.equals(this)
-    case other: Any         => false
-  }
+  // Don't implement an equals method.  This is already done in SchemaRowReader.
+
+  // scalastyle:off null
+  var mapObj: UTF8Map = null
+  // scalastyle:on null
 
   /**
    * Returns an array of bytes which is sortable byte-wise for its contents (which is not the goal of
@@ -219,6 +224,7 @@ Exception(s"BinaryRecordBuilder: needed $needed bytes, but only had $max.")
 
 class BinaryRecordBuilder(schema: RecordSchema, val base: Any, val offset: Long, maxBytes: Int) {
   var numBytes = schema.variableDataStartOffset
+  var mapObj: Option[UTF8Map] = None
 
   // Initialize null words - assume every field is null until it is set
   for { nullWordNo <- 0 until schema.nullBitWords } {
@@ -282,16 +288,49 @@ class BinaryRecordBuilder(schema: RecordSchema, val base: Any, val offset: Long,
   }
 
   /**
+   * Appends a UTF8Map to the end, returning the 32-bit offset to the map area.  The format of the map
+   * is as follows:
+   *   offset + 0      u32   number of key-value pairs
+   *   offset + 4      u32 * numKV   An int per KV pair: upper 16-bits: length of key, lower16: len value
+   *   after that, all of the key value UTF8 blobs laid out back to back
+   */
+  def appendMap(map: UTF8Map): Int = {
+    val neededBytes = 4 + 4 * map.size + map.map { case (k, v) => k.numBytes + v.numBytes }.sum
+    val fixedInt = numBytes
+
+    reserveVarBytes(neededBytes).map { destOffset =>
+      UnsafeUtils.setInt(base, destOffset, map.size)
+      var blobOffset = destOffset + 4 + 4 * map.size
+      var sizeOffset = destOffset + 4
+      map.foreach { case (k, v) =>
+        require(k.numBytes < 65536 && v.numBytes < 65536, s"Key/value sizes over 2^16!")
+        val kvLenInt = (k.numBytes << 16) | v.numBytes
+        UnsafeUtils.setInt(base, sizeOffset, kvLenInt)
+        sizeOffset += 4
+        k.copyTo(base, blobOffset)
+        blobOffset += k.numBytes
+        v.copyTo(base, blobOffset)
+        blobOffset += v.numBytes
+      }
+    }.getOrElse(throw OutOfBytesException(neededBytes, maxBytes))
+    fixedInt
+  }
+
+  /**
    * Builds a final BinaryRecord.
    * @param copy if true, copies to a new Array[Byte].  Use if initially allocated giant buffer, otherwise
    *             the free space in that buffer cannot be reclaimed.
    */
-  def build(copy: Boolean = false): BinaryRecord = if (copy) {
-    val newAray = new Array[Byte](numBytes)
-    UnsafeUtils.unsafe.copyMemory(base, offset, newAray, UnsafeUtils.arayOffset, numBytes)
-    new ArrayBinaryRecord(schema, newAray)
-  } else {
-    new BinaryRecord(schema, base, offset, numBytes)
+  def build(copy: Boolean = false): BinaryRecord = {
+    val newRecord = if (copy) {
+      val newAray = new Array[Byte](numBytes)
+      UnsafeUtils.unsafe.copyMemory(base, offset, newAray, UnsafeUtils.arayOffset, numBytes)
+      new ArrayBinaryRecord(schema, newAray)
+    } else {
+      new BinaryRecord(schema, base, offset, numBytes)
+    }
+    mapObj.foreach(newRecord.mapObj = _)
+    newRecord
   }
 }
 

@@ -5,8 +5,9 @@ import org.boon.primitive.ByteBuf
 import org.velvia.filo.{RowReader, UnsafeUtils, ZeroCopyUTF8String}
 import org.velvia.filo.RowReader._
 
-import filodb.core.SingleKeyTypes.{Int32HighBit, Long64HighBit}
 import filodb.core.metadata.Column.ColumnType
+import filodb.core.SingleKeyTypes.{Int32HighBit, Long64HighBit}
+import filodb.core.Types._
 
 trait FieldType[@specialized T] {
   def numFixedBytes: Int = numFixedWords * 4
@@ -57,7 +58,8 @@ object FieldType {
     StringColumn  -> UTF8StringFieldType,
     BitmapColumn  -> BooleanFieldType,
     DoubleColumn  -> DoubleFieldType,
-    TimestampColumn -> LongFieldType  // default to long handling due to BinaryRecord
+    TimestampColumn -> LongFieldType,  // default to long handling due to BinaryRecord
+    MapColumn     -> UTF8MapFieldType
   )
 }
 
@@ -184,4 +186,47 @@ object UTF8StringFieldType extends SimpleFieldType[ZeroCopyUTF8String] {
     val wordCmp = UnsafeUtils.wordCompare(rec1.base, off1, rec2.base, off2, Math.min(len1, len2))
     if (wordCmp != 0) wordCmp else len1 - len2
   }
+}
+
+import filodb.core.SingleKeyTypes._
+
+object UTF8MapFieldType extends SimpleFieldType[UTF8Map] {
+  val numFixedWords: Int = 1
+  // scalastyle:off null
+  final def extract(data: BinaryRecord, field: Field): UTF8Map =
+    if (data.mapObj != null) { data.mapObj }
+    else {
+      // read the data
+      val baseOffset = UnsafeUtils.getInt(data.base, data.offset + field.fixedDataOffset) + data.offset
+      val numPairs = UnsafeUtils.getInt(data.base, baseOffset)
+      var blobOffset = baseOffset + 4 + 4 * numPairs
+      val map = (0 until numPairs).map { i =>
+        val sizeInt = UnsafeUtils.getInt(data.base, baseOffset + 4 + 4 * i)
+        val keyLen = sizeInt >> 16
+        val valueLen = sizeInt & 0x0ffff
+        val key = new ZeroCopyUTF8String(data.base, blobOffset, keyLen)
+        blobOffset += keyLen
+        val value = new ZeroCopyUTF8String(data.base, blobOffset, valueLen)
+        blobOffset += valueLen
+        key -> value
+      }.toMap
+      data.mapObj = map
+      map
+    }
+  // scalastyle:on null
+
+  final def add(builder: BinaryRecordBuilder, field: Field, data: UTF8Map): Unit = {
+    UnsafeUtils.setInt(builder.base, builder.offset + field.fixedDataOffset,
+                       builder.appendMap(data))
+    builder.mapObj = Some(data)
+    builder.setNotNull(field.num)
+  }
+
+  override final def addNull(builder: BinaryRecordBuilder, field: Field): Unit =
+    UnsafeUtils.setInt(builder.base, builder.offset + field.fixedDataOffset, 0)
+
+  final def writeSortable(data: BinaryRecord, field: Field, buf: ByteBuf): Unit = ???
+
+  final def compare(rec1: BinaryRecord, rec2: BinaryRecord, field: Field): Int =
+    extract(rec1, field).size - extract(rec2, field).size
 }

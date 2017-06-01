@@ -61,6 +61,7 @@ class Arguments extends FieldArgs {
           case "string" => DataColumn(0, name, dataset, version, StringColumn)
           case "bool"   => DataColumn(0, name, dataset, version, BitmapColumn)
           case "timestamp" => DataColumn(0, name, dataset, version, TimestampColumn)
+          case "map"    => DataColumn(0, name, dataset, version, MapColumn)
         }
       }.toSeq
     }.getOrElse(Nil)
@@ -79,7 +80,7 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
     println("filo-cli help:")
     println("  commands: init create importcsv list analyze dumpinfo delete truncate")
     println("  columns: <colName1>:<type1>,<colName2>:<type2>,... ")
-    println("  types:  int,long,double,string,bool,timestamp")
+    println("  types:  int,long,double,string,bool,timestamp,map")
     println("  common options:  --dataset --database")
     println("  OR:  --select col1, col2  [--limit <n>]  [--outfile /tmp/out.csv]")
     println("\nStandalone client commands:")

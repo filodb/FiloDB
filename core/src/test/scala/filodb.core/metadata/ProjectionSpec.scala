@@ -110,6 +110,40 @@ class ProjectionSpec extends FunSpec with Matchers {
       resp.partitionColIndices should equal (Seq(0, 1))
       resp.partitionColumns should equal (schema take 2)
       resp.partExtractors.toSeq should equal (Seq(UTF8StringFieldExtractor, UTF8StringFieldExtractor))
+
+      resp.nonPartitionColumns should equal (schema drop 2)
+      resp.dataColumns should equal (schema)
+    }
+
+    it("should getPositions correctly") {
+      val proj = GdeltTestData.projection1
+      val cols = GdeltTestData.schema
+
+      // Partition columns should return negative values
+      proj.getPositions(cols).toList should equal (List(0, 1, 2, -2, -1, 3, 4, 5))
+
+      // columns not in schema should get an error
+      intercept[IllegalArgumentException] { proj.getPositions(NamesTestData.schema) }
+    }
+
+    it("should allow MapColumns only in last position of partition key") {
+      val mapCol = DataColumn(5, "tags", "foo", 0, Column.ColumnType.MapColumn)
+      val schemaWithMap = schema :+ mapCol
+
+      // OK: only partition column is map
+      val resp1 = RichProjection(dataset.copy(partitionColumns = Seq("tags")), schemaWithMap)
+      resp1.partitionColumns should equal (Seq(mapCol))
+
+      // OK: last partition column is map
+      val resp2 = RichProjection(dataset.copy(partitionColumns = Seq("first", "tags")), schemaWithMap)
+      resp2.partitionColumns.last should equal (mapCol)
+
+      // Not OK: first partition column is map
+      intercept[BadSchemaError] { RichProjection(dataset.copy(partitionColumns = Seq("tags", "first")),
+                                                 schemaWithMap) }
+
+      // Not OK: map in data columns, not partition column
+      intercept[BadSchemaError] { RichProjection(dataset, schemaWithMap) }
     }
 
     it("should create RichProjection properly for String row key column") {

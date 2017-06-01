@@ -157,6 +157,15 @@ object SingleKeyTypes {
     def fromString(str: String): Boolean = str.toBoolean
   }
 
+  import Types._
+  implicit val utf8MapExtractor = ObjectFieldExtractor(emptyUTF8Map)
+  // Kind of bogus ordering - but is there really a way of ordering maps?
+  implicit val utf8MapOrdering = Ordering.by((m: UTF8Map) => m.size)
+
+  implicit case object UTF8MapKeyType extends SingleKeyTypeBase[UTF8Map] {
+    def fromString(str: String): UTF8Map = ???
+  }
+
   implicit val timestampOrdering = Ordering.by((t: Timestamp) => t.getTime)
 
   implicit case object TimestampKeyType extends SingleKeyTypeBase[Timestamp] {

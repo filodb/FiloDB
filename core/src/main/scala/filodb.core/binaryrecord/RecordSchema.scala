@@ -34,10 +34,13 @@ final class RecordSchema(columnTypes: Seq[ColumnType]) {
   // val fields - fixed data field section
   var curOffset = fixedDataStartOffset
   val fields = columnTypes.zipWithIndex.map { case (colType, no) =>
+    if (colType == ColumnType.MapColumn) require(no == columnTypes.length - 1)
     val field = Field(no, colType, curOffset, FieldType.columnToField(colType))
     curOffset += field.fieldType.numFixedBytes
     field
   }.toArray
+
+  val extractors = columnTypes.map(_.keyType.extractor).toArray
 
   val variableDataStartOffset = curOffset
 
