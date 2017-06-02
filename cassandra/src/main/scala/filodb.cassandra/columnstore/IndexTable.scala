@@ -61,7 +61,7 @@ sealed class IndexTable(val dataset: DatasetRef, val connector: FiloCassandraCon
     val it = session.execute(allPartReadCql.bind(toBuffer(binPartition),
                                                  version: java.lang.Integer))
                     .toIterator.map(fromRow)
-    Observable.fromIterator(it)
+    Observable.fromIterator(it).handleObservableErrors
   }
 
   val tokenQ = "TOKEN(partition, version)"
@@ -76,7 +76,7 @@ sealed class IndexTable(val dataset: DatasetRef, val connector: FiloCassandraCon
                .filter(_.getInt("version") == version)
                .map { row => fromRow(row) }
       }
-    Observable.fromIterator(it)
+    Observable.fromIterator(it).handleObservableErrors
   }
 
   lazy val writeIndexCql = session.prepare(

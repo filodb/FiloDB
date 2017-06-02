@@ -1,7 +1,6 @@
 package filodb.stress
 
-import org.apache.spark.{SparkConf, SparkContext}
-import org.apache.spark.sql.{DataFrame, SQLContext, SaveMode}
+import org.apache.spark.sql.{DataFrame, SparkSession, SaveMode}
 import scala.util.Random
 import scala.concurrent.duration._
 
@@ -37,17 +36,17 @@ object BatchIngestion extends App {
   val keyspaceName = sys.props.getOrElse("stress.keyspace", "filostress")
 
   // Setup SparkContext, etc.
-  val conf = (new SparkConf).setAppName("FiloDB BatchIngestion")
-                            .set("spark.filodb.cassandra.keyspace", keyspaceName)
-                            .set("spark.sql.shuffle.partitions", "4")
-                            .set("spark.scheduler.mode", "FAIR")
-  val sc = new SparkContext(conf)
-  val sql = new SQLContext(sc)
-  import sql.implicits._
+  val sess = SparkSession.builder.appName("FiloDB BatchIngestion")
+                                 .config("spark.filodb.cassandra.keyspace", keyspaceName)
+                                 .config("spark.sql.shuffle.partitions", "4")
+                                 .config("spark.scheduler.mode", "FAIR")
+                                 .getOrCreate
+  val sc = sess.sparkContext
+  import sess.implicits._
 
-  val csvDF = sql.read.format("com.databricks.spark.csv").
-                 option("header", "true").option("inferSchema", "true").
-                 load(taxiCsvFile)
+  val csvDF = sess.read.format("com.databricks.spark.csv").
+                   option("header", "true").option("inferSchema", "true").
+                   load(taxiCsvFile)
 
   val csvLines = csvDF.count()
 
@@ -63,8 +62,8 @@ object BatchIngestion extends App {
 
   puts(s"\n ==> Batch ingestion took $ingestMillis ms\n")
 
-  val df = sql.filoDataset(tableName)
-  df.registerTempTable(tableName)
+  val df = sess.filoDataset(tableName)
+  df.createOrReplaceTempView(tableName)
 
   val count = df.count()
   if (count == csvLines) { puts(s"Count matched $count for dataframe $df") }

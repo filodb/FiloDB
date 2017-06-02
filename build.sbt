@@ -2,7 +2,7 @@ import com.typesafe.sbt.SbtMultiJvm
 import com.typesafe.sbt.SbtMultiJvm.MultiJvmKeys.MultiJvm
 
 val mySettings = Seq(organization := "org.velvia",
-                     scalaVersion := "2.10.4",
+                     scalaVersion := "2.11.8",
                      parallelExecution in Test := false,
                      fork in Test := true,
                      resolvers ++= extraRepos,
@@ -82,7 +82,7 @@ lazy val standalone = (project in file("standalone"))
 
 val cassDriverVersion = "3.0.2"
 val akkaVersion    = "2.3.15"
-val sparkVersion   = "1.6.1"
+val sparkVersion   = "2.0.0"
 
 lazy val extraRepos = Seq(
   "Velvia Bintray" at "https://dl.bintray.com/velvia/maven",
@@ -116,7 +116,7 @@ lazy val coreDeps = commonDeps ++ Seq(
   "joda-time"             % "joda-time"         % "2.2",
   "org.joda"              % "joda-convert"      % "1.2",
   "com.googlecode.concurrentlinkedhashmap" % "concurrentlinkedhashmap-lru" % "1.4",
-  "net.ceedubs"          %% "ficus"             % "1.0.1",
+  "net.ceedubs"          %% "ficus"             % "1.1.2",
   "org.scodec"           %% "scodec-bits"       % "1.0.10",
   "io.fastjson"           % "boon"              % "0.33",
   "com.googlecode.javaewah" % "JavaEWAH"        % "1.1.6",
@@ -125,7 +125,7 @@ lazy val coreDeps = commonDeps ++ Seq(
   "org.scalactic"        %% "scalactic"         % "2.2.6",
   "com.markatta"         %% "futiles"           % "1.1.3",
   scalaxyDep,
-  "com.github.scala-incubator.io" %% "scala-io-file" % "0.4.2" % "test"
+  "com.github.scala-incubator.io" %% "scala-io-file" % "0.4.3-1" % "test"
 )
 
 lazy val cassDeps = commonDeps ++ Seq(
