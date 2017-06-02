@@ -1,7 +1,6 @@
 package filodb.stress
 
-import org.apache.spark.{SparkConf, SparkContext}
-import org.apache.spark.sql.{DataFrame, SQLContext, SaveMode}
+import org.apache.spark.sql.{DataFrame, SparkSession, SaveMode}
 import scala.util.Random
 import scala.concurrent.duration.Duration
 import scala.concurrent.{Await, Future}
@@ -52,21 +51,21 @@ object InMemoryQueryStress extends App {
   val allQueries = singleDriverQueries
 
   // Setup SparkContext, etc.
-  val conf = (new SparkConf).setMaster("local[8]")
-                            .setAppName("InMemoryQueryStress")
-                            .set("spark.filodb.store", "in-memory")
-                            .set("spark.sql.shuffle.partitions", "4")
-                            .set("spark.scheduler.mode", "FAIR")
-                            .set("spark.ui.enabled", "false")   // No need for UI when doing perf stuff
-                            .set("spark.filodb.memtable.min-free-mb", "50")
-  val sc = new SparkContext(conf)
-  val sql = new SQLContext(sc)
+  val sess = SparkSession.builder.master("local[8]")
+                                 .appName("InMemoryQueryStress")
+                                 .config("spark.filodb.store", "in-memory")
+                                 .config("spark.sql.shuffle.partitions", "4")
+                                 .config("spark.scheduler.mode", "FAIR")
+                                 .config("spark.ui.enabled", "false")   // No need for UI when doing perf stuff
+                                 .config("spark.filodb.memtable.min-free-mb", "50")
+                                 .getOrCreate
+  val sc = sess.sparkContext
 
   // Ingest file - note, this will take several minutes
   puts("Starting ingestion...")
-  val csvDF = sql.read.format("com.databricks.spark.csv").
-                 option("header", "true").option("inferSchema", "true").
-                 load(taxiCsvFile)
+  val csvDF = sess.read.format("com.databricks.spark.csv").
+                   option("header", "true").option("inferSchema", "true").
+                   load(taxiCsvFile)
   csvDF.write.format("filodb.spark").
     option("dataset", "nyc_taxi").
     option("row_keys", "hack_license,pickup_datetime").
@@ -75,8 +74,8 @@ object InMemoryQueryStress extends App {
     mode(SaveMode.Overwrite).save()
   puts("Ingestion done.")
 
-  val taxiDF = sql.filoDataset("nyc_taxi")
-  taxiDF.registerTempTable("nyc_taxi")
+  val taxiDF = sess.filoDataset("nyc_taxi")
+  taxiDF.createOrReplaceTempView("nyc_taxi")
   val numRecords = taxiDF.count()
   puts(s"Ingested $numRecords records")
 
@@ -87,7 +86,7 @@ object InMemoryQueryStress extends App {
   val cachedDF = new collection.mutable.HashMap[String, DataFrame]
 
   def getCachedDF(query: String): DataFrame =
-    cachedDF.getOrElseUpdate(query, sql.sql(query))
+    cachedDF.getOrElseUpdate(query, sess.sql(query))
 
   def runQueries(queries: Array[String], numQueries: Int = 1000): Unit = {
     val startMillis = System.currentTimeMillis

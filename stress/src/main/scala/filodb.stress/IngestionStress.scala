@@ -1,7 +1,6 @@
 package filodb.stress
 
-import org.apache.spark.{SparkConf, SparkContext}
-import org.apache.spark.sql.{DataFrame, SQLContext, SaveMode}
+import org.apache.spark.sql.{DataFrame, SparkSession, SaveMode}
 import scala.util.Random
 import scala.concurrent.duration._
 import scala.concurrent.{Await, Future}
@@ -42,24 +41,24 @@ object IngestionStress extends App {
   val keyspaceName = sys.props.getOrElse("stress.keyspace", "filostress")
 
   // Setup SparkContext, etc.
-  val conf = (new SparkConf).setAppName("IngestionStress")
-                            .set("spark.filodb.cassandra.keyspace", keyspaceName)
-                            .set("spark.sql.shuffle.partitions", "4")
-                            .set("spark.scheduler.mode", "FAIR")
-  val sc = new SparkContext(conf)
-  val sql = new SQLContext(sc)
-  import sql.implicits._
+  val sess = SparkSession.builder.appName("IngestionStress")
+                                 .config("spark.filodb.cassandra.keyspace", keyspaceName)
+                                 .config("spark.sql.shuffle.partitions", "4")
+                                 .config("spark.scheduler.mode", "FAIR")
+                                 .getOrCreate
+  val sc = sess.sparkContext
+  import sess.implicits._
 
   // Ingest the taxi file two different ways using two Futures
   // One way is by hour of day - very relaxed and fast
   // Another is the "stress" schema - very tiny segments, huge amounts of memory churn and I/O bandwidth
-  val csvDF = sql.read.format("com.databricks.spark.csv").
+  val csvDF = sess.read.format("com.databricks.spark.csv").
                  option("header", "true").option("inferSchema", "true").
                  load(taxiCsvFile)
   // Define a hour of day function
   import org.joda.time.DateTime
   import java.sql.Timestamp
-  val hourOfDay = sql.udf.register("hourOfDay", { (t: Timestamp) => new DateTime(t).getHourOfDay })
+  val hourOfDay = sess.udf.register("hourOfDay", { (t: Timestamp) => new DateTime(t).getHourOfDay })
   val dfWithHoD = csvDF.withColumn("hourOfDay", hourOfDay(csvDF("pickup_datetime")))
 
   val stressLines = csvDF.count()
@@ -81,8 +80,8 @@ object IngestionStress extends App {
 
     puts(s"\n ==> Stressful ingestion took $ingestMillis ms\n")
 
-    val df = sql.filoDataset(stressName)
-    df.registerTempTable(stressName)
+    val df = sess.filoDataset(stressName)
+    df.createOrReplaceTempView(stressName)
     df
   }
 
@@ -102,8 +101,8 @@ object IngestionStress extends App {
 
     puts(s"\n ==> hour-of-day (easy) ingestion took $ingestMillis ms\n")
 
-    val df = sql.filoDataset(hrOfDayName)
-    df.registerTempTable(hrOfDayName)
+    val df = sess.filoDataset(hrOfDayName)
+    df.createOrReplaceTempView(hrOfDayName)
     df
   }
 

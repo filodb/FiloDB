@@ -67,7 +67,7 @@ object FiloDriver extends FiloSetup with StrictLogging {
   // The init method called from a SparkContext is going to be from the driver/app.
   // It also initializes all executors.
   def init(context: SparkContext): Unit = synchronized {
-    _config.getOrElse {
+    if (_config.isEmpty) {
       logger.info("Initializing FiloDriver clustering/coordination...")
       role = "driver"
       val filoConfig = configFromSpark(context)

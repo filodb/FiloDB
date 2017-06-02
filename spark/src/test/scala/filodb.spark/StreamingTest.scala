@@ -1,9 +1,8 @@
 package filodb.spark
 
 import com.typesafe.config.ConfigFactory
-import org.apache.spark.{SparkConf, SparkContext, SparkException}
 import org.apache.spark.rdd.RDD
-import org.apache.spark.sql.{SQLContext, SaveMode}
+import org.apache.spark.sql.{SparkSession, SaveMode}
 import org.apache.spark.streaming.{Milliseconds, StreamingContext}
 import org.scalatest.time.{Millis, Seconds, Span}
 import scala.collection.mutable
@@ -30,15 +29,15 @@ with Matchers with ScalaFutures {
     PatienceConfig(timeout = Span(10, Seconds), interval = Span(50, Millis))
 
   // Setup SQLContext and a sample DataFrame
-  val conf = (new SparkConf).setMaster("local[4]")
-                            .setAppName("test")
-                            .set("spark.filodb.cassandra.keyspace", "unittest")
-                            .set("spark.filodb.cassandra.admin-keyspace", "unittest")
-                            .set("spark.filodb.memtable.min-free-mb", "10")
-                            .set("spark.ui.enabled", "false")
+  val sess = SparkSession.builder.master("local[4]")
+                                 .appName("test")
+                                 .config("spark.filodb.cassandra.keyspace", "unittest")
+                                 .config("spark.filodb.cassandra.admin-keyspace", "unittest")
+                                 .config("spark.filodb.memtable.min-free-mb", "10")
+                                 .config("spark.ui.enabled", "false")
+                                 .getOrCreate
 
-  val ssc = new StreamingContext(conf, Milliseconds(700))
-  val sql = new SQLContext(ssc.sparkContext)
+  val ssc = new StreamingContext(sess.sparkContext, Milliseconds(700))
 
   // This is the same code that the Spark stuff uses.  Make sure we use exact same environment as real code
   // so we don't have two copies of metaStore that could be configured differently.
@@ -82,7 +81,7 @@ with Matchers with ScalaFutures {
                 grouped(200).
                 foreach { g => queue += ssc.sparkContext.parallelize(g, 1) }
     val nameChunks = ssc.queueStream(queue)
-    import sql.implicits._
+    import sess.implicits._
     nameChunks.foreachRDD { rdd =>
       rdd.toDF.write.format("filodb.spark").
           option("dataset", largeDataset.name).
@@ -103,7 +102,7 @@ with Matchers with ScalaFutures {
     import org.apache.spark.sql.functions._
 
     // Now, read back the names to make sure they were all written
-    val df = sql.read.format("filodb.spark").option("dataset", largeDataset.name).load()
-    df.select(count("age")).collect.head(0) should equal (lotLotNames.length)
+    val df = sess.read.format("filodb.spark").option("dataset", largeDataset.name).load()
+    df.select(count("age")).collect.head should equal (lotLotNames.length)
   }
 }

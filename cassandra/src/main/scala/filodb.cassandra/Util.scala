@@ -1,8 +1,9 @@
 package filodb.cassandra
 
-import com.datastax.driver.core.exceptions.DriverException
 import com.datastax.driver.core._
+import com.datastax.driver.core.exceptions.DriverException
 import java.nio.ByteBuffer
+import monix.reactive.Observable
 import scala.concurrent.{Future, Promise}
 
 import filodb.core._
@@ -19,6 +20,7 @@ object Util {
         if (resultSet.wasApplied) Success else notAppliedResponse
       }.recover {
         case e: DriverException => throw StorageEngineException(e)
+        case e: Exception       => throw StorageEngineException(e)
       }
     }
   }
@@ -29,6 +31,17 @@ object Util {
       // from invalid Enum strings, which should never happen, or some other parsing error
       case e: NoSuchElementException   => throw MetadataException(e)
       case e: IllegalArgumentException => throw MetadataException(e)
+      case e: Exception                => throw StorageEngineException(e)
+    }
+  }
+
+  implicit class HandleObservableErrors[T](o: Observable[T]) {
+    def handleObservableErrors: Observable[T] = o.onErrorRecover {
+      case e: DriverException          => throw StorageEngineException(e)
+      // from invalid Enum strings, which should never happen, or some other parsing error
+      case e: NoSuchElementException   => throw MetadataException(e)
+      case e: IllegalArgumentException => throw MetadataException(e)
+      case e: Exception                => throw StorageEngineException(e)
     }
   }
 
