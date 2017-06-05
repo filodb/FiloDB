@@ -5,10 +5,6 @@ import org.parboiled2._
 import filodb.core.query.{ColumnFilter, Filter}
 
 object PromQLParser {
-  val DefaultRange = SecsInMinute * 30
-  val Quote = "\""
-  val Space = " "
-
   // We don't really want users to be able to scan every metric. Make this obscure.
   val ScanEverythingMetric = ":_really_scan_everything"
 
@@ -16,6 +12,10 @@ object PromQLParser {
   val SecsInHour   = 3600
   val SecsInDay    = SecsInHour * 24
   val SecsInWeek   = SecsInDay * 7
+
+  val DefaultRange = SecsInMinute * 30
+  val Quote = "\""
+  val Space = " "
 }
 
 sealed trait Expr

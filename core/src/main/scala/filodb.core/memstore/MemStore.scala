@@ -59,7 +59,7 @@ trait MemStore extends BaseColumnStore {
   /**
    * Returns the number of partitions being maintained in the memtable.
    * TODO: add shard number
-   * @Return -1 if dataset not found, otherwise number of active partitions
+   * @return -1 if dataset not found, otherwise number of active partitions
    */
   def numPartitions(dataset: DatasetRef): Int
 }
