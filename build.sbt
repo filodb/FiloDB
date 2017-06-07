@@ -1,84 +1,92 @@
 import com.typesafe.sbt.SbtMultiJvm
 import com.typesafe.sbt.SbtMultiJvm.MultiJvmKeys.MultiJvm
 
-val mySettings = Seq(organization := "org.velvia",
-                     scalaVersion := "2.11.8",
-                     parallelExecution in Test := false,
-                     fork in Test := true,
-                     resolvers ++= extraRepos,
-                     ivyScala := ivyScala.value map { _.copy(overrideScalaVersion = true) }) ++ universalSettings
+lazy val buildSettings = Seq(
+  organization := "org.velvia",
+  scalaVersion := "2.11.8")
 
-publishTo      := Some(Resolver.file("Unused repo", file("target/unusedrepo")))
+publishTo := Some(Resolver.file("Unused repo", file("target/unusedrepo")))
 
-lazy val core = (project in file("core"))
-                  .settings(mySettings:_*)
-                  .settings(name := "filodb-core")
-                  .settings(scalacOptions += "-language:postfixOps")
-                  .settings(libraryDependencies ++= coreDeps)
+lazy val core = project
+  .in(file("core"))
+  .settings(buildSettings:_*)
+  .settings(commonSettings:_*)
+  .settings(name := "filodb-core")
+  .settings(scalacOptions += "-language:postfixOps")
+  .settings(libraryDependencies ++= coreDeps)
 
-lazy val coordinator = (project in file("coordinator"))
-                         .configs(MultiJvm)
-                         .settings(mySettings:_*)
-                         .settings(multiJvmSettings:_*)
-                         .settings(name := "filodb-coordinator")
-                         .settings(libraryDependencies ++= coordDeps)
-                         // Unfortunately, Scala deps are hard to exclude unless they are put in settings
-                         .settings(libraryDependencies +=
-                                    "com.typesafe.akka" %% "akka-contrib" % akkaVersion exclude(
-                                      "com.typesafe.akka", s"akka-persistence-experimental_${scalaBinaryVersion.value}"))
-                         .dependsOn(core % "compile->compile; test->test")
+lazy val coordinator = project
+  .in(file("coordinator"))
+  .settings(buildSettings:_*)
+  .settings(commonSettings:_*)
+  .settings(multiJvmSettings:_*)
+  .settings(name := "filodb-coordinator")
+  .settings(libraryDependencies ++= coordDeps)
+  .settings(libraryDependencies +=
+    "com.typesafe.akka" %% "akka-contrib" % akkaVersion exclude(
+      "com.typesafe.akka", s"akka-persistence-experimental_${scalaBinaryVersion.value}"))
+  .dependsOn(core % "compile->compile; test->test")
+  .configs(MultiJvm)
 
-lazy val cassandra = (project in file("cassandra"))
-                       .settings(mySettings:_*)
-                       .settings(name := "filodb-cassandra")
-                       .settings(libraryDependencies ++= cassDeps)
-                       .dependsOn(core % "compile->compile; test->test",
-                                  coordinator)
+lazy val cassandra = project
+  .in(file("cassandra"))
+  .settings(buildSettings:_*)
+  .settings(commonSettings:_*)
+  .settings(name := "filodb-cassandra")
+  .settings(libraryDependencies ++= cassDeps)
+  .dependsOn(core % "compile->compile; test->test", coordinator)
 
-lazy val cli = (project in file("cli"))
-                 .settings(mySettings:_*)
-                 .settings(name := "filodb-cli")
-                 .settings(libraryDependencies ++= cliDeps)
-                 .settings(cliAssemblySettings:_*)
-                 .dependsOn(core % "compile->compile; test->test",
-                            coordinator, cassandra)
+lazy val cli = project
+  .in(file("cli"))
+  .settings(buildSettings:_*)
+  .settings(commonSettings:_*)
+  .settings(name := "filodb-cli")
+  .settings(libraryDependencies ++= cliDeps)
+  .settings(cliAssemblySettings:_*)
+  .dependsOn(core % "compile->compile; test->test", coordinator, cassandra)
 
-lazy val spark = (project in file("spark"))
-                   .settings(name := "filodb-spark")
-                   .configs( IntegrationTest )
-                   .settings(itSettings : _*)
-                   .settings(fork in IntegrationTest := true)
-                   .settings(mySettings:_*)
-                   .settings(libraryDependencies ++= sparkDeps)
-                   .settings(jvmPerTestSettings:_*)
-                   .settings(assemblySettings:_*)
-                   .settings(assemblyOption in assembly := (assemblyOption in assembly).value.copy(includeScala = false))
-                   .dependsOn(core % "compile->compile; test->test; it->test",
-                              coordinator % "compile->compile; test->test",
-                              cassandra % "compile->compile; test->test; it->test")
+lazy val spark = project
+  .in(file("spark"))
+  .settings(name := "filodb-spark")
+  .settings(buildSettings:_*)
+  .settings(commonSettings:_*)
+  .settings(libraryDependencies ++= sparkDeps)
+  .settings(jvmPerTestSettings:_*)
+  .settings(assemblyExcludeScala)
+  .settings(itSettings : _*)
+  .settings(fork in IntegrationTest := true)
+  .dependsOn(core % "compile->compile; test->test; it->test",
+    coordinator % "compile->compile; test->test",
+    cassandra % "compile->compile; test->test; it->test")
+  .configs(IntegrationTest)
 
-lazy val jmh = (project in file("jmh"))
-                 .settings(mySettings:_*)
-                 .settings(name := "filodb-jmh")
-                 .settings(libraryDependencies ++= jmhDeps)
-                 .settings(publish := {})
-                 .enablePlugins(JmhPlugin)
-                 .dependsOn(core % "compile->compile; compile->test", spark)
+lazy val jmh = project
+  .in(file("jmh"))
+  .settings(buildSettings:_*)
+  .settings(commonSettings:_*)
+  .settings(name := "filodb-jmh")
+  .settings(libraryDependencies ++= jmhDeps)
+  .settings(publish := {})
+  .enablePlugins(JmhPlugin)
+  .dependsOn(core % "compile->compile; compile->test", spark)
 
-lazy val stress = (project in file("stress"))
-                    .settings(mySettings:_*)
-                    .settings(name := "filodb-stress")
-                    .settings(libraryDependencies ++= stressDeps)
-                    .settings(assemblySettings:_*)
-                    .settings(assemblyOption in assembly := (assemblyOption in assembly).value.copy(includeScala = false))
-                    .dependsOn(spark)
+lazy val stress = project
+  .in(file("stress"))
+  .settings(name := "filodb-stress")
+  .settings(buildSettings:_*)
+  .settings(commonSettings:_*)
+  .settings(libraryDependencies ++= stressDeps)
+  .settings(assemblyExcludeScala)
+  .dependsOn(spark)
 
-lazy val standalone = (project in file("standalone"))
-                        .settings(mySettings:_*)
-                        .settings(publish := {})
-                        .settings(assemblySettings:_*)
-                        .settings(libraryDependencies += log4jDep)
-                        .dependsOn(core, coordinator, cassandra)
+lazy val standalone = project
+  .in(file("standalone"))
+  .settings(buildSettings:_*)
+  .settings(commonSettings:_*)
+  .settings(assemblySettings:_*)
+  .settings(publish := {})
+  .settings(libraryDependencies += log4jDep)
+  .dependsOn(core, coordinator, cassandra)
 
 val cassDriverVersion = "3.0.2"
 val akkaVersion    = "2.3.15"
@@ -100,8 +108,7 @@ val logbackDep = "ch.qos.logback"        % "logback-classic"   % "1.0.7"
 val log4jDep   = "log4j"                 % "log4j"             % "1.2.17"
 
 lazy val commonDeps = Seq(
-  "io.kamon"             %% "kamon-core"        % "0.6.0",
-  logbackDep % "test",  // to get good test logs
+  "io.kamon"             %% "kamon-core"        % "0.6.0", logbackDep % "test",
   "org.scalatest"        %% "scalatest"         % "2.2.4" % "test"
 )
 
@@ -172,28 +179,29 @@ lazy val stressDeps = Seq(
   "org.apache.spark"     %% "spark-streaming"   % sparkVersion % "provided" excludeAll(excludeZK)
 )
 
-//////////////////////////
-///
+/* Settings */
 
 lazy val coreSettings = Seq(
   scalacOptions ++= Seq("-Xlint","-Xlint:-infer-any", "-deprecation", "-Xfatal-warnings", "-feature")
 )
 
 lazy val testSettings = Seq(
-    parallelExecution in Test := false,
-    // Needed to avoid cryptic EOFException crashes in forked tests
-    // in Travis with `sudo: false`.
-    // See https://github.com/sbt/sbt/issues/653
-    // and https://github.com/travis-ci/travis-ci/issues/3775
-    javaOptions += "-Xmx1250M",
-    concurrentRestrictions in Global := Seq(
-      // Tags.limit(Tags.CPU, java.lang.Runtime.getRuntime().availableProcessors()),
-      Tags.limit(Tags.CPU, 1),
-      // limit to 1 concurrent test task, even across sub-projects
-      Tags.limit(Tags.Test, 1),
-      // Note: some components of tests seem to have the "Untagged" tag rather than "Test" tag.
-      // So, we limit the sum of "Test", "Untagged" tags to 1 concurrent
-      Tags.limitSum(1, Tags.Test, Tags.Untagged))
+  parallelExecution in Test := false,
+  fork in Test := true,
+  parallelExecution in Test := false,
+  // Needed to avoid cryptic EOFException crashes in forked tests
+  // in Travis with `sudo: false`.
+  // See https://github.com/sbt/sbt/issues/653
+  // and https://github.com/travis-ci/travis-ci/issues/3775
+  javaOptions += "-Xmx1250M",
+  concurrentRestrictions in Global := Seq(
+    // Tags.limit(Tags.CPU, java.lang.Runtime.getRuntime().availableProcessors()),
+    Tags.limit(Tags.CPU, 1),
+    // limit to 1 concurrent test task, even across sub-projects
+    Tags.limit(Tags.Test, 1),
+    // Note: some components of tests seem to have the "Untagged" tag rather than "Test" tag.
+    // So, we limit the sum of "Test", "Untagged" tags to 1 concurrent
+    Tags.limitSum(1, Tags.Test, Tags.Untagged))
 )
 
 // Fork a separate JVM for each test, instead of one for all tests in a module.
@@ -229,8 +237,6 @@ lazy val multiJvmSettings = SbtMultiJvm.multiJvmSettings ++ Seq(
 lazy val itSettings = Defaults.itSettings ++ Seq(
   fork in IntegrationTest := true
 )
-
-lazy val universalSettings = coreSettings ++ styleSettings ++ testSettings ++ publishSettings
 
 // Create a default Scala style task to run with tests
 lazy val testScalastyle = taskKey[Unit]("testScalastyle")
@@ -321,6 +327,9 @@ lazy val assemblySettings = Seq(
   test in assembly := {} //noisy for end-user since the jar is not available and user needs to build the project locally
 )
 
+lazy val assemblyExcludeScala = assemblySettings ++ Seq(
+  assemblyOption in assembly := (assemblyOption in assembly).value.copy(includeScala = false))
+
 lazy val publishSettings = Seq(
   organizationName := "FiloDB",
   publishMavenStyle := true,
@@ -329,3 +338,16 @@ lazy val publishSettings = Seq(
   licenses += ("Apache-2.0", url("http://choosealicense.com/licenses/apache/")),
   pomIncludeRepository := { x => false }
 )
+
+lazy val sharedSettings = Seq(
+  resolvers ++= Seq(
+    "Velvia Bintray" at "https://dl.bintray.com/velvia/maven",
+    "spray repo" at "http://repo.spray.io"),
+  ivyScala := ivyScala.value map { _.copy(overrideScalaVersion = true) })
+
+lazy val commonSettings =
+  coreSettings ++
+    styleSettings ++
+    testSettings ++
+    publishSettings ++
+    sharedSettings
