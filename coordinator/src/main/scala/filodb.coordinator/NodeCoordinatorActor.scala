@@ -227,7 +227,7 @@ class NodeCoordinatorActor(metaStore: MetaStore,
                       logger.warn(s"Actor $childRef has terminated!  Ingestion for ${(datasetRef,version)} will stop.")
                       dsCoordinators.remove((datasetRef,version))
                       // TODO @parekuti: update ingestion state
-                      metaStore.updateIngestionState(actorPath, datasetRef, "Failed", "Error during ingestion", version)
+                      // metaStore.updateIngestionState(actorPath, datasetRef, "Failed", "Error during ingestion", version)
                     }
 
     case u @ NodeClusterActor.ShardMapUpdate(ref, newMap) =>
