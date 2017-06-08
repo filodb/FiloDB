@@ -28,6 +28,16 @@ lazy val coordinator = project
   .dependsOn(core % "compile->compile; test->test")
   .configs(MultiJvm)
 
+lazy val kafka = project
+  .in(file("kafka"))
+  .settings(name := "filodb-kafka")
+  .settings(buildSettings:_*)
+  .settings(commonSettings:_*)
+  .settings(multiJvmSettings:_*)
+  .settings(assemblySettings:_*)
+  .dependsOn(coordinator % "compile->compile; test->test")
+  .configs(MultiJvm)
+
 lazy val cassandra = project
   .in(file("cassandra"))
   .settings(buildSettings:_*)

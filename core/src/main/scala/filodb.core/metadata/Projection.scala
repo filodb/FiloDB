@@ -19,14 +19,15 @@ import filodb.core._
  * By convention, projection 0 is the SuperProjection which consists of all columns from the dataset.
  *
  * The Projection base class is normalized, ie it doesn't have all the information.
+ *
+ * @param columns defaults to `Nil` columns, which means all columns.
+ *                Must include the rowKeyColumns and segmentColumn.
  */
 case class Projection(id: Int,
                       dataset: DatasetRef,
                       keyColIds: Seq[ColumnId],
                       segmentColId: ColumnId,
                       reverse: Boolean = false,
-                      // Nil columns means all columns
-                      // Must include the rowKeyColumns and segmentColumn.
                       columns: Seq[ColumnId] = Nil) {
   def detailedString: String =
     s"Projection $id from dataset $dataset:\n" +

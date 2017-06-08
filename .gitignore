@@ -28,3 +28,5 @@ project/plugins/project/
 
 # HIVE
 metastore_db/
+**/kafka/src/test/scala/filodb/kafka/shard*
+*lib*
