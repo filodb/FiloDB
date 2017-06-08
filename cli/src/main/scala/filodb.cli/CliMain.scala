@@ -18,7 +18,7 @@ import scala.language.postfixOps
 import scala.util.{Try, Success => SSuccess, Failure}
 
 import filodb.cassandra.columnstore.CassandraTokenRangeSplit
-import filodb.coordinator.client.{Client, ClientException, LocalClient}
+import filodb.coordinator.client._
 import filodb.coordinator.{DatasetCommands, QueryCommands, CoordinatorSetupWithFactory, NodeClusterActor}
 import filodb.core._
 import filodb.core.metadata.Column.{ColumnType, Schema}
@@ -304,35 +304,15 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
 
   def parsePromQuery(client: LocalClient, query: String, dataset: String, metricCol: String): Unit = {
     val parser = new PromQLParser(query)
-    parser.Query.run() match {
-      // Single level of function
-      case SSuccess(FunctionQuery(funcName, paramOpt, partSpec: PartitionSpec)) =>
-        evalArgs(funcName, paramOpt, partSpec).map { args =>
-          val spec = QueryArgs(funcName, args)
-          executeQuery(client, dataset, spec, partSpec.metricName, partSpec.filters, metricCol)
-        }.getOrElse {
-          println(s"Unable to parse function $funcName with option $paramOpt")
-          exitCode = 2
-        }
+    parser.parseAndGetArgs() match {
+      // Valid parsed QueryArgs
+      case SSuccess((args, partSpec: PartitionSpec)) =>
+        executeQuery(client, dataset, args, partSpec.metricName, partSpec.filters, metricCol)
 
-      // Two levels of functions.  Assume outer one is combiner.
-      // For now, only support a single combiner parameter.
-      case SSuccess(FunctionQuery(combName, combParam,
-                      FunctionQuery(funcName, paramOpt, partSpec: PartitionSpec))) =>
-        evalArgs(funcName, paramOpt, partSpec).map { args =>
-          val spec = QueryArgs(funcName, args, combName, combParam.toSeq)
-          executeQuery(client, dataset, spec, partSpec.metricName, partSpec.filters, metricCol)
-        }.getOrElse {
-          println(s"Unable to parse function $funcName with option $paramOpt")
-          exitCode = 2
-        }
-
-      case SSuccess(otherExpr) =>
-        println(s"Sorry, query with AST $otherExpr cannot be supported right now.")
-        exitCode = 1
       case Failure(e: ParseError) =>
         println(s"Failure parsing $query:\n${parser.formatError(e)}")
         exitCode = 2
+
       case Failure(t: Throwable) => throw t
     }
   }
@@ -353,20 +333,6 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
         exitCode = 2
     }
 
-  }
-
-  def evalArgs(func: String, paramOpt: Option[String], spec: PartitionSpec): Option[Seq[String]] = {
-    // For now, only parse the time aggregate functions
-    if (func.startsWith("time_group")) {
-      // arguments:  <timeColumn> <valueColumn> <startTs> <endTs> <numBuckets>
-      val numBuckets = paramOpt.map(_.toInt).getOrElse(50)
-      val endTs = System.currentTimeMillis
-      val startTs = endTs - (spec.range * 1000)
-      Some(Seq("timestamp", spec.column, startTs.toString, endTs.toString, numBuckets.toString))
-    } else {
-      // Assume a single-column function
-      Some(Seq(spec.column))
-    }
   }
 
   def printAggregate(agg: AggregateResponse[_]): Unit = agg match {

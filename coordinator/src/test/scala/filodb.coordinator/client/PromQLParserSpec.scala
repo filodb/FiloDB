@@ -1,4 +1,4 @@
-package filodb.cli
+package filodb.coordinator.client
 
 import org.parboiled2.ParseError
 import scala.util.{Try, Success, Failure}
