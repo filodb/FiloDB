@@ -28,6 +28,15 @@ lazy val coordinator = project
   .dependsOn(core % "compile->compile; test->test")
   .configs(MultiJvm)
 
+lazy val routing = project
+  .in(file("routing"))
+  .settings(name := "filodb-routing")
+  .settings(buildSettings:_*)
+  .settings(commonSettings:_*)
+  .settings(multiJvmSettings:_*)
+  .dependsOn(coordinator)
+  .configs(MultiJvm)
+
 lazy val cassandra = project
   .in(file("cassandra"))
   .settings(buildSettings:_*)
