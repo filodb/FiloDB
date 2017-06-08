@@ -158,14 +158,14 @@ lazy val coordDeps = commonDeps ++ Seq(
   // Take out the below line if you really don't want statsd metrics enabled
   "io.kamon"             %% "kamon-statsd"      % "0.6.0",
   "com.opencsv"           % "opencsv"           % "3.3",
+  "org.parboiled"        %% "parboiled"         % "2.1.3",
   "com.typesafe.akka"    %% "akka-testkit"      % akkaVersion % "test",
   "com.typesafe.akka"    %% "akka-multi-node-testkit" % akkaVersion % "test"
 )
 
 lazy val cliDeps = Seq(
   logbackDep,
-  "com.quantifind"       %% "sumac"             % "0.3.0",
-  "org.parboiled"        %% "parboiled"         % "2.1.3"
+  "com.quantifind"       %% "sumac"             % "0.3.0"
 )
 
 lazy val sparkDeps = Seq(

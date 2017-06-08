@@ -1,6 +1,7 @@
-package filodb.cli
+package filodb.coordinator.client
 
 import org.parboiled2._
+import scala.util.{Try, Success, Failure}
 
 import filodb.core.query.{ColumnFilter, Filter}
 
@@ -40,6 +41,7 @@ final case class FunctionQuery(functionName: String, param: Option[String], expr
 class PromQLParser(val input: ParserInput) extends Parser {
   import Filter._
   import PromQLParser._
+  import filodb.coordinator.QueryCommands._
 
   // scalastyle:off method.name
   // scalastyle:off public.methods.have.type
@@ -77,4 +79,48 @@ class PromQLParser(val input: ParserInput) extends Parser {
 
   def VectorExpr = rule { VectorSelector ~> VectorExprOnlyQuery }
   def Query: Rule1[PromQuery] = rule { (FunctionExpr | VectorExpr) ~ EOI }
+
+  /**
+   * Method to parse a PromQL query and return important parameters for the FilODB client query call
+   */
+  def parseAndGetArgs(): Try[(QueryArgs, PartitionSpec)] = {
+    Query.run().flatMap {
+      // Single level of function
+      case FunctionQuery(funcName, paramOpt, partSpec: PartitionSpec) =>
+        evalArgs(funcName, paramOpt, partSpec).map { args =>
+          val spec = QueryArgs(funcName, args)
+          Success((spec, partSpec))
+        }.getOrElse {
+          Failure(new IllegalArgumentException(s"Unable to parse function $funcName with option $paramOpt"))
+        }
+
+      // Two levels of functions.  Assume outer one is combiner.
+      // For now, only support a single combiner parameter.
+      case FunctionQuery(combName, combParam,
+             FunctionQuery(funcName, paramOpt, partSpec: PartitionSpec)) =>
+        evalArgs(funcName, paramOpt, partSpec).map { args =>
+          val spec = QueryArgs(funcName, args, combName, combParam.toSeq)
+          Success((spec, partSpec))
+        }.getOrElse {
+          Failure(new IllegalArgumentException(s"Unable to parse function $funcName with option $paramOpt"))
+        }
+
+      case other: PromQuery =>
+        Failure(new IllegalArgumentException(s"Sorry, query with AST $other cannot be supported right now."))
+    }
+  }
+
+  private def evalArgs(func: String, paramOpt: Option[String], spec: PartitionSpec): Option[Seq[String]] = {
+    // For now, only parse the time aggregate functions
+    if (func.startsWith("time_group")) {
+      // arguments:  <timeColumn> <valueColumn> <startTs> <endTs> <numBuckets>
+      val numBuckets = paramOpt.map(_.toInt).getOrElse(50)
+      val endTs = System.currentTimeMillis
+      val startTs = endTs - (spec.range * 1000)
+      Some(Seq("timestamp", spec.column, startTs.toString, endTs.toString, numBuckets.toString))
+    } else {
+      // Assume a single-column function
+      Some(Seq(spec.column))
+    }
+  }
 }
