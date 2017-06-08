@@ -107,4 +107,17 @@ class PartitionKeyIndexSpec extends FunSpec with Matchers with BeforeAndAfter {
     partNums1.toSeq should equal (Seq(7, 8, 9))
     unFounded1.toSeq should equal (Seq("MyName"))
   }
+
+  it("should ignore unsupported columns and return empty filter") {
+    val index2 = new PartitionKeyIndex(projection1)
+    readers.zipWithIndex.take(10).foreach { case (row, index) =>
+      index2.addKey(projection1.partitionKeyFunc(row), index)
+    }
+
+    val filters1 = Seq(ColumnFilter("Actor2Code", Equals("GOV".utf8)),
+                       ColumnFilter("Year", Equals(1979)))
+    val (partNums1, unFounded1) = index2.parseFilters(filters1)
+    partNums1.toSeq should equal (Seq(7, 8, 9))
+    unFounded1.toSeq should equal (Seq("Year"))
+  }
 }

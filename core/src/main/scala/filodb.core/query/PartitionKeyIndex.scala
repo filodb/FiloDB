@@ -1,6 +1,7 @@
 package filodb.core.query
 
 import com.googlecode.javaewah.{EWAHCompressedBitmap, IntIterator}
+import com.typesafe.scalalogging.slf4j.StrictLogging
 import org.jctools.maps.NonBlockingHashMap
 import org.velvia.filo.{ZeroCopyUTF8String => UTF8Str}
 import scalaxy.loops._
@@ -13,15 +14,18 @@ trait Indexer {
   def fromKey(key: PartitionKey, partIndex: Int): Unit
 }
 
+object NoOpIndexer extends Indexer {
+  def fromKey(key: PartitionKey, partIndex: Int): Unit = {}
+}
+
 /**
  * A high performance index using BitmapIndex for partition keys.
  */
-class PartitionKeyIndex(proj: RichProjection) {
+class PartitionKeyIndex(proj: RichProjection) extends StrictLogging {
   import filodb.core._
   import collection.JavaConverters._
   import Column.ColumnType._
 
-  require(proj.partitionColumns.forall(c => c.columnType == StringColumn || c.columnType == MapColumn))
   private final val numPartColumns = proj.partitionColumns.length
   private final val indices = new NonBlockingHashMap[UTF8Str, BitmapIndex[UTF8Str]]
 
@@ -41,7 +45,9 @@ class PartitionKeyIndex(proj: RichProjection) {
                             }
                           }
                         }
-      case other: Any => ???
+      case other: Any =>
+        logger.warn(s"Column $c has type that cannot be indexed and will be ignored right now")
+        NoOpIndexer
     }
   }.toArray
 

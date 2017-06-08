@@ -84,6 +84,8 @@ object MemStore {
           new DoubleReaderAppender(bv.DoubleVector.appendingVector(maxElements), index)
         case TimestampColumn =>
           new LongReaderAppender(bv.LongBinaryVector.appendingVector(maxElements), index)
+        case StringColumn    =>
+          new StringReaderAppender(bv.UTF8Vector.appendingVector(maxElements), index)
         case other: Column.ColumnType => ???
       }
     }.toArray

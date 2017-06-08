@@ -137,7 +137,7 @@ object GdeltTestData {
   def records(proj: RichProjection, readerSeq: Seq[RowReader] = readers): Seq[IngestRecord] =
     readerSeq.zipWithIndex.map { case (reader, idx) => IngestRecord(proj, reader, idx) }
 
-  val badLine = ArrayStringRowReader(Array("NotANumber"))   // Will fail
+  val badLine = ArrayStringRowReader("NotANumber, , , , , , ,".split(','))   // Will fail
   val altLines =
     """0,1979-01-01,197901,1979,AFR,africa,5,5.52631578947368
       |1,1979-01-01,197901,1979,AGR,farm-yo,6,10.9792284866469
