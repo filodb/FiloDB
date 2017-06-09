@@ -3,6 +3,7 @@ package filodb.coordinator.client
 import org.parboiled2._
 import scala.util.{Try, Success, Failure}
 
+import filodb.coordinator.QueryCommands._
 import filodb.core.query.{ColumnFilter, Filter}
 
 object PromQLParser {
@@ -28,6 +29,19 @@ final case class VectorExprOnlyQuery(spec: PartitionSpec) extends PromQuery
 final case class FunctionQuery(functionName: String, param: Option[String], expr: Expr)
     extends PromQuery with Expr
 
+final case class ArgsAndPartSpec(queryArgs: QueryArgs, partSpec: PartitionSpec) {
+  def withMetricFilter(metricCol: String): ArgsAndPartSpec =
+    this.copy(partSpec = partSpec.copy(filters =
+                partSpec.filters :+ ColumnFilter(metricCol, Filter.Equals(partSpec.metricName))))
+
+  /**
+   * Replaces ONE of the arguments of the main function.
+   * May throw an exception if the index number is outside of range of arguments.
+   */
+  def withNewArg(argIndex: Int, newArg: String): ArgsAndPartSpec =
+    this.copy(queryArgs = queryArgs.copy(args = queryArgs.args.updated(argIndex, newArg)))
+}
+
 /**
  * A Prometheus PromQL-like query syntax parser
  * To be able to parse expressions like {{ sum(http-requests-total#avg{method="GET"}[5m]) }}
@@ -41,7 +55,6 @@ final case class FunctionQuery(functionName: String, param: Option[String], expr
 class PromQLParser(val input: ParserInput) extends Parser {
   import Filter._
   import PromQLParser._
-  import filodb.coordinator.QueryCommands._
 
   // scalastyle:off method.name
   // scalastyle:off public.methods.have.type
@@ -83,13 +96,13 @@ class PromQLParser(val input: ParserInput) extends Parser {
   /**
    * Method to parse a PromQL query and return important parameters for the FilODB client query call
    */
-  def parseAndGetArgs(): Try[(QueryArgs, PartitionSpec)] = {
+  def parseAndGetArgs(): Try[ArgsAndPartSpec] = {
     Query.run().flatMap {
       // Single level of function
       case FunctionQuery(funcName, paramOpt, partSpec: PartitionSpec) =>
         evalArgs(funcName, paramOpt, partSpec).map { args =>
           val spec = QueryArgs(funcName, args)
-          Success((spec, partSpec))
+          Success(ArgsAndPartSpec(spec, partSpec))
         }.getOrElse {
           Failure(new IllegalArgumentException(s"Unable to parse function $funcName with option $paramOpt"))
         }
@@ -100,7 +113,7 @@ class PromQLParser(val input: ParserInput) extends Parser {
              FunctionQuery(funcName, paramOpt, partSpec: PartitionSpec)) =>
         evalArgs(funcName, paramOpt, partSpec).map { args =>
           val spec = QueryArgs(funcName, args, combName, combParam.toSeq)
-          Success((spec, partSpec))
+          Success(ArgsAndPartSpec(spec, partSpec))
         }.getOrElse {
           Failure(new IllegalArgumentException(s"Unable to parse function $funcName with option $paramOpt"))
         }
