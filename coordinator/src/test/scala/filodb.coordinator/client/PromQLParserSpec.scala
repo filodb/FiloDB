@@ -58,6 +58,12 @@ class PromQLParserSpec extends FunSpec with Matchers {
       case Success(ArgsAndPartSpec(QueryArgs("time_group_avg", Seq("timestamp", "avg", _, _, "30"), _, Nil),
                                    PartitionSpec("http-requests-total", "avg", Seq(filter1), 300))) =>
     }
+
+    val parser2 = new PromQLParser("""http-requests-total#min[6m]""")
+    parser2.parseAndGetArgs() match {
+      case Success(ArgsAndPartSpec(QueryArgs("last", Seq("timestamp", "min"), "simple", Nil),
+                                   PartitionSpec("http-requests-total", "min", Nil, 360))) =>
+    }
   }
 
   it("should return ParseError for invalid input") {

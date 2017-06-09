@@ -5,7 +5,7 @@ import enumeratum.{Enum, EnumEntry}
 import monix.eval.Task
 import org.scalactic._
 import org.velvia.filo.{FiloVector, BinaryVector, ArrayStringRowReader, RowReader}
-import scala.reflect.ClassTag
+import scala.reflect.{classTag, ClassTag}
 import scalaxy.loops._
 
 import filodb.core.metadata._
@@ -23,8 +23,8 @@ abstract class Aggregate[R: ClassTag] {
 }
 
 // Immutable aggregate for simple values
-class PrimitiveSimpleAggregate[@specialized R: ClassTag](value: R) extends Aggregate[R] {
-  def result: Array[R] = Array(value)
+class PrimitiveSimpleAggregate[@specialized R: ClassTag](val data: R) extends Aggregate[R] {
+  def result: Array[R] = Array(data)
 }
 
 trait NumericAggregate {
@@ -41,15 +41,18 @@ extends PrimitiveSimpleAggregate(value) with NumericAggregate {
   val doubleValue = value.toDouble
 }
 
+final case class DoubleSeriesPoint(timestamp: Long, value: Double)
+final case class DoubleSeriesValues(partitionName: String, points: Seq[DoubleSeriesPoint])
+
 // This Aggregate is designed to be mutable for high performance and low allocation cost
 class ArrayAggregate[@specialized(Int, Long, Double) R: ClassTag](size: Int,
                                                                   value: R) extends Aggregate[R] {
   val result = Array.fill(size)(value)
 }
 
-final case class ListAggregate[R: ClassTag](value: Vector[R] = Vector.empty) extends Aggregate[R] {
-  val result = value.toArray
-  def add(other: ListAggregate[R]): ListAggregate[R] = ListAggregate(value ++ other.value)
+final case class ListAggregate[R: ClassTag](values: Seq[R] = Nil) extends Aggregate[R] {
+  val result = values.toArray
+  def add(other: ListAggregate[R]): ListAggregate[R] = ListAggregate(values ++ other.values)
 }
 
 /**
@@ -65,13 +68,30 @@ trait Aggregator {
   // every time, especially if that aggregate is mutable, such as the ArrayAggregate -- unless you are
   // sure that the aggregate and aggregation logic is immutable, in which case using a val is fine.
   def emptyAggregate: A
+
+  // Combines aggregates from individual chunksets. Also may be used by some combiners to combine aggregates
+  // from individual partitions.
   def combine(first: A, second: A): A
+
+  // If false, then combine() cannot be used and one should default to accumulating individual results
+  // (or possibly things like topK)
+  def isCombinable: Boolean = true
 
   /**
    * If an aggregate can provide an appropriate scan method to aid in pushdown filtering, then it should
    * return something other than None here.
    */
   def chunkScan(projection: RichProjection): Option[ChunkScanMethod] = None
+}
+
+// An Aggregator that produces a single value that cannot be combined.
+trait OneValueAggregator extends Aggregator {
+  type R   // the inner value
+  type A = PrimitiveSimpleAggregate[R]
+  def tag: ClassTag[R]
+  override def isCombinable: Boolean = false
+  def emptyAggregate: A = ???
+  def combine(first: A, second: A): A = ???
 }
 
 trait ChunkAggregator extends Aggregator {
@@ -84,15 +104,25 @@ trait ChunkAggregator extends Aggregator {
     }
 }
 
-class PartitionKeysAggregator extends Aggregator {
-  type A = ListAggregate[String]
-  def emptyAggregate: A = ListAggregate[String]()
-
+class PartitionKeysAggregator extends OneValueAggregator {
+  type R = String
+  val tag = classTag[String]
   def aggPartition(infosSkips: ChunkSetInfo.InfosSkipsIt, partition: FiloPartition):
-      ListAggregate[String] = ListAggregate(Vector(partition.binPartition.toString))
+      PrimitiveSimpleAggregate[String] = new PrimitiveSimpleAggregate(partition.stringPartition)
+}
 
-  def combine(first: ListAggregate[String], second: ListAggregate[String]): ListAggregate[String] =
-    first.add(second)
+class LastDoubleValueAggregator(timestampIndex: Int, doubleColIndex: Int) extends OneValueAggregator {
+  type R = DoubleSeriesValues
+  val tag = classTag[DoubleSeriesValues]
+  def aggPartition(infosSkips: ChunkSetInfo.InfosSkipsIt, partition: FiloPartition):
+      PrimitiveSimpleAggregate[DoubleSeriesValues] = {
+    val lastVectors = partition.lastVectors
+    val timestampVector = lastVectors(timestampIndex).asInstanceOf[FiloVector[Long]]
+    val doubleVector = lastVectors(doubleColIndex).asInstanceOf[FiloVector[Double]]
+    val point = DoubleSeriesPoint(timestampVector(timestampVector.length - 1),
+                                  doubleVector(doubleVector.length - 1))
+    new PrimitiveSimpleAggregate(DoubleSeriesValues(partition.stringPartition, Seq(point)))
+  }
 }
 
 /**
@@ -116,6 +146,23 @@ trait SingleColumnAggFunction extends AggregationFunction {
     yield {
       makeAggregator(sourceColIndex, sourceColType)
     }
+  }
+}
+
+trait TimeAggFunction extends AggregationFunction {
+  import Column.ColumnType._
+  import filodb.core.SingleKeyTypes._
+
+  def allowedTypes: Set[Column.ColumnType]
+  def makeAggregator(timeColIndex: Int, valueColIndex: Int, colType: Column.ColumnType): Aggregator
+
+  def validate(args: Seq[String], proj: RichProjection): Aggregator Or InvalidFunctionSpec = {
+    for { args <- validateNumArgs(args, 2)
+          timeColIndex <- columnIndex(proj.nonPartitionColumns, args(0))
+          timeColType  <- validatedColumnType(proj.nonPartitionColumns, timeColIndex, Set(LongColumn, TimestampColumn))
+          valueColIndex <- columnIndex(proj.nonPartitionColumns, args(1))
+          valueColType  <- validatedColumnType(proj.nonPartitionColumns, valueColIndex, allowedTypes) }
+    yield { makeAggregator(timeColIndex, valueColIndex, valueColType) }
   }
 }
 
@@ -174,6 +221,15 @@ object AggregationFunction extends Enum[AggregationFunction] {
     val allowedTypes: Set[Column.ColumnType] = Column.ColumnType.values.toSet
     def makeAggregator(colIndex: Int, colType: Column.ColumnType): Aggregator =
       new CountingAggregator(colIndex)
+  }
+
+  case object Last extends TimeAggFunction {
+    val allowedTypes: Set[Column.ColumnType] = Set(DoubleColumn)
+    def makeAggregator(timeColIndex: Int, valueColIndex: Int, colType: Column.ColumnType): Aggregator =
+    colType match {
+      case DoubleColumn => new LastDoubleValueAggregator(timeColIndex, valueColIndex)
+      case o: Any       => ???
+    }
   }
 
   case object TimeGroupMin extends TimeGroupingAggFunction {
