@@ -306,7 +306,7 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
     val parser = new PromQLParser(query)
     parser.parseAndGetArgs() match {
       // Valid parsed QueryArgs
-      case SSuccess((args, partSpec: PartitionSpec)) =>
+      case SSuccess(ArgsAndPartSpec(args, partSpec)) =>
         executeQuery(client, dataset, args, partSpec.metricName, partSpec.filters, metricCol)
 
       case Failure(e: ParseError) =>
