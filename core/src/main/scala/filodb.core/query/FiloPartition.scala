@@ -1,6 +1,7 @@
 package filodb.core.query
 
 import monix.reactive.Observable
+import org.velvia.filo.FiloVector
 
 import filodb.core.store.ChunkSetInfo
 import filodb.core.Types.PartitionKey
@@ -12,6 +13,8 @@ trait FiloPartition {
   import ChunkSetInfo._
 
   def binPartition: PartitionKey
+  // Use this instead of binPartition.toString as it is cached and potentially expensive
+  lazy val stringPartition = binPartition.toString
 
   def numChunks: Int
   def latestChunkLen: Int
@@ -26,4 +29,7 @@ trait FiloPartition {
     Observable.fromIterator(readers(infosSkips, positions))
 
   def readers(infosSkips: InfosSkipsIt, positions: Array[Int]): Iterator[ChunkSetReader]
+
+  // Optimized access to the latest vectors, should be very fast (for streaming)
+  def lastVectors: Array[FiloVector[_]]
 }

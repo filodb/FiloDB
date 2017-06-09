@@ -118,6 +118,11 @@ class PromQLParser(val input: ParserInput) extends Parser {
           Failure(new IllegalArgumentException(s"Unable to parse function $funcName with option $paramOpt"))
         }
 
+      case VectorExprOnlyQuery(partSpec) =>
+        // For now just return the last data point and list all series
+        val spec = QueryArgs("last", Seq("timestamp", partSpec.column))
+        Success(ArgsAndPartSpec(spec, partSpec))
+
       case other: PromQuery =>
         Failure(new IllegalArgumentException(s"Sorry, query with AST $other cannot be supported right now."))
     }
