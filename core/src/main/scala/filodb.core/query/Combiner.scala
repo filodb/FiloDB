@@ -29,6 +29,15 @@ class SimpleCombiner(val aggregator: Aggregator) extends Combiner {
     }
 }
 
+class ListCombiner(val aggregator: OneValueAggregator,
+                   maxSize: Int = 1000) extends Combiner {
+  def fold(aggregateStream: Observable[Aggregate[_]]): Task[Aggregate[_]] =
+    aggregateStream.take(maxSize)
+                   .map { case p: PrimitiveSimpleAggregate[aggregator.R] @unchecked => p.data }
+                   .toListL
+                   .map(seq => ListAggregate[aggregator.R](seq)(aggregator.tag))
+}
+
 final case class HistogramBucket(max: Double, count: Int) {
   override def toString: String = s"$max | count=$count"
 }
@@ -100,7 +109,10 @@ object CombinerFunction extends Enum[CombinerFunction] {
 
   case object Simple extends CombinerFunction {
     def validate(aggregator: Aggregator, arg: Seq[String]): Combiner Or InvalidFunctionSpec =
-      Good(new SimpleCombiner(aggregator))
+      aggregator match {
+        case ov: OneValueAggregator => Good(new ListCombiner(ov))
+        case other: Aggregator      => Good(new SimpleCombiner(aggregator))
+      }
   }
 
   /**

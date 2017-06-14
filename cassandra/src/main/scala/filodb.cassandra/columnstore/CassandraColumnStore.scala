@@ -5,7 +5,7 @@ import com.typesafe.config.Config
 import com.typesafe.scalalogging.slf4j.StrictLogging
 import java.net.InetSocketAddress
 import java.nio.ByteBuffer
-import java.util.HashSet
+import org.velvia.filo.FiloVector
 import kamon.trace.{TraceContext, Tracer}
 import monix.reactive.Observable
 
@@ -378,4 +378,6 @@ extends ChunkIDPartitionChunkIndex(binPartition, projection) with FiloPartition 
 
   def readers(infosSkips: InfosSkipsIt, positions: Array[Int]): Iterator[ChunkSetReader] =
     streamReaders(infosSkips, positions).toIterator()
+
+  def lastVectors: Array[FiloVector[_]] = ???
 }

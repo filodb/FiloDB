@@ -173,6 +173,11 @@ class TimeSeriesPartition(val projection: RichProjection,
       new ChunkSetReader(info, binPartition, skips, getVectors(positions, vectArray, info.numRows))
     }
 
+  def lastVectors: Array[FiloVector[_]] =
+    (if (currentChunkLen == 0 && chunkIDs.nonEmpty) {
+      vectors.get(chunkIDs.last)
+    } else { currentChunks }).asInstanceOf[Array[FiloVector[_]]]
+
   // Initializes vectors, chunkIDs for a new chunkset/chunkID
   private def initNewChunk(): Unit = {
     val newChunkID = timeUUID64
