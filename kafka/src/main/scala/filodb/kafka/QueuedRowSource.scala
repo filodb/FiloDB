@@ -1,7 +1,8 @@
 package filodb.kafka
 
-import akka.actor.Props
 import java.util.concurrent.BlockingQueue
+
+import akka.actor.Props
 
 import filodb.coordinator.DirectRowSource
 import filodb.core.metadata.RichProjection
@@ -11,11 +12,11 @@ object QueuedRowSource {
   def props(queue: BlockingQueue[IngestRecord],
             memStore: MemStore,
             projection: RichProjection): Props =
-    Props(classOf[QueuedRowSource], queue, memStore, projection)
+    Props(classOf[KafkaRowSource], queue, memStore, projection)
 }
 
 /** Temporary: A RowSource taking its input from a BlockingQueue.*/
-class QueuedRowSource(queue: BlockingQueue[IngestRecord],
+class KafkaRowSource(queue: BlockingQueue[IngestRecord],
                       val memStore: MemStore,
                       val projection: RichProjection) extends DirectRowSource {
   val batchIterator = new Iterator[Seq[IngestRecord]] {

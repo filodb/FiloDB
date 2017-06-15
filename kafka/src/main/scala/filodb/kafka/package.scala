@@ -6,7 +6,6 @@ import java.util.concurrent.{CompletableFuture, CompletionStage, TimeUnit}
 import scala.concurrent.Future
 import scala.collection.JavaConverters._
 import scala.concurrent.java8.FuturesConvertersImpl.{CF, P}
-import scala.util.Try
 
 package object kafka {
 
@@ -53,10 +52,5 @@ package object kafka {
   implicit final class PropertiesOps(props: JProperties) {
 
     def asMap: Map[String, String] = props.asScala.toMap[String, String]
-  }
-
-  def createClass(fqcn: String, defaultFqcn: String): Class[_] = {
-    val name = Option(fqcn).getOrElse(defaultFqcn)
-    Try(Class.forName(name)).getOrElse(Class.forName(defaultFqcn))
   }
 }

@@ -9,6 +9,7 @@ import org.apache.kafka.clients.producer.ProducerConfig
 import org.apache.kafka.common.serialization.{ByteArraySerializer, IntegerSerializer}
 
 import scala.collection.immutable
+import scala.util.Try
 
 object KafkaSettings {
 
@@ -37,8 +38,6 @@ class KafkaSettings(conf: Config) extends NodeSettings(conf) {
 
   protected val filo = conf.withFallback(ConfigFactory.load()).getConfig("filodb")
 
-  protected val kafka = filo.getConfig("kafka")
-
   protected val secureConfig: Map[String, AnyRef] = Map.empty[String, AnyRef]
 
   /** Set from either a comma-separated string from -Dfilodb.kafka.bootstrap.servers
@@ -57,9 +56,9 @@ class KafkaSettings(conf: Config) extends NodeSettings(conf) {
         .asScala.toList.distinct.mkString(","))
 
   /** The FiloDB event stream ingestion topic. */
-  val IngestionTopic = kafka.getString("topics.ingestion")
+  val IngestionTopic = filo.getString("kafka.topics.ingestion")
 
-  private val patterns = kafka.getObject("topics.patterns")
+  private val patterns = filo.getObject("kafka.topics.patterns")
 
   /** Returns a single topic of configured, otherwise an empty String. */
   val WireTapTopic: String = patterns.get("wire-tap").unwrapped.toString
@@ -67,15 +66,11 @@ class KafkaSettings(conf: Config) extends NodeSettings(conf) {
   /** Returns a single topic of configured, otherwise an empty String. */
   val FailureTopic: String = patterns.get("failure").unwrapped.toString
 
-  /*val ProducerPartitionerClass: Class[_] =
-    createClass(filo.getString("kafka.producer.partitioner"),
-      classOf[ShardPartitioner].getCanonicalName)
-*/
-  val ProducerKeySerializerClass: Class[_] =
+  lazy val ProducerKeySerializerClass: Class[_] =
     createClass(filo.getString("kafka.producer.key.serializer"),
       classOf[IntegerSerializer].getCanonicalName)
 
-  val ProducerValueSerializerClass: Class[_] =
+  lazy val ProducerValueSerializerClass: Class[_] =
     createClass(filo.getString("kafka.producer.value.serializer"),
       classOf[ByteArraySerializer].getCanonicalName)
 
@@ -92,5 +87,15 @@ class KafkaSettings(conf: Config) extends NodeSettings(conf) {
       ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG ->
         userConfig.getOrElse(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, ProducerValueSerializerClass))
       ).asProps
+  }
+
+
+  def createClass(fqcn: String): Class[_] = {
+    Class.forName(fqcn) // todo this can throw. handle.
+  }
+
+  def createClass(fqcn: String, defaultFqcn: String): Class[_] = {
+    val name = Option(fqcn).getOrElse(defaultFqcn)
+    Try(Class.forName(name)).getOrElse(Class.forName(defaultFqcn))
   }
 }
