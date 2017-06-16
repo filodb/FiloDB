@@ -48,6 +48,8 @@ class ShardMapper(val numShards: Int) extends Serializable {
     ShardAndNode(shard, shardMap(shard))
   }
 
+  def coordForShard(shardNum: Int): ActorRef = shardMap(shardNum)
+
   /**
    * Maps a shard key to a range of shards.  Used to limit shard distribution for queries when one knows
    * the shard key.

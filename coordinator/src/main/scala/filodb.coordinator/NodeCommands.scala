@@ -78,13 +78,11 @@ object IngestionCommands {
    * Ingests a new set of rows for a given dataset and version.
    * The partitioning column and sort column are set up in the dataset.
    *
-   * @param seqNo the sequence number to be returned for acknowledging the entire set of rows
    * @return Ack(seqNo) returned when the set of rows has been committed to the MemTable.
    */
   final case class IngestRows(dataset: DatasetRef,
                               version: Int,
-                              rows: Seq[IngestRecord],
-                              seqNo: Long) extends NodeCommand
+                              rows: Seq[IngestRecord]) extends NodeCommand
 
   final case class Ack(seqNo: Long) extends NodeResponse
   case object UnknownDataset extends NodeResponse with ErrorResponse

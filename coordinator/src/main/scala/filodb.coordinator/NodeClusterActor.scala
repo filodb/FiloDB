@@ -38,14 +38,14 @@ object NodeClusterActor {
    *                           setup on all nodes - for that, subscribe to ShardMapUpdate's
    */
   final case class DatasetResourceSpec(numShards: Int, minNumNodes: Int)
-  final case class IngestionSource(rowSourceFactoryClass: String, config: Config = ConfigFactory.empty)
+  final case class IngestionSource(streamFactoryClass: String, config: Config = ConfigFactory.empty)
   final case class SetupDataset(ref: DatasetRef,
                                 columns: Seq[String],
                                 resources: DatasetResourceSpec,
                                 source: IngestionSource)
 
   // A dummy source to use for tests and when you just want to push new records in
-  val noOpSource = IngestionSource(classOf[NoOpSourceFactory].getName)
+  val noOpSource = IngestionSource(classOf[NoOpStreamFactory].getName)
 
   case object DatasetVerified
   final case class DatasetAlreadySetup(ref: DatasetRef) extends ErrorResponse
@@ -68,6 +68,7 @@ object NodeClusterActor {
                                    resources: DatasetResourceSpec,
                                    source: IngestionSource)
   final case class AddCoordActor(roles: Set[String], addr: Address, ref: ActorRef)
+  case object Reset           // Only use for testing, in before {} blocks
   case object EverybodyLeave  // Make every member leave, should be used only for testing
 
   /**
@@ -295,6 +296,13 @@ private[filodb] class NodeClusterActor(cluster: Cluster,
       } else {
         logger.warn(s"Ignoring EverybodyLeave, somebody already sent it")
       }
+
+    case Reset =>
+      logger.info(s"Resetting all dataset state except membership....")
+      shardMappers.clear()
+      subscribers.clear()
+      projections.clear()
+      sources.clear()
   }
 
   def receive: Receive = membershipHandler orElse shardMapHandler orElse routerEvents

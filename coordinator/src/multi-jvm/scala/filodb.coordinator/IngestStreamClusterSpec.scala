@@ -16,7 +16,7 @@ import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Span, Seconds}
 import org.scalatest.{BeforeAndAfterAll, FunSpecLike, Matchers}
 
-object RowSourceClusterSpecConfig extends MultiNodeConfig {
+object IngestStreamClusterSpecConfig extends MultiNodeConfig {
   // register the named roles (nodes) of the test
   val first = role("first")
   val second = role("second")
@@ -31,8 +31,8 @@ object RowSourceClusterSpecConfig extends MultiNodeConfig {
   commonConfig(globalConfig)
 }
 
-// A multi-JVM RowSource spec to test out sending to multiple nodes
-abstract class RowSourceClusterSpec extends MultiNodeSpec(RowSourceClusterSpecConfig)
+// A multi-JVM IngestStream spec to test out sending to multiple nodes
+abstract class IngestStreamClusterSpec extends MultiNodeSpec(IngestStreamClusterSpecConfig)
   with FunSpecLike with Matchers with BeforeAndAfterAll
   with CoordinatorSetupWithFactory
   with StrictLogging
@@ -42,8 +42,8 @@ abstract class RowSourceClusterSpec extends MultiNodeSpec(RowSourceClusterSpecCo
   import DatasetCommands._
   import GdeltTestData._
   import NodeClusterActor._
-  import RowSourceClusterSpecConfig._
-  import sources.{CsvSourceActor, CsvSourceFactory}
+  import IngestStreamClusterSpecConfig._
+  import sources.{CsvStream, CsvStreamFactory}
 
   override def initialParticipants = roles.size
 
@@ -52,7 +52,7 @@ abstract class RowSourceClusterSpec extends MultiNodeSpec(RowSourceClusterSpecCo
   override def afterAll() = multiNodeSpecAfterAll()
 
   val config = globalConfig.getConfig("filodb")
-  val settings = CsvSourceActor.CsvSourceSettings()
+  val settings = CsvStream.CsvStreamSettings()
 
   val address1 = node(first).address
   val address2 = node(second).address
@@ -65,9 +65,9 @@ abstract class RowSourceClusterSpec extends MultiNodeSpec(RowSourceClusterSpecCo
   var clusterActor: ActorRef = _
 
   val sampleReader = new java.io.InputStreamReader(getClass.getResourceAsStream("/GDELT-sample-test.csv"))
-  val headerCols = CsvSourceActor.getHeaderColumns(sampleReader)
+  val headerCols = CsvStream.getHeaderColumns(sampleReader)
 
-  it("should start NodeClusterActor, CoordActors, join cluster, and wait for all nodes to enter barrier") {
+  it("should start actors, join cluster, setup ingestion, and wait for all nodes to enter barrier") {
     // Start NodeCoordinator on all nodes so the ClusterActor will register them
     coordinatorActor
     clusterActor = singletonClusterActor("worker")
@@ -77,6 +77,17 @@ abstract class RowSourceClusterSpec extends MultiNodeSpec(RowSourceClusterSpecCo
     cluster join address1
     awaitCond(cluster.state.members.size == 2)
     enterBarrier("both-nodes-joined-cluster")
+
+    runOn(first) {
+      // Empty ingestion source - we're going to pump in records ourselves
+      // 4 shards, 2 nodes, 2 nodes per shard
+      val msg = SetupDataset(ref2,
+                             headerCols,
+                             DatasetResourceSpec(4, 2), noOpSource)
+      clusterActor ! msg
+      expectMsg(DatasetVerified)
+    }
+    enterBarrier("dataset-setup-done")
   }
 
   private def getColStoreRows(): Int = {
@@ -85,42 +96,29 @@ abstract class RowSourceClusterSpec extends MultiNodeSpec(RowSourceClusterSpecCo
     rowIt.toSeq.length
   }
 
+  import Ingest._
+
   /**
-   * What we're going to do here is to have BOTH nodes read from the SAME CSV.
-   * If the routing works correctly, then each node will get two copies of each row, and half of the rows,
-   * and with the row replacement logic, each node's InMemoryColumnStore will have half of the input rows.
-   * If the routing does not work, or is turned off, then each node will get all the input rows.
+   * Only one node is going to read the CSV, but we will get counts from both nodes
    */
   it("should start ingestion and route rows to the right node") {
-    // Note: can only send 20 rows at a time before waiting for acks.  Therefore this tests memtable
-    // ack on timer and ability for RowSource to handle waiting for acks repeatedly
     runOn(first) {
+      // TODO: replace with waiting for node ready message
+      Thread sleep 1000
+
       val config = ConfigFactory.parseString(s"""header = true
-                                             rows-to-read = 10
-                                             max-unacked-batches = 4
+                                             batch-size = 10
                                              resource = "/GDELT-sample-test.csv"
                                              """)
-      val msg = SetupDataset(dataset6.projections.head.dataset,
-                             headerCols,
-                             DatasetResourceSpec(1, 1),
-                             IngestionSource(classOf[CsvSourceFactory].getName, config))
-      clusterActor ! msg
-      expectMsg(DatasetVerified)
+      val stream = (new CsvStreamFactory).create(config, projection6)
+      val protocolActor = system.actorOf(IngestProtocol.props(clusterActor, projection6.datasetRef))
+      stream.routeToShards(new ShardMapper(1), projection6, protocolActor)
+
+      // TODO: find a way to wait for ingestion to be done via subscribing to node events
+      Thread sleep 3000
     }
 
-    enterBarrier("ingestion-ready")
-
-    // TODO: find a way to wait for ingestion to be done via subscribing to node events
-    Thread sleep 6000
     enterBarrier("ingestion-done")
-
-    // Flush all nodes and get the final count from each ColumnStore...
-    runOn(first) {
-      val client = new ClusterClient(clusterActor, "worker", "worker")
-      client.flushCompletely(ref2, 0)
-    }
-
-    enterBarrier("all-nodes-flushed")
 
     runOn(second) {
       val numRows = getColStoreRows()
@@ -139,5 +137,5 @@ abstract class RowSourceClusterSpec extends MultiNodeSpec(RowSourceClusterSpecCo
   }
 }
 
-class RowSourceClusterSpecMultiJvmNode1 extends RowSourceClusterSpec
-class RowSourceClusterSpecMultiJvmNode2 extends RowSourceClusterSpec
+class IngestStreamClusterSpecMultiJvmNode1 extends IngestStreamClusterSpec
+class IngestStreamClusterSpecMultiJvmNode2 extends IngestStreamClusterSpec
