@@ -13,6 +13,7 @@ object MemStoreCoordActor {
   final case class IngestRows(ackTo: ActorRef, records: Seq[IngestRecord])
   case object GetStatus
 
+  // TODO: do we need a more specific name?
   final case class Status(rowsIngested: Int, lastError: Option[Throwable])
 
   def props(projection: RichProjection,
@@ -22,7 +23,6 @@ object MemStoreCoordActor {
 }
 
 /**
- * POC POC POC
  * Simply a wrapper for ingesting new records into a MemStore
  * Also starts up an IngestStream streaming directly into MemStore.
  *
@@ -30,10 +30,10 @@ object MemStoreCoordActor {
  *
  * @param sched a Scheduler for running ingestion stream Observables
  */
-private[filodb] class MemStoreCoordActor(projection: RichProjection,
-                                         memStore: MemStore,
-                                         source: NodeClusterActor.IngestionSource)
-                                        (implicit sched: Scheduler) extends BaseActor {
+private[filodb] final class MemStoreCoordActor(projection: RichProjection,
+                                               memStore: MemStore,
+                                               source: NodeClusterActor.IngestionSource)
+                                              (implicit sched: Scheduler) extends BaseActor {
   import MemStoreCoordActor._
 
   private var rowsIngested = 0

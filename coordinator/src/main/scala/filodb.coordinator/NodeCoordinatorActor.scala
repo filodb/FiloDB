@@ -46,10 +46,10 @@ object NodeCoordinatorActor {
     Props(classOf[NodeCoordinatorActor], metaStore, memStore, columnStore, config)
 }
 
-class NodeCoordinatorActor(metaStore: MetaStore,
-                           memStore: MemStore,
-                           columnStore: ColumnStore,
-                           config: Config) extends BaseActor {
+private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
+                                                 memStore: MemStore,
+                                                 columnStore: ColumnStore,
+                                                 config: Config) extends BaseActor {
   import NodeCoordinatorActor._
   import DatasetCommands._
   import IngestionCommands._

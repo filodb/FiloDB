@@ -42,7 +42,7 @@ object Ingest {
               logger.warn(s"Mismatching offsets: got $seqNo, expected ${records.last.offset}")
               Stop
             case other: Any =>
-              logger.warn(s"Got an unexpected result from remote ActorRef: $other... stopping stream")
+              logger.warn(s"Unexpected result from remote ActorRef: $other... stopping stream")
               Stop
           }
         }
