@@ -8,7 +8,7 @@ import scala.concurrent.Await
 import scala.concurrent.duration._
 
 import filodb.coordinator.client.LocalClient
-import filodb.coordinator.{CoordinatorSetupWithFactory, RowSourceFactory, NodeClusterActor}
+import filodb.coordinator.CoordinatorSetupWithFactory
 import filodb.core.metadata.{Dataset, DataColumn, Column, RichProjection}
 
 /**
