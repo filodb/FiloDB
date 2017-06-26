@@ -1,44 +1,33 @@
 package filodb.kafka
 
-import java.util.{Properties => JProperties}
+import java.net.InetAddress
 
-import akka.actor.ActorSystem
+import scala.collection.JavaConverters._
+import scala.concurrent.duration._
+
 import com.typesafe.config.{Config, ConfigFactory}
-import org.apache.kafka.clients.CommonClientConfigs
-import org.apache.kafka.clients.producer.ProducerConfig
-import org.apache.kafka.common.serialization.{ByteArraySerializer, IntegerSerializer}
 
-import scala.collection.immutable
-import scala.util.Try
-
-object KafkaSettings {
-
-  private val JaasConfKey = "java.security.auth.login.config"
-
-  def apply(system: ActorSystem): KafkaSettings =
-    new KafkaSettings(system.settings.config)
-
-  def apply(conf: Config): KafkaSettings =
-    new KafkaSettings(conf)
-
-}
+import filodb.coordinator.Instance
 
 /** Creates an immutable `com.typesafe.config.Config`.
   *
   * Override default settings in your deploy reference.conf file per environment.
   * Extendable class, see the sample:
   */
-class KafkaSettings(conf: Config) extends NodeSettings(conf) {
+class KafkaSettings(conf: Config) extends Instance {
 
-  import scala.collection.JavaConverters._
-
-  def this() = this(ConfigFactory.load())
+  def this() = this(ConfigFactory.load)
 
   ConfigFactory.invalidateCaches()
 
-  protected val filo = conf.withFallback(ConfigFactory.load()).getConfig("filodb")
+  val config = conf.withFallback(ConfigFactory.load())
 
-  protected val secureConfig: Map[String, AnyRef] = Map.empty[String, AnyRef]
+  protected val kafka = config.getConfig("filodb.kafka")
+
+  /** Override with `akka.cluster.Cluster.selfAddress` if on the classpath. */
+  val selfAddress = InetAddress.getLocalHost.getHostAddress
+
+  def createSelfId: String = selfAddress + "-" + System.currentTimeMillis
 
   /** Set from either a comma-separated string from -Dfilodb.kafka.bootstrap.servers
     * or configured list of host:port entries like this
@@ -51,51 +40,55 @@ class KafkaSettings(conf: Config) extends NodeSettings(conf) {
     *
     * Returns a comma-separated String of host:port entries required by the Kafka client. */
   val BootstrapServers: String =
-    sys.props.getOrElse("kafka.bootstrap.servers",
-      filo.getStringList("kafka.bootstrap.servers")
+    sys.props.getOrElse("bootstrap.servers",
+      kafka.getStringList("bootstrap.servers")
         .asScala.toList.distinct.mkString(","))
 
-  /** The FiloDB event stream ingestion topic. */
-  val IngestionTopic = filo.getString("kafka.topics.ingestion")
+  val NumPartitions = kafka.getInt("partitions")
 
-  private val patterns = filo.getObject("kafka.topics.patterns")
+  val IngestionTopic = kafka.getString("topics.ingestion")
 
-  /** Returns a single topic of configured, otherwise an empty String. */
-  val WireTapTopic: String = patterns.get("wire-tap").unwrapped.toString
+  val FailureTopic: String = kafka.getString("topics.failure")
 
-  /** Returns a single topic of configured, otherwise an empty String. */
-  val FailureTopic: String = patterns.get("failure").unwrapped.toString
+  require(kafka.hasPath("record-converter"),
+    "'filodb.kafka.record-converter' must not be empty. Configure a custom converter.")
 
-  lazy val ProducerKeySerializerClass: Class[_] =
-    createClass(filo.getString("kafka.producer.key.serializer"),
-      classOf[IntegerSerializer].getCanonicalName)
+  val RecordConverterClass = kafka.getString("record-converter")
 
-  lazy val ProducerValueSerializerClass: Class[_] =
-    createClass(filo.getString("kafka.producer.value.serializer"),
-      classOf[ByteArraySerializer].getCanonicalName)
+  val ConnectedTimeout = Duration(kafka.getDuration(
+    "tasks.lifecycle.connect-timeout", MILLISECONDS), MILLISECONDS)
 
-  def producerConfig(userConfig: immutable.Map[String, AnyRef] = Map.empty): JProperties = {
-    (userConfig ++ secureConfig ++ Map(
-      CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG ->
-        userConfig.getOrElse(CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG, BootstrapServers),
-      ProducerConfig.ACKS_CONFIG ->
-        userConfig.getOrElse(ProducerConfig.ACKS_CONFIG, "1"), // ack=1 from partition leader only, test:"all" slowest, safest
-      ProducerConfig.CLIENT_ID_CONFIG ->
-        userConfig.getOrElse(ProducerConfig.CLIENT_ID_CONFIG, selfAddressId),
-      ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG ->
-        ProducerKeySerializerClass,
-      ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG ->
-        userConfig.getOrElse(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, ProducerValueSerializerClass))
-      ).asProps
+  val GracefulStopTimeout = Duration(kafka.getDuration(
+    "tasks.lifecycle.shutdown-timeout", SECONDS), SECONDS)
+
+  val StatusTimeout = Duration(kafka.getDuration(
+    "tasks.status-timeout", MILLISECONDS), MILLISECONDS)
+
+  protected val security: Map[String, AnyRef] = {
+    Map.empty
+    /* wip kafka.getConfig("security").toMap ++
+      kafka.getConfig("sasl").toMap ++
+      kafka.getConfig("ssl").toMap*/
   }
+}
 
+/** For the native way Kafka properties are loaded by users,
+  * and retaining full keys wich Typesafe config would break up to
+  * the last key which does not work for Kafka settings.
+  */
+object Loaded {
 
-  def createClass(fqcn: String): Class[_] = {
-    Class.forName(fqcn) // todo this can throw. handle.
-  }
+  private[kafka] lazy val kafka: Map[String, AnyRef] =
+    sys.props.get("filodb.kafka.clients.config")
+      .map { path => new java.io.File(path.replace("./", "")).asMap }
+      .getOrElse(throw new IllegalArgumentException(
+        "'filodb.kafka.clients.config' must be set: path/to/your-kafka.properties"))
 
-  def createClass(fqcn: String, defaultFqcn: String): Class[_] = {
-    val name = Option(fqcn).getOrElse(defaultFqcn)
-    Try(Class.forName(name)).getOrElse(Class.forName(defaultFqcn))
-  }
+  def consumer: Map[String, AnyRef] = filter("consumer")
+  def producer: Map[String, AnyRef] = filter("producer")
+
+  private def filter(client: String): Map[String, AnyRef] =
+    kafka.collect { case (k,v) if k.startsWith(client) =>
+      k.replace(client + ".", "") -> v
+    }
 }

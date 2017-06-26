@@ -34,9 +34,10 @@ lazy val kafka = project
   .settings(buildSettings:_*)
   .settings(commonSettings:_*)
   .settings(multiJvmSettings:_*)
+  .settings(itSettings : _*)
   .settings(assemblySettings:_*)
   .dependsOn(coordinator % "compile->compile; test->test")
-  .configs(MultiJvm)
+  .configs(IntegrationTest, MultiJvm)
 
 lazy val cassandra = project
   .in(file("cassandra"))

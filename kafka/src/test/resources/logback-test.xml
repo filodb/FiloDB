@@ -10,14 +10,14 @@
 
     <logger name="org.apache.kafka.common.metrics" level="ERROR"/>
     <logger name="org.apache.kafka.clients.producer.ProducerConfig" level="WARN"/>
-
-
-    <logger name="org.apache.kafka.common.security" level="DEBUG"/>
+    <logger name="org.apache.kafka.common.security" level="INFO"/>
+    <logger name="org.apache.kafka.streams.processor" level="INFO"/>
+    <logger name="org.apache.kafka.streams.processor.internals.StreamTask" level="WARN"/>
+    <logger name="org.apache.kafka.streams.processor.internals.StreamThread" level="WARN"/>
     <logger name="org.apache.kafka.clients" level="INFO"/>
     <logger name="org.apache.kafka" level="INFO"/>
 
     <root level="INFO">
-        <appender-ref ref="FILE" />
         <appender-ref ref="STDOUT" />
     </root>
 </configuration>
