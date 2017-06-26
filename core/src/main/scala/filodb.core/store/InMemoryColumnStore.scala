@@ -1,20 +1,19 @@
 package filodb.core.store
 
+import java.nio.ByteBuffer
+import java.util.concurrent.{ConcurrentHashMap, ConcurrentSkipListMap}
+import javax.xml.bind.DatatypeConverter
+
 import bloomfilter.mutable.BloomFilter
 import com.typesafe.scalalogging.slf4j.StrictLogging
-import java.nio.ByteBuffer
-import java.util.concurrent.{ConcurrentHashMap, ConcurrentSkipListMap, ConcurrentNavigableMap}
-import javax.xml.bind.DatatypeConverter
+import filodb.core.Types._
+import filodb.core._
+import filodb.core.metadata.{Column, Projection, RichProjection}
+import filodb.core.query.{ChunkIDPartitionChunkIndex, PartitionChunkIndex}
 import monix.reactive.Observable
+
 import scala.collection.mutable.HashMap
 import scala.concurrent.{ExecutionContext, Future}
-import scalaxy.loops._
-
-import filodb.core._
-import filodb.core.binaryrecord.BinaryRecord
-import filodb.core.metadata.{Column, Projection, RichProjection}
-import filodb.core.query.{PartitionChunkIndex, ChunkIDPartitionChunkIndex}
-import filodb.core.Types._
 
 /**
  * A ColumnStore implementation which is entirely in memory for speed.
@@ -25,35 +24,38 @@ import filodb.core.Types._
  * know how to distribute data, or at least keep track of different nodes,
  * TODO: use thread-safe structures
  */
+object InMemoryColumnStore {
+  private[store] final case class DbKey(dataset: DatasetRef, partition: PartitionKey, version: Int)
+}
+
 class InMemoryColumnStore(val readEc: ExecutionContext)(implicit val ec: ExecutionContext)
 extends ColumnStore with InMemoryColumnStoreScanner with StrictLogging {
-  import Types._
-  import collection.JavaConversions._
+  import InMemoryColumnStore._
 
   logger.info("Starting InMemoryColumnStore...")
 
-  val chunkDb = new HashMap[(DatasetRef, PartitionKey, Int), InMemoryChunkStore]
-  val indices = new HashMap[(DatasetRef, PartitionKey, Int), PartitionChunkIndex]
-  val filters = new HashMap[(DatasetRef, PartitionKey, Int), FilterTree]
+  val chunkDb = new HashMap[DbKey, InMemoryChunkStore]
+  val indices = new HashMap[DbKey, PartitionChunkIndex]
+  val filters = new HashMap[DbKey, FilterTree]
 
   def initializeProjection(projection: Projection): Future[Response] = Future.successful(Success)
 
   def clearProjectionData(projection: Projection): Future[Response] = Future {
-    chunkDb.keys.collect { case key @ (ds, _, _) if ds == projection.dataset => chunkDb remove key }
-    indices.keys.collect { case key @ (ds, _, _) if ds == projection.dataset => indices remove key }
-    filters.keys.collect { case key @ (ds, _, _) if ds == projection.dataset => filters remove key }
+    chunkDb.keys.collect { case key @ DbKey(ds, _, _) if ds == projection.dataset => chunkDb remove key }
+    indices.keys.collect { case key @ DbKey(ds, _, _) if ds == projection.dataset => indices remove key }
+    filters.keys.collect { case key @ DbKey(ds, _, _) if ds == projection.dataset => filters remove key }
     Success
   }
 
   def dropDataset(dataset: DatasetRef): Future[Response] = {
     chunkDb.synchronized {
-      chunkDb.retain { case ((ds, _, _), _) => ds != dataset }
+      chunkDb.retain { case (DbKey(ds, _, _), _) => ds != dataset }
     }
     indices.synchronized {
-      indices.retain { case ((ds, _, _), _) => ds != dataset }
+      indices.retain { case (DbKey(ds, _, _), _) => ds != dataset }
     }
     filters.synchronized {
-      filters.retain { case ((ds, _, _), _) => ds != dataset }
+      filters.retain { case (DbKey(ds, _, _), _) => ds != dataset }
     }
     Future.successful(Success)
   }
@@ -61,7 +63,7 @@ extends ColumnStore with InMemoryColumnStoreScanner with StrictLogging {
   def appendSegment(projection: RichProjection,
                     segment: ChunkSetSegment,
                     version: Int): Future[Response] = Future {
-    val dbKey = (projection.datasetRef, segment.partition, version)
+    val dbKey = DbKey(projection.datasetRef, segment.partition, version)
 
     if (segment.chunkSets.isEmpty) { NotApplied }
     else {
@@ -113,22 +115,24 @@ case object InMemoryWholeSplit extends ScanSplit {
 }
 
 trait InMemoryColumnStoreScanner extends ColumnStoreScanner {
+  import InMemoryColumnStore._
   import Types._
+
   import collection.JavaConversions._
 
   type FilterTree = ConcurrentSkipListMap[ChunkID, BloomFilter[Long]]
   val EmptyFilterTree = new FilterTree
 
-  def chunkDb: HashMap[(DatasetRef, PartitionKey, Int), InMemoryChunkStore]
-  def indices: HashMap[(DatasetRef, PartitionKey, Int), PartitionChunkIndex]
-  def filters: HashMap[(DatasetRef, PartitionKey, Int), FilterTree]
+  def chunkDb: HashMap[DbKey, InMemoryChunkStore]
+  def indices: HashMap[DbKey, PartitionChunkIndex]
+  def filters: HashMap[DbKey, FilterTree]
 
   def readPartitionChunks(dataset: DatasetRef,
                           version: Int,
                           columns: Seq[Column],
                           partitionIndex: PartitionChunkIndex,
                           chunkMethod: ChunkScanMethod): Observable[ChunkPipeItem] = {
-    chunkDb.get((dataset, partitionIndex.binPartition, version)).map { chunkStore =>
+    chunkDb.get(DbKey(dataset, partitionIndex.binPartition, version)).map { chunkStore =>
       logger.debug(s"Reading chunks from columns $columns, ${partitionIndex.binPartition}, method $chunkMethod")
       val infosSkips = (chunkMethod match {
         case AllChunkScan             => partitionIndex.allChunks
@@ -153,7 +157,7 @@ trait InMemoryColumnStoreScanner extends ColumnStoreScanner {
                   partition: Types.PartitionKey,
                   chunkRange: (Types.ChunkID, Types.ChunkID))
                  (implicit ec: ExecutionContext): Future[Iterator[SegmentState.IDAndFilter]] = {
-    val filterTree = filters.getOrElse((dataset, partition, version), EmptyFilterTree)
+    val filterTree = filters.getOrElse(DbKey(dataset, partition, version), EmptyFilterTree)
     val it = filterTree.subMap(chunkRange._1, true, chunkRange._2, true).entrySet.iterator.map { entry =>
       (entry.getKey, entry.getValue)
     }
@@ -162,13 +166,13 @@ trait InMemoryColumnStoreScanner extends ColumnStoreScanner {
 
   def singlePartScan(projection: RichProjection, version: Int, partition: PartitionKey):
     Iterator[PartitionChunkIndex] = {
-    indices.get((projection.datasetRef, partition, version)).toIterator
+    indices.get(DbKey(projection.datasetRef, partition, version)).toIterator
   }
 
   def multiPartScan(projection: RichProjection, version: Int, partitions: Seq[PartitionKey]):
     Iterator[PartitionChunkIndex] = {
     partitions.flatMap { partition =>
-      indices.get((projection.datasetRef, partition, version)).toSeq
+      indices.get(DbKey(projection.datasetRef, partition, version)).toSeq
     }.toIterator
   }
 
@@ -176,10 +180,10 @@ trait InMemoryColumnStoreScanner extends ColumnStoreScanner {
                        version: Int,
                        split: ScanSplit,
                        filterFunc: PartitionKey => Boolean): Iterator[PartitionChunkIndex] = {
-    val partitions = indices.keysIterator.collect { case (ds, partition, ver) if
+    val partitions = indices.keysIterator.collect { case DbKey(ds, partition, ver) if
       ds == projection.datasetRef && ver == version => partition }
     partitions.filter(filterFunc)
-              .map { partition => indices((projection.datasetRef, partition, version)) }
+              .map { partition => indices(DbKey(projection.datasetRef, partition, version)) }
   }
 
   def scanPartitions(projection: RichProjection,
