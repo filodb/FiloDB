@@ -12,15 +12,35 @@ import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.memstore.IngestRecord
 import filodb.core.metadata.RichProjection
 
-object Ingest {
+/**
+ * Unlike the RowSource, an IngestStream simply provides a stream of records, keeping things simple.
+ * It is the responsibility of subscribers (code in FiloDB coordinator, usually) to then perform ingestion
+ * and routing as necessary.  Reactive API allows for backpressure to be propagated back.
+ */
+trait IngestStream {
   /**
-   * Unlike the RowSource, an IngestStream simply provides a stream of records, keeping things simple.
-   * It is the responsibility of subscribers (code in FiloDB coordinator, usually) to then perform ingestion
-   * and routing as necessary.  Reactive API allows for backpressure to be propagated back.
+   * Should return the observable for the stream.  Ideally should be cached or be not expensive, should
+   * return the same stream every time.
    */
-  type IngestStream = Observable[Seq[IngestRecord]]
+  def get: Observable[Seq[IngestRecord]]
 
-  val emptyStream = Observable.empty[Seq[IngestRecord]]
+  /**
+   * NOTE: this does not cancel any subscriptions to the Observable.  That should be done prior to
+   * calling this, which is more for release of resources.
+   */
+  def teardown(): Unit
+}
+
+object IngestStream {
+  /**
+   * Wraps a simple observable into an IngestStream with no teardown behavior
+   */
+  def apply(stream: Observable[Seq[IngestRecord]]): IngestStream = new IngestStream {
+    val get = stream
+    def teardown(): Unit = {}
+  }
+
+  val empty = apply(Observable.empty[Seq[IngestRecord]])
 
   implicit class RichIngestStream(stream: IngestStream) extends StrictLogging {
     import Ack._
@@ -48,7 +68,7 @@ object Ingest {
         }
       }
 
-      stream.map { records =>
+      stream.get.map { records =>
               records.map { r => r.copy(partition = projection.partKey(r.partition),
                                         data = BinaryRecord(projection.binSchema, r.data)) }
             }.flatMap { records =>
@@ -61,23 +81,23 @@ object Ingest {
   }
 }
 
-import Ingest._
-
 /**
  * A zero-arg constructor class that knows how to create an IngestStream.
  */
 trait IngestStreamFactory {
   /**
-   * Returns an IngestStream that can be subscribed to
+   * Returns an IngestStream that can be subscribed to for a given shard.
+   * If a source does not support streams for n shards, it could support just one shard and require
+   * users to limit the number of shards.
    * @param config the configuration for the data source
    * @param projection
    */
-  def create(config: Config, projection: RichProjection): IngestStream
+  def create(config: Config, projection: RichProjection, shard: Int): IngestStream
 }
 
 /**
  * An IngestStreamFactory to use when you want to just push manually to a coord.
  */
 class NoOpStreamFactory extends IngestStreamFactory {
-  def create(config: Config, projection: RichProjection): IngestStream = emptyStream
+  def create(config: Config, projection: RichProjection, shard: Int): IngestStream = IngestStream.empty
 }

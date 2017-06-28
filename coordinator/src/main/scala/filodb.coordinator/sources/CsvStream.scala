@@ -7,7 +7,7 @@ import monix.reactive.Observable
 import net.ceedubs.ficus.Ficus._
 import org.velvia.filo.ArrayStringRowReader
 
-import filodb.coordinator.{Ingest, IngestStreamFactory}
+import filodb.coordinator.{IngestStream, IngestStreamFactory}
 import filodb.core.memstore.IngestRecord
 import filodb.core.metadata.{Dataset, RichProjection}
 
@@ -44,12 +44,14 @@ object CsvStream extends StrictLogging {
  * If the CSV has a header, you need to set header=true.  Since a projection is already required,
  * you need to separately parse the header another time to get the list of input columns first before
  * setting up the ingestion.
+ *
+ * NOTE: right now this only works with a single shard.
  */
 class CsvStreamFactory extends IngestStreamFactory {
   import CsvStream._
-  import collection.JavaConverters._
 
-  def create(config: Config, projection: RichProjection): Ingest.IngestStream = {
+  def create(config: Config, projection: RichProjection, shard: Int): IngestStream = {
+    require(shard == 0)
     val settings = CsvStreamSettings(config.getBoolean("header"),
                      config.as[Option[Int]]("batch-size").getOrElse(BatchSize),
                      config.as[Option[String]]("separator-char").getOrElse(",").charAt(0))
@@ -58,15 +60,28 @@ class CsvStreamFactory extends IngestStreamFactory {
                  }.getOrElse {
                    new java.io.InputStreamReader(getClass.getResourceAsStream(config.getString("resource")))
                  }
-    val csvReader = new CSVReader(reader, settings.separatorChar)
+    new CsvStream(reader, projection, settings)
+  }
+}
 
-    if (settings.header) csvReader.readNext
+private[filodb] class CsvStream(reader: java.io.Reader,
+                                projection: RichProjection,
+                                settings: CsvStream.CsvStreamSettings) extends IngestStream {
+  import collection.JavaConverters._
 
-    val batchIterator = csvReader.iterator.asScala
-                          .zipWithIndex
-                          .map { case (tokens, idx) =>
-                            IngestRecord(projection, ArrayStringRowReader(tokens), idx)
-                          }.grouped(settings.batchSize)
-    Observable.fromIterator(batchIterator)
+  val csvReader = new CSVReader(reader, settings.separatorChar)
+
+  if (settings.header) csvReader.readNext
+
+  val batchIterator = csvReader.iterator.asScala
+                        .zipWithIndex
+                        .map { case (tokens, idx) =>
+                          IngestRecord(projection, ArrayStringRowReader(tokens), idx)
+                        }.grouped(settings.batchSize)
+  val get = Observable.fromIterator(batchIterator)
+
+  def teardown(): Unit = {
+    reader.close()
+    csvReader.close()
   }
 }
