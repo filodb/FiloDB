@@ -17,12 +17,21 @@ import filodb.core.metadata.{Column, Projection, RichProjection, InvalidFunction
 import filodb.core.query._
 import filodb.core.query.ChunkSetReader._
 
-sealed trait PartitionScanMethod
-final case class SinglePartitionScan(partition: PartitionKey) extends PartitionScanMethod
-final case class MultiPartitionScan(partitions: Seq[PartitionKey]) extends PartitionScanMethod
+sealed trait PartitionScanMethod {
+  def shard: Int
+}
+
+final case class SinglePartitionScan(partition: PartitionKey, shard: Int = 0) extends PartitionScanMethod
+final case class MultiPartitionScan(partitions: Seq[PartitionKey],
+                                    shard: Int = 0) extends PartitionScanMethod
 // NOTE: One ColumnFilter per column please.
 final case class FilteredPartitionScan(split: ScanSplit,
-                                       filters: Seq[ColumnFilter] = Nil) extends PartitionScanMethod
+                                       filters: Seq[ColumnFilter] = Nil) extends PartitionScanMethod {
+  def shard: Int = split match {
+    case ShardSplit(shard) => shard
+    case other: ScanSplit  => ???
+  }
+}
 
 sealed trait ChunkScanMethod
 case object AllChunkScan extends ChunkScanMethod
@@ -50,6 +59,10 @@ final case class QuerySpec(aggregateFunc: AggregationFunction,
 trait ScanSplit {
   // Should return a set of hostnames or IP addresses describing the preferred hosts for that scan split
   def hostnames: Set[String]
+}
+
+final case class ShardSplit(shard: Int) extends ScanSplit {
+  def hostnames: Set[String] = Set.empty
 }
 
 /**

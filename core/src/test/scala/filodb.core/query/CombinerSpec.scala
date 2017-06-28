@@ -22,14 +22,13 @@ class CombinerSpec extends FunSpec with Matchers with BeforeAndAfter with ScalaF
     memStore.reset()
   }
 
-  val split = memStore.getScanSplits(projection1.datasetRef, 1).head
-
   describe("Simple and ListCombiners") {
     it("should use ListCombiner for base functions which don't combine eg Last") {
-      memStore.setup(projection1)
+      memStore.setup(projection1, 0)
       val data = records(linearMultiSeries()).take(30)   // 3 records per series x 10 series
-      memStore.ingest(projection1.datasetRef, data)
+      memStore.ingest(projection1.datasetRef, 0, data)
 
+      val split = memStore.getScanSplits(projection1.datasetRef, 1).head
       val query = QuerySpec(AggregationFunction.Last, Seq("timestamp", "min"),
                                 CombinerFunction.Simple, Nil)
       val agg1 = memStore.aggregate(projection1, 0, query, FilteredPartitionScan(split))
@@ -46,7 +45,8 @@ class CombinerSpec extends FunSpec with Matchers with BeforeAndAfter with ScalaF
     val baseQuery = QuerySpec(AggregationFunction.Sum, Seq("min"),
                               CombinerFunction.Histogram, Seq("2000"))
     it("should invalidate queries with invalid Combiner/histo args") {
-      memStore.setup(projection1)
+      memStore.setup(projection1, 0)
+      val split = memStore.getScanSplits(projection1.datasetRef, 1).head
 
       // No args
       val query1 = baseQuery.copy(combinerArgs = Nil)
@@ -71,6 +71,8 @@ class CombinerSpec extends FunSpec with Matchers with BeforeAndAfter with ScalaF
     }
 
     it("should invalidate histo queries where aggregation is not single number") {
+      memStore.setup(projection1, 0)
+      val split = memStore.getScanSplits(projection1.datasetRef, 1).head
       val query = baseQuery.copy(aggregateFunc = AggregationFunction.TimeGroupMin,
                                  aggregateArgs = Seq("timestamp", "min", "110000", "130000", "2"))
       val agg1 = memStore.aggregate(projection1, 0, query, FilteredPartitionScan(split))
@@ -78,10 +80,11 @@ class CombinerSpec extends FunSpec with Matchers with BeforeAndAfter with ScalaF
     }
 
     it("should compute histogram correctly") {
-      memStore.setup(projection1)
+      memStore.setup(projection1, 0)
       val data = records(linearMultiSeries()).take(30)   // 3 records per series x 10 series
-      memStore.ingest(projection1.datasetRef, data)
+      memStore.ingest(projection1.datasetRef, 0, data)
 
+      val split = memStore.getScanSplits(projection1.datasetRef, 1).head
       val agg = memStore.aggregate(projection1, 0, baseQuery, FilteredPartitionScan(split))
                   .get.runAsync.futureValue
       agg shouldBe a[HistogramAggregate]

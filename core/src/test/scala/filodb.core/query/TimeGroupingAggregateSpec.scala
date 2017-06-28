@@ -22,9 +22,9 @@ class TimeGroupingAggregateSpec extends FunSpec with Matchers with BeforeAndAfte
   }
 
   it("should filter and aggregate across time buckets and series") {
-    memStore.setup(projection1)
+    memStore.setup(projection1, 0)
     val data = records(linearMultiSeries()).take(30)   // 3 records per series x 10 series
-    memStore.ingest(projection1.datasetRef, data)
+    memStore.ingest(projection1.datasetRef, 0, data)
 
     val split = memStore.getScanSplits(projection1.datasetRef, 1).head
     val query = QuerySpec(AggregationFunction.TimeGroupMin,

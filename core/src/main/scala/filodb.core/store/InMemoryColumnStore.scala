@@ -183,8 +183,8 @@ trait InMemoryColumnStoreScanner extends ColumnStoreScanner {
                      version: Int,
                      partMethod: PartitionScanMethod): Observable[PartitionChunkIndex] = {
     val indexIt = partMethod match {
-      case SinglePartitionScan(partition) => singlePartScan(projection, version, partition)
-      case MultiPartitionScan(partitions) => multiPartScan(projection, version, partitions)
+      case SinglePartitionScan(partition, _) => singlePartScan(projection, version, partition)
+      case MultiPartitionScan(partitions, _) => multiPartScan(projection, version, partitions)
       case FilteredPartitionScan(split, filters) =>
         filteredPartScan(projection, version, split, filters)
     }
