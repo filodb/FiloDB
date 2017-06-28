@@ -1,6 +1,6 @@
 package filodb.coordinator
 
-import akka.actor.ActorRef
+import akka.actor.{Address, ActorRef}
 import scala.collection.mutable.HashMap
 import scala.util.{Try, Success, Failure}
 
@@ -78,6 +78,15 @@ class ShardMapper(val numShards: Int) extends Serializable {
     val shardKeyMask = ~partHashMask
     toShard((partitionHash & partHashMask) | (shardHash & shardKeyMask), numShards)
   }
+
+  /**
+   * Returns all shards that match a given address - typically used to compare to cluster.selfAddress
+   * for that node's own shards
+   */
+  def shardsForAddress(addr: Address): Seq[Int] =
+    shardMap.toSeq.zipWithIndex.collect {
+      case (ref, shardNum) if ref.path.address == addr => shardNum
+    }
 
   /**
    * Returns all the shards that have not yet been assigned

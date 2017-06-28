@@ -115,6 +115,9 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     val data2 = records(withMap(linearMultiSeries(200000L, 6), 6)).take(20)   // 5 series only
     memStore.ingest(projection2.datasetRef, 1, data2)
 
+    memStore.activeShards(projection1.datasetRef) should equal (Seq(0, 1))
+    memStore.numRowsIngested(projection1.datasetRef, 0) should equal (20L)
+
     val splits = memStore.getScanSplits(projection2.datasetRef, 1)
     splits should have length (2)
 
@@ -135,6 +138,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
   it("should ingestStream into multiple shards") {
     memStore.setup(projection1, 0)
     memStore.setup(projection1, 1)
+    memStore.activeShards(projection1.datasetRef) should equal (Seq(0, 1))
 
     val stream = Observable.fromIterable(records(linearMultiSeries()).take(100).grouped(5).toSeq)
     memStore.ingestStream(projection1.datasetRef, 0, stream)(ex => throw ex)

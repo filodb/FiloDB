@@ -54,7 +54,7 @@ class SerializationSpec extends FunSpec with Matchers {
       record.copy(partition = projection.partKey(record.partition),
                   data = BinaryRecord(projection.binSchema, record.data))
     }
-    val cmd = IngestRows(datasetRef, 0, records)
+    val cmd = IngestRows(datasetRef, 0, 1, records)
     fromBinaryIngestRows(cmd.toBytes()) should equal (cmd)
   }
 }

@@ -82,6 +82,7 @@ object IngestionCommands {
    */
   final case class IngestRows(dataset: DatasetRef,
                               version: Int,
+                              shard: Int,
                               rows: Seq[IngestRecord]) extends NodeCommand
 
   final case class Ack(seqNo: Long) extends NodeResponse

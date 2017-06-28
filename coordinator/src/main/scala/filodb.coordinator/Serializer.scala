@@ -38,6 +38,7 @@ object Serializer extends StrictLogging {
     buf.writeMediumString(data.dataset.dataset)
     buf.writeMediumString(data.dataset.database.getOrElse(""))
     buf.writeInt(data.version)
+    buf.writeInt(data.shard)
     buf.writeInt(data.rows.length)
     for { record <- data.rows } {
       record match {
@@ -57,6 +58,7 @@ object Serializer extends StrictLogging {
     val dataset = scanner.readMediumString
     val db = Option(scanner.readMediumString).filter(_.length > 0)
     val version = scanner.readInt
+    val shard = scanner.readInt
     val numRows = scanner.readInt
     val rows = new collection.mutable.ArrayBuffer[IngestRecord]()
     if (numRows > 0) {
@@ -69,7 +71,7 @@ object Serializer extends StrictLogging {
                              scanner.readLong)
       }
     }
-    IngestionCommands.IngestRows(DatasetRef(dataset, db), version, rows)
+    IngestionCommands.IngestRows(DatasetRef(dataset, db), version, shard, rows)
   }
 
   private val partSchemaMap = new java.util.concurrent.ConcurrentHashMap[Int, RecordSchema]

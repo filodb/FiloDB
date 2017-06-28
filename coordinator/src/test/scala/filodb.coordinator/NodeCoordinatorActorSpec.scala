@@ -52,11 +52,15 @@ with CoordinatorSetup with ScalaFutures {
   var coordActor: ActorRef = _
   var probe: TestProbe = _
 
+  import NodeClusterActor.ShardMapUpdate
+  val shardMap = new ShardMapper(1)
+
   before {
     metaStore.clearAllData().futureValue
     memStore.reset()
     coordActor = system.actorOf(NodeCoordinatorActor.props(metaStore, memStore, columnStore, config))
     probe = TestProbe()
+    shardMap.registerNode(Seq(0), coordActor)
   }
 
   after {
@@ -103,10 +107,6 @@ with CoordinatorSetup with ScalaFutures {
     }
   }
 
-  import NodeClusterActor.ShardMapUpdate
-  val shardMap = new ShardMapper(1)
-  shardMap.registerNode(Seq(0), coordActor)
-
   describe("QueryActor commands and responses") {
     import MachineMetricsData._
     import QueryCommands._
@@ -133,7 +133,7 @@ with CoordinatorSetup with ScalaFutures {
 
     it("should return raw chunks with a RawQuery after ingesting rows") {
       val ref = setupTimeSeries()
-      probe.send(coordActor, IngestRows(ref, 0, records(multiSeriesData()).take(20)))
+      probe.send(coordActor, IngestRows(ref, 0, 0, records(multiSeriesData()).take(20)))
       probe.expectMsg(Ack(19L))
 
       // Query existing partition: Series 1
@@ -201,7 +201,7 @@ with CoordinatorSetup with ScalaFutures {
 
     it("should return results in AggregateResponse if valid AggregateQuery") {
       val ref = setupTimeSeries()
-      probe.send(coordActor, IngestRows(ref, 0, records(linearMultiSeries()).take(30)))
+      probe.send(coordActor, IngestRows(ref, 0, 0, records(linearMultiSeries()).take(30)))
       probe.expectMsg(Ack(29L))
 
       val args = QueryArgs("time_group_avg", Seq("timestamp", "min", "110000", "130000", "2"))
@@ -233,7 +233,7 @@ with CoordinatorSetup with ScalaFutures {
 
     it("should aggregate using histogram combiner") {
       val ref = setupTimeSeries()
-      probe.send(coordActor, IngestRows(ref, 0, records(linearMultiSeries()).take(30)))
+      probe.send(coordActor, IngestRows(ref, 0, 0, records(linearMultiSeries()).take(30)))
       probe.expectMsg(Ack(29L))
 
       val args = QueryArgs("sum", Seq("min"), "histogram", Seq("2000"))
@@ -248,7 +248,7 @@ with CoordinatorSetup with ScalaFutures {
 
     it("should query partitions in AggregateQuery") {
       val ref = setupTimeSeries()
-      probe.send(coordActor, IngestRows(ref, 0, records(linearMultiSeries()).take(30)))
+      probe.send(coordActor, IngestRows(ref, 0, 0, records(linearMultiSeries()).take(30)))
       probe.expectMsg(Ack(29L))
 
       val args = QueryArgs("partition_keys", Seq("foo"))  // Doesn't matter what the column name is
@@ -263,7 +263,7 @@ with CoordinatorSetup with ScalaFutures {
 
     it("should respond to GetIndexNames and GetIndexValues") {
       val ref = setupTimeSeries()
-      probe.send(coordActor, IngestRows(ref, 0, records(linearMultiSeries()).take(30)))
+      probe.send(coordActor, IngestRows(ref, 0, 0, records(linearMultiSeries()).take(30)))
       probe.expectMsg(Ack(29L))
 
       probe.send(coordActor, GetIndexNames(ref))
@@ -282,7 +282,7 @@ with CoordinatorSetup with ScalaFutures {
     probe.send(coordActor, ShardMapUpdate(ref, shardMap))
     probe.send(coordActor, DatasetSetup(projection6.dataset, schema.map(_.toString), 0))
 
-    probe.send(coordActor, IngestRows(ref, 0, records(projection6)))
+    probe.send(coordActor, IngestRows(ref, 0, 0, records(projection6)))
     probe.expectMsg(Ack(98L))
 
     // Flush not needed for MemStores.....
@@ -309,13 +309,13 @@ with CoordinatorSetup with ScalaFutures {
     probe.send(coordActor, DatasetSetup(projection1.dataset, schema.map(_.toString), 0))
 
     EventFilter[NumberFormatException](occurrences = 1) intercept {
-      probe.send(coordActor, IngestRows(ref, 0, records(projection1, readers ++ Seq(badLine))))
+      probe.send(coordActor, IngestRows(ref, 0, 0, records(projection1, readers ++ Seq(badLine))))
       // This should trigger an error, and datasetCoordinatorActor will stop, and no ack will be forthcoming.
       probe.expectNoMsg
     }
 
     // Now, if we send more rows, we will get UnknownDataset
-    probe.send(coordActor, IngestRows(ref, 0, records(projection1)))
+    probe.send(coordActor, IngestRows(ref, 0, 0, records(projection1)))
     probe.expectMsg(UnknownDataset)
   }
 
@@ -362,7 +362,7 @@ with CoordinatorSetup with ScalaFutures {
     probe.send(coordActor, CheckCanIngest(ref, 0))
     probe.expectMsg(CanIngest(true))
 
-    probe.send(coordActor, IngestRows(ref, 0, records(projection4)))
+    probe.send(coordActor, IngestRows(ref, 0, 0, records(projection4)))
     probe.expectMsg(Ack(98L))
 
     Thread sleep 2000
@@ -379,7 +379,7 @@ with CoordinatorSetup with ScalaFutures {
     probe.send(coordActor, CheckCanIngest(ref, 0))
     probe.expectMsg(CanIngest(true))
 
-    probe.send(coordActor, IngestRows(ref, 0, records(proj)))
+    probe.send(coordActor, IngestRows(ref, 0, 0, records(proj)))
     probe.expectMsg(Ack(98L))
 
     probe.send(coordActor, GetIngestionStats(ref, 0))
@@ -391,12 +391,12 @@ with CoordinatorSetup with ScalaFutures {
     // val readers2 = gdeltLines.map { line => ArrayStringRowReader(line.split(",")) }
 
     // EventFilter[NumberFormatException](occurrences = 1) intercept {
-    //   probe.send(coordActor, IngestRows(ref, 0, readers2))
+    //   probe.send(coordActor, IngestRows(ref, 0, 0, readers2))
     //   // This should trigger an error, and datasetCoordinatorActor will stop, and no ack will be forthcoming.
     //   probe.expectNoMsg
     // }
     // Now, if we send more rows, we will get UnknownDataset
-    // probe.send(coordActor, IngestRows(ref, 0, readers))
+    // probe.send(coordActor, IngestRows(ref, 0, 0, readers))
     // probe.expectMsg(UnknownDataset)
   }
 }

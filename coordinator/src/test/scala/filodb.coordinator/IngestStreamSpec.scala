@@ -132,7 +132,7 @@ with CoordinatorSetupWithFactory with ScalaFutures {
     expectMsg(MemStoreCoordActor.Status(99, None))
   }
 
-  import Ingest._
+  import IngestStream._
   it("should ingest all rows using routeToShards and ProtocolActor") {
     // Empty ingestion source - we're going to pump in records ourselves
     val msg = SetupDataset(projection6.datasetRef,
@@ -148,7 +148,7 @@ with CoordinatorSetupWithFactory with ScalaFutures {
                                            batch-size = 10
                                            resource = "/GDELT-sample-test-200.csv"
                                            """)
-    val stream = (new CsvStreamFactory).create(config, projection6)
+    val stream = (new CsvStreamFactory).create(config, projection6, 0)
     val protocolActor = system.actorOf(IngestProtocol.props(clusterActor, projection6.datasetRef))
     stream.routeToShards(new ShardMapper(1), projection6, protocolActor)
 

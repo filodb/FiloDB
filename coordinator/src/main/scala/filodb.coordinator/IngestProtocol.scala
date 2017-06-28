@@ -93,7 +93,7 @@ class IngestProtocol(clusterActor: ActorRef,
       val nodeRef = mapper.coordForShard(shardNum)
       // We forward it so that the one who sent us MoreRows will get back the Ack message directly
       // which also means we don't have to deal with responses
-      nodeRef.forward(IngestionCommands.IngestRows(ref, version, records))
+      nodeRef.forward(IngestionCommands.IngestRows(ref, version, shardNum, records))
       rowsIngested.increment(records.length)
       shardHist.record(shardNum)
   }) orElse mapUpdate orElse errorCatcher

@@ -149,9 +149,13 @@ class QueryActor(colStore: BaseColumnStore,
     case q: RawQuery       => handleRawQuery(q)
     case q: AggregateQuery => handleAggQuery(q)
     case GetIndexNames(ref, limit) if memStore.isDefined =>
-      sender ! memStore.get.indexNames(ref).take(limit).toBuffer
+      sender ! memStore.get.indexNames(ref).take(limit).map(_._1).toBuffer
     case GetIndexValues(ref, index, limit) if memStore.isDefined =>
-      sender ! memStore.get.indexValues(ref, index).take(limit).map(_.toString).toBuffer
+      // For now, just return values from the first shard
+      memStore.foreach { store =>
+        val shard = store.activeShards(ref).head
+        sender ! store.indexValues(ref, shard, index).take(limit).map(_.toString).toBuffer
+      }
     case NodeClusterActor.ShardMapUpdate(ref, newMap) =>
       shardMap = newMap
   }

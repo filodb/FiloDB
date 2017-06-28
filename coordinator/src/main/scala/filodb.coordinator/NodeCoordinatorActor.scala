@@ -127,7 +127,7 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
     Serializer.putPartitionSchema(RecordSchema(proj.partitionColumns))
     Serializer.putDataSchema(RecordSchema(proj.nonPartitionColumns))
 
-    val props = MemStoreCoordActor.props(proj, memStore, ds.source)(ingestScheduler)
+    val props = MemStoreCoordActor.props(proj, memStore, clusterSelfAddr, ds.source)(ingestScheduler)
     val ingestRef = context.actorOf(props, s"ms-coord-${proj.dataset.name}-${ds.version}")
     dsCoordinators((ref, ds.version)) = ingestRef
     val shardMapMsg = NodeClusterActor.ShardMapUpdate(ref, shardMaps(ref))
@@ -190,8 +190,8 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
       if (!(dsCoordinators.contains((ref, version)))) { setupDataset(sender, ds) }
       else { logger.warn(s"Getting redundant DatasetSetup for dataset $dataset") }
 
-    case IngestRows(dataset, version, rows) =>
-      withDsCoord(sender, dataset, version) { _ ! MemStoreCoordActor.IngestRows(sender, rows) }
+    case IngestRows(dataset, version, shard, rows) =>
+      withDsCoord(sender, dataset, version) { _ ! MemStoreCoordActor.IngestRows(sender, shard, rows) }
 
     case flushCmd @ Flush(dataset, version) =>
       withDsCoord(sender, dataset, version) { _ ! DatasetCoordinatorActor.StartFlush(Some(sender)) }

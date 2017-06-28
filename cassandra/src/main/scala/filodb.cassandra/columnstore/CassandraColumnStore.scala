@@ -303,10 +303,10 @@ trait CassandraColumnStoreScanner extends ColumnStoreScanner with StrictLogging 
     val indexTable = getOrCreateIndexTable(projection.datasetRef)
     logger.debug(s"Scanning partitions for ${projection.datasetRef} with method $partMethod...")
     val (filters, indexRecords) = partMethod match {
-      case SinglePartitionScan(partition) =>
+      case SinglePartitionScan(partition, _) =>
         (Nil, indexTable.getIndices(partition, version))
 
-      case MultiPartitionScan(partitions) =>
+      case MultiPartitionScan(partitions, _) =>
         (Nil, multiPartScan(projection, partitions, indexTable, version))
 
       case FilteredPartitionScan(CassandraTokenRangeSplit(tokens, _), filters) =>

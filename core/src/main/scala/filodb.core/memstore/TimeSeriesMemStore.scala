@@ -93,8 +93,14 @@ extends MemStore with ColumnStoreAggregator with StrictLogging {
     case p: TimeSeriesPartition => p
   }
 
+  def numRowsIngested(dataset: DatasetRef, shard: Int): Long =
+    getShard(dataset, shard).map(_.numRowsIngested).getOrElse(-1L)
+
+  def activeShards(dataset: DatasetRef): Seq[Int] =
+    datasets.get(dataset).map(_.keySet.asScala.map(_.toInt).toSeq).getOrElse(Nil)
+
   def getScanSplits(dataset: DatasetRef, splitsPerNode: Int = 1): Seq[ScanSplit] =
-    datasets.get(dataset).map(_.keySet.asScala.map(s => ShardSplit(s.toInt)).toSeq).getOrElse(Nil)
+    activeShards(dataset).map(ShardSplit)
 
   def reset(): Unit = {
     datasets.clear()
@@ -123,6 +129,7 @@ class TimeSeriesShard(projection: RichProjection, config: Config) extends Strict
   private final val partitions = new ArrayBuffer[TimeSeriesPartition]
   private final val keyMap = new HashMap[SchemaRowReader, TimeSeriesPartition]
   private final val keyIndex = new PartitionKeyIndex(projection)
+  private final var ingested = 0L
 
   private val chunksToKeep = config.getInt("memstore.chunks-to-keep")
   private val maxChunksSize = config.getInt("memstore.max-chunks-size")
@@ -137,17 +144,20 @@ class TimeSeriesShard(projection: RichProjection, config: Config) extends Strict
   }
 
   def ingest(rows: Seq[IngestRecord]): Unit = {
-    rowsIngested.increment(rows.length)
     // now go through each row, find the partition and call partition ingest
     rows.foreach { case IngestRecord(partKey, data, offset) =>
       val partition = keyMap.getOrElse(partKey, addPartition(partKey))
       partition.ingest(data, offset)
     }
+    rowsIngested.increment(rows.length)
+    ingested += rows.length
   }
 
   def indexNames: Iterator[String] = keyIndex.indexNames
 
   def indexValues(indexName: String): Iterator[ZeroCopyUTF8String] = keyIndex.indexValues(indexName)
+
+  def numRowsIngested: Long = ingested
 
   def numActivePartitions: Int = keyMap.size
 

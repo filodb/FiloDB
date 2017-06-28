@@ -90,6 +90,19 @@ trait MemStore extends BaseColumnStore {
    * @return -1 if dataset not found, otherwise number of active partitions
    */
   def numPartitions(dataset: DatasetRef, shard: Int): Int
+
+  /**
+   * Number of total rows ingested for that shard
+   */
+  def numRowsIngested(dataset: DatasetRef, shard: Int): Long
+
+  def numRowsIngested(dataset: DatasetRef): Long =
+    activeShards(dataset).map(s => numRowsIngested(dataset, s)).sum
+
+  /**
+   * The active shards for a given dataset
+   */
+  def activeShards(dataset: DatasetRef): Seq[Int]
 }
 
 import Column.ColumnType._
