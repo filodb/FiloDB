@@ -1,6 +1,7 @@
 package filodb.core.query
 
 import com.typesafe.config.ConfigFactory
+import monix.reactive.Observable
 import org.velvia.filo.BinaryVector
 
 import org.scalatest.{FunSpec, Matchers, BeforeAndAfter}
@@ -91,6 +92,21 @@ class CombinerSpec extends FunSpec with Matchers with BeforeAndAfter with ScalaF
       val histAgg = agg.asInstanceOf[HistogramAggregate]
       histAgg.counts.size should equal (10)
       histAgg.counts should equal (Array(0, 0, 0, 0, 4, 6, 0, 0, 0, 0))
+    }
+
+    it("should be able to combine two HistogramAggregates") {
+      val buckets = HistogramAggregate.geometricBuckets(5000, 8)
+      val combiner1 = new HistogramCombiner(buckets)
+      val combiner2 = new HistogramCombiner(buckets)
+      val values = Seq(1.5, 50.0, 2000.0, 5.6, 7.1, 99.9, 555.5, 128, 256, 71, 890)
+                     .map(DoubleAggregate)
+      val hist1 = combiner1.fold(Observable.fromIterable(values take 5)).runAsync.futureValue
+      val hist2 = combiner2.fold(Observable.fromIterable(values drop 5)).runAsync.futureValue
+      hist1.counts should equal (Array(1, 2, 0, 1, 0, 0, 0, 1))
+      hist2.counts should equal (Array(0, 0, 0, 0, 3, 2, 1, 0))
+
+      val finalHist = combiner1.combine(hist1, hist2)
+      finalHist.counts should equal (Array(1, 2, 0, 1, 3, 2, 1, 1))
     }
   }
 }

@@ -26,6 +26,7 @@ class ShardMapperSpec extends ActorTest(ShardMapperSpec.getNewSystem) {
     mapper1.registerNode(Seq(0, 10, 20), ref1).isSuccess should be (true)
     mapper1.allNodes should equal (Set(ref1))
     mapper1.numAssignedShards should equal (3)
+    mapper1.assignedShards should equal (Seq(0, 10, 20))
 
     mapper1.registerNode(Seq(15, 20), ref2).isSuccess should be (false)
   }
@@ -36,8 +37,7 @@ class ShardMapperSpec extends ActorTest(ShardMapperSpec.getNewSystem) {
     mapper1.registerNode(Seq(41, 43, 45), ref2).isSuccess should be (true)
     mapper1.numAssignedShards should equal (7)
 
-    val map1 = Map(ref1 -> Seq(40, 42), ref2 -> Seq(41, 43))
-    mapper1.shardKeyToNodes("banana".hashCode, 4) should equal (map1)
+    mapper1.shardKeyToShards("banana".hashCode, 4) should equal (Seq(40, 41, 42, 43))
   }
 
   it("can return shards and nodes given a partition key") {

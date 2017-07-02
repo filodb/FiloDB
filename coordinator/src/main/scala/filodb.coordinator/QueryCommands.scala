@@ -66,8 +66,15 @@ object QueryCommands {
                              combinerName: String = CombinerFunction.default,
                              combinerArgs: Seq[String] = Nil)
 
+  final case class QueryOptions(shardKeyHash: Option[Int] = None,
+                                shardKeyNBits: Int = 4,
+                                parallelism: Int = 16,
+                                queryTimeoutSecs: Int = 30)
+
   /**
-   * Executes a query which performs aggregation and returns the result as one message to the client
+   * Executes a query which performs aggregation and returns the result as one message to the client.
+   * Depends on queryOptions, the query will fan out to multiple nodes and shards as needed to gather
+   * results.
    * @param dataset the dataset (and possibly database) to query
    * @param version the version of the dataset to query.  Ignored for MemStores.
    * @param query   the QueryArgs specifying the name of the query function and the arguments as strings
@@ -76,13 +83,15 @@ object QueryCommands {
    *                aggregates already control and take care of this, but others don't.  If the function
    *                does not specify this and this is also left unspecified then this defaults to
    *                AllPartitionData.
+   * @param queryOptions options to control routing of query
    * @return AggregateResponse, or BadQuery, BadArgument, WrongNumberOfArgs, UndefinedColumns
    */
   final case class AggregateQuery(dataset: DatasetRef,
                                   version: Int,
                                   query: QueryArgs,
                                   partitionQuery: PartitionQuery,
-                                  dataQuery: Option[DataQuery] = None) extends QueryCommand
+                                  dataQuery: Option[DataQuery] = None,
+                                  queryOptions: QueryOptions = QueryOptions()) extends QueryCommand
 
   // Error responses from query
   final case class BadArgument(msg: String) extends ErrorResponse with QueryResponse

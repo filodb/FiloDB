@@ -70,13 +70,12 @@ abstract class IngestStreamClusterSpec extends MultiNodeSpec(IngestStreamCluster
   it("should start actors, join cluster, setup ingestion, and wait for all nodes to enter barrier") {
     // Start NodeCoordinator on all nodes so the ClusterActor will register them
     coordinatorActor
-    clusterActor = singletonClusterActor("worker")
-
-    enterBarrier("cluster-actor-started")
-
     cluster join address1
     awaitCond(cluster.state.members.size == 2)
     enterBarrier("both-nodes-joined-cluster")
+
+    clusterActor = singletonClusterActor("worker")
+    enterBarrier("cluster-actor-started")
 
     runOn(first) {
       // Empty ingestion source - we're going to pump in records ourselves

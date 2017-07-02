@@ -60,7 +60,8 @@ with CoordinatorSetup with ScalaFutures {
     memStore.reset()
     coordActor = system.actorOf(NodeCoordinatorActor.props(metaStore, memStore, columnStore, config))
     probe = TestProbe()
-    shardMap.registerNode(Seq(0), coordActor)
+    shardMap.clear()
+    shardMap.registerNode(Seq(0), coordActor).isSuccess should equal (true)
   }
 
   after {
@@ -111,11 +112,11 @@ with CoordinatorSetup with ScalaFutures {
     import MachineMetricsData._
     import QueryCommands._
 
-    def setupTimeSeries(): DatasetRef = {
+    def setupTimeSeries(map: ShardMapper = shardMap): DatasetRef = {
       probe.send(coordActor, CreateDataset(dataset1, schemaWithSeries))
       probe.expectMsg(DatasetCreated)
 
-      probe.send(coordActor, ShardMapUpdate(dataset1.projections.head.dataset, shardMap))
+      probe.send(coordActor, ShardMapUpdate(dataset1.projections.head.dataset, map))
 
       probe.send(coordActor, DatasetSetup(dataset1, schemaWithSeries.map(_.toString), 0))
       dataset1.projections.head.dataset
@@ -229,6 +230,27 @@ with CoordinatorSetup with ScalaFutures {
       val answer3 = probe.expectMsgClass(classOf[AggregateResponse[Double]])
       answer3.elementClass should equal (classOf[Double])
       answer3.elements.length should equal (2)
+    }
+
+    it("should aggregate from multiple shards") {
+      val map = new ShardMapper(2)
+      map.registerNode(Seq(0, 1), coordActor).isSuccess should equal (true)
+      val ref = setupTimeSeries(map)
+      probe.send(coordActor, IngestRows(ref, 0, 0, records(linearMultiSeries()).take(30)))
+      probe.expectMsg(Ack(29L))
+      probe.send(coordActor, IngestRows(ref, 0, 1, records(linearMultiSeries(130000L)).take(20)))
+      probe.expectMsg(Ack(19L))
+
+      // Should return results from both shards
+      // shard 1 - timestamps 110000 -< 130000;  shard 2 - timestamps 130000 <- 1400000
+      val args = QueryArgs("time_group_avg", Seq("timestamp", "min", "110000", "140000", "3"))
+      val series2 = (2 to 4).map(n => s"Series $n").toSet.asInstanceOf[Set[Any]]
+      val multiFilter = Seq(ColumnFilter("series", Filter.In(series2)))
+      val q2 = AggregateQuery(ref, 0, args, FilteredPartitionQuery(multiFilter))
+      probe.send(coordActor, q2)
+      val answer2 = probe.expectMsgClass(classOf[AggregateResponse[Double]])
+      answer2.elementClass should equal (classOf[Double])
+      answer2.elements should equal (Array(14.0, 24.0, 4.0))
     }
 
     it("should aggregate using histogram combiner") {

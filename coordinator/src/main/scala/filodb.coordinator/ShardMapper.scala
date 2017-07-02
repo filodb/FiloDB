@@ -54,14 +54,14 @@ class ShardMapper(val numShards: Int) extends Serializable {
    * Maps a shard key to a range of shards.  Used to limit shard distribution for queries when one knows
    * the shard key.
    * @param numShardBits the number of upper bits of the hash to use for the shard key
-   * @return a Map from the node coordinator -> a list of shards for that node
+   * @return a list or range of shards
    */
-  def shardKeyToNodes(shardHash: Int, numShardBits: Int): Map[ActorRef, Seq[Int]] = {
+  def shardKeyToShards(shardHash: Int, numShardBits: Int): Seq[Int] = {
     val partHashMask = (0xffffffffL >> numShardBits).toInt
     val shardKeyMask = ~partHashMask
     val startingShard = toShard(shardHash & shardKeyMask, numShards)
     val endingShard = toShard(shardHash & shardKeyMask | partHashMask, numShards)
-    (startingShard to endingShard).groupBy(shardMap)
+    (startingShard to endingShard)
   }
 
   /**
@@ -93,6 +93,9 @@ class ShardMapper(val numShards: Int) extends Serializable {
    */
   def unassignedShards: Seq[Int] =
     shardMap.toSeq.zipWithIndex.collect { case (ActorRef.noSender, shard) => shard }
+
+  def assignedShards: Seq[Int] =
+    shardMap.toSeq.zipWithIndex.collect { case (ref, shard) if ref != ActorRef.noSender => shard }
 
   def numAssignedShards: Int = numShards - unassignedShards.length
 
@@ -126,5 +129,9 @@ class ShardMapper(val numShards: Int) extends Serializable {
         shardMap(i) = ActorRef.noSender
         i
     }
+  }
+
+  def clear(): Unit = {
+    for { i <- 0 until numShards } { shardMap(i) = ActorRef.noSender }
   }
 }

@@ -210,6 +210,9 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
     case q: QueryCommand =>
       val originator = sender
       withQueryActor(originator, q.dataset) { _.tell(q, originator) }
+    case q: QueryActor.SingleShardQuery =>
+      val originator = sender
+      withQueryActor(originator, q.dataset) { _.tell(q, originator) }
   }
 
   def other: Receive = LoggingReceive {

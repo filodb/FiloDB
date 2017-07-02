@@ -53,6 +53,9 @@ class ArrayAggregate[@specialized(Int, Long, Double) R: ClassTag](size: Int,
 final case class ListAggregate[R: ClassTag](values: Seq[R] = Nil) extends Aggregate[R] {
   val result = values.toArray
   def add(other: ListAggregate[R]): ListAggregate[R] = ListAggregate(values ++ other.values)
+  def addWithMax(other: ListAggregate[R], maxSize: Int): ListAggregate[R] =
+    if (values.length >= maxSize) { this }
+    else { ListAggregate(values ++ other.values.take(maxSize - values.length)) }
 }
 
 /**
