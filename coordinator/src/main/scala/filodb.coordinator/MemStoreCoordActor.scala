@@ -6,6 +6,7 @@ import com.typesafe.config.Config
 import monix.execution.{Cancelable, Scheduler}
 import org.velvia.filo.RowReader
 import scala.collection.mutable.HashMap
+import scala.util.control.NonFatal
 
 import filodb.core.memstore._
 import filodb.core.metadata.RichProjection
@@ -26,7 +27,7 @@ object MemStoreCoordActor {
 
 /**
  * Simply a wrapper for ingesting new records into a MemStore
- * Also starts up an IngestStream streaming directly into MemStore.
+ * Also starts up an IngestionStream streaming directly into MemStore.
  *
  * ERROR HANDLING: currently any error in ingestion stream or memstore ingestion wll stop the ingestion
  *
@@ -37,24 +38,29 @@ private[filodb] final class MemStoreCoordActor(projection: RichProjection,
                                                selfAddress: Address,
                                                source: NodeClusterActor.IngestionSource)
                                               (implicit sched: Scheduler) extends BaseActor {
-  import MemStoreCoordActor._
+  import MemStoreCoordActor.{IngestRows, GetStatus, Status}
 
   private var lastErr: Option[Throwable] = None
   private final val streamSubscriptions = new HashMap[Int, Cancelable]
-  private final val streams = new HashMap[Int, IngestStream]
+  private final val streams = new HashMap[Int, IngestionStream]
 
   // TODO: add and remove per-shard ingestion sources?
   // For now just start it up one time and kill the actor if it fails
   val ctor = Class.forName(source.streamFactoryClass).getConstructors.head
-  val streamFactory = ctor.newInstance().asInstanceOf[IngestStreamFactory]
+  val streamFactory = ctor.newInstance().asInstanceOf[IngestionStreamFactory]
   logger.info(s"Using stream factory $streamFactory with config ${source.config}")
+
+  override def postStop(): Unit = {
+    logger.info(s"Stopping actor, cancelling all streams and calling teardown")
+    streamSubscriptions.keys.foreach(stopShardIngestion)
+  }
 
   private def setupShard(shard: Int): Unit = {
     try {
       memStore.setup(projection, shard)
     } catch {
       case ex @ DatasetAlreadySetup(ds) =>
-        logger.warn(s"Dataset $ds already setup, projections might differ!   $ex")
+        logger.warn(s"Dataset $ds already setup, projections might differ!", ex)
       case ShardAlreadySetup =>
         logger.warn(s"Shard already setup, projection might differ")
     }
@@ -65,7 +71,7 @@ private[filodb] final class MemStoreCoordActor(projection: RichProjection,
 
     // TODO(velvia): user-configurable error handling?  Should we stop?  Should we restart?
     val stream = ingestStream.get
-    stream.onErrorRecover { case ex: Exception => handleErr(ex) }
+    stream.onErrorRecover { case NonFatal(ex) => handleErr(ex) }
     streamSubscriptions(shard) = memStore.ingestStream(projection.datasetRef, shard, stream) {
                                    ex => handleErr(ex) }
     // TODO: send status update on stream completion
@@ -75,7 +81,7 @@ private[filodb] final class MemStoreCoordActor(projection: RichProjection,
     streamSubscriptions.remove(shard).foreach(_.cancel)
     streams.remove(shard).foreach(_.teardown())
     // TODO: release memory for shard in MemStore
-    logger.info(s"Stopped streaming ingestion for shard $shard and released resources...")
+    logger.info(s"Stopped streaming ingestion for shard $shard and released resources")
   }
 
   private def handleErr(ex: Throwable): Unit = {
@@ -94,7 +100,7 @@ private[filodb] final class MemStoreCoordActor(projection: RichProjection,
     case u @ NodeClusterActor.ShardMapUpdate(ref, newMap) =>
       // For now figure out what shards to add or remove from the new ShardMap.
       // TODO: in future, replace with status event subscription
-      logger.debug(s"Got new shardMap for ref $ref = $newMap")
+      logger.debug(s"Received new shardMap for ref $ref = $newMap")
       val ourShards = (newMap.shardsForAddress(selfAddress) ++
                        newMap.shardsForAddress(self.path.address)).distinct
       val additions = ourShards.toSet -- streams.keys

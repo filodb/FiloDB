@@ -7,7 +7,7 @@ import monix.reactive.Observable
 import net.ceedubs.ficus.Ficus._
 import org.velvia.filo.ArrayStringRowReader
 
-import filodb.coordinator.{IngestStream, IngestStreamFactory}
+import filodb.coordinator.{IngestionStream, IngestionStreamFactory}
 import filodb.core.memstore.IngestRecord
 import filodb.core.metadata.{Dataset, RichProjection}
 
@@ -47,10 +47,10 @@ object CsvStream extends StrictLogging {
  *
  * NOTE: right now this only works with a single shard.
  */
-class CsvStreamFactory extends IngestStreamFactory {
+class CsvStreamFactory extends IngestionStreamFactory {
   import CsvStream._
 
-  def create(config: Config, projection: RichProjection, shard: Int): IngestStream = {
+  def create(config: Config, projection: RichProjection, shard: Int): IngestionStream = {
     require(shard == 0)
     val settings = CsvStreamSettings(config.getBoolean("header"),
                      config.as[Option[Int]]("batch-size").getOrElse(BatchSize),
@@ -66,7 +66,7 @@ class CsvStreamFactory extends IngestStreamFactory {
 
 private[filodb] class CsvStream(reader: java.io.Reader,
                                 projection: RichProjection,
-                                settings: CsvStream.CsvStreamSettings) extends IngestStream {
+                                settings: CsvStream.CsvStreamSettings) extends IngestionStream {
   import collection.JavaConverters._
 
   val csvReader = new CSVReader(reader, settings.separatorChar)

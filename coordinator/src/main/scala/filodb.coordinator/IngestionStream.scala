@@ -13,11 +13,11 @@ import filodb.core.memstore.IngestRecord
 import filodb.core.metadata.RichProjection
 
 /**
- * Unlike the RowSource, an IngestStream simply provides a stream of records, keeping things simple.
+ * Unlike the RowSource, an IngestionStream simply provides a stream of records, keeping things simple.
  * It is the responsibility of subscribers (code in FiloDB coordinator, usually) to then perform ingestion
  * and routing as necessary.  Reactive API allows for backpressure to be propagated back.
  */
-trait IngestStream {
+trait IngestionStream {
   /**
    * Should return the observable for the stream.  Ideally should be cached or be not expensive, should
    * return the same stream every time.
@@ -31,18 +31,18 @@ trait IngestStream {
   def teardown(): Unit
 }
 
-object IngestStream {
+object IngestionStream {
   /**
-   * Wraps a simple observable into an IngestStream with no teardown behavior
+   * Wraps a simple observable into an IngestionStream with no teardown behavior
    */
-  def apply(stream: Observable[Seq[IngestRecord]]): IngestStream = new IngestStream {
+  def apply(stream: Observable[Seq[IngestRecord]]): IngestionStream = new IngestionStream {
     val get = stream
     def teardown(): Unit = {}
   }
 
   val empty = apply(Observable.empty[Seq[IngestRecord]])
 
-  implicit class RichIngestStream(stream: IngestStream) extends StrictLogging {
+  implicit class RichIngestionStream(stream: IngestionStream) extends StrictLogging {
     import Ack._
     /**
      * Converts incoming stream to BinaryRecords, groups by shard, and subscribes each one to a
@@ -82,22 +82,22 @@ object IngestStream {
 }
 
 /**
- * A zero-arg constructor class that knows how to create an IngestStream.
+ * A zero-arg constructor class that knows how to create an IngestionStream.
  */
-trait IngestStreamFactory {
+trait IngestionStreamFactory {
   /**
-   * Returns an IngestStream that can be subscribed to for a given shard.
+   * Returns an IngestionStream that can be subscribed to for a given shard.
    * If a source does not support streams for n shards, it could support just one shard and require
    * users to limit the number of shards.
    * @param config the configuration for the data source
    * @param projection
    */
-  def create(config: Config, projection: RichProjection, shard: Int): IngestStream
+  def create(config: Config, projection: RichProjection, shard: Int): IngestionStream
 }
 
 /**
- * An IngestStreamFactory to use when you want to just push manually to a coord.
+ * An IngestionStreamFactory to use when you want to just push manually to a coord.
  */
-class NoOpStreamFactory extends IngestStreamFactory {
-  def create(config: Config, projection: RichProjection, shard: Int): IngestStream = IngestStream.empty
+class NoOpStreamFactory extends IngestionStreamFactory {
+  def create(config: Config, projection: RichProjection, shard: Int): IngestionStream = IngestionStream.empty
 }

@@ -127,6 +127,7 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
     Serializer.putPartitionSchema(RecordSchema(proj.partitionColumns))
     Serializer.putDataSchema(RecordSchema(proj.nonPartitionColumns))
 
+    // TODO: get rid of clusterSelfAddr?  Do we really need it?
     val props = MemStoreCoordActor.props(proj, memStore, clusterSelfAddr, ds.source)(ingestScheduler)
     val ingestRef = context.actorOf(props, s"ms-coord-${proj.dataset.name}-${ds.version}")
     dsCoordinators((ref, ds.version)) = ingestRef

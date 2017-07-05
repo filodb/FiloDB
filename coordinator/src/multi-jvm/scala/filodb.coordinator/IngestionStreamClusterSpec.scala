@@ -16,7 +16,7 @@ import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Span, Seconds}
 import org.scalatest.{BeforeAndAfterAll, FunSpecLike, Matchers}
 
-object IngestStreamClusterSpecConfig extends MultiNodeConfig {
+object IngestionStreamClusterSpecConfig extends MultiNodeConfig {
   // register the named roles (nodes) of the test
   val first = role("first")
   val second = role("second")
@@ -31,8 +31,8 @@ object IngestStreamClusterSpecConfig extends MultiNodeConfig {
   commonConfig(globalConfig)
 }
 
-// A multi-JVM IngestStream spec to test out sending to multiple nodes
-abstract class IngestStreamClusterSpec extends MultiNodeSpec(IngestStreamClusterSpecConfig)
+// A multi-JVM IngestionStream spec to test out sending to multiple nodes
+abstract class IngestionStreamClusterSpec extends MultiNodeSpec(IngestionStreamClusterSpecConfig)
   with FunSpecLike with Matchers with BeforeAndAfterAll
   with CoordinatorSetupWithFactory
   with StrictLogging
@@ -42,7 +42,7 @@ abstract class IngestStreamClusterSpec extends MultiNodeSpec(IngestStreamCluster
   import DatasetCommands._
   import GdeltTestData._
   import NodeClusterActor._
-  import IngestStreamClusterSpecConfig._
+  import IngestionStreamClusterSpecConfig._
   import sources.{CsvStream, CsvStreamFactory}
 
   override def initialParticipants = roles.size
@@ -95,7 +95,7 @@ abstract class IngestStreamClusterSpec extends MultiNodeSpec(IngestStreamCluster
     rowIt.toSeq.length
   }
 
-  import IngestStream._
+  import IngestionStream._
 
   /**
    * Only one node is going to read the CSV, but we will get counts from both nodes
@@ -136,5 +136,5 @@ abstract class IngestStreamClusterSpec extends MultiNodeSpec(IngestStreamCluster
   }
 }
 
-class IngestStreamClusterSpecMultiJvmNode1 extends IngestStreamClusterSpec
-class IngestStreamClusterSpecMultiJvmNode2 extends IngestStreamClusterSpec
+class IngestionStreamClusterSpecMultiJvmNode1 extends IngestionStreamClusterSpec
+class IngestionStreamClusterSpecMultiJvmNode2 extends IngestionStreamClusterSpec

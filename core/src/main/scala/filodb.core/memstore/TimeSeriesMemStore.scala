@@ -29,6 +29,7 @@ extends MemStore with ColumnStoreAggregator with StrictLogging {
   type Shards = NonBlockingHashMapLong[TimeSeriesShard]
   private val datasets = new HashMap[DatasetRef, Shards]
 
+  // TODO: Change the API to return Unit Or ShardAlreadySetup, instead of throwing.  Make idempotent.
   def setup(projection: RichProjection, shard: Int): Unit = synchronized {
     val dataset = projection.datasetRef
     val shards = datasets.getOrElseUpdate(dataset, new NonBlockingHashMapLong[TimeSeriesShard](32, false))

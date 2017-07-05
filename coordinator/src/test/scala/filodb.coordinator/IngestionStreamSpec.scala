@@ -20,12 +20,12 @@ import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
 
 
-object IngestStreamSpec extends ActorSpecConfig
+object IngestionStreamSpec extends ActorSpecConfig
 
 // This is really an end to end ingestion test, it's what a client talking to a FiloDB node would do.
-// Most of the tests use the automated DatasetSetup where the coordinators set up the IngestStream, but
+// Most of the tests use the automated DatasetSetup where the coordinators set up the IngestionStream, but
 // some set them up manually by invoking the factories directly.
-class IngestStreamSpec extends ActorTest(IngestStreamSpec.getNewSystem)
+class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem)
 with CoordinatorSetupWithFactory with ScalaFutures {
   import akka.testkit._
   import DatasetCommands._
@@ -91,7 +91,7 @@ with CoordinatorSetupWithFactory with ScalaFutures {
     expectMsg(DatasetVerified)
   }
 
-  // It's pretty hard to get an IngestStream to fail when reading the stream itself, as no real parsing
+  // It's pretty hard to get an IngestionStream to fail when reading the stream itself, as no real parsing
   // happens until the MemStoreCoordActor ingests.   When the failure occurs, the cluster state is updated
   // but then we need to query for it.
   it("should fail if cannot parse input RowReader during coordinator ingestion") {
@@ -132,7 +132,7 @@ with CoordinatorSetupWithFactory with ScalaFutures {
     expectMsg(MemStoreCoordActor.Status(99, None))
   }
 
-  import IngestStream._
+  import IngestionStream._
   it("should ingest all rows using routeToShards and ProtocolActor") {
     // Empty ingestion source - we're going to pump in records ourselves
     val msg = SetupDataset(projection6.datasetRef,
