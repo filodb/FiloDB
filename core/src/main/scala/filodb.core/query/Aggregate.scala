@@ -15,8 +15,10 @@ import filodb.core.binaryrecord.BinaryRecord
 /**
  * An Aggregate stores intermediate results from Aggregators, which can later be combined using
  * Combinators or Operators
+ * NOTE: if you add a new type of Aggregate, be sure to extend the serialization test case in
+ *       SerializationSpec.scala
  */
-abstract class Aggregate[R: ClassTag] {
+abstract class Aggregate[R: ClassTag] extends Serializable {
   def result: Array[R]
   def clazz: Class[_] = implicitly[ClassTag[R]].runtimeClass
   override def toString: String = s"${getClass.getName}[${result.toList.mkString(", ")}]"
