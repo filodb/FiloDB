@@ -54,7 +54,27 @@ class SerializationSpec extends FunSpec with Matchers {
       record.copy(partition = projection.partKey(record.partition),
                   data = BinaryRecord(projection.binSchema, record.data))
     }
-    val cmd = IngestRows(datasetRef, 0, records, 100L)
+    val cmd = IngestRows(datasetRef, 0, 1, records)
     fromBinaryIngestRows(cmd.toBytes()) should equal (cmd)
+  }
+
+  import filodb.core.query._
+
+  it("should be able to serialize different Aggregates") {
+    val baos = new ByteArrayOutputStream
+    val oos = new ObjectOutputStream(baos)
+    oos.writeObject(DoubleAggregate(99.9))
+    val arrayAgg = new ArrayAggregate(10, 0.0)
+    oos.writeObject(arrayAgg)
+    val pointAgg = new PrimitiveSimpleAggregate(DoubleSeriesValues("foo",
+                                                                   Seq(DoubleSeriesPoint(100000L, 1.2))))
+    oos.writeObject(pointAgg)
+
+    val ois = new ObjectInputStream(new ByteArrayInputStream(baos.toByteArray))
+    ois.readObject should equal (DoubleAggregate(99.9))
+    val deserArrayAgg = ois.readObject.asInstanceOf[ArrayAggregate[Double]]
+    deserArrayAgg.result should === (arrayAgg.result)
+    val deserPointAgg = ois.readObject.asInstanceOf[PrimitiveSimpleAggregate[DoubleSeriesValues]]
+    deserPointAgg.data should equal (pointAgg.data)
   }
 }

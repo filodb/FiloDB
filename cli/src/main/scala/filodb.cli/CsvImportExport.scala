@@ -11,7 +11,7 @@ import scala.concurrent.duration._
 import scala.language.postfixOps
 
 import filodb.coordinator.client.{Client, LocalClient}
-import filodb.coordinator.sources.{CsvSourceActor, CsvSourceFactory}
+import filodb.coordinator.sources.{CsvStream, CsvStreamFactory}
 import filodb.coordinator.NodeClusterActor
 import filodb.core._
 import filodb.core.store.MetaStore
@@ -36,7 +36,7 @@ trait CsvImportExport extends StrictLogging {
                 delimiter: Char,
                 timeout: FiniteDuration): Unit = {
     val fileReader = new java.io.FileReader(csvPath)
-    val headerCols = CsvSourceActor.getHeaderColumns(fileReader)
+    val headerCols = CsvStream.getHeaderColumns(fileReader)
 
     val config = ConfigFactory.parseString(s"""header = true
                                            file = $csvPath
@@ -44,7 +44,7 @@ trait CsvImportExport extends StrictLogging {
     client.setupDataset(dataset,
                         headerCols,
                         DatasetResourceSpec(1, 1),
-                        IngestionSource(classOf[CsvSourceFactory].getName, config)).foreach {
+                        IngestionSource(classOf[CsvStreamFactory].getName, config)).foreach {
       case e: ErrorResponse =>
         println(s"Errors setting up ingestion: $e")
         exitCode = 2

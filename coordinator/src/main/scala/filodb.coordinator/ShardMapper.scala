@@ -1,6 +1,6 @@
 package filodb.coordinator
 
-import akka.actor.ActorRef
+import akka.actor.{Address, ActorRef}
 import scala.collection.mutable.HashMap
 import scala.util.{Try, Success, Failure}
 
@@ -48,18 +48,20 @@ class ShardMapper(val numShards: Int) extends Serializable {
     ShardAndNode(shard, shardMap(shard))
   }
 
+  def coordForShard(shardNum: Int): ActorRef = shardMap(shardNum)
+
   /**
    * Maps a shard key to a range of shards.  Used to limit shard distribution for queries when one knows
    * the shard key.
    * @param numShardBits the number of upper bits of the hash to use for the shard key
-   * @return a Map from the node coordinator -> a list of shards for that node
+   * @return a list or range of shards
    */
-  def shardKeyToNodes(shardHash: Int, numShardBits: Int): Map[ActorRef, Seq[Int]] = {
+  def shardKeyToShards(shardHash: Int, numShardBits: Int): Seq[Int] = {
     val partHashMask = (0xffffffffL >> numShardBits).toInt
     val shardKeyMask = ~partHashMask
     val startingShard = toShard(shardHash & shardKeyMask, numShards)
     val endingShard = toShard(shardHash & shardKeyMask | partHashMask, numShards)
-    (startingShard to endingShard).groupBy(shardMap)
+    (startingShard to endingShard)
   }
 
   /**
@@ -78,10 +80,22 @@ class ShardMapper(val numShards: Int) extends Serializable {
   }
 
   /**
+   * Returns all shards that match a given address - typically used to compare to cluster.selfAddress
+   * for that node's own shards
+   */
+  def shardsForAddress(addr: Address): Seq[Int] =
+    shardMap.toSeq.zipWithIndex.collect {
+      case (ref, shardNum) if ref.path.address == addr => shardNum
+    }
+
+  /**
    * Returns all the shards that have not yet been assigned
    */
   def unassignedShards: Seq[Int] =
     shardMap.toSeq.zipWithIndex.collect { case (ActorRef.noSender, shard) => shard }
+
+  def assignedShards: Seq[Int] =
+    shardMap.toSeq.zipWithIndex.collect { case (ref, shard) if ref != ActorRef.noSender => shard }
 
   def numAssignedShards: Int = numShards - unassignedShards.length
 
@@ -115,5 +129,9 @@ class ShardMapper(val numShards: Int) extends Serializable {
         shardMap(i) = ActorRef.noSender
         i
     }
+  }
+
+  def clear(): Unit = {
+    for { i <- 0 until numShards } { shardMap(i) = ActorRef.noSender }
   }
 }

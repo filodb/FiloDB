@@ -4,6 +4,7 @@ import akka.actor.{Actor, ActorRef, PoisonPill, Props, SupervisorStrategy, Termi
 import akka.cluster.Cluster
 import akka.event.LoggingReceive
 import com.typesafe.config.Config
+import monix.execution.Scheduler
 import net.ceedubs.ficus.Ficus._
 import scala.collection.mutable.HashMap
 import scala.concurrent.duration._
@@ -45,10 +46,10 @@ object NodeCoordinatorActor {
     Props(classOf[NodeCoordinatorActor], metaStore, memStore, columnStore, config)
 }
 
-class NodeCoordinatorActor(metaStore: MetaStore,
-                           memStore: MemStore,
-                           columnStore: ColumnStore,
-                           config: Config) extends BaseActor {
+private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
+                                                 memStore: MemStore,
+                                                 columnStore: ColumnStore,
+                                                 config: Config) extends BaseActor {
   import NodeCoordinatorActor._
   import DatasetCommands._
   import IngestionCommands._
@@ -61,6 +62,9 @@ class NodeCoordinatorActor(metaStore: MetaStore,
   val clusterSelfAddr = Cluster(context.system).selfAddress
   val actorPath = clusterSelfAddr.host.getOrElse("None")
   var clusterActor: Option[ActorRef] = None
+
+  // The thread pool used by Monix Observables/reactive ingestion
+  val ingestScheduler = Scheduler.computation(config.getInt("ingestion-threads"))
 
   // By default, stop children DatasetCoordinatorActors when something goes wrong.
   override val supervisorStrategy = SupervisorStrategy.stoppingStrategy
@@ -123,7 +127,8 @@ class NodeCoordinatorActor(metaStore: MetaStore,
     Serializer.putPartitionSchema(RecordSchema(proj.partitionColumns))
     Serializer.putDataSchema(RecordSchema(proj.nonPartitionColumns))
 
-    val props = MemStoreCoordActor.props(proj, memStore, ds.source)
+    // TODO: get rid of clusterSelfAddr?  Do we really need it?
+    val props = MemStoreCoordActor.props(proj, memStore, clusterSelfAddr, ds.source)(ingestScheduler)
     val ingestRef = context.actorOf(props, s"ms-coord-${proj.dataset.name}-${ds.version}")
     dsCoordinators((ref, ds.version)) = ingestRef
     val shardMapMsg = NodeClusterActor.ShardMapUpdate(ref, shardMaps(ref))
@@ -186,8 +191,8 @@ class NodeCoordinatorActor(metaStore: MetaStore,
       if (!(dsCoordinators.contains((ref, version)))) { setupDataset(sender, ds) }
       else { logger.warn(s"Getting redundant DatasetSetup for dataset $dataset") }
 
-    case IngestRows(dataset, version, rows, seqNo) =>
-      withDsCoord(sender, dataset, version) { _ ! DatasetCoordinatorActor.NewRows(sender, rows, seqNo) }
+    case IngestRows(dataset, version, shard, rows) =>
+      withDsCoord(sender, dataset, version) { _ ! MemStoreCoordActor.IngestRows(sender, shard, rows) }
 
     case flushCmd @ Flush(dataset, version) =>
       withDsCoord(sender, dataset, version) { _ ! DatasetCoordinatorActor.StartFlush(Some(sender)) }
@@ -196,7 +201,7 @@ class NodeCoordinatorActor(metaStore: MetaStore,
       withDsCoord(sender, dataset, version) { _.forward(DatasetCoordinatorActor.CanIngest) }
 
     case GetIngestionStats(dataset, version) =>
-      withDsCoord(sender, dataset, version) { _.forward(DatasetCoordinatorActor.GetStats) }
+      withDsCoord(sender, dataset, version) { _.forward(MemStoreCoordActor.GetStatus) }
 
     case ReloadIngestionState(originator, dataset, version) =>
       withDsCoord(sender, dataset, version) { _.forward(DatasetCoordinatorActor.InitIngestion(originator)) }
@@ -206,12 +211,17 @@ class NodeCoordinatorActor(metaStore: MetaStore,
     case q: QueryCommand =>
       val originator = sender
       withQueryActor(originator, q.dataset) { _.tell(q, originator) }
+    case q: QueryActor.SingleShardQuery =>
+      val originator = sender
+      withQueryActor(originator, q.dataset) { _.tell(q, originator) }
   }
 
   def other: Receive = LoggingReceive {
     case Reset =>
       dsCoordinators.values.foreach(_ ! PoisonPill)
       dsCoordinators.clear()
+      queryActors.values.foreach(_ ! PoisonPill)
+      queryActors.clear()
       columnStore.reset()
       memStore.reset()
 

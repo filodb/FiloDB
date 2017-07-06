@@ -293,6 +293,6 @@ object MachineMetricsData {
   val dataset2 = dataset1.copy(partitionColumns = Seq("series", "tags"))
   val projection2 = RichProjection(dataset2, schemaWithMap)
 
-  def withMap(data: Stream[Seq[Any]]): Stream[Seq[Any]] =
-    data.zipWithIndex.map { case (row, idx) => row :+ Map("n".utf8 -> (idx % 5).toString.utf8) }
+  def withMap(data: Stream[Seq[Any]], n: Int = 5): Stream[Seq[Any]] =
+    data.zipWithIndex.map { case (row, idx) => row :+ Map("n".utf8 -> (idx % n).toString.utf8) }
 }

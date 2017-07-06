@@ -16,26 +16,37 @@ import filodb.core.SingleKeyTypes._
  * More interesting cases include histograms, topK, bottomK, grouping functions, etc.
  */
 trait Combiner {
-  def fold(aggregateStream: Observable[Aggregate[_]]): Task[Aggregate[_]]
+  type C <: Aggregate[_]
+  def fold(aggregateStream: Observable[Aggregate[_]]): Task[C]
+
+  // Combine is used to combine intermediate aggregates produced by Combiners. Don't use fold on
+  // intermediates.
+  def combine(one: C, two: C): C
 }
 
 /**
  * The SimpleCombiner just performs the same aggregation as the original aggregate.
  */
 class SimpleCombiner(val aggregator: Aggregator) extends Combiner {
-  def fold(aggregateStream: Observable[Aggregate[_]]): Task[Aggregate[_]] =
+  type C = aggregator.A
+  def fold(aggregateStream: Observable[Aggregate[_]]): Task[C] =
     aggregateStream.foldLeftL(aggregator.emptyAggregate) { case (acc, newItem) =>
       aggregator.combine(acc, newItem.asInstanceOf[aggregator.A])
     }
+
+  def combine(one: C, two: C): C = aggregator.combine(one, two)
 }
 
 class ListCombiner(val aggregator: OneValueAggregator,
                    maxSize: Int = 1000) extends Combiner {
-  def fold(aggregateStream: Observable[Aggregate[_]]): Task[Aggregate[_]] =
+  type C = ListAggregate[aggregator.R]
+  def fold(aggregateStream: Observable[Aggregate[_]]): Task[C] =
     aggregateStream.take(maxSize)
                    .map { case p: PrimitiveSimpleAggregate[aggregator.R] @unchecked => p.data }
                    .toListL
                    .map(seq => ListAggregate[aggregator.R](seq)(aggregator.tag))
+
+  def combine(one: C, two: C): C = one.addWithMax(two, maxSize)
 }
 
 final case class HistogramBucket(max: Double, count: Int) {
@@ -44,7 +55,7 @@ final case class HistogramBucket(max: Double, count: Int) {
 
 // A histogram storing counts for values in configurable Double-based buckets
 class HistogramAggregate(buckets: Array[Double]) extends Aggregate[HistogramBucket] {
-  val bucketHash = buckets.hashCode
+  val bucketHash = java.util.Arrays.hashCode(buckets)
   val counts = new Array[Int](buckets.size)
   var noBucketCount = 0     // number of values that don't fall in any bucket
 
@@ -81,12 +92,18 @@ object HistogramAggregate {
  * The HistogramCombiner computes a histogram using primitive aggregate values from individual partitions.
  */
 class HistogramCombiner(buckets: Array[Double]) extends Combiner {
-  def fold(aggregateStream: Observable[Aggregate[_]]): Task[Aggregate[_]] = {
+  type C = HistogramAggregate
+  def fold(aggregateStream: Observable[Aggregate[_]]): Task[C] = {
     val histo = new HistogramAggregate(buckets)
     aggregateStream.foldLeftL(histo) { case (histo, newAgg: NumericAggregate) =>
       histo.increment(newAgg.doubleValue)
       histo
     }
+  }
+
+  def combine(one: C, two: C): C = {
+    one.merge(two)
+    one
   }
 }
 
