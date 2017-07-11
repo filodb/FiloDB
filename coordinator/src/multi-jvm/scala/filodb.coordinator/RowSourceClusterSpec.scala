@@ -4,7 +4,7 @@ import akka.actor.{ActorSystem, ActorRef, PoisonPill}
 import akka.remote.testkit.{MultiNodeConfig, MultiNodeSpec}
 import akka.testkit.ImplicitSender
 import com.typesafe.config.ConfigFactory
-import com.typesafe.scalalogging.slf4j.StrictLogging
+import com.typesafe.scalalogging.StrictLogging
 import scala.concurrent.duration._
 
 import filodb.core._

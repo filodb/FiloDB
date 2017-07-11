@@ -2,7 +2,7 @@ package filodb.coordinator.sources
 
 import akka.actor.{Actor, ActorRef, Props}
 import com.opencsv.CSVReader
-import com.typesafe.scalalogging.slf4j.StrictLogging
+import com.typesafe.scalalogging.StrictLogging
 import org.velvia.filo.{ArrayStringRowReader, RowReader}
 import scala.concurrent.duration._
 import scala.util.Try

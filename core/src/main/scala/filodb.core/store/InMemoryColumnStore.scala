@@ -5,7 +5,7 @@ import java.util.concurrent.{ConcurrentHashMap, ConcurrentSkipListMap}
 import javax.xml.bind.DatatypeConverter
 
 import bloomfilter.mutable.BloomFilter
-import com.typesafe.scalalogging.slf4j.StrictLogging
+import com.typesafe.scalalogging.StrictLogging
 import filodb.core.Types._
 import filodb.core._
 import filodb.core.metadata.{Column, Projection, RichProjection}

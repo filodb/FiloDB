@@ -38,6 +38,17 @@ lazy val cli = (project in file("cli"))
                  .settings(cliAssemblySettings:_*)
                  .dependsOn(core, coordinator, cassandra)
 
+lazy val kafka = project
+  .in(file("kafka"))
+  .settings(name := "filodb-kafka")
+  .settings(buildSettings:_*)
+  .settings(mySettings:_*)
+  .settings(multiJvmSettings:_*)
+  .settings(itSettings : _*)
+  .settings(assemblySettings:_*)
+  .dependsOn(coordinator % "compile->compile; test->test")
+  .configs(IntegrationTest, MultiJvm)
+
 lazy val spark = (project in file("spark"))
                    .settings(name := "filodb-spark")
                    .configs( IntegrationTest )
@@ -91,10 +102,10 @@ lazy val commonDeps = Seq(
 )
 
 lazy val coreDeps = commonDeps ++ Seq(
-  "com.typesafe.scala-logging" %% "scala-logging-slf4j" % "2.1.2",
+  "com.typesafe.scala-logging" %% "scala-logging" % "3.5.0",
   "org.slf4j"             % "slf4j-api"         % "1.7.10",
   "com.beachape"         %% "enumeratum"        % "1.2.1",
-  "org.velvia.filo"      %% "filo-scala"        % "0.3.3",
+  "org.velvia.filo"      %% "filo-scala"        % "0.3.6",
   "io.monix"             %% "monix"             % "2.1.1",
   "joda-time"             % "joda-time"         % "2.2",
   "org.joda"              % "joda-convert"      % "1.2",
@@ -283,6 +294,7 @@ lazy val assemblySettings = Seq(
     case PathList(ps @ _*) if ps.last endsWith ".txt.1" => MergeStrategy.first
     case "reference.conf"    => MergeStrategy.concat
     case "application.conf"  => MergeStrategy.concat
+    case "filodb-defaults.conf"  => MergeStrategy.concat
     case x =>
       val oldStrategy = (assemblyMergeStrategy in assembly).value
       oldStrategy(x)

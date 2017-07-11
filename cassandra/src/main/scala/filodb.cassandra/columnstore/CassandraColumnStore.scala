@@ -2,7 +2,7 @@ package filodb.cassandra.columnstore
 
 import com.datastax.driver.core.TokenRange
 import com.typesafe.config.Config
-import com.typesafe.scalalogging.slf4j.StrictLogging
+import com.typesafe.scalalogging.StrictLogging
 import java.net.InetSocketAddress
 import java.nio.ByteBuffer
 import java.util.HashSet

@@ -4,7 +4,7 @@ import akka.actor.{ActorSystem, AddressFromURIString}
 import akka.pattern.ask
 import akka.util.Timeout
 import com.typesafe.config.{Config, ConfigFactory}
-import com.typesafe.scalalogging.slf4j.StrictLogging
+import com.typesafe.scalalogging.StrictLogging
 import net.ceedubs.ficus.Ficus._
 import org.apache.spark.SparkContext
 import scala.concurrent.Await

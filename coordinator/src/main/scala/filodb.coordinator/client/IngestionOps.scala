@@ -1,6 +1,6 @@
 package filodb.coordinator.client
 
-import com.typesafe.scalalogging.slf4j.StrictLogging
+import com.typesafe.scalalogging.StrictLogging
 import scala.concurrent.duration._
 
 import filodb.core._

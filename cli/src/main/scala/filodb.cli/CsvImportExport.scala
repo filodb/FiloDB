@@ -4,7 +4,7 @@ import akka.actor.{ActorRef, ActorSystem}
 import akka.pattern.ask
 import akka.util.Timeout
 import com.opencsv.{CSVReader, CSVWriter}
-import com.typesafe.scalalogging.slf4j.StrictLogging
+import com.typesafe.scalalogging.StrictLogging
 import org.velvia.filo.{ArrayStringRowReader, RowReader}
 import scala.concurrent.{Await, Future, ExecutionContext}
 import scala.concurrent.duration._

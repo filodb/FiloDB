@@ -1,7 +1,7 @@
 package filodb.core.store
 
 import bloomfilter.mutable.BloomFilter
-import com.typesafe.scalalogging.slf4j.StrictLogging
+import com.typesafe.scalalogging.StrictLogging
 import java.nio.ByteBuffer
 import java.util.TreeMap
 import monix.execution.Scheduler

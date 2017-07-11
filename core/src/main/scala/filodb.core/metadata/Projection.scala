@@ -1,6 +1,6 @@
 package filodb.core.metadata
 
-import com.typesafe.scalalogging.slf4j.StrictLogging
+import com.typesafe.scalalogging.StrictLogging
 import org.scalactic._
 import org.velvia.filo.{RowReader, RoutingRowReader, SeqRowReader}
 

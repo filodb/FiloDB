@@ -2,7 +2,7 @@ package filodb.spark
 
 import akka.actor.ActorRef
 import com.typesafe.config.{Config, ConfigFactory, ConfigRenderOptions}
-import com.typesafe.scalalogging.slf4j.StrictLogging
+import com.typesafe.scalalogging.StrictLogging
 import java.nio.ByteBuffer
 import kamon.Kamon
 import net.ceedubs.ficus.Ficus._

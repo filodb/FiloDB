@@ -1,7 +1,7 @@
 package filodb.core.reprojector
 
 import com.typesafe.config.Config
-import com.typesafe.scalalogging.slf4j.StrictLogging
+import com.typesafe.scalalogging.StrictLogging
 import kamon.trace.Tracer
 import net.ceedubs.ficus.Ficus._
 import org.velvia.filo.RowReader

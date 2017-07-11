@@ -2,7 +2,7 @@ package filodb.coordinator
 
 import akka.actor.{Actor, ActorRef, Cancellable}
 import akka.event.LoggingReceive
-import com.typesafe.scalalogging.slf4j.StrictLogging
+import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
 import org.velvia.filo.RowReader
 import scala.collection.mutable.HashMap
@@ -241,5 +241,5 @@ trait RowSource extends Actor with StrictLogging {
     context.stop(self)
   }
 
-  val receive = start
+  def receive: Actor.Receive = start
 }

@@ -1,6 +1,6 @@
 package filodb.core.store
 
-import com.typesafe.scalalogging.slf4j.StrictLogging
+import com.typesafe.scalalogging.StrictLogging
 import monix.reactive.Observable
 import org.velvia.filo.{RowReader, FiloVector}
 import org.velvia.filo.RowReader.TypedFieldExtractor

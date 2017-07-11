@@ -1,0 +1,23 @@
+<configuration>
+
+    <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>[%date{ISO8601}] %-5level %logger{26} [%X{akkaSource}] %msg%n</pattern>
+        </encoder>
+    </appender>
+
+    <logger name="filodb" level="DEBUG"/>
+
+    <logger name="org.apache.kafka.common.metrics" level="ERROR"/>
+    <logger name="org.apache.kafka.clients.producer.ProducerConfig" level="WARN"/>
+    <logger name="org.apache.kafka.common.security" level="INFO"/>
+    <logger name="org.apache.kafka.streams.processor" level="INFO"/>
+    <logger name="org.apache.kafka.streams.processor.internals.StreamTask" level="WARN"/>
+    <logger name="org.apache.kafka.streams.processor.internals.StreamThread" level="WARN"/>
+    <logger name="org.apache.kafka.clients" level="INFO"/>
+    <logger name="org.apache.kafka" level="INFO"/>
+
+    <root level="INFO">
+        <appender-ref ref="STDOUT" />
+    </root>
+</configuration>
