@@ -1,24 +1,24 @@
 import com.typesafe.sbt.SbtMultiJvm
 import com.typesafe.sbt.SbtMultiJvm.MultiJvmKeys.MultiJvm
 
-lazy val buildSettings = Seq(
-  organization := "org.velvia",
-  scalaVersion := "2.11.8")
+val mySettings = Seq(organization := "org.velvia",
+                     scalaVersion := "2.11.8",
+                     parallelExecution in Test := false,
+                     fork in Test := true,
+                     resolvers ++= extraRepos,
+                     ivyScala := ivyScala.value map { _.copy(overrideScalaVersion = true) }) ++ universalSettings
 
-publishTo := Some(Resolver.file("Unused repo", file("target/unusedrepo")))
+publishTo      := Some(Resolver.file("Unused repo", file("target/unusedrepo")))
 
-lazy val core = project
-  .in(file("core"))
-  .settings(buildSettings:_*)
-  .settings(commonSettings:_*)
-  .settings(name := "filodb-core")
-  .settings(scalacOptions += "-language:postfixOps")
-  .settings(libraryDependencies ++= coreDeps)
+lazy val core = (project in file("core"))
+                  .settings(mySettings:_*)
+                  .settings(name := "filodb-core")
+                  .settings(scalacOptions += "-language:postfixOps")
+                  .settings(libraryDependencies ++= coreDeps)
 
 lazy val coordinator = project
   .in(file("coordinator"))
-  .settings(buildSettings:_*)
-  .settings(commonSettings:_*)
+  .settings(mySettings:_*)
   .settings(multiJvmSettings:_*)
   .settings(name := "filodb-coordinator")
   .settings(libraryDependencies ++= coordDeps)
@@ -28,76 +28,67 @@ lazy val coordinator = project
   .dependsOn(core % "compile->compile; test->test")
   .configs(MultiJvm)
 
+lazy val cassandra = (project in file("cassandra"))
+                       .settings(mySettings:_*)
+                       .settings(name := "filodb-cassandra")
+                       .settings(libraryDependencies ++= cassDeps)
+                       .dependsOn(core % "compile->compile; test->test",
+                                  coordinator)
+
+lazy val cli = (project in file("cli"))
+                 .settings(mySettings:_*)
+                 .settings(name := "filodb-cli")
+                 .settings(libraryDependencies ++= cliDeps)
+                 .settings(cliAssemblySettings:_*)
+                 .dependsOn(core, coordinator, cassandra)
+
 lazy val kafka = project
   .in(file("kafka"))
   .settings(name := "filodb-kafka")
-  .settings(buildSettings:_*)
-  .settings(commonSettings:_*)
+  .settings(mySettings:_*)
   .settings(multiJvmSettings:_*)
   .settings(itSettings : _*)
   .settings(assemblySettings:_*)
   .dependsOn(coordinator % "compile->compile; test->test")
   .configs(IntegrationTest, MultiJvm)
 
-lazy val cassandra = project
-  .in(file("cassandra"))
-  .settings(buildSettings:_*)
-  .settings(commonSettings:_*)
-  .settings(name := "filodb-cassandra")
-  .settings(libraryDependencies ++= cassDeps)
-  .dependsOn(core % "compile->compile; test->test", coordinator)
-
-lazy val cli = project
-  .in(file("cli"))
-  .settings(buildSettings:_*)
-  .settings(commonSettings:_*)
-  .settings(name := "filodb-cli")
-  .settings(libraryDependencies ++= cliDeps)
-  .settings(cliAssemblySettings:_*)
-  .dependsOn(core % "compile->compile; test->test", coordinator, cassandra)
-
-lazy val spark = project
-  .in(file("spark"))
-  .settings(name := "filodb-spark")
-  .settings(buildSettings:_*)
-  .settings(commonSettings:_*)
-  .settings(libraryDependencies ++= sparkDeps)
-  .settings(jvmPerTestSettings:_*)
-  .settings(assemblyExcludeScala)
-  .settings(itSettings : _*)
-  .settings(fork in IntegrationTest := true)
-  .dependsOn(core % "compile->compile; test->test; it->test",
-    coordinator % "compile->compile; test->test",
-    cassandra % "compile->compile; test->test; it->test")
-  .configs(IntegrationTest)
-
-lazy val jmh = project
-  .in(file("jmh"))
-  .settings(buildSettings:_*)
-  .settings(commonSettings:_*)
-  .settings(name := "filodb-jmh")
-  .settings(libraryDependencies ++= jmhDeps)
-  .settings(publish := {})
-  .enablePlugins(JmhPlugin)
-  .dependsOn(core % "compile->compile; compile->test", spark)
-
-lazy val stress = project
-  .in(file("stress"))
-  .settings(name := "filodb-stress")
-  .settings(buildSettings:_*)
-  .settings(commonSettings:_*)
-  .settings(libraryDependencies ++= stressDeps)
-  .settings(assemblyExcludeScala)
-  .dependsOn(spark)
-
 lazy val standalone = project
   .in(file("standalone"))
-  .settings(buildSettings:_*)
-  .settings(commonSettings:_*)
+  .settings(mySettings:_*)
   .settings(assemblySettings:_*)
   .settings(publish := {})
   .settings(libraryDependencies += log4jDep)
   .dependsOn(core, coordinator, cassandra)
+
+lazy val spark = (project in file("spark"))
+                   .settings(name := "filodb-spark")
+                   .configs( IntegrationTest )
+                   .settings(itSettings : _*)
+                   .settings(fork in IntegrationTest := true)
+                   .settings(mySettings:_*)
+                   .settings(libraryDependencies ++= sparkDeps)
+                   .settings(jvmPerTestSettings:_*)
+                   .settings(assemblySettings:_*)
+                   .settings(assemblyOption in assembly := (assemblyOption in assembly).value.copy(includeScala = false))
+                   .dependsOn(core % "compile->compile; test->test; it->test",
+                              coordinator % "compile->compile; test->test",
+                              cassandra % "compile->compile; test->test; it->test")
+
+lazy val jmh = (project in file("jmh"))
+                 .settings(mySettings:_*)
+                 .settings(name := "filodb-jmh")
+                 .settings(libraryDependencies ++= jmhDeps)
+                 .settings(publish := {})
+                 .enablePlugins(JmhPlugin)
+                 .dependsOn(core % "compile->compile; compile->test", spark)
+
+lazy val stress = (project in file("stress"))
+                    .settings(mySettings:_*)
+                    .settings(name := "filodb-stress")
+                    .settings(libraryDependencies ++= stressDeps)
+                    .settings(assemblySettings:_*)
+                    .settings(assemblyOption in assembly := (assemblyOption in assembly).value.copy(includeScala = false))
+                    .dependsOn(spark)
 
 val cassDriverVersion = "3.0.2"
 val akkaVersion    = "2.3.15"
@@ -126,7 +117,7 @@ lazy val commonDeps = Seq(
 lazy val scalaxyDep = "com.nativelibs4java"  %% "scalaxy-loops"     % "0.3.3" % "provided"
 
 lazy val coreDeps = commonDeps ++ Seq(
-  "com.typesafe.scala-logging" %% "scala-logging-slf4j" % "2.1.2",
+  "com.typesafe.scala-logging" %% "scala-logging" % "3.5.0",
   "org.slf4j"             % "slf4j-api"         % "1.7.10",
   "com.beachape"         %% "enumeratum"        % "1.5.10",
   "org.velvia.filo"      %% "filo-scala"        % "0.3.6",
@@ -325,6 +316,7 @@ lazy val assemblySettings = Seq(
     case PathList(ps @ _*) if ps.last endsWith ".txt.1" => MergeStrategy.first
     case "reference.conf"    => MergeStrategy.concat
     case "application.conf"  => MergeStrategy.concat
+    case "filodb-defaults.conf"  => MergeStrategy.concat
     case x =>
       val oldStrategy = (assemblyMergeStrategy in assembly).value
       oldStrategy(x)
@@ -356,7 +348,7 @@ lazy val sharedSettings = Seq(
     "spray repo" at "http://repo.spray.io"),
   ivyScala := ivyScala.value map { _.copy(overrideScalaVersion = true) })
 
-lazy val commonSettings =
+lazy val universalSettings =
   coreSettings ++
     styleSettings ++
     testSettings ++

@@ -2,7 +2,7 @@ package filodb.coordinator
 
 import akka.actor.ActorRef
 import com.typesafe.config.Config
-import com.typesafe.scalalogging.slf4j.StrictLogging
+import com.typesafe.scalalogging.StrictLogging
 import monix.execution.{Ack, Cancelable, Scheduler}
 import monix.reactive.Observable
 import monix.reactive.observers.Subscriber

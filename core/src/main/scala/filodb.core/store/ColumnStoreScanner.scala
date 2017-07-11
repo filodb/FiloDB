@@ -1,6 +1,6 @@
 package filodb.core.store
 
-import com.typesafe.scalalogging.slf4j.StrictLogging
+import com.typesafe.scalalogging.StrictLogging
 import java.nio.ByteBuffer
 import monix.eval.Task
 import monix.reactive.Observable

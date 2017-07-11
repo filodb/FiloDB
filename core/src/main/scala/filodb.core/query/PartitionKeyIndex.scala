@@ -1,7 +1,7 @@
 package filodb.core.query
 
 import com.googlecode.javaewah.{EWAHCompressedBitmap, IntIterator}
-import com.typesafe.scalalogging.slf4j.StrictLogging
+import com.typesafe.scalalogging.StrictLogging
 import org.jctools.maps.NonBlockingHashMap
 import org.velvia.filo.{ZeroCopyUTF8String => UTF8Str}
 import scalaxy.loops._

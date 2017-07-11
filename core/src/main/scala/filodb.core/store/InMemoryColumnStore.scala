@@ -6,10 +6,10 @@ import javax.xml.bind.DatatypeConverter
 
 import bloomfilter.mutable.BloomFilter
 import com.typesafe.scalalogging.StrictLogging
-import filodb.core.Types._
 import filodb.core._
 import filodb.core.metadata.{Column, Projection, RichProjection}
-import filodb.core.query.{ChunkIDPartitionChunkIndex, PartitionChunkIndex}
+import filodb.core.query._
+import filodb.core.Types._
 import monix.reactive.Observable
 
 import scala.collection.mutable.HashMap

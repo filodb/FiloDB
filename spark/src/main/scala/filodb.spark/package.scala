@@ -4,7 +4,7 @@ import akka.actor.ActorRef
 import akka.pattern.ask
 import akka.util.Timeout
 import com.typesafe.config.Config
-import com.typesafe.scalalogging.slf4j.StrictLogging
+import com.typesafe.scalalogging.StrictLogging
 import java.util.concurrent.ArrayBlockingQueue
 import net.ceedubs.ficus.Ficus._
 import org.apache.spark.sql.types.StructType

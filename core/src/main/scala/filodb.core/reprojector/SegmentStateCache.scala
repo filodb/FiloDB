@@ -1,7 +1,7 @@
 package filodb.core.reprojector
 
 import com.typesafe.config.Config
-import com.typesafe.scalalogging.slf4j.StrictLogging
+import com.typesafe.scalalogging.StrictLogging
 import java.nio.ByteBuffer
 import kamon.Kamon
 import kamon.trace.Tracer

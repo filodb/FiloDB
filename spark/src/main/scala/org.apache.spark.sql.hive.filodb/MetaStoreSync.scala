@@ -1,6 +1,6 @@
 package org.apache.spark.sql.hive.filodb
 
-import com.typesafe.scalalogging.slf4j.StrictLogging
+import com.typesafe.scalalogging.StrictLogging
 import org.apache.spark.SparkEnv
 import org.apache.spark.sql.catalyst.TableIdentifier
 import org.apache.spark.sql.execution.command.CreateDataSourceTableUtils

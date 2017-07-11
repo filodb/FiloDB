@@ -1,6 +1,6 @@
 package filodb.core.reprojector
 
-import com.typesafe.scalalogging.slf4j.StrictLogging
+import com.typesafe.scalalogging.StrictLogging
 import org.velvia.filo.RowReader
 import scala.collection.mutable.HashMap
 

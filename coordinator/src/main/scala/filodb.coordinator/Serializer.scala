@@ -1,6 +1,6 @@
 package filodb.coordinator
 
-import com.typesafe.scalalogging.slf4j.StrictLogging
+import com.typesafe.scalalogging.StrictLogging
 import org.boon.primitive.{ByteBuf, InputByteArray}
 import org.velvia.filo.RowReader
 

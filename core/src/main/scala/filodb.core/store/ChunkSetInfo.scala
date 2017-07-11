@@ -2,7 +2,7 @@ package filodb.core.store
 
 import bloomfilter.mutable.BloomFilter
 import com.googlecode.javaewah.EWAHCompressedBitmap
-import com.typesafe.scalalogging.slf4j.StrictLogging
+import com.typesafe.scalalogging.StrictLogging
 import java.io.{DataOutputStream, ByteArrayOutputStream}
 import java.nio.ByteBuffer
 import java.sql.Timestamp

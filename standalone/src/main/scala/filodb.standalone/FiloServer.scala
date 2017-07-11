@@ -2,7 +2,7 @@ package filodb.standalone
 
 import akka.actor.{ActorSystem, AddressFromURIString}
 import com.typesafe.config.Config
-import com.typesafe.scalalogging.slf4j.StrictLogging
+import com.typesafe.scalalogging.StrictLogging
 import net.ceedubs.ficus.Ficus._
 import scala.concurrent.Await
 import scala.concurrent.duration._

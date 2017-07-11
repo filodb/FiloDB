@@ -1,7 +1,7 @@
 package filodb.coordinator
 
 import akka.actor.ActorRef
-import com.typesafe.scalalogging.slf4j.StrictLogging
+import com.typesafe.scalalogging.StrictLogging
 import scala.collection.{Map => CMap, mutable}
 import scala.util.{Success, Failure}
 

@@ -3,7 +3,7 @@ package filodb.coordinator
 import scala.reflect.ClassTag
 import scala.util.Try
 
-import com.typesafe.scalalogging.slf4j.StrictLogging
+import com.typesafe.scalalogging.StrictLogging
 
 /** Used to bootstrap configurable FQCNs from config to instances. */
 trait Instance {

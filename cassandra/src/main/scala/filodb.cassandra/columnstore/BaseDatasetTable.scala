@@ -1,6 +1,6 @@
 package filodb.cassandra.columnstore
 
-import com.typesafe.scalalogging.slf4j.StrictLogging
+import com.typesafe.scalalogging.StrictLogging
 import scala.concurrent.Future
 
 import filodb.core._

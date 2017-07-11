@@ -2,7 +2,7 @@ package filodb.core.memstore
 
 import com.googlecode.javaewah.IntIterator
 import com.typesafe.config.Config
-import com.typesafe.scalalogging.slf4j.StrictLogging
+import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
 import kamon.metric.instrument.Gauge
 import monix.execution.{Cancelable, Scheduler}

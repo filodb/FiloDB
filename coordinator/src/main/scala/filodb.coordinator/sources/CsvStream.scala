@@ -2,7 +2,7 @@ package filodb.coordinator.sources
 
 import com.opencsv.CSVReader
 import com.typesafe.config.Config
-import com.typesafe.scalalogging.slf4j.StrictLogging
+import com.typesafe.scalalogging.StrictLogging
 import monix.reactive.Observable
 import net.ceedubs.ficus.Ficus._
 import org.velvia.filo.ArrayStringRowReader

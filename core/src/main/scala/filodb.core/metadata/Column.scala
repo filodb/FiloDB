@@ -1,6 +1,6 @@
 package filodb.core.metadata
 
-import com.typesafe.scalalogging.slf4j.StrictLogging
+import com.typesafe.scalalogging.StrictLogging
 import enumeratum.{Enum, EnumEntry}
 import org.velvia.filo.{VectorInfo, ZeroCopyUTF8String}
 import org.velvia.filo.RowReader.TypedFieldExtractor
