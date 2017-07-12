@@ -242,12 +242,18 @@ private[filodb] class NodeClusterActor(cluster: Cluster,
       subscribers.foreach { case (ds, subs) => subscribers(ds) = subscribers(ds) - ref }
 
     case SubscribeShardUpdates(ref) =>
-      logger.debug(s"Registered $sender to receive shard map updates for $ref")
       // Send an immediate current snapshot of partition state
       // (as ingestion will subscribe usually when cluster is already stable)
-      shardMappers.get(ref).foreach { map => sender ! ShardMapUpdate(ref, map) }
-      subscribers(ref) = subscribers(ref) + sender
-      context.watch(sender)
+      shardMappers.get(ref) match {
+        case Some(map) =>
+          sender ! ShardMapUpdate(ref, map)
+          subscribers(ref) = subscribers(ref) + sender
+          logger.debug(s"Registered $sender to receive shard map updates for $ref")
+          context.watch(sender)
+        case None =>
+          logger.info(s"No such dataset $ref set up yet")
+          sender ! UnknownDataset(ref)
+      }
 
     case s: SetupDataset =>
       if (subscribers contains s.ref) { sender ! DatasetAlreadySetup(s.ref) }
