@@ -152,6 +152,7 @@ class ComputedColumnSpec extends FunSpec with Matchers {
       val proj = RichProjection(dataset.copy(partitionColumns = Seq(":hash first 10")), schema)
       val partFunc = proj.partitionKeyFunc
 
+      // This code will change quite a bit, this is just to get it to pass
       partFunc(TupleRowReader(names(1))).getInt(0) should equal (1)
       partFunc(TupleRowReader(names(2))).getInt(0) should equal (0)
     }
