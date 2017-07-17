@@ -2,13 +2,8 @@ package filodb.coordinator
 
 import akka.actor.ActorRef
 import akka.remote.testkit.MultiNodeConfig
-import akka.remote.testkit.MultiNodeSpec
-import akka.testkit.ImplicitSender
 import com.typesafe.config.ConfigFactory
 import scala.concurrent.duration._
-
-import org.scalatest.{BeforeAndAfterAll, FunSpecLike, Matchers}
-import org.scalatest.concurrent.ScalaFutures
 
 import filodb.core._
 
@@ -27,11 +22,7 @@ object NodeClusterSpecConfig extends MultiNodeConfig {
  * Tests the NodeClusterActor cluster singleton, dataset setup error responses,
  * and shard assignment changes when nodes join and leave
  */
-abstract class NodeClusterSpec extends MultiNodeSpec(NodeClusterSpecConfig)
-  with FunSpecLike with Matchers with BeforeAndAfterAll
-  with CoordinatorSetupWithFactory
-  with ImplicitSender
-  with ScalaFutures {
+abstract class NodeClusterSpec extends ClusterSpec(NodeClusterSpecConfig) {
 
   import akka.testkit._
   import NodeClusterSpecConfig._
@@ -45,8 +36,8 @@ abstract class NodeClusterSpec extends MultiNodeSpec(NodeClusterSpecConfig)
     multiNodeSpecBeforeAll()
 
     // Initialize dataset
-    metaStore.newDataset(dataset).futureValue should equal (Success)
-    schema.foreach { col => metaStore.newColumn(col, datasetRef).futureValue should equal (Success) }
+    metaStore.newDataset(dataset).futureValue shouldEqual Success
+    schema.foreach { col => metaStore.newColumn(col, datasetRef).futureValue shouldEqual Success }
   }
 
   override def afterAll() = multiNodeSpecAfterAll()
@@ -113,8 +104,8 @@ abstract class NodeClusterSpec extends MultiNodeSpec(NodeClusterSpecConfig)
       val shardMap = expectMsgPF(3.seconds.dilated) {
         case ShardMapUpdate(datasetRef, newMap) => newMap
       }
-      shardMap.numAssignedShards should equal (2)
-      shardMap.allNodes should equal (Set(coordinatorActor))
+      shardMap.numAssignedShards shouldEqual 2
+      shardMap.allNodes shouldEqual Set(coordinatorActor)
 
       // Calling SetupDataset again should return DatasetAlreadySetup
       clusterActor ! SetupDataset(datasetRef, Seq("first", "age"), spec, noOpSource)
@@ -137,8 +128,8 @@ abstract class NodeClusterSpec extends MultiNodeSpec(NodeClusterSpecConfig)
       val shardMap = expectMsgPF(3.seconds.dilated) {
         case ShardMapUpdate(datasetRef, newMap) => newMap
       }
-      shardMap.numAssignedShards should equal (4)
-      shardMap.allNodes.size should equal (2)
+      shardMap.numAssignedShards shouldEqual 4
+      shardMap.allNodes.size shouldEqual 2
     }
 
     enterBarrier("second-node-update-received")

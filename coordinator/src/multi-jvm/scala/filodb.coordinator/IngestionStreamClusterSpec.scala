@@ -2,9 +2,7 @@ package filodb.coordinator
 
 import akka.actor.{ActorSystem, ActorRef, PoisonPill}
 import akka.remote.testkit.{MultiNodeConfig, MultiNodeSpec}
-import akka.testkit.ImplicitSender
 import com.typesafe.config.ConfigFactory
-import com.typesafe.scalalogging.slf4j.StrictLogging
 import scala.concurrent.duration._
 
 import filodb.core._
@@ -12,9 +10,7 @@ import filodb.core.store.FilteredPartitionScan
 import filodb.core.metadata.{Column, DataColumn, Dataset, RichProjection}
 import filodb.coordinator.client.ClusterClient
 
-import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Span, Seconds}
-import org.scalatest.{BeforeAndAfterAll, FunSpecLike, Matchers}
 
 object IngestionStreamClusterSpecConfig extends MultiNodeConfig {
   // register the named roles (nodes) of the test
@@ -33,12 +29,7 @@ object IngestionStreamClusterSpecConfig extends MultiNodeConfig {
 
 // A multi-JVM IngestionStream spec to test out routing to multiple nodes
 // and distributed querying across nodes
-abstract class IngestionStreamClusterSpec extends MultiNodeSpec(IngestionStreamClusterSpecConfig)
-  with FunSpecLike with Matchers with BeforeAndAfterAll
-  with CoordinatorSetupWithFactory
-  with StrictLogging
-  with ImplicitSender with ScalaFutures {
-
+abstract class IngestionStreamClusterSpec extends ClusterSpec(IngestionStreamClusterSpecConfig) {
   import akka.testkit._
   import DatasetCommands._
   import GdeltTestData._

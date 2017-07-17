@@ -126,7 +126,7 @@ final class QueryActor(colStore: BaseColumnStore,
 
   def handleRawQuery(q: RawQuery): Unit = {
     val RawQuery(dataset, version, colStrs, partQuery, dataQuery) = q
-    val originator = sender
+    val originator = sender()
     (for { colSeq      <- validateColumns(colStrs)
            partMethods <- validatePartQuery(partQuery, QueryOptions())
            chunkMethod <- validateDataQuery(dataQuery) }
@@ -152,7 +152,7 @@ final class QueryActor(colStore: BaseColumnStore,
   // validate high level query params, then send out lower level aggregate queries to shards/coordinators
   // gather them and form an overall response
   def validateAndGatherAggregates(q: AggregateQuery): Unit = {
-    val originator = sender
+    val originator = sender()
     (for { aggFunc    <- validateFunction(q.query.functionName)
            combinerFunc <- validateCombiner(q.query.combinerName)
            aggregator <- aggFunc.validate(q.query.args, projection)
@@ -189,7 +189,7 @@ final class QueryActor(colStore: BaseColumnStore,
 
   // lower level handling of per-shard aggregate
   def singleShardQuery(q: SingleShardQuery): Unit = {
-    val originator = sender
+    val originator = sender()
     (for { aggFunc    <- validateFunction(q.query.functionName)
            combinerFunc <- validateCombiner(q.query.combinerName)
            qSpec = QuerySpec(aggFunc, q.query.args, combinerFunc, q.query.combinerArgs)
@@ -211,12 +211,12 @@ final class QueryActor(colStore: BaseColumnStore,
     case q: AggregateQuery => validateAndGatherAggregates(q)
     case q: SingleShardQuery => singleShardQuery(q)
     case GetIndexNames(ref, limit) if memStore.isDefined =>
-      sender ! memStore.get.indexNames(ref).take(limit).map(_._1).toBuffer
+      sender() ! memStore.get.indexNames(ref).take(limit).map(_._1).toBuffer
     case GetIndexValues(ref, index, limit) if memStore.isDefined =>
       // For now, just return values from the first shard
       memStore.foreach { store =>
         store.activeShards(ref).headOption.foreach { shard =>
-          sender ! store.indexValues(ref, shard, index).take(limit).map(_.toString).toBuffer
+          sender() ! store.indexValues(ref, shard, index).take(limit).map(_.toString).toBuffer
         }
       }
     case NodeClusterActor.ShardMapUpdate(ref, newMap) =>

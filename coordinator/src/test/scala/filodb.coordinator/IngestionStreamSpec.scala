@@ -52,14 +52,14 @@ with CoordinatorSetupWithFactory with ScalaFutures {
   val clusterActor = singletonClusterActor("worker")
 
   val ref = projection6.datasetRef
-  metaStore.newDataset(dataset6).futureValue should equal (Success)
-  schema.foreach { col => metaStore.newColumn(col, ref).futureValue should equal (Success) }
+  metaStore.newDataset(dataset6).futureValue shouldEqual Success
+  schema.foreach { col => metaStore.newColumn(col, ref).futureValue shouldEqual Success }
 
   val dataset33 = dataset3.withName("gdelt2")
-  metaStore.newDataset(dataset33).futureValue should equal (Success)
+  metaStore.newDataset(dataset33).futureValue shouldEqual Success
   val proj2 = RichProjection(dataset33, schema)
   val ref2 = proj2.datasetRef
-  schema.foreach { col => metaStore.newColumn(col, ref2).futureValue should equal (Success) }
+  schema.foreach { col => metaStore.newColumn(col, ref2).futureValue shouldEqual Success }
 
   val shardMap = new ShardMapper(1)
   shardMap.registerNode(Seq(0), coordinatorActor)
