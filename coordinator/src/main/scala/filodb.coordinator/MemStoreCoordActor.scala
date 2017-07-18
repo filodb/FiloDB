@@ -110,6 +110,6 @@ private[filodb] final class MemStoreCoordActor(projection: RichProjection,
       subtractions.foreach(stopShardIngestion)
 
     case GetStatus =>
-      sender ! Status(memStore.numRowsIngested(projection.datasetRef), lastErr)
+      sender() ! Status(memStore.numRowsIngested(projection.datasetRef), lastErr)
   }
 }

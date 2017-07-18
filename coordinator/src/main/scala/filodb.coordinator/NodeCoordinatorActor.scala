@@ -170,49 +170,49 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
 
   def datasetHandlers: Receive = LoggingReceive {
     case CreateDataset(datasetObj, columns, db) =>
-      createDataset(sender, datasetObj, DatasetRef(datasetObj.name, db), columns)
+      createDataset(sender(), datasetObj, DatasetRef(datasetObj.name, db), columns)
 
     case TruncateProjection(projection, version) =>
       // First try through DS Coordinator so we could coordinate with flushes
       dsCoordinators.get((projection.dataset, version))
-                    .map(_ ! DatasetCoordinatorActor.ClearProjection(sender, projection))
+                    .map(_ ! DatasetCoordinatorActor.ClearProjection(sender(), projection))
                     .getOrElse {
                       // Ok, so there is no DatasetCoordinatorActor, meaning no ingestion.  We should
                       // still be able to truncate a projection if it exists.
-                      truncateDataset(sender, projection)
+                      truncateDataset(sender(), projection)
                     }
 
-    case DropDataset(dataset) => dropDataset(sender, dataset)
+    case DropDataset(dataset) => dropDataset(sender(), dataset)
   }
 
   def ingestHandlers: Receive = LoggingReceive {
     case ds @ DatasetSetup(dataset, _, version, _) =>
       val ref = dataset.projections.head.dataset
-      if (!(dsCoordinators.contains((ref, version)))) { setupDataset(sender, ds) }
+      if (!(dsCoordinators.contains((ref, version)))) { setupDataset(sender(), ds) }
       else { logger.warn(s"Getting redundant DatasetSetup for dataset $dataset") }
 
     case IngestRows(dataset, version, shard, rows) =>
-      withDsCoord(sender, dataset, version) { _ ! MemStoreCoordActor.IngestRows(sender, shard, rows) }
+      withDsCoord(sender(), dataset, version) { _ ! MemStoreCoordActor.IngestRows(sender(), shard, rows) }
 
     case flushCmd @ Flush(dataset, version) =>
-      withDsCoord(sender, dataset, version) { _ ! DatasetCoordinatorActor.StartFlush(Some(sender)) }
+      withDsCoord(sender(), dataset, version) { _ ! DatasetCoordinatorActor.StartFlush(Some(sender())) }
 
     case CheckCanIngest(dataset, version) =>
-      withDsCoord(sender, dataset, version) { _.forward(DatasetCoordinatorActor.CanIngest) }
+      withDsCoord(sender(), dataset, version) { _.forward(DatasetCoordinatorActor.CanIngest) }
 
     case GetIngestionStats(dataset, version) =>
-      withDsCoord(sender, dataset, version) { _.forward(MemStoreCoordActor.GetStatus) }
+      withDsCoord(sender(), dataset, version) { _.forward(MemStoreCoordActor.GetStatus) }
 
     case ReloadIngestionState(originator, dataset, version) =>
-      withDsCoord(sender, dataset, version) { _.forward(DatasetCoordinatorActor.InitIngestion(originator)) }
+      withDsCoord(sender(), dataset, version) { _.forward(DatasetCoordinatorActor.InitIngestion(originator)) }
   }
 
   def queryHandlers: Receive = LoggingReceive {
     case q: QueryCommand =>
-      val originator = sender
+      val originator = sender()
       withQueryActor(originator, q.dataset) { _.tell(q, originator) }
     case q: QueryActor.SingleShardQuery =>
-      val originator = sender
+      val originator = sender()
       withQueryActor(originator, q.dataset) { _.tell(q, originator) }
   }
 
@@ -251,10 +251,10 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
       clusterActor = Some(clusterRef)
 
     case MiscCommands.GetClusterActor =>
-      sender ! clusterActor
+      sender() ! clusterActor
 
     case ReloadDCA =>
-      reloadDatasetCoordActors(sender)
+      reloadDatasetCoordActors(sender())
   }
 
   def receive: Receive = queryHandlers orElse ingestHandlers orElse datasetHandlers orElse other

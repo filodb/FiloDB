@@ -85,7 +85,7 @@ class ShardMapper(val numShards: Int) extends Serializable {
    */
   def shardsForAddress(addr: Address): Seq[Int] =
     shardMap.toSeq.zipWithIndex.collect {
-      case (ref, shardNum) if ref.path.address == addr => shardNum
+      case (ref, shardNum) if ref != ActorRef.noSender && ref.path.address == addr => shardNum
     }
 
   /**
