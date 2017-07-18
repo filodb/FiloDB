@@ -41,7 +41,6 @@ lazy val cli = (project in file("cli"))
 lazy val kafka = project
   .in(file("kafka"))
   .settings(name := "filodb-kafka")
-  .settings(buildSettings:_*)
   .settings(mySettings:_*)
   .settings(multiJvmSettings:_*)
   .settings(itSettings : _*)
