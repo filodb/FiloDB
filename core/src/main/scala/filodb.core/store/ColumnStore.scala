@@ -57,7 +57,8 @@ trait ColumnStore {
 
   /**
    * Completely and permanently drops the dataset from the column store.
-   * @param dataset the DatasetRef for the dataset to drop.
+    *
+    * @param dataset the DatasetRef for the dataset to drop.
    */
   def dropDataset(dataset: DatasetRef): Future[Response]
 
@@ -66,7 +67,8 @@ trait ColumnStore {
    * segment to produce a new segment that has combined data such that rows with new unique primary keys
    * are appended and rows with existing primary keys will overwrite.  Also, the sort order must somehow be
    * preserved such that the chunk/row# in the ChunkRowMap can be read out in sort key order.
-   * @param segment the partial Segment to write / merge to the columnar store
+    *
+    * @param segment the partial Segment to write / merge to the columnar store
    * @param version the version # to write the segment to
    * @return Success. Future.failure(exception) otherwise.
    */
@@ -136,7 +138,8 @@ trait ColumnStore {
 
   /**
    * Determines how to split the scanning of a dataset across a columnstore.
-   * @param dataset the name of the dataset to determine splits for
+    *
+    * @param dataset the name of the dataset to determine splits for
    * @param splitsPerNode the number of splits to target per node.  May not actually be possible.
    * @return a Seq[ScanSplit]
    */
@@ -172,7 +175,7 @@ trait CachedMergingColumnStore extends ColumnStore with ColumnStoreScanner with 
   // This ExecutionContext is the default used for writing, it should have bounds set
   implicit val ec: ExecutionContext
 
-  protected val stats = ColumnStoreStats()
+  def stats : Option[ColumnStoreStats]
 
   def clearProjectionData(projection: Projection): Future[Response] = {
     // Clear out any entries from segmentCache first
@@ -192,7 +195,8 @@ trait CachedMergingColumnStore extends ColumnStore with ColumnStoreScanner with 
 
   /**
    * Writes chunks to underlying storage.
-   * @param chunks an Iterator over triples of (columnName, chunkId, chunk bytes)
+    *
+    * @param chunks an Iterator over triples of (columnName, chunkId, chunk bytes)
    * @return Success. Future.failure(exception) otherwise.
    */
   def writeChunks(dataset: DatasetRef,
@@ -214,23 +218,27 @@ trait CachedMergingColumnStore extends ColumnStore with ColumnStoreScanner with 
 
   def clearSegmentCache(): Unit = { segmentCache.clear() }
 
-  def appendSegment(projection: RichProjection,
-                    segment: Segment,
-                    version: Int): Future[Response] = Tracer.withNewContext("append-segment") {
+  private def appendSegmentWithTrace(projection: RichProjection,
+                                     segment: Segment,
+                                     version: Int): Future[Response] = Tracer.withNewContext("append-segment") {
     val ctx = Tracer.currentContext
-    stats.segmentAppend()
+    if (stats.nonEmpty) {
+      stats.get.segmentAppend()
+    }
     if (segment.isEmpty) {
-      stats.segmentEmpty()
+      if (stats.nonEmpty) {
+        stats.get.segmentEmpty()
+      }
       return(Future.successful(NotApplied))
     }
     for { oldSegment <- getSegFromCache(projection.toRowKeyOnlyProjection, segment, version)
           mergedSegment = subtrace(ctx, "segment-index-merge", "ingestion") {
-                            mergingStrategy.mergeSegments(oldSegment, segment) }
-          writeChunksResp <- writeBatchedChunks(projection.datasetRef, version, mergedSegment, ctx)
-            if writeChunksResp == Success
+            mergingStrategy.mergeSegments(oldSegment, segment) }
+          writeChunksResp <- writeBatchedChunks(projection.datasetRef, version, mergedSegment, Some(ctx))
+          if writeChunksResp == Success
           writeCRMapResp <- asyncSubtrace(ctx, "write-index", "ingest-io") {
-                              writeChunkRowMap(projection.datasetRef, segment.binaryPartition, version,
-                                               segment.segmentId, mergedSegment.index) }
+            writeChunkRowMap(projection.datasetRef, segment.binaryPartition, version,
+              segment.segmentId, mergedSegment.index) }
     } yield {
       // Important!  Update the cache with the new merged segment.
       updateCache(projection, version, mergedSegment)
@@ -239,14 +247,51 @@ trait CachedMergingColumnStore extends ColumnStore with ColumnStoreScanner with 
     }
   }
 
+  private def appendSegmentWithoutTrace(projection: RichProjection,
+                                        segment: Segment,
+                                        version: Int): Future[Response] =  {
+    // logger.info(s"appendSegmentWithoutTrace:${segment}")
+    if (segment.isEmpty) {
+      return(Future.successful(NotApplied))
+    }
+    for { oldSegment <- getSegFromCache(projection.toRowKeyOnlyProjection, segment, version)
+          mergedSegment = mergingStrategy.mergeSegments(oldSegment, segment)
+          writeChunksResp <- writeBatchedChunks(projection.datasetRef, version, mergedSegment, None)
+          if writeChunksResp == Success
+          writeCRMapResp <- writeChunkRowMap(projection.datasetRef, segment.binaryPartition, version,
+            segment.segmentId, mergedSegment.index)
+    } yield {
+      // Important!  Update the cache with the new merged segment.
+      updateCache(projection, version, mergedSegment)
+      writeCRMapResp
+    }
+  }
+
+
+  def appendSegment(projection: RichProjection,
+                    segment: Segment,
+                    version: Int): Future[Response] = {
+    if (stats.isEmpty){
+      appendSegmentWithoutTrace(projection, segment, version)
+    } else {
+      appendSegmentWithTrace(projection, segment, version)
+    }
+  }
+
   def chunkBatchSize: Int
 
   private def writeBatchedChunks(dataset: DatasetRef,
                                  version: Int,
                                  segment: Segment,
-                                 ctx: TraceContext): Future[Response] = {
+                                 ctx: Option[TraceContext]): Future[Response] = {
     val binPartition = segment.binaryPartition
-    asyncSubtrace(ctx, "write-chunks", "ingest-io") {
+    if (ctx.nonEmpty) {
+      asyncSubtrace(ctx.get, "write-chunks", "ingest-io") {
+        Future.traverse(segment.getChunks.grouped(chunkBatchSize).toSeq) { chunks =>
+          writeChunks(dataset, binPartition, version, segment.segmentId, chunks.toIterator)
+        }.map { responses => responses.head }
+      }
+    } else {
       Future.traverse(segment.getChunks.grouped(chunkBatchSize).toSeq) { chunks =>
         writeChunks(dataset, binPartition, version, segment.segmentId, chunks.toIterator)
       }.map { responses => responses.head }
@@ -258,7 +303,9 @@ trait CachedMergingColumnStore extends ColumnStore with ColumnStoreScanner with 
                               version: Int): Future[Segment] = asyncSubtrace("index-read", "ingest-io") {
     segmentCache((projection.datasetName, segment.binaryPartition, version, segment.segmentId)) {
       val newSegInfo = segment.segInfo.basedOn(projection)
-      stats.segmentIndexMissingRead()
+      if (stats.nonEmpty) {
+        stats.get.segmentIndexMissingRead()
+      }
       mergingStrategy.readSegmentForCache(projection, version)(newSegInfo)(readEc)
     }
   }

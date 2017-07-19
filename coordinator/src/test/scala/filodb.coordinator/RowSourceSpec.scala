@@ -34,7 +34,8 @@ with CoordinatorSetup with ScalaFutures {
                             .getConfig("filodb")
 
   implicit val context = scala.concurrent.ExecutionContext.Implicits.global
-  val columnStore = new InMemoryColumnStore(context)
+  val kamonEnabled = config.getBoolean("kamon-metrics-flag-enabled")
+  val columnStore = new InMemoryColumnStore(kamonEnabled, context)
   val metaStore = new InMemoryMetaStore
 
   metaStore.newDataset(dataset1).futureValue should equal (Success)

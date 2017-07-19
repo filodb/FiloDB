@@ -20,7 +20,8 @@ import filodb.core.metadata.{Column, Projection, RichProjection}
  * know how to distribute data, or at least keep track of different nodes,
  * TODO: use thread-safe structures
  */
-class InMemoryColumnStore(val readEc: ExecutionContext)(implicit val ec: ExecutionContext)
+class InMemoryColumnStore(val kamonEnabled: Boolean,
+                          val readEc: ExecutionContext)(implicit val ec: ExecutionContext)
 extends CachedMergingColumnStore with InMemoryColumnStoreScanner with StrictLogging {
   import Types._
   import collection.JavaConversions._
@@ -31,6 +32,7 @@ extends CachedMergingColumnStore with InMemoryColumnStoreScanner with StrictLogg
   val chunkBatchSize = 256
 
   val mergingStrategy = new AppendingChunkMergingStrategy(this)
+  val stats = ColumnStoreStats(kamonEnabled)
 
   val chunkDb = new HashMap[(DatasetRef, BinaryPartition, Int), ChunkTree]
   val rowMaps = new HashMap[(DatasetRef, BinaryPartition, Int), RowMapTree]

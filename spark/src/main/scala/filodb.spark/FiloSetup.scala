@@ -37,9 +37,11 @@ trait FiloSetup extends CoordinatorSetup {
     ActorSystem("filo-spark", configAkka(role, port))
   }
 
+  val kamonEnabled = systemConfig.getBoolean("filodb.kamon-metrics-flag-enabled")
+
   lazy val columnStore = config.getString("store") match {
     case "cassandra" => new CassandraColumnStore(config, readEc)
-    case "in-memory" => new InMemoryColumnStore(readEc)
+    case "in-memory" => new InMemoryColumnStore(kamonEnabled, readEc)
   }
   lazy val metaStore = config.getString("store") match {
     case "cassandra" => new CassandraMetaStore(config.getConfig("cassandra"))
@@ -72,7 +74,10 @@ object FiloDriver extends FiloSetup with StrictLogging {
       role = "driver"
       val filoConfig = configFromSpark(context)
       _config = Some(filoConfig)
-      kamonInit()
+      val kamonEnabled = filoConfig.getBoolean("kamon-metrics-flag-enabled")
+      if (kamonEnabled) {
+        kamonInit()
+      }
       coordinatorActor
 
       // Add in self cluster address, and join cluster ourselves
@@ -106,14 +111,18 @@ object FiloDriver extends FiloSetup with StrictLogging {
 object FiloExecutor extends FiloSetup with StrictLogging {
   /**
    * Initializes the config if it is not set, and start things for an executor.
-   * @param filoConfig The config within the filodb.** level.
+    *
+    * @param filoConfig The config within the filodb.** level.
    * @param role the Akka Cluster role, either "executor" or "driver"
    */
   def init(filoConfig: Config): Unit = synchronized {
     _config.getOrElse {
       this.role = "executor"
       _config = Some(filoConfig)
-      kamonInit()
+      val kamonEnabled = filoConfig.getBoolean("kamon-metrics-flag-enabled")
+      if (kamonEnabled) {
+        kamonInit()
+      }
       coordinatorActor       // force coordinator to start
       // get address from config and join cluster.  note: it's ok to join cluster multiple times
       val addr = AddressFromURIString.parse(filoConfig.getString("spark-driver-addr"))

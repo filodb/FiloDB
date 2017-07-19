@@ -87,7 +87,7 @@ object FiloRelation extends StrictLogging {
     // 3. If number of partition key combinations are more than inqueryPartitionsLimit then
     // run full table scan otherwise run multipartition scan.
     if (predicateValues.length == projection.partitionColumns.length) {
-      if(predicateValues.length == 1) {
+      if (predicateValues.length == 1) {
         predicateValues.flatten
       } else {
         val predList = combine(predicateValues)
