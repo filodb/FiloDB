@@ -14,6 +14,11 @@ import scala.util.control.NonFatal
 
 // From http://stackoverflow.com/questions/10642337/is-there-are-iterative-version-of-groupby-in-scala
 object Iterators {
+  // Use the I/O Pool by default instead of the global fork-join pool -- for the ObservableIterator.
+  // The I/O pool allows unlimited number of threads, otherwise the FJ pool might have 1 thread only
+  // and cause a deadlock with the BlockingQueue
+  val ioPool = Scheduler.io("filodb-io")
+
   implicit class RichIterator[T](origIt: Iterator[T]) {
     def sortedGroupBy[B](func: T => B): Iterator[(B, Iterator[T])] = new Iterator[(B, Iterator[T])] {
       var iter = origIt
@@ -50,7 +55,8 @@ object Iterators {
     private var cached: Notification[T] = OnComplete
     private var completed = false
     private val subscription = observable
-      .asyncBoundary(OverflowStrategy.Default)
+      // Can also use (but might be slightly slower)  .asyncBoundary(OverflowStrategy.Default)
+      .subscribeOn(Iterators.ioPool)
       .materialize
       .foreach(queue.put)
 
