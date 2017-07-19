@@ -1,13 +1,14 @@
 import com.typesafe.sbt.SbtMultiJvm
 import com.typesafe.sbt.SbtMultiJvm.MultiJvmKeys.MultiJvm
 
-val buildSettings = universalSettings ++ Seq(
+val buildSettings = Seq(
   organization := "org.velvia",
   scalaVersion := "2.11.8",
   parallelExecution in Test := false,
   fork in Test := true,
   resolvers ++= extraRepos,
-  ivyScala := ivyScala.value map { _.copy(overrideScalaVersion = true) })
+  ivyScala := ivyScala.value map { _.copy(overrideScalaVersion = true) }) ++
+  universalSettings
 
 publishTo      := Some(Resolver.file("Unused repo", file("target/unusedrepo")))
 
