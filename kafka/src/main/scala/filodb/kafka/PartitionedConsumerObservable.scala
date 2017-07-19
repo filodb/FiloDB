@@ -9,9 +9,9 @@ import org.apache.kafka.common.TopicPartition
 
 object PartitionedConsumerObservable {
 
-  /** Creates a [[KafkaConsumerObservable]] instance.
+  /** Creates a `KafkaConsumerObservable` instance.
     *
-    * @param cfg is the [[KafkaConsumerConfig]] needed for initializing the consumer
+    * @param cfg is the `KafkaConsumerConfig` needed for initializing the consumer
     *
     * @param topics the list of Kafka topics to subscribe to.
     */
