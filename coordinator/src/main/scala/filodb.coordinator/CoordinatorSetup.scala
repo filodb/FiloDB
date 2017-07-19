@@ -61,7 +61,7 @@ trait CoordinatorSetup {
                                                   config.getInt("core-futures-pool-size"),
                                                   config.getInt("core-futures-max-pool-size"))
 
-  implicit lazy val ec = Scheduler(ExecutionContext.fromExecutorService(threadPool))
+  implicit lazy val ec = Scheduler(ExecutionContext.fromExecutorService(threadPool) : ExecutionContext)
 
   // A separate ExecutionContext can optionally be used for reads, to control read task queue length
   // separately perhaps.  I have found this is not really necessary.  This was originally created to

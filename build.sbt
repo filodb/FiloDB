@@ -125,7 +125,7 @@ lazy val coreDeps = commonDeps ++ Seq(
   "org.slf4j"             % "slf4j-api"         % "1.7.10",
   "com.beachape"         %% "enumeratum"        % "1.5.10",
   "org.velvia.filo"      %% "filo-scala"        % "0.3.6",
-  "io.monix"             %% "monix"             % "2.1.1",
+  "io.monix"             %% "monix"             % "2.3.0",
   "joda-time"             % "joda-time"         % "2.2",
   "org.joda"              % "joda-convert"      % "1.2",
   "com.googlecode.concurrentlinkedhashmap" % "concurrentlinkedhashmap-lru" % "1.4",
