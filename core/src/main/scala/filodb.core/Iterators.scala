@@ -2,10 +2,12 @@ package filodb.core
 
 import java.io.Closeable
 import java.util.concurrent.ArrayBlockingQueue
+
 import monix.execution.{Ack, Scheduler}
 import monix.reactive.observables.ObservableLike.Operator
 import monix.reactive.observers.Subscriber
-import monix.reactive.{Notification, Observable}
+import monix.reactive.{Notification, Observable, OverflowStrategy}
+
 import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.Future
 import scala.util.control.NonFatal
@@ -47,8 +49,10 @@ object Iterators {
     private val queue = new ArrayBlockingQueue[Notification[T]](queueSize)
     private var cached: Notification[T] = OnComplete
     private var completed = false
-    private val subscription = observable.materialize
-                                         .foreach(queue.put)
+    private val subscription = observable
+      .asyncBoundary(OverflowStrategy.Default)
+      .materialize
+      .foreach(queue.put)
 
     final def hasNext: Boolean = {
       cacheNext()
