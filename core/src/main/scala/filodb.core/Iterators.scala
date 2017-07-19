@@ -2,16 +2,23 @@ package filodb.core
 
 import java.io.Closeable
 import java.util.concurrent.ArrayBlockingQueue
+
 import monix.execution.{Ack, Scheduler}
 import monix.reactive.observables.ObservableLike.Operator
 import monix.reactive.observers.Subscriber
-import monix.reactive.{Notification, Observable}
+import monix.reactive.{Notification, Observable, OverflowStrategy}
+
 import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.Future
 import scala.util.control.NonFatal
 
 // From http://stackoverflow.com/questions/10642337/is-there-are-iterative-version-of-groupby-in-scala
 object Iterators {
+  // Use the I/O Pool by default instead of the global fork-join pool -- for the ObservableIterator.
+  // The I/O pool allows unlimited number of threads, otherwise the FJ pool might have 1 thread only
+  // and cause a deadlock with the BlockingQueue
+  val ioPool = Scheduler.io("filodb-io")
+
   implicit class RichIterator[T](origIt: Iterator[T]) {
     def sortedGroupBy[B](func: T => B): Iterator[(B, Iterator[T])] = new Iterator[(B, Iterator[T])] {
       var iter = origIt
@@ -47,8 +54,11 @@ object Iterators {
     private val queue = new ArrayBlockingQueue[Notification[T]](queueSize)
     private var cached: Notification[T] = OnComplete
     private var completed = false
-    private val subscription = observable.materialize
-                                         .foreach(queue.put)
+    private val subscription = observable
+      // Can also use (but might be slightly slower)  .asyncBoundary(OverflowStrategy.Default)
+      .subscribeOn(Iterators.ioPool)
+      .materialize
+      .foreach(queue.put)
 
     final def hasNext: Boolean = {
       cacheNext()
