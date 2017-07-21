@@ -40,7 +40,7 @@ trait MemStore extends BaseColumnStore {
    * Sets up one shard of a dataset for ingestion and the schema to be used when ingesting.
    * Once set up, the schema may not be changed.  The schema should be the same for all shards.
    * This method only succeeds if the dataset and shard has not already been setup.
-   * @throws DatasetAlreadySetup, ShardAlreadySetup
+   * @throws ShardAlreadySetup
    */
   def setup(projection: RichProjection, shard: Int): Unit
 

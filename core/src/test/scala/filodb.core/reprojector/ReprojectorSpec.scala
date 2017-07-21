@@ -99,7 +99,8 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
     rowIter.map(_.getInt(6)).sum should equal (492)
   }
 
-  it("should reload segment metadata and replace previous chunk rows successfully") {
+  // disable for now.  Reprojector is going to be ripped out soon.
+  ignore("should reload segment metadata and replace previous chunk rows successfully") {
     import GdeltTestData._
 
     gdeltMemTable.ingestRows(readers take 60)
