@@ -73,6 +73,8 @@ lazy val spark = project
   .settings(fork in IntegrationTest := true)
   .settings(jvmPerTestSettings:_*)
   .settings(assemblyExcludeScala:_*)
+  // Disable tests for now since lots of work remaining to enable Spark
+  .settings(test := {})
   .dependsOn(core % "compile->compile; test->test; it->test",
     coordinator % "compile->compile; test->test",
     cassandra % "compile->compile; test->test; it->test")

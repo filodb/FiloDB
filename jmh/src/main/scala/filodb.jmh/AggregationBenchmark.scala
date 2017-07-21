@@ -15,7 +15,7 @@ import scala.concurrent.duration._
 import filodb.core._
 import filodb.core.memstore.{IngestRecord, TimeSeriesMemStore}
 import filodb.core.query._
-import filodb.core.store.FilteredPartitionScan
+import filodb.core.store.{FilteredPartitionScan, QuerySpec}
 
 /**
  * Microbenchmark involving TimeSeriesMemStore aggregation using TimeGroupingAggregate
@@ -37,11 +37,14 @@ class AggregationBenchmark {
   val endTs   = startTs + 1000 * numPoints
 
   // Ingest raw data
-  memStore.setup(projection1)
-  val data = mapper(linearMultiSeries(startTs)).take(numPoints)
-  val rows = data.zipWithIndex.map { case (reader, n) => IngestRecord(reader, n) }
-  memStore.ingest(projection1.datasetRef, rows)
+  memStore.setup(projection1, 0)
+  val data = records(linearMultiSeries(startTs)).take(numPoints)
+  memStore.ingest(projection1.datasetRef, 0, data)
   val split = memStore.getScanSplits(projection1.datasetRef, 1).head
+
+  val avgTimeQuery = QuerySpec(AggregationFunction.TimeGroupAvg,
+                               Seq("timestamp", "min", startTs.toString, endTs.toString, "100"))
+  val sumQuery     = QuerySpec(AggregationFunction.Sum, Seq("min"))
 
   /**
    * Doing average aggregation on all 10000 points with 100 buckets
@@ -49,22 +52,18 @@ class AggregationBenchmark {
   @Benchmark
   @BenchmarkMode(Array(Mode.Throughput))
   @OutputTimeUnit(TimeUnit.SECONDS)
-  def avgTimeGroupAgg(): Array[Double] = {
-    val aggregator = new TimeGroupingAvgDoubleAgg(0, 1, startTs, endTs, 100)
-    val fut = memStore.readChunks(projection1, schema take 2, 0, FilteredPartitionScan(split))
-                      .foldLeftL(aggregator.asInstanceOf[Aggregate[Double]])(_ add _)
-                      .runAsync
+  def avgTimeGroupAgg(): Array[_] = {
+    val fut = memStore.aggregate(projection1, 0, avgTimeQuery, FilteredPartitionScan(split))
+                      .get.runAsync
     Await.result(fut, 2.second).result
   }
 
   @Benchmark
   @BenchmarkMode(Array(Mode.Throughput))
   @OutputTimeUnit(TimeUnit.SECONDS)
-  def sumAgg(): Array[Double] = {
-    val aggregator = new SumDoublesAggregate(0)
-    val fut = memStore.readChunks(projection1, schema drop 1 take 1, 0, FilteredPartitionScan(split))
-                      .foldLeftL(aggregator.asInstanceOf[Aggregate[Double]])(_ add _)
-                      .runAsync
+  def sumAgg(): Array[_] = {
+    val fut = memStore.aggregate(projection1, 0, sumQuery, FilteredPartitionScan(split))
+                      .get.runAsync
     Await.result(fut, 2.second).result
   }
 }

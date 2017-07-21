@@ -5,8 +5,9 @@ import scala.concurrent.duration._
 import scala.util.Try
 import scalax.file.Path
 
-import filodb.core.metadata.Projection
+import filodb.coordinator.NodeClusterActor
 import filodb.coordinator.NodeCoordinatorActor.Reset
+import filodb.core.metadata.Projection
 
 import org.scalatest.{BeforeAndAfter, BeforeAndAfterAll, FunSpecLike, Matchers}
 import org.scalatest.concurrent.ScalaFutures
@@ -42,6 +43,7 @@ with Matchers with ScalaFutures {
       case e: Exception =>
     }
     FiloDriver.client.sendAllIngestors(Reset)
+    FiloDriver.clusterActor ! NodeClusterActor.Reset
   }
 
   after {

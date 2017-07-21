@@ -27,14 +27,17 @@ class BinaryRecordBenchmark {
 
   org.slf4j.LoggerFactory.getLogger("filodb").asInstanceOf[Logger].setLevel(Level.ERROR)
 
-  val binSchema = RecordSchema(schema)
-  Serializer.putSchema(binSchema)
+  Serializer.putPartitionSchema(projection2.partKeyBinSchema)
+  Serializer.putDataSchema(projection2.binSchema)
 
-  val ingestRowsRegular = IngestRows(projection2.datasetRef, 0, seqReaders.take(50).toList, 100L)
+  val ingestRowsRegular = IngestRows(projection2.datasetRef, 0, 0,
+                                     records(projection2, seqReaders.take(50).toList))
 
   def getBinRecordRows: IngestRows = {
-    val binRecords = seqReaders.take(50).map { r => BinaryRecord(binSchema, r) }
-    ingestRowsRegular.copy(rows = binRecords)
+    ingestRowsRegular.copy(rows = ingestRowsRegular.rows.map { r =>
+      r.copy(partition = projection2.partKey(r.partition),
+             data = BinaryRecord(projection2.binSchema, r.data))
+    })
   }
 
   private def serializeJavaRows: Array[Byte] = {

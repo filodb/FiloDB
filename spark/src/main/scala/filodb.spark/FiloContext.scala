@@ -7,7 +7,7 @@ import scala.concurrent.duration._
 import scala.language.postfixOps
 import filodb.core._
 import filodb.core.metadata.{Column, DataColumn, Dataset, RichProjection}
-import filodb.coordinator.IngestionCommands
+import filodb.coordinator.{IngestionCommands, NodeClusterActor}
 
 /**
  * Class implementing insert and save Scala APIs.
@@ -119,6 +119,8 @@ class FiloContext(val sqlContext: SQLContext) extends AnyVal {
                    database, writeTimeout, flushAfterInsert)
   }
 
+  import NodeClusterActor._
+
   /**
    * Implements INSERT INTO into a Filo Dataset.  The dataset must already have been created.
    * Will check and add any extra columns from the DataFrame into the dataset, but column type
@@ -148,11 +150,16 @@ class FiloContext(val sqlContext: SQLContext) extends AnyVal {
     sparkLogger.info(s"Inserting into ($dataset/$version) with $numPartitions partitions")
     sparkLogger.debug(s"   Dataframe schema = $dfColumns")
 
-    FiloDriver.client.setupIngestion(dataset, columnNames, version) match {
-      case Nil =>
+    // TODO: actually figure out right number of nodes.
+    FiloDriver.client.setupDataset(dataset, columnNames,
+                                   DatasetResourceSpec(numPartitions, Math.min(numPartitions, 10)),
+                                   noOpSource) match {
+      case None =>
         sparkLogger.info(s"Ingestion set up on all coordinators for $dataset / $version")
-      case errs: Seq[ErrorResponse] =>
-        throw new RuntimeException(s"Errors setting up ingestion: $errs")
+        sparkLogger.info(s"Waiting to ensure coordinators ready. TODO: replace with shard status")
+        Thread sleep 5000
+      case Some(err) =>
+        throw new RuntimeException(s"Error setting up ingestion: $err")
     }
 
     // Cannot serialize raw columns

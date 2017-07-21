@@ -25,6 +25,7 @@ object IntSumReadBenchmark {
   val dataset = Dataset("dataset", "rownum", ":round rownum 10000")
   val ref = DatasetRef("dataset")
   val projection = RichProjection(dataset, schema)
+  val partKey = projection.partKey("/0")
 
   val rowIt = Iterator.from(0).map { row => (Some(scala.util.Random.nextInt), Some(row)) }
 
@@ -43,11 +44,11 @@ class IntSumReadBenchmark {
 
   val state = new TestSegmentState(projection, schema)
   val chunkSet = ChunkSet(state, rowIt.map(TupleRowReader).take(NumRows))
-  val reader = ChunkSetReader(chunkSet, schema)
+  val reader = ChunkSetReader(chunkSet, partKey, schema)
 
   val NumSkips = 300  // 3% skips - not that much really
   val skips = (0 until NumSkips).map { i => Random.nextInt(NumRows) }.sorted.distinct
-  val readerWithSkips = ChunkSetReader(chunkSet, schema, EWAHCompressedBitmap.bitmapOf(skips :_*))
+  val readerWithSkips = ChunkSetReader(chunkSet, partKey, schema, EWAHCompressedBitmap.bitmapOf(skips :_*))
 
   /**
    * Simulation of a columnar query engine scanning the segment chunks columnar wise

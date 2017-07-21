@@ -2,8 +2,7 @@ package filodb.stress
 
 import akka.pattern.ask
 import akka.util.Timeout
-import org.apache.spark.{SparkConf, SparkContext}
-import org.apache.spark.sql.{DataFrame, SQLContext, SaveMode}
+import org.apache.spark.sql.{DataFrame, SparkSession, SaveMode}
 import monix.eval.Task
 import monix.reactive.Observable
 import scala.util.Random
@@ -47,20 +46,19 @@ object MemStoreStress extends App {
   val medallions = scala.io.Source.fromURL(getClass.getResource("/1000medallions.csv")).getLines.toArray
   val numKeys = medallions.size
 
-  // set up SparkContext
-  val conf = (new SparkConf).setMaster("local[8]")
-                            .setAppName("MemStoreStress")
-                            .set("spark.filodb.store", "in-memory")
-                            .set("spark.sql.shuffle.partitions", "4")
-                            .set("spark.scheduler.mode", "FAIR")
-                            .set("spark.ui.enabled", "false")   // No need for UI when doing perf stuff
-                            .set("spark.filodb.memstore.max-chunks-size", "1000")
-  val sc = new SparkContext(conf)
-  val sql = new SQLContext(sc)
+  val sess = SparkSession.builder()
+    .master("local[8]")
+    .appName("MemStoreStress")
+    .config("spark.filodb.store", "in-memory")
+    .config("spark.sql.shuffle.partitions", "4")
+    .config("spark.scheduler.mode", "FAIR")
+    .config("spark.ui.enabled", "false")   // No need for UI when doing perf stuff
+    .config("spark.filodb.memstore.max-chunks-size", "1000")
+    .getOrCreate()
 
   // ingest CSV data.  NOTE: select only some columns.  The point of the ingest test is not ingestion speed
   // or total volume but rather query and ingest concurrency
-  val csvDF = sql.read.format("com.databricks.spark.csv").
+  val csvDF = sess.read.format("com.databricks.spark.csv").
                  option("header", "true").option("inferSchema", "true").
                  load(taxiCsvFile).
                  select("medallion", "rate_code", "pickup_datetime", "dropoff_datetime", "passenger_count", "trip_time_in_secs", "trip_distance", "pickup_longitude", "pickup_latitude")
@@ -104,5 +102,5 @@ object MemStoreStress extends App {
 
   FiloDriver.shutdown()
   FiloExecutor.shutdown()
-  sc.stop()
+  sess.stop()
 }

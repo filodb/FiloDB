@@ -1,24 +1,25 @@
 package filodb
 
 import akka.actor.ActorRef
-import akka.pattern.ask
-import akka.util.Timeout
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
-import java.util.concurrent.ArrayBlockingQueue
+import java.sql.Timestamp
+import monix.reactive.Observable
 import net.ceedubs.ficus.Ficus._
 import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.{DataFrame, Row, SQLContext, SparkSession, SaveMode}
+import org.velvia.filo.RowReader
+import scala.collection.mutable.HashMap
 import scala.concurrent.duration._
-import scala.concurrent.{Await, Future}
 import scala.language.implicitConversions
 import scala.language.postfixOps
 
 import org.apache.spark.sql.hive.filodb.MetaStoreSync
 
 import filodb.coordinator.client.ClientException
-import filodb.coordinator.{DatasetCommands, DatasetCoordinatorActor, IngestionCommands, RowSource}
+import filodb.coordinator._
 import filodb.core._
+import filodb.core.memstore.IngestRecord
 import filodb.core.metadata.{Column, DataColumn, Dataset, RichProjection}
 
 package spark {
@@ -43,6 +44,20 @@ package spark {
                               flushAfterInsert: Boolean = true,
                               resetSchema: Boolean = false)
 
+  case class RddRowReader(row: Row) extends RowReader {
+    def notNull(columnNo: Int): Boolean = !row.isNullAt(columnNo)
+    def getBoolean(columnNo: Int): Boolean = row.getBoolean(columnNo)
+    def getInt(columnNo: Int): Int = row.getInt(columnNo)
+    def getLong(columnNo: Int): Long =
+      try { row.getLong(columnNo) }
+      catch {
+        case e: ClassCastException => row.getAs[Timestamp](columnNo).getTime
+      }
+    def getDouble(columnNo: Int): Double = row.getDouble(columnNo)
+    def getFloat(columnNo: Int): Float = row.getFloat(columnNo)
+    def getString(columnNo: Int): String = row.getString(columnNo)
+    def getAny(columnNo: Int): Any = row.get(columnNo)
+  }
 }
 
 /**
@@ -64,7 +79,8 @@ package object spark extends StrictLogging {
   import IngestionCommands._
   import DatasetCommands._
   import FiloDriver.metaStore
-  import RowSource._
+  import IngestionStream._
+  import NodeClusterActor.{SubscribeShardUpdates, ShardMapUpdate}
   import filodb.coordinator.client.Client.{parse, actorAsk}
 
   val sparkLogger = logger
@@ -74,37 +90,46 @@ package object spark extends StrictLogging {
   lazy val datasetOpTimeout = FiloDriver.config.as[FiniteDuration]("spark.dataset-ops-timeout")
   lazy val flushTimeout     = FiloDriver.config.as[FiniteDuration]("spark.flush-timeout")
 
+  private val protocolActors = new HashMap[DatasetRef, ActorRef]
+
+  private[spark] def getProtocolActor(clusterActor: ActorRef, ref: DatasetRef): ActorRef = synchronized {
+    protocolActors.getOrElseUpdate(ref, {
+      val actorId = actorCounter.getAndIncrement()
+      FiloExecutor.system.actorOf(IngestProtocol.props(clusterActor, ref),
+                                  s"ingestProtocol_${ref}_$actorId")
+    })
+  }
+
+  /**
+   * Sends rows from this Spark partition to the right FiloDB nodes using IngestionProtocol.
+   * Might not be terribly efficient.
+   * Uses a shared IngestionProtocol for better efficiency amongst all partitions.
+   */
   private[spark] def ingestRddRows(clusterActor: ActorRef,
                                    projection: RichProjection,
                                    version: Int,
                                    rows: Iterator[Row],
                                    writeTimeout: FiniteDuration,
                                    partitionIndex: Int): Unit = {
-    // Use a queue and read off of iterator in this, the Spark thread.  Due to the presence of ThreadLocals
-    // it is not safe for us to read off of this iterator in another (ie Actor) thread
-    val queue = new ArrayBlockingQueue[Seq[Row]](32)
-    val props = RddRowSourceActor.props(queue, projection, version, clusterActor)
-    val actorId = actorCounter.getAndIncrement()
     val ref = projection.datasetRef
-    val rddRowActor = FiloExecutor.system.actorOf(props, s"${ref}_${version}_${partitionIndex}_${actorId}")
-    implicit val timeout = Timeout(writeTimeout)
-    val resp = rddRowActor ? Start
-    val rowChunks = rows.grouped(1000)
-    var i = 0
-    while (rowChunks.hasNext && !resp.value.isDefined) {
-      queue.put(rowChunks.next)
-      if (i % 20 == 0) logger.info(s"Ingesting batch starting at row ${i * 1000}")
-      i += 1
+    val mapper = actorAsk(clusterActor, SubscribeShardUpdates(ref)) {
+      case ShardMapUpdate(_, newMap) => newMap
     }
-    queue.put(Nil)    // Final marker that there are no more rows
-    Await.result(resp, writeTimeout) match {
-      case AllDone =>
-      case SetupError(UnknownDataset)    => throw DatasetNotFound(ref.toString)
-      case SetupError(BadSchema(reason)) => throw BadSchemaError(reason)
-      case SetupError(other)             => throw new RuntimeException(other.toString)
-      case IngestionErr(errString, None) => throw new RuntimeException(errString)
-      case IngestionErr(errString, Some(e)) => throw new RuntimeException(errString, e)
+
+    val stream = new IngestionStream {
+      def get: Observable[Seq[IngestRecord]] = {
+        val recordSeqIt = rows.grouped(1000).zipWithIndex.map { case (rows, idx) =>
+          if (idx % 20 == 0) logger.info(s"Ingesting batch starting at row ${idx * 1000}")
+          rows.map { row => IngestRecord(projection, RddRowReader(row), idx) }
+        }
+        Observable.fromIterator(recordSeqIt)
+      }
+      def teardown(): Unit = {}
     }
+
+    // NOTE: might need to force scheduler to run on current thread due to bug with Spark ThreadLocal
+    // during shuffles.
+    stream.routeToShards(mapper, projection, getProtocolActor(clusterActor, ref))(FiloExecutor.ec)
   }
 
   /**
