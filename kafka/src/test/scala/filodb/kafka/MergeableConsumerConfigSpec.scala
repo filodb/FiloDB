@@ -5,7 +5,7 @@ import org.apache.kafka.clients.CommonClientConfigs
 import org.apache.kafka.clients.consumer.{ConsumerConfig, SourceConfig}
 import org.apache.kafka.common.serialization.{LongDeserializer, StringDeserializer}
 
-class MergeableConsumerConfigSpec extends AbstractSpec {
+class MergeableConsumerConfigSpec extends ConfigSpec {
   "MergeableConsumerConfig" must {
     "consumer test" in {
       val topic = "test"
@@ -13,7 +13,6 @@ class MergeableConsumerConfigSpec extends AbstractSpec {
 
       val settings = new KafkaSettings(ConfigFactory.parseString(
         s"""
-           |filodb.kafka.config.file="./src/test/resources/full-test.properties"
            |filodb.kafka.topics.ingestion=$topic
            |filodb.kafka.partitions=$partitions
            |filodb.kafka.record-converter="filodb.kafka.StringRecordConverter"

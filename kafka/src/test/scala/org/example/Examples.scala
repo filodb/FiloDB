@@ -1,7 +1,7 @@
 package org.example
 
+import filodb.core.memstore.IngestRecord
 import org.apache.kafka.common.serialization._
-
 import filodb.core.metadata.RichProjection
 import filodb.kafka.{KafkaSerdes, RecordConverter}
 import org.velvia.filo._
@@ -18,10 +18,10 @@ final class CustomDeserializer extends Deserializer[String] with KafkaSerdes {
 
 class CustomRecordConverter extends RecordConverter {
 
-  override def convert(proj: RichProjection, event: AnyRef, offset: Long): Seq[RowReader] = {
+  override def convert(proj: RichProjection, event: AnyRef, partition: Int, offset: Long): Seq[IngestRecord] = {
     event match {
-      case e: Event => Seq(SeqRowReader(e.values))
-      case _ => Seq.empty[RowReader]
+      case e: Event => Seq(IngestRecord(proj, SeqRowReader(e.values), offset))
+      case _        => Seq.empty[IngestRecord]
     }
   }
 }
@@ -34,14 +34,3 @@ final class EventDeserializer extends Deserializer[Event] with KafkaSerdes {
   override def deserialize(topic: String, data: Array[Byte]): Event =
     Event(Seq(new String(data)))
 }
-
-class SimpleRecordConverter extends RecordConverter {
-
-  override def convert(proj: RichProjection, event: AnyRef, offset: Long): Seq[RowReader] = {
-    event match {
-      case e: String => Seq(SeqRowReader(e))
-      case _ => Seq.empty[RowReader]
-    }
-  }
-}
-

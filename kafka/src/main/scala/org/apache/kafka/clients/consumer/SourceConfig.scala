@@ -13,34 +13,25 @@ import filodb.kafka.MergeableConfig
   * INTERNAL API.
   *
   * @param bootstrapServers the kafka cluster host:port list to use
-  *
-  * @param clientId the client Id for the consumer instance
-  *
-  * @param provided the user-provided configurations
+  * @param clientId         the client Id for the consumer instance
+  * @param provided         the user-provided configurations
   */
 final class SourceConfig(bootstrapServers: String,
                          clientId: String,
                          provided: Map[String, AnyRef]
-                        ) extends MergeableConfig(provided) {
+                        ) extends MergeableConfig(bootstrapServers, clientId, provided, "consumer") {
 
   override def kafkaConfig: Map[String, AnyRef] = {
     import ConsumerConfig._
 
-    val consumer = filter("consumer")
-    require(consumer.get(VALUE_DESERIALIZER_CLASS_CONFIG).isDefined,
-      "'value.deserializer' must be defined.")
-    require(consumer.get(AUTO_OFFSET_RESET_CONFIG).isDefined,
-      "'auto.offset.reset' must be defined.")
-    require(consumer.get(GROUP_ID_CONFIG).isEmpty,
-      "'group.id' must be empty.")
+    require(filtered.get(VALUE_DESERIALIZER_CLASS_CONFIG).isDefined,
+      "'value.deserializer' must be configured.")
+    require(filtered.get(AUTO_OFFSET_RESET_CONFIG).isDefined,
+      "'auto.offset.reset' must be configured.")
 
-    val config = consumer ++ Map(
-      BOOTSTRAP_SERVERS_CONFIG ->
-        consumer.getOrElse(BOOTSTRAP_SERVERS_CONFIG, bootstrapServers),
-      CLIENT_ID_CONFIG ->
-        consumer.getOrElse(CLIENT_ID_CONFIG, clientId),
-      KEY_DESERIALIZER_CLASS_CONFIG -> consumer.getOrElse(KEY_DESERIALIZER_CLASS_CONFIG,
-        classOf[LongDeserializer].getName))
+    val config = commonConfig ++ filtered ++ Map(
+      KEY_DESERIALIZER_CLASS_CONFIG -> filtered.getOrElse(KEY_DESERIALIZER_CLASS_CONFIG, classOf[LongDeserializer].getName),
+      VALUE_DESERIALIZER_CLASS_CONFIG -> filtered(VALUE_DESERIALIZER_CLASS_CONFIG))
 
     new ConsumerConfig(config.asJava).values
       .asScala.toMap.map(valueTyped).map {

@@ -50,7 +50,7 @@ trait MemStore extends BaseColumnStore {
    *       Instead the more reactive ingestStream method should be used.
    *
    * @param dataset the dataset to ingest into
-   * @param the shard number to ingest into
+   * @param shard shard number to ingest into
    * @param rows the input rows, each one with an offset, and conforming to the schema used in setup()
    */
   def ingest(dataset: DatasetRef, shard: Int, rows: Seq[IngestRecord]): Unit
@@ -64,7 +64,7 @@ trait MemStore extends BaseColumnStore {
    * stream is safe for now.
    *
    * @param dataset the dataset to ingest into
-   * @param the shard number to ingest into
+   * @param shard shard number to ingest into
    * @param stream the stream of new records, with schema conforming to that used in setup()
    * @param errHandler this is called when an ingestion error occurs
    * @return a Cancelable for cancelling the stream subscription, which should be done on teardown

@@ -34,7 +34,7 @@ package object kafka {
 
   implicit final class FileOps(file: JFile) {
 
-    def asMap = {
+    def asMap: Map[String, AnyRef] = {
       val source = scala.io.Source.fromFile(file.getAbsolutePath)
       try {
         val props = new java.util.Properties()

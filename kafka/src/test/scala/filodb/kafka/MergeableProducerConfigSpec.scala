@@ -5,7 +5,7 @@ import org.apache.kafka.clients.CommonClientConfigs
 import org.apache.kafka.clients.producer.{ProducerConfig, SinkConfig}
 import org.apache.kafka.common.serialization.{LongSerializer, StringSerializer}
 
-class MergeableProducerConfigSpec extends AbstractSpec {
+class MergeableProducerConfigSpec extends ConfigSpec {
   "MergeableProducerConfig" must {
     "producer test" in {
       val topic = "test"
@@ -13,7 +13,6 @@ class MergeableProducerConfigSpec extends AbstractSpec {
 
       val settings = new KafkaSettings(ConfigFactory.parseString(
         s"""
-           |filodb.kafka.config.file="./src/test/resources/full-test.properties"
            |filodb.kafka.topics.ingestion=$topic
            |filodb.kafka.partitions=$partitions
            |filodb.kafka.record-converter="filodb.kafka.StringRecordConverter"

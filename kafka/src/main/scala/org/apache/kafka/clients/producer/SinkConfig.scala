@@ -21,19 +21,17 @@ import filodb.kafka.MergeableConfig
 final class SinkConfig(bootstrapServers: String,
                        clientId: String,
                        provided: Map[String, AnyRef]
-                      ) extends MergeableConfig(provided) {
+                      ) extends MergeableConfig(bootstrapServers, clientId, provided, "producer") {
 
   override def kafkaConfig: Map[String, AnyRef] = {
     import ProducerConfig._
-    val producer = filter("producer")
 
-    require(producer.get(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG).isDefined,
-      s"'${ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG}' must be defined.")
+    require(filtered.get(VALUE_SERIALIZER_CLASS_CONFIG).isDefined,
+      s"'$VALUE_SERIALIZER_CLASS_CONFIG' must be defined.")
 
-    val config = producer ++ Map(
-      BOOTSTRAP_SERVERS_CONFIG -> producer.getOrElse(BOOTSTRAP_SERVERS_CONFIG, bootstrapServers),
-      CLIENT_ID_CONFIG -> producer.getOrElse(CLIENT_ID_CONFIG, clientId),
-      KEY_SERIALIZER_CLASS_CONFIG -> classOf[LongSerializer].getName)
+    val config = commonConfig ++ filtered ++ Map(
+      KEY_SERIALIZER_CLASS_CONFIG -> filtered.getOrElse(KEY_SERIALIZER_CLASS_CONFIG, classOf[LongSerializer].getName),
+      VALUE_SERIALIZER_CLASS_CONFIG -> filtered(VALUE_SERIALIZER_CLASS_CONFIG))
 
     new ProducerConfig(config.asJava).values
       .asScala.toMap.map(valueTyped).map {

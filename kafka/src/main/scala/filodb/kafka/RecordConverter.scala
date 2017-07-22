@@ -1,25 +1,31 @@
 package filodb.kafka
 
 import scala.util.control.NonFatal
-import scala.reflect.ClassTag
-import scala.util.Try
 
-import com.typesafe.scalalogging.StrictLogging
-
+import filodb.coordinator.ConfigurableInstance
+import filodb.core.memstore.IngestRecord
 import filodb.core.metadata.RichProjection
-import org.velvia.filo.{RowReader, SeqRowReader}
+import org.velvia.filo.SingleValueRowReader
 
 /** Extend to create custom converters for even types. */
 trait RecordConverter {
 
-  def convert(proj: RichProjection, event: AnyRef, offset: Long): Seq[RowReader]
+  /** Converts each inbound event received from the Kafka stream
+    * to a FiloDB `IngestRecord`.
+    *
+    * @param proj      the user's data scheme projection
+    * @param event     the value of the Kafka ConsumerRecord
+    * @param partition the Kafka topic partition the event was received by
+    * @param offset    the Kafka topic partition's offset of the message
+    */
+  def convert(proj: RichProjection, event: AnyRef, partition: Int, offset: Long): Seq[IngestRecord]
 }
 
-object RecordConverter extends Instance with StrictLogging {
+object RecordConverter extends ConfigurableInstance {
 
   def apply(fqcn: String): RecordConverter =
     createClass(fqcn)
-      .flatMap{ c: Class[_] => createInstance[RecordConverter](c)}
+      .flatMap { c: Class[_] => createInstance[RecordConverter](c) }
       .recover { case NonFatal(e) =>
         logger.error(s"Unable to instantiate IngestionConverter from $fqcn", e)
         throw e
@@ -27,38 +33,12 @@ object RecordConverter extends Instance with StrictLogging {
 }
 
 /** A simple converter for String types. */
-class StringRecordConverter extends RecordConverter {
+final class StringRecordConverter extends RecordConverter {
 
-  override def convert(proj: RichProjection, event: AnyRef, offset: Long): Seq[RowReader] = {
+  override def convert(proj: RichProjection, event: AnyRef, partition: Int, offset: Long): Seq[IngestRecord] = {
     event match {
-      case e: String => Seq(SeqRowReader(e))
-      case _ => Seq.empty[RowReader]
+      case e: String => Seq(IngestRecord(proj, SingleValueRowReader(e), offset))
+      case _         => Seq.empty[IngestRecord]
     }
   }
 }
-
-trait Instance {
-
-  /** Used to bootstrap configurable FQCNs from config to instances. */
-  def createClass[T: ClassTag](fqcn: String): Try[Class[T]] =
-    Try[Class[T]] {
-      val c = Class.forName(fqcn, false, getClass.getClassLoader).asInstanceOf[Class[T]]
-      val t = implicitly[ClassTag[T]].runtimeClass
-      if (c.isAssignableFrom(c) || c.getName == fqcn) {
-        c
-      }
-      else {
-        throw new ClassCastException(s"$c must be assignable from or be $c")
-      }
-    }
-
-  /** Attempts to create instance of configured type, for no-arg constructor. */
-  def createInstance[T: ClassTag](clazz: Class[_]): Try[T] =
-    Try {
-      val constructor = clazz.getDeclaredConstructor()
-      constructor.setAccessible(true)
-      val obj = constructor.newInstance()
-      obj.asInstanceOf[T]
-    }
-}
-

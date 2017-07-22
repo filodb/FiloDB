@@ -1,41 +1,65 @@
 package filodb.kafka
 
+import java.lang.{Long => JLong}
+
 import scala.concurrent.blocking
 
 import monix.eval.Task
-import monix.kafka.{Deserializer, KafkaConsumerConfig, KafkaConsumerObservable}
+import monix.execution.Scheduler
+import monix.kafka._
+import monix.kafka.config.AutoOffsetReset
 import org.apache.kafka.clients.consumer.KafkaConsumer
 import org.apache.kafka.common.TopicPartition
 
 object PartitionedConsumerObservable {
+  import collection.JavaConverters._
 
   /** Creates a `KafkaConsumerObservable` instance.
     *
-    * @param cfg is the `KafkaConsumerConfig` needed for initializing the consumer
+    * @param settings the `KafkaSettings` needed for initializing the consumer
     *
-    * @param topics the list of Kafka topics to subscribe to.
+    * @param topicPartition the Kafka ingestion topic-partition(s) to assign the new consumer to
     */
-  def apply[K,V](cfg: KafkaConsumerConfig, topics: List[TopicPartition])
-                (implicit K: Deserializer[K], V: Deserializer[V]): KafkaConsumerObservable[K,V] = {
+  def create(settings: KafkaSettings, topicPartition: TopicPartition): KafkaConsumerObservable[JLong, Any] = {
 
-    val consumer = createConsumer[K,V](cfg, topics)
-    KafkaConsumerObservable[K,V](cfg, consumer)
+    val consumer = createConsumer(settings, topicPartition)
+    val cfg = consumerConfig(settings)
+    require(cfg.autoOffsetReset == AutoOffsetReset.Earliest)//enforce?
+
+    KafkaConsumerObservable[JLong, Any](cfg, consumer)
   }
 
-  /** Returns a `Task` for creating a consumer instance, assigned to the
-    * specified topic-partition(s).
-    */
-  def createConsumer[K,V](config: KafkaConsumerConfig, topics: List[TopicPartition])
-                         (implicit K: Deserializer[K], V: Deserializer[V]): Task[KafkaConsumer[K,V]] = {
-
-    import collection.JavaConverters._
+  private[filodb] def createConsumer(settings: KafkaSettings,
+                                     topicPartition: TopicPartition): Task[KafkaConsumer[JLong, Any]] =
     Task {
-      val props = config.toProperties
+      val props = settings.sourceConfig.kafkaConfig.asProps
       blocking {
-        val consumer = new KafkaConsumer[K,V](props, K.create, V.create)
-        consumer.assign(topics.asJava)
-        consumer
+        val consumer = new KafkaConsumer(props)
+        consumer.assign(List(topicPartition).asJava)
+        consumer.asInstanceOf[KafkaConsumer[JLong, Any]]
       }
     }
+
+  private[filodb] def consumerConfig(settings: KafkaSettings) =
+    KafkaConsumerConfig(settings.sourceConfig.asConfig)
+
+}
+
+
+object PartitionedProducerSink {
+
+  /** Convenience function for creating a Monix producer:
+    * {{{
+    *     val producer = PartitionedProducer.create[K, V](settings, scheduler)
+    * }}}
+    *
+    * @param settings the kafka settings
+    *
+    * @param io the monix scheduler
+    */
+  def create[K, V](settings: KafkaSettings, io: Scheduler)
+                  (implicit K: Serializer[K], V: Serializer[V]): KafkaProducerSink[K, V] = {
+    val cfg = KafkaProducerConfig(settings.sinkConfig.asConfig)
+    KafkaProducerSink[K, V](cfg, io)
   }
 }
