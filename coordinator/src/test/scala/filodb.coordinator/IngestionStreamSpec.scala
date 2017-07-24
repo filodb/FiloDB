@@ -127,7 +127,7 @@ with CoordinatorSetupWithFactory with ScalaFutures {
     // Also need a way to probably unregister datasets from NodeClusterActor.
     setup(dataset33, "/GDELT-sample-test.csv", rowsToRead = 10)
 
-    Thread sleep 1400
+    Thread sleep 4000
     coordinatorActor ! GetIngestionStats(ref2, 0)
     expectMsg(MemStoreCoordActor.Status(99, None))
   }
