@@ -60,9 +60,8 @@ lazy val standalone = project
   .in(file("standalone"))
   .settings(buildSettings:_*)
   .settings(assemblySettings:_*)
-  .settings(publish := {})
-  .settings(libraryDependencies += log4jDep)
-  .dependsOn(core, coordinator, cassandra)
+  .settings(libraryDependencies += logbackDep)
+  .dependsOn(core, coordinator, cassandra, kafka)
 
 lazy val spark = project
   .in(file("spark"))
