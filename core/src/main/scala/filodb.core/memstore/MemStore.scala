@@ -1,6 +1,6 @@
 package filodb.core.memstore
 
-import monix.execution.{Cancelable, Scheduler}
+import monix.execution.{CancelableFuture, Scheduler}
 import monix.reactive.Observable
 import org.velvia.filo._
 import org.velvia.filo.{vectors => bv}
@@ -67,11 +67,11 @@ trait MemStore extends BaseColumnStore {
    * @param shard shard number to ingest into
    * @param stream the stream of new records, with schema conforming to that used in setup()
    * @param errHandler this is called when an ingestion error occurs
-   * @return a Cancelable for cancelling the stream subscription, which should be done on teardown
+   * @return a CancelableFuture for cancelling the stream subscription, which should be done on teardown
    */
   def ingestStream(dataset: DatasetRef, shard: Int, stream: Observable[Seq[IngestRecord]])
                   (errHandler: Throwable => Unit)
-                  (implicit sched: Scheduler): Cancelable
+                  (implicit sched: Scheduler): CancelableFuture[Unit]
 
   /**
    * Returns the names of tags or columns that are indexed at the partition level, across

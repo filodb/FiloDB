@@ -5,7 +5,7 @@ import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
 import kamon.metric.instrument.Gauge
-import monix.execution.{Cancelable, Scheduler}
+import monix.execution.{CancelableFuture, Scheduler}
 import monix.reactive.Observable
 import org.jctools.maps.NonBlockingHashMapLong
 import org.velvia.filo.{SchemaRowReader, ZeroCopyUTF8String}
@@ -50,7 +50,7 @@ extends MemStore with ColumnStoreAggregator with StrictLogging {
 
   def ingestStream(dataset: DatasetRef, shard: Int, stream: Observable[Seq[IngestRecord]])
                   (errHandler: Throwable => Unit)
-                  (implicit sched: Scheduler): Cancelable = {
+                  (implicit sched: Scheduler): CancelableFuture[Unit] = {
     getShard(dataset, shard).map { shard =>
       stream.foreach { records => shard.ingest(records) }
             .recover { case ex: Exception => errHandler(ex) }
