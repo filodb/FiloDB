@@ -9,16 +9,15 @@ class MergeableConsumerConfigSpec extends ConfigSpec {
   "MergeableConsumerConfig" must {
     "consumer test" in {
       val topic = "test"
-      val partitions = 1
 
       val settings = new KafkaSettings(ConfigFactory.parseString(
         s"""
-           |filodb.kafka.topics.ingestion=$topic
-           |filodb.kafka.partitions=$partitions
-           |filodb.kafka.record-converter="filodb.kafka.StringRecordConverter"
+           |include file("$FullTestPropsPath")
+           |filo-topic-name=$topic
+           |filo-record-converter="filodb.kafka.StringRecordConverter"
         """.stripMargin))
 
-      val config = new SourceConfig(settings.BootstrapServers, settings.clientId, settings.nativeKafkaConfig)
+      val config = new SourceConfig(settings.BootstrapServers, settings.clientId, settings.kafkaConfig)
       val values = config.kafkaConfig
 
       values(CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG) must be (settings.BootstrapServers)

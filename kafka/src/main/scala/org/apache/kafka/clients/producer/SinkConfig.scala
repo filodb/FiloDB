@@ -2,8 +2,6 @@ package org.apache.kafka.clients.producer
 
 import scala.collection.JavaConverters._
 
-import org.apache.kafka.common.serialization.LongSerializer
-
 import filodb.kafka.MergeableConfig
 
 /** Ensures the configurations not explicitly overwritten by the user
@@ -13,9 +11,7 @@ import filodb.kafka.MergeableConfig
   * INTERNAL API.
   *
   * @param bootstrapServers the kafka cluster host:port list to use
-  *
-  * @param clientId the client Id for the consumer instance
-  *
+  * @param clientId the client Id for the producer instance
   * @param provided the user-provided configurations
   */
 final class SinkConfig(bootstrapServers: String,
@@ -26,12 +22,10 @@ final class SinkConfig(bootstrapServers: String,
   override def kafkaConfig: Map[String, AnyRef] = {
     import ProducerConfig._
 
-    require(filtered.get(VALUE_SERIALIZER_CLASS_CONFIG).isDefined,
+    require(provided.get(VALUE_SERIALIZER_CLASS_CONFIG).isDefined,
       s"'$VALUE_SERIALIZER_CLASS_CONFIG' must be defined.")
 
-    val config = commonConfig ++ filtered ++ Map(
-      KEY_SERIALIZER_CLASS_CONFIG -> filtered.getOrElse(KEY_SERIALIZER_CLASS_CONFIG, classOf[LongSerializer].getName),
-      VALUE_SERIALIZER_CLASS_CONFIG -> filtered(VALUE_SERIALIZER_CLASS_CONFIG))
+    val config = commonConfig ++ provided
 
     new ProducerConfig(config.asJava).values
       .asScala.toMap.map(valueTyped).map {

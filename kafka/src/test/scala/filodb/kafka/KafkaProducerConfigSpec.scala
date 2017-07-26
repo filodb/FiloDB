@@ -11,9 +11,9 @@ class KafkaProducerConfigSpec extends ConfigSpec {
     "have the expected configurations after user configuration and KafkaSettings are passed in" in {
       val settings = new KafkaSettings(ConfigFactory.parseString(
         s"""
-           |filodb.kafka.topics.ingestion="fu"
-           |filodb.kafka.partitions=128
-           |filodb.kafka.record-converter="filodb.kafka.StringRecordConverter"
+           |filo-topic-name="fu"
+           |filo-record-converter="filodb.kafka.StringRecordConverter"
+           |value.serializer=org.apache.kafka.common.serialization.StringSerializer
         """.stripMargin))
 
       settings.sinkConfig.kafkaConfig(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG) must be (classOf[StringSerializer].getName)
@@ -29,9 +29,9 @@ class KafkaConsumerConfigSpec extends ConfigSpec {
     "have the expected configurations after user configuration and KafkaSettings are passed in" in {
       val settings = new KafkaSettings(ConfigFactory.parseString(
         s"""
-           |filodb.kafka.topics.ingestion="fu"
-           |filodb.kafka.partitions=128
-           |filodb.kafka.record-converter="filodb.kafka.StringRecordConverter"
+           |filo-topic-name="fu"
+           |filo-record-converter="filodb.kafka.StringRecordConverter"
+           |value.deserializer=org.apache.kafka.common.serialization.StringDeserializer
         """.stripMargin))
 
       settings.sourceConfig.kafkaConfig(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG) must be (classOf[StringDeserializer].getName)

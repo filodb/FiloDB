@@ -22,10 +22,14 @@ trait PartitionStrategy extends Partitioner {
 }
 
 abstract class ShardPartitionStrategy extends PartitionStrategy {
+  var numShards = -1
 
-  private val settings = new KafkaSettings()
+  override def configure(map: JMap[String, _]): Unit = {
+    numShards = map.get("number.of.shards").toString.toInt
+    require(numShards > 0)
+  }
 
-  protected final val shardToNodeMappings = new ShardMapper(settings.NumPartitions)
+  protected final val shardToNodeMappings = new ShardMapper(numShards)
 
   def partition(topic: String, key: Any, keyBytes: Array[Byte], value: Any, valueBytes: Array[Byte], cluster: Cluster): Int
 

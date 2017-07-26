@@ -13,6 +13,8 @@ import filodb.core.store.{ColumnStore, ColumnStoreScanner, InMemoryMetaStore, In
 import filodb.core.memstore.TimeSeriesMemStore
 
 object GlobalConfig {
+  val ioPool = Scheduler.io()
+
   // Loads the overall configuration in a specific order:
   //  - System properties
   //  - Config file in location specified by filodb.config.file
@@ -20,6 +22,7 @@ object GlobalConfig {
   //  - cluster-reference.conf
   //  - all other reference.conf's
   val systemConfig: Config = {
+    ConfigFactory.invalidateCaches()
     val customConfig = sys.props.get("filodb.config.file").orElse(sys.props.get("config.file"))
                                 .map { path => ConfigFactory.parseFile(new java.io.File(path)) }
                                 .getOrElse(ConfigFactory.empty)

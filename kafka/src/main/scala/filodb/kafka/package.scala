@@ -1,9 +1,10 @@
 package filodb
 
-import java.io.{File => JFile}
 import java.util.{Map => JMap, Properties => JProperties}
 
 import scala.collection.JavaConverters._
+
+import com.typesafe.config.Config
 
 /** Simple conversion implicits. */
 // scalastyle:off
@@ -27,21 +28,11 @@ package object kafka {
     }
   }
 
-  implicit final class PropertiesOps(props: JProperties) {
-
-    def asMap: Map[String, AnyRef] = props.asScala.toMap[String, AnyRef]
-  }
-
-  implicit final class FileOps(file: JFile) {
-
-    def asMap: Map[String, AnyRef] = {
-      val source = scala.io.Source.fromFile(file.getAbsolutePath)
-      try {
-        val props = new java.util.Properties()
-        props.load(source.reader)
-        props.asMap
-      } finally source.close()
-    }
+  implicit final class ConfigOps(config: Config) {
+    // Returns a map with an entry for every node or leaf in the config; it's like walking the config
+    // depth first.  Allows us to return the full config path like 'a.b.c' for every entry.
+    def flattenToMap: Map[String, AnyRef] =
+      config.entrySet.asScala.map { e => e.getKey -> e.getValue.unwrapped }.toMap
   }
 }
 // scalastyle:on

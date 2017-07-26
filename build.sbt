@@ -53,7 +53,8 @@ lazy val kafka = project
   .settings(multiJvmSettings:_*)
   .settings(itSettings : _*)
   .settings(assemblySettings:_*)
-  .dependsOn(coordinator % "compile->compile; test->test")
+  .dependsOn(coordinator % "compile->compile; test->test",
+             core % "compile->compile; it->test")
   .configs(IntegrationTest, MultiJvm)
 
 lazy val standalone = project
@@ -112,7 +113,7 @@ val excludeZK = ExclusionRule(organization = "org.apache.zookeeper")
 val excludeSlf4jLog4j = ExclusionRule(organization = "org.slf4j", name = "slf4j-log4j12")
 val excludeJersey = ExclusionRule(organization = "com.sun.jersey")
 
-val logbackDep = "ch.qos.logback"        % "logback-classic"   % "1.0.7"
+val logbackDep = "ch.qos.logback"        % "logback-classic"   % "1.1.7"
 val log4jDep   = "log4j"                 % "log4j"             % "1.2.17"
 
 lazy val commonDeps = Seq(
@@ -196,12 +197,13 @@ lazy val coreSettings = Seq(
 lazy val testSettings = Seq(
   parallelExecution in Test := false,
   fork in Test := true,
-  parallelExecution in Test := false,
+  // Uncomment below to debug Typesafe Config file loading
+  // javaOptions ++= List("-Xmx2G", "-Dconfig.trace=loads"),
+  javaOptions ++= List("-Xmx2G"),
   // Needed to avoid cryptic EOFException crashes in forked tests
   // in Travis with `sudo: false`.
   // See https://github.com/sbt/sbt/issues/653
   // and https://github.com/travis-ci/travis-ci/issues/3775
-  javaOptions += "-Xmx1250M",
   concurrentRestrictions in Global := Seq(
     // Tags.limit(Tags.CPU, java.lang.Runtime.getRuntime().availableProcessors()),
     Tags.limit(Tags.CPU, 1),

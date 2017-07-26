@@ -6,124 +6,92 @@ import scala.collection.JavaConverters._
 import scala.concurrent.duration._
 import scala.util.{Random, Try}
 import com.typesafe.config.{Config, ConfigFactory}
+import net.ceedubs.ficus.Ficus._
 import org.apache.kafka.clients.CommonClientConfigs
 import org.apache.kafka.clients.consumer.SourceConfig
 import org.apache.kafka.clients.producer.SinkConfig
 import org.apache.kafka.common.config.SslConfigs
 
-/** Creates an immutable `com.typesafe.config.Config`.
+import filodb.coordinator.GlobalConfig
+
+/**
+ * Global settings for FiloDB Kafka overall, not tied to individual sources
+ */
+object KafkaSettings {
+  val moduleConfig = GlobalConfig.systemConfig.getConfig("filodb.kafka-module")
+
+  val EnableFailureChannel = moduleConfig.getBoolean("failures.channel-enabled")
+  val FailureTopic: String = moduleConfig.getString("failures.topic")
+
+  val ConnectedTimeout = moduleConfig.as[FiniteDuration]("tasks.lifecycle.connect-timeout")
+  val StatusTimeout = moduleConfig.as[FiniteDuration]("tasks.status-timeout")
+  lazy val StatusLogInterval = moduleConfig.as[FiniteDuration]("tasks.status.log-interval")
+  lazy val PublishTimeout = moduleConfig.as[FiniteDuration]("tasks.publish-timeout")
+
+  val GracefulStopTimeout = Duration(moduleConfig.getDuration(
+    "tasks.lifecycle.shutdown-timeout", SECONDS), SECONDS)
+}
+
+
+/** Kafka config class wrapping the user-supplied source configuration
+  * when they start a Kafka stream using the filo-cli.
+  * NOTE: This is NOT the global FiloDB config loaded at startup.  A different source config
+  * can be used to start different Kafka streams while the FiloDB nodes/cluster is up.
+  *
+  * An example of a config to pass into KafkaSettings is in src/main/resources/example-source.conf
+  * Due to the design, this config may include or even be parsed from a properties file!  However
+  * this property file cannot have a namespace.
   *
   * Required User Configurations:
-  * `filodb.kafka.config.file` can be either provided by the user in their Typesafe
-  *   custom.conf file or passed in as -Dfilodb.kafka.config.file=/path/to/custom.properties.
   *
-  * `filodb.kafka.bootstrap.servers` the kafka cluster hosts to use. If none provided,
+  * `filo-kafka-servers` the kafka cluster hosts to use. If none provided,
   * defaults to localhost:9092
   *
-  * `filodb.kafka.record-converter` the converter used to convert the event to a filodb row source.
+  * `record-converter` the converter used to convert the event to a filodb row source.
   * A custom event type converter or one of the primitive
   * type filodb.kafka.*Converter
   */
 class KafkaSettings(conf: Config) {
-
-  def this() = this(ConfigFactory.load())
-
-  ConfigFactory.invalidateCaches()
-
-  val config = conf.withFallback(ConfigFactory.load("filodb-defaults.conf"))
-
-  protected val kafka = config.getConfig("filodb.kafka")
+  val config = conf.resolve().withFallback(GlobalConfig.systemConfig.getConfig("filodb.kafka"))
 
   /** Override with `akka.cluster.Cluster.selfAddress` if on the classpath. */
   val selfAddress = InetAddress.getLocalHost.getHostAddress
 
-  def addressId: String = s"$selfAddress-${System.nanoTime}"
+  def clientId: String = s"filodb.kafka.$selfAddress-${System.nanoTime}"
 
-  /** `filodb.kafka.config.file` can be either provided by the user in their Typesafe
-    * custom.conf file or passed in as -Dfilodb.kafka.config.file=/path/to/custom.properties.
-    *
-    * For the native way Kafka properties are loaded by users, and retaining full keys
-    * which Typesafe config would break up to the last key which does not work for how
-    * Kafka loads its configuration. It requires `the.full.key=value`.
-    *
-    * We don't use the monix KafkaConsumerConfig load functions because
-    * FiloDB coordinator module loads using those typesafe config sys props.
-    * Monix also does not read `key.deserializer` or `value.deserializer` -
-    * it only takes the types from the user and we can't.
-    */
-  // scalastyle:off
-  private[kafka] val nativeKafkaConfig: Map[String, AnyRef] =
-    sys.props.get("filodb.kafka.config.file") match {
-      case Some(path) if path.nonEmpty =>
-        val file = new java.io.File(path.replace("./", ""))
-        require(file.exists, s"'filodb.kafka.config.file=${file.getAbsolutePath}' not found.")
-        for {
-          (k, v) <- file.asMap
-          if k.startsWith("filodb.kafka")
-        } yield k.replace("filodb.kafka.", "") -> v
-      case _ =>
-        throw new IllegalArgumentException(
-          "'filodb.kafka.config.file=/path/your.properties' must be set to load your kafka client configuration.")
-    }
-  // scalastyle:on
-
-  def clientId: String = s"filodb.kafka.$addressId"
+  def kafkaConfig: Map[String, AnyRef] = config.flattenToMap
+                                               .filterNot { case (k, _) => k.startsWith("filo-") }
 
   /** Returns a comma-separated String of host:port entries required by the Kafka client.
     *
-    * Set from either a comma-separated string from the user's kafka properties file
-    * with namespace `filodb.kafka.bootstrap.server` or configured in your custom.conf
-    * file as a list of host:port entries like:
+    * Set from either a comma-separated string from `bootstrap.servers` config key
+    * or use `filo-kafka-servers` in your .conf file using HOCON list syntax:
     * {{{
-    *   filodb.kafka {
-    *      bootstrap.servers = [
+    *      filo-kafka-servers = [
     *       "dockerKafkaBroker1:9092",
     *       "dockerKafkaBroker2:9093" ]
-    *   }}
     * }}}
     */
-  val BootstrapServers: String = nativeKafkaConfig
+  val BootstrapServers: String = kafkaConfig
       .get(CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG).map(_.toString)
-      .getOrElse(kafka.getStringList("bootstrap.servers").asScala.toList.distinct.mkString(","))
+      .getOrElse(config.as[Seq[String]]("filo-kafka-servers").distinct.mkString(","))
 
-  val NumPartitions = kafka.getInt("partitions")
+  val IngestionTopic = config.getString("filo-topic-name")
 
-  val IngestionTopic = kafka.getString("topics.ingestion")
-
-  val FailureTopic: String = kafka.getString("topics.failure")
-
-  require(kafka.hasPath("record-converter"),
+  require(config.hasPath("filo-record-converter"),
     "'filodb.kafka.record-converter' must not be empty. Configure a custom converter.")
 
-  val RecordConverterClass = kafka.getString("record-converter")
-
-  val EnableFailureChannel = kafka.getBoolean("failures.channel-enabled")
-
-  val ConnectedTimeout = Duration(kafka.getDuration(
-    "tasks.lifecycle.connect-timeout", MILLISECONDS), MILLISECONDS)
-
-  val GracefulStopTimeout = Duration(kafka.getDuration(
-    "tasks.lifecycle.shutdown-timeout", SECONDS), SECONDS)
-
-  val StatusTimeout = Duration(kafka.getDuration(
-    "tasks.status-timeout", MILLISECONDS), MILLISECONDS)
-
-  lazy val StatusLogInterval = Duration(kafka.getDuration(
-    "tasks.status.log-interval", MILLISECONDS), MILLISECONDS)
-
-  lazy val PublishTimeout = Duration(kafka.getDuration(
-    "tasks.publish-timeout", MILLISECONDS), MILLISECONDS)
+  val RecordConverterClass = config.getString("filo-record-converter")
 
   /** Bridges the monix config gap with native kafka user properties. */
-  def sourceConfig = new SourceConfig(BootstrapServers, clientId, nativeKafkaConfig)
+  def sourceConfig: SourceConfig = new SourceConfig(BootstrapServers, clientId, kafkaConfig)
 
   /** Bridges the monix config gap with native kafka user properties. */
-  def sinkConfig = new SinkConfig(BootstrapServers, clientId, nativeKafkaConfig)
+  def sinkConfig: SinkConfig = new SinkConfig(BootstrapServers, clientId, kafkaConfig)
 
 }
 
-/** A class that merges the user-provided native kafka properties file
-  * loaded and merged with any required by filodb and or defaults.
+/** A class that merges the user-provided kafka config with generated config such as client ID
   *
   * @param provided the configs to use
   */
@@ -143,14 +111,6 @@ abstract class MergeableConfig(bootstrapServers: String,
   private val listTypes = Seq(
     CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG,
     SslConfigs.SSL_ENABLED_PROTOCOLS_CONFIG)
-
-  protected final val filtered: Map[String, AnyRef] =
-    provided collect {
-      case (k, v) if k.startsWith(namespace) =>
-        k.replace(namespace + ".", "") -> v
-      case (k, v) if k.startsWith("kafka.") =>
-        k.replace("kafka.", "") -> v
-    }
 
   // no namespacing in kafka, used by both producers and consumers
   protected def commonConfig: Map[String, AnyRef] = Map(

@@ -24,10 +24,20 @@
             <maxHistory>30</maxHistory>
         </rollingPolicy>
 
-    <encoder>
-      <pattern>[%date{ISO8601}] %-5level %logger{20} [%thread] - %msg%n</pattern>
-    </encoder>
+        <encoder>
+          <pattern>[%date{ISO8601}] %-5level %logger{20} [%thread] - %msg%n</pattern>
+        </encoder>
     </appender>
+
+    <logger name="org.apache.kafka.clients.consumer.ConsumerConfig" level="INFO"/>
+    <logger name="org.apache.kafka.clients" level="INFO"/>
+    <logger name="org.apache.kafka" level="INFO"/>
+
+    <logger name="org.apache.kafka.clients.producer.ProducerConfig" level="WARN"/>
+    <logger name="org.apache.kafka.common.security" level="WARN"/>
+    <logger name="org.apache.kafka.common.network" level="WARN"/>
+    <logger name="org.apache.kafka.common.metrics" level="ERROR"/>
+
     <root level="info">
         <appender-ref ref="file"/>
     </root>

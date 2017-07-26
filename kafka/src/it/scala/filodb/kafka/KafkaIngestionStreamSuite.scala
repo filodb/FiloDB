@@ -35,12 +35,16 @@ class KafkaIngestionStreamSuite extends ConfigSpec with StrictLogging {
   import Column.ColumnType._
 
   private val count = 1000
+  private val numPartitions = 2
 
-  private val config = ConfigFactory.parseString(
+  ConfigFactory.invalidateCaches()
+  val globalConfig = ConfigFactory.load("application_test.conf")
+
+  private val sourceConfig = ConfigFactory.parseString(
     s"""
-       |filodb.kafka.topics.ingestion="integration-test-topic"
-       |filodb.kafka.partitions=2
-       |filodb.kafka.record-converter="${classOf[PartitionRecordConverter].getName}"
+       |include file("$FullTestPropsPath")
+       |filo-topic-name="integration-test-topic"
+       |filo-record-converter="${classOf[PartitionRecordConverter].getName}"
         """.stripMargin)
 
   implicit val timeout: Timeout = 10.seconds
@@ -59,11 +63,11 @@ class KafkaIngestionStreamSuite extends ConfigSpec with StrictLogging {
       val ds = DatasetSetup(dataset, schema.map(_.toString), 0, source)
 
       // kafka config
-      val settings = new KafkaSettings(config)
+      val settings = new KafkaSettings(sourceConfig)
 
       // coordinator:
       val ctor = Class.forName(ds.source.streamFactoryClass).getConstructors.head
-      val memStore = new TimeSeriesMemStore(settings.config.getConfig("filodb"))
+      val memStore = new TimeSeriesMemStore(globalConfig.getConfig("filodb"))
       memStore.setup(projection, 0)
       memStore.reset()
 
@@ -79,7 +83,7 @@ class KafkaIngestionStreamSuite extends ConfigSpec with StrictLogging {
                 Consumer.complete
                 Stop
               case IngestRecord(_, RoutingRowReader(TupleRowReader((m: String,p: Int)), _), o) =>
-                logger.debug(s"Received and converted $o with partition=$p offset=$o")
+                logger.debug(s"Received and converted $m with partition=$p offset=$o")
                 Continue
             }.getOrElse(Continue)
           }
@@ -92,7 +96,7 @@ class KafkaIngestionStreamSuite extends ConfigSpec with StrictLogging {
       implicit val io = Scheduler.io("filodb-kafka-tests")
       val producer = PartitionedProducerSink.create[JLong, String](settings, io)
 
-      val tasks = for (partition <- 0 until settings.NumPartitions) yield {
+      val tasks = for (partition <- 0 until numPartitions) yield {
         // The producer task creates `count` ProducerRecords, each range divided equally between the topic's partitions
         val sinkT = Observable.range(0, count)
           .map(msg => new ProducerRecord[JLong, String](settings.IngestionTopic, JLong.valueOf(partition), msg.toString))

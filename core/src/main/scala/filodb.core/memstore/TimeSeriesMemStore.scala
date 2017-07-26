@@ -32,7 +32,15 @@ extends MemStore with ColumnStoreAggregator with StrictLogging {
   // TODO: Change the API to return Unit Or ShardAlreadySetup, instead of throwing.  Make idempotent.
   def setup(projection: RichProjection, shard: Int): Unit = synchronized {
     val dataset = projection.datasetRef
-    val shards = datasets.getOrElseUpdate(dataset, new NonBlockingHashMapLong[TimeSeriesShard](32, false))
+    val shards = datasets.getOrElseUpdate(dataset, {
+                   val shardMap = new NonBlockingHashMapLong[TimeSeriesShard](32, false)
+                   Kamon.metrics.gauge(s"num-partitions-${dataset.dataset}",
+                     5.seconds)(new Gauge.CurrentValueCollector {
+                      def currentValue: Long =
+                        shardMap.values.asScala.map(_.numActivePartitions).sum.toLong
+                     })
+                   shardMap
+                 })
     if (shards contains shard) {
       throw ShardAlreadySetup
     } else {
@@ -134,10 +142,6 @@ class TimeSeriesShard(projection: RichProjection, config: Config) extends Strict
 
   private val chunksToKeep = config.getInt("memstore.chunks-to-keep")
   private val maxChunksSize = config.getInt("memstore.max-chunks-size")
-  private val numPartitions = Kamon.metrics.gauge(s"num-partitions-${projection.datasetRef.dataset}",
-                                                  5.seconds)(new Gauge.CurrentValueCollector {
-                                                   def currentValue: Long = partitions.size.toLong
-                                                  })
 
   class PartitionIterator(intIt: IntIterator) extends Iterator[TimeSeriesPartition] {
     def hasNext: Boolean = intIt.hasNext

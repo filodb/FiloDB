@@ -19,13 +19,5 @@ abstract class AbstractAkkaSpec(name: String) extends TestKit(ActorSystem(name))
  with BaseSpec with WordSpecLike with ImplicitSender with StrictLogging
 
 trait ConfigSpec extends AbstractSpec {
-
-  override def beforeAll(): Unit = {
-    if (sys.props.get("idea.launcher.bin.path").nonEmpty) {
-      System.setProperty("filodb.kafka.config.file", "./kafka/src/test/resources/full-test.properties")
-    }
-  }
-
-  override def afterAll(): Unit = System.clearProperty("filodb.kafka.config.file")
-
+  val FullTestPropsPath = "./src/test/resources/full-test.properties"
 }

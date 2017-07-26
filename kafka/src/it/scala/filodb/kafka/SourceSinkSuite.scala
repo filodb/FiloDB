@@ -22,13 +22,13 @@ import org.apache.kafka.common.TopicPartition
 class SourceSinkSuite extends ConfigSpec {
 
   // TODO UPDATE FOR PARTITIONS=3 TEST
-  private val topic = "filodb-kafka-tests11"
+  private val topic = "filodb-kafka-tests"
 
   private lazy val settings = new KafkaSettings(ConfigFactory.parseString(
     s"""
-       |filodb.kafka.topics.ingestion=$topic
-       |filodb.kafka.partitions=1
-       |filodb.kafka.record-converter="filodb.kafka.StringRecordConverter"
+       |include file("$FullTestPropsPath")
+       |filo-topic-name=$topic
+       |filo-record-converter="filodb.kafka.StringRecordConverter"
         """.stripMargin))
 
   private val tps = List(new TopicPartition(topic, 0))
@@ -38,7 +38,6 @@ class SourceSinkSuite extends ConfigSpec {
   "FiloDBKafka" must {
     "have the expected shared configuration" in {
       settings.IngestionTopic must be(topic)
-      settings.NumPartitions must be(1)
       settings.RecordConverterClass must be(classOf[StringRecordConverter].getName)
       settings.BootstrapServers must be("localhost:9092")
     }
@@ -52,7 +51,6 @@ class SourceSinkSuite extends ConfigSpec {
       producerCfg.clientId.contains("filodb") must be(true)
 
       consumerCfg.autoOffsetReset must be(AutoOffsetReset.Earliest)
-      consumerCfg.groupId must be("") // why does monix not use null if unset? bad.
     }
     "publish one message" in {
       val producerCfg = KafkaProducerConfig(settings.sinkConfig.asConfig)
