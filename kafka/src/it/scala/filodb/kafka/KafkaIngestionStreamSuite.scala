@@ -21,9 +21,13 @@ import filodb.core.memstore.{IngestRecord, TimeSeriesMemStore}
 import filodb.core.metadata.{Column, DataColumn, Dataset, RichProjection}
 import org.velvia.filo.{RoutingRowReader, TupleRowReader}
 
-/** Start Zookeeper and Kafka.
-  * Run ./bin/kafka-topics.sh --create --zookeeper localhost:2181 --replication-factor 1 --partitions 2 --topic integration-test-topic
-  * Make sure the configured settings for number of partitions and topic name below match what you created.
+/** 1. Start Zookeeper
+  * 2. Start Kafka (tested with Kafka 0.10.2.1 and 0.11)
+  * 3. Create a new topic
+  *   ./bin/kafka-topics.sh --create --zookeeper localhost:2181 --replication-factor 1 --partitions 2 --topic integration-test-topic
+  *    Make sure the configured settings for number of partitions and topic name below match what you created.
+  * 4. Run test either from Intellij or SBT:
+  *    > kafka/it:testOnly filodb.kafka.KafkaIngestionStreamSuite
   */
 class KafkaIngestionStreamSuite extends ConfigSpec with StrictLogging {
 
@@ -34,7 +38,7 @@ class KafkaIngestionStreamSuite extends ConfigSpec with StrictLogging {
 
   private val config = ConfigFactory.parseString(
     s"""
-       |filodb.kafka.topics.ingestion="integration-test-topic7"
+       |filodb.kafka.topics.ingestion="integration-test-topic"
        |filodb.kafka.partitions=2
        |filodb.kafka.record-converter="${classOf[PartitionRecordConverter].getName}"
         """.stripMargin)
@@ -71,10 +75,11 @@ class KafkaIngestionStreamSuite extends ConfigSpec with StrictLogging {
           def onNext(elem: Seq[IngestRecord]): Ack = {
             elem.headOption.collect {
               case IngestRecord(_, RoutingRowReader(TupleRowReader((m: String,p: Int)), _), o) if m == range.max =>
-                logger.debug(s"Processing last published event for partition $p with offset $o")
+                logger.debug(s"Processing last published event for partition=$p offset=$o")
                 Consumer.complete
                 Stop
               case IngestRecord(_, RoutingRowReader(TupleRowReader((m: String,p: Int)), _), o) =>
+                logger.debug(s"Received and converted $o with partition=$p offset=$o")
                 Continue
             }.getOrElse(Continue)
           }
