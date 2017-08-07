@@ -62,7 +62,7 @@ lazy val standalone = project
   .settings(buildSettings:_*)
   .settings(assemblySettings:_*)
   .settings(libraryDependencies += logbackDep)
-  .dependsOn(core, coordinator, cassandra, kafka)
+  .dependsOn(core, coordinator % "compile->compile; test->test", cassandra, kafka)
 
 lazy val spark = project
   .in(file("spark"))

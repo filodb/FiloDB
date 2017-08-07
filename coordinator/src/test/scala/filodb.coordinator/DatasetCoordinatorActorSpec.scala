@@ -1,24 +1,23 @@
 package filodb.coordinator
 
-import akka.actor.{ActorRef, ActorSystem, PoisonPill}
-import akka.testkit.TestProbe
-import akka.pattern.gracefulStop
-import com.typesafe.config.ConfigFactory
-import org.velvia.filo.{RowReader, TupleRowReader}
-
 import scala.concurrent.Future
 import scala.concurrent.duration._
+import scala.util.Try
+
+import akka.actor.{ActorRef, PoisonPill}
+import akka.pattern.gracefulStop
+import com.typesafe.config.ConfigFactory
+import org.velvia.filo.TupleRowReader
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
-import filodb.core._
-import filodb.core.metadata.{Column, Dataset, RichProjection}
-import filodb.core.memstore.IngestRecord
-import filodb.core.store.{ChunkSetSegment, InMemoryColumnStore, SegmentInfo}
-import filodb.core.reprojector.{DefaultReprojector, MemTable, Reprojector}
+import scalax.file.Path
 import org.scalatest.DoNotDiscover
 
-import scala.util.Try
-import scalax.file.Path
+import filodb.core._
+import filodb.core.metadata.RichProjection
+import filodb.core.memstore.IngestRecord
+import filodb.core.store.{ChunkSetSegment, InMemoryColumnStore, SegmentInfo}
+import filodb.core.reprojector.{MemTable, Reprojector}
 
 object DatasetCoordinatorActorSpec extends ActorSpecConfig
 

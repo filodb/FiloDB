@@ -21,14 +21,14 @@ class MergeableProducerConfigSpec extends ConfigSpec {
       val config = new SinkConfig(settings.BootstrapServers, settings.clientId, settings.kafkaConfig)
       val values = config.kafkaConfig
 
-      values(CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG) must be ("localhost:9092")
-      values(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG) must be (classOf[LongSerializer].getName)
-      values(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG) must be (classOf[StringSerializer].getName)
+      values(CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG) should be ("localhost:9092")
+      values(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG) should be (classOf[LongSerializer].getName)
+      values(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG) should be (classOf[StringSerializer].getName)
 
       val props = values.asProps
-      props.get(CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG) must be (settings.BootstrapServers)
-      props.get(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG) must be (classOf[LongSerializer].getName)
-      props.get(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG) must be (classOf[StringSerializer].getName)
+      props.get(CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG) should be (settings.BootstrapServers)
+      props.get(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG) should be (classOf[LongSerializer].getName)
+      props.get(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG) should be (classOf[StringSerializer].getName)
     }
   }
 }

@@ -1,9 +1,10 @@
 package filodb.coordinator
 
+import scala.concurrent.duration._
+
 import akka.actor.ActorRef
 import akka.remote.testkit.MultiNodeConfig
 import com.typesafe.config.ConfigFactory
-import scala.concurrent.duration._
 
 import filodb.core._
 
@@ -28,6 +29,10 @@ abstract class NodeClusterSpec extends ClusterSpec(NodeClusterSpecConfig) {
   import NodeClusterSpecConfig._
   import NodeClusterActor._
   import NamesTestData._
+
+  private lazy val metaStore = cluster.metaStore
+
+  private lazy val coordinatorActor = cluster.coordinatorActor
 
   override def initialParticipants = roles.size
 
@@ -57,7 +62,7 @@ abstract class NodeClusterSpec extends ClusterSpec(NodeClusterSpecConfig) {
       cluster join address1
       awaitCond(cluster.state.members.size == 1)
 
-      clusterActor = singletonClusterActor("worker")
+      clusterActor = cluster.clusterSingletonProxy("worker", withManager = true)
     }
     enterBarrier("first-node-joined-cluster-actor-started")
   }
@@ -119,7 +124,7 @@ abstract class NodeClusterSpec extends ClusterSpec(NodeClusterSpecConfig) {
     runOn(second) {
       cluster join address1
       awaitCond(cluster.state.members.size == 2)
-      clusterActor = singletonClusterActor("worker")
+      clusterActor = cluster.clusterSingletonProxy("worker", withManager = true)
     }
 
     enterBarrier("second-node-joined")

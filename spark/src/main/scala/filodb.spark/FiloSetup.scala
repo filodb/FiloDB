@@ -1,24 +1,24 @@
 package filodb.spark
 
-import akka.actor.{ActorSystem, AddressFromURIString}
-import akka.pattern.ask
-import akka.util.Timeout
-import com.typesafe.config.{Config, ConfigFactory}
-import com.typesafe.scalalogging.StrictLogging
-import net.ceedubs.ficus.Ficus._
-import org.apache.spark.SparkContext
 import scala.concurrent.Await
 import scala.concurrent.duration._
 import scala.language.{implicitConversions, postfixOps}
 
+import akka.actor.{ActorSystem, AddressFromURIString}
+import akka.pattern.ask
+import akka.util.Timeout
+import com.typesafe.config.{Config, ConfigFactory}
+import net.ceedubs.ficus.Ficus._
+import org.apache.spark.SparkContext
+import org.apache.spark.sql.hive.filodb.MetaStoreSync
+
 import filodb.coordinator.client.ClusterClient
 import filodb.coordinator.IngestionCommands.DCAReady
 import filodb.coordinator.NodeCoordinatorActor.ReloadDCA
-import filodb.coordinator.{CoordinatorSetupWithFactory, NodeClusterActor}
-import org.apache.spark.sql.hive.filodb.MetaStoreSync
+import filodb.coordinator.{NodeClusterActor, _}
 
 /**
- * FiloSetup handles the Spark side setup of both executors and the driver app, including one-time
+ * FilodbSparkCluster handles the Spark side setup of both executors and the driver app, including one-time
  * initialization of the coordinator on executors.  Note that executor and driver setup are different.
  * Drivers initialize first, joins the cluster and adds the driver address to the config.
  * Executors initialize by joining the cluster, starting the coordinator.
@@ -31,64 +31,73 @@ import org.apache.spark.sql.hive.filodb.MetaStoreSync
  * the same JVM.  The benefit is that local mode works exactly the same as distributed cluster mode, making
  * the code simpler.
  */
-trait FiloSetup extends CoordinatorSetupWithFactory {
+private[filodb] trait FilodbSparkCluster extends FilodbClusterNode {
+
+  // value actorSystem in class SparkEnv is deprecated: and actor system is no longer supported as of 1.4.0
+  // When you have DSE set up on mutlinodes(each node is assigned it's own ip address) in one physical machine,
+  // it's hard to identify Memtable WAL files created for each node. So to address this issue require to pass
+  // Hostname to the akka configuration
+  lazy val settings = {
+    val port = systemConfig.as[Option[Int]](s"filodb.spark.$role.port").getOrElse(0)
+    val host = MetaStoreSync.sparkHost
+    ConfigFactory.parseString(s"""
+      akka.cluster.roles=["$roleName"]
+      akka.remote.netty.tcp.hostname=$host
+      akka.remote.netty.tcp.port=$port""")
+
+    new FilodbSettings()
+  }
+
+  override lazy val system = ActorSystem(systemName, settings.allConfig)
+
+  override lazy val cluster = FilodbCluster(system)
+
+  var _config: Option[Config] = None
+
   // The global config of filodb with cassandra, columnstore, etc. sections
   def config: Config = _config.get
-  var _config: Option[Config] = None
-  var role: String = "executor"
 
-  lazy val system = {
-    val port = systemConfig.as[Option[Int]](s"filodb.spark.$role.port").getOrElse(0)
-    // value actorSystem in class SparkEnv is deprecated: and actor system is no longer supported as of 1.4.0
-    // When you have DSE set up on mutlinodes(each node is assigned it's own ip address) in one physical machine,
-    // it's hard to identify Memtable WAL files created for each node. So to address this issue require to pass
-    // Hostname to the akka configuration
-    val host = MetaStoreSync.sparkHost
-    ActorSystem("filo-spark", configAkka(role, host, port))
-  }
+  lazy val columnStore = cluster.columnStore
 
-  def configAkka(role: String, host: String, akkaPort: Int): Config =
-    ConfigFactory.parseString(s"""akka.cluster.roles=[$role]
-                                  |akka.remote.netty.tcp.hostname=$host
-                                  |akka.remote.netty.tcp.port=$akkaPort""".stripMargin)
-              .withFallback(systemConfig)
+  lazy val stateCache = cluster.stateCache
 
-  override def shutdown(): Unit = {
-    _config.foreach(c => super.shutdown())
-  }
+  lazy val clusterActor = cluster.clusterSingletonProxy(roleName, withManager = true)
+
 }
 
-object FiloDriver extends FiloSetup with StrictLogging {
+object FiloDriver extends FilodbSparkCluster {
   import collection.JavaConverters._
 
-  lazy val clusterActor = getClusterActor("executor")
+  override val role = ClusterRole.Driver
+
   lazy val client = new ClusterClient(clusterActor, "executor", "driver")
 
   // The init method called from a SparkContext is going to be from the driver/app.
   // It also initializes all executors.
-  def init(context: SparkContext): Unit = synchronized {
+  private[filodb] def init(context: SparkContext): Unit = synchronized {
     if (_config.isEmpty) {
+      import cluster.settings._
+
       logger.info("Initializing FiloDriver clustering/coordination...")
-      role = "driver"
       val filoConfig = configFromSpark(context)
       _config = Some(filoConfig)
-      kamonInit()
-      coordinatorActor
 
-      // Add in self cluster address, and join cluster ourselves
-      val selfAddr = cluster.selfAddress
-      cluster.join(selfAddr)
+      cluster.kamonInit(role)
+      coordinatorActor // create it
+      cluster.join(cluster.selfAddress)
 
-      val finalConfig = ConfigFactory.parseString(s"""spark-driver-addr = "$selfAddr"""")
-                                     .withFallback(filoConfig)
-      implicit val timeout = Timeout(59.seconds)
-      Await.result(metaStore.initialize(), 60.seconds)
+      val finalConfig = ConfigFactory
+        .parseString(s"""spark-driver-addr = "${cluster.selfAddress}"""")
+        .withFallback(filoConfig)
+
+      implicit val timeout = Timeout(InitializationTimeout.minus(1.second))
+      Await.result(metaStore.initialize(), InitializationTimeout)
+
       FiloExecutor.initAllExecutors(finalConfig, context)
-
       // Because the clusterActor can only be instantiated on an executor/FiloDB node, this works by
       // waiting for the clusterActor to respond, thus guaranteeing cluster working correctly
-      Await.result(clusterActor ? NodeClusterActor.GetRefs("executor"), 60.seconds)
-
+      Await.result(clusterActor ? NodeClusterActor.GetRefs("executor"), InitializationTimeout)
+      cluster._isInitialized.set(true)
       _config = Some(finalConfig)
     }
   }
@@ -104,14 +113,17 @@ object FiloDriver extends FiloSetup with StrictLogging {
                                                 k.replace("spark.filodb.", "filodb.") -> v
                                             }
     ConfigFactory.parseMap(filoOverrides.toMap.asJava)
-                 .withFallback(systemConfig)
-                 .getConfig("filodb")
+                 .withFallback(settings.config) // the filodb config
   }
+
+  Runtime.getRuntime.addShutdownHook(new Thread() {
+    override def run(): Unit = shutdown()
+  })
 }
 
-object FiloExecutor extends FiloSetup with StrictLogging {
+object FiloExecutor extends FilodbSparkCluster {
 
-  lazy val clusterActor = singletonClusterActor("executor")
+  override val role = ClusterRole.Executor
 
   def initAllExecutors(filoConfig: Config, context: SparkContext, numPartitions: Int = 1000): Unit = {
       logger.info(s"Initializing executors using $numPartitions partitions...")
@@ -124,27 +136,26 @@ object FiloExecutor extends FiloSetup with StrictLogging {
 
   /**
    * Initializes the config if it is not set, and start things for an executor.
+   *
    * @param filoConfig The config within the filodb.** level.
-   * @param role the Akka Cluster role, either "executor" or "driver"
    */
   def init(filoConfig: Config): Unit = synchronized {
     _config.getOrElse {
-      this.role = "executor"
       _config = Some(filoConfig)
-      kamonInit()
-      coordinatorActor       // force coordinator to start
 
       // start ingesting data once reload DCA process is complete
       if (startReloadDCA()) {
-        // get address from config and join cluster.  note: it's ok to join cluster multiple times
         val addr = AddressFromURIString.parse(filoConfig.getString("spark-driver-addr"))
         logger.info(s"Initializing FiloExecutor clustering by joining driver at $addr...")
+        cluster.kamonInit(role)
+        coordinatorActor // create it
         cluster.join(addr)
         clusterActor
+        cluster._isInitialized.set(true)
       } else {
         // Stop ingestion if there is an exception occurs during reload DCA
         shutdown()
-        FiloDriver.shutdown()
+        FiloDriver.shutdown() // do we need to call both?
         sys.exit(2)
       }
     }
@@ -152,7 +163,7 @@ object FiloExecutor extends FiloSetup with StrictLogging {
 
   def startReloadDCA(): Boolean = {
     implicit val timeout = Timeout(FiniteDuration(10, SECONDS))
-    val resp = coordinatorActor ? ReloadDCA
+    val resp = cluster.coordinatorActor ? ReloadDCA
     // start reloading WAL files if reload-wal-enabled is set to true
     if (config.getBoolean("write-ahead-log.reload-wal-enabled")) {
       try {

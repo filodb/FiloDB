@@ -107,7 +107,7 @@ class KafkaIngestionStreamSuite extends ConfigSpec with StrictLogging {
         // this is currently a 1:1 Observable stream
         val  sourceT = {
           val streamFactory = ctor.newInstance().asInstanceOf[IngestionStreamFactory]
-          streamFactory.isInstanceOf[KafkaIngestionStreamFactory] must be(true)
+          streamFactory.isInstanceOf[KafkaIngestionStreamFactory] should be(true)
           streamFactory
             .create(settings.config, projection, partition)
             .get

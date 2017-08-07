@@ -16,10 +16,10 @@ class KafkaProducerConfigSpec extends ConfigSpec {
            |value.serializer=org.apache.kafka.common.serialization.StringSerializer
         """.stripMargin))
 
-      settings.sinkConfig.kafkaConfig(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG) must be (classOf[StringSerializer].getName)
+      settings.sinkConfig.kafkaConfig(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG) should be (classOf[StringSerializer].getName)
 
       val config = KafkaProducerConfig(settings.sinkConfig.asConfig)
-      config.bufferMemoryInBytes must be (settings.sinkConfig.kafkaConfig(ProducerConfig.BUFFER_MEMORY_CONFIG))
+      config.bufferMemoryInBytes should be (settings.sinkConfig.kafkaConfig(ProducerConfig.BUFFER_MEMORY_CONFIG))
     }
   }
 }
@@ -34,10 +34,10 @@ class KafkaConsumerConfigSpec extends ConfigSpec {
            |value.deserializer=org.apache.kafka.common.serialization.StringDeserializer
         """.stripMargin))
 
-      settings.sourceConfig.kafkaConfig(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG) must be (classOf[StringDeserializer].getName)
+      settings.sourceConfig.kafkaConfig(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG) should be (classOf[StringDeserializer].getName)
 
       val config = KafkaConsumerConfig(settings.sourceConfig.asConfig)
-      config.enableAutoCommit must be (settings.sourceConfig.kafkaConfig(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG))
+      config.enableAutoCommit should be (settings.sourceConfig.kafkaConfig(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG))
     }
   }
 }

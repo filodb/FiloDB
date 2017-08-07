@@ -41,7 +41,7 @@ object Client {
    * Creates a LocalClient that remotely connects to a standalone FiloDB node NodeCoordinator.
    * @param host the full host string (without port) or IP address where the FiloDB standalone node resides
    * @param port the Akka port number for remote connectivity
-   * @param systemName the ActorSystem name to connect to
+   * @param system the ActorSystem to connect to
    */
   def standaloneClient(system: ActorSystem,
                        host: String,
@@ -131,7 +131,7 @@ class ClusterClient(nodeClusterActor: ActorRef,
     Client.actorsAsk(coords.toSeq, msg, askTimeout)(Client.standardResponse(f))
   }
 
-  def sendAllIngestors(msg: Any): Unit = nodeClusterActor ! ForwardToAll(ingestionRole, msg)
+  def sendAllIngestors(msg: Any): Unit = nodeClusterActor ! Broadcast(ingestionRole, msg)
 
   val clusterActor = Some(nodeClusterActor)
 }

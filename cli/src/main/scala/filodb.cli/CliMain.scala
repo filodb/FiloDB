@@ -4,6 +4,11 @@ import java.io.OutputStream
 import java.sql.Timestamp
 import javax.activation.UnsupportedDataTypeException
 
+import scala.concurrent.Await
+import scala.concurrent.duration._
+import scala.language.postfixOps
+import scala.util.{Failure, Success => SSuccess}
+
 import akka.actor.ActorSystem
 import com.opencsv.CSVWriter
 import com.quantifind.sumac.{ArgMain, FieldArgs}
@@ -11,20 +16,15 @@ import com.typesafe.config.{Config, ConfigFactory}
 import monix.reactive.Observable
 import net.ceedubs.ficus.Ficus._
 import org.parboiled2.ParseError
-import org.velvia.filo.{RowReader, FastFiloRowReader}
-import scala.concurrent.Await
-import scala.concurrent.duration._
-import scala.language.postfixOps
-import scala.util.{Try, Success => SSuccess, Failure}
+import org.velvia.filo.RowReader
 
 import filodb.cassandra.columnstore.CassandraTokenRangeSplit
 import filodb.coordinator.client._
-import filodb.coordinator.{DatasetCommands, QueryCommands, CoordinatorSetupWithFactory, NodeClusterActor}
+import filodb.coordinator._
 import filodb.core._
-import filodb.core.metadata.Column.{ColumnType, Schema}
 import filodb.core.metadata.{Column, DataColumn, Dataset, RichProjection}
 import filodb.core.query.{ColumnFilter, Filter}
-import filodb.core.store.{Analyzer, ChunkInfo, ChunkSetInfo, FilteredPartitionScan, ScanSplit}
+import filodb.core.store._
 
 // scalastyle:off
 class Arguments extends FieldArgs {
@@ -68,11 +68,20 @@ class Arguments extends FieldArgs {
   }
 }
 
-object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorSetupWithFactory {
+object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbClusterNode {
 
-  val system = ActorSystem("filo-cli", systemConfig)
-  val config = systemConfig.getConfig("filodb")
+  override val role = ClusterRole.Cli
+
+  override lazy val system = ActorSystem(systemName)
+
+  override lazy val cluster = FilodbCluster(system)
+
+  coordinatorActor // create it
+  cluster._isInitialized.set(true)
+
   lazy val client = new LocalClient(coordinatorActor)
+
+  val config = systemConfig.getConfig("filodb")
 
   import Client.{actorAsk, parse}
 
@@ -139,7 +148,7 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
                     99.minutes)
 
         case Some("analyze") =>
-          parse(Analyzer.analyze(columnStore,
+          parse(Analyzer.analyze(cluster.columnStore,
                                  metaStore,
                                  getRef(args),
                                  version,
@@ -147,7 +156,7 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
                                  args.numPartitions), 30.minutes)(a => println(a.prettify()))
 
         case Some("dumpinfo") =>
-          printChunkInfos(Analyzer.getChunkInfos(columnStore,
+          printChunkInfos(Analyzer.getChunkInfos(cluster.columnStore,
                                    metaStore,
                                    getRef(args),
                                    version,
@@ -402,8 +411,8 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with CoordinatorS
     val columns = columnNames.map(schema)
 
     // NOTE: we will only return data from the first split!
-    val splits = columnStore.getScanSplits(dataset)
-    val requiredRows = columnStore.scanRows(richProj, columns, version, FilteredPartitionScan(splits.head))
+    val splits = cluster.columnStore.getScanSplits(dataset)
+    val requiredRows = cluster.columnStore.scanRows(richProj, columns, version, FilteredPartitionScan(splits.head))
                                   .take(limit)
     writeResult(dataset.dataset, requiredRows, columnNames, columns, outFile)
   }

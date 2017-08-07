@@ -2,11 +2,16 @@ package filodb.coordinator
 
 import akka.testkit._
 
+import filodb.core._
+
 object ShardMapperSpec extends ActorSpecConfig
 
 class ShardMapperSpec extends ActorTest(ShardMapperSpec.getNewSystem) {
+  import ShardMapper.ShardAndNode
+
   val ref1 = TestProbe().ref
   val ref2 = TestProbe().ref
+  val dataset = DatasetRef("foo")
 
   it("can hashToShard using different number of bits") {
     val mapper1 = new ShardMapper(64)
@@ -57,5 +62,41 @@ class ShardMapperSpec extends ActorTest(ShardMapperSpec.getNewSystem) {
     mapper1.removeNode(ref1) should equal (Seq(0, 10, 20))
     mapper1.unassignedShards.length should equal (64)
     mapper1.removeNode(ref1) should equal (Nil)
+  }
+
+  it("can update status from events and filter shards by status") {
+    val mapper1 = new ShardMapper(32)
+    mapper1.numAssignedShards shouldEqual 0
+    mapper1.activeShards(Seq(1, 5, 10)) shouldEqual Nil
+
+    mapper1.updateFromEvent(IngestionStarted(dataset, 2, ref1)).isSuccess shouldEqual true
+    mapper1.updateFromEvent(RecoveryStarted(dataset, 4, ref1)).isSuccess shouldEqual true
+    mapper1.numAssignedShards shouldEqual 2
+    mapper1.activeShards(Seq(1, 2, 3, 4)) shouldEqual Seq(2, 4)
+
+    mapper1.updateFromEvent(IngestionStarted(dataset, 3, ref2)).isSuccess shouldEqual true
+    mapper1.updateFromEvent(ShardDown(dataset, 4)).isSuccess shouldEqual true
+    mapper1.numAssignedShards shouldEqual 3
+    mapper1.activeShards(Seq(1, 2, 3, 4)) shouldEqual Seq(2, 3)
+
+    // Even when down, should be able to still access the node ref
+    mapper1.coordForShard(4) shouldEqual ref1
+  }
+
+  it("can produce a minimal set of events to reproduce ShardMapper state") {
+    val mapper1 = new ShardMapper(32)
+    mapper1.updateFromEvent(IngestionStarted(dataset, 2, ref1)).isSuccess shouldEqual true
+    mapper1.updateFromEvent(RecoveryStarted(dataset, 4, ref1)).isSuccess shouldEqual true
+    mapper1.updateFromEvent(IngestionStarted(dataset, 3, ref2)).isSuccess shouldEqual true
+    mapper1.updateFromEvent(ShardDown(dataset, 4)).isSuccess shouldEqual true
+
+    val events = mapper1.minimalEvents(dataset)
+    events should have length (4)
+    events(0) shouldBe an[IngestionStarted]
+    events(1) shouldBe an[IngestionStarted]
+
+    val mapper2 = new ShardMapper(32)
+    events.foreach { e => mapper2.updateFromEvent(e).get }
+    mapper2 shouldEqual mapper1
   }
 }

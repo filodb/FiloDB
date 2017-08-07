@@ -1,28 +1,36 @@
 package filodb.coordinator
 
+import scala.collection.mutable.HashMap
+import scala.concurrent.duration._
+
 import akka.actor._
 import akka.cluster.Cluster
 import akka.cluster.ClusterEvent._
 import akka.event.LoggingReceive
 import com.typesafe.config.{Config, ConfigFactory}
-import scala.collection.mutable.HashMap
-import scala.collection.immutable.HashSet
-import scala.concurrent.duration._
 
 import filodb.core._
 import filodb.core.metadata.RichProjection
 import filodb.core.store.MetaStore
 
 object NodeClusterActor {
+
+  sealed trait ClusterActorEvent
+
   // Forwards message to one random recipient that has the given role.  Any replies go back to originator.
-  final case class ForwardToOne(role: String, msg: Any)
-  case object NoSuchRole extends ErrorResponse
+  final case class ForwardToOne(role: String, msg: Any) extends ClusterActorEvent
 
   // Gets all the ActorRefs for a specific role.  Returns a Set[ActorRef].
-  final case class GetRefs(role: String)
+  final case class GetRefs(role: String) extends ClusterActorEvent
 
   // Forwards message to all recipients with given role.  Sending actor must handle separate replies.
-  final case class ForwardToAll(role: String, msg: Any)
+  final case class Broadcast(role: String, msg: Any) extends ClusterActorEvent
+
+  case object NoSuchRole extends ErrorResponse
+
+  final case class DatasetResourceSpec(numShards: Int, minNumNodes: Int)
+
+  final case class IngestionSource(streamFactoryClass: String, config: Config = ConfigFactory.empty)
 
   /**
    * Sets up a dataset for streaming ingestion and querying, with specs for sharding.
@@ -37,8 +45,6 @@ object NodeClusterActor {
    * @return DatasetVerified - meaning the dataset and columns are valid.  Does not mean ingestion is
    *                           setup on all nodes - for that, subscribe to ShardMapUpdate's
    */
-  final case class DatasetResourceSpec(numShards: Int, minNumNodes: Int)
-  final case class IngestionSource(streamFactoryClass: String, config: Config = ConfigFactory.empty)
   final case class SetupDataset(ref: DatasetRef,
                                 columns: Seq[String],
                                 resources: DatasetResourceSpec,
@@ -124,7 +130,7 @@ private[filodb] class NodeClusterActor(cluster: Cluster,
                                        metaStore: MetaStore,
                                        assignmentStrategy: ShardAssignmentStrategy,
                                        resolveActorDuration: FiniteDuration) extends BaseActor {
-  import NodeClusterActor._
+  import NodeClusterActor._, NodeGuardian._
 
   val memberRefs = new HashMap[Address, ActorRef]
   val roleToCoords = new HashMap[String, Set[ActorRef]]().withDefaultValue(Set.empty[ActorRef])
@@ -179,8 +185,8 @@ private[filodb] class NodeClusterActor(cluster: Cluster,
 
   def membershipHandler: Receive = LoggingReceive {
     case MemberUp(member) =>
-      logger.info(s"Member is Up: ${member.address} with roles ${member.roles}")
-      val memberCoordActor = RootActorPath(member.address) / "user" / "coordinator"
+      logger.info(s"Member ${member.status}: ${member.address} with roles ${member.roles}")
+      val memberCoordActor = RootActorPath(member.address) / "user" / NodeGuardianName / CoordinatorName
       context.actorSelection(memberCoordActor).resolveOne(resolveActorDuration)
         .map { ref => self ! AddCoordActor(member.roles, member.address, ref) }
         .recover {
@@ -290,7 +296,7 @@ private[filodb] class NodeClusterActor(cluster: Cluster,
     case GetRefs(role) =>
       withRole(role) { refs => sender() ! refs }
 
-    case ForwardToAll(role, msg) =>
+    case Broadcast(role, msg) =>
       withRole(role) { refs => refs.foreach(_.forward(msg)) }
 
     case EverybodyLeave =>

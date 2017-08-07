@@ -1,16 +1,13 @@
 package filodb.coordinator
 
-import akka.actor.{ActorSystem, ActorRef, PoisonPill}
-import akka.remote.testkit.{MultiNodeConfig, MultiNodeSpec}
-import com.typesafe.config.ConfigFactory
 import scala.concurrent.duration._
 
-import filodb.core._
-import filodb.core.store.FilteredPartitionScan
-import filodb.core.metadata.{Column, DataColumn, Dataset, RichProjection}
-import filodb.coordinator.client.ClusterClient
+import akka.actor.ActorRef
+import akka.remote.testkit.MultiNodeConfig
+import com.typesafe.config.ConfigFactory
 
-import org.scalatest.time.{Millis, Span, Seconds}
+import filodb.core._
+import filodb.core.metadata.RichProjection
 
 object IngestionStreamClusterSpecConfig extends MultiNodeConfig {
   // register the named roles (nodes) of the test
@@ -31,11 +28,12 @@ object IngestionStreamClusterSpecConfig extends MultiNodeConfig {
 // and distributed querying across nodes
 abstract class IngestionStreamClusterSpec extends ClusterSpec(IngestionStreamClusterSpecConfig) {
   import akka.testkit._
-  import DatasetCommands._
   import GdeltTestData._
   import NodeClusterActor._
   import IngestionStreamClusterSpecConfig._
   import sources.{CsvStream, CsvStreamFactory}
+
+  import cluster.ec
 
   override def initialParticipants = roles.size
 
@@ -48,6 +46,9 @@ abstract class IngestionStreamClusterSpec extends ClusterSpec(IngestionStreamClu
 
   val address1 = node(first).address
   val address2 = node(second).address
+
+  private lazy val coordinatorActor = cluster.coordinatorActor
+  private lazy val metaStore = cluster.metaStore
 
   metaStore.newDataset(dataset6).futureValue should equal (Success)
   val proj2 = RichProjection(dataset6, schema)
@@ -67,7 +68,7 @@ abstract class IngestionStreamClusterSpec extends ClusterSpec(IngestionStreamClu
     awaitCond(cluster.state.members.size == 2)
     enterBarrier("both-nodes-joined-cluster")
 
-    clusterActor = singletonClusterActor("worker")
+    clusterActor = cluster.clusterSingletonProxy("worker", withManager = true)
     enterBarrier("cluster-actor-started")
 
     runOn(first) {

@@ -4,17 +4,22 @@ import akka.actor.{Address, ActorRef}
 import scala.collection.mutable.HashMap
 import scala.util.{Try, Success, Failure}
 
-object ShardMapper {
+import filodb.core.DatasetRef
+
+private[filodb] object ShardMapper {
+
   val empty = new ShardMapper(0)
 
-  final def toShard(n: Int, numShards: Int): Int = (((n & 0xffffffffL) * numShards) >> 32).toInt
-}
+  final case class ShardAndNode(shard: Int, coord: ActorRef)
 
-final case class ShardAndNode(shard: Int, coord: ActorRef)
+  final def toShard(n: Int, numShards: Int): Int = (((n & 0xffffffffL) * numShards) >> 32).toInt
+
+}
 
 /**
  * Each FiloDB dataset is divided into a fixed number of shards for ingestion and distributed in-memory
  * querying. The ShardMapper keeps track of the mapping between shards and nodes for a single dataset.
+ * It also keeps track of the status of each shard.
  * - Given a partition hash, find the shard and node coordinator
  * - Given a shard key hash and # bits, find the shards and node coordinators to query
  * - Given a shard key hash and partition hash, # bits, compute the shard (for ingestion partitioning)
@@ -28,6 +33,7 @@ class ShardMapper(val numShards: Int) extends Serializable {
   import ShardMapper._
 
   private final val shardMap = Array.fill(numShards)(ActorRef.noSender)
+  private final val statusMap = Array.fill[ShardStatus](numShards)(ShardUnassigned)
 
   override def equals(other: Any): Boolean = other match {
     case s: ShardMapper => s.numShards == numShards && s.shardValues == shardValues
@@ -38,7 +44,7 @@ class ShardMapper(val numShards: Int) extends Serializable {
 
   override def toString: String = s"ShardMapper {${shardValues.zipWithIndex}}"
 
-  def shardValues: Seq[ActorRef] = shardMap.toBuffer
+  def shardValues: Seq[(ActorRef, ShardStatus)] = shardMap.zip(statusMap).toBuffer
 
   /**
    * Maps a partition hash to a shard number and a NodeCoordinator ActorRef
@@ -49,6 +55,7 @@ class ShardMapper(val numShards: Int) extends Serializable {
   }
 
   def coordForShard(shardNum: Int): ActorRef = shardMap(shardNum)
+  def statusForShard(shardNum: Int): ShardStatus = statusMap(shardNum)
 
   /**
    * Maps a shard key to a range of shards.  Used to limit shard distribution for queries when one knows
@@ -100,12 +107,49 @@ class ShardMapper(val numShards: Int) extends Serializable {
   def numAssignedShards: Int = numShards - unassignedShards.length
 
   /**
+   * Find out if a shard is active (Normal or Recovery status) or filter a list of shards
+   */
+  def activeShard(shard: Int): Boolean =
+    statusMap(shard) == ShardStatusNormal || statusMap(shard) == ShardStatusRecovery
+  def activeShards(shards: Seq[Int]): Seq[Int] = shards.filter(activeShard)
+
+  /**
    * Returns a set of unique NodeCoordinator ActorRefs for all assigned shards
    */
   def allNodes: Set[ActorRef] = shardMap.toSeq.filter(_ != ActorRef.noSender).toSet
 
   /**
+   * The main API for updating a ShardMapper.
+   * If you want to throw if an update does not succeed, call updateFromEvent(ev).get
+   */
+  def updateFromEvent(event: ShardEvent): Try[Unit] = event match {
+    case IngestionStarted(_, shard, node) =>
+      statusMap(shard) = ShardStatusNormal
+      registerNode(Seq(shard), node)
+    case RecoveryStarted(_, shard, node) =>
+      statusMap(shard) = ShardStatusRecovery
+      registerNode(Seq(shard), node)
+    case IngestionError(_, shard, _) =>
+      Success(())
+    case ShardDown(_, shard) =>
+      statusMap(shard) = ShardStatusDown
+      Success(())
+    case IngestionStopped(_, shard) =>
+      statusMap(shard) = ShardStatusStopped
+      Success(())
+  }
+
+  /**
+   * Returns the minimal set of events needed to reconstruct this ShardMapper
+   */
+  def minimalEvents(ref: DatasetRef): Seq[ShardEvent] =
+    (0 until numShards).flatMap { shard =>
+      statusMap(shard).minimalEvents(ref, shard, shardMap(shard))
+    }
+
+  /**
    * Registers a new node to the given shards.  Modifies state in place.
+   * TODO: make this private. Everybody should use the event API.
    */
   def registerNode(shards: Seq[Int], coordinator: ActorRef): Try[Unit] = {
     shards.foreach { shard =>

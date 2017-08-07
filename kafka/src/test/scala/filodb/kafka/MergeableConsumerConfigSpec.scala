@@ -20,14 +20,14 @@ class MergeableConsumerConfigSpec extends ConfigSpec {
       val config = new SourceConfig(settings.BootstrapServers, settings.clientId, settings.kafkaConfig)
       val values = config.kafkaConfig
 
-      values(CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG) must be (settings.BootstrapServers)
-      values(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG) must be (classOf[LongDeserializer].getName)
-      values(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG) must be (classOf[StringDeserializer].getName)
+      values(CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG) should be (settings.BootstrapServers)
+      values(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG) should be (classOf[LongDeserializer].getName)
+      values(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG) should be (classOf[StringDeserializer].getName)
 
       val props = values.asProps
-      props.get(CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG) must be (settings.BootstrapServers)
-      props.get(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG) must be (classOf[LongDeserializer].getName)
-      props.get(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG) must be (classOf[StringDeserializer].getName)
+      props.get(CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG) should be (settings.BootstrapServers)
+      props.get(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG) should be (classOf[LongDeserializer].getName)
+      props.get(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG) should be (classOf[StringDeserializer].getName)
     }
   }
 }

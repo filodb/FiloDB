@@ -1,19 +1,17 @@
 package filodb.coordinator
 
-import akka.actor.{Actor, ActorRef, PoisonPill, Props, SupervisorStrategy, Terminated}
-import akka.cluster.Cluster
+import akka.actor.{ActorRef, Address, PoisonPill, Props, SupervisorStrategy, Terminated}
 import akka.event.LoggingReceive
 import com.typesafe.config.Config
 import monix.execution.Scheduler
-import net.ceedubs.ficus.Ficus._
+
 import scala.collection.mutable.HashMap
 import scala.concurrent.duration._
-import scala.concurrent.{Await, Future}
-
+import scala.concurrent.Await
 import filodb.core._
 import filodb.core.binaryrecord.RecordSchema
 import filodb.core.memstore.MemStore
-import filodb.core.metadata.{Column, DataColumn, Dataset, Projection, RichProjection}
+import filodb.core.metadata._
 import filodb.core.store.{ColumnStore, MetaStore}
 import filodb.core.Types._
 
@@ -42,13 +40,15 @@ object NodeCoordinatorActor {
   def props(metaStore: MetaStore,
             memStore: MemStore,
             columnStore: ColumnStore,
+            selfAddress: Address,
             config: Config): Props =
-    Props(classOf[NodeCoordinatorActor], metaStore, memStore, columnStore, config)
+    Props(classOf[NodeCoordinatorActor], metaStore, memStore, columnStore, selfAddress, config)
 }
 
 private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
                                                  memStore: MemStore,
                                                  columnStore: ColumnStore,
+                                                 selfAddress: Address,
                                                  config: Config) extends BaseActor {
   import NodeCoordinatorActor._
   import DatasetCommands._
@@ -59,8 +59,7 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
   val dsCoordinators = new HashMap[(DatasetRef, Int), ActorRef]
   val queryActors = new HashMap[DatasetRef, ActorRef]
   val shardMaps = new HashMap[DatasetRef, ShardMapper]
-  val clusterSelfAddr = Cluster(context.system).selfAddress
-  val actorPath = clusterSelfAddr.host.getOrElse("None")
+  val actorPath = selfAddress.host.getOrElse("None")
   var clusterActor: Option[ActorRef] = None
 
   // The thread pool used by Monix Observables/reactive ingestion
@@ -128,7 +127,7 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
     Serializer.putDataSchema(RecordSchema(proj.nonPartitionColumns))
 
     // TODO: get rid of clusterSelfAddr?  Do we really need it?
-    val props = MemStoreCoordActor.props(proj, memStore, clusterSelfAddr, ds.source)(ingestScheduler)
+    val props = MemStoreCoordActor.props(proj, memStore, selfAddress, ds.source)(ingestScheduler)
     val ingestRef = context.actorOf(props, s"ms-coord-${proj.dataset.name}-${ds.version}")
     dsCoordinators((ref, ds.version)) = ingestRef
     val shardMapMsg = NodeClusterActor.ShardMapUpdate(ref, shardMaps(ref))

@@ -37,20 +37,20 @@ class SourceSinkSuite extends ConfigSpec {
 
   "FiloDBKafka" must {
     "have the expected shared configuration" in {
-      settings.IngestionTopic must be(topic)
-      settings.RecordConverterClass must be(classOf[StringRecordConverter].getName)
-      settings.BootstrapServers must be("localhost:9092")
+      settings.IngestionTopic should be(topic)
+      settings.RecordConverterClass should be(classOf[StringRecordConverter].getName)
+      settings.BootstrapServers should be("localhost:9092")
     }
     "have the expected consumer/producer configuration" in {
       val producerCfg = KafkaProducerConfig(settings.sinkConfig.asConfig)
       val consumerCfg = KafkaConsumerConfig(settings.sourceConfig.asConfig)
 
-      producerCfg.bootstrapServers must be(List("localhost:9092"))
-      consumerCfg.bootstrapServers must be(List("localhost:9092"))
-      producerCfg.acks must be(Acks.NonZero(1))
-      producerCfg.clientId.contains("filodb") must be(true)
+      producerCfg.bootstrapServers should be(List("localhost:9092"))
+      consumerCfg.bootstrapServers should be(List("localhost:9092"))
+      producerCfg.acks should be(Acks.NonZero(1))
+      producerCfg.clientId.contains("filodb") should be(true)
 
-      consumerCfg.autoOffsetReset must be(AutoOffsetReset.Earliest)
+      consumerCfg.autoOffsetReset should be(AutoOffsetReset.Earliest)
     }
     "publish one message" in {
       val producerCfg = KafkaProducerConfig(settings.sinkConfig.asConfig)

@@ -1,15 +1,13 @@
 package filodb.standalone
 
-import akka.actor.{ActorSystem, AddressFromURIString}
+import akka.actor.ActorSystem
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
 import net.ceedubs.ficus.Ficus._
-import scala.concurrent.Await
-import scala.concurrent.duration._
 
+import filodb.coordinator._
 import filodb.coordinator.client.LocalClient
-import filodb.coordinator.CoordinatorSetupWithFactory
-import filodb.core.metadata.{Dataset, DataColumn, Column, RichProjection}
+import filodb.core.metadata.{Column, DataColumn, Dataset}
 
 /**
  * FiloServer starts a "standalone" FiloDB server which can ingest and support queries through the Akka
@@ -35,33 +33,36 @@ import filodb.core.metadata.{Dataset, DataColumn, Column, RichProjection}
  *   }
  * }}}
  */
-object FiloServer extends App with CoordinatorSetupWithFactory with StrictLogging {
+object FiloServer extends FilodbClusterNode with StrictLogging {
   import Column.ColumnType._
 
-  val config = systemConfig.getConfig("filodb")
-  lazy val system = ActorSystem("filo-standalone", systemConfig)
+  override val role = ClusterRole.Server
 
-  kamonInit()
-  coordinatorActor
-  Await.result(metaStore.initialize(), 60.seconds)
+  val settings = new FilodbSettings()
 
-  // initialize Akka Cluster
-  // We must join the cluster after the coordinator starts up, so that when the NodeClusterActor discovers
-  // the joined node, it can find the coordinator right away
-  val seedNodes: collection.immutable.Seq[String] = config.as[Seq[String]]("seed-nodes").toList
-  cluster.joinSeedNodes(seedNodes.map(AddressFromURIString.apply))
+  override lazy val system = ActorSystem(systemName, settings.allConfig)
 
-  // get cluster actor
-  val clusterActor = singletonClusterActor("worker")
-
-  logger.info(s"Cluster initialized.")
+  override lazy val cluster = FilodbCluster(system)
 
   // Now, initialize any datasets using in memory MetaStore.
   // This is a hack until we are able to use CassandraMetaStore for standalone.  It is also a
   // convenience for users to get up and running quickly without setting up cassandra.
   val client = new LocalClient(coordinatorActor)
-  config.as[Map[String, Config]]("dataset-definitions").foreach { case (datasetName, datasetConf) =>
-    createDatasetFromConfig(datasetName, datasetConf)
+
+  val config = settings.config
+
+  def main(args: Array[String]): Unit = {
+    import settings._
+    cluster.kamonInit(role)
+    coordinatorActor
+    scala.concurrent.Await.result(metaStore.initialize(), InitializationTimeout)
+    cluster.joinSeedNodes()
+    cluster.clusterSingletonProxy(roleName, withManager = true)
+    cluster._isInitialized.set(true)
+
+    settings.DatasetDefinitions.foreach { case (datasetName, datasetConf) =>
+      createDatasetFromConfig(datasetName, datasetConf)
+    }
   }
 
   def createDatasetFromConfig(datasetName: String, config: Config): Unit = {
@@ -86,4 +87,9 @@ object FiloServer extends App with CoordinatorSetupWithFactory with StrictLoggin
     shutdown()
     sys.exit(code)
   }
+
+  /** To ensure proper shutdown in case `shutdownAndExit` is not called. */
+  Runtime.getRuntime.addShutdownHook(new Thread() {
+    override def run(): Unit = shutdown()
+  })
 }

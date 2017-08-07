@@ -1,24 +1,14 @@
 package filodb.coordinator
 
-import akka.actor.{ActorRef, ActorSystem, PoisonPill}
-import akka.pattern.gracefulStop
-import akka.testkit.{EventFilter, TestProbe}
-import com.opencsv.CSVReader
-import com.typesafe.config.{Config, ConfigFactory}
-import monix.execution.Scheduler
 import scala.concurrent.duration._
-import scala.concurrent.Await
-import scala.util.Try
-import scalax.file.Path
 
-import filodb.core._
-import filodb.core.metadata.{Column, DataColumn, Dataset, RichProjection}
-import filodb.core.reprojector.SegmentStateCache
-import filodb.core.store._
-
+import com.typesafe.config.ConfigFactory
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
+import org.scalatest.BeforeAndAfterEach
 
+import filodb.core._
+import filodb.core.metadata.{Dataset, RichProjection}
 
 object IngestionStreamSpec extends ActorSpecConfig
 
@@ -26,9 +16,8 @@ object IngestionStreamSpec extends ActorSpecConfig
 // Most of the tests use the automated DatasetSetup where the coordinators set up the IngestionStream, but
 // some set them up manually by invoking the factories directly.
 class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem)
-with CoordinatorSetupWithFactory with ScalaFutures {
+  with ScalaFutures with BeforeAndAfterEach {
   import akka.testkit._
-  import DatasetCommands._
   import IngestionCommands._
   import GdeltTestData._
   import NodeClusterActor._
@@ -47,9 +36,12 @@ with CoordinatorSetupWithFactory with ScalaFutures {
                             .withFallback(ConfigFactory.load("application_test.conf"))
                             .getConfig("filodb")
 
-  coordinatorActor
-  cluster.join(cluster.selfAddress)
-  val clusterActor = singletonClusterActor("worker")
+  private val cluster = FilodbCluster(system)
+  private val coordinatorActor = cluster.coordinatorActor
+  cluster.join()
+  private val clusterActor = cluster.clusterSingletonProxy("worker", withManager = true)
+  private val memStore = cluster.memStore
+  private val metaStore = cluster.metaStore
 
   val ref = projection6.datasetRef
   metaStore.newDataset(dataset6).futureValue shouldEqual Success
@@ -64,7 +56,7 @@ with CoordinatorSetupWithFactory with ScalaFutures {
   val shardMap = new ShardMapper(1)
   shardMap.registerNode(Seq(0), coordinatorActor)
 
-  before {
+  override def afterEach(): Unit = {
     memStore.reset()
     clusterActor ! NodeClusterActor.Reset
     coordinatorActor ! NodeCoordinatorActor.Reset
@@ -72,7 +64,7 @@ with CoordinatorSetupWithFactory with ScalaFutures {
 
   override def afterAll(): Unit = {
     super.afterAll()
-    gracefulStop(clusterActor, 3.seconds.dilated, PoisonPill).futureValue
+    cluster.shutdown()
   }
 
   val sampleReader = new java.io.InputStreamReader(getClass.getResourceAsStream("/GDELT-sample-test.csv"))
@@ -88,6 +80,7 @@ with CoordinatorSetupWithFactory with ScalaFutures {
                            DatasetResourceSpec(1, 1),
                            IngestionSource(classOf[CsvStreamFactory].getName, config))
     clusterActor ! msg
+    // TODO assertion failed: expected DatasetVerified, found DatasetAlreadySetup(gdelt2)
     expectMsg(DatasetVerified)
   }
 
@@ -150,6 +143,8 @@ with CoordinatorSetupWithFactory with ScalaFutures {
                                            """)
     val stream = (new CsvStreamFactory).create(config, projection6, 0)
     val protocolActor = system.actorOf(IngestProtocol.props(clusterActor, projection6.datasetRef))
+
+    import cluster.ec
     stream.routeToShards(new ShardMapper(1), projection6, protocolActor)
 
     Thread sleep 1000

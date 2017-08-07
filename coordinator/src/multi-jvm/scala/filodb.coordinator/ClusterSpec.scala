@@ -9,6 +9,9 @@ import org.scalatest.{BeforeAndAfterAll, FunSpecLike, Matchers}
 
 abstract class ClusterSpec(config: MultiNodeConfig) extends MultiNodeSpec(config)
   with FunSpecLike with Matchers with BeforeAndAfterAll
-  with CoordinatorSetupWithFactory
   with StrictLogging
-  with ImplicitSender with ScalaFutures
+  with ImplicitSender with ScalaFutures {
+
+  val cluster = FilodbCluster(system)
+
+}

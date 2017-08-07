@@ -1,12 +1,20 @@
 package filodb.cassandra
 
+import scala.concurrent.ExecutionContext
+
+import com.typesafe.config.Config
+
 import filodb.cassandra.columnstore.CassandraColumnStore
 import filodb.cassandra.metastore.CassandraMetaStore
-import filodb.coordinator.{StoreFactory, CoordinatorSetup}
+import filodb.coordinator.StoreFactory
 
-class CassandraStoreFactory(setup: CoordinatorSetup) extends StoreFactory {
-  import setup.ec
-  val columnStore = new CassandraColumnStore(setup.config, setup.readEc)
-  val metaStore = new CassandraMetaStore(setup.config.getConfig("cassandra"))
+class CassandraStoreFactory(config: Config,
+                            executionContext: ExecutionContext,
+                            readExecutionContext: ExecutionContext
+                           ) extends StoreFactory {
+
+  implicit val ec = executionContext
+  val columnStore = new CassandraColumnStore(config, readExecutionContext)
+  val metaStore = new CassandraMetaStore(config.getConfig("cassandra"))
 }
 
