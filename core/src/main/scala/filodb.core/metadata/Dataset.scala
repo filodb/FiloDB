@@ -1,10 +1,7 @@
 package filodb.core.metadata
 
-import com.typesafe.config.{ConfigFactory, ConfigRenderOptions}
-import net.ceedubs.ficus.Ficus._
-import org.velvia.filo.RowReader
+import com.typesafe.config.{Config, ConfigFactory, ConfigRenderOptions}
 import scala.collection.JavaConverters._
-import scala.reflect.ClassTag
 import scala.util.{Try, Success, Failure}
 
 import filodb.core._
@@ -31,10 +28,14 @@ case class Dataset(name: String,
  * Config options for a table define operational details for the column store and memtable.
  * Every option must have a default!
  */
-case class DatasetOptions(chunkSize: Int) {
+case class DatasetOptions(chunkSize: Int,
+                          metricColumn: String,
+                          valueColumn: String) {
   override def toString: String = {
     val map = Map(
-                   "chunkSize" -> chunkSize
+                   "chunkSize" -> chunkSize,
+                   "metricColumn" -> metricColumn,
+                   "valueColumn" -> valueColumn
                  )
     val config = ConfigFactory.parseMap(map.asJava)
     config.root.render(ConfigRenderOptions.concise)
@@ -42,10 +43,13 @@ case class DatasetOptions(chunkSize: Int) {
 }
 
 object DatasetOptions {
-  def fromString(s: String): DatasetOptions = {
-    val config = ConfigFactory.parseString(s)
-    DatasetOptions(chunkSize = config.getInt("chunkSize"))
-  }
+  def fromString(s: String): DatasetOptions =
+    fromConfig(ConfigFactory.parseString(s).withFallback(Dataset.DefaultOptionsConfig))
+
+  def fromConfig(config: Config): DatasetOptions =
+    DatasetOptions(chunkSize = config.getInt("chunkSize"),
+                   metricColumn = config.getString("metricColumn"),
+                   valueColumn = config.getString("valueColumn"))
 }
 
 /**
@@ -56,41 +60,33 @@ object Dataset {
   // the dataset must fit in one node.
   val DefaultPartitionKey = "/0"
   val DefaultPartitionColumn = s":string $DefaultPartitionKey"
-  val DefaultSegment = ":string 0"
 
-  val DefaultOptions = DatasetOptions(chunkSize = 5000)
+  val DefaultOptions = DatasetOptions(chunkSize = 5000,
+                                      metricColumn = "__name__",
+                                      valueColumn = "value")
+  val DefaultOptionsConfig = ConfigFactory.parseString(DefaultOptions.toString)
 
   /**
    * Creates a new Dataset with a single superprojection with a single key column and
    * segment column.
    */
+  def apply(name: String, keyColumn: String): Dataset =
+    Dataset(name, keyColumn, DefaultPartitionColumn)
+
   def apply(name: String,
             keyColumn: String,
-            segmentColumn: String,
             partitionColumn: String): Dataset =
-    Dataset(name, Seq(keyColumn), segmentColumn, Seq(partitionColumn))
+    Dataset(name, Seq(keyColumn), Seq(partitionColumn))
 
   def apply(name: String,
             keyColumns: Seq[String],
-            segmentColumn: String,
             partitionColumns: Seq[String]): Dataset =
-    Dataset(DatasetRef(name), keyColumns, segmentColumn, partitionColumns)
-
-  def apply(ref: DatasetRef,
-            keyColumns: Seq[String],
-            segmentColumn: String,
-            partitionColumns: Seq[String]): Dataset =
-    Dataset(ref.dataset,
-            Seq(Projection(0, ref, keyColumns, segmentColumn)),
-            partitionColumns)
+    Dataset(DatasetRef(name), keyColumns, partitionColumns)
 
   def apply(ref: DatasetRef,
             keyColumns: Seq[String],
             partitionColumns: Seq[String]): Dataset =
     Dataset(ref.dataset,
-            Seq(Projection(0, ref, keyColumns, DefaultSegment)),
+            Seq(Projection(0, ref, keyColumns)),
             partitionColumns)
-
-  def apply(name: String, keyColumn: String, segmentColumn: String): Dataset =
-    Dataset(name, keyColumn, segmentColumn, DefaultPartitionColumn)
 }

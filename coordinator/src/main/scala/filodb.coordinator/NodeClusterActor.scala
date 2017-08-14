@@ -186,7 +186,7 @@ private[filodb] class NodeClusterActor(cluster: Cluster,
   def membershipHandler: Receive = LoggingReceive {
     case MemberUp(member) =>
       logger.info(s"Member ${member.status}: ${member.address} with roles ${member.roles}")
-      val memberCoordActor = RootActorPath(member.address) / "user" / NodeGuardianName / CoordinatorName
+      val memberCoordActor = nodeCoordinatorPath(member.address)
       context.actorSelection(memberCoordActor).resolveOne(resolveActorDuration)
         .map { ref => self ! AddCoordActor(member.roles, member.address, ref) }
         .recover {

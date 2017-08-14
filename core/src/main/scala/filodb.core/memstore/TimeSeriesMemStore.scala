@@ -44,7 +44,7 @@ extends MemStore with ColumnStoreAggregator with StrictLogging {
     if (shards contains shard) {
       throw ShardAlreadySetup
     } else {
-      val tsdb = new TimeSeriesShard(projection, config)
+      val tsdb = new TimeSeriesShard(projection, config, shard)
       shards.put(shard, tsdb)
     }
   }
@@ -132,7 +132,7 @@ object TimeSeriesShard {
 /**
  * Contains all of the data for a SINGLE shard of a time series oriented dataset.
  */
-class TimeSeriesShard(projection: RichProjection, config: Config) extends StrictLogging {
+class TimeSeriesShard(projection: RichProjection, config: Config, shardNum: Int) extends StrictLogging {
   import TimeSeriesShard._
 
   private final val partitions = new ArrayBuffer[TimeSeriesPartition]
@@ -174,7 +174,7 @@ class TimeSeriesShard(projection: RichProjection, config: Config) extends Strict
   // and external partition key components need to yield the same hashCode.  IE, use UTF8Strings everywhere.
   private def addPartition(newPartKey: SchemaRowReader): TimeSeriesPartition = {
     val binPartKey = projection.partKey(newPartKey)
-    val newPart = new TimeSeriesPartition(projection, binPartKey, chunksToKeep, maxChunksSize)
+    val newPart = new TimeSeriesPartition(projection, binPartKey, shardNum, chunksToKeep, maxChunksSize)
     val newIndex = partitions.length
     keyIndex.addKey(binPartKey, newIndex)
     partitions += newPart

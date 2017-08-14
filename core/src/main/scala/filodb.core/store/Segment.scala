@@ -26,8 +26,8 @@ case class SegmentInfo[+PK, +SK](partition: PartitionKey, segment: SK) {
    * tied to that class's projection parameter, and Scala does not know that the original projection
    * object has the same types.
    */
-  def basedOn(projection: RichProjection): SegmentInfo[projection.PK, projection.SK] =
-    this.asInstanceOf[SegmentInfo[projection.PK, projection.SK]]
+  def basedOn(projection: RichProjection): SegmentInfo[projection.PK, Any] =
+    this.asInstanceOf[SegmentInfo[projection.PK, Any]]
 }
 
 /**
@@ -36,7 +36,7 @@ case class SegmentInfo[+PK, +SK](partition: PartitionKey, segment: SK) {
  */
 trait Segment {
   val projection: RichProjection
-  def segInfo: SegmentInfo[projection.PK, projection.SK]
+  def segInfo: SegmentInfo[projection.PK, Any]
 
   def partition: PartitionKey = segInfo.partition
 
@@ -139,7 +139,7 @@ abstract class SegmentState(val projection: RichProjection,
 }
 
 class ColumnStoreSegmentState private(proj: RichProjection,
-                                      segInfo: SegmentInfo[RichProjection#PK, RichProjection#SK],
+                                      segInfo: SegmentInfo[RichProjection#PK, Any],
                                       chunkIndex: MutablePartitionChunkIndex,
                                       schema: Seq[Column],
                                       version: Int,
@@ -159,7 +159,7 @@ object ColumnStoreSegmentState extends StrictLogging {
             version: Int,
             scanner: ColumnStore with ColumnStoreScanner,
             settings: SegmentStateSettings = SegmentStateSettings())
-           (segInfo: SegmentInfo[proj.PK, proj.SK])
+           (segInfo: SegmentInfo[proj.PK, Any])
            (implicit ec: Scheduler): ColumnStoreSegmentState = {
     logger.debug(s"Retrieving partition indexes and filters from column store: $segInfo")
     val indexObs = scanner.scanPartitions(proj, version, SinglePartitionScan(segInfo.partition))
@@ -182,7 +182,7 @@ class ChunkSetSegment(val projection: RichProjection,
                       _segInfo: SegmentInfo[_, _]) extends Segment {
   val chunkSets = new ArrayBuffer[ChunkSet]
 
-  def segInfo: SegmentInfo[projection.PK, projection.SK] = _segInfo.basedOn(projection)
+  def segInfo: SegmentInfo[projection.PK, Any] = _segInfo.basedOn(projection)
 
   /**
    * Creates a chunk set from rows and current segment state, and returns the new state

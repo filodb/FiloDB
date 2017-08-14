@@ -26,7 +26,6 @@ import filodb.core._
 case class Projection(id: Int,
                       dataset: DatasetRef,
                       keyColIds: Seq[ColumnId],
-                      segmentColId: ColumnId,
                       reverse: Boolean = false,
                       columns: Seq[ColumnId] = Nil) {
   def detailedString: String =
@@ -52,15 +51,11 @@ case class Projection(id: Int,
 case class RichProjection(projection: Projection,
                           dataset: Dataset,
                           columns: Seq[Column],
-                          segmentColumn: Column, // get rid of segment*
-                          segmentColIndex: Int,
-                          segmentType: KeyType,
                           rowKeyColumns: Seq[Column],
                           rowKeyColIndices: Seq[Int],
                           rowKeyType: KeyType,    // get rid of this too
                           partitionColumns: Seq[Column],
                           partitionColIndices: Seq[Int]) {
-  type SK = segmentType.T
   type RK = rowKeyType.T
   type PK = PartitionKey
 
@@ -258,20 +253,17 @@ object RichProjection extends StrictLogging {
     val normProjection = dataset.projections(projectionId)
 
     // NOTE: right now computed columns MUST be at the end, because Filo vectorization can't handle mixing
-    val allColIds = dataset.partitionColumns ++ normProjection.keyColIds ++ Seq(normProjection.segmentColId)
+    val allColIds = dataset.partitionColumns ++ normProjection.keyColIds
 
     for { computedColumns <- getComputedColumns(dataset.name, allColIds, columns)
           dataColumns <- getColumnsFromNames(columns, normProjection.columns)
           nothing     <- validateMapColumn(columns, dataset)
           richColumns = dataColumns ++ computedColumns
           // scalac has problems dealing with (a, b, c) <- getColIndicesAndType... apparently
-          segStuff <- getColIndicesAndType(richColumns, Seq(normProjection.segmentColId), "segment")
           keyStuff <- getColIndicesAndType(richColumns, normProjection.keyColIds, "row")
           partStuff <- getColIndicesAndType(richColumns, dataset.partitionColumns, "partition") }
     yield {
-      val (segColIdx, segCols, segType) = segStuff
       RichProjection(normProjection, dataset, richColumns,
-                     segCols.head, segColIdx.head, segType,
                      keyStuff._2, keyStuff._1, keyStuff._3,
                      partStuff._2, partStuff._1)
     }
@@ -290,17 +282,14 @@ object RichProjection extends StrictLogging {
       Nil
     }
     val rowKeyColumns = rowKeyStr.split(':').toSeq.map(DataColumn.fromString(_, dsName))
-    val segmentColumn = ComputedColumn(-1, ":string 0", dsName, Column.ColumnType.StringColumn,
-                                       Nil, SingleKeyTypes.StringKeyType.extractor)
     val dsNameParts = dsName.split('.').toSeq
     val ref = dsNameParts match {
       case Seq(db, ds) => DatasetRef(ds, Some(db))
       case Seq(ds)     => DatasetRef(ds)
     }
-    val dataset = Dataset(ref, Nil, segmentColumn.name, partitionColumns.map(_.name))
+    val dataset = Dataset(ref, Nil, partitionColumns.map(_.name))
 
     RichProjection(dataset.projections.head, dataset, extraColumns,
-                   segmentColumn, -1, segmentColumn.columnType.keyType,
                    rowKeyColumns, Nil, Column.columnsToKeyType(rowKeyColumns),
                    partitionColumns, Nil)
   }

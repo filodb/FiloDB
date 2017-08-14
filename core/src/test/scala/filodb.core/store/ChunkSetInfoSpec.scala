@@ -98,7 +98,7 @@ class ChunkSetInfoSpec extends FunSpec with Matchers {
   it("should find intersection range of keys with timestamps") {
     import GdeltTestData._
     // Timestamp, String, String for rowkey / 0 seg / Year partition
-    val dataset5 = Dataset("gdelt", Seq("SQLDATE", "Actor2Code", "Actor2Name"), ":string 0", Seq("Year"))
+    val dataset5 = Dataset("gdelt", Seq("SQLDATE", "Actor2Code", "Actor2Name"), Seq("Year"))
     val proj5 = RichProjection(dataset5, schema)
 
     val key1 = BinaryRecord(proj5, Seq(Timestamp.valueOf("2013-01-02 08:00:00").getTime, "0", "0"))

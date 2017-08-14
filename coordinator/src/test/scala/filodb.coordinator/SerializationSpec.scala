@@ -66,7 +66,7 @@ class SerializationSpec extends FunSpec with Matchers {
     oos.writeObject(DoubleAggregate(99.9))
     val arrayAgg = new ArrayAggregate(10, 0.0)
     oos.writeObject(arrayAgg)
-    val pointAgg = new PrimitiveSimpleAggregate(DoubleSeriesValues("foo",
+    val pointAgg = new PrimitiveSimpleAggregate(DoubleSeriesValues(3, "foo",
                                                                    Seq(DoubleSeriesPoint(100000L, 1.2))))
     oos.writeObject(pointAgg)
 

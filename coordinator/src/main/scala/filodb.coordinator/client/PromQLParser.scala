@@ -4,6 +4,7 @@ import org.parboiled2._
 import scala.util.{Try, Success, Failure}
 
 import filodb.coordinator.QueryCommands._
+import filodb.core.metadata.{Dataset, DatasetOptions}
 import filodb.core.query.{ColumnFilter, Filter}
 
 object PromQLParser {
@@ -21,8 +22,10 @@ object PromQLParser {
 }
 
 sealed trait Expr
-final case class PartitionSpec(metricName: String, column: String, filters: Seq[ColumnFilter], range: Int)
-    extends Expr
+final case class PartitionSpec(metricName: String,
+                               column: String,
+                               filters: Seq[ColumnFilter],
+                               range: Int) extends Expr
 
 sealed trait PromQuery
 final case class VectorExprOnlyQuery(spec: PartitionSpec) extends PromQuery
@@ -30,9 +33,16 @@ final case class FunctionQuery(functionName: String, param: Option[String], expr
     extends PromQuery with Expr
 
 final case class ArgsAndPartSpec(queryArgs: QueryArgs, partSpec: PartitionSpec) {
-  def withMetricFilter(metricCol: String): ArgsAndPartSpec =
-    this.copy(partSpec = partSpec.copy(filters =
-                partSpec.filters :+ ColumnFilter(metricCol, Filter.Equals(partSpec.metricName))))
+  /**
+   * Adds a filter for the metricName, because under the hood FiloDB indexes everything and does not
+   * treat the metricName any differently.
+   * @param metricCol the index name or column name for the name of the metric
+   * @param allowScanAll if true, and metricName matches ScanEverythingMetric, don't filter on metric
+   */
+  def withMetricFilter(metricCol: String, allowScanAll: Boolean): ArgsAndPartSpec =
+    if (allowScanAll && partSpec.metricName == PromQLParser.ScanEverythingMetric) { this }
+    else { this.copy(partSpec = partSpec.copy(filters =
+                     partSpec.filters :+ ColumnFilter(metricCol, Filter.Equals(partSpec.metricName)))) }
 
   /**
    * Replaces ONE of the arguments of the main function.
@@ -47,12 +57,14 @@ final case class ArgsAndPartSpec(queryArgs: QueryArgs, partSpec: PartitionSpec) 
  * To be able to parse expressions like {{ sum(http-requests-total#avg{method="GET"}[5m]) }}
  *
  * Differences from PromQL:
- * - FiloDB has flexible schemas, so #columnName needs to be appended to the metrics name
+ * - FiloDB has flexible schemas, so #columnName can be appended to the metrics name
+ *   (there is a default)
  * - What column does the metric name map to?  TODO: allow filtering on metric name too
  * - For now very strict subset supported
  *   - nested functions can be parsed now
  */
-class PromQLParser(val input: ParserInput) extends Parser {
+class PromQLParser(val input: ParserInput,
+                   options: DatasetOptions = Dataset.DefaultOptions) extends Parser {
   import Filter._
   import PromQLParser._
 
@@ -80,29 +92,33 @@ class PromQLParser(val input: ParserInput) extends Parser {
 
   def TagFilter: Rule1[ColumnFilter] = rule { EqualsFilter }
 
+  def DataColumnSelector = rule { "#" ~ NameString }
   def VectorSelector =
-    rule { NameString ~ "#" ~ NameString ~ TagSelector.? ~ TimeRange.? ~>
-           ((metric: String, column: String, filters: Option[Seq[ColumnFilter]], duration: Option[Int]) =>
-            PartitionSpec(metric, column, filters.getOrElse(Nil), duration.getOrElse(DefaultRange))) }
+    rule { NameString ~ DataColumnSelector.? ~ TagSelector.? ~ TimeRange.? ~>
+           ((metric: String, column: Option[String], filters: Option[Seq[ColumnFilter]], duration: Option[Int]) =>
+            PartitionSpec(metric, column.getOrElse(options.valueColumn),
+                          filters.getOrElse(Nil), duration.getOrElse(DefaultRange))) }
 
   def FunctionParam = rule { NameString ~ ',' ~ Space.? }
   def FunctionExpr = rule { NameString ~ '(' ~ FunctionParam.? ~ FunctionOrSelector ~ ')' ~> FunctionQuery }
 
-  def FunctionOrSelector: Rule1[Expr] = rule { VectorSelector | FunctionExpr }
+  // NOTE: the FunctionExpr rule has to come first or else some VectorSelectors don't get parsed correctly
+  def FunctionOrSelector: Rule1[Expr] = rule { FunctionExpr | VectorSelector }
 
   def VectorExpr = rule { VectorSelector ~> VectorExprOnlyQuery }
   def Query: Rule1[PromQuery] = rule { (FunctionExpr | VectorExpr) ~ EOI }
 
   /**
-   * Method to parse a PromQL query and return important parameters for the FilODB client query call
+   * Method to parse a PromQL query and return important parameters for the FiloDB client query call
+   * Among other things, it runs withMetricFilter to add a filter for the metric name.
    */
-  def parseAndGetArgs(): Try[ArgsAndPartSpec] = {
+  def parseAndGetArgs(allowScanAll: Boolean): Try[ArgsAndPartSpec] = {
     Query.run().flatMap {
       // Single level of function
       case FunctionQuery(funcName, paramOpt, partSpec: PartitionSpec) =>
         evalArgs(funcName, paramOpt, partSpec).map { args =>
           val spec = QueryArgs(funcName, args)
-          Success(ArgsAndPartSpec(spec, partSpec))
+          Success(ArgsAndPartSpec(spec, partSpec).withMetricFilter(options.metricColumn, allowScanAll))
         }.getOrElse {
           Failure(new IllegalArgumentException(s"Unable to parse function $funcName with option $paramOpt"))
         }
@@ -113,7 +129,7 @@ class PromQLParser(val input: ParserInput) extends Parser {
              FunctionQuery(funcName, paramOpt, partSpec: PartitionSpec)) =>
         evalArgs(funcName, paramOpt, partSpec).map { args =>
           val spec = QueryArgs(funcName, args, combName, combParam.toSeq)
-          Success(ArgsAndPartSpec(spec, partSpec))
+          Success(ArgsAndPartSpec(spec, partSpec).withMetricFilter(options.metricColumn, allowScanAll))
         }.getOrElse {
           Failure(new IllegalArgumentException(s"Unable to parse function $funcName with option $paramOpt"))
         }
@@ -121,7 +137,7 @@ class PromQLParser(val input: ParserInput) extends Parser {
       case VectorExprOnlyQuery(partSpec) =>
         // For now just return the last data point and list all series
         val spec = QueryArgs("last", Seq("timestamp", partSpec.column))
-        Success(ArgsAndPartSpec(spec, partSpec))
+        Success(ArgsAndPartSpec(spec, partSpec).withMetricFilter(options.metricColumn, allowScanAll))
 
       case other: PromQuery =>
         Failure(new IllegalArgumentException(s"Sorry, query with AST $other cannot be supported right now."))

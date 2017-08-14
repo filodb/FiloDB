@@ -43,8 +43,14 @@ extends PrimitiveSimpleAggregate(value) with NumericAggregate {
   val doubleValue = value.toDouble
 }
 
-final case class DoubleSeriesPoint(timestamp: Long, value: Double)
-final case class DoubleSeriesValues(partitionName: String, points: Seq[DoubleSeriesPoint])
+final case class DoubleSeriesPoint(timestamp: Long, value: Double) {
+  override def toString: String =
+    s"$timestamp (${(System.currentTimeMillis - timestamp)/1000}s ago) - $value"
+}
+final case class DoubleSeriesValues(shard: Int, partitionName: String, points: Seq[DoubleSeriesPoint]) {
+  override def toString: String =
+    s"[Shard $shard] $partitionName\n  ${points.mkString("\n  ")}"
+}
 
 // This Aggregate is designed to be mutable for high performance and low allocation cost
 class ArrayAggregate[@specialized(Int, Long, Double) R: ClassTag](size: Int,
@@ -109,6 +115,18 @@ trait ChunkAggregator extends Aggregator {
     }
 }
 
+class NumBytesAggregator(vectorPos: Int = 0) extends ChunkAggregator {
+  type A = IntAggregate
+  val emptyAggregate = IntAggregate(0)
+  val positions = Array(vectorPos)
+
+  def add(orig: A, reader: ChunkSetReader): A = reader.vectors(0) match {
+    case v: BinaryVector[_] => IntAggregate(orig.value + v.numBytes)
+  }
+
+  def combine(first: A, second: A): A = IntAggregate(first.value + second.value)
+}
+
 class PartitionKeysAggregator extends OneValueAggregator {
   type R = String
   val tag = classTag[String]
@@ -126,7 +144,7 @@ class LastDoubleValueAggregator(timestampIndex: Int, doubleColIndex: Int) extend
     val doubleVector = lastVectors(doubleColIndex).asInstanceOf[FiloVector[Double]]
     val point = DoubleSeriesPoint(timestampVector(timestampVector.length - 1),
                                   doubleVector(doubleVector.length - 1))
-    new PrimitiveSimpleAggregate(DoubleSeriesValues(partition.stringPartition, Seq(point)))
+    new PrimitiveSimpleAggregate(DoubleSeriesValues(partition.shard, partition.stringPartition, Seq(point)))
   }
 }
 
@@ -211,6 +229,12 @@ object AggregationFunction extends Enum[AggregationFunction] {
   case object PartitionKeys extends AggregationFunction {
     def validate(args: Seq[String], proj: RichProjection): Aggregator Or InvalidFunctionSpec =
       Good(new PartitionKeysAggregator)
+  }
+
+  case object NumBytes extends SingleColumnAggFunction {
+    val allowedTypes: Set[Column.ColumnType] = Column.ColumnType.values.toSet
+    def makeAggregator(colIndex: Int, colType: Column.ColumnType): Aggregator =
+      new NumBytesAggregator(colIndex)
   }
 
   case object Sum extends SingleColumnAggFunction {

@@ -47,7 +47,8 @@ class Arguments extends FieldArgs {
   var host: Option[String] = None
   var port: Int = 2552
   var promql: Option[String] = None
-  var metricColumn: String = "kpi"
+  var metricColumn: String = "__name__"
+  var linePerItem: Boolean = false
 
   import Column.ColumnType._
 
@@ -72,11 +73,9 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
 
   override val role = ClusterRole.Cli
 
-  override lazy val system = ActorSystem(systemName)
+  override lazy val system = ActorSystem(systemName, systemConfig)
 
   override lazy val cluster = FilodbCluster(system)
-
-  coordinatorActor // create it
   cluster._isInitialized.set(true)
 
   lazy val client = new LocalClient(coordinatorActor)
@@ -199,7 +198,7 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
           args.promql.map { query =>
             require(args.host.nonEmpty && args.dataset.nonEmpty, "--host and --dataset must be defined")
             val remote = Client.standaloneClient(system, args.host.get, args.port)
-            parsePromQuery(remote, query, args.dataset.get, args.metricColumn)
+            parsePromQuery(remote, query, args.dataset.get, args.metricColumn, args.linePerItem)
           }.getOrElse {
             args.select.map { selectCols =>
               exportCSV(getRef(args),
@@ -311,12 +310,14 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
 
   import QueryCommands.{AggregateResponse, QueryArgs}
 
-  def parsePromQuery(client: LocalClient, query: String, dataset: String, metricCol: String): Unit = {
-    val parser = new PromQLParser(query)
-    parser.parseAndGetArgs() match {
+  def parsePromQuery(client: LocalClient, query: String, dataset: String,
+                     metricCol: String, linePerItem: Boolean): Unit = {
+    val opts = Dataset.DefaultOptions.copy(metricColumn = metricCol)
+    val parser = new PromQLParser(query, opts)
+    parser.parseAndGetArgs(true) match {
       // Valid parsed QueryArgs
       case SSuccess(ArgsAndPartSpec(args, partSpec)) =>
-        executeQuery(client, dataset, args, partSpec.metricName, partSpec.filters, metricCol)
+        executeQuery(client, dataset, args, partSpec.metricName, partSpec.filters, linePerItem)
 
       case Failure(e: ParseError) =>
         println(s"Failure parsing $query:\n${parser.formatError(e)}")
@@ -327,26 +328,23 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
   }
 
   def executeQuery(client: LocalClient, dataset: String, query: QueryArgs,
-                   metricName: String, filters: Seq[ColumnFilter], metricCol: String): Unit = {
+                   metricName: String, filters: Seq[ColumnFilter], linePerItem: Boolean): Unit = {
     val ref = DatasetRef(dataset)
-    val filtersWithMetric =
-      if (metricName == PromQLParser.ScanEverythingMetric) { filters }
-      else { filters :+ ColumnFilter(metricCol, Filter.Equals(metricName)) }
     println(s"Sending aggregation command to server for $ref...")
-    println(s"Query: $query\nFilters: $filtersWithMetric")
+    println(s"Query: $query\nFilters: $filters")
     try {
-      printAggregate(client.partitionFilterAggregate(ref, query, filtersWithMetric))
+      printAggregate(client.partitionFilterAggregate(ref, query, filters), linePerItem)
     } catch {
       case e: ClientException =>
         println(s"ERROR: ${e.getMessage}")
         exitCode = 2
     }
-
   }
 
-  def printAggregate(agg: AggregateResponse[_]): Unit = agg match {
+  def printAggregate(agg: AggregateResponse[_], linePerItem: Boolean): Unit = agg match {
     case AggregateResponse(_, _, array) =>
-      println(s"[${array.mkString(",")}]")
+      if (linePerItem) { array.foreach(println) }
+      else             { println(s"[${array.mkString(",")}]") }
   }
 
   import scala.language.existentials

@@ -80,7 +80,7 @@ object FiloCliApp extends FilodbClusterNode with StrictLogging {
   }
 
   def createDataset(datasetName: String, columns: Seq[DataColumn], rowKeys: Seq[String], partKeys: Seq[String]): Try[Unit] = {
-    val dataset = Dataset(datasetName, rowKeys, ":string 0", partKeys)
+    val dataset = Dataset(datasetName, rowKeys, partKeys)
     logger.info(s"Creating dataset $dataset with columns $columns...")
     Try(client.createNewDataset(dataset, columns))
   }

@@ -29,7 +29,6 @@ sealed class DatasetTable(val config: Config, val sessionProvider: FiloSessionPr
                     |partitioncolumns text static,
                     |projectioncolumns text,
                     |projectionreverse boolean,
-                    |segmentcolumns text,
                     |PRIMARY KEY ((database, name), projectionid)
                     |)""".stripMargin
 
@@ -41,7 +40,6 @@ sealed class DatasetTable(val config: Config, val sessionProvider: FiloSessionPr
     Projection(row.getInt("projectionid"),
                DatasetRef(row.getString("name"), Some(row.getString("database"))),
                splitCString(row.getString("keycolumns")),
-               row.getString("segmentcolumns"),
                row.getBool("projectionreverse"),
                splitCString(Try(row.getString("projectioncolumns")).getOrElse("")))
 
@@ -58,8 +56,8 @@ sealed class DatasetTable(val config: Config, val sessionProvider: FiloSessionPr
   def clearAll(): Future[Response] = execCql(s"TRUNCATE $tableString")
 
   lazy val projInsertCql = session.prepare(
-    s"""INSERT INTO $tableString (name, database, projectionid, keycolumns, segmentcolumns,
-       |projectionreverse, projectioncolumns) VALUES (?, ?, ?, ?, ?, ?, ?)""".stripMargin
+    s"""INSERT INTO $tableString (name, database, projectionid, keycolumns,
+       |projectionreverse, projectioncolumns) VALUES (?, ?, ?, ?, ?, ?)""".stripMargin
   )
 
   def insertProjection(projection: Projection): Future[Response] =
@@ -67,7 +65,6 @@ sealed class DatasetTable(val config: Config, val sessionProvider: FiloSessionPr
                                 projection.dataset.database.getOrElse(defaultKeySpace),
                                 projection.id: java.lang.Integer,
                                 stringsToStr(projection.keyColIds),
-                                projection.segmentColId,
                                 projection.reverse: java.lang.Boolean,
                                 stringsToStr(projection.columns)))
 
@@ -91,7 +88,7 @@ sealed class DatasetTable(val config: Config, val sessionProvider: FiloSessionPr
 
   def getProjection(dataset: DatasetRef, id: Int): Future[Projection] =
     session.executeAsync(s"""
-      SELECT name, database, projectionid, keycolumns, segmentcolumns, projectionreverse, projectioncolumns
+      SELECT name, database, projectionid, keycolumns, projectionreverse, projectioncolumns
       FROM $tableString WHERE name = '${dataset.dataset}' AND projectionid = $id
       AND database = '${dataset.database.getOrElse(defaultKeySpace)}'
       """).toOne.map { _.map(fromRow).getOrElse(throw NotFoundError(s"Dataset $dataset")) }

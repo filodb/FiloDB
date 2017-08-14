@@ -18,6 +18,7 @@ trait FiloPartition {
 
   def numChunks: Int
   def latestChunkLen: Int
+  def shard: Int
 
   /**
    * Streams back ChunkSetReaders from this Partition as an observable of readers by chunkID

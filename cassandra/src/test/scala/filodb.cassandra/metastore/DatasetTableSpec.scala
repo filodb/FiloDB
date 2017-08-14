@@ -29,7 +29,7 @@ class DatasetTableSpec extends FlatSpec with AsyncTest {
     datasetTable.clearAll().futureValue(timeout)
   }
 
-  val fooDataset = Dataset("foo", "someSortCol", "seg")
+  val fooDataset = Dataset("foo", "someSortCol")
   val timeout = Timeout(30 seconds)
   import scala.concurrent.ExecutionContext.Implicits.global
 
@@ -67,7 +67,7 @@ class DatasetTableSpec extends FlatSpec with AsyncTest {
 
   it should "return the Dataset if it exists" in {
     val barRef = DatasetRef("bar", Some("funky_ks"))
-    val barDataset = Dataset(barRef, Seq("key1", ":getOrElse key2 --"), "seg",
+    val barDataset = Dataset(barRef, Seq("key1", ":getOrElse key2 --"),
                              Seq("part1", ":getOrElse part2 00"))
     datasetTable.createNewDataset(barDataset).futureValue(timeout) should equal (Success)
 

@@ -2,7 +2,7 @@ package filodb.coordinator
 
 import scala.concurrent.Future
 
-import akka.actor.{Actor, ActorRef, DeadLetter, PoisonPill, Props, Terminated}
+import akka.actor._
 import akka.cluster.Cluster
 import akka.contrib.pattern.{ClusterSingletonManager, ClusterSingletonProxy}
 
@@ -150,6 +150,9 @@ private[filodb] object NodeGuardian {
 
   /* Actor Paths */
   val ClusterSingletonProxyPath = s"/user/$NodeGuardianName/$SingletonMgrName/$NodeClusterName"
+
+  def nodeCoordinatorPath(addr: Address): ActorPath =
+    RootActorPath(addr) / "user" / NodeGuardianName / CoordinatorName
 
   def props(settings: FilodbSettings,
             cluster: Cluster,

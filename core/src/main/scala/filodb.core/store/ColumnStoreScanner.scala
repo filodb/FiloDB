@@ -67,7 +67,7 @@ trait ColumnStoreScanner extends ColumnStoreAggregator with StrictLogging {
   def readFilters(projection: RichProjection,
                   version: Int,
                   chunkRange: (Types.ChunkID, Types.ChunkID))
-                 (segInfo: SegmentInfo[projection.PK, projection.SK])
+                 (segInfo: SegmentInfo[projection.PK, Any])
                  (implicit ec: ExecutionContext): Future[Iterator[SegmentState.IDAndFilter]] = {
     readFilters(projection.datasetRef, version, segInfo.partition, chunkRange)
   }

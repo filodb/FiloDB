@@ -52,7 +52,7 @@ trait DatasetOps extends ClientBase with StrictLogging {
                       version: Int,
                       timeout: FiniteDuration = 30.seconds): Unit = {
     logger.info(s"Truncating dataset $dataset...")
-    val projection = Projection(0, dataset, Nil, "")
+    val projection = Projection(0, dataset, Nil)
     askCoordinator(TruncateProjection(projection, version), timeout) {
       case ProjectionTruncated =>
     }

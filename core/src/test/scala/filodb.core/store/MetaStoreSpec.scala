@@ -27,7 +27,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
 
   describe("dataset API") {
     it("should create a new Dataset if one not there") {
-      val dataset = Dataset(fooRef, Seq("key1", ":getOrElse key2 --"), "seg",
+      val dataset = Dataset(fooRef, Seq("key1", ":getOrElse key2 --"),
                             Seq("part1", ":getOrElse part2 00"))
       metaStore.newDataset(dataset).futureValue should equal (Success)
 
@@ -35,7 +35,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
     }
 
     it("should return AlreadyExists if dataset already exists") {
-      val dataset = Dataset("foo", "autoid", "seg")
+      val dataset = Dataset("foo", "autoid")
       metaStore.newDataset(dataset).futureValue should equal (Success)
       metaStore.newDataset(dataset).futureValue should equal (AlreadyExists)
     }
@@ -47,7 +47,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
     it("should return all datasets created") {
       for { i <- 0 to 2 } {
         val ref = DatasetRef(i.toString, Some((i % 2).toString))
-        val dataset = Dataset(ref, Seq("key1", ":getOrElse key2 --"), "seg",
+        val dataset = Dataset(ref, Seq("key1", ":getOrElse key2 --"),
                               Seq("part1", ":getOrElse part2 00"))
         metaStore.newDataset(dataset).futureValue should equal (Success)
       }
@@ -108,7 +108,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
     }
 
     it("deleteDatasets should delete both dataset and columns") {
-      val dataset = Dataset("gdelt", "autoid", "seg")
+      val dataset = Dataset("gdelt", "autoid")
       metaStore.newDataset(dataset).futureValue should equal (Success)
       metaStore.newColumn(monthYearCol, gdeltRef).futureValue should equal (Success)
 

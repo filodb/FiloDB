@@ -58,7 +58,7 @@ class SegmentStateCache(config: Config, columnStore: ColumnStore with ColumnStor
   def getSegmentState(projection: RichProjection,
                       schema: Seq[Column],
                       version: Int)
-                     (segInfo: SegmentInfo[projection.PK, projection.SK]): SegmentState = {
+                     (segInfo: SegmentInfo[projection.PK, Any]): SegmentState = {
     cacheReads.increment
     val cacheKey = (projection.datasetRef, segInfo)
     cache.getOrElseUpdate(cacheKey, { case (ref: DatasetRef,

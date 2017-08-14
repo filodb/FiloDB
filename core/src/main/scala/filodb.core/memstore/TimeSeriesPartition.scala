@@ -33,6 +33,7 @@ import filodb.core.Types._
  */
 class TimeSeriesPartition(val projection: RichProjection,
                           val binPartition: PartitionKey,
+                          val shard: Int,
                           chunksToKeep: Int,
                           maxChunkSize: Int) extends PartitionChunkIndex with FiloPartition {
   import ChunkSetInfo._

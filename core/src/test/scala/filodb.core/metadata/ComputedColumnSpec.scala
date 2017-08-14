@@ -82,7 +82,7 @@ class ComputedColumnSpec extends FunSpec with Matchers {
     }
 
     it("should round double value") {
-      val dblDataset = Dataset("a", "dbl", ":string 0", ":round dbl 2.5")
+      val dblDataset = Dataset("a", "dbl", ":round dbl 2.5")
       val dblColumn = DataColumn(0, "dbl", "a", 0, Column.ColumnType.DoubleColumn)
       val proj = RichProjection(dblDataset, Seq(dblColumn))
       proj.partitionKeyFunc(TupleRowReader((Some(2.499), None))).getDouble(0) should equal (0.0)
@@ -111,7 +111,7 @@ class ComputedColumnSpec extends FunSpec with Matchers {
     }
 
     it("should timeslice Timestamp values") {
-      val tsDataset = Dataset("a", "ts", ":string 0", ":timeslice ts 5m")
+      val tsDataset = Dataset("a", "ts", ":timeslice ts 5m")
       val tsColumn = DataColumn(0, "ts", "a", 0, Column.ColumnType.TimestampColumn)
       val proj = RichProjection(tsDataset, Seq(tsColumn))
 
@@ -122,7 +122,7 @@ class ComputedColumnSpec extends FunSpec with Matchers {
 
   describe(":monthOfYear") {
     it("should return month of year for timestamp column") {
-      val tsDataset = Dataset("a", "ts", ":string 0", ":monthOfYear ts")
+      val tsDataset = Dataset("a", "ts", ":monthOfYear ts")
       val tsColumn = DataColumn(0, "ts", "a", 0, Column.ColumnType.TimestampColumn)
       val proj = RichProjection(tsDataset, Seq(tsColumn))
 

@@ -59,7 +59,7 @@ object NamesTestData {
 
   def mapper(rows: Seq[Product]): Seq[RowReader] = rows.map(TupleRowReader)
 
-  val dataset = Dataset("dataset", "age", "seg")
+  val dataset = Dataset("dataset", "age")
   val datasetRef = DatasetRef(dataset.name)
   val projection = RichProjection(dataset, schema)
 
@@ -165,35 +165,31 @@ object GdeltTestData {
   }
   val seqReaders = records.map { record => SeqRowReader(record.productIterator.toList) }
 
-  // Dataset1: Partition keys (Actor2Code, Year) / Row key GLOBALEVENTID / Seg :string 0
-  val dataset1 = Dataset("gdelt", Seq("GLOBALEVENTID"), ":string 0", Seq("Actor2Code", "Year"))
+  // Dataset1: Partition keys (Actor2Code, Year) / Row key GLOBALEVENTID
+  val dataset1 = Dataset("gdelt", Seq("GLOBALEVENTID"), Seq("Actor2Code", "Year"))
   val projection1 = RichProjection(dataset1, schema)
 
   // Dataset2: Partition key (MonthYear) / Row keys (Actor2Code, GLOBALEVENTID)
-  // Segment ID is to group GLOBALEVENTID such that there will be two segments
-  val dataset2 = Dataset("gdelt", Seq("Actor2Code", "GLOBALEVENTID"),
-                         ":round GLOBALEVENTID 50", Seq("MonthYear"))
+  val dataset2 = Dataset("gdelt", Seq("Actor2Code", "GLOBALEVENTID"), Seq("MonthYear"))
   val projection2 = RichProjection(dataset2, schema)
 
   // Dataset3: same as Dataset1 but with :getOrElse to prevent null partition keys
-  val dataset3 = Dataset("gdelt", Seq("GLOBALEVENTID"), ":string 0",
+  val dataset3 = Dataset("gdelt", Seq("GLOBALEVENTID"),
                          Seq(":getOrElse Actor2Code NONE", ":getOrElse Year -1"))
   val projection3 = RichProjection(dataset3, schema)
 
-  // Dataset4: One big partition (Year) and segment (:string 0) with (Actor2Code, GLOBALEVENTID) rowkey
+  // Dataset4: One big partition (Year) with (Actor2Code, GLOBALEVENTID) rowkey
   // to easily test row key scans
-  val dataset4 = Dataset("gdelt", Seq("Actor2Code", "GLOBALEVENTID"), ":string 0", Seq("Year"))
+  val dataset4 = Dataset("gdelt", Seq("Actor2Code", "GLOBALEVENTID"), Seq("Year"))
   val projection4 = RichProjection(dataset4, schema)
 
   // Dataset 5: partition :monthYear SQLDATE, rowkey (Actor2Code, GLOBALEVENTID)
   // to test timestamp processing
-  val dataset5 = Dataset("gdelt", Seq("Actor2Code", "GLOBALEVENTID"), ":string 0",
-                                  Seq(":monthOfYear SQLDATE"))
+  val dataset5 = Dataset("gdelt", Seq("Actor2Code", "GLOBALEVENTID"), Seq(":monthOfYear SQLDATE"))
   val projection5 = RichProjection(dataset5, schema)
 
   // Proj 6: partition Actor2Code,Actor2Name to test partition key bitmap indexing
-  val dataset6 = Dataset("gdelt", Seq("GLOBALEVENTID"), ":string 0",
-                                  Seq("Actor2Code", "Actor2Name"))
+  val dataset6 = Dataset("gdelt", Seq("GLOBALEVENTID"), Seq("Actor2Code", "Actor2Name"))
   val projection6 = RichProjection(dataset6, schema)
 
   def getSegments(partKey: PartitionKey): Seq[(ChunkSetSegment, Seq[RowReader])] = {
@@ -233,7 +229,7 @@ object MachineMetricsData {
                    DataColumn(3, "max",       "metrics", 0, DoubleColumn),
                    DataColumn(4, "p90",       "metrics", 0, DoubleColumn))
 
-  val dataset = Dataset("metrics", "timestamp", ":string 0")
+  val dataset = Dataset("metrics", "timestamp")
   val datasetRef = DatasetRef(dataset.name)
   val projection = RichProjection(dataset, schema)
   val defaultPartKey = BinaryRecord(projection.partKeyBinSchema, SeqRowReader(Seq("/0")))
@@ -254,7 +250,7 @@ object MachineMetricsData {
   val schemaWithSeries = schema :+ DataColumn(5, "series",    "metrics", 0, StringColumn)
 
   // Dataset1: Partition keys (series) / Row key timestamp / Seg :string 0
-  val dataset1 = Dataset("gdelt", Seq("timestamp"), ":string 0", Seq("series"))
+  val dataset1 = Dataset("gdelt", Seq("timestamp"), Seq("series"))
   val projection1 = RichProjection(dataset1, schemaWithSeries)
 
   // Turns either multiSeriesData() or linearMultiSeries() into IngestRecord's

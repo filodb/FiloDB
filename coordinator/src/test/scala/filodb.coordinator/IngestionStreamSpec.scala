@@ -43,6 +43,8 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem)
   private val memStore = cluster.memStore
   private val metaStore = cluster.metaStore
 
+  metaStore.initialize().futureValue
+  metaStore.clearAllData().futureValue
   val ref = projection6.datasetRef
   metaStore.newDataset(dataset6).futureValue shouldEqual Success
   schema.foreach { col => metaStore.newColumn(col, ref).futureValue shouldEqual Success }

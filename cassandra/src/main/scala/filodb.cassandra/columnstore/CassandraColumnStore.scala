@@ -361,6 +361,9 @@ extends ChunkIDPartitionChunkIndex(binPartition, projection) with FiloPartition 
 
   def latestChunkLen: Int = latestN(1).toSeq.headOption.map(_._1.numRows).getOrElse(0)
 
+  // For now just report a dummy shard.  In the future figure this out.
+  val shard = 0
+
   override def streamReaders(infosSkips: InfosSkipsIt, positions: Array[Int]): Observable[ChunkSetReader] = {
     val chunkTable = scanner.getOrCreateChunkTable(projection.datasetRef)
     val columns = positions.map(projection.columns)

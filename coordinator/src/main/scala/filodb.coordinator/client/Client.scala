@@ -9,7 +9,7 @@ import scala.concurrent.{Await, Future}
 import scala.language.postfixOps
 
 import filodb.core._
-import filodb.coordinator.{NodeClusterActor, MiscCommands}
+import filodb.coordinator.{NodeClusterActor, NodeGuardian, MiscCommands}
 
 object Client {
   implicit val context = monix.execution.Scheduler.Implicits.global
@@ -48,7 +48,7 @@ object Client {
                        port: Int = 2552,
                        askTimeout: FiniteDuration = 30 seconds): LocalClient = {
     val addr = Address("akka.tcp", "filo-standalone", host, port)
-    val refFuture = system.actorSelection(RootActorPath(addr) / "user" / "coordinator")
+    val refFuture = system.actorSelection(NodeGuardian.nodeCoordinatorPath(addr))
                           .resolveOne(askTimeout)
     new LocalClient(Await.result(refFuture, askTimeout))
   }

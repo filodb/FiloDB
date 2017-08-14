@@ -76,7 +76,7 @@ object FiloServer extends FilodbClusterNode with StrictLogging {
       config.as[Seq[String]]("int-columns").map(n => DataColumn(0, n, datasetName, 0, IntColumn)) ++
       config.as[Seq[String]]("map-columns").map(n => DataColumn(0, n, datasetName, 0, MapColumn))
 
-    val dataset = Dataset(datasetName, rowKeys, ":string 0", partKeys)
+    val dataset = Dataset(datasetName, rowKeys, partKeys)
     logger.info(s"Creating dataset $dataset with columns $columns...")
     client.createNewDataset(dataset, columns)
   }
