@@ -8,10 +8,9 @@ import scala.concurrent.Await
 import akka.util.Timeout
 import com.typesafe.config.ConfigFactory
 import com.typesafe.scalalogging.StrictLogging
-import monix.execution.{Ack, Scheduler}
-import monix.execution.Ack._
+import monix.execution.Scheduler
 import monix.eval.Task
-import monix.reactive.{Consumer, Observable, Observer}
+import monix.reactive.Observable
 import org.apache.kafka.clients.producer.ProducerRecord
 
 import filodb.coordinator.IngestionCommands.DatasetSetup
@@ -19,7 +18,7 @@ import filodb.coordinator.IngestionStreamFactory
 import filodb.coordinator.NodeClusterActor.IngestionSource
 import filodb.core.memstore.{IngestRecord, TimeSeriesMemStore}
 import filodb.core.metadata.{Column, DataColumn, Dataset, RichProjection}
-import org.velvia.filo.{RoutingRowReader, TupleRowReader}
+import org.velvia.filo.ArrayStringRowReader
 
 /** 1. Start Zookeeper
   * 2. Start Kafka (tested with Kafka 0.10.2.1 and 0.11)
@@ -45,18 +44,20 @@ class KafkaIngestionStreamSuite extends ConfigSpec with StrictLogging {
        |include file("$FullTestPropsPath")
        |filo-topic-name="integration-test-topic"
        |filo-record-converter="${classOf[PartitionRecordConverter].getName}"
+       |partitioner.class = "${classOf[LongKeyPartitionStrategy].getName}"
         """.stripMargin)
 
   implicit val timeout: Timeout = 10.seconds
-
-  implicit val ec = scala.concurrent.ExecutionContext.global
+  implicit val io = Scheduler.io("filodb-kafka-tests")
 
   "IngestionStreamFactory" must {
     "create a new KafkaStream" in {
 
       // data:
-      val schema = Seq(DataColumn(0, "timestamp", "timestamp", 0, StringColumn))
-      val dataset = Dataset("metrics", "timestamp", ":string 0")
+      val schema = Seq(DataColumn(0, "series",    "metrics", 0, StringColumn),
+                       DataColumn(0, "timestamp", "metrics", 0, TimestampColumn),
+                       DataColumn(1, "value",     "metrics", 0, IntColumn))
+      val dataset = Dataset("metrics", "timestamp", ":string 0", "series")
       val datasetRef = DatasetRef(dataset.name)
       val projection = RichProjection(dataset, schema)
       val source = IngestionSource(classOf[KafkaIngestionStreamFactory].getName)
@@ -71,29 +72,7 @@ class KafkaIngestionStreamSuite extends ConfigSpec with StrictLogging {
       memStore.setup(projection, 0)
       memStore.reset()
 
-      // a completed-aware observer showing a consumer of the streams
-      val coordinator = Consumer.fromObserver[Seq[IngestRecord]] { implicit scheduler =>
-        val range = Range(0, count-1).map(_.toString)
-
-        new Observer.Sync[Seq[IngestRecord]] {
-          def onNext(elem: Seq[IngestRecord]): Ack = {
-            elem.headOption.collect {
-              case IngestRecord(_, RoutingRowReader(TupleRowReader((m: String,p: Int)), _), o) if m == range.max =>
-                logger.debug(s"Processing last published event for partition=$p offset=$o")
-                Consumer.complete
-                Stop
-              case IngestRecord(_, RoutingRowReader(TupleRowReader((m: String,p: Int)), _), o) =>
-                logger.debug(s"Received and converted $m with partition=$p offset=$o")
-                Continue
-            }.getOrElse(Continue)
-          }
-          def onComplete(): Unit = logger.debug("task completed")
-          def onError(e: Throwable): Unit = logger.error("task error", e)
-        }
-      }
-
       // producer:
-      implicit val io = Scheduler.io("filodb-kafka-tests")
       val producer = PartitionedProducerSink.create[JLong, String](settings, io)
 
       val tasks = for (partition <- 0 until numPartitions) yield {
@@ -103,20 +82,24 @@ class KafkaIngestionStreamSuite extends ConfigSpec with StrictLogging {
           .bufferIntrospective(1024)
           .consumeWith(producer)
 
+        memStore.setup(projection, partition)
+
         // The consumer task creates one ingestion stream per topic-partition (consumer.assign(topic,partition)
         // this is currently a 1:1 Observable stream
-        val  sourceT = {
+        val sourceT = {
           val streamFactory = ctor.newInstance().asInstanceOf[IngestionStreamFactory]
           streamFactory.isInstanceOf[KafkaIngestionStreamFactory] should be(true)
-          streamFactory
+          val stream = streamFactory
             .create(settings.config, projection, partition)
             .get
-            .consumeWith(coordinator)
+            .take(count)
+
+          Task.fromFuture(memStore.ingestStream(datasetRef, partition, stream) { err => throw err })
         }
         Task.zip2(Task.fork(sourceT), Task.fork(sinkT)).runAsync
       }
 
-      tasks foreach (task => Await.result(task, 60.seconds))
+      tasks foreach { task => Await.result(task, 60.seconds) }
     }
   }
 }
@@ -125,6 +108,8 @@ class KafkaIngestionStreamSuite extends ConfigSpec with StrictLogging {
 final class PartitionRecordConverter extends RecordConverter {
 
   override def convert(proj: RichProjection, event: AnyRef, partition: Int, offset: Long): Seq[IngestRecord] =
-    Seq(IngestRecord(proj, TupleRowReader((event, partition)), offset))
+    Seq(IngestRecord(proj, ArrayStringRowReader(Array(partition.toString,
+                                                      event.asInstanceOf[String],
+                                                      partition.toString)), offset))
 
 }

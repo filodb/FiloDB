@@ -250,7 +250,7 @@ object MachineMetricsData {
   val schemaWithSeries = schema :+ DataColumn(5, "series",    "metrics", 0, StringColumn)
 
   // Dataset1: Partition keys (series) / Row key timestamp / Seg :string 0
-  val dataset1 = Dataset("gdelt", Seq("timestamp"), Seq("series"))
+  val dataset1 = Dataset("metrics", Seq("timestamp"), Seq("series"))
   val projection1 = RichProjection(dataset1, schemaWithSeries)
 
   // Turns either multiSeriesData() or linearMultiSeries() into IngestRecord's

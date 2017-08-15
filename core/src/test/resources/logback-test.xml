@@ -23,6 +23,14 @@
     <appender-ref ref="FILE" />
   </logger>
 
+  <logger name="org.apache.kafka.common.metrics" level="ERROR"/>
+  <logger name="org.apache.kafka.clients.consumer.KafkaConsumer" level="DEBUG"/>
+  <logger name="org.apache.kafka.clients.producer.ProducerConfig" level="WARN"/>
+  <logger name="org.apache.kafka.clients.consumer.ConsumerConfig" level="WARN"/>
+  <logger name="org.apache.kafka.common.security" level="INFO"/>
+  <logger name="org.apache.kafka.clients" level="INFO"/>
+  <logger name="org.apache.kafka" level="INFO"/>
+
   <root level="WARN">
     <appender-ref ref="FILE" />
     <appender-ref ref="STDOUT" />

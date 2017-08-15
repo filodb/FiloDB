@@ -4,7 +4,7 @@ import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
 
 import scala.concurrent.{Await, ExecutionContext}
 
-import akka.actor.{ActorRef, ActorSystem, Address, AddressFromURIString, ExtendedActorSystem, Extension, ExtensionId, ExtensionIdProvider, PoisonPill}
+import akka.actor._
 import akka.cluster.{Cluster, ClusterEvent, MemberStatus}
 import akka.util.Timeout
 import com.typesafe.scalalogging.StrictLogging

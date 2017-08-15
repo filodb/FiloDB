@@ -46,6 +46,7 @@ final class FilodbSettings(val conf: Config) {
 
   val MaxPoolSize = config.as[Int]("core-futures-max-pool-size")
 
-  lazy val DatasetDefinitions = config.as[Option[Map[String, Config]]]("dataset-definitions").getOrElse(Map.empty[String, Config])
+  lazy val DatasetDefinitions = config.as[Option[Map[String, Config]]]("dataset-definitions")
+                                      .getOrElse(Map.empty[String, Config])
 
 }

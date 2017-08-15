@@ -61,7 +61,9 @@ object MemStoreStress extends App {
   val csvDF = sess.read.format("com.databricks.spark.csv").
                  option("header", "true").option("inferSchema", "true").
                  load(taxiCsvFile).
-                 select("medallion", "rate_code", "pickup_datetime", "dropoff_datetime", "passenger_count", "trip_time_in_secs", "trip_distance", "pickup_longitude", "pickup_latitude")
+                 select("medallion", "rate_code", "pickup_datetime", "dropoff_datetime",
+                        "passenger_count", "trip_time_in_secs", "trip_distance",
+                        "pickup_longitude", "pickup_latitude")
 
   // use observables (a stream of queries) to handle queries
   val queryArgs = QueryArgs("time_group_avg", Seq("pickup_datetime", "trip_distance", "2013-01-01T00Z",
@@ -98,7 +100,8 @@ object MemStoreStress extends App {
   puts(s"\n\n==> memStore ingestion was complete in ${ingestMillis/1000.0} seconds")
   val queryCount = Await.result(queryFut, 1 minute)
   val queryThroughput = nQueries * 1000 / (endMs - startMs)
-  puts(s"\n==> Concurrent querying of $nQueries queries ($queryThreads threads) over ${endMs - startMs} ms = $queryThroughput QPS")
+  puts(s"\n==> Concurrent querying of $nQueries queries ($queryThreads threads) " +
+       s"over ${endMs - startMs} ms = $queryThroughput QPS")
 
   FiloDriver.shutdown()
   FiloExecutor.shutdown()

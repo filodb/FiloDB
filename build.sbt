@@ -50,7 +50,8 @@ lazy val kafka = project
   .in(file("kafka"))
   .settings(name := "filodb-kafka")
   .settings(buildSettings:_*)
-  .settings(multiJvmSettings:_*)
+  // Don't automatically run multi-jvm tests.  Requires Kafka instance.
+  // .settings(multiJvmSettings:_*)
   .settings(itSettings : _*)
   .settings(assemblySettings:_*)
   .dependsOn(coordinator % "compile->compile; test->test",

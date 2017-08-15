@@ -7,7 +7,6 @@ import scala.concurrent.blocking
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.kafka._
-import monix.kafka.config.AutoOffsetReset
 import org.apache.kafka.clients.consumer.KafkaConsumer
 import org.apache.kafka.common.TopicPartition
 
@@ -24,7 +23,6 @@ object PartitionedConsumerObservable {
 
     val consumer = createConsumer(settings, topicPartition)
     val cfg = consumerConfig(settings)
-    require(cfg.autoOffsetReset == AutoOffsetReset.Earliest)//enforce?
 
     KafkaConsumerObservable[JLong, Any](cfg, consumer)
   }

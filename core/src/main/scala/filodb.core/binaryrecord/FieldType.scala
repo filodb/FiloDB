@@ -1,9 +1,10 @@
 package filodb.core.binaryrecord
 
+import com.typesafe.scalalogging.StrictLogging
 import java.sql.Timestamp
 import org.boon.primitive.ByteBuf
-import org.velvia.filo.{RowReader, UnsafeUtils, ZeroCopyUTF8String}
 import org.velvia.filo.RowReader._
+import org.velvia.filo.{RowReader, UnsafeUtils, ZeroCopyUTF8String}
 
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.SingleKeyTypes.{Int32HighBit, Long64HighBit}
@@ -35,12 +36,18 @@ trait FieldType[@specialized T] {
   def compare(rec1: BinaryRecord, rec2: BinaryRecord, field: Field): Int
 }
 
-abstract class SimpleFieldType[@specialized T: TypedFieldExtractor] extends FieldType[T] {
+abstract class SimpleFieldType[@specialized T: TypedFieldExtractor] extends FieldType[T] with StrictLogging {
   private final val extractor = implicitly[TypedFieldExtractor[T]]
   final def addFromReader(builder: BinaryRecordBuilder,
                           field: Field,
                           reader: RowReader): Unit =
-    add(builder, field, extractor.getField(reader, field.num))
+    try {
+      add(builder, field, extractor.getField(reader, field.num))
+    } catch {
+      case e: Exception =>
+        logger.error(s"Could not extract from $reader using field ${field.num}", e)
+        throw e
+    }
 
   final def addWithExtractor(builder: BinaryRecordBuilder,
                              field: Field,

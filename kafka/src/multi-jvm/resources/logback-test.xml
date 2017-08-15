@@ -7,7 +7,7 @@
   </appender>
 
   <appender name="FILE" class="ch.qos.logback.core.FileAppender">
-    <file>filodb-kafka-test.log</file>
+    <file>multijvm-${multijvm.node}-test.log</file>
 
     <!-- truncate the logfile every time we start the test -->
     <append>false</append>
@@ -23,16 +23,13 @@
     <appender-ref ref="FILE" />
   </logger>
 
-    <logger name="org.apache.kafka.common.metrics" level="ERROR"/>
-    <logger name="org.apache.kafka.clients.consumer.KafkaConsumer" level="DEBUG"/>
-    <logger name="org.apache.kafka.clients.producer.ProducerConfig" level="WARN"/>
-    <logger name="org.apache.kafka.clients.consumer.ConsumerConfig" level="WARN"/>
-    <logger name="org.apache.kafka.common.security" level="INFO"/>
-    <logger name="org.apache.kafka.streams.processor" level="INFO"/>
-    <logger name="org.apache.kafka.streams.processor.internals.StreamTask" level="WARN"/>
-    <logger name="org.apache.kafka.streams.processor.internals.StreamThread" level="WARN"/>
-    <logger name="org.apache.kafka.clients" level="INFO"/>
-    <logger name="org.apache.kafka" level="INFO"/>
+  <logger name="org.apache.kafka.common.metrics" level="ERROR"/>
+  <logger name="org.apache.kafka.clients.consumer.KafkaConsumer" level="DEBUG"/>
+  <logger name="org.apache.kafka.clients.producer.ProducerConfig" level="WARN"/>
+  <logger name="org.apache.kafka.clients.consumer.ConsumerConfig" level="WARN"/>
+  <logger name="org.apache.kafka.common.security" level="INFO"/>
+  <logger name="org.apache.kafka.clients" level="INFO"/>
+  <logger name="org.apache.kafka" level="INFO"/>
 
   <root level="WARN">
     <appender-ref ref="FILE" />

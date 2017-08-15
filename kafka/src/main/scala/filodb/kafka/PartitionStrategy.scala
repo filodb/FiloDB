@@ -31,7 +31,18 @@ abstract class ShardPartitionStrategy extends PartitionStrategy {
 
   protected final val shardToNodeMappings = new ShardMapper(numShards)
 
-  def partition(topic: String, key: Any, keyBytes: Array[Byte], value: Any, valueBytes: Array[Byte], cluster: Cluster): Int
+  def partition(topic: String,
+                key: Any, keyBytes: Array[Byte],
+                value: Any, valueBytes: Array[Byte],
+                cluster: Cluster): Int
+}
 
-  override def close(): Unit = {}
+/**
+ * A really simple PartitionStrategy that obtains the desired partition or shard number from the key of the
+ * message as a Long.
+ */
+class LongKeyPartitionStrategy extends PartitionStrategy {
+  def partition(topic: String, key: Any, keyBytes: Array[Byte],
+                value: Any, valueBytes: Array[Byte], cluster: Cluster): Int =
+    key.asInstanceOf[java.lang.Long].toInt
 }
