@@ -57,7 +57,7 @@ class KafkaIngestionStreamSuite extends ConfigSpec with StrictLogging {
       val schema = Seq(DataColumn(0, "series",    "metrics", 0, StringColumn),
                        DataColumn(0, "timestamp", "metrics", 0, TimestampColumn),
                        DataColumn(1, "value",     "metrics", 0, IntColumn))
-      val dataset = Dataset("metrics", "timestamp", ":string 0", "series")
+      val dataset = Dataset("metrics", "timestamp", "series")
       val datasetRef = DatasetRef(dataset.name)
       val projection = RichProjection(dataset, schema)
       val source = IngestionSource(classOf[KafkaIngestionStreamFactory].getName)
@@ -76,14 +76,10 @@ class KafkaIngestionStreamSuite extends ConfigSpec with StrictLogging {
       val producer = PartitionedProducerSink.create[JLong, String](settings, io)
 
       val tasks = for (partition <- 0 until numPartitions) yield {
-        // The producer task creates `count` ProducerRecords, each range divided equally between the topic's partitions
-        val sinkT = Observable.range(0, count)
-          .map(msg => new ProducerRecord[JLong, String](settings.IngestionTopic, JLong.valueOf(partition), msg.toString))
-          .bufferIntrospective(1024)
-          .consumeWith(producer)
 
         memStore.setup(projection, partition)
 
+        // start consumers before producers so that all messages are consumed properly.
         // The consumer task creates one ingestion stream per topic-partition (consumer.assign(topic,partition)
         // this is currently a 1:1 Observable stream
         val sourceT = {
@@ -96,6 +92,15 @@ class KafkaIngestionStreamSuite extends ConfigSpec with StrictLogging {
 
           Task.fromFuture(memStore.ingestStream(datasetRef, partition, stream) { err => throw err })
         }
+        Thread.sleep(1000) // so that the consumers start fully before the producers begin
+
+        // now start producers
+        // The producer task creates `count` ProducerRecords, each range divided equally between the topic's partitions
+        val sinkT = Observable.range(0, count)
+          .map(msg => new ProducerRecord[JLong, String](settings.IngestionTopic, JLong.valueOf(partition), msg.toString))
+          .bufferIntrospective(1024)
+          .consumeWith(producer)
+
         Task.zip2(Task.fork(sourceT), Task.fork(sinkT)).runAsync
       }
 

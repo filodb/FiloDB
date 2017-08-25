@@ -38,6 +38,7 @@ object KafkaIngestionClusterSpecConfig extends MultiNodeConfig {
 
   // this configuration will be used for all nodes
   val globalConfig = ConfigFactory.parseString("""filodb.memtable.write.interval = 500 ms
+                                                 |akka.logger-startup-timeout = 10s
                                                  |filodb.memtable.filo.chunksize = 70
                                                  |filodb.memtable.max-rows-per-table = 70""".stripMargin)
                        .withFallback(ConfigFactory.load("application_test.conf"))
@@ -99,6 +100,7 @@ abstract class KafkaIngestionClusterSpec extends ClusterSpec(KafkaIngestionClust
       clusterActor ! msg
       // It takes a _really_ long time for the cluster actor singleton to start.
       expectMsg(30.seconds.dilated, DatasetVerified)
+      Thread sleep 15000 // wait for kafka consumers to start
     }
     enterBarrier("dataset-setup-done")
   }
@@ -117,8 +119,8 @@ abstract class KafkaIngestionClusterSpec extends ClusterSpec(KafkaIngestionClust
       val sinkT = Observable.fromIterable(stream)
         .map { values => produced += 1
           new ProducerRecord[JLong, String](settings.IngestionTopic,
-                                            JLong.valueOf(values.last.hashCode % NumPartitions),
-                                            values.mkString(",")) }
+            JLong.valueOf(values.last.hashCode % NumPartitions),
+            values.mkString(",")) }
         .bufferIntrospective(1024)
         .consumeWith(producer)
 

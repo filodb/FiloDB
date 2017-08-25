@@ -19,7 +19,7 @@ class FilodbClusterNodeSpec extends RunnableSpec {
     FiloServerApp.main(Array.empty)
 
     "join the cluster" in {
-      TestKit.awaitCond(FiloServerApp.cluster.isJoined, 5.seconds)
+      TestKit.awaitCond(FiloServerApp.cluster.isJoined, 30.seconds)
     }
     "create and setup the coordinatorActor and clusterActor" in {
       val coordinatorActor = FiloServerApp.coordinatorActor
