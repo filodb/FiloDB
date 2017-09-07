@@ -1,48 +1,51 @@
 package filodb.coordinator
 
-import akka.actor.{Actor, ActorRef, Address, Props}
-import akka.event.LoggingReceive
-import com.typesafe.config.Config
-import monix.execution.{Cancelable, Scheduler}
-import org.velvia.filo.RowReader
 import scala.collection.mutable.HashMap
 import scala.util.control.NonFatal
+import scala.util.Try
+
+import akka.actor.{ActorRef, Props}
+import akka.event.LoggingReceive
+import monix.execution.{Cancelable, Scheduler}
+import monix.eval.Task
 
 import filodb.core.memstore._
 import filodb.core.metadata.RichProjection
+import filodb.core.DatasetRef
 
 object MemStoreCoordActor {
+
   final case class IngestRows(ackTo: ActorRef, shard: Int, records: Seq[IngestRecord])
+
   case object GetStatus
 
-  // TODO: do we need a more specific name?
-  final case class Status(rowsIngested: Long, lastError: Option[Throwable])
+  final case class IngestionStatus(rowsIngested: Long)
 
   def props(projection: RichProjection,
             memStore: MemStore,
-            selfAddress: Address,
-            source: NodeClusterActor.IngestionSource)(implicit sched: Scheduler): Props =
-    Props(classOf[MemStoreCoordActor], projection, memStore, selfAddress, source, sched)
+            source: NodeClusterActor.IngestionSource,
+            shardActor: ActorRef)(implicit sched: Scheduler): Props =
+    Props(classOf[MemStoreCoordActor], projection, memStore, source, shardActor, sched)
 }
 
 /**
- * Simply a wrapper for ingesting new records into a MemStore
- * Also starts up an IngestionStream streaming directly into MemStore.
- *
- * ERROR HANDLING: currently any error in ingestion stream or memstore ingestion wll stop the ingestion
- *
- * @param sched a Scheduler for running ingestion stream Observables
- */
+  * Simply a wrapper for ingesting new records into a MemStore
+  * Also starts up an IngestionStream streaming directly into MemStore.
+  *
+  * ERROR HANDLING: currently any error in ingestion stream or memstore ingestion wll stop the ingestion
+  *
+  * @param sched a Scheduler for running ingestion stream Observables
+  */
 private[filodb] final class MemStoreCoordActor(projection: RichProjection,
                                                memStore: MemStore,
-                                               selfAddress: Address,
-                                               source: NodeClusterActor.IngestionSource)
+                                               source: NodeClusterActor.IngestionSource,
+                                               shardActor: ActorRef)
                                               (implicit sched: Scheduler) extends BaseActor {
-  import MemStoreCoordActor.{IngestRows, GetStatus, Status}
 
-  private var lastErr: Option[Throwable] = None
-  private final val streamSubscriptions = new HashMap[Int, Cancelable]
-  private final val streams = new HashMap[Int, IngestionStream]
+  import MemStoreCoordActor._
+
+  final val streamSubscriptions = new HashMap[Int, Cancelable]
+  final val streams = new HashMap[Int, IngestionStream]
 
   // TODO: add and remove per-shard ingestion sources?
   // For now just start it up one time and kill the actor if it fails
@@ -51,65 +54,99 @@ private[filodb] final class MemStoreCoordActor(projection: RichProjection,
   logger.info(s"Using stream factory $streamFactory with config ${source.config}")
 
   override def postStop(): Unit = {
-    logger.info(s"Stopping actor, cancelling all streams and calling teardown")
-    streamSubscriptions.keys.foreach(stopShardIngestion)
+    super.postStop() // <- logs shutting down
+    logger.info("Cancelling all streams and calling teardown")
+    streamSubscriptions.keys.foreach(stop(projection.datasetRef, _, ActorRef.noSender))
   }
 
-  private def setupShard(shard: Int): Unit = {
-    try {
-      memStore.setup(projection, shard)
-    } catch {
-      case ex @ DatasetAlreadySetup(ds) =>
-        logger.warn(s"Dataset $ds already setup, projections might differ!", ex)
-      case ShardAlreadySetup =>
-        logger.warn(s"Shard already setup, projection might differ")
-    }
-
-    val ingestStream = streamFactory.create(source.config, projection, shard)
-    streams(shard) = ingestStream
-    logger.info(s"Ingestion stream $ingestStream set up for shard $shard")
-
-    // TODO(velvia): user-configurable error handling?  Should we stop?  Should we restart?
-    val stream = ingestStream.get
-    stream.onErrorRecover { case NonFatal(ex) => handleErr(ex) }
-    streamSubscriptions(shard) = memStore.ingestStream(projection.datasetRef, shard, stream) {
-                                   ex => handleErr(ex) }
-    // TODO: send status update on stream completion
-  }
-
-  private def stopShardIngestion(shard: Int): Unit = {
-    streamSubscriptions.remove(shard).foreach(_.cancel)
-    streams.remove(shard).foreach(_.teardown())
-    // TODO: release memory for shard in MemStore
-    logger.info(s"Stopped streaming ingestion for shard $shard and released resources")
-  }
-
-  private def handleErr(ex: Throwable): Unit = {
-    lastErr = Some(ex)
-    // TODO: send status update on error
-    logger.error(s"Exception thrown during ingestion stream", ex)
-  }
-
+  /** All [[ShardCommand]] tasks are only started if the dataset
+    * and shard are valid for this ingester.
+    */
   def receive: Receive = LoggingReceive {
-    case IngestRows(ackTo, shard, records) =>
-      memStore.ingest(projection.datasetRef, shard, records)
-      if (records.nonEmpty) {
-        ackTo ! IngestionCommands.Ack(records.last.offset)
+    case e: StartShardIngestion        => start(e, sender())
+    case e: IngestRows                 => ingest(e)
+    case GetStatus                     => status(sender())
+    case StopShardIngestion(ds, shard) => stop(ds, shard, sender())
+  }
+
+  /** Guards that only this projection's commands are acted upon.
+    * Handles initial memstore setup of projection to shard.
+    */
+  private def start(e: StartShardIngestion, origin: ActorRef): Unit =
+    if (invalid(e.ref)) handleInvalid(e, Some(origin)) else {
+      // TODO(velvia): user-configurable error handling?  Should we stop?  Should we restart?
+
+      try memStore.setup(projection, e.shard) catch {
+        case ex@DatasetAlreadySetup(ds) =>
+          logger.warn(s"Dataset $ds already setup, projections might differ!", ex)
+        case ShardAlreadySetup =>
+          logger.warn(s"Shard already setup, projection might differ")
       }
 
-    case u @ NodeClusterActor.ShardMapUpdate(ref, newMap) =>
-      // For now figure out what shards to add or remove from the new ShardMap.
-      // TODO: in future, replace with status event subscription
-      logger.debug(s"Received new shardMap for ref $ref = $newMap")
-      val ourShards = (newMap.shardsForAddress(selfAddress) ++
-                       newMap.shardsForAddress(self.path.address)).distinct
-      val additions = ourShards.toSet -- streams.keys
-      val subtractions = streams.keySet -- ourShards
-      logger.debug(s"selfAddr=$selfAddress ourShards=$ourShards additions=$additions subt=$subtractions")
-      additions.foreach(setupShard)
-      subtractions.foreach(stopShardIngestion)
+      // TODO(velvia): user-configurable error handling?  Should we stop?  Should we restart?
+      create(e, origin) map { ingestionStream =>
+        val stream = ingestionStream.get
+        shardActor ! IngestionStarted(projection.datasetRef, e.shard, context.parent)
 
-    case GetStatus =>
-      sender() ! Status(memStore.numRowsIngested(projection.datasetRef), lastErr)
+        stream
+          .doOnCompleteEval(Task.eval(shardActor ! IngestionStopped(projection.datasetRef, e.shard)))
+          .onErrorRecover { case NonFatal(ex) => handleError(projection.datasetRef, e.shard, ex) }
+
+        streamSubscriptions(e.shard) = memStore.ingestStream(projection.datasetRef, e.shard, stream) {
+          ex => handleError(projection.datasetRef, e.shard, ex)
+        }
+      } recover { case NonFatal(t) =>
+        handleError(e.ref, e.shard, t)
+      }
+    }
+
+  /** [[filodb.coordinator.IngestionStreamFactory.create]] can raise IllegalArgumentException
+    * if the shard is not 0. This will notify versus throw so the sender can handle the
+    * problem, which is internal.
+    */
+  private def create(e: StartShardIngestion, origin: ActorRef): Try[IngestionStream] =
+    Try {
+      val ingestStream = streamFactory.create(source.config, projection, e.shard)
+      streams(e.shard) = ingestStream
+      logger.info(s"Ingestion stream $ingestStream set up for shard ${e.shard}")
+      ingestStream
+    }
+
+  private def ingest(e: IngestRows): Unit = {
+    memStore.ingest(projection.datasetRef, e.shard, e.records)
+    if (e.records.nonEmpty) {
+      e.ackTo ! IngestionCommands.Ack(e.records.last.offset)
+    }
+  }
+
+  private def status(origin: ActorRef): Unit =
+    origin ! IngestionStatus(memStore.numRowsIngested(projection.datasetRef))
+
+  /** Guards that only this projection's commands are acted upon. */
+  private def stop(ds: DatasetRef, shard: Int, origin: ActorRef): Unit =
+    if (invalid(ds)) handleInvalid(StopShardIngestion(ds, shard), Some(origin)) else {
+      streamSubscriptions.remove(shard).foreach(_.cancel)
+      streams.remove(shard).foreach(_.teardown())
+      shardActor ! IngestionStopped(projection.datasetRef, shard)
+
+      // TODO: release memory for shard in MemStore
+      logger.info(s"Stopped streaming ingestion for shard $shard and released resources")
+  }
+
+  private def invalid(dataset: DatasetRef): Boolean = dataset != projection.datasetRef
+
+  private def handleError(ref: DatasetRef, shard: Int, err: Throwable): Unit = {
+    shardActor ! IngestionError(ref, shard, err)
+    logger.error("Exception thrown during ingestion stream", err)
+  }
+
+  private def handleInvalid(command: ShardCommand, origin: Option[ActorRef]): Unit = {
+    logger.error(s"$command is invalid for this ingester '${projection.datasetRef}'.")
+    origin foreach(_ ! InvalidIngestionCommand(command.ref, command.shard))
+  }
+
+  private def recover(): Unit = {
+    // TODO: start recovery, then.. could also be in Actor.preRestart()
+    // statusActor ! RecoveryStarted(projection.datasetRef, shard, context.parent)
   }
 }

@@ -1,17 +1,17 @@
 package filodb.coordinator
 
-import akka.actor.{Actor, ActorRef, Cancellable, Props}
-import akka.event.LoggingReceive
-import akka.pattern.ask
-import akka.util.Timeout
-import kamon.Kamon
 import scala.concurrent.duration._
 import scala.concurrent.Future
 import scala.language.existentials
 
+import akka.actor.{ActorRef, Props}
+import akka.event.LoggingReceive
+import akka.pattern.ask
+import akka.util.Timeout
+import kamon.Kamon
+
 import filodb.core._
-import filodb.core.metadata.RichProjection
-import filodb.core.memstore.{IngestRecord, DatasetAlreadySetup}
+import filodb.core.memstore.IngestRecord
 
 object IngestProtocol {
   final case class MoreRows(shard: Int, records: Seq[IngestRecord])
@@ -53,8 +53,10 @@ class IngestProtocol(clusterActor: ActorRef,
 
   private var mapper: ShardMapper = ShardMapper.empty
 
-  // Send an initial message to the cluster actor for subscription
-  clusterActor ! NodeClusterActor.SubscribeShardUpdates(ref)
+  override def preStart(): Unit = {
+    clusterActor ! NodeClusterActor.SubscribeShardUpdates(ref)
+    super.preStart()
+  }
 
   // *** Metrics ***
   private val kamonTags = Map("dataset" -> ref.dataset, "version" -> version.toString)
@@ -63,18 +65,18 @@ class IngestProtocol(clusterActor: ActorRef,
 
   import context.dispatcher
 
-  def start: Receive = LoggingReceive {
-    case NodeClusterActor.ShardMapUpdate(_, newMap) =>
+  def initializing: Receive = LoggingReceive {
+    case CurrentShardSnapshot(_, newMap) =>
       logger.info(s"Starting, received initial shard map with ${newMap.numShards} shards")
       mapper = newMap
-      logger.info(s" ==> Starting ingestion, waiting for new rows...")
+      logger.info(s" ==> Starting ingestion, waiting for new rows.")
       context.become(reading)
   }
 
-  def mapUpdate: Receive = LoggingReceive {
-    case NodeClusterActor.ShardMapUpdate(_, newMap) =>
-      logger.info(s"Received new partition map")
-      mapper = newMap
+  def shardUpdates: Receive = LoggingReceive {
+    case e: ShardEvent =>
+      logger.debug(s"Received update $e")
+      mapper.updateFromEvent(e)
   }
 
   def errorCatcher: Receive = LoggingReceive {
@@ -88,7 +90,7 @@ class IngestProtocol(clusterActor: ActorRef,
       context.parent ! IngestionErr(s"Error from $sender, " + e.toString)
   }
 
-  def reading: Receive = (LoggingReceive {
+  def reading: Receive = LoggingReceive {
     case MoreRows(shardNum, records) if records.nonEmpty =>
       val nodeRef = mapper.coordForShard(shardNum)
       // We forward it so that the one who sent us MoreRows will get back the Ack message directly
@@ -96,7 +98,7 @@ class IngestProtocol(clusterActor: ActorRef,
       nodeRef.forward(IngestionCommands.IngestRows(ref, version, shardNum, records))
       rowsIngested.increment(records.length)
       shardHist.record(shardNum)
-  }) orElse mapUpdate orElse errorCatcher
+  } orElse shardUpdates orElse errorCatcher
 
-  val receive = start
+  def receive = initializing
 }

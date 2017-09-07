@@ -1,14 +1,13 @@
 package filodb.spark
 
-import org.apache.spark.{SparkContext, SparkConf}
+import org.apache.spark.SparkContext
+
 import scala.concurrent.duration._
 import scala.util.Try
 import scalax.file.Path
+import filodb.coordinator.NodeProtocol
 
-import filodb.coordinator.NodeClusterActor
-import filodb.coordinator.NodeCoordinatorActor.Reset
 import filodb.core.metadata.Projection
-
 import org.scalatest.{BeforeAndAfter, BeforeAndAfterAll, FunSpecLike, Matchers}
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
@@ -36,14 +35,14 @@ with Matchers with ScalaFutures {
 
   before {
     metaStore.clearAllData().futureValue(defaultPatience)
-    FiloDriver.coordinatorActor ! Reset
+    FiloDriver.coordinatorActor ! NodeProtocol.ResetState
     try {
       testProjections.foreach { p => columnStore.clearProjectionData(p).futureValue(defaultPatience) }
     } catch {
       case e: Exception =>
     }
-    FiloDriver.client.sendAllIngestors(Reset)
-    FiloDriver.clusterActor ! NodeClusterActor.Reset
+    FiloDriver.client.sendAllIngestors(NodeProtocol.ResetState)
+    FiloDriver.clusterActor ! NodeProtocol.ResetState
   }
 
   after {

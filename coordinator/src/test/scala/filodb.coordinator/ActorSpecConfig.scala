@@ -84,8 +84,8 @@ object AkkaSpec extends SeedNodeConfig {
 
   val settings = new FilodbSettings(userConfig.withFallback(serverConfig))
 
-  def getNewSystem = ActorSystem("test", settings.allConfig)
-
+  def getNewSystem(c: Option[Config] = None): ActorSystem =
+    ActorSystem("test", c.map(_.withFallback(settings.allConfig)) getOrElse settings.allConfig)
 }
 
 abstract class AkkaSpec(system: ActorSystem) extends AbstractTestKit(system)

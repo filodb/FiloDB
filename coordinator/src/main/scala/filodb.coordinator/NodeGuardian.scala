@@ -1,7 +1,5 @@
 package filodb.coordinator
 
-import scala.concurrent.Future
-
 import akka.actor._
 import akka.cluster.Cluster
 import akka.contrib.pattern.{ClusterSingletonManager, ClusterSingletonProxy}
@@ -10,18 +8,18 @@ import filodb.core.memstore.MemStore
 import filodb.core.store.{ColumnStore, MetaStore}
 
 /** Supervisor for all child actors and their actors on the node. */
-final class NodeGuardian(settings: FilodbSettings,
+final class NodeGuardian(val settings: FilodbSettings,
                          cluster: Cluster,
                          metaStore: MetaStore,
                          memStore: MemStore,
                          columnStore: ColumnStore,
                          assignmentStrategy: ShardAssignmentStrategy
-                        ) extends BaseActor {
+                        ) extends GracefulStopAwareSupervisor {
 
-  import NodeGuardian._, NodeProtocol._
+  import NodeProtocol._, ActorName._
   import context.dispatcher
 
-  private var gracefulShutdownStarted = false
+  private val failureDetector = cluster.failureDetector
 
   override def preStart(): Unit = {
     //context.system.eventStream.subscribe(self, classOf[DeadLetter]) // todo in separate worker
@@ -29,7 +27,6 @@ final class NodeGuardian(settings: FilodbSettings,
 
   override def postStop(): Unit = {
     super.postStop()
-    // shut down kamon if started
     context.child(TraceLoggerName) foreach {
       actor => kamon.Kamon.shutdown()
     }
@@ -39,16 +36,16 @@ final class NodeGuardian(settings: FilodbSettings,
     super.preStart()
   }
 
-  override def receive: Actor.Receive = {
+  def guardianReceive: Actor.Receive = {
     case CreateTraceLogger(role)   => startKamon(role, sender())
     case CreateCoordinator         => createCoordinator(sender())
     case e: CreateClusterSingleton => createProxy(e, sender())
-    case Terminated(actor)         => terminated(actor)
     case e: DeadLetter             =>
-    case GracefulShutdown          => gracefulShutdown(sender())
   }
 
-  /** Idempotent. Cli does not start metrics. */
+  override def receive: Actor.Receive = guardianReceive orElse super.receive
+
+    /** Idempotent. Cli does not start metrics. */
   private def startKamon(role: ClusterRole, requester: ActorRef): Unit = {
     role match {
       case ClusterRole.Cli =>
@@ -64,16 +61,19 @@ final class NodeGuardian(settings: FilodbSettings,
     }
   }
 
-  /** Idempotent. */
+  /** The NodeClusterActor's [[filodb.coordinator.ShardSubscriptions]]
+    * does the DeathWatch on  [[filodb.coordinator.NodeCoordinatorActor]]
+    * instances in order to update shard status, so this actor does not
+    * watch it here.
+    *
+    * Idempotent.
+    */
   private def createCoordinator(requester: ActorRef): Unit = {
-    val ref = context.child(CoordinatorName) getOrElse {
-      val actor = context.actorOf(NodeCoordinatorActor.props(
-        metaStore, memStore, columnStore, cluster.selfAddress, settings.config), CoordinatorName)
-      context watch actor
-      actor
-    }
+    val actor = context.child(CoordinatorName) getOrElse {
+      val props = NodeCoordinatorActor.props(metaStore, memStore, columnStore, cluster.selfAddress, settings.config)
+      context.actorOf(props, CoordinatorName) }
 
-    requester ! CoordinatorRef(ref)
+    requester ! CoordinatorRef(actor)
   }
 
   /**
@@ -84,7 +84,7 @@ final class NodeGuardian(settings: FilodbSettings,
   private def createProxy(e: CreateClusterSingleton, requester: ActorRef): Unit = {
     if (e.withManager && context.child(SingletonMgrName).isEmpty) {
       val mgr = context.actorOf(ClusterSingletonManager.props(
-        singletonProps = NodeClusterActor.props(cluster, e.role, metaStore, assignmentStrategy),
+        singletonProps = NodeClusterActor.props(settings, cluster, e.role, metaStore, assignmentStrategy),
         singletonName = NodeClusterName,
         terminationMessage = PoisonPill,
         role = Some(e.role)),
@@ -116,43 +116,9 @@ final class NodeGuardian(settings: FilodbSettings,
   private def onDeadLetter(e: DeadLetter): Unit = {
     logger.warn(s"Received $e") // TODO in a worker, handle no data loss etc
   }
-
-  private def terminated(actor: ActorRef): Unit = {
-    val message = s"$actor terminated."
-    if (gracefulShutdownStarted) logger.info(message) else logger.warn(message)
-  }
-
-  private def gracefulShutdown(requester: ActorRef): Unit = {
-    import akka.pattern.gracefulStop
-    import akka.pattern.pipe
-    import settings.GracefulStopTimeout
-
-    gracefulShutdownStarted = true
-    logger.info("Starting graceful shutdown.")
-
-    Future
-      .sequence(context.children.map(gracefulStop(_, GracefulStopTimeout, PoisonPill)))
-      .map(f => ShutdownComplete(self))
-      .pipeTo(requester)
-  }
 }
 
 private[filodb] object NodeGuardian {
-
-  /* Actor Path names */
-  val NodeGuardianName = "node"
-  val CoordinatorName = "coordinator"
-  val TraceLoggerName = "trace-logger"
-  /* The actor name of the child singleton actor */
-  val NodeClusterName = "nodecluster"
-  val SingletonMgrName = "singleton"
-  val NodeClusterProxyName = "nodeClusterProxy"
-
-  /* Actor Paths */
-  val ClusterSingletonProxyPath = s"/user/$NodeGuardianName/$SingletonMgrName/$NodeClusterName"
-
-  def nodeCoordinatorPath(addr: Address): ActorPath =
-    RootActorPath(addr) / "user" / NodeGuardianName / CoordinatorName
 
   def props(settings: FilodbSettings,
             cluster: Cluster,
@@ -163,23 +129,41 @@ private[filodb] object NodeGuardian {
     Props(new NodeGuardian(settings, cluster, metaStore, memStore, columnStore, assignmentStrategy))
 }
 
-private[coordinator] object NodeProtocol {
+/** Management and task actions on the local node.
+  * INTERNAL API.
+  */
+object NodeProtocol {
 
+  /** Commands to start a task. */
   sealed trait TaskCommand
-  final case class CreateTraceLogger(role: ClusterRole) extends TaskCommand
-  case object CreateCoordinator extends TaskCommand
+  /* Acked on task complete */
+  sealed trait TaskAck
+
+  sealed trait CreationCommand extends TaskCommand
 
   /**
     * @param role the role to assign
     * @param withManager if `true` creates the ClusterSingletonManager as well, if `false` only creates the proxy
     */
-  final case class CreateClusterSingleton(role: String, withManager: Boolean) extends TaskCommand
+  private[coordinator] final case class CreateClusterSingleton(role: String, withManager: Boolean) extends CreationCommand
+  private[coordinator] final case class CreateTraceLogger(role: ClusterRole) extends CreationCommand
+  private[coordinator] case object CreateCoordinator extends CreationCommand
 
-  case object GracefulShutdown extends TaskCommand
+  sealed trait CreationAck extends TaskAck
+  private[coordinator] final case class CoordinatorRef(ref: ActorRef) extends CreationAck
+  private[coordinator] final case class ClusterSingletonRef(ref: ActorRef) extends CreationAck
+  private[coordinator] final case class TraceLoggerRef(ref: ActorRef) extends CreationAck
 
-  sealed trait NodeAck
-  final case class CoordinatorRef(ref: ActorRef) extends NodeAck
-  final case class ClusterSingletonRef(ref: ActorRef) extends NodeAck
-  final case class TraceLoggerRef(ref: ActorRef) extends NodeAck
-  final case class ShutdownComplete(ref: ActorRef) extends NodeAck
+
+  sealed trait LifecycleCommand
+  private[coordinator] case object GracefulShutdown extends LifecycleCommand
+
+  sealed trait LifecycleAck extends TaskAck
+  private[coordinator] final case class ShutdownComplete(ref: ActorRef) extends LifecycleAck
+
+  sealed trait StateCommand
+  private[filodb] case object ResetState extends LifecycleCommand
+
+  sealed trait StateTaskAck extends TaskAck
+  private[filodb] case object StateReset extends StateTaskAck
 }

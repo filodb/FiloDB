@@ -1,19 +1,19 @@
 package filodb
 
-import akka.actor.ActorRef
-import com.typesafe.config.Config
-import com.typesafe.scalalogging.StrictLogging
 import java.sql.Timestamp
-import monix.reactive.Observable
-import net.ceedubs.ficus.Ficus._
-import org.apache.spark.sql.types.StructType
-import org.apache.spark.sql.{DataFrame, Row, SQLContext, SparkSession, SaveMode}
-import org.velvia.filo.RowReader
+
 import scala.collection.mutable.HashMap
 import scala.concurrent.duration._
 import scala.language.implicitConversions
 import scala.language.postfixOps
 
+import akka.actor.ActorRef
+import com.typesafe.scalalogging.StrictLogging
+import monix.reactive.Observable
+import net.ceedubs.ficus.Ficus._
+import org.apache.spark.sql.types.StructType
+import org.apache.spark.sql.{DataFrame, Row, SQLContext, SparkSession, SaveMode}
+import org.velvia.filo.RowReader
 import org.apache.spark.sql.hive.filodb.MetaStoreSync
 
 import filodb.coordinator.client.ClientException
@@ -80,7 +80,6 @@ package object spark extends StrictLogging {
   import DatasetCommands._
   import FiloDriver.metaStore
   import IngestionStream._
-  import NodeClusterActor.{SubscribeShardUpdates, ShardMapUpdate}
   import filodb.coordinator.client.Client.{parse, actorAsk}
 
   val sparkLogger = logger
@@ -112,8 +111,8 @@ package object spark extends StrictLogging {
                                    writeTimeout: FiniteDuration,
                                    partitionIndex: Int): Unit = {
     val ref = projection.datasetRef
-    val mapper = actorAsk(clusterActor, SubscribeShardUpdates(ref)) {
-      case ShardMapUpdate(_, newMap) => newMap
+    val mapper = actorAsk(clusterActor, NodeClusterActor.SubscribeShardUpdates(ref)) {
+      case CurrentShardSnapshot(_, newMap) => newMap
     }
 
     val stream = new IngestionStream {

@@ -1,12 +1,12 @@
 package filodb.coordinator
 
+import scala.concurrent.Future
+
 import akka.actor.ActorRef
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
 import monix.execution.{Ack, Cancelable, Scheduler}
 import monix.reactive.Observable
-import monix.reactive.observers.Subscriber
-import scala.concurrent.Future
 
 import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.memstore.IngestRecord
@@ -56,14 +56,21 @@ object IngestionStream {
         val (shard, records) = elem
         if (records.isEmpty) { Future.successful(Continue) }
         else {
-          IngestProtocol.sendRowsGetAck(protocolActor, shard, records).map {
-            case IngestionCommands.Ack(seqNo) if seqNo == records.last.offset => Continue
-            case IngestionCommands.Ack(seqNo) =>
-              logger.warn(s"Mismatching offsets: got $seqNo, expected ${records.last.offset}")
-              Stop
-            case other: Any =>
-              logger.warn(s"Unexpected result from remote ActorRef: $other... stopping stream")
-              Stop
+          // protects IngestionProtocol -> MoreRows() -> mapper.coordForShard(shardNum) NPE
+          if (mapper.assignedShards.contains(shard)) {
+            IngestProtocol.sendRowsGetAck(protocolActor, shard, records).map {
+              case IngestionCommands.Ack(seqNo) if seqNo == records.last.offset => Continue
+              case IngestionCommands.Ack(seqNo) =>
+                logger.warn(s"Mismatching offsets: got $seqNo, expected ${records.last.offset}")
+                Stop
+              case other: Any =>
+                logger.warn(s"Unexpected result from remote ActorRef: $other... stopping stream")
+                Stop
+            }
+          }
+          else {
+            logger.warn(s"Shard $shard is not an assigned shard, no coordinator is assigned, in mapper $mapper")
+            Future.successful(Continue)
           }
         }
       }

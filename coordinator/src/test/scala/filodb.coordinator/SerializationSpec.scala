@@ -1,14 +1,14 @@
 package filodb.coordinator
 
-import akka.actor.{Address, ActorRef}
 import java.io.{ByteArrayInputStream, ObjectInputStream}
 import java.io.{ByteArrayOutputStream, ObjectOutputStream}
 
-import filodb.core.binaryrecord.{BinaryRecord, RecordSchema}
+import akka.actor.ActorRef
+import org.scalatest.{FunSpec, Matchers}
+
+import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.memstore.IngestRecord
 import filodb.core.NamesTestData
-
-import org.scalatest.{FunSpec, Matchers, BeforeAndAfter, BeforeAndAfterAll}
 
 class SerializationSpec extends FunSpec with Matchers {
   import IngestionCommands._

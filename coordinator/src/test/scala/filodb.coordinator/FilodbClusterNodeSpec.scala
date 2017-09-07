@@ -6,28 +6,30 @@ import akka.actor.{ActorRef, ActorSystem}
 import akka.testkit.{TestKit, TestProbe}
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
+import org.scalatest.concurrent.ScalaFutures
 
 import filodb.coordinator.client.LocalClient
 import filodb.core.metadata.{DataColumn, Dataset}
 
-class FilodbClusterNodeSpec extends RunnableSpec {
+class FilodbClusterNodeSpec extends RunnableSpec with ScalaFutures {
 
   import NodeClusterActor._
-  import NodeCoordinatorActor._
 
   "A FiloServer Node" must {
     FiloServerApp.main(Array.empty)
 
     "join the cluster" in {
-      TestKit.awaitCond(FiloServerApp.cluster.isJoined, 30.seconds)
+      TestKit.awaitCond(FiloServerApp.cluster.isJoined, 50.seconds)
     }
     "create and setup the coordinatorActor and clusterActor" in {
       val coordinatorActor = FiloServerApp.coordinatorActor
       val clusterActor = FiloServerApp.clusterActor
 
       implicit val system = FiloServerApp.system
+      val shardPath = ActorName.shardStatusPath(FiloServerApp.cluster.selfAddress)
+      val shardActor = system.actorSelection(shardPath).resolveOne(2.seconds).futureValue
       val probe = TestProbe()
-      probe.send(coordinatorActor, ClusterHello(clusterActor))
+      probe.send(coordinatorActor, CoordinatorRegistered(clusterActor, shardActor))
       probe.send(coordinatorActor, MiscCommands.GetClusterActor)
       probe.expectMsgPF() {
         case Some(ref: ActorRef) => ref shouldEqual clusterActor
@@ -63,14 +65,15 @@ object FiloServerApp extends FilodbClusterNode with StrictLogging {
   lazy val client = new LocalClient(coordinatorActor)
 
   def main(args: Array[String]): Unit = {
-    cluster.kamonInit(role)
+    clusterActor
     coordinatorActor
-    scala.concurrent.Await.result(metaStore.initialize(), cluster.settings.InitializationTimeout)
     cluster.joinSeedNodes()
-    cluster.clusterSingletonProxy(roleName, withManager = true)
+    cluster.kamonInit(role)
+
+    scala.concurrent.Await.result(metaStore.initialize(), cluster.settings.InitializationTimeout)
     cluster._isInitialized.set(true)
 
-    clusterActor
+
     client
   }
 

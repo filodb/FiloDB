@@ -51,7 +51,7 @@ class CsvStreamFactory extends IngestionStreamFactory {
   import CsvStream._
 
   def create(config: Config, projection: RichProjection, shard: Int): IngestionStream = {
-    require(shard == 0)
+    require(shard == 0, s"Shard on creation must be shard 0 but was '$shard'.")
     val settings = CsvStreamSettings(config.getBoolean("header"),
                      config.as[Option[Int]]("batch-size").getOrElse(BatchSize),
                      config.as[Option[String]]("separator-char").getOrElse(",").charAt(0))

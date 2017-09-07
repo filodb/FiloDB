@@ -192,7 +192,13 @@ lazy val stressDeps = Seq(
 /* Settings */
 
 lazy val coreSettings = Seq(
-  scalacOptions ++= Seq("-Xlint","-Xlint:-infer-any", "-deprecation", "-Xfatal-warnings", "-feature")
+  scalacOptions ++= Seq(
+    "-Xlint",
+    "-Xlint:-infer-any",
+    "-deprecation",
+    "-Xfatal-warnings",
+    "-feature",
+    "-unchecked")
 )
 
 lazy val testSettings = Seq(

@@ -1,15 +1,16 @@
 package filodb.coordinator.client
 
-import akka.actor.{ActorRef, ActorSystem, Address, RootActorPath}
-import akka.pattern.ask
-import akka.util.Timeout
-import com.typesafe.scalalogging.StrictLogging
 import scala.concurrent.duration._
 import scala.concurrent.{Await, Future}
 import scala.language.postfixOps
 
+import akka.actor.{ActorRef, ActorSystem, Address}
+import akka.pattern.ask
+import akka.util.Timeout
+import com.typesafe.scalalogging.StrictLogging
+
 import filodb.core._
-import filodb.coordinator.{NodeClusterActor, NodeGuardian, MiscCommands}
+import filodb.coordinator.{ActorName, MiscCommands, NodeClusterActor}
 
 object Client {
   implicit val context = monix.execution.Scheduler.Implicits.global
@@ -48,7 +49,7 @@ object Client {
                        port: Int = 2552,
                        askTimeout: FiniteDuration = 30 seconds): LocalClient = {
     val addr = Address("akka.tcp", "filo-standalone", host, port)
-    val refFuture = system.actorSelection(NodeGuardian.nodeCoordinatorPath(addr))
+    val refFuture = system.actorSelection(ActorName.nodeCoordinatorPath(addr))
                           .resolveOne(askTimeout)
     new LocalClient(Await.result(refFuture, askTimeout))
   }

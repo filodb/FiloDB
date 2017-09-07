@@ -2,6 +2,7 @@ package filodb.coordinator
 
 import scala.concurrent.duration._
 
+import akka.util.Timeout
 import com.typesafe.config.ConfigFactory
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
@@ -36,6 +37,7 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem)
                             .withFallback(ConfigFactory.load("application_test.conf"))
                             .getConfig("filodb")
 
+  private val within = 5.seconds.dilated
   private val cluster = FilodbCluster(system)
   private val coordinatorActor = cluster.coordinatorActor
   cluster.join()
@@ -55,13 +57,16 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem)
   val ref2 = proj2.datasetRef
   schema.foreach { col => metaStore.newColumn(col, ref2).futureValue shouldEqual Success }
 
-  val shardMap = new ShardMapper(1)
-  shardMap.registerNode(Seq(0), coordinatorActor)
+  private var shardMap: ShardMapper = ShardMapper.empty
 
   override def afterEach(): Unit = {
     memStore.reset()
-    clusterActor ! NodeClusterActor.Reset
-    coordinatorActor ! NodeCoordinatorActor.Reset
+    coordinatorActor ! NodeProtocol.ResetState
+    clusterActor ! NodeProtocol.ResetState
+    receiveWhile(within) {
+      case NodeProtocol.StateReset =>
+      case IngestionStopped(_, 0) =>
+    }
   }
 
   override def afterAll(): Unit = {
@@ -72,85 +77,107 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem)
   val sampleReader = new java.io.InputStreamReader(getClass.getResourceAsStream("/GDELT-sample-test.csv"))
   val headerCols = CsvStream.getHeaderColumns(sampleReader)
 
-  def setup(dataset: Dataset, resource: String, rowsToRead: Int = 5): Unit = {
+  def setup(dataset: Dataset, resource: String, rowsToRead: Int = 5, source: Option[IngestionSource]): SetupDataset = {
     val config = ConfigFactory.parseString(s"""header = true
                                            batch-size = $rowsToRead
                                            resource = $resource
                                            """)
-    val msg = SetupDataset(dataset.projections.head.dataset,
-                           headerCols,
-                           DatasetResourceSpec(1, 1),
-                           IngestionSource(classOf[CsvStreamFactory].getName, config))
-    clusterActor ! msg
-    // TODO assertion failed: expected DatasetVerified, found DatasetAlreadySetup(gdelt2)
-    expectMsg(DatasetVerified)
+
+    val datasetRef = dataset.projections.head.dataset
+    val ingestionSource = source.getOrElse(IngestionSource(classOf[CsvStreamFactory].getName, config))
+    val command = SetupDataset(datasetRef, headerCols, DatasetResourceSpec(1, 1), ingestionSource)
+    clusterActor ! command
+    expectMsg(within, DatasetVerified)
+
+    clusterActor ! SubscribeShardUpdates(command.ref)
+    expectMsgPF(within) {
+      case CurrentShardSnapshot(ds, mapper) =>
+        shardMap = mapper
+        shardMap.numShards shouldEqual command.resources.numShards
+    }
+    expectMsg(IngestionStarted(command.ref, 0, coordinatorActor))
+
+    command
   }
 
   // It's pretty hard to get an IngestionStream to fail when reading the stream itself, as no real parsing
   // happens until the MemStoreCoordActor ingests.   When the failure occurs, the cluster state is updated
   // but then we need to query for it.
-  it("should fail if cannot parse input RowReader during coordinator ingestion") {
-    setup(dataset33, "/GDELT-sample-test-errors.csv", rowsToRead = 5)
-
-    // Note: this relies on the MemStoreCoordActor not disappearing after errors.
-    // Also the thread sleep is needed as we have to wait for MemStoreCoordActor to be setup and ingesting
-    // A more reliable way is to query the NodeClusterActor for status, or subscribe for status
-    // updates (in which case no more thread sleeps!)
-    Thread sleep 1400
-    coordinatorActor ! GetIngestionStats(ref2, 0)
-    val status = expectMsgPF(5.seconds.dilated) {
-      // 5 rows read at a time, 53 before error, so 50 successfully ingested
-      case MemStoreCoordActor.Status(50, Some(ex)) =>
+ it("should fail if cannot parse input RowReader during coordinator ingestion") {
+    setup(dataset33, "/GDELT-sample-test-errors.csv", rowsToRead = 5, None)
+    expectMsgPF(within) {
+      case IngestionError(ds, shard, ex) =>
+        ds shouldBe ref2
         ex shouldBe a[NumberFormatException]
     }
+
+    // Sending this will intentionally raise: java.lang.IllegalArgumentException: dataset gdelt / shard 0 not setup
+    // Note: this relies on the MemStoreCoordActor not disappearing after errors.
+    coordinatorActor ! GetIngestionStats(ref2, 0)
+    expectMsg(MemStoreCoordActor.IngestionStatus(50))
   }
 
-  // TODO: Not sure how to simulate this failure.  Maybe simulate I/O failure or use a custom source
+  // TODO: Simulate more failures.  Maybe simulate I/O failure or use a custom source
   // where we can inject failures?
-  ignore("should fail fast if somehow the source stream itself bombs") {
-    setup(dataset6, "/GDELT-sample-test.csv", rowsToRead = 5)
 
-    Thread sleep 2000
-    coordinatorActor ! GetIngestionStats(ref2, 0)
-    val status = expectMsgPF(5.seconds.dilated) {
-      case MemStoreCoordActor.Status(53, Some(ex)) =>
-        ex shouldBe a[NumberFormatException]
+  it("should not start ingestion, raise a IngestionError vs IngestionStopped, if incorrect shard is sent for the creation of the stream") {
+    val command = setup(dataset6, "/GDELT-sample-test.csv", rowsToRead = 5, None)
+    val commandS = IngestionCommands.DatasetSetup(dataset6, headerCols, 0, noOpSource)
+
+    val invalidShard = 10
+    coordinatorActor ! StartShardIngestion(command.ref, invalidShard, None)
+    expectMsgPF(within) {
+      case IngestionError(_, shard, reason) => shard shouldEqual invalidShard
     }
+    expectNoMsg()
+  }
+
+  it("should start and stop cleanly") {
+    import MemStoreCoordActor.IngestionStatus
+
+    val batchSize = 100
+    val command = setup(dataset6, "/GDELT-sample-test.csv", rowsToRead = batchSize, None)
+
+    import system.dispatcher
+    import akka.pattern.ask
+    implicit val timeout: Timeout = cluster.settings.InitializationTimeout
+
+    val func = (coordinatorActor ? GetIngestionStats(command.ref, 0)).mapTo[IngestionStatus]
+    awaitCond(func.futureValue.rowsIngested == batchSize - 1)
+
+    coordinatorActor ! StopShardIngestion(command.ref, 0)
+    expectMsg(IngestionStopped(command.ref, 0))
   }
 
   it("should ingest all rows directly into MemStore") {
     // Also need a way to probably unregister datasets from NodeClusterActor.
-    setup(dataset33, "/GDELT-sample-test.csv", rowsToRead = 10)
-
-    Thread sleep 4000
-    coordinatorActor ! GetIngestionStats(ref2, 0)
-    expectMsg(MemStoreCoordActor.Status(99, None))
+    // this functionality already is built into the shard actor: shardActor ! RemoveSubscription(ref)
+    setup(dataset33, "/GDELT-sample-test.csv", rowsToRead = 5, None)
+    coordinatorActor ! GetIngestionStats(DatasetRef(dataset33.name), 0)
+    expectMsg(MemStoreCoordActor.IngestionStatus(99))
   }
 
-  import IngestionStream._
   it("should ingest all rows using routeToShards and ProtocolActor") {
-    // Empty ingestion source - we're going to pump in records ourselves
-    val msg = SetupDataset(projection6.datasetRef,
-                           headerCols,
-                           DatasetResourceSpec(1, 1), noOpSource)
-    clusterActor ! msg
-    expectMsg(DatasetVerified)
+    val projection = projection6
+    val resource = "/GDELT-sample-test-200.csv"
+    val batchSize = 10
 
-    // TODO: replace with waiting for node ready message
-    Thread sleep 1000
+    // Empty ingestion source - we're going to pump in records ourselves
+    setup(projection.dataset, resource, batchSize, Some(noOpSource))
 
     val config = ConfigFactory.parseString(s"""header = true
-                                           batch-size = 10
-                                           resource = "/GDELT-sample-test-200.csv"
+                                           batch-size = $batchSize
+                                           resource = $resource
                                            """)
-    val stream = (new CsvStreamFactory).create(config, projection6, 0)
-    val protocolActor = system.actorOf(IngestProtocol.props(clusterActor, projection6.datasetRef))
+    val stream = (new CsvStreamFactory).create(config, projection, 0)
+    val protocolActor = system.actorOf(IngestProtocol.props(clusterActor, projection.datasetRef))
 
     import cluster.ec
-    stream.routeToShards(new ShardMapper(1), projection6, protocolActor)
 
-    Thread sleep 1000
-    coordinatorActor ! GetIngestionStats(projection6.datasetRef, 0)
-    expectMsg(MemStoreCoordActor.Status(199, None))
+    stream.routeToShards(shardMap, projection, protocolActor)
+
+    Thread sleep 1000 // time to accumulate 199 below
+    coordinatorActor ! GetIngestionStats(projection.datasetRef, 0)
+    expectMsg(MemStoreCoordActor.IngestionStatus(199))
   }
 }

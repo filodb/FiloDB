@@ -1,25 +1,27 @@
 package filodb.coordinator
 
-import akka.actor.Props
-import akka.pattern.ask
-import akka.util.Timeout
 import java.util.concurrent.atomic.AtomicLong
-import monix.eval.Task
-import monix.reactive.Observable
-import org.scalactic._
-import org.velvia.filo.BinaryVector
+
 import scala.concurrent.duration._
 import scala.concurrent.Future
 import scala.language.existentials
 import scala.util.Try
 
+import akka.actor.Props
+import akka.pattern.ask
+import akka.util.Timeout
+
+import monix.eval.Task
+import monix.reactive.Observable
+import org.scalactic._
+import org.velvia.filo.BinaryVector
+
 import filodb.core._
 import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.memstore.MemStore
 import filodb.core.metadata.{Column, RichProjection, BadArgument => BadArg, WrongNumberArguments}
-import filodb.core.query.{Aggregate, AggregationFunction, CombinerFunction}
+import filodb.core.query.{AggregationFunction, CombinerFunction}
 import filodb.core.store._
-import filodb.coordinator.client.Client
 
 object QueryActor {
   private val nextId = new AtomicLong()
@@ -219,7 +221,12 @@ final class QueryActor(colStore: BaseColumnStore,
           sender() ! store.indexValues(ref, shard, index).take(limit).map(_.toString).toBuffer
         }
       }
-    case NodeClusterActor.ShardMapUpdate(ref, newMap) =>
-      shardMap = newMap
+
+    case CurrentShardSnapshot(ds, mapper) =>
+      shardMap = mapper
+
+    case e: ShardEvent =>
+     shardMap.updateFromEvent(e)
+
   }
 }

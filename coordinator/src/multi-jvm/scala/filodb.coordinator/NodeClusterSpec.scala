@@ -28,24 +28,27 @@ abstract class NodeClusterSpec extends ClusterSpec(NodeClusterSpecConfig) {
   import akka.testkit._
   import NodeClusterSpecConfig._
   import NodeClusterActor._
-  import NamesTestData._
+  import GdeltTestData._
 
   private lazy val metaStore = cluster.metaStore
 
   private lazy val coordinatorActor = cluster.coordinatorActor
 
+  private val ref = projection6.datasetRef
+  private val spec = DatasetResourceSpec(4, 2)   // 4 shards, 2 nodes, 2 shards per node
+
   override def initialParticipants = roles.size
 
-  override def beforeAll() = {
+  override def beforeAll(): Unit = {
     metaStore.clearAllData().futureValue
     multiNodeSpecBeforeAll()
 
     // Initialize dataset
-    metaStore.newDataset(dataset).futureValue shouldEqual Success
-    schema.foreach { col => metaStore.newColumn(col, datasetRef).futureValue shouldEqual Success }
+    metaStore.newDataset(projection6.dataset).futureValue shouldEqual Success
+    schema.foreach { col => metaStore.newColumn(col, ref).futureValue shouldEqual Success }
   }
 
-  override def afterAll() = multiNodeSpecAfterAll()
+  override def afterAll(): Unit = multiNodeSpecAfterAll()
 
   val config = globalConfig.getConfig("filodb")
 
@@ -77,22 +80,20 @@ abstract class NodeClusterSpec extends ClusterSpec(NodeClusterSpecConfig) {
     }
   }
 
-  val spec = DatasetResourceSpec(4, 2)   // 4 shards, 2 nodes, 2 shards per node
-
   it("should return UnknownDataset when dataset missing or no columns defined") {
     runOn(first) {
-      clusterActor ! SubscribeShardUpdates(datasetRef)
-      expectMsg(UnknownDataset(datasetRef))
+      clusterActor ! SubscribeShardUpdates(ref)
+      expectMsg(DatasetUnknown(ref))
 
       clusterActor ! SetupDataset(DatasetRef("noColumns"), Seq("first"), spec, noOpSource)
-      expectMsg(UnknownDataset(DatasetRef("noColumns")))
+      expectMsg(DatasetUnknown(DatasetRef("noColumns")))
     }
   }
 
   it("should return UndefinedColumns if trying to setup with undefined columns") {
     runOn(first) {
-      clusterActor ! SetupDataset(datasetRef, Seq("first", "country"), spec, noOpSource)
-      expectMsg(UndefinedColumns(Set("country")))
+      clusterActor ! SetupDataset(ref, Seq("first", "country"), spec, noOpSource)
+      expectMsg(UndefinedColumns(Set("first", "country")))
     }
     enterBarrier("end-of-undefined-columns")
   }
@@ -102,25 +103,50 @@ abstract class NodeClusterSpec extends ClusterSpec(NodeClusterSpecConfig) {
 
   it("should setup dataset on all nodes for valid dataset and get ShardMap updates") {
     runOn(first) {
-      clusterActor ! SetupDataset(datasetRef, Seq("first", "last", "age", "seg"), spec, noOpSource)
+      val noOpSource = IngestionSource(classOf[NoOpStreamFactory].getName)
+      val columns = schema.map(_.name)
+      val command = SetupDataset(projection6.datasetRef, columns, spec, noOpSource)
+
+      clusterActor ! command
       expectMsg(DatasetVerified)
 
-      clusterActor ! SubscribeShardUpdates(datasetRef)
-      val shardMap = expectMsgPF(3.seconds.dilated) {
-        case ShardMapUpdate(datasetRef, newMap) => newMap
-      }
-      shardMap.numAssignedShards shouldEqual 2
-      shardMap.allNodes shouldEqual Set(coordinatorActor)
+      val subscriber1 = TestProbe()
+      val subscriber2 = TestProbe()
 
-      // Calling SetupDataset again should return DatasetAlreadySetup
-      clusterActor ! SetupDataset(datasetRef, Seq("first", "age"), spec, noOpSource)
-      expectMsg(DatasetAlreadySetup(datasetRef))
+      subscriber1.send(clusterActor, SubscribeShardUpdates(ref))
+      subscriber1.expectMsgPF(3.seconds.dilated) {
+        case CurrentShardSnapshot(ds, newMap) =>
+          0 until spec.numShards forall (shard => newMap.statusForShard(shard) == ShardUnassigned) shouldBe true
+          newMap.allNodes.isEmpty shouldBe true // ingestion not started
+          newMap.numShards shouldEqual spec.numShards
+      }
+
+      subscriber1.receiveWhile(messages = spec.numShards) {
+        case e: IngestionStarted =>
+          e.shard shouldEqual (0 +- 1)
+          e.node shouldEqual coordinatorActor
+      }
+
+      subscriber2.send(clusterActor, SubscribeShardUpdates(ref))
+      subscriber2.expectMsgPF(3.seconds.dilated) {
+        case CurrentShardSnapshot(ds, newMap) =>
+          newMap.numAssignedShards shouldEqual 2
+          newMap.allNodes shouldEqual Set(coordinatorActor) // only one
+
+          for {
+            shard <- 0 until newMap.numAssignedShards
+          } newMap.statusForShard(shard) shouldEqual ShardStatusNormal
+
+      }
+
+      clusterActor ! command
+      expectMsg(DatasetExists(ref))
     }
 
     enterBarrier("dataset-setup")
   }
 
-  it("should get ShardMap updates and have shards assigned when new node joins") {
+ it("should get ShardMapper updates and have shards assigned when new node joins") {
     runOn(second) {
       cluster join address1
       awaitCond(cluster.state.members.size == 2)
@@ -130,11 +156,13 @@ abstract class NodeClusterSpec extends ClusterSpec(NodeClusterSpecConfig) {
     enterBarrier("second-node-joined")
 
     runOn(first) {
-      val shardMap = expectMsgPF(3.seconds.dilated) {
-        case ShardMapUpdate(datasetRef, newMap) => newMap
+
+      clusterActor ! SubscribeShardUpdates(ref)
+      expectMsgPF(3.seconds.dilated) {
+        case CurrentShardSnapshot(ref, map) =>
+          map.numAssignedShards shouldEqual 2 // TODO not 4
+          map.allNodes.size shouldEqual 1 // only one coord created in entire multi test
       }
-      shardMap.numAssignedShards shouldEqual 4
-      shardMap.allNodes.size shouldEqual 2
     }
 
     enterBarrier("second-node-update-received")

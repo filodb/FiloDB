@@ -1,12 +1,12 @@
 package filodb.coordinator
 
 import scala.collection.mutable.HashMap
-import scala.concurrent.duration._
 
 import akka.actor._
 import akka.cluster.Cluster
 import akka.cluster.ClusterEvent._
 import akka.event.LoggingReceive
+import akka.util.Timeout
 import com.typesafe.config.{Config, ConfigFactory}
 
 import filodb.core._
@@ -14,6 +14,11 @@ import filodb.core.metadata.RichProjection
 import filodb.core.store.MetaStore
 
 object NodeClusterActor {
+
+  /** Lets each NodeCoordinator know about the `clusterActor` so it can send it updates.
+    * Sent from ClusterActor upon joining.
+    */
+  final case class CoordinatorRegistered(clusterActor: ActorRef, shardActor: ActorRef)
 
   sealed trait ClusterActorEvent
 
@@ -54,48 +59,47 @@ object NodeClusterActor {
   val noOpSource = IngestionSource(classOf[NoOpStreamFactory].getName)
 
   case object DatasetVerified
-  final case class DatasetAlreadySetup(ref: DatasetRef) extends ErrorResponse
-  final case class UnknownDataset(ref: DatasetRef) extends ErrorResponse
+  private[coordinator] final case class DatasetExists(ref: DatasetRef) extends ErrorResponse
+  final case class DatasetUnknown(ref: DatasetRef) extends ErrorResponse
   final case class UndefinedColumns(undefined: Set[String]) extends ErrorResponse
   final case class BadSchema(message: String) extends ErrorResponse
-
-  // Registers sending actor to receive ShardMapUpdate whenever it changes.  DeathWatch will be used
-  // on the sending actors to watch for updates.  Also, will immediately send back the current state
-  // via a ShardMapUpdate message.  NodeCoordinators are automatically subscribed to every dataset.
-  // This should be sent after RegisterDataset.
-  final case class SubscribeShardUpdates(ref: DatasetRef)
-  final case class ShardMapUpdate(dataset: DatasetRef, map: ShardMapper)
 
   // Obtains a copy of the current cluster state
   case object GetState
 
-  // Internal message
-  final case class RegisterDataset(proj: RichProjection,
-                                   resources: DatasetResourceSpec,
-                                   source: IngestionSource)
-  final case class AddCoordActor(roles: Set[String], addr: Address, ref: ActorRef)
-  case object Reset           // Only use for testing, in before {} blocks
-  case object EverybodyLeave  // Make every member leave, should be used only for testing
+  private[coordinator] final case class AddCoordinator(roles: Set[String], addr: Address, coordinator: ActorRef)
+
+  /** Registers sending actor to receive `ShardMapUpdate` whenever it changes. DeathWatch
+    * will be used on the sending actors to watch for updates. On subscribe, will
+    * immediately send back the current state via a `ShardMapUpdate` message.
+    * NodeCoordinators are automatically subscribed to every dataset. This should
+    * be sent after RegisterDataset.
+    */
+  final case class SubscribeShardUpdates(ref: DatasetRef)
+
+  // Only use for testing, in before {} blocks
+  private[coordinator] case object EverybodyLeave
 
   /**
-   * Creates a new NodeClusterActor.
-   * @param cluster the Cluster to subscribe to for membership messages
-   * @param nodeCoordRole String, for the role containing the NodeCoordinatorActor or ingestion nodes
-   * @param resolveActorDuration the timeout to use to resolve NodeCoordinatorActor refs for new nodes
-   */
-  def props(cluster: Cluster,
+    * Creates a new NodeClusterActor.
+    *
+    * @param settings             general settings from config
+    * @param cluster              the Cluster to subscribe to for membership messages
+    * @param nodeCoordRole        String, for the role containing the NodeCoordinatorActor or ingestion nodes
+    */
+  def props(settings: FilodbSettings,
+            cluster: Cluster,
             nodeCoordRole: String,
             metaStore: MetaStore,
-            assignmentStrategy: ShardAssignmentStrategy,
-            resolveActorDuration: FiniteDuration = 10.seconds): Props =
-    Props(classOf[NodeClusterActor], cluster, nodeCoordRole, metaStore,
-                                     assignmentStrategy, resolveActorDuration)
+            assignmentStrategy: ShardAssignmentStrategy): Props =
+    Props(new NodeClusterActor(settings, cluster, nodeCoordRole, metaStore, assignmentStrategy))
 
   class RemoteAddressExtensionImpl(system: ExtendedActorSystem) extends Extension {
     def address: Address = system.provider.getDefaultAddress
   }
 
   object RemoteAddressExtension extends ExtensionKey[RemoteAddressExtensionImpl]
+
 }
 
 /**
@@ -125,19 +129,24 @@ object NodeClusterActor {
  * - It can notify when some address joins
  * - It tracks dataset shard assignments and coordinates new dataset setup
  */
-private[filodb] class NodeClusterActor(cluster: Cluster,
+private[filodb] class NodeClusterActor(settings: FilodbSettings,
+                                       cluster: Cluster,
                                        nodeCoordRole: String,
                                        metaStore: MetaStore,
-                                       assignmentStrategy: ShardAssignmentStrategy,
-                                       resolveActorDuration: FiniteDuration) extends BaseActor {
-  import NodeClusterActor._, NodeGuardian._
+                                       assignmentStrategy: ShardAssignmentStrategy
+                                      ) extends NamingAwareBaseActor {
+
+  import NodeClusterActor._, ActorName._, ShardSubscriptions._
+  import settings.ResolveActorTimeout
+  import akka.pattern.{ask, pipe}
 
   val memberRefs = new HashMap[Address, ActorRef]
   val roleToCoords = new HashMap[String, Set[ActorRef]]().withDefaultValue(Set.empty[ActorRef])
-  val shardMappers = new HashMap[DatasetRef, ShardMapper]
-  val subscribers = new HashMap[DatasetRef, Set[ActorRef]].withDefaultValue(Set.empty[ActorRef])
   val projections = new HashMap[DatasetRef, RichProjection]
   val sources = new HashMap[DatasetRef, IngestionSource]
+
+  /* TODO run on its own dispatcher .withDispatcher("akka.shard-status-dispatcher") */
+  val shardActor = context.actorOf(Props(new ShardCoordinatorActor(assignmentStrategy)), ShardName)
 
   import context.dispatcher
 
@@ -148,37 +157,15 @@ private[filodb] class NodeClusterActor(cluster: Cluster,
   }
 
   override def postStop(): Unit = {
+    super.postStop()
     cluster.unsubscribe(self)
   }
 
-  private def withRole(role: String)(f: Set[ActorRef] => Unit): Unit = roleToCoords.get(role) match {
-    case None       => sender() ! NoSuchRole
-    case Some(refs) => f(refs)
-  }
-
-  // Update shard maps and send out updates to subcribers
-  private def stateChanged(updatedMaps: Seq[(DatasetRef, ShardMapper)]): Unit = {
-    updatedMaps.foreach { case (ref, newMap) =>
-      shardMappers(ref) = newMap
-      val update = ShardMapUpdate(ref, newMap)
-      subscribers(ref).foreach(_ ! update)
+  private def withRole(role: String, requester: ActorRef)(f: Set[ActorRef] => Unit): Unit =
+    roleToCoords.get(role) match {
+      case None       => requester ! NoSuchRole
+      case Some(refs) => f(refs)
     }
-  }
-
-  private def setupDataset(originator: ActorRef, setup: SetupDataset): Unit = {
-    (for { datasetObj <- metaStore.getDataset(setup.ref)
-           columnObjects <- metaStore.getColumns(setup.ref, 0, setup.columns) }
-     yield {
-       val proj = RichProjection(datasetObj, columnObjects)
-       self ! RegisterDataset(proj, setup.resources, setup.source)
-       originator ! DatasetVerified
-    }).recover {
-      case MetaStore.UndefinedColumns(cols) => originator ! UndefinedColumns(cols)
-      case err: RichProjection.BadSchema => originator ! BadSchema(err.toString)
-      case NotFoundError(what) => originator ! UnknownDataset(setup.ref)
-      case t: Throwable        => originator ! MetadataException(t)
-    }
-  }
 
   val localRemoteAddr = RemoteAddressExtension(context.system).address
   var everybodyLeftSender: Option[ActorRef] = None
@@ -187,12 +174,12 @@ private[filodb] class NodeClusterActor(cluster: Cluster,
     case MemberUp(member) =>
       logger.info(s"Member ${member.status}: ${member.address} with roles ${member.roles}")
       val memberCoordActor = nodeCoordinatorPath(member.address)
-      context.actorSelection(memberCoordActor).resolveOne(resolveActorDuration)
-        .map { ref => self ! AddCoordActor(member.roles, member.address, ref) }
+      context.actorSelection(memberCoordActor).resolveOne(ResolveActorTimeout)
+        .map { ref => self ! AddCoordinator(member.roles, member.address, ref) }
         .recover {
           case e: Exception =>
             logger.warn(s"Unable to resolve coordinator at $memberCoordActor, ignoring. " +
-                        "Maybe NodeCoordinatorActor did not start up before node joined cluster.", e)
+                         "Maybe NodeCoordinatorActor did not start up before node joined cluster.", e)
         }
 
     case UnreachableMember(member) =>
@@ -200,18 +187,21 @@ private[filodb] class NodeClusterActor(cluster: Cluster,
 
     case MemberRemoved(member, previousStatus) =>
       logger.info(s"Member is Removed: ${member.address} after $previousStatus")
-      memberRefs.remove(member.address).map { removedCoordinator =>
-          // roleToCoords(role) = roleToCoords(role).filterNot { ref =>
-          //   // if we don't do this cannot properly match when self node is asked to leave
-          //   val addr = if (ref.path.address.hasLocalScope) localRemoteAddr else ref.path.address
-          //   addr == member.address
-          // }
+      memberRefs.remove(member.address) match {
+        case Some(removedCoordinator) =>
+        // roleToCoords(role) = roleToCoords(role).filterNot { ref =>
+        //   // if we don't do this cannot properly match when self node is asked to leave
+        //   val addr = if (ref.path.address.hasLocalScope) localRemoteAddr else ref.path.address
+        //   addr == member.address
+        // }
         roleToCoords.transform { case (_, refs) => refs - removedCoordinator }
         roleToCoords.retain { case (role, refs) => refs.nonEmpty }
-        subscribers.transform { case (_, refs) => refs - removedCoordinator }
-        val updates = assignmentStrategy.nodeRemoved(removedCoordinator, shardMappers)
-        stateChanged(updates)
-      }.getOrElse { logger.warn(s"UNABLE TO REMOVE ${member.address} FROM memberRefs!!") }
+
+        shardActor ! ShardSubscriptions.Unsubscribe(removedCoordinator)
+        case _ =>
+          logger.warn(s"UNABLE TO REMOVE ${member.address} FROM memberRefs")
+      }
+
       if (roleToCoords.isEmpty) {
         logger.info("All members removed!")
         everybodyLeftSender.foreach { ref => ref ! EverybodyLeave }
@@ -221,100 +211,142 @@ private[filodb] class NodeClusterActor(cluster: Cluster,
     case _: MemberEvent => // ignore
   }
 
+  def shardMapHandler: Receive = LoggingReceive {
+    case e: AddCoordinator        => addCoordinator(e)
+    case e: SubscribeShardUpdates => subscribe(e.ref, sender())
+    case e: SetupDataset          => setupDataset(e, sender())
+    case e: DatasetAdded          => datasetSetup(e)
+    case e: ShardSubscriptions.CoordinatorSubscribed => subscribed(e)
+    case e: ShardSubscriptions.SubscriptionUnknown   => datasetUnknown(e)
+  }
+
+  /** If the dataset is registered as a subscription, a `CurrentShardSnapshot` is sent
+    * to the subscriber, otherwise a `DatasetUnknown` is returned.
+    *
+    * It is on the subscriber/client and NodeClusterActor to know you can't subscribe
+    * unless the dataset has first been fully set up. Subscription datasets are only
+    * set up by the NodeClusterActor.
+    *
+    * Idempotent.
+    */
+  private def subscribe(dataset: DatasetRef, subscriber: ActorRef): Unit =
+    shardActor ! ShardSubscriptions.Subscribe(subscriber, dataset)
+
+  /** Sets up the new coordinator, forwards to shard status actor to complete
+    * its subscription setup. The coordinator is sent an ack.
+    * The shard stats actor responds with a `SendDatasetSetup` to handle the updates.
+    */
+  private def addCoordinator(e: AddCoordinator): Unit = {
+    e.roles.foreach { role => roleToCoords(role) += e.coordinator }
+    logger.debug(s"Updated roleToCoords: $roleToCoords")
+
+    if (e.roles contains nodeCoordRole) {
+      memberRefs(e.addr) = e.coordinator
+      shardActor ! ShardSubscriptions.SubscribeCoordinator(e.coordinator)
+    }
+  }
+
+  private def datasetUnknown(e: ShardSubscriptions.SubscriptionUnknown): Unit = {
+    logger.error(s"Dataset ${e.dataset} is not set up yet, unable to subscribe ${e.subscriber}.")
+    e.subscriber ! DatasetUnknown(e.dataset) // can do if isCoordinator(sub)... else...
+  }
+
+  /** Initiated by Client and Spark FiloDriver setup. */
+  private def setupDataset(setup: SetupDataset, origin: ActorRef): Unit =
+    (for {datasetObj    <- metaStore.getDataset(setup.ref)
+          columnObjects <- metaStore.getColumns(setup.ref, 0, setup.columns)}
+      yield {
+        shardActor ! AddDataset(setup, datasetObj, columnObjects, memberRefs.values.toSet, origin)
+
+      }).recover {
+      case MetaStore.UndefinedColumns(cols) => origin ! UndefinedColumns(cols)
+      case err: RichProjection.BadSchema    => origin ! BadSchema(err.toString)
+      case NotFoundError(what)              => origin ! DatasetUnknown(setup.ref)
+      case t: Throwable                     => origin ! MetadataException(t)
+    }
+
+  private def datasetSetup(e: DatasetAdded): Unit = {
+    val proj = RichProjection(e.dataset, e.columns)
+    logger.info(s"Registering dataset ${proj.datasetRef} with ingestion source ${e.source}")
+    projections(proj.datasetRef) = proj
+    sources(proj.datasetRef) = e.source
+
+    // TODO inspect diff for new members not known at time of initial ds setup
+    sendDatasetSetup(memberRefs.values.toSet, proj, e.source)
+    e.ackTo ! DatasetVerified
+    sendStartCommand(e.shards, proj)
+  }
+
+  /** Called after a new coordinator is added and shard assignment strategy has
+    * added the node and returns updates.
+    *
+    * `CoordinatorRegistered` should not be changed to contain `ShardsAssigned`,
+    * even though they are now known at this time, to keep tests simpler for now.
+    * Can consider optimization later.
+    *
+    * INTERNAL API. Idempotent.
+    */
+  private def subscribed(e: ShardSubscriptions.CoordinatorSubscribed): Unit = {
+    e.coordinator ! CoordinatorRegistered(self, shardActor)
+
+    val oneAdded = Set(e.coordinator)
+    for {
+      dataset <- e.updated
+    } sendDatasetSetup(oneAdded, projections(dataset), sources(dataset))
+  }
+
+  /** Called on successfull AddNodeCoordinator and SetupDataset protocols.
+    *
+    * @param coords the current cluster members
+    * @param proj   the dataset projection
+    * @param source the ingestion source type to use
+    */
   private def sendDatasetSetup(coords: Set[ActorRef], proj: RichProjection, source: IngestionSource): Unit = {
-    logger.info(s"Sending setup message for ${proj.datasetRef} to coordinators $coords...")
+    logger.info(s"Sending setup message for ${proj.datasetRef} to coordinators $coords.")
     val colStrs = proj.dataColumns.map(_.toString)
     val setupMsg = IngestionCommands.DatasetSetup(proj.dataset, colStrs, 0, source)
     coords.foreach(_ ! setupMsg)
   }
 
-  private def addNodeCoord(addr: Address, coordRef: ActorRef): Unit = {
-    logger.info(s"Adding node with address $addr, coordinator $coordRef")
-    memberRefs(addr) = coordRef
-    subscribers.transform { case (_, refs) => refs + coordRef }
-
-    // Let each NodeCoordinator know about us so it can send us updates
-    coordRef ! NodeCoordinatorActor.ClusterHello(self)
-
-    val updates = assignmentStrategy.nodeAdded(coordRef, shardMappers)
-    logger.debug(s"Updated shard maps: $updates")
-    stateChanged(updates)
-
-    updates.foreach { case (ref, _) => sendDatasetSetup(Set(coordRef), projections(ref), sources(ref)) }
-  }
-
-  def shardMapHandler: Receive = LoggingReceive {
-    case Terminated(ref) =>
-      subscribers.foreach { case (ds, subs) => subscribers(ds) = subscribers(ds) - ref }
-
-    case SubscribeShardUpdates(ref) =>
-      // Send an immediate current snapshot of partition state
-      // (as ingestion will subscribe usually when cluster is already stable)
-      shardMappers.get(ref) match {
-        case Some(map) =>
-          sender() ! ShardMapUpdate(ref, map)
-          subscribers(ref) = subscribers(ref) + sender()
-          logger.debug(s"Registered $sender to receive shard map updates for $ref")
-          context.watch(sender())
-        case None =>
-          logger.info(s"No such dataset $ref set up yet")
-          sender() ! UnknownDataset(ref)
-      }
-
-    case s: SetupDataset =>
-      if (subscribers contains s.ref) { sender() ! DatasetAlreadySetup(s.ref) }
-      else { setupDataset(sender(), s) }
-
-    case RegisterDataset(proj, spec, source) =>
-      val ref = proj.datasetRef
-      if (subscribers contains ref) {
-        logger.info(s"Dataset $ref already registered, ignoring...")
-      } else {
-        logger.info(s"Registering dataset $ref with resources $spec and ingestion source $source...")
-        val allCoordinators = memberRefs.values.toSet
-        val updates = assignmentStrategy.datasetAdded(ref, spec, allCoordinators, shardMappers)
-        logger.debug(s"Updated shard maps: $updates")
-
-        projections(ref) = proj
-        sources(ref) = source
-        subscribers(ref) = allCoordinators
-        stateChanged(updates)
-
-        sendDatasetSetup(allCoordinators, proj, source)
-      }
-
-    case AddCoordActor(roles, addr, coordRef) =>
-      roles.foreach { role => roleToCoords(role) += coordRef }
-      if (roles contains nodeCoordRole) addNodeCoord(addr, coordRef)
-      logger.debug(s"Updated roleToCoords: $roleToCoords")
-  }
+  /** If no shards are assigned to a coordinator, no commands are sent. */
+  private def sendStartCommand(coords: Map[ActorRef, Seq[Int]], proj: RichProjection): Unit =
+    for {
+      (coord, shards) <- coords
+      shard           <- shards.toList
+    } coord ! StartShardIngestion(proj.datasetRef, shard, None)
 
   def routerEvents: Receive = LoggingReceive {
     case ForwardToOne(role, msg) =>
-      withRole(role) { refs => refs.toSeq.apply(util.Random.nextInt(refs.size)).forward(msg) }
+      withRole(role, sender()) { refs => refs.toSeq.apply(util.Random.nextInt(refs.size)).forward(msg) }
 
     case GetRefs(role) =>
-      withRole(role) { refs => sender() ! refs }
+      val requestor = sender()
+      withRole(role, requestor) { refs => requestor ! refs }
 
     case Broadcast(role, msg) =>
-      withRole(role) { refs => refs.foreach(_.forward(msg)) }
+      withRole(role, sender()) { refs => refs.foreach(_.forward(msg)) }
 
     case EverybodyLeave =>
-      if (roleToCoords.isEmpty) { sender() ! EverybodyLeave }
+      val requestor = sender()
+      if (roleToCoords.isEmpty) {
+        requestor ! EverybodyLeave
+      }
       else if (everybodyLeftSender.isEmpty) {
         logger.info(s"Removing all members from cluster...")
         cluster.state.members.map(_.address).foreach(cluster.leave)
-        everybodyLeftSender = Some(sender())
+        everybodyLeftSender = Some(requestor)
       } else {
         logger.warn(s"Ignoring EverybodyLeave, somebody already sent it")
       }
 
-    case Reset =>
-      logger.info(s"Resetting all dataset state except membership....")
-      shardMappers.clear()
-      subscribers.clear()
+    case NodeProtocol.ResetState =>
+      val origin = sender()
+      logger.info("Resetting all dataset state except membership.")
       projections.clear()
       sources.clear()
+
+      implicit val timeout: Timeout = settings.DefaultTaskTimeout
+      (shardActor ? NodeProtocol.ResetState) pipeTo origin
   }
 
   def receive: Receive = membershipHandler orElse shardMapHandler orElse routerEvents

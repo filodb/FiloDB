@@ -42,7 +42,8 @@ object FilodbCluster extends ExtensionId[FilodbCluster] with ExtensionIdProvider
   * Coordinator Extension Id and factory for creating a basic Coordinator extension.
   */
 final class FilodbCluster(system: ExtendedActorSystem) extends Extension with StrictLogging {
-  import NodeProtocol._, NodeGuardian.NodeGuardianName
+  import NodeProtocol._
+  import ActorName.{NodeGuardianName => guardianName}
   import akka.pattern.ask
 
   val settings = new FilodbSettings(system.settings.config)
@@ -51,6 +52,8 @@ final class FilodbCluster(system: ExtendedActorSystem) extends Extension with St
   implicit lazy val timeout: Timeout = DefaultTaskTimeout
 
   private val _isTerminated = new AtomicBoolean(false)
+
+  private val _isTerminating = new AtomicBoolean(false)
 
   private[filodb] val _isInitialized = new AtomicBoolean(false)
 
@@ -96,7 +99,7 @@ final class FilodbCluster(system: ExtendedActorSystem) extends Extension with St
     * All actions are idempotent. It manages the underlying lifecycle of all node actors.
     */
   private lazy val guardian = system.actorOf(NodeGuardian.props(
-    settings, cluster, metaStore, memStore, columnStore, assignmentStrategy), NodeGuardianName)
+    settings, cluster, metaStore, memStore, columnStore, assignmentStrategy), guardianName)
 
   /** Idempotent. */
   def kamonInit(role: ClusterRole): ActorRef =
@@ -175,6 +178,12 @@ final class FilodbCluster(system: ExtendedActorSystem) extends Extension with St
 
   def isTerminated: Boolean = _isTerminated.get
 
+  /** Returns true if the node termination is in progress. This is
+    * used during evaluation of DeathWatch Terminated events and actions
+    * based on that state.
+    */
+  def isTerminating: Boolean = _isTerminating.get
+
   private def joined(): Unit = {
     logger.debug(s"Members size ${state.members.size}")
     state.members.collectFirst {
@@ -190,10 +199,12 @@ final class FilodbCluster(system: ExtendedActorSystem) extends Extension with St
       import akka.pattern.gracefulStop
       import system.dispatcher
 
+      _isTerminating.set(true)
+      logger.info("Starting shutdown")
+      _isJoined.set(false)
+      _isInitialized.set(false)
+
       try {
-        logger.info("Starting shutdown")
-        _isJoined.set(false)
-        _isInitialized.set(false)
         cluster.leave(selfAddress)
         Await.result(gracefulStop(guardian, GracefulStopTimeout, GracefulShutdown), GracefulStopTimeout)
         system.shutdown()

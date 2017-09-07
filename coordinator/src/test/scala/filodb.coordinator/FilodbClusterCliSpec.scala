@@ -15,7 +15,7 @@ import filodb.core.metadata.{DataColumn, Dataset, RichProjection}
 
 class FilodbClusterCliSpec extends RunnableSpec with ScalaFutures {
 
-  import NodeCoordinatorActor._
+  import NodeClusterActor.CoordinatorRegistered
   import filodb.core.GdeltTestData.{dataset3, schema}
 
   private val streamSettings = CsvStream.CsvStreamSettings()
@@ -44,7 +44,7 @@ class FilodbClusterCliSpec extends RunnableSpec with ScalaFutures {
       implicit val system = FiloCliApp.system
       val probe = TestProbe()
 
-      probe.send(coordinatorActor, ClusterHello(probe.ref))
+      probe.send(coordinatorActor, CoordinatorRegistered(probe.ref, probe.ref))
       probe.send(coordinatorActor, MiscCommands.GetClusterActor)
       probe.expectMsgPF() {
         case Some(ref: ActorRef) => ref shouldEqual probe.ref

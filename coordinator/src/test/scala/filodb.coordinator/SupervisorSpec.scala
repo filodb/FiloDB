@@ -35,14 +35,14 @@ class SupervisorSpec extends AkkaSpec {
   private lazy val cluster = Cluster(system)
 
   "NodeGuardian" must {
-    import NodeGuardian.{NodeGuardianName => supervisor}
+    import ActorName.{NodeGuardianName => supervisor}
     "start Kamon metrics if not ClusterRole.Cli" in {
       factory.getClass should be(classOf[InMemoryStoreFactory])
       val guardian = system.actorOf(guardianProps, supervisor)
       guardian ! CreateTraceLogger(ClusterRole.Server)
       expectMsgPF() {
         case TraceLoggerRef(ref) =>
-          ref.path.name should be(NodeGuardian.TraceLoggerName)
+          ref.path.name should be(ActorName.TraceLoggerName)
           system stop ref
       }
       system stop guardian
@@ -52,7 +52,7 @@ class SupervisorSpec extends AkkaSpec {
       guardian ! CreateCoordinator
       expectMsgPF() {
         case CoordinatorRef(ref) =>
-          ref.path should be(ActorPath.fromString("akka://akka-test/user/sguardian/" + NodeGuardian.CoordinatorName))
+          ref.path should be(ActorPath.fromString("akka://akka-test/user/sguardian/" + ActorName.CoordinatorName))
           ref ! PoisonPill // now kill it, should see it logged
       }
       system stop guardian
@@ -62,7 +62,7 @@ class SupervisorSpec extends AkkaSpec {
       guardian ! CreateClusterSingleton("worker", withManager = true)
       expectMsgPF() {
         case ClusterSingletonRef(ref) =>
-          ref.path should be(ActorPath.fromString("akka://akka-test/user/guardian/" + NodeGuardian.NodeClusterProxyName))
+          ref.path should be(ActorPath.fromString("akka://akka-test/user/guardian/" + ActorName.NodeClusterProxyName))
       }
       system stop guardian
     }

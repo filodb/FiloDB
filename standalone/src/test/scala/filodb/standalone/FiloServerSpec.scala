@@ -1,24 +1,27 @@
 package filodb.standalone
 
-import scala.concurrent.duration._
 import akka.actor.ActorRef
 import akka.testkit.{TestKit, TestProbe}
-import filodb.coordinator.{MiscCommands, RunnableSpec}
-import filodb.coordinator.NodeCoordinatorActor.ClusterHello
+import org.scalatest.concurrent.ScalaFutures
 
-class FiloServerSpec extends RunnableSpec {
+import filodb.coordinator.NodeClusterActor.CoordinatorRegistered
+import filodb.coordinator.{ActorName, FiloServerApp, MiscCommands, RunnableSpec}
+
+class FiloServerSpec extends RunnableSpec with ScalaFutures {
   "A FiloServer Node" must {
+    val timeout = FiloServer.cluster.settings.DefaultTaskTimeout
+
     "initialize" in {
       FiloServer.main(Array.empty)
-      TestKit.awaitCond(FiloServer.cluster.isInitialized, 5.seconds)
+      TestKit.awaitCond(FiloServer.cluster.isInitialized,  timeout)
     }
     "create and setup the coordinatorActor and clusterActor" in {
+      implicit val system = FiloServer.system
       val coordinatorActor = FiloServer.coordinatorActor
       val clusterActor = FiloServer.cluster.clusterActor.get
 
-      implicit val system = FiloServer.system
       val probe = TestProbe()
-      probe.send(coordinatorActor, ClusterHello(clusterActor))
+      probe.send(coordinatorActor, CoordinatorRegistered(clusterActor, probe.ref))
       probe.send(coordinatorActor, MiscCommands.GetClusterActor)
       probe.expectMsgPF() {
         case Some(ref: ActorRef) => ref shouldEqual clusterActor
@@ -26,7 +29,7 @@ class FiloServerSpec extends RunnableSpec {
     }
     "shutdown cleanly" in {
       FiloServer.shutdown()
-      TestKit.awaitCond(FiloServer.cluster.isTerminated, 5.seconds)
+      TestKit.awaitCond(FiloServer.cluster.isTerminated, timeout)
     }
   }
 }

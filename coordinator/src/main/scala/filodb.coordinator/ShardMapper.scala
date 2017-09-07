@@ -1,20 +1,10 @@
 package filodb.coordinator
 
-import akka.actor.{Address, ActorRef}
-import scala.collection.mutable.HashMap
 import scala.util.{Try, Success, Failure}
 
+import akka.actor.{Address, ActorRef}
+
 import filodb.core.DatasetRef
-
-private[filodb] object ShardMapper {
-
-  val empty = new ShardMapper(0)
-
-  final case class ShardAndNode(shard: Int, coord: ActorRef)
-
-  final def toShard(n: Int, numShards: Int): Int = (((n & 0xffffffffL) * numShards) >> 32).toInt
-
-}
 
 /**
  * Each FiloDB dataset is divided into a fixed number of shards for ingestion and distributed in-memory
@@ -42,7 +32,7 @@ class ShardMapper(val numShards: Int) extends Serializable {
 
   override def hashCode: Int = shardValues.hashCode
 
-  override def toString: String = s"ShardMapper {${shardValues.zipWithIndex}}"
+  override def toString: String = s"ShardMapper ${shardValues.zipWithIndex}"
 
   def shardValues: Seq[(ActorRef, ShardStatus)] = shardMap.zip(statusMap).toBuffer
 
@@ -137,6 +127,8 @@ class ShardMapper(val numShards: Int) extends Serializable {
     case IngestionStopped(_, shard) =>
       statusMap(shard) = ShardStatusStopped
       Success(())
+    case _ =>
+      Success(())
   }
 
   /**
@@ -149,12 +141,10 @@ class ShardMapper(val numShards: Int) extends Serializable {
 
   /**
    * Registers a new node to the given shards.  Modifies state in place.
-   * TODO: make this private. Everybody should use the event API.
    */
-  def registerNode(shards: Seq[Int], coordinator: ActorRef): Try[Unit] = {
+  private[coordinator] def registerNode(shards: Seq[Int], coordinator: ActorRef): Try[Unit] = {
     shards.foreach { shard =>
       if (shardMap(shard) != ActorRef.noSender) {
-        // Alreaady assigned!
         return Failure(new IllegalArgumentException(s"Shard $shard is already assigned!"))
       } else {
         shardMap(shard) = coordinator
@@ -167,7 +157,7 @@ class ShardMapper(val numShards: Int) extends Serializable {
    * Removes a coordinator ref from all shards mapped to it.  Resets the shards to no owner and
    * returns the shards removed.
    */
-  def removeNode(coordinator: ActorRef): Seq[Int] = {
+  private[coordinator] def removeNode(coordinator: ActorRef): Seq[Int] = {
     shardMap.toSeq.zipWithIndex.collect {
       case (ref, i) if ref == coordinator =>
         shardMap(i) = ActorRef.noSender
@@ -175,7 +165,17 @@ class ShardMapper(val numShards: Int) extends Serializable {
     }
   }
 
-  def clear(): Unit = {
+  private[coordinator] def clear(): Unit = {
     for { i <- 0 until numShards } { shardMap(i) = ActorRef.noSender }
   }
+}
+
+private[filodb] object ShardMapper {
+
+  val empty = new ShardMapper(0)
+
+  final case class ShardAndNode(shard: Int, coord: ActorRef)
+
+  final def toShard(n: Int, numShards: Int): Int = (((n & 0xffffffffL) * numShards) >> 32).toInt
+
 }

@@ -18,12 +18,12 @@ class FilodbClusterSpec extends AkkaSpec {
     }
     "load and setup basic components successfully" in {
       val tracer = cluster.kamonInit(ClusterRole.Server)
-      tracer.path.name should be (NodeGuardian.TraceLoggerName)
+      tracer.path.name should be (ActorName.TraceLoggerName)
 
-      cluster.coordinatorActor.path.name should be (NodeGuardian.CoordinatorName)
+      cluster.coordinatorActor.path.name should be (ActorName.CoordinatorName)
       Await.result(cluster.metaStore.initialize(), InitializationTimeout)
       cluster.join()
-      awaitCond(cluster.isJoined)
+      awaitCond(cluster.isJoined, max = cluster.settings.DefaultTaskTimeout)
       cluster.isTerminated should be (false)
     }
     "provide CurrentClusterState" in {
@@ -31,7 +31,7 @@ class FilodbClusterSpec extends AkkaSpec {
       cluster.state.members.size should be (1)
     }
     "setup cluster singleton and manager successfully" in {
-      import NodeGuardian._
+      import ActorName._
 
       def pathElementsExist(a: ActorRef): Boolean =
         Set("user", NodeGuardianName, NodeClusterProxyName)

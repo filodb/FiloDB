@@ -3,6 +3,7 @@ package filodb.coordinator
 import scala.collection.immutable
 import scala.concurrent.duration.FiniteDuration
 
+import akka.actor.{ActorPath, Address, RootActorPath}
 import com.typesafe.config.{Config, ConfigFactory}
 import net.ceedubs.ficus.Ficus._
 
@@ -48,5 +49,47 @@ final class FilodbSettings(val conf: Config) {
 
   lazy val DatasetDefinitions = config.as[Option[Map[String, Config]]]("dataset-definitions")
                                       .getOrElse(Map.empty[String, Config])
+
+  /** The timeout to use to resolve NodeCoordinatorActor refs for new nodes. */
+  val ResolveActorTimeout = config.as[FiniteDuration]("tasks.timeouts.resolve-actor")
+
+}
+
+/** Consistent naming: allows other actors to accurately filter
+  * by actor.path.name and the creators of the actors to use the
+  * name others look up.
+  *
+  * Actors have an internal dataset of all their children. No need
+  * to duplicate them as a collection to query and track and incur
+  * additional resources. Simply leverage the existing with a
+  * naming convention.
+  *
+  * @see [[filodb.coordinator.NamingAwareBaseActor]]
+  */
+object ActorName {
+
+  val NodeGuardianName = "node"
+  val CoordinatorName = "coordinator"
+  val TraceLoggerName = "trace-logger"
+
+  /* The actor name of the child singleton actor */
+  val NodeClusterName = "nodecluster"
+  val SingletonMgrName = "singleton"
+  val NodeClusterProxyName = "nodeClusterProxy"
+  val ShardName = "shard-subscriptions"
+
+  /** MemstoreCoord Worker name prefix. Naming pattern is prefix-datasetRef.dataset */
+  val Ingestion = "ingestion"
+  /** Query Worker name prefix. Naming pattern is prefix-datasetRef.dataset */
+  val Query = "query"
+
+  /* Actor Paths */
+  val ClusterSingletonProxyPath = s"/user/$NodeGuardianName/$SingletonMgrName/$NodeClusterName"
+
+  def nodeCoordinatorPath(addr: Address): ActorPath =
+    RootActorPath(addr) / "user" / NodeGuardianName / CoordinatorName
+
+  private[filodb] def shardStatusPath(address: Address): ActorPath =
+    RootActorPath(address, s"/$ClusterSingletonProxyPath/$ShardName")
 
 }
