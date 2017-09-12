@@ -63,11 +63,11 @@ private[coordinator] trait NamingAwareBaseActor extends BaseActor {
     context.children filter (_.path.name startsWith prefix)
 }
 
-/** For Deathwatch actors, handles [[akka.actor.Terminated]] events,
+/** For Deathwatch actors, handles `akka.actor.Terminated` events,
   * and Supervisors wanting graceful shutdown of supervised children
   * for no data loss or clean behavior on shutdown, sends a
-  * [[filodb.coordinator.NodeProtocol.ShutdownComplete]] to the
-  * [[filodb.coordinator.NodeProtocol.GracefulShutdown]] sender.
+  * `filodb.coordinator.NodeProtocol.ShutdownComplete` to the
+  * `filodb.coordinator.NodeProtocol.GracefulShutdown` sender.
   */
 trait GracefulStopAwareSupervisor extends BaseActor {
 

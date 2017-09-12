@@ -51,7 +51,7 @@ class DefaultShardAssignmentStrategy extends ShardAssignmentStrategy with Strict
   private val shardToNodeRatio = new mutable.HashMap[DatasetRef, Double]
   private val shardsPerCoord = new mutable.HashMap[ActorRef, Int].withDefaultValue(0)
 
-  /** On node added [[akka.cluster.ClusterEvent.MemberUp]].
+  /** On node added `akka.cluster.ClusterEvent.MemberUp`.
     * TODO: rebalance existing shards if a new node adds capacity
     */
   def nodeAdded(coordRef: ActorRef, shardMaps: CMap[DatasetRef, ShardMapper]): NodeAdded = {
@@ -74,8 +74,8 @@ class DefaultShardAssignmentStrategy extends ShardAssignmentStrategy with Strict
     NodeAdded(dss)
   }
 
-  /** Called on node removed [[akka.cluster.ClusterEvent.MemberRemoved]]
-    * or through DeathWatch and [[akka.actor.Terminated]].
+  /** Called on node removed `akka.cluster.ClusterEvent.MemberRemoved`
+    * or through DeathWatch and `akka.actor.Terminated`.
     */
   def nodeRemoved(coordRef: ActorRef, shardMaps: CMap[DatasetRef, ShardMapper]): NodeRemoved = {
     val updatedMaps = shardMaps.map { case (ref, map) =>

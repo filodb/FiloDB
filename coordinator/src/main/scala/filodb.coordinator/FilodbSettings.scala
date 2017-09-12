@@ -64,7 +64,7 @@ final class FilodbSettings(val conf: Config) {
   * additional resources. Simply leverage the existing with a
   * naming convention.
   *
-  * @see [[filodb.coordinator.NamingAwareBaseActor]]
+  * See `filodb.coordinator.NamingAwareBaseActor`
   */
 object ActorName {
 
