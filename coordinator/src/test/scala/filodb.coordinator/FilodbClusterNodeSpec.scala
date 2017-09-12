@@ -58,21 +58,18 @@ object FiloServerApp extends FilodbClusterNode with StrictLogging {
 
   override lazy val system = ActorSystem(systemName, AkkaSpec.settings.allConfig)
 
-  override lazy val cluster = FilodbCluster(system)
+  override val cluster = FilodbCluster(system)
 
-  lazy val clusterActor = cluster.clusterSingletonProxy(roleName, withManager = true)
+  val clusterActor = cluster.clusterSingletonProxy(roleName, withManager = true)
+  cluster.joinSeedNodes()
 
   lazy val client = new LocalClient(coordinatorActor)
 
   def main(args: Array[String]): Unit = {
-    clusterActor
     coordinatorActor
-    cluster.joinSeedNodes()
     cluster.kamonInit(role)
-
     scala.concurrent.Await.result(metaStore.initialize(), cluster.settings.InitializationTimeout)
     cluster._isInitialized.set(true)
-
 
     client
   }
