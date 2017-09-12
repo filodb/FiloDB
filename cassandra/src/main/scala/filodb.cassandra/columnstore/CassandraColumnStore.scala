@@ -264,6 +264,7 @@ trait CassandraColumnStoreScanner extends ColumnStoreScanner with StrictLogging 
       case AllChunkScan             => (true, partitionIndex.allChunks)
       case RowKeyChunkScan(k1, k2)  => (false, partitionIndex.rowKeyRange(k1.binRec, k2.binRec))
       case SingleChunkScan(key, id) => (false, partitionIndex.singleChunk(key.binRec, id))
+      case LastSampleChunkScan      => (false, partitionIndex.latestN(1))
     }
 
     val groupedInfos = infosSkips.grouped(10)  // TODO: group by # of rows read

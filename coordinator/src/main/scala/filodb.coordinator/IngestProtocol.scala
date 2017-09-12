@@ -100,5 +100,5 @@ class IngestProtocol(clusterActor: ActorRef,
       shardHist.record(shardNum)
   } orElse shardUpdates orElse errorCatcher
 
-  def receive = initializing
+  def receive: Receive = initializing
 }

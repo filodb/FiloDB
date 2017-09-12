@@ -1,5 +1,6 @@
 package filodb.core.memstore
 
+import kamon.Kamon
 import org.jctools.maps.NonBlockingHashMapLong
 import org.velvia.filo.{BinaryAppendableVector, BinaryVector, FiloVector, RowReader, RoutingRowReader}
 import scalaxy.loops._
@@ -9,6 +10,12 @@ import filodb.core.metadata.RichProjection
 import filodb.core.query.{PartitionChunkIndex, ChunkIDPartitionChunkIndex, ChunkSetReader, FiloPartition}
 import filodb.core.store.{ChunkSetInfo, timeUUID64}
 import filodb.core.Types._
+
+object TimeSeriesPartition {
+  val numChunksEncoded = Kamon.metrics.counter("memstore-chunks-encoded")
+  val numSamplesEncoded = Kamon.metrics.counter("memstore-samples-encoded")
+  val encodedBytes     = Kamon.metrics.counter("memstore-encoded-bytes-allocated")
+}
 
 /**
  * A MemStore Partition holding chunks of data for different columns (a schema) for time series use cases.
@@ -37,6 +44,7 @@ class TimeSeriesPartition(val projection: RichProjection,
                           chunksToKeep: Int,
                           maxChunkSize: Int) extends PartitionChunkIndex with FiloPartition {
   import ChunkSetInfo._
+  import TimeSeriesPartition._
 
   // NOTE: private final compiles down to a field in bytecode, faster than method invocation
   private final val vectors = new NonBlockingHashMapLong[Array[BinaryVector[_]]](32, false)
@@ -91,9 +99,12 @@ class TimeSeriesPartition(val projection: RichProjection,
     // optimize and compact current chunks
     val frozenVectors = currentChunks.map { curChunk =>
       val optimized = curChunk.optimize()
+      encodedBytes.increment(optimized.numBytes)
       curChunk.reset()
       optimized
     }
+    numSamplesEncoded.increment(currentChunkLen)
+    numChunksEncoded.increment(frozenVectors.length)
 
     val curChunkID = chunkIDs.last
     val chunkInfo = ChunkSetInfo(curChunkID, currentChunkLen, firstRowKey, lastRowKey)
@@ -114,6 +125,9 @@ class TimeSeriesPartition(val projection: RichProjection,
 
   def singleChunk(startKey: BinaryRecord, id: ChunkID): InfosSkipsIt =
     index.singleChunk(startKey, id)
+
+  def latestN(n: Int): InfosSkipsIt =
+    if (n == 1) latestChunkIt else index.latestN(n)
 
   def numChunks: Int = chunkIDs.size
   def latestChunkLen: Int = currentChunkLen

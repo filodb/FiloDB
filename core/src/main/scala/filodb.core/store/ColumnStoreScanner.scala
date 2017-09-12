@@ -105,13 +105,13 @@ trait ColumnStoreAggregator {
                 query: QuerySpec,
                 partMethod: PartitionScanMethod,
                 chunkMethod: ChunkScanMethod = AllChunkScan): Task[Aggregate[_]] Or InvalidFunctionSpec = {
-    for { aggregator <- query.aggregateFunc.validate(query.aggregateArgs, projection)
+    for { aggregator <- query.aggregateFunc.validate(query.column, projection.timestampColumn.map(_.name),
+                                                     chunkMethod, query.aggregateArgs, projection)
           combiner   <- query.combinerFunc.validate(aggregator, query.combinerArgs) }
     yield {
-      val chunkScan = aggregator.chunkScan(projection).getOrElse(chunkMethod)
       val aggStream = scanPartitions(projection, version, partMethod)
                         .map { index =>
-                          aggregator.aggPartition(index.findByMethod(chunkScan),
+                          aggregator.aggPartition(index.findByMethod(chunkMethod),
                                                   indexToPartition(index))
                         }
       combiner.fold(aggStream)

@@ -45,6 +45,7 @@ class ShardMapper(val numShards: Int) extends Serializable {
   }
 
   def coordForShard(shardNum: Int): ActorRef = shardMap(shardNum)
+  def unassigned(shardNum: Int): Boolean = coordForShard(shardNum) == ActorRef.noSender
   def statusForShard(shardNum: Int): ShardStatus = statusMap(shardNum)
 
   /**
@@ -144,7 +145,7 @@ class ShardMapper(val numShards: Int) extends Serializable {
    */
   private[coordinator] def registerNode(shards: Seq[Int], coordinator: ActorRef): Try[Unit] = {
     shards.foreach { shard =>
-      if (shardMap(shard) != ActorRef.noSender) {
+      if (!unassigned(shard)) {
         return Failure(new IllegalArgumentException(s"Shard $shard is already assigned!"))
       } else {
         shardMap(shard) = coordinator

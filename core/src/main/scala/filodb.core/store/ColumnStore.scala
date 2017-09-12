@@ -39,20 +39,26 @@ case object AllChunkScan extends ChunkScanMethod
 final case class RowKeyChunkScan(firstBinKey: BinaryRecordWrapper,
                                  lastBinKey: BinaryRecordWrapper) extends ChunkScanMethod {
   def startkey: BinaryRecord = firstBinKey.binRec
-  def endKey: BinaryRecord = lastBinKey.binRec
+  def endkey: BinaryRecord = lastBinKey.binRec
 }
 final case class SingleChunkScan(firstBinKey: BinaryRecordWrapper,
                                  chunkId: Types.ChunkID) extends ChunkScanMethod {
   def startkey: BinaryRecord = firstBinKey.binRec
 }
+case object LastSampleChunkScan extends ChunkScanMethod
 
 object RowKeyChunkScan {
   def apply(startKey: BinaryRecord, endKey: BinaryRecord): RowKeyChunkScan =
     RowKeyChunkScan(BinaryRecordWrapper(startKey), BinaryRecordWrapper(endKey))
+
+  def apply(projection: RichProjection, startKey: Seq[Any], endKey: Seq[Any]): RowKeyChunkScan =
+    RowKeyChunkScan(BinaryRecord(projection, startKey), BinaryRecord(projection, endKey))
 }
 
-final case class QuerySpec(aggregateFunc: AggregationFunction,
-                           aggregateArgs: Seq[String],
+
+final case class QuerySpec(column: String,
+                           aggregateFunc: AggregationFunction,
+                           aggregateArgs: Seq[String] = Nil,
                            combinerFunc: CombinerFunction = CombinerFunction.Simple,
                            combinerArgs: Seq[String] = Nil)
 

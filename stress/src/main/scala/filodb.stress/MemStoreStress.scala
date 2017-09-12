@@ -3,6 +3,7 @@ package filodb.stress
 import akka.pattern.ask
 import akka.util.Timeout
 import org.apache.spark.sql.{DataFrame, SparkSession, SaveMode}
+import org.joda.time.DateTime
 import monix.eval.Task
 import monix.reactive.Observable
 import scala.util.Random
@@ -66,8 +67,9 @@ object MemStoreStress extends App {
                         "pickup_longitude", "pickup_latitude")
 
   // use observables (a stream of queries) to handle queries
-  val queryArgs = QueryArgs("time_group_avg", Seq("pickup_datetime", "trip_distance", "2013-01-01T00Z",
-                                                  "2013-02-01T00Z", "90"))
+  val timeRange = KeyRangeQuery(Seq(DateTime.parse("2013-01-01T00Z").getMillis),
+                                Seq(DateTime.parse("2013-02-01T00Z").getMillis))
+  val queryArgs = QueryArgs("time_group_avg", "trip_distance", Seq("90"), timeRange)
   val ref = DatasetRef("nyc_taxi")
   var startMs = 0L
   var endMs = 0L

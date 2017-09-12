@@ -15,7 +15,8 @@ import org.apache.kafka.clients.producer.ProducerRecord
 
 
 /**
-  * Simple driver to produce time series data into local kafka similar. Data format is similar to prometheus metric sample.
+  * Simple driver to produce time series data into local kafka similar. Data format is similar to
+  * prometheus metric sample.
   * This is for development testing purposes only. TODO: Later evolve this to accept prometheus formats.
   *
   * Run as `java -cp classpath filodb.timeseries.TestTimeseriesProducer numMessages`
@@ -28,7 +29,8 @@ object TestTimeseriesProducer extends StrictLogging {
   val oneBitMask = 0x1
   val twoBitMask = 0x3
   val rand = Random
-  val defaultStartTime = System.currentTimeMillis() - 1000L * 60 * 60 * 24 * rand.nextInt(365 * 5) // start from a random day in the last 5 years
+  // start from a random day in the last 5 years
+  val defaultStartTime = System.currentTimeMillis() - 1000L * 60 * 60 * 24 * rand.nextInt(365 * 5)
   val kafkaServer = "localhost:9092"
 
   def main(args: Array[String]): Unit = {
@@ -71,7 +73,8 @@ object TestTimeseriesProducer extends StrictLogging {
     */
   def timeSeriesData(startTime: Long = defaultStartTime, numInstances: Int = 16): Stream[(JLong, String)] = {
 
-    // TODO For now, generating a (sinusoidal + gaussian) time series. Other generators more closer to real world data can be added later.
+    // TODO For now, generating a (sinusoidal + gaussian) time series. Other generators more
+    // closer to real world data can be added later.
     Stream.from(0).map { n =>
       val dc = n & oneBitMask
       val partition = (n >> 1) & twoBitMask
@@ -81,8 +84,10 @@ object TestTimeseriesProducer extends StrictLogging {
       val timestamp = startTime + (n / numInstances) * 10000 // generate 1 sample every 10s for each instance
       val value = 15 + Math.sin(n + 1) + rand.nextGaussian()
       val kafkaParitionId:JLong = (instance % numKafkaPartitions).toLong
-      // TODO For now shardId is instanceId % partitions. Later on, we will build the algorithm that can use the application name and spread.
+      // TODO For now shardId is instanceId % partitions. Later on, we will build the algorithm
+      // that can use the application name and spread.
 
+      //scalastyle:off line.size.limit
       val sample = s"__name__=heap_usage,dc=DC$dc,app=A$app,partition=P$partition,host=H$host,instance=I$instance   $timestamp   $value"
       logger.trace(s"Producing $sample")
       (kafkaParitionId, s"__name__=heap_usage,dc=DC$dc,app=A$app,partition=P$partition,host=H$host,instance=I$instance   $timestamp   $value")

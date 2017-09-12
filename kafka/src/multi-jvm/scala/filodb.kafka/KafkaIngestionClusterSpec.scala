@@ -140,7 +140,7 @@ abstract class KafkaIngestionClusterSpec extends ClusterSpec(KafkaIngestionClust
     // Both nodes can execute a distributed query to all shards and should get back the same answer
     // Count all the records in every partition in every shard
     // counting a non-partition column... can't count a partition column yet
-    val query = AggregateQuery(datasetRef, 0, QueryArgs("count", Seq("min")), FilteredPartitionQuery(Nil))
+    val query = AggregateQuery(datasetRef, 0, QueryArgs("count", "min"), FilteredPartitionQuery(Nil))
     cluster.coordinatorActor ! query
     val answer = expectMsgClass(classOf[AggregateResponse[Int]])
     answer.elementClass should equal (classOf[Int])

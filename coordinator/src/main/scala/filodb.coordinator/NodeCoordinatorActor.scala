@@ -234,6 +234,7 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
     case ReloadDCA                    => reloadDatasetCoordActors(sender())
     case ClearState(ref, version)     => clearState(ref, version)
     case NodeProtocol.ResetState      => reset(sender())
+    case e: ShardEvent                => // NOP for now
   }
 
   def receive: Receive = queryHandlers orElse ingestHandlers orElse datasetHandlers orElse coordinatorReceive

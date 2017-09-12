@@ -232,14 +232,16 @@ object ShardSubscriptions {
   private[coordinator] final case class SubscribeCoordinator(subscriber: ActorRef) extends SubscribeCommand
 
   /** Ack returned by shard actor to cluster actor on successful coordinator subscribe. */
-  private[coordinator] final case class CoordinatorSubscribed(coordinator: ActorRef, updated: Seq[DatasetRef]) extends SubscriptionProtocol
+  private[coordinator] final case class CoordinatorSubscribed(
+    coordinator: ActorRef, updated: Seq[DatasetRef]) extends SubscriptionProtocol
 
   /** Returned to cluster actor subscribing on behalf of a coordinator or subscriber
     * or to the coordinator subscribing a query actor on create, if the dataset is
     * unrecognized. Similar to [[filodb.coordinator.NodeClusterActor.DatasetUnknown]]
     * but requires the actor being subscribed for tracking.
     */
-  private[coordinator] final case class SubscriptionUnknown(dataset: DatasetRef, subscriber: ActorRef) extends SubscriptionProtocol
+  private[coordinator] final case class SubscriptionUnknown(
+    dataset: DatasetRef, subscriber: ActorRef) extends SubscriptionProtocol
 
   /** Unsubscribes a subscriber. */
   final case class Unsubscribe(subscriber: ActorRef) extends SubscriptionProtocol
@@ -271,6 +273,7 @@ private[coordinator] final case class ShardSubscriptions(subscriptions: Set[Shar
   def subscribers(dataset: DatasetRef): Set[ActorRef] =
     subscription(dataset).map(_.subscribers).getOrElse(Set.empty)
 
+  //scalastyle:off method.name
   def :+(s: ShardSubscription): ShardSubscriptions =
     subscription(s.dataset).map(x => this)
       .getOrElse(copy(subscriptions = this.subscriptions + s))

@@ -88,6 +88,8 @@ class ProjectionSpec extends FunSpec with Matchers {
       resp.rowKeyColIndices should equal (Seq(2))
       resp.rowKeyType should equal (LongKeyType)
       resp.partitionColIndices should equal (Seq(4))
+      resp.isTimeSeries shouldEqual true
+      resp.timestampColumn shouldEqual Some(schema(2))
       names.take(3).map(TupleRowReader).map(resp.rowKeyFunc) should equal (Seq(24L, 28L, 25L))
     }
 
@@ -100,6 +102,8 @@ class ProjectionSpec extends FunSpec with Matchers {
       resp.rowKeyType shouldBe a[CompositeKeyType]
       resp.partitionColIndices should equal (Seq(0, 1))
       resp.partitionColumns should equal (schema take 2)
+      resp.isTimeSeries shouldEqual false
+      resp.timestampColumn shouldEqual None
       resp.partExtractors.toSeq should equal (Seq(UTF8StringFieldExtractor, UTF8StringFieldExtractor))
 
       resp.nonPartitionColumns should equal (schema drop 2)

@@ -20,7 +20,7 @@ import filodb.core._
 import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.memstore.MemStore
 import filodb.core.metadata.{Column, RichProjection, BadArgument => BadArg, WrongNumberArguments}
-import filodb.core.query.{AggregationFunction, CombinerFunction}
+import filodb.core.query.{Aggregate, AggregationFunction, CombinerFunction, NoTimestampColumn}
 import filodb.core.store._
 
 object QueryActor {
@@ -55,12 +55,6 @@ final class QueryActor(colStore: BaseColumnStore,
   implicit val scheduler = monix.execution.Scheduler(context.dispatcher)
   var shardMap = ShardMapper.empty
 
-  private val isTimeSeries = projection.rowKeyColumns.head.columnType match {
-    case LongColumn           => true
-    case TimestampColumn      => true
-    case x: Column.ColumnType => false
-  }
-
   private val memStore: Option[MemStore] = colStore match {
     case m: MemStore => Some(m)
     case o: Any      => None
@@ -87,7 +81,13 @@ final class QueryActor(colStore: BaseColumnStore,
       case MultiPartitionQuery(keys) =>
         val partKeys = keys.map { k => projection.partKey(k :_*) }
         partKeys.groupBy { pk => shardMap.partitionToShardNode(pk.hashCode).shard }
-          .toSeq.map { case (shard, keys) => MultiPartitionScan(keys, shard) }
+          .toSeq
+          .filterNot { case (shard, keys) =>
+            val emptyShard = shardMap.unassigned(shard)
+            if (emptyShard) logger.warn(s"Ignoring ${keys.length} keys from unassigned shard $shard")
+            emptyShard
+          }
+          .map { case (shard, keys) => MultiPartitionScan(keys, shard) }
 
       case FilteredPartitionQuery(filters) =>
         // get limited # of shards if shard key available, otherwise query all shards
@@ -101,18 +101,17 @@ final class QueryActor(colStore: BaseColumnStore,
       case e: Exception => BadArgument(e.getMessage)
     }
 
-  def rowKeyScan(startKey: Seq[Any], endKey: Seq[Any]): RowKeyChunkScan =
-    RowKeyChunkScan(BinaryRecord(projection, startKey), BinaryRecord(projection, endKey))
-
   def validateDataQuery(dataQuery: DataQuery): ChunkScanMethod Or ErrorResponse = {
     Try(dataQuery match {
-      case AllPartitionData =>                AllChunkScan
-      case KeyRangeQuery(startKey, endKey) => rowKeyScan(startKey, endKey)
-      case MostRecentTime(lastMillis) =>
-        require(isTimeSeries, s"Cannot use this query on a non-timeseries schema")
+      case AllPartitionData                => AllChunkScan
+      case KeyRangeQuery(startKey, endKey) => RowKeyChunkScan(projection, startKey, endKey)
+      case MostRecentTime(lastMillis) if projection.isTimeSeries =>
         val timeNow = System.currentTimeMillis
-        rowKeyScan(Seq(timeNow - lastMillis), Seq(timeNow))
+        RowKeyChunkScan(projection, Seq(timeNow - lastMillis), Seq(timeNow))
+      case MostRecentSample if projection.isTimeSeries => LastSampleChunkScan
     }).toOr.badMap {
+      case m: MatchError if !projection.isTimeSeries =>
+        BadQuery(s"Not a time series schema - cannot filter using $dataQuery: " + m.getMessage)
       case m: MatchError => BadQuery(s"Could not parse $dataQuery: " + m.getMessage)
       case e: Exception => BadArgument(e.getMessage)
     }
@@ -157,10 +156,11 @@ final class QueryActor(colStore: BaseColumnStore,
     val originator = sender()
     (for { aggFunc    <- validateFunction(q.query.functionName)
            combinerFunc <- validateCombiner(q.query.combinerName)
-           aggregator <- aggFunc.validate(q.query.args, projection)
+           chunkMethod <- validateDataQuery(q.query.dataQuery)
+           aggregator <- aggFunc.validate(q.query.column, projection.timestampColumn.map(_.name),
+                                          chunkMethod, q.query.args, projection)
            combiner   <- combinerFunc.validate(aggregator, q.query.combinerArgs)
-           partMethods <- validatePartQuery(q.partitionQuery, q.queryOptions)
-           chunkMethod <- validateDataQuery(q.dataQuery.getOrElse(AllPartitionData)) }
+           partMethods <- validatePartQuery(q.partitionQuery, q.queryOptions) }
     yield {
       val queryId = QueryActor.nextQueryId
       implicit val askTimeout = Timeout(q.queryOptions.queryTimeoutSecs.seconds)
@@ -185,6 +185,8 @@ final class QueryActor(colStore: BaseColumnStore,
       case resp: ErrorResponse => originator ! resp
       case WrongNumberArguments(given, expected) => originator ! WrongNumberOfArgs(given, expected)
       case BadArg(reason) => originator ! BadArgument(reason)
+      case NoTimestampColumn =>
+        originator ! BadQuery(s"Cannot use time-based functions on dataset ${projection.datasetRef}")
       case other: Any     => originator ! BadQuery(other.toString)
     }
   }
@@ -194,7 +196,7 @@ final class QueryActor(colStore: BaseColumnStore,
     val originator = sender()
     (for { aggFunc    <- validateFunction(q.query.functionName)
            combinerFunc <- validateCombiner(q.query.combinerName)
-           qSpec = QuerySpec(aggFunc, q.query.args, combinerFunc, q.query.combinerArgs)
+           qSpec = QuerySpec(q.query.column, aggFunc, q.query.args, combinerFunc, q.query.combinerArgs)
            aggregateTask <- colStore.aggregate(projection, q.version, qSpec, q.partMethod, q.chunkScan) }
     yield {
       aggregateTask.runAsync
@@ -223,10 +225,11 @@ final class QueryActor(colStore: BaseColumnStore,
       }
 
     case CurrentShardSnapshot(ds, mapper) =>
+      logger.info(s"Got initial ShardSnapshot $mapper")
       shardMap = mapper
 
     case e: ShardEvent =>
-     shardMap.updateFromEvent(e)
-
+      shardMap.updateFromEvent(e)
+      logger.debug(s"Received ShardEvent $e, updated to $shardMap")
   }
 }
