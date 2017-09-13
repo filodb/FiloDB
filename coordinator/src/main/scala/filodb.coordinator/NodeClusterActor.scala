@@ -64,8 +64,11 @@ object NodeClusterActor {
   final case class UndefinedColumns(undefined: Set[String]) extends ErrorResponse
   final case class BadSchema(message: String) extends ErrorResponse
 
-  // Obtains a copy of the current cluster state
-  case object GetState
+  // Cluste state info commands
+  // Returns a Seq[DatasetRef]
+  case object ListRegisteredDatasets
+  // Returns a ShardMapper object or DatasetUnknown
+  final case class GetShardMap(ref: DatasetRef)
 
   private[coordinator] final case class AddCoordinator(roles: Set[String], addr: Address, coordinator: ActorRef)
 
@@ -216,6 +219,11 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
     case _: MemberEvent => // ignore
   }
 
+  def infoHandler: Receive = LoggingReceive {
+    case ListRegisteredDatasets => sender() ! projections.keys.toSeq
+    case g: GetShardMap         => shardActor.forward(g)
+  }
+
   def shardMapHandler: Receive = LoggingReceive {
     case e: AddCoordinator        => addCoordinator(e)
     case e: SubscribeShardUpdates => subscribe(e.ref, sender())
@@ -354,5 +362,5 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
       (shardActor ? NodeProtocol.ResetState) pipeTo origin
   }
 
-  def receive: Receive = membershipHandler orElse shardMapHandler orElse routerEvents
+  def receive: Receive = membershipHandler orElse shardMapHandler orElse infoHandler orElse routerEvents
 }

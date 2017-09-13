@@ -20,6 +20,7 @@ import filodb.core.metadata.{Column, Dataset}
 private[coordinator] final class ShardCoordinatorActor(strategy: ShardAssignmentStrategy) extends NamingAwareBaseActor {
 
   import ShardSubscriptions._
+  import NodeClusterActor.{GetShardMap, DatasetUnknown}
 
   val shardMappers = new MutableHashMap[DatasetRef, ShardMapper] // when this gets too big
 
@@ -36,6 +37,7 @@ private[coordinator] final class ShardCoordinatorActor(strategy: ShardAssignment
     case GetSubscribers(ds)      => subscribers(ds, sender())
     case GetSubscriptions        => subscriptions(sender())
     case NodeProtocol.ResetState => reset(sender())
+    case GetShardMap(ref)        => getMapper(ref, sender())
   }
 
   /** Selects the `ShardMapper` for the provided dataset, updates the mapper
@@ -111,6 +113,12 @@ private[coordinator] final class ShardCoordinatorActor(strategy: ShardAssignment
         e.subscriber ! CurrentShardSnapshot(e.dataset, mapper)
       case _ =>
         origin ! SubscriptionUnknown(e.dataset, e.subscriber)
+    }
+
+  private def getMapper(ref: DatasetRef, originator: ActorRef): Unit =
+    shardMappers.get(ref) match {
+      case Some(mapper) => originator ! mapper
+      case _            => originator ! DatasetUnknown(ref)
     }
 
   /** Removes the terminated `actor` which can either be a subscriber

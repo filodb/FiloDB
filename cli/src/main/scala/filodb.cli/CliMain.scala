@@ -7,7 +7,7 @@ import javax.activation.UnsupportedDataTypeException
 import scala.concurrent.Await
 import scala.concurrent.duration._
 import scala.language.postfixOps
-import scala.util.{Failure, Success => SSuccess}
+import scala.util.{Try, Failure, Success => SSuccess}
 
 import akka.actor.ActorSystem
 import com.opencsv.CSVWriter
@@ -96,6 +96,8 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
     println("  --host <hostname/IP> [--port ...] --command indexvalues --indexname <index> --dataset <dataset>")
     println("  --host <hostname/IP> [--port ...] [--metricColumn <col>] --dataset <dataset> --promql <query>")
     println("  --host <hostname/IP> [--port ...] --command setup --filename <configFile> | --configPath <path>")
+    println("  --host <hostname/IP> [--port ...] --command list")
+    println("  --host <hostname/IP> [--port ...] --command status --dataset <dataset>")
     println("\nTo change config: pass -Dconfig.file=/path/to/config as first arg or set $FILO_CONFIG_FILE")
     println("  or override any config by passing -Dconfig.path=newvalue as first args")
     println("\nFor detailed debugging, uncomment the TRACE/DEBUG loggers in logback.xml and add these ")
@@ -113,6 +115,12 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
     }
   }
 
+  def getClientAndRef(args: Arguments): (LocalClient, DatasetRef) = {
+    require(args.host.nonEmpty && args.dataset.nonEmpty, "--host and --dataset must be defined")
+    val remote = Client.standaloneClient(system, args.host.get, args.port)
+    (remote, DatasetRef(args.dataset.get))
+  }
+
   def main(args: Arguments) {
     try {
       val version = args.version.getOrElse(0)
@@ -125,7 +133,11 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
           }
 
         case Some("list") =>
-          args.dataset.map(ds => dumpDataset(ds, args.database)).getOrElse(dumpAllDatasets(args.database))
+          args.host.map { server =>
+            listRegisteredDatasets(Client.standaloneClient(system, server, args.port))
+          }.getOrElse {
+            args.dataset.map(ds => dumpDataset(ds, args.database)).getOrElse(dumpAllDatasets(args.database))
+          }
 
         case Some("create") =>
           require(args.dataset.isDefined && args.columns.isDefined, "Need to specify dataset and columns")
@@ -169,17 +181,19 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
           client.truncateDataset(getRef(args), version, timeout)
 
         case Some("indexnames") =>
-          require(args.host.nonEmpty && args.dataset.nonEmpty, "--host and --dataset must be defined")
-          val remote = Client.standaloneClient(system, args.host.get, args.port)
-          val names = remote.getIndexNames(DatasetRef(args.dataset.get))
+          val (remote, ref) = getClientAndRef(args)
+          val names = remote.getIndexNames(ref)
           names.foreach(println)
 
         case Some("indexvalues") =>
-          require(args.host.nonEmpty && args.dataset.nonEmpty, "--host and --dataset must be defined")
           require(args.indexName.nonEmpty, "--indexName required")
-          val remote = Client.standaloneClient(system, args.host.get, args.port)
-          val values = remote.getIndexValues(DatasetRef(args.dataset.get), args.indexName.get)
+          val (remote, ref) = getClientAndRef(args)
+          val values = remote.getIndexValues(ref, args.indexName.get)
           values.foreach(println)
+
+        case Some("status") =>
+          val (remote, ref) = getClientAndRef(args)
+          dumpShardStatus(remote, ref)
 
         case Some("setup") =>
           require(args.host.nonEmpty, "--host must be defined")
@@ -305,6 +319,25 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
       case e: ErrorResponse =>
         println(s"Errors setting up dataset $dataset: $e")
         exitCode = 2
+    }
+  }
+
+  def listRegisteredDatasets(client: LocalClient): Unit = {
+    client.getDatasets().foreach(println)
+  }
+
+  val ShardFormatStr = "%5s\t%20s\t\t%s"
+
+  def dumpShardStatus(client: LocalClient, ref: DatasetRef): Unit = {
+    client.getShardMapper(ref) match {
+      case Some(map) =>
+        println(ShardFormatStr.format("Shard", "Status", "Address"))
+        map.shardValues.zipWithIndex.foreach { case ((ref, status), idx) =>
+          println(ShardFormatStr.format(idx, status,
+                                        Try(ref.path.address).getOrElse("")))
+        }
+      case _ =>
+        println(s"Unable to obtain status for dataset $ref, has it been setup yet?")
     }
   }
 

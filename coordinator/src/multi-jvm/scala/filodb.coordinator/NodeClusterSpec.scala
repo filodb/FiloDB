@@ -85,6 +85,11 @@ abstract class NodeClusterSpec extends ClusterSpec(NodeClusterSpecConfig) {
       clusterActor ! SubscribeShardUpdates(ref)
       expectMsg(DatasetUnknown(ref))
 
+      clusterActor ! ListRegisteredDatasets
+      expectMsg(Nil)
+      clusterActor ! GetShardMap(ref)
+      expectMsg(DatasetUnknown(ref))
+
       clusterActor ! SetupDataset(DatasetRef("noColumns"), Seq("first"), spec, noOpSource)
       expectMsg(DatasetUnknown(DatasetRef("noColumns")))
     }
@@ -156,13 +161,21 @@ abstract class NodeClusterSpec extends ClusterSpec(NodeClusterSpecConfig) {
     enterBarrier("second-node-joined")
 
     runOn(first) {
-
       clusterActor ! SubscribeShardUpdates(ref)
       expectMsgPF(3.seconds.dilated) {
         case CurrentShardSnapshot(ref, map) =>
           map.numAssignedShards shouldEqual 2 // TODO not 4
           map.allNodes.size shouldEqual 1 // only one coord created in entire multi test
       }
+    }
+
+    clusterActor ! ListRegisteredDatasets
+    expectMsg(Seq(ref))
+    clusterActor ! GetShardMap(ref)
+    expectMsgPF(3.seconds.dilated) {
+      case map: ShardMapper =>
+        map.numAssignedShards shouldEqual 2 // TODO not 4
+        map.allNodes.size shouldEqual 1 // only one coord created in entire multi test
     }
 
     enterBarrier("second-node-update-received")
