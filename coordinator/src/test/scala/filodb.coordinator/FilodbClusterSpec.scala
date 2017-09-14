@@ -14,7 +14,6 @@ class FilodbClusterSpec extends AkkaSpec {
       cluster.isInitialized should be (false)
       cluster.isJoined should be (false)
       cluster.isTerminated should be (false)
-      cluster.state.members.size shouldEqual 0
     }
     "load and setup basic components successfully" in {
       val tracer = cluster.kamonInit(ClusterRole.Server)
@@ -25,10 +24,6 @@ class FilodbClusterSpec extends AkkaSpec {
       cluster.join()
       awaitCond(cluster.isJoined, max = cluster.settings.DefaultTaskTimeout)
       cluster.isTerminated should be (false)
-    }
-    "provide CurrentClusterState" in {
-      cluster.state.leader.isDefined should be (true)
-      cluster.state.members.size should be (1)
     }
     "setup cluster singleton and manager successfully" in {
       import ActorName._

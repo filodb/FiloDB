@@ -3,6 +3,7 @@ package filodb.coordinator
 import akka.actor.{Actor, ActorRef, Props}
 import akka.testkit.TestProbe
 import com.typesafe.config.ConfigFactory
+
 import filodb.coordinator.NodeClusterActor.{DatasetResourceSpec, IngestionSource, SetupDataset}
 import filodb.core.DatasetRef
 import filodb.core.metadata.Dataset
@@ -28,8 +29,8 @@ class ShardCoordinatorActorSpec extends AkkaSpec {
   val thirdCoordinator = node2.actorOf(Props(new TestCoordinator(self)), CoordinatorName)
 
   override def afterAll(): Unit = {
-    node1.shutdown()
-    node2.shutdown()
+    node1.terminate()
+    node2.terminate()
     super.afterAll()
   }
 
@@ -37,10 +38,6 @@ class ShardCoordinatorActorSpec extends AkkaSpec {
     val strategy = new DefaultShardAssignmentStrategy
     val shardActor = system.actorOf(Props(new ShardCoordinatorActor(strategy)))
 
-    "build the ShardStatusActor path for a given address" in {
-      val path = ActorName.shardStatusPath(shardActor.path.address)
-      path.toString.contains(ClusterSingletonProxyPath) shouldBe true
-    }
     "subscribe self-node coordinator, no datasets created yet" in {
       shardActor ! SubscribeCoordinator(localCoordinator)
       expectMsgPF() {

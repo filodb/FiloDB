@@ -3,13 +3,11 @@ package filodb.coordinator
 import scala.concurrent.duration._
 import scala.concurrent.Future
 import scala.language.existentials
-
-import akka.actor.{ActorRef, Props}
+import akka.actor.{Actor, ActorRef, Props}
 import akka.event.LoggingReceive
 import akka.pattern.ask
 import akka.util.Timeout
 import kamon.Kamon
-
 import filodb.core._
 import filodb.core.memstore.IngestRecord
 
@@ -90,7 +88,7 @@ class IngestProtocol(clusterActor: ActorRef,
       context.parent ! IngestionErr(s"Error from $sender, " + e.toString)
   }
 
-  def reading: Receive = LoggingReceive {
+  def reading: Receive = LoggingReceive({
     case MoreRows(shardNum, records) if records.nonEmpty =>
       val nodeRef = mapper.coordForShard(shardNum)
       // We forward it so that the one who sent us MoreRows will get back the Ack message directly
@@ -98,7 +96,7 @@ class IngestProtocol(clusterActor: ActorRef,
       nodeRef.forward(IngestionCommands.IngestRows(ref, version, shardNum, records))
       rowsIngested.increment(records.length)
       shardHist.record(shardNum)
-  } orElse shardUpdates orElse errorCatcher
+  }: Receive) orElse shardUpdates orElse errorCatcher
 
   def receive: Receive = initializing
 }

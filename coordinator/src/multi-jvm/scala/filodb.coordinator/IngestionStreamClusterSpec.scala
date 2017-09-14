@@ -1,13 +1,13 @@
 package filodb.coordinator
 
 import scala.concurrent.duration._
+
 import akka.actor.ActorRef
 import akka.remote.testkit.MultiNodeConfig
 import com.typesafe.config.ConfigFactory
+
 import filodb.core._
 import filodb.core.metadata.RichProjection
-
-import scala.util.Try
 
 object IngestionStreamClusterSpecConfig extends MultiNodeConfig {
   // register the named roles (nodes) of the test

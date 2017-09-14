@@ -75,8 +75,8 @@ object ActorName {
   /* The actor name of the child singleton actor */
   val NodeClusterName = "nodecluster"
   val SingletonMgrName = "singleton"
-  val NodeClusterProxyName = "nodeClusterProxy"
-  val ShardName = "shard-subscriptions"
+  val NodeClusterProxyName = "singletonProxy"
+  val ShardName = "shard-coordinator"
 
   /** MemstoreCoord Worker name prefix. Naming pattern is prefix-datasetRef.dataset */
   val Ingestion = "ingestion"
@@ -84,12 +84,7 @@ object ActorName {
   val Query = "query"
 
   /* Actor Paths */
-  val ClusterSingletonProxyPath = s"/user/$NodeGuardianName/$SingletonMgrName/$NodeClusterName"
-
   def nodeCoordinatorPath(addr: Address): ActorPath =
     RootActorPath(addr) / "user" / NodeGuardianName / CoordinatorName
-
-  private[filodb] def shardStatusPath(address: Address): ActorPath =
-    RootActorPath(address, s"/$ClusterSingletonProxyPath/$ShardName")
 
 }

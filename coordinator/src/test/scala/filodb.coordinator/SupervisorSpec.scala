@@ -15,7 +15,8 @@ class SupervisorSpec extends AkkaSpec {
 
   import NodeProtocol._
 
-  lazy val settings = new FilodbSettings(system.settings.config)
+  private val filoCluster = FilodbCluster(system)
+  private val settings = new FilodbSettings(system.settings.config)
   import settings._
 
   /* Set all as lazy to test same startup as users. */
@@ -31,7 +32,7 @@ class SupervisorSpec extends AkkaSpec {
   private lazy val memStore = new TimeSeriesMemStore(config)
   private lazy val assignmentStrategy = new DefaultShardAssignmentStrategy
   private lazy val coordinatorProps = NodeCoordinatorActor.props(metaStore, memStore, columnStore, cluster.selfAddress, config)
-  private lazy val guardianProps = NodeGuardian.props(settings, cluster, metaStore, memStore, columnStore, assignmentStrategy)
+  private lazy val guardianProps = NodeGuardian.props(filoCluster, cluster, metaStore, memStore, columnStore, assignmentStrategy)
   private lazy val cluster = Cluster(system)
 
   "NodeGuardian" must {

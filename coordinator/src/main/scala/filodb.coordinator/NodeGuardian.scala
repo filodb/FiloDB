@@ -1,14 +1,14 @@
 package filodb.coordinator
 
 import akka.actor._
-import akka.cluster.Cluster
-import akka.contrib.pattern.{ClusterSingletonManager, ClusterSingletonProxy}
-
+import akka.cluster.{Cluster, Member}
+import akka.cluster.ClusterEvent.{InitialStateAsEvents, MemberUp}
+import akka.cluster.singleton._
 import filodb.core.memstore.MemStore
 import filodb.core.store.{ColumnStore, MetaStore}
 
 /** Supervisor for all child actors and their actors on the node. */
-final class NodeGuardian(val settings: FilodbSettings,
+final class NodeGuardian(extension: FilodbCluster,
                          cluster: Cluster,
                          metaStore: MetaStore,
                          memStore: MemStore,
@@ -19,9 +19,12 @@ final class NodeGuardian(val settings: FilodbSettings,
   import NodeProtocol._, ActorName._
   import context.dispatcher
 
-  private val failureDetector = cluster.failureDetector
+  protected val settings: FilodbSettings = extension.settings
+
+  private lazy val failureDetector = cluster.failureDetector
 
   override def preStart(): Unit = {
+    cluster.subscribe(self, initialStateMode = InitialStateAsEvents, classOf[MemberUp])
     //context.system.eventStream.subscribe(self, classOf[DeadLetter]) // todo in separate worker
   }
 
@@ -34,9 +37,11 @@ final class NodeGuardian(val settings: FilodbSettings,
 
   override def preRestart(reason: Throwable, message: Option[Any]): Unit = {
     super.preStart()
+    // coming soon
   }
 
   def guardianReceive: Actor.Receive = {
+    case MemberUp(member)          => initialized(member)
     case CreateTraceLogger(role)   => startKamon(role, sender())
     case CreateCoordinator         => createCoordinator(sender())
     case e: CreateClusterSingleton => createProxy(e, sender())
@@ -45,7 +50,12 @@ final class NodeGuardian(val settings: FilodbSettings,
 
   override def receive: Actor.Receive = guardianReceive orElse super.receive
 
-    /** Idempotent. Cli does not start metrics. */
+  private def initialized(member: Member): Unit =
+    if (member.address == cluster.selfAddress) {
+      extension._isJoined.set(true)
+    }
+
+  /** Idempotent. Cli does not start metrics. */
   private def startKamon(role: ClusterRole, requester: ActorRef): Unit = {
     role match {
       case ClusterRole.Cli =>
@@ -83,12 +93,14 @@ final class NodeGuardian(val settings: FilodbSettings,
     */
   private def createProxy(e: CreateClusterSingleton, requester: ActorRef): Unit = {
     if (e.withManager && context.child(SingletonMgrName).isEmpty) {
-      val mgr = context.actorOf(ClusterSingletonManager.props(
-        singletonProps = NodeClusterActor.props(settings, cluster, e.role, metaStore, assignmentStrategy),
-        singletonName = NodeClusterName,
-        terminationMessage = PoisonPill,
-        role = Some(e.role)),
-        name = SingletonMgrName)
+      val mgr = context.actorOf(
+        ClusterSingletonManager.props(
+          singletonProps = NodeClusterActor.props(settings, cluster, e.role, metaStore, assignmentStrategy),
+          terminationMessage = PoisonPill,
+          settings = ClusterSingletonManagerSettings(context.system)
+            .withRole(e.role)
+            .withSingletonName(SingletonMgrName)),
+          name = NodeClusterName)
 
       context watch mgr
       logger.info(s"Created ClusterSingletonManager for NodeClusterActor [mgr=$mgr, role=${e.role}]")
@@ -104,12 +116,12 @@ final class NodeGuardian(val settings: FilodbSettings,
     */
   private def clusterActor(role: String): ActorRef = {
     val proxy = context.actorOf(ClusterSingletonProxy.props(
-      singletonPath = ClusterSingletonProxyPath,
-      role = Some(role)),
+      singletonManagerPath = s"/user/$NodeGuardianName/$NodeClusterName",
+      settings = ClusterSingletonProxySettings(context.system).withRole(role)),
       name = NodeClusterProxyName)
 
     context watch proxy
-    logger.info(s"Created ClusterSingletonProxy $proxy for [role=$role, path=$ClusterSingletonProxyPath")
+    logger.info(s"Created ClusterSingletonProxy [proxy=$proxy, role=$role]")
     proxy
   }
 
@@ -120,13 +132,13 @@ final class NodeGuardian(val settings: FilodbSettings,
 
 private[filodb] object NodeGuardian {
 
-  def props(settings: FilodbSettings,
+  def props(extension: FilodbCluster,
             cluster: Cluster,
             metaStore: MetaStore,
             memStore: MemStore,
             columnStore: ColumnStore,
             assignmentStrategy: ShardAssignmentStrategy): Props =
-    Props(new NodeGuardian(settings, cluster, metaStore, memStore, columnStore, assignmentStrategy))
+    Props(new NodeGuardian(extension, cluster, metaStore, memStore, columnStore, assignmentStrategy))
 }
 
 /** Management and task actions on the local node.

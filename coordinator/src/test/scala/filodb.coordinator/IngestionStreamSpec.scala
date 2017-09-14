@@ -39,25 +39,27 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem)
 
   private val within = 5.seconds.dilated
   private val cluster = FilodbCluster(system)
-  private val coordinatorActor = cluster.coordinatorActor
   cluster.join()
+
+  private val coordinatorActor = cluster.coordinatorActor
   private val clusterActor = cluster.clusterSingletonProxy("worker", withManager = true)
   private val memStore = cluster.memStore
   private val metaStore = cluster.metaStore
-
-  metaStore.initialize().futureValue
-  metaStore.clearAllData().futureValue
-  val ref = projection6.datasetRef
-  metaStore.newDataset(dataset6).futureValue shouldEqual Success
-  schema.foreach { col => metaStore.newColumn(col, ref).futureValue shouldEqual Success }
-
-  val dataset33 = dataset3.withName("gdelt2")
-  metaStore.newDataset(dataset33).futureValue shouldEqual Success
-  val proj2 = RichProjection(dataset33, schema)
-  val ref2 = proj2.datasetRef
-  schema.foreach { col => metaStore.newColumn(col, ref2).futureValue shouldEqual Success }
+  private val dataset33 = dataset3.withName("gdelt2")
+  private val proj2 = RichProjection(dataset33, schema)
+  private val ref2 = proj2.datasetRef
 
   private var shardMap: ShardMapper = ShardMapper.empty
+
+  override def beforeAll(): Unit = {
+    metaStore.initialize().futureValue
+    metaStore.clearAllData().futureValue
+    val ref = projection6.datasetRef
+    metaStore.newDataset(dataset6).futureValue shouldEqual Success
+    schema.foreach { col => metaStore.newColumn(col, ref).futureValue shouldEqual Success }
+    metaStore.newDataset(dataset33).futureValue shouldEqual Success
+    schema.foreach { col => metaStore.newColumn(col, ref2).futureValue shouldEqual Success }
+  }
 
   override def afterEach(): Unit = {
     memStore.reset()
@@ -104,12 +106,12 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem)
   // happens until the MemStoreCoordActor ingests.   When the failure occurs, the cluster state is updated
   // but then we need to query for it.
  it("should fail if cannot parse input RowReader during coordinator ingestion") {
-    setup(dataset33, "/GDELT-sample-test-errors.csv", rowsToRead = 5, None)
-    expectMsgPF(within) {
-      case IngestionError(ds, shard, ex) =>
-        ds shouldBe ref2
-        ex shouldBe a[NumberFormatException]
-    }
+   setup(dataset33, "/GDELT-sample-test-errors.csv", rowsToRead = 5, None)
+   expectMsgPF(within) {
+     case IngestionError(ds, shard, ex) =>
+       ds shouldBe ref2
+       ex shouldBe a[NumberFormatException]
+   }
 
     // Sending this will intentionally raise: java.lang.IllegalArgumentException: dataset gdelt / shard 0 not setup
     // Note: this relies on the MemStoreCoordActor not disappearing after errors.

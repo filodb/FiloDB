@@ -25,10 +25,8 @@ object GlobalConfig {
     // and only the below works.
     // filodb-defaults.conf sets cluster.roles=["worker"] as the default
     val defaultsFromUrl = ConfigFactory.parseURL(getClass.getResource("/filodb-defaults.conf"))
-    val clusterFromUrl = ConfigFactory.parseURL(getClass.getResource("/cluster-reference.conf"))
     ConfigFactory.defaultOverrides.withFallback(customConfig) // spark overrides cluster.roles, cli doesn't
                  .withFallback(defaultsFromUrl)
-                 .withFallback(clusterFromUrl)
                  .withFallback(ConfigFactory.defaultReference())
                  .resolve()
   }

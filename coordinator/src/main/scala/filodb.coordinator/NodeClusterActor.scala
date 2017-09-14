@@ -94,11 +94,16 @@ object NodeClusterActor {
             assignmentStrategy: ShardAssignmentStrategy): Props =
     Props(new NodeClusterActor(settings, cluster, nodeCoordRole, metaStore, assignmentStrategy))
 
-  class RemoteAddressExtensionImpl(system: ExtendedActorSystem) extends Extension {
+  class RemoteAddressExtension(system: ExtendedActorSystem) extends Extension {
     def address: Address = system.provider.getDefaultAddress
   }
 
-  object RemoteAddressExtension extends ExtensionKey[RemoteAddressExtensionImpl]
+  object RemoteAddressExtension extends ExtensionId[RemoteAddressExtension] with ExtensionIdProvider {
+    override def lookup: ExtensionId[RemoteAddressExtension]= RemoteAddressExtension
+    override def createExtension(system: ExtendedActorSystem): RemoteAddressExtension =
+      new RemoteAddressExtension(system)
+    override def get(system: ActorSystem): RemoteAddressExtension = super.get(system)
+  }
 
 }
 

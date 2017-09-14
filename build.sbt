@@ -106,7 +106,7 @@ lazy val stress = project
   .dependsOn(spark)
 
 val cassDriverVersion = "3.0.2"
-val akkaVersion    = "2.3.15"
+val akkaVersion    = "2.5.4"
 val sparkVersion   = "2.0.0"
 
 lazy val extraRepos = Seq(

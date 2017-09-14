@@ -19,31 +19,23 @@ class FilodbClusterNodeSpec extends RunnableSpec with ScalaFutures {
     FiloServerApp.main(Array.empty)
 
     "join the cluster" in {
-      TestKit.awaitCond(FiloServerApp.cluster.isJoined, 50.seconds)
+      TestKit.awaitCond(FiloServerApp.cluster.isJoined, 10.seconds)
     }
     "create and setup the coordinatorActor and clusterActor" in {
       val coordinatorActor = FiloServerApp.coordinatorActor
       val clusterActor = FiloServerApp.clusterActor
 
       implicit val system = FiloServerApp.system
-      val shardPath = ActorName.shardStatusPath(FiloServerApp.cluster.selfAddress)
-      val shardActor = system.actorSelection(shardPath).resolveOne(2.seconds).futureValue
       val probe = TestProbe()
-      probe.send(coordinatorActor, CoordinatorRegistered(clusterActor, shardActor))
+      probe.send(coordinatorActor, CoordinatorRegistered(clusterActor, TestProbe().ref))
       probe.send(coordinatorActor, MiscCommands.GetClusterActor)
       probe.expectMsgPF() {
         case Some(ref: ActorRef) => ref shouldEqual clusterActor
       }
-
-      probe.send(clusterActor, GetRefs("worker"))
-      probe.expectMsgPF(2.seconds) {
-        case refs =>
-          refs.asInstanceOf[Set[ActorRef]].head shouldEqual FiloServerApp.coordinatorActor
-      }
     }
     "shutdown cleanly" in {
       FiloServerApp.shutdown()
-      TestKit.awaitCond(FiloServerApp.cluster.isTerminated, 5.seconds)
+      TestKit.awaitCond(FiloServerApp.cluster.isTerminated, 3.seconds)
     }
   }
 }
@@ -60,13 +52,14 @@ object FiloServerApp extends FilodbClusterNode with StrictLogging {
 
   override val cluster = FilodbCluster(system)
 
-  val clusterActor = cluster.clusterSingletonProxy(roleName, withManager = true)
-  cluster.joinSeedNodes()
+  lazy val clusterActor = cluster.clusterSingletonProxy(roleName, withManager = true)
 
   lazy val client = new LocalClient(coordinatorActor)
 
   def main(args: Array[String]): Unit = {
+    clusterActor
     coordinatorActor
+    cluster.joinSeedNodes()
     cluster.kamonInit(role)
     scala.concurrent.Await.result(metaStore.initialize(), cluster.settings.InitializationTimeout)
     cluster._isInitialized.set(true)

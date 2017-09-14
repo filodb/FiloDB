@@ -66,7 +66,6 @@ final class FilodbCluster(system: ExtendedActorSystem) extends Extension with St
   private[coordinator] lazy val cluster = {
     val _cluster = Cluster(system)
     logger.info(s"Cluster node starting on ${_cluster.selfAddress}")
-    _cluster.registerOnMemberUp(joined())
     _cluster
   }
 
@@ -99,7 +98,7 @@ final class FilodbCluster(system: ExtendedActorSystem) extends Extension with St
     * All actions are idempotent. It manages the underlying lifecycle of all node actors.
     */
   private lazy val guardian = system.actorOf(NodeGuardian.props(
-    settings, cluster, metaStore, memStore, columnStore, assignmentStrategy), guardianName)
+    this, cluster, metaStore, memStore, columnStore, assignmentStrategy), guardianName)
 
   /** Idempotent. */
   def kamonInit(role: ClusterRole): ActorRef =
@@ -157,8 +156,8 @@ final class FilodbCluster(system: ExtendedActorSystem) extends Extension with St
     * @param role the [[NodeRoleAwareConfiguration.roleName]]
     *
     * @param withManager depending on the [[ClusterRole]], whether or not to create
-    *                    the [[akka.contrib.pattern.ClusterSingletonManager]]
-    *                    when creating the [[akka.contrib.pattern.ClusterSingletonProxy]]
+    *                    the [[akka.cluster.singleton.ClusterSingletonManager]]
+    *                    when creating the [[akka.cluster.singleton.ClusterSingletonProxy]]
     */
   private[filodb] def clusterSingletonProxy(role: String, withManager: Boolean): ActorRef =
     _clusterActor.get.getOrElse {
@@ -184,20 +183,12 @@ final class FilodbCluster(system: ExtendedActorSystem) extends Extension with St
     */
   def isTerminating: Boolean = _isTerminating.get
 
-  private def joined(): Unit = {
-    logger.debug(s"Members size ${state.members.size}")
-    state.members.collectFirst {
-      case m if m.address == cluster.selfAddress && m.status == MemberStatus.Up =>
-        _isJoined.set(true)
-    }
-  }
-
   /** Idempotent. */
   def shutdown(): Unit = {
     if (_isTerminated.compareAndSet(false, true)) {
       import NodeProtocol.GracefulShutdown
       import akka.pattern.gracefulStop
-      import system.dispatcher
+
 
       _isTerminating.set(true)
       logger.info("Starting shutdown")
@@ -207,12 +198,15 @@ final class FilodbCluster(system: ExtendedActorSystem) extends Extension with St
       try {
         cluster.leave(selfAddress)
         Await.result(gracefulStop(guardian, GracefulStopTimeout, GracefulShutdown), GracefulStopTimeout)
-        system.shutdown()
+        system.terminate foreach { _ =>
+          logger.info("Actor system was shut down")
+        }
+
         columnStore.shutdown()
         metaStore.shutdown()
         threadPool.shutdown()
       } catch { case NonFatal(e) =>
-        system.shutdown()
+        system.terminate()
         threadPool.shutdown()
       } finally {
         _isJoined.set(false)
