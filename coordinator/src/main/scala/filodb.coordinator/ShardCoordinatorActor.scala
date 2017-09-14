@@ -28,12 +28,13 @@ private[coordinator] final class ShardCoordinatorActor(strategy: ShardAssignment
 
   override def receive: Actor.Receive = LoggingReceive {
     case e: AddDataset           => addDataset(e, sender())
-    case e: SubscribeCoordinator => subscribe(e, sender())
+    case e: AddMember            => addNode(e, sender())
     case e: Subscribe            => subscribe(e, sender())
     case e: ShardEvent           => publish(e, sender())
     case RemoveSubscription(ds)  => remove(ds)
     case Terminated(actor)       => terminated(actor)
     case Unsubscribe(actor)      => unsubscribe(actor)
+    case RemoveMember(ref)       => removeMember(ref)
     case GetSubscribers(ds)      => subscribers(ds, sender())
     case GetSubscriptions        => subscriptions(sender())
     case NodeProtocol.ResetState => reset(sender())
@@ -67,7 +68,7 @@ private[coordinator] final class ShardCoordinatorActor(strategy: ShardAssignment
         e.ackTo ! NodeClusterActor.DatasetExists(e.setup.ref)
       case _ =>
 
-        val added = strategy.datasetAdded(e.setup.ref, e.setup.resources, shardMappers)
+        val added = strategy.datasetAdded(e.setup.ref, e.coordinators, e.setup.resources, shardMappers)
 
         shardMappers(added.ref) = added.mapper
         subscriptions :+= ShardSubscription(added.ref, e.coordinators)
@@ -77,21 +78,22 @@ private[coordinator] final class ShardCoordinatorActor(strategy: ShardAssignment
     }
 
   /** Shard assignment strategy adds the new node and returns the `ShardsAssigned`.
-    * The set up local `ShardMapper`s are updated. Sends `CoordinatorSubscribed`
-    * to initiate [[filodb.coordinator.NodeClusterActor.sendDatasetSetup]].
-    * The new Coordinator is subscribed to all registered subscriptions (datasets).
+    * The set up local `ShardMapper`s are updated. Sends `CoordinatorAdded`
+    * to initiate [[filodb.coordinator.NodeClusterActor.sendDatasetSetup]]
+    * and start ingestion on any added shards.  Also the node added is watched for termination.
     *
     * INTERNAL API.
     */
-  private def subscribe(e: SubscribeCoordinator, origin: ActorRef): Unit = {
-    val assigned = strategy.nodeAdded(e.subscriber, shardMappers)
+  private def addNode(e: AddMember, origin: ActorRef): Unit = {
+    logger.info(s"Adding node ${e.coordinator}")
+    context watch e.coordinator
+    val assigned = strategy.nodeAdded(e.coordinator, shardMappers)
 
     assigned.shards foreach { dshards =>
       shardMappers(dshards.ref) = dshards.mapper
-      subscribe(e.subscriber, dshards.ref)
     }
 
-    origin ! CoordinatorSubscribed(e.subscriber, assigned.datasets)
+    origin ! CoordinatorAdded(e.coordinator, assigned.shards)
   }
 
   /** If the mapper for the provided `datasetRef` has been added, sends an initial
@@ -129,13 +131,19 @@ private[coordinator] final class ShardCoordinatorActor(strategy: ShardAssignment
   def terminated(actor: ActorRef): Unit = {
     unsubscribe(actor)
 
-    if (isCoordinator(actor)) {
-      val shards = strategy.nodeRemoved(actor, shardMappers).shards
+    if (isCoordinator(actor)) removeMember(actor)
+  }
 
-      for {
-        (ds, mapper)         <- shardMappers
-        (shards, updatedMap) <- shards.get(ds)
-      } shardMappers(ds) = updatedMap
+  /** Removes a Node coordinator/member, execute any resulting commands, update maps */
+  private def removeMember(node: ActorRef): Unit = {
+    val shards = strategy.nodeRemoved(node, shardMappers).shards
+    // TODO: any commands to send out?
+    for {
+      (ds, mapper)         <- shardMappers
+      (shards, updatedMap) <- shards.get(ds)
+    } {
+      shardMappers(ds) = updatedMap
+      logger.debug(s"ShardMap for $ds updated to $updatedMap")
     }
   }
 
@@ -193,11 +201,13 @@ private[coordinator] final class ShardCoordinatorActor(strategy: ShardAssignment
   private def reset(origin: ActorRef): Unit = {
     shardMappers.clear()
     subscriptions = subscriptions.clear
+    strategy.reset()
     origin ! NodeProtocol.StateReset
   }
 }
 
 object ShardSubscriptions {
+  import ShardAssignmentStrategy.DatasetShards
 
   final case class Subscribers(subscribers: Set[ActorRef], dataset: DatasetRef)
 
@@ -213,7 +223,7 @@ object ShardSubscriptions {
                                                   ) extends ShardAssignmentProtocol
 
   /** Ack by ShardStatusActor to it's parent, [[filodb.coordinator.NodeClusterActor]],
-    * upon it sending `SubscribeCoordinator`. Command to start ingestion for dataset.
+    * upon it sending `AddMember`. Command to start ingestion for dataset.
     */
   private[coordinator] final case class DatasetAdded(dataset: Dataset,
                                                      columns: Seq[Column],
@@ -222,9 +232,7 @@ object ShardSubscriptions {
                                                      ackTo: ActorRef
                                                     ) extends ShardAssignmentProtocol
 
-  sealed trait SubscribeCommand extends SubscriptionProtocol {
-    def subscriber: ActorRef
-  }
+  sealed trait ShardCoordCommand extends SubscriptionProtocol
 
   /** Usable by FiloDB clients.
     * Internally used by Coordinators to subscribe a new Query actor to it's dataset.
@@ -232,16 +240,17 @@ object ShardSubscriptions {
     * @param subscriber the actor subscribing to the `ShardMapper` status updates
     * @param dataset    the `DatasetRef` key for the `ShardMapper`
     */
-  final case class Subscribe(subscriber: ActorRef, dataset: DatasetRef) extends SubscribeCommand
+  final case class Subscribe(subscriber: ActorRef, dataset: DatasetRef) extends ShardCoordCommand
 
-  /** Used only by the cluster actor to subscribe coordinators to all datasets.
+  /** Used only by the cluster actor to add/remove coordinators to all datasets and update shard assignments
     * INTERNAL API.
     */
-  private[coordinator] final case class SubscribeCoordinator(subscriber: ActorRef) extends SubscribeCommand
+  private[coordinator] final case class AddMember(coordinator: ActorRef) extends ShardCoordCommand
+  private[coordinator] final case class RemoveMember(coordinator: ActorRef) extends ShardCoordCommand
 
   /** Ack returned by shard actor to cluster actor on successful coordinator subscribe. */
-  private[coordinator] final case class CoordinatorSubscribed(
-    coordinator: ActorRef, updated: Seq[DatasetRef]) extends SubscriptionProtocol
+  private[coordinator] final case class CoordinatorAdded(
+    coordinator: ActorRef, newShards: Seq[DatasetShards]) extends SubscriptionProtocol
 
   /** Returned to cluster actor subscribing on behalf of a coordinator or subscriber
     * or to the coordinator subscribing a query actor on create, if the dataset is

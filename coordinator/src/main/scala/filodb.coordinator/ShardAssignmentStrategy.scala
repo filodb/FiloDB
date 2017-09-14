@@ -20,8 +20,11 @@ trait ShardAssignmentStrategy {
   def nodeRemoved(coordRef: ActorRef, shardMaps: CMap[DatasetRef, ShardMapper]): NodeRemoved
 
   def datasetAdded(dataset: DatasetRef,
+                   coords: Set[ActorRef],
                    resources: DatasetResourceSpec,
                    shardMaps: CMap[DatasetRef, ShardMapper]): DatasetAdded
+
+  def reset(): Unit
 }
 
 /** Local node commands returned by the [[filodb.coordinator.ShardAssignmentStrategy]].
@@ -107,8 +110,11 @@ class DefaultShardAssignmentStrategy extends ShardAssignmentStrategy with Strict
   }
 
   def datasetAdded(dataset: DatasetRef,
+                   coords: Set[ActorRef],
                    resources: DatasetResourceSpec,
                    shardMaps: CMap[DatasetRef, ShardMapper]): DatasetAdded = {
+    // Initialize shardsPerCoord as needed... esp for tests when nodeAdded might not be called
+    (coords -- shardsPerCoord.keySet).foreach { c => shardsPerCoord(c) = 0 }
 
     shardToNodeRatio(dataset) = resources.numShards / resources.minNumNodes.toDouble
     logger.info(s"shardToNodeRatio for $dataset is ${shardToNodeRatio(dataset)}")
@@ -142,12 +148,26 @@ class DefaultShardAssignmentStrategy extends ShardAssignmentStrategy with Strict
       val shardsToAdd = map.unassignedShards.take(addHowMany)
       logger.info(s"Assigning [shards=$shardsToAdd, dataset=$dataset, node=$coordinator.")
       shardsPerCoord(coordinator) += shardsToAdd.length
+
+      // We need to assign a temporary state of BeingAssigned to the shards we will add.  This prevents
+      // future calls of addShards() from assigning the same shards again and again, and also lets
+      // users know that an assignment is in progress.
+      // TODO: broadcast this event out to subscribers?
+      shardsToAdd.foreach { shard =>
+        val event = ShardAssignmentStarted(dataset, shard, coordinator)
+        map.updateFromEvent(event)
+      }
       AddShards(addHowMany, coordinator, shardsToAdd)
 
     } else {
       logger.warn(s"Unable to add shards for dataset $dataset to coord $coordinator.")
       AddShards(0, coordinator, Seq.empty)
     }
+  }
+
+  def reset(): Unit = {
+    shardToNodeRatio.clear()
+    shardsPerCoord.clear()
   }
 }
 

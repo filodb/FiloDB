@@ -108,7 +108,7 @@ abstract class IngestionStreamClusterSpec extends ClusterSpec(IngestionStreamClu
 
       receiveWhile(messages = resources.numShards) {
         case e: IngestionStarted =>
-          e.shard should (equal (0) or equal (1))
+          e.shard should be < (4)
           mapper.updateFromEvent(e)
       }
 
@@ -131,8 +131,7 @@ abstract class IngestionStreamClusterSpec extends ClusterSpec(IngestionStreamClu
       answer.elements
     }
 
-    // Note does only valid shards, was: Array(99)
-    awaitCond(func sameElements Array(62), max = durationForCI, interval = durationForCI / 3)
+    awaitCond(func sameElements Array(99), max = durationForCI, interval = durationForCI / 3)
 
     enterBarrier("finished")
   }

@@ -147,6 +147,7 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
   import NodeClusterActor._, ActorName._, ShardSubscriptions._
   import settings.ResolveActorTimeout
   import akka.pattern.{ask, pipe}
+  import ShardAssignmentStrategy.DatasetShards
 
   val memberRefs = new HashMap[Address, ActorRef]
   val roleToCoords = new HashMap[String, Set[ActorRef]]().withDefaultValue(Set.empty[ActorRef])
@@ -205,7 +206,7 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
         roleToCoords.transform { case (_, refs) => refs - removedCoordinator }
         roleToCoords.retain { case (role, refs) => refs.nonEmpty }
 
-        shardActor ! ShardSubscriptions.Unsubscribe(removedCoordinator)
+        shardActor ! ShardSubscriptions.RemoveMember(removedCoordinator)
         case _ =>
           logger.warn(s"UNABLE TO REMOVE ${member.address} FROM memberRefs")
       }
@@ -229,7 +230,7 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
     case e: SubscribeShardUpdates => subscribe(e.ref, sender())
     case e: SetupDataset          => setupDataset(e, sender())
     case e: DatasetAdded          => datasetSetup(e)
-    case e: ShardSubscriptions.CoordinatorSubscribed => subscribed(e)
+    case e: ShardSubscriptions.CoordinatorAdded => coordAdded(e)
     case e: ShardSubscriptions.SubscriptionUnknown   => datasetUnknown(e)
   }
 
@@ -255,7 +256,7 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
 
     if (e.roles contains nodeCoordRole) {
       memberRefs(e.addr) = e.coordinator
-      shardActor ! ShardSubscriptions.SubscribeCoordinator(e.coordinator)
+      shardActor ! ShardSubscriptions.AddMember(e.coordinator)
     }
   }
 
@@ -299,13 +300,16 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
     *
     * INTERNAL API. Idempotent.
     */
-  private def subscribed(e: ShardSubscriptions.CoordinatorSubscribed): Unit = {
+  private def coordAdded(e: ShardSubscriptions.CoordinatorAdded): Unit = {
     e.coordinator ! CoordinatorRegistered(self, shardActor)
 
     val oneAdded = Set(e.coordinator)
     for {
-      dataset <- e.updated
-    } sendDatasetSetup(oneAdded, projections(dataset), sources(dataset))
+      DatasetShards(ref, _, shards) <- e.newShards
+    } {
+      sendDatasetSetup(oneAdded, projections(ref), sources(ref))
+      sendStartCommand(Map(e.coordinator -> shards), projections(ref))
+    }
   }
 
   /** Called on successfull AddNodeCoordinator and SetupDataset protocols.

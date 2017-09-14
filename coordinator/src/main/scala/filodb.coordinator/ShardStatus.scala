@@ -62,6 +62,9 @@ final case class ShardDown(ref: DatasetRef, shard: Int) extends ShardEvent
 
 final case class IngestionStopped(ref: DatasetRef, shard: Int) extends ShardEvent
 
+// Used by ShardAssignmentStrategy only to assign a temporary state
+final case class ShardAssignmentStarted(ref: DatasetRef, shard: Int, node: ActorRef) extends ShardEvent
+
 sealed trait ShardStatus extends ShardAction {
   /**
     * Generates the minimal set of events needed to reach the given status.
@@ -71,6 +74,14 @@ sealed trait ShardStatus extends ShardAction {
 
 case object ShardUnassigned extends ShardStatus {
   def minimalEvents(ref: DatasetRef, shard: Int, node: ActorRef): Seq[ShardEvent] = Nil
+}
+
+// A temporary state used only by ShardAssignmentStrategy to denote the shard has been assigned and
+// the start of ingestion is being communicated, but the IngestionStarted has not been received yet
+// It enables the AssignmentStrategy to avoid assigning the same shards again
+case object ShardBeingAssigned extends ShardStatus {
+  def minimalEvents(ref: DatasetRef, shard: Int, node: ActorRef): Seq[ShardEvent] =
+    Seq(ShardAssignmentStarted(ref, shard, node))
 }
 
 case object ShardStatusNormal extends ShardStatus {

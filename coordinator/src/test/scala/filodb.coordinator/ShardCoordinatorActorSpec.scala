@@ -34,15 +34,16 @@ class ShardCoordinatorActorSpec extends AkkaSpec {
     super.afterAll()
   }
 
+  // NOTE: State is NOT reset in between test cases.  State accumulates.
   "ShardActor" must {
     val strategy = new DefaultShardAssignmentStrategy
     val shardActor = system.actorOf(Props(new ShardCoordinatorActor(strategy)))
 
-    "subscribe self-node coordinator, no datasets created yet" in {
-      shardActor ! SubscribeCoordinator(localCoordinator)
+    "add self-node coordinator, no datasets created yet" in {
+      shardActor ! AddMember(localCoordinator)
       expectMsgPF() {
-        case CoordinatorSubscribed(coord, updates) =>
-          updates.size shouldEqual 0 // no datasets added yet
+        case CoordinatorAdded(coord, shards) =>
+          shards.size shouldEqual 0 // no datasets added yet, thus no shards
           coord shouldEqual localCoordinator
       }
     }
@@ -81,11 +82,12 @@ class ShardCoordinatorActorSpec extends AkkaSpec {
         case SubscriptionUnknown(ds, sub) => ds.dataset shouldEqual "invalid"
       }
     }
-    "subscribe second coordinator, ack to parent" in {
-      shardActor ! SubscribeCoordinator(downingCoordinator)
+    "add second coordinator, ack to parent" in {
+      shardActor ! AddMember(downingCoordinator)
       expectMsgPF() {
-        case CoordinatorSubscribed(coord, datasets) =>
-          datasets.size shouldEqual 1
+        case CoordinatorAdded(coord, shards) =>
+          shards.size shouldEqual 1
+          shards.head.ref shouldEqual dataset1
           coord shouldEqual downingCoordinator
       }
     }
@@ -94,8 +96,9 @@ class ShardCoordinatorActorSpec extends AkkaSpec {
       expectMsgPF() {
         case Subscribers(subscribers, dataset) =>
           dataset shouldEqual dataset1
-          subscribers.size shouldEqual 4
-          subscribers.count(_.path.name == CoordinatorName) shouldEqual 2
+          subscribers.size shouldEqual 3
+          // Only 1 coordinator subscribed when dataset added
+          subscribers.count(_.path.name == CoordinatorName) shouldEqual 1
           subscribers.count(a => a == subscriber1.ref || a == subscriber2.ref) shouldEqual 2
 
           system stop downingCoordinator
@@ -117,9 +120,9 @@ class ShardCoordinatorActorSpec extends AkkaSpec {
       }
     }
     "subscribe a third node, expect 2 nodes - second was downed" in {
-      shardActor ! SubscribeCoordinator(thirdCoordinator)
+      shardActor ! AddMember(thirdCoordinator)
       expectMsgPF() {
-        case CoordinatorSubscribed(coord, datsets) =>
+        case CoordinatorAdded(coord, datsets) =>
           datsets.size shouldEqual 1
           (coord compareTo thirdCoordinator) == 0 shouldBe true
       }
@@ -128,12 +131,12 @@ class ShardCoordinatorActorSpec extends AkkaSpec {
       expectMsgPF() {
         case e@ShardSubscriptions(subscriptions) =>
           subscriptions.forall(_.subscribers.contains(localCoordinator)) shouldBe true
-          subscriptions.forall(_.subscribers.contains(thirdCoordinator)) shouldBe true
 
           subscriptions.size shouldEqual 1
           val subscribers = e.subscribers(dataset1)
-          subscribers.size shouldEqual 4
-          subscribers.count(_.path.name == CoordinatorName) shouldEqual 2
+          // 2 subscribers + orig coordinator
+          subscribers.size shouldEqual 3
+          subscribers.count(_.path.name == CoordinatorName) shouldEqual 1
           subscribers.count(a => a == subscriber1.ref || a == subscriber2.ref) shouldEqual 2
       }
     }
@@ -151,6 +154,10 @@ class ShardCoordinatorActorSpec extends AkkaSpec {
         case DatasetAdded(dataset, columns, source, nodeToShards, ackTo) =>
           nodeToShards.size shouldEqual coordinators.size
           coordinators.forall(nodeToShards.keySet.contains) shouldBe true
+
+          // Ensure that every shard is uniquely assigned
+          val uniqueShards = nodeToShards.values.reduce(_ ++ _).toSet
+          uniqueShards shouldEqual (0 until resources.numShards).toSet
           dataset.name shouldEqual dataset2.dataset
 
           for {(node, shards) <- nodeToShards; shard <- shards} {
@@ -166,12 +173,12 @@ class ShardCoordinatorActorSpec extends AkkaSpec {
           case CurrentShardSnapshot(ds, mapper) =>
             ds shouldEqual dataset2
             mapper.numShards shouldEqual 4
-            mapper.unassignedShards.size shouldEqual resources.numShards / resources.minNumNodes
-            mapper.assignedShards.size shouldEqual resources.numShards / resources.minNumNodes
+            mapper.unassignedShards.size shouldEqual 0
+            mapper.assignedShards.size shouldEqual resources.numShards
             mapper.shardValues.size shouldEqual resources.numShards
 
-            // TODO was false: mapper.allNodes.size shouldEqual coordinators.size
-            mapper.assignedShards shouldEqual Seq(0, 1)
+            mapper.allNodes.size shouldEqual coordinators.size
+            mapper.assignedShards shouldEqual (0 until resources.numShards)
             mapper.assignedShards foreach { shard =>
               mapper.activeShard(shard) shouldBe true
               mapper.statusForShard(shard) shouldBe ShardStatusNormal
@@ -205,50 +212,109 @@ class ShardCoordinatorActorSpec extends AkkaSpec {
 
         val subscribers = subscription.subscribers
         e.subscribers(ds) shouldEqual subscribers
-        subscribers.size shouldEqual 4
-        e.subscribers(ds).size shouldEqual 4
+        val numSubscribers = if (ds == dataset1) 3 else 4
+        subscribers.size shouldEqual numSubscribers
+        e.subscribers(ds).size shouldEqual numSubscribers
         val dsCoords = subscribers.filter(_.path.name == CoordinatorName)
-        dsCoords.size shouldEqual 2
+        dsCoords.size shouldEqual (numSubscribers - 2)
 
-        coordinators foreach (c => dsCoords contains c shouldBe true)
         Set(subscriber1.ref, subscriber2.ref) foreach { sub =>
           e.subscribers(ds) contains sub shouldBe true
         }
       }
     }
-   "unsubscribe a subscriber" in {
-     val probe = TestProbe()
-     shardActor ! Subscribe(probe.ref, dataset2)
-     probe.expectMsgPF() {
-       case CurrentShardSnapshot(ds, mapper) =>
-         shardActor ! Unsubscribe(probe.ref)
-     }
+    "unsubscribe a subscriber" in {
+      val probe = TestProbe()
+      shardActor ! Subscribe(probe.ref, dataset2)
+      probe.expectMsgPF() {
+        case CurrentShardSnapshot(ds, mapper) =>
+          shardActor ! Unsubscribe(probe.ref)
+      }
 
-     shardActor ! GetSubscribers(dataset2)
-     expectMsgPF() {
-       case Subscribers(subscribers, ds) =>
-         subscribers.contains(probe.ref) shouldBe false
-     }
-   }
-   "remove a subscription" in {
-     shardActor ! GetSubscriptions
-     expectMsgPF() {
-       case pre: ShardSubscriptions =>
-         pre.subscriptions.size shouldEqual 2
-     }
-     shardActor ! RemoveSubscription(dataset2)
-     shardActor ! GetSubscriptions
-     expectMsgPF() {
-       case post: ShardSubscriptions =>
-         post.subscription(dataset2).isEmpty shouldBe true
-         post.subscriptions.size shouldEqual 1
-     }
-     shardActor ! GetSubscribers(dataset2)
-     expectMsgPF() {
-       case Subscribers(subscribers, ds) =>
-         subscribers shouldEqual Set.empty
-     }
-   }
+      shardActor ! GetSubscribers(dataset2)
+      expectMsgPF() {
+        case Subscribers(subscribers, ds) =>
+          subscribers.contains(probe.ref) shouldBe false
+      }
+    }
+    "remove a subscription" in {
+      shardActor ! GetSubscriptions
+      expectMsgPF() {
+        case pre: ShardSubscriptions =>
+          pre.subscriptions.size shouldEqual 2
+      }
+      shardActor ! RemoveSubscription(dataset2)
+      shardActor ! GetSubscriptions
+      expectMsgPF() {
+        case post: ShardSubscriptions =>
+          post.subscription(dataset2).isEmpty shouldBe true
+          post.subscriptions.size shouldEqual 1
+      }
+      shardActor ! GetSubscribers(dataset2)
+      expectMsgPF() {
+        case Subscribers(subscribers, ds) =>
+          subscribers shouldEqual Set.empty
+      }
+    }
+    "assign shards correctly when nodes added after dataset shard add" in {
+      // Must reset state, cuz everything is cumulative
+      shardActor ! NodeProtocol.ResetState
+      expectMsg(NodeProtocol.StateReset)
+
+      // Add a dataset with no nodes
+      val noOpSource = IngestionSource(classOf[NoOpStreamFactory].getName)
+      val sd = SetupDataset(dataset1, Seq.empty, resources, noOpSource)
+      val dataset = Dataset(dataset1.dataset, Seq.empty, Seq.empty)
+      shardActor ! AddDataset(sd, dataset, Seq.empty, Set.empty, self)
+      expectMsgPF() {
+        case DatasetAdded(dataset, columns, source, nodeShards, ackTo) =>
+          dataset.name shouldEqual dataset1.dataset
+          nodeShards.size shouldEqual 0
+      }
+
+      shardActor ! Subscribe(subscriber1.ref, dataset1)
+      subscriber1.expectMsgPF() {
+        case CurrentShardSnapshot(ds, mapper) =>
+          mapper.numAssignedShards shouldEqual 0
+      }
+
+      // Now subscribe/add a single coordinator.  Check shard assignments
+      shardActor ! AddMember(localCoordinator)
+      expectMsgPF() {
+        case CoordinatorAdded(coord, updates) =>
+          updates should have length 1
+          updates.head.ref shouldEqual dataset1
+          updates.head.shards shouldEqual Seq(0, 1)
+          coord shouldEqual localCoordinator
+      }
+
+      // TODO: test that shardActor sends out commands?  otherwise how does the added shards
+      // start ingesting?
+
+      shardActor ! NodeClusterActor.GetShardMap(dataset1)
+      expectMsgPF() {
+        case mapper: ShardMapper =>
+          mapper.numAssignedShards shouldEqual 2
+          mapper.unassignedShards.size shouldEqual 2
+      }
+
+      // Now subscribe another coordinator.  Check assignments again
+      shardActor ! AddMember(thirdCoordinator)
+      expectMsgPF() {
+        case CoordinatorAdded(coord, updates) =>
+          updates should have length 1
+          updates.head.ref shouldEqual dataset1
+          updates.head.shards shouldEqual Seq(2, 3)
+          coord shouldEqual thirdCoordinator
+      }
+
+      shardActor ! NodeClusterActor.GetShardMap(dataset1)
+      expectMsgPF() {
+        case mapper: ShardMapper =>
+          mapper.numAssignedShards shouldEqual 4
+          mapper.unassignedShards.size shouldEqual 0
+      }
+    }
   }
 }
 

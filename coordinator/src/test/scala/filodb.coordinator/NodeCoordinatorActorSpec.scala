@@ -74,8 +74,8 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
 
     coordinatorActor = system.actorOf(nodeCoordProps, s"test-node-coord-${System.nanoTime}")
 
-    shardActor ! SubscribeCoordinator(coordinatorActor)
-    expectMsg(CoordinatorSubscribed(coordinatorActor, Seq.empty))
+    shardActor ! AddMember(coordinatorActor)
+    expectMsg(CoordinatorAdded(coordinatorActor, Seq.empty))
     coordinatorActor ! CoordinatorRegistered(self, shardActor)
 
     probe = TestProbe()

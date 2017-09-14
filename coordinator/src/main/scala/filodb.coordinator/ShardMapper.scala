@@ -87,7 +87,7 @@ class ShardMapper(val numShards: Int) extends Serializable {
     }
 
   /**
-   * Returns all the shards that have not yet been assigned
+   * Returns all the shards that have not yet been assigned or in process of being assigned
    */
   def unassignedShards: Seq[Int] =
     shardMap.toSeq.zipWithIndex.collect { case (ActorRef.noSender, shard) => shard }
@@ -116,6 +116,9 @@ class ShardMapper(val numShards: Int) extends Serializable {
   def updateFromEvent(event: ShardEvent): Try[Unit] = event match {
     case IngestionStarted(_, shard, node) =>
       statusMap(shard) = ShardStatusNormal
+      registerNode(Seq(shard), node)
+    case ShardAssignmentStarted(_, shard, node) =>
+      statusMap(shard) = ShardBeingAssigned
       registerNode(Seq(shard), node)
     case RecoveryStarted(_, shard, node) =>
       statusMap(shard) = ShardStatusRecovery

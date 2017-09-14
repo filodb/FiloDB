@@ -121,8 +121,9 @@ abstract class NodeClusterSpec extends ClusterSpec(NodeClusterSpecConfig) {
       subscriber1.send(clusterActor, SubscribeShardUpdates(ref))
       subscriber1.expectMsgPF(3.seconds.dilated) {
         case CurrentShardSnapshot(ds, newMap) =>
-          0 until spec.numShards forall (shard => newMap.statusForShard(shard) == ShardUnassigned) shouldBe true
-          newMap.allNodes.isEmpty shouldBe true // ingestion not started
+          newMap.shardValues.map(_._2) shouldEqual Seq(ShardBeingAssigned, ShardBeingAssigned,
+                                                       ShardUnassigned, ShardUnassigned)
+          newMap.allNodes shouldEqual Set(coordinatorActor)
           newMap.numShards shouldEqual spec.numShards
       }
 
@@ -164,8 +165,8 @@ abstract class NodeClusterSpec extends ClusterSpec(NodeClusterSpecConfig) {
       clusterActor ! SubscribeShardUpdates(ref)
       expectMsgPF(3.seconds.dilated) {
         case CurrentShardSnapshot(ref, map) =>
-          map.numAssignedShards shouldEqual 2 // TODO not 4
-          map.allNodes.size shouldEqual 1 // only one coord created in entire multi test
+          map.numAssignedShards shouldEqual 4
+          map.allNodes.size shouldEqual 2
       }
     }
 
@@ -174,8 +175,8 @@ abstract class NodeClusterSpec extends ClusterSpec(NodeClusterSpecConfig) {
     clusterActor ! GetShardMap(ref)
     expectMsgPF(3.seconds.dilated) {
       case map: ShardMapper =>
-        map.numAssignedShards shouldEqual 2 // TODO not 4
-        map.allNodes.size shouldEqual 1 // only one coord created in entire multi test
+        map.numAssignedShards shouldEqual 4
+        map.allNodes.size shouldEqual 2
     }
 
     enterBarrier("second-node-update-received")
