@@ -24,6 +24,8 @@ object QueryCommands {
   // most recent lastMillis milliseconds of data.  The row key must be a single Long or Timestamp column
   // consisting of milliseconds since Epoch.  A shortcut for KeyRangeQuery.
   final case class MostRecentTime(lastMillis: Long) extends DataQuery
+  // most recent single sample of data
+  case object MostRecentSample extends DataQuery
 
   /**
    * Returns a Seq[String] of the first *limit* tags or columns indexed
@@ -58,11 +60,17 @@ object QueryCommands {
   /**
    * Specifies details about the aggregation query to execute on the FiloDB server.
    * @param functionName the name of the function for aggregating raw data
+   * @param column       name of column holding the data to query
+   * @param args         optional arguments to the function, may be none
+   * @param dataQuery    selector/filter for data within a partition/time series.  This could be
+   *                       MostRecentTime(nMillis) or MostRecentSample, or a specific range.
    * @param combinerName the name of a "combiner" which combines results from first level functions, such
    *                     as topk, bottomk, histogram, etc.
    */
   final case class QueryArgs(functionName: String,
+                             column: String,
                              args: Seq[String] = Nil,
+                             dataQuery: DataQuery = AllPartitionData,
                              combinerName: String = CombinerFunction.default,
                              combinerArgs: Seq[String] = Nil)
 
@@ -79,10 +87,6 @@ object QueryCommands {
    * @param version the version of the dataset to query.  Ignored for MemStores.
    * @param query   the QueryArgs specifying the name of the query function and the arguments as strings
    * @param partitionQuery which partitions to query and filter on
-   * @param dataQuery optionally, which parts of a partition to query on.  Some functions such as time
-   *                aggregates already control and take care of this, but others don't.  If the function
-   *                does not specify this and this is also left unspecified then this defaults to
-   *                AllPartitionData.
    * @param queryOptions options to control routing of query
    * @return AggregateResponse, or BadQuery, BadArgument, WrongNumberOfArgs, UndefinedColumns
    */
@@ -90,7 +94,6 @@ object QueryCommands {
                                   version: Int,
                                   query: QueryArgs,
                                   partitionQuery: PartitionQuery,
-                                  dataQuery: Option[DataQuery] = None,
                                   queryOptions: QueryOptions = QueryOptions()) extends QueryCommand
 
   // Error responses from query

@@ -145,7 +145,8 @@ object NodeProtocol {
     * @param role the role to assign
     * @param withManager if `true` creates the ClusterSingletonManager as well, if `false` only creates the proxy
     */
-  private[coordinator] final case class CreateClusterSingleton(role: String, withManager: Boolean) extends CreationCommand
+  private[coordinator] final case class CreateClusterSingleton(role: String, withManager: Boolean)
+      extends CreationCommand
   private[coordinator] final case class CreateTraceLogger(role: ClusterRole) extends CreationCommand
   private[coordinator] case object CreateCoordinator extends CreationCommand
 

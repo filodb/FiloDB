@@ -32,6 +32,7 @@ See [architecture](doc/architecture.md) and [datasets and reading](doc/datasets_
   - [Roadmap](#roadmap)
 - [Pre-requisites](#pre-requisites)
 - [Getting Started](#getting-started)
+- [End to End Kafka Developer Setup](#end-to-end-kafka-developer-setup)
 - [Introduction to FiloDB Data Modelling](#introduction-to-filodb-data-modelling)
   - [Computed Columns](#computed-columns)
   - [FiloDB vs Cassandra Data Modelling](#filodb-vs-cassandra-data-modelling)
@@ -139,6 +140,57 @@ NOTE: Please check out the `spark1.6` branch for Spark 1.6 version.
 7. Listing/deleting/maintenance can be done using `filo-cli`.  If using Cassandra, `cqlsh` can also be used to inspect metadata.
 
 Note: There is at least one release out now, tagged via Git and also located in the "Releases" tab on Github.
+
+
+## End to End Kafka Developer Setup
+
+This section describes how you can run an end-to-end test locally on a Macbook by ingesting time series data into FiloDB In Memory Store, and querying from it using PromQL.
+
+Use your favorite package manager to install and set up pre-requisite infrastructure. Kafka 0.10.2+ or 0.11 can be used. 
+```
+brew install kafka
+brew services start zookeeper
+brew services start kafka
+```
+
+Create a new Kafka topic with 4 partitions. This is where time series data will be ingested for FiloDB to consume
+```
+kafka-topics --create --zookeeper localhost:2181 --replication-factor 1 --partitions 4 --topic timeseries-dev
+```
+
+Build the required projects
+```
+sbt standalone/assembly cli/assembly tsgenerator/assembly
+```
+
+The script below brings up the FiloDB Dev Standalone server, and then sets up the timeseries dataset
+```
+./filodb-dev-start.sh
+```
+
+You can now tail the server logs. If you'd like to direct the logs to a specific folder, you can set the LOG_DIR environment variable. 
+```
+tail -f LOG_DIR_IS_UNDEFINED/filodb-server.log
+```
+Verify this message `NodeClusterActor Actor[akka://filo-standalone/user/node/singleton/nodecluster#-528195195] said hello!` in the logs. The logs should also indicate kafka connections being setup for consumption for the dataset. Wait for this to happen.
+
+Now run the time series generator. This will ingest 10000 samples into the Kafka topic.
+```
+java -cp tsgenerator/target/scala-2.11/tsgenerator-*.telemetry-SNAPSHOT filodb.timeseries.TestTimeseriesProducer 10000
+```
+
+At this point, you should be able to confirm such a message in the server logs: `KAMON counter name=memstore-rows-ingested count=10000`
+
+Now you are ready to query FiloDB for the ingested data. The following command should return matching subset of the data that was ingested by the producer.
+
+```
+./filo-cli '-Dakka.remote.netty.tcp.hostname=127.0.0.1' --host 127.0.0.1 --dataset timeseries --promql 'heap_usage{host="H1"}'
+```
+
+To stop the dev server. Note that this will stop all the FiloDB servers if multiple are running.
+```
+./filodb-dev-stop.sh
+```
 
 ## Introduction to FiloDB Data Modelling
 

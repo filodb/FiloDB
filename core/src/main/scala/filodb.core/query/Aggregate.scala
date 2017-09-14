@@ -9,7 +9,7 @@ import scala.reflect.{classTag, ClassTag}
 import scalaxy.loops._
 
 import filodb.core.metadata._
-import filodb.core.store.{ChunkScanMethod, ChunkSetInfo}
+import filodb.core.store.{ChunkScanMethod, ChunkSetInfo, RowKeyChunkScan}
 import filodb.core.binaryrecord.BinaryRecord
 
 /**
@@ -87,12 +87,6 @@ trait Aggregator {
   // If false, then combine() cannot be used and one should default to accumulating individual results
   // (or possibly things like topK)
   def isCombinable: Boolean = true
-
-  /**
-   * If an aggregate can provide an appropriate scan method to aid in pushdown filtering, then it should
-   * return something other than None here.
-   */
-  def chunkScan(projection: RichProjection): Option[ChunkScanMethod] = None
 }
 
 // An Aggregator that produces a single value that cannot be combined.
@@ -153,69 +147,94 @@ class LastDoubleValueAggregator(timestampIndex: Int, doubleColIndex: Int) extend
  * It is also an EnumEntry and the name of the function is the class name in "snake_case" ie underscores
  */
 sealed trait AggregationFunction extends FunctionValidationHelpers with EnumEntry with Snakecase {
+  def allowedTypes: Set[Column.ColumnType]
+
+  def validate(dataColumn: String,
+               timestampColumn: Option[String],
+               scanMethod: ChunkScanMethod,
+               args: Seq[String],
+               proj: RichProjection): Aggregator Or InvalidFunctionSpec =
+    for { dataColIndex <- columnIndex(proj.nonPartitionColumns, dataColumn)
+          dataColType <- validatedColumnType(proj.nonPartitionColumns, dataColIndex, allowedTypes)
+          agg <- validate(dataColIndex, dataColType, timestampColumn, scanMethod, args, proj) }
+    yield { agg }
+
   // validate the arguments against the projection and produce an Aggregate of the right type,
-  // as well as the indices of the columns to read from the projection
-  def validate(args: Seq[String], proj: RichProjection): Aggregator Or InvalidFunctionSpec
+  def validate(dataColIndex: Int, dataColType: Column.ColumnType,
+               timestampColumn: Option[String],
+               scanMethod: ChunkScanMethod,
+               args: Seq[String],
+               proj: RichProjection): Aggregator Or InvalidFunctionSpec
 }
 
 trait SingleColumnAggFunction extends AggregationFunction {
-  def allowedTypes: Set[Column.ColumnType]
-  def makeAggregator(colIndex: Int, colType: Column.ColumnType): Aggregator
+  def makeAggregator(colIndex: Int, colType: Column.ColumnType, scanMethod: ChunkScanMethod): Aggregator
 
-  def validate(args: Seq[String], proj: RichProjection): Aggregator Or InvalidFunctionSpec = {
-    for { args <- validateNumArgs(args, 1)
-          sourceColIndex <- columnIndex(proj.nonPartitionColumns, args(0))
-          sourceColType <- validatedColumnType(proj.nonPartitionColumns, sourceColIndex, allowedTypes) }
-    yield {
-      makeAggregator(sourceColIndex, sourceColType)
-    }
-  }
+  def validate(dataColIndex: Int, dataColType: Column.ColumnType,
+               timestampColumn: Option[String],
+               scanMethod: ChunkScanMethod,
+               args: Seq[String],
+               proj: RichProjection): Aggregator Or InvalidFunctionSpec =
+    Good(makeAggregator(dataColIndex, dataColType, scanMethod))
 }
 
-trait TimeAggFunction extends AggregationFunction {
+// Using a time-based function on a non-time-series schema or when no timestamp column is supplied
+case object NoTimestampColumn extends InvalidFunctionSpec
+
+trait TimeAggFunction[A] extends AggregationFunction {
   import Column.ColumnType._
   import filodb.core.SingleKeyTypes._
 
-  def allowedTypes: Set[Column.ColumnType]
-  def makeAggregator(timeColIndex: Int, valueColIndex: Int, colType: Column.ColumnType): Aggregator
+  def makeAggregator(timeColIndex: Int, valueColIndex: Int, colType: Column.ColumnType,
+                     scanMethod: ChunkScanMethod, arg: A): Aggregator
 
-  def validate(args: Seq[String], proj: RichProjection): Aggregator Or InvalidFunctionSpec = {
-    for { args <- validateNumArgs(args, 2)
-          timeColIndex <- columnIndex(proj.nonPartitionColumns, args(0))
+  // Used to validate and transform the input args for the aggregator
+  def validateArgs(args: Seq[String]): A Or InvalidFunctionSpec
+
+  def validate(dataColIndex: Int, dataColType: Column.ColumnType,
+               timestampColumn: Option[String],
+               scanMethod: ChunkScanMethod,
+               args: Seq[String],
+               proj: RichProjection): Aggregator Or InvalidFunctionSpec = {
+    for { timestampCol <- timestampColumn.map(Good(_)).getOrElse(Bad(NoTimestampColumn))
+          timeColIndex <- columnIndex(proj.nonPartitionColumns, timestampCol)
           timeColType  <- validatedColumnType(proj.nonPartitionColumns, timeColIndex, Set(LongColumn, TimestampColumn))
-          valueColIndex <- columnIndex(proj.nonPartitionColumns, args(1))
-          valueColType  <- validatedColumnType(proj.nonPartitionColumns, valueColIndex, allowedTypes) }
-    yield { makeAggregator(timeColIndex, valueColIndex, valueColType) }
+          arg          <- validateArgs(args) }
+    yield { makeAggregator(timeColIndex, dataColIndex, dataColType, scanMethod, arg) }
   }
+}
+
+object TimeBucketingAggFunction {
+  val DefaultNumBuckets = 50
 }
 
 /**
- * Time grouping aggregates take 5 arguments:
- *   <timeColumn> <valueColumn> <startTs> <endTs> <numBuckets>
- *   <startTs> and <endTs> may either be Longs representing millis since epoch, or ISO8601 formatted datetimes.
+ * Time bucketing aggregates takes 1 optional argument:
+ *   <numBuckets> - number of buckets, defaults to ??
  */
-trait TimeGroupingAggFunction extends AggregationFunction {
+trait TimeBucketingAggFunction extends TimeAggFunction[Int] {
   import Column.ColumnType._
   import filodb.core.SingleKeyTypes._
 
-  def allowedTypes: Set[Column.ColumnType]
-  def makeAggregator(timeColIndex: Int, valueColIndex: Int,
-                     colType: Column.ColumnType, startTs: Long, endTs: Long, numBuckets: Int): Aggregator
-
-  def validate(args: Seq[String], proj: RichProjection): Aggregator Or InvalidFunctionSpec = {
-    for { args <- validateNumArgs(args, 5)
-          timeColIndex <- columnIndex(proj.nonPartitionColumns, args(0))
-          timeColType  <- validatedColumnType(proj.nonPartitionColumns, timeColIndex, Set(LongColumn, TimestampColumn))
-          valueColIndex <- columnIndex(proj.nonPartitionColumns, args(1))
-          valueColType  <- validatedColumnType(proj.nonPartitionColumns, valueColIndex, allowedTypes)
-          startTs      <- parseParam(LongKeyType, args(2))
-          endTs        <- parseParam(LongKeyType, args(3))
-          numBuckets   <- parseParam(IntKeyType, args(4)) }
-    yield {
-      // Assumption: we only read time and value columns
-      makeAggregator(timeColIndex, valueColIndex, valueColType, startTs, endTs, numBuckets)
+  def validateArgs(args: Seq[String]): Int Or InvalidFunctionSpec =
+    if (args.isEmpty) { Good(TimeBucketingAggFunction.DefaultNumBuckets) }
+    else {
+      parseParam(IntKeyType, args(0))
     }
+
+  def makeAggregator(timeColIndex: Int, valueColIndex: Int, colType: Column.ColumnType,
+                     scanMethod: ChunkScanMethod, arg: Int): Aggregator = scanMethod match {
+    case rk: RowKeyChunkScan => makeAggregator(timeColIndex, valueColIndex, colType,
+                                               rk.startkey.getLong(0), rk.endkey.getLong(0), arg)
+    // For now, for another method, just allow aggregating over all samples.
+    // TODO: figure out how to limit "last value" scans to really just the last value.
+    case _                   => makeAggregator(timeColIndex, valueColIndex, colType,
+                                               Long.MinValue, Long.MaxValue, arg)
   }
+
+  def makeAggregator(timeColIndex: Int, valueColIndex: Int,
+                     colType: Column.ColumnType,
+                     startTs: Long, endTs: Long, buckets: Int): Aggregator
 }
 
 /**
@@ -226,20 +245,21 @@ object AggregationFunction extends Enum[AggregationFunction] {
   val values = findValues
 
   // partition_keys returns all the partition keys (or time series) in a query
-  case object PartitionKeys extends AggregationFunction {
-    def validate(args: Seq[String], proj: RichProjection): Aggregator Or InvalidFunctionSpec =
-      Good(new PartitionKeysAggregator)
+  case object PartitionKeys extends SingleColumnAggFunction {
+    val allowedTypes: Set[Column.ColumnType] = Column.ColumnType.values.toSet
+    def makeAggregator(colIndex: Int, colType: Column.ColumnType, scanMethod: ChunkScanMethod): Aggregator =
+      new PartitionKeysAggregator
   }
 
   case object NumBytes extends SingleColumnAggFunction {
     val allowedTypes: Set[Column.ColumnType] = Column.ColumnType.values.toSet
-    def makeAggregator(colIndex: Int, colType: Column.ColumnType): Aggregator =
+    def makeAggregator(colIndex: Int, colType: Column.ColumnType, scanMethod: ChunkScanMethod): Aggregator =
       new NumBytesAggregator(colIndex)
   }
 
   case object Sum extends SingleColumnAggFunction {
     val allowedTypes: Set[Column.ColumnType] = Set(DoubleColumn)
-    def makeAggregator(colIndex: Int, colType: Column.ColumnType): Aggregator =
+    def makeAggregator(colIndex: Int, colType: Column.ColumnType, scanMethod: ChunkScanMethod): Aggregator =
     colType match {
       case DoubleColumn => new SumDoublesAggregator(colIndex)
       case o: Any       => ???
@@ -248,20 +268,21 @@ object AggregationFunction extends Enum[AggregationFunction] {
 
   case object Count extends SingleColumnAggFunction {
     val allowedTypes: Set[Column.ColumnType] = Column.ColumnType.values.toSet
-    def makeAggregator(colIndex: Int, colType: Column.ColumnType): Aggregator =
+    def makeAggregator(colIndex: Int, colType: Column.ColumnType, scanMethod: ChunkScanMethod): Aggregator =
       new CountingAggregator(colIndex)
   }
 
-  case object Last extends TimeAggFunction {
+  case object Last extends TimeAggFunction[Unit] {
     val allowedTypes: Set[Column.ColumnType] = Set(DoubleColumn)
-    def makeAggregator(timeColIndex: Int, valueColIndex: Int, colType: Column.ColumnType): Aggregator =
-    colType match {
+    def validateArgs(args: Seq[String]): Unit Or InvalidFunctionSpec = Good(())
+    def makeAggregator(timeColIndex: Int, valueColIndex: Int, colType: Column.ColumnType,
+                       scanMethod: ChunkScanMethod, arg: Unit): Aggregator = colType match {
       case DoubleColumn => new LastDoubleValueAggregator(timeColIndex, valueColIndex)
       case o: Any       => ???
     }
   }
 
-  case object TimeGroupMin extends TimeGroupingAggFunction {
+  case object TimeGroupMin extends TimeBucketingAggFunction {
     val allowedTypes: Set[Column.ColumnType] = Set(DoubleColumn)
     def makeAggregator(timeColIndex: Int, valueColIndex: Int,
                        colType: Column.ColumnType,
@@ -271,7 +292,7 @@ object AggregationFunction extends Enum[AggregationFunction] {
     }
   }
 
-  case object TimeGroupMax extends TimeGroupingAggFunction {
+  case object TimeGroupMax extends TimeBucketingAggFunction {
     val allowedTypes: Set[Column.ColumnType] = Set(DoubleColumn)
     def makeAggregator(timeColIndex: Int, valueColIndex: Int,
                        colType: Column.ColumnType,
@@ -281,7 +302,7 @@ object AggregationFunction extends Enum[AggregationFunction] {
     }
   }
 
-  case object TimeGroupAvg extends TimeGroupingAggFunction {
+  case object TimeGroupAvg extends TimeBucketingAggFunction {
     val allowedTypes: Set[Column.ColumnType] = Set(DoubleColumn)
     def makeAggregator(timeColIndex: Int, valueColIndex: Int,
                        colType: Column.ColumnType,

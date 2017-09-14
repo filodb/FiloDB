@@ -15,7 +15,7 @@ import scala.concurrent.duration._
 import filodb.core._
 import filodb.core.memstore.{IngestRecord, TimeSeriesMemStore}
 import filodb.core.query._
-import filodb.core.store.{FilteredPartitionScan, QuerySpec}
+import filodb.core.store.{FilteredPartitionScan, QuerySpec, RowKeyChunkScan}
 
 /**
  * Microbenchmark involving TimeSeriesMemStore aggregation using TimeGroupingAggregate
@@ -42,9 +42,9 @@ class AggregationBenchmark {
   memStore.ingest(projection1.datasetRef, 0, data)
   val split = memStore.getScanSplits(projection1.datasetRef, 1).head
 
-  val avgTimeQuery = QuerySpec(AggregationFunction.TimeGroupAvg,
-                               Seq("timestamp", "min", startTs.toString, endTs.toString, "100"))
-  val sumQuery     = QuerySpec(AggregationFunction.Sum, Seq("min"))
+  val timeRange = RowKeyChunkScan(projection1, Seq(startTs), Seq(endTs))
+  val avgTimeQuery = QuerySpec("min", AggregationFunction.TimeGroupAvg, Seq("100"))
+  val sumQuery     = QuerySpec("min", AggregationFunction.Sum)
 
   /**
    * Doing average aggregation on all 10000 points with 100 buckets
@@ -53,7 +53,7 @@ class AggregationBenchmark {
   @BenchmarkMode(Array(Mode.Throughput))
   @OutputTimeUnit(TimeUnit.SECONDS)
   def avgTimeGroupAgg(): Array[_] = {
-    val fut = memStore.aggregate(projection1, 0, avgTimeQuery, FilteredPartitionScan(split))
+    val fut = memStore.aggregate(projection1, 0, avgTimeQuery, FilteredPartitionScan(split), timeRange)
                       .get.runAsync
     Await.result(fut, 2.second).result
   }

@@ -10,7 +10,7 @@ import org.scalatest.concurrent.ScalaFutures
 import filodb.core._
 import filodb.core.metadata._
 import filodb.core.memstore.{IngestRecord, TimeSeriesMemStore}
-import filodb.core.store.{QuerySpec, FilteredPartitionScan}
+import filodb.core.store.{QuerySpec, FilteredPartitionScan, RowKeyChunkScan}
 
 class CombinerSpec extends FunSpec with Matchers with BeforeAndAfter with ScalaFutures {
   import monix.execution.Scheduler.Implicits.global
@@ -30,8 +30,7 @@ class CombinerSpec extends FunSpec with Matchers with BeforeAndAfter with ScalaF
       memStore.ingest(projection1.datasetRef, 0, data)
 
       val split = memStore.getScanSplits(projection1.datasetRef, 1).head
-      val query = QuerySpec(AggregationFunction.Last, Seq("timestamp", "min"),
-                                CombinerFunction.Simple, Nil)
+      val query = QuerySpec("min", AggregationFunction.Last, Nil, CombinerFunction.Simple, Nil)
       val agg1 = memStore.aggregate(projection1, 0, query, FilteredPartitionScan(split))
                    .get.runAsync.futureValue
       agg1 shouldBe a[ListAggregate[_]]
@@ -43,7 +42,7 @@ class CombinerSpec extends FunSpec with Matchers with BeforeAndAfter with ScalaF
   }
 
   describe("Histogram") {
-    val baseQuery = QuerySpec(AggregationFunction.Sum, Seq("min"),
+    val baseQuery = QuerySpec("min", AggregationFunction.Sum, Nil,
                               CombinerFunction.Histogram, Seq("2000"))
     it("should invalidate queries with invalid Combiner/histo args") {
       memStore.setup(projection1, 0)
@@ -75,8 +74,9 @@ class CombinerSpec extends FunSpec with Matchers with BeforeAndAfter with ScalaF
       memStore.setup(projection1, 0)
       val split = memStore.getScanSplits(projection1.datasetRef, 1).head
       val query = baseQuery.copy(aggregateFunc = AggregationFunction.TimeGroupMin,
-                                 aggregateArgs = Seq("timestamp", "min", "110000", "130000", "2"))
-      val agg1 = memStore.aggregate(projection1, 0, query, FilteredPartitionScan(split))
+                                 aggregateArgs = Seq("2"))
+      val timeScan = RowKeyChunkScan(projection1, Seq(110000L), Seq(130000L))
+      val agg1 = memStore.aggregate(projection1, 0, query, FilteredPartitionScan(split), timeScan)
       agg1.swap.get shouldBe an[InvalidAggregator]
     }
 

@@ -16,7 +16,11 @@ object PromQLParser {
   val SecsInDay    = SecsInHour * 24
   val SecsInWeek   = SecsInDay * 7
 
-  val DefaultRange = SecsInMinute * 30
+  sealed trait TimeSpec
+  final case class DurationSecs(seconds: Int) extends TimeSpec
+  final case class Special(word: String) extends TimeSpec
+  case object NoTimeSpecified extends TimeSpec            // no duration specified
+
   val Quote = "\""
   val Space = " "
 }
@@ -25,7 +29,7 @@ sealed trait Expr
 final case class PartitionSpec(metricName: String,
                                column: String,
                                filters: Seq[ColumnFilter],
-                               range: Int) extends Expr
+                               timeSpec: PromQLParser.TimeSpec) extends Expr
 
 sealed trait PromQuery
 final case class VectorExprOnlyQuery(spec: PartitionSpec) extends PromQuery
@@ -78,12 +82,12 @@ class PromQLParser(val input: ParserInput,
 
   def Number = rule { capture(oneOrMore(CharPredicate.Digit)) ~> (_.toInt) }
 
-  def Duration: Rule1[Int] = rule { DurationSec | DurationMin | DurationHour | DurationDay | DurationWeek }
-  def DurationSec = rule { Number ~ Space.? ~ "s" }
-  def DurationMin = rule { Number ~ Space.? ~ "m" ~> (_ * SecsInMinute) }
-  def DurationHour = rule { Number ~ Space.? ~ "h" ~> (_ * SecsInHour) }
-  def DurationDay = rule { Number ~ Space.? ~ "d" ~> (_ * SecsInDay) }
-  def DurationWeek = rule { Number ~ Space.? ~ "w" ~> (_ * SecsInWeek) }
+  def Duration: Rule1[TimeSpec] = rule { DurationSec | DurationMin | DurationHour | DurationDay | DurationWeek }
+  def DurationSec = rule { Number ~ Space.? ~ "s" ~> DurationSecs }
+  def DurationMin = rule { Number ~ Space.? ~ "m" ~>  (s => DurationSecs(s * SecsInMinute)) }
+  def DurationHour = rule { Number ~ Space.? ~ "h" ~> (s => DurationSecs(s * SecsInHour)) }
+  def DurationDay = rule { Number ~ Space.? ~ "d" ~>  (s => DurationSecs(s * SecsInDay)) }
+  def DurationWeek = rule { Number ~ Space.? ~ "w" ~> (s => DurationSecs(s * SecsInWeek)) }
 
   def TagSelector = rule { '{' ~ oneOrMore(TagFilter).separatedBy(ch(',')) ~ '}' }
 
@@ -95,9 +99,10 @@ class PromQLParser(val input: ParserInput,
   def DataColumnSelector = rule { "#" ~ NameString }
   def VectorSelector =
     rule { NameString ~ DataColumnSelector.? ~ TagSelector.? ~ TimeRange.? ~>
-           ((metric: String, column: Option[String], filters: Option[Seq[ColumnFilter]], duration: Option[Int]) =>
+           ((metric: String, column: Option[String], filters: Option[Seq[ColumnFilter]],
+             timeSpec: Option[TimeSpec]) =>
             PartitionSpec(metric, column.getOrElse(options.valueColumn),
-                          filters.getOrElse(Nil), duration.getOrElse(DefaultRange))) }
+                          filters.getOrElse(Nil), timeSpec.getOrElse(NoTimeSpecified))) }
 
   def FunctionParam = rule { NameString ~ ',' ~ Space.? }
   def FunctionExpr = rule { NameString ~ '(' ~ FunctionParam.? ~ FunctionOrSelector ~ ')' ~> FunctionQuery }
@@ -116,27 +121,20 @@ class PromQLParser(val input: ParserInput,
     Query.run().flatMap {
       // Single level of function
       case FunctionQuery(funcName, paramOpt, partSpec: PartitionSpec) =>
-        evalArgs(funcName, paramOpt, partSpec).map { args =>
-          val spec = QueryArgs(funcName, args)
-          Success(ArgsAndPartSpec(spec, partSpec).withMetricFilter(options.metricColumn, allowScanAll))
-        }.getOrElse {
-          Failure(new IllegalArgumentException(s"Unable to parse function $funcName with option $paramOpt"))
-        }
+        val spec = QueryArgs(funcName, partSpec.column, paramOpt.toSeq, dataQuery(partSpec.timeSpec))
+        Success(ArgsAndPartSpec(spec, partSpec).withMetricFilter(options.metricColumn, allowScanAll))
 
       // Two levels of functions.  Assume outer one is combiner.
       // For now, only support a single combiner parameter.
       case FunctionQuery(combName, combParam,
              FunctionQuery(funcName, paramOpt, partSpec: PartitionSpec)) =>
-        evalArgs(funcName, paramOpt, partSpec).map { args =>
-          val spec = QueryArgs(funcName, args, combName, combParam.toSeq)
-          Success(ArgsAndPartSpec(spec, partSpec).withMetricFilter(options.metricColumn, allowScanAll))
-        }.getOrElse {
-          Failure(new IllegalArgumentException(s"Unable to parse function $funcName with option $paramOpt"))
-        }
+        val spec = QueryArgs(funcName, partSpec.column, paramOpt.toSeq,
+                             dataQuery(partSpec.timeSpec), combName, combParam.toSeq)
+        Success(ArgsAndPartSpec(spec, partSpec).withMetricFilter(options.metricColumn, allowScanAll))
 
       case VectorExprOnlyQuery(partSpec) =>
         // For now just return the last data point and list all series
-        val spec = QueryArgs("last", Seq("timestamp", partSpec.column))
+        val spec = QueryArgs("last", partSpec.column, Nil, dataQuery(partSpec.timeSpec))
         Success(ArgsAndPartSpec(spec, partSpec).withMetricFilter(options.metricColumn, allowScanAll))
 
       case other: PromQuery =>
@@ -144,17 +142,9 @@ class PromQLParser(val input: ParserInput,
     }
   }
 
-  private def evalArgs(func: String, paramOpt: Option[String], spec: PartitionSpec): Option[Seq[String]] = {
-    // For now, only parse the time aggregate functions
-    if (func.startsWith("time_group")) {
-      // arguments:  <timeColumn> <valueColumn> <startTs> <endTs> <numBuckets>
-      val numBuckets = paramOpt.map(_.toInt).getOrElse(50)
-      val endTs = System.currentTimeMillis
-      val startTs = endTs - (spec.range * 1000)
-      Some(Seq("timestamp", spec.column, startTs.toString, endTs.toString, numBuckets.toString))
-    } else {
-      // Assume a single-column function
-      Some(Seq(spec.column))
-    }
+  private def dataQuery(timeSpec: TimeSpec): DataQuery = timeSpec match {
+    case DurationSecs(secs) => MostRecentTime(secs * 1000)
+    case NoTimeSpecified    => MostRecentSample
+    case Special(word)      => ???
   }
 }

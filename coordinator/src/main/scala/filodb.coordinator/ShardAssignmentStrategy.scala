@@ -135,7 +135,8 @@ class DefaultShardAssignmentStrategy extends ShardAssignmentStrategy with Strict
 
   private def addShards(map: ShardMapper, dataset: DatasetRef, coordinator: ActorRef): AddShards = {
     val addHowMany = (shardToNodeRatio(dataset) * (map.allNodes.size + 1)).toInt - map.numAssignedShards
-    logger.debug(s"Add shards [dataset=$dataset, addHowMany=$addHowMany, unassignedShards=${map.unassignedShards}], numAssignedShards=${map.numAssignedShards}")
+    logger.debug(s"Add shards [dataset=$dataset, addHowMany=$addHowMany, " +
+                 s"unassignedShards=${map.unassignedShards}], numAssignedShards=${map.numAssignedShards}")
 
     if (addHowMany > 0) {
       val shardsToAdd = map.unassignedShards.take(addHowMany)

@@ -56,6 +56,8 @@ case class RichProjection(projection: Projection,
                           rowKeyType: KeyType,    // get rid of this too
                           partitionColumns: Seq[Column],
                           partitionColIndices: Seq[Int]) {
+  import Column.ColumnType._
+
   type RK = rowKeyType.T
   type PK = PartitionKey
 
@@ -72,6 +74,14 @@ case class RichProjection(projection: Projection,
 
   val rowKeyBinSchema = RecordSchema(rowKeyColumns)
   val binSchema = RecordSchema(nonPartitionColumns)
+
+  def isTimeSeries: Boolean = rowKeyColumns.head.columnType match {
+    case LongColumn           => true
+    case TimestampColumn      => true
+    case x: Column.ColumnType => false
+  }
+
+  def timestampColumn: Option[Column] = if (isTimeSeries) rowKeyColumns.headOption else None
 
   /**
    * Returns a new RichProjection with the specified database and everything else kept the same

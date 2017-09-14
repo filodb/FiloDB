@@ -54,7 +54,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     }
 
     val split = memStore.getScanSplits(projection1.datasetRef, 1).head
-    val query = QuerySpec(AggregationFunction.Sum, Seq("min"))
+    val query = QuerySpec("min", AggregationFunction.Sum)
     val agg1 = memStore.aggregate(projection1, 0, query, FilteredPartitionScan(split))
                        .get.runAsync.futureValue
     agg1.result should equal (Array((1 to 20).map(_.toDouble).sum))
@@ -66,7 +66,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     memStore.ingest(projection2.datasetRef, 0, data)
 
     val split = memStore.getScanSplits(projection2.datasetRef, 1).head
-    val query = QuerySpec(AggregationFunction.Sum, Seq("min"))
+    val query = QuerySpec("min", AggregationFunction.Sum)
     val filter = ColumnFilter("n", Filter.Equals("2".utf8))
     val agg1 = memStore.aggregate(projection2, 0, query, FilteredPartitionScan(split, Seq(filter)))
                        .get.runAsync.futureValue
@@ -124,7 +124,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     memStore.indexNames(projection2.datasetRef).toList should equal (
       Seq(("n", 0), ("series", 0), ("n", 1), ("series", 1)))
 
-    val query = QuerySpec(AggregationFunction.Sum, Seq("min"))
+    val query = QuerySpec("min", AggregationFunction.Sum)
     val filter = ColumnFilter("n", Filter.Equals("2".utf8))
     val agg1 = memStore.aggregate(projection2, 0, query, FilteredPartitionScan(splits.head, Seq(filter)))
                        .get.runAsync.futureValue
@@ -146,7 +146,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
 
     Thread sleep 1000
     val splits = memStore.getScanSplits(projection1.datasetRef, 1)
-    val query = QuerySpec(AggregationFunction.Sum, Seq("min"))
+    val query = QuerySpec("min", AggregationFunction.Sum)
     val agg1 = memStore.aggregate(projection1, 0, query, FilteredPartitionScan(splits.head))
                        .get.runAsync.futureValue
     agg1.result should equal (Array((1 to 100).map(_.toDouble).sum))

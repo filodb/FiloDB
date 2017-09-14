@@ -33,6 +33,11 @@ trait PartitionChunkIndex {
   def allChunks: InfosSkipsIt
 
   /**
+   * Returns the latest N chunk infos
+   */
+  def latestN(n: Int): InfosSkipsIt
+
+  /**
    * Returns the ChunkSetInfo and skips for a single chunk with startKey and id.
    * Depending on implementation, either only the id (which should be unique) or both may be used.
    * @return an iterator with a single item (ChunkSetInfo, skipArray) or empty iterator if not found
@@ -44,6 +49,7 @@ trait PartitionChunkIndex {
       case AllChunkScan             => allChunks
       case RowKeyChunkScan(k1, k2)  => rowKeyRange(k1.binRec, k2.binRec)
       case SingleChunkScan(key, id) => singleChunk(key.binRec, id)
+      case LastSampleChunkScan      => latestN(1)
     }
 }
 
@@ -111,6 +117,9 @@ extends MutablePartitionChunkIndex {
       (info, skipRows.get(info.id))
     }
 
+  // NOTE: latestN does not make sense for the RowkeyPartitionChunkIndex.
+  def latestN(n: Int): InfosSkipsIt = ???
+
   def remove(id: ChunkID): Unit = {
     infos.keySet.iterator.asScala
          .find(_._2 == id)
@@ -156,9 +165,6 @@ extends MutablePartitionChunkIndex {
   def singleChunk(startKey: BinaryRecord, id: ChunkID): InfosSkipsIt =
     infosSkips.subMap(id, true, id, true).values.iterator.asScala
 
-  /**
-   * Returns the latest N chunk infos
-   */
   def latestN(n: Int): InfosSkipsIt =
     infosSkips.descendingMap.values.iterator.asScala.take(n).toBuffer.reverse.toIterator
 

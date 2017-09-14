@@ -122,7 +122,7 @@ abstract class IngestionStreamClusterSpec extends ClusterSpec(IngestionStreamClu
     // Count all the records in every partition in every shard
     // counting a non-partition column... can't count a partition column yet
     val durationForCI = 30.seconds.dilated
-    val query = AggregateQuery(ref2, 0, QueryArgs("count", Seq("MonthYear")), FilteredPartitionQuery(Nil))
+    val query = AggregateQuery(ref2, 0, QueryArgs("count", "MonthYear"), FilteredPartitionQuery(Nil))
 
     def func: Array[Int] = {
       coordinatorActor ! query

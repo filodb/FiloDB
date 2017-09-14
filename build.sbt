@@ -46,6 +46,13 @@ lazy val cli = project
   .settings(cliAssemblySettings:_*)
   .dependsOn(core, coordinator, cassandra)
 
+lazy val tsgenerator = project
+  .in(file("tsgenerator"))
+  .settings(buildSettings:_*)
+  .settings(name := "tsgenerator")
+  .settings(libraryDependencies ++= tsgeneratorDeps)
+  .settings(tsgeneratorAssemblySettings:_*)
+
 lazy val kafka = project
   .in(file("kafka"))
   .settings(name := "filodb-kafka")
@@ -166,6 +173,11 @@ lazy val coordDeps = commonDeps ++ Seq(
 lazy val cliDeps = Seq(
   logbackDep,
   "com.quantifind"       %% "sumac"             % "0.3.0"
+)
+
+lazy val tsgeneratorDeps = Seq(
+  logbackDep,
+  "io.monix" %% "monix-kafka-10" % "0.14"
 )
 
 lazy val sparkDeps = Seq(
@@ -297,6 +309,11 @@ lazy val cliAssemblySettings = assemblySettings ++ Seq(
   assemblyOption in assembly := (assemblyOption in assembly).value.copy(
                                   prependShellScript = Some(shellScript)),
   assemblyJarName in assembly := s"filo-cli-${version.value}"
+)
+
+// builds timeseries-gen as a far jar so it can be executed for development test scenarios
+lazy val tsgeneratorAssemblySettings = assemblySettings ++ Seq(
+  assemblyJarName in assembly := s"tsgenerator-${version.value}"
 )
 
 // Create a new MergeStrategy for aop.xml files

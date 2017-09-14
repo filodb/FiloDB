@@ -49,9 +49,6 @@ extends ChunkAggregator {
     orig
   }
 
-  override def chunkScan(projection: RichProjection): Option[ChunkScanMethod] =
-    Some(RowKeyChunkScan(BinaryRecord(projection, Seq(startTime)), BinaryRecord(projection, Seq(endTime))))
-
   def aggNoNAs(agg: A, tv: BinaryVector[Long], vv: BinaryVector[T], numRows: Int): Unit
   def aggWithNAs(agg: A, tv: FiloVector[Long], vv: FiloVector[T], numRows: Int): Unit
 }
