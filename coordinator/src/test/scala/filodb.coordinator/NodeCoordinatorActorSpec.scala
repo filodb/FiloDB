@@ -72,7 +72,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
     memStore.reset()
     shardMap.clear()
 
-    coordinatorActor = system.actorOf(nodeCoordProps, "test-node-coord")
+    coordinatorActor = system.actorOf(nodeCoordProps, s"test-node-coord-${System.nanoTime}")
 
     shardActor ! SubscribeCoordinator(coordinatorActor)
     expectMsg(CoordinatorSubscribed(coordinatorActor, Seq.empty))
@@ -151,7 +151,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       probe.expectMsg(DatasetDropped)
 
       // Now verify that the dataset was indeed dropped
-      metaStore.getDataset(ref).failed.futureValue shouldBe a [NotFoundError]
+      metaStore.getDataset(ref).failed.futureValue shouldBe a[NotFoundError]
     }
   }
 
