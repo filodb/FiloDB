@@ -1,13 +1,17 @@
 package filodb.standalone
 
+import scala.util.control.NonFatal
+
 import akka.actor.ActorSystem
+import akka.cluster.Cluster
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
-import net.ceedubs.ficus.Ficus._
-
+import filodb.akkabootstrapper.AkkaBootstrapper
 import filodb.coordinator._
 import filodb.coordinator.client.LocalClient
 import filodb.core.metadata.{Column, DataColumn, Dataset}
+import filodb.http.FiloHttpServer
+import net.ceedubs.ficus.Ficus._
 
 /**
  * FiloServer starts a "standalone" FiloDB server which can ingest and support queries through the Akka
@@ -51,17 +55,31 @@ object FiloServer extends FilodbClusterNode with StrictLogging {
 
   val config = settings.config
 
-  def main(args: Array[String]): Unit = {
-    import settings._
-    cluster.kamonInit(role)
-    coordinatorActor
-    scala.concurrent.Await.result(metaStore.initialize(), InitializationTimeout)
-    cluster.joinSeedNodes()
-    cluster.clusterSingletonProxy(roleName, withManager = true)
-    cluster._isInitialized.set(true)
+  def bootstrap(akkaCluster: Cluster): Unit = {
+    val bootstrapper = AkkaBootstrapper(akkaCluster)
+    bootstrapper.bootstrap()
+    val filoHttpServer = new FiloHttpServer(akkaCluster.system)
+    filoHttpServer.start(bootstrapper.getAkkaHttpRoute())
+  }
 
-    settings.DatasetDefinitions.foreach { case (datasetName, datasetConf) =>
-      createDatasetFromConfig(datasetName, datasetConf)
+  def main(args: Array[String]): Unit = {
+    try {
+      import settings._
+      cluster.kamonInit(role)
+      coordinatorActor
+      scala.concurrent.Await.result(metaStore.initialize(), InitializationTimeout)
+      bootstrap(cluster.cluster)
+      cluster.clusterSingletonProxy(roleName, withManager = true)
+      cluster._isInitialized.set(true)
+
+      settings.DatasetDefinitions.foreach { case (datasetName, datasetConf) =>
+        createDatasetFromConfig(datasetName, datasetConf)
+      }
+    } catch {
+      // if there is an error in the initialization, we need to fail fast so that the process can be rescheduled
+      case NonFatal(e) =>
+        logger.error("Could not initialize server", e)
+        cluster.cluster.system.terminate()
     }
   }
 
@@ -92,4 +110,6 @@ object FiloServer extends FilodbClusterNode with StrictLogging {
   Runtime.getRuntime.addShutdownHook(new Thread() {
     override def run(): Unit = shutdown()
   })
+
+
 }

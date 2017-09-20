@@ -53,6 +53,20 @@ lazy val tsgenerator = project
   .settings(libraryDependencies ++= tsgeneratorDeps)
   .settings(tsgeneratorAssemblySettings:_*)
 
+lazy val bootstrapper = project
+  .in(file("akka-bootstrapper"))
+  .settings(buildSettings:_*)
+  .settings(name := "akka-bootstrapper")
+  .settings(libraryDependencies ++= bootstrapperDeps)
+  .configs(MultiJvm)
+
+lazy val http = project
+  .in(file("http"))
+  .settings(buildSettings:_*)
+  .settings(name := "http")
+  .settings(libraryDependencies ++= httpDeps)
+  .dependsOn(core)
+
 lazy val kafka = project
   .in(file("kafka"))
   .settings(name := "filodb-kafka")
@@ -70,7 +84,7 @@ lazy val standalone = project
   .settings(buildSettings:_*)
   .settings(assemblySettings:_*)
   .settings(libraryDependencies += logbackDep)
-  .dependsOn(core, coordinator % "compile->compile; test->test", cassandra, kafka)
+  .dependsOn(core, coordinator % "compile->compile; test->test", cassandra, kafka, http, bootstrapper)
 
 lazy val spark = project
   .in(file("spark"))
@@ -108,6 +122,7 @@ lazy val stress = project
 val cassDriverVersion = "3.0.2"
 val akkaVersion    = "2.5.4"
 val sparkVersion   = "2.0.0"
+val akkaHttpVersion = "10.0.10"
 
 lazy val extraRepos = Seq(
   "Velvia Bintray" at "https://dl.bintray.com/velvia/maven",
@@ -123,16 +138,20 @@ val excludeJersey = ExclusionRule(organization = "com.sun.jersey")
 
 val logbackDep = "ch.qos.logback"        % "logback-classic"   % "1.1.7"
 val log4jDep   = "log4j"                 % "log4j"             % "1.2.17"
+val scalaLoggingDep = "com.typesafe.scala-logging" %% "scala-logging" % "3.5.0"
+val scalaTest = "org.scalatest"        %% "scalatest"         % "2.2.4"
+val akkaHttp = "com.typesafe.akka"    %% "akka-http"        %  akkaHttpVersion
+val akkaHttpSprayJson = "com.typesafe.akka" %% "akka-http-spray-json"   % akkaHttpVersion
 
 lazy val commonDeps = Seq(
   "io.kamon"             %% "kamon-core"        % "0.6.0", logbackDep % "test",
-  "org.scalatest"        %% "scalatest"         % "2.2.4" % "test"
+  scalaTest  % "test"
 )
 
 lazy val scalaxyDep = "com.nativelibs4java"  %% "scalaxy-loops"     % "0.3.3" % "provided"
 
 lazy val coreDeps = commonDeps ++ Seq(
-  "com.typesafe.scala-logging" %% "scala-logging" % "3.5.0",
+  scalaLoggingDep,
   "org.slf4j"             % "slf4j-api"         % "1.7.10",
   "com.beachape"         %% "enumeratum"        % "1.5.10",
   "org.velvia.filo"      %% "filo-scala"        % "0.3.6",
@@ -180,12 +199,33 @@ lazy val tsgeneratorDeps = Seq(
   "io.monix" %% "monix-kafka-10" % "0.14"
 )
 
+lazy val httpDeps = Seq(
+  logbackDep,
+  akkaHttp,
+  akkaHttpSprayJson
+)
+
+lazy val bootstrapperDeps = Seq(
+  logbackDep,
+  scalaLoggingDep,
+  "com.typesafe.akka"            %% "akka-cluster"            % akkaVersion,
+  // akka http should be a compile time dependency only. Users of this library may want to use a different http server
+  akkaHttp          % "test; provided",
+  akkaHttpSprayJson % "test; provided",
+  "com.typesafe.akka"            %% "akka-slf4j"              % akkaVersion,
+  "dnsjava"                      %  "dnsjava"                 % "2.1.8",
+  "org.scalaj"                   %% "scalaj-http"             % "2.3.0",
+  "com.typesafe.akka"            %% "akka-testkit"            % akkaVersion   % Test,
+  "com.typesafe.akka"            %% "akka-multi-node-testkit" % akkaVersion   % Test,
+    scalaTest   % Test
+)
+
 lazy val sparkDeps = Seq(
   // We don't want LOG4J.  We want Logback!  The excludeZK is to help with a conflict re Coursier plugin.
   "org.apache.spark"     %% "spark-hive"        % sparkVersion % "provided" excludeAll(excludeSlf4jLog4j, excludeZK),
   "org.apache.spark"     %% "spark-hive-thriftserver" % sparkVersion % "provided" excludeAll(excludeSlf4jLog4j, excludeZK),
   "org.apache.spark"     %% "spark-streaming"   % sparkVersion % "provided",
-  "org.scalatest"        %% "scalatest"         % "2.2.4" % "it"
+  scalaTest % "it"
 )
 
 lazy val jmhDeps = Seq(
@@ -216,6 +256,7 @@ lazy val coreSettings = Seq(
 lazy val testSettings = Seq(
   parallelExecution in Test := false,
   fork in Test := true,
+  testOptions in Test += Tests.Argument(TestFrameworks.ScalaTest, "-oF"),
   // Uncomment below to debug Typesafe Config file loading
   // javaOptions ++= List("-Xmx2G", "-Dconfig.trace=loads"),
   javaOptions ++= List("-Xmx2G"),

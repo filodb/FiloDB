@@ -14,11 +14,11 @@
         <!--for further documentation-->
 
         <!-- This is where the current log file is written -->
-        <file>${LOG_DIR}/filodb-server.log</file>
+        <file>${LOG_DIR:-logs}/filodb-server-${logSuffix:-1}.log</file>
 
         <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
             <!-- daily rollover -->
-            <fileNamePattern>${LOG_DIR}/filodb-server.%d{yyyy-MM-dd}.log</fileNamePattern>
+            <fileNamePattern>${LOG_DIR}/filodb-server-${logSuffix:-1}.%d{yyyy-MM-dd}.log</fileNamePattern>
 
             <!-- keep 30 days' worth of history -->
             <maxHistory>30</maxHistory>

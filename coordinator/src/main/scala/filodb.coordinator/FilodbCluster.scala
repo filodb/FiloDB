@@ -42,6 +42,7 @@ object FilodbCluster extends ExtensionId[FilodbCluster] with ExtensionIdProvider
   * Coordinator Extension Id and factory for creating a basic Coordinator extension.
   */
 final class FilodbCluster(system: ExtendedActorSystem) extends Extension with StrictLogging {
+
   import NodeProtocol._
   import ActorName.{NodeGuardianName => guardianName}
   import akka.pattern.ask
@@ -63,7 +64,7 @@ final class FilodbCluster(system: ExtendedActorSystem) extends Extension with St
 
   private val _clusterActor = new AtomicReference[Option[ActorRef]](None)
 
-  private[coordinator] lazy val cluster = {
+  private[filodb] lazy val cluster = {
     val _cluster = Cluster(system)
     logger.info(s"Cluster node starting on ${_cluster.selfAddress}")
     _cluster
@@ -124,6 +125,9 @@ final class FilodbCluster(system: ExtendedActorSystem) extends Extension with St
     * This action ensures the cluster is joined only after the `NodeCoordinatorActor` is created.
     * This is so that when the NodeClusterActor discovers the joined node, it can find the coordinator right away.
     * Used by FiloDB server.
+    *
+    * This is a static way to join the cluster. For a more dynamic way to join the cluster,
+    * see the akka-bootstrapper module.
     *
     * INTERNAL API.
     */
