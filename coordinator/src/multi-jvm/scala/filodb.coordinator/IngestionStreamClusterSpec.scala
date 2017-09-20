@@ -66,7 +66,7 @@ abstract class IngestionStreamClusterSpec extends ClusterSpec(IngestionStreamClu
     // Start NodeCoordinator on all nodes so the ClusterActor will register them
     coordinatorActor
     cluster join address1
-    awaitCond(cluster.state.members.size == 2)
+    awaitCond(cluster.isJoined)
     enterBarrier("both-nodes-joined-cluster")
 
     clusterActor = cluster.clusterSingletonProxy("worker", withManager = true)

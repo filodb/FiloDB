@@ -86,7 +86,7 @@ abstract class KafkaIngestionClusterSpec extends ClusterSpec(KafkaIngestionClust
     // Start NodeCoordinator on all nodes so the ClusterActor will register them
     cluster.coordinatorActor
     cluster join address1
-    awaitCond(cluster.state.members.size == 2)
+    awaitCond(cluster.isJoined)
     enterBarrier("both-nodes-joined-cluster")
 
     val clusterActor = cluster.clusterSingletonProxy("worker", withManager = true)

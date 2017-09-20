@@ -63,7 +63,7 @@ abstract class NodeClusterSpec extends ClusterSpec(NodeClusterSpecConfig) {
 
     runOn(first) {
       cluster join address1
-      awaitCond(cluster.state.members.size == 1)
+      awaitCond(cluster.isJoined)
 
       clusterActor = cluster.clusterSingletonProxy("worker", withManager = true)
     }
@@ -155,7 +155,7 @@ abstract class NodeClusterSpec extends ClusterSpec(NodeClusterSpecConfig) {
  it("should get ShardMapper updates and have shards assigned when new node joins") {
     runOn(second) {
       cluster join address1
-      awaitCond(cluster.state.members.size == 2)
+      awaitCond(cluster.isJoined)
       clusterActor = cluster.clusterSingletonProxy("worker", withManager = true)
     }
 
