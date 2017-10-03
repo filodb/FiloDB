@@ -275,12 +275,13 @@ lazy val testSettings = Seq(
 // Fork a separate JVM for each test, instead of one for all tests in a module.
 // This is necessary for Spark tests due to initialization, for example
 lazy val jvmPerTestSettings = {
-  import Tests._
-
   def jvmPerTest(tests: Seq[TestDefinition]) =
     tests map { test =>
-      new Group(test.name, Seq(test), SubProcess(Nil))
-    } toSeq
+      Tests.Group(
+        name = test.name,
+        tests = Seq(test),
+        runPolicy = Tests.SubProcess(ForkOptions(runJVMOptions = Seq.empty[String])))
+    }
 
   Seq(testGrouping in Test := ((definedTests in Test) map jvmPerTest).value)
 }
@@ -350,7 +351,7 @@ lazy val cliAssemblySettings = assemblySettings ++ Seq(
   assemblyJarName in assembly := s"filo-cli-${version.value}"
 )
 
-// builds timeseries-gen as a far jar so it can be executed for development test scenarios
+// builds timeseries-gen as a fat jar so it can be executed for development test scenarios
 lazy val tsgeneratorAssemblySettings = assemblySettings ++ Seq(
   assemblyJarName in assembly := s"tsgenerator-${version.value}"
 )
