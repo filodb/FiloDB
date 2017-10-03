@@ -7,9 +7,7 @@ import akka.cluster.Cluster
 import monix.execution.Scheduler
 
 import filodb.core.FutureUtils
-import filodb.core.memstore.TimeSeriesMemStore
-import filodb.core.reprojector.SegmentStateCache
-import filodb.core.store.{ColumnStore, ColumnStoreScanner, MetaStore}
+import filodb.core.store.MetaStore
 
 class SupervisorSpec extends AkkaSpec {
 
@@ -26,13 +24,11 @@ class SupervisorSpec extends AkkaSpec {
   private lazy val readEc = ec
 
   private lazy val factory = StoreFactory(settings, ec, readEc)
-  private lazy val columnStore: ColumnStore with ColumnStoreScanner = factory.columnStore
   private lazy val metaStore: MetaStore = factory.metaStore
-  private lazy val stateCache = new SegmentStateCache(config, columnStore)
-  private lazy val memStore = new TimeSeriesMemStore(config)
+  private lazy val memStore = factory.memStore
   private lazy val assignmentStrategy = new DefaultShardAssignmentStrategy
-  private lazy val coordinatorProps = NodeCoordinatorActor.props(metaStore, memStore, columnStore, cluster.selfAddress, config)
-  private lazy val guardianProps = NodeGuardian.props(filoCluster, cluster, metaStore, memStore, columnStore, assignmentStrategy)
+  private lazy val coordinatorProps = NodeCoordinatorActor.props(metaStore, memStore, cluster.selfAddress, config)
+  private lazy val guardianProps = NodeGuardian.props(filoCluster, cluster, metaStore, memStore, assignmentStrategy)
   private lazy val cluster = Cluster(system)
 
   "NodeGuardian" must {

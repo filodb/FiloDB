@@ -12,7 +12,6 @@ final class NodeGuardian(extension: FilodbCluster,
                          cluster: Cluster,
                          metaStore: MetaStore,
                          memStore: MemStore,
-                         columnStore: ColumnStore,
                          assignmentStrategy: ShardAssignmentStrategy
                         ) extends GracefulStopAwareSupervisor {
 
@@ -80,7 +79,7 @@ final class NodeGuardian(extension: FilodbCluster,
     */
   private def createCoordinator(requester: ActorRef): Unit = {
     val actor = context.child(CoordinatorName) getOrElse {
-      val props = NodeCoordinatorActor.props(metaStore, memStore, columnStore, cluster.selfAddress, settings.config)
+      val props = NodeCoordinatorActor.props(metaStore, memStore, cluster.selfAddress, settings.config)
       context.actorOf(props, CoordinatorName) }
 
     requester ! CoordinatorRef(actor)
@@ -136,9 +135,8 @@ private[filodb] object NodeGuardian {
             cluster: Cluster,
             metaStore: MetaStore,
             memStore: MemStore,
-            columnStore: ColumnStore,
             assignmentStrategy: ShardAssignmentStrategy): Props =
-    Props(new NodeGuardian(extension, cluster, metaStore, memStore, columnStore, assignmentStrategy))
+    Props(new NodeGuardian(extension, cluster, metaStore, memStore, assignmentStrategy))
 }
 
 /** Management and task actions on the local node.

@@ -42,8 +42,7 @@ class IntSumReadBenchmark {
   import IntSumReadBenchmark._
   val NumRows = 10000
 
-  val state = new TestSegmentState(projection, schema)
-  val chunkSet = ChunkSet(state, rowIt.map(TupleRowReader).take(NumRows))
+  val chunkSet = ChunkSet(projection, partKey, rowIt.map(TupleRowReader).take(NumRows).toSeq)
   val reader = ChunkSetReader(chunkSet, partKey, schema)
 
   val NumSkips = 300  // 3% skips - not that much really

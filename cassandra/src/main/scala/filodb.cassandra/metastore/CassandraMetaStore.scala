@@ -5,7 +5,7 @@ import scala.concurrent.{ExecutionContext, Future}
 
 import filodb.cassandra.{DefaultFiloSessionProvider, FiloSessionProvider}
 import filodb.core._
-import filodb.core.metadata.{Column, DataColumn, Dataset, IngestionStateData}
+import filodb.core.metadata.{Column, DataColumn, Dataset}
 import filodb.core.store.MetaStore
 
 /**
@@ -19,22 +19,19 @@ class CassandraMetaStore(config: Config, filoSessionProvider: Option[FiloSession
   private val sessionProvider = filoSessionProvider.getOrElse(new DefaultFiloSessionProvider(config))
   val datasetTable = new DatasetTable(config, sessionProvider)
   val columnTable = new ColumnTable(config, sessionProvider)
-  val ingestionStateTable = new IngestionStateTable(config, sessionProvider)
 
   val defaultKeySpace = config.getString("keyspace")
 
   def initialize(): Future[Response] = {
     datasetTable.createKeyspace(datasetTable.keyspace)
     for { dtResp <- datasetTable.initialize()
-          ctResp <- columnTable.initialize()
-          istResp <- ingestionStateTable.initialize() }
+          ctResp <- columnTable.initialize() }
     yield { ctResp }
   }
 
   def clearAllData(): Future[Response] =
     for { dtResp <- datasetTable.clearAll()
-          ctResp <- columnTable.clearAll()
-          istResp <- ingestionStateTable.clearAll() }
+          ctResp <- columnTable.clearAll() }
     yield { ctResp }
 
   def newDataset(dataset: Dataset): Future[Response] =
@@ -61,25 +58,4 @@ class CassandraMetaStore(config: Config, filoSessionProvider: Option[FiloSession
     datasetTable.shutdown()
     columnTable.shutdown()
   }
-
-  def insertIngestionState(actorAddress: String, dataset: DatasetRef, columns: String,
-                           state: String, version: Int, exceptions: String = ""): Future[Response] =
-    ingestionStateTable.insertIngestionState(actorAddress,
-                                            dataset.database.getOrElse(defaultKeySpace),
-                                            dataset.dataset,
-                                            version,
-                                            columns,
-                                            state)
-
-  def getAllIngestionEntries(actorPath: String): Future[Seq[IngestionStateData]] =
-    ingestionStateTable.getIngestionStateByNodeActor(actorPath)
-
-  def updateIngestionState(actorAddress: String, dataset: DatasetRef,
-                           state: String, exceptions: String, version: Int ): Future[Response] =
-    ingestionStateTable.updateIngestionState(actorAddress,
-                                            dataset.database.getOrElse(defaultKeySpace),
-                                            dataset.dataset,
-                                            state,
-                                            exceptions,
-                                            version)
 }

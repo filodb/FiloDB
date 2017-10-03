@@ -9,7 +9,7 @@ import filodb.cassandra.FiloCassandraConnector
 import filodb.core._
 import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.metadata.RichProjection
-import filodb.core.store.ColumnStoreStats
+import filodb.core.store.ChunkSinkStats
 
 // Typical record read from serialized incremental index (ChunkInfo + Skips) entries
 case class IndexRecord(binPartition: ByteBuffer, data: ByteBuffer) {
@@ -90,7 +90,7 @@ sealed class IndexTable(val dataset: DatasetRef, val connector: FiloCassandraCon
   def writeIndices(partition: Types.PartitionKey,
                    version: Int,
                    indices: Seq[(Types.ChunkID, Array[Byte])],
-                   stats: ColumnStoreStats): Future[Response] = {
+                   stats: ChunkSinkStats): Future[Response] = {
     var indexBytes = 0
     val partitionBuf = toBuffer(partition)
     val statements = indices.map { case (chunkId, indexData) =>

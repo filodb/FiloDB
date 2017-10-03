@@ -2,9 +2,14 @@ package filodb.core
 
 import com.github.rholder.fauxflake.IdGenerators
 import java.nio.ByteBuffer
+import monix.eval.Task
 import net.jpountz.lz4.{LZ4Factory, LZ4Compressor, LZ4FastDecompressor}
+import org.scalactic._
+import org.velvia.filo.RowReader
 
+import filodb.core.metadata.{Column, InvalidFunctionSpec, RichProjection}
 import filodb.core.SingleKeyTypes.Long64HighBit
+import filodb.core.query._
 
 package object store {
   val compressor = new ThreadLocal[LZ4Compressor]()
@@ -80,5 +85,92 @@ package object store {
     (machineId1024 << machIdBitOffset) |
     ((System.nanoTime >> baseNsBitOffset) & nanoBitMask) ^
     Long64HighBit
+  }
+
+  /**
+   * Adds a few useful methods to ChunkSource
+   */
+  implicit class RichChunkSource(source: ChunkSource) {
+    import ChunkSetReader._
+    import Iterators._
+
+    def aggregate(projection: RichProjection,
+                  version: Int,
+                  query: QuerySpec,
+                  partMethod: PartitionScanMethod,
+                  chunkMethod: ChunkScanMethod = AllChunkScan): Task[Aggregate[_]] Or InvalidFunctionSpec = {
+      for { aggregator <- query.aggregateFunc.validate(query.column, projection.timestampColumn.map(_.name),
+                                                       chunkMethod, query.aggregateArgs, projection)
+            combiner   <- query.combinerFunc.validate(aggregator, query.combinerArgs) }
+      yield {
+        val aggStream = source.scanPartitions(projection, version, partMethod)
+                          .map { partition => aggregator.aggPartition(chunkMethod, partition) }
+        combiner.fold(aggStream)
+      }
+    }
+
+    /**
+     * Scans chunks from a dataset.  ScanMethod params determines what gets scanned.
+     *
+     * @param projection the Projection to read from
+     * @param columns the set of columns to read back.  Order determines the order of columns read back
+     *                in each row
+     * @param version the version # to read from
+     * @param partMethod which partitions to scan
+     * @param chunkMethod which chunks within a partition to scan
+     * @return An iterator over ChunkSetReaders
+     */
+    def scanChunks(projection: RichProjection,
+                   columns: Seq[Column],
+                   version: Int,
+                   partMethod: PartitionScanMethod,
+                   chunkMethod: ChunkScanMethod = AllChunkScan,
+                   colToMaker: ColumnToMaker = defaultColumnToMaker): Iterator[ChunkSetReader] =
+      source.readChunks(projection, columns, version, partMethod, chunkMethod, colToMaker).toIterator()
+
+    /**
+     * Scans over chunks, just like scanChunks, but returns an iterator of RowReader
+     * for all of those row-oriented applications.  Contains a high performance iterator
+     * implementation, probably faster than trying to do it yourself.  :)
+     */
+    def scanRows(projection: RichProjection,
+                 columns: Seq[Column],
+                 version: Int,
+                 partMethod: PartitionScanMethod,
+                 chunkMethod: ChunkScanMethod = AllChunkScan,
+                 colToMaker: ColumnToMaker = defaultColumnToMaker,
+                 readerFactory: RowReaderFactory = DefaultReaderFactory): Iterator[RowReader] = {
+      val chunkIt = scanChunks(projection, columns, version, partMethod, chunkMethod, colToMaker)
+      if (chunkIt.hasNext) {
+        // TODO: fork this kind of code into a macro, called fastFlatMap.
+        // That's what we really need...  :-p
+        new Iterator[RowReader] {
+          final def getNextRowIt: Iterator[RowReader] = {
+            val chunkReader = chunkIt.next
+            chunkReader.rowIterator(readerFactory)
+          }
+
+          var rowIt: Iterator[RowReader] = getNextRowIt
+
+          final def hasNext: Boolean = {
+            var _hasNext = rowIt.hasNext
+            while (!_hasNext) {
+              if (chunkIt.hasNext) {
+                rowIt = getNextRowIt
+                _hasNext = rowIt.hasNext
+              } else {
+                // all done. No more chunks.
+                return false
+              }
+            }
+            _hasNext
+          }
+
+          final def next: RowReader = rowIt.next.asInstanceOf[RowReader]
+        }
+      } else {
+        Iterator.empty
+      }
+    }
   }
 }

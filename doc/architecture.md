@@ -2,15 +2,21 @@
 <!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
 **Table of Contents**  *generated with [DocToc](https://github.com/thlorenz/doctoc)*
 
-- [FiloDB Architecture and Code Overview](#filodb-architecture-overview)
+- [FiloDB Architecture and Code Overview](#filodb-architecture-and-code-overview)
   - [Coordinator](#coordinator)
   - [Core](#core)
   - [Cassandra](#cassandra)
   - [Spark](#spark)
+  - [Kafka](#kafka)
+  - [HTTP](#http)
+  - [Standalone](#standalone)
+  - [CLI](#cli)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
 ## FiloDB Architecture and Code Overview
+
+TODO: redo, this is way outdated
 
 ![FiloDB Architecture](filodb_architecture.png)
 
@@ -24,16 +30,14 @@ Clients such as Spark and the CLI implement source actors that extend the [RowSo
 
 ### Core
 
-These components form the core part of FiloDB and are portable across data stores.
+These components form the core part of FiloDB and are portable across data stores.  Subcomponents:
 
-Ingested rows come from the `DatasetCoordinatorActor` into a [MemTable](../core/src/main/scala/filodb.core/reprojector/MemTable.scala), of which there is only one implementation currently, the [FiloMemTable](../core/src/main/scala/filodb.core/reprojector/FiloMemTable.scala).  MemTables hold enough rows so they can be chunked efficiently.  MemTables are flushed to the columnstore using the [Reprojector](../core/src/main/scala/filodb.core/reprojector/Reprojector.scala) based on scheduling and policies set by the `DatasetCoordinatorActor`.  The rows in the `MemTable` form Segments (see [Segment.scala](../core/src/main/scala/filodb.core/store/Segment.scala)) and are appended to the [ColumnStore](../core/src/main/scala/filodb.core/store/ColumnStore).
-
-The core module has an [InMemoryColumnStore](../core/src/main/scala/filodb.core/store/InMemoryColumnStore.scala), a full `ColumnStore` implementation used for both testing and low-latency in-memory Spark queries.
-
-On the read side, the [ColumnStoreScanner](../core/src/main/scala/filodb.core/store/ColumnStoreScanner.scala) contains APIs for reading out segments and rows using various `ScanMethod`s - there are ones for single partition queries, queries that span multiple partitions using custom filtering functions, etc.  Helper functions in [KeyFilter](../core/src/main/scala/filodb.core/query/KeyFilter.scala) help compose functions for filtered scanning.
-
-All `ColumnStore` and `MetaStore` APIs are Scala Future based to take maximum advantage of CPU and nonblocking behavior.
-
+* `binaryrecord` - used for supporting efficient, no-serialization, multi-schema partition keys and for serializing rows for Spark ingestion
+* `memstore` - a [MemStore](../core/src/main/scala/filodb.core/memstore/MemStore.scala) ingests records, encodes them into columnar chunks, and allows for real-time querying through the `ChunkSource` API.  The current implementation is a [TimeSeriesMemStore](../core/src/main/scala/filodb.core/memstore/TimeSeriesMemStore.scala) which is designed for very high cardinality time series data.  For each dataset it stores one or more shards, each of which may contain many many thousands of [TimeSeriesPartition](../core/src/main/scala/filodb.core/memstore/TimeSeriesPartition.scala) instances.  MemStores also manage persistence of encoded data via `ChunkSink`s.
+* `store` - contains the main APIs for persistence and chunk reading, including [ChunkSource](../core/src/main/scala/filodb.core/store/ChunkSourceSink.scala) and `ChunkSink`, as well as the [MetaStore](../core/src/main/scala/filodb.core/store/MetaStore.scala) for metadata persistence.  Most of the APIs are based on reactive streams for backpressure handling.
+* `query` - contains aggregation and querying logic built on top of `ChunkSource`s.
+* `metadata` - Dataset and Column definitions
+* 
 FiloDB datasets consists of one or more projections, each of which contains columns.  The [MetaStore](../core/src/main/scala/filodb.core/store/MetaStore.scala) defines an API for concurrent reads/writes/updates on dataset, projection, and column metadata.  Each [Column](../core/src/main/scala/filodb.core/metadata/Column.scala) has a `ColumnType`, which has a [KeyType](../core/src/main/scala/filodb.core/metadata/KeyType.scala).  `KeyType` is a fundamental type class defining serialization and extraction for each type of column/key.  Most of FiloDB depends heavily on [RichProjection](../core/src/main/scala/filodb.core/metadata/Projection.scala), which contains the partition, row, and segment key columns and their `KeyType`s.
 
 ### Cassandra
@@ -43,3 +47,17 @@ An implementation of ColumnStore and MetaStore for Apache Cassandra.
 ### Spark
 
 Contains the Spark input source for ingesting and querying data from FiloDB.
+
+### Kafka
+
+Contains the Kafka ingestion source for FiloDB standalone
+
+### HTTP
+
+### Standalone
+
+The standalone module is used for FiloDB real-time direct ingestion (from Kafka) and querying without Spark, for metrics and event use cases.
+
+### CLI
+
+Contains the client CLI for setting up datasets and connecting with a FiloDB standalone cluster for direct querying using PromQL.

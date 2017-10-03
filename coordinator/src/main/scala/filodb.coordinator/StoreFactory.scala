@@ -6,22 +6,22 @@ import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
 
 import filodb.core.store._
+import filodb.core.memstore.{MemStore, TimeSeriesMemStore}
 
 /** Strategies from configuration or type. */
-abstract class StoreStrategy
+sealed trait StoreStrategy
 object StoreStrategy {
   case object InMemory extends StoreStrategy
-  final case class Configured(name: String) extends StoreStrategy
+  final case class Configured(fqcn: String) extends StoreStrategy
 }
 
 /**
-  * A StoreFactory creates instances of ColumnStore and MetaStore one time.  The columnStore and metaStore
+  * A StoreFactory creates instances of MemStore and MetaStore one time.  The memStore and metaStore
   * methods should return that created instance every time, not create a new instance.  The implementation
-  * should be a class that is passed a single parameter, the CoordinatorSetup instance with config,
-  * ExecutionContext, etc.
+  * should be a class that is passed three params, the FilodbSettings, then two ExecutionContexts
   */
 trait StoreFactory {
-  def columnStore: ColumnStore with ColumnStoreScanner
+  def memStore: MemStore
   def metaStore: MetaStore
 }
 
@@ -32,7 +32,7 @@ object StoreFactory extends Instance with StrictLogging {
 
     settings.StorageStrategy match {
       case StoreStrategy.InMemory =>
-        new InMemoryStoreFactory(ec, readEc)
+        new InMemoryStoreFactory(settings.config, ec)
 
       case StoreStrategy.Configured(fqcn) =>
         createClass(fqcn)
@@ -46,15 +46,14 @@ object StoreFactory extends Instance with StrictLogging {
           }
           .recover { case e: ClassNotFoundException =>
             logger.error(s"Configured StoreFactory class '$fqcn' not found on classpath. Falling back to in-memory.", e)
-            new InMemoryStoreFactory(ec, readEc)
-          }.getOrElse(new InMemoryStoreFactory(ec, readEc))
+            new InMemoryStoreFactory(settings.config, ec)
+          }.getOrElse(new InMemoryStoreFactory(settings.config, ec))
     }
 }
 
-class InMemoryStoreFactory(executionContext: ExecutionContext,
-                           readExecutionContext: ExecutionContext) extends StoreFactory {
+class InMemoryStoreFactory(config: Config, executionContext: ExecutionContext) extends StoreFactory {
   implicit val ec = executionContext
-  val columnStore = new InMemoryColumnStore(readExecutionContext)
+  val memStore = new TimeSeriesMemStore(config)
   val metaStore = SingleJvmInMemoryStore.metaStore
 }
 

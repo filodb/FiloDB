@@ -24,7 +24,6 @@ class ClusterIngestTest extends SparkTestBase {
                                  .config("spark.executor.extraClassPath", currClassPath)
                                  .config("spark.filodb.cassandra.keyspace", "unittest")
                                  .config("spark.filodb.cassandra.admin-keyspace", "unittest")
-                                 .config("spark.filodb.memtable.min-free-mb", "10")
                                  .config("spark.ui.enabled", "false")
                                  .getOrCreate
   val sc = sess.sparkContext
@@ -34,7 +33,7 @@ class ClusterIngestTest extends SparkTestBase {
   import org.apache.spark.sql.functions._
 
   val segCol = ":string 0"
-  val testProjections = Seq(dataset1.projections.head)
+  val testDatasets = Seq(projection1.datasetRef)
 
   it("should be able to write in cluster with multi-column partition keys") {
     import sess.implicits._

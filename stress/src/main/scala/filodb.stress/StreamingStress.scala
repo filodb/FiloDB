@@ -50,7 +50,7 @@ object StreamingStress extends App {
 
   puts(s"Truncating dataset (if it exists already)...")
   try {
-    FiloDriver.client.truncateDataset(ref, 0)
+    FiloDriver.client.truncateDataset(ref)
   } catch {
     case filodb.coordinator.client.ClientException(e) => puts(s"Ignoring error $e")
   }

@@ -3,6 +3,7 @@ package filodb.core
 import bloomfilter.mutable.BloomFilter
 import java.nio.ByteBuffer
 import java.sql.Timestamp
+import monix.reactive.Observable
 import org.joda.time.DateTime
 import org.velvia.filo._
 import org.velvia.filo.ZeroCopyUTF8String._
@@ -18,37 +19,12 @@ import filodb.core.query.{ChunkSetReader, MutablePartitionChunkIndex, RowkeyPart
 import filodb.core.store._
 import filodb.core.Types.PartitionKey
 
-class TestSegmentState(projection: RichProjection,
-                       index: MutablePartitionChunkIndex,
-                       schema: Seq[Column],
-                       settings: SegmentStateSettings)
-extends SegmentState(projection, index, schema, settings) {
-
-  def this(projection: RichProjection,
-           schema: Seq[Column],
-           partition: PartitionKey = NamesTestData.defaultPartKey,
-           settings: SegmentStateSettings = SegmentStateSettings()) =
-    this(projection,
-         new RowkeyPartitionChunkIndex(partition, projection),
-         schema,
-         settings)
-
-  val makers = projection.rowKeyColumns.map(ChunkSetReader.defaultColumnToMaker).toArray
-
-  val rowKeyChunks = new collection.mutable.HashMap[(BinaryRecord, Types.ChunkID), Array[ByteBuffer]]
-
-  def getRowKeyVectors(key: BinaryRecord, chunkId: Types.ChunkID): Array[FiloVector[_]] =
-    rowKeyChunks((key, chunkId)).zip(makers).map { case (buf, maker) => maker(buf, 5000) }
-
-  def store(chunkSet: ChunkSet): Unit = {
-    val rowKeyColNames = projection.rowKeyColumns.map(_.name)
-    val chunkArray = rowKeyColNames.map(chunkSet.chunks).toArray
-    rowKeyChunks((chunkSet.info.firstKey, chunkSet.info.id)) = chunkArray
-  }
-
-  def clear(): Unit = {
-    rowKeyChunks.clear
-  }
+object TestData {
+  def toChunkSetStream(proj: RichProjection,
+                       part: PartitionKey,
+                       rows: Seq[RowReader],
+                       rowsPerChunk: Int = 10): Observable[ChunkSet] =
+    Observable.fromIterator(rows.grouped(rowsPerChunk).map { chunkRows => ChunkSet(proj, part, chunkRows) })
 }
 
 object NamesTestData {
@@ -83,13 +59,8 @@ object NamesTestData {
 
   val defaultPartKey = BinaryRecord(projection.partKeyBinSchema, SeqRowReader(Seq("/0")))
 
-  val stateSettings = SegmentStateSettings()
-  val emptyFilter = SegmentState.emptyFilter(stateSettings)
-
-  def getState(segment: Int = 0): TestSegmentState = new TestSegmentState(projection, schema)
-
-  def getWriterSegment(segment: Int = 0): ChunkSetSegment =
-    new ChunkSetSegment(projection, SegmentInfo(defaultPartKey, segment).basedOn(projection))
+  def chunkSetStream(data: Seq[Product] = names): Observable[ChunkSet] =
+    TestData.toChunkSetStream(projection, defaultPartKey, mapper(data))
 
   val firstNames = names.map(_._1.get)
   val utf8FirstNames = firstNames.map(_.utf8)
@@ -192,30 +163,16 @@ object GdeltTestData {
   val dataset6 = Dataset("gdelt", Seq("GLOBALEVENTID"), Seq("Actor2Code", "Actor2Name"))
   val projection6 = RichProjection(dataset6, schema)
 
-  def getSegments(partKey: PartitionKey): Seq[(ChunkSetSegment, Seq[RowReader])] = {
-    val segInfo = SegmentInfo(partKey, "").basedOn(projection2)
-    val seg = new ChunkSetSegment(projection2, segInfo)
-    Seq((seg, readers.toBuffer))
-  }
-
   // Returns projection1 or 2 segments grouped by partition
-  def getSegmentsByPartKey(projection: RichProjection): Seq[(ChunkSetSegment, Seq[RowReader])] = {
+  def getStreamsByPartKey(projection: RichProjection): Seq[Observable[ChunkSet]] = {
     val inputGroupedBySeg = readers.toSeq.groupBy(projection.partitionKeyFunc)
     inputGroupedBySeg.map { case (partKey, lines) =>
-      val segInfo = SegmentInfo(partKey, "").basedOn(projection)
-      val seg = new ChunkSetSegment(projection, segInfo)
-      (seg, lines)
+      TestData.toChunkSetStream(projection, partKey, lines)
     }.toSeq
   }
 
-  def createColumns(count: Int) : Seq[Column] = {
-    if (count == 0){
-      Nil
-    } else{
-      val fieldName = s"column$count"
-      new DataColumn(count,fieldName,"testtable",0,Column.ColumnType.StringColumn) +: createColumns(count - 1)
-    }
-  }
+  def getRowsByPartKey(projection: RichProjection): Seq[(PartitionKey, Seq[RowReader])] =
+    readers.toSeq.groupBy(projection.partitionKeyFunc).toSeq
 }
 
 // A simulation of machine metrics data

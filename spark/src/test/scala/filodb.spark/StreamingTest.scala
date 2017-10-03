@@ -8,11 +8,9 @@ import org.scalatest.time.{Millis, Seconds, Span}
 import scala.collection.mutable
 import scala.concurrent.duration._
 import scala.util.Try
-import scalax.file.Path
 
 import filodb.core._
 import filodb.core.metadata.{Column, Dataset}
-import filodb.core.store.SegmentSpec
 
 import org.scalatest.{BeforeAndAfter, BeforeAndAfterAll, FunSpec, Matchers}
 import org.scalatest.concurrent.ScalaFutures
@@ -44,11 +42,10 @@ with Matchers with ScalaFutures {
   val filoConfig = FiloDriver.initAndGetConfig(ssc.sparkContext)
 
   val metaStore = FiloDriver.metaStore
-  val columnStore = FiloDriver.columnStore
 
   override def beforeAll(): Unit = {
     metaStore.initialize().futureValue
-    columnStore.initializeProjection(largeDataset.projections.head).futureValue
+    // columnStore.initializeProjection(largeDataset.projections.head).futureValue
   }
 
   override def afterAll(): Unit = {
@@ -59,17 +56,14 @@ with Matchers with ScalaFutures {
   before {
     metaStore.clearAllData().futureValue
     try {
-      columnStore.clearProjectionData(largeDataset.projections.head).futureValue
+      FiloDriver.client.truncateDataset(DatasetRef(largeDataset.name))
     } catch {
       case e: Exception =>
     }
   }
 
   after {
-    FiloExecutor.stateCache.clear()
-    val walDir = FiloExecutor.config.getString("write-ahead-log.memtable-wal-dir")
-    val path = Path.fromString (walDir)
-    Try(path.deleteRecursively(continueOnFailure = false))
+    FiloExecutor.memStore.reset()
   }
 
   implicit val ec = FiloDriver.ec

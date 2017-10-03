@@ -12,9 +12,7 @@ import monix.execution.misc.NonFatal
 import monix.execution.{Scheduler => MonixScheduler}
 
 import filodb.core.FutureUtils
-import filodb.core.memstore.TimeSeriesMemStore
-import filodb.core.reprojector.SegmentStateCache
-import filodb.core.store.{ColumnStore, ColumnStoreScanner, MetaStore}
+import filodb.core.store.MetaStore
 
 /** The base Coordinator Extension implementation. Implementers must provide their
   * appropriate versions of:
@@ -85,13 +83,9 @@ final class FilodbCluster(system: ExtendedActorSystem) extends Extension with St
   /** Initializes columnStore and metaStore using the factory setting from config. */
   private lazy val factory = StoreFactory(settings, ec, readEc)
 
-  lazy val columnStore: ColumnStore with ColumnStoreScanner = factory.columnStore
-
   lazy val metaStore: MetaStore = factory.metaStore
 
-  lazy val stateCache = new SegmentStateCache(settings.config, columnStore)
-
-  lazy val memStore = new TimeSeriesMemStore(settings.config)
+  lazy val memStore = factory.memStore
 
   lazy val assignmentStrategy = new DefaultShardAssignmentStrategy
 
@@ -99,7 +93,7 @@ final class FilodbCluster(system: ExtendedActorSystem) extends Extension with St
     * All actions are idempotent. It manages the underlying lifecycle of all node actors.
     */
   private lazy val guardian = system.actorOf(NodeGuardian.props(
-    this, cluster, metaStore, memStore, columnStore, assignmentStrategy), guardianName)
+    this, cluster, metaStore, memStore, assignmentStrategy), guardianName)
 
   /** Idempotent. */
   def kamonInit(role: ClusterRole): ActorRef =
@@ -206,8 +200,8 @@ final class FilodbCluster(system: ExtendedActorSystem) extends Extension with St
           logger.info("Actor system was shut down")
         }
 
-        columnStore.shutdown()
         metaStore.shutdown()
+        memStore.shutdown()
         threadPool.shutdown()
       } catch { case NonFatal(e) =>
         system.terminate()

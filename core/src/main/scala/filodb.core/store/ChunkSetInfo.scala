@@ -14,66 +14,32 @@ import scala.math.Ordered._
 
 import filodb.core._
 import filodb.core.binaryrecord.{BinaryRecord, RecordSchema}
-import filodb.core.metadata.RichProjection
+import filodb.core.metadata.{Column, RichProjection}
 import filodb.core.Types._
 
 /**
  * A ChunkSet is the set of chunks for all columns, one per column, serialized from a set of rows.
- * The rows should be ordered from firstKey to lastKey.
  * ChunkSetInfo records common metadata about a ChunkSet.
  */
 case class ChunkSet(info: ChunkSetInfo,
+                    partition: PartitionKey,
                     skips: Seq[ChunkRowSkipIndex],
-                    bloomFilter: BloomFilter[Long],
-                    rowKeys: Array[BinaryRecord],
                     chunks: Map[ColumnId, ByteBuffer])
 
-object ChunkSet extends StrictLogging {
-  val chunkSetsCreated = Kamon.metrics.counter("chunksets-created")
-  val chunkSetsRowKeyCount = Kamon.metrics.histogram("chunksets-incoming-n-rowkeys")
-  val chunkSetsFilteredKeyCount = Kamon.metrics.histogram("chunksets-filtered-n-rowkeys")
-  val chunkSetsHitKeyCount = Kamon.metrics.histogram("chunksets-hit-n-rowkeys")
-  val chunkSetsNeedReadRowKey = Kamon.metrics.counter("chunksets-need-read-row-keys")
-
-  val builderMap = VectorBuilder.defaultBuilderMap ++ Map(
-                     classOf[Timestamp] -> (() => new LongVectorBuilder)
-                   )
+object ChunkSet {
+  private def makeRowKey(proj: RichProjection, row: RowReader): BinaryRecord =
+    BinaryRecord(proj.rowKeyBinSchema, RoutingRowReader(row, proj.rowKeyColIndices.toArray))
 
   /**
-   * Creates a new ChunkSet with empty skipList, based on existing state
-   * @param state a SegmentState instance
-   * @param rows rows to be chunkified sorted in order of rowkey
-   * Pure, does not modify existing state.  User is responsible for updating the SegmentState.
+   * Create a ChunkSet out of a set of rows easily.  Mostly for testing.
    */
-  def apply(state: SegmentState, rows: Iterator[RowReader]): ChunkSet = {
-    // NOTE: some RowReaders, such as FastFiloRowReader, must be iterators
-    // since rowNo in FastFiloRowReader is mutated.
-    val builder = new RowToVectorBuilder(state.filoSchema, builderMap)
-    val rowKeys = rows.map { row =>
-      builder.addRow(row)
-      state.makeRowKey(row)
-    }.toArray
-
-    require(rowKeys.nonEmpty)
-    chunkSetsCreated.increment
-
-    val chunkMap = builder.convertToBytes()
-    val info = ChunkSetInfo(state.nextChunkId, rowKeys.size, rowKeys.head, rowKeys.last)
-    chunkSetsRowKeyCount.record(rowKeys.size)
-    ChunkSet(info, Nil, state.makeBloomFilter(rowKeys), rowKeys, chunkMap)
-  }
-
-  /**
-   * Same as above, but detects skips also using the current segment state.
-   */
-  def withSkips(state: SegmentState, rows: Iterator[RowReader]): ChunkSet = {
-    val initChunkSet = apply(state, rows)
-    // Now filter row keys in master bloom filter.  Should reduce # of keys significantly.
-    val filteredKeys = state.filterRowKeys(initChunkSet.rowKeys)
-    logger.debug(s"chunk ${initChunkSet.info}: filtered ${initChunkSet.rowKeys.size} rowKeys to " +
-                 s"${filteredKeys.size} bloom hits")
-    chunkSetsFilteredKeyCount.record(filteredKeys.size)
-    initChunkSet.copy(skips = ChunkSetInfo.detectSkips(state, filteredKeys))
+  def apply(proj: RichProjection, part: PartitionKey, rows: Seq[RowReader]): ChunkSet = {
+    require(rows.nonEmpty)
+    val firstKey = makeRowKey(proj, rows.head)
+    val info = ChunkSetInfo(timeUUID64, rows.length, firstKey, makeRowKey(proj, rows.last))
+    val filoSchema = Column.toFiloSchema(proj.columns)
+    val chunkMap = RowToVectorBuilder.buildFromRows(rows.toIterator, filoSchema)
+    ChunkSet(info, part, Nil, chunkMap)
   }
 }
 
@@ -132,12 +98,8 @@ object ChunkSetInfo extends StrictLogging {
   type SkipMap    = EWAHCompressedBitmap
   type ChunkInfosAndSkips = Seq[(ChunkSetInfo, SkipMap)]
   type InfosSkipsIt = Iterator[(ChunkSetInfo, SkipMap)]
-  type IndexAndFilterSeq = Seq[(ChunkSetInfo, ChunkSkips, BloomFilter[Long])]
-  import ChunkSet._
 
   val emptySkips = new SkipMap()
-
-  val missingBloomFilters = Kamon.metrics.counter("chunks-missing-bloom-filter")
 
   /**
    * Serializes ChunkSetInfo into bytes for persistence.
@@ -185,108 +147,5 @@ object ChunkSetInfo extends StrictLogging {
       skips.append(ChunkRowSkipIndex(skipId, skipList))
     }
     (ChunkSetInfo(id, numRows, firstKey, lastKey), skips)
-  }
-
-  /**
-   * Scans previous ChunkSetInfos for possible row replacements.
-   * TODO: replace with an interval tree algorithm.  Or the interval tree could be used to provide otherInfos
-   * @param state a current SegmentState instance holding bloom filters and chunkSetInfos
-   * @param rowKeys array of BinaryRecord rowkeys to detect skips for.  May have been filtered.
-   * @param infosAndFilters list of ChunkSetInfo and associated BloomFilter
-   * @param rowKeysForChunk a function that retrieves row keys given a chunkID
-   */
-  def detectSkips(state: SegmentState,
-                  rowKeys: Array[BinaryRecord]): ChunkSkips = {
-    if (rowKeys.isEmpty) {
-      Nil
-    } else {
-      implicit val ordering = state.projection.rowKeyType.rowReaderOrdering
-      val keyInfo = ChunkSetInfo(-1, 0, rowKeys.head, rowKeys.last)
-
-      // Check for rowkey range intersection
-      // Match each key in range over bloom filter and return a list of hit rowkeys for each chunkID
-      var numHitKeys = 0
-      val hitKeysByChunk = state.infos.flatMap { info =>
-        val bfOpt = state.filter(info.id)
-        keyInfo.intersection(info).map { case (key1, key2) =>
-          // Ignore the key, it's probably faster to just hit keys against bloom filter
-          val hitKeys = bfOpt.map { bf => rowKeys.filter { k => bf.mightContain(k.cachedHash64) } }
-                             .getOrElse {
-                               missingBloomFilters.increment
-                               logger.info(s"Missing bloom filter for chunk $info...")
-                               rowKeys
-                             }
-          logger.debug(s"Checking chunk $info: ${hitKeys.size} hitKeys")
-          numHitKeys += hitKeys.size
-          (info, hitKeys)
-        }.filter(_._2.nonEmpty)
-      }.toBuffer
-
-      // For each matching chunkId and set of hit keys, find possible position to skip
-      // NOTE: This will be very slow as will probably need to read back row keys from disk
-      // Also, we are assuming there are very few keys that match, so binary search is effective.
-      //   ie that (k log n) << n  where k = # of hit keys, and n is size of chunk
-      // If above not true, then a linear scan in sort order and compare is more effective
-      if (numHitKeys > 0) {
-        chunkSetsNeedReadRowKey.increment
-        chunkSetsHitKeyCount.record(numHitKeys)
-      }
-      hitKeysByChunk.map { case (ChunkSetInfo(chunkId, numRows, startKey, _), keys) =>
-        val keyVectors = state.getRowKeyVectors(startKey, chunkId)
-        val overrides = keys.flatMap { key =>
-          binarySearchKeyChunks(state.projection, keyVectors, numRows, key) match {
-            case (pos, true) => Some(pos)
-            case (_,  false) => None
-          }
-        }
-        ChunkRowSkipIndex(chunkId, EWAHCompressedBitmap.bitmapOf(overrides.sorted :_*))
-      }.filterNot(_.overrides.isEmpty)
-    }
-  }
-
-  /**
-   * Does a binary search through the vectors representing row keys in a segment, finding the position
-   * equal to the given key or just greater than the given key, if the key is not matched
-   * (ie where the nonmatched item would be inserted).
-   * Note: we take advantage of the fact that row keys cannot have null values, so no need to null check.
-   *
-   * @param vectors an array of FiloVectors, in order of the projection.rowKeyColumns.
-   * @param key    a RowReader representing the key to search for.  Must also have rowKeyColumns elements.
-   * @return (position, true if exact match is found)  position might be equal to the number of rows in chunk
-   *            if exact match not found and item compares greater than last item
-   */
-  def binarySearchKeyChunks(projection: RichProjection,
-                            vectors: Array[FiloVector[_]],
-                            chunkLen: Int,
-                            key: RowReader): (Int, Boolean) = {
-    val reader = new FastFiloRowReader(vectors)
-    val ordering = projection.rowKeyType.rowReaderOrdering
-    binarySearchKeyChunks(reader, chunkLen, ordering, key)
-  }
-
-  // NOTE/TODO: The binary search algo below could be turned into a tail-recursive one, but be sure to do
-  // a benchmark comparison first.  This is definitely in the critical path and we don't want a slowdown.
-  // OTOH a tail recursive probably won't be the bottleneck.
-  def binarySearchKeyChunks(reader: FiloRowReader,
-                            chunkLen: Int,
-                            ordering: Ordering[RowReader],
-                            key: RowReader): (Int, Boolean) = {
-    var len = chunkLen
-    var first = 0
-    while (len > 0) {
-      val half = len >>> 1
-      val middle = first + half
-      reader.setRowNo(middle)
-      val comparison = ordering.compare(reader, key)
-      if (comparison == 0) {
-        return (middle, true)
-      } else if (comparison < 0) {
-        first = middle + 1
-        len = len - half - 1
-      } else {
-        len = half
-      }
-    }
-    (first, ordering.equiv(reader, key))
   }
 }

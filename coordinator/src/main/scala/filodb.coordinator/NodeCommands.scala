@@ -32,17 +32,10 @@ object DatasetCommands {
   final case class DatasetError(msg: String) extends ErrorResponse with NodeResponse
 
   /**
-   * Truncates all data from a projection of a dataset.  Waits for any pending flushes from said
-   * dataset to finish first, and also clears the columnStore cache for that dataset.
+   * Truncates all data from the memStore and any underlying ChunkSink/persistent store for a dataset
    */
-  final case class TruncateProjection(projection: Projection, version: Int) extends NodeCommand
-  case object ProjectionTruncated extends NodeResponse
-
-  /**
-   * Drops all versions/projections of a dataset from both the column store and metastore.
-   */
-  final case class DropDataset(dataset: DatasetRef) extends NodeCommand
-  case object DatasetDropped extends NodeResponse
+  final case class TruncateDataset(dataset: DatasetRef) extends NodeCommand
+  case object DatasetTruncated extends NodeResponse
 }
 
 object MiscCommands {
@@ -58,7 +51,7 @@ object IngestionCommands {
   /**
    * Sets up ingestion and querying for a given dataset, version, and schema of columns.
    * The dataset and columns must have been previously defined.
-   * Internally creates the projection and sets up DatasetCoordinatorActors and QueryActors
+   * Internally creates the projection and sets up IngestionActors and QueryActors
    * and also starts up a RowSource to start ingestion for current dataset.
    * NOTE: this is not meant for external APIs but an internal one.  It is sent by the NodeClusterActor
    * after verifying the dataset.
@@ -101,24 +94,8 @@ object IngestionCommands {
   case object FlushIgnored extends NodeResponse
 
   /**
-   * Checks to see if the DatasetCoordActor is ready to take in more rows.  Usually sent when an actor
-   * is in a wait state.
-   */
-  final case class CheckCanIngest(dataset: DatasetRef, version: Int) extends NodeCommand
-  final case class CanIngest(can: Boolean) extends NodeResponse
-
-  /**
    * Gets the latest ingestion stats from the DatasetCoordinatorActor
    */
   final case class GetIngestionStats(dataset: DatasetRef, version: Int) extends NodeCommand
-
-  /**
-    * Initializes new Memtable and loads it using WAL file.
-    */
-  case class ReloadIngestionState(originator: ActorRef,
-                                  dataset: DatasetRef,
-                                  version: Int) extends NodeCommand
-
-  case object DCAReady extends NodeResponse
 }
 

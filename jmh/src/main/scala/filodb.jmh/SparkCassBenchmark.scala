@@ -15,7 +15,6 @@ import scalaxy.loops._
 
 import filodb.core._
 import filodb.core.metadata.{Column, Dataset, RichProjection}
-import filodb.core.store.InMemoryColumnStore
 import filodb.spark.{SparkRowReader, FiloDriver, FiloExecutor, TypeConverters}
 
 // Spark CassandraColumnStore benchmark
@@ -29,6 +28,7 @@ class SparkCassBenchmark {
   val sess = SparkSession.builder.master("local[4]")
                                  .appName("test")
                                  .config("spark.ui.enabled", "false")
+                                 // TODO: configure memstore to read from Cass
                                  .config("spark.filodb.cassandra.keyspace", "filodb")
                                  .getOrCreate
   val sc = sess.sparkContext

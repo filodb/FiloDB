@@ -34,8 +34,8 @@ object QueryActor {
                                     partMethod: PartitionScanMethod,
                                     chunkScan: ChunkScanMethod)
 
-  def props(colStore: BaseColumnStore, projection: RichProjection): Props =
-    Props(classOf[QueryActor], colStore, projection)
+  def props(memStore: MemStore, projection: RichProjection): Props =
+    Props(classOf[QueryActor], memStore, projection)
 }
 
 /**
@@ -44,7 +44,7 @@ object QueryActor {
  * The actual reading of data structures and aggregation is performed asynchronously by Observables,
  * so it is probably fine for there to be just one QueryActor per dataset.
  */
-final class QueryActor(colStore: BaseColumnStore,
+final class QueryActor(memStore: MemStore,
                        projection: RichProjection) extends BaseActor {
   import QueryActor._
   import QueryCommands._
@@ -54,11 +54,6 @@ final class QueryActor(colStore: BaseColumnStore,
 
   implicit val scheduler = monix.execution.Scheduler(context.dispatcher)
   var shardMap = ShardMapper.empty
-
-  private val memStore: Option[MemStore] = colStore match {
-    case m: MemStore => Some(m)
-    case o: Any      => None
-  }
 
   def validateColumns(colStrs: Seq[String]): Seq[Column] Or ErrorResponse =
     RichProjection.getColumnsFromNames(projection.columns, colStrs)
@@ -92,6 +87,7 @@ final class QueryActor(colStore: BaseColumnStore,
       case FilteredPartitionQuery(filters) =>
         // get limited # of shards if shard key available, otherwise query all shards
         // TODO: filter shards by ones that are active?  reroute to other DC? etc.
+        // TODO: monitor ratio of queries using shardKeyHash to queries that go to all shards
         val shards = options.shardKeyHash.map { hash =>
                        shardMap.shardKeyToShards(hash, options.shardKeyNBits)
                      }.getOrElse(shardMap.assignedShards)
@@ -135,7 +131,7 @@ final class QueryActor(colStore: BaseColumnStore,
       val queryId = nextQueryId
       originator ! QueryInfo(queryId, dataset, colSeq.map(_.toString))
       // TODO: this is totally broken if there is more than one partMethod
-      colStore.readChunks(projection, colSeq, version, partMethods.head, chunkMethod)
+      memStore.readChunks(projection, colSeq, version, partMethods.head, chunkMethod)
         .foreach { reader =>
           val bufs = reader.vectors.map {
             case b: BinaryVector[_] => b.toFiloBuffer
@@ -197,7 +193,7 @@ final class QueryActor(colStore: BaseColumnStore,
     (for { aggFunc    <- validateFunction(q.query.functionName)
            combinerFunc <- validateCombiner(q.query.combinerName)
            qSpec = QuerySpec(q.query.column, aggFunc, q.query.args, combinerFunc, q.query.combinerArgs)
-           aggregateTask <- colStore.aggregate(projection, q.version, qSpec, q.partMethod, q.chunkScan) }
+           aggregateTask <- memStore.aggregate(projection, q.version, qSpec, q.partMethod, q.chunkScan) }
     yield {
       aggregateTask.runAsync
         .map { agg => originator ! agg }
@@ -214,14 +210,12 @@ final class QueryActor(colStore: BaseColumnStore,
     case q: RawQuery       => handleRawQuery(q)
     case q: AggregateQuery => validateAndGatherAggregates(q)
     case q: SingleShardQuery => singleShardQuery(q)
-    case GetIndexNames(ref, limit) if memStore.isDefined =>
-      sender() ! memStore.get.indexNames(ref).take(limit).map(_._1).toBuffer
-    case GetIndexValues(ref, index, limit) if memStore.isDefined =>
+    case GetIndexNames(ref, limit) =>
+      sender() ! memStore.indexNames(ref).take(limit).map(_._1).toBuffer
+    case GetIndexValues(ref, index, limit) =>
       // For now, just return values from the first shard
-      memStore.foreach { store =>
-        store.activeShards(ref).headOption.foreach { shard =>
-          sender() ! store.indexValues(ref, shard, index).take(limit).map(_.toString).toBuffer
-        }
+      memStore.activeShards(ref).headOption.foreach { shard =>
+        sender() ! memStore.indexValues(ref, shard, index).take(limit).map(_.toString).toBuffer
       }
 
     case CurrentShardSnapshot(ds, mapper) =>

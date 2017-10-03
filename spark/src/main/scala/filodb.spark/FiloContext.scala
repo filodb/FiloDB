@@ -69,8 +69,9 @@ class FiloContext(val sqlContext: SQLContext) extends AnyVal {
         throw new RuntimeException(s"Dataset $dataset already exists!")
       case (Some(dsObj), SaveMode.Overwrite) if resetSchema =>
         val ds = makeAndVerifyDataset(dataset, rowKeys, partKeys, chunkSize, dfColumns)
-        deleteDataset(dataset)
-        createNewDataset(ds)
+        throw new RuntimeException(s"Sorry, at this time you must manually delete the dataset yourself")
+        // deleteDataset(dataset)
+        // createNewDataset(ds)
       case (_, _) =>
         sparkLogger.info(s"Dataset $dataset definition not changed")
     }
@@ -143,7 +144,7 @@ class FiloContext(val sqlContext: SQLContext) extends AnyVal {
     checkAndAddColumns(dfColumns, dataset, version)
 
     if (overwrite) {
-      FiloDriver.client.truncateDataset(dataset, version)
+      FiloDriver.client.truncateDataset(dataset)
     }
 
     val numPartitions = df.rdd.partitions.size

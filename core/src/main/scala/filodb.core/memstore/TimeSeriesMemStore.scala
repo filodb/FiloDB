@@ -15,19 +15,21 @@ import scala.concurrent.{ExecutionContext, Future}
 
 import filodb.core.DatasetRef
 import filodb.core.metadata.{Column, RichProjection}
-import filodb.core.query.{ChunkSetReader, KeyFilter, PartitionChunkIndex, PartitionKeyIndex, FiloPartition}
+import filodb.core.query.{ChunkSetReader, KeyFilter, PartitionChunkIndex, PartitionKeyIndex}
 import filodb.core.store._
 import filodb.core.Types.{PartitionKey, ChunkID}
 
 final case class DatasetAlreadySetup(dataset: DatasetRef) extends Exception(s"Dataset $dataset already setup")
 
 class TimeSeriesMemStore(config: Config)(implicit val ec: ExecutionContext)
-extends MemStore with ColumnStoreAggregator with StrictLogging {
+extends MemStore with StrictLogging {
   import ChunkSetReader._
   import collection.JavaConverters._
 
   type Shards = NonBlockingHashMapLong[TimeSeriesShard]
   private val datasets = new HashMap[DatasetRef, Shards]
+
+  val stats = new ChunkSourceStats
 
   // TODO: Change the API to return Unit Or ShardAlreadySetup, instead of throwing.  Make idempotent.
   def setup(projection: RichProjection, shard: Int): Unit = synchronized {
@@ -81,26 +83,9 @@ extends MemStore with ColumnStoreAggregator with StrictLogging {
 
   def scanPartitions(projection: RichProjection,
                      version: Int,
-                     partMethod: PartitionScanMethod): Observable[PartitionChunkIndex] =
+                     partMethod: PartitionScanMethod,
+                     colToMaker: ColumnToMaker = defaultColumnToMaker): Observable[FiloPartition] =
     datasets(projection.datasetRef).get(partMethod.shard).scanPartitions(partMethod)
-
-  // Use our own readChunks implementation, because it is faster for us to directly create readers
-  def readChunks(projection: RichProjection,
-                 columns: Seq[Column],
-                 version: Int,
-                 partMethod: PartitionScanMethod,
-                 chunkMethod: ChunkScanMethod = AllChunkScan,
-                 colToMaker: ColumnToMaker = defaultColumnToMaker): Observable[ChunkSetReader] = {
-    val positions = projection.getPositions(columns)
-    scanPartitions(projection, version, partMethod)
-      .flatMap { case p: PartitionChunkIndex with FiloPartition =>
-        p.streamReaders(p.findByMethod(chunkMethod), positions)
-      }
-  }
-
-  def indexToPartition(index: PartitionChunkIndex): FiloPartition = index match {
-    case p: TimeSeriesPartition => p
-  }
 
   def numRowsIngested(dataset: DatasetRef, shard: Int): Long =
     getShard(dataset, shard).map(_.numRowsIngested).getOrElse(-1L)
@@ -114,6 +99,8 @@ extends MemStore with ColumnStoreAggregator with StrictLogging {
   def reset(): Unit = {
     datasets.clear()
   }
+
+  def truncate(dataset: DatasetRef): Unit = {}
 
   def shutdown(): Unit = {}
 }
@@ -183,9 +170,9 @@ class TimeSeriesShard(projection: RichProjection, config: Config, shardNum: Int)
     newPart
   }
 
-  private def getPartition(partKey: PartitionKey): Option[PartitionChunkIndex] = keyMap.get(partKey)
+  private def getPartition(partKey: PartitionKey): Option[FiloPartition] = keyMap.get(partKey)
 
-  def scanPartitions(partMethod: PartitionScanMethod): Observable[PartitionChunkIndex] = {
+  def scanPartitions(partMethod: PartitionScanMethod): Observable[FiloPartition] = {
     val indexIt = partMethod match {
       case SinglePartitionScan(partition, _) =>
         getPartition(partition).map(Iterator.single).getOrElse(Iterator.empty)

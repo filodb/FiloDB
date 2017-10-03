@@ -13,7 +13,7 @@ import filodb.core.memstore._
 import filodb.core.metadata.RichProjection
 import filodb.core.DatasetRef
 
-object MemStoreCoordActor {
+object IngestionActor {
 
   final case class IngestRows(ackTo: ActorRef, shard: Int, records: Seq[IngestRecord])
 
@@ -25,7 +25,7 @@ object MemStoreCoordActor {
             memStore: MemStore,
             source: NodeClusterActor.IngestionSource,
             shardActor: ActorRef)(implicit sched: Scheduler): Props =
-    Props(classOf[MemStoreCoordActor], projection, memStore, source, shardActor, sched)
+    Props(classOf[IngestionActor], projection, memStore, source, shardActor, sched)
 }
 
 /**
@@ -36,13 +36,13 @@ object MemStoreCoordActor {
   *
   * @param sched a Scheduler for running ingestion stream Observables
   */
-private[filodb] final class MemStoreCoordActor(projection: RichProjection,
-                                               memStore: MemStore,
-                                               source: NodeClusterActor.IngestionSource,
-                                               shardActor: ActorRef)
-                                              (implicit sched: Scheduler) extends BaseActor {
+private[filodb] final class IngestionActor(projection: RichProjection,
+                                           memStore: MemStore,
+                                           source: NodeClusterActor.IngestionSource,
+                                           shardActor: ActorRef)
+                                          (implicit sched: Scheduler) extends BaseActor {
 
-  import MemStoreCoordActor._
+  import IngestionActor._
 
   final val streamSubscriptions = new HashMap[Int, Cancelable]
   final val streams = new HashMap[Int, IngestionStream]

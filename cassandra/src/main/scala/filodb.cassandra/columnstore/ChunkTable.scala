@@ -9,7 +9,7 @@ import scodec.bits._
 
 import filodb.cassandra.FiloCassandraConnector
 import filodb.core._
-import filodb.core.store.{ColumnStoreStats, ChunkSetInfo, SingleChunkInfo, compress, decompress}
+import filodb.core.store.{ChunkSinkStats, ChunkSetInfo, SingleChunkInfo, compress, decompress}
 
 /**
  * Represents the table which holds the actual columnar chunks for segments
@@ -48,7 +48,7 @@ sealed class ChunkTable(val dataset: DatasetRef, val connector: FiloCassandraCon
                   version: Int,
                   chunkId: Types.ChunkID,
                   chunks: Map[String, ByteBuffer],
-                  stats: ColumnStoreStats): Future[Response] = {
+                  stats: ChunkSinkStats): Future[Response] = {
     val partBytes = toBuffer(partition)
     var chunkBytes = 0L
     val statements = chunks.map { case (columnName, bytes) =>

@@ -20,11 +20,11 @@ trait AllTablesTest extends FunSpecLike with AsyncTest {
   implicit val defaultPatience =
     PatienceConfig(timeout = Span(30, Seconds), interval = Span(250, Millis))
 
-  implicit val context = scala.concurrent.ExecutionContext.Implicits.global
+  implicit val scheduler = monix.execution.Scheduler.Implicits.global
 
   val config = ConfigFactory.load("application_test.conf").getConfig("filodb")
 
-  lazy val columnStore = new CassandraColumnStore(config, context)
+  lazy val columnStore = new CassandraColumnStore(config, scheduler)
   lazy val metaStore = new CassandraMetaStore(config.getConfig("cassandra"))
 
   import Column.ColumnType._

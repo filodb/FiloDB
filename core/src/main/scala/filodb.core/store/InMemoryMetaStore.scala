@@ -6,7 +6,7 @@ import java.util.concurrent.ConcurrentSkipListMap
 import scala.collection.concurrent.TrieMap
 import scala.concurrent.{ExecutionContext, Future}
 import filodb.core._
-import filodb.core.metadata.{Column, DataColumn, Dataset, IngestionStateData}
+import filodb.core.metadata.{Column, DataColumn, Dataset}
 
 /**
  * An in-memory MetaStore.  Does not aim to keep data distributed, but is just a
@@ -24,7 +24,6 @@ class InMemoryMetaStore(implicit val ec: ExecutionContext) extends MetaStore wit
   type ColumnMap = ConcurrentSkipListMap[(Int, Types.ColumnId), DataColumn]
   val colMapOrdering = math.Ordering[(Int, Types.ColumnId)]
   val columns = new TrieMap[String, ColumnMap]
-  val ingestionstates = new TrieMap[String, IngestionStateData]
 
   def initialize(): Future[Response] = Future.successful(Success)
 
@@ -32,7 +31,6 @@ class InMemoryMetaStore(implicit val ec: ExecutionContext) extends MetaStore wit
     logger.warn("Clearing all data!")
     datasets.clear()
     columns.clear()
-    ingestionstates.clear()
     Success
   }
 
@@ -92,43 +90,6 @@ class InMemoryMetaStore(implicit val ec: ExecutionContext) extends MetaStore wit
                .map(_.getValue)
                .foldLeft(Column.EmptySchema)(Column.schemaFold)
     }.getOrElse(Column.EmptySchema)
-  }
-
-  /**
-   * ** IngestionState API ***
-   */
-  def insertIngestionState(actorAddress: String,
-                           dataset: DatasetRef,
-                           columns: String,
-                           state: String,
-                           version: Int,
-                           exceptions: String = ""): Future[Response] = {
-    ingestionstates.putIfAbsent(actorAddress,
-      IngestionStateData(actorAddress,
-        dataset.database.getOrElse("None"),
-        dataset.dataset,
-        version,
-        columns,
-        state,
-        exceptions
-      )) match {
-      case None =>
-        Future.successful(Success)
-      case Some(x) =>
-        logger.info(s"Ignoring ingestion state for dataset($dataset); entry already exists")
-        Future.successful(AlreadyExists)
-    }
-  }
-
-  def getAllIngestionEntries(actorPath: String): Future[Seq[IngestionStateData]] = {
-    Future.successful(ingestionstates.get(actorPath).toSeq)
-  }
-
-  def updateIngestionState(actorAddress: String, dataset: DatasetRef,
-                           state: String, exceptions: String, version: Int ): Future[Response] = {
-    val ingStCols = ingestionstates.get(actorAddress).toString
-    ingestionstates.remove(actorAddress)
-    insertIngestionState(actorAddress, dataset, ingStCols.split("\u0001")(4), state, version, exceptions)
   }
 
   def shutdown(): Unit = {}

@@ -9,7 +9,7 @@ import filodb.core.store.ColumnStoreSpec
 import filodb.core.Types
 
 class CassandraColumnStoreSpec extends ColumnStoreSpec {
-  import scala.concurrent.ExecutionContext.Implicits.global
+  import monix.execution.Scheduler.Implicits.global
   import filodb.core.store._
   import NamesTestData._
 
@@ -37,11 +37,8 @@ class CassandraColumnStoreSpec extends ColumnStoreSpec {
                                              .withFallback(config)
   val lz4ColStore = new CassandraColumnStore(configWithChunkCompress, global)
 
-  "lz4-chunk-compress" should "append new rows to a cached segment successfully" in {
-    val state = getState()
-    val segment = getWriterSegment()
-    segment.addChunkSet(state, mapper(names take 3))
-    whenReady(lz4ColStore.appendSegment(projection, segment, 0)) { response =>
+  "lz4-chunk-compress" should "write and read compressed chunks successfully" in {
+    whenReady(lz4ColStore.write(projection, 0, chunkSetStream(names take 3))) { response =>
       response should equal (Success)
     }
 

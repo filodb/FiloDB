@@ -166,9 +166,7 @@ lazy val coreDeps = commonDeps ++ Seq(
   "com.github.alexandrnikitin" %% "bloom-filter" % "0.7.0",
   "com.github.rholder.fauxflake" % "fauxflake-core" % "1.1.0",
   "org.scalactic"        %% "scalactic"         % "2.2.6",
-  "com.markatta"         %% "futiles"           % "1.1.3",
-  scalaxyDep,
-  "com.github.scala-incubator.io" %% "scala-io-file" % "0.4.3-1" % "test"
+  scalaxyDep
 )
 
 lazy val cassDeps = commonDeps ++ Seq(

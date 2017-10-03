@@ -140,7 +140,7 @@ case class RichProjection(projection: Projection,
       if (pos < 0) {
         val partitionPos = partitionColumns.indexOf(c)
         if (partitionPos < 0) {
-          throw new IllegalArgumentException(s"Column $c not found amongst columns $columns")
+          throw new IllegalArgumentException(s"Column $c not found amongst columns $nonPartitionColumns")
         } else {
           -partitionPos - 1
         }

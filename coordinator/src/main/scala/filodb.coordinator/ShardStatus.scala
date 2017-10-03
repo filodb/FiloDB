@@ -37,7 +37,7 @@ final case class StopShardIngestion(ref: DatasetRef, shard: Int) extends ShardCo
 final case class InvalidIngestionCommand(ref: DatasetRef, shard: Int)
 
 /**
-  * The events are sent by the MemStoreCoordActor on a node when the actual ingestion stream
+  * The events are sent by the IngestionActor on a node when the actual ingestion stream
   * starts, errors, or by the NodeClusterActor singleton upon detection of node failure / disconnect
   * via Akka Cluster events.
   *

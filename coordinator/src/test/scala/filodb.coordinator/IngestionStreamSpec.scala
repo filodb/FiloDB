@@ -103,7 +103,7 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem)
   }
 
   // It's pretty hard to get an IngestionStream to fail when reading the stream itself, as no real parsing
-  // happens until the MemStoreCoordActor ingests.   When the failure occurs, the cluster state is updated
+  // happens until the IngestionActor ingests.   When the failure occurs, the cluster state is updated
   // but then we need to query for it.
  it("should fail if cannot parse input RowReader during coordinator ingestion") {
    setup(dataset33, "/GDELT-sample-test-errors.csv", rowsToRead = 5, None)
@@ -114,9 +114,9 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem)
    }
 
     // Sending this will intentionally raise: java.lang.IllegalArgumentException: dataset gdelt / shard 0 not setup
-    // Note: this relies on the MemStoreCoordActor not disappearing after errors.
+    // Note: this relies on the IngestionActor not disappearing after errors.
     coordinatorActor ! GetIngestionStats(ref2, 0)
-    expectMsg(MemStoreCoordActor.IngestionStatus(50))
+    expectMsg(IngestionActor.IngestionStatus(50))
   }
 
   // TODO: Simulate more failures.  Maybe simulate I/O failure or use a custom source
@@ -135,7 +135,7 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem)
   }
 
   it("should start and stop cleanly") {
-    import MemStoreCoordActor.IngestionStatus
+    import IngestionActor.IngestionStatus
 
     val batchSize = 100
     val command = setup(dataset6, "/GDELT-sample-test.csv", rowsToRead = batchSize, None)
@@ -156,7 +156,7 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem)
     // this functionality already is built into the shard actor: shardActor ! RemoveSubscription(ref)
     setup(dataset33, "/GDELT-sample-test.csv", rowsToRead = 5, None)
     coordinatorActor ! GetIngestionStats(DatasetRef(dataset33.name), 0)
-    expectMsg(MemStoreCoordActor.IngestionStatus(99))
+    expectMsg(IngestionActor.IngestionStatus(99))
   }
 
   it("should ingest all rows using routeToShards and ProtocolActor") {
@@ -180,6 +180,6 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem)
 
     Thread sleep 1000 // time to accumulate 199 below
     coordinatorActor ! GetIngestionStats(projection.datasetRef, 0)
-    expectMsg(MemStoreCoordActor.IngestionStatus(199))
+    expectMsg(IngestionActor.IngestionStatus(199))
   }
 }

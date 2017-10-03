@@ -65,7 +65,7 @@ class NamingAwareBaseActorSpec extends AkkaSpec {
         parent ! Parent.GetDsCreated(ds)
         expectMsgPF() {
           case Parent.Created(dsPair) =>
-            dsPair.size shouldEqual 2 // one MemstoreCoordActor, one QueryActor
+            dsPair.size shouldEqual 2 // one IngestionActor, one QueryActor
             dsPair.forall(a => a.path.name endsWith ds.dataset)
         }
       }

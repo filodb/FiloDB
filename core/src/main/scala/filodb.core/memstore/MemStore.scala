@@ -8,7 +8,7 @@ import scalaxy.loops._
 
 import filodb.core.DatasetRef
 import filodb.core.metadata.{Column, RichProjection}
-import filodb.core.store.BaseColumnStore
+import filodb.core.store.ChunkSource
 import filodb.core.Types.PartitionKey
 
 // partition key is separated from the other data columns, as the partition key does not need
@@ -28,14 +28,14 @@ case object ShardAlreadySetup extends Exception
 
 /**
  * A MemStore is an in-memory ColumnStore that ingests data not in chunks but as new records, potentially
- * spread over many partitions.  It supports the BaseColumnStore API, and should support real-time reads
+ * spread over many partitions.  It supports the ChunkSource API, and should support real-time reads
  * of fresh ingested data.  Being in-memory, it is designed to not retain data forever but flush completed
  * chunks to a persistent ColumnStore.
  *
  * A MemStore contains shards of data for one or more datasets, with optimized ingestion pipeline for
  * each shard.
  */
-trait MemStore extends BaseColumnStore {
+trait MemStore extends ChunkSource {
   /**
    * Sets up one shard of a dataset for ingestion and the schema to be used when ingesting.
    * Once set up, the schema may not be changed.  The schema should be the same for all shards.
@@ -103,6 +103,18 @@ trait MemStore extends BaseColumnStore {
    * The active shards for a given dataset
    */
   def activeShards(dataset: DatasetRef): Seq[Int]
+
+  /**
+   * WARNING: truncates all the data in the memstore for the given dataset, and also the data
+   *          in any underlying storage system too.
+   */
+  def truncate(dataset: DatasetRef): Unit
+
+  /**
+   * Resets the state of the MemStore. Usually used for testing.
+   */
+  def reset(): Unit
+  def shutdown(): Unit
 }
 
 import Column.ColumnType._

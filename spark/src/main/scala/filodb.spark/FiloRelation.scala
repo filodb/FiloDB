@@ -212,7 +212,7 @@ object FiloRelation extends StrictLogging {
                   readOnlyProjStr: String,
                   chunkMethod: ChunkScanMethod,
                   version: Int)(f: ScanSplit => PartitionScanMethod): RDD[Row] = {
-    val splits = FiloDriver.columnStore.getScanSplits(dataset, splitsPerNode)
+    val splits = FiloDriver.memStore.getScanSplits(dataset, splitsPerNode)
     logger.info(s"${splits.length} splits: [${splits.take(3).mkString(", ")}...]")
 
     val splitsWithLocations = splits.map { s => (s, s.hostnames.toSeq) }
@@ -235,10 +235,10 @@ object FiloRelation extends StrictLogging {
                              chunkMethod: ChunkScanMethod): Iterator[Row] = {
     // NOTE: all the code inside here runs distributed on each node.  So, create my own datastore, etc.
     FiloExecutor.init(confStr)
-    FiloExecutor.columnStore    // force startup
+    FiloExecutor.memStore    // force startup
     val readOnlyProjection = RichProjection.readOnlyFromString(readOnlyProjectionString)
 
-    FiloExecutor.columnStore.scanRows(
+    FiloExecutor.memStore.scanRows(
       readOnlyProjection, readOnlyProjection.columns, version, partMethod, chunkMethod,
       SparkRowReader.sparkColToMaker,
       (vectors) => new SparkRowReader(vectors)).asInstanceOf[Iterator[Row]]

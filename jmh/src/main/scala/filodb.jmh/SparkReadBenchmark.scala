@@ -15,6 +15,7 @@ import scala.language.postfixOps
 import scalaxy.loops._
 
 import filodb.core._
+import filodb.core.memstore.IngestRecord
 import filodb.core.metadata.{Column, Dataset}
 import filodb.core.store._
 import filodb.spark.{FiloDriver, FiloExecutor, FiloRelation}
@@ -23,10 +24,10 @@ import filodb.spark.{FiloDriver, FiloExecutor, FiloRelation}
  * A benchmark to compare performance of FiloRelation against different scenarios,
  * for an analytical query summing 5 million random integers from a single column of a
  * FiloDB dataset.  Description:
- * - sparkSum(): Sum 5 million integers stored using InMemoryColumnStore.
+ * - sparkSum(): Sum 5 million integers stored using MemStore.
  * - sparkBaseline(): Get the first 2 records.  Just to see what the baseline latency is of a
  *   DataFrame query.
- * - inMemoryColStoreOnly(): No Spark, just reading rows from the InMemoryColumnStore
+ * - memStoreOnly(): No Spark, just reading rows from the MemStore
  * - sparkCassSum(): Sum 5 million integers using CassandraColumnStore.  Must have run CreateCassTestData
  *   first to populate into Cassandra.
  *   NOTE: This has been moved to SparkCassBenchmark.scala
@@ -35,7 +36,7 @@ import filodb.spark.{FiloDriver, FiloExecutor, FiloRelation}
  * For example, on my laptop, here is the JMH output:
  * {{{
  *  Benchmark                              Mode  Cnt  Score   Error  Units
- *  SparkReadBenchmark.inMemoryColStoreOnly  ss   15  ≈ 10⁻³            s/op
+ *  SparkReadBenchmark.memStoreOnly          ss   15  ≈ 10⁻³            s/op
  *  SparkReadBenchmark.sparkBaseline         ss   15   0.013 ±  0.001   s/op
  *  SparkReadBenchmark.sparkSum              ss   15   0.045 ±  0.002   s/op
  *  SparkCassBenchmark.sparkCassSum          ss   15   0.226 ± 0.035   s/op
@@ -57,6 +58,7 @@ class SparkReadBenchmark {
                                  .appName("test")
                                  .config("spark.ui.enabled", "false")
                                  .config("spark.filodb.store", "in-memory")
+                                 .config("spark.filodb.memstore.chunks-to-keep", "20")
                                  .getOrCreate
   val sc = sess.sparkContext
   // Below is to make sure that Filo actor system stuff is run before test code
@@ -70,16 +72,16 @@ class SparkReadBenchmark {
   parse(FiloDriver.metaStore.newDataset(dataset)) { x => x }
   val createColumns = schema.map { col => FiloDriver.metaStore.newColumn(col, ref) }
   parse(Future.sequence(createColumns)) { x => x }
-  val split = FiloDriver.columnStore.getScanSplits(ref).head
+  FiloDriver.memStore.setup(projection, 0)
+  val split = FiloDriver.memStore.getScanSplits(ref).head
 
-  // Merge segments into InMemoryColumnStore
-  rowIt.toSeq.take(NumRows).grouped(10000).foreach { rows =>
-    val segInfo = SegmentInfo(projection.partKey("/0"), "").basedOn(projection)
-    val state = ColumnStoreSegmentState(projection, schema, 0, FiloDriver.columnStore)(segInfo)
-    val writerSeg = new ChunkSetSegment(projection, segInfo)
-    writerSeg.addChunkSet(state, rows.map(TupleRowReader))
-    parse(FiloDriver.columnStore.appendSegment(projection, writerSeg, 0)) { x => x }
-  }
+  // Write raw data into MemStore
+  rowIt.take(NumRows).zipWithIndex
+       .map { case (row, i) => IngestRecord(projection, TupleRowReader(row), i) }
+       .grouped(500)
+       .foreach { records =>
+         FiloDriver.memStore.ingest(ref, 0, records)
+       }
 
   @TearDown
   def shutdownFiloActors(): Unit = {
@@ -101,12 +103,12 @@ class SparkReadBenchmark {
   val readOnlyProjStr = projection.toReadOnlyProjString(Seq("int"))
   val configStr = filoConfig.root.render(ConfigRenderOptions.concise)
 
-  // Measure the speed of InMemoryColumnStore's ScanSegments over many segments
+  // Measure the speed of MemStore's ScanChunks etc. over many chunks
   // Including null check
   @Benchmark
   @BenchmarkMode(Array(Mode.SingleShotTime))
   @OutputTimeUnit(TimeUnit.SECONDS)
-  def inMemoryColStoreOnly(): Any = {
+  def memStoreOnly(): Any = {
     val it = FiloRelation.perPartitionRowScanner(configStr, readOnlyProjStr, 0,
                             FilteredPartitionScan(split), AllChunkScan).asInstanceOf[Iterator[InternalRow]]
     var sum = 0

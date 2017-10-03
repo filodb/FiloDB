@@ -222,11 +222,6 @@ package object spark extends StrictLogging {
     FiloDriver.client.createNewDataset(dataset, Nil, timeout = datasetOpTimeout)
   }
 
-  private[spark] def deleteDataset(dataset: DatasetRef): Unit = {
-    logger.info(s"Deleting dataset $dataset")
-    FiloDriver.client.deleteDataset(dataset, datasetOpTimeout)
-  }
-
   implicit def sqlToFiloContext(sql: SQLContext): FiloContext = new FiloContext(sql)
 
   implicit def sessionToFiloContext(sess: SparkSession): FiloContext = new FiloContext(sess.sqlContext)

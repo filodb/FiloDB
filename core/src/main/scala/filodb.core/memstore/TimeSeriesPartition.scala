@@ -7,8 +7,8 @@ import scalaxy.loops._
 
 import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.metadata.RichProjection
-import filodb.core.query.{PartitionChunkIndex, ChunkIDPartitionChunkIndex, ChunkSetReader, FiloPartition}
-import filodb.core.store.{ChunkSetInfo, timeUUID64}
+import filodb.core.query.{PartitionChunkIndex, ChunkIDPartitionChunkIndex, ChunkSetReader}
+import filodb.core.store._
 import filodb.core.Types._
 
 object TimeSeriesPartition {
@@ -42,7 +42,7 @@ class TimeSeriesPartition(val projection: RichProjection,
                           val binPartition: PartitionKey,
                           val shard: Int,
                           chunksToKeep: Int,
-                          maxChunkSize: Int) extends PartitionChunkIndex with FiloPartition {
+                          maxChunkSize: Int) extends FiloPartition {
   import ChunkSetInfo._
   import TimeSeriesPartition._
 
@@ -118,14 +118,6 @@ class TimeSeriesPartition(val projection: RichProjection,
     currentChunkLen = 0
   }
 
-  def rowKeyRange(startKey: BinaryRecord, endKey: BinaryRecord): InfosSkipsIt =
-    index.rowKeyRange(startKey, endKey) ++ latestChunkIt
-
-  def allChunks: InfosSkipsIt = index.allChunks ++ latestChunkIt
-
-  def singleChunk(startKey: BinaryRecord, id: ChunkID): InfosSkipsIt =
-    index.singleChunk(startKey, id)
-
   def latestN(n: Int): InfosSkipsIt =
     if (n == 1) latestChunkIt else index.latestN(n)
 
@@ -178,15 +170,24 @@ class TimeSeriesPartition(val projection: RichProjection,
 
   /**
    * Streams back ChunkSetReaders from this Partition as an iterator of readers by chunkID
-   * @param infosSkips ChunkSetInfos and skips, as returned by one of the index search methods
+   * @param method the ChunkScanMethod determining which chunks to read out
    * @param positions an array of the column positions according to projection.dataColumns, ie 0 for the first
    *                  column, up to projection.dataColumns.length - 1
    */
-  def readers(infosSkips: InfosSkipsIt, positions: Array[Int]): Iterator[ChunkSetReader] =
+  def readers(method: ChunkScanMethod, positions: Array[Int]): Iterator[ChunkSetReader] = {
+    val infosSkips = method match {
+      case AllChunkScan               => index.allChunks ++ latestChunkIt
+      // To derive time range: r.startkey.getLong(0) -> r.endkey.getLong(0)
+      case r: RowKeyChunkScan         => index.rowKeyRange(r.startkey, r.endkey) ++ latestChunkIt
+      case r @ SingleChunkScan(_, id) => index.singleChunk(r.startkey, id)
+      case LastSampleChunkScan        => latestN(1)
+    }
+
     infosSkips.map { case (info, skips) =>
       val vectArray = vectors.get(info.id)
       new ChunkSetReader(info, binPartition, skips, getVectors(positions, vectArray, info.numRows))
     }
+  }
 
   def lastVectors: Array[FiloVector[_]] =
     (if (currentChunkLen == 0 && chunkIDs.nonEmpty) {

@@ -22,9 +22,9 @@ import filodb.core.Types._
  * It is responsible for:
  * - Overall external FiloDB API.
  * - Metadata changes (dataset/column changes)
- * - Supervising, spinning up, cleaning up DatasetCoordinatorActors, QueryActors
+ * - Supervising, spinning up, cleaning up IngestionActors, QueryActors
  * - Forwarding new changes (rows) to other NodeCoordinatorActors if they are not local
- * - Forwarding rows to DatasetCoordinatorActors
+ * - Forwarding rows to IngestionActors
  *
  * Since it is the API entry point its work should be very lightweight, mostly forwarding things to
  * other actors to do the real work.
@@ -36,19 +36,15 @@ object NodeCoordinatorActor {
   /** Clears the state of a single dataset. */
   final case class ClearState(dataset: DatasetRef, version: Int)
 
-  case object ReloadDCA
-
   def props(metaStore: MetaStore,
             memStore: MemStore,
-            columnStore: ColumnStore,
             selfAddress: Address,
             config: Config): Props =
-    Props(classOf[NodeCoordinatorActor], metaStore, memStore, columnStore, selfAddress, config)
+    Props(classOf[NodeCoordinatorActor], metaStore, memStore, selfAddress, config)
 }
 
 private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
                                                  memStore: MemStore,
-                                                 columnStore: ColumnStore,
                                                  selfAddress: Address,
                                                  config: Config) extends NamingAwareBaseActor {
   import NodeCoordinatorActor._
@@ -58,7 +54,7 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
   import context.dispatcher
 
   val settings = new FilodbSettings(config)
-  val dsCoordinators = new HashMap[(DatasetRef, Int), ActorRef]
+  val ingesters = new HashMap[(DatasetRef, Int), ActorRef]
   val actorPath = selfAddress.host.getOrElse("None")
   var clusterActor: Option[ActorRef] = None
   var shardActor: Option[ActorRef] = None
@@ -66,12 +62,12 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
   // The thread pool used by Monix Observables/reactive ingestion
   val ingestScheduler = Scheduler.computation(config.getInt("ingestion-threads"))
 
-  // By default, stop children DatasetCoordinatorActors when something goes wrong.
+  // By default, stop children IngestionActors when something goes wrong.
   override val supervisorStrategy = SupervisorStrategy.stoppingStrategy
 
-  private def withDsCoord(originator: ActorRef, dataset: DatasetRef, version: Int)
-                         (func: ActorRef => Unit): Unit = {
-    dsCoordinators.get((dataset, version)).map(func).getOrElse(originator ! UnknownDataset)
+  private def withIngester(originator: ActorRef, dataset: DatasetRef, version: Int)
+                          (func: ActorRef => Unit): Unit = {
+    ingesters.get((dataset, version)).map(func).getOrElse(originator ! UnknownDataset)
   }
 
   // For now, datasets need to be set up for ingestion before they can be queried (in-mem only)
@@ -87,8 +83,7 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
       originator ! DatasetError(s"There must be at least one projection in dataset $datasetObj")
     } else {
       (for { resp1 <- metaStore.newDataset(datasetObj) if resp1 == Success
-             resp2 <- metaStore.newColumns(columns, ref)
-             resp3 <- columnStore.initializeProjection(datasetObj.projections.head) }
+             resp2 <- metaStore.newColumns(columns, ref) }
       yield {
         originator ! DatasetCreated
       }).recover {
@@ -99,19 +94,12 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
     }
   }
 
-  private def truncateDataset(originator: ActorRef, projection: Projection): Unit = {
-    columnStore.clearProjectionData(projection)
-               .map { resp => originator ! ProjectionTruncated }
-               .recover {
-                 case e: Exception => originator ! DatasetError(e.getMessage)
-               }
-  }
-
-  private def dropDataset(originator: ActorRef, dataset: DatasetRef): Unit = {
-    (for { resp1 <- metaStore.deleteDataset(dataset)
-           resp2 <- columnStore.dropDataset(dataset) if resp1 == Success } yield {
-      if (resp2 == Success) originator ! DatasetDropped
-    }).recover {
+  // TODO: move createDataset and truncateDataset into NodeClusterActor.  truncate() needs distributed coord
+  private def truncateDataset(originator: ActorRef, dataset: DatasetRef): Unit = {
+    try {
+      memStore.truncate(dataset)
+      originator ! DatasetTruncated
+    } catch {
       case e: Exception => originator ! DatasetError(e.getMessage)
     }
   }
@@ -139,10 +127,10 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
 
     shardActor match {
       case Some(shardStatus) =>
-        val props = MemStoreCoordActor.props(proj, memStore, ds.source, shardStatus)(ingestScheduler)
+        val props = IngestionActor.props(proj, memStore, ds.source, shardStatus)(ingestScheduler)
         val ingester = context.actorOf(props, s"$Ingestion-${proj.dataset.name}-${ds.version}")
         context.watch(ingester)
-        dsCoordinators((ref, ds.version)) = ingester
+        ingesters((ref, ds.version)) = ingester
 
         logger.info(s"Creating QueryActor for dataset $ref")
         val queryRef = context.actorOf(QueryActor.props(memStore, proj), s"$Query-$ref")
@@ -156,65 +144,25 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
     }
   }
 
-  private def reloadDatasetCoordActors(originator: ActorRef) : Unit = {
-    logger.info(s"Reload of dataset coordinator actors has started for path: $actorPath")
-
-    metaStore.getAllIngestionEntries(actorPath).map {
-      case entries if entries.nonEmpty =>
-        entries.foreach { ingestion =>
-          val data = ingestion.toString().split("\u0001")
-          val databaseOpt = if (data(1).isEmpty || data(1).equals("None")) None else Some(data(1))
-          val ref = DatasetRef(data(2), databaseOpt)
-          val columns = data(4).split("\u0002").map(col => DataColumn.fromString(col, data(2)))
-          val projection = RichProjection(Await.result(metaStore.getDataset(ref), 10.second), columns)
-          val colNames = projection.dataColumns.map(_.name)
-          // setupDataset(originator, projection.dataset, colNames, data(3).toInt)
-        }
-      case entries =>
-        originator ! DCAReady
-    }.recover { case e: Exception =>
-      originator ! StorageEngineException(e)
-    }
-  }
-
   def datasetHandlers: Receive = LoggingReceive {
     case CreateDataset(datasetObj, columns, db) =>
       createDataset(sender(), datasetObj, DatasetRef(datasetObj.name, db), columns)
 
-    case TruncateProjection(projection, version) =>
-      // First try through DS Coordinator so we could coordinate with flushes
-      dsCoordinators.get((projection.dataset, version)) match {
-        case Some(dsCoordinator) =>
-          dsCoordinator ! DatasetCoordinatorActor.ClearProjection(sender(), projection)
-        case _ =>
-          // Ok, so there is no DatasetCoordinatorActor, meaning no ingestion.  We should
-          // still be able to truncate a projection if it exists.
-          truncateDataset(sender(), projection)
-      }
-
-    case DropDataset(dataset) => dropDataset(sender(), dataset)
+    case TruncateDataset(ref) =>
+      truncateDataset(sender(), ref)
   }
 
   def ingestHandlers: Receive = LoggingReceive {
     case ds @ DatasetSetup(dataset, _, version, _) =>
       val ref = dataset.projections.head.dataset
-      if (!(dsCoordinators.contains((ref, version)))) { setupDataset(ds, sender()) }
+      if (!(ingesters.contains((ref, version)))) { setupDataset(ds, sender()) }
       else { logger.warn(s"Getting redundant DatasetSetup for dataset $dataset") }
 
     case IngestRows(dataset, version, shard, rows) =>
-      withDsCoord(sender(), dataset, version) { _ ! MemStoreCoordActor.IngestRows(sender(), shard, rows) }
-
-    case flushCmd @ Flush(dataset, version) =>
-      withDsCoord(sender(), dataset, version) { _ ! DatasetCoordinatorActor.StartFlush(Some(sender())) }
-
-    case CheckCanIngest(dataset, version) =>
-      withDsCoord(sender(), dataset, version) { _.forward(DatasetCoordinatorActor.CanIngest) }
+      withIngester(sender(), dataset, version) { _ ! IngestionActor.IngestRows(sender(), shard, rows) }
 
     case GetIngestionStats(dataset, version) =>
-      withDsCoord(sender(), dataset, version) { _.forward(MemStoreCoordActor.GetStatus) }
-
-    case ReloadIngestionState(originator, dataset, version) =>
-      withDsCoord(sender(), dataset, version) { _.forward(DatasetCoordinatorActor.InitIngestion(originator)) }
+      withIngester(sender(), dataset, version) { _.forward(IngestionActor.GetStatus) }
   }
 
   def queryHandlers: Receive = LoggingReceive {
@@ -231,7 +179,6 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
     case e: ShardCommand              => forward(e, sender())
     case Terminated(memstoreCoord)    => terminated(memstoreCoord)
     case MiscCommands.GetClusterActor => sender() ! clusterActor
-    case ReloadDCA                    => reloadDatasetCoordActors(sender())
     case ClearState(ref, version)     => clearState(ref, version)
     case NodeProtocol.ResetState      => reset(sender())
     case e: ShardEvent                => // NOP for now
@@ -249,7 +196,7 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
     * TODO version match if needed, when > 1, currently only 0.
     */
   private def forward(command: ShardCommand, origin: ActorRef): Unit =
-    dsCoordinators.collectFirst { case ((ds, _), actor) if ds == command.ref => actor }
+    ingesters.collectFirst { case ((ds, _), actor) if ds == command.ref => actor }
       match {
         case Some(actor) =>
           actor.tell(command, origin)
@@ -257,25 +204,24 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
           logger.warn(s"No MemstoreCoordinator for dataset ${command.ref}.")
       }
 
-  private def terminated(memstoreCoord: ActorRef): Unit =
-    dsCoordinators.find { case (key, ref) => ref == memstoreCoord }
+  private def terminated(ingester: ActorRef): Unit =
+    ingesters.find { case (key, ref) => ref == ingester }
       .foreach { case ((datasetRef,version), _) =>
-        logger.warn(s"$memstoreCoord terminated. Stopping ingestion for ${(datasetRef, version)}.")
-        dsCoordinators.remove((datasetRef,version))
+        logger.warn(s"$ingester terminated. Stopping ingestion for ${(datasetRef, version)}.")
+        ingesters.remove((datasetRef,version))
         // TODO @parekuti: update ingestion state
         // metaStore.updateIngestionState(actorPath, datasetRef, "Failed", "Error during ingestion", version)
       }
 
   private def reset(origin: ActorRef): Unit = {
     context.children foreach (_ ! PoisonPill)
-    dsCoordinators.clear()
-    columnStore.reset()
+    ingesters.clear()
     memStore.reset()
   }
 
   private def clearState(ref: DatasetRef, version: Int): Unit = {
-    dsCoordinators.get((ref, version)).foreach(_ ! PoisonPill)
-    dsCoordinators.remove((ref, version))
+    ingesters.get((ref, version)).foreach(_ ! PoisonPill)
+    ingesters.remove((ref, version))
     // This is a bit heavy handed, it clears out the entire cache, not just for all datasets
     memStore.reset()
   }

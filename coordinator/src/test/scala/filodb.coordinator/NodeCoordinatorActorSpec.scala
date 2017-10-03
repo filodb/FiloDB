@@ -11,10 +11,8 @@ import com.typesafe.config.ConfigFactory
 import org.scalatest.BeforeAndAfterEach
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
-import scalax.file.Path
 
 import org.velvia.filo.ZeroCopyUTF8String
-import filodb.coordinator.NodeCoordinatorActor.ReloadDCA
 import filodb.core._
 import filodb.core.metadata.{DataColumn, Dataset, RichProjection}
 import filodb.core.query.{AggregationFunction, ColumnFilter, Filter, HistogramBucket}
@@ -60,7 +58,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
   var probe: TestProbe = _
   var shardMap = new ShardMapper(1)
   val colNames = schema.map(_.name)
-  val nodeCoordProps = NodeCoordinatorActor.props(metaStore, memStore, cluster.columnStore, selfAddress, config)
+  val nodeCoordProps = NodeCoordinatorActor.props(metaStore, memStore, selfAddress, config)
 
   override def beforeAll(): Unit = {
     super.beforeAll()
@@ -86,10 +84,6 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
     expectMsg(NodeProtocol.StateReset)
 
     gracefulStop(coordinatorActor, 3.seconds.dilated, PoisonPill).futureValue
-
-    val walDir = config.getString("write-ahead-log.memtable-wal-dir")
-    val path = Path.fromString(walDir)
-    Try(path.deleteRecursively(continueOnFailure = false))
   }
 
   def createTable(dataset: Dataset, columns: Seq[DataColumn]): Unit = {
@@ -138,20 +132,6 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
 
       probe.send(coordinatorActor, CreateDataset(dataset1, schema))
       probe.expectMsg(DatasetAlreadyExists)
-    }
-
-    it("should be able to drop a dataset") {
-      probe.send(coordinatorActor, CreateDataset(dataset1, schema))
-      probe.expectMsg(DatasetCreated)
-
-      val ref = DatasetRef(dataset1.name)
-      metaStore.getDataset(ref).futureValue should equal (dataset1)
-
-      probe.send(coordinatorActor, DropDataset(DatasetRef(dataset1.name)))
-      probe.expectMsg(DatasetDropped)
-
-      // Now verify that the dataset was indeed dropped
-      metaStore.getDataset(ref).failed.futureValue shouldBe a[NotFoundError]
     }
   }
 
@@ -382,7 +362,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
     // probe.expectMsg(Flushed)
 
     probe.send(coordinatorActor, GetIngestionStats(ref, 0))
-    probe.expectMsg(MemStoreCoordActor.IngestionStatus(99))
+    probe.expectMsg(IngestionActor.IngestionStatus(99))
 
     // Now, read stuff back from the column store and check that it's all there
     val split = memStore.getScanSplits(ref, 1).head
@@ -408,88 +388,6 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
     // Now, if we send more rows, we will get UnknownDataset
     probe.send(coordinatorActor, IngestRows(ref, 0, 0, records(projection1)))
     probe.expectMsg(UnknownDataset)
-  }
-
-  /* The following two tests are being refactored for changes in wal */
-  ignore("should reload dataset coordinator actors once the nodes are up") {
-    probe.send(coordinatorActor, CreateDataset(dataset4, schema))
-    probe.expectMsg(DatasetCreated)
-
-    val proj = projection4.withDatabase("unittest2")
-    val ref = proj.datasetRef
-
-    startIngestion(proj, schema, 1)
-    generateActorException(proj)
-
-    probe.send(coordinatorActor, ReloadDCA)
-    probe.expectMsg(DCAReady)
-
-    probe.send(coordinatorActor, Flush(ref, 0))
-    probe.expectMsg(Flushed)
-
-    probe.send(coordinatorActor, GetIngestionStats(ref, 0))
-    probe.expectMsg(DatasetCoordinatorActor.Stats(1, 1, 0, 0, -1, 0))
-
-  }
-
-  ignore("should be able to create new WAL files once the reload and flush is complete") {
-    probe.send(coordinatorActor, CreateDataset(dataset4, schema))
-    probe.expectMsg(DatasetCreated)
-
-    val proj = projection4.withDatabase("unittest2")
-    val ref = proj.datasetRef
-
-    generateActorException(proj)
-
-    probe.send(coordinatorActor, ReloadDCA)
-    probe.expectMsg(DCAReady)
-
-    var numRows = 0
-    if(config.getBoolean("write-ahead-log.write-ahead-log-enabled")){
-      numRows = 99
-    }
-    probe.send(coordinatorActor, GetIngestionStats(ref, 0))
-    probe.expectMsg(DatasetCoordinatorActor.Stats(0, 0, 0, numRows, -1, 0))
-
-    // Ingest more rows to create new WAL file
-    probe.send(coordinatorActor, CheckCanIngest(ref, 0))
-    probe.expectMsg(CanIngest(true))
-
-    probe.send(coordinatorActor, IngestRows(ref, 0, 0, records(projection4)))
-    probe.expectMsg(Ack(98L))
-
-    Thread sleep 2000
-
-    probe.send(coordinatorActor, GetIngestionStats(ref, 0))
-    probe.expectMsg(DatasetCoordinatorActor.Stats(1, 1, 0, 0, -1, 99L))
-
-  }
-
-  def generateActorException(proj: RichProjection): Unit = {
-    val ref = proj.datasetRef
-
-    probe.send(coordinatorActor, CheckCanIngest(ref, 0))
-    probe.expectMsg(CanIngest(true))
-
-    probe.send(coordinatorActor, IngestRows(ref, 0, 0, records(proj)))
-    probe.expectMsg(Ack(98L))
-
-    probe.send(coordinatorActor, GetIngestionStats(ref, 0))
-    probe.expectMsg(DatasetCoordinatorActor.Stats(0, 0, 0, 99, -1, 99L))
-
-    // val gdeltLines = Source.fromURL(getClass.getResource("/GDELT-sample-test2.csv"))
-    //   .getLines.toSeq.drop(1) // drop the header line
-
-    // val readers2 = gdeltLines.map { line => ArrayStringRowReader(line.split(",")) }
-
-    // EventFilter[NumberFormatException](occurrences = 1) intercept {
-    //   probe.send(coordActor, IngestRows(ref, 0, 0, readers2))
-    //   // This should trigger an error, and datasetCoordinatorActor will stop, and no ack will be forthcoming.
-    //   probe.expectNoMsg
-    // }
-    // Now, if we send more rows, we will get UnknownDataset
-    // probe.send(coordActor, IngestRows(ref, 0, 0, readers))
-    // probe.expectMsg(UnknownDataset)
   }
 }
 

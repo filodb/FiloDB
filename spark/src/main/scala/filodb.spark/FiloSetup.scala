@@ -13,8 +13,6 @@ import org.apache.spark.SparkContext
 import org.apache.spark.sql.hive.filodb.MetaStoreSync
 
 import filodb.coordinator.client.ClusterClient
-import filodb.coordinator.IngestionCommands.DCAReady
-import filodb.coordinator.NodeCoordinatorActor.ReloadDCA
 import filodb.coordinator.{NodeClusterActor, _}
 
 /**
@@ -57,9 +55,7 @@ private[filodb] trait FilodbSparkCluster extends FilodbClusterNode {
   // The global config of filodb with cassandra, columnstore, etc. sections
   def config: Config = _config.get
 
-  lazy val columnStore = cluster.columnStore
-
-  lazy val stateCache = cluster.stateCache
+  lazy val memStore = cluster.memStore
 
   lazy val clusterActor = cluster.clusterSingletonProxy(roleName, withManager = true)
 
@@ -143,45 +139,14 @@ object FiloExecutor extends FilodbSparkCluster {
     _config.getOrElse {
       _config = Some(filoConfig)
 
-      // start ingesting data once reload DCA process is complete
-      if (startReloadDCA()) {
-        val addr = AddressFromURIString.parse(filoConfig.getString("spark-driver-addr"))
-        logger.info(s"Initializing FiloExecutor clustering by joining driver at $addr...")
-        cluster.kamonInit(role)
-        coordinatorActor // create it
-        cluster.join(addr)
-        clusterActor
-        cluster._isInitialized.set(true)
-      } else {
-        // Stop ingestion if there is an exception occurs during reload DCA
-        shutdown()
-        FiloDriver.shutdown() // do we need to call both?
-        sys.exit(2)
-      }
+      val addr = AddressFromURIString.parse(filoConfig.getString("spark-driver-addr"))
+      logger.info(s"Initializing FiloExecutor clustering by joining driver at $addr...")
+      cluster.kamonInit(role)
+      coordinatorActor // create it
+      cluster.join(addr)
+      clusterActor
+      cluster._isInitialized.set(true)
     }
-  }
-
-  def startReloadDCA(): Boolean = {
-    implicit val timeout = Timeout(FiniteDuration(10, SECONDS))
-    val resp = cluster.coordinatorActor ? ReloadDCA
-    // start reloading WAL files if reload-wal-enabled is set to true
-    if (config.getBoolean("write-ahead-log.reload-wal-enabled")) {
-      try {
-        Await.result(resp, timeout.duration) match {
-          case DCAReady =>
-            logger.info("Reload of dataset coordinator actors is completed")
-            return true
-          case _ =>
-            logger.info("Reload is not complete, and received a wrong acknowledgement")
-            return false
-        }
-      } catch {
-        case e: Exception =>
-          logger.error(s"Exception occurred while reloading dataset coordinator actors:${e.printStackTrace()}")
-          return false
-      }
-    }
-    return true
   }
 
   def init(confStr: String): Unit = if (_config.isEmpty) {

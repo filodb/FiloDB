@@ -3,7 +3,6 @@ package filodb.core.metadata
 import org.velvia.filo.TupleRowReader
 
 import filodb.core.NamesTestData
-import filodb.core.store.SegmentSpec
 
 import org.scalatest.{FunSpec, Matchers, BeforeAndAfter}
 

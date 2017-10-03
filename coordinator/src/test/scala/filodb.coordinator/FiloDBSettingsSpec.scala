@@ -22,7 +22,7 @@ class FiloDBSettingsSpec extends RunnableSpec {
 
       import settings._
       SeedNodes.size should be (1)
-      StorageStrategy should be (StoreStrategy.Configured("filodb.cassandra.CassandraStoreFactory"))
+      StorageStrategy should be (StoreStrategy.InMemory)
     }
   }
 }

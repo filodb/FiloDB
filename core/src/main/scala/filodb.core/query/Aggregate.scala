@@ -9,7 +9,7 @@ import scala.reflect.{classTag, ClassTag}
 import scalaxy.loops._
 
 import filodb.core.metadata._
-import filodb.core.store.{ChunkScanMethod, ChunkSetInfo, RowKeyChunkScan}
+import filodb.core.store.{ChunkScanMethod, FiloPartition, RowKeyChunkScan}
 import filodb.core.binaryrecord.BinaryRecord
 
 /**
@@ -73,7 +73,7 @@ final case class ListAggregate[R: ClassTag](values: Seq[R] = Nil) extends Aggreg
 trait Aggregator {
   type A <: Aggregate[_]
 
-  def aggPartition(infosSkips: ChunkSetInfo.InfosSkipsIt, partition: FiloPartition): A
+  def aggPartition(method: ChunkScanMethod, partition: FiloPartition): A
 
   // NOTE: This is called at the beginning of every new partition.  Make sure you return a NEW instance
   // every time, especially if that aggregate is mutable, such as the ArrayAggregate -- unless you are
@@ -103,8 +103,8 @@ trait ChunkAggregator extends Aggregator {
   def add(orig: A, reader: ChunkSetReader): A
   def positions: Array[Int]
 
-  def aggPartition(infosSkips: ChunkSetInfo.InfosSkipsIt, partition: FiloPartition): A =
-    partition.readers(infosSkips, positions).foldLeft(emptyAggregate) {
+  def aggPartition(method: ChunkScanMethod, partition: FiloPartition): A =
+    partition.readers(method, positions).foldLeft(emptyAggregate) {
       case (agg, reader) => add(agg, reader)
     }
 }
@@ -124,14 +124,14 @@ class NumBytesAggregator(vectorPos: Int = 0) extends ChunkAggregator {
 class PartitionKeysAggregator extends OneValueAggregator {
   type R = String
   val tag = classTag[String]
-  def aggPartition(infosSkips: ChunkSetInfo.InfosSkipsIt, partition: FiloPartition):
+  def aggPartition(method: ChunkScanMethod, partition: FiloPartition):
       PrimitiveSimpleAggregate[String] = new PrimitiveSimpleAggregate(partition.stringPartition)
 }
 
 class LastDoubleValueAggregator(timestampIndex: Int, doubleColIndex: Int) extends OneValueAggregator {
   type R = DoubleSeriesValues
   val tag = classTag[DoubleSeriesValues]
-  def aggPartition(infosSkips: ChunkSetInfo.InfosSkipsIt, partition: FiloPartition):
+  def aggPartition(method: ChunkScanMethod, partition: FiloPartition):
       PrimitiveSimpleAggregate[DoubleSeriesValues] = {
     val lastVectors = partition.lastVectors
     val timestampVector = lastVectors(timestampIndex).asInstanceOf[FiloVector[Long]]

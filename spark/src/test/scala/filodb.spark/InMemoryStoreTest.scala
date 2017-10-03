@@ -18,7 +18,6 @@ class InMemoryStoreTest extends SparkTestBase {
   val sess = SparkSession.builder.master("local[4]")
                                  .appName("test")
                                  .config("spark.filodb.store", "in-memory")
-                                 .config("spark.filodb.memtable.min-free-mb", "10")
                                  .config("spark.ui.enabled", "false")
                                  .getOrCreate
   val sc = sess.sparkContext
@@ -28,7 +27,7 @@ class InMemoryStoreTest extends SparkTestBase {
   import org.apache.spark.sql.functions._
 
   val segCol = ":string 0"
-  val testProjections = Seq(dataset1.projections.head)
+  val testDatasets = Seq(projection1.datasetRef)
 
   it("should be able to write to InMemoryColumnStore with multi-column partition keys") {
     import sess.implicits._

@@ -18,7 +18,6 @@ import net.ceedubs.ficus.Ficus._
 import org.parboiled2.ParseError
 import org.velvia.filo.RowReader
 
-import filodb.cassandra.columnstore.CassandraTokenRangeSplit
 import filodb.coordinator.client._
 import filodb.coordinator._
 import filodb.core._
@@ -86,7 +85,7 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
 
   def printHelp() {
     println("filo-cli help:")
-    println("  commands: init create importcsv list analyze dumpinfo delete truncate")
+    println("  commands: init create importcsv list truncate")
     println("  columns: <colName1>:<type1>,<colName2>:<type2>,... ")
     println("  types:  int,long,double,string,bool,timestamp,map")
     println("  common options:  --dataset --database")
@@ -105,15 +104,6 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
   }
 
   def getRef(args: Arguments): DatasetRef = DatasetRef(args.dataset.get, args.database)
-
-  def combineSplits(splits: Seq[ScanSplit]): ScanSplit = {
-    val csplits = splits.asInstanceOf[Seq[CassandraTokenRangeSplit]]
-
-    // Compress all the token ranges down into one split
-    csplits.foldLeft(csplits.head.copy(tokens = Nil)) { case (nextSplit, ourSplit) =>
-      ourSplit.copy(tokens = ourSplit.tokens ++ nextSplit.tokens)
-    }
-  }
 
   def getClientAndRef(args: Arguments): (LocalClient, DatasetRef) = {
     require(args.host.nonEmpty && args.dataset.nonEmpty, "--host and --dataset must be defined")
@@ -158,27 +148,8 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
                     delimiter,
                     99.minutes)
 
-        case Some("analyze") =>
-          parse(Analyzer.analyze(cluster.columnStore,
-                                 metaStore,
-                                 getRef(args),
-                                 version,
-                                 combineSplits,
-                                 args.numPartitions), 30.minutes)(a => println(a.prettify()))
-
-        case Some("dumpinfo") =>
-          printChunkInfos(Analyzer.getChunkInfos(cluster.columnStore,
-                                   metaStore,
-                                   getRef(args),
-                                   version,
-                                   combineSplits,
-                                   args.numPartitions))
-
-        case Some("delete") =>
-          client.deleteDataset(getRef(args), timeout)
-
         case Some("truncate") =>
-          client.truncateDataset(getRef(args), version, timeout)
+          client.truncateDataset(getRef(args), timeout)
 
         case Some("indexnames") =>
           val (remote, ref) = getClientAndRef(args)
@@ -255,13 +226,6 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
     parse(metaStore.getAllDatasets(database)) { refs =>
       refs.foreach { ref => println("%25s\t%s".format(ref.database.getOrElse(""), ref.dataset)) }
     }
-  }
-
-  def printChunkInfos(infos: Observable[ChunkInfo]): Unit = {
-    val fut = infos.foreach { case ChunkInfo(partKey, ChunkSetInfo(id, numRows, firstKey, lastKey)) =>
-      println(" %25s\t%10d %5d  %40s %s".format(partKey, id, numRows, firstKey, lastKey))
-    }
-    parse(fut) { x => x }
   }
 
   def createDatasetAndColumns(dataset: DatasetRef,
@@ -442,8 +406,8 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
     val columns = columnNames.map(schema)
 
     // NOTE: we will only return data from the first split!
-    val splits = cluster.columnStore.getScanSplits(dataset)
-    val requiredRows = cluster.columnStore.scanRows(richProj, columns, version, FilteredPartitionScan(splits.head))
+    val splits = cluster.memStore.getScanSplits(dataset)
+    val requiredRows = cluster.memStore.scanRows(richProj, columns, version, FilteredPartitionScan(splits.head))
                                   .take(limit)
     writeResult(dataset.dataset, requiredRows, columnNames, columns, outFile)
   }
