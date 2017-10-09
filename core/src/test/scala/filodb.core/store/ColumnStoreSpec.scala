@@ -33,7 +33,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
   val projectionDb2 = projection.withDatabase("unittest2")
 
   // First create the tables in C*
-  override def beforeAll() {
+  override def beforeAll(): Unit = {
     super.beforeAll()
     colStore.initializeProjection(dataset.projections.head).futureValue
     colStore.initializeProjection(GdeltTestData.dataset2.projections.head).futureValue

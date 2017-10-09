@@ -59,7 +59,7 @@ final case class TimeseriesTagsRowReader(keyValues: String) extends SchemaRowRea
   final def notNull(columnNo: Int): Boolean = true
 }
 
-final case class SampleRowReader(timestampMs:Long, value:Double) extends RowReader {
+final case class SampleRowReader(timestampMs: Long, value: Double) extends RowReader {
   final def getDouble(index: Int): Double = value
   final def getLong(index: Int): Long = timestampMs
 

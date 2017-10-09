@@ -2,12 +2,12 @@ package filodb.core.metadata
 
 import com.typesafe.scalalogging.StrictLogging
 import org.scalactic._
-import org.velvia.filo.{RowReader, RoutingRowReader, SeqRowReader}
+import org.velvia.filo.{RoutingRowReader, RowReader, SeqRowReader}
 
-import filodb.core.{CompositeKeyType, KeyType}
-import filodb.core.binaryrecord.{RecordSchema, BinaryRecord}
-import filodb.core.Types._
 import filodb.core._
+import filodb.core.KeyType
+import filodb.core.binaryrecord.{BinaryRecord, RecordSchema}
+import filodb.core.Types._
 
 /**
  * A Projection defines one particular view of a dataset, designed to be optimized for a particular query.

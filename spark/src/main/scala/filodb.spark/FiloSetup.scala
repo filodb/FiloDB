@@ -136,7 +136,7 @@ object FiloExecutor extends FilodbSparkCluster {
    * @param filoConfig The config within the filodb.** level.
    */
   def init(filoConfig: Config): Unit = synchronized {
-    _config.getOrElse {
+    if (_config.isEmpty) {
       _config = Some(filoConfig)
 
       val addr = AddressFromURIString.parse(filoConfig.getString("spark-driver-addr"))

@@ -1,22 +1,21 @@
 package filodb.core.store
 
-import com.typesafe.scalalogging.StrictLogging
+import java.nio.ByteBuffer
+
 import kamon.Kamon
 import monix.reactive.Observable
 
-import scala.concurrent.{ExecutionContext, Future}
-
 import filodb.core._
-import filodb.core.Types.PartitionKey
-import filodb.core.metadata.{Column, Projection, RichProjection, InvalidFunctionSpec}
-import filodb.core.query.{Aggregate, ChunkSetReader, MutableChunkSetReader, PartitionChunkIndex}
-import ChunkSetReader._
+import filodb.core.metadata.{Column, RichProjection}
+import filodb.core.query.ChunkSetReader
 
 /**
  * ChunkSource is the base trait for a source of chunks given a `PartitionScanMethod` and a
  * `ChunkScanMethod`.  It is the basis for querying and reading out of raw chunks.
  */
 trait ChunkSource {
+  import ChunkSetReader._
+
   def stats: ChunkSourceStats
 
   /**
@@ -89,5 +88,4 @@ class ChunkSourceStats {
   def incrChunkWithNoInfo(): Unit = { chunkNoInfoCtr.increment }
 }
 
-import java.nio.ByteBuffer
-case class SingleChunkInfo(id: Types.ChunkID, colNo: Int, bytes: ByteBuffer)
+final case class SingleChunkInfo(id: Types.ChunkID, colNo: Int, bytes: ByteBuffer)

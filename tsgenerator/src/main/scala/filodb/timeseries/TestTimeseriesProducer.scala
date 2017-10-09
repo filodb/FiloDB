@@ -83,7 +83,7 @@ object TestTimeseriesProducer extends StrictLogging {
       val instance = n % numInstances
       val timestamp = startTime + (n / numInstances) * 10000 // generate 1 sample every 10s for each instance
       val value = 15 + Math.sin(n + 1) + rand.nextGaussian()
-      val kafkaParitionId:JLong = (instance % numKafkaPartitions).toLong
+      val kafkaParitionId: JLong = (instance % numKafkaPartitions).toLong
       // TODO For now shardId is instanceId % partitions. Later on, we will build the algorithm
       // that can use the application name and spread.
 

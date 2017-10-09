@@ -1,22 +1,21 @@
 package filodb.core.query
 
-import com.googlecode.javaewah.EWAHCompressedBitmap
 import org.jctools.maps.NonBlockingHashMapLong
-import scala.collection.immutable.TreeSet
-import scala.collection.mutable.HashMap
 
-import filodb.core.Types.{PartitionKey, ChunkID}
 import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.metadata.RichProjection
 import filodb.core.store._
-import ChunkSetInfo._
+import filodb.core.Types.{ChunkID, PartitionKey}
 
 /**
  * An index providing facilities to search through the chunks of a partition in different ways
  * NOTE: it focuses purely on the ChunkSetInfo, not on filters and other things
  */
 trait PartitionChunkIndex {
+  import ChunkSetInfo._
+
   def projection: RichProjection
+
   def binPartition: PartitionKey
 
   def numChunks: Int
@@ -71,6 +70,7 @@ trait MutablePartitionChunkIndex extends PartitionChunkIndex {
 }
 
 object PartitionChunkIndex {
+  import ChunkSetInfo.SkipMap
   def newSkip(key: java.lang.Long): SkipMap = new SkipMap()
 }
 
@@ -83,6 +83,7 @@ object PartitionChunkIndex {
 class RowkeyPartitionChunkIndex(val binPartition: PartitionKey, val projection: RichProjection)
 extends MutablePartitionChunkIndex {
   import collection.JavaConverters._
+  import ChunkSetInfo._
   import PartitionChunkIndex._
   import filodb.core._
 
@@ -134,8 +135,7 @@ extends MutablePartitionChunkIndex {
 class ChunkIDPartitionChunkIndex(val binPartition: PartitionKey, val projection: RichProjection)
 extends MutablePartitionChunkIndex {
   import collection.JavaConverters._
-  import PartitionChunkIndex._
-  import filodb.core._
+  import ChunkSetInfo._
 
   val infosSkips = new java.util.TreeMap[ChunkID, (ChunkSetInfo, SkipMap)]
 

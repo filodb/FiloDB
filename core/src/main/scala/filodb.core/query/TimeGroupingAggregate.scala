@@ -1,13 +1,10 @@
 package filodb.core.query
 
-import org.velvia.filo.{FiloVector, BinaryVector}
 import scala.language.postfixOps
 import scala.reflect.ClassTag
-import scalaxy.loops._
 
-import filodb.core.binaryrecord.BinaryRecord
-import filodb.core.metadata.RichProjection
-import filodb.core.store.{ChunkScanMethod, RowKeyChunkScan}
+import org.velvia.filo.{BinaryVector, FiloVector}
+import scalaxy.loops._
 
 /**
  * A time-series filtering + aggregation function - agg(x) group by time WHERE time > start AND time < end

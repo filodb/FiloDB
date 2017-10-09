@@ -2,12 +2,12 @@ package filodb.core.memstore
 
 import kamon.Kamon
 import org.jctools.maps.NonBlockingHashMapLong
-import org.velvia.filo.{BinaryAppendableVector, BinaryVector, FiloVector, RowReader, RoutingRowReader}
+import org.velvia.filo.{BinaryVector, FiloVector, RoutingRowReader, RowReader}
 import scalaxy.loops._
 
 import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.metadata.RichProjection
-import filodb.core.query.{PartitionChunkIndex, ChunkIDPartitionChunkIndex, ChunkSetReader}
+import filodb.core.query.{ChunkIDPartitionChunkIndex, ChunkSetReader}
 import filodb.core.store._
 import filodb.core.Types._
 

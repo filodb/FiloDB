@@ -1,13 +1,11 @@
 package filodb.cassandra
 
+import scala.concurrent.duration.FiniteDuration
+import scala.util.Try
+
 import com.datastax.driver.core._
 import com.typesafe.config.Config
 import net.ceedubs.ficus.Ficus._
-import scala.concurrent.duration.FiniteDuration
-import scala.concurrent.{ExecutionContext, Future}
-import scala.util.Try
-
-import filodb.core._
 
 trait FiloSessionProvider {
   // It is recommended this be implemented via lazy val.  Don't want to recreate a session every time.
@@ -56,7 +54,7 @@ class DefaultFiloSessionProvider(val config: Config) extends FiloSessionProvider
   private[this] val cluster =
     Cluster.builder()
            .addContactPoints(
-             Try(config.as[Seq[String]]("hosts")).getOrElse(config.getString("hosts").split(',').toSeq) :_*
+             Try(config.as[Seq[String]]("hosts")).getOrElse(config.getString("hosts").split(',').toSeq): _*
             )
            .withPort(config.getInt("port"))
            .withAuthProvider(authProvider)

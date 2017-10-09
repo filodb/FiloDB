@@ -1,20 +1,20 @@
 package filodb.spark
 
+import scala.concurrent.duration._
+import scala.language.postfixOps
+
 import org.apache.spark.sql.{DataFrame, Row, SQLContext, SaveMode}
 import org.apache.spark.sql.types.StructType
 
-import scala.concurrent.duration._
-import scala.language.postfixOps
 import filodb.core._
-import filodb.core.metadata.{Column, DataColumn, Dataset, RichProjection}
-import filodb.coordinator.{IngestionCommands, NodeClusterActor}
+import filodb.core.metadata.{DataColumn, Dataset, RichProjection}
+import filodb.coordinator.NodeClusterActor
 
 /**
  * Class implementing insert and save Scala APIs.
  * Don't directly instantiate this, instead use the implicit conversion function.
  */
 class FiloContext(val sqlContext: SQLContext) extends AnyVal {
-  import IngestionCommands.{Flush, Flushed}
   import FiloRelation._
 
   /**
@@ -128,6 +128,7 @@ class FiloContext(val sqlContext: SQLContext) extends AnyVal {
    * mismatches will result in an error.
    * @param overwrite if true, first truncate the dataset before writing
    */
+  // scalastyle:off
   def insertIntoFilo(df: DataFrame,
                      datasetName: String,
                      version: Int = 0,
@@ -182,4 +183,5 @@ class FiloContext(val sqlContext: SQLContext) extends AnyVal {
 
     syncToHive(sqlContext)
   }
+  // scalastyle:on
 }

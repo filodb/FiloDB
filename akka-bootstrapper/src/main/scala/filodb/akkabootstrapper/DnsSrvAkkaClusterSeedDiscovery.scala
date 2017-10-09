@@ -1,12 +1,12 @@
 package filodb.akkabootstrapper
 
-import akka.actor.{ActorRefProvider, Address, ExtendedActorSystem}
+import scala.annotation.tailrec
+import scala.collection.immutable.Seq
+
+import akka.actor.{Address, ExtendedActorSystem}
 import akka.cluster.Cluster
 import com.typesafe.scalalogging.StrictLogging
 import org.xbill.DNS._
-
-import scala.annotation.tailrec
-import scala.collection.immutable.Seq
 
 abstract class DnsSrvAkkaClusterSeedDiscovery(override val cluster: Cluster,
                                               override val settings: AkkaBootstrapperSettings)
@@ -47,9 +47,10 @@ abstract class DnsSrvAkkaClusterSeedDiscovery(override val cluster: Cluster,
         val port = srvRecord.getPort
         Address(cluster.selfAddress.protocol, cluster.system.name, ipAddress, port)
       }.sortBy(a => a.toString)
-      // remove self node unless it is at the head of the sorted list.
-      require(!peers.isEmpty)
-      peers.filter(address => address != selfAddress || address == peers.head).toList
+
+      val headOpt = peers.headOption
+      val selfAddress = cluster.selfAddress
+      peers.filter(address => address != selfAddress || headOpt.contains(address)).toList
     } else if (srvRecords.length > settings.seedNodeCount) {
       throw new IllegalStateException(
         s"Should not have found more nodes than ${settings.seedNodeCount}. This is unexpected. Check your " +

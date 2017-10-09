@@ -3,26 +3,21 @@ import com.typesafe.sbt.SbtMultiJvm.MultiJvmKeys.MultiJvm
 
 val buildSettings = Seq(
   organization := "org.velvia",
-  scalaVersion := "2.11.8",
-  parallelExecution in Test := false,
-  fork in Test := true,
-  resolvers ++= extraRepos,
-  ivyScala := ivyScala.value map { _.copy(overrideScalaVersion = true) }) ++
-  universalSettings
+  scalaVersion := "2.11.8")
 
 publishTo      := Some(Resolver.file("Unused repo", file("target/unusedrepo")))
 
 lazy val core = project
   .in(file("core"))
-  .settings(buildSettings:_*)
+  .settings(commonSettings: _*)
   .settings(name := "filodb-core")
   .settings(scalacOptions += "-language:postfixOps")
   .settings(libraryDependencies ++= coreDeps)
 
 lazy val coordinator = project
   .in(file("coordinator"))
-  .settings(buildSettings:_*)
-  .settings(multiJvmSettings:_*)
+  .settings(commonSettings: _*)
+  .settings(multiJvmSettings: _*)
   .settings(name := "filodb-coordinator")
   .settings(libraryDependencies ++= coordDeps)
   .settings(libraryDependencies +=
@@ -33,68 +28,61 @@ lazy val coordinator = project
 
 lazy val cassandra = project
   .in(file("cassandra"))
-  .settings(buildSettings:_*)
+  .settings(commonSettings: _*)
   .settings(name := "filodb-cassandra")
   .settings(libraryDependencies ++= cassDeps)
   .dependsOn(core % "compile->compile; test->test", coordinator)
 
 lazy val cli = project
   .in(file("cli"))
-  .settings(buildSettings:_*)
+  .settings(commonSettings: _*)
   .settings(name := "filodb-cli")
   .settings(libraryDependencies ++= cliDeps)
-  .settings(cliAssemblySettings:_*)
+  .settings(cliAssemblySettings: _*)
   .dependsOn(core, coordinator, cassandra)
 
-lazy val tsgenerator = project
-  .in(file("tsgenerator"))
-  .settings(buildSettings:_*)
-  .settings(name := "tsgenerator")
-  .settings(libraryDependencies ++= tsgeneratorDeps)
-  .settings(tsgeneratorAssemblySettings:_*)
+lazy val kafka = project
+  .in(file("kafka"))
+  .settings(name := "filodb-kafka")
+  .settings(commonSettings: _*)
+  .settings(kafkaSettings: _*)
+  .settings(itSettings: _*)
+  .settings(assemblySettings: _*)
+  .settings(libraryDependencies ++= kafkaDeps)
+  .dependsOn(
+    core % "compile->compile; it->test",
+    coordinator % "compile->compile; test->test")
+  .configs(IntegrationTest, MultiJvm)
 
 lazy val bootstrapper = project
   .in(file("akka-bootstrapper"))
-  .settings(buildSettings:_*)
+  .settings(commonSettings: _*)
   .settings(name := "akka-bootstrapper")
   .settings(libraryDependencies ++= bootstrapperDeps)
   .configs(MultiJvm)
 
 lazy val http = project
   .in(file("http"))
-  .settings(buildSettings:_*)
+  .settings(commonSettings: _*)
   .settings(name := "http")
   .settings(libraryDependencies ++= httpDeps)
   .dependsOn(core)
 
-lazy val kafka = project
-  .in(file("kafka"))
-  .settings(name := "filodb-kafka")
-  .settings(buildSettings:_*)
-  // Don't automatically run multi-jvm tests.  Requires Kafka instance.
-  // .settings(multiJvmSettings:_*)
-  .settings(itSettings : _*)
-  .settings(assemblySettings:_*)
-  .dependsOn(coordinator % "compile->compile; test->test",
-             core % "compile->compile; it->test")
-  .configs(IntegrationTest, MultiJvm)
-
 lazy val standalone = project
   .in(file("standalone"))
-  .settings(buildSettings:_*)
-  .settings(assemblySettings:_*)
+  .settings(commonSettings: _*)
+  .settings(assemblySettings: _*)
   .settings(libraryDependencies += logbackDep)
   .dependsOn(core, coordinator % "compile->compile; test->test", cassandra, kafka, http, bootstrapper)
 
 lazy val spark = project
   .in(file("spark"))
   .settings(name := "filodb-spark")
-  .settings(buildSettings:_*)
+  .settings(commonSettings: _*)
   .settings(libraryDependencies ++= sparkDeps)
-  .settings(itSettings : _*)
-  .settings(fork in IntegrationTest := true)
-  .settings(jvmPerTestSettings:_*)
-  .settings(assemblyExcludeScala:_*)
+  .settings(itSettings: _*)
+  .settings(jvmPerTestSettings: _*)
+  .settings(assemblyExcludeScala: _*)
   // Disable tests for now since lots of work remaining to enable Spark
   .settings(test := {})
   .dependsOn(core % "compile->compile; test->test; it->test",
@@ -104,7 +92,7 @@ lazy val spark = project
 
 lazy val jmh = project
   .in(file("jmh"))
-  .settings(buildSettings:_*)
+  .settings(commonSettings: _*)
   .settings(name := "filodb-jmh")
   .settings(libraryDependencies ++= jmhDeps)
   .settings(publish := {})
@@ -113,39 +101,46 @@ lazy val jmh = project
 
 lazy val stress = project
   .in(file("stress"))
-  .settings(buildSettings:_*)
+  .settings(commonSettings: _*)
   .settings(name := "filodb-stress")
   .settings(libraryDependencies ++= stressDeps)
-  .settings(assemblyExcludeScala:_*)
+  .settings(assemblyExcludeScala: _*)
   .dependsOn(spark)
 
-val cassDriverVersion = "3.0.2"
-val akkaVersion    = "2.5.4"
-val sparkVersion   = "2.0.0"
-val akkaHttpVersion = "10.0.10"
+lazy val tsgenerator = project
+  .in(file("tsgenerator"))
+  .settings(commonSettings: _*)
+  .settings(name := "tsgenerator")
+  .settings(libraryDependencies ++= tsgeneratorDeps)
+  .settings(tsgeneratorAssemblySettings: _*)
 
-lazy val extraRepos = Seq(
-  "Velvia Bintray" at "https://dl.bintray.com/velvia/maven",
-  "spray repo" at "http://repo.spray.io"
-)
-
-val excludeShapeless = ExclusionRule(organization = "com.chuusai")
 // Zookeeper pulls in slf4j-log4j12 which we DON'T want
 val excludeZK = ExclusionRule(organization = "org.apache.zookeeper")
 // This one is brought by Spark by default
 val excludeSlf4jLog4j = ExclusionRule(organization = "org.slf4j", name = "slf4j-log4j12")
 val excludeJersey = ExclusionRule(organization = "com.sun.jersey")
 
-val logbackDep = "ch.qos.logback"        % "logback-classic"   % "1.1.7"
-val log4jDep   = "log4j"                 % "log4j"             % "1.2.17"
-val scalaLoggingDep = "com.typesafe.scala-logging" %% "scala-logging" % "3.5.0"
-val scalaTest = "org.scalatest"        %% "scalatest"         % "2.2.4"
-val akkaHttp = "com.typesafe.akka"    %% "akka-http"        %  akkaHttpVersion
-val akkaHttpSprayJson = "com.typesafe.akka" %% "akka-http-spray-json"   % akkaHttpVersion
+
+/* Versions in various modules versus one area of build */
+val akkaVersion       = "2.4.19" // akka-http/akka-stream compat. TODO when kamon-akka-remote is akka 2.5.4 compat
+val cassDriverVersion = "3.0.2"
+val ficusVersion      = "1.1.2"
+val kamonVersion      = "0.6.0" // TODO 0.6.7++
+val monixKafkaVersion = "0.14"
+val sparkVersion      = "2.0.0"
+
+/* Dependencies shared */
+val logbackDep        = "ch.qos.logback"             % "logback-classic"       % "1.2.3"
+val log4jDep          = "log4j"                      % "log4j"                 % "1.2.17"
+val scalaLoggingDep   = "com.typesafe.scala-logging" %% "scala-logging"        % "3.7.2"
+val scalaTest         = "org.scalatest"              %% "scalatest"            % "2.2.6" // TODO upgrade to 3.0.4
+val akkaHttp          = "com.typesafe.akka"          %% "akka-http"            % "10.0.10"
+val akkaHttpSprayJson = "com.typesafe.akka"          %% "akka-http-spray-json" % "10.0.10"
 
 lazy val commonDeps = Seq(
-  "io.kamon"             %% "kamon-core"        % "0.6.0", logbackDep % "test",
-  scalaTest  % "test"
+  "io.kamon" %% "kamon-core" % kamonVersion,
+  logbackDep % Test,
+  scalaTest  % Test
 )
 
 lazy val scalaxyDep = "com.nativelibs4java"  %% "scalaxy-loops"     % "0.3.3" % "provided"
@@ -159,7 +154,7 @@ lazy val coreDeps = commonDeps ++ Seq(
   "joda-time"             % "joda-time"         % "2.2",
   "org.joda"              % "joda-convert"      % "1.2",
   "com.googlecode.concurrentlinkedhashmap" % "concurrentlinkedhashmap-lru" % "1.4",
-  "net.ceedubs"          %% "ficus"             % "1.1.2",
+  "net.ceedubs"          %% "ficus"             % ficusVersion,
   "org.scodec"           %% "scodec-bits"       % "1.0.10",
   "io.fastjson"           % "boon"              % "0.33",
   "com.googlecode.javaewah" % "JavaEWAH"        % "1.1.6",
@@ -171,30 +166,40 @@ lazy val coreDeps = commonDeps ++ Seq(
 
 lazy val cassDeps = commonDeps ++ Seq(
   // other dependencies separated by commas
-  "net.jpountz.lz4"       % "lz4"               % "1.3.0",
+  "net.jpountz.lz4"        % "lz4"               % "1.3.0",
   "com.datastax.cassandra" % "cassandra-driver-core" % cassDriverVersion,
-  logbackDep % "test"
+  logbackDep % Test
 )
 
 lazy val coordDeps = commonDeps ++ Seq(
   "com.typesafe.akka"    %% "akka-slf4j"        % akkaVersion,
   "com.typesafe.akka"    %% "akka-cluster"      % akkaVersion,
+  // TODO kamon-akka-remote for cluster support:
+  //   but only with kamon 0.6.7 vs 0.6.8, and akka 2.4.16 (not available yet for 2.5)
+  // TODO kamon-akka is akka 2.5 compatible
   // Take out the below line if you really don't want statsd metrics enabled
-  "io.kamon"             %% "kamon-statsd"      % "0.6.0",
-  "com.opencsv"           % "opencsv"           % "3.3",
+  "io.kamon"             %% "kamon-statsd"      % kamonVersion,
+  "com.opencsv"          % "opencsv"            % "3.3",
   "org.parboiled"        %% "parboiled"         % "2.1.3",
-  "com.typesafe.akka"    %% "akka-testkit"      % akkaVersion % "test",
-  "com.typesafe.akka"    %% "akka-multi-node-testkit" % akkaVersion % "test"
+  "com.typesafe.akka"    %% "akka-testkit"      % akkaVersion % Test,
+  "com.typesafe.akka"    %% "akka-multi-node-testkit" % akkaVersion % Test
 )
 
 lazy val cliDeps = Seq(
   logbackDep,
-  "com.quantifind"       %% "sumac"             % "0.3.0"
+  "com.quantifind"    %% "sumac"          % "0.3.0"
 )
+
+lazy val kafkaDeps = Seq(
+  "io.monix"          %% "monix-kafka-10" % monixKafkaVersion,
+  "org.apache.kafka"  % "kafka-clients"   % "0.10.2.1" % "compile,test" exclude("org.slf4j", "slf4j-log4j12"),
+  "com.typesafe.akka" %% "akka-testkit"   % akkaVersion % "test,it",
+  scalaTest  % "test,it",
+  logbackDep % "test,it")
 
 lazy val tsgeneratorDeps = Seq(
   logbackDep,
-  "io.monix" %% "monix-kafka-10" % "0.14"
+  "io.monix" %% "monix-kafka-10" % monixKafkaVersion
 )
 
 lazy val httpDeps = Seq(
@@ -215,21 +220,20 @@ lazy val bootstrapperDeps = Seq(
   "org.scalaj"                   %% "scalaj-http"             % "2.3.0",
   "com.typesafe.akka"            %% "akka-testkit"            % akkaVersion   % Test,
   "com.typesafe.akka"            %% "akka-multi-node-testkit" % akkaVersion   % Test,
-    scalaTest   % Test
+  scalaTest   % Test
 )
 
 lazy val sparkDeps = Seq(
   // We don't want LOG4J.  We want Logback!  The excludeZK is to help with a conflict re Coursier plugin.
-  "org.apache.spark"     %% "spark-hive"        % sparkVersion % "provided" excludeAll(excludeSlf4jLog4j, excludeZK),
-  "org.apache.spark"     %% "spark-hive-thriftserver" % sparkVersion % "provided" excludeAll(excludeSlf4jLog4j, excludeZK),
-  "org.apache.spark"     %% "spark-streaming"   % sparkVersion % "provided",
+  "org.apache.spark" %% "spark-hive"              % sparkVersion % "provided" excludeAll(excludeSlf4jLog4j, excludeZK),
+  "org.apache.spark" %% "spark-hive-thriftserver" % sparkVersion % "provided" excludeAll(excludeSlf4jLog4j, excludeZK),
+  "org.apache.spark" %% "spark-streaming"         % sparkVersion % "provided",
   scalaTest % "it"
 )
 
 lazy val jmhDeps = Seq(
   scalaxyDep,
-  "org.apache.spark"     %% "spark-sql"         % sparkVersion excludeAll(
-                                                    excludeSlf4jLog4j, excludeZK, excludeJersey)
+  "org.apache.spark" %% "spark-sql" % sparkVersion excludeAll(excludeSlf4jLog4j, excludeZK, excludeJersey)
 )
 
 lazy val stressDeps = Seq(
@@ -241,15 +245,92 @@ lazy val stressDeps = Seq(
 
 /* Settings */
 
-lazy val coreSettings = Seq(
+/* The REPL can’t cope with -Ywarn-unused:imports or -Xfatal-warnings
+   so we disable for console */
+ lazy val consoleSettings = Seq(
+   scalacOptions in (Compile, console) ~= (_.filterNot(Set(
+     "-Ywarn-unused:imports",
+     "-Xfatal-warnings"
+ ))))
+
+lazy val compilerSettings = Seq(
+
   scalacOptions ++= Seq(
-    "-Xlint",
-    "-Xlint:-infer-any",
     "-deprecation",
-    "-Xfatal-warnings",
+    "-encoding", "UTF-8",
+    "-unchecked",
     "-feature",
-    "-unchecked")
-)
+    "-Xfuture",
+    "-Xcheckinit",
+    "-Xfatal-warnings",
+    "-Ywarn-inaccessible",
+    "-Ywarn-dead-code",
+    "-Yno-adapted-args",
+    "-language:existentials",
+    "-language:experimental.macros",
+    "-language:higherKinds",
+    "-language:implicitConversions"
+    // TODO relocate here: -Ywarn-unused-import, add -Ywarn-numeric-widen
+    // TODO in 2.12: remove: -Yinline-warnings, add the new applicable ones
+  ),
+
+  javacOptions ++= Seq(
+    "-encoding", "UTF-8"
+  ))
+
+// Create a default Scala style task to run with tests
+lazy val testScalastyle = taskKey[Unit]("testScalastyle")
+
+lazy val compileScalastyle = taskKey[Unit]("compileScalastyle")
+
+lazy val styleSettings = Seq(
+  scalastyleFailOnError := true,
+  testScalastyle := org.scalastyle.sbt.ScalastylePlugin.scalastyle.in(Test).toTask("").value,
+  // (scalastyleConfig in Test) := "scalastyle-test-config.xml",
+  // This is disabled for now, cannot get ScalaStyle to recognize the file above for some reason :/
+  // (test in Test) <<= (test in Test) dependsOn testScalastyle,
+  compileScalastyle := org.scalastyle.sbt.ScalastylePlugin.scalastyle.in(Compile).toTask("").value,
+  // Is running this on compile too much?
+  (compile in Test) := ((compile in Test) dependsOn compileScalastyle).value)
+
+lazy val evictionSettings = Seq(
+  evictionWarningOptions in update := EvictionWarningOptions.default
+    .withWarnTransitiveEvictions(false)
+    .withWarnDirectEvictions(false)
+    .withWarnScalaVersionEviction(false))
+
+// TODO disabled for now: "-Xlint:infer-any", "-Xlint",
+lazy val lintSettings = Seq(
+  scalacOptions ++= Seq(
+    "-Xlint:adapted-args",
+    "-Xlint:nullary-unit",
+    "-Xlint:inaccessible",
+    "-Xlint:nullary-override",
+    "-Xlint:missing-interpolator",
+    "-Xlint:doc-detached",
+    "-Xlint:private-shadow",
+    "-Xlint:type-parameter-shadow",
+    "-Xlint:poly-implicit-overload",
+    "-Xlint:option-implicit",
+    "-Xlint:delayedinit-select",
+    "-Xlint:by-name-right-associative",
+    "-Xlint:package-object-classes",
+    "-Xlint:unsound-match",
+    "-Xlint:stars-align"
+),
+
+  javacOptions ++= Seq(
+    "-Xlint",
+    "-Xlint:deprecation",
+    "-Xlint:unchecked"
+  ))
+
+lazy val disciplineSettings =
+  compilerSettings ++
+    lintSettings ++
+    styleSettings ++
+    evictionSettings ++
+    consoleSettings
 
 lazy val testSettings = Seq(
   parallelExecution in Test := false,
@@ -272,19 +353,13 @@ lazy val testSettings = Seq(
     Tags.limitSum(1, Tags.Test, Tags.Untagged))
 )
 
-// Fork a separate JVM for each test, instead of one for all tests in a module.
-// This is necessary for Spark tests due to initialization, for example
-lazy val jvmPerTestSettings = {
-  def jvmPerTest(tests: Seq[TestDefinition]) =
-    tests map { test =>
-      Tests.Group(
-        name = test.name,
-        tests = Seq(test),
-        runPolicy = Tests.SubProcess(ForkOptions(runJVMOptions = Seq.empty[String])))
-    }
+lazy val itSettings = Defaults.itSettings ++ Seq(
+  fork in IntegrationTest := true,
 
-  Seq(testGrouping in Test := ((definedTests in Test) map jvmPerTest).value)
-}
+  parallelExecution in IntegrationTest := false,
+
+  internalDependencyClasspath in IntegrationTest := (Classpaths.concat(
+    internalDependencyClasspath in IntegrationTest, exportedProducts in Test)).value)
 
 lazy val multiJvmSettings = SbtMultiJvm.multiJvmSettings ++ Seq(
   compile in MultiJvm := ((compile in MultiJvm) triggeredBy (compile in Test)).value,
@@ -304,25 +379,19 @@ lazy val multiJvmSettings = SbtMultiJvm.multiJvmSettings ++ Seq(
   }
 )
 
-lazy val itSettings = Defaults.itSettings ++ Seq(
-  fork in IntegrationTest := true
-)
+// Fork a separate JVM for each test, instead of one for all tests in a module.
+// This is necessary for Spark tests due to initialization, for example
+lazy val jvmPerTestSettings = {
+  def jvmPerTest(tests: Seq[TestDefinition]) =
+    tests map { test =>
+      Tests.Group(
+        name = test.name,
+        tests = Seq(test),
+        runPolicy = Tests.SubProcess(ForkOptions(runJVMOptions = Seq.empty[String])))
+    }
 
-// Create a default Scala style task to run with tests
-lazy val testScalastyle = taskKey[Unit]("testScalastyle")
-
-lazy val compileScalastyle = taskKey[Unit]("compileScalastyle")
-
-lazy val styleSettings = Seq(
-  testScalastyle := org.scalastyle.sbt.ScalastylePlugin.scalastyle.in(Test).toTask("").value,
-  // (scalastyleConfig in Test) := "scalastyle-test-config.xml",
-  // This is disabled for now, cannot get ScalaStyle to recognize the file above for some reason :/
-  // (test in Test) <<= (test in Test) dependsOn testScalastyle,
-  scalastyleFailOnError := true,
-  compileScalastyle := org.scalastyle.sbt.ScalastylePlugin.scalastyle.in(Compile).toTask("").value,
-  // Is running this on compile too much?
-  (compile in Test) := ((compile in Test) dependsOn compileScalastyle).value
-)
+  Seq(testGrouping in Test := ((definedTests in Test) map jvmPerTest).value)
+}
 
 // NOTE: The -Xms1g and using RemoteActorRefProvider (no Cluster startup) both help CLI startup times
 lazy val shellScript = """#!/bin/bash
@@ -344,17 +413,11 @@ fi
 exec $CMD -Xmx4g -Xms1g -DLOG_DIR=$FILOLOG $config $allprops -jar "$0" $@  ;
 """.split("\n")
 
-// Builds cli as a standalone executable to make it easier to launch commands
-lazy val cliAssemblySettings = assemblySettings ++ Seq(
-  assemblyOption in assembly := (assemblyOption in assembly).value.copy(
-                                  prependShellScript = Some(shellScript)),
-  assemblyJarName in assembly := s"filo-cli-${version.value}"
-)
+lazy val kafkaSettings = Seq(
 
-// builds timeseries-gen as a fat jar so it can be executed for development test scenarios
-lazy val tsgeneratorAssemblySettings = assemblySettings ++ Seq(
-  assemblyJarName in assembly := s"tsgenerator-${version.value}"
-)
+  aggregate in update := false,
+
+  updateOptions := updateOptions.value.withCachedResolution(true))
 
 // Create a new MergeStrategy for aop.xml files
 // Needed for Kamon.io async / Akka tracing / AspectJ weaving
@@ -406,6 +469,18 @@ lazy val assemblySettings = Seq(
 lazy val assemblyExcludeScala = assemblySettings ++ Seq(
   assemblyOption in assembly := (assemblyOption in assembly).value.copy(includeScala = false))
 
+// Builds cli as a standalone executable to make it easier to launch commands
+lazy val cliAssemblySettings = assemblySettings ++ Seq(
+  assemblyOption in assembly := (assemblyOption in assembly).value.copy(
+    prependShellScript = Some(shellScript)),
+  assemblyJarName in assembly := s"filo-cli-${version.value}"
+)
+
+// builds timeseries-gen as a fat jar so it can be executed for development test scenarios
+lazy val tsgeneratorAssemblySettings = assemblySettings ++ Seq(
+  assemblyJarName in assembly := s"tsgenerator-${version.value}"
+)
+
 lazy val publishSettings = Seq(
   organizationName := "FiloDB",
   publishMavenStyle := true,
@@ -415,15 +490,21 @@ lazy val publishSettings = Seq(
   pomIncludeRepository := { x => false }
 )
 
-lazy val sharedSettings = Seq(
+lazy val moduleSettings = Seq(
   resolvers ++= Seq(
     "Velvia Bintray" at "https://dl.bintray.com/velvia/maven",
-    "spray repo" at "http://repo.spray.io"),
+    "spray repo" at "http://repo.spray.io"
+  ),
+
+  cancelable in Global := true,
+
+  incOptions := incOptions.value.withNameHashing(true),
+
   ivyScala := ivyScala.value map { _.copy(overrideScalaVersion = true) })
 
-lazy val universalSettings =
-  coreSettings ++
-    styleSettings ++
+lazy val commonSettings =
+  buildSettings ++
+    disciplineSettings ++
+    moduleSettings ++
     testSettings ++
-    publishSettings ++
-    sharedSettings
+    publishSettings

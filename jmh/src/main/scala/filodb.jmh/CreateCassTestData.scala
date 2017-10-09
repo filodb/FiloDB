@@ -46,5 +46,4 @@ object CreateCassTestData extends App {
   sc.stop()
   FiloDriver.shutdown()
   FiloExecutor.shutdown()
-  sys.exit(0)
 }

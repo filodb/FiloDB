@@ -1,17 +1,18 @@
 package filodb.akkabootstrapper
 
+import scala.collection.immutable.Seq
+import scala.util.control.NonFatal
+import scala.util.{Failure, Success}
+
 import akka.actor.{Address, AddressFromURIString}
 import akka.cluster.Cluster
 import com.typesafe.scalalogging.StrictLogging
 import spray.json._
-
-import scala.collection.immutable.Seq
-import scala.util.control.NonFatal
-import scala.util.{Failure, Success}
 import scalaj.http.Http
 
-abstract class AkkaClusterSeedDiscovery(val cluster: Cluster, val settings: AkkaBootstrapperSettings)
-  extends StrictLogging with ClusterMembershipJsonSuppport {
+abstract class AkkaClusterSeedDiscovery(val cluster: Cluster,
+                                        val settings: AkkaBootstrapperSettings
+                                       ) extends StrictLogging with ClusterMembershipJsonSuppport {
 
   @throws(classOf[DiscoveryTimeoutException])
   def discoverAkkaClusterSeeds: Seq[Address] = {

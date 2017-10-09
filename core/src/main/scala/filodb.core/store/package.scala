@@ -1,9 +1,10 @@
 package filodb.core
 
-import com.github.rholder.fauxflake.IdGenerators
 import java.nio.ByteBuffer
+
+import com.github.rholder.fauxflake.IdGenerators
 import monix.eval.Task
-import net.jpountz.lz4.{LZ4Factory, LZ4Compressor, LZ4FastDecompressor}
+import net.jpountz.lz4.{LZ4Compressor, LZ4Factory, LZ4FastDecompressor}
 import org.scalactic._
 import org.velvia.filo.RowReader
 

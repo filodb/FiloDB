@@ -1,13 +1,13 @@
 package filodb
 
-import com.googlecode.concurrentlinkedhashmap.ConcurrentLinkedHashMap
 import java.util.concurrent.ConcurrentMap
+
 import scala.language.implicitConversions
+
+import com.googlecode.concurrentlinkedhashmap.ConcurrentLinkedHashMap
 
 package object core {
   type SingleKeyType = SingleKeyTypeBase[_]
-
-  import SingleKeyTypes._
 
   implicit class RichCMap[K, V](orig: ConcurrentMap[K, V]) {
     import java.util.function.{Function => JFunction}

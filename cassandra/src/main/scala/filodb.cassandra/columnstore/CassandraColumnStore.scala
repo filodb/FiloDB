@@ -249,7 +249,7 @@ trait CassandraChunkSource extends ChunkSource with StrictLogging {
     val its = partitions.map { partition =>
       indexTable.getIndices(partition, version)
     }
-    Observable.concat(its :_*)
+    Observable.concat(its: _*)
   }
 
   def scanPartitions(projection: RichProjection,
@@ -348,7 +348,7 @@ class CassandraPartition(index: ChunkIDPartitionChunkIndex,
       chunkTable.readChunks(index.binPartition, 0, columnNames(pos), pos, ids, false)
                 .switchIfEmpty(scanner.emptyChunkStream(infosSkips, pos))
     }
-    Observable.merge(chunkStreams:_*)
+    Observable.merge(chunkStreams: _*)
               .map { case SingleChunkInfo(id, colNo, buf) =>
                 readers.get(id) match {
                   // scalastyle:off

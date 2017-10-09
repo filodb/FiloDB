@@ -6,12 +6,13 @@ import akka.actor.ActorSystem
 import akka.cluster.Cluster
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
+import net.ceedubs.ficus.Ficus._
+
 import filodb.akkabootstrapper.AkkaBootstrapper
 import filodb.coordinator._
 import filodb.coordinator.client.LocalClient
 import filodb.core.metadata.{Column, DataColumn, Dataset}
 import filodb.http.FiloHttpServer
-import net.ceedubs.ficus.Ficus._
 
 /**
  * FiloServer starts a "standalone" FiloDB server which can ingest and support queries through the Akka
@@ -57,6 +58,9 @@ object FiloServer extends FilodbClusterNode with StrictLogging {
 
   def bootstrap(akkaCluster: Cluster): Unit = {
     val bootstrapper = AkkaBootstrapper(akkaCluster)
+    if (bootstrapper.settings.invalidSeeds.nonEmpty) {
+      // ticket open, coming in separate commit to add the behavior using these. Already logged in settings.
+    }
     bootstrapper.bootstrap()
     val filoHttpServer = new FiloHttpServer(akkaCluster.system)
     filoHttpServer.start(bootstrapper.getAkkaHttpRoute())
@@ -110,6 +114,4 @@ object FiloServer extends FilodbClusterNode with StrictLogging {
   Runtime.getRuntime.addShutdownHook(new Thread() {
     override def run(): Unit = shutdown()
   })
-
-
 }

@@ -1,16 +1,13 @@
 package filodb.core.store
 
-import com.typesafe.scalalogging.StrictLogging
+import scala.concurrent.Future
+
 import kamon.Kamon
 import monix.reactive.Observable
 
-import scala.concurrent.{ExecutionContext, Future}
-
 import filodb.core._
-import filodb.core.Types.PartitionKey
-import filodb.core.metadata.{Column, Projection, RichProjection, InvalidFunctionSpec}
-import filodb.core.query.{Aggregate, ChunkSetReader, MutableChunkSetReader, PartitionChunkIndex}
-import ChunkSetReader._
+import filodb.core.metadata.{ Projection, RichProjection}
+
 
 
 /**

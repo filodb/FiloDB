@@ -1,11 +1,12 @@
 package filodb.cassandra.metastore
 
-import com.typesafe.config.ConfigFactory
-import org.scalatest.concurrent.PatienceConfiguration.Timeout
-import org.scalatest.FlatSpec
 import scala.concurrent.Await
 import scala.concurrent.duration._
 import scala.language.postfixOps
+
+import com.typesafe.config.ConfigFactory
+import org.scalatest.concurrent.PatienceConfiguration.Timeout
+import org.scalatest.FlatSpec
 
 import filodb.cassandra.{AsyncTest, DefaultFiloSessionProvider}
 import filodb.core._
@@ -18,7 +19,7 @@ class DatasetTableSpec extends FlatSpec with AsyncTest {
   val datasetTable = new DatasetTable(config, new DefaultFiloSessionProvider(config))
 
   // First create the datasets table
-  override def beforeAll() {
+  override def beforeAll(): Unit = {
     super.beforeAll()
     datasetTable.createKeyspace(datasetTable.keyspace)
     // Note: This is a CREATE TABLE IF NOT EXISTS

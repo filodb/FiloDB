@@ -1,8 +1,8 @@
 package filodb.core.metadata
 
-import com.typesafe.config.{Config, ConfigFactory, ConfigRenderOptions}
 import scala.collection.JavaConverters._
-import scala.util.{Try, Success, Failure}
+
+import com.typesafe.config.{Config, ConfigFactory, ConfigRenderOptions}
 
 import filodb.core._
 import filodb.core.Types._
@@ -32,11 +32,10 @@ case class DatasetOptions(chunkSize: Int,
                           metricColumn: String,
                           valueColumn: String) {
   override def toString: String = {
-    val map = Map(
+    val map: Map[String, Any] = Map(
                    "chunkSize" -> chunkSize,
                    "metricColumn" -> metricColumn,
-                   "valueColumn" -> valueColumn
-                 )
+                   "valueColumn" -> valueColumn)
     val config = ConfigFactory.parseMap(map.asJava)
     config.root.render(ConfigRenderOptions.concise)
   }

@@ -1,9 +1,11 @@
 package filodb.cassandra.columnstore
 
-import com.datastax.driver.core.Row
 import java.nio.ByteBuffer
-import monix.reactive.Observable
+
 import scala.concurrent.{ExecutionContext, Future}
+
+import com.datastax.driver.core.Row
+import monix.reactive.Observable
 
 import filodb.cassandra.FiloCassandraConnector
 import filodb.core._
@@ -31,7 +33,7 @@ case class IndexRecord(binPartition: ByteBuffer, data: ByteBuffer) {
 sealed class IndexTable(val dataset: DatasetRef, val connector: FiloCassandraConnector)
                        (implicit ec: ExecutionContext) extends BaseDatasetTable {
   import filodb.cassandra.Util._
-  import scala.collection.JavaConversions._
+  import scala.collection.JavaConverters._
 
   val suffix = "index"
 
@@ -60,7 +62,7 @@ sealed class IndexTable(val dataset: DatasetRef, val connector: FiloCassandraCon
                  version: Int): Observable[IndexRecord] = {
     val it = session.execute(allPartReadCql.bind(toBuffer(binPartition),
                                                  version: java.lang.Integer))
-                    .toIterator.map(fromRow)
+                      .asScala.toIterator.map(fromRow)
     Observable.fromIterator(it).handleObservableErrors
   }
 
@@ -72,7 +74,7 @@ sealed class IndexTable(val dataset: DatasetRef, val connector: FiloCassandraCon
       s"SELECT * FROM $tableString WHERE $tokenQ >= $start AND $tokenQ < $end AND indextype = 1 " +
       s"ALLOW FILTERING"
     val it = tokens.iterator.flatMap { case (start, end) =>
-        session.execute(cql(start, end)).iterator
+        session.execute(cql(start, end)).iterator.asScala
                .filter(_.getInt("version") == version)
                .map { row => fromRow(row) }
       }

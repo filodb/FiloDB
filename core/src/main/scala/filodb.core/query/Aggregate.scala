@@ -1,16 +1,14 @@
 package filodb.core.query
 
-import enumeratum.EnumEntry.Snakecase
-import enumeratum.{Enum, EnumEntry}
-import monix.eval.Task
-import org.scalactic._
-import org.velvia.filo.{FiloVector, BinaryVector, ArrayStringRowReader, RowReader}
 import scala.reflect.{classTag, ClassTag}
-import scalaxy.loops._
+
+import enumeratum.{Enum, EnumEntry}
+import enumeratum.EnumEntry.Snakecase
+import org.scalactic._
+import org.velvia.filo.{BinaryVector, FiloVector}
 
 import filodb.core.metadata._
 import filodb.core.store.{ChunkScanMethod, FiloPartition, RowKeyChunkScan}
-import filodb.core.binaryrecord.BinaryRecord
 
 /**
  * An Aggregate stores intermediate results from Aggregators, which can later be combined using

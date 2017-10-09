@@ -1,14 +1,12 @@
 package filodb.core.query
 
 import com.typesafe.config.ConfigFactory
-import org.velvia.filo.BinaryVector
-
-import org.scalatest.{FunSpec, Matchers, BeforeAndAfter}
+import org.scalatest._
 import org.scalatest.concurrent.ScalaFutures
 
 import filodb.core._
-import filodb.core.memstore.{IngestRecord, TimeSeriesMemStore}
-import filodb.core.store.{QuerySpec, FilteredPartitionScan, RowKeyChunkScan}
+import filodb.core.memstore.TimeSeriesMemStore
+import filodb.core.store.{FilteredPartitionScan, QuerySpec, RowKeyChunkScan}
 
 class TimeGroupingAggregateSpec extends FunSpec with Matchers with BeforeAndAfter with ScalaFutures {
   import monix.execution.Scheduler.Implicits.global

@@ -1,11 +1,11 @@
 package filodb.core
 
 import java.nio.ByteBuffer
+
 import org.velvia.filo.ZeroCopyUTF8String
 import scalaxy.loops._
 import scodec.bits.ByteVector
 
-import filodb.core.metadata.RichProjection
 import filodb.core.binaryrecord.BinaryRecord
 
 /**

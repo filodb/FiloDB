@@ -1,19 +1,16 @@
 package filodb.core.store
 
-import bloomfilter.mutable.BloomFilter
+import java.io.{ByteArrayOutputStream, DataOutputStream}
+import java.nio.ByteBuffer
+
+import scala.collection.mutable.ArrayBuffer
+
 import com.googlecode.javaewah.EWAHCompressedBitmap
 import com.typesafe.scalalogging.StrictLogging
-import java.io.{DataOutputStream, ByteArrayOutputStream}
-import java.nio.ByteBuffer
-import java.sql.Timestamp
-import kamon.Kamon
 import org.boon.primitive.{ByteBuf, InputByteArray}
 import org.velvia.filo._
-import scala.collection.mutable.ArrayBuffer
-import scala.math.Ordered._
 
-import filodb.core._
-import filodb.core.binaryrecord.{BinaryRecord, RecordSchema}
+import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.metadata.{Column, RichProjection}
 import filodb.core.Types._
 
@@ -90,7 +87,7 @@ case class ChunkRowSkipIndex(id: ChunkID, overrides: EWAHCompressedBitmap)
 
 object ChunkRowSkipIndex {
   def apply(id: ChunkID, overrides: Array[Int]): ChunkRowSkipIndex =
-    ChunkRowSkipIndex(id, EWAHCompressedBitmap.bitmapOf(overrides.sorted :_*))
+    ChunkRowSkipIndex(id, EWAHCompressedBitmap.bitmapOf(overrides.sorted: _*))
 }
 
 object ChunkSetInfo extends StrictLogging {

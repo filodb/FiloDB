@@ -69,12 +69,12 @@ final class QueryActor(memStore: MemStore,
                         options: QueryOptions): Seq[PartitionScanMethod] Or ErrorResponse =
     Try(partQuery match {
       case SinglePartitionQuery(keyParts) =>
-        val partKey = projection.partKey(keyParts:_*)
+        val partKey = projection.partKey(keyParts: _*)
         val shard = shardMap.partitionToShardNode(partKey.hashCode).shard
         Seq(SinglePartitionScan(partKey, shard))
 
       case MultiPartitionQuery(keys) =>
-        val partKeys = keys.map { k => projection.partKey(k :_*) }
+        val partKeys = keys.map { k => projection.partKey(k: _*) }
         partKeys.groupBy { pk => shardMap.partitionToShardNode(pk.hashCode).shard }
           .toSeq
           .filterNot { case (shard, keys) =>

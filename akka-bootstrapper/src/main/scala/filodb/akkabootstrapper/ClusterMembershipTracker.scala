@@ -1,11 +1,11 @@
 package filodb.akkabootstrapper
 
-import akka.actor.{Actor, ActorLogging, Address}
+import scala.collection.mutable.HashSet
+
+import akka.actor.{Actor, Address}
 import akka.cluster.Cluster
 import akka.cluster.ClusterEvent._
 import com.typesafe.scalalogging.StrictLogging
-
-import scala.collection.mutable.HashSet
 
 class ClusterMembershipTracker extends Actor with StrictLogging {
 

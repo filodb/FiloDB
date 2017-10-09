@@ -1,13 +1,13 @@
 package filodb.core.query
 
-import org.scalactic._
-import org.velvia.filo.{RowReader, SingleValueRowReader, ZeroCopyUTF8String, UTF8Wrapper}
 import scala.language.postfixOps
+
+import org.scalactic._
+import org.velvia.filo.{SingleValueRowReader, UTF8Wrapper, ZeroCopyUTF8String}
 import scalaxy.loops._
 
-import filodb.core._
 import filodb.core.Types.PartitionKey
-import filodb.core.metadata.{Column, DataColumn, ComputedColumn, RichProjection}
+import filodb.core.metadata.{Column, ComputedColumn, DataColumn, RichProjection}
 
 sealed trait Filter {
   def filterFunc: Any => Boolean

@@ -1,8 +1,11 @@
 package filodb.akkabootstrapper
 
+import scala.concurrent.duration._
+import scala.language.postfixOps
+import scala.collection.immutable.Seq
+
 import akka.actor.{ActorRef, Address, Props}
 import akka.cluster.Cluster
-import akka.http.scaladsl.model._
 import akka.http.scaladsl.server.Directives._
 import akka.http.scaladsl.server.Route
 import akka.pattern.ask
@@ -10,11 +13,6 @@ import akka.util.Timeout
 import akka.http.scaladsl.marshallers.sprayjson.SprayJsonSupport._
 import spray.json._
 import com.typesafe.scalalogging.StrictLogging
-
-import scala.concurrent.duration._
-import scala.language.postfixOps
-import scala.collection.immutable.Seq
-
 
 object AkkaBootstrapperMessages {
 
@@ -46,7 +44,7 @@ trait ClusterMembershipJsonSuppport {
 class AkkaBootstrapper(protected val cluster: Cluster) extends StrictLogging with ClusterMembershipJsonSuppport {
 
   private implicit val system = cluster.system
-  private val akkaBootstrapperSettings = new AkkaBootstrapperSettings(cluster.system.settings.config)
+  private[filodb] val settings = new AkkaBootstrapperSettings(cluster.system.settings.config)
 
   /**
     * Every instance that wants to join the akka cluster call this method.
@@ -66,7 +64,7 @@ class AkkaBootstrapper(protected val cluster: Cluster) extends StrictLogging wit
     */
   @throws(classOf[DiscoveryTimeoutException])
   def bootstrap(): Unit = {
-    val seeds = AkkaClusterSeedDiscovery(cluster, akkaBootstrapperSettings).discoverAkkaClusterSeeds
+    val seeds = AkkaClusterSeedDiscovery(cluster, settings).discoverAkkaClusterSeeds
     logger.info(s"Joining seeds $seeds")
     cluster.joinSeedNodes(seeds)
     logger.info("Exited from AkkaBootstrapper.joinSeedNodes")
@@ -88,14 +86,14 @@ class AkkaBootstrapper(protected val cluster: Cluster) extends StrictLogging wit
   def getAkkaHttpRoute(membershipActor: Option[ActorRef] = None): Route = {
     val clusterMembershipTracker = membershipActor.getOrElse(system.actorOf(Props[ClusterMembershipTracker],
       name = "clusterListener"))
-    val seedsContextPath = akkaBootstrapperSettings.seedsPath
+    val seedsContextPath = settings.seedsPath
     import AkkaBootstrapperMessages._
 
     implicit val executionContext = system.dispatcher
     val route =
       path(seedsContextPath) {
         get {
-          implicit val timeout = Timeout(2 seconds)
+          implicit val timeout = Timeout(2 seconds) // TODO configurable timeout
           val seedNodes = (clusterMembershipTracker ask ClusterMembershipRequest).mapTo[ClusterMembershipResponse]
 
           complete {

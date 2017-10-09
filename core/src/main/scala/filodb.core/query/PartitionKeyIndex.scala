@@ -75,7 +75,7 @@ class PartitionKeyIndex(proj: RichProjection) extends StrictLogging {
     }
     val bitmaps = bitmapsAndUnfoundeds.collect { case (Some(bm), _) => bm }
     val unfoundColumns = bitmapsAndUnfoundeds.collect { case (_, Some(col)) => col }
-    val andedBitmap = if (bitmaps.isEmpty) emptySkips else EWAHCompressedBitmap.and(bitmaps :_*)
+    val andedBitmap = if (bitmaps.isEmpty) emptySkips else EWAHCompressedBitmap.and(bitmaps: _*)
     (andedBitmap.intIterator, unfoundColumns)
   }
 

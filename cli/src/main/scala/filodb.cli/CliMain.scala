@@ -83,7 +83,7 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
 
   import Client.{actorAsk, parse}
 
-  def printHelp() {
+  def printHelp(): Unit = {
     println("filo-cli help:")
     println("  commands: init create importcsv list truncate")
     println("  columns: <colName1>:<type1>,<colName2>:<type2>,... ")
@@ -111,7 +111,7 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
     (remote, DatasetRef(args.dataset.get))
   }
 
-  def main(args: Arguments) {
+  def main(args: Arguments): Unit = {
     try {
       val version = args.version.getOrElse(0)
       val timeout = args.timeoutSeconds.seconds
@@ -205,7 +205,7 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
     }
   }
 
-  def dumpDataset(dataset: String, database: Option[String]) {
+  def dumpDataset(dataset: String, database: Option[String]): Unit = {
     val ref = DatasetRef(dataset, database)
     require(ref.dataset == dataset)
     parse(metaStore.getDataset(ref)) { datasetObj =>
@@ -222,7 +222,7 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
     }
   }
 
-  def dumpAllDatasets(database: Option[String]) {
+  def dumpAllDatasets(database: Option[String]): Unit = {
     parse(metaStore.getAllDatasets(database)) { refs =>
       refs.foreach { ref => println("%25s\t%s".format(ref.database.getOrElse(""), ref.dataset)) }
     }
@@ -232,7 +232,7 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
                               columns: Seq[DataColumn],
                               rowKeys: Seq[String],
                               partitionKeys: Seq[String],
-                              timeout: FiniteDuration) {
+                              timeout: FiniteDuration): Unit = {
     println(s"Creating dataset $dataset...")
     val datasetObj = Dataset(dataset, rowKeys, partitionKeys)
 

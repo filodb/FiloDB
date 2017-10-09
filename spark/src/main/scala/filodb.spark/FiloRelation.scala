@@ -1,23 +1,20 @@
 package filodb.spark
 
-import akka.actor.ActorRef
-import com.typesafe.config.{Config, ConfigFactory, ConfigRenderOptions}
+import scala.concurrent.duration._
+import scala.language.postfixOps
+
+import com.typesafe.config.{Config, ConfigRenderOptions}
 import com.typesafe.scalalogging.StrictLogging
 import java.nio.ByteBuffer
 import kamon.Kamon
-import net.ceedubs.ficus.Ficus._
 import org.apache.spark.rdd.RDD
-import org.apache.spark.SparkContext
 import org.apache.spark.sql.catalyst.expressions.{BaseGenericInternalRow, GenericInternalRow}
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.sources._
 import org.apache.spark.sql.types._
 import org.apache.spark.sql.{DataFrame, Row, SQLContext}
 import org.apache.spark.unsafe.types.UTF8String
-import org.joda.time.DateTime
-import org.velvia.filo.{FiloRowReader, FiloVector, RowReader, VectorReader, ZeroCopyUTF8String}
-import scala.concurrent.duration._
-import scala.language.postfixOps
+import org.velvia.filo.{FiloRowReader, FiloVector, ZeroCopyUTF8String}
 
 import filodb.coordinator.client.Client.parse
 import filodb.core._
@@ -27,7 +24,7 @@ import filodb.core.metadata.{Column, DataColumn, Dataset, RichProjection}
 import filodb.core.store._
 
 object FiloRelation extends StrictLogging {
-  import TypeConverters._
+
   import Types.PartitionKey
 
   implicit val context = scala.concurrent.ExecutionContext.Implicits.global
@@ -92,7 +89,7 @@ object FiloRelation extends StrictLogging {
     // 3. If number of partition key combinations are more than inqueryPartitionsLimit then
     // run full table scan otherwise run multipartition scan.
     if (predicateValues.length == projection.partitionColumns.length) {
-      val partKeys = combine(predicateValues).map { values => projection.partKey(values:_*) }
+      val partKeys = combine(predicateValues).map { values => projection.partKey(values: _*) }
       if (partKeys.size <= inqueryPartitionsLimit) partKeys else Nil
     } else {
       Nil

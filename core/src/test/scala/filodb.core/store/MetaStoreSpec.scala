@@ -1,29 +1,27 @@
 package filodb.core.store
 
-import java.nio.ByteBuffer
-import scala.concurrent.Future
+import org.scalatest.{FunSpec, Matchers, BeforeAndAfter, BeforeAndAfterAll}
+import org.scalatest.concurrent.ScalaFutures
 
 import filodb.core._
 import filodb.core.metadata.{Column, DataColumn, Dataset}
 
-import org.scalatest.{FunSpec, Matchers, BeforeAndAfter, BeforeAndAfterAll}
-import org.scalatest.concurrent.ScalaFutures
-
 trait MetaStoreSpec extends FunSpec with Matchers
-with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
+  with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
+
   import MetaStore._
 
   def metaStore: MetaStore
   implicit def defaultPatience: PatienceConfig
 
-  override def beforeAll() {
+  override def beforeAll(): Unit = {
     super.beforeAll()
-    metaStore.initialize().futureValue(defaultPatience)
+    metaStore.initialize().futureValue
   }
 
   val fooRef = DatasetRef("foo", Some("unittest"))
 
-  before { metaStore.clearAllData().futureValue(defaultPatience) }
+  before { metaStore.clearAllData().futureValue }
 
   describe("dataset API") {
     it("should create a new Dataset if one not there") {
@@ -41,7 +39,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
     }
 
     it("should return NotFound if getDataset on nonexisting dataset") {
-      metaStore.getDataset(DatasetRef("notThere")).failed.futureValue shouldBe a [NotFoundError]
+      metaStore.getDataset(DatasetRef("notThere")).failed.futureValue shouldBe a[NotFoundError]
     }
 
     it("should return all datasets created") {
@@ -67,8 +65,8 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
       }
 
       whenReady(metaStore.newColumn(firstColumn.copy(version = 0), fooRef).failed) { err =>
-        err shouldBe an [IllegalColumnChange]
-      } (patienceConfig)
+        err shouldBe an[IllegalColumnChange]
+      }
     }
 
     val monthYearCol = DataColumn(1, "monthYear", "gdelt", 1, Column.ColumnType.LongColumn)
@@ -88,8 +86,8 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
 
       val badColumn = firstColumn.copy(version = 0)  // lower version than first column!
       whenReady(metaStore.newColumns(Seq(badColumn, secondColumn), fooRef).failed) { err =>
-        err shouldBe an [IllegalColumnChange]
-      } (patienceConfig)
+        err shouldBe an[IllegalColumnChange]
+      }
     }
 
     it("should getColumns and return valid list of columns or UndefinedColumns") {
@@ -99,7 +97,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
 
       metaStore.getColumns(fooRef, 1, Seq("second", "first")).futureValue should equal (
                                                                       Seq(secondColumn, firstColumn))
-      metaStore.getColumns(fooRef, 1, Seq("second", "baz")).failed.futureValue shouldBe an [UndefinedColumns]
+      metaStore.getColumns(fooRef, 1, Seq("second", "baz")).failed.futureValue shouldBe an[UndefinedColumns]
     }
 
     it("should be able to add many new columns at once") {
@@ -113,7 +111,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
       metaStore.newColumn(monthYearCol, gdeltRef).futureValue should equal (Success)
 
       metaStore.deleteDataset(gdeltRef).futureValue should equal (Success)
-      metaStore.getDataset(gdeltRef).failed.futureValue shouldBe a [NotFoundError]
+      metaStore.getDataset(gdeltRef).failed.futureValue shouldBe a[NotFoundError]
       metaStore.getSchema(gdeltRef, 10).futureValue should equal (Map.empty)
     }
   }

@@ -1,7 +1,7 @@
 package filodb.core.query
 
-import enumeratum.EnumEntry.Snakecase
 import enumeratum.{Enum, EnumEntry}
+import enumeratum.EnumEntry.Snakecase
 import monix.eval.Task
 import monix.reactive.Observable
 import org.scalactic._

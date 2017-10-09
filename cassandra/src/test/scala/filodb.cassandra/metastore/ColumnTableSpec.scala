@@ -22,7 +22,7 @@ class ColumnTableSpec extends FlatSpec with AsyncTest {
   val columnTable = new ColumnTable(config, new DefaultFiloSessionProvider(config))
   val timeout = Timeout(30 seconds)
   // First create the columns table
-  override def beforeAll() {
+  override def beforeAll(): Unit = {
     super.beforeAll()
     columnTable.createKeyspace(columnTable.keyspace)
     columnTable.initialize().futureValue(timeout)

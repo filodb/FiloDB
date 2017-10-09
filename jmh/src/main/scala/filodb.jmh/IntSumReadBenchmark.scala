@@ -47,7 +47,7 @@ class IntSumReadBenchmark {
 
   val NumSkips = 300  // 3% skips - not that much really
   val skips = (0 until NumSkips).map { i => Random.nextInt(NumRows) }.sorted.distinct
-  val readerWithSkips = ChunkSetReader(chunkSet, partKey, schema, EWAHCompressedBitmap.bitmapOf(skips :_*))
+  val readerWithSkips = ChunkSetReader(chunkSet, partKey, schema, EWAHCompressedBitmap.bitmapOf(skips: _*))
 
   /**
    * Simulation of a columnar query engine scanning the segment chunks columnar wise
