@@ -6,8 +6,8 @@
   - [Coordinator](#coordinator)
   - [Core](#core)
   - [Cassandra](#cassandra)
-  - [Spark](#spark)
   - [Kafka](#kafka)
+  - [Spark](#spark)
   - [HTTP](#http)
   - [Standalone](#standalone)
   - [CLI](#cli)
@@ -24,9 +24,48 @@ The code is laid out following the different parts and components.
 
 ### Coordinator
 
-Provides an upper-level, client-facing interface for the core components, and manages the scheduling around the MemTable, Reprojector, flushes, and column store.  Handles different types of streaming data ingestion.
+The Coordinator provides an upper-level, client-facing interface for a FiloDB cluster and
+its core per-node components. It also handles shard management, assignment, 
+and status handling for ingestion and distributed in-memory querying through an internal PubSub CQRS component.
+This is composed of
+* A configurable ShardAssignmentStrategy, responsible for assigning or removing shards to/from nodes based 
+a defined policy, when state changes occur. It is possible to locate the shard and node coordinator 
+to query with either a partition hash or a shard key hash and # bits. 
+* [ShardMapper(s)](../coordinator/src/main/scala/filodb.coordinator/ShardMapper.scala)
+which keep track of the mapping between shards and nodes for a single dataset. 
+For the cluster these are managed by the 
+[ShardCoordinatorActor](../coordinator/src/main/scala/filodb.coordinator/ShardCoordinatorActor.scala),
+a child of the cluster singleton. On each node, the [NodeClusterActor](../coordinator/src/main/scala/filodb.coordinator/NodeClusterActor.scala)
+tracks them locally.
 
-Clients such as Spark and the CLI implement source actors that extend the [RowSource](../coordinator/src/main/scala/filodb.coordinator/RowSource.scala) trait. `RowSource` communicates with the [NodeCoordinatorActor](../coordinator/src/main/scala/filodb.coordinator/NodeCoordinatorActor.scala) - one per node - to establish streaming ingestion and send rows of data.  `RowSource` retries rows for which it does not receive an `Ack` such that ingestion is at-least-once, and has built-in backpressure not to try to send too many unacked rows. The `NodeCoordinatorActor` in turn creates a [DatasetCoordinatorActor](../coordinator/src/main/scala/filodb.coordinator/DatasetCoordinatorActor.scala) to handle the state of memtables for each (dataset, version) pair, backpressure, and flushing the memtables to the column store.
+The coordinator also handles different types of streaming data ingestion, and the ability to
+subscribe to ingestion stream shard health, state and status.
+
+Each FiloDB node creates a node guardian which creates and supervises the lifecycle of the primary
+components: [NodeCoordinatorActor](../core/src/main/scala/filodb.coordinator/NodeCoordinatorActor.scala), 
+local proxy to the cluster singleton [NodeClusterActor](../coordinator/src/main/scala/filodb.coordinator/NodeClusterActor.scala), node
+metrics, and handles graceful shutdown of the node. 
+ 
+The `NodeCoordinatorActor` is the common external API entry point for all FiloDB operations. 
+For each new dataset added the `NodeCoordinatorActor` creates two actors for
+the new dataset
+
+* An [IngestionActor](../coordinator/src/main/scala/filodb.coordinator/IngestionActor.scala) which creates and manages sharded ingestion streams of records for that dataset, 
+and stores the records in the memstore
+* A [QueryActor](../coordinator/src/main/scala/filodb.coordinator/QueryActor.scala)  which translates external query API calls into internal ColumnStore calls.
+The actual reading of data structures and aggregation is performed asynchronously by Observables
+ 
+The `IngestionActor` publishes shard ingestion change events to the `ShardCoordinatorActor` which then
+broadcasts to all subscribers of that dataset. The `QueryActor` is decoupled from the `ShardCoordinatorActor`
+and is subscribed by its parent, the `NodeCoordinatorActor`, to these shard change events and
+simply receives them and can act on them as needed.
+
+#### Sharding
+
+* [Shard Coordination](sharding.md#shard_coordination)
+* [Shard Assignment](sharding.md#shard_assignment)
+* [Shard Event Subscriptions](sharding.md#shard_event_subscriptions)
+* [Subscribe To Shard Status And Ingestion Events](sharding.md#subscribe_to_shard_status_events)
 
 ### Core
 
@@ -44,13 +83,13 @@ FiloDB datasets consists of one or more projections, each of which contains colu
 
 An implementation of ColumnStore and MetaStore for Apache Cassandra.
 
+### Kafka
+
+[Ingestion for FiloDB from Kafka event streams](ingestion.md#kafka_ingestion).
+
 ### Spark
 
 Contains the Spark input source for ingesting and querying data from FiloDB.
-
-### Kafka
-
-Contains the Kafka ingestion source for FiloDB standalone
 
 ### HTTP
 
