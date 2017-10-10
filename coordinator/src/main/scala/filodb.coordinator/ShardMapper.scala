@@ -1,8 +1,8 @@
 package filodb.coordinator
 
-import scala.util.{Try, Success, Failure}
+import scala.util.{Failure, Success, Try}
 
-import akka.actor.{Address, ActorRef}
+import akka.actor.{ActorRef, Address}
 
 import filodb.core.DatasetRef
 
@@ -18,12 +18,32 @@ import filodb.core.DatasetRef
  * It is not multi thread safe for mutations (registrations) but reads should be fine.
  *
  * The shard finding given a hash needs to be VERY fast, it is in the hot query and ingestion path.
+  *
+  * @param numShards number of shards. For this implementation, it needs to be a power of 2.
+  *
  */
 class ShardMapper(val numShards: Int) extends Serializable {
   import ShardMapper._
 
+  require((numShards & (numShards - 1)) == 0, s"numShards $numShards must be a power of two")
+
+  private final val log2NumShards = (scala.math.log10(numShards) / scala.math.log10(2)).round.toInt
   private final val shardMap = Array.fill(numShards)(ActorRef.noSender)
   private final val statusMap = Array.fill[ShardStatus](numShards)(ShardUnassigned)
+  private final val log2NumShardsOneBits = (1 << log2NumShards) - 1 // results in log2NumShards one bits
+
+  // spreadMask is precomputed for all possible spreads.
+  // The spread is the array index. Value is (log2NumShards-spread) bits set to 1 followed by spread bits set to 0
+  private final val spreadMask = Array.tabulate[Int](log2NumShards + 1) { i =>
+    (log2NumShardsOneBits << i) & log2NumShardsOneBits
+  }
+
+  // spreadOneBits is precomputed for all possible spreads.
+  // The spread is the array index. Value is spread 1 bits
+  private final val spreadOneBits = Array.tabulate[Int](log2NumShards + 1) { i =>
+    (1 << i) - 1
+  }
+
 
   override def equals(other: Any): Boolean = other match {
     case s: ShardMapper => s.numShards == numShards && s.shardValues == shardValues
@@ -40,7 +60,7 @@ class ShardMapper(val numShards: Int) extends Serializable {
    * Maps a partition hash to a shard number and a NodeCoordinator ActorRef
    */
   def partitionToShardNode(partitionHash: Int): ShardAndNode = {
-    val shard = toShard(partitionHash, numShards)
+    val shard = toShard(partitionHash, numShards) // TODO this is not right. Need to fix
     ShardAndNode(shard, shardMap(shard))
   }
 
@@ -48,33 +68,58 @@ class ShardMapper(val numShards: Int) extends Serializable {
   def unassigned(shardNum: Int): Boolean = coordForShard(shardNum) == ActorRef.noSender
   def statusForShard(shardNum: Int): ShardStatus = statusMap(shardNum)
 
+
   /**
-   * Maps a shard key to a range of shards.  Used to limit shard distribution for queries when one knows
-   * the shard key.
-   * @param numShardBits the number of upper bits of the hash to use for the shard key
-   * @return a list or range of shards
-   */
-  def shardKeyToShards(shardHash: Int, numShardBits: Int): Seq[Int] = {
-    val partHashMask = (0xffffffffL >> numShardBits).toInt
-    val shardKeyMask = ~partHashMask
-    val startingShard = toShard(shardHash & shardKeyMask, numShards)
-    val endingShard = toShard(shardHash & shardKeyMask | partHashMask, numShards)
-    (startingShard to endingShard)
+    * Use this function to identify the list of shards to query given the shard key hash.
+    *
+    * @param shardKeyHash This is the shard key hash, and is used to identify the shard group
+    * @param spread       This is the 'spread' S assigned for a given appName. The data for every
+    *                     metric in the app is spread across 2^S^ shards. Example: if S=2, data
+    *                     is spread across 4 shards. If S=0, data is located in 1 shard. Bigger
+    *                     apps are assigned bigger S and smaller apps are assigned small S.
+    * @return The shard numbers that hold data for the given shardKeyHash
+    */
+  def queryShards(shardKeyHash: Int, spread: Int): Seq[Int] = {
+    validateSpread(spread)
+
+    // formulate shardMask (like CIDR mask) by setting least significant 'spread' bits to 0
+    val shardMask = shardKeyHash & spreadMask(spread)
+
+    // create a range starting from shardMask to the shardMask with last 'spread' bits set to 1
+    shardMask to (shardMask | spreadOneBits(spread))
+  }
+
+  private def validateSpread(spread: Int) = {
+    require(spread >= 0 && spread <= log2NumShards, s"Invalid spread $spread. log2NumShards is $log2NumShards")
   }
 
   /**
-   * Computes the shard number given a regular partition hash, a shard key hash, and number of bits.
-   * This computes the shard and overall hash in such a way that when the number of bits needs to decrease
-   * or the sharding needs to go to more shards, the original shards are preserved, thus avoiding
-   * fragmentation and simplifying the querying logic.
-   * @param shardHash the 32-bit hash of the shard key
-   * @param partitionHash the 32-bit hash of the overall partition or time series key, containing all tags
-   * @param numShardBits the number of upper bits of the hash to use for the shard key
-   */
+    * Use this function to calculate the ingestion shard for a fully specified partition id.
+    * The code logic ingesting data into partitions can use this function to direct data
+    * to the right partition
+    *
+    * @param shardKeyHash  This is the shard key hash, and is used to identify the shard group
+    * @param partitionHash The 32-bit hash of the overall partition or time series key, containing all tags
+    * @param spread        This is the 'spread' S assigned for a given appName. The data for every
+    *                      metric in the app is spread across 2^S^ shards. Example: if S=2, data
+    *                      is spread across 4 shards. If S=0, data is located in 1 shard. Bigger
+    *                      apps are assigned bigger S and smaller apps are assigned small S.
+    * @return The shard number that contains the partition for the record described by the given
+    *         shardKeyHash and partitionHash
+    */
+  def ingestionShard(shardKeyHash: Int, partitionHash: Int, spread: Int): Int = {
+    validateSpread(spread)
+
+    // explanation for the one-liner:
+    // first part formulates shardMask (like CIDR mask) by setting shardKeyHash's least significant 'spread' bits to 0
+    // second part extracts last 'spread' bits from tagHash
+    // then combine the two
+    (shardKeyHash & spreadMask(spread)) | (partitionHash & spreadOneBits(spread))
+  }
+
+  @deprecated(message = "Use ingestionShard() instead of this method", since = "0.7")
   def hashToShard(shardHash: Int, partitionHash: Int, numShardBits: Int): Int = {
-    val partHashMask = (0xffffffffL >> numShardBits).toInt
-    val shardKeyMask = ~partHashMask
-    toShard((partitionHash & partHashMask) | (shardHash & shardKeyMask), numShards)
+    ingestionShard(shardHash, partitionHash, log2NumShards - numShardBits)
   }
 
   /**
@@ -176,7 +221,7 @@ class ShardMapper(val numShards: Int) extends Serializable {
 
 private[filodb] object ShardMapper {
 
-  val empty = new ShardMapper(0)
+  val default = new ShardMapper(1)
 
   final case class ShardAndNode(shard: Int, coord: ActorRef)
 

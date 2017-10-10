@@ -170,7 +170,7 @@ The script below brings up the FiloDB Dev Standalone server, and then sets up th
 
 You can now tail the server logs. If you'd like to direct the logs to a specific folder, you can set the LOG_DIR environment variable. 
 ```
-tail -f LOG_DIR_IS_UNDEFINED/filodb-server.log
+tail -f logs/filodb-server-1.log
 ```
 Verify this message `NodeClusterActor Actor[akka://filo-standalone/user/node/singleton/nodecluster#-528195195] said hello!` in the logs. The logs should also indicate kafka connections being setup for consumption for the dataset. Wait for this to happen.
 

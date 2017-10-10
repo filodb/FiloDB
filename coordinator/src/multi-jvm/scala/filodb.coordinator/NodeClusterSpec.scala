@@ -26,8 +26,9 @@ object NodeClusterSpecConfig extends MultiNodeConfig {
 abstract class NodeClusterSpec extends ClusterSpec(NodeClusterSpecConfig) {
 
   import akka.testkit._
-  import NodeClusterSpecConfig._
+
   import NodeClusterActor._
+  import NodeClusterSpecConfig._
   import GdeltTestData._
 
   private lazy val metaStore = cluster.metaStore
@@ -35,7 +36,7 @@ abstract class NodeClusterSpec extends ClusterSpec(NodeClusterSpecConfig) {
   private lazy val coordinatorActor = cluster.coordinatorActor
 
   private val ref = projection6.datasetRef
-  private val spec = DatasetResourceSpec(4, 2)   // 4 shards, 2 nodes, 2 shards per node
+  private val spec = DatasetResourceSpec(4, 2) // 4 shards, 2 nodes, 2 shards per node
 
   override def initialParticipants = roles.size
 

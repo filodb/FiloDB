@@ -3,8 +3,8 @@ package filodb.timeseries
 import java.lang.{Long => JLong}
 
 import scala.concurrent.Await
-import scala.util.{Random, Try}
 import scala.concurrent.duration._
+import scala.util.{Random, Try}
 import scala.util.control.NonFatal
 
 import com.typesafe.scalalogging.StrictLogging

@@ -1,7 +1,7 @@
 package filodb.coordinator
 
-import akka.actor.ActorRef
 import java.nio.ByteBuffer
+
 import scala.language.existentials
 
 import filodb.core.query.{ColumnFilter, CombinerFunction}
@@ -75,7 +75,7 @@ object QueryCommands {
                              combinerArgs: Seq[String] = Nil)
 
   final case class QueryOptions(shardKeyHash: Option[Int] = None,
-                                shardKeyNBits: Int = 4,
+                                shardKeySpread: Int = 2,
                                 parallelism: Int = 16,
                                 queryTimeoutSecs: Int = 30)
 

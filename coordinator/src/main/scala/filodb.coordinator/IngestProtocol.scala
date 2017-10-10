@@ -1,13 +1,15 @@
 package filodb.coordinator
 
-import scala.concurrent.duration._
 import scala.concurrent.Future
+import scala.concurrent.duration._
 import scala.language.existentials
-import akka.actor.{Actor, ActorRef, Props}
+
+import akka.actor.{ActorRef, Props}
 import akka.event.LoggingReceive
 import akka.pattern.ask
 import akka.util.Timeout
 import kamon.Kamon
+
 import filodb.core._
 import filodb.core.memstore.IngestRecord
 
@@ -49,7 +51,7 @@ class IngestProtocol(clusterActor: ActorRef,
                      version: Int = 0) extends BaseActor {
   import IngestProtocol._
 
-  private var mapper: ShardMapper = ShardMapper.empty
+  private var mapper: ShardMapper = ShardMapper.default
 
   override def preStart(): Unit = {
     clusterActor ! NodeClusterActor.SubscribeShardUpdates(ref)
@@ -60,8 +62,6 @@ class IngestProtocol(clusterActor: ActorRef,
   private val kamonTags = Map("dataset" -> ref.dataset, "version" -> version.toString)
   private val rowsIngested = Kamon.metrics.counter("protocol-rows-ingested", kamonTags)
   private val shardHist    = Kamon.metrics.histogram("source-shards-distributed", kamonTags)
-
-  import context.dispatcher
 
   def initializing: Receive = LoggingReceive {
     case CurrentShardSnapshot(_, newMap) =>

@@ -2,14 +2,15 @@ package filodb.kafka
 
 import java.lang.{Long => JLong}
 
+import scala.concurrent.Await
+import scala.concurrent.duration._
+
 import akka.remote.testkit.MultiNodeConfig
 import com.typesafe.config.ConfigFactory
 import monix.execution.Scheduler
 import monix.reactive.Observable
 import org.apache.kafka.clients.producer.ProducerRecord
 import org.velvia.filo.ArrayStringRowReader
-import scala.concurrent.Await
-import scala.concurrent.duration._
 
 import filodb.coordinator.{NodeClusterActor, QueryCommands}
 import filodb.core._
@@ -57,11 +58,13 @@ object KafkaIngestionClusterSpecConfig extends MultiNodeConfig {
   *    > kafka/multi-jvm:testOnly filodb.kafka.KafkaIngestionClusterSpec
   */
 abstract class KafkaIngestionClusterSpec extends ClusterSpec(KafkaIngestionClusterSpecConfig) {
+
   import akka.testkit._
+
   import NodeClusterActor._
   import QueryCommands._
-  import KafkaIngestionClusterSpecConfig._
   import MachineMetricsData._
+  import KafkaIngestionClusterSpecConfig._
 
   override def initialParticipants = roles.size
 
@@ -96,7 +99,7 @@ abstract class KafkaIngestionClusterSpec extends ClusterSpec(KafkaIngestionClust
       val source = IngestionSource(classOf[KafkaIngestionStreamFactory].getName, sourceConfig)
       val msg = SetupDataset(datasetRef,
                              schemaWithSeries.map(_.name),
-                             DatasetResourceSpec(NumPartitions, 2), source)
+        DatasetResourceSpec(NumPartitions, 2), source)
       clusterActor ! msg
       // It takes a _really_ long time for the cluster actor singleton to start.
       expectMsg(30.seconds.dilated, DatasetVerified)

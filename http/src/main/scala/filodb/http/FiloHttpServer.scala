@@ -1,13 +1,13 @@
 package filodb.http
 
+import scala.concurrent.Await
+
 import akka.actor.ActorSystem
 import akka.http.scaladsl.Http
-import akka.http.scaladsl.server.Directives._
 import akka.http.scaladsl.server.Route
+import akka.http.scaladsl.server.Directives._
 import akka.stream.ActorMaterializer
 import com.typesafe.scalalogging.StrictLogging
-
-import scala.concurrent.Await
 
 trait FiloRoute {
   def route: Route
@@ -35,7 +35,7 @@ class FiloHttpServer(actorSystem: ActorSystem) extends StrictLogging {
       settings.httpServerBindPort)
     val bind = Await.result(bindingFuture,
       scala.concurrent.duration.Duration.fromNanos(settings.httpServerStartTimeout.toNanos))
-    logger.info("FiloDB HTTP server is live. Seeds can be seen at http:/{}/seeds", bind.localAddress)
+    logger.info("FiloDB HTTP server is live at http:/{}/", bind.localAddress)
   }
 }
 

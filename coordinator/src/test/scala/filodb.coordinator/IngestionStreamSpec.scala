@@ -4,9 +4,9 @@ import scala.concurrent.duration._
 
 import akka.util.Timeout
 import com.typesafe.config.ConfigFactory
+import org.scalatest.BeforeAndAfterEach
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
-import org.scalatest.BeforeAndAfterEach
 
 import filodb.core._
 import filodb.core.metadata.{Dataset, RichProjection}
@@ -18,12 +18,13 @@ object IngestionStreamSpec extends ActorSpecConfig
 // some set them up manually by invoking the factories directly.
 class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem)
   with ScalaFutures with BeforeAndAfterEach {
-  import akka.testkit._
-  import IngestionCommands._
-  import GdeltTestData._
-  import NodeClusterActor._
 
+  import akka.testkit._
+
+  import IngestionCommands._
+  import NodeClusterActor._
   import sources.{CsvStream, CsvStreamFactory}
+  import GdeltTestData._
 
   val settings = CsvStream.CsvStreamSettings()
 
@@ -49,7 +50,7 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem)
   private val proj2 = RichProjection(dataset33, schema)
   private val ref2 = proj2.datasetRef
 
-  private var shardMap: ShardMapper = ShardMapper.empty
+  private var shardMap: ShardMapper = ShardMapper.default
 
   override def beforeAll(): Unit = {
     metaStore.initialize().futureValue
@@ -122,7 +123,8 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem)
   // TODO: Simulate more failures.  Maybe simulate I/O failure or use a custom source
   // where we can inject failures?
 
-  it("should not start ingestion, raise a IngestionError vs IngestionStopped, if incorrect shard is sent for the creation of the stream") {
+  it("should not start ingestion, raise a IngestionError vs IngestionStopped, " +
+    "if incorrect shard is sent for the creation of the stream") {
     val command = setup(dataset6, "/GDELT-sample-test.csv", rowsToRead = 5, None)
     val commandS = IngestionCommands.DatasetSetup(dataset6, headerCols, 0, noOpSource)
 
@@ -140,7 +142,6 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem)
     val batchSize = 100
     val command = setup(dataset6, "/GDELT-sample-test.csv", rowsToRead = batchSize, None)
 
-    import system.dispatcher
     import akka.pattern.ask
     implicit val timeout: Timeout = cluster.settings.InitializationTimeout
 

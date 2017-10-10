@@ -13,14 +13,32 @@ class ShardMapperSpec extends ActorTest(ShardMapperSpec.getNewSystem) {
   val ref2 = TestProbe().ref
   val dataset = DatasetRef("foo")
 
-  it("can hashToShard using different number of bits") {
+  it("fails if numShards is not a power of 2") {
+    intercept[IllegalArgumentException] {
+      new ShardMapper(34)
+    }
+  }
+
+  it("can getIngestionShard using different spread values") {
     val mapper1 = new ShardMapper(64)
     mapper1.numAssignedShards should equal (0)
-    mapper1.hashToShard("banana".hashCode, 123456, 4) should equal (40)
-    mapper1.hashToShard("banana".hashCode, 123456, 0) should equal (0)
-    mapper1.hashToShard("banana".hashCode, 123456, 5) should equal (42)
+    val shardKeyHash = ("someAppName" + "$" + "someMetricName").hashCode
+    val partitionHash = "a=1;b=2;c=3".hashCode
 
-    mapper1.hashToShard("banana".hashCode, "123456".hashCode, 4) should equal (41)
+    // Turns out that:
+    // shardKeyHash: 10001000111111100110111011011
+    // partitionHash: 10011101001111010111011100101111
+
+    mapper1.ingestionShard(shardKeyHash, partitionHash, 0) shouldEqual 27
+    mapper1.ingestionShard(shardKeyHash, partitionHash, 1) shouldEqual 27
+    mapper1.ingestionShard(shardKeyHash, partitionHash, 2) shouldEqual 27
+    mapper1.ingestionShard(shardKeyHash, partitionHash, 3) shouldEqual 31
+    mapper1.ingestionShard(shardKeyHash, partitionHash, 4) shouldEqual 31
+    mapper1.ingestionShard(shardKeyHash, partitionHash, 5) shouldEqual 15
+    mapper1.ingestionShard(shardKeyHash, partitionHash, 6) shouldEqual 47
+    intercept[IllegalArgumentException] {
+      mapper1.ingestionShard(shardKeyHash, partitionHash, 7)
+    }
   }
 
   it("can assign new nodes to shards and fail if shards already assigned") {
@@ -36,13 +54,34 @@ class ShardMapperSpec extends ActorTest(ShardMapperSpec.getNewSystem) {
     mapper1.registerNode(Seq(15, 20), ref2).isSuccess should be (false)
   }
 
-  it("can find shards given a shard key and number of bits") {
-    val mapper1 = new ShardMapper(64)
-    mapper1.registerNode(Seq(0, 10, 40, 42), ref1).isSuccess should be (true)
-    mapper1.registerNode(Seq(41, 43, 45), ref2).isSuccess should be (true)
-    mapper1.numAssignedShards should equal (7)
+  it("can getQueryShards given a shard key and spread") {
 
-    mapper1.shardKeyToShards("banana".hashCode, 4) should equal (Seq(40, 41, 42, 43))
+
+    val mapper1 = new ShardMapper(64)
+    mapper1.numAssignedShards should equal(0)
+    val shardKeyHash = ("someAppName" + "$" + "someMetricName").hashCode
+
+    // Turns out that:
+    // shardKeyHash: 10001000111111100110111011011
+
+    mapper1.registerNode(Seq(0, 10, 40, 42), ref1).isSuccess shouldBe true
+    mapper1.registerNode(Seq(41, 43, 45), ref2).isSuccess shouldBe true
+    mapper1.numAssignedShards shouldEqual 7
+
+    mapper1.queryShards(shardKeyHash, 0) shouldEqual Seq(27)
+    mapper1.queryShards(shardKeyHash, 1) shouldEqual Seq(26, 27)
+    mapper1.queryShards(shardKeyHash, 2) shouldEqual Seq(24, 25, 26, 27)
+    mapper1.queryShards(shardKeyHash, 3) shouldEqual Seq(24, 25, 26, 27, 28, 29, 30, 31)
+    mapper1.queryShards(shardKeyHash, 4) shouldEqual
+      Seq(16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31)
+    mapper1.queryShards(shardKeyHash, 5).size shouldEqual 32
+    mapper1.queryShards(shardKeyHash, 5).contains(15) shouldBe true
+    mapper1.queryShards(shardKeyHash, 6).size shouldEqual 64
+    mapper1.queryShards(shardKeyHash, 6).contains(47) shouldBe true
+    intercept[IllegalArgumentException] {
+      mapper1.queryShards(shardKeyHash, 7)
+    }
+
   }
 
   it("can return shards and nodes given a partition key") {

@@ -2,25 +2,23 @@ package filodb.coordinator
 
 import java.util.concurrent.atomic.AtomicLong
 
-import scala.concurrent.duration._
 import scala.concurrent.Future
+import scala.concurrent.duration._
 import scala.language.existentials
 import scala.util.Try
 
 import akka.actor.Props
 import akka.pattern.ask
 import akka.util.Timeout
-
 import monix.eval.Task
 import monix.reactive.Observable
 import org.scalactic._
 import org.velvia.filo.BinaryVector
 
 import filodb.core._
-import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.memstore.MemStore
-import filodb.core.metadata.{Column, RichProjection, BadArgument => BadArg, WrongNumberArguments}
-import filodb.core.query.{Aggregate, AggregationFunction, CombinerFunction, NoTimestampColumn}
+import filodb.core.metadata.{Column, RichProjection, WrongNumberArguments, BadArgument => BadArg}
+import filodb.core.query.{AggregationFunction, CombinerFunction, NoTimestampColumn}
 import filodb.core.store._
 
 object QueryActor {
@@ -46,14 +44,14 @@ object QueryActor {
  */
 final class QueryActor(memStore: MemStore,
                        projection: RichProjection) extends BaseActor {
+  import OptionSugar._
+  import TrySugar._
+
   import QueryActor._
   import QueryCommands._
-  import TrySugar._
-  import OptionSugar._
-  import Column.ColumnType._
 
   implicit val scheduler = monix.execution.Scheduler(context.dispatcher)
-  var shardMap = ShardMapper.empty
+  var shardMap = ShardMapper.default
 
   def validateColumns(colStrs: Seq[String]): Seq[Column] Or ErrorResponse =
     RichProjection.getColumnsFromNames(projection.columns, colStrs)
@@ -89,7 +87,7 @@ final class QueryActor(memStore: MemStore,
         // TODO: filter shards by ones that are active?  reroute to other DC? etc.
         // TODO: monitor ratio of queries using shardKeyHash to queries that go to all shards
         val shards = options.shardKeyHash.map { hash =>
-                       shardMap.shardKeyToShards(hash, options.shardKeyNBits)
+                        shardMap.queryShards(hash, options.shardKeySpread)
                      }.getOrElse(shardMap.assignedShards)
         shards.map { s => FilteredPartitionScan(ShardSplit(s), filters) }
     }).toOr.badMap {

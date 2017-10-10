@@ -7,22 +7,21 @@ import javax.activation.UnsupportedDataTypeException
 import scala.concurrent.Await
 import scala.concurrent.duration._
 import scala.language.postfixOps
-import scala.util.{Try, Failure, Success => SSuccess}
+import scala.util.{Failure, Try, Success => SSuccess}
 
 import akka.actor.ActorSystem
 import com.opencsv.CSVWriter
 import com.quantifind.sumac.{ArgMain, FieldArgs}
 import com.typesafe.config.{Config, ConfigFactory}
-import monix.reactive.Observable
 import net.ceedubs.ficus.Ficus._
 import org.parboiled2.ParseError
 import org.velvia.filo.RowReader
 
-import filodb.coordinator.client._
 import filodb.coordinator._
+import filodb.coordinator.client._
 import filodb.core._
 import filodb.core.metadata.{Column, DataColumn, Dataset, RichProjection}
-import filodb.core.query.{ColumnFilter, Filter}
+import filodb.core.query.ColumnFilter
 import filodb.core.store._
 
 // scalastyle:off
@@ -81,7 +80,7 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
 
   val config = systemConfig.getConfig("filodb")
 
-  import Client.{actorAsk, parse}
+  import Client.parse
 
   def printHelp(): Unit = {
     println("filo-cli help:")
@@ -259,8 +258,8 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
    * setup command configuration example:
    * {{{
    *   dataset = "gdelt"
-   *   columns = ["GLOBALEVENTID", "MonthYear", "Year", "Actor2Code", "Actor2Name", "Code"]
-   *   numshards = 30   # for Kafka this should match the number of partitions
+   *   columns = ["GLOBALEVENTID", "MonthYear", "Year", "Actor2Code", "Actor2Name", "Code"]*
+   *   numshards = 32   # for Kafka this should match the number of partitions
    *   min-num-nodes = 10     # This many nodes needed to ingest all shards
    *   sourcefactory = "filodb.kafka.KafkaSourceFactory"
    *   sourceconfig {
@@ -345,6 +344,7 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
   }
 
   import scala.language.existentials
+
   import filodb.core.metadata.Column.ColumnType._
 
   private def getRowValues(columns: Seq[Column],
