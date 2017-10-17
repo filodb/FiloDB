@@ -85,7 +85,6 @@ object ChunkSetReader {
 
   /**
    * Selects columns columnIDs from chunkSet, producing a ChunkSetReader
-   * @type {[type]}
    */
   def apply(chunkSet: ChunkSet,
             dataset: Dataset,
