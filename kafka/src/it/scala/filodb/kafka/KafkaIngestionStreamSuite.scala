@@ -16,8 +16,8 @@ import org.apache.kafka.clients.producer.ProducerRecord
 import filodb.coordinator.IngestionCommands.DatasetSetup
 import filodb.coordinator.IngestionStreamFactory
 import filodb.coordinator.NodeClusterActor.IngestionSource
-import filodb.core.memstore.{IngestRecord, TimeSeriesMemStore}
-import filodb.core.metadata.{Column, DataColumn, Dataset, RichProjection}
+import filodb.core.memstore.{IngestRecord, IngestRouting, TimeSeriesMemStore}
+import filodb.core.metadata.Dataset
 import org.velvia.filo.ArrayStringRowReader
 
 /** 1. Start Zookeeper
@@ -29,9 +29,6 @@ import org.velvia.filo.ArrayStringRowReader
   *    > kafka/it:testOnly filodb.kafka.KafkaIngestionStreamSuite
   */
 class KafkaIngestionStreamSuite extends ConfigSpec with StrictLogging {
-
-  import filodb.core._
-  import Column.ColumnType._
 
   private val count = 1000
   private val numPartitions = 2
@@ -53,15 +50,9 @@ class KafkaIngestionStreamSuite extends ConfigSpec with StrictLogging {
   "IngestionStreamFactory" must {
     "create a new KafkaStream" in {
 
-      // data:
-      val schema = Seq(DataColumn(0, "series",    "metrics", 0, StringColumn),
-                       DataColumn(0, "timestamp", "metrics", 0, TimestampColumn),
-                       DataColumn(1, "value",     "metrics", 0, IntColumn))
-      val dataset = Dataset("metrics", "timestamp", "series")
-      val datasetRef = DatasetRef(dataset.name)
-      val projection = RichProjection(dataset, schema)
+      val dataset = Dataset("metrics", Seq("series:string"), Seq("timestamp:long", "value:int"))
       val source = IngestionSource(classOf[KafkaIngestionStreamFactory].getName)
-      val ds = DatasetSetup(dataset, schema.map(_.toString), 0, source)
+      val ds = DatasetSetup(dataset.asCompactString, source)
 
       // kafka config
       val settings = new KafkaSettings(sourceConfig)
@@ -69,7 +60,7 @@ class KafkaIngestionStreamSuite extends ConfigSpec with StrictLogging {
       // coordinator:
       val ctor = Class.forName(ds.source.streamFactoryClass).getConstructors.head
       val memStore = new TimeSeriesMemStore(globalConfig.getConfig("filodb"))
-      memStore.setup(projection, 0)
+      memStore.setup(dataset, 0)
       memStore.reset()
 
       // producer:
@@ -77,7 +68,7 @@ class KafkaIngestionStreamSuite extends ConfigSpec with StrictLogging {
 
       val tasks = for (partition <- 0 until numPartitions) yield {
 
-        memStore.setup(projection, partition)
+        memStore.setup(dataset, partition)
 
         // start consumers before producers so that all messages are consumed properly.
         // The consumer task creates one ingestion stream per topic-partition (consumer.assign(topic,partition)
@@ -86,11 +77,11 @@ class KafkaIngestionStreamSuite extends ConfigSpec with StrictLogging {
           val streamFactory = ctor.newInstance().asInstanceOf[IngestionStreamFactory]
           streamFactory.isInstanceOf[KafkaIngestionStreamFactory] should be(true)
           val stream = streamFactory
-            .create(settings.config, projection, partition)
+            .create(settings.config, dataset, partition)
             .get
             .take(count)
 
-          Task.fromFuture(memStore.ingestStream(datasetRef, partition, stream) { err => throw err })
+          Task.fromFuture(memStore.ingestStream(dataset.ref, partition, stream) { err => throw err })
         }
         Thread.sleep(1000) // so that the consumers start fully before the producers begin
 
@@ -110,11 +101,11 @@ class KafkaIngestionStreamSuite extends ConfigSpec with StrictLogging {
 }
 
 
-final class PartitionRecordConverter extends RecordConverter {
-
-  override def convert(proj: RichProjection, event: AnyRef, partition: Int, offset: Long): Seq[IngestRecord] =
-    Seq(IngestRecord(proj, ArrayStringRowReader(Array(partition.toString,
-                                                      event.asInstanceOf[String],
-                                                      partition.toString)), offset))
+final class PartitionRecordConverter(dataset: Dataset) extends RecordConverter {
+  val routing = IngestRouting(dataset, Seq("series", "timestamp", "value"))
+  override def convert(event: AnyRef, partition: Int, offset: Long): Seq[IngestRecord] =
+    Seq(IngestRecord(routing, ArrayStringRowReader(Array(partition.toString,
+                                                         event.asInstanceOf[String],
+                                                         partition.toString)), offset))
 
 }

@@ -3,7 +3,7 @@ package filodb.timeseries
 import com.typesafe.scalalogging.StrictLogging
 import filodb.core.memstore.IngestRecord
 import filodb.core.metadata.Column.ColumnType
-import filodb.core.metadata.RichProjection
+import filodb.core.metadata.Dataset
 import filodb.kafka.RecordConverter
 import org.velvia.filo.{RowReader, SchemaRowReader, ZeroCopyUTF8String}
 
@@ -17,9 +17,9 @@ import org.velvia.filo.{RowReader, SchemaRowReader, ZeroCopyUTF8String}
   * Meant for local development testing only. Not optimized for performance.
   *
   */
-class TimeseriesSampleConverter extends RecordConverter with StrictLogging {
+class TimeseriesSampleConverter(dataset: Dataset) extends RecordConverter with StrictLogging {
 
-  override def convert(proj: RichProjection, event: AnyRef, partition: Int, offset: Long): Seq[IngestRecord] = {
+  override def convert(event: AnyRef, partition: Int, offset: Long): Seq[IngestRecord] = {
     event match {
       case e: String =>
         val fields =  e.split("\\s+")

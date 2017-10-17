@@ -69,8 +69,7 @@ object InMemoryQueryStress extends App {
   csvDF.write.format("filodb.spark").
     option("dataset", "nyc_taxi").
     option("row_keys", "hack_license,pickup_datetime").
-    option("segment_key", ":timeslice pickup_datetime 6d").
-    option("partition_keys", ":stringPrefix medallion 2").
+    option("partition_columns", "medallion").
     mode(SaveMode.Overwrite).save()
   puts("Ingestion done.")
 

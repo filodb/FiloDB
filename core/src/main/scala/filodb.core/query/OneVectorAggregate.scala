@@ -1,7 +1,6 @@
 package filodb.core.query
 
 import scala.language.postfixOps
-import scala.reflect.ClassTag
 
 import org.velvia.filo.{BinaryVector, FiloVector}
 import scalaxy.loops._

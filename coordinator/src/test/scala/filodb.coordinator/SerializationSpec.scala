@@ -7,7 +7,7 @@ import akka.actor.ActorRef
 import org.scalatest.{FunSpec, Matchers}
 
 import filodb.core.binaryrecord.BinaryRecord
-import filodb.core.memstore.IngestRecord
+import filodb.core.memstore.{IngestRecord, IngestRouting}
 import filodb.core.NamesTestData
 
 class SerializationSpec extends FunSpec with Matchers {
@@ -18,7 +18,7 @@ class SerializationSpec extends FunSpec with Matchers {
   it("should be able to serialize different IngestionCommands messages") {
     val baos = new ByteArrayOutputStream
     val oos = new ObjectOutputStream(baos)
-    val setupMsg = DatasetSetup(dataset, schema.map(_.toString), 0)
+    val setupMsg = DatasetSetup(dataset.asCompactString)
     oos.writeObject(setupMsg)
     oos.writeObject(IngestionCommands.UnknownDataset)
     oos.writeObject(BadSchema("no match foo blah"))
@@ -47,14 +47,15 @@ class SerializationSpec extends FunSpec with Matchers {
     import filodb.core.NamesTestData._
     import Serializer._
 
-    putPartitionSchema(projection.partKeyBinSchema)
-    putDataSchema(projection.binSchema)
+    putPartitionSchema(dataset.partitionBinSchema)
+    putDataSchema(dataset.dataBinSchema)
+    val routing = IngestRouting(dataset, Seq("first", "last", "age", "seg"))
     val records = mapper(names).zipWithIndex.map { case (r, idx) =>
-      val record = IngestRecord(projection, r, idx)
-      record.copy(partition = projection.partKey(record.partition),
-                  data = BinaryRecord(projection.binSchema, record.data))
+      val record = IngestRecord(routing, r, idx)
+      record.copy(partition = dataset.partKey(record.partition),
+                  data = BinaryRecord(dataset.dataBinSchema, record.data))
     }
-    val cmd = IngestRows(datasetRef, 0, 1, records)
+    val cmd = IngestRows(dataset.ref, 1, records)
     fromBinaryIngestRows(cmd.toBytes()) should equal (cmd)
   }
 

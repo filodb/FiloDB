@@ -2,11 +2,11 @@ package filodb.core.memstore
 
 import kamon.Kamon
 import org.jctools.maps.NonBlockingHashMapLong
-import org.velvia.filo.{BinaryVector, FiloVector, RoutingRowReader, RowReader}
+import org.velvia.filo.{BinaryVector, FiloVector, RowReader}
 import scalaxy.loops._
 
 import filodb.core.binaryrecord.BinaryRecord
-import filodb.core.metadata.RichProjection
+import filodb.core.metadata.Dataset
 import filodb.core.query.{ChunkIDPartitionChunkIndex, ChunkSetReader}
 import filodb.core.store._
 import filodb.core.Types._
@@ -30,15 +30,11 @@ object TimeSeriesPartition {
  * Design is for high ingestion rates.
  * Concurrency: single writer for ingest, multiple readers OK for reads
  *
- * This also implements PartitionChunkIndex, and the various chunk indexing methods include returning the
- * very latest data.  However the ChunkSetInfo for the latest chunk still being appended will not have
- * a correct set of starting and ending keys (since they are still changing).
- *
  * TODO: eliminate chunkIDs, that can be stored in the index
  * TODO: document tradeoffs between chunksToKeep, maxChunkSize
  * TODO: update flushedWatermark when flush is confirmed
  */
-class TimeSeriesPartition(val projection: RichProjection,
+class TimeSeriesPartition(val dataset: Dataset,
                           val binPartition: PartitionKey,
                           val shard: Int,
                           chunksToKeep: Int,
@@ -50,18 +46,16 @@ class TimeSeriesPartition(val projection: RichProjection,
   private final val vectors = new NonBlockingHashMapLong[Array[BinaryVector[_]]](32, false)
   private final val chunkIDs = new collection.mutable.Queue[ChunkID]
   // This only holds immutable, finished chunks
-  private final val index = new ChunkIDPartitionChunkIndex(binPartition, projection)
+  private final val index = new ChunkIDPartitionChunkIndex(binPartition, dataset)
   private var currentChunkLen = 0
   private var firstRowKey = BinaryRecord.empty
 
   // Set initial size to a fraction of the max chunk size, so that partitions with sparse amount of data
   // will not cause too much memory bloat.  GrowableVector allows vectors to grow, so this should be OK
-  private final val appenders = MemStore.getAppendables(projection, binPartition, maxChunkSize / 8)
+  private final val appenders = MemStore.getAppendables(dataset, maxChunkSize / 8)
   private final val numColumns = appenders.size
-  private final val partitionVectors = new Array[FiloVector[_]](projection.partitionColumns.length)
+  private final val partitionVectors = new Array[FiloVector[_]](dataset.partitionColumns.length)
   private final val currentChunks = appenders.map(_.appender)
-  // TODO(velvia): These are not correct, needs to be adjusted for non-partition columns
-  private final val rowKeyIndices = projection.rowKeyColIndices.toArray
 
   // The highest offset of a row that has been committed to disk
   var flushedWatermark = Long.MinValue
@@ -77,14 +71,14 @@ class TimeSeriesPartition(val projection: RichProjection,
       // Don't create new chunkID until new data appears
       if (currentChunkLen == 0) {
         initNewChunk()
-        firstRowKey = makeRowKey(row)
+        firstRowKey = dataset.rowKey(row)
       }
       for { col <- 0 until numColumns optimized } {
         appenders(col).append(row)
       }
       currentChunkLen += 1
       if (ingestedWatermark < offset) ingestedWatermark = offset
-      if (currentChunkLen >= maxChunkSize) flush(makeRowKey(row))
+      if (currentChunkLen >= maxChunkSize) flush(dataset.rowKey(row))
     }
   }
 
@@ -141,40 +135,18 @@ class TimeSeriesPartition(val projection: RichProjection,
     if (currentChunkLen > 0) { Iterator.single((latestChunkInfo, emptySkips)) }
     else                     { Iterator.empty }
 
-  private def makeRowKey(row: RowReader): BinaryRecord =
-    BinaryRecord(projection.rowKeyBinSchema, RoutingRowReader(row, rowKeyIndices))
-
-  private def getVectors(positions: Array[Int],
+  private def getVectors(columnIds: Array[Int],
                          vectors: Array[BinaryVector[_]],
                          vectLength: Int): Array[FiloVector[_]] = {
-    val finalVectors = new Array[FiloVector[_]](positions.size)
-    for { i <- 0 until positions.size optimized } {
-      finalVectors(i) = if (positions(i) >= 0) { vectors(positions(i)) }
-                        else {
-                          // Create const vectors for partition key columns on demand, since they are
-                          // rarely queried.  Cache them in partitionVectors.
-                          // scalastyle:off null
-                          val partVectPos = -positions(i) - 1
-                          val partVect = partitionVectors(partVectPos)
-                          if (partVect == null) {
-                            val constVect = projection.partExtractors(partVectPos).
-                                              constVector(binPartition, partVectPos, vectLength)
-                            partitionVectors(partVectPos) = constVect
-                            constVect
-                          } else { partVect }
-                          // scalastyle:on null
-                        }
+    val finalVectors = new Array[FiloVector[_]](columnIds.size)
+    for { i <- 0 until columnIds.size optimized } {
+      finalVectors(i) = if (Dataset.isPartitionID(columnIds(i))) { constPartitionVector(columnIds(i)) }
+                        else                                     { vectors(columnIds(i)) }
     }
     finalVectors
   }
 
-  /**
-   * Streams back ChunkSetReaders from this Partition as an iterator of readers by chunkID
-   * @param method the ChunkScanMethod determining which chunks to read out
-   * @param positions an array of the column positions according to projection.dataColumns, ie 0 for the first
-   *                  column, up to projection.dataColumns.length - 1
-   */
-  def readers(method: ChunkScanMethod, positions: Array[Int]): Iterator[ChunkSetReader] = {
+  def readers(method: ChunkScanMethod, columnIds: Array[Int]): Iterator[ChunkSetReader] = {
     val infosSkips = method match {
       case AllChunkScan               => index.allChunks ++ latestChunkIt
       // To derive time range: r.startkey.getLong(0) -> r.endkey.getLong(0)
@@ -185,7 +157,7 @@ class TimeSeriesPartition(val projection: RichProjection,
 
     infosSkips.map { case (info, skips) =>
       val vectArray = vectors.get(info.id)
-      new ChunkSetReader(info, binPartition, skips, getVectors(positions, vectArray, info.numRows))
+      new ChunkSetReader(info, binPartition, skips, getVectors(columnIds, vectArray, info.numRows))
     }
   }
 

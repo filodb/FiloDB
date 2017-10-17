@@ -16,28 +16,25 @@ trait IngestionOps extends ClientBase with StrictLogging {
    * ingesting.  Calling this prematurely results in smaller chunks and less efficient storage.
    * All NodeCoordinators will be asked to flush, and the count of nodes flushing will be returned.
    * @param dataset the DatasetRef of the dataset to flush
-   * @param version the version of the dataset to flush
    * @throws ClientException
    */
-  def flush(dataset: DatasetRef, version: Int, timeout: FiniteDuration = 30.seconds): Int = {
-    askAllCoordinators(Flush(dataset, version), timeout) {
+  def flush(dataset: DatasetRef, timeout: FiniteDuration = 30.seconds): Int = {
+    askAllCoordinators(Flush(dataset), timeout) {
       case Flushed => true
       case FlushIgnored => false
       case UnknownDataset => false
     }.filter(x => x).length
   }
 
-  def flushByName(datasetName: String,
-                  database: Option[String] = None,
-                  version: Int = 0): Int = flush(DatasetRef(datasetName, database), version)
+  def flushByName(datasetName: String, database: Option[String] = None): Int =
+    flush(DatasetRef(datasetName, database))
 
   /**
    * Retrieves the current ingestion stats from all nodes for a particular dataset and version.
    */
   def ingestionStats(dataset: DatasetRef,
-                     version: Int,
                      timeout: FiniteDuration = 30.seconds): Seq[IngestionStatus] =
-    askAllCoordinators(GetIngestionStats(dataset, version), timeout) {
+    askAllCoordinators(GetIngestionStats(dataset), timeout) {
       case stats: IngestionStatus => Some(stats)
       case UnknownDataset => None
     }.flatten
@@ -45,7 +42,7 @@ trait IngestionOps extends ClientBase with StrictLogging {
   /**
    * Repeatedly checks the ingestion stats and flushes until everything is flushed for a given dataset.
    */
-  def flushCompletely(dataset: DatasetRef, version: Int, timeout: FiniteDuration = 30.seconds): Int = {
+  def flushCompletely(dataset: DatasetRef, timeout: FiniteDuration = 30.seconds): Int = {
     var nodesFlushed: Int = 0
 
     // TODO: need to reimplement this based on MemStore flush status

@@ -1,7 +1,5 @@
 package filodb.core.metadata
 
-import com.typesafe.config.ConfigFactory
-import java.sql.Timestamp
 import org.scalactic._
 import org.velvia.filo.{RowReader, ZeroCopyUTF8String => UTF8Str}
 

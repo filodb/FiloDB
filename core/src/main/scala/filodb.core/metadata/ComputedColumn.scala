@@ -1,12 +1,10 @@
 package filodb.core.metadata
 
 import org.scalactic._
-import org.velvia.filo.RowReader
 import org.velvia.filo.RowReader._
 import scala.language.existentials
 
-import filodb.core.{KeyType, SingleKeyTypeBase}
-import filodb.core.Types._
+import filodb.core.KeyType
 
 /**
  * Represents a computed or generated column.

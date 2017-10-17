@@ -4,9 +4,7 @@ import java.io.OutputStream
 import java.sql.Timestamp
 import javax.activation.UnsupportedDataTypeException
 
-import scala.concurrent.Await
 import scala.concurrent.duration._
-import scala.language.postfixOps
 import scala.util.{Failure, Try, Success => SSuccess}
 
 import akka.actor.ActorSystem
@@ -20,7 +18,7 @@ import org.velvia.filo.RowReader
 import filodb.coordinator._
 import filodb.coordinator.client._
 import filodb.core._
-import filodb.core.metadata.{Column, DataColumn, Dataset, RichProjection}
+import filodb.core.metadata.{Column, Dataset, DatasetOptions}
 import filodb.core.query.ColumnFilter
 import filodb.core.store._
 
@@ -31,11 +29,10 @@ class Arguments extends FieldArgs {
   var command: Option[String] = None
   var filename: Option[String] = None
   var configPath: Option[String] = None
-  var columns: Option[Map[String, String]] = None
-  var rowKeys: Seq[String] = Nil
+  var dataColumns: Seq[String] = Nil
+  var partitionColumns: Seq[String] = Nil
+  var rowKeys: Seq[String] = Seq("timestamp")
   var partitionKeys: Seq[String] = Nil
-  var numPartitions: Int = 1000
-  var version: Option[Int] = None
   var select: Option[Seq[String]] = None
   var limit: Int = 1000
   var timeoutSeconds: Int = 60
@@ -47,24 +44,6 @@ class Arguments extends FieldArgs {
   var promql: Option[String] = None
   var metricColumn: String = "__name__"
   var linePerItem: Boolean = false
-
-  import Column.ColumnType._
-
-  def toColumns(dataset: String, version: Int): Seq[DataColumn] = {
-    columns.map { colStrStr =>
-      colStrStr.map { case (name, colType) =>
-        colType match {
-          case "int"    => DataColumn(0, name, dataset, version, IntColumn)
-          case "long"   => DataColumn(0, name, dataset, version, LongColumn)
-          case "double" => DataColumn(0, name, dataset, version, DoubleColumn)
-          case "string" => DataColumn(0, name, dataset, version, StringColumn)
-          case "bool"   => DataColumn(0, name, dataset, version, BitmapColumn)
-          case "timestamp" => DataColumn(0, name, dataset, version, TimestampColumn)
-          case "map"    => DataColumn(0, name, dataset, version, MapColumn)
-        }
-      }.toSeq
-    }.getOrElse(Nil)
-  }
 }
 
 object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbClusterNode {
@@ -85,8 +64,8 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
   def printHelp(): Unit = {
     println("filo-cli help:")
     println("  commands: init create importcsv list truncate")
-    println("  columns: <colName1>:<type1>,<colName2>:<type2>,... ")
-    println("  types:  int,long,double,string,bool,timestamp,map")
+    println("  dataColumns/partitionColumns: <colName1>:<type1>,<colName2>:<type2>,... ")
+    println("  types:  int,long,double,string,bitmap,ts,map")
     println("  common options:  --dataset --database")
     println("  OR:  --select col1, col2  [--limit <n>]  [--outfile /tmp/out.csv]")
     println("\nStandalone client commands:")
@@ -112,7 +91,6 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
 
   def main(args: Arguments): Unit = {
     try {
-      val version = args.version.getOrElse(0)
       val timeout = args.timeoutSeconds.seconds
       args.command match {
         case Some("init") =>
@@ -129,20 +107,20 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
           }
 
         case Some("create") =>
-          require(args.dataset.isDefined && args.columns.isDefined, "Need to specify dataset and columns")
-          require(args.rowKeys.nonEmpty, "--rowKeys must be defined")
+          require(args.dataset.isDefined &&
+                  args.dataColumns.nonEmpty &&
+                  args.partitionColumns.nonEmpty, "Need to specify dataset and partition/dataColumns")
           val datasetName = args.dataset.get
-          createDatasetAndColumns(getRef(args), args.toColumns(datasetName, version),
-                                  args.rowKeys,
-                                  if (args.partitionKeys.isEmpty) { Seq(Dataset.DefaultPartitionColumn) }
-                                  else { args.partitionKeys },
-                                  timeout)
+          createDataset(getRef(args),
+                        args.dataColumns,
+                        args.partitionColumns,
+                        args.rowKeys,
+                        timeout)
 
         case Some("importcsv") =>
           import org.apache.commons.lang3.StringEscapeUtils._
           val delimiter = unescapeJava(args.delimiter)(0)
           ingestCSV(getRef(args),
-                    version,
                     args.filename.get,
                     delimiter,
                     99.minutes)
@@ -186,7 +164,6 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
           }.getOrElse {
             args.select.map { selectCols =>
               exportCSV(getRef(args),
-                        version,
                         selectCols,
                         args.limit,
                         args.outfile)
@@ -206,18 +183,12 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
 
   def dumpDataset(dataset: String, database: Option[String]): Unit = {
     val ref = DatasetRef(dataset, database)
-    require(ref.dataset == dataset)
     parse(metaStore.getDataset(ref)) { datasetObj =>
-      println(s"Dataset name: ${datasetObj.name}")
-      println(s"Partition keys: ${datasetObj.partitionColumns.mkString(", ")}")
+      println(s"Dataset name: ${datasetObj.ref}")
+      println(s"Partition columns:\n  ${datasetObj.partitionColumns.mkString("\n  ")}")
+      println(s"Data columns:\n  ${datasetObj.dataColumns.mkString("\n  ")}")
+      println(s"Row keys:\n  ${datasetObj.rowKeyColumns.mkString("\n  ")}")
       println(s"Options: ${datasetObj.options}\n")
-      datasetObj.projections.foreach(p => println(p.detailedString))
-    }
-    parse(metaStore.getSchema(ref, Int.MaxValue)) { schema =>
-      println("\nColumns:")
-      schema.values.toSeq.sortBy(_.name).foreach { case DataColumn(_, name, _, ver, colType, _) =>
-        println("  %-35.35s %5d %s".format(name, ver, colType))
-      }
     }
   }
 
@@ -227,25 +198,22 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
     }
   }
 
-  def createDatasetAndColumns(dataset: DatasetRef,
-                              columns: Seq[DataColumn],
-                              rowKeys: Seq[String],
-                              partitionKeys: Seq[String],
-                              timeout: FiniteDuration): Unit = {
+  def createDataset(dataset: DatasetRef,
+                    dataColumns: Seq[String],
+                    partitionColumns: Seq[String],
+                    rowKeys: Seq[String],
+                    timeout: FiniteDuration): Unit = {
     println(s"Creating dataset $dataset...")
-    val datasetObj = Dataset(dataset, rowKeys, partitionKeys)
-
-    RichProjection.make(datasetObj, columns).recover {
-      case err: RichProjection.BadSchema =>
-        println(s"Bad dataset schema: $err")
-        exitCode = 2
-        return
-    }
 
     try {
-      client.createNewDataset(datasetObj, columns, dataset.database)
+      val datasetObj = Dataset(dataset.dataset, partitionColumns, dataColumns, rowKeys)
+      client.createNewDataset(datasetObj, dataset.database)
       exitCode = 0
     } catch {
+      case b: Dataset.BadSchemaError =>
+        println(b)
+        println(b.getMessage)
+        exitCode = 2
       case r: RuntimeException =>
         println(r.getMessage)
         exitCode = 2
@@ -258,7 +226,6 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
    * setup command configuration example:
    * {{{
    *   dataset = "gdelt"
-   *   columns = ["GLOBALEVENTID", "MonthYear", "Year", "Actor2Code", "Actor2Name", "Code"]*
    *   numshards = 32   # for Kafka this should match the number of partitions
    *   min-num-nodes = 10     # This many nodes needed to ingest all shards
    *   sourcefactory = "filodb.kafka.KafkaSourceFactory"
@@ -272,13 +239,12 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
    */
   def setupDataset(client: LocalClient, config: Config): Unit = {
     val dataset = DatasetRef(config.getString("dataset"))
-    val columns = config.as[Seq[String]]("columns")
     val resourceSpec = DatasetResourceSpec(config.getInt("numshards"),
                                            config.getInt("min-num-nodes"))
     val sourceSpec = config.as[Option[String]]("sourcefactory").map { factory =>
                        IngestionSource(factory, config.getConfig("sourceconfig"))
                      }.getOrElse(noOpSource)
-    client.setupDataset(dataset, columns, resourceSpec, sourceSpec).foreach {
+    client.setupDataset(dataset, resourceSpec, sourceSpec).foreach {
       case e: ErrorResponse =>
         println(s"Errors setting up dataset $dataset: $e")
         exitCode = 2
@@ -308,7 +274,7 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
 
   def parsePromQuery(client: LocalClient, query: String, dataset: String,
                      metricCol: String, linePerItem: Boolean): Unit = {
-    val opts = Dataset.DefaultOptions.copy(metricColumn = metricCol)
+    val opts = DatasetOptions.DefaultOptions.copy(metricColumn = metricCol)
     val parser = new PromQLParser(query, opts)
     parser.parseAndGetArgs(true) match {
       // Valid parsed QueryArgs
@@ -342,8 +308,6 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
       if (linePerItem) { array.foreach(println) }
       else             { println(s"[${array.mkString(",")}]") }
   }
-
-  import scala.language.existentials
 
   import filodb.core.metadata.Column.ColumnType._
 
@@ -382,7 +346,7 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
       writer.writeNext(columnNames.toArray, false)
       rows.foreach {
         r =>
-          val content: Array[String] = getRowValues(columns,columnCount, r)
+          val content: Array[String] = getRowValues(columns, columnCount, r)
           writer.writeNext(content, false)
       }
     } catch {
@@ -396,18 +360,16 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
   }
 
   def exportCSV(dataset: DatasetRef,
-                version: Int,
                 columnNames: Seq[String],
                 limit: Int,
                 outFile: Option[String]): Unit = {
-    val schema = Await.result(metaStore.getSchema(dataset, version), 10.second)
     val datasetObj = parse(metaStore.getDataset(dataset)) { ds => ds }
-    val richProj = RichProjection(datasetObj, schema.values.toSeq)
-    val columns = columnNames.map(schema)
+    val colIDs = datasetObj.colIDs(columnNames: _*).get
+    val columns = colIDs.map(id => datasetObj.dataColumns(id))
 
     // NOTE: we will only return data from the first split!
     val splits = cluster.memStore.getScanSplits(dataset)
-    val requiredRows = cluster.memStore.scanRows(richProj, columns, version, FilteredPartitionScan(splits.head))
+    val requiredRows = cluster.memStore.scanRows(datasetObj, colIDs, FilteredPartitionScan(splits.head))
                                   .take(limit)
     writeResult(dataset.dataset, requiredRows, columnNames, columns, outFile)
   }

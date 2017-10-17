@@ -1,16 +1,12 @@
 package filodb.spark
 
-import com.typesafe.config.ConfigFactory
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.{SparkSession, SaveMode}
 import org.apache.spark.streaming.{Milliseconds, StreamingContext}
 import org.scalatest.time.{Millis, Seconds, Span}
 import scala.collection.mutable
-import scala.concurrent.duration._
-import scala.util.Try
 
 import filodb.core._
-import filodb.core.metadata.{Column, Dataset}
 
 import org.scalatest.{BeforeAndAfter, BeforeAndAfterAll, FunSpec, Matchers}
 import org.scalatest.concurrent.ScalaFutures
@@ -56,7 +52,7 @@ with Matchers with ScalaFutures {
   before {
     metaStore.clearAllData().futureValue
     try {
-      FiloDriver.client.truncateDataset(DatasetRef(largeDataset.name))
+      FiloDriver.client.truncateDataset(dataset.ref)
     } catch {
       case e: Exception =>
     }
@@ -78,10 +74,9 @@ with Matchers with ScalaFutures {
     import sess.implicits._
     nameChunks.foreachRDD { rdd =>
       rdd.toDF.write.format("filodb.spark").
-          option("dataset", largeDataset.name).
+          option("dataset", dataset.name).
           option("row_keys", "age").
-          option("segment_key", ":string 0").
-          option("partition_keys", "league").
+          option("partition_columns", "league:string").
           // Flushing after each small batch would be very inefficient...
           option("flush_after_write", "false").
           mode(SaveMode.Append).save()
@@ -91,12 +86,12 @@ with Matchers with ScalaFutures {
 
     // Flush after end of stream.  This is only needed for this test to get definitive results; in a real
     // streaming app this would not be needed, ever....
-    FiloDriver.client.flushByName(largeDataset.name, Some("unittest"))
+    FiloDriver.client.flushByName(dataset.name, Some("unittest"))
 
     import org.apache.spark.sql.functions._
 
     // Now, read back the names to make sure they were all written
-    val df = sess.read.format("filodb.spark").option("dataset", largeDataset.name).load()
+    val df = sess.read.format("filodb.spark").option("dataset", dataset.name).load()
     df.select(count("age")).collect.head should equal (lotLotNames.length)
   }
 }

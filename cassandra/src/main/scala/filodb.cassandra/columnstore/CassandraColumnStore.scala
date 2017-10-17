@@ -15,9 +15,8 @@ import scala.concurrent.{ExecutionContext, Future}
 
 import filodb.cassandra.{DefaultFiloSessionProvider, FiloCassandraConnector, FiloSessionProvider}
 import filodb.core._
-import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.store._
-import filodb.core.metadata.{Column, Projection, RichProjection}
+import filodb.core.metadata.Dataset
 import filodb.core.query._
 
 /**
@@ -54,7 +53,6 @@ class CassandraColumnStore(val config: Config, val readEc: Scheduler,
                           (implicit val sched: Scheduler)
 extends ColumnStore with CassandraChunkSource with StrictLogging {
   import filodb.core.store._
-  import Types._
   import collection.JavaConverters._
   import Perftools._
 
@@ -64,25 +62,18 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
 
   val sinkStats = new ChunkSinkStats
 
-  /**
-   * Initializes the column store for a given dataset projection.  Must be called once before appending
- * segments to that projection.
-   */
-  def initializeProjection(projection: Projection): Future[Response] = {
-    val chunkTable = getOrCreateChunkTable(projection.dataset)
+  def initialize(dataset: DatasetRef): Future[Response] = {
+    val chunkTable = getOrCreateChunkTable(dataset)
     clusterConnector.createKeyspace(chunkTable.keyspace)
-    val indexTable = getOrCreateIndexTable(projection.dataset)
+    val indexTable = getOrCreateIndexTable(dataset)
     for { ctResp    <- chunkTable.initialize()
           rmtResp   <- indexTable.initialize() } yield rmtResp
   }
 
-  /**
-   * Clears all data from the column store for that given projection.
-   */
-  def clearProjectionData(projection: Projection): Future[Response] = {
-    logger.info(s"Clearing all columnar projection data for dataset ${projection.dataset}")
-    val chunkTable = getOrCreateChunkTable(projection.dataset)
-    val indexTable = getOrCreateIndexTable(projection.dataset)
+  def truncate(dataset: DatasetRef): Future[Response] = {
+    logger.info(s"Clearing all data for dataset ${dataset}")
+    val chunkTable = getOrCreateChunkTable(dataset)
+    val indexTable = getOrCreateIndexTable(dataset)
     for { ctResp    <- chunkTable.clearAll()
           rmtResp   <- indexTable.clearAll() } yield rmtResp
   }
@@ -101,15 +92,14 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
 
   // Initial implementation: write each ChunkSet as its own transaction.  Will result in lots of writes.
   // Future optimization: group by token range and batch?
-  def write(projection: RichProjection,
-            version: Int,
+  def write(dataset: Dataset,
             chunksets: Observable[ChunkSet]): Future[Response] = {
     chunksets.mapAsync(writeParallelism) { chunkset =>
                Tracer.withNewContext("write-chunkset") {
                  val ctx = Tracer.currentContext
                  val future =
-                   for { writeChunksResp  <- writeChunks(projection.datasetRef, version, chunkset, ctx)
-                         writeIndexResp   <- writeIndices(projection, version, chunkset, ctx)
+                   for { writeChunksResp  <- writeChunks(dataset.ref, chunkset, ctx)
+                         writeIndexResp   <- writeIndices(dataset, chunkset, ctx)
                                              if writeChunksResp == Success
                    } yield {
                      ctx.finish()
@@ -125,24 +115,22 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
              }
   }
 
-  private def writeChunks(dataset: DatasetRef,
-                          version: Int,
+  private def writeChunks(ref: DatasetRef,
                           chunkset: ChunkSet,
                           ctx: TraceContext): Future[Response] = {
     asyncSubtrace("write-chunks", "ingestion", Some(ctx)) {
-      val chunkTable = getOrCreateChunkTable(dataset)
-      chunkTable.writeChunks(chunkset.partition, version, chunkset.info.id, chunkset.chunks, sinkStats)
+      val chunkTable = getOrCreateChunkTable(ref)
+      chunkTable.writeChunks(chunkset.partition, chunkset.info.id, chunkset.chunks, sinkStats)
     }
   }
 
-  private def writeIndices(projection: RichProjection,
-                           version: Int,
+  private def writeIndices(dataset: Dataset,
                            chunkset: ChunkSet,
                            ctx: TraceContext): Future[Response] = {
     asyncSubtrace("write-index", "ingestion", Some(ctx)) {
-      val indexTable = getOrCreateIndexTable(projection.datasetRef)
-      val indices = Seq((chunkset.info.id, ChunkSetInfo.toBytes(projection, chunkset.info, chunkset.skips)))
-      indexTable.writeIndices(chunkset.partition, version, indices, sinkStats)
+      val indexTable = getOrCreateIndexTable(dataset.ref)
+      val indices = Seq((chunkset.info.id, ChunkSetInfo.toBytes(dataset, chunkset.info, chunkset.skips)))
+      indexTable.writeIndices(chunkset.partition, indices, sinkStats)
     }
   }
 
@@ -209,9 +197,6 @@ case class CassandraTokenRangeSplit(tokens: Seq[(String, String)],
 }
 
 trait CassandraChunkSource extends ChunkSource with StrictLogging {
-  import ChunkSetReader._
-  import Types._
-  import collection.JavaConverters._
   import Iterators._
 
   def config: Config
@@ -241,44 +226,41 @@ trait CassandraChunkSource extends ChunkSource with StrictLogging {
       // scalastyle:on
     })
 
-  def multiPartScan(projection: RichProjection,
+  def multiPartScan(dataset: Dataset,
                     partitions: Seq[Types.PartitionKey],
-                    indexTable: IndexTable,
-                    version: Int): Observable[IndexRecord] = {
+                    indexTable: IndexTable): Observable[IndexRecord] = {
     // Get each partition index observable concurrently.  As observables they are lazy
     val its = partitions.map { partition =>
-      indexTable.getIndices(partition, version)
+      indexTable.getIndices(partition)
     }
     Observable.concat(its: _*)
   }
 
-  def scanPartitions(projection: RichProjection,
-                     version: Int,
-                     partMethod: PartitionScanMethod,
-                     colToMaker: ColumnToMaker = defaultColumnToMaker): Observable[FiloPartition] = {
-    val indexTable = getOrCreateIndexTable(projection.datasetRef)
-    logger.debug(s"Scanning partitions for ${projection.datasetRef} with method $partMethod...")
+  def scanPartitions(dataset: Dataset,
+                     partMethod: PartitionScanMethod): Observable[FiloPartition] = {
+    val indexTable = getOrCreateIndexTable(dataset.ref)
+    logger.debug(s"Scanning partitions for ${dataset.ref} with method $partMethod...")
     val (filters, indexRecords) = partMethod match {
       case SinglePartitionScan(partition, _) =>
-        (Nil, indexTable.getIndices(partition, version))
+        (Nil, indexTable.getIndices(partition))
 
       case MultiPartitionScan(partitions, _) =>
-        (Nil, multiPartScan(projection, partitions, indexTable, version))
+        (Nil, multiPartScan(dataset, partitions, indexTable))
 
       case FilteredPartitionScan(CassandraTokenRangeSplit(tokens, _), filters) =>
-        (filters, indexTable.scanIndices(version, tokens))
+        (filters, indexTable.scanIndices(tokens))
 
       case other: PartitionScanMethod =>  ???
     }
-    val filterFunc = KeyFilter.makePartitionFilterFunc(projection, filters)
-    indexRecords.sortedGroupBy(_.partition(projection))
+    val filterFunc = KeyFilter.makePartitionFilterFunc(dataset, filters)
+    indexRecords.sortedGroupBy(_.partition(dataset))
                 .collect { case (binPart, binIndices) if filterFunc(binPart) =>
-                  val newIndex = new ChunkIDPartitionChunkIndex(binPart, projection)
+                  val newIndex = new ChunkIDPartitionChunkIndex(binPart, dataset)
                   binIndices.foreach { binIndex =>
-                    val (info, skips) = ChunkSetInfo.fromBytes(projection, binIndex.data.array)
+                    val (info, skips) = ChunkSetInfo.fromBytes(dataset, binIndex.data.array)
                     newIndex.add(info, skips)
                   }
-                  new CassandraPartition(newIndex, projection, this, colToMaker)
+                  new CassandraPartition(newIndex, dataset, this)
                 }
   }
 
@@ -302,10 +284,8 @@ trait CassandraChunkSource extends ChunkSource with StrictLogging {
  * The index state can be cached for lower read latency.
  */
 class CassandraPartition(index: ChunkIDPartitionChunkIndex,
-                         projection: RichProjection,
-                         scanner: CassandraChunkSource,
-                         colToMaker: ChunkSetReader.ColumnToMaker) extends FiloPartition with StrictLogging {
-  import ChunkSetInfo._
+                         val dataset: Dataset,
+                         scanner: CassandraChunkSource) extends FiloPartition with StrictLogging {
   import Iterators._
 
   val binPartition = index.binPartition
@@ -317,39 +297,13 @@ class CassandraPartition(index: ChunkIDPartitionChunkIndex,
   // For now just report a dummy shard.  In the future figure this out.
   val shard = 0
 
-  private val chunkTable = scanner.getOrCreateChunkTable(projection.datasetRef)
+  private val chunkTable = scanner.getOrCreateChunkTable(dataset.ref)
   private val readers = new NonBlockingHashMapLong[ChunkSetReader](32, false)
 
-  // NOTE: positions are index of partitionColumns/nonPartitionColumns within projection
-  override def streamReaders(method: ChunkScanMethod, positions: Array[Int]): Observable[ChunkSetReader] = {
-    val columns = positions.map { p =>
-      if (p < 0) projection.partitionColumns(-p - 1) else projection.nonPartitionColumns(p)
-    }
-    val columnNames = columns.map(_.name).toArray
-    val makers = columns.map(colToMaker).toArray
-
-    // parse ChunkScanMethod into infosSkips....
-    val (rangeQuery, infosSkips) = method match {
-      case AllChunkScan             => (true, index.allChunks.toSeq)
-      case RowKeyChunkScan(k1, k2)  => (false, index.rowKeyRange(k1.binRec, k2.binRec).toSeq)
-      case SingleChunkScan(key, id) => (false, index.singleChunk(key.binRec, id).toSeq)
-      case LastSampleChunkScan      => (false, index.latestN(1).toSeq)
-    }
-    logger.debug(s"Reading chunks from columns ${columnNames.toList}, ${index.binPartition}, method $method")
-
-    // from infoSkips, create the MutableChunkSetReader's
-    infosSkips.foreach { case (info, skips) =>
-      readers.put(info.id, new MutableChunkSetReader(info, index.binPartition, skips, makers))
-    }
-
-    // Read chunks in, populate MutableChunkSetReader's, and emit readers when they are full
-    val ids = infosSkips.map(_._1.id).toBuffer
-    val chunkStreams = (0 until positions.size).map { pos =>
-      chunkTable.readChunks(index.binPartition, 0, columnNames(pos), pos, ids, false)
-                .switchIfEmpty(scanner.emptyChunkStream(infosSkips, pos))
-    }
+  private def mergeChunks(chunkStreams: Seq[Observable[SingleChunkInfo]],
+                          columnIds: Array[Int]): Observable[ChunkSetReader] = {
     Observable.merge(chunkStreams: _*)
-              .map { case SingleChunkInfo(id, colNo, buf) =>
+              .map { case SingleChunkInfo(id, pos, buf) =>
                 readers.get(id) match {
                   // scalastyle:off
                   case null =>
@@ -357,7 +311,7 @@ class CassandraPartition(index: ChunkIDPartitionChunkIndex,
                     scanner.stats.incrChunkWithNoInfo()
                     None
                   case reader: MutableChunkSetReader =>
-                    reader.addChunk(colNo, buf)
+                    reader.addChunk(pos, dataset.vectorMakers(columnIds(pos))(buf, reader.length))
                     if (reader.isFull) {
                       readers.remove(id)
                       scanner.stats.incrReadChunksets()
@@ -367,8 +321,40 @@ class CassandraPartition(index: ChunkIDPartitionChunkIndex,
               }.collect { case Some(reader) => reader }
   }
 
-  def readers(method: ChunkScanMethod, positions: Array[Int]): Iterator[ChunkSetReader] =
-    streamReaders(method, positions).toIterator()
+  // Asynchronously reads different columns from Cassandra, merging the reads into ChunkSetReaders
+  override def streamReaders(method: ChunkScanMethod, columnIds: Array[Int]): Observable[ChunkSetReader] = {
+    // parse ChunkScanMethod into infosSkips....
+    val (rangeQuery, infosSkips) = method match {
+      case AllChunkScan             => (true, index.allChunks.toSeq)
+      case RowKeyChunkScan(k1, k2)  => (false, index.rowKeyRange(k1.binRec, k2.binRec).toSeq)
+      case SingleChunkScan(key, id) => (false, index.singleChunk(key.binRec, id).toSeq)
+      case LastSampleChunkScan      => (false, index.latestN(1).toSeq)
+    }
+    logger.debug(s"Reading chunks from columns ${columnIds.toList}, ${index.binPartition}, method $method")
+
+    // from infoSkips, create the MutableChunkSetReader's
+    infosSkips.foreach { case (info, skips) =>
+      readers.putIfAbsent(info.id, new MutableChunkSetReader(info, index.binPartition, skips, columnIds.size))
+    }
+
+    // Read chunks in, populate MutableChunkSetReader's, and emit readers when they are full
+    val ids = infosSkips.map(_._1.id).toBuffer
+    val chunkStreams = (0 until columnIds.size).map { pos =>
+      if (Dataset.isPartitionID(columnIds(pos))) {
+        val constVect = constPartitionVector(columnIds(pos))
+        // directly populate the ChunkReaders with constant vectors -- no I/O!!
+        ids.foreach { id => readers.get(id).asInstanceOf[MutableChunkSetReader].addChunk(pos, constVect) }
+        Observable.empty[SingleChunkInfo]
+      } else {
+        chunkTable.readChunks(index.binPartition, columnIds(pos), pos, ids, false)
+                  .switchIfEmpty(scanner.emptyChunkStream(infosSkips, pos))
+      }
+    }
+    mergeChunks(chunkStreams, columnIds)
+  }
+
+  def readers(method: ChunkScanMethod, columnIds: Array[Int]): Iterator[ChunkSetReader] =
+    streamReaders(method, columnIds).toIterator()
 
   def lastVectors: Array[FiloVector[_]] = ???
 }

@@ -6,7 +6,7 @@ import java.util.concurrent.ArrayBlockingQueue
 import monix.execution.{Ack, Scheduler}
 import monix.reactive.observables.ObservableLike.Operator
 import monix.reactive.observers.Subscriber
-import monix.reactive.{Notification, Observable, OverflowStrategy}
+import monix.reactive.{Notification, Observable}
 
 import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.Future

@@ -1,16 +1,15 @@
 package filodb.core.store
 
 import java.sql.Timestamp
-import org.velvia.filo.{RoutingRowReader, SeqRowReader}
+import org.velvia.filo.RoutingRowReader
 import org.scalatest.FunSpec
 import org.scalatest.Matchers
 
 import filodb.core._
 import filodb.core.binaryrecord.BinaryRecord
-import filodb.core.metadata.{RichProjection, Dataset}
+import filodb.core.metadata.Dataset
 
 class ChunkSetInfoSpec extends FunSpec with Matchers {
-  import SingleKeyTypes._
   import NamesTestData._
 
   val info1 = ChunkSetInfo(13, 5000, firstKey, lastKey)
@@ -24,15 +23,13 @@ class ChunkSetInfoSpec extends FunSpec with Matchers {
     }
   }
 
-  val prj = projection
-
   it("should serialize and deserialize ChunkSetInfo and no skips") {
-    val (infoRead1, skips1) = ChunkSetInfo.fromBytes(prj, ChunkSetInfo.toBytes(prj, info1, Nil))
+    val (infoRead1, skips1) = ChunkSetInfo.fromBytes(dataset, ChunkSetInfo.toBytes(dataset, info1, Nil))
     infosShouldEqual(infoRead1, info1)
     skips1 should equal (Nil)
 
     intercept[AssertionError] {
-      ChunkSetInfo.fromBytes(prj, Array[Byte](2, 3, 4))
+      ChunkSetInfo.fromBytes(dataset, Array[Byte](2, 3, 4))
     }
   }
 
@@ -41,12 +38,12 @@ class ChunkSetInfoSpec extends FunSpec with Matchers {
     val skips2 = ChunkRowSkipIndex(9, Array(2, 5))
     val skips3 = ChunkRowSkipIndex(11, Array(10, 11, 12, 20, 25))
 
-    val (infoRead1, skipsRead1) = ChunkSetInfo.fromBytes(prj, ChunkSetInfo.toBytes(prj, info1, Seq(skips1)))
+    val (infoRead1, skipsRead1) = ChunkSetInfo.fromBytes(dataset, ChunkSetInfo.toBytes(dataset, info1, Seq(skips1)))
     infosShouldEqual(infoRead1, info1)
     skipsRead1 should equal (Seq(skips1))
 
-    val (infoRead2, skipsRead2) = ChunkSetInfo.fromBytes(prj, ChunkSetInfo.toBytes(
-                                                                prj, info1, Seq(skips2, skips3)))
+    val (infoRead2, skipsRead2) = ChunkSetInfo.fromBytes(dataset, ChunkSetInfo.toBytes(
+                                                                dataset, info1, Seq(skips2, skips3)))
     infosShouldEqual(infoRead2, info1)
     skipsRead2 should equal (Seq(skips2, skips3))
   }
@@ -54,13 +51,11 @@ class ChunkSetInfoSpec extends FunSpec with Matchers {
   private def getCSI(id: Int, firstLine: Int, lastLine: Int): ChunkSetInfo = {
     import GdeltTestData._
     ChunkSetInfo(id, 5000,
-                 BinaryRecord(projection2.rowKeyBinSchema, RoutingRowReader(readers(firstLine), Array(4, 0))),
-                 BinaryRecord(projection2.rowKeyBinSchema, RoutingRowReader(readers(lastLine), Array(4, 0))))
+                 BinaryRecord(dataset2.rowKeyBinSchema, RoutingRowReader(readers(firstLine), Array(4, 0))),
+                 BinaryRecord(dataset2.rowKeyBinSchema, RoutingRowReader(readers(lastLine), Array(4, 0))))
   }
 
   it("should find intersection range of composite keys with strings") {
-    import GdeltTestData._
-
     val info1 = getCSI(1, 0, 7)
     val intersect1 = info1.intersection(getCSI(2, 7, 17))
     intersect1 should be ('defined)
@@ -90,7 +85,6 @@ class ChunkSetInfoSpec extends FunSpec with Matchers {
   }
 
   it("should not find intersection if key1 is greater than key2") {
-    import GdeltTestData._
     val info1 = getCSI(1, 0, 7)
     info1.intersection(info1.lastKey, info1.firstKey) should equal (None)
   }
@@ -98,15 +92,14 @@ class ChunkSetInfoSpec extends FunSpec with Matchers {
   it("should find intersection range of keys with timestamps") {
     import GdeltTestData._
     // Timestamp, String, String for rowkey / 0 seg / Year partition
-    val dataset5 = Dataset("gdelt", Seq("SQLDATE", "Actor2Code", "Actor2Name"), Seq("Year"))
-    val proj5 = RichProjection(dataset5, schema)
+    val dataset5 = Dataset("gdelt", Seq(schema(3)), schema.patch(3, Nil, 1), Seq("SQLDATE", "Actor2Code", "Actor2Name"))
 
-    val key1 = BinaryRecord(proj5, Seq(Timestamp.valueOf("2013-01-02 08:00:00").getTime, "0", "0"))
-    val key2 = BinaryRecord(proj5, Seq(Timestamp.valueOf("2013-01-05 17:30:00").getTime, "0", "0"))
-    val key3 = BinaryRecord(proj5, Seq(Timestamp.valueOf("2013-01-10 12:00:00").getTime, "AABCDE", "0"))
-    val key4 = BinaryRecord(proj5, Seq(Timestamp.valueOf("2013-01-10 12:00:00").getTime, "GHTI", "0"))
-    val key5 = BinaryRecord(proj5, Seq(Timestamp.valueOf("2013-01-18 20:59:00").getTime, "0", "0"))
-    val key6 = BinaryRecord(proj5, Seq(Timestamp.valueOf("2013-01-21 23:59:59").getTime, "0", "0"))
+    val key1 = BinaryRecord(dataset5, Seq(Timestamp.valueOf("2013-01-02 08:00:00").getTime, "0", "0"))
+    val key2 = BinaryRecord(dataset5, Seq(Timestamp.valueOf("2013-01-05 17:30:00").getTime, "0", "0"))
+    val key3 = BinaryRecord(dataset5, Seq(Timestamp.valueOf("2013-01-10 12:00:00").getTime, "AABCDE", "0"))
+    val key4 = BinaryRecord(dataset5, Seq(Timestamp.valueOf("2013-01-10 12:00:00").getTime, "GHTI", "0"))
+    val key5 = BinaryRecord(dataset5, Seq(Timestamp.valueOf("2013-01-18 20:59:00").getTime, "0", "0"))
+    val key6 = BinaryRecord(dataset5, Seq(Timestamp.valueOf("2013-01-21 23:59:59").getTime, "0", "0"))
 
     val info1 = ChunkSetInfo(1, 1, key2, key4)
 
@@ -123,14 +116,12 @@ class ChunkSetInfoSpec extends FunSpec with Matchers {
     info1.intersection(key5, key6) should equal (None)
 
     // Query with shortened keys
-    val keyA = BinaryRecord(proj5, Seq(Timestamp.valueOf("2013-01-05 17:30:00").getTime))
-    val keyB = BinaryRecord(proj5, Seq(Timestamp.valueOf("2013-01-10 12:00:00").getTime))
+    val keyA = BinaryRecord(dataset5, Seq(Timestamp.valueOf("2013-01-05 17:30:00").getTime))
+    val keyB = BinaryRecord(dataset5, Seq(Timestamp.valueOf("2013-01-10 12:00:00").getTime))
     info1.intersection(keyA, keyB) should equal (Some((key2, keyB)))
   }
 
   it("should return None if error with one of the RowReaders") {
-    import GdeltTestData._
-
     val info1 = getCSI(1, 0, 7)
     info1.intersection(ChunkSetInfo(2, 100, null, null)) should be (None)
   }

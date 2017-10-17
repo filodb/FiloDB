@@ -4,7 +4,7 @@ import org.parboiled2._
 import scala.util.{Try, Success, Failure}
 
 import filodb.coordinator.QueryCommands._
-import filodb.core.metadata.{Dataset, DatasetOptions}
+import filodb.core.metadata.DatasetOptions
 import filodb.core.query.{ColumnFilter, Filter}
 
 object PromQLParser {
@@ -68,7 +68,7 @@ final case class ArgsAndPartSpec(queryArgs: QueryArgs, partSpec: PartitionSpec) 
  *   - nested functions can be parsed now
  */
 class PromQLParser(val input: ParserInput,
-                   options: DatasetOptions = Dataset.DefaultOptions) extends Parser {
+                   options: DatasetOptions = DatasetOptions.DefaultOptions) extends Parser {
   import Filter._
   import PromQLParser._
 

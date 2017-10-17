@@ -11,19 +11,18 @@ import org.jctools.maps.NonBlockingHashMapLong
 import org.velvia.filo.{SchemaRowReader, ZeroCopyUTF8String}
 import scala.collection.mutable.{ArrayBuffer, HashMap}
 import scala.concurrent.duration._
-import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.ExecutionContext
 
 import filodb.core.DatasetRef
-import filodb.core.metadata.{Column, RichProjection}
-import filodb.core.query.{ChunkSetReader, KeyFilter, PartitionChunkIndex, PartitionKeyIndex}
+import filodb.core.metadata.Dataset
+import filodb.core.query.PartitionKeyIndex
 import filodb.core.store._
-import filodb.core.Types.{PartitionKey, ChunkID}
+import filodb.core.Types.PartitionKey
 
 final case class DatasetAlreadySetup(dataset: DatasetRef) extends Exception(s"Dataset $dataset already setup")
 
 class TimeSeriesMemStore(config: Config)(implicit val ec: ExecutionContext)
 extends MemStore with StrictLogging {
-  import ChunkSetReader._
   import collection.JavaConverters._
 
   type Shards = NonBlockingHashMapLong[TimeSeriesShard]
@@ -32,11 +31,10 @@ extends MemStore with StrictLogging {
   val stats = new ChunkSourceStats
 
   // TODO: Change the API to return Unit Or ShardAlreadySetup, instead of throwing.  Make idempotent.
-  def setup(projection: RichProjection, shard: Int): Unit = synchronized {
-    val dataset = projection.datasetRef
-    val shards = datasets.getOrElseUpdate(dataset, {
+  def setup(dataset: Dataset, shard: Int): Unit = synchronized {
+    val shards = datasets.getOrElseUpdate(dataset.ref, {
                    val shardMap = new NonBlockingHashMapLong[TimeSeriesShard](32, false)
-                   Kamon.metrics.gauge(s"num-partitions-${dataset.dataset}",
+                   Kamon.metrics.gauge(s"num-partitions-${dataset.name}",
                      5.seconds)(new Gauge.CurrentValueCollector {
                       def currentValue: Long =
                         shardMap.values.asScala.map(_.numActivePartitions).sum.toLong
@@ -46,7 +44,7 @@ extends MemStore with StrictLogging {
     if (shards contains shard) {
       throw ShardAlreadySetup
     } else {
-      val tsdb = new TimeSeriesShard(projection, config, shard)
+      val tsdb = new TimeSeriesShard(dataset, config, shard)
       shards.put(shard, tsdb)
     }
   }
@@ -81,11 +79,9 @@ extends MemStore with StrictLogging {
   def numPartitions(dataset: DatasetRef, shard: Int): Int =
     getShard(dataset, shard).map(_.numActivePartitions).getOrElse(-1)
 
-  def scanPartitions(projection: RichProjection,
-                     version: Int,
-                     partMethod: PartitionScanMethod,
-                     colToMaker: ColumnToMaker = defaultColumnToMaker): Observable[FiloPartition] =
-    datasets(projection.datasetRef).get(partMethod.shard).scanPartitions(partMethod)
+  def scanPartitions(dataset: Dataset,
+                     partMethod: PartitionScanMethod): Observable[FiloPartition] =
+    datasets(dataset.ref).get(partMethod.shard).scanPartitions(partMethod)
 
   def numRowsIngested(dataset: DatasetRef, shard: Int): Long =
     getShard(dataset, shard).map(_.numRowsIngested).getOrElse(-1L)
@@ -119,12 +115,12 @@ object TimeSeriesShard {
 /**
  * Contains all of the data for a SINGLE shard of a time series oriented dataset.
  */
-class TimeSeriesShard(projection: RichProjection, config: Config, shardNum: Int) extends StrictLogging {
+class TimeSeriesShard(dataset: Dataset, config: Config, shardNum: Int) extends StrictLogging {
   import TimeSeriesShard._
 
   private final val partitions = new ArrayBuffer[TimeSeriesPartition]
   private final val keyMap = new HashMap[SchemaRowReader, TimeSeriesPartition]
-  private final val keyIndex = new PartitionKeyIndex(projection)
+  private final val keyIndex = new PartitionKeyIndex(dataset)
   private final var ingested = 0L
 
   private val chunksToKeep = config.getInt("memstore.chunks-to-keep")
@@ -160,8 +156,8 @@ class TimeSeriesShard(projection: RichProjection, config: Config, shardNum: Int)
   // around, which might be much more expensive memory wise.  One consequence though is that internal
   // and external partition key components need to yield the same hashCode.  IE, use UTF8Strings everywhere.
   private def addPartition(newPartKey: SchemaRowReader): TimeSeriesPartition = {
-    val binPartKey = projection.partKey(newPartKey)
-    val newPart = new TimeSeriesPartition(projection, binPartKey, shardNum, chunksToKeep, maxChunksSize)
+    val binPartKey = dataset.partKey(newPartKey)
+    val newPart = new TimeSeriesPartition(dataset, binPartKey, shardNum, chunksToKeep, maxChunksSize)
     val newIndex = partitions.length
     keyIndex.addKey(binPartKey, newIndex)
     partitions += newPart

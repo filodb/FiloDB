@@ -1,3 +1,15 @@
+<!-- START doctoc generated TOC please keep comment here to allow auto update -->
+<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
+**Table of Contents**  *generated with [DocToc](https://github.com/thlorenz/doctoc)*
+
+- [FiloDB](#filodb)
+  - [Akka Cluster Bootstrapper](#akka-cluster-bootstrapper)
+    - [Algorithm](#algorithm)
+    - [Usage](#usage)
+    - [Run Multi-JVM Tests](#run-multi-jvm-tests)
+
+<!-- END doctoc generated TOC please keep comment here to allow auto update -->
+
 # FiloDB
 
 ## Akka Cluster Bootstrapper

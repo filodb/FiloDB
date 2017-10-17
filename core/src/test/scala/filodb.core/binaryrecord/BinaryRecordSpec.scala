@@ -4,7 +4,7 @@ import java.io.{ByteArrayInputStream, ObjectInputStream}
 import java.io.{ByteArrayOutputStream, ObjectOutputStream}
 import java.sql.Timestamp
 import org.scalatest.{Matchers, FunSpec}
-import org.velvia.filo.{RowReader, SeqRowReader, TupleRowReader, ZeroCopyUTF8String}
+import org.velvia.filo.{SeqRowReader, TupleRowReader, ZeroCopyUTF8String}
 import scodec.bits.ByteVector
 
 import filodb.core.Types._
@@ -87,7 +87,7 @@ class BinaryRecordSpec extends FunSpec with Matchers {
   it("should produce shorter BinaryRecords if smaller number of items fed") {
     import filodb.core.GdeltTestData._
 
-    val shortBR1 = BinaryRecord(projection2, Seq("USA"))
+    val shortBR1 = BinaryRecord(dataset2, Seq("USA"))
     shortBR1.schema.numFields should equal (1)
   }
 
@@ -95,13 +95,13 @@ class BinaryRecordSpec extends FunSpec with Matchers {
     import filodb.core.GdeltTestData._
 
     // Should compare semantically rather than by binary.  Int occurs first byte-wise, but 2nd semantically
-    val rec1 = BinaryRecord(projection2, Seq("FRA", 55))
-    rec1 should be > (BinaryRecord(projection2, Seq("CHL", 60)))
-    rec1 should equal (BinaryRecord(projection2, Seq("FRA", 55)))
+    val rec1 = BinaryRecord(dataset2, Seq("FRA", 55))
+    rec1 should be > (BinaryRecord(dataset2, Seq("CHL", 60)))
+    rec1 should equal (BinaryRecord(dataset2, Seq("FRA", 55)))
 
     // Should be able to compare shorter record with longer one
-    BinaryRecord(projection2, Seq("FRA")) should equal (rec1)
-    BinaryRecord(projection2, Seq("GA")) should be > (rec1)
+    BinaryRecord(dataset2, Seq("FRA")) should equal (rec1)
+    BinaryRecord(dataset2, Seq("GA")) should be > (rec1)
   }
 
   it("should semantically compare BinaryRecord Int and Long fields correctly") (pending)
@@ -124,7 +124,6 @@ class BinaryRecordSpec extends FunSpec with Matchers {
     val binRec3 = BinaryRecord(schema2_is, reader6)
 
     import filodb.core.Types._
-    import scala.math.Ordered._
 
     ByteVector(binRec1.toSortableBytes()) should be < (ByteVector(binRec2.toSortableBytes()))
     ByteVector(binRec1.toSortableBytes()) should be > (ByteVector(binRec3.toSortableBytes()))

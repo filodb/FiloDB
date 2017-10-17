@@ -1,3 +1,17 @@
+<!-- START doctoc generated TOC please keep comment here to allow auto update -->
+<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
+**Table of Contents**  *generated with [DocToc](https://github.com/thlorenz/doctoc)*
+
+- [Exactly Once Ingestion and Error Recovery](#exactly-once-ingestion-and-error-recovery)
+  - [Overall Strategy](#overall-strategy)
+  - [Scenario: Kafka + Spark Streaming](#scenario-kafka--spark-streaming)
+    - [Idempotency Shortcuts](#idempotency-shortcuts)
+  - [Scenario: Kafka + Independent Reader Processes (or Samza)](#scenario-kafka--independent-reader-processes-or-samza)
+  - [Scenario: Batch Ingestion](#scenario-batch-ingestion)
+  - [Scenario: Other (eg direct reads from Cassandra)](#scenario-other-eg-direct-reads-from-cassandra)
+
+<!-- END doctoc generated TOC please keep comment here to allow auto update -->
+
 # Exactly Once Ingestion and Error Recovery
 
 What happens if an ingestion node goes down?  How can we guarantee writes of incoming records in the face of failure?

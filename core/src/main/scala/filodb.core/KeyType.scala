@@ -33,8 +33,6 @@ trait KeyType {
 
 }
 
-import SingleKeyTypes._
-
 case class NullKeyValue(colIndex: Int) extends Exception(s"Null key value for col index $colIndex")
 
 abstract class SingleKeyTypeBase[K : Ordering : TypedFieldExtractor] extends KeyType {
@@ -126,8 +124,6 @@ case class CompositeKeyType(atomTypes: Seq[SingleKeyType]) extends KeyType {
 object SingleKeyTypes {
   val Int32HighBit = 0x80000000
   val Long64HighBit = (1L << 63)
-
-  import org.velvia.filo.DefaultValues._
 
   trait LongKeyTypeLike extends SingleKeyTypeBase[Long] {
     def fromString(str: String): Long = str.toLong

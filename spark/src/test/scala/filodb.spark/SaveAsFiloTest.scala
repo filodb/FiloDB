@@ -2,19 +2,17 @@ package filodb.spark
 
 import java.sql.Timestamp
 import org.apache.spark.sql.{SaveMode, SparkSession}
-import org.apache.spark.SparkException
-import org.scalatest.time.{Millis, Seconds, Span}
 import scala.concurrent.duration._
 
 import filodb.core._
-import filodb.core.metadata.{Column, DataColumn, Dataset}
+import filodb.core.metadata.Dataset
 
 object SaveAsFiloTest {
-  case class TSData(machine: String, metric: Double, time: Timestamp)
+  case class TSData(machine: String, metric: Double, time: Timestamp, series: String)
   val timeseries = Seq(
-    TSData("com.abc.def.foo", 1.1, new Timestamp(1000000L)),
-    TSData("com.abc.def.bar", 1.2, new Timestamp(1000010L)),
-    TSData("com.abc.def.baz", 1.3, new Timestamp(1000020L))
+    TSData("com.abc.def.foo", 1.1, new Timestamp(1000000L), "series1"),
+    TSData("com.abc.def.bar", 1.2, new Timestamp(1000010L), "series1"),
+    TSData("com.abc.def.baz", 1.3, new Timestamp(1000020L), "series1")
   )
 }
 
@@ -38,13 +36,11 @@ class SaveAsFiloTest extends SparkTestBase {
 
   val sc = sess.sparkContext
 
-  val segCol = ":string 0"
-  val partKeys = Seq(":string part0")
-  val ds1 = Dataset("gdelt1", "id", segCol)
-  val ds2 = Dataset("gdelt2", "id", segCol)
-  val ds3 = Dataset("gdelt3", "id", segCol)
-  val test1 = Dataset("test1", "id", segCol)
-  val testDatasets = Seq(ds1, ds2, ds3, test1).map { ds => DatasetRef(ds.name) }
+  val partColumns = Seq("year:long")
+  val dataColumns = Seq("id:long", "sqlDate:string", "monthYear:long")
+  val ds1 = Dataset("gdelt1", partColumns, dataColumns, "id")
+  val ds2 = Dataset("gdelt2", partColumns, Seq("id:string", "sqlDate:string", "monthYear:long"), "id")
+  val testDatasets = Seq(ds1.ref, ds2.ref, DatasetRef("test1"), DatasetRef("gdelt3"))
   val ingestOptions = IngestionOptions(writeTimeout = 2.minutes)
 
   // This is the same code that the Spark stuff uses.  Make sure we use exact same environment as real code
@@ -62,8 +58,8 @@ class SaveAsFiloTest extends SparkTestBase {
   import org.apache.spark.sql.functions._
   import sess.implicits._
 
-  it("should create missing columns and partitions and write table") {
-    sess.saveAsFilo(dataDF, "gdelt1", Seq("id"), partKeys,
+  it("should write table and create dataset metadata") {
+    sess.saveAsFilo(dataDF, "gdelt1", Seq("id"), partColumns,
                    options = ingestOptions)
 
     // Now read stuff back and ensure it got written
@@ -78,58 +74,42 @@ class SaveAsFiloTest extends SparkTestBase {
 
   it("should throw ColumnTypeMismatch if existing columns are not same type") {
     metaStore.newDataset(ds2).futureValue should equal (Success)
-    val idStrCol = DataColumn(0, "id", "gdelt2", 0, Column.ColumnType.StringColumn)
-    metaStore.newColumn(idStrCol, DatasetRef("gdelt2")).futureValue should equal (Success)
 
     intercept[ColumnTypeMismatch] {
-      sess.saveAsFilo(dataDF, "gdelt2", Seq("id"), partKeys)
+      sess.saveAsFilo(dataDF, "gdelt2", Seq("id"), partColumns)
     }
   }
 
-  it("should throw BadSchemaError if illegal computed column specification or bad schema") {
-    // year is a Long column, <none> cannot be parsed to a Long
-    intercept[BadSchemaError] {
-      dataDF.write.format("filodb.spark").
-                   option("dataset", "test1").
-                   option("row_keys", "id").
-                   option("partition_keys", ":getOrElse year <none>").
-                   mode(SaveMode.Overwrite).
-                   save()
-    }
+  it("should throw BadSchemaError if inserting DataFrame with undeclared columns") {
+    val testDS = Dataset("test1", partColumns, Seq("timestamp:long", "value:double"))
+    metaStore.newDataset(testDS).futureValue shouldEqual Success
 
+    // dataDF does not have same columns as testDS
     intercept[BadSchemaError] {
-      dataDF.write.format("filodb.spark").
-                   option("dataset", "test1").
-                   option("row_keys", "not_a_col").
-                   option("partition_keys", ":fooMucnhkin 123").
-                   mode(SaveMode.Overwrite).
-                   save()
+      sess.insertIntoFilo(dataDF, "test1")
     }
   }
 
   it("should not delete original metadata if overwrite with bad schema definition") {
-    sess.saveAsFilo(dataDF, "gdelt1", Seq("id"), partKeys, options = ingestOptions)
+    sess.saveAsFilo(dataDF, "gdelt1", Seq("id"), partColumns, options = ingestOptions)
 
-    intercept[BadSchemaError] {
+    intercept[Dataset.BadSchemaError] {
       dataDF.write.format("filodb.spark").
                    option("dataset", "gdelt1").
                    option("row_keys", "not_a_col").
-                   option("partition_keys", ":fooMucnhkin 123").
+                   option("partition_columns", "foo:notatype").
                    option("reset_schema", "true").
                    mode(SaveMode.Overwrite).
                    save()
     }
 
-    FiloDriver.metaStore.getDataset("gdelt1").futureValue should equal (
-      ds1.copy(partitionColumns = partKeys).withDatabase("unittest"))
+    FiloDriver.metaStore.getDataset("gdelt1").futureValue.copy(database=None) shouldEqual ds1
   }
 
-  it("should write table if there are existing matching columns") {
-    metaStore.newDataset(ds3).futureValue should equal (Success)
-    val idStrCol = DataColumn(0, "id", "gdelt1", 0, Column.ColumnType.LongColumn)
-    metaStore.newColumn(idStrCol, DatasetRef("gdelt1")).futureValue should equal (Success)
+  it("should write table if dataset exists already") {
+    metaStore.newDataset(ds1).futureValue should equal (Success)
 
-    sess.saveAsFilo(dataDF, "gdelt1", Seq("id"), partKeys, options = ingestOptions)
+    sess.saveAsFilo(dataDF, "gdelt1", Seq("id"), partColumns, options = ingestOptions)
 
     // Now read stuff back and ensure it got written
     val df = sess.filoDataset("gdelt1")
@@ -137,13 +117,14 @@ class SaveAsFiloTest extends SparkTestBase {
   }
 
   it("should throw error in ErrorIfExists mode if dataset already exists") {
-    sess.saveAsFilo(dataDF, "gdelt2", Seq("id"), partKeys, options = ingestOptions)
+    sess.saveAsFilo(dataDF, "gdelt2", Seq("id"), partColumns, options = ingestOptions)
 
     intercept[RuntimeException] {
       // The default mode is ErrorIfExists
       dataDF.write.format("filodb.spark").
                    option("dataset", "gdelt2").
                    option("row_keys", "id").
+                   option("partition_columns", "year:long").
                    save()
     }
   }
@@ -152,6 +133,7 @@ class SaveAsFiloTest extends SparkTestBase {
     dataDF.write.format("filodb.spark").
                  option("dataset", "test1").
                  option("row_keys", "id").
+                 option("partition_columns", "year:long").
                  mode(SaveMode.Overwrite).
                  save()
     val df = sess.read.format("filodb.spark").option("dataset", "test1").load()
@@ -164,6 +146,7 @@ class SaveAsFiloTest extends SparkTestBase {
                  option("dataset", "test1").
                  option("database", "unittest2").
                  option("row_keys", "id").
+                 option("partition_columns", "year:long").
                  mode(SaveMode.Overwrite).
                  save()
     val df = sess.read.format("filodb.spark").option("dataset", "test1").
@@ -193,6 +176,7 @@ class SaveAsFiloTest extends SparkTestBase {
     dataDF.sort("id").write.format("filodb.spark").
                  option("dataset", "gdelt1").
                  option("row_keys", "id").
+                 option("partition_columns", "year:long").
                  save()
 
     // Data is different, should not append, should overwrite
@@ -200,24 +184,26 @@ class SaveAsFiloTest extends SparkTestBase {
     dataDF2.write.format("filodb.spark").
                  option("dataset", "gdelt1").
                  option("row_keys", "sqlDate").
+                 option("partition_columns", "year:long").
                  mode(SaveMode.Overwrite).
                  save()
 
     val df = sess.read.format("filodb.spark").option("dataset", "gdelt1").load()
     df.agg(sum("year")).collect().head(0) should equal (4032)
 
-    val dsObj = metaStore.getDataset(DatasetRef("gdelt1")).futureValue
-    dsObj.projections.head.keyColIds should equal (Seq("id"))
+    val dsObj = metaStore.getDataset(ds1.ref).futureValue
+    dsObj.rowKeyColumns.head.name shouldEqual "id"
 
     dataDF2.write.format("filodb.spark").
                  option("dataset", "gdelt1").
                  option("row_keys", "sqlDate").
+                 option("partition_columns", "year:long").
                  option("reset_schema", "true").
                  mode(SaveMode.Overwrite).
                  save()
 
-    val dsObj2 = metaStore.getDataset(DatasetRef("gdelt1")).futureValue
-    dsObj2.projections.head.keyColIds should equal (Seq("sqlDate"))
+    val dsObj2 = metaStore.getDataset(ds1.ref).futureValue
+    dsObj2.rowKeyColumns.head.name shouldEqual "sqlDate"
 
     // Also try overwriting with insert API
     sess.insertIntoFilo(dataDF2, "gdelt1", overwrite = true)
@@ -228,6 +214,7 @@ class SaveAsFiloTest extends SparkTestBase {
     dataDF.write.format("filodb.spark").
                  option("dataset", "gdelt2").
                  option("row_keys", "id").
+                 option("partition_columns", "year:long").
                  mode(SaveMode.Append).
                  save()
 
@@ -238,8 +225,8 @@ class SaveAsFiloTest extends SparkTestBase {
   }
 
   it("should append data using SQL INSERT INTO statements") {
-    sess.saveAsFilo(dataDF2, "gdelt1", Seq("id"), partKeys, options = ingestOptions)
-    sess.saveAsFilo(dataDF, "gdelt2", Seq("id"), partKeys, options = ingestOptions)
+    sess.saveAsFilo(dataDF2, "gdelt1", Seq("id"), partColumns, options = ingestOptions)
+    sess.saveAsFilo(dataDF, "gdelt2", Seq("id"), partColumns, options = ingestOptions)
 
     val gdelt1 = sess.filoDataset("gdelt1")
     val gdelt2 = sess.filoDataset("gdelt2")
@@ -254,7 +241,7 @@ class SaveAsFiloTest extends SparkTestBase {
     dataDF.write.format("filodb.spark").
                  option("dataset", "test1").
                  option("row_keys", "id").
-                 option("partition_keys", ":getOrElse year 9999").
+                 option("partition_columns", "year:long").
                  mode(SaveMode.Overwrite).
                  save()
     val df = sess.read.format("filodb.spark").option("dataset", "test1").load()
@@ -269,7 +256,7 @@ class SaveAsFiloTest extends SparkTestBase {
     gdeltDF.write.format("filodb.spark").
                  option("dataset", "gdelt3").
                  option("row_keys", "eventId").
-                 option("partition_keys", ":getOrElse actor2Code --,:getOrElse year -1").
+                 option("partition_columns", "actor2Code:string,year:long").
                  mode(SaveMode.Overwrite).
                  save()
     val df = sess.read.format("filodb.spark").option("dataset", "gdelt3").load()
@@ -281,7 +268,7 @@ class SaveAsFiloTest extends SparkTestBase {
     gdeltDF.write.format("filodb.spark").
                  option("dataset", "gdelt3").
                  option("row_keys", "eventId").
-                 option("partition_keys", ":getOrElse actor2Code --,:getOrElse year -1").
+                 option("partition_columns", "actor2Code:string,year:int").
                  mode(SaveMode.Overwrite).
                  save()
     val df = sess.read.format("filodb.spark").option("dataset", "gdelt3").load()
@@ -300,36 +287,14 @@ class SaveAsFiloTest extends SparkTestBase {
     (FiloExecutor.memStore.stats.readPartitions - readPartitions) should equal (3)
   }
 
-  it("should be able to parse and use partition filters even if partition has computed column") {
-    import sess.implicits._
-
-    val gdeltDF = sc.parallelize(GdeltTestData.records.toSeq).toDF()
-    gdeltDF.write.format("filodb.spark").
-                 option("dataset", "gdelt3").
-                 option("row_keys", "eventId").
-                 option("partition_keys", ":stringPrefix actor2Code 1,:getOrElse year -1").
-                 mode(SaveMode.Overwrite).
-                 save()
-    val df = sess.read.format("filodb.spark").option("dataset", "gdelt3").load()
-    df.createOrReplaceTempView("gdelt")
-    val readPartitions = FiloExecutor.memStore.stats.readPartitions
-    sess.sql("select sum(numArticles) from gdelt where actor2Code in ('JPN', 'KHM')").collect().
-      head(0) should equal (30)
-    // OK, well here we will still be reading two segments, the J partition and K partition
-    (FiloExecutor.memStore.stats.readPartitions - readPartitions) should equal (2)
-
-    sess.sql("select sum(numArticles) from gdelt where actor2Code = 'JPN' AND year = 1979").collect().
-      head(0) should equal (10)
-  }
-
-  it("should be able to parse and use single partition query ") {
+  it("should be able to parse and use single partition query") {
     import sess.implicits._
 
     val gdeltDF = sc.parallelize(GdeltTestData.records.toSeq).toDF()
     gdeltDF.write.format("filodb.spark").
       option("dataset", "gdelt3").
       option("row_keys", "eventId").
-      option("partition_keys", ":getOrElse actor2Code --,:getOrElse year -1").
+      option("partition_columns", "actor2Code:string,year:int").
       mode(SaveMode.Overwrite).
       save()
     val df = sess.read.format("filodb.spark").option("dataset", "gdelt3").load()
@@ -345,7 +310,7 @@ class SaveAsFiloTest extends SparkTestBase {
     gdeltDF.write.format("filodb.spark").
       option("dataset", "gdelt3").
       option("row_keys", "eventId").
-      option("partition_keys", ":stringPrefix actor2Code 1").
+      option("partition_columns", "actor2Code:string").
       mode(SaveMode.Overwrite).
       save()
     val df = sess.read.format("filodb.spark").option("dataset", "gdelt3").load()
@@ -361,7 +326,7 @@ class SaveAsFiloTest extends SparkTestBase {
     gdeltDF.write.format("filodb.spark").
       option("dataset", "gdelt3").
       option("row_keys", "eventId").
-      option("partition_keys", ":getOrElse actor2Code --,:getOrElse year -1").
+      option("partition_columns", "actor2Code:string,year:int").
       option("chunk_size", "50").
       mode(SaveMode.Overwrite).
       save()
@@ -395,7 +360,7 @@ class SaveAsFiloTest extends SparkTestBase {
     gdeltDF.write.format("filodb.spark").
       option("dataset", "gdelt3").
       option("row_keys", "eventId").
-      option("partition_keys", ":getOrElse actor2Code 1,:getOrElse year -1").
+      option("partition_columns", "actor2Code:string,year:int").
       mode(SaveMode.Overwrite).
       save()
     val df = sess.read.format("filodb.spark").option("dataset", "gdelt3").load()
@@ -411,6 +376,7 @@ class SaveAsFiloTest extends SparkTestBase {
     gdeltDF.write.format("filodb.spark").
                  option("dataset", "gdelt3").
                  option("row_keys", "actor2Code,eventId").
+                 option("partition_columns", "year:int").
                  option("chunk_size", "50").
                  mode(SaveMode.Overwrite).
                  save()
@@ -454,6 +420,7 @@ class SaveAsFiloTest extends SparkTestBase {
     tsDF.write.format("filodb.spark").
                option("dataset", "test1").
                option("row_keys", "time").
+               option("partition_columns", "series:string").
                mode(SaveMode.Overwrite).save()
     val df = sess.read.format("filodb.spark").option("dataset", "test1").load()
     val selectedRow = df.select("metric", "time").limit(1).collect.head
@@ -462,14 +429,14 @@ class SaveAsFiloTest extends SparkTestBase {
     df.agg(max("time")).collect().head(0) should equal (new Timestamp(1000020L))
   }
 
-  it("should be able to ingest records using a hash partition key and filter by hashed key") {
+  ignore("should be able to ingest records using a hash partition key and filter by hashed key") {
     import sess.implicits._
 
     val gdeltDF = sc.parallelize(GdeltTestData.records.toSeq).toDF()
     gdeltDF.write.format("filodb.spark").
                  option("dataset", "gdelt1").
                  option("row_keys", "eventId").
-                 option("partition_keys", ":hash actor2Code 8").
+                 option("partition_columns", ":hash actor2Code 8").
                  mode(SaveMode.Overwrite).
                  save()
     val df = sess.read.format("filodb.spark").option("dataset", "gdelt1").load()

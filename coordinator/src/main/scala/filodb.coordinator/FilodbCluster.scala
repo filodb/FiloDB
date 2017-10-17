@@ -5,7 +5,7 @@ import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
 import scala.concurrent.{Await, ExecutionContext}
 
 import akka.actor._
-import akka.cluster.{Cluster, ClusterEvent, MemberStatus}
+import akka.cluster.{Cluster, ClusterEvent}
 import akka.util.Timeout
 import com.typesafe.scalalogging.StrictLogging
 import monix.execution.misc.NonFatal

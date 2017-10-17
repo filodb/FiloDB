@@ -2,7 +2,6 @@ package filodb.spark
 
 import scala.concurrent.Await
 import scala.concurrent.duration._
-import scala.language.{implicitConversions, postfixOps}
 
 import akka.actor.{ActorSystem, AddressFromURIString}
 import akka.pattern.ask
@@ -38,12 +37,12 @@ private[filodb] trait FilodbSparkCluster extends FilodbClusterNode {
   lazy val settings = {
     val port = systemConfig.as[Option[Int]](s"filodb.spark.$role.port").getOrElse(0)
     val host = MetaStoreSync.sparkHost
-    ConfigFactory.parseString(s"""
+    val ourConf = ConfigFactory.parseString(s"""
       akka.cluster.roles=["$roleName"]
       akka.remote.netty.tcp.hostname=$host
       akka.remote.netty.tcp.port=$port""")
 
-    new FilodbSettings()
+    new FilodbSettings(ourConf)
   }
 
   override lazy val system = ActorSystem(systemName, settings.allConfig)
@@ -66,7 +65,8 @@ object FiloDriver extends FilodbSparkCluster {
 
   override val role = ClusterRole.Driver
 
-  lazy val client = new ClusterClient(clusterActor, "executor", "driver")
+  // NOTE: It's important that we use the executor's cluster actor so that the right singleton is reached
+  lazy val client = new ClusterClient(FiloExecutor.clusterActor, "executor", "driver")
 
   // The init method called from a SparkContext is going to be from the driver/app.
   // It also initializes all executors.
@@ -92,7 +92,7 @@ object FiloDriver extends FilodbSparkCluster {
       FiloExecutor.initAllExecutors(finalConfig, context)
       // Because the clusterActor can only be instantiated on an executor/FiloDB node, this works by
       // waiting for the clusterActor to respond, thus guaranteeing cluster working correctly
-      Await.result(clusterActor ? NodeClusterActor.GetRefs("executor"), InitializationTimeout)
+      Await.result(FiloExecutor.clusterActor ? NodeClusterActor.GetRefs("executor"), InitializationTimeout)
       cluster._isInitialized.set(true)
       _config = Some(finalConfig)
     }

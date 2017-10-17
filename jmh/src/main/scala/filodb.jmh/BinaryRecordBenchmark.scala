@@ -9,7 +9,7 @@ import org.openjdk.jmh.annotations.BenchmarkMode
 import org.openjdk.jmh.annotations.OutputTimeUnit
 import org.openjdk.jmh.annotations.{Mode, State, Scope}
 
-import filodb.core.binaryrecord.{BinaryRecord, RecordSchema}
+import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.GdeltTestData
 import filodb.coordinator.IngestionCommands.IngestRows
 import filodb.coordinator.Serializer
@@ -27,16 +27,16 @@ class BinaryRecordBenchmark {
 
   org.slf4j.LoggerFactory.getLogger("filodb").asInstanceOf[Logger].setLevel(Level.ERROR)
 
-  Serializer.putPartitionSchema(projection2.partKeyBinSchema)
-  Serializer.putDataSchema(projection2.binSchema)
+  Serializer.putPartitionSchema(dataset2.partitionBinSchema)
+  Serializer.putDataSchema(dataset2.dataBinSchema)
 
-  val ingestRowsRegular = IngestRows(projection2.datasetRef, 0, 0,
-                                     records(projection2, seqReaders.take(50).toList))
+  val ingestRowsRegular = IngestRows(dataset2.ref, 0,
+                                     records(dataset2, seqReaders.take(50).toList))
 
   def getBinRecordRows: IngestRows = {
     ingestRowsRegular.copy(rows = ingestRowsRegular.rows.map { r =>
-      r.copy(partition = projection2.partKey(r.partition),
-             data = BinaryRecord(projection2.binSchema, r.data))
+      r.copy(partition = dataset2.partKey(r.partition),
+             data = BinaryRecord(dataset2.dataBinSchema, r.data))
     })
   }
 

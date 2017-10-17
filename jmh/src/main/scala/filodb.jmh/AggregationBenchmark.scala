@@ -2,8 +2,6 @@ package filodb.jmh
 
 import ch.qos.logback.classic.{Level, Logger}
 import com.typesafe.config.ConfigFactory
-import java.io.{ByteArrayInputStream, ObjectInputStream}
-import java.io.{ByteArrayOutputStream, ObjectOutputStream}
 import java.util.concurrent.TimeUnit
 import org.openjdk.jmh.annotations.Benchmark
 import org.openjdk.jmh.annotations.BenchmarkMode
@@ -13,7 +11,7 @@ import scala.concurrent.Await
 import scala.concurrent.duration._
 
 import filodb.core._
-import filodb.core.memstore.{IngestRecord, TimeSeriesMemStore}
+import filodb.core.memstore.TimeSeriesMemStore
 import filodb.core.query._
 import filodb.core.store.{FilteredPartitionScan, QuerySpec, RowKeyChunkScan}
 
@@ -37,12 +35,12 @@ class AggregationBenchmark {
   val endTs   = startTs + 1000 * numPoints
 
   // Ingest raw data
-  memStore.setup(projection1, 0)
+  memStore.setup(dataset1, 0)
   val data = records(linearMultiSeries(startTs)).take(numPoints)
-  memStore.ingest(projection1.datasetRef, 0, data)
-  val split = memStore.getScanSplits(projection1.datasetRef, 1).head
+  memStore.ingest(dataset1.ref, 0, data)
+  val split = memStore.getScanSplits(dataset1.ref, 1).head
 
-  val timeRange = RowKeyChunkScan(projection1, Seq(startTs), Seq(endTs))
+  val timeRange = RowKeyChunkScan(dataset1, Seq(startTs), Seq(endTs))
   val avgTimeQuery = QuerySpec("min", AggregationFunction.TimeGroupAvg, Seq("100"))
   val sumQuery     = QuerySpec("min", AggregationFunction.Sum)
 
@@ -53,7 +51,7 @@ class AggregationBenchmark {
   @BenchmarkMode(Array(Mode.Throughput))
   @OutputTimeUnit(TimeUnit.SECONDS)
   def avgTimeGroupAgg(): Array[_] = {
-    val fut = memStore.aggregate(projection1, 0, avgTimeQuery, FilteredPartitionScan(split), timeRange)
+    val fut = memStore.aggregate(dataset1, avgTimeQuery, FilteredPartitionScan(split), timeRange)
                       .get.runAsync
     Await.result(fut, 2.second).result
   }
@@ -62,7 +60,7 @@ class AggregationBenchmark {
   @BenchmarkMode(Array(Mode.Throughput))
   @OutputTimeUnit(TimeUnit.SECONDS)
   def sumAgg(): Array[_] = {
-    val fut = memStore.aggregate(projection1, 0, sumQuery, FilteredPartitionScan(split))
+    val fut = memStore.aggregate(dataset1, sumQuery, FilteredPartitionScan(split))
                       .get.runAsync
     Await.result(fut, 2.second).result
   }

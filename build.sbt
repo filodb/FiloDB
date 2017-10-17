@@ -265,6 +265,7 @@ lazy val compilerSettings = Seq(
     "-Xfatal-warnings",
     "-Ywarn-inaccessible",
     "-Ywarn-dead-code",
+    "-Ywarn-unused-import",
     "-Yno-adapted-args",
     "-language:existentials",
     "-language:experimental.macros",

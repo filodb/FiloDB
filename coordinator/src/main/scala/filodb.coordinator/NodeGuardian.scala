@@ -5,7 +5,7 @@ import akka.cluster.{Cluster, Member}
 import akka.cluster.ClusterEvent.{InitialStateAsEvents, MemberUp}
 import akka.cluster.singleton._
 import filodb.core.memstore.MemStore
-import filodb.core.store.{ColumnStore, MetaStore}
+import filodb.core.store.MetaStore
 
 /** Supervisor for all child actors and their actors on the node. */
 final class NodeGuardian(extension: FilodbCluster,
@@ -16,7 +16,6 @@ final class NodeGuardian(extension: FilodbCluster,
                         ) extends GracefulStopAwareSupervisor {
 
   import NodeProtocol._, ActorName._
-  import context.dispatcher
 
   protected val settings: FilodbSettings = extension.settings
 

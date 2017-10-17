@@ -2,6 +2,7 @@ package filodb.core.metadata
 
 import com.typesafe.scalalogging.StrictLogging
 import enumeratum.{Enum, EnumEntry}
+import org.scalactic._
 import org.velvia.filo.{VectorInfo, ZeroCopyUTF8String}
 import org.velvia.filo.RowReader.TypedFieldExtractor
 import scala.reflect.ClassTag
@@ -10,28 +11,11 @@ import filodb.core._
 import filodb.core.Types._
 
 /**
- * Defines a column of data and its properties.
- *
- * ==Columns and versions==
- * It is uncommon for the schema to change much between versions.
- * A DDL might change the type of a column; a column might be deleted
- *
- * 1. A Column def remains in effect for subsequent versions unless
- * 2. It has been marked deleted in subsequent versions, or
- * 3. Its columnType or serializer has been changed, in which case data
- *    from previous versions are discarded (due to incompatibility)
- *
- * ==System Columns and Names==
- * Column names starting with a colon (':') are reserved for "system" and computed columns:
- * - ':deleted' - special bitmap column marking deleted rows
- * - other columns are computed columns whose values are generated from other columns or a function
- *
- * System columns are not actually stored.
+ * Defines a column of data and its type and other properties
  */
 trait Column {
   def id: Int         // Every column must have a unique ID
   def name: String
-  def dataset: String
   def columnType: Column.ColumnType
   def extractor: TypedFieldExtractor[_]
 
@@ -45,24 +29,12 @@ trait Column {
  */
 case class DataColumn(id: Int,
                       name: String,
-                      dataset: String,
-                      version: Int,
-                      columnType: Column.ColumnType,
-                      isDeleted: Boolean = false) extends Column {
-  /**
-   * Has one of the properties other than name, dataset, version changed?
-   * (Name and dataset have to be constant for comparison to even be valid)
-   * (Since name has to be constant, can't change from system to nonsystem)
-   */
-  def propertyChanged(other: DataColumn): Boolean =
-    (columnType != other.columnType) ||
-    (isDeleted != other.isDeleted)
-
+                      columnType: Column.ColumnType) extends Column {
   // Use this for efficient serialization over the wire.
   // We leave out the dataset because that is almost always inferred from context.
   // NOTE: this is one reason why column names cannot have commas
   override def toString: String =
-    s"[$id,$name,$version,$columnType${if (isDeleted) ",t" else ""}]"
+    s"[$id,$name,$columnType]"
 
   def extractor: TypedFieldExtractor[_] = columnType.keyType.extractor
 }
@@ -71,23 +43,23 @@ object DataColumn {
   /**
    * Recreates a DataColumn from its toString output
    */
-  def fromString(str: String, dataset: String): DataColumn = {
+  def fromString(str: String): DataColumn = {
     val parts = str.drop(1).dropRight(1).split(',')
-    DataColumn(parts(0).toInt, parts(1), dataset, parts(2).toInt,
-               Column.ColumnType.withName(parts(3)),
-               parts.size > 4)
+    DataColumn(parts(0).toInt, parts(1), Column.ColumnType.withName(parts(2)))
   }
 }
 
 object Column extends StrictLogging {
   sealed trait ColumnType extends EnumEntry {
+    def typeName: String
     // NOTE: due to a Spark serialization bug, this cannot be a val
     // (https://github.com/apache/spark/pull/7122)
     def clazz: Class[_]
     def keyType: SingleKeyTypeBase[_]
   }
 
-  sealed abstract class RichColumnType[T : ClassTag : SingleKeyTypeBase] extends ColumnType {
+  sealed abstract class RichColumnType[T : ClassTag : SingleKeyTypeBase](val typeName: String)
+  extends ColumnType {
     def clazz: Class[_] = implicitly[ClassTag[T]].runtimeClass
     def keyType: SingleKeyTypeBase[_] = implicitly[SingleKeyTypeBase[T]]
   }
@@ -96,17 +68,16 @@ object Column extends StrictLogging {
     val values = findValues
 
     import filodb.core.SingleKeyTypes._
-    case object IntColumn extends RichColumnType[Int]
-    case object LongColumn extends RichColumnType[Long]
-    case object DoubleColumn extends RichColumnType[Double]
-    case object StringColumn extends RichColumnType[ZeroCopyUTF8String]
-    case object BitmapColumn extends RichColumnType[Boolean]
-    case object TimestampColumn extends RichColumnType[Long]
-    case object MapColumn extends RichColumnType[UTF8Map]
+    case object IntColumn extends RichColumnType[Int]("int")
+    case object LongColumn extends RichColumnType[Long]("long")
+    case object DoubleColumn extends RichColumnType[Double]("double")
+    case object StringColumn extends RichColumnType[ZeroCopyUTF8String]("string")
+    case object BitmapColumn extends RichColumnType[Boolean]("bitmap")
+    case object TimestampColumn extends RichColumnType[Long]("ts")
+    case object MapColumn extends RichColumnType[UTF8Map]("map")
   }
 
-  type Schema = Map[String, DataColumn]
-  val EmptySchema = Map.empty[String, DataColumn]
+  val typeNameToColType = ColumnType.values.map { colType => colType.typeName -> colType }.toMap
 
   /**
    * Converts a list of columns to the appropriate KeyType.
@@ -114,7 +85,7 @@ object Column extends StrictLogging {
    */
   def columnsToKeyType(columns: Seq[Column]): KeyType = columns match {
     case Nil      => throw new IllegalArgumentException("Empty columns supplied")
-    case Seq(DataColumn(_, _, _, _, columnType, _))  => columnType.keyType
+    case Seq(DataColumn(_, _, columnType))  => columnType.keyType
     case Seq(ComputedColumn(_, _, _, columnType, _, _)) => columnType.keyType
     case cols: Seq[Column] =>
       val keyTypes = cols.map { col => columnsToKeyType(Seq(col)).asInstanceOf[SingleKeyType] }
@@ -125,56 +96,46 @@ object Column extends StrictLogging {
    * Converts a list of data columns to Filo VectorInfos for building Filo vectors
    */
   def toFiloSchema(columns: Seq[Column]): Seq[VectorInfo] = columns.collect {
-    case DataColumn(_, name, _, _, colType, false) => VectorInfo(name, colType.clazz)
+    case DataColumn(_, name, colType) => VectorInfo(name, colType.clazz)
   }
 
-  /**
-   * Returns string column names with no match in the schema
-   */
-  def invalidColumns(columns: Seq[String], schema: Schema): Set[String] = (columns.toSet -- schema.keys)
+  import Dataset._
+  import OptionSugar._
+  val illicitCharsRegex = "[:() ,\u0001]+"r
 
   /**
-   * Fold function used to compute a schema up from a list of DataColumn instances.
-   * Assumes the list of columns is sorted in increasing version.
-   * Contains the business rules above.
+   * Validates the column name -- make sure it doesn't have any illegal chars
    */
-  def schemaFold(schema: Schema, newColumn: DataColumn): Schema = {
-    if (newColumn.isDeleted) { schema - newColumn.name }
-    else if (schema.contains(newColumn.name)) {
-      // See if newColumn changed anything from older definition
-      if (newColumn.propertyChanged(schema(newColumn.name))) {
-        schema ++ Map(newColumn.name -> newColumn)
-      } else {
-        logger.warn(s"Skipping illegal or redundant column definition: $newColumn")
-        schema
-      }
-    } else {
-      // really a new column definition, just add it
-      schema ++ Map(newColumn.name -> newColumn)
-    }
-  }
+  def validateColumnName(colName: String): Unit Or One[BadSchema] =
+    illicitCharsRegex.findFirstMatchIn(colName)
+      .toOr(()).swap
+      .badMap(x => One(BadColumnName(colName, s"Illegal char $x found")))
 
   /**
-   * Checks for any problems with a column about to be "created" or changed.
-   * @param schema the latest schema from scanning all versions
-   * @param column the DataColumn to be validated
-   * @return A Seq[String] of every reason the column is not valid
+   * Validates the column name and type and returns a DataColumn instance
+   * @param name the column name
+   * @param typeName the column type string, see ColumnType for valid values
+   * @param nextId the next column ID to use
+   * @return Good(DataColumn) or Bad(BadSchema)
    */
-  def invalidateNewColumn(schema: Schema, column: DataColumn): Seq[String] = {
-    def check(requirement: => Boolean, failMessage: String): Option[String] =
-      if (requirement) None else Some(failMessage)
+  def validateColumn(name: String, typeName: String, nextId: Int): DataColumn Or One[BadSchema] =
+    for { nothing <- validateColumnName(name)
+          colType <- typeNameToColType.get(typeName).toOr(One(BadColumnType(typeName))) }
+    yield { DataColumn(nextId, name, colType) }
 
-    import scala.language.postfixOps
-    val illicitCharsRegex = "[:() ,\u0001]+"r
-    val alreadyHaveIt = schema contains column.name
-    Seq(
-      // check(!startsWithColon, "Data columns cannot start with a colon"),
-      illicitCharsRegex.findFirstMatchIn(column.name).map(x => s"Illegal char $x found in column name"),
-      check(!alreadyHaveIt || (alreadyHaveIt && column.version > schema(column.name).version),
-            "Cannot add column at version lower than latest definition"),
-      check(!alreadyHaveIt || (alreadyHaveIt && column.propertyChanged(schema(column.name))),
-            "Nothing changed from previous definition"),
-      check(alreadyHaveIt || (!alreadyHaveIt && !column.isDeleted), "New column cannot be deleted")
-    ).flatten
-  }
+  import Accumulation._
+
+  /**
+   * Creates and validates a set of DataColumns from a list of "columnName:columnType" strings
+   * @param nameTypeList a Seq of "columnName:columnType" strings. Valid types are in ColumnType
+   * @param startingId   column IDs are assigned starting with startingId incrementally
+   */
+  def makeColumnsFromNameTypeList(nameTypeList: Seq[String], startingId: Int = 0): Seq[Column] Or BadSchema =
+    nameTypeList.zipWithIndex.map { case (nameType, idx) =>
+      val parts = nameType.split(':')
+      for { nameAndType <- if (parts.size == 2) Good((parts(0), parts(1))) else Bad(One(NotNameColonType(nameType)))
+            (name, colType) = nameAndType
+            col         <- validateColumn(name, colType, startingId + idx) }
+      yield { col }
+    }.combined.badMap { errs => ColumnErrors(errs.toSeq) }
 }

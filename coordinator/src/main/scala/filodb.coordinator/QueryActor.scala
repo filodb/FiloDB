@@ -2,9 +2,8 @@ package filodb.coordinator
 
 import java.util.concurrent.atomic.AtomicLong
 
-import scala.concurrent.Future
 import scala.concurrent.duration._
-import scala.language.existentials
+import scala.concurrent.Future
 import scala.util.Try
 
 import akka.actor.Props
@@ -17,7 +16,7 @@ import org.velvia.filo.BinaryVector
 
 import filodb.core._
 import filodb.core.memstore.MemStore
-import filodb.core.metadata.{Column, RichProjection, WrongNumberArguments, BadArgument => BadArg}
+import filodb.core.metadata.{Dataset, BadArgument => BadArg, WrongNumberArguments}
 import filodb.core.query.{AggregationFunction, CombinerFunction, NoTimestampColumn}
 import filodb.core.store._
 
@@ -28,12 +27,11 @@ object QueryActor {
   // Internal command for query on each individual node, directed at one shard only
   final case class SingleShardQuery(query: QueryCommands.QueryArgs,
                                     dataset: DatasetRef,
-                                    version: Int,
                                     partMethod: PartitionScanMethod,
                                     chunkScan: ChunkScanMethod)
 
-  def props(memStore: MemStore, projection: RichProjection): Props =
-    Props(classOf[QueryActor], memStore, projection)
+  def props(memStore: MemStore, dataset: Dataset): Props =
+    Props(classOf[QueryActor], memStore, dataset)
 }
 
 /**
@@ -43,36 +41,29 @@ object QueryActor {
  * so it is probably fine for there to be just one QueryActor per dataset.
  */
 final class QueryActor(memStore: MemStore,
-                       projection: RichProjection) extends BaseActor {
-  import OptionSugar._
-  import TrySugar._
-
+                       dataset: Dataset) extends BaseActor {
   import QueryActor._
   import QueryCommands._
+  import TrySugar._
+  import OptionSugar._
 
   implicit val scheduler = monix.execution.Scheduler(context.dispatcher)
   var shardMap = ShardMapper.default
 
-  def validateColumns(colStrs: Seq[String]): Seq[Column] Or ErrorResponse =
-    RichProjection.getColumnsFromNames(projection.columns, colStrs)
-                  .badMap {
-                    case RichProjection.MissingColumnNames(missing, _) =>
-                      NodeClusterActor.UndefinedColumns(missing.toSet)
-                    case x: Any =>
-                      DatasetCommands.DatasetError(x.toString)
-                  }
+  def getColumnIDs(colStrs: Seq[String]): Seq[Types.ColumnId] Or ErrorResponse =
+    dataset.colIDs(colStrs: _*).badMap(missing => UndefinedColumns(missing.toSet))
 
   // Returns a list of PartitionScanMethods, one per shard
   def validatePartQuery(partQuery: PartitionQuery,
                         options: QueryOptions): Seq[PartitionScanMethod] Or ErrorResponse =
     Try(partQuery match {
       case SinglePartitionQuery(keyParts) =>
-        val partKey = projection.partKey(keyParts: _*)
+        val partKey = dataset.partKey(keyParts: _*)
         val shard = shardMap.partitionToShardNode(partKey.hashCode).shard
         Seq(SinglePartitionScan(partKey, shard))
 
       case MultiPartitionQuery(keys) =>
-        val partKeys = keys.map { k => projection.partKey(k: _*) }
+        val partKeys = keys.map { k => dataset.partKey(k: _*) }
         partKeys.groupBy { pk => shardMap.partitionToShardNode(pk.hashCode).shard }
           .toSeq
           .filterNot { case (shard, keys) =>
@@ -98,13 +89,13 @@ final class QueryActor(memStore: MemStore,
   def validateDataQuery(dataQuery: DataQuery): ChunkScanMethod Or ErrorResponse = {
     Try(dataQuery match {
       case AllPartitionData                => AllChunkScan
-      case KeyRangeQuery(startKey, endKey) => RowKeyChunkScan(projection, startKey, endKey)
-      case MostRecentTime(lastMillis) if projection.isTimeSeries =>
+      case KeyRangeQuery(startKey, endKey) => RowKeyChunkScan(dataset, startKey, endKey)
+      case MostRecentTime(lastMillis) if dataset.timestampColumn.isDefined =>
         val timeNow = System.currentTimeMillis
-        RowKeyChunkScan(projection, Seq(timeNow - lastMillis), Seq(timeNow))
-      case MostRecentSample if projection.isTimeSeries => LastSampleChunkScan
+        RowKeyChunkScan(dataset, Seq(timeNow - lastMillis), Seq(timeNow))
+      case MostRecentSample if dataset.timestampColumn.isDefined => LastSampleChunkScan
     }).toOr.badMap {
-      case m: MatchError if !projection.isTimeSeries =>
+      case m: MatchError if dataset.timestampColumn.isEmpty =>
         BadQuery(s"Not a time series schema - cannot filter using $dataQuery: " + m.getMessage)
       case m: MatchError => BadQuery(s"Could not parse $dataQuery: " + m.getMessage)
       case e: Exception => BadArgument(e.getMessage)
@@ -120,16 +111,16 @@ final class QueryActor(memStore: MemStore,
                     .toOr(BadQuery(s"No such combiner function $combinerName"))
 
   def handleRawQuery(q: RawQuery): Unit = {
-    val RawQuery(dataset, version, colStrs, partQuery, dataQuery) = q
+    val RawQuery(_, colStrs, partQuery, dataQuery) = q
     val originator = sender()
-    (for { colSeq      <- validateColumns(colStrs)
+    (for { colIDs      <- getColumnIDs(colStrs)
            partMethods <- validatePartQuery(partQuery, QueryOptions())
            chunkMethod <- validateDataQuery(dataQuery) }
     yield {
       val queryId = nextQueryId
-      originator ! QueryInfo(queryId, dataset, colSeq.map(_.toString))
+      originator ! QueryInfo(queryId, dataset.ref, colStrs)
       // TODO: this is totally broken if there is more than one partMethod
-      memStore.readChunks(projection, colSeq, version, partMethods.head, chunkMethod)
+      memStore.readChunks(dataset, colIDs, partMethods.head, chunkMethod)
         .foreach { reader =>
           val bufs = reader.vectors.map {
             case b: BinaryVector[_] => b.toFiloBuffer
@@ -151,8 +142,8 @@ final class QueryActor(memStore: MemStore,
     (for { aggFunc    <- validateFunction(q.query.functionName)
            combinerFunc <- validateCombiner(q.query.combinerName)
            chunkMethod <- validateDataQuery(q.query.dataQuery)
-           aggregator <- aggFunc.validate(q.query.column, projection.timestampColumn.map(_.name),
-                                          chunkMethod, q.query.args, projection)
+           aggregator <- aggFunc.validate(q.query.column, dataset.timestampColumn.map(_.name),
+                                          chunkMethod, q.query.args, dataset)
            combiner   <- combinerFunc.validate(aggregator, q.query.combinerArgs)
            partMethods <- validatePartQuery(q.partitionQuery, q.queryOptions) }
     yield {
@@ -162,7 +153,7 @@ final class QueryActor(memStore: MemStore,
       val results = Observable.fromIterable(partMethods)
                       .mapAsync(q.queryOptions.parallelism) { partMethod =>
                         val coord = shardMap.coordForShard(partMethod.shard)
-                        val query = SingleShardQuery(q.query, q.dataset, q.version, partMethod, chunkMethod)
+                        val query = SingleShardQuery(q.query, q.dataset, partMethod, chunkMethod)
                         val future: Future[combiner.C] = (coord ? query).map {
                           case a: combiner.C @unchecked => a
                           case err: ErrorResponse => throw new RuntimeException(err.toString)
@@ -180,7 +171,7 @@ final class QueryActor(memStore: MemStore,
       case WrongNumberArguments(given, expected) => originator ! WrongNumberOfArgs(given, expected)
       case BadArg(reason) => originator ! BadArgument(reason)
       case NoTimestampColumn =>
-        originator ! BadQuery(s"Cannot use time-based functions on dataset ${projection.datasetRef}")
+        originator ! BadQuery(s"Cannot use time-based functions on dataset ${dataset.ref}")
       case other: Any     => originator ! BadQuery(other.toString)
     }
   }
@@ -191,7 +182,7 @@ final class QueryActor(memStore: MemStore,
     (for { aggFunc    <- validateFunction(q.query.functionName)
            combinerFunc <- validateCombiner(q.query.combinerName)
            qSpec = QuerySpec(q.query.column, aggFunc, q.query.args, combinerFunc, q.query.combinerArgs)
-           aggregateTask <- memStore.aggregate(projection, q.version, qSpec, q.partMethod, q.chunkScan) }
+           aggregateTask <- memStore.aggregate(dataset, qSpec, q.partMethod, q.chunkScan) }
     yield {
       aggregateTask.runAsync
         .map { agg => originator ! agg }

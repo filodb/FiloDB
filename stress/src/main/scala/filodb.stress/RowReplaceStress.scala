@@ -1,9 +1,9 @@
 package filodb.stress
 
-import org.apache.spark.sql.{DataFrame, Row, SparkSession, SaveMode}
+import org.apache.spark.sql.{Row, SparkSession, SaveMode}
 import scala.util.Random
 
-import filodb.core.{DatasetRef, Perftools}
+import filodb.core.Perftools
 import filodb.spark._
 
 /**
@@ -75,7 +75,7 @@ object RowReplaceStress extends App {
     injectedDF.sort($"medallion").write.format("filodb.spark").
       option("dataset", datasetName).
       option("row_keys", "pickup_datetime,hack_license,medallion,pickup_longitude").
-      option("partition_keys", ":monthOfYear pickup_datetime,:stringPrefix medallion 2").
+      option("partition_columns", ":monthOfYear pickup_datetime,:stringPrefix medallion 2").
       mode(SaveMode.Overwrite).save()
     puts("Batch ingestion done.")
   }

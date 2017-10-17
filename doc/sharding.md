@@ -1,3 +1,19 @@
+<!-- START doctoc generated TOC please keep comment here to allow auto update -->
+<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
+**Table of Contents**  *generated with [DocToc](https://github.com/thlorenz/doctoc)*
+
+- [FiloDB](#filodb)
+  - [Shard Coordination](#shard-coordination)
+  - [Shard Assignment](#shard-assignment)
+    - [Shard Event Subscriptions](#shard-event-subscriptions)
+      - [Subscribe to Shard Status Events](#subscribe-to-shard-status-events)
+        - [Shard Status and Shard Status Events](#shard-status-and-shard-status-events)
+        - [Auto Subscribe](#auto-subscribe)
+      - [Unsubscribe to Shard Status Events](#unsubscribe-to-shard-status-events)
+        - [Auto Unsubscribe](#auto-unsubscribe)
+
+<!-- END doctoc generated TOC please keep comment here to allow auto update -->
+
 # FiloDB
 
 ## Shard Coordination

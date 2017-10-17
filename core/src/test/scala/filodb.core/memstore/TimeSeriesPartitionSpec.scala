@@ -1,7 +1,5 @@
 package filodb.core.memstore
 
-import org.velvia.filo.BinaryVector
-
 import org.scalatest.{FunSpec, Matchers}
 import org.scalatest.concurrent.ScalaFutures
 
@@ -13,7 +11,7 @@ class TimeSeriesPartitionSpec extends FunSpec with Matchers with ScalaFutures {
   import MachineMetricsData._
 
   it("should be able to read immediately after ingesting rows") {
-    val part = new TimeSeriesPartition(projection, defaultPartKey, 0, chunksToKeep = 3, maxChunkSize = 10)
+    val part = new TimeSeriesPartition(dataset, defaultPartKey, 0, chunksToKeep = 3, maxChunkSize = 10)
     val data = singleSeriesReaders().take(5)
     part.ingest(data(0), 1000L)
     part.numChunks shouldEqual 1
@@ -24,7 +22,7 @@ class TimeSeriesPartitionSpec extends FunSpec with Matchers with ScalaFutures {
   }
 
   it("should ingest rows, flush, and be able to ingest new rows") {
-    val part = new TimeSeriesPartition(projection, defaultPartKey, 0, chunksToKeep = 3, maxChunkSize = 10)
+    val part = new TimeSeriesPartition(dataset, defaultPartKey, 0, chunksToKeep = 3, maxChunkSize = 10)
     val data = singleSeriesReaders().take(11)
     val minData = data.map(_.getDouble(1))
     data.zipWithIndex.foreach { case (r, i) => part.ingest(r, 1000L + i) }
@@ -38,7 +36,7 @@ class TimeSeriesPartitionSpec extends FunSpec with Matchers with ScalaFutures {
   }
 
   it("should remove old chunks when # chunks > chunksToKeep") {
-    val part = new TimeSeriesPartition(projection, defaultPartKey, 0, chunksToKeep = 2, maxChunkSize = 10)
+    val part = new TimeSeriesPartition(dataset, defaultPartKey, 0, chunksToKeep = 2, maxChunkSize = 10)
     val data = singleSeriesReaders().take(21)   // one more than needed to kick old chunks out
     val minData = data.map(_.getDouble(1))
 
@@ -60,7 +58,7 @@ class TimeSeriesPartitionSpec extends FunSpec with Matchers with ScalaFutures {
   }
 
   it("should skip ingesting rows when offset < flushedWatermark") {
-    val part = new TimeSeriesPartition(projection, defaultPartKey, 0, chunksToKeep = 3, maxChunkSize = 10)
+    val part = new TimeSeriesPartition(dataset, defaultPartKey, 0, chunksToKeep = 3, maxChunkSize = 10)
     part.flushedWatermark = 500L
     val data = singleSeriesReaders().take(10)
     val minData = data.map(_.getDouble(1))

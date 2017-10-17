@@ -1,3 +1,15 @@
+<!-- START doctoc generated TOC please keep comment here to allow auto update -->
+<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
+**Table of Contents**  *generated with [DocToc](https://github.com/thlorenz/doctoc)*
+
+- [FiloDB](#filodb)
+  - [Ingestion](#ingestion)
+    - [Kafka Ingestion](#kafka-ingestion)
+      - [Basic Configuration](#basic-configuration)
+      - [Sample Code](#sample-code)
+
+<!-- END doctoc generated TOC please keep comment here to allow auto update -->
+
 # FiloDB
 
 ## Ingestion
@@ -12,7 +24,6 @@ Create your custom source config file, e.g. [example-source.conf](../kafka/src/m
 
 ```yaml
 dataset = "example"
-columns = ["one", "two", "three"]
 # e.g. one shard per kafka partition
 numshards = 100
 min-num-nodes = 5

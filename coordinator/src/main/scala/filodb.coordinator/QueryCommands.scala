@@ -52,7 +52,6 @@ object QueryCommands {
    * @return QueryInfo followed by successive QueryRawChunks, followed by QueryEndRaw or QueryError
    */
   final case class RawQuery(dataset: DatasetRef,
-                            version: Int,
                             columns: Seq[String],
                             partitionQuery: PartitionQuery,
                             dataQuery: DataQuery) extends QueryCommand
@@ -84,19 +83,18 @@ object QueryCommands {
    * Depends on queryOptions, the query will fan out to multiple nodes and shards as needed to gather
    * results.
    * @param dataset the dataset (and possibly database) to query
-   * @param version the version of the dataset to query.  Ignored for MemStores.
    * @param query   the QueryArgs specifying the name of the query function and the arguments as strings
    * @param partitionQuery which partitions to query and filter on
    * @param queryOptions options to control routing of query
    * @return AggregateResponse, or BadQuery, BadArgument, WrongNumberOfArgs, UndefinedColumns
    */
   final case class AggregateQuery(dataset: DatasetRef,
-                                  version: Int,
                                   query: QueryArgs,
                                   partitionQuery: PartitionQuery,
                                   queryOptions: QueryOptions = QueryOptions()) extends QueryCommand
 
   // Error responses from query
+  final case class UndefinedColumns(undefined: Set[String]) extends ErrorResponse
   final case class BadArgument(msg: String) extends ErrorResponse with QueryResponse
   final case class BadQuery(msg: String) extends ErrorResponse with QueryResponse
   final case class WrongNumberOfArgs(actual: Int, expected: Int) extends ErrorResponse with QueryResponse

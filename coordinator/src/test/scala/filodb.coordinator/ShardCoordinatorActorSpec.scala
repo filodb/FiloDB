@@ -14,6 +14,7 @@ class ShardCoordinatorActorSpec extends AkkaSpec {
 
   private val dataset1 = DatasetRef("one")
   private val dataset2 = DatasetRef("two")
+  val datasetObj = Dataset(dataset1.dataset, Seq("seg:int"), Seq("timestamp:long"))
 
   private val resources = DatasetResourceSpec(4, 2)
 
@@ -49,11 +50,11 @@ class ShardCoordinatorActorSpec extends AkkaSpec {
     }
     "add a subscription for dataset shard updates" in {
       val noOpSource = IngestionSource(classOf[NoOpStreamFactory].getName)
-      val sd = SetupDataset(dataset1, Seq.empty, resources, noOpSource)
-      val dataset = Dataset(dataset1.dataset, Seq.empty, Seq.empty)
-      shardActor ! AddDataset(sd, dataset, Seq.empty, Set(localCoordinator), self)
+      val sd = SetupDataset(dataset1, resources, noOpSource)
+      val dataset = datasetObj
+      shardActor ! AddDataset(sd, dataset, Set(localCoordinator), self)
       expectMsgPF() {
-        case DatasetAdded(dataset, columns, source, nodeShards, ackTo) =>
+        case DatasetAdded(dataset, source, nodeShards, ackTo) =>
           dataset.name shouldEqual dataset1.dataset
 
           nodeShards foreach { case (node, shards) =>
@@ -146,12 +147,12 @@ class ShardCoordinatorActorSpec extends AkkaSpec {
       val subscribers = coordinators ++ regularSubscribers.map(_.ref)
 
       val noOpSource = IngestionSource(classOf[NoOpStreamFactory].getName)
-      val sd = SetupDataset(dataset2, Seq.empty, resources, noOpSource)
-      val dataset = Dataset(dataset2.dataset, Seq.empty, Seq.empty)
-      shardActor ! AddDataset(sd, dataset, Seq.empty, coordinators, self)
+      val sd = SetupDataset(dataset2, resources, noOpSource)
+      val dataset = datasetObj.copy(name = dataset2.dataset)
+      shardActor ! AddDataset(sd, dataset, coordinators, self)
 
       expectMsgPF() {
-        case DatasetAdded(dataset, columns, source, nodeToShards, ackTo) =>
+        case DatasetAdded(dataset, source, nodeToShards, ackTo) =>
           nodeToShards.size shouldEqual coordinators.size
           coordinators.forall(nodeToShards.keySet.contains) shouldBe true
 
@@ -189,9 +190,9 @@ class ShardCoordinatorActorSpec extends AkkaSpec {
     "receive DatasetExists if AddDataset has existing dataset" in {
       val coordinators = Set(localCoordinator, thirdCoordinator)
       val noOpSource = IngestionSource(classOf[NoOpStreamFactory].getName)
-      val dataset = Dataset(dataset2.dataset, Seq.empty, Seq.empty)
-      val sd = SetupDataset(dataset2, Seq.empty, resources, noOpSource)
-      shardActor ! AddDataset(sd, dataset, Seq.empty, coordinators, self)
+      val dataset = datasetObj.copy(name = dataset2.dataset)
+      val sd = SetupDataset(dataset2, resources, noOpSource)
+      shardActor ! AddDataset(sd, dataset, coordinators, self)
 
       expectMsg(NodeClusterActor.DatasetExists(dataset2))
     }
@@ -263,11 +264,11 @@ class ShardCoordinatorActorSpec extends AkkaSpec {
 
       // Add a dataset with no nodes
       val noOpSource = IngestionSource(classOf[NoOpStreamFactory].getName)
-      val sd = SetupDataset(dataset1, Seq.empty, resources, noOpSource)
-      val dataset = Dataset(dataset1.dataset, Seq.empty, Seq.empty)
-      shardActor ! AddDataset(sd, dataset, Seq.empty, Set.empty, self)
+      val sd = SetupDataset(dataset1, resources, noOpSource)
+      val dataset = datasetObj
+      shardActor ! AddDataset(sd, dataset, Set.empty, self)
       expectMsgPF() {
-        case DatasetAdded(dataset, columns, source, nodeShards, ackTo) =>
+        case DatasetAdded(dataset, source, nodeShards, ackTo) =>
           dataset.name shouldEqual dataset1.dataset
           nodeShards.size shouldEqual 0
       }

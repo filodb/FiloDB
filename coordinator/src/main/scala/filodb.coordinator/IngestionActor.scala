@@ -10,7 +10,7 @@ import monix.execution.{Cancelable, Scheduler}
 import monix.eval.Task
 
 import filodb.core.memstore._
-import filodb.core.metadata.RichProjection
+import filodb.core.metadata.Dataset
 import filodb.core.DatasetRef
 
 object IngestionActor {
@@ -21,11 +21,11 @@ object IngestionActor {
 
   final case class IngestionStatus(rowsIngested: Long)
 
-  def props(projection: RichProjection,
+  def props(dataset: Dataset,
             memStore: MemStore,
             source: NodeClusterActor.IngestionSource,
             shardActor: ActorRef)(implicit sched: Scheduler): Props =
-    Props(classOf[IngestionActor], projection, memStore, source, shardActor, sched)
+    Props(classOf[IngestionActor], dataset, memStore, source, shardActor, sched)
 }
 
 /**
@@ -36,7 +36,7 @@ object IngestionActor {
   *
   * @param sched a Scheduler for running ingestion stream Observables
   */
-private[filodb] final class IngestionActor(projection: RichProjection,
+private[filodb] final class IngestionActor(dataset: Dataset,
                                            memStore: MemStore,
                                            source: NodeClusterActor.IngestionSource,
                                            shardActor: ActorRef)
@@ -56,7 +56,7 @@ private[filodb] final class IngestionActor(projection: RichProjection,
   override def postStop(): Unit = {
     super.postStop() // <- logs shutting down
     logger.info("Cancelling all streams and calling teardown")
-    streamSubscriptions.keys.foreach(stop(projection.datasetRef, _, ActorRef.noSender))
+    streamSubscriptions.keys.foreach(stop(dataset.ref, _, ActorRef.noSender))
   }
 
   /** All [[ShardCommand]] tasks are only started if the dataset
@@ -69,31 +69,31 @@ private[filodb] final class IngestionActor(projection: RichProjection,
     case StopShardIngestion(ds, shard) => stop(ds, shard, sender())
   }
 
-  /** Guards that only this projection's commands are acted upon.
-    * Handles initial memstore setup of projection to shard.
+  /** Guards that only this dataset's commands are acted upon.
+    * Handles initial memstore setup of dataset to shard.
     */
   private def start(e: StartShardIngestion, origin: ActorRef): Unit =
     if (invalid(e.ref)) handleInvalid(e, Some(origin)) else {
       // TODO(velvia): user-configurable error handling?  Should we stop?  Should we restart?
 
-      try memStore.setup(projection, e.shard) catch {
+      try memStore.setup(dataset, e.shard) catch {
         case ex@DatasetAlreadySetup(ds) =>
-          logger.warn(s"Dataset $ds already setup, projections might differ!", ex)
+          logger.warn(s"Dataset $ds already setup", ex)
         case ShardAlreadySetup =>
-          logger.warn(s"Shard already setup, projection might differ")
+          logger.warn(s"Shard already setup")
       }
 
       // TODO(velvia): user-configurable error handling?  Should we stop?  Should we restart?
       create(e, origin) map { ingestionStream =>
         val stream = ingestionStream.get
-        shardActor ! IngestionStarted(projection.datasetRef, e.shard, context.parent)
+        shardActor ! IngestionStarted(dataset.ref, e.shard, context.parent)
 
         stream
-          .doOnCompleteEval(Task.eval(shardActor ! IngestionStopped(projection.datasetRef, e.shard)))
-          .onErrorRecover { case NonFatal(ex) => handleError(projection.datasetRef, e.shard, ex) }
+          .doOnCompleteEval(Task.eval(shardActor ! IngestionStopped(dataset.ref, e.shard)))
+          .onErrorRecover { case NonFatal(ex) => handleError(dataset.ref, e.shard, ex) }
 
-        streamSubscriptions(e.shard) = memStore.ingestStream(projection.datasetRef, e.shard, stream) {
-          ex => handleError(projection.datasetRef, e.shard, ex)
+        streamSubscriptions(e.shard) = memStore.ingestStream(dataset.ref, e.shard, stream) {
+          ex => handleError(dataset.ref, e.shard, ex)
         }
       } recover { case NonFatal(t) =>
         handleError(e.ref, e.shard, t)
@@ -106,34 +106,34 @@ private[filodb] final class IngestionActor(projection: RichProjection,
     */
   private def create(e: StartShardIngestion, origin: ActorRef): Try[IngestionStream] =
     Try {
-      val ingestStream = streamFactory.create(source.config, projection, e.shard)
+      val ingestStream = streamFactory.create(source.config, dataset, e.shard)
       streams(e.shard) = ingestStream
       logger.info(s"Ingestion stream $ingestStream set up for shard ${e.shard}")
       ingestStream
     }
 
   private def ingest(e: IngestRows): Unit = {
-    memStore.ingest(projection.datasetRef, e.shard, e.records)
+    memStore.ingest(dataset.ref, e.shard, e.records)
     if (e.records.nonEmpty) {
       e.ackTo ! IngestionCommands.Ack(e.records.last.offset)
     }
   }
 
   private def status(origin: ActorRef): Unit =
-    origin ! IngestionStatus(memStore.numRowsIngested(projection.datasetRef))
+    origin ! IngestionStatus(memStore.numRowsIngested(dataset.ref))
 
-  /** Guards that only this projection's commands are acted upon. */
+  /** Guards that only this dataset's commands are acted upon. */
   private def stop(ds: DatasetRef, shard: Int, origin: ActorRef): Unit =
     if (invalid(ds)) handleInvalid(StopShardIngestion(ds, shard), Some(origin)) else {
       streamSubscriptions.remove(shard).foreach(_.cancel)
       streams.remove(shard).foreach(_.teardown())
-      shardActor ! IngestionStopped(projection.datasetRef, shard)
+      shardActor ! IngestionStopped(dataset.ref, shard)
 
       // TODO: release memory for shard in MemStore
       logger.info(s"Stopped streaming ingestion for shard $shard and released resources")
   }
 
-  private def invalid(dataset: DatasetRef): Boolean = dataset != projection.datasetRef
+  private def invalid(ref: DatasetRef): Boolean = ref != dataset.ref
 
   private def handleError(ref: DatasetRef, shard: Int, err: Throwable): Unit = {
     shardActor ! IngestionError(ref, shard, err)
@@ -141,12 +141,12 @@ private[filodb] final class IngestionActor(projection: RichProjection,
   }
 
   private def handleInvalid(command: ShardCommand, origin: Option[ActorRef]): Unit = {
-    logger.error(s"$command is invalid for this ingester '${projection.datasetRef}'.")
+    logger.error(s"$command is invalid for this ingester '${dataset.ref}'.")
     origin foreach(_ ! InvalidIngestionCommand(command.ref, command.shard))
   }
 
   private def recover(): Unit = {
     // TODO: start recovery, then.. could also be in Actor.preRestart()
-    // statusActor ! RecoveryStarted(projection.datasetRef, shard, context.parent)
+    // statusActor ! RecoveryStarted(dataset.ref, shard, context.parent)
   }
 }

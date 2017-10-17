@@ -5,7 +5,7 @@ import akka.actor._
 import akka.event.LoggingReceive
 import filodb.coordinator.NodeClusterActor.{IngestionSource, SetupDataset}
 import filodb.core.DatasetRef
-import filodb.core.metadata.{Column, Dataset}
+import filodb.core.metadata.Dataset
 
 /** This actor manages the following for its parent, the cluster singleton,
   * [[filodb.coordinator.NodeClusterActor]]:
@@ -74,7 +74,7 @@ private[coordinator] final class ShardCoordinatorActor(strategy: ShardAssignment
         subscriptions :+= ShardSubscription(added.ref, e.coordinators)
         logger.info(s"Dataset '${added.ref}' added, created new ${added.mapper}")
 
-        origin ! DatasetAdded(e.dataset, e.columns, e.setup.source, added.shards, e.ackTo)
+        origin ! DatasetAdded(e.dataset, e.setup.source, added.shards, e.ackTo)
     }
 
   /** Shard assignment strategy adds the new node and returns the `ShardsAssigned`.
@@ -217,7 +217,6 @@ object ShardSubscriptions {
   /** Command to add a subscription. */
   private[coordinator] final case class AddDataset(setup: SetupDataset,
                                                    dataset: Dataset,
-                                                   columns: Seq[Column],
                                                    coordinators: Set[ActorRef],
                                                    ackTo: ActorRef
                                                   ) extends ShardAssignmentProtocol
@@ -226,7 +225,6 @@ object ShardSubscriptions {
     * upon it sending `AddMember`. Command to start ingestion for dataset.
     */
   private[coordinator] final case class DatasetAdded(dataset: Dataset,
-                                                     columns: Seq[Column],
                                                      source: IngestionSource,
                                                      shards: Map[ActorRef, Seq[Int]],
                                                      ackTo: ActorRef

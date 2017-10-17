@@ -10,7 +10,7 @@ import monix.reactive.Observable
 
 import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.memstore.IngestRecord
-import filodb.core.metadata.RichProjection
+import filodb.core.metadata.Dataset
 
 /**
  * Unlike the RowSource, an IngestionStream simply provides a stream of records, keeping things simple.
@@ -49,7 +49,7 @@ object IngestionStream {
      * function that gets an ack back from the remote node before continuing
      */
     def routeToShards(mapper: ShardMapper,
-                      projection: RichProjection,
+                      dataset: Dataset,
                       protocolActor: ActorRef)
                      (implicit s: Scheduler): Cancelable = {
       def onNext(elem: (Int, Seq[IngestRecord])): Future[Ack] = {
@@ -76,8 +76,8 @@ object IngestionStream {
       }
 
       stream.get.map { records =>
-              records.map { r => r.copy(partition = projection.partKey(r.partition),
-                                        data = BinaryRecord(projection.binSchema, r.data)) }
+              records.map { r => r.copy(partition = dataset.partKey(r.partition),
+                                        data = BinaryRecord(dataset.dataBinSchema, r.data)) }
             }.flatMap { records =>
               val byShardRecords = records.groupBy { r =>
                 mapper.partitionToShardNode(r.partition.hashCode).shard
@@ -97,14 +97,14 @@ trait IngestionStreamFactory {
    * If a source does not support streams for n shards, it could support just one shard and require
    * users to limit the number of shards.
    * @param config the configuration for the data source
-   * @param projection
+   * @param dataset
    */
-  def create(config: Config, projection: RichProjection, shard: Int): IngestionStream
+  def create(config: Config, dataset: Dataset, shard: Int): IngestionStream
 }
 
 /**
  * An IngestionStreamFactory to use when you want to just push manually to a coord.
  */
 class NoOpStreamFactory extends IngestionStreamFactory {
-  def create(config: Config, projection: RichProjection, shard: Int): IngestionStream = IngestionStream.empty
+  def create(config: Config, dataset: Dataset, shard: Int): IngestionStream = IngestionStream.empty
 }

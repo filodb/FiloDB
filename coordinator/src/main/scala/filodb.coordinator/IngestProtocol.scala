@@ -1,8 +1,7 @@
 package filodb.coordinator
 
-import scala.concurrent.Future
 import scala.concurrent.duration._
-import scala.language.existentials
+import scala.concurrent.Future
 
 import akka.actor.{ActorRef, Props}
 import akka.event.LoggingReceive
@@ -25,8 +24,8 @@ object IngestProtocol {
     protocol ? MoreRows(shard, rows)
   }
 
-  def props(clusterActor: ActorRef, ref: DatasetRef, version: Int = 0): Props =
-    Props(classOf[IngestProtocol], clusterActor, ref, version)
+  def props(clusterActor: ActorRef, ref: DatasetRef): Props =
+    Props(classOf[IngestProtocol], clusterActor, ref)
 }
 
 /**
@@ -47,8 +46,7 @@ object IngestProtocol {
  * NOTE: this might very well be going away and be replaced by something like rsocket.io
  */
 class IngestProtocol(clusterActor: ActorRef,
-                     ref: DatasetRef,
-                     version: Int = 0) extends BaseActor {
+                     ref: DatasetRef) extends BaseActor {
   import IngestProtocol._
 
   private var mapper: ShardMapper = ShardMapper.default
@@ -59,7 +57,7 @@ class IngestProtocol(clusterActor: ActorRef,
   }
 
   // *** Metrics ***
-  private val kamonTags = Map("dataset" -> ref.dataset, "version" -> version.toString)
+  private val kamonTags = Map("dataset" -> ref.toString)
   private val rowsIngested = Kamon.metrics.counter("protocol-rows-ingested", kamonTags)
   private val shardHist    = Kamon.metrics.histogram("source-shards-distributed", kamonTags)
 
@@ -93,7 +91,7 @@ class IngestProtocol(clusterActor: ActorRef,
       val nodeRef = mapper.coordForShard(shardNum)
       // We forward it so that the one who sent us MoreRows will get back the Ack message directly
       // which also means we don't have to deal with responses
-      nodeRef.forward(IngestionCommands.IngestRows(ref, version, shardNum, records))
+      nodeRef.forward(IngestionCommands.IngestRows(ref, shardNum, records))
       rowsIngested.increment(records.length)
       shardHist.record(shardNum)
   }: Receive) orElse shardUpdates orElse errorCatcher

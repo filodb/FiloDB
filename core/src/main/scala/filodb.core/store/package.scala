@@ -8,7 +8,8 @@ import net.jpountz.lz4.{LZ4Compressor, LZ4Factory, LZ4FastDecompressor}
 import org.scalactic._
 import org.velvia.filo.RowReader
 
-import filodb.core.metadata.{Column, InvalidFunctionSpec, RichProjection}
+import filodb.core.Types._
+import filodb.core.metadata.{Dataset, InvalidFunctionSpec}
 import filodb.core.SingleKeyTypes.Long64HighBit
 import filodb.core.query._
 
@@ -95,16 +96,21 @@ package object store {
     import ChunkSetReader._
     import Iterators._
 
-    def aggregate(projection: RichProjection,
-                  version: Int,
+    /**
+     * Performs aggregations on the ChunkSource chunks.
+     * @param dataset the Dataset to read from
+     * @param columnIDs the set of column IDs to read back.  Order determines the order of columns read back
+     *                in each row.  These are the IDs from the Column instances.
+     */
+    def aggregate(dataset: Dataset,
                   query: QuerySpec,
                   partMethod: PartitionScanMethod,
                   chunkMethod: ChunkScanMethod = AllChunkScan): Task[Aggregate[_]] Or InvalidFunctionSpec = {
-      for { aggregator <- query.aggregateFunc.validate(query.column, projection.timestampColumn.map(_.name),
-                                                       chunkMethod, query.aggregateArgs, projection)
+      for { aggregator <- query.aggregateFunc.validate(query.column, dataset.timestampColumn.map(_.name),
+                                                       chunkMethod, query.aggregateArgs, dataset)
             combiner   <- query.combinerFunc.validate(aggregator, query.combinerArgs) }
       yield {
-        val aggStream = source.scanPartitions(projection, version, partMethod)
+        val aggStream = source.scanPartitions(dataset, partMethod)
                           .map { partition => aggregator.aggPartition(chunkMethod, partition) }
         combiner.fold(aggStream)
       }
@@ -113,41 +119,41 @@ package object store {
     /**
      * Scans chunks from a dataset.  ScanMethod params determines what gets scanned.
      *
-     * @param projection the Projection to read from
-     * @param columns the set of columns to read back.  Order determines the order of columns read back
-     *                in each row
-     * @param version the version # to read from
+     * @param dataset the Dataset to read from
+     * @param columnIDs the set of column IDs to read back.  Order determines the order of columns read back
+     *                in each row.  These are the IDs from the Column instances.
      * @param partMethod which partitions to scan
      * @param chunkMethod which chunks within a partition to scan
      * @return An iterator over ChunkSetReaders
      */
-    def scanChunks(projection: RichProjection,
-                   columns: Seq[Column],
-                   version: Int,
+    def scanChunks(dataset: Dataset,
+                   columnIDs: Seq[ColumnId],
                    partMethod: PartitionScanMethod,
-                   chunkMethod: ChunkScanMethod = AllChunkScan,
-                   colToMaker: ColumnToMaker = defaultColumnToMaker): Iterator[ChunkSetReader] =
-      source.readChunks(projection, columns, version, partMethod, chunkMethod, colToMaker).toIterator()
+                   chunkMethod: ChunkScanMethod = AllChunkScan): Iterator[ChunkSetReader] =
+      source.readChunks(dataset, columnIDs, partMethod, chunkMethod).toIterator()
 
     /**
      * Scans over chunks, just like scanChunks, but returns an iterator of RowReader
      * for all of those row-oriented applications.  Contains a high performance iterator
      * implementation, probably faster than trying to do it yourself.  :)
+     *
+     * @param chunkReaderMap A function to transform the incoming ChunkSetReader => ChunkSetReader.
+     *                       Mainly used by the Spark DataSource to adapt FiloVectors for Spark.
+     * @param readerFactory  A function Array[FiloVector] => RowReader
      */
-    def scanRows(projection: RichProjection,
-                 columns: Seq[Column],
-                 version: Int,
+    def scanRows(dataset: Dataset,
+                 columnIDs: Seq[ColumnId],
                  partMethod: PartitionScanMethod,
                  chunkMethod: ChunkScanMethod = AllChunkScan,
-                 colToMaker: ColumnToMaker = defaultColumnToMaker,
+                 chunkReaderMap: ChunkSetReader => ChunkSetReader = { x => x },
                  readerFactory: RowReaderFactory = DefaultReaderFactory): Iterator[RowReader] = {
-      val chunkIt = scanChunks(projection, columns, version, partMethod, chunkMethod, colToMaker)
+      val chunkIt = scanChunks(dataset, columnIDs, partMethod, chunkMethod)
       if (chunkIt.hasNext) {
         // TODO: fork this kind of code into a macro, called fastFlatMap.
         // That's what we really need...  :-p
         new Iterator[RowReader] {
           final def getNextRowIt: Iterator[RowReader] = {
-            val chunkReader = chunkIt.next
+            val chunkReader = chunkReaderMap(chunkIt.next)
             chunkReader.rowIterator(readerFactory)
           }
 

@@ -1,6 +1,5 @@
 package filodb.cassandra.metastore
 
-import scala.concurrent.Await
 import scala.concurrent.duration._
 import scala.language.postfixOps
 
@@ -30,9 +29,8 @@ class DatasetTableSpec extends FlatSpec with AsyncTest {
     datasetTable.clearAll().futureValue(timeout)
   }
 
-  val fooDataset = Dataset("foo", "someSortCol")
+  val fooDataset = Dataset("foo", Seq("seg:int"), Seq("timestamp:long", "min:double", "max:double"))
   val timeout = Timeout(30 seconds)
-  import scala.concurrent.ExecutionContext.Implicits.global
 
   "DatasetTable" should "create a dataset successfully, then return AlreadyExists" in {
     whenReady(datasetTable.createNewDataset(fooDataset), timeout) { response =>
@@ -67,12 +65,11 @@ class DatasetTableSpec extends FlatSpec with AsyncTest {
   }
 
   it should "return the Dataset if it exists" in {
-    val barRef = DatasetRef("bar", Some("funky_ks"))
-    val barDataset = Dataset(barRef, Seq("key1", ":getOrElse key2 --"),
-                             Seq("part1", ":getOrElse part2 00"))
+    val barDataset = Dataset("bar", Seq("seg:int"), Seq("timestamp:long", "min:double", "max:double"))
+                       .copy(database = Some("funky_ks"))
     datasetTable.createNewDataset(barDataset).futureValue(timeout) should equal (Success)
 
-    whenReady(datasetTable.getDataset(barRef),timeout) { dataset =>
+    whenReady(datasetTable.getDataset(barDataset.ref),timeout) { dataset =>
       dataset should equal (barDataset)
     }
   }

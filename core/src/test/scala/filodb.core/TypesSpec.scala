@@ -1,6 +1,6 @@
 package filodb.core
 
-import org.velvia.filo.{RowReader, TupleRowReader}
+import org.velvia.filo.TupleRowReader
 import org.velvia.filo.ZeroCopyUTF8String._
 import scodec.bits._
 

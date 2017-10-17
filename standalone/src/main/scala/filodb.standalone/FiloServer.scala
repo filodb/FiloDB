@@ -11,7 +11,7 @@ import net.ceedubs.ficus.Ficus._
 import filodb.akkabootstrapper.AkkaBootstrapper
 import filodb.coordinator._
 import filodb.coordinator.client.LocalClient
-import filodb.core.metadata.{Column, DataColumn, Dataset}
+import filodb.core.metadata.Dataset
 import filodb.http.FiloHttpServer
 
 /**
@@ -27,20 +27,14 @@ import filodb.http.FiloHttpServer
  *   seed-nodes = ["akka.tcp://filo-standalone@hostname_or_ip:2552"]
  *   dataset-definitions {
  *     sample-timeseries {
- *       string-columns = ["metric-name"]
- *       double-columns = ["metric-value"]
- *       long-columns = ["timestamp"]
- *       int-columns = []
- *
- *       partition-keys = ["metric-name"]
+ *       partition-columns = ["metricName:string", "tags:map"]
+ *       data-columns = ["timestamp:long", "value:double"]
  *       row-keys = ["timestamp"]
  *     }
  *   }
  * }}}
  */
 object FiloServer extends FilodbClusterNode with StrictLogging {
-  import Column.ColumnType._
-
   override val role = ClusterRole.Server
 
   val settings = new FilodbSettings()
@@ -88,19 +82,13 @@ object FiloServer extends FilodbClusterNode with StrictLogging {
   }
 
   def createDatasetFromConfig(datasetName: String, config: Config): Unit = {
-    val partKeys = config.as[Seq[String]]("partition-keys")
+    val partColumns = config.as[Seq[String]]("partition-columns")
+    val dataColumns = config.as[Seq[String]]("data-columns")
     val rowKeys = config.as[Seq[String]]("row-keys")
 
-    val columns =
-      config.as[Seq[String]]("string-columns").map(n => DataColumn(0, n, datasetName, 0, StringColumn)) ++
-      config.as[Seq[String]]("double-columns").map(n => DataColumn(0, n, datasetName, 0, DoubleColumn)) ++
-      config.as[Seq[String]]("long-columns").map(n => DataColumn(0, n, datasetName, 0, LongColumn)) ++
-      config.as[Seq[String]]("int-columns").map(n => DataColumn(0, n, datasetName, 0, IntColumn)) ++
-      config.as[Seq[String]]("map-columns").map(n => DataColumn(0, n, datasetName, 0, MapColumn))
-
-    val dataset = Dataset(datasetName, rowKeys, partKeys)
-    logger.info(s"Creating dataset $dataset with columns $columns...")
-    client.createNewDataset(dataset, columns)
+    val dataset = Dataset(datasetName, partColumns, dataColumns, rowKeys)
+    logger.info(s"Created dataset $dataset...")
+    client.createNewDataset(dataset)
   }
 
   // NOTE: user must watch for ingestion manually using CLI and logs

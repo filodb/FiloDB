@@ -2,19 +2,17 @@ package filodb.stress
 
 import akka.pattern.ask
 import akka.util.Timeout
-import org.apache.spark.sql.{DataFrame, SparkSession, SaveMode}
+import org.apache.spark.sql.{SparkSession, SaveMode}
 import org.joda.time.DateTime
 import monix.eval.Task
 import monix.reactive.Observable
-import scala.util.Random
 import scala.concurrent.duration._
-import scala.concurrent.{Await, Future}
+import scala.concurrent.Await
 import scala.language.postfixOps
-import scalaxy.loops._
 
 import filodb.core.{Perftools, DatasetRef}
 import filodb.coordinator.QueryCommands._
-import filodb.spark.{FiloDriver, FiloRelation, FiloExecutor}
+import filodb.spark.{FiloDriver, FiloExecutor}
 
 /**
  * A MemStore ingestion and concurrent query stress tester
@@ -78,7 +76,7 @@ object MemStoreStress extends App {
                    .map { n =>
                      val startIndex = n % (medallions.size - 10)
                      val keys = medallions.slice(startIndex, startIndex + 10).toSeq.map(k => Seq(k))
-                     AggregateQuery(ref, 0, queryArgs, MultiPartitionQuery(keys))
+                     AggregateQuery(ref, queryArgs, MultiPartitionQuery(keys))
                    }.mapAsync(queryThreads) { qMessage =>
                      Perftools.withTrace(Task.fromFuture(FiloExecutor.coordinatorActor ? qMessage),
                                          "time-series-query")
@@ -92,7 +90,7 @@ object MemStoreStress extends App {
     csvDF.write.format("filodb.spark").
       option("dataset", "nyc_taxi").
       option("row_keys", "pickup_datetime").
-      option("partition_keys", "medallion").
+      option("partition_columns", "medallion:string").
       // This is needed for now because memstore write path doesn't handle flush - flushes are N/A to memstore
       option("flush_after_write", "false").
       mode(SaveMode.Overwrite).save()

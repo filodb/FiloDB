@@ -10,24 +10,18 @@ import scala.language.postfixOps
 import scala.util.Random
 import scalaxy.loops._
 
-import filodb.core._
-import filodb.core.metadata.{Column, DataColumn, Dataset, RichProjection}
+import filodb.core.metadata.Dataset
 import filodb.core.query.ChunkSetReader
 import filodb.core.store.{ChunkSet}
-import org.velvia.filo.{FiloVector, FastFiloRowReader, RowReader, TupleRowReader}
+import org.velvia.filo.{FiloVector, FastFiloRowReader, TupleRowReader}
 
 import java.util.concurrent.TimeUnit
 
 object IntSumReadBenchmark {
-  val schema = Seq(DataColumn(0, "int", "dataset", 0, Column.ColumnType.IntColumn),
-                   DataColumn(1, "rownum", "dataset", 0, Column.ColumnType.IntColumn))
-
-  val dataset = Dataset("dataset", "rownum", ":round rownum 10000")
-  val ref = DatasetRef("dataset")
-  val projection = RichProjection(dataset, schema)
-  val partKey = projection.partKey("/0")
-
-  val rowIt = Iterator.from(0).map { row => (Some(scala.util.Random.nextInt), Some(row)) }
+  val dataset = Dataset("dataset", Seq("part:int"), Seq("int:int", "rownum:int"), "rownum")
+  val rowIt = Iterator.from(0).map { row => (Some(scala.util.Random.nextInt), Some(row), Some(0)) }
+  val partKey = dataset.partKey(0)
+  val rowColumns = Seq("int", "rownum", "part")
 
   org.slf4j.LoggerFactory.getLogger("filodb").asInstanceOf[Logger].setLevel(Level.ERROR)
 }
@@ -42,12 +36,13 @@ class IntSumReadBenchmark {
   import IntSumReadBenchmark._
   val NumRows = 10000
 
-  val chunkSet = ChunkSet(projection, partKey, rowIt.map(TupleRowReader).take(NumRows).toSeq)
-  val reader = ChunkSetReader(chunkSet, partKey, schema)
+  val chunkSet = ChunkSet(dataset, partKey, rowIt.map(TupleRowReader).take(NumRows).toSeq)
+  val reader = ChunkSetReader(chunkSet, dataset, 0 until dataset.dataColumns.length)
 
   val NumSkips = 300  // 3% skips - not that much really
   val skips = (0 until NumSkips).map { i => Random.nextInt(NumRows) }.sorted.distinct
-  val readerWithSkips = ChunkSetReader(chunkSet, partKey, schema, EWAHCompressedBitmap.bitmapOf(skips: _*))
+  val readerWithSkips = ChunkSetReader(chunkSet, dataset, 0 until dataset.dataColumns.length,
+                                       EWAHCompressedBitmap.bitmapOf(skips: _*))
 
   /**
    * Simulation of a columnar query engine scanning the segment chunks columnar wise

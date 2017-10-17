@@ -3,7 +3,6 @@ package filodb.coordinator
 import java.net.InetAddress
 
 import scala.concurrent.duration._
-import scala.util.Try
 
 import akka.actor.{ActorRef, AddressFromURIString, PoisonPill, Props}
 import akka.pattern.gracefulStop
@@ -14,7 +13,7 @@ import org.scalatest.time.{Millis, Seconds, Span}
 
 import org.velvia.filo.ZeroCopyUTF8String
 import filodb.core._
-import filodb.core.metadata.{DataColumn, Dataset, RichProjection}
+import filodb.core.metadata.Dataset
 import filodb.core.query.{AggregationFunction, ColumnFilter, Filter, HistogramBucket}
 import filodb.core.store._
 
@@ -57,7 +56,6 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
   var coordinatorActor: ActorRef = _
   var probe: TestProbe = _
   var shardMap = new ShardMapper(1)
-  val colNames = schema.map(_.name)
   val nodeCoordProps = NodeCoordinatorActor.props(metaStore, memStore, selfAddress, config)
 
   override def beforeAll(): Unit = {
@@ -86,31 +84,23 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
     gracefulStop(coordinatorActor, 3.seconds.dilated, PoisonPill).futureValue
   }
 
-  def createTable(dataset: Dataset, columns: Seq[DataColumn]): Unit = {
-    metaStore.newDataset(dataset).futureValue should equal (Success)
-    val ref = DatasetRef(dataset.name)
-    columns.foreach { col => metaStore.newColumn(col, ref).futureValue should equal (Success) }
-  }
-
-  def startIngestion(projection: RichProjection, dataColumns: Seq[DataColumn], numShards: Int): Unit = {
+  def startIngestion(dataset: Dataset, numShards: Int): Unit = {
     val resources = DatasetResourceSpec(numShards, 1)
     val noOpSource = IngestionSource(classOf[NoOpStreamFactory].getName)
-    val columns = dataColumns.map(_.toString)// this test wants toString vs _.name
-    val dataset = Dataset(projection.datasetRef, Seq.empty, Seq.empty)
-    val sd = SetupDataset(projection.datasetRef, columns, resources, noOpSource)
-    shardActor ! AddDataset(sd, dataset, Seq.empty, Set(coordinatorActor), self)
+    val sd = SetupDataset(dataset.ref, resources, noOpSource)
+    shardActor ! AddDataset(sd, dataset, Set(coordinatorActor), self)
     val added = expectMsgPF() {
       case e: DatasetAdded =>
-        probe.send(coordinatorActor, IngestionCommands.DatasetSetup(projection.dataset, columns, 0))
+        probe.send(coordinatorActor, IngestionCommands.DatasetSetup(dataset.asCompactString))
         e
     }
-    shardActor ! Subscribe(probe.ref, projection.datasetRef)
+    shardActor ! Subscribe(probe.ref, dataset.ref)
     probe.expectMsgPF() { case CurrentShardSnapshot(ds, mapper) =>
       shardMap = mapper
     }
 
     added.shards(coordinatorActor) foreach { shard =>
-      probe.send(coordinatorActor, StartShardIngestion(projection.datasetRef, shard, None))
+      probe.send(coordinatorActor, StartShardIngestion(dataset.ref, shard, None))
       probe.expectMsgPF() {
         case e: IngestionStarted =>
           shardMap.updateFromEvent(e)
@@ -122,15 +112,15 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
 
   describe("NodeCoordinatorActor DatasetOps commands") {
     it("should be able to create new dataset") {
-      probe.send(coordinatorActor, CreateDataset(dataset1, schema))
+      probe.send(coordinatorActor, CreateDataset(dataset1))
       probe.expectMsg(DatasetCreated)
     }
 
     it("should return DatasetAlreadyExists creating dataset that already exists") {
-      probe.send(coordinatorActor, CreateDataset(dataset1, schema))
+      probe.send(coordinatorActor, CreateDataset(dataset1))
       probe.expectMsg(DatasetCreated)
 
-      probe.send(coordinatorActor, CreateDataset(dataset1, schema))
+      probe.send(coordinatorActor, CreateDataset(dataset1))
       probe.expectMsg(DatasetAlreadyExists)
     }
   }
@@ -140,30 +130,30 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
     import QueryCommands._
 
     def setupTimeSeries(numShards: Int = 1): DatasetRef = {
-      probe.send(coordinatorActor, CreateDataset(dataset1, schemaWithSeries))
+      probe.send(coordinatorActor, CreateDataset(dataset1))
       probe.expectMsg(DatasetCreated)
 
-      startIngestion(MachineMetricsData.projection1, schemaWithSeries, numShards)
-      projection.datasetRef
+      startIngestion(MachineMetricsData.dataset1, numShards)
+      dataset.ref
     }
 
     it("should return UnknownDataset if attempting to query before ingestion set up") {
-      probe.send(coordinatorActor, CreateDataset(dataset1, schemaWithSeries))
+      probe.send(coordinatorActor, CreateDataset(dataset1))
       probe.expectMsg(DatasetCreated)
 
-      val ref = MachineMetricsData.projection1.datasetRef
-      val q1 = RawQuery(ref, 0, Seq("min"), SinglePartitionQuery(Seq("Series 1")), AllPartitionData)
+      val ref = MachineMetricsData.dataset1.ref
+      val q1 = RawQuery(ref, Seq("min"), SinglePartitionQuery(Seq("Series 1")), AllPartitionData)
       probe.send(coordinatorActor, q1)
       probe.expectMsg(UnknownDataset)
     }
 
     it("should return raw chunks with a RawQuery after ingesting rows") {
       val ref = setupTimeSeries()
-      probe.send(coordinatorActor, IngestRows(ref, 0, 0, records(multiSeriesData()).take(20)))
+      probe.send(coordinatorActor, IngestRows(ref, 0, records(multiSeriesData()).take(20)))
       probe.expectMsg(Ack(19L))
 
       // Query existing partition: Series 1
-      val q1 = RawQuery(ref, 0, Seq("min"), SinglePartitionQuery(Seq("Series 1")), AllPartitionData)
+      val q1 = RawQuery(ref, Seq("min"), SinglePartitionQuery(Seq("Series 1")), AllPartitionData)
       probe.send(coordinatorActor, q1)
       val info1 = probe.expectMsgPF(3.seconds.dilated) {
         case q @ QueryInfo(_, ref, _) => q
@@ -174,7 +164,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       probe.expectMsg(QueryEndRaw(info1.id))
 
       // Query nonexisting partition
-      val q2 = RawQuery(ref, 0, Seq("min"), SinglePartitionQuery(Seq("NotSeries")), AllPartitionData)
+      val q2 = RawQuery(ref, Seq("min"), SinglePartitionQuery(Seq("NotSeries")), AllPartitionData)
       probe.send(coordinatorActor, q2)
       val info2 = probe.expectMsgPF(3.seconds.dilated) {
         case q @ QueryInfo(_, ref, _) => q
@@ -184,18 +174,18 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
 
     it("should return BadArgument/BadQuery if wrong type of partition key passed") {
       val ref = setupTimeSeries()
-      val q1 = RawQuery(ref, 0, Seq("min"), SinglePartitionQuery(Seq(-1)), AllPartitionData)
+      val q1 = RawQuery(ref, Seq("min"), SinglePartitionQuery(Seq(-1)), AllPartitionData)
       probe.send(coordinatorActor, q1)
       probe.expectMsgClass(classOf[BadQuery])
     }
 
     it("should return BadQuery if aggregation function not defined") {
       val ref = setupTimeSeries()
-      val q1 = AggregateQuery(ref, 0, QueryArgs("not-a-func", "foo"), SinglePartitionQuery(Seq("Series 1")))
+      val q1 = AggregateQuery(ref, QueryArgs("not-a-func", "foo"), SinglePartitionQuery(Seq("Series 1")))
       probe.send(coordinatorActor, q1)
       probe.expectMsg(BadQuery("No such aggregation function not-a-func"))
 
-      val q2 = AggregateQuery(ref, 0, QueryArgs("TimeGroupMin", "min"), SinglePartitionQuery(Seq("Series 1")))
+      val q2 = AggregateQuery(ref, QueryArgs("TimeGroupMin", "min"), SinglePartitionQuery(Seq("Series 1")))
       probe.send(coordinatorActor, q2)
       probe.expectMsg(BadQuery("No such aggregation function TimeGroupMin"))
     }
@@ -203,7 +193,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
     // Don't have a function that returns this yet.  time_group_* _used_ to but doesn't anymore
     ignore("should return WrongNumberOfArgs if number of arguments wrong") {
       val ref = setupTimeSeries()
-      val q1 = AggregateQuery(ref, 0, QueryArgs("time_group_avg", "min"),
+      val q1 = AggregateQuery(ref, QueryArgs("time_group_avg", "min"),
                               SinglePartitionQuery(Seq("Series 1")))
       probe.send(coordinatorActor, q1)
       probe.expectMsg(WrongNumberOfArgs(2, 5))
@@ -211,7 +201,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
 
     it("should return BadArgument if arguments could not be parsed successfully") {
       val ref = setupTimeSeries()
-      val q1 = AggregateQuery(ref, 0, QueryArgs("time_group_avg", "min", Seq("a1b")),
+      val q1 = AggregateQuery(ref, QueryArgs("time_group_avg", "min", Seq("a1b")),
                               SinglePartitionQuery(Seq("Series 1")))
       probe.send(coordinatorActor, q1)
       probe.expectMsgClass(classOf[BadArgument])
@@ -223,7 +213,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       val ref = setupTimeSeries()
       // Test 1: Cannot pass in a non-double column for time_group_avg
       val args = QueryArgs("time_group_avg", "timestamp", Seq("100"), timeScan)
-      val q1 = AggregateQuery(ref, 0, args, SinglePartitionQuery(Seq("Series 1")))
+      val q1 = AggregateQuery(ref, args, SinglePartitionQuery(Seq("Series 1")))
       probe.send(coordinatorActor, q1)
       val msg = probe.expectMsgClass(classOf[BadArgument])
       msg.msg should include ("not in allowed set")
@@ -232,23 +222,23 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
     it("should return BadQuery if time function used on a non-timeseries dataset") {
       import GdeltTestData._
 
-      probe.send(coordinatorActor, CreateDataset(dataset4, schema))
+      probe.send(coordinatorActor, CreateDataset(dataset4))
       probe.expectMsg(DatasetCreated)
 
       // No need to initialize ingestion, because this test doesn't query data itself
 
-      val ref4 = dataset4.projections.head.dataset
-      probe.send(coordinatorActor, DatasetSetup(dataset4, schema.map(_.toString), 0))
+      val ref4 = dataset4.ref
+      probe.send(coordinatorActor, DatasetSetup(dataset4.asCompactString))
 
       // case 1: scan all data in partition, but no timestamp column ->
       val args = QueryArgs("time_group_avg", "AvgTone", Nil)
-      val q1 = AggregateQuery(ref4, 0, args, FilteredPartitionQuery(Nil))
+      val q1 = AggregateQuery(ref4, args, FilteredPartitionQuery(Nil))
       probe.send(coordinatorActor, q1)
       val msg = probe.expectMsgClass(classOf[BadQuery])
       msg.msg should include ("time-based functions")
 
       // case 2: using a time-based range scan should not be valid for non-timeseries dataset
-      val q2 = AggregateQuery(ref4, 0, args.copy(dataQuery = MostRecentTime(5000)), FilteredPartitionQuery(Nil))
+      val q2 = AggregateQuery(ref4, args.copy(dataQuery = MostRecentTime(5000)), FilteredPartitionQuery(Nil))
       probe.send(coordinatorActor, q2)
       val msg2 = probe.expectMsgClass(classOf[BadQuery])
       msg2.msg should include ("Not a time")
@@ -256,12 +246,12 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
 
     it("should return results in AggregateResponse if valid AggregateQuery") {
       val ref = setupTimeSeries()
-      probe.send(coordinatorActor, IngestRows(ref, 0, 0, records(linearMultiSeries()).take(30)))
+      probe.send(coordinatorActor, IngestRows(ref, 0, records(linearMultiSeries()).take(30)))
       probe.expectMsg(Ack(29L))
 
       val args = QueryArgs("time_group_avg", "min", Seq("2"), timeScan)
       val series = (1 to 3).map(n => Seq(s"Series $n"))
-      val q1 = AggregateQuery(ref, 0, args, MultiPartitionQuery(series))
+      val q1 = AggregateQuery(ref, args, MultiPartitionQuery(series))
       probe.send(coordinatorActor, q1)
       val answer = probe.expectMsgClass(classOf[AggregateResponse[Double]])
       answer.elementClass should equal (classOf[Double])
@@ -271,7 +261,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       import ZeroCopyUTF8String._
       val series2 = (2 to 4).map(n => s"Series $n").toSet.asInstanceOf[Set[Any]]
       val multiFilter = Seq(ColumnFilter("series", Filter.In(series2)))
-      val q2 = AggregateQuery(ref, 0, args, FilteredPartitionQuery(multiFilter))
+      val q2 = AggregateQuery(ref, args, FilteredPartitionQuery(multiFilter))
       probe.send(coordinatorActor, q2)
       val answer2 = probe.expectMsgClass(classOf[AggregateResponse[Double]])
       answer2.elementClass should equal (classOf[Double])
@@ -279,7 +269,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
 
       // What if filter returns no results?
       val filter3 = Seq(ColumnFilter("series", Filter.Equals("foobar".utf8)))
-      val q3 = AggregateQuery(ref, 0, args, FilteredPartitionQuery(filter3))
+      val q3 = AggregateQuery(ref, args, FilteredPartitionQuery(filter3))
       probe.send(coordinatorActor, q3)
       val answer3 = probe.expectMsgClass(classOf[AggregateResponse[Double]])
       answer3.elementClass should equal (classOf[Double])
@@ -288,9 +278,9 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
 
     it("should aggregate from multiple shards") {
       val ref = setupTimeSeries(2)
-      probe.send(coordinatorActor, IngestRows(ref, 0, 0, records(linearMultiSeries()).take(30)))
+      probe.send(coordinatorActor, IngestRows(ref, 0, records(linearMultiSeries()).take(30)))
       probe.expectMsg(Ack(29L))
-      probe.send(coordinatorActor, IngestRows(ref, 0, 1, records(linearMultiSeries(130000L)).take(20)))
+      probe.send(coordinatorActor, IngestRows(ref, 1, records(linearMultiSeries(130000L)).take(20)))
       probe.expectMsg(Ack(19L))
 
       // Should return results from both shards
@@ -298,7 +288,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       val args = QueryArgs("time_group_avg", "min", Seq("3"), timeScan.copy(end = Seq(140000L)))
       val series2 = (2 to 4).map(n => s"Series $n").toSet.asInstanceOf[Set[Any]]
       val multiFilter = Seq(ColumnFilter("series", Filter.In(series2)))
-      val q2 = AggregateQuery(ref, 0, args, FilteredPartitionQuery(multiFilter))
+      val q2 = AggregateQuery(ref, args, FilteredPartitionQuery(multiFilter))
       probe.send(coordinatorActor, q2)
       val answer2 = probe.expectMsgClass(classOf[AggregateResponse[Double]])
       answer2.elementClass should equal (classOf[Double])
@@ -307,11 +297,11 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
 
     it("should aggregate using histogram combiner") {
       val ref = setupTimeSeries()
-      probe.send(coordinatorActor, IngestRows(ref, 0, 0, records(linearMultiSeries()).take(30)))
+      probe.send(coordinatorActor, IngestRows(ref, 0, records(linearMultiSeries()).take(30)))
       probe.expectMsg(Ack(29L))
 
       val args = QueryArgs("sum", "min", combinerName="histogram", combinerArgs=Seq("2000"))
-      val q1 = AggregateQuery(ref, 0, args, FilteredPartitionQuery(Nil))
+      val q1 = AggregateQuery(ref, args, FilteredPartitionQuery(Nil))
       probe.send(coordinatorActor, q1)
       val answer = probe.expectMsgClass(classOf[AggregateResponse[HistogramBucket]])
       answer.elementClass should equal (classOf[HistogramBucket])
@@ -322,13 +312,13 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
 
     it("should query partitions in AggregateQuery") {
       val ref = setupTimeSeries()
-      probe.send(coordinatorActor, IngestRows(ref, 0, 0, records(linearMultiSeries()).take(30)))
+      probe.send(coordinatorActor, IngestRows(ref, 0, records(linearMultiSeries()).take(30)))
       probe.expectMsg(Ack(29L))
 
       val args = QueryArgs("partition_keys", "min")
       val series2 = (2 to 4).map(n => s"Series $n").toSet
       val multiFilter = Seq(ColumnFilter("series", Filter.In(series2.asInstanceOf[Set[Any]])))
-      val q2 = AggregateQuery(ref, 0, args, FilteredPartitionQuery(multiFilter))
+      val q2 = AggregateQuery(ref, args, FilteredPartitionQuery(multiFilter))
       probe.send(coordinatorActor, q2)
       val answer2 = probe.expectMsgClass(classOf[AggregateResponse[String]])
       answer2.elementClass should equal (classOf[String])
@@ -337,7 +327,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
 
     it("should respond to GetIndexNames and GetIndexValues") {
       val ref = setupTimeSeries()
-      probe.send(coordinatorActor, IngestRows(ref, 0, 0, records(linearMultiSeries()).take(30)))
+      probe.send(coordinatorActor, IngestRows(ref, 0, records(linearMultiSeries()).take(30)))
       probe.expectMsg(Ack(29L))
 
       probe.send(coordinatorActor, GetIndexNames(ref))
@@ -349,44 +339,44 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
   }
 
   it("should be able to start ingestion, send rows, and get an ack back") {
-    val ref = projection6.datasetRef
+    val ref = dataset6.ref
 
-    probe.send(coordinatorActor, CreateDataset(dataset6, schema))
+    probe.send(coordinatorActor, CreateDataset(dataset6))
     probe.expectMsg(DatasetCreated)
-    startIngestion(projection6, schema, 1)
-    probe.send(coordinatorActor, IngestRows(ref, 0, 0, records(projection6)))
+    startIngestion(dataset6, 1)
+    probe.send(coordinatorActor, IngestRows(ref, 0, records(dataset6)))
     probe.expectMsg(Ack(98L))
 
     // Flush not needed for MemStores.....
     // probe.send(coordActor, Flush(ref, 0))
     // probe.expectMsg(Flushed)
 
-    probe.send(coordinatorActor, GetIngestionStats(ref, 0))
+    probe.send(coordinatorActor, GetIngestionStats(ref))
     probe.expectMsg(IngestionActor.IngestionStatus(99))
 
     // Now, read stuff back from the column store and check that it's all there
     val split = memStore.getScanSplits(ref, 1).head
     val query = QuerySpec("AvgTone", AggregationFunction.Sum)
-    val agg1 = memStore.aggregate(projection6, 0, query, FilteredPartitionScan(split))
+    val agg1 = memStore.aggregate(dataset6, query, FilteredPartitionScan(split))
                        .get.runAsync.futureValue
     agg1.result.asInstanceOf[Array[Double]](0) should be (575.24 +- 0.01)
   }
 
   it("should stop datasetActor if error occurs and prevent further ingestion") {
-    probe.send(coordinatorActor, CreateDataset(projection1.dataset, schema))
+    probe.send(coordinatorActor, CreateDataset(dataset1))
     probe.expectMsg(DatasetCreated)
 
-    val ref = projection1.datasetRef
-    startIngestion(projection1, schema, 1)
+    val ref = dataset1.ref
+    startIngestion(dataset1, 1)
 
     EventFilter[NumberFormatException](occurrences = 1) intercept {
-      probe.send(coordinatorActor, IngestRows(ref, 0, 0, records(projection1, readers ++ Seq(badLine))))
+      probe.send(coordinatorActor, IngestRows(ref, 0, records(dataset1, readers ++ Seq(badLine))))
       // This should trigger an error, and datasetCoordinatorActor will stop.  A stop event will come.
       probe.expectMsgClass(classOf[IngestionStopped])
     }
 
     // Now, if we send more rows, we will get UnknownDataset
-    probe.send(coordinatorActor, IngestRows(ref, 0, 0, records(projection1)))
+    probe.send(coordinatorActor, IngestRows(ref, 0, records(dataset1)))
     probe.expectMsg(UnknownDataset)
   }
 }

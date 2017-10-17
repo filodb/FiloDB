@@ -2,9 +2,6 @@ package filodb.timeseries
 
 import java.lang.{Long => JLong}
 
-import scala.concurrent.Await
-import scala.concurrent.duration._
-
 import com.typesafe.scalalogging.StrictLogging
 import monix.execution.Scheduler
 import monix.kafka.config.AutoOffsetReset

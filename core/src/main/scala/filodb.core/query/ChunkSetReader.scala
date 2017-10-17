@@ -5,11 +5,9 @@ import java.nio.ByteBuffer
 import org.velvia.filo._
 import scala.collection.mutable.BitSet
 
-import filodb.core.binaryrecord.{BinaryRecord, RecordSchema}
-import filodb.core.metadata.Column
-import filodb.core.metadata.Column.ColumnType
+import filodb.core.metadata.Dataset
 import filodb.core.store.{ChunkSet, ChunkSetInfo}
-import filodb.core.Types.{ColumnId, PartitionKey}
+import filodb.core.Types.PartitionKey
 
 /**
  * ChunkSetReader aggregates incoming chunks during query/read time and provides an Iterator[RowReader]
@@ -20,24 +18,25 @@ import filodb.core.Types.{ColumnId, PartitionKey}
 class MutableChunkSetReader(info: ChunkSetInfo,
                             partition: PartitionKey,
                             skips: EWAHCompressedBitmap,
-                            makers: Array[ChunkSetReader.VectorFactory])
-extends ChunkSetReader(info, partition, skips, new Array[FiloVector[_]](makers.size)) {
+                            numChunks: Int)
+extends ChunkSetReader(info, partition, skips, new Array[FiloVector[_]](numChunks)) {
   private final val bitset = new BitSet
 
-  final def addChunk(colNo: Int, bytes: ByteBuffer): Unit = {
-    vectors(colNo) = makers(colNo)(bytes, length)
+  final def addChunk(colNo: Int, vector: FiloVector[_]): Unit = {
+    vectors(colNo) = vector
     bitset += colNo
   }
 
-  final def isFull: Boolean = bitset.size >= makers.size
+  final def isFull: Boolean = bitset.size >= numChunks
 }
 
 /**
  * ChunkSetReader provides a way to iterate through FiloVectors as rows, including skipping of rows.
+ * The partition is used by some aggregation functions to pull out partition information.
  */
 class ChunkSetReader(val info: ChunkSetInfo,
                      val partition: PartitionKey,
-                     skips: EWAHCompressedBitmap,
+                     val skips: EWAHCompressedBitmap,
                      parsers: Array[FiloVector[_]]) {
   import ChunkSetReader._
   private final val len = info.numRows
@@ -84,18 +83,18 @@ object ChunkSetReader {
 
   val DefaultReaderFactory: RowReaderFactory = (vectors) => new FastFiloRowReader(vectors)
 
-  type ColumnToMaker = Column => VectorFactory
-  val defaultColumnToMaker: ColumnToMaker =
-    (col: Column) => FiloVector.defaultVectorMaker(col.columnType.clazz)
-
+  /**
+   * Selects columns columnIDs from chunkSet, producing a ChunkSetReader
+   * @type {[type]}
+   */
   def apply(chunkSet: ChunkSet,
-            partition: PartitionKey,
-            schema: Seq[Column],
+            dataset: Dataset,
+            columnIDs: Seq[Int],
             skips: EWAHCompressedBitmap = emptySkips): ChunkSetReader = {
-    val nameToPos = schema.zipWithIndex.map { case (c, i) => (c.name -> i) }.toMap
-    val makers = schema.map(defaultColumnToMaker).toArray
-    val reader = new MutableChunkSetReader(chunkSet.info, partition, skips, makers)
-    chunkSet.chunks.foreach { case (colName, bytes) => reader.addChunk(nameToPos(colName), bytes) }
+    val reader = new MutableChunkSetReader(chunkSet.info, chunkSet.partition, skips, chunkSet.chunks.length)
+    chunkSet.chunks.zipWithIndex.foreach { case ((colID, buffer), pos) =>
+      reader.addChunk(pos, dataset.vectorMakers(colID)(buffer, chunkSet.info.numRows))
+    }
     reader
   }
 }

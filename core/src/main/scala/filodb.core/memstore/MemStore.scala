@@ -4,33 +4,18 @@ import monix.execution.{CancelableFuture, Scheduler}
 import monix.reactive.Observable
 import org.velvia.filo._
 import org.velvia.filo.{vectors => bv}
-import scalaxy.loops._
 
 import filodb.core.DatasetRef
-import filodb.core.metadata.{Column, RichProjection}
+import filodb.core.metadata.{Column, Dataset}
 import filodb.core.store.ChunkSource
-import filodb.core.Types.PartitionKey
-
-// partition key is separated from the other data columns, as the partition key does not need
-// to be stored, but is needed for routing and other purposes... = less extraction time
-// This allows a partition key to be reused across multiple records also, for efficiency :)
-final case class IngestRecord(partition: SchemaRowReader, data: RowReader, offset: Long)
-
-object IngestRecord {
-  // Creates an IngestRecord from a reader spanning a single entire record, such as that from a CSV file
-  def apply(proj: RichProjection, reader: RowReader, offset: Long): IngestRecord =
-    IngestRecord(SchemaRoutingRowReader(reader, proj.partIndices, proj.partExtractors),
-                 RoutingRowReader(reader, proj.nonPartColIndices),
-                 offset)
-}
 
 case object ShardAlreadySetup extends Exception
 
 /**
- * A MemStore is an in-memory ColumnStore that ingests data not in chunks but as new records, potentially
+ * A MemStore is an in-memory ChunkSource that ingests data not in chunks but as new records, potentially
  * spread over many partitions.  It supports the ChunkSource API, and should support real-time reads
  * of fresh ingested data.  Being in-memory, it is designed to not retain data forever but flush completed
- * chunks to a persistent ColumnStore.
+ * chunks to a persistent ChunkSink.
  *
  * A MemStore contains shards of data for one or more datasets, with optimized ingestion pipeline for
  * each shard.
@@ -42,7 +27,7 @@ trait MemStore extends ChunkSource {
    * This method only succeeds if the dataset and shard has not already been setup.
    * @throws ShardAlreadySetup
    */
-  def setup(projection: RichProjection, shard: Int): Unit
+  def setup(dataset: Dataset, shard: Int): Unit
 
   /**
    * Ingests new rows, making them immediately available for reads
@@ -124,10 +109,9 @@ object MemStore {
    * Figures out the RowReaderAppenders for each column, depending on type and whether it is a static/
    * constant column for each partition.
    */
-  def getAppendables(proj: RichProjection,
-                     partition: PartitionKey,
+  def getAppendables(dataset: Dataset,
                      maxElements: Int): Array[RowReaderAppender] =
-    proj.nonPartitionColumns.zipWithIndex.map { case (col, index) =>
+    dataset.dataColumns.zipWithIndex.map { case (col, index) =>
       col.columnType match {
         case IntColumn       =>
           new IntReaderAppender(bv.IntBinaryVector.appendingVector(maxElements), index)

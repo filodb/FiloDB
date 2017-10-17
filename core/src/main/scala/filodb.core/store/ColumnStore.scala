@@ -1,18 +1,12 @@
 package filodb.core.store
 
 import com.typesafe.scalalogging.StrictLogging
-import monix.eval.Task
-import monix.reactive.Observable
-import org.scalactic._
-import scala.concurrent.{Await, ExecutionContext, Future}
-import scala.concurrent.duration._
-import scala.language.existentials
 
 import filodb.core._
-import filodb.core.Types.PartitionKey
 import filodb.core.binaryrecord.{BinaryRecord, BinaryRecordWrapper}
-import filodb.core.metadata.{Projection, RichProjection}
+import filodb.core.metadata.Dataset
 import filodb.core.query._
+import filodb.core.Types.PartitionKey
 
 sealed trait PartitionScanMethod {
   def shard: Int
@@ -48,8 +42,8 @@ object RowKeyChunkScan {
   def apply(startKey: BinaryRecord, endKey: BinaryRecord): RowKeyChunkScan =
     RowKeyChunkScan(BinaryRecordWrapper(startKey), BinaryRecordWrapper(endKey))
 
-  def apply(projection: RichProjection, startKey: Seq[Any], endKey: Seq[Any]): RowKeyChunkScan =
-    RowKeyChunkScan(BinaryRecord(projection, startKey), BinaryRecord(projection, endKey))
+  def apply(dataset: Dataset, startKey: Seq[Any], endKey: Seq[Any]): RowKeyChunkScan =
+    RowKeyChunkScan(BinaryRecord(dataset, startKey), BinaryRecord(dataset, endKey))
 }
 
 

@@ -5,18 +5,11 @@ import com.typesafe.config.ConfigRenderOptions
 import java.util.concurrent.TimeUnit
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.functions.sum
-import org.apache.spark.sql.types._
-import org.apache.spark.sql.{DataFrame, Row, SparkSession}
+import org.apache.spark.sql.SparkSession
 import org.openjdk.jmh.annotations._
-import org.velvia.filo.{RowReader, TupleRowReader}
-import scala.concurrent.duration._
-import scala.concurrent.{Await, Future}
-import scala.language.postfixOps
-import scalaxy.loops._
+import org.velvia.filo.TupleRowReader
 
-import filodb.core._
-import filodb.core.memstore.IngestRecord
-import filodb.core.metadata.{Column, Dataset}
+import filodb.core.memstore.{IngestRecord, IngestRouting}
 import filodb.core.store._
 import filodb.spark.{FiloDriver, FiloExecutor, FiloRelation}
 
@@ -70,17 +63,16 @@ class SparkReadBenchmark {
   // Initialize metastore
   import filodb.coordinator.client.Client._
   parse(FiloDriver.metaStore.newDataset(dataset)) { x => x }
-  val createColumns = schema.map { col => FiloDriver.metaStore.newColumn(col, ref) }
-  parse(Future.sequence(createColumns)) { x => x }
-  FiloDriver.memStore.setup(projection, 0)
-  val split = FiloDriver.memStore.getScanSplits(ref).head
+  FiloDriver.memStore.setup(dataset, 0)
+  val split = FiloDriver.memStore.getScanSplits(dataset.ref).head
 
   // Write raw data into MemStore
+  val routing = IngestRouting(dataset, rowColumns)
   rowIt.take(NumRows).zipWithIndex
-       .map { case (row, i) => IngestRecord(projection, TupleRowReader(row), i) }
+       .map { case (row, i) => IngestRecord(routing, TupleRowReader(row), i) }
        .grouped(500)
        .foreach { records =>
-         FiloDriver.memStore.ingest(ref, 0, records)
+         FiloDriver.memStore.ingest(dataset.ref, 0, records)
        }
 
   @TearDown
@@ -100,7 +92,6 @@ class SparkReadBenchmark {
     df.agg(sum(df("int"))).collect().head
   }
 
-  val readOnlyProjStr = projection.toReadOnlyProjString(Seq("int"))
   val configStr = filoConfig.root.render(ConfigRenderOptions.concise)
 
   // Measure the speed of MemStore's ScanChunks etc. over many chunks
@@ -109,7 +100,7 @@ class SparkReadBenchmark {
   @BenchmarkMode(Array(Mode.SingleShotTime))
   @OutputTimeUnit(TimeUnit.SECONDS)
   def memStoreOnly(): Any = {
-    val it = FiloRelation.perPartitionRowScanner(configStr, readOnlyProjStr, 0,
+    val it = FiloRelation.perPartitionRowScanner(configStr, dataset.asCompactString, dataset.colIDs("int").get,
                             FilteredPartitionScan(split), AllChunkScan).asInstanceOf[Iterator[InternalRow]]
     var sum = 0
     while (it.hasNext) {

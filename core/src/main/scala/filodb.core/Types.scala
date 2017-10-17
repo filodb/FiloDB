@@ -17,9 +17,7 @@ import filodb.core.binaryrecord.BinaryRecord
 object Types {
   // A Chunk is a single columnar chunk for a given table, partition, column
   type Chunk = ByteBuffer
-  type SegmentId = ByteVector
-  // TODO: Change ColumnId to an Int.  Would be more efficient, and allow renaming columns.
-  type ColumnId = String
+  type ColumnId = Int
   type ChunkID = Long     // Each chunk is identified by segmentID and a long timestamp
 
   type PartitionKey = BinaryRecord

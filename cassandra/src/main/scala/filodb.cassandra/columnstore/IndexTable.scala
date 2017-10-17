@@ -10,12 +10,12 @@ import monix.reactive.Observable
 import filodb.cassandra.FiloCassandraConnector
 import filodb.core._
 import filodb.core.binaryrecord.BinaryRecord
-import filodb.core.metadata.RichProjection
+import filodb.core.metadata.Dataset
 import filodb.core.store.ChunkSinkStats
 
 // Typical record read from serialized incremental index (ChunkInfo + Skips) entries
 case class IndexRecord(binPartition: ByteBuffer, data: ByteBuffer) {
-  def partition(proj: RichProjection): Types.PartitionKey = BinaryRecord(proj.partKeyBinSchema, binPartition)
+  def partition(ds: Dataset): Types.PartitionKey = BinaryRecord(ds.partitionBinSchema, binPartition)
 }
 
 /**
@@ -39,11 +39,10 @@ sealed class IndexTable(val dataset: DatasetRef, val connector: FiloCassandraCon
 
   val createCql = s"""CREATE TABLE IF NOT EXISTS $tableString (
                      |    partition blob,
-                     |    version int,
                      |    indextype int,
                      |    chunkid bigint,
                      |    data blob,
-                     |    PRIMARY KEY ((partition, version), indextype, chunkid)
+                     |    PRIMARY KEY (partition, indextype, chunkid)
                      |) WITH COMPACT STORAGE AND compression = {
                     'sstable_compression': '$sstableCompression'}""".stripMargin
 
@@ -52,45 +51,40 @@ sealed class IndexTable(val dataset: DatasetRef, val connector: FiloCassandraCon
     IndexRecord(row.getBytes("partition"), row.getBytes("data"))
 
   val selectCql = s"SELECT partition, data FROM $tableString WHERE "
-  val partVersionFilter = "partition = ? AND version = ? AND indextype = 1"
-  lazy val allPartReadCql = session.prepare(selectCql + partVersionFilter)
+  val partitionFilter = "partition = ? AND indextype = 1"
+  lazy val allPartReadCql = session.prepare(selectCql + partitionFilter)
 
   /**
    * Retrieves all indices from a single partition.
    */
-  def getIndices(binPartition: Types.PartitionKey,
-                 version: Int): Observable[IndexRecord] = {
-    val it = session.execute(allPartReadCql.bind(toBuffer(binPartition),
-                                                 version: java.lang.Integer))
-                      .asScala.toIterator.map(fromRow)
+  def getIndices(binPartition: Types.PartitionKey): Observable[IndexRecord] = {
+    val it = session.execute(allPartReadCql.bind(toBuffer(binPartition)))
+                    .asScala.toIterator.map(fromRow)
     Observable.fromIterator(it).handleObservableErrors
   }
 
-  val tokenQ = "TOKEN(partition, version)"
+  val tokenQ = "TOKEN(partition)"
 
-  def scanIndices(version: Int,
-                  tokens: Seq[(String, String)]): Observable[IndexRecord] = {
+  def scanIndices(tokens: Seq[(String, String)]): Observable[IndexRecord] = {
     def cql(start: String, end: String): String =
       s"SELECT * FROM $tableString WHERE $tokenQ >= $start AND $tokenQ < $end AND indextype = 1 " +
       s"ALLOW FILTERING"
     val it = tokens.iterator.flatMap { case (start, end) =>
         session.execute(cql(start, end)).iterator.asScala
-               .filter(_.getInt("version") == version)
                .map { row => fromRow(row) }
       }
     Observable.fromIterator(it).handleObservableErrors
   }
 
   lazy val writeIndexCql = session.prepare(
-    s"INSERT INTO $tableString (partition, version, indextype, chunkid, data) " +
-    "VALUES (?, ?, 1, ?, ?)")
+    s"INSERT INTO $tableString (partition, indextype, chunkid, data) " +
+    "VALUES (?, 1, ?, ?)")
 
   /**
    * Writes new indices to the index table
    * @return Success, or an exception as a Future.failure
    */
   def writeIndices(partition: Types.PartitionKey,
-                   version: Int,
                    indices: Seq[(Types.ChunkID, Array[Byte])],
                    stats: ChunkSinkStats): Future[Response] = {
     var indexBytes = 0
@@ -98,7 +92,6 @@ sealed class IndexTable(val dataset: DatasetRef, val connector: FiloCassandraCon
     val statements = indices.map { case (chunkId, indexData) =>
       indexBytes += indexData.size
       writeIndexCql.bind(partitionBuf,
-                         version: java.lang.Integer,
                          chunkId: java.lang.Long,
                          ByteBuffer.wrap(indexData))
     }

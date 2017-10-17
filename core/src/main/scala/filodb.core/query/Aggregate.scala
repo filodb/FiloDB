@@ -151,10 +151,10 @@ sealed trait AggregationFunction extends FunctionValidationHelpers with EnumEntr
                timestampColumn: Option[String],
                scanMethod: ChunkScanMethod,
                args: Seq[String],
-               proj: RichProjection): Aggregator Or InvalidFunctionSpec =
-    for { dataColIndex <- columnIndex(proj.nonPartitionColumns, dataColumn)
-          dataColType <- validatedColumnType(proj.nonPartitionColumns, dataColIndex, allowedTypes)
-          agg <- validate(dataColIndex, dataColType, timestampColumn, scanMethod, args, proj) }
+               dataset: Dataset): Aggregator Or InvalidFunctionSpec =
+    for { dataColIndex <- columnIndex(dataset.dataColumns, dataColumn)
+          dataColType <- validatedColumnType(dataset.dataColumns, dataColIndex, allowedTypes)
+          agg <- validate(dataColIndex, dataColType, timestampColumn, scanMethod, args, dataset) }
     yield { agg }
 
   // validate the arguments against the projection and produce an Aggregate of the right type,
@@ -162,7 +162,7 @@ sealed trait AggregationFunction extends FunctionValidationHelpers with EnumEntr
                timestampColumn: Option[String],
                scanMethod: ChunkScanMethod,
                args: Seq[String],
-               proj: RichProjection): Aggregator Or InvalidFunctionSpec
+               dataset: Dataset): Aggregator Or InvalidFunctionSpec
 }
 
 trait SingleColumnAggFunction extends AggregationFunction {
@@ -172,7 +172,7 @@ trait SingleColumnAggFunction extends AggregationFunction {
                timestampColumn: Option[String],
                scanMethod: ChunkScanMethod,
                args: Seq[String],
-               proj: RichProjection): Aggregator Or InvalidFunctionSpec =
+               dataset: Dataset): Aggregator Or InvalidFunctionSpec =
     Good(makeAggregator(dataColIndex, dataColType, scanMethod))
 }
 
@@ -181,7 +181,6 @@ case object NoTimestampColumn extends InvalidFunctionSpec
 
 trait TimeAggFunction[A] extends AggregationFunction {
   import Column.ColumnType._
-  import filodb.core.SingleKeyTypes._
 
   def makeAggregator(timeColIndex: Int, valueColIndex: Int, colType: Column.ColumnType,
                      scanMethod: ChunkScanMethod, arg: A): Aggregator
@@ -193,10 +192,10 @@ trait TimeAggFunction[A] extends AggregationFunction {
                timestampColumn: Option[String],
                scanMethod: ChunkScanMethod,
                args: Seq[String],
-               proj: RichProjection): Aggregator Or InvalidFunctionSpec = {
+               dataset: Dataset): Aggregator Or InvalidFunctionSpec = {
     for { timestampCol <- timestampColumn.map(Good(_)).getOrElse(Bad(NoTimestampColumn))
-          timeColIndex <- columnIndex(proj.nonPartitionColumns, timestampCol)
-          timeColType  <- validatedColumnType(proj.nonPartitionColumns, timeColIndex, Set(LongColumn, TimestampColumn))
+          timeColIndex <- columnIndex(dataset.dataColumns, timestampCol)
+          timeColType  <- validatedColumnType(dataset.dataColumns, timeColIndex, Set(LongColumn, TimestampColumn))
           arg          <- validateArgs(args) }
     yield { makeAggregator(timeColIndex, dataColIndex, dataColType, scanMethod, arg) }
   }
@@ -211,7 +210,6 @@ object TimeBucketingAggFunction {
  *   <numBuckets> - number of buckets, defaults to ??
  */
 trait TimeBucketingAggFunction extends TimeAggFunction[Int] {
-  import Column.ColumnType._
   import filodb.core.SingleKeyTypes._
 
   def validateArgs(args: Seq[String]): Int Or InvalidFunctionSpec =

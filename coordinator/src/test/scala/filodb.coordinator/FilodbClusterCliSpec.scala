@@ -1,7 +1,5 @@
 package filodb.coordinator
 
-import scala.util.Try
-
 import akka.actor.{ActorRef, ActorSystem}
 import akka.testkit.{TestKit, TestProbe}
 import com.typesafe.config.ConfigFactory
@@ -9,21 +7,11 @@ import com.typesafe.scalalogging.StrictLogging
 import org.scalatest.concurrent.ScalaFutures
 
 import filodb.coordinator.client.{Client, LocalClient}
-import filodb.coordinator.sources.CsvStream
-import filodb.core.DatasetRef
-import filodb.core.metadata.{DataColumn, Dataset, RichProjection}
 
 class FilodbClusterCliSpec extends RunnableSpec with ScalaFutures {
 
   import NodeClusterActor.CoordinatorRegistered
-  import filodb.core.GdeltTestData.{dataset3, schema}
 
-  private val streamSettings = CsvStream.CsvStreamSettings()
-  private val sampleReader = new java.io.InputStreamReader(this.getClass.getResourceAsStream("/GDELT-sample-test.csv"))
-  private val headerCols = CsvStream.getHeaderColumns(sampleReader)
-  private val dataset = dataset3.withName("gdelt2")
-  private val datasetRef = DatasetRef(dataset.name)
-  private val projection = RichProjection(dataset, schema)
   private val conf = ConfigFactory.parseString(
     s"""
       header = true
@@ -77,12 +65,6 @@ object FiloCliApp extends FilodbClusterNode with StrictLogging {
     Client.parse(metaStore.initialize(), cluster.settings.DefaultTaskTimeout) {
       case filodb.core.Success => logger.debug("Succeeded.")
     }
-  }
-
-  def createDataset(datasetName: String, columns: Seq[DataColumn], rowKeys: Seq[String], partKeys: Seq[String]): Try[Unit] = {
-    val dataset = Dataset(datasetName, rowKeys, partKeys)
-    logger.info(s"Creating dataset $dataset with columns $columns...")
-    Try(client.createNewDataset(dataset, columns))
   }
 
   Runtime.getRuntime.addShutdownHook(new Thread() {

@@ -1,14 +1,15 @@
 package filodb.spark
 
 import scala.concurrent.duration._
-import scala.language.postfixOps
 
-import org.apache.spark.sql.{DataFrame, Row, SQLContext, SaveMode}
+import org.apache.spark.sql.{DataFrame, SQLContext, SaveMode}
 import org.apache.spark.sql.types.StructType
 
-import filodb.core._
-import filodb.core.metadata.{DataColumn, Dataset, RichProjection}
+import filodb.coordinator.client.Client
 import filodb.coordinator.NodeClusterActor
+import filodb.core._
+import filodb.core.memstore.IngestRouting
+import filodb.core.metadata.Dataset
 
 /**
  * Class implementing insert and save Scala APIs.
@@ -16,44 +17,41 @@ import filodb.coordinator.NodeClusterActor
  */
 class FiloContext(val sqlContext: SQLContext) extends AnyVal {
   import FiloRelation._
+  import Client.parse
 
   /**
    * Creates a DataFrame from a FiloDB table.  Does no reading until a query is run, but it does
    * read the schema for the table.
    * @param dataset the name of the FiloDB dataset to read from
    * @param database the database / Cassandra keyspace to read the dataset from
-   * @param version the version number to read from
    * @param splitsPerNode the parallelism or number of splits per node
    */
   def filoDataset(dataset: String,
                   database: Option[String] = None,
-                  version: Int = 0,
                   splitsPerNode: Int = 4): DataFrame =
-    sqlContext.baseRelationToDataFrame(FiloRelation(DatasetRef(dataset, database), version, splitsPerNode)
+    sqlContext.baseRelationToDataFrame(FiloRelation(DatasetRef(dataset, database), splitsPerNode)
                                                    (sqlContext))
 
   // Convenience method for Java programmers
   def filoDataset(dataset: String): DataFrame = filoDataset(dataset, None)
 
   /**
-   * Creates (or recreates) a FiloDB dataset with certain row, segment, partition keys.  Only creates the
-   * dataset/projection definition and persists the dataset metadata; does not actually create the column
-   * definitions (that is done by the insert step).  The exact behavior depends on the mode:
+   * Creates (or recreates) a FiloDB dataset, writing to the MetaStore.
+   * The exact behavior depends on the mode:
    *   Append  - creates the dataset if it doesn't exist
    *   Overwrite - creates the dataset, deleting the old definition first if needed
    *   ErrorIfExists - throws an error if the dataset already exists
    *
-   * For the other paramter definitions, please see saveAsFiloDataset().
+   * For the other parameter definitions, please see saveAsFiloDataset().
    */
   private[spark] def createOrUpdateDataset(schema: StructType,
                                            dataset: DatasetRef,
                                            rowKeys: Seq[String],
-                                           partitionKeys: Seq[String],
+                                           partitionColumns: Seq[String],
                                            chunkSize: Option[Int] = None,
                                            resetSchema: Boolean = false,
                                            mode: SaveMode = SaveMode.Append): Unit = {
     FiloDriver.init(sqlContext.sparkContext)
-    val partKeys = if (partitionKeys.nonEmpty) partitionKeys else Seq(Dataset.DefaultPartitionColumn)
     val dfColumns = dfToFiloColumns(schema)
 
     val datasetObj = try {
@@ -63,30 +61,29 @@ class FiloContext(val sqlContext: SQLContext) extends AnyVal {
     }
     (datasetObj, mode) match {
       case (None, SaveMode.Append) | (None, SaveMode.Overwrite) | (None, SaveMode.ErrorIfExists) =>
-        val ds = makeAndVerifyDataset(dataset, rowKeys, partKeys, chunkSize, dfColumns)
-        createNewDataset(ds)
+        val ds = makeAndVerifyDataset(dataset, rowKeys, partitionColumns, chunkSize, dfColumns)
+        createNewDataset(ds, dataset.database)
       case (Some(dsObj), SaveMode.ErrorIfExists) =>
         throw new RuntimeException(s"Dataset $dataset already exists!")
       case (Some(dsObj), SaveMode.Overwrite) if resetSchema =>
-        val ds = makeAndVerifyDataset(dataset, rowKeys, partKeys, chunkSize, dfColumns)
-        throw new RuntimeException(s"Sorry, at this time you must manually delete the dataset yourself")
-        // deleteDataset(dataset)
-        // createNewDataset(ds)
+        val ds = makeAndVerifyDataset(dataset, rowKeys, partitionColumns, chunkSize, dfColumns)
+        parse(FiloDriver.metaStore.deleteDataset(dataset)) { x => x }
+        createNewDataset(ds, dataset.database)
       case (_, _) =>
         sparkLogger.info(s"Dataset $dataset definition not changed")
     }
   }
 
   /**
-   * Saves a DataFrame in a FiloDB Table
-   * - Creates columns in FiloDB from DF schema if needed
+   * Saves a DataFrame in a FiloDB Table.
+   * Depending on the SaveMode, a Dataset definition may be created from the DataFrame schema.
    *
    * @param df the DataFrame to write to FiloDB
    * @param dataset the name of the FiloDB table/dataset to read from
    * @param rowKeys the name of the column(s) used as the row primary key within each partition.
    *                Cannot be computed.  May be used for range queries within partitions.
-   * @param partitionKeys column name(s) used for partition key.  If empty, then the default Dataset
-   *                      partition key of `:string /0` (a constant) will be used.
+   * @param partitionColumns column name:type strings used to define partition columns.  For valid type strings
+   *          please see Column.ColumnType.nameType values (or the README, or the filo-cli help)
    *
    *          Partitioning columns could be created using an expression on another column
    *          {{{
@@ -98,9 +95,6 @@ class FiloContext(val sqlContext: SQLContext) extends AnyVal {
    *            val newDF = df.withColumn("partition", idHash(df("id")) % 100)
    *          }}}
    *
-   *          However, note that the above methods will lead to a physical column being created, so
-   *          use of computed columns is probably preferable.
-   *
    * @param database the database/keyspace to write to, optional.  Default behavior depends on ColumnStore.
    * @param mode the Spark SaveMode - ErrorIfExists, Append, Overwrite, Ignore
    * @param options various IngestionOptions, such as timeouts, version to write to, etc.
@@ -108,15 +102,15 @@ class FiloContext(val sqlContext: SQLContext) extends AnyVal {
   def saveAsFilo(df: DataFrame,
                  dataset: String,
                  rowKeys: Seq[String],
-                 partitionKeys: Seq[String],
+                 partitionColumns: Seq[String],
                  database: Option[String] = None,
                  mode: SaveMode = SaveMode.Append,
                  options: IngestionOptions = IngestionOptions()): Unit = {
-    val IngestionOptions(version, chunkSize, writeTimeout,
+    val IngestionOptions(chunkSize, writeTimeout,
                          flushAfterInsert, resetSchema) = options
     val ref = DatasetRef(dataset, database)
-    createOrUpdateDataset(df.schema, ref, rowKeys, partitionKeys, chunkSize, resetSchema, mode)
-    insertIntoFilo(df, dataset, version, mode == SaveMode.Overwrite,
+    createOrUpdateDataset(df.schema, ref, rowKeys, partitionColumns, chunkSize, resetSchema, mode)
+    insertIntoFilo(df, dataset, mode == SaveMode.Overwrite,
                    database, writeTimeout, flushAfterInsert)
   }
 
@@ -124,62 +118,59 @@ class FiloContext(val sqlContext: SQLContext) extends AnyVal {
 
   /**
    * Implements INSERT INTO into a Filo Dataset.  The dataset must already have been created.
-   * Will check and add any extra columns from the DataFrame into the dataset, but column type
-   * mismatches will result in an error.
+   * Will check columns from the DataFrame against the dataset definition. Column type
+   * mismatches and missing columns will result in an error.
    * @param overwrite if true, first truncate the dataset before writing
    */
   // scalastyle:off
   def insertIntoFilo(df: DataFrame,
                      datasetName: String,
-                     version: Int = 0,
                      overwrite: Boolean = false,
                      database: Option[String] = None,
                      writeTimeout: FiniteDuration = DefaultWriteTimeout,
                      flushAfterInsert: Boolean = true): Unit = {
     FiloDriver.init(sqlContext.sparkContext)
     val dfColumns = dfToFiloColumns(df)
-    val columnNames = dfColumns.map(_.name)
-    val datasetObj = getDatasetObj(DatasetRef(datasetName, database))
-    // NOTE: This ensures the datasetRef contains a valid database, at least in Cassandra
-    val dataset = datasetObj.projections.head.dataset
-    checkAndAddColumns(dfColumns, dataset, version)
+    val ref = DatasetRef(datasetName, database)
+    val dataset = getDatasetObj(ref)
+    checkColumns(dfColumns, dataset)
 
     if (overwrite) {
-      FiloDriver.client.truncateDataset(dataset)
+      FiloDriver.client.truncateDataset(ref)
     }
 
     val numPartitions = df.rdd.partitions.size
-    sparkLogger.info(s"Inserting into ($dataset/$version) with $numPartitions partitions")
+    sparkLogger.info(s"Inserting into ($ref) with $numPartitions partitions")
     sparkLogger.debug(s"   Dataframe schema = $dfColumns")
 
     // TODO: actually figure out right number of nodes.
-    FiloDriver.client.setupDataset(dataset, columnNames,
+    FiloDriver.client.setupDataset(ref,
                                    DatasetResourceSpec(numPartitions, Math.min(numPartitions, 10)),
                                    noOpSource) match {
       case None =>
-        sparkLogger.info(s"Ingestion set up on all coordinators for $dataset / $version")
+        sparkLogger.info(s"Ingestion set up on all coordinators for $ref")
         sparkLogger.info(s"Waiting to ensure coordinators ready. TODO: replace with shard status")
         Thread sleep 5000
       case Some(err) =>
         throw new RuntimeException(s"Error setting up ingestion: $err")
     }
 
-    // Cannot serialize raw columns
-    val colStrings = dfColumns.map(_.toString)
+    // Things to serialize
+    val serializedDataset = dataset.asCompactString
+    val dfColumnNames = dfColumns.map(_.split(':')(0))
 
     // For each partition, start the ingestion
     df.rdd.mapPartitionsWithIndex { case (index, rowIter) =>
       // Everything within this function runs on each partition/executor, so need a local datastore & system
-      val _columns = colStrings.map(s => DataColumn.fromString(s, dataset.dataset))
-      val proj = RichProjection(datasetObj, _columns)
-      sparkLogger.info(s"Starting ingestion of DataFrame for dataset $dataset, partition $index...")
-      ingestRddRows(FiloExecutor.clusterActor, proj, version, rowIter,
-                    writeTimeout, index)
+      val _dataset = Dataset.fromCompactString(serializedDataset)
+      val routing = IngestRouting(_dataset, dfColumnNames)
+      sparkLogger.info(s"Starting ingestion of DataFrame for dataset ${_dataset.ref}, partition $index...")
+      ingestRddRows(FiloExecutor.clusterActor, _dataset, routing, rowIter, writeTimeout, index)
       Iterator.empty
     }.count()
 
     // This is the only time that flush is explicitly called
-    if (flushAfterInsert) flushAndLog(dataset, version)
+    if (flushAfterInsert) flushAndLog(ref)
 
     syncToHive(sqlContext)
   }

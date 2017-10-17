@@ -2,12 +2,11 @@ package filodb.core.query
 
 import scala.language.postfixOps
 
-import org.scalactic._
 import org.velvia.filo.{SingleValueRowReader, UTF8Wrapper, ZeroCopyUTF8String}
 import scalaxy.loops._
 
 import filodb.core.Types.PartitionKey
-import filodb.core.metadata.{Column, ComputedColumn, DataColumn, RichProjection}
+import filodb.core.metadata.{Column, DataColumn, Dataset}
 
 sealed trait Filter {
   def filterFunc: Any => Boolean
@@ -35,8 +34,6 @@ final case class ColumnFilter(column: String, filter: Filter)
  * Utilities to generate functions to filter keys.
  */
 object KeyFilter {
-  import Requirements._
-
   // Parses the literal in an expression through a KeyType's key function... intended mostly for
   // ComputedColumns so that proper transformation of a value can happen for predicate pushdowns.
   // For example, if a partition column uses :stringPrefix, then apply that first to a value.
@@ -60,35 +57,36 @@ object KeyFilter {
    * Identifies column names belonging to a projection's partition key columns and their positions within
    * the partition key.  For computed columns, if there is only one source column, the source column is used.
    * Computed columns with multiple source columns are ignored.
-   * @param proj a full RichProjection - don't try passing in a rowKeyOnlyProjection or readOnlyProjection
+   * NOTE: computed columns not currently supported here; to support them in the future we'd need to update
+   * computed columns to properly compute the position
+   * @param dataset a Dataset
    * @param columnNames the names of columns to match
    * @return a Map(column name -> (position, Column)) of identified partition columns
    */
-  def mapPartitionColumns(proj: RichProjection, columnNames: Seq[String]): Map[String, (Int, Column)] =
-    mapColumns(proj.partitionColumns, proj.columns, columnNames)
+  def mapPartitionColumns(dataset: Dataset, columnNames: Seq[String]): Map[String, (Int, Column)] =
+    mapColumns(dataset.partitionColumns, columnNames)
 
-  def mapRowKeyColumns(proj: RichProjection, columnNames: Seq[String]): Map[String, (Int, Column)] =
-    mapColumns(proj.rowKeyColumns, proj.columns, columnNames)
+  def mapRowKeyColumns(dataset: Dataset, columnNames: Seq[String]): Map[String, (Int, Column)] =
+    mapColumns(dataset.rowKeyColumns, columnNames)
 
   def mapColumns(columns: Seq[Column],
-                 allCols: Seq[Column],
                  columnNames: Seq[String]): Map[String, (Int, Column)] = {
     columns.zipWithIndex.collect {
-      case d @ (DataColumn(_, name, _, _, _, _), idx)           => name -> (idx -> d._1)
-      case d @ (ComputedColumn(_, _, _, _, Seq(index), _), idx) => allCols(index).name -> (idx -> d._1)
+      case d @ (DataColumn(_, name, _), idx)           => name -> (idx -> d._1)
     }.toMap.filterKeys { name => columnNames.contains(name) }
   }
 
   /**
    * Creates a filter function that returns boolean given a PartitionKey.
-   * @param proj the RichProjection describing the dataset schema
+   * @param dataset the Dataset describing the dataset schema
    * @param filters one ColumnFilter per column to filter on.  If multiple filters are desired on that
    *                column they should be combined using And.
    */
-  def makePartitionFilterFunc(proj: RichProjection,
+  def makePartitionFilterFunc(dataset: Dataset,
                               filters: Seq[ColumnFilter]): PartitionKey => Boolean = {
-    val positionsAndFuncs = filters.map {
-      case ColumnFilter(col, filter) => (proj.nameToPartColIndex.getOrElse(col, -1), filter.filterFunc) }
+    val positionsAndFuncs = filters.map { case ColumnFilter(col, filter) =>
+                              val pos = dataset.partitionColumns.indexWhere(_.name == col)
+                              (pos, filter.filterFunc) }
     val positions = positionsAndFuncs.collect { case (pos, func) if pos >= 0 => pos }.toArray
     val funcs = positionsAndFuncs.collect { case (pos, func) if pos >= 0 => func }.toArray
 
@@ -103,6 +101,6 @@ object KeyFilter {
     partFunc
   }
 
-  def makePartitionFilterFunc(proj: RichProjection, filter: ColumnFilter): PartitionKey => Boolean =
-    makePartitionFilterFunc(proj, Seq(filter))
+  def makePartitionFilterFunc(dataset: Dataset, filter: ColumnFilter): PartitionKey => Boolean =
+    makePartitionFilterFunc(dataset, Seq(filter))
 }

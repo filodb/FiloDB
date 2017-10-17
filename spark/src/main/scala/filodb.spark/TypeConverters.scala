@@ -15,7 +15,7 @@ object TypeConverters {
   )
 
   def columnsToSqlFields(columns: Seq[Column]): Seq[StructField] =
-    columns.map { case DataColumn(_, name, _, _, colType, false) =>
+    columns.map { case DataColumn(_, name, colType) =>
       StructField(name, colTypeToSqlType(colType), true)
     }
 
@@ -23,6 +23,8 @@ object TypeConverters {
     columns.map { column => colTypeToSqlType(column.columnType) }
 
   val sqlTypeToColType = colTypeToSqlType.map { case (ct, st) => st -> ct }.toMap
+
+  val sqlTypeToTypeName = sqlTypeToColType.map { case (st, ct) => st -> ct.typeName }.toMap
 
   def structToColTypes(struct: StructType): Seq[Column.ColumnType] =
     struct.map { field => sqlTypeToColType(field.dataType) }

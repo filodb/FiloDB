@@ -6,7 +6,7 @@ import org.jctools.maps.NonBlockingHashMap
 import org.velvia.filo.{ZeroCopyUTF8String => UTF8Str}
 import scalaxy.loops._
 
-import filodb.core.metadata.{Column, RichProjection}
+import filodb.core.metadata.{Column, Dataset}
 import filodb.core.store.ChunkSetInfo.emptySkips
 import filodb.core.Types.PartitionKey
 
@@ -21,15 +21,15 @@ object NoOpIndexer extends Indexer {
 /**
  * A high performance index using BitmapIndex for partition keys.
  */
-class PartitionKeyIndex(proj: RichProjection) extends StrictLogging {
+class PartitionKeyIndex(dataset: Dataset) extends StrictLogging {
   import filodb.core._
   import collection.JavaConverters._
   import Column.ColumnType._
 
-  private final val numPartColumns = proj.partitionColumns.length
+  private final val numPartColumns = dataset.partitionColumns.length
   private final val indices = new NonBlockingHashMap[UTF8Str, BitmapIndex[UTF8Str]]
 
-  private final val indexers = proj.partitionColumns.zipWithIndex.map { case (c, pos) =>
+  private final val indexers = dataset.partitionColumns.zipWithIndex.map { case (c, pos) =>
     c.columnType match {
       case StringColumn => new Indexer {
                              val colName = UTF8Str(c.name)

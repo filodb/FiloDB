@@ -14,8 +14,8 @@ import org.velvia.filo.ArrayStringRowReader
 
 import filodb.coordinator.{NodeClusterActor, QueryCommands}
 import filodb.core._
-import filodb.core.memstore.IngestRecord
-import filodb.core.metadata.RichProjection
+import filodb.core.memstore.{IngestRecord, IngestRouting}
+import filodb.core.metadata.Dataset
 
 object KafkaIngestionClusterSpecConfig extends MultiNodeConfig {
   // register the named roles (nodes) of the test
@@ -83,7 +83,6 @@ abstract class KafkaIngestionClusterSpec extends ClusterSpec(KafkaIngestionClust
 
   private val metaStore = cluster.metaStore
   metaStore.newDataset(dataset1).futureValue should equal (Success)
-  schemaWithSeries.foreach { col => metaStore.newColumn(col, datasetRef).futureValue should equal (Success) }
 
   it("should start actors, join cluster, setup ingestion, and wait for all nodes to enter barrier") {
     // Start NodeCoordinator on all nodes so the ClusterActor will register them
@@ -98,8 +97,8 @@ abstract class KafkaIngestionClusterSpec extends ClusterSpec(KafkaIngestionClust
     runOn(first) {
       val source = IngestionSource(classOf[KafkaIngestionStreamFactory].getName, sourceConfig)
       val msg = SetupDataset(datasetRef,
-                             schemaWithSeries.map(_.name),
-        DatasetResourceSpec(NumPartitions, 2), source)
+                             DatasetResourceSpec(NumPartitions, 2),
+                             source)
       clusterActor ! msg
       // It takes a _really_ long time for the cluster actor singleton to start.
       expectMsg(30.seconds.dilated, DatasetVerified)
@@ -143,7 +142,7 @@ abstract class KafkaIngestionClusterSpec extends ClusterSpec(KafkaIngestionClust
     // Both nodes can execute a distributed query to all shards and should get back the same answer
     // Count all the records in every partition in every shard
     // counting a non-partition column... can't count a partition column yet
-    val query = AggregateQuery(datasetRef, 0, QueryArgs("count", "min"), FilteredPartitionQuery(Nil))
+    val query = AggregateQuery(datasetRef, QueryArgs("count", "min"), FilteredPartitionQuery(Nil))
     cluster.coordinatorActor ! query
     val answer = expectMsgClass(classOf[AggregateResponse[Int]])
     answer.elementClass should equal (classOf[Int])
@@ -151,10 +150,12 @@ abstract class KafkaIngestionClusterSpec extends ClusterSpec(KafkaIngestionClust
   }
 }
 
-final class CSVRecordConverter extends RecordConverter {
-  override def convert(proj: RichProjection, event: AnyRef, partition: Int, offset: Long): Seq[IngestRecord] = {
+final class CSVRecordConverter(dataset: Dataset) extends RecordConverter {
+  val routing = IngestRouting(dataset, Seq("timestamp", "min", "avg", "max", "p90", "series"))
+
+  override def convert(event: AnyRef, partition: Int, offset: Long): Seq[IngestRecord] = {
     KafkaIngestionClusterSpecConfig.convertedRecords += 1
-    Seq(IngestRecord(proj, ArrayStringRowReader(event.asInstanceOf[String].split(',')), offset))
+    Seq(IngestRecord(routing, ArrayStringRowReader(event.asInstanceOf[String].split(',')), offset))
   }
 
 }

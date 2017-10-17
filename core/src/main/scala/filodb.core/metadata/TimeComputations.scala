@@ -1,18 +1,13 @@
 package filodb.core.metadata
 
 import com.typesafe.config.ConfigFactory
-import java.sql.Timestamp
 import net.ceedubs.ficus.Ficus._
 import org.joda.time.{DateTime, DateTimeZone}
 import org.scalactic._
-import org.velvia.filo.RowReader
 import scala.concurrent.duration.FiniteDuration
 
-import filodb.core._
-import filodb.core.Types._
 
 object TimeComputations {
-  import SingleKeyTypes._
   import Column.ColumnType._
 
   /**

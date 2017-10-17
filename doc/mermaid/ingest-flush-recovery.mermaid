@@ -1,0 +1,10 @@
+sequenceDiagram
+  IngestionStream->>MemStore: `Seq[IngestRecord]`
+  Scheduler->>MemStore: Flush group gg
+  MemStore->>MemStore: optimizes chunks
+  MemStore->>ChunkSink: Observable[ChunkSet]
+  ChunkSink->>Cassandra: chunks
+  ChunkSink-->>MemStore: Done
+  MemStore->>MetaStore: Write checkpoint
+  MetaStore->>Cassandra: Checkpoint data
+  MetaStore-->>MemStore: Mark chunks in Block as purgeable

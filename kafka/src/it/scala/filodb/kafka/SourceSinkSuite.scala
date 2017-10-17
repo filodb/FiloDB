@@ -63,7 +63,7 @@ class SourceSinkSuite extends ConfigSpec {
       val key = JLong.valueOf(0L)
 
       try {
-        val send = producer.send(topic, key,"my-message")
+        val send = producer.send(topic, key, "my-message")
         Await.result(send.runAsync, 30.seconds)
         val records = consumer.poll(10.seconds.toMillis).asScala.map(_.value()).toList
         assert(records == List("my-message"))

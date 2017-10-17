@@ -2,10 +2,7 @@ package filodb.cassandra
 
 import com.datastax.driver.core._
 import com.typesafe.config.Config
-import net.ceedubs.ficus.Ficus._
-import scala.concurrent.duration.FiniteDuration
 import scala.concurrent.{ExecutionContext, Future}
-import scala.util.Try
 
 import filodb.core._
 

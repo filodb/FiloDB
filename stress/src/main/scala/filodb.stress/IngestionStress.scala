@@ -1,7 +1,6 @@
 package filodb.stress
 
 import org.apache.spark.sql.{DataFrame, SparkSession, SaveMode}
-import scala.util.Random
 import scala.concurrent.duration._
 import scala.concurrent.{Await, Future}
 
@@ -9,12 +8,9 @@ import filodb.core.{DatasetRef, Perftools}
 import filodb.spark._
 
 /**
- * Ingests into two different tables simultaneously, one with small segment size. Tests ingestion pipeline
+ * Ingests into two different tables simultaneously, using different schemas. Tests ingestion pipeline
  * handling of tons of concurrent write / I/O, backpressure, accuracy, etc.
  * Reads back both datasets and compares every cell and row to be sure the data is readable and accurate.
- *
- * NOTE: The segment key has been replaced with a constant to test segmentless data model and its effect
- * on both ingestion and query performance.  Uncomment the original data model to get it back.
  *
  * To prepare, download the first month's worth of data from http://www.andresmh.com/nyctaxitrips/
  * Also, run this to initialize the filo-stress keyspace:
@@ -47,7 +43,6 @@ object IngestionStress extends App {
                                  .config("spark.scheduler.mode", "FAIR")
                                  .getOrCreate
   val sc = sess.sparkContext
-  import sess.implicits._
 
   // Ingest the taxi file two different ways using two Futures
   // One way is by hour of day - very relaxed and fast
@@ -66,13 +61,14 @@ object IngestionStress extends App {
 
   import scala.concurrent.ExecutionContext.Implicits.global
 
+  // "stress" because it ingests tons of partitions - every medallion in fact
   val stressIngestor = Future {
     val ingestMillis = Perftools.timeMillis {
       puts("Starting stressful ingestion...")
       csvDF.write.format("filodb.spark").
         option("dataset", stressName).
-        option("row_keys", "medallion,hack_license,pickup_datetime").
-        option("partition_keys", ":stringPrefix medallion 2").
+        option("row_keys", "hack_license,pickup_datetime").
+        option("partition_columns", "medallion:string").
         option("reset_schema", "true").
         mode(SaveMode.Overwrite).save()
       puts("Stressful ingestion done.")
@@ -92,7 +88,7 @@ object IngestionStress extends App {
       dfWithHoD.write.format("filodb.spark").
         option("dataset", hrOfDayName).
         option("row_keys", "pickup_datetime,medallion,hack_license").
-        option("partition_keys", "hourOfDay").
+        option("partition_columns", "hourOfDay:int").
         option("reset_schema", "true").
         mode(SaveMode.Overwrite).save()
 
@@ -114,7 +110,7 @@ object IngestionStress extends App {
   }
 
   def printIngestionStats(dataset: String): Unit = {
-    val stats = FiloDriver.client.ingestionStats(DatasetRef(dataset), 0)
+    val stats = FiloDriver.client.ingestionStats(DatasetRef(dataset))
     puts(s"  Stats for dataset $dataset =>")
     stats.foreach(s => puts(s"   $s"))
   }

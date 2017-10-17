@@ -11,35 +11,34 @@ import akka.actor.ActorRef
 import com.typesafe.scalalogging.StrictLogging
 import monix.reactive.Observable
 import net.ceedubs.ficus.Ficus._
-import org.apache.spark.sql.types.StructType
-import org.apache.spark.sql.{DataFrame, Row, SQLContext, SparkSession, SaveMode}
-import org.velvia.filo.RowReader
 import org.apache.spark.sql.hive.filodb.MetaStoreSync
+import org.apache.spark.sql.types.StructType
+import org.apache.spark.sql.{DataFrame, Row, SQLContext, SparkSession}
+import org.scalactic._
+import org.velvia.filo.RowReader
 
 import filodb.coordinator.client.ClientException
 import filodb.coordinator._
 import filodb.core._
-import filodb.core.memstore.IngestRecord
-import filodb.core.metadata.{Column, DataColumn, Dataset, RichProjection}
+import filodb.core.memstore.{IngestRecord, IngestRouting}
+import filodb.core.metadata.{Column, Dataset, DatasetOptions}
 
 package spark {
   case class DatasetNotFound(dataset: String) extends Exception(s"Dataset $dataset not found")
   // For each mismatch: the column name, DataFrame type, and existing column type
-  case class ColumnTypeMismatch(mismatches: Set[(String, Column.ColumnType, Column.ColumnType)]) extends
+  case class ColumnTypeMismatch(mismatches: Set[(String, String, String)]) extends
     Exception(s"Mismatches:\n${mismatches.toList.mkString("\n")}")
   case class BadSchemaError(reason: String) extends Exception(reason)
 
   /**
    * Options for calling saveAsFilo
-   * @param version the version number to write to
    * @param chunkSize an optionally different chunkSize to set new dataset to use
    * @param writeTimeout Maximum time to wait for write of each partition to complete
    * @param flushAfterInsert if true, ensure all data is flushed in memtables at end of ingestion
    * @param resetSchema if true, allows dataset schema (eg partition keys) to be reset when overwriting
    *          an existing dataset
    */
-  case class IngestionOptions(version: Int = 0,
-                              chunkSize: Option[Int] = None,
+  case class IngestionOptions(chunkSize: Option[Int] = None,
                               writeTimeout: FiniteDuration = DefaultWriteTimeout,
                               flushAfterInsert: Boolean = true,
                               resetSchema: Boolean = false)
@@ -76,11 +75,9 @@ package spark {
 package object spark extends StrictLogging {
   val DefaultWriteTimeout = 999 minutes
 
-  import IngestionCommands._
-  import DatasetCommands._
   import FiloDriver.metaStore
   import IngestionStream._
-  import filodb.coordinator.client.Client.{parse, actorAsk}
+  import filodb.coordinator.client.Client.{actorAsk, parse}
 
   val sparkLogger = logger
 
@@ -105,21 +102,20 @@ package object spark extends StrictLogging {
    * Uses a shared IngestionProtocol for better efficiency amongst all partitions.
    */
   private[spark] def ingestRddRows(clusterActor: ActorRef,
-                                   projection: RichProjection,
-                                   version: Int,
+                                   dataset: Dataset,
+                                   routing: IngestRouting,
                                    rows: Iterator[Row],
                                    writeTimeout: FiniteDuration,
                                    partitionIndex: Int): Unit = {
-    val ref = projection.datasetRef
-    val mapper = actorAsk(clusterActor, NodeClusterActor.SubscribeShardUpdates(ref)) {
-      case CurrentShardSnapshot(_, newMap) => newMap
+    val mapper = actorAsk(clusterActor, NodeClusterActor.GetShardMap(dataset.ref)) {
+      case newMap: ShardMapper => newMap
     }
 
     val stream = new IngestionStream {
       def get: Observable[Seq[IngestRecord]] = {
         val recordSeqIt = rows.grouped(1000).zipWithIndex.map { case (rows, idx) =>
           if (idx % 20 == 0) logger.info(s"Ingesting batch starting at row ${idx * 1000}")
-          rows.map { row => IngestRecord(projection, RddRowReader(row), idx) }
+          rows.map { row => IngestRecord(routing, RddRowReader(row), idx) }
         }
         Observable.fromIterator(recordSeqIt)
       }
@@ -128,7 +124,7 @@ package object spark extends StrictLogging {
 
     // NOTE: might need to force scheduler to run on current thread due to bug with Spark ThreadLocal
     // during shuffles.
-    stream.routeToShards(mapper, projection, getProtocolActor(clusterActor, ref))(FiloExecutor.ec)
+    stream.routeToShards(mapper, dataset, getProtocolActor(clusterActor, dataset.ref))(FiloExecutor.ec)
   }
 
   /**
@@ -149,77 +145,65 @@ package object spark extends StrictLogging {
 
   import filodb.spark.TypeConverters._
 
-  private[spark] def dfToFiloColumns(df: DataFrame): Seq[DataColumn] = dfToFiloColumns(df.schema)
+  private[spark] def dfToFiloColumns(df: DataFrame): Seq[String] = dfToFiloColumns(df.schema)
 
-  private[spark] def dfToFiloColumns(schema: StructType): Seq[DataColumn] = {
-    schema.map { f =>
-      DataColumn(0, f.name, "", -1, sqlTypeToColType(f.dataType))
+  // Creates name:type strings as needed for Dataset creation
+  private[spark] def dfToFiloColumns(schema: StructType): Seq[String] =
+    schema.map { f => s"${f.name}:${sqlTypeToTypeName(f.dataType)}" }
+
+  private[spark] def checkColumns(dfColumns: Seq[String],
+                                  dataset: Dataset): Unit = {
+    // Check DF schema against dataset columns, get column IDs back
+    val nameToType = dfColumns.map { nameAndType =>
+      val parts = nameAndType.split(':')
+      parts(0) -> parts(1)
+    }.toMap
+    logger.info(s"Columns from Dataframe Schema: $nameToType")
+    val colIDs = dataset.colIDs(nameToType.keys.toSeq: _*) match {
+      case Good(colIDs) => colIDs
+      case Bad(missing) => throw BadSchemaError(s"Columns $missing not in dataset ${dataset.ref}")
     }
-  }
-
-  private[spark] def checkAndAddColumns(dfColumns: Seq[DataColumn],
-                                        dataset: DatasetRef,
-                                        version: Int): Unit = {
-    // Pull out existing dataset schema
-    val schema = parse(metaStore.getSchema(dataset, version), datasetOpTimeout) { schema => schema }
-
-    // Translate DF schema to columns, create new ones if needed
-    val dfSchemaSeq = dfColumns.map { col => col.name -> col }
-    logger.info(s"Columns from Dataframe Schema: ${dfSchemaSeq.map(_._2).zipWithIndex}")
-    val dfSchema = dfSchemaSeq.toMap
-    val matchingCols = dfSchema.keySet.intersect(schema.keySet)
-    val missingCols = dfSchema.keySet -- schema.keySet
-    logger.info(s"Matching columns - $matchingCols\nMissing columns - $missingCols")
 
     // Type-check matching columns
-    val matchingTypeErrs = matchingCols.collect {
-      case colName: String if dfSchema(colName).columnType != schema(colName).columnType =>
-        (colName, dfSchema(colName).columnType, schema(colName).columnType)
+    val matchingTypeErrs = colIDs.map(id => dataset.columnFromID(id)).collect {
+      case c: Column if nameToType(c.name) != c.columnType.typeName =>
+        (c.name, nameToType(c.name), c.columnType.typeName)
     }
-    if (matchingTypeErrs.nonEmpty) throw ColumnTypeMismatch(matchingTypeErrs)
-
-    if (missingCols.nonEmpty) {
-      val newCols = missingCols.map(dfSchema(_).copy(dataset = dataset.dataset, version = version))
-      parse(metaStore.newColumns(newCols.toSeq, dataset), datasetOpTimeout) { resp =>
-        if (resp != Success) throw new RuntimeException(s"Error $resp creating new columns $newCols")
-      }
-    }
+    if (matchingTypeErrs.nonEmpty) throw ColumnTypeMismatch(matchingTypeErrs.toSet)
   }
 
-  private[spark] def flushAndLog(dataset: DatasetRef, version: Int): Unit = {
+  private[spark] def flushAndLog(dataset: DatasetRef): Unit = {
     try {
-      val nodesFlushed = FiloDriver.client.flushCompletely(dataset, version, flushTimeout)
+      val nodesFlushed = FiloDriver.client.flushCompletely(dataset, flushTimeout)
       sparkLogger.info(s"Flush completed on $nodesFlushed nodes for dataset $dataset")
     } catch {
       case ClientException(msg) =>
         sparkLogger.warn(s"Could not flush due to client exception $msg on dataset $dataset...")
       case e: Exception =>
-        sparkLogger.warn(s"Exception from flushing nodes for $dataset/$version", e)
+        sparkLogger.warn(s"Exception from flushing nodes for $dataset", e)
     }
   }
 
-  // Checks for schema errors via RichProjection.make, and returns created Dataset object
+  // Checks for schema errors, and returns created Dataset object
   private[spark] def makeAndVerifyDataset(datasetRef: DatasetRef,
                                           rowKeys: Seq[String],
-                                          partitionKeys: Seq[String],
+                                          partitionColumns: Seq[String],
                                           chunkSize: Option[Int],
-                                          dfColumns: Seq[Column]): Dataset = {
-    val options = Dataset.DefaultOptions
+                                          dfColumns: Seq[String]): Dataset = {
+    val options = DatasetOptions.DefaultOptions
     val options2 = chunkSize.map { newSize => options.copy(chunkSize = newSize) }.getOrElse(options)
-    val dataset = Dataset(datasetRef, rowKeys, partitionKeys).copy(options = options2)
-
-    // validate against schema.  Checks key names, computed columns, etc.
-    RichProjection.make(dataset, dfColumns).recover {
-      case err: RichProjection.BadSchema => throw BadSchemaError(err.toString)
-    }
-
-    dataset
+    val partColNames = partitionColumns.map(_.split(':')(0)).toSet
+    val dataColumns = dfColumns.filterNot(partColNames contains _.split(':')(0))
+    sparkLogger.info(s"Creating dataset $datasetRef with partition columns $partitionColumns, " +
+                     s"data columns $dataColumns, row keys $rowKeys")
+    Dataset(datasetRef.dataset, partitionColumns, dataColumns, rowKeys).copy(options = options2)
   }
 
-  // This doesn't create columns, because that's in checkAndAddColumns.
-  private[spark] def createNewDataset(dataset: Dataset): Unit = {
+  private[spark] def createNewDataset(dataset: Dataset, database: Option[String]): Unit = {
     logger.info(s"Creating dataset ${dataset.name}...")
-    FiloDriver.client.createNewDataset(dataset, Nil, timeout = datasetOpTimeout)
+    // FiloDriver.client.createNewDataset(dataset, database, timeout = datasetOpTimeout)
+    // TODO: fix: cannot serialize CreateDataset actor message
+    parse(FiloDriver.metaStore.newDataset(dataset), datasetOpTimeout) { x => x }
   }
 
   implicit def sqlToFiloContext(sql: SQLContext): FiloContext = new FiloContext(sql)

@@ -1,3 +1,21 @@
+<!-- START doctoc generated TOC please keep comment here to allow auto update -->
+<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
+**Table of Contents**  *generated with [DocToc](https://github.com/thlorenz/doctoc)*
+
+- [FiloDB Data Model and Storage Layout](#filodb-data-model-and-storage-layout)
+  - [Overall Data Model](#overall-data-model)
+    - [A note about "segmentless" changes](#a-note-about-segmentless-changes)
+  - [Turning Records into Chunks and ChunkSets](#turning-records-into-chunks-and-chunksets)
+  - [Single Writer per Partition](#single-writer-per-partition)
+  - [Chunk Index Tree Structure](#chunk-index-tree-structure)
+  - [Row Replacement](#row-replacement)
+- [CassandraColumnStore](#cassandracolumnstore)
+  - [Cassandra Tables](#cassandra-tables)
+  - [Query Patterns](#query-patterns)
+  - [Alternative Storage Patterns](#alternative-storage-patterns)
+
+<!-- END doctoc generated TOC please keep comment here to allow auto update -->
+
 # FiloDB Data Model and Storage Layout
 
 This guide reflects the new indexing scheme for chunking and row replacement.  In the open source code base it is currently in the `new-storage-format` branch.  It also goes over data layout and Cassandra storage layout.

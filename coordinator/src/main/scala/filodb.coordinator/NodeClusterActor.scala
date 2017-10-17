@@ -10,7 +10,7 @@ import akka.util.Timeout
 import com.typesafe.config.{Config, ConfigFactory}
 
 import filodb.core._
-import filodb.core.metadata.RichProjection
+import filodb.core.metadata.Dataset
 import filodb.core.store.MetaStore
 
 object NodeClusterActor {
@@ -43,7 +43,6 @@ object NodeClusterActor {
    * Initiates ingestion on each node.
    *
    * @param ref the DatasetRef for the dataset defined in MetaStore to start ingesting
-   * @param columns the schema/columns to ingest
    * @param resources the sharding and number of nodes for ingestion and querying
    * @param source the IngestionSource on each node.  Use noOpSource to not start ingestion and
    *               manually push records into NodeCoordinator.
@@ -51,7 +50,6 @@ object NodeClusterActor {
    *                           setup on all nodes - for that, subscribe to ShardMapUpdate's
    */
   final case class SetupDataset(ref: DatasetRef,
-                                columns: Seq[String],
                                 resources: DatasetResourceSpec,
                                 source: IngestionSource)
 
@@ -61,7 +59,6 @@ object NodeClusterActor {
   case object DatasetVerified
   private[coordinator] final case class DatasetExists(ref: DatasetRef) extends ErrorResponse
   final case class DatasetUnknown(ref: DatasetRef) extends ErrorResponse
-  final case class UndefinedColumns(undefined: Set[String]) extends ErrorResponse
   final case class BadSchema(message: String) extends ErrorResponse
 
   // Cluste state info commands
@@ -151,7 +148,7 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
 
   val memberRefs = new HashMap[Address, ActorRef]
   val roleToCoords = new HashMap[String, Set[ActorRef]]().withDefaultValue(Set.empty[ActorRef])
-  val projections = new HashMap[DatasetRef, RichProjection]
+  val datasets = new HashMap[DatasetRef, Dataset]
   val sources = new HashMap[DatasetRef, IngestionSource]
 
   /* TODO run on its own dispatcher .withDispatcher("akka.shard-status-dispatcher") */
@@ -221,7 +218,7 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
   }
 
   def infoHandler: Receive = LoggingReceive {
-    case ListRegisteredDatasets => sender() ! projections.keys.toSeq
+    case ListRegisteredDatasets => sender() ! datasets.keys.toSeq
     case g: GetShardMap         => shardActor.forward(g)
   }
 
@@ -267,28 +264,25 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
 
   /** Initiated by Client and Spark FiloDriver setup. */
   private def setupDataset(setup: SetupDataset, origin: ActorRef): Unit =
-    (for {datasetObj    <- metaStore.getDataset(setup.ref)
-          columnObjects <- metaStore.getColumns(setup.ref, 0, setup.columns)}
+    (for { datasetObj    <- metaStore.getDataset(setup.ref) }
       yield {
-        shardActor ! AddDataset(setup, datasetObj, columnObjects, memberRefs.values.toSet, origin)
-
+        shardActor ! AddDataset(setup, datasetObj, memberRefs.values.toSet, origin)
       }).recover {
-      case MetaStore.UndefinedColumns(cols) => origin ! UndefinedColumns(cols)
-      case err: RichProjection.BadSchema    => origin ! BadSchema(err.toString)
+      case err: Dataset.BadSchema           => origin ! BadSchema(err.toString)
       case NotFoundError(what)              => origin ! DatasetUnknown(setup.ref)
       case t: Throwable                     => origin ! MetadataException(t)
     }
 
   private def datasetSetup(e: DatasetAdded): Unit = {
-    val proj = RichProjection(e.dataset, e.columns)
-    logger.info(s"Registering dataset ${proj.datasetRef} with ingestion source ${e.source}")
-    projections(proj.datasetRef) = proj
-    sources(proj.datasetRef) = e.source
+    val ref = e.dataset.ref
+    logger.info(s"Registering dataset $ref with ingestion source ${e.source}")
+    datasets(ref) = e.dataset
+    sources(ref) = e.source
 
     // TODO inspect diff for new members not known at time of initial ds setup
-    sendDatasetSetup(memberRefs.values.toSet, proj, e.source)
+    sendDatasetSetup(memberRefs.values.toSet, e.dataset, e.source)
     e.ackTo ! DatasetVerified
-    sendStartCommand(e.shards, proj)
+    sendStartCommand(e.shards, ref)
   }
 
   /** Called after a new coordinator is added and shard assignment strategy has
@@ -307,30 +301,29 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
     for {
       DatasetShards(ref, _, shards) <- e.newShards
     } {
-      sendDatasetSetup(oneAdded, projections(ref), sources(ref))
-      sendStartCommand(Map(e.coordinator -> shards), projections(ref))
+      sendDatasetSetup(oneAdded, datasets(ref), sources(ref))
+      sendStartCommand(Map(e.coordinator -> shards), ref)
     }
   }
 
-  /** Called on successfull AddNodeCoordinator and SetupDataset protocols.
+  /** Called on successful AddNodeCoordinator and SetupDataset protocols.
     *
     * @param coords the current cluster members
-    * @param proj   the dataset projection
+    * @param dataset the Dataset object
     * @param source the ingestion source type to use
     */
-  private def sendDatasetSetup(coords: Set[ActorRef], proj: RichProjection, source: IngestionSource): Unit = {
-    logger.info(s"Sending setup message for ${proj.datasetRef} to coordinators $coords.")
-    val colStrs = proj.dataColumns.map(_.toString)
-    val setupMsg = IngestionCommands.DatasetSetup(proj.dataset, colStrs, 0, source)
+  private def sendDatasetSetup(coords: Set[ActorRef], dataset: Dataset, source: IngestionSource): Unit = {
+    logger.info(s"Sending setup message for ${dataset.ref} to coordinators $coords.")
+    val setupMsg = IngestionCommands.DatasetSetup(dataset.asCompactString, source)
     coords.foreach(_ ! setupMsg)
   }
 
   /** If no shards are assigned to a coordinator, no commands are sent. */
-  private def sendStartCommand(coords: Map[ActorRef, Seq[Int]], proj: RichProjection): Unit =
+  private def sendStartCommand(coords: Map[ActorRef, Seq[Int]], ref: DatasetRef): Unit =
     for {
       (coord, shards) <- coords
       shard           <- shards.toList
-    } coord ! StartShardIngestion(proj.datasetRef, shard, None)
+    } coord ! StartShardIngestion(ref, shard, None)
 
   def routerEvents: Receive = LoggingReceive {
     case ForwardToOne(role, msg) =>
@@ -359,7 +352,7 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
     case NodeProtocol.ResetState =>
       val origin = sender()
       logger.info("Resetting all dataset state except membership.")
-      projections.clear()
+      datasets.clear()
       sources.clear()
 
       implicit val timeout: Timeout = settings.DefaultTaskTimeout

@@ -6,16 +6,17 @@ import kamon.Kamon
 import monix.reactive.Observable
 
 import filodb.core._
-import filodb.core.metadata.{Column, RichProjection}
+import filodb.core.metadata.Dataset
 import filodb.core.query.ChunkSetReader
 
 /**
  * ChunkSource is the base trait for a source of chunks given a `PartitionScanMethod` and a
  * `ChunkScanMethod`.  It is the basis for querying and reading out of raw chunks.
+ *
+ * Besides the basic methods here, see `package.scala` for derivative methods including aggregate
+ * and row iterator based methods (intended for things like Spark)
  */
 trait ChunkSource {
-  import ChunkSetReader._
-
   def stats: ChunkSourceStats
 
   /**
@@ -31,36 +32,32 @@ trait ChunkSource {
    * Scans and returns partitions according to the method.  Note that the Partition returned may not
    * contain any data; an additional streamReaders method must be invoked to actually return chunks.
    * This allows data to be returned lazily for systems like Cassandra.
+   * @param dataset the Dataset to read from
+   * @param partMethod which partitions to scan
    * @return an Observable over FiloPartition
    */
-  def scanPartitions(projection: RichProjection,
-                     version: Int,
-                     partMethod: PartitionScanMethod,
-                     colToMaker: ColumnToMaker = defaultColumnToMaker): Observable[FiloPartition]
+  def scanPartitions(dataset: Dataset,
+                     partMethod: PartitionScanMethod): Observable[FiloPartition]
 
   /**
    * Reads chunks from a dataset and returns an Observable of chunk readers.
    *
-   * @param projection the Projection to read from
-   * @param columns the set of columns to read back.  Order determines the order of columns read back
-   *                in each row
-   * @param version the version # to read from
+   * @param dataset the Dataset to read from
+   * @param columnIDs the set of column IDs to read back.  Order determines the order of columns read back
+   *                in each row.  These are the IDs from the Column instances.
    * @param partMethod which partitions to scan
    * @param chunkMethod which chunks within a partition to scan
-   * @param colToMaker a function to translate a Column to a VectorFactory
    * @return an Observable of ChunkSetReaders
    */
-  def readChunks(projection: RichProjection,
-                 columns: Seq[Column],
-                 version: Int,
+  def readChunks(dataset: Dataset,
+                 columnIDs: Seq[Types.ColumnId],
                  partMethod: PartitionScanMethod,
-                 chunkMethod: ChunkScanMethod = AllChunkScan,
-                 colToMaker: ColumnToMaker = defaultColumnToMaker): Observable[ChunkSetReader] = {
-    val positions = projection.getPositions(columns)
-    scanPartitions(projection, version, partMethod, colToMaker)
+                 chunkMethod: ChunkScanMethod = AllChunkScan): Observable[ChunkSetReader] = {
+    val ids = columnIDs.toArray
+    scanPartitions(dataset, partMethod)
       .flatMap { partition =>
         stats.incrReadPartitions(1)
-        partition.streamReaders(chunkMethod, positions)
+        partition.streamReaders(chunkMethod, ids)
       }
   }
 }

@@ -1,18 +1,17 @@
 package filodb.cassandra.columnstore
 
-import com.datastax.driver.core.{BoundStatement, Row}
+import com.datastax.driver.core.BoundStatement
 import java.nio.ByteBuffer
 import java.lang.{Long => jlLong, Integer => jlInt}
 import monix.reactive.Observable
 import scala.concurrent.{ExecutionContext, Future}
-import scodec.bits._
 
 import filodb.cassandra.FiloCassandraConnector
 import filodb.core._
-import filodb.core.store.{ChunkSinkStats, ChunkSetInfo, SingleChunkInfo, compress, decompress}
+import filodb.core.store.{ChunkSinkStats, SingleChunkInfo, compress, decompress}
 
 /**
- * Represents the table which holds the actual columnar chunks for segments
+ * Represents the table which holds the actual columnar chunks
  *
  * Data is stored in a columnar fashion similar to Parquet -- grouped by column.  Each
  * chunk actually stores many many rows grouped together into one binary chunk for efficiency.
@@ -31,30 +30,28 @@ sealed class ChunkTable(val dataset: DatasetRef, val connector: FiloCassandraCon
   // http://blog.librato.com/posts/cassandra-compact-storage
   val createCql = s"""CREATE TABLE IF NOT EXISTS $tableString (
                     |    partition blob,
-                    |    version int,
-                    |    columnname text,
+                    |    columnid int,
                     |    chunkid bigint,
                     |    data blob,
-                    |    PRIMARY KEY ((partition, version), columnname, chunkid)
+                    |    PRIMARY KEY (partition, columnid, chunkid)
                     |) WITH COMPACT STORAGE AND compression = {
                     'sstable_compression': '$sstableCompression'}""".stripMargin
 
   lazy val writeChunksCql = session.prepare(
-    s"""INSERT INTO $tableString (partition, version, chunkid, columnname, data
-      |) VALUES (?, ?, ?, ?, ?)""".stripMargin
+    s"""INSERT INTO $tableString (partition, chunkid, columnid, data
+      |) VALUES (?, ?, ?, ?)""".stripMargin
   )
 
   def writeChunks(partition: Types.PartitionKey,
-                  version: Int,
                   chunkId: Types.ChunkID,
-                  chunks: Map[String, ByteBuffer],
+                  chunks: Seq[(Int, ByteBuffer)],
                   stats: ChunkSinkStats): Future[Response] = {
     val partBytes = toBuffer(partition)
     var chunkBytes = 0L
-    val statements = chunks.map { case (columnName, bytes) =>
+    val statements = chunks.map { case (columnId, bytes) =>
       val finalBytes = compressChunk(bytes)
       chunkBytes += finalBytes.capacity.toLong
-      writeChunksCql.bind(partBytes, version: jlInt, chunkId: jlLong, columnName, finalBytes)
+      writeChunksCql.bind(partBytes, chunkId: jlLong, columnId: jlInt, finalBytes)
     }.toSeq
     stats.addChunkWriteStats(statements.length, chunkBytes)
     connector.execStmt(unloggedBatch(statements))
@@ -62,35 +59,34 @@ sealed class ChunkTable(val dataset: DatasetRef, val connector: FiloCassandraCon
 
   lazy val readChunkInCql = session.prepare(
                                  s"""SELECT chunkid, data FROM $tableString WHERE
-                                  | columnname = ? AND partition = ? AND version = ?
+                                  | columnid = ? AND partition = ?
                                   | AND chunkid IN ?""".stripMargin)
 
   lazy val readChunkRangeCql = session.prepare(
                                  s"""SELECT chunkid, data FROM $tableString WHERE
-                                  | columnname = ? AND partition = ? AND version = ?
+                                  | columnid = ? AND partition = ?
                                   | AND chunkid >= ? AND chunkid <= ?""".stripMargin)
 
   def readChunks(partition: Types.PartitionKey,
-                 version: Int,
-                 column: String,
-                 colNo: Int,
+                 columnId: Int,
+                 colPos: Int,
                  chunkIds: Seq[Types.ChunkID],
                  rangeQuery: Boolean = false): Observable[SingleChunkInfo] = {
     val query = if (rangeQuery) {
-        readChunkRangeCql.bind(column, toBuffer(partition), version: jlInt,
+        readChunkRangeCql.bind(columnId: jlInt, toBuffer(partition),
                                chunkIds.head: jlLong, chunkIds.last: jlLong)
       } else {
-        readChunkInCql.bind(column, toBuffer(partition), version: jlInt, chunkIds.asJava)
+        readChunkInCql.bind(columnId: jlInt, toBuffer(partition), chunkIds.asJava)
       }
-    Observable.fromFuture(execReadChunk(colNo, query))
+    Observable.fromFuture(execReadChunk(colPos, query))
               .flatMap(it => Observable.fromIterator(it))
   }
 
-  private def execReadChunk(colNo: Int,
+  private def execReadChunk(colPos: Int,
                             query: BoundStatement): Future[Iterator[SingleChunkInfo]] = {
     session.executeAsync(query).toIterator.handleErrors.map { rowIt =>
       rowIt.map { row =>
-        SingleChunkInfo(row.getLong(0), colNo, decompressChunk(row.getBytes(1)))
+        SingleChunkInfo(row.getLong(0), colPos, decompressChunk(row.getBytes(1)))
       }
     }
   }

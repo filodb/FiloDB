@@ -2,20 +2,11 @@ package filodb.jmh
 
 import ch.qos.logback.classic.{Level, Logger}
 import java.util.concurrent.TimeUnit
-import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.functions.sum
-import org.apache.spark.sql.types._
-import org.apache.spark.sql.{DataFrame, Row, SparkSession}
+import org.apache.spark.sql.SparkSession
 import org.openjdk.jmh.annotations._
-import org.velvia.filo.{RowReader, TupleRowReader}
-import scala.concurrent.Await
-import scala.concurrent.duration._
-import scala.language.postfixOps
-import scalaxy.loops._
 
-import filodb.core._
-import filodb.core.metadata.{Column, Dataset, RichProjection}
-import filodb.spark.{SparkRowReader, FiloDriver, FiloExecutor, TypeConverters}
+import filodb.spark.{FiloDriver, FiloExecutor}
 
 // Spark CassandraColumnStore benchmark
 // NOTE: before running this test, MUST do sbt jmh/run on CreateCassTestData to populate

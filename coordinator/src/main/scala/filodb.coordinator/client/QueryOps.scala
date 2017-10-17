@@ -44,9 +44,8 @@ trait QueryOps extends ClientBase with StrictLogging {
   def partitionFilterAggregate(dataset: DatasetRef,
                                query: QueryArgs,
                                filters: Seq[ColumnFilter],
-                               version: Int = 0,
                                timeout: FiniteDuration = 60.seconds): AggregateResponse[_] = {
-    val aggCmd = AggregateQuery(dataset, version, query, FilteredPartitionQuery(filters))
+    val aggCmd = AggregateQuery(dataset, query, FilteredPartitionQuery(filters))
     askCoordinator(aggCmd, timeout) { case r: AggregateResponse[_] => r }
   }
 }

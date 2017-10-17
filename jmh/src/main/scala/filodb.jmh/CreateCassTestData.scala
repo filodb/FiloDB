@@ -1,6 +1,6 @@
 package filodb.jmh
 
-import org.apache.spark.sql.{DataFrame, SparkSession, SaveMode}
+import org.apache.spark.sql.{SparkSession, SaveMode}
 
 import filodb.spark.{FiloDriver, FiloExecutor}
 

@@ -6,8 +6,7 @@ import kamon.Kamon
 import monix.reactive.Observable
 
 import filodb.core._
-import filodb.core.metadata.{ Projection, RichProjection}
-
+import filodb.core.metadata.Dataset
 
 
 /**
@@ -18,27 +17,23 @@ trait ChunkSink {
 
   /**
    * Writes the ChunkSets appearing in a stream/Observable to persistent storage, with backpressure
-   * @param projection the Projection to write to
-   * @param version the version # to write the chunks to
+   * @param dataset the Dataset to write to
    * @param chunksets an Observable stream of chunksets to write
    * @return Success when the chunksets stream ends and is completely written.
    *         Future.failure(exception) if an exception occurs.
    */
-  def write(projection: RichProjection,
-            version: Int,
-            chunksets: Observable[ChunkSet]): Future[Response]
+  def write(dataset: Dataset, chunksets: Observable[ChunkSet]): Future[Response]
 
   /**
-   * Initializes the ChunkSink for a given dataset projection.  Must be called once before writing.
+   * Initializes the ChunkSink for a given dataset.  Must be called once before writing.
    */
-  def initializeProjection(projection: Projection): Future[Response]
+  def initialize(dataset: DatasetRef): Future[Response]
 
   /**
-   * Clears all data from the ChunkSink for that given projection, for all versions.
-   * More like a truncation, not a drop.
-   * NOTE: please make sure there are no reprojections or writes going on before calling this
+   * Truncates/clears all data from the ChunkSink for that given dataset.
+   * NOTE: please make sure there are no writes going on before calling this
    */
-  def clearProjectionData(projection: Projection): Future[Response]
+  def truncate(dataset: DatasetRef): Future[Response]
 
   /**
    * Completely and permanently drops the dataset from the ChunkSink.

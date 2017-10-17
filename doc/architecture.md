@@ -2,23 +2,18 @@
 <!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
 **Table of Contents**  *generated with [DocToc](https://github.com/thlorenz/doctoc)*
 
-- [FiloDB Architecture and Code Overview](#filodb-architecture-and-code-overview)
-  - [Coordinator](#coordinator)
-  - [Core](#core)
-  - [Cassandra](#cassandra)
-  - [Kafka](#kafka)
-  - [Spark](#spark)
-  - [HTTP](#http)
-  - [Standalone](#standalone)
-  - [CLI](#cli)
+- [Coordinator](#coordinator)
+  - [Sharding](#sharding)
+- [Core](#core)
+  - [Ingestion Flow](#ingestion-flow)
+- [Cassandra](#cassandra)
+- [Kafka](#kafka)
+- [Spark](#spark)
+- [HTTP](#http)
+- [Standalone](#standalone)
+- [CLI](#cli)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
-
-## FiloDB Architecture and Code Overview
-
-TODO: redo, this is way outdated
-
-![FiloDB Architecture](filodb_architecture.png)
 
 The code is laid out following the different parts and components.
 
@@ -73,11 +68,15 @@ These components form the core part of FiloDB and are portable across data store
 
 * `binaryrecord` - used for supporting efficient, no-serialization, multi-schema partition keys and for serializing rows for Spark ingestion
 * `memstore` - a [MemStore](../core/src/main/scala/filodb.core/memstore/MemStore.scala) ingests records, encodes them into columnar chunks, and allows for real-time querying through the `ChunkSource` API.  The current implementation is a [TimeSeriesMemStore](../core/src/main/scala/filodb.core/memstore/TimeSeriesMemStore.scala) which is designed for very high cardinality time series data.  For each dataset it stores one or more shards, each of which may contain many many thousands of [TimeSeriesPartition](../core/src/main/scala/filodb.core/memstore/TimeSeriesPartition.scala) instances.  MemStores also manage persistence of encoded data via `ChunkSink`s.
-* `store` - contains the main APIs for persistence and chunk reading, including [ChunkSource](../core/src/main/scala/filodb.core/store/ChunkSourceSink.scala) and `ChunkSink`, as well as the [MetaStore](../core/src/main/scala/filodb.core/store/MetaStore.scala) for metadata persistence.  Most of the APIs are based on reactive streams for backpressure handling.
+* `store` - contains the main APIs for persistence and chunk reading, including [ChunkSource](../core/src/main/scala/filodb.core/store/ChunkSource.scala) and `ChunkSink`, as well as the [MetaStore](../core/src/main/scala/filodb.core/store/MetaStore.scala) for metadata persistence.  Most of the APIs are based on reactive streams for backpressure handling.
 * `query` - contains aggregation and querying logic built on top of `ChunkSource`s.
 * `metadata` - Dataset and Column definitions
-* 
-FiloDB datasets consists of one or more projections, each of which contains columns.  The [MetaStore](../core/src/main/scala/filodb.core/store/MetaStore.scala) defines an API for concurrent reads/writes/updates on dataset, projection, and column metadata.  Each [Column](../core/src/main/scala/filodb.core/metadata/Column.scala) has a `ColumnType`, which has a [KeyType](../core/src/main/scala/filodb.core/metadata/KeyType.scala).  `KeyType` is a fundamental type class defining serialization and extraction for each type of column/key.  Most of FiloDB depends heavily on [RichProjection](../core/src/main/scala/filodb.core/metadata/Projection.scala), which contains the partition, row, and segment key columns and their `KeyType`s.
+
+FiloDB's [Dataset](../core/src/main/scala/filodb.core/metadata/Dataset.scala) defines the partition and data columns and the row key.  The [MetaStore](../core/src/main/scala/filodb.core/store/MetaStore.scala) defines an API for concurrent reads/writes/updates on dataset metadata.  Each [Column](../core/src/main/scala/filodb.core/metadata/Column.scala) has a `ColumnType`, which has a [KeyType](../core/src/main/scala/filodb.core/metadata/KeyType.scala).  `KeyType` is a fundamental type class defining serialization and extraction for each type of column/key.
+
+#### Ingestion Flow
+
+![IngestionFlow](mermaid/ingest-flush-recovery.mermaid.png)
 
 ### Cassandra
 
@@ -95,7 +94,7 @@ Contains the Spark input source for ingesting and querying data from FiloDB.
 
 ### Standalone
 
-The standalone module is used for FiloDB real-time direct ingestion (from Kafka) and querying without Spark, for metrics and event use cases.
+The standalone module is used for FiloDB real-time direct ingestion (from Kafka) and low-latency querying without Spark, for metrics and event use cases.
 
 ### CLI
 

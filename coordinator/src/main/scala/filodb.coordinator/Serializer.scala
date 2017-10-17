@@ -2,7 +2,6 @@ package filodb.coordinator
 
 import com.typesafe.scalalogging.StrictLogging
 import org.boon.primitive.{ByteBuf, InputByteArray}
-import org.velvia.filo.RowReader
 
 import filodb.coordinator.IngestionCommands.IngestRows
 import filodb.core._
@@ -37,7 +36,6 @@ object Serializer extends StrictLogging {
     buf.writeInt(dataSchemaHash)
     buf.writeMediumString(data.dataset.dataset)
     buf.writeMediumString(data.dataset.database.getOrElse(""))
-    buf.writeInt(data.version)
     buf.writeInt(data.shard)
     buf.writeInt(data.rows.length)
     for { record <- data.rows } {
@@ -57,7 +55,6 @@ object Serializer extends StrictLogging {
     val dataSchemaHash = scanner.readInt
     val dataset = scanner.readMediumString
     val db = Option(scanner.readMediumString).filter(_.length > 0)
-    val version = scanner.readInt
     val shard = scanner.readInt
     val numRows = scanner.readInt
     val rows = new collection.mutable.ArrayBuffer[IngestRecord]()
@@ -71,7 +68,7 @@ object Serializer extends StrictLogging {
                              scanner.readLong)
       }
     }
-    IngestionCommands.IngestRows(DatasetRef(dataset, db), version, shard, rows)
+    IngestionCommands.IngestRows(DatasetRef(dataset, db), shard, rows)
   }
 
   private val partSchemaMap = new java.util.concurrent.ConcurrentHashMap[Int, RecordSchema]

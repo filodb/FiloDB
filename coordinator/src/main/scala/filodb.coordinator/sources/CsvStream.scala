@@ -8,8 +8,8 @@ import net.ceedubs.ficus.Ficus._
 import org.velvia.filo.ArrayStringRowReader
 
 import filodb.coordinator.{IngestionStream, IngestionStreamFactory}
-import filodb.core.memstore.IngestRecord
-import filodb.core.metadata.{Dataset, RichProjection}
+import filodb.core.memstore.{IngestRecord, IngestRouting}
+import filodb.core.metadata.Dataset
 
 object CsvStream extends StrictLogging {
   // Number of lines to read and send at a time
@@ -20,12 +20,12 @@ object CsvStream extends StrictLogging {
                                      separatorChar: Char = ',')
 
   def getHeaderColumns(csvStream: java.io.Reader,
-                       separatorChar: Char = ','): Seq[String] = {
+                       separatorChar: Char = ','): (Seq[String], CSVReader) = {
     val reader = new CSVReader(csvStream, separatorChar)
-    reader.readNext.toSeq
+    (reader.readNext.toSeq, reader)
   }
 
-  def getHeaderColumns(csvPath: String): Seq[String] = {
+  def getHeaderColumns(csvPath: String): (Seq[String], CSVReader) = {
     val fileReader = new java.io.FileReader(csvPath)
     getHeaderColumns(fileReader)
   }
@@ -38,19 +38,20 @@ object CsvStream extends StrictLogging {
  *   header = true
  *   batch-size = 100
  *   # separator-char = ","
+ *   column-names = ["time", "value"]
  * }}}
  * Instead of file one can put "resource"
  *
- * If the CSV has a header, you need to set header=true.  Since a projection is already required,
- * you need to separately parse the header another time to get the list of input columns first before
- * setting up the ingestion.
+ * If the CSV has a header, you need to set header=true.
+ * Then the header will be parsed automatically.
+ * Otherwise you must pass in the column names in the config.
  *
  * NOTE: right now this only works with a single shard.
  */
 class CsvStreamFactory extends IngestionStreamFactory {
   import CsvStream._
 
-  def create(config: Config, projection: RichProjection, shard: Int): IngestionStream = {
+  def create(config: Config, dataset: Dataset, shard: Int): IngestionStream = {
     require(shard == 0, s"Shard on creation must be shard 0 but was '$shard'.")
     val settings = CsvStreamSettings(config.getBoolean("header"),
                      config.as[Option[Int]]("batch-size").getOrElse(BatchSize),
@@ -60,28 +61,38 @@ class CsvStreamFactory extends IngestionStreamFactory {
                  }.getOrElse {
                    new java.io.InputStreamReader(getClass.getResourceAsStream(config.getString("resource")))
                  }
-    new CsvStream(reader, projection, settings)
+
+    val (columnNames, csvReader) = if (settings.header) {
+      getHeaderColumns(reader, settings.separatorChar)
+    } else {
+      (config.as[Seq[String]]("column-names"), new CSVReader(reader, settings.separatorChar))
+    }
+    new CsvStream(csvReader, dataset, columnNames, settings)
   }
 }
 
-private[filodb] class CsvStream(reader: java.io.Reader,
-                                projection: RichProjection,
-                                settings: CsvStream.CsvStreamSettings) extends IngestionStream {
+/**
+ * CSV post-header reader.
+ * Either the CSV file has no headers, in which case the column names must be supplied,
+ * or you can read the first line and parse the headers and then invoke this class.
+ */
+private[filodb] class CsvStream(csvReader: CSVReader,
+                                dataset: Dataset,
+                                columnNames: Seq[String],
+                                settings: CsvStream.CsvStreamSettings) extends IngestionStream with StrictLogging {
   import collection.JavaConverters._
 
-  val csvReader = new CSVReader(reader, settings.separatorChar)
-
-  if (settings.header) csvReader.readNext
+  val routing = IngestRouting(dataset, columnNames)
+  logger.info(s"CsvStream started with dataset ${dataset.ref}, columnNames $columnNames, routing $routing")
 
   val batchIterator = csvReader.iterator.asScala
                         .zipWithIndex
                         .map { case (tokens, idx) =>
-                          IngestRecord(projection, ArrayStringRowReader(tokens), idx)
+                          IngestRecord(routing, ArrayStringRowReader(tokens), idx)
                         }.grouped(settings.batchSize)
   val get = Observable.fromIterator(batchIterator)
 
   def teardown(): Unit = {
-    reader.close()
     csvReader.close()
   }
 }

@@ -2,7 +2,7 @@ package filodb.stress
 
 import com.opencsv.CSVReader
 import org.apache.spark.rdd.RDD
-import org.apache.spark.sql.{DataFrame, SparkSession, SaveMode}
+import org.apache.spark.sql.{SparkSession, SaveMode}
 import org.apache.spark.streaming.{Milliseconds, StreamingContext}
 import org.joda.time.DateTime
 import scala.concurrent.duration._
@@ -85,7 +85,7 @@ object StreamingStress extends App {
                  rdd.toDF.write.format("filodb.spark").
                     option("dataset", "taxi_streaming").
                     option("row_keys", "pickup_datetime,hack_license").
-                    option("partition_keys", ":stringPrefix medallion 2").
+                    option("partition_columns", "medallion:string").
                     // Flushing after each small batch would be very inefficient...
                     option("flush_after_write", "false").
                     mode(SaveMode.Append).save()
@@ -118,7 +118,7 @@ object StreamingStress extends App {
       val numRecords = taxiData.count()
       puts(s"Taxi dataset now has   ===>  $numRecords records!")
 
-      val stats = Try(FiloDriver.client.ingestionStats(ref, 0)).getOrElse("Oops, dataset not there yet")
+      val stats = Try(FiloDriver.client.ingestionStats(ref)).getOrElse("Oops, dataset not there yet")
       puts(s"  ==> Ingestion stats: $stats")
       Thread sleep 700
     }

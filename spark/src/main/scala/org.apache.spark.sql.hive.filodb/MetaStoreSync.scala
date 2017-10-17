@@ -8,7 +8,6 @@ import org.apache.spark.sql.{SQLContext, SparkSession}
 import scala.util.Try
 
 import filodb.core.store.MetaStore
-import filodb.spark.FiloRelation
 
 
 object MetaStoreSync extends StrictLogging {

@@ -3,6 +3,7 @@ package filodb.core.query
 import com.googlecode.javaewah.IntIterator
 
 import filodb.core._
+import filodb.core.memstore.IngestRecord
 
 import org.scalatest.{FunSpec, Matchers, BeforeAndAfter}
 
@@ -12,7 +13,7 @@ class PartitionKeyIndexSpec extends FunSpec with Matchers with BeforeAndAfter {
   import org.velvia.filo.ZeroCopyUTF8String._
   import org.velvia.filo.UTF8Wrapper
 
-  val keyIndex = new PartitionKeyIndex(projection6)
+  val keyIndex = new PartitionKeyIndex(dataset6)
 
   before {
     keyIndex.reset()
@@ -27,9 +28,9 @@ class PartitionKeyIndexSpec extends FunSpec with Matchers with BeforeAndAfter {
   }
 
   it("should add keys and parse filters correctly") {
-    // Add the first nine keys and row numbers
-    readers.zipWithIndex.take(10).foreach { case (row, index) =>
-      keyIndex.addKey(projection6.partitionKeyFunc(row), index)
+    // Add the first ten keys and row numbers
+    records(dataset6, readers.take(10)).foreach { case IngestRecord(partReader, data, index) =>
+      keyIndex.addKey(dataset6.partKey(partReader), index.toInt)
     }
 
     // Should get empty iterator when passing no filters
@@ -49,9 +50,9 @@ class PartitionKeyIndexSpec extends FunSpec with Matchers with BeforeAndAfter {
   }
 
   it("should parse filters with UTF8Wrapper and string correctly") {
-    // Add the first nine keys and row numbers
-    readers.zipWithIndex.take(10).foreach { case (row, index) =>
-      keyIndex.addKey(projection6.partitionKeyFunc(row), index)
+    // Add the first ten keys and row numbers
+    records(dataset6, readers.take(10)).foreach { case IngestRecord(partReader, data, index) =>
+      keyIndex.addKey(dataset6.partKey(partReader), index.toInt)
     }
 
     val filter2 = ColumnFilter("Actor2Name", Equals(UTF8Wrapper("REGIME".utf8)))
@@ -66,9 +67,9 @@ class PartitionKeyIndexSpec extends FunSpec with Matchers with BeforeAndAfter {
   }
 
   it("should obtain indexed names and values") {
-    // Add the first nine keys and row numbers
-    readers.zipWithIndex.take(10).foreach { case (row, index) =>
-      keyIndex.addKey(projection6.partitionKeyFunc(row), index)
+    // Add the first ten keys and row numbers
+    records(dataset6, readers.take(10)).foreach { case IngestRecord(partReader, data, index) =>
+      keyIndex.addKey(dataset6.partKey(partReader), index.toInt)
     }
 
     keyIndex.indexNames.toSet should equal (Set("Actor2Code", "Actor2Name"))
@@ -79,8 +80,9 @@ class PartitionKeyIndexSpec extends FunSpec with Matchers with BeforeAndAfter {
   }
 
   it("should be able to AND multiple filters together") {
-    readers.zipWithIndex.take(10).foreach { case (row, index) =>
-      keyIndex.addKey(projection6.partitionKeyFunc(row), index)
+    // Add the first ten keys and row numbers
+    records(dataset6, readers.take(10)).foreach { case IngestRecord(partReader, data, index) =>
+      keyIndex.addKey(dataset6.partKey(partReader), index.toInt)
     }
 
     val filters1 = Seq(ColumnFilter("Actor2Code", Equals("GOV".utf8)),
@@ -97,8 +99,9 @@ class PartitionKeyIndexSpec extends FunSpec with Matchers with BeforeAndAfter {
   }
 
   it("should return unfound column names when calling parseFilters") {
-    readers.zipWithIndex.take(10).foreach { case (row, index) =>
-      keyIndex.addKey(projection6.partitionKeyFunc(row), index)
+    // Add the first ten keys and row numbers
+    records(dataset6, readers.take(10)).foreach { case IngestRecord(partReader, data, index) =>
+      keyIndex.addKey(dataset6.partKey(partReader), index.toInt)
     }
 
     val filters1 = Seq(ColumnFilter("Actor2Code", Equals("GOV".utf8)),
@@ -109,9 +112,9 @@ class PartitionKeyIndexSpec extends FunSpec with Matchers with BeforeAndAfter {
   }
 
   it("should ignore unsupported columns and return empty filter") {
-    val index2 = new PartitionKeyIndex(projection1)
-    readers.zipWithIndex.take(10).foreach { case (row, index) =>
-      index2.addKey(projection1.partitionKeyFunc(row), index)
+    val index2 = new PartitionKeyIndex(dataset1)
+    records(dataset1, readers.take(10)).foreach { case IngestRecord(partReader, data, index) =>
+      index2.addKey(dataset1.partKey(partReader), index.toInt)
     }
 
     val filters1 = Seq(ColumnFilter("Actor2Code", Equals("GOV".utf8)),

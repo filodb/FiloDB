@@ -7,7 +7,6 @@ import akka.remote.testkit.MultiNodeConfig
 import com.typesafe.config.ConfigFactory
 
 import filodb.core._
-import filodb.core.metadata.RichProjection
 
 object IngestionStreamClusterSpecConfig extends MultiNodeConfig {
   // register the named roles (nodes) of the test
@@ -31,7 +30,7 @@ abstract class IngestionStreamClusterSpec extends ClusterSpec(IngestionStreamClu
   import GdeltTestData._
   import NodeClusterActor._
   import IngestionStreamClusterSpecConfig._
-  import sources.{CsvStream, CsvStreamFactory}
+  import sources.CsvStreamFactory
 
   import cluster.ec
 
@@ -42,7 +41,6 @@ abstract class IngestionStreamClusterSpec extends ClusterSpec(IngestionStreamClu
   override def afterAll(): Unit = multiNodeSpecAfterAll()
 
   val config = globalConfig.getConfig("filodb")
-  val settings = CsvStream.CsvStreamSettings()
 
   val address1 = node(first).address
   val address2 = node(second).address
@@ -51,15 +49,10 @@ abstract class IngestionStreamClusterSpec extends ClusterSpec(IngestionStreamClu
   private lazy val metaStore = cluster.metaStore
 
   metaStore.newDataset(dataset6).futureValue should equal (Success)
-  val proj2 = RichProjection(dataset6, schema)
-  val ref2 = proj2.datasetRef
-  schema.foreach { col => metaStore.newColumn(col, ref2).futureValue should equal (Success) }
 
   var clusterActor: ActorRef = _
   var mapper: ShardMapper = _
 
-  val sampleReader = new java.io.InputStreamReader(getClass.getResourceAsStream("/GDELT-sample-test.csv"))
-  val headerCols = CsvStream.getHeaderColumns(sampleReader)
   private val resources = DatasetResourceSpec(4, 2)
 
   it("should start actors, join cluster, setup ingestion, and wait for all nodes to enter barrier") {
@@ -75,7 +68,7 @@ abstract class IngestionStreamClusterSpec extends ClusterSpec(IngestionStreamClu
     runOn(first) {
       // Empty ingestion source - we're going to pump in records ourselves
       // 4 shards, 2 nodes, 2 nodes per shard
-      val msg = SetupDataset(ref2, headerCols, resources, noOpSource)
+      val msg = SetupDataset(dataset6.ref, resources, noOpSource)
       clusterActor ! msg
       // It takes a _really_ long time for the cluster actor singleton to start.
       expectMsg(30.seconds.dilated, DatasetVerified)
@@ -92,19 +85,19 @@ abstract class IngestionStreamClusterSpec extends ClusterSpec(IngestionStreamClu
   it("should start ingestion, route to shards, and do distributed querying") {
     runOn(first) {
 
-      val protocolActor = system.actorOf(IngestProtocol.props(clusterActor, ref2))
+      val protocolActor = system.actorOf(IngestProtocol.props(clusterActor, dataset6.ref))
 
       // We have to subscribe and get our own copy of the ShardMap so that routeToShards can route
-      clusterActor ! SubscribeShardUpdates(ref2)
+      clusterActor ! SubscribeShardUpdates(dataset6.ref)
       expectMsgPF(3.seconds.dilated) {
-        case CurrentShardSnapshot(ref2, newMap) => mapper = newMap
+        case CurrentShardSnapshot(ref, newMap) if ref == dataset6.ref => mapper = newMap
       }
 
       val config = ConfigFactory.parseString(s"""header = true
                                              batch-size = 10
                                              resource = "/GDELT-sample-test.csv"
                                              """)
-      val stream = (new CsvStreamFactory).create(config, proj2, 0)
+      val stream = (new CsvStreamFactory).create(config, dataset6, 0)
 
       receiveWhile(messages = resources.numShards) {
         case e: IngestionStarted =>
@@ -113,7 +106,7 @@ abstract class IngestionStreamClusterSpec extends ClusterSpec(IngestionStreamClu
       }
 
       // Now, route records to all different shards and nodes across cluster
-      stream.routeToShards(mapper, proj2, protocolActor)
+      stream.routeToShards(mapper, dataset6, protocolActor)
     }
 
     enterBarrier("ingestion-done")
@@ -122,7 +115,7 @@ abstract class IngestionStreamClusterSpec extends ClusterSpec(IngestionStreamClu
     // Count all the records in every partition in every shard
     // counting a non-partition column... can't count a partition column yet
     val durationForCI = 30.seconds.dilated
-    val query = AggregateQuery(ref2, 0, QueryArgs("count", "MonthYear"), FilteredPartitionQuery(Nil))
+    val query = AggregateQuery(dataset6.ref, QueryArgs("count", "MonthYear"), FilteredPartitionQuery(Nil))
 
     def func: Array[Int] = {
       coordinatorActor ! query

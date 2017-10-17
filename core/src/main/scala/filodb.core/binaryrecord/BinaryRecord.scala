@@ -7,7 +7,7 @@ import org.velvia.filo.RowReader.TypedFieldExtractor
 import scala.language.postfixOps
 import scalaxy.loops._
 
-import filodb.core.metadata.RichProjection
+import filodb.core.metadata.Dataset
 import filodb.core.Types._
 
 // scalastyle:off equals.hash.code
@@ -27,7 +27,6 @@ class BinaryRecord private[binaryrecord](val schema: RecordSchema,
                                          val numBytes: Int)
 extends ZeroCopyBinary with SchemaRowReader {
   import BinaryRecord._
-  import ZeroCopyBinary._
 
   // private final compiles to a JVM bytecode field, cheaper to access (as opposed to a method)
   private final val fields = schema.fields
@@ -120,8 +119,8 @@ object BinaryRecord {
   def apply(schema: RecordSchema, bytes: Array[Byte]): BinaryRecord =
     new ArrayBinaryRecord(schema, bytes)
 
-  def apply(projection: RichProjection, bytes: Array[Byte]): BinaryRecord =
-    apply(projection.rowKeyBinSchema, bytes)
+  def apply(dataset: Dataset, bytes: Array[Byte]): BinaryRecord =
+    apply(dataset.rowKeyBinSchema, bytes)
 
   def apply(schema: RecordSchema, buffer: ByteBuffer): BinaryRecord =
     if (buffer.hasArray) { apply(schema, buffer.array) }
@@ -158,11 +157,11 @@ object BinaryRecord {
     builder.build(copy = true)
   }
 
-  def apply(projection: RichProjection, items: Seq[Any]): BinaryRecord =
-    if (items.length < projection.rowKeyColumns.length) {
-      apply(RecordSchema(projection.rowKeyColumns.take(items.length)), SeqRowReader(items))
+  def apply(dataset: Dataset, items: Seq[Any]): BinaryRecord =
+    if (items.length < dataset.rowKeyColumns.length) {
+      apply(RecordSchema(dataset.rowKeyColumns.take(items.length)), SeqRowReader(items))
     } else {
-      apply(projection.rowKeyBinSchema, SeqRowReader(items))
+      apply(dataset.rowKeyBinSchema, SeqRowReader(items))
     }
 
   implicit val ordering = new Ordering[BinaryRecord] {

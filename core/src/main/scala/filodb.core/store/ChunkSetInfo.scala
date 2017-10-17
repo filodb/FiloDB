@@ -11,7 +11,7 @@ import org.boon.primitive.{ByteBuf, InputByteArray}
 import org.velvia.filo._
 
 import filodb.core.binaryrecord.BinaryRecord
-import filodb.core.metadata.{Column, RichProjection}
+import filodb.core.metadata.{Column, Dataset}
 import filodb.core.Types._
 
 /**
@@ -21,22 +21,21 @@ import filodb.core.Types._
 case class ChunkSet(info: ChunkSetInfo,
                     partition: PartitionKey,
                     skips: Seq[ChunkRowSkipIndex],
-                    chunks: Map[ColumnId, ByteBuffer])
+                    chunks: Seq[(ColumnId, ByteBuffer)])
 
 object ChunkSet {
-  private def makeRowKey(proj: RichProjection, row: RowReader): BinaryRecord =
-    BinaryRecord(proj.rowKeyBinSchema, RoutingRowReader(row, proj.rowKeyColIndices.toArray))
-
   /**
    * Create a ChunkSet out of a set of rows easily.  Mostly for testing.
+   * @param rows a RowReader for the data columns only - partition columns at end might be OK
    */
-  def apply(proj: RichProjection, part: PartitionKey, rows: Seq[RowReader]): ChunkSet = {
+  def apply(dataset: Dataset, part: PartitionKey, rows: Seq[RowReader]): ChunkSet = {
     require(rows.nonEmpty)
-    val firstKey = makeRowKey(proj, rows.head)
-    val info = ChunkSetInfo(timeUUID64, rows.length, firstKey, makeRowKey(proj, rows.last))
-    val filoSchema = Column.toFiloSchema(proj.columns)
+    val firstKey = dataset.rowKey(rows.head)
+    val info = ChunkSetInfo(timeUUID64, rows.length, firstKey, dataset.rowKey(rows.last))
+    val filoSchema = Column.toFiloSchema(dataset.dataColumns)
     val chunkMap = RowToVectorBuilder.buildFromRows(rows.toIterator, filoSchema)
-    ChunkSet(info, part, Nil, chunkMap)
+    val idsAndBytes = chunkMap.map { case (colName, buf) => (dataset.colIDs(colName).get.head, buf) }.toSeq
+    ChunkSet(info, part, Nil, idsAndBytes)
   }
 }
 
@@ -110,7 +109,7 @@ object ChunkSetInfo extends StrictLogging {
    *   maxConsideredChunkID - long
    *   repeated - id: long, med. byte array (EWAHCompressedBitmap) - ChunkRowSkipIndex
    */
-  def toBytes(projection: RichProjection, chunkSetInfo: ChunkSetInfo, skips: ChunkSkips): Array[Byte] = {
+  def toBytes(dataset: Dataset, chunkSetInfo: ChunkSetInfo, skips: ChunkSkips): Array[Byte] = {
     val buf = ByteBuf.create(100)
     buf.writeByte(0x01)
     buf.writeLong(chunkSetInfo.id)
@@ -128,14 +127,14 @@ object ChunkSetInfo extends StrictLogging {
     buf.toBytes
   }
 
-  def fromBytes(projection: RichProjection, bytes: Array[Byte]): (ChunkSetInfo, ChunkSkips) = {
+  def fromBytes(dataset: Dataset, bytes: Array[Byte]): (ChunkSetInfo, ChunkSkips) = {
     val scanner = new InputByteArray(bytes)
     val versionByte = scanner.readByte
     assert(versionByte == 0x01, s"Incompatible ChunkSetInfo version $versionByte")
     val id = scanner.readLong
     val numRows = scanner.readInt
-    val firstKey = BinaryRecord(projection, scanner.readMediumByteArray)
-    val lastKey = BinaryRecord(projection, scanner.readMediumByteArray)
+    val firstKey = BinaryRecord(dataset, scanner.readMediumByteArray)
+    val lastKey = BinaryRecord(dataset, scanner.readMediumByteArray)
     scanner.readLong    // throw away maxConsideredChunkID for now
     val skips = new ArrayBuffer[ChunkRowSkipIndex]
     while (scanner.location < bytes.size) {

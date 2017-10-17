@@ -5,7 +5,7 @@ import scala.concurrent.{ExecutionContext, Future}
 
 import filodb.cassandra.{DefaultFiloSessionProvider, FiloSessionProvider}
 import filodb.core._
-import filodb.core.metadata.{Column, DataColumn, Dataset}
+import filodb.core.metadata.Dataset
 import filodb.core.store.MetaStore
 
 /**
@@ -18,21 +18,16 @@ class CassandraMetaStore(config: Config, filoSessionProvider: Option[FiloSession
                         (implicit val ec: ExecutionContext) extends MetaStore {
   private val sessionProvider = filoSessionProvider.getOrElse(new DefaultFiloSessionProvider(config))
   val datasetTable = new DatasetTable(config, sessionProvider)
-  val columnTable = new ColumnTable(config, sessionProvider)
 
   val defaultKeySpace = config.getString("keyspace")
 
   def initialize(): Future[Response] = {
     datasetTable.createKeyspace(datasetTable.keyspace)
-    for { dtResp <- datasetTable.initialize()
-          ctResp <- columnTable.initialize() }
-    yield { ctResp }
+    datasetTable.initialize()
   }
 
   def clearAllData(): Future[Response] =
-    for { dtResp <- datasetTable.clearAll()
-          ctResp <- columnTable.clearAll() }
-    yield { ctResp }
+    datasetTable.clearAll()
 
   def newDataset(dataset: Dataset): Future[Response] =
     datasetTable.createNewDataset(dataset)
@@ -44,18 +39,9 @@ class CassandraMetaStore(config: Config, filoSessionProvider: Option[FiloSession
     datasetTable.getAllDatasets(database)
 
   def deleteDataset(ref: DatasetRef): Future[Response] =
-    for { dtResp <- datasetTable.deleteDataset(ref)
-          ctResp <- columnTable.deleteDataset(ref) }
-    yield { ctResp }
-
-  def insertColumns(columns: Seq[DataColumn], ref: DatasetRef): Future[Response] =
-    columnTable.insertColumns(columns, ref)
-
-  def getSchema(ref: DatasetRef, version: Int): Future[Column.Schema] =
-    columnTable.getSchema(ref, version)
+    datasetTable.deleteDataset(ref)
 
   def shutdown(): Unit = {
     datasetTable.shutdown()
-    columnTable.shutdown()
   }
 }

@@ -35,8 +35,8 @@ abstract class NodeClusterSpec extends ClusterSpec(NodeClusterSpecConfig) {
 
   private lazy val coordinatorActor = cluster.coordinatorActor
 
-  private val ref = projection6.datasetRef
-  private val spec = DatasetResourceSpec(4, 2) // 4 shards, 2 nodes, 2 shards per node
+  private val ref = dataset6.ref
+  private val spec = DatasetResourceSpec(4, 2)   // 4 shards, 2 nodes, 2 shards per node
 
   override def initialParticipants = roles.size
 
@@ -45,8 +45,7 @@ abstract class NodeClusterSpec extends ClusterSpec(NodeClusterSpecConfig) {
     multiNodeSpecBeforeAll()
 
     // Initialize dataset
-    metaStore.newDataset(projection6.dataset).futureValue shouldEqual Success
-    schema.foreach { col => metaStore.newColumn(col, ref).futureValue shouldEqual Success }
+    metaStore.newDataset(dataset6).futureValue shouldEqual Success
   }
 
   override def afterAll(): Unit = multiNodeSpecAfterAll()
@@ -91,17 +90,9 @@ abstract class NodeClusterSpec extends ClusterSpec(NodeClusterSpecConfig) {
       clusterActor ! GetShardMap(ref)
       expectMsg(DatasetUnknown(ref))
 
-      clusterActor ! SetupDataset(DatasetRef("noColumns"), Seq("first"), spec, noOpSource)
+      clusterActor ! SetupDataset(DatasetRef("noColumns"), spec, noOpSource)
       expectMsg(DatasetUnknown(DatasetRef("noColumns")))
     }
-  }
-
-  it("should return UndefinedColumns if trying to setup with undefined columns") {
-    runOn(first) {
-      clusterActor ! SetupDataset(ref, Seq("first", "country"), spec, noOpSource)
-      expectMsg(UndefinedColumns(Set("first", "country")))
-    }
-    enterBarrier("end-of-undefined-columns")
   }
 
   // NOTE: getting a BadSchema should never happen.  Creating a dataset with either CLI or Spark,
@@ -110,8 +101,7 @@ abstract class NodeClusterSpec extends ClusterSpec(NodeClusterSpecConfig) {
   it("should setup dataset on all nodes for valid dataset and get ShardMap updates") {
     runOn(first) {
       val noOpSource = IngestionSource(classOf[NoOpStreamFactory].getName)
-      val columns = schema.map(_.name)
-      val command = SetupDataset(projection6.datasetRef, columns, spec, noOpSource)
+      val command = SetupDataset(dataset6.ref, spec, noOpSource)
 
       clusterActor ! command
       expectMsg(DatasetVerified)

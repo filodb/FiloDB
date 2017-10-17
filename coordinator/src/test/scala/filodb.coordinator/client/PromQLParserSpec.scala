@@ -3,7 +3,7 @@ package filodb.coordinator.client
 import org.parboiled2.ParseError
 import scala.util.{Try, Success, Failure}
 
-import filodb.core.metadata.Dataset
+import filodb.core.metadata.DatasetOptions
 import filodb.core.query.{ColumnFilter, Filter}
 
 import org.scalatest.{FunSpec, Matchers}
@@ -100,8 +100,8 @@ class PromQLParserSpec extends FunSpec with Matchers {
   }
 
   it("should use nonstandard options to parse queries") {
-    val myOptions = Dataset.DefaultOptions.copy(valueColumn = "data1",
-                                                metricColumn = "kpi")
+    val myOptions = DatasetOptions.DefaultOptions.copy(valueColumn = "data1",
+                                                       metricColumn = "kpi")
     val metricFilter = Seq(ColumnFilter("kpi", Filter.Equals("http-requests-total")))
 
     val parser3 = new PromQLParser("""http-requests-total[6m]""", myOptions)

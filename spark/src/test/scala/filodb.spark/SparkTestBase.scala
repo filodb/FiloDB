@@ -2,8 +2,6 @@ package filodb.spark
 
 import org.apache.spark.SparkContext
 
-import scala.concurrent.duration._
-import scala.util.Try
 import org.scalatest.{BeforeAndAfter, BeforeAndAfterAll, FunSpecLike, Matchers}
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
@@ -42,7 +40,7 @@ with Matchers with ScalaFutures {
       case e: Exception =>
     }
     FiloDriver.client.sendAllIngestors(NodeProtocol.ResetState)
-    FiloDriver.clusterActor ! NodeProtocol.ResetState
+    FiloExecutor.clusterActor ! NodeProtocol.ResetState
   }
 
   implicit lazy val ec = FiloDriver.ec

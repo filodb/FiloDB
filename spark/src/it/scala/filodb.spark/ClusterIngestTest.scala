@@ -1,10 +1,7 @@
 package filodb.spark
 
 import org.apache.spark.sql.{SparkSession, SaveMode}
-import scala.concurrent.duration._
 
-import filodb.core._
-import filodb.core.metadata.{Column, DataColumn, Dataset}
 
 /**
  * Use local-cluster mode to test the finer points of ingestion on a cluster, especially
@@ -32,8 +29,7 @@ class ClusterIngestTest extends SparkTestBase {
   import filodb.core.GdeltTestData._
   import org.apache.spark.sql.functions._
 
-  val segCol = ":string 0"
-  val testDatasets = Seq(projection1.datasetRef)
+  val testDatasets = Seq(dataset1.ref)
 
   it("should be able to write in cluster with multi-column partition keys") {
     import sess.implicits._
@@ -43,8 +39,7 @@ class ClusterIngestTest extends SparkTestBase {
     gdeltDF.sort("actor2Code").write.format("filodb.spark").
                  option("dataset", dataset1.name).
                  option("row_keys", "eventId").
-                 option("segment_key", segCol).
-                 option("partition_keys", ":getOrElse actor2Code --,:getOrElse year -1").
+                 option("partition_columns", "actor2Code:string,year:int").
                  mode(SaveMode.Overwrite).
                  save()
 
