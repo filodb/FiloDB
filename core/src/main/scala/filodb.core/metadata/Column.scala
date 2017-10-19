@@ -2,9 +2,9 @@ package filodb.core.metadata
 
 import com.typesafe.scalalogging.StrictLogging
 import enumeratum.{Enum, EnumEntry}
+import filodb.memory.format.{VectorInfo, ZeroCopyUTF8String}
+import filodb.memory.format.RowReader.TypedFieldExtractor
 import org.scalactic._
-import org.velvia.filo.{VectorInfo, ZeroCopyUTF8String}
-import org.velvia.filo.RowReader.TypedFieldExtractor
 import scala.reflect.ClassTag
 
 import filodb.core._

@@ -13,7 +13,7 @@ import com.quantifind.sumac.{ArgMain, FieldArgs}
 import com.typesafe.config.{Config, ConfigFactory}
 import net.ceedubs.ficus.Ficus._
 import org.parboiled2.ParseError
-import org.velvia.filo.RowReader
+import filodb.memory.format.RowReader
 
 import filodb.coordinator._
 import filodb.coordinator.client._

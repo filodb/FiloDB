@@ -1,15 +1,17 @@
 package filodb.core.memstore
 
-import kamon.Kamon
-import org.jctools.maps.NonBlockingHashMapLong
-import org.velvia.filo.{BinaryVector, FiloVector, RowReader}
 import scalaxy.loops._
 
+import filodb.core.Types._
 import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.metadata.Dataset
 import filodb.core.query.{ChunkIDPartitionChunkIndex, ChunkSetReader}
 import filodb.core.store._
-import filodb.core.Types._
+import filodb.memory.BlockHolder
+import filodb.memory.format.{FiloVector, RowReader}
+
+import kamon.Kamon
+import org.jctools.maps.NonBlockingHashMapLong
 
 object TimeSeriesPartition {
   val numChunksEncoded = Kamon.metrics.counter("memstore-chunks-encoded")
@@ -38,12 +40,13 @@ class TimeSeriesPartition(val dataset: Dataset,
                           val binPartition: PartitionKey,
                           val shard: Int,
                           chunksToKeep: Int,
-                          maxChunkSize: Int) extends FiloPartition {
+                          maxChunkSize: Int)
+                         (implicit blockHolder: BlockHolder) extends FiloPartition {
   import ChunkSetInfo._
   import TimeSeriesPartition._
 
   // NOTE: private final compiles down to a field in bytecode, faster than method invocation
-  private final val vectors = new NonBlockingHashMapLong[Array[BinaryVector[_]]](32, false)
+  private final val vectors = new NonBlockingHashMapLong[Array[FiloVector[_]]](32, false)
   private final val chunkIDs = new collection.mutable.Queue[ChunkID]
   // This only holds immutable, finished chunks
   private final val index = new ChunkIDPartitionChunkIndex(binPartition, dataset)
@@ -54,6 +57,7 @@ class TimeSeriesPartition(val dataset: Dataset,
   // will not cause too much memory bloat.  GrowableVector allows vectors to grow, so this should be OK
   private final val appenders = MemStore.getAppendables(dataset, maxChunkSize / 8)
   private final val numColumns = appenders.size
+
   private final val partitionVectors = new Array[FiloVector[_]](dataset.partitionColumns.length)
   private final val currentChunks = appenders.map(_.appender)
 
@@ -89,13 +93,19 @@ class TimeSeriesPartition(val dataset: Dataset,
    * we might wish to flush current chunks as they are for persistence but then keep adding to the partially
    * filled currentChunks.  That involves much more state, so do much later.
    */
-  def flush(lastRowKey: BinaryRecord): Unit = {
+  protected def flush(lastRowKey: BinaryRecord): Unit = {
     // optimize and compact current chunks
-    val frozenVectors = currentChunks.map { curChunk =>
+    val frozenVectors = currentChunks.zipWithIndex.map { case (curChunk,i) =>
       val optimized = curChunk.optimize()
+      val block = blockHolder.requestBlock(optimized.numBytes)
+      block.own()
+      val (pos, size) = block.write(optimized)
+      val vector = dataset.vectorMakers(i)(block.read(pos, size), size)
+      optimized.dispose()
+
       encodedBytes.increment(optimized.numBytes)
       curChunk.reset()
-      optimized
+      vector
     }
     numSamplesEncoded.increment(currentChunkLen)
     numChunksEncoded.increment(frozenVectors.length)
@@ -135,8 +145,9 @@ class TimeSeriesPartition(val dataset: Dataset,
     if (currentChunkLen > 0) { Iterator.single((latestChunkInfo, emptySkips)) }
     else                     { Iterator.empty }
 
+
   private def getVectors(columnIds: Array[Int],
-                         vectors: Array[BinaryVector[_]],
+                         vectors: Array[FiloVector[_]],
                          vectLength: Int): Array[FiloVector[_]] = {
     val finalVectors = new Array[FiloVector[_]](columnIds.size)
     for { i <- 0 until columnIds.size optimized } {
@@ -169,7 +180,7 @@ class TimeSeriesPartition(val dataset: Dataset,
   // Initializes vectors, chunkIDs for a new chunkset/chunkID
   private def initNewChunk(): Unit = {
     val newChunkID = timeUUID64
-    vectors.put(newChunkID, currentChunks.asInstanceOf[Array[BinaryVector[_]]])
+    vectors.put(newChunkID, currentChunks.asInstanceOf[Array[FiloVector[_]]])
     chunkIDs += newChunkID
 
     // check number of chunks, flush out old chunk if needed

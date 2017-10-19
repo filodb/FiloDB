@@ -10,7 +10,7 @@ import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
 import org.jctools.maps.NonBlockingHashMapLong
-import org.velvia.filo.FiloVector
+import filodb.memory.format.FiloVector
 import scala.concurrent.{ExecutionContext, Future}
 
 import filodb.cassandra.{DefaultFiloSessionProvider, FiloCassandraConnector, FiloSessionProvider}

@@ -2,7 +2,7 @@ package filodb.core.query
 
 import com.googlecode.javaewah.EWAHCompressedBitmap
 import java.nio.ByteBuffer
-import org.velvia.filo._
+import filodb.memory.format._
 import scala.collection.mutable.BitSet
 
 import filodb.core.metadata.Dataset

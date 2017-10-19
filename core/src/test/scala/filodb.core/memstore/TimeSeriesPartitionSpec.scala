@@ -1,14 +1,20 @@
 package filodb.core.memstore
 
-import org.scalatest.{FunSpec, Matchers}
-import org.scalatest.concurrent.ScalaFutures
-
 import filodb.core._
 import filodb.core.store._
+import filodb.memory.impl.PageAlignedBlockManager
+import filodb.memory.{BlockHolder, BlockManager}
+
+import org.scalatest.concurrent.ScalaFutures
+import org.scalatest.{FunSpec, Matchers}
 
 class TimeSeriesPartitionSpec extends FunSpec with Matchers with ScalaFutures {
-  import monix.execution.Scheduler.Implicits.global
   import MachineMetricsData._
+
+  import monix.execution.Scheduler.Implicits.global
+  private val blockStore = new PageAlignedBlockManager(100 * 1024 * 1024)
+  protected implicit val blockHolder = new BlockHolder(blockStore,BlockManager.reclaimAnyPolicy)
+
 
   it("should be able to read immediately after ingesting rows") {
     val part = new TimeSeriesPartition(dataset, defaultPartKey, 0, chunksToKeep = 3, maxChunkSize = 10)

@@ -1,15 +1,16 @@
 package filodb.core
 
-import org.velvia.filo.TupleRowReader
-import org.velvia.filo.ZeroCopyUTF8String._
-import scodec.bits._
+import filodb.memory.format.TupleRowReader
+import filodb.memory.format.ZeroCopyUTF8String._
 
 import org.scalatest.{FunSpec, Matchers}
+import scodec.bits._
 
 class TypesSpec extends FunSpec with Matchers {
-  import Types._
+  import Ordered._
+
   import SingleKeyTypes._
-  import Ordered._   // enables a < b
+  import Types._   // enables a < b
 
   describe("ByteVectorOrdering") {
     it("should compare by length if contents equal") {

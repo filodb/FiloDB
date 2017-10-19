@@ -4,8 +4,14 @@ import java.sql.Timestamp
 
 import scala.collection.mutable.HashMap
 import scala.concurrent.duration._
-import scala.language.implicitConversions
-import scala.language.postfixOps
+import scala.language.{implicitConversions, postfixOps}
+
+import filodb.coordinator._
+import filodb.coordinator.client.ClientException
+import filodb.core._
+import filodb.core.memstore.{IngestRecord, IngestRouting}
+import filodb.core.metadata.{Column, Dataset, DatasetOptions}
+import filodb.memory.format.RowReader
 
 import akka.actor.ActorRef
 import com.typesafe.scalalogging.StrictLogging
@@ -15,13 +21,6 @@ import org.apache.spark.sql.hive.filodb.MetaStoreSync
 import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.{DataFrame, Row, SQLContext, SparkSession}
 import org.scalactic._
-import org.velvia.filo.RowReader
-
-import filodb.coordinator.client.ClientException
-import filodb.coordinator._
-import filodb.core._
-import filodb.core.memstore.{IngestRecord, IngestRouting}
-import filodb.core.metadata.{Column, Dataset, DatasetOptions}
 
 package spark {
   case class DatasetNotFound(dataset: String) extends Exception(s"Dataset $dataset not found")

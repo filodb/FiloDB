@@ -1,9 +1,8 @@
 package filodb.core.memstore
 
-import org.velvia.filo._
-import org.velvia.filo.RowReader._
-
 import filodb.core.metadata.Dataset
+import filodb.memory.format.RowReader.TypedFieldExtractor
+import filodb.memory.format.{RoutingRowReader, RowReader, SchemaRoutingRowReader, SchemaRowReader}
 
 /**
  * A record for ingesting into a MemStore.

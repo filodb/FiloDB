@@ -6,7 +6,7 @@ import com.github.rholder.fauxflake.IdGenerators
 import monix.eval.Task
 import net.jpountz.lz4.{LZ4Compressor, LZ4Factory, LZ4FastDecompressor}
 import org.scalactic._
-import org.velvia.filo.RowReader
+import filodb.memory.format.RowReader
 
 import filodb.core.Types._
 import filodb.core.metadata.{Dataset, InvalidFunctionSpec}

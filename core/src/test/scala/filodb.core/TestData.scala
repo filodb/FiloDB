@@ -2,8 +2,8 @@ package filodb.core
 
 import monix.reactive.Observable
 import org.joda.time.DateTime
-import org.velvia.filo._
-import org.velvia.filo.ZeroCopyUTF8String._
+import filodb.memory.format._
+import filodb.memory.format.ZeroCopyUTF8String._
 import scala.io.Source
 
 import filodb.core.binaryrecord.BinaryRecord

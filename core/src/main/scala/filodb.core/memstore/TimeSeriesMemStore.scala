@@ -1,5 +1,18 @@
 package filodb.core.memstore
 
+import scala.collection.mutable.{ArrayBuffer, HashMap}
+import scala.concurrent.ExecutionContext
+import scala.concurrent.duration._
+
+import filodb.core.DatasetRef
+import filodb.core.Types.PartitionKey
+import filodb.core.metadata.Dataset
+import filodb.core.query.PartitionKeyIndex
+import filodb.core.store._
+import filodb.memory.format.{SchemaRowReader, ZeroCopyUTF8String}
+import filodb.memory.impl.PageAlignedBlockManager
+import filodb.memory.{BlockHolder, BlockManager}
+
 import com.googlecode.javaewah.IntIterator
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
@@ -8,16 +21,6 @@ import kamon.metric.instrument.Gauge
 import monix.execution.{CancelableFuture, Scheduler}
 import monix.reactive.Observable
 import org.jctools.maps.NonBlockingHashMapLong
-import org.velvia.filo.{SchemaRowReader, ZeroCopyUTF8String}
-import scala.collection.mutable.{ArrayBuffer, HashMap}
-import scala.concurrent.duration._
-import scala.concurrent.ExecutionContext
-
-import filodb.core.DatasetRef
-import filodb.core.metadata.Dataset
-import filodb.core.query.PartitionKeyIndex
-import filodb.core.store._
-import filodb.core.Types.PartitionKey
 
 final case class DatasetAlreadySetup(dataset: DatasetRef) extends Exception(s"Dataset $dataset already setup")
 
@@ -125,6 +128,10 @@ class TimeSeriesShard(dataset: Dataset, config: Config, shardNum: Int) extends S
 
   private val chunksToKeep = config.getInt("memstore.chunks-to-keep")
   private val maxChunksSize = config.getInt("memstore.max-chunks-size")
+  private val shardMemoryMB = config.getInt("memstore.shard-memory-mb")
+
+  private val blockStore = new PageAlignedBlockManager(shardMemoryMB * 1024 * 1024)
+  protected implicit val blockHolder = new BlockHolder(blockStore, BlockManager.reclaimAnyPolicy)
 
   class PartitionIterator(intIt: IntIterator) extends Iterator[TimeSeriesPartition] {
     def hasNext: Boolean = intIt.hasNext
@@ -185,5 +192,4 @@ class TimeSeriesShard(dataset: Dataset, config: Config, shardNum: Int) extends S
     }
     Observable.fromIterator(indexIt)
   }
-
 }

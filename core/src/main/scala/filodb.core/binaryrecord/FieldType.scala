@@ -3,8 +3,8 @@ package filodb.core.binaryrecord
 import com.typesafe.scalalogging.StrictLogging
 import java.sql.Timestamp
 import org.boon.primitive.ByteBuf
-import org.velvia.filo.RowReader._
-import org.velvia.filo.{RowReader, UnsafeUtils, ZeroCopyUTF8String}
+import filodb.memory.format.RowReader._
+import filodb.memory.format.{RowReader, UnsafeUtils, ZeroCopyUTF8String}
 
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.SingleKeyTypes.{Int32HighBit, Long64HighBit}

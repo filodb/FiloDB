@@ -1,7 +1,7 @@
 package filodb.core.metadata
 
 import org.scalactic._
-import org.velvia.filo.RowReader._
+import filodb.memory.format.RowReader._
 import scala.language.existentials
 
 import filodb.core.KeyType

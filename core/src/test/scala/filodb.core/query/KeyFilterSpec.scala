@@ -1,7 +1,7 @@
 package filodb.core.query
 
-import org.velvia.filo.RowReader
-import org.velvia.filo.ZeroCopyUTF8String._
+import filodb.memory.format.RowReader
+import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.core._
 import filodb.core.metadata.{Column, ComputedColumn}
 

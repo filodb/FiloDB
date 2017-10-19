@@ -5,7 +5,7 @@ import filodb.core.memstore.IngestRecord
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.Dataset
 import filodb.kafka.RecordConverter
-import org.velvia.filo.{RowReader, SchemaRowReader, ZeroCopyUTF8String}
+import filodb.memory.format.{RowReader, SchemaRowReader, ZeroCopyUTF8String}
 
 /**
   * Converts a time series sample in the following simple human-readable string format.

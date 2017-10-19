@@ -1,21 +1,21 @@
 package filodb.core.memstore
 
-import com.typesafe.config.ConfigFactory
-import monix.reactive.Observable
-import org.velvia.filo.ZeroCopyUTF8String
-
-import org.scalatest.{FunSpec, Matchers, BeforeAndAfter}
-import org.scalatest.concurrent.ScalaFutures
-
 import filodb.core._
 import filodb.core.binaryrecord.BinaryRecord
-import filodb.core.query.{ColumnFilter, Filter, AggregationFunction}
-import filodb.core.store.{FilteredPartitionScan, SinglePartitionScan, QuerySpec}
+import filodb.core.query.{AggregationFunction, ColumnFilter, Filter}
+import filodb.core.store.{FilteredPartitionScan, QuerySpec, SinglePartitionScan}
+import filodb.memory.format.ZeroCopyUTF8String
+
+import com.typesafe.config.ConfigFactory
+import monix.reactive.Observable
+import org.scalatest.concurrent.ScalaFutures
+import org.scalatest.{BeforeAndAfter, FunSpec, Matchers}
 
 class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter with ScalaFutures {
-  import monix.execution.Scheduler.Implicits.global
   import MachineMetricsData._
   import ZeroCopyUTF8String._
+
+  import monix.execution.Scheduler.Implicits.global
 
   val config = ConfigFactory.load("application_test.conf").getConfig("filodb")
   val memStore = new TimeSeriesMemStore(config)

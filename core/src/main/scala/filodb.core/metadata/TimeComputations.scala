@@ -1,10 +1,11 @@
 package filodb.core.metadata
 
+import scala.concurrent.duration.FiniteDuration
+
 import com.typesafe.config.ConfigFactory
 import net.ceedubs.ficus.Ficus._
 import org.joda.time.{DateTime, DateTimeZone}
 import org.scalactic._
-import scala.concurrent.duration.FiniteDuration
 
 
 object TimeComputations {

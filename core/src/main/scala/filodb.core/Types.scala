@@ -1,8 +1,8 @@
 package filodb.core
 
 import java.nio.ByteBuffer
+import filodb.memory.format.ZeroCopyUTF8String
 
-import org.velvia.filo.ZeroCopyUTF8String
 import scalaxy.loops._
 import scodec.bits.ByteVector
 

@@ -2,8 +2,8 @@ package filodb.core.binaryrecord
 
 import java.nio.ByteBuffer
 import org.boon.primitive.ByteBuf
-import org.velvia.filo._
-import org.velvia.filo.RowReader.TypedFieldExtractor
+import filodb.memory.format._
+import filodb.memory.format.RowReader.TypedFieldExtractor
 import scala.language.postfixOps
 import scalaxy.loops._
 

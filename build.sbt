@@ -135,13 +135,15 @@ val logbackDep        = "ch.qos.logback"             % "logback-classic"       %
 val log4jDep          = "log4j"                      % "log4j"                 % "1.2.17"
 val scalaLoggingDep   = "com.typesafe.scala-logging" %% "scala-logging"        % "3.7.2"
 val scalaTest         = "org.scalatest"              %% "scalatest"            % "2.2.6" // TODO upgrade to 3.0.4
+val scalaCheck        = "org.scalacheck"             %% "scalacheck"           % "1.11.0"
 val akkaHttp          = "com.typesafe.akka"          %% "akka-http"            % "10.0.10"
 val akkaHttpSprayJson = "com.typesafe.akka"          %% "akka-http-spray-json" % "10.0.10"
 
 lazy val commonDeps = Seq(
   "io.kamon" %% "kamon-core" % kamonVersion,
   logbackDep % Test,
-  scalaTest  % Test
+  scalaTest  % Test,
+  scalaCheck % "test"
 )
 
 lazy val scalaxyDep = "com.nativelibs4java"  %% "scalaxy-loops"     % "0.3.3" % "provided"
@@ -150,7 +152,6 @@ lazy val coreDeps = commonDeps ++ Seq(
   scalaLoggingDep,
   "org.slf4j"             % "slf4j-api"         % "1.7.10",
   "com.beachape"         %% "enumeratum"        % "1.5.10",
-  "org.velvia.filo"      %% "filo-scala"        % "0.3.6",
   "io.monix"             %% "monix"             % "2.3.0",
   "joda-time"             % "joda-time"         % "2.2",
   "org.joda"              % "joda-convert"      % "1.2",
@@ -162,6 +163,9 @@ lazy val coreDeps = commonDeps ++ Seq(
   "com.github.alexandrnikitin" %% "bloom-filter" % "0.7.0",
   "com.github.rholder.fauxflake" % "fauxflake-core" % "1.1.0",
   "org.scalactic"        %% "scalactic"         % "2.2.6",
+  "com.github.jnr"       %  "jnr-ffi"           % "2.1.6",
+  "net.java.dev.jna"     %  "jna"               % "4.4.0",
+  "net.jpountz.lz4"      %  "lz4"               % "1.3.0",
   scalaxyDep
 )
 
@@ -248,11 +252,11 @@ lazy val stressDeps = Seq(
 
 /* The REPL can’t cope with -Ywarn-unused:imports or -Xfatal-warnings
    so we disable for console */
- lazy val consoleSettings = Seq(
-   scalacOptions in (Compile, console) ~= (_.filterNot(Set(
-     "-Ywarn-unused:imports",
-     "-Xfatal-warnings"
- ))))
+lazy val consoleSettings = Seq(
+  scalacOptions in (Compile, console) ~= (_.filterNot(Set(
+    "-Ywarn-unused:imports",
+    "-Xfatal-warnings"
+  ))))
 
 lazy val compilerSettings = Seq(
 
@@ -319,7 +323,7 @@ lazy val lintSettings = Seq(
     "-Xlint:package-object-classes",
     "-Xlint:unsound-match",
     "-Xlint:stars-align"
-),
+  ),
 
   javacOptions ++= Seq(
     "-Xlint",

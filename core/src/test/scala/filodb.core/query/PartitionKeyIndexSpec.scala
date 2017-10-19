@@ -10,8 +10,8 @@ import org.scalatest.{FunSpec, Matchers, BeforeAndAfter}
 class PartitionKeyIndexSpec extends FunSpec with Matchers with BeforeAndAfter {
   import GdeltTestData._
   import Filter._
-  import org.velvia.filo.ZeroCopyUTF8String._
-  import org.velvia.filo.UTF8Wrapper
+  import filodb.memory.format.ZeroCopyUTF8String._
+  import filodb.memory.format.UTF8Wrapper
 
   val keyIndex = new PartitionKeyIndex(dataset6)
 

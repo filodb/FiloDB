@@ -5,7 +5,7 @@ import scala.util.control.NonFatal
 import filodb.coordinator.ConfigurableInstance
 import filodb.core.memstore.IngestRecord
 import filodb.core.metadata.{Column, DataColumn, Dataset}
-import org.velvia.filo.{SingleValueRowReader, RowReader, SchemaRoutingRowReader}
+import filodb.memory.format.{RowReader, SchemaRoutingRowReader, SingleValueRowReader}
 
 /**
  * Extend to create custom converters for event types.

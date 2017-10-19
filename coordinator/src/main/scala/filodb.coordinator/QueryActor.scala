@@ -12,7 +12,7 @@ import akka.util.Timeout
 import monix.eval.Task
 import monix.reactive.Observable
 import org.scalactic._
-import org.velvia.filo.BinaryVector
+import filodb.memory.format.BinaryVector
 
 import filodb.core._
 import filodb.core.memstore.MemStore

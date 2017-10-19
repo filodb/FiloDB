@@ -2,7 +2,7 @@ package filodb.core.query
 
 import com.googlecode.javaewah.EWAHCompressedBitmap
 import java.util.concurrent.ConcurrentSkipListMap
-import org.velvia.filo.ZeroCopyUTF8String
+import filodb.memory.format.ZeroCopyUTF8String
 
 import filodb.core._
 import filodb.core.store.ChunkSetInfo.emptySkips

@@ -1,7 +1,7 @@
 package filodb.core.store
 
 import monix.reactive.Observable
-import org.velvia.filo.FiloVector
+import filodb.memory.format.FiloVector
 
 import filodb.core.metadata.Dataset
 import filodb.core.query.ChunkSetReader

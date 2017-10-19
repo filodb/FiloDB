@@ -1,21 +1,19 @@
 package filodb.jmh
 
-import ch.qos.logback.classic.{Level, Logger}
-import com.googlecode.javaewah.EWAHCompressedBitmap
-import org.openjdk.jmh.annotations.Benchmark
-import org.openjdk.jmh.annotations.BenchmarkMode
-import org.openjdk.jmh.annotations.OutputTimeUnit
-import org.openjdk.jmh.annotations.{Mode, State, Scope}
+import java.util.concurrent.TimeUnit
+
 import scala.language.postfixOps
 import scala.util.Random
 import scalaxy.loops._
 
 import filodb.core.metadata.Dataset
 import filodb.core.query.ChunkSetReader
-import filodb.core.store.{ChunkSet}
-import org.velvia.filo.{FiloVector, FastFiloRowReader, TupleRowReader}
+import filodb.core.store.ChunkSet
+import filodb.memory.format.{FastFiloRowReader, FiloVector, TupleRowReader}
 
-import java.util.concurrent.TimeUnit
+import ch.qos.logback.classic.{Level, Logger}
+import com.googlecode.javaewah.EWAHCompressedBitmap
+import org.openjdk.jmh.annotations._
 
 object IntSumReadBenchmark {
   val dataset = Dataset("dataset", Seq("part:int"), Seq("int:int", "rownum:int"), "rownum")

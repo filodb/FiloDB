@@ -1,16 +1,15 @@
 package filodb.core.store
 
-import com.typesafe.config.ConfigFactory
-import monix.reactive.Observable
-import org.velvia.filo.ZeroCopyUTF8String._
-
 import filodb.core._
 import filodb.core.binaryrecord.BinaryRecord
-import filodb.core.query.{Filter, ColumnFilter}
+import filodb.core.query.{ColumnFilter, Filter}
+import filodb.memory.format.ZeroCopyUTF8String._
 
-import org.scalatest.{FlatSpec, Matchers, BeforeAndAfter, BeforeAndAfterAll}
+import com.typesafe.config.ConfigFactory
+import monix.reactive.Observable
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
+import org.scalatest.{BeforeAndAfter, BeforeAndAfterAll, FlatSpec, Matchers}
 
 trait ColumnStoreSpec extends FlatSpec with Matchers
 with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {

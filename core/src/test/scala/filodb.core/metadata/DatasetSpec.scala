@@ -1,13 +1,13 @@
 package filodb.core.metadata
 
-import org.scalatest.{FunSpec, Matchers}
-
 import filodb.core._
 
+import org.scalatest.{FunSpec, Matchers}
+
 class DatasetSpec extends FunSpec with Matchers {
-  import NamesTestData._
-  import Dataset._
   import Column.ColumnType._
+  import Dataset._
+  import NamesTestData._
 
   describe("Dataset validation") {
     it("should return NotNameColonType if column specifiers not name:type format") {

@@ -4,10 +4,9 @@ import scala.collection.JavaConverters._
 
 import com.typesafe.config.{Config, ConfigFactory, ConfigRenderOptions}
 import org.scalactic._
-import org.velvia.filo._
-
 import filodb.core._
-import filodb.core.binaryrecord.{RecordSchema, BinaryRecord}
+import filodb.core.binaryrecord.{BinaryRecord, RecordSchema}
+import filodb.memory.format.{FiloVector, RoutingRowReader, RowReader, SeqRowReader}
 
 /**
  * A dataset describes the schema (column name & type) and distribution for a stream/set of data.

@@ -1,13 +1,13 @@
 package filodb.core.store
 
 import java.sql.Timestamp
-import org.velvia.filo.RoutingRowReader
-import org.scalatest.FunSpec
-import org.scalatest.Matchers
 
 import filodb.core._
 import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.metadata.Dataset
+import filodb.memory.format.RoutingRowReader
+
+import org.scalatest.{FunSpec, Matchers}
 
 class ChunkSetInfoSpec extends FunSpec with Matchers {
   import NamesTestData._

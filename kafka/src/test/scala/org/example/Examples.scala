@@ -4,7 +4,7 @@ import filodb.core.memstore.IngestRecord
 import org.apache.kafka.common.serialization._
 import filodb.core.metadata.Dataset
 import filodb.kafka.{KafkaSerdes, RecordConverter}
-import org.velvia.filo._
+import filodb.memory.format._
 
 /**
  * We want to convert an event with an instance which is the partition key and values

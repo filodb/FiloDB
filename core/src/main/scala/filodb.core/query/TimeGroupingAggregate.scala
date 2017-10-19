@@ -2,9 +2,9 @@ package filodb.core.query
 
 import scala.language.postfixOps
 import scala.reflect.ClassTag
-
-import org.velvia.filo.{BinaryVector, FiloVector}
 import scalaxy.loops._
+
+import filodb.memory.format.{BinaryVector, FiloVector}
 
 /**
  * A time-series filtering + aggregation function - agg(x) group by time WHERE time > start AND time < end

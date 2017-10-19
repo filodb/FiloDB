@@ -1,9 +1,9 @@
 package filodb.core.query
 
 import scala.language.postfixOps
-
-import org.velvia.filo.{BinaryVector, FiloVector}
 import scalaxy.loops._
+
+import filodb.memory.format.{BinaryVector, FiloVector}
 
 /**
  * An Aggregator for a single vector.

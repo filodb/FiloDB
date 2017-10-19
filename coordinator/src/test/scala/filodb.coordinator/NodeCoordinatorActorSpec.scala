@@ -11,7 +11,7 @@ import org.scalatest.BeforeAndAfterEach
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
 
-import org.velvia.filo.ZeroCopyUTF8String
+import filodb.memory.format.ZeroCopyUTF8String
 import filodb.core._
 import filodb.core.metadata.Dataset
 import filodb.core.query.{AggregationFunction, ColumnFilter, Filter, HistogramBucket}
