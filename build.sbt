@@ -113,6 +113,7 @@ lazy val tsgenerator = project
   .settings(name := "tsgenerator")
   .settings(libraryDependencies ++= tsgeneratorDeps)
   .settings(tsgeneratorAssemblySettings: _*)
+  .dependsOn(coordinator)
 
 // Zookeeper pulls in slf4j-log4j12 which we DON'T want
 val excludeZK = ExclusionRule(organization = "org.apache.zookeeper")
@@ -125,7 +126,7 @@ val excludeJersey = ExclusionRule(organization = "com.sun.jersey")
 val akkaVersion       = "2.4.19" // akka-http/akka-stream compat. TODO when kamon-akka-remote is akka 2.5.4 compat
 val cassDriverVersion = "3.0.2"
 val ficusVersion      = "1.1.2"
-val kamonVersion      = "0.6.0" // TODO 0.6.7++
+val kamonVersion      = "0.6.3"
 val monixKafkaVersion = "0.14"
 val sparkVersion      = "2.0.0"
 

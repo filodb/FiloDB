@@ -167,7 +167,6 @@ The script below brings up the FiloDB Dev Standalone server, and then sets up th
 ```
 ./filodb-dev-start.sh
 ```
-
 You can now tail the server logs. If you'd like to direct the logs to a specific folder, you can set the LOG_DIR environment variable. 
 ```
 tail -f logs/filodb-server-1.log
@@ -191,6 +190,37 @@ To stop the dev server. Note that this will stop all the FiloDB servers if multi
 ```
 ./filodb-dev-stop.sh
 ```
+
+#### Multiple Servers
+
+To run multiple servers simultaneously, first set up Consul dev agent:
+
+```
+> brew install consul 
+> cat /usr/local/etc/consul/config/basic_config.json 
+{
+"data_dir": "/usr/local/var/consul",
+"ui" : true,
+"dns_config" : {
+    "enable_truncate" : true
+}
+ 	
+```
+
+Then run consul consul agent in dev mode:
+```
+consul agent -dev -config-dir=/usr/local/etc/consul/config/
+```
+
+Start first server with
+```
+./filodb-dev-start.sh -c conf/timeseries-filodb-server-consul.conf -l 1
+```
+And subsequent servers with:
+```
+./filodb-dev-start.sh -c conf/timeseries-filodb-server-consul.conf -l 2 -p -s
+```
+Enable the -s option for the last dataset. It sets up the timeseries dataset.
 
 ## Introduction to FiloDB Data Modelling
 

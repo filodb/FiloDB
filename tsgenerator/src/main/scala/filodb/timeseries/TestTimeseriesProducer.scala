@@ -13,6 +13,8 @@ import monix.kafka._
 import monix.reactive.Observable
 import org.apache.kafka.clients.producer.ProducerRecord
 
+import filodb.coordinator.ShardMapper
+
 
 /**
   * Simple driver to produce time series data into local kafka similar. Data format is similar to
@@ -73,6 +75,7 @@ object TestTimeseriesProducer extends StrictLogging {
     */
   def timeSeriesData(startTime: Long = defaultStartTime, numInstances: Int = 16): Stream[(JLong, String)] = {
 
+    val shardMapper = new ShardMapper(numKafkaPartitions)
     // TODO For now, generating a (sinusoidal + gaussian) time series. Other generators more
     // closer to real world data can be added later.
     Stream.from(0).map { n =>
@@ -83,11 +86,12 @@ object TestTimeseriesProducer extends StrictLogging {
       val instance = n % numInstances
       val timestamp = startTime + (n / numInstances) * 10000 // generate 1 sample every 10s for each instance
       val value = 15 + Math.sin(n + 1) + rand.nextGaussian()
-      val kafkaParitionId: JLong = (instance % numKafkaPartitions).toLong
-      // TODO For now shardId is instanceId % partitions. Later on, we will build the algorithm
-      // that can use the application name and spread.
 
       //scalastyle:off line.size.limit
+      val appNameMetricNameHash = s"__name__=heap_usage;app=A$app".hashCode
+      val tagHash = s"__name__=heap_usage,dc=DC$dc,app=A$app,partition=P$partition,host=H$host,instance=I$instance".hashCode
+      val kafkaParitionId: JLong = shardMapper.ingestionShard(appNameMetricNameHash, tagHash, 2).toLong
+
       val sample = s"__name__=heap_usage,dc=DC$dc,app=A$app,partition=P$partition,host=H$host,instance=I$instance   $timestamp   $value"
       logger.trace(s"Producing $sample")
       (kafkaParitionId, s"__name__=heap_usage,dc=DC$dc,app=A$app,partition=P$partition,host=H$host,instance=I$instance   $timestamp   $value")

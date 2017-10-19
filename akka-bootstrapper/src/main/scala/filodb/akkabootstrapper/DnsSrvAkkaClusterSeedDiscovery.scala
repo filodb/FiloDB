@@ -104,10 +104,12 @@ final class ConsulAkkaClusterSeedDiscovery(cluster: Cluster,
   consulClient.register(serviceId, registrationServiceName, host, port)
   logger.info(s"Registered with consul $host:$port as $registrationServiceName ")
 
-  cluster.system.registerOnTermination {
-    consulClient.deregister(serviceId)
-    logger.info(s"Deregistered $serviceId with consul")
-  }
+  Runtime.getRuntime.addShutdownHook(new Thread() {
+    override def run(): Unit = {
+      consulClient.deregister(serviceId)
+      logger.info(s"Deregistered $serviceId with consul")
+    }
+  })
 
 }
 
