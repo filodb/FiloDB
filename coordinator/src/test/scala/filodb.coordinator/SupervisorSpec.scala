@@ -1,12 +1,9 @@
 package filodb.coordinator
 
-import scala.concurrent.ExecutionContext
-
 import akka.actor.{ActorPath, PoisonPill}
 import akka.cluster.Cluster
 import monix.execution.Scheduler
 
-import filodb.core.FutureUtils
 import filodb.core.store.MetaStore
 
 class SupervisorSpec extends AkkaSpec {
@@ -18,12 +15,11 @@ class SupervisorSpec extends AkkaSpec {
   import settings._
 
   /* Set all as lazy to test same startup as users. */
-  private lazy val threadPool = FutureUtils.getBoundedTPE(QueueLength, PoolName, PoolSize, MaxPoolSize)
+  // private lazy val threadPool = FutureUtils.getBoundedTPE(QueueLength, PoolName, PoolSize, MaxPoolSize)
 
-  implicit lazy val ec = Scheduler(ExecutionContext.fromExecutorService(threadPool): ExecutionContext)
-  private lazy val readEc = ec
+  // implicit lazy val ec = Scheduler(ExecutionContext.fromExecutorService(threadPool): ExecutionContext)
 
-  private lazy val factory = StoreFactory(settings, ec, readEc)
+  private lazy val factory = StoreFactory(settings, Scheduler.io("test"))
   private lazy val metaStore: MetaStore = factory.metaStore
   private lazy val memStore = factory.memStore
   private lazy val assignmentStrategy = new DefaultShardAssignmentStrategy
@@ -34,7 +30,7 @@ class SupervisorSpec extends AkkaSpec {
   "NodeGuardian" must {
     import ActorName.{NodeGuardianName => supervisor}
     "start Kamon metrics if not ClusterRole.Cli" in {
-      factory.getClass should be(classOf[InMemoryStoreFactory])
+      factory.getClass should be(classOf[TimeSeriesNullStoreFactory])
       val guardian = system.actorOf(guardianProps, supervisor)
       guardian ! CreateTraceLogger(ClusterRole.Server)
       expectMsgPF() {

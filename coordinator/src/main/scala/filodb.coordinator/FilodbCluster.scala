@@ -2,33 +2,23 @@ package filodb.coordinator
 
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
 
-import scala.concurrent.{Await, ExecutionContext}
+import scala.concurrent.Await
 
 import akka.actor._
 import akka.cluster.{Cluster, ClusterEvent}
 import akka.util.Timeout
 import com.typesafe.scalalogging.StrictLogging
 import monix.execution.misc.NonFatal
-import monix.execution.{Scheduler => MonixScheduler}
+import monix.execution.Scheduler
 
-import filodb.core.FutureUtils
 import filodb.core.store.MetaStore
 
-/** The base Coordinator Extension implementation. Implementers must provide their
-  * appropriate versions of:
-  * {{{
-  *   override def columnStore: ColumnStore with ColumnStoreScanner = ???
-  *   override def metaStore: MetaStore = ???
-  * }}}
+/** The base Coordinator Extension implementation providing standard ActorSystem startup.
   * The coordinator module is responsible cluster coordination and node membership information.
   * Changes to the cluster are events that can be subscribed to.
   * Commands to operate the cluster for managmement are provided based on role/authorization.
   *
-  * Provides a separate ExecutionContext that can optionally be used for reads, to
-  * control read task queue length separately perhaps. Originally created to help
-  * decongest heavy write workloads, but a better design has been the throttling of
-  * reprojection by limiting number of segments flushed at once (see the use of
-  * foldLeftSequentially in Reprojector).
+  * Provides a compute scheduler (ec) and one for I/O operations.
   */
 object FilodbCluster extends ExtensionId[FilodbCluster] with ExtensionIdProvider {
   override def get(system: ActorSystem): FilodbCluster = super.get(system)
@@ -73,15 +63,11 @@ final class FilodbCluster(system: ExtendedActorSystem) extends Extension with St
   /** The address including a `uid` of this cluster member. */
   lazy val selfUniqueAddress = cluster.selfUniqueAddress
 
-  protected lazy val threadPool = FutureUtils.getBoundedTPE(QueueLength, PoolName, PoolSize, MaxPoolSize)
-
-  implicit lazy val ec = MonixScheduler(ExecutionContext.fromExecutorService(threadPool): ExecutionContext)
-
-  /** A separate ExecutionContext that can optionally used for reads. */
-  lazy val readEc = ec
+  implicit lazy val ec = Scheduler.Implicits.global
+  lazy val ioPool = Scheduler.io(IOPoolName)
 
   /** Initializes columnStore and metaStore using the factory setting from config. */
-  private lazy val factory = StoreFactory(settings, ec, readEc)
+  private lazy val factory = StoreFactory(settings, ioPool)
 
   lazy val metaStore: MetaStore = factory.metaStore
 
@@ -202,10 +188,10 @@ final class FilodbCluster(system: ExtendedActorSystem) extends Extension with St
 
         metaStore.shutdown()
         memStore.shutdown()
-        threadPool.shutdown()
+        ioPool.shutdown()
       } catch { case NonFatal(e) =>
         system.terminate()
-        threadPool.shutdown()
+        ioPool.shutdown()
       } finally {
         _isJoined.set(false)
         _isTerminated.set(true)

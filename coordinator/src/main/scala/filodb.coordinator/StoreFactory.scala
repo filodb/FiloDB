@@ -1,9 +1,8 @@
 package filodb.coordinator
 
-import scala.concurrent.ExecutionContext
-
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
+import monix.execution.Scheduler
 
 import filodb.core.store._
 import filodb.core.memstore.{MemStore, TimeSeriesMemStore}
@@ -11,49 +10,48 @@ import filodb.core.memstore.{MemStore, TimeSeriesMemStore}
 /** Strategies from configuration or type. */
 sealed trait StoreStrategy
 object StoreStrategy {
-  case object InMemory extends StoreStrategy
   final case class Configured(fqcn: String) extends StoreStrategy
+
+  val TimeSeriesNullSink = Configured(classOf[TimeSeriesNullStoreFactory].getName)
 }
 
 /**
   * A StoreFactory creates instances of MemStore and MetaStore one time.  The memStore and metaStore
   * methods should return that created instance every time, not create a new instance.  The implementation
-  * should be a class that is passed three params, the FilodbSettings, then two ExecutionContexts
+  * should be a class that is passed two params, the FilodbSettings, and a Scheduler for scheduling I/O tasks
   */
 trait StoreFactory {
   def memStore: MemStore
   def metaStore: MetaStore
+  // TODO: explicitly add a method for a ColumnStore or ChunkSink?
 }
 
 object StoreFactory extends Instance with StrictLogging {
 
-  /** Initializes columnStore and metaStore using the factory setting from config. */
-  def apply(settings: FilodbSettings, ec: ExecutionContext, readEc: ExecutionContext): StoreFactory =
-
+  /**
+   * Initializes the StoreFactory with configuration and a scheduler
+   * @param settings a FilodbSettings
+   * @param sched a Monix Scheduler for scheduling async I/O operations, probably the default I/O pool
+   */
+  def apply(settings: FilodbSettings, sched: Scheduler): StoreFactory =
     settings.StorageStrategy match {
-      case StoreStrategy.InMemory =>
-        new InMemoryStoreFactory(settings.config, ec)
-
       case StoreStrategy.Configured(fqcn) =>
-        createClass(fqcn)
-          .map { c =>
-            val args = Seq(
-              (classOf[Config] -> settings.config),
-              (classOf[ExecutionContext] -> ec),
-              (classOf[ExecutionContext] -> readEc))
+        val clazz = createClass(fqcn).get
+        val args = Seq(
+          (classOf[Config] -> settings.config),
+          (classOf[Scheduler] -> sched))
 
-            createInstance[StoreFactory](c, args).get
-          }
-          .recover { case e: ClassNotFoundException =>
-            logger.error(s"Configured StoreFactory class '$fqcn' not found on classpath. Falling back to in-memory.", e)
-            new InMemoryStoreFactory(settings.config, ec)
-          }.getOrElse(new InMemoryStoreFactory(settings.config, ec))
+        createInstance[StoreFactory](clazz, args).get
     }
 }
 
-class InMemoryStoreFactory(config: Config, executionContext: ExecutionContext) extends StoreFactory {
-  implicit val ec = executionContext
-  val memStore = new TimeSeriesMemStore(config)
+/**
+ * TimeSeriesMemstore with a NullChunkSink (no chunks persisted), and in-memory MetaStore.
+ * Not what you want for production, but good for getting started and running tests.
+ */
+class TimeSeriesNullStoreFactory(config: Config, scheduler: Scheduler) extends StoreFactory {
+  implicit val sched = scheduler
+  val memStore = new TimeSeriesMemStore(config, new NullChunkSink)
   val metaStore = SingleJvmInMemoryStore.metaStore
 }
 

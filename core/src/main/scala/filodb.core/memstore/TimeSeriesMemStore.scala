@@ -13,7 +13,7 @@ import filodb.memory.format.{SchemaRowReader, ZeroCopyUTF8String}
 import filodb.memory.impl.PageAlignedBlockManager
 import filodb.memory.{BlockHolder, BlockManager}
 
-import com.googlecode.javaewah.IntIterator
+import com.googlecode.javaewah.{EWAHCompressedBitmap, IntIterator}
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
@@ -24,7 +24,7 @@ import org.jctools.maps.NonBlockingHashMapLong
 
 final case class DatasetAlreadySetup(dataset: DatasetRef) extends Exception(s"Dataset $dataset already setup")
 
-class TimeSeriesMemStore(config: Config)(implicit val ec: ExecutionContext)
+class TimeSeriesMemStore(config: Config, val sink: ChunkSink)(implicit val ec: ExecutionContext)
 extends MemStore with StrictLogging {
   import collection.JavaConverters._
 
@@ -97,9 +97,13 @@ extends MemStore with StrictLogging {
 
   def reset(): Unit = {
     datasets.clear()
+    sink.reset()
   }
 
-  def truncate(dataset: DatasetRef): Unit = {}
+  def truncate(dataset: DatasetRef): Unit = {
+    datasets.get(dataset).foreach(_.values.asScala.foreach(_.reset()))
+    sink.truncate(dataset)
+  }
 
   def shutdown(): Unit = {}
 }
@@ -107,6 +111,7 @@ extends MemStore with StrictLogging {
 object TimeSeriesShard {
   val rowsIngested = Kamon.metrics.counter("memstore-rows-ingested")
   val partitionsCreated = Kamon.metrics.counter("memstore-partitions-created")
+  val rowsSkipped  = Kamon.metrics.counter("recovery-row-skipped")
 }
 
 // TODO for scalability: get rid of stale partitions?
@@ -117,6 +122,15 @@ object TimeSeriesShard {
 
 /**
  * Contains all of the data for a SINGLE shard of a time series oriented dataset.
+ *
+ * Each partition has an integer ID which is used for bitmap indexing using PartitionKeyIndex.
+ * Within a shard, the partitions are grouped into a fixed number of groups to facilitate persistence and recovery:
+ * - groups spread out the persistence/flushing load across time
+ * - having smaller batches of flushes shortens the window of recovery and enables skipping of records/less CPU
+ *
+ * Each incoming time series is hashed into a group.  Each group has its own watermark.  The watermark indicates,
+ * for that group, up to what offset incoming records for that group has been persisted.  At recovery time, records
+ * that fall below the watermark for that group will be skipped (since they can be recovered from disk).
  */
 class TimeSeriesShard(dataset: Dataset, config: Config, shardNum: Int) extends StrictLogging {
   import TimeSeriesShard._
@@ -129,9 +143,16 @@ class TimeSeriesShard(dataset: Dataset, config: Config, shardNum: Int) extends S
   private val chunksToKeep = config.getInt("memstore.chunks-to-keep")
   private val maxChunksSize = config.getInt("memstore.max-chunks-size")
   private val shardMemoryMB = config.getInt("memstore.shard-memory-mb")
+  private final val numGroups = config.getInt("memstore.groups-per-shard")
+  private val maxNumPartitions = config.getInt("memstore.max-num-partitions")
 
   private val blockStore = new PageAlignedBlockManager(shardMemoryMB * 1024 * 1024)
   protected implicit val blockHolder = new BlockHolder(blockStore, BlockManager.reclaimAnyPolicy)
+  private val bufferPool = new WriteBufferPool(dataset, maxChunksSize / 8, maxNumPartitions)
+
+  private final val partitionGroups = Array.fill(numGroups)(new EWAHCompressedBitmap)
+  // The offset up to and including the last record in this group to be successfully persisted
+  private final val groupWatermark = Array.fill(numGroups)(Long.MinValue)
 
   class PartitionIterator(intIt: IntIterator) extends Iterator[TimeSeriesPartition] {
     def hasNext: Boolean = intIt.hasNext
@@ -141,8 +162,14 @@ class TimeSeriesShard(dataset: Dataset, config: Config, shardNum: Int) extends S
   def ingest(rows: Seq[IngestRecord]): Unit = {
     // now go through each row, find the partition and call partition ingest
     rows.foreach { case IngestRecord(partKey, data, offset) =>
-      val partition = keyMap.getOrElse(partKey, addPartition(partKey))
-      partition.ingest(data, offset)
+      // RECOVERY: Check the watermark for the group that this record is part of.  If the offset is < watermark,
+      // then do not bother with the expensive partition key comparison and ingestion.  Just skip it
+      if (offset < groupWatermark(group(partKey))) {
+        rowsSkipped.increment
+      } else {
+        val partition = keyMap.getOrElse(partKey, addPartition(partKey))
+        partition.ingest(data, offset)
+      }
     }
     rowsIngested.increment(rows.length)
     ingested += rows.length
@@ -156,6 +183,8 @@ class TimeSeriesShard(dataset: Dataset, config: Config, shardNum: Int) extends S
 
   def numActivePartitions: Int = keyMap.size
 
+  private final def group(partKey: SchemaRowReader): Int = Math.abs(partKey.hashCode % numGroups)
+
   // Creates a new TimeSeriesPartition, updating indexes
   // NOTE: it's important to use an actual BinaryRecord instead of just a RowReader in the internal
   // data structures.  The translation to BinaryRecord only happens here (during first time creation
@@ -164,12 +193,13 @@ class TimeSeriesShard(dataset: Dataset, config: Config, shardNum: Int) extends S
   // and external partition key components need to yield the same hashCode.  IE, use UTF8Strings everywhere.
   private def addPartition(newPartKey: SchemaRowReader): TimeSeriesPartition = {
     val binPartKey = dataset.partKey(newPartKey)
-    val newPart = new TimeSeriesPartition(dataset, binPartKey, shardNum, chunksToKeep, maxChunksSize)
+    val newPart = new TimeSeriesPartition(dataset, binPartKey, shardNum, bufferPool)
     val newIndex = partitions.length
     keyIndex.addKey(binPartKey, newIndex)
     partitions += newPart
     partitionsCreated.increment
     keyMap(binPartKey) = newPart
+    partitionGroups(group(newPartKey)).set(newIndex)
     newPart
   }
 
@@ -191,5 +221,19 @@ class TimeSeriesShard(dataset: Dataset, config: Config, shardNum: Int) extends S
         }
     }
     Observable.fromIterator(indexIt)
+  }
+
+  /**
+   * Release all memory and reset all state in this shard
+   */
+  def reset(): Unit = {
+    partitions.clear()
+    keyMap.clear()
+    keyIndex.reset()
+    ingested = 0L
+    for { group <- 0 until numGroups } {
+      partitionGroups(group) = new EWAHCompressedBitmap()
+      groupWatermark(group) = Long.MinValue
+    }
   }
 }

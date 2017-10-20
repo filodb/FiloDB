@@ -3,7 +3,7 @@ package filodb.core.memstore
 import filodb.core._
 import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.query.{AggregationFunction, ColumnFilter, Filter}
-import filodb.core.store.{FilteredPartitionScan, QuerySpec, SinglePartitionScan}
+import filodb.core.store.{FilteredPartitionScan, NullChunkSink, QuerySpec, SinglePartitionScan}
 import filodb.memory.format.ZeroCopyUTF8String
 
 import com.typesafe.config.ConfigFactory
@@ -18,7 +18,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
   import monix.execution.Scheduler.Implicits.global
 
   val config = ConfigFactory.load("application_test.conf").getConfig("filodb")
-  val memStore = new TimeSeriesMemStore(config)
+  val memStore = new TimeSeriesMemStore(config, new NullChunkSink)
 
   after {
     memStore.reset()
@@ -169,4 +169,17 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
   }
 
   it("should ingest into multiple series and flush older chunks") (pending)
+
+  it("should truncate shards properly") {
+    memStore.setup(dataset1, 0)
+    val data = records(multiSeriesData()).take(20)   // 2 records per series x 10 series
+    memStore.ingest(dataset1.ref, 0, data)
+
+    memStore.numPartitions(dataset1.ref, 0) should equal (10)
+    memStore.indexNames(dataset1.ref).toSeq should equal (Seq(("series", 0)))
+
+    memStore.truncate(dataset1.ref)
+
+    memStore.numPartitions(dataset1.ref, 0) should equal (0)
+  }
 }

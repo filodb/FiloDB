@@ -14,7 +14,7 @@ class FiloDBSettingsSpec extends RunnableSpec {
       import settings._
       SeedNodes.size should be (1)
       InitializationTimeout should be(60.seconds)
-      StorageStrategy should be (StoreStrategy.InMemory)
+      StorageStrategy should be (StoreStrategy.TimeSeriesNullSink)
     }
     "have default settings" in {
       val settings = new FilodbSettings(ConfigFactory.parseString(
@@ -22,7 +22,7 @@ class FiloDBSettingsSpec extends RunnableSpec {
 
       import settings._
       SeedNodes.size should be (1)
-      StorageStrategy should be (StoreStrategy.InMemory)
+      StorageStrategy should be (StoreStrategy.TimeSeriesNullSink)
     }
   }
 }

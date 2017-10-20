@@ -10,6 +10,7 @@ import filodb.coordinator.IngestionStreamFactory
 import filodb.coordinator.NodeClusterActor.IngestionSource
 import filodb.core.memstore.{IngestRecord, IngestRouting, TimeSeriesMemStore}
 import filodb.core.metadata.Dataset
+import filodb.core.store.NullChunkSink
 import filodb.memory.format.ArrayStringRowReader
 
 import akka.util.Timeout
@@ -59,7 +60,7 @@ class KafkaIngestionStreamSuite extends ConfigSpec with StrictLogging {
 
       // coordinator:
       val ctor = Class.forName(ds.source.streamFactoryClass).getConstructors.head
-      val memStore = new TimeSeriesMemStore(globalConfig.getConfig("filodb"))
+      val memStore = new TimeSeriesMemStore(globalConfig.getConfig("filodb"), new NullChunkSink)
       memStore.setup(dataset, 0)
       memStore.reset()
 

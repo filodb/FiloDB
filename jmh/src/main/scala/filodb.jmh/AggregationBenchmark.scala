@@ -13,7 +13,7 @@ import scala.concurrent.duration._
 import filodb.core._
 import filodb.core.memstore.TimeSeriesMemStore
 import filodb.core.query._
-import filodb.core.store.{FilteredPartitionScan, QuerySpec, RowKeyChunkScan}
+import filodb.core.store.{FilteredPartitionScan, QuerySpec, RowKeyChunkScan, NullChunkSink}
 
 /**
  * Microbenchmark involving TimeSeriesMemStore aggregation using TimeGroupingAggregate
@@ -29,7 +29,7 @@ class AggregationBenchmark {
   val config = ConfigFactory.parseString("filodb.memstore.max-chunks-size = 1000")
                             .withFallback(ConfigFactory.load("application_test.conf"))
                             .getConfig("filodb")
-  val memStore = new TimeSeriesMemStore(config)
+  val memStore = new TimeSeriesMemStore(config, new NullChunkSink)
   val startTs = 1000000L
   val numPoints = 10000
   val endTs   = startTs + 1000 * numPoints

@@ -53,7 +53,6 @@ object InMemoryQueryStress extends App {
   // Setup SparkContext, etc.
   val sess = SparkSession.builder.master("local[8]")
                                  .appName("InMemoryQueryStress")
-                                 .config("spark.filodb.store", "in-memory")
                                  .config("spark.sql.shuffle.partitions", "4")
                                  .config("spark.scheduler.mode", "FAIR")
                                  .config("spark.ui.enabled", "false")   // No need for UI when doing perf stuff

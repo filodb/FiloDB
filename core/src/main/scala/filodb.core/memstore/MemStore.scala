@@ -2,7 +2,7 @@ package filodb.core.memstore
 
 import filodb.core.DatasetRef
 import filodb.core.metadata.{Column, Dataset}
-import filodb.core.store.ChunkSource
+import filodb.core.store.{ChunkSource, ChunkSink}
 import filodb.memory.format.{vectors => bv, _}
 
 import monix.execution.{CancelableFuture, Scheduler}
@@ -20,6 +20,8 @@ case object ShardAlreadySetup extends Exception
  * each shard.
  */
 trait MemStore extends ChunkSource {
+  def sink: ChunkSink
+
   /**
    * Sets up one shard of a dataset for ingestion and the schema to be used when ingesting.
    * Once set up, the schema may not be changed.  The schema should be the same for all shards.
@@ -90,7 +92,7 @@ trait MemStore extends ChunkSource {
 
   /**
    * WARNING: truncates all the data in the memstore for the given dataset, and also the data
-   *          in any underlying storage system too.
+   *          in any underlying ChunkSink too.
    */
   def truncate(dataset: DatasetRef): Unit
 

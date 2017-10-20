@@ -253,10 +253,10 @@ lazy val stressDeps = Seq(
 /* The REPL can’t cope with -Ywarn-unused:imports or -Xfatal-warnings
    so we disable for console */
 lazy val consoleSettings = Seq(
-  scalacOptions in (Compile, console) ~= (_.filterNot(Set(
-    "-Ywarn-unused:imports",
-    "-Xfatal-warnings"
-  ))))
+ scalacOptions in (Compile, console) ~= (_.filterNot(Set(
+   "-Ywarn-unused-import",
+   "-Xfatal-warnings"
+))))
 
 lazy val compilerSettings = Seq(
 

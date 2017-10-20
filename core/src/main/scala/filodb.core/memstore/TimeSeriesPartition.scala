@@ -8,7 +8,7 @@ import filodb.core.metadata.Dataset
 import filodb.core.query.{ChunkIDPartitionChunkIndex, ChunkSetReader}
 import filodb.core.store._
 import filodb.memory.BlockHolder
-import filodb.memory.format.{FiloVector, RowReader}
+import filodb.memory.format._
 
 import kamon.Kamon
 import org.jctools.maps.NonBlockingHashMapLong
@@ -30,103 +30,130 @@ object TimeSeriesPartition {
  *   engine.
  *
  * Design is for high ingestion rates.
- * Concurrency: single writer for ingest, multiple readers OK for reads
+ * Concurrency/Ingestion flow:
+ *   The idea is to alternate between ingest() and switchBuffers() in the ingestion thread.
+ *     This allows for safe and cheap write buffer churn without losing any data.
+ *   switchBuffers() is called before flush() is called in another thread, possibly.
  *
  * TODO: eliminate chunkIDs, that can be stored in the index
- * TODO: document tradeoffs between chunksToKeep, maxChunkSize
- * TODO: update flushedWatermark when flush is confirmed
  */
 class TimeSeriesPartition(val dataset: Dataset,
                           val binPartition: PartitionKey,
                           val shard: Int,
-                          chunksToKeep: Int,
-                          maxChunkSize: Int)
+                          bufferPool: WriteBufferPool)
                          (implicit blockHolder: BlockHolder) extends FiloPartition {
   import ChunkSetInfo._
   import TimeSeriesPartition._
 
   // NOTE: private final compiles down to a field in bytecode, faster than method invocation
-  private final val vectors = new NonBlockingHashMapLong[Array[FiloVector[_]]](32, false)
+  private final val vectors = new NonBlockingHashMapLong[Array[BinaryVector[_]]](32, false)
   private final val chunkIDs = new collection.mutable.Queue[ChunkID]
   // This only holds immutable, finished chunks
   private final val index = new ChunkIDPartitionChunkIndex(binPartition, dataset)
-  private var currentChunkLen = 0
-  private var firstRowKey = BinaryRecord.empty
 
   // Set initial size to a fraction of the max chunk size, so that partitions with sparse amount of data
   // will not cause too much memory bloat.  GrowableVector allows vectors to grow, so this should be OK
-  private final val appenders = MemStore.getAppendables(dataset, maxChunkSize / 8)
+  private val (initAppenders, initCurChunks) = bufferPool.obtain()
+  private var appenders = initAppenders
+  private var currentChunks = initCurChunks
+  private var flushingAppenders = UnsafeUtils.ZeroPointer.asInstanceOf[Array[RowReaderAppender]]
+  private var flushingChunkID = Long.MinValue
   private final val numColumns = appenders.size
 
   private final val partitionVectors = new Array[FiloVector[_]](dataset.partitionColumns.length)
-  private final val currentChunks = appenders.map(_.appender)
 
-  // The highest offset of a row that has been committed to disk
-  var flushedWatermark = Long.MinValue
-  // The highest offset ingested, but probably not committed
-  var ingestedWatermark = Long.MinValue
+  // Add initial write buffers as the first chunkSet/chunkID
+  initNewChunk()
 
   /**
-   * Ingests a new row, adding it to currentChunks IF the offset is greater than the flushedWatermark.
-   * The condition ensures data already persisted will not be encoded again.
+   * Ingests a new row, adding it to currentChunks.
+   * Note that it is the responsibility of flush() to ensure the right currentChunks is allocated.
    */
   def ingest(row: RowReader, offset: Long): Unit = {
-    if (offset > flushedWatermark) {
-      // Don't create new chunkID until new data appears
-      if (currentChunkLen == 0) {
-        initNewChunk()
-        firstRowKey = dataset.rowKey(row)
-      }
-      for { col <- 0 until numColumns optimized } {
-        appenders(col).append(row)
-      }
-      currentChunkLen += 1
-      if (ingestedWatermark < offset) ingestedWatermark = offset
-      if (currentChunkLen >= maxChunkSize) flush(dataset.rowKey(row))
+    for { col <- 0 until numColumns optimized } {
+      appenders(col).append(row)
     }
   }
 
   /**
-   * Compacts currentChunks and flushes to disk.  When the flush is complete, update the watermark.
-   * Gets ready for ingesting a new set of chunks. Keeps chunks in memory until they are aged out.
+   * Atomically switches the writeBuffers/appenders to a new empty one.
+   * The old writeBuffers/chunks becomes flushingAppenders.
+   * In theory this may be called from another thread from ingest(), but then ingest() may continue to write
+   * to the old flushingAppenders buffers until the concurrent ingest() finishes.
+   * To guarantee no more writes happen when switchBuffers is called, have ingest() and switchBuffers() be
+   * called from a single thread / single synchronous stream.
+   */
+  def switchBuffers(): Unit = if (currentChunks(0).length > 0) {
+    // Get new write buffers from pool
+    flushingAppenders = appenders
+    flushingChunkID = chunkIDs.last
+    val newAppendersAndChunks = bufferPool.obtain()
+    // Right after this all ingest() calls will append to new chunks
+    appenders = newAppendersAndChunks._1
+    currentChunks = newAppendersAndChunks._2
+    initNewChunk()   // At this point the new buffers can be read from
+  }
+
+  /**
+   * Optimizes flushingChunks into smallest BinaryVectors, store in memory and produce a ChunkSet for persistence.
+   * Only one thread should call flush() at a time.  This may be called concurrently w.r.t. flush(), but
+   * switchBuffers() must be called first.
+   *
+   * For now, assume switchBuffers() is called synchronously with ingest() so that no changes occur to the
+   * flushingChunks when this method is called.  If this is not true, then a retry loop is needed to guarantee
+   * that nothing changes from underneath optimize().
+   *
    * TODO: for partitions getting very little data, in the future, instead of creating a new set of chunks,
    * we might wish to flush current chunks as they are for persistence but then keep adding to the partially
    * filled currentChunks.  That involves much more state, so do much later.
    */
-  protected def flush(lastRowKey: BinaryRecord): Unit = {
-    // optimize and compact current chunks
-    val frozenVectors = currentChunks.zipWithIndex.map { case (curChunk,i) =>
-      val optimized = curChunk.optimize()
-      val block = blockHolder.requestBlock(optimized.numBytes)
-      block.own()
-      val (pos, size) = block.write(optimized)
-      val vector = dataset.vectorMakers(i)(block.read(pos, size), size)
-      optimized.dispose()
+  def flush(): Option[ChunkSet] = {
+    if (flushingAppenders == UnsafeUtils.ZeroPointer || flushingAppenders(0).appender.length == 0) {
+      None
+    } else {
+      // optimize and compact old chunks
+      val frozenVectors = flushingAppenders.zipWithIndex.map { case (appender, i) =>
+        val optimized = appender.appender.optimize()
+        val block = blockHolder.requestBlock(optimized.numBytes)
+        block.own()
+        val (pos, size) = block.write(optimized)
+        val vector = dataset.vectorMakers(i)(block.read(pos, size), size)
 
-      encodedBytes.increment(optimized.numBytes)
-      curChunk.reset()
-      vector
+        encodedBytes.increment(optimized.numBytes)
+        optimized.dispose()
+        vector.asInstanceOf[BinaryVector[_]]
+      }
+      val numSamples = frozenVectors(0).length
+      numSamplesEncoded.increment(numSamples)
+      numChunksEncoded.increment(frozenVectors.length)
+
+      // replace appendableVectors reference in vectors hash with compacted, immutable chunks
+      vectors.put(flushingChunkID, frozenVectors)
+
+      // release older appenders back to pool.  Nothing at this point should reference the older appenders.
+      bufferPool.release(flushingAppenders)
+      flushingAppenders = UnsafeUtils.ZeroPointer.asInstanceOf[Array[RowReaderAppender]]
+
+      // Create ChunkSetInfo
+      val reader = new FastFiloRowReader(frozenVectors.asInstanceOf[Array[FiloVector[_]]])
+      reader.setRowNo(0)
+      val firstRowKey = dataset.rowKey(reader)
+      reader.setRowNo(numSamples - 1)
+      val lastRowKey = dataset.rowKey(reader)
+      val chunkInfo = ChunkSetInfo(flushingChunkID, numSamples, firstRowKey, lastRowKey)
+      index.add(chunkInfo, Nil)
+
+      Some(ChunkSet(chunkInfo, binPartition, Nil,
+                    frozenVectors.zipWithIndex.map { case (vect, pos) => (pos, vect.toFiloBuffer) }))
     }
-    numSamplesEncoded.increment(currentChunkLen)
-    numChunksEncoded.increment(frozenVectors.length)
-
-    val curChunkID = chunkIDs.last
-    val chunkInfo = ChunkSetInfo(curChunkID, currentChunkLen, firstRowKey, lastRowKey)
-    index.add(chunkInfo, Nil)
-    // TODO: push new chunks to ColumnStore
-
-    // replace appendableVectors reference in vectors hash with compacted, immutable chunks
-    vectors.put(curChunkID, frozenVectors)
-
-    // Finally, mark current chunk len as 0 so we know to create a new chunkID on next row
-    currentChunkLen = 0
   }
 
   def latestN(n: Int): InfosSkipsIt =
-    if (n == 1) latestChunkIt else index.latestN(n)
+    if (latestChunkLen > 0) { latestChunkIt ++ index.latestN(n - 1) }
+    else                    { index.latestN(n) }
 
   def numChunks: Int = chunkIDs.size
-  def latestChunkLen: Int = currentChunkLen
+  def latestChunkLen: Int = currentChunks(0).length
 
   /**
    * Gets the most recent n ChunkSetInfos and skipMaps (which will be empty)
@@ -137,17 +164,13 @@ class TimeSeriesPartition(val dataset: Dataset,
     index.latestN(numToTake) ++ latest
   }
 
-  // Only returns valid results if there is a current chunk being appended to
   private def latestChunkInfo: ChunkSetInfo =
-    ChunkSetInfo(chunkIDs.last, currentChunkLen, firstRowKey, BinaryRecord.empty)
+    ChunkSetInfo(chunkIDs.last, latestChunkLen, BinaryRecord.empty, BinaryRecord.empty)
 
-  private def latestChunkIt: InfosSkipsIt =
-    if (currentChunkLen > 0) { Iterator.single((latestChunkInfo, emptySkips)) }
-    else                     { Iterator.empty }
-
+  private def latestChunkIt: InfosSkipsIt = Iterator.single((latestChunkInfo, emptySkips))
 
   private def getVectors(columnIds: Array[Int],
-                         vectors: Array[FiloVector[_]],
+                         vectors: Array[BinaryVector[_]],
                          vectLength: Int): Array[FiloVector[_]] = {
     val finalVectors = new Array[FiloVector[_]](columnIds.size)
     for { i <- 0 until columnIds.size optimized } {
@@ -172,22 +195,12 @@ class TimeSeriesPartition(val dataset: Dataset,
     }
   }
 
-  def lastVectors: Array[FiloVector[_]] =
-    (if (currentChunkLen == 0 && chunkIDs.nonEmpty) {
-      vectors.get(chunkIDs.last)
-    } else { currentChunks }).asInstanceOf[Array[FiloVector[_]]]
+  def lastVectors: Array[FiloVector[_]] = currentChunks.asInstanceOf[Array[FiloVector[_]]]
 
   // Initializes vectors, chunkIDs for a new chunkset/chunkID
   private def initNewChunk(): Unit = {
     val newChunkID = timeUUID64
-    vectors.put(newChunkID, currentChunks.asInstanceOf[Array[FiloVector[_]]])
+    vectors.put(newChunkID, currentChunks.asInstanceOf[Array[BinaryVector[_]]])
     chunkIDs += newChunkID
-
-    // check number of chunks, flush out old chunk if needed
-    if (chunkIDs.length > chunksToKeep) {
-      val oldestID = chunkIDs.dequeue // how to remove head element?
-      vectors.remove(oldestID)
-      index.remove(oldestID)
-    }
   }
 }

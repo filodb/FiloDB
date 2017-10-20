@@ -13,7 +13,6 @@ class InMemoryStoreTest extends SparkTestBase {
   // Setup SQLContext and a sample DataFrame
   val sess = SparkSession.builder.master("local[4]")
                                  .appName("test")
-                                 .config("spark.filodb.store", "in-memory")
                                  .config("spark.ui.enabled", "false")
                                  .getOrCreate
   val sc = sess.sparkContext

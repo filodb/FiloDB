@@ -28,10 +28,7 @@ final class FilodbSettings(val conf: Config) {
       .map(_.trim.split(",").toList)
       .getOrElse(config.as[Seq[String]]("seed-nodes").toList)
 
-  val StorageStrategy: StoreStrategy = config.as[String]("store") match {
-    case "in-memory" => StoreStrategy.InMemory
-    case fqcn        => StoreStrategy.Configured(fqcn)
-  }
+  val StorageStrategy = StoreStrategy.Configured(config.as[String]("store-factory"))
 
   val DefaultTaskTimeout = config.as[FiniteDuration]("tasks.timeouts.default")
 
@@ -39,13 +36,7 @@ final class FilodbSettings(val conf: Config) {
 
   val InitializationTimeout = config.as[FiniteDuration]("tasks.timeouts.initialization")
 
-  val PoolName = "filodb.core"
-
-  val QueueLength = config.as[Int]("core-futures-queue-length")
-
-  val PoolSize = config.as[Int]("core-futures-pool-size")
-
-  val MaxPoolSize = config.as[Int]("core-futures-max-pool-size")
+  val IOPoolName = "filodb.io"
 
   lazy val DatasetDefinitions = config.as[Option[Map[String, Config]]]("dataset-definitions")
                                       .getOrElse(Map.empty[String, Config])

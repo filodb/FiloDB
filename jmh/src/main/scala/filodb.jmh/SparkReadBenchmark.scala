@@ -51,7 +51,6 @@ class SparkReadBenchmark {
   val sess = SparkSession.builder.master("local[4]")
                                  .appName("test")
                                  .config("spark.ui.enabled", "false")
-                                 .config("spark.filodb.store", "in-memory")
                                  .config("spark.filodb.memstore.chunks-to-keep", "20")
                                  .getOrCreate
   val sc = sess.sparkContext

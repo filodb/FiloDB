@@ -2,7 +2,9 @@ package filodb.core.store
 
 import scala.concurrent.Future
 
+import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
+import monix.execution.Scheduler
 import monix.reactive.Observable
 
 import filodb.core._
@@ -70,4 +72,29 @@ class ChunkSinkStats {
   }
 
   def chunksetWrite(): Unit = { chunksetWrites.increment }
+}
+
+/**
+ * NullChunkSink keeps stats but other than that writes chunks nowhere.  It's convenient for testing though.
+ */
+class NullChunkSink(implicit sched: Scheduler) extends ChunkSink with StrictLogging {
+  val sinkStats = new ChunkSinkStats
+
+  def write(dataset: Dataset, chunksets: Observable[ChunkSet]): Future[Response] = {
+    chunksets.foreach { chunkset =>
+      val totalBytes = chunkset.chunks.map(_._2.limit).sum
+      sinkStats.addChunkWriteStats(chunkset.chunks.length, totalBytes)
+      sinkStats.chunksetWrite()
+      logger.debug(s"NullChunkSink: ${chunkset.info}  ${chunkset.chunks.length} chunks with $totalBytes bytes")
+    }
+    Future.successful(Success)
+  }
+
+  def initialize(dataset: DatasetRef): Future[Response] = Future.successful(Success)
+
+  def truncate(dataset: DatasetRef): Future[Response] = Future.successful(Success)
+
+  def dropDataset(dataset: DatasetRef): Future[Response] = Future.successful(Success)
+
+  def reset(): Unit = {}
 }
