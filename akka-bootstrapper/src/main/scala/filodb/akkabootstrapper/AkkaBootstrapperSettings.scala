@@ -1,12 +1,10 @@
 package filodb.akkabootstrapper
 
-import java.net.MalformedURLException
 import java.util.concurrent.TimeUnit
 
 import scala.collection.JavaConverters._
 import scala.util.Try
 
-import akka.actor.AddressFromURIString
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
 
@@ -40,23 +38,5 @@ final class AkkaBootstrapperSettings(val config: Config) extends StrictLogging {
   lazy val registrationServiceName: String = bootstrapper.getString("consul.registration-service-name")
 
   lazy val seedsWhitelist: List[String] = bootstrapper.getStringList("whitelist.seeds").asScala.toList
-
-  /** Eagerly attempts to create addresses from each whitelist seed config
-    * to fail fast if MalformedURIException thrown. Logs any invalids,
-    * and removes from the returned list.
-    */
-  private[akkabootstrapper] lazy val seeds = {
-    val validate = (s: String) =>
-      try Right(AddressFromURIString(s)) catch {
-        case e: MalformedURLException =>
-          logger.error(s"Invalid configured whitelist seed node: $s.", e)
-          Left(s)
-      }
-
-    seedsWhitelist.map(validate).partition(_.isRight)
-  }
-
-  private[filodb] lazy val invalidSeeds: List[String] =
-    seeds._2.collect { case Left(string) => string }
 
 }

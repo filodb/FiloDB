@@ -10,10 +10,10 @@ class SeedNodeHeadDiscoverySpec extends BaseSeedNodeDiscoverySpec(AbstractTestKi
   "WhitelistSeedDiscovery" must {
     "discover if selfNode is head of list" in {
       seeds.headOption shouldEqual Some(selfAddress)
-      val discovery = new WhitelistAkkaClusterSeedDiscovery(cluster, settings)
+      val discovery = new WhitelistClusterSeedDiscovery(cluster, settings)
       // remove self node unless it is in the head of the sorted list.
-      discovery.discoverAkkaClusterSeeds.contains(cluster.selfAddress) shouldBe true
-      discovery.discoverAkkaClusterSeeds.size shouldEqual settings.seedsWhitelist.size
+      discovery.discoverClusterSeeds.contains(cluster.selfAddress) shouldBe true
+      discovery.discoverClusterSeeds.size shouldEqual settings.seedsWhitelist.size
     }
   }
 }
@@ -22,38 +22,10 @@ class SeedNodeLastDiscoverySpec extends BaseSeedNodeDiscoverySpec(AbstractTestKi
   "WhitelistSeedDiscovery" must {
     "discover if selfNode is last of list" in {
       seeds.last shouldEqual selfAddress
-      val discovery = new WhitelistAkkaClusterSeedDiscovery(cluster, settings)
+      val discovery = new WhitelistClusterSeedDiscovery(cluster, settings)
       // remove self node unless it is in the head of the sorted list.
-      discovery.discoverAkkaClusterSeeds.contains(cluster.selfAddress) shouldBe false
-      discovery.discoverAkkaClusterSeeds.size shouldEqual settings.seedsWhitelist.size - 1
-    }
-  }
-}
-
-class AkkaBootstrapperSettingsSpec
-  extends AbstractTestKit(ConfigFactory.parseString(
-    s"""
-       |akka-bootstrapper{
-       |  whitelist.seeds = [
-       |  "akka.tcp://test@127.0.0.1:0",
-       |  "akka://test:127.0.0.1:0" ]
-       |}
-      """.stripMargin).withFallback(AbstractTestKit.rootConfig))
-    with WordSpecLike {
-
-  "AkkaBootstrapperSettings" must {
-
-    val selfAddress = Cluster(system).selfAddress
-    val settings = new AkkaBootstrapperSettings(system.settings.config)
-
-    "validate configured seeds" in {
-      val seeds = settings.seedsWhitelist
-      (settings.seeds._1 ++ settings.seeds._2).size shouldEqual seeds.size
-    }
-    "catch malformed addresses for user code to decide handling of invalids" in {
-      settings.invalidSeeds.size shouldEqual 1
-      val valid = settings.seeds._1.collect { case Right(address) => address }
-      valid.contains(selfAddress) shouldBe false
+      discovery.discoverClusterSeeds.contains(cluster.selfAddress) shouldBe false
+      discovery.discoverClusterSeeds.size shouldEqual settings.seedsWhitelist.size - 1
     }
   }
 }

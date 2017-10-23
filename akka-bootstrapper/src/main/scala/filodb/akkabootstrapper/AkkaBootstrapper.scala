@@ -11,8 +11,8 @@ import akka.http.scaladsl.server.Route
 import akka.pattern.ask
 import akka.util.Timeout
 import akka.http.scaladsl.marshallers.sprayjson.SprayJsonSupport._
-import spray.json._
 import com.typesafe.scalalogging.StrictLogging
+import spray.json._
 
 object AkkaBootstrapperMessages {
 
@@ -47,7 +47,7 @@ class AkkaBootstrapper(protected val cluster: Cluster) extends StrictLogging wit
   private[filodb] val settings = new AkkaBootstrapperSettings(cluster.system.settings.config)
 
   /**
-    * Every instance that wants to join the akka cluster call this method.
+    * Every node needing to manually join the akka cluster should call this method.
     * This is a blocking call and does not return until akka cluster is formed or joined.
     *
     * It first checks if a cluster already exists to join by invoking the seeds endpoint.
@@ -64,7 +64,7 @@ class AkkaBootstrapper(protected val cluster: Cluster) extends StrictLogging wit
     */
   @throws(classOf[DiscoveryTimeoutException])
   def bootstrap(): Unit = {
-    val seeds = AkkaClusterSeedDiscovery(cluster, settings).discoverAkkaClusterSeeds
+    val seeds = ClusterSeedDiscovery(cluster, settings).discoverClusterSeeds
     logger.info(s"Joining seeds $seeds")
     cluster.joinSeedNodes(seeds)
     logger.info("Exited from AkkaBootstrapper.joinSeedNodes")
@@ -84,14 +84,14 @@ class AkkaBootstrapper(protected val cluster: Cluster) extends StrictLogging wit
     * @return The akka http Route that should be started by the caller once the method returns.
     */
   def getAkkaHttpRoute(membershipActor: Option[ActorRef] = None): Route = {
-    val clusterMembershipTracker = membershipActor.getOrElse(system.actorOf(Props[ClusterMembershipTracker],
-      name = "clusterListener"))
-    val seedsContextPath = settings.seedsPath
+    val clusterMembershipTracker = membershipActor.getOrElse(
+      system.actorOf(Props[ClusterMembershipTracker], name = "clusterListener"))
+
     import AkkaBootstrapperMessages._
 
     implicit val executionContext = system.dispatcher
     val route =
-      path(seedsContextPath) {
+      path(settings.seedsPath) {
         get {
           implicit val timeout = Timeout(2 seconds) // TODO configurable timeout
           val seedNodes = (clusterMembershipTracker ask ClusterMembershipRequest).mapTo[ClusterMembershipResponse]

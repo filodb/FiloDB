@@ -10,22 +10,23 @@ import com.typesafe.scalalogging.StrictLogging
 import spray.json._
 import scalaj.http.Http
 
-abstract class AkkaClusterSeedDiscovery(val cluster: Cluster,
-                                        val settings: AkkaBootstrapperSettings
-                                       ) extends StrictLogging with ClusterMembershipJsonSuppport {
+/** Seed node strategy. Some implementations discover, some simply read from immutable config. */
+abstract class ClusterSeedDiscovery(val cluster: Cluster,
+                                    val settings: AkkaBootstrapperSettings)
+  extends StrictLogging with ClusterMembershipJsonSuppport {
 
   @throws(classOf[DiscoveryTimeoutException])
-  def discoverAkkaClusterSeeds: Seq[Address] = {
-    discoverExistingAkkaCluster match {
-      case Seq() => discoverPeersForNewAkkaCluster
+  def discoverClusterSeeds: Seq[Address] = {
+    discoverExistingCluster match {
+      case Seq() => discoverPeersForNewCluster
       case nonEmpty: Seq[Address] => nonEmpty
     }
   }
 
   @throws(classOf[DiscoveryTimeoutException])
-  protected def discoverPeersForNewAkkaCluster: Seq[Address]
+  protected def discoverPeersForNewCluster: Seq[Address]
 
-  protected def discoverExistingAkkaCluster: Seq[Address] = {
+  protected def discoverExistingCluster: Seq[Address] = {
 
     val seedsEndpoint = settings.seedsBaseUrl + settings.seedsPath
 
@@ -52,17 +53,19 @@ abstract class AkkaClusterSeedDiscovery(val cluster: Cluster,
 }
 
 
-object AkkaClusterSeedDiscovery {
+object ClusterSeedDiscovery {
 
-  def apply(cluster: Cluster, settings: AkkaBootstrapperSettings): AkkaClusterSeedDiscovery = {
-    val className = settings.seedDiscoveryClass
-    val args: Seq[(Class[_], AnyRef)] = Seq((cluster.getClass, cluster), (settings.getClass, settings))
-    cluster.system.dynamicAccess.createInstanceFor[AkkaClusterSeedDiscovery](className, args) match {
-      case Failure(e) =>
-        throw new IllegalArgumentException(s"Could not instantiate seed discovery class " +
-          s"${settings.seedDiscoveryClass}. Please check your configuration", e)
-      case Success(clazz) => clazz
-    }
+  /** Seed node strategy. Some implementations discover, some simply read them. */
+  def apply(cluster: Cluster, settings: AkkaBootstrapperSettings): ClusterSeedDiscovery = {
+    import settings.{seedDiscoveryClass => fqcn}
+
+    cluster.system.dynamicAccess.createInstanceFor[ClusterSeedDiscovery](
+      fqcn, Seq((cluster.getClass, cluster), (settings.getClass, settings))) match {
+        case Failure(e) =>
+          throw new IllegalArgumentException(
+            s"Could not instantiate seed discovery class $fqcn. Please check your configuration", e)
+        case Success(clazz) => clazz
+      }
   }
 
 }

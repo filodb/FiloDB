@@ -1,5 +1,7 @@
 package filodb.akkabootstrapper
 
+import akka.ConfigurationException
+
 import scala.annotation.tailrec
 import scala.collection.immutable.Seq
 
@@ -8,22 +10,24 @@ import akka.cluster.Cluster
 import com.typesafe.scalalogging.StrictLogging
 import org.xbill.DNS._
 
-abstract class DnsSrvAkkaClusterSeedDiscovery(override val cluster: Cluster,
-                                              override val settings: AkkaBootstrapperSettings)
-  extends AkkaClusterSeedDiscovery(cluster, settings) {
+abstract class DnsSrvClusterSeedDiscovery(override val cluster: Cluster,
+                                          override val settings: AkkaBootstrapperSettings)
+  extends ClusterSeedDiscovery(cluster, settings) {
 
   val srvLookup = new Lookup(settings.serviceName, Type.SRV, DClass.IN)
   val selfAddress = cluster.selfAddress
   val simpleResolver = settings.resolverHost.map(r => new SimpleResolver(r))
+
   simpleResolver.foreach { _.setPort(settings.resolverPort) }
   simpleResolver.foreach { r => srvLookup.setResolver(r) }
 
-  override protected def discoverPeersForNewAkkaCluster: Seq[Address] = {
+  override protected def discoverPeersForNewCluster: Seq[Address] = {
     logger.info("Discovering cluster peers by looking up SRV records from DNS for {}", settings.serviceName)
     val startTime = System.currentTimeMillis()
     discover(startTime)
   }
 
+  // TODO: 2 Thread.sleep calls, function too long, 4 if/else cases is too many
   @tailrec
   private def discover(startTime: Long): Seq[Address] = {
     val currentTime = System.currentTimeMillis()
@@ -77,39 +81,43 @@ abstract class DnsSrvAkkaClusterSeedDiscovery(override val cluster: Cluster,
 
 }
 
-
 /**
-  * This concrete implementation assumes that registration and de-registration with DNS is not required.
+  * This implementation assumes that registration and de-registration with DNS is not required.
   * And it is done automatically by the deployment environment, for example Mesos DNS.
   */
-final class SimpleDnsSrvAkkaClusterSeedDiscovery(cluster: Cluster,
-                                                 settings: AkkaBootstrapperSettings)
-  extends DnsSrvAkkaClusterSeedDiscovery(cluster, settings)
+final class SimpleDnsSrvClusterSeedDiscovery(cluster: Cluster,
+                                             settings: AkkaBootstrapperSettings)
+  extends DnsSrvClusterSeedDiscovery(cluster, settings)
 
 /**
-  * This concrete implementation is used for local development. It does a registration
+  * This implementation is used for local development. It does a registration
   * and de-registration with Consul DNS.
   */
-final class ConsulAkkaClusterSeedDiscovery(cluster: Cluster,
-                                           settings: AkkaBootstrapperSettings)
-  extends DnsSrvAkkaClusterSeedDiscovery(cluster, settings) with StrictLogging {
+final class ConsulClusterSeedDiscovery(cluster: Cluster,
+                                       settings: AkkaBootstrapperSettings)
+  extends DnsSrvClusterSeedDiscovery(cluster, settings) with StrictLogging {
 
   private val defaultAddress = cluster.system.asInstanceOf[ExtendedActorSystem].provider.getDefaultAddress
-  val port = defaultAddress.port.get
-  val host = defaultAddress.host.get
 
-  val registrationServiceName: String = settings.registrationServiceName
-  val serviceId = s"$registrationServiceName-$host-$port"
-  val consulClient = new ConsulClient(settings)
-  consulClient.register(serviceId, registrationServiceName, host, port)
-  logger.info(s"Registered with consul $host:$port as $registrationServiceName ")
-
-  Runtime.getRuntime.addShutdownHook(new Thread() {
-    override def run(): Unit = {
-      consulClient.deregister(serviceId)
-      logger.info(s"Deregistered $serviceId with consul")
-    }
-  })
+  defaultAddress match {
+    case Address(_, _, Some(host), Some(port)) =>
+      val registrationServiceName = settings.registrationServiceName
+      val consulClient = new ConsulClient(settings)
+      val serviceId = s"$registrationServiceName-$host-$port"
+      consulClient.register(serviceId, registrationServiceName, host, port)
+      logger.info(s"Registered with consul $host:$port as $registrationServiceName ")
+      Runtime.getRuntime.addShutdownHook(new Thread() {
+        override def run(): Unit = {
+          consulClient.deregister(serviceId)
+          logger.info(s"Deregistered $serviceId with consul")
+        }
+      })
+    case _ =>
+      val context = s"""'host' and 'port' in $defaultAddress must be configured properly.
+        Check 'akka.remote.netty.tcp.{hostname,port}'."""
+      logger.error(context)
+      throw new ConfigurationException(context)
+  }
 
 }
 

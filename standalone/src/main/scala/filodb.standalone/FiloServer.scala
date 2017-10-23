@@ -52,9 +52,6 @@ object FiloServer extends FilodbClusterNode with StrictLogging {
 
   def bootstrap(akkaCluster: Cluster): Unit = {
     val bootstrapper = AkkaBootstrapper(akkaCluster)
-    if (bootstrapper.settings.invalidSeeds.nonEmpty) {
-      // ticket open, coming in separate commit to add the behavior using these. Already logged in settings.
-    }
     bootstrapper.bootstrap()
     val filoHttpServer = new FiloHttpServer(akkaCluster.system)
     filoHttpServer.start(bootstrapper.getAkkaHttpRoute())
