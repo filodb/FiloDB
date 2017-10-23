@@ -18,16 +18,20 @@ class CassandraMetaStore(config: Config, filoSessionProvider: Option[FiloSession
                         (implicit val ec: ExecutionContext) extends MetaStore {
   private val sessionProvider = filoSessionProvider.getOrElse(new DefaultFiloSessionProvider(config))
   val datasetTable = new DatasetTable(config, sessionProvider)
+  val checkpointTable = new CheckpointTable(config, sessionProvider)
 
   val defaultKeySpace = config.getString("keyspace")
 
   def initialize(): Future[Response] = {
     datasetTable.createKeyspace(datasetTable.keyspace)
     datasetTable.initialize()
+    checkpointTable.initialize()
   }
 
-  def clearAllData(): Future[Response] =
+  def clearAllData(): Future[Response] = {
     datasetTable.clearAll()
+    checkpointTable.clearAll()
+  }
 
   def newDataset(dataset: Dataset): Future[Response] =
     datasetTable.createNewDataset(dataset)
@@ -43,5 +47,19 @@ class CassandraMetaStore(config: Config, filoSessionProvider: Option[FiloSession
 
   def shutdown(): Unit = {
     datasetTable.shutdown()
+  }
+
+  def writeCheckpoint(dataset: DatasetRef, shardNum: Int, groupNum: Int, offset: Long): Future[Response] = {
+    checkpointTable.writeCheckpoint(dataset, shardNum, groupNum, offset)
+  }
+
+  def readCheckpoints(dataset: DatasetRef, shardNum: Int): Future[Map[Int,Long]] = {
+    checkpointTable.readCheckpoints(dataset, shardNum)
+  }
+
+  def readEarliestCheckpoint(dataset: DatasetRef, shardNum: Int): Future[Long] = {
+    readCheckpoints(dataset,shardNum) map { m =>
+      if (m.values.isEmpty) Long.MinValue else m.values.min
+    }
   }
 }

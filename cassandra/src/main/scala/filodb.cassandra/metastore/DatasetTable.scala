@@ -5,7 +5,6 @@ import com.typesafe.config.Config
 
 import scala.concurrent.{ExecutionContext, Future}
 import filodb.cassandra.{FiloCassandraConnector, FiloSessionProvider}
-import filodb.core.DatasetRef
 import filodb.core.metadata.{Dataset, DatasetOptions}
 
 /**
