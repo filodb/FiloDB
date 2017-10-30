@@ -24,7 +24,7 @@ object GlobalConfig {
     // ConfigFactory.parseResources() does NOT work in Spark 1.4.1 executors
     // and only the below works.
     // filodb-defaults.conf sets cluster.roles=["worker"] as the default
-    val defaultsFromUrl = ConfigFactory.parseURL(getClass.getResource("/filodb-defaults.conf"))
+    val defaultsFromUrl = ConfigFactory.load("filodb-defaults")
     ConfigFactory.defaultOverrides.withFallback(customConfig) // spark overrides cluster.roles, cli doesn't
                  .withFallback(defaultsFromUrl)
                  .withFallback(ConfigFactory.defaultReference())

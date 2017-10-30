@@ -45,22 +45,74 @@ class TimeSeriesPartition(val dataset: Dataset,
   import ChunkSetInfo._
   import TimeSeriesPartition._
 
-  // NOTE: private final compiles down to a field in bytecode, faster than method invocation
+  /**
+    * This is a map from chunkId to the Array of chunks(BinaryVector) corresponding to that chunkId.
+    *
+    * NOTE: private final compiles down to a field in bytecode, faster than method invocation
+    */
   private final val vectors = new NonBlockingHashMapLong[Array[BinaryVector[_]]](32, false)
+
+  /**
+    * As new chunks are initialized in this partition, the ids are appended to this queue
+    */
   private final val chunkIDs = new collection.mutable.Queue[ChunkID]
-  // This only holds immutable, finished chunks
+
+  /**
+    * This is the index enabling queries to be done on the ingested data. Allows for
+    * query by chunkId, rowKey etc. See [[filodb.core.memstore.TimeSeriesPartition#readers]]
+    * for how this is done.
+    *
+    * This only holds immutable, finished chunks.
+    *
+    */
   private final val index = new ChunkIDPartitionChunkIndex(binPartition, dataset)
 
   // Set initial size to a fraction of the max chunk size, so that partitions with sparse amount of data
   // will not cause too much memory bloat.  GrowableVector allows vectors to grow, so this should be OK
   private val (initAppenders, initCurChunks) = bufferPool.obtain()
+
+  /**
+    * Ingested data goes into this appender. There is one appender for each column in the dataset.
+    * Var mutates when buffers are switched for optimization. During switching of buffers
+    * in [[filodb.core.memstore.TimeSeriesPartition#switchBuffers]], current var
+    * value is assigned to flushingAppenders, and new appender that is added to the partition is assigned to this var.
+    */
   private var appenders = initAppenders
+
+  /**
+    * This is essentially the chunks (binaryVectors) associated with 'appenders' member of this class. This var will
+    * hold the incoming un-encoded data for the partition.
+    * There is one element for each column of the dataset. All of them have the same chunkId.
+    * Var mutates when buffers are switched for optimization
+    * in [[filodb.core.memstore.TimeSeriesPartition#switchBuffers]],
+    * and new chunk is added to the partition.
+    */
   private var currentChunks = initCurChunks
+
+  /**
+    * This var holds the next appender to be optimized and persisted.
+    * Mutates when buffers are switched for optimization in [[filodb.core.memstore.TimeSeriesPartition#switchBuffers]].
+    * There is one element for each column of the dataset.
+    * Initialized to ZeroPointer since at the beginning nothing is ready to be flushed
+    */
   private var flushingAppenders = UnsafeUtils.ZeroPointer.asInstanceOf[Array[RowReaderAppender]]
+
+  /**
+    * Holds the id of the chunks in flushingAppender that should be flushed next.
+    * Mutates when buffers are switched for optimization in [[filodb.core.memstore.TimeSeriesPartition#switchBuffers]].
+    *
+    * Always increases since it is a timeuuid.
+    * Initially Long.MinValue since no chunk is ready for flush in the beginning.
+    */
   private var flushingChunkID = Long.MinValue
+
+  /**
+    * Number of columns in the dataset
+    */
   private final val numColumns = appenders.size
 
-  private final val partitionVectors = new Array[FiloVector[_]](dataset.partitionColumns.length)
+  // Not used for now
+  // private final val partitionVectors = new Array[FiloVector[_]](dataset.partitionColumns.length)
 
   // Add initial write buffers as the first chunkSet/chunkID
   initNewChunk()
@@ -96,8 +148,8 @@ class TimeSeriesPartition(val dataset: Dataset,
 
   /**
    * Optimizes flushingChunks into smallest BinaryVectors, store in memory and produce a ChunkSet for persistence.
-   * Only one thread should call flush() at a time.  This may be called concurrently w.r.t. flush(), but
-   * switchBuffers() must be called first.
+   * Only one thread should call makeFlushChunks() at a time.
+   * This may be called concurrently w.r.t. makeFlushChunks(), but switchBuffers() must be called first.
    *
    * For now, assume switchBuffers() is called synchronously with ingest() so that no changes occur to the
    * flushingChunks when this method is called.  If this is not true, then a retry loop is needed to guarantee
@@ -107,7 +159,7 @@ class TimeSeriesPartition(val dataset: Dataset,
    * we might wish to flush current chunks as they are for persistence but then keep adding to the partially
    * filled currentChunks.  That involves much more state, so do much later.
    */
-  def flush(): Option[ChunkSet] = {
+  def makeFlushChunks(): Option[ChunkSet] = {
     if (flushingAppenders == UnsafeUtils.ZeroPointer || flushingAppenders(0).appender.length == 0) {
       None
     } else {
@@ -197,7 +249,10 @@ class TimeSeriesPartition(val dataset: Dataset,
 
   def lastVectors: Array[FiloVector[_]] = currentChunks.asInstanceOf[Array[FiloVector[_]]]
 
-  // Initializes vectors, chunkIDs for a new chunkset/chunkID
+  /**
+    * Initializes vectors, chunkIDs for a new chunkset/chunkID.
+    * This is called once every chunk-duration for each group, when the buffers are switched for that group
+    */
   private def initNewChunk(): Unit = {
     val newChunkID = timeUUID64
     vectors.put(newChunkID, currentChunks.asInstanceOf[Array[BinaryVector[_]]])

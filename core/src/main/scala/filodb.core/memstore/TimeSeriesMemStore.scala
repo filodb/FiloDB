@@ -4,34 +4,37 @@ import scala.collection.mutable.{ArrayBuffer, HashMap}
 import scala.concurrent.ExecutionContext
 import scala.concurrent.duration._
 
-import filodb.core.DatasetRef
-import filodb.core.Types.PartitionKey
-import filodb.core.metadata.Dataset
-import filodb.core.query.PartitionKeyIndex
-import filodb.core.store._
-import filodb.memory.format.{SchemaRowReader, ZeroCopyUTF8String}
-import filodb.memory.impl.PageAlignedBlockManager
-import filodb.memory.{BlockHolder, BlockManager}
-
 import com.googlecode.javaewah.{EWAHCompressedBitmap, IntIterator}
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
 import kamon.metric.instrument.Gauge
+import monix.eval.Task
 import monix.execution.{CancelableFuture, Scheduler}
 import monix.reactive.Observable
 import org.jctools.maps.NonBlockingHashMapLong
 
-final case class DatasetAlreadySetup(dataset: DatasetRef) extends Exception(s"Dataset $dataset already setup")
+import filodb.core.{DatasetRef, ErrorResponse, Response, Success}
+import filodb.core.Types.PartitionKey
+import filodb.core.metadata.Dataset
+import filodb.core.query.PartitionKeyIndex
+import filodb.core.store._
+import filodb.memory.{BlockHolder, BlockManager}
+import filodb.memory.format.{SchemaRowReader, ZeroCopyUTF8String}
+import filodb.memory.impl.PageAlignedBlockManager
 
-class TimeSeriesMemStore(config: Config, val sink: ChunkSink)(implicit val ec: ExecutionContext)
+class TimeSeriesMemStore(config: Config, val sink: ChunkSink, val metastore: MetaStore)
+                        (implicit val ec: ExecutionContext)
 extends MemStore with StrictLogging {
   import collection.JavaConverters._
 
   type Shards = NonBlockingHashMapLong[TimeSeriesShard]
   private val datasets = new HashMap[DatasetRef, Shards]
+  val numGroups = config.getInt("memstore.groups-per-shard")
 
   val stats = new ChunkSourceStats
+
+  private val numParallelFlushes = config.getInt("memstore.flush-task-parallelism")
 
   // TODO: Change the API to return Unit Or ShardAlreadySetup, instead of throwing.  Make idempotent.
   def setup(dataset: Dataset, shard: Int): Unit = synchronized {
@@ -47,7 +50,7 @@ extends MemStore with StrictLogging {
     if (shards contains shard) {
       throw ShardAlreadySetup
     } else {
-      val tsdb = new TimeSeriesShard(dataset, config, shard)
+      val tsdb = new TimeSeriesShard(dataset, config, shard, sink, metastore)
       shards.put(shard, tsdb)
     }
   }
@@ -59,12 +62,27 @@ extends MemStore with StrictLogging {
     getShard(dataset, shard).map { shard => shard.ingest(rows)
     }.getOrElse(throw new IllegalArgumentException(s"dataset $dataset / shard $shard not setup"))
 
-  def ingestStream(dataset: DatasetRef, shard: Int, stream: Observable[Seq[IngestRecord]])
+  // Should only be called once per dataset/shard
+  def ingestStream(dataset: DatasetRef,
+                   shard: Int,
+                   stream: Observable[Seq[IngestRecord]],
+                   flushStream: Observable[FlushCommand] = FlushStream.empty)
                   (errHandler: Throwable => Unit)
                   (implicit sched: Scheduler): CancelableFuture[Unit] = {
     getShard(dataset, shard).map { shard =>
-      stream.foreach { records => shard.ingest(records) }
-            .recover { case ex: Exception => errHandler(ex) }
+      val combinedStream = Observable.merge(stream.map(SomeData), flushStream)
+      combinedStream.map {
+                      case SomeData(records) => shard.ingest(records)
+                                                None
+                      // The write buffers for all partitions in a group are switched here, in line with ingestion
+                      // stream.  This avoids concurrency issues and ensures that buffers for a group are switched
+                      // at the same offset/watermark
+                      case FlushCommand(group) => shard.switchGroupBuffers(group)
+                                                  Some(FlushGroup(shard.shardNum, group, shard.latestOffset))
+                    }.collect { case Some(flushGroup) => flushGroup }
+                    .mapAsync(numParallelFlushes)(shard.createFlushTask _)
+                    .foreach { x => }
+                    .recover { case ex: Exception => errHandler(ex) }
     }.getOrElse(throw new IllegalArgumentException(s"dataset $dataset / shard $shard not setup"))
   }
 
@@ -88,6 +106,9 @@ extends MemStore with StrictLogging {
 
   def numRowsIngested(dataset: DatasetRef, shard: Int): Long =
     getShard(dataset, shard).map(_.numRowsIngested).getOrElse(-1L)
+
+  def latestOffset(dataset: DatasetRef, shard: Int): Long =
+    getShard(dataset, shard).get.latestOffset
 
   def activeShards(dataset: DatasetRef): Seq[Int] =
     datasets.get(dataset).map(_.keySet.asScala.map(_.toInt).toSeq).getOrElse(Nil)
@@ -132,15 +153,16 @@ object TimeSeriesShard {
  * for that group, up to what offset incoming records for that group has been persisted.  At recovery time, records
  * that fall below the watermark for that group will be skipped (since they can be recovered from disk).
  */
-class TimeSeriesShard(dataset: Dataset, config: Config, shardNum: Int) extends StrictLogging {
+class TimeSeriesShard(dataset: Dataset, config: Config, val shardNum: Int, sink: ChunkSink, metastore: MetaStore)
+      extends StrictLogging {
   import TimeSeriesShard._
 
   private final val partitions = new ArrayBuffer[TimeSeriesPartition]
   private final val keyMap = new HashMap[SchemaRowReader, TimeSeriesPartition]
   private final val keyIndex = new PartitionKeyIndex(dataset)
   private final var ingested = 0L
+  private final var _offset = Long.MinValue
 
-  private val chunksToKeep = config.getInt("memstore.chunks-to-keep")
   private val maxChunksSize = config.getInt("memstore.max-chunks-size")
   private val shardMemoryMB = config.getInt("memstore.shard-memory-mb")
   private final val numGroups = config.getInt("memstore.groups-per-shard")
@@ -169,6 +191,7 @@ class TimeSeriesShard(dataset: Dataset, config: Config, shardNum: Int) extends S
       } else {
         val partition = keyMap.getOrElse(partKey, addPartition(partKey))
         partition.ingest(data, offset)
+        _offset = offset
       }
     }
     rowsIngested.increment(rows.length)
@@ -183,7 +206,37 @@ class TimeSeriesShard(dataset: Dataset, config: Config, shardNum: Int) extends S
 
   def numActivePartitions: Int = keyMap.size
 
+  def latestOffset: Long = _offset
+
   private final def group(partKey: SchemaRowReader): Int = Math.abs(partKey.hashCode % numGroups)
+
+  // Rapidly switch all of the input buffers for a particular group
+  // Preferably this is done in the same thread/stream as input records to avoid concurrency issues
+  // and ensure that all the partitions in a group are switched at the same watermark
+  def switchGroupBuffers(groupNum: Int): Unit = {
+    logger.debug(s"Switching write buffers for group $groupNum")
+    new PartitionIterator(partitionGroups(groupNum).intIterator).foreach(_.switchBuffers())
+  }
+
+  def createFlushTask(flushGroup: FlushGroup)(implicit sched: Scheduler): Task[Response] = {
+    // Given the flush group, create an observable of ChunkSets
+    val chunkSetIt = new PartitionIterator(partitionGroups(flushGroup.groupNum).intIterator)
+                       .map(_.makeFlushChunks())
+                       .flatten
+    val chunkSetStream = Observable.fromIterator(chunkSetIt)
+    logger.debug(s"Created flush ChunkSets stream for group ${flushGroup.groupNum}")
+
+    // Write the stream to the sink, checkpoint, mark buffers as eligible for cleanup
+    val taskFuture = for {
+      resp1 <- sink.write(dataset, chunkSetStream)
+      resp2 <- metastore.writeCheckpoint(dataset.ref, shardNum, flushGroup.groupNum, flushGroup.flushWatermark)
+      if resp1 == Success
+    } yield resp2 match {
+      case Success => Success
+      case e: ErrorResponse => throw FlushError(e)
+    }
+    Task.fromFuture(taskFuture)
+  }
 
   // Creates a new TimeSeriesPartition, updating indexes
   // NOTE: it's important to use an actual BinaryRecord instead of just a RowReader in the internal

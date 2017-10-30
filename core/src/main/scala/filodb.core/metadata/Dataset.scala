@@ -4,6 +4,7 @@ import scala.collection.JavaConverters._
 
 import com.typesafe.config.{Config, ConfigFactory, ConfigRenderOptions}
 import org.scalactic._
+
 import filodb.core._
 import filodb.core.binaryrecord.{BinaryRecord, RecordSchema}
 import filodb.memory.format.{FiloVector, RoutingRowReader, RowReader, SeqRowReader}
@@ -68,8 +69,8 @@ final case class Dataset(name: String,
   def rowKey(dataRowReader: RowReader): BinaryRecord =
     BinaryRecord(rowKeyBinSchema, RoutingRowReader(dataRowReader, rowKeyRouting))
 
-  import OptionSugar._
   import Accumulation._
+  import OptionSugar._
   /**
    * Returns the column IDs for the named columns or the missing column names
    */
@@ -86,7 +87,8 @@ final case class Dataset(name: String,
 
   /** Returns a compact String for easy serialization */
   def asCompactString: String =
-    Seq(name,
+      Seq(database.getOrElse(""),
+        name,
         partitionColumns.map(_.toString).mkString(":"),
         dataColumns.map(_.toString).mkString(":"),
         rowKeyIDs.mkString(":")).mkString("\u0001")
@@ -132,11 +134,12 @@ object Dataset {
    * Re-creates a Dataset from the output of `asCompactString`
    */
   def fromCompactString(compactStr: String): Dataset = {
-    val Array(name, partColStr, dataColStr, rowKeyIndices) = compactStr.split('\u0001')
+    val Array(database, name, partColStr, dataColStr, rowKeyIndices) = compactStr.split('\u0001')
     val partitionColumns = partColStr.split(':').toSeq.map(raw => DataColumn.fromString(raw))
     val dataColumns = dataColStr.split(':').toSeq.map(raw => DataColumn.fromString(raw))
     val rowKeyIDs = rowKeyIndices.split(':').toSeq.map(_.toInt)
-    Dataset(name, partitionColumns, dataColumns, rowKeyIDs)
+    val databaseOption = if (database == "") None else Some(database)
+    Dataset(name, partitionColumns, dataColumns, rowKeyIDs, databaseOption)
   }
 
   /**
@@ -176,6 +179,7 @@ object Dataset {
   case class BadSchemaError(badSchema: BadSchema) extends Exception(badSchema.toString)
 
   import OptionSugar._
+
   import Column.ColumnType._
 
   def validateMapColumn(partColumns: Seq[Column], dataColumns: Seq[Column]): Unit Or BadSchema = {

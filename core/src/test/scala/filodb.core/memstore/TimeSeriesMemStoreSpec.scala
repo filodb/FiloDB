@@ -1,24 +1,25 @@
 package filodb.core.memstore
 
+import com.typesafe.config.ConfigFactory
+import monix.execution.ExecutionModel.BatchedExecution
+import monix.reactive.Observable
+import org.scalatest.{BeforeAndAfter, FunSpec, Matchers}
+import org.scalatest.concurrent.ScalaFutures
+
 import filodb.core._
 import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.query.{AggregationFunction, ColumnFilter, Filter}
-import filodb.core.store.{FilteredPartitionScan, NullChunkSink, QuerySpec, SinglePartitionScan}
+import filodb.core.store.{FilteredPartitionScan, InMemoryMetaStore, NullChunkSink, QuerySpec, SinglePartitionScan}
 import filodb.memory.format.ZeroCopyUTF8String
 
-import com.typesafe.config.ConfigFactory
-import monix.reactive.Observable
-import org.scalatest.concurrent.ScalaFutures
-import org.scalatest.{BeforeAndAfter, FunSpec, Matchers}
-
 class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter with ScalaFutures {
+  import monix.execution.Scheduler.Implicits.global
+
   import MachineMetricsData._
   import ZeroCopyUTF8String._
 
-  import monix.execution.Scheduler.Implicits.global
-
   val config = ConfigFactory.load("application_test.conf").getConfig("filodb")
-  val memStore = new TimeSeriesMemStore(config, new NullChunkSink)
+  val memStore = new TimeSeriesMemStore(config, new NullChunkSink, new InMemoryMetaStore())
 
   after {
     memStore.reset()
@@ -32,6 +33,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
 
     memStore.numPartitions(dataset1.ref, 0) should equal (10)
     memStore.indexNames(dataset1.ref).toSeq should equal (Seq(("series", 0)))
+    memStore.latestOffset(dataset1.ref, 0) shouldEqual 19
 
     val minSet = data.map(_.data.getDouble(1)).toSet
     val split = memStore.getScanSplits(dataset1.ref, 1).head
@@ -135,16 +137,18 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     agg2.result should equal (Array(3 + 9 + 15))
   }
 
-  it("should ingestStream into multiple shards") {
+  it("should ingestStream into multiple shards and not flush with empty flush stream") {
     memStore.setup(dataset1, 0)
     memStore.setup(dataset1, 1)
     memStore.activeShards(dataset1.ref) should equal (Seq(0, 1))
 
     val stream = Observable.fromIterable(records(linearMultiSeries()).take(100).grouped(5).toSeq)
-    memStore.ingestStream(dataset1.ref, 0, stream)(ex => throw ex)
-    memStore.ingestStream(dataset1.ref, 1, stream)(ex => throw ex)
+    val fut1 = memStore.ingestStream(dataset1.ref, 0, stream, FlushStream.empty)(ex => throw ex)
+    val fut2 = memStore.ingestStream(dataset1.ref, 1, stream, FlushStream.empty)(ex => throw ex)
+    // Allow both futures to run first before waiting for completion
+    fut1.futureValue
+    fut2.futureValue
 
-    Thread sleep 1000
     val splits = memStore.getScanSplits(dataset1.ref, 1)
     val query = QuerySpec("min", AggregationFunction.Sum)
     val agg1 = memStore.aggregate(dataset1, query, FilteredPartitionScan(splits.head))
@@ -154,6 +158,8 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     val agg2 = memStore.aggregate(dataset1, query, FilteredPartitionScan(splits.last))
                        .get.runAsync.futureValue
     agg2.result should equal (Array((1 to 100).map(_.toDouble).sum))
+
+    memStore.sink.sinkStats.chunksetsWritten shouldEqual 0
   }
 
   it("should handle errors from ingestStream") {
@@ -162,13 +168,34 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
 
     val errStream = Observable.fromIterable(records(linearMultiSeries()).take(100).grouped(5).toSeq)
                               .endWithError(new NumberFormatException)
-    memStore.ingestStream(dataset1.ref, 0, errStream) { ex => err = ex }
+    val fut = memStore.ingestStream(dataset1.ref, 0, errStream) { ex => err = ex }
+    fut.futureValue
 
-    Thread sleep 500
     err shouldBe a[NumberFormatException]
   }
 
-  it("should ingest into multiple series and flush older chunks") (pending)
+  it("should ingestStream and flush on interval") {
+    memStore.setup(dataset1, 0)
+    memStore.sink.sinkStats.chunksetsWritten shouldEqual 0
+
+    // Flush every 50 records.
+    // NOTE: due to the batched ExecutionModel of fromIterable, it is hard to determine exactly when the FlushCommand
+    // gets mixed in.  The custom BatchedExecution reduces batch size and causes better interleaving though.
+    val stream = Observable.fromIterable(records(linearMultiSeries()).take(100).grouped(5).toSeq)
+                           .executeWithModel(BatchedExecution(5))
+    val flushStream = FlushStream.everyN(4, 50, stream)
+    memStore.ingestStream(dataset1.ref, 0, stream, flushStream)(ex => throw ex).futureValue
+
+    // Two flushes and 3 chunksets have been flushed
+    memStore.sink.sinkStats.chunksetsWritten shouldEqual 3
+
+    // Try reading - should be able to read optimized chunks too
+    val splits = memStore.getScanSplits(dataset1.ref, 1)
+    val query = QuerySpec("min", AggregationFunction.Sum)
+    val agg1 = memStore.aggregate(dataset1, query, FilteredPartitionScan(splits.head))
+                       .get.runAsync.futureValue
+    agg1.result should equal (Array((1 to 100).map(_.toDouble).sum))
+  }
 
   it("should truncate shards properly") {
     memStore.setup(dataset1, 0)

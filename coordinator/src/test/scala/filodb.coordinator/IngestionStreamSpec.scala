@@ -74,6 +74,8 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem)
     val config = ConfigFactory.parseString(s"""header = true
                                            batch-size = $rowsToRead
                                            resource = $resource
+                                           noflush = true
+                                           chunk-duration = 1 hour
                                            """)
 
     val ingestionSource = source.getOrElse(IngestionSource(classOf[CsvStreamFactory].getName, config))
@@ -103,8 +105,9 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem)
        ex shouldBe a[NumberFormatException]
    }
 
-    // Sending this will intentionally raise: java.lang.IllegalArgumentException: dataset gdelt / shard 0 not setup
-    // Note: this relies on the IngestionActor not disappearing after errors.
+    expectMsg(IngestionStopped(dataset33.ref, 0))
+
+    // NOTE: right now ingestion errors do not cause IngestionActor to disappear.  Should it?
     coordinatorActor ! GetIngestionStats(dataset33.ref)
     expectMsg(IngestionActor.IngestionStatus(50))
   }
@@ -118,10 +121,13 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem)
 
     val invalidShard = 10
     coordinatorActor ! StartShardIngestion(command.ref, invalidShard, None)
-    expectMsgPF(within) {
-      case IngestionError(_, shard, reason) => shard shouldEqual invalidShard
+    // We don't know exact order of IngestionStopped vs IngestionError
+    (0 to 1).foreach { n =>
+      expectMsgPF(within) {
+        case IngestionError(_, shard, reason) => shard shouldEqual invalidShard
+        case IngestionStopped(dataset6.ref, 0) =>
+      }
     }
-    expectNoMsg()
   }
 
   it("should start and stop cleanly") {
@@ -133,17 +139,21 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem)
     import akka.pattern.ask
     implicit val timeout: Timeout = cluster.settings.InitializationTimeout
 
+    // Wait for all messages to be ingested
+    expectMsg(IngestionStopped(command.ref, 0))
+
     val func = (coordinatorActor ? GetIngestionStats(command.ref)).mapTo[IngestionStatus]
     awaitCond(func.futureValue.rowsIngested == batchSize - 1)
-
-    coordinatorActor ! StopShardIngestion(command.ref, 0)
-    expectMsg(IngestionStopped(command.ref, 0))
   }
 
   it("should ingest all rows directly into MemStore") {
     // Also need a way to probably unregister datasets from NodeClusterActor.
     // this functionality already is built into the shard actor: shardActor ! RemoveSubscription(ref)
     setup(dataset33.ref, "/GDELT-sample-test.csv", rowsToRead = 5, None)
+
+    // Wait for all messages to be ingested
+    expectMsg(IngestionStopped(dataset33.ref, 0))
+
     coordinatorActor ! GetIngestionStats(DatasetRef(dataset33.name))
     expectMsg(IngestionActor.IngestionStatus(99))
   }
@@ -166,7 +176,7 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem)
 
     stream.routeToShards(shardMap, dataset6, protocolActor)
 
-    Thread sleep 1000 // time to accumulate 199 below
+    Thread sleep 2000 // time to accumulate 199 below
     coordinatorActor ! GetIngestionStats(dataset6.ref)
     expectMsg(IngestionActor.IngestionStatus(199))
   }

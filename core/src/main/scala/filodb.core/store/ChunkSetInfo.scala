@@ -15,9 +15,17 @@ import com.typesafe.scalalogging.StrictLogging
 import org.boon.primitive.{ByteBuf, InputByteArray}
 
 /**
- * A ChunkSet is the set of chunks for all columns, one per column, serialized from a set of rows.
- * ChunkSetInfo records common metadata about a ChunkSet.
- */
+  * A ChunkSet is the set of chunks for all columns, one per column, serialized from a set of rows.
+  * Chunk is the unit of encoded data that is stored in memory or in a column store.
+  *
+  * @param info      records common metadata about a ChunkSet
+  * @param partition the partition key for all the chunks in this ChunkSet
+  * @param skips
+  * @param chunks    each item in the Seq encodes a column's values in the chunk's dataset. First
+  *                  value in the tuple identifies the column, the second is a reference to the
+  *                  off-heap memory store where the contents of the chunks can be obtained
+  *
+  */
 case class ChunkSet(info: ChunkSetInfo,
                     partition: PartitionKey,
                     skips: Seq[ChunkRowSkipIndex],
@@ -39,6 +47,14 @@ object ChunkSet {
   }
 }
 
+/**
+  * Records metadata about a chunk set
+  *
+  * @param id       chunk id (usually a timeuuid)
+  * @param numRows  number of rows encoded by this chunkset
+  * @param firstKey first rowKey in the chunkset
+  * @param lastKey  last rowKey in the chunkset
+  */
 case class ChunkSetInfo(id: ChunkID,
                         numRows: Int,
                         firstKey: BinaryRecord,

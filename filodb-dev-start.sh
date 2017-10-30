@@ -11,7 +11,7 @@ function showHelp {
         echo "   -p selects a randomly available akka tcp and http port"
 }
 
-CONFIG=conf/timeseries-filodb-server-consul.conf
+CONFIG=conf/timeseries-filodb-server.conf
 LOG_SUFFIX=1
 SETUP_DATASET=NO
 AKKA_PORT_ARG=""

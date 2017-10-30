@@ -2,6 +2,8 @@ package filodb.kafka
 
 import java.lang.{Long => JLong}
 
+import filodb.core.store.InMemoryMetaStore
+
 import scala.concurrent.Await
 import scala.concurrent.duration._
 
@@ -24,7 +26,8 @@ import org.apache.kafka.clients.producer.ProducerRecord
 /** 1. Start Zookeeper
   * 2. Start Kafka (tested with Kafka 0.10.2.1 and 0.11)
   * 3. Create a new topic
-  *   ./bin/kafka-topics.sh --create --zookeeper localhost:2181 --replication-factor 1 --partitions 2 --topic integration-test-topic
+  *   ./bin/kafka-topics.sh --create --zookeeper localhost:2181 --replication-factor 1 \
+  *              --partitions 2 --topic integration-test-topic
   *    Make sure the configured settings for number of partitions and topic name below match what you created.
   * 4. Run test either from Intellij or SBT:
   *    > kafka/it:testOnly filodb.kafka.KafkaIngestionStreamSuite
@@ -60,7 +63,9 @@ class KafkaIngestionStreamSuite extends ConfigSpec with StrictLogging {
 
       // coordinator:
       val ctor = Class.forName(ds.source.streamFactoryClass).getConstructors.head
-      val memStore = new TimeSeriesMemStore(globalConfig.getConfig("filodb"), new NullChunkSink)
+      val memStore = new TimeSeriesMemStore(globalConfig.getConfig("filodb"),
+                                            new NullChunkSink,
+                                            new InMemoryMetaStore())
       memStore.setup(dataset, 0)
       memStore.reset()
 
@@ -89,7 +94,9 @@ class KafkaIngestionStreamSuite extends ConfigSpec with StrictLogging {
         // now start producers
         // The producer task creates `count` ProducerRecords, each range divided equally between the topic's partitions
         val sinkT = Observable.range(0, count)
-          .map(msg => new ProducerRecord[JLong, String](settings.IngestionTopic, JLong.valueOf(partition), msg.toString))
+          .map(msg => new ProducerRecord[JLong, String](settings.IngestionTopic,
+                                                        JLong.valueOf(partition),
+                                                        msg.toString))
           .bufferIntrospective(1024)
           .consumeWith(producer)
 

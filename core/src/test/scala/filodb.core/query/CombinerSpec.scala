@@ -1,22 +1,22 @@
 package filodb.core.query
 
+import com.typesafe.config.ConfigFactory
+import monix.reactive.Observable
+import org.scalatest.{BeforeAndAfter, FunSpec, Matchers}
+import org.scalatest.concurrent.ScalaFutures
+
 import filodb.core._
 import filodb.core.memstore.TimeSeriesMemStore
 import filodb.core.metadata._
-import filodb.core.store.{FilteredPartitionScan, NullChunkSink, QuerySpec, RowKeyChunkScan}
-
-import com.typesafe.config.ConfigFactory
-import monix.reactive.Observable
-import org.scalatest.concurrent.ScalaFutures
-import org.scalatest.{BeforeAndAfter, FunSpec, Matchers}
+import filodb.core.store.{FilteredPartitionScan, InMemoryMetaStore, NullChunkSink, QuerySpec, RowKeyChunkScan}
 
 class CombinerSpec extends FunSpec with Matchers with BeforeAndAfter with ScalaFutures {
-  import MachineMetricsData._
-
   import monix.execution.Scheduler.Implicits.global
 
+  import MachineMetricsData._
+
   val config = ConfigFactory.load("application_test.conf").getConfig("filodb")
-  val memStore = new TimeSeriesMemStore(config, new NullChunkSink)
+  val memStore = new TimeSeriesMemStore(config, new NullChunkSink, new InMemoryMetaStore())
 
   after {
     memStore.reset()

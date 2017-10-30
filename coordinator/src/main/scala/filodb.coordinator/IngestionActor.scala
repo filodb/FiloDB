@@ -1,20 +1,21 @@
 package filodb.coordinator
 
 import scala.collection.mutable.HashMap
+import scala.concurrent.duration._
 import scala.util.control.NonFatal
 import scala.util.Try
 
 import akka.actor.{ActorRef, Props}
 import akka.event.LoggingReceive
-import monix.execution.{Cancelable, Scheduler}
-import monix.eval.Task
+import monix.execution.{CancelableFuture, Scheduler}
+import monix.reactive.Observable
+import net.ceedubs.ficus.Ficus._
 
 import filodb.core.memstore._
 import filodb.core.metadata.Dataset
 import filodb.core.DatasetRef
 
 object IngestionActor {
-
   final case class IngestRows(ackTo: ActorRef, shard: Int, records: Seq[IngestRecord])
 
   case object GetStatus
@@ -44,8 +45,13 @@ private[filodb] final class IngestionActor(dataset: Dataset,
 
   import IngestionActor._
 
-  final val streamSubscriptions = new HashMap[Int, Cancelable]
+  final val streamSubscriptions = new HashMap[Int, CancelableFuture[Unit]]
   final val streams = new HashMap[Int, IngestionStream]
+
+  // Params for creating the default memStore flush scheduler
+  // TODO: eventually make the flush scheduler pluggable based on the source config
+  private final val chunkDuration = source.config.as[Option[FiniteDuration]]("chunk-duration")
+                                                 .map(_ / 1000).getOrElse(1.hour)
 
   // TODO: add and remove per-shard ingestion sources?
   // For now just start it up one time and kill the actor if it fails
@@ -88,17 +94,26 @@ private[filodb] final class IngestionActor(dataset: Dataset,
         val stream = ingestionStream.get
         shardActor ! IngestionStarted(dataset.ref, e.shard, context.parent)
 
-        stream
-          .doOnCompleteEval(Task.eval(shardActor ! IngestionStopped(dataset.ref, e.shard)))
-          .onErrorRecover { case NonFatal(ex) => handleError(dataset.ref, e.shard, ex) }
-
-        streamSubscriptions(e.shard) = memStore.ingestStream(dataset.ref, e.shard, stream) {
+        streamSubscriptions(e.shard) = memStore.ingestStream(dataset.ref, e.shard, stream, flushStream()) {
           ex => handleError(dataset.ref, e.shard, ex)
+        }
+        // On completion of the future, send IngestionStopped
+        // except for noOpSource, which would stop right away, and is used for sending in tons of data
+        streamSubscriptions(e.shard).foreach { x =>
+          if (source != NodeClusterActor.noOpSource) shardActor ! IngestionStopped(dataset.ref, e.shard)
         }
       } recover { case NonFatal(t) =>
         handleError(e.ref, e.shard, t)
       }
     }
+
+  private def flushStream(): Observable[FlushCommand] = {
+    if (source.config.as[Option[Boolean]]("noflush").getOrElse(false)) {
+      FlushStream.empty
+    } else {
+      FlushStream.interval(memStore.numGroups, chunkDuration / memStore.numGroups)
+    }
+  }
 
   /** [[filodb.coordinator.IngestionStreamFactory.create]] can raise IllegalArgumentException
     * if the shard is not 0. This will notify versus throw so the sender can handle the

@@ -401,7 +401,8 @@ lazy val jvmPerTestSettings = {
 
 // NOTE: The -Xms1g and using RemoteActorRefProvider (no Cluster startup) both help CLI startup times
 lazy val shellScript = """#!/bin/bash
-allprops="-Dakka.actor.provider=akka.remote.RemoteActorRefProvider"
+# ClusterActorRefProvider by default. Enable this line if needed for some of the commands
+# allprops="-Dakka.actor.provider=akka.remote.RemoteActorRefProvider"
 while [ "${1:0:2}" = "-D" ]
 do
   allprops="$allprops $1"

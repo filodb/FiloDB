@@ -27,6 +27,7 @@ dataset = "example"
 # e.g. one shard per kafka partition
 numshards = 100
 min-num-nodes = 5
+chunk-duration = 1 hour
 sourcefactory = "filodb.kafka.KafkaIngestionStreamFactory"
 sourceconfig {
   filo-topic-name = "topics.topic1"

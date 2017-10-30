@@ -20,16 +20,18 @@ sealed class CheckpointTable(val config: Config, val sessionProvider: FiloSessio
 
   val createCql =
     s"""CREATE TABLE IF NOT EXISTS $tableString (
+       | databasename text,
        | datasetname text,
        | shardnum int,
        | groupnum int,
        | offset bigint,
-       | PRIMARY KEY ((datasetname, shardNum), groupNum)
+       | PRIMARY KEY ((databasename, datasetname, shardNum), groupNum)
        |)""".stripMargin
 
   lazy val readCheckpointCql = {
     val statement = session.prepare(
       s"""SELECT groupnum, offset FROM $tableString WHERE
+         | databasename = ? AND
          | datasetname = ? AND
          | shardnum = ? """.stripMargin)
     statement.setConsistencyLevel(ConsistencyLevel.QUORUM) // we want consistent reads during recovery
@@ -38,8 +40,8 @@ sealed class CheckpointTable(val config: Config, val sessionProvider: FiloSessio
 
   lazy val writeCheckpointCql = {
     val statement = session.prepare(
-      s"""INSERT INTO $tableString (datasetname, shardnum, groupnum, offset)
-         | VALUES (?, ?, ?, ?)""".stripMargin
+      s"""INSERT INTO $tableString (databasename, datasetname, shardnum, groupnum, offset)
+         | VALUES (?, ?, ?, ?, ?)""".stripMargin
     )
     statement.setConsistencyLevel(ConsistencyLevel.ONE) // we want fast writes during ingestion
     statement
@@ -53,12 +55,14 @@ sealed class CheckpointTable(val config: Config, val sessionProvider: FiloSessio
   def clearAll(): Future[Response] = execCql(s"TRUNCATE $tableString")
 
   def writeCheckpoint(dataset: DatasetRef, shardNum: Int, groupNum: Int, offset: Long): Future[Response] = {
-    execStmt(writeCheckpointCql.bind(dataset.dataset, Int.box(shardNum), Int.box(groupNum), Long.box(offset)))
+    // TODO database name should not be an optional in internally since there is a default value. Punted for later.
+    execStmt(writeCheckpointCql.bind(dataset.database.getOrElse(""),
+      dataset.dataset, Int.box(shardNum), Int.box(groupNum), Long.box(offset)))
   }
 
-
   def readCheckpoints(dataset: DatasetRef, shardNum: Int): Future[Map[Int,Long]] = {
-    session.executeAsync(readCheckpointCql.bind(dataset.dataset, Int.box(shardNum)))
+    session.executeAsync(readCheckpointCql.bind(dataset.database.getOrElse(""),
+            dataset.dataset, Int.box(shardNum)))
       .toIterator // future of Iterator
       .map { it => it.map(r => r.getInt(0) -> r.getLong(1)).toMap }
   }

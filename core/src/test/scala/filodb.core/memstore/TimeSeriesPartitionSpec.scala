@@ -45,7 +45,7 @@ class TimeSeriesPartitionSpec extends FunSpec with Matchers with ScalaFutures {
     part.switchBuffers()
     bufferPool.poolSize shouldEqual (origPoolSize - 1)
 
-    val flushFut = Future(part.flush())
+    val flushFut = Future(part.makeFlushChunks())
     data.drop(10).zipWithIndex.foreach { case (r, i) => part.ingest(r, 1100L + i) }
     val chunkSetOpt = flushFut.futureValue
 
@@ -98,14 +98,14 @@ class TimeSeriesPartitionSpec extends FunSpec with Matchers with ScalaFutures {
 
     // Now, switch buffers and flush.  Now we have two chunks
     part.switchBuffers()
-    part.flush().isDefined shouldEqual true
+    part.makeFlushChunks().isDefined shouldEqual true
     part.numChunks shouldEqual 2
     part.latestChunkLen shouldEqual 0
 
     // Now, switch buffers again without ingesting more data.  Clearly there are no rows, no switch, and no flush.
     part.switchBuffers()
     part.numChunks shouldEqual 2
-    part.flush() shouldEqual None
+    part.makeFlushChunks() shouldEqual None
 
     val minData = data.map(_.getDouble(1))
     val chunk1 = part.readers(LastSampleChunkScan, Array(1)).toSeq.head

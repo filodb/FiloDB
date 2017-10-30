@@ -3,17 +3,18 @@ package filodb.jmh
 import ch.qos.logback.classic.{Level, Logger}
 import com.typesafe.config.ConfigFactory
 import java.util.concurrent.TimeUnit
+
 import org.openjdk.jmh.annotations.Benchmark
 import org.openjdk.jmh.annotations.BenchmarkMode
 import org.openjdk.jmh.annotations.OutputTimeUnit
-import org.openjdk.jmh.annotations.{Mode, State, Scope}
+import org.openjdk.jmh.annotations.{Mode, Scope, State}
 import scala.concurrent.Await
 import scala.concurrent.duration._
 
 import filodb.core._
 import filodb.core.memstore.TimeSeriesMemStore
 import filodb.core.query._
-import filodb.core.store.{FilteredPartitionScan, QuerySpec, RowKeyChunkScan, NullChunkSink}
+import filodb.core.store.{FilteredPartitionScan, InMemoryMetaStore, NullChunkSink, QuerySpec, RowKeyChunkScan}
 
 /**
  * Microbenchmark involving TimeSeriesMemStore aggregation using TimeGroupingAggregate
@@ -29,7 +30,7 @@ class AggregationBenchmark {
   val config = ConfigFactory.parseString("filodb.memstore.max-chunks-size = 1000")
                             .withFallback(ConfigFactory.load("application_test.conf"))
                             .getConfig("filodb")
-  val memStore = new TimeSeriesMemStore(config, new NullChunkSink)
+  val memStore = new TimeSeriesMemStore(config, new NullChunkSink, new InMemoryMetaStore())
   val startTs = 1000000L
   val numPoints = 10000
   val endTs   = startTs + 1000 * numPoints

@@ -33,7 +33,6 @@ trait DatasetOps extends ClientBase with StrictLogging {
   /**
    * Truncates the data for the given dataset, including all the data in the memstore and on disk.
    * @param dataset the dataset to truncate
-   * @param version the version to truncate
    */
   def truncateDataset(dataset: DatasetRef,
                       timeout: FiniteDuration = 30.seconds): Unit = {

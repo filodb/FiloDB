@@ -1,14 +1,24 @@
 package filodb.core.memstore
 
-import filodb.core.DatasetRef
-import filodb.core.metadata.{Column, Dataset}
-import filodb.core.store.{ChunkSource, ChunkSink}
-import filodb.memory.format.{vectors => bv, _}
-
 import monix.execution.{CancelableFuture, Scheduler}
 import monix.reactive.Observable
 
+import filodb.core.{DatasetRef, ErrorResponse}
+import filodb.core.metadata.{Column, Dataset}
+import filodb.core.store.{ChunkSink, ChunkSource}
+import filodb.memory.format.{vectors => bv, _}
+
 case object ShardAlreadySetup extends Exception
+final case class DatasetAlreadySetup(dataset: DatasetRef) extends Exception(s"Dataset $dataset already setup")
+
+sealed trait DataOrCommand
+final case class SomeData(records: Seq[IngestRecord]) extends DataOrCommand
+final case class FlushCommand(groupNum: Int) extends DataOrCommand
+
+final case class FlushGroup(shard: Int, groupNum: Int, flushWatermark: Long)
+
+final case class FlushError(err: ErrorResponse) extends Exception(s"Flush error $err")
+
 
 /**
  * A MemStore is an in-memory ChunkSource that ingests data not in chunks but as new records, potentially
@@ -45,6 +55,8 @@ trait MemStore extends ChunkSource {
    * Sets up a shard of a dataset to continuously ingest new sets of records from a stream.
    * The records are immediately available for reads from that shard of the memstore.
    * Errors during ingestion are handled by the errHandler.
+   * Flushes to the ChunkSink are initiated by a potentially independent stream, the flushStream, which emits
+   *   flush events of a specific subgroup of a shard.
    * NOTE: does not check that existing streams are not already writing to this store.  That needs to be
    * handled by an upper layer.  Multiple stream ingestion is not guaranteed to be thread safe, a single
    * stream is safe for now.
@@ -52,10 +64,15 @@ trait MemStore extends ChunkSource {
    * @param dataset the dataset to ingest into
    * @param shard shard number to ingest into
    * @param stream the stream of new records, with schema conforming to that used in setup()
+   * @param flushStream the stream of FlushCommands for regular flushing of chunks to ChunkSink
    * @param errHandler this is called when an ingestion error occurs
    * @return a CancelableFuture for cancelling the stream subscription, which should be done on teardown
+   *        the Future completes when both stream and flushStream ends.  It is up to the caller to ensure this.
    */
-  def ingestStream(dataset: DatasetRef, shard: Int, stream: Observable[Seq[IngestRecord]])
+  def ingestStream(dataset: DatasetRef,
+                   shard: Int,
+                   stream: Observable[Seq[IngestRecord]],
+                   flushStream: Observable[FlushCommand] = FlushStream.empty)
                   (errHandler: Throwable => Unit)
                   (implicit sched: Scheduler): CancelableFuture[Unit]
 
@@ -84,6 +101,16 @@ trait MemStore extends ChunkSource {
 
   def numRowsIngested(dataset: DatasetRef): Long =
     activeShards(dataset).map(s => numRowsIngested(dataset, s)).sum
+
+  /**
+   * Number of ingestion subgroups per shard
+   */
+  def numGroups: Int
+
+  /**
+   * Returns the latest offset of a given shard
+   */
+  def latestOffset(dataset: DatasetRef, shard: Int): Long
 
   /**
    * The active shards for a given dataset

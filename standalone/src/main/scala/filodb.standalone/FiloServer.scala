@@ -67,9 +67,9 @@ object FiloServer extends FilodbClusterNode with StrictLogging {
       cluster.clusterSingletonProxy(roleName, withManager = true)
       cluster._isInitialized.set(true)
 
-      settings.DatasetDefinitions.foreach { case (datasetName, datasetConf) =>
-        createDatasetFromConfig(datasetName, datasetConf)
-      }
+//      settings.DatasetDefinitions.foreach { case (datasetName, datasetConf) =>
+//        createDatasetFromConfig(datasetName, datasetConf)
+//      }
     } catch {
       // if there is an error in the initialization, we need to fail fast so that the process can be rescheduled
       case NonFatal(e) =>

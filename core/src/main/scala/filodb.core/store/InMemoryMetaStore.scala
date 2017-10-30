@@ -57,7 +57,7 @@ class InMemoryMetaStore(implicit val ec: ExecutionContext) extends MetaStore wit
   def shutdown(): Unit = {}
 
   override def writeCheckpoint(dataset: DatasetRef, shardNum: Int, groupNum: Int, offset: Long): Future[Response] = {
-    throw new UnsupportedOperationException
+    Future.successful(Success)
   }
 
   override def readEarliestCheckpoint(dataset: DatasetRef, shardNum: Int): Future[Long] = {

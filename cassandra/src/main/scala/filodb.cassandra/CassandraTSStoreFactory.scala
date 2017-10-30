@@ -17,6 +17,6 @@ import filodb.core.memstore.TimeSeriesMemStore
  */
 class CassandraTSStoreFactory(config: Config, sched: Scheduler) extends StoreFactory {
   val colStore = new CassandraColumnStore(config, sched)(sched)
-  val memStore = new TimeSeriesMemStore(config, colStore)(sched)
-  val metaStore = new CassandraMetaStore(config)(sched)
+  val metaStore = new CassandraMetaStore(config.getConfig("cassandra"))(sched)
+  val memStore = new TimeSeriesMemStore(config, colStore, metaStore)(sched)
 }

@@ -59,6 +59,7 @@ class ChunkSinkStats {
   private val indexBytesHist     = Kamon.metrics.histogram("index-bytes-per-call")
 
   private val chunksetWrites     = Kamon.metrics.counter("chunkset-writes")
+  var chunksetsWritten = 0
 
   def addChunkWriteStats(numChunks: Int, totalChunkBytes: Long): Unit = {
     numChunkWriteCalls.increment
@@ -71,7 +72,10 @@ class ChunkSinkStats {
     indexBytesHist.record(totalIndexBytes)
   }
 
-  def chunksetWrite(): Unit = { chunksetWrites.increment }
+  def chunksetWrite(): Unit = {
+    chunksetWrites.increment
+    chunksetsWritten += 1
+  }
 }
 
 /**
@@ -85,7 +89,8 @@ class NullChunkSink(implicit sched: Scheduler) extends ChunkSink with StrictLogg
       val totalBytes = chunkset.chunks.map(_._2.limit).sum
       sinkStats.addChunkWriteStats(chunkset.chunks.length, totalBytes)
       sinkStats.chunksetWrite()
-      logger.debug(s"NullChunkSink: ${chunkset.info}  ${chunkset.chunks.length} chunks with $totalBytes bytes")
+      logger.debug(s"NullChunkSink: [${chunkset.partition}] ${chunkset.info}  ${chunkset.chunks.length} " +
+                   s"chunks with $totalBytes bytes")
     }
     Future.successful(Success)
   }

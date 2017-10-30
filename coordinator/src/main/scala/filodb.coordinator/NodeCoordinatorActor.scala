@@ -43,11 +43,12 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
                                                  memStore: MemStore,
                                                  selfAddress: Address,
                                                  config: Config) extends NamingAwareBaseActor {
-  import NodeCoordinatorActor._
-  import NodeClusterActor._
+  import context.dispatcher
+
   import DatasetCommands._
   import IngestionCommands._
-  import context.dispatcher
+  import NodeClusterActor._
+  import NodeCoordinatorActor._
 
   val settings = new FilodbSettings(config)
   val ingesters = new HashMap[DatasetRef, ActorRef]
@@ -73,7 +74,10 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
 
   private def createDataset(originator: ActorRef,
                             datasetObj: Dataset): Unit = {
-    (for { resp1 <- metaStore.newDataset(datasetObj) if resp1 == Success }
+    (for {
+      resp1 <- metaStore.newDataset(datasetObj) if resp1 == Success
+      resp2 <- memStore.sink.initialize(datasetObj.ref) if resp2 == Success
+    }
     yield {
       originator ! DatasetCreated
     }).recover {

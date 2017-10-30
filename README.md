@@ -158,14 +158,26 @@ Create a new Kafka topic with 4 partitions. This is where time series data will 
 kafka-topics --create --zookeeper localhost:2181 --replication-factor 1 --partitions 4 --topic timeseries-dev
 ```
 
+Download and start Cassandra 2.1.
+
+```
+bin/cassandra
+```
+
 Build the required projects
 ```
 sbt standalone/assembly cli/assembly tsgenerator/assembly
 ```
+First set up the dataset. This should create the keyspaces and tables in Cassandra. 
+```
+./filo-cli -Dconfig.file=conf/timeseries-filodb-server.conf  --command init
+./filo-cli -Dconfig.file=conf/timeseries-filodb-server.conf  --command create --dataset timeseries --dataColumns timestamp:long,value:double --partitionColumns tags:map
+```
+Verify that tables were created in `filodb` and `filodb-admin` keyspaces.
 
 The script below brings up the FiloDB Dev Standalone server, and then sets up the timeseries dataset
 ```
-./filodb-dev-start.sh
+./filodb-dev-start.sh -s
 ```
 You can now tail the server logs. If you'd like to direct the logs to a specific folder, you can set the LOG_DIR environment variable. 
 ```
@@ -178,13 +190,15 @@ Now run the time series generator. This will ingest 10000 samples into the Kafka
 java -cp tsgenerator/target/scala-2.11/tsgenerator-*.telemetry-SNAPSHOT filodb.timeseries.TestTimeseriesProducer 10000
 ```
 
-At this point, you should be able to confirm such a message in the server logs: `KAMON counter name=memstore-rows-ingested count=10000`
+At this point, you should be able to confirm such a message in the server logs: `KAMON counter name=memstore-rows-ingested count=4999`
 
 Now you are ready to query FiloDB for the ingested data. The following command should return matching subset of the data that was ingested by the producer.
 
 ```
 ./filo-cli '-Dakka.remote.netty.tcp.hostname=127.0.0.1' --host 127.0.0.1 --dataset timeseries --promql 'heap_usage{host="H1"}'
 ```
+
+You can also look at Cassandra to check for persisted data. Look at the tables in `filodb` and `filodb-admin` keyspaces.
 
 To stop the dev server. Note that this will stop all the FiloDB servers if multiple are running.
 ```
@@ -211,16 +225,17 @@ Then run consul consul agent in dev mode:
 ```
 consul agent -dev -config-dir=/usr/local/etc/consul/config/
 ```
+Perform the filo-cli `init` and `create` steps as before.
 
-Start first server with
+Start first FiloDB server 
 ```
 ./filodb-dev-start.sh -c conf/timeseries-filodb-server-consul.conf -l 1
 ```
-And subsequent servers with:
+And subsequent FiloDB servers. Change log file suffix with the `-l` option for each server. Add the `-s` option to 
+the last server, so data setup is initiated after all servers come up.
 ```
 ./filodb-dev-start.sh -c conf/timeseries-filodb-server-consul.conf -l 2 -p -s
 ```
-Enable the -s option for the last dataset. It sets up the timeseries dataset.
 
 ## Introduction to FiloDB Data Modelling
 

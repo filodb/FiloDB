@@ -1,9 +1,10 @@
 package filodb.cassandra.metastore
 
+import scala.concurrent.{ExecutionContext, Future}
+
 import com.datastax.driver.core.Row
 import com.typesafe.config.Config
 
-import scala.concurrent.{ExecutionContext, Future}
 import filodb.cassandra.{FiloCassandraConnector, FiloSessionProvider}
 import filodb.core.metadata.{Dataset, DatasetOptions}
 
@@ -31,7 +32,7 @@ sealed class DatasetTable(val config: Config, val sessionProvider: FiloSessionPr
 
   def fromRow(row: Row): Dataset =
     Dataset.fromCompactString(row.getString("datasetstring"))
-           .copy(database = Some(row.getString("database")),
+           .copy(database = Option(row.getString("database")).filter(_.length > 0),
                  options = DatasetOptions.fromString(row.getString("options")))
 
   def initialize(): Future[Response] = execCql(createCql)
@@ -45,7 +46,7 @@ sealed class DatasetTable(val config: Config, val sessionProvider: FiloSessionPr
 
   def createNewDataset(dataset: Dataset): Future[Response] =
     execStmt(datasetInsertCql.bind(dataset.name,
-                                   dataset.database.getOrElse(defaultKeySpace),
+                                   dataset.database.getOrElse(""),
                                    dataset.asCompactString,
                                    dataset.options.toString
                                   ), AlreadyExists)
@@ -55,7 +56,7 @@ sealed class DatasetTable(val config: Config, val sessionProvider: FiloSessionPr
 
   def getDataset(dataset: DatasetRef): Future[Dataset] =
     session.executeAsync(datasetSelectCql.bind(
-                         dataset.dataset, dataset.database.getOrElse(defaultKeySpace)))
+                         dataset.dataset, dataset.database.getOrElse("")))
            .toOne
            .map { _.map(fromRow).getOrElse(throw NotFoundError(s"Dataset $dataset")) }
 
@@ -72,5 +73,5 @@ sealed class DatasetTable(val config: Config, val sessionProvider: FiloSessionPr
   // NOTE: CQL does not return any error if you DELETE FROM datasets WHERE name = ...
   def deleteDataset(dataset: DatasetRef): Future[Response] =
     execCql(s"DELETE FROM $tableString WHERE name = '${dataset.dataset}' AND " +
-            s"database = '${dataset.database.getOrElse(defaultKeySpace)}'")
+            s"database = '${dataset.database.getOrElse("")}'")
 }
