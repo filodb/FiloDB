@@ -4,6 +4,14 @@ import scala.collection.mutable.{ArrayBuffer, HashMap}
 import scala.concurrent.ExecutionContext
 import scala.concurrent.duration._
 
+import filodb.core.Types.PartitionKey
+import filodb.core.metadata.Dataset
+import filodb.core.query.PartitionKeyIndex
+import filodb.core.store._
+import filodb.core.{DatasetRef, ErrorResponse, Response, Success}
+import filodb.memory.format.{SchemaRowReader, ZeroCopyUTF8String}
+import filodb.memory.{BlockHolder, BlockManager, NativeMemoryManager, PageAlignedBlockManager}
+
 import com.googlecode.javaewah.{EWAHCompressedBitmap, IntIterator}
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
@@ -13,15 +21,6 @@ import monix.eval.Task
 import monix.execution.{CancelableFuture, Scheduler}
 import monix.reactive.Observable
 import org.jctools.maps.NonBlockingHashMapLong
-
-import filodb.core.{DatasetRef, ErrorResponse, Response, Success}
-import filodb.core.Types.PartitionKey
-import filodb.core.metadata.Dataset
-import filodb.core.query.PartitionKeyIndex
-import filodb.core.store._
-import filodb.memory.{BlockHolder, BlockManager}
-import filodb.memory.format.{SchemaRowReader, ZeroCopyUTF8String}
-import filodb.memory.impl.PageAlignedBlockManager
 
 class TimeSeriesMemStore(config: Config, val sink: ChunkSink, val metastore: MetaStore)
                         (implicit val ec: ExecutionContext)
@@ -170,7 +169,8 @@ class TimeSeriesShard(dataset: Dataset, config: Config, val shardNum: Int, sink:
 
   private val blockStore = new PageAlignedBlockManager(shardMemoryMB * 1024 * 1024)
   protected implicit val blockHolder = new BlockHolder(blockStore, BlockManager.reclaimAnyPolicy)
-  private val bufferPool = new WriteBufferPool(dataset, maxChunksSize / 8, maxNumPartitions)
+  protected val bufferMemoryManager = new NativeMemoryManager(maxChunksSize * 8 * maxNumPartitions)
+  private val bufferPool = new WriteBufferPool(bufferMemoryManager, dataset, maxChunksSize / 8, maxNumPartitions)
 
   private final val partitionGroups = Array.fill(numGroups)(new EWAHCompressedBitmap)
   // The offset up to and including the last record in this group to be successfully persisted

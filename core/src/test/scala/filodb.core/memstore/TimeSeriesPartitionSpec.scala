@@ -4,11 +4,10 @@ import scala.concurrent.Future
 
 import filodb.core._
 import filodb.core.store._
-import filodb.memory.impl.PageAlignedBlockManager
-import filodb.memory.{BlockHolder, BlockManager}
+import filodb.memory.{BlockHolder, BlockManager, NativeMemoryManager, PageAlignedBlockManager}
 
 import org.scalatest.concurrent.ScalaFutures
-import org.scalatest.time.{Millis, Span, Seconds}
+import org.scalatest.time.{Millis, Seconds, Span}
 import org.scalatest.{FunSpec, Matchers}
 
 class TimeSeriesPartitionSpec extends FunSpec with Matchers with ScalaFutures {
@@ -19,8 +18,8 @@ class TimeSeriesPartitionSpec extends FunSpec with Matchers with ScalaFutures {
   import monix.execution.Scheduler.Implicits.global
   private val blockStore = new PageAlignedBlockManager(100 * 1024 * 1024)
   protected implicit val blockHolder = new BlockHolder(blockStore,BlockManager.reclaimAnyPolicy)
-
-  private val bufferPool = new WriteBufferPool(dataset, 10, 50)
+  val memFactory = new NativeMemoryManager(10 * 1024 * 1024)
+  private val bufferPool = new WriteBufferPool(memFactory, dataset, 10, 50)
 
   it("should be able to read immediately after ingesting rows") {
     val part = new TimeSeriesPartition(dataset, defaultPartKey, 0, bufferPool)

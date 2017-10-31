@@ -3,11 +3,9 @@ package filodb.memory.format
 import java.nio.ByteBuffer
 
 import com.kenai.jffi.MemoryIO
-import filodb.memory.impl.NativeMemoryManager
 
 object UnsafeUtils {
   val unsafe = scala.concurrent.util.Unsafe.instance
-  val memoryManager = new NativeMemoryManager(100 * 1024 * 1024)
 
   // scalastyle:off
   val ZeroPointer: Any = null
@@ -29,25 +27,8 @@ object UnsafeUtils {
   }
   // scalastyle:on
 
-  /**
-   * Allocates off-heap (OS / malloc) memory.  This is not direct memory, this is really off-heap.
-   * The memory needs to be manually tracked and freed using freeOffheap.
-   * @param numBytes the number of bytes to allocate
-   * @param initialize if true, zero out the memory first
-   * @return a Long (64-bit) address or raw pointer to the memory.
-   */
-  def allocOffheap(numBytes: Int, initialize: Boolean = false): Long =
-    memoryManager.allocateMemory(numBytes)
-
-  def freeOffheap(addr: Long): Unit = memoryManager.freeMemory(addr)
-
-  def getAddress(buf: ByteBuffer): Long = {
-    assert(buf.isDirect)
-    MemoryIO.getCheckedInstance.getDirectBufferAddress(buf)
-  }
-
-  def copy(srcOffset: Long, destOffset: Long, numBytes: Int): Unit = {
-    MemoryIO.getCheckedInstance.copyMemory(srcOffset, destOffset, numBytes)
+  def asDirectBuffer(address: Long, size: Int): ByteBuffer = {
+    MemoryIO.getCheckedInstance.newDirectByteBuffer(address,size)
   }
 
   /**

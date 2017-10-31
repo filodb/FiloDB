@@ -1,5 +1,6 @@
 package filodb.memory.format.vectors
 
+import filodb.memory.MemFactory
 import filodb.memory.format.{BinaryAppendableVector, BinaryVector, UnsafeUtils, WireFormat}
 
 object ConstVector {
@@ -10,8 +11,8 @@ object ConstVector {
    * @param fillBytes a function to fill out bytes at given base and offset
    * @return the (base, offset, numBytes) for the ConstVector
    */
-  def make(len: Int, neededBytes: Int)(fillBytes: (Any, Long) => Unit): (Any, Long, Int) = {
-    val (base, off, nBytes) = BinaryVector.allocWithMagicHeader(4 + neededBytes)
+  def make(memFactory: MemFactory,len: Int, neededBytes: Int)(fillBytes: (Any, Long) => Unit): (Any, Long, Int) = {
+    val (base, off, nBytes) = memFactory.allocateWithMagicHeader(4 + neededBytes)
     UnsafeUtils.setInt(base, off, len)
     fillBytes(base, off + 4)
     (base, off, nBytes)
@@ -65,8 +66,8 @@ extends BinaryAppendableVector[A] with ConstVectorType {
   val maybeNAs = false
   override def frozenSize: Int = 4 + neededBytes
   final def reset(): Unit = { len = 0 }
-  override def optimize(hint: EncodingHint = AutoDetect): BinaryVector[A] = {
-    val (b, o, l) = ConstVector.make(len, neededBytes)(fillBytes)
+  override def optimize(memFactory: MemFactory, hint: EncodingHint = AutoDetect): BinaryVector[A] = {
+    val (b, o, l) = ConstVector.make(memFactory, len, neededBytes)(fillBytes)
     finishCompaction(b, o)
   }
 }

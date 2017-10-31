@@ -4,9 +4,10 @@ import java.nio.ByteBuffer
 
 import filodb.memory.format.Encodings.{AutoDetect, EncodingHint}
 import filodb.memory.format.vectors._
-
 import scalaxy.loops._
 import scala.language.existentials
+
+import filodb.memory.MemFactory
 
 
 case class VectorInfo(name: String, dataType: Class[_])
@@ -47,20 +48,20 @@ object RowToVectorBuilder {
   *
   * TODO: Add stats about # of rows, chunks/buffers encoded, bytes encoded, # NA's etc.
   */
-class RowToVectorBuilder(schema: Seq[VectorInfo]) {
+class RowToVectorBuilder(schema: Seq[VectorInfo], memFactory: MemFactory = MemFactory.onHeapFactory) {
   val maxElements = 1000
   val builders = schema.zipWithIndex.map {
     case (VectorInfo(_, dataType),index)=> dataType match {
       case Classes.Int      =>
-        new IntReaderAppender(IntBinaryVector.appendingVector(maxElements),index)
+        new IntReaderAppender(IntBinaryVector.appendingVector(memFactory, maxElements),index)
       case Classes.Long       =>
-        new LongReaderAppender(LongBinaryVector.appendingVector(maxElements), index)
+        new LongReaderAppender(LongBinaryVector.appendingVector(memFactory, maxElements), index)
       case Classes.Double    =>
-        new DoubleReaderAppender(DoubleVector.appendingVector(maxElements), index)
+        new DoubleReaderAppender(DoubleVector.appendingVector(memFactory, maxElements), index)
       case Classes.UTF8    =>
-        new StringReaderAppender(UTF8Vector.appendingVector(maxElements), index)
+        new StringReaderAppender(UTF8Vector.appendingVector(memFactory, maxElements), index)
       case Classes.String    =>
-        new StringReaderAppender(UTF8Vector.appendingVector(maxElements), index)
+        new StringReaderAppender(UTF8Vector.appendingVector(memFactory, maxElements), index)
     }
   }
   val numColumns = schema.length
@@ -78,7 +79,7 @@ class RowToVectorBuilder(schema: Seq[VectorInfo]) {
 
 
   def convertToBytes(hint: EncodingHint = AutoDetect): Map[String, ByteBuffer] = {
-    val chunks = builders.map(_.appender.optimize(hint).toFiloBuffer)
+    val chunks = builders.map(_.appender.optimize(memFactory, hint).toFiloBuffer)
     schema.zip(chunks).map { case (VectorInfo(colName, _), bytes) => (colName, bytes) }.toMap
   }
 

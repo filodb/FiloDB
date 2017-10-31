@@ -1,4 +1,4 @@
-package filodb.memory.impl
+package filodb.memory
 
 import filodb.memory.BlockManager._
 

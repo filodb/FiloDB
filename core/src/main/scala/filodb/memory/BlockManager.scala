@@ -1,6 +1,11 @@
 package filodb.memory
 
-import java.util.concurrent.atomic.AtomicReference
+import java.util
+import java.util.concurrent.locks.ReentrantLock
+
+import scala.collection.JavaConverters._
+
+import com.kenai.jffi.PageManager
 
 /**
   * Allows requesting blocks.
@@ -46,24 +51,121 @@ object BlockManager {
 
 }
 
+
 /**
-  * A holder which maintains a reference to a currentBlock which is replaced when
-  * it is full
+  * Pre Allocates blocks totalling to the passed memory size.
+  * Each block size is the same as the OS page size.
+  * This class is thread safe
   *
-  * @param blockStore The BlockStore which is used to request more blocks when the current
-  *                   block is full.
+  * @param totalMemorySizeInBytes Control the number of pages to allocate. (totalling up to the totallMemorySizeInBytes)
   */
-class BlockHolder(blockStore: BlockManager, canReclaim: (Block) => Boolean) {
+class PageAlignedBlockManager(val totalMemorySizeInBytes: Long) extends BlockManager with CleanShutdown {
 
-  protected val currentBlock = new AtomicReference[Block]()
+  private val pageSize = PageManager.getInstance().pageSize()
+  val mask = PageManager.PROT_READ | PageManager.PROT_EXEC | PageManager.PROT_WRITE
 
-  currentBlock.set(blockStore.requestBlock(canReclaim).get)
+  protected val freeBlocks: util.LinkedList[Block] = allocateWithPageManager
+  protected val usedBlocks: util.LinkedList[Block] = new util.LinkedList[Block]()
 
-  def requestBlock(forSize: Long): Block = {
-    if (!currentBlock.get().hasCapacity(forSize)) {
-      currentBlock.set(blockStore.requestBlock(canReclaim).get)
+  protected val lock = new ReentrantLock()
+
+  override def blockSizeInBytes: Long = pageSize
+
+  def availablePreAllocated: Long = numFreeBlocks * blockSizeInBytes
+
+  def usedMemory: Long = usedBlocks.size * blockSizeInBytes
+
+  override def numFreeBlocks: Int = freeBlocks.size
+
+  override def requestBlock(canReclaim: (Block) => Boolean): Option[Block] = {
+    val blocks = requestBlocks(pageSize, canReclaim)
+    blocks.size match {
+      case 0 => None
+      case _ => Some(blocks.head)
     }
-    currentBlock.get()
+  }
+
+  /**
+    * Allocates requested number of blocks. If enough blocks are not available,
+    * then uses the ReclaimPolicy to check if blocks can be reclaimed
+    */
+  override def requestBlocks(memorySize: Long, canReclaim: (Block) => Boolean): Seq[Block] = {
+    lock.lock()
+    try {
+      val num: Int = Math.ceil(memorySize / blockSizeInBytes).toInt
+
+      if (freeBlocks.size < num) tryReclaim(num, canReclaim)
+
+      if (freeBlocks.size >= num) {
+        val allocated = new Array[Block](num)
+        (0 until num).foreach { i =>
+          val block = freeBlocks.remove()
+          use(block)
+          allocated(i) = block
+                              }
+        allocated
+      } else {
+        Seq.empty[Block]
+      }
+    } finally {
+      lock.unlock()
+    }
+  }
+
+  protected def allocateWithPageManager = {
+    val numBlocks: Int = Math.floor(totalMemorySizeInBytes / blockSizeInBytes).toInt
+    val blocks = new util.LinkedList[Block]()
+
+    val firstPageAddress: Long =
+      PageManager.getInstance().allocatePages(numBlocks, mask)
+    for (i <- 0 until numBlocks) {
+      val address = firstPageAddress + (i * pageSize)
+      blocks.add(new Block(address, blockSizeInBytes))
+    }
+    blocks
+  }
+
+
+  protected def use(block: Block) = {
+    block.markInUse
+    usedBlocks.add(block)
+  }
+
+  protected def tryReclaim(num: Int, canReclaim: (Block) => Boolean): Unit = {
+    val entries = usedBlocks.iterator
+    var i = 0
+    while (entries.hasNext) {
+      val block = entries.next
+      if (canReclaim(block)) {
+        entries.remove()
+        block.reclaim()
+        freeBlocks.add(block)
+        i = i + 1
+      }
+      if (i >= num) {
+        return
+      }
+    }
+  }
+
+  override protected[memory] def releaseBlocks() = {
+    lock.lock()
+    try {
+      releaseBlocksWithPM(freeBlocks)
+      releaseBlocksWithPM(usedBlocks)
+    } finally {
+      lock.unlock()
+    }
+  }
+
+  protected def releaseBlocksWithPM(blocks: java.lang.Iterable[Block]) = {
+    blocks.asScala.foreach { block =>
+      PageManager.getInstance().freePages(block.address, 1)
+                           }
+  }
+
+  override def shutdown(): Unit = {
+    releaseBlocks
   }
 
 }

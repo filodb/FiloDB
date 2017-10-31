@@ -54,7 +54,7 @@ class TimeGroupingAggregateSpec extends FunSpec with Matchers with BeforeAndAfte
     val query = QuerySpec("min", AggregationFunction.TimeGroupMin)
     val agg1 = memStore.aggregate(dataset1, query, FilteredPartitionScan(split), timeScan)
                        .get.runAsync.futureValue
-    agg1 shouldBe an [ArrayAggregate[_]]
+    agg1 shouldBe an[ArrayAggregate[_]]
   }
 
   it("should return error when using time-based functions on non-time series dataset/projection") {

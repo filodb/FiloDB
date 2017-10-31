@@ -1,7 +1,8 @@
 package filodb.core.memstore
 
 import filodb.core.metadata.Dataset
-import filodb.memory.format.{RowReaderAppender, BinaryAppendableVector}
+import filodb.memory.MemFactory
+import filodb.memory.format.{BinaryAppendableVector, RowReaderAppender}
 
 /**
  * A WriteBufferPool pre-allocates/creates a pool of WriteBuffers for sharing amongst many MemStore Partitions.
@@ -17,14 +18,15 @@ import filodb.memory.format.{RowReaderAppender, BinaryAppendableVector}
  *
  * TODO: Use MemoryManager etc. and allocate memory from a fixed block instead of specifying max # partitions
  */
-class WriteBufferPool(dataset: Dataset,
+class WriteBufferPool(memFactory: MemFactory,
+                      dataset: Dataset,
                       initChunkSize: Int,
                       numPartitions: Int = 100000) {
   val queue = new collection.mutable.Queue[(Array[RowReaderAppender], Array[BinaryAppendableVector[_]])]
 
   // Fill queue up
   (0 until numPartitions).foreach { n =>
-    val appenders = MemStore.getAppendables(dataset, initChunkSize)
+    val appenders = MemStore.getAppendables(memFactory, dataset, initChunkSize)
     val currentChunks = appenders.map(_.appender)
     queue.enqueue((appenders, currentChunks))
   }

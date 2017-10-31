@@ -6,8 +6,6 @@ import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
 
 import scala.collection.mutable.ListBuffer
 
-import filodb.memory.format.BinaryVector
-
 import com.kenai.jffi.MemoryIO
 
 
@@ -70,27 +68,6 @@ trait ReusableMemory {
   def capacity(): Long
 
   /**
-    * See return. This is thread safe. Multiple threads can read data from different offsets safely.
-    *
-    * @param offset The offset from the location returned by the address
-    * @param size   The size in bytes to read
-    * @return A ByteBuffer wrapping the memory which is of the passed size from the passed offset
-    */
-  def read(offset: Int, size: Int): ByteBuffer
-
-  /**
-    * Writes a BinaryVector to this memory at the current position of the buffer which is based
-    * on what has been written to this memory already. This method is not thread safe. Care should be
-    * taken that this method is accessed by only one thread at any time. Otherwise the buffer position
-    * will be indeterminate.
-    *
-    * @param bv The BinaryVector to write to this memory.
-    * @return The offset (starting at which the BinaryVector was written) and size of the
-    *         written memory from the offset in bytes
-    */
-  def write(bv: BinaryVector[_]): (Int, Int)
-
-  /**
     * Marks this Memory as in use.
     */
   protected[memory] def markInUse() = {
@@ -131,7 +108,7 @@ trait ReusableMemory {
   * @param address
   * @param capacity
   */
-class Block(val address: Long, val capacity: Long) extends ReusableMemory with Owned {
+class Block(val address: Long, val capacity: Long) extends Owned {
 
   protected val internalBuffer = MemoryIO.getCheckedInstance().newDirectByteBuffer(address, capacity.toInt)
 
@@ -143,30 +120,16 @@ class Block(val address: Long, val capacity: Long) extends ReusableMemory with O
     MemoryIO.getCheckedInstance.memset(address, 0, capacity)
   }
 
-  /**
-    * @param offset The offset from the location returned by the address
-    * @param size   The size in bytes to read
-    * @return A ByteBuffer wrapping the memory which is of the passed size from the passed offset
-    */
-  override def read(offset: Int, size: Int): ByteBuffer = {
-    MemoryIO.getCheckedInstance().newDirectByteBuffer(address + offset, size)
+  def position(): Int = {
+    internalBuffer.position()
   }
 
-  /**
-    * @param bv The BinaryVector to write to this memory.
-    * @return The offset (starting at which the BinaryVector was written) and size of the
-    *         written memory from the offset in bytes
-    */
-  override def write(bv: BinaryVector[_]): (Int, Int) = {
+  def position(newPosition: Int): Unit = {
     checkOwnership()
-    val size = bv.numBytes + 4
-    if (!hasCapacity(size))
-      throw new IndexOutOfBoundsException("Write size exceeds capacity")
-
-    val position = internalBuffer.position()
-    bv.copyTo(internalBuffer)
-    (position, size)
+    internalBuffer.position(newPosition)
   }
+
+  def remaining(): Int = internalBuffer.remaining()
 
   /**
     * @param forSize the size for which to check the capacity for

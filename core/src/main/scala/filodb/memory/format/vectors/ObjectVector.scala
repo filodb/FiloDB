@@ -1,5 +1,6 @@
 package filodb.memory.format.vectors
 
+import filodb.memory.MemFactory
 import filodb.memory.format.{BinaryAppendableVector, BinaryVector, UnsafeUtils}
 
 object ObjectVector {
@@ -56,6 +57,8 @@ abstract class ObjectVector[T](val base: Any,
   def finishCompaction(newBase: Any, newOff: Long): BinaryVector[T] =
     throw new RuntimeException("Cannot finalize an ObjectVector")
 
-  override def optimize(hint: EncodingHint = AutoDetect): BinaryVector[T] = suboptimize(hint)
-  def suboptimize(hint: EncodingHint = AutoDetect): BinaryVector[T]
+  override def optimize(memFactory: MemFactory, hint: EncodingHint = AutoDetect): BinaryVector[T]
+  = suboptimize(MemFactory.onHeapFactory, hint)
+
+  def suboptimize(memFactory: MemFactory, hint: EncodingHint = AutoDetect): BinaryVector[T]
 }

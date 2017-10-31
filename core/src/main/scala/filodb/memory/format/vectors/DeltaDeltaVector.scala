@@ -2,10 +2,11 @@ package filodb.memory.format.vectors
 
 import java.nio.ByteBuffer
 
-import filodb.memory.format.{BinaryAppendableVector, BinaryVector, UnsafeUtils, WireFormat}
-
 import scala.util.Try
 import scalaxy.loops._
+
+import filodb.memory.MemFactory
+import filodb.memory.format.{BinaryAppendableVector, BinaryVector, UnsafeUtils, WireFormat}
 
 /**
  * The Delta-Delta Vector represents an efficient encoding of a sloped line where in general values are
@@ -28,15 +29,16 @@ object DeltaDeltaVector {
    * Really meant to be called from the optimize method of a LongAppendingVector, although you could
    * initialize a fresh one if you are relatively sure about the initial value and slope parameters.
    */
-  def appendingVector(maxElements: Int,
+  def appendingVector(memFactory: MemFactory,
+                      maxElements: Int,
                       initValue: Long,
                       slope: Int,
                       nbits: Short,
-                      signed: Boolean,
-                      offheap: Boolean = false): DeltaDeltaAppendingVector = {
+                      signed: Boolean): DeltaDeltaAppendingVector = {
     val bytesRequired = 12 + IntBinaryVector.noNAsize(maxElements, nbits)
-    val (base, off, nBytes) = BinaryVector.allocWithMagicHeader(bytesRequired, offheap)
-    new DeltaDeltaAppendingVector(base, off, nBytes, initValue, slope, nbits, signed)
+    val (base, off, nBytes) = memFactory.allocateWithMagicHeader(bytesRequired)
+    val dispose = () => memFactory.freeMemory(off)
+    new DeltaDeltaAppendingVector(base, off, nBytes, initValue, slope, nbits, signed, dispose)
   }
 
   /**
@@ -47,7 +49,8 @@ object DeltaDeltaVector {
    * of other values, unless the vector is really small then we look at everything.
    * @return Some(vector) if the input vect is eligible, or None if it is not eligible
    */
-  def fromLongVector(inputVect: BinaryAppendableVector[Long],
+  def fromLongVector(memFactory: MemFactory,
+                     inputVect: BinaryAppendableVector[Long],
                      min: Long, max: Long,
                      samples: Int = 4): Option[DeltaDeltaAppendingVector] = {
     val indexDelta = inputVect.length / (samples + 1)
@@ -56,8 +59,7 @@ object DeltaDeltaVector {
       // Good: all diffs positive, min=first elem, max=last elem
       if (min == inputVect(0) && max == inputVect(inputVect.length - 1) && diffs.forall(_ > 0)) {
         for { slope <- getSlope(min, max, inputVect.length)
-              deltaVect = appendingVector(inputVect.length, min, slope, 32, true,
-                                          inputVect.isOffheap)
+              deltaVect = appendingVector(memFactory, inputVect.length, min, slope, 32, true)
               appended <- Try(deltaVect.addVector(inputVect)).toOption
         } yield { deltaVect }
       // TODO(velvia): Maybe add less stringent case of slope fitting, flat or negative slope good too.
@@ -67,7 +69,7 @@ object DeltaDeltaVector {
 
   def apply(buffer: ByteBuffer): BinaryVector[Long] = {
     val (base, off, len) = UnsafeUtils.BOLfromBuffer(buffer)
-    DeltaDeltaVector(base, off, len)
+    DeltaDeltaVector(base, off, len, BinaryVector.NoOpDispose)
   }
 
   /**
@@ -80,17 +82,20 @@ object DeltaDeltaVector {
   }
 }
 
-final case class DeltaDeltaVector(base: Any, offset: Long, numBytes: Int) extends BinaryVector[Long] {
+final case class DeltaDeltaVector(base: Any, offset: Long,
+                                  numBytes: Int,
+                                  val dispose: () => Unit) extends BinaryVector[Long] {
   val vectMajorType = WireFormat.VECTORTYPE_DELTA2
   val vectSubType = WireFormat.SUBTYPE_INT_NOMASK
   val maybeNAs = false
   private final val initValue = UnsafeUtils.getLong(base, offset)
   private final val slope     = UnsafeUtils.getInt(base, offset + 8)
-  private final val inner     = IntBinaryVector(base, offset + 12, numBytes - 12)
+  private final val inner     = IntBinaryVector(base, offset + 12, numBytes - 12, dispose)
 
   override val length: Int = inner.length
   final def isAvailable(index: Int): Boolean = true
   final def apply(index: Int): Long = initValue + slope * index + inner(index)
+
 }
 
 final case class DeltaTooLarge(value: Long, expected: Long) extends
@@ -105,14 +110,15 @@ class DeltaDeltaAppendingVector(val base: Any,
                                 initValue: Long,
                                 slope: Int,
                                 nbits: Short,
-                                signed: Boolean) extends BinaryAppendableVector[Long] {
+                                signed: Boolean,
+                                val dispose: () => Unit) extends BinaryAppendableVector[Long] {
   val isAllNA = false
   val noNAs = true
   val maybeNAs = false
   val vectMajorType = WireFormat.VECTORTYPE_DELTA2
   val vectSubType = WireFormat.SUBTYPE_INT_NOMASK
 
-  private val deltas = IntBinaryVector.appendingVectorNoNA(base, offset + 12, maxBytes - 12, nbits, signed)
+  private val deltas = IntBinaryVector.appendingVectorNoNA(base, offset + 12, maxBytes - 12, nbits, signed, dispose)
   private var expected = initValue
   private var innerMin: Int = Int.MaxValue
   private var innerMax: Int = Int.MinValue
@@ -157,19 +163,20 @@ class DeltaDeltaAppendingVector(val base: Any,
   }
 
   def finishCompaction(newBase: Any, newOff: Long): BinaryVector[Long] =
-    DeltaDeltaVector(newBase, newOff, numBytes)
+    DeltaDeltaVector(newBase, newOff, numBytes, dispose)
 
-  override def optimize(hint: EncodingHint = AutoDetect): BinaryVector[Long] = {
+  override def optimize(memFactory: MemFactory, hint: EncodingHint = AutoDetect): BinaryVector[Long] = {
     // Just optimize nbits.
     val (newNbits, newSigned) = IntBinaryVector.minMaxToNbitsSigned(innerMin, innerMax)
     if (newNbits < nbits) {
-      val newVect = DeltaDeltaVector.appendingVector(deltas.length, initValue, slope, newNbits, newSigned,
-                                                     offheap=this.isOffheap)
+      val newVect = DeltaDeltaVector.appendingVector(memFactory, deltas.length,
+                                                     initValue, slope,
+                                                     newNbits, newSigned)
       newVect.addInnerVectors(deltas)
       if (hint == AutoDetectDispose) dispose()
-      newVect.freeze(copy = false)    // already writing new vector
+      newVect.freeze(None) // already writing new vector
     } else {
-      freeze()
+      freeze(memFactory)
     }
   }
 }

@@ -3,8 +3,9 @@ package filodb.memory.format
 import java.nio.ByteBuffer
 
 import filodb.memory.format.Encodings._
-
 import scalaxy.loops._
+
+import filodb.memory.MemFactory
 
 /**
  * This is really the same as FiloVector, but supports off-heap easier.
@@ -12,68 +13,56 @@ import scalaxy.loops._
  * TODO: maybe merge this and FiloVector, or just make FiloVector support ZeroCopyBinary.
  */
 trait BinaryVector[@specialized(Int, Long, Double, Boolean) A] extends FiloVector[A] with ZeroCopyBinary {
+
   /** The major and subtype bytes as defined in WireFormat that will go into the FiloVector header */
   def vectMajorType: Int
+
   def vectSubType: Int
 
   /**
-   * Should return false if this vector definitely has no NAs, and true if it might have some or is
-   * designed to support NAs.
-   * Returning false allows optimizations for aggregations.
-   */
+    * Should return false if this vector definitely has no NAs, and true if it might have some or is
+    * designed to support NAs.
+    * Returning false allows optimizations for aggregations.
+    */
   def maybeNAs: Boolean
 
   def isOffheap: Boolean = base == UnsafeUtils.ZeroPointer
 
   /**
-   * Frees up memory used by this BinaryVector if it was offheap memory.  Otherwise do nothing
-   */
-  def dispose(): Unit = {
-    //compensate for magic header
-    if (base == UnsafeUtils.ZeroPointer) UnsafeUtils.freeOffheap(offset - 4)
-  }
+    * Called when this BinaryVector is no longer required.
+    * Implementations may choose to free memory or any other resources.
+    */
+  def dispose: () => Unit
 
   /**
-   * Produce a FiloVector ByteBuffer with the four-byte header.  The resulting buffer can be used for I/O
-   * and fed to FiloVector.apply() to be parsed back.  For most BinaryVectors returned by optimize() and
-   * freeze(), a copy is not necessary so this is usually a very inexpensive operation.
-   */
-  def toFiloBuffer: ByteBuffer = {
-    def copyIt(): Array[Byte] = {
-      val bytes = new Array[Byte](numBytes + 4)
-      copyTo(bytes, UnsafeUtils.arayOffset + 4)
-      UnsafeUtils.setInt(bytes, UnsafeUtils.arayOffset, WireFormat(vectMajorType, vectSubType))
-      bytes
-    }
-    // Check if magic word written to header location.  Then write header, and wrap all the bytes
-    // in a ByteBuffer and return that.  Assumes byte array properly allocated beforehand.
-    // If that doesn't work, copy bytes to new array first then write header.
-    val byteArray = base match {
-      case a: Array[Byte] if offset == (UnsafeUtils.arayOffset + 4) &&
-                             UnsafeUtils.getInt(base, offset - 4) == BinaryVector.HeaderMagic =>
-        UnsafeUtils.setInt(base, offset - 4, WireFormat(vectMajorType, vectSubType))
-        a
-      case x: Any => copyIt()
-      case UnsafeUtils.ZeroPointer => copyIt()
-    }
-    val bb = ByteBuffer.wrap(byteArray)
-    bb.limit(numBytes + 4)
-    bb.order(java.nio.ByteOrder.LITTLE_ENDIAN)
-    bb
+    * Produce a FiloVector ByteBuffer with the four-byte header.  The resulting buffer can be used for I/O
+    * and fed to FiloVector.apply() to be parsed back.  For most BinaryVectors returned by optimize() and
+    * freeze(), a copy is not necessary so this is usually a very inexpensive operation.
+    */
+  def toFiloBuffer: ByteBuffer = base match {
+    case UnsafeUtils.ZeroPointer =>
+      // Check if magic word written to header location.
+      // Then write header, and wrap in a ByteBuffer and return that
+      assert(UnsafeUtils.getInt(base, offset - 4) == BinaryVector.HeaderMagic)
+      val byteBuffer = UnsafeUtils.asDirectBuffer(offset - 4, numBytes + 4)
+      UnsafeUtils.setInt(base, offset - 4, WireFormat(vectMajorType, vectSubType))
+      byteBuffer
+
+    case a: Array[Byte] =>
+      // Check if magic word written to header location.  Then write header, and wrap all the bytes
+      // in a ByteBuffer and return that.  Assumes byte array properly allocated beforehand.
+      assert(offset == (UnsafeUtils.arayOffset + 4) && UnsafeUtils.getInt(base, offset - 4) == BinaryVector.HeaderMagic)
+      UnsafeUtils.setInt(base, offset - 4, WireFormat(vectMajorType, vectSubType))
+      val bb = ByteBuffer.wrap(a)
+      bb.limit(numBytes + 4)
+      bb.order(java.nio.ByteOrder.LITTLE_ENDIAN)
+      bb
+
+    case _ =>
+      //we only support cases where base is an Array or null for offheap.
+      throw new UnsupportedOperationException
   }
 
-  final def copyTo(buf: ByteBuffer): Unit = {
-    assert(buf.isDirect)
-    if (base == UnsafeUtils.ZeroPointer) {
-      val position = buf.position()
-      val destOffset = UnsafeUtils.getAddress(buf) + position
-      UnsafeUtils.setInt(UnsafeUtils.ZeroPointer, destOffset, WireFormat(vectMajorType, vectSubType))
-      UnsafeUtils.copy(offset, destOffset + 4, numBytes)
-      buf.position(position + numBytes + 4)
-    } else {
-      buf.put(bytes)
-    }
-  }
 }
 
 trait PrimitiveVector[@specialized(Int, Long, Double, Boolean) A] extends BinaryVector[A] {
@@ -87,29 +76,18 @@ object BinaryVector {
   val HeaderMagic = 0x87654300  // The lower 8 bits should not be 00
 
   /**
-   * Allocate a byte array with nBytes usable bytes, prepended with a 4-byte HeaderMagic
-   * to reserve space for writing the FiloVector header.
-   * @param offheap if true, allocate offheap storage, which means vector must be freed.
-   * @param initialize if true, zero out memory before allocation.  Only meaningful when offheap=true
-   * @return (base, offset, numBytes) tuple for the appendingvector
-   */
-  def allocWithMagicHeader(nBytes: Int,
-                           offheap: Boolean = true,
-                           initialize: Boolean = true): (Any, Long, Int) = {
-    if (offheap) {
-      val newAddress = UnsafeUtils.allocOffheap(nBytes + 4, initialize)
-      UnsafeUtils.setInt(UnsafeUtils.ZeroPointer, newAddress, HeaderMagic)
-      (UnsafeUtils.ZeroPointer, newAddress + 4, nBytes)
-    } else {
-      val newBytes = new Array[Byte](nBytes + 4)
-      UnsafeUtils.setInt(newBytes, UnsafeUtils.arayOffset, HeaderMagic)
-      (newBytes, UnsafeUtils.arayOffset + 4, nBytes)
-    }
-  }
+    * A memory has a base, offset and a length. An off-heap memory usually has a null base.
+    * An array backed memory has the array object as the base. Offset is a Long indicating the
+    * location in native memory. For an array it is retrieved using Unsafe.arrayBaseOffset
+    * Length is the length of memory in bytes
+    */
+  type Memory = Tuple3[Any, Long, Int]
 
-  def reAlloc(base: Any, nBytes: Int): (Any, Long, Int) =
-    if (base == UnsafeUtils.ZeroPointer) { allocWithMagicHeader(nBytes, offheap=true) }
-    else                                 { allocWithMagicHeader(nBytes, offheap=false) }
+  /**
+    * A dispose method which does nothing.
+    */
+  val NoOpDispose = () => {}
+
 }
 
 /**
@@ -205,7 +183,7 @@ trait BinaryAppendableVector[@specialized(Int, Long, Double, Boolean) A] extends
    * Allocates a new instance of itself growing by factor growFactor.
    * Needs to be defined for any vectors that GrowableVector wraps.
    */
-  def newInstance(growFactor: Int = 2): BinaryAppendableVector[A] = ???
+  def newInstance(memFactory: MemFactory, growFactor: Int = 2): BinaryAppendableVector[A] = ???
 
   /**
    * Returns the number of bytes required for a compacted AppendableVector
@@ -233,13 +211,9 @@ trait BinaryAppendableVector[@specialized(Int, Long, Double, Boolean) A] extends
    * @param newBaseOffset optionally, compact not in place but to a new location.  If left as None,
    *                      any compaction will be done "in-place" in the same buffer.
    */
-  def freeze(copy: Boolean = true): BinaryVector[A] = {
-    if (copy) {
-      val (base, off, _) = BinaryVector.allocWithMagicHeader(frozenSize, isOffheap)
-      freeze(Some((base, off)))
-    } else {
-      freeze(None)
-    }
+  def freeze(memFactory: MemFactory): BinaryVector[A] = {
+    val (base, off, _) = memFactory.allocateWithMagicHeader(frozenSize)
+    freeze(Some((base, off)))
   }
 
   def freeze(newBaseOffset: Option[(Any, Long)]): BinaryVector[A] =
@@ -270,8 +244,10 @@ trait BinaryAppendableVector[@specialized(Int, Long, Double, Boolean) A] extends
    * an IntVector could return a vector with a smaller bit packed size given a max integer.
    * This always produces a new, frozen copy and takes more CPU than freeze() but can result in dramatically
    * smaller vectors using advanced techniques such as delta-delta or dictionary encoding.
+   *
+   * By default it copies using the passed memFactory to allocate
    */
-  def optimize(hint: EncodingHint = AutoDetect): BinaryVector[A] = freeze()
+  def optimize(memFactory: MemFactory,hint: EncodingHint = AutoDetect): BinaryVector[A] = freeze(memFactory)
 
   /**
    * Clears the elements so one can start over.
@@ -279,14 +255,15 @@ trait BinaryAppendableVector[@specialized(Int, Long, Double, Boolean) A] extends
   def reset(): Unit
 }
 
-case class GrowableVector[@specialized(Int, Long, Double, Boolean) A](var inner: BinaryAppendableVector[A])
+case class GrowableVector[@specialized(Int, Long, Double, Boolean) A](memFactory: MemFactory,
+                                                                      var inner: BinaryAppendableVector[A])
 extends AppendableVectorWrapper[A, A] {
   def addData(value: A): Unit = {
     try {
       inner.addData(value)
     } catch {
       case e: VectorTooSmall =>
-        val newInst = inner.newInstance()
+        val newInst = inner.newInstance(memFactory)
         newInst.addVector(inner)
         inner.dispose()   // free memory in case it's off-heap .. just before reference is lost
         inner = newInst
@@ -299,14 +276,17 @@ extends AppendableVectorWrapper[A, A] {
       inner.addNA()
     } catch {
       case e: VectorTooSmall =>
-        val newInst = inner.newInstance()
+        val newInst = inner.newInstance(memFactory)
         newInst.addVector(inner)
+        inner.dispose()   // free memory in case it's off-heap .. just before reference is lost
         inner = newInst
         inner.addNA()
     }
   }
 
   def apply(index: Int): A = inner(index)
+
+  override def dispose: () => Unit = inner.dispose
 }
 
 trait AppendableVectorWrapper[A, I] extends BinaryAppendableVector[A] {
@@ -332,8 +312,10 @@ trait AppendableVectorWrapper[A, I] extends BinaryAppendableVector[A] {
     inner.finishCompaction(newBase, newOff).asInstanceOf[BinaryVector[A]]
   override def frozenSize: Int = inner.frozenSize
   final def reset(): Unit = inner.reset()
-  override def optimize(hint: EncodingHint = AutoDetect): BinaryVector[A] =
-    inner.optimize(hint).asInstanceOf[BinaryVector[A]]
+  override def optimize(memFactory: MemFactory, hint: EncodingHint = AutoDetect): BinaryVector[A] =
+    inner.optimize(memFactory, hint).asInstanceOf[BinaryVector[A]]
+
+  override def dispose: () => Unit = inner.dispose
 }
 
 /**

@@ -2,11 +2,13 @@ package filodb.memory.format
 
 import java.sql.Timestamp
 
+import filodb.memory.NativeMemoryManager
 import filodb.memory.format.vectors.{IntBinaryVector, LongBinaryVector}
+
 import org.scalatest.{FunSpec, Matchers}
 
 class RowReaderTest extends FunSpec with Matchers {
-
+  val memFactory = new NativeMemoryManager(100000)
   val rows = Seq(
     (Some("Matthew Perry"), Some(18), Some(new Timestamp(10000L))),
     (Some("Michelle Pfeiffer"), None, Some(new Timestamp(10010L))),
@@ -36,11 +38,11 @@ class RowReaderTest extends FunSpec with Matchers {
   it("should append to BinaryAppendableVector from Readers with RowReaderAppender") {
     val readers = rows.map(TupleRowReader)
     val appenders = Seq(
-      new IntReaderAppender(IntBinaryVector.appendingVector(10), 1),
-      new LongReaderAppender(LongBinaryVector.appendingVector(10), 2)
+      new IntReaderAppender(IntBinaryVector.appendingVector(memFactory, 10), 1),
+      new LongReaderAppender(LongBinaryVector.appendingVector(memFactory, 10), 2)
     )
     readers.foreach { r => appenders.foreach(_.append(r)) }
-    val bufs = appenders.map(_.appender.optimize().toFiloBuffer).toArray
+    val bufs = appenders.map(_.appender.optimize(memFactory).toFiloBuffer).toArray
     val reader = new FastFiloRowReader(bufs, Array(classOf[Int], classOf[Long]))
 
     readValues(reader, 4)(_.getInt(0)) should equal(Seq(18, 0, 59, 26))

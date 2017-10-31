@@ -165,15 +165,9 @@ class TimeSeriesPartition(val dataset: Dataset,
     } else {
       // optimize and compact old chunks
       val frozenVectors = flushingAppenders.zipWithIndex.map { case (appender, i) =>
-        val optimized = appender.appender.optimize()
-        val block = blockHolder.requestBlock(optimized.numBytes)
-        block.own()
-        val (pos, size) = block.write(optimized)
-        val vector = dataset.vectorMakers(i)(block.read(pos, size), size)
-
+        val optimized = appender.appender.optimize(blockHolder)
         encodedBytes.increment(optimized.numBytes)
-        optimized.dispose()
-        vector.asInstanceOf[BinaryVector[_]]
+        optimized
       }
       val numSamples = frozenVectors(0).length
       numSamplesEncoded.increment(numSamples)

@@ -1,12 +1,13 @@
 package filodb.core.memstore
 
-import monix.execution.{CancelableFuture, Scheduler}
-import monix.reactive.Observable
-
-import filodb.core.{DatasetRef, ErrorResponse}
 import filodb.core.metadata.{Column, Dataset}
 import filodb.core.store.{ChunkSink, ChunkSource}
+import filodb.core.{DatasetRef, ErrorResponse}
+import filodb.memory.MemFactory
 import filodb.memory.format.{vectors => bv, _}
+
+import monix.execution.{CancelableFuture, Scheduler}
+import monix.reactive.Observable
 
 case object ShardAlreadySetup extends Exception
 final case class DatasetAlreadySetup(dataset: DatasetRef) extends Exception(s"Dataset $dataset already setup")
@@ -137,20 +138,21 @@ object MemStore {
    * Figures out the RowReaderAppenders for each column, depending on type and whether it is a static/
    * constant column for each partition.
    */
-  def getAppendables(dataset: Dataset,
+  def getAppendables(memFactory: MemFactory,
+                     dataset: Dataset,
                      maxElements: Int): Array[RowReaderAppender] =
     dataset.dataColumns.zipWithIndex.map { case (col, index) =>
       col.columnType match {
       case IntColumn       =>
-        new IntReaderAppender(bv.IntBinaryVector.appendingVector(maxElements), index)
+        new IntReaderAppender(bv.IntBinaryVector.appendingVector(memFactory, maxElements), index)
       case LongColumn      =>
-        new LongReaderAppender(bv.LongBinaryVector.appendingVector(maxElements), index)
+        new LongReaderAppender(bv.LongBinaryVector.appendingVector(memFactory, maxElements), index)
       case DoubleColumn    =>
-        new DoubleReaderAppender(bv.DoubleVector.appendingVector(maxElements), index)
+        new DoubleReaderAppender(bv.DoubleVector.appendingVector(memFactory, maxElements), index)
       case TimestampColumn =>
-        new LongReaderAppender(bv.LongBinaryVector.appendingVector(maxElements), index)
+        new LongReaderAppender(bv.LongBinaryVector.appendingVector(memFactory, maxElements), index)
       case StringColumn    =>
-        new StringReaderAppender(bv.UTF8Vector.appendingVector(maxElements), index)
+        new StringReaderAppender(bv.UTF8Vector.appendingVector(memFactory, maxElements), index)
       case other: Column.ColumnType => ???
     }
     }.toArray

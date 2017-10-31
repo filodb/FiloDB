@@ -1,4 +1,4 @@
-package filodb.memory.impl
+package filodb.memory
 
 /**
   * For clean shutdown using a Runtime hook.
