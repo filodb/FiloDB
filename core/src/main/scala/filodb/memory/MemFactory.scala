@@ -5,6 +5,7 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.{AtomicLong, AtomicReference}
 
 import scala.collection.JavaConverters._
+import scala.collection.mutable.ListBuffer
 
 import filodb.memory.format.BinaryVector.{HeaderMagic, Memory}
 import filodb.memory.format.{BinaryVector, UnsafeUtils}
@@ -136,19 +137,25 @@ class ArrayBackedMemFactory extends MemFactory {
   * @param blockStore The BlockStore which is used to request more blocks when the current
   *                   block is full.
   */
-class BlockHolder(blockStore: BlockManager, canReclaim: (Block) => Boolean) extends MemFactory {
+class BlockHolder(blockStore: BlockManager) extends MemFactory {
 
+  val blockGroup = ListBuffer[Block]()
   val currentBlock = new AtomicReference[Block]()
 
-  currentBlock.set(blockStore.requestBlock(canReclaim).get)
+  currentBlock.set(blockStore.requestBlock().get)
+  blockGroup += currentBlock.get()
 
   protected def ensureCapacity(forSize: Long): Block = {
     if (!currentBlock.get().hasCapacity(forSize)) {
-      currentBlock.set(blockStore.requestBlock(canReclaim).get)
+      currentBlock.set(blockStore.requestBlock().get)
+      blockGroup += currentBlock.get()
     }
     currentBlock.get()
   }
 
+  def markUsedBlocksReclaimable(): Unit = {
+    blockGroup.foreach(_.markReclaimable())
+  }
   /**
     * Allocates memory for requested size.
     *

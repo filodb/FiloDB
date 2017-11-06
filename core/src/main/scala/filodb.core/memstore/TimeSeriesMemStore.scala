@@ -10,7 +10,7 @@ import filodb.core.query.PartitionKeyIndex
 import filodb.core.store._
 import filodb.core.{DatasetRef, ErrorResponse, Response, Success}
 import filodb.memory.format.{SchemaRowReader, ZeroCopyUTF8String}
-import filodb.memory.{BlockHolder, BlockManager, NativeMemoryManager, PageAlignedBlockManager}
+import filodb.memory.{BlockHolder, NativeMemoryManager, PageAlignedBlockManager}
 
 import com.googlecode.javaewah.{EWAHCompressedBitmap, IntIterator}
 import com.typesafe.config.Config
@@ -168,7 +168,6 @@ class TimeSeriesShard(dataset: Dataset, config: Config, val shardNum: Int, sink:
   private val maxNumPartitions = config.getInt("memstore.max-num-partitions")
 
   private val blockStore = new PageAlignedBlockManager(shardMemoryMB * 1024 * 1024)
-  protected implicit val blockHolder = new BlockHolder(blockStore, BlockManager.reclaimAnyPolicy)
   protected val bufferMemoryManager = new NativeMemoryManager(maxChunksSize * 8 * maxNumPartitions)
   private val bufferPool = new WriteBufferPool(bufferMemoryManager, dataset, maxChunksSize / 8, maxNumPartitions)
 
@@ -219,20 +218,27 @@ class TimeSeriesShard(dataset: Dataset, config: Config, val shardNum: Int, sink:
   }
 
   def createFlushTask(flushGroup: FlushGroup)(implicit sched: Scheduler): Task[Response] = {
+    val blockHolder = new BlockHolder(blockStore)
     // Given the flush group, create an observable of ChunkSets
     val chunkSetIt = new PartitionIterator(partitionGroups(flushGroup.groupNum).intIterator)
-                       .map(_.makeFlushChunks())
+                       .map(_.makeFlushChunks(blockHolder))
                        .flatten
     val chunkSetStream = Observable.fromIterator(chunkSetIt)
     logger.debug(s"Created flush ChunkSets stream for group ${flushGroup.groupNum}")
 
-    // Write the stream to the sink, checkpoint, mark buffers as eligible for cleanup
+    // Write the stream to the sink, checkpoint, mark blocks as eligible for cleanup
     val taskFuture = for {
       resp1 <- sink.write(dataset, chunkSetStream)
       resp2 <- metastore.writeCheckpoint(dataset.ref, shardNum, flushGroup.groupNum, flushGroup.flushWatermark)
       if resp1 == Success
     } yield resp2 match {
-      case Success => Success
+      case Success => blockHolder.markUsedBlocksReclaimable()
+                      Success
+        //TODO What does it mean for the flush to fail.
+        //Flush fail means 2 things. The write to the sink failed or writing the checkpoint failed.
+        //We need to add logic to retry these aspects. If the retry succeeds we need mark the blocks reusable.
+        //If the retry fails, we are in a bad state. We have to discards both the buffers and blocks.
+        //Then we ingest from Kafka again.
       case e: ErrorResponse => throw FlushError(e)
     }
     Task.fromFuture(taskFuture)

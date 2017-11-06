@@ -4,7 +4,7 @@ import scala.concurrent.Future
 
 import filodb.core._
 import filodb.core.store._
-import filodb.memory.{BlockHolder, BlockManager, NativeMemoryManager, PageAlignedBlockManager}
+import filodb.memory.{BlockHolder, NativeMemoryManager, PageAlignedBlockManager}
 
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
@@ -17,7 +17,6 @@ class TimeSeriesPartitionSpec extends FunSpec with Matchers with ScalaFutures {
 
   import monix.execution.Scheduler.Implicits.global
   private val blockStore = new PageAlignedBlockManager(100 * 1024 * 1024)
-  protected implicit val blockHolder = new BlockHolder(blockStore,BlockManager.reclaimAnyPolicy)
   val memFactory = new NativeMemoryManager(10 * 1024 * 1024)
   private val bufferPool = new WriteBufferPool(memFactory, dataset, 10, 50)
 
@@ -43,8 +42,8 @@ class TimeSeriesPartitionSpec extends FunSpec with Matchers with ScalaFutures {
     // First 10 rows ingested. Now flush in a separate Future while ingesting the remaining row
     part.switchBuffers()
     bufferPool.poolSize shouldEqual (origPoolSize - 1)
-
-    val flushFut = Future(part.makeFlushChunks())
+    val blockHolder = new BlockHolder(blockStore)
+    val flushFut = Future(part.makeFlushChunks(blockHolder))
     data.drop(10).zipWithIndex.foreach { case (r, i) => part.ingest(r, 1100L + i) }
     val chunkSetOpt = flushFut.futureValue
 
@@ -97,14 +96,15 @@ class TimeSeriesPartitionSpec extends FunSpec with Matchers with ScalaFutures {
 
     // Now, switch buffers and flush.  Now we have two chunks
     part.switchBuffers()
-    part.makeFlushChunks().isDefined shouldEqual true
+    val blockHolder = new BlockHolder(blockStore)
+    part.makeFlushChunks(blockHolder).isDefined shouldEqual true
     part.numChunks shouldEqual 2
     part.latestChunkLen shouldEqual 0
 
     // Now, switch buffers again without ingesting more data.  Clearly there are no rows, no switch, and no flush.
     part.switchBuffers()
     part.numChunks shouldEqual 2
-    part.makeFlushChunks() shouldEqual None
+    part.makeFlushChunks(blockHolder) shouldEqual None
 
     val minData = data.map(_.getDouble(1))
     val chunk1 = part.readers(LastSampleChunkScan, Array(1)).toSeq.head

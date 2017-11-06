@@ -28,13 +28,13 @@ trait BlockManager {
     * @param canReclaim Function which checks if a block can be reclaimed
     * @return A sequence of blocks totaling up in memory requested or empty if unable to allocate
     */
-  def requestBlocks(memorySize: Long, canReclaim: (Block) => Boolean): Seq[Block]
+  def requestBlocks(memorySize: Long): Seq[Block]
 
   /**
     * @param canReclaim Function which checks if a block can be reclaimed
     * @return One block of memory
     */
-  def requestBlock(canReclaim: (Block) => Boolean): Option[Block]
+  def requestBlock(): Option[Block]
 
   /**
     * Releases all blocks allocated by this store.
@@ -42,15 +42,6 @@ trait BlockManager {
   protected[memory] def releaseBlocks(): Unit
 
 }
-
-object BlockManager {
-
-  val noReclaimPolicy = ((block: Block) => false)
-
-  val reclaimAnyPolicy = ((block: Block) => true)
-
-}
-
 
 /**
   * Pre Allocates blocks totalling to the passed memory size.
@@ -77,8 +68,8 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long) extends BlockMan
 
   override def numFreeBlocks: Int = freeBlocks.size
 
-  override def requestBlock(canReclaim: (Block) => Boolean): Option[Block] = {
-    val blocks = requestBlocks(pageSize, canReclaim)
+  override def requestBlock(): Option[Block] = {
+    val blocks = requestBlocks(pageSize)
     blocks.size match {
       case 0 => None
       case _ => Some(blocks.head)
@@ -89,12 +80,12 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long) extends BlockMan
     * Allocates requested number of blocks. If enough blocks are not available,
     * then uses the ReclaimPolicy to check if blocks can be reclaimed
     */
-  override def requestBlocks(memorySize: Long, canReclaim: (Block) => Boolean): Seq[Block] = {
+  override def requestBlocks(memorySize: Long): Seq[Block] = {
     lock.lock()
     try {
       val num: Int = Math.ceil(memorySize / blockSizeInBytes).toInt
 
-      if (freeBlocks.size < num) tryReclaim(num, canReclaim)
+      if (freeBlocks.size < num) tryReclaim(num)
 
       if (freeBlocks.size >= num) {
         val allocated = new Array[Block](num)
@@ -131,12 +122,12 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long) extends BlockMan
     usedBlocks.add(block)
   }
 
-  protected def tryReclaim(num: Int, canReclaim: (Block) => Boolean): Unit = {
+  protected def tryReclaim(num: Int): Unit = {
     val entries = usedBlocks.iterator
     var i = 0
     while (entries.hasNext) {
       val block = entries.next
-      if (canReclaim(block)) {
+      if (block.canReclaim) {
         entries.remove()
         block.reclaim()
         freeBlocks.add(block)

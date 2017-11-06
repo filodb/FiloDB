@@ -40,8 +40,7 @@ object TimeSeriesPartition {
 class TimeSeriesPartition(val dataset: Dataset,
                           val binPartition: PartitionKey,
                           val shard: Int,
-                          bufferPool: WriteBufferPool)
-                         (implicit blockHolder: BlockHolder) extends FiloPartition {
+                          bufferPool: WriteBufferPool) extends FiloPartition {
   import ChunkSetInfo._
   import TimeSeriesPartition._
 
@@ -159,7 +158,7 @@ class TimeSeriesPartition(val dataset: Dataset,
    * we might wish to flush current chunks as they are for persistence but then keep adding to the partially
    * filled currentChunks.  That involves much more state, so do much later.
    */
-  def makeFlushChunks(): Option[ChunkSet] = {
+  def makeFlushChunks(blockHolder: BlockHolder): Option[ChunkSet] = {
     if (flushingAppenders == UnsafeUtils.ZeroPointer || flushingAppenders(0).appender.length == 0) {
       None
     } else {

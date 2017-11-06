@@ -1,7 +1,5 @@
 package filodb.memory
 
-import filodb.memory.BlockManager._
-
 import com.kenai.jffi.PageManager
 import org.scalatest.{FlatSpec, Matchers}
 
@@ -13,7 +11,7 @@ class PageAlignedBlockManagerSpec extends FlatSpec with Matchers {
     //2MB
     val blockManager = new PageAlignedBlockManager(2048 * 1024)
     val blockSize = blockManager.blockSizeInBytes
-    val blocks = blockManager.requestBlocks(blockSize * 10, noReclaimPolicy)
+    val blocks = blockManager.requestBlocks(blockSize * 10)
     blocks.size should be(10)
   }
 
@@ -27,11 +25,11 @@ class PageAlignedBlockManagerSpec extends FlatSpec with Matchers {
     //2 pages
     val blockManager = new PageAlignedBlockManager(2 * pageSize)
     val blockSize = blockManager.blockSizeInBytes
-    val firstRequest = blockManager.requestBlocks(blockSize * 2, noReclaimPolicy)
+    val firstRequest = blockManager.requestBlocks(blockSize * 2)
     //used 2 out of 2
     firstRequest.size should be(2)
     //cannot fulfill
-    val secondRequest = blockManager.requestBlocks(blockSize * 2, noReclaimPolicy)
+    val secondRequest = blockManager.requestBlocks(blockSize * 2)
     secondRequest should be(Seq.empty)
 
   }
@@ -40,11 +38,12 @@ class PageAlignedBlockManagerSpec extends FlatSpec with Matchers {
     //2 pages
     val blockManager = new PageAlignedBlockManager(2 * pageSize)
     val blockSize = blockManager.blockSizeInBytes
-    val firstRequest = blockManager.requestBlocks(blockSize * 2, reclaimAnyPolicy)
+    val firstRequest = blockManager.requestBlocks(blockSize * 2)
     //used 2 out of 2
     firstRequest.size should be(2)
-    //reclaim policy is set to any. So can reclaim any
-    val secondRequest = blockManager.requestBlocks(blockSize * 2, reclaimAnyPolicy)
+    //mark them as reclaimable
+    firstRequest.foreach(_.markReclaimable())
+    val secondRequest = blockManager.requestBlocks(blockSize * 2)
     //this request will fulfill
     secondRequest.size should be(2)
   }
@@ -53,11 +52,11 @@ class PageAlignedBlockManagerSpec extends FlatSpec with Matchers {
     //4 pages
     val blockManager = new PageAlignedBlockManager(4 * pageSize)
     val blockSize = blockManager.blockSizeInBytes
-    val firstRequest = blockManager.requestBlocks(blockSize * 2, noReclaimPolicy)
+    val firstRequest = blockManager.requestBlocks(blockSize * 2)
     //used 2 out of 4
     firstRequest.size should be(2)
     //only 2 left - cannot fulfill request
-    val secondRequest = blockManager.requestBlocks(blockSize * 3, noReclaimPolicy)
+    val secondRequest = blockManager.requestBlocks(blockSize * 3)
     secondRequest should be(Seq.empty)
   }
 

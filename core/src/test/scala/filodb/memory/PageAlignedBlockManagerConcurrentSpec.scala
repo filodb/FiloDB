@@ -1,7 +1,5 @@
 package filodb.memory
 
-import filodb.memory.BlockManager._
-
 import org.scalatest.Matchers
 import org.scalatest.concurrent.ConductorFixture
 import org.scalatest.fixture.FunSuite
@@ -17,7 +15,7 @@ class PageAlignedBlockManagerConcurrentSpec extends FunSuite with ConductorFixtu
 
       thread("Random guy") {
         //1 page
-        val blocks = blockManager.requestBlocks(pageSize, noReclaimPolicy)
+        val blocks = blockManager.requestBlocks(pageSize)
         blocks.size should be(1)
         val block = blocks.head
         block.own()
@@ -26,7 +24,7 @@ class PageAlignedBlockManagerConcurrentSpec extends FunSuite with ConductorFixtu
       }
       thread("Another dude") {
         //2 page
-        val blocks = blockManager.requestBlocks(2 * pageSize, noReclaimPolicy)
+        val blocks = blockManager.requestBlocks(2 * pageSize)
         blocks.size should be(2)
         val block = blocks.head
         block.own()
@@ -35,7 +33,7 @@ class PageAlignedBlockManagerConcurrentSpec extends FunSuite with ConductorFixtu
       }
       thread("Yet another dude") {
         //3 page
-        val blocks = blockManager.requestBlocks(3 * pageSize, noReclaimPolicy)
+        val blocks = blockManager.requestBlocks(3 * pageSize)
         blocks.size should be(3)
         val block = blocks.head
         block.own()
