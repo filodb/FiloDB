@@ -54,7 +54,7 @@ sealed trait ShardEvent extends ShardAction {
 
 final case class IngestionStarted(ref: DatasetRef, shard: Int, node: ActorRef) extends ShardEvent
 
-final case class RecoveryStarted(ref: DatasetRef, shard: Int, node: ActorRef) extends ShardEvent
+final case class RecoveryStarted(ref: DatasetRef, shard: Int, node: ActorRef, progressPct: Int) extends ShardEvent
 
 final case class IngestionError(ref: DatasetRef, shard: Int, err: Throwable) extends ShardEvent
 
@@ -89,9 +89,9 @@ case object ShardStatusNormal extends ShardStatus {
     Seq(IngestionStarted(ref, shard, node))
 }
 
-case object ShardStatusRecovery extends ShardStatus {
+final case class ShardStatusRecovery(progressPct: Int) extends ShardStatus {
   def minimalEvents(ref: DatasetRef, shard: Int, node: ActorRef): Seq[ShardEvent] =
-    Seq(RecoveryStarted(ref, shard, node))
+    Seq(RecoveryStarted(ref, shard, node, progressPct))
 }
 
 case object ShardStatusDown extends ShardStatus {

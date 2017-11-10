@@ -96,15 +96,19 @@ trait IngestionStreamFactory {
    * Returns an IngestionStream that can be subscribed to for a given shard.
    * If a source does not support streams for n shards, it could support just one shard and require
    * users to limit the number of shards.
-   * @param config the configuration for the data source
-   * @param dataset
+   * @param config the configuration for the data source.  For an example see the sourceconfig {} in
+   *               ingestion.md or `conf/timeseries-dev-source.conf`
+   * @param dataset the Dataset to ingest into
+   * @param shard  the shard number
+   * @param offset Some(offset) to rewind the source to a particular "offset" for recovery
    */
-  def create(config: Config, dataset: Dataset, shard: Int): IngestionStream
+  def create(config: Config, dataset: Dataset, shard: Int, offset: Option[Long]): IngestionStream
 }
 
 /**
  * An IngestionStreamFactory to use when you want to just push manually to a coord.
  */
 class NoOpStreamFactory extends IngestionStreamFactory {
-  def create(config: Config, dataset: Dataset, shard: Int): IngestionStream = IngestionStream.empty
+  def create(config: Config, dataset: Dataset, shard: Int, offset: Option[Long]): IngestionStream =
+      IngestionStream.empty
 }

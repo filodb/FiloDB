@@ -109,7 +109,7 @@ class ShardMapperSpec extends ActorTest(ShardMapperSpec.getNewSystem) {
     mapper1.activeShards(Seq(1, 5, 10)) shouldEqual Nil
 
     mapper1.updateFromEvent(IngestionStarted(dataset, 2, ref1)).isSuccess shouldEqual true
-    mapper1.updateFromEvent(RecoveryStarted(dataset, 4, ref1)).isSuccess shouldEqual true
+    mapper1.updateFromEvent(RecoveryStarted(dataset, 4, ref1, 0)).isSuccess shouldEqual true
     mapper1.numAssignedShards shouldEqual 2
     mapper1.activeShards(Seq(1, 2, 3, 4)) shouldEqual Seq(2, 4)
 
@@ -125,7 +125,7 @@ class ShardMapperSpec extends ActorTest(ShardMapperSpec.getNewSystem) {
   it("can produce a minimal set of events to reproduce ShardMapper state") {
     val mapper1 = new ShardMapper(32)
     mapper1.updateFromEvent(IngestionStarted(dataset, 2, ref1)).isSuccess shouldEqual true
-    mapper1.updateFromEvent(RecoveryStarted(dataset, 4, ref1)).isSuccess shouldEqual true
+    mapper1.updateFromEvent(RecoveryStarted(dataset, 4, ref1, 50)).isSuccess shouldEqual true
     mapper1.updateFromEvent(IngestionStarted(dataset, 3, ref2)).isSuccess shouldEqual true
     mapper1.updateFromEvent(ShardDown(dataset, 4)).isSuccess shouldEqual true
 

@@ -16,24 +16,28 @@ object PartitionedConsumerObservable {
   /** Creates a `KafkaConsumerObservable` instance.
     *
     * @param settings the `KafkaSettings` needed for initializing the consumer
-    *
     * @param topicPartition the Kafka ingestion topic-partition(s) to assign the new consumer to
+    * @param offset Some(longOffset) to seek to a certain offset when the consumer starts
     */
-  def create(settings: KafkaSettings, topicPartition: TopicPartition): KafkaConsumerObservable[JLong, Any] = {
+  def create(settings: KafkaSettings,
+             topicPartition: TopicPartition,
+             offset: Option[Long]): KafkaConsumerObservable[JLong, Any] = {
 
-    val consumer = createConsumer(settings, topicPartition)
+    val consumer = createConsumer(settings, topicPartition, offset)
     val cfg = consumerConfig(settings)
 
     KafkaConsumerObservable[JLong, Any](cfg, consumer)
   }
 
   private[filodb] def createConsumer(settings: KafkaSettings,
-                                     topicPartition: TopicPartition): Task[KafkaConsumer[JLong, Any]] =
+                                     topicPartition: TopicPartition,
+                                     offset: Option[Long]): Task[KafkaConsumer[JLong, Any]] =
     Task {
       val props = settings.sourceConfig.kafkaConfig.asProps
       blocking {
         val consumer = new KafkaConsumer(props)
         consumer.assign(List(topicPartition).asJava)
+        offset.foreach { off => consumer.seek(topicPartition, off) }
         consumer.asInstanceOf[KafkaConsumer[JLong, Any]]
       }
     }

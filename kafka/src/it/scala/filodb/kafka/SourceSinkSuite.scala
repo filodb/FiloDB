@@ -58,7 +58,7 @@ class SourceSinkSuite extends ConfigSpec {
       val producerCfg = KafkaProducerConfig(settings.sinkConfig.asConfig)
       val producer = KafkaProducer[JLong, String](producerCfg, io)
 
-      val consumerTask = PartitionedConsumerObservable.createConsumer(settings, tps.head).executeOn(io)
+      val consumerTask = PartitionedConsumerObservable.createConsumer(settings, tps.head, None).executeOn(io)
       val consumer = Await.result(consumerTask.runAsync, 60.seconds)
       val key = JLong.valueOf(0L)
 
@@ -77,7 +77,7 @@ class SourceSinkSuite extends ConfigSpec {
     "listen for one message" ignore {
       val producerCfg = KafkaProducerConfig(settings.sinkConfig.asConfig)
       val producer = KafkaProducer[JLong, String](producerCfg, io)
-      val consumer = PartitionedConsumerObservable.create(settings, tps.head).executeOn(io)
+      val consumer = PartitionedConsumerObservable.create(settings, tps.head, None).executeOn(io)
       val key = JLong.valueOf(0L)
 
       try {
@@ -98,12 +98,12 @@ class SourceSinkSuite extends ConfigSpec {
 
       val tps = List(new TopicPartition(settings.IngestionTopic, 0))
       val producer = PartitionedProducerSink.create[JLong, String](settings, io)
-      val consumer = PartitionedConsumerObservable.create(settings, tps.head).executeOn(io).take(count)
+      val consumer = PartitionedConsumerObservable.create(settings, tps.head, None).executeOn(io).take(count)
       val key = JLong.valueOf(0L)
 
       val pushT = Observable.range(0, count)
         .map(msg => new ProducerRecord(settings.IngestionTopic, key, msg.toString))
-        .bufferIntrospective(1024)
+        .bufferTumbling(10)  // This must be something into which count/2 can divide.  buffer scrambles order.
         .consumeWith(producer)
 
       val streamT = consumer
@@ -115,6 +115,17 @@ class SourceSinkSuite extends ConfigSpec {
       val (result, _) = Await.result(task, 60.seconds)
 
       assert(result.collect { case (k, v) => v.toString.toInt }.sum == (0 until count).sum)
+
+      // Now, test consuming from a particular offset.  Check the offset halfway through the list
+      val cutoff = count / 2
+      val offsetAtCutoff = result(cutoff)._1
+      val origSum = (cutoff until count).sum
+
+      val consumer2 = PartitionedConsumerObservable.create(settings, tps.head, Some(offsetAtCutoff))
+                                                   .executeOn(io).take(cutoff)
+      val streamT2 = consumer2.map(_.value.toString).toListL
+      val result2 = Await.result(streamT2.runAsync, 60.seconds)
+      result2.map(_.toString.toInt).sum shouldEqual origSum
     }
   }
 }

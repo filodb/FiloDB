@@ -12,23 +12,23 @@ import filodb.core.metadata.Dataset
 /** Used by the coordinator.
   * INTERNAL API.
   *
-  * @param config     the Typesafe config to use
+  * @param config     the Typesafe source config to use, see sourceconfig in `docs/ingestion.md`
   * @param projection the projection for the dataset
   * @param shard      the shard / partition
   */
 private[filodb] class KafkaIngestionStream(config: Config,
                                            dataset: Dataset,
-                                           shard: Int) extends IngestionStream with StrictLogging {
+                                           shard: Int,
+                                           offset: Option[Long]) extends IngestionStream with StrictLogging {
 
   private val settings = new KafkaSettings(config)
   import settings._
 
   private val converter = RecordConverter(RecordConverterClass, dataset)
-
   private val tp = new TopicPartition(IngestionTopic, shard)
 
-  logger.info(s"Creating consumer assigned to topic ${tp.topic} partition ${tp.partition}")
-  private val consumer = PartitionedConsumerObservable.create(settings, tp)
+  logger.info(s"Creating consumer assigned to topic ${tp.topic} partition ${tp.partition} offset $offset")
+  private val consumer = PartitionedConsumerObservable.create(settings, tp, offset)
 
   /**
    * Returns a reactive Observable stream of IngestRecord sequences from Kafka.
@@ -58,11 +58,8 @@ class KafkaIngestionStreamFactory extends IngestionStreamFactory {
   /**
     * Returns an IngestionStream that can be subscribed to for a given shard,
     * or in this case, a single partition (1 shard => 1 Kafka partition) of a given Kafka topic.
-    *
-    * @param config     the configuration for the data source
-    * @param dataset the dataset for the dataset
     */
-  override def create(config: Config, dataset: Dataset, shard: Int): IngestionStream = {
-    new KafkaIngestionStream(config, dataset, shard)
+  override def create(config: Config, dataset: Dataset, shard: Int, offset: Option[Long]): IngestionStream = {
+    new KafkaIngestionStream(config, dataset, shard, offset)
   }
 }

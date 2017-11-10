@@ -146,7 +146,7 @@ class ShardMapper(val numShards: Int) extends Serializable {
    * Find out if a shard is active (Normal or Recovery status) or filter a list of shards
    */
   def activeShard(shard: Int): Boolean =
-    statusMap(shard) == ShardStatusNormal || statusMap(shard) == ShardStatusRecovery
+    statusMap(shard) == ShardStatusNormal || statusMap(shard).isInstanceOf[ShardStatusRecovery]
   def activeShards(shards: Seq[Int]): Seq[Int] = shards.filter(activeShard)
 
   /**
@@ -165,8 +165,8 @@ class ShardMapper(val numShards: Int) extends Serializable {
     case ShardAssignmentStarted(_, shard, node) =>
       statusMap(shard) = ShardBeingAssigned
       registerNode(Seq(shard), node)
-    case RecoveryStarted(_, shard, node) =>
-      statusMap(shard) = ShardStatusRecovery
+    case RecoveryStarted(_, shard, node, progress) =>
+      statusMap(shard) = ShardStatusRecovery(progress)
       registerNode(Seq(shard), node)
     case IngestionError(_, shard, _) =>
       Success(())

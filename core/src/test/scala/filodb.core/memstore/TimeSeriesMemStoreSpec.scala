@@ -197,6 +197,35 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     agg1.result should equal (Array((1 to 100).map(_.toDouble).sum))
   }
 
+  import Iterators._
+
+  it("should recoveryStream, skip some records, and receive a stream of offset updates") {
+    // There are 4 subgroups within the shard.  Set up the watermarks like this:
+    // 0 -> 5, 1 -> 10, 2 -> 15, 3 -> 20
+    // A whole bunch of records should be skipped.  Cut off the stream at record 50.
+
+    memStore.setup(dataset1, 0)
+    val initChunksWritten = memStore.sink.sinkStats.chunksetsWritten
+    val checkpoints = Map(0 -> 5L, 1 -> 10L, 2 -> 15L, 3 -> 20L)
+
+    val stream = Observable.fromIterable(records(linearMultiSeries()).take(100).grouped(5).toSeq)
+    val offsets = memStore.recoverStream(dataset1.ref, 0, stream, checkpoints, 10L)
+                          .until(_ >= 50L).toListL.runAsync.futureValue
+
+    // Last element exceeding condition should be included
+    offsets.drop(1) shouldEqual Seq(29L, 39L, 49L, 59L)
+    // no flushes
+    memStore.sink.sinkStats.chunksetsWritten shouldEqual initChunksWritten
+
+    // Should have less than 50 records ingested
+    // Try reading - should be able to read optimized chunks too
+    val splits = memStore.getScanSplits(dataset1.ref, 1)
+    val query = QuerySpec("min", AggregationFunction.Count)
+    val agg1 = memStore.aggregate(dataset1, query, FilteredPartitionScan(splits.head))
+                       .get.runAsync.futureValue
+    agg1.result should equal (Array(46))
+  }
+
   it("should truncate shards properly") {
     memStore.setup(dataset1, 0)
     val data = records(multiSeriesData()).take(20)   // 2 records per series x 10 series

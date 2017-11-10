@@ -97,7 +97,7 @@ abstract class IngestionStreamClusterSpec extends ClusterSpec(IngestionStreamClu
                                              batch-size = 10
                                              resource = "/GDELT-sample-test.csv"
                                              """)
-      val stream = (new CsvStreamFactory).create(config, dataset6, 0)
+      val stream = (new CsvStreamFactory).create(config, dataset6, 0, None)
 
       receiveWhile(messages = resources.numShards) {
         case e: IngestionStarted =>

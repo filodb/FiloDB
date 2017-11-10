@@ -13,12 +13,13 @@ object FlushStream {
   /**
    * Produces a stream of FlushCommands at the interval defined by period.  Note that if there is backpressure
    * then there might be bunching of FlushCommands.
-   * The group number round robins from 0 to (numGroups - 1).
+   * The group number round robins from 0 to (numGroups - 1) starting at startingGroupNo
    * @param numGroups the number of groups to round robin
    * @param period the period of flush commands.  Every period the next group will be flushed.
+   * @param startingGroupNo the starting group number
    */
-  def interval(numGroups: Int, period: FiniteDuration): Observable[FlushCommand] =
-    Observable.interval(period).map { n => FlushCommand(n.toInt % numGroups) }
+  def interval(numGroups: Int, period: FiniteDuration, startingGroupNo: Int = 0): Observable[FlushCommand] =
+    Observable.interval(period).map { n => FlushCommand((n + startingGroupNo).toInt % numGroups) }
 
   /**
    * Produces a stream of FlushCommands approximately every nRecords input records.

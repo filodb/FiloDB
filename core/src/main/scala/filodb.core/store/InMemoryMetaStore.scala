@@ -19,12 +19,14 @@ class InMemoryMetaStore(implicit val ec: ExecutionContext) extends MetaStore wit
   logger.info("Starting InMemoryMetaStore...")
 
   val datasets = new TrieMap[String, Dataset]
+  val checkpoints = new TrieMap[(String, Int), Map[Int, Long]].withDefaultValue(Map.empty)
 
   def initialize(): Future[Response] = Future.successful(Success)
 
   def clearAllData(): Future[Response] = Future {
     logger.warn("Clearing all data!")
     datasets.clear()
+    checkpoints.clear()
     Success
   }
 
@@ -57,14 +59,18 @@ class InMemoryMetaStore(implicit val ec: ExecutionContext) extends MetaStore wit
   def shutdown(): Unit = {}
 
   override def writeCheckpoint(dataset: DatasetRef, shardNum: Int, groupNum: Int, offset: Long): Future[Response] = {
+    val groupMap = checkpoints((dataset.dataset, shardNum))
+    checkpoints((dataset.dataset, shardNum)) = groupMap + (groupNum -> offset)
     Future.successful(Success)
   }
 
-  override def readEarliestCheckpoint(dataset: DatasetRef, shardNum: Int): Future[Long] = {
-    throw new UnsupportedOperationException
-  }
+  override def readEarliestCheckpoint(dataset: DatasetRef, shardNum: Int): Future[Long] =
+    readCheckpoints(dataset, shardNum).map {
+      case checkpoints if checkpoints.nonEmpty => checkpoints.values.min
+      case checkpoints                         => Long.MinValue
+    }
 
-  override def readCheckpoints(dataset: DatasetRef, shardNum: Int): Future[Map[Int, Long]] = {
-    throw new UnsupportedOperationException
+  override def readCheckpoints(dataset: DatasetRef, shardNum: Int): Future[Map[Int, Long]] = Future {
+    checkpoints((dataset.dataset, shardNum))
   }
 }

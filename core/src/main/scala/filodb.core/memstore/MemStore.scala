@@ -1,10 +1,10 @@
 package filodb.core.memstore
 
 import filodb.core.metadata.{Column, Dataset}
-import filodb.core.store.{ChunkSink, ChunkSource}
+import filodb.core.store.{ChunkSink, ChunkSource, MetaStore}
 import filodb.core.{DatasetRef, ErrorResponse}
-import filodb.memory.MemFactory
 import filodb.memory.format.{vectors => bv, _}
+import filodb.memory.MemFactory
 
 import monix.execution.{CancelableFuture, Scheduler}
 import monix.reactive.Observable
@@ -32,6 +32,7 @@ final case class FlushError(err: ErrorResponse) extends Exception(s"Flush error 
  */
 trait MemStore extends ChunkSource {
   def sink: ChunkSink
+  def metastore: MetaStore
 
   /**
    * Sets up one shard of a dataset for ingestion and the schema to be used when ingesting.
@@ -76,6 +77,33 @@ trait MemStore extends ChunkSource {
                    flushStream: Observable[FlushCommand] = FlushStream.empty)
                   (errHandler: Throwable => Unit)
                   (implicit sched: Scheduler): CancelableFuture[Unit]
+
+  /**
+   * Sets up streaming recovery of a shard from ingest records.  This is a separate API for several reasons:
+   * 1. No flushing occurs during recovery.  We are recovering the write buffers before they get flushed.
+   * 2. Ingested records that have an offset below the group watermark in checkpoints are skipped. They should have
+   *    been flushed already.
+   * 3. This returns an Observable of offsets that are read in, at roughly every "reportingInterval" offsets.  This
+   *    is used for reporting recovery progress and to know when to end the recovery stream.
+   *
+   * This allows a MemStore to implement a more efficient recovery stream.  Some assumptions are made:
+   * - The stream should restart from the min(checkpoints)
+   * - The caller is responsible for subscribing the resulting stream, ending it, and handling errors
+   *
+   * @param dataset the dataset to ingest/recover into
+   * @param shard shard number to ingest/recover into
+   * @param stream the stream of records, with schema conforming to that used in setup().  It should restart from the
+   *               min(checkpoints)
+   * @param checkpoints the write checkpoints for each subgroup, a Map(subgroup# -> checkpoint).  Records for that
+   *                    subgroup with an offset below the checkpoint will be skipped, since they have been persisted.
+   * @param reportingInterval the interval at which the latest offsets ingested will be sent back
+   * @return an Observable of the latest ingested offsets.  Caller is responsible for subscribing and ending the stream
+   */
+  def recoverStream(dataset: DatasetRef,
+                    shard: Int,
+                    stream: Observable[Seq[IngestRecord]],
+                    checkpoints: Map[Int, Long],
+                    reportingInterval: Long): Observable[Long]
 
   /**
    * Returns the names of tags or columns that are indexed at the partition level, across

@@ -33,11 +33,11 @@ sourceconfig {
   filo-topic-name = "topics.topic1"
   filo-kafka-servers = ["host1:port", "host2:port"]
   filo-record-converter = "com.example.CustomRecordConverter"
+  # And any standard kafka configurations, e.g.
+  # auto.offset.reset=latest
+  # value.deserializer = "com.example.CustomKafkaDeserializer"
+  # partitioner.class = "com.example.OptionalCustomPartitioner"
 }
-# And any standard kafka configurations, e.g.
-auto.offset.reset=latest
-value.deserializer = "com.example.CustomKafkaDeserializer"
-partitioner.class = "com.example.OptionalCustomPartitioner"
 ```
 The [defaults](../kafka/src/main/resources/filodb-defaults.conf) you can override and see
 [all configuration here](../kafka/src/main/resources).

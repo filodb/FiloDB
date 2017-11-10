@@ -83,7 +83,7 @@ class KafkaIngestionStreamSuite extends ConfigSpec with StrictLogging {
           val streamFactory = ctor.newInstance().asInstanceOf[IngestionStreamFactory]
           streamFactory.isInstanceOf[KafkaIngestionStreamFactory] should be(true)
           val stream = streamFactory
-            .create(settings.config, dataset, partition)
+            .create(settings.config, dataset, partition, None)
             .get
             .take(count)
 

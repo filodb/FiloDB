@@ -46,12 +46,15 @@ object CsvStream extends StrictLogging {
  * Then the header will be parsed automatically.
  * Otherwise you must pass in the column names in the config.
  *
+ * Offsets created are the line numbers, where the first line after the header is offset 0, next one 1, etc.
+ * This Stream Factory is capable of rewinding to a given line number when given a positive offset.
+ *
  * NOTE: right now this only works with a single shard.
  */
 class CsvStreamFactory extends IngestionStreamFactory {
   import CsvStream._
 
-  def create(config: Config, dataset: Dataset, shard: Int): IngestionStream = {
+  def create(config: Config, dataset: Dataset, shard: Int, offset: Option[Long]): IngestionStream = {
     require(shard == 0, s"Shard on creation must be shard 0 but was '$shard'.")
     val settings = CsvStreamSettings(config.getBoolean("header"),
                      config.as[Option[Int]]("batch-size").getOrElse(BatchSize),
@@ -67,7 +70,7 @@ class CsvStreamFactory extends IngestionStreamFactory {
     } else {
       (config.as[Seq[String]]("column-names"), new CSVReader(reader, settings.separatorChar))
     }
-    new CsvStream(csvReader, dataset, columnNames, settings)
+    new CsvStream(csvReader, dataset, columnNames, settings, offset)
   }
 }
 
@@ -75,18 +78,29 @@ class CsvStreamFactory extends IngestionStreamFactory {
  * CSV post-header reader.
  * Either the CSV file has no headers, in which case the column names must be supplied,
  * or you can read the first line and parse the headers and then invoke this class.
+ *
+ * @param offset the number of lines to skip; must be >=0 and <= Int.MaxValue or will reset to 0
  */
 private[filodb] class CsvStream(csvReader: CSVReader,
                                 dataset: Dataset,
                                 columnNames: Seq[String],
-                                settings: CsvStream.CsvStreamSettings) extends IngestionStream with StrictLogging {
+                                settings: CsvStream.CsvStreamSettings,
+                                offset: Option[Long]) extends IngestionStream with StrictLogging {
   import collection.JavaConverters._
+
+  val numLinesToSkip = offset.filter(n => n >= 0 && n <= Int.MaxValue).map(_.toInt)
+                             .getOrElse {
+                               logger.info(s"Possibly resetting offset to 0; supplied offset $offset")
+                               0
+                             }
 
   val routing = IngestRouting(dataset, columnNames)
   logger.info(s"CsvStream started with dataset ${dataset.ref}, columnNames $columnNames, routing $routing")
+  if (numLinesToSkip > 0) logger.info(s"Skipping initial $numLinesToSkip lines...")
 
   val batchIterator = csvReader.iterator.asScala
                         .zipWithIndex
+                        .drop(numLinesToSkip)
                         .map { case (tokens, idx) =>
                           IngestRecord(routing, ArrayStringRowReader(tokens), idx)
                         }.grouped(settings.batchSize)

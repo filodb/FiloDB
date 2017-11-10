@@ -85,6 +85,25 @@ extends MemStore with StrictLogging {
     }.getOrElse(throw new IllegalArgumentException(s"dataset $dataset / shard $shard not setup"))
   }
 
+  // a more optimized ingest stream handler specifically for recovery
+  // TODO: See if we can parallelize ingestion stream for even better throughput
+  def recoverStream(dataset: DatasetRef,
+                    shard: Int,
+                    stream: Observable[Seq[IngestRecord]],
+                    checkpoints: Map[Int, Long],
+                    reportingInterval: Long): Observable[Long] = {
+    getShard(dataset, shard).map { shard =>
+      shard.setGroupWatermarks(checkpoints)
+      var targetOffset = checkpoints.values.min + reportingInterval
+      stream.map(shard.ingest(_))
+            .collect {
+              case offset if offset > targetOffset =>
+                targetOffset += reportingInterval
+                offset
+            }
+    }.getOrElse(throw new IllegalArgumentException(s"dataset $dataset / shard $shard not setup"))
+  }
+
   def indexNames(dataset: DatasetRef): Iterator[(String, Int)] =
     datasets.get(dataset).map { shards =>
       shards.entrySet.iterator.asScala.flatMap { entry =>
@@ -180,8 +199,9 @@ class TimeSeriesShard(dataset: Dataset, config: Config, val shardNum: Int, sink:
     def next: TimeSeriesPartition = partitions(intIt.next)
   }
 
-  def ingest(rows: Seq[IngestRecord]): Unit = {
+  def ingest(rows: Seq[IngestRecord]): Long = {
     // now go through each row, find the partition and call partition ingest
+    var numActuallyIngested = 0
     rows.foreach { case IngestRecord(partKey, data, offset) =>
       // RECOVERY: Check the watermark for the group that this record is part of.  If the offset is < watermark,
       // then do not bother with the expensive partition key comparison and ingestion.  Just skip it
@@ -190,11 +210,13 @@ class TimeSeriesShard(dataset: Dataset, config: Config, val shardNum: Int, sink:
       } else {
         val partition = keyMap.getOrElse(partKey, addPartition(partKey))
         partition.ingest(data, offset)
-        _offset = offset
+        numActuallyIngested += 1
       }
     }
-    rowsIngested.increment(rows.length)
-    ingested += rows.length
+    rowsIngested.increment(numActuallyIngested)
+    ingested += numActuallyIngested
+    if (rows.nonEmpty) _offset = rows.last.offset
+    _offset
   }
 
   def indexNames: Iterator[String] = keyIndex.indexNames
@@ -206,6 +228,14 @@ class TimeSeriesShard(dataset: Dataset, config: Config, val shardNum: Int, sink:
   def numActivePartitions: Int = keyMap.size
 
   def latestOffset: Long = _offset
+
+  /**
+   * Sets the watermark for each subgroup.  If an ingested record offset is below this watermark then it will be
+   * assumed to already have been persisted, and the record will be discarded.  Use only for recovery.
+   * @param watermarks a Map from group number to watermark
+   */
+  def setGroupWatermarks(watermarks: Map[Int, Long]): Unit =
+    watermarks.foreach { case (group, mark) => groupWatermark(group) = mark }
 
   private final def group(partKey: SchemaRowReader): Int = Math.abs(partKey.hashCode % numGroups)
 
