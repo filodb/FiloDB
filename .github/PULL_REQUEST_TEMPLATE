@@ -1,0 +1,28 @@
+**Pull Request checklist**
+
+- [ ] The commit(s) message(s) follows the contribution [guidelines](CONTRIBUTING.md) ?
+- [ ] Tests for the changes have been added (for bug fixes / features) ?
+- [ ] Docs have been added / updated (for bug fixes / features) ?
+
+**Current behavior :** (link exiting issues here : https://help.github.com/articles/basic-writing-and-formatting-syntax/#referencing-issues-and-pull-requests)
+
+
+
+**New behavior :**
+
+
+
+**BREAKING CHANGES**
+
+If this PR contains a breaking change, please describe the impact and migration
+path for existing applications.
+If not please remove this section.
+
+Breaking changes may include:
+- Any schema changes to any Cassandra tables
+- The serialized format for Dataset and Column (see .toString methods)
+- Over the wire formats for Akka messages / case classes
+- Changes to the HTTP public API
+- Changes to query parsing / PromQL parsing
+
+**Other information**:
