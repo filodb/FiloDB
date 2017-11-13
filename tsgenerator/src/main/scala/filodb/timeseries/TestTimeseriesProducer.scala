@@ -47,9 +47,12 @@ object TestTimeseriesProducer extends StrictLogging {
       case None =>
         logger.info("Provide valid number of samples as an argument")
       case Some(n) =>
-        logger.info(s"Started producing $n messages into topic $topicName")
         implicit val io = Scheduler.io("kafka-producer")
-        val stream = timeSeriesData().take(n)
+        val numInstances = 5
+        val startTime = System.currentTimeMillis() - n.toLong * numInstances * 10000
+        logger.info(s"Started producing $n messages into topic $topicName with timestamps " +
+                    s"from ${n.toLong * numInstances * 10 / 60} minutes ago")
+        val stream = timeSeriesData(startTime, numInstances).take(n)
         val producer = KafkaProducerSink[JLong, String](producerCfg, io)
         val sinkT = Observable.fromIterable(stream)
           .map { case (partition, value) =>
@@ -84,7 +87,7 @@ object TestTimeseriesProducer extends StrictLogging {
       val app = (n >> 3) & oneBitMask
       val host = (n >> 4) & twoBitMask
       val instance = n % numInstances
-      val timestamp = startTime + (n / numInstances) * 10000 // generate 1 sample every 10s for each instance
+      val timestamp = startTime + (n.toLong * 10000 / numInstances)  // generate 1 sample every 10s for each instance
       val value = 15 + Math.sin(n + 1) + rand.nextGaussian()
 
       //scalastyle:off line.size.limit

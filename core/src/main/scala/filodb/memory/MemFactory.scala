@@ -159,7 +159,7 @@ class BlockHolder(blockStore: BlockManager) extends MemFactory {
   /**
     * Allocates memory for requested size.
     *
-    * @param size Request memory allocation size in bytes
+    * @param allocateSize Request memory allocation size in bytes
     * @return Memory which has a base, offset and a length
     */
   override def allocateWithMagicHeader(allocateSize: Int): Memory = {

@@ -9,7 +9,7 @@ import org.scalatest.concurrent.ScalaFutures
 import filodb.core._
 import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.query.{AggregationFunction, ColumnFilter, Filter}
-import filodb.core.store.{FilteredPartitionScan, InMemoryMetaStore, NullChunkSink, QuerySpec, SinglePartitionScan}
+import filodb.core.store.{FilteredPartitionScan, InMemoryMetaStore, NullColumnStore, QuerySpec, SinglePartitionScan}
 import filodb.memory.format.ZeroCopyUTF8String
 
 class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter with ScalaFutures {
@@ -19,7 +19,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
   import ZeroCopyUTF8String._
 
   val config = ConfigFactory.load("application_test.conf").getConfig("filodb")
-  val memStore = new TimeSeriesMemStore(config, new NullChunkSink, new InMemoryMetaStore())
+  val memStore = new TimeSeriesMemStore(config, new NullColumnStore, new InMemoryMetaStore())
 
   after {
     memStore.reset()

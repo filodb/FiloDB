@@ -1,7 +1,18 @@
 package filodb.core.memstore
 
+import java.lang.management.ManagementFactory
+
+import scala.concurrent.duration._
+
 import scalaxy.loops._
 
+import com.typesafe.scalalogging.StrictLogging
+import kamon.Kamon
+import monix.eval.Task
+import monix.reactive.Observable
+import org.jctools.maps.NonBlockingHashMapLong
+
+import filodb.core.Iterators
 import filodb.core.Types._
 import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.metadata.Dataset
@@ -9,9 +20,6 @@ import filodb.core.query.{ChunkIDPartitionChunkIndex, ChunkSetReader}
 import filodb.core.store._
 import filodb.memory.BlockHolder
 import filodb.memory.format._
-
-import kamon.Kamon
-import org.jctools.maps.NonBlockingHashMapLong
 
 object TimeSeriesPartition {
   val numChunksEncoded = Kamon.metrics.counter("memstore-chunks-encoded")
@@ -21,6 +29,7 @@ object TimeSeriesPartition {
 
 /**
  * A MemStore Partition holding chunks of data for different columns (a schema) for time series use cases.
+ *
  * This implies:
  * - New data is assumed to mostly be increasing in time
  * - Thus newer chunks generally contain newer stretches of time
@@ -35,24 +44,29 @@ object TimeSeriesPartition {
  *     This allows for safe and cheap write buffer churn without losing any data.
  *   switchBuffers() is called before flush() is called in another thread, possibly.
  *
+ * This partition accepts as parameter a chunk source that represents the persistent column store
+ * to fetch older chunks for the partition to support read-through caching. Chunks are fetched from the persistent
+ * store lazily when a query requests chunks from the partition.
+ *
  * TODO: eliminate chunkIDs, that can be stored in the index
  */
 class TimeSeriesPartition(val dataset: Dataset,
                           val binPartition: PartitionKey,
                           val shard: Int,
-                          bufferPool: WriteBufferPool) extends FiloPartition {
-  import ChunkSetInfo._
+                          val chunkSource: ChunkSource,
+                          bufferPool: WriteBufferPool) extends FiloPartition with StrictLogging {
   import TimeSeriesPartition._
+  import ChunkSetInfo._
 
   /**
-    * This is a map from chunkId to the Array of chunks(BinaryVector) corresponding to that chunkId.
+    * This is a map from chunkId to the Array of optimized/frozen chunks(BinaryVector) corresponding to that chunkId.
     *
     * NOTE: private final compiles down to a field in bytecode, faster than method invocation
     */
   private final val vectors = new NonBlockingHashMapLong[Array[BinaryVector[_]]](32, false)
 
   /**
-    * As new chunks are initialized in this partition, the ids are appended to this queue
+    * As new chunks are initialized in this partition, their ids are appended to this queue
     */
   private final val chunkIDs = new collection.mutable.Queue[ChunkID]
 
@@ -109,6 +123,15 @@ class TimeSeriesPartition(val dataset: Dataset,
     * Number of columns in the dataset
     */
   private final val numColumns = appenders.size
+
+
+  private val jvmStartTime = ManagementFactory.getRuntimeMXBean.getStartTime
+
+  // TODO data retention has not been implemented as a feature yet.
+  // There are pending design decisions, so punting on the config
+  private val dataRetentionTime = 3.days.toMillis
+
+  private var partitionLoadedFromPersistentStore = false
 
   // Not used for now
   // private final val partitionVectors = new Array[FiloVector[_]](dataset.partitionColumns.length)
@@ -225,7 +248,7 @@ class TimeSeriesPartition(val dataset: Dataset,
     finalVectors
   }
 
-  def readers(method: ChunkScanMethod, columnIds: Array[Int]): Iterator[ChunkSetReader] = {
+  private def readersFromMemory(method: ChunkScanMethod, columnIds: Array[Int]): Iterator[ChunkSetReader] = {
     val infosSkips = method match {
       case AllChunkScan               => index.allChunks ++ latestChunkIt
       // To derive time range: r.startkey.getLong(0) -> r.endkey.getLong(0)
@@ -251,4 +274,69 @@ class TimeSeriesPartition(val dataset: Dataset,
     vectors.put(newChunkID, currentChunks.asInstanceOf[Array[BinaryVector[_]]])
     chunkIDs += newChunkID
   }
+
+  /**
+    * Indicates that the partition's chunks have been loaded from persistent store into memory
+    * and the reads do not need to go to the persistent column store
+    *
+    * @return true if chunks have been loaded, false otherwise
+    */
+  private def cacheIsWarm = {
+    if (partitionLoadedFromPersistentStore) {
+      true
+    } else {
+      val timeSinceStart = System.currentTimeMillis - jvmStartTime
+      timeSinceStart > dataRetentionTime
+    }
+  }
+
+  override def streamReaders(method: ChunkScanMethod, columnIds: Array[Int]): Observable[ChunkSetReader] = {
+    if (cacheIsWarm) { // provide read-through functionality
+      super.streamReaders(method, columnIds) // return data from memory
+    } else {
+      // fetch data from colStore
+      Observable.fromTask(ingestChunksFromColStore()) flatMap { _ =>
+        // then read memstore to return response for query
+        super.streamReaders(method, columnIds)
+      }
+    }
+  }
+
+  override def readers(method: ChunkScanMethod, columnIds: Array[Int]): Iterator[ChunkSetReader] = {
+    import Iterators._
+    if (cacheIsWarm) { // provide read-through functionality
+      readersFromMemory(method, columnIds) // return data from memory
+    } else {
+      // fetch data from colStore
+      Observable.fromTask(ingestChunksFromColStore()).map { _ =>
+        // then read memstore to return response for query
+        readersFromMemory(method, columnIds)
+      }.toIterator().flatten
+    }
+    // Runtime errors are thrown back to caller
+  }
+
+  /**
+    * Helper function to read chunks from colStore and write into memStore.
+    *
+    * IMPORTANT NOTE: It is possible that multiple queries are causing concurrent loading of data from Cassandra
+    * at the same time. We do not prevent parallel loads from cassandra since the ingestOptimizedChunks call
+    * is idempotent. Keeps the implementation simple. Revisit later if this is really an issue.
+    *
+    */
+  private def ingestChunksFromColStore(): Task[Unit] = {
+    logger.trace(s"Ingesting Chunks for Cassandra into Memstore for partition key $binPartition")
+    val readers = chunkSource.scanPartitions(dataset, SinglePartitionScan(binPartition, shard))
+      .take(1)
+      .flatMap(_.streamReaders(AllChunkScan, dataset.dataColumns.map(_.id).toArray)) // all chunks, all columns
+    readers.map { r =>
+      // TODO r.vectors is on-heap. It should be copied to the offheap store before adding to index.
+      vectors.put(r.info.id, r.vectors.map(_.asInstanceOf[BinaryVector[_]]))
+      index.add(r.info, Nil)
+    }.completedL.map { _ =>
+      logger.trace(s"Successfully ingested chunks from cassandra into Memstore for partition key $binPartition")
+      partitionLoadedFromPersistentStore = true
+    }
+  }
+
 }

@@ -6,7 +6,7 @@ import org.scalatest.concurrent.ScalaFutures
 
 import filodb.core._
 import filodb.core.memstore.TimeSeriesMemStore
-import filodb.core.store.{FilteredPartitionScan, InMemoryMetaStore, NullChunkSink, QuerySpec, RowKeyChunkScan}
+import filodb.core.store.{FilteredPartitionScan, InMemoryMetaStore, NullColumnStore, QuerySpec, RowKeyChunkScan}
 
 class TimeGroupingAggregateSpec extends FunSpec with Matchers with BeforeAndAfter with ScalaFutures {
   import monix.execution.Scheduler.Implicits.global
@@ -14,7 +14,7 @@ class TimeGroupingAggregateSpec extends FunSpec with Matchers with BeforeAndAfte
   import MachineMetricsData._
 
   val config = ConfigFactory.load("application_test.conf").getConfig("filodb")
-  val memStore = new TimeSeriesMemStore(config, new NullChunkSink, new InMemoryMetaStore())
+  val memStore = new TimeSeriesMemStore(config, new NullColumnStore, new InMemoryMetaStore())
 
   after {
     memStore.reset()

@@ -157,13 +157,10 @@ object MachineMetricsData {
 
   val columns = Seq("timestamp:long", "min:double", "avg:double", "max:double", "p90:double")
 
-  val dataset = Dataset("metrics", Nil, columns)
-  val datasetRef = dataset.ref
-
-  def singleSeriesData(): Stream[Product] = {
-    val initTs = System.currentTimeMillis
+  def singleSeriesData(initTs: Long = System.currentTimeMillis,
+                       incr: Long = 1000): Stream[Product] = {
     Stream.from(0).map { n =>
-      (Some(initTs + n * 1000),
+      (Some(initTs + n * incr),
        Some((45 + nextInt(10)).toDouble),
        Some((60 + nextInt(25)).toDouble),
        Some((100 + nextInt(15)).toDouble),

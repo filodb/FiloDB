@@ -31,6 +31,10 @@ final case class FlushError(err: ErrorResponse) extends Exception(s"Flush error 
  * each shard.
  */
 trait MemStore extends ChunkSource {
+
+  /**
+    * Persistent chunk sink. Ingested data will eventually be poured into this sink for persistence
+    */
   def sink: ChunkSink
   def metastore: MetaStore
 

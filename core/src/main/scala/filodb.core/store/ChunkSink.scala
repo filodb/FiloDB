@@ -81,8 +81,9 @@ class ChunkSinkStats {
 /**
  * NullChunkSink keeps stats but other than that writes chunks nowhere.  It's convenient for testing though.
  */
-class NullChunkSink(implicit sched: Scheduler) extends ChunkSink with StrictLogging {
+class NullColumnStore(implicit sched: Scheduler) extends ColumnStore with StrictLogging {
   val sinkStats = new ChunkSinkStats
+  val stats = new ChunkSourceStats
 
   def write(dataset: Dataset, chunksets: Observable[ChunkSet]): Future[Response] = {
     chunksets.foreach { chunkset =>
@@ -102,4 +103,11 @@ class NullChunkSink(implicit sched: Scheduler) extends ChunkSink with StrictLogg
   def dropDataset(dataset: DatasetRef): Future[Response] = Future.successful(Success)
 
   def reset(): Unit = {}
+
+  override def shutdown(): Unit = {}
+
+  override def scanPartitions(dataset: Dataset,
+                              partMethod: PartitionScanMethod): Observable[FiloPartition] = Observable.empty
+
+  override def getScanSplits(dataset: DatasetRef, splitsPerNode: Int): Seq[ScanSplit] = Seq.empty
 }

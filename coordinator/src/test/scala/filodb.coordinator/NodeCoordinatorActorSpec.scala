@@ -134,7 +134,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       probe.expectMsg(DatasetCreated)
 
       startIngestion(MachineMetricsData.dataset1, numShards)
-      dataset.ref
+      dataset1.ref
     }
 
     it("should return UnknownDataset if attempting to query before ingestion set up") {

@@ -4,14 +4,6 @@ import scala.collection.mutable.{ArrayBuffer, HashMap}
 import scala.concurrent.ExecutionContext
 import scala.concurrent.duration._
 
-import filodb.core.Types.PartitionKey
-import filodb.core.metadata.Dataset
-import filodb.core.query.PartitionKeyIndex
-import filodb.core.store._
-import filodb.core.{DatasetRef, ErrorResponse, Response, Success}
-import filodb.memory.format.{SchemaRowReader, ZeroCopyUTF8String}
-import filodb.memory.{BlockHolder, NativeMemoryManager, PageAlignedBlockManager}
-
 import com.googlecode.javaewah.{EWAHCompressedBitmap, IntIterator}
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
@@ -22,7 +14,15 @@ import monix.execution.{CancelableFuture, Scheduler}
 import monix.reactive.Observable
 import org.jctools.maps.NonBlockingHashMapLong
 
-class TimeSeriesMemStore(config: Config, val sink: ChunkSink, val metastore: MetaStore)
+import filodb.core.{DatasetRef, ErrorResponse, Response, Success}
+import filodb.core.Types.PartitionKey
+import filodb.core.metadata.Dataset
+import filodb.core.query.PartitionKeyIndex
+import filodb.core.store._
+import filodb.memory.{BlockHolder, NativeMemoryManager, PageAlignedBlockManager}
+import filodb.memory.format.{SchemaRowReader, ZeroCopyUTF8String}
+
+class TimeSeriesMemStore(config: Config, val sink: ColumnStore, val metastore: MetaStore)
                         (implicit val ec: ExecutionContext)
 extends MemStore with StrictLogging {
   import collection.JavaConverters._
@@ -171,14 +171,33 @@ object TimeSeriesShard {
  * for that group, up to what offset incoming records for that group has been persisted.  At recovery time, records
  * that fall below the watermark for that group will be skipped (since they can be recovered from disk).
  */
-class TimeSeriesShard(dataset: Dataset, config: Config, val shardNum: Int, sink: ChunkSink, metastore: MetaStore)
-      extends StrictLogging {
+class TimeSeriesShard(dataset: Dataset, config: Config, val shardNum: Int, sink: ColumnStore, metastore: MetaStore)
+  extends StrictLogging {
   import TimeSeriesShard._
 
+  /**
+    * List of all partitions in the shard stored in memory
+    */
   private final val partitions = new ArrayBuffer[TimeSeriesPartition]
+
+  /**
+    * Hash Map from Partition Key to Partition
+    */
   private final val keyMap = new HashMap[SchemaRowReader, TimeSeriesPartition]
+
+  /**
+    * This index helps identify which partition has a given column-value.
+    * Maintained using a high-performance bitmap index
+    */
   private final val keyIndex = new PartitionKeyIndex(dataset)
+  /**
+    * Keeps track of ingested rows, not necessarily flushed
+    */
   private final var ingested = 0L
+
+  /**
+    * Keeps track of last offset ingested into memory (not necessarily flushed)
+    */
   private final var _offset = Long.MinValue
 
   private val maxChunksSize = config.getInt("memstore.max-chunks-size")
@@ -247,31 +266,35 @@ class TimeSeriesShard(dataset: Dataset, config: Config, val shardNum: Int, sink:
     new PartitionIterator(partitionGroups(groupNum).intIterator).foreach(_.switchBuffers())
   }
 
-  def createFlushTask(flushGroup: FlushGroup)(implicit sched: Scheduler): Task[Response] = {
+  def createFlushTask(flushGroup: FlushGroup)(implicit ingestionScheduler: Scheduler): Task[Response] = {
     val blockHolder = new BlockHolder(blockStore)
     // Given the flush group, create an observable of ChunkSets
     val chunkSetIt = new PartitionIterator(partitionGroups(flushGroup.groupNum).intIterator)
-                       .map(_.makeFlushChunks(blockHolder))
-                       .flatten
-    val chunkSetStream = Observable.fromIterator(chunkSetIt)
-    logger.debug(s"Created flush ChunkSets stream for group ${flushGroup.groupNum}")
+                       .flatMap(_.makeFlushChunks(blockHolder))
+    chunkSetIt.isEmpty match {
+      case false =>
+        val chunkSetStream = Observable.fromIterator (chunkSetIt)
+        logger.debug(s"Created flush ChunkSets stream for group ${flushGroup.groupNum}")
 
-    // Write the stream to the sink, checkpoint, mark blocks as eligible for cleanup
-    val taskFuture = for {
-      resp1 <- sink.write(dataset, chunkSetStream)
-      resp2 <- metastore.writeCheckpoint(dataset.ref, shardNum, flushGroup.groupNum, flushGroup.flushWatermark)
-      if resp1 == Success
-    } yield resp2 match {
-      case Success => blockHolder.markUsedBlocksReclaimable()
-                      Success
-        //TODO What does it mean for the flush to fail.
-        //Flush fail means 2 things. The write to the sink failed or writing the checkpoint failed.
-        //We need to add logic to retry these aspects. If the retry succeeds we need mark the blocks reusable.
-        //If the retry fails, we are in a bad state. We have to discards both the buffers and blocks.
-        //Then we ingest from Kafka again.
-      case e: ErrorResponse => throw FlushError(e)
+        // Write the stream to the sink, checkpoint, mark buffers as eligible for cleanup
+        val taskFuture = sink.write (dataset, chunkSetStream) flatMap {
+          case e: ErrorResponse => throw FlushError (e)
+          case Success =>
+            metastore.writeCheckpoint (dataset.ref, shardNum, flushGroup.groupNum, flushGroup.flushWatermark)
+        } map {
+          case Success => blockHolder.markUsedBlocksReclaimable ()
+                          Success
+              //TODO What does it mean for the flush to fail.
+              //Flush fail means 2 things. The write to the sink failed or writing the checkpoint failed.
+              //We need to add logic to retry these aspects. If the retry succeeds we need mark the blocks reusable.
+              //If the retry fails, we are in a bad state. We have to discards both the buffers and blocks.
+              //Then we ingest from Kafka again.
+          case e: ErrorResponse => throw FlushError (e)
+        }
+        Task.fromFuture (taskFuture)
+      case true =>
+        Task { Success }
     }
-    Task.fromFuture(taskFuture)
   }
 
   // Creates a new TimeSeriesPartition, updating indexes
@@ -282,7 +305,7 @@ class TimeSeriesShard(dataset: Dataset, config: Config, val shardNum: Int, sink:
   // and external partition key components need to yield the same hashCode.  IE, use UTF8Strings everywhere.
   private def addPartition(newPartKey: SchemaRowReader): TimeSeriesPartition = {
     val binPartKey = dataset.partKey(newPartKey)
-    val newPart = new TimeSeriesPartition(dataset, binPartKey, shardNum, bufferPool)
+    val newPart = new TimeSeriesPartition(dataset, binPartKey, shardNum, sink, bufferPool)
     val newIndex = partitions.length
     keyIndex.addKey(binPartKey, newIndex)
     partitions += newPart
