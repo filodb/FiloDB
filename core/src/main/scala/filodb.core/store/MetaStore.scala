@@ -2,13 +2,24 @@ package filodb.core.store
 
 import scala.concurrent.Future
 
+import com.typesafe.config.Config
+
 import filodb.core._
 import filodb.core.metadata.Dataset
 
 abstract class MetaStoreError(msg: String) extends Exception(msg)
 
 /**
- * The MetaStore defines an API to read and write dataset metadata.
+ * Contains all the config needed to recreate `NodeClusterActor.SetupDataset`, set up a dataset for streaming
+ * ingestion on FiloDB nodes.   Note: the resources Config needs to be translated by an upper layer.
+ */
+final case class IngestionConfig(ref: DatasetRef,
+                                resources: Config,
+                                streamFactoryClass: String,
+                                streamConfig: Config)
+
+/**
+ * The MetaStore defines an API to read and write datasets, checkpoints, and other metadata.
  * It is not responsible for sharding, partitioning, etc. which is the domain of the ColumnStore.
  * Like the ColumnStore, datasets are partitioned into "databases", like keyspaces in Cassandra.
  */
@@ -55,7 +66,7 @@ trait MetaStore {
   /**
    * Deletes all dataset metadata.  Does not delete column store data.
    * @param ref the DatasetRef defining the dataset to delete
-   * @return Success, or MetadataException, or StorageEngineException
+   * @return Success, or MetadataException, or StorageEngineException; NotFound if dataset not there before
    */
   def deleteDataset(ref: DatasetRef): Future[Response]
 
@@ -99,4 +110,27 @@ trait MetaStore {
     */
   def readCheckpoints(dataset: DatasetRef, shardNum: Int): Future[Map[Int,Long]]
 
+  /**
+   * Writes the ingestion state to the metaStore so it could be recovered later.
+   * Note that the entry is keyed on the DatasetRef, so if this is called for the same DatasetRef then the data
+   * will be overwritten (perhaps use a different database to distinguish?)
+   *
+   * @param state the IngestionConfig to write
+   * @return Success, or MetadataException, or StorageEngineException
+   */
+  def writeIngestionConfig(config: IngestionConfig): Future[Response]
+
+  /**
+   * Reads back all previously defined IngestionConfigs.
+   *
+   * @return a Seq of IngestionConfig's, or Nil if no states exist in the table
+   */
+  def readIngestionConfigs(): Future[Seq[IngestionConfig]]
+
+  /**
+   * Removes a previously persisted IngestionConfig.  This might be useful say if one wanted to stop streaming a dataset
+   *
+   * @return Success if the IngestionConfig was removed successfully, NotFound if it did not exist
+   */
+  def deleteIngestionConfig(ref: DatasetRef): Future[Response]
 }

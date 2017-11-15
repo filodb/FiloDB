@@ -78,7 +78,7 @@ final class NodeGuardian(extension: FilodbCluster,
     */
   private def createCoordinator(requester: ActorRef): Unit = {
     val actor = context.child(CoordinatorName) getOrElse {
-      val props = NodeCoordinatorActor.props(metaStore, memStore, cluster.selfAddress, settings.config)
+      val props = NodeCoordinatorActor.props(metaStore, memStore, settings.config)
       context.actorOf(props, CoordinatorName) }
 
     requester ! CoordinatorRef(actor)

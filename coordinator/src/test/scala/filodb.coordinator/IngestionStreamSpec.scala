@@ -120,7 +120,7 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem)
     "if incorrect shard is sent for the creation of the stream") {
     setup(dataset6.ref, "/GDELT-sample-test.csv", rowsToRead = 5, None)
 
-    val invalidShard = 10
+    val invalidShard = -1
     coordinatorActor ! StartShardIngestion(dataset6.ref, invalidShard, None)
     // We don't know exact order of IngestionStopped vs IngestionError
     (0 to 1).foreach { n =>

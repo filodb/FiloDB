@@ -3,7 +3,7 @@
 [![Join the chat at https://gitter.im/velvia/FiloDB](https://badges.gitter.im/Join%20Chat.svg)](https://gitter.im/velvia/FiloDB?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)
 [![Build Status](https://travis-ci.org/filodb/FiloDB.svg?branch=master)](https://travis-ci.org/filodb/FiloDB)
 
-High-performance distributed analytical database + Spark SQL queries + built for streaming.
+Distributed, real-time, in-memory, massively scalable, multi-schema time series / event / operational database.  Prometheus support.
 
 [filodb-announce](https://groups.google.com/forum/#!forum/filodb-announce) google group
 and [filodb-discuss](https://groups.google.com/forum/#!forum/filodb-discuss) google group
@@ -18,8 +18,6 @@ and [filodb-discuss](https://groups.google.com/forum/#!forum/filodb-discuss) goo
 
 ![](Dantat.jpg)
 
-Columnar, versioned layers of data wrapped in a yummy high-performance analytical database engine.
-
 See [architecture](doc/architecture.md) and [datasets and reading](doc/datasets_reading.md) for more information.  Also see the Spark Notebooks under `doc`... there is one for time-series/geo analysis of the NYC Taxi dataset, and one for interactive charting of the GDELT dataset!
 
 <!-- START doctoc generated TOC please keep comment here to allow auto update -->
@@ -29,17 +27,15 @@ See [architecture](doc/architecture.md) and [datasets and reading](doc/datasets_
 - [Overview](#overview)
   - [Use Cases](#use-cases)
   - [Anti-use-cases](#anti-use-cases)
-  - [Roadmap](#roadmap)
 - [Pre-requisites](#pre-requisites)
 - [Getting Started](#getting-started)
 - [End to End Kafka Developer Setup](#end-to-end-kafka-developer-setup)
+    - [Multiple Servers](#multiple-servers)
 - [Introduction to FiloDB Data Modelling](#introduction-to-filodb-data-modelling)
-  - [Computed Columns](#computed-columns)
-  - [FiloDB vs Cassandra Data Modelling](#filodb-vs-cassandra-data-modelling)
+  - [Example FiloDB Schema for machine metrics](#example-filodb-schema-for-machine-metrics)
   - [Data Modelling and Performance Considerations](#data-modelling-and-performance-considerations)
   - [Predicate Pushdowns](#predicate-pushdowns)
-  - [Example FiloDB Schema for machine metrics](#example-filodb-schema-for-machine-metrics)
-  - [Distributed Partitioning](#distributed-partitioning)
+  - [Sharding](#sharding)
 - [Using FiloDB Data Source with Spark](#using-filodb-data-source-with-spark)
   - [Configuring FiloDB](#configuring-filodb)
     - [Passing Cassandra Authentication Settings](#passing-cassandra-authentication-settings)
@@ -52,8 +48,6 @@ See [architecture](doc/architecture.md) and [datasets and reading](doc/datasets_
   - [Running the CLI](#running-the-cli)
   - [CLI Example](#cli-example)
 - [Current Status](#current-status)
-  - [Upcoming version 0.7 changes:](#upcoming-version-07-changes)
-  - [Version 0.4 change list:](#version-04-change-list)
 - [Deploying](#deploying)
 - [Monitoring and Metrics](#monitoring-and-metrics)
   - [Metrics Sinks](#metrics-sinks)
@@ -66,20 +60,19 @@ See [architecture](doc/architecture.md) and [datasets and reading](doc/datasets_
 
 ## Overview
 
-FiloDB is a new open-source distributed, versioned, and columnar analytical database designed for modern streaming workloads.
+FiloDB is an open-source distributed, real-time, in-memory, massively scalable, multi-schema time series / event / operational database with Prometheus query support and some Spark support as well.
 
-* **High performance** - competitive with Parquet scan speeds, plus filtering along two or more dimensions
-  - Very flexible filtering: filter on only part of a partition key, much more flexible than allowed in Cassandra
-  - Much faster bulk ingestion than raw Cassandra tables
-* **Compact storage** - within 35% of Parquet for CassandraColumnStore
-  - Up to 27x more data stored per GB, compared to Cassandra 2.x, in real world fact table storage
-  - See the blog post on [Apache Cassandra for analytics: a performance and storage analysis](https://www.oreilly.com/ideas/apache-cassandra-for-analytics-a-performance-and-storage-analysis)
-* **Idempotent writes** - primary-key based appends and updates; easy exactly-once ingestion from streaming sources
-* **Distributed** - pluggable storage engine includes Apache Cassandra and in-memory
-* **Low-latency** - minimal SQL query latency of 15ms on one node; sub-second easily achievable with filtering and easy to use concurrency control
-  - See post on [700 SQL Queries per Second in Apache Spark with FiloDB](http://velvia.github.io/Spark-Concurrent-Fast-Queries/)
-* **SQL queries** - plug in Tableau or any tool using JDBC/ODBC drivers
-* Ingest from Spark/Spark Streaming from any supported Spark data source
+The normal configuration for real-time ingestion is deployment as stand-alone processes in a cluster, ingesting directly from Apache Kafka.  The processes form a cluster using peer-to-peer Akka Cluster technology.
+
+* **Massively Scalable** - designed to ingest many millions of entities, sharded across multiple processes, with distributed querying built in
+* **Prometheus PromQL Support**
+* **Tag-based Indexing** - Support for indexing and fast querying over flexible tags for each time series/partition, just like Prometheus
+* **Efficient** - holds a huge amount of data in-memory thanks to columnar compression techniques
+* **Low-latency** - designed for highly concurrent, low-latency workloads such as dashboards and alerting
+* **Real Time** - data immediately available for querying once ingested
+* **Fault Tolerant** - designed for dual-datacenter operation with strong recoverability and no single point of failure. explain explain
+* **Multi-Schema and Multi-Stream** - easily segregate and prioritize different classes of metrics and data.  Easily support different types of events.
+* **Off Heap** - intelligent memory management minimizes garbage collection
 
 [Overview presentation](http://velvia.github.io/presentations/2015-filodb-spark-streaming/#/) -- see the docs folder for design docs.
 
@@ -87,34 +80,25 @@ To compile the .mermaid source files to .png's, install the [Mermaid CLI](http:/
 
 ### Use Cases
 
-* Storage and analysis of streaming event / time series data
-* Data warehousing
-* In-memory database for Spark Streaming analytics
-* Low-latency in-memory SQL database engine
+* Real-time operational metrics storage, querying, dashboards, visibility
+* Distributed tracing (ie Zipkin like) storage
+* Low-latency real-time ad-hoc application metric debugging
+* Real-time event storage and querying
 
 ### Anti-use-cases
 
 * Heavily transactional, update-oriented workflows
-
-### Roadmap
-
-Your input is appreciated!
-
-NOTE: Please beware that significant storage-layer changes are taking place.  For a stable version, please use the `v0.4` release/tag. At the next release, the storage layer should be stable for production use. 
-
-* Kafka input API / connector (without needing Spark)
-* In-memory caching for significant query speedup
-* True columnar querying and execution, using late materialization and vectorization techniques.  GPU/SIMD.
-* Projections.  Often-repeated queries can be sped up significantly with projections.
 
 ## Pre-requisites
 
 1. [Java 8](http://www.oracle.com/technetwork/java/javase/downloads/jdk8-downloads-2133151.html)
 2. [SBT](http://www.scala-sbt.org/) to build
 3. [Apache Cassandra](http://cassandra.apache.org/) 2.x or 3.x (We prefer using [CCM](https://github.com/pcmanus/ccm) for local testing) (Optional if you are using the in-memory column store)
-4. [Apache Spark (2.0)](http://spark.apache.org/)
+4. [Apache Kafka](http://kafka.apache.org/) 0.10.x or above
+ 
+Optional:
 
-NOTE: Please check out the `spark1.6` branch for Spark 1.6 version.
+4. [Apache Spark (2.0)](http://spark.apache.org/)
 
 ## Getting Started
 
@@ -128,19 +112,7 @@ NOTE: Please check out the `spark1.6` branch for Spark 1.6 version.
     - It is recommended you use the last stable released version.
     - To build, run `filo-cli` (see below) and also `sbt spark/assembly`.
 
-2. Choose either the Cassandra column store (default) or the in-memory column store.
-    - Start a Cassandra Cluster.
-    - Copy `core/src/main/resources/filodb-defaults.conf` and modify the Cassandra settings for your cluster.  This step and passing in a custom config may be skipped for a localhost Cassandra cluster with no auth.
-    - Or, use FiloDB's in-memory column store with Spark (does not work with CLI). Pass the `--conf spark.filodb.store=in-memory` to `spark-submit` / `spark-shell`.  This is a great option to test things out, and is really really fast!
-
-3. For Cassandra, update the `keyspace-replication-options` config, then run `filo-cli -Dconfig.file=/path/to/my/filo.conf --command init` to initialize the default `filodb_admin` keyspace.   In addition, you should use CQLSH to create any additional keyspaces you desire to store FiloDB datasets in.
-4. Dataset creation can be done using `filo-cli` or using Spark Shell / Scala/Java API.
-5. Inserting data can be done using `filo-cli` (CSV only), using Spark SQL/JDBC (INSERT INTO), or the Spark Shell / Scala / Java API.
-6. Querying is done using Spark SQL/JDBC or Scala/Java API.
-7. Listing/deleting/maintenance can be done using `filo-cli`.  If using Cassandra, `cqlsh` can also be used to inspect metadata.
-
-Note: There is at least one release out now, tagged via Git and also located in the "Releases" tab on Github.
-
+Follow the instructions below to set up an end to end local environment.
 
 ## End to End Kafka Developer Setup
 
@@ -168,6 +140,7 @@ Build the required projects
 ```
 sbt standalone/assembly cli/assembly tsgenerator/assembly
 ```
+
 First set up the dataset. This should create the keyspaces and tables in Cassandra. 
 ```
 ./filo-cli -Dconfig.file=conf/timeseries-filodb-server.conf  --command init
@@ -265,51 +238,35 @@ Perhaps it's easiest by starting with a diagram of how FiloDB stores data.
 
 Data is modeled and ingested using the two different parts of a record's primary key: the **partition key** and the **row key**.
 
-1. **partition key** - decides how data is going to be distributed across the cluster. All data within one partition key is guaranteed to fit on one node. Similar to the partition key in Cassandra.  May consist of multiple columns with computed columns.
-1. **row key**     - acts as a primary key within each partition. Records with the same row key will replace previous ones. Within each chunkset, records are sorted by row key.  Row keys also facilitate range scans within a partition.
+1. **partition key** - decides how data is going to be distributed across the cluster. All data within one partition key should be routed to the same shard, or Kafka partition, and one shard must fit completely into the memory of a single node.
+1. **row key**     - NOTE: for time series data the row key is only used when doing a range lookup during querying.  Each chunk is delimited by a start and end row key.   OUTDATED: acts as a primary key within each partition. Records with the same row key will replace previous ones. Within each chunkset, records are sorted by row key.  Row keys also facilitate range scans within a partition.
 
 The PRIMARY KEY for FiloDB consists of (partition key, row key).  When choosing the above values you must make sure the combination of the two are unique.  If any component of a primary key contains a null value, then a default value will be substituted.
-
-Specifying the partition key is optional.  If a partition key is not specified, FiloDB will create a default one with a fixed value, which means everything will be thrown into one node, and is only suitable for small amounts of data.  The usual strategy is to find partition keys that distribute data in the cluster and over time.
 
 For examples of data modeling and choosing keys, see the examples below as well as [datasets](doc/datasets_reading.md).
 
 For additional information refer to Data Modeling and Performance Considerations.
 
-### Computed Columns
+### Example FiloDB Schema for machine metrics
 
-You may specify a function, or computed column, for use with partition keys.  This is especially useful for hashing values or time bucketing.
+* Partition key = `metricName:string,tags:map`
+* Row key = `timestamp`
+* Columns: `timestamp:long,value:double`
 
-| Name      | Description     | Example     |
-| :-------- | :-------------- | :---------- |
-| string    | returns a constant string value | `:string /0` |
-| getOrElse | returns default value if column value is null.  This is not needed most of the time as FiloDB will use a default value in case of null, though `:getOrElse` may help with key uniqueness.   NOTE: do not use the default value null for strings. | `:getOrElse columnA ---` |
-| round     | rounds down a numeric column.  Useful for bucketing by time or bucketing numeric IDs.  | `:round timestamp 10000` |
-| stringPrefix | takes the first N chars of a string; good for partitioning | `:stringPrefix token 4` |
-| hash      | hashes keys of any type to an int between 0 and N | `:hash customerID 400` | 
-| timeslice | bucketizes a Long (millisecond) or Timestamp column using duration strings - 500ms, 5s, 10m, 3h, etc. | `:timeslice arrivalTime 30s` |
-| monthOfYear | return 1 to 12 (IntColumn) for the month number of a Long (millisecond) or Timestamp column | `:monthOfYear pickup_datetime` |
+The above is the classic Prometheus-compatible schema.  It supports indexing on any component of the partition key.  Thus standard Prometheus queries that filter by a tag such as `hostname` or `datacenter` for example would work fine.
 
-### FiloDB vs Cassandra Data Modelling
-
-* Like Cassandra, partitions (physical rows) distribute data
-* Like Cassandra, a single partition is the smallest unit of parallelism when querying from Spark
-* Row keys are like Cassandra clustering keys -- they act as primary key within a partition, but sorting works differently due to chunks
-* Wider rows work better for FiloDB (bigger chunk/segment size)
-* FiloDB does not have Cassandra's restrictions for partition key filtering. You can filter by any partition keys with most operators.  This means less tables in FiloDB can match more query patterns.
-* Cassandra range scans within a partition is available via row keys
+If this was for events, you might have multiple columns, and some of them can be strings too.  This totally works fine.  See the example dataset schemas.
 
 ### Data Modelling and Performance Considerations
 
 **Choosing Partition Keys**.
 
 - A good start for a partition key is a hash of an ID or columns that distribute well, plus a time bucket.  This spreads data around but also prevents too much data from piling up in a single partition.
-- Partition keys are the most efficient way to filter data.  Remember that, unlike Cassandra, FiloDB is able to efficiently filter any column in a partition key -- even string contains, IN on only one column.  It can do this because FiloDB pre-scans a much smaller table ahead of scanning the main columnar chunk table.  This flexibility means that there is no need to populate different tables with different orders of partition keys just to optimize for different queries.
-- Target between 10-100 active partitions per node in a cluster during ingestion.  This leads to big chunk sizes that are efficient for reading.  This does not mean that there can only be 100 partitions total; rather that at any one time during ingestion the number of active partitions are limited (another reason why time bucketing is important).
+- Partition keys are the most efficient way to filter data.
+- FiloDB indexes components of a partition key.  A map can be used (when using a Prometheus-like data model for example) and all the keys and values within the map will be indexed, in addition to regular partition key columns.  This allows for very fast in-memory queries across many partitions.
 - If the numer of rows in each partition is too few, then the storage will not be efficient.
-- Consider picking a column or group of columns with low cardinality, and has good distribution so that data is distributed across the cluster.
-- Consider only those columns that do not get updated. Since partition key is part of primary key, partition key columns cannot get updated.
-- For Cassandra, each partition cannot be too big, target 500MB-1GB as a maximum size
+- If the partition key changes during ingestion, then a new partition (or time series) is automatically created, just like in Prometheus.
+- For Cassandra, each partition cannot be too big, target 500MB-1GB as a maximum size.  Usually older data is TTL'ed.
 
 **Row Keys and Chunk Size**.
 
@@ -353,26 +310,9 @@ To help with planning, here is an exact list of the predicate pushdowns (in Spar
 
 Note: You can see predicate pushdown filters in application logs by setting logging level to INFO.
 
-### Example FiloDB Schema for machine metrics
+### Sharding
 
-This is one way I would recommend setting things up to take advantage of FiloDB.
-
-The metric names are the column names.  This lets you select on just one metric and effectively take advantage of columnar layout.
-
-* Partition key = `:hash hostname 100,:timeslice timestamp 1d`
-* Row key = `timestamp,hostname`
-* Columns: hostname, timestamp, CPU, load_avg, disk_usage, etc.
-
-You can add more metrics/columns over time, but storing each metric in its own column is FAR FAR more efficient, at least in FiloDB.   For example, disk usage metrics are likely to have very different numbers than load_avg, and so Filo can optimize the storage of each one independently.  Right now I would store them as ints and longs if possible.
-
-Queries that would work well for the above layout:
-
-- SELECT avg(load_avg), min(load_avg), max(load_avg) FROM metrics WHERE timestamp > t1 AND timestamp < t2
-- The above with filter on a specific hostname (would be single partition read)
-
-### Distributed Partitioning
-
-FiloDB will automatically form a cluster (via Akka Cluster), divide the range of partition keys amongst the nodes using a consistent-hashing algorithm, and re-route incoming records to the right ingestion node.  Thus, users no longer need to sort their incoming data in Spark.
+TODO: add details about FiloDB sharding, the shard-key vs partition key mechanism, etc.
 
 ## Using FiloDB Data Source with Spark
 
@@ -686,32 +626,7 @@ Query/export some columns:
 
 ## Current Status
 
-Version 0.4 is the stable, latest released version.  It has been tested on a cluster for a different variety of schemas, has a stable data model and ingestion, and features a huge number of improvements over the previous version.
-
-### Upcoming version 0.7 changes:
-
-* ALL NEW segmentless data model, much simpler to ingest data efficiently without as much guesswork (no need to determine segment key), especially for streaming apps
-* Range scans over one or more row keys, instead of over segment keys
-* Completely revised, more efficient read path
-* NEW storage layout with incremental indices, provides much better ingestion for large partitions and skewed data 
-* Spark 2.0 and Scala 2.11 (master branch)
-* Automatic routing of ingestion records across the network - no need to `sort` your DataFrame in Spark
-* creating a function for checking java and another to check sbt (@jenaiz)
-
-### Version 0.4 change list:
-
-* Defaults to Spark 1.6.1
-* New metrics and monitoring framework based on Kamon.io, with built in stats logging and statsd output, and tracing of write path
-* Replaced Phantom with direct usage of Java C* driver.  Bonus: use prepared statements, should result in better performance all around especially on ingest; plus supports C* 3.0+
-* WHERE clauses specifying multiple partition keys now get pushed down.  Should result in much better read performance in those cases.
-* New :hash function makes it easier to hash partition key components into smaller cardinality (but specify the full key in WHERE clauses)
-* New config `filodb.cassandra.keyspace-replication-options` allows any CQL replication option to be set when FiloDB keyspaces are created with CLI --command init
-* A few new configs for Cassandra CQL / chunk / sstable compression; can help improve remote read performance
-* CLI log directory can be easily changed with FILO_LOG_DIR env var
-* CLI analyze command can now analyze segments from multiple partitions up to a configurable maximum # of segments
-* Allow comma-separated list of hosts for `filodb.cassandra.hosts`
-* Fix missing data on read issue with wrapping token ranges in C*
-* Fix actor path uniqueness issue on ingestion
+TODO
 
 ## Deploying
 

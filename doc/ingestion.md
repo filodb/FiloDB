@@ -7,6 +7,7 @@
     - [Kafka Ingestion](#kafka-ingestion)
       - [Basic Configuration](#basic-configuration)
       - [Sample Code](#sample-code)
+  - [Recovery and Persistence](#recovery-and-persistence)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
@@ -91,4 +92,23 @@ val task = Task.zip2(Task.fork(streamT), Task.fork(pushT)).runAsync
 ```
 
 You can also look at [SourceSinkSuite.scala](../kafka/src/it/scala/filodb/kafka/SourceSinkSuite.scala).
+
+## Recovery and Persistence
+
+Datasets are divided into shards.  One shard must wholly fit into one node/process.  Within each shard, individual time series or "partitions" are further grouped into sub-groups.  The number of groups per shard is configurable.
+
+Data in a shard are flushed one sub-group at a time, on a rotating basis.  When it is time for a sub-group to be flushed, the write buffers for each time series is then optimized into an immutable chunk and the chunks and a checkpoint is written to a (hopefully) persistent ChunkSink.  A watermark for that sub-group then determines up to which ingest offset data has been persisted (thus, which offset one needs to perform recovery from).
+
+Recovery upon start of ingestion is managed by the coordinator's `IngestionActor`.  The process goes like this:
+
+ 1. StartShardIngestion command is received and start() called
+ 2. MemStore.setup() is called for that shard
+ 3. IF no checkpoint data is found, THEN normal ingestion is started
+ 4. IF checkpoints are found, then recovery is started from the minimum checkpoint offset
+    and goes until the maximum checkpoint offset.  These offsets are per subgroup of the shard.
+    Progress will be sent at regular intervals
+ 5. Once the recovery has proceeded beyond the end checkpoint then normal ingestion is started
+
+Checking on the shard status (possible via CLI right now, perhaps via HTTP in future) will yield a recovery status first with progress %, then after recovery is done, the status will revert back to Normal.
+
 

@@ -1,6 +1,6 @@
 package filodb.coordinator
 
-import akka.actor.{Actor, ActorRef, Props}
+import akka.actor.{Actor, AddressFromURIString, ActorRef, Props}
 import akka.testkit.TestProbe
 import com.typesafe.config.ConfigFactory
 
@@ -9,7 +9,6 @@ import filodb.core.DatasetRef
 import filodb.core.metadata.Dataset
 
 class ShardCoordinatorActorSpec extends AkkaSpec {
-
   import ShardSubscriptions._, ActorName._
 
   private val dataset1 = DatasetRef("one")
@@ -24,6 +23,7 @@ class ShardCoordinatorActorSpec extends AkkaSpec {
   private lazy val conf = ConfigFactory.parseString("akka.remote.netty.tcp.port=0").withFallback(AkkaSpec.serverConfig)
   private lazy val node1 = AkkaSpec.getNewSystem(Some(conf))
   private lazy val node2 = AkkaSpec.getNewSystem(Some(conf))
+  private val selfAddress = AddressFromURIString(s"akka.tcp://${system.name}@$host:2552")
 
   val localCoordinator = system.actorOf(Props(new TestCoordinator(self)), CoordinatorName)
   val downingCoordinator = node1.actorOf(Props(new TestCoordinator(self)), CoordinatorName)
@@ -41,9 +41,9 @@ class ShardCoordinatorActorSpec extends AkkaSpec {
     val shardActor = system.actorOf(Props(new ShardCoordinatorActor(strategy)))
 
     "add self-node coordinator, no datasets created yet" in {
-      shardActor ! AddMember(localCoordinator)
+      shardActor ! AddMember(localCoordinator, selfAddress)
       expectMsgPF() {
-        case CoordinatorAdded(coord, shards) =>
+        case CoordinatorAdded(coord, shards, _) =>
           shards.size shouldEqual 0 // no datasets added yet, thus no shards
           coord shouldEqual localCoordinator
       }
@@ -84,9 +84,9 @@ class ShardCoordinatorActorSpec extends AkkaSpec {
       }
     }
     "add second coordinator, ack to parent" in {
-      shardActor ! AddMember(downingCoordinator)
+      shardActor ! AddMember(downingCoordinator, selfAddress)
       expectMsgPF() {
-        case CoordinatorAdded(coord, shards) =>
+        case CoordinatorAdded(coord, shards, _) =>
           shards.size shouldEqual 1
           shards.head.ref shouldEqual dataset1
           coord shouldEqual downingCoordinator
@@ -121,9 +121,9 @@ class ShardCoordinatorActorSpec extends AkkaSpec {
       }
     }
     "subscribe a third node, expect 2 nodes - second was downed" in {
-      shardActor ! AddMember(thirdCoordinator)
+      shardActor ! AddMember(thirdCoordinator, selfAddress)
       expectMsgPF() {
-        case CoordinatorAdded(coord, datsets) =>
+        case CoordinatorAdded(coord, datsets, _) =>
           datsets.size shouldEqual 1
           (coord compareTo thirdCoordinator) == 0 shouldBe true
       }
@@ -280,9 +280,9 @@ class ShardCoordinatorActorSpec extends AkkaSpec {
       }
 
       // Now subscribe/add a single coordinator.  Check shard assignments
-      shardActor ! AddMember(localCoordinator)
+      shardActor ! AddMember(localCoordinator, selfAddress)
       expectMsgPF() {
-        case CoordinatorAdded(coord, updates) =>
+        case CoordinatorAdded(coord, updates, selfAddress) =>
           updates should have length 1
           updates.head.ref shouldEqual dataset1
           updates.head.shards shouldEqual Seq(0, 1)
@@ -300,9 +300,9 @@ class ShardCoordinatorActorSpec extends AkkaSpec {
       }
 
       // Now subscribe another coordinator.  Check assignments again
-      shardActor ! AddMember(thirdCoordinator)
+      shardActor ! AddMember(thirdCoordinator, selfAddress)
       expectMsgPF() {
-        case CoordinatorAdded(coord, updates) =>
+        case CoordinatorAdded(coord, updates, selfAddress) =>
           updates should have length 1
           updates.head.ref shouldEqual dataset1
           updates.head.shards shouldEqual Seq(2, 3)

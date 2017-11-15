@@ -11,7 +11,7 @@ import com.typesafe.config.{Config, ConfigFactory}
 
 import filodb.core._
 import filodb.core.metadata.Dataset
-import filodb.core.store.MetaStore
+import filodb.core.store.{IngestionConfig, MetaStore}
 
 object NodeClusterActor {
 
@@ -51,7 +51,22 @@ object NodeClusterActor {
    */
   final case class SetupDataset(ref: DatasetRef,
                                 resources: DatasetResourceSpec,
-                                source: IngestionSource)
+                                source: IngestionSource) {
+    import collection.JavaConverters._
+    val resourceConfig = ConfigFactory.parseMap(
+      Map("num-shards" -> resources.numShards, "min-num-nodes" -> resources.minNumNodes).asJava)
+    val config = IngestionConfig(ref, resourceConfig,
+                                 source.streamFactoryClass,
+                                 source.config)
+  }
+
+  object SetupDataset {
+    def apply(source: IngestionConfig): SetupDataset =
+      SetupDataset(source.ref,
+                   DatasetResourceSpec(source.resources.getInt("num-shards"),
+                                       source.resources.getInt("min-num-nodes")),
+                   IngestionSource(source.streamFactoryClass, source.streamConfig))
+  }
 
   // A dummy source to use for tests and when you just want to push new records in
   val noOpSource = IngestionSource(classOf[NoOpStreamFactory].getName)
@@ -119,9 +134,12 @@ object NodeClusterActor {
  * The state includes the state of each node - is it ready for ingestion?  recovering?  etc.  These
  * state changes are watched by for example RowSources to determine when to send data.
  *
+ * When DatasetSetup is received, the setup info is persisted to the MetaStore.  On startup, this actor
+ * will restore previously persisted setup state so that DatasetSetup is not needed and streaming/querying
+ * can restart automatically for datasets previously set up.
+ *
  * TODO: implement UnregisterDataset?  Any state change -> reassign shards?
  * TODO: implement get cluster state
- * TODO: what to preserve to restore properly on cluster exit/rollover? datasets being ingested?
  *
  * There should only be ONE of these for a given cluster.
  *
@@ -160,6 +178,16 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
   override def preStart(): Unit = {
     cluster.subscribe(self, initialStateMode = InitialStateAsEvents,
       classOf[MemberEvent], classOf[UnreachableMember])
+    // Restore previously set up datasets.  This happens asynchronously, and messages may come before or after
+    // membership messages such as MemberUp
+    // TODO: Think about how this will work when NCA has to be migrated to different nodes
+    logger.info(s"Attempting to restore previous ingestion state...")
+    metaStore.readIngestionConfigs()
+             .map(_.foreach { state => self ! SetupDataset(state) })
+             .recover {
+               case e: Exception =>
+                 logger.error(s"Unable to restore ingestion state: $e\nTry manually setting up ingestion again", e)
+             }
   }
 
   override def postStop(): Unit = {
@@ -252,8 +280,7 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
     logger.debug(s"Updated roleToCoords: $roleToCoords")
 
     if (e.roles contains nodeCoordRole) {
-      memberRefs(e.addr) = e.coordinator
-      shardActor ! ShardSubscriptions.AddMember(e.coordinator)
+      shardActor ! ShardSubscriptions.AddMember(e.coordinator, e.addr)
     }
   }
 
@@ -264,7 +291,8 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
 
   /** Initiated by Client and Spark FiloDriver setup. */
   private def setupDataset(setup: SetupDataset, origin: ActorRef): Unit =
-    (for { datasetObj    <- metaStore.getDataset(setup.ref) }
+    (for { datasetObj    <- metaStore.getDataset(setup.ref)
+           resp1         <- metaStore.writeIngestionConfig(setup.config) }
       yield {
         shardActor ! AddDataset(setup, datasetObj, memberRefs.values.toSet, origin)
       }).recover {
@@ -297,6 +325,10 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
   private def coordAdded(e: ShardSubscriptions.CoordinatorAdded): Unit = {
     e.coordinator ! CoordinatorRegistered(self, shardActor)
 
+    // NOTE: it's important that memberRefs happens here, after CoordinatorRegistered is sent out, and not before
+    // otherwise a race condition happens where SetupDataset could be sent to coords before it gets hello, and then
+    // the SetupDataset will fail
+    memberRefs(e.addr) = e.coordinator
     val oneAdded = Set(e.coordinator)
     for {
       DatasetShards(ref, _, shards) <- e.newShards

@@ -31,11 +31,8 @@ trait ActorSpecConfig {
 }
 
 trait SeedNodeConfig {
-
   val host = InetAddress.getLocalHost.getHostAddress
-
   val port = 2552
-
 }
 
 abstract class AbstractTestKit(system: ActorSystem) extends TestKit(system)
@@ -89,6 +86,7 @@ object AkkaSpec extends SeedNodeConfig {
 }
 
 abstract class AkkaSpec(system: ActorSystem) extends AbstractTestKit(system)
+  with SeedNodeConfig
   with WordSpecLike
   with Eventually
   with IntegrationPatience

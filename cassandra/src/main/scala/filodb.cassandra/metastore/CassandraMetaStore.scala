@@ -6,7 +6,7 @@ import scala.concurrent.{ExecutionContext, Future}
 import filodb.cassandra.{DefaultFiloSessionProvider, FiloSessionProvider}
 import filodb.core._
 import filodb.core.metadata.Dataset
-import filodb.core.store.MetaStore
+import filodb.core.store.{IngestionConfig, MetaStore}
 
 /**
  * A class for Cassandra implementation of the MetaStore.
@@ -19,6 +19,7 @@ class CassandraMetaStore(config: Config, filoSessionProvider: Option[FiloSession
   private val sessionProvider = filoSessionProvider.getOrElse(new DefaultFiloSessionProvider(config))
   val datasetTable = new DatasetTable(config, sessionProvider)
   val checkpointTable = new CheckpointTable(config, sessionProvider)
+  val sourcesTable = new IngestionConfigTable(config, sessionProvider)
 
   val defaultKeySpace = config.getString("keyspace")
 
@@ -26,11 +27,13 @@ class CassandraMetaStore(config: Config, filoSessionProvider: Option[FiloSession
     datasetTable.createKeyspace(datasetTable.keyspace)
     datasetTable.initialize()
     checkpointTable.initialize()
+    sourcesTable.initialize()
   }
 
   def clearAllData(): Future[Response] = {
     datasetTable.clearAll()
     checkpointTable.clearAll()
+    sourcesTable.clearAll()
   }
 
   def newDataset(dataset: Dataset): Future[Response] =
@@ -62,4 +65,13 @@ class CassandraMetaStore(config: Config, filoSessionProvider: Option[FiloSession
       if (m.values.isEmpty) Long.MinValue else m.values.min
     }
   }
+
+  def writeIngestionConfig(source: IngestionConfig): Future[Response] =
+    sourcesTable.insertIngestionConfig(source)
+
+  def readIngestionConfigs(): Future[Seq[IngestionConfig]] =
+    sourcesTable.readAllConfigs()
+
+  def deleteIngestionConfig(ref: DatasetRef): Future[Response] =
+    sourcesTable.deleteIngestionConfig(ref)
 }

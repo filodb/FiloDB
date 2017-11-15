@@ -20,6 +20,7 @@ class InMemoryMetaStore(implicit val ec: ExecutionContext) extends MetaStore wit
 
   val datasets = new TrieMap[String, Dataset]
   val checkpoints = new TrieMap[(String, Int), Map[Int, Long]].withDefaultValue(Map.empty)
+  val sources = new TrieMap[DatasetRef, IngestionConfig]
 
   def initialize(): Future[Response] = Future.successful(Success)
 
@@ -27,6 +28,7 @@ class InMemoryMetaStore(implicit val ec: ExecutionContext) extends MetaStore wit
     logger.warn("Clearing all data!")
     datasets.clear()
     checkpoints.clear()
+    sources.clear()
     Success
   }
 
@@ -51,9 +53,8 @@ class InMemoryMetaStore(implicit val ec: ExecutionContext) extends MetaStore wit
     Future.successful(datasets.values.map(_.ref).filter(filterFunc).toSeq)
   }
 
-  def deleteDataset(ref: DatasetRef): Future[Response] = {
-    datasets.remove(ref.dataset)
-    Future.successful(Success)
+  def deleteDataset(ref: DatasetRef): Future[Response] = Future {
+    datasets.remove(ref.dataset).map(x => Success).getOrElse(NotFound)
   }
 
   def shutdown(): Unit = {}
@@ -72,5 +73,17 @@ class InMemoryMetaStore(implicit val ec: ExecutionContext) extends MetaStore wit
 
   override def readCheckpoints(dataset: DatasetRef, shardNum: Int): Future[Map[Int, Long]] = Future {
     checkpoints((dataset.dataset, shardNum))
+  }
+
+  def writeIngestionConfig(state: IngestionConfig): Future[Response] = {
+    sources.put(state.ref, state)
+    Future.successful(Success)
+  }
+
+  def readIngestionConfigs(): Future[Seq[IngestionConfig]] =
+    Future.successful(sources.values.toSeq)
+
+  def deleteIngestionConfig(ref: DatasetRef): Future[Response] = Future {
+    sources.remove(ref).map(x => Success).getOrElse(NotFound)
   }
 }

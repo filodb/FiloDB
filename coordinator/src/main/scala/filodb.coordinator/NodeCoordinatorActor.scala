@@ -2,7 +2,7 @@ package filodb.coordinator
 
 import scala.collection.mutable.HashMap
 
-import akka.actor.{ActorRef, Address, PoisonPill, Props, SupervisorStrategy, Terminated}
+import akka.actor.{ActorRef, PoisonPill, Props, SupervisorStrategy, Terminated}
 import akka.event.LoggingReceive
 import com.typesafe.config.Config
 import monix.execution.Scheduler
@@ -34,14 +34,12 @@ object NodeCoordinatorActor {
 
   def props(metaStore: MetaStore,
             memStore: MemStore,
-            selfAddress: Address,
             config: Config): Props =
-    Props(classOf[NodeCoordinatorActor], metaStore, memStore, selfAddress, config)
+    Props(classOf[NodeCoordinatorActor], metaStore, memStore, config)
 }
 
 private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
                                                  memStore: MemStore,
-                                                 selfAddress: Address,
                                                  config: Config) extends NamingAwareBaseActor {
   import context.dispatcher
 
@@ -52,7 +50,6 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
 
   val settings = new FilodbSettings(config)
   val ingesters = new HashMap[DatasetRef, ActorRef]
-  val actorPath = selfAddress.host.getOrElse("None")
   var clusterActor: Option[ActorRef] = None
   var shardActor: Option[ActorRef] = None
 

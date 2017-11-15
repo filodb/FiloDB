@@ -5,6 +5,8 @@ import java.util.UUID
 import org.scalatest.{FunSpec, Matchers, BeforeAndAfter, BeforeAndAfterAll}
 import org.scalatest.concurrent.ScalaFutures
 
+import com.typesafe.config.ConfigFactory
+
 import filodb.core._
 import filodb.core.metadata.Dataset
 
@@ -53,6 +55,8 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
 
     it("deleteDatasets should delete dataset") {
       val ds = dataset.copy(name = "gdelt")
+      metaStore.deleteDataset(ds.ref).futureValue should equal (NotFound)
+
       metaStore.newDataset(ds).futureValue should equal (Success)
 
       metaStore.deleteDataset(ds.ref).futureValue should equal (Success)
@@ -93,6 +97,40 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
       // should be able to clear the table
       metaStore.clearAllData().futureValue
       metaStore.readCheckpoints(ds.ref, 2).futureValue.isEmpty shouldBe true
+    }
+  }
+
+  describe("IngestionConfig API") {
+    val config1 = ConfigFactory.parseString("""brokers=["foo.bar.com:1234", "foo.baz.com:5678"]
+                                              |auto.offset.commit=false""".stripMargin)
+    val factory1 = "filodb.fake.SomeStore"
+    val resource1 = ConfigFactory.parseString("""num-shards=100
+                                                 min-num-nodes=16""")
+    val resource2 = ConfigFactory.parseString("""num-shards=50
+                                                 min-num-nodes=10""")
+    val source1 = IngestionConfig(dataset.ref, resource1, factory1, config1)
+    val source2 = IngestionConfig(DatasetRef("juju"), resource2, factory1, config1)
+
+    it("should return Nil if no IngestionConfig persisted yet") {
+      metaStore.readIngestionConfigs().futureValue shouldEqual Nil
+    }
+
+    it("should write and read back IngestionConfigs") {
+      metaStore.writeIngestionConfig(source1).futureValue shouldEqual Success
+      metaStore.readIngestionConfigs().futureValue shouldEqual Seq(source1)
+
+      metaStore.writeIngestionConfig(source2).futureValue shouldEqual Success
+      metaStore.readIngestionConfigs().futureValue.toSet shouldEqual Set(source1, source2)
+    }
+
+    it("should be able to delete ingestion configs") {
+      metaStore.deleteIngestionConfig(dataset.ref).futureValue shouldEqual NotFound
+
+      metaStore.writeIngestionConfig(source1).futureValue shouldEqual Success
+      metaStore.readIngestionConfigs().futureValue shouldEqual Seq(source1)
+
+      metaStore.deleteIngestionConfig(dataset.ref).futureValue shouldEqual Success
+      metaStore.readIngestionConfigs().futureValue shouldEqual Nil
     }
   }
 }

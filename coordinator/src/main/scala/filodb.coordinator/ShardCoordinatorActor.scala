@@ -93,7 +93,7 @@ private[coordinator] final class ShardCoordinatorActor(strategy: ShardAssignment
       shardMappers(dshards.ref) = dshards.mapper
     }
 
-    origin ! CoordinatorAdded(e.coordinator, assigned.shards)
+    origin ! CoordinatorAdded(e.coordinator, assigned.shards, e.addr)
   }
 
   /** If the mapper for the provided `datasetRef` has been added, sends an initial
@@ -243,12 +243,12 @@ object ShardSubscriptions {
   /** Used only by the cluster actor to add/remove coordinators to all datasets and update shard assignments
     * INTERNAL API.
     */
-  private[coordinator] final case class AddMember(coordinator: ActorRef) extends ShardCoordCommand
+  private[coordinator] final case class AddMember(coordinator: ActorRef, addr: Address) extends ShardCoordCommand
   private[coordinator] final case class RemoveMember(coordinator: ActorRef) extends ShardCoordCommand
 
   /** Ack returned by shard actor to cluster actor on successful coordinator subscribe. */
   private[coordinator] final case class CoordinatorAdded(
-    coordinator: ActorRef, newShards: Seq[DatasetShards]) extends SubscriptionProtocol
+    coordinator: ActorRef, newShards: Seq[DatasetShards], addr: Address) extends SubscriptionProtocol
 
   /** Returned to cluster actor subscribing on behalf of a coordinator or subscriber
     * or to the coordinator subscribing a query actor on create, if the dataset is

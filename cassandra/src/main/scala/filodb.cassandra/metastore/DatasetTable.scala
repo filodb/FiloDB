@@ -70,8 +70,7 @@ sealed class DatasetTable(val config: Config, val sessionProvider: FiloSessionPr
     }
   }
 
-  // NOTE: CQL does not return any error if you DELETE FROM datasets WHERE name = ...
   def deleteDataset(dataset: DatasetRef): Future[Response] =
     execCql(s"DELETE FROM $tableString WHERE name = '${dataset.dataset}' AND " +
-            s"database = '${dataset.database.getOrElse("")}'")
+            s"database = '${dataset.database.getOrElse("")}' IF EXISTS", NotFound)
 }

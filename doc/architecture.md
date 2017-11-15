@@ -67,7 +67,7 @@ simply receives them and can act on them as needed.
 These components form the core part of FiloDB and are portable across data stores.  Subcomponents:
 
 * `binaryrecord` - used for supporting efficient, no-serialization, multi-schema partition keys and for serializing rows for Spark ingestion
-* `memstore` - a [MemStore](../core/src/main/scala/filodb.core/memstore/MemStore.scala) ingests records, encodes them into columnar chunks, and allows for real-time querying through the `ChunkSource` API.  The current implementation is a [TimeSeriesMemStore](../core/src/main/scala/filodb.core/memstore/TimeSeriesMemStore.scala) which is designed for very high cardinality time series data.  For each dataset it stores one or more shards, each of which may contain many many thousands of [TimeSeriesPartition](../core/src/main/scala/filodb.core/memstore/TimeSeriesPartition.scala) instances.  MemStores also manage persistence of encoded data via `ChunkSink`s.
+* `memstore` - a [MemStore](../core/src/main/scala/filodb.core/memstore/MemStore.scala) ingests records, encodes them into columnar chunks, and allows for real-time querying through the `ChunkSource` API.  The current implementation is a [TimeSeriesMemStore](../core/src/main/scala/filodb.core/memstore/TimeSeriesMemStore.scala) which is designed for very high cardinality time series data.  For each dataset it stores one or more shards, each of which may contain many many thousands of [TimeSeriesPartition](../core/src/main/scala/filodb.core/memstore/TimeSeriesPartition.scala) instances.  MemStores also manage persistence of encoded data via `ChunkSink`s, as well as read-through caching of in-memory chunks from a persistent chunk store.
 * `store` - contains the main APIs for persistence and chunk reading, including [ChunkSource](../core/src/main/scala/filodb.core/store/ChunkSource.scala) and `ChunkSink`, as well as the [MetaStore](../core/src/main/scala/filodb.core/store/MetaStore.scala) for metadata persistence.  Most of the APIs are based on reactive streams for backpressure handling.
 * `query` - contains aggregation and querying logic built on top of `ChunkSource`s.
 * `metadata` - Dataset and Column definitions
@@ -77,6 +77,8 @@ FiloDB's [Dataset](../core/src/main/scala/filodb.core/metadata/Dataset.scala) de
 #### Ingestion Flow
 
 ![IngestionFlow](mermaid/ingest-flush-recovery.mermaid.png)
+
+Also see the [ingeston doc](ingestion.md) for details on recovery and persistence.
 
 ### Cassandra
 

@@ -56,7 +56,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
   var coordinatorActor: ActorRef = _
   var probe: TestProbe = _
   var shardMap = new ShardMapper(1)
-  val nodeCoordProps = NodeCoordinatorActor.props(metaStore, memStore, selfAddress, config)
+  val nodeCoordProps = NodeCoordinatorActor.props(metaStore, memStore, config)
 
   override def beforeAll(): Unit = {
     super.beforeAll()
@@ -70,8 +70,8 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
 
     coordinatorActor = system.actorOf(nodeCoordProps, s"test-node-coord-${System.nanoTime}")
 
-    shardActor ! AddMember(coordinatorActor)
-    expectMsg(CoordinatorAdded(coordinatorActor, Seq.empty))
+    shardActor ! AddMember(coordinatorActor, selfAddress)
+    expectMsg(CoordinatorAdded(coordinatorActor, Seq.empty, selfAddress))
     coordinatorActor ! CoordinatorRegistered(self, shardActor)
 
     probe = TestProbe()

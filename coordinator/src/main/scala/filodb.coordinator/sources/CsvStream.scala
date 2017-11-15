@@ -49,13 +49,13 @@ object CsvStream extends StrictLogging {
  * Offsets created are the line numbers, where the first line after the header is offset 0, next one 1, etc.
  * This Stream Factory is capable of rewinding to a given line number when given a positive offset.
  *
- * NOTE: right now this only works with a single shard.
+ * NOTE: if this is started with more than one shard, it will read from the same file.
  */
 class CsvStreamFactory extends IngestionStreamFactory {
   import CsvStream._
 
   def create(config: Config, dataset: Dataset, shard: Int, offset: Option[Long]): IngestionStream = {
-    require(shard == 0, s"Shard on creation must be shard 0 but was '$shard'.")
+    require(shard >= 0, s"Shard on creation must be positive but was '$shard'.")
     val settings = CsvStreamSettings(config.getBoolean("header"),
                      config.as[Option[Int]]("batch-size").getOrElse(BatchSize),
                      config.as[Option[String]]("separator-char").getOrElse(",").charAt(0))
