@@ -24,6 +24,9 @@ trait ShardAssignmentStrategy {
                    resources: DatasetResourceSpec,
                    shardMaps: CMap[DatasetRef, ShardMapper]): DatasetAdded
 
+  /** Returns true if the implementation is already tracking the `coordinator`. */
+  def tracking(coordinator: ActorRef): Boolean
+
   def reset(): Unit
 }
 
@@ -34,13 +37,15 @@ private[coordinator] object ShardAssignmentStrategy {
 
   final case class DatasetAdded(ref: DatasetRef, mapper: ShardMapper, shards: Map[ActorRef, Seq[Int]])
 
-  final case class NodeAdded(shards: Seq[DatasetShards]) {
+  final case class NodeAdded(node: ActorRef, shards: Seq[DatasetShards]) {
     def datasets: Seq[DatasetRef] = shards.map(_.ref)
   }
 
-  final case class NodeRemoved(shards: Map[DatasetRef, (Seq[Int], ShardMapper)])
+  final case class NodeRemoved(shards: Seq[DatasetShards])
 
   final case class DatasetShards(ref: DatasetRef, mapper: ShardMapper, shards: Seq[Int])
+
+  final case class AddShards(howMany: Int, coordinator: ActorRef, shards: Seq[Int], map: ShardMapper)
 
 }
 
@@ -49,64 +54,72 @@ private[coordinator] object ShardAssignmentStrategy {
  * It is relatively static, ie if a node goes down, it waits for a node to be up again.
  */
 class DefaultShardAssignmentStrategy extends ShardAssignmentStrategy with StrictLogging {
-  import DefaultShardAssignmentStrategy._, ShardAssignmentStrategy._
+  import ShardAssignmentStrategy._
 
   private val shardToNodeRatio = new mutable.HashMap[DatasetRef, Double]
   private val shardsPerCoord = new mutable.HashMap[ActorRef, Int].withDefaultValue(0)
 
-  /** On node added `akka.cluster.ClusterEvent.MemberUp`.
+  def tracking(coordinator: ActorRef): Boolean =
+    shardsPerCoord.keySet contains coordinator
+
+  /** On node added `akka.cluster.ClusterEvent.MemberUp`. If the `coordRef` has
+    * previously been added, and not yet removed by `akka.cluster.ClusterEvent.MemberRemoved`
+    * this returns an empty NodeAdded - immutable.
     * TODO: rebalance existing shards if a new node adds capacity
     */
-  def nodeAdded(coordRef: ActorRef, shardMaps: CMap[DatasetRef, ShardMapper]): NodeAdded = {
-    shardsPerCoord(coordRef) = 0
-    // what are the shard maps with most unassigned shards?
-    // hmm.  how many shards can be added to a node?  Need to know roughly how many nodes we expect
-    // to process a given dataset.
-    val sortedMaps = shardMaps.toSeq.map { case (ref, map) => (ref, map, map.numAssignedShards) }
-                              .sortBy(_._3)
+  def nodeAdded(coordinator: ActorRef, shardMaps: CMap[DatasetRef, ShardMapper]): NodeAdded = {
+    if (tracking(coordinator)) NodeAdded(coordinator, Seq.empty) else {
+      shardsPerCoord(coordinator) = 0
+      var dss: Seq[DatasetShards] = Seq.empty
 
-    // can we do without takeWhile to avoid this?
-    var dss: Seq[DatasetShards] = Seq.empty
+      // what are the shard maps with most unassigned shards?
+      // hmm.  how many shards can be added to a node?  Need to know roughly how many nodes we expect
+      // to process a given dataset.
+      shardMaps.toSeq
+        .map { case (ref, map) => (ref, map, map.numAssignedShards) }
+        .sortBy(_._3)
+        .takeWhile { case (ref, map, assignedShards) =>
+          val add = addShards(map, ref, coordinator)
+          dss :+= DatasetShards(ref, map, add.shards)
+          (assignedShards < map.numShards) && (add.howMany > 0)
+        }
 
-    sortedMaps.takeWhile { case (ref, map, assignedShards) =>
-      val add = addShards(map, ref, coordRef)
-      dss :+= DatasetShards(ref, map, add.shards)
-      (assignedShards < map.numShards) && (add.howMany > 0)
+      NodeAdded(coordinator, dss)
     }
-
-    NodeAdded(dss)
   }
 
   /** Called on node removed `akka.cluster.ClusterEvent.MemberRemoved`
     * or through DeathWatch and `akka.actor.Terminated`.
     */
-  def nodeRemoved(coordRef: ActorRef, shardMaps: CMap[DatasetRef, ShardMapper]): NodeRemoved = {
-    val updatedMaps = shardMaps.map { case (ref, map) =>
-      val shardsRemoved = map.removeNode(coordRef)
+  def nodeRemoved(coordinator: ActorRef, shardMaps: CMap[DatasetRef, ShardMapper]): NodeRemoved = {
+    if (tracking(coordinator)) {
+      val updated = shardMaps.map { case (ref, map) =>
+        val shards = map.removeNode(coordinator)
 
-      // Any spare capacity to allocate removed shared?
-      // try to spread removed shards amongst remaining nodes in order from
-      // least loaded nodes on up
-      // NOTE: zip returns a list which is the smaller of the two lists
+        // Any spare capacity to allocate removed shared?
+        // try to spread removed shards amongst remaining nodes in order from
+        // least loaded nodes on up
+        // NOTE: zip returns a list which is the smaller of the two lists
 
-      // NOTE: for now disable this.  We want more static allocation.  Reshuffling nodes can cause
-      // too much IO and will cause pain to spread across the cluster.
-      // lessLoadedNodes.zip(shardsRemoved).foreach { case ((coord, _), shard) =>
-      //   map.registerNode(Seq(shard), coord) match {
-      //     case Success(x) =>
-      //       shardsPerCoord(coord) += 1
-      //       logger.info(s"Reallocated shard $shard from $coordRef to $coord")
-      //     case Failure(ex) =>
-      //       logger.error(s"Unable to add shards: $ex")
-      //   }
-      // }
+        // NOTE: for now disable this.  We want more static allocation.  Reshuffling nodes can cause
+        // too much IO and will cause pain to spread across the cluster.
+        // lessLoadedNodes.zip(shardsRemoved).foreach { case ((coord, _), shard) =>
+        //   map.registerNode(Seq(shard), coord) match {
+        //     case Success(x) =>
+        //       shardsPerCoord(coord) += 1
+        //       logger.info(s"Reallocated shard $shard from $coordRef to $coord")
+        //     case Failure(ex) =>
+        //       logger.error(s"Unable to add shards: $ex")
+        //   }
+        // }
+        DatasetShards(ref, map, shards)
+      }.toSeq
 
-      ref -> Tuple2(shardsRemoved, map)
-    }.toMap
+      shardsPerCoord -= coordinator
 
-    shardsPerCoord -= coordRef
-
-    NodeRemoved(updatedMaps)
+      NodeRemoved(updated)
+    }
+    else NodeRemoved(Seq.empty)
   }
 
   def datasetAdded(dataset: DatasetRef,
@@ -134,7 +147,7 @@ class DefaultShardAssignmentStrategy extends ShardAssignmentStrategy with Strict
 
     val added = _added.toSeq
     logger.info(s"Added ${added.map(_.howMany).sum} shards total")
-    val shards = added.map(a => a.coord -> a.shards).toMap
+    val shards = added.map(a => a.coordinator -> a.shards).toMap
 
     DatasetAdded(dataset, map, shards)
   }
@@ -148,20 +161,12 @@ class DefaultShardAssignmentStrategy extends ShardAssignmentStrategy with Strict
       val shardsToAdd = map.unassignedShards.take(addHowMany)
       logger.info(s"Assigning [shards=$shardsToAdd, dataset=$dataset, node=$coordinator.")
       shardsPerCoord(coordinator) += shardsToAdd.length
+      map.registerNode(shardsToAdd, coordinator)
 
-      // We need to assign a temporary state of BeingAssigned to the shards we will add.  This prevents
-      // future calls of addShards() from assigning the same shards again and again, and also lets
-      // users know that an assignment is in progress.
-      // TODO: broadcast this event out to subscribers?
-      shardsToAdd.foreach { shard =>
-        val event = ShardAssignmentStarted(dataset, shard, coordinator)
-        map.updateFromEvent(event)
-      }
-      AddShards(addHowMany, coordinator, shardsToAdd)
-
+      AddShards(addHowMany, coordinator, shardsToAdd, map)
     } else {
       logger.warn(s"Unable to add shards for dataset $dataset to coord $coordinator.")
-      AddShards(0, coordinator, Seq.empty)
+      AddShards(0, coordinator, Seq.empty, map)
     }
   }
 
@@ -169,10 +174,4 @@ class DefaultShardAssignmentStrategy extends ShardAssignmentStrategy with Strict
     shardToNodeRatio.clear()
     shardsPerCoord.clear()
   }
-}
-
-private object DefaultShardAssignmentStrategy {
-  /** INTERNAL API. */
-  final case class AddShards(howMany: Int, coord: ActorRef, shards: Seq[Int])
-
 }

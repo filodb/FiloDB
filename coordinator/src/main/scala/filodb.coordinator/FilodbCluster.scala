@@ -143,10 +143,10 @@ final class FilodbCluster(system: ExtendedActorSystem) extends Extension with St
     *                    the [[akka.cluster.singleton.ClusterSingletonManager]]
     *                    when creating the [[akka.cluster.singleton.ClusterSingletonProxy]]
     */
-  private[filodb] def clusterSingletonProxy(role: String, withManager: Boolean): ActorRef =
+  private[filodb] def clusterSingleton(role: String, withManager: Boolean, watcher: Option[ActorRef] = None): ActorRef =
     _clusterActor.get.getOrElse {
       logger.info(s"Creating clusterActor for role '$role'")
-      val e = CreateClusterSingleton(role, withManager)
+      val e = CreateClusterSingleton(role, withManager, watcher)
       val actor = Await.result((guardian ? e).mapTo[ClusterSingletonRef], DefaultTaskTimeout).ref
       _clusterActor.set(Some(actor))
       actor

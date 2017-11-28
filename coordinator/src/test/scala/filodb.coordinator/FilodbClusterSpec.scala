@@ -33,9 +33,9 @@ class FilodbClusterSpec extends AkkaSpec {
           .forall(v => a.path.elements.exists(_ == v))
 
       // both operations (they differ slightly) should return the same final actor
-      val clusterActor1 = cluster.clusterSingletonProxy("worker", withManager = true)
+      val clusterActor1 = cluster.clusterSingleton("worker", withManager = true)
       pathElementsExist(clusterActor1) should be (true)
-      val clusterActor2 = cluster.clusterSingletonProxy("worker", withManager = false)
+      val clusterActor2 = cluster.clusterSingleton("worker", withManager = false)
       pathElementsExist(clusterActor2) should be (true)
       clusterActor1 shouldEqual clusterActor2
     }

@@ -56,7 +56,7 @@ private[filodb] trait FilodbSparkCluster extends FilodbClusterNode {
 
   lazy val memStore = cluster.memStore
 
-  lazy val clusterActor = cluster.clusterSingletonProxy(roleName, withManager = true)
+  lazy val clusterActor = cluster.clusterSingleton(roleName, withManager = true)
 
 }
 

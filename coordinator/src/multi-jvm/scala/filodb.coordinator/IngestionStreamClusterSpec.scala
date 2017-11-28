@@ -62,7 +62,7 @@ abstract class IngestionStreamClusterSpec extends ClusterSpec(IngestionStreamClu
     awaitCond(cluster.isJoined)
     enterBarrier("both-nodes-joined-cluster")
 
-    clusterActor = cluster.clusterSingletonProxy("worker", withManager = true)
+    clusterActor = cluster.clusterSingleton("worker", withManager = true)
     enterBarrier("cluster-actor-started")
 
     runOn(first) {

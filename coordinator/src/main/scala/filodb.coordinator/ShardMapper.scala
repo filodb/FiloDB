@@ -29,7 +29,7 @@ class ShardMapper(val numShards: Int) extends Serializable {
 
   private final val log2NumShards = (scala.math.log10(numShards) / scala.math.log10(2)).round.toInt
   private final val shardMap = Array.fill(numShards)(ActorRef.noSender)
-  private final val statusMap = Array.fill[ShardStatus](numShards)(ShardUnassigned)
+  private final val statusMap = Array.fill[ShardStatus](numShards)(ShardStatusUnassigned)
   private final val log2NumShardsOneBits = (1 << log2NumShards) - 1 // results in log2NumShards one bits
 
   // spreadMask is precomputed for all possible spreads.
@@ -67,7 +67,6 @@ class ShardMapper(val numShards: Int) extends Serializable {
   def coordForShard(shardNum: Int): ActorRef = shardMap(shardNum)
   def unassigned(shardNum: Int): Boolean = coordForShard(shardNum) == ActorRef.noSender
   def statusForShard(shardNum: Int): ShardStatus = statusMap(shardNum)
-
 
   /**
     * Use this function to identify the list of shards to query given the shard key hash.
@@ -147,6 +146,7 @@ class ShardMapper(val numShards: Int) extends Serializable {
    */
   def activeShard(shard: Int): Boolean =
     statusMap(shard) == ShardStatusNormal || statusMap(shard).isInstanceOf[ShardStatusRecovery]
+
   def activeShards(shards: Seq[Int]): Seq[Int] = shards.filter(activeShard)
 
   /**
@@ -159,22 +159,29 @@ class ShardMapper(val numShards: Int) extends Serializable {
    * If you want to throw if an update does not succeed, call updateFromEvent(ev).get
    */
   def updateFromEvent(event: ShardEvent): Try[Unit] = event match {
+    case e if statusMap.length < e.shard || e.shard < 0 =>
+      Failure(ShardError(e, s"Invalid shard ${e.shard}, unable to update status."))
+    case ShardAssignmentStarted(_, shard, node) =>
+      statusMap(shard) = ShardStatusAssigned
+      registerNode(Seq(shard), node)
     case IngestionStarted(_, shard, node) =>
       statusMap(shard) = ShardStatusNormal
-      registerNode(Seq(shard), node)
-    case ShardAssignmentStarted(_, shard, node) =>
-      statusMap(shard) = ShardBeingAssigned
       registerNode(Seq(shard), node)
     case RecoveryStarted(_, shard, node, progress) =>
       statusMap(shard) = ShardStatusRecovery(progress)
       registerNode(Seq(shard), node)
     case IngestionError(_, shard, _) =>
+      statusMap(shard) = ShardStatusError
       Success(())
-    case ShardDown(_, shard) =>
+    case ShardDown(_, shard, node) =>
       statusMap(shard) = ShardStatusDown
       Success(())
     case IngestionStopped(_, shard) =>
       statusMap(shard) = ShardStatusStopped
+      Success(())
+    case ShardMemberRemoved(_, shard, node) =>
+      statusMap(shard) = ShardStatusUnassigned
+      removeNode(node)
       Success(())
     case _ =>
       Success(())
@@ -190,14 +197,21 @@ class ShardMapper(val numShards: Int) extends Serializable {
 
   /**
    * Registers a new node to the given shards.  Modifies state in place.
+   * Idempotent.
    */
   private[coordinator] def registerNode(shards: Seq[Int], coordinator: ActorRef): Try[Unit] = {
-    shards.foreach { shard =>
-      if (!unassigned(shard)) {
-        return Failure(new IllegalArgumentException(s"Shard $shard is already assigned!"))
-      } else {
+    shards foreach {
+      case shard if unassigned(shard) =>
         shardMap(shard) = coordinator
-      }
+      case shard =>
+        // registerNode is called on three status changes and
+        // ShardAssignmentStrategy.addShards with the same coord
+        // so only another coord is a failure, but could add
+        // it to fail also if same coord but invalid status transition
+        val assignedTo = coordForShard(shard)
+        if (assignedTo.compareTo(coordinator) != 0) {
+          return Failure(ShardAlreadyAssigned(shard, statusForShard(shard), assignedTo))
+        }
     }
     Success(())
   }
@@ -227,4 +241,9 @@ private[filodb] object ShardMapper {
 
   final def toShard(n: Int, numShards: Int): Int = (((n & 0xffffffffL) * numShards) >> 32).toInt
 
+  final case class ShardAlreadyAssigned(shard: Int, status: ShardStatus, assignedTo: ActorRef)
+    extends Exception(s"Shard [shard=$shard, status=$status, coordinator=$assignedTo] is already assigned.")
+
+  final case class ShardError(event: ShardEvent, context: String)
+    extends Exception(s"$context [shard=${event.shard}, event=$event]")
 }

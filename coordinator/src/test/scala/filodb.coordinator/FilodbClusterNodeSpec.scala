@@ -46,7 +46,7 @@ object FiloServerApp extends FilodbClusterNode with StrictLogging {
 
   override val cluster = FilodbCluster(system)
 
-  lazy val clusterActor = cluster.clusterSingletonProxy(roleName, withManager = true)
+  lazy val clusterActor = cluster.clusterSingleton(roleName, withManager = true)
 
   lazy val client = new LocalClient(coordinatorActor)
 

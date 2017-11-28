@@ -1,7 +1,6 @@
 package filodb.coordinator
 
 import scala.collection.mutable.HashMap
-
 import akka.actor._
 import akka.cluster.Cluster
 import akka.cluster.ClusterEvent._
@@ -106,8 +105,9 @@ object NodeClusterActor {
             cluster: Cluster,
             nodeCoordRole: String,
             metaStore: MetaStore,
-            assignmentStrategy: ShardAssignmentStrategy): Props =
-    Props(new NodeClusterActor(settings, cluster, nodeCoordRole, metaStore, assignmentStrategy))
+            assignmentStrategy: ShardAssignmentStrategy,
+            watcher: ActorRef): Props =
+    Props(new NodeClusterActor(settings, cluster, nodeCoordRole, metaStore, assignmentStrategy, watcher))
 
   class RemoteAddressExtension(system: ExtendedActorSystem) extends Extension {
     def address: Address = system.provider.getDefaultAddress
@@ -156,7 +156,8 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
                                        cluster: Cluster,
                                        nodeCoordRole: String,
                                        metaStore: MetaStore,
-                                       assignmentStrategy: ShardAssignmentStrategy
+                                       assignmentStrategy: ShardAssignmentStrategy,
+                                       watcher: ActorRef
                                       ) extends NamingAwareBaseActor {
 
   import NodeClusterActor._, ActorName._, ShardSubscriptions._
@@ -176,8 +177,11 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
 
   // subscribe to cluster changes, re-subscribe when restart
   override def preStart(): Unit = {
+    super.preStart()
     cluster.subscribe(self, initialStateMode = InitialStateAsEvents,
       classOf[MemberEvent], classOf[UnreachableMember])
+    watcher ! NodeProtocol.PreStart(self.path)
+
     // Restore previously set up datasets.  This happens asynchronously, and messages may come before or after
     // membership messages such as MemberUp
     // TODO: Think about how this will work when NCA has to be migrated to different nodes
@@ -193,6 +197,13 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
   override def postStop(): Unit = {
     super.postStop()
     cluster.unsubscribe(self)
+    shardActor ! StartHandover
+    watcher ! NodeProtocol.PostStop(self.path)
+  }
+
+  override def preRestart(reason: Throwable, message: Option[Any]): Unit = {
+    super.preRestart(reason, message)
+    watcher ! NodeProtocol.PreRestart(self.path, reason)
   }
 
   private def withRole(role: String, requester: ActorRef)(f: Set[ActorRef] => Unit): Unit =
@@ -247,7 +258,7 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
 
   def infoHandler: Receive = LoggingReceive {
     case ListRegisteredDatasets => sender() ! datasets.keys.toSeq
-    case g: GetShardMap         => shardActor.forward(g)
+    case GetShardMap(ref)       => shardActor.forward(GetSnapshot(ref))
   }
 
   def shardMapHandler: Receive = LoggingReceive {
@@ -255,8 +266,8 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
     case e: SubscribeShardUpdates => subscribe(e.ref, sender())
     case e: SetupDataset          => setupDataset(e, sender())
     case e: DatasetAdded          => datasetSetup(e)
-    case e: ShardSubscriptions.CoordinatorAdded => coordAdded(e)
-    case e: ShardSubscriptions.SubscriptionUnknown   => datasetUnknown(e)
+    case e: CoordinatorAdded      => coordinatorAdded(e)
+    case e: CoordinatorRemoved    => coordinatorRemoved(e)
   }
 
   /** If the dataset is registered as a subscription, a `CurrentShardSnapshot` is sent
@@ -282,11 +293,6 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
     if (e.roles contains nodeCoordRole) {
       shardActor ! ShardSubscriptions.AddMember(e.coordinator, e.addr)
     }
-  }
-
-  private def datasetUnknown(e: ShardSubscriptions.SubscriptionUnknown): Unit = {
-    logger.error(s"Dataset ${e.dataset} is not set up yet, unable to subscribe ${e.subscriber}.")
-    e.subscriber ! DatasetUnknown(e.dataset) // can do if isCoordinator(sub)... else...
   }
 
   /** Initiated by Client and Spark FiloDriver setup. */
@@ -322,7 +328,7 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
     *
     * INTERNAL API. Idempotent.
     */
-  private def coordAdded(e: ShardSubscriptions.CoordinatorAdded): Unit = {
+  private def coordinatorAdded(e: CoordinatorAdded): Unit = {
     e.coordinator ! CoordinatorRegistered(self, shardActor)
 
     // NOTE: it's important that memberRefs happens here, after CoordinatorRegistered is sent out, and not before
@@ -331,12 +337,21 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
     memberRefs(e.addr) = e.coordinator
     val oneAdded = Set(e.coordinator)
     for {
-      DatasetShards(ref, _, shards) <- e.newShards
+      DatasetShards(ref, _, shards) <- e.shards
     } {
       sendDatasetSetup(oneAdded, datasets(ref), sources(ref))
       sendStartCommand(Map(e.coordinator -> shards), ref)
     }
   }
+
+  /** Called after an existing coordinator is removed, shard assignment
+    * strategy has removed the node and returns updates.
+    */
+  private def coordinatorRemoved(e: CoordinatorRemoved): Unit =
+    for {
+      dss   <- e.shards
+      shard <- dss.shards
+    } e.coordinator ! StopShardIngestion(dss.ref, shard)
 
   /** Called on successful AddNodeCoordinator and SetupDataset protocols.
     *

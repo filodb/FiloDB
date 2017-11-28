@@ -4,6 +4,7 @@ import akka.actor._
 import akka.cluster.{Cluster, Member}
 import akka.cluster.ClusterEvent.{InitialStateAsEvents, MemberUp}
 import akka.cluster.singleton._
+
 import filodb.core.memstore.MemStore
 import filodb.core.store.MetaStore
 
@@ -22,12 +23,13 @@ final class NodeGuardian(extension: FilodbCluster,
   private lazy val failureDetector = cluster.failureDetector
 
   override def preStart(): Unit = {
+    super.preStart()
     cluster.subscribe(self, initialStateMode = InitialStateAsEvents, classOf[MemberUp])
-    //context.system.eventStream.subscribe(self, classOf[DeadLetter]) // todo in separate worker
   }
 
   override def postStop(): Unit = {
     super.postStop()
+    context.system.eventStream.unsubscribe(self)
     context.child(TraceLoggerName) foreach {
       actor => kamon.Kamon.shutdown()
     }
@@ -43,6 +45,7 @@ final class NodeGuardian(extension: FilodbCluster,
     case CreateTraceLogger(role)   => startKamon(role, sender())
     case CreateCoordinator         => createCoordinator(sender())
     case e: CreateClusterSingleton => createProxy(e, sender())
+    case e: ActorLifecycle         => // coming in different PR
     case e: DeadLetter             =>
   }
 
@@ -91,9 +94,10 @@ final class NodeGuardian(extension: FilodbCluster,
     */
   private def createProxy(e: CreateClusterSingleton, requester: ActorRef): Unit = {
     if (e.withManager && context.child(SingletonMgrName).isEmpty) {
+      val watcher = e.watcher.getOrElse(self)
       val mgr = context.actorOf(
         ClusterSingletonManager.props(
-          singletonProps = NodeClusterActor.props(settings, cluster, e.role, metaStore, assignmentStrategy),
+          singletonProps = NodeClusterActor.props(settings, cluster, e.role, metaStore, assignmentStrategy, watcher),
           terminationMessage = PoisonPill,
           settings = ClusterSingletonManagerSettings(context.system)
             .withRole(e.role)
@@ -154,8 +158,11 @@ object NodeProtocol {
     * @param role the role to assign
     * @param withManager if `true` creates the ClusterSingletonManager as well, if `false` only creates the proxy
     */
-  private[coordinator] final case class CreateClusterSingleton(role: String, withManager: Boolean)
-      extends CreationCommand
+  private[coordinator] final case class CreateClusterSingleton(role: String,
+                                                               withManager: Boolean,
+                                                               watcher: Option[ActorRef]
+                                                              ) extends CreationCommand
+
   private[coordinator] final case class CreateTraceLogger(role: ClusterRole) extends CreationCommand
   private[coordinator] case object CreateCoordinator extends CreationCommand
 
@@ -176,4 +183,13 @@ object NodeProtocol {
 
   sealed trait StateTaskAck extends TaskAck
   private[filodb] case object StateReset extends StateTaskAck
+
+  /** For watchers aware of specific actor transitions in lifecycle. */
+  sealed trait ActorLifecycle extends LifecycleCommand {
+    def identity: ActorPath
+  }
+  private[coordinator] final case class PreStart(identity: ActorPath) extends ActorLifecycle
+  private[coordinator] final case class PreRestart(identity: ActorPath, reason: Throwable) extends ActorLifecycle
+  private[coordinator] final case class PostStop(identity: ActorPath) extends ActorLifecycle
+
 }

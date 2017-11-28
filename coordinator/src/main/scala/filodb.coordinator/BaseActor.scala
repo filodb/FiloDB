@@ -10,6 +10,10 @@ import filodb.core.DatasetRef
 trait BaseActor extends Actor with StrictLogging {
   logger.info(s"Starting class ${this.getClass.getName}, actor $self with path ${self.path}")
 
+  override def preStart(): Unit = {
+    logger.info("Starting.")
+  }
+
   override def postStop(): Unit = {
     logger.info("Shutting down.")
   }

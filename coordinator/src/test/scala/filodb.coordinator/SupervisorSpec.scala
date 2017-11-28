@@ -52,7 +52,7 @@ class SupervisorSpec extends AkkaSpec {
     }
     "create the cluster actor" in {
       val guardian = system.actorOf(guardianProps, "guardian")
-      guardian ! CreateClusterSingleton("worker", withManager = true)
+      guardian ! CreateClusterSingleton("worker", withManager = true, None)
       expectMsgPF() {
         case ClusterSingletonRef(ref) =>
           ref.path should be(ActorPath.fromString("akka://akka-test/user/guardian/" + ActorName.NodeClusterProxyName))
@@ -63,7 +63,7 @@ class SupervisorSpec extends AkkaSpec {
       val guardian = system.actorOf(guardianProps)
       guardian ! CreateCoordinator
       expectMsgClass(classOf[CoordinatorRef])
-      guardian ! CreateClusterSingleton("worker", withManager = true)
+      guardian ! CreateClusterSingleton("worker", withManager = true, None)
       expectMsgClass(classOf[ClusterSingletonRef])
 
       guardian ! GracefulShutdown

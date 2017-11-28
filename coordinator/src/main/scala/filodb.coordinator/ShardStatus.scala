@@ -8,7 +8,7 @@ import filodb.core._
 sealed trait ShardAction extends Serializable
 
 /** Sent once to newly-subscribed subscribers to initialize their local ShardMapper. */
-final case class CurrentShardSnapshot(ref: DatasetRef, map: ShardMapper) extends ShardAction
+final case class CurrentShardSnapshot(ref: DatasetRef, map: ShardMapper) extends ShardAction with Response
 
 /**
   * These commands are sent by the NodeClusterActor to the right nodes upon events or
@@ -50,20 +50,28 @@ final case class InvalidIngestionCommand(ref: DatasetRef, shard: Int)
   */
 sealed trait ShardEvent extends ShardAction {
   def ref: DatasetRef
+  def shard: Int
 }
+
+/** Used by ShardAssignmentStrategy to assign a temporary state. */
+final case class ShardAssignmentStarted(ref: DatasetRef, shard: Int, node: ActorRef) extends ShardEvent
 
 final case class IngestionStarted(ref: DatasetRef, shard: Int, node: ActorRef) extends ShardEvent
 
-final case class RecoveryStarted(ref: DatasetRef, shard: Int, node: ActorRef, progressPct: Int) extends ShardEvent
-
 final case class IngestionError(ref: DatasetRef, shard: Int, err: Throwable) extends ShardEvent
-
-final case class ShardDown(ref: DatasetRef, shard: Int) extends ShardEvent
 
 final case class IngestionStopped(ref: DatasetRef, shard: Int) extends ShardEvent
 
-// Used by ShardAssignmentStrategy only to assign a temporary state
-final case class ShardAssignmentStarted(ref: DatasetRef, shard: Int, node: ActorRef) extends ShardEvent
+final case class RecoveryStarted(ref: DatasetRef, shard: Int, node: ActorRef, progressPct: Int) extends ShardEvent
+
+/** TODO this is not granular enough. */
+final case class ShardDown(ref: DatasetRef, shard: Int, node: ActorRef) extends ShardEvent
+
+/** Used by ShardAssignmentStrategy to assign a temporary state. It's not until the
+  * `NodeClusterActor` receives a `MemberRemoved` that the `ShardCoordinatorActor`
+  * removes the node via its `ShardAssignmentStrategy`.
+  */
+final case class ShardMemberRemoved(ref: DatasetRef, shard: Int, node: ActorRef) extends ShardEvent
 
 sealed trait ShardStatus extends ShardAction {
   /**
@@ -72,14 +80,12 @@ sealed trait ShardStatus extends ShardAction {
   def minimalEvents(ref: DatasetRef, shard: Int, node: ActorRef): Seq[ShardEvent]
 }
 
-case object ShardUnassigned extends ShardStatus {
+case object ShardStatusUnassigned extends ShardStatus {
   def minimalEvents(ref: DatasetRef, shard: Int, node: ActorRef): Seq[ShardEvent] = Nil
 }
 
-// A temporary state used only by ShardAssignmentStrategy to denote the shard has been assigned and
-// the start of ingestion is being communicated, but the IngestionStarted has not been received yet
-// It enables the AssignmentStrategy to avoid assigning the same shards again
-case object ShardBeingAssigned extends ShardStatus {
+/** Used by ShardAssignmentStrategy to mark the shard as assigned, but ingestion not yet confirmed. */
+case object ShardStatusAssigned extends ShardStatus {
   def minimalEvents(ref: DatasetRef, shard: Int, node: ActorRef): Seq[ShardEvent] =
     Seq(ShardAssignmentStarted(ref, shard, node))
 }
@@ -89,17 +95,22 @@ case object ShardStatusNormal extends ShardStatus {
     Seq(IngestionStarted(ref, shard, node))
 }
 
+case object ShardStatusError extends ShardStatus {
+  def minimalEvents(ref: DatasetRef, shard: Int, node: ActorRef): Seq[ShardEvent] =
+    Seq(IngestionStarted(ref, shard, node))
+}
+
 final case class ShardStatusRecovery(progressPct: Int) extends ShardStatus {
   def minimalEvents(ref: DatasetRef, shard: Int, node: ActorRef): Seq[ShardEvent] =
     Seq(RecoveryStarted(ref, shard, node, progressPct))
 }
 
-case object ShardStatusDown extends ShardStatus {
-  def minimalEvents(ref: DatasetRef, shard: Int, node: ActorRef): Seq[ShardEvent] =
-    Seq(IngestionStarted(ref, shard, node), ShardDown(ref, shard))
-}
-
 case object ShardStatusStopped extends ShardStatus {
   def minimalEvents(ref: DatasetRef, shard: Int, node: ActorRef): Seq[ShardEvent] =
     Seq(IngestionStarted(ref, shard, node), IngestionStopped(ref, shard))
+}
+
+case object ShardStatusDown extends ShardStatus {
+  def minimalEvents(ref: DatasetRef, shard: Int, node: ActorRef): Seq[ShardEvent] =
+    Seq(IngestionStarted(ref, shard, node), ShardDown(ref, shard, node))
 }

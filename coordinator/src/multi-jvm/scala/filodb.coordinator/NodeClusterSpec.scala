@@ -65,7 +65,7 @@ abstract class NodeClusterSpec extends ClusterSpec(NodeClusterSpecConfig) {
       cluster join address1
       awaitCond(cluster.isJoined)
 
-      clusterActor = cluster.clusterSingletonProxy("worker", withManager = true)
+      clusterActor = cluster.clusterSingleton("worker", withManager = true)
     }
     enterBarrier("first-node-joined-cluster-actor-started")
   }
@@ -112,8 +112,8 @@ abstract class NodeClusterSpec extends ClusterSpec(NodeClusterSpecConfig) {
       subscriber1.send(clusterActor, SubscribeShardUpdates(ref))
       subscriber1.expectMsgPF(3.seconds.dilated) {
         case CurrentShardSnapshot(ds, newMap) =>
-          newMap.shardValues.map(_._2) shouldEqual Seq(ShardBeingAssigned, ShardBeingAssigned,
-                                                       ShardUnassigned, ShardUnassigned)
+          newMap.shardValues.map(_._2) shouldEqual Seq(ShardStatusAssigned, ShardStatusAssigned,
+                                                       ShardStatusUnassigned, ShardStatusUnassigned)
           newMap.allNodes shouldEqual Set(coordinatorActor)
           newMap.numShards shouldEqual spec.numShards
       }
@@ -147,7 +147,7 @@ abstract class NodeClusterSpec extends ClusterSpec(NodeClusterSpecConfig) {
     runOn(second) {
       cluster join address1
       awaitCond(cluster.isJoined)
-      clusterActor = cluster.clusterSingletonProxy("worker", withManager = true)
+      clusterActor = cluster.clusterSingleton("worker", withManager = true)
     }
 
     enterBarrier("second-node-joined")
@@ -165,7 +165,7 @@ abstract class NodeClusterSpec extends ClusterSpec(NodeClusterSpecConfig) {
     expectMsg(Seq(ref))
     clusterActor ! GetShardMap(ref)
     expectMsgPF(3.seconds.dilated) {
-      case map: ShardMapper =>
+      case CurrentShardSnapshot(ds, map) =>
         map.numAssignedShards shouldEqual 4
         map.allNodes.size shouldEqual 2
     }

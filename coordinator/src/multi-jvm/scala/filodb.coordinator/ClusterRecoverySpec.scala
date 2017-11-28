@@ -75,7 +75,7 @@ abstract class ClusterRecoverySpec extends ClusterSpec(ClusterRecoverySpecConfig
     awaitCond(cluster.isJoined)
     enterBarrier("both-nodes-joined-cluster")
 
-    clusterActor = cluster.clusterSingletonProxy("worker", withManager = true)
+    clusterActor = cluster.clusterSingleton("worker", withManager = true)
     // wait for dataset to get registered automatically
     // NOTE: unfortunately the delay seems to be needed in order to query the ClusterActor successfully
     Thread sleep 2000

@@ -64,7 +64,7 @@ object FiloServer extends FilodbClusterNode with StrictLogging {
       coordinatorActor
       scala.concurrent.Await.result(metaStore.initialize(), InitializationTimeout)
       bootstrap(cluster.cluster)
-      cluster.clusterSingletonProxy(roleName, withManager = true)
+      cluster.clusterSingleton(roleName, withManager = true)
       cluster._isInitialized.set(true)
 
 //      settings.DatasetDefinitions.foreach { case (datasetName, datasetConf) =>
