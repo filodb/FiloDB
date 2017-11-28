@@ -73,14 +73,15 @@ clusterActor ! SubscribeShardUpdates(dataset)
 
 The subscriber will receive shard events as they occur, for any datasets they subscribe to per `SubscribeShardUpdates`.
 
+The association of ShardEvents to ShardStatus (api in progress) starting with ShardStatusUnassigned:
 ```
-def receive: Actor.Receive = {
-  case CurrentShardSnapshot(dataset, shardMap) =>
-  case IngestionStarted(dataset, shard, node)  =>
-  case RecoveryStarted(dataset, shard, node)   =>
-  case IngestionError(dataset, shard, ex)      =>
-  case ShardDown(dataset, shard)               =>
-  case IngestionStopped(dataset, shard)        =>
+  case ShardAssignmentStarted(dataset, shard, node) => // ShardStatusAssigned
+  case IngestionStarted(dataset, shard, node)       => // ShardStatusNormal
+  case IngestionError(dataset, shard, ex)           => // ShardStatusError
+  case IngestionStopped(dataset, shard)             => // ShardStatusStopped
+  case RecoveryStarted(dataset, shard, node)        => // ShardStatusRecovery
+  case ShardDown(dataset, shard, node)              => // ShardStatusDown (changing, breaking out to more granular)
+  case ShardMemberRemoved(dataset, shard, node)     => // ShardMemberRemoved (also changing)
 }
 ```
  
