@@ -204,7 +204,8 @@ lazy val kafkaDeps = Seq(
 
 lazy val tsgeneratorDeps = Seq(
   logbackDep,
-  "io.monix" %% "monix-kafka-10" % monixKafkaVersion
+  "io.monix" %% "monix-kafka-10" % monixKafkaVersion,
+  "org.rogach" %% "scallop" % "3.1.1"
 )
 
 lazy val httpDeps = Seq(

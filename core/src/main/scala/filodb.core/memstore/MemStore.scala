@@ -1,13 +1,15 @@
 package filodb.core.memstore
 
-import filodb.core.metadata.{Column, Dataset}
-import filodb.core.store.{ChunkSink, ChunkSource, MetaStore}
-import filodb.core.{DatasetRef, ErrorResponse}
-import filodb.memory.format.{vectors => bv, _}
-import filodb.memory.MemFactory
+import scala.concurrent.Future
 
 import monix.execution.{CancelableFuture, Scheduler}
 import monix.reactive.Observable
+
+import filodb.core.{DatasetRef, ErrorResponse}
+import filodb.core.metadata.{Column, Dataset}
+import filodb.core.store.{ChunkSink, ChunkSource, MetaStore}
+import filodb.memory.MemFactory
+import filodb.memory.format.{vectors => bv, _}
 
 case object ShardAlreadySetup extends Exception
 final case class DatasetAlreadySetup(dataset: DatasetRef) extends Exception(s"Dataset $dataset already setup")
@@ -15,7 +17,6 @@ final case class DatasetAlreadySetup(dataset: DatasetRef) extends Exception(s"Da
 sealed trait DataOrCommand
 final case class SomeData(records: Seq[IngestRecord]) extends DataOrCommand
 final case class FlushCommand(groupNum: Int) extends DataOrCommand
-
 final case class FlushGroup(shard: Int, groupNum: Int, flushWatermark: Long)
 
 final case class FlushError(err: ErrorResponse) extends Exception(s"Flush error $err")
@@ -109,6 +110,18 @@ trait MemStore extends ChunkSource {
                     checkpoints: Map[Int, Long],
                     reportingInterval: Long): Observable[Long]
 
+  /**
+    * Restore all partitions from persistent store. Note that this will not populate the chunks yet.
+    * Loading of the partitions without the data will keep the index up to date so that chunks
+    * can be fetched from column store on demand.
+    *
+    * This method is typically called when the node is coming up and initializing itself.
+    *
+    * The system will be ready to answer queries once the loading happens successfully.
+    *
+    * @return count of partitions restored
+    */
+  def restorePartitions(dataset: Dataset, shard: Int)(implicit sched: Scheduler): Future[Long]
   /**
    * Returns the names of tags or columns that are indexed at the partition level, across
    * all shards on this node

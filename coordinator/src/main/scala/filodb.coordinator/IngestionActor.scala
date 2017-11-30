@@ -57,8 +57,7 @@ private[filodb] final class IngestionActor(dataset: Dataset,
 
   // Params for creating the default memStore flush scheduler
   // TODO: eventually make the flush scheduler pluggable based on the source config
-  private final val chunkDuration = source.config.as[Option[FiniteDuration]]("chunk-duration")
-                                                 .map(_ / 1000).getOrElse(1.hour)
+  private final val chunkDuration = source.config.as[Option[FiniteDuration]]("chunk-duration").getOrElse(1.hour)
 
   // TODO: add and remove per-shard ingestion sources?
   // For now just start it up one time and kill the actor if it fails
@@ -95,7 +94,9 @@ private[filodb] final class IngestionActor(dataset: Dataset,
           logger.warn(s"Shard already setup")
       }
 
-      for { checkpoints <- memStore.metastore.readCheckpoints(dataset.ref, e.shard) }
+      val ingestion = for {
+        done <- memStore.restorePartitions(dataset, e.shard)
+        checkpoints <- memStore.metastore.readCheckpoints(dataset.ref, e.shard) }
       yield {
         if (checkpoints.isEmpty) {
           // Start normal ingestion with no recovery checkpoint and flush group 0 first
@@ -103,12 +104,12 @@ private[filodb] final class IngestionActor(dataset: Dataset,
         } else {
           // Figure out recovery end watermark and intervals.  The reportingInterval is the interval at which
           // offsets come back from the MemStore for us to report progress.
-          val startRecoveryWatermark = checkpoints.values.min
+          val startRecoveryWatermark = checkpoints.values.min + 1
           val endRecoveryWatermark = checkpoints.values.max
           val lastFlushedGroup = checkpoints.find(_._2 == endRecoveryWatermark).get._1
           val reportingInterval = Math.max((endRecoveryWatermark - startRecoveryWatermark) / 20, 1L)
-          logger.info(s"Starting recovery: from $startRecoveryWatermark to $endRecoveryWatermark; " +
-                      s"last flushed group $lastFlushedGroup")
+          logger.info(s"Starting recovery for shard ${e.shard}: from $startRecoveryWatermark to " +
+                      s"$endRecoveryWatermark; last flushed group $lastFlushedGroup")
           for { lastOffset <- doRecovery(e.shard, startRecoveryWatermark, endRecoveryWatermark, reportingInterval,
                                          checkpoints) }
           yield {
@@ -116,6 +117,11 @@ private[filodb] final class IngestionActor(dataset: Dataset,
             normalIngestion(e.shard, Some(lastOffset + 1), (lastFlushedGroup + 1) % memStore.numGroups)
           }
         }
+      }
+      ingestion.recover {
+        case NonFatal(t) =>
+          logger.error(s"Error occurred during initialization/execution of ingestion for shard ${e.shard}", t)
+          // TODO should we respond to origin actor with an error?
       }
     }
 
@@ -169,12 +175,13 @@ private[filodb] final class IngestionActor(dataset: Dataset,
 
     val futTry = create(shard, Some(startOffset)) map { ingestionStream =>
       val stream = ingestionStream.get
-      shardActor ! RecoveryStarted(dataset.ref, shard, context.parent, 0)
+      shardActor ! RecoveryInProgress(dataset.ref, shard, context.parent, 0)
 
       val fut = memStore.recoverStream(dataset.ref, shard, stream, checkpoints, interval)
         .map { off =>
-          val progressPct = (off - startOffset) * 100 / (endOffset - startOffset)
-          shardActor ! RecoveryStarted(dataset.ref, shard, context.parent, progressPct.toInt)
+          val progressPct = if (endOffset - startOffset == 0) 100
+                            else (off - startOffset) * 100 / (endOffset - startOffset)
+          shardActor ! RecoveryInProgress(dataset.ref, shard, context.parent, progressPct.toInt)
           off }
         .until(_ >= endOffset)
         .lastL.runAsync

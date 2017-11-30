@@ -182,20 +182,19 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem)
 
     innerSetup(dataset33.ref, "/GDELT-sample-test.csv", rowsToRead = 5, None)
 
-    expectMsg(RecoveryStarted(dataset33.ref, 0, coordinatorActor, 0))
+    expectMsg(RecoveryInProgress(dataset33.ref, 0, coordinatorActor, 0))
 
     // A few more recovery status updates, and then finally the real IngestionStarted
-    expectMsg(RecoveryStarted(dataset33.ref, 0, coordinatorActor, 26))
-    expectMsg(RecoveryStarted(dataset33.ref, 0, coordinatorActor, 60))
-    expectMsg(RecoveryStarted(dataset33.ref, 0, coordinatorActor, 93))
-    expectMsg(RecoveryStarted(dataset33.ref, 0, coordinatorActor, 126))
+    expectMsg(RecoveryInProgress(dataset33.ref, 0, coordinatorActor, 28))
+    expectMsg(RecoveryInProgress(dataset33.ref, 0, coordinatorActor, 64))
+    expectMsg(RecoveryInProgress(dataset33.ref, 0, coordinatorActor, 100))
     expectMsg(IngestionStarted(dataset33.ref, 0, coordinatorActor))
 
     expectMsg(IngestionStopped(dataset33.ref, 0))
 
     // Check the number of rows
     coordinatorActor ! GetIngestionStats(dataset33.ref)
-    expectMsg(IngestionActor.IngestionStatus(85))
+    expectMsg(IngestionActor.IngestionStatus(84))
   }
 
   it("should ingest all rows using routeToShards and ProtocolActor") {

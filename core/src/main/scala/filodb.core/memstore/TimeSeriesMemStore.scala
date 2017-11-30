@@ -1,7 +1,7 @@
 package filodb.core.memstore
 
 import scala.collection.mutable.{ArrayBuffer, HashMap}
-import scala.concurrent.ExecutionContext
+import scala.concurrent.{ExecutionContext, Future}
 import scala.concurrent.duration._
 
 import com.googlecode.javaewah.{EWAHCompressedBitmap, IntIterator}
@@ -25,6 +25,7 @@ import filodb.memory.format.{SchemaRowReader, ZeroCopyUTF8String}
 class TimeSeriesMemStore(config: Config, val sink: ColumnStore, val metastore: MetaStore)
                         (implicit val ec: ExecutionContext)
 extends MemStore with StrictLogging {
+
   import collection.JavaConverters._
 
   type Shards = NonBlockingHashMapLong[TimeSeriesShard]
@@ -54,54 +55,75 @@ extends MemStore with StrictLogging {
     }
   }
 
+  /**
+    * Retrieve shard for given dataset and shard number as an Option
+    */
   private def getShard(dataset: DatasetRef, shard: Int): Option[TimeSeriesShard] =
     datasets.get(dataset).flatMap { shards => Option(shards.get(shard)) }
 
+  /**
+    * Retrieve shard for given dataset and shard number. Raises exception if
+    * the shard is not setup.
+    */
+  private def getShardE(dataset: DatasetRef, shard: Int): TimeSeriesShard = {
+    datasets.get(dataset)
+            .flatMap(shards => Option(shards.get(shard)))
+            .getOrElse(throw new IllegalArgumentException(s"Dataset $dataset and shard $shard have not been set up"))
+  }
+
   def ingest(dataset: DatasetRef, shard: Int, rows: Seq[IngestRecord]): Unit =
-    getShard(dataset, shard).map { shard => shard.ingest(rows)
-    }.getOrElse(throw new IllegalArgumentException(s"dataset $dataset / shard $shard not setup"))
+    getShardE(dataset, shard).ingest(rows)
+
+  def restorePartitions(dataset: Dataset, shardNum: Int)(implicit sched: Scheduler): Future[Long] = {
+    val partitionKeys = sink.scanPartitionKeys(dataset, shardNum)
+    val shard = getShardE(dataset.ref, shardNum)
+    partitionKeys.map { p =>
+      shard.addPartition(p, false)
+    }.countL.runAsync.map { count =>
+      logger.info(s"Restored $count time series partitions into memstore for shard $shardNum")
+      count
+    }
+  }
 
   // Should only be called once per dataset/shard
   def ingestStream(dataset: DatasetRef,
-                   shard: Int,
+                   shardNum: Int,
                    stream: Observable[Seq[IngestRecord]],
                    flushStream: Observable[FlushCommand] = FlushStream.empty)
                   (errHandler: Throwable => Unit)
                   (implicit sched: Scheduler): CancelableFuture[Unit] = {
-    getShard(dataset, shard).map { shard =>
-      val combinedStream = Observable.merge(stream.map(SomeData), flushStream)
-      combinedStream.map {
-                      case SomeData(records) => shard.ingest(records)
-                                                None
-                      // The write buffers for all partitions in a group are switched here, in line with ingestion
-                      // stream.  This avoids concurrency issues and ensures that buffers for a group are switched
-                      // at the same offset/watermark
-                      case FlushCommand(group) => shard.switchGroupBuffers(group)
-                                                  Some(FlushGroup(shard.shardNum, group, shard.latestOffset))
-                    }.collect { case Some(flushGroup) => flushGroup }
-                    .mapAsync(numParallelFlushes)(shard.createFlushTask _)
-                    .foreach { x => }
-                    .recover { case ex: Exception => errHandler(ex) }
-    }.getOrElse(throw new IllegalArgumentException(s"dataset $dataset / shard $shard not setup"))
+    val shard = getShardE(dataset, shardNum)
+    val combinedStream = Observable.merge(stream.map(SomeData), flushStream)
+    combinedStream.map {
+                    case SomeData(records) => shard.ingest(records)
+                                              None
+                    // The write buffers for all partitions in a group are switched here, in line with ingestion
+                    // stream.  This avoids concurrency issues and ensures that buffers for a group are switched
+                    // at the same offset/watermark
+                    case FlushCommand(group) => shard.switchGroupBuffers(group)
+                                                Some(FlushGroup(shard.shardNum, group, shard.latestOffset))
+                  }.collect { case Some(flushGroup) => flushGroup }
+                  .mapAsync(numParallelFlushes)(shard.createFlushTask _)
+                  .foreach { x => }
+                  .recover { case ex: Exception => errHandler(ex) }
   }
 
   // a more optimized ingest stream handler specifically for recovery
   // TODO: See if we can parallelize ingestion stream for even better throughput
   def recoverStream(dataset: DatasetRef,
-                    shard: Int,
+                    shardNum: Int,
                     stream: Observable[Seq[IngestRecord]],
                     checkpoints: Map[Int, Long],
                     reportingInterval: Long): Observable[Long] = {
-    getShard(dataset, shard).map { shard =>
-      shard.setGroupWatermarks(checkpoints)
-      var targetOffset = checkpoints.values.min + reportingInterval
-      stream.map(shard.ingest(_))
-            .collect {
-              case offset if offset > targetOffset =>
-                targetOffset += reportingInterval
-                offset
-            }
-    }.getOrElse(throw new IllegalArgumentException(s"dataset $dataset / shard $shard not setup"))
+    val shard = getShardE(dataset, shardNum)
+    shard.setGroupWatermarks(checkpoints)
+    var targetOffset = checkpoints.values.min + reportingInterval
+    stream.map(shard.ingest(_))
+          .collect {
+            case offset if offset > targetOffset =>
+              targetOffset += reportingInterval
+              offset
+          }
   }
 
   def indexNames(dataset: DatasetRef): Iterator[(String, Int)] =
@@ -145,6 +167,10 @@ extends MemStore with StrictLogging {
   }
 
   def shutdown(): Unit = {}
+
+  override def scanPartitionKeys(dataset: Dataset, shardNum: Int): Observable[PartitionKey] = {
+    scanPartitions(dataset, FilteredPartitionScan(ShardSplit(shardNum))).map(_.binPartition)
+  }
 }
 
 object TimeSeriesShard {
@@ -172,6 +198,7 @@ object TimeSeriesShard {
  * that fall below the watermark for that group will be skipped (since they can be recovered from disk).
  */
 class TimeSeriesShard(dataset: Dataset, config: Config, val shardNum: Int, sink: ColumnStore, metastore: MetaStore)
+                     (implicit val ec: ExecutionContext)
   extends StrictLogging {
   import TimeSeriesShard._
 
@@ -186,17 +213,21 @@ class TimeSeriesShard(dataset: Dataset, config: Config, val shardNum: Int, sink:
   private final val keyMap = new HashMap[SchemaRowReader, TimeSeriesPartition]
 
   /**
-    * This index helps identify which partition has a given column-value.
-    * Maintained using a high-performance bitmap index
+    * This index helps identify which partitions have any given column-value.
+    * Used to answer queries not involving the full partition key.
+    * Maintained using a high-performance bitmap index.
     */
   private final val keyIndex = new PartitionKeyIndex(dataset)
+
   /**
-    * Keeps track of ingested rows, not necessarily flushed
+    * Keeps track of count of rows ingested into memstore, not necessarily flushed.
+    * This is generally used to report status and metrics.
     */
   private final var ingested = 0L
 
   /**
-    * Keeps track of last offset ingested into memory (not necessarily flushed)
+    * Keeps track of last offset ingested into memory (not necessarily flushed).
+    * This value is used to keep track of the checkpoint to be written for next flush for any group.
     */
   private final var _offset = Long.MinValue
 
@@ -207,11 +238,25 @@ class TimeSeriesShard(dataset: Dataset, config: Config, val shardNum: Int, sink:
 
   private val blockStore = new PageAlignedBlockManager(shardMemoryMB * 1024 * 1024)
   protected val bufferMemoryManager = new NativeMemoryManager(maxChunksSize * 8 * maxNumPartitions)
+
+  /**
+    * Unencoded/unoptimized ingested data is stored in buffers that are allocated from this off-heap pool
+    */
   private val bufferPool = new WriteBufferPool(bufferMemoryManager, dataset, maxChunksSize / 8, maxNumPartitions)
 
   private final val partitionGroups = Array.fill(numGroups)(new EWAHCompressedBitmap)
-  // The offset up to and including the last record in this group to be successfully persisted
+
+  /**
+    * The offset up to and including the last record in this group to be successfully persisted
+    */
   private final val groupWatermark = Array.fill(numGroups)(Long.MinValue)
+
+  /**
+    * This holds two bitmap indexes per group and tracks the partition keys that are pending
+    * flush to the persistent sink's partition list tracker. When one bitmap is being updated with ingested partitions,
+    * the other is being flushed. When buffers are switched for the group, the indexes are swapped.
+    */
+  private final val partKeysToFlush = Array.fill(numGroups, 2)(new EWAHCompressedBitmap)
 
   class PartitionIterator(intIt: IntIterator) extends Iterator[TimeSeriesPartition] {
     def hasNext: Boolean = intIt.hasNext
@@ -227,7 +272,7 @@ class TimeSeriesShard(dataset: Dataset, config: Config, val shardNum: Int, sink:
       if (offset < groupWatermark(group(partKey))) {
         rowsSkipped.increment
       } else {
-        val partition = keyMap.getOrElse(partKey, addPartition(partKey))
+        val partition = keyMap.getOrElse(partKey, addPartition(partKey, true))
         partition.ingest(data, offset)
         numActuallyIngested += 1
       }
@@ -262,8 +307,14 @@ class TimeSeriesShard(dataset: Dataset, config: Config, val shardNum: Int, sink:
   // Preferably this is done in the same thread/stream as input records to avoid concurrency issues
   // and ensure that all the partitions in a group are switched at the same watermark
   def switchGroupBuffers(groupNum: Int): Unit = {
-    logger.debug(s"Switching write buffers for group $groupNum")
+    logger.debug(s"Switching write buffers for group $groupNum in shard $shardNum")
     new PartitionIterator(partitionGroups(groupNum).intIterator).foreach(_.switchBuffers())
+
+    // swap the partKeysToFlush bitmap indexes too. Clear the one that has been flushed
+    val temp = partKeysToFlush(groupNum)(0)
+    partKeysToFlush(groupNum)(0) = partKeysToFlush(groupNum)(1)
+    partKeysToFlush(groupNum)(1) = temp
+    partKeysToFlush(groupNum)(0).clear()
   }
 
   def createFlushTask(flushGroup: FlushGroup)(implicit ingestionScheduler: Scheduler): Task[Response] = {
@@ -274,13 +325,20 @@ class TimeSeriesShard(dataset: Dataset, config: Config, val shardNum: Int, sink:
     chunkSetIt.isEmpty match {
       case false =>
         val chunkSetStream = Observable.fromIterator (chunkSetIt)
-        logger.debug(s"Created flush ChunkSets stream for group ${flushGroup.groupNum}")
+        logger.debug(s"Created flush ChunkSets stream for group ${flushGroup.groupNum} in shard $shardNum")
 
-        // Write the stream to the sink, checkpoint, mark buffers as eligible for cleanup
-        val taskFuture = sink.write (dataset, chunkSetStream) flatMap {
-          case e: ErrorResponse => throw FlushError (e)
-          case Success =>
-            metastore.writeCheckpoint (dataset.ref, shardNum, flushGroup.groupNum, flushGroup.flushWatermark)
+        // Write the stream and partition keys to the sink, checkpoint, mark buffers as eligible for cleanup
+
+        val partKeysInGroup =
+          new PartitionIterator(partKeysToFlush(flushGroup.groupNum)(1).intIterator()).map(_.binPartition)
+        val writePartKeyFuture = sink.addPartitions(dataset, partKeysInGroup, shardNum)
+        val writeChunksFuture = sink.write(dataset, chunkSetStream)
+        val combined = Future.sequence(Seq(writeChunksFuture, writePartKeyFuture))
+        val taskFuture = combined flatMap {
+          case Seq(Success, Success) =>
+            metastore.writeCheckpoint(dataset.ref, shardNum, flushGroup.groupNum, flushGroup.flushWatermark)
+          case Seq(e: ErrorResponse, _) => throw FlushError (e)
+          case Seq(_, e: ErrorResponse) => throw FlushError (e)
         } map {
           case Success => blockHolder.markUsedBlocksReclaimable ()
                           Success
@@ -293,7 +351,13 @@ class TimeSeriesShard(dataset: Dataset, config: Config, val shardNum: Int, sink:
         }
         Task.fromFuture (taskFuture)
       case true =>
-        Task { Success }
+        // even though there were no records for the chunkset, we want to write checkpoint anyway
+        // since we should not resume from earlier checkpoint for the group
+        if (flushGroup.flushWatermark > 0) // negative checkpoints are refused by Kafka
+          Task.fromFuture(
+            metastore.writeCheckpoint (dataset.ref, shardNum, flushGroup.groupNum, flushGroup.flushWatermark))
+        else
+          Task { Success }
     }
   }
 
@@ -303,7 +367,7 @@ class TimeSeriesShard(dataset: Dataset, config: Config, val shardNum: Int, sink:
   // of a partition) and keeps internal data structures from having to keep copies of incoming records
   // around, which might be much more expensive memory wise.  One consequence though is that internal
   // and external partition key components need to yield the same hashCode.  IE, use UTF8Strings everywhere.
-  private def addPartition(newPartKey: SchemaRowReader): TimeSeriesPartition = {
+  def addPartition(newPartKey: SchemaRowReader, needsPersistence: Boolean): TimeSeriesPartition = {
     val binPartKey = dataset.partKey(newPartKey)
     val newPart = new TimeSeriesPartition(dataset, binPartKey, shardNum, sink, bufferPool)
     val newIndex = partitions.length
@@ -312,6 +376,8 @@ class TimeSeriesShard(dataset: Dataset, config: Config, val shardNum: Int, sink:
     partitionsCreated.increment
     keyMap(binPartKey) = newPart
     partitionGroups(group(newPartKey)).set(newIndex)
+    // if we are in the restore execution flow, we should not need to write this key
+    if (needsPersistence) partKeysToFlush(group(binPartKey))(0).set(newIndex)
     newPart
   }
 

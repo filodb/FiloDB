@@ -58,6 +58,8 @@ final case class ShardAssignmentStarted(ref: DatasetRef, shard: Int, node: Actor
 
 final case class IngestionStarted(ref: DatasetRef, shard: Int, node: ActorRef) extends ShardEvent
 
+final case class RecoveryInProgress(ref: DatasetRef, shard: Int, node: ActorRef, progressPct: Int) extends ShardEvent
+
 final case class IngestionError(ref: DatasetRef, shard: Int, err: Throwable) extends ShardEvent
 
 final case class IngestionStopped(ref: DatasetRef, shard: Int) extends ShardEvent
@@ -102,7 +104,7 @@ case object ShardStatusError extends ShardStatus {
 
 final case class ShardStatusRecovery(progressPct: Int) extends ShardStatus {
   def minimalEvents(ref: DatasetRef, shard: Int, node: ActorRef): Seq[ShardEvent] =
-    Seq(RecoveryStarted(ref, shard, node, progressPct))
+    Seq(RecoveryInProgress(ref, shard, node, progressPct))
 }
 
 case object ShardStatusStopped extends ShardStatus {

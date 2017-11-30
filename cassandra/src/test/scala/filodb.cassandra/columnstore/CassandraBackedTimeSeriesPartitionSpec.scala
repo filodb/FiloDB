@@ -15,6 +15,7 @@ class CassandraBackedTimeSeriesPartitionSpec extends TimeSeriesPartitionSpec {
   val config = ConfigFactory.load("application_test.conf").getConfig("filodb")
   import monix.execution.Scheduler.Implicits.global
   override val colStore = new CassandraColumnStore(config, global)
+  colStore.initialize(dataset1.ref)
 
   it("should be able to load from persistent store to answer queries") {
 

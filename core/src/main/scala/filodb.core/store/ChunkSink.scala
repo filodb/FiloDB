@@ -1,6 +1,9 @@
 package filodb.core.store
 
+import java.util.concurrent.ConcurrentHashMap
+
 import scala.concurrent.Future
+import scala.collection.JavaConverters._
 
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
@@ -9,6 +12,7 @@ import monix.reactive.Observable
 
 import filodb.core._
 import filodb.core.metadata.Dataset
+import filodb.core.Types.PartitionKey
 
 
 /**
@@ -36,6 +40,19 @@ trait ChunkSink {
    * NOTE: please make sure there are no writes going on before calling this
    */
   def truncate(dataset: DatasetRef): Future[Response]
+
+  /**
+    * This method should be called when new partitions are flushed in the column store.
+    * It is used to build a list of available partition keys in the store.
+    */
+  def addPartitions(dataset: Dataset, partitionKeys: Iterator[Types.PartitionKey], shardNum: Int): Future[Response]
+
+  /**
+    * This method should be called when partition(s) are removed from the store likely due to
+    * the fact that the retention period for all data contained in the partition has expired,
+    * and there is no new data.
+    */
+  def removePartitions(dataset: Dataset, partitionKey: Iterator[Types.PartitionKey], shardNum: Int): Future[Response]
 
   /**
    * Completely and permanently drops the dataset from the ChunkSink.
@@ -79,18 +96,22 @@ class ChunkSinkStats {
 }
 
 /**
- * NullChunkSink keeps stats but other than that writes chunks nowhere.  It's convenient for testing though.
+ * NullColumnStore keeps stats and partitions but other than that writes chunks nowhere.
+ * It's convenient for testing though.
  */
 class NullColumnStore(implicit sched: Scheduler) extends ColumnStore with StrictLogging {
   val sinkStats = new ChunkSinkStats
   val stats = new ChunkSourceStats
+
+  // in-memory store of partition keys
+  val partitionKeys = new ConcurrentHashMap[DatasetRef, scala.collection.mutable.Set[Types.PartitionKey]]().asScala
 
   def write(dataset: Dataset, chunksets: Observable[ChunkSet]): Future[Response] = {
     chunksets.foreach { chunkset =>
       val totalBytes = chunkset.chunks.map(_._2.limit).sum
       sinkStats.addChunkWriteStats(chunkset.chunks.length, totalBytes)
       sinkStats.chunksetWrite()
-      logger.debug(s"NullChunkSink: [${chunkset.partition}] ${chunkset.info}  ${chunkset.chunks.length} " +
+      logger.debug(s"NullColumnStore: [${chunkset.partition}] ${chunkset.info}  ${chunkset.chunks.length} " +
                    s"chunks with $totalBytes bytes")
     }
     Future.successful(Success)
@@ -98,11 +119,16 @@ class NullColumnStore(implicit sched: Scheduler) extends ColumnStore with Strict
 
   def initialize(dataset: DatasetRef): Future[Response] = Future.successful(Success)
 
-  def truncate(dataset: DatasetRef): Future[Response] = Future.successful(Success)
+  def truncate(dataset: DatasetRef): Future[Response] = {
+    partitionKeys -= dataset
+    Future.successful(Success)
+  }
 
   def dropDataset(dataset: DatasetRef): Future[Response] = Future.successful(Success)
 
-  def reset(): Unit = {}
+  def reset(): Unit = {
+    partitionKeys.clear()
+  }
 
   override def shutdown(): Unit = {}
 
@@ -110,4 +136,40 @@ class NullColumnStore(implicit sched: Scheduler) extends ColumnStore with Strict
                               partMethod: PartitionScanMethod): Observable[FiloPartition] = Observable.empty
 
   override def getScanSplits(dataset: DatasetRef, splitsPerNode: Int): Seq[ScanSplit] = Seq.empty
+
+  override def addPartitions(dataset: Dataset,
+                             keys: Iterator[PartitionKey],
+                             shardNum: Int): Future[Response] = {
+    val keysForDataset = partitionKeys.getOrElseUpdate(dataset.ref, {
+      val keyList = createConcurrentSet[PartitionKey]()
+      partitionKeys += (dataset.ref -> keyList)
+      keyList
+    })
+    keysForDataset ++= keys
+    logger.debug(s"NullColumnStore.addPartitions: $keysForDataset")
+    Future.successful(Success)
+  }
+
+  private def createConcurrentSet[T]() = {
+    java.util.Collections.newSetFromMap(new java.util.concurrent.ConcurrentHashMap[T, java.lang.Boolean]).asScala
+  }
+
+  override def removePartitions(dataset: Dataset,
+                                keys: Iterator[PartitionKey],
+                                shardNum: Int): Future[Response] = {
+    partitionKeys.get(dataset.ref) match {
+      case Some(keyList) =>
+        keyList --= keys
+        if (keyList.isEmpty) partitionKeys -= dataset.ref
+      case None => throw new IllegalArgumentException("Dataset not found")
+    }
+    Future.successful(Success)
+  }
+
+  override def scanPartitionKeys(dataset: Dataset,
+                                 shardNum: Int): Observable[PartitionKey] = {
+    partitionKeys.get(dataset.ref)
+      .map(Observable.fromIterable(_))
+      .getOrElse(Observable.empty)
+  }
 }

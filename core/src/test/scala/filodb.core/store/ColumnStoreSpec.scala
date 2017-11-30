@@ -1,15 +1,15 @@
 package filodb.core.store
 
+import com.typesafe.config.ConfigFactory
+import monix.reactive.Observable
+import org.scalatest.{BeforeAndAfter, BeforeAndAfterAll, FlatSpec, Matchers}
+import org.scalatest.concurrent.ScalaFutures
+import org.scalatest.time.{Millis, Seconds, Span}
+
 import filodb.core._
 import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.query.{ColumnFilter, Filter}
 import filodb.memory.format.ZeroCopyUTF8String._
-
-import com.typesafe.config.ConfigFactory
-import monix.reactive.Observable
-import org.scalatest.concurrent.ScalaFutures
-import org.scalatest.time.{Millis, Seconds, Span}
-import org.scalatest.{BeforeAndAfter, BeforeAndAfterAll, FlatSpec, Matchers}
 
 trait ColumnStoreSpec extends FlatSpec with Matchers
 with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
@@ -280,4 +280,17 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
     val rowIt = colStore.scanRows(dataset3, dataset3.colIDs("NumArticles").get, method2)
     rowIt.map(_.getInt(0)).sum should equal (10)
   }
+
+  "partition list api" should "allow reading and writing partition list for shard" in {
+
+    import monix.execution.Scheduler.Implicits.global
+
+    val writtenKeys = Range(0, 1024).map(i => dataset.partKey(i))
+    val additions = colStore.addPartitions(dataset, writtenKeys.toIterator, 0).futureValue
+    additions shouldBe Success
+    val readKeys = colStore.scanPartitionKeys(dataset, 0).toListL.runAsync.futureValue
+    writtenKeys.toSet shouldEqual readKeys.toSet
+  }
+
+
 }

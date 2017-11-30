@@ -1,23 +1,28 @@
 package filodb.cassandra.columnstore
 
+import java.net.InetSocketAddress
+import java.nio.ByteBuffer
+
+import scala.collection.mutable
+import scala.collection.mutable.ArrayBuffer
+import scala.concurrent.{ExecutionContext, Future}
+
 import com.datastax.driver.core.TokenRange
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
-import java.net.InetSocketAddress
-import java.nio.ByteBuffer
 import kamon.trace.{TraceContext, Tracer}
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
 import org.jctools.maps.NonBlockingHashMapLong
-import filodb.memory.format.FiloVector
-import scala.concurrent.{ExecutionContext, Future}
 
 import filodb.cassandra.{DefaultFiloSessionProvider, FiloCassandraConnector, FiloSessionProvider}
 import filodb.core._
-import filodb.core.store._
 import filodb.core.metadata.Dataset
 import filodb.core.query._
+import filodb.core.store._
+import filodb.core.Types.PartitionKey
+import filodb.memory.format.FiloVector
 
 /**
  * Implementation of a column store using Apache Cassandra tables.
@@ -52,13 +57,15 @@ class CassandraColumnStore(val config: Config, val readEc: Scheduler,
                            val filoSessionProvider: Option[FiloSessionProvider] = None)
                           (implicit val sched: Scheduler)
 extends ColumnStore with CassandraChunkSource with StrictLogging {
-  import filodb.core.store._
   import collection.JavaConverters._
+
+  import filodb.core.store._
   import Perftools._
 
   logger.info(s"Starting CassandraColumnStore with config ${cassandraConfig.withoutPath("password")}")
 
   private val writeParallelism = cassandraConfig.getInt("write-parallelism")
+  private val partitionListNumStripesPerShard = cassandraConfig.getInt("partition-list-num-stripes-per-shard")
 
   val sinkStats = new ChunkSinkStats
 
@@ -66,27 +73,34 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
     val chunkTable = getOrCreateChunkTable(dataset)
     clusterConnector.createKeyspace(chunkTable.keyspace)
     val indexTable = getOrCreateIndexTable(dataset)
+    val partitionListTable = getOrCreatePartitionListTable(dataset)
     for { ctResp    <- chunkTable.initialize()
-          rmtResp   <- indexTable.initialize() } yield rmtResp
+          rmtResp   <- indexTable.initialize()
+          pltResp   <- partitionListTable.initialize() } yield pltResp
   }
 
   def truncate(dataset: DatasetRef): Future[Response] = {
     logger.info(s"Clearing all data for dataset ${dataset}")
     val chunkTable = getOrCreateChunkTable(dataset)
     val indexTable = getOrCreateIndexTable(dataset)
+    val partitionListTable = getOrCreatePartitionListTable(dataset)
     for { ctResp    <- chunkTable.clearAll()
-          rmtResp   <- indexTable.clearAll() } yield rmtResp
+          rmtResp   <- indexTable.clearAll()
+          pltResp   <- partitionListTable.clearAll()  } yield pltResp
   }
 
   def dropDataset(dataset: DatasetRef): Future[Response] = {
     val chunkTable = getOrCreateChunkTable(dataset)
     val indexTable = getOrCreateIndexTable(dataset)
+    val partitionListTable = getOrCreatePartitionListTable(dataset)
     for { ctResp    <- chunkTable.drop() if ctResp == Success
-          rmtResp   <- indexTable.drop() if rmtResp == Success }
+          rmtResp   <- indexTable.drop() if rmtResp == Success
+          pltResp   <- partitionListTable.drop() if pltResp == Success }
     yield {
       chunkTableCache.remove(dataset)
       indexTableCache.remove(dataset)
-      rmtResp
+      partitionListTableCache.remove(dataset)
+      pltResp
     }
   }
 
@@ -188,6 +202,50 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
 
   def unwrapTokenRanges(wrappedRanges : Seq[TokenRange]): Seq[TokenRange] =
     wrappedRanges.flatMap(_.unwrap().asScala.toSeq)
+
+  override def scanPartitionKeys(dataset: Dataset, shardNum: Int): Observable[PartitionKey] = {
+    getOrCreatePartitionListTable(dataset.ref).getPartitions(dataset, shardNum, partitionListNumStripesPerShard)
+  }
+
+  override def addPartitions(dataset: Dataset,
+                             partitionKeys: Iterator[Types.PartitionKey],
+                             shardNum: Int): Future[Response] = {
+    val stripes = new mutable.HashMap[Int, ArrayBuffer[Types.PartitionKey]]()
+    partitionKeys.foreach { p =>
+      val g = getStripeForPartitionKey(p)
+      stripes.getOrElseUpdate(g, ArrayBuffer()) += p
+    }
+
+    val table = getOrCreatePartitionListTable(dataset.ref)
+    val writes = stripes.map { stripe =>
+      table.writePartitions(shardNum, stripe._1, stripe._2)
+    }
+    Future.sequence(writes).map { responses =>
+      responses.find(_ != Success).getOrElse(Success)
+    }
+  }
+
+  override def removePartitions(dataset: Dataset,
+                                partitionKeys: Iterator[Types.PartitionKey],
+                                shardNum: Int): Future[Response] = {
+    val stripes = new mutable.HashMap[Int, ArrayBuffer[Types.PartitionKey]]()
+    partitionKeys.foreach { p =>
+      val g = getStripeForPartitionKey(p)
+      stripes.getOrElseUpdate(g, ArrayBuffer()) += p
+    }
+
+    val table = getOrCreatePartitionListTable(dataset.ref)
+    val writes = stripes.map { stripe =>
+      table.deletePartitions(shardNum, stripe._1, stripe._2)
+    }
+    Future.sequence(writes).map { responses =>
+      responses.find(_ != Success).getOrElse(Success)
+    }
+  }
+
+  private def getStripeForPartitionKey(partitionKey: PartitionKey): Int = {
+    Math.abs(partitionKey.hashCode % partitionListNumStripesPerShard)
+  }
 }
 
 case class CassandraTokenRangeSplit(tokens: Seq[(String, String)],
@@ -210,6 +268,7 @@ trait CassandraChunkSource extends ChunkSource with StrictLogging {
 
   val chunkTableCache = concurrentCache[DatasetRef, ChunkTable](tableCacheSize)
   val indexTableCache = concurrentCache[DatasetRef, IndexTable](tableCacheSize)
+  val partitionListTableCache = concurrentCache[DatasetRef, PartitionListTable](tableCacheSize)
 
   protected val clusterConnector = new FiloCassandraConnector {
     def config: Config = cassandraConfig
@@ -274,6 +333,12 @@ trait CassandraChunkSource extends ChunkSource with StrictLogging {
     indexTableCache.getOrElseUpdate(dataset,
                                     { (dataset: DatasetRef) =>
                                       new IndexTable(dataset, clusterConnector)(readEc) })
+  }
+
+  def getOrCreatePartitionListTable(dataset: DatasetRef): PartitionListTable = {
+    partitionListTableCache.getOrElseUpdate(dataset, { dataset: DatasetRef =>
+      new PartitionListTable(dataset, clusterConnector)(readEc)
+    })
   }
 
   def reset(): Unit = {}

@@ -8,6 +8,7 @@ import monix.reactive.Observable
 import filodb.core._
 import filodb.core.metadata.Dataset
 import filodb.core.query.ChunkSetReader
+import filodb.core.Types.PartitionKey
 
 /**
  * ChunkSource is the base trait for a source of chunks given a `PartitionScanMethod` and a
@@ -60,6 +61,13 @@ trait ChunkSource {
         partition.streamReaders(chunkMethod, ids)
       }
   }
+
+  /**
+    * Quickly retrieves all the partition keys this chunk source has stored for the given shard number.
+    * Useful when the node has just restarted and all the available partitions for the shard needs to be
+    * read so query indexes can be populated.
+    */
+  def scanPartitionKeys(dataset: Dataset, shardNum: Int): Observable[PartitionKey]
 }
 
 /**

@@ -325,7 +325,6 @@ class TimeSeriesPartition(val dataset: Dataset,
     *
     */
   private def ingestChunksFromColStore(): Task[Unit] = {
-    logger.trace(s"Ingesting Chunks for Cassandra into Memstore for partition key $binPartition")
     val readers = chunkSource.scanPartitions(dataset, SinglePartitionScan(binPartition, shard))
       .take(1)
       .flatMap(_.streamReaders(AllChunkScan, dataset.dataColumns.map(_.id).toArray)) // all chunks, all columns
@@ -333,8 +332,8 @@ class TimeSeriesPartition(val dataset: Dataset,
       // TODO r.vectors is on-heap. It should be copied to the offheap store before adding to index.
       vectors.put(r.info.id, r.vectors.map(_.asInstanceOf[BinaryVector[_]]))
       index.add(r.info, Nil)
-    }.completedL.map { _ =>
-      logger.trace(s"Successfully ingested chunks from cassandra into Memstore for partition key $binPartition")
+    }.countL.map { count =>
+      logger.trace(s"Successfully ingested $count chunks from cassandra into Memstore for partition key $binPartition")
       partitionLoadedFromPersistentStore = true
     }
   }
