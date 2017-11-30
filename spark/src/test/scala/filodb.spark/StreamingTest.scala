@@ -1,15 +1,15 @@
 package filodb.spark
 
-import org.apache.spark.rdd.RDD
-import org.apache.spark.sql.{SparkSession, SaveMode}
-import org.apache.spark.streaming.{Milliseconds, StreamingContext}
-import org.scalatest.time.{Millis, Seconds, Span}
 import scala.collection.mutable
 
-import filodb.core._
-
+import org.apache.spark.rdd.RDD
+import org.apache.spark.sql.{SaveMode, SparkSession}
+import org.apache.spark.streaming.{Milliseconds, StreamingContext}
 import org.scalatest.{BeforeAndAfter, BeforeAndAfterAll, FunSpec, Matchers}
 import org.scalatest.concurrent.ScalaFutures
+import org.scalatest.time.{Millis, Seconds, Span}
+
+import filodb.core._
 
 
 case class NameRecord(first: Option[String], last: Option[String],

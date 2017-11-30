@@ -1,9 +1,9 @@
 package filodb.memory.format.vectors
 
+import org.scalatest.{FunSpec, Matchers}
+
 import filodb.memory.NativeMemoryManager
 import filodb.memory.format.{BinaryVector, FiloVector, GrowableVector}
-
-import org.scalatest.{FunSpec, Matchers}
 
 class LongVectorTest extends FunSpec with Matchers {
   def maxPlus(i: Int): Long = Int.MaxValue.toLong + i

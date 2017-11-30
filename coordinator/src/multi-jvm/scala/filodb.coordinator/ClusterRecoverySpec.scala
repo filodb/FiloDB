@@ -1,7 +1,7 @@
 package filodb.coordinator
 
-import scala.concurrent.duration._
 import scala.concurrent.Future
+import scala.concurrent.duration._
 
 import akka.actor.ActorRef
 import akka.pattern.ask
@@ -27,10 +27,11 @@ object ClusterRecoverySpecConfig extends MultiNodeConfig {
  */
 abstract class ClusterRecoverySpec extends ClusterSpec(ClusterRecoverySpecConfig) {
   import akka.testkit._
-  import GdeltTestData._
-  import NodeClusterActor._
+
   import ClusterRecoverySpecConfig._
+  import NodeClusterActor._
   import sources.CsvStreamFactory
+  import GdeltTestData._
 
   override def initialParticipants = roles.size
 

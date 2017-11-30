@@ -2,7 +2,7 @@
  <name>Scalastyle configuration</name>
  <check level="error" class="org.scalastyle.scalariform.ImportOrderChecker" enabled="true">
   <parameters>
-   <parameter name="groups">java1,scala,3rdParty,filodb</parameter>
+   <parameter name="groups">java,scala,3rdParty,filodb</parameter>
    <parameter name="group.java">javax?\..*</parameter>
    <parameter name="group.scala">scala\..*</parameter>
    <parameter name="group.3rdParty">(?!filodb\.).*</parameter>

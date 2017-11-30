@@ -1,23 +1,23 @@
 package filodb.spark
 
-import filodb.coordinator.client.Client.parse
-import filodb.core._
-import filodb.core.binaryrecord.{BinaryRecord, BinaryRecordWrapper}
-import filodb.core.metadata.{Column, Dataset}
-import filodb.core.query.{ChunkSetReader, ColumnFilter, KeyFilter, Filter => FF}
-import filodb.core.store._
-import filodb.memory.format.{FiloRowReader, FiloVector, ZeroCopyUTF8String}
-
 import com.typesafe.config.{Config, ConfigRenderOptions}
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
 import org.apache.spark.rdd.RDD
+import org.apache.spark.sql.{DataFrame, Row, SQLContext}
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.{BaseGenericInternalRow, GenericInternalRow}
 import org.apache.spark.sql.sources._
 import org.apache.spark.sql.types._
-import org.apache.spark.sql.{DataFrame, Row, SQLContext}
 import org.apache.spark.unsafe.types.UTF8String
+
+import filodb.coordinator.client.Client.parse
+import filodb.core._
+import filodb.core.binaryrecord.{BinaryRecord, BinaryRecordWrapper}
+import filodb.core.metadata.{Column, Dataset}
+import filodb.core.query.{ChunkSetReader, ColumnFilter, Filter => FF, KeyFilter}
+import filodb.core.store._
+import filodb.memory.format.{FiloRowReader, FiloVector, ZeroCopyUTF8String}
 
 object FiloRelation extends StrictLogging {
   import Types.PartitionKey

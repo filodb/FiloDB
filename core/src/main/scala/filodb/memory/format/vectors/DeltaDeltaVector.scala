@@ -3,10 +3,13 @@ package filodb.memory.format.vectors
 import java.nio.ByteBuffer
 
 import scala.util.Try
+
 import scalaxy.loops._
 
 import filodb.memory.MemFactory
 import filodb.memory.format.{BinaryAppendableVector, BinaryVector, UnsafeUtils, WireFormat}
+import filodb.memory.format.Encodings._
+
 
 /**
  * The Delta-Delta Vector represents an efficient encoding of a sloped line where in general values are
@@ -100,8 +103,6 @@ final case class DeltaDeltaVector(base: Any, offset: Long,
 
 final case class DeltaTooLarge(value: Long, expected: Long) extends
   IllegalArgumentException(s"Delta too large for value $value")
-
-import filodb.memory.format.Encodings._
 
 // TODO: validate args, esp base offset etc, somehow.  Need to think about this for the many diff classes.
 class DeltaDeltaAppendingVector(val base: Any,

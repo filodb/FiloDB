@@ -1,12 +1,12 @@
 package filodb.core
 
 import java.nio.ByteBuffer
-import filodb.memory.format.ZeroCopyUTF8String
 
 import scalaxy.loops._
 import scodec.bits.ByteVector
 
 import filodb.core.binaryrecord.BinaryRecord
+import filodb.memory.format.ZeroCopyUTF8String
 
 /**
  * Temporary home for new FiloDB API definitions, including column store and memtable etc.

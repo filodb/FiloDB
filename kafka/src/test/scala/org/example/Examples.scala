@@ -1,7 +1,8 @@
 package org.example
 
-import filodb.core.memstore.IngestRecord
 import org.apache.kafka.common.serialization._
+
+import filodb.core.memstore.IngestRecord
 import filodb.core.metadata.Dataset
 import filodb.kafka.{KafkaSerdes, RecordConverter}
 import filodb.memory.format._

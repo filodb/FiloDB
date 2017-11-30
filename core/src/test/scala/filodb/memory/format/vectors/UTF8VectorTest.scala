@@ -1,9 +1,9 @@
 package filodb.memory.format.vectors
 
+import org.scalatest.{FunSpec, Matchers}
+
 import filodb.memory.NativeMemoryManager
 import filodb.memory.format.{FiloVector, GrowableVector, ZeroCopyUTF8String}
-
-import org.scalatest.{FunSpec, Matchers}
 //noinspection ScalaStyle
 class UTF8VectorTest extends FunSpec with Matchers {
   import filodb.memory.format.Encodings._

@@ -1,11 +1,11 @@
 package filodb.memory
 
-import java.util
 import java.util.concurrent.locks.ReentrantLock
 
 import scala.collection.JavaConverters._
 
 import com.kenai.jffi.PageManager
+import java.util
 
 /**
   * Allows requesting blocks.

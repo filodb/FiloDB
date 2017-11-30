@@ -2,17 +2,17 @@ package filodb.jmh
 
 import java.util.concurrent.TimeUnit
 
-import filodb.core.memstore.{IngestRecord, IngestRouting}
-import filodb.core.store._
-import filodb.memory.format.TupleRowReader
-import filodb.spark.{FiloDriver, FiloExecutor, FiloRelation}
-
 import ch.qos.logback.classic.{Level, Logger}
 import com.typesafe.config.ConfigRenderOptions
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.functions.sum
 import org.openjdk.jmh.annotations._
+
+import filodb.core.memstore.{IngestRecord, IngestRouting}
+import filodb.core.store._
+import filodb.memory.format.TupleRowReader
+import filodb.spark.{FiloDriver, FiloExecutor, FiloRelation}
 
 /**
  * A benchmark to compare performance of FiloRelation against different scenarios,

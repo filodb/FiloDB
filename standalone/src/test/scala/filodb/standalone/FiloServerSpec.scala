@@ -4,8 +4,8 @@ import akka.actor.ActorRef
 import akka.testkit.{TestKit, TestProbe}
 import org.scalatest.concurrent.ScalaFutures
 
-import filodb.coordinator.NodeClusterActor.CoordinatorRegistered
 import filodb.coordinator.{MiscCommands, RunnableSpec}
+import filodb.coordinator.NodeClusterActor.CoordinatorRegistered
 
 class FiloServerSpec extends RunnableSpec with ScalaFutures {
   "A FiloServer Node" must {

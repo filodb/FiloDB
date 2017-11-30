@@ -1,10 +1,10 @@
 package filodb.core.metadata
 
 import org.scalactic._
-import filodb.memory.format.{RowReader, ZeroCopyUTF8String => UTF8Str}
 
 import filodb.core._
 import filodb.core.Types._
+import filodb.memory.format.{RowReader, ZeroCopyUTF8String => UTF8Str}
 
 
 object SimpleComputations {

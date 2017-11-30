@@ -1,12 +1,12 @@
 package filodb.coordinator.client
 
+import scala.util.{Failure, Success, Try}
+
 import org.parboiled2.ParseError
-import scala.util.{Try, Success, Failure}
+import org.scalatest.{FunSpec, Matchers}
 
 import filodb.core.metadata.DatasetOptions
 import filodb.core.query.{ColumnFilter, Filter}
-
-import org.scalatest.{FunSpec, Matchers}
 
 class PromQLParserSpec extends FunSpec with Matchers {
   import PromQLParser._

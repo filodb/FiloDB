@@ -1,11 +1,11 @@
 package filodb.core.store
 
 import monix.reactive.Observable
-import filodb.memory.format.FiloVector
 
 import filodb.core.metadata.Dataset
 import filodb.core.query.ChunkSetReader
 import filodb.core.Types.PartitionKey
+import filodb.memory.format.FiloVector
 
 /**
  * An abstraction for a single partition of data, which can be scanned for chunks or readers

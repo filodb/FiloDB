@@ -1,7 +1,7 @@
 package filodb.memory.format
 
-import org.scalatest.prop.PropertyChecks
 import org.scalatest.{FunSpec, Matchers}
+import org.scalatest.prop.PropertyChecks
 
 class ZeroCopyBinaryTest extends FunSpec with Matchers with PropertyChecks {
   describe("ZeroCopyUTF8String") {

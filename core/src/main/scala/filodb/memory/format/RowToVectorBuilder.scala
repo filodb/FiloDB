@@ -2,12 +2,13 @@ package filodb.memory.format
 
 import java.nio.ByteBuffer
 
-import filodb.memory.format.Encodings.{AutoDetect, EncodingHint}
-import filodb.memory.format.vectors._
-import scalaxy.loops._
 import scala.language.existentials
 
+import scalaxy.loops._
+
 import filodb.memory.MemFactory
+import filodb.memory.format.Encodings.{AutoDetect, EncodingHint}
+import filodb.memory.format.vectors._
 
 
 case class VectorInfo(name: String, dataType: Class[_])

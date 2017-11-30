@@ -2,8 +2,8 @@ package filodb.coordinator
 
 import java.util.concurrent.atomic.AtomicLong
 
-import scala.concurrent.duration._
 import scala.concurrent.Future
+import scala.concurrent.duration._
 import scala.util.Try
 
 import akka.actor.Props
@@ -12,13 +12,13 @@ import akka.util.Timeout
 import monix.eval.Task
 import monix.reactive.Observable
 import org.scalactic._
-import filodb.memory.format.BinaryVector
 
 import filodb.core._
 import filodb.core.memstore.MemStore
-import filodb.core.metadata.{Dataset, BadArgument => BadArg, WrongNumberArguments}
+import filodb.core.metadata.{BadArgument => BadArg, Dataset, WrongNumberArguments}
 import filodb.core.query.{AggregationFunction, CombinerFunction, NoTimestampColumn}
 import filodb.core.store._
+import filodb.memory.format.BinaryVector
 
 object QueryActor {
   private val nextId = new AtomicLong()
@@ -42,10 +42,11 @@ object QueryActor {
  */
 final class QueryActor(memStore: MemStore,
                        dataset: Dataset) extends BaseActor {
+  import OptionSugar._
+  import TrySugar._
+
   import QueryActor._
   import QueryCommands._
-  import TrySugar._
-  import OptionSugar._
 
   implicit val scheduler = monix.execution.Scheduler(context.dispatcher)
   var shardMap = ShardMapper.default

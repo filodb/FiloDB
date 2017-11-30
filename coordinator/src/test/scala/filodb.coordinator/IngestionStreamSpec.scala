@@ -22,9 +22,8 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem)
 
   import IngestionCommands._
   import NodeClusterActor._
-  import GdeltTestData._
-
   import sources.CsvStreamFactory
+  import GdeltTestData._
 
   implicit val defaultPatience =
     PatienceConfig(timeout = Span(10, Seconds), interval = Span(50, Millis))

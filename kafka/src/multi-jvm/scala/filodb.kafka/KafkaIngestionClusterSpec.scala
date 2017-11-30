@@ -5,15 +5,15 @@ import java.lang.{Long => JLong}
 import scala.concurrent.Await
 import scala.concurrent.duration._
 
-import filodb.coordinator.{NodeClusterActor, QueryCommands}
-import filodb.core._
-import filodb.core.memstore.{IngestRecord, IngestRouting}
-import filodb.core.metadata.Dataset
-
 import com.typesafe.config.ConfigFactory
 import monix.execution.Scheduler
 import monix.reactive.Observable
 import org.apache.kafka.clients.producer.ProducerRecord
+
+import filodb.coordinator.{NodeClusterActor, QueryCommands}
+import filodb.core._
+import filodb.core.memstore.{IngestRecord, IngestRouting}
+import filodb.core.metadata.Dataset
 
 object KafkaIngestionClusterSpecConfig extends MultiNodeConfig {
   // register the named roles (nodes) of the test
@@ -57,9 +57,9 @@ object KafkaIngestionClusterSpecConfig extends MultiNodeConfig {
   */
 abstract class KafkaIngestionClusterSpec extends ClusterSpec(KafkaIngestionClusterSpecConfig) {
 
-  import KafkaIngestionClusterSpecConfig._
   import NodeClusterActor._
   import QueryCommands._
+  import KafkaIngestionClusterSpecConfig._
 
   override def initialParticipants = roles.size
 

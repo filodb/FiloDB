@@ -1,11 +1,12 @@
 package org.apache.spark.sql.hive.filodb
 
+import scala.util.Try
+
 import com.typesafe.scalalogging.StrictLogging
 import org.apache.spark.SparkEnv
+import org.apache.spark.sql.{SparkSession, SQLContext}
 import org.apache.spark.sql.catalyst.TableIdentifier
 import org.apache.spark.sql.execution.command.CreateDataSourceTableUtils
-import org.apache.spark.sql.{SQLContext, SparkSession}
-import scala.util.Try
 
 import filodb.core.store.MetaStore
 

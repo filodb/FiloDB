@@ -1,9 +1,10 @@
 package filodb.core
 
+import scala.concurrent.Future
+
 import kamon.Kamon
 import kamon.trace.{TraceContext, Tracer}
 import monix.eval.Task
-import scala.concurrent.Future
 
 /**
  * Helpers for performance measurement and tracing.

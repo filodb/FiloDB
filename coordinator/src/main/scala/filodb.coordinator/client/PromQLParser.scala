@@ -1,7 +1,8 @@
 package filodb.coordinator.client
 
+import scala.util.{Failure, Success, Try}
+
 import org.parboiled2._
-import scala.util.{Try, Success, Failure}
 
 import filodb.coordinator.QueryCommands._
 import filodb.core.metadata.DatasetOptions
@@ -69,8 +70,8 @@ final case class ArgsAndPartSpec(queryArgs: QueryArgs, partSpec: PartitionSpec) 
  */
 class PromQLParser(val input: ParserInput,
                    options: DatasetOptions = DatasetOptions.DefaultOptions) extends Parser {
-  import Filter._
   import PromQLParser._
+  import Filter._
 
   // scalastyle:off method.name
   // scalastyle:off public.methods.have.type

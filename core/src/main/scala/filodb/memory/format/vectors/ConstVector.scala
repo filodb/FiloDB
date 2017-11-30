@@ -2,6 +2,7 @@ package filodb.memory.format.vectors
 
 import filodb.memory.MemFactory
 import filodb.memory.format.{BinaryAppendableVector, BinaryVector, UnsafeUtils, WireFormat}
+import filodb.memory.format.Encodings._
 
 object ConstVector {
   /**
@@ -34,8 +35,6 @@ BinaryVector[A] with ConstVectorType {
   final def isAvailable(i: Int): Boolean = true
   val maybeNAs = false
 }
-
-import filodb.memory.format.Encodings._
 
 /**
  * An AppendingVector-API compatible class for situations (such as fixed partition keys) where you know

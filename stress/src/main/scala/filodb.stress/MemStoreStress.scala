@@ -1,17 +1,18 @@
 package filodb.stress
 
-import akka.pattern.ask
-import akka.util.Timeout
-import org.apache.spark.sql.{SparkSession, SaveMode}
-import org.joda.time.DateTime
-import monix.eval.Task
-import monix.reactive.Observable
-import scala.concurrent.duration._
 import scala.concurrent.Await
+import scala.concurrent.duration._
 import scala.language.postfixOps
 
-import filodb.core.{Perftools, DatasetRef}
+import akka.pattern.ask
+import akka.util.Timeout
+import monix.eval.Task
+import monix.reactive.Observable
+import org.apache.spark.sql.{SaveMode, SparkSession}
+import org.joda.time.DateTime
+
 import filodb.coordinator.QueryCommands._
+import filodb.core.{DatasetRef, Perftools}
 import filodb.spark.{FiloDriver, FiloExecutor}
 
 /**

@@ -1,10 +1,10 @@
 package filodb.coordinator
 
 import scala.collection.mutable.HashMap
-import scala.concurrent.duration._
 import scala.concurrent.Future
-import scala.util.control.NonFatal
+import scala.concurrent.duration._
 import scala.util.Try
+import scala.util.control.NonFatal
 
 import akka.actor.{ActorRef, Props}
 import akka.event.LoggingReceive
@@ -12,9 +12,9 @@ import monix.execution.{CancelableFuture, Scheduler}
 import monix.reactive.Observable
 import net.ceedubs.ficus.Ficus._
 
+import filodb.core.{DatasetRef, Iterators}
 import filodb.core.memstore._
 import filodb.core.metadata.Dataset
-import filodb.core.{DatasetRef, Iterators}
 
 object IngestionActor {
   final case class IngestRows(ackTo: ActorRef, shard: Int, records: Seq[IngestRecord])

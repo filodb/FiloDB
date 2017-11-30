@@ -5,14 +5,14 @@ import java.nio.ByteBuffer
 
 import scala.collection.mutable.ArrayBuffer
 
+import com.googlecode.javaewah.EWAHCompressedBitmap
+import com.typesafe.scalalogging.StrictLogging
+import org.boon.primitive.{ByteBuf, InputByteArray}
+
 import filodb.core.Types._
 import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.metadata.{Column, Dataset}
 import filodb.memory.format._
-
-import com.googlecode.javaewah.EWAHCompressedBitmap
-import com.typesafe.scalalogging.StrictLogging
-import org.boon.primitive.{ByteBuf, InputByteArray}
 
 /**
   * A ChunkSet is the set of chunks for all columns, one per column, serialized from a set of rows.

@@ -8,8 +8,8 @@ import akka.actor._
 import akka.cluster.{Cluster, ClusterEvent}
 import akka.util.Timeout
 import com.typesafe.scalalogging.StrictLogging
-import monix.execution.misc.NonFatal
 import monix.execution.Scheduler
+import monix.execution.misc.NonFatal
 
 import filodb.core.store.MetaStore
 
@@ -31,9 +31,10 @@ object FilodbCluster extends ExtensionId[FilodbCluster] with ExtensionIdProvider
   */
 final class FilodbCluster(system: ExtendedActorSystem) extends Extension with StrictLogging {
 
-  import NodeProtocol._
-  import ActorName.{NodeGuardianName => guardianName}
   import akka.pattern.ask
+
+  import ActorName.{NodeGuardianName => guardianName}
+  import NodeProtocol._
 
   val settings = new FilodbSettings(system.settings.config)
   import settings._
@@ -170,8 +171,9 @@ final class FilodbCluster(system: ExtendedActorSystem) extends Extension with St
   /** Idempotent. */
   def shutdown(): Unit = {
     if (_isTerminated.compareAndSet(false, true)) {
-      import NodeProtocol.GracefulShutdown
       import akka.pattern.gracefulStop
+
+      import NodeProtocol.GracefulShutdown
 
 
       _isTerminating.set(true)

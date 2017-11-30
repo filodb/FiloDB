@@ -1,9 +1,9 @@
 package filodb.memory.format.vectors
 
+import org.scalatest.{FunSpec, Matchers}
+
 import filodb.memory.NativeMemoryManager
 import filodb.memory.format.{FiloVector, GrowableVector, VectorTooSmall}
-
-import org.scalatest.{FunSpec, Matchers}
 
 class IntBinaryVectorTest extends FunSpec with Matchers {
   val memFactory = new NativeMemoryManager(10 * 1024 * 1024)

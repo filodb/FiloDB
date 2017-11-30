@@ -1,13 +1,14 @@
 package filodb.stress
 
+import scala.concurrent.{Await, Future}
+import scala.concurrent.duration._
+import scala.util.Try
+
 import com.opencsv.CSVReader
 import org.apache.spark.rdd.RDD
-import org.apache.spark.sql.{SparkSession, SaveMode}
+import org.apache.spark.sql.{SaveMode, SparkSession}
 import org.apache.spark.streaming.{Milliseconds, StreamingContext}
 import org.joda.time.DateTime
-import scala.concurrent.duration._
-import scala.concurrent.{Await, Future}
-import scala.util.Try
 
 import filodb.core.DatasetRef
 import filodb.spark._

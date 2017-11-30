@@ -22,9 +22,9 @@ import filodb.core.metadata.Dataset
   */
 private[coordinator] final class ShardCoordinatorActor(strategy: ShardAssignmentStrategy) extends NamingAwareBaseActor {
 
-  import ShardSubscriptions._
   import NodeClusterActor.DatasetUnknown
   import ShardAssignmentStrategy.DatasetShards
+  import ShardSubscriptions._
 
   val shardMappers = new MutableHashMap[DatasetRef, ShardMapper] // when this gets too big
 

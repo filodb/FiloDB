@@ -2,10 +2,10 @@ package filodb.memory.format
 
 import java.nio.ByteBuffer
 
-import filodb.memory.format.Encodings._
 import scalaxy.loops._
 
 import filodb.memory.MemFactory
+import filodb.memory.format.Encodings._
 
 /**
  * This is really the same as FiloVector, but supports off-heap easier.

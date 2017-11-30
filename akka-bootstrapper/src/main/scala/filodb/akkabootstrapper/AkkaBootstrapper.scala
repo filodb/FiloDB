@@ -1,16 +1,16 @@
 package filodb.akkabootstrapper
 
+import scala.collection.immutable.Seq
 import scala.concurrent.duration._
 import scala.language.postfixOps
-import scala.collection.immutable.Seq
 
 import akka.actor.{ActorRef, Address, Props}
 import akka.cluster.Cluster
+import akka.http.scaladsl.marshallers.sprayjson.SprayJsonSupport._
 import akka.http.scaladsl.server.Directives._
 import akka.http.scaladsl.server.Route
 import akka.pattern.ask
 import akka.util.Timeout
-import akka.http.scaladsl.marshallers.sprayjson.SprayJsonSupport._
 import com.typesafe.scalalogging.StrictLogging
 import spray.json._
 

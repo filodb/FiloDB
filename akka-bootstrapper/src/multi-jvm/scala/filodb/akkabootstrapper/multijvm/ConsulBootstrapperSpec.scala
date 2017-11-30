@@ -1,6 +1,5 @@
 package filodb.akkabootstrapper.multijvm
 
-import akka.remote.testkit.MultiNodeSpec
 import com.typesafe.config.{Config, ConfigFactory}
 
 

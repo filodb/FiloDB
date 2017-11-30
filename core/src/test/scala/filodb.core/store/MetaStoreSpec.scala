@@ -2,10 +2,9 @@ package filodb.core.store
 
 import java.util.UUID
 
-import org.scalatest.{FunSpec, Matchers, BeforeAndAfter, BeforeAndAfterAll}
-import org.scalatest.concurrent.ScalaFutures
-
 import com.typesafe.config.ConfigFactory
+import org.scalatest.{BeforeAndAfter, BeforeAndAfterAll, FunSpec, Matchers}
+import org.scalatest.concurrent.ScalaFutures
 
 import filodb.core._
 import filodb.core.metadata.Dataset

@@ -4,8 +4,8 @@ import java.lang.{Long => JLong}
 
 import com.typesafe.scalalogging.StrictLogging
 import monix.execution.Scheduler
-import monix.kafka.config.AutoOffsetReset
 import monix.kafka.{KafkaConsumerConfig, KafkaConsumerObservable}
+import monix.kafka.config.AutoOffsetReset
 
 object TestTimeseriesConsumer extends StrictLogging {
 

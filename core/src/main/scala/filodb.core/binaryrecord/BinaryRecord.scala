@@ -1,14 +1,16 @@
 package filodb.core.binaryrecord
 
 import java.nio.ByteBuffer
-import org.boon.primitive.ByteBuf
-import filodb.memory.format._
-import filodb.memory.format.RowReader.TypedFieldExtractor
+
 import scala.language.postfixOps
+
+import org.boon.primitive.ByteBuf
 import scalaxy.loops._
 
 import filodb.core.metadata.Dataset
 import filodb.core.Types._
+import filodb.memory.format._
+import filodb.memory.format.RowReader.TypedFieldExtractor
 
 // scalastyle:off equals.hash.code
 /**

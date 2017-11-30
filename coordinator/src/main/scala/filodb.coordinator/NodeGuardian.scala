@@ -16,7 +16,8 @@ final class NodeGuardian(extension: FilodbCluster,
                          assignmentStrategy: ShardAssignmentStrategy
                         ) extends GracefulStopAwareSupervisor {
 
-  import NodeProtocol._, ActorName._
+  import ActorName._
+  import NodeProtocol._
 
   protected val settings: FilodbSettings = extension.settings
 

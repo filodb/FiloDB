@@ -1,14 +1,13 @@
 package filodb.coordinator
 
-import java.io.{ByteArrayInputStream, ObjectInputStream}
-import java.io.{ByteArrayOutputStream, ObjectOutputStream}
+import java.io.{ByteArrayInputStream, ByteArrayOutputStream, ObjectInputStream, ObjectOutputStream}
 
 import akka.actor.ActorRef
 import org.scalatest.{FunSpec, Matchers}
 
+import filodb.core.NamesTestData
 import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.memstore.{IngestRecord, IngestRouting}
-import filodb.core.NamesTestData
 
 class SerializationSpec extends FunSpec with Matchers {
   import IngestionCommands._
@@ -44,8 +43,8 @@ class SerializationSpec extends FunSpec with Matchers {
   }
 
   it("should be able to serialize and deserialize IngestRows with BinaryRecords") {
-    import filodb.core.NamesTestData._
     import Serializer._
+    import filodb.core.NamesTestData._
 
     putPartitionSchema(dataset.partitionBinSchema)
     putDataSchema(dataset.dataBinSchema)

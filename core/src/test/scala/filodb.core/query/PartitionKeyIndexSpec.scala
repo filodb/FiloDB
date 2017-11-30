@@ -1,17 +1,16 @@
 package filodb.core.query
 
 import com.googlecode.javaewah.IntIterator
+import org.scalatest.{BeforeAndAfter, FunSpec, Matchers}
 
 import filodb.core._
 import filodb.core.memstore.IngestRecord
 
-import org.scalatest.{FunSpec, Matchers, BeforeAndAfter}
-
 class PartitionKeyIndexSpec extends FunSpec with Matchers with BeforeAndAfter {
   import GdeltTestData._
   import Filter._
-  import filodb.memory.format.ZeroCopyUTF8String._
   import filodb.memory.format.UTF8Wrapper
+  import filodb.memory.format.ZeroCopyUTF8String._
 
   val keyIndex = new PartitionKeyIndex(dataset6)
 

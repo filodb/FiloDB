@@ -1,13 +1,13 @@
 package filodb.cassandra
 
 import com.typesafe.config.ConfigFactory
+import org.scalatest._
 import org.scalatest.concurrent.ScalaFutures
-import org.scalatest.{Suite, FunSpecLike, BeforeAndAfter, BeforeAndAfterAll, Matchers}
-import org.scalatest.time.{Millis, Span, Seconds}
+import org.scalatest.time.{Millis, Seconds, Span}
 
-import filodb.core.metadata.Dataset
-import filodb.core._
 import filodb.cassandra.columnstore.CassandraColumnStore
+import filodb.core._
+import filodb.core.metadata.Dataset
 
 trait AsyncTest extends Suite with Matchers with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures
 

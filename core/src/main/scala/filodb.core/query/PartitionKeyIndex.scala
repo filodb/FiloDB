@@ -3,12 +3,12 @@ package filodb.core.query
 import com.googlecode.javaewah.{EWAHCompressedBitmap, IntIterator}
 import com.typesafe.scalalogging.StrictLogging
 import org.jctools.maps.NonBlockingHashMap
-import filodb.memory.format.{ZeroCopyUTF8String => UTF8Str}
 import scalaxy.loops._
 
 import filodb.core.metadata.{Column, Dataset}
 import filodb.core.store.ChunkSetInfo.emptySkips
 import filodb.core.Types.PartitionKey
+import filodb.memory.format.{ZeroCopyUTF8String => UTF8Str}
 
 trait Indexer {
   def fromKey(key: PartitionKey, partIndex: Int): Unit
@@ -22,8 +22,9 @@ object NoOpIndexer extends Indexer {
  * A high performance index using BitmapIndex for partition keys.
  */
 class PartitionKeyIndex(dataset: Dataset) extends StrictLogging {
-  import filodb.core._
   import collection.JavaConverters._
+
+  import filodb.core._
   import Column.ColumnType._
 
   private final val numPartColumns = dataset.partitionColumns.length

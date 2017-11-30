@@ -1,6 +1,6 @@
 package filodb.coordinator
 
-import akka.actor.{Actor, AddressFromURIString, ActorRef, Props}
+import akka.actor.{Actor, ActorRef, AddressFromURIString, Props}
 import akka.testkit.TestProbe
 import com.typesafe.config.ConfigFactory
 
@@ -10,8 +10,8 @@ import filodb.core.metadata.Dataset
 
 class ShardCoordinatorCumulativeStateSpec extends ShardCoordinatorSpec {
 
-  import ShardSubscriptions._
   import ShardAssignmentStrategy.DatasetShards
+  import ShardSubscriptions._
 
   "ShardCoordinatorActor" must {
     "add the first node coordinator, no datasets added by clients yet, all shards" in {

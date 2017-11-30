@@ -3,14 +3,14 @@ package filodb.coordinator
 import scala.concurrent.duration.FiniteDuration
 
 import akka.actor.{Actor, ActorRef, Address, Deploy, Props}
-import akka.cluster.ClusterEvent._
 import akka.cluster.{Cluster, Member, MemberStatus}
+import akka.cluster.ClusterEvent._
 import akka.remote.testconductor.RoleName
 import akka.remote.testkit.{FlightRecordingSupport, MultiNodeSpec, MultiNodeSpecCallbacks}
 import akka.testkit.{ImplicitSender, TestLatch, TestProbe}
 import com.typesafe.scalalogging.StrictLogging
-import org.scalatest.concurrent.ScalaFutures
 import org.scalatest._
+import org.scalatest.concurrent.ScalaFutures
 
 trait ClusterMultiNodeSpec extends MultiNodeSpecCallbacks
   with WordSpecLike with Matchers with BeforeAndAfterAll { self: MultiNodeSpec =>

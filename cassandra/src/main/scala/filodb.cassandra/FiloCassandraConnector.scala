@@ -1,8 +1,9 @@
 package filodb.cassandra
 
+import scala.concurrent.{ExecutionContext, Future}
+
 import com.datastax.driver.core._
 import com.typesafe.config.Config
-import scala.concurrent.{ExecutionContext, Future}
 
 import filodb.core._
 

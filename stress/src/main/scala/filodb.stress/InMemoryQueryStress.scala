@@ -1,9 +1,10 @@
 package filodb.stress
 
-import org.apache.spark.sql.{DataFrame, SparkSession, SaveMode}
-import scala.util.Random
-import scala.concurrent.duration.Duration
 import scala.concurrent.{Await, Future}
+import scala.concurrent.duration.Duration
+import scala.util.Random
+
+import org.apache.spark.sql.{DataFrame, SaveMode, SparkSession}
 
 import filodb.spark._
 

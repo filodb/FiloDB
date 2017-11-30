@@ -2,10 +2,11 @@ package filodb.memory.format.vectors
 
 import java.nio.ByteBuffer
 
-import filodb.memory.format._
 import scalaxy.loops._
 
 import filodb.memory.MemFactory
+import filodb.memory.format._
+import filodb.memory.format.Encodings._
 
 /**
   * Constructor methods for UTF8 vector types, as well as UTF8/binary blob utilities
@@ -299,8 +300,6 @@ class UTF8AppendableVector(base: Any,
     fixedData
   }
 }
-
-import filodb.memory.format.Encodings._
 
 /**
   * Not a vector that can be sent over the wire, instead it is used to append source UTF8String objects

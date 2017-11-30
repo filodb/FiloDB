@@ -5,11 +5,11 @@ import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
 import monix.reactive.Observable
 import net.ceedubs.ficus.Ficus._
-import filodb.memory.format.ArrayStringRowReader
 
 import filodb.coordinator.{IngestionStream, IngestionStreamFactory}
 import filodb.core.memstore.{IngestRecord, IngestRouting}
 import filodb.core.metadata.Dataset
+import filodb.memory.format.ArrayStringRowReader
 
 object CsvStream extends StrictLogging {
   // Number of lines to read and send at a time

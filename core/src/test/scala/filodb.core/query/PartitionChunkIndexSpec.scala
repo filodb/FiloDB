@@ -1,12 +1,13 @@
 package filodb.core.query
 
-import filodb.core.store.{ChunkSetInfo, ChunkRowSkipIndex}
-
 import org.scalatest.{FunSpec, Matchers}
 
+import filodb.core.store.{ChunkRowSkipIndex, ChunkSetInfo}
+
 class PartitionChunkIndexSpec extends FunSpec with Matchers {
-  import filodb.core.NamesTestData._
   import collection.JavaConverters._
+
+  import filodb.core.NamesTestData._
 
   val info1 = ChunkSetInfo(100L, 3, firstKey, lastKey)
   val info2 = ChunkSetInfo(99L, 3, keyForName(1), lastKey)

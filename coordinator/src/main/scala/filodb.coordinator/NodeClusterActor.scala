@@ -1,6 +1,7 @@
 package filodb.coordinator
 
 import scala.collection.mutable.HashMap
+
 import akka.actor._
 import akka.cluster.Cluster
 import akka.cluster.ClusterEvent._
@@ -160,10 +161,13 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
                                        watcher: ActorRef
                                       ) extends NamingAwareBaseActor {
 
-  import NodeClusterActor._, ActorName._, ShardSubscriptions._
-  import settings.ResolveActorTimeout
   import akka.pattern.{ask, pipe}
+  import settings.ResolveActorTimeout
+
+  import ActorName._
+  import NodeClusterActor._
   import ShardAssignmentStrategy.DatasetShards
+  import ShardSubscriptions._
 
   val memberRefs = new HashMap[Address, ActorRef]
   val roleToCoords = new HashMap[String, Set[ActorRef]]().withDefaultValue(Set.empty[ActorRef])

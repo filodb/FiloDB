@@ -1,18 +1,15 @@
 package filodb.jmh
 
-import ch.qos.logback.classic.{Level, Logger}
-import java.io.{ByteArrayInputStream, ObjectInputStream}
-import java.io.{ByteArrayOutputStream, ObjectOutputStream}
+import java.io.{ByteArrayInputStream, ByteArrayOutputStream, ObjectInputStream, ObjectOutputStream}
 import java.util.concurrent.TimeUnit
-import org.openjdk.jmh.annotations.Benchmark
-import org.openjdk.jmh.annotations.BenchmarkMode
-import org.openjdk.jmh.annotations.OutputTimeUnit
-import org.openjdk.jmh.annotations.{Mode, State, Scope}
 
-import filodb.core.binaryrecord.BinaryRecord
-import filodb.core.GdeltTestData
+import ch.qos.logback.classic.{Level, Logger}
+import org.openjdk.jmh.annotations._
+
 import filodb.coordinator.IngestionCommands.IngestRows
 import filodb.coordinator.Serializer
+import filodb.core.binaryrecord.BinaryRecord
+import filodb.core.GdeltTestData
 
 /**
  * Microbenchmark involving BinaryRecord serialization / comparison vs other record/key formats

@@ -5,7 +5,7 @@ import java.sql.Timestamp
 import javax.activation.UnsupportedDataTypeException
 
 import scala.concurrent.duration._
-import scala.util.{Failure, Try, Success => SSuccess}
+import scala.util.{Failure, Success => SSuccess, Try}
 
 import akka.actor.ActorSystem
 import com.opencsv.CSVWriter
@@ -13,7 +13,6 @@ import com.quantifind.sumac.{ArgMain, FieldArgs}
 import com.typesafe.config.{Config, ConfigFactory}
 import net.ceedubs.ficus.Ficus._
 import org.parboiled2.ParseError
-import filodb.memory.format.RowReader
 
 import filodb.coordinator._
 import filodb.coordinator.client._
@@ -21,6 +20,7 @@ import filodb.core._
 import filodb.core.metadata.{Column, Dataset, DatasetOptions}
 import filodb.core.query.ColumnFilter
 import filodb.core.store._
+import filodb.memory.format.RowReader
 
 // scalastyle:off
 class Arguments extends FieldArgs {

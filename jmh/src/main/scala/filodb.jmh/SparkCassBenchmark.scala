@@ -2,12 +2,12 @@ package filodb.jmh
 
 import java.util.concurrent.TimeUnit
 
-import filodb.spark.{FiloDriver, FiloExecutor}
-
 import ch.qos.logback.classic.{Level, Logger}
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.functions.sum
 import org.openjdk.jmh.annotations._
+
+import filodb.spark.{FiloDriver, FiloExecutor}
 
 // Spark CassandraColumnStore benchmark
 // NOTE: before running this test, MUST do sbt jmh/run on CreateCassTestData to populate

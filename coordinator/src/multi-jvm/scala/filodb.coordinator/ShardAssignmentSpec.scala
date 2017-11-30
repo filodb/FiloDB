@@ -16,8 +16,8 @@ abstract class ShardAssignmentClusterSingletonSpec
   extends MultiNodeSpec(ShardAssignmentSpecMultiNodeConfig)
     with MultiNodeClusterBehavior {
 
-  import ShardAssignmentSpecMultiNodeConfig._
   import NodeClusterActor._
+  import ShardAssignmentSpecMultiNodeConfig._
   import GdeltTestData._
 
   private val ref = dataset6.ref
@@ -81,8 +81,8 @@ abstract class ShardAssignmentClusterSingletonSpec
     }
 
     "have expected datasets registered on all nodes then verify cluster singleton restart on new member node" in {
-      import akka.cluster.ClusterEvent._
       import akka.cluster.MemberStatus
+      import akka.cluster.ClusterEvent._
 
       runOn(first, second) {
         clusterSingleton ! ListRegisteredDatasets

@@ -3,10 +3,10 @@ package filodb.memory.format.vectors
 import java.nio.ByteBuffer
 import java.util.HashMap
 
-import filodb.memory.format._
 import scalaxy.loops._
 
 import filodb.memory.MemFactory
+import filodb.memory.format._
 
 case class DictUTF8Info(codeMap: HashMap[ZeroCopyUTF8String, Int],
                         dictStrings: BinaryAppendableVector[ZeroCopyUTF8String],

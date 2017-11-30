@@ -5,8 +5,8 @@ import scala.collection.{mutable, Map => CMap}
 import akka.actor.ActorRef
 import com.typesafe.scalalogging.StrictLogging
 
+import filodb.coordinator.NodeClusterActor.DatasetResourceSpec
 import filodb.core.DatasetRef
-import NodeClusterActor.DatasetResourceSpec
 
 /**
  * A ShardAssignmentStrategy is responsible for assigning or removing shards to/from nodes based on some

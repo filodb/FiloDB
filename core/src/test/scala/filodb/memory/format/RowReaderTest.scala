@@ -2,10 +2,10 @@ package filodb.memory.format
 
 import java.sql.Timestamp
 
+import org.scalatest.{FunSpec, Matchers}
+
 import filodb.memory.NativeMemoryManager
 import filodb.memory.format.vectors.{IntBinaryVector, LongBinaryVector}
-
-import org.scalatest.{FunSpec, Matchers}
 
 class RowReaderTest extends FunSpec with Matchers {
   val memFactory = new NativeMemoryManager(100000)

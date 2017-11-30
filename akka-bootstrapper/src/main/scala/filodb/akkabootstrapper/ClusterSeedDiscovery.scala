@@ -1,14 +1,14 @@
 package filodb.akkabootstrapper
 
 import scala.collection.immutable.Seq
-import scala.util.control.NonFatal
 import scala.util.{Failure, Success}
+import scala.util.control.NonFatal
 
 import akka.actor.{Address, AddressFromURIString}
 import akka.cluster.Cluster
 import com.typesafe.scalalogging.StrictLogging
-import spray.json._
 import scalaj.http.Http
+import spray.json._
 
 /** Seed node strategy. Some implementations discover, some simply read from immutable config. */
 abstract class ClusterSeedDiscovery(val cluster: Cluster,

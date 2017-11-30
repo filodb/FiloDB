@@ -1,6 +1,6 @@
 package filodb.cassandra.metastore
 
-import filodb.core.store.MetaStoreSpec
 import filodb.cassandra.AllTablesTest
+import filodb.core.store.MetaStoreSpec
 
 class CassandraMetaStoreSpec extends MetaStoreSpec with AllTablesTest

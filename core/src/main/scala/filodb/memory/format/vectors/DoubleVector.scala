@@ -2,10 +2,12 @@ package filodb.memory.format.vectors
 
 import java.nio.ByteBuffer
 
-import filodb.memory.format._
 import scalaxy.loops._
 
 import filodb.memory.MemFactory
+import filodb.memory.format._
+import filodb.memory.format.Encodings._
+
 
 object DoubleVector {
   /**
@@ -113,8 +115,6 @@ extends PrimitiveAppendableVector[Double](base, offset, maxBytes, 64, true) {
   override def finishCompaction(newBase: Any, newOff: Long): BinaryVector[Double] =
     new DoubleBinaryVector(newBase, newOff, numBytes, dispose)
 }
-
-import filodb.memory.format.Encodings._
 
 class MaskedDoubleAppendingVector(base: Any,
                                   val offset: Long,

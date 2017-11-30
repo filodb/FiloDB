@@ -1,9 +1,9 @@
 package filodb.memory
 
-import filodb.memory.format.BinaryVector.Memory
-
 import com.kenai.jffi.MemoryIO
 import org.scalatest.{FlatSpec, Matchers}
+
+import filodb.memory.format.BinaryVector.Memory
 
 /**
   * Buffer manager allocation and freeing tests

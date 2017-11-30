@@ -1,14 +1,14 @@
 package filodb.core.query
 
-import scala.reflect.{ClassTag, classTag}
+import scala.reflect.{classTag, ClassTag}
+
+import enumeratum.{Enum, EnumEntry}
+import enumeratum.EnumEntry.Snakecase
+import org.scalactic._
 
 import filodb.core.metadata._
 import filodb.core.store.{ChunkScanMethod, FiloPartition, RowKeyChunkScan}
 import filodb.memory.format.{BinaryVector, FiloVector}
-
-import enumeratum.EnumEntry.Snakecase
-import enumeratum.{Enum, EnumEntry}
-import org.scalactic._
 
 /**
  * An Aggregate stores intermediate results from Aggregators, which can later be combined using

@@ -2,17 +2,17 @@ package filodb.memory.format.vectors
 
 import java.nio.ByteBuffer
 
-import filodb.memory.format._
 import scalaxy.loops._
 
 import filodb.memory.MemFactory
+import filodb.memory.format._
+import filodb.memory.format.Encodings._
 
 object LongBinaryVector {
   /**
    * Creates a new MaskedLongAppendingVector, allocating a byte array of the right size for the max #
    * of elements plus a bit mask.
    * @param maxElements initial maximum number of elements this vector will hold. Will automatically grow.
-   * @param offheap if true, allocate the space for the vector off heap.  User will have to dispose.
    */
   def appendingVector(memFactory: MemFactory, maxElements: Int): BinaryAppendableVector[Long] = {
     val bytesRequired = 8 + BitmapMask.numBytesRequired(maxElements) + 8 * maxElements
@@ -24,7 +24,6 @@ object LongBinaryVector {
   /**
    * Creates a LongAppendingVector - does not grow and does not have bit mask. All values are marked
    * as available.
-   * @param offheap if true, allocate the space for the vector off heap.  User will have to dispose.
    */
   def appendingVectorNoNA(memFactory: MemFactory, maxElements: Int): BinaryAppendableVector[Long] = {
     val bytesRequired = 4 + 8 * maxElements
@@ -122,8 +121,6 @@ extends PrimitiveAppendableVector[Long](base, offset, maxBytes, 64, true) {
   def finishCompaction(newBase: Any, newOff: Long): BinaryVector[Long] =
     new LongBinaryVector(newBase, newOff, numBytes, dispose)
 }
-
-import filodb.memory.format.Encodings._
 
 class MaskedLongAppendingVector(base: Any,
                                 val offset: Long,

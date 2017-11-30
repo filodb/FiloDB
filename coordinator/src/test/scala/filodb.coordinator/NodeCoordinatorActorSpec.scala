@@ -11,11 +11,11 @@ import org.scalatest.BeforeAndAfterEach
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
 
-import filodb.memory.format.ZeroCopyUTF8String
 import filodb.core._
 import filodb.core.metadata.Dataset
 import filodb.core.query.{AggregationFunction, ColumnFilter, Filter, HistogramBucket}
 import filodb.core.store._
+import filodb.memory.format.ZeroCopyUTF8String
 
 object NodeCoordinatorActorSpec extends ActorSpecConfig
 
@@ -24,12 +24,13 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
   with ScalaFutures with BeforeAndAfterEach {
 
   import akka.testkit._
+
+  import ActorName.ShardName
   import DatasetCommands._
   import IngestionCommands._
-  import GdeltTestData._
-  import ShardSubscriptions._
   import NodeClusterActor._
-  import ActorName.ShardName
+  import ShardSubscriptions._
+  import GdeltTestData._
 
   implicit val defaultPatience =
     PatienceConfig(timeout = Span(10, Seconds), interval = Span(50, Millis))
@@ -126,8 +127,8 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
   }
 
   describe("QueryActor commands and responses") {
-    import MachineMetricsData._
     import QueryCommands._
+    import MachineMetricsData._
 
     def setupTimeSeries(numShards: Int = 1): DatasetRef = {
       probe.send(coordinatorActor, CreateDataset(dataset1))

@@ -1,10 +1,9 @@
 package filodb.akkabootstrapper
 
-import akka.ConfigurationException
-
 import scala.annotation.tailrec
 import scala.collection.immutable.Seq
 
+import akka.ConfigurationException
 import akka.actor.{Address, ExtendedActorSystem}
 import akka.cluster.Cluster
 import com.typesafe.scalalogging.StrictLogging

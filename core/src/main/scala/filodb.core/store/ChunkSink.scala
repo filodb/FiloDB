@@ -2,8 +2,8 @@ package filodb.core.store
 
 import java.util.concurrent.ConcurrentHashMap
 
-import scala.concurrent.Future
 import scala.collection.JavaConverters._
+import scala.concurrent.Future
 
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon

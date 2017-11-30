@@ -7,11 +7,11 @@ import java.util.concurrent.atomic.{AtomicLong, AtomicReference}
 import scala.collection.JavaConverters._
 import scala.collection.mutable.ListBuffer
 
-import filodb.memory.format.BinaryVector.{HeaderMagic, Memory}
-import filodb.memory.format.{BinaryVector, UnsafeUtils}
-import filodb.memory.format.UnsafeUtils.arayOffset
-
 import com.kenai.jffi.MemoryIO
+
+import filodb.memory.format.{BinaryVector, UnsafeUtils}
+import filodb.memory.format.BinaryVector.{HeaderMagic, Memory}
+import filodb.memory.format.UnsafeUtils.arayOffset
 
 /**
   * A trait which allows allocation of memory with the Filo magic header

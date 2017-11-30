@@ -1,8 +1,9 @@
 package filodb.stress
 
-import org.apache.spark.sql.{DataFrame, SparkSession, SaveMode}
-import scala.concurrent.duration._
 import scala.concurrent.{Await, Future}
+import scala.concurrent.duration._
+
+import org.apache.spark.sql.{DataFrame, SaveMode, SparkSession}
 
 import filodb.core.{DatasetRef, Perftools}
 import filodb.spark._
@@ -51,8 +52,9 @@ object IngestionStress extends App {
                  option("header", "true").option("inferSchema", "true").
                  load(taxiCsvFile)
   // Define a hour of day function
-  import org.joda.time.DateTime
   import java.sql.Timestamp
+
+  import org.joda.time.DateTime
   val hourOfDay = sess.udf.register("hourOfDay", { (t: Timestamp) => new DateTime(t).getHourOfDay })
   val dfWithHoD = csvDF.withColumn("hourOfDay", hourOfDay(csvDF("pickup_datetime")))
 

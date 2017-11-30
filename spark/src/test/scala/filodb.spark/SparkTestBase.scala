@@ -1,13 +1,12 @@
 package filodb.spark
 
 import org.apache.spark.SparkContext
-
 import org.scalatest.{BeforeAndAfter, BeforeAndAfterAll, FunSpecLike, Matchers}
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
 
-import filodb.core._
 import filodb.coordinator.NodeProtocol
+import filodb.core._
 
 trait SparkTestBase extends FunSpecLike with BeforeAndAfter with BeforeAndAfterAll
 with Matchers with ScalaFutures {

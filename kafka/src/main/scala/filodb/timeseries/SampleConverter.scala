@@ -1,6 +1,7 @@
 package filodb.timeseries
 
 import com.typesafe.scalalogging.StrictLogging
+
 import filodb.core.memstore.IngestRecord
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.Dataset

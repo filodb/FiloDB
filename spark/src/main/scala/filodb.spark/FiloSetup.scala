@@ -11,8 +11,8 @@ import net.ceedubs.ficus.Ficus._
 import org.apache.spark.SparkContext
 import org.apache.spark.sql.hive.filodb.MetaStoreSync
 
-import filodb.coordinator.client.ClusterClient
 import filodb.coordinator.{NodeClusterActor, _}
+import filodb.coordinator.client.ClusterClient
 
 /**
  * FilodbSparkCluster handles the Spark side setup of both executors and the driver app, including one-time

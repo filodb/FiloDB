@@ -1,7 +1,8 @@
 package filodb.cassandra.metastore
 
-import com.typesafe.config.Config
 import scala.concurrent.{ExecutionContext, Future}
+
+import com.typesafe.config.Config
 
 import filodb.cassandra.{DefaultFiloSessionProvider, FiloSessionProvider}
 import filodb.core._

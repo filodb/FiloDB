@@ -1,6 +1,7 @@
 package filodb.coordinator
 
 import akka.japi.Util.immutableSeq
+
 import filodb.core.AbstractSpec
 
 trait ClusterNodeConfigurationSpec extends AbstractSpec with NodeRoleAwareConfiguration {

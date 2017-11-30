@@ -5,6 +5,7 @@ import java.net.InetAddress
 import scala.collection.JavaConverters._
 import scala.concurrent.duration._
 import scala.util.{Random, Try}
+
 import com.typesafe.config.{Config, ConfigFactory}
 import net.ceedubs.ficus.Ficus._
 import org.apache.kafka.clients.CommonClientConfigs

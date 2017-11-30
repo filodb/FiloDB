@@ -2,18 +2,8 @@ package filodb.kafka
 
 import java.lang.{Long => JLong}
 
-import filodb.core.store.InMemoryMetaStore
-
 import scala.concurrent.Await
 import scala.concurrent.duration._
-
-import filodb.coordinator.IngestionCommands.DatasetSetup
-import filodb.coordinator.IngestionStreamFactory
-import filodb.coordinator.NodeClusterActor.IngestionSource
-import filodb.core.memstore.{IngestRecord, IngestRouting, TimeSeriesMemStore}
-import filodb.core.metadata.Dataset
-import filodb.core.store.NullColumnStore
-import filodb.memory.format.ArrayStringRowReader
 
 import akka.util.Timeout
 import com.typesafe.config.ConfigFactory
@@ -22,6 +12,14 @@ import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
 import org.apache.kafka.clients.producer.ProducerRecord
+
+import filodb.coordinator.IngestionStreamFactory
+import filodb.coordinator.IngestionCommands.DatasetSetup
+import filodb.coordinator.NodeClusterActor.IngestionSource
+import filodb.core.memstore.{IngestRecord, IngestRouting, TimeSeriesMemStore}
+import filodb.core.metadata.Dataset
+import filodb.core.store.{InMemoryMetaStore, NullColumnStore}
+import filodb.memory.format.ArrayStringRowReader
 
 /** 1. Start Zookeeper
   * 2. Start Kafka (tested with Kafka 0.10.2.1 and 0.11)

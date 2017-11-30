@@ -1,8 +1,8 @@
 package filodb.core.memstore
 
 import filodb.core.metadata.Dataset
-import filodb.memory.format.RowReader.TypedFieldExtractor
 import filodb.memory.format.{RoutingRowReader, RowReader, SchemaRoutingRowReader, SchemaRowReader}
+import filodb.memory.format.RowReader.TypedFieldExtractor
 
 /**
  * A record for ingesting into a MemStore.

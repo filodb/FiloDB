@@ -4,13 +4,12 @@ import java.lang.management.ManagementFactory
 
 import scala.concurrent.duration._
 
-import scalaxy.loops._
-
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
 import monix.eval.Task
 import monix.reactive.Observable
 import org.jctools.maps.NonBlockingHashMapLong
+import scalaxy.loops._
 
 import filodb.core.Iterators
 import filodb.core.Types._

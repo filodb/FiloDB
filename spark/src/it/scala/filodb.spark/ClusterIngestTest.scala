@@ -1,6 +1,6 @@
 package filodb.spark
 
-import org.apache.spark.sql.{SparkSession, SaveMode}
+import org.apache.spark.sql.{SaveMode, SparkSession}
 
 
 /**
@@ -26,8 +26,9 @@ class ClusterIngestTest extends SparkTestBase {
   val sc = sess.sparkContext
   FiloDriver.init(sc)
 
-  import filodb.core.GdeltTestData._
   import org.apache.spark.sql.functions._
+
+  import filodb.core.GdeltTestData._
 
   val testDatasets = Seq(dataset1.ref)
 

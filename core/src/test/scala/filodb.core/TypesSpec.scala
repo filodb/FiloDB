@@ -1,10 +1,10 @@
 package filodb.core
 
-import filodb.memory.format.TupleRowReader
-import filodb.memory.format.ZeroCopyUTF8String._
-
 import org.scalatest.{FunSpec, Matchers}
 import scodec.bits._
+
+import filodb.memory.format.TupleRowReader
+import filodb.memory.format.ZeroCopyUTF8String._
 
 class TypesSpec extends FunSpec with Matchers {
   import Ordered._

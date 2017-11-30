@@ -6,7 +6,7 @@ import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.metadata.Dataset
 import filodb.core.store._
 import filodb.core.Types.{ChunkID, PartitionKey}
-import ChunkSetInfo._
+import filodb.core.store.ChunkSetInfo._
 
 /**
  * An index providing facilities to search through the chunks of a partition in different ways
@@ -81,9 +81,10 @@ object PartitionChunkIndex {
 class RowkeyPartitionChunkIndex(val binPartition: PartitionKey, val dataset: Dataset)
 extends MutablePartitionChunkIndex {
   import collection.JavaConverters._
-  import ChunkSetInfo._
-  import PartitionChunkIndex._
+
   import filodb.core._
+  import PartitionChunkIndex._
+  import ChunkSetInfo._
 
   val skipRows = new NonBlockingHashMapLong[SkipMap](64)
   val infos = new java.util.TreeMap[(BinaryRecord, ChunkID), ChunkSetInfo](

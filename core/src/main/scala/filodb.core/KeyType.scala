@@ -4,12 +4,12 @@ import java.sql.Timestamp
 
 import scala.language.postfixOps
 import scala.math.Ordering
-import scalaxy.loops._
-
-import filodb.memory.format.RowReader._
-import filodb.memory.format.{RowReader, ZeroCopyUTF8String}
 
 import org.joda.time.DateTime
+import scalaxy.loops._
+
+import filodb.memory.format.{RowReader, ZeroCopyUTF8String}
+import filodb.memory.format.RowReader._
 
 /**
  * A generic typeclass for dealing with keys (partition, sort, segment) of various types.

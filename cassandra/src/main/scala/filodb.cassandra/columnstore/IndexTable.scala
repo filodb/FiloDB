@@ -32,8 +32,9 @@ case class IndexRecord(binPartition: ByteBuffer, data: ByteBuffer) {
  */
 sealed class IndexTable(val dataset: DatasetRef, val connector: FiloCassandraConnector)
                        (implicit ec: ExecutionContext) extends BaseDatasetTable {
-  import filodb.cassandra.Util._
   import scala.collection.JavaConverters._
+
+  import filodb.cassandra.Util._
 
   val suffix = "index"
 

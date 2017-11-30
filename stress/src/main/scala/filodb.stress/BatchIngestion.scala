@@ -1,6 +1,6 @@
 package filodb.stress
 
-import org.apache.spark.sql.{SparkSession, SaveMode}
+import org.apache.spark.sql.{SaveMode, SparkSession}
 
 import filodb.core.Perftools
 import filodb.spark._

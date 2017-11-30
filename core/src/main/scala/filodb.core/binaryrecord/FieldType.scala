@@ -1,14 +1,15 @@
 package filodb.core.binaryrecord
 
-import com.typesafe.scalalogging.StrictLogging
 import java.sql.Timestamp
+
+import com.typesafe.scalalogging.StrictLogging
 import org.boon.primitive.ByteBuf
-import filodb.memory.format.RowReader._
-import filodb.memory.format.{RowReader, UnsafeUtils, ZeroCopyUTF8String}
 
 import filodb.core.metadata.Column.ColumnType
-import filodb.core.SingleKeyTypes.{Int32HighBit, Long64HighBit}
+import filodb.core.SingleKeyTypes._
 import filodb.core.Types._
+import filodb.memory.format.{RowReader, UnsafeUtils, ZeroCopyUTF8String}
+import filodb.memory.format.RowReader._
 
 trait FieldType[@specialized T] {
   def numFixedBytes: Int = numFixedWords * 4
@@ -194,8 +195,6 @@ object UTF8StringFieldType extends SimpleFieldType[ZeroCopyUTF8String] {
     if (wordCmp != 0) wordCmp else len1 - len2
   }
 }
-
-import filodb.core.SingleKeyTypes._
 
 object UTF8MapFieldType extends SimpleFieldType[UTF8Map] {
   val numFixedWords: Int = 1

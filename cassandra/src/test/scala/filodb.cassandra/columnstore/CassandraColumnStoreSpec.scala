@@ -7,6 +7,7 @@ import filodb.core.store.ColumnStoreSpec
 
 class CassandraColumnStoreSpec extends ColumnStoreSpec {
   import monix.execution.Scheduler.Implicits.global
+
   import filodb.core.store._
   import NamesTestData._
 

@@ -3,14 +3,14 @@ package filodb.core
 import java.io.Closeable
 import java.util.concurrent.ArrayBlockingQueue
 
-import monix.execution.{Ack, Scheduler}
-import monix.reactive.observables.ObservableLike.Operator
-import monix.reactive.observers.Subscriber
-import monix.reactive.{Notification, Observable}
-
 import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.Future
 import scala.util.control.NonFatal
+
+import monix.execution.{Ack, Scheduler}
+import monix.reactive.{Notification, Observable}
+import monix.reactive.observables.ObservableLike.Operator
+import monix.reactive.observers.Subscriber
 
 // From http://stackoverflow.com/questions/10642337/is-there-are-iterative-version-of-groupby-in-scala
 object Iterators {

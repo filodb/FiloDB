@@ -4,8 +4,8 @@ import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
 import monix.execution.Scheduler
 
-import filodb.core.store._
 import filodb.core.memstore.{MemStore, TimeSeriesMemStore}
+import filodb.core.store._
 
 /** Strategies from configuration or type. */
 sealed trait StoreStrategy

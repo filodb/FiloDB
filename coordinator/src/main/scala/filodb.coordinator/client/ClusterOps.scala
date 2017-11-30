@@ -1,10 +1,11 @@
 package filodb.coordinator.client
 
-import com.typesafe.scalalogging.StrictLogging
 import scala.concurrent.duration._
 
-import filodb.core._
+import com.typesafe.scalalogging.StrictLogging
+
 import filodb.coordinator._
+import filodb.core._
 
 case object NoClusterActor extends ErrorResponse
 

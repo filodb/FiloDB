@@ -1,14 +1,16 @@
 package filodb.cassandra.columnstore
 
-import com.datastax.driver.core.BoundStatement
+import java.lang.{Integer => jlInt, Long => jlLong}
 import java.nio.ByteBuffer
-import java.lang.{Long => jlLong, Integer => jlInt}
-import monix.reactive.Observable
+
 import scala.concurrent.{ExecutionContext, Future}
+
+import com.datastax.driver.core.BoundStatement
+import monix.reactive.Observable
 
 import filodb.cassandra.FiloCassandraConnector
 import filodb.core._
-import filodb.core.store.{ChunkSinkStats, SingleChunkInfo, compress, decompress}
+import filodb.core.store.{compress, decompress, ChunkSinkStats, SingleChunkInfo}
 
 /**
  * Represents the table which holds the actual columnar chunks
@@ -18,8 +20,9 @@ import filodb.core.store.{ChunkSinkStats, SingleChunkInfo, compress, decompress}
  */
 sealed class ChunkTable(val dataset: DatasetRef, val connector: FiloCassandraConnector)
                        (implicit ec: ExecutionContext) extends BaseDatasetTable {
-  import filodb.cassandra.Util._
   import collection.JavaConverters._
+
+  import filodb.cassandra.Util._
 
   val suffix = "chunks"
 

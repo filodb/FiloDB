@@ -2,10 +2,11 @@ package filodb.memory.format.vectors
 
 import java.nio.ByteBuffer
 
-import filodb.memory.format._
 import scalaxy.loops._
 
 import filodb.memory.MemFactory
+import filodb.memory.format._
+import filodb.memory.format.Encodings._
 
 object IntBinaryVector {
   /**
@@ -254,8 +255,6 @@ trait MaskedIntAppending extends BinaryAppendableVector[Int] {
   def dataVect(memFactory: MemFactory): BinaryVector[Int]
   def getVect(memFactory: MemFactory): BinaryVector[Int] = freeze(memFactory)
 }
-
-import filodb.memory.format.Encodings._
 
 class MaskedIntAppendingVector(base: Any,
                                val offset: Long,

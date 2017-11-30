@@ -3,15 +3,15 @@ package filodb.core.binaryrecord
 import java.io.{ByteArrayInputStream, ByteArrayOutputStream, ObjectInputStream, ObjectOutputStream}
 import java.sql.Timestamp
 
-import filodb.core.Types._
-import filodb.memory.format.{SeqRowReader, TupleRowReader, ZeroCopyUTF8String}
-
 import org.scalatest.{FunSpec, Matchers}
 import scodec.bits.ByteVector
 
+import filodb.core.Types._
+import filodb.memory.format.{SeqRowReader, TupleRowReader, ZeroCopyUTF8String}
+
 class BinaryRecordSpec extends FunSpec with Matchers {
-  import ZeroCopyUTF8String._
   import filodb.core.metadata.Column.ColumnType._
+  import ZeroCopyUTF8String._
 
   val schema1_i = new RecordSchema(Seq(IntColumn))
   val schema1_s = new RecordSchema(Seq(StringColumn))

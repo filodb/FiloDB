@@ -1,7 +1,8 @@
 package filodb.stress
 
-import org.apache.spark.sql.{Row, SparkSession, SaveMode}
 import scala.util.Random
+
+import org.apache.spark.sql.{Row, SaveMode, SparkSession}
 
 import filodb.core.Perftools
 import filodb.spark._

@@ -1,10 +1,11 @@
 package filodb.core.metadata
 
-import org.scalactic._
-import filodb.memory.format.RowReader._
 import scala.language.existentials
 
+import org.scalactic._
+
 import filodb.core.KeyType
+import filodb.memory.format.RowReader._
 
 /**
  * Represents a computed or generated column.

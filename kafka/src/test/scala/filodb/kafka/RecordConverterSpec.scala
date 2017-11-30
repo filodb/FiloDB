@@ -1,8 +1,9 @@
 package filodb.kafka
 
+import org.example._
+
 import filodb.core.{AbstractSpec, MachineMetricsData}
 import filodb.core.memstore.IngestRecord
-import org.example._
 
 class RecordConverterSpec extends AbstractSpec {
   "RecordConverter" must {

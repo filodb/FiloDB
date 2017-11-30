@@ -1,14 +1,15 @@
 package filodb.coordinator.client
 
-import com.typesafe.scalalogging.StrictLogging
 import scala.concurrent.duration._
 
-import filodb.core._
+import com.typesafe.scalalogging.StrictLogging
+
 import filodb.coordinator._
+import filodb.core._
 
 trait IngestionOps extends ClientBase with StrictLogging {
-  import IngestionCommands._
   import IngestionActor.IngestionStatus
+  import IngestionCommands._
 
   /**
    * Flushes the active memtable of the given dataset and version, no matter how much is in the memtable.

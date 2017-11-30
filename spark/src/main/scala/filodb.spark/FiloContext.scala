@@ -2,11 +2,11 @@ package filodb.spark
 
 import scala.concurrent.duration._
 
-import org.apache.spark.sql.{DataFrame, SQLContext, SaveMode}
+import org.apache.spark.sql.{DataFrame, SaveMode, SQLContext}
 import org.apache.spark.sql.types.StructType
 
-import filodb.coordinator.client.Client
 import filodb.coordinator.NodeClusterActor
+import filodb.coordinator.client.Client
 import filodb.core._
 import filodb.core.memstore.IngestRouting
 import filodb.core.metadata.Dataset
@@ -16,8 +16,8 @@ import filodb.core.metadata.Dataset
  * Don't directly instantiate this, instead use the implicit conversion function.
  */
 class FiloContext(val sqlContext: SQLContext) extends AnyVal {
-  import FiloRelation._
   import Client.parse
+  import FiloRelation._
 
   /**
    * Creates a DataFrame from a FiloDB table.  Does no reading until a query is run, but it does

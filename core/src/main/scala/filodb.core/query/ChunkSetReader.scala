@@ -1,13 +1,15 @@
 package filodb.core.query
 
-import com.googlecode.javaewah.EWAHCompressedBitmap
 import java.nio.ByteBuffer
-import filodb.memory.format._
+
 import scala.collection.mutable.BitSet
+
+import com.googlecode.javaewah.EWAHCompressedBitmap
 
 import filodb.core.metadata.Dataset
 import filodb.core.store.{ChunkSet, ChunkSetInfo}
 import filodb.core.Types.PartitionKey
+import filodb.memory.format._
 
 /**
  * ChunkSetReader aggregates incoming chunks during query/read time and provides an Iterator[RowReader]

@@ -2,12 +2,11 @@ package filodb.memory.format.vectors
 
 import filodb.memory.MemFactory
 import filodb.memory.format.{BinaryAppendableVector, BinaryVector, UnsafeUtils}
+import filodb.memory.format.Encodings._
 
 object ObjectVector {
   val objectRefSize = UnsafeUtils.unsafe.arrayIndexScale(classOf[Array[Any]])
 }
-
-import filodb.memory.format.Encodings._
 
 /**
  * Technically not a binary/serializable vector, rather one that holds object references.

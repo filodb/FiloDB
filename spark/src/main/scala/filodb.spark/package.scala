@@ -6,21 +6,21 @@ import scala.collection.mutable.HashMap
 import scala.concurrent.duration._
 import scala.language.{implicitConversions, postfixOps}
 
+import akka.actor.ActorRef
+import com.typesafe.scalalogging.StrictLogging
+import monix.reactive.Observable
+import net.ceedubs.ficus.Ficus._
+import org.apache.spark.sql.{DataFrame, Row, SparkSession, SQLContext}
+import org.apache.spark.sql.hive.filodb.MetaStoreSync
+import org.apache.spark.sql.types.StructType
+import org.scalactic._
+
 import filodb.coordinator._
 import filodb.coordinator.client.ClientException
 import filodb.core._
 import filodb.core.memstore.{IngestRecord, IngestRouting}
 import filodb.core.metadata.{Column, Dataset, DatasetOptions}
 import filodb.memory.format.RowReader
-
-import akka.actor.ActorRef
-import com.typesafe.scalalogging.StrictLogging
-import monix.reactive.Observable
-import net.ceedubs.ficus.Ficus._
-import org.apache.spark.sql.hive.filodb.MetaStoreSync
-import org.apache.spark.sql.types.StructType
-import org.apache.spark.sql.{DataFrame, Row, SQLContext, SparkSession}
-import org.scalactic._
 
 package spark {
   case class DatasetNotFound(dataset: String) extends Exception(s"Dataset $dataset not found")
@@ -74,9 +74,9 @@ package spark {
 package object spark extends StrictLogging {
   val DefaultWriteTimeout = 999 minutes
 
-  import FiloDriver.metaStore
   import IngestionStream._
   import filodb.coordinator.client.Client.{actorAsk, parse}
+  import FiloDriver.metaStore
 
   val sparkLogger = logger
 

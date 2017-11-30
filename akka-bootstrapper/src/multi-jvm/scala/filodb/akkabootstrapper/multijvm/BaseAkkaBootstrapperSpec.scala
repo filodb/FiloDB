@@ -1,18 +1,16 @@
 package filodb.akkabootstrapper.multijvm
 
+import scala.concurrent.duration._
+import scala.language.postfixOps
+
 import akka.actor.AddressFromURIString
 import akka.cluster.Cluster
 import akka.http.scaladsl.Http
-import akka.remote.testkit.{MultiNodeConfig, MultiNodeSpec, MultiNodeSpecCallbacks}
 import akka.stream.ActorMaterializer
 import com.typesafe.config.{Config, ConfigFactory}
-import filodb.akkabootstrapper.{AkkaBootstrapper, ClusterMembershipHttpResponse, ClusterMembershipJsonSuppport}
-import org.scalatest.concurrent.ScalaFutures
-import org.scalatest.{BeforeAndAfterAll, Matchers, WordSpecLike}
 import spray.json._
 
-import scala.concurrent.duration._
-import scala.language.postfixOps
+import filodb.akkabootstrapper.{AkkaBootstrapper, ClusterMembershipHttpResponse, ClusterMembershipJsonSuppport}
 
 trait AkkaBootstrapperMultiNodeConfig extends MultiNodeConfig {
 

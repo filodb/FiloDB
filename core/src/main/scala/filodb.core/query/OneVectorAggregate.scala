@@ -1,6 +1,7 @@
 package filodb.core.query
 
 import scala.language.postfixOps
+
 import scalaxy.loops._
 
 import filodb.memory.format.{BinaryVector, FiloVector}

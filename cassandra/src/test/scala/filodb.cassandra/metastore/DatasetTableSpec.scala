@@ -4,8 +4,8 @@ import scala.concurrent.duration._
 import scala.language.postfixOps
 
 import com.typesafe.config.ConfigFactory
-import org.scalatest.concurrent.PatienceConfiguration.Timeout
 import org.scalatest.FlatSpec
+import org.scalatest.concurrent.PatienceConfiguration.Timeout
 
 import filodb.cassandra.{AsyncTest, DefaultFiloSessionProvider}
 import filodb.core._

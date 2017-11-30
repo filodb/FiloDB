@@ -2,9 +2,9 @@ package filodb.memory.format
 
 import java.sql.Timestamp
 
-import org.joda.time.DateTime
-
 import scala.reflect.ClassTag
+
+import org.joda.time.DateTime
 import scalaxy.loops._
 
 /**

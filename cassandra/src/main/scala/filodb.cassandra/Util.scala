@@ -1,10 +1,12 @@
 package filodb.cassandra
 
+import java.nio.ByteBuffer
+
+import scala.concurrent.{Future, Promise}
+
 import com.datastax.driver.core._
 import com.datastax.driver.core.exceptions.DriverException
-import java.nio.ByteBuffer
 import monix.reactive.Observable
-import scala.concurrent.{Future, Promise}
 
 import filodb.core._
 
@@ -45,7 +47,7 @@ object Util {
     }
   }
 
-  import com.google.common.util.concurrent.{ListenableFuture, FutureCallback, Futures}
+  import com.google.common.util.concurrent.{FutureCallback, Futures, ListenableFuture}
 
   implicit class CassandraFutureOps[A](lf: ListenableFuture[A]) {
     def toScalaFuture: Future[A] = {

@@ -2,6 +2,7 @@ package filodb.coordinator
 
 import akka.actor.ActorRef
 import akka.testkit._
+
 import filodb.core._
 
 object ShardMapperSpec extends ActorSpecConfig

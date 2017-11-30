@@ -2,9 +2,9 @@ package filodb.kafka
 
 import java.lang.{Long => JLong}
 
+import scala.collection.JavaConverters._
 import scala.concurrent.Await
 import scala.concurrent.duration._
-import scala.collection.JavaConverters._
 
 import com.typesafe.config.ConfigFactory
 import monix.eval.Task

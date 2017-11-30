@@ -1,11 +1,12 @@
 package filodb.coordinator.client
 
-import com.typesafe.scalalogging.StrictLogging
 import scala.concurrent.duration._
 
+import com.typesafe.scalalogging.StrictLogging
+
+import filodb.coordinator._
 import filodb.core._
 import filodb.core.query.ColumnFilter
-import filodb.coordinator._
 
 trait QueryOps extends ClientBase with StrictLogging {
   import QueryCommands._

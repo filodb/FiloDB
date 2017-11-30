@@ -15,8 +15,8 @@ case class UnsupportedFiloType(vectType: Int, subType: Int) extends
  * super fast.  Traits would slow it WAY down.  Instead maybe we can use macros.
  */
 object VectorReader {
-  import WireFormat._
   import TypedBufferReader._
+  import WireFormat._
   val forImportingImplicit = FOR_IMPLICIT
 
   implicit object BoolVectorReader extends PrimitiveVectorReader[Boolean]

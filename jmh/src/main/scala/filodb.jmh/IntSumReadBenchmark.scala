@@ -4,16 +4,16 @@ import java.util.concurrent.TimeUnit
 
 import scala.language.postfixOps
 import scala.util.Random
+
+import ch.qos.logback.classic.{Level, Logger}
+import com.googlecode.javaewah.EWAHCompressedBitmap
+import org.openjdk.jmh.annotations._
 import scalaxy.loops._
 
 import filodb.core.metadata.Dataset
 import filodb.core.query.ChunkSetReader
 import filodb.core.store.ChunkSet
 import filodb.memory.format.{FastFiloRowReader, FiloVector, TupleRowReader}
-
-import ch.qos.logback.classic.{Level, Logger}
-import com.googlecode.javaewah.EWAHCompressedBitmap
-import org.openjdk.jmh.annotations._
 
 object IntSumReadBenchmark {
   val dataset = Dataset("dataset", Seq("part:int"), Seq("int:int", "rownum:int"), "rownum")

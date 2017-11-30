@@ -27,12 +27,12 @@ object IngestionStreamClusterSpecConfig extends MultiNodeConfig {
 // and distributed querying across nodes
 abstract class IngestionStreamClusterSpec extends ClusterSpec(IngestionStreamClusterSpecConfig) {
   import akka.testkit._
-  import GdeltTestData._
-  import NodeClusterActor._
-  import IngestionStreamClusterSpecConfig._
-  import sources.CsvStreamFactory
-
   import cluster.ec
+
+  import IngestionStreamClusterSpecConfig._
+  import NodeClusterActor._
+  import sources.CsvStreamFactory
+  import GdeltTestData._
 
   override def initialParticipants = roles.size
 

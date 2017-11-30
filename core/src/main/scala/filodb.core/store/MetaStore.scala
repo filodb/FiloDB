@@ -115,7 +115,7 @@ trait MetaStore {
    * Note that the entry is keyed on the DatasetRef, so if this is called for the same DatasetRef then the data
    * will be overwritten (perhaps use a different database to distinguish?)
    *
-   * @param state the IngestionConfig to write
+   * @param config the IngestionConfig to write
    * @return Success, or MetadataException, or StorageEngineException
    */
   def writeIngestionConfig(config: IngestionConfig): Future[Response]

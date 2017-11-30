@@ -1,7 +1,7 @@
 package filodb.coordinator.client
 
-import scala.concurrent.duration._
 import scala.concurrent.{Await, Future}
+import scala.concurrent.duration._
 import scala.language.postfixOps
 
 import akka.actor.{ActorRef, ActorSystem, Address}
@@ -9,8 +9,8 @@ import akka.pattern.ask
 import akka.util.Timeout
 import com.typesafe.scalalogging.StrictLogging
 
-import filodb.core._
 import filodb.coordinator.{ActorName, MiscCommands, NodeClusterActor}
+import filodb.core._
 
 object Client {
   implicit val context = monix.execution.Scheduler.Implicits.global

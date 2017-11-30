@@ -1,11 +1,12 @@
 package filodb.core.query
 
-import com.googlecode.javaewah.EWAHCompressedBitmap
 import java.util.concurrent.ConcurrentSkipListMap
-import filodb.memory.format.ZeroCopyUTF8String
+
+import com.googlecode.javaewah.EWAHCompressedBitmap
 
 import filodb.core._
 import filodb.core.store.ChunkSetInfo.emptySkips
+import filodb.memory.format.ZeroCopyUTF8String
 
 /**
  * A sorted index of all values belonging to a single column/tag, with a bitmap per value.
@@ -14,9 +15,10 @@ import filodb.core.store.ChunkSetInfo.emptySkips
  * Suitable for multithreaded adds and queries.
  */
 class BitmapIndex[K](indexName: ZeroCopyUTF8String) {
+  import collection.JavaConverters._
+
   import Filter._
   import KeyFilter.decode
-  import collection.JavaConverters._
 
   private final val bitmaps = new ConcurrentSkipListMap[K, EWAHCompressedBitmap]()
 

@@ -1,16 +1,16 @@
 package filodb.memory.format
 
+import org.scalatest.{FunSpec, Matchers}
+import org.scalatest.prop.PropertyChecks
+
 import filodb.memory.NativeMemoryManager
 import filodb.memory.format.vectors.UTF8Vector
 
-import org.scalatest.prop.PropertyChecks
-import org.scalatest.{FunSpec, Matchers}
-
 class EncodingPropertiesTest extends FunSpec with Matchers with PropertyChecks {
-  import filodb.memory.format.Encodings._
-
   import org.scalacheck._
   import Arbitrary.arbitrary
+
+  import filodb.memory.format.Encodings._
 
   // Generate a list of bounded integers, every time bound it slightly differently
   // (to test different int compression techniques)

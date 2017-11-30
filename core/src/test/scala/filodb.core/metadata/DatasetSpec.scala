@@ -1,8 +1,8 @@
 package filodb.core.metadata
 
-import filodb.core._
-
 import org.scalatest.{FunSpec, Matchers}
+
+import filodb.core._
 
 class DatasetSpec extends FunSpec with Matchers {
   import Column.ColumnType._

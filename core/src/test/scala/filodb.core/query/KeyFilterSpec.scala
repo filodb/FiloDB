@@ -1,11 +1,11 @@
 package filodb.core.query
 
-import filodb.memory.format.RowReader
-import filodb.memory.format.ZeroCopyUTF8String._
+import org.scalatest.{FunSpec, Matchers}
+
 import filodb.core._
 import filodb.core.metadata.{Column, ComputedColumn}
-
-import org.scalatest.{Matchers, FunSpec}
+import filodb.memory.format.RowReader
+import filodb.memory.format.ZeroCopyUTF8String._
 
 class KeyFilterSpec extends FunSpec with Matchers {
   import NamesTestData._

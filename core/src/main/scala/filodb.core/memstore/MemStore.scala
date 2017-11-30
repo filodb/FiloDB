@@ -7,6 +7,7 @@ import monix.reactive.Observable
 
 import filodb.core.{DatasetRef, ErrorResponse}
 import filodb.core.metadata.{Column, Dataset}
+import filodb.core.metadata.Column.ColumnType._
 import filodb.core.store.{ChunkSink, ChunkSource, MetaStore}
 import filodb.memory.MemFactory
 import filodb.memory.format.{vectors => bv, _}
@@ -175,8 +176,6 @@ trait MemStore extends ChunkSource {
   def reset(): Unit
   def shutdown(): Unit
 }
-
-import filodb.core.metadata.Column.ColumnType._
 
 object MemStore {
   /**

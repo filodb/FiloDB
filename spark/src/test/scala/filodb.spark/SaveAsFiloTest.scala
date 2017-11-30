@@ -1,8 +1,10 @@
 package filodb.spark
 
 import java.sql.Timestamp
-import org.apache.spark.sql.{SaveMode, SparkSession}
+
 import scala.concurrent.duration._
+
+import org.apache.spark.sql.{SaveMode, SparkSession}
 
 import filodb.core._
 import filodb.core.metadata.Dataset

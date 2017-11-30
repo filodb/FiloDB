@@ -92,8 +92,7 @@ trait GracefulStopAwareSupervisor extends BaseActor {
   }
 
   protected def gracefulShutdown(requester: ActorRef): Unit = {
-    import akka.pattern.gracefulStop
-    import akka.pattern.pipe
+    import akka.pattern.{gracefulStop, pipe}
     import context.dispatcher
 
     logger.info("Starting graceful shutdown.")

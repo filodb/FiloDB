@@ -1,16 +1,17 @@
 package filodb.core
 
+import scala.io.Source
+
 import monix.reactive.Observable
 import org.joda.time.DateTime
-import filodb.memory.format._
-import filodb.memory.format.ZeroCopyUTF8String._
-import scala.io.Source
 
 import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.memstore.{IngestRecord, IngestRouting}
 import filodb.core.metadata.{Column, Dataset}
 import filodb.core.store._
 import filodb.core.Types.PartitionKey
+import filodb.memory.format._
+import filodb.memory.format.ZeroCopyUTF8String._
 
 object TestData {
   def toChunkSetStream(ds: Dataset,
@@ -153,6 +154,7 @@ object GdeltTestData {
 // A simulation of machine metrics data
 object MachineMetricsData {
   import scala.util.Random.nextInt
+
   import Column.ColumnType._
 
   val columns = Seq("timestamp:long", "min:double", "avg:double", "max:double", "p90:double")

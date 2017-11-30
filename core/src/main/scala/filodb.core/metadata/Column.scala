@@ -1,14 +1,16 @@
 package filodb.core.metadata
 
-import com.typesafe.scalalogging.StrictLogging
-import enumeratum.{Enum, EnumEntry}
-import filodb.memory.format.{VectorInfo, ZeroCopyUTF8String}
-import filodb.memory.format.RowReader.TypedFieldExtractor
-import org.scalactic._
 import scala.reflect.ClassTag
 
+import com.typesafe.scalalogging.StrictLogging
+import enumeratum.{Enum, EnumEntry}
+import org.scalactic._
+
 import filodb.core._
+import filodb.core.SingleKeyTypes._
 import filodb.core.Types._
+import filodb.memory.format.{VectorInfo, ZeroCopyUTF8String}
+import filodb.memory.format.RowReader.TypedFieldExtractor
 
 /**
  * Defines a column of data and its type and other properties
@@ -67,7 +69,6 @@ object Column extends StrictLogging {
   object ColumnType extends Enum[ColumnType] {
     val values = findValues
 
-    import filodb.core.SingleKeyTypes._
     case object IntColumn extends RichColumnType[Int]("int")
     case object LongColumn extends RichColumnType[Long]("long")
     case object DoubleColumn extends RichColumnType[Double]("double")
@@ -99,8 +100,9 @@ object Column extends StrictLogging {
     case DataColumn(_, name, colType) => VectorInfo(name, colType.clazz)
   }
 
-  import Dataset._
   import OptionSugar._
+
+  import Dataset._
   val illicitCharsRegex = "[:() ,\u0001]+"r
 
   /**

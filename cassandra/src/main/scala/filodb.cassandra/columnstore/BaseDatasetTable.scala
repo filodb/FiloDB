@@ -1,10 +1,11 @@
 package filodb.cassandra.columnstore
 
-import com.typesafe.scalalogging.StrictLogging
 import scala.concurrent.Future
 
-import filodb.core._
+import com.typesafe.scalalogging.StrictLogging
+
 import filodb.cassandra.FiloCassandraConnector
+import filodb.core._
 
 trait BaseDatasetTable extends StrictLogging {
   // The suffix for the dataset table, ie chunks, index, filter, etc.

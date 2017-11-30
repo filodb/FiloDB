@@ -1,6 +1,6 @@
 package filodb.core.store
 
-import org.scalatest.time.{Millis, Span, Seconds}
+import org.scalatest.time.{Millis, Seconds, Span}
 
 class InMemoryMetaStoreSpec extends MetaStoreSpec {
   implicit override val defaultPatience =

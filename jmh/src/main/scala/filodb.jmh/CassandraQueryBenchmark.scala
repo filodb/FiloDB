@@ -1,18 +1,17 @@
 package filodb.jmh
 
-import ch.qos.logback.classic.{Level, Logger}
-import com.typesafe.config.ConfigFactory
 import java.sql.Timestamp
 import java.util.concurrent.TimeUnit
-import org.openjdk.jmh.annotations._
-import org.openjdk.jmh.annotations.OutputTimeUnit
-import org.openjdk.jmh.annotations.{Mode, State, Scope}
 
-import filodb.core._
-import filodb.core.binaryrecord.BinaryRecord
-import filodb.core.store.{SinglePartitionScan, RowKeyChunkScan}
+import ch.qos.logback.classic.{Level, Logger}
+import com.typesafe.config.ConfigFactory
+import org.openjdk.jmh.annotations.{Mode, OutputTimeUnit, Scope, State, _}
+
 import filodb.cassandra.columnstore.CassandraColumnStore
 import filodb.cassandra.metastore.CassandraMetaStore
+import filodb.core._
+import filodb.core.binaryrecord.BinaryRecord
+import filodb.core.store.{RowKeyChunkScan, SinglePartitionScan}
 
 /**
  * Microbenchmark of single partition reads, including some range scans, from Cassandra.  No Spark.

@@ -1,17 +1,15 @@
 package filodb.jmh
 
-import ch.qos.logback.classic.{Level, Logger}
-import com.typesafe.config.ConfigFactory
 import java.util.concurrent.TimeUnit
 
-import org.openjdk.jmh.annotations.Benchmark
-import org.openjdk.jmh.annotations.BenchmarkMode
-import org.openjdk.jmh.annotations.OutputTimeUnit
-import org.openjdk.jmh.annotations.{Mode, Scope, State}
 import scala.concurrent.Await
 import scala.concurrent.duration._
 
-import filodb.core._
+import ch.qos.logback.classic.{Level, Logger}
+import com.typesafe.config.ConfigFactory
+import org.openjdk.jmh.annotations._
+
+import filodb.core.MachineMetricsData
 import filodb.core.memstore.TimeSeriesMemStore
 import filodb.core.query._
 import filodb.core.store.{FilteredPartitionScan, InMemoryMetaStore, NullColumnStore, QuerySpec, RowKeyChunkScan}

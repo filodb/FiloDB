@@ -6,12 +6,12 @@ import com.github.rholder.fauxflake.IdGenerators
 import monix.eval.Task
 import net.jpountz.lz4.{LZ4Compressor, LZ4Factory, LZ4FastDecompressor}
 import org.scalactic._
-import filodb.memory.format.RowReader
 
 import filodb.core.Types._
 import filodb.core.metadata.{Dataset, InvalidFunctionSpec}
 import filodb.core.SingleKeyTypes.Long64HighBit
 import filodb.core.query._
+import filodb.memory.format.RowReader
 
 package object store {
   val compressor = new ThreadLocal[LZ4Compressor]()

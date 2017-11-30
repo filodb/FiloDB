@@ -1,7 +1,8 @@
 package filodb.core.binaryrecord
 
-import org.boon.primitive.ByteBuf
 import scala.language.existentials
+
+import org.boon.primitive.ByteBuf
 
 import filodb.core.metadata.Column
 import filodb.core.metadata.Column.ColumnType
