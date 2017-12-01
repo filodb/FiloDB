@@ -8,7 +8,6 @@ class FilodbClusterSpec extends AkkaSpec {
 
   "FilodbCluster" must {
     val cluster = FilodbCluster(system)
-    import cluster.settings._
 
     "have the expected start state"  in {
       cluster.isInitialized should be (false)
@@ -20,7 +19,7 @@ class FilodbClusterSpec extends AkkaSpec {
       tracer.path.name should be (ActorName.TraceLoggerName)
 
       cluster.coordinatorActor.path.name should be (ActorName.CoordinatorName)
-      Await.result(cluster.metaStore.initialize(), InitializationTimeout)
+      Await.result(cluster.metaStore.initialize(), cluster.settings.InitializationTimeout)
       cluster.join()
       awaitCond(cluster.isJoined, max = cluster.settings.DefaultTaskTimeout)
       cluster.isTerminated should be (false)
@@ -29,7 +28,7 @@ class FilodbClusterSpec extends AkkaSpec {
       import ActorName._
 
       def pathElementsExist(a: ActorRef): Boolean =
-        Set("user", NodeGuardianName, NodeClusterProxyName)
+        Set("user", NodeGuardianName, ClusterSingletonProxyName)
           .forall(v => a.path.elements.exists(_ == v))
 
       // both operations (they differ slightly) should return the same final actor
@@ -41,7 +40,7 @@ class FilodbClusterSpec extends AkkaSpec {
     }
     "shutdown cleanly" in {
       cluster.shutdown()
-      awaitCond(cluster.isTerminated, GracefulStopTimeout)
+      awaitCond(cluster.isTerminated, cluster.settings.GracefulStopTimeout)
     }
   }
 }

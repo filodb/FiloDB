@@ -197,8 +197,9 @@ class ShardCoordinatorCumulativeStateSpec extends ShardCoordinatorSpec {
 
       shardActor ! GetSubscriptions
       expectMsgPF() {
-        case ShardSubscriptions(subscriptions) =>
+        case ShardSubscriptions(subscriptions, watchers) =>
           subscriptions.headOption.forall(_.dataset == dataset1) shouldEqual true
+          watchers.isEmpty shouldEqual true
       }
 
       shardActor ! GetSnapshot(dataset1)
@@ -231,10 +232,11 @@ class ShardCoordinatorCumulativeStateSpec extends ShardCoordinatorSpec {
 
       shardActor ! GetSubscriptions
       expectMsgPF() {
-        case e@ShardSubscriptions(subscriptions) =>
+        case e@ShardSubscriptions(subscriptions, watchers) =>
           val subscriberRefs = subscribers.map(_.ref)
           subscriptions shouldEqual Set(ShardSubscription(dataset1, subscriberRefs))
           e.subscribers(dataset1) shouldEqual subscriberRefs
+          watchers.isEmpty shouldEqual true
       }
 
       nextShards foreach { shard =>

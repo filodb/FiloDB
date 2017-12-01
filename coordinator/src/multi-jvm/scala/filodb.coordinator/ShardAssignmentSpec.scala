@@ -90,15 +90,22 @@ abstract class ShardAssignmentClusterSingletonSpec
       }
       enterBarrier("singleton-dataset-check-before-member-leave")
 
-      awaitOnClusterLeave(second, first, classOf[MemberRemoved], MemberStatus.Removed)
+      awaitOnClusterLeave(second, first, classOf[MemberRemoved], MemberStatus.Removed) {
+        watcher.expectMsgPF(defaultTimeout) {
+          case NodeProtocol.PreStart(identity) =>
+            identity.name shouldEqual ActorName.ClusterSingletonName
+            info(s"$identity PreStart")
+        }
+      }
     }
-    "dataset on second after first MemberRemoved unassign shards and update survivor nodes and subscribers" is pending
+    "have expected cluster shard state on second after first MemberRemoved and update subscribers" is pending
     /* Not implemented yet in the restart, part of another ticket.
       runOn(second) {
         info("Starting to test cluster singleton handover state to second")
         import akka.pattern.ask
         implicit val t: Timeout = defaultTimeout * 2
 
+        // can't call this until state transfer work is added
         def registered: Seq[DatasetRef] = (clusterSingleton ? ListRegisteredDatasets).mapTo[Seq[DatasetRef]].futureValue
 
         awaitAssert(registered shouldEqual Seq(ref), max = t.duration)

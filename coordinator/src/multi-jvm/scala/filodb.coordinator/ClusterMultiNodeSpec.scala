@@ -39,7 +39,8 @@ trait MultiNodeClusterSpec extends Suite
 
   protected lazy val watcher = TestProbe()
 
-  protected lazy val clusterSingleton: ActorRef = filodbCluster.clusterSingleton("worker", true, Some(watcher.ref))
+  protected lazy val clusterSingleton: ActorRef =
+    filodbCluster.clusterSingleton("worker", true, Some(watcher.ref))
 
   protected def address(role: RoleName): Address = node(role).address
 
@@ -85,7 +86,7 @@ trait MultiNodeClusterBehavior extends MultiNodeClusterSpec {
       startClusterNode()
       watcher.expectMsgPF(defaultTimeout) {
         case NodeProtocol.PreStart(identity) =>
-          identity.name shouldEqual ActorName.SingletonMgrName
+          identity.name shouldEqual ActorName.ClusterSingletonName
           info(s"Prestart on $myself: $identity")
       }
     }
@@ -122,7 +123,7 @@ trait MultiNodeClusterBehavior extends MultiNodeClusterSpec {
                           leaving: RoleName,
                           event: Class[_ <: MemberEvent],
                           status: MemberStatus,
-                          timeout: FiniteDuration = defaultTimeout): Unit =
+                          timeout: FiniteDuration = defaultTimeout)(thunk: => Unit): Unit =
     within(timeout) {
       runOn(on) {
         val addr = address(leaving)
@@ -135,12 +136,7 @@ trait MultiNodeClusterBehavior extends MultiNodeClusterSpec {
             case e: MemberEvent =>
               if (e.getClass == event && e.member.address == addr) {
                 exitingLatch.countDown()
-                watcher.expectMsgPF(defaultTimeout) {
-                  case NodeProtocol.PreStart(identity) =>
-                    identity.name shouldEqual ActorName.SingletonMgrName
-                    identity.address shouldEqual address(on)
-                    info(s"$identity restarted on $on.")
-                }
+                thunk
               }
           }
         }).withDeploy(Deploy.local)), classOf[MemberEvent])

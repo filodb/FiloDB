@@ -107,8 +107,9 @@ object NodeClusterActor {
             nodeCoordRole: String,
             metaStore: MetaStore,
             assignmentStrategy: ShardAssignmentStrategy,
+            guardian: ActorRef,
             watcher: ActorRef): Props =
-    Props(new NodeClusterActor(settings, cluster, nodeCoordRole, metaStore, assignmentStrategy, watcher))
+    Props(new NodeClusterActor(settings, cluster, nodeCoordRole, metaStore, assignmentStrategy, guardian, watcher))
 
   class RemoteAddressExtension(system: ExtendedActorSystem) extends Extension {
     def address: Address = system.provider.getDefaultAddress
@@ -158,6 +159,7 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
                                        nodeCoordRole: String,
                                        metaStore: MetaStore,
                                        assignmentStrategy: ShardAssignmentStrategy,
+                                       guardian: ActorRef,
                                        watcher: ActorRef
                                       ) extends NamingAwareBaseActor {
 
@@ -176,6 +178,7 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
 
   /* TODO run on its own dispatcher .withDispatcher("akka.shard-status-dispatcher") */
   val shardActor = context.actorOf(Props(new ShardCoordinatorActor(assignmentStrategy)), ShardName)
+  guardian ! NodeProtocol.ShardCoordinatorRef(shardActor)
 
   import context.dispatcher
 
@@ -201,7 +204,6 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
   override def postStop(): Unit = {
     super.postStop()
     cluster.unsubscribe(self)
-    shardActor ! StartHandover
     watcher ! NodeProtocol.PostStop(self.path)
   }
 

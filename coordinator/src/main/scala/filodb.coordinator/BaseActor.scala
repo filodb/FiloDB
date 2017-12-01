@@ -47,7 +47,7 @@ private[coordinator] trait NamingAwareBaseActor extends BaseActor {
 
   /** Returns true if this is the Singleton node cluster actor. */
   def isCluster(actor: ActorRef): Boolean =
-    actor.path.name startsWith ActorName.NodeClusterName
+    actor.path.name startsWith ActorName.ClusterSingletonManagerName
 
   /** Returns true if this is any incarnation of a node coordinator actor. */
   def isCoordinator(actor: ActorRef): Boolean =

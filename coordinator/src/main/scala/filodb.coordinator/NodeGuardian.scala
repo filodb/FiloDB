@@ -1,10 +1,13 @@
 package filodb.coordinator
 
+import scala.collection.mutable.{HashMap => MutableHashMap}
+
 import akka.actor._
 import akka.cluster.{Cluster, Member}
 import akka.cluster.ClusterEvent.{InitialStateAsEvents, MemberUp}
 import akka.cluster.singleton._
 
+import filodb.core.DatasetRef
 import filodb.core.memstore.MemStore
 import filodb.core.store.MetaStore
 
@@ -21,7 +24,12 @@ final class NodeGuardian(extension: FilodbCluster,
 
   protected val settings: FilodbSettings = extension.settings
 
-  private lazy val failureDetector = cluster.failureDetector
+  val failureDetector = cluster.failureDetector
+
+  val shardMappers = new MutableHashMap[DatasetRef, ShardMapper]
+
+  /** For tracking state when the singleton goes down and restarts on a new node.  */
+  var subscriptions = ShardSubscriptions.Empty
 
   override def preStart(): Unit = {
     super.preStart()
@@ -30,7 +38,6 @@ final class NodeGuardian(extension: FilodbCluster,
 
   override def postStop(): Unit = {
     super.postStop()
-    context.system.eventStream.unsubscribe(self)
     context.child(TraceLoggerName) foreach {
       actor => kamon.Kamon.shutdown()
     }
@@ -46,8 +53,10 @@ final class NodeGuardian(extension: FilodbCluster,
     case CreateTraceLogger(role)   => startKamon(role, sender())
     case CreateCoordinator         => createCoordinator(sender())
     case e: CreateClusterSingleton => createProxy(e, sender())
+    case ShardCoordinatorRef(a)    => subscribeTo(a)
+    case e: ShardEvent             => shardEvent(e)
+    case e: ShardSubscriptions     => subscriptions = e
     case e: ActorLifecycle         => // coming in different PR
-    case e: DeadLetter             =>
   }
 
   override def receive: Actor.Receive = guardianReceive orElse super.receive
@@ -56,6 +65,16 @@ final class NodeGuardian(extension: FilodbCluster,
     if (member.address == cluster.selfAddress) {
       extension._isJoined.set(true)
     }
+
+  /** Receives from the `NodeClusterActor`. */
+  private def subscribeTo(shardCoordinator: ActorRef): Unit =
+    shardCoordinator ! ShardSubscriptions.SubscribeAll
+
+  private def shardEvent(e: ShardEvent): Unit =
+    for {
+      map <- shardMappers.get(e.ref)
+      if map.updateFromEvent(e).isSuccess
+    } shardMappers(e.ref) = map
 
   /** Idempotent. Cli does not start metrics. */
   private def startKamon(role: ClusterRole, requester: ActorRef): Unit = {
@@ -94,16 +113,17 @@ final class NodeGuardian(extension: FilodbCluster,
     * node. There is only ONE instance per cluster.
     */
   private def createProxy(e: CreateClusterSingleton, requester: ActorRef): Unit = {
-    if (e.withManager && context.child(SingletonMgrName).isEmpty) {
+    if (e.withManager && context.child(ClusterSingletonName).isEmpty) {
       val watcher = e.watcher.getOrElse(self)
       val mgr = context.actorOf(
         ClusterSingletonManager.props(
-          singletonProps = NodeClusterActor.props(settings, cluster, e.role, metaStore, assignmentStrategy, watcher),
+          singletonProps = NodeClusterActor.props(
+            settings, cluster, e.role, metaStore, assignmentStrategy, self, watcher),
           terminationMessage = PoisonPill,
           settings = ClusterSingletonManagerSettings(context.system)
             .withRole(e.role)
-            .withSingletonName(SingletonMgrName)),
-          name = NodeClusterName)
+            .withSingletonName(ClusterSingletonName)),
+          name = ClusterSingletonManagerName)
 
       context watch mgr
       logger.info(s"Created ClusterSingletonManager for NodeClusterActor [mgr=$mgr, role=${e.role}]")
@@ -119,11 +139,10 @@ final class NodeGuardian(extension: FilodbCluster,
     */
   private def clusterActor(role: String): ActorRef = {
     val proxy = context.actorOf(ClusterSingletonProxy.props(
-      singletonManagerPath = s"/user/$NodeGuardianName/$NodeClusterName",
+      singletonManagerPath = s"/user/$NodeGuardianName/$ClusterSingletonManagerName",
       settings = ClusterSingletonProxySettings(context.system).withRole(role)),
-      name = NodeClusterProxyName)
+      name = ClusterSingletonProxyName)
 
-    context watch proxy
     logger.info(s"Created ClusterSingletonProxy [proxy=$proxy, role=$role]")
     proxy
   }
@@ -170,8 +189,8 @@ object NodeProtocol {
   sealed trait CreationAck extends TaskAck
   private[coordinator] final case class CoordinatorRef(ref: ActorRef) extends CreationAck
   private[coordinator] final case class ClusterSingletonRef(ref: ActorRef) extends CreationAck
+  private[coordinator] final case class ShardCoordinatorRef(shardCoordinator: ActorRef) extends CreationCommand
   private[coordinator] final case class TraceLoggerRef(ref: ActorRef) extends CreationAck
-
 
   sealed trait LifecycleCommand
   private[coordinator] case object GracefulShutdown extends LifecycleCommand
@@ -180,7 +199,7 @@ object NodeProtocol {
   private[coordinator] final case class ShutdownComplete(ref: ActorRef) extends LifecycleAck
 
   sealed trait StateCommand
-  private[filodb] case object ResetState extends LifecycleCommand
+  private[filodb] case object ResetState extends StateCommand
 
   sealed trait StateTaskAck extends TaskAck
   private[filodb] case object StateReset extends StateTaskAck

@@ -55,7 +55,7 @@ class SupervisorSpec extends AkkaSpec {
       guardian ! CreateClusterSingleton("worker", withManager = true, None)
       expectMsgPF() {
         case ClusterSingletonRef(ref) =>
-          ref.path should be(ActorPath.fromString("akka://akka-test/user/guardian/" + ActorName.NodeClusterProxyName))
+          ref.path should be(ActorPath.fromString("akka://akka-test/user/guardian/" + ActorName.ClusterSingletonProxyName))
       }
       system stop guardian
     }

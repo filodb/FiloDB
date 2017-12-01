@@ -64,9 +64,9 @@ object ActorName {
   val TraceLoggerName = "trace-logger"
 
   /* The actor name of the child singleton actor */
-  val NodeClusterName = "nodecluster"
-  val SingletonMgrName = "singleton"
-  val NodeClusterProxyName = "singletonProxy"
+  val ClusterSingletonManagerName = "nodecluster"
+  val ClusterSingletonName = "singleton"
+  val ClusterSingletonProxyName = "singletonProxy"
   val ShardName = "shard-coordinator"
 
   /** MemstoreCoord Worker name prefix. Naming pattern is prefix-datasetRef.dataset */

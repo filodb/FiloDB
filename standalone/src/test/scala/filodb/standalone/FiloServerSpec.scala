@@ -18,13 +18,15 @@ class FiloServerSpec extends RunnableSpec with ScalaFutures {
     "create and setup the coordinatorActor and clusterActor" in {
       implicit val system = FiloServer.system
       val coordinatorActor = FiloServer.coordinatorActor
-      val clusterActor = FiloServer.cluster.clusterActor.get
-
+      FiloServer.cluster.clusterActor.isDefined shouldEqual true
       val probe = TestProbe()
-      probe.send(coordinatorActor, CoordinatorRegistered(clusterActor, probe.ref))
-      probe.send(coordinatorActor, MiscCommands.GetClusterActor)
-      probe.expectMsgPF() {
-        case Some(ref: ActorRef) => ref shouldEqual clusterActor
+
+      FiloServer.cluster.clusterActor foreach { clusterActor =>
+        probe.send(coordinatorActor, CoordinatorRegistered(clusterActor, probe.ref))
+        probe.send(coordinatorActor, MiscCommands.GetClusterActor)
+        probe.expectMsgPF() {
+          case Some(ref: ActorRef) => ref shouldEqual clusterActor
+        }
       }
     }
     "shutdown cleanly" in {
