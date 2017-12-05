@@ -25,7 +25,7 @@ trait Instance {
       constructor.setAccessible(true)
       val obj = constructor.newInstance(values: _*)
       obj.asInstanceOf[T]
-    }.orElse(createInstance[T](clazz))
+    }
 
   /** Attempts to create instance of configured type, for no-arg constructor. */
   def createInstance[T: ClassTag](clazz: Class[_]): Try[T] =

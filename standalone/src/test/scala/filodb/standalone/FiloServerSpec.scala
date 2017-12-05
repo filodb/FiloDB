@@ -8,20 +8,22 @@ import filodb.coordinator.{MiscCommands, RunnableSpec}
 import filodb.coordinator.NodeClusterActor.CoordinatorRegistered
 
 class FiloServerSpec extends RunnableSpec with ScalaFutures {
+  val server = new FiloServer()
+
   "A FiloServer Node" must {
-    val timeout = FiloServer.cluster.settings.DefaultTaskTimeout
+    val timeout = server.cluster.settings.DefaultTaskTimeout
 
     "initialize" in {
-      FiloServer.main(Array.empty)
-      TestKit.awaitCond(FiloServer.cluster.isInitialized,  timeout)
+      server.start()
+      TestKit.awaitCond(server.cluster.isInitialized,  timeout)
     }
     "create and setup the coordinatorActor and clusterActor" in {
-      implicit val system = FiloServer.system
-      val coordinatorActor = FiloServer.coordinatorActor
-      FiloServer.cluster.clusterActor.isDefined shouldEqual true
+      implicit val system = server.system
+      val coordinatorActor = server.coordinatorActor
+      server.cluster.clusterActor.isDefined shouldEqual true
       val probe = TestProbe()
 
-      FiloServer.cluster.clusterActor foreach { clusterActor =>
+      server.cluster.clusterActor foreach { clusterActor =>
         probe.send(coordinatorActor, CoordinatorRegistered(clusterActor, probe.ref))
         probe.send(coordinatorActor, MiscCommands.GetClusterActor)
         probe.expectMsgPF() {
@@ -30,8 +32,8 @@ class FiloServerSpec extends RunnableSpec with ScalaFutures {
       }
     }
     "shutdown cleanly" in {
-      FiloServer.shutdown()
-      TestKit.awaitCond(FiloServer.cluster.isTerminated, timeout)
+      server.shutdown()
+      TestKit.awaitCond(server.cluster.isTerminated, timeout)
     }
   }
 }

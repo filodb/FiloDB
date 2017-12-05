@@ -52,8 +52,8 @@ trait ClusterOps extends ClientBase with StrictLogging {
   def getShardMapper(dataset: DatasetRef, timeout: FiniteDuration = 30.seconds): Option[ShardMapper] =
     clusterActor.map { ref =>
       Client.actorAsk(ref, GetShardMap(dataset), timeout) {
-        case m: ShardMapper => Some(m)
-        case _              => None
+        case CurrentShardSnapshot(_, m) => Some(m)
+        case _                          => None
       }
     }.getOrElse(None)
 }

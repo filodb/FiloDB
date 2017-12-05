@@ -71,9 +71,12 @@ lazy val http = project
 lazy val standalone = project
   .in(file("standalone"))
   .settings(commonSettings: _*)
+  .settings(multiJvmSettings: _*)
   .settings(assemblySettings: _*)
-  .settings(libraryDependencies += logbackDep)
-  .dependsOn(core, coordinator % "compile->compile; test->test", cassandra, kafka, http, bootstrapper)
+  .settings(libraryDependencies ++= standaloneDeps)
+  .dependsOn(core, coordinator % "compile->compile; test->test", cassandra, kafka, http, bootstrapper,
+    tsgenerator % Test)
+  .configs(MultiJvm)
 
 lazy val spark = project
   .in(file("spark"))
@@ -212,6 +215,12 @@ lazy val httpDeps = Seq(
   logbackDep,
   akkaHttp,
   akkaHttpSprayJson
+)
+
+lazy val standaloneDeps = Seq(
+  logbackDep,
+  "net.ceedubs"          %% "ficus"             % ficusVersion      % Test,
+  "com.typesafe.akka"    %% "akka-multi-node-testkit" % akkaVersion % Test
 )
 
 lazy val bootstrapperDeps = Seq(

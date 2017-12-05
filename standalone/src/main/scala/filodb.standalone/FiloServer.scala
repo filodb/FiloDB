@@ -5,7 +5,6 @@ import scala.util.control.NonFatal
 import akka.actor.ActorSystem
 import akka.cluster.Cluster
 import com.typesafe.config.Config
-import com.typesafe.scalalogging.StrictLogging
 import net.ceedubs.ficus.Ficus._
 
 import filodb.akkabootstrapper.AkkaBootstrapper
@@ -34,7 +33,7 @@ import filodb.http.FiloHttpServer
  *   }
  * }}}
  */
-object FiloServer extends FilodbClusterNode with StrictLogging {
+class FiloServer extends FilodbClusterNode {
   override val role = ClusterRole.Server
 
   val settings = new FilodbSettings()
@@ -57,7 +56,7 @@ object FiloServer extends FilodbClusterNode with StrictLogging {
     filoHttpServer.start(bootstrapper.getAkkaHttpRoute())
   }
 
-  def main(args: Array[String]): Unit = {
+  def start(): Unit = {
     try {
       import settings._
       cluster.kamonInit(role)
@@ -99,4 +98,10 @@ object FiloServer extends FilodbClusterNode with StrictLogging {
   Runtime.getRuntime.addShutdownHook(new Thread() {
     override def run(): Unit = shutdown()
   })
+}
+
+object FiloServer {
+  def main(args: Array[String]): Unit = {
+    new FiloServer().start()
+  }
 }

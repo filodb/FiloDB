@@ -2,7 +2,7 @@ package filodb.timeseries
 
 import java.lang.{Long => JLong}
 
-import scala.concurrent.Await
+import scala.concurrent.{Await, Future}
 import scala.concurrent.duration._
 import scala.util.Random
 import scala.util.control.NonFatal
@@ -46,34 +46,45 @@ object TestTimeseriesProducer extends StrictLogging {
     val conf = new ProducerOptions(args)
     val numSamples = conf.numSamples()
     val numTimeSeries = conf.numPartitions()
-
     // to get default start time, look at numSamples and calculate a startTime that ends generation at current time
     val startMinutesAgo = conf.startMinutesAgo.toOption
-        .getOrElse((numSamples.toDouble / numTimeSeries / 6).ceil.toInt )  // at 6 samples per minute
+      .getOrElse((numSamples.toDouble / numTimeSeries / 6).ceil.toInt )  // at 6 samples per minute
+
+    Await.result(produceMetrics(numSamples, numTimeSeries, startMinutesAgo), 1.hour)
+  }
+
+  /**
+    * Produce metrics
+    * @param numSamples number of samples to produce
+    * @param numTimeSeries number of time series partitions to produce
+    * @param startMinutesAgo the samples will carry a timestamp starting from these many minutes ago
+    * @return
+    */
+  def produceMetrics(numSamples: Int, numTimeSeries: Int, startMinutesAgo: Long): Future[Unit] = {
     val startTime = System.currentTimeMillis() - startMinutesAgo * 60 * 1000
 
     val producerCfg = KafkaProducerConfig.default.copy(
       bootstrapServers = List(kafkaServer)
     )
-
     implicit val io = Scheduler.io("kafka-producer")
     logger.info(s"Started producing $numSamples messages into topic $topicName with timestamps " +
-                s"from about ${(System.currentTimeMillis() - startTime) / 1000 / 60} minutes ago")
+      s"from about ${(System.currentTimeMillis() - startTime) / 1000 / 60} minutes ago")
     val stream = timeSeriesData(startTime, numTimeSeries).take(numSamples)
     val producer = KafkaProducerSink[JLong, String](producerCfg, io)
-    val sinkT = Observable.fromIterable(stream)
+    Observable.fromIterable(stream)
       .map { case (partition, value) =>
         new ProducerRecord[JLong, String](topicName, partition.toInt, partition, value)
       }
       .bufferIntrospective(1024)
       .consumeWith(producer)
       .runAsync
+      .map { _ =>
+        logger.info(s"Finished producing $numSamples messages into topic $topicName with timestamps " +
+          s"from about ${(System.currentTimeMillis() - startTime) / 1000 / 60} minutes ago")
+      }
       .recover { case NonFatal(e) =>
         logger.error("Error occurred while producing messages to Kafka", e)
       }
-    Await.result(sinkT, 1.hour)
-    logger.info(s"Finished producing $numSamples messages into topic $topicName with timestamps " +
-      s"from about ${(System.currentTimeMillis() - startTime) / 1000 / 60} minutes ago")
   }
 
   /**

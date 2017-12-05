@@ -158,9 +158,10 @@ tail -f logs/filodb-server-1.log
 ```
 Verify this message `NodeClusterActor Actor[akka://filo-standalone/user/node/singleton/nodecluster#-528195195] said hello!` in the logs. The logs should also indicate kafka connections being setup for consumption for the dataset. Wait for this to happen.
 
-Now run the time series generator. This will ingest 10000 samples into the Kafka topic.
+Now run the time series generator. This will ingest 10000 samples into the Kafka topic with timestamps 100 minutes ago
+and with 20 partitions.
 ```
-java -cp tsgenerator/target/scala-2.11/tsgenerator-*.telemetry-SNAPSHOT filodb.timeseries.TestTimeseriesProducer 10000
+java -cp tsgenerator/target/scala-2.11/tsgenerator-*.telemetry-SNAPSHOT filodb.timeseries.TestTimeseriesProducer -n 10000 -t 100 -p 20
 ```
 
 At this point, you should be able to confirm such a message in the server logs: `KAMON counter name=memstore-rows-ingested count=4999`

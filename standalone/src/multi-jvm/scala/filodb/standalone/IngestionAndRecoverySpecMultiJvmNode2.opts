@@ -1,0 +1,1 @@
+-Dmultijvm.node=ing-rec-node2 -Dakka.remote.netty.tcp.port=0 -Dfilodb.http.bind-port=0 -Dconfig.file=conf/timeseries-filodb-server.conf
