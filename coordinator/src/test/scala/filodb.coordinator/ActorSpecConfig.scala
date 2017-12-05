@@ -68,6 +68,10 @@ object AkkaSpec extends SeedNodeConfig {
       |}
     """.stripMargin)
 
+  val logAkkaToConsole = sys.env.get("LOG_AKKA_TO_CONSOLE")
+                                .map(x => s"""\nakka.loggers = ["akka.testkit.TestEventListener"]""")
+                                .getOrElse("")
+
   val serverConfig = ConfigFactory.parseString(
    s"""akka.remote.netty.tcp.port = $port
       |akka.remote.netty.tcp.host = $host
@@ -75,8 +79,7 @@ object AkkaSpec extends SeedNodeConfig {
       |akka.log-sent-messages = on
       |akka.debug.lifecycle = on
       |akka.jvm-exit-on-fatal-error = off
-      |akka.loggers = ["akka.testkit.TestEventListener"]
-    """.stripMargin)
+    """.stripMargin + logAkkaToConsole)
     .withFallback(ConfigFactory.load("application_test.conf"))
 
   val settings = new FilodbSettings(userConfig.withFallback(serverConfig))

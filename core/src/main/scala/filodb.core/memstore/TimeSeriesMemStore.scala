@@ -48,7 +48,7 @@ extends MemStore with StrictLogging {
                    shardMap
                  })
     if (shards contains shard) {
-      throw ShardAlreadySetup
+      throw ShardAlreadySetup(dataset.ref, shard)
     } else {
       val tsdb = new TimeSeriesShard(dataset, config, shard, sink, metastore)
       shards.put(shard, tsdb)

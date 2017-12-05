@@ -79,7 +79,7 @@ final class FilodbCluster(system: ExtendedActorSystem) extends Extension with St
   /** The supervisor creates nothing unless specific tasks are requested of it.
     * All actions are idempotent. It manages the underlying lifecycle of all node actors.
     */
-  private lazy val guardian = system.actorOf(NodeGuardian.props(
+  private[coordinator] lazy val guardian = system.actorOf(NodeGuardian.props(
     this, cluster, metaStore, memStore, assignmentStrategy), guardianName)
 
   /** Idempotent. */

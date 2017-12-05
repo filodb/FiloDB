@@ -167,7 +167,8 @@ object ShardAssignmentSpecMultiNodeConfig extends MultiNodeConfig {
         destination=target/flight-recorder-${UUID.randomUUID().toString}.afr
       }
     }
-    akka.loggers = ["akka.testkit.TestEventListener"]
+    # Uncomment or change logback-multijvm-test.xml logging level to see more STDOUT output
+    # akka.loggers = ["akka.testkit.TestEventListener"]
     akka.test {
       single-expect-default = 5 s
     }

@@ -12,8 +12,8 @@ import filodb.core.store.{ChunkSink, ChunkSource, MetaStore}
 import filodb.memory.MemFactory
 import filodb.memory.format.{vectors => bv, _}
 
-case object ShardAlreadySetup extends Exception
-final case class DatasetAlreadySetup(dataset: DatasetRef) extends Exception(s"Dataset $dataset already setup")
+final case class ShardAlreadySetup(dataset: DatasetRef, shard: Int) extends
+    Exception(s"Dataset $dataset shard $shard already setup")
 
 sealed trait DataOrCommand
 final case class SomeData(records: Seq[IngestRecord]) extends DataOrCommand

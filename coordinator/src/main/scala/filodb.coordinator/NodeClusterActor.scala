@@ -1,9 +1,8 @@
 package filodb.coordinator
 
-import scala.collection.mutable.HashMap
+import scala.collection.mutable.{HashMap, HashSet}
 
 import akka.actor._
-import akka.cluster.Cluster
 import akka.cluster.ClusterEvent._
 import akka.event.LoggingReceive
 import akka.util.Timeout
@@ -79,7 +78,7 @@ object NodeClusterActor {
   // Cluste state info commands
   // Returns a Seq[DatasetRef]
   case object ListRegisteredDatasets
-  // Returns a ShardMapper object or DatasetUnknown
+  // Returns CurrentShardSnapshot or DatasetUnknown
   final case class GetShardMap(ref: DatasetRef)
 
   private[coordinator] final case class AddCoordinator(roles: Set[String], addr: Address, coordinator: ActorRef)
@@ -94,22 +93,20 @@ object NodeClusterActor {
 
   // Only use for testing, in before {} blocks
   private[coordinator] case object EverybodyLeave
+  private[coordinator] case object RecoverShardStates
 
   /**
     * Creates a new NodeClusterActor.
     *
-    * @param settings             general settings from config
-    * @param cluster              the Cluster to subscribe to for membership messages
+    * @param cluster              a FilodbCluster instance
     * @param nodeCoordRole        String, for the role containing the NodeCoordinatorActor or ingestion nodes
     */
-  def props(settings: FilodbSettings,
-            cluster: Cluster,
+  def props(cluster: FilodbCluster,
             nodeCoordRole: String,
             metaStore: MetaStore,
             assignmentStrategy: ShardAssignmentStrategy,
-            guardian: ActorRef,
             watcher: ActorRef): Props =
-    Props(new NodeClusterActor(settings, cluster, nodeCoordRole, metaStore, assignmentStrategy, guardian, watcher))
+    Props(new NodeClusterActor(cluster, nodeCoordRole, metaStore, assignmentStrategy, watcher))
 
   class RemoteAddressExtension(system: ExtendedActorSystem) extends Extension {
     def address: Address = system.provider.getDefaultAddress
@@ -154,17 +151,14 @@ object NodeClusterActor {
  * - It can notify when some address joins
  * - It tracks dataset shard assignments and coordinates new dataset setup
  */
-private[filodb] class NodeClusterActor(settings: FilodbSettings,
-                                       cluster: Cluster,
+private[filodb] class NodeClusterActor(cluster: FilodbCluster,
                                        nodeCoordRole: String,
                                        metaStore: MetaStore,
                                        assignmentStrategy: ShardAssignmentStrategy,
-                                       guardian: ActorRef,
                                        watcher: ActorRef
                                       ) extends NamingAwareBaseActor {
-
+  import cluster.settings.ResolveActorTimeout
   import akka.pattern.{ask, pipe}
-  import settings.ResolveActorTimeout
 
   import ActorName._
   import NodeClusterActor._
@@ -176,26 +170,28 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
   val datasets = new HashMap[DatasetRef, Dataset]
   val sources = new HashMap[DatasetRef, IngestionSource]
 
+  private val initDatasets = new HashSet[DatasetRef]
+
   /* TODO run on its own dispatcher .withDispatcher("akka.shard-status-dispatcher") */
   val shardActor = context.actorOf(Props(new ShardCoordinatorActor(assignmentStrategy)), ShardName)
-  guardian ! NodeProtocol.ShardCoordinatorRef(shardActor)
 
   import context.dispatcher
 
   // subscribe to cluster changes, re-subscribe when restart
   override def preStart(): Unit = {
     super.preStart()
-    cluster.subscribe(self, initialStateMode = InitialStateAsEvents,
-      classOf[MemberEvent], classOf[UnreachableMember])
     watcher ! NodeProtocol.PreStart(self.path)
 
-    // Restore previously set up datasets.  This happens asynchronously, and messages may come before or after
-    // membership messages such as MemberUp
-    // TODO: Think about how this will work when NCA has to be migrated to different nodes
+    // Restore previously set up datasets and shards.  This happens in a very specific order so that
+    // shard and dataset state can be recovered correctly.  First all the datasets are set up.
+    // Then shard state is recovered, and finally cluster membership events are replayed.
     logger.info(s"Attempting to restore previous ingestion state...")
     metaStore.readIngestionConfigs()
-             .map(_.foreach { state => self ! SetupDataset(state) })
-             .recover {
+             .map { configs =>
+               initDatasets ++= configs.map(_.ref)
+               configs.foreach { config => self ! SetupDataset(config) }
+               if (configs.isEmpty) self ! RecoverShardStates
+             }.recover {
                case e: Exception =>
                  logger.error(s"Unable to restore ingestion state: $e\nTry manually setting up ingestion again", e)
              }
@@ -203,7 +199,7 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
 
   override def postStop(): Unit = {
     super.postStop()
-    cluster.unsubscribe(self)
+    cluster.cluster.unsubscribe(self)
     watcher ! NodeProtocol.PostStop(self.path)
   }
 
@@ -267,6 +263,28 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
     case GetShardMap(ref)       => shardActor.forward(GetSnapshot(ref))
   }
 
+  // The initial recovery handler: recover dataset setup/ingestion config first
+  def datasetInitHandler: Receive = LoggingReceive {
+    case e: SetupDataset    => setupDataset(e, sender())
+    case e: DatasetAdded    => datasetSetup(e)
+                               initDatasets -= e.dataset.ref
+                               if (initDatasets.isEmpty) self ! RecoverShardStates
+    case RecoverShardStates => logger.info(s"Recovery of ingestion configs/datasets complete")
+                               sendShardStateRecoveryMessage()
+                               context.become(shardMapRecoveryHandler orElse subscribeAllHandler)
+  }
+
+  def shardMapRecoveryHandler: Receive = LoggingReceive {
+    case ms: NodeProtocol.MapsAndSubscriptions =>
+      ms.shardMaps foreach { case (ref, map) => shardActor ! RecoverShardState(ref, map) }
+      shardActor ! RecoverSubscriptions(ms.subscriptions)
+      // NOW, subscribe to cluster membership state and then switch to normal receiver
+      logger.info("Now subscribing to cluster events and switching to normalReceive")
+      cluster.cluster.subscribe(self, initialStateMode = InitialStateAsEvents,
+                                classOf[MemberEvent])
+      context.become(normalReceive)
+  }
+
   def shardMapHandler: Receive = LoggingReceive {
     case e: AddCoordinator        => addCoordinator(e)
     case e: SubscribeShardUpdates => subscribe(e.ref, sender())
@@ -275,6 +293,14 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
     case e: CoordinatorAdded      => coordinatorAdded(e)
     case e: CoordinatorRemoved    => coordinatorRemoved(e)
   }
+
+  def subscribeAllHandler: Receive = LoggingReceive {
+    case SubscribeAll             => shardActor.forward(SubscribeAll)
+  }
+
+  /** Send a message to recover the current shard maps and subscriptions from the Guardian of local node. */
+  private def sendShardStateRecoveryMessage(): Unit =
+    cluster.guardian ! NodeProtocol.GetShardMapsSubscriptions
 
   /** If the dataset is registered as a subscription, a `CurrentShardSnapshot` is sent
     * to the subscriber, otherwise a `DatasetUnknown` is returned.
@@ -396,7 +422,7 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
       }
       else if (everybodyLeftSender.isEmpty) {
         logger.info(s"Removing all members from cluster...")
-        cluster.state.members.map(_.address).foreach(cluster.leave)
+        cluster.state.members.map(_.address).foreach(cluster.cluster.leave)
         everybodyLeftSender = Some(requestor)
       } else {
         logger.warn(s"Ignoring EverybodyLeave, somebody already sent it")
@@ -408,9 +434,11 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
       datasets.clear()
       sources.clear()
 
-      implicit val timeout: Timeout = settings.DefaultTaskTimeout
+      implicit val timeout: Timeout = cluster.settings.DefaultTaskTimeout
       (shardActor ? NodeProtocol.ResetState) pipeTo origin
   }
 
-  def receive: Receive = membershipHandler orElse shardMapHandler orElse infoHandler orElse routerEvents
+  def normalReceive: Receive = membershipHandler orElse shardMapHandler orElse infoHandler orElse
+                                  routerEvents orElse subscribeAllHandler
+  def receive: Receive = datasetInitHandler orElse subscribeAllHandler
 }

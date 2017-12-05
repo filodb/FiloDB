@@ -234,12 +234,17 @@ class ShardMapper(val numShards: Int) extends Serializable {
 }
 
 private[filodb] object ShardMapper {
-
   val default = new ShardMapper(1)
 
   final case class ShardAndNode(shard: Int, coord: ActorRef)
 
   final def toShard(n: Int, numShards: Int): Int = (((n & 0xffffffffL) * numShards) >> 32).toInt
+
+  def copy(orig: ShardMapper, ref: DatasetRef): ShardMapper = {
+    val newMap = new ShardMapper(orig.numShards)
+    orig.minimalEvents(ref).foreach(newMap.updateFromEvent)
+    newMap
+  }
 
   final case class ShardAlreadyAssigned(shard: Int, status: ShardStatus, assignedTo: ActorRef)
     extends Exception(s"Shard [shard=$shard, status=$status, coordinator=$assignedTo] is already assigned.")

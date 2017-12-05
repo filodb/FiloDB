@@ -8,9 +8,9 @@
     - [Shard Event Subscriptions](#shard-event-subscriptions)
       - [Subscribe to Shard Status Events](#subscribe-to-shard-status-events)
         - [Shard Status and Shard Status Events](#shard-status-and-shard-status-events)
-        - [Auto Subscribe](#auto-subscribe)
       - [Unsubscribe to Shard Status Events](#unsubscribe-to-shard-status-events)
-        - [Auto Unsubscribe](#auto-unsubscribe)
+      - [Auto Unsubscribe](#auto-unsubscribe)
+  - [Cluster/Shard State Recovery](#clustershard-state-recovery)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
@@ -106,16 +106,24 @@ def receive: Actor.Receive = {
 }
 ```
 
-##### Auto Subscribe
-On `MemberUp` each new `NodeCoordinatorActor` is automatically subscribed to all datasets added. Then 
-the `NodeCoordinatorActor` can receive `ShardCommand`s which it forwards to the appropriate Ingester, 
-e.g. to start shard ingestion for that dataset on that shard. A successful start of that ingestion stream
-will broadcast an `IngestionStarted` event to all subscribers of that dataset.
-
 #### Unsubscribe to Shard Status Events
 A subscriber can unsubscribe at any time by sending the `ShardCoordinatorActor` a `Unsubscribe(self)` command,
 which will unsubscribe from all the subscriber's subscriptions. Unsubscribe happens automatically when a subscriber actor
 is terminated for any reason. This is also true for all `NodeCoordinatorActor`s.
 
-##### Auto Unsubscribe
+#### Auto Unsubscribe
 Any subscriber that has terminated is automatically removed.
+
+## Cluster/Shard State Recovery
+
+The `NodeClusterActor` and `ShardCoordinatorActor` are both singletons and only one instance lives in the Akka/FiloDB Cluster at any one time.  They contain important state such as shard maps and current subscriptions to shard status updates.  What if the node containing the singleton dies?  
+
+Here is what happens:
+
+1. When each node starts up, its `NodeGuardian` subscribes to all shard status and subscription updates from the singletons.
+2. As the shard status updates and new subscribers come online, the `ShardCoordinatorActor` sends updates to all the `NodeGuardian` subscribers.
+3. The node containing the singletons goes down.  Akka sends `Unreachable` and other cluster membership events, though this won't be noticed because the node is down.
+4. Eventually, Akka's ClusterSingletonManager notices the node is down and restarts the singletons on a different node.  When it is restarted, it has none of the previous state.
+5. The `NodeClusterActor` first recovers previous streaming ingestion configs from the `MetaStore`, which is probably Cassandra.
+6. The `NodeClusterActor` next recovers the current shard maps and subscribers from the new node's `NodeGuardian`, which should have been subscribing to updates due to the first step.
+7. Next, the `NodeClusterActor` replays a summary of all cluster membership events, including any new node failure events, and thus updates shard status accordingly.

@@ -1,6 +1,6 @@
 package filodb.coordinator
 
-import scala.collection.mutable.{HashMap => MutableHashMap}
+import scala.collection.mutable.{HashMap => MutableHashMap, Map => MMap}
 
 import akka.actor._
 import akka.cluster.{Cluster, Member}
@@ -53,9 +53,10 @@ final class NodeGuardian(extension: FilodbCluster,
     case CreateTraceLogger(role)   => startKamon(role, sender())
     case CreateCoordinator         => createCoordinator(sender())
     case e: CreateClusterSingleton => createProxy(e, sender())
-    case ShardCoordinatorRef(a)    => subscribeTo(a)
     case e: ShardEvent             => shardEvent(e)
+    case s: CurrentShardSnapshot   => shardMappers(s.ref) = s.map
     case e: ShardSubscriptions     => subscriptions = e
+    case GetShardMapsSubscriptions => getMapsSubscriptions(sender())
     case e: ActorLifecycle         => // coming in different PR
   }
 
@@ -66,9 +67,8 @@ final class NodeGuardian(extension: FilodbCluster,
       extension._isJoined.set(true)
     }
 
-  /** Receives from the `NodeClusterActor`. */
-  private def subscribeTo(shardCoordinator: ActorRef): Unit =
-    shardCoordinator ! ShardSubscriptions.SubscribeAll
+  private def getMapsSubscriptions(requestor: ActorRef): Unit =
+    requestor ! MapsAndSubscriptions(shardMappers, subscriptions)
 
   private def shardEvent(e: ShardEvent): Unit =
     for {
@@ -117,8 +117,7 @@ final class NodeGuardian(extension: FilodbCluster,
       val watcher = e.watcher.getOrElse(self)
       val mgr = context.actorOf(
         ClusterSingletonManager.props(
-          singletonProps = NodeClusterActor.props(
-            settings, cluster, e.role, metaStore, assignmentStrategy, self, watcher),
+          singletonProps = NodeClusterActor.props(extension, e.role, metaStore, assignmentStrategy, watcher),
           terminationMessage = PoisonPill,
           settings = ClusterSingletonManagerSettings(context.system)
             .withRole(e.role)
@@ -142,6 +141,10 @@ final class NodeGuardian(extension: FilodbCluster,
       singletonManagerPath = s"/user/$NodeGuardianName/$ClusterSingletonManagerName",
       settings = ClusterSingletonProxySettings(context.system).withRole(role)),
       name = ClusterSingletonProxyName)
+
+    // Subscribe myself to all shard updates and subscriber additions.  NOTE: this code needs to be
+    // run on every node so that any node that the singleton fails over to will have the backup in the Guardian.
+    proxy ! ShardSubscriptions.SubscribeAll
 
     logger.info(s"Created ClusterSingletonProxy [proxy=$proxy, role=$role]")
     proxy
@@ -189,8 +192,14 @@ object NodeProtocol {
   sealed trait CreationAck extends TaskAck
   private[coordinator] final case class CoordinatorRef(ref: ActorRef) extends CreationAck
   private[coordinator] final case class ClusterSingletonRef(ref: ActorRef) extends CreationAck
-  private[coordinator] final case class ShardCoordinatorRef(shardCoordinator: ActorRef) extends CreationCommand
   private[coordinator] final case class TraceLoggerRef(ref: ActorRef) extends CreationAck
+
+  sealed trait RecoveryCommand extends TaskCommand
+  private[coordinator] case object GetShardMapsSubscriptions extends RecoveryCommand
+
+  sealed trait RecoveryAck extends TaskAck
+  private[coordinator] final case class MapsAndSubscriptions(shardMaps: MMap[DatasetRef, ShardMapper],
+                                                             subscriptions: ShardSubscriptions) extends RecoveryAck
 
   sealed trait LifecycleCommand
   private[coordinator] case object GracefulShutdown extends LifecycleCommand

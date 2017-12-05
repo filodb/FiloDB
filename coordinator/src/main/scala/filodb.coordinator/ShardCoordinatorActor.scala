@@ -1,6 +1,6 @@
 package filodb.coordinator
 
-import scala.collection.mutable.{HashMap => MutableHashMap}
+import scala.collection.mutable.{HashMap => MutableHashMap, HashSet => MutableHashSet}
 import scala.util.{Failure, Success}
 
 import akka.actor._
@@ -23,10 +23,12 @@ import filodb.core.metadata.Dataset
 private[coordinator] final class ShardCoordinatorActor(strategy: ShardAssignmentStrategy) extends NamingAwareBaseActor {
 
   import NodeClusterActor.DatasetUnknown
-  import ShardAssignmentStrategy.DatasetShards
+  import ShardAssignmentStrategy.{DatasetShards, DatasetResources}
   import ShardSubscriptions._
 
   val shardMappers = new MutableHashMap[DatasetRef, ShardMapper]
+  val members      = new MutableHashSet[ActorRef]
+  val resources    = new MutableHashMap[DatasetRef, DatasetResources]
 
   var subscriptions = ShardSubscriptions.Empty
 
@@ -36,6 +38,7 @@ private[coordinator] final class ShardCoordinatorActor(strategy: ShardAssignment
     case e: AddMember            => addMember(e, sender())
     case RemoveDataset(ds)       => removeDataset(ds)
     case RemoveMember(ref)       => removeMember(ref, Some(sender()))
+    case r: RecoverShardState    => recoverShardState(r)
     case NodeProtocol.ResetState => reset(sender())
   }
 
@@ -44,15 +47,34 @@ private[coordinator] final class ShardCoordinatorActor(strategy: ShardAssignment
     case SubscribeAll            => subscribeAll(sender())
     case Unsubscribe(actor)      => unsubscribe(actor)
     case Terminated(actor)       => unsubscribe(actor)
+    case RecoverSubscriptions(subs) => recoverSubscriptions(subs)
   }
 
   def reads: Actor.Receive = LoggingReceive {
-    case GetSubscribers(ds)      => subscribers(ds, sender())
-    case GetSubscriptions        => subscriptions(sender())
+    case GetSubscribers(ds)      => sendSubscribers(ds, sender())
+    case GetSubscriptions        => sendSubscriptions(sender())
     case GetSnapshot(ref)        => snapshot(ref, sender())
   }
 
   override def receive: Actor.Receive = sharding orElse subscribers orElse reads
+
+  /**
+   * Intended for recovery of ShardMapper state only - recovers a current ShardMap as well as updating a list of
+   * members / coordinator ActorRefs
+   */
+  private def recoverShardState(r: RecoverShardState): Unit = {
+    logger.info(s"!!! Recovering map for dataset ${r.ref}")
+    shardMappers(r.ref) = r.map
+    members ++= r.map.allNodes
+    logger.debug(s"Map contents: ${r.map}   Members are now:  $members")
+  }
+
+  private def recoverSubscriptions(subs: ShardSubscriptions): Unit = {
+    logger.info(s"!!! Recovering (adding) subscriptions from $subs")
+    subscriptions = subscriptions.copy(subscriptions = subscriptions.subscriptions ++ subs.subscriptions,
+                                       watchers = subscriptions.watchers ++ subs.watchers)
+    logger.debug(s"Final subscriptions = $subscriptions")
+  }
 
   /** Selects the `ShardMapper` for the provided dataset, updates the mapper
     * for the received shard event from the event source, and publishes
@@ -115,7 +137,7 @@ private[coordinator] final class ShardCoordinatorActor(strategy: ShardAssignment
 
         subscriptions :+= ShardSubscription(added.ref, Set.empty)
         subscriptions.watchers foreach (subscribe(_, added.ref))
-
+        resources(added.ref) = added.resources
         logger.info(s"Dataset '${added.ref}' added, created new ${added.mapper}")
 
         origin ! DatasetAdded(e.dataset, e.setup.source, added.shards, e.ackTo)
@@ -133,15 +155,18 @@ private[coordinator] final class ShardCoordinatorActor(strategy: ShardAssignment
     * INTERNAL API.
     */
   private def addMember(e: AddMember, origin: ActorRef): Unit =
-    if (!strategy.tracking(e.coordinator)) {
-      val added = strategy.nodeAdded(e.coordinator, shardMappers)
+    if (!members.contains(e.coordinator)) {
+      val added = strategy.nodeAdded(e.coordinator, shardMappers, resources)
       logger.info(s"Added new ${e.coordinator}")
+      members += e.coordinator
       for {
         DatasetShards(ds, map, shards) <- added.shards
         shard <- shards
       } update(ShardAssignmentStarted(ds, shard, e.coordinator), map)
 
       origin ! CoordinatorAdded(e.coordinator, added.shards, e.addr)
+    } else {
+      logger.info(s"Member $e was already added, skipping")
     }
 
   /** Removes a Node coordinator/member, execute any resulting commands, update maps.
@@ -149,16 +174,17 @@ private[coordinator] final class ShardCoordinatorActor(strategy: ShardAssignment
     * update their local shards for the removed coordinator as unassigned.
     */
   private def removeMember(coordinator: ActorRef, origin: Option[ActorRef]): Unit =
-    if (strategy tracking coordinator) {
+    if (members contains coordinator) {
       val removed = strategy.nodeRemoved(coordinator, shardMappers)
       logger.info(s"Removed $coordinator")
+      members -= coordinator
       for {
         DatasetShards(ds, map, shards) <- removed.shards
         shard <- shards
       } update(ShardMemberRemoved(ds, shard, coordinator), map)
 
       origin foreach (_ ! CoordinatorRemoved(coordinator, removed.shards))
-  }
+    }
 
   /** If the mapper for the provided `datasetRef` has been added, sends an initial
     * current snapshot of partition state, as ingestion will subscribe usually when
@@ -195,9 +221,12 @@ private[coordinator] final class ShardCoordinatorActor(strategy: ShardAssignment
     * snapshot of subscribers per dataset. This `subsce`
     */
   private def subscribeAll(subscriber: ActorRef): Unit = {
+    logger.info(s"Subscribing $subscriber to events from all datasets and subscriptions")
     subscriptions = subscriptions subscribe subscriber
-    subscriptions.watchers foreach (subscriptions(_))
+    subscriptions.watchers foreach (sendSubscriptions(_))
     context watch subscriber
+    // send the subscriber all current shardMappers
+    shardMappers foreach { case (ref, map) => subscriber ! CurrentShardSnapshot(ref, map) }
   }
 
   /** Subscribes a subscriber to an existing dataset's shard updates.
@@ -205,7 +234,7 @@ private[coordinator] final class ShardCoordinatorActor(strategy: ShardAssignment
     */
   private def subscribe(subscriber: ActorRef, dataset: DatasetRef): Unit = {
     subscriptions = subscriptions.subscribe(subscriber, dataset)
-    subscriptions.watchers foreach (subscriptions(_))
+    subscriptions.watchers foreach (sendSubscriptions(_))
     context watch subscriber
   }
 
@@ -219,7 +248,7 @@ private[coordinator] final class ShardCoordinatorActor(strategy: ShardAssignment
     */
   private def unsubscribe(subscriber: ActorRef): Unit = {
     subscriptions = subscriptions unsubscribe subscriber
-    subscriptions.watchers foreach (subscriptions(_))
+    subscriptions.watchers foreach (sendSubscriptions(_))
     context unwatch subscriber
   }
 
@@ -228,14 +257,14 @@ private[coordinator] final class ShardCoordinatorActor(strategy: ShardAssignment
     *
     * INTERNAL API. Read-only.
     */
-  private def subscribers(ds: DatasetRef, origin: ActorRef): Unit =
+  private def sendSubscribers(ds: DatasetRef, origin: ActorRef): Unit =
     origin ! Subscribers(subscriptions.subscribers(ds), ds)
 
   /** Sends subscriptions to requester.
     *
     * INTERNAL API. Read-only.
     */
-  private def subscriptions(origin: ActorRef): Unit =
+  private def sendSubscriptions(origin: ActorRef): Unit =
     origin ! subscriptions
 
   /** Removes the dataset from subscriptions, if exists.
@@ -255,7 +284,6 @@ private[coordinator] final class ShardCoordinatorActor(strategy: ShardAssignment
   private def reset(origin: ActorRef): Unit = {
     shardMappers.clear()
     subscriptions = subscriptions.clear
-    strategy.reset()
     origin ! NodeProtocol.StateReset
   }
 }
@@ -323,6 +351,9 @@ object ShardSubscriptions {
 
   /** Returns a mapper snapshot for a specific dataset if it exists. */
   private[coordinator] final case class GetSnapshot(dataset: DatasetRef) extends SubscriptionProtocol
+
+  private[coordinator] final case class RecoverShardState(ref: DatasetRef, map: ShardMapper)
+  private[coordinator] final case class RecoverSubscriptions(subscriptions: ShardSubscriptions)
 
   private[coordinator] case object Reset extends SubscriptionProtocol
   private[coordinator] case object ResetComplete extends SubscriptionProtocol

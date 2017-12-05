@@ -88,10 +88,9 @@ private[filodb] final class IngestionActor(dataset: Dataset,
   private def start(e: StartShardIngestion, origin: ActorRef): Unit =
     if (invalid(e.ref)) handleInvalid(e, Some(origin)) else {
       try memStore.setup(dataset, e.shard) catch {
-        case ex@DatasetAlreadySetup(ds) =>
-          logger.warn(s"Dataset $ds already setup", ex)
-        case ShardAlreadySetup =>
-          logger.warn(s"Shard already setup")
+        case ShardAlreadySetup(ds, shard) =>
+          logger.warn(s"Dataset $ds shard $shard already setup, skipping....")
+          return
       }
 
       val ingestion = for {
