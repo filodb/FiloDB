@@ -156,7 +156,7 @@ abstract class IngestionAndRecoverySpec extends MultiNodeSpec(IngestionAndRecove
 
   it should "be able to validate the cluster status as normal via CLI" in {
     runOn(first) {
-      validateShardStatus(_ == ShardStatusNormal)
+      validateShardStatus(client1)(_ == ShardStatusNormal)
     }
   }
 
@@ -235,10 +235,9 @@ abstract class IngestionAndRecoverySpec extends MultiNodeSpec(IngestionAndRecove
     enterBarrier("second-node-restarted")
   }
 
-  // TODO enable this test - future is timing out for some reason
-  ignore should "be able to validate the cluster status as recovering via CLI" in {
+  it should "be able to validate the cluster status as recovering via CLI" in {
     runOn(first) {
-      validateShardStatus {
+      validateShardStatus(client2) {
         case ShardStatusRecovery(p) => // ok
         case _ => fail("All shards should be in shard recovery state")
       }
@@ -261,16 +260,15 @@ abstract class IngestionAndRecoverySpec extends MultiNodeSpec(IngestionAndRecove
     enterBarrier("data3-ingested")
   }
 
-  // TODO enable this test - future is timing out for some reason
-  ignore should "be able to validate the cluster status as normal again via CLI" in {
+  it should "be able to validate the cluster status as normal again via CLI" in {
     runOn(first) {
-      validateShardStatus(_ == ShardStatusNormal)
+      validateShardStatus(client2)(_ == ShardStatusNormal)
     }
     enterBarrier("shard-normal-end-of-test")
   }
 
-  def validateShardStatus(statusValidator: ShardStatus => Unit): Unit = {
-    client1.getShardMapper(dataset) match {
+  def validateShardStatus(client: LocalClient)(statusValidator: ShardStatus => Unit): Unit = {
+    client.getShardMapper(dataset) match {
       case Some(map) =>
         map.shardValues.size shouldBe 4  // numer of shards
         map.shardValues.foreach { case (_, status) =>
