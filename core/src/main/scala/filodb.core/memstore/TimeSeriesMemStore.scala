@@ -237,7 +237,8 @@ class TimeSeriesShard(dataset: Dataset, config: Config, val shardNum: Int, sink:
   private val maxNumPartitions = config.getInt("memstore.max-num-partitions")
 
   private val blockStore = new PageAlignedBlockManager(shardMemoryMB * 1024 * 1024)
-  protected val bufferMemoryManager = new NativeMemoryManager(maxChunksSize * 8 * maxNumPartitions)
+  private val numColumns = dataset.dataColumns.size
+  protected val bufferMemoryManager = new NativeMemoryManager(maxChunksSize * 8 * maxNumPartitions * numColumns)
 
   /**
     * Unencoded/unoptimized ingested data is stored in buffers that are allocated from this off-heap pool
