@@ -50,9 +50,9 @@ trait BlockManager {
   *
   * @param totalMemorySizeInBytes Control the number of pages to allocate. (totalling up to the totallMemorySizeInBytes)
   */
-class PageAlignedBlockManager(val totalMemorySizeInBytes: Long) extends BlockManager with CleanShutdown {
+class PageAlignedBlockManager(val totalMemorySizeInBytes: Long, numPagesPerBlock: Int = 1)
+  extends BlockManager with CleanShutdown {
 
-  private val pageSize = PageManager.getInstance().pageSize()
   val mask = PageManager.PROT_READ | PageManager.PROT_EXEC | PageManager.PROT_WRITE
 
   protected val freeBlocks: util.LinkedList[Block] = allocateWithPageManager
@@ -60,7 +60,7 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long) extends BlockMan
 
   protected val lock = new ReentrantLock()
 
-  override def blockSizeInBytes: Long = pageSize
+  override def blockSizeInBytes: Long = PageManager.getInstance().pageSize() * numPagesPerBlock
 
   def availablePreAllocated: Long = numFreeBlocks * blockSizeInBytes
 
@@ -69,7 +69,7 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long) extends BlockMan
   override def numFreeBlocks: Int = freeBlocks.size
 
   override def requestBlock(): Option[Block] = {
-    val blocks = requestBlocks(pageSize)
+    val blocks = requestBlocks(blockSizeInBytes)
     blocks.size match {
       case 0 => None
       case _ => Some(blocks.head)
@@ -110,7 +110,7 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long) extends BlockMan
     val firstPageAddress: Long =
       PageManager.getInstance().allocatePages(numBlocks, mask)
     for (i <- 0 until numBlocks) {
-      val address = firstPageAddress + (i * pageSize)
+      val address = firstPageAddress + (i * blockSizeInBytes)
       blocks.add(new Block(address, blockSizeInBytes))
     }
     blocks

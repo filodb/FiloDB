@@ -2,6 +2,7 @@ package filodb.core.memstore
 
 import scala.collection.mutable.{ArrayBuffer, HashMap}
 import scala.concurrent.{ExecutionContext, Future}
+import scala.util.Try
 
 import com.googlecode.javaewah.{EWAHCompressedBitmap, IntIterator}
 import com.typesafe.config.Config
@@ -80,6 +81,7 @@ class TimeSeriesShard(dataset: Dataset, config: Config, val shardNum: Int, sink:
 
   private val maxChunksSize = config.getInt("memstore.max-chunks-size")
   private val shardMemoryMB = config.getInt("memstore.shard-memory-mb")
+  private val numPagesPerBlock = Try(config.getInt("memstore.num-block-pages")).getOrElse(1000)
   private final val numGroups = config.getInt("memstore.groups-per-shard")
   private val maxNumPartitions = config.getInt("memstore.max-num-partitions")
 
