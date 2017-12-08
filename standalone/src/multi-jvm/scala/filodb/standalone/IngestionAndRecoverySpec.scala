@@ -107,6 +107,7 @@ abstract class IngestionAndRecoverySpec extends MultiNodeSpec(IngestionAndRecove
   override def beforeAll(): Unit = multiNodeSpecBeforeAll()
 
   override def afterAll(): Unit = multiNodeSpecAfterAll()
+  val producePatience = PatienceConfig(timeout = Span(10, Seconds), interval = Span(100, Millis))
 
   "IngestionAndRecoverySpec Multi-JVM Test" should "clear data on node 1" in {
     runOn(first) {
@@ -124,7 +125,7 @@ abstract class IngestionAndRecoverySpec extends MultiNodeSpec(IngestionAndRecove
         Seq("timestamp:long", "value:double"), Seq("timestamp"))
       metaStore.newDataset(datasetObj).futureValue shouldBe Success
       colStore.initialize(dataset).futureValue shouldBe Success
-      logger.info("Dataset created")
+      info("Dataset created")
     }
     enterBarrier("dataset-created")
   }
@@ -163,7 +164,6 @@ abstract class IngestionAndRecoverySpec extends MultiNodeSpec(IngestionAndRecove
   it should "be able to ingest data into FiloDB via Kafka" in {
     within(chunkDurationTimeout) {
       runOn(first) {
-        val producePatience = PatienceConfig(timeout = Span(10, Seconds), interval = Span(100, Millis))
         TestTimeseriesProducer.produceMetrics(1000, 100, 400).futureValue(producePatience)
         info("Waiting for chunk-duration to pass so checkpoints for all groups are created")
         Thread.sleep(chunkDuration.toMillis + 7000)
@@ -190,7 +190,6 @@ abstract class IngestionAndRecoverySpec extends MultiNodeSpec(IngestionAndRecove
   it should "be able to ingest larger amounts of data into FiloDB via Kafka again" in {
     within(chunkDurationTimeout) {
       runOn(first) {
-        val producePatience = PatienceConfig(timeout = Span(10, Seconds), interval = Span(100, Millis))
         TestTimeseriesProducer.produceMetrics(10000, 100, 200).futureValue(producePatience)
         info("Waiting for part of the chunk-duration so that there are unpersisted chunks")
         Thread.sleep(chunkDuration.toMillis / 3)
@@ -254,7 +253,6 @@ abstract class IngestionAndRecoverySpec extends MultiNodeSpec(IngestionAndRecove
 
   it should "be able to ingest some more data on node 1" in {
     runOn(first) {
-      val producePatience = PatienceConfig(timeout = Span(10, Seconds), interval = Span(100, Millis))
       TestTimeseriesProducer.produceMetrics(1000, 100, 50).futureValue(producePatience)
     }
     enterBarrier("data3-ingested")
@@ -286,12 +284,12 @@ abstract class IngestionAndRecoverySpec extends MultiNodeSpec(IngestionAndRecove
   }
 
   def runQuery(client: LocalClient): Double = {
-    // This is the promQL Equivalent: sum(heap_usage{partition="P0"}[1000m])
+    // This is the promQL equivalent: sum(heap_usage{partition="P0"}[1000m])
     val query = QueryArgs("sum", "value", List(), MostRecentTime(60000000), "simple", List())
     val filters = Vector(ColumnFilter("partition", Equals("P0")), ColumnFilter("__name__", Equals("heap_usage")))
     val response1 = client.partitionFilterAggregate(dataset, query, filters)
     val answer = response1.elements.head.asInstanceOf[Double]
-    logger.info(s"Query Response was: $answer")
+    info(s"Query Response was: $answer")
     answer.asInstanceOf[Double]
   }
 
