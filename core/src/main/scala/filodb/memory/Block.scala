@@ -145,6 +145,13 @@ class Block(val address: Long, val capacity: Long) extends Owned {
     stringBuf.toString
   }
 
+  def internalBufferStats(): (Int,Int,Int) = {
+    val remaining = internalBuffer.remaining()
+    val position = internalBuffer.position()
+    val limit = internalBuffer.limit()
+    (remaining,position,limit)
+  }
+
 }
 
 
