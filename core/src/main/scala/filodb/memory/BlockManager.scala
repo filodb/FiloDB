@@ -4,7 +4,7 @@ import java.util.concurrent.locks.ReentrantLock
 
 import scala.collection.JavaConverters._
 
-import com.kenai.jffi.PageManager
+import com.kenai.jffi.{MemoryIO, PageManager}
 import java.util
 
 /**
@@ -55,7 +55,7 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long, numPagesPerBlock
 
   val mask = PageManager.PROT_READ | PageManager.PROT_EXEC | PageManager.PROT_WRITE
 
-  protected val freeBlocks: util.LinkedList[Block] = allocateWithPageManager
+  protected val freeBlocks: util.LinkedList[Block] = allocateDirect
   protected val usedBlocks: util.LinkedList[Block] = new util.LinkedList[Block]()
 
   protected val lock = new ReentrantLock()
@@ -116,6 +116,15 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long, numPagesPerBlock
     blocks
   }
 
+  protected def allocateDirect = {
+    val numBlocks: Int = Math.floor(totalMemorySizeInBytes / blockSizeInBytes).toInt
+    val blocks = new util.LinkedList[Block]()
+    for (i <- 0 until numBlocks) {
+      val address = MemoryIO.getCheckedInstance().allocateMemory(blockSizeInBytes, true)
+      blocks.add(new Block(address, blockSizeInBytes))
+    }
+    blocks
+  }
 
   protected def use(block: Block) = {
     block.markInUse
@@ -142,17 +151,24 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long, numPagesPerBlock
   override protected[memory] def releaseBlocks() = {
     lock.lock()
     try {
-      releaseBlocksWithPM(freeBlocks)
-      releaseBlocksWithPM(usedBlocks)
+      releaseBlocksDirect(freeBlocks)
+      releaseBlocksDirect(usedBlocks)
     } finally {
       lock.unlock()
     }
   }
 
+  protected def releaseBlocksDirect(blocks: util.LinkedList[Block]) = {
+    blocks.asScala.foreach { block =>
+      MemoryIO.getCheckedInstance().freeMemory(block.address)
+    }
+
+  }
+
   protected def releaseBlocksWithPM(blocks: java.lang.Iterable[Block]) = {
     blocks.asScala.foreach { block =>
       PageManager.getInstance().freePages(block.address, 1)
-                           }
+    }
   }
 
   override def shutdown(): Unit = {

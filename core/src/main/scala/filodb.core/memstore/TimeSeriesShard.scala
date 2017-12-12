@@ -85,7 +85,7 @@ class TimeSeriesShard(dataset: Dataset, config: Config, val shardNum: Int, sink:
   private final val numGroups = config.getInt("memstore.groups-per-shard")
   private val maxNumPartitions = config.getInt("memstore.max-num-partitions")
 
-  private val blockStore = new PageAlignedBlockManager(shardMemoryMB * 1024 * 1024)
+  private val blockStore = new PageAlignedBlockManager(shardMemoryMB * 1024 * 1024, numPagesPerBlock)
   private val numColumns = dataset.dataColumns.size
   protected val bufferMemoryManager = new NativeMemoryManager(maxChunksSize * 8 * maxNumPartitions * numColumns)
 
