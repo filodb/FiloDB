@@ -4,7 +4,7 @@ import com.typesafe.config.ConfigFactory
 import monix.reactive.Observable
 
 import filodb.core.TestData
-import filodb.core.memstore.{TimeSeriesPartition, TimeSeriesPartitionSpec}
+import filodb.core.memstore.{TimeSeriesPartition, TimeSeriesPartitionSpec, TimeSeriesShardStats}
 import filodb.core.MachineMetricsData.{dataset1, defaultPartKey, singleSeriesData}
 import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.store.{AllChunkScan, ChunkSet, RowKeyChunkScan}
@@ -27,7 +27,8 @@ class CassandraBackedTimeSeriesPartitionSpec extends TimeSeriesPartitionSpec {
     // first write chunks to persistent store
     colStore.write(dataset1, chunks).futureValue
 
-    val part = new TimeSeriesPartition(dataset1, defaultPartKey, 0, colStore, bufferPool)
+    val part = new TimeSeriesPartition(dataset1, defaultPartKey, 0, colStore, bufferPool,
+      new TimeSeriesShardStats(dataset1.ref, 0))
 
     // now query the persistence backed store for a sub interval without ingesting data explicitly
     val start: BinaryRecord = BinaryRecord(dataset1, Seq(now))

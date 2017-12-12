@@ -52,31 +52,28 @@ class KamonLogger extends BaseActor {
   def receive: Receive = {
     case tick: TickMetricSnapshot =>
       tick.metrics foreach {
-        // case (Entity(name, "akka-actor", _), snapshot)       =>
-        // case (Entity(name, "akka-router", _), snapshot)      =>
-        // case (Entity(name, "akka-dispatcher", _), snapshot)  =>
-        // case (Entity(name, "executor-service", _), snapshot) =>
-        case (Entity(name, "trace", _), snapshot)               =>
-          logHistogram(name, snapshot.histogram("elapsed-time").get, "trace")
-        case (Entity(name, "trace-segment", _), snapshot)       =>
-          logHistogram(name, snapshot.histogram("elapsed-time").get, "trace-segment")
-        case (Entity(name, "histogram", _), snapshot)           =>
-          logHistogram(name, snapshot.histogram("histogram").get)
-        case (Entity(name, "counter", _), snapshot)             =>
-          logCounter(name, snapshot.counter("counter").get)
-        case (Entity(name, "min-max-counter", _), snapshot)     =>
-          logMinAvgMax(name, snapshot.minMaxCounter("min-max-counter").get, "min-max")
-        case (Entity(name, "gauge", _), snapshot)               =>
-          logMinAvgMax(name, snapshot.gauge("gauge").get, "gauge")
-        case x: Any                                             =>
+        case (Entity(name, "trace", tags), snapshot)               =>
+          logHistogram(name, snapshot.histogram("elapsed-time").get, "trace", tags)
+        case (Entity(name, "trace-segment", tags), snapshot)       =>
+          logHistogram(name, snapshot.histogram("elapsed-time").get, "trace-segment", tags)
+        case (Entity(name, "histogram", tags), snapshot)           =>
+          logHistogram(name, snapshot.histogram("histogram").get, "histogram", tags)
+        case (Entity(name, "counter", tags), snapshot)             =>
+          logCounter(name, snapshot.counter("counter").get, tags)
+        case (Entity(name, "min-max-counter", tags), snapshot)     =>
+          logMinAvgMax(name, snapshot.minMaxCounter("min-max-counter").get, "min-max", tags)
+        case (Entity(name, "gauge", tags), snapshot)               =>
+          logMinAvgMax(name, snapshot.gauge("gauge").get, "gauge", tags)
+        case x: Any                                                =>
       }
   }
 
-  def logCounter(name: String, c: Counter.Snapshot): Unit =
-    logger.info(s"KAMON counter name=$name count=${c.count}")
+  def logCounter(name: String, c: Counter.Snapshot, tags: Map[String, String]): Unit =
+    logger.info(s"KAMON counter name=$name ${formatTags(tags)} count=${c.count}")
 
-  def logHistogram(name: String, h: Histogram.Snapshot, category: String = "histogram"): Unit =
-    logger.info(s"KAMON $category name=$name n=${h.numberOfMeasurements} min=${h.min} " +
+  def logHistogram(name: String, h: Histogram.Snapshot, category: String = "histogram",
+                   tags: Map[String, String]): Unit =
+    logger.info(s"KAMON $category name=$name ${formatTags(tags)} n=${h.numberOfMeasurements} min=${h.min} " +
                 s"p50=${h.percentile(50.0D)} p90=${h.percentile(90.0D)} " +
                 s"p95=${h.percentile(95.0D)} p99=${h.percentile(99.0D)} " +
                 s"p999=${h.percentile(99.9D)} max=${h.max}")
@@ -86,6 +83,12 @@ class KamonLogger extends BaseActor {
     else { histogram.sum / histogram.numberOfMeasurements }
   }
 
-  def logMinAvgMax(name: String, h: Histogram.Snapshot, category: String): Unit =
-    logger.info(s"KAMON $category name=$name min=${h.min} avg=${average(h)} max=${h.max}")
+  def logMinAvgMax(name: String, h: Histogram.Snapshot, category: String, tags: Map[String, String]): Unit =
+    logger.info(s"KAMON $category name=$name " +
+                s"${formatTags(tags)} " +
+                s"min=${h.min} " +
+                s"avg=${average(h)} " +
+                s"max=${h.max}")
+
+  private def formatTags(tags: Map[String, String]) = tags.view.map { case (k,v) => s"$k=$v" }.mkString(" ")
 }

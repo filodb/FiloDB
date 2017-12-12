@@ -5,7 +5,6 @@ import java.lang.management.ManagementFactory
 import scala.concurrent.duration._
 
 import com.typesafe.scalalogging.StrictLogging
-import kamon.Kamon
 import monix.eval.Task
 import monix.reactive.Observable
 import org.jctools.maps.NonBlockingHashMapLong
@@ -20,11 +19,6 @@ import filodb.core.store._
 import filodb.memory.BlockHolder
 import filodb.memory.format._
 
-object TimeSeriesPartition {
-  val numChunksEncoded = Kamon.metrics.counter("memstore-chunks-encoded")
-  val numSamplesEncoded = Kamon.metrics.counter("memstore-samples-encoded")
-  val encodedBytes     = Kamon.metrics.counter("memstore-encoded-bytes-allocated")
-}
 
 /**
  * A MemStore Partition holding chunks of data for different columns (a schema) for time series use cases.
@@ -53,10 +47,9 @@ class TimeSeriesPartition(val dataset: Dataset,
                           val binPartition: PartitionKey,
                           val shard: Int,
                           val chunkSource: ChunkSource,
-                          bufferPool: WriteBufferPool) extends FiloPartition with StrictLogging {
-  import TimeSeriesPartition._
+                          bufferPool: WriteBufferPool,
+                          val shardStats: TimeSeriesShardStats) extends FiloPartition with StrictLogging {
   import ChunkSetInfo._
-
   /**
     * This is a map from chunkId to the Array of optimized/frozen chunks(BinaryVector) corresponding to that chunkId.
     *
@@ -187,12 +180,12 @@ class TimeSeriesPartition(val dataset: Dataset,
       // optimize and compact old chunks
       val frozenVectors = flushingAppenders.zipWithIndex.map { case (appender, i) =>
         val optimized = appender.appender.optimize(blockHolder)
-        encodedBytes.increment(optimized.numBytes)
+        shardStats.encodedBytes.increment(optimized.numBytes)
         optimized
       }
       val numSamples = frozenVectors(0).length
-      numSamplesEncoded.increment(numSamples)
-      numChunksEncoded.increment(frozenVectors.length)
+      shardStats.numSamplesEncoded.increment(numSamples)
+      shardStats.numChunksEncoded.increment(frozenVectors.length)
 
       // replace appendableVectors reference in vectors hash with compacted, immutable chunks
       vectors.put(flushingChunkID, frozenVectors)
@@ -258,7 +251,9 @@ class TimeSeriesPartition(val dataset: Dataset,
 
     infosSkips.map { case (info, skips) =>
       val vectArray = vectors.get(info.id)
-      new ChunkSetReader(info, binPartition, skips, getVectors(columnIds, vectArray, info.numRows))
+      val chunkset = getVectors(columnIds, vectArray, info.numRows)
+      shardStats.numChunksQueried.increment(chunkset.length)
+      new ChunkSetReader(info, binPartition, skips, chunkset)
     }
   }
 
@@ -332,7 +327,9 @@ class TimeSeriesPartition(val dataset: Dataset,
       vectors.put(r.info.id, r.vectors.map(_.asInstanceOf[BinaryVector[_]]))
       index.add(r.info, Nil)
     }.countL.map { count =>
-      logger.trace(s"Successfully ingested $count chunks from cassandra into Memstore for partition key $binPartition")
+      shardStats.partitionsPagedFromColStore.increment()
+      shardStats.chunkIdsPagedFromColStore.increment(count)
+      logger.trace(s"Successfully ingested $count rows from cassandra into Memstore for partition key $binPartition")
       partitionLoadedFromPersistentStore = true
     }
   }

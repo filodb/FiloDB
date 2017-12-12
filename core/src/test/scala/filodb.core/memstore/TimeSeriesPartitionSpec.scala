@@ -29,7 +29,8 @@ class TimeSeriesPartitionSpec extends FunSpec with Matchers with BeforeAndAfter 
   }
 
   it("should be able to read immediately after ingesting rows") {
-    val part = new TimeSeriesPartition(dataset1, defaultPartKey, 0, colStore, bufferPool)
+    val part = new TimeSeriesPartition(dataset1, defaultPartKey, 0, colStore, bufferPool,
+      new TimeSeriesShardStats(dataset1.ref, 0))
     val data = singleSeriesReaders().take(5)
     part.ingest(data(0), 1000L)
     part.numChunks shouldEqual 1
@@ -40,7 +41,8 @@ class TimeSeriesPartitionSpec extends FunSpec with Matchers with BeforeAndAfter 
   }
 
   it("should be able to ingest new rows while flush() executing concurrently") {
-    val part = new TimeSeriesPartition(dataset1, defaultPartKey, 0, colStore, bufferPool)
+    val part = new TimeSeriesPartition(dataset1, defaultPartKey, 0, colStore, bufferPool,
+      new TimeSeriesShardStats(dataset1.ref, 0))
     val data = singleSeriesReaders().take(11)
     val minData = data.map(_.getDouble(1))
     data.take(10).zipWithIndex.foreach { case (r, i) => part.ingest(r, 1000L + i) }
@@ -96,7 +98,8 @@ class TimeSeriesPartitionSpec extends FunSpec with Matchers with BeforeAndAfter 
   // }
 
   it("should not switch buffers and flush when current chunks are empty") {
-    val part = new TimeSeriesPartition(dataset1, defaultPartKey, 0, colStore, bufferPool)
+    val part = new TimeSeriesPartition(dataset1, defaultPartKey, 0, colStore, bufferPool,
+      new TimeSeriesShardStats(dataset1.ref, 0))
     val data = singleSeriesReaders().take(11)
     data.zipWithIndex.foreach { case (r, i) => part.ingest(r, 1000L + i) }
     part.numChunks shouldEqual 1

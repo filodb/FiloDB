@@ -6,9 +6,11 @@ import scala.concurrent.Future
 import scala.concurrent.duration._
 import scala.util.Try
 
-import akka.actor.Props
+import akka.actor.{ActorRef, Props}
 import akka.pattern.ask
 import akka.util.Timeout
+import kamon.Kamon
+import kamon.trace.TraceContext
 import monix.eval.Task
 import monix.reactive.Observable
 import org.scalactic._
@@ -50,6 +52,7 @@ final class QueryActor(memStore: MemStore,
 
   implicit val scheduler = monix.execution.Scheduler(context.dispatcher)
   var shardMap = ShardMapper.default
+  val kamonTags = Map("dataset" -> dataset.ref.toString)
 
   def getColumnIDs(colStrs: Seq[String]): Seq[Types.ColumnId] Or ErrorResponse =
     dataset.colIDs(colStrs: _*).badMap(missing => UndefinedColumns(missing.toSet))
@@ -112,6 +115,7 @@ final class QueryActor(memStore: MemStore,
                     .toOr(BadQuery(s"No such combiner function $combinerName"))
 
   def handleRawQuery(q: RawQuery): Unit = {
+    val trace = Kamon.tracer.newContext("raw-query-latency", None, kamonTags)
     val RawQuery(_, colStrs, partQuery, dataQuery) = q
     val originator = sender()
     (for { colIDs      <- getColumnIDs(colStrs)
@@ -129,16 +133,17 @@ final class QueryActor(memStore: MemStore,
           originator ! QueryRawChunks(queryId, reader.info.id, bufs)
         }
         // NOTE: for some reason Monix's doOnSuccess... has the wrong timing
-        .map { Unit => originator ! QueryEndRaw(queryId) }
-        .recover { case err: Exception => originator ! QueryError(queryId, err) }
+        .map { Unit => respond(originator, QueryEndRaw(queryId), trace) }
+        .recover { case err: Exception => respond(originator, QueryError(queryId, err), trace) }
     }).recover {
-      case resp: ErrorResponse => originator ! resp
+      case resp: ErrorResponse => respond(originator, resp, trace)
     }
   }
 
   // validate high level query params, then send out lower level aggregate queries to shards/coordinators
   // gather them and form an overall response
   def validateAndGatherAggregates(q: AggregateQuery): Unit = {
+    val trace = Kamon.tracer.newContext("aggregate-query-latency", None, kamonTags)
     val originator = sender()
     (for { aggFunc    <- validateFunction(q.query.functionName)
            combinerFunc <- validateCombiner(q.query.combinerName)
@@ -163,22 +168,31 @@ final class QueryActor(memStore: MemStore,
                       }
       val combined = if (partMethods.length > 1) results.reduce(combiner.combine) else results
       combined.headL.runAsync
-              .map { agg => originator ! AggregateResponse(queryId, agg.clazz, agg.result) }
+              .map { agg => respond(originator, AggregateResponse(queryId, agg.clazz, agg.result), trace) }
               .recover { case err: Exception =>
                 logger.error(s"Error during combining: $err", err)
-                originator ! QueryError(queryId, err) }
+                respond(originator, QueryError(queryId, err), trace) }
     }).recover {
-      case resp: ErrorResponse => originator ! resp
-      case WrongNumberArguments(given, expected) => originator ! WrongNumberOfArgs(given, expected)
-      case BadArg(reason) => originator ! BadArgument(reason)
+      case resp: ErrorResponse => respond(originator, resp, trace)
+      case WrongNumberArguments(given, expected) => respond(originator, WrongNumberOfArgs(given, expected), trace)
+      case BadArg(reason) => respond(originator, BadArgument(reason), trace)
       case NoTimestampColumn =>
-        originator ! BadQuery(s"Cannot use time-based functions on dataset ${dataset.ref}")
-      case other: Any     => originator ! BadQuery(other.toString)
+        respond(originator, BadQuery(s"Cannot use time-based functions on dataset ${dataset.ref}"), trace)
+      case other: Any     => respond(originator, BadQuery(other.toString), trace)
     }
+  }
+
+  private def respond(sender: ActorRef, response: Any, trace: TraceContext) = {
+    sender ! response
+    trace.finish()
   }
 
   // lower level handling of per-shard aggregate
   def singleShardQuery(q: SingleShardQuery): Unit = {
+    // TODO currently each raw/aggregate query translates to multiple single shard queries
+
+    val trace = Kamon.tracer.newContext("single-shard-query-latency", None,
+      Map("dataset" -> dataset.ref.toString, "shard" -> q.partMethod.shard.toString))
     val originator = sender()
     (for { aggFunc    <- validateFunction(q.query.functionName)
            combinerFunc <- validateCombiner(q.query.combinerName)
@@ -186,13 +200,13 @@ final class QueryActor(memStore: MemStore,
            aggregateTask <- memStore.aggregate(dataset, qSpec, q.partMethod, q.chunkScan) }
     yield {
       aggregateTask.runAsync
-        .map { agg => originator ! agg }
-        .recover { case err: Exception => originator ! QueryError(-1, err) }
+        .map { agg => respond(originator, agg, trace) }
+        .recover { case err: Exception => respond(originator, QueryError(-1, err), trace) }
     }).recover {
-      case resp: ErrorResponse => originator ! resp
-      case WrongNumberArguments(given, expected) => originator ! WrongNumberOfArgs(given, expected)
-      case BadArg(reason) => originator ! BadArgument(reason)
-      case other: Any     => originator ! BadQuery(other.toString)
+      case resp: ErrorResponse => respond(originator, resp, trace)
+      case WrongNumberArguments(given, expected) => respond(originator, WrongNumberOfArgs(given, expected), trace)
+      case BadArg(reason) => respond(originator, BadArgument(reason), trace)
+      case other: Any     => respond(originator, BadQuery(other.toString), trace)
     }
   }
 

@@ -12,7 +12,7 @@ import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
 
-import filodb.core.{ErrorResponse, Response, Success}
+import filodb.core.{DatasetRef, ErrorResponse, Response, Success}
 import filodb.core.Types.PartitionKey
 import filodb.core.metadata.Dataset
 import filodb.core.query.PartitionKeyIndex
@@ -21,10 +21,21 @@ import filodb.memory.{BlockHolder, NativeMemoryManager, PageAlignedBlockManager}
 import filodb.memory.format.{SchemaRowReader, ZeroCopyUTF8String}
 
 
-object TimeSeriesShard {
-  val rowsIngested = Kamon.metrics.counter("memstore-rows-ingested")
-  val partitionsCreated = Kamon.metrics.counter("memstore-partitions-created")
-  val rowsSkipped  = Kamon.metrics.counter("recovery-row-skipped")
+class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
+
+  val tags = Map("shard" -> shardNum.toString, "dataset" -> dataset.toString)
+
+  val rowsIngested = Kamon.metrics.counter("memstore-rows-ingested", tags)
+  val partitionsCreated = Kamon.metrics.counter("memstore-partitions-created", tags)
+  val rowsSkipped  = Kamon.metrics.counter("recovery-row-skipped", tags)
+  val numChunksEncoded = Kamon.metrics.counter("memstore-chunks-encoded", tags)
+  val numSamplesEncoded = Kamon.metrics.counter("memstore-samples-encoded", tags)
+  val encodedBytes  = Kamon.metrics.counter("memstore-encoded-bytes-allocated", tags)
+  val partitionsPagedFromColStore = Kamon.metrics.counter("memstore-partitions-paged-in", tags)
+  val chunkIdsPagedFromColStore = Kamon.metrics.counter("memstore-chunkids-paged-in", tags)
+  val partitionsQueried = Kamon.metrics.counter("memstore-partitions-queried", tags)
+  val numChunksQueried = Kamon.metrics.counter("memstore-chunks-queried", tags)
+
 }
 
 // TODO for scalability: get rid of stale partitions?
@@ -48,7 +59,8 @@ object TimeSeriesShard {
 class TimeSeriesShard(dataset: Dataset, config: Config, val shardNum: Int, sink: ColumnStore, metastore: MetaStore)
                      (implicit val ec: ExecutionContext)
   extends StrictLogging {
-  import TimeSeriesShard._
+
+  val shardStats = new TimeSeriesShardStats(dataset.ref, shardNum)
 
   /**
     * List of all partitions in the shard stored in memory
@@ -123,14 +135,14 @@ class TimeSeriesShard(dataset: Dataset, config: Config, val shardNum: Int, sink:
       // RECOVERY: Check the watermark for the group that this record is part of.  If the offset is < watermark,
       // then do not bother with the expensive partition key comparison and ingestion.  Just skip it
       if (offset < groupWatermark(group(partKey))) {
-        rowsSkipped.increment
+        shardStats.rowsSkipped.increment
       } else {
         val partition = keyMap.getOrElse(partKey, addPartition(partKey, true))
         partition.ingest(data, offset)
         numActuallyIngested += 1
       }
     }
-    rowsIngested.increment(numActuallyIngested)
+    shardStats.rowsIngested.increment(numActuallyIngested)
     ingested += numActuallyIngested
     if (rows.nonEmpty) _offset = rows.last.offset
     _offset
@@ -222,11 +234,11 @@ class TimeSeriesShard(dataset: Dataset, config: Config, val shardNum: Int, sink:
   // and external partition key components need to yield the same hashCode.  IE, use UTF8Strings everywhere.
   def addPartition(newPartKey: SchemaRowReader, needsPersistence: Boolean): TimeSeriesPartition = {
     val binPartKey = dataset.partKey(newPartKey)
-    val newPart = new TimeSeriesPartition(dataset, binPartKey, shardNum, sink, bufferPool)
+    val newPart = new TimeSeriesPartition(dataset, binPartKey, shardNum, sink, bufferPool, shardStats)
     val newIndex = partitions.length
     keyIndex.addKey(binPartKey, newIndex)
     partitions += newPart
-    partitionsCreated.increment
+    shardStats.partitionsCreated.increment
     keyMap(binPartKey) = newPart
     partitionGroups(group(newPartKey)).set(newIndex)
     // if we are in the restore execution flow, we should not need to write this key
@@ -251,7 +263,10 @@ class TimeSeriesShard(dataset: Dataset, config: Config, val shardNum: Int, sink:
           partitions.toIterator
         }
     }
-    Observable.fromIterator(indexIt)
+    Observable.fromIterator(indexIt.map { p =>
+      shardStats.partitionsQueried.increment()
+      p
+    })
   }
 
   /**

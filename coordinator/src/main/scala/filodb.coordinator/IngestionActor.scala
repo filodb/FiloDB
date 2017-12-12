@@ -3,11 +3,12 @@ package filodb.coordinator
 import scala.collection.mutable.HashMap
 import scala.concurrent.Future
 import scala.concurrent.duration._
-import scala.util.Try
+import scala.util.{Failure, Success, Try}
 import scala.util.control.NonFatal
 
 import akka.actor.{ActorRef, Props}
 import akka.event.LoggingReceive
+import kamon.Kamon
 import monix.execution.{CancelableFuture, Scheduler}
 import monix.reactive.Observable
 import net.ceedubs.ficus.Ficus._
@@ -171,8 +172,9 @@ private[filodb] final class IngestionActor(dataset: Dataset,
    */
   private def doRecovery(shard: Int, startOffset: Long, endOffset: Long, interval: Long,
                          checkpoints: Map[Int, Long]): Future[Long] = {
-
+    val tags = Map("shard" -> shard.toString, "dataset" -> dataset.ref.toString)
     val futTry = create(shard, Some(startOffset)) map { ingestionStream =>
+      val recoveryTrace = Kamon.tracer.newContext("ingestion-recovery-trace", None, tags)
       val stream = ingestionStream.get
       clusterActor ! RecoveryInProgress(dataset.ref, shard, context.parent, 0)
 
@@ -184,10 +186,14 @@ private[filodb] final class IngestionActor(dataset: Dataset,
           off }
         .until(_ >= endOffset)
         .lastL.runAsync
-      fut.foreach { off => ingestionStream.teardown() }
-      fut.recover { case ex =>
-        ingestionStream.teardown()
-        handleError(dataset.ref, shard, ex)
+      fut.onComplete {
+        case Success(_) =>
+          ingestionStream.teardown()
+          recoveryTrace.finish()
+        case Failure(ex) =>
+          ingestionStream.teardown()
+          recoveryTrace.finishWithError(ex)
+          handleError(dataset.ref, shard, ex)
       }
       fut
     }
