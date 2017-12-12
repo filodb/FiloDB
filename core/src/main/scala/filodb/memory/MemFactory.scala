@@ -3,7 +3,6 @@ package filodb.memory
 import java.nio.ByteBuffer
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.{AtomicLong, AtomicReference}
-import java.util.concurrent.locks.ReentrantLock
 
 import scala.collection.JavaConverters._
 import scala.collection.mutable.ListBuffer
@@ -151,8 +150,6 @@ class BlockHolder(blockStore: BlockManager) extends MemFactory with StrictLoggin
   currentBlock.set(blockStore.requestBlock().get)
   blockGroup += currentBlock.get()
 
-  val lock = new ReentrantLock()
-
   protected def ensureCapacity(forSize: Long): Block = {
     logger.debug(s"BlockGroup flush - Ensuring capacity $forSize")
     if (!currentBlock.get().hasCapacity(forSize)) {
@@ -165,13 +162,7 @@ class BlockHolder(blockStore: BlockManager) extends MemFactory with StrictLoggin
   }
 
   def markUsedBlocksReclaimable(): Unit = {
-    lock.lock()
-    try {
-      blockGroup.foreach(_.markReclaimable())
-    } finally {
-      lock.unlock()
-    }
-
+    blockGroup.foreach(_.markReclaimable())
   }
 
   /**
@@ -181,26 +172,20 @@ class BlockHolder(blockStore: BlockManager) extends MemFactory with StrictLoggin
     * @return Memory which has a base, offset and a length
     */
   override def allocateWithMagicHeader(allocateSize: Int): Memory = {
-    lock.lock()
-    try {
-      //4 for magic header
-      val size = allocateSize + 4
-      val block = ensureCapacity(size)
-      block.own()
-      val preAllocationPosition = block.position()
-      val preAllocStats = block.internalBufferStats()
-      logger.debug(s"BlockGroup flush - Pre Allocation Stats $preAllocStats ")
-      val headerAddress = block.address + preAllocationPosition
-      UnsafeUtils.setInt(UnsafeUtils.ZeroPointer, headerAddress, BinaryVector.HeaderMagic)
-      val postAllocationPosition = preAllocationPosition + 4 + allocateSize
-      block.position(postAllocationPosition)
-      val postAllocStats = block.internalBufferStats()
-      logger.debug(s"BlockGroup flush - Post Allocation Stats $postAllocStats ")
-      (UnsafeUtils.ZeroPointer, headerAddress + 4, allocateSize)
-    } finally {
-      lock.unlock()
-    }
-
+    //4 for magic header
+    val size = allocateSize + 4
+    val block = ensureCapacity(size)
+    block.own()
+    val preAllocationPosition = block.position()
+    val preAllocStats = block.internalBufferStats()
+    logger.debug(s"BlockGroup flush - Pre Allocation Stats $preAllocStats ")
+    val headerAddress = block.address + preAllocationPosition
+    UnsafeUtils.setInt(UnsafeUtils.ZeroPointer, headerAddress, BinaryVector.HeaderMagic)
+    val postAllocationPosition = preAllocationPosition + 4 + allocateSize
+    block.position(postAllocationPosition)
+    val postAllocStats = block.internalBufferStats()
+    logger.debug(s"BlockGroup flush - Post Allocation Stats $postAllocStats ")
+    (UnsafeUtils.ZeroPointer, headerAddress + 4, allocateSize)
   }
 
   /**
