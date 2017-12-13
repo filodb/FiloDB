@@ -56,6 +56,8 @@ class ShardMapper(val numShards: Int) extends Serializable {
 
   def shardValues: Seq[(ActorRef, ShardStatus)] = shardMap.zip(statusMap).toBuffer
 
+  def statuses: Array[ShardStatus] = statusMap
+
   /**
    * Maps a partition hash to a shard number and a NodeCoordinator ActorRef
    */

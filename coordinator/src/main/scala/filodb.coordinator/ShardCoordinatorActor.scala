@@ -29,6 +29,7 @@ private[coordinator] final class ShardCoordinatorActor(strategy: ShardAssignment
   val shardMappers = new MutableHashMap[DatasetRef, ShardMapper]
   val members      = new MutableHashSet[ActorRef]
   val resources    = new MutableHashMap[DatasetRef, DatasetResources]
+  val metrics      = new MutableHashMap[DatasetRef, ShardHealthStats]
 
   var subscriptions = ShardSubscriptions.Empty
 
@@ -135,6 +136,7 @@ private[coordinator] final class ShardCoordinatorActor(strategy: ShardAssignment
           shardMappers(added.ref) = added.mapper
         }
 
+        metrics(added.ref) = new ShardHealthStats(added.ref, shardMappers(added.ref))
         subscriptions :+= ShardSubscription(added.ref, Set.empty)
         subscriptions.watchers foreach (subscribe(_, added.ref))
         resources(added.ref) = added.resources
@@ -267,7 +269,7 @@ private[coordinator] final class ShardCoordinatorActor(strategy: ShardAssignment
   private def sendSubscriptions(origin: ActorRef): Unit =
     origin ! subscriptions
 
-  /** Removes the dataset from subscriptions, if exists.
+  /** Removes the dataset from all subscriptions and data structures
     *
     * INTERNAL API. Idempotent.
     *
@@ -276,6 +278,9 @@ private[coordinator] final class ShardCoordinatorActor(strategy: ShardAssignment
   private def removeDataset(dataset: DatasetRef): Unit = {
     subscriptions = subscriptions - dataset
     shardMappers remove dataset
+    resources remove dataset
+    metrics(dataset).shutdown()
+    metrics remove dataset
   }
 
   /** Resets all state.
@@ -283,6 +288,9 @@ private[coordinator] final class ShardCoordinatorActor(strategy: ShardAssignment
     */
   private def reset(origin: ActorRef): Unit = {
     shardMappers.clear()
+    resources.clear()
+    metrics.values.foreach(_.shutdown())
+    metrics.clear()
     subscriptions = subscriptions.clear
     origin ! NodeProtocol.StateReset
   }
