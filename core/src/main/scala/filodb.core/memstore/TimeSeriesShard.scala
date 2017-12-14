@@ -22,7 +22,6 @@ import filodb.memory.format.{SchemaRowReader, ZeroCopyUTF8String}
 
 
 class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
-
   val tags = Map("shard" -> shardNum.toString, "dataset" -> dataset.toString)
 
   val rowsIngested = Kamon.metrics.counter("memstore-rows-ingested", tags)
@@ -31,11 +30,30 @@ class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
   val numChunksEncoded = Kamon.metrics.counter("memstore-chunks-encoded", tags)
   val numSamplesEncoded = Kamon.metrics.counter("memstore-samples-encoded", tags)
   val encodedBytes  = Kamon.metrics.counter("memstore-encoded-bytes-allocated", tags)
+  val flushesSuccessful = Kamon.metrics.counter("memstore-flushes-success", tags)
+  val flushesFailedPartWrite = Kamon.metrics.counter("memstore-flushes-failed-partition", tags)
+  val flushesFailedChunkWrite = Kamon.metrics.counter("memstore-flushes-failed-chunk", tags)
+  val flushesFailedOther = Kamon.metrics.counter("memstore-flushes-failed-other", tags)
+
+  /**
+   * These gauges are intended to be combined with one of the latest offset of Kafka partitions so we can produce
+   * stats on message lag:
+   *   kafka_ingestion_lag = kafka_latest_offset - offsetLatestInMem
+   *   memstore_ingested_to_persisted_lag = offsetLatestInMem - offsetLatestFlushed
+   *   etc.
+   *
+   * NOTE: only positive offsets will be recorded.  Kafka does not give negative offsets, but Kamon cannot record
+   * negative numbers either.
+   * The "latest" vs "earliest" flushed reflects that there are really n offsets, one per flush group.
+   */
+  val offsetLatestInMem = Kamon.metrics.gauge("shard-offset-latest-inmemory", tags)(0L)
+  val offsetLatestFlushed = Kamon.metrics.gauge("shard-offset-flushed-latest", tags)(0L)
+  val offsetEarliestFlushed = Kamon.metrics.gauge("shard-offset-flushed-earliest", tags)(0L)
+
   val partitionsPagedFromColStore = Kamon.metrics.counter("memstore-partitions-paged-in", tags)
   val chunkIdsPagedFromColStore = Kamon.metrics.counter("memstore-chunkids-paged-in", tags)
   val partitionsQueried = Kamon.metrics.counter("memstore-partitions-queried", tags)
   val numChunksQueried = Kamon.metrics.counter("memstore-chunks-queried", tags)
-
 }
 
 // TODO for scalability: get rid of stale partitions?
@@ -200,30 +218,44 @@ class TimeSeriesShard(dataset: Dataset, config: Config, val shardNum: Int, sink:
         val writeChunksFuture = sink.write(dataset, chunkSetStream)
         val combined = Future.sequence(Seq(writeChunksFuture, writePartKeyFuture))
         val taskFuture = combined flatMap {
-          case Seq(Success, Success) =>
-            metastore.writeCheckpoint(dataset.ref, shardNum, flushGroup.groupNum, flushGroup.flushWatermark)
-          case Seq(e: ErrorResponse, _) => throw FlushError (e)
-          case Seq(_, e: ErrorResponse) => throw FlushError (e)
+          case Seq(Success, Success)    => commitCheckpoint(dataset.ref, shardNum, flushGroup)
+          case Seq(e: ErrorResponse, _) => shardStats.flushesFailedChunkWrite.increment
+                                           throw FlushError (e)
+          case Seq(_, e: ErrorResponse) => shardStats.flushesFailedPartWrite.increment
+                                           throw FlushError (e)
         } map {
           case Success => blockHolder.markUsedBlocksReclaimable ()
-            Success
+                          shardStats.flushesSuccessful.increment
+                          Success
           //TODO What does it mean for the flush to fail.
           //Flush fail means 2 things. The write to the sink failed or writing the checkpoint failed.
           //We need to add logic to retry these aspects. If the retry succeeds we need mark the blocks reusable.
-          //If the retry fails, we are in a bad state. We have to discards both the buffers and blocks.
-          //Then we ingest from Kafka again.
-          case e: ErrorResponse => throw FlushError (e)
+          //If the retry fails, we are in a bad state. We have to discards both the buffers and blocks, reingest.
+          case e: ErrorResponse => shardStats.flushesFailedOther.increment
+                                   throw FlushError (e)
         }
-        Task.fromFuture (taskFuture)
+        Task.fromFuture(taskFuture)
       case true =>
         // even though there were no records for the chunkset, we want to write checkpoint anyway
         // since we should not resume from earlier checkpoint for the group
         if (flushGroup.flushWatermark > 0) // negative checkpoints are refused by Kafka
-          Task.fromFuture(
-            metastore.writeCheckpoint (dataset.ref, shardNum, flushGroup.groupNum, flushGroup.flushWatermark))
+          Task.fromFuture(commitCheckpoint(dataset.ref, shardNum, flushGroup))
         else
           Task { Success }
     }
+  }
+
+  private def commitCheckpoint(ref: DatasetRef, shardNum: Int, flushGroup: FlushGroup): Future[Response] = {
+    val fut = metastore.writeCheckpoint(ref, shardNum, flushGroup.groupNum, flushGroup.flushWatermark)
+    // Update stats
+    if (_offset >= 0) shardStats.offsetLatestInMem.record(_offset)
+    groupWatermark(flushGroup.groupNum) = flushGroup.flushWatermark
+    val maxWatermark = groupWatermark.max
+    val minWatermark = groupWatermark.min
+    if (maxWatermark >= 0) shardStats.offsetLatestFlushed.record(maxWatermark)
+    if (minWatermark >= 0) shardStats.offsetEarliestFlushed.record(minWatermark)
+
+    fut
   }
 
   // Creates a new TimeSeriesPartition, updating indexes

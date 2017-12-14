@@ -6,13 +6,11 @@ import scala.concurrent.duration._
 
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
-import kamon.Kamon
-import kamon.metric.instrument.Gauge
 import monix.execution.{CancelableFuture, Scheduler}
 import monix.reactive.Observable
 import org.jctools.maps.NonBlockingHashMapLong
 
-import filodb.core.DatasetRef
+import filodb.core.{DatasetRef, Perftools}
 import filodb.core.Types.PartitionKey
 import filodb.core.metadata.Dataset
 import filodb.core.store._
@@ -21,7 +19,6 @@ import filodb.memory.format.ZeroCopyUTF8String
 class TimeSeriesMemStore(config: Config, val sink: ColumnStore, val metastore: MetaStore)
                         (implicit val ec: ExecutionContext)
 extends MemStore with StrictLogging {
-
   import collection.JavaConverters._
 
   type Shards = NonBlockingHashMapLong[TimeSeriesShard]
@@ -36,11 +33,10 @@ extends MemStore with StrictLogging {
   def setup(dataset: Dataset, shard: Int): Unit = synchronized {
     val shards = datasets.getOrElseUpdate(dataset.ref, {
                    val shardMap = new NonBlockingHashMapLong[TimeSeriesShard](32, false)
-                   Kamon.metrics.gauge(s"num-partitions-${dataset.name}",
-                     5.seconds)(new Gauge.CurrentValueCollector {
-                      def currentValue: Long =
-                        shardMap.values.asScala.map(_.numActivePartitions).sum.toLong
-                     })
+                   val tags = Map("dataset" -> dataset.ref.toString)
+                   Perftools.pollingGauge(s"num-partitions", 5.seconds, tags) {
+                     shardMap.values.asScala.map(_.numActivePartitions).sum.toLong
+                   }
                    shardMap
                  })
     if (shards contains shard) {

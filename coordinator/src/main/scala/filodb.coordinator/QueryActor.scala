@@ -52,7 +52,7 @@ final class QueryActor(memStore: MemStore,
 
   implicit val scheduler = monix.execution.Scheduler(context.dispatcher)
   var shardMap = ShardMapper.default
-  val kamonTags = Map("dataset" -> dataset.ref.toString)
+  val kamonTags = Map("dataset" -> dataset.ref.toString, "shard" -> "multiple")
 
   def getColumnIDs(colStrs: Seq[String]): Seq[Types.ColumnId] Or ErrorResponse =
     dataset.colIDs(colStrs: _*).badMap(missing => UndefinedColumns(missing.toSet))
