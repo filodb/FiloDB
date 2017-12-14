@@ -139,6 +139,7 @@ private[coordinator] final class ShardCoordinatorActor(strategy: ShardAssignment
         metrics(added.ref) = new ShardHealthStats(added.ref, shardMappers(added.ref))
         subscriptions :+= ShardSubscription(added.ref, Set.empty)
         subscriptions.watchers foreach (subscribe(_, added.ref))
+        subscriptions.watchers foreach (_ ! CurrentShardSnapshot(added.ref, added.mapper))
         resources(added.ref) = added.resources
         logger.info(s"Dataset '${added.ref}' added, created new ${added.mapper}")
 
@@ -169,6 +170,7 @@ private[coordinator] final class ShardCoordinatorActor(strategy: ShardAssignment
       origin ! CoordinatorAdded(e.coordinator, added.shards, e.addr)
     } else {
       logger.info(s"Member $e was already added, skipping")
+      origin ! CoordinatorAdded(e.coordinator, Nil, e.addr)
     }
 
   /** Removes a Node coordinator/member, execute any resulting commands, update maps.
@@ -203,6 +205,7 @@ private[coordinator] final class ShardCoordinatorActor(strategy: ShardAssignment
   private def subscribe(e: Subscribe): Unit =
     mapperOpt(e.dataset) match {
       case Some(current) =>
+        logger.info(s"Adding ${e.subscriber} as a subscriber for dataset ${e.dataset}")
         subscribe(e.subscriber, e.dataset)
         e.subscriber ! current
       case _ =>

@@ -7,7 +7,7 @@
   </appender>
 
   <appender name="FILE" class="ch.qos.logback.core.FileAppender">
-    <file>multijvm-${multijvm.node}-test.log</file>
+    <file>logs/multijvm-${multijvm.node}-test.log</file>
 
     <!-- truncate the logfile every time we start the test -->
     <append>false</append>

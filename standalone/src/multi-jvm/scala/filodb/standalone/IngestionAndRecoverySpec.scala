@@ -5,22 +5,15 @@ import java.util.concurrent.TimeUnit
 import scala.concurrent.duration.{FiniteDuration, _}
 import scala.language.postfixOps
 
-import akka.remote.testkit.{MultiNodeConfig, MultiNodeSpec}
+import akka.remote.testkit.MultiNodeConfig
 import com.typesafe.config.{Config, ConfigFactory}
-import com.typesafe.scalalogging.StrictLogging
-import net.ceedubs.ficus.Ficus._
-import org.scalatest._
-import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
 
-import filodb.coordinator.{FilodbCluster, ShardStatus, ShardStatusNormal, ShardStatusRecovery}
-import filodb.coordinator.client.{Client, LocalClient}
-import filodb.coordinator.NodeClusterActor.{DatasetResourceSpec, IngestionSource}
-import filodb.coordinator.QueryCommands.{MostRecentTime, QueryArgs}
-import filodb.core.{DatasetRef, ErrorResponse, Success}
+import filodb.coordinator._
+import filodb.coordinator.client.Client
+import filodb.coordinator.NodeClusterActor.SubscribeShardUpdates
+import filodb.core.Success
 import filodb.core.metadata.Dataset
-import filodb.core.query.ColumnFilter
-import filodb.core.query.Filter.Equals
 import filodb.timeseries.TestTimeseriesProducer
 
 object IngestionAndRecoveryMultiNodeConfig extends MultiNodeConfig {
@@ -45,10 +38,7 @@ object IngestionAndRecoveryMultiNodeConfig extends MultiNodeConfig {
     """)
 }
 
-@Ignore
 class IngestionAndRecoverySpecMultiJvmNode1 extends IngestionAndRecoverySpec
-
-@Ignore
 class IngestionAndRecoverySpecMultiJvmNode2 extends IngestionAndRecoverySpec
 
 /**
@@ -61,44 +51,25 @@ class IngestionAndRecoverySpecMultiJvmNode2 extends IngestionAndRecoverySpec
   * kafka-topics --create --zookeeper localhost:2181 --replication-factor 1 --partitions 4 --topic timeseries-dev
   * 3. Run test using:
   * standalone/multi-jvm:testOnly filodb.standalone.IngestionAndRecoverySpec
+  *
+  * NOTE: this test will run as part of the standard test directive when MAYBE_MULTI_JVM is set in the environment
   */
-@Ignore  // ignored since automated build cannot run Kafka based tests yet
-abstract class IngestionAndRecoverySpec extends MultiNodeSpec(IngestionAndRecoveryMultiNodeConfig)
-  with Suite with StrictLogging
-  with ScalaFutures with FlatSpecLike
-  with Matchers with BeforeAndAfterAll {
-
-  override def initialParticipants: Int = roles.size
-
+abstract class IngestionAndRecoverySpec extends StandaloneMultiJvmSpec(IngestionAndRecoveryMultiNodeConfig) {
+  import akka.testkit._
   import IngestionAndRecoveryMultiNodeConfig._
 
-  // Ingestion Source section
-  val source = ConfigFactory.parseFile(new java.io.File("conf/timeseries-dev-source.conf"))
-  val dataset = DatasetRef(source.getString("dataset"))
-  val numShards = source.getInt("numshards")
-  val resourceSpec = DatasetResourceSpec(numShards, source.getInt("min-num-nodes"))
-  val sourceconfig = source.getConfig("sourceconfig")
-  val ingestionSource = source.as[Option[String]]("sourcefactory").map { factory =>
-    IngestionSource(factory, sourceconfig)
-  }.get
-  val chunkDuration = sourceconfig.getDuration("chunk-duration")
+  // Used for first start of servers on each node
+  lazy val server1 = new FiloServer()
+  lazy val server2 = new FiloServer()
+  lazy val client1 = Client.standaloneClient(system, "127.0.0.1", 2552)
+  lazy val client2 = Client.standaloneClient(system, "127.0.0.1", 2552)
 
   // Initializing a FilodbCluster to get a handle to the metastore and colstore so we can clear and validate data
   // It is not used beyond that. We never start this cluster.
-  val cluster = FilodbCluster(system)
+  val cluster = FilodbCluster(server1.cluster.system)
   val metaStore = cluster.metaStore
   val colStore = cluster.memStore.sink
   val numGroupsPerShard = cluster.settings.allConfig.getInt("filodb.memstore.groups-per-shard")
-
-  // Used for first start of servers on each node
-  lazy val server1A = new FiloServer()
-  lazy val server2A = new FiloServer()
-  lazy val client1 = Client.standaloneClient(system, "127.0.0.1", 2552)
-
-  // Used during restart of servers on each node
-  lazy val server1B = new FiloServer()
-  lazy val server2B = new FiloServer()
-  lazy val client2 = Client.standaloneClient(system, "127.0.0.1", 2552)
 
   // Test fields
   var query1Response: Double = 0
@@ -133,24 +104,28 @@ abstract class IngestionAndRecoverySpec extends MultiNodeSpec(IngestionAndRecove
   it should "be able to bring up FiloServer on node 1" in {
 
     runOn(first) {
-      server1A.start()
-      awaitAssert(server1A.cluster.isInitialized shouldBe true, 5 seconds)
+      server1.start()
+      awaitAssert(server1.cluster.isInitialized shouldBe true, 5 seconds)
     }
     enterBarrier("first-node-started")
   }
 
   it should "be able to bring up FiloServer on node 2" in {
     runOn(second) {
-      server1B.start()
-      awaitAssert(server1B.cluster.isInitialized shouldBe true, 5 seconds)
+      server1.start()
+      awaitAssert(server1.cluster.isInitialized shouldBe true, 5 seconds)
     }
     enterBarrier("second-node-started")
   }
 
   it should "be able to set up dataset successfully on node 1" in {
     runOn(first) {
-      setupDataset
-      Thread.sleep(10000) // not an easy way to check if Kafka connections have been set up. It is this for now.
+      setupDataset(client1)
+      server1.cluster.clusterActor.get ! SubscribeShardUpdates(dataset)
+      expectMsgPF(6.seconds.dilated) {
+        case CurrentShardSnapshot(ref, newMap) => info(s"Got initial ShardMap for $ref: $newMap")
+      }
+      waitAllShardsIngestionActive()
     }
     enterBarrier("dataset-set-up")
   }
@@ -207,28 +182,28 @@ abstract class IngestionAndRecoverySpec extends MultiNodeSpec(IngestionAndRecove
 
   it should "be able to shutdown nodes prior to chunks being written to persistent store" in {
     runOn(first) {
-      server1A.shutdown()
-      awaitCond(server1A.cluster.isTerminated == true, 3 seconds)
+      server1.shutdown()
+      awaitCond(server1.cluster.isTerminated == true, 3 seconds)
     }
     runOn(second) {
-      server1B.shutdown()
-      awaitCond(server1B.cluster.isTerminated == true, 3 seconds)
+      server1.shutdown()
+      awaitCond(server1.cluster.isTerminated == true, 3 seconds)
     }
     enterBarrier("both-nodes-shutdown")
   }
 
   it should "be able to restart node 1" in {
     runOn(first) {
-      server2A.start()
-      awaitAssert(server2A.cluster.isInitialized shouldBe true, 5 seconds)
+      server2.start()
+      awaitAssert(server2.cluster.isInitialized shouldBe true, 5 seconds)
     }
     enterBarrier("first-node-restarted")
   }
 
   it should "be able to restart node 2" in {
     runOn(second) {
-      server2B.start()
-      awaitAssert(server2B.cluster.isInitialized shouldBe true, 5 seconds)
+      server2.start()
+      awaitAssert(server2.cluster.isInitialized shouldBe true, 5 seconds)
       Thread.sleep(5000) // wait for coordinator and query actors to be initialized
     }
     enterBarrier("second-node-restarted")
@@ -237,7 +212,7 @@ abstract class IngestionAndRecoverySpec extends MultiNodeSpec(IngestionAndRecove
   it should "be able to validate the cluster status as recovering via CLI" in {
     runOn(first) {
       validateShardStatus(client2) {
-        case ShardStatusRecovery(p) => // ok
+        case ShardStatusRecovery(p) => true   // ok
         case _ => fail("All shards should be in shard recovery state")
       }
     }
@@ -264,33 +239,4 @@ abstract class IngestionAndRecoverySpec extends MultiNodeSpec(IngestionAndRecove
     }
     enterBarrier("shard-normal-end-of-test")
   }
-
-  def validateShardStatus(client: LocalClient)(statusValidator: ShardStatus => Unit): Unit = {
-    client.getShardMapper(dataset) match {
-      case Some(map) =>
-        map.shardValues.size shouldBe 4  // numer of shards
-        map.shardValues.foreach { case (_, status) =>
-          statusValidator(status)
-        }
-      case _ =>
-        fail(s"Unable to obtain status for dataset $dataset")
-    }
-  }
-
-  def setupDataset(): Unit = {
-    client1.setupDataset(dataset, resourceSpec, ingestionSource).foreach {
-      case e: ErrorResponse => fail(s"Errors setting up dataset $dataset: $e")
-    }
-  }
-
-  def runQuery(client: LocalClient): Double = {
-    // This is the promQL equivalent: sum(heap_usage{partition="P0"}[1000m])
-    val query = QueryArgs("sum", "value", List(), MostRecentTime(60000000), "simple", List())
-    val filters = Vector(ColumnFilter("partition", Equals("P0")), ColumnFilter("__name__", Equals("heap_usage")))
-    val response1 = client.partitionFilterAggregate(dataset, query, filters)
-    val answer = response1.elements.head.asInstanceOf[Double]
-    info(s"Query Response was: $answer")
-    answer.asInstanceOf[Double]
-  }
-
 }

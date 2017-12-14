@@ -54,7 +54,7 @@ final class NodeGuardian(extension: FilodbCluster,
     case CreateCoordinator         => createCoordinator(sender())
     case e: CreateClusterSingleton => createProxy(e, sender())
     case e: ShardEvent             => shardEvent(e)
-    case s: CurrentShardSnapshot   => shardMappers(s.ref) = s.map
+    case s: CurrentShardSnapshot   => setShardMap(s)
     case e: ShardSubscriptions     => subscriptions = e
     case GetShardMapsSubscriptions => getMapsSubscriptions(sender())
     case e: ActorLifecycle         => // coming in different PR
@@ -67,14 +67,21 @@ final class NodeGuardian(extension: FilodbCluster,
       extension._isJoined.set(true)
     }
 
+  private def setShardMap(s: CurrentShardSnapshot): Unit = {
+    logger.debug(s"Guardian setting shardmap for ref ${s.ref}")
+    shardMappers(s.ref) = s.map
+  }
+
   private def getMapsSubscriptions(requestor: ActorRef): Unit =
     requestor ! MapsAndSubscriptions(shardMappers, subscriptions)
 
-  private def shardEvent(e: ShardEvent): Unit =
+  private def shardEvent(e: ShardEvent): Unit = {
+    logger.debug(s"Updating shard mapper for ref ${e.ref} with event $e")
     for {
       map <- shardMappers.get(e.ref)
       if map.updateFromEvent(e).isSuccess
     } shardMappers(e.ref) = map
+  }
 
   /** Idempotent. Cli does not start metrics. */
   private def startKamon(role: ClusterRole, requester: ActorRef): Unit = {

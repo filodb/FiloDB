@@ -51,7 +51,6 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
   val settings = new FilodbSettings(config)
   val ingesters = new HashMap[DatasetRef, ActorRef]
   var clusterActor: Option[ActorRef] = None
-  var shardActor: Option[ActorRef] = None
 
   // The thread pool used by Monix Observables/reactive ingestion
   val ingestScheduler = Scheduler.computation(config.getInt("ingestion-threads"))
@@ -111,16 +110,16 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
     Serializer.putPartitionSchema(dataset.partitionBinSchema)
     Serializer.putDataSchema(dataset.dataBinSchema)
 
-    shardActor match {
-      case Some(shardStatus) =>
-        val props = IngestionActor.props(dataset, memStore, source, shardStatus)(ingestScheduler)
+    clusterActor match {
+      case Some(nca) =>
+        val props = IngestionActor.props(dataset, memStore, source, nca)(ingestScheduler)
         val ingester = context.actorOf(props, s"$Ingestion-${dataset.name}")
         context.watch(ingester)
         ingesters(ref) = ingester
 
         logger.info(s"Creating QueryActor for dataset $ref")
         val queryRef = context.actorOf(QueryActor.props(memStore, dataset), s"$Query-$ref")
-        shardStatus ! ShardSubscriptions.Subscribe(queryRef, ref)
+        nca.tell(SubscribeShardUpdates(ref), queryRef)
 
         // TODO: Send status update to cluster actor
         logger.info(s"Coordinator set up for ingestion and querying for $ref.")
@@ -175,7 +174,6 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
   private def registered(e: CoordinatorRegistered): Unit = {
     logger.info(s"${e.clusterActor} said hello!")
     clusterActor = Some(e.clusterActor)
-    shardActor = Some(e.shardActor)
   }
 
   /** Forwards shard commands to the ingester for the given dataset.

@@ -11,7 +11,7 @@ trait BaseActor extends Actor with StrictLogging {
   logger.info(s"Starting class ${this.getClass.getName}, actor $self with path ${self.path}")
 
   override def preStart(): Unit = {
-    logger.info("Starting.")
+    logger.debug("In preStart()")
   }
 
   override def postStop(): Unit = {

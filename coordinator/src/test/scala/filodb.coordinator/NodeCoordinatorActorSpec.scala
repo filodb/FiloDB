@@ -4,7 +4,7 @@ import java.net.InetAddress
 
 import scala.concurrent.duration._
 
-import akka.actor.{ActorRef, AddressFromURIString, PoisonPill, Props}
+import akka.actor.{Actor, ActorRef, AddressFromURIString, PoisonPill, Props}
 import akka.pattern.gracefulStop
 import com.typesafe.config.ConfigFactory
 import org.scalatest.BeforeAndAfterEach
@@ -54,6 +54,12 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
 
   val strategy = new DefaultShardAssignmentStrategy
   val shardActor = system.actorOf(Props(new ShardCoordinatorActor(new DefaultShardAssignmentStrategy)), ShardName)
+  val clusterActor = system.actorOf(Props(new Actor {
+    def receive: Receive = {
+      case SubscribeShardUpdates(ref) => shardActor ! ShardSubscriptions.Subscribe(sender(), ref)
+      case e: ShardEvent              => shardActor.forward(e)
+    }
+  }))
   var coordinatorActor: ActorRef = _
   var probe: TestProbe = _
   var shardMap = new ShardMapper(1)
@@ -73,7 +79,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
 
     shardActor ! AddMember(coordinatorActor, selfAddress)
     expectMsg(CoordinatorAdded(coordinatorActor, Seq.empty, selfAddress))
-    coordinatorActor ! CoordinatorRegistered(self, shardActor)
+    coordinatorActor ! CoordinatorRegistered(clusterActor)
 
     probe = TestProbe()
   }

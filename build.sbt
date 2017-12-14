@@ -45,6 +45,7 @@ lazy val kafka = project
   .in(file("kafka"))
   .settings(name := "filodb-kafka")
   .settings(commonSettings: _*)
+  .settings(multiJvmMaybeSettings: _*)
   .settings(kafkaSettings: _*)
   .settings(itSettings: _*)
   .settings(assemblySettings: _*)
@@ -71,7 +72,7 @@ lazy val http = project
 lazy val standalone = project
   .in(file("standalone"))
   .settings(commonSettings: _*)
-  .settings(multiJvmSettings: _*)
+  .settings(multiJvmMaybeSettings: _*)
   .settings(assemblySettings: _*)
   .settings(libraryDependencies ++= standaloneDeps)
   .dependsOn(core, coordinator % "compile->compile; test->test", cassandra, kafka, http, bootstrapper,
@@ -394,6 +395,8 @@ lazy val multiJvmSettings = SbtMultiJvm.multiJvmSettings ++ Seq(
       testResults.summaries ++ multiNodeResults.summaries)
   }
 )
+
+lazy val multiJvmMaybeSettings = if (sys.env.contains("MAYBE_MULTI_JVM")) multiJvmSettings else Nil
 
 // Fork a separate JVM for each test, instead of one for all tests in a module.
 // This is necessary for Spark tests due to initialization, for example

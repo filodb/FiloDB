@@ -29,7 +29,7 @@ object FilodbCluster extends ExtensionId[FilodbCluster] with ExtensionIdProvider
 /**
   * Coordinator Extension Id and factory for creating a basic Coordinator extension.
   */
-final class FilodbCluster(system: ExtendedActorSystem) extends Extension with StrictLogging {
+final class FilodbCluster(val system: ExtendedActorSystem) extends Extension with StrictLogging {
 
   import akka.pattern.ask
 

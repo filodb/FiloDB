@@ -98,12 +98,9 @@ class LocalClient(val nodeCoordinator: ActorRef) extends AllClientOps {
 
   def sendAllIngestors(msg: Any): Unit = { nodeCoordinator ! msg }
 
-  private var clusterRef: Option[ActorRef] = None
-  def clusterActor: Option[ActorRef] = clusterRef.orElse {
-    val newRef = askCoordinator(MiscCommands.GetClusterActor) { case x: Option[ActorRef] @unchecked => x }
-    clusterRef = newRef
-    newRef
-  }
+  // Always get the cluster actor ref anew.  Cluster actor may move around the cluster!
+  def clusterActor: Option[ActorRef] =
+    askCoordinator(MiscCommands.GetClusterActor) { case x: Option[ActorRef] @unchecked => x }
 }
 
 /**

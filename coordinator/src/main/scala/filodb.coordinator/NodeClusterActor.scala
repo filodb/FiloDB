@@ -13,12 +13,6 @@ import filodb.core.metadata.Dataset
 import filodb.core.store.{IngestionConfig, MetaStore}
 
 object NodeClusterActor {
-
-  /** Lets each NodeCoordinator know about the `clusterActor` so it can send it updates.
-    * Sent from ClusterActor upon joining.
-    */
-  final case class CoordinatorRegistered(clusterActor: ActorRef, shardActor: ActorRef)
-
   sealed trait ClusterActorEvent
 
   // Forwards message to one random recipient that has the given role.  Any replies go back to originator.
@@ -81,8 +75,6 @@ object NodeClusterActor {
   // Returns CurrentShardSnapshot or DatasetUnknown
   final case class GetShardMap(ref: DatasetRef)
 
-  private[coordinator] final case class AddCoordinator(roles: Set[String], addr: Address, coordinator: ActorRef)
-
   /** Registers sending actor to receive `ShardMapUpdate` whenever it changes. DeathWatch
     * will be used on the sending actors to watch for updates. On subscribe, will
     * immediately send back the current state via a `ShardMapUpdate` message.
@@ -90,6 +82,16 @@ object NodeClusterActor {
     * be sent after RegisterDataset.
     */
   final case class SubscribeShardUpdates(ref: DatasetRef)
+
+  /**
+   * INTERNAL MESSAGES
+   */
+  private[coordinator] final case class AddCoordinator(roles: Set[String], addr: Address, coordinator: ActorRef)
+  /** Lets each NodeCoordinator know about the `clusterActor` so it can send it updates.
+    * Would not be necessary except coordinator currently is created before the clusterActor.
+    */
+  private[coordinator] final case class CoordinatorRegistered(clusterActor: ActorRef)
+
 
   // Only use for testing, in before {} blocks
   private[coordinator] case object EverybodyLeave
@@ -271,7 +273,7 @@ private[filodb] class NodeClusterActor(cluster: FilodbCluster,
                                if (initDatasets.isEmpty) self ! RecoverShardStates
     case RecoverShardStates => logger.info(s"Recovery of ingestion configs/datasets complete")
                                sendShardStateRecoveryMessage()
-                               context.become(shardMapRecoveryHandler orElse subscribeAllHandler)
+                               context.become(shardMapRecoveryHandler orElse subscriptionHandler)
   }
 
   def shardMapRecoveryHandler: Receive = LoggingReceive {
@@ -287,14 +289,15 @@ private[filodb] class NodeClusterActor(cluster: FilodbCluster,
 
   def shardMapHandler: Receive = LoggingReceive {
     case e: AddCoordinator        => addCoordinator(e)
-    case e: SubscribeShardUpdates => subscribe(e.ref, sender())
     case e: SetupDataset          => setupDataset(e, sender())
     case e: DatasetAdded          => datasetSetup(e)
     case e: CoordinatorAdded      => coordinatorAdded(e)
     case e: CoordinatorRemoved    => coordinatorRemoved(e)
   }
 
-  def subscribeAllHandler: Receive = LoggingReceive {
+  def subscriptionHandler: Receive = LoggingReceive {
+    case e: ShardEvent            => shardActor.forward(e)
+    case e: SubscribeShardUpdates => subscribe(e.ref, sender())
     case SubscribeAll             => shardActor.forward(SubscribeAll)
   }
 
@@ -354,14 +357,14 @@ private[filodb] class NodeClusterActor(cluster: FilodbCluster,
   /** Called after a new coordinator is added and shard assignment strategy has
     * added the node and returns updates.
     *
-    * `CoordinatorRegistered` should not be changed to contain `ShardsAssigned`,
-    * even though they are now known at this time, to keep tests simpler for now.
-    * Can consider optimization later.
+    * NOTE: we send not our own ActorRef, but rather that of the cluster singleton proxy.
+    * This enables coordinator/IngestionActor shard event updates to be more resilient.
+    * The proxy buffers messages if the singleton is not available, and is a stable ref if the singleton moves.
     *
     * INTERNAL API. Idempotent.
     */
   private def coordinatorAdded(e: CoordinatorAdded): Unit = {
-    e.coordinator ! CoordinatorRegistered(self, shardActor)
+    e.coordinator ! CoordinatorRegistered(cluster.clusterActor.get)
 
     // NOTE: it's important that memberRefs happens here, after CoordinatorRegistered is sent out, and not before
     // otherwise a race condition happens where SetupDataset could be sent to coords before it gets hello, and then
@@ -439,6 +442,6 @@ private[filodb] class NodeClusterActor(cluster: FilodbCluster,
   }
 
   def normalReceive: Receive = membershipHandler orElse shardMapHandler orElse infoHandler orElse
-                                  routerEvents orElse subscribeAllHandler
-  def receive: Receive = datasetInitHandler orElse subscribeAllHandler
+                                  routerEvents orElse subscriptionHandler
+  def receive: Receive = datasetInitHandler orElse subscriptionHandler
 }

@@ -1,0 +1,1 @@
+-Dmultijvm.node=sing-fail-node2 -Dfilodb.http.bind-port=0 -Dconfig.file=conf/timeseries-filodb-server.conf -Dlogback.configurationFile=logback-multijvm-test.xml

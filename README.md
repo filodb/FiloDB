@@ -679,6 +679,12 @@ Please go to the [architecture](doc/architecture.md) doc.
 
 Run the tests with `sbt test`, or for continuous development, `sbt ~test`.  Noisy cassandra logs can be seen in `filodb-test.log`.
 
+Multi-JVM tests output a separate log file per process, in the `logs` dir under `multijvm-nodeN-test.log`.
+
+Some useful environment vars:
+* `LOG_AKKA_TO_CONSOLE` - define this to have noisy Akka Cluster logs output to the console
+* `MAYBE_MULTI_JVM` - enable multi-JVM tests for the Kafka and Standalone modules.  These require both Cassandra and Kafka to be up and running.
+
 To run benchmarks, from within SBT:
 
     cd jmh

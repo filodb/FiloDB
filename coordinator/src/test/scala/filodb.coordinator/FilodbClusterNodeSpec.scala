@@ -26,7 +26,7 @@ class FilodbClusterNodeSpec extends RunnableSpec with ScalaFutures {
 
       implicit val system = app.system
       val probe = TestProbe()
-      probe.send(coordinatorActor, CoordinatorRegistered(clusterActor, TestProbe().ref))
+      probe.send(coordinatorActor, CoordinatorRegistered(clusterActor))
       probe.send(coordinatorActor, MiscCommands.GetClusterActor)
       probe.expectMsgPF() {
         case Some(ref: ActorRef) => ref shouldEqual clusterActor
@@ -78,7 +78,7 @@ class FilodbClusterNodeRecoverySpec extends RunnableSpec with ScalaFutures {
       // recover from Guardian
       val clusterActor = app.clusterActor
 
-      probe.send(coordinatorActor, CoordinatorRegistered(clusterActor, TestProbe().ref))
+      probe.send(coordinatorActor, CoordinatorRegistered(clusterActor))
       probe.send(coordinatorActor, MiscCommands.GetClusterActor)
       probe.expectMsgPF() {
         case Some(ref: ActorRef) => ref shouldEqual clusterActor

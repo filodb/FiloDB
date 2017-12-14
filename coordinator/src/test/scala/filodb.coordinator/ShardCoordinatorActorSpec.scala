@@ -107,7 +107,10 @@ class ShardCoordinatorCumulativeStateSpec extends ShardCoordinatorSpec {
       // there are two times ShardAssignmentStrategy.addShards is called:
       // on AddMember and AddDataset by NodeClusterActor
       shardActor ! AddMember(localCoordinator, localAddress)
-      expectNoMsg()
+      expectMsgPF() {
+        case CoordinatorAdded(coordinator, Nil, _) =>
+          coordinator shouldEqual localCoordinator
+      }
 
       shardActor ! GetSnapshot(dataset1)
       expectMsgPF() {
