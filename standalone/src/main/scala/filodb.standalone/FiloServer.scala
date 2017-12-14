@@ -2,7 +2,6 @@ package filodb.standalone
 
 import scala.util.control.NonFatal
 
-import akka.actor.ActorSystem
 import akka.cluster.Cluster
 import com.typesafe.config.Config
 import net.ceedubs.ficus.Ficus._
@@ -34,37 +33,30 @@ import filodb.http.FiloHttpServer
  * }}}
  */
 class FiloServer extends FilodbClusterNode {
+
   override val role = ClusterRole.Server
 
-  val settings = new FilodbSettings()
-
-  override lazy val system = ActorSystem(systemName, settings.allConfig)
-
-  override lazy val cluster = FilodbCluster(system)
+  lazy val config = cluster.settings.config
 
   // Now, initialize any datasets using in memory MetaStore.
   // This is a hack until we are able to use CassandraMetaStore for standalone.  It is also a
   // convenience for users to get up and running quickly without setting up cassandra.
   val client = new LocalClient(coordinatorActor)
 
-  val config = settings.config
-
   def bootstrap(akkaCluster: Cluster): Unit = {
     val bootstrapper = AkkaBootstrapper(akkaCluster)
-    bootstrapper.bootstrap()
+    val seeds = bootstrapper.bootstrap()
     val filoHttpServer = new FiloHttpServer(akkaCluster.system)
     filoHttpServer.start(bootstrapper.getAkkaHttpRoute())
   }
 
   def start(): Unit = {
     try {
-      import settings._
       cluster.kamonInit(role)
       coordinatorActor
-      scala.concurrent.Await.result(metaStore.initialize(), InitializationTimeout)
+      scala.concurrent.Await.result(metaStore.initialize(), cluster.settings.InitializationTimeout)
       bootstrap(cluster.cluster)
-      cluster.clusterSingleton(roleName, withManager = true)
-      cluster._isInitialized.set(true)
+      cluster.clusterSingleton(role, None)
 
 //      settings.DatasetDefinitions.foreach { case (datasetName, datasetConf) =>
 //        createDatasetFromConfig(datasetName, datasetConf)
@@ -73,10 +65,11 @@ class FiloServer extends FilodbClusterNode {
       // if there is an error in the initialization, we need to fail fast so that the process can be rescheduled
       case NonFatal(e) =>
         logger.error("Could not initialize server", e)
-        cluster.cluster.system.terminate()
+        shutdown()
     }
   }
 
+  // Design: unused - why is it here still? why was FiloServer made a class and main separate?
   def createDatasetFromConfig(datasetName: String, config: Config): Unit = {
     val partColumns = config.as[Seq[String]]("partition-columns")
     val dataColumns = config.as[Seq[String]]("data-columns")
@@ -93,11 +86,6 @@ class FiloServer extends FilodbClusterNode {
     shutdown()
     sys.exit(code)
   }
-
-  /** To ensure proper shutdown in case `shutdownAndExit` is not called. */
-  Runtime.getRuntime.addShutdownHook(new Thread() {
-    override def run(): Unit = shutdown()
-  })
 }
 
 object FiloServer {

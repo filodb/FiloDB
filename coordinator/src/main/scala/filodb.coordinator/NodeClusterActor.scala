@@ -3,6 +3,7 @@ package filodb.coordinator
 import scala.collection.mutable.{HashMap, HashSet}
 
 import akka.actor._
+import akka.cluster.Cluster
 import akka.cluster.ClusterEvent._
 import akka.event.LoggingReceive
 import akka.util.Timeout
@@ -13,6 +14,7 @@ import filodb.core.metadata.Dataset
 import filodb.core.store.{IngestionConfig, MetaStore}
 
 object NodeClusterActor {
+
   sealed trait ClusterActorEvent
 
   // Forwards message to one random recipient that has the given role.  Any replies go back to originator.
@@ -97,18 +99,20 @@ object NodeClusterActor {
   private[coordinator] case object EverybodyLeave
   private[coordinator] case object RecoverShardStates
 
+  private[coordinator] final case class ActorArgs(singletonProxy: ActorRef,
+                                                             guardian: ActorRef,
+                                                             watcher: Option[ActorRef])
   /**
     * Creates a new NodeClusterActor.
     *
-    * @param cluster              a FilodbCluster instance
-    * @param nodeCoordRole        String, for the role containing the NodeCoordinatorActor or ingestion nodes
+    * @param nodeCoordRole String, for the role containing the NodeCoordinatorActor or ingestion nodes
     */
-  def props(cluster: FilodbCluster,
+  def props(settings: FilodbSettings,
             nodeCoordRole: String,
             metaStore: MetaStore,
             assignmentStrategy: ShardAssignmentStrategy,
-            watcher: ActorRef): Props =
-    Props(new NodeClusterActor(cluster, nodeCoordRole, metaStore, assignmentStrategy, watcher))
+            actors: ActorArgs): Props =
+    Props(new NodeClusterActor(settings, nodeCoordRole, metaStore, assignmentStrategy, actors))
 
   class RemoteAddressExtension(system: ExtendedActorSystem) extends Extension {
     def address: Address = system.provider.getDefaultAddress
@@ -153,19 +157,20 @@ object NodeClusterActor {
  * - It can notify when some address joins
  * - It tracks dataset shard assignments and coordinates new dataset setup
  */
-private[filodb] class NodeClusterActor(cluster: FilodbCluster,
+private[filodb] class NodeClusterActor(settings: FilodbSettings,
                                        nodeCoordRole: String,
                                        metaStore: MetaStore,
                                        assignmentStrategy: ShardAssignmentStrategy,
-                                       watcher: ActorRef
+                                       actors: NodeClusterActor.ActorArgs
                                       ) extends NamingAwareBaseActor {
-  import cluster.settings.ResolveActorTimeout
-  import akka.pattern.{ask, pipe}
 
-  import ActorName._
-  import NodeClusterActor._
+  import akka.pattern.{ask, pipe}
+  import ActorName._, NodeClusterActor._, ShardSubscriptions._
   import ShardAssignmentStrategy.DatasetShards
-  import ShardSubscriptions._
+  import actors._
+  import settings._
+
+  val cluster = Cluster(context.system)
 
   val memberRefs = new HashMap[Address, ActorRef]
   val roleToCoords = new HashMap[String, Set[ActorRef]]().withDefaultValue(Set.empty[ActorRef])
@@ -182,8 +187,7 @@ private[filodb] class NodeClusterActor(cluster: FilodbCluster,
   // subscribe to cluster changes, re-subscribe when restart
   override def preStart(): Unit = {
     super.preStart()
-    watcher ! NodeProtocol.PreStart(self.path)
-
+    actors.watcher foreach(_ ! NodeProtocol.PreStart(self.path))
     // Restore previously set up datasets and shards.  This happens in a very specific order so that
     // shard and dataset state can be recovered correctly.  First all the datasets are set up.
     // Then shard state is recovered, and finally cluster membership events are replayed.
@@ -201,13 +205,13 @@ private[filodb] class NodeClusterActor(cluster: FilodbCluster,
 
   override def postStop(): Unit = {
     super.postStop()
-    cluster.cluster.unsubscribe(self)
-    watcher ! NodeProtocol.PostStop(self.path)
+    cluster.unsubscribe(self)
+    watcher foreach(_ ! NodeProtocol.PostStop(self.path))
   }
 
   override def preRestart(reason: Throwable, message: Option[Any]): Unit = {
     super.preRestart(reason, message)
-    watcher ! NodeProtocol.PreRestart(self.path, reason)
+    watcher foreach(_ ! NodeProtocol.PreRestart(self.path, reason))
   }
 
   private def withRole(role: String, requester: ActorRef)(f: Set[ActorRef] => Unit): Unit =
@@ -282,7 +286,7 @@ private[filodb] class NodeClusterActor(cluster: FilodbCluster,
       shardActor ! RecoverSubscriptions(ms.subscriptions)
       // NOW, subscribe to cluster membership state and then switch to normal receiver
       logger.info("Now subscribing to cluster events and switching to normalReceive")
-      cluster.cluster.subscribe(self, initialStateMode = InitialStateAsEvents,
+      cluster.subscribe(self, initialStateMode = InitialStateAsEvents,
                                 classOf[MemberEvent])
       context.become(normalReceive)
   }
@@ -303,7 +307,7 @@ private[filodb] class NodeClusterActor(cluster: FilodbCluster,
 
   /** Send a message to recover the current shard maps and subscriptions from the Guardian of local node. */
   private def sendShardStateRecoveryMessage(): Unit =
-    cluster.guardian ! NodeProtocol.GetShardMapsSubscriptions
+    guardian ! NodeProtocol.GetShardMapsSubscriptions
 
   /** If the dataset is registered as a subscription, a `CurrentShardSnapshot` is sent
     * to the subscriber, otherwise a `DatasetUnknown` is returned.
@@ -364,7 +368,7 @@ private[filodb] class NodeClusterActor(cluster: FilodbCluster,
     * INTERNAL API. Idempotent.
     */
   private def coordinatorAdded(e: CoordinatorAdded): Unit = {
-    e.coordinator ! CoordinatorRegistered(cluster.clusterActor.get)
+    e.coordinator ! CoordinatorRegistered(singletonProxy)
 
     // NOTE: it's important that memberRefs happens here, after CoordinatorRegistered is sent out, and not before
     // otherwise a race condition happens where SetupDataset could be sent to coords before it gets hello, and then
@@ -425,7 +429,7 @@ private[filodb] class NodeClusterActor(cluster: FilodbCluster,
       }
       else if (everybodyLeftSender.isEmpty) {
         logger.info(s"Removing all members from cluster...")
-        cluster.state.members.map(_.address).foreach(cluster.cluster.leave)
+        cluster.state.members.map(_.address).foreach(cluster.leave)
         everybodyLeftSender = Some(requestor)
       } else {
         logger.warn(s"Ignoring EverybodyLeave, somebody already sent it")
@@ -437,7 +441,7 @@ private[filodb] class NodeClusterActor(cluster: FilodbCluster,
       datasets.clear()
       sources.clear()
 
-      implicit val timeout: Timeout = cluster.settings.DefaultTaskTimeout
+      implicit val timeout: Timeout = DefaultTaskTimeout
       (shardActor ? NodeProtocol.ResetState) pipeTo origin
   }
 

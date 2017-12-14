@@ -3,7 +3,7 @@ package filodb.spark
 import scala.concurrent.Await
 import scala.concurrent.duration._
 
-import akka.actor.{ActorSystem, AddressFromURIString}
+import akka.actor.AddressFromURIString
 import akka.pattern.ask
 import akka.util.Timeout
 import com.typesafe.config.{Config, ConfigFactory}
@@ -34,20 +34,13 @@ private[filodb] trait FilodbSparkCluster extends FilodbClusterNode {
   // When you have DSE set up on mutlinodes(each node is assigned it's own ip address) in one physical machine,
   // it's hard to identify Memtable WAL files created for each node. So to address this issue require to pass
   // Hostname to the akka configuration
-  lazy val settings = {
+  override protected lazy val roleConfig = {
     val port = systemConfig.as[Option[Int]](s"filodb.spark.$role.port").getOrElse(0)
     val host = MetaStoreSync.sparkHost
-    val ourConf = ConfigFactory.parseString(s"""
-      akka.cluster.roles=["$roleName"]
+    ConfigFactory.parseString(s"""
       akka.remote.netty.tcp.hostname=$host
       akka.remote.netty.tcp.port=$port""")
-
-    new FilodbSettings(ourConf)
   }
-
-  override lazy val system = ActorSystem(systemName, settings.allConfig)
-
-  override lazy val cluster = FilodbCluster(system)
 
   var _config: Option[Config] = None
 
@@ -55,8 +48,6 @@ private[filodb] trait FilodbSparkCluster extends FilodbClusterNode {
   def config: Config = _config.get
 
   lazy val memStore = cluster.memStore
-
-  lazy val clusterActor = cluster.clusterSingleton(roleName, withManager = true)
 
 }
 
@@ -72,7 +63,7 @@ object FiloDriver extends FilodbSparkCluster {
   // It also initializes all executors.
   private[filodb] def init(context: SparkContext): Unit = synchronized {
     if (_config.isEmpty) {
-      import cluster.settings._
+      import cluster.settings.InitializationTimeout
 
       logger.info("Initializing FiloDriver clustering/coordination...")
       val filoConfig = configFromSpark(context)
@@ -93,7 +84,6 @@ object FiloDriver extends FilodbSparkCluster {
       // Because the clusterActor can only be instantiated on an executor/FiloDB node, this works by
       // waiting for the clusterActor to respond, thus guaranteeing cluster working correctly
       Await.result(FiloExecutor.clusterActor ? NodeClusterActor.GetRefs("executor"), InitializationTimeout)
-      cluster._isInitialized.set(true)
       _config = Some(finalConfig)
     }
   }
@@ -109,17 +99,15 @@ object FiloDriver extends FilodbSparkCluster {
                                                 k.replace("spark.filodb.", "filodb.") -> v
                                             }
     ConfigFactory.parseMap(filoOverrides.toMap.asJava)
-                 .withFallback(settings.config) // the filodb config
+                 .withFallback(cluster.settings.config) // the filodb config
   }
-
-  Runtime.getRuntime.addShutdownHook(new Thread() {
-    override def run(): Unit = shutdown()
-  })
 }
 
 object FiloExecutor extends FilodbSparkCluster {
 
   override val role = ClusterRole.Executor
+
+  lazy val clusterActor = cluster.clusterSingleton(role, None)
 
   def initAllExecutors(filoConfig: Config, context: SparkContext, numPartitions: Int = 1000): Unit = {
       logger.info(s"Initializing executors using $numPartitions partitions...")
@@ -145,7 +133,6 @@ object FiloExecutor extends FilodbSparkCluster {
       coordinatorActor // create it
       cluster.join(addr)
       clusterActor
-      cluster._isInitialized.set(true)
     }
   }
 

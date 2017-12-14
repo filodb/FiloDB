@@ -2,11 +2,14 @@ package filodb.coordinator
 
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
 
+import scala.collection.immutable
 import scala.concurrent.Await
 
 import akka.actor._
-import akka.cluster.{Cluster, ClusterEvent}
+import akka.cluster._
+import akka.cluster.ClusterEvent._
 import akka.util.Timeout
+import com.typesafe.config.{Config, ConfigFactory}
 import com.typesafe.scalalogging.StrictLogging
 import monix.execution.Scheduler
 import monix.execution.misc.NonFatal
@@ -14,7 +17,7 @@ import monix.execution.misc.NonFatal
 import filodb.core.store.MetaStore
 
 /** The base Coordinator Extension implementation providing standard ActorSystem startup.
-  * The coordinator module is responsible cluster coordination and node membership information.
+  * The coordinator module is responsible for cluster coordination and node membership information.
   * Changes to the cluster are events that can be subscribed to.
   * Commands to operate the cluster for managmement are provided based on role/authorization.
   *
@@ -31,38 +34,26 @@ object FilodbCluster extends ExtensionId[FilodbCluster] with ExtensionIdProvider
   */
 final class FilodbCluster(val system: ExtendedActorSystem) extends Extension with StrictLogging {
 
-  import akka.pattern.ask
-
   import ActorName.{NodeGuardianName => guardianName}
   import NodeProtocol._
+  import akka.pattern.ask
 
   val settings = new FilodbSettings(system.settings.config)
   import settings._
 
   implicit lazy val timeout: Timeout = DefaultTaskTimeout
 
+  private[coordinator] val _isInitialized = new AtomicBoolean(false)
+
+  private val _isJoined = new AtomicBoolean(false)
+
   private val _isTerminated = new AtomicBoolean(false)
 
-  private val _isTerminating = new AtomicBoolean(false)
-
-  private[filodb] val _isInitialized = new AtomicBoolean(false)
-
-  private[filodb] val _isJoined = new AtomicBoolean(false)
+  private val _cluster = new AtomicReference[Option[Cluster]](None)
 
   private val _coordinatorActor = new AtomicReference[Option[ActorRef]](None)
 
   private val _clusterActor = new AtomicReference[Option[ActorRef]](None)
-
-  private[filodb] lazy val cluster = {
-    val _cluster = Cluster(system)
-    logger.info(s"Cluster node starting on ${_cluster.selfAddress}")
-    _cluster
-  }
-
-  lazy val selfAddress = cluster.selfAddress
-
-  /** The address including a `uid` of this cluster member. */
-  lazy val selfUniqueAddress = cluster.selfUniqueAddress
 
   implicit lazy val ec = Scheduler.Implicits.global
   lazy val ioPool = Scheduler.io(IOPoolName)
@@ -74,22 +65,47 @@ final class FilodbCluster(val system: ExtendedActorSystem) extends Extension wit
 
   lazy val memStore = factory.memStore
 
-  lazy val assignmentStrategy = new DefaultShardAssignmentStrategy
-
   /** The supervisor creates nothing unless specific tasks are requested of it.
     * All actions are idempotent. It manages the underlying lifecycle of all node actors.
     */
   private[coordinator] lazy val guardian = system.actorOf(NodeGuardian.props(
-    this, cluster, metaStore, memStore, assignmentStrategy), guardianName)
+    settings, metaStore, memStore, new DefaultShardAssignmentStrategy), guardianName)
+
+  def isInitialized: Boolean = _isInitialized.get
+
+  def isTerminated: Boolean = _isTerminated.get
 
   /** Idempotent. */
   def kamonInit(role: ClusterRole): ActorRef =
     Await.result((guardian ? CreateTraceLogger(role)).mapTo[TraceLoggerRef], DefaultTaskTimeout).ref
 
+  def coordinatorActor: ActorRef = _coordinatorActor.get.getOrElse {
+    val actor = Await.result((guardian ? CreateCoordinator).mapTo[CoordinatorRef], DefaultTaskTimeout).ref
+    logger.info(s"NodeCoordinatorActor created: $actor")
+    actor
+  }
+
+  def cluster: Cluster = _cluster.get.getOrElse {
+    val c = Cluster(system)
+    _cluster.set(Some(c))
+    c.registerOnMemberUp(startListener())
+    c
+  }
+
+  def selfAddress: Address = cluster.selfAddress
+
+  /** The address including a `uid` of this cluster member. */
+  def selfUniqueAddress: UniqueAddress = cluster.selfUniqueAddress
+
+  logger.info(s"Filodb cluster node starting on $selfAddress")
+
+  /** Current snapshot state of the cluster. */
+  def state: ClusterEvent.CurrentClusterState = cluster.state
+
   /** Join the cluster using the cluster selfAddress. Idempotent.
     * INTERNAL API.
     */
-  def join(): Unit = cluster join selfAddress
+  def join(): Unit = join(selfAddress)
 
   /** Join the cluster using the provided address. Idempotent.
     * Used by drivers or other users.
@@ -112,17 +128,21 @@ final class FilodbCluster(val system: ExtendedActorSystem) extends Extension wit
     *
     * INTERNAL API.
     */
-  def joinSeedNodes(): Unit = {
-    val address = SeedNodes.map(AddressFromURIString.apply)
-    logger.debug(s"Attempting to join cluster with address $address")
-    cluster.joinSeedNodes(address)
+  def joinSeedNodes(providerSeeds: immutable.Seq[Address]): Unit = {
+    val seeds = if (providerSeeds.nonEmpty) providerSeeds else SeedNodes.map(AddressFromURIString.apply)
+    logger.info(s"Attempting to join cluster with seed nodes $seeds")
+    cluster.joinSeedNodes(seeds)
   }
 
-  def coordinatorActor: ActorRef = _coordinatorActor.get.getOrElse {
-    val actor = Await.result((guardian ? CreateCoordinator).mapTo[CoordinatorRef], DefaultTaskTimeout).ref
-    logger.info(s"NodeCoordinatorActor created: $actor")
-    actor
-  }
+  /** Returns true if self-node has joined the cluster and is MemberStatus.Up.
+    * Returns false if local node is removed from the cluster, by graceful leave
+    * or failure/unreachable downing.
+    */
+  def isJoined: Boolean = _isJoined.get
+
+  /** Returns true if the node for the given `address` is unreachable and `Down`. */
+  def isUnreachable(address: Address): Boolean = state.unreachable.exists(m =>
+    m.address == address && m.status == MemberStatus.Down)
 
   /** All roles but the `Cli` create this actor. `Server` creates
     * it as a val. `Executor` creates it after calling join on cluster.
@@ -138,66 +158,127 @@ final class FilodbCluster(val system: ExtendedActorSystem) extends Extension wit
     *
     * Idempotent.
     *
-    * @param role the [[NodeRoleAwareConfiguration.roleName]]
+    * @param role    the [[FilodbClusterNode.role]]
     *
-    * @param withManager depending on the [[ClusterRole]], whether or not to create
-    *                    the [[akka.cluster.singleton.ClusterSingletonManager]]
-    *                    when creating the [[akka.cluster.singleton.ClusterSingletonProxy]]
+    * @param watcher an optional Test watcher
     */
-  private[filodb] def clusterSingleton(role: String, withManager: Boolean, watcher: Option[ActorRef] = None): ActorRef =
+  def clusterSingleton(role: ClusterRole, watcher: Option[ActorRef]): ActorRef =
     _clusterActor.get.getOrElse {
-      logger.info(s"Creating clusterActor for role '$role'")
-      val e = CreateClusterSingleton(role, withManager, watcher)
+      val e = CreateClusterSingleton(role.roleName, watcher)
       val actor = Await.result((guardian ? e).mapTo[ClusterSingletonRef], DefaultTaskTimeout).ref
       _clusterActor.set(Some(actor))
+      _isInitialized.set(true)
       actor
     }
 
-  /** Current snapshot state of the cluster. */
-  def state: ClusterEvent.CurrentClusterState = cluster.state
-
-  def isInitialized: Boolean = _isInitialized.get
-
-  def isJoined: Boolean = _isJoined.get
-
-  def isTerminated: Boolean = _isTerminated.get
-
-  /** Returns true if the node termination is in progress. This is
-    * used during evaluation of DeathWatch Terminated events and actions
-    * based on that state.
+  /** Begins node graceful shutdown:
+    *   A. Sets `isTerminating` to true and `isJoined` and `isInitialized` to false,
+    *   B. Calls `akka.cluster.Cluster.leave(selfAddress)`
+    *   C. Awaits the async graceful shutdown of the `filodb.coordinator.NodeGuardian`
+    *      supervised child actors via `filodb.coordinator.GracefulStopStrategy`
+    *   D. Shuts down `monix.execution.Scheduler.io` and `filodb.core.store.StoreFactory`'s MetaStore and MemStore
+    *   E. Calls the async terminate on `akka.actor.ActorSystem`
+    *
+    * Idempotent.
     */
-  def isTerminating: Boolean = _isTerminating.get
-
-  /** Idempotent. */
-  def shutdown(): Unit = {
-    if (_isTerminated.compareAndSet(false, true)) {
+  protected[coordinator] def shutdown(): Unit =
+    if (!isTerminated) {
       import akka.pattern.gracefulStop
-
       import NodeProtocol.GracefulShutdown
 
+      logger.info("Leaving the cluster.")
+      _cluster.get foreach (_.leave(selfAddress))
 
-      _isTerminating.set(true)
-      logger.info("Starting shutdown")
-      _isJoined.set(false)
       _isInitialized.set(false)
+      logger.info("Terminating: starting shutdown")
 
       try {
-        cluster.leave(selfAddress)
         Await.result(gracefulStop(guardian, GracefulStopTimeout, GracefulShutdown), GracefulStopTimeout)
         system.terminate foreach { _ =>
           logger.info("Actor system was shut down")
         }
-
         metaStore.shutdown()
         memStore.shutdown()
         ioPool.shutdown()
-      } catch { case NonFatal(e) =>
-        system.terminate()
-        ioPool.shutdown()
-      } finally {
-        _isJoined.set(false)
-        _isTerminated.set(true)
+      } catch {
+        case NonFatal(e) =>
+          system.terminate()
+          ioPool.shutdown()
       }
+      finally _isTerminated.set(true)
     }
+
+  Runtime.getRuntime.addShutdownHook(new Thread() {
+    override def run(): Unit = shutdown()
+  })
+
+  /** For usage when the `akka.cluster.Member` is needed in a non-actor.
+    * Creates a temporary actor which subscribes to `akka.cluster.MemberRemoved`.
+    * for local node to privately set the appropriate node flag internally.
+    * Upon receiving sets self-node flag, stops the listener.
+    */
+  private def startListener(): Unit = {
+    cluster.subscribe(system.actorOf(Props(new Actor {
+      guardian ! NodeProtocol.ListenerRef(self)
+
+      def receive: Actor.Receive = {
+        case e: MemberUp if e.member.address == selfAddress =>
+          _isJoined.set(true)
+        case e: MemberRemoved if e.member.address == selfAddress =>
+          _isJoined.set(false)
+          cluster unsubscribe self
+          context stop self
+      }
+    })), InitialStateAsEvents, classOf[MemberUp], classOf[MemberRemoved])
   }
+
+}
+
+/** Mixin for easy usage of the FiloDBCluster Extension.
+  * Used by all `ClusterRole` nodes starting an ActorSystem and FiloDB Cluster nodes.
+  */
+private[filodb] trait FilodbClusterNode extends NodeConfiguration with StrictLogging {
+
+  def role: ClusterRole
+
+  /** Override to pass in additional module config. */
+  protected lazy val roleConfig: Config = ConfigFactory.empty
+
+  /** The `ActorSystem` used to create the FilodbCluster Akka Extension. */
+  final lazy val system = {
+    val allConfig = roleConfig.withFallback(role match {
+      case ClusterRole.Cli => ConfigFactory.empty
+      case _ => ConfigFactory.parseString(s"""akka.cluster.roles=["${role.roleName}"]""")
+    }).withFallback(systemConfig)
+
+    ActorSystem(role.systemName, allConfig)
+  }
+
+  lazy val cluster = FilodbCluster(system)
+
+  implicit lazy val ec = cluster.ec
+
+  lazy val metaStore: MetaStore = cluster.metaStore
+
+  /** If `role` is `ClusterRole.Cli`, the `FilodbCluster` `isInitialized`
+    * flag is set here, on creation of the `NodeCoordinatorActor`. All other
+    * roles are marked as initialized after `NodeClusterActor` is created.
+    */
+  lazy val coordinatorActor: ActorRef = {
+    val actor = cluster.coordinatorActor
+    role match {
+      case ClusterRole.Cli if actor != Actor.noSender =>
+        cluster._isInitialized.set(true)
+      case _ =>
+    }
+    actor
+  }
+
+  /** Returns a singleton proxy reference to the `NodeClusterActor`. */
+  def clusterSingleton(role: ClusterRole, watcher: Option[ActorRef]): ActorRef =
+    cluster.clusterSingleton(role, watcher)
+
+  /** Only calls `akka.cluster.leave` akka.cluster.Cluster was called by user. */
+  def shutdown(): Unit = cluster.shutdown()
+
 }

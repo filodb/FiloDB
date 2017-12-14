@@ -1,16 +1,13 @@
 package filodb.coordinator
-import java.util.UUID
 
 import akka.remote.testkit._
 import akka.testkit.TestProbe
-import com.typesafe.config.{Config, ConfigFactory}
+import com.typesafe.config.ConfigFactory
 
 import filodb.core._
 
 class ShardAssignmentClusterSingletonSpecMultiJvmNode1 extends ShardAssignmentClusterSingletonSpec
 class ShardAssignmentClusterSingletonSpecMultiJvmNode2 extends ShardAssignmentClusterSingletonSpec
-//class ShardAssignmentClusterSingletonSpecMultiJvmNode3 extends ShardAssignmentSpec
-//class ShardAssignmentClusterSingletonSpecMultiJvmNode4 extends ShardAssignmentSpec
 
 abstract class ShardAssignmentClusterSingletonSpec
   extends MultiNodeSpec(ShardAssignmentSpecMultiNodeConfig)
@@ -131,46 +128,11 @@ abstract class ShardAssignmentClusterSingletonSpec
 object ShardAssignmentSpecMultiNodeConfig extends MultiNodeConfig {
   val first = role("first")
   val second = role("second")
-  //val third = role("third")
-  //val fourth = role("fourth")
 
   val globalConfig = ConfigFactory.load("application_test.conf")
 
   commonConfig(debugConfig(on = false)
-    .withFallback(clusterConfig)
+    .withFallback(ConfigFactory.parseString("akka.actor.provider = cluster"))
     .withFallback(globalConfig))
 
-  // in addition to application_test.conf:
-  def clusterConfig: Config = ConfigFactory.parseString(
-    s"""
-    akka.actor.provider = cluster
-    akka.cluster {
-      jmx.enabled                         = off
-      gossip-interval                     = 200 ms
-      leader-actions-interval             = 200 ms
-      unreachable-nodes-reaper-interval   = 200 ms
-      periodic-tasks-initial-delay        = 300 ms
-      publish-stats-interval              = 0 s # always, when it happens
-      #failure-detector.heartbeat-interval = 200 ms
-      #singleton-proxy {
-      #  singleton-identification-interval = 1s
-      #  buffer-size = 1000
-      #}
-    }
-    akka.loglevel = INFO
-    akka.log-dead-letters = off
-    akka.log-dead-letters-during-shutdown = off
-    akka.remote {
-      log-remote-lifecycle-events = off
-      artery.advanced.flight-recorder {
-        enabled=off
-        destination=target/flight-recorder-${UUID.randomUUID().toString}.afr
-      }
-    }
-    # Uncomment or change logback-multijvm-test.xml logging level to see more STDOUT output
-    # akka.loggers = ["akka.testkit.TestEventListener"]
-    akka.test {
-      single-expect-default = 5 s
-    }
-    """)
 }

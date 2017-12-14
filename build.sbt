@@ -39,7 +39,7 @@ lazy val cli = project
   .settings(name := "filodb-cli")
   .settings(libraryDependencies ++= cliDeps)
   .settings(cliAssemblySettings: _*)
-  .dependsOn(core, coordinator, cassandra)
+  .dependsOn(core, coordinator  % "test->test", cassandra)
 
 lazy val kafka = project
   .in(file("kafka"))

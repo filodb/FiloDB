@@ -40,7 +40,7 @@ trait MultiNodeClusterSpec extends Suite
   protected lazy val watcher = TestProbe()
 
   protected lazy val clusterSingleton: ActorRef =
-    filodbCluster.clusterSingleton("worker", true, Some(watcher.ref))
+    filodbCluster.clusterSingleton(ClusterRole.Server, Some(watcher.ref))
 
   protected def address(role: RoleName): Address = node(role).address
 
@@ -66,8 +66,7 @@ trait MultiNodeClusterSpec extends Suite
   }
 }
 
-trait MultiNodeClusterBehavior extends MultiNodeClusterSpec {
-  self: MultiNodeSpec =>
+trait MultiNodeClusterBehavior extends MultiNodeClusterSpec { self: MultiNodeSpec =>
 
   def startClusterNode(other: Option[RoleName] = None): Unit = {
     val role = other getOrElse myself

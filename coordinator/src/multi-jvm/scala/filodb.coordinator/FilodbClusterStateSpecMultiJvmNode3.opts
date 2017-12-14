@@ -1,0 +1,1 @@
+-Dmultijvm.node=node3 -Dlogback.configurationFile=logback-multijvm-test.xml

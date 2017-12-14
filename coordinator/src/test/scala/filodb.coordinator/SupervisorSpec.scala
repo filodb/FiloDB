@@ -24,7 +24,7 @@ class SupervisorSpec extends AkkaSpec {
   private lazy val memStore = factory.memStore
   private lazy val assignmentStrategy = new DefaultShardAssignmentStrategy
   private lazy val coordinatorProps = NodeCoordinatorActor.props(metaStore, memStore, config)
-  private lazy val guardianProps = NodeGuardian.props(filoCluster, cluster, metaStore, memStore, assignmentStrategy)
+  private lazy val guardianProps = NodeGuardian.props(settings, metaStore, memStore, assignmentStrategy)
   private lazy val cluster = Cluster(system)
 
   "NodeGuardian" must {
@@ -52,10 +52,11 @@ class SupervisorSpec extends AkkaSpec {
     }
     "create the cluster actor" in {
       val guardian = system.actorOf(guardianProps, "guardian")
-      guardian ! CreateClusterSingleton("worker", withManager = true, None)
+      guardian ! CreateClusterSingleton("worker", None)
       expectMsgPF() {
         case ClusterSingletonRef(ref) =>
-          ref.path should be(ActorPath.fromString("akka://akka-test/user/guardian/" + ActorName.ClusterSingletonProxyName))
+          ref.path should be(ActorPath.fromString(
+            "akka://akka-test/user/guardian/" + ActorName.ClusterSingletonProxyName))
       }
       system stop guardian
     }
@@ -63,7 +64,7 @@ class SupervisorSpec extends AkkaSpec {
       val guardian = system.actorOf(guardianProps)
       guardian ! CreateCoordinator
       expectMsgClass(classOf[CoordinatorRef])
-      guardian ! CreateClusterSingleton("worker", withManager = true, None)
+      guardian ! CreateClusterSingleton("worker", None)
       expectMsgClass(classOf[ClusterSingletonRef])
 
       guardian ! GracefulShutdown

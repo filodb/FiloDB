@@ -7,7 +7,6 @@ import javax.activation.UnsupportedDataTypeException
 import scala.concurrent.duration._
 import scala.util.{Failure, Success => SSuccess, Try}
 
-import akka.actor.ActorSystem
 import com.opencsv.CSVWriter
 import com.quantifind.sumac.{ArgMain, FieldArgs}
 import com.typesafe.config.{Config, ConfigFactory}
@@ -49,11 +48,6 @@ class Arguments extends FieldArgs {
 object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbClusterNode {
 
   override val role = ClusterRole.Cli
-
-  override lazy val system = ActorSystem(systemName, systemConfig)
-
-  override lazy val cluster = FilodbCluster(system)
-  cluster._isInitialized.set(true)
 
   lazy val client = new LocalClient(coordinatorActor)
 

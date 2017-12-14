@@ -65,7 +65,7 @@ abstract class NodeClusterSpec extends ClusterSpec(NodeClusterSpecConfig) {
       cluster join address1
       awaitCond(cluster.isJoined)
 
-      clusterActor = cluster.clusterSingleton("worker", withManager = true)
+      clusterActor = cluster.clusterSingleton(ClusterRole.Server, None)
     }
     enterBarrier("first-node-joined-cluster-actor-started")
   }
@@ -147,7 +147,7 @@ abstract class NodeClusterSpec extends ClusterSpec(NodeClusterSpecConfig) {
     runOn(second) {
       cluster join address1
       awaitCond(cluster.isJoined)
-      clusterActor = cluster.clusterSingleton("worker", withManager = true)
+      clusterActor = cluster.clusterSingleton(ClusterRole.Server, None)
     }
 
     enterBarrier("second-node-joined")

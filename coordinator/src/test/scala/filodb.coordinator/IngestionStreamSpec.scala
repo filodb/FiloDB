@@ -37,7 +37,7 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem)
   cluster.join()
 
   private val coordinatorActor = cluster.coordinatorActor
-  private val clusterActor = cluster.clusterSingleton("worker", withManager = true)
+  private val clusterActor = cluster.clusterSingleton(ClusterRole.Server, None)
   private val memStore = cluster.memStore
   private val metaStore = cluster.metaStore
   private val dataset33 = dataset3.copy(name = "gdelt2")
