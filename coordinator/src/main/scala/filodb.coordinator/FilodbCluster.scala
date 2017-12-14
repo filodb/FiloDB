@@ -150,15 +150,15 @@ final class FilodbCluster(val system: ExtendedActorSystem) extends Extension wit
     */
   def clusterActor: Option[ActorRef] = _clusterActor.get
 
-  /** Returns a singleton proxy reference to the `NodeClusterActor`.
+  /** Returns a singleton proxy reference to the NodeClusterActor.
     * Only one will exist per cluster. This should be called on every FiloDB
     * Coordinator/ingestion node. The proxy can be started on every node where
-    * the singleton needs to be reached. If `withManager` is true, additionally
+    * the singleton needs to be reached. If withManager is true, additionally
     * creates a ClusterSingletonManager.
     *
     * Idempotent.
     *
-    * @param role    the [[FilodbClusterNode.role]]
+    * @param role    the FilodbClusterNode.role
     *
     * @param watcher an optional Test watcher
     */
