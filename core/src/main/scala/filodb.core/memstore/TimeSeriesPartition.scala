@@ -16,7 +16,7 @@ import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.metadata.Dataset
 import filodb.core.query.{ChunkIDPartitionChunkIndex, ChunkSetReader}
 import filodb.core.store._
-import filodb.memory.BlockHolder
+import filodb.memory.{BlockHolder, ReclaimListener}
 import filodb.memory.format._
 
 
@@ -177,8 +177,14 @@ class TimeSeriesPartition(val dataset: Dataset,
     if (flushingAppenders == UnsafeUtils.ZeroPointer || flushingAppenders(0).appender.length == 0) {
       None
     } else {
+      blockHolder.startPartition()
       // optimize and compact old chunks
       val frozenVectors = flushingAppenders.zipWithIndex.map { case (appender, i) =>
+        //This assumption cannot break. We should ensure one vector can be written
+        //to one block always atleast as per the current design. We want a flush group
+        //to typically end in atmost 2 blocks.
+        //TODO Check if this is alright
+        assert(blockHolder.blockAllocationSize() > appender.appender.frozenSize)
         val optimized = appender.appender.optimize(blockHolder)
         shardStats.encodedBytes.increment(optimized.numBytes)
         optimized
@@ -202,6 +208,16 @@ class TimeSeriesPartition(val dataset: Dataset,
       val lastRowKey = dataset.rowKey(reader)
       val chunkInfo = ChunkSetInfo(flushingChunkID, numSamples, firstRowKey, lastRowKey)
       index.add(chunkInfo, Nil)
+
+      blockHolder.endPartition(new ReclaimListener {
+        //It is very likely that a flushChunk ends only in one block. At worst in may end up in a couple.
+        //So a blockGroup contains atmost 2. When anyone Block in the flushGroup is evicted the flushChunk is removed.
+        //So if and when a second block gets reclaimed this is a no-op
+        override def onReclaim(): Unit = {
+          vectors.remove(flushingChunkID)
+          index.remove(chunkInfo.id)
+        }
+      })
 
       Some(ChunkSet(chunkInfo, binPartition, Nil,
                     frozenVectors.zipWithIndex.map { case (vect, pos) => (pos, vect.toFiloBuffer) }))

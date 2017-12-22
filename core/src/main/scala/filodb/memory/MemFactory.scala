@@ -132,10 +132,6 @@ class ArrayBackedMemFactory extends MemFactory {
 
 
 /**
-  * TODO:
-  * 1)Remove expensive logging when we are done investigating
-  * 2)Find a cheaper way for locking than to lock every single allocation
-  *
   * A holder which maintains a reference to a currentBlock which is replaced when
   * it is full
   *
@@ -146,23 +142,41 @@ class BlockHolder(blockStore: BlockManager) extends MemFactory with StrictLoggin
 
   val blockGroup = ListBuffer[Block]()
   val currentBlock = new AtomicReference[Block]()
+  val partitionGroup: ListBuffer[Block] = ListBuffer[Block]()
 
   currentBlock.set(blockStore.requestBlock().get)
   blockGroup += currentBlock.get()
 
-  protected def ensureCapacity(forSize: Long): Block = {
-    logger.debug(s"BlockGroup flush - Ensuring capacity $forSize")
-    if (!currentBlock.get().hasCapacity(forSize)) {
-      val currentBlockRemaining = currentBlock.get().remaining()
-      logger.debug(s"Requesting new block - requested $forSize but current is $currentBlockRemaining")
-      currentBlock.set(blockStore.requestBlock().get)
-      blockGroup += currentBlock.get()
-    }
-    currentBlock.get()
+  /**
+    * Starts tracking the block references for a partition.
+    * This is to aid in adding listeners to the block for the partition when
+    * the block gets reclaimed
+    */
+  def startPartition(): Unit = {
+    partitionGroup += (currentBlock.get())
+  }
+
+  /**
+    * Stops tracking the blocks that a single partition is written to.
+    * And registers the listener to the blocks to which this partition is written to.
+    * @param reclaimListener the listener to register
+    */
+  def endPartition(reclaimListener: ReclaimListener): Unit = {
+    partitionGroup.foreach(_.registerListener(reclaimListener))
+    partitionGroup.clear()
   }
 
   def markUsedBlocksReclaimable(): Unit = {
     blockGroup.foreach(_.markReclaimable())
+  }
+
+  protected def ensureCapacity(forSize: Long): Block = {
+    if (!currentBlock.get().hasCapacity(forSize)) {
+      val currentBlockRemaining = currentBlock.get().remaining()
+      currentBlock.set(blockStore.requestBlock().get)
+      blockGroup += currentBlock.get()
+    }
+    currentBlock.get()
   }
 
   /**
@@ -178,13 +192,11 @@ class BlockHolder(blockStore: BlockManager) extends MemFactory with StrictLoggin
     block.own()
     val preAllocationPosition = block.position()
     val preAllocStats = block.internalBufferStats()
-    logger.debug(s"BlockGroup flush - Pre Allocation Stats $preAllocStats ")
     val headerAddress = block.address + preAllocationPosition
     UnsafeUtils.setInt(UnsafeUtils.ZeroPointer, headerAddress, BinaryVector.HeaderMagic)
     val postAllocationPosition = preAllocationPosition + 4 + allocateSize
     block.position(postAllocationPosition)
     val postAllocStats = block.internalBufferStats()
-    logger.debug(s"BlockGroup flush - Post Allocation Stats $postAllocStats ")
     (UnsafeUtils.ZeroPointer, headerAddress + 4, allocateSize)
   }
 
@@ -196,6 +208,11 @@ class BlockHolder(blockStore: BlockManager) extends MemFactory with StrictLoggin
   override def freeMemory(address: Long): Unit = {
     throw new UnsupportedOperationException
   }
+
+  /**
+    * @return The capacity of any allocated block
+    */
+  def blockAllocationSize(): Long = currentBlock.get().capacity
 }
 
 

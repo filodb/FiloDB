@@ -4,6 +4,8 @@ import java.nio.ByteBuffer
 import java.util.ConcurrentModificationException
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
 
+import scala.collection.mutable.ListBuffer
+
 import com.kenai.jffi.MemoryIO
 
 
@@ -37,6 +39,12 @@ protected[memory] trait Owned extends ReusableMemory {
 }
 
 /**
+  * A listener called when a reusable memory is reclaimed.
+  */
+trait ReclaimListener {
+  def onReclaim(): Unit
+}
+/**
   * A reclaimable memory which can be reclaimed and reused. Has an address
   * Code which needs to be called upon reclaim should register itself using the
   * register method as a ReclaimListener. Upon reclaim the onReclaim for all the
@@ -46,9 +54,11 @@ protected[memory] trait Owned extends ReusableMemory {
 trait ReusableMemory {
   protected val _isFree: AtomicBoolean = new AtomicBoolean(false)
   protected val _isReusable: AtomicBoolean = new AtomicBoolean(false)
+  protected val reclaimListeners = ListBuffer.empty[ReclaimListener]
 
   protected def isFree = _isFree.get()
 
+  def registerListener(reclaimListener: ReclaimListener): Unit = reclaimListeners += reclaimListener
   /**
     * @return Whether this block can be reclaimed. The original owning callsite has to
     *         set this as being reusable
@@ -84,6 +94,7 @@ trait ReusableMemory {
     * Marks this memory as free.
     */
   protected def free() = {
+    reclaimListeners.foreach(_.onReclaim())
     _isFree.set(true)
   }
 
@@ -91,7 +102,7 @@ trait ReusableMemory {
   /**
     * To be called when this memory is reclaimed. In turn this will call all registered listeners.
     */
-  protected[memory] def reclaim(): Unit = {
+  def reclaim(): Unit = {
     if (!canReclaim) throw new IllegalStateException("Cannot reclaim this block")
     free()
   }

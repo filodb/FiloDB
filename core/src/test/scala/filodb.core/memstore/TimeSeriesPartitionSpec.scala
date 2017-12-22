@@ -72,30 +72,44 @@ class TimeSeriesPartitionSpec extends FunSpec with Matchers with BeforeAndAfter 
     chunkSetOpt.get.chunks should have length (5)
   }
 
-  // TimeSeriesPartition does not remove old chunks automatically.  This is waiting for reclaim stuff to be done.
-  // Maybe enable once reclaim stuff is done.
+  it("should be reclaim blocks and evict flush chunks upon reclaim") {
+     val part = new TimeSeriesPartition(dataset1, defaultPartKey, 0, colStore, bufferPool,
+                                        new TimeSeriesShardStats(dataset1.ref, 0))
+     val data = singleSeriesReaders().take(11)
+     val minData = data.map(_.getDouble(1))
+     data.take(10).zipWithIndex.foreach { case (r, i) => part.ingest(r, 1000L + i) }
 
-  // it("should remove old chunks when # chunks > chunksToKeep") {
-  //   val part = new TimeSeriesPartition(dataset, defaultPartKey, 0, bufferPool)
-  //   val data = singleSeriesReaders().take(21)   // one more than needed to kick old chunks out
-  //   val minData = data.map(_.getDouble(1))
+     val origPoolSize = bufferPool.poolSize
 
-  //   // First ingest 20 rows. This should fill up and finalize 2 chunks.  Both chunks should be kept.
-  //   data.zipWithIndex.take(20).foreach { case (r, i) => part.ingest(r, 1000L + i) }
-  //   part.numChunks shouldEqual 2
-  //   val ids1 = part.newestChunkIds(2).toBuffer
-  //   ids1 should have length (2)
-  //   val chunks = part.readers(AllChunkScan, Array(1)).map(_.vectors(0).toSeq).toSeq
-  //   chunks shouldEqual Seq(minData take 10, minData drop 10 take 10)
+     // First 10 rows ingested. Now flush in a separate Future while ingesting the remaining row
+     part.switchBuffers()
+     bufferPool.poolSize shouldEqual (origPoolSize - 1)
+     val blockHolder = new BlockHolder(blockStore)
+     val flushFut = Future(part.makeFlushChunks(blockHolder))
+     data.drop(10).zipWithIndex.foreach { case (r, i) => part.ingest(r, 1100L + i) }
+     val chunkSetOpt = flushFut.futureValue
 
-  //   // Now ingest one more.  This should start creating a new set of chunks which means old one gotta go
-  //   part.ingest(data.last, 10000L)
-  //   part.numChunks shouldEqual 2
-  //   val ids2 = part.newestChunkIds(2).toBuffer
-  //   ids2 should not equal (ids1)
-  //   val chunks2 = part.readers(AllChunkScan, Array(1)).map(_.vectors(0).toSeq).toSeq
-  //   chunks2 shouldEqual Seq(minData drop 10 take 10, minData drop 20)
-  // }
+     // After flush, the old writebuffers should be returned to pool
+     bufferPool.poolSize shouldEqual origPoolSize
+
+     // there should be a frozen chunk of 10 records plus 1 record in currently appending chunks
+     part.numChunks shouldEqual 2
+     part.latestChunkLen shouldEqual 1
+     val chunks = part.streamReaders(AllChunkScan, Array(1))
+       .map(_.vectors(0).toSeq).toListL.runAsync
+     chunks.futureValue should equal (Seq(minData take 10, minData drop 10))
+
+     chunkSetOpt.isDefined shouldEqual true
+     chunkSetOpt.get.info.numRows shouldEqual 10
+     chunkSetOpt.get.chunks should have length (5)
+
+     blockHolder.markUsedBlocksReclaimable()
+     blockHolder.blockGroup.foreach(_.reclaim())
+     //should now be only 1 the unflushed chunk instead of 2
+     val readers = part.readers(AllChunkScan,Array(1))
+     readers.toSeq.length should be(1)
+ }
+
 
   it("should not switch buffers and flush when current chunks are empty") {
     val part = new TimeSeriesPartition(dataset1, defaultPartKey, 0, colStore, bufferPool,
