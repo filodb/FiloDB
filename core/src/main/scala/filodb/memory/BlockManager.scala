@@ -1,11 +1,12 @@
 package filodb.memory
 
+import java.util
 import java.util.concurrent.locks.ReentrantLock
 
 import scala.collection.JavaConverters._
 
 import com.kenai.jffi.{MemoryIO, PageManager}
-import java.util
+import kamon.Kamon
 
 /**
   * Allows requesting blocks.
@@ -43,14 +44,25 @@ trait BlockManager {
 
 }
 
+class MemoryStats(tags: Map[String,String]) {
+  val usedBlocksMetric = Kamon.metrics.gauge("blockstore-used-blocks", tags)(0L)
+  val freeBlocksMetric = Kamon.metrics.gauge("blockstore-free-blocks", tags)(0L)
+  val blocksReclaimedMetric = Kamon.metrics.gauge("blockstore-blocks-reclaimed", tags)(0L)
+}
+
+
 /**
   * Pre Allocates blocks totalling to the passed memory size.
   * Each block size is the same as the OS page size.
   * This class is thread safe
   *
   * @param totalMemorySizeInBytes Control the number of pages to allocate. (totalling up to the totallMemorySizeInBytes)
+  * @param stats Memory metrics which need to be recorded
+  * @param numPagesPerBlock The number of pages a block spans
   */
-class PageAlignedBlockManager(val totalMemorySizeInBytes: Long, numPagesPerBlock: Int = 1)
+class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
+                              stats: MemoryStats,
+                              numPagesPerBlock: Int = 1)
   extends BlockManager with CleanShutdown {
 
   val mask = PageManager.PROT_READ | PageManager.PROT_EXEC | PageManager.PROT_WRITE
@@ -123,12 +135,14 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long, numPagesPerBlock
       val address = MemoryIO.getCheckedInstance().allocateMemory(blockSizeInBytes, true)
       blocks.add(new Block(address, blockSizeInBytes))
     }
+    stats.freeBlocksMetric.record(blocks.size())
     blocks
   }
 
   protected def use(block: Block) = {
     block.markInUse
     usedBlocks.add(block)
+    stats.usedBlocksMetric.record(usedBlocks.size())
   }
 
   protected def tryReclaim(num: Int): Unit = {
@@ -140,6 +154,7 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long, numPagesPerBlock
         entries.remove()
         block.reclaim()
         freeBlocks.add(block)
+        stats.freeBlocksMetric.record(freeBlocks.size())
         i = i + 1
       }
       if (i >= num) {

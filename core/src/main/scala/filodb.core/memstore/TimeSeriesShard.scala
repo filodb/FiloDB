@@ -17,7 +17,7 @@ import filodb.core.Types.PartitionKey
 import filodb.core.metadata.Dataset
 import filodb.core.query.PartitionKeyIndex
 import filodb.core.store._
-import filodb.memory.{BlockHolder, NativeMemoryManager, PageAlignedBlockManager}
+import filodb.memory.{BlockHolder, MemoryStats, NativeMemoryManager, PageAlignedBlockManager}
 import filodb.memory.format.{SchemaRowReader, ZeroCopyUTF8String}
 
 
@@ -54,6 +54,7 @@ class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
   val chunkIdsPagedFromColStore = Kamon.metrics.counter("memstore-chunkids-paged-in", tags)
   val partitionsQueried = Kamon.metrics.counter("memstore-partitions-queried", tags)
   val numChunksQueried = Kamon.metrics.counter("memstore-chunks-queried", tags)
+  val memoryStats = new MemoryStats(tags)
 }
 
 // TODO for scalability: get rid of stale partitions?
@@ -116,7 +117,7 @@ class TimeSeriesShard(dataset: Dataset, config: Config, val shardNum: Int, sink:
   private val maxNumPartitions = config.getInt("memstore.max-num-partitions")
 
   protected val blockMemorySize: Long = shardMemoryMB * 1024 * 1024L
-  private val blockStore = new PageAlignedBlockManager(blockMemorySize, numPagesPerBlock)
+  private val blockStore = new PageAlignedBlockManager(blockMemorySize, shardStats.memoryStats, numPagesPerBlock)
   private val numColumns = dataset.dataColumns.size
 
   protected val bufferMemorySize: Long = maxChunksSize * 8L * maxNumPartitions * numColumns

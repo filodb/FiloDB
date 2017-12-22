@@ -8,7 +8,7 @@ import org.scalatest.time.{Millis, Seconds, Span}
 
 import filodb.core._
 import filodb.core.store._
-import filodb.memory.{BlockHolder, NativeMemoryManager, PageAlignedBlockManager}
+import filodb.memory.{BlockHolder, MemoryStats, NativeMemoryManager, PageAlignedBlockManager}
 
 class TimeSeriesPartitionSpec extends FunSpec with Matchers with BeforeAndAfter with ScalaFutures {
   import MachineMetricsData._
@@ -20,7 +20,7 @@ class TimeSeriesPartitionSpec extends FunSpec with Matchers with BeforeAndAfter 
   // implemented by concrete test sub class
   val colStore: ColumnStore = new NullColumnStore()
 
-  private val blockStore = new PageAlignedBlockManager(100 * 1024 * 1024)
+  private val blockStore = new PageAlignedBlockManager(100 * 1024 * 1024, new MemoryStats(Map("test"-> "test")))
   val memFactory = new NativeMemoryManager(10 * 1024 * 1024)
   protected val bufferPool = new WriteBufferPool(memFactory, dataset1, 10, 50)
 

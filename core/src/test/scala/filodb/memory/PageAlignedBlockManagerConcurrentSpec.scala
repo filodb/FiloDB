@@ -6,7 +6,7 @@ import org.scalatest.fixture.FunSuite
 
 class PageAlignedBlockManagerConcurrentSpec extends FunSuite with ConductorFixture with Matchers {
 
-  val blockManager = new PageAlignedBlockManager(2048 * 1024)
+  val blockManager = new PageAlignedBlockManager(2048 * 1024, new MemoryStats(Map("test"-> "test")))
   val pageSize = blockManager.blockSizeInBytes
 
   test("Should allow multiple thread to request blocks safely") {
