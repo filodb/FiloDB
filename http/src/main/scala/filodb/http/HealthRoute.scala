@@ -4,8 +4,7 @@ import akka.http.scaladsl.model._
 import akka.http.scaladsl.server.Directives._
 
 object HealthRoute extends FiloRoute {
-
-  override val route = {
+  val route = {
     path ("__health") {
       get {
         // TODO change this to make the health more meaningful for FiloDB.

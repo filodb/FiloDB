@@ -2,7 +2,7 @@ package filodb.http
 
 import scala.concurrent.Await
 
-import akka.actor.ActorSystem
+import akka.actor.{ActorRef, ActorSystem}
 import akka.http.scaladsl.Http
 import akka.http.scaladsl.server.Directives._
 import akka.http.scaladsl.server.Route
@@ -20,12 +20,16 @@ class FiloHttpServer(actorSystem: ActorSystem) extends StrictLogging {
   /**
     * Starts the HTTP Server, blocks until it is up.
     *
+    * @param coordinatorRef the ActorRef to the local NodeCoordinator
+    * @param clusterProxy the ClusterSingletonProxy ActorRef to the NodeClusterActor singleton
     * @param externalRoutes Additional routes to add besides those configured within the module
     */
-  def start(externalRoutes: Route = reject): Unit = {
-
+  def start(coordinatorRef: ActorRef,
+            clusterProxy: ActorRef,
+            externalRoutes: Route = reject): Unit = {
     // This is a preliminary implementation of routes. Will be enhanced later
-    val filoRoutes: List[FiloRoute] = List(HealthRoute)
+    val filoRoutes: List[FiloRoute] = List(HealthRoute,
+                                           new ClusterApiRoute(clusterProxy))
     val reduced = filoRoutes.foldLeft[Route](reject)((acc, r) => r.route ~ acc)
     implicit val system = actorSystem
     implicit val materializer = ActorMaterializer()

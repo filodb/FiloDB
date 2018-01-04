@@ -2,6 +2,7 @@ package filodb.cassandra.columnstore
 
 import com.typesafe.config.ConfigFactory
 import monix.reactive.Observable
+import org.scalatest.BeforeAndAfterAll
 
 import filodb.core.TestData
 import filodb.core.memstore.{TimeSeriesPartition, TimeSeriesPartitionSpec, TimeSeriesShardStats}
@@ -10,12 +11,16 @@ import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.store.{AllChunkScan, ChunkSet, RowKeyChunkScan}
 import filodb.memory.format.TupleRowReader
 
-class CassandraBackedTimeSeriesPartitionSpec extends TimeSeriesPartitionSpec {
+class CassandraBackedTimeSeriesPartitionSpec extends TimeSeriesPartitionSpec with BeforeAndAfterAll {
 
   val config = ConfigFactory.load("application_test.conf").getConfig("filodb")
   import monix.execution.Scheduler.Implicits.global
   override val colStore = new CassandraColumnStore(config, global)
-  colStore.initialize(dataset1.ref)
+
+  override def beforeAll(): Unit = {
+    super.beforeAll()
+    colStore.initialize(dataset1.ref)
+  }
 
   it("should be able to load from persistent store to answer queries") {
 

@@ -51,3 +51,13 @@ case class DatasetRef(dataset: String, database: Option[String] = None) {
   override def toString: String =
     database.map { db => s"$db.$dataset" }.getOrElse(dataset)
 }
+
+object DatasetRef {
+  def fromDotString(str: String): DatasetRef =
+    if (str contains ".") {
+      val Array(db, dataset) = str.split('.')
+      DatasetRef(dataset, Some(db))
+    } else {
+      DatasetRef(str)
+    }
+}

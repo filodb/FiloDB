@@ -8,12 +8,12 @@ import akka.actor.{Address, AddressFromURIString}
 import akka.cluster.Cluster
 import com.typesafe.scalalogging.StrictLogging
 import scalaj.http.Http
-import spray.json._
 
 /** Seed node strategy. Some implementations discover, some simply read from immutable config. */
 abstract class ClusterSeedDiscovery(val cluster: Cluster,
-                                    val settings: AkkaBootstrapperSettings)
-  extends StrictLogging with ClusterMembershipJsonSuppport {
+                                    val settings: AkkaBootstrapperSettings) extends StrictLogging {
+  import io.circe.parser.decode
+  import io.circe.generic.auto._
 
   @throws(classOf[DiscoveryTimeoutException])
   def discoverClusterSeeds: Seq[Address] = {
@@ -40,9 +40,14 @@ abstract class ClusterSeedDiscovery(val cluster: Cluster,
           response.code.toString, response.body)
         Seq.empty[Address]
       } else {
-        val membersResponse = response.body.parseJson.convertTo[ClusterMembershipHttpResponse]
-        logger.info("Cluster exists. Response: {}", membersResponse)
-        membersResponse.members.sorted.map(a => AddressFromURIString.parse(a))
+        decode[ClusterMembershipHttpResponse](response.body) match {
+          case Right(membersResponse) =>
+            logger.info("Cluster exists. Response: {}", membersResponse)
+            membersResponse.members.sorted.map(a => AddressFromURIString.parse(a))
+          case Left(ex) =>
+            logger.error(s"Exception parsing JSON response ${response.body}, returning empty seeds", ex)
+            Seq.empty[Address]
+        }
       }
     } catch {
       case NonFatal(e) =>
@@ -54,7 +59,6 @@ abstract class ClusterSeedDiscovery(val cluster: Cluster,
 
 
 object ClusterSeedDiscovery {
-
   /** Seed node strategy. Some implementations discover, some simply read them. */
   def apply(cluster: Cluster, settings: AkkaBootstrapperSettings): ClusterSeedDiscovery = {
     import settings.{seedDiscoveryClass => fqcn}
@@ -67,5 +71,4 @@ object ClusterSeedDiscovery {
         case Success(clazz) => clazz
       }
   }
-
 }

@@ -6,11 +6,13 @@ import scala.language.postfixOps
 import akka.actor.AddressFromURIString
 import akka.cluster.Cluster
 import akka.http.scaladsl.Http
+import akka.remote.testkit.{MultiNodeConfig, MultiNodeSpecCallbacks, MultiNodeSpec}
 import akka.stream.ActorMaterializer
 import com.typesafe.config.{Config, ConfigFactory}
-import spray.json._
+import org.scalatest._
+import org.scalatest.concurrent.ScalaFutures
 
-import filodb.akkabootstrapper.{AkkaBootstrapper, ClusterMembershipHttpResponse, ClusterMembershipJsonSuppport}
+import filodb.akkabootstrapper.{AkkaBootstrapper, ClusterMembershipHttpResponse}
 
 trait AkkaBootstrapperMultiNodeConfig extends MultiNodeConfig {
 
@@ -47,9 +49,10 @@ trait AkkaBootstrapperMultiNodeConfig extends MultiNodeConfig {
   */
 trait BaseAkkaBootstrapperSpec extends MultiNodeSpecCallbacks
   with WordSpecLike with Matchers with ScalaFutures
-  with BeforeAndAfterAll with ClusterMembershipJsonSuppport {
+  with BeforeAndAfterAll { multiNodeSpecWithConfig: MultiNodeSpec =>
 
-  multiNodeSpecWithConfig: MultiNodeSpec =>
+  import io.circe.parser.decode
+  import io.circe.generic.auto._
 
   override def beforeAll(): Unit = multiNodeSpecBeforeAll()
   override def afterAll(): Unit = multiNodeSpecAfterAll()
@@ -84,19 +87,16 @@ trait BaseAkkaBootstrapperSpec extends MultiNodeSpecCallbacks
       enterBarrier("thirdMemberAdded")
       awaitCond(cluster.state.members.size == 3, max = 10 seconds, interval = 1 second)
       validateSeedsFromHttpEndpoint(seedsEndpoint, 3)
-
     }
-
   }
 
   protected def validateSeedsFromHttpEndpoint(seedsEndpoint: String, numSeeds: Int): Unit = {
     Thread.sleep(4000) // sleep for a bit for ClusterMembershipTracker actor to get the message
     val response = scalaj.http.Http(seedsEndpoint).timeout(500, 500).asString
     response.is2xx shouldEqual true
-    val addresses = response.body.parseJson.convertTo[ClusterMembershipHttpResponse]
-      .members.map(a => AddressFromURIString.parse(a))
+    val addresses = decode[ClusterMembershipHttpResponse](response.body).right.get
+                      .members.map(a => AddressFromURIString.parse(a))
     addresses.size shouldEqual numSeeds
   }
-
 }
 

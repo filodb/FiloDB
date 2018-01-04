@@ -174,6 +174,10 @@ trait MemStore extends ChunkSource {
    * Resets the state of the MemStore. Usually used for testing.
    */
   def reset(): Unit
+
+  /**
+   * Shuts down the MemStore and releases all previously allocated memory
+   */
   def shutdown(): Unit
 }
 

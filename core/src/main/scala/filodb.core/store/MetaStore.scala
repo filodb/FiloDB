@@ -2,7 +2,8 @@ package filodb.core.store
 
 import scala.concurrent.Future
 
-import com.typesafe.config.Config
+import com.typesafe.config.{Config, ConfigFactory}
+import net.ceedubs.ficus.Ficus._
 
 import filodb.core._
 import filodb.core.metadata.Dataset
@@ -14,9 +15,25 @@ abstract class MetaStoreError(msg: String) extends Exception(msg)
  * ingestion on FiloDB nodes.   Note: the resources Config needs to be translated by an upper layer.
  */
 final case class IngestionConfig(ref: DatasetRef,
-                                resources: Config,
-                                streamFactoryClass: String,
-                                streamConfig: Config)
+                                 resources: Config,
+                                 streamFactoryClass: String,
+                                 streamConfig: Config)
+
+object IngestionConfig {
+  /**
+   * Creates an IngestionConfig from a "source config" file - see conf/timeseries-dev-source.conf
+   */
+  def apply(sourceConfig: Config): IngestionConfig = {
+    val ref = DatasetRef.fromDotString(sourceConfig.getString("dataset"))
+    val streamConfig = sourceConfig.as[Option[Config]]("sourceconfig").getOrElse(ConfigFactory.empty)
+    IngestionConfig(ref, sourceConfig, sourceConfig.getString("sourcefactory"), streamConfig)
+  }
+
+  def apply(sourceConfig: Config, backupSourceFactory: String): IngestionConfig = {
+    val backup = ConfigFactory.parseString(s"sourcefactory = $backupSourceFactory")
+    apply(sourceConfig.withFallback(backup))
+  }
+}
 
 /**
  * The MetaStore defines an API to read and write datasets, checkpoints, and other metadata.

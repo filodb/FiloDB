@@ -6,6 +6,7 @@ import java.util.concurrent.locks.ReentrantLock
 import scala.collection.JavaConverters._
 
 import com.kenai.jffi.{MemoryIO, PageManager}
+import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
 
 /**
@@ -40,8 +41,7 @@ trait BlockManager {
   /**
     * Releases all blocks allocated by this store.
     */
-  protected[memory] def releaseBlocks(): Unit
-
+  def releaseBlocks(): Unit
 }
 
 class MemoryStats(tags: Map[String,String]) {
@@ -63,11 +63,10 @@ class MemoryStats(tags: Map[String,String]) {
 class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
                               stats: MemoryStats,
                               numPagesPerBlock: Int = 1)
-  extends BlockManager with CleanShutdown {
-
+  extends BlockManager with StrictLogging {
   val mask = PageManager.PROT_READ | PageManager.PROT_EXEC | PageManager.PROT_WRITE
 
-  protected val freeBlocks: util.LinkedList[Block] = allocateDirect
+  protected val freeBlocks: util.LinkedList[Block] = allocateDirect()
   protected val usedBlocks: util.LinkedList[Block] = new util.LinkedList[Block]()
 
   protected val lock = new ReentrantLock()
@@ -118,6 +117,7 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
   protected def allocateWithPageManager = {
     val numBlocks: Int = Math.floor(totalMemorySizeInBytes / blockSizeInBytes).toInt
     val blocks = new util.LinkedList[Block]()
+    logger.info(s"Allocating $numBlocks blocks of $blockSizeInBytes bytes each, total $totalMemorySizeInBytes")
 
     val firstPageAddress: Long =
       PageManager.getInstance().allocatePages(numBlocks, mask)
@@ -128,9 +128,10 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
     blocks
   }
 
-  protected def allocateDirect = {
+  protected def allocateDirect(): util.LinkedList[Block] = {
     val numBlocks: Int = Math.floor(totalMemorySizeInBytes / blockSizeInBytes).toInt
     val blocks = new util.LinkedList[Block]()
+    logger.info(s"Allocating $numBlocks blocks of $blockSizeInBytes bytes each, total $totalMemorySizeInBytes")
     for (i <- 0 until numBlocks) {
       val address = MemoryIO.getCheckedInstance().allocateMemory(blockSizeInBytes, true)
       blocks.add(new Block(address, blockSizeInBytes))
@@ -163,7 +164,7 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
     }
   }
 
-  override protected[memory] def releaseBlocks() = {
+  def releaseBlocks(): Unit = {
     lock.lock()
     try {
       releaseBlocksDirect(freeBlocks)
@@ -185,9 +186,4 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
       PageManager.getInstance().freePages(block.address, 1)
     }
   }
-
-  override def shutdown(): Unit = {
-    releaseBlocks
-  }
-
 }

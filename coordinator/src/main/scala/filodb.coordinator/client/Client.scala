@@ -3,6 +3,7 @@ package filodb.coordinator.client
 import scala.concurrent.{Await, Future}
 import scala.concurrent.duration._
 import scala.language.postfixOps
+import scala.reflect.ClassTag
 
 import akka.actor.{ActorRef, ActorSystem, Address}
 import akka.pattern.ask
@@ -19,10 +20,23 @@ object Client {
     func(Await.result(cmd, awaitTimeout))
   }
 
+  /**
+   * Synchronous ask of an actor, parsing the result with a PartialFunction
+   */
   def actorAsk[B](actor: ActorRef, msg: Any,
                   askTimeout: FiniteDuration = 30 seconds)(f: PartialFunction[Any, B]): B = {
     implicit val timeout = Timeout(askTimeout)
     parse(actor ? msg, askTimeout)(f)
+  }
+
+  def asyncAsk(actor: ActorRef, msg: Any, askTimeout: FiniteDuration = 30 seconds): Future[Any] = {
+    implicit val timeout = Timeout(askTimeout)
+    actor ? msg
+  }
+
+  def asyncTypedAsk[T: ClassTag](actor: ActorRef, msg: Any, askTimeout: FiniteDuration = 30 seconds): Future[T] = {
+    implicit val timeout = Timeout(askTimeout)
+    (actor ? msg).mapTo[T]
   }
 
   def standardResponse[B](partial: PartialFunction[Any, B]): PartialFunction[Any, B] =

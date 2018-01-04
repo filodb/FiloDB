@@ -6,20 +6,16 @@ import scala.language.postfixOps
 
 import akka.actor.{ActorRef, Address, Props}
 import akka.cluster.Cluster
-import akka.http.scaladsl.marshallers.sprayjson.SprayJsonSupport._
 import akka.http.scaladsl.server.Directives._
 import akka.http.scaladsl.server.Route
 import akka.pattern.ask
 import akka.util.Timeout
 import com.typesafe.scalalogging.StrictLogging
-import spray.json._
+import de.heikoseeberger.akkahttpcirce.FailFastCirceSupport
 
 object AkkaBootstrapperMessages {
-
   final case object ClusterMembershipRequest
-
   final case class ClusterMembershipResponse(seeds: Seq[Address])
-
 }
 
 final case class DiscoveryTimeoutException(message: String, cause: Throwable = None.orNull)
@@ -27,21 +23,14 @@ final case class DiscoveryTimeoutException(message: String, cause: Throwable = N
 
 final case class ClusterMembershipHttpResponse(members: List[String])
 
-trait ClusterMembershipJsonSuppport {
-
-  import DefaultJsonProtocol._
-
-  implicit val printer = PrettyPrinter
-  implicit val membershipJsonFormat = jsonFormat1(ClusterMembershipHttpResponse)
-
-}
-
 /**
   * This is the API facade for the Akka Bootstrapper Library
   *
   * @param cluster local cluster object to join with seeds
   */
-class AkkaBootstrapper(protected val cluster: Cluster) extends StrictLogging with ClusterMembershipJsonSuppport {
+class AkkaBootstrapper(protected val cluster: Cluster) extends StrictLogging {
+  import FailFastCirceSupport._
+  import io.circe.generic.auto._
 
   private implicit val system = cluster.system
   private[filodb] val settings = new AkkaBootstrapperSettings(cluster.system.settings.config)

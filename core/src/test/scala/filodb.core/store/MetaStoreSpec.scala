@@ -131,5 +131,17 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
       metaStore.deleteIngestionConfig(dataset.ref).futureValue shouldEqual Success
       metaStore.readIngestionConfigs().futureValue shouldEqual Nil
     }
+
+    it("should be able to parse source config with no sourceFactory and sourceConfig") {
+      val sourceConf = """
+                       |dataset = "gdelt"
+                       |numshards = 32   # for Kafka this should match the number of partitions
+                       |min-num-nodes = 10     # This many nodes needed to ingest all shards
+                       """.stripMargin
+      val ingestConf = IngestionConfig(ConfigFactory.parseString(sourceConf), "a.backup")
+      ingestConf.ref shouldEqual DatasetRef("gdelt")
+      ingestConf.streamFactoryClass shouldEqual "a.backup"
+      ingestConf.streamConfig.isEmpty shouldEqual true
+    }
   }
 }

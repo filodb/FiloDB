@@ -36,6 +36,7 @@ See [architecture](doc/architecture.md) and [datasets and reading](doc/datasets_
   - [Data Modelling and Performance Considerations](#data-modelling-and-performance-considerations)
   - [Predicate Pushdowns](#predicate-pushdowns)
   - [Sharding](#sharding)
+- [Using the FiloDB HTTP API](#using-the-filodb-http-api)
 - [Using FiloDB Data Source with Spark](#using-filodb-data-source-with-spark)
   - [Configuring FiloDB](#configuring-filodb)
     - [Passing Cassandra Authentication Settings](#passing-cassandra-authentication-settings)
@@ -260,6 +261,8 @@ If this was for events, you might have multiple columns, and some of them can be
 
 ### Data Modelling and Performance Considerations
 
+NOTE: this section is really old and needs to be rewritten.
+
 **Choosing Partition Keys**.
 
 - A good start for a partition key is a hash of an ID or columns that distribute well, plus a time bucket.  This spreads data around but also prevents too much data from piling up in a single partition.
@@ -314,6 +317,10 @@ Note: You can see predicate pushdown filters in application logs by setting logg
 ### Sharding
 
 TODO: add details about FiloDB sharding, the shard-key vs partition key mechanism, etc.
+
+## Using the FiloDB HTTP API
+
+Please see the [HTTP API](doc/http_api.md) doc.
 
 ## Using FiloDB Data Source with Spark
 

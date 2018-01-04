@@ -187,12 +187,14 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
         logger.warn(s"No IngestionActor for dataset ${command.ref}")
     }
 
-  private def terminated(ingester: ActorRef): Unit =
+  private def terminated(ingester: ActorRef): Unit = {
+    memStore.shutdown()
     ingesters.find { case (key, ref) => ref == ingester }
       .foreach { case (datasetRef, _) =>
         logger.warn(s"$ingester terminated. Stopping ingestion for ${(datasetRef)}.")
         ingesters.remove(datasetRef)
       }
+  }
 
   private def reset(origin: ActorRef): Unit = {
     context.children foreach (_ ! PoisonPill)

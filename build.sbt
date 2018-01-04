@@ -45,7 +45,6 @@ lazy val kafka = project
   .in(file("kafka"))
   .settings(name := "filodb-kafka")
   .settings(commonSettings: _*)
-  .settings(multiJvmMaybeSettings: _*)
   .settings(kafkaSettings: _*)
   .settings(itSettings: _*)
   .settings(assemblySettings: _*)
@@ -58,6 +57,7 @@ lazy val kafka = project
 lazy val bootstrapper = project
   .in(file("akka-bootstrapper"))
   .settings(commonSettings: _*)
+  .settings(multiJvmMaybeSettings: _*)
   .settings(name := "akka-bootstrapper")
   .settings(libraryDependencies ++= bootstrapperDeps)
   .configs(MultiJvm)
@@ -67,7 +67,7 @@ lazy val http = project
   .settings(commonSettings: _*)
   .settings(name := "http")
   .settings(libraryDependencies ++= httpDeps)
-  .dependsOn(core)
+  .dependsOn(core, coordinator % "compile->compile; test->test")
 
 lazy val standalone = project
   .in(file("standalone"))
@@ -128,6 +128,7 @@ val excludeJersey = ExclusionRule(organization = "com.sun.jersey")
 
 /* Versions in various modules versus one area of build */
 val akkaVersion       = "2.4.19" // akka-http/akka-stream compat. TODO when kamon-akka-remote is akka 2.5.4 compat
+val akkaHttpVersion   = "10.0.10"
 val cassDriverVersion = "3.0.2"
 val ficusVersion      = "1.1.2"
 val kamonVersion      = "0.6.3"
@@ -140,8 +141,11 @@ val log4jDep          = "log4j"                      % "log4j"                 %
 val scalaLoggingDep   = "com.typesafe.scala-logging" %% "scala-logging"        % "3.7.2"
 val scalaTest         = "org.scalatest"              %% "scalatest"            % "2.2.6" // TODO upgrade to 3.0.4
 val scalaCheck        = "org.scalacheck"             %% "scalacheck"           % "1.11.0"
-val akkaHttp          = "com.typesafe.akka"          %% "akka-http"            % "10.0.10"
-val akkaHttpSprayJson = "com.typesafe.akka"          %% "akka-http-spray-json" % "10.0.10"
+val akkaHttp          = "com.typesafe.akka"          %% "akka-http"            % akkaHttpVersion
+val akkaHttpTestkit   = "com.typesafe.akka"          %% "akka-http-testkit"    % akkaHttpVersion
+val akkaHttpCirce     = "de.heikoseeberger"          %% "akka-http-circe"      % "1.18.1"
+val circeGeneric      = "io.circe"                   %% "circe-generic"        % "0.8.0"
+val circeParser       = "io.circe"                   %% "circe-parser"         % "0.8.0"
 
 lazy val commonDeps = Seq(
   "io.kamon" %% "kamon-core" % kamonVersion,
@@ -215,7 +219,10 @@ lazy val tsgeneratorDeps = Seq(
 lazy val httpDeps = Seq(
   logbackDep,
   akkaHttp,
-  akkaHttpSprayJson
+  akkaHttpCirce,
+  circeGeneric,
+  circeParser,
+  akkaHttpTestkit % Test
 )
 
 lazy val standaloneDeps = Seq(
@@ -230,7 +237,9 @@ lazy val bootstrapperDeps = Seq(
   "com.typesafe.akka"            %% "akka-cluster"            % akkaVersion,
   // akka http should be a compile time dependency only. Users of this library may want to use a different http server
   akkaHttp          % "test; provided",
-  akkaHttpSprayJson % "test; provided",
+  akkaHttpCirce     % "test; provided",
+  circeGeneric      % "test; provided",
+  circeParser       % "test; provided",
   "com.typesafe.akka"            %% "akka-slf4j"              % akkaVersion,
   "dnsjava"                      %  "dnsjava"                 % "2.1.8",
   "org.scalaj"                   %% "scalaj-http"             % "2.3.0",
@@ -379,7 +388,9 @@ lazy val itSettings = Defaults.itSettings ++ Seq(
     internalDependencyClasspath in IntegrationTest, exportedProducts in Test)).value)
 
 lazy val multiJvmSettings = SbtMultiJvm.multiJvmSettings ++ Seq(
-  compile in MultiJvm := ((compile in MultiJvm) triggeredBy (compile in Test)).value,
+  compile in MultiJvm := ((compile in MultiJvm) triggeredBy (compile in Test)).value)
+
+lazy val testMultiJvmToo = Seq(
   // make sure that MultiJvm tests are executed by the default test target,
   // and combine the results from ordinary test and multi-jvm tests
   executeTests in Test := {
@@ -396,7 +407,8 @@ lazy val multiJvmSettings = SbtMultiJvm.multiJvmSettings ++ Seq(
   }
 )
 
-lazy val multiJvmMaybeSettings = if (sys.env.contains("MAYBE_MULTI_JVM")) multiJvmSettings else Nil
+lazy val multiJvmMaybeSettings = multiJvmSettings ++ {
+                                 if (sys.env.contains("MAYBE_MULTI_JVM")) testMultiJvmToo else Nil }
 
 // Fork a separate JVM for each test, instead of one for all tests in a module.
 // This is necessary for Spark tests due to initialization, for example

@@ -18,7 +18,6 @@ import filodb.memory.format.UnsafeUtils.arayOffset
   * A trait which allows allocation of memory with the Filo magic header
   */
 trait MemFactory {
-
   /**
     * Allocates memory for requested size plus 4 bytes for magic header
     *
@@ -43,6 +42,11 @@ trait MemFactory {
       (UnsafeUtils.ZeroPointer, address + buf.position, buf.limit - buf.position)
     }
   }
+
+  /**
+   * Performs all cleanup, including freeing all allocated memory (if applicable)
+   */
+  def shutdown(): Unit
 }
 
 object MemFactory {
@@ -50,10 +54,10 @@ object MemFactory {
 }
 
 /**
-  * Uses MemoryIO to do Dynamic memory allocation
+  * Native (off heap) memory manager, allocating using MemoryIO with every call to allocateWithMagicHeader
+  * and relying on a cap to not allocate more than upperBoundSizeInBytes
   */
-class NativeMemoryManager(val upperBoundSizeInBytes: Long) extends MemFactory with CleanShutdown {
-
+class NativeMemoryManager(val upperBoundSizeInBytes: Long) extends MemFactory {
   protected val usedSoFar = new AtomicLong(0)
   protected val sizeMapping = new ConcurrentHashMap[Long, Long]()
 
@@ -80,7 +84,6 @@ class NativeMemoryManager(val upperBoundSizeInBytes: Long) extends MemFactory wi
     }
   }
 
-
   override def freeMemory(startAddress: Long): Unit = {
     //start where the header started
     val address = startAddress - 4
@@ -103,12 +106,14 @@ class NativeMemoryManager(val upperBoundSizeInBytes: Long) extends MemFactory wi
     sizeMapping.clear()
   }
 
-  override def shutdown(): Unit = {
+  def shutdown(): Unit = {
     freeAll()
   }
-
 }
 
+/**
+ * An on-heap MemFactory implemented by creating byte[]
+ */
 class ArrayBackedMemFactory extends MemFactory {
   /**
     * Allocates memory for requested size.
@@ -122,12 +127,9 @@ class ArrayBackedMemFactory extends MemFactory {
     (newBytes, UnsafeUtils.arayOffset + 4, size)
   }
 
-  /**
-    * Frees memory allocated at the passed address
-    *
-    * @param address The native address which represents the starting location of memory allocated
-    */
-  override def freeMemory(address: Long): Unit = {} //do nothing
+  // Nothing to free, let heap GC take care of it  :)
+  override def freeMemory(address: Long): Unit = {}
+  def shutdown(): Unit = {}
 }
 
 
@@ -213,6 +215,10 @@ class BlockHolder(blockStore: BlockManager) extends MemFactory with StrictLoggin
     * @return The capacity of any allocated block
     */
   def blockAllocationSize(): Long = currentBlock.get().capacity
+
+  // We don't free memory, because many BlockHolders will share a single BlockManager, and we rely on
+  // the BlockManager's own shutdown mechanism
+  def shutdown(): Unit = {}
 }
 
 

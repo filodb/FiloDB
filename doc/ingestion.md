@@ -26,7 +26,7 @@ Create your custom source config file, e.g. [example-source.conf](../kafka/src/m
 ```yaml
 dataset = "example"
 # e.g. one shard per kafka partition
-numshards = 100
+num-shards = 100
 min-num-nodes = 5
 chunk-duration = 1 hour
 sourcefactory = "filodb.kafka.KafkaIngestionStreamFactory"

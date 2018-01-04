@@ -1,5 +1,6 @@
 package filodb.akkabootstrapper.multijvm
 
+import akka.remote.testkit.MultiNodeSpec
 import com.typesafe.config.{Config, ConfigFactory}
 
 
@@ -8,7 +9,7 @@ object WhitelistBootstrapperMultiNodeConfig extends AkkaBootstrapperMultiNodeCon
   override def baseConfig: Config = ConfigFactory.parseString(
     s"""
        |akka-bootstrapper {
-       |  seed-discovery.class = "filodb.akkabootstrapper.WhitelistAkkaClusterSeedDiscovery"
+       |  seed-discovery.class = "filodb.akkabootstrapper.WhitelistClusterSeedDiscovery"
        |  whitelist.seeds = [
        |                          "akka.tcp://WhitelistBootstrapperSpec@127.0.0.1:2552"
        |                          "akka.tcp://WhitelistBootstrapperSpec@127.0.0.1:2562"

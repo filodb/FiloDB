@@ -1,13 +1,13 @@
 package filodb.akkabootstrapper.multijvm
 
+import akka.remote.testkit.MultiNodeSpec
 import com.typesafe.config.{Config, ConfigFactory}
-
 
 object ConsulBootstrapperMultiNodeConfig extends AkkaBootstrapperMultiNodeConfig {
   override def baseConfig : Config = ConfigFactory.parseString(
     s"""
        |akka-bootstrapper {
-       |  seed-discovery.class = "filodb.akkabootstrapper.ConsulAkkaClusterSeedDiscovery"
+       |  seed-discovery.class = "filodb.akkabootstrapper.ConsulClusterSeedDiscovery"
        |  dns-srv.resolver-host = "127.0.0.1"  #consul by default
        |  dns-srv.resolver-port = 8600  # consul by default
        |  dns-srv.seed-node-count = 2

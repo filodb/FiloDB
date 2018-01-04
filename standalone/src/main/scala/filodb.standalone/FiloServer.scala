@@ -43,11 +43,10 @@ class FiloServer extends FilodbClusterNode {
   // convenience for users to get up and running quickly without setting up cassandra.
   val client = new LocalClient(coordinatorActor)
 
-  def bootstrap(akkaCluster: Cluster): Unit = {
+  def bootstrap(akkaCluster: Cluster): AkkaBootstrapper = {
     val bootstrapper = AkkaBootstrapper(akkaCluster)
     val seeds = bootstrapper.bootstrap()
-    val filoHttpServer = new FiloHttpServer(akkaCluster.system)
-    filoHttpServer.start(bootstrapper.getAkkaHttpRoute())
+    bootstrapper
   }
 
   def start(): Unit = {
@@ -55,12 +54,10 @@ class FiloServer extends FilodbClusterNode {
       cluster.kamonInit(role)
       coordinatorActor
       scala.concurrent.Await.result(metaStore.initialize(), cluster.settings.InitializationTimeout)
-      bootstrap(cluster.cluster)
-      cluster.clusterSingleton(role, None)
-
-//      settings.DatasetDefinitions.foreach { case (datasetName, datasetConf) =>
-//        createDatasetFromConfig(datasetName, datasetConf)
-//      }
+      val bootstrapper = bootstrap(cluster.cluster)
+      val singleton = cluster.clusterSingleton(role, None)
+      val filoHttpServer = new FiloHttpServer(cluster.system)
+      filoHttpServer.start(coordinatorActor, singleton, bootstrapper.getAkkaHttpRoute())
     } catch {
       // if there is an error in the initialization, we need to fail fast so that the process can be rescheduled
       case NonFatal(e) =>

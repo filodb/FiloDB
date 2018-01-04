@@ -116,22 +116,27 @@ class TimeSeriesShard(dataset: Dataset, config: Config, val shardNum: Int, sink:
   private final val numGroups = config.getInt("memstore.groups-per-shard")
   private val maxNumPartitions = config.getInt("memstore.max-num-partitions")
 
+  // The off-heap block store used for encoded chunks
   protected val blockMemorySize: Long = shardMemoryMB * 1024 * 1024L
   private val blockStore = new PageAlignedBlockManager(blockMemorySize, shardStats.memoryStats, numPagesPerBlock)
   private val numColumns = dataset.dataColumns.size
 
+  // The off-heap buffers used for ingesting the newest data samples
   protected val bufferMemorySize: Long = maxChunksSize * 8L * maxNumPartitions * numColumns
+  logger.info(s"Allocating $bufferMemorySize bytes for WriteBufferPool for shard $shardNum")
   protected val bufferMemoryManager = new NativeMemoryManager(bufferMemorySize)
 
   /**
     * Unencoded/unoptimized ingested data is stored in buffers that are allocated from this off-heap pool
     */
   private val bufferPool = new WriteBufferPool(bufferMemoryManager, dataset, maxChunksSize / 8, maxNumPartitions)
+  logger.info(s"Finished initializing memory pools for shard $shardNum")
 
   private final val partitionGroups = Array.fill(numGroups)(new EWAHCompressedBitmap)
 
   /**
-    * The offset up to and including the last record in this group to be successfully persisted
+    * The offset up to and including the last record in this group to be successfully persisted.
+    * Also used during recovery to figure out what incoming records to skip (since it's persisted)
     */
   private final val groupWatermark = Array.fill(numGroups)(Long.MinValue)
 
@@ -303,9 +308,11 @@ class TimeSeriesShard(dataset: Dataset, config: Config, val shardNum: Int, sink:
   }
 
   /**
-    * Release all memory and reset all state in this shard
+    * Reset all state in this shard.  Memory is not released as once released, then this class
+    * cannot be used anymore.
     */
   def reset(): Unit = {
+    logger.info(s"Clearing all MemStore state for shard $shardNum")
     partitions.clear()
     keyMap.clear()
     keyIndex.reset()
@@ -314,5 +321,12 @@ class TimeSeriesShard(dataset: Dataset, config: Config, val shardNum: Int, sink:
       partitionGroups(group) = new EWAHCompressedBitmap()
       groupWatermark(group) = Long.MinValue
     }
+  }
+
+  def shutdown(): Unit = {
+    reset()   // Not really needed, but clear everything just to be consistent
+    logger.info(s"Shutting down and releasing offheap memory for shard $shardNum")
+    bufferMemoryManager.shutdown()
+    blockStore.releaseBlocks()
   }
 }

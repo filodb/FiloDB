@@ -10,7 +10,6 @@ import scala.util.{Failure, Success => SSuccess, Try}
 import com.opencsv.CSVWriter
 import com.quantifind.sumac.{ArgMain, FieldArgs}
 import com.typesafe.config.{Config, ConfigFactory}
-import net.ceedubs.ficus.Ficus._
 import org.parboiled2.ParseError
 
 import filodb.coordinator._
@@ -142,9 +141,9 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
           val remote = Client.standaloneClient(system, args.host.get, args.port)
           (args.filename, args.configPath) match {
             case (Some(configFile), _) =>
-              setupDataset(remote, ConfigFactory.parseFile(new java.io.File(configFile)))
+              setupDataset(remote, ConfigFactory.parseFile(new java.io.File(configFile)), timeout)
             case (None, Some(configPath)) =>
-              setupDataset(remote, systemConfig.getConfig(configPath))
+              setupDataset(remote, systemConfig.getConfig(configPath), timeout)
             case (None, None) =>
               println("Either --filename or --configPath must be specified for setup")
               exitCode = 1
@@ -220,7 +219,7 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
    * setup command configuration example:
    * {{{
    *   dataset = "gdelt"
-   *   numshards = 32   # for Kafka this should match the number of partitions
+   *   num-shards = 32   # for Kafka this should match the number of partitions
    *   min-num-nodes = 10     # This many nodes needed to ingest all shards
    *   sourcefactory = "filodb.kafka.KafkaSourceFactory"
    *   sourceconfig {
@@ -231,16 +230,11 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
    * sourcefactory and sourceconfig is optional.  If omitted, a NoOpFactory will be used, which means
    * no automatic pull ingestion will be started.  New data can always be pushed into any Filo node.
    */
-  def setupDataset(client: LocalClient, config: Config): Unit = {
-    val dataset = DatasetRef(config.getString("dataset"))
-    val resourceSpec = DatasetResourceSpec(config.getInt("numshards"),
-                                           config.getInt("min-num-nodes"))
-    val sourceSpec = config.as[Option[String]]("sourcefactory").map { factory =>
-                       IngestionSource(factory, config.getConfig("sourceconfig"))
-                     }.getOrElse(noOpSource)
-    client.setupDataset(dataset, resourceSpec, sourceSpec).foreach {
+  def setupDataset(client: LocalClient, config: Config, timeout: FiniteDuration): Unit = {
+    val ingestConfig = IngestionConfig(config, backupSourceFactory=noOpSource.streamFactoryClass)
+    client.setupDataset(ingestConfig, timeout).foreach {
       case e: ErrorResponse =>
-        println(s"Errors setting up dataset $dataset: $e")
+        println(s"Errors setting up dataset ${ingestConfig.ref}: $e")
         exitCode = 2
     }
   }

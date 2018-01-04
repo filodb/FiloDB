@@ -6,6 +6,7 @@ import com.typesafe.scalalogging.StrictLogging
 
 import filodb.coordinator._
 import filodb.core._
+import filodb.core.store.IngestionConfig
 
 case object NoClusterActor extends ErrorResponse
 
@@ -30,6 +31,11 @@ trait ClusterOps extends ClientBase with StrictLogging {
         case e: ErrorResponse => Some(e)
       }
     }.getOrElse(Some(NoClusterActor))
+
+  def setupDataset(config: IngestionConfig, timeout: FiniteDuration): Option[ErrorResponse] = {
+    val command = SetupDataset(config)
+    setupDataset(command.ref, command.resources, command.source, timeout)
+  }
 
   /**
    * Obtains a list of all datasets registered in the cluster for ingestion and querying via

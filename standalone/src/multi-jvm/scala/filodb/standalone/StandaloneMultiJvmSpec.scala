@@ -34,7 +34,7 @@ abstract class StandaloneMultiJvmSpec(config: MultiNodeConfig) extends MultiNode
   // Ingestion Source section
   val source = ConfigFactory.parseFile(new java.io.File("conf/timeseries-dev-source.conf"))
   val dataset = DatasetRef(source.getString("dataset"))
-  val numShards = source.getInt("numshards")
+  val numShards = source.getInt("num-shards")
   val resourceSpec = DatasetResourceSpec(numShards, source.getInt("min-num-nodes"))
   val sourceconfig = source.getConfig("sourceconfig")
   val ingestionSource = source.as[Option[String]]("sourcefactory").map { factory =>

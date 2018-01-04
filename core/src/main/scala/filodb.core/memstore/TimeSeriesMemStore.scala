@@ -158,7 +158,11 @@ extends MemStore with StrictLogging {
     sink.truncate(dataset)
   }
 
-  def shutdown(): Unit = {}
+  // Release memory etc.
+  def shutdown(): Unit = {
+    datasets.values.foreach(_.values.asScala.foreach(_.shutdown()))
+    reset()
+  }
 
   override def scanPartitionKeys(dataset: Dataset, shardNum: Int): Observable[PartitionKey] = {
     scanPartitions(dataset, FilteredPartitionScan(ShardSplit(shardNum))).map(_.binPartition)
