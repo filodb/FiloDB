@@ -91,7 +91,7 @@ with ScalatestRouteTest with ScalaFutures {
         val resp = responseAs[HttpList[HttpShardState]]
         resp.status shouldEqual "success"
         resp.data should have length 4
-        resp.data.map(_.status).filter(_ contains "Normal") should have length 2  // Two normal nodes
+        resp.data.map(_.status).filter(_ contains "Active") should have length 2  // Two active nodes
       }
     }
   }
