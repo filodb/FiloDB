@@ -47,7 +47,6 @@ final class NodeGuardian(val settings: FilodbSettings,
     case e: ShardSubscriptions     => subscriptions = e
     case GetShardMapsSubscriptions => getMapsSubscriptions(sender())
     case e: ListenerRef            => failureAware ! e
-    case e: ActorLifecycle         => // coming in different PR
   }
 
   override def receive: Actor.Receive = guardianReceive orElse super.receive
@@ -107,10 +106,11 @@ final class NodeGuardian(val settings: FilodbSettings,
     val proxy = clusterActor(e.role)
 
     if (context.child(ClusterSingletonName).isEmpty) {
+      val watcher = e.watcher.getOrElse(self)
       val mgr = context.actorOf(
         ClusterSingletonManager.props(
           singletonProps = NodeClusterActor.props(
-            settings, e.role, metaStore, assignmentStrategy, NodeClusterActor.ActorArgs(proxy, self, e.watcher)),
+            settings, e.role, metaStore, assignmentStrategy, NodeClusterActor.ActorArgs(proxy, self, watcher)),
           terminationMessage = PoisonPill,
           settings = ClusterSingletonManagerSettings(context.system)
             .withRole(e.role)

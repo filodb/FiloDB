@@ -147,7 +147,7 @@ class ShardMapper(val numShards: Int) extends Serializable {
    * Find out if a shard is active (Normal or Recovery status) or filter a list of shards
    */
   def activeShard(shard: Int): Boolean =
-    statusMap(shard) == ShardStatusNormal || statusMap(shard).isInstanceOf[ShardStatusRecovery]
+    statusMap(shard) == ShardStatusActive || statusMap(shard).isInstanceOf[ShardStatusRecovery]
 
   def activeShards(shards: Seq[Int]): Seq[Int] = shards.filter(activeShard)
 
@@ -167,7 +167,7 @@ class ShardMapper(val numShards: Int) extends Serializable {
       statusMap(shard) = ShardStatusAssigned
       registerNode(Seq(shard), node)
     case IngestionStarted(_, shard, node) =>
-      statusMap(shard) = ShardStatusNormal
+      statusMap(shard) = ShardStatusActive
       registerNode(Seq(shard), node)
     case RecoveryInProgress(_, shard, node, progress) =>
       statusMap(shard) = ShardStatusRecovery(progress)
@@ -175,14 +175,11 @@ class ShardMapper(val numShards: Int) extends Serializable {
     case IngestionError(_, shard, _) =>
       statusMap(shard) = ShardStatusError
       Success(())
-    case ShardDown(_, shard, node) =>
-      statusMap(shard) = ShardStatusDown
-      Success(())
     case IngestionStopped(_, shard) =>
       statusMap(shard) = ShardStatusStopped
       Success(())
-    case ShardMemberRemoved(_, shard, node) =>
-      statusMap(shard) = ShardStatusUnassigned
+    case ShardDown(_, shard, node) =>
+      statusMap(shard) = ShardStatusDown
       removeNode(node)
       Success(())
     case _ =>

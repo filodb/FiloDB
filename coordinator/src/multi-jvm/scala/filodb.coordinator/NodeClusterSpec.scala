@@ -132,7 +132,7 @@ abstract class NodeClusterSpec extends ClusterSpec(NodeClusterSpecConfig) {
 
           for {
             shard <- 0 until newMap.numAssignedShards
-          } newMap.statusForShard(shard) shouldEqual ShardStatusNormal
+          } newMap.statusForShard(shard) shouldEqual ShardStatusActive
 
       }
 

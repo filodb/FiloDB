@@ -4,6 +4,7 @@ import scala.collection.mutable.{HashMap => MutableHashMap, HashSet => MutableHa
 import scala.util.{Failure, Success}
 
 import akka.actor._
+import akka.cluster.{Cluster, Member, MemberStatus}
 import akka.event.LoggingReceive
 
 import filodb.coordinator.NodeClusterActor.{IngestionSource, SetupDataset}
@@ -26,6 +27,7 @@ private[coordinator] final class ShardCoordinatorActor(strategy: ShardAssignment
   import ShardAssignmentStrategy.{DatasetShards, DatasetResources}
   import ShardSubscriptions._
 
+  val cluster = Cluster(context.system)
   val shardMappers = new MutableHashMap[DatasetRef, ShardMapper]
   val members      = new MutableHashSet[ActorRef]
   val resources    = new MutableHashMap[DatasetRef, DatasetResources]
@@ -185,10 +187,51 @@ private[coordinator] final class ShardCoordinatorActor(strategy: ShardAssignment
       for {
         DatasetShards(ds, map, shards) <- removed.shards
         shard <- shards
-      } update(ShardMemberRemoved(ds, shard, coordinator), map)
+      } update(ShardDown(ds, shard, coordinator), map)
 
       origin foreach (_ ! CoordinatorRemoved(coordinator, removed.shards))
+
+      reassign(removed.shards)
     }
+
+  /** If there is an unassigned node, reassigns a removed node's dataset shards
+    * to the oldest one and moves shard's statuses to assigned. If no unassigned
+    * node is available, ShardDown status holds.
+    *
+    * @param from the removed node's shards per dataset
+    */
+  def reassign(from: Seq[DatasetShards]): Unit = {
+    // should not require shardToNodeRatio, these shards were originally
+    // assigned to the one removed coordinator based on the ratio for the removed node datasets
+    for {
+      to     <- oldestUnassignedNode
+      dss    <- from
+      clone  = ShardMapper.copy(dss.mapper, dss.ref)
+      _      <- clone.registerNode(dss.shards, to)
+      shard  <- dss.shards
+    } update(ShardAssignmentStarted(dss.ref, shard, to), clone)
+  }
+
+  /** Returns any unassigned nodes. */
+  private def unassignedNodes: Set[ActorRef] =
+    (for {
+      member     <- members
+      unassigned <- shardMappers.collectFirst { case (_, map) if !map.allNodes.contains(member) => member }
+    } yield unassigned).toSet
+
+  /** Returns the oldest unassigned node. */
+  private def oldestUnassignedNode: Option[ActorRef] = {
+    val assignable = unassignedNodes.map(a => a.path.address -> a).toMap
+    val addresses = assignable.keySet
+    val prioritized = cluster.state.members
+      .filter(m => m.status == MemberStatus.Up && addresses.contains(m.address))
+      .toSeq.sorted(Member.ageOrdering)
+
+    for {
+      oldest      <- prioritized.headOption
+      coordinator <- assignable.get(oldest.address)
+    } yield coordinator
+  }
 
   /** If the mapper for the provided `datasetRef` has been added, sends an initial
     * current snapshot of partition state, as ingestion will subscribe usually when

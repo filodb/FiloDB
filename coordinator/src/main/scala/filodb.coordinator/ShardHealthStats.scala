@@ -19,7 +19,7 @@ class ShardHealthStats(ref: DatasetRef,
   import filodb.core.Perftools._
 
    val numActive = pollingGauge(s"num-active-shards-$ref",
-     reportingInterval){ shardMapFunc.statuses.filter(_ == ShardStatusNormal).size }
+     reportingInterval){ shardMapFunc.statuses.filter(_ == ShardStatusActive).size }
    val numRecovering = pollingGauge(s"num-recovering-shards-$ref",
      reportingInterval){ shardMapFunc.statuses.filter(_.isInstanceOf[ShardStatusRecovery]).size }
    val numUnassigned = pollingGauge(s"num-unassigned-shards-$ref",

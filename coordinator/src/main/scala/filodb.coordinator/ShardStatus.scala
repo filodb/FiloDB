@@ -66,14 +66,7 @@ final case class IngestionStopped(ref: DatasetRef, shard: Int) extends ShardEven
 
 final case class RecoveryStarted(ref: DatasetRef, shard: Int, node: ActorRef, progressPct: Int) extends ShardEvent
 
-/** TODO this is not granular enough. */
 final case class ShardDown(ref: DatasetRef, shard: Int, node: ActorRef) extends ShardEvent
-
-/** Used by ShardAssignmentStrategy to assign a temporary state. It's not until the
-  * `NodeClusterActor` receives a `MemberRemoved` that the `ShardCoordinatorActor`
-  * removes the node via its `ShardAssignmentStrategy`.
-  */
-final case class ShardMemberRemoved(ref: DatasetRef, shard: Int, node: ActorRef) extends ShardEvent
 
 sealed trait ShardStatus extends ShardAction {
   /**
@@ -92,7 +85,7 @@ case object ShardStatusAssigned extends ShardStatus {
     Seq(ShardAssignmentStarted(ref, shard, node))
 }
 
-case object ShardStatusNormal extends ShardStatus {
+case object ShardStatusActive extends ShardStatus {
   def minimalEvents(ref: DatasetRef, shard: Int, node: ActorRef): Seq[ShardEvent] =
     Seq(IngestionStarted(ref, shard, node))
 }

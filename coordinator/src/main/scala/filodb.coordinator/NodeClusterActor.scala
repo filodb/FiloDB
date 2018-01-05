@@ -100,8 +100,8 @@ object NodeClusterActor {
   private[coordinator] case object RecoverShardStates
 
   private[coordinator] final case class ActorArgs(singletonProxy: ActorRef,
-                                                             guardian: ActorRef,
-                                                             watcher: Option[ActorRef])
+                                                  guardian: ActorRef,
+                                                  watcher: ActorRef)
   /**
     * Creates a new NodeClusterActor.
     *
@@ -187,7 +187,7 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
   // subscribe to cluster changes, re-subscribe when restart
   override def preStart(): Unit = {
     super.preStart()
-    actors.watcher foreach(_ ! NodeProtocol.PreStart(self.path))
+    watcher ! NodeProtocol.PreStart(self.path)
     // Restore previously set up datasets and shards.  This happens in a very specific order so that
     // shard and dataset state can be recovered correctly.  First all the datasets are set up.
     // Then shard state is recovered, and finally cluster membership events are replayed.
@@ -206,12 +206,12 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
   override def postStop(): Unit = {
     super.postStop()
     cluster.unsubscribe(self)
-    watcher foreach(_ ! NodeProtocol.PostStop(self.path))
+    watcher ! NodeProtocol.PostStop(self.path)
   }
 
   override def preRestart(reason: Throwable, message: Option[Any]): Unit = {
     super.preRestart(reason, message)
-    watcher foreach(_ ! NodeProtocol.PreRestart(self.path, reason))
+    watcher ! NodeProtocol.PreRestart(self.path, reason)
   }
 
   private def withRole(role: String, requester: ActorRef)(f: Set[ActorRef] => Unit): Unit =

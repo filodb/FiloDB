@@ -3,6 +3,7 @@ package filodb.coordinator
 import akka.actor.{Actor, ActorRef, AddressFromURIString, Props}
 import akka.testkit.TestProbe
 import com.typesafe.config.ConfigFactory
+import org.scalatest.BeforeAndAfterEach
 
 import filodb.coordinator.NodeClusterActor.{DatasetResourceSpec, IngestionSource, SetupDataset}
 import filodb.core.DatasetRef
@@ -92,11 +93,11 @@ class ShardCoordinatorCumulativeStateSpec extends ShardCoordinatorSpec {
       expectMsgPF() {
         case CurrentShardSnapshot(ds, map) =>
           map.shardValues shouldEqual Seq(
-            (localCoordinator, ShardStatusNormal), (localCoordinator, ShardStatusNormal),
+            (localCoordinator, ShardStatusActive), (localCoordinator, ShardStatusActive),
             (ActorRef.noSender, ShardStatusUnassigned), (ActorRef.noSender, ShardStatusUnassigned))
 
           initialShards.forall { shard =>
-            map.statusForShard(shard) == ShardStatusNormal &&
+            map.statusForShard(shard) == ShardStatusActive &&
               map.coordForShard(shard) == localCoordinator &&
               map.assignedShards == initialShards &&
               !map.unassigned(shard)
@@ -116,7 +117,7 @@ class ShardCoordinatorCumulativeStateSpec extends ShardCoordinatorSpec {
       expectMsgPF() {
         case CurrentShardSnapshot(ds, map) =>
           initialShards.forall { shard =>
-            map.statusForShard(shard) == ShardStatusNormal &&
+            map.statusForShard(shard) == ShardStatusActive &&
               map.coordForShard(shard) == localCoordinator &&
               map.assignedShards == initialShards &&
               !map.unassigned(shard)
@@ -146,7 +147,7 @@ class ShardCoordinatorCumulativeStateSpec extends ShardCoordinatorSpec {
           initialShards.forall { shard =>
             !map.unassigned(shard) &&
               map.coordForShard(shard) == localCoordinator &&
-              map.statusForShard(shard) == ShardStatusNormal
+              map.statusForShard(shard) == ShardStatusActive
           } &&
           nextShards.forall { shard =>
             !map.unassigned(shard) &&
@@ -168,8 +169,8 @@ class ShardCoordinatorCumulativeStateSpec extends ShardCoordinatorSpec {
       expectMsgPF() {
         case CurrentShardSnapshot(ds, map) =>
           map.shardValues shouldEqual Seq(
-            (localCoordinator, ShardStatusNormal), (localCoordinator, ShardStatusNormal),
-            (downingCoordinator, ShardStatusNormal), (downingCoordinator, ShardStatusNormal))
+            (localCoordinator, ShardStatusActive), (localCoordinator, ShardStatusActive),
+            (downingCoordinator, ShardStatusActive), (downingCoordinator, ShardStatusActive))
       }
     }
     "not reassign already-assigned shards when adding a new dataset during AddDataset" in {
@@ -191,11 +192,10 @@ class ShardCoordinatorCumulativeStateSpec extends ShardCoordinatorSpec {
               dss.mapper.unassignedShards == nextShards &&
               dss.mapper.shardsForAddress(downingCoordinator.path.address).isEmpty &&
               dss.shards.forall { shard =>
-                dss.mapper.statusForShard(shard) == ShardStatusUnassigned &&
+                dss.mapper.statusForShard(shard) == ShardStatusDown &&
                   Option(dss.mapper.coordForShard(shard)).isEmpty &&
                   dss.mapper.unassigned(shard)
-              }
-          } shouldEqual true
+              }} shouldEqual true
       }
 
       shardActor ! GetSubscriptions
@@ -213,9 +213,9 @@ class ShardCoordinatorCumulativeStateSpec extends ShardCoordinatorSpec {
     }
     "update subscribers on MemberRemoved with ShardMemberRemoved => ShardStatusUnassigned" in {
       nextShards forall { shard =>
-        val unassignment = ShardMemberRemoved(dataset1, shard, downingCoordinator)
+        val unassignment = ShardDown(dataset1, shard, downingCoordinator)
         subscribers forall { _.expectMsgPF() {
-          case e: ShardMemberRemoved => e === unassignment
+          case e: ShardDown => e === unassignment
         }}
       } shouldEqual true
     }
@@ -291,12 +291,12 @@ class ShardCoordinatorCumulativeStateSpec extends ShardCoordinatorSpec {
               map.assignedShards shouldEqual initialShards ++ nextShards
               map.assignedShards forall { shard =>
                 map.activeShard(shard) &&
-                  map.statusForShard(shard) == ShardStatusNormal
+                  map.statusForShard(shard) == ShardStatusActive
               } shouldEqual true
 
               map.shardValues.sortBy(_._1) shouldEqual Seq(
-                (localCoordinator, ShardStatusNormal), (localCoordinator, ShardStatusNormal),
-                (thirdCoordinator, ShardStatusNormal), (thirdCoordinator, ShardStatusNormal))
+                (localCoordinator, ShardStatusActive), (localCoordinator, ShardStatusActive),
+                (thirdCoordinator, ShardStatusActive), (thirdCoordinator, ShardStatusActive))
           }
       }
     }
@@ -350,14 +350,16 @@ class ShardCoordinatorCumulativeStateSpec extends ShardCoordinatorSpec {
   }
 }
 
-class ShardCoordinatorActorSpec extends ShardCoordinatorSpec {
+class ShardCoordinatorActorSpec extends ShardCoordinatorSpec with BeforeAndAfterEach {
   import ShardSubscriptions._
+
+  override def beforeEach(): Unit = {
+    shardActor ! NodeProtocol.ResetState
+    expectMsg(NodeProtocol.StateReset)
+  }
 
   "ShardActor" must {
     "assign shards correctly when nodes added after dataset shard add" in {
-      shardActor ! NodeProtocol.ResetState
-      expectMsg(NodeProtocol.StateReset)
-
       // Add a dataset with no nodes
       val noOpSource = IngestionSource(classOf[NoOpStreamFactory].getName)
       val sd = SetupDataset(dataset1, resources, noOpSource)
@@ -451,7 +453,6 @@ trait ShardCoordinatorSpec extends AkkaSpec {
 
   protected val thirdCoordinator = node2.actorOf(Props[TestCoordinator], CoordinatorName)
   protected val thirdAddress = AddressFromURIString(s"akka.tcp://${system.name}@$host:2552")
-
 
   protected val subscriber1 = TestProbe()
   protected lazy val subscriber2 = TestProbe()

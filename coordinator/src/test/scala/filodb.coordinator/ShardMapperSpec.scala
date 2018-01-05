@@ -121,7 +121,7 @@ class ShardMapperSpec extends ActorTest(ShardMapperSpec.getNewSystem) {
     mapper1.activeShards(Seq(1, 2, 3, 4)) shouldEqual Seq(2, 3, 4)
     mapper1.numAssignedShards shouldEqual 3
 
-    mapper1.updateFromEvent(ShardMemberRemoved(dataset, 4, ref1)).isSuccess shouldEqual true
+    mapper1.updateFromEvent(ShardDown(dataset, 4, ref1)).isSuccess shouldEqual true
     mapper1.activeShards(Seq(1, 2, 3, 4)) shouldEqual Seq(2, 3)
     mapper1.numAssignedShards shouldEqual 1
     mapper1.coordForShard(4) shouldEqual ActorRef.noSender
@@ -181,7 +181,7 @@ class ShardMapperSpec extends ActorTest(ShardMapperSpec.getNewSystem) {
     map.updateFromEvent(RecoveryStarted(dataset, 3, ref2, 0)).isSuccess shouldEqual true
     map.numAssignedShards shouldEqual initialShards.size + nextShards.size
 
-    map.updateFromEvent(ShardMemberRemoved(dataset, 3, ref2)).isSuccess shouldEqual true
+    map.updateFromEvent(ShardDown(dataset, 3, ref2)).isSuccess shouldEqual true
     // Even when down, should be able to still access the node ref
     // so when would be free the shard for re-assignment other than a planned stop or end of a stream
     map.coordForShard(3) shouldEqual ActorRef.noSender

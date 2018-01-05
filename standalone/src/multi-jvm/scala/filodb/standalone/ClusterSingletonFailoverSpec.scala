@@ -9,7 +9,7 @@ import akka.remote.testkit.MultiNodeConfig
 import com.typesafe.config.{Config, ConfigFactory}
 import org.scalatest.time.{Millis, Seconds, Span}
 
-import filodb.coordinator.{CurrentShardSnapshot, ShardStatusNormal}
+import filodb.coordinator.{CurrentShardSnapshot, ShardStatusActive}
 import filodb.coordinator.client.{LocalClient}
 import filodb.coordinator.NodeClusterActor.SubscribeShardUpdates
 import filodb.core.Success
@@ -141,7 +141,7 @@ abstract class ClusterSingletonFailoverSpec extends StandaloneMultiJvmSpec(Clust
 
   it should "be able to validate the cluster status as normal via CLI" in {
     runOn(first) {
-      validateShardStatus(client1){ _ == ShardStatusNormal }
+      validateShardStatus(client1){ _ == ShardStatusActive }
     }
   }
 
@@ -185,7 +185,7 @@ abstract class ClusterSingletonFailoverSpec extends StandaloneMultiJvmSpec(Clust
 
         // TODO: change this when the NodeClusterActor receives and handles ShardRemoved etc. events
         // because then, the shards that are shut down status will change, and maybe get reassigned
-        validateShardStatus(client1){ _ == ShardStatusNormal }
+        validateShardStatus(client1){ _ == ShardStatusActive }
       }
       enterBarrier("check-new-singleton")
     }
@@ -202,7 +202,7 @@ abstract class ClusterSingletonFailoverSpec extends StandaloneMultiJvmSpec(Clust
   // TODO enable this test - future is timing out for some reason
   ignore should "be able to validate the cluster status as normal again via CLI" in {
     runOn(first) {
-      validateShardStatus(client1){ _ == ShardStatusNormal }
+      validateShardStatus(client1){ _ == ShardStatusActive }
     }
     enterBarrier("shard-normal-end-of-test")
   }

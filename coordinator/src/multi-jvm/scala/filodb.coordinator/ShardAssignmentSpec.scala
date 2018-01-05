@@ -95,33 +95,6 @@ abstract class ShardAssignmentClusterSingletonSpec
         }
       }
     }
-    "have expected cluster shard state on second after first MemberRemoved and update subscribers" is pending
-    /* Not implemented yet in the restart, part of another ticket.
-      runOn(second) {
-        info("Starting to test cluster singleton handover state to second")
-        import akka.pattern.ask
-        implicit val t: Timeout = defaultTimeout * 2
-
-        // can't call this until state transfer work is added
-        def registered: Seq[DatasetRef] = (clusterSingleton ? ListRegisteredDatasets).mapTo[Seq[DatasetRef]].futureValue
-
-        awaitAssert(registered shouldEqual Seq(ref), max = t.duration)
-        enterBarrier("registered-on-second-handover-singleton")
-
-        clusterSingleton ! GetShardMap(ref)
-        expectMsgPF(defaultTimeout) {
-          case CurrentShardSnapshot(ds, map) =>
-            map.allNodes shouldEqual Seq(address(second))
-            map.numAssignedShards shouldEqual 2
-            map.assignedShards shouldEqual Seq(2, 3)
-            map.unassignedShards shouldEqual Seq(0, 1)
-          //Seq(0, 1).forall(s => map.statusForShard(s) == ShardStatusUnassigned) shouldEqual true
-          //Seq(2, 3).forall(s => map.statusForShard(s) == ShardStatusNormal) shouldEqual true
-        }
-      }
-
-      enterBarrier("finished")
-      */
   }
 }
 

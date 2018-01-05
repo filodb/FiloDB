@@ -132,7 +132,7 @@ abstract class IngestionAndRecoverySpec extends StandaloneMultiJvmSpec(Ingestion
 
   it should "be able to validate the cluster status as normal via CLI" in {
     runOn(first) {
-      validateShardStatus(client1)(_ == ShardStatusNormal)
+      validateShardStatus(client1)(_ == ShardStatusActive)
     }
   }
 
@@ -235,7 +235,7 @@ abstract class IngestionAndRecoverySpec extends StandaloneMultiJvmSpec(Ingestion
 
   it should "be able to validate the cluster status as normal again via CLI" in {
     runOn(first) {
-      validateShardStatus(client2)(_ == ShardStatusNormal)
+      validateShardStatus(client2)(_ == ShardStatusActive)
     }
     enterBarrier("shard-normal-end-of-test")
   }

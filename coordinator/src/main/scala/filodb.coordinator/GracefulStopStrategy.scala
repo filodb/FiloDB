@@ -4,7 +4,7 @@ import scala.concurrent.Future
 
 import akka.actor.{ActorRef, PoisonPill, Terminated}
 import akka.actor.{Actor, DeadLetter}
-import akka.cluster.{Cluster, Member, MemberStatus}
+import akka.cluster.{Cluster, MemberStatus}
 import akka.cluster.ClusterEvent._
 import akka.event.LoggingReceive
 
@@ -47,7 +47,7 @@ trait GracefulStopStrategy extends BaseActor {
   }
 }
 
-// Impl and usage coming next commit
+/** TODO handle when singleton is in handover. */
 private[coordinator] final class NodeLifecycleStrategy(settings: FilodbSettings) extends BaseActor {
 
   val cluster = Cluster(context.system)
@@ -71,23 +71,24 @@ private[coordinator] final class NodeLifecycleStrategy(settings: FilodbSettings)
   }
 
   override def receive: Actor.Receive = LoggingReceive {
-    case MemberJoined(member) =>
-    case MemberUp(member) =>
-    case MemberLeft(member) =>
-    case MemberRemoved(member, previous) =>
-    case UnreachableMember(member) =>
-      logger.info(s"Member detected as unreachable: $member")
-    case ReachableMember(member) =>
-    case LeaderChanged(leader) =>
-    case e: DeadLetter => onDeadLetter(e)
-    case e: MemberEvent => // ignore others
-    case ClusterShuttingDown =>
+    case e: MemberUp          => onUp(e)
+    case e: UnreachableMember => onUnreachable(e)
+    case e: ReachableMember   => onReachable(e)
+    case e: MemberRemoved     => onRemoved(e)
+    case e: MemberEvent       => // ignore others
+    case e: DeadLetter        => onDeadLetter(e)
   }
 
   private def state = cluster.state
 
-  private def onMemberRemoved(member: Member): Unit =
-    member.status match {
+  private def onUp(e: MemberUp): Unit = {}
+
+  private def onUnreachable(e: UnreachableMember): Unit = {}
+
+  private def onReachable(e: ReachableMember): Unit = {}
+
+  private def onRemoved(e: MemberRemoved): Unit =
+    e.previousStatus match {
       case MemberStatus.Down =>
       case MemberStatus.Exiting =>
       case other =>
