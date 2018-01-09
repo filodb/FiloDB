@@ -69,7 +69,7 @@ class ShardMapper(val numShards: Int) extends Serializable {
   def coordForShard(shardNum: Int): ActorRef = shardMap(shardNum)
   def unassigned(shardNum: Int): Boolean = coordForShard(shardNum) == ActorRef.noSender
   def statusForShard(shardNum: Int): ShardStatus = statusMap(shardNum)
-
+  def numAssignedCoords: Int = (shardMap.toSet - ActorRef.noSender).size
   /**
     * Use this function to identify the list of shards to query given the shard key hash.
     *
@@ -132,6 +132,16 @@ class ShardMapper(val numShards: Int) extends Serializable {
       case (ref, shardNum) if ref != ActorRef.noSender && ref.path.address == addr => shardNum
     }
 
+  def shardsForCoord(coord: ActorRef): Seq[Int] =
+    shardMap.toSeq.zipWithIndex.collect {
+      case (ref, shardNum) if ref == coord => shardNum
+    }
+
+  def unassignShard(shard: Int): Try[Unit] = {
+    shardMap(shard) = ActorRef.noSender
+    Success(())
+  }
+
   /**
    * Returns all the shards that have not yet been assigned or in process of being assigned
    */
@@ -180,8 +190,7 @@ class ShardMapper(val numShards: Int) extends Serializable {
       Success(())
     case ShardDown(_, shard, node) =>
       statusMap(shard) = ShardStatusDown
-      removeNode(node)
-      Success(())
+      unassignShard(shard)
     case _ =>
       Success(())
   }

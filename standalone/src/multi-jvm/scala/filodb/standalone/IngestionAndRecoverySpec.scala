@@ -58,15 +58,17 @@ abstract class IngestionAndRecoverySpec extends StandaloneMultiJvmSpec(Ingestion
   import akka.testkit._
   import IngestionAndRecoveryMultiNodeConfig._
 
-  // Used for first start of servers on each node
+  // Used when servers are started first time
   lazy val server1 = new FiloServer()
-  lazy val server2 = new FiloServer()
   lazy val client1 = Client.standaloneClient(system, "127.0.0.1", 2552)
+
+  // Used when servers are restarted after shutdown
+  lazy val server2 = new FiloServer()
   lazy val client2 = Client.standaloneClient(system, "127.0.0.1", 2552)
 
   // Initializing a FilodbCluster to get a handle to the metastore and colstore so we can clear and validate data
   // It is not used beyond that. We never start this cluster.
-  val cluster = FilodbCluster(server1.cluster.system)
+  val cluster = FilodbCluster(system)
   val metaStore = cluster.metaStore
   val colStore = cluster.memStore.sink
   val numGroupsPerShard = cluster.settings.allConfig.getInt("filodb.memstore.groups-per-shard")
@@ -74,11 +76,11 @@ abstract class IngestionAndRecoverySpec extends StandaloneMultiJvmSpec(Ingestion
   // Test fields
   var query1Response: Double = 0
   val chunkDurationTimeout = FiniteDuration(chunkDuration.toMillis + 20000, TimeUnit.MILLISECONDS)
+  val producePatience = PatienceConfig(timeout = Span(10, Seconds), interval = Span(100, Millis))
 
   override def beforeAll(): Unit = multiNodeSpecBeforeAll()
 
   override def afterAll(): Unit = multiNodeSpecAfterAll()
-  val producePatience = PatienceConfig(timeout = Span(10, Seconds), interval = Span(100, Millis))
 
   "IngestionAndRecoverySpec Multi-JVM Test" should "clear data on node 1" in {
     runOn(first) {
@@ -102,7 +104,6 @@ abstract class IngestionAndRecoverySpec extends StandaloneMultiJvmSpec(Ingestion
   }
 
   it should "be able to bring up FiloServer on node 1" in {
-
     runOn(first) {
       server1.start()
       awaitAssert(server1.cluster.isInitialized shouldBe true, 5 seconds)

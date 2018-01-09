@@ -1,6 +1,7 @@
 package filodb.coordinator
 
 import scala.collection.mutable.{HashMap, HashSet}
+import scala.concurrent.Future
 
 import akka.actor._
 import akka.cluster.Cluster
@@ -85,6 +86,8 @@ object NodeClusterActor {
     */
   final case class SubscribeShardUpdates(ref: DatasetRef)
 
+  // TODO Important Bug: Unsubscribe was not handled here from earlier. Needs to be addressed in a new PR.
+
   /**
    * INTERNAL MESSAGES
    */
@@ -97,7 +100,6 @@ object NodeClusterActor {
 
   // Only use for testing, in before {} blocks
   private[coordinator] case object EverybodyLeave
-  private[coordinator] case object RecoverShardStates
 
   private[coordinator] final case class ActorArgs(singletonProxy: ActorRef,
                                                   guardian: ActorRef,
@@ -164,9 +166,7 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
                                        actors: NodeClusterActor.ActorArgs
                                       ) extends NamingAwareBaseActor {
 
-  import akka.pattern.{ask, pipe}
   import ActorName._, NodeClusterActor._, ShardSubscriptions._
-  import ShardAssignmentStrategy.DatasetShards
   import actors._
   import settings._
 
@@ -176,11 +176,9 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
   val roleToCoords = new HashMap[String, Set[ActorRef]]().withDefaultValue(Set.empty[ActorRef])
   val datasets = new HashMap[DatasetRef, Dataset]
   val sources = new HashMap[DatasetRef, IngestionSource]
+  val shardManager = new ShardManager(assignmentStrategy)
 
   private val initDatasets = new HashSet[DatasetRef]
-
-  /* TODO run on its own dispatcher .withDispatcher("akka.shard-status-dispatcher") */
-  val shardActor = context.actorOf(Props(new ShardCoordinatorActor(assignmentStrategy)), ShardName)
 
   import context.dispatcher
 
@@ -196,7 +194,7 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
              .map { configs =>
                initDatasets ++= configs.map(_.ref)
                configs.foreach { config => self ! SetupDataset(config) }
-               if (configs.isEmpty) self ! RecoverShardStates
+               if (configs.isEmpty) initiateShardStateRecovery()
              }.recover {
                case e: Exception =>
                  logger.error(s"Unable to restore ingestion state: $e\nTry manually setting up ingestion again", e)
@@ -250,7 +248,7 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
         roleToCoords.transform { case (_, refs) => refs - removedCoordinator }
         roleToCoords.retain { case (role, refs) => refs.nonEmpty }
 
-        shardActor ! ShardSubscriptions.RemoveMember(removedCoordinator)
+        shardManager.removeMember(removedCoordinator)
         case _ =>
           logger.warn(s"UNABLE TO REMOVE ${member.address} FROM memberRefs")
       }
@@ -266,24 +264,28 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
 
   def infoHandler: Receive = LoggingReceive {
     case ListRegisteredDatasets => sender() ! datasets.keys.toSeq
-    case GetShardMap(ref)       => shardActor.forward(GetSnapshot(ref))
+    case GetShardMap(ref)       => shardManager.sendSnapshot(ref, sender())
   }
 
   // The initial recovery handler: recover dataset setup/ingestion config first
   def datasetInitHandler: Receive = LoggingReceive {
-    case e: SetupDataset    => setupDataset(e, sender())
-    case e: DatasetAdded    => datasetSetup(e)
-                               initDatasets -= e.dataset.ref
-                               if (initDatasets.isEmpty) self ! RecoverShardStates
-    case RecoverShardStates => logger.info(s"Recovery of ingestion configs/datasets complete")
-                               sendShardStateRecoveryMessage()
-                               context.become(shardMapRecoveryHandler orElse subscriptionHandler)
+    case e: SetupDataset    => setupDataset(e, sender()) map { _ =>
+                                  initDatasets -= e.ref
+                                  if (initDatasets.isEmpty) initiateShardStateRecovery()
+                               }
+  }
+
+  private def initiateShardStateRecovery(): Unit = {
+    logger.info("Recovery of ingestion configs/datasets complete")
+    sendShardStateRecoveryMessage()
+    context.become(shardMapRecoveryHandler orElse subscriptionHandler)
   }
 
   def shardMapRecoveryHandler: Receive = LoggingReceive {
     case ms: NodeProtocol.MapsAndSubscriptions =>
-      ms.shardMaps foreach { case (ref, map) => shardActor ! RecoverShardState(ref, map) }
-      shardActor ! RecoverSubscriptions(ms.subscriptions)
+      ms.shardMaps foreach { case (ref, map) => shardManager.recoverShardState(ref, map) }
+      shardManager.recoverSubscriptions(ms.subscriptions)
+
       // NOW, subscribe to cluster membership state and then switch to normal receiver
       logger.info("Now subscribing to cluster events and switching to normalReceive")
       cluster.subscribe(self, initialStateMode = InitialStateAsEvents,
@@ -294,15 +296,13 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
   def shardMapHandler: Receive = LoggingReceive {
     case e: AddCoordinator        => addCoordinator(e)
     case e: SetupDataset          => setupDataset(e, sender())
-    case e: DatasetAdded          => datasetSetup(e)
-    case e: CoordinatorAdded      => coordinatorAdded(e)
-    case e: CoordinatorRemoved    => coordinatorRemoved(e)
   }
 
   def subscriptionHandler: Receive = LoggingReceive {
-    case e: ShardEvent            => shardActor.forward(e)
+    case e: ShardEvent            => shardManager.updateFromShardEventAndPublish(e)
     case e: SubscribeShardUpdates => subscribe(e.ref, sender())
-    case SubscribeAll             => shardActor.forward(SubscribeAll)
+    case SubscribeAll             => subscribeAll(sender())
+    case Terminated(subscriber)   => context unwatch subscriber
   }
 
   /** Send a message to recover the current shard maps and subscriptions from the Guardian of local node. */
@@ -318,8 +318,15 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
     *
     * Idempotent.
     */
-  private def subscribe(dataset: DatasetRef, subscriber: ActorRef): Unit =
-    shardActor ! ShardSubscriptions.Subscribe(subscriber, dataset)
+  private def subscribe(dataset: DatasetRef, subscriber: ActorRef): Unit = {
+    shardManager.subscribe(subscriber, dataset)
+    context watch subscriber
+  }
+
+  private def subscribeAll(subscriber: ActorRef): Unit = {
+    shardManager.subscribeAll(subscriber)
+    context watch subscriber
+  }
 
   /** Sets up the new coordinator, forwards to shard status actor to complete
     * its subscription setup. The coordinator is sent an ack.
@@ -330,86 +337,27 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
     logger.debug(s"Updated roleToCoords: $roleToCoords")
 
     if (e.roles contains nodeCoordRole) {
-      shardActor ! ShardSubscriptions.AddMember(e.coordinator, e.addr)
+      e.coordinator ! CoordinatorRegistered(singletonProxy)
+      shardManager.addMember(e.coordinator, e.addr)
+      memberRefs(e.addr) = e.coordinator
     }
   }
 
   /** Initiated by Client and Spark FiloDriver setup. */
-  private def setupDataset(setup: SetupDataset, origin: ActorRef): Unit =
+  private def setupDataset(setup: SetupDataset, origin: ActorRef): Future[Unit] = {
+    logger.info(s"Registering dataset ${setup.ref} with ingestion source ${setup.source}")
     (for { datasetObj    <- metaStore.getDataset(setup.ref)
            resp1         <- metaStore.writeIngestionConfig(setup.config) }
       yield {
-        shardActor ! AddDataset(setup, datasetObj, memberRefs.values.toSet, origin)
+        shardManager.addDataset(setup, datasetObj, origin)
+        datasets(setup.ref) = datasetObj
+        sources(setup.ref) = setup.source
       }).recover {
       case err: Dataset.BadSchema           => origin ! BadSchema(err.toString)
       case NotFoundError(what)              => origin ! DatasetUnknown(setup.ref)
       case t: Throwable                     => origin ! MetadataException(t)
     }
-
-  private def datasetSetup(e: DatasetAdded): Unit = {
-    val ref = e.dataset.ref
-    logger.info(s"Registering dataset $ref with ingestion source ${e.source}")
-    datasets(ref) = e.dataset
-    sources(ref) = e.source
-
-    // TODO inspect diff for new members not known at time of initial ds setup
-    sendDatasetSetup(memberRefs.values.toSet, e.dataset, e.source)
-    e.ackTo ! DatasetVerified
-    sendStartCommand(e.shards, ref)
   }
-
-  /** Called after a new coordinator is added and shard assignment strategy has
-    * added the node and returns updates.
-    *
-    * NOTE: we send not our own ActorRef, but rather that of the cluster singleton proxy.
-    * This enables coordinator/IngestionActor shard event updates to be more resilient.
-    * The proxy buffers messages if the singleton is not available, and is a stable ref if the singleton moves.
-    *
-    * INTERNAL API. Idempotent.
-    */
-  private def coordinatorAdded(e: CoordinatorAdded): Unit = {
-    e.coordinator ! CoordinatorRegistered(singletonProxy)
-
-    // NOTE: it's important that memberRefs happens here, after CoordinatorRegistered is sent out, and not before
-    // otherwise a race condition happens where SetupDataset could be sent to coords before it gets hello, and then
-    // the SetupDataset will fail
-    memberRefs(e.addr) = e.coordinator
-    val oneAdded = Set(e.coordinator)
-    for {
-      DatasetShards(ref, _, shards) <- e.shards
-    } {
-      sendDatasetSetup(oneAdded, datasets(ref), sources(ref))
-      sendStartCommand(Map(e.coordinator -> shards), ref)
-    }
-  }
-
-  /** Called after an existing coordinator is removed, shard assignment
-    * strategy has removed the node and returns updates.
-    */
-  private def coordinatorRemoved(e: CoordinatorRemoved): Unit =
-    for {
-      dss   <- e.shards
-      shard <- dss.shards
-    } e.coordinator ! StopShardIngestion(dss.ref, shard)
-
-  /** Called on successful AddNodeCoordinator and SetupDataset protocols.
-    *
-    * @param coords the current cluster members
-    * @param dataset the Dataset object
-    * @param source the ingestion source type to use
-    */
-  private def sendDatasetSetup(coords: Set[ActorRef], dataset: Dataset, source: IngestionSource): Unit = {
-    logger.info(s"Sending setup message for ${dataset.ref} to coordinators $coords.")
-    val setupMsg = IngestionCommands.DatasetSetup(dataset.asCompactString, source)
-    coords.foreach(_ ! setupMsg)
-  }
-
-  /** If no shards are assigned to a coordinator, no commands are sent. */
-  private def sendStartCommand(coords: Map[ActorRef, Seq[Int]], ref: DatasetRef): Unit =
-    for {
-      (coord, shards) <- coords
-      shard           <- shards.toList
-    } coord ! StartShardIngestion(ref, shard, None)
 
   def routerEvents: Receive = LoggingReceive {
     case ForwardToOne(role, msg) =>
@@ -442,7 +390,8 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
       sources.clear()
 
       implicit val timeout: Timeout = DefaultTaskTimeout
-      (shardActor ? NodeProtocol.ResetState) pipeTo origin
+      shardManager.reset()
+      origin ! NodeProtocol.StateReset
   }
 
   def normalReceive: Receive = membershipHandler orElse shardMapHandler orElse infoHandler orElse

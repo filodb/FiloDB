@@ -123,7 +123,7 @@ class ShardMapperSpec extends ActorTest(ShardMapperSpec.getNewSystem) {
 
     mapper1.updateFromEvent(ShardDown(dataset, 4, ref1)).isSuccess shouldEqual true
     mapper1.activeShards(Seq(1, 2, 3, 4)) shouldEqual Seq(2, 3)
-    mapper1.numAssignedShards shouldEqual 1
+    mapper1.numAssignedShards shouldEqual 2
     mapper1.coordForShard(4) shouldEqual ActorRef.noSender
   }
 

@@ -22,7 +22,7 @@ class SupervisorSpec extends AkkaSpec {
   private lazy val factory = StoreFactory(settings, Scheduler.io("test"))
   private lazy val metaStore: MetaStore = factory.metaStore
   private lazy val memStore = factory.memStore
-  private lazy val assignmentStrategy = new DefaultShardAssignmentStrategy
+  private lazy val assignmentStrategy = DefaultShardAssignmentStrategy
   private lazy val coordinatorProps = NodeCoordinatorActor.props(metaStore, memStore, config)
   private lazy val guardianProps = NodeGuardian.props(settings, metaStore, memStore, assignmentStrategy)
   private lazy val cluster = Cluster(system)

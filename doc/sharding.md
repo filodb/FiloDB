@@ -23,9 +23,10 @@ This action provisions the new dataset and adds it as a subscription users can s
 to and receive shard change events on for that dataset. The `NodeClusterActor` provides the 
 API for client interaction with the shard information per dataset. 
 
-The [ShardCoordinatorActor](../coordinator/src/main/scala/filodb.coordinator/ShardCoordinatorActor.scala) 
-manages the following for its parent, the cluster singleton, 
-[NodeClusterActor](../coordinator/src/main/scala/filodb.coordinator/NodeClusterActor.scala)
+The [NodeClusterActor](../coordinator/src/main/scala/filodb.coordinator/NodeClusterActor.scala) delegates shard 
+coordination operations to [ShardManager](../coordinator/src/main/scala/filodb.coordinator/ShardManager.scala) 
+a synchronous helper class that is responsible for orchestrating the shard assignment events. It also is the owner
+for the shard assignment state within the NodeClusterActor. It manages:
 
 * The [ShardMapper(s)](../coordinator/src/main/scala/filodb.coordinator/ShardMapper.scala) for each dataset
 * The Subscription for each dataset to publish shard state events to subscribers
@@ -41,16 +42,28 @@ ShardMappers internally manage
 And other related dataset shard state. Commands are sent by the `NodeClusterActor` 
 to the right nodes upon events or changes to the cluster. 
 For example a new node joins, StartShardIngestion might be sent.
+
+To better understand interactions between NodeClusterActor, ShardManager, ShardAssignmentStrategy and NodeCoordinator
+see the documented [Shard Coordination Sequence Diagram](mermaid/shard-coordination.mermaid.png) 
    
 ## Shard Assignment
-A [ShardAssignmentStrategy](../coordinator/src/main/scala/filodb.coordinator/ShardAssignmentStrategy.scala) is responsible for assigning or removing shards to/from nodes based on some
-policy, when state changes occur. Initial shards are assigned by the configured `ShardAssignmentStrategy`.
 
-In the `DefaultShardAssignmentStrategy` implementation, shard assignment is based on the number of healthy 
-member nodes in a FiloDB cluster, the shard to node ratio, and the number of unassigned shards. This 
-strategy will allocate resources to a dataset when a minimum of N nodes are up. It is informed
-on each node added and removed by the `ShardCoordinatorActor`. Custom implementations can be configured. 
-   
+The ShardManager delegates shard assignment decisions to a [ShardAssignmentStrategy](../coordinator/src/main/scala/filodb.coordinator/ShardAssignmentStrategy.scala) 
+implementation. This trait has one method, that makes shard assignment recommendation for one dataset and one worker
+node at a time. The ShardManager is responsible for sequencing the assignment recommendations for all worker nodes
+whenever shards need to be assigned to nodes. It then makes the state change based on these recommendations. It is 
+important that state change be applied for one node prior to fetching recommendations for next node. This is important
+since the assignment strategy is designed to be functional and stateless. The assignment state is owned by the 
+ShardManager. 
+
+In the `DefaultShardAssignmentStrategy` implementation, shards are eagerly assigned to nodes after making sure that
+shards are evenly spread as much as possible among the nodes. If shards go down, and reassignment needs to be done,
+the assignment strategy will also try to find room on nodes that were incompletely filled.
+
+The ShardManager must seek recommendations for assignment in reverse order of deployment in order to aid smooth
+rolling upgrades, which will be carried out by bringing up a new version node before bringing down an old version node.
+More recently deployed nodes are given preference for shard assignment. 
+
 ### Shard Event Subscriptions
 It is possible to subscribe to shard events for any user-defined datasets, for example to know when an ingestion stream
 has started for a dataset, is down, encountered an error, is recovering or has stopped. This functionality allows
@@ -64,8 +77,7 @@ several things including:
 
 #### Subscribe to Shard Status Events
 To subscribe to shard events, a client sends a `SubscribeShardUpdates(ref: DatasetRef)` to the `NodeClusterActor` (a cluster singleton).
-The `ShardCoordinatorActor` (child of cluster singleton) acks the subscriber request 
-with a `CurrentShardSnapshot(ref: DatasetRef, latestMap: ShardMapper)`. `CurrentShardSnapshot` is sent once to newly-subscribed subscribers to initialize their local `ShardMapper`.
+The `ShardManager` acks the subscriber request with a `CurrentShardSnapshot(ref: DatasetRef, latestMap: ShardMapper)`. `CurrentShardSnapshot` is sent once to newly-subscribed subscribers to initialize their local `ShardMapper`.
 
 ```
 clusterActor ! SubscribeShardUpdates(dataset)
@@ -92,7 +104,7 @@ These events are subscribed to by QueryActors, etc. For example in Spark, execut
       
 Each `ShardMapper` maps each shard to the ActorRef of the `NodeCoordinatorActor` of the FiloDB node holding that shard. 
 The [Shard Status](../coordinator/src/main/scala/filodb.coordinator/ShardStatus.scala#L65-L94) of the shards are updated
-internally by FiloDB via the `ShardCoordinatorActor` and `ShardAssignmentStrategy`. Subscribers
+internally by FiloDB via `ShardManager`. Subscribers
 can maintain their own local copy for a dataset if needed, and leverage the events:
 
 ```
@@ -107,7 +119,7 @@ def receive: Actor.Receive = {
 ```
 
 #### Unsubscribe to Shard Status Events
-A subscriber can unsubscribe at any time by sending the `ShardCoordinatorActor` a `Unsubscribe(self)` command,
+A subscriber can unsubscribe at any time by sending the `NodeClusterActor` a `Unsubscribe(self)` command,
 which will unsubscribe from all the subscriber's subscriptions. Unsubscribe happens automatically when a subscriber actor
 is terminated for any reason. This is also true for all `NodeCoordinatorActor`s.
 
@@ -116,12 +128,12 @@ Any subscriber that has terminated is automatically removed.
 
 ## Cluster/Shard State Recovery
 
-The `NodeClusterActor` and `ShardCoordinatorActor` are both singletons and only one instance lives in the Akka/FiloDB Cluster at any one time.  They contain important state such as shard maps and current subscriptions to shard status updates.  What if the node containing the singleton dies?  
+The `NodeClusterActor` and `ShardManager` are both singletons and only one instance lives in the Akka/FiloDB Cluster at any one time.  They contain important state such as shard maps and current subscriptions to shard status updates.  What if the node containing the singleton dies?  
 
 Here is what happens:
 
 1. When each node starts up, its `NodeGuardian` subscribes to all shard status and subscription updates from the singletons.
-2. As the shard status updates and new subscribers come online, the `ShardCoordinatorActor` sends updates to all the `NodeGuardian` subscribers.
+2. As the shard status updates and new subscribers come online, the `ShardManager` sends updates to all the `NodeGuardian` subscribers.
 3. The node containing the singletons goes down.  Akka sends `Unreachable` and other cluster membership events, though this won't be noticed because the node is down.
 4. Eventually, Akka's ClusterSingletonManager notices the node is down and restarts the singletons on a different node.  When it is restarted, it has none of the previous state.
 5. The `NodeClusterActor` first recovers previous streaming ingestion configs from the `MetaStore`, which is probably Cassandra.

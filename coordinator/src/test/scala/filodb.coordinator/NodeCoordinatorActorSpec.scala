@@ -25,11 +25,9 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
 
   import akka.testkit._
 
-  import ActorName.ShardName
   import DatasetCommands._
   import IngestionCommands._
   import NodeClusterActor._
-  import ShardSubscriptions._
   import GdeltTestData._
 
   implicit val defaultPatience =
@@ -52,12 +50,14 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
   implicit val ec = cluster.ec
   implicit val context = scala.concurrent.ExecutionContext.Implicits.global
 
-  val strategy = new DefaultShardAssignmentStrategy
-  val shardActor = system.actorOf(Props(new ShardCoordinatorActor(new DefaultShardAssignmentStrategy)), ShardName)
+  val strategy = DefaultShardAssignmentStrategy
+  protected val shardManager = new ShardManager(DefaultShardAssignmentStrategy)
+
+
   val clusterActor = system.actorOf(Props(new Actor {
     def receive: Receive = {
-      case SubscribeShardUpdates(ref) => shardActor ! ShardSubscriptions.Subscribe(sender(), ref)
-      case e: ShardEvent              => shardActor.forward(e)
+      case SubscribeShardUpdates(ref) => shardManager.subscribe(sender(), ref)
+      case e: ShardEvent              => shardManager.updateFromShardEventNoPublish(e)
     }
   }))
   var coordinatorActor: ActorRef = _
@@ -76,18 +76,14 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
     shardMap.clear()
 
     coordinatorActor = system.actorOf(nodeCoordProps, s"test-node-coord-${System.nanoTime}")
-
-    shardActor ! AddMember(coordinatorActor, selfAddress)
-    expectMsg(CoordinatorAdded(coordinatorActor, Seq.empty, selfAddress))
     coordinatorActor ! CoordinatorRegistered(clusterActor)
 
+    shardManager.addMember(coordinatorActor, selfAddress)
     probe = TestProbe()
   }
 
   override def afterEach(): Unit = {
-    shardActor ! NodeProtocol.ResetState
-    expectMsg(NodeProtocol.StateReset)
-
+    shardManager.reset()
     gracefulStop(coordinatorActor, 3.seconds.dilated, PoisonPill).futureValue
   }
 
@@ -95,25 +91,10 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
     val resources = DatasetResourceSpec(numShards, 1)
     val noOpSource = IngestionSource(classOf[NoOpStreamFactory].getName)
     val sd = SetupDataset(dataset.ref, resources, noOpSource)
-    shardActor ! AddDataset(sd, dataset, Set(coordinatorActor), self)
-    val added = expectMsgPF() {
-      case e: DatasetAdded =>
-        probe.send(coordinatorActor, IngestionCommands.DatasetSetup(dataset.asCompactString))
-        e
-    }
-    shardActor ! Subscribe(probe.ref, dataset.ref)
+    shardManager.addDataset(sd, dataset, self)
+    shardManager.subscribe(probe.ref, dataset.ref)
     probe.expectMsgPF() { case CurrentShardSnapshot(ds, mapper) =>
       shardMap = mapper
-    }
-
-    added.shards(coordinatorActor) foreach { shard =>
-      probe.send(coordinatorActor, StartShardIngestion(dataset.ref, shard, None))
-      probe.expectMsgPF() {
-        case e: IngestionStarted =>
-          shardMap.updateFromEvent(e)
-          e.node shouldEqual coordinatorActor
-          e.shard shouldEqual shard
-      }
     }
   }
 
@@ -378,9 +359,11 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
 
     EventFilter[NumberFormatException](occurrences = 1) intercept {
       probe.send(coordinatorActor, IngestRows(ref, 0, records(dataset1, readers ++ Seq(badLine))))
-      // This should trigger an error, and datasetCoordinatorActor will stop.  A stop event will come.
-      probe.expectMsgClass(classOf[IngestionStopped])
+      // This should trigger an error, and datasetCoordinatorActor will stop.  A stop event will come and cause
+      // shard status to be updated
     }
+
+    shardManager.shardMappers(ref).statusForShard(0) shouldEqual ShardStatusStopped
 
     // Now, if we send more rows, we will get UnknownDataset
     probe.send(coordinatorActor, IngestRows(ref, 0, records(dataset1)))

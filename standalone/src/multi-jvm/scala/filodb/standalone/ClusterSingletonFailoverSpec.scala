@@ -126,7 +126,7 @@ abstract class ClusterSingletonFailoverSpec extends StandaloneMultiJvmSpec(Clust
     info(s"All nodes initialized, address = ${server.cluster.selfAddress}")
   }
 
-  it should "be able to set up dataset successfully on node 1" in {
+  it should "be able to set up dataset successfully on node 2" in {
     // NOTE: for some reason this does not work when run from a node other than the singleton node
     runOn(second) {
       setupDataset(client1)
@@ -150,7 +150,7 @@ abstract class ClusterSingletonFailoverSpec extends StandaloneMultiJvmSpec(Clust
       runOn(first) {
         val producePatience = PatienceConfig(timeout = Span(10, Seconds), interval = Span(100, Millis))
         TestTimeseriesProducer.produceMetrics(1000, 100, 400).futureValue(producePatience)
-        info("Waiting for chunk-duration to pass so checkpoints for all groups are created")
+        info("Waiting for ingest-duration to pass")
         Thread.sleep(ingestDuration.toMillis)
       }
       enterBarrier("data1-ingested")

@@ -1,0 +1,66 @@
+sequenceDiagram
+participant NodeClusterActor
+participant ShardManager
+participant ShardAssignmentStrategy
+participant NodeCoordinatorActor1
+
+note over NodeClusterActor: This is Member Addition
+activate NodeClusterActor
+NodeClusterActor->>NodeClusterActor : Add member to list of nodeCoords
+NodeClusterActor->>+ShardManager: addMember(newCoord)
+note over ShardManager: ShardManager is the owner of shardMapping state
+loop for each dataset
+    ShardManager ->> ShardManager: Add empty mapping for newCoord in mapper
+    ShardManager ->>+ShardAssignmentStrategy: getAssignmentsFor(dataset, coord, mapper)
+    note over ShardAssignmentStrategy: This method is simply concerned about next assignment\n to perform given current assignment state
+    ShardAssignmentStrategy-->>-ShardManager: Seq[ShardAssignmentChange]
+    ShardManager ->> ShardManager: shardMapping = update(currentShardMapping, \nshardAssignmentChanges)
+    ShardManager ->> ShardManager : Publish ShardAssignmentStarted Event to subscribers
+    ShardManager -x NodeCoordinatorActor1 : For each shard assigned, send DatasetSetup to coord
+    ShardManager -x NodeCoordinatorActor1 : For each shard assigned, send StartShardIngestion to coord
+end
+ShardManager-->>-NodeClusterActor : done
+NodeClusterActor->>NodeCoordinatorActor1 : Here is the singleton address in CoordinatorRegistered
+NodeClusterActor->>NodeClusterActor : Add coord ref to cluster state
+deactivate NodeClusterActor
+
+note over NodeClusterActor: This is Dataset Addition
+
+activate NodeClusterActor
+NodeClusterActor->>+ShardManager : addDataset(coords dataset)
+ShardManager->>ShardManager : initialize empty state for dataset
+loop for each coord (in reverse deployment order)
+    loop for each dataset
+        ShardManager ->> ShardManager: Add empty mapping to mapper for coord
+        ShardManager ->>+ ShardAssignmentStrategy: getAssignmentsFor(dataset, coord, mapper)
+        ShardAssignmentStrategy-->>-ShardManager: Seq[ShardAssignmentChange]
+        ShardManager ->> ShardManager: shardMapping = update(currentShardMapping, \nshardAssignmentChanges)
+        ShardManager ->> ShardManager : Publish ShardAssignmentStarted Event to subscribers
+        ShardManager -x NodeCoordinatorActor1 : For each shard assigned, send DatasetSetup to coord
+        ShardManager -x NodeCoordinatorActor1 : For each shard assigned, send StartShardIngestion to coord
+    end
+end
+ShardManager -->>-NodeClusterActor : done
+deactivate NodeClusterActor
+
+note over NodeClusterActor: This is Member Removal
+
+activate NodeClusterActor
+NodeClusterActor->>+ShardManager : removeMember(removedCoord)
+loop for each dataset
+    ShardManager ->> ShardManager : Update ShardMapper and remove \nassignments for removedCoord
+    ShardManager ->> ShardManager : Publish ShardDown Event to subscribers
+    ShardManager ->> NodeCoordinatorActor1 : For each removed shard, send StopShardIngestion (this may not be delivered after all since node is down)
+    loop for each coord(in reverse deployment order)
+        ShardManager->>+ShardAssignmentStrategy: getAssignmentsFor(dataset, coord, mapper)
+        ShardAssignmentStrategy-->>-ShardManager: Seq[ShardAssignmentChange]
+        ShardManager->>ShardManager: shardMapping = update(currentShardMapping, shardAssignmentChanges)
+        ShardManager->>ShardManager : Publish ShardAssignmentStarted Event to subscribers
+        ShardManager -x NodeCoordinatorActor1 : For each shard assigned, send DatasetSetup to coord
+        ShardManager -x NodeCoordinatorActor1 : For each shard assigned, send StartShardIngestion to coord
+    end
+end
+ShardManager -->>-NodeClusterActor : done
+NodeClusterActor ->>NodeClusterActor : Remove removedCoord ref from list of coords
+deactivate NodeClusterActor
+
