@@ -93,6 +93,20 @@ class ShardMapperSpec extends ActorTest(ShardMapperSpec.getNewSystem) {
     mapper1.partitionToShardNode("123456".hashCode) should equal (ShardAndNode(21, ref2))
   }
 
+  it("can return shardKeyHash given a input") {
+    var tags = new java.util.HashMap[String, String](2)
+    tags.put("tagkey1", "value1")
+    tags.put("job", "somejobname")
+    tags.put("tagkey2", "value2")
+    tags.put("__name__", "someevent")
+    tags.put("tagkey3", "value3")
+
+    ShardKeyGenerator.shardKeyHash(tags, "job", "__name__") should equal (71981721)
+    ShardKeyGenerator.shardKeyHash(tags, "notjob", "__name__") should not equal (71981721)
+    ShardKeyGenerator.shardKeyHash(tags, "sometagkey", "job", "__name__") should equal (71981721)
+    ShardKeyGenerator.shardKeyHash(tags, "job", "anotherKey", "__name__") should equal (71981721)
+  }
+
   it("can remove new nodes added and return which shards removed") {
     val mapper1 = new ShardMapper(64)
     mapper1.registerNode(Seq(0, 10, 20), ref1).isSuccess should be (true)

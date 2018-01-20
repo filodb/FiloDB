@@ -260,3 +260,22 @@ private[filodb] object ShardMapper {
   final case class ShardError(event: ShardEvent, context: String)
     extends Exception(s"$context [shard=${event.shard}, event=$event]")
 }
+
+object ShardKeyGenerator {
+
+  /**
+    * Use the function to calculate the shard key hash for the given time series key-value pair map.
+    *
+    * @param tags             This is the input key-value pair map of time series
+    * @param shardKeyColumns  This is the list of columns against which the shard key hash will be calculated
+    * @return The shard key hash that is calculated from the given shard key column of the time series tags
+    */
+  def shardKeyHash(tags: java.util.Map[String, String], shardKeyColumns: String*): Int = {
+    var shardKeyHash = 7
+    shardKeyColumns.foreach { shardKey =>
+      if (tags.containsKey(shardKey)) shardKeyHash = 31 * shardKeyHash + tags.get(shardKey).hashCode
+    }
+    shardKeyHash
+  }
+
+}
