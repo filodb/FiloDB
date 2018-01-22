@@ -2,6 +2,7 @@ package filodb.cassandra.metastore
 
 import scala.concurrent.{ExecutionContext, Future}
 
+import com.datastax.driver.core.ConsistencyLevel
 import com.typesafe.config.Config
 
 import filodb.cassandra.{DefaultFiloSessionProvider, FiloSessionProvider}
@@ -17,9 +18,10 @@ import filodb.core.store.{IngestionConfig, MetaStore}
  */
 class CassandraMetaStore(config: Config, filoSessionProvider: Option[FiloSessionProvider] = None)
                         (implicit val ec: ExecutionContext) extends MetaStore {
+  private val ingestionConsistencyLevel = ConsistencyLevel.valueOf(config.getString("ingestion-consistency-level"))
   private val sessionProvider = filoSessionProvider.getOrElse(new DefaultFiloSessionProvider(config))
   val datasetTable = new DatasetTable(config, sessionProvider)
-  val checkpointTable = new CheckpointTable(config, sessionProvider)
+  val checkpointTable = new CheckpointTable(config, sessionProvider, ingestionConsistencyLevel)
   val sourcesTable = new IngestionConfigTable(config, sessionProvider)
 
   val defaultKeySpace = config.getString("keyspace")

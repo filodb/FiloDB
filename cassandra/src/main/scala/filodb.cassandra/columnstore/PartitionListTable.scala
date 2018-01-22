@@ -2,7 +2,7 @@ package filodb.cassandra.columnstore
 
 import scala.concurrent.{ExecutionContext, Future}
 
-import com.datastax.driver.core.{BatchStatement, Row}
+import com.datastax.driver.core.{BatchStatement, ConsistencyLevel, Row}
 import monix.reactive.Observable
 
 import filodb.cassandra.FiloCassandraConnector
@@ -20,8 +20,10 @@ import filodb.core.metadata.Dataset
   * Partition keys are stored against a shard number and a consistently hashed stripe number as well.
   * To fetch all partition keys for a shard, we issue a read for each stripe for the shard.
   */
-sealed class PartitionListTable(val dataset: DatasetRef, val connector: FiloCassandraConnector)
-                       (implicit ec: ExecutionContext) extends BaseDatasetTable {
+sealed class PartitionListTable(val dataset: DatasetRef,
+                                val connector: FiloCassandraConnector,
+                                writeConsistencyLevel: ConsistencyLevel)
+                                (implicit ec: ExecutionContext) extends BaseDatasetTable {
   import scala.collection.JavaConverters._
 
   import filodb.cassandra.Util._
@@ -42,6 +44,7 @@ sealed class PartitionListTable(val dataset: DatasetRef, val connector: FiloCass
   lazy val readCql = session.prepare(s"SELECT partition FROM $tableString WHERE shard = ? and stripe = ?")
   lazy val writePartitionCql = session.prepare(
     s"INSERT INTO $tableString (shard, stripe, partition) VALUES (?, ?, ?)")
+    .setConsistencyLevel(writeConsistencyLevel)
 
   lazy val deletePartitionCql = session.prepare(
     s"DELETE FROM $tableString WHERE shard = ? and stripe = ? and partition = ?")
@@ -60,7 +63,7 @@ sealed class PartitionListTable(val dataset: DatasetRef, val connector: FiloCass
     partitions.foreach { p =>
       batchStatement.add(writePartitionCql.bind(Int.box(shard), Int.box(stripe), toBuffer(p)))
     }
-    connector.execStmt(batchStatement)
+    connector.execStmtWithRetries(batchStatement)
   }
 
   def deletePartitions(shard: Int, stripe: Int, partitions: Seq[Types.PartitionKey]): Future[Response] = {

@@ -5,7 +5,7 @@ import java.nio.ByteBuffer
 
 import scala.concurrent.{ExecutionContext, Future}
 
-import com.datastax.driver.core.BoundStatement
+import com.datastax.driver.core.{BoundStatement, ConsistencyLevel}
 import monix.reactive.Observable
 
 import filodb.cassandra.FiloCassandraConnector
@@ -18,7 +18,9 @@ import filodb.core.store.{compress, decompress, ChunkSinkStats, SingleChunkInfo}
  * Data is stored in a columnar fashion similar to Parquet -- grouped by column.  Each
  * chunk actually stores many many rows grouped together into one binary chunk for efficiency.
  */
-sealed class ChunkTable(val dataset: DatasetRef, val connector: FiloCassandraConnector)
+sealed class ChunkTable(val dataset: DatasetRef,
+                        val connector: FiloCassandraConnector,
+                        writeConsistencyLevel: ConsistencyLevel)
                        (implicit ec: ExecutionContext) extends BaseDatasetTable {
   import collection.JavaConverters._
 
@@ -43,7 +45,7 @@ sealed class ChunkTable(val dataset: DatasetRef, val connector: FiloCassandraCon
   lazy val writeChunksCql = session.prepare(
     s"""INSERT INTO $tableString (partition, chunkid, columnid, data
       |) VALUES (?, ?, ?, ?)""".stripMargin
-  )
+  ).setConsistencyLevel(writeConsistencyLevel)
 
   def writeChunks(partition: Types.PartitionKey,
                   chunkId: Types.ChunkID,
@@ -55,20 +57,22 @@ sealed class ChunkTable(val dataset: DatasetRef, val connector: FiloCassandraCon
       val finalBytes = compressChunk(bytes)
       chunkBytes += finalBytes.capacity.toLong
       writeChunksCql.bind(partBytes, chunkId: jlLong, columnId: jlInt, finalBytes)
-    }.toSeq
+    }
     stats.addChunkWriteStats(statements.length, chunkBytes)
-    connector.execStmt(unloggedBatch(statements))
+    connector.execStmtWithRetries(unloggedBatch(statements).setConsistencyLevel(writeConsistencyLevel))
   }
 
   lazy val readChunkInCql = session.prepare(
                                  s"""SELECT chunkid, data FROM $tableString WHERE
                                   | columnid = ? AND partition = ?
                                   | AND chunkid IN ?""".stripMargin)
+                              .setConsistencyLevel(ConsistencyLevel.ONE)
 
   lazy val readChunkRangeCql = session.prepare(
                                  s"""SELECT chunkid, data FROM $tableString WHERE
                                   | columnid = ? AND partition = ?
                                   | AND chunkid >= ? AND chunkid <= ?""".stripMargin)
+                              .setConsistencyLevel(ConsistencyLevel.ONE)
 
   def readChunks(partition: Types.PartitionKey,
                  columnId: Int,

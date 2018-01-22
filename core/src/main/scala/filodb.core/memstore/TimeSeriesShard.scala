@@ -12,7 +12,7 @@ import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
 
-import filodb.core.{DatasetRef, ErrorResponse, Response, Success}
+import filodb.core.{DataDropped, DatasetRef, ErrorResponse, Response, Success}
 import filodb.core.Types.PartitionKey
 import filodb.core.metadata.Dataset
 import filodb.core.query.PartitionKeyIndex
@@ -211,36 +211,10 @@ class TimeSeriesShard(dataset: Dataset, config: Config, val shardNum: Int, sink:
     // Given the flush group, create an observable of ChunkSets
     val chunkSetIt = new PartitionIterator(partitionGroups(flushGroup.groupNum).intIterator)
       .flatMap(_.makeFlushChunks(blockHolder))
-    chunkSetIt.isEmpty match {
+    val tracer = Kamon.tracer.newContext("chunk-flush-task-latency-after-retries", None, shardStats.tags)
+    val taskToReturn = chunkSetIt.isEmpty match {
       case false =>
-        val chunkSetStream = Observable.fromIterator (chunkSetIt)
-        logger.debug(s"Created flush ChunkSets stream for group ${flushGroup.groupNum} in shard $shardNum")
-
-        // Write the stream and partition keys to the sink, checkpoint, mark buffers as eligible for cleanup
-
-        val partKeysInGroup =
-          new PartitionIterator(partKeysToFlush(flushGroup.groupNum)(1).intIterator()).map(_.binPartition)
-        val writePartKeyFuture = sink.addPartitions(dataset, partKeysInGroup, shardNum)
-        val writeChunksFuture = sink.write(dataset, chunkSetStream)
-        val combined = Future.sequence(Seq(writeChunksFuture, writePartKeyFuture))
-        val taskFuture = combined flatMap {
-          case Seq(Success, Success)    => commitCheckpoint(dataset.ref, shardNum, flushGroup)
-          case Seq(e: ErrorResponse, _) => shardStats.flushesFailedChunkWrite.increment
-                                           throw FlushError (e)
-          case Seq(_, e: ErrorResponse) => shardStats.flushesFailedPartWrite.increment
-                                           throw FlushError (e)
-        } map {
-          case Success => blockHolder.markUsedBlocksReclaimable ()
-                          shardStats.flushesSuccessful.increment
-                          Success
-          //TODO What does it mean for the flush to fail.
-          //Flush fail means 2 things. The write to the sink failed or writing the checkpoint failed.
-          //We need to add logic to retry these aspects. If the retry succeeds we need mark the blocks reusable.
-          //If the retry fails, we are in a bad state. We have to discards both the buffers and blocks, reingest.
-          case e: ErrorResponse => shardStats.flushesFailedOther.increment
-                                   throw FlushError (e)
-        }
-        Task.fromFuture(taskFuture)
+        doFlushSteps(flushGroup, chunkSetIt)
       case true =>
         // even though there were no records for the chunkset, we want to write checkpoint anyway
         // since we should not resume from earlier checkpoint for the group
@@ -249,10 +223,52 @@ class TimeSeriesShard(dataset: Dataset, config: Config, val shardNum: Int, sink:
         else
           Task { Success }
     }
+    taskToReturn.runOnComplete(_ => tracer.finish())
+    taskToReturn
+  }
+
+  private def doFlushSteps(flushGroup: FlushGroup, chunkSetIt: Iterator[ChunkSet]): Task[Response] = {
+    // Note that all cassandra writes will have included retries. Failures after retries will imply data loss
+    // in order to keep the ingestion moving. It is important that we don't fall back far behind.
+    val chunkSetStream = Observable.fromIterator(chunkSetIt)
+    logger.debug(s"Created flush ChunkSets stream for group ${flushGroup.groupNum} in shard $shardNum")
+    // Write the stream and partition keys to the sink, checkpoint, mark buffers as eligible for cleanup
+    val partKeysInGroup =
+      new PartitionIterator(partKeysToFlush(flushGroup.groupNum)(1).intIterator()).map(_.binPartition)
+
+    val writeChunksFuture = sink.write(dataset, chunkSetStream).recover { case e =>
+      logger.error("Critical! Chunk persistence failed after retries and skipped", e)
+      shardStats.flushesFailedChunkWrite.increment
+      DataDropped
+    }
+    val writePartKeyFuture = sink.addPartitions(dataset, partKeysInGroup, shardNum).recover { case e =>
+      logger.error("Critical! Partition Key(s) persistence failed after retries and skipped", e)
+      shardStats.flushesFailedPartWrite.increment
+      DataDropped
+    }
+
+    // If the above futures fail with ErrorResponse because of DB failures, skip the chunk.
+    // Sorry - need to drop the data to keep the ingestion moving
+    val taskFuture = Future.sequence(Seq(writeChunksFuture, writePartKeyFuture)).flatMap {
+      case Seq(Success, Success)     => commitCheckpoint(dataset.ref, shardNum, flushGroup)
+      case Seq(er: ErrorResponse, _) => Future.successful(er)
+      case Seq(_, er: ErrorResponse) => Future.successful(er)
+    }.recover { case e =>
+      logger.error("Should have not reached this point. Possible programming error", e)
+      DataDropped
+    }
+    Task.fromFuture(taskFuture)
   }
 
   private def commitCheckpoint(ref: DatasetRef, shardNum: Int, flushGroup: FlushGroup): Future[Response] = {
-    val fut = metastore.writeCheckpoint(ref, shardNum, flushGroup.groupNum, flushGroup.flushWatermark)
+    val fut = metastore.writeCheckpoint(ref, shardNum, flushGroup.groupNum,
+                                    flushGroup.flushWatermark).recover { case e =>
+      logger.error("Critical! Checkpoint persistence skipped", e)
+      shardStats.flushesFailedOther.increment
+      // skip the checkpoint write
+      // Sorry - need to skip to keep the ingestion moving
+      DataDropped
+    }
     // Update stats
     if (_offset >= 0) shardStats.offsetLatestInMem.record(_offset)
     groupWatermark(flushGroup.groupNum) = flushGroup.flushWatermark
@@ -260,7 +276,6 @@ class TimeSeriesShard(dataset: Dataset, config: Config, val shardNum: Int, sink:
     val minWatermark = groupWatermark.min
     if (maxWatermark >= 0) shardStats.offsetLatestFlushed.record(maxWatermark)
     if (minWatermark >= 0) shardStats.offsetEarliestFlushed.record(minWatermark)
-
     fut
   }
 

@@ -7,7 +7,7 @@ import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.{ExecutionContext, Future}
 
-import com.datastax.driver.core.TokenRange
+import com.datastax.driver.core.{ConsistencyLevel, TokenRange}
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
 import kamon.trace.{TraceContext, Tracer}
@@ -264,6 +264,7 @@ trait CassandraChunkSource extends ChunkSource with StrictLogging {
   val stats = new ChunkSourceStats
 
   val cassandraConfig = config.getConfig("cassandra")
+  val ingestionConsistencyLevel = ConsistencyLevel.valueOf(cassandraConfig.getString("ingestion-consistency-level"))
   val tableCacheSize = config.getInt("columnstore.tablecache-size")
 
   val chunkTableCache = concurrentCache[DatasetRef, ChunkTable](tableCacheSize)
@@ -326,7 +327,7 @@ trait CassandraChunkSource extends ChunkSource with StrictLogging {
   def getOrCreateChunkTable(dataset: DatasetRef): ChunkTable = {
     chunkTableCache.getOrElseUpdate(dataset,
                                     { (dataset: DatasetRef) =>
-                                      new ChunkTable(dataset, clusterConnector)(readEc) })
+                                      new ChunkTable(dataset, clusterConnector, ingestionConsistencyLevel)(readEc) })
   }
 
   def getOrCreateIndexTable(dataset: DatasetRef): IndexTable = {
@@ -337,7 +338,7 @@ trait CassandraChunkSource extends ChunkSource with StrictLogging {
 
   def getOrCreatePartitionListTable(dataset: DatasetRef): PartitionListTable = {
     partitionListTableCache.getOrElseUpdate(dataset, { dataset: DatasetRef =>
-      new PartitionListTable(dataset, clusterConnector)(readEc)
+      new PartitionListTable(dataset, clusterConnector, ingestionConsistencyLevel)(readEc)
     })
   }
 

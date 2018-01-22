@@ -13,8 +13,10 @@ import filodb.cassandra.{FiloCassandraConnector, FiloSessionProvider}
   * @param config          a Typesafe Config with hosts, port, and keyspace parameters for Cassandra connection
   * @param sessionProvider if provided, a session provider provides a session for the configuration
   */
-sealed class CheckpointTable(val config: Config, val sessionProvider: FiloSessionProvider)
-                            (implicit val ec: ExecutionContext) extends FiloCassandraConnector {
+sealed class CheckpointTable(val config: Config,
+                             val sessionProvider: FiloSessionProvider,
+                             writeConsistencyLevel: ConsistencyLevel)
+                             (implicit val ec: ExecutionContext) extends FiloCassandraConnector {
   val keyspace = config.getString("admin-keyspace")
   val tableString = s"${keyspace}.checkpoints"
 
@@ -28,22 +30,20 @@ sealed class CheckpointTable(val config: Config, val sessionProvider: FiloSessio
        | PRIMARY KEY ((databasename, datasetname, shardNum), groupNum)
        |)""".stripMargin
 
-  lazy val readCheckpointCql = {
-    val statement = session.prepare(
+  lazy val readCheckpointCql =
+    session.prepare(
       s"""SELECT groupnum, offset FROM $tableString WHERE
          | databasename = ? AND
          | datasetname = ? AND
-         | shardnum = ? """.stripMargin)
-    statement.setConsistencyLevel(ConsistencyLevel.QUORUM) // we want consistent reads during recovery
-    statement
-  }
+         | shardnum = ? """.stripMargin).setConsistencyLevel(ConsistencyLevel.QUORUM)
+    // we want consistent reads during recovery
 
   lazy val writeCheckpointCql = {
     val statement = session.prepare(
       s"""INSERT INTO $tableString (databasename, datasetname, shardnum, groupnum, offset)
          | VALUES (?, ?, ?, ?, ?)""".stripMargin
     )
-    statement.setConsistencyLevel(ConsistencyLevel.ONE) // we want fast writes during ingestion
+    statement.setConsistencyLevel(writeConsistencyLevel)
     statement
   }
 

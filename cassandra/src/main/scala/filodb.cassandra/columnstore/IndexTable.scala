@@ -4,7 +4,7 @@ import java.nio.ByteBuffer
 
 import scala.concurrent.{ExecutionContext, Future}
 
-import com.datastax.driver.core.Row
+import com.datastax.driver.core.{ConsistencyLevel, Row}
 import monix.reactive.Observable
 
 import filodb.cassandra.FiloCassandraConnector
@@ -80,6 +80,7 @@ sealed class IndexTable(val dataset: DatasetRef, val connector: FiloCassandraCon
   lazy val writeIndexCql = session.prepare(
     s"INSERT INTO $tableString (partition, indextype, chunkid, data) " +
     "VALUES (?, 1, ?, ?)")
+    .setConsistencyLevel(ConsistencyLevel.ONE)
 
   /**
    * Writes new indices to the index table
@@ -97,6 +98,6 @@ sealed class IndexTable(val dataset: DatasetRef, val connector: FiloCassandraCon
                          ByteBuffer.wrap(indexData))
     }
     stats.addIndexWriteStats(indexBytes)
-    connector.execStmt(unloggedBatch(statements))
+    connector.execStmtWithRetries(unloggedBatch(statements).setConsistencyLevel(ConsistencyLevel.ONE))
   }
 }
