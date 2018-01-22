@@ -101,10 +101,10 @@ class ShardMapperSpec extends ActorTest(ShardMapperSpec.getNewSystem) {
     tags.put("__name__", "someevent")
     tags.put("tagkey3", "value3")
 
-    ShardKeyGenerator.shardKeyHash(tags, "job", "__name__") should equal (71981721)
-    ShardKeyGenerator.shardKeyHash(tags, "notjob", "__name__") should not equal (71981721)
-    ShardKeyGenerator.shardKeyHash(tags, "sometagkey", "job", "__name__") should equal (71981721)
-    ShardKeyGenerator.shardKeyHash(tags, "job", "anotherKey", "__name__") should equal (71981721)
+    ShardKeyGenerator.shardKeyHash(tags, Array("job", "__name__")) should equal (71981721)
+    ShardKeyGenerator.shardKeyHash(tags, Array("notjob", "__name__")) should not equal (71981721)
+    ShardKeyGenerator.shardKeyHash(tags, Array("sometagkey", "job", "__name__")) should equal (71981721)
+    ShardKeyGenerator.shardKeyHash(tags, Array("job", "anotherKey", "__name__")) should equal (71981721)
   }
 
   it("can remove new nodes added and return which shards removed") {

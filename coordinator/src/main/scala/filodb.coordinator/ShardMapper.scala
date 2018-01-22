@@ -270,7 +270,7 @@ object ShardKeyGenerator {
     * @param shardKeyColumns  This is the list of columns against which the shard key hash will be calculated
     * @return The shard key hash that is calculated from the given shard key column of the time series tags
     */
-  def shardKeyHash(tags: java.util.Map[String, String], shardKeyColumns: String*): Int = {
+  def shardKeyHash(tags: java.util.Map[String, String], shardKeyColumns: Array[String]): Int = {
     var shardKeyHash = 7
     shardKeyColumns.foreach { shardKey =>
       if (tags.containsKey(shardKey)) shardKeyHash = 31 * shardKeyHash + tags.get(shardKey).hashCode
