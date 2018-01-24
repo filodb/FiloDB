@@ -255,21 +255,21 @@ class TimeSeriesShard(dataset: Dataset, config: Config, val shardNum: Int, sink:
       case Seq(Success, Success)     => commitCheckpoint(dataset.ref, shardNum, flushGroup)
       case Seq(er: ErrorResponse, _) => Future.successful(er)
       case Seq(_, er: ErrorResponse) => Future.successful(er)
-    }.map {
-      case Success => blockHolder.markUsedBlocksReclaimable()
-                      shardStats.flushesSuccessful.increment
-                      Success
-      case other: Any => other
+    }.map { case resp =>
+      blockHolder.markUsedBlocksReclaimable()
+      resp
     }.recover { case e =>
-      logger.error("Should have not reached this point. Possible programming error", e)
+      logger.error("Internal Error - should have not reached this state", e)
       DataDropped
     }
     Task.fromFuture(taskFuture)
   }
 
   private def commitCheckpoint(ref: DatasetRef, shardNum: Int, flushGroup: FlushGroup): Future[Response] = {
-    val fut = metastore.writeCheckpoint(ref, shardNum, flushGroup.groupNum,
-                                    flushGroup.flushWatermark).recover { case e =>
+    val fut = metastore.writeCheckpoint(ref, shardNum, flushGroup.groupNum, flushGroup.flushWatermark).map { r =>
+      shardStats.flushesSuccessful.increment
+      r
+    }.recover { case e =>
       logger.error("Critical! Checkpoint persistence skipped", e)
       shardStats.flushesFailedOther.increment
       // skip the checkpoint write
