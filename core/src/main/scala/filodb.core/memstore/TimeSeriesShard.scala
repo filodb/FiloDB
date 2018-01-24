@@ -214,7 +214,7 @@ class TimeSeriesShard(dataset: Dataset, config: Config, val shardNum: Int, sink:
     val tracer = Kamon.tracer.newContext("chunk-flush-task-latency-after-retries", None, shardStats.tags)
     val taskToReturn = chunkSetIt.isEmpty match {
       case false =>
-        doFlushSteps(flushGroup, chunkSetIt)
+        doFlushSteps(flushGroup, blockHolder, chunkSetIt)
       case true =>
         // even though there were no records for the chunkset, we want to write checkpoint anyway
         // since we should not resume from earlier checkpoint for the group
@@ -227,7 +227,9 @@ class TimeSeriesShard(dataset: Dataset, config: Config, val shardNum: Int, sink:
     taskToReturn
   }
 
-  private def doFlushSteps(flushGroup: FlushGroup, chunkSetIt: Iterator[ChunkSet]): Task[Response] = {
+  private def doFlushSteps(flushGroup: FlushGroup,
+                           blockHolder: BlockHolder,
+                           chunkSetIt: Iterator[ChunkSet]): Task[Response] = {
     // Note that all cassandra writes will have included retries. Failures after retries will imply data loss
     // in order to keep the ingestion moving. It is important that we don't fall back far behind.
     val chunkSetStream = Observable.fromIterator(chunkSetIt)
@@ -253,6 +255,11 @@ class TimeSeriesShard(dataset: Dataset, config: Config, val shardNum: Int, sink:
       case Seq(Success, Success)     => commitCheckpoint(dataset.ref, shardNum, flushGroup)
       case Seq(er: ErrorResponse, _) => Future.successful(er)
       case Seq(_, er: ErrorResponse) => Future.successful(er)
+    }.map {
+      case Success => blockHolder.markUsedBlocksReclaimable()
+                      shardStats.flushesSuccessful.increment
+                      Success
+      case other: Any => other
     }.recover { case e =>
       logger.error("Should have not reached this point. Possible programming error", e)
       DataDropped
