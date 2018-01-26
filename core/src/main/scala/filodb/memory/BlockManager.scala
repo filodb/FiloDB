@@ -3,8 +3,6 @@ package filodb.memory
 import java.util
 import java.util.concurrent.locks.ReentrantLock
 
-import scala.collection.JavaConverters._
-
 import com.kenai.jffi.{MemoryIO, PageManager}
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
@@ -49,7 +47,7 @@ trait BlockManager {
   def stats(): MemoryStats
 }
 
-class MemoryStats(tags: Map[String,String]) {
+class MemoryStats(tags: Map[String, String]) {
   val usedBlocksMetric = Kamon.metrics.gauge("blockstore-used-blocks", tags)(0L)
   val freeBlocksMetric = Kamon.metrics.gauge("blockstore-free-blocks", tags)(0L)
   val blocksReclaimedMetric = Kamon.metrics.counter("blockstore-blocks-reclaimed", tags)
@@ -63,8 +61,8 @@ class MemoryStats(tags: Map[String,String]) {
   * This class is thread safe
   *
   * @param totalMemorySizeInBytes Control the number of pages to allocate. (totalling up to the totallMemorySizeInBytes)
-  * @param stats Memory metrics which need to be recorded
-  * @param numPagesPerBlock The number of pages a block spans
+  * @param stats                  Memory metrics which need to be recorded
+  * @param numPagesPerBlock       The number of pages a block spans
   */
 class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
                               val stats: MemoryStats,
@@ -72,7 +70,9 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
   extends BlockManager with StrictLogging {
   val mask = PageManager.PROT_READ | PageManager.PROT_EXEC | PageManager.PROT_WRITE
 
-  protected val freeBlocks: util.LinkedList[Block] = allocateDirect()
+  protected var firstPageAddress: Long = 0L
+
+  protected val freeBlocks: util.LinkedList[Block] = allocate()
   protected val usedBlocks: util.LinkedList[Block] = new util.LinkedList[Block]()
 
   protected val lock = new ReentrantLock()
@@ -120,26 +120,13 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
     }
   }
 
-  protected def allocateWithPageManager = {
+  protected def allocate(): util.LinkedList[Block] = {
     val numBlocks: Int = Math.floor(totalMemorySizeInBytes / blockSizeInBytes).toInt
     val blocks = new util.LinkedList[Block]()
     logger.info(s"Allocating $numBlocks blocks of $blockSizeInBytes bytes each, total $totalMemorySizeInBytes")
-
-    val firstPageAddress: Long =
-      PageManager.getInstance().allocatePages(numBlocks, mask)
+    firstPageAddress = MemoryIO.getCheckedInstance().allocateMemory(totalMemorySizeInBytes, false)
     for (i <- 0 until numBlocks) {
       val address = firstPageAddress + (i * blockSizeInBytes)
-      blocks.add(new Block(address, blockSizeInBytes))
-    }
-    blocks
-  }
-
-  protected def allocateDirect(): util.LinkedList[Block] = {
-    val numBlocks: Int = Math.floor(totalMemorySizeInBytes / blockSizeInBytes).toInt
-    val blocks = new util.LinkedList[Block]()
-    logger.info(s"Allocating $numBlocks blocks of $blockSizeInBytes bytes each, total $totalMemorySizeInBytes")
-    for (i <- 0 until numBlocks) {
-      val address = MemoryIO.getCheckedInstance().allocateMemory(blockSizeInBytes, true)
       blocks.add(new Block(address, blockSizeInBytes))
     }
     stats.freeBlocksMetric.record(blocks.size())
@@ -174,23 +161,12 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
   def releaseBlocks(): Unit = {
     lock.lock()
     try {
-      releaseBlocksDirect(freeBlocks)
-      releaseBlocksDirect(usedBlocks)
+      MemoryIO.getCheckedInstance.freeMemory(firstPageAddress)
+    } catch {
+      case e: Throwable => logger.warn(s"Could not release blocks at $firstPageAddress", e)
     } finally {
       lock.unlock()
     }
   }
 
-  protected def releaseBlocksDirect(blocks: util.LinkedList[Block]) = {
-    blocks.asScala.foreach { block =>
-      MemoryIO.getCheckedInstance().freeMemory(block.address)
-    }
-
-  }
-
-  protected def releaseBlocksWithPM(blocks: java.lang.Iterable[Block]) = {
-    blocks.asScala.foreach { block =>
-      PageManager.getInstance().freePages(block.address, 1)
-    }
-  }
 }
