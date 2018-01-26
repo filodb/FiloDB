@@ -211,11 +211,12 @@ class TimeSeriesPartition(val dataset: Dataset,
 
       blockHolder.endPartition(new ReclaimListener {
         //It is very likely that a flushChunk ends only in one block. At worst in may end up in a couple.
-        //So a blockGroup contains atmost 2. When anyone Block in the flushGroup is evicted the flushChunk is removed.
+        //So a blockGroup contains atmost 2. When any one Block in the flushGroup is evicted the flushChunk is removed.
         //So if and when a second block gets reclaimed this is a no-op
         override def onReclaim(): Unit = {
           vectors.remove(flushingChunkID)
           index.remove(chunkInfo.id)
+          shardStats.chunkIdsEvicted.increment()
         }
       })
 

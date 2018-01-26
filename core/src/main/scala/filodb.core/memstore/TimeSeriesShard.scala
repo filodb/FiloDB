@@ -52,6 +52,7 @@ class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
 
   val partitionsPagedFromColStore = Kamon.metrics.counter("memstore-partitions-paged-in", tags)
   val chunkIdsPagedFromColStore = Kamon.metrics.counter("memstore-chunkids-paged-in", tags)
+  val chunkIdsEvicted  = Kamon.metrics.counter("memstore-chunkids-evicted", tags)
   val partitionsQueried = Kamon.metrics.counter("memstore-partitions-queried", tags)
   val numChunksQueried = Kamon.metrics.counter("memstore-chunks-queried", tags)
   val memoryStats = new MemoryStats(tags)

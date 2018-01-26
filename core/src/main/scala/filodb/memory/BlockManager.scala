@@ -42,12 +42,18 @@ trait BlockManager {
     * Releases all blocks allocated by this store.
     */
   def releaseBlocks(): Unit
+
+  /**
+    * @return Memory stats for recording
+    */
+  def stats(): MemoryStats
 }
 
 class MemoryStats(tags: Map[String,String]) {
   val usedBlocksMetric = Kamon.metrics.gauge("blockstore-used-blocks", tags)(0L)
   val freeBlocksMetric = Kamon.metrics.gauge("blockstore-free-blocks", tags)(0L)
-  val blocksReclaimedMetric = Kamon.metrics.gauge("blockstore-blocks-reclaimed", tags)(0L)
+  val blocksReclaimedMetric = Kamon.metrics.counter("blockstore-blocks-reclaimed", tags)
+  val blockUtilizationMetric = Kamon.metrics.histogram("blockstore-block-utilized-bytes", tags)
 }
 
 
@@ -61,7 +67,7 @@ class MemoryStats(tags: Map[String,String]) {
   * @param numPagesPerBlock The number of pages a block spans
   */
 class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
-                              stats: MemoryStats,
+                              val stats: MemoryStats,
                               numPagesPerBlock: Int = 1)
   extends BlockManager with StrictLogging {
   val mask = PageManager.PROT_READ | PageManager.PROT_EXEC | PageManager.PROT_WRITE
@@ -104,7 +110,7 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
           val block = freeBlocks.remove()
           use(block)
           allocated(i) = block
-                              }
+        }
         allocated
       } else {
         Seq.empty[Block]
@@ -156,6 +162,7 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
         block.reclaim()
         freeBlocks.add(block)
         stats.freeBlocksMetric.record(freeBlocks.size())
+        stats.blocksReclaimedMetric.increment()
         i = i + 1
       }
       if (i >= num) {
