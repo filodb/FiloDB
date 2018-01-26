@@ -195,12 +195,10 @@ class BlockHolder(blockStore: BlockManager) extends MemFactory with StrictLoggin
     val block = ensureCapacity(size)
     block.own()
     val preAllocationPosition = block.position()
-    val preAllocStats = block.internalBufferStats()
     val headerAddress = block.address + preAllocationPosition
     UnsafeUtils.setInt(UnsafeUtils.ZeroPointer, headerAddress, BinaryVector.HeaderMagic)
     val postAllocationPosition = preAllocationPosition + 4 + allocateSize
     block.position(postAllocationPosition)
-    val postAllocStats = block.internalBufferStats()
     (UnsafeUtils.ZeroPointer, headerAddress + 4, allocateSize)
   }
 

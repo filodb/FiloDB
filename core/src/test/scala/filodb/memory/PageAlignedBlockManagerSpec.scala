@@ -42,11 +42,15 @@ class PageAlignedBlockManagerSpec extends FlatSpec with Matchers {
     val firstRequest = blockManager.requestBlocks(blockSize * 2)
     //used 2 out of 2
     firstRequest.size should be(2)
+    //simulate writing to the block
+    firstRequest(0).own()
+    firstRequest(0).position(blockSize.toInt -1)
     //mark them as reclaimable
     firstRequest.foreach(_.markReclaimable())
     val secondRequest = blockManager.requestBlocks(blockSize * 2)
     //this request will fulfill
     secondRequest.size should be(2)
+    secondRequest(0).hasCapacity(10) should be(true)
   }
 
   it should "Fail to Allocate blocks when enough blocks cannot be reclaimed" in {

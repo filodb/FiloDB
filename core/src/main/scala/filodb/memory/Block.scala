@@ -6,8 +6,6 @@ import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
 
 import scala.collection.mutable.ListBuffer
 
-import com.kenai.jffi.MemoryIO
-
 
 /*
 * Useful to establish thread ownership of a buffer.
@@ -117,33 +115,33 @@ trait ReusableMemory {
   */
 class Block(val address: Long, val capacity: Long) extends Owned {
 
-  protected val internalBuffer = MemoryIO.getCheckedInstance().newDirectByteBuffer(address, capacity.toInt)
+  protected var _position: Int = 0
 
   /**
     * Marks this memory as free. Also zeroes all the bytes from the beginning address until capacity
     */
   override protected def free(): Unit = {
     super.free()
-    MemoryIO.getCheckedInstance.memset(address, 0, capacity)
+    _position = 0
   }
 
   def position(): Int = {
-    internalBuffer.position()
+    _position
   }
 
   def position(newPosition: Int): Unit = {
     checkOwnership()
-    internalBuffer.position(newPosition)
+    _position = newPosition
   }
 
-  def remaining(): Int = internalBuffer.remaining()
+  def remaining(): Int = capacity.toInt - _position
 
   /**
     * @param forSize the size for which to check the capacity for
     * @return Whether this block has capacity remaining to accomodate passed size of bytes.
     */
   def hasCapacity(forSize: Long): Boolean = {
-    forSize <= internalBuffer.remaining()
+    forSize <= remaining()
   }
 
   //debug utility method
@@ -154,13 +152,6 @@ class Block(val address: Long, val capacity: Long) extends Owned {
     val stringBuf = new StringBuffer()
     byteArr.foreach(b => stringBuf.append(b))
     stringBuf.toString
-  }
-
-  def internalBufferStats(): (Int,Int,Int) = {
-    val remaining = internalBuffer.remaining()
-    val position = internalBuffer.position()
-    val limit = internalBuffer.limit()
-    (remaining,position,limit)
   }
 
 }
