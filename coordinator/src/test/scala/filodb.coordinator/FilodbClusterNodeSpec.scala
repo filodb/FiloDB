@@ -167,9 +167,9 @@ class ClusterNodeRecoverySpec extends FilodbClusterNodeSpec {
       (0 to 3).foreach { s => map.updateFromEvent(IngestionStarted(dataset.ref, s, coordinatorActor)) }
       probe.send(cluster.guardian, CurrentShardSnapshot(dataset.ref, map))
 
-      probe.send(cluster.guardian, GetShardMapsSubscriptions)
+      probe.send(cluster.guardian, GetClusterState)
       probe.expectMsgPF() {
-        case MapsAndSubscriptions(mappers, subscriptions) =>
+        case ClusterState(mappers, subscriptions) =>
           mappers.size shouldEqual 1
           mappers(dataset.ref) shouldEqual map
           subscriptions.subscriptions.isEmpty shouldEqual true

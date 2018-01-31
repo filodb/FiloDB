@@ -78,7 +78,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
     coordinatorActor = system.actorOf(nodeCoordProps, s"test-node-coord-${System.nanoTime}")
     coordinatorActor ! CoordinatorRegistered(clusterActor)
 
-    shardManager.addMember(coordinatorActor, selfAddress)
+    shardManager.addMember(selfAddress, coordinatorActor)
     probe = TestProbe()
   }
 

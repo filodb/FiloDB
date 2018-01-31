@@ -84,8 +84,8 @@ trait MultiNodeClusterBehavior extends MultiNodeClusterSpec { self: MultiNodeSpe
     runOn(roles.head) {
       startClusterNode()
       watcher.expectMsgPF(defaultTimeout) {
-        case NodeProtocol.PreStart(identity) =>
-          identity.name shouldEqual ActorName.ClusterSingletonName
+        case NodeProtocol.PreStart(identity, address) =>
+          Some(identity) shouldEqual filodbCluster.clusterActor
           info(s"Prestart on $myself: $identity")
       }
     }

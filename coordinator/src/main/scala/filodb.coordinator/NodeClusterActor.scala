@@ -1,6 +1,6 @@
 package filodb.coordinator
 
-import scala.collection.mutable.{HashMap, HashSet}
+import scala.collection.mutable.{HashMap => MutableHashMap, HashSet => MutableHashSet}
 import scala.concurrent.Future
 
 import akka.actor._
@@ -92,6 +92,7 @@ object NodeClusterActor {
    * INTERNAL MESSAGES
    */
   private[coordinator] final case class AddCoordinator(roles: Set[String], addr: Address, coordinator: ActorRef)
+
   /** Lets each NodeCoordinator know about the `clusterActor` so it can send it updates.
     * Would not be necessary except coordinator currently is created before the clusterActor.
     */
@@ -107,14 +108,14 @@ object NodeClusterActor {
   /**
     * Creates a new NodeClusterActor.
     *
-    * @param nodeCoordRole String, for the role containing the NodeCoordinatorActor or ingestion nodes
+    * @param localRole String, for the role containing the NodeCoordinatorActor or ingestion nodes
     */
   def props(settings: FilodbSettings,
-            nodeCoordRole: String,
+            localRole: String,
             metaStore: MetaStore,
             assignmentStrategy: ShardAssignmentStrategy,
             actors: ActorArgs): Props =
-    Props(new NodeClusterActor(settings, nodeCoordRole, metaStore, assignmentStrategy, actors))
+    Props(new NodeClusterActor(settings, localRole, metaStore, assignmentStrategy, actors))
 
   class RemoteAddressExtension(system: ExtendedActorSystem) extends Extension {
     def address: Address = system.provider.getDefaultAddress
@@ -160,7 +161,7 @@ object NodeClusterActor {
  * - It tracks dataset shard assignments and coordinates new dataset setup
  */
 private[filodb] class NodeClusterActor(settings: FilodbSettings,
-                                       nodeCoordRole: String,
+                                       localRole: String,
                                        metaStore: MetaStore,
                                        assignmentStrategy: ShardAssignmentStrategy,
                                        actors: NodeClusterActor.ActorArgs
@@ -169,23 +170,22 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
   import ActorName._, NodeClusterActor._, ShardSubscriptions._
   import actors._
   import settings._
+  import context.dispatcher
 
   val cluster = Cluster(context.system)
 
-  val memberRefs = new HashMap[Address, ActorRef]
-  val roleToCoords = new HashMap[String, Set[ActorRef]]().withDefaultValue(Set.empty[ActorRef])
-  val datasets = new HashMap[DatasetRef, Dataset]
-  val sources = new HashMap[DatasetRef, IngestionSource]
+  val initDatasets = new MutableHashSet[DatasetRef]
+  val roleToCoords = new MutableHashMap[String, Set[ActorRef]]().withDefaultValue(Set.empty[ActorRef])
+  val datasets = new MutableHashMap[DatasetRef, Dataset]
+  val sources = new MutableHashMap[DatasetRef, IngestionSource]
   val shardManager = new ShardManager(assignmentStrategy)
+  val localRemoteAddr = RemoteAddressExtension(context.system).address
+  var everybodyLeftSender: Option[ActorRef] = None
 
-  private val initDatasets = new HashSet[DatasetRef]
-
-  import context.dispatcher
-
-  // subscribe to cluster changes, re-subscribe when restart
   override def preStart(): Unit = {
     super.preStart()
-    watcher ! NodeProtocol.PreStart(self.path)
+    watcher ! NodeProtocol.PreStart(singletonProxy, cluster.selfAddress)
+
     // Restore previously set up datasets and shards.  This happens in a very specific order so that
     // shard and dataset state can be recovered correctly.  First all the datasets are set up.
     // Then shard state is recovered, and finally cluster membership events are replayed.
@@ -204,12 +204,12 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
   override def postStop(): Unit = {
     super.postStop()
     cluster.unsubscribe(self)
-    watcher ! NodeProtocol.PostStop(self.path)
+    watcher ! NodeProtocol.PostStop(singletonProxy, cluster.selfAddress)
   }
 
   override def preRestart(reason: Throwable, message: Option[Any]): Unit = {
     super.preRestart(reason, message)
-    watcher ! NodeProtocol.PreRestart(self.path, reason)
+    watcher ! NodeProtocol.PreRestart(singletonProxy, cluster.selfAddress, reason)
   }
 
   private def withRole(role: String, requester: ActorRef)(f: Set[ActorRef] => Unit): Unit =
@@ -217,9 +217,6 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
       case None       => requester ! NoSuchRole
       case Some(refs) => f(refs)
     }
-
-  val localRemoteAddr = RemoteAddressExtension(context.system).address
-  var everybodyLeftSender: Option[ActorRef] = None
 
   def membershipHandler: Receive = LoggingReceive {
     case MemberUp(member) =>
@@ -236,21 +233,26 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
     case UnreachableMember(member) =>
       logger.info(s"Member detected as unreachable: $member")
 
-    case MemberRemoved(member, previousStatus) =>
+    case e @ MemberRemoved(member, previousStatus) =>
       logger.info(s"Member is Removed: ${member.address} after $previousStatus")
-      memberRefs.remove(member.address) match {
-        case Some(removedCoordinator) =>
-        // roleToCoords(role) = roleToCoords(role).filterNot { ref =>
-        //   // if we don't do this cannot properly match when self node is asked to leave
-        //   val addr = if (ref.path.address.hasLocalScope) localRemoteAddr else ref.path.address
-        //   addr == member.address
-        // }
-        roleToCoords.transform { case (_, refs) => refs - removedCoordinator }
-        roleToCoords.retain { case (role, refs) => refs.nonEmpty }
 
-        shardManager.removeMember(removedCoordinator)
+      shardManager.removeMember(member.address) match {
+        case Some(ref) =>
+          // roleToCoords(role) = roleToCoords(role).filterNot { ref =>
+          //   // if we don't do this cannot properly match when self node is asked to leave
+          //   val addr = if (ref.path.address.hasLocalScope) localRemoteAddr else ref.path.address
+          //   addr == member.address
+          // }
+          roleToCoords.transform { case (_, refs) => refs - ref }
+          roleToCoords.retain { case (role, refs) => refs.nonEmpty }
         case _ =>
-          logger.warn(s"UNABLE TO REMOVE ${member.address} FROM memberRefs")
+          /* Recovery during ClusterSingleton handoff: replayed from cluster.subscribe events.
+              If this is a downed node that was assigned shards, it can be in the mapper, stale.
+              Or after downing the oldest/first deployed node, which may never be assigned shards
+              based on the number of nodes joined and shards to assign, no action is needed. */
+          watcher ! e // only TestProbe
+          logger.warn(s"MemberRemoved(${member.address}) may be stale, attempting to remove and update.")
+          shardManager remove member.address
       }
 
       if (roleToCoords.isEmpty) {
@@ -269,10 +271,11 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
 
   // The initial recovery handler: recover dataset setup/ingestion config first
   def datasetInitHandler: Receive = LoggingReceive {
-    case e: SetupDataset    => setupDataset(e, sender()) map { _ =>
-                                  initDatasets -= e.ref
-                                  if (initDatasets.isEmpty) initiateShardStateRecovery()
-                               }
+    case e: SetupDataset =>
+      setupDataset(e, sender()) map { _ =>
+        initDatasets -= e.ref
+        if (initDatasets.isEmpty) initiateShardStateRecovery()
+      }
   }
 
   private def initiateShardStateRecovery(): Unit = {
@@ -282,14 +285,14 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
   }
 
   def shardMapRecoveryHandler: Receive = LoggingReceive {
-    case ms: NodeProtocol.MapsAndSubscriptions =>
-      ms.shardMaps foreach { case (ref, map) => shardManager.recoverShardState(ref, map) }
-      shardManager.recoverSubscriptions(ms.subscriptions)
+    case NodeProtocol.ClusterState(mappers, subscriptions) =>
+      // never includes downed nodes, which come through cluster.subscribe event replay
+      mappers foreach { case (ref, map) => shardManager.recoverShards(ref, map) }
+      shardManager.recoverSubscriptions(subscriptions)
 
       // NOW, subscribe to cluster membership state and then switch to normal receiver
-      logger.info("Now subscribing to cluster events and switching to normalReceive")
-      cluster.subscribe(self, initialStateMode = InitialStateAsEvents,
-                                classOf[MemberEvent])
+      logger.info("Subscribing to cluster events and switching to normalReceive")
+      cluster.subscribe(self, initialStateMode = InitialStateAsEvents, classOf[MemberEvent])
       context.become(normalReceive)
   }
 
@@ -307,7 +310,7 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
 
   /** Send a message to recover the current shard maps and subscriptions from the Guardian of local node. */
   private def sendShardStateRecoveryMessage(): Unit =
-    guardian ! NodeProtocol.GetShardMapsSubscriptions
+    guardian ! NodeProtocol.GetClusterState
 
   /** If the dataset is registered as a subscription, a `CurrentShardSnapshot` is sent
     * to the subscriber, otherwise a `DatasetUnknown` is returned.
@@ -328,18 +331,14 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
     context watch subscriber
   }
 
-  /** Sets up the new coordinator, forwards to shard status actor to complete
-    * its subscription setup. The coordinator is sent an ack.
-    * The shard stats actor responds with a `SendDatasetSetup` to handle the updates.
-    */
+  /** Sets up the new coordinator which is sent an ack. */
   private def addCoordinator(e: AddCoordinator): Unit = {
     e.roles.foreach { role => roleToCoords(role) += e.coordinator }
     logger.debug(s"Updated roleToCoords: $roleToCoords")
 
-    if (e.roles contains nodeCoordRole) {
+    if (e.roles contains localRole) {
       e.coordinator ! CoordinatorRegistered(singletonProxy)
-      shardManager.addMember(e.coordinator, e.addr)
-      memberRefs(e.addr) = e.coordinator
+      shardManager.addMember(e.addr, e.coordinator)
     }
   }
 
@@ -394,7 +393,14 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
       origin ! NodeProtocol.StateReset
   }
 
-  def normalReceive: Receive = membershipHandler orElse shardMapHandler orElse infoHandler orElse
-                                  routerEvents orElse subscriptionHandler
-  def receive: Receive = datasetInitHandler orElse subscriptionHandler
+  def normalReceive: Receive =
+    membershipHandler orElse
+    shardMapHandler orElse
+    infoHandler orElse
+    routerEvents orElse
+    subscriptionHandler
+
+  def receive: Receive =
+    datasetInitHandler orElse
+    subscriptionHandler
 }

@@ -77,10 +77,10 @@ final class FilodbCluster(val system: ExtendedActorSystem) extends Extension wit
 
   /** Idempotent. */
   def kamonInit(role: ClusterRole): ActorRef =
-    Await.result((guardian ? CreateTraceLogger(role)).mapTo[TraceLoggerRef], DefaultTaskTimeout).ref
+    Await.result((guardian ? CreateTraceLogger(role)).mapTo[TraceLoggerRef], DefaultTaskTimeout).identity
 
   def coordinatorActor: ActorRef = _coordinatorActor.get.getOrElse {
-    val actor = Await.result((guardian ? CreateCoordinator).mapTo[CoordinatorRef], DefaultTaskTimeout).ref
+    val actor = Await.result((guardian ? CreateCoordinator).mapTo[CoordinatorIdentity], DefaultTaskTimeout).identity
     logger.info(s"NodeCoordinatorActor created: $actor")
     actor
   }
@@ -165,7 +165,7 @@ final class FilodbCluster(val system: ExtendedActorSystem) extends Extension wit
   def clusterSingleton(role: ClusterRole, watcher: Option[ActorRef]): ActorRef =
     _clusterActor.get.getOrElse {
       val e = CreateClusterSingleton(role.roleName, watcher)
-      val actor = Await.result((guardian ? e).mapTo[ClusterSingletonRef], DefaultTaskTimeout).ref
+      val actor = Await.result((guardian ? e).mapTo[ClusterSingletonIdentity], DefaultTaskTimeout).identity
       _clusterActor.set(Some(actor))
       _isInitialized.set(true)
       actor

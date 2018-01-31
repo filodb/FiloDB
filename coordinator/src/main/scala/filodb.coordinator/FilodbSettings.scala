@@ -41,7 +41,7 @@ final class FilodbSettings(val conf: Config) {
   lazy val DatasetDefinitions = config.as[Option[Map[String, Config]]]("dataset-definitions")
                                       .getOrElse(Map.empty[String, Config])
 
-  /** The timeout to use to resolve NodeCoordinatorActor refs for new nodes. */
+  /** The timeout to use to resolve an actor ref for new nodes. */
   val ResolveActorTimeout = config.as[FiniteDuration]("tasks.timeouts.resolve-actor")
 
 }

@@ -3,15 +3,14 @@ package filodb.standalone
 import java.util.concurrent.TimeUnit
 
 import scala.concurrent.duration.{FiniteDuration, _}
-import scala.language.postfixOps
 
 import akka.remote.testkit.MultiNodeConfig
 import com.typesafe.config.{Config, ConfigFactory}
 import org.scalatest.time.{Millis, Seconds, Span}
 
 import filodb.coordinator._
-import filodb.coordinator.client.Client
 import filodb.coordinator.NodeClusterActor.SubscribeShardUpdates
+import filodb.coordinator.client.Client
 import filodb.core.Success
 import filodb.core.metadata.Dataset
 import filodb.timeseries.TestTimeseriesProducer
@@ -59,11 +58,11 @@ abstract class IngestionAndRecoverySpec extends StandaloneMultiJvmSpec(Ingestion
   import IngestionAndRecoveryMultiNodeConfig._
 
   // Used when servers are started first time
-  lazy val server1 = new FiloServer()
+  lazy val server1 = new FiloServer(Some(watcher.ref))
   lazy val client1 = Client.standaloneClient(system, "127.0.0.1", 2552)
 
   // Used when servers are restarted after shutdown
-  lazy val server2 = new FiloServer()
+  lazy val server2 = new FiloServer(Some(watcher.ref))
   lazy val client2 = Client.standaloneClient(system, "127.0.0.1", 2552)
 
   // Initializing a FilodbCluster to get a handle to the metastore and colstore so we can clear and validate data
@@ -77,10 +76,6 @@ abstract class IngestionAndRecoverySpec extends StandaloneMultiJvmSpec(Ingestion
   var query1Response: Double = 0
   val chunkDurationTimeout = FiniteDuration(chunkDuration.toMillis + 20000, TimeUnit.MILLISECONDS)
   val producePatience = PatienceConfig(timeout = Span(10, Seconds), interval = Span(100, Millis))
-
-  override def beforeAll(): Unit = multiNodeSpecBeforeAll()
-
-  override def afterAll(): Unit = multiNodeSpecAfterAll()
 
   "IngestionAndRecoverySpec Multi-JVM Test" should "clear data on node 1" in {
     runOn(first) {
@@ -105,16 +100,14 @@ abstract class IngestionAndRecoverySpec extends StandaloneMultiJvmSpec(Ingestion
 
   it should "be able to bring up FiloServer on node 1" in {
     runOn(first) {
-      server1.start()
-      awaitAssert(server1.cluster.isInitialized shouldBe true, 5 seconds)
+      awaitNodeUp(server1)
     }
     enterBarrier("first-node-started")
   }
 
   it should "be able to bring up FiloServer on node 2" in {
     runOn(second) {
-      server1.start()
-      awaitAssert(server1.cluster.isInitialized shouldBe true, 5 seconds)
+      awaitNodeUp(server1)
     }
     enterBarrier("second-node-started")
   }
@@ -183,28 +176,24 @@ abstract class IngestionAndRecoverySpec extends StandaloneMultiJvmSpec(Ingestion
 
   it should "be able to shutdown nodes prior to chunks being written to persistent store" in {
     runOn(first) {
-      server1.shutdown()
-      awaitCond(server1.cluster.isTerminated == true, 3 seconds)
+      awaitNodeDown(server1)
     }
     runOn(second) {
-      server1.shutdown()
-      awaitCond(server1.cluster.isTerminated == true, 3 seconds)
+      awaitNodeDown(server1)
     }
     enterBarrier("both-nodes-shutdown")
   }
 
   it should "be able to restart node 1" in {
     runOn(first) {
-      server2.start()
-      awaitAssert(server2.cluster.isInitialized shouldBe true, 5 seconds)
+      awaitNodeUp(server2)
     }
     enterBarrier("first-node-restarted")
   }
 
   it should "be able to restart node 2" in {
     runOn(second) {
-      server2.start()
-      awaitAssert(server2.cluster.isInitialized shouldBe true, 5 seconds)
+      awaitNodeUp(server2)
       Thread.sleep(5000) // wait for coordinator and query actors to be initialized
     }
     enterBarrier("second-node-restarted")

@@ -1,13 +1,15 @@
 package filodb.coordinator
 
+import akka.actor.{ActorRef, Address}
 import akka.testkit.TestProbe
 
-import filodb.coordinator.IngestionCommands.DatasetSetup
-import filodb.coordinator.NodeClusterActor.{DatasetResourceSpec, DatasetVerified, IngestionSource, SetupDataset}
 import filodb.core.DatasetRef
 import filodb.core.metadata.Dataset
 
 class ShardManagerSpec extends AkkaSpec {
+
+  import NodeClusterActor.{DatasetResourceSpec, DatasetVerified, IngestionSource, SetupDataset}
+  import IngestionCommands.DatasetSetup
 
   protected val dataset1 = DatasetRef("one")
   protected val datasetObj1 = Dataset(dataset1.dataset, Seq("seg:int"), Seq("timestamp:long"))
@@ -20,9 +22,16 @@ class ShardManagerSpec extends AkkaSpec {
   protected val shardManager = new ShardManager(DefaultShardAssignmentStrategy)
 
   val coord1 = TestProbe("coordinator1")
+  val coord1Address = uniqueAddress(coord1.ref)
+
   val coord2 = TestProbe("coordinator2")
+  val coord2Address = uniqueAddress(coord2.ref)
+
   val coord3 = TestProbe("coordinator3")
+  val coord3Address = uniqueAddress(coord3.ref)
+
   val coord4 = TestProbe("coordinator4")
+  val coord4Address = uniqueAddress(coord4.ref)
 
   val subscriber = TestProbe("subscriber")
 
@@ -32,6 +41,9 @@ class ShardManagerSpec extends AkkaSpec {
   val noOpSource2 = IngestionSource(classOf[NoOpStreamFactory].getName)
   val setupDs2 = SetupDataset(dataset2, resources2, noOpSource2)
 
+
+  def uniqueAddress(probe: ActorRef): Address =
+    probe.path.address.copy(system = s"${probe.path.address.system}-${probe.path.name}")
 
   /* Please read/run this spec from top to bottom. Later tests depend on initial tests to run */
   "ShardManager" must {
@@ -43,29 +55,29 @@ class ShardManagerSpec extends AkkaSpec {
     }
 
     "change state for addition of first coordinator without datasets" in {
-      shardManager.addMember(coord1.ref, coord1.ref.path.address)
-      shardManager.coords.toSeq shouldBe Seq(coord1.ref)
+      shardManager.addMember(coord1Address, coord1.ref)
+      shardManager.coordinators shouldBe Seq(coord1.ref)
       shardManager.datasetInfo.size shouldBe 0
       coord1.expectNoMsg() // since there are no datasets, there should be no assignments
     }
 
     "change state for addition of second coordinator without datasets" in {
-      shardManager.addMember(coord2.ref, coord2.ref.path.address)
-      shardManager.coords.toSeq shouldBe Seq(coord1.ref, coord2.ref)
+      shardManager.addMember(coord2Address, coord2.ref)
+      shardManager.coordinators shouldBe Seq(coord1.ref, coord2.ref)
       shardManager.datasetInfo.size shouldBe 0
       coord2.expectNoMsg() // since there are no datasets, there should be no assignments
     }
 
     "change state for addition of third coordinator without datasets" in {
-      shardManager.addMember(coord3.ref, coord3.ref.path.address)
-      shardManager.coords.toSeq shouldBe Seq(coord1.ref, coord2.ref, coord3.ref)
+      shardManager.addMember(coord3Address, coord3.ref)
+      shardManager.coordinators shouldBe Seq(coord1.ref, coord2.ref, coord3.ref)
       shardManager.datasetInfo.size shouldBe 0
       coord3.expectNoMsg() // since there are no datasets, there should be no assignments
     }
 
     "change state for removal of coordinator without datasets" in {
-      shardManager.removeMember(coord2.ref)
-      shardManager.coords.toSeq shouldBe Seq(coord1.ref, coord3.ref)
+      shardManager.removeMember(coord2Address)
+      shardManager.coordinators shouldBe Seq(coord1.ref, coord3.ref)
       shardManager.datasetInfo.size shouldBe 0
       coord2.expectNoMsg() // since there are no datasets, there should be no assignments
     }
@@ -98,7 +110,8 @@ class ShardManagerSpec extends AkkaSpec {
     }
 
     "send shard subscribers updates on shard events as a result of dataset addition" in {
-      subscriber.expectMsg(ShardSubscriptions(Set(ShardSubscription(dataset1,Set(subscriber.ref))),Set(subscriber.ref)))
+      subscriber.expectMsg(ShardSubscriptions(Set(
+        ShardSubscription(dataset1, Set(subscriber.ref))), Set(subscriber.ref)))
       subscriber.expectMsgPF() { case s: CurrentShardSnapshot =>
         s.ref shouldEqual dataset1
         s.map.shardsForCoord(coord3.ref) shouldEqual Seq(0, 1, 2)
@@ -109,8 +122,8 @@ class ShardManagerSpec extends AkkaSpec {
     }
 
     "change state for addition of coordinator when there are datasets" in {
-      shardManager.addMember(coord2.ref, coord2.ref.path.address)
-      shardManager.coords.toSeq shouldBe Seq(coord1.ref, coord3.ref, coord2.ref)
+      shardManager.addMember(coord2Address, coord2.ref)
+      shardManager.coordinators shouldBe Seq(coord1.ref, coord3.ref, coord2.ref)
 
       coord2.expectMsgPF() { case ds: DatasetSetup =>
         ds.compactDatasetStr shouldEqual datasetObj1.asCompactString
@@ -120,23 +133,22 @@ class ShardManagerSpec extends AkkaSpec {
         StartShardIngestion(dataset1, 6, None),
         StartShardIngestion(dataset1, 7, None))
 
-      subscriber.receiveWhile(messages = 2) {  case m: ShardAssignmentStarted => m }
+      subscriber.receiveWhile(messages = 2) { case m: ShardAssignmentStarted => m }
 
     }
 
     "change state for addition of spare coordinator" in {
-      shardManager.addMember(coord4.ref, coord4.ref.path.address)
-      shardManager.coords.toSeq shouldBe Seq(coord1.ref, coord3.ref, coord2.ref, coord4.ref)
+      shardManager.addMember(coord4Address, coord4.ref)
+      shardManager.coordinators shouldBe Seq(coord1.ref, coord3.ref, coord2.ref, coord4.ref)
       shardManager.datasetInfo.size shouldBe 1
       coord4.expectNoMsg() // since this is a spare node, there should be no assignments
       subscriber.expectNoMsg()
     }
 
     "change state for removal of coordinator when there are datasets and spare nodes" in {
-      shardManager.removeMember(coord1.ref)
-      shardManager.coords.toSeq shouldBe Seq(coord3.ref, coord2.ref, coord4.ref)
+      shardManager.removeMember(coord1Address)
+      shardManager.coordinators shouldBe Seq(coord3.ref, coord2.ref, coord4.ref)
       shardManager.datasetInfo.size shouldBe 1
-
 
       // first ingestion should be stopped on downed node
       coord1.expectMsgAllOf(
@@ -159,8 +171,8 @@ class ShardManagerSpec extends AkkaSpec {
     }
 
     "reassign shards where additional room available on removal of coordinator when there are no spare nodes" in {
-      shardManager.removeMember(coord4.ref)
-      shardManager.coords.toSeq shouldBe Seq(coord3.ref, coord2.ref)
+      shardManager.removeMember(coord4Address)
+      shardManager.coordinators shouldBe Seq(coord3.ref, coord2.ref)
       shardManager.datasetInfo.size shouldBe 1
 
       // ingestion should be stopped on downed node
@@ -187,8 +199,8 @@ class ShardManagerSpec extends AkkaSpec {
     }
 
     "reassign remaining unassigned shards when a replacement node comes back" in {
-      shardManager.addMember(coord4.ref, coord4.ref.path.address)
-      shardManager.coords.toSeq shouldBe Seq(coord3.ref, coord2.ref, coord4.ref)
+      shardManager.addMember(coord4.ref.path.address, coord4.ref)
+      shardManager.coordinators shouldBe Seq(coord3.ref, coord2.ref, coord4.ref)
 
       coord4.expectMsgPF() { case ds: DatasetSetup =>
         ds.compactDatasetStr shouldEqual datasetObj1.asCompactString
@@ -199,7 +211,7 @@ class ShardManagerSpec extends AkkaSpec {
         StartShardIngestion(dataset1, 5, None))
 
       subscriber.receiveWhile(messages = 8) {
-        case ShardDown(d, s, _) if d == dataset2 && s >=0 && s < 8 =>
+        case ShardDown(d, s, _) if d == dataset2 && s >= 0 && s < 8 =>
       }
       subscriber.receiveWhile(messages = 2) { case m: ShardAssignmentStarted => m }
     }
@@ -225,15 +237,15 @@ class ShardManagerSpec extends AkkaSpec {
       shardManager.subscriptions.subscriptions.size shouldBe 0
 
       subscriber.receiveWhile(messages = 8) {
-        case ShardDown(d, s, _) if d == dataset1 && s >=0 && s < 8 =>
+        case ShardDown(d, s, _) if d == dataset1 && s >= 0 && s < 8 =>
       }
     }
 
     "change state for addition of multiple datasets" in {
 
       // add back coord1 and coord4
-      shardManager.addMember(coord1.ref, coord1.ref.path.address)
-      shardManager.coords.toSeq shouldBe Seq(coord3.ref, coord2.ref, coord4.ref, coord1.ref)
+      shardManager.addMember(coord1Address, coord1.ref)
+      shardManager.coordinators shouldBe Seq(coord3.ref, coord2.ref, coord4.ref, coord1.ref)
 
       val assignments1 = shardManager.addDataset(setupDs1, datasetObj1, self)
       shardManager.datasetInfo.size shouldBe 1
@@ -273,15 +285,15 @@ class ShardManagerSpec extends AkkaSpec {
 
       // addition of dataset results in snapshot/subscriptions broadcast
       subscriber.expectMsg(
-        ShardSubscriptions(Set(ShardSubscription(dataset1,Set(subscriber.ref))), Set(subscriber.ref)))
+        ShardSubscriptions(Set(ShardSubscription(dataset1, Set(subscriber.ref))), Set(subscriber.ref)))
       subscriber.expectMsgPF() { case s: CurrentShardSnapshot if s.ref == dataset1 => }
       subscriber.expectMsgPF() { case s: CurrentShardSnapshot if s.ref == dataset1 => } // one more
 
       val assignments2 = shardManager.addDataset(setupDs2, datasetObj2, self)
       shardManager.datasetInfo.size shouldBe 2
       assignments2 shouldEqual Map(
-        coord1.ref -> Range(0,8),
-        coord4.ref -> Range(8,16),
+        coord1.ref -> Range(0, 8),
+        coord4.ref -> Range(8, 16),
         coord2.ref -> Seq.empty,
         coord3.ref -> Seq.empty)
 
@@ -331,19 +343,20 @@ class ShardManagerSpec extends AkkaSpec {
       // node cluster actor should help with recovery of shard mapping
       for {
         (dataset, map) <- shardManager.shardMappers
-      } shardManager2.recoverShardState(dataset, map)
+      } shardManager2.recoverShards(dataset, map)
 
       // node cluster actor should help with recovery of subscriptions
       shardManager2.recoverSubscriptions(shardManager.subscriptions)
 
       // akka membership events will trigger addMember calls from node cluster actor
+      shardManager.coordinators.size shouldEqual 4
       for {
-        c <- shardManager.coords
-      } shardManager2.addMember(c, c.path.address)
+        c <- shardManager.coordinators
+      } shardManager2.addMember(uniqueAddress(c), c)
 
       // now test continuance of business after failover to new shardManager by downing a node and verifying effects
-      shardManager2.removeMember(coord4.ref)
-      shardManager2.coords.toSeq shouldBe Seq(coord3.ref, coord2.ref, coord1.ref)
+      shardManager2.removeMember(coord4Address)
+      shardManager2.coordinators shouldBe Seq(coord3.ref, coord2.ref, coord1.ref)
       shardManager2.datasetInfo.size shouldBe 2
 
       // ingestion should be stopped on downed node for 8 + 3 shards

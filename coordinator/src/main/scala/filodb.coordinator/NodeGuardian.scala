@@ -43,21 +43,24 @@ final class NodeGuardian(val settings: FilodbSettings,
     case CreateCoordinator         => createCoordinator(sender())
     case e: CreateClusterSingleton => createSingleton(e, sender())
     case e: ShardEvent             => shardEvent(e)
-    case s: CurrentShardSnapshot   => setShardMap(s)
+    case s: CurrentShardSnapshot   => shardSnapshot(s)
     case e: ShardSubscriptions     => subscriptions = e
-    case GetShardMapsSubscriptions => getMapsSubscriptions(sender())
+    case GetClusterState          => state(sender())
     case e: ListenerRef            => failureAware ! e
   }
 
   override def receive: Actor.Receive = guardianReceive orElse super.receive
 
-  private def setShardMap(s: CurrentShardSnapshot): Unit = {
-    logger.debug(s"Guardian setting shardmap for ref ${s.ref}")
+  /** Sends the current state of local `ShardMapper`
+    * and `ShardSubscription` collections to the `requestor`.
+    */
+  private def state(requestor: ActorRef): Unit =
+    requestor ! ClusterState(shardMappers, subscriptions)
+
+  private def shardSnapshot(s: CurrentShardSnapshot): Unit = {
+    logger.debug(s"Updating shardMappers for ref ${s.ref}")
     shardMappers(s.ref) = s.map
   }
-
-  private def getMapsSubscriptions(requestor: ActorRef): Unit =
-    requestor ! MapsAndSubscriptions(shardMappers, subscriptions)
 
   private def shardEvent(e: ShardEvent): Unit = {
     logger.debug(s"Updating shard mapper for ref ${e.ref} with event $e")
@@ -95,7 +98,7 @@ final class NodeGuardian(val settings: FilodbSettings,
       val props = NodeCoordinatorActor.props(metaStore, memStore, settings.config)
       context.actorOf(props, CoordinatorName) }
 
-    requester ! CoordinatorRef(actor)
+    requester ! CoordinatorIdentity(actor)
   }
 
   /** Creates a singleton NodeClusterActor and returns a proxy ActorRef to it.
@@ -120,7 +123,7 @@ final class NodeGuardian(val settings: FilodbSettings,
       logger.info(s"Created ClusterSingletonManager for NodeClusterActor [mgr=$mgr, role=${e.role}]")
     }
 
-    requester ! ClusterSingletonRef(proxy)
+    requester ! ClusterSingletonIdentity(proxy)
   }
 
   /** Returns reference to the cluster actor. The proxy
@@ -160,11 +163,17 @@ private[filodb] object NodeGuardian {
 object NodeProtocol {
 
   /** Commands to start a task. */
-  sealed trait TaskCommand
+  @SerialVersionUID(1)
+  sealed trait TaskCommand extends Serializable
   /* Acked on task complete */
-  sealed trait TaskAck
+  @SerialVersionUID(1)
+  sealed trait TaskAck extends Serializable
 
-  sealed trait CreationCommand extends TaskCommand
+  sealed trait LifecycleCommand extends TaskCommand
+  sealed trait StateCommand extends TaskCommand
+
+  sealed trait LifecycleAck extends TaskAck
+  sealed trait StateTaskAck extends TaskAck
 
   /**
     * @param role the role to assign
@@ -172,42 +181,41 @@ object NodeProtocol {
     */
   private[coordinator] final case class CreateClusterSingleton(role: String,
                                                                watcher: Option[ActorRef]
-                                                              ) extends CreationCommand
+                                                              ) extends LifecycleCommand
 
-  private[coordinator] final case class CreateTraceLogger(role: ClusterRole) extends CreationCommand
-  private[coordinator] case object CreateCoordinator extends CreationCommand
-
-  sealed trait CreationAck extends TaskAck
-  private[coordinator] final case class CoordinatorRef(ref: ActorRef) extends CreationAck
-  private[coordinator] final case class ClusterSingletonRef(ref: ActorRef) extends CreationAck
-  private[coordinator] final case class TraceLoggerRef(ref: ActorRef) extends CreationAck
-  private[coordinator] final case class ListenerRef(ref: ActorRef) extends CreationAck
-
-  sealed trait RecoveryCommand extends TaskCommand
-  private[coordinator] case object GetShardMapsSubscriptions extends RecoveryCommand
-
-  sealed trait RecoveryAck extends TaskAck
-  private[coordinator] final case class MapsAndSubscriptions(shardMaps: MMap[DatasetRef, ShardMapper],
-                                                             subscriptions: ShardSubscriptions) extends RecoveryAck
-
-  sealed trait LifecycleCommand
+  private[coordinator] final case class CreateTraceLogger(role: ClusterRole) extends LifecycleCommand
+  private[coordinator] case object CreateCoordinator extends LifecycleCommand
   private[coordinator] case object GracefulShutdown extends LifecycleCommand
 
-  sealed trait LifecycleAck extends TaskAck
   private[coordinator] final case class ShutdownComplete(ref: ActorRef) extends LifecycleAck
 
-  sealed trait StateCommand
-  private[filodb] case object ResetState extends StateCommand
+  /** Identity ACK. */
+  @SerialVersionUID(1)
+  sealed trait ActorIdentity extends Serializable {
+    def identity: ActorRef
+  }
 
-  sealed trait StateTaskAck extends TaskAck
+  /* Specific load-time 'create' task completion ACKs: */
+  private[coordinator] final case class CoordinatorIdentity(identity: ActorRef) extends ActorIdentity
+  private[coordinator] final case class ClusterSingletonIdentity(identity: ActorRef) extends ActorIdentity
+  private[coordinator] final case class TraceLoggerRef(identity: ActorRef) extends ActorIdentity
+  private[coordinator] final case class ListenerRef(identity: ActorRef) extends ActorIdentity
+
+  private[filodb] case object ResetState extends StateCommand
+  private[coordinator] case object GetClusterState extends StateCommand
+
   private[filodb] case object StateReset extends StateTaskAck
 
-  /** For watchers aware of specific actor transitions in lifecycle. */
-  sealed trait ActorLifecycle extends LifecycleCommand {
-    def identity: ActorPath
-  }
-  private[coordinator] final case class PreStart(identity: ActorPath) extends ActorLifecycle
-  private[coordinator] final case class PreRestart(identity: ActorPath, reason: Throwable) extends ActorLifecycle
-  private[coordinator] final case class PostStop(identity: ActorPath) extends ActorLifecycle
+  private[coordinator] final case class ClusterState(shardMaps: MMap[DatasetRef, ShardMapper],
+                                                     subscriptions: ShardSubscriptions) extends StateTaskAck
+
+  /** Self-generated events for watchers of specific actor lifecycle transitions such as
+    * restarts of an actor on error, or restarts of one actor on a different node than
+    * it was first created on, for host or new instance verification.
+    */
+  sealed trait ActorLifecycleEvent extends ActorIdentity
+  final case class PreStart(identity: ActorRef, address: Address) extends ActorLifecycleEvent
+  final case class PreRestart(identity: ActorRef, address: Address, reason: Throwable) extends ActorLifecycleEvent
+  final case class PostStop(identity: ActorRef, address: Address) extends ActorLifecycleEvent
 
 }

@@ -3,6 +3,7 @@ package filodb.standalone
 import scala.collection.mutable.HashSet
 import scala.concurrent.duration._
 
+import akka.actor.ActorRef
 import akka.remote.testkit.{MultiNodeConfig, MultiNodeSpec}
 import akka.testkit.ImplicitSender
 import com.typesafe.config.ConfigFactory
@@ -12,9 +13,9 @@ import org.scalatest._
 import org.scalatest.concurrent.ScalaFutures
 
 import filodb.coordinator._
-import filodb.coordinator.client.LocalClient
 import filodb.coordinator.NodeClusterActor.{DatasetResourceSpec, IngestionSource}
 import filodb.coordinator.QueryCommands.{MostRecentTime, QueryArgs}
+import filodb.coordinator.client.LocalClient
 import filodb.core.{DatasetRef, ErrorResponse}
 import filodb.core.query.ColumnFilter
 import filodb.core.query.Filter.Equals
@@ -31,48 +32,97 @@ abstract class StandaloneMultiJvmSpec(config: MultiNodeConfig) extends MultiNode
 
   import akka.testkit._
 
+  lazy val watcher = TestProbe()
+
+  val duration = 5.seconds.dilated
+  val longDuration = 60.seconds
+  val removedDuration = longDuration * 8
+
   // Ingestion Source section
   val source = ConfigFactory.parseFile(new java.io.File("conf/timeseries-dev-source.conf"))
-  val dataset = DatasetRef(source.getString("dataset"))
-  val numShards = source.getInt("num-shards")
-  val resourceSpec = DatasetResourceSpec(numShards, source.getInt("min-num-nodes"))
+  val dataset = DatasetRef(source.as[String]("dataset"))
+  val numShards = source.as[Int]("num-shards")
+  val resourceSpec = DatasetResourceSpec(numShards, source.as[Int]("min-num-nodes"))
   val sourceconfig = source.getConfig("sourceconfig")
   val ingestionSource = source.as[Option[String]]("sourcefactory").map { factory =>
     IngestionSource(factory, sourceconfig)
   }.get
-  val chunkDuration = sourceconfig.getDuration("chunk-duration")
+  val chunkDuration = sourceconfig.as[FiniteDuration]("chunk-duration")
 
+  override def beforeAll(): Unit = multiNodeSpecBeforeAll()
+
+  override def afterAll(): Unit = multiNodeSpecAfterAll()
+
+  /** Execute within a `runOn`. */
+  def awaitNodeUp(server: FiloServer, within: FiniteDuration = duration): Unit = {
+    server.start()
+    awaitCond(server.cluster.isInitialized, within)
+  }
+
+  /** Execute within a `runOn`. */
+  def awaitNodeDown(server: FiloServer, within: FiniteDuration = longDuration * 2): Unit = {
+    server.shutdown()
+    awaitCond(server.cluster.isTerminated, within)
+  }
 
   def waitAllShardsIngestionActive(): Unit = {
     val activeShards = new HashSet[Int]()
     while (activeShards.size < numShards) {
-      expectMsgPF(5.seconds.dilated) {
+      expectMsgPF(duration) {
         case ShardAssignmentStarted(_, shard, _) =>
         case IngestionStarted(_, shard, _) => activeShards += shard
       }
     }
   }
 
-  def validateShardStatus(client: LocalClient)(statusValidator: ShardStatus => Boolean): Unit = {
+  /**
+    * @param shards use when some are up and some down, to test different shard status
+    */
+  def validateShardStatus(client: LocalClient,
+                          coordinator: Option[ActorRef] = None,
+                          shards: Seq[Int] = Seq.empty)
+                         (statusValidator: ShardStatus => Boolean): Unit = {
     client.getShardMapper(dataset) match {
       case Some(map) =>
         info(s"Shard map:  $map")
         info(s"Shard map nodes: ${map.allNodes}")
-
+        if (coordinator.nonEmpty) coordinator forall (c => map.allNodes contains c) shouldEqual true
+        map.allNodes.size shouldEqual 2 // only two nodes assigned
         map.shardValues.size shouldBe numShards
-        map.shardValues.forall { case (_, status) =>
-          statusValidator(status)
-        } shouldEqual true
-        // only two nodes assigned
-        map.allNodes.size shouldEqual 2
+        shards match {
+          case Seq() =>
+           map.shardValues.forall { case (_, status) => statusValidator(status) } shouldEqual true
+          case _ =>
+            shards forall(shard => statusValidator(map.statusForShard(shard))) shouldEqual true
+        }
+
       case _ =>
         fail(s"Unable to obtain status for dataset $dataset")
     }
   }
 
+  def validateShardAssignments(client: LocalClient,
+                               nodeCount: Int,
+                               assignments: Seq[Int],
+                               coordinator: akka.actor.ActorRef): Unit =
+    client.getShardMapper(dataset) match {
+      case Some(mapper) =>
+        mapper.allNodes.size shouldEqual nodeCount
+        mapper.assignedShards shouldEqual Seq(0, 1, 2, 3)
+        mapper.unassignedShards shouldEqual Seq.empty
+        val shards = mapper.shardsForCoord(coordinator)
+        shards shouldEqual assignments
+        for {
+          shard <- shards
+        } info(s"shard($shard) ${mapper.statusForShard(shard)} $coordinator")
+
+      case _ =>
+
+    }
+
   def setupDataset(client: LocalClient): Unit = {
     client.setupDataset(dataset, resourceSpec, ingestionSource).foreach {
-      case e: ErrorResponse => fail(s"Errors setting up dataset $dataset: $e")
+      e: ErrorResponse => fail(s"Errors setting up dataset $dataset: $e")
     }
   }
 

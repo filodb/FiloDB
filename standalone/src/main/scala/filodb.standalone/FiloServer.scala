@@ -2,6 +2,7 @@ package filodb.standalone
 
 import scala.util.control.NonFatal
 
+import akka.actor.ActorRef
 import akka.cluster.Cluster
 import com.typesafe.config.Config
 import net.ceedubs.ficus.Ficus._
@@ -31,8 +32,15 @@ import filodb.http.FiloHttpServer
  *     }
  *   }
  * }}}
+ *
+ * @param watcher optionally register a watcher `ActorRef` with the `NodeClusterActor` cluster
+ *                singleton. Primarily for Multi-JVM tests, but this strategy is used in the
+ *                coordinator module in all test types.
  */
-class FiloServer extends FilodbClusterNode {
+class FiloServer(watcher: Option[ActorRef]) extends FilodbClusterNode {
+
+  def this() = this(None)
+  def this(watcher: ActorRef) = this(Some(watcher))
 
   override val role = ClusterRole.Server
 
@@ -55,7 +63,7 @@ class FiloServer extends FilodbClusterNode {
       coordinatorActor
       scala.concurrent.Await.result(metaStore.initialize(), cluster.settings.InitializationTimeout)
       val bootstrapper = bootstrap(cluster.cluster)
-      val singleton = cluster.clusterSingleton(role, None)
+      val singleton = cluster.clusterSingleton(role, watcher)
       val filoHttpServer = new FiloHttpServer(cluster.system)
       filoHttpServer.start(coordinatorActor, singleton, bootstrapper.getAkkaHttpRoute())
     } catch {
@@ -86,7 +94,6 @@ class FiloServer extends FilodbClusterNode {
 }
 
 object FiloServer {
-  def main(args: Array[String]): Unit = {
+  def main(args: Array[String]): Unit =
     new FiloServer().start()
-  }
 }

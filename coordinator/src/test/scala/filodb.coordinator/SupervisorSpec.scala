@@ -44,7 +44,7 @@ class SupervisorSpec extends AkkaSpec {
       val guardian = system.actorOf(guardianProps, "sguardian")
       guardian ! CreateCoordinator
       expectMsgPF() {
-        case CoordinatorRef(ref) =>
+        case CoordinatorIdentity(ref) =>
           ref.path should be(ActorPath.fromString("akka://akka-test/user/sguardian/" + ActorName.CoordinatorName))
           ref ! PoisonPill // now kill it, should see it logged
       }
@@ -54,7 +54,7 @@ class SupervisorSpec extends AkkaSpec {
       val guardian = system.actorOf(guardianProps, "guardian")
       guardian ! CreateClusterSingleton("worker", None)
       expectMsgPF() {
-        case ClusterSingletonRef(ref) =>
+        case ClusterSingletonIdentity(ref) =>
           ref.path should be(ActorPath.fromString(
             "akka://akka-test/user/guardian/" + ActorName.ClusterSingletonProxyName))
       }
@@ -63,9 +63,9 @@ class SupervisorSpec extends AkkaSpec {
     "stop gracefully" in {
       val guardian = system.actorOf(guardianProps)
       guardian ! CreateCoordinator
-      expectMsgClass(classOf[CoordinatorRef])
+      expectMsgClass(classOf[CoordinatorIdentity])
       guardian ! CreateClusterSingleton("worker", None)
-      expectMsgClass(classOf[ClusterSingletonRef])
+      expectMsgClass(classOf[ClusterSingletonIdentity])
 
       guardian ! GracefulShutdown
       expectMsgPF() {
