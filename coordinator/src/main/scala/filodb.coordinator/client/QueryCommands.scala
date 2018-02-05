@@ -1,14 +1,9 @@
-package filodb.coordinator
+package filodb.coordinator.client
 
-import java.nio.ByteBuffer
-
-import scala.language.existentials
-
-import filodb.core.query.{ColumnFilter, CombinerFunction}
+import filodb.core.query.{ColumnFilter, CombinerFunction, ExecPlan, Result}
 
 object QueryCommands {
   import filodb.core._
-  import filodb.core.Types._
 
   // These correspond to the ColumnStore PartitionScan methods, but take in raw data ie strings, ints
   // Which partitions should I query?
@@ -43,21 +38,8 @@ object QueryCommands {
                                   limit: Int = 100) extends QueryCommand
 
   /**
-   * Executes a query which returns the raw FiloVectors for the client to process
-   * @param dataset the dataset (and possibly database) to query
-   * @param columns the name of the columns to query.  Data will be returned for each chunkset in the same
-   *                column order.
-   * @param partitionQuery which partitions to query and filter on
-   * @param dataQuery which data within a partition to return
-   * @return QueryInfo followed by successive QueryRawChunks, followed by QueryEndRaw or QueryError
-   */
-  final case class RawQuery(dataset: DatasetRef,
-                            columns: Seq[String],
-                            partitionQuery: PartitionQuery,
-                            dataQuery: DataQuery) extends QueryCommand
-
-  /**
    * Specifies details about the aggregation query to execute on the FiloDB server.
+   * TODO: deprecated, remove when old combiner-aggregate pipeline is removed
    * @param functionName the name of the function for aggregating raw data
    * @param column       name of column holding the data to query
    * @param args         optional arguments to the function, may be none
@@ -79,19 +61,23 @@ object QueryCommands {
                                 queryTimeoutSecs: Int = 30)
 
   /**
-   * Executes a query which performs aggregation and returns the result as one message to the client.
+   * Executes a query using a LogicalPlan and returns the result as one message to the client.
    * Depends on queryOptions, the query will fan out to multiple nodes and shards as needed to gather
    * results.
    * @param dataset the dataset (and possibly database) to query
-   * @param query   the QueryArgs specifying the name of the query function and the arguments as strings
-   * @param partitionQuery which partitions to query and filter on
+   * @param plan the LogicalPlan for the query to run
    * @param queryOptions options to control routing of query
    * @return AggregateResponse, or BadQuery, BadArgument, WrongNumberOfArgs, UndefinedColumns
    */
-  final case class AggregateQuery(dataset: DatasetRef,
-                                  query: QueryArgs,
-                                  partitionQuery: PartitionQuery,
-                                  queryOptions: QueryOptions = QueryOptions()) extends QueryCommand
+  final case class LogicalPlanQuery(dataset: DatasetRef,
+                                    plan: LogicalPlan,
+                                    queryOptions: QueryOptions = QueryOptions()) extends QueryCommand
+
+  /**
+   * INTERNAL API only.
+   * Executes a query using an ExecPlan (physical plan).
+   */
+  final case class ExecPlanQuery(dataset: DatasetRef, execPlan: ExecPlan[_, _]) extends QueryCommand
 
   // Error responses from query
   final case class UndefinedColumns(undefined: Set[String]) extends ErrorResponse
@@ -99,22 +85,10 @@ object QueryCommands {
   final case class BadQuery(msg: String) extends ErrorResponse with QueryResponse
   final case class WrongNumberOfArgs(actual: Int, expected: Int) extends ErrorResponse with QueryResponse
 
-  /**
-   * Metadata info about a query.
-   * @param columnStrings serialized version of Column objects, use DataColumn.fromString()
-   */
-  final case class QueryInfo(id: Long, dataset: DatasetRef, columnStrings: Seq[String]) extends QueryResponse
-  final case class QueryEndRaw(id: Long) extends QueryResponse
   final case class QueryError(id: Long, t: Throwable) extends ErrorResponse with QueryResponse {
     override def toString: String = s"QueryError id=$id ${t.getClass.getName} ${t.getMessage}\n" +
                                     t.getStackTrace.map(_.toString).mkString("\n")
   }
 
-  final case class QueryRawChunks(queryID: Long,
-                                  chunkID: ChunkID,
-                                  buffers: Array[ByteBuffer]) extends QueryResponse
-
-  final case class AggregateResponse[R](id: Long,
-                                        elementClass: Class[_],
-                                        elements: Array[R]) extends QueryResponse
+  final case class QueryResult(id: Long, result: Result) extends QueryResponse
 }

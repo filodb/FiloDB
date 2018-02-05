@@ -14,7 +14,7 @@ import monix.reactive.Observable
 import org.apache.kafka.clients.producer.ProducerRecord
 
 import filodb.coordinator.IngestionStreamFactory
-import filodb.coordinator.IngestionCommands.DatasetSetup
+import filodb.coordinator.client.IngestionCommands.DatasetSetup
 import filodb.coordinator.NodeClusterActor.IngestionSource
 import filodb.core.memstore.{IngestRecord, IngestRouting, TimeSeriesMemStore}
 import filodb.core.metadata.Dataset

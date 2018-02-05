@@ -34,6 +34,13 @@ trait BinaryVector[@specialized(Int, Long, Double, Boolean) A] extends FiloVecto
     */
   def dispose: () => Unit
 
+  // Write out the header if it is uninitialized
+  // Assumes proper allocation with magic header written to four bytes before offset
+  def initHeaderBytes(): Unit =
+    if (UnsafeUtils.getInt(base, offset - 4) == BinaryVector.HeaderMagic) {
+      UnsafeUtils.setInt(base, offset - 4, WireFormat(vectMajorType, vectSubType))
+    }
+
   /**
     * Produce a FiloVector ByteBuffer with the four-byte header.  The resulting buffer can be used for I/O
     * and fed to FiloVector.apply() to be parsed back.  For most BinaryVectors returned by optimize() and
@@ -41,18 +48,12 @@ trait BinaryVector[@specialized(Int, Long, Double, Boolean) A] extends FiloVecto
     */
   def toFiloBuffer: ByteBuffer = base match {
     case UnsafeUtils.ZeroPointer =>
-      // Check if magic word written to header location.
-      // Then write header, and wrap in a ByteBuffer and return that
-      assert(UnsafeUtils.getInt(base, offset - 4) == BinaryVector.HeaderMagic)
-      val byteBuffer = UnsafeUtils.asDirectBuffer(offset - 4, numBytes + 4)
-      UnsafeUtils.setInt(base, offset - 4, WireFormat(vectMajorType, vectSubType))
-      byteBuffer
+      initHeaderBytes()
+      UnsafeUtils.asDirectBuffer(offset - 4, numBytes + 4)
 
     case a: Array[Byte] =>
-      // Check if magic word written to header location.  Then write header, and wrap all the bytes
-      // in a ByteBuffer and return that.  Assumes byte array properly allocated beforehand.
-      assert(offset == (UnsafeUtils.arayOffset + 4) && UnsafeUtils.getInt(base, offset - 4) == BinaryVector.HeaderMagic)
-      UnsafeUtils.setInt(base, offset - 4, WireFormat(vectMajorType, vectSubType))
+      assert(offset == (UnsafeUtils.arayOffset + 4))
+      initHeaderBytes()
       val bb = ByteBuffer.wrap(a)
       bb.limit(numBytes + 4)
       bb.order(java.nio.ByteOrder.LITTLE_ENDIAN)

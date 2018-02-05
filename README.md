@@ -55,6 +55,8 @@ See [architecture](doc/architecture.md) and [datasets and reading](doc/datasets_
   - [Metrics Configuration](#metrics-configuration)
 - [Code Walkthrough](#code-walkthrough)
 - [Building and Testing](#building-and-testing)
+  - [Debugging serialization](#debugging-serialization)
+  - [Benchmarking](#benchmarking)
 - [You can help!](#you-can-help)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
@@ -697,6 +699,18 @@ Multi-JVM tests output a separate log file per process, in the `logs` dir under 
 Some useful environment vars:
 * `LOG_AKKA_TO_CONSOLE` - define this to have noisy Akka Cluster logs output to the console
 * `MAYBE_MULTI_JVM` - enable multi-JVM tests for the Kafka and Standalone modules.  These require both Cassandra and Kafka to be up and running.
+
+### Debugging serialization
+
+Right now both Java and Kryo serialization are used for Akka messaging.  If there are mysterious hangs, or other potentially serialization-related bugs, here is where to investigate:
+
+1. Run the `SerializationSpec` in coordinator.client module, especially if changes have been done to the Akka configuration.  This test uses the Akka serialization module to ensure settings and serializers work correctly.
+2. Set `MAYBE_MULTI_JVM` to true and run `cassandra/test` and `standalone/test`. They test multi-node communication for both ingestion and querying.
+3. Turn on `-Dakka.actor.kryo.kryo-trace=true` which logs in extreme detail Kryo serialization traces.  Kryo seems to have an annoying habit of swallowing some serialization errors so look at the last thing serialized.
+4. In particular, enable the above when running the CLI with the standalone FiloDB process to do PromQL queries.
+5. Enable trace level debugging for the coordinator module.  Details esp of `BinaryVector` serialization will be available and are useful for debugging.
+
+### Benchmarking
 
 To run benchmarks, from within SBT:
 

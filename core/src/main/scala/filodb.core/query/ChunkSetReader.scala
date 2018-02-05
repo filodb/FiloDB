@@ -6,9 +6,10 @@ import scala.collection.mutable.BitSet
 
 import com.googlecode.javaewah.EWAHCompressedBitmap
 
+import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.metadata.Dataset
-import filodb.core.store.{ChunkSet, ChunkSetInfo}
-import filodb.core.Types.PartitionKey
+import filodb.core.store.{timeUUID64, ChunkSet, ChunkSetInfo}
+import filodb.core.Types.ChunkID
 import filodb.memory.format._
 
 /**
@@ -18,10 +19,9 @@ import filodb.memory.format._
  * the parsing and allocation overhead.
  */
 class MutableChunkSetReader(info: ChunkSetInfo,
-                            partition: PartitionKey,
                             skips: EWAHCompressedBitmap,
                             numChunks: Int)
-extends ChunkSetReader(info, partition, skips, new Array[FiloVector[_]](numChunks)) {
+extends ChunkSetReader(info, skips, new Array[FiloVector[_]](numChunks)) {
   private final val bitset = new BitSet
 
   final def addChunk(colNo: Int, vector: FiloVector[_]): Unit = {
@@ -37,7 +37,6 @@ extends ChunkSetReader(info, partition, skips, new Array[FiloVector[_]](numChunk
  * The partition is used by some aggregation functions to pull out partition information.
  */
 class ChunkSetReader(val info: ChunkSetInfo,
-                     val partition: PartitionKey,
                      val skips: EWAHCompressedBitmap,
                      parsers: Array[FiloVector[_]]) {
   import ChunkSetReader._
@@ -46,6 +45,48 @@ class ChunkSetReader(val info: ChunkSetInfo,
 
   def vectors: Array[FiloVector[_]] = parsers
   def length: Int = len
+
+  /**
+   * Assuming the records are sorted in order of increasing rowKey, finds the range of row numbers
+   * within this ChunkSetReader that contains the records for the range of row keys.
+   * If the inputs are invalid (like key1 > key2) then (-1, -1) is returned.
+   *
+   * NOTE: the first chunks in a chunkset must correspond to row key columns.  For example, if rowkeys
+   * is ["timestamp"], then the first chunk must be the timestamp vector.
+   *
+   * @param ordering an Ordering that compares RowReaders made from the vectors, consistent with row key vectors
+   */
+  final def rowKeyRange(key1: BinaryRecord, key2: BinaryRecord, ordering: Ordering[RowReader]): (Int, Int) = {
+    if (key1 > key2) {
+      (-1, -1)
+    } else if (info.firstKey.isEmpty) {
+      // Empty key = no key range info, cannot compare.  Just return all rows
+      (0, len - 1)
+    } else {
+      // check key1 vs firstKey
+      val startRow =
+        if (key1 <= info.firstKey) { 0 }
+        else {
+          binarySearchKeyChunks(parsers, len, ordering, key1)._1
+        }
+
+      // check key2 vs lastKey
+      val endRow =
+        if (key2 >= info.lastKey) { len - 1 }
+        else {
+          binarySearchKeyChunks(parsers, len, ordering, key2) match {
+            // no match - binarySearch returns the row # _after_ the searched key.
+            // So if key is less than the first item then 0 is returned since 0 is after the key.
+            // Since this is the ending row inclusive we need to decrease row # - cannot include next row
+            case (row, false) =>  row - 1
+            // exact match - just return the row number
+            case (row, true)  =>  row
+          }
+        }
+
+      (startRow, endRow)
+    }
+  }
 
   /**
    * Iterates over rows in this chunkset, skipping over any rows defined in skiplist.
@@ -92,10 +133,77 @@ object ChunkSetReader {
             dataset: Dataset,
             columnIDs: Seq[Int],
             skips: EWAHCompressedBitmap = emptySkips): ChunkSetReader = {
-    val reader = new MutableChunkSetReader(chunkSet.info, chunkSet.partition, skips, chunkSet.chunks.length)
+    val reader = new MutableChunkSetReader(chunkSet.info, skips, chunkSet.chunks.length)
     chunkSet.chunks.zipWithIndex.foreach { case ((colID, buffer), pos) =>
       reader.addChunk(pos, dataset.vectorMakers(colID)(buffer, chunkSet.info.numRows))
     }
     reader
+  }
+
+  /**
+   * Easiest way to create a ChunkSetReader for testing from a set of vectors
+   */
+  def fromVectors(vectors: Array[FiloVector[_]],
+                  chunkID: ChunkID = timeUUID64,
+                  firstKey: BinaryRecord = BinaryRecord.empty,
+                  lastKey: BinaryRecord = BinaryRecord.empty): ChunkSetReader = {
+    require(vectors.size > 0, s"Cannot pass in an empty set of vectors")
+    val info = ChunkSetInfo(chunkID, vectors(0).length, firstKey, lastKey)
+    new ChunkSetReader(info, emptySkips, vectors)
+  }
+
+  /**
+   * Does a binary search through the vectors representing row keys in a segment, finding the position
+   * equal to the given key or just greater than the given key, if the key is not matched
+   * (ie where the nonmatched item would be inserted).
+   * Note: we take advantage of the fact that row keys cannot have null values, so no need to null check.
+   *
+   * @param reader a FiloRowReader based on an array of FiloVectors. First vectors must be row keys.
+   * @param chunkLen the number of items in each FiloVector
+   * @param ordering an Ordering that compares RowReaders made from the vectors, consistent with row key vectors
+   * @param key    a RowReader representing the key to search for.  Must also have rowKeyColumns elements.
+   * @return (position, true if exact match is found)  position might be equal to the number of rows in chunk
+   *            if exact match not found and item compares greater than last item
+   */
+  // NOTE/TODO: The binary search algo below could be turned into a tail-recursive one, but be sure to do
+  // a benchmark comparison first.  This is definitely in the critical path and we don't want a slowdown.
+  // OTOH a tail recursive probably won't be the bottleneck.
+  def binarySearchKeyChunks(reader: FiloRowReader,
+                            chunkLen: Int,
+                            ordering: Ordering[RowReader],
+                            key: RowReader): (Int, Boolean) = {
+    var len = chunkLen
+    var first = 0
+    while (len > 0) {
+      val half = len >>> 1
+      val middle = first + half
+      reader.setRowNo(middle)
+      val comparison = ordering.compare(reader, key)
+      if (comparison == 0) {
+        return (middle, true)
+      } else if (comparison < 0) {
+        first = middle + 1
+        len = len - half - 1
+      } else {
+        len = half
+      }
+    }
+    (first, ordering.equiv(reader, key))
+  }
+
+  /**
+   * An alternative of the above where we wrap a FastFiloRowReader around a set of vectors for convenience.
+   * @param vectors an array of FiloVectors, must start with row key columns according to the ordering
+   * @param ordering an Ordering that compares RowReaders made from the vectors, consistent with row key vectors
+   * @param key    a RowReader representing the key to search for.  Must also have rowKeyColumns elements.
+   * @return (position, true if exact match is found)  position might be equal to the number of rows in chunk
+   *            if exact match not found and item compares greater than last item
+   */
+  def binarySearchKeyChunks(vectors: Array[FiloVector[_]],
+                            chunkLen: Int,
+                            ordering: Ordering[RowReader],
+                            key: RowReader): (Int, Boolean) = {
+    val reader = new FastFiloRowReader(vectors)
+    binarySearchKeyChunks(reader, chunkLen, ordering, key)
   }
 }

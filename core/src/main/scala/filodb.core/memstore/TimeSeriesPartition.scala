@@ -270,7 +270,7 @@ class TimeSeriesPartition(val dataset: Dataset,
       val vectArray = vectors.get(info.id)
       val chunkset = getVectors(columnIds, vectArray, info.numRows)
       shardStats.numChunksQueried.increment(chunkset.length)
-      new ChunkSetReader(info, binPartition, skips, chunkset)
+      new ChunkSetReader(info, skips, chunkset)
     }
   }
 

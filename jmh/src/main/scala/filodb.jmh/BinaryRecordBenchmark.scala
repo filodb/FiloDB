@@ -6,8 +6,8 @@ import java.util.concurrent.TimeUnit
 import ch.qos.logback.classic.{Level, Logger}
 import org.openjdk.jmh.annotations._
 
-import filodb.coordinator.IngestionCommands.IngestRows
-import filodb.coordinator.Serializer
+import filodb.coordinator.client.IngestionCommands.IngestRows
+import filodb.coordinator.client.Serializer
 import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.GdeltTestData
 

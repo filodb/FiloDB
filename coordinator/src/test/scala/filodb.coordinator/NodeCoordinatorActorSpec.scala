@@ -11,9 +11,10 @@ import org.scalatest.BeforeAndAfterEach
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
 
+import filodb.coordinator.client._
 import filodb.core._
-import filodb.core.metadata.Dataset
-import filodb.core.query.{AggregationFunction, ColumnFilter, Filter, HistogramBucket}
+import filodb.core.metadata.{Dataset, Column}
+import filodb.core.query._
 import filodb.core.store._
 import filodb.memory.format.ZeroCopyUTF8String
 
@@ -25,10 +26,12 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
 
   import akka.testkit._
 
-  import DatasetCommands._
-  import IngestionCommands._
+  import client.DatasetCommands._
+  import client.IngestionCommands._
   import NodeClusterActor._
   import GdeltTestData._
+  import LogicalPlan._
+  import Column.ColumnType._
 
   implicit val defaultPatience =
     PatienceConfig(timeout = Span(10, Seconds), interval = Span(50, Millis))
@@ -114,7 +117,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
   }
 
   describe("QueryActor commands and responses") {
-    import QueryCommands._
+    import client.QueryCommands._
     import MachineMetricsData._
 
     def setupTimeSeries(numShards: Int = 1): DatasetRef = {
@@ -130,50 +133,54 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       probe.expectMsg(DatasetCreated)
 
       val ref = MachineMetricsData.dataset1.ref
-      val q1 = RawQuery(ref, Seq("min"), SinglePartitionQuery(Seq("Series 1")), AllPartitionData)
+      val q1 = LogicalPlanQuery(ref, PartitionsInstant(SinglePartitionQuery(Seq("Series 1")), Seq("min")))
       probe.send(coordinatorActor, q1)
       probe.expectMsg(UnknownDataset)
     }
 
-    it("should return raw chunks with a RawQuery after ingesting rows") {
+    it("should return chunks when querying all samples after ingesting rows") {
       val ref = setupTimeSeries()
       probe.send(coordinatorActor, IngestRows(ref, 0, records(multiSeriesData()).take(20)))
       probe.expectMsg(Ack(19L))
 
       // Query existing partition: Series 1
-      val q1 = RawQuery(ref, Seq("min"), SinglePartitionQuery(Seq("Series 1")), AllPartitionData)
+      val q1 = LogicalPlanQuery(ref, PartitionsRange.all(SinglePartitionQuery(Seq("Series 1")), Seq("min")))
       probe.send(coordinatorActor, q1)
       val info1 = probe.expectMsgPF(3.seconds.dilated) {
-        case q @ QueryInfo(_, ref, _) => q
+        case QueryResult(_, VectorListResult(rangeOpt, schema, partVectorSeq)) =>
+          rangeOpt shouldEqual None
+          schema shouldEqual ResultSchema(Seq(ColumnInfo("timestamp", LongColumn), ColumnInfo("min", DoubleColumn)), 1)
+          partVectorSeq should have length (1)
+          partVectorSeq.head.readers should have length (1)
+          partVectorSeq.head.info.get.partKey shouldEqual dataset1.partKey("Series 1")
       }
-      probe.expectMsgPF(3.seconds.dilated) {
-        case QueryRawChunks(info1.id, _, chunks) => chunks.size should equal (1)
-      }
-      probe.expectMsg(QueryEndRaw(info1.id))
 
       // Query nonexisting partition
-      val q2 = RawQuery(ref, Seq("min"), SinglePartitionQuery(Seq("NotSeries")), AllPartitionData)
+      val q2 = LogicalPlanQuery(ref, PartitionsRange.all(SinglePartitionQuery(Seq("NotSeries")), Seq("min")))
       probe.send(coordinatorActor, q2)
       val info2 = probe.expectMsgPF(3.seconds.dilated) {
-        case q @ QueryInfo(_, ref, _) => q
+        case QueryResult(_, VectorListResult(None, ResultSchema(schema, 1), Nil)) =>
+          schema shouldEqual Seq(ColumnInfo("timestamp", LongColumn), ColumnInfo("min", DoubleColumn))
       }
-      probe.expectMsg(QueryEndRaw(info2.id))
     }
 
     it("should return BadArgument/BadQuery if wrong type of partition key passed") {
       val ref = setupTimeSeries()
-      val q1 = RawQuery(ref, Seq("min"), SinglePartitionQuery(Seq(-1)), AllPartitionData)
+      val q1 = LogicalPlanQuery(ref, PartitionsRange.all(SinglePartitionQuery(Seq(-1)), Seq("min")))
       probe.send(coordinatorActor, q1)
       probe.expectMsgClass(classOf[BadQuery])
     }
 
     it("should return BadQuery if aggregation function not defined") {
       val ref = setupTimeSeries()
-      val q1 = AggregateQuery(ref, QueryArgs("not-a-func", "foo"), SinglePartitionQuery(Seq("Series 1")))
+      val q1 = LogicalPlanQuery(ref, simpleAgg("not-a-func", childPlan=
+                 PartitionsRange.all(SinglePartitionQuery(Seq("Series 1")), Seq("foo"))))
       probe.send(coordinatorActor, q1)
       probe.expectMsg(BadQuery("No such aggregation function not-a-func"))
 
-      val q2 = AggregateQuery(ref, QueryArgs("TimeGroupMin", "min"), SinglePartitionQuery(Seq("Series 1")))
+      // Need time-group-min (eg dashes)
+      val q2 = LogicalPlanQuery(ref, simpleAgg("TimeGroupMin", childPlan=
+                 PartitionsRange.all(SinglePartitionQuery(Seq("Series 1")), Seq("min"))))
       probe.send(coordinatorActor, q2)
       probe.expectMsg(BadQuery("No such aggregation function TimeGroupMin"))
     }
@@ -181,16 +188,16 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
     // Don't have a function that returns this yet.  time_group_* _used_ to but doesn't anymore
     ignore("should return WrongNumberOfArgs if number of arguments wrong") {
       val ref = setupTimeSeries()
-      val q1 = AggregateQuery(ref, QueryArgs("time_group_avg", "min"),
-                              SinglePartitionQuery(Seq("Series 1")))
+      val q1 = LogicalPlanQuery(ref, simpleAgg("time_group_avg", childPlan=
+                 PartitionsRange.all(SinglePartitionQuery(Seq("Series 1")), Seq("min"))))
       probe.send(coordinatorActor, q1)
       probe.expectMsg(WrongNumberOfArgs(2, 5))
     }
 
     it("should return BadArgument if arguments could not be parsed successfully") {
       val ref = setupTimeSeries()
-      val q1 = AggregateQuery(ref, QueryArgs("time_group_avg", "min", Seq("a1b")),
-                              SinglePartitionQuery(Seq("Series 1")))
+      val q1 = LogicalPlanQuery(ref, simpleAgg("time_group_avg", Seq("a1b"), childPlan=
+                 PartitionsRange.all(SinglePartitionQuery(Seq("Series 1")), Seq("min"))))
       probe.send(coordinatorActor, q1)
       probe.expectMsgClass(classOf[BadArgument])
     }
@@ -200,8 +207,8 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
     it("should return BadArgument if wrong types of columns are passed") {
       val ref = setupTimeSeries()
       // Test 1: Cannot pass in a non-double column for time_group_avg
-      val args = QueryArgs("time_group_avg", "timestamp", Seq("100"), timeScan)
-      val q1 = AggregateQuery(ref, args, SinglePartitionQuery(Seq("Series 1")))
+      val q1 = LogicalPlanQuery(ref, simpleAgg("time_group_avg", Seq("100"), childPlan=
+                 PartitionsRange(SinglePartitionQuery(Seq("Series 1")), timeScan, Seq("timestamp"))))
       probe.send(coordinatorActor, q1)
       val msg = probe.expectMsgClass(classOf[BadArgument])
       msg.msg should include ("not in allowed set")
@@ -219,49 +226,62 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       probe.send(coordinatorActor, DatasetSetup(dataset4.asCompactString))
 
       // case 1: scan all data in partition, but no timestamp column ->
-      val args = QueryArgs("time_group_avg", "AvgTone", Nil)
-      val q1 = AggregateQuery(ref4, args, FilteredPartitionQuery(Nil))
+      val q1 = LogicalPlanQuery(ref4, simpleAgg("time_group_avg", childPlan=
+                 PartitionsRange.all(FilteredPartitionQuery(Nil), Seq("AvgTone"))))
       probe.send(coordinatorActor, q1)
       val msg = probe.expectMsgClass(classOf[BadQuery])
       msg.msg should include ("time-based functions")
 
       // case 2: using a time-based range scan should not be valid for non-timeseries dataset
-      val q2 = AggregateQuery(ref4, args.copy(dataQuery = MostRecentTime(5000)), FilteredPartitionQuery(Nil))
+      val q2 = LogicalPlanQuery(ref4, simpleAgg("time_group_avg", childPlan=
+                 PartitionsRange(FilteredPartitionQuery(Nil), MostRecentTime(5000), Seq("AvgTone"))))
       probe.send(coordinatorActor, q2)
       val msg2 = probe.expectMsgClass(classOf[BadQuery])
       msg2.msg should include ("Not a time")
     }
 
-    it("should return results in AggregateResponse if valid AggregateQuery") {
+    it("should return results in QueryResult if valid LogicalPlanQuery") {
       val ref = setupTimeSeries()
       probe.send(coordinatorActor, IngestRows(ref, 0, records(linearMultiSeries()).take(30)))
       probe.expectMsg(Ack(29L))
 
-      val args = QueryArgs("time_group_avg", "min", Seq("2"), timeScan)
       val series = (1 to 3).map(n => Seq(s"Series $n"))
-      val q1 = AggregateQuery(ref, args, MultiPartitionQuery(series))
+      val q1 = LogicalPlanQuery(ref, simpleAgg("time_group_avg", Seq("2"), childPlan=
+                 PartitionsRange(MultiPartitionQuery(series), timeScan, Seq("min"))))
       probe.send(coordinatorActor, q1)
-      val answer = probe.expectMsgClass(classOf[AggregateResponse[Double]])
-      answer.elementClass should equal (classOf[Double])
-      answer.elements should equal (Array(13.0, 23.0))
+      probe.expectMsgPF() {
+        case QueryResult(_, VectorResult(schema, PartitionVector(None, readers))) =>
+          schema shouldEqual ResultSchema(Seq(ColumnInfo("result", DoubleColumn)), 0)
+          readers should have length (1)
+          readers.head.vectors.size shouldEqual 1
+          readers.head.vectors(0).toSeq shouldEqual Seq(13.0, 23.0)
+      }
 
       // Try a filtered partition query
       import ZeroCopyUTF8String._
       val series2 = (2 to 4).map(n => s"Series $n").toSet.asInstanceOf[Set[Any]]
       val multiFilter = Seq(ColumnFilter("series", Filter.In(series2)))
-      val q2 = AggregateQuery(ref, args, FilteredPartitionQuery(multiFilter))
+      val q2 = LogicalPlanQuery(ref, simpleAgg("time_group_avg", Seq("2"), childPlan=
+                 PartitionsRange(FilteredPartitionQuery(multiFilter), timeScan, Seq("min"))))
       probe.send(coordinatorActor, q2)
-      val answer2 = probe.expectMsgClass(classOf[AggregateResponse[Double]])
-      answer2.elementClass should equal (classOf[Double])
-      answer2.elements should equal (Array(14.0, 24.0))
+      probe.expectMsgPF() {
+        case QueryResult(_, VectorResult(schema, PartitionVector(None, readers))) =>
+          schema shouldEqual ResultSchema(Seq(ColumnInfo("result", DoubleColumn)), 0)
+          readers should have length (1)
+          readers.head.vectors.size shouldEqual 1
+          readers.head.vectors(0).toSeq shouldEqual Seq(14.0, 24.0)
+      }
 
       // What if filter returns no results?
       val filter3 = Seq(ColumnFilter("series", Filter.Equals("foobar".utf8)))
-      val q3 = AggregateQuery(ref, args, FilteredPartitionQuery(filter3))
+      val q3 = LogicalPlanQuery(ref, simpleAgg("sum", childPlan=
+                 PartitionsRange(FilteredPartitionQuery(filter3), timeScan, Seq("min"))))
       probe.send(coordinatorActor, q3)
-      val answer3 = probe.expectMsgClass(classOf[AggregateResponse[Double]])
-      answer3.elementClass should equal (classOf[Double])
-      answer3.elements.length should equal (2)
+      probe.expectMsgPF() {
+        case QueryResult(_, TupleResult(schema, Tuple(None, bRec))) =>
+          schema shouldEqual ResultSchema(Seq(ColumnInfo("result", DoubleColumn)), 0)
+          bRec.getDouble(0) shouldEqual 0.0
+      }
     }
 
     it("should aggregate from multiple shards") {
@@ -273,14 +293,46 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
 
       // Should return results from both shards
       // shard 1 - timestamps 110000 -< 130000;  shard 2 - timestamps 130000 <- 1400000
-      val args = QueryArgs("time_group_avg", "min", Seq("3"), timeScan.copy(end = Seq(140000L)))
       val series2 = (2 to 4).map(n => s"Series $n").toSet.asInstanceOf[Set[Any]]
       val multiFilter = Seq(ColumnFilter("series", Filter.In(series2)))
-      val q2 = AggregateQuery(ref, args, FilteredPartitionQuery(multiFilter))
+      val q2 = LogicalPlanQuery(ref, simpleAgg("time_group_avg", Seq("3"), childPlan=
+                 PartitionsRange(FilteredPartitionQuery(multiFilter), timeScan.copy(end = Seq(140000L)), Seq("min"))))
       probe.send(coordinatorActor, q2)
-      val answer2 = probe.expectMsgClass(classOf[AggregateResponse[Double]])
-      answer2.elementClass should equal (classOf[Double])
-      answer2.elements should equal (Array(14.0, 24.0, 4.0))
+      probe.expectMsgPF() {
+        case QueryResult(_, VectorResult(schema, PartitionVector(None, readers))) =>
+          schema shouldEqual ResultSchema(Seq(ColumnInfo("result", DoubleColumn)), 0)
+          readers should have length (1)
+          readers.head.vectors.size shouldEqual 1
+          readers.head.vectors(0).toSeq shouldEqual Seq(14.0, 24.0, 4.0)
+      }
+    }
+
+    it("should concatenate Tuples/Vectors from multiple shards") {
+      val ref = setupTimeSeries(2)
+      // Same series is ingested into two shards.  I know, this should not happen in real life.
+      probe.send(coordinatorActor, IngestRows(ref, 0, records(linearMultiSeries()).take(30)))
+      probe.expectMsg(Ack(29L))
+      probe.send(coordinatorActor, IngestRows(ref, 1, records(linearMultiSeries(130000L)).take(20)))
+      probe.expectMsg(Ack(19L))
+
+      val series2 = (2 to 4).map(n => s"Series $n")
+      val multiFilter = Seq(ColumnFilter("series", Filter.In(series2.toSet.asInstanceOf[Set[Any]])))
+      val q2 = LogicalPlanQuery(ref, PartitionsInstant(FilteredPartitionQuery(multiFilter), Seq("min")))
+      probe.send(coordinatorActor, q2)
+      val info1 = probe.expectMsgPF(3.seconds.dilated) {
+        case QueryResult(_, TupleListResult(schema, tuples)) =>
+          schema shouldEqual ResultSchema(Seq(ColumnInfo("timestamp", LongColumn), ColumnInfo("min", DoubleColumn)), 1)
+          // We should get tuples from both shards
+          tuples should have length (6)
+          // Group by partition key
+          val groupedByKey = tuples.groupBy(_.info.get.partKey)
+          // Each grouping should have two tuples, one from each shard
+          groupedByKey.map(_._2.length) shouldEqual Seq(2, 2, 2)
+          val series2Key = dataset1.partKey("Series 2")
+          groupedByKey(series2Key).map(_.info.get.shardNo).toSet shouldEqual Set(0, 1)
+          groupedByKey(series2Key).map(_.data.getLong(0)).toSet shouldEqual Set(122000L, 142000L)
+          groupedByKey(series2Key).map(_.data.getDouble(1)).toSet shouldEqual Set(23.0, 13.0)
+      }
     }
 
     it("should aggregate using histogram combiner") {
@@ -288,29 +340,34 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       probe.send(coordinatorActor, IngestRows(ref, 0, records(linearMultiSeries()).take(30)))
       probe.expectMsg(Ack(29L))
 
-      val args = QueryArgs("sum", "min", combinerName="histogram", combinerArgs=Seq("2000"))
-      val q1 = AggregateQuery(ref, args, FilteredPartitionQuery(Nil))
+      val q1 = LogicalPlanQuery(ref, simpleAgg("sum", Nil, "histogram", Seq("2000"), childPlan=
+                 PartitionsRange.all(FilteredPartitionQuery(Nil), Seq("min"))))
       probe.send(coordinatorActor, q1)
-      val answer = probe.expectMsgClass(classOf[AggregateResponse[HistogramBucket]])
-      answer.elementClass should equal (classOf[HistogramBucket])
-      val buckets = answer.elements.toSeq
-      buckets should have length (10)
-      buckets.map(_.count) should equal (Seq(0, 0, 0, 0, 4, 6, 0, 0, 0, 0))
+      probe.expectMsgPF() {
+        case QueryResult(_, VectorResult(schema, PartitionVector(None, readers))) =>
+          schema shouldEqual ResultSchema(Seq(ColumnInfo("counts", IntColumn), ColumnInfo("bucketMax", DoubleColumn)), 0)
+          readers should have length (1)
+          readers.head.vectors.size shouldEqual 2
+          readers.head.vectors(0).toSeq shouldEqual Seq(0, 0, 0, 0, 4, 6, 0, 0, 0, 0)
+      }
     }
 
-    it("should query partitions in AggregateQuery") {
+    it("should return PartitionInfo and Tuples correctly when querying PartitionsInstant") {
       val ref = setupTimeSeries()
       probe.send(coordinatorActor, IngestRows(ref, 0, records(linearMultiSeries()).take(30)))
       probe.expectMsg(Ack(29L))
 
-      val args = QueryArgs("partition_keys", "min")
-      val series2 = (2 to 4).map(n => s"Series $n").toSet
-      val multiFilter = Seq(ColumnFilter("series", Filter.In(series2.asInstanceOf[Set[Any]])))
-      val q2 = AggregateQuery(ref, args, FilteredPartitionQuery(multiFilter))
+      val series2 = (2 to 4).map(n => s"Series $n")
+      val multiFilter = Seq(ColumnFilter("series", Filter.In(series2.toSet.asInstanceOf[Set[Any]])))
+      val q2 = LogicalPlanQuery(ref, PartitionsInstant(FilteredPartitionQuery(multiFilter), Seq("min")))
       probe.send(coordinatorActor, q2)
-      val answer2 = probe.expectMsgClass(classOf[AggregateResponse[String]])
-      answer2.elementClass should equal (classOf[String])
-      answer2.elements.toSet should equal (series2.map(s => s"b[$s]"))
+      val info1 = probe.expectMsgPF(3.seconds.dilated) {
+        case QueryResult(_, TupleListResult(schema, tuples)) =>
+          schema shouldEqual ResultSchema(Seq(ColumnInfo("timestamp", LongColumn), ColumnInfo("min", DoubleColumn)), 1)
+          tuples should have length (3)
+          tuples.map(_.info.get.partKey) shouldEqual series2.map { s => dataset1.partKey(s: Any) }
+          tuples.map(_.data.getDouble(1)) shouldEqual Seq(23.0, 24.0, 25.0)
+      }
     }
 
     it("should respond to GetIndexNames and GetIndexValues") {

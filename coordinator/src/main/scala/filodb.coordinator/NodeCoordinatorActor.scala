@@ -7,6 +7,7 @@ import akka.event.LoggingReceive
 import com.typesafe.config.Config
 import monix.execution.Scheduler
 
+import filodb.coordinator.client.{MiscCommands, Serializer}
 import filodb.core._
 import filodb.core.memstore.MemStore
 import filodb.core.metadata._
@@ -43,8 +44,8 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
                                                  config: Config) extends NamingAwareBaseActor {
   import context.dispatcher
 
-  import DatasetCommands._
-  import IngestionCommands._
+  import client.DatasetCommands._
+  import client.IngestionCommands._
   import NodeClusterActor._
   import NodeCoordinatorActor._
 
@@ -151,7 +152,7 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
   }
 
   def queryHandlers: Receive = LoggingReceive {
-    case q: QueryCommand =>
+    case q: client.QueryCommand =>
       val originator = sender()
       withQueryActor(originator, q.dataset) { _.tell(q, originator) }
     case q: QueryActor.SingleShardQuery =>

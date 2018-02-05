@@ -24,7 +24,8 @@ trait ActorSpecConfig {
   lazy val configString = defaultConfig
   // Allow Java system properties to set config options like akka.test.timefactor
   lazy val config = ConfigFactory.parseString(configString)
-    .withFallback(ConfigFactory.load("application_test.conf"))
+    .withFallback(ConfigFactory.parseResources("application_test.conf"))
+    .withFallback(ConfigFactory.load("filodb-defaults.conf"))
 
   def getNewSystem = ActorSystem("test", config)
 

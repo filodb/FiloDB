@@ -289,7 +289,7 @@ private[coordinator] final class ShardManager(strategy: ShardAssignmentStrategy)
     */
   private def sendDatasetSetup(coord: ActorRef, dataset: Dataset, source: IngestionSource): Unit = {
     logger.info(s"Sending setup message for ${dataset.ref} to coordinators $coord.")
-    val setupMsg = IngestionCommands.DatasetSetup(dataset.asCompactString, source)
+    val setupMsg = client.IngestionCommands.DatasetSetup(dataset.asCompactString, source)
     coord ! setupMsg
   }
 

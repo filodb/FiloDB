@@ -1,4 +1,4 @@
-package filodb.coordinator
+package filodb.coordinator.client
 
 import filodb.core._
 import filodb.core.memstore.IngestRecord
@@ -7,10 +7,12 @@ import filodb.core.metadata.Dataset
 // Public, external Actor/Akka API for NodeCoordinatorActor, so every incoming command should be a NodeCommand
 sealed trait NodeCommand
 sealed trait NodeResponse
-trait QueryCommand extends NodeCommand {
+
+// NOTE: need to inherit java.io.Serializable to ensure Kryo will serialize subclasses
+trait QueryCommand extends NodeCommand with java.io.Serializable {
   def dataset: DatasetRef
 }
-trait QueryResponse extends NodeResponse
+trait QueryResponse extends NodeResponse with java.io.Serializable
 
 object DatasetCommands {
   /**
@@ -40,7 +42,7 @@ object MiscCommands {
 }
 
 object IngestionCommands {
-  import NodeClusterActor._
+  import filodb.coordinator.NodeClusterActor._
 
   /**
    * Sets up ingestion and querying for a given dataset and version.

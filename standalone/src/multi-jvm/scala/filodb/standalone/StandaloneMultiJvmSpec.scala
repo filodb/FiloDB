@@ -13,12 +13,13 @@ import org.scalatest._
 import org.scalatest.concurrent.ScalaFutures
 
 import filodb.coordinator._
+import filodb.coordinator.client.QueryCommands.{FilteredPartitionQuery, MostRecentTime, QueryResult}
+import filodb.coordinator.client.{LocalClient, LogicalPlan}
 import filodb.coordinator.NodeClusterActor.{DatasetResourceSpec, IngestionSource}
-import filodb.coordinator.QueryCommands.{MostRecentTime, QueryArgs}
-import filodb.coordinator.client.LocalClient
-import filodb.core.{DatasetRef, ErrorResponse}
-import filodb.core.query.ColumnFilter
+import filodb.core.metadata.Column.ColumnType
 import filodb.core.query.Filter.Equals
+import filodb.core.query.{ColumnFilter, ColumnInfo, Tuple, TupleResult}
+import filodb.core.{DatasetRef, ErrorResponse}
 
 /**
  * A trait used for MultiJVM tests based on starting the standalone FiloServer using timeseries-dev config
@@ -126,14 +127,19 @@ abstract class StandaloneMultiJvmSpec(config: MultiNodeConfig) extends MultiNode
     }
   }
 
+  import LogicalPlan._
+
   def runQuery(client: LocalClient): Double = {
     // This is the promQL equivalent: sum(heap_usage{partition="P0"}[1000m])
-    val query = QueryArgs("sum", "value", Nil, MostRecentTime(60000000), "simple", List())
     val filters = Vector(ColumnFilter("partition", Equals("P0")), ColumnFilter("__name__", Equals("heap_usage")))
-    val response1 = client.partitionFilterAggregate(dataset, query, filters)
-    val answer = response1.elements.head.asInstanceOf[Double]
-    info(s"Query Response was: $answer")
-    answer.asInstanceOf[Double]
+    val plan = simpleAgg("sum", Nil, childPlan=
+                         PartitionsRange(FilteredPartitionQuery(filters), MostRecentTime(60000000), Seq("value")))
+    client.logicalPlanQuery(dataset, plan) match {
+      case QueryResult(_, TupleResult(schema, Tuple(None, bRec))) =>
+        schema shouldEqual Seq(ColumnInfo("result", ColumnType.DoubleColumn))
+        info(s"Query Response was a TupleResult with bRec=$bRec and schema=$schema")
+        bRec.getDouble(0)
+    }
   }
 }
 

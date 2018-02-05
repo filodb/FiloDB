@@ -4,9 +4,7 @@ import scala.concurrent.duration._
 
 import com.typesafe.scalalogging.StrictLogging
 
-import filodb.coordinator._
 import filodb.core._
-import filodb.core.query.ColumnFilter
 
 trait QueryOps extends ClientBase with StrictLogging {
   import QueryCommands._
@@ -40,13 +38,15 @@ trait QueryOps extends ClientBase with StrictLogging {
     }
 
   /**
-   * Asks the FiloDB node to perform an aggregation query with a partition filter.
+   * Asks the FiloDB node to perform a query using a LogicalPlan.
+   * @param dataset the Dataset (and Database) to query
+   * @param plan the query LogicalPlan to execute
+   * @param options the query options including spread etc
    */
-  def partitionFilterAggregate(dataset: DatasetRef,
-                               query: QueryArgs,
-                               filters: Seq[ColumnFilter],
-                               timeout: FiniteDuration = 60.seconds): AggregateResponse[_] = {
-    val aggCmd = AggregateQuery(dataset, query, FilteredPartitionQuery(filters))
-    askCoordinator(aggCmd, timeout) { case r: AggregateResponse[_] => r }
+  def logicalPlanQuery(dataset: DatasetRef,
+                       plan: LogicalPlan,
+                       options: QueryOptions = QueryOptions()): QueryResult = {
+    val qCmd = LogicalPlanQuery(dataset, plan, options)
+    askCoordinator(qCmd, options.queryTimeoutSecs.seconds) { case r: QueryResult => r }
   }
 }

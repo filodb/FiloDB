@@ -93,6 +93,15 @@ object IntBinaryVector {
   }
 
   /**
+   * Quickly create an IntBinaryVector from a sequence of Ints which can be optimized.
+   */
+  def apply(memFactory: MemFactory, data: Seq[Int]): BinaryAppendableVector[Int] = {
+    val vect = appendingVector(memFactory, data.length)
+    data.foreach(vect.addData)
+    vect
+  }
+
+  /**
    * Creates a BinaryVector[Int] with no NAMask
    */
   def apply(base: Any, offset: Long, numBytes: Int, dispose: () => Unit): BinaryVector[Int] = {

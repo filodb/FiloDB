@@ -5,6 +5,7 @@ import com.typesafe.config.Config
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
 
+import filodb.coordinator.client.MiscCommands
 import filodb.core.{AbstractSpec, Success}
 
 trait FilodbClusterNodeSpec extends AbstractSpec with FilodbClusterNode with ScalaFutures {
@@ -127,9 +128,9 @@ class ClusterNodeRecoverySpec extends FilodbClusterNodeSpec {
   import akka.testkit.{TestKit, TestProbe}
 
   import filodb.coordinator.client.LocalClient
+  import filodb.core.NamesTestData._
   import NodeClusterActor._
   import NodeProtocol._
-  import filodb.core.NamesTestData._
 
   override val role = ClusterRole.Server
 

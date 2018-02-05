@@ -10,6 +10,8 @@ import akka.util.Timeout
 import com.typesafe.config.ConfigFactory
 
 import filodb.core._
+import filodb.core.metadata.Column.ColumnType
+import filodb.core.query.{ColumnInfo, ResultSchema, Tuple, TupleResult}
 
 object ClusterRecoverySpecConfig extends MultiNodeConfig {
   // register the named roles (nodes) of the test
@@ -32,6 +34,7 @@ abstract class ClusterRecoverySpec extends ClusterSpec(ClusterRecoverySpecConfig
   import NodeClusterActor._
   import sources.CsvStreamFactory
   import GdeltTestData._
+  import client.LogicalPlan._
 
   override def initialParticipants = roles.size
 
@@ -62,7 +65,7 @@ abstract class ClusterRecoverySpec extends ClusterSpec(ClusterRecoverySpecConfig
   var clusterActor: ActorRef = _
   var mapper: ShardMapper = _
 
-  import QueryCommands._
+  import client.QueryCommands._
 
   private def hasAllShardsStopped(mapper: ShardMapper): Boolean = {
     val statuses = mapper.shardValues.map(_._2)
@@ -96,12 +99,15 @@ abstract class ClusterRecoverySpec extends ClusterSpec(ClusterRecoverySpecConfig
     }
     enterBarrier("ingestion-stopped")
 
-    val query = AggregateQuery(dataset6.ref, QueryArgs("count", "MonthYear"), FilteredPartitionQuery(Nil))
+    val query = LogicalPlanQuery(dataset6.ref,
+                  simpleAgg("count", childPlan=PartitionsRange.all(FilteredPartitionQuery(Nil), Seq("MonthYear"))))
 
     coordinatorActor ! query
-    val answer = expectMsgClass(classOf[AggregateResponse[Int]])
-    if (answer.elements.nonEmpty) answer.elementClass should equal (classOf[Int])
-    answer.elements shouldEqual Array(99 * 2)
+    expectMsgPF() {
+      case QueryResult(_, TupleResult(schema, Tuple(None, bRec))) =>
+        schema shouldEqual ResultSchema(Seq(ColumnInfo("result", ColumnType.IntColumn)), 0)
+        bRec.getInt(0) shouldEqual (99 * 2)
+    }
   }
 }
 

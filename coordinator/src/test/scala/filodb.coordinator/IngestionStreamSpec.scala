@@ -21,7 +21,7 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem) wi
 
   import akka.testkit._
 
-  import IngestionCommands._
+  import client.IngestionCommands._
   import NodeClusterActor._
   import sources.CsvStreamFactory
   import GdeltTestData._

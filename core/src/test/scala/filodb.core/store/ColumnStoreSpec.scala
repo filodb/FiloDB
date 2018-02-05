@@ -282,7 +282,6 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
   }
 
   "partition list api" should "allow reading and writing partition list for shard" in {
-
     import monix.execution.Scheduler.Implicits.global
 
     val writtenKeys = Range(0, 1024).map(i => dataset.partKey(i))
@@ -292,5 +291,25 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
     writtenKeys.toSet shouldEqual readKeys.toSet
   }
 
+  "partitionChunks" should "return PartitionChunks with partition filter and read all rows" in {
+    import GdeltTestData._
+    import monix.execution.Scheduler.Implicits.global
 
+    val streams = getStreamsByPartKey(dataset2)
+    streams.foreach { s =>
+      colStore.write(dataset2, s).futureValue should equal (Success)
+    }
+
+    val paramSet = colStore.getScanSplits(dataset.ref, 1)
+    paramSet should have length (1)
+
+    val filter = ColumnFilter("MonthYear", Filter.Equals(197902))
+    val method = FilteredPartitionScan(paramSet.head, Seq(filter))
+    val partVectObs = colStore.partitionVectors(dataset2, dataset2.colIDs("NumArticles").get, method)
+    val partVectors = partVectObs.toListL.runAsync.futureValue
+
+    partVectors should have length (1)
+    partVectors.head.info.get.partKey shouldEqual dataset2.partKey(197902)
+    partVectors.head.allRowsIterator.map(_.getInt(0)).sum should equal (22)
+  }
 }

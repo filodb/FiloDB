@@ -339,7 +339,7 @@ object SparkRowReader {
         if (!newVectors(tsPos).isInstanceOf[SparkTimestampFiloVector])
           newVectors(tsPos) = new SparkTimestampFiloVector(r.vectors(tsPos).asInstanceOf[FiloVector[Long]])
       }
-      new ChunkSetReader(r.info, r.partition, r.skips, newVectors)
+      new ChunkSetReader(r.info, r.skips, newVectors)
     }
   }
 }

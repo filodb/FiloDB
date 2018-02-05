@@ -22,24 +22,6 @@ class CombinerSpec extends FunSpec with Matchers with BeforeAndAfter with ScalaF
     memStore.reset()
   }
 
-  describe("Simple and ListCombiners") {
-    it("should use ListCombiner for base functions which don't combine eg Last") {
-      memStore.setup(dataset1, 0)
-      val data = records(linearMultiSeries()).take(30)   // 3 records per series x 10 series
-      memStore.ingest(dataset1.ref, 0, data)
-
-      val split = memStore.getScanSplits(dataset1.ref, 1).head
-      val query = QuerySpec("min", AggregationFunction.Last, Nil, CombinerFunction.Simple, Nil)
-      val agg1 = memStore.aggregate(dataset1, query, FilteredPartitionScan(split))
-                   .get.runAsync.futureValue
-      agg1 shouldBe a[ListAggregate[_]]
-      val listAgg = agg1.asInstanceOf[ListAggregate[DoubleSeriesValues]]
-      listAgg.values.length should be (10)
-      listAgg.values.head.points.length should be (1)
-      listAgg.values.head.points.head.timestamp should be (120000L)
-    }
-  }
-
   describe("Histogram") {
     val baseQuery = QuerySpec("min", AggregationFunction.Sum, Nil,
                               CombinerFunction.Histogram, Seq("2000"))

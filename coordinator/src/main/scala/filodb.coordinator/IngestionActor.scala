@@ -219,7 +219,7 @@ private[filodb] final class IngestionActor(dataset: Dataset,
   private def ingest(e: IngestRows): Unit = {
     memStore.ingest(dataset.ref, e.shard, e.records)
     if (e.records.nonEmpty) {
-      e.ackTo ! IngestionCommands.Ack(e.records.last.offset)
+      e.ackTo ! client.IngestionCommands.Ack(e.records.last.offset)
     }
   }
 

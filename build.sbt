@@ -7,17 +7,26 @@ val buildSettings = Seq(
 
 publishTo      := Some(Resolver.file("Unused repo", file("target/unusedrepo")))
 
+lazy val memory = project
+  .in(file("memory"))
+  .settings(commonSettings: _*)
+  .settings(name := "filodb-memory")
+  .settings(scalacOptions += "-language:postfixOps")
+  .settings(libraryDependencies ++= memoryDeps)
+
 lazy val core = project
   .in(file("core"))
   .settings(commonSettings: _*)
   .settings(name := "filodb-core")
   .settings(scalacOptions += "-language:postfixOps")
   .settings(libraryDependencies ++= coreDeps)
+  .dependsOn(memory)
 
 lazy val coordinator = project
   .in(file("coordinator"))
   .settings(commonSettings: _*)
   .settings(multiJvmSettings: _*)
+  .settings(testMultiJvmToo: _*)
   .settings(name := "filodb-coordinator")
   .settings(libraryDependencies ++= coordDeps)
   .settings(libraryDependencies +=
@@ -156,13 +165,20 @@ lazy val commonDeps = Seq(
 
 lazy val scalaxyDep = "com.nativelibs4java"  %% "scalaxy-loops"     % "0.3.3" % "provided"
 
+lazy val memoryDeps = commonDeps ++ Seq(
+  "com.github.jnr"       %  "jnr-ffi"           % "2.1.6",
+  "joda-time"             % "joda-time"         % "2.2",
+  "org.joda"              % "joda-convert"      % "1.2",
+  "net.jpountz.lz4"      %  "lz4"               % "1.3.0",
+  scalaLoggingDep,
+  scalaxyDep
+)
+
 lazy val coreDeps = commonDeps ++ Seq(
   scalaLoggingDep,
   "org.slf4j"             % "slf4j-api"         % "1.7.10",
   "com.beachape"         %% "enumeratum"        % "1.5.10",
   "io.monix"             %% "monix"             % "2.3.0",
-  "joda-time"             % "joda-time"         % "2.2",
-  "org.joda"              % "joda-convert"      % "1.2",
   "com.googlecode.concurrentlinkedhashmap" % "concurrentlinkedhashmap-lru" % "1.4",
   "net.ceedubs"          %% "ficus"             % ficusVersion,
   "org.scodec"           %% "scodec-bits"       % "1.0.10",
@@ -171,9 +187,6 @@ lazy val coreDeps = commonDeps ++ Seq(
   "com.github.alexandrnikitin" %% "bloom-filter" % "0.7.0",
   "com.github.rholder.fauxflake" % "fauxflake-core" % "1.1.0",
   "org.scalactic"        %% "scalactic"         % "2.2.6",
-  "com.github.jnr"       %  "jnr-ffi"           % "2.1.6",
-  "net.java.dev.jna"     %  "jna"               % "4.4.0",
-  "net.jpountz.lz4"      %  "lz4"               % "1.3.0",
   scalaxyDep
 )
 
@@ -191,6 +204,7 @@ lazy val coordDeps = commonDeps ++ Seq(
   //   but only with kamon 0.6.7 vs 0.6.8, and akka 2.4.16 (not available yet for 2.5)
   // TODO kamon-akka is akka 2.5 compatible
   // Take out the below line if you really don't want statsd metrics enabled
+  "com.github.romix.akka" %% "akka-kryo-serialization" % "0.5.0",
   "io.kamon"             %% "kamon-statsd"      % kamonVersion,
   "com.opencsv"          % "opencsv"            % "3.3",
   "org.parboiled"        %% "parboiled"         % "2.1.3",
@@ -275,8 +289,10 @@ lazy val stressDeps = Seq(
 lazy val consoleSettings = Seq(
  scalacOptions in (Compile, console) ~= (_.filterNot(Set(
    "-Ywarn-unused-import",
-   "-Xfatal-warnings"
-))))
+   "-Xfatal-warnings"))),
+ scalacOptions in (Test, console) ~= (_.filterNot(Set(
+   "-Ywarn-unused-import",
+   "-Xfatal-warnings"))))
 
 lazy val compilerSettings = Seq(
 

@@ -103,8 +103,7 @@ class DoubleVectorTest extends FunSpec with Matchers {
     }
 
     it("should be able to optimize all integral vector to IntBinaryVector") {
-      val builder = DoubleVector.appendingVector(memFactory, 100)
-      (0 to 4).map(_.toDouble).foreach(builder.addData)
+      val builder = DoubleVector(memFactory, (0 to 4).map(_.toDouble))
       val optimized = builder.optimize(memFactory)
       optimized.length should equal (5)
       optimized.toSeq should equal (0 to 4)

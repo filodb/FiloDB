@@ -7,7 +7,7 @@ import monix.reactive.Observable
 
 import filodb.core._
 import filodb.core.metadata.Dataset
-import filodb.core.query.ChunkSetReader
+import filodb.core.query.{ChunkSetReader, PartitionInfo, PartitionVector}
 import filodb.core.Types.PartitionKey
 
 /**
@@ -41,7 +41,8 @@ trait ChunkSource {
                      partMethod: PartitionScanMethod): Observable[FiloPartition]
 
   /**
-   * Reads chunks from a dataset and returns an Observable of chunk readers.
+   * Reads chunks from a dataset and returns an Observable of chunk readers.  Essentially an API for reading
+   * from a dataset as one continuous table.
    *
    * @param dataset the Dataset to read from
    * @param columnIDs the set of column IDs to read back.  Order determines the order of columns read back
@@ -59,6 +60,29 @@ trait ChunkSource {
       .flatMap { partition =>
         stats.incrReadPartitions(1)
         partition.streamReaders(chunkMethod, ids)
+      }
+  }
+
+  /**
+   * Returns a stream of PartitionVector's.  Good for per-partition (or time series) processing.
+   *
+   * @param dataset the Dataset to read from
+   * @param columnIDs the set of column IDs to read back.  Order determines the order of columns read back
+   *                in each row.  These are the IDs from the Column instances.
+   * @param partMethod which partitions to scan
+   * @param chunkMethod which chunks within a partition to scan
+   * @return an Observable of ChunkSetReaders
+   */
+  def partitionVectors(dataset: Dataset,
+                       columnIDs: Seq[Types.ColumnId],
+                       partMethod: PartitionScanMethod,
+                       chunkMethod: ChunkScanMethod = AllChunkScan): Observable[PartitionVector] = {
+    val ids = columnIDs.toArray
+    scanPartitions(dataset, partMethod)
+      .map { partition =>
+        stats.incrReadPartitions(1)
+        val info = PartitionInfo(partition.binPartition, partition.shard)
+        PartitionVector(Some(info), partition.readers(chunkMethod, ids).toBuffer)
       }
   }
 

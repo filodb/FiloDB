@@ -8,7 +8,7 @@ import org.scalactic._
 
 import filodb.core.metadata._
 import filodb.core.store.{ChunkScanMethod, FiloPartition, RowKeyChunkScan}
-import filodb.memory.format.{BinaryVector, FiloVector}
+import filodb.memory.format.BinaryVector
 
 /**
  * An Aggregate stores intermediate results from Aggregators, which can later be combined using
@@ -124,20 +124,6 @@ class PartitionKeysAggregator extends OneValueAggregator {
   val tag = classTag[String]
   def aggPartition(method: ChunkScanMethod, partition: FiloPartition):
       PrimitiveSimpleAggregate[String] = new PrimitiveSimpleAggregate(partition.stringPartition)
-}
-
-class LastDoubleValueAggregator(timestampIndex: Int, doubleColIndex: Int) extends OneValueAggregator {
-  type R = DoubleSeriesValues
-  val tag = classTag[DoubleSeriesValues]
-  def aggPartition(method: ChunkScanMethod, partition: FiloPartition):
-      PrimitiveSimpleAggregate[DoubleSeriesValues] = {
-    val lastVectors = partition.lastVectors
-    val timestampVector = lastVectors(timestampIndex).asInstanceOf[FiloVector[Long]]
-    val doubleVector = lastVectors(doubleColIndex).asInstanceOf[FiloVector[Double]]
-    val point = DoubleSeriesPoint(timestampVector(timestampVector.length - 1),
-                                  doubleVector(doubleVector.length - 1))
-    new PrimitiveSimpleAggregate(DoubleSeriesValues(partition.shard, partition.stringPartition, Seq(point)))
-  }
 }
 
 /**
@@ -266,16 +252,6 @@ object AggregationFunction extends Enum[AggregationFunction] {
     val allowedTypes: Set[Column.ColumnType] = Column.ColumnType.values.toSet
     def makeAggregator(colIndex: Int, colType: Column.ColumnType, scanMethod: ChunkScanMethod): Aggregator =
       new CountingAggregator(colIndex)
-  }
-
-  case object Last extends TimeAggFunction[Unit] {
-    val allowedTypes: Set[Column.ColumnType] = Set(DoubleColumn)
-    def validateArgs(args: Seq[String]): Unit Or InvalidFunctionSpec = Good(())
-    def makeAggregator(timeColIndex: Int, valueColIndex: Int, colType: Column.ColumnType,
-                       scanMethod: ChunkScanMethod, arg: Unit): Aggregator = colType match {
-      case DoubleColumn => new LastDoubleValueAggregator(timeColIndex, valueColIndex)
-      case o: Any       => ???
-    }
   }
 
   case object TimeGroupMin extends TimeBucketingAggFunction {

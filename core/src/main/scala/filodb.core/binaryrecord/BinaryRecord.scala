@@ -47,6 +47,8 @@ extends ZeroCopyBinary with SchemaRowReader {
     true
   }
 
+  final def isEmpty: Boolean = length == 0
+
   final def getBoolean(columnNo: Int): Boolean = fields(columnNo).get[Boolean](this)
   final def getInt(columnNo: Int): Int = fields(columnNo).get[Int](this)
   final def getLong(columnNo: Int): Long = fields(columnNo).get[Long](this)

@@ -3,6 +3,7 @@ package filodb.core.metadata
 import org.scalatest.{FunSpec, Matchers}
 
 import filodb.core._
+import filodb.core.query.ColumnInfo
 
 class DatasetSpec extends FunSpec with Matchers {
   import Column.ColumnType._
@@ -111,7 +112,7 @@ class DatasetSpec extends FunSpec with Matchers {
       ds.rowKeyRouting shouldEqual Array(2, 0)
     }
 
-    it("should return IDs for colIDs or seq of missing names") {
+    it("should return IDs for column names or seq of missing names") {
       val ds = Dataset("dataset", Seq("part:string"), dataColSpecs, "age")
       ds.colIDs("first", "age").get shouldEqual Seq(0, 2)
 
@@ -120,6 +121,15 @@ class DatasetSpec extends FunSpec with Matchers {
       val resp1 = ds.colIDs("last", "unknown")
       resp1.isBad shouldEqual true
       resp1.swap.get shouldEqual Seq("unknown")
+    }
+
+    it("should return ColumnInfos for colIDs") {
+      val ds = Dataset("dataset", Seq("part:string"), dataColSpecs, "age")
+      val infos = ds.infosFromIDs(Seq(0, 2))
+      infos shouldEqual Seq(ColumnInfo("first", StringColumn), ColumnInfo("age", LongColumn))
+
+      val infos2 = ds.infosFromIDs(Seq(PartColStartIndex, 1))
+      infos2 shouldEqual Seq(ColumnInfo("part", StringColumn), ColumnInfo("last", StringColumn))
     }
   }
 

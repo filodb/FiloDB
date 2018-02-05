@@ -32,6 +32,8 @@ trait IngestionStream {
 }
 
 object IngestionStream {
+  import client.IngestionCommands
+
   /**
    * Wraps a simple observable into an IngestionStream with no teardown behavior
    */

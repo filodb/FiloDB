@@ -400,7 +400,7 @@ class CassandraPartition(index: ChunkIDPartitionChunkIndex,
 
     // from infoSkips, create the MutableChunkSetReader's
     infosSkips.foreach { case (info, skips) =>
-      readers.putIfAbsent(info.id, new MutableChunkSetReader(info, index.binPartition, skips, columnIds.size))
+      readers.putIfAbsent(info.id, new MutableChunkSetReader(info, skips, columnIds.size))
     }
 
     // Read chunks in, populate MutableChunkSetReader's, and emit readers when they are full

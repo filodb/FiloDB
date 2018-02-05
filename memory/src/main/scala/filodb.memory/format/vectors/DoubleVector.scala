@@ -35,6 +35,15 @@ object DoubleVector {
     new DoubleAppendingVector(base, off, nBytes, dispose)
   }
 
+  /**
+   * Quickly create a DoubleVector from a sequence of Doubles which can be optimized.
+   */
+  def apply(memFactory: MemFactory, data: Seq[Double]): BinaryAppendableVector[Double] = {
+    val vect = appendingVector(memFactory, data.length)
+    data.foreach(vect.addData)
+    vect
+  }
+
   def apply(buffer: ByteBuffer): BinaryVector[Double] = {
     val (base, off, len) = UnsafeUtils.BOLfromBuffer(buffer)
     DoubleBinaryVector(base, off, len, BinaryVector.NoOpDispose)

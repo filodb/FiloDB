@@ -1,0 +1,296 @@
+package filodb.coordinator.client
+
+import java.nio.ByteBuffer
+
+import com.esotericsoftware.kryo.{Serializer => KryoSerializer}
+import com.esotericsoftware.kryo.io.Input
+import com.esotericsoftware.kryo.io.Output
+import com.esotericsoftware.kryo.Kryo
+import com.typesafe.scalalogging.StrictLogging
+import org.boon.primitive.{ByteBuf, InputByteArray}
+
+import filodb.core._
+import filodb.core.binaryrecord.{ArrayBinaryRecord, BinaryRecord, RecordSchema}
+import filodb.core.memstore.IngestRecord
+import filodb.core.metadata.Column
+import filodb.memory.format.{BinaryVector, FiloVector, UnsafeUtils, VectorReader, ZeroCopyUTF8String}
+import filodb.memory.format.{vectors => BV}
+
+/**
+ * Utilities for special serializers for row data (for efficient record routing).
+ *
+ * We also maintain some global state for mapping a schema hashcode to the actual schema object.  This must
+ * be updated externally.  The reason this is decided is because IngestRows is sent between a RowSource
+ * client and node ingestor actors, both of whom have exchanged and know the schema already, thus there is
+ * no need to pay the price of transmitting the schema itself with every IngestRows object.
+ */
+object Serializer extends StrictLogging {
+  import IngestionCommands.IngestRows
+
+  implicit class RichIngestRows(data: IngestRows) {
+    /**
+     * Converts a IngestRows into bytes, assuming all RowReaders are in fact BinaryRecords
+     */
+    def toBytes(): Array[Byte] =
+      serializeIngestRows(data)
+  }
+
+  def serializeIngestRows(data: IngestRows): Array[Byte] = {
+    val buf = ByteBuf.create(1000)
+    val (partSchemaHash, dataSchemaHash) = data.rows.headOption match {
+      case Some(IngestRecord(p: BinaryRecord, d: BinaryRecord, _)) =>
+        (p.schema.hashCode, d.schema.hashCode)
+      case other: Any            => (-1, -1)
+    }
+    buf.writeInt(partSchemaHash)
+    buf.writeInt(dataSchemaHash)
+    buf.writeMediumString(data.dataset.dataset)
+    buf.writeMediumString(data.dataset.database.getOrElse(""))
+    buf.writeInt(data.shard)
+    buf.writeInt(data.rows.length)
+    for { record <- data.rows } {
+      record match {
+        case IngestRecord(p: BinaryRecord, d: BinaryRecord, offset) =>
+          buf.writeMediumByteArray(p.bytes)
+          buf.writeMediumByteArray(d.bytes)
+          buf.writeLong(offset)
+      }
+    }
+    buf.toBytes
+  }
+
+  def fromBinaryIngestRows(bytes: Array[Byte]): IngestRows = {
+    val scanner = new InputByteArray(bytes)
+    val partSchemaHash = scanner.readInt
+    val dataSchemaHash = scanner.readInt
+    val dataset = scanner.readMediumString
+    val db = Option(scanner.readMediumString).filter(_.length > 0)
+    val shard = scanner.readInt
+    val numRows = scanner.readInt
+    val rows = new collection.mutable.ArrayBuffer[IngestRecord]()
+    if (numRows > 0) {
+      val partSchema = partSchemaMap.get(partSchemaHash)
+      val dataSchema = dataSchemaMap.get(dataSchemaHash)
+      if (Option(partSchema).isEmpty) { logger.error(s"Schema with hash $partSchemaHash not found!") }
+      for { i <- 0 until numRows } {
+        rows += IngestRecord(BinaryRecord(partSchema, scanner.readMediumByteArray),
+                             BinaryRecord(dataSchema, scanner.readMediumByteArray),
+                             scanner.readLong)
+      }
+    }
+    IngestionCommands.IngestRows(DatasetRef(dataset, db), shard, rows)
+  }
+
+  private val partSchemaMap = new java.util.concurrent.ConcurrentHashMap[Int, RecordSchema]
+  private val dataSchemaMap = new java.util.concurrent.ConcurrentHashMap[Int, RecordSchema]
+
+  def putPartitionSchema(schema: RecordSchema): Unit = {
+    logger.debug(s"Saving partition schema with fields ${schema.fields.toList} and hash ${schema.hashCode}...")
+    partSchemaMap.put(schema.hashCode, schema)
+  }
+
+  def putDataSchema(schema: RecordSchema): Unit = {
+    logger.debug(s"Saving data schema with fields ${schema.fields.toList} and hash ${schema.hashCode}...")
+    dataSchemaMap.put(schema.hashCode, schema)
+  }
+}
+
+/**
+ * A special serializer to use the fast binary IngestRows format instead of much slower Java serialization
+ * To solve the problem of the serializer not knowing the schema beforehand, it is the responsibility of
+ * the DatasetCoordinatorActor to update the schema when it changes.  The hash of the RecordSchema is
+ * sent and received.
+ */
+class IngestRowsSerializer extends akka.serialization.Serializer {
+  import Serializer._
+  import IngestionCommands.IngestRows
+
+  // This is whether "fromBinary" requires a "clazz" or not
+  def includeManifest: Boolean = false
+
+  def identifier: Int = 1001
+
+  def toBinary(obj: AnyRef): Array[Byte] = obj match {
+    case i: IngestRows => i.toBytes()
+  }
+
+  def fromBinary(bytes: Array[Byte],
+                 clazz: Option[Class[_]]): AnyRef = {
+    fromBinaryIngestRows(bytes)
+  }
+}
+
+/**
+ * Register commonly used classes for efficient Kryo serialization.  If this is not done then Kryo might have to
+ * send over the FQCN, which wastes tons of space like Java serialization
+ * NOTE: top-level classes still need to be configured in Typesafe config in akka.actor.serialization-bindings
+ * These are just for the enclosing classes
+ *
+ * NOTE: for now, we need to explicitly register every BinaryVector class.  This is tedious  :(
+ * but the problem is that due to type erasure Kryo cannot tell the difference between a BinaryVector[Int] or [Long]
+ * etc.  If a class is not registered then it might get the wrong BinaryVectorSerializer.
+ *
+ * Registering is better anyhow due to not needing to serialize the entire FQCN.
+ *
+ * In the future, possible solutions would include:
+ * - Embedding an inner type code into the 4-byte FiloVector header
+ * - Recreating original class and injecting base, offset, any at runtime is a possibility, but we don't want
+ *   to reinstantiate things like GrowableVector, wrappers, and appendable types
+ */
+class KryoInit {
+  def customize(kryo: Kryo): Unit = {
+    kryo.addDefaultSerializer(classOf[Column.ColumnType], classOf[ColumnTypeSerializer])
+    val colTypeSer = new ColumnTypeSerializer
+    Column.ColumnType.values.zipWithIndex.foreach { case (ct, i) => kryo.register(ct.getClass, colTypeSer, 100 + i) }
+
+    import VectorReader._
+    val intBinVectSer = new BinaryVectorSerializer[Int]
+    kryo.addDefaultSerializer(classOf[BinaryVector[Int]], intBinVectSer)
+    kryo.register(classOf[BV.IntBinaryVector], intBinVectSer)
+    kryo.register(classOf[BV.MaskedIntBinaryVector], intBinVectSer)
+    kryo.register(classOf[BV.MaskedIntAppendingVector], intBinVectSer)
+    kryo.register(classOf[BV.IntConstVector], intBinVectSer)
+    kryo.register(classOf[filodb.memory.format.GrowableVector$mcI$sp], intBinVectSer)
+
+    val longBinVectSer = new BinaryVectorSerializer[Long]
+    kryo.register(classOf[BV.DeltaDeltaVector], longBinVectSer)
+    kryo.register(classOf[BV.LongBinaryVector], longBinVectSer)
+    kryo.register(classOf[BV.MaskedLongBinaryVector], longBinVectSer)
+    kryo.register(classOf[BV.MaskedLongAppendingVector], longBinVectSer)
+    kryo.register(classOf[BV.LongIntWrapper], longBinVectSer)
+    kryo.register(classOf[BV.LongConstVector], longBinVectSer)
+    kryo.register(classOf[filodb.memory.format.GrowableVector$mcJ$sp], longBinVectSer)
+
+    val doubleBinVectSer = new BinaryVectorSerializer[Double]
+    kryo.register(classOf[BV.DoubleBinaryVector], doubleBinVectSer)
+    kryo.register(classOf[BV.MaskedDoubleBinaryVector], doubleBinVectSer)
+    kryo.register(classOf[BV.MaskedDoubleAppendingVector], doubleBinVectSer)
+    kryo.register(classOf[BV.DoubleIntWrapper], doubleBinVectSer)
+    kryo.register(classOf[BV.DoubleConstVector], doubleBinVectSer)
+    kryo.register(classOf[filodb.memory.format.GrowableVector$mcD$sp], doubleBinVectSer)
+
+    val utf8BinVectSer = new BinaryVectorSerializer[ZeroCopyUTF8String]
+    kryo.register(classOf[BV.DictUTF8Vector], utf8BinVectSer)
+    kryo.register(classOf[BV.FixedMaxUTF8Vector], utf8BinVectSer)
+    kryo.register(classOf[BV.UTF8ConstVector], utf8BinVectSer)
+
+    kryo.addDefaultSerializer(classOf[RecordSchema], classOf[RecordSchemaSerializer])
+    kryo.addDefaultSerializer(classOf[BinaryRecord], classOf[BinaryRecordSerializer])
+
+    initOtherFiloClasses(kryo)
+    kryo.setReferences(true)   // save space by referring to same objects with ordinals
+  }
+
+  def initOtherFiloClasses(kryo: Kryo): Unit = {
+    // Initialize other commonly used FiloDB classes
+    kryo.register(classOf[DatasetRef])
+    kryo.register(classOf[BinaryRecord])
+    kryo.register(classOf[ArrayBinaryRecord])
+    kryo.register(classOf[RecordSchema])
+
+    import filodb.core.query._
+    kryo.register(classOf[PartitionInfo])
+    kryo.register(classOf[PartitionVector])
+    kryo.register(classOf[Tuple])
+    kryo.register(classOf[ColumnInfo])
+    kryo.register(classOf[TupleResult])
+    kryo.register(classOf[VectorResult])
+    kryo.register(classOf[TupleListResult])
+    kryo.register(classOf[VectorListResult])
+    kryo.register(classOf[ColumnFilter])
+
+    import filodb.core.store._
+    kryo.register(classOf[ChunkSetInfo])
+    kryo.register(LastSampleChunkScan.getClass)
+    kryo.register(AllChunkScan.getClass)
+    kryo.register(classOf[RowKeyChunkScan])
+    kryo.register(classOf[FilteredPartitionScan])
+    kryo.register(classOf[ShardSplit])
+
+    kryo.register(classOf[QueryCommands.LogicalPlanQuery])
+    kryo.register(classOf[QueryCommands.ExecPlanQuery])
+    kryo.register(classOf[QueryCommands.QueryResult])
+    kryo.register(classOf[QueryCommands.BadQuery])
+    kryo.register(classOf[QueryCommands.QueryOptions])
+    kryo.register(classOf[QueryCommands.FilteredPartitionQuery])
+  }
+}
+
+// All the ColumnTypes are Objects - singletons.  Thus the class info is enough to find the right one.
+// No need to actually write anything.  :D :D :D
+class ColumnTypeSerializer extends KryoSerializer[Column.ColumnType] {
+  override def read(kryo: Kryo, input: Input, typ: Class[Column.ColumnType]): Column.ColumnType =
+    Column.clazzToColType(typ)
+
+  override def write(kryo: Kryo, output: Output, colType: Column.ColumnType): Unit = {}
+}
+
+/**
+ * A Kryo serializer for BinaryVectors.  Since BinaryVectors are already blobs, the goal here is to ship bytes
+ * out as quickly as possible.  Standard field-based serializers must NOT be used here.
+ * TODO: optimize this code for input/output classes like UnsafeMemoryInput/Output.  Right now we have to assume
+ * a generic Input/Output which uses a byte[] onheap buffer, and copy stuff in and out of that.  This is obviously
+ * less ideal.
+ */
+class BinaryVectorSerializer[A: VectorReader] extends KryoSerializer[BinaryVector[A]] with StrictLogging {
+  override def read(kryo: Kryo, input: Input, typ: Class[BinaryVector[A]]): BinaryVector[A] = {
+    val onHeapBuffer = ByteBuffer.wrap(input.readBytes(input.readInt))
+    logger.trace(s"Reading typ=$typ with reader=${implicitly[VectorReader[A]]} into buffer $onHeapBuffer")
+    FiloVector[A](onHeapBuffer).asInstanceOf[BinaryVector[A]]
+  }
+
+  override def write(kryo: Kryo, output: Output, vector: BinaryVector[A]): Unit = {
+    val buf = vector.toFiloBuffer         // now idempotent, can be called many times
+    var bytesToGo = vector.numBytes + 4   // include the header bytes
+    output.writeInt(bytesToGo)
+    while (bytesToGo > 0) {
+      val bytesToCopy = Math.min(bytesToGo, output.getBuffer.size - output.position)
+      // directly copy from ByteBuffer (which may be Direct/offheap) into output buffer
+      buf.get(output.getBuffer, output.position, bytesToCopy)
+      output.setPosition(output.position + bytesToCopy)
+      if (output.position >= output.getBuffer.size) output.flush()
+      bytesToGo -= bytesToCopy
+    }
+  }
+}
+
+class RecordSchemaSerializer extends KryoSerializer[RecordSchema] {
+  override def read(kryo: Kryo, input: Input, typ: Class[RecordSchema]): RecordSchema = {
+    val colTypesObj = kryo.readClassAndObject(input)
+    new RecordSchema(colTypesObj.asInstanceOf[Seq[Column.ColumnType]])
+  }
+
+  override def write(kryo: Kryo, output: Output, schema: RecordSchema): Unit = {
+    kryo.writeClassAndObject(output, schema.columnTypes)
+  }
+}
+
+/**
+ * Serializer for BinaryRecords.  One complication with BinaryRecords is that they require a schema.
+ * We don't want to instantiate a new RecordSchema with every single BR, that would be a huge waste of memory.
+ * However, it seems that Kryo remembers RecordSchema references, and if the same RecordSchema is used for multiple
+ * BinaryRecords in an object graph (say a VectorListResult or TupleListResult) then it will be stored by some
+ * reference ID.  Thus it saves us cost and memory allocations on restore.  :)
+ */
+class BinaryRecordSerializer extends KryoSerializer[BinaryRecord] {
+  override def read(kryo: Kryo, input: Input, typ: Class[BinaryRecord]): BinaryRecord = {
+    val schema = kryo.readObject(input, classOf[RecordSchema])
+    val bytes = input.readBytes(input.readInt)
+    BinaryRecord(schema, bytes)
+  }
+
+  override def write(kryo: Kryo, output: Output, br: BinaryRecord): Unit = {
+    kryo.writeObject(output, br.schema)
+    output.writeInt(br.numBytes)
+    // It would be simpler if we simply took the bytes from ArrayBinaryRecord and wrote them, but
+    // BinaryRecords might go offheap.
+    var offset = 0
+    while ((br.numBytes - offset) > 0) {
+      val bytesToCopy = Math.min(br.numBytes - offset, output.getBuffer.size - output.position)
+      br.copyTo(output.getBuffer, UnsafeUtils.arayOffset + output.position, offset, bytesToCopy)
+      output.setPosition(output.position + bytesToCopy)
+      if (output.position >= output.getBuffer.size) output.flush()
+      offset += bytesToCopy
+    }
+  }
+}

@@ -7,9 +7,8 @@ import filodb.core.DatasetRef
 import filodb.core.metadata.Dataset
 
 class ShardManagerSpec extends AkkaSpec {
-
   import NodeClusterActor.{DatasetResourceSpec, DatasetVerified, IngestionSource, SetupDataset}
-  import IngestionCommands.DatasetSetup
+  import client.IngestionCommands.DatasetSetup
 
   protected val dataset1 = DatasetRef("one")
   protected val datasetObj1 = Dataset(dataset1.dataset, Seq("seg:int"), Seq("timestamp:long"))

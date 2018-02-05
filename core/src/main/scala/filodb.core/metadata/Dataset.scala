@@ -7,6 +7,7 @@ import org.scalactic._
 
 import filodb.core._
 import filodb.core.binaryrecord.{BinaryRecord, RecordSchema}
+import filodb.core.query.ColumnInfo
 import filodb.memory.format.{FiloVector, RoutingRowReader, RowReader, SeqRowReader}
 
 /**
@@ -45,6 +46,9 @@ final case class Dataset(name: String,
   // Used to create a `FiloVector` of correct type for a given data column ID; (ByteBuffer, Int) => FiloVector[_]
   val vectorMakers    = dataColumns.map(col => FiloVector.defaultVectorMaker(col.columnType.clazz)).toArray
 
+  // Used for ChunkSetReader.binarySearchKeyChunks
+  val rowKeyOrdering = CompositeReaderOrdering(rowKeyColumns.map(_.columnType.keyType))
+
   import Column.ColumnType._
 
   val timestampColumn: Option[Column] = rowKeyColumns.map(_.columnType) match {
@@ -69,6 +73,9 @@ final case class Dataset(name: String,
   def rowKey(dataRowReader: RowReader): BinaryRecord =
     BinaryRecord(rowKeyBinSchema, RoutingRowReader(dataRowReader, rowKeyRouting))
 
+  def rowKey(parts: Any*): BinaryRecord =
+    BinaryRecord(rowKeyBinSchema, SeqRowReader(parts))
+
   import Accumulation._
   import OptionSugar._
   /**
@@ -84,6 +91,10 @@ final case class Dataset(name: String,
   def columnFromID(columnID: Int): Column =
     if (Dataset.isPartitionID(columnID)) { partitionColumns(columnID - Dataset.PartColStartIndex) }
     else                                 { dataColumns(columnID) }
+
+  /** Returns ColumnInfos from a set of column IDs.  Throws exception if ID is invalid */
+  def infosFromIDs(ids: Seq[Types.ColumnId]): Seq[ColumnInfo] =
+    ids.map(columnFromID).map { c => ColumnInfo(c.name, c.columnType) }
 
   /** Returns a compact String for easy serialization */
   def asCompactString: String =

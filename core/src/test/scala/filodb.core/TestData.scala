@@ -190,7 +190,7 @@ object MachineMetricsData {
       Seq(initTs + n * 1000,
          (45 + nextInt(10)).toDouble,
          (60 + nextInt(25)).toDouble,
-         (100 + nextInt(15)).toDouble,
+         (99.9 + nextInt(15)).toDouble,
          (85 + nextInt(12)).toDouble,
          "Series " + (n % 10))
     }
@@ -202,7 +202,7 @@ object MachineMetricsData {
       Seq(startTs + n * 1000,
          (1 + n).toDouble,
          (20 + n).toDouble,
-         (100 + n).toDouble,
+         (99.9 + n).toDouble,
          (85 + n).toDouble,
          "Series " + (n % numSeries))
     }

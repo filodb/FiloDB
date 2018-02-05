@@ -80,6 +80,8 @@ object Column extends StrictLogging {
 
   val typeNameToColType = ColumnType.values.map { colType => colType.typeName -> colType }.toMap
 
+  val clazzToColType: Map[Class[_], ColumnType] = ColumnType.values.map { colType => colType.getClass -> colType }.toMap
+
   /**
    * Converts a list of columns to the appropriate KeyType.
    * @return a KeyType

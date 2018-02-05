@@ -11,7 +11,8 @@ import monix.reactive.Observable
 import org.apache.spark.sql.{SaveMode, SparkSession}
 import org.joda.time.DateTime
 
-import filodb.coordinator.QueryCommands._
+import filodb.coordinator.client.LogicalPlan
+import filodb.coordinator.client.QueryCommands._
 import filodb.core.{DatasetRef, Perftools}
 import filodb.spark.{FiloDriver, FiloExecutor}
 
@@ -67,7 +68,6 @@ object MemStoreStress extends App {
   // use observables (a stream of queries) to handle queries
   val timeRange = KeyRangeQuery(Seq(DateTime.parse("2013-01-01T00Z").getMillis),
                                 Seq(DateTime.parse("2013-02-01T00Z").getMillis))
-  val queryArgs = QueryArgs("time_group_avg", "trip_distance", Seq("90"), timeRange)
   val ref = DatasetRef("nyc_taxi")
   var startMs = 0L
   var endMs = 0L
@@ -76,9 +76,10 @@ object MemStoreStress extends App {
                    .map { n =>
                      val startIndex = n % (medallions.size - 10)
                      val keys = medallions.slice(startIndex, startIndex + 10).toSeq.map(k => Seq(k))
-                     AggregateQuery(ref, queryArgs, MultiPartitionQuery(keys))
-                   }.mapAsync(queryThreads) { qMessage =>
-                     Perftools.withTrace(Task.fromFuture(FiloExecutor.coordinatorActor ? qMessage),
+                     LogicalPlan.simpleAgg("time_group_avg", Seq("90"), childPlan=
+                       LogicalPlan.PartitionsRange(MultiPartitionQuery(keys), timeRange, Seq("trip_distance")))
+                   }.mapAsync(queryThreads) { plan =>
+                     Perftools.withTrace(Task.fromFuture(FiloExecutor.coordinatorActor ? LogicalPlanQuery(ref, plan)),
                                          "time-series-query")
                    }.delaySubscription(8 seconds)
                    .doOnStart { x => startMs = System.currentTimeMillis }

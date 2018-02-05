@@ -7,6 +7,8 @@ import akka.remote.testkit.MultiNodeConfig
 import com.typesafe.config.ConfigFactory
 
 import filodb.core._
+import filodb.core.metadata.Column.ColumnType
+import filodb.core.query.{ColumnInfo, ResultSchema, Tuple, TupleResult, VectorListResult}
 
 object IngestionStreamClusterSpecConfig extends MultiNodeConfig {
   // register the named roles (nodes) of the test
@@ -19,7 +21,8 @@ object IngestionStreamClusterSpecConfig extends MultiNodeConfig {
   val globalConfig = ConfigFactory.parseString("""filodb.memtable.write.interval = 500 ms
                                                  |filodb.memtable.filo.chunksize = 70
                                                  |filodb.memtable.max-rows-per-table = 70""".stripMargin)
-                       .withFallback(ConfigFactory.load("application_test.conf"))
+                       .withFallback(ConfigFactory.parseResources("application_test.conf"))
+                       .withFallback(ConfigFactory.load("filodb-defaults.conf"))
   commonConfig(globalConfig)
 }
 
@@ -33,6 +36,7 @@ abstract class IngestionStreamClusterSpec extends ClusterSpec(IngestionStreamClu
   import NodeClusterActor._
   import sources.CsvStreamFactory
   import GdeltTestData._
+  import client.LogicalPlan._
 
   override def initialParticipants = roles.size
 
@@ -77,12 +81,12 @@ abstract class IngestionStreamClusterSpec extends ClusterSpec(IngestionStreamClu
   }
 
   import IngestionStream._
-  import QueryCommands._
+  import client.QueryCommands._
 
   /**
    * Only one node is going to read the CSV, but we will get counts from both nodes and all shards
    */
-  it("should start ingestion, route to shards, and do distributed querying") {
+  it("should start ingestion and route to shards") {
     runOn(first) {
 
       val protocolActor = system.actorOf(IngestProtocol.props(clusterActor, dataset6.ref))
@@ -110,23 +114,45 @@ abstract class IngestionStreamClusterSpec extends ClusterSpec(IngestionStreamClu
     }
 
     enterBarrier("ingestion-done")
+  }
 
+  it("should do distributed querying") {
     // Both nodes can execute a distributed query to all shards and should get back the same answer
     // Count all the records in every partition in every shard
     // counting a non-partition column... can't count a partition column yet
     val durationForCI = 30.seconds.dilated
-    val query = AggregateQuery(dataset6.ref, QueryArgs("count", "MonthYear"), FilteredPartitionQuery(Nil))
+    val query = LogicalPlanQuery(dataset6.ref,
+                  simpleAgg("count", childPlan=PartitionsRange.all(FilteredPartitionQuery(Nil), Seq("MonthYear"))))
 
-    def func: Array[Int] = {
+    def func: Int = {
       coordinatorActor ! query
-      val answer = expectMsgClass(durationForCI, classOf[AggregateResponse[Int]])
-      if (answer.elements.nonEmpty) answer.elementClass should equal (classOf[Int])
-      answer.elements
+      expectMsgPF() {
+        case QueryResult(_, TupleResult(schema, Tuple(None, bRec))) =>
+          schema shouldEqual ResultSchema(Seq(ColumnInfo("result", ColumnType.IntColumn)), 0)
+          bRec.getInt(0)
+      }
     }
 
-    awaitCond(func sameElements Array(99), max = durationForCI, interval = durationForCI / 3)
+    awaitCond(func == 99, max = durationForCI, interval = durationForCI / 3)
+    enterBarrier("aggregate query done")
 
-    enterBarrier("finished")
+    val q2 = LogicalPlanQuery(dataset6.ref,
+               PartitionsRange.all(FilteredPartitionQuery(Nil), Seq("Actor2Code", "MonthYear")))
+    coordinatorActor ! q2
+    expectMsgPF() {
+      case QueryResult(_, VectorListResult(keyRange, ResultSchema(schema, 1), vectors)) =>
+        keyRange shouldEqual None
+        // always add row key which is GLOBALEVENTID to the front of the schema
+        schema shouldEqual Seq(ColumnInfo("GLOBALEVENTID", ColumnType.IntColumn),
+                               ColumnInfo("Actor2Code", ColumnType.StringColumn),
+                               ColumnInfo("MonthYear", ColumnType.IntColumn))
+        vectors should have length (59)
+        vectors.map(_.info.get.shardNo).toSet shouldEqual Set(0, 1, 2, 3)
+        // There are exactly 17 entries in the group with blank ActorCode/ActorName
+        vectors.map(_.readers.head.info.numRows).max shouldEqual 17
+    }
+
+    enterBarrier("QueryEngine / ExecPlan raw query done")
   }
 }
 

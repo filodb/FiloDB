@@ -9,6 +9,7 @@ import akka.pattern.ask
 import akka.util.Timeout
 import kamon.Kamon
 
+import filodb.coordinator.client.IngestionCommands
 import filodb.core._
 import filodb.core.memstore.IngestRecord
 

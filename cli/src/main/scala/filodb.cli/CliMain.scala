@@ -16,7 +16,6 @@ import filodb.coordinator._
 import filodb.coordinator.client._
 import filodb.core._
 import filodb.core.metadata.{Column, Dataset, DatasetOptions}
-import filodb.core.query.ColumnFilter
 import filodb.core.store._
 import filodb.memory.format.RowReader
 
@@ -41,7 +40,6 @@ class Arguments extends FieldArgs {
   var port: Int = 2552
   var promql: Option[String] = None
   var metricColumn: String = "__name__"
-  var linePerItem: Boolean = false
 }
 
 object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbClusterNode {
@@ -160,7 +158,7 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
           args.promql.map { query =>
             require(args.host.nonEmpty && args.dataset.nonEmpty, "--host and --dataset must be defined")
             val remote = Client.standaloneClient(system, args.host.get, args.port)
-            parsePromQuery(remote, query, args.dataset.get, args.metricColumn, args.linePerItem)
+            parsePromQuery(remote, query, args.dataset.get, args.metricColumn, args.limit)
           }.getOrElse {
             args.select.map { selectCols =>
               exportCSV(getRef(args),
@@ -265,16 +263,15 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
     }
   }
 
-  import QueryCommands.{AggregateResponse, QueryArgs}
+  import QueryCommands.QueryResult
 
   def parsePromQuery(client: LocalClient, query: String, dataset: String,
-                     metricCol: String, linePerItem: Boolean): Unit = {
+                     metricCol: String, limit: Int): Unit = {
     val opts = DatasetOptions.DefaultOptions.copy(metricColumn = metricCol)
     val parser = new PromQLParser(query, opts)
-    parser.parseAndGetArgs(true) match {
-      // Valid parsed QueryArgs
-      case SSuccess(ArgsAndPartSpec(args, partSpec)) =>
-        executeQuery(client, dataset, args, partSpec.metricName, partSpec.filters, linePerItem)
+    parser.parseToPlan(true) match {
+      case SSuccess(plan) =>
+        executeQuery(client, dataset, plan, limit)
 
       case Failure(e: ParseError) =>
         println(s"Failure parsing $query:\n${parser.formatError(e)}")
@@ -284,24 +281,22 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
     }
   }
 
-  def executeQuery(client: LocalClient, dataset: String, query: QueryArgs,
-                   metricName: String, filters: Seq[ColumnFilter], linePerItem: Boolean): Unit = {
+  def executeQuery(client: LocalClient, dataset: String, plan: LogicalPlan,
+                   limit: Int): Unit = {
     val ref = DatasetRef(dataset)
-    println(s"Sending aggregation command to server for $ref...")
-    println(s"Query: $query\nFilters: $filters")
+    println(s"Sending query command to server for $ref...")
+    println(s"Query Plan:\n$plan")
     try {
-      printAggregate(client.partitionFilterAggregate(ref, query, filters), linePerItem)
+      client.logicalPlanQuery(ref, plan) match {
+        case QueryResult(_, result) =>
+          println(result.schema.columns.map(_.name).mkString("\t"))
+          result.prettyPrint(partitionRowLimit=limit).foreach(println)
+      }
     } catch {
       case e: ClientException =>
         println(s"ERROR: ${e.getMessage}")
         exitCode = 2
     }
-  }
-
-  def printAggregate(agg: AggregateResponse[_], linePerItem: Boolean): Unit = agg match {
-    case AggregateResponse(_, _, array) =>
-      if (linePerItem) { array.foreach(println) }
-      else             { println(s"[${array.mkString(",")}]") }
   }
 
   import filodb.core.metadata.Column.ColumnType._

@@ -10,7 +10,7 @@ import akka.pattern.ask
 import akka.util.Timeout
 import com.typesafe.scalalogging.StrictLogging
 
-import filodb.coordinator.{ActorName, MiscCommands, NodeClusterActor}
+import filodb.coordinator.{ActorName, NodeClusterActor}
 import filodb.core._
 
 object Client {

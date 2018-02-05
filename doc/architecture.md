@@ -80,6 +80,10 @@ FiloDB's [Dataset](../core/src/main/scala/filodb.core/metadata/Dataset.scala) de
 
 Also see the [ingeston doc](ingestion.md) for details on recovery and persistence.
 
+### Memory
+
+Contains off-heap memory management as well as columnar encoding/decoding/super fast binary vector logic.
+
 ### Cassandra
 
 An implementation of ColumnStore and MetaStore for Apache Cassandra.
