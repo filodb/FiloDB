@@ -283,7 +283,7 @@ private[coordinator] final class ShardManager(strategy: ShardAssignmentStrategy)
       val event = ShardAssignmentStarted(dataset, shard, coord)
       updateFromShardEventAndPublish(event)
     }
-    /** If no shards are assigned to a coordinator, no commands are sent. */
+    /* If no shards are assigned to a coordinator, no commands are sent. */
     logger.info(s"Sending start ingestion message for $dataset to coordinator $coord.")
     for {shard <- shards} coord ! StartShardIngestion(dataset, shard, None)
   }
