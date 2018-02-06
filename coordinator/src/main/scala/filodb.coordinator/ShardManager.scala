@@ -133,7 +133,7 @@ private[coordinator] final class ShardManager(strategy: ShardAssignmentStrategy)
 
     for ((dataset, resources, mapper) <- datasetShardMaps) {
       val assignable = strategy.shardAssignments(coordinator, dataset, resources, mapper)
-      if (assignable.nonEmpty) assignShards(dataset, coordinator, assignable)
+      if (assignable.nonEmpty) sendAssignmentMessagesAndEvents(dataset, coordinator, assignable)
     }
     logger.info(s"Completed addMember for coordinator $coordinator")
   }
@@ -141,40 +141,38 @@ private[coordinator] final class ShardManager(strategy: ShardAssignmentStrategy)
   /** Called on MemberRemoved, new status already updated. */
   def removeMember(address: Address): Option[ActorRef] =
     _coordinators.get(address) map { coordinator =>
-      logger.info(s"Initiated removeMember for coordinator on $address")
-      _coordinators remove address
-
-      for ((dataset, resources, mapper) <- datasetShardMaps) {
-        val reassignable = unassignShards(dataset, coordinator, mapper)
-        logger.debug(s"Unassigned shards $reassignable from $address")
-        assignShardsToNodes(dataset, mapper, resources)
-      }
-      logger.info(s"Completed removeMember for coordinator $coordinator")
-      coordinator
+        logger.info(s"Initiated removeMember for coordinator on $address")
+        _coordinators remove address
+        removeCoordinator(coordinator)
+        coordinator
     }
 
-  /** Called on MemberRemoved, related to a ClusterSingleton handoff and recovery.
-    * When state is such that there is a stale node still assigned to shards that should
-    * not be, when node is already downed, but no currently-tracked coordinator
-    * match is 'seen'.
-    *
-    * Note: `mapper.shardsForAddress(address)` works here, however currently
-    * the coordinator is needed for a ShardDown  and un-assign operation.
-    * Could consider simplifying this. In deployments with churn, we may find
-    * that is needed.
+  /**
+    * Called after recovery of cluster singleton to remove assignment of stale member(s).
+    * This is necessary after fail-over of the cluster singleton node because MemberRemoved
+    * for failed singleton nodes are not consistently delivered to the node owning the new singleton.
     */
-  def remove(address: Address): Unit = {
-    logger.info(s"Initiated mapper sync on removed stale node $address")
-
-    for {
-      (dataset, spec, map) <- datasetShardMaps
-      (stale, status)      <- map.shardValues
-      if stale.path.address == address
-    } {
-      val reassignable = unassignShards(dataset, stale, map, nodeUp = false)
-      logger.info(s"Removed stale node $address, unassigned shards ($reassignable) and updated status.")
-      assignShardsToNodes(dataset, map, spec)
+  def removeStaleCoordinators(): Unit = {
+    logger.info("Attempting to remove stale coordinators from cluster")
+    val nodesToRemove = for {
+      (dataset, mapper) <- shardMappers
+    } yield {
+      val allRegisteredNodes = mapper.allNodes
+      allRegisteredNodes -- coordinators // coordinators is the list of recovered nodes
     }
+    for { coord <- nodesToRemove.flatten } {
+      logger.info(s"Cleaning up stale coordinator $coord after recovery")
+      removeCoordinator(coord)
+    }
+  }
+
+  private def removeCoordinator(coordinator: ActorRef): Unit = {
+    for ((dataset, resources, mapper) <- datasetShardMaps) {
+      sendUnassignmentMessagesAndEvents(dataset, coordinator, mapper)
+      // try to reassign shards that were unassigned to other nodes that have room.
+      assignShardsToNodes(dataset, mapper, resources)
+    }
+    logger.info(s"Completed removeMember for coordinator $coordinator")
   }
 
   /**
@@ -218,7 +216,7 @@ private[coordinator] final class ShardManager(strategy: ShardAssignmentStrategy)
       coord <- latestCoords // assign shards on newer nodes first
     } yield {
       val assignable = strategy.shardAssignments(coord, dataset, resources, mapper)
-      if (assignable.nonEmpty) assignShards(dataset, coord, assignable)
+      if (assignable.nonEmpty) sendAssignmentMessagesAndEvents(dataset, coord, assignable)
       coord -> assignable
     }).toMap
   }
@@ -228,7 +226,7 @@ private[coordinator] final class ShardManager(strategy: ShardAssignmentStrategy)
     for {
       (_, coord) <- _coordinators
       mapper = _shardMappers(dataset)
-    } unassignShards(dataset, coord, mapper)
+    } sendUnassignmentMessagesAndEvents(dataset, coord, mapper)
     _datasetInfo remove dataset
     _shardMappers remove dataset
     _subscriptions = _subscriptions - dataset
@@ -269,47 +267,42 @@ private[coordinator] final class ShardManager(strategy: ShardAssignmentStrategy)
       publishEvent(event)
     }
 
-  private def assignShards(dataset: DatasetRef,
-                           coord: ActorRef,
-                           shards: Seq[Int]): Unit = {
+  /**
+    * This method has the shared logic for sending shard assignment messages
+    * to the coordinator, updating state for the event and broadcast of the state change to subscribers
+    */
+  private def sendAssignmentMessagesAndEvents(dataset: DatasetRef,
+                                              coord: ActorRef,
+                                              shards: Seq[Int]): Unit = {
     val state = _datasetInfo(dataset)
-    sendDatasetSetup(coord, state.dataset, state.source)
+    logger.info(s"Sending setup message for ${state.dataset.ref} to coordinators $coord.")
+    val setupMsg = client.IngestionCommands.DatasetSetup(state.dataset.asCompactString, state.source)
+    coord ! setupMsg
+
     for { shard <- shards }  {
       val event = ShardAssignmentStarted(dataset, shard, coord)
       updateFromShardEventAndPublish(event)
     }
-    sendStartCommands(coord, dataset, shards)
+    /** If no shards are assigned to a coordinator, no commands are sent. */
+    logger.info(s"Sending start ingestion message for $dataset to coordinator $coord.")
+    for {shard <- shards} coord ! StartShardIngestion(dataset, shard, None)
   }
 
-  /** Called on successful addMember and SetupDataset protocols.
-    *
-    * @param coord the current cluster members
-    * @param dataset the Dataset object
-    * @param source the ingestion source type to use
+  /**
+    * This method has the shared logic for sending shard un-assignment messages
+    * to the coordinator, updating state for the event and broadcast of the state change to subscribers
     */
-  private def sendDatasetSetup(coord: ActorRef, dataset: Dataset, source: IngestionSource): Unit = {
-    logger.info(s"Sending setup message for ${dataset.ref} to coordinators $coord.")
-    val setupMsg = client.IngestionCommands.DatasetSetup(dataset.asCompactString, source)
-    coord ! setupMsg
-  }
-
-  /** If no shards are assigned to a coordinator, no commands are sent. */
-  private def sendStartCommands(coord: ActorRef, ref: DatasetRef, shards: Seq[Int]): Unit = {
-    logger.info(s"Sending start ingestion message for $ref to coordinator $coord.")
-    for {shard <- shards} coord ! StartShardIngestion(ref, shard, None)
-  }
-
-  private def unassignShards(dataset: DatasetRef,
-                             coordinator: ActorRef,
-                             mapper: ShardMapper,
-                             nodeUp: Boolean = true): Seq[Int] = {
+  private def sendUnassignmentMessagesAndEvents(dataset: DatasetRef,
+                                                coordinator: ActorRef,
+                                                mapper: ShardMapper,
+                                                nodeUp: Boolean = true): Unit = {
     val shardsToDown = mapper.shardsForCoord(coordinator)
     for { shard <- shardsToDown } {
       val event = ShardDown(dataset, shard, coordinator)
       updateFromShardEventAndPublish(event)
       if (nodeUp) coordinator ! StopShardIngestion(dataset, shard)
     }
-    shardsToDown
+    logger.debug(s"Unassigned shards $shardsToDown from $coordinator")
   }
 
   /** Publishes the event to all subscribers of that dataset. */

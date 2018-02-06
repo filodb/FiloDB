@@ -4,7 +4,7 @@ import scala.collection.mutable.{HashMap => MutableHashMap, HashSet => MutableHa
 import scala.concurrent.Future
 
 import akka.actor._
-import akka.cluster.Cluster
+import akka.cluster.{Cluster, Member, MemberStatus}
 import akka.cluster.ClusterEvent._
 import akka.event.LoggingReceive
 import akka.util.Timeout
@@ -92,12 +92,12 @@ object NodeClusterActor {
    * INTERNAL MESSAGES
    */
   private[coordinator] final case class AddCoordinator(roles: Set[String], addr: Address, coordinator: ActorRef)
+  private case object RemoveStaleCoordinators
 
   /** Lets each NodeCoordinator know about the `clusterActor` so it can send it updates.
     * Would not be necessary except coordinator currently is created before the clusterActor.
     */
   private[coordinator] final case class CoordinatorRegistered(clusterActor: ActorRef)
-
 
   // Only use for testing, in before {} blocks
   private[coordinator] case object EverybodyLeave
@@ -218,17 +218,28 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
       case Some(refs) => f(refs)
     }
 
+  private def memberUp(member: Member): Future[Unit] = {
+    logger.info(s"Member ${member.status}: ${member.address} with roles ${member.roles}")
+    val memberCoordActor = nodeCoordinatorPath(member.address)
+    context.actorSelection(memberCoordActor).resolveOne(ResolveActorTimeout)
+      .map { ref => self ! AddCoordinator(member.roles, member.address, ref) }
+      .recover {
+        case e: Exception =>
+          logger.warn(s"Unable to resolve coordinator at $memberCoordActor, ignoring. " +
+            "Maybe NodeCoordinatorActor did not start up before node joined cluster.", e)
+      }
+  }
+
   def membershipHandler: Receive = LoggingReceive {
+    case s: CurrentClusterState =>
+      logger.info(s"Initial Cluster State was: $s")
+      val memberUpFutures = s.members.filter(_.status == MemberStatus.Up).map(memberUp(_))
+      Future.sequence(memberUpFutures.toSeq).onComplete { _ =>
+        self ! RemoveStaleCoordinators
+      }
+
     case MemberUp(member) =>
-      logger.info(s"Member ${member.status}: ${member.address} with roles ${member.roles}")
-      val memberCoordActor = nodeCoordinatorPath(member.address)
-      context.actorSelection(memberCoordActor).resolveOne(ResolveActorTimeout)
-        .map { ref => self ! AddCoordinator(member.roles, member.address, ref) }
-        .recover {
-          case e: Exception =>
-            logger.warn(s"Unable to resolve coordinator at $memberCoordActor, ignoring. " +
-                         "Maybe NodeCoordinatorActor did not start up before node joined cluster.", e)
-        }
+      memberUp(member)
 
     case UnreachableMember(member) =>
       logger.info(s"Member detected as unreachable: $member")
@@ -245,14 +256,10 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
           // }
           roleToCoords.transform { case (_, refs) => refs - ref }
           roleToCoords.retain { case (role, refs) => refs.nonEmpty }
-        case _ =>
-          /* Recovery during ClusterSingleton handoff: replayed from cluster.subscribe events.
-              If this is a downed node that was assigned shards, it can be in the mapper, stale.
-              Or after downing the oldest/first deployed node, which may never be assigned shards
-              based on the number of nodes joined and shards to assign, no action is needed. */
-          watcher ! e // only TestProbe
-          logger.warn(s"MemberRemoved(${member.address}) may be stale, attempting to remove and update.")
-          shardManager remove member.address
+
+        case None =>
+          logger.info(s"Received MemberRemoved for stale member ${member.address}. It " +
+            s" will be (or already has been) removed on RemoveStaleCoordinators event")
       }
 
       if (roleToCoords.isEmpty) {
@@ -292,12 +299,13 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
 
       // NOW, subscribe to cluster membership state and then switch to normal receiver
       logger.info("Subscribing to cluster events and switching to normalReceive")
-      cluster.subscribe(self, initialStateMode = InitialStateAsEvents, classOf[MemberEvent])
+      cluster.subscribe(self, initialStateMode = InitialStateAsSnapshot, classOf[MemberEvent])
       context.become(normalReceive)
   }
 
   def shardMapHandler: Receive = LoggingReceive {
     case e: AddCoordinator        => addCoordinator(e)
+    case RemoveStaleCoordinators  => shardManager.removeStaleCoordinators()
     case e: SetupDataset          => setupDataset(e, sender())
   }
 
