@@ -284,7 +284,7 @@ private[coordinator] final class ShardManager(strategy: ShardAssignmentStrategy)
       updateFromShardEventAndPublish(event)
     }
     /* If no shards are assigned to a coordinator, no commands are sent. */
-    logger.info(s"Sending start ingestion message for $dataset to coordinator $coord.")
+    logger.info(s"Sending start ingestion message for $dataset to coordinator $coord for shards $shards")
     for {shard <- shards} coord ! StartShardIngestion(dataset, shard, None)
   }
 
@@ -297,6 +297,7 @@ private[coordinator] final class ShardManager(strategy: ShardAssignmentStrategy)
                                                 mapper: ShardMapper,
                                                 nodeUp: Boolean = true): Unit = {
     val shardsToDown = mapper.shardsForCoord(coordinator)
+    logger.info(s"Sending stop ingestion message for $dataset to coordinator $coordinator for shards $shardsToDown")
     for { shard <- shardsToDown } {
       val event = ShardDown(dataset, shard, coordinator)
       updateFromShardEventAndPublish(event)

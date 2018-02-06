@@ -310,7 +310,8 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
   }
 
   def subscriptionHandler: Receive = LoggingReceive {
-    case e: ShardEvent            => shardManager.updateFromShardEventAndPublish(e)
+    case e: ShardEvent            => logger.debug(s"Received ShardEvent $e from $sender")
+                                     shardManager.updateFromShardEventAndPublish(e)
     case e: SubscribeShardUpdates => subscribe(e.ref, sender())
     case SubscribeAll             => subscribeAll(sender())
     case Terminated(subscriber)   => context unwatch subscriber
@@ -356,6 +357,7 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
     (for { datasetObj    <- metaStore.getDataset(setup.ref)
            resp1         <- metaStore.writeIngestionConfig(setup.config) }
       yield {
+        // TODO this is happening in a future - we need to make sure there arent any concurrency issues
         shardManager.addDataset(setup, datasetObj, origin)
         datasets(setup.ref) = datasetObj
         sources(setup.ref) = setup.source
