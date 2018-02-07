@@ -256,7 +256,6 @@ private[coordinator] final class ShardManager(strategy: ShardAssignmentStrategy)
     */
   def updateFromShardEventAndPublish(event: ShardEvent): Unit =
     _shardMappers.get(event.ref) foreach { mapper =>
-      logger.debug(s"Before updateFromShardEventAndPublish $mapper")
       mapper.updateFromEvent(event) match {
         case Failure(l) =>
           logger.error(s"Invalid shard.", l)
@@ -266,7 +265,7 @@ private[coordinator] final class ShardManager(strategy: ShardAssignmentStrategy)
       // TODO if failure we don't need to publish, though that's what we have
       // been doing thus far. This requires changing tests out of scope for the current changes
       publishEvent(event)
-      logger.debug(s"After updateFromShardEventAndPublish $mapper")
+      logger.debug(s"Shard Mapper after updateFromShardEventAndPublish: $mapper")
     }
 
   /**
