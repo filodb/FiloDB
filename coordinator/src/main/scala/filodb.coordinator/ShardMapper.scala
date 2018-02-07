@@ -3,6 +3,7 @@ package filodb.coordinator
 import scala.util.{Failure, Success, Try}
 
 import akka.actor.{ActorRef, Address}
+import com.typesafe.scalalogging.StrictLogging
 
 import filodb.core.DatasetRef
 
@@ -22,7 +23,7 @@ import filodb.core.DatasetRef
   * @param numShards number of shards. For this implementation, it needs to be a power of 2.
   *
  */
-class ShardMapper(val numShards: Int) extends Serializable {
+class ShardMapper(val numShards: Int) extends Serializable with StrictLogging {
   import ShardMapper._
 
   require((numShards & (numShards - 1)) == 0, s"numShards $numShards must be a power of two")
@@ -170,29 +171,34 @@ class ShardMapper(val numShards: Int) extends Serializable {
    * The main API for updating a ShardMapper.
    * If you want to throw if an update does not succeed, call updateFromEvent(ev).get
    */
-  def updateFromEvent(event: ShardEvent): Try[Unit] = event match {
-    case e if statusMap.length < e.shard || e.shard < 0 =>
-      Failure(ShardError(e, s"Invalid shard ${e.shard}, unable to update status."))
-    case ShardAssignmentStarted(_, shard, node) =>
-      statusMap(shard) = ShardStatusAssigned
-      registerNode(Seq(shard), node)
-    case IngestionStarted(_, shard, node) =>
-      statusMap(shard) = ShardStatusActive
-      registerNode(Seq(shard), node)
-    case RecoveryInProgress(_, shard, node, progress) =>
-      statusMap(shard) = ShardStatusRecovery(progress)
-      registerNode(Seq(shard), node)
-    case IngestionError(_, shard, _) =>
-      statusMap(shard) = ShardStatusError
-      Success(())
-    case IngestionStopped(_, shard) =>
-      statusMap(shard) = ShardStatusStopped
-      Success(())
-    case ShardDown(_, shard, node) =>
-      statusMap(shard) = ShardStatusDown
-      unassignShard(shard)
-    case _ =>
-      Success(())
+  def updateFromEvent(event: ShardEvent): Try[Unit] = {
+    logger.debug(s"Before updateFromEvent $event. status: ${statusMap(event.shard)}; coord: ${shardMap(event.shard)}")
+    val ret = event match {
+      case e if statusMap.length < e.shard || e.shard < 0 =>
+        Failure(ShardError(e, s"Invalid shard ${e.shard}, unable to update status."))
+      case ShardAssignmentStarted(_, shard, node) =>
+        statusMap(shard) = ShardStatusAssigned
+        registerNode(Seq(shard), node)
+      case IngestionStarted(_, shard, node) =>
+        statusMap(shard) = ShardStatusActive
+        registerNode(Seq(shard), node)
+      case RecoveryInProgress(_, shard, node, progress) =>
+        statusMap(shard) = ShardStatusRecovery(progress)
+        registerNode(Seq(shard), node)
+      case IngestionError(_, shard, _) =>
+        statusMap(shard) = ShardStatusError
+        Success(())
+      case IngestionStopped(_, shard) =>
+        statusMap(shard) = ShardStatusStopped
+        Success(())
+      case ShardDown(_, shard, node) =>
+        statusMap(shard) = ShardStatusDown
+        unassignShard(shard)
+      case _ =>
+        Success(())
+    }
+    logger.debug(s"After  updateFromEvent $event. status: ${statusMap(event.shard)}; coord: ${shardMap(event.shard)}")
+    ret
   }
 
   /**
