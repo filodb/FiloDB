@@ -30,6 +30,7 @@ object DefaultShardAssignmentStrategy extends ShardAssignmentStrategy with Stric
                        dataset: DatasetRef,
                        resources: DatasetResourceSpec,
                        mapper: ShardMapper): Seq[Int] = {
+    logger.debug(s"Shard Mapper for $dataset is $mapper")
     // We want to assign shards evenly to coords as they come up. Simply using
     // ceil or floor of shardToNode ratio wont spread it evenly. Instead, at any time
     // we divide unassigned shards by unassigned coords to figure out number of shards to
