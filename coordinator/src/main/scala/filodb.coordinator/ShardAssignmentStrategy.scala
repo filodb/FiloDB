@@ -61,6 +61,7 @@ object DefaultShardAssignmentStrategy extends ShardAssignmentStrategy with Stric
            |   coord=$coord
            |   dataset=$dataset
            |   resources=$resources
+           |   unassignedShards=$unassignedShards
            |   numUnassignedShards=$numUnassignedShards
            |   numAlreadyAssignedToCoord=$numAlreadyAssignedToCoord
            |   numAssignedCoords=$numAssignedCoords

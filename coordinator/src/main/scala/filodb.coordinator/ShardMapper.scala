@@ -3,7 +3,6 @@ package filodb.coordinator
 import scala.util.{Failure, Success, Try}
 
 import akka.actor.{ActorRef, Address}
-import com.typesafe.scalalogging.StrictLogging
 
 import filodb.core.DatasetRef
 
@@ -23,7 +22,7 @@ import filodb.core.DatasetRef
   * @param numShards number of shards. For this implementation, it needs to be a power of 2.
   *
  */
-class ShardMapper(val numShards: Int) extends Serializable with StrictLogging {
+class ShardMapper(val numShards: Int) extends Serializable {
   import ShardMapper._
 
   require((numShards & (numShards - 1)) == 0, s"numShards $numShards must be a power of two")
@@ -171,9 +170,7 @@ class ShardMapper(val numShards: Int) extends Serializable with StrictLogging {
    * The main API for updating a ShardMapper.
    * If you want to throw if an update does not succeed, call updateFromEvent(ev).get
    */
-  def updateFromEvent(event: ShardEvent): Try[Unit] = {
-    logger.debug(s"Before updateFromEvent $event. status: ${statusMap(event.shard)}; coord: ${shardMap(event.shard)}")
-    val ret = event match {
+  def updateFromEvent(event: ShardEvent): Try[Unit] = event match {
       case e if statusMap.length < e.shard || e.shard < 0 =>
         Failure(ShardError(e, s"Invalid shard ${e.shard}, unable to update status."))
       case ShardAssignmentStarted(_, shard, node) =>
@@ -197,9 +194,6 @@ class ShardMapper(val numShards: Int) extends Serializable with StrictLogging {
       case _ =>
         Success(())
     }
-    logger.debug(s"After  updateFromEvent $event. status: ${statusMap(event.shard)}; coord: ${shardMap(event.shard)}")
-    ret
-  }
 
   /**
    * Returns the minimal set of events needed to reconstruct this ShardMapper
