@@ -166,8 +166,14 @@ abstract class ResultMaker[A: TypeTag] {
 
   def fromResult(res: Result): A
 
-  // Full type info including erased inner class info.  Needed to discern inner type of Observables.
-  def typeInfo: String = typeOf[A].toString
+  /**
+   * Full type info including erased inner class info.  Needed to discern inner type of Observables.
+   * Converted to a string and shortened to leave out the package namespaces
+   */
+  def typeInfo: String = {
+    val typ = typeOf[A]
+    s"${typ.typeSymbol.name}[${typ.typeArgs.map(_.typeSymbol.name).mkString(",")}]"
+  }
 }
 
 object ResultMaker extends StrictLogging {

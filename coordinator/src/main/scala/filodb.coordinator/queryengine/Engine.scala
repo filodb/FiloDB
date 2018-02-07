@@ -46,6 +46,7 @@ object Engine extends StrictLogging {
       scatterGather[QueryResult](coordsAndMsgs, parallelism)
         .flatMap { case QueryResult(_, res) => oMaker.fromResult(res) }
     }
+    val args = coordsAndPlans.map(_._1.toString)
   }
 
   object DistributeConcat {

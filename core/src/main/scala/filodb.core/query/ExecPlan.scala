@@ -44,8 +44,12 @@ abstract class ExecPlan[I: ResultMaker, O: ResultMaker] extends StrictLogging {
                       limit: Int = 1000): Task[Result] =
     implicitly[ResultMaker[O]].toResult(execute(source, dataset), schema(dataset), chunkMethod, limit)
 
+  /** Arguments for this ExecPlan for printTree/debugging output */
+  def args: Seq[String]
+
   def printTree(level: Int = 0): String =
-    s"${"  "*level}${getClass.getSimpleName} => $outputType\n${children.map(_.printTree(level + 1)).mkString("\n")}"
+    s"${"  "*level}${getClass.getSimpleName} => $outputType  (${args.mkString(", ")})\n" +
+    s"${children.map(_.printTree(level + 1)).mkString("\n")}"
 
   override def toString: String = printTree(0)
 }
@@ -86,13 +90,16 @@ extends UnaryExecNode[I, O] {
   def execute(source: ChunkSource, dataset: Dataset): O = mapFn(child.execute(source, dataset))
   def schema(dataset: Dataset): ResultSchema = schemaFn(child.schema(dataset))
   def chunkMethod: ChunkScanMethod = child.chunkMethod
+  val args = Seq(mapFn.toString, schemaFn.toString)
 }
 
 object ExecPlan {
   // Maps Observable[I] to Observable[O] using I => O
   class ObservableMapper[I, O](mapFn: I => O, child: ExecPlan[_, Observable[I]])
                               (implicit iMaker: ResultMaker[Observable[I]], oMaker: ResultMaker[Observable[O]])
-    extends MappedUnaryExecNode[Observable[I], Observable[O]](_.map(mapFn), child)()
+    extends MappedUnaryExecNode[Observable[I], Observable[O]](_.map(mapFn), child)() {
+    override val args = Seq(mapFn.toString)
+  }
 
   type PartitionsMapper  = ObservableMapper[PartitionVector, PartitionVector]
   type PartitionsReducer = ObservableMapper[PartitionVector, Tuple]
@@ -117,8 +124,8 @@ object ExecPlan {
    *                  MUST be the dataset row key IDs, otherwise the range selection in the result won't work
    */
   class LocalVectorReader(columnIDs: Seq[Types.ColumnId],
-                               partMethod: PartitionScanMethod,
-                               val chunkMethod: ChunkScanMethod) extends LeafExecNode[Observable[PartitionVector]] {
+                          partMethod: PartitionScanMethod,
+                          val chunkMethod: ChunkScanMethod) extends LeafExecNode[Observable[PartitionVector]] {
     def execute(source: ChunkSource, dataset: Dataset): Observable[PartitionVector] = {
       chunkMethod match {
         case r: RowKeyChunkScan => require(columnIDs.indexOfSlice(dataset.rowKeyIDs) == 0)
@@ -130,6 +137,8 @@ object ExecPlan {
     def schema(dataset: Dataset): ResultSchema =
       ResultSchema(dataset.infosFromIDs(columnIDs),
                    columnIDs.zip(dataset.rowKeyIDs).takeWhile { case (a, b) => a == b }.length)
+
+    val args = Seq(columnIDs.toString, partMethod.toString, chunkMethod.toString)
   }
 
   def lastTupleFn(sourceSchema: Seq[ColumnInfo]): PartitionVector => Tuple = {
