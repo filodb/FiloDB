@@ -191,12 +191,13 @@ private[coordinator] final class ShardManager(strategy: ShardAssignmentStrategy)
         Map.empty
       case None =>
         val mapper = new ShardMapper(setup.resources.numShards)
+        _shardMappers(dataset.ref) = mapper
+        // Access the shardmapper through the HashMap so even if it gets replaced it will update the shard stats
+        val metrics = new ShardHealthStats(setup.ref, _shardMappers(dataset.ref))
         val resources = setup.resources
-        val metrics = new ShardHealthStats(setup.ref, mapper)
         val source = setup.source
         val state = DatasetInfo(resources, metrics, source, dataset)
         _datasetInfo(dataset.ref) = state
-        _shardMappers(dataset.ref) = mapper
 
         val assignments = assignShardsToNodes(dataset.ref, mapper, resources)
 
