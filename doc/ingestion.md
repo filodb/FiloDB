@@ -31,13 +31,21 @@ min-num-nodes = 5
 chunk-duration = 1 hour
 sourcefactory = "filodb.kafka.KafkaIngestionStreamFactory"
 sourceconfig {
+  # Required FiloDB Kafka settings
   filo-topic-name = "topics.topic1"
-  filo-kafka-servers = ["host1:port", "host2:port"]
   filo-record-converter = "com.example.CustomRecordConverter"
+
+  # Custom client configurations
+  my.custom.client.config = "custom.value"
+
   # And any standard kafka configurations, e.g.
-  # auto.offset.reset=latest
-  # value.deserializer = "com.example.CustomKafkaDeserializer"
-  # partitioner.class = "com.example.OptionalCustomPartitioner"
+  bootstrap.servers = "host1:port,host2:port"
+  auto.offset.reset=latest
+  value.serializer = "org.example.CustomSerializer"
+  value.deserializer = "org.example.CustomDeserializer"
+  # optional etc.
+  partitioner.class = "com.example.OptionalCustomPartitioner"
+  group.id = "org.example.cluster1.filodb.consumer1"
 }
 ```
 The [defaults](../kafka/src/main/resources/filodb-defaults.conf) you can override and see

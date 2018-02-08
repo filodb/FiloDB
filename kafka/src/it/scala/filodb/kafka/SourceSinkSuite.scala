@@ -11,49 +11,33 @@ import monix.eval.Task
 import monix.execution.Scheduler
 import monix.execution.Scheduler.Implicits.global
 import monix.kafka.{KafkaProducer, _}
-import monix.kafka.config.{Acks, AutoOffsetReset}
 import monix.reactive.Observable
 import org.apache.kafka.clients.producer.ProducerRecord
 import org.apache.kafka.common.TopicPartition
 
 /** Run against kafka:
-  * ./bin/kafka-topics.sh --create --zookeeper localhost:2181   --replication-factor 1 --partitions 1   --topic filodb-kafka-tests
+  * ./bin/kafka-topics.sh --create --zookeeper localhost:2181  --replication-factor 1 --partitions 1 \
+  * --topic filodb-kafka-tests
   */
-class SourceSinkSuite extends ConfigSpec {
+class SourceSinkSuite extends KafkaSpec {
 
   // TODO UPDATE FOR PARTITIONS=3 TEST
   private val topic = "filodb-kafka-tests"
 
-  private lazy val settings = new KafkaSettings(ConfigFactory.parseString(
+  private val settings = new KafkaSettings(ConfigFactory.parseString(
     s"""
-       |include file("$FullTestPropsPath")
-       |filo-topic-name=$topic
-       |filo-record-converter="filodb.kafka.StringRecordConverter"
-        """.stripMargin))
+       |include file("./src/test/resources/sourceconfig.conf")
+       |sourceconfig.filo-topic-name=$topic
+       |sourceconfig.filo-record-converter="filodb.kafka.StringRecordConverter"
+        """.stripMargin).withFallback(source))
 
   private val tps = List(new TopicPartition(topic, 0))
 
   lazy val io = Scheduler.io("filodb-kafka-tests")
 
   "FiloDBKafka" must {
-    "have the expected shared configuration" in {
-      settings.IngestionTopic should be(topic)
-      settings.RecordConverterClass should be(classOf[StringRecordConverter].getName)
-      settings.BootstrapServers should be("localhost:9092")
-    }
-    "have the expected consumer/producer configuration" in {
-      val producerCfg = KafkaProducerConfig(settings.sinkConfig.asConfig)
-      val consumerCfg = KafkaConsumerConfig(settings.sourceConfig.asConfig)
-
-      producerCfg.bootstrapServers should be(List("localhost:9092"))
-      consumerCfg.bootstrapServers should be(List("localhost:9092"))
-      producerCfg.acks should be(Acks.NonZero(1))
-      producerCfg.clientId.contains("filodb") should be(true)
-
-      consumerCfg.autoOffsetReset should be(AutoOffsetReset.Latest)
-    }
-
-    // For some reason this doesn't work. In any case, the important test is the full producer/consumer one
+    // For some reason this doesn't work - but it did when first added.
+    // In any case, the important test is the full producer/consumer one
     "publish one message" ignore {
       val producerCfg = KafkaProducerConfig(settings.sinkConfig.asConfig)
       val producer = KafkaProducer[JLong, String](producerCfg, io)
@@ -74,7 +58,7 @@ class SourceSinkSuite extends ConfigSpec {
       }
     }
 
-    "listen for one message" ignore {
+    "consume for one message" ignore {
       val producerCfg = KafkaProducerConfig(settings.sinkConfig.asConfig)
       val producer = KafkaProducer[JLong, String](producerCfg, io)
       val consumer = PartitionedConsumerObservable.create(settings, tps.head, None).executeOn(io)
@@ -125,7 +109,7 @@ class SourceSinkSuite extends ConfigSpec {
                                                    .executeOn(io).take(cutoff)
       val streamT2 = consumer2.map(_.value.toString).toListL
       val result2 = Await.result(streamT2.runAsync, 60.seconds)
-      result2.map(_.toString.toInt).sum shouldEqual origSum
+      result2.map(_.toInt).sum shouldEqual origSum
     }
   }
 }

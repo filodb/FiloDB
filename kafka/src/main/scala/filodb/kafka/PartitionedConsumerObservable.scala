@@ -33,7 +33,7 @@ object PartitionedConsumerObservable {
                                      topicPartition: TopicPartition,
                                      offset: Option[Long]): Task[KafkaConsumer[JLong, Any]] =
     Task {
-      val props = settings.sourceConfig.kafkaConfig.asProps
+      val props = settings.sourceConfig.asProps
       blocking {
         val consumer = new KafkaConsumer(props)
         consumer.assign(List(topicPartition).asJava)
@@ -46,7 +46,6 @@ object PartitionedConsumerObservable {
     KafkaConsumerConfig(settings.sourceConfig.asConfig)
 
 }
-
 
 object PartitionedProducerSink {
 

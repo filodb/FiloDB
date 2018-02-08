@@ -12,9 +12,9 @@ import filodb.core.metadata.Dataset
 /** Used by the coordinator.
   * INTERNAL API.
   *
-  * @param config     the Typesafe source config to use, see sourceconfig in `docs/ingestion.md`
-  * @param projection the projection for the dataset
-  * @param shard      the shard / partition
+  * @param config  the Typesafe source config to use, see sourceconfig in `docs/ingestion.md`
+  * @param dataset the dataset
+  * @param shard   the shard / partition
   */
 private[filodb] class KafkaIngestionStream(config: Config,
                                            dataset: Dataset,

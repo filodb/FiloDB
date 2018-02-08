@@ -30,44 +30,40 @@ import filodb.memory.format.ArrayStringRowReader
   * 4. Run test either from Intellij or SBT:
   *    > kafka/it:testOnly filodb.kafka.KafkaIngestionStreamSuite
   */
-class KafkaIngestionStreamSuite extends ConfigSpec with StrictLogging {
+class KafkaIngestionStreamSuite extends KafkaSpec with StrictLogging {
 
   private val count = 1000
   private val numPartitions = 2
-
-  ConfigFactory.invalidateCaches()
-  val globalConfig = ConfigFactory.load("application_test.conf")
-
-  private val sourceConfig = ConfigFactory.parseString(
-    s"""
-       |include file("$FullTestPropsPath")
-       |filo-topic-name="integration-test-topic"
-       |filo-record-converter="${classOf[PartitionRecordConverter].getName}"
-       |partitioner.class = "${classOf[LongKeyPartitionStrategy].getName}"
-        """.stripMargin)
+  private val dataset = Dataset("metrics", Seq("series:string"), Seq("timestamp:long", "value:int"))
+  private val src = IngestionSource(classOf[KafkaIngestionStreamFactory].getName)
+  private val ds = DatasetSetup(dataset.asCompactString, src)
+  private val ctor = Class.forName(ds.source.streamFactoryClass).getConstructors.head
 
   implicit val timeout: Timeout = 10.seconds
   implicit val io = Scheduler.io("filodb-kafka-tests")
 
-  "IngestionStreamFactory" must {
-    "create a new KafkaStream" in {
+  ConfigFactory.invalidateCaches()
+  val globalConfig = ConfigFactory.load("application_test.conf")
 
-      val dataset = Dataset("metrics", Seq("series:string"), Seq("timestamp:long", "value:int"))
-      val source = IngestionSource(classOf[KafkaIngestionStreamFactory].getName)
-      val ds = DatasetSetup(dataset.asCompactString, source)
+  private val memStore = new TimeSeriesMemStore(
+    globalConfig.getConfig("filodb"), new NullColumnStore, new InMemoryMetaStore())
 
-      // kafka config
+  override def beforeAll(): Unit = memStore.setup(dataset, 0)
+
+  override def beforeEach(): Unit = memStore.reset()
+
+  override def afterAll(): Unit = memStore.shutdown()
+
+  "KafkaIngestionStreamFactory" must {
+    s"consume messages from $numPartitions partitions" in {
+      val sourceConfig = ConfigFactory.parseString(
+        s"""
+           |include file("./src/test/resources/sourceconfig.conf")
+           |sourceconfig.filo-topic-name="integration-test-topic"
+           |sourceconfig.filo-record-converter="${classOf[PartitionRecordConverter].getName}"
+           |sourceconfig.partitioner.class = "${classOf[LongKeyPartitionStrategy].getName}"
+        """.stripMargin)
       val settings = new KafkaSettings(sourceConfig)
-
-      // coordinator:
-      val ctor = Class.forName(ds.source.streamFactoryClass).getConstructors.head
-      val memStore = new TimeSeriesMemStore(globalConfig.getConfig("filodb"),
-                                            new NullColumnStore,
-                                            new InMemoryMetaStore())
-      memStore.setup(dataset, 0)
-      memStore.reset()
-
-      // producer:
       val producer = PartitionedProducerSink.create[JLong, String](settings, io)
 
       val tasks = for (partition <- 0 until numPartitions) yield {
@@ -79,9 +75,9 @@ class KafkaIngestionStreamSuite extends ConfigSpec with StrictLogging {
         // this is currently a 1:1 Observable stream
         val sourceT = {
           val streamFactory = ctor.newInstance().asInstanceOf[IngestionStreamFactory]
-          streamFactory.isInstanceOf[KafkaIngestionStreamFactory] should be(true)
+          streamFactory.isInstanceOf[KafkaIngestionStreamFactory] shouldEqual true
           val stream = streamFactory
-            .create(settings.config, dataset, partition, None)
+            .create(sourceConfig, dataset, partition, None)
             .get
             .take(count)
 
