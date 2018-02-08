@@ -243,6 +243,7 @@ class BinaryVectorSerializer[A: VectorReader] extends KryoSerializer[BinaryVecto
     val buf = vector.toFiloBuffer         // now idempotent, can be called many times
     var bytesToGo = vector.numBytes + 4   // include the header bytes
     output.writeInt(bytesToGo)
+    logger.trace(s"Writing BinaryVector $vector of size $bytesToGo")
     while (bytesToGo > 0) {
       val bytesToCopy = Math.min(bytesToGo, output.getBuffer.size - output.position)
       // directly copy from ByteBuffer (which may be Direct/offheap) into output buffer
@@ -272,7 +273,7 @@ class RecordSchemaSerializer extends KryoSerializer[RecordSchema] {
  * BinaryRecords in an object graph (say a VectorListResult or TupleListResult) then it will be stored by some
  * reference ID.  Thus it saves us cost and memory allocations on restore.  :)
  */
-class BinaryRecordSerializer extends KryoSerializer[BinaryRecord] {
+class BinaryRecordSerializer extends KryoSerializer[BinaryRecord] with StrictLogging {
   override def read(kryo: Kryo, input: Input, typ: Class[BinaryRecord]): BinaryRecord = {
     val schema = kryo.readObject(input, classOf[RecordSchema])
     val bytes = input.readBytes(input.readInt)
@@ -282,6 +283,7 @@ class BinaryRecordSerializer extends KryoSerializer[BinaryRecord] {
   override def write(kryo: Kryo, output: Output, br: BinaryRecord): Unit = {
     kryo.writeObject(output, br.schema)
     output.writeInt(br.numBytes)
+    logger.trace(s"Writing BinaryRecord $br with length ${br.numBytes} at ${br.base}")
     // It would be simpler if we simply took the bytes from ArrayBinaryRecord and wrote them, but
     // BinaryRecords might go offheap.
     var offset = 0

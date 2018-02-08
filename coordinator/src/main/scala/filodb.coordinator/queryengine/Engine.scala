@@ -20,9 +20,9 @@ object Engine extends StrictLogging {
   /**
    * Query Engine APIs
    */
-  def execute(physicalPlan: ExecPlan[_, _], dataset: Dataset, source: ChunkSource): Task[Result] = {
+  def execute(physicalPlan: ExecPlan[_, _], dataset: Dataset, source: ChunkSource, limit: Int): Task[Result] = {
     logger.debug(s"Starting execution of physical plan for dataset ${dataset.ref}:\n$physicalPlan")
-    physicalPlan.executeToResult(source, dataset)
+    physicalPlan.executeToResult(source, dataset, limit)
   }
 
   /*************
@@ -34,15 +34,16 @@ object Engine extends StrictLogging {
    * Observable of Vector or Tuple (or other supported type of observables)
    * @param coordsAndPlans a Seq of (NodeCoordinatorActor ref, childPlan to send to node)
    * @param parallelism the max number of simultaneous tasks to distribute
+   * @param itemLimit the max number of items to return from each child
    * @param t the maximum Timeout to wait for any individual request to come back
    */
   class DistributeConcat[O](coordsAndPlans: Seq[(ActorRef, ExecPlan[_, Observable[O]])],
-                             parallelism: Int)
+                             parallelism: Int, itemLimit: Int)
                             (implicit oMaker: ResultMaker[Observable[O]], t: Timeout, ec: ExecutionContext)
   extends MultiExecNode[Observable[O], Observable[O]](coordsAndPlans.map(_._2)) {
     def execute(source: ChunkSource, dataset: Dataset): Observable[O] = {
       logger.debug(s"Distributing ExecPlans:\n${coordsAndPlans.mkString("\n\n")}")
-      val coordsAndMsgs = coordsAndPlans.map { case (c, p) => (c, ExecPlanQuery(dataset.ref, p)) }
+      val coordsAndMsgs = coordsAndPlans.map { case (c, p) => (c, ExecPlanQuery(dataset.ref, p, itemLimit)) }
       scatterGather[QueryResult](coordsAndMsgs, parallelism)
         .flatMap { case QueryResult(_, res) => oMaker.fromResult(res) }
     }
@@ -56,15 +57,16 @@ object Engine extends StrictLogging {
      * @param shards the shard numbers to distribute the subplans to
      * @param shardMap the ShardMapper containing a mapping of shards to node ActorRefs
      * @param parallelism the max number of simultaneous tasks to distribute
+     * @param itemLimit the max number of items to return from each child
      * @param childPlanFn function to turn methods into plans
      */
-    def apply[O](methods: Seq[PartitionScanMethod], shardMap: ShardMapper, parallelism: Int)
+    def apply[O](methods: Seq[PartitionScanMethod], shardMap: ShardMapper, parallelism: Int, itemLimit: Int)
                 (childPlanFn: PartitionScanMethod => ExecPlan[_, Observable[O]])
                 (implicit oMaker: ResultMaker[Observable[O]], t: Timeout, ec: ExecutionContext): DistributeConcat[O] = {
       val coordsAndPlans = methods.map { method =>
         (shardMap.coordForShard(method.shard), childPlanFn(method))
       }
-      new DistributeConcat[O](coordsAndPlans, parallelism)
+      new DistributeConcat[O](coordsAndPlans, parallelism, itemLimit)
     }
   }
 }

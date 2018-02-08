@@ -58,6 +58,9 @@ final class QueryActor(memStore: MemStore,
   var shardMap = ShardMapper.default
   val kamonTags = Map("dataset" -> dataset.ref.toString, "shard" -> "multiple")
 
+  val config = context.system.settings.config
+  val testQSerialize = config.getBoolean("filodb.test-query-serialization")
+
   def validateFunction(funcName: String): AggregationFunction Or ErrorResponse =
     AggregationFunction.withNameInsensitiveOption(funcName)
                        .toOr(BadQuery(s"No such aggregation function $funcName"))
@@ -141,6 +144,19 @@ final class QueryActor(memStore: MemStore,
     trace.finish()
   }
 
+  import akka.serialization.SerializationExtension
+  private val serialization = SerializationExtension(context.system)
+
+  private def trySerializeResult(res: Result): Unit = {
+    val serializer = serialization.findSerializerFor(res)
+    try {
+      serializer.toBinary(res)
+      logger.debug("Serialization of result succeeded")
+    } catch {
+      case e: Exception => logger.error(s"Could not serialize $res", e)
+    }
+  }
+
   /**
    * Materializes the given Task by running it, firing a QueryResult to the originator, or if the task
    * results in an Exception, then responding with a QueryError.
@@ -150,6 +166,7 @@ final class QueryActor(memStore: MemStore,
     task.runAsync
       .map { res =>
         logger.debug(s"Result obtained from plan execution: $res")
+        if (testQSerialize) trySerializeResult(res)
         originator ! QueryResult(queryId, res)
       }.recover { case NonFatal(err) => originator ! QueryError(queryId, err) }
   }
@@ -191,11 +208,11 @@ final class QueryActor(memStore: MemStore,
       implicit val askTimeout = Timeout(options.queryTimeoutSecs.seconds)
       val execPlan = dataQuery match {
         case MostRecentSample =>
-          Engine.DistributeConcat(partMethods, shardMap, options.parallelism) { method =>
+          Engine.DistributeConcat(partMethods, shardMap, options.parallelism, options.itemLimit) { method =>
             ExecPlan.streamLastTuplePlan(dataset, colIDs, method)
           }
         case _ =>
-          Engine.DistributeConcat(partMethods, shardMap, options.parallelism) { method =>
+          Engine.DistributeConcat(partMethods, shardMap, options.parallelism, options.itemLimit) { method =>
             new ExecPlan.LocalVectorReader(colIDs, method, chunkMethod)
           }
       }
@@ -204,14 +221,14 @@ final class QueryActor(memStore: MemStore,
       // In the future, the step below will be common to all queries and can be moved out
       // For now kick start physical plan execution by sending a message to myself
       // NOTE: forward originator so we can respond directly to it
-      self.tell(ExecPlanQuery(dataset.ref, execPlan), originator)
+      self.tell(ExecPlanQuery(dataset.ref, execPlan, options.itemLimit), originator)
     }).recover {
       case resp: ErrorResponse => originator ! resp
     }
   }
 
-  def execPhysicalPlan(physPlan: ExecPlan[_, _], originator: ActorRef): Unit =
-    respond(originator, Engine.execute(physPlan, dataset, memStore))
+  def execPhysicalPlan(physQuery: ExecPlanQuery, originator: ActorRef): Unit =
+    respond(originator, Engine.execute(physQuery.execPlan, dataset, memStore, physQuery.limit))
 
   // This is only temporary, before the QueryEngine and optimizer is really flushed out.
   // Parse the query LogicalPlan and carry out actions
@@ -252,7 +269,7 @@ final class QueryActor(memStore: MemStore,
 
   def receive: Receive = {
     case q: LogicalPlanQuery       => parseQueryPlan(q, sender())
-    case ExecPlanQuery(ref, plan)  => execPhysicalPlan(plan, sender())
+    case q: ExecPlanQuery          => execPhysicalPlan(q, sender())
     case q: SingleShardQuery       => singleShardQuery(q)
     case GetIndexNames(ref, limit) =>
       sender() ! memStore.indexNames(ref).take(limit).map(_._1).toBuffer

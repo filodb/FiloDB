@@ -58,7 +58,8 @@ object QueryCommands {
   final case class QueryOptions(shardKeyHash: Option[Int] = None,
                                 shardKeySpread: Int = 2,
                                 parallelism: Int = 16,
-                                queryTimeoutSecs: Int = 30)
+                                queryTimeoutSecs: Int = 30,
+                                itemLimit: Int = 1000)
 
   /**
    * Executes a query using a LogicalPlan and returns the result as one message to the client.
@@ -76,8 +77,11 @@ object QueryCommands {
   /**
    * INTERNAL API only.
    * Executes a query using an ExecPlan (physical plan).
+   * @param dataset the DatasetRef to be queried
+   * @param execPlan the ExecPlan containing the physical execution query plan
+   * @param limit the limit to the number of items returned
    */
-  final case class ExecPlanQuery(dataset: DatasetRef, execPlan: ExecPlan[_, _]) extends QueryCommand
+  final case class ExecPlanQuery(dataset: DatasetRef, execPlan: ExecPlan[_, _], limit: Int) extends QueryCommand
 
   // Error responses from query
   final case class UndefinedColumns(undefined: Set[String]) extends ErrorResponse

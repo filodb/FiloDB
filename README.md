@@ -702,13 +702,13 @@ Some useful environment vars:
 
 ### Debugging serialization
 
-Right now both Java and Kryo serialization are used for Akka messaging.  If there are mysterious hangs, or other potentially serialization-related bugs, here is where to investigate:
+Right now both Java and Kryo serialization are used for Akka messaging.  Kryo is used for query result serialization.  If there are mysterious hangs, or other potentially serialization-related bugs, here is where to investigate:
 
 1. Run the `SerializationSpec` in coordinator.client module, especially if changes have been done to the Akka configuration.  This test uses the Akka serialization module to ensure settings and serializers work correctly.
 2. Set `MAYBE_MULTI_JVM` to true and run `cassandra/test` and `standalone/test`. They test multi-node communication for both ingestion and querying.
-3. Turn on `-Dakka.actor.kryo.kryo-trace=true` which logs in extreme detail Kryo serialization traces.  Kryo seems to have an annoying habit of swallowing some serialization errors so look at the last thing serialized.
+3. Set "filodb.coordinator.client" logger to DEBUG, and "com.esotericsoftware.minlog" logger to DEBUG or TRACE.  Kryo seems to have an annoying habit of swallowing some serialization errors so look at the last thing serialized.
 4. In particular, enable the above when running the CLI with the standalone FiloDB process to do PromQL queries.
-5. Enable trace level debugging for the coordinator module.  Details esp of `BinaryVector` serialization will be available and are useful for debugging.
+5. Also try enabling the `filodb.test-query-serialization` global config setting
 
 ### Benchmarking
 

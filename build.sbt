@@ -133,6 +133,8 @@ val excludeZK = ExclusionRule(organization = "org.apache.zookeeper")
 // This one is brought by Spark by default
 val excludeSlf4jLog4j = ExclusionRule(organization = "org.slf4j", name = "slf4j-log4j12")
 val excludeJersey = ExclusionRule(organization = "com.sun.jersey")
+// The default minlog only logs to STDOUT.  We want to log to SLF4J.
+val excludeMinlog = ExclusionRule(organization = "com.esotericsoftware", name = "minlog")
 
 
 /* Versions in various modules versus one area of build */
@@ -204,7 +206,9 @@ lazy val coordDeps = commonDeps ++ Seq(
   //   but only with kamon 0.6.7 vs 0.6.8, and akka 2.4.16 (not available yet for 2.5)
   // TODO kamon-akka is akka 2.5 compatible
   // Take out the below line if you really don't want statsd metrics enabled
-  "com.github.romix.akka" %% "akka-kryo-serialization" % "0.5.0",
+  "com.github.romix.akka" %% "akka-kryo-serialization" % "0.5.0" excludeAll(excludeMinlog),
+  // Redirect minlog logs to SLF4J
+   "com.dorkbox"         % "MinLog-SLF4J"       % "1.12",
   "io.kamon"             %% "kamon-statsd"      % kamonVersion,
   "com.opencsv"          % "opencsv"            % "3.3",
   "org.parboiled"        %% "parboiled"         % "2.1.3",

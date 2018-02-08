@@ -167,7 +167,7 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
     import MachineMetricsData._
     val keys = (2 to 4).map(n => dataset1.partKey(s"Series $n"))
     val plan = ExecPlan.streamLastTuplePlan(dataset1, Seq(0, 1), MultiPartitionScan(keys))
-    val query = ExecPlanQuery(dataset.ref, plan)
+    val query = ExecPlanQuery(dataset.ref, plan, 500)
 
     val readQuery = roundTrip(query).asInstanceOf[ExecPlanQuery]
     readQuery.dataset shouldEqual query.dataset

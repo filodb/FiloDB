@@ -32,6 +32,7 @@ class Arguments extends FieldArgs {
   var partitionKeys: Seq[String] = Nil
   var select: Option[Seq[String]] = None
   var limit: Int = 1000
+  var sampleLimit: Int = 200
   var timeoutSeconds: Int = 60
   var outfile: Option[String] = None
   var delimiter: String = ","
@@ -158,7 +159,7 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
           args.promql.map { query =>
             require(args.host.nonEmpty && args.dataset.nonEmpty, "--host and --dataset must be defined")
             val remote = Client.standaloneClient(system, args.host.get, args.port)
-            parsePromQuery(remote, query, args.dataset.get, args.metricColumn, args.limit)
+            parsePromQuery(remote, query, args.dataset.get, args.metricColumn, args.limit, args.sampleLimit)
           }.getOrElse {
             args.select.map { selectCols =>
               exportCSV(getRef(args),
@@ -266,12 +267,12 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
   import QueryCommands.QueryResult
 
   def parsePromQuery(client: LocalClient, query: String, dataset: String,
-                     metricCol: String, limit: Int): Unit = {
+                     metricCol: String, limit: Int, sampleLimit: Int): Unit = {
     val opts = DatasetOptions.DefaultOptions.copy(metricColumn = metricCol)
     val parser = new PromQLParser(query, opts)
     parser.parseToPlan(true) match {
       case SSuccess(plan) =>
-        executeQuery(client, dataset, plan, limit)
+        executeQuery(client, dataset, plan, limit, sampleLimit)
 
       case Failure(e: ParseError) =>
         println(s"Failure parsing $query:\n${parser.formatError(e)}")
@@ -282,15 +283,16 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
   }
 
   def executeQuery(client: LocalClient, dataset: String, plan: LogicalPlan,
-                   limit: Int): Unit = {
+                   limit: Int, sampleLimit: Int): Unit = {
     val ref = DatasetRef(dataset)
-    println(s"Sending query command to server for $ref...")
+    val qOpts = QueryCommands.QueryOptions(itemLimit = limit)
+    println(s"Sending query command to server for $ref with options $qOpts...")
     println(s"Query Plan:\n$plan")
     try {
-      client.logicalPlanQuery(ref, plan) match {
+      client.logicalPlanQuery(ref, plan, qOpts) match {
         case QueryResult(_, result) =>
           println(result.schema.columns.map(_.name).mkString("\t"))
-          result.prettyPrint(partitionRowLimit=limit).foreach(println)
+          result.prettyPrint(partitionRowLimit=sampleLimit).foreach(println)
       }
     } catch {
       case e: ClientException =>

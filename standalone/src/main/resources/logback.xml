@@ -29,6 +29,9 @@
         </encoder>
     </appender>
 
+  <!-- NOTE: enable this to trace or debug Kryo/MinLog serialization messages  -->
+  <!-- <logger name="com.esotericsoftware.minlog" level="TRACE"/> -->
+
     <logger name="org.apache.kafka.clients.consumer.ConsumerConfig" level="INFO"/>
     <logger name="org.apache.kafka.clients" level="INFO"/>
     <logger name="org.apache.kafka" level="INFO"/>
