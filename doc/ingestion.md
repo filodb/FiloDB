@@ -39,6 +39,8 @@ sourceconfig {
   my.custom.client.config = "custom.value"
 
   # And any standard kafka configurations, e.g.
+  # This accepts both the standard kafka value of a comma-separated
+  # string and a Typesafe list of String values
   bootstrap.servers = "host1:port,host2:port"
   auto.offset.reset=latest
   value.serializer = "org.example.CustomSerializer"
