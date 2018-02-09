@@ -710,6 +710,10 @@ Right now both Java and Kryo serialization are used for Akka messaging.  Kryo is
 4. In particular, enable the above when running the CLI with the standalone FiloDB process to do PromQL queries.
 5. Also try enabling the `filodb.test-query-serialization` global config setting
 
+To dynamically change the log level, you can use the `/admin/loglevel` HTTP API (per host).  Example:
+
+    curl -d 'trace' http://localhost:8080/admin/loglevel/com.esotericsoftware.minlog
+
 ### Benchmarking
 
 To run benchmarks, from within SBT:

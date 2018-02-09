@@ -4,10 +4,12 @@
 
 - [FiloDB HTTP API](#filodb-http-api)
   - [FiloDB Specific APIs](#filodb-specific-apis)
-    - [GET /__health](#get-__health)
-    - [GET /__seeds](#get-__seeds)
+    - [GET /__members](#get-__members)
+    - [GET /admin/health](#get-adminhealth)
+    - [POST /admin/loglevel/{loggerName}](#post-adminloglevelloggername)
     - [GET /api/v1/cluster](#get-apiv1cluster)
     - [GET /api/v1/cluster/{dataset}/status](#get-apiv1clusterdatasetstatus)
+    - [POST /api/v1/cluster/{dataset}](#post-apiv1clusterdataset)
   - [Prometheus-compatible APIs](#prometheus-compatible-apis)
     - [GET /api/v1/label/{label_name}/values](#get-apiv1labellabel_namevalues)
     - [GET /api/v1/query](#get-apiv1query)
@@ -21,15 +23,25 @@
 
 ### FiloDB Specific APIs
 
-#### GET /__health
+#### GET /__members
+
+Internal API used to return seed nodes for FiloDB Cluster initialization.  See the [akka-bootstrapper docs](akka-bootstrapper.md).
+
+#### GET /admin/health
 
 Currently returns `All good` if the node is up.
 
 TODO: expose more detailed health, status, etc.?
 
-#### GET /__members
+#### POST /admin/loglevel/{loggerName}
 
-Internal API used to return seed nodes for FiloDB Cluster initialization.  See the [akka-bootstrapper docs](akka-bootstrapper.md).
+Post the new loglevel (debug,info,warn,error,trace) with the logger name in dot notation.  Allows dynamically changing the log level for the node in question only.
+
+Example to turn on TRACE logging for Kryo serialization:
+
+    curl -d 'trace' http://localhost:8080/admin/loglevel/com.esotericsoftware.minlog
+
+Returns text explaining what got changed (sorry not JSON).
 
 #### GET /api/v1/cluster
 

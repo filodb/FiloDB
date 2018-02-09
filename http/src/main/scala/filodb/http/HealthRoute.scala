@@ -12,5 +12,4 @@ object HealthRoute extends FiloRoute {
       }
     }
   }
-
 }
