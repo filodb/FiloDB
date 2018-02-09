@@ -161,10 +161,10 @@ tail -f logs/filodb-server-1.log
 ```
 Verify this message `NodeClusterActor Actor[akka://filo-standalone/user/node/singleton/nodecluster#-528195195] said hello!` in the logs. The logs should also indicate kafka connections being setup for consumption for the dataset. Wait for this to happen.
 
-Now run the time series generator. This will ingest 10000 samples into the Kafka topic with timestamps 100 minutes ago
-and with 20 partitions.
+Now run the time series generator. This will ingest 20 time series (the default) with 100 samples each into the Kafka topic with current timestamps.  The required argument is the path to the source config.  Use `--help` for all the options.
+
 ```
-java -cp tsgenerator/target/scala-2.11/tsgenerator-*.telemetry-SNAPSHOT filodb.timeseries.TestTimeseriesProducer -n 10000 -t 100 -p 20
+java -cp tsgenerator/target/scala-2.11/tsgenerator-*.telemetry-SNAPSHOT filodb.timeseries.TestTimeseriesProducer -c conf/timeseries-dev-source.conf
 ```
 
 At this point, you should be able to confirm such a message in the server logs: `KAMON counter name=memstore-rows-ingested count=4999`
@@ -212,6 +212,41 @@ And subsequent FiloDB servers. Change log file suffix with the `-l` option for e
 the last server, so data setup is initiated after all servers come up.
 ```
 ./filodb-dev-start.sh -c conf/timeseries-filodb-server-consul.conf -l 2 -p -s
+```
+
+#### Local Scale Testing
+
+Follow the same steps as in original setup, but do this first to clear out existing metadata:
+
+```bash
+./filo-cli -Dconfig.file=conf/timeseries-filodb-server.conf --command clearMetadata
+```
+
+Then follow the steps to create the dataset etc.  Create a different Kafka topic with 128 partitions:
+
+```bash
+bin/kafka-topics.sh --create --zookeeper localhost:2181 --replication-factor 1 --partitions 128 --topic timeseries-perf
+```
+
+Start two servers as follows. This will not start ingestion yet:
+
+```bash
+./filodb-dev-start.sh -c conf/timeseries-128shards-server.conf -l 1
+./filodb-dev-start.sh -c conf/timeseries-128shards-server.conf -l 2 -p
+```
+
+Set up ingestion:
+
+```bash
+./filo-cli --host 127.0.0.1 --dataset timeseries --command setup --filename conf/timeseries-128shards-source.conf
+```
+
+Now if you curl the cluster status you should see 128 shards which are slowly turning active: `curl http://127.0.0.1:8080/api/v1/cluster/timeseries/status | jq '.'`
+
+Generate records:
+
+```
+java -cp tsgenerator/target/scala-2.11/tsgenerator-*.telemetry-SNAPSHOT filodb.timeseries.TestTimeseriesProducer -c conf/timeseries-128shards-source.conf -p 5000
 ```
 
 ## Introduction to FiloDB Data Modelling

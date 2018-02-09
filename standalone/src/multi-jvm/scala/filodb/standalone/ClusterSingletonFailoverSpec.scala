@@ -173,7 +173,7 @@ abstract class ClusterSingletonFailoverSpec extends StandaloneMultiJvmSpec(Clust
   it should "be able to ingest data into FiloDB via Kafka" in {
     within(ingestDuration + 5.seconds) {
       runOn(third) {
-        val task = TestTimeseriesProducer.produceMetrics(1000, 100, 400)
+        val task = TestTimeseriesProducer.produceMetrics(source, 1000, 100, 400)
         info(s"Waiting for ingest-duration ($ingestDuration) to pass")
         awaitCond(task.isCompleted, ingestDuration)
       }

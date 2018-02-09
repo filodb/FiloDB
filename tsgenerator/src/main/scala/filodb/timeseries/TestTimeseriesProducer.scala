@@ -7,6 +7,7 @@ import scala.concurrent.duration._
 import scala.util.Random
 import scala.util.control.NonFatal
 
+import com.typesafe.config.{Config, ConfigFactory}
 import com.typesafe.scalalogging.StrictLogging
 import monix.execution.Scheduler
 import monix.kafka._
@@ -25,51 +26,55 @@ import filodb.coordinator.ShardMapper
   *
   */
 object TestTimeseriesProducer extends StrictLogging {
-
   class ProducerOptions(args: Seq[String]) extends ScallopConf(args) {
-    val numSamples = opt[Int](required = true, short = 'n')
+    val samplesPerSeries = opt[Int](short = 'n', default = Some(100),
+                                    descr="# of samples per time series")
     val startMinutesAgo = opt[Int](short='t')
-    val numPartitions = opt[Int](short='p', default = Some(20))
+    val numSeries = opt[Int](short='p', default = Some(20), descr="# of total time series")
+    val sourceConfigPath = opt[String](required = true, short = 'c',
+                                       descr="Path to source conf file eg conf/timeseries-dev-source.conf")
     verify()
   }
 
-  val numKafkaPartitions = 4 // this should match the numshards value specified in the dataset source configuration
-  val topicName = "timeseries-dev"
   val oneBitMask = 0x1
   val twoBitMask = 0x3
   val rand = Random
   // start from a random day in the last 5 years
-  val kafkaServer = "localhost:9092"
 
   def main(args: Array[String]): Unit = {
-
     val conf = new ProducerOptions(args)
-    val numSamples = conf.numSamples()
-    val numTimeSeries = conf.numPartitions()
+    val sourceConfig = ConfigFactory.parseFile(new java.io.File(conf.sourceConfigPath()))
+    val numSamples = conf.samplesPerSeries() * conf.numSeries()
+    val numTimeSeries = conf.numSeries()
     // to get default start time, look at numSamples and calculate a startTime that ends generation at current time
     val startMinutesAgo = conf.startMinutesAgo.toOption
       .getOrElse((numSamples.toDouble / numTimeSeries / 6).ceil.toInt )  // at 6 samples per minute
 
-    Await.result(produceMetrics(numSamples, numTimeSeries, startMinutesAgo), 1.hour)
+    Await.result(produceMetrics(sourceConfig, numSamples, numTimeSeries, startMinutesAgo), 1.hour)
   }
 
   /**
     * Produce metrics
+    * @param conf the sourceConfig
     * @param numSamples number of samples to produce
     * @param numTimeSeries number of time series partitions to produce
     * @param startMinutesAgo the samples will carry a timestamp starting from these many minutes ago
     * @return
     */
-  def produceMetrics(numSamples: Int, numTimeSeries: Int, startMinutesAgo: Long): Future[Unit] = {
+  def produceMetrics(conf: Config, numSamples: Int, numTimeSeries: Int, startMinutesAgo: Long): Future[Unit] = {
     val startTime = System.currentTimeMillis() - startMinutesAgo * 60 * 1000
+    val numShards = conf.getInt("num-shards")
 
+    // TODO: use the official KafkaIngestionStream stuff to parse the file.  This is just faster for now.
     val producerCfg = KafkaProducerConfig.default.copy(
-      bootstrapServers = List(kafkaServer)
+      bootstrapServers = conf.getString("sourceconfig.bootstrap.servers").split(',').toList
     )
+    val topicName = conf.getString("sourceconfig.filo-topic-name")
+
     implicit val io = Scheduler.io("kafka-producer")
     logger.info(s"Started producing $numSamples messages into topic $topicName with timestamps " +
       s"from about ${(System.currentTimeMillis() - startTime) / 1000 / 60} minutes ago")
-    val stream = timeSeriesData(startTime, numTimeSeries).take(numSamples)
+    val stream = timeSeriesData(startTime, numShards, numTimeSeries).take(numSamples)
     val producer = KafkaProducerSink[JLong, String](producerCfg, io)
     Observable.fromIterable(stream)
       .map { case (partition, value) =>
@@ -91,12 +96,13 @@ object TestTimeseriesProducer extends StrictLogging {
     * Generate time series data.
     *
     * @param startTime    Start time stamp
+    * @param numShards the number of shards or Kafka partitions
     * @param numTimeSeries number of instances or time series
     * @return stream of a 2-tuple (kafkaParitionId , sampleData)
     */
-  def timeSeriesData(startTime: Long, numTimeSeries: Int = 16): Stream[(JLong, String)] = {
-
-    val shardMapper = new ShardMapper(numKafkaPartitions)
+  def timeSeriesData(startTime: Long, numShards: Int, numTimeSeries: Int = 16): Stream[(JLong, String)] = {
+    val shardMapper = new ShardMapper(numShards)
+    val spread = (Math.log10(numShards / 2) / Math.log10(2.0)).toInt
     // TODO For now, generating a (sinusoidal + gaussian) time series. Other generators more
     // closer to real world data can be added later.
     Stream.from(0).map { n =>
@@ -111,7 +117,7 @@ object TestTimeseriesProducer extends StrictLogging {
       //scalastyle:off line.size.limit
       val appNameMetricNameHash = s"__name__=heap_usage;app=A$app".hashCode
       val tagHash = s"__name__=heap_usage,dc=DC$dc,app=A$app,partition=P$partition,host=H$host,instance=I$instance".hashCode
-      val kafkaParitionId: JLong = shardMapper.ingestionShard(appNameMetricNameHash, tagHash, 2).toLong
+      val kafkaParitionId: JLong = shardMapper.ingestionShard(appNameMetricNameHash, tagHash, spread).toLong
 
       val sample = s"__name__=heap_usage,dc=DC$dc,app=A$app,partition=P$partition,host=H$host,instance=I$instance   $timestamp   $value"
       logger.trace(s"Producing $sample")

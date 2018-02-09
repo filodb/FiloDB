@@ -133,7 +133,7 @@ abstract class IngestionAndRecoverySpec extends StandaloneMultiJvmSpec(Ingestion
   it should "be able to ingest data into FiloDB via Kafka" in {
     within(chunkDurationTimeout) {
       runOn(first) {
-        TestTimeseriesProducer.produceMetrics(1000, 100, 400).futureValue(producePatience)
+        TestTimeseriesProducer.produceMetrics(source, 1000, 100, 400).futureValue(producePatience)
         info("Waiting for chunk-duration to pass so checkpoints for all groups are created")
         Thread.sleep(chunkDuration.toMillis + 7000)
       }
@@ -159,7 +159,7 @@ abstract class IngestionAndRecoverySpec extends StandaloneMultiJvmSpec(Ingestion
   it should "be able to ingest larger amounts of data into FiloDB via Kafka again" in {
     within(chunkDurationTimeout) {
       runOn(first) {
-        TestTimeseriesProducer.produceMetrics(10000, 100, 200).futureValue(producePatience)
+        TestTimeseriesProducer.produceMetrics(source, 10000, 100, 200).futureValue(producePatience)
         info("Waiting for part of the chunk-duration so that there are unpersisted chunks")
         Thread.sleep(chunkDuration.toMillis / 3)
       }
@@ -218,7 +218,7 @@ abstract class IngestionAndRecoverySpec extends StandaloneMultiJvmSpec(Ingestion
 
   it should "be able to ingest some more data on node 1" in {
     runOn(first) {
-      TestTimeseriesProducer.produceMetrics(1000, 100, 50).futureValue(producePatience)
+      TestTimeseriesProducer.produceMetrics(source, 1000, 100, 50).futureValue(producePatience)
     }
     enterBarrier("data3-ingested")
   }
