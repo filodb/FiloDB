@@ -31,6 +31,7 @@ See [architecture](doc/architecture.md) and [datasets and reading](doc/datasets_
 - [Getting Started](#getting-started)
 - [End to End Kafka Developer Setup](#end-to-end-kafka-developer-setup)
     - [Multiple Servers](#multiple-servers)
+    - [Local Scale Testing](#local-scale-testing)
 - [Introduction to FiloDB Data Modelling](#introduction-to-filodb-data-modelling)
   - [Example FiloDB Schema for machine metrics](#example-filodb-schema-for-machine-metrics)
   - [Data Modelling and Performance Considerations](#data-modelling-and-performance-considerations)
@@ -55,7 +56,7 @@ See [architecture](doc/architecture.md) and [datasets and reading](doc/datasets_
   - [Metrics Configuration](#metrics-configuration)
 - [Code Walkthrough](#code-walkthrough)
 - [Building and Testing](#building-and-testing)
-  - [Debugging serialization](#debugging-serialization)
+  - [Debugging serialization and queries](#debugging-serialization-and-queries)
   - [Benchmarking](#benchmarking)
 - [You can help!](#you-can-help)
 
@@ -735,15 +736,17 @@ Some useful environment vars:
 * `LOG_AKKA_TO_CONSOLE` - define this to have noisy Akka Cluster logs output to the console
 * `MAYBE_MULTI_JVM` - enable multi-JVM tests for the Kafka and Standalone modules.  These require both Cassandra and Kafka to be up and running.
 
-### Debugging serialization
+### Debugging serialization and queries
 
 Right now both Java and Kryo serialization are used for Akka messaging.  Kryo is used for query result serialization.  If there are mysterious hangs, or other potentially serialization-related bugs, here is where to investigate:
 
 1. Run the `SerializationSpec` in coordinator.client module, especially if changes have been done to the Akka configuration.  This test uses the Akka serialization module to ensure settings and serializers work correctly.
 2. Set `MAYBE_MULTI_JVM` to true and run `cassandra/test` and `standalone/test`. They test multi-node communication for both ingestion and querying.
-3. Set "filodb.coordinator.client" logger to DEBUG, and "com.esotericsoftware.minlog" logger to DEBUG or TRACE.  Kryo seems to have an annoying habit of swallowing some serialization errors so look at the last thing serialized.
+3. Set the following log levels to trace queries and serialization in detail:
+    - `filodb.coordinator.queryengine` to DEBUG - especially useful to see how `ExecPlans` get distributed
+    - `com.esotericsoftware.minlog` to DEBUG or TRACE -- detailed overall serialization
+    - `com.esotericsoftware.kryo.io` to TRACE - detailed `BinaryRecord` / `BinaryVector` serde debugging 
 4. In particular, enable the above when running the CLI with the standalone FiloDB process to do PromQL queries.
-5. Also try enabling the `filodb.test-query-serialization` global config setting
 
 To dynamically change the log level, you can use the `/admin/loglevel` HTTP API (per host).  Example:
 

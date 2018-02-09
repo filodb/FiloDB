@@ -16,6 +16,7 @@ object SerializationSpecConfig extends ActorSpecConfig {
   override val defaultConfig = """
                       |akka.loggers = ["akka.testkit.TestEventListener"]
                       |akka.actor.serialize-messages = on
+                      |akka.actor.kryo.buffer-size = 2048
                       """.stripMargin
 }
 
@@ -83,6 +84,17 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
                                                                    Seq(DoubleSeriesPoint(100000L, 1.2))))
     val deserPointAgg = roundTrip(pointAgg).asInstanceOf[PrimitiveSimpleAggregate[DoubleSeriesValues]]
     deserPointAgg.data should equal (pointAgg.data)
+  }
+
+  it("should be able to serialize BinaryRecords larger than buffer size") {
+    import MachineMetricsData._
+
+    for { recSize <- Seq(1000, 1020, 2040, 2050, 4086, 4096, 4106) } {
+      val record = dataset1.partKey(" " * recSize)
+      val tupleResult = TupleResult(ResultSchema(dataset1.infosFromIDs(0 to 0), 1),
+                                    Tuple(Some(PartitionInfo(record, 0)), record))
+      roundTrip(tupleResult) shouldEqual tupleResult
+    }
   }
 
   val timeScan = KeyRangeQuery(Seq(110000L), Seq(130000L))

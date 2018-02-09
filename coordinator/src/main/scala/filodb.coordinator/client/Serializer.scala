@@ -1,10 +1,7 @@
 package filodb.coordinator.client
 
-import java.nio.ByteBuffer
-
 import com.esotericsoftware.kryo.{Serializer => KryoSerializer}
-import com.esotericsoftware.kryo.io.Input
-import com.esotericsoftware.kryo.io.Output
+import com.esotericsoftware.kryo.io.{BinaryRecordSerializer, BinaryVectorSerializer, Input, Output}
 import com.esotericsoftware.kryo.Kryo
 import com.typesafe.scalalogging.StrictLogging
 import org.boon.primitive.{ByteBuf, InputByteArray}
@@ -13,7 +10,7 @@ import filodb.core._
 import filodb.core.binaryrecord.{ArrayBinaryRecord, BinaryRecord, RecordSchema}
 import filodb.core.memstore.IngestRecord
 import filodb.core.metadata.Column
-import filodb.memory.format.{BinaryVector, FiloVector, UnsafeUtils, VectorReader, ZeroCopyUTF8String}
+import filodb.memory.format.{BinaryVector, ZeroCopyUTF8String}
 import filodb.memory.format.{vectors => BV}
 
 /**
@@ -143,7 +140,6 @@ class KryoInit {
     val colTypeSer = new ColumnTypeSerializer
     Column.ColumnType.values.zipWithIndex.foreach { case (ct, i) => kryo.register(ct.getClass, colTypeSer, 100 + i) }
 
-    import VectorReader._
     val intBinVectSer = new BinaryVectorSerializer[Int]
     kryo.addDefaultSerializer(classOf[BinaryVector[Int]], intBinVectSer)
     kryo.register(classOf[BV.IntBinaryVector], intBinVectSer)
@@ -225,36 +221,6 @@ class ColumnTypeSerializer extends KryoSerializer[Column.ColumnType] {
   override def write(kryo: Kryo, output: Output, colType: Column.ColumnType): Unit = {}
 }
 
-/**
- * A Kryo serializer for BinaryVectors.  Since BinaryVectors are already blobs, the goal here is to ship bytes
- * out as quickly as possible.  Standard field-based serializers must NOT be used here.
- * TODO: optimize this code for input/output classes like UnsafeMemoryInput/Output.  Right now we have to assume
- * a generic Input/Output which uses a byte[] onheap buffer, and copy stuff in and out of that.  This is obviously
- * less ideal.
- */
-class BinaryVectorSerializer[A: VectorReader] extends KryoSerializer[BinaryVector[A]] with StrictLogging {
-  override def read(kryo: Kryo, input: Input, typ: Class[BinaryVector[A]]): BinaryVector[A] = {
-    val onHeapBuffer = ByteBuffer.wrap(input.readBytes(input.readInt))
-    logger.trace(s"Reading typ=$typ with reader=${implicitly[VectorReader[A]]} into buffer $onHeapBuffer")
-    FiloVector[A](onHeapBuffer).asInstanceOf[BinaryVector[A]]
-  }
-
-  override def write(kryo: Kryo, output: Output, vector: BinaryVector[A]): Unit = {
-    val buf = vector.toFiloBuffer         // now idempotent, can be called many times
-    var bytesToGo = vector.numBytes + 4   // include the header bytes
-    output.writeInt(bytesToGo)
-    logger.trace(s"Writing BinaryVector $vector of size $bytesToGo")
-    while (bytesToGo > 0) {
-      val bytesToCopy = Math.min(bytesToGo, output.getBuffer.size - output.position)
-      // directly copy from ByteBuffer (which may be Direct/offheap) into output buffer
-      buf.get(output.getBuffer, output.position, bytesToCopy)
-      output.setPosition(output.position + bytesToCopy)
-      if (output.position >= output.getBuffer.size) output.flush()
-      bytesToGo -= bytesToCopy
-    }
-  }
-}
-
 class RecordSchemaSerializer extends KryoSerializer[RecordSchema] {
   override def read(kryo: Kryo, input: Input, typ: Class[RecordSchema]): RecordSchema = {
     val colTypesObj = kryo.readClassAndObject(input)
@@ -263,36 +229,5 @@ class RecordSchemaSerializer extends KryoSerializer[RecordSchema] {
 
   override def write(kryo: Kryo, output: Output, schema: RecordSchema): Unit = {
     kryo.writeClassAndObject(output, schema.columnTypes)
-  }
-}
-
-/**
- * Serializer for BinaryRecords.  One complication with BinaryRecords is that they require a schema.
- * We don't want to instantiate a new RecordSchema with every single BR, that would be a huge waste of memory.
- * However, it seems that Kryo remembers RecordSchema references, and if the same RecordSchema is used for multiple
- * BinaryRecords in an object graph (say a VectorListResult or TupleListResult) then it will be stored by some
- * reference ID.  Thus it saves us cost and memory allocations on restore.  :)
- */
-class BinaryRecordSerializer extends KryoSerializer[BinaryRecord] with StrictLogging {
-  override def read(kryo: Kryo, input: Input, typ: Class[BinaryRecord]): BinaryRecord = {
-    val schema = kryo.readObject(input, classOf[RecordSchema])
-    val bytes = input.readBytes(input.readInt)
-    BinaryRecord(schema, bytes)
-  }
-
-  override def write(kryo: Kryo, output: Output, br: BinaryRecord): Unit = {
-    kryo.writeObject(output, br.schema)
-    output.writeInt(br.numBytes)
-    logger.trace(s"Writing BinaryRecord $br with length ${br.numBytes} at ${br.base}")
-    // It would be simpler if we simply took the bytes from ArrayBinaryRecord and wrote them, but
-    // BinaryRecords might go offheap.
-    var offset = 0
-    while ((br.numBytes - offset) > 0) {
-      val bytesToCopy = Math.min(br.numBytes - offset, output.getBuffer.size - output.position)
-      br.copyTo(output.getBuffer, UnsafeUtils.arayOffset + output.position, offset, bytesToCopy)
-      output.setPosition(output.position + bytesToCopy)
-      if (output.position >= output.getBuffer.size) output.flush()
-      offset += bytesToCopy
-    }
   }
 }

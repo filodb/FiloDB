@@ -59,7 +59,7 @@ object QueryCommands {
                                 shardKeySpread: Int = 1,
                                 parallelism: Int = 16,
                                 queryTimeoutSecs: Int = 30,
-                                itemLimit: Int = 1000)
+                                itemLimit: Int = 100)
 
   /**
    * Executes a query using a LogicalPlan and returns the result as one message to the client.

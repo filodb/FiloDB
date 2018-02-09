@@ -59,7 +59,6 @@ final class QueryActor(memStore: MemStore,
   val kamonTags = Map("dataset" -> dataset.ref.toString, "shard" -> "multiple")
 
   val config = context.system.settings.config
-  val testQSerialize = config.getBoolean("filodb.test-query-serialization")
 
   def validateFunction(funcName: String): AggregationFunction Or ErrorResponse =
     AggregationFunction.withNameInsensitiveOption(funcName)
@@ -144,19 +143,6 @@ final class QueryActor(memStore: MemStore,
     trace.finish()
   }
 
-  import akka.serialization.SerializationExtension
-  private val serialization = SerializationExtension(context.system)
-
-  private def trySerializeResult(res: Result): Unit = {
-    val serializer = serialization.findSerializerFor(res)
-    try {
-      serializer.toBinary(res)
-      logger.debug("Serialization of result succeeded")
-    } catch {
-      case e: Exception => logger.error(s"Could not serialize $res", e)
-    }
-  }
-
   /**
    * Materializes the given Task by running it, firing a QueryResult to the originator, or if the task
    * results in an Exception, then responding with a QueryError.
@@ -166,7 +152,6 @@ final class QueryActor(memStore: MemStore,
     task.runAsync
       .map { res =>
         logger.debug(s"Result obtained from plan execution: $res")
-        if (testQSerialize) trySerializeResult(res)
         originator ! QueryResult(queryId, res)
       }.recover { case NonFatal(err) => originator ! QueryError(queryId, err) }
   }
