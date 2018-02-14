@@ -47,6 +47,47 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
         Ack(123L)).foreach { thing => roundTrip(thing) shouldEqual thing }
   }
 
+  it("should be able to serialize IngestionConfig, SetupDataset, DatasetResourceSpec, IngestionSource") {
+
+    val source1 = s"""
+                       |dataset = ${dataset.name}
+                       |num-shards = 128
+                       |min-num-nodes = 32
+                       |sourceconfig {
+                       |  filo-topic-name = "org.example.app.topic1"
+                       |  bootstrap.servers = "host:port"
+                       |  filo-record-converter = "org.example.app.SomeRecordConverter"
+                       |  value.deserializer=com.apple.pie.filodb.timeseries.TimeSeriesDeserializer
+                       |  group.id = "org.example.app.consumer.group1"
+                       |  my.custom.key = "custom.value"
+                       |}
+                     """.stripMargin
+
+    val source2 = """
+                    |dataset = "gdelt"
+                    |num-shards = 32
+                    |min-num-nodes = 10
+                  """.stripMargin
+
+    val source3 = """
+                    |dataset = "a.b.c"
+                    |num-shards = 32
+                    |min-num-nodes = 10
+                  """.stripMargin
+
+    val source4 = """
+                    |dataset = "a-b-c"
+                    |num-shards = 32
+                    |min-num-nodes=10
+                  """.stripMargin
+
+    val command1 = SetupDataset(IngestionConfig(source1, "a.backup").get)
+    val command2 = SetupDataset(IngestionConfig(source2, "a.backup").get)
+    val command3 = SetupDataset(IngestionConfig(source2, "a.backup").get)
+    val command4 = SetupDataset(IngestionConfig(source4, "a.backup").get)
+    Set(command1, command2, command3, command4) forall(cmd => roundTrip(cmd) === cmd) shouldEqual true
+  }
+
   it("should be able to serialize a ShardMapper") {
     val emptyRef = ActorRef.noSender
     val mapper = new ShardMapper(16)

@@ -228,20 +228,25 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
    *   dataset = "gdelt"
    *   num-shards = 32   # for Kafka this should match the number of partitions
    *   min-num-nodes = 10     # This many nodes needed to ingest all shards
-   *   sourcefactory = "filodb.kafka.KafkaSourceFactory"
+   *   sourcefactory = "filodb.kafka.KafkaIngestionStreamFactory"
    *   sourceconfig {
-   *     brokers = ["10.11.12.13", "10.11.12.14"]
-   *     topic = "gdelt-events.production"
+   *     bootstrap.servers = ["10.11.12.13", "10.11.12.14"]
+   *     filo-topic-name = "gdelt-events.production"
    *   }
    * }}}
-   * sourcefactory and sourceconfig is optional.  If omitted, a NoOpFactory will be used, which means
+   * sourcefactory and sourceconfig are optional.  If omitted, a NoOpFactory will be used, which means
    * no automatic pull ingestion will be started.  New data can always be pushed into any Filo node.
    */
   def setupDataset(client: LocalClient, config: Config, timeout: FiniteDuration): Unit = {
-    val ingestConfig = IngestionConfig(config, backupSourceFactory=noOpSource.streamFactoryClass)
-    client.setupDataset(ingestConfig, timeout).foreach {
-      case e: ErrorResponse =>
-        println(s"Errors setting up dataset ${ingestConfig.ref}: $e")
+    IngestionConfig(config, noOpSource.streamFactoryClass) match {
+      case SSuccess(ingestConfig) =>
+        client.setupDataset(ingestConfig, timeout).foreach {
+          case e: ErrorResponse =>
+            println(s"Errors setting up dataset ${ingestConfig.ref}: $e")
+            exitCode = 2
+        }
+      case Failure(e) =>
+        println(s"Configuration error: unable to parse config for IngestionConfig: ${e.getClass.getName}: ${e.getMessage}")
         exitCode = 2
     }
   }

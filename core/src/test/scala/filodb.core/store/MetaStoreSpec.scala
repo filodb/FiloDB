@@ -2,7 +2,7 @@ package filodb.core.store
 
 import java.util.UUID
 
-import com.typesafe.config.ConfigFactory
+import com.typesafe.config.{ConfigException, ConfigFactory}
 import org.scalatest.{BeforeAndAfter, BeforeAndAfterAll, FunSpec, Matchers}
 import org.scalatest.concurrent.ScalaFutures
 
@@ -135,13 +135,52 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
     it("should be able to parse source config with no sourceFactory and sourceConfig") {
       val sourceConf = """
                        |dataset = "gdelt"
-                       |numshards = 32   # for Kafka this should match the number of partitions
+                       |num-shards = 32   # for Kafka this should match the number of partitions
                        |min-num-nodes = 10     # This many nodes needed to ingest all shards
                        """.stripMargin
-      val ingestConf = IngestionConfig(ConfigFactory.parseString(sourceConf), "a.backup")
-      ingestConf.ref shouldEqual DatasetRef("gdelt")
-      ingestConf.streamFactoryClass shouldEqual "a.backup"
-      ingestConf.streamConfig.isEmpty shouldEqual true
+      val ingestionConfig = IngestionConfig(sourceConf, "a.backup").get
+      ingestionConfig.ref shouldEqual DatasetRef("gdelt")
+      ingestionConfig.streamFactoryClass shouldEqual "a.backup"
+      ingestionConfig.streamConfig.isEmpty shouldEqual true
+    }
+
+    it("should be able to parse for IngestionConfig with sourceconfig") {
+      val sourceConf = """
+                         |dataset = "gdelt"
+                         |num-shards = 128
+                         |min-num-nodes = 32
+                         |sourceconfig {
+                         |  filo-topic-name = "org.example.app.topic1"
+                         |  bootstrap.servers = "host:port"
+                         |  filo-record-converter = "org.example.app.SomeRecordConverter"
+                         |  value.deserializer=com.apple.pie.filodb.timeseries.TimeSeriesDeserializer
+                         |  group.id = "org.example.app.consumer.group1"
+                         |  my.custom.key = "custom.value"
+                         |}
+                       """.stripMargin
+
+      val ingestionConfig = IngestionConfig(sourceConf, "a.backup").get
+      ingestionConfig.ref shouldEqual DatasetRef("gdelt")
+      ingestionConfig.streamFactoryClass shouldEqual "a.backup"
+      ingestionConfig.streamConfig.isEmpty shouldEqual false
+      ingestionConfig.streamConfig.getString("group.id") shouldEqual "org.example.app.consumer.group1"
+      ingestionConfig.streamConfig.getString("my.custom.key") shouldEqual "custom.value"
+    }
+
+    it("should return failure context when no dataset is configured") {
+      val sourceConf = s"""${IngestionKeys.SourceFactory} = "fu""""
+
+      val ingestionConfig = IngestionConfig(ConfigFactory.parseString(sourceConf))
+      ingestionConfig.isFailure shouldEqual true
+      ingestionConfig.failed.get.getClass shouldEqual classOf[ConfigException.Missing]
+    }
+
+    it("should return failure context when source factory class is configured") {
+      val sourceConf = s"""${IngestionKeys.Dataset} = "gdelt"""".stripMargin
+
+      val ingestionConfig = IngestionConfig(ConfigFactory.parseString(sourceConf))
+      ingestionConfig.isFailure shouldEqual true
+      ingestionConfig.failed.get.getClass shouldEqual classOf[ConfigException.Missing]
     }
   }
 }

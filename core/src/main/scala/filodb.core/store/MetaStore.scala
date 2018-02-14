@@ -1,6 +1,7 @@
 package filodb.core.store
 
 import scala.concurrent.Future
+import scala.util.Try
 
 import com.typesafe.config.{Config, ConfigFactory}
 import net.ceedubs.ficus.Ficus._
@@ -17,22 +18,55 @@ abstract class MetaStoreError(msg: String) extends Exception(msg)
 final case class IngestionConfig(ref: DatasetRef,
                                  resources: Config,
                                  streamFactoryClass: String,
-                                 streamConfig: Config)
+                                 streamConfig: Config) {
+
+  // called by NodeClusterActor, by this point, validation and failure if
+  // config parse issue or not available are raised from Cli / HTTP
+  def numShards: Int = IngestionConfig.numShards(resources).get
+  def minNumNodes: Int = IngestionConfig.minNumNodes(resources).get
+
+}
 
 object IngestionConfig {
-  /**
-   * Creates an IngestionConfig from a "source config" file - see conf/timeseries-dev-source.conf
-   */
-  def apply(sourceConfig: Config): IngestionConfig = {
-    val ref = DatasetRef.fromDotString(sourceConfig.getString("dataset"))
-    val streamConfig = sourceConfig.as[Option[Config]]("sourceconfig").getOrElse(ConfigFactory.empty)
-    IngestionConfig(ref, sourceConfig, sourceConfig.getString("sourcefactory"), streamConfig)
-  }
+  import IngestionKeys.{Dataset => DatasetRefKey, _}
 
-  def apply(sourceConfig: Config, backupSourceFactory: String): IngestionConfig = {
-    val backup = ConfigFactory.parseString(s"sourcefactory = $backupSourceFactory")
+  /* These two are not called until NodeClusterActor creates
+     DatasetResourceSpec for SetupData, but they are not specifically written/read via C*,
+     only as string. Why not parse early to fail fast and store specifically like 'dataset'. */
+  def numShards(c: Config): Try[Int] = c.intT(IngestionKeys.NumShards)
+  def minNumNodes(c: Config): Try[Int] = c.intT(IngestionKeys.MinNumNodes)
+
+  /** Creates an IngestionConfig from a "source config" file - see conf/timeseries-dev-source.conf.
+    * Allows the caller to decide what to do with configuration parsing errors and when.
+    * Fails if no dataset is provided by the config submitter.
+    */
+  private[core] def apply(sourceConfig: Config): Try[IngestionConfig] =
+    for {
+      resolved  <- sourceConfig.resolveT
+      dataset   <- resolved.stringT(DatasetRefKey) // fail fast if missing
+      factory   <- resolved.stringT(SourceFactory) // fail fast if missing
+      numShards <- numShards(resolved)             // fail fast if missing
+      minNodes  <- minNumNodes(resolved)           // fail fast if missing
+      streamConfig = resolved.as[Option[Config]](IngestionKeys.SourceConfig).getOrElse(ConfigFactory.empty)
+      ref          = DatasetRef.fromDotString(dataset)
+    } yield IngestionConfig(ref, resolved, factory, streamConfig)
+
+  def apply(sourceConfig: Config, backupSourceFactory: String): Try[IngestionConfig] = {
+    val backup = ConfigFactory.parseString(s"$SourceFactory = $backupSourceFactory")
     apply(sourceConfig.withFallback(backup))
   }
+
+  def apply(sourceStr: String, backupSourceFactory: String): Try[IngestionConfig] =
+    Try(ConfigFactory.parseString(sourceStr))
+      .flatMap(apply(_, backupSourceFactory))
+
+  /** Creates an IngestionConfig from `ingestionconfig` Cassandra table. */
+  def apply(ref: DatasetRef, factoryclass: String, resources: String, sourceconfig: String): IngestionConfig =
+    IngestionConfig(
+      ref,
+      ConfigFactory.parseString(resources),
+      factoryclass,
+      ConfigFactory.parseString(sourceconfig))
 }
 
 /**
