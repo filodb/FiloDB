@@ -25,13 +25,11 @@ trait BlockManager {
 
   /**
     * @param memorySize The size of memory in bytes for which blocks are to be allocated
-    * @param canReclaim Function which checks if a block can be reclaimed
     * @return A sequence of blocks totaling up in memory requested or empty if unable to allocate
     */
   def requestBlocks(memorySize: Long): Seq[Block]
 
   /**
-    * @param canReclaim Function which checks if a block can be reclaimed
     * @return One block of memory
     */
   def requestBlock(): Option[Block]
@@ -48,8 +46,8 @@ trait BlockManager {
 }
 
 class MemoryStats(tags: Map[String, String]) {
-  val usedBlocksMetric = Kamon.metrics.gauge("blockstore-used-blocks", tags)(0L)
-  val freeBlocksMetric = Kamon.metrics.gauge("blockstore-free-blocks", tags)(0L)
+  val usedBlocksMetric = Kamon.metrics.minMaxCounter("blockstore-used-blocks", tags)
+  val freeBlocksMetric = Kamon.metrics.minMaxCounter("blockstore-free-blocks", tags)
   val blocksReclaimedMetric = Kamon.metrics.counter("blockstore-blocks-reclaimed", tags)
   val blockUtilizationMetric = Kamon.metrics.histogram("blockstore-block-utilized-bytes", tags)
 }
@@ -129,14 +127,15 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
       val address = firstPageAddress + (i * blockSizeInBytes)
       blocks.add(new Block(address, blockSizeInBytes))
     }
-    stats.freeBlocksMetric.record(blocks.size())
+    stats.freeBlocksMetric.increment(blocks.size())
     blocks
   }
 
   protected def use(block: Block) = {
     block.markInUse
     usedBlocks.add(block)
-    stats.usedBlocksMetric.record(usedBlocks.size())
+    stats.usedBlocksMetric.increment()
+    stats.freeBlocksMetric.decrement()
   }
 
   protected def tryReclaim(num: Int): Unit = {
@@ -148,7 +147,7 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
         entries.remove()
         block.reclaim()
         freeBlocks.add(block)
-        stats.freeBlocksMetric.record(freeBlocks.size())
+        stats.freeBlocksMetric.increment()
         stats.blocksReclaimedMetric.increment()
         i = i + 1
       }
