@@ -107,14 +107,16 @@ sealed trait Result extends java.io.Serializable {
     val curTime = System.currentTimeMillis
     toRowReaders.map { case (partInfoOpt, rowReaders) =>
       partInfoOpt.map(_.toString).getOrElse("") + "\n\t" +
-        rowReaders.take(partitionRowLimit).map { reader =>
-          val firstCol = if (formatTime && schema.isTimeSeries) {
-            val timeStamp = reader.getLong(0)
-            s"${new DateTime(timeStamp).toString()} (${(curTime - timeStamp)/1000}s ago)"
-          } else {
-            reader.getAny(0).toString
-          }
-          (firstCol +: (1 until schema.length).map(reader.getAny(_).toString)).mkString("\t")
+        rowReaders.take(partitionRowLimit).map {
+          case br: BinaryRecord if br.isEmpty =>  "\t<empty>"
+          case reader =>
+            val firstCol = if (formatTime && schema.isTimeSeries) {
+              val timeStamp = reader.getLong(0)
+              s"${new DateTime(timeStamp).toString()} (${(curTime - timeStamp)/1000}s ago)"
+            } else {
+              reader.getAny(0).toString
+            }
+            (firstCol +: (1 until schema.length).map(reader.getAny(_).toString)).mkString("\t")
         }.mkString("\n\t") + "\n"
     }
   }

@@ -208,14 +208,11 @@ class TimeSeriesShard(dataset: Dataset, config: Config, val shardNum: Int, sink:
   }
 
   def createFlushTask(flushGroup: FlushGroup)(implicit ingestionScheduler: Scheduler): Task[Response] = {
-    val blockHolder = new BlockHolder(blockStore)
-    // Given the flush group, create an observable of ChunkSets
-    val chunkSetIt = new PartitionIterator(partitionGroups(flushGroup.groupNum).intIterator)
-      .flatMap(_.makeFlushChunks(blockHolder))
+    val partitionIt = new PartitionIterator(partitionGroups(flushGroup.groupNum).intIterator)
     val tracer = Kamon.tracer.newContext("chunk-flush-task-latency-after-retries", None, shardStats.tags)
-    val taskToReturn = chunkSetIt.isEmpty match {
+    val taskToReturn = partitionIt.isEmpty match {
       case false =>
-        doFlushSteps(flushGroup, blockHolder, chunkSetIt)
+        doFlushSteps(flushGroup, partitionIt)
       case true =>
         // even though there were no records for the chunkset, we want to write checkpoint anyway
         // since we should not resume from earlier checkpoint for the group
@@ -229,8 +226,12 @@ class TimeSeriesShard(dataset: Dataset, config: Config, val shardNum: Int, sink:
   }
 
   private def doFlushSteps(flushGroup: FlushGroup,
-                           blockHolder: BlockHolder,
-                           chunkSetIt: Iterator[ChunkSet]): Task[Response] = {
+                           partitionIt: Iterator[TimeSeriesPartition]): Task[Response] = {
+    // Only allocate the blockHolder when we actually have chunks/partitions to flush
+    val blockHolder = new BlockHolder(blockStore)
+    // Given the flush group, create an observable of ChunkSets
+    val chunkSetIt = partitionIt.flatMap(_.makeFlushChunks(blockHolder))
+
     // Note that all cassandra writes will have included retries. Failures after retries will imply data loss
     // in order to keep the ingestion moving. It is important that we don't fall back far behind.
     val chunkSetStream = Observable.fromIterator(chunkSetIt)
