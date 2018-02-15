@@ -59,9 +59,15 @@ class KafkaIngestionStreamSuite extends KafkaSpec with StrictLogging {
       val sourceConfig = ConfigFactory.parseString(
         s"""
            |include file("./src/test/resources/sourceconfig.conf")
-           |sourceconfig.filo-topic-name="integration-test-topic"
-           |sourceconfig.filo-record-converter="${classOf[PartitionRecordConverter].getName}"
-           |sourceconfig.partitioner.class = "${classOf[LongKeyPartitionStrategy].getName}"
+           |sourceconfig {
+           |  filo-topic-name = "integration-test-topic"
+           |  filo-record-converter = "${classOf[PartitionRecordConverter].getName}"
+           |  filo-log-consumer-config = true
+           |  bootstrap.servers = "localhost:9092"
+           |  value.serializer = "org.example.CustomSerializer"
+           |  value.deserializer = "org.example.CustomDeserializer"
+           |  partitioner.class = "${classOf[LongKeyPartitionStrategy].getName}"
+           |}
         """.stripMargin)
       val settings = new KafkaSettings(sourceConfig)
       val producer = PartitionedProducerSink.create[JLong, String](settings, io)

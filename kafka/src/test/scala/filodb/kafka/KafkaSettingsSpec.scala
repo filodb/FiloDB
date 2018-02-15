@@ -47,6 +47,7 @@ class KafkaSettingsSpec extends KafkaSpec {
     "have the expected defaults" in {
       val settings = new KafkaSettings(ConfigFactory.parseString(
         """
+          |sourceconfig.bootstrap.servers = "localhost:9092"
           |sourceconfig.filo-topic-name = "test"
           |sourceconfig.filo-record-converter = "org.example.CustomRecordConverter"
           |sourceconfig.value.deserializer = "org.example.CustomDeserializer"
@@ -58,7 +59,7 @@ class KafkaSettingsSpec extends KafkaSpec {
       import settings._
 
       val expected = defaultConfigKeys ++ Seq(
-        "value.deserializer", "sasl.mechanism", "client.id", "my.custom.client.namespace")
+        "bootstrap.servers", "value.deserializer", "sasl.mechanism", "client.id", "my.custom.client.namespace")
 
       kafkaConfig.size shouldEqual expected.size
       kafkaConfig("my.custom.client.namespace") shouldEqual 1

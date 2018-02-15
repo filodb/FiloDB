@@ -27,6 +27,7 @@ class SourceSinkSuite extends KafkaSpec {
   private val settings = new KafkaSettings(ConfigFactory.parseString(
     s"""
        |include file("./src/test/resources/sourceconfig.conf")
+       |sourceconfig.bootstrap.servers = "localhost:9092"
        |sourceconfig.filo-topic-name=$topic
        |sourceconfig.filo-record-converter="filodb.kafka.StringRecordConverter"
         """.stripMargin).withFallback(source))

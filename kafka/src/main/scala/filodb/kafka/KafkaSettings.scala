@@ -55,8 +55,9 @@ object KafkaSettings {
 final class KafkaSettings(conf: Config) extends StrictLogging {
 
   val config = {
-    val sourceconfig = if (conf.hasPath("sourceconfig")) conf.getConfig("sourceconfig") else conf
-    sourceconfig.resolve().withFallback(GlobalConfig.systemConfig.getConfig("filodb.kafka"))
+    val resolved = conf.resolve
+    val sourceconfig = if (resolved.hasPath("sourceconfig")) resolved.as[Config]("sourceconfig") else resolved
+    sourceconfig.withFallback(GlobalConfig.systemConfig.as[Config]("filodb.kafka")).resolve
   }
 
   require(config.hasPath("filo-topic-name"),
@@ -68,6 +69,15 @@ final class KafkaSettings(conf: Config) extends StrictLogging {
   val IngestionTopic = config.getString("filo-topic-name")
 
   val RecordConverterClass = config.getString("filo-record-converter")
+
+  /** Optionally log consumer configuration on load. Defaults to false.
+    * {{{
+    *   sourceconfig {
+    *     log-consumer-config = true
+    *   }
+    * }}}
+    */
+  val LogConsumerConfig = config.as[Option[Boolean]]("filo-log-consumer-config").getOrElse(false)
 
   /** Contains configurations including common for the two client types: producer, consumer,
     * if configured. E.g. bootstrap.servers, client.id - Kafka does not namespace these.
@@ -93,7 +103,9 @@ final class KafkaSettings(conf: Config) extends StrictLogging {
     require(kafkaConfig.get(AUTO_OFFSET_RESET_CONFIG).isDefined,
       "'auto.offset.reset' must be configured.")
 
-    mergedConfig(ConsumerConfig.configNames.asScala.toSet)
+    val consumerConfig = mergedConfig(ConsumerConfig.configNames.asScala.toSet)
+    if (LogConsumerConfig) logger.info(s"Consumer config: \n  ${consumerConfig}")
+    consumerConfig
   }
 
   /** Bridges the monix config gap with native kafka client properties. */
