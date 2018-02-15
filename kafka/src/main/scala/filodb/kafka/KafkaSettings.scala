@@ -103,9 +103,7 @@ final class KafkaSettings(conf: Config) extends StrictLogging {
     require(kafkaConfig.get(AUTO_OFFSET_RESET_CONFIG).isDefined,
       "'auto.offset.reset' must be configured.")
 
-    val consumerConfig = mergedConfig(ConsumerConfig.configNames.asScala.toSet)
-    if (LogConsumerConfig) logger.info(s"Consumer config: \n  ${consumerConfig}")
-    consumerConfig
+    mergedConfig(ConsumerConfig.configNames.asScala.toSet)
   }
 
   /** Bridges the monix config gap with native kafka client properties. */

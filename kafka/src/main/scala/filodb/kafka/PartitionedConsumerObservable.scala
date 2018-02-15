@@ -4,13 +4,14 @@ import java.lang.{Long => JLong}
 
 import scala.concurrent.blocking
 
+import com.typesafe.scalalogging.StrictLogging
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.kafka._
 import org.apache.kafka.clients.consumer.KafkaConsumer
 import org.apache.kafka.common.TopicPartition
 
-object PartitionedConsumerObservable {
+object PartitionedConsumerObservable extends StrictLogging {
   import collection.JavaConverters._
 
   /** Creates a `KafkaConsumerObservable` instance.
@@ -34,6 +35,9 @@ object PartitionedConsumerObservable {
                                      offset: Option[Long]): Task[KafkaConsumer[JLong, Any]] =
     Task {
       val props = settings.sourceConfig.asProps
+      // if (LogConsumerConfig) logger.info(s"Consumer sourceConfig: \n  $consumerConfig")
+      logger.info(s"Consumer properties: \n  $props")
+
       blocking {
         val consumer = new KafkaConsumer(props)
         consumer.assign(List(topicPartition).asJava)
