@@ -12,10 +12,11 @@ class FilodbCliSpec extends RunnableSpec {
       CliMain.system.name shouldEqual ClusterRole.Cli.systemName
       val coordinatorActor = CliMain.coordinatorActor
       coordinatorActor.path.name shouldEqual ActorName.CoordinatorName
-      //CliMain.cluster.clusterActor.isDefined shouldEqual false
     }
     "shutdown cleanly" in {
+      CliMain.cluster.clusterActor.isEmpty shouldEqual true
       CliMain.shutdown()
+      CliMain.cluster.clusterActor.isEmpty shouldEqual true
       eventually(CliMain.cluster.isTerminated)
     }
   }

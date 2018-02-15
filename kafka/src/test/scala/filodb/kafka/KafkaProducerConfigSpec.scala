@@ -17,7 +17,6 @@ class KafkaProducerConfigSpec extends KafkaSpec {
       val producerCfg = KafkaProducerConfig(settings.sinkConfig.asConfig)
       producerCfg.acks shouldEqual Acks.NonZero(1)
       producerCfg.bootstrapServers shouldEqual List("localhost:9092")
-      producerCfg.clientId.contains("org.example.cluster1.filodb.client1") shouldEqual true
     }
   }
 }

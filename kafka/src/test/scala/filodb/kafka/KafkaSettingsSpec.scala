@@ -58,6 +58,8 @@ class KafkaSettingsSpec extends KafkaSpec {
       ))
       import settings._
 
+      settings.LogConsumerConfig shouldEqual false
+
       val expected = defaultConfigKeys ++ Seq(
         "bootstrap.servers", "value.deserializer", "sasl.mechanism", "client.id", "my.custom.client.namespace")
 
@@ -78,7 +80,6 @@ class KafkaSettingsSpec extends KafkaSpec {
 
       values.get("my.custom.client.namespace") shouldEqual Some("custom.value")
       values(ConsumerConfig.GROUP_ID_CONFIG) shouldEqual "org.example.cluster1.filodb.consumer1"
-      values(CommonClientConfigs.CLIENT_ID_CONFIG) shouldEqual "org.example.cluster1.filodb.client1"
       values(CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG) shouldEqual "localhost:9092"
       values(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG) shouldEqual classOf[LongDeserializer].getName
       values(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG) shouldEqual classOf[CustomDeserializer].getName
@@ -109,9 +110,9 @@ class KafkaSettingsSpec extends KafkaSpec {
 
     "get correct global Kafka module defaults" in {
       KafkaSettings.FailureTopic shouldEqual "failure"
-      KafkaSettings.StatusTimeout should be (3000.millis)
-      KafkaSettings.ConnectedTimeout should be (8000.millis)
-      KafkaSettings.GracefulStopTimeout should be (10.seconds)
+      KafkaSettings.StatusTimeout shouldEqual 3000.millis
+      KafkaSettings.ConnectedTimeout shouldEqual 8000.millis
+      KafkaSettings.GracefulStopTimeout shouldEqual 10.seconds
     }
   }
 }

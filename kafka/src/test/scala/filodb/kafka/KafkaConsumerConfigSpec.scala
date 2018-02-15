@@ -18,7 +18,6 @@ class KafkaConsumerConfigSpec extends KafkaSpec {
       consumerCfg.enableAutoCommit shouldEqual settings.sourceConfig(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG)
       consumerCfg.autoOffsetReset should be(AutoOffsetReset.Latest)
       consumerCfg.bootstrapServers should be(List("localhost:9092"))
-      consumerCfg.clientId.contains("org.example.cluster1.filodb.client1") shouldEqual true
       consumerCfg.groupId.contains("org.example.cluster1.filodb.consumer1") shouldEqual true
     }
   }

@@ -35,8 +35,10 @@ object PartitionedConsumerObservable extends StrictLogging {
                                      offset: Option[Long]): Task[KafkaConsumer[JLong, Any]] =
     Task {
       val props = settings.sourceConfig.asProps
-      // if (LogConsumerConfig) logger.info(s"Consumer sourceConfig: \n  $consumerConfig")
-      logger.info(s"Consumer properties: \n  $props")
+
+      if (settings.LogConsumerConfig) {
+        logger.info(s"\nConsumer properties:\n${props.entrySet.asScala.mkString("\n")}\n")
+      }
 
       blocking {
         val consumer = new KafkaConsumer(props)

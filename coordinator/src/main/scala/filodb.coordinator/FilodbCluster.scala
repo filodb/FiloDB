@@ -193,7 +193,10 @@ final class FilodbCluster(val system: ExtendedActorSystem) extends Extension wit
       logger.info("Terminating: starting shutdown")
 
       try {
-        Await.result(gracefulStop(guardian, GracefulStopTimeout, GracefulShutdown), GracefulStopTimeout)
+        if (clusterActor.isDefined) {
+          Await.result(gracefulStop(guardian, GracefulStopTimeout, GracefulShutdown), GracefulStopTimeout)
+        }
+
         system.terminate foreach { _ =>
           logger.info("Actor system was shut down")
         }

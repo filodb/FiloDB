@@ -66,9 +66,9 @@ final class KafkaSettings(conf: Config) extends StrictLogging {
   require(config.hasPath("filo-record-converter"),
     "'record-converter' must not be empty. Configure a custom converter.")
 
-  val IngestionTopic = config.getString("filo-topic-name")
+  val IngestionTopic = config.as[String]("filo-topic-name")
 
-  val RecordConverterClass = config.getString("filo-record-converter")
+  val RecordConverterClass = config.as[String]("filo-record-converter")
 
   /** Optionally log consumer configuration on load. Defaults to false.
     * {{{
