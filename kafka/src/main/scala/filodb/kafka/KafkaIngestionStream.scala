@@ -16,19 +16,19 @@ import filodb.core.metadata.Dataset
   * @param dataset the dataset
   * @param shard   the shard / partition
   */
-private[filodb] class KafkaIngestionStream(config: Config,
-                                           dataset: Dataset,
-                                           shard: Int,
-                                           offset: Option[Long]) extends IngestionStream with StrictLogging {
+class KafkaIngestionStream(config: Config,
+                           dataset: Dataset,
+                           shard: Int,
+                           offset: Option[Long]) extends IngestionStream with StrictLogging {
 
-  private val settings = new KafkaSettings(config)
+  protected val settings = new KafkaSettings(config)
   import settings._
 
   private val converter = RecordConverter(RecordConverterClass, dataset)
   private val tp = new TopicPartition(IngestionTopic, shard)
 
   logger.info(s"Creating consumer assigned to topic ${tp.topic} partition ${tp.partition} offset $offset")
-  private val consumer = PartitionedConsumerObservable.create(settings, tp, offset)
+  protected val consumer = PartitionedConsumerObservable.create(settings, tp, offset)
 
   /**
    * Returns a reactive Observable stream of IngestRecord sequences from Kafka.
