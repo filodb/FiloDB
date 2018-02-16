@@ -10,6 +10,7 @@
 
     <logger name="filodb.coordinator" level="TRACE" />
     <logger name="filodb.core" level="TRACE" />
+    <logger name="filodb.memory" level="DEBUG" />
 
     <logger name="org.apache.kafka.clients.consumer.ConsumerConfig" level="INFO"/>
     <logger name="org.apache.kafka.clients" level="INFO"/>

@@ -72,42 +72,60 @@ class TimeSeriesPartitionSpec extends FunSpec with Matchers with BeforeAndAfter 
     chunkSetOpt.get.chunks should have length (5)
   }
 
-  it("should be reclaim blocks and evict flush chunks upon reclaim") {
+  it("should reclaim blocks and evict flushed chunks properly upon reclaim") {
      val part = new TimeSeriesPartition(dataset1, defaultPartKey, 0, colStore, bufferPool,
                                         new TimeSeriesShardStats(dataset1.ref, 0))
-     val data = singleSeriesReaders().take(11)
+     val data = singleSeriesReaders().take(21)
      val minData = data.map(_.getDouble(1))
      data.take(10).zipWithIndex.foreach { case (r, i) => part.ingest(r, 1000L + i) }
 
      val origPoolSize = bufferPool.poolSize
 
-     // First 10 rows ingested. Now flush in a separate Future while ingesting the remaining row
+     // First 10 rows ingested. Now flush in a separate Future while ingesting 6 more rows
      part.switchBuffers()
      bufferPool.poolSize shouldEqual (origPoolSize - 1)
      val blockHolder = new BlockHolder(blockStore)
      val flushFut = Future(part.makeFlushChunks(blockHolder))
-     data.drop(10).zipWithIndex.foreach { case (r, i) => part.ingest(r, 1100L + i) }
+     data.drop(10).take(6).zipWithIndex.foreach { case (r, i) => part.ingest(r, 1100L + i) }
      val chunkSetOpt = flushFut.futureValue
 
      // After flush, the old writebuffers should be returned to pool
      bufferPool.poolSize shouldEqual origPoolSize
 
-     // there should be a frozen chunk of 10 records plus 1 record in currently appending chunks
+     // there should be a frozen chunk of 10 records plus 6 records in currently appending chunks
      part.numChunks shouldEqual 2
-     part.latestChunkLen shouldEqual 1
+     part.latestChunkLen shouldEqual 6
      val chunks = part.streamReaders(AllChunkScan, Array(1))
        .map(_.vectors(0).toSeq).toListL.runAsync
-     chunks.futureValue should equal (Seq(minData take 10, minData drop 10))
+     chunks.futureValue should equal (Seq(minData take 10, minData drop 10 take 6))
 
      chunkSetOpt.isDefined shouldEqual true
      chunkSetOpt.get.info.numRows shouldEqual 10
      chunkSetOpt.get.chunks should have length (5)
 
      blockHolder.markUsedBlocksReclaimable()
+
+     // Now, switch buffers and flush again, ingesting 5 more rows
+     // There should now be 3 chunks total, the current write buffers plus the two flushed ones
+     part.switchBuffers()
+     val holder2 = new BlockHolder(blockStore)
+     val flushFut2 = Future(part.makeFlushChunks(holder2))
+     data.drop(16).zipWithIndex.foreach { case (r, i) => part.ingest(r, 1100L + i) }
+     val chunkSetOpt2 = flushFut2.futureValue
+
+     part.numChunks shouldEqual 3
+     part.latestChunkLen shouldEqual 5
+     chunkSetOpt2.isDefined shouldEqual true
+     chunkSetOpt2.get.info.numRows shouldEqual 6
+
+     val chunks2 = part.readers(AllChunkScan, Array(1)).map(_.vectors(0).toSeq).toSeq
+     chunks2 shouldEqual Seq(minData take 10, minData drop 10 take 6, minData drop 16)
+
+     // Reclaim earliest group of flushed chunks.  Make sure write buffers + latest flushed chunks still there.
      blockHolder.blockGroup.foreach(_.reclaim())
-     //should now be only 1 the unflushed chunk instead of 2
-     val readers = part.readers(AllChunkScan,Array(1))
-     readers.toSeq.length should be(1)
+     val readers = part.readers(AllChunkScan, Array(1)).toSeq
+     readers.length shouldEqual 2
+     readers.map(_.vectors(0).toSeq) shouldEqual Seq(minData drop 10 take 6, minData drop 16)
  }
 
 

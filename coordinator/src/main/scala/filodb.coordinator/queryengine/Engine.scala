@@ -22,7 +22,11 @@ object Engine extends StrictLogging {
    */
   def execute(physicalPlan: ExecPlan[_, _], dataset: Dataset, source: ChunkSource, limit: Int): Task[Result] = {
     logger.debug(s"Starting execution of physical plan for dataset ${dataset.ref}:\n$physicalPlan")
-    physicalPlan.executeToResult(source, dataset, limit)
+    try {
+      physicalPlan.executeToResult(source, dataset, limit)
+    } catch {
+      case e: Exception => Task.raiseError(e)
+    }
   }
 
   /*************

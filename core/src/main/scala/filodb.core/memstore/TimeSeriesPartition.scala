@@ -214,7 +214,7 @@ class TimeSeriesPartition(val dataset: Dataset,
         //So a blockGroup contains atmost 2. When any one Block in the flushGroup is evicted the flushChunk is removed.
         //So if and when a second block gets reclaimed this is a no-op
         override def onReclaim(): Unit = {
-          vectors.remove(flushingChunkID)
+          vectors.remove(chunkInfo.id)
           index.remove(chunkInfo.id)
           shardStats.chunkIdsEvicted.increment()
         }
@@ -268,6 +268,10 @@ class TimeSeriesPartition(val dataset: Dataset,
 
     infosSkips.map { case (info, skips) =>
       val vectArray = vectors.get(info.id)
+      //scalastyle:off
+      require(vectArray != null,
+        s"INCONSISTENCY! vectArray is null, ${info.id} does not exist in vectors but $info is in index")
+      //scalastyle:on
       val chunkset = getVectors(columnIds, vectArray, info.numRows)
       shardStats.numChunksQueried.increment(chunkset.length)
       new ChunkSetReader(info, skips, chunkset)

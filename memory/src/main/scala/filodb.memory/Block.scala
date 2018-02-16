@@ -1,11 +1,13 @@
 package filodb.memory
 
+import java.lang.{Long => jLong}
 import java.nio.ByteBuffer
 import java.util.ConcurrentModificationException
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
 
 import scala.collection.mutable.ListBuffer
 
+import com.typesafe.scalalogging.StrictLogging
 
 /*
 * Useful to establish thread ownership of a buffer.
@@ -49,7 +51,7 @@ trait ReclaimListener {
   * registered listeners is called.
   * A buffer to which a BinaryVector can be written
   */
-trait ReusableMemory {
+trait ReusableMemory extends StrictLogging {
   protected val _isFree: AtomicBoolean = new AtomicBoolean(false)
   protected val _isReusable: AtomicBoolean = new AtomicBoolean(false)
   protected val reclaimListeners = ListBuffer.empty[ReclaimListener]
@@ -92,6 +94,7 @@ trait ReusableMemory {
     * Marks this memory as free.
     */
   protected def free() = {
+    logger.debug(s"Reclaiming block at ${jLong.toHexString(address)} with ${reclaimListeners.length} listeners...")
     reclaimListeners.foreach(_.onReclaim())
     _isFree.set(true)
   }
