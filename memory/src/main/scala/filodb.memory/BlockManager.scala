@@ -46,8 +46,8 @@ trait BlockManager {
 }
 
 class MemoryStats(tags: Map[String, String]) {
-  val usedBlocksMetric = Kamon.metrics.minMaxCounter("blockstore-used-blocks", tags)
-  val freeBlocksMetric = Kamon.metrics.minMaxCounter("blockstore-free-blocks", tags)
+  val usedBlocksMetric = Kamon.metrics.gauge("blockstore-used-blocks", tags)(0L)
+  val freeBlocksMetric = Kamon.metrics.gauge("blockstore-free-blocks", tags)(0L)
   val blocksReclaimedMetric = Kamon.metrics.counter("blockstore-blocks-reclaimed", tags)
   val blockUtilizationMetric = Kamon.metrics.histogram("blockstore-block-utilized-bytes", tags)
 }
@@ -127,15 +127,15 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
       val address = firstPageAddress + (i * blockSizeInBytes)
       blocks.add(new Block(address, blockSizeInBytes))
     }
-    stats.freeBlocksMetric.increment(blocks.size())
+    stats.freeBlocksMetric.record(blocks.size())
     blocks
   }
 
   protected def use(block: Block) = {
     block.markInUse
     usedBlocks.add(block)
-    stats.usedBlocksMetric.increment()
-    stats.freeBlocksMetric.decrement()
+    stats.usedBlocksMetric.record(usedBlocks.size())
+    stats.freeBlocksMetric.record(freeBlocks.size())
   }
 
   protected def tryReclaim(num: Int): Unit = {
@@ -147,7 +147,7 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
         entries.remove()
         block.reclaim()
         freeBlocks.add(block)
-        stats.freeBlocksMetric.increment()
+        stats.freeBlocksMetric.record(freeBlocks.size())
         stats.blocksReclaimedMetric.increment()
         i = i + 1
       }
