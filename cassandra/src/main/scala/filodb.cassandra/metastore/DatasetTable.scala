@@ -6,7 +6,7 @@ import com.datastax.driver.core.Row
 import com.typesafe.config.Config
 
 import filodb.cassandra.{FiloCassandraConnector, FiloSessionProvider}
-import filodb.core.metadata.{Dataset, DatasetOptions}
+import filodb.core.metadata.Dataset
 
 /**
  * Represents the "dataset" Cassandra table tracking each dataset and its column definitions
@@ -23,7 +23,6 @@ sealed class DatasetTable(val config: Config, val sessionProvider: FiloSessionPr
                     |database text,
                     |name text,
                     |datasetstring text,
-                    |options text,
                     |PRIMARY KEY ((database, name))
                     |)""".stripMargin
 
@@ -32,27 +31,25 @@ sealed class DatasetTable(val config: Config, val sessionProvider: FiloSessionPr
 
   def fromRow(row: Row): Dataset =
     Dataset.fromCompactString(row.getString("datasetstring"))
-           .copy(database = Option(row.getString("database")).filter(_.length > 0),
-                 options = DatasetOptions.fromString(row.getString("options")))
+           .copy(database = Option(row.getString("database")).filter(_.length > 0))
 
   def initialize(): Future[Response] = execCql(createCql)
 
   def clearAll(): Future[Response] = execCql(s"TRUNCATE $tableString")
 
   lazy val datasetInsertCql = session.prepare(
-    s"""INSERT INTO $tableString (name, database, datasetstring, options
-       |) VALUES (?, ?, ?, ?) IF NOT EXISTS""".stripMargin
+    s"""INSERT INTO $tableString (name, database, datasetstring
+       |) VALUES (?, ?, ?) IF NOT EXISTS""".stripMargin
   )
 
   def createNewDataset(dataset: Dataset): Future[Response] =
     execStmt(datasetInsertCql.bind(dataset.name,
                                    dataset.database.getOrElse(""),
-                                   dataset.asCompactString,
-                                   dataset.options.toString
+                                   dataset.asCompactString
                                   ), AlreadyExists)
 
   lazy val datasetSelectCql = session.prepare(
-    s"SELECT database, datasetstring, options FROM $tableString WHERE name = ? AND database = ?")
+    s"SELECT database, datasetstring FROM $tableString WHERE name = ? AND database = ?")
 
   def getDataset(dataset: DatasetRef): Future[Dataset] =
     session.executeAsync(datasetSelectCql.bind(

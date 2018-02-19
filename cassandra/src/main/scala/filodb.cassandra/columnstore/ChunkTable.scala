@@ -10,7 +10,7 @@ import monix.reactive.Observable
 
 import filodb.cassandra.FiloCassandraConnector
 import filodb.core._
-import filodb.core.store.{compress, decompress, ChunkSinkStats, SingleChunkInfo}
+import filodb.core.store.{compress, decompress, ChunkSetInfo, ChunkSinkStats, SingleChunkInfo}
 
 /**
  * Represents the table which holds the actual columnar chunks
@@ -48,7 +48,7 @@ sealed class ChunkTable(val dataset: DatasetRef,
   ).setConsistencyLevel(writeConsistencyLevel)
 
   def writeChunks(partition: Types.PartitionKey,
-                  chunkId: Types.ChunkID,
+                  chunkInfo: ChunkSetInfo,
                   chunks: Seq[(Int, ByteBuffer)],
                   stats: ChunkSinkStats): Future[Response] = {
     val partBytes = toBuffer(partition)
@@ -56,9 +56,9 @@ sealed class ChunkTable(val dataset: DatasetRef,
     val statements = chunks.map { case (columnId, bytes) =>
       val finalBytes = compressChunk(bytes)
       chunkBytes += finalBytes.capacity.toLong
-      writeChunksCql.bind(partBytes, chunkId: jlLong, columnId: jlInt, finalBytes)
+      writeChunksCql.bind(partBytes, chunkInfo.id: jlLong, columnId: jlInt, finalBytes)
     }
-    stats.addChunkWriteStats(statements.length, chunkBytes)
+    stats.addChunkWriteStats(statements.length, chunkBytes, chunkInfo.numRows)
     connector.execStmtWithRetries(unloggedBatch(statements).setConsistencyLevel(writeConsistencyLevel))
   }
 

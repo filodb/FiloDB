@@ -134,7 +134,7 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
                           ctx: TraceContext): Future[Response] = {
     asyncSubtrace("write-chunks", "ingestion", Some(ctx)) {
       val chunkTable = getOrCreateChunkTable(ref)
-      chunkTable.writeChunks(chunkset.partition, chunkset.info.id, chunkset.chunks, sinkStats)
+      chunkTable.writeChunks(chunkset.partition, chunkset.info, chunkset.chunks, sinkStats)
     }
   }
 

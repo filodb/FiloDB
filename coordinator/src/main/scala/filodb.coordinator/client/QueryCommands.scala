@@ -55,8 +55,7 @@ object QueryCommands {
                              combinerName: String = CombinerFunction.default,
                              combinerArgs: Seq[String] = Nil)
 
-  final case class QueryOptions(shardKeyHash: Option[Int] = None,
-                                shardKeySpread: Int = 1,
+  final case class QueryOptions(shardKeySpread: Int = 1,
                                 parallelism: Int = 16,
                                 queryTimeoutSecs: Int = 30,
                                 itemLimit: Int = 100)

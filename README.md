@@ -148,11 +148,12 @@ sbt standalone/assembly cli/assembly tsgenerator/assembly
 First set up the dataset. This should create the keyspaces and tables in Cassandra. 
 ```
 ./filo-cli -Dconfig.file=conf/timeseries-filodb-server.conf  --command init
-./filo-cli -Dconfig.file=conf/timeseries-filodb-server.conf  --command create --dataset timeseries --dataColumns timestamp:long,value:double --partitionColumns tags:map
+./filo-cli -Dconfig.file=conf/timeseries-filodb-server.conf  --command create --dataset timeseries --dataColumns timestamp:long,value:double --partitionColumns tags:map --shardKeyColumns __name__,job
 ```
 Verify that tables were created in `filodb` and `filodb-admin` keyspaces.
 
-The script below brings up the FiloDB Dev Standalone server, and then sets up the timeseries dataset
+The script below brings up the FiloDB Dev Standalone server, and then sets up the timeseries dataset (NOTE: if you previously started FiloDB and have not cleared the metadata, then the -s is not needed as FiloDB will recover previous ingestion configs from Cassandra)
+
 ```
 ./filodb-dev-start.sh -s
 ```
@@ -383,7 +384,6 @@ The options to use with the data-source api are:
 | partition_keys   | comma-separated list of column name(s) or computed column functions to use for the partition key.  If not specified, defaults to `:string /0` (a single partition).  | write      | Yes      |
 | splits_per_node  | number of read threads per node, defaults to 4 | read | Yes |
 | reset_schema     | If true, allows dataset schema (eg partition keys) to be redefined for an existing dataset when SaveMode.Overwrite is used.  Defaults to false.  | write | Yes |
-| chunk_size       | Max number of rows to put into one chunk.  Note that this only has an effect if the dataset is created for the first time.| write | Yes |
 | flush_after_write | initiates a memtable flush after Spark INSERT / DataFrame.write;  this ensures all the rows are flushed to ColumnStore.  Might want to be turned off for streaming  | write | yes - default true |
 | version          | numeric version of data to write, defaults to 0  | read/write | Yes |
 

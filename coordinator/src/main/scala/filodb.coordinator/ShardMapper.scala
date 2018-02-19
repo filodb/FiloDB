@@ -70,6 +70,7 @@ class ShardMapper(val numShards: Int) extends Serializable {
   def unassigned(shardNum: Int): Boolean = coordForShard(shardNum) == ActorRef.noSender
   def statusForShard(shardNum: Int): ShardStatus = statusMap(shardNum)
   def numAssignedCoords: Int = (shardMap.toSet - ActorRef.noSender).size
+
   /**
     * Use this function to identify the list of shards to query given the shard key hash.
     *
@@ -262,6 +263,10 @@ private[filodb] object ShardMapper {
 }
 
 object ShardKeyGenerator {
+  private val InitialHash = 7
+
+  // Should be inlined by the JVM for speed, since it's final and small method
+  private final def nextHash(origHash: Int, nextHashCode: Int): Int = 31 * origHash + nextHashCode
 
   /**
     * Use the function to calculate the shard key hash for the given time series key-value pair map.
@@ -271,11 +276,22 @@ object ShardKeyGenerator {
     * @return The shard key hash that is calculated from the given shard key column of the time series tags
     */
   def shardKeyHash(tags: java.util.Map[String, String], shardKeyColumns: Array[String]): Int = {
-    var shardKeyHash = 7
+    var shardKeyHash = InitialHash
     shardKeyColumns.foreach { shardKey =>
-      if (tags.containsKey(shardKey)) shardKeyHash = 31 * shardKeyHash + tags.get(shardKey).hashCode
+      if (tags.containsKey(shardKey)) shardKeyHash = nextHash(shardKeyHash, tags.get(shardKey).hashCode)
     }
     shardKeyHash
   }
 
+  /**
+   * A variation of the above for queries where we have to go through a set of filters instead of tags, and
+   * where filters are already parsed against the shardKeyColumns.  Used by queryengine.Utils.shardHashFromFilters()
+   *
+   * @param keyValues a list of String values corresponding to each shard key column
+   */
+  def shardKeyHash(keyValues: Seq[String]): Int = {
+    var shardKeyHash = InitialHash
+    keyValues.foreach { value => shardKeyHash = nextHash(shardKeyHash, value.hashCode) }
+    shardKeyHash
+  }
 }

@@ -11,10 +11,11 @@ import monix.eval.Task
 import monix.reactive.Observable
 import org.scalactic._
 
+import filodb.coordinator.{ShardKeyGenerator, ShardMapper}
 import filodb.coordinator.client.QueryCommands
-import filodb.coordinator.ShardMapper
 import filodb.core.{ErrorResponse, Types}
 import filodb.core.metadata.Dataset
+import filodb.core.query.{ColumnFilter, Filter}
 import filodb.core.store._
 
 final case class ChildQueryError(source: ActorRef, err: QueryCommands.QueryError) extends
@@ -90,16 +91,38 @@ object Utils extends StrictLogging {
 
       case FilteredPartitionQuery(filters) =>
         // get limited # of shards if shard key available, otherwise query all shards
-        // TODO: filter shards by ones that are active?  reroute to other DC? etc.
         // TODO: monitor ratio of queries using shardKeyHash to queries that go to all shards
-        options.shardKeyHash
-          .map(shardMap.queryShards(_, options.shardKeySpread))
-          .getOrElse(shardMap.assignedShards)
-          .map { s => FilteredPartitionScan(ShardSplit(s), filters) }
+        val shards = if (dataset.options.shardKeyColumns.length > 0) {
+          shardHashFromFilters(filters, dataset.options.shardKeyColumns) match {
+            case Some(shardHash) => shardMap.queryShards(shardHash, options.shardKeySpread)
+            case None            => shardMap.assignedShards
+          }
+        } else {
+          shardMap.assignedShards
+        }
+        logger.debug(s"Translated filters $filters into shards $shards using spread ${options.shardKeySpread}")
+        shards.map { s => FilteredPartitionScan(ShardSplit(s), filters) }
     }).toOr.badMap {
       case m: MatchError => BadQuery(s"Could not parse $partQuery: ${m.getMessage}")
       case e: Exception => BadArgument(e.getMessage)
     }
+
+  private def shardHashFromFilters(filters: Seq[ColumnFilter], shardColumns: Seq[String]): Option[Int] = {
+    val shardColValues = shardColumns.map { shardCol =>
+      // So to compute the shard hash we need shardCol == value filter (exact equals) for each shardColumn
+      filters.find(f => f.column == shardCol) match {
+        case Some(ColumnFilter(_, Filter.Equals(filtVal: String))) => filtVal
+        case Some(ColumnFilter(_, filter)) =>
+          logger.debug(s"Found filter for shard column $shardCol but $filter cannot be used for shard key routing")
+          return None
+        case _ =>
+          logger.debug(s"Could not find filter for shard key column $shardCol, shard key hashing disabled")
+          return None
+      }
+    }
+    logger.debug(s"For shardColumns $shardColumns, extracted filter values $shardColValues successfully")
+    Some(ShardKeyGenerator.shardKeyHash(shardColValues))
+  }
 
   /**
    * Performs a scatter gather of a request to different NodeCoordinator's,

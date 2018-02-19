@@ -6,25 +6,29 @@ import akka.actor.{Actor, Props}
 import akka.util.Timeout
 import org.scalatest.concurrent.ScalaFutures
 
-import filodb.coordinator.{ActorSpecConfig, ActorTest, FilodbCluster}
+import filodb.coordinator._
 import filodb.coordinator.client.QueryCommands
 import filodb.core.MachineMetricsData
-import filodb.core.query.ExecPlan
+import filodb.core.metadata.DatasetOptions
+import filodb.core.query.{ColumnFilter, ExecPlan, Filter}
 import filodb.core.store._
 
 object DistributeSpec extends ActorSpecConfig
 
-// This is really an end to end ingestion test, it's what a client talking to a FiloDB node would do
+/**
+ * A test for DistributeConcat as well as various sharding / shard key hashing logic to do with distribution
+ */
 class DistributeSpec extends ActorTest(DistributeSpec.getNewSystem) with ScalaFutures {
   import MachineMetricsData._
   import monix.execution.Scheduler.Implicits.global
+  import QueryCommands._
 
   implicit val askTimeout = Timeout(5.seconds)
 
   val fakeNode = system.actorOf(Props(new Actor {
     def receive = {
-      case e: QueryCommands.ExecPlanQuery =>
-        sender() ! QueryCommands.QueryError(10L, new RuntimeException("foo"))
+      case e: ExecPlanQuery =>
+        sender() ! QueryError(10L, new RuntimeException("foo"))
     }
   }))
 
@@ -38,6 +42,52 @@ class DistributeSpec extends ActorTest(DistributeSpec.getNewSystem) with ScalaFu
       val exc = Engine.execute(plan, dataset1, memStore, 100).runAsync.failed.futureValue
       exc shouldBe a[ChildQueryError]
       exc.asInstanceOf[ChildQueryError].source shouldEqual fakeNode
+    }
+  }
+
+  describe("validatePartQuery / shard key hashing") {
+    val mapper = new ShardMapper(16)
+    (0 to 15).foreach { i => mapper.updateFromEvent(IngestionStarted(dataset1.ref, i, fakeNode)) }
+
+    val datasetWithShardCols = dataset1.copy(options = DatasetOptions.DefaultOptions.copy(
+                                 shardKeyColumns = Seq("__name__", "job")))
+    val options = QueryOptions(shardKeySpread = 1)
+
+    it("should route to just a few shards if all filters matching and shard key columns defined") {
+      val filters = Seq(ColumnFilter("__name__", Filter.Equals("jvm_heap_used")),
+                        ColumnFilter("job",      Filter.Equals("prometheus")))
+      val resp = Utils.validatePartQuery(datasetWithShardCols, mapper,
+                                         FilteredPartitionQuery(filters), options)
+      resp.isGood shouldEqual true
+      resp.get should have length (2)
+      resp.get.map(_.shard) shouldEqual Seq(14, 15)
+
+      val resp2 = Utils.validatePartQuery(datasetWithShardCols, mapper,
+                                         FilteredPartitionQuery(filters), options.copy(shardKeySpread = 2))
+      resp2.isGood shouldEqual true
+      resp2.get.map(_.shard) shouldEqual (12 to 15)
+    }
+
+    it("should route to all shards if not all filters matching for all shard key columns") {
+      val filters = Seq(ColumnFilter("__name__", Filter.Equals("jvm_heap_used")),
+                        ColumnFilter("jehovah",  Filter.Equals("prometheus")))
+      val resp = Utils.validatePartQuery(datasetWithShardCols, mapper,
+                                         FilteredPartitionQuery(filters), options)
+      resp.get.map(_.shard) shouldEqual (0 to 15)
+
+      val filters2 = Seq(ColumnFilter("__name__", Filter.Equals("jvm_heap_used")),
+                         ColumnFilter("job",      Filter.In(Set("prometheus"))))
+      val resp2 = Utils.validatePartQuery(datasetWithShardCols, mapper,
+                                         FilteredPartitionQuery(filters2), options)
+      resp2.get.map(_.shard) shouldEqual (0 to 15)
+    }
+
+    it("should route to all shards if dataset does not define shard key columns") {
+      val filters = Seq(ColumnFilter("__name__", Filter.Equals("jvm_heap_used")),
+                        ColumnFilter("job",      Filter.Equals("prometheus")))
+      val resp = Utils.validatePartQuery(dataset1, mapper,
+                                         FilteredPartitionQuery(filters), options)
+      resp.get.map(_.shard) shouldEqual (0 to 15)
     }
   }
 }

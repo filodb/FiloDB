@@ -19,7 +19,7 @@ import filodb.coordinator._
 import filodb.coordinator.client.ClientException
 import filodb.core._
 import filodb.core.memstore.{IngestRecord, IngestRouting}
-import filodb.core.metadata.{Column, Dataset, DatasetOptions}
+import filodb.core.metadata.{Column, Dataset}
 import filodb.memory.format.RowReader
 
 package spark {
@@ -37,8 +37,7 @@ package spark {
    * @param resetSchema if true, allows dataset schema (eg partition keys) to be reset when overwriting
    *          an existing dataset
    */
-  case class IngestionOptions(chunkSize: Option[Int] = None,
-                              writeTimeout: FiniteDuration = DefaultWriteTimeout,
+  case class IngestionOptions(writeTimeout: FiniteDuration = DefaultWriteTimeout,
                               flushAfterInsert: Boolean = true,
                               resetSchema: Boolean = false)
 
@@ -187,15 +186,12 @@ package object spark extends StrictLogging {
   private[spark] def makeAndVerifyDataset(datasetRef: DatasetRef,
                                           rowKeys: Seq[String],
                                           partitionColumns: Seq[String],
-                                          chunkSize: Option[Int],
                                           dfColumns: Seq[String]): Dataset = {
-    val options = DatasetOptions.DefaultOptions
-    val options2 = chunkSize.map { newSize => options.copy(chunkSize = newSize) }.getOrElse(options)
     val partColNames = partitionColumns.map(_.split(':')(0)).toSet
     val dataColumns = dfColumns.filterNot(partColNames contains _.split(':')(0))
     sparkLogger.info(s"Creating dataset $datasetRef with partition columns $partitionColumns, " +
                      s"data columns $dataColumns, row keys $rowKeys")
-    Dataset(datasetRef.dataset, partitionColumns, dataColumns, rowKeys).copy(options = options2)
+    Dataset(datasetRef.dataset, partitionColumns, dataColumns, rowKeys)
   }
 
   private[spark] def createNewDataset(dataset: Dataset, database: Option[String]): Unit = {

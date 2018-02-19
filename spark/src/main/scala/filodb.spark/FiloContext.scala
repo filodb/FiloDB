@@ -48,7 +48,6 @@ class FiloContext(val sqlContext: SQLContext) extends AnyVal {
                                            dataset: DatasetRef,
                                            rowKeys: Seq[String],
                                            partitionColumns: Seq[String],
-                                           chunkSize: Option[Int] = None,
                                            resetSchema: Boolean = false,
                                            mode: SaveMode = SaveMode.Append): Unit = {
     FiloDriver.init(sqlContext.sparkContext)
@@ -61,12 +60,12 @@ class FiloContext(val sqlContext: SQLContext) extends AnyVal {
     }
     (datasetObj, mode) match {
       case (None, SaveMode.Append) | (None, SaveMode.Overwrite) | (None, SaveMode.ErrorIfExists) =>
-        val ds = makeAndVerifyDataset(dataset, rowKeys, partitionColumns, chunkSize, dfColumns)
+        val ds = makeAndVerifyDataset(dataset, rowKeys, partitionColumns, dfColumns)
         createNewDataset(ds, dataset.database)
       case (Some(dsObj), SaveMode.ErrorIfExists) =>
         throw new RuntimeException(s"Dataset $dataset already exists!")
       case (Some(dsObj), SaveMode.Overwrite) if resetSchema =>
-        val ds = makeAndVerifyDataset(dataset, rowKeys, partitionColumns, chunkSize, dfColumns)
+        val ds = makeAndVerifyDataset(dataset, rowKeys, partitionColumns, dfColumns)
         parse(FiloDriver.metaStore.deleteDataset(dataset)) { x => x }
         createNewDataset(ds, dataset.database)
       case (_, _) =>
@@ -106,10 +105,9 @@ class FiloContext(val sqlContext: SQLContext) extends AnyVal {
                  database: Option[String] = None,
                  mode: SaveMode = SaveMode.Append,
                  options: IngestionOptions = IngestionOptions()): Unit = {
-    val IngestionOptions(chunkSize, writeTimeout,
-                         flushAfterInsert, resetSchema) = options
+    val IngestionOptions(writeTimeout, flushAfterInsert, resetSchema) = options
     val ref = DatasetRef(dataset, database)
-    createOrUpdateDataset(df.schema, ref, rowKeys, partitionColumns, chunkSize, resetSchema, mode)
+    createOrUpdateDataset(df.schema, ref, rowKeys, partitionColumns, resetSchema, mode)
     insertIntoFilo(df, dataset, mode == SaveMode.Overwrite,
                    database, writeTimeout, flushAfterInsert)
   }

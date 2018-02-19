@@ -68,9 +68,9 @@ trait ChunkSink {
  * Stats for a ChunkSink
  */
 class ChunkSinkStats {
-  private val numChunkWriteCalls = Kamon.metrics.counter("chunk-write-calls-num")
   private val chunksPerCallHist  = Kamon.metrics.histogram("chunks-per-call")
   private val chunkBytesHist     = Kamon.metrics.histogram("chunk-bytes-per-call")
+  private val chunkLenHist       = Kamon.metrics.histogram("chunk-length")
 
   private val numIndexWriteCalls = Kamon.metrics.counter("index-write-calls-num")
   private val indexBytesHist     = Kamon.metrics.histogram("index-bytes-per-call")
@@ -78,10 +78,10 @@ class ChunkSinkStats {
   private val chunksetWrites     = Kamon.metrics.counter("chunkset-writes")
   var chunksetsWritten = 0
 
-  def addChunkWriteStats(numChunks: Int, totalChunkBytes: Long): Unit = {
-    numChunkWriteCalls.increment
+  def addChunkWriteStats(numChunks: Int, totalChunkBytes: Long, chunkLen: Int): Unit = {
     chunksPerCallHist.record(numChunks)
     chunkBytesHist.record(totalChunkBytes)
+    chunkLenHist.record(chunkLen)
   }
 
   def addIndexWriteStats(totalIndexBytes: Long): Unit = {
@@ -109,7 +109,7 @@ class NullColumnStore(implicit sched: Scheduler) extends ColumnStore with Strict
   def write(dataset: Dataset, chunksets: Observable[ChunkSet]): Future[Response] = {
     chunksets.foreach { chunkset =>
       val totalBytes = chunkset.chunks.map(_._2.limit).sum
-      sinkStats.addChunkWriteStats(chunkset.chunks.length, totalBytes)
+      sinkStats.addChunkWriteStats(chunkset.chunks.length, totalBytes, chunkset.info.numRows)
       sinkStats.chunksetWrite()
       logger.debug(s"NullColumnStore: [${chunkset.partition}] ${chunkset.info}  ${chunkset.chunks.length} " +
                    s"chunks with $totalBytes bytes")

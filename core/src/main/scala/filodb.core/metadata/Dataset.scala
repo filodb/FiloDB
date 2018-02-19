@@ -3,6 +3,7 @@ package filodb.core.metadata
 import scala.collection.JavaConverters._
 
 import com.typesafe.config.{Config, ConfigFactory, ConfigRenderOptions}
+import net.ceedubs.ficus.Ficus._
 import org.scalactic._
 
 import filodb.core._
@@ -99,22 +100,23 @@ final case class Dataset(name: String,
   /** Returns a compact String for easy serialization */
   def asCompactString: String =
       Seq(database.getOrElse(""),
-        name,
-        partitionColumns.map(_.toString).mkString(":"),
-        dataColumns.map(_.toString).mkString(":"),
-        rowKeyIDs.mkString(":")).mkString("\u0001")
+          name,
+          partitionColumns.map(_.toString).mkString(":"),
+          dataColumns.map(_.toString).mkString(":"),
+          rowKeyIDs.mkString(":"),
+          options.toString).mkString("\u0001")
 }
 
 /**
  * Config options for a table define operational details for the column store and memtable.
  * Every option must have a default!
  */
-case class DatasetOptions(chunkSize: Int,
+case class DatasetOptions(shardKeyColumns: Seq[String],
                           metricColumn: String,
                           valueColumn: String) {
   override def toString: String = {
     val map: Map[String, Any] = Map(
-                   "chunkSize" -> chunkSize,
+                   "shardKeyColumns" -> shardKeyColumns.asJava,
                    "metricColumn" -> metricColumn,
                    "valueColumn" -> valueColumn)
     val config = ConfigFactory.parseMap(map.asJava)
@@ -123,7 +125,7 @@ case class DatasetOptions(chunkSize: Int,
 }
 
 object DatasetOptions {
-  val DefaultOptions = DatasetOptions(chunkSize = 5000,
+  val DefaultOptions = DatasetOptions(shardKeyColumns = Nil,
                                       metricColumn = "__name__",
                                       valueColumn = "value")
   val DefaultOptionsConfig = ConfigFactory.parseString(DefaultOptions.toString)
@@ -132,7 +134,7 @@ object DatasetOptions {
     fromConfig(ConfigFactory.parseString(s).withFallback(DefaultOptionsConfig))
 
   def fromConfig(config: Config): DatasetOptions =
-    DatasetOptions(chunkSize = config.getInt("chunkSize"),
+    DatasetOptions(shardKeyColumns = config.as[Seq[String]]("shardKeyColumns"),
                    metricColumn = config.getString("metricColumn"),
                    valueColumn = config.getString("valueColumn"))
 }
@@ -145,12 +147,13 @@ object Dataset {
    * Re-creates a Dataset from the output of `asCompactString`
    */
   def fromCompactString(compactStr: String): Dataset = {
-    val Array(database, name, partColStr, dataColStr, rowKeyIndices) = compactStr.split('\u0001')
+    val Array(database, name, partColStr, dataColStr, rowKeyIndices, optStr) = compactStr.split('\u0001')
     val partitionColumns = partColStr.split(':').toSeq.map(raw => DataColumn.fromString(raw))
     val dataColumns = dataColStr.split(':').toSeq.map(raw => DataColumn.fromString(raw))
     val rowKeyIDs = rowKeyIndices.split(':').toSeq.map(_.toInt)
     val databaseOption = if (database == "") None else Some(database)
-    Dataset(name, partitionColumns, dataColumns, rowKeyIDs, databaseOption)
+    val options = DatasetOptions.fromString(optStr)
+    Dataset(name, partitionColumns, dataColumns, rowKeyIDs, databaseOption, options)
   }
 
   /**

@@ -12,7 +12,7 @@ import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
 
-import filodb.core.{DataDropped, DatasetRef, ErrorResponse, Response, Success}
+import filodb.core._
 import filodb.core.Types.PartitionKey
 import filodb.core.metadata.Dataset
 import filodb.core.query.PartitionKeyIndex
@@ -216,10 +216,7 @@ class TimeSeriesShard(dataset: Dataset, config: Config, val shardNum: Int, sink:
       case true =>
         // even though there were no records for the chunkset, we want to write checkpoint anyway
         // since we should not resume from earlier checkpoint for the group
-        if (flushGroup.flushWatermark > 0) // negative checkpoints are refused by Kafka
-          Task.fromFuture(commitCheckpoint(dataset.ref, shardNum, flushGroup))
-        else
-          Task { Success }
+        Task.fromFuture(commitCheckpoint(dataset.ref, shardNum, flushGroup))
     }
     taskToReturn.runOnComplete(_ => tracer.finish())
     taskToReturn
@@ -255,6 +252,8 @@ class TimeSeriesShard(dataset: Dataset, config: Config, val shardNum: Int, sink:
     // Sorry - need to drop the data to keep the ingestion moving
     val taskFuture = Future.sequence(Seq(writeChunksFuture, writePartKeyFuture)).flatMap {
       case Seq(Success, Success)     => commitCheckpoint(dataset.ref, shardNum, flushGroup)
+      // No chunks written but partition keys flushed.  This is possible too.
+      case Seq(NotApplied, Success)  => commitCheckpoint(dataset.ref, shardNum, flushGroup)
       case Seq(er: ErrorResponse, _) => Future.successful(er)
       case Seq(_, er: ErrorResponse) => Future.successful(er)
     }.map { case resp =>
@@ -267,26 +266,30 @@ class TimeSeriesShard(dataset: Dataset, config: Config, val shardNum: Int, sink:
     Task.fromFuture(taskFuture)
   }
 
-  private def commitCheckpoint(ref: DatasetRef, shardNum: Int, flushGroup: FlushGroup): Future[Response] = {
-    val fut = metastore.writeCheckpoint(ref, shardNum, flushGroup.groupNum, flushGroup.flushWatermark).map { r =>
-      shardStats.flushesSuccessful.increment
-      r
-    }.recover { case e =>
-      logger.error("Critical! Checkpoint persistence skipped", e)
-      shardStats.flushesFailedOther.increment
-      // skip the checkpoint write
-      // Sorry - need to skip to keep the ingestion moving
-      DataDropped
+  private def commitCheckpoint(ref: DatasetRef, shardNum: Int, flushGroup: FlushGroup): Future[Response] =
+    // negative checkpoints are refused by Kafka, and also offsets should be positive
+    if (flushGroup.flushWatermark > 0) {
+      val fut = metastore.writeCheckpoint(ref, shardNum, flushGroup.groupNum, flushGroup.flushWatermark).map { r =>
+        shardStats.flushesSuccessful.increment
+        r
+      }.recover { case e =>
+        logger.error("Critical! Checkpoint persistence skipped", e)
+        shardStats.flushesFailedOther.increment
+        // skip the checkpoint write
+        // Sorry - need to skip to keep the ingestion moving
+        DataDropped
+      }
+      // Update stats
+      if (_offset >= 0) shardStats.offsetLatestInMem.record(_offset)
+      groupWatermark(flushGroup.groupNum) = flushGroup.flushWatermark
+      val maxWatermark = groupWatermark.max
+      val minWatermark = groupWatermark.min
+      if (maxWatermark >= 0) shardStats.offsetLatestFlushed.record(maxWatermark)
+      if (minWatermark >= 0) shardStats.offsetEarliestFlushed.record(minWatermark)
+      fut
+    } else {
+      Future.successful(NotApplied)
     }
-    // Update stats
-    if (_offset >= 0) shardStats.offsetLatestInMem.record(_offset)
-    groupWatermark(flushGroup.groupNum) = flushGroup.flushWatermark
-    val maxWatermark = groupWatermark.max
-    val minWatermark = groupWatermark.min
-    if (maxWatermark >= 0) shardStats.offsetLatestFlushed.record(maxWatermark)
-    if (minWatermark >= 0) shardStats.offsetEarliestFlushed.record(minWatermark)
-    fut
-  }
 
   // Creates a new TimeSeriesPartition, updating indexes
   // NOTE: it's important to use an actual BinaryRecord instead of just a RowReader in the internal

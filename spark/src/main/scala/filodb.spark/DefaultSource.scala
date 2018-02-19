@@ -35,7 +35,6 @@ class DefaultSource extends RelationProvider with CreatableRelationProvider {
    *   database         defaults to filodb.cassandra.keyspace
    *   row_keys         comma-separated list of row keys
    *   partition_columns comma-separated list of partition column name:type pairs
-   *   chunk_size       defaults to 5000
    *   flush_after_write  defaults to true
    *   reset_schema     defaults to false
    */
@@ -48,11 +47,10 @@ class DefaultSource extends RelationProvider with CreatableRelationProvider {
     val database = parameters.get("database")
     val rowKeys = parameters.get("row_keys").map(_.split(',').toSeq).getOrElse(Nil)
     val partitionCols = parameters.get("partition_columns").get.split(',').toSeq
-    val chunkSize = parameters.get("chunk_size").map(_.toInt)
     val flushAfter = parameters.get("flush_after_write").map(_.toBoolean).getOrElse(true)
     val resetSchema = parameters.get("reset_schema").map(_.toBoolean).getOrElse(false)
 
-    val options = IngestionOptions(chunkSize, flushAfterInsert = flushAfter,
+    val options = IngestionOptions(flushAfterInsert = flushAfter,
                                    resetSchema = resetSchema)
     sqlContext.saveAsFilo(data, dataset, rowKeys, partitionCols, database, mode, options)
 

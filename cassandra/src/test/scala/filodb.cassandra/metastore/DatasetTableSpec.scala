@@ -9,7 +9,7 @@ import org.scalatest.concurrent.PatienceConfiguration.Timeout
 
 import filodb.cassandra.{AsyncTest, DefaultFiloSessionProvider}
 import filodb.core._
-import filodb.core.metadata.Dataset
+import filodb.core.metadata.{Dataset, DatasetOptions}
 
 class DatasetTableSpec extends FlatSpec with AsyncTest {
   import scala.concurrent.ExecutionContext.Implicits.global
@@ -66,7 +66,8 @@ class DatasetTableSpec extends FlatSpec with AsyncTest {
 
   it should "return the Dataset if it exists" in {
     val barDataset = Dataset("bar", Seq("seg:int"), Seq("timestamp:long", "min:double", "max:double"))
-                       .copy(database = Some("funky_ks"))
+                       .copy(database = Some("funky_ks"),
+                             options = DatasetOptions.DefaultOptions.copy(shardKeyColumns = Seq("job", "metric")))
     datasetTable.createNewDataset(barDataset).futureValue(timeout) should equal (Success)
 
     whenReady(datasetTable.getDataset(barDataset.ref),timeout) { dataset =>
