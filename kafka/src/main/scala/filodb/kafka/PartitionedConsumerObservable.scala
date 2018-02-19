@@ -16,26 +16,26 @@ object PartitionedConsumerObservable extends StrictLogging {
 
   /** Creates a `KafkaConsumerObservable` instance.
     *
-    * @param settings the `KafkaSettings` needed for initializing the consumer
+    * @param sourceConfig the `SourceConfig` needed for initializing the consumer
     * @param topicPartition the Kafka ingestion topic-partition(s) to assign the new consumer to
     * @param offset Some(longOffset) to seek to a certain offset when the consumer starts
     */
-  def create(settings: KafkaSettings,
+  def create(sourceConfig: SourceConfig,
              topicPartition: TopicPartition,
              offset: Option[Long]): KafkaConsumerObservable[JLong, Any] = {
 
-    val consumer = createConsumer(settings, topicPartition, offset)
-    val cfg = consumerConfig(settings)
+    val consumer = createConsumer(sourceConfig, topicPartition, offset)
+    val cfg = consumerConfig(sourceConfig)
 
     KafkaConsumerObservable[JLong, Any](cfg, consumer)
   }
 
-  private[filodb] def createConsumer(settings: KafkaSettings,
+  private[filodb] def createConsumer(sourceConfig: SourceConfig,
                                      topicPartition: TopicPartition,
                                      offset: Option[Long]): Task[KafkaConsumer[JLong, Any]] =
     Task {
-      val props = settings.sourceConfig.asProps
-      logger.info(s"\nConsumer properties:\n${props.entrySet.asScala.mkString("\n")}\n")
+      val props = sourceConfig.asProps
+      if (sourceConfig.LogConfig) logger.info(s"Consumer properties: $props")
 
       blocking {
         val consumer = new KafkaConsumer(props)
@@ -45,8 +45,8 @@ object PartitionedConsumerObservable extends StrictLogging {
       }
     }
 
-  private[filodb] def consumerConfig(settings: KafkaSettings) =
-    KafkaConsumerConfig(settings.sourceConfig.asConfig)
+  private[filodb] def consumerConfig(sourceConfig: SourceConfig) =
+    KafkaConsumerConfig(sourceConfig.asConfig)
 
 }
 
@@ -54,16 +54,16 @@ object PartitionedProducerSink {
 
   /** Convenience function for creating a Monix producer:
     * {{{
-    *     val producer = PartitionedProducer.create[K, V](settings, scheduler)
+    *     val producer = PartitionedProducer.create[K, V](sinkConfig, scheduler)
     * }}}
     *
-    * @param settings the kafka settings
+    * @param sinkConfig the kafka settings
     *
     * @param io the monix scheduler
     */
-  def create[K, V](settings: KafkaSettings, io: Scheduler)
+  def create[K, V](sinkConfig: SinkConfig, io: Scheduler)
                   (implicit K: Serializer[K], V: Serializer[V]): KafkaProducerSink[K, V] = {
-    val cfg = KafkaProducerConfig(settings.sinkConfig.asConfig)
+    val cfg = KafkaProducerConfig(sinkConfig.asConfig)
     KafkaProducerSink[K, V](cfg, io)
   }
 }

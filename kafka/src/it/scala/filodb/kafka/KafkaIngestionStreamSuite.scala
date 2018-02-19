@@ -14,8 +14,8 @@ import monix.reactive.Observable
 import org.apache.kafka.clients.producer.ProducerRecord
 
 import filodb.coordinator.IngestionStreamFactory
-import filodb.coordinator.client.IngestionCommands.DatasetSetup
 import filodb.coordinator.NodeClusterActor.IngestionSource
+import filodb.coordinator.client.IngestionCommands.DatasetSetup
 import filodb.core.memstore.{IngestRecord, IngestRouting, TimeSeriesMemStore}
 import filodb.core.metadata.Dataset
 import filodb.core.store.{InMemoryMetaStore, NullColumnStore}
@@ -25,7 +25,7 @@ import filodb.memory.format.ArrayStringRowReader
   * 2. Start Kafka (tested with Kafka 0.10.2.1 and 0.11)
   * 3. Create a new topic
   *   ./bin/kafka-topics.sh --create --zookeeper localhost:2181 --replication-factor 1 \
-  *              --partitions 2 --topic integration-test-topic
+  *              --partitions 2 --topic integration-test-topic2
   *    Make sure the configured settings for number of partitions and topic name below match what you created.
   * 4. Run test either from Intellij or SBT:
   *    > kafka/it:testOnly filodb.kafka.KafkaIngestionStreamSuite
@@ -56,21 +56,24 @@ class KafkaIngestionStreamSuite extends KafkaSpec with StrictLogging {
 
   "KafkaIngestionStreamFactory" must {
     s"consume messages from $numPartitions partitions" in {
-      val sourceConfig = ConfigFactory.parseString(
+      val config = ConfigFactory.parseString(
         s"""
            |include file("./src/test/resources/sourceconfig.conf")
            |sourceconfig {
            |  filo-topic-name = "integration-test-topic"
+           |  # consumer:
            |  filo-record-converter = "${classOf[PartitionRecordConverter].getName}"
-           |  filo-log-consumer-config = true
-           |  bootstrap.servers = "localhost:9092"
-           |  value.serializer = "org.example.CustomSerializer"
+           |  filo-log-config = true
            |  value.deserializer = "org.example.CustomDeserializer"
+           |  # producer:
+           |  value.serializer = "org.example.CustomSerializer"
            |  partitioner.class = "${classOf[LongKeyPartitionStrategy].getName}"
            |}
         """.stripMargin)
-      val settings = new KafkaSettings(sourceConfig)
-      val producer = PartitionedProducerSink.create[JLong, String](settings, io)
+      val sinkConfig = new SinkConfig(config)
+      val producer = PartitionedProducerSink.create[JLong, String](sinkConfig, io)
+
+      var read = 0
 
       val tasks = for (partition <- 0 until numPartitions) yield {
 
@@ -83,18 +86,17 @@ class KafkaIngestionStreamSuite extends KafkaSpec with StrictLogging {
           val streamFactory = ctor.newInstance().asInstanceOf[IngestionStreamFactory]
           streamFactory.isInstanceOf[KafkaIngestionStreamFactory] shouldEqual true
           val stream = streamFactory
-            .create(sourceConfig, dataset, partition, None)
+            .create(config, dataset, partition, None)
             .get
+            .map { m => read +=1; m }
             .take(count)
 
           Task.fromFuture(memStore.ingestStream(dataset.ref, partition, stream) { err => throw err })
         }
-        Thread.sleep(1000) // so that the consumers start fully before the producers begin
 
-        // now start producers
         // The producer task creates `count` ProducerRecords, each range divided equally between the topic's partitions
         val sinkT = Observable.range(0, count)
-          .map(msg => new ProducerRecord[JLong, String](settings.IngestionTopic,
+          .map(msg => new ProducerRecord[JLong, String](sinkConfig.IngestionTopic,
                                                         JLong.valueOf(partition),
                                                         msg.toString))
           .bufferIntrospective(1024)
@@ -104,6 +106,8 @@ class KafkaIngestionStreamSuite extends KafkaSpec with StrictLogging {
       }
 
       tasks foreach { task => Await.result(task, 60.seconds) }
+
+      read should be > (count)
     }
   }
 }

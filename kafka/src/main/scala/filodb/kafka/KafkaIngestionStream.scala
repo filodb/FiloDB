@@ -21,19 +21,19 @@ class KafkaIngestionStream(config: Config,
                            shard: Int,
                            offset: Option[Long]) extends IngestionStream with StrictLogging {
 
-  protected val settings = new KafkaSettings(config)
-  import settings._
+  protected val sc = new SourceConfig(config, shard)
+  import sc._
 
   private val converter = RecordConverter(RecordConverterClass, dataset)
   private val tp = new TopicPartition(IngestionTopic, shard)
 
   logger.info(s"Creating consumer assigned to topic ${tp.topic} partition ${tp.partition} offset $offset")
-  protected val consumer = PartitionedConsumerObservable.create(settings, tp, offset)
+  private val consumer = PartitionedConsumerObservable.create(sc, tp, offset)
 
   /**
    * Returns a reactive Observable stream of IngestRecord sequences from Kafka.
    * NOTE: the scheduler used makes a huge difference.
-   * The IO scheduler allows all the Kafka partiton inits to happen at beginning,
+   * The IO scheduler allows all the Kafka partition inits to happen at beginning,
    *   & allows lots of simultaneous streams to stream efficiently.
    * The global scheduler allows parallel stream init, multiple streams to consume in parallel, but REALLY slowly
    * The computation() sched seems to behave like a round robin: it seems to take turns pulling from only

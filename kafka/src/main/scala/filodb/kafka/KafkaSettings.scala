@@ -1,5 +1,7 @@
 package filodb.kafka
 
+import java.util.{Properties => JProperties}
+
 import scala.collection.JavaConverters._
 import scala.concurrent.duration._
 import scala.util.Try
@@ -14,25 +16,37 @@ import org.apache.kafka.common.config.SslConfigs
 
 import filodb.coordinator.GlobalConfig
 
-/**
-  * Global settings for FiloDB Kafka overall, not tied to individual sources
-  */
-object KafkaSettings {
+class SourceConfig(conf: Config, shard: Int)
+  extends KafkaSettings(conf, ConsumerConfig.configNames.asScala.toSet) {
 
-  val moduleConfig = GlobalConfig.systemConfig.getConfig("filodb.kafka-module")
+  import ConsumerConfig._
 
-  val EnableFailureChannel = moduleConfig.getBoolean("failures.channel-enabled")
-  val FailureTopic: String = moduleConfig.getString("failures.topic")
+  require(resolved.hasPath("filo-record-converter"),
+    "'record-converter' must not be empty. Configure a custom converter.")
 
-  val ConnectedTimeout = moduleConfig.as[FiniteDuration]("tasks.lifecycle.connect-timeout")
-  val StatusTimeout = moduleConfig.as[FiniteDuration]("tasks.status-timeout")
-  lazy val StatusLogInterval = moduleConfig.as[FiniteDuration]("tasks.status.log-interval")
-  lazy val PublishTimeout = moduleConfig.as[FiniteDuration]("tasks.publish-timeout")
+  val RecordConverterClass = resolved.as[String]("filo-record-converter")
 
-  val GracefulStopTimeout = Duration(moduleConfig.getDuration(
-    "tasks.lifecycle.shutdown-timeout", SECONDS), SECONDS)
+  val AutoOffsetReset = resolved.as[Option[String]](AUTO_OFFSET_RESET_CONFIG).getOrElse("latest")
 
+  val EnableAutoCommit = resolved.as[Option[Boolean]](ENABLE_AUTO_COMMIT_CONFIG).getOrElse(false)
+
+  val GroupId = {
+    val id = resolved.as[Option[String]](GROUP_ID_CONFIG).getOrElse("filodb.consumer")
+    s"$id$shard"
+  }
+
+  override def config: Map[String, AnyRef] = {
+    val defaults = Map(
+      GROUP_ID_CONFIG -> GroupId,
+      AUTO_OFFSET_RESET_CONFIG -> AutoOffsetReset,
+      ENABLE_AUTO_COMMIT_CONFIG -> EnableAutoCommit.toString)
+
+     defaults ++ super.config.filterNot { case (k, _) =>
+       k == GROUP_ID_CONFIG || k == AUTO_OFFSET_RESET_CONFIG || k == ENABLE_AUTO_COMMIT_CONFIG }
+  }
 }
+
+class SinkConfig(conf: Config) extends KafkaSettings(conf, ProducerConfig.configNames.asScala.toSet)
 
 /** Kafka config class wrapping the user-supplied source configuration
   * when they start a Kafka stream using the filo-cli.
@@ -44,46 +58,42 @@ object KafkaSettings {
   * this property file cannot have a namespace.
   *
   * Required User Configurations:
+  * `filo-topic-name` the kafka topic to consume from.
   *
-  * `filo-kafka-servers` the kafka cluster hosts to use. If none provided,
+  * `bootstrap.servers` the kafka cluster hosts to use. If none provided,
   * defaults to localhost:9092
   *
   * `record-converter` the converter used to convert the event to a filodb row source.
   * A custom event type converter or one of the primitive
   * type filodb.kafka.*Converter
   */
-final class KafkaSettings(conf: Config) extends StrictLogging {
+class KafkaSettings(conf: Config, keys: Set[String]) extends StrictLogging {
 
-  val config = {
-    val resolved = conf.resolve
-    val sourceconfig = if (resolved.hasPath("sourceconfig")) resolved.as[Config]("sourceconfig") else resolved
-    sourceconfig.withFallback(GlobalConfig.systemConfig.as[Config]("filodb.kafka")).resolve
+  protected val resolved = {
+    val resolvedConfig = conf.resolve
+    if (resolvedConfig.hasPath("sourceconfig")) resolvedConfig.as[Config]("sourceconfig")
+    else resolvedConfig
   }
 
-  require(config.hasPath("filo-topic-name"),
-    "'filo-topic-name' must not be empty. Configure an ingestion topic.")
-
-  require(config.hasPath("filo-record-converter"),
-    "'record-converter' must not be empty. Configure a custom converter.")
-
-  val IngestionTopic = config.as[String]("filo-topic-name")
-
-  val RecordConverterClass = config.as[String]("filo-record-converter")
+  val IngestionTopic = {
+    require(resolved.hasPath("filo-topic-name"), "'filo-topic-name' must not be empty. Configure an ingestion topic.")
+    resolved.as[String]("filo-topic-name")
+  }
 
   /** Optionally log consumer configuration on load. Defaults to false.
+    * Helpful for debugging configuration on load issues.
+    *
     * {{{
-    *   sourceconfig {
-    *     log-consumer-config = true
-    *   }
+    *   sourceconfig.log-config = true
     * }}}
     */
-  val LogConsumerConfig = config.as[Option[Boolean]]("filo-log-consumer-config").getOrElse(false)
+  val LogConfig = resolved.as[Option[Boolean]]("filo-log-config").getOrElse(false)
 
   /** Contains configurations including common for the two client types: producer, consumer,
     * if configured. E.g. bootstrap.servers, client.id - Kafka does not namespace these.
     */
   val kafkaConfig: Map[String, AnyRef] =
-    config
+    resolved
       .flattenToMap
       .filterNot { case (k, _) => k.startsWith("filo-") || k.startsWith("akka.") }
 
@@ -93,39 +103,6 @@ final class KafkaSettings(conf: Config) extends StrictLogging {
     val filter = ConsumerConfig.configNames.asScala ++ ProducerConfig.configNames.asScala
     kafkaConfig.filterKeys(k => !filter.contains(k))
   }
-
-  /** Bridges the monix config gap with native kafka client properties. */
-  def sourceConfig: Map[String, AnyRef] = {
-    import ConsumerConfig._
-
-    require(kafkaConfig.get(VALUE_DESERIALIZER_CLASS_CONFIG).isDefined,
-      "'value.deserializer' must be configured.")
-    require(kafkaConfig.get(AUTO_OFFSET_RESET_CONFIG).isDefined,
-      "'auto.offset.reset' must be configured.")
-
-    mergedConfig(ConsumerConfig.configNames.asScala.toSet)
-  }
-
-  /** Bridges the monix config gap with native kafka client properties. */
-  def sinkConfig: Map[String, AnyRef] = {
-    import ProducerConfig._
-
-    require(kafkaConfig.get(VALUE_SERIALIZER_CLASS_CONFIG).isDefined,
-      s"'$VALUE_SERIALIZER_CLASS_CONFIG' must be defined.")
-
-    mergedConfig(ProducerConfig.configNames.asScala.toSet)
-  }
-
-  /** The merged configuration into Kafka `ConsumerConfig` or `ProducerConfig`
-    * key-value pairs with all Kafka defaults for settings not provided by the user.
-    */
-  private def mergedConfig(filterFor: Set[String]): Map[String, AnyRef]  = {
-    // avoid: WARN  o.a.k.c.c.ConsumerConfig The configuration 'producer.acks' was supplied but isn't a known config
-    val kafkaClientConfig = kafkaConfig collect { case (k, v) if filterFor contains k => valueTyped((k, v)) }
-
-    customClientConfig ++ kafkaClientConfig
-  }
-
 
   // workaround for monix/kafka List types that should accept comma-separated strings
   private val listTypes = Seq(
@@ -140,5 +117,33 @@ final class KafkaSettings(conf: Config) extends StrictLogging {
       case (k, v) =>
         k -> v.asInstanceOf[AnyRef]
     }
+
+  /** Bridges the monix config gap with native kafka client properties.
+    * The merged configuration into Kafka `ConsumerConfig` or `ProducerConfig`
+    * key-value pairs with all Kafka defaults for settings not provided by the user.
+    */
+  def config: Map[String, AnyRef] = {
+    val kafkaClientConfig = kafkaConfig collect { case (k, v) if keys contains k => valueTyped((k, v)) }
+    customClientConfig ++ kafkaClientConfig
+  }
+
+  /** Used by Monix-Kafka. */
+  def asConfig: Config = config.asConfig
+
+  /** Used by Kafka Consumer. */
+  def asProps: JProperties = config.asProps
+
+}
+
+/** Global settings for FiloDB Kafka overall, not tied to individual sources. */
+object KafkaSettings {
+
+  val moduleConfig = GlobalConfig.systemConfig.as[Config]("filodb.kafka").resolve
+  val EnableFailureChannel = moduleConfig.as[Boolean]("failures.channel-enabled")
+  val FailureTopic: String = moduleConfig.as[String]("failures.topic")
+  val ConnectedTimeout = moduleConfig.as[FiniteDuration]("tasks.lifecycle.connect-timeout")
+  val StatusTimeout = moduleConfig.as[FiniteDuration]("tasks.status-timeout")
+  val GracefulStopTimeout = moduleConfig.as[FiniteDuration]("tasks.lifecycle.shutdown-timeout")
+
 }
 
