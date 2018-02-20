@@ -20,6 +20,7 @@ class SourceConfig(conf: Config, shard: Int)
   extends KafkaSettings(conf, ConsumerConfig.configNames.asScala.toSet) {
 
   import ConsumerConfig._
+  import KafkaSettings.{ConsumerFilters => filterNot}
 
   require(resolved.hasPath("filo-record-converter"),
     "'record-converter' must not be empty. Configure a custom converter.")
@@ -34,15 +35,19 @@ class SourceConfig(conf: Config, shard: Int)
     val id = resolved.as[Option[String]](GROUP_ID_CONFIG).getOrElse("filodb.consumer")
     s"$id$shard"
   }
+  val ClientId = {
+    val id = resolved.as[Option[String]](CLIENT_ID_CONFIG).getOrElse("filodb.client")
+    s"$id$shard"
+  }
 
   override def config: Map[String, AnyRef] = {
     val defaults = Map(
       GROUP_ID_CONFIG -> GroupId,
+      CLIENT_ID_CONFIG -> ClientId,
       AUTO_OFFSET_RESET_CONFIG -> AutoOffsetReset,
       ENABLE_AUTO_COMMIT_CONFIG -> EnableAutoCommit.toString)
 
-     defaults ++ super.config.filterNot { case (k, _) =>
-       k == GROUP_ID_CONFIG || k == AUTO_OFFSET_RESET_CONFIG || k == ENABLE_AUTO_COMMIT_CONFIG }
+     defaults ++ super.config.filterNot { case (k, _) => filterNot contains k }
   }
 }
 
@@ -144,6 +149,11 @@ object KafkaSettings {
   val ConnectedTimeout = moduleConfig.as[FiniteDuration]("tasks.lifecycle.connect-timeout")
   val StatusTimeout = moduleConfig.as[FiniteDuration]("tasks.status-timeout")
   val GracefulStopTimeout = moduleConfig.as[FiniteDuration]("tasks.lifecycle.shutdown-timeout")
+
+  val ConsumerFilters = {
+    import ConsumerConfig._
+    Set(GROUP_ID_CONFIG, CLIENT_ID_CONFIG, AUTO_OFFSET_RESET_CONFIG, ENABLE_AUTO_COMMIT_CONFIG)
+  }
 
 }
 
