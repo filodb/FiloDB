@@ -7,7 +7,7 @@ import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.{ExecutionContext, Future}
 
-import com.datastax.driver.core.{ConsistencyLevel, TokenRange}
+import com.datastax.driver.core.{ConsistencyLevel, Metadata, TokenRange}
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
 import kamon.trace.{TraceContext, Tracer}
@@ -74,6 +74,8 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
     clusterConnector.createKeyspace(chunkTable.keyspace)
     val indexTable = getOrCreateIndexTable(dataset)
     val partitionListTable = getOrCreatePartitionListTable(dataset)
+    // Important: make sure nodes are in agreement before any schema changes
+    clusterMeta.checkSchemaAgreement()
     for { ctResp    <- chunkTable.initialize()
           rmtResp   <- indexTable.initialize()
           pltResp   <- partitionListTable.initialize() } yield pltResp
@@ -84,6 +86,7 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
     val chunkTable = getOrCreateChunkTable(dataset)
     val indexTable = getOrCreateIndexTable(dataset)
     val partitionListTable = getOrCreatePartitionListTable(dataset)
+    clusterMeta.checkSchemaAgreement()
     for { ctResp    <- chunkTable.clearAll()
           rmtResp   <- indexTable.clearAll()
           pltResp   <- partitionListTable.clearAll()  } yield pltResp
@@ -93,6 +96,7 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
     val chunkTable = getOrCreateChunkTable(dataset)
     val indexTable = getOrCreateIndexTable(dataset)
     val partitionListTable = getOrCreatePartitionListTable(dataset)
+    clusterMeta.checkSchemaAgreement()
     for { ctResp    <- chunkTable.drop() if ctResp == Success
           rmtResp   <- indexTable.drop() if rmtResp == Success
           pltResp   <- partitionListTable.drop() if pltResp == Success }
@@ -152,20 +156,21 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
     clusterConnector.shutdown()
   }
 
+  private def clusterMeta: Metadata = clusterConnector.session.getCluster.getMetadata
+
   /**
    * Splits scans of a dataset across multiple token ranges.
    * @param splitsPerNode  - how much parallelism or ways to divide a token range on each node
    * @return each split will have token_start, token_end, replicas filled in
    */
   def getScanSplits(dataset: DatasetRef, splitsPerNode: Int = 1): Seq[ScanSplit] = {
-    val metadata = clusterConnector.session.getCluster.getMetadata
     val keyspace = clusterConnector.keySpaceName(dataset)
     require(splitsPerNode >= 1, s"Must specify at least 1 splits_per_node, got $splitsPerNode")
 
-    val tokenRanges = unwrapTokenRanges(metadata.getTokenRanges.asScala.toSeq)
+    val tokenRanges = unwrapTokenRanges(clusterMeta.getTokenRanges.asScala.toSeq)
     logger.debug(s"unwrapTokenRanges: ${tokenRanges.toString()}")
     val tokensByReplica = tokenRanges.groupBy { tokenRange =>
-      metadata.getReplicas(keyspace, tokenRange)
+      clusterMeta.getReplicas(keyspace, tokenRange)
     }
 
     val tokenRangeGroups: Seq[Seq[TokenRange]] = {
@@ -194,7 +199,7 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
     }
 
     tokenRangeGroups.map { tokenRanges =>
-      val replicas = metadata.getReplicas(keyspace, tokenRanges.head).asScala
+      val replicas = clusterMeta.getReplicas(keyspace, tokenRanges.head).asScala
       CassandraTokenRangeSplit(tokenRanges.map { range => (range.getStart.toString, range.getEnd.toString) },
                                replicas.map(_.getSocketAddress).toSet)
     }
