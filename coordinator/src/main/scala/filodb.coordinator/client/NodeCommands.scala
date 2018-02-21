@@ -32,6 +32,7 @@ object DatasetCommands {
    */
   final case class TruncateDataset(dataset: DatasetRef) extends NodeCommand
   case object DatasetTruncated extends NodeResponse
+  final case class ServerError(errorObject: Any) extends NodeResponse
 }
 
 object MiscCommands {

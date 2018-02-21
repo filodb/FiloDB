@@ -376,13 +376,18 @@ class CassandraPartition(index: ChunkIDPartitionChunkIndex,
                   // scalastyle:on
                     scanner.stats.incrChunkWithNoInfo()
                     None
-                  case reader: MutableChunkSetReader =>
+                  //scalastyle:off
+                  case reader: MutableChunkSetReader if buf != null =>
+                  //scalastyle:on
                     reader.addChunk(pos, dataset.vectorMakers(columnIds(pos))(buf, reader.length))
                     if (reader.isFull) {
                       readers.remove(id)
                       scanner.stats.incrReadChunksets()
                       Some(reader)
                     } else { None }
+                  case reader: MutableChunkSetReader =>
+                    logger.debug(s"Skipping chunk $id due to empty buffer / no data from Cassandra")
+                    None
                 }
               }.collect { case Some(reader) => reader }
   }

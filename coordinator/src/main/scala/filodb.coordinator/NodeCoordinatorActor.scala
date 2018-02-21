@@ -87,8 +87,10 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
   // TODO: move createDataset and truncateDataset into NodeClusterActor.  truncate() needs distributed coord
   private def truncateDataset(originator: ActorRef, dataset: DatasetRef): Unit = {
     try {
-      memStore.truncate(dataset)
-      originator ! DatasetTruncated
+      memStore.truncate(dataset).map {
+        case Success    => originator ! DatasetTruncated
+        case other: Any => originator ! ServerError(other)
+      }
     } catch {
       case e: Exception => originator ! DatasetError(e.getMessage)
     }

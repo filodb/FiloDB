@@ -132,6 +132,7 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
 
         case Some("truncate") =>
           client.truncateDataset(getRef(args), timeout)
+          println(s"Truncated data for ${getRef(args)} with no errors")
 
         case Some("indexnames") =>
           val (remote, ref) = getClientAndRef(args)

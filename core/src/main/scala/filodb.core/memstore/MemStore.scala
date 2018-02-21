@@ -5,7 +5,7 @@ import scala.concurrent.Future
 import monix.execution.{CancelableFuture, Scheduler}
 import monix.reactive.Observable
 
-import filodb.core.{DatasetRef, ErrorResponse}
+import filodb.core.{DatasetRef, ErrorResponse, Response}
 import filodb.core.metadata.{Column, Dataset}
 import filodb.core.metadata.Column.ColumnType._
 import filodb.core.store.{ChunkSink, ChunkSource, MetaStore}
@@ -167,8 +167,9 @@ trait MemStore extends ChunkSource {
   /**
    * WARNING: truncates all the data in the memstore for the given dataset, and also the data
    *          in any underlying ChunkSink too.
+   * @return Success, or some ErrorResponse
    */
-  def truncate(dataset: DatasetRef): Unit
+  def truncate(dataset: DatasetRef): Future[Response]
 
   /**
    * Resets the state of the MemStore. Usually used for testing.

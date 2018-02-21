@@ -10,7 +10,7 @@ import monix.execution.{CancelableFuture, Scheduler}
 import monix.reactive.Observable
 import org.jctools.maps.NonBlockingHashMapLong
 
-import filodb.core.{DatasetRef, Perftools}
+import filodb.core.{DatasetRef, Perftools, Response}
 import filodb.core.Types.PartitionKey
 import filodb.core.metadata.Dataset
 import filodb.core.store._
@@ -153,7 +153,7 @@ extends MemStore with StrictLogging {
     sink.reset()
   }
 
-  def truncate(dataset: DatasetRef): Unit = {
+  def truncate(dataset: DatasetRef): Future[Response] = {
     datasets.get(dataset).foreach(_.values.asScala.foreach(_.reset()))
     sink.truncate(dataset)
   }
