@@ -37,16 +37,13 @@ class KafkaConsumerConfigSpec extends KafkaSpec {
          """.stripMargin), 0)
       source.EnableAutoCommit shouldEqual false
       source.AutoOffsetReset shouldEqual "latest"
-      source.GroupId shouldEqual "filodb.consumer0"
-      source.ClientId shouldEqual "filodb.client0"
+      source.KeyDeserializer shouldEqual classOf[LongDeserializer].getName
       source.asConfig.getString(AUTO_OFFSET_RESET_CONFIG) shouldEqual "latest"
       source.asConfig.getBoolean(ENABLE_AUTO_COMMIT_CONFIG) shouldEqual false
-      source.asConfig.getString(GROUP_ID_CONFIG) shouldEqual "filodb.consumer0"
-      source.asConfig.getString(CLIENT_ID_CONFIG) shouldEqual "filodb.client0"
+      source.asConfig.getString(KEY_DESERIALIZER_CLASS_CONFIG) shouldEqual classOf[LongDeserializer].getName
       source.asProps.getProperty(AUTO_OFFSET_RESET_CONFIG) shouldEqual "latest"
       source.asProps.getProperty(ENABLE_AUTO_COMMIT_CONFIG) shouldEqual "false"
-      source.asProps.getProperty(GROUP_ID_CONFIG) shouldEqual "filodb.consumer0"
-      source.asProps.getProperty(CLIENT_ID_CONFIG) shouldEqual "filodb.client0"
+      source.asProps.getProperty(KEY_DESERIALIZER_CLASS_CONFIG) shouldEqual classOf[LongDeserializer].getName
     }
 
     "have the expected Config" in {
@@ -55,8 +52,8 @@ class KafkaConsumerConfigSpec extends KafkaSpec {
       source.RecordConverterClass shouldEqual classOf[CustomRecordConverter].getName
       source.EnableAutoCommit shouldEqual false
       source.AutoOffsetReset shouldEqual "latest"
-      source.GroupId shouldEqual "org.example.cluster1.consumer2"
       source.LogConfig shouldEqual false
+      source.KeyDeserializer shouldEqual classOf[LongDeserializer].getName
 
       val sourceConfig = source.asConfig
       sourceConfig.getString(KEY_DESERIALIZER_CLASS_CONFIG) shouldEqual classOf[LongDeserializer].getName
@@ -72,8 +69,6 @@ class KafkaConsumerConfigSpec extends KafkaSpec {
       props.getProperty("my.custom.client.namespace") shouldEqual "custom.value"
       props.getProperty(AUTO_OFFSET_RESET_CONFIG) shouldEqual "latest"
       props.getProperty(ENABLE_AUTO_COMMIT_CONFIG) shouldEqual "false"
-      props.getProperty(GROUP_ID_CONFIG) shouldEqual "org.example.cluster1.consumer1"
-      props.getProperty(CLIENT_ID_CONFIG) shouldEqual "org.example.cluster1.client1"
       props.get(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG) shouldEqual "localhost:9092"
       props.get(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG) shouldEqual classOf[LongDeserializer].getName
       props.get(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG) shouldEqual classOf[CustomDeserializer].getName
@@ -85,8 +80,6 @@ class KafkaConsumerConfigSpec extends KafkaSpec {
       consumerCfg.autoOffsetReset.toString.toLowerCase shouldEqual "latest"
       consumerCfg.enableAutoCommit shouldEqual false
       consumerCfg.bootstrapServers should be(List("localhost:9092"))
-      consumerCfg.groupId  shouldEqual "org.example.cluster1.consumer1"
-      consumerCfg.clientId shouldEqual "org.example.cluster1.client1"
     }
   }
 }

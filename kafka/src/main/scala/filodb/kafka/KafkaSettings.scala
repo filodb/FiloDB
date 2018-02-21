@@ -13,6 +13,7 @@ import org.apache.kafka.clients.CommonClientConfigs
 import org.apache.kafka.clients.consumer.ConsumerConfig
 import org.apache.kafka.clients.producer.ProducerConfig
 import org.apache.kafka.common.config.SslConfigs
+import org.apache.kafka.common.serialization.LongDeserializer
 
 import filodb.coordinator.GlobalConfig
 
@@ -20,34 +21,28 @@ class SourceConfig(conf: Config, shard: Int)
   extends KafkaSettings(conf, ConsumerConfig.configNames.asScala.toSet) {
 
   import ConsumerConfig._
-  import KafkaSettings.{ConsumerFilters => filterNot}
 
   require(resolved.hasPath("filo-record-converter"),
     "'record-converter' must not be empty. Configure a custom converter.")
 
   val RecordConverterClass = resolved.as[String]("filo-record-converter")
 
+  val KeyDeserializer = resolved
+    .as[Option[String]](KEY_DESERIALIZER_CLASS_CONFIG)
+    .getOrElse(classOf[LongDeserializer].getName)
+
   val AutoOffsetReset = resolved.as[Option[String]](AUTO_OFFSET_RESET_CONFIG).getOrElse("latest")
 
   val EnableAutoCommit = resolved.as[Option[Boolean]](ENABLE_AUTO_COMMIT_CONFIG).getOrElse(false)
 
-  val GroupId = {
-    val id = resolved.as[Option[String]](GROUP_ID_CONFIG).getOrElse("filodb.consumer")
-    s"$id$shard"
-  }
-  val ClientId = {
-    val id = resolved.as[Option[String]](CLIENT_ID_CONFIG).getOrElse("filodb.client")
-    s"$id$shard"
-  }
-
   override def config: Map[String, AnyRef] = {
+    val filterNot = Set(KEY_DESERIALIZER_CLASS_CONFIG, AUTO_OFFSET_RESET_CONFIG, ENABLE_AUTO_COMMIT_CONFIG)
     val defaults = Map(
-      GROUP_ID_CONFIG -> GroupId,
-      CLIENT_ID_CONFIG -> ClientId,
+      KEY_DESERIALIZER_CLASS_CONFIG -> KeyDeserializer,
       AUTO_OFFSET_RESET_CONFIG -> AutoOffsetReset,
       ENABLE_AUTO_COMMIT_CONFIG -> EnableAutoCommit.toString)
 
-     defaults ++ super.config.filterNot { case (k, _) => filterNot contains k }
+    defaults ++ super.config.filterNot { case (k, _) => filterNot contains k }
   }
 }
 
@@ -149,11 +144,6 @@ object KafkaSettings {
   val ConnectedTimeout = moduleConfig.as[FiniteDuration]("tasks.lifecycle.connect-timeout")
   val StatusTimeout = moduleConfig.as[FiniteDuration]("tasks.status-timeout")
   val GracefulStopTimeout = moduleConfig.as[FiniteDuration]("tasks.lifecycle.shutdown-timeout")
-
-  val ConsumerFilters = {
-    import ConsumerConfig._
-    Set(GROUP_ID_CONFIG, CLIENT_ID_CONFIG, AUTO_OFFSET_RESET_CONFIG, ENABLE_AUTO_COMMIT_CONFIG)
-  }
 
 }
 
