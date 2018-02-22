@@ -42,7 +42,7 @@ class ShardMapperSpec extends ActorTest(ShardMapperSpec.getNewSystem) {
     }
   }
 
-  it("can assign new nodes to shards and fail if shards already assigned") {
+  it("can assign new nodes to shards and succeed in reassignment if shards already assigned") {
     val mapper1 = new ShardMapper(64)
     mapper1.allNodes should equal (Set.empty)
     mapper1.unassignedShards should equal (0 to 63)
@@ -52,7 +52,7 @@ class ShardMapperSpec extends ActorTest(ShardMapperSpec.getNewSystem) {
     mapper1.numAssignedShards should equal (3)
     mapper1.assignedShards should equal (Seq(0, 10, 20))
 
-    mapper1.registerNode(Seq(15, 20), ref2).isSuccess should be (false)
+    mapper1.registerNode(Seq(15, 20), ref2).isSuccess should be (true)
   }
 
   it("can getQueryShards given a shard key and spread") {
@@ -218,19 +218,19 @@ class ShardMapperSpec extends ActorTest(ShardMapperSpec.getNewSystem) {
     map.updateFromEvent(RecoveryStarted(dataset, 2, ref2, 0))
   }
 
-  it("should fail to register node if attempted assignment is invalid") {
+  it("should register node if a second assignment is attempted") {
     val numShards = 32
     val map = new ShardMapper(numShards)
     map.statusForShard(1) == ShardStatusUnassigned
     map.updateFromEvent(ShardAssignmentStarted(dataset, 1, ref2)).isSuccess shouldEqual true
     map.statusForShard(1) shouldEqual ShardStatusAssigned
     map.coordForShard(1) shouldEqual ref2
+    //this means a re-assignment
     map.updateFromEvent(IngestionStarted(dataset, 1, ref2)).isSuccess shouldEqual true
-
-    map.updateFromEvent(ShardAssignmentStarted(dataset, 1, ref1)).isSuccess shouldEqual false
+    map.updateFromEvent(ShardAssignmentStarted(dataset, 1, ref1)).isSuccess shouldEqual true
   }
 
-  it("should fail to register node if invalid2") {
+  it("should register node if a second assignment is attempted2") {
     val numShards = 32
     val map = new ShardMapper(numShards)
     map.statusForShard(1) shouldEqual ShardStatusUnassigned
@@ -239,7 +239,7 @@ class ShardMapperSpec extends ActorTest(ShardMapperSpec.getNewSystem) {
     map.updateFromEvent(ShardAssignmentStarted(dataset, 1, ref1)).isSuccess shouldEqual true
     map.statusForShard(1) shouldEqual ShardStatusAssigned
     map.coordForShard(1) shouldEqual ref1
-    map.updateFromEvent(ShardAssignmentStarted(dataset, 1, ref2)).isSuccess shouldEqual false
+    map.updateFromEvent(ShardAssignmentStarted(dataset, 1, ref2)).isSuccess shouldEqual true
   }
 
   it("should set shard status to ShardStatusError if updated with IngestionError") {
@@ -283,35 +283,35 @@ class ShardMapperSpec extends ActorTest(ShardMapperSpec.getNewSystem) {
       map.updateFromEvent(RecoveryStarted(dataset, shard, coord1, 0)).isSuccess } shouldEqual true
     assert(coord = coord1, shards = Seq(0, 1), numAssignedShards = 2, unassignedShards = 30)
 
-    // shards not reassigned
-    map.registerNode(Seq(0, 1), coord2).isFailure
-    Seq(0, 1) forall { shard =>
-      map.updateFromEvent(ShardAssignmentStarted(dataset, shard, coord2)).isFailure } shouldEqual true
-    assert(coord = coord1, shards = Seq(0, 1), numAssignedShards = 2, unassignedShards = 30)
+    // shards should be reassigned
+    map.registerNode(Seq(1), coord2).isSuccess shouldEqual true
+    Seq(1) forall { shard =>
+      map.updateFromEvent(ShardAssignmentStarted(dataset, shard, coord2)).isSuccess } shouldEqual true
+    assert(coord = coord1, shards = Seq(1), numAssignedShards = 2, unassignedShards = 30)
 
     // second coord
-    map.registerNode(Seq(2, 3), coord2).isSuccess
+    map.registerNode(Seq(2, 3), coord2).isSuccess  shouldEqual true
     assert(coord = coord2, shards = Seq(2, 3), numAssignedShards = 4, unassignedShards = 28)
 
     // second coord shards not reassigned
-    map.registerNode(Seq(2, 3), coord1).isFailure
-    assert(coord = coord2, shards = Seq(2, 3), numAssignedShards = 2, unassignedShards = 28)
+    map.registerNode(Seq(3), coord1).isSuccess  shouldEqual true
+    assert(coord = coord2, shards = Seq(3), numAssignedShards = 2, unassignedShards = 28)
 
-    Seq(0, 1).forall(s => map.coordForShard(s) == coord1) shouldEqual true
-    Seq(2, 3).forall(s => map.coordForShard(s) == coord2) shouldEqual true
+    Seq(0, 3).forall(s => map.coordForShard(s) == coord1) shouldEqual true
+    Seq(1, 2).forall(s => map.coordForShard(s) == coord2) shouldEqual true
 
     // remove first, unassign shards
     map.unassignedShards.size shouldEqual 28
     map.numAssignedShards shouldEqual 4
-    map.removeNode(coord1) shouldEqual Seq(0, 1)
+    map.removeNode(coord1) shouldEqual Seq(0, 3)
     map.unassignedShards.size shouldEqual 30
     map.numAssignedShards shouldEqual 2
-    Seq(0, 1).forall(s => Option(map.coordForShard(s)).isEmpty) shouldEqual true
+    Seq(0, 3).forall(s => Option(map.coordForShard(s)).isEmpty) shouldEqual true
 
     // now re-assign free shards to new coord
     val newCoord = TestProbe().ref
-    map.registerNode(Seq(0, 1), newCoord).isSuccess
-    Seq(0, 1).forall(s => map.coordForShard(s) == newCoord) shouldEqual true
-    assert(coord = newCoord, shards = Seq(0, 1), numAssignedShards = 4, unassignedShards = 28)
+    map.registerNode(Seq(0, 3), newCoord).isSuccess
+    Seq(0, 3).forall(s => map.coordForShard(s) == newCoord) shouldEqual true
+    assert(coord = newCoord, shards = Seq(0, 3), numAssignedShards = 4, unassignedShards = 28)
   }
 }

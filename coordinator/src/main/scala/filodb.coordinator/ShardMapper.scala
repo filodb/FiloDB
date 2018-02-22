@@ -3,6 +3,7 @@ package filodb.coordinator
 import scala.util.{Failure, Success, Try}
 
 import akka.actor.{ActorRef, Address}
+import com.typesafe.scalalogging.StrictLogging
 
 import filodb.core.DatasetRef
 
@@ -22,7 +23,7 @@ import filodb.core.DatasetRef
   * @param numShards number of shards. For this implementation, it needs to be a power of 2.
   *
  */
-class ShardMapper(val numShards: Int) extends Serializable {
+class ShardMapper(val numShards: Int) extends Serializable with StrictLogging {
   import ShardMapper._
 
   require((numShards & (numShards - 1)) == 0, s"numShards $numShards must be a power of two")
@@ -210,17 +211,14 @@ class ShardMapper(val numShards: Int) extends Serializable {
    */
   private[coordinator] def registerNode(shards: Seq[Int], coordinator: ActorRef): Try[Unit] = {
     shards foreach {
-      case shard if unassigned(shard) =>
-        shardMap(shard) = coordinator
       case shard =>
-        // registerNode is called on three status changes and
-        // ShardAssignmentStrategy.addShards with the same coord
-        // so only another coord is a failure, but could add
-        // it to fail also if same coord but invalid status transition
-        val assignedTo = coordForShard(shard)
-        if (assignedTo.compareTo(coordinator) != 0) {
-          return Failure(ShardAlreadyAssigned(shard, statusForShard(shard), assignedTo))
-        }
+        //we always override the mapping. There was code earlier which prevent from
+        //changing the mapping unless it was explicitly unassigned first.
+        //But functional tests uncovered that sometimes the member down event is not
+        //received and hence assignments were not removed first.
+        val oldCoord = shardMap(shard)
+        logger.info(s"Unassigned coordinator $oldCoord  for shard $shard - Reassigning to $coordinator")
+        shardMap(shard) = coordinator
     }
     Success(())
   }
