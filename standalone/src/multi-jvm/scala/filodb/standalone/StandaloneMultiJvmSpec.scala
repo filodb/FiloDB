@@ -16,9 +16,9 @@ import filodb.coordinator._
 import filodb.coordinator.client.QueryCommands.{FilteredPartitionQuery, MostRecentTime, QueryResult}
 import filodb.coordinator.client.{LocalClient, LogicalPlan}
 import filodb.coordinator.NodeClusterActor.{DatasetResourceSpec, IngestionSource}
-import filodb.core.metadata.Column.ColumnType
+import filodb.core.metadata.Column.ColumnType.DoubleColumn
 import filodb.core.query.Filter.Equals
-import filodb.core.query.{ColumnFilter, ColumnInfo, Tuple, TupleResult}
+import filodb.core.query._
 import filodb.core.{DatasetRef, ErrorResponse}
 
 /**
@@ -136,7 +136,7 @@ abstract class StandaloneMultiJvmSpec(config: MultiNodeConfig) extends MultiNode
                          PartitionsRange(FilteredPartitionQuery(filters), MostRecentTime(60000000), Seq("value")))
     client.logicalPlanQuery(dataset, plan) match {
       case QueryResult(_, TupleResult(schema, Tuple(None, bRec))) =>
-        schema shouldEqual Seq(ColumnInfo("result", ColumnType.DoubleColumn))
+        schema shouldEqual ResultSchema(List(ColumnInfo("result",DoubleColumn)), 0)
         info(s"Query Response was a TupleResult with bRec=$bRec and schema=$schema")
         bRec.getDouble(0)
     }

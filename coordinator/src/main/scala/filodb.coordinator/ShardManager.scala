@@ -113,13 +113,13 @@ private[coordinator] final class ShardManager(strategy: ShardAssignmentStrategy)
     origin ! mapperOpt(ref).getOrElse(DatasetUnknown(ref))
 
   private def mapperOpt(ref: DatasetRef): Option[CurrentShardSnapshot] =
-    shardMappers.get(ref).map(m => CurrentShardSnapshot(ref, m))
+    _shardMappers.get(ref).map(m => CurrentShardSnapshot(ref, m))
 
   /** Selects the `ShardMapper` for the provided dataset, updates the mapper
     * for the received shard event from the event source.
     */
   def updateFromShardEventNoPublish(e: ShardEvent): Unit =
-    shardMappers.get(e.ref) foreach (m => m.updateFromEvent(e))
+    _shardMappers.get(e.ref) foreach (m => m.updateFromEvent(e))
 
   /** Called on MemberUp. Handles acquiring assignable shards, if any, assignment,
     * and full setup of new node.
