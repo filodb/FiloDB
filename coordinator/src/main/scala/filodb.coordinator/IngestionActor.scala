@@ -182,6 +182,7 @@ private[filodb] final class IngestionActor(dataset: Dataset,
         .map { off =>
           val progressPct = if (endOffset - startOffset == 0) 100
                             else (off - startOffset) * 100 / (endOffset - startOffset)
+          logger.info(s"Shard $shard at $progressPct % - offset $off (target $endOffset)")
           clusterActor ! RecoveryInProgress(dataset.ref, shard, context.parent, progressPct.toInt)
           off }
         .until(_ >= endOffset)

@@ -252,11 +252,12 @@ class TimeSeriesShard(dataset: Dataset, config: Config, val shardNum: Int, sink:
     // Sorry - need to drop the data to keep the ingestion moving
     val taskFuture = Future.sequence(Seq(writeChunksFuture, writePartKeyFuture)).flatMap {
       case Seq(Success, Success)     => commitCheckpoint(dataset.ref, shardNum, flushGroup)
-      // No chunks written but partition keys flushed.  This is possible too.
-      case Seq(NotApplied, Success)  => commitCheckpoint(dataset.ref, shardNum, flushGroup)
+      // No chunks written but partition keys flushed?  Don't checkpoint in this case
+      case Seq(NotApplied, Success)  => Future.successful(NotApplied)
       case Seq(er: ErrorResponse, _) => Future.successful(er)
       case Seq(_, er: ErrorResponse) => Future.successful(er)
     }.map { case resp =>
+      logger.info(s"Flush of shard=$shardNum group=$flushGroup response=$resp offset=${_offset}")
       blockHolder.markUsedBlocksReclaimable()
       resp
     }.recover { case e =>
