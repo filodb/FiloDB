@@ -19,11 +19,11 @@ object IngestionAndRecoveryMultiNodeConfig extends MultiNodeConfig {
   val first = role("first")
   val second = role("second")
 
-  val globalConfig = ConfigFactory.parseFile(new java.io.File("conf/timeseries-filodb-server.conf"))
-
+  // To be consistent, the config file is actually passed in the MultiJvmNode*.opt files, and resolved automatically
+  // using GlobalConfig.  This means config resolution is identical between us and standalone FiloServer.
   commonConfig(debugConfig(on = false)
     .withFallback(overrides)
-    .withFallback(globalConfig))
+    .withFallback(GlobalConfig.systemConfig))
 
   def overrides: Config = ConfigFactory.parseString(
     """
@@ -145,6 +145,7 @@ abstract class IngestionAndRecoverySpec extends StandaloneMultiJvmSpec(Ingestion
     runOn(first) {
       (0 until numShards).foreach { s =>
         val checkpoints = metaStore.readCheckpoints(dataset, s).futureValue
+        info(s"shard $s: checkpoints=$checkpoints")
         (0 until numGroupsPerShard).foreach { g =>
           withClue(s"Checkpoint $g on shard $s: ") {
             checkpoints.contains(g) shouldBe true

@@ -19,11 +19,9 @@ object ClusterSingletonFailoverMultiNodeConfig extends MultiNodeConfig {
   val second = role("second")
   val third = role("third")
 
-  // NOTE: none of these configs really matter, because FiloServer() creates its own ActorSystem
-  // and thus resolves config using FiloDB own priorities.
-  val tsConfig = ConfigFactory.parseFile(new java.io.File("conf/timeseries-filodb-server.conf"))
-  val myConfig = overrides.withFallback(tsConfig)
-                          .withFallback(ConfigFactory.load("application_test.conf"))
+  // To be consistent, the config file is actually passed in the MultiJvmNode*.opt files, and resolved automatically
+  // using GlobalConfig.  This means config resolution is identical between us and standalone FiloServer.
+  val myConfig = overrides.withFallback(GlobalConfig.systemConfig)
   commonConfig(myConfig)
 
   val ingestDuration = 15.seconds
