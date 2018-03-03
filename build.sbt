@@ -384,7 +384,8 @@ lazy val testSettings = Seq(
   testOptions in Test += Tests.Argument(TestFrameworks.ScalaTest, "-oF"),
   // Uncomment below to debug Typesafe Config file loading
   // javaOptions ++= List("-Xmx2G", "-Dconfig.trace=loads"),
-  javaOptions ++= List("-Xmx2G"),
+  // Make Akka tests more resilient esp for CI/CD/Travis/etc.
+  javaOptions ++= List("-Xmx2G", "-Dakka.test.timefactor=3"),
   // Needed to avoid cryptic EOFException crashes in forked tests
   // in Travis with `sudo: false`.
   // See https://github.com/sbt/sbt/issues/653

@@ -68,26 +68,38 @@ class DistributeSpec extends ActorTest(DistributeSpec.getNewSystem) with ScalaFu
       resp2.get.map(_.shard) shouldEqual (12 to 15)
     }
 
-    it("should route to all shards if not all filters matching for all shard key columns") {
+    it("should return BadArgument if not all filters matching for all shard key columns") {
       val filters = Seq(ColumnFilter("__name__", Filter.Equals("jvm_heap_used")),
                         ColumnFilter("jehovah",  Filter.Equals("prometheus")))
       val resp = Utils.validatePartQuery(datasetWithShardCols, mapper,
                                          FilteredPartitionQuery(filters), options)
-      resp.get.map(_.shard) shouldEqual (0 to 15)
+      resp.isGood shouldEqual false
+      resp.swap.get shouldBe a[BadArgument]
 
       val filters2 = Seq(ColumnFilter("__name__", Filter.Equals("jvm_heap_used")),
                          ColumnFilter("job",      Filter.In(Set("prometheus"))))
       val resp2 = Utils.validatePartQuery(datasetWithShardCols, mapper,
                                          FilteredPartitionQuery(filters2), options)
-      resp2.get.map(_.shard) shouldEqual (0 to 15)
+      resp.isGood shouldEqual false
+      resp.swap.get shouldBe a[BadArgument]
     }
 
-    it("should route to all shards if dataset does not define shard key columns") {
+    it("should route to all shards, governed by limit, if dataset does not define shard key columns") {
       val filters = Seq(ColumnFilter("__name__", Filter.Equals("jvm_heap_used")),
                         ColumnFilter("job",      Filter.Equals("prometheus")))
       val resp = Utils.validatePartQuery(dataset1, mapper,
                                          FilteredPartitionQuery(filters), options)
       resp.get.map(_.shard) shouldEqual (0 to 15)
+    }
+
+    it("should route to shards dictated by shardOverrides if provided") {
+      val filters = Seq(ColumnFilter("__name__", Filter.Equals("jvm_heap_used")),
+                        ColumnFilter("job",      Filter.Equals("prometheus")))
+      val resp = Utils.validatePartQuery(datasetWithShardCols, mapper,
+                                         FilteredPartitionQuery(filters),
+                                         options.copy(shardOverrides = Some(Seq(5, 6))))
+      resp.isGood shouldEqual true
+      resp.get.map(_.shard) shouldEqual Seq(5, 6)
     }
   }
 }

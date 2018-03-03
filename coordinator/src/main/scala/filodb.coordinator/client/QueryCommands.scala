@@ -58,7 +58,8 @@ object QueryCommands {
   final case class QueryOptions(shardKeySpread: Int = 1,
                                 parallelism: Int = 16,
                                 queryTimeoutSecs: Int = 30,
-                                itemLimit: Int = 100)
+                                itemLimit: Int = 100,
+                                shardOverrides: Option[Seq[Int]] = None)
 
   /**
    * Executes a query using a LogicalPlan and returns the result as one message to the client.

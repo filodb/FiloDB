@@ -92,13 +92,16 @@ object Utils extends StrictLogging {
       case FilteredPartitionQuery(filters) =>
         // get limited # of shards if shard key available, otherwise query all shards
         // TODO: monitor ratio of queries using shardKeyHash to queries that go to all shards
-        val shards = if (dataset.options.shardKeyColumns.length > 0) {
-          shardHashFromFilters(filters, dataset.options.shardKeyColumns) match {
-            case Some(shardHash) => shardMap.queryShards(shardHash, options.shardKeySpread)
-            case None            => shardMap.assignedShards
+        val shards = options.shardOverrides.getOrElse {
+          val shardCols = dataset.options.shardKeyColumns
+          if (shardCols.length > 0) {
+            shardHashFromFilters(filters, shardCols) match {
+              case Some(shardHash) => shardMap.queryShards(shardHash, options.shardKeySpread)
+              case None            => throw new IllegalArgumentException(s"Must specify filters for $shardCols")
+            }
+          } else {
+            shardMap.assignedShards
           }
-        } else {
-          shardMap.assignedShards
         }
         logger.debug(s"Translated filters $filters into shards $shards using spread ${options.shardKeySpread}")
         shards.map { s => FilteredPartitionScan(ShardSplit(s), filters) }

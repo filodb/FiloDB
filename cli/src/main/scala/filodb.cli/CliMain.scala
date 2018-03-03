@@ -45,6 +45,7 @@ class Arguments extends FieldArgs {
   var metricColumn: String = "__name__"
   var shardKeyColumns: Seq[String] = Nil
   var everyNSeconds: Option[String] = None
+  var shardOverrides: Option[Seq[String]] = None
 }
 
 object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbClusterNode {
@@ -166,8 +167,9 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
           args.promql.map { query =>
             require(args.host.nonEmpty && args.dataset.nonEmpty, "--host and --dataset must be defined")
             val remote = Client.standaloneClient(system, args.host.get, args.port)
-            parsePromQuery(remote, query, args.dataset.get, args.metricColumn,
-                           args.limit, args.sampleLimit, args.everyNSeconds.map(_.toInt))
+            val options = QOptions(args.limit, args.sampleLimit, args.everyNSeconds.map(_.toInt),
+                                   timeout, args.shardOverrides.map(_.map(_.toInt)))
+            parsePromQuery(remote, query, args.dataset.get, args.metricColumn, options)
           }.getOrElse {
             args.select.map { selectCols =>
               exportCSV(getRef(args),
@@ -282,13 +284,17 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
 
   import QueryCommands.QueryResult
 
+  final case class QOptions(limit: Int, sampleLimit: Int,
+                            everyN: Option[Int], timeout: FiniteDuration,
+                            shardOverrides: Option[Seq[Int]])
+
   def parsePromQuery(client: LocalClient, query: String, dataset: String,
-                     metricCol: String, limit: Int, sampleLimit: Int, everyN: Option[Int]): Unit = {
+                     metricCol: String, options: QOptions): Unit = {
     val opts = DatasetOptions.DefaultOptions.copy(metricColumn = metricCol)
     val parser = new PromQLParser(query, opts)
     parser.parseToPlan(true) match {
       case SSuccess(plan) =>
-        executeQuery(client, dataset, plan, limit, sampleLimit, everyN)
+        executeQuery(client, dataset, plan, options)
 
       case Failure(e: ParseError) =>
         println(s"Failure parsing $query:\n${parser.formatError(e)}")
@@ -299,17 +305,19 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
   }
 
   def executeQuery(client: LocalClient, dataset: String, plan: LogicalPlan,
-                   limit: Int, sampleLimit: Int, everyN: Option[Int]): Unit = {
+                   options: QOptions): Unit = {
     val ref = DatasetRef(dataset)
-    val qOpts = QueryCommands.QueryOptions(itemLimit = limit)
+    val qOpts = QueryCommands.QueryOptions(itemLimit = options.limit,
+                                           queryTimeoutSecs = options.timeout.toSeconds.toInt,
+                                           shardOverrides = options.shardOverrides)
     println(s"Sending query command to server for $ref with options $qOpts...")
     println(s"Query Plan:\n$plan")
-    everyN match {
+    options.everyN match {
       case Some(intervalSecs) =>
         val fut = Observable.intervalAtFixedRate(intervalSecs.seconds).foreach { n =>
           client.logicalPlanQuery(ref, plan, qOpts) match {
             case QueryResult(_, result) =>
-              result.prettyPrint(partitionRowLimit=sampleLimit).foreach(println)
+              result.prettyPrint(partitionRowLimit = options.sampleLimit).foreach(println)
           }
         }.recover {
           case e: ClientException =>
@@ -322,7 +330,7 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
           client.logicalPlanQuery(ref, plan, qOpts) match {
             case QueryResult(_, result) =>
               println(result.schema.columns.map(_.name).mkString("\t"))
-              result.prettyPrint(partitionRowLimit=sampleLimit).foreach(println)
+              result.prettyPrint(partitionRowLimit = options.sampleLimit).foreach(println)
           }
         } catch {
           case e: ClientException =>
