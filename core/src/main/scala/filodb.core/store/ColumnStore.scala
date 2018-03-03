@@ -2,7 +2,6 @@ package filodb.core.store
 
 import com.typesafe.scalalogging.StrictLogging
 
-import filodb.core._
 import filodb.core.binaryrecord.{BinaryRecord, BinaryRecordWrapper}
 import filodb.core.metadata.Dataset
 import filodb.core.query._
@@ -31,10 +30,6 @@ final case class RowKeyChunkScan(firstBinKey: BinaryRecordWrapper,
                                  lastBinKey: BinaryRecordWrapper) extends ChunkScanMethod {
   def startkey: BinaryRecord = firstBinKey.binRec
   def endkey: BinaryRecord = lastBinKey.binRec
-}
-final case class SingleChunkScan(firstBinKey: BinaryRecordWrapper,
-                                 chunkId: Types.ChunkID) extends ChunkScanMethod {
-  def startkey: BinaryRecord = firstBinKey.binRec
 }
 case object LastSampleChunkScan extends ChunkScanMethod
 

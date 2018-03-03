@@ -228,6 +228,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     // Try reading - should be able to read optimized chunks too
     val splits = memStore.getScanSplits(dataset1.ref, 1)
     val query = QuerySpec("min", AggregationFunction.Sum)
+
     val agg1 = memStore.aggregate(dataset1, query, FilteredPartitionScan(splits.head))
                        .get.runAsync.futureValue
     agg1.result should equal (Array((1 to 100).map(_.toDouble).sum))

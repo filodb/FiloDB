@@ -49,7 +49,6 @@ class MemoryStats(tags: Map[String, String]) {
   val usedBlocksMetric = Kamon.metrics.gauge("blockstore-used-blocks", tags)(0L)
   val freeBlocksMetric = Kamon.metrics.gauge("blockstore-free-blocks", tags)(0L)
   val blocksReclaimedMetric = Kamon.metrics.counter("blockstore-blocks-reclaimed", tags)
-  val blockUtilizationMetric = Kamon.metrics.histogram("blockstore-block-utilized-bytes", tags)
 }
 
 

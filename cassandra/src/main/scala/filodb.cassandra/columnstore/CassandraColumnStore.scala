@@ -403,7 +403,6 @@ class CassandraPartition(index: ChunkIDPartitionChunkIndex,
     val (rangeQuery, infosSkips) = method match {
       case AllChunkScan             => (true, index.allChunks.toSeq)
       case RowKeyChunkScan(k1, k2)  => (false, index.rowKeyRange(k1.binRec, k2.binRec).toSeq)
-      case SingleChunkScan(key, id) => (false, index.singleChunk(key.binRec, id).toSeq)
       case LastSampleChunkScan      => (false, index.latestN(1).toSeq)
     }
     logger.debug(s"Reading chunks from columns ${columnIds.toList}, ${index.binPartition}, method $method")

@@ -143,6 +143,7 @@ private[filodb] final class IngestionActor(dataset: Dataset,
   private def normalIngestion(shard: Int, offset: Option[Long], startingGroupNo: Int): Unit = {
     create(shard, offset) map { ingestionStream =>
       val stream = ingestionStream.get
+      logger.info(s"Starting normal/active ingestion for shard $shard at offset $offset")
       clusterActor ! IngestionStarted(dataset.ref, shard, context.parent)
 
       streamSubscriptions(shard) = memStore.ingestStream(dataset.ref, shard, stream, flushStream(startingGroupNo)) {
@@ -150,10 +151,11 @@ private[filodb] final class IngestionActor(dataset: Dataset,
       }
       // On completion of the future, send IngestionStopped
       // except for noOpSource, which would stop right away, and is used for sending in tons of data
-      streamSubscriptions(shard).foreach { x =>
+      // also: small chance for race condition here due to remove call in stop() method
+      streamSubscriptions.get(shard).map(_.foreach { x =>
         if (source != NodeClusterActor.noOpSource) clusterActor ! IngestionStopped(dataset.ref, shard)
         ingestionStream.teardown()
-      }
+      })
     } recover { case NonFatal(t) =>
       handleError(dataset.ref, shard, t)
     }

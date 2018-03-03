@@ -2,6 +2,7 @@ package filodb.core.query
 
 import scala.reflect.{classTag, ClassTag}
 
+import com.typesafe.scalalogging.StrictLogging
 import enumeratum.{Enum, EnumEntry}
 import enumeratum.EnumEntry.Snakecase
 import org.scalactic._
@@ -97,14 +98,18 @@ trait OneValueAggregator extends Aggregator {
   def combine(first: A, second: A): A = ???
 }
 
-trait ChunkAggregator extends Aggregator {
+trait ChunkAggregator extends Aggregator with StrictLogging {
   def add(orig: A, reader: ChunkSetReader): A
   def positions: Array[Int]
 
-  def aggPartition(method: ChunkScanMethod, partition: FiloPartition): A =
+  def aggPartition(method: ChunkScanMethod, partition: FiloPartition): A = {
+    logger.trace(s"Aggregating partition ${partition.binPartition}")
     partition.readers(method, positions).foldLeft(emptyAggregate) {
-      case (agg, reader) => add(agg, reader)
+      case (agg, reader) =>
+        logger.trace(s"  --> agg=$agg reader=${reader.info}")
+        add(agg, reader)
     }
+  }
 }
 
 class NumBytesAggregator(vectorPos: Int = 0) extends ChunkAggregator {

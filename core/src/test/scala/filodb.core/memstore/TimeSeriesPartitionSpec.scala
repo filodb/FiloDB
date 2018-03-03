@@ -51,13 +51,21 @@ class TimeSeriesPartitionSpec extends FunSpec with Matchers with BeforeAndAfter 
 
     // First 10 rows ingested. Now flush in a separate Future while ingesting the remaining row
     part.switchBuffers()
-    bufferPool.poolSize shouldEqual (origPoolSize - 1)
+    // After switchBuffers, currentChunks should be null, pool size the same (nothing new allocated yet)
+    bufferPool.poolSize shouldEqual origPoolSize
+    part.latestChunkLen shouldEqual 0
+
+    // Before flush happens, should be able to read all chunks
+    part.numChunks shouldEqual 1
+    val chunks1 = part.readers(AllChunkScan, Array(1)).map(_.vectors(0).toSeq).toBuffer
+    chunks1 shouldEqual Seq(minData take 10)
+
     val blockHolder = new BlockHolder(blockStore)
     val flushFut = Future(part.makeFlushChunks(blockHolder))
     data.drop(10).zipWithIndex.foreach { case (r, i) => part.ingest(r, 1100L + i) }
     val chunkSetOpt = flushFut.futureValue
 
-    // After flush, the old writebuffers should be returned to pool
+    // After flush, the old writebuffers should be returned to pool, but new one allocated for ingesting
     bufferPool.poolSize shouldEqual origPoolSize
 
     // there should be a frozen chunk of 10 records plus 1 record in currently appending chunks
@@ -83,13 +91,13 @@ class TimeSeriesPartitionSpec extends FunSpec with Matchers with BeforeAndAfter 
 
      // First 10 rows ingested. Now flush in a separate Future while ingesting 6 more rows
      part.switchBuffers()
-     bufferPool.poolSize shouldEqual (origPoolSize - 1)
+     bufferPool.poolSize shouldEqual origPoolSize    // current chunks become null, no new allocation yet
      val blockHolder = new BlockHolder(blockStore)
      val flushFut = Future(part.makeFlushChunks(blockHolder))
      data.drop(10).take(6).zipWithIndex.foreach { case (r, i) => part.ingest(r, 1100L + i) }
      val chunkSetOpt = flushFut.futureValue
 
-     // After flush, the old writebuffers should be returned to pool
+     // After flush, the old writebuffers should be returned to pool, but new one allocated too
      bufferPool.poolSize shouldEqual origPoolSize
 
      // there should be a frozen chunk of 10 records plus 6 records in currently appending chunks
@@ -141,12 +149,12 @@ class TimeSeriesPartitionSpec extends FunSpec with Matchers with BeforeAndAfter 
     part.switchBuffers()
     val blockHolder = new BlockHolder(blockStore)
     part.makeFlushChunks(blockHolder).isDefined shouldEqual true
-    part.numChunks shouldEqual 2
+    part.numChunks shouldEqual 1
     part.latestChunkLen shouldEqual 0
 
     // Now, switch buffers again without ingesting more data.  Clearly there are no rows, no switch, and no flush.
     part.switchBuffers()
-    part.numChunks shouldEqual 2
+    part.numChunks shouldEqual 1
     part.makeFlushChunks(blockHolder) shouldEqual None
 
     val minData = data.map(_.getDouble(1))

@@ -45,7 +45,6 @@ trait PartitionChunkIndex {
     method match {
       case AllChunkScan             => allChunks
       case RowKeyChunkScan(k1, k2)  => rowKeyRange(k1.binRec, k2.binRec)
-      case SingleChunkScan(key, id) => singleChunk(key.binRec, id)
       case LastSampleChunkScan      => latestN(1)
     }
 }

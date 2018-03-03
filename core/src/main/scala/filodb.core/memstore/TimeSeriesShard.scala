@@ -17,7 +17,7 @@ import filodb.core.Types.PartitionKey
 import filodb.core.metadata.Dataset
 import filodb.core.query.PartitionKeyIndex
 import filodb.core.store._
-import filodb.memory.{BlockHolder, MemoryStats, NativeMemoryManager, PageAlignedBlockManager}
+import filodb.memory.{BlockMemFactoryPool, MemoryStats, NativeMemoryManager, PageAlignedBlockManager}
 import filodb.memory.format.{SchemaRowReader, ZeroCopyUTF8String}
 
 
@@ -56,6 +56,8 @@ class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
   val partitionsQueried = Kamon.metrics.counter("memstore-partitions-queried", tags)
   val numChunksQueried = Kamon.metrics.counter("memstore-chunks-queried", tags)
   val memoryStats = new MemoryStats(tags)
+
+  val bufferPoolSize = Kamon.metrics.gauge("memstore-writebuffer-pool-size", tags)(0L)
 }
 
 // TODO for scalability: get rid of stale partitions?
@@ -120,6 +122,7 @@ class TimeSeriesShard(dataset: Dataset, config: Config, val shardNum: Int, sink:
   // The off-heap block store used for encoded chunks
   protected val blockMemorySize: Long = shardMemoryMB * 1024 * 1024L
   private val blockStore = new PageAlignedBlockManager(blockMemorySize, shardStats.memoryStats, numPagesPerBlock)
+  private val blockFactoryPool = new BlockMemFactoryPool(blockStore)
   private val numColumns = dataset.dataColumns.size
 
   // The off-heap buffers used for ingesting the newest data samples
@@ -129,6 +132,8 @@ class TimeSeriesShard(dataset: Dataset, config: Config, val shardNum: Int, sink:
 
   /**
     * Unencoded/unoptimized ingested data is stored in buffers that are allocated from this off-heap pool
+    * Set initial size to a fraction of the max chunk size, so that partitions with sparse amount of data
+    * will not cause too much memory bloat.  GrowableVector allows vectors to grow, so this should be OK
     */
   private val bufferPool = new WriteBufferPool(bufferMemoryManager, dataset, maxChunksSize / 8, maxNumPartitions)
   logger.info(s"Finished initializing memory pools for shard $shardNum")
@@ -219,13 +224,14 @@ class TimeSeriesShard(dataset: Dataset, config: Config, val shardNum: Int, sink:
         Task.fromFuture(commitCheckpoint(dataset.ref, shardNum, flushGroup))
     }
     taskToReturn.runOnComplete(_ => tracer.finish())
+    shardStats.bufferPoolSize.record(bufferPool.poolSize)
     taskToReturn
   }
 
   private def doFlushSteps(flushGroup: FlushGroup,
                            partitionIt: Iterator[TimeSeriesPartition]): Task[Response] = {
     // Only allocate the blockHolder when we actually have chunks/partitions to flush
-    val blockHolder = new BlockHolder(blockStore)
+    val blockHolder = blockFactoryPool.checkout()
     // Given the flush group, create an observable of ChunkSets
     val chunkSetIt = partitionIt.flatMap(_.makeFlushChunks(blockHolder))
 
@@ -259,9 +265,11 @@ class TimeSeriesShard(dataset: Dataset, config: Config, val shardNum: Int, sink:
     }.map { case resp =>
       logger.info(s"Flush of shard=$shardNum group=$flushGroup response=$resp offset=${_offset}")
       blockHolder.markUsedBlocksReclaimable()
+      blockFactoryPool.release(blockHolder)
       resp
     }.recover { case e =>
       logger.error("Internal Error - should have not reached this state", e)
+      blockFactoryPool.release(blockHolder)
       DataDropped
     }
     Task.fromFuture(taskFuture)

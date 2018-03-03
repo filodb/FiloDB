@@ -174,9 +174,6 @@ class BlockHolder(blockStore: BlockManager) extends MemFactory with StrictLoggin
 
   protected def ensureCapacity(forSize: Long): Block = {
     if (!currentBlock.get().hasCapacity(forSize)) {
-      val currentBlockRemaining = currentBlock.get().remaining()
-      val currentBlockCapacity = currentBlock.get().capacity
-      blockStore.stats().blockUtilizationMetric.record(currentBlockCapacity - currentBlockRemaining)
       currentBlock.set(blockStore.requestBlock().get)
       blockGroup += currentBlock.get()
     }

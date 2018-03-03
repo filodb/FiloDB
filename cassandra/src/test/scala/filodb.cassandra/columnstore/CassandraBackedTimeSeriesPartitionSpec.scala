@@ -39,10 +39,10 @@ class CassandraBackedTimeSeriesPartitionSpec extends TimeSeriesPartitionSpec wit
     val start: BinaryRecord = BinaryRecord(dataset1, Seq(now))
     val end: BinaryRecord = BinaryRecord(dataset1, Seq(now + 20000 - 100)) // query for 2 chunks
     val scan = RowKeyChunkScan(start, end)
-    val colIds = Array(0,1)
+    val colIds = Array(0, 1)
     val readers1 = part.readers(scan, colIds).toList
-    // we should see 20 rows in two chunks, then add one for the latest unencoded chunk
-    readers1.size shouldBe 3
+    // we should see 20 rows in two chunks.  No data ingested means no chunks for write buffer
+    readers1.size shouldBe 2
     readers1.map(_.rowIterator().size).sum shouldEqual 20
     val readTuples = readers1.flatMap(_.rowIterator().map(r => (r.getLong(0), r.getDouble(1))))
     val ingestedTuples = data.take(20).toList.map(r => (r.getLong(0), r.getDouble(1)))
@@ -50,14 +50,14 @@ class CassandraBackedTimeSeriesPartitionSpec extends TimeSeriesPartitionSpec wit
 
     // now query all chunks
     val readers2 = part.readers(AllChunkScan, colIds).toList
-    // we should see at least 4 chunks, each with 10 rows
-    readers2.size should be > 4
+    // we should see exactly 4 chunks, each with 10 rows (since we didn't ingest new data)
+    readers2.size shouldEqual 4
     readers2.map(_.rowIterator().size).sum shouldEqual 40 // since it may include rows from earlier runs
 
     // now test streamReaders
     val readers3 = part.streamReaders(scan, colIds).toListL.runAsync.futureValue
-    // we should see 20 rows in two chunks, then add one for the latest unencoded chunk
-    readers3.size shouldBe 3
+    // we should see 20 rows in two chunks
+    readers3.size shouldBe 2
     readers3.map(_.rowIterator().size).sum shouldEqual 20
 
   }
