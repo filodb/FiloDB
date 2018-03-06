@@ -23,6 +23,7 @@ extends MemStore with StrictLogging {
   type Shards = NonBlockingHashMapLong[TimeSeriesShard]
   private val datasets = new HashMap[DatasetRef, Shards]
   val numGroups = config.getInt("memstore.groups-per-shard")
+  val maxPartitionsToRecover = config.getInt("memstore.max-partitions-to-recover")
 
   val stats = new ChunkSourceStats
 
@@ -61,7 +62,7 @@ extends MemStore with StrictLogging {
   def restorePartitions(dataset: Dataset, shardNum: Int)(implicit sched: Scheduler): Future[Long] = {
     val partitionKeys = sink.scanPartitionKeys(dataset, shardNum)
     val shard = getShardE(dataset.ref, shardNum)
-    partitionKeys.map { p =>
+    partitionKeys.take(maxPartitionsToRecover).map { p =>
       shard.addPartition(p, false)
     }.countL.runAsync.map { count =>
       logger.info(s"Restored $count time series partitions into memstore for shard $shardNum")
