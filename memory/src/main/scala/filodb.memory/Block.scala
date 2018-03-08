@@ -52,11 +52,8 @@ trait ReclaimListener {
   * A buffer to which a BinaryVector can be written
   */
 trait ReusableMemory extends StrictLogging {
-  protected val _isFree: AtomicBoolean = new AtomicBoolean(false)
   protected val _isReusable: AtomicBoolean = new AtomicBoolean(false)
   protected val reclaimListeners = ListBuffer.empty[ReclaimListener]
-
-  protected def isFree = _isFree.get()
 
   def registerListener(reclaimListener: ReclaimListener): Unit = reclaimListeners += reclaimListener
   /**
@@ -79,7 +76,7 @@ trait ReusableMemory extends StrictLogging {
     * Marks this Memory as in use.
     */
   protected[memory] def markInUse() = {
-    _isFree.set(false)
+    _isReusable.set(false)
   }
 
   /**
@@ -89,25 +86,21 @@ trait ReusableMemory extends StrictLogging {
     _isReusable.set(true)
   }
 
-
   /**
     * Marks this memory as free.
     */
   protected def free() = {
     logger.debug(s"Reclaiming block at ${jLong.toHexString(address)} with ${reclaimListeners.length} listeners...")
     reclaimListeners.foreach(_.onReclaim())
-    _isFree.set(true)
   }
-
 
   /**
     * To be called when this memory is reclaimed. In turn this will call all registered listeners.
     */
-  def reclaim(): Unit = {
-    if (!canReclaim) throw new IllegalStateException("Cannot reclaim this block")
+  def reclaim(forced: Boolean = false): Unit = {
+    if (!canReclaim && !forced) throw new IllegalStateException("Cannot reclaim this block")
     free()
   }
-
 }
 
 /**

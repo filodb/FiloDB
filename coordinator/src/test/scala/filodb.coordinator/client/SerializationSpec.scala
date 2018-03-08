@@ -1,7 +1,10 @@
 package filodb.coordinator.client
 
+import java.util.concurrent.TimeUnit
+
 import akka.actor.ActorRef
 import akka.serialization.SerializationExtension
+import com.typesafe.config.ConfigFactory
 import org.scalatest.concurrent.ScalaFutures
 
 import filodb.coordinator.{ActorSpecConfig, ActorTest, NodeClusterActor, ShardMapper}
@@ -10,7 +13,7 @@ import filodb.core.{MachineMetricsData, NamesTestData, TestData}
 import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.memstore._
 import filodb.core.store._
-import filodb.memory.NativeMemoryManager
+import filodb.memory.{MemoryStats, NativeMemoryManager, PageAlignedBlockManager}
 
 object SerializationSpecConfig extends ActorSpecConfig {
   override val defaultConfig = """
@@ -182,8 +185,13 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
   it("should be able to serialize writable buffers as part of VectorListResult") {
     import MachineMetricsData._
     val bufferPool = new WriteBufferPool(memFactory, dataset1, 10, 50)
-    val part = new TimeSeriesPartition(dataset1, defaultPartKey, 0, colStore, bufferPool,
-      new TimeSeriesShardStats(dataset1.ref, 0))
+    val config = ConfigFactory.load("application_test.conf").getConfig("filodb")
+    val chunkRetentionHours = config.getDuration("memstore.demand-paged-chunk-retention-period", TimeUnit.HOURS).toInt
+    val blockStore = new PageAlignedBlockManager(100 * 1024 * 1024,
+      new MemoryStats(Map("test"-> "test")), 1, chunkRetentionHours)
+    val pagedChunkStore = new DemandPagedChunkStore(dataset1, blockStore, chunkRetentionHours, 1)
+    val part = new TimeSeriesPartition(dataset1, defaultPartKey, 0, colStore, bufferPool, config, false,
+          pagedChunkStore,  new TimeSeriesShardStats(dataset1.ref, 0))
     val data = singleSeriesReaders().take(10)
     data.zipWithIndex.foreach { case (r, i) => part.ingest(r, 1000L + i) }
 

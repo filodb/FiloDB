@@ -1,12 +1,13 @@
 package filodb.core.memstore
 
 import java.lang.management.ManagementFactory
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.ConcurrentSkipListMap
 
-import scala.concurrent.duration._
-
+import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
-import monix.eval.Task
+import monix.execution.Scheduler
 import monix.reactive.Observable
 import scalaxy.loops._
 
@@ -16,7 +17,7 @@ import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.metadata.Dataset
 import filodb.core.query.ChunkSetReader
 import filodb.core.store._
-import filodb.memory.{BlockHolder, ReclaimListener}
+import filodb.memory.{BlockMemFactory, ReclaimListener}
 import filodb.memory.format._
 
 final case class InfoChunks(info: ChunkSetInfo, chunks: Array[BinaryVector[_]])
@@ -49,7 +50,11 @@ class TimeSeriesPartition(val dataset: Dataset,
                           val shard: Int,
                           val chunkSource: ChunkSource,
                           bufferPool: WriteBufferPool,
-                          val shardStats: TimeSeriesShardStats) extends FiloPartition with StrictLogging {
+                          config: Config,
+                          skipDemandPaging: Boolean,
+                          pagedChunkStore: DemandPagedChunkStore,
+                          val shardStats: TimeSeriesShardStats)
+                         (implicit val queryScheduler: Scheduler) extends FiloPartition with StrictLogging {
   import ChunkSetInfo._
   import collection.JavaConverters._
 
@@ -105,14 +110,13 @@ class TimeSeriesPartition(val dataset: Dataset,
     */
   private final val numColumns = dataset.dataColumns.length
 
-
   private val jvmStartTime = ManagementFactory.getRuntimeMXBean.getStartTime
 
   // TODO data retention has not been implemented as a feature yet.
-  // There are pending design decisions, so punting on the config
-  private val dataRetentionTime = 3.days.toMillis
+  private val chunkRetentionMillis = config.getDuration("memstore.demand-paged-chunk-retention-period",
+    TimeUnit.MILLISECONDS)
 
-  private var partitionLoadedFromPersistentStore = false
+  private val partitionLoadedFromPersistentStore = new AtomicBoolean(skipDemandPaging)
 
   /**
    * Ingests a new row, adding it to currentChunks.
@@ -156,7 +160,7 @@ class TimeSeriesPartition(val dataset: Dataset,
    * we might wish to flush current chunks as they are for persistence but then keep adding to the partially
    * filled currentChunks.  That involves much more state, so do much later.
    */
-  def makeFlushChunks(blockHolder: BlockHolder): Option[ChunkSet] = {
+  def makeFlushChunks(blockHolder: BlockMemFactory): Option[ChunkSet] = {
     if (flushingAppenders == UnsafeUtils.ZeroPointer || flushingAppenders(0).appender.length == 0) {
       None
     } else {
@@ -192,15 +196,7 @@ class TimeSeriesPartition(val dataset: Dataset,
       bufferPool.release(flushingAppenders)
       flushingAppenders = nullAppenders
 
-      blockHolder.endPartition(new ReclaimListener {
-        //It is very likely that a flushChunk ends only in one block. At worst in may end up in a couple.
-        //So a blockGroup contains atmost 2. When any one Block in the flushGroup is evicted the flushChunk is removed.
-        //So if and when a second block gets reclaimed this is a no-op
-        override def onReclaim(): Unit = {
-          infosChunks.remove(chunkInfo.id)
-          shardStats.chunkIdsEvicted.increment()
-        }
-      })
+      blockHolder.endPartition(reclaimListener(Seq(chunkInfo)))
 
       Some(ChunkSet(chunkInfo, binPartition, Nil,
                     frozenVectors.zipWithIndex.map { case (vect, pos) => (pos, vect.toFiloBuffer) }))
@@ -271,12 +267,13 @@ class TimeSeriesPartition(val dataset: Dataset,
     *
     * @return true if chunks have been loaded, false otherwise
     */
-  private def cacheIsWarm = {
-    if (partitionLoadedFromPersistentStore) {
+  def cacheIsWarm(): Boolean = {
+    if (partitionLoadedFromPersistentStore.get) {
       true
     } else {
       val timeSinceStart = System.currentTimeMillis - jvmStartTime
-      timeSinceStart > dataRetentionTime
+      if (timeSinceStart > chunkRetentionMillis) partitionLoadedFromPersistentStore.set(true)
+      timeSinceStart > chunkRetentionMillis
     }
   }
 
@@ -284,11 +281,7 @@ class TimeSeriesPartition(val dataset: Dataset,
     if (cacheIsWarm) { // provide read-through functionality
       super.streamReaders(method, columnIds) // return data from memory
     } else {
-      // fetch data from colStore
-      Observable.fromTask(ingestChunksFromColStore()) flatMap { _ =>
-        // then read memstore to return response for query
-        super.streamReaders(method, columnIds)
-      }
+      demandPageFromColStore(method, columnIds)
     }
   }
 
@@ -297,36 +290,85 @@ class TimeSeriesPartition(val dataset: Dataset,
     if (cacheIsWarm) { // provide read-through functionality
       readersFromMemory(method, columnIds) // return data from memory
     } else {
-      // fetch data from colStore
-      Observable.fromTask(ingestChunksFromColStore()).map { _ =>
-        // then read memstore to return response for query
-        readersFromMemory(method, columnIds)
-      }.toIterator().flatten
+      demandPageFromColStore(method, columnIds).toIterator()
     }
-    // Runtime errors are thrown back to caller
+  }
+
+  def reclaimListener(chunkInfos: Seq[ChunkSetInfo]): ReclaimListener = new ReclaimListener {
+    //It is very likely that a flushChunk ends only in one block. At worst in may end up in a couple.
+    //So a blockGroup contains atmost 2. When any one Block in the flushGroup is evicted the flushChunk is removed.
+    //So if and when a second block gets reclaimed this is a no-op
+    override def onReclaim(): Unit = {
+      chunkInfos.foreach { info =>
+        infosChunks.remove(info.id)
+        shardStats.chunkIdsEvicted.increment()
+      }
+    }
+  }
+
+  def addChunkSet(info: ChunkSetInfo, bytes: Array[BinaryVector[_]]): Unit = {
+    infosChunks.put(info.id, InfoChunks(info, bytes))
   }
 
   /**
-    * Helper function to read chunks from colStore and write into memStore.
-    *
-    * IMPORTANT NOTE: It is possible that multiple queries are causing concurrent loading of data from Cassandra
-    * at the same time. We do not prevent parallel loads from cassandra since the ingestOptimizedChunks call
-    * is idempotent. Keeps the implementation simple. Revisit later if this is really an issue.
-    *
+    * Implements the on-demand paging for the time series partition
     */
-  private def ingestChunksFromColStore(): Task[Unit] = {
-    val readers = chunkSource.scanPartitions(dataset, SinglePartitionScan(binPartition, shard))
-      .take(1)
-      .flatMap(_.streamReaders(AllChunkScan, dataset.dataColumns.map(_.id).toArray)) // all chunks, all columns
-    readers.map { r =>
-      // TODO r.vectors is on-heap. It should be copied to the offheap store before adding to index.
-      infosChunks.put(r.info.id, InfoChunks(r.info, r.vectors.map(_.asInstanceOf[BinaryVector[_]])))
-    }.countL.map { count =>
+  private def demandPageFromColStore(method: ChunkScanMethod, columnIds: Array[Int]): Observable[ChunkSetReader] = {
+
+    // results where query time range spans both data from cassandra and recently ingested data
+    val resultsFromMemory = Observable.fromIterator(readersFromMemory(method, columnIds))
+
+    val colStoreReaders = readFromColStore()
+
+    // store the chunks into memory (happens asynchronously, not on the query path)
+    colStoreReaders.flatMap { onHeapReaders =>
+      pagedChunkStore.storeAsync(onHeapReaders, this)
+    }.map { onHeapInfos =>
+      partitionLoadedFromPersistentStore.set(true)
       shardStats.partitionsPagedFromColStore.increment()
-      shardStats.chunkIdsPagedFromColStore.increment(count)
-      logger.trace(s"Successfully ingested $count rows from cassandra into Memstore for partition key $binPartition")
-      partitionLoadedFromPersistentStore = true
+      shardStats.chunkIdsPagedFromColStore.increment(onHeapInfos.size)
+      logger.trace(s"Successfully paged ${onHeapInfos.size} chunksets from cassandra for partition key $binPartition")
+    }.onFailure { case e =>
+      logger.warn("Error occurred when paging data into Memstore", e)
     }
+
+    // now filter the data read from colStore per user query
+    val resultsFromColStore = Observable.fromFuture(colStoreReaders).flatMap(Observable.fromIterable(_))
+      .filter { r =>
+        // filter chunks based on query
+        method match {
+          case AllChunkScan =>                          true
+          case RowKeyChunkScan(from, to) =>             r.info.intersection(from.binRec, to.binRec).isDefined
+          case LastSampleChunkScan =>                   false
+              // TODO return last chunk only if no data is ingested.
+              // For now assume data is ingested continuously, and the chunk in memory will suffice
+        }
+      }.map { r =>
+        // get right columns
+        val chunkset = getVectors(columnIds, r.vectors.map(_.asInstanceOf[BinaryVector[_]]))
+        shardStats.numChunksQueried.increment(chunkset.length)
+        new ChunkSetReader(r.info, emptySkips, chunkset)
+      }
+    resultsFromMemory ++ resultsFromColStore
   }
 
+  private def readFromColStore() = {
+    val colStoreScan = dataset.timestampColumn match {
+      case Some(tsCol) =>
+        // scan colStore since retention (ex, 72) hours ago until (not including) first key in memstore
+        val from = BinaryRecord(dataset, Seq(System.currentTimeMillis() - chunkRetentionMillis))
+        val toL = infosChunks.values.headOption.flatMap { v =>
+          if (v.info.firstKey.isEmpty) None else Some(v.info.firstKey.getLong(tsCol.id) - 1)
+        }
+        val to = BinaryRecord(dataset, Seq(toL.getOrElse(Long.MaxValue)))
+        RowKeyChunkScan(from, to)
+      case None =>
+        AllChunkScan
+    }
+    chunkSource.scanPartitions(dataset, SinglePartitionScan(binPartition, shard))
+      .take(1)
+      .flatMap(_.streamReaders(colStoreScan, dataset.dataColumns.map(_.id).toArray)) // all chunks, all columns
+      .toListL
+      .runAsync
+  }
 }

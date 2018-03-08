@@ -1,6 +1,5 @@
 package filodb.cassandra.columnstore
 
-import com.typesafe.config.ConfigFactory
 import monix.reactive.Observable
 import org.scalatest.BeforeAndAfterAll
 
@@ -13,7 +12,6 @@ import filodb.memory.format.TupleRowReader
 
 class CassandraBackedTimeSeriesPartitionSpec extends TimeSeriesPartitionSpec with BeforeAndAfterAll {
 
-  val config = ConfigFactory.load("application_test.conf").getConfig("filodb")
   import monix.execution.Scheduler.Implicits.global
   override val colStore = new CassandraColumnStore(config, global)
 
@@ -27,13 +25,13 @@ class CassandraBackedTimeSeriesPartitionSpec extends TimeSeriesPartitionSpec wit
     val now = System.currentTimeMillis()
     val data = singleSeriesData(now, 1000).map(TupleRowReader).take(40) // generate for each second
     val chunks: Observable[ChunkSet] = TestData.toChunkSetStream(dataset1,
-      defaultPartKey, data, 10) // 10 rows per chunk
+      defaultPartKey, data, 10) // 10 rows per chunk, 4 chunks will be created
 
     // first write chunks to persistent store
     colStore.write(dataset1, chunks).futureValue
 
-    val part = new TimeSeriesPartition(dataset1, defaultPartKey, 0, colStore, bufferPool,
-      new TimeSeriesShardStats(dataset1.ref, 0))
+    val part = new TimeSeriesPartition(dataset1, defaultPartKey, 0, colStore, bufferPool, config, false,
+          pagedChunkStore, new TimeSeriesShardStats(dataset1.ref, 0))
 
     // now query the persistence backed store for a sub interval without ingesting data explicitly
     val start: BinaryRecord = BinaryRecord(dataset1, Seq(now))
@@ -61,5 +59,9 @@ class CassandraBackedTimeSeriesPartitionSpec extends TimeSeriesPartitionSpec wit
     readers3.map(_.rowIterator().size).sum shouldEqual 20
 
   }
+
+  // TODO test a query that involves both memory and cassandra
+
+  // TODO test a query that does not involve all columns
 
 }

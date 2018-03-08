@@ -7,7 +7,7 @@ import org.scalatest.fixture.FunSuite
 class PageAlignedBlockManagerConcurrentSpec extends FunSuite with ConductorFixture with Matchers {
 
   val memoryStats = new MemoryStats(Map("test"-> "test"))
-  val blockManager = new PageAlignedBlockManager(2048 * 1024, memoryStats)
+  val blockManager = new PageAlignedBlockManager(2048 * 1024, memoryStats, 1, 72)
   val pageSize = blockManager.blockSizeInBytes
 
   test("Should allow multiple thread to request blocks safely") {
@@ -16,7 +16,7 @@ class PageAlignedBlockManagerConcurrentSpec extends FunSuite with ConductorFixtu
 
       thread("Random guy") {
         //1 page
-        val blocks = blockManager.requestBlocks(pageSize)
+        val blocks = blockManager.requestBlocks(pageSize, None)
         blocks.size should be(1)
         val block = blocks.head
         block.own()
@@ -25,7 +25,7 @@ class PageAlignedBlockManagerConcurrentSpec extends FunSuite with ConductorFixtu
       }
       thread("Another dude") {
         //2 page
-        val blocks = blockManager.requestBlocks(2 * pageSize)
+        val blocks = blockManager.requestBlocks(2 * pageSize, None)
         blocks.size should be(2)
         val block = blocks.head
         block.own()
@@ -34,7 +34,7 @@ class PageAlignedBlockManagerConcurrentSpec extends FunSuite with ConductorFixtu
       }
       thread("Yet another dude") {
         //3 page
-        val blocks = blockManager.requestBlocks(3 * pageSize)
+        val blocks = blockManager.requestBlocks(3 * pageSize, None)
         blocks.size should be(3)
         val block = blocks.head
         block.own()

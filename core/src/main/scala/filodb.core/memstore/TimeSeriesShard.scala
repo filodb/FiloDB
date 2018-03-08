@@ -1,5 +1,7 @@
 package filodb.core.memstore
 
+import java.util.concurrent.TimeUnit
+
 import scala.collection.mutable.{ArrayBuffer, HashMap}
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.Try
@@ -118,10 +120,13 @@ class TimeSeriesShard(dataset: Dataset, config: Config, val shardNum: Int, sink:
   private val numPagesPerBlock = Try(config.getInt("memstore.num-block-pages")).getOrElse(1000)
   private final val numGroups = config.getInt("memstore.groups-per-shard")
   private val maxNumPartitions = config.getInt("memstore.max-num-partitions")
+  private val chunkRetentionHours = config.getDuration("memstore.demand-paged-chunk-retention-period",
+    TimeUnit.HOURS).toInt
 
   // The off-heap block store used for encoded chunks
   protected val blockMemorySize: Long = shardMemoryMB * 1024 * 1024L
-  private val blockStore = new PageAlignedBlockManager(blockMemorySize, shardStats.memoryStats, numPagesPerBlock)
+  private val blockStore = new PageAlignedBlockManager(blockMemorySize, shardStats.memoryStats,
+                                                       numPagesPerBlock, chunkRetentionHours)
   private val blockFactoryPool = new BlockMemFactoryPool(blockStore)
   private val numColumns = dataset.dataColumns.size
 
@@ -129,6 +134,7 @@ class TimeSeriesShard(dataset: Dataset, config: Config, val shardNum: Int, sink:
   protected val bufferMemorySize: Long = maxChunksSize * 8L * maxNumPartitions * numColumns
   logger.info(s"Allocating $bufferMemorySize bytes for WriteBufferPool for shard $shardNum")
   protected val bufferMemoryManager = new NativeMemoryManager(bufferMemorySize)
+  protected val pagedChunkStore = new DemandPagedChunkStore(dataset, blockStore, chunkRetentionHours, shardNum)
 
   /**
     * Unencoded/unoptimized ingested data is stored in buffers that are allocated from this off-heap pool
@@ -152,6 +158,8 @@ class TimeSeriesShard(dataset: Dataset, config: Config, val shardNum: Int, sink:
     * the other is being flushed. When buffers are switched for the group, the indexes are swapped.
     */
   private final val partKeysToFlush = Array.fill(numGroups, 2)(new EWAHCompressedBitmap)
+
+  val queryScheduler = monix.execution.Scheduler.computation()
 
   class PartitionIterator(intIt: IntIterator) extends Iterator[TimeSeriesPartition] {
     def hasNext: Boolean = intIt.hasNext
@@ -308,7 +316,8 @@ class TimeSeriesShard(dataset: Dataset, config: Config, val shardNum: Int, sink:
   // and external partition key components need to yield the same hashCode.  IE, use UTF8Strings everywhere.
   def addPartition(newPartKey: SchemaRowReader, needsPersistence: Boolean): TimeSeriesPartition = {
     val binPartKey = dataset.partKey(newPartKey)
-    val newPart = new TimeSeriesPartition(dataset, binPartKey, shardNum, sink, bufferPool, shardStats)
+    val newPart = new TimeSeriesPartition(dataset, binPartKey, shardNum, sink, bufferPool, config, needsPersistence,
+      pagedChunkStore, shardStats)(queryScheduler)
     val newIndex = partitions.length
     keyIndex.addKey(binPartKey, newIndex)
     partitions += newPart

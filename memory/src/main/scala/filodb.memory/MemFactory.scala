@@ -33,6 +33,14 @@ trait MemFactory {
     */
   def freeMemory(address: Long): Unit
 
+  /**
+    * Allocate and make of copy of the bytes into the allocated memory
+    *
+    * @param bytes The bytes to be copied
+    * @return The memory to which the bytes have been copied to
+    */
+  def copyFromBytes(bytes: Array[Byte]): ByteBuffer
+
   def fromBuffer(buf: ByteBuffer): Memory = {
     if (buf.hasArray) {
       (buf.array, arayOffset.toLong + buf.arrayOffset + buf.position, buf.limit - buf.position)
@@ -65,6 +73,30 @@ class NativeMemoryManager(val upperBoundSizeInBytes: Long) extends MemFactory {
 
   def availableDynMemory: Long = upperBoundSizeInBytes - usedSoFar.get()
 
+  /**
+    * Allocate and make of copy of the bytes into the allocated memory
+    *
+    * @param bytes The bytes to be copied
+    * @return The memory to which the bytes have been copied to
+    */
+  override def copyFromBytes(bytes: Array[Byte]): ByteBuffer = {
+    val currentSize = usedSoFar.get()
+    //4 for magic header
+    val size = bytes.length
+    val resultantSize = currentSize + size
+    if (!(resultantSize > upperBoundSizeInBytes)) {
+      val address: Long = MemoryIO.getCheckedInstance().allocateMemory(size, true)
+      usedSoFar.compareAndSet(currentSize, currentSize + size)
+      sizeMapping.put(address, size)
+      val byteBuffer = UnsafeUtils.asDirectBuffer(address, size)
+      UnsafeUtils.unsafe.copyMemory(bytes, UnsafeUtils.arayOffset, UnsafeUtils.ZeroPointer, address, size)
+      byteBuffer
+    } else {
+      val msg = s"Resultant memory size $resultantSize after allocating " +
+        s"with requested size $size is greater than upper bound size $upperBoundSizeInBytes"
+      throw new IndexOutOfBoundsException(msg)
+    }
+  }
 
   override def allocateWithMagicHeader(allocateSize: Int): Memory = {
     val currentSize = usedSoFar.get()
@@ -127,6 +159,12 @@ class ArrayBackedMemFactory extends MemFactory {
     (newBytes, UnsafeUtils.arayOffset + 4, size)
   }
 
+  override def copyFromBytes(bytes: Array[Byte]): ByteBuffer = {
+    val newBytes = new Array[Byte](bytes.length)
+    System.arraycopy(bytes, 0, newBytes, 0, bytes.length)
+    ByteBuffer.wrap(newBytes)
+  }
+
   // Nothing to free, let heap GC take care of it  :)
   override def freeMemory(address: Long): Unit = {}
   def shutdown(): Unit = {}
@@ -134,20 +172,27 @@ class ArrayBackedMemFactory extends MemFactory {
 
 
 /**
-  * A holder which maintains a reference to a currentBlock which is replaced when
-  * it is full
+  * A MemFactory that allocates memory from Blocks obtained from the BlockManager. It
+  * maintains a reference to a currentBlock which is replaced when it is full
   *
-  * @param blockStore The BlockStore which is used to request more blocks when the current
+  * @param blockStore The BlockManager which is used to request more blocks when the current
   *                   block is full.
+  * @param markFullBlocksAsReclaimable Immediately mark and fully used block as reclaimable.
+  *                                    Typically true during on-demand paging of optimized chunks from persistent store
   */
-class BlockHolder(blockStore: BlockManager) extends MemFactory with StrictLogging {
+class BlockMemFactory(blockStore: BlockManager, reclaimOrder: Option[Int],
+                      markFullBlocksAsReclaimable: Boolean = false) extends MemFactory with StrictLogging {
 
-  val blockGroup = ListBuffer[Block]()
+  // tracks fully populated blocks not marked reclaimable yet (typically waiting for flush)
+  val fullBlocks = ListBuffer[Block]()
+
+  // tracks block currently being populated
   val currentBlock = new AtomicReference[Block]()
-  val partitionGroup: ListBuffer[Block] = ListBuffer[Block]()
 
-  currentBlock.set(blockStore.requestBlock().get)
-  blockGroup += currentBlock.get()
+  // tracks blocks that belong to same partition and share same reclaim listener
+  private val partitionGroup: ListBuffer[Block] = ListBuffer[Block]()
+
+  currentBlock.set(blockStore.requestBlock(reclaimOrder).get)
 
   /**
     * Starts tracking the block references for a partition.
@@ -169,13 +214,17 @@ class BlockHolder(blockStore: BlockManager) extends MemFactory with StrictLoggin
   }
 
   def markUsedBlocksReclaimable(): Unit = {
-    blockGroup.foreach(_.markReclaimable())
+    fullBlocks.foreach(_.markReclaimable())
+    fullBlocks.clear()
   }
 
   protected def ensureCapacity(forSize: Long): Block = {
     if (!currentBlock.get().hasCapacity(forSize)) {
-      currentBlock.set(blockStore.requestBlock().get)
-      blockGroup += currentBlock.get()
+      if (markFullBlocksAsReclaimable) {
+        currentBlock.get().markReclaimable()
+      }
+      fullBlocks += currentBlock.get()
+      currentBlock.set(blockStore.requestBlock(reclaimOrder).get)
     }
     currentBlock.get()
   }
@@ -197,6 +246,29 @@ class BlockHolder(blockStore: BlockManager) extends MemFactory with StrictLoggin
     val postAllocationPosition = preAllocationPosition + 4 + allocateSize
     block.position(postAllocationPosition)
     (UnsafeUtils.ZeroPointer, headerAddress + 4, allocateSize)
+  }
+
+  /**
+    * Chunks from recovered partitions are copied here.
+    * Unlike in a flush these will happen in a multi-threaded fashion.
+    * A block is  just a buffer of memory - so it cannot be concurrently used.
+    * We need to lock before doing the copy. A small price to pay so that flush allocation
+    * is seamless and we don't need to compact to de-fragment.
+    * @param bytes The bytes to be copied
+    * @return The memory to which the bytes have been copied to
+    */
+  override def copyFromBytes(bytes: Array[Byte]): ByteBuffer = {
+    val allocateSize = bytes.length
+    val block = ensureCapacity(allocateSize)
+    val preAllocationPosition = block.position()
+    val address = block.address + preAllocationPosition
+    val byteBuffer = UnsafeUtils.asDirectBuffer(address, allocateSize)
+    block.own()
+    byteBuffer.put(bytes)
+    val postAllocationPosition = preAllocationPosition + allocateSize
+    block.position(postAllocationPosition)
+    byteBuffer.flip()
+    byteBuffer
   }
 
   /**
