@@ -1,7 +1,11 @@
 package filodb.cassandra.columnstore
 
+import scala.concurrent.duration._
+import scala.language.postfixOps
+
 import monix.reactive.Observable
 import org.scalatest.BeforeAndAfterAll
+import org.scalatest.concurrent.PatienceConfiguration.Timeout
 
 import filodb.core.TestData
 import filodb.core.memstore.{TimeSeriesPartition, TimeSeriesPartitionSpec, TimeSeriesShardStats}
@@ -14,10 +18,11 @@ class CassandraBackedTimeSeriesPartitionSpec extends TimeSeriesPartitionSpec wit
 
   import monix.execution.Scheduler.Implicits.global
   override val colStore = new CassandraColumnStore(config, global)
+  val timeout = Timeout(30 seconds)
 
   override def beforeAll(): Unit = {
     super.beforeAll()
-    colStore.initialize(dataset1.ref)
+    colStore.initialize(dataset1.ref).futureValue(timeout)
   }
 
   it("should be able to load from persistent store to answer queries") {

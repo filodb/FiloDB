@@ -35,7 +35,7 @@ sealed class PartitionListTable(val dataset: DatasetRef,
                      |    stripe int,
                      |    partition blob,
                      |    PRIMARY KEY ((shard, stripe), partition)
-                     |) WITH COMPACT STORAGE AND compression = {
+                     |) WITH compression = {
                     'sstable_compression': '$sstableCompression'}""".stripMargin
 
   def fromRow(row: Row, dataset: Dataset): Types.PartitionKey =

@@ -31,15 +31,13 @@ sealed class ChunkTable(val dataset: DatasetRef,
   private val compressChunks = connector.config.getBoolean("lz4-chunk-compress")
   private val compressBytePrefix = 0xff.toByte
 
-  // WITH COMPACT STORAGE saves 35% on storage costs according to this article:
-  // http://blog.librato.com/posts/cassandra-compact-storage
   val createCql = s"""CREATE TABLE IF NOT EXISTS $tableString (
                     |    partition blob,
                     |    columnid int,
                     |    chunkid bigint,
                     |    data blob,
                     |    PRIMARY KEY (partition, columnid, chunkid)
-                    |) WITH COMPACT STORAGE AND compression = {
+                    |) WITH compression = {
                     'sstable_compression': '$sstableCompression'}""".stripMargin
 
   lazy val writeChunksCql = session.prepare(

@@ -44,7 +44,7 @@ sealed class IndexTable(val dataset: DatasetRef, val connector: FiloCassandraCon
                      |    chunkid bigint,
                      |    data blob,
                      |    PRIMARY KEY (partition, indextype, chunkid)
-                     |) WITH COMPACT STORAGE AND compression = {
+                     |) WITH compression = {
                     'sstable_compression': '$sstableCompression'}""".stripMargin
 
 
