@@ -12,9 +12,6 @@ class FilodbClusterSpec extends AkkaSpec {
       cluster.isTerminated shouldEqual false
     }
     "load and setup basic components successfully and reach expected 'start' state" in {
-      val tracer = cluster.kamonInit(ClusterRole.Server)
-      tracer.path.name should be (ActorName.TraceLoggerName)
-
       cluster.coordinatorActor.path.name should be (ActorName.CoordinatorName)
       awaitCond(cluster.metaStore.initialize().isCompleted, cluster.settings.InitializationTimeout)
       cluster.join()

@@ -27,11 +27,11 @@ object FiloRelation extends StrictLogging {
   // *** Statistics **
   // For now they are global across all tables.
   // TODO(velvia): Make them per-table?
-  val totalQueries             = Kamon.metrics.counter("spark-queries-total")
-  val singlePartQueries        = Kamon.metrics.counter("spark-queries-single-partition")
-  val multiPartQueries         = Kamon.metrics.counter("spark-queries-multi-partition")
-  val fullFilteredQueries      = Kamon.metrics.counter("spark-queries-full-filtered")
-  val fullTableQueries         = Kamon.metrics.counter("spark-queries-full-table")
+  val totalQueries             = Kamon.counter("spark-queries-total")
+  val singlePartQueries        = Kamon.counter("spark-queries-single-partition")
+  val multiPartQueries         = Kamon.counter("spark-queries-multi-partition")
+  val fullFilteredQueries      = Kamon.counter("spark-queries-full-filtered")
+  val fullTableQueries         = Kamon.counter("spark-queries-full-table")
 
   def getDatasetObj(dataset: DatasetRef): Dataset =
     parse(FiloDriver.metaStore.getDataset(dataset)) { ds => ds }
@@ -242,7 +242,6 @@ object FiloRelation extends StrictLogging {
  * parallelize reads from different columns.
  *
  * @constructor
- * @param sparkContext the spark context to pull config from
  * @param dataset the DatasetRef with name and database/keyspace of the dataset to read from
  */
 case class FiloRelation(dataset: DatasetRef,

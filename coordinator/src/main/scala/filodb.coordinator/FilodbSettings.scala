@@ -21,8 +21,6 @@ final class FilodbSettings(val conf: Config) {
   /** The filodb configuration specifically. */
   val config: Config = allConfig.as[Config]("filodb")
 
-  lazy val metrics: Config = config.as[Option[Config]]("metrics-logger").getOrElse(ConfigFactory.empty)
-
   lazy val SeedNodes: immutable.Seq[String] =
     sys.props.get("filodb.seed-nodes")
       .map(_.trim.split(",").toList)
@@ -61,7 +59,6 @@ object ActorName {
 
   val NodeGuardianName = "node"
   val CoordinatorName = "coordinator"
-  val TraceLoggerName = "trace-logger"
 
   /* The actor name of the child singleton actor */
   val ClusterSingletonManagerName = "nodecluster"

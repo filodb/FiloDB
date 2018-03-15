@@ -176,7 +176,9 @@ private[filodb] final class IngestionActor(dataset: Dataset,
                          checkpoints: Map[Int, Long]): Future[Long] = {
     val tags = Map("shard" -> shard.toString, "dataset" -> dataset.ref.toString)
     val futTry = create(shard, Some(startOffset)) map { ingestionStream =>
-      val recoveryTrace = Kamon.tracer.newContext("ingestion-recovery-trace", None, tags)
+      val recoveryTrace = Kamon.buildSpan("ingestion-recovery-trace")
+                               .withTag("shard", shard.toString)
+                               .withTag("dataset", dataset.ref.toString).start()
       val stream = ingestionStream.get
       clusterActor ! RecoveryInProgress(dataset.ref, shard, context.parent, 0)
 
@@ -195,7 +197,8 @@ private[filodb] final class IngestionActor(dataset: Dataset,
           recoveryTrace.finish()
         case Failure(ex) =>
           ingestionStream.teardown()
-          recoveryTrace.finishWithError(ex)
+          recoveryTrace.addError(s"Recovery failed for shard $shard", ex)
+          recoveryTrace.finish()
           handleError(dataset.ref, shard, ex)
       }
       fut
@@ -244,7 +247,7 @@ private[filodb] final class IngestionActor(dataset: Dataset,
 
   private def handleError(ref: DatasetRef, shard: Int, err: Throwable): Unit = {
     clusterActor ! IngestionError(ref, shard, err)
-    logger.error("Exception thrown during ingestion stream", err)
+    logger.error(s"Exception thrown during ingestion stream for shard $shard", err)
   }
 
   private def handleInvalid(command: ShardCommand, origin: Option[ActorRef]): Unit = {

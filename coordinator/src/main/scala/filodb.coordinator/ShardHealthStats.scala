@@ -2,6 +2,8 @@ package filodb.coordinator
 
 import scala.concurrent.duration._
 
+import kamon.Kamon
+
 import filodb.core.DatasetRef
 
 /**
@@ -16,34 +18,36 @@ import filodb.core.DatasetRef
 class ShardHealthStats(ref: DatasetRef,
                        shardMapFunc: => ShardMapper,
                        reportingInterval: FiniteDuration = 5.seconds) {
-  import filodb.core.Perftools._
 
-   val numActive = pollingGauge(s"num-active-shards-$ref",
-     reportingInterval){ shardMapFunc.statuses.filter(_ == ShardStatusActive).size }
-   val numRecovering = pollingGauge(s"num-recovering-shards-$ref",
-     reportingInterval){ shardMapFunc.statuses.filter(_.isInstanceOf[ShardStatusRecovery]).size }
-   val numUnassigned = pollingGauge(s"num-unassigned-shards-$ref",
-     reportingInterval){ shardMapFunc.statuses.filter(_ == ShardStatusUnassigned).size }
-   val numAssigned = pollingGauge(s"num-assigned-shards-$ref",
-     reportingInterval){ shardMapFunc.statuses.filter(_ == ShardStatusAssigned).size }
-   val numError = pollingGauge(s"num-error-shards-$ref",
-     reportingInterval){ shardMapFunc.statuses.filter(_ == ShardStatusError).size }
-   val numStopped = pollingGauge(s"num-stopped-shards-$ref",
-     reportingInterval){ shardMapFunc.statuses.filter(_ == ShardStatusStopped).size }
-   val numDown = pollingGauge(s"num-down-shards-$ref",
-     reportingInterval){ shardMapFunc.statuses.filter(_ == ShardStatusDown).size }
+  val numActive = Kamon.gauge(s"num-active-shards-$ref")
+  val numRecovering = Kamon.gauge(s"num-recovering-shards-$ref")
+  val numUnassigned = Kamon.gauge(s"num-unassigned-shards-$ref")
+  val numAssigned = Kamon.gauge(s"num-assigned-shards-$ref")
+  val numError = Kamon.gauge(s"num-error-shards-$ref")
+  val numStopped = Kamon.gauge(s"num-stopped-shards-$ref")
+  val numDown = Kamon.gauge(s"num-down-shards-$ref")
+
+  def update(mapper: ShardMapper): Unit = {
+    numActive.set(shardMapFunc.statuses.filter(_ == ShardStatusActive).size)
+    numRecovering.set(shardMapFunc.statuses.filter(_ == ShardStatusRecovery).size)
+    numUnassigned.set(shardMapFunc.statuses.filter(_ == ShardStatusUnassigned).size)
+    numAssigned.set(shardMapFunc.statuses.filter(_ == ShardStatusAssigned).size)
+    numError.set(shardMapFunc.statuses.filter(_ == ShardStatusError).size)
+    numStopped.set(shardMapFunc.statuses.filter(_ == ShardStatusStopped).size)
+    numDown.set(shardMapFunc.statuses.filter(_ == ShardStatusDown).size)
+  }
 
    /**
     * Stop collecting the metrics.  If this is not done then errors might get propagated and the code keeps running
     * forever and ever.
     */
-   def shutdown(): Unit = {
-     numActive.cleanup
-     numRecovering.cleanup
-     numUnassigned.cleanup
-     numAssigned.cleanup
-     numError.cleanup
-     numStopped.cleanup
-     numDown.cleanup
+   def reset(): Unit = {
+     numActive.set(0)
+     numRecovering.set(0)
+     numUnassigned.set(0)
+     numAssigned.set(0)
+     numError.set(0)
+     numStopped.set(0)
+     numDown.set(0)
    }
 }

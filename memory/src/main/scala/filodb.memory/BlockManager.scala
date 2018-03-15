@@ -1,12 +1,12 @@
 package filodb.memory
 
-import java.util
 import java.util.concurrent.locks.ReentrantLock
 
 import com.kenai.jffi.{MemoryIO, PageManager}
 import com.typesafe.scalalogging.StrictLogging
+import java.util
 import kamon.Kamon
-import kamon.metric.instrument.Counter
+import kamon.metric.Counter
 
 /**
   * Allows requesting blocks.
@@ -53,11 +53,11 @@ trait BlockManager {
 }
 
 class MemoryStats(tags: Map[String, String]) {
-  val usedBlocksMetric = Kamon.metrics.gauge("blockstore-used-blocks", tags)(0L)
-  val freeBlocksMetric = Kamon.metrics.gauge("blockstore-free-blocks", tags)(0L)
-  val usedBlocksTimeOrderedMetric = Kamon.metrics.gauge("blockstore-used-time-ordered-blocks", tags)(0L)
-  val timeOrderedBlocksReclaimedMetric = Kamon.metrics.counter("blockstore-time-ordered-blocks-reclaimed", tags)
-  val blocksReclaimedMetric = Kamon.metrics.counter("blockstore-blocks-reclaimed", tags)
+  val usedBlocksMetric = Kamon.gauge("blockstore-used-blocks").refine(tags)
+  val freeBlocksMetric = Kamon.gauge("blockstore-free-blocks").refine(tags)
+  val usedBlocksTimeOrderedMetric = Kamon.gauge("blockstore-used-time-ordered-blocks").refine(tags)
+  val timeOrderedBlocksReclaimedMetric = Kamon.counter("blockstore-time-ordered-blocks-reclaimed").refine(tags)
+  val blocksReclaimedMetric = Kamon.counter("blockstore-blocks-reclaimed").refine(tags)
 }
 
 /**
@@ -148,7 +148,7 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
       val address = firstPageAddress + (i * blockSizeInBytes)
       blocks.add(new Block(address, blockSizeInBytes))
     }
-    stats.freeBlocksMetric.record(blocks.size())
+    stats.freeBlocksMetric.set(blocks.size())
     blocks
   }
 
@@ -156,11 +156,11 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
     block.markInUse
     reclaimOrder match {
       case Some(bucket) => usedBlocksTimeOrdered(bucket).add(block)
-                           stats.usedBlocksTimeOrderedMetric.record(usedBlocksTimeOrdered.map(_.size).sum)
+                           stats.usedBlocksTimeOrderedMetric.set(usedBlocksTimeOrdered.map(_.size).sum)
       case None =>         usedBlocks.add(block)
-                           stats.usedBlocksMetric.record(usedBlocks.size())
+                           stats.usedBlocksMetric.set(usedBlocks.size())
     }
-    stats.freeBlocksMetric.record(freeBlocks.size())
+    stats.freeBlocksMetric.set(freeBlocks.size())
   }
 
   def reclaimTimeOrderedBlocks(): Unit = {
@@ -175,7 +175,7 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
           entries.remove()
           block.reclaim()
           freeBlocks.add(block)
-          stats.freeBlocksMetric.record(freeBlocks.size())
+          stats.freeBlocksMetric.set(freeBlocks.size())
           stats.timeOrderedBlocksReclaimedMetric.increment()
         }
       }
@@ -205,7 +205,7 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
           entries.remove()
           block.reclaim()
           freeBlocks.add(block)
-          stats.freeBlocksMetric.record(freeBlocks.size())
+          stats.freeBlocksMetric.set(freeBlocks.size())
           reclaimedCounter.increment()
           reclaimed = reclaimed + 1
         }

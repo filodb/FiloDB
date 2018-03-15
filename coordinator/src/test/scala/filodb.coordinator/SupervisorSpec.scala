@@ -28,18 +28,6 @@ class SupervisorSpec extends AkkaSpec {
   private lazy val cluster = Cluster(system)
 
   "NodeGuardian" must {
-    import ActorName.{NodeGuardianName => supervisor}
-    "start Kamon metrics if not ClusterRole.Cli" in {
-      factory.getClass should be(classOf[TimeSeriesNullStoreFactory])
-      val guardian = system.actorOf(guardianProps, supervisor)
-      guardian ! CreateTraceLogger(ClusterRole.Server)
-      expectMsgPF() {
-        case TraceLoggerRef(ref) =>
-          ref.path.name should be(ActorName.TraceLoggerName)
-          system stop ref
-      }
-      system stop guardian
-    }
     "create the coordinator actor" in {
       val guardian = system.actorOf(guardianProps, "sguardian")
       guardian ! CreateCoordinator

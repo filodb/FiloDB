@@ -10,7 +10,7 @@ import scala.concurrent.{ExecutionContext, Future}
 import com.datastax.driver.core.{ConsistencyLevel, Metadata, TokenRange}
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
-import kamon.trace.{TraceContext, Tracer}
+import kamon.Kamon
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
@@ -113,19 +113,17 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
   def write(dataset: Dataset,
             chunksets: Observable[ChunkSet]): Future[Response] = {
     chunksets.mapAsync(writeParallelism) { chunkset =>
-               Tracer.withNewContext("write-chunkset") {
-                 val ctx = Tracer.currentContext
-                 val future =
-                   for { writeChunksResp  <- writeChunks(dataset.ref, chunkset, ctx)
-                         writeIndexResp   <- writeIndices(dataset, chunkset, ctx)
-                                             if writeChunksResp == Success
-                   } yield {
-                     ctx.finish()
-                     sinkStats.chunksetWrite()
-                     writeIndexResp
-                   }
-                 Task.fromFuture(future)
-               }
+               val span = Kamon.buildSpan("write-chunkset").start()
+               val future =
+                 for { writeChunksResp  <- writeChunks(dataset.ref, chunkset)
+                       writeIndexResp   <- writeIndices(dataset, chunkset)
+                                           if writeChunksResp == Success
+                 } yield {
+                   span.finish()
+                   sinkStats.chunksetWrite()
+                   writeIndexResp
+                 }
+               Task.fromFuture(future)
              }.takeWhile(_ == Success)
              .countL.runAsync
              .map { chunksWritten =>
@@ -134,18 +132,16 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
   }
 
   private def writeChunks(ref: DatasetRef,
-                          chunkset: ChunkSet,
-                          ctx: TraceContext): Future[Response] = {
-    asyncSubtrace("write-chunks", "ingestion", Some(ctx)) {
+                          chunkset: ChunkSet): Future[Response] = {
+    asyncSubtrace("write-chunks", "ingestion") {
       val chunkTable = getOrCreateChunkTable(ref)
       chunkTable.writeChunks(chunkset.partition, chunkset.info, chunkset.chunks, sinkStats)
     }
   }
 
   private def writeIndices(dataset: Dataset,
-                           chunkset: ChunkSet,
-                           ctx: TraceContext): Future[Response] = {
-    asyncSubtrace("write-index", "ingestion", Some(ctx)) {
+                           chunkset: ChunkSet): Future[Response] = {
+    asyncSubtrace("write-index", "ingestion") {
       val indexTable = getOrCreateIndexTable(dataset.ref)
       val indices = Seq((chunkset.info.id, ChunkSetInfo.toBytes(dataset, chunkset.info, chunkset.skips)))
       indexTable.writeIndices(chunkset.partition, indices, sinkStats)

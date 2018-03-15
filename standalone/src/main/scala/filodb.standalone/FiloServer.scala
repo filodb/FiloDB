@@ -59,7 +59,6 @@ class FiloServer(watcher: Option[ActorRef]) extends FilodbClusterNode {
 
   def start(): Unit = {
     try {
-      cluster.kamonInit(role)
       coordinatorActor
       scala.concurrent.Await.result(metaStore.initialize(), cluster.settings.InitializationTimeout)
       val bootstrapper = bootstrap(cluster.cluster)

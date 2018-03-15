@@ -100,7 +100,7 @@ private[coordinator] final class ShardManager(strategy: ShardAssignmentStrategy)
     * INTERNAL API.
     */
   def reset(): Unit = {
-    _datasetInfo.values.foreach(_.metrics.shutdown())
+    _datasetInfo.values.foreach(_.metrics.reset())
     _datasetInfo.clear()
     _shardMappers.clear()
     _subscriptions = subscriptions.clear
@@ -147,6 +147,12 @@ private[coordinator] final class ShardManager(strategy: ShardAssignmentStrategy)
         coordinator
     }
 
+  private def updateShardMetrics(): Unit = {
+    _datasetInfo.foreach { case (dataset, info) =>
+        info.metrics.update(_shardMappers(dataset))
+    }
+  }
+
   /**
     * Called after recovery of cluster singleton to remove assignment of stale member(s).
     * This is necessary after fail-over of the cluster singleton node because MemberRemoved
@@ -164,6 +170,7 @@ private[coordinator] final class ShardManager(strategy: ShardAssignmentStrategy)
       logger.info(s"Cleaning up stale coordinator $coord after recovery")
       removeCoordinator(coord)
     }
+    updateShardMetrics()
   }
 
   private def removeCoordinator(coordinator: ActorRef): Unit = {
@@ -184,7 +191,7 @@ private[coordinator] final class ShardManager(strategy: ShardAssignmentStrategy)
                  ackTo: ActorRef): Map[ActorRef, Seq[Int]] = {
 
     logger.info(s"Initiated Setup for Dataset ${setup.ref}")
-    mapperOpt(setup.ref) match {
+    val answer: Map[ActorRef, Seq[Int]] = mapperOpt(setup.ref) match {
       case Some(_) =>
         logger.info(s"Dataset ${setup.ref} already exists - ignoring")
         ackTo ! DatasetExists(setup.ref)
@@ -208,6 +215,8 @@ private[coordinator] final class ShardManager(strategy: ShardAssignmentStrategy)
         ackTo ! DatasetVerified
         assignments
     }
+    updateShardMetrics()
+    answer
   }
 
   private def assignShardsToNodes(dataset: DatasetRef,
@@ -242,6 +251,7 @@ private[coordinator] final class ShardManager(strategy: ShardAssignmentStrategy)
     logger.info(s"Recovering map for dataset $ref")
     _shardMappers(ref) = map
     logger.debug(s"Map contents: $map")
+    updateShardMetrics()
   }
 
   def recoverSubscriptions(subs: ShardSubscriptions): Unit = {
@@ -255,7 +265,7 @@ private[coordinator] final class ShardManager(strategy: ShardAssignmentStrategy)
     * for the received shard event from the event source, and publishes
     * the event to all subscribers of that event and dataset.
     */
-  def updateFromShardEventAndPublish(event: ShardEvent): Unit =
+  def updateFromShardEventAndPublish(event: ShardEvent): Unit = {
     _shardMappers.get(event.ref) foreach { mapper =>
       mapper.updateFromEvent(event) match {
         case Failure(l) =>
@@ -268,6 +278,8 @@ private[coordinator] final class ShardManager(strategy: ShardAssignmentStrategy)
       publishEvent(event)
       logger.debug(s"Shard Mapper after updateFromShardEventAndPublish: $mapper")
     }
+    updateShardMetrics()
+  }
 
   /**
     * This method has the shared logic for sending shard assignment messages

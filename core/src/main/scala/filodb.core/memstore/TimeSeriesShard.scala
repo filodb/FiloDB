@@ -10,6 +10,7 @@ import com.googlecode.javaewah.{EWAHCompressedBitmap, IntIterator}
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
+import kamon.metric.MeasurementUnit
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
@@ -26,16 +27,16 @@ import filodb.memory.format.{SchemaRowReader, ZeroCopyUTF8String}
 class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
   val tags = Map("shard" -> shardNum.toString, "dataset" -> dataset.toString)
 
-  val rowsIngested = Kamon.metrics.counter("memstore-rows-ingested", tags)
-  val partitionsCreated = Kamon.metrics.counter("memstore-partitions-created", tags)
-  val rowsSkipped  = Kamon.metrics.counter("recovery-row-skipped", tags)
-  val numChunksEncoded = Kamon.metrics.counter("memstore-chunks-encoded", tags)
-  val numSamplesEncoded = Kamon.metrics.counter("memstore-samples-encoded", tags)
-  val encodedBytes  = Kamon.metrics.counter("memstore-encoded-bytes-allocated", tags)
-  val flushesSuccessful = Kamon.metrics.counter("memstore-flushes-success", tags)
-  val flushesFailedPartWrite = Kamon.metrics.counter("memstore-flushes-failed-partition", tags)
-  val flushesFailedChunkWrite = Kamon.metrics.counter("memstore-flushes-failed-chunk", tags)
-  val flushesFailedOther = Kamon.metrics.counter("memstore-flushes-failed-other", tags)
+  val rowsIngested = Kamon.counter("memstore-rows-ingested").refine(tags)
+  val partitionsCreated = Kamon.counter("memstore-partitions-created").refine(tags)
+  val rowsSkipped  = Kamon.counter("recovery-row-skipped").refine(tags)
+  val numChunksEncoded = Kamon.counter("memstore-chunks-encoded").refine(tags)
+  val numSamplesEncoded = Kamon.counter("memstore-samples-encoded").refine(tags)
+  val encodedBytes  = Kamon.counter("memstore-encoded-bytes-allocated", MeasurementUnit.information.bytes).refine(tags)
+  val flushesSuccessful = Kamon.counter("memstore-flushes-success").refine(tags)
+  val flushesFailedPartWrite = Kamon.counter("memstore-flushes-failed-partition").refine(tags)
+  val flushesFailedChunkWrite = Kamon.counter("memstore-flushes-failed-chunk").refine(tags)
+  val flushesFailedOther = Kamon.counter("memstore-flushes-failed-other").refine(tags)
 
   /**
    * These gauges are intended to be combined with one of the latest offset of Kafka partitions so we can produce
@@ -48,18 +49,19 @@ class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
    * negative numbers either.
    * The "latest" vs "earliest" flushed reflects that there are really n offsets, one per flush group.
    */
-  val offsetLatestInMem = Kamon.metrics.gauge("shard-offset-latest-inmemory", tags)(0L)
-  val offsetLatestFlushed = Kamon.metrics.gauge("shard-offset-flushed-latest", tags)(0L)
-  val offsetEarliestFlushed = Kamon.metrics.gauge("shard-offset-flushed-earliest", tags)(0L)
+  val offsetLatestInMem = Kamon.gauge("shard-offset-latest-inmemory").refine(tags)
+  val offsetLatestFlushed = Kamon.gauge("shard-offset-flushed-latest").refine(tags)
+  val offsetEarliestFlushed = Kamon.gauge("shard-offset-flushed-earliest").refine(tags)
+  val numPartitions = Kamon.gauge("num-partitions").refine(tags)
 
-  val partitionsPagedFromColStore = Kamon.metrics.counter("memstore-partitions-paged-in", tags)
-  val chunkIdsPagedFromColStore = Kamon.metrics.counter("memstore-chunkids-paged-in", tags)
-  val chunkIdsEvicted  = Kamon.metrics.counter("memstore-chunkids-evicted", tags)
-  val partitionsQueried = Kamon.metrics.counter("memstore-partitions-queried", tags)
-  val numChunksQueried = Kamon.metrics.counter("memstore-chunks-queried", tags)
+  val partitionsPagedFromColStore = Kamon.counter("memstore-partitions-paged-in").refine(tags)
+  val chunkIdsPagedFromColStore = Kamon.counter("memstore-chunkids-paged-in").refine(tags)
+  val chunkIdsEvicted  = Kamon.counter("memstore-chunkids-evicted").refine(tags)
+  val partitionsQueried = Kamon.counter("memstore-partitions-queried").refine(tags)
+  val numChunksQueried = Kamon.counter("memstore-chunks-queried").refine(tags)
   val memoryStats = new MemoryStats(tags)
 
-  val bufferPoolSize = Kamon.metrics.gauge("memstore-writebuffer-pool-size", tags)(0L)
+  val bufferPoolSize = Kamon.gauge("memstore-writebuffer-pool-size").refine(tags)
 }
 
 // TODO for scalability: get rid of stale partitions?
@@ -222,7 +224,7 @@ class TimeSeriesShard(dataset: Dataset, config: Config, val shardNum: Int, sink:
 
   def createFlushTask(flushGroup: FlushGroup)(implicit ingestionScheduler: Scheduler): Task[Response] = {
     val partitionIt = new PartitionIterator(partitionGroups(flushGroup.groupNum).intIterator)
-    val tracer = Kamon.tracer.newContext("chunk-flush-task-latency-after-retries", None, shardStats.tags)
+    val tracer = Kamon.buildSpan("chunk-flush-task-latency-after-retries").start() // TODO tags: shardStats.tags
     val taskToReturn = partitionIt.isEmpty match {
       case false =>
         doFlushSteps(flushGroup, partitionIt)
@@ -232,7 +234,7 @@ class TimeSeriesShard(dataset: Dataset, config: Config, val shardNum: Int, sink:
         Task.fromFuture(commitCheckpoint(dataset.ref, shardNum, flushGroup))
     }
     taskToReturn.runOnComplete(_ => tracer.finish())
-    shardStats.bufferPoolSize.record(bufferPool.poolSize)
+    shardStats.bufferPoolSize.set(bufferPool.poolSize)
     taskToReturn
   }
 
@@ -297,12 +299,12 @@ class TimeSeriesShard(dataset: Dataset, config: Config, val shardNum: Int, sink:
         DataDropped
       }
       // Update stats
-      if (_offset >= 0) shardStats.offsetLatestInMem.record(_offset)
+      if (_offset >= 0) shardStats.offsetLatestInMem.set(_offset)
       groupWatermark(flushGroup.groupNum) = flushGroup.flushWatermark
       val maxWatermark = groupWatermark.max
       val minWatermark = groupWatermark.min
-      if (maxWatermark >= 0) shardStats.offsetLatestFlushed.record(maxWatermark)
-      if (minWatermark >= 0) shardStats.offsetEarliestFlushed.record(minWatermark)
+      if (maxWatermark >= 0) shardStats.offsetLatestFlushed.set(maxWatermark)
+      if (minWatermark >= 0) shardStats.offsetEarliestFlushed.set(minWatermark)
       fut
     } else {
       Future.successful(NotApplied)
@@ -323,6 +325,7 @@ class TimeSeriesShard(dataset: Dataset, config: Config, val shardNum: Int, sink:
     partitions += newPart
     shardStats.partitionsCreated.increment
     keyMap(binPartKey) = newPart
+    shardStats.numPartitions.increment()
     partitionGroups(group(newPartKey)).set(newIndex)
     // if we are in the restore execution flow, we should not need to write this key
     if (needsPersistence) partKeysToFlush(group(binPartKey))(0).set(newIndex)

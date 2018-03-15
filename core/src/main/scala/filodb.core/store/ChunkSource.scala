@@ -98,9 +98,9 @@ trait ChunkSource {
  * Statistics for a ChunkSource.  Some of this is used by unit tests.
  */
 class ChunkSourceStats {
-  private val readPartitionsCtr  = Kamon.metrics.counter("read-partitions")
-  private val readChunksetsCtr   = Kamon.metrics.counter("read-chunksets")
-  private val chunkNoInfoCtr     = Kamon.metrics.counter("read-chunks-with-no-info")
+  private val readPartitionsCtr  = Kamon.counter("read-partitions")
+  private val readChunksetsCtr   = Kamon.counter("read-chunksets")
+  private val chunkNoInfoCtr     = Kamon.counter("read-chunks-with-no-info")
   var readChunkSets: Int = 0
   var readPartitions: Int = 0
 

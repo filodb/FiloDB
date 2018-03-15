@@ -142,7 +142,7 @@ val akkaVersion       = "2.4.19" // akka-http/akka-stream compat. TODO when kamo
 val akkaHttpVersion   = "10.0.10"
 val cassDriverVersion = "3.0.2"
 val ficusVersion      = "1.1.2"
-val kamonVersion      = "0.6.3"
+val kamonVersion      = "1.1.0"
 val monixKafkaVersion = "0.14"
 val sparkVersion      = "2.0.0"
 
@@ -160,6 +160,9 @@ val circeParser       = "io.circe"                   %% "circe-parser"         %
 
 lazy val commonDeps = Seq(
   "io.kamon" %% "kamon-core" % kamonVersion,
+  "io.kamon" %% "kamon-akka-2.4" % "1.0.1",
+  "io.kamon" %% "kamon-executors" % "1.0.0",
+  "io.kamon" %% "kamon-akka-remote-2.4" % "1.0.0",
   logbackDep % Test,
   scalaTest  % Test,
   scalaCheck % "test"
@@ -202,14 +205,9 @@ lazy val cassDeps = commonDeps ++ Seq(
 lazy val coordDeps = commonDeps ++ Seq(
   "com.typesafe.akka"    %% "akka-slf4j"        % akkaVersion,
   "com.typesafe.akka"    %% "akka-cluster"      % akkaVersion,
-  // TODO kamon-akka-remote for cluster support:
-  //   but only with kamon 0.6.7 vs 0.6.8, and akka 2.4.16 (not available yet for 2.5)
-  // TODO kamon-akka is akka 2.5 compatible
-  // Take out the below line if you really don't want statsd metrics enabled
   "com.github.romix.akka" %% "akka-kryo-serialization" % "0.5.0" excludeAll(excludeMinlog),
   // Redirect minlog logs to SLF4J
    "com.dorkbox"         % "MinLog-SLF4J"       % "1.12",
-  "io.kamon"             %% "kamon-statsd"      % kamonVersion,
   "com.opencsv"          % "opencsv"            % "3.3",
   "org.parboiled"        %% "parboiled"         % "2.1.3",
   "com.typesafe.akka"    %% "akka-testkit"      % akkaVersion % Test,
@@ -218,6 +216,9 @@ lazy val coordDeps = commonDeps ++ Seq(
 
 lazy val cliDeps = Seq(
   logbackDep,
+  "io.kamon" %% "kamon-akka-2.4" % "1.0.1",
+  "io.kamon" %% "kamon-executors" % "1.0.0",
+  "io.kamon" %% "kamon-akka-remote-2.4" % "1.0.0",
   "com.quantifind"    %% "sumac"          % "0.3.0"
 )
 
@@ -245,6 +246,7 @@ lazy val httpDeps = Seq(
 
 lazy val standaloneDeps = Seq(
   logbackDep,
+  "io.kamon" %% "kamon-zipkin" % "1.0.0",
   "net.ceedubs"          %% "ficus"             % ficusVersion      % Test,
   "com.typesafe.akka"    %% "akka-multi-node-testkit" % akkaVersion % Test
 )

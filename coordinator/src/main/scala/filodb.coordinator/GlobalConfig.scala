@@ -40,11 +40,4 @@ trait NodeConfiguration {
 
 }
 
-/**
- * This is an optional method for Spark and other FiloDB apps to reuse the same config loading
- * mechanism provided by FiloDB, instead of using the default Typesafe config loading.  To use this
- * pass -Dkamon.config-provider=filodb.coordinator.KamonConfigProvider
- */
-class KamonConfigProvider extends kamon.ConfigProvider {
-  def config: Config = GlobalConfig.systemConfig
-}
+

@@ -28,9 +28,6 @@ final class NodeGuardian(val settings: FilodbSettings,
 
   override def postStop(): Unit = {
     super.postStop()
-    context.child(TraceLoggerName) foreach {
-      actor => kamon.Kamon.shutdown()
-    }
   }
 
   override def preRestart(reason: Throwable, message: Option[Any]): Unit = {
@@ -39,7 +36,6 @@ final class NodeGuardian(val settings: FilodbSettings,
   }
 
   def guardianReceive: Actor.Receive = {
-    case CreateTraceLogger(role)   => startKamon(role, sender())
     case CreateCoordinator         => createCoordinator(sender())
     case e: CreateClusterSingleton => createSingleton(e, sender())
     case e: ShardEvent             => shardEvent(e)
@@ -68,22 +64,6 @@ final class NodeGuardian(val settings: FilodbSettings,
       map <- shardMappers.get(e.ref)
       if map.updateFromEvent(e).isSuccess
     } shardMappers(e.ref) = map
-  }
-
-  /** Idempotent. Cli does not start metrics. */
-  private def startKamon(role: ClusterRole, requester: ActorRef): Unit = {
-    role match {
-      case ClusterRole.Cli =>
-      case _ =>
-        context.child(TraceLoggerName) getOrElse {
-          kamon.Kamon.start()
-          val actor = context.actorOf(KamonTraceLogger.props(settings.metrics), TraceLoggerName)
-          context watch actor
-          kamon.Kamon.tracer.subscribe(actor)
-          KamonLogger.start(context.system, settings.metrics)
-          requester ! TraceLoggerRef(actor)
-        }
-    }
   }
 
   /** The NodeClusterActor's [[filodb.coordinator.ShardSubscriptions]]
@@ -183,7 +163,6 @@ object NodeProtocol {
                                                                watcher: Option[ActorRef]
                                                               ) extends LifecycleCommand
 
-  private[coordinator] final case class CreateTraceLogger(role: ClusterRole) extends LifecycleCommand
   private[coordinator] case object CreateCoordinator extends LifecycleCommand
   private[coordinator] case object GracefulShutdown extends LifecycleCommand
 

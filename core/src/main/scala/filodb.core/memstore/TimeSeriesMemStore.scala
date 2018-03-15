@@ -2,7 +2,6 @@ package filodb.core.memstore
 
 import scala.collection.mutable.HashMap
 import scala.concurrent.{ExecutionContext, Future}
-import scala.concurrent.duration._
 
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
@@ -10,7 +9,7 @@ import monix.execution.{CancelableFuture, Scheduler}
 import monix.reactive.Observable
 import org.jctools.maps.NonBlockingHashMapLong
 
-import filodb.core.{DatasetRef, Perftools, Response}
+import filodb.core.{DatasetRef, Response}
 import filodb.core.Types.PartitionKey
 import filodb.core.metadata.Dataset
 import filodb.core.store._
@@ -31,14 +30,7 @@ extends MemStore with StrictLogging {
 
   // TODO: Change the API to return Unit Or ShardAlreadySetup, instead of throwing.  Make idempotent.
   def setup(dataset: Dataset, shard: Int): Unit = synchronized {
-    val shards = datasets.getOrElseUpdate(dataset.ref, {
-                   val shardMap = new NonBlockingHashMapLong[TimeSeriesShard](32, false)
-                   val tags = Map("dataset" -> dataset.ref.toString)
-                   Perftools.pollingGauge(s"num-partitions", 5.seconds, tags) {
-                     shardMap.values.asScala.map(_.numActivePartitions).sum.toLong
-                   }
-                   shardMap
-                 })
+    val shards = datasets.getOrElseUpdate(dataset.ref, new NonBlockingHashMapLong[TimeSeriesShard](32, false))
     if (shards contains shard) {
       throw ShardAlreadySetup(dataset.ref, shard)
     } else {

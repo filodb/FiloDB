@@ -16,7 +16,7 @@ import monix.eval.Task
 import filodb.core._
 
 object FiloCassandraConnector {
-  val cassRetriesScheduledCount = Kamon.metrics.counter("cassandra-retries-scheduled")
+  val cassRetriesScheduledCount = Kamon.counter("cassandra-retries-scheduled")
 }
 
 trait FiloCassandraConnector extends StrictLogging {

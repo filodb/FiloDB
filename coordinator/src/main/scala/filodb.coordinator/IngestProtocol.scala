@@ -59,8 +59,8 @@ class IngestProtocol(clusterActor: ActorRef,
 
   // *** Metrics ***
   private val kamonTags = Map("dataset" -> ref.toString)
-  private val rowsIngested = Kamon.metrics.counter("protocol-rows-ingested", kamonTags)
-  private val shardHist    = Kamon.metrics.histogram("source-shards-distributed", kamonTags)
+  private val rowsIngested = Kamon.counter("protocol-rows-ingested").refine(kamonTags)
+  private val shardHist    = Kamon.histogram("source-shards-distributed").refine(kamonTags)
 
   def initializing: Receive = LoggingReceive {
     case CurrentShardSnapshot(_, newMap) =>

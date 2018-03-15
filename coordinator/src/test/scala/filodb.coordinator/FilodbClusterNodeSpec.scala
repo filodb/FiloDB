@@ -22,7 +22,6 @@ trait FilodbClusterNodeSpec extends AbstractSpec with FilodbClusterNode with Sca
       case ClusterRole.Cli =>
         cluster.isInitialized shouldEqual true
       case _ =>
-        cluster.kamonInit(role)
         cluster.isInitialized shouldEqual false
         cluster.join()
         val probe = TestProbe()(system)
@@ -153,7 +152,6 @@ class ClusterNodeRecoverySpec extends FilodbClusterNodeSpec {
     */
   "A FiloServer Node" must {
     // NOTE: we don't want to start the coordinator and clusterActor here, it has to be done later so it can be tested
-    cluster.kamonInit(role)
     coordinatorActor
     metaStore.initialize().futureValue shouldBe Success
     cluster.joinSeedNodes(immutable.Seq.empty[Address])

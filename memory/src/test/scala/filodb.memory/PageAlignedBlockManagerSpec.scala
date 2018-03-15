@@ -1,7 +1,6 @@
 package filodb.memory
 
 import com.kenai.jffi.PageManager
-import kamon.metric.instrument.CollectionContext
 import org.scalatest.{FlatSpec, Matchers}
 
 class PageAlignedBlockManagerSpec extends FlatSpec with Matchers {
@@ -13,15 +12,15 @@ class PageAlignedBlockManagerSpec extends FlatSpec with Matchers {
     val stats = new MemoryStats(Map("test1" -> "test1"))
     val blockManager = new PageAlignedBlockManager(2048 * 1024, stats, 1, 72)
 
-    val fbm = freeBlocksMetric(stats)
-    fbm.max should be(512)
+//    val fbm = freeBlocksMetric(stats)
+//    fbm.max should be(512)
     val blockSize = blockManager.blockSizeInBytes
     val blocks = blockManager.requestBlocks(blockSize * 10, None)
     blocks.size should be(10)
-    val ubm = usedBlocksMetric(stats)
-    ubm.max should be(10)
-    val fbm2 = freeBlocksMetric(stats)
-    fbm2.min should be(502)
+//    val ubm = usedBlocksMetric(stats)
+//    ubm.max should be(10)
+//    val fbm2 = freeBlocksMetric(stats)
+//    fbm2.min should be(502)
   }
 
   it should "Align block size to page size" in {
@@ -36,16 +35,16 @@ class PageAlignedBlockManagerSpec extends FlatSpec with Matchers {
     val stats = new MemoryStats(Map("test3" -> "test3"))
     val blockManager = new PageAlignedBlockManager(2 * pageSize, stats, 1, 72)
     val blockSize = blockManager.blockSizeInBytes
-    val fbm = freeBlocksMetric(stats)
-    fbm.max should be(2)
+//    val fbm = freeBlocksMetric(stats)
+//    fbm.max should be(2)
     val firstRequest = blockManager.requestBlocks(blockSize * 2, None)
     //used 2 out of 2
     firstRequest.size should be(2)
-    val ubm = usedBlocksMetric(stats)
-    ubm.max should be(2)
+//    val ubm = usedBlocksMetric(stats)
+//    ubm.max should be(2)
     //cannot fulfill
-    val fbm2 = freeBlocksMetric(stats)
-    fbm2.min should be(0)
+//    val fbm2 = freeBlocksMetric(stats)
+//    fbm2.min should be(0)
     val secondRequest = blockManager.requestBlocks(blockSize * 2, None)
     secondRequest should be(Seq.empty)
   }
@@ -64,8 +63,8 @@ class PageAlignedBlockManagerSpec extends FlatSpec with Matchers {
     //mark them as reclaimable
     firstRequest.foreach(_.markReclaimable())
     val secondRequest = blockManager.requestBlocks(blockSize * 2, None)
-    val brm = reclaimedBlocksMetric(stats)
-    brm.count should be(2)
+//    val brm = reclaimedBlocksMetric(stats)
+//    brm.count should be(2)
     //this request will fulfill
     secondRequest.size should be(2)
     secondRequest.head.hasCapacity(10) should be(true)
@@ -81,8 +80,8 @@ class PageAlignedBlockManagerSpec extends FlatSpec with Matchers {
     firstRequest.size should be(2)
     //only 2 left - cannot fulfill request
     val secondRequest = blockManager.requestBlocks(blockSize * 3, None)
-    val brm = reclaimedBlocksMetric(stats)
-    brm.count should be(0)
+//    val brm = reclaimedBlocksMetric(stats)
+//    brm.count should be(0)
     secondRequest should be(Seq.empty)
   }
 
@@ -137,18 +136,5 @@ class PageAlignedBlockManagerSpec extends FlatSpec with Matchers {
     blockManager.timeOrderedBlocksEnabled shouldEqual false
 
   }
-
-  private def usedBlocksMetric(stats: MemoryStats) = {
-    stats.usedBlocksMetric.collect(CollectionContext(100))
-  }
-
-  private def freeBlocksMetric(stats: MemoryStats) = {
-    stats.freeBlocksMetric.collect(CollectionContext(100))
-  }
-
-  private def reclaimedBlocksMetric(stats: MemoryStats) = {
-    stats.blocksReclaimedMetric.collect(CollectionContext(100))
-  }
-
 
 }

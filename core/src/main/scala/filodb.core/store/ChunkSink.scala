@@ -68,14 +68,14 @@ trait ChunkSink {
  * Stats for a ChunkSink
  */
 class ChunkSinkStats {
-  private val chunksPerCallHist  = Kamon.metrics.histogram("chunks-per-call")
-  private val chunkBytesHist     = Kamon.metrics.histogram("chunk-bytes-per-call")
-  private val chunkLenHist       = Kamon.metrics.histogram("chunk-length")
+  private val chunksPerCallHist  = Kamon.histogram("chunks-per-call")
+  private val chunkBytesHist     = Kamon.histogram("chunk-bytes-per-call")
+  private val chunkLenHist       = Kamon.histogram("chunk-length")
 
-  private val numIndexWriteCalls = Kamon.metrics.counter("index-write-calls-num")
-  private val indexBytesHist     = Kamon.metrics.histogram("index-bytes-per-call")
+  private val numIndexWriteCalls = Kamon.counter("index-write-calls-num")
+  private val indexBytesHist     = Kamon.histogram("index-bytes-per-call")
 
-  private val chunksetWrites     = Kamon.metrics.counter("chunkset-writes")
+  private val chunksetWrites     = Kamon.counter("chunkset-writes")
   var chunksetsWritten = 0
 
   def addChunkWriteStats(numChunks: Int, totalChunkBytes: Long, chunkLen: Int): Unit = {

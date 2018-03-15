@@ -69,7 +69,6 @@ object FiloDriver extends FilodbSparkCluster {
       val filoConfig = configFromSpark(context)
       _config = Some(filoConfig)
 
-      cluster.kamonInit(role)
       coordinatorActor // create it
       cluster.join(cluster.selfAddress)
 
@@ -129,7 +128,6 @@ object FiloExecutor extends FilodbSparkCluster {
 
       val addr = AddressFromURIString.parse(filoConfig.getString("spark-driver-addr"))
       logger.info(s"Initializing FiloExecutor clustering by joining driver at $addr...")
-      cluster.kamonInit(role)
       coordinatorActor // create it
       cluster.join(addr)
       clusterActor

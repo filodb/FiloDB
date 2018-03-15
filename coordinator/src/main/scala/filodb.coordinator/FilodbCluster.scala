@@ -11,6 +11,7 @@ import akka.cluster.ClusterEvent._
 import akka.util.Timeout
 import com.typesafe.config.{Config, ConfigFactory}
 import com.typesafe.scalalogging.StrictLogging
+import kamon.Kamon
 import monix.execution.Scheduler
 import monix.execution.misc.NonFatal
 
@@ -74,10 +75,6 @@ final class FilodbCluster(val system: ExtendedActorSystem) extends Extension wit
   def isInitialized: Boolean = _isInitialized.get
 
   def isTerminated: Boolean = _isTerminated.get
-
-  /** Idempotent. */
-  def kamonInit(role: ClusterRole): ActorRef =
-    Await.result((guardian ? CreateTraceLogger(role)).mapTo[TraceLoggerRef], DefaultTaskTimeout).identity
 
   def coordinatorActor: ActorRef = _coordinatorActor.get.getOrElse {
     val actor = Await.result((guardian ? CreateCoordinator).mapTo[CoordinatorIdentity], DefaultTaskTimeout).identity
@@ -184,6 +181,7 @@ final class FilodbCluster(val system: ExtendedActorSystem) extends Extension wit
   protected[coordinator] def shutdown(): Unit =
     if (!isTerminated) {
       import akka.pattern.gracefulStop
+
       import NodeProtocol.GracefulShutdown
 
       logger.info("Leaving the cluster.")
@@ -256,6 +254,8 @@ private[filodb] trait FilodbClusterNode extends NodeConfiguration with StrictLog
 
     ActorSystem(role.systemName, allConfig)
   }
+
+  Kamon.loadReportersFromConfig()
 
   lazy val cluster = FilodbCluster(system)
 
