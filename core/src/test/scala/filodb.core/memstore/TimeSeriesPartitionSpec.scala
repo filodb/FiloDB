@@ -112,7 +112,7 @@ class TimeSeriesPartitionSpec extends FunSpec with Matchers with BeforeAndAfter 
      part.latestChunkLen shouldEqual 6
      val chunks = part.streamReaders(AllChunkScan, Array(1))
        .map(_.vectors(0).toSeq).toListL.runAsync
-     chunks.futureValue should equal (Seq(minData take 10, minData drop 10 take 6))
+     chunks.futureValue.toSet shouldEqual Seq(minData take 10, minData drop 10 take 6).toSet
 
      chunkSetOpt.isDefined shouldEqual true
      chunkSetOpt.get.info.numRows shouldEqual 10
