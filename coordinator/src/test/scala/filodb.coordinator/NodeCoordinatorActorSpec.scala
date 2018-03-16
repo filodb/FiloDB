@@ -36,7 +36,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
   import Column.ColumnType._
 
   implicit val defaultPatience =
-    PatienceConfig(timeout = Span(10, Seconds), interval = Span(50, Millis))
+    PatienceConfig(timeout = Span(15, Seconds), interval = Span(50, Millis))
 
   val config = ConfigFactory.parseString(
                       """filodb.memtable.flush-trigger-rows = 100
