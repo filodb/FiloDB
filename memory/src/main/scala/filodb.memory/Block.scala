@@ -5,8 +5,6 @@ import java.nio.ByteBuffer
 import java.util.ConcurrentModificationException
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
 
-import scala.collection.mutable.ListBuffer
-
 import com.typesafe.scalalogging.StrictLogging
 
 /*
@@ -39,23 +37,23 @@ protected[memory] trait Owned extends ReusableMemory {
 }
 
 /**
-  * A listener called when a reusable memory is reclaimed.
+  * A listener called when a ReusableMemory is reclaimed.  The onReclaim() method is called for each piece of
+  * metadata in the ReusableMemory.
   */
 trait ReclaimListener {
-  def onReclaim(): Unit
+  def onReclaim(metadata: Long, numBytes: Int): Unit
 }
+
 /**
-  * A reclaimable memory which can be reclaimed and reused. Has an address
-  * Code which needs to be called upon reclaim should register itself using the
-  * register method as a ReclaimListener. Upon reclaim the onReclaim for all the
-  * registered listeners is called.
-  * A buffer to which a BinaryVector can be written
+  * A reclaimable memory which can be reclaimed and reused. Normally used to hold many BinaryVectors.
+  * It also can hold pieces of metadata which are passed to a ReclaimListener when the memory is reclaimed.
+  * The metadata can be used to free references and do other housekeeping.
   */
 trait ReusableMemory extends StrictLogging {
   protected val _isReusable: AtomicBoolean = new AtomicBoolean(false)
-  protected val reclaimListeners = ListBuffer.empty[ReclaimListener]
 
-  def registerListener(reclaimListener: ReclaimListener): Unit = reclaimListeners += reclaimListener
+  def reclaimListener: ReclaimListener
+
   /**
     * @return Whether this block can be reclaimed. The original owning callsite has to
     *         set this as being reusable
@@ -87,11 +85,16 @@ trait ReusableMemory extends StrictLogging {
   }
 
   /**
-    * Marks this memory as free.
+   * Calls the reclaimListener for each piece of metadata that we own
+   */
+  protected def reclaimWithMetadata(): Unit
+
+  /**
+    * Marks this memory as free and calls reclaimListener for every piece of metadata.
     */
   protected def free() = {
-    logger.debug(s"Reclaiming block at ${jLong.toHexString(address)} with ${reclaimListeners.length} listeners...")
-    reclaimListeners.foreach(_.onReclaim())
+    logger.debug(s"Reclaiming block at ${jLong.toHexString(address)}...")
+    reclaimWithMetadata()
   }
 
   /**
@@ -105,13 +108,19 @@ trait ReusableMemory extends StrictLogging {
 
 /**
   * A block is a resuable piece of memory beginning at the address and has a capacity.
+  * It is capable of holding metadata also for reclaims.
+  * Normally usage of a block starts at position 0 and grows upward.  Metadata usage starts at the top and grows
+  * downward.  Each piece of metadata must be < 64KB as two bytes are used to denote size at the start of each piece of
+  * metadata.
   *
   * @param address
   * @param capacity
   */
-class Block(val address: Long, val capacity: Long) extends Owned {
+class Block(val address: Long, val capacity: Long, val reclaimListener: ReclaimListener) extends Owned {
+  import format.UnsafeUtils
 
   protected var _position: Int = 0
+  protected var _metaPosition: Int = capacity.toInt
 
   /**
     * Marks this memory as free. Also zeroes all the bytes from the beginning address until capacity
@@ -130,7 +139,29 @@ class Block(val address: Long, val capacity: Long) extends Owned {
     _position = newPosition
   }
 
-  def remaining(): Int = capacity.toInt - _position
+  def remaining(): Int = _metaPosition - _position
+
+  /**
+   * Allocates metaSize bytes for metadata storage.
+   * @param metaSize the number of bytes to use for metadata storage.
+   * @return the Long address of the metadata space.  The metaSize is written to the location 2 bytes before this.
+   */
+  def allocMetadata(metaSize: Short): Long = {
+    assert(metaSize > 0 && metaSize <= (remaining() - 2))
+    _metaPosition -= (metaSize + 2)
+    val metaAddr = address + _metaPosition
+    UnsafeUtils.setShort(UnsafeUtils.ZeroPointer, metaAddr, metaSize)
+    metaAddr + 2
+  }
+
+  protected def reclaimWithMetadata(): Unit = {
+    var metaPointer = address + _metaPosition
+    while (metaPointer < (address + capacity)) {
+      val metaSize = UnsafeUtils.getShort(metaPointer)
+      reclaimListener.onReclaim(metaPointer + 2, metaSize)
+      metaPointer += (2 + metaSize)
+    }
+  }
 
   /**
     * @param forSize the size for which to check the capacity for

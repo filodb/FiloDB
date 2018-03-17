@@ -177,10 +177,13 @@ class ArrayBackedMemFactory extends MemFactory {
   *
   * @param blockStore The BlockManager which is used to request more blocks when the current
   *                   block is full.
+  * @param metadataAllocSize the additional size in bytes to ensure is free for writing metadata, per chunk
   * @param markFullBlocksAsReclaimable Immediately mark and fully used block as reclaimable.
   *                                    Typically true during on-demand paging of optimized chunks from persistent store
   */
-class BlockMemFactory(blockStore: BlockManager, reclaimOrder: Option[Int],
+class BlockMemFactory(blockStore: BlockManager,
+                      reclaimOrder: Option[Int],
+                      metadataAllocSize: Int,
                       markFullBlocksAsReclaimable: Boolean = false) extends MemFactory with StrictLogging {
 
   // tracks fully populated blocks not marked reclaimable yet (typically waiting for flush)
@@ -189,28 +192,31 @@ class BlockMemFactory(blockStore: BlockManager, reclaimOrder: Option[Int],
   // tracks block currently being populated
   val currentBlock = new AtomicReference[Block]()
 
-  // tracks blocks that belong to same partition and share same reclaim listener
-  private val partitionGroup: ListBuffer[Block] = ListBuffer[Block]()
+  // tracks blocks that should share metadata
+  private val metadataSpan: ListBuffer[Block] = ListBuffer[Block]()
 
   currentBlock.set(blockStore.requestBlock(reclaimOrder).get)
 
   /**
-    * Starts tracking the block references for a partition.
-    * This is to aid in adding listeners to the block for the partition when
-    * the block gets reclaimed
+    * Starts tracking a span of multiple Blocks over which the same metadata should be applied.
+    * An example would be chunk metadata for chunks written to potentially more than 1 block.
     */
-  def startPartition(): Unit = {
-    partitionGroup += (currentBlock.get())
+  def startMetaSpan(): Unit = {
+    metadataSpan += (currentBlock.get())
   }
 
   /**
-    * Stops tracking the blocks that a single partition is written to.
-    * And registers the listener to the blocks to which this partition is written to.
-    * @param reclaimListener the listener to register
+    * Stops tracking the blocks that the same metadata should be applied to, and allocates and writes metadata
+    * for those spanned blocks.
+    * @param metadataWriter the function to write metadata to each block
+    * @param metaSize the number of bytes the piece of metadata takes
     */
-  def endPartition(reclaimListener: ReclaimListener): Unit = {
-    partitionGroup.foreach(_.registerListener(reclaimListener))
-    partitionGroup.clear()
+  def endMetaSpan(metadataWriter: Long => Unit, metaSize: Short): Unit = {
+    metadataSpan.foreach { blk =>
+      // It is possible that the first block(s) did not have enough memory.  Don't write metadata to full blocks
+      if (blk.hasCapacity(metaSize)) metadataWriter(blk.allocMetadata(metaSize))
+    }
+    metadataSpan.clear()
   }
 
   def markUsedBlocksReclaimable(): Unit = {
@@ -230,7 +236,8 @@ class BlockMemFactory(blockStore: BlockManager, reclaimOrder: Option[Int],
   }
 
   /**
-    * Allocates memory for requested size.
+    * Allocates memory for requested size + 4 byte header.  Used for BinaryVectors only.
+    * Also ensures that metadataAllocSize is available for metadata storage.
     *
     * @param allocateSize Request memory allocation size in bytes
     * @return Memory which has a base, offset and a length
@@ -238,12 +245,12 @@ class BlockMemFactory(blockStore: BlockManager, reclaimOrder: Option[Int],
   override def allocateWithMagicHeader(allocateSize: Int): Memory = {
     //4 for magic header
     val size = allocateSize + 4
-    val block = ensureCapacity(size)
+    val block = ensureCapacity(size + metadataAllocSize + 2)
     block.own()
     val preAllocationPosition = block.position()
     val headerAddress = block.address + preAllocationPosition
     UnsafeUtils.setInt(UnsafeUtils.ZeroPointer, headerAddress, BinaryVector.HeaderMagic)
-    val postAllocationPosition = preAllocationPosition + 4 + allocateSize
+    val postAllocationPosition = preAllocationPosition + size
     block.position(postAllocationPosition)
     (UnsafeUtils.ZeroPointer, headerAddress + 4, allocateSize)
   }
@@ -259,7 +266,7 @@ class BlockMemFactory(blockStore: BlockManager, reclaimOrder: Option[Int],
     */
   override def copyFromBytes(bytes: Array[Byte]): ByteBuffer = {
     val allocateSize = bytes.length
-    val block = ensureCapacity(allocateSize)
+    val block = ensureCapacity(allocateSize + metadataAllocSize + 2)
     val preAllocationPosition = block.position()
     val address = block.address + preAllocationPosition
     val byteBuffer = UnsafeUtils.asDirectBuffer(address, allocateSize)

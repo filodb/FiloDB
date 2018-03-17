@@ -67,11 +67,13 @@ class MemoryStats(tags: Map[String, String]) {
   *
   * @param totalMemorySizeInBytes Control the number of pages to allocate. (totalling up to the totallMemorySizeInBytes)
   * @param stats                  Memory metrics which need to be recorded
+  * @param reclaimer              ReclaimListener to use on block metadata when a block is freed
   * @param numPagesPerBlock       The number of pages a block spans
   * @param numTimeBuckets         Number of buckets for time ordered blocks
   */
 class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
                               val stats: MemoryStats,
+                              reclaimer: ReclaimListener,
                               numPagesPerBlock: Int,
                               numTimeBuckets: Int)
   extends BlockManager with StrictLogging {
@@ -146,7 +148,7 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
     firstPageAddress = MemoryIO.getCheckedInstance().allocateMemory(totalMemorySizeInBytes, false)
     for (i <- 0 until numBlocks) {
       val address = firstPageAddress + (i * blockSizeInBytes)
-      blocks.add(new Block(address, blockSizeInBytes))
+      blocks.add(new Block(address, blockSizeInBytes, reclaimer))
     }
     stats.freeBlocksMetric.set(blocks.size())
     blocks

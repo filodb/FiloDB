@@ -42,6 +42,13 @@ object UnsafeUtils {
   final def getDouble(obj: Any, offset: Long): Double = unsafe.getDouble(obj, offset)
   final def getFloat(obj: Any, offset: Long): Double = unsafe.getFloat(obj, offset)
 
+  final def getByte(addr: Long): Byte = unsafe.getByte(ZeroPointer, addr)
+  final def getShort(addr: Long): Short = unsafe.getShort(ZeroPointer, addr)
+  final def getInt(addr: Long): Int = unsafe.getInt(ZeroPointer, addr)
+  final def getLong(addr: Long): Long = unsafe.getLong(ZeroPointer, addr)
+  final def getDouble(addr: Long): Double = unsafe.getDouble(ZeroPointer, addr)
+  final def getFloat(addr: Long): Double = unsafe.getFloat(ZeroPointer, addr)
+
   final def setByte(obj: Any, offset: Long, byt: Byte): Unit = unsafe.putByte(obj, offset, byt)
   final def setShort(obj: Any, offset: Long, s: Short): Unit = unsafe.putShort(obj, offset, s)
   final def setInt(obj: Any, offset: Long, i: Int): Unit = unsafe.putInt(obj, offset, i)

@@ -93,7 +93,7 @@ abstract class IngestionStreamClusterSpec extends ClusterSpec(IngestionStreamClu
 
       // We have to subscribe and get our own copy of the ShardMap so that routeToShards can route
       clusterActor ! SubscribeShardUpdates(dataset6.ref)
-      expectMsgPF(3.seconds.dilated) {
+      expectMsgPF(10.seconds.dilated) {
         case CurrentShardSnapshot(ref, newMap) if ref == dataset6.ref => mapper = newMap
       }
 
@@ -126,7 +126,7 @@ abstract class IngestionStreamClusterSpec extends ClusterSpec(IngestionStreamClu
 
     def func: Int = {
       coordinatorActor ! query
-      expectMsgPF() {
+      expectMsgPF(durationForCI) {
         case QueryResult(_, TupleResult(schema, Tuple(None, bRec))) =>
           schema shouldEqual ResultSchema(Seq(ColumnInfo("result", ColumnType.IntColumn)), 0)
           bRec.getInt(0)
@@ -139,7 +139,7 @@ abstract class IngestionStreamClusterSpec extends ClusterSpec(IngestionStreamClu
     val q2 = LogicalPlanQuery(dataset6.ref,
                PartitionsRange.all(FilteredPartitionQuery(Nil), Seq("Actor2Code", "MonthYear")))
     coordinatorActor ! q2
-    expectMsgPF() {
+    expectMsgPF(durationForCI) {
       case QueryResult(_, VectorListResult(keyRange, ResultSchema(schema, 1), vectors)) =>
         keyRange shouldEqual None
         // always add row key which is GLOBALEVENTID to the front of the schema

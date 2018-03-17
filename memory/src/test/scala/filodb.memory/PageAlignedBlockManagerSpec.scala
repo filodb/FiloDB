@@ -1,16 +1,34 @@
 package filodb.memory
 
-import com.kenai.jffi.PageManager
-import org.scalatest.{FlatSpec, Matchers}
+import scala.language.reflectiveCalls
 
-class PageAlignedBlockManagerSpec extends FlatSpec with Matchers {
+import com.kenai.jffi.PageManager
+import org.scalatest.{BeforeAndAfter, FlatSpec, Matchers}
+
+object PageAlignedBlockManagerSpec {
+  val testReclaimer = new ReclaimListener {
+    var reclaimedBytes = 0
+    val addresses = new collection.mutable.ArrayBuffer[Long]
+    def onReclaim(metadata: Long, numBytes: Int): Unit = {
+      reclaimedBytes += numBytes
+      addresses += metadata
+    }
+  }
+}
+
+class PageAlignedBlockManagerSpec extends FlatSpec with Matchers with BeforeAndAfter {
+  import PageAlignedBlockManagerSpec._
 
   val pageSize = PageManager.getInstance().pageSize()
+
+  before {
+    testReclaimer.reclaimedBytes = 0
+  }
 
   it should "Allocate blocks as requested for size" in {
     //2MB
     val stats = new MemoryStats(Map("test1" -> "test1"))
-    val blockManager = new PageAlignedBlockManager(2048 * 1024, stats, 1, 72)
+    val blockManager = new PageAlignedBlockManager(2048 * 1024, stats, testReclaimer, 1, 72)
 
 //    val fbm = freeBlocksMetric(stats)
 //    fbm.max should be(512)
@@ -21,19 +39,23 @@ class PageAlignedBlockManagerSpec extends FlatSpec with Matchers {
 //    ubm.max should be(10)
 //    val fbm2 = freeBlocksMetric(stats)
 //    fbm2.min should be(502)
+
+    blockManager.releaseBlocks()
   }
 
   it should "Align block size to page size" in {
     val stats = new MemoryStats(Map("test2" -> "test2"))
-    val blockManager = new PageAlignedBlockManager(2048 * 1024, stats, 1, 72)
+    val blockManager = new PageAlignedBlockManager(2048 * 1024, stats, testReclaimer, 1, 72)
     val blockSize = blockManager.blockSizeInBytes
     blockSize should be(pageSize)
+
+    blockManager.releaseBlocks()
   }
 
   it should "Not allow a request of blocks over the upper bound if no blocks are reclaimable" in {
     //2 pages
     val stats = new MemoryStats(Map("test3" -> "test3"))
-    val blockManager = new PageAlignedBlockManager(2 * pageSize, stats, 1, 72)
+    val blockManager = new PageAlignedBlockManager(2 * pageSize, stats, testReclaimer, 1, 72)
     val blockSize = blockManager.blockSizeInBytes
 //    val fbm = freeBlocksMetric(stats)
 //    fbm.max should be(2)
@@ -47,12 +69,14 @@ class PageAlignedBlockManagerSpec extends FlatSpec with Matchers {
 //    fbm2.min should be(0)
     val secondRequest = blockManager.requestBlocks(blockSize * 2, None)
     secondRequest should be(Seq.empty)
+
+    blockManager.releaseBlocks()
   }
 
   it should "Allocate blocks as requested even when upper bound is reached if blocks can be reclaimed" in {
     //2 pages
     val stats = new MemoryStats(Map("test4" -> "test4"))
-    val blockManager = new PageAlignedBlockManager(2 * pageSize, stats, 1, 72)
+    val blockManager = new PageAlignedBlockManager(2 * pageSize, stats, testReclaimer, 1, 72)
     val blockSize = blockManager.blockSizeInBytes
     val firstRequest = blockManager.requestBlocks(blockSize * 2, None)
     //used 2 out of 2
@@ -68,12 +92,14 @@ class PageAlignedBlockManagerSpec extends FlatSpec with Matchers {
     //this request will fulfill
     secondRequest.size should be(2)
     secondRequest.head.hasCapacity(10) should be(true)
+
+    blockManager.releaseBlocks()
   }
 
   it should "Fail to Allocate blocks when enough blocks cannot be reclaimed" in {
     //4 pages
     val stats = new MemoryStats(Map("test5" -> "test5"))
-    val blockManager = new PageAlignedBlockManager(4 * pageSize, stats, 1, 72)
+    val blockManager = new PageAlignedBlockManager(4 * pageSize, stats, testReclaimer, 1, 72)
     val blockSize = blockManager.blockSizeInBytes
     val firstRequest = blockManager.requestBlocks(blockSize * 2, None)
     //used 2 out of 4
@@ -83,12 +109,14 @@ class PageAlignedBlockManagerSpec extends FlatSpec with Matchers {
 //    val brm = reclaimedBlocksMetric(stats)
 //    brm.count should be(0)
     secondRequest should be(Seq.empty)
+
+    blockManager.releaseBlocks()
   }
 
   it should "allocate and reclaim blocks with time order" in {
     val stats = new MemoryStats(Map("test5" -> "test5"))
     // This block manager has 5 blocks capacity
-    val blockManager = new PageAlignedBlockManager(5 * pageSize, stats, 1, 72)
+    val blockManager = new PageAlignedBlockManager(5 * pageSize, stats, testReclaimer, 1, 72)
 
     blockManager.usedBlocks.size() shouldEqual 0
     for { i <- 0 until 72} {
@@ -135,6 +163,6 @@ class PageAlignedBlockManagerSpec extends FlatSpec with Matchers {
 
     blockManager.timeOrderedBlocksEnabled shouldEqual false
 
+    blockManager.releaseBlocks()
   }
-
 }

@@ -89,7 +89,7 @@ abstract class ClusterRecoverySpec extends ClusterSpec(ClusterRecoverySpecConfig
     enterBarrier("cluster-actor-recovery-started")
 
     clusterActor ! SubscribeShardUpdates(dataset6.ref)
-    expectMsgPF(3.seconds.dilated) {
+    expectMsgPF(10.seconds.dilated) {
       case CurrentShardSnapshot(ref, newMap) if ref == dataset6.ref => mapper = newMap
     }
 
@@ -103,7 +103,7 @@ abstract class ClusterRecoverySpec extends ClusterSpec(ClusterRecoverySpecConfig
                   simpleAgg("count", childPlan=PartitionsRange.all(FilteredPartitionQuery(Nil), Seq("MonthYear"))))
 
     coordinatorActor ! query
-    expectMsgPF() {
+    expectMsgPF(10.seconds.dilated) {
       case QueryResult(_, TupleResult(schema, Tuple(None, bRec))) =>
         schema shouldEqual ResultSchema(Seq(ColumnInfo("result", ColumnType.IntColumn)), 0)
         bRec.getInt(0) shouldEqual (99 * 2)

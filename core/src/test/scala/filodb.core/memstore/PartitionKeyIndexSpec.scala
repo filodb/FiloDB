@@ -1,10 +1,10 @@
-package filodb.core.query
+package filodb.core.memstore
 
-import com.googlecode.javaewah.IntIterator
+import com.googlecode.javaewah.{EWAHCompressedBitmap, IntIterator}
 import org.scalatest.{BeforeAndAfter, FunSpec, Matchers}
 
 import filodb.core._
-import filodb.core.memstore.IngestRecord
+import filodb.core.query.{ColumnFilter, Filter}
 
 class PartitionKeyIndexSpec extends FunSpec with Matchers with BeforeAndAfter {
   import GdeltTestData._
@@ -121,5 +121,22 @@ class PartitionKeyIndexSpec extends FunSpec with Matchers with BeforeAndAfter {
     val (partNums1, unFounded1) = index2.parseFilters(filters1)
     partNums1.toSeq should equal (Seq(7, 8, 9))
     unFounded1.toSeq should equal (Seq("Year"))
+  }
+
+  it("should remove entries correctly") {
+    records(dataset6, readers.take(10)).foreach { case IngestRecord(partReader, data, index) =>
+      keyIndex.addKey(dataset6.partKey(partReader), index.toInt)
+    }
+
+    keyIndex.indexSize shouldEqual 15
+
+    val entries = EWAHCompressedBitmap.bitmapOf(2, 3)
+    keyIndex.removeEntries("Actor2Code".utf8, Seq("AGR".utf8, "CHN".utf8), entries)
+    keyIndex.indexSize shouldEqual 14   // CHN entry removed, but not AGR
+
+    val filters2 = Seq(ColumnFilter("Actor2Code", Equals("AGR".utf8)))
+    val (partNums2, unFounded2) = keyIndex.parseFilters(filters2)
+    partNums2.toSeq shouldEqual Seq(1)
+    unFounded2.toSeq shouldEqual Nil
   }
 }

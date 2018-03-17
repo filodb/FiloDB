@@ -1,14 +1,20 @@
 package filodb.memory
 
-import org.scalatest.Matchers
+import org.scalatest.{Matchers, BeforeAndAfterAll}
 import org.scalatest.concurrent.ConductorFixture
 import org.scalatest.fixture.FunSuite
 
-class PageAlignedBlockManagerConcurrentSpec extends FunSuite with ConductorFixture with Matchers {
+class PageAlignedBlockManagerConcurrentSpec extends FunSuite
+with ConductorFixture with Matchers with BeforeAndAfterAll {
+  import PageAlignedBlockManagerSpec._
 
   val memoryStats = new MemoryStats(Map("test"-> "test"))
-  val blockManager = new PageAlignedBlockManager(2048 * 1024, memoryStats, 1, 72)
+  val blockManager = new PageAlignedBlockManager(2048 * 1024, memoryStats, testReclaimer, 1, 72)
   val pageSize = blockManager.blockSizeInBytes
+
+  override def afterAll(): Unit = {
+    blockManager.releaseBlocks()
+  }
 
   test("Should allow multiple thread to request blocks safely") {
     (conductor: Conductor) =>

@@ -17,7 +17,7 @@ import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.metadata.Dataset
 import filodb.core.query.ChunkSetReader
 import filodb.core.store._
-import filodb.memory.{BlockMemFactory, ReclaimListener}
+import filodb.memory.BlockMemFactory
 import filodb.memory.format._
 
 final case class InfoChunks(info: ChunkSetInfo, chunks: Array[BinaryVector[_]])
@@ -45,7 +45,8 @@ final case class InfoChunks(info: ChunkSetInfo, chunks: Array[BinaryVector[_]])
  *
  * TODO: eliminate chunkIDs, that can be stored in the index
  */
-class TimeSeriesPartition(val dataset: Dataset,
+class TimeSeriesPartition(val partID: Int,
+                          val dataset: Dataset,
                           val binPartition: PartitionKey,
                           val shard: Int,
                           val chunkSource: ChunkSource,
@@ -147,6 +148,9 @@ class TimeSeriesPartition(val dataset: Dataset,
     currentChunks = nullChunks
   }
 
+  def notFlushing: Boolean =
+    flushingAppenders == UnsafeUtils.ZeroPointer || flushingAppenders(0).appender.length == 0
+
   /**
    * Optimizes flushingChunks into smallest BinaryVectors, store in memory and produce a ChunkSet for persistence.
    * Only one thread should call makeFlushChunks() at a time.
@@ -161,10 +165,10 @@ class TimeSeriesPartition(val dataset: Dataset,
    * filled currentChunks.  That involves much more state, so do much later.
    */
   def makeFlushChunks(blockHolder: BlockMemFactory): Option[ChunkSet] = {
-    if (flushingAppenders == UnsafeUtils.ZeroPointer || flushingAppenders(0).appender.length == 0) {
+    if (notFlushing) {
       None
     } else {
-      blockHolder.startPartition()
+      blockHolder.startMetaSpan()
       // optimize and compact old chunks
       val frozenVectors = flushingAppenders.zipWithIndex.map { case (appender, i) =>
         //This assumption cannot break. We should ensure one vector can be written
@@ -196,7 +200,7 @@ class TimeSeriesPartition(val dataset: Dataset,
       bufferPool.release(flushingAppenders)
       flushingAppenders = nullAppenders
 
-      blockHolder.endPartition(reclaimListener(Seq(chunkInfo)))
+      blockHolder.endMetaSpan(TimeSeriesShard.writeMeta(_, partID, chunkInfo.id), TimeSeriesShard.BlockMetaAllocSize)
 
       Some(ChunkSet(chunkInfo, binPartition, Nil,
                     frozenVectors.zipWithIndex.map { case (vect, pos) => (pos, vect.toFiloBuffer) }))
@@ -294,16 +298,9 @@ class TimeSeriesPartition(val dataset: Dataset,
     }
   }
 
-  def reclaimListener(chunkInfos: Seq[ChunkSetInfo]): ReclaimListener = new ReclaimListener {
-    //It is very likely that a flushChunk ends only in one block. At worst in may end up in a couple.
-    //So a blockGroup contains atmost 2. When any one Block in the flushGroup is evicted the flushChunk is removed.
-    //So if and when a second block gets reclaimed this is a no-op
-    override def onReclaim(): Unit = {
-      chunkInfos.foreach { info =>
-        infosChunks.remove(info.id)
-        shardStats.chunkIdsEvicted.increment()
-      }
-    }
+  def removeChunksAt(id: ChunkID): Unit = {
+    infosChunks.remove(id)
+    shardStats.chunkIdsEvicted.increment()
   }
 
   def addChunkSet(info: ChunkSetInfo, bytes: Array[BinaryVector[_]]): Unit = {

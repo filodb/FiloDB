@@ -15,7 +15,8 @@ import filodb.core.metadata.Dataset
 import filodb.core.store._
 import filodb.memory.format.ZeroCopyUTF8String
 
-class TimeSeriesMemStore(config: Config, val sink: ColumnStore, val metastore: MetaStore)
+class TimeSeriesMemStore(config: Config, val sink: ColumnStore, val metastore: MetaStore,
+                         evictionPolicy: Option[PartitionEvictionPolicy] = None)
                         (implicit val ec: ExecutionContext)
 extends MemStore with StrictLogging {
   import collection.JavaConverters._
@@ -29,13 +30,17 @@ extends MemStore with StrictLogging {
 
   private val numParallelFlushes = config.getInt("memstore.flush-task-parallelism")
 
+  private val partEvictionPolicy = evictionPolicy.getOrElse {
+    new HeapPercentageEvictionPolicy(config.getInt("memstore.min-heap-free-percentage"))
+  }
+
   // TODO: Change the API to return Unit Or ShardAlreadySetup, instead of throwing.  Make idempotent.
   def setup(dataset: Dataset, shard: Int): Unit = synchronized {
     val shards = datasets.getOrElseUpdate(dataset.ref, new NonBlockingHashMapLong[TimeSeriesShard](32, false))
     if (shards contains shard) {
       throw ShardAlreadySetup(dataset.ref, shard)
     } else {
-      val tsdb = new TimeSeriesShard(dataset, config, shard, sink, metastore)
+      val tsdb = new TimeSeriesShard(dataset, config, shard, sink, metastore, partEvictionPolicy)
       shards.put(shard, tsdb)
     }
   }
@@ -134,6 +139,9 @@ extends MemStore with StrictLogging {
 
   def latestOffset(dataset: DatasetRef, shard: Int): Long =
     getShard(dataset, shard).get.latestOffset
+
+  def shardMetrics(dataset: DatasetRef, shard: Int): TimeSeriesShardStats =
+    getShard(dataset, shard).get.shardStats
 
   def activeShards(dataset: DatasetRef): Seq[Int] =
     datasets.get(dataset).map(_.keySet.asScala.map(_.toInt).toSeq).getOrElse(Nil)

@@ -29,19 +29,22 @@ import filodb.memory.format.BinaryVector
   *
   * @param dataset the dataset this paged chunk store is allocated for.
   * @param blockManager The block manager to be used for block allocation
+  * @param metadataAllocSize the additional size in bytes to ensure is free for writing metadata, per chunk
   * @param chunkRetentionHours number of hours chunks need to be retained for. A bucket will be created per hour
   *                            to reclaim blocks in a time ordered fashion
   */
-class DemandPagedChunkStore(dataset: Dataset, blockManager: BlockManager, chunkRetentionHours: Int, shardNum: Int)
-          extends StrictLogging {
-
+class DemandPagedChunkStore(dataset: Dataset,
+                            blockManager: BlockManager,
+                            metadataAllocSize: Int,
+                            chunkRetentionHours: Int,
+                            shardNum: Int) extends StrictLogging {
   // It is important that the tasks be executed in a single thread  to remove resource contention in BlockManager
   private val scheduler = Scheduler(Executors.newSingleThreadScheduledExecutor(),
                             ExecutionContext.fromExecutorService(Executors.newSingleThreadExecutor()))
 
   // block factories for each time order
   private val memFactories = Array.tabulate(chunkRetentionHours) { i =>
-    new BlockMemFactory(blockManager, Some(i), markFullBlocksAsReclaimable = true)
+    new BlockMemFactory(blockManager, Some(i), metadataAllocSize, markFullBlocksAsReclaimable = true)
   }
 
   private[memstore] var onDemandPagingEnabled = true // is enabled from start of jvm to retention period
@@ -59,6 +62,8 @@ class DemandPagedChunkStore(dataset: Dataset, blockManager: BlockManager, chunkR
     onDemandPagingEnabled = false
   }
 
+  import TimeSeriesShard._
+
   /**
     * Stores the on heap chunkset into off-heap memory and indexes them into partition
     *
@@ -69,15 +74,16 @@ class DemandPagedChunkStore(dataset: Dataset, blockManager: BlockManager, chunkR
     val p = Promise[Seq[ChunkSetInfo]]()
     scheduler.scheduleOnce(0.seconds) {
       if (onDemandPagingEnabled && !partition.cacheIsWarm()) {
-        memFactories.foreach(_.startPartition())
         val offHeapChunkInfos = onHeap.flatMap { reader => // flatMap removes Nones
           timeOrderForChunkSet(reader.info).map { timeOrder =>
-            val (info, chunks) = copyToOffHeap(reader, memFactories(timeOrder))
+            val memFactory = memFactories(timeOrder)
+            memFactory.startMetaSpan()
+            val (info, chunks) = copyToOffHeap(reader, memFactory)
             partition.addChunkSet(info, chunks)
+            memFactory.endMetaSpan(writeMeta(_, partition.partID, info.id), BlockMetaAllocSize)
             info
           }
         }
-        memFactories.foreach(_.endPartition(partition.reclaimListener(offHeapChunkInfos)))
         p.success(offHeapChunkInfos)
       } else {
         p.failure(new IllegalArgumentException(s"Warning: Attempt to page data from chunk store into memory after " +

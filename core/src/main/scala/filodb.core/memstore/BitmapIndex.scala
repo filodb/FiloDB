@@ -1,12 +1,13 @@
-package filodb.core.query
+package filodb.core.memstore
 
 import java.util.concurrent.ConcurrentSkipListMap
 
 import com.googlecode.javaewah.EWAHCompressedBitmap
 
 import filodb.core._
+import filodb.core.query.{Filter, KeyFilter}
 import filodb.core.store.ChunkSetInfo.emptySkips
-import filodb.memory.format.ZeroCopyUTF8String
+import filodb.memory.format.{ZeroCopyUTF8String => UTF8Str}
 
 /**
  * A sorted index of all values belonging to a single column/tag, with a bitmap per value.
@@ -14,7 +15,7 @@ import filodb.memory.format.ZeroCopyUTF8String
  * with an Int/Long.
  * Suitable for multithreaded adds and queries.
  */
-class BitmapIndex[K](indexName: ZeroCopyUTF8String) {
+class BitmapIndex[K](indexName: UTF8Str) {
   import collection.JavaConverters._
 
   import Filter._
@@ -24,6 +25,8 @@ class BitmapIndex[K](indexName: ZeroCopyUTF8String) {
 
   def size: Int = bitmaps.size
 
+  def bitmapBytes: Long = bitmaps.values.asScala.foldLeft(0L)(_ + _.sizeInBytes.toLong)
+
   /**
    * Adds a new entry to the index with value indexValue and numeric index n.
    * getOrElseUpdate is actually a computeIfAbsent, which is atomic.
@@ -32,6 +35,24 @@ class BitmapIndex[K](indexName: ZeroCopyUTF8String) {
   def addEntry(indexValue: K, n: Int): Unit = {
     val bitmap = bitmaps.getOrElseUpdate(indexValue, { k => new EWAHCompressedBitmap() })
     bitmap.set(n)
+  }
+
+  /**
+   * Removes entries denoted by a bitmap from multiple values.   If a bitmap for
+   * a value becomes empty, then that value will be removed entirely.
+   * @param values all of the values whose bitmaps will have the entries removed
+   * @param entries a bitmap of entries to remove
+   */
+  def removeEntries(values: Seq[K], entries: EWAHCompressedBitmap): Unit = {
+    for { value <- values
+          oldBitmap <- Option(bitmaps.get(value)) } {
+      val newBitmap = oldBitmap.andNot(entries)
+      if (newBitmap.isEmpty) {
+        bitmaps.remove(value)
+      } else {
+        bitmaps.put(value, newBitmap)
+      }
+    }
   }
 
   /**
@@ -72,7 +93,7 @@ class BitmapIndex[K](indexName: ZeroCopyUTF8String) {
    * Parses the query Filter to produce a bitmap
    */
   def parseFilter(f: Filter): EWAHCompressedBitmap = f match {
-    case Equals(v: Any) => get(decode(v).asInstanceOf[K]).getOrElse(emptySkips)
+    case Equals(v: Any)       => get(decode(v).asInstanceOf[K]).getOrElse(emptySkips)
     case In(values: Set[Any]) => in(values.map(decode).asInstanceOf[Set[K]])
     case And(left, right)     => parseFilter(left).or(parseFilter(right))
     case o: Any               => ???

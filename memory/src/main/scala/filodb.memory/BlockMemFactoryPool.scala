@@ -7,7 +7,7 @@ import com.typesafe.scalalogging.StrictLogging
  * and half empty.  It has a checkout and return semantics.  Multiple parallel tasks each do their own
  * checkout and return, thus there should be one blockholder outstanding per task.
  */
-class BlockMemFactoryPool(blockStore: BlockManager) extends StrictLogging {
+class BlockMemFactoryPool(blockStore: BlockManager, metadataAllocSize: Int) extends StrictLogging {
   private val factoryPool = new collection.mutable.Queue[BlockMemFactory]()
 
   def poolSize: Int = factoryPool.length
@@ -18,7 +18,7 @@ class BlockMemFactoryPool(blockStore: BlockManager) extends StrictLogging {
       factoryPool.dequeue
     } else {
       logger.debug(s"Nothing in BlockMemFactory pool.  Creating a new one")
-      new BlockMemFactory(blockStore, None)
+      new BlockMemFactory(blockStore, None, metadataAllocSize)
     }
   }
 

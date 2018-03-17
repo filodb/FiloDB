@@ -3,9 +3,9 @@ package filodb.core.memstore
 import com.typesafe.config.ConfigFactory
 import monix.execution.ExecutionModel.BatchedExecution
 import monix.reactive.Observable
-import org.scalatest.{BeforeAndAfter, FunSpec, Matchers}
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
+import org.scalatest.{BeforeAndAfter, FunSpec, Matchers}
 
 import filodb.core._
 import filodb.core.binaryrecord.BinaryRecord
@@ -20,7 +20,8 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
   import ZeroCopyUTF8String._
 
   val config = ConfigFactory.load("application_test.conf").getConfig("filodb")
-  val memStore = new TimeSeriesMemStore(config, new NullColumnStore, new InMemoryMetaStore())
+  val policy = new FixedMaxPartitionsEvictionPolicy(20)
+  val memStore = new TimeSeriesMemStore(config, new NullColumnStore, new InMemoryMetaStore(), Some(policy))
   implicit override val patienceConfig = PatienceConfig(timeout = Span(2, Seconds), interval = Span(50, Millis))
 
   after {
@@ -35,7 +36,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     val data = records(multiSeriesData()).take(20)   // 2 records per series x 10 series
     memStore.ingest(dataset1.ref, 0, data)
 
-    memStore.numPartitions(dataset1.ref, 0) should equal (10)
+    memStore.numPartitions(dataset1.ref, 0) shouldEqual 10
     memStore.indexNames(dataset1.ref).toSeq should equal (Seq(("series", 0)))
     memStore.latestOffset(dataset1.ref, 0) shouldEqual 19
 
@@ -67,9 +68,8 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
   }
 
   it("should record partitions in persistent store during ingestion; should be able to load partitions from there") {
-
     memStore.setup(dataset1, 0)
-    memStore.sink.sinkStats.chunksetsWritten shouldEqual 0
+    chunksetsWritten shouldEqual 0
 
     // Flush every 25 records. We take 100 records, and do 4 groups.
     // NOTE: due to the batched ExecutionModel of fromIterable, it is hard to determine exactly when the FlushCommand
@@ -79,7 +79,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     val flushStream = FlushStream.everyN(4, 25, stream)
     memStore.ingestStream(dataset1.ref, 0, stream, flushStream)(ex => throw ex).futureValue
 
-    memStore.numPartitions(dataset1.ref, 0) should equal (10)
+    memStore.numPartitions(dataset1.ref, 0) shouldEqual 10
 
     // all partitions should be written to persistent store
     memStore.sink.scanPartitionKeys(dataset1, 0).toListL.runAsync.futureValue.size shouldEqual 10
@@ -175,7 +175,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     memStore.setup(dataset1, 1)
     memStore.activeShards(dataset1.ref) should equal (Seq(0, 1))
 
-    val initChunksWritten = memStore.sink.sinkStats.chunksetsWritten
+    val initChunksWritten = chunksetsWritten
 
     val stream = Observable.fromIterable(records(linearMultiSeries()).take(100).grouped(5).toSeq)
     val fut1 = memStore.ingestStream(dataset1.ref, 0, stream, FlushStream.empty)(ex => throw ex)
@@ -195,7 +195,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     agg2.result should equal (Array((1 to 100).map(_.toDouble).sum))
 
     // should not have increased
-    memStore.sink.sinkStats.chunksetsWritten shouldEqual initChunksWritten
+    chunksetsWritten shouldEqual initChunksWritten
   }
 
   it("should handle errors from ingestStream") {
@@ -212,7 +212,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
 
   it("should ingestStream and flush on interval") {
     memStore.setup(dataset1, 0)
-    val initChunksWritten = memStore.sink.sinkStats.chunksetsWritten
+    val initChunksWritten = chunksetsWritten
 
     // Flush every 50 records.
     // NOTE: due to the batched ExecutionModel of fromIterable, it is hard to determine exactly when the FlushCommand
@@ -223,7 +223,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     memStore.ingestStream(dataset1.ref, 0, stream, flushStream)(ex => throw ex).futureValue
 
     // Two flushes and 3 chunksets have been flushed
-    memStore.sink.sinkStats.chunksetsWritten shouldEqual initChunksWritten + 3
+    chunksetsWritten shouldEqual initChunksWritten + 3
 
     // Try reading - should be able to read optimized chunks too
     val splits = memStore.getScanSplits(dataset1.ref, 1)
@@ -242,7 +242,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     // A whole bunch of records should be skipped.  Cut off the stream at record 50.
 
     memStore.setup(dataset1, 0)
-    val initChunksWritten = memStore.sink.sinkStats.chunksetsWritten
+    val initChunksWritten = chunksetsWritten
     val checkpoints = Map(0 -> 5L, 1 -> 10L, 2 -> 15L, 3 -> 20L)
 
     val stream = Observable.fromIterable(records(linearMultiSeries()).take(100).grouped(5).toSeq)
@@ -252,7 +252,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     // Last element exceeding condition should be included
     offsets.drop(1) shouldEqual Seq(29L, 39L, 49L, 59L)
     // no flushes
-    memStore.sink.sinkStats.chunksetsWritten shouldEqual initChunksWritten
+    chunksetsWritten shouldEqual initChunksWritten
 
     // Should have less than 50 records ingested
     // Try reading - should be able to read optimized chunks too
@@ -268,11 +268,31 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     val data = records(multiSeriesData()).take(20)   // 2 records per series x 10 series
     memStore.ingest(dataset1.ref, 0, data)
 
-    memStore.numPartitions(dataset1.ref, 0) should equal (10)
+    memStore.numPartitions(dataset1.ref, 0) shouldEqual 10
     memStore.indexNames(dataset1.ref).toSeq should equal (Seq(("series", 0)))
 
     memStore.truncate(dataset1.ref)
 
     memStore.numPartitions(dataset1.ref, 0) should equal (0)
+  }
+
+  private def chunksetsWritten = memStore.sink.sinkStats.chunksetsWritten
+
+  it("should be able to evict partitions properly, flush, and still query") {
+    memStore.setup(dataset1, 0)
+
+    // Ingest normal multi series data with 10 partitions.  Should have 10 partitions.
+    val data = records(linearMultiSeries()).take(10)
+    memStore.ingest(dataset1.ref, 0, data)
+
+    memStore.numPartitions(dataset1.ref, 0) shouldEqual 10
+    memStore.indexValues(dataset1.ref, 0, "series").toSeq should have length (10)
+
+    // Now, ingest 22 partitions.  First two partitions ingested should be evicted. Check numpartitions, stats, index
+    val data2 = records(linearMultiSeries(numSeries = 22)).take(22)
+    memStore.ingest(dataset1.ref, 0, data2)
+
+    memStore.numPartitions(dataset1.ref, 0) shouldEqual 20
+    memStore.indexValues(dataset1.ref, 0, "series").toSeq should have length (20)
   }
 }

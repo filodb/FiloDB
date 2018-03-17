@@ -89,12 +89,12 @@ class ExecPlanSpec extends FunSpec with Matchers with BeforeAndAfter with ScalaF
         range shouldEqual Some((keyRange.startkey, keyRange.endkey))
         schema shouldEqual ResultSchema(schemaCols, 1)
         vectorList should have length (10)
-        vectorList.map(_.info.get.partKey) shouldEqual partKeys
+        vectorList.map(_.info.get.partKey).toSet shouldEqual partKeys.toSet   // order of partitions not guaranteed
         // vectorList.map(_.readers.length) shouldEqual Seq.fill(10)(1)
         vectorList.map(_.readers.head.vectors.size) shouldEqual Seq.fill(10)(2)
 
-        r.toRowReaders.toSeq.map(_._1.get.partKey) shouldEqual partKeys
-        r.toRowReaders.toSeq.flatMap(_._2.map(_.getDouble(1))).take(8) shouldEqual Seq(
+        r.toRowReaders.toSeq.map(_._1.get.partKey).toSet shouldEqual partKeys.toSet
+        r.toRowReaders.toSeq.flatMap(_._2.map(_.getDouble(1))).take(8).toSet shouldEqual Set(
                                             11.0, 12.0, 13.0, 14.0, 15.0, 6.0, 16.0, 7.0)
       case other: Any =>
         throw new RuntimeException(s"Should not have gotten $other")
