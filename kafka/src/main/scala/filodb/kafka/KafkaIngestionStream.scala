@@ -24,11 +24,11 @@ class KafkaIngestionStream(config: Config,
   protected val sc = new SourceConfig(config, shard)
   import sc._
 
-  private val converter = RecordConverter(RecordConverterClass, dataset)
+  protected val converter = RecordConverter(RecordConverterClass, dataset)
   private val tp = new TopicPartition(IngestionTopic, shard)
 
   logger.info(s"Creating consumer assigned to topic ${tp.topic} partition ${tp.partition} offset $offset")
-  private val consumer = PartitionedConsumerObservable.create(sc, tp, offset)
+  protected val consumer = PartitionedConsumerObservable.create(sc, tp, offset)
 
   /**
    * Returns a reactive Observable stream of IngestRecord sequences from Kafka.
