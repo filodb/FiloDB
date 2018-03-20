@@ -7,6 +7,7 @@ import scala.util.control.NonFatal
 
 import akka.actor.{ActorRef, Props}
 import akka.util.Timeout
+import kamon.Kamon
 import monix.eval.Task
 import org.scalactic._
 
@@ -241,9 +242,12 @@ final class QueryActor(memStore: MemStore,
   }
 
   def receive: Receive = {
-    case q: LogicalPlanQuery       => parseQueryPlan(q, sender())
-    case q: ExecPlanQuery          => execPhysicalPlan(q, sender())
-    case q: SingleShardQuery       => singleShardQuery(q)
+    case q: LogicalPlanQuery       => Kamon.currentSpan().tag("LogicalPlanQuery", q.toString)
+                                      parseQueryPlan(q, sender())
+    case q: ExecPlanQuery          => Kamon.currentSpan().tag("ExecPlanQuery", q.toString)
+                                      execPhysicalPlan(q, sender())
+    case q: SingleShardQuery       => Kamon.currentSpan().tag("SingleShardQuery", q.toString)
+                                      singleShardQuery(q)
     case GetIndexNames(ref, limit) =>
       sender() ! memStore.indexNames(ref).take(limit).map(_._1).toBuffer
     case GetIndexValues(ref, index, limit) =>
