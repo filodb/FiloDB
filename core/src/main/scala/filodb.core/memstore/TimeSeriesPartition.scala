@@ -272,9 +272,17 @@ class TimeSeriesPartition(val partID: Int,
     * Also compacts infosChunks tombstones.
     */
   private def initNewChunk(): Unit = {
-    val (newAppenders, newCurChunks) = bufferPool.obtain()
-    appenders = newAppenders
-    currentChunks = newCurChunks
+    while(appenders == nullAppenders) {
+      try {
+        val (newAppenders, newCurChunks) = bufferPool.obtain()
+        appenders = newAppenders
+        currentChunks = newCurChunks
+      } catch {
+        case e: NoSuchElementException =>
+          logger.warn(s"Out of write buffers.  Waiting in a loop until we have such buffers")
+          Thread sleep 10000
+      }
+    }
     val newChunkId = timeUUID64
     val newInfo = ChunkSetInfo(newChunkId, -1, BinaryRecord.empty, BinaryRecord.empty)
     infosChunks.put(newChunkId, InfoChunks(newInfo, currentChunks.asInstanceOf[Array[BinaryVector[_]]]))
