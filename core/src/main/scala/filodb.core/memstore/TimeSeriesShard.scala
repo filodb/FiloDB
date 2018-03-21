@@ -166,8 +166,9 @@ class TimeSeriesShard(dataset: Dataset,
   private val blockFactoryPool = new BlockMemFactoryPool(blockStore, BlockMetaAllocSize)
   private val numColumns = dataset.dataColumns.size
 
-  // The off-heap buffers used for ingesting the newest data samples
-  protected val bufferMemorySize: Long = maxChunksSize * 8L * maxNumPartitions * numColumns
+  // The off-heap buffers used for ingesting the newest data samples.  Give it 10% overhead.
+  protected val bufferMemorySizeEst: Long = maxChunksSize * 8L * maxNumPartitions * numColumns
+  protected val bufferMemorySize = (bufferMemorySizeEst * 1.1).toLong
   logger.info(s"Allocating $bufferMemorySize bytes for WriteBufferPool for shard $shardNum")
   protected val bufferMemoryManager = new NativeMemoryManager(bufferMemorySize)
   protected val pagedChunkStore = new DemandPagedChunkStore(dataset, blockStore, BlockMetaAllocSize,
@@ -175,10 +176,11 @@ class TimeSeriesShard(dataset: Dataset,
 
   /**
     * Unencoded/unoptimized ingested data is stored in buffers that are allocated from this off-heap pool
-    * Set initial size to a fraction of the max chunk size, so that partitions with sparse amount of data
-    * will not cause too much memory bloat.  GrowableVector allows vectors to grow, so this should be OK
+    * TODO: For now set initialSize to maxChunksSize, because we don't have enough memory for it to just
+    *       keep growing, and as we keep cycling through WriteBuffers they all grow anyways.
+    * TODO: Redesign the WriteBufferPool so that we can actually manage differently sized buffers
     */
-  private val bufferPool = new WriteBufferPool(bufferMemoryManager, dataset, maxChunksSize / 8, maxNumPartitions)
+  private val bufferPool = new WriteBufferPool(bufferMemoryManager, dataset, maxChunksSize, maxNumPartitions)
   logger.info(s"Finished initializing memory pools for shard $shardNum")
 
   private final val partitionGroups = Array.fill(numGroups)(new EWAHCompressedBitmap)
