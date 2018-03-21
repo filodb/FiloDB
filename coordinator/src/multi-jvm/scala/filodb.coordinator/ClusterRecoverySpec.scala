@@ -82,10 +82,10 @@ abstract class ClusterRecoverySpec extends ClusterSpec(ClusterRecoverySpecConfig
     clusterActor = cluster.clusterSingleton(ClusterRole.Server, None)
     // wait for dataset to get registered automatically
     // NOTE: unfortunately the delay seems to be needed in order to query the ClusterActor successfully
-    Thread sleep 2000
+    Thread sleep 3000
     implicit val timeout: Timeout = cluster.settings.InitializationTimeout
     def func: Future[Seq[DatasetRef]] = (clusterActor ? ListRegisteredDatasets).mapTo[Seq[DatasetRef]]
-    awaitCond(func.futureValue == Seq(dataset6.ref), interval=250.millis)
+    awaitCond(func.futureValue == Seq(dataset6.ref), interval=250.millis, max=10.seconds)
     enterBarrier("cluster-actor-recovery-started")
 
     clusterActor ! SubscribeShardUpdates(dataset6.ref)

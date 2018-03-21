@@ -33,7 +33,7 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem) wi
                             .withFallback(ConfigFactory.load("application_test.conf"))
                             .getConfig("filodb")
 
-  private val within = 5.seconds.dilated
+  private val within = 7.seconds.dilated
   private val cluster = FilodbCluster(system)
   cluster.join()
 
@@ -146,7 +146,7 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem) wi
     expectMsg(IngestionStopped(dataset6.ref, 0))
 
     val func = (coordinatorActor ? GetIngestionStats(dataset6.ref)).mapTo[IngestionStatus]
-    awaitCond(func.futureValue.rowsIngested == batchSize - 1)
+    awaitCond(func.futureValue.rowsIngested == batchSize - 1, max=within)
   }
 
   it("should ingest all rows directly into MemStore") {

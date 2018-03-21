@@ -1,7 +1,6 @@
 package filodb.memory
 
 import java.nio.ByteBuffer
-import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.{AtomicLong, AtomicReference}
 
 import scala.collection.JavaConverters._
@@ -9,6 +8,7 @@ import scala.collection.mutable.ListBuffer
 
 import com.kenai.jffi.MemoryIO
 import com.typesafe.scalalogging.StrictLogging
+import org.jctools.maps.NonBlockingHashMapLong
 
 import filodb.memory.format.{BinaryVector, UnsafeUtils}
 import filodb.memory.format.BinaryVector.{HeaderMagic, Memory}
@@ -67,7 +67,7 @@ object MemFactory {
   */
 class NativeMemoryManager(val upperBoundSizeInBytes: Long) extends MemFactory {
   protected val usedSoFar = new AtomicLong(0)
-  protected val sizeMapping = new ConcurrentHashMap[Long, Long]()
+  protected val sizeMapping = new NonBlockingHashMapLong[Long]()
 
   def usedMemory: Long = usedSoFar.get()
 
@@ -80,35 +80,29 @@ class NativeMemoryManager(val upperBoundSizeInBytes: Long) extends MemFactory {
     * @return The memory to which the bytes have been copied to
     */
   override def copyFromBytes(bytes: Array[Byte]): ByteBuffer = {
-    val currentSize = usedSoFar.get()
-    //4 for magic header
     val size = bytes.length
-    val resultantSize = currentSize + size
-    if (!(resultantSize > upperBoundSizeInBytes)) {
-      val address: Long = MemoryIO.getCheckedInstance().allocateMemory(size, true)
-      usedSoFar.compareAndSet(currentSize, currentSize + size)
-      sizeMapping.put(address, size)
-      val byteBuffer = UnsafeUtils.asDirectBuffer(address, size)
-      UnsafeUtils.unsafe.copyMemory(bytes, UnsafeUtils.arayOffset, UnsafeUtils.ZeroPointer, address, size)
-      byteBuffer
-    } else {
-      val msg = s"Resultant memory size $resultantSize after allocating " +
-        s"with requested size $size is greater than upper bound size $upperBoundSizeInBytes"
-      throw new IndexOutOfBoundsException(msg)
-    }
+    val address = allocate(size)
+    val byteBuffer = UnsafeUtils.asDirectBuffer(address, size)
+    UnsafeUtils.unsafe.copyMemory(bytes, UnsafeUtils.arayOffset, UnsafeUtils.ZeroPointer, address, size)
+    byteBuffer
   }
 
   override def allocateWithMagicHeader(allocateSize: Int): Memory = {
-    val currentSize = usedSoFar.get()
     //4 for magic header
-    val size = allocateSize + 4
+    val address = allocate(allocateSize + 4)
+    UnsafeUtils.setInt(UnsafeUtils.ZeroPointer, address, HeaderMagic)
+    (UnsafeUtils.ZeroPointer, address + 4, allocateSize)
+  }
+
+  // Allocates a native 64-bit pointer, or throws an exception if not enough space
+  private def allocate(size: Int): Long = {
+    val currentSize = usedSoFar.get()
     val resultantSize = currentSize + size
     if (!(resultantSize > upperBoundSizeInBytes)) {
       val address: Long = MemoryIO.getCheckedInstance().allocateMemory(size, true)
       usedSoFar.compareAndSet(currentSize, currentSize + size)
       sizeMapping.put(address, size)
-      UnsafeUtils.setInt(UnsafeUtils.ZeroPointer, address, HeaderMagic)
-      (UnsafeUtils.ZeroPointer, address + 4, allocateSize)
+      address
     } else {
       val msg = s"Resultant memory size $resultantSize after allocating " +
         s"with requested size $size is greater than upper bound size $upperBoundSizeInBytes"
@@ -202,6 +196,7 @@ class BlockMemFactory(blockStore: BlockManager,
     * An example would be chunk metadata for chunks written to potentially more than 1 block.
     */
   def startMetaSpan(): Unit = {
+    metadataSpan.clear()
     metadataSpan += (currentBlock.get())
   }
 
@@ -214,9 +209,9 @@ class BlockMemFactory(blockStore: BlockManager,
   def endMetaSpan(metadataWriter: Long => Unit, metaSize: Short): Unit = {
     metadataSpan.foreach { blk =>
       // It is possible that the first block(s) did not have enough memory.  Don't write metadata to full blocks
-      if (blk.hasCapacity(metaSize)) metadataWriter(blk.allocMetadata(metaSize))
+      val metaAddr = blk.allocMetadata(metaSize)
+      if (metaAddr != 0) metadataWriter(metaAddr)
     }
-    metadataSpan.clear()
   }
 
   def markUsedBlocksReclaimable(): Unit = {

@@ -34,16 +34,16 @@ class BlockSpec extends FlatSpec with Matchers with BeforeAndAfter with BeforeAn
     block.remaining shouldEqual 3854
   }
 
-  it should "throw error when allocate metadata if not enough space" in {
+  it should "return null when allocate metadata if not enough space" in {
     val block = blockManager.requestBlock(None).get
     block.own()
     block.capacity shouldEqual 4096
     block.remaining shouldEqual 4096
 
     block.position(3800)
-    intercept[AssertionError] {
-      block.allocMetadata(300)
-    }
+    block.remaining shouldEqual (4096-3800)
+    block.allocMetadata(300) shouldEqual 0
+    block.remaining shouldEqual (4096-3800)   // still same space remaining
   }
 
   it should "not reclaim when block has not been marked reclaimable" in {

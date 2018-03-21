@@ -59,6 +59,8 @@ class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
   val partitionsQueried = Kamon.counter("memstore-partitions-queried").refine(tags)
   val numChunksQueried = Kamon.counter("memstore-chunks-queried").refine(tags)
   val partitionsEvicted = Kamon.counter("memstore-partitions-evicted").refine(tags)
+  // The number of uncommitted WriteBuffers freed due to errors or other circumstances
+  val uncommittedBuffersFreed = Kamon.counter("memstore-uncommitted-buffers-freed").refine(tags)
   val memoryStats = new MemoryStats(tags)
 
   val bufferPoolSize = Kamon.gauge("memstore-writebuffer-pool-size").refine(tags)
@@ -277,10 +279,15 @@ class TimeSeriesShard(dataset: Dataset,
         Task.fromFuture(commitCheckpoint(dataset.ref, shardNum, flushGroup))
     }
     taskToReturn.runOnComplete(_ => tracer.finish())
+    updateGauges()
+    taskToReturn
+  }
+
+  private def updateGauges(): Unit = {
     shardStats.bufferPoolSize.set(bufferPool.poolSize)
     shardStats.indexEntries.set(keyIndex.indexSize)
     shardStats.indexBytes.set(keyIndex.indexBytes)
-    taskToReturn
+    shardStats.numPartitions.set(numActivePartitions)
   }
 
   private def doFlushSteps(flushGroup: FlushGroup,
@@ -301,6 +308,9 @@ class TimeSeriesShard(dataset: Dataset,
     val writeChunksFuture = sink.write(dataset, chunkSetStream).recover { case e =>
       logger.error("Critical! Chunk persistence failed after retries and skipped", e)
       shardStats.flushesFailedChunkWrite.increment
+      // Free up the remainder of the WriteBuffers that have not been flushed yet.  Otherwise they will
+      // never be freed.
+      partitionIt.foreach(_.releaseFlushingAppenders())
       DataDropped
     }
     val writePartKeyFuture = sink.addPartitions(dataset, partKeysInGroup, shardNum).recover { case e =>
@@ -370,7 +380,6 @@ class TimeSeriesShard(dataset: Dataset,
     partitions.put(nextPartitionID, newPart)
     shardStats.partitionsCreated.increment
     keyMap(binPartKey) = newPart
-    shardStats.numPartitions.increment()
     partitionGroups(group(newPartKey)).set(nextPartitionID)
     // if we are in the restore execution flow, we should not need to write this key
     if (needsPersistence) partKeysToFlush(group(binPartKey))(0).set(nextPartitionID)

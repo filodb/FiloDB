@@ -145,14 +145,17 @@ class Block(val address: Long, val capacity: Long, val reclaimListener: ReclaimL
    * Allocates metaSize bytes for metadata storage.
    * @param metaSize the number of bytes to use for metadata storage.
    * @return the Long address of the metadata space.  The metaSize is written to the location 2 bytes before this.
+   *         If there is no capacity then 0 (null) is returned.
    */
-  def allocMetadata(metaSize: Short): Long = {
-    assert(metaSize > 0 && metaSize <= (remaining() - 2))
-    _metaPosition -= (metaSize + 2)
-    val metaAddr = address + _metaPosition
-    UnsafeUtils.setShort(UnsafeUtils.ZeroPointer, metaAddr, metaSize)
-    metaAddr + 2
-  }
+  def allocMetadata(metaSize: Short): Long =
+    if (metaSize > 0 && metaSize <= (remaining() - 2)) {
+      _metaPosition -= (metaSize + 2)
+      val metaAddr = address + _metaPosition
+      UnsafeUtils.setShort(UnsafeUtils.ZeroPointer, metaAddr, metaSize)
+      metaAddr + 2
+    } else {
+      0
+    }
 
   protected def reclaimWithMetadata(): Unit = {
     var metaPointer = address + _metaPosition

@@ -171,10 +171,11 @@ lazy val commonDeps = Seq(
 lazy val scalaxyDep = "com.nativelibs4java"  %% "scalaxy-loops"     % "0.3.3" % "provided"
 
 lazy val memoryDeps = commonDeps ++ Seq(
-  "com.github.jnr"       %  "jnr-ffi"           % "2.1.6",
-  "joda-time"             % "joda-time"         % "2.2",
-  "org.joda"              % "joda-convert"      % "1.2",
-  "net.jpountz.lz4"      %  "lz4"               % "1.3.0",
+  "com.github.jnr"       %  "jnr-ffi"          % "2.1.6",
+  "joda-time"            % "joda-time"         % "2.2",
+  "org.joda"             % "joda-convert"      % "1.2",
+  "net.jpountz.lz4"      %  "lz4"              % "1.3.0",
+  "org.jctools"          % "jctools-core"      % "2.0.1",
   scalaLoggingDep,
   scalaxyDep
 )

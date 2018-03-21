@@ -141,6 +141,12 @@ class TimeSeriesPartition(val partID: Int,
    * called from a single thread / single synchronous stream.
    */
   def switchBuffers(): Unit = if (latestChunkLen > 0) {
+    if (flushingAppenders != UnsafeUtils.ZeroPointer) {
+      // This should not happen unless due to error/flush failures.  It means the preivous flushing chunks
+      // never got flushed properly.
+      bufferPool.release(flushingAppenders)
+      shardStats.uncommittedBuffersFreed.increment
+    }
     flushingAppenders = appenders
     flushingChunkID = infosChunks.keys.last
     // Right after this all ingest() calls will check and potentially append to new chunks
@@ -204,6 +210,15 @@ class TimeSeriesPartition(val partID: Int,
 
       Some(ChunkSet(chunkInfo, binPartition, Nil,
                     frozenVectors.zipWithIndex.map { case (vect, pos) => (pos, vect.toFiloBuffer) }))
+    }
+  }
+
+  // Releases the flushing appenders.  Called in case of failure to make sure flushing appenders are released.
+  def releaseFlushingAppenders(): Unit = {
+    if (flushingAppenders != UnsafeUtils.ZeroPointer) {
+      bufferPool.release(flushingAppenders)
+      flushingAppenders = nullAppenders
+      shardStats.uncommittedBuffersFreed.increment
     }
   }
 
