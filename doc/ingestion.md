@@ -103,6 +103,13 @@ val task = Task.zip2(Task.fork(streamT), Task.fork(pushT)).runAsync
 
 You can also look at [SourceSinkSuite.scala](../kafka/src/it/scala/filodb/kafka/SourceSinkSuite.scala).
 
+## Testing the Consumer
+
+* `sbt standalone/assembly`
+* `java -cp standalone/target/scala-2.11/standalone-assembly-0.7.0.jar filodb.kafka.TestConsumer my-kafka-sourceconfig.conf`
+
+See the TestConsumer for more info.
+
 ## Recovery and Persistence
 
 Datasets are divided into shards.  One shard must wholly fit into one node/process.  Within each shard, individual time series or "partitions" are further grouped into sub-groups.  The number of groups per shard is configurable.
