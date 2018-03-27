@@ -42,19 +42,20 @@ sealed class ChunkTable(val dataset: DatasetRef,
 
   lazy val writeChunksCql = session.prepare(
     s"""INSERT INTO $tableString (partition, chunkid, columnid, data
-      |) VALUES (?, ?, ?, ?)""".stripMargin
+      |) VALUES (?, ?, ?, ?) USING TTL ?""".stripMargin
   ).setConsistencyLevel(writeConsistencyLevel)
 
   def writeChunks(partition: Types.PartitionKey,
                   chunkInfo: ChunkSetInfo,
                   chunks: Seq[(Int, ByteBuffer)],
-                  stats: ChunkSinkStats): Future[Response] = {
+                  stats: ChunkSinkStats,
+                  diskTimeToLive: Int): Future[Response] = {
     val partBytes = toBuffer(partition)
     var chunkBytes = 0L
     val statements = chunks.map { case (columnId, bytes) =>
       val finalBytes = compressChunk(bytes)
       chunkBytes += finalBytes.capacity.toLong
-      writeChunksCql.bind(partBytes, chunkInfo.id: jlLong, columnId: jlInt, finalBytes)
+      writeChunksCql.bind(partBytes, chunkInfo.id: jlLong, columnId: jlInt, finalBytes, diskTimeToLive: jlInt)
     }
     stats.addChunkWriteStats(statements.length, chunkBytes, chunkInfo.numRows)
     connector.execStmtWithRetries(unloggedBatch(statements).setConsistencyLevel(writeConsistencyLevel))

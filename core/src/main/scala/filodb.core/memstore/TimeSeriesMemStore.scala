@@ -79,7 +79,8 @@ extends MemStore with StrictLogging {
   def ingestStream(dataset: DatasetRef,
                    shardNum: Int,
                    stream: Observable[Seq[IngestRecord]],
-                   flushStream: Observable[FlushCommand] = FlushStream.empty)
+                   flushStream: Observable[FlushCommand] = FlushStream.empty,
+                   diskTimeToLive: Int = 259200)
                   (errHandler: Throwable => Unit)
                   (implicit sched: Scheduler): CancelableFuture[Unit] = {
     val shard = getShardE(dataset, shardNum)
@@ -91,7 +92,10 @@ extends MemStore with StrictLogging {
                     // stream.  This avoids concurrency issues and ensures that buffers for a group are switched
                     // at the same offset/watermark
                     case FlushCommand(group) => shard.switchGroupBuffers(group)
-                                                Some(FlushGroup(shard.shardNum, group, shard.latestOffset))
+                                                Some(FlushGroup(shard.shardNum,
+                                                  group,
+                                                  shard.latestOffset,
+                                                  diskTimeToLive))
                   }.collect { case Some(flushGroup) => flushGroup }
                   .mapAsync(numParallelFlushes)(shard.createFlushTask _)
                   .foreach { x => }

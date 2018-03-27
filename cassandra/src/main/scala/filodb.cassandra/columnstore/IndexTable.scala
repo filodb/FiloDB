@@ -79,7 +79,7 @@ sealed class IndexTable(val dataset: DatasetRef, val connector: FiloCassandraCon
 
   lazy val writeIndexCql = session.prepare(
     s"INSERT INTO $tableString (partition, indextype, chunkid, data) " +
-    "VALUES (?, 1, ?, ?)")
+    "VALUES (?, 1, ?, ?) USING TTL ?")
     .setConsistencyLevel(ConsistencyLevel.ONE)
 
   /**
@@ -88,14 +88,16 @@ sealed class IndexTable(val dataset: DatasetRef, val connector: FiloCassandraCon
    */
   def writeIndices(partition: Types.PartitionKey,
                    indices: Seq[(Types.ChunkID, Array[Byte])],
-                   stats: ChunkSinkStats): Future[Response] = {
+                   stats: ChunkSinkStats,
+                   diskTimeToLive: Int): Future[Response] = {
     var indexBytes = 0
     val partitionBuf = toBuffer(partition)
     val statements = indices.map { case (chunkId, indexData) =>
       indexBytes += indexData.size
       writeIndexCql.bind(partitionBuf,
                          chunkId: java.lang.Long,
-                         ByteBuffer.wrap(indexData))
+                         ByteBuffer.wrap(indexData),
+                         diskTimeToLive: java.lang.Integer)
     }
     stats.addIndexWriteStats(indexBytes)
     connector.execStmtWithRetries(unloggedBatch(statements).setConsistencyLevel(ConsistencyLevel.ONE))

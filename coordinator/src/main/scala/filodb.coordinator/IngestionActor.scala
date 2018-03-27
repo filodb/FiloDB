@@ -59,6 +59,9 @@ private[filodb] final class IngestionActor(dataset: Dataset,
   // Params for creating the default memStore flush scheduler
   // TODO: eventually make the flush scheduler pluggable based on the source config
   private final val chunkDuration = source.config.as[Option[FiniteDuration]]("chunk-duration").getOrElse(1.hour)
+  private final val DefaultTTL = 259200
+  private final val diskTimeToLive = source.config.as[Option[FiniteDuration]]("disk-time-to-live-seconds")
+                                      .map(_.toSeconds.toInt).getOrElse(DefaultTTL)
 
   // TODO: add and remove per-shard ingestion sources?
   // For now just start it up one time and kill the actor if it fails
@@ -100,7 +103,7 @@ private[filodb] final class IngestionActor(dataset: Dataset,
       yield {
         if (checkpoints.isEmpty) {
           // Start normal ingestion with no recovery checkpoint and flush group 0 first
-          normalIngestion(e.shard, None, 0)
+          normalIngestion(e.shard, None, 0, diskTimeToLive)
         } else {
           // Figure out recovery end watermark and intervals.  The reportingInterval is the interval at which
           // offsets come back from the MemStore for us to report progress.
@@ -114,7 +117,7 @@ private[filodb] final class IngestionActor(dataset: Dataset,
                                          checkpoints) }
           yield {
             // Start reading past last offset for normal records; start flushes one group past last group
-            normalIngestion(e.shard, Some(lastOffset + 1), (lastFlushedGroup + 1) % memStore.numGroups)
+            normalIngestion(e.shard, Some(lastOffset + 1), (lastFlushedGroup + 1) % memStore.numGroups, diskTimeToLive)
           }
         }
       }
@@ -140,13 +143,20 @@ private[filodb] final class IngestionActor(dataset: Dataset,
    * @param offset optionally the offset to start ingestion at
    * @param startingGroupNo the group number to start flushes at
    */
-  private def normalIngestion(shard: Int, offset: Option[Long], startingGroupNo: Int): Unit = {
+  private def normalIngestion(shard: Int,
+                              offset: Option[Long],
+                              startingGroupNo: Int,
+                              diskTimeToLive: Int): Unit = {
     create(shard, offset) map { ingestionStream =>
       val stream = ingestionStream.get
       logger.info(s"Starting normal/active ingestion for shard $shard at offset $offset")
       clusterActor ! IngestionStarted(dataset.ref, shard, context.parent)
 
-      streamSubscriptions(shard) = memStore.ingestStream(dataset.ref, shard, stream, flushStream(startingGroupNo)) {
+      streamSubscriptions(shard) = memStore.ingestStream(dataset.ref,
+        shard,
+        stream,
+        flushStream(startingGroupNo),
+        diskTimeToLive) {
         ex => handleError(dataset.ref, shard, ex)
       }
       // On completion of the future, send IngestionStopped

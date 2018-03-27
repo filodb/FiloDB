@@ -25,10 +25,11 @@ trait ChunkSink {
    * Writes the ChunkSets appearing in a stream/Observable to persistent storage, with backpressure
    * @param dataset the Dataset to write to
    * @param chunksets an Observable stream of chunksets to write
+   * @param diskTimeToLive the time for chunksets to live on disk (Cassandra)
    * @return Success when the chunksets stream ends and is completely written.
    *         Future.failure(exception) if an exception occurs.
    */
-  def write(dataset: Dataset, chunksets: Observable[ChunkSet]): Future[Response]
+  def write(dataset: Dataset, chunksets: Observable[ChunkSet], diskTimeToLive: Int = 259200): Future[Response]
 
   /**
    * Initializes the ChunkSink for a given dataset.  Must be called once before writing.
@@ -106,7 +107,7 @@ class NullColumnStore(implicit sched: Scheduler) extends ColumnStore with Strict
   // in-memory store of partition keys
   val partitionKeys = new ConcurrentHashMap[DatasetRef, scala.collection.mutable.Set[Types.PartitionKey]]().asScala
 
-  def write(dataset: Dataset, chunksets: Observable[ChunkSet]): Future[Response] = {
+  def write(dataset: Dataset, chunksets: Observable[ChunkSet], diskTimeToLive: Int): Future[Response] = {
     chunksets.foreach { chunkset =>
       val totalBytes = chunkset.chunks.map(_._2.limit).sum
       sinkStats.addChunkWriteStats(chunkset.chunks.length, totalBytes, chunkset.info.numRows)

@@ -307,7 +307,7 @@ class TimeSeriesShard(dataset: Dataset,
     val partKeysInGroup =
       new PartitionIterator(partKeysToFlush(flushGroup.groupNum)(1).intIterator()).map(_.binPartition)
 
-    val writeChunksFuture = sink.write(dataset, chunkSetStream).recover { case e =>
+    val writeChunksFuture = sink.write(dataset, chunkSetStream, flushGroup.diskTimeToLive).recover { case e =>
       logger.error("Critical! Chunk persistence failed after retries and skipped", e)
       shardStats.flushesFailedChunkWrite.increment
       // Free up the remainder of the WriteBuffers that have not been flushed yet.  Otherwise they will

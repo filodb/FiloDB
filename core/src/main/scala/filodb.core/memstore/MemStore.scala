@@ -18,7 +18,7 @@ final case class ShardAlreadySetup(dataset: DatasetRef, shard: Int) extends
 sealed trait DataOrCommand
 final case class SomeData(records: Seq[IngestRecord]) extends DataOrCommand
 final case class FlushCommand(groupNum: Int) extends DataOrCommand
-final case class FlushGroup(shard: Int, groupNum: Int, flushWatermark: Long)
+final case class FlushGroup(shard: Int, groupNum: Int, flushWatermark: Long, diskTimeToLive: Int)
 
 final case class FlushError(err: ErrorResponse) extends Exception(s"Flush error $err")
 
@@ -73,6 +73,7 @@ trait MemStore extends ChunkSource {
    * @param shard shard number to ingest into
    * @param stream the stream of new records, with schema conforming to that used in setup()
    * @param flushStream the stream of FlushCommands for regular flushing of chunks to ChunkSink
+   * @param diskTimeToLive the time for chunks in this stream to live on disk (Cassandra)
    * @param errHandler this is called when an ingestion error occurs
    * @return a CancelableFuture for cancelling the stream subscription, which should be done on teardown
    *        the Future completes when both stream and flushStream ends.  It is up to the caller to ensure this.
@@ -80,7 +81,8 @@ trait MemStore extends ChunkSource {
   def ingestStream(dataset: DatasetRef,
                    shard: Int,
                    stream: Observable[Seq[IngestRecord]],
-                   flushStream: Observable[FlushCommand] = FlushStream.empty)
+                   flushStream: Observable[FlushCommand] = FlushStream.empty,
+                   diskTimeToLive: Int = 259200)
                   (errHandler: Throwable => Unit)
                   (implicit sched: Scheduler): CancelableFuture[Unit]
 

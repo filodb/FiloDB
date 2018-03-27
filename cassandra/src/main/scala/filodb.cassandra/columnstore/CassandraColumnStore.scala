@@ -111,12 +111,13 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
   // Initial implementation: write each ChunkSet as its own transaction.  Will result in lots of writes.
   // Future optimization: group by token range and batch?
   def write(dataset: Dataset,
-            chunksets: Observable[ChunkSet]): Future[Response] = {
+            chunksets: Observable[ChunkSet],
+            diskTimeToLive: Int = 259200): Future[Response] = {
     chunksets.mapAsync(writeParallelism) { chunkset =>
                val span = Kamon.buildSpan("write-chunkset").start()
                val future =
-                 for { writeChunksResp  <- writeChunks(dataset.ref, chunkset)
-                       writeIndexResp   <- writeIndices(dataset, chunkset)
+                 for { writeChunksResp  <- writeChunks(dataset.ref, chunkset, diskTimeToLive)
+                       writeIndexResp   <- writeIndices(dataset, chunkset, diskTimeToLive)
                                            if writeChunksResp == Success
                  } yield {
                    span.finish()
@@ -132,19 +133,21 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
   }
 
   private def writeChunks(ref: DatasetRef,
-                          chunkset: ChunkSet): Future[Response] = {
+                          chunkset: ChunkSet,
+                          diskTimeToLive: Int): Future[Response] = {
     asyncSubtrace("write-chunks", "ingestion") {
       val chunkTable = getOrCreateChunkTable(ref)
-      chunkTable.writeChunks(chunkset.partition, chunkset.info, chunkset.chunks, sinkStats)
+      chunkTable.writeChunks(chunkset.partition, chunkset.info, chunkset.chunks, sinkStats, diskTimeToLive)
     }
   }
 
   private def writeIndices(dataset: Dataset,
-                           chunkset: ChunkSet): Future[Response] = {
+                           chunkset: ChunkSet,
+                           diskTimeToLive: Int): Future[Response] = {
     asyncSubtrace("write-index", "ingestion") {
       val indexTable = getOrCreateIndexTable(dataset.ref)
       val indices = Seq((chunkset.info.id, ChunkSetInfo.toBytes(dataset, chunkset.info, chunkset.skips)))
-      indexTable.writeIndices(chunkset.partition, indices, sinkStats)
+      indexTable.writeIndices(chunkset.partition, indices, sinkStats, diskTimeToLive)
     }
   }
 
