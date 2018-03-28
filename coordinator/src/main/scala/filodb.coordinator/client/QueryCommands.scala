@@ -27,7 +27,8 @@ object QueryCommands {
    * Or Nil if the dataset is not found.
    */
   final case class GetIndexNames(dataset: DatasetRef,
-                                 limit: Int = 10) extends QueryCommand
+                                 limit: Int = 10,
+                                 submitTime: Long = System.currentTimeMillis()) extends QueryCommand
 
   /**
    * Returns a Seq[String] of the first *limit* values indexed for a given tag/column.
@@ -35,7 +36,8 @@ object QueryCommands {
    */
   final case class GetIndexValues(dataset: DatasetRef,
                                   indexName: String,
-                                  limit: Int = 100) extends QueryCommand
+                                  limit: Int = 100,
+                                  submitTime: Long = System.currentTimeMillis()) extends QueryCommand
 
   /**
    * Specifies details about the aggregation query to execute on the FiloDB server.
@@ -72,7 +74,8 @@ object QueryCommands {
    */
   final case class LogicalPlanQuery(dataset: DatasetRef,
                                     plan: LogicalPlan,
-                                    queryOptions: QueryOptions = QueryOptions()) extends QueryCommand
+                                    queryOptions: QueryOptions = QueryOptions(),
+                                    submitTime: Long = System.currentTimeMillis()) extends QueryCommand
 
   /**
    * INTERNAL API only.
@@ -81,7 +84,10 @@ object QueryCommands {
    * @param execPlan the ExecPlan containing the physical execution query plan
    * @param limit the limit to the number of items returned
    */
-  final case class ExecPlanQuery(dataset: DatasetRef, execPlan: ExecPlan[_, _], limit: Int) extends QueryCommand
+  final case class ExecPlanQuery(dataset: DatasetRef,
+                                 execPlan: ExecPlan[_, _],
+                                 limit: Int,
+                                 submitTime: Long = System.currentTimeMillis()) extends QueryCommand
 
   // Error responses from query
   final case class UndefinedColumns(undefined: Set[String]) extends ErrorResponse

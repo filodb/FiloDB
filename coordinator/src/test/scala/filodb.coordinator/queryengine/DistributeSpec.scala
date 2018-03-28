@@ -38,7 +38,7 @@ class DistributeSpec extends ActorTest(DistributeSpec.getNewSystem) with ScalaFu
   describe("DistributeConcat") {
     it("should propagate QueryErrors from children as ChildQueryErrors") {
       val childPlan = new ExecPlan.LocalVectorReader(Seq(0), FilteredPartitionScan(ShardSplit(0), Nil), AllChunkScan)
-      val plan = new Engine.DistributeConcat(Seq((fakeNode, childPlan)), 4, 100)
+      val plan = new Engine.DistributeConcat(Seq((fakeNode, childPlan)), 4, 100, System.currentTimeMillis())
       val exc = Engine.execute(plan, dataset1, memStore, 100).runAsync.failed.futureValue
       exc shouldBe a[ChildQueryError]
       exc.asInstanceOf[ChildQueryError].source shouldEqual fakeNode

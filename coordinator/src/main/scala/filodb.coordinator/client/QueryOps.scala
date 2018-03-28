@@ -19,7 +19,9 @@ trait QueryOps extends ClientBase with StrictLogging {
   def getIndexNames(dataset: DatasetRef,
                     limit: Int = 10,
                     timeout: FiniteDuration = 15.seconds): Seq[String] =
-    askCoordinator(GetIndexNames(dataset, limit), timeout) { case s: Seq[String] @unchecked => s }
+    askCoordinator(GetIndexNames(dataset, limit, System.currentTimeMillis()), timeout) {
+      case s: Seq[String] @unchecked => s
+    }
 
   /**
    * Returns a Seq[String] of the first *limit* values indexed for a given tag/column.
@@ -33,7 +35,7 @@ trait QueryOps extends ClientBase with StrictLogging {
                      indexName: String,
                      limit: Int = 100,
                      timeout: FiniteDuration = 15.seconds): Seq[String] =
-    askCoordinator(GetIndexValues(dataset, indexName, limit), timeout) {
+    askCoordinator(GetIndexValues(dataset, indexName, limit, System.currentTimeMillis()), timeout) {
       case s: Seq[String] @unchecked => s
     }
 
@@ -47,7 +49,7 @@ trait QueryOps extends ClientBase with StrictLogging {
   def logicalPlanQuery(dataset: DatasetRef,
                        plan: LogicalPlan,
                        options: QueryOptions = QueryOptions()): QueryResult = {
-    val qCmd = LogicalPlanQuery(dataset, plan, options)
+    val qCmd = LogicalPlanQuery(dataset, plan, options, System.currentTimeMillis())
     // NOTE: It's very important to extend the query timeout for the ask itself, because the queryTimeoutSecs is
     // the internal FiloDB scatter-gather timeout.  We need additional time for the proper error to get transmitted
     // back in case of internal timeouts.

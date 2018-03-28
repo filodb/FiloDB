@@ -115,13 +115,13 @@ object TestTimeseriesProducer extends StrictLogging {
       val value = 15 + Math.sin(n + 1) + rand.nextGaussian()
 
       //scalastyle:off line.size.limit
-      val appNameMetricNameHash = s"__name__=heap_usage;app=A$app".hashCode
-      val tagHash = s"__name__=heap_usage,dc=DC$dc,app=A$app,partition=P$partition,host=H$host,instance=I$instance".hashCode
+      val appNameMetricNameHash = s"__name__=heap_usage;job=A$app".hashCode
+      val tagHash = s"dc=DC$dc,partition=P$partition,host=H$host,instance=I$instance".hashCode
       val kafkaParitionId: JLong = shardMapper.ingestionShard(appNameMetricNameHash, tagHash, spread).toLong
 
-      val sample = s"__name__=heap_usage,dc=DC$dc,app=A$app,partition=P$partition,host=H$host,instance=I$instance   $timestamp   $value"
+      val sample = s"__name__=heap_usage,dc=DC$dc,job=A$app,partition=P$partition,host=H$host,instance=I$instance   $timestamp   $value"
       logger.trace(s"Producing $sample")
-      (kafkaParitionId, s"__name__=heap_usage,dc=DC$dc,app=A$app,partition=P$partition,host=H$host,instance=I$instance   $timestamp   $value")
+      (kafkaParitionId, s"__name__=heap_usage,dc=DC$dc,job=A$app,partition=P$partition,host=H$host,instance=I$instance   $timestamp   $value")
     }
   }
 }

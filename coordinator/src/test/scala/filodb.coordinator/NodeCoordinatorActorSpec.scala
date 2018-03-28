@@ -364,7 +364,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       probe.expectMsg(Ack(29L))
 
       val partMethods = Seq(FilteredPartitionScan(ShardSplit(0), Nil))
-      val plan = Engine.DistributeConcat(partMethods, shardMap, 4, 10) { method =>
+      val plan = Engine.DistributeConcat(partMethods, shardMap, 4, 10, System.currentTimeMillis()) { method =>
         new ExecPlan.LocalVectorReader(Seq(-1, 199), method, AllChunkScan) }
       probe.send(coordinatorActor, ExecPlanQuery(ref, plan, 100))
       probe.expectMsgPF() {

@@ -5,12 +5,16 @@ import java.util.concurrent.atomic.AtomicLong
 import scala.concurrent.duration._
 import scala.util.control.NonFatal
 
-import akka.actor.{ActorRef, Props}
+import akka.actor.{ActorRef, ActorSystem, Props}
+import akka.dispatch.{Envelope, UnboundedStablePriorityMailbox}
 import akka.util.Timeout
+import com.typesafe.config.Config
 import kamon.Kamon
+import kamon.trace.Span
 import monix.eval.Task
 import org.scalactic._
 
+import filodb.coordinator.client.QueryCommand
 import filodb.core._
 import filodb.core.binaryrecord.{BinaryRecord, RecordSchema}
 import filodb.core.memstore.MemStore
@@ -20,6 +24,20 @@ import filodb.core.store._
 import filodb.memory.MemFactory
 import filodb.memory.format.{Classes, SeqRowReader}
 import filodb.memory.format.vectors.{DoubleVector, IntBinaryVector}
+
+object QueryCommandPriority extends java.util.Comparator[Envelope] {
+  override def compare(o1: Envelope, o2: Envelope): Int = {
+    (o1.message, o2.message) match {
+      case (q1: QueryCommand, q2: QueryCommand) => q1.submitTime.compareTo(q2.submitTime)
+      case (_, _: QueryCommand) => -1 // non-query commands are admin and have higher priority
+      case (_: QueryCommand, _) => 1 // non-query commands are admin and have higher priority
+      case _ => 0
+    }
+  }
+}
+
+class QueryActorMailbox(settings: ActorSystem.Settings, config: Config)
+  extends UnboundedStablePriorityMailbox(QueryCommandPriority)
 
 object QueryActor {
   private val nextId = new AtomicLong()
@@ -32,7 +50,7 @@ object QueryActor {
                                     chunkScan: ChunkScanMethod)
 
   def props(memStore: MemStore, dataset: Dataset): Props =
-    Props(new QueryActor(memStore, dataset))
+    Props(new QueryActor(memStore, dataset)).withMailbox("query-actor-mailbox")
 }
 
 /**
@@ -138,13 +156,17 @@ final class QueryActor(memStore: MemStore,
    * Materializes the given Task by running it, firing a QueryResult to the originator, or if the task
    * results in an Exception, then responding with a QueryError.
    */
-  private def respond(originator: ActorRef, task: Task[Result]): Unit = {
+  private def respond(originator: ActorRef, task: Task[Result], span: Span): Unit = {
     val queryId = nextQueryId
     task.runAsync
       .map { res =>
         logger.debug(s"Result obtained from plan execution: $res")
         originator ! QueryResult(queryId, res)
-      }.recover { case NonFatal(err) => originator ! QueryError(queryId, err) }
+        span.finish()
+      }.recover { case NonFatal(err) =>
+        originator ! QueryError(queryId, err)
+        span.finish()
+      }
   }
 
   // lower level handling of per-shard aggregate
@@ -172,6 +194,7 @@ final class QueryActor(memStore: MemStore,
   def validateRawQuery(partQuery: PartitionQuery,
                        dataQuery: DataQuery,
                        columns: Seq[String],
+                       submitTime: Long,
                        options: QueryOptions): Unit = {
     val originator = sender()
     (for { colIDs      <- getColumnIDs(dataset, columns)
@@ -182,11 +205,11 @@ final class QueryActor(memStore: MemStore,
       implicit val askTimeout = Timeout(options.queryTimeoutSecs.seconds)
       val execPlan = dataQuery match {
         case MostRecentSample =>
-          Engine.DistributeConcat(partMethods, shardMap, options.parallelism, options.itemLimit) { method =>
+          Engine.DistributeConcat(partMethods, shardMap, options.parallelism, options.itemLimit, submitTime) { method =>
             ExecPlan.streamLastTuplePlan(dataset, colIDs, method)
           }
         case _ =>
-          Engine.DistributeConcat(partMethods, shardMap, options.parallelism, options.itemLimit) { method =>
+          Engine.DistributeConcat(partMethods, shardMap, options.parallelism, options.itemLimit, submitTime) { method =>
             new ExecPlan.LocalVectorReader(colIDs, method, chunkMethod)
           }
       }
@@ -195,15 +218,17 @@ final class QueryActor(memStore: MemStore,
       // In the future, the step below will be common to all queries and can be moved out
       // For now kick start physical plan execution by sending a message to myself
       // NOTE: forward originator so we can respond directly to it
-      self.tell(ExecPlanQuery(dataset.ref, execPlan, options.itemLimit), originator)
+      self.tell(ExecPlanQuery(dataset.ref, execPlan, options.itemLimit, submitTime), originator)
     }).recover {
       case resp: ErrorResponse => originator ! resp
     }
   }
 
-  def execPhysicalPlan(physQuery: ExecPlanQuery, originator: ActorRef): Unit =
-    respond(originator, Engine.execute(physQuery.execPlan, dataset, memStore, physQuery.limit))
-
+  def execPhysicalPlan(physQuery: ExecPlanQuery, originator: ActorRef): Unit = {
+    val span = Kamon.buildSpan(s"exec-physical-plan-${physQuery.execPlan.getClass.getSimpleName}").start()
+    val task = Engine.execute(physQuery.execPlan, dataset, memStore, physQuery.limit)
+    respond(originator, task, span)
+  }
   // This is only temporary, before the QueryEngine and optimizer is really flushed out.
   // Parse the query LogicalPlan and carry out actions
   // In the future, the optimizer will translate these plans into physical plans.  Validation done below would
@@ -213,9 +238,9 @@ final class QueryActor(memStore: MemStore,
     q.plan match {
       case PartitionsInstant(partQuery, cols) =>
         // TODO: extract the last value of every vector only. OR, report a time range for the single value aggregate
-        validateRawQuery(partQuery, MostRecentSample, cols, q.queryOptions)
+        validateRawQuery(partQuery, MostRecentSample, cols, q.submitTime, q.queryOptions)
       case PartitionsRange(partQuery, dataQuery, cols) =>
-        validateRawQuery(partQuery, dataQuery, cols, q.queryOptions)
+        validateRawQuery(partQuery, dataQuery, cols, q.submitTime, q.queryOptions)
 
       // Right now everything else fits the combiner/aggregator pattern below
       case ReducePartitions(combFunc, combArgs,
@@ -244,13 +269,13 @@ final class QueryActor(memStore: MemStore,
   def receive: Receive = {
     case q: LogicalPlanQuery       => Kamon.currentSpan().tag("LogicalPlanQuery", q.toString)
                                       parseQueryPlan(q, sender())
-    case q: ExecPlanQuery          => Kamon.currentSpan().tag("ExecPlanQuery", q.toString)
+    case q: ExecPlanQuery          => Kamon.currentSpan().tag("ExecPlanQuery", q.execPlan.toString)
                                       execPhysicalPlan(q, sender())
     case q: SingleShardQuery       => Kamon.currentSpan().tag("SingleShardQuery", q.toString)
                                       singleShardQuery(q)
-    case GetIndexNames(ref, limit) =>
+    case GetIndexNames(ref, limit, _) =>
       sender() ! memStore.indexNames(ref).take(limit).map(_._1).toBuffer
-    case GetIndexValues(ref, index, limit) =>
+    case GetIndexValues(ref, index, limit, _) =>
       // For now, just return values from the first shard
       memStore.activeShards(ref).headOption.foreach { shard =>
         sender() ! memStore.indexValues(ref, shard, index).take(limit).map(_.toString).toBuffer

@@ -10,6 +10,7 @@ sealed trait NodeResponse
 
 // NOTE: need to inherit java.io.Serializable to ensure Kryo will serialize subclasses
 trait QueryCommand extends NodeCommand with java.io.Serializable {
+  def submitTime: Long
   def dataset: DatasetRef
 }
 trait QueryResponse extends NodeResponse with java.io.Serializable
