@@ -90,7 +90,7 @@ extends UnaryExecNode[I, O] {
   def execute(source: ChunkSource, dataset: Dataset): O = mapFn(child.execute(source, dataset))
   def schema(dataset: Dataset): ResultSchema = schemaFn(child.schema(dataset))
   def chunkMethod: ChunkScanMethod = child.chunkMethod
-  val args = Seq(mapFn.toString, schemaFn.toString)
+  def args: Seq[String] = Seq(mapFn.toString, schemaFn.toString)
 }
 
 object ExecPlan {
@@ -98,7 +98,7 @@ object ExecPlan {
   class ObservableMapper[I, O](mapFn: I => O, child: ExecPlan[_, Observable[I]])
                               (implicit iMaker: ResultMaker[Observable[I]], oMaker: ResultMaker[Observable[O]])
     extends MappedUnaryExecNode[Observable[I], Observable[O]](_.map(mapFn), child)() {
-    override val args = Seq(mapFn.toString)
+    override def args: Seq[String] = Seq(mapFn.toString)
   }
 
   type PartitionsMapper  = ObservableMapper[PartitionVector, PartitionVector]
@@ -138,7 +138,7 @@ object ExecPlan {
       ResultSchema(dataset.infosFromIDs(columnIDs),
                    columnIDs.zip(dataset.rowKeyIDs).takeWhile { case (a, b) => a == b }.length)
 
-    val args = Seq(columnIDs.toString, partMethod.toString, chunkMethod.toString)
+    def args: Seq[String] = Seq(columnIDs.toString, partMethod.toString, chunkMethod.toString)
   }
 
   def lastTupleFn(sourceSchema: Seq[ColumnInfo]): PartitionVector => Tuple = {
