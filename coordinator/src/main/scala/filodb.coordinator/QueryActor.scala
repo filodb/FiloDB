@@ -267,11 +267,11 @@ final class QueryActor(memStore: MemStore,
   }
 
   def receive: Receive = {
-    case q: LogicalPlanQuery       => Kamon.currentSpan().tag("LogicalPlanQuery", q.toString)
+    case q: LogicalPlanQuery       => Kamon.currentSpan().tag("query", q.plan.getClass.getSimpleName)
                                       parseQueryPlan(q, sender())
-    case q: ExecPlanQuery          => Kamon.currentSpan().tag("ExecPlanQuery", q.execPlan.toString)
+    case q: ExecPlanQuery          => Kamon.currentSpan().tag("query", q.execPlan.getClass.getSimpleName)
                                       execPhysicalPlan(q, sender())
-    case q: SingleShardQuery       => Kamon.currentSpan().tag("SingleShardQuery", q.toString)
+    case q: SingleShardQuery       => Kamon.currentSpan().tag("query", q.getClass.getSimpleName)
                                       singleShardQuery(q)
     case GetIndexNames(ref, limit, _) =>
       sender() ! memStore.indexNames(ref).take(limit).map(_._1).toBuffer
