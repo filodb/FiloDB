@@ -108,12 +108,16 @@ PrimitiveMaskVector[Long] {
 
 class LongAppendingVector(base: Any, offset: Long, maxBytes: Int, val dispose: () => Unit)
 extends PrimitiveAppendableVector[Long](base, offset, maxBytes, 64, true) {
-  final def addNA(): Unit = addData(0L)
-  final def addData(data: Long): Unit = {
-    checkOffset()
-    UnsafeUtils.setLong(base, writeOffset, data)
-    writeOffset += 8
+  final def addNA(): AddResponse = addData(0L)
+  final def addData(data: Long): AddResponse = checkOffset() match {
+    case Ack =>
+      UnsafeUtils.setLong(base, writeOffset, data)
+      writeOffset += 8
+      Ack
+    case other: AddResponse => other
   }
+
+  final def addFromReaderNoNA(reader: RowReader, col: Int): AddResponse = addData(reader.getLong(col))
 
   private final val readVect = new LongBinaryVector(base, offset, maxBytes, dispose)
   final def apply(index: Int): Long = readVect.apply(index)
@@ -179,7 +183,7 @@ with AppendableVectorWrapper[Int, Long] {
 
   val binConstVector = (min == max) && inner.noNAs
 
-  final def addData(value: Int): Unit = inner.addData(value.toLong)
+  final def addData(value: Int): AddResponse = inner.addData(value.toLong)
   final def apply(index: Int): Int = inner(index).toInt
 
   def dataVect(memFactory: MemFactory): BinaryVector[Int] = {

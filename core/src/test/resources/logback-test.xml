@@ -24,8 +24,9 @@
   </logger>
 
   <!-- NOTE: enable this to trace or debug Kryo/MinLog serialization messages  -->
-  <!-- <logger name="com.esotericsoftware.minlog" level="TRACE"/> -->
-
+<!--   <logger name="com.esotericsoftware.minlog" level="DEBUG"/>
+  <logger name="com.esotericsoftware.kryo.io" level="TRACE"/>
+ -->
   <logger name="org.apache.kafka.common.metrics" level="ERROR"/>
   <logger name="org.apache.kafka.clients.consumer.KafkaConsumer" level="DEBUG"/>
   <logger name="org.apache.kafka.clients.producer.ProducerConfig" level="WARN"/>

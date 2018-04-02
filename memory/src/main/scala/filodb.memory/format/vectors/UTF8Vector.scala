@@ -188,18 +188,24 @@ class UTF8AppendableVector(base: Any,
     UnsafeUtils.setInt(base, offset, _len)
   }
 
-  final def addData(data: ZeroCopyUTF8String): Unit = {
-    checkSize(length + 1, maxElements)
-    val fixedData = appendBlob(data)
-    UnsafeUtils.setInt(base, curFixedOffset, fixedData)
-    bumpLen()
+  final def addData(data: ZeroCopyUTF8String): AddResponse = checkSize(length + 1, maxElements) match {
+    case Ack =>
+      val fixedData = appendBlob(data)
+      UnsafeUtils.setInt(base, curFixedOffset, fixedData)
+      bumpLen()
+      Ack
+    case other: AddResponse => other
   }
 
-  final def addNA(): Unit = {
-    checkSize(length + 1, maxElements)
-    UnsafeUtils.setInt(base, curFixedOffset, EmptyBlob)
-    bumpLen()
+  final def addNA(): AddResponse = checkSize(length + 1, maxElements) match {
+    case Ack =>
+      UnsafeUtils.setInt(base, curFixedOffset, EmptyBlob)
+      bumpLen()
+      Ack
+    case other: AddResponse => other
   }
+
+  final def addFromReaderNoNA(reader: RowReader, col: Int): AddResponse = addData(reader.filoUTF8String(col))
 
   final def isAllNA: Boolean = {
     var fixedOffset = offset + 4
@@ -310,17 +316,22 @@ class UTF8PtrAppendable(base: Any, offset: Long, maxBytes: Int, val dispose: () 
   private var maxStrLen = 0
   var flexBytes = 0
 
-  override def addData(data: ZeroCopyUTF8String): Unit = {
-    super.addData(data)
-    flexBytes += 4 + data.length +
-      (if (numBytes > 0xffff || data.length > 2047) 4 else 0)
-    maxStrLen = Math.max(maxStrLen, data.length)
+  override def addData(data: ZeroCopyUTF8String): AddResponse = super.addData(data) match {
+    case Ack =>
+      flexBytes += 4 + data.length +
+        (if (numBytes > 0xffff || data.length > 2047) 4 else 0)
+      maxStrLen = Math.max(maxStrLen, data.length)
+      Ack
+    case other: AddResponse => other
   }
 
-  override def addNA(): Unit = {
-    super.addNA()
-    flexBytes += 4
+  override def addNA(): AddResponse = {
+    val resp = super.addNA()
+    if (resp == Ack) flexBytes += 4
+    resp
   }
+
+  final def addFromReaderNoNA(reader: RowReader, col: Int): AddResponse = addData(reader.filoUTF8String(col))
 
   def suboptimize(memFactory: MemFactory,
                   hint: EncodingHint = AutoDetect): BinaryVector[ZeroCopyUTF8String] = hint match {
@@ -412,19 +423,27 @@ class FixedMaxUTF8AppendableVector(base: Any,
     numBytes = 1
   }
 
-  final def addData(item: ZeroCopyUTF8String): Unit = {
-    require(item.length < bytesPerItem)
-    checkSize(numBytes + bytesPerItem, maxBytes)
-    // Easy way to ensure byte after length byte is zero (so cannot be NA)
-    UnsafeUtils.setShort(base, offset + numBytes, item.length.toShort)
-    item.copyTo(base, offset + numBytes + 1)
-    numBytes += bytesPerItem
+  final def addData(item: ZeroCopyUTF8String): AddResponse = {
+    if (item.length >= bytesPerItem) return ItemTooLarge
+    val resp = checkSize(numBytes + bytesPerItem, maxBytes)
+    if (resp == Ack) {
+      // Easy way to ensure byte after length byte is zero (so cannot be NA)
+      UnsafeUtils.setShort(base, offset + numBytes, item.length.toShort)
+      item.copyTo(base, offset + numBytes + 1)
+      numBytes += bytesPerItem
+    }
+    resp
   }
 
-  final def addNA(): Unit = {
-    UnsafeUtils.setShort(base, offset + numBytes, UTF8Vector.NAShort)
-    numBytes += bytesPerItem
+  final def addNA(): AddResponse = checkSize(numBytes + bytesPerItem, maxBytes) match {
+    case Ack =>
+      UnsafeUtils.setShort(base, offset + numBytes, UTF8Vector.NAShort)
+      numBytes += bytesPerItem
+      Ack
+    case other: AddResponse => other
   }
+
+  final def addFromReaderNoNA(reader: RowReader, col: Int): AddResponse = addData(reader.filoUTF8String(col))
 
   // Not needed as this vector will not be optimized further
   final def isAllNA: Boolean = ???

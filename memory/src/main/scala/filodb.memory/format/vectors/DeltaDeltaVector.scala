@@ -7,7 +7,7 @@ import scala.util.Try
 import scalaxy.loops._
 
 import filodb.memory.MemFactory
-import filodb.memory.format.{BinaryAppendableVector, BinaryVector, UnsafeUtils, WireFormat}
+import filodb.memory.format._
 import filodb.memory.format.Encodings._
 
 
@@ -101,9 +101,6 @@ final case class DeltaDeltaVector(base: Any, offset: Long,
 
 }
 
-final case class DeltaTooLarge(value: Long, expected: Long) extends
-  IllegalArgumentException(s"Delta too large for value $value")
-
 // TODO: validate args, esp base offset etc, somehow.  Need to think about this for the many diff classes.
 class DeltaDeltaAppendingVector(val base: Any,
                                 val offset: Long,
@@ -132,19 +129,25 @@ class DeltaDeltaAppendingVector(val base: Any,
   final def apply(index: Int): Long = initValue + slope * index + deltas(index)
   final def numBytes: Int = 12 + deltas.numBytes
 
-  final def addNA(): Unit = ???   // NAs are not supported for delta delta for now
-  final def addData(data: Long): Unit = {
+  final def addNA(): AddResponse = ???   // NAs are not supported for delta delta for now
+  final def addData(data: Long): AddResponse = {
     val innerValue = data - expected
-    if (innerValue <= Int.MaxValue && innerValue >= Int.MinValue) { deltas.addData(innerValue.toInt) }
-    else {
-      dispose()
-      throw DeltaTooLarge(data, expected)
+    if (innerValue <= Int.MaxValue && innerValue >= Int.MinValue) {
+      deltas.addData(innerValue.toInt) match {
+        case Ack =>
+          innerMin = Math.min(innerMin, innerValue.toInt)
+          innerMax = Math.max(innerMax, innerValue.toInt)
+          expected += slope
+          Ack
+        case other: AddResponse => other
+      }
+    } else {
+      dispose()   // TODO: should we really dispose automatically?
+      ItemTooLarge
     }
-    innerMin = Math.min(innerMin, innerValue.toInt)
-    innerMax = Math.max(innerMax, innerValue.toInt)
-    expected += slope
   }
 
+  final def addFromReaderNoNA(reader: RowReader, col: Int): AddResponse = addData(reader.getLong(col))
 
   def reset(): Unit = {
     expected = initValue

@@ -13,7 +13,7 @@ import filodb.core.{MachineMetricsData, NamesTestData, TestData}
 import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.memstore._
 import filodb.core.store._
-import filodb.memory.{MemoryStats, NativeMemoryManager, PageAlignedBlockManager, ReclaimListener}
+import filodb.memory._
 
 object SerializationSpecConfig extends ActorSpecConfig {
   override val defaultConfig = """
@@ -188,16 +188,17 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
 
   it("should be able to serialize writable buffers as part of VectorListResult") {
     import MachineMetricsData._
-    val bufferPool = new WriteBufferPool(memFactory, dataset1, 10, 50)
+    val bufferPool = new WriteBufferPool(memFactory, dataset1, 100, 50)
     val config = ConfigFactory.load("application_test.conf").getConfig("filodb")
     val chunkRetentionHours = config.getDuration("memstore.demand-paged-chunk-retention-period", TimeUnit.HOURS).toInt
     val blockStore = new PageAlignedBlockManager(100 * 1024 * 1024,
       new MemoryStats(Map("test"-> "test")), reclaimer, 1, chunkRetentionHours)
     val pagedChunkStore = new DemandPagedChunkStore(dataset1, blockStore, 12, chunkRetentionHours, 1)
+    val ingestBlockHolder = new BlockMemFactory(blockStore, None, 12, true)
     val part = new TimeSeriesPartition(0, dataset1, defaultPartKey, 0, colStore, bufferPool, config, false,
           pagedChunkStore,  new TimeSeriesShardStats(dataset1.ref, 0))
     val data = singleSeriesReaders().take(10)
-    data.zipWithIndex.foreach { case (r, i) => part.ingest(r, 1000L + i) }
+    data.zipWithIndex.foreach { case (r, i) => part.ingest(r, 1000L + i, ingestBlockHolder) }
 
     val readers = part.readers(LastSampleChunkScan, Array(0, 1)).toSeq
     val partVector = PartitionVector(Some(PartitionInfo(defaultPartKey, 0)), readers)

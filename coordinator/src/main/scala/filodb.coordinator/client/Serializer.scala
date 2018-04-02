@@ -145,6 +145,7 @@ class KryoInit {
     kryo.register(classOf[BV.IntBinaryVector], intBinVectSer)
     kryo.register(classOf[BV.MaskedIntBinaryVector], intBinVectSer)
     kryo.register(classOf[BV.MaskedIntAppendingVector], intBinVectSer)
+    kryo.register(classOf[BV.IntAppendingVector], intBinVectSer)
     kryo.register(classOf[BV.IntConstVector], intBinVectSer)
     kryo.register(classOf[filodb.memory.format.GrowableVector$mcI$sp], intBinVectSer)
 
@@ -153,6 +154,7 @@ class KryoInit {
     kryo.register(classOf[BV.LongBinaryVector], longBinVectSer)
     kryo.register(classOf[BV.MaskedLongBinaryVector], longBinVectSer)
     kryo.register(classOf[BV.MaskedLongAppendingVector], longBinVectSer)
+    kryo.register(classOf[BV.LongAppendingVector], longBinVectSer)
     kryo.register(classOf[BV.LongIntWrapper], longBinVectSer)
     kryo.register(classOf[BV.LongConstVector], longBinVectSer)
     kryo.register(classOf[filodb.memory.format.GrowableVector$mcJ$sp], longBinVectSer)
@@ -161,6 +163,7 @@ class KryoInit {
     kryo.register(classOf[BV.DoubleBinaryVector], doubleBinVectSer)
     kryo.register(classOf[BV.MaskedDoubleBinaryVector], doubleBinVectSer)
     kryo.register(classOf[BV.MaskedDoubleAppendingVector], doubleBinVectSer)
+    kryo.register(classOf[BV.DoubleAppendingVector], doubleBinVectSer)
     kryo.register(classOf[BV.DoubleIntWrapper], doubleBinVectSer)
     kryo.register(classOf[BV.DoubleConstVector], doubleBinVectSer)
     kryo.register(classOf[filodb.memory.format.GrowableVector$mcD$sp], doubleBinVectSer)

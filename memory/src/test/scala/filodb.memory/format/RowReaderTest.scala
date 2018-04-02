@@ -35,14 +35,14 @@ class RowReaderTest extends FunSpec with Matchers {
   }
 
 
-  it("should append to BinaryAppendableVector from Readers with RowReaderAppender") {
+  it("should append to BinaryAppendableVector from Readers using addFromReader") {
     val readers = rows.map(TupleRowReader)
     val appenders = Seq(
-      new IntReaderAppender(IntBinaryVector.appendingVector(memFactory, 10), 1),
-      new LongReaderAppender(LongBinaryVector.appendingVector(memFactory, 10), 2)
+      IntBinaryVector.appendingVector(memFactory, 10),
+      LongBinaryVector.appendingVector(memFactory, 10)
     )
-    readers.foreach { r => appenders.foreach(_.append(r)) }
-    val bufs = appenders.map(_.appender.optimize(memFactory).toFiloBuffer).toArray
+    readers.foreach { r => appenders.zipWithIndex.foreach { case (a, i) => a.addFromReader(r, i + 1) } }
+    val bufs = appenders.map(_.optimize(memFactory).toFiloBuffer).toArray
     val reader = new FastFiloRowReader(bufs, Array(classOf[Int], classOf[Long]))
 
     readValues(reader, 4)(_.getInt(0)) should equal(Seq(18, 0, 59, 26))

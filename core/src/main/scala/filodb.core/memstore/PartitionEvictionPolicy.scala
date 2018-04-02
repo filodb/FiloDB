@@ -40,8 +40,7 @@ class HeapPercentageEvictionPolicy(minFreePercentage: Int,
     }
   }
 
-  def canEvict(partition: TimeSeriesPartition): Boolean =
-    partition.latestChunkLen == 0 && partition.notFlushing
+  def canEvict(partition: TimeSeriesPartition): Boolean = partition.unflushedChunksets == 0
 }
 
 /**

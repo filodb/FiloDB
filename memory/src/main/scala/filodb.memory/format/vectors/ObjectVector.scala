@@ -1,7 +1,7 @@
 package filodb.memory.format.vectors
 
 import filodb.memory.MemFactory
-import filodb.memory.format.{BinaryAppendableVector, BinaryVector, UnsafeUtils}
+import filodb.memory.format._
 import filodb.memory.format.Encodings._
 
 object ObjectVector {
@@ -35,17 +35,22 @@ abstract class ObjectVector[T](val base: Any,
   final def apply(index: Int): T =
     UnsafeUtils.unsafe.getObject(base, offset + perElem * index).asInstanceOf[T]
 
-  def addData(data: T): Unit = {
-    checkSize(numBytes, maxBytes)
-    UnsafeUtils.unsafe.putObject(base, writeOffset, data)
-    writeOffset += perElem
+  def addData(data: T): AddResponse = checkSize(numBytes, maxBytes) match {
+    case Ack =>
+      checkSize(numBytes, maxBytes)
+      UnsafeUtils.unsafe.putObject(base, writeOffset, data)
+      writeOffset += perElem
+      Ack
+    case other: AddResponse => other
   }
 
-  def addNA(): Unit = {
-    checkSize(numBytes, maxBytes)
-    UnsafeUtils.unsafe.putObject(base, writeOffset, null)
-    writeOffset += perElem
-    numNAs += 1
+  def addNA(): AddResponse = checkSize(numBytes, maxBytes) match {
+    case Ack =>
+      UnsafeUtils.unsafe.putObject(base, writeOffset, null)
+      writeOffset += perElem
+      numNAs += 1
+      Ack
+    case other: AddResponse => other
   }
   // scalastyle:on
   final def isAllNA: Boolean = numNAs == length

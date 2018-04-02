@@ -116,8 +116,10 @@ object BitmapMask {
   def numBytesRequired(elements: Int): Int = ((elements + 63) / 64) * 8
 }
 
-case class VectorTooSmall(bytesNeeded: Int, bytesHave: Int) extends
-Exception(s"Need $bytesNeeded bytes, but only have $bytesHave")
+sealed trait AddResponse
+case object Ack extends AddResponse
+final case class VectorTooSmall(bytesNeeded: Int, bytesHave: Int) extends AddResponse
+case object ItemTooLarge extends AddResponse
 
 /**
  * A BinaryVector that you can append to.  Has some notion of a maximum size (max # of items or bytes)
@@ -130,6 +132,10 @@ Exception(s"Need $bytesNeeded bytes, but only have $bytesHave")
  *
  * NOTE: AppendableVectors are not designed to be multi-thread safe for writing.  They are designed for
  * high single-thread performance.
+ *
+ * ## Error handling
+ *
+ * The add methods return an AddResponse.  We avoid throwing Exceptions as they are exceptionally expensive!!
  *
  * ## Use Cases and LifeCycle
  *
@@ -146,13 +152,31 @@ trait BinaryAppendableVector[@specialized(Int, Long, Double, Boolean) A] extends
   /** Max size that current buffer can grow to */
   def maxBytes: Int
 
-  /** Add a Not Available (null) element to the builder. */
-  def addNA(): Unit
+  /**
+   * Add a Not Available (null) element to the builder.
+   * @return Ack or another AddResponse if it cannot be added
+   */
+  def addNA(): AddResponse
 
-  /** Add a value of type T to the builder.  It will be marked as available. */
-  def addData(value: A): Unit
+  /**
+   * Add a value of type T to the builder.  It will be marked as available.
+   * @return Ack or another AddResponse if it cannot be added
+   */
+  def addData(value: A): AddResponse
 
-  final def add(data: Option[A]): Unit = if (data.nonEmpty) addData(data.get) else addNA()
+  final def add(data: Option[A]): AddResponse = if (data.nonEmpty) addData(data.get) else addNA()
+
+  /**
+   * Adds to this vector from a RowReader.  Method avoids boxing.  Does not check for data availability.
+   */
+  def addFromReaderNoNA(reader: RowReader, col: Int): AddResponse
+
+  /**
+   * Adds to this vector from a RowReader, checking for availability
+   */
+  final def addFromReader(reader: RowReader, col: Int): AddResponse =
+    if (reader.notNull(col)) { addFromReaderNoNA(reader, col) }
+    else                     { addNA() }
 
   /** Returns true if every element added is NA, or no elements have been added */
   def isAllNA: Boolean
@@ -177,8 +201,8 @@ trait BinaryAppendableVector[@specialized(Int, Long, Double, Boolean) A] extends
   /**
    * Checks to see if enough bytes or need to allocate more space.
    */
-  def checkSize(need: Int, have: Int): Unit =
-    if (!(need <= have)) throw VectorTooSmall(need, have)
+  def checkSize(need: Int, have: Int): AddResponse =
+    if (!(need <= have)) VectorTooSmall(need, have) else Ack
 
   /**
    * Allocates a new instance of itself growing by factor growFactor.
@@ -259,30 +283,24 @@ trait BinaryAppendableVector[@specialized(Int, Long, Double, Boolean) A] extends
 case class GrowableVector[@specialized(Int, Long, Double, Boolean) A](memFactory: MemFactory,
                                                                       var inner: BinaryAppendableVector[A])
 extends AppendableVectorWrapper[A, A] {
-  def addData(value: A): Unit = {
-    try {
+  def addData(value: A): AddResponse = inner.addData(value) match {
+    case e: VectorTooSmall =>
+      val newInst = inner.newInstance(memFactory)
+      newInst.addVector(inner)
+      inner.dispose()   // free memory in case it's off-heap .. just before reference is lost
+      inner = newInst
       inner.addData(value)
-    } catch {
-      case e: VectorTooSmall =>
-        val newInst = inner.newInstance(memFactory)
-        newInst.addVector(inner)
-        inner.dispose()   // free memory in case it's off-heap .. just before reference is lost
-        inner = newInst
-        inner.addData(value)
-    }
+    case other: AddResponse => other
   }
 
-  override def addNA(): Unit = {
-    try {
+  override def addNA(): AddResponse = inner.addNA() match {
+    case e: VectorTooSmall =>
+      val newInst = inner.newInstance(memFactory)
+      newInst.addVector(inner)
+      inner.dispose()   // free memory in case it's off-heap .. just before reference is lost
+      inner = newInst
       inner.addNA()
-    } catch {
-      case e: VectorTooSmall =>
-        val newInst = inner.newInstance(memFactory)
-        newInst.addVector(inner)
-        inner.dispose()   // free memory in case it's off-heap .. just before reference is lost
-        inner = newInst
-        inner.addNA()
-    }
+    case other: AddResponse => other
   }
 
   def apply(index: Int): A = inner(index)
@@ -290,10 +308,11 @@ extends AppendableVectorWrapper[A, A] {
   override def dispose: () => Unit = inner.dispose
 }
 
-trait AppendableVectorWrapper[A, I] extends BinaryAppendableVector[A] {
+trait AppendableVectorWrapper[@specialized(Int, Long, Double, Boolean) A, I] extends BinaryAppendableVector[A] {
   def inner: BinaryAppendableVector[I]
 
-  def addNA(): Unit = inner.addNA()
+  def addNA(): AddResponse = inner.addNA()
+  def addFromReaderNoNA(reader: RowReader, col: Int): AddResponse = inner.addFromReaderNoNA(reader, col)
 
   final def isAvailable(index: Int): Boolean = inner.isAvailable(index)
   final def base: Any = inner.base
@@ -338,8 +357,8 @@ extends BinaryAppendableVector[A] {
   def numBytes: Int = (writeOffset - offset).toInt + (if (bitShift != 0) 1 else 0)
 
   private final val dangerZone = offset + maxBytes
-  final def checkOffset(): Unit =
-    if (writeOffset >= dangerZone) throw VectorTooSmall((writeOffset - offset).toInt, maxBytes)
+  final def checkOffset(): AddResponse =
+    if (writeOffset >= dangerZone) VectorTooSmall((writeOffset - offset).toInt + 1, maxBytes) else Ack
 
   protected final def bumpBitShift(): Unit = {
     bitShift = (bitShift + nbits) % 8
@@ -413,17 +432,28 @@ extends BitmapMaskVector[A] with BinaryAppendableVector[A] {
   final def numBytes: Int = 4 + bitmapMaskBufferSize + subVect.numBytes
   final def apply(index: Int): A = subVect.apply(index)
 
-  final def addNA(): Unit = {
-    checkSize(curBitmapOffset, bitmapMaskBufferSize)
-    val maskVal = UnsafeUtils.getLong(base, bitmapOffset + curBitmapOffset)
-    UnsafeUtils.setLong(base, bitmapOffset + curBitmapOffset, maskVal | curMask)
-    subVect.addNA()
-    nextMaskIndex()
+  final def addNA(): AddResponse = checkSize(curBitmapOffset, bitmapMaskBufferSize) match {
+    case Ack =>
+      val resp = subVect.addNA()
+      if (resp == Ack) {
+        val maskVal = UnsafeUtils.getLong(base, bitmapOffset + curBitmapOffset)
+        UnsafeUtils.setLong(base, bitmapOffset + curBitmapOffset, maskVal | curMask)
+        nextMaskIndex()
+      }
+      resp
+    case other: AddResponse => other
   }
 
-  final def addData(value: A): Unit = {
-    subVect.addData(value)
-    nextMaskIndex()
+  final def addData(value: A): AddResponse = {
+    val resp = subVect.addData(value)
+    if (resp == Ack) nextMaskIndex()
+    resp
+  }
+
+  def addFromReaderNoNA(reader: RowReader, col: Int): AddResponse = {
+    val resp = subVect.addFromReaderNoNA(reader, col)
+    if (resp == Ack) nextMaskIndex()
+    resp
   }
 
   final def isAllNA: Boolean = {

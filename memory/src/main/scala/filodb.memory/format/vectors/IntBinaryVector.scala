@@ -45,6 +45,7 @@ object IntBinaryVector {
     appendingVectorNoNA(base, off, nBytes, nbits, signed, dispose)
   }
 
+  // scalastyle:off method.length
   def appendingVectorNoNA(base: Any,
                           offset: Long,
                           maxBytes: Int,
@@ -52,42 +53,52 @@ object IntBinaryVector {
                           signed: Boolean,
                           dispose: () => Unit): IntAppendingVector = nbits match {
     case 32 => new IntAppendingVector(base, offset, maxBytes, nbits, signed, dispose) {
-      final def addData(v: Int): Unit = {
-        checkOffset()
-        UnsafeUtils.setInt(base, offset + numBytes, v)
-        writeOffset += 4
+      final def addData(v: Int): AddResponse = checkOffset() match {
+        case Ack =>
+          UnsafeUtils.setInt(base, offset + numBytes, v)
+          writeOffset += 4
+          Ack
+        case other: AddResponse => other
       }
     }
     case 16 => new IntAppendingVector(base, offset, maxBytes, nbits, signed, dispose) {
-      final def addData(v: Int): Unit = {
-        checkOffset()
-        UnsafeUtils.setShort(base, offset + numBytes, v.toShort)
-        writeOffset += 2
+      final def addData(v: Int): AddResponse = checkOffset() match {
+        case Ack =>
+          UnsafeUtils.setShort(base, offset + numBytes, v.toShort)
+          writeOffset += 2
+          Ack
+        case other: AddResponse => other
       }
     }
     case 8 => new IntAppendingVector(base, offset, maxBytes, nbits, signed, dispose) {
-      final def addData(v: Int): Unit = {
-        checkOffset()
-        UnsafeUtils.setByte(base, offset + numBytes, v.toByte)
-        writeOffset += 1
+      final def addData(v: Int): AddResponse = checkOffset() match {
+        case Ack =>
+          UnsafeUtils.setByte(base, offset + numBytes, v.toByte)
+          writeOffset += 1
+          Ack
+        case other: AddResponse => other
       }
     }
     case 4 => new IntAppendingVector(base, offset, maxBytes, nbits, signed, dispose) {
-      final def addData(v: Int): Unit = {
-        checkOffset()
-        val origByte = UnsafeUtils.getByte(base, writeOffset)
-        val newByte = (origByte | (v << bitShift)).toByte
-        UnsafeUtils.setByte(base, writeOffset, newByte)
-        bumpBitShift()
+      final def addData(v: Int): AddResponse = checkOffset() match {
+        case Ack =>
+          val origByte = UnsafeUtils.getByte(base, writeOffset)
+          val newByte = (origByte | (v << bitShift)).toByte
+          UnsafeUtils.setByte(base, writeOffset, newByte)
+          bumpBitShift()
+          Ack
+        case other: AddResponse => other
       }
     }
     case 2 => new IntAppendingVector(base, offset, maxBytes, nbits, signed, dispose) {
-      final def addData(v: Int): Unit = {
-        checkOffset()
-        val origByte = UnsafeUtils.getByte(base, writeOffset)
-        val newByte = (origByte | (v << bitShift)).toByte
-        UnsafeUtils.setByte(base, writeOffset, newByte)
-        bumpBitShift()
+      final def addData(v: Int): AddResponse = checkOffset() match {
+        case Ack =>
+          val origByte = UnsafeUtils.getByte(base, writeOffset)
+          val newByte = (origByte | (v << bitShift)).toByte
+          UnsafeUtils.setByte(base, writeOffset, newByte)
+          bumpBitShift()
+          Ack
+        case other: AddResponse => other
       }
     }
   }
@@ -250,9 +261,11 @@ abstract class IntAppendingVector(base: Any,
 extends PrimitiveAppendableVector[Int](base, offset, maxBytes, nbits, signed) {
   override val vectSubType = WireFormat.SUBTYPE_INT_NOMASK
 
-  final def addNA(): Unit = addData(0)
+  final def addNA(): AddResponse = addData(0)
   private final val readVect = IntBinaryVector(base, offset, maxBytes, dispose)
   final def apply(index: Int): Int = readVect.apply(index)
+
+  final def addFromReaderNoNA(reader: RowReader, col: Int): AddResponse = addData(reader.getInt(col))
 
   override def finishCompaction(newBase: Any, newOff: Long): BinaryVector[Int] =
     IntBinaryVector(newBase, newOff, numBytes, dispose)

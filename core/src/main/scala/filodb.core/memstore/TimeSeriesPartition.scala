@@ -22,6 +22,10 @@ import filodb.memory.format._
 
 final case class InfoChunks(info: ChunkSetInfo, chunks: Array[BinaryVector[_]])
 
+object TimeSeriesPartition {
+  val nullChunks    = UnsafeUtils.ZeroPointer.asInstanceOf[Array[BinaryAppendableVector[_]]]
+}
+
 /**
  * A MemStore Partition holding chunks of data for different columns (a schema) for time series use cases.
  *
@@ -58,10 +62,7 @@ class TimeSeriesPartition(val partID: Int,
                          (implicit val queryScheduler: Scheduler) extends FiloPartition with StrictLogging {
   import ChunkSetInfo._
   import collection.JavaConverters._
-
-  private val nullAppenders = UnsafeUtils.ZeroPointer.asInstanceOf[Array[RowReaderAppender]]
-  private val nullChunks    = UnsafeUtils.ZeroPointer.asInstanceOf[Array[BinaryAppendableVector[_]]]
-
+  import TimeSeriesPartition._
 
   /**
    * This is the ONE main data structure holding the chunks of a TSPartition.  It is appended to as chunks arrive
@@ -69,42 +70,32 @@ class TimeSeriesPartition(val partID: Int,
    *    Key(ChunkID) -> Value InfoChunks(ChunkSetInfo, Array[BinaryVector])
    * Thus it is sorted by increasing chunkID, yet addressable by chunkID, and concurrent.
    */
-  private var infosChunks = new ConcurrentSkipListMap[ChunkID, InfoChunks].asScala
+  private var infosChunks = new ConcurrentSkipListMap[ChunkID, InfoChunks]
 
   /**
-    * Ingested data goes into this appender. There is one appender for each column in the dataset.
-    * Var mutates when buffers are switched for optimization. During switching of buffers
-    * in [[filodb.core.memstore.TimeSeriesPartition#switchBuffers]], current var
-    * value is assigned to flushingAppenders, and null appenders is assigned until more data arrives.
-    */
-  private var appenders = nullAppenders
-
-  /**
-    * This is essentially the chunks (binaryVectors) associated with 'appenders' member of this class. This var will
-    * hold the incoming un-encoded data for the partition.
+    * Incoming, unencoded data gets appended to these BinaryAppendableVectors.
     * There is one element for each column of the dataset. All of them have the same chunkId.
-    * Var mutates when buffers are switched for optimization
+    * Var mutates when buffers are switched for optimization back to NULL, until new data arrives.
     * in [[filodb.core.memstore.TimeSeriesPartition#switchBuffers]],
     * and new chunk is added to the partition.
+    * Note that if this is not NULL, then it is always the most recent element of infosChunks.
     */
   private var currentChunks = nullChunks
+  private var currentChunkID = Long.MinValue
 
   /**
-    * This var holds the next appender to be optimized and persisted.
-    * Mutates when buffers are switched for optimization in [[filodb.core.memstore.TimeSeriesPartition#switchBuffers]].
-    * There is one element for each column of the dataset.
-    * At the beginning nothing is ready to be flushed, so set to null
-    */
-  private var flushingAppenders = nullAppenders
+   * The newest ChunkID that has been flushed or encoded.  You can think of the progression of chunks like this,
+   * from newest to oldest (thus represents a traversal of infosChunks):
+   * current -> notEncoded -> encodedNotFlushed -> Flushed -> Flushed -> (eventually) reclaimed
+   *
+   * During flush we ensure any unencoded chunks that are not current (writing) are encoded and updates these IDs.
+   */
+  private var newestFlushedID = Long.MinValue
 
-   /**
-    * Holds the id of the chunks in flushingAppender that should be flushed next.
-    * Mutates when buffers are switched for optimization in [[filodb.core.memstore.TimeSeriesPartition#switchBuffers]].
-    *
-    * Always increases since it is a timeuuid.
-    * Initially Long.MinValue since no chunk is ready for flush in the beginning.
-    */
-  private var flushingChunkID = Long.MinValue
+  /**
+   * The number of rows in the currentChunks
+   */
+  var appendingChunkLen = 0
 
   /**
     * Number of columns in the dataset
@@ -121,44 +112,86 @@ class TimeSeriesPartition(val partID: Int,
 
   /**
    * Ingests a new row, adding it to currentChunks.
-   * Note that it is the responsibility of flush() to ensure the right currentChunks is allocated.
+   * If ingesting a new row causes WriteBuffers to overflow, then the current chunks are encoded, a new set
+   * of appending chunks are obtained, and we re-ingest into the new chunks.
+   *
+   * @param blockHolder the BlockMemFactory to use for encoding chunks in case of WriteBuffer overflow
    */
-  def ingest(row: RowReader, offset: Long): Unit = {
-    if (appenders == nullAppenders) initNewChunk()
+  final def ingest(row: RowReader, offset: Long, blockHolder: BlockMemFactory): Unit = {
+    if (currentChunks == nullChunks) initNewChunk()
     for { col <- 0 until numColumns optimized } {
-      appenders(col).append(row)
+      currentChunks(col).addFromReaderNoNA(row, col) match {
+        case r: VectorTooSmall =>
+          switchBuffers(blockHolder, encode=true)
+          ingest(row, offset, blockHolder)   // re-ingest every element, allocating new WriteBuffers
+          return
+        case other: AddResponse =>
+      }
     }
+    appendingChunkLen += 1
   }
 
   /**
-   * Atomically switches the writeBuffers/appenders to a null one.  If and when we get more data, then
-   * we will initialize the appenders to new ones.  This way dead partitions not getting more data will not
+   * Atomically switches the writeBuffers to a null one.  If and when we get more data, then
+   * we will initialize the writeBuffers to new ones.  This way dead partitions not getting more data will not
    * waste empty appenders.
-   * The old writeBuffers/chunks becomes flushingAppenders.
-   * In theory this may be called from another thread from ingest(), but then ingest() may continue to write
-   * to the old flushingAppenders buffers until the concurrent ingest() finishes.
+   * Also populates a complete ChunkSetInfo so that these chunks may be queried reliably.
    * To guarantee no more writes happen when switchBuffers is called, have ingest() and switchBuffers() be
    * called from a single thread / single synchronous stream.
    */
-  def switchBuffers(): Unit = if (latestChunkLen > 0) {
-    if (flushingAppenders != UnsafeUtils.ZeroPointer) {
-      // This should not happen unless due to error/flush failures.  It means the preivous flushing chunks
-      // never got flushed properly.
-      bufferPool.release(flushingAppenders)
-      shardStats.uncommittedBuffersFreed.increment
-    }
-    flushingAppenders = appenders
-    flushingChunkID = infosChunks.keys.last
+  final def switchBuffers(blockHolder: BlockMemFactory, encode: Boolean = false): Unit = if (appendingChunkLen > 0) {
+    // Create ChunkSetInfo
+    val reader = new FastFiloRowReader(currentChunks.asInstanceOf[Array[FiloVector[_]]])
+    reader.setRowNo(0)
+    val firstRowKey = dataset.rowKey(reader)
+    reader.setRowNo(appendingChunkLen - 1)
+    val lastRowKey = dataset.rowKey(reader)
+    val chunkInfo = infosChunks.get(currentChunkID).info.copy(numRows = appendingChunkLen,
+                                                              firstKey = firstRowKey,
+                                                              lastKey = lastRowKey)
+    infosChunks.put(chunkInfo.id, InfoChunks(chunkInfo, currentChunks.asInstanceOf[Array[BinaryVector[_]]]))
+
     // Right after this all ingest() calls will check and potentially append to new chunks
-    appenders = nullAppenders
     currentChunks = nullChunks
+    currentChunkID = Long.MinValue
+    appendingChunkLen = 0
+
+    if (encode) encodeOneChunkset(chunkInfo.id, blockHolder)
   }
 
-  def notFlushing: Boolean =
-    flushingAppenders == UnsafeUtils.ZeroPointer || flushingAppenders(0).appender.length == 0
+  /**
+   * Optimizes a set of chunks into the smallest BinaryVectors and updates index structure.  May be called concurrently.
+   */
+  private def encodeOneChunkset(id: ChunkID, blockHolder: BlockMemFactory) = {
+    val infoChunks = infosChunks.get(id)
+    //scalastyle:off
+    require(infoChunks != null, s"Calling encodeOneChunkset on ChunkID $id but it doesn't exist!!")
+    //scalastyle:on
+    val appenders = infoChunks.chunks.asInstanceOf[Array[BinaryAppendableVector[_]]]
+    blockHolder.startMetaSpan()
+    // optimize and compact chunks
+    val frozenVectors = appenders.zipWithIndex.map { case (appender, i) =>
+      // This assumption cannot break. We should ensure one vector can be written
+      // to one block always atleast as per the current design.
+      // If this gets triggered, decrease the max writebuffer size so smaller chunks are encoded
+      require(blockHolder.blockAllocationSize() > appender.frozenSize)
+      val optimized = appender.optimize(blockHolder)
+      shardStats.encodedBytes.increment(optimized.numBytes)
+      optimized
+    }
+    shardStats.numSamplesEncoded.increment(infoChunks.info.numRows)
+    shardStats.numChunksEncoded.increment(frozenVectors.length)
+
+    infosChunks.put(id, infoChunks.copy(chunks = frozenVectors))
+    blockHolder.endMetaSpan(TimeSeriesShard.writeMeta(_, partID, id), TimeSeriesShard.BlockMetaAllocSize)
+
+    // release older write buffers back to pool.  Nothing at this point should reference the older appenders.
+    bufferPool.release(appenders)
+    frozenVectors
+  }
 
   /**
-   * Optimizes flushingChunks into smallest BinaryVectors, store in memory and produce a ChunkSet for persistence.
+   * Encodes (as necessary) and produces a series of ChunkSets for chunks not flushed yet.
    * Only one thread should call makeFlushChunks() at a time.
    * This may be called concurrently w.r.t. makeFlushChunks(), but switchBuffers() must be called first.
    *
@@ -170,60 +203,44 @@ class TimeSeriesPartition(val partID: Int,
    * we might wish to flush current chunks as they are for persistence but then keep adding to the partially
    * filled currentChunks.  That involves much more state, so do much later.
    */
-  def makeFlushChunks(blockHolder: BlockMemFactory): Option[ChunkSet] = {
-    if (notFlushing) {
-      None
-    } else {
-      blockHolder.startMetaSpan()
-      // optimize and compact old chunks
-      val frozenVectors = flushingAppenders.zipWithIndex.map { case (appender, i) =>
-        //This assumption cannot break. We should ensure one vector can be written
-        //to one block always atleast as per the current design. We want a flush group
-        //to typically end in atmost 2 blocks.
-        //TODO: Break up chunks longer than blockAllocationSize into smaller ones
-        assert(blockHolder.blockAllocationSize() > appender.appender.frozenSize)
-        val optimized = appender.appender.optimize(blockHolder)
-        shardStats.encodedBytes.increment(optimized.numBytes)
-        optimized
+  def makeFlushChunks(blockHolder: BlockMemFactory): Iterator[ChunkSet] = {
+    // Now return all the un-flushed chunksets
+    encodeAndReleaseBuffers(blockHolder)
+    infosChunksToBeFlushed
+      .map { case InfoChunks(info, chunks) =>
+        ChunkSet(info, binPartition, Nil,
+                 chunks.zipWithIndex.map { case (vect, pos) => (pos, vect.toFiloBuffer) },
+                 // Updates the newestFlushedID when the flush succeeds.
+                 // NOTE: by using a method instead of closure, we allocate less
+                 updateFlushedID)
       }
-      val numSamples = frozenVectors(0).length
-      shardStats.numSamplesEncoded.increment(numSamples)
-      shardStats.numChunksEncoded.increment(frozenVectors.length)
-
-      // Create ChunkSetInfo
-      val reader = new FastFiloRowReader(frozenVectors.asInstanceOf[Array[FiloVector[_]]])
-      reader.setRowNo(0)
-      val firstRowKey = dataset.rowKey(reader)
-      reader.setRowNo(numSamples - 1)
-      val lastRowKey = dataset.rowKey(reader)
-      val chunkInfo = infosChunks(flushingChunkID).info.copy(numRows = numSamples,
-                                                             firstKey = firstRowKey,
-                                                             lastKey = lastRowKey)
-      // replace write buffers / vectors with compacted, immutable chunks
-      infosChunks.put(flushingChunkID, InfoChunks(chunkInfo, frozenVectors))
-
-      // release older appenders back to pool.  Nothing at this point should reference the older appenders.
-      bufferPool.release(flushingAppenders)
-      flushingAppenders = nullAppenders
-
-      blockHolder.endMetaSpan(TimeSeriesShard.writeMeta(_, partID, chunkInfo.id), TimeSeriesShard.BlockMetaAllocSize)
-
-      Some(ChunkSet(chunkInfo, binPartition, Nil,
-                    frozenVectors.zipWithIndex.map { case (vect, pos) => (pos, vect.toFiloBuffer) }))
-    }
   }
 
-  // Releases the flushing appenders.  Called in case of failure to make sure flushing appenders are released.
-  def releaseFlushingAppenders(): Unit = {
-    if (flushingAppenders != UnsafeUtils.ZeroPointer) {
-      bufferPool.release(flushingAppenders)
-      flushingAppenders = nullAppenders
-      shardStats.uncommittedBuffersFreed.increment
-    }
-  }
+  // Encodes and releases any remaining WriteBuffers back to the pool
+  def encodeAndReleaseBuffers(blockHolder: BlockMemFactory): Unit =
+    infosChunksToBeFlushed
+      .foreach { case InfoChunks(info, chunks) =>
+        chunks(0) match {
+          case v: BinaryAppendableVector[_] => encodeOneChunkset(info.id, blockHolder)
+          case other: BinaryVector[_]       =>
+        }
+      }
 
   def numChunks: Int = infosChunks.size
-  def latestChunkLen: Int = if (currentChunks != nullChunks) currentChunks(0).length else 0
+
+  /**
+   * Number of unflushed chunksets lying around.  Goes up every time a new writebuffer is allocated and goes down
+   * when flushes happen.  Computed dynamically from current infosChunks state.
+   */
+  def unflushedChunksets: Int = infosChunks.tailMap(newestFlushedID, false).size
+
+  private def allInfosChunks: Iterator[InfoChunks] = infosChunks.values.asScala.toIterator
+
+  // NOT including currently flushing writeBuffer chunks if there are any
+  private def infosChunksToBeFlushed: Iterator[InfoChunks] =
+    infosChunks.tailMap(newestFlushedID, false).values
+               .asScala.toIterator
+               .filterNot(_.info.id == currentChunkID)  // filter out the appending chunk
 
   private def getVectors(columnIds: Array[Int],
                          vectors: Array[BinaryVector[_]]): Array[FiloVector[_]] = {
@@ -238,15 +255,15 @@ class TimeSeriesPartition(val partID: Int,
   private def readersFromMemory(method: ChunkScanMethod, columnIds: Array[Int]): Iterator[ChunkSetReader] = {
     val infosVects = method match {
       case AllChunkScan               =>
-        infosChunks.values.toIterator
+        allInfosChunks
       // To derive time range: r.startkey.getLong(0) -> r.endkey.getLong(0)
       case r: RowKeyChunkScan         =>
-        infosChunks.values.toIterator.filter { ic =>
-          ic.info.firstKey.isEmpty ||      // empty key = most recent chunk, get a free pass
+        allInfosChunks.filter { ic =>
+          ic.info.id == currentChunkID ||      // most recent chunk gets a free pass, cannot compare range
           ic.info.intersection(r.startkey, r.endkey).isDefined
         }
       case LastSampleChunkScan        =>
-        if (infosChunks.isEmpty) Iterator.empty else Iterator.single(infosChunks.values.last)
+        if (infosChunks.isEmpty) Iterator.empty else Iterator.single(infosChunks.get(infosChunks.lastKey))
     }
 
     infosVects.map { case InfoChunks(info, vectArray) =>
@@ -255,7 +272,7 @@ class TimeSeriesPartition(val partID: Int,
       //scalastyle:on
       val realInfo = info match {
         // First chunk, fill in real chunk length.  TODO: also fill in current first & last key
-        case i @ ChunkSetInfo(_, -1, _, _) => i.copy(numRows = latestChunkLen)
+        case i @ ChunkSetInfo(_, -1, _, _) => i.copy(numRows = appendingChunkLen)
         case _: Any                        => info
       }
       val chunkset = getVectors(columnIds, vectArray)
@@ -272,20 +289,18 @@ class TimeSeriesPartition(val partID: Int,
     * Also compacts infosChunks tombstones.
     */
   private def initNewChunk(): Unit = {
-    while(appenders == nullAppenders) {
+    while (currentChunks == nullChunks) {
       try {
-        val (newAppenders, newCurChunks) = bufferPool.obtain()
-        appenders = newAppenders
-        currentChunks = newCurChunks
+        currentChunks = bufferPool.obtain()
       } catch {
         case e: NoSuchElementException =>
           logger.warn(s"Out of write buffers.  Waiting in a loop until we have such buffers")
           Thread sleep 10000
       }
     }
-    val newChunkId = timeUUID64
-    val newInfo = ChunkSetInfo(newChunkId, -1, BinaryRecord.empty, BinaryRecord.empty)
-    infosChunks.put(newChunkId, InfoChunks(newInfo, currentChunks.asInstanceOf[Array[BinaryVector[_]]]))
+    currentChunkID = timeUUID64
+    val newInfo = ChunkSetInfo(currentChunkID, -1, BinaryRecord.empty, BinaryRecord.empty)
+    infosChunks.put(currentChunkID, InfoChunks(newInfo, currentChunks.asInstanceOf[Array[BinaryVector[_]]]))
   }
 
   /**
@@ -321,13 +336,20 @@ class TimeSeriesPartition(val partID: Int,
     }
   }
 
-  def removeChunksAt(id: ChunkID): Unit = {
+  final def removeChunksAt(id: ChunkID): Unit = {
     infosChunks.remove(id)
     shardStats.chunkIdsEvicted.increment()
   }
 
-  def addChunkSet(info: ChunkSetInfo, bytes: Array[BinaryVector[_]]): Unit = {
+  // Used for adding chunksets that are paged in, ie that are already persisted
+  final def addChunkSet(info: ChunkSetInfo, bytes: Array[BinaryVector[_]]): Unit = {
     infosChunks.put(info.id, InfoChunks(info, bytes))
+    // Make sure to update newestFlushedID so that flushes work correctly and don't try to flush these chunksets
+    updateFlushedID(info)
+  }
+
+  final def updateFlushedID(info: ChunkSetInfo): Unit = {
+    newestFlushedID = Math.max(newestFlushedID, info.id)
   }
 
   /**
@@ -377,7 +399,7 @@ class TimeSeriesPartition(val partID: Int,
       case Some(tsCol) =>
         // scan colStore since retention (ex, 72) hours ago until (not including) first key in memstore
         val from = BinaryRecord(dataset, Seq(System.currentTimeMillis() - chunkRetentionMillis))
-        val toL = infosChunks.values.headOption.flatMap { v =>
+        val toL = infosChunks.values.asScala.headOption.flatMap { v =>
           if (v.info.firstKey.isEmpty) None else Some(v.info.firstKey.getLong(tsCol.id) - 1)
         }
         val to = BinaryRecord(dataset, Seq(toL.getOrElse(Long.MaxValue)))

@@ -3,7 +3,8 @@ package filodb.memory.format.vectors
 import org.scalatest.{FunSpec, Matchers}
 
 import filodb.memory.NativeMemoryManager
-import filodb.memory.format.{FiloVector, GrowableVector, ZeroCopyUTF8String}
+import filodb.memory.format._
+
 //noinspection ScalaStyle
 class UTF8VectorTest extends FunSpec with Matchers {
   import filodb.memory.format.Encodings._
@@ -13,8 +14,8 @@ class UTF8VectorTest extends FunSpec with Matchers {
   describe("UTF8Vector") {
     it("should be able to append all NAs") {
       val utf8vect = UTF8Vector.flexibleAppending(memFactory, 5, 1024)
-      utf8vect.addNA()
-      utf8vect.addNA()
+      utf8vect.addNA() shouldEqual Ack
+      utf8vect.addNA() shouldEqual Ack
       utf8vect.length should equal (2)
       utf8vect.frozenSize should equal (12)
       utf8vect.isAvailable(0) should equal (false)
@@ -30,7 +31,7 @@ class UTF8VectorTest extends FunSpec with Matchers {
       val strs = Seq("apple", "", "Charlie").map(ZeroCopyUTF8String.apply)
       val utf8vect = UTF8Vector.flexibleAppending(memFactory, 5, 1024)
       utf8vect.addNA()
-      strs.foreach(utf8vect.addData)
+      strs.foreach(s => utf8vect.addData(s) shouldEqual Ack)
       utf8vect.addNA()
 
       utf8vect.length should equal (5)
@@ -46,13 +47,13 @@ class UTF8VectorTest extends FunSpec with Matchers {
 
     it("should be able to calculate min, max # bytes for all elements") {
       val utf8vect = UTF8Vector.flexibleAppending(memFactory, 5, 1024)
-      Seq("apple", "zoe", "bananas").foreach(s => utf8vect.addData(ZeroCopyUTF8String(s)))
+      Seq("apple", "zoe", "bananas").foreach(s => utf8vect.addData(ZeroCopyUTF8String(s)) shouldEqual Ack)
       utf8vect.addNA()   // NA or empty string should not affect min/max len
       val inner = utf8vect.asInstanceOf[GrowableVector[_]].inner.asInstanceOf[UTF8AppendableVector]
       inner.minMaxStrLen should equal ((3, 7))
 
       val utf8vect2 = UTF8Vector.flexibleAppending(memFactory, 5, 1024)
-      Seq("apple", "", "bananas").foreach(s => utf8vect2.addData(ZeroCopyUTF8String(s)))
+      Seq("apple", "", "bananas").foreach(s => utf8vect2.addData(ZeroCopyUTF8String(s)) shouldEqual Ack)
       utf8vect2.noNAs should equal (true)
       val inner2 = utf8vect2.asInstanceOf[GrowableVector[_]].inner.asInstanceOf[UTF8AppendableVector]
       inner2.minMaxStrLen should equal ((0, 7))
@@ -61,7 +62,7 @@ class UTF8VectorTest extends FunSpec with Matchers {
     it("should be able to freeze and minimize bytes used") {
       val strs = Seq("apple", "zoe", "bananas").map(ZeroCopyUTF8String.apply)
       val utf8vect = UTF8Vector.flexibleAppending(memFactory, 10, 1024)
-      strs.foreach(utf8vect.addData)
+      strs.foreach(s => utf8vect.addData(s) shouldEqual Ack)
       utf8vect.length should equal (3)
       utf8vect.noNAs should equal (true)
       utf8vect.frozenSize should equal (4 + 12 + 5 + 3 + 7)
@@ -75,7 +76,7 @@ class UTF8VectorTest extends FunSpec with Matchers {
     it("should be able toFiloBuffer and parse back with FiloVector") {
       val strs = Seq("apple", "zoe", "bananas").map(ZeroCopyUTF8String.apply)
       val utf8vect = UTF8Vector.flexibleAppending(memFactory, strs.length, 1024)
-      strs.foreach(utf8vect.addData)
+      strs.foreach(s => utf8vect.addData(s) shouldEqual Ack)
       val buffer = utf8vect.toFiloBuffer
       val readVect = FiloVector[ZeroCopyUTF8String](buffer)
       readVect.toSeq should equal (strs)
@@ -89,7 +90,7 @@ class UTF8VectorTest extends FunSpec with Matchers {
       // Purposefully test when offsets grow beyond 32k
       val strs = (1 to 10000).map(i => ZeroCopyUTF8String("string" + i))
       val utf8vect = UTF8Vector.flexibleAppending(memFactory, 50, 16384)
-      strs.foreach(utf8vect.addData)
+      strs.foreach(s => utf8vect.addData(s) shouldEqual Ack)
       val buffer = utf8vect.toFiloBuffer
       val readVect = FiloVector[ZeroCopyUTF8String](buffer)
       readVect.toSeq should equal (strs)
@@ -97,31 +98,31 @@ class UTF8VectorTest extends FunSpec with Matchers {
       val vect2 = UTF8Vector.appendingVector(memFactory, 50)
       vect2 shouldBe a[GrowableVector[_]]
       vect2.asInstanceOf[GrowableVector[_]].inner shouldBe a[UTF8PtrAppendable]
-      strs.foreach(vect2.addData)
+      strs.foreach(s => vect2.addData(s) shouldEqual Ack)
       val readVect2 = FiloVector[ZeroCopyUTF8String](vect2.optimize(memFactory).toFiloBuffer)
       readVect2.toSeq should equal (strs)
     }
   }
 
   describe("FixedMaxUTF8Vector") {
-    it("should throw if try to append item longer than max") {
+    it("should return ItemTooLarge if try to append item longer than max") {
       val cb = UTF8Vector.fixedMaxAppending(memFactory, 5, 4)
       // OK: 3 chars, or 4 chars
-      cb.addData(ZeroCopyUTF8String("zoe"))
-      cb.addData(ZeroCopyUTF8String("card"))
+      cb.addData(ZeroCopyUTF8String("zoe")) shouldEqual Ack
+      cb.addData(ZeroCopyUTF8String("card")) shouldEqual Ack
       cb.length should be (2)
       cb.frozenSize should be (1 + 5 + 5)
 
-      // Not OK, will throw: 5 chars
-      intercept[IllegalArgumentException] {
-        cb.addData(ZeroCopyUTF8String("money"))
-      }
+      // Not OK: 5 chars
+      cb.addData(ZeroCopyUTF8String("money")) shouldEqual ItemTooLarge
+      cb.length should be (2)
+      cb.frozenSize should be (1 + 5 + 5)
     }
 
     it("should add multiple items, create buffer and read it back") {
       val strs = Seq("apple", "zoe", "jack").map(ZeroCopyUTF8String.apply)
       val cb = UTF8Vector.fixedMaxAppending(memFactory, 3, 5)
-      strs.foreach(cb.addData)
+      strs.foreach(s => cb.addData(s) shouldEqual Ack)
       val buffer = cb.toFiloBuffer
       val readVect = FiloVector[ZeroCopyUTF8String](buffer)
       readVect.toSeq should equal (strs)
@@ -129,9 +130,9 @@ class UTF8VectorTest extends FunSpec with Matchers {
 
     it("should handle NA items as well as empty strings") {
       val cb = UTF8Vector.fixedMaxAppending(memFactory, 3, 4)
-      cb.addData("zoe".utf8)
-      cb.addNA()
-      cb.addData("".utf8)
+      cb.addData("zoe".utf8) shouldEqual Ack
+      cb.addNA() shouldEqual Ack
+      cb.addData("".utf8) shouldEqual Ack
       val buffer = cb.toFiloBuffer
       val readVect = FiloVector[ZeroCopyUTF8String](buffer)
       readVect(0) should equal ("zoe".utf8)

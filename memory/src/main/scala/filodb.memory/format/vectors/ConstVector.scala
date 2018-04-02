@@ -1,7 +1,7 @@
 package filodb.memory.format.vectors
 
 import filodb.memory.MemFactory
-import filodb.memory.format.{BinaryAppendableVector, BinaryVector, UnsafeUtils, WireFormat}
+import filodb.memory.format._
 import filodb.memory.format.Encodings._
 
 object ConstVector {
@@ -51,8 +51,12 @@ extends BinaryAppendableVector[A] with ConstVectorType {
   def fillBytes(base: Any, offset: Long): Unit
 
   final def apply(index: Int): A = value
-  final def addData(data: A): Unit = { len += 1 }
-  final def addNA(): Unit = { len += 1 }
+  final def addData(data: A): AddResponse = addNA()
+  final def addNA(): AddResponse = {
+    len += 1
+    Ack
+  }
+  final def addFromReaderNoNA(reader: RowReader, col: Int): AddResponse = addNA()
   final def isAvailable(index: Int): Boolean = true
   final def base: Any = this
   final def numBytes: Int = frozenSize

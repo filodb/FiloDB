@@ -64,8 +64,8 @@ trait ZeroCopyBinary extends Ordered[ZeroCopyBinary] {
   override def equals(other: Any): Boolean = other match {
     case z: ZeroCopyBinary =>
       (numBytes == z.numBytes) && UnsafeUtils.equate(base, offset, z.base, z.offset, numBytes)
-    case o: Any =>
-      false
+    case o: Any => false
+    case UnsafeUtils.ZeroPointer => false
   }
 
   private var hash64: Long = -1L
@@ -76,6 +76,7 @@ trait ZeroCopyBinary extends Ordered[ZeroCopyBinary] {
       val hash = base match {
         case a: Array[Byte] => hasher64.hash(a, offset.toInt - UnsafeUtils.arayOffset, numBytes, Seed)
         case o: Any         => hasher64.hash(asNewByteArray, 0, numBytes, Seed)
+        case UnsafeUtils.ZeroPointer => 0
       }
       hash64 = hash
     }

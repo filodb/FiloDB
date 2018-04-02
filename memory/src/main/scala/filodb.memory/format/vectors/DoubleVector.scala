@@ -111,12 +111,16 @@ class MaskedDoubleBinaryVector(val base: Any,
 
 class DoubleAppendingVector(base: Any, offset: Long, maxBytes: Int, val dispose: () => Unit)
 extends PrimitiveAppendableVector[Double](base, offset, maxBytes, 64, true) {
-  final def addNA(): Unit = addData(0.0)
-  final def addData(data: Double): Unit = {
-    checkOffset()
-    UnsafeUtils.setDouble(base, writeOffset, data)
-    writeOffset += 8
+  final def addNA(): AddResponse = addData(0.0)
+  final def addData(data: Double): AddResponse = checkOffset() match {
+    case Ack =>
+      UnsafeUtils.setDouble(base, writeOffset, data)
+      writeOffset += 8
+      Ack
+    case other: AddResponse => other
   }
+
+  final def addFromReaderNoNA(reader: RowReader, col: Int): AddResponse = addData(reader.getDouble(col))
 
   private final val readVect = new DoubleBinaryVector(base, offset, maxBytes, dispose)
   final def apply(index: Int): Double = readVect.apply(index)
@@ -194,7 +198,7 @@ with AppendableVectorWrapper[Int, Double] {
 
   val binConstVector = (min == max) && inner.noNAs
 
-  final def addData(value: Int): Unit = inner.addData(value.toDouble)
+  final def addData(value: Int): AddResponse = inner.addData(value.toDouble)
   final def apply(index: Int): Int = inner(index).toInt
 
   def dataVect(memFactory: MemFactory): BinaryVector[Int] = {

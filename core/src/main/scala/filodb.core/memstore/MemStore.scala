@@ -186,25 +186,22 @@ trait MemStore extends ChunkSource {
 
 object MemStore {
   /**
-   * Figures out the RowReaderAppenders for each column, depending on type and whether it is a static/
+   * Figures out the AppendableVectors for each column, depending on type and whether it is a static/
    * constant column for each partition.
    */
   def getAppendables(memFactory: MemFactory,
                      dataset: Dataset,
-                     maxElements: Int): Array[RowReaderAppender] =
+                     maxElements: Int): Array[BinaryAppendableVector[_]] =
     dataset.dataColumns.zipWithIndex.map { case (col, index) =>
       col.columnType match {
-      case IntColumn       =>
-        new IntReaderAppender(bv.IntBinaryVector.appendingVector(memFactory, maxElements), index)
-      case LongColumn      =>
-        new LongReaderAppender(bv.LongBinaryVector.appendingVector(memFactory, maxElements), index)
-      case DoubleColumn    =>
-        new DoubleReaderAppender(bv.DoubleVector.appendingVector(memFactory, maxElements), index)
-      case TimestampColumn =>
-        new LongReaderAppender(bv.LongBinaryVector.appendingVector(memFactory, maxElements), index)
-      case StringColumn    =>
-        new StringReaderAppender(bv.UTF8Vector.appendingVector(memFactory, maxElements), index)
-      case other: Column.ColumnType => ???
-    }
+        // Time series data doesn't really need the NA/null functionality, so use more optimal vectors
+        // to save memory and CPU
+        case IntColumn       => bv.IntBinaryVector.appendingVectorNoNA(memFactory, maxElements)
+        case LongColumn      => bv.LongBinaryVector.appendingVectorNoNA(memFactory, maxElements)
+        case DoubleColumn    => bv.DoubleVector.appendingVectorNoNA(memFactory, maxElements)
+        case TimestampColumn => bv.LongBinaryVector.appendingVectorNoNA(memFactory, maxElements)
+        case StringColumn    => bv.UTF8Vector.appendingVector(memFactory, maxElements)
+        case other: Column.ColumnType => ???
+      }
     }.toArray
 }

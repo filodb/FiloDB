@@ -18,7 +18,13 @@ trait FiloPartition {
   lazy val stringPartition = binPartition.toString
 
   def numChunks: Int
-  def latestChunkLen: Int
+
+  /**
+   * The length or # of data samples of the set of appending or ingesting chunks.  0 if there are no
+   * appendable chunks or write buffers.
+   */
+  def appendingChunkLen: Int
+
   def shard: Int
 
   private final val partitionVectors = new Array[FiloVector[_]](dataset.partitionColumns.length)

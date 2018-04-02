@@ -59,8 +59,6 @@ class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
   val partitionsQueried = Kamon.counter("memstore-partitions-queried").refine(tags)
   val numChunksQueried = Kamon.counter("memstore-chunks-queried").refine(tags)
   val partitionsEvicted = Kamon.counter("memstore-partitions-evicted").refine(tags)
-  // The number of uncommitted WriteBuffers freed due to errors or other circumstances
-  val uncommittedBuffersFreed = Kamon.counter("memstore-uncommitted-buffers-freed").refine(tags)
   val memoryStats = new MemoryStats(tags)
 
   val bufferPoolSize = Kamon.gauge("memstore-writebuffer-pool-size").refine(tags)
@@ -166,6 +164,10 @@ class TimeSeriesShard(dataset: Dataset,
   private val blockFactoryPool = new BlockMemFactoryPool(blockStore, BlockMetaAllocSize)
   private val numColumns = dataset.dataColumns.size
 
+  // Each shard has a single ingestion stream at a time.  This BlockMemFactory is used for buffer overflow encoding
+  // strictly during ingest() and switchBuffers().
+  private val overflowBlockFactory = new BlockMemFactory(blockStore, None, BlockMetaAllocSize, true)
+
   // The off-heap buffers used for ingesting the newest data samples.  Give it 10% overhead.
   protected val bufferMemorySizeEst: Long = maxChunksSize * 8L * maxNumPartitions * numColumns
   protected val bufferMemorySize = (bufferMemorySizeEst * 1.1).toLong
@@ -225,7 +227,7 @@ class TimeSeriesShard(dataset: Dataset,
         shardStats.rowsSkipped.increment
       } else {
         val partition = keyMap.getOrElse(partKey, addPartition(partKey, true))
-        partition.ingest(data, offset)
+        partition.ingest(data, offset, overflowBlockFactory)
         numActuallyIngested += 1
       }
     }
@@ -256,11 +258,11 @@ class TimeSeriesShard(dataset: Dataset,
   private final def group(partKey: SchemaRowReader): Int = Math.abs(partKey.hashCode % numGroups)
 
   // Rapidly switch all of the input buffers for a particular group
-  // Preferably this is done in the same thread/stream as input records to avoid concurrency issues
+  // This MUST be done in the same thread/stream as input records to avoid concurrency issues
   // and ensure that all the partitions in a group are switched at the same watermark
   def switchGroupBuffers(groupNum: Int): Unit = {
     logger.debug(s"Switching write buffers for group $groupNum in shard $shardNum")
-    new PartitionIterator(partitionGroups(groupNum).intIterator).foreach(_.switchBuffers())
+    new PartitionIterator(partitionGroups(groupNum).intIterator).foreach(_.switchBuffers(overflowBlockFactory))
 
     // swap the partKeysToFlush bitmap indexes too. Clear the one that has been flushed
     val temp = partKeysToFlush(groupNum)(0)
@@ -310,9 +312,9 @@ class TimeSeriesShard(dataset: Dataset,
     val writeChunksFuture = sink.write(dataset, chunkSetStream, flushGroup.diskTimeToLive).recover { case e =>
       logger.error("Critical! Chunk persistence failed after retries and skipped", e)
       shardStats.flushesFailedChunkWrite.increment
-      // Free up the remainder of the WriteBuffers that have not been flushed yet.  Otherwise they will
+      // Encode and free up the remainder of the WriteBuffers that have not been flushed yet.  Otherwise they will
       // never be freed.
-      partitionIt.foreach(_.releaseFlushingAppenders())
+      partitionIt.foreach(_.encodeAndReleaseBuffers(blockHolder))
       DataDropped
     }
     val writePartKeyFuture = sink.addPartitions(dataset, partKeysInGroup, shardNum).recover { case e =>

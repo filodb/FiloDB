@@ -24,12 +24,15 @@ import filodb.memory.format._
   * @param chunks    each item in the Seq encodes a column's values in the chunk's dataset. First
   *                  value in the tuple identifies the column, the second is a reference to the
   *                  off-heap memory store where the contents of the chunks can be obtained
-  *
+  * @param listener a callback for when that chunkset is successfully flushed
   */
 case class ChunkSet(info: ChunkSetInfo,
                     partition: PartitionKey,
                     skips: Seq[ChunkRowSkipIndex],
-                    chunks: Seq[(ColumnId, ByteBuffer)])
+                    chunks: Seq[(ColumnId, ByteBuffer)],
+                    listener: ChunkSetInfo => Unit = info => {}) {
+  def invokeFlushListener(): Unit = listener(info)
+}
 
 object ChunkSet {
   /**

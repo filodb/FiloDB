@@ -138,6 +138,9 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
     asyncSubtrace("write-chunks", "ingestion") {
       val chunkTable = getOrCreateChunkTable(ref)
       chunkTable.writeChunks(chunkset.partition, chunkset.info, chunkset.chunks, sinkStats, diskTimeToLive)
+        .collect {
+          case Success => chunkset.invokeFlushListener(); Success
+        }
     }
   }
 
@@ -362,7 +365,7 @@ class CassandraPartition(index: ChunkIDPartitionChunkIndex,
 
   def numChunks: Int = index.numChunks
 
-  def latestChunkLen: Int = index.latestN(1).toSeq.headOption.map(_._1.numRows).getOrElse(0)
+  def appendingChunkLen: Int = index.latestN(1).toSeq.headOption.map(_._1.numRows).getOrElse(0)
 
   // For now just report a dummy shard.  In the future figure this out.
   val shard = 0

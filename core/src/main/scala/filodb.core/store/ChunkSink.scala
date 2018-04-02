@@ -114,6 +114,7 @@ class NullColumnStore(implicit sched: Scheduler) extends ColumnStore with Strict
       sinkStats.chunksetWrite()
       logger.debug(s"NullColumnStore: [${chunkset.partition}] ${chunkset.info}  ${chunkset.chunks.length} " +
                    s"chunks with $totalBytes bytes")
+      chunkset.listener(chunkset.info)
     }
     Future.successful(Success)
   }

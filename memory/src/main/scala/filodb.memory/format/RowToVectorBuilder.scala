@@ -53,16 +53,11 @@ class RowToVectorBuilder(schema: Seq[VectorInfo], memFactory: MemFactory = MemFa
   val maxElements = 1000
   val builders = schema.zipWithIndex.map {
     case (VectorInfo(_, dataType),index)=> dataType match {
-      case Classes.Int      =>
-        new IntReaderAppender(IntBinaryVector.appendingVector(memFactory, maxElements),index)
-      case Classes.Long       =>
-        new LongReaderAppender(LongBinaryVector.appendingVector(memFactory, maxElements), index)
-      case Classes.Double    =>
-        new DoubleReaderAppender(DoubleVector.appendingVector(memFactory, maxElements), index)
-      case Classes.UTF8    =>
-        new StringReaderAppender(UTF8Vector.appendingVector(memFactory, maxElements), index)
-      case Classes.String    =>
-        new StringReaderAppender(UTF8Vector.appendingVector(memFactory, maxElements), index)
+      case Classes.Int    => IntBinaryVector.appendingVector(memFactory, maxElements)
+      case Classes.Long   => LongBinaryVector.appendingVector(memFactory, maxElements)
+      case Classes.Double => DoubleVector.appendingVector(memFactory, maxElements)
+      case Classes.UTF8   => UTF8Vector.appendingVector(memFactory, maxElements)
+      case Classes.String => UTF8Vector.appendingVector(memFactory, maxElements)
     }
   }
   val numColumns = schema.length
@@ -74,13 +69,13 @@ class RowToVectorBuilder(schema: Seq[VectorInfo], memFactory: MemFactory = MemFa
     */
   def addRow(row: RowReader): Unit = {
     for { i <- 0 until numColumns optimized } {
-      builders(i).append(row)
+      builders(i).addFromReader(row, i)
     }
   }
 
 
   def convertToBytes(hint: EncodingHint = AutoDetect): Map[String, ByteBuffer] = {
-    val chunks = builders.map(_.appender.optimize(memFactory, hint).toFiloBuffer)
+    val chunks = builders.map(_.optimize(memFactory, hint).toFiloBuffer)
     schema.zip(chunks).map { case (VectorInfo(colName, _), bytes) => (colName, bytes) }.toMap
   }
 
