@@ -38,7 +38,7 @@ class WriteBufferPool(memFactory: MemFactory,
    * Obtains a new set of AppendableVectors from the pool.
    *
    * @return Array of AppendableVectors
-   * @throws NoSuchElementException if the Queue is empty
+   * Throws NoSuchElementException if the Queue is empty
    */
   def obtain(): Array[BinaryAppendableVector[_]] = queue.dequeue
 

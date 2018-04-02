@@ -302,7 +302,7 @@ lazy val consoleSettings = Seq(
    "-Xfatal-warnings"))))
 
 lazy val compilerSettings = Seq(
-
+  autoAPIMappings := true,
   scalacOptions ++= Seq(
     "-deprecation",
     "-encoding", "UTF-8",
