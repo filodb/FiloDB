@@ -15,7 +15,7 @@ import org.scalatest.time.{Millis, Seconds, Span}
 import filodb.coordinator.client._
 import filodb.coordinator.queryengine.Engine
 import filodb.core._
-import filodb.core.metadata.{Dataset, Column}
+import filodb.core.metadata.{Column, Dataset}
 import filodb.core.query._
 import filodb.core.store._
 import filodb.memory.format.ZeroCopyUTF8String
@@ -402,6 +402,19 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       probe.send(coordinatorActor, GetIndexValues(ref, "series", limit=4))
       probe.expectMsg(Seq("Series 0", "Series 1", "Series 2", "Series 3"))
     }
+
+    it("should restart QueryActor on error") {
+      val ref = setupTimeSeries()
+      probe.send(coordinatorActor, IngestRows(ref, 0, records(linearMultiSeries()).take(30)))
+      probe.expectMsg(Ack(29L))
+
+      probe.send(coordinatorActor, GetIndexNames(ref))
+      probe.expectMsg(Seq("series"))
+
+      //actor should restart and serve queries again
+      probe.send(coordinatorActor, GetIndexValues(ref, "series", limit=4))
+      probe.expectMsg(Seq("Series 0", "Series 1", "Series 2", "Series 3"))
+    }
   }
 
   it("should be able to start ingestion, send rows, and get an ack back") {
@@ -447,5 +460,8 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
     probe.send(coordinatorActor, IngestRows(ref, 0, records(dataset1)))
     probe.expectMsg(UnknownDataset)
   }
+
+
+
 }
 

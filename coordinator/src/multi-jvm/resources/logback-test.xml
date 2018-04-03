@@ -20,7 +20,7 @@
 
   <!-- NOTE: additivity=false means filodb debug logs will not go to STDOUT -->
   <logger name="filodb" level="DEBUG" additivity="false">
-    <appender-ref ref="FILE" />
+    <appender-ref ref="STDOUT" />
   </logger>
 
   <!-- NOTE: change the root log level to control STDOUT/console logging levels -->

@@ -8,7 +8,8 @@ import filodb.core._
 sealed trait ShardAction extends Serializable
 
 /** Sent once to newly-subscribed subscribers to initialize their local ShardMapper. */
-final case class CurrentShardSnapshot(ref: DatasetRef, map: ShardMapper) extends ShardAction with Response
+final case class CurrentShardSnapshot(ref: DatasetRef,
+                                      map: ShardMapper) extends ShardAction with Response
 
 /**
   * These commands are sent by the NodeClusterActor to the right nodes upon events or
