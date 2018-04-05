@@ -2,6 +2,7 @@ package filodb.spark
 
 import scala.concurrent.duration._
 
+import com.typesafe.config.ConfigFactory
 import org.apache.spark.sql.{DataFrame, SaveMode, SQLContext}
 import org.apache.spark.sql.types.StructType
 
@@ -10,6 +11,7 @@ import filodb.coordinator.client.Client
 import filodb.core._
 import filodb.core.memstore.IngestRouting
 import filodb.core.metadata.Dataset
+import filodb.core.store.StoreConfig
 
 /**
  * Class implementing insert and save Scala APIs.
@@ -141,10 +143,16 @@ class FiloContext(val sqlContext: SQLContext) extends AnyVal {
     sparkLogger.info(s"Inserting into ($ref) with $numPartitions partitions")
     sparkLogger.debug(s"   Dataframe schema = $dfColumns")
 
+    val storeConf = ConfigFactory.parseString(s"""
+                         |  store {
+                         |    flush-interval = 30m
+                         |    shard-memory-mb = 500
+                         |  }""".stripMargin)
+
     // TODO: actually figure out right number of nodes.
     FiloDriver.client.setupDataset(ref,
                                    DatasetResourceSpec(numPartitions, Math.min(numPartitions, 10)),
-                                   noOpSource) match {
+                                   noOpSource, StoreConfig(storeConf)) match {
       case None =>
         sparkLogger.info(s"Ingestion set up on all coordinators for $ref")
         sparkLogger.info(s"Waiting to ensure coordinators ready. TODO: replace with shard status")

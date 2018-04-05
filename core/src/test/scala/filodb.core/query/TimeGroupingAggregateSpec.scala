@@ -21,7 +21,7 @@ class TimeGroupingAggregateSpec extends FunSpec with Matchers with BeforeAndAfte
   }
 
   it("should filter and aggregate across time buckets and series") {
-    memStore.setup(dataset1, 0)
+    memStore.setup(dataset1, 0, TestData.storeConf)
     val data = records(linearMultiSeries()).take(30)   // 3 records per series x 10 series
     memStore.ingest(dataset1.ref, 0, data)
 
@@ -45,7 +45,7 @@ class TimeGroupingAggregateSpec extends FunSpec with Matchers with BeforeAndAfte
   }
 
   it("should aggregate with default number of buckets when no argument passed in") {
-    memStore.setup(dataset1, 0)
+    memStore.setup(dataset1, 0, TestData.storeConf)
     val data = records(linearMultiSeries()).take(30)   // 3 records per series x 10 series
     memStore.ingest(dataset1.ref, 0, data)
 
@@ -60,7 +60,7 @@ class TimeGroupingAggregateSpec extends FunSpec with Matchers with BeforeAndAfte
   it("should return error when using time-based functions on non-time series dataset/projection") {
     import GdeltTestData._
 
-    memStore.setup(dataset6, 0)  // GDELT uses int row key, not considered timestamp
+    memStore.setup(dataset6, 0, TestData.storeConf)  // GDELT uses int row key, not considered timestamp
     memStore.ingest(dataset6.ref, 0, records(dataset6, readers))
 
     val split = memStore.getScanSplits(dataset6.ref, 1).head

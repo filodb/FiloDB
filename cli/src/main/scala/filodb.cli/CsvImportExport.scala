@@ -10,7 +10,7 @@ import filodb.coordinator.client.LocalClient
 import filodb.coordinator.sources.CsvStreamFactory
 import filodb.coordinator.NodeClusterActor
 import filodb.core._
-import filodb.core.store.MetaStore
+import filodb.core.store.{MetaStore, StoreConfig}
 
 // Turn off style rules for CLI classes
 // scalastyle:off
@@ -31,9 +31,18 @@ trait CsvImportExport extends StrictLogging {
     val config = ConfigFactory.parseString(s"""header = true
                                            file = $csvPath
                                            """)
+
+    // Just set up some defaults.  Not terribly important since CSV import is going away sometime.
+    val storeConf = ConfigFactory.parseString(s"""
+                         |  store {
+                         |    flush-interval = 30m
+                         |    shard-memory-mb = 500
+                         |  }""".stripMargin)
+
     client.setupDataset(dataset,
                         DatasetResourceSpec(1, 1),
-                        IngestionSource(classOf[CsvStreamFactory].getName, config)).foreach {
+                        IngestionSource(classOf[CsvStreamFactory].getName, config),
+                        StoreConfig(storeConf)).foreach {
       case e: ErrorResponse =>
         println(s"Errors setting up ingestion: $e")
         exitCode = 2

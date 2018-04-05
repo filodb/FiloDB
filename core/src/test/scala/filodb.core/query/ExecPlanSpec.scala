@@ -31,7 +31,7 @@ class ExecPlanSpec extends FunSpec with Matchers with BeforeAndAfter with ScalaF
   val partKeys = (0 to 9).map(n => dataset1.partKey(s"Series $n"))
 
   it("LocalVectorReader should return result with vectors and proper schema when execute") {
-    memStore.setup(dataset1, 0)
+    memStore.setup(dataset1, 0, TestData.storeConf)
     val data = records(linearMultiSeries()).take(20)   // 2 records per series x 10 series
     memStore.ingest(dataset1.ref, 0, data)
 
@@ -58,7 +58,7 @@ class ExecPlanSpec extends FunSpec with Matchers with BeforeAndAfter with ScalaF
 
   it("LocalVectorReader should throw error if key range and don't pass in row key columns") {
     val keyRange = RowKeyChunkScan(dataset1, Seq(105000L), Seq(115000L))
-    memStore.setup(dataset1, 0)
+    memStore.setup(dataset1, 0, TestData.storeConf)
     val split = memStore.getScanSplits(dataset1.ref, 1).head
     val plan = new ExecPlan.LocalVectorReader(Seq(1, 2), FilteredPartitionScan(split), keyRange)
     intercept[IllegalArgumentException] {
@@ -72,7 +72,7 @@ class ExecPlanSpec extends FunSpec with Matchers with BeforeAndAfter with ScalaF
     val keyRange = RowKeyChunkScan(dataset1, Seq(105000L), Seq(115000L))
     val schemaCols = Seq(ColumnInfo("timestamp", LongColumn), ColumnInfo("min",DoubleColumn))
 
-    memStore.setup(dataset1, 0)
+    memStore.setup(dataset1, 0, TestData.storeConf)
 
     // Ingest and flush.  We force flushing because right now we cannot range scan the write buffer.
     val stream = Observable.fromIterable(records(linearMultiSeries()).take(20).grouped(5).toSeq)
@@ -105,7 +105,7 @@ class ExecPlanSpec extends FunSpec with Matchers with BeforeAndAfter with ScalaF
   }
 
   it("streamLastTuplePlan should return plan which executes returns TupleListResult") {
-    memStore.setup(dataset1, 0)
+    memStore.setup(dataset1, 0, TestData.storeConf)
     val data = records(linearMultiSeries()).take(30)   // 3 records per series x 10 series
     memStore.ingest(dataset1.ref, 0, data)
 

@@ -14,7 +14,7 @@ import filodb.coordinator.client.{MiscCommands, Serializer}
 import filodb.core._
 import filodb.core.memstore.MemStore
 import filodb.core.metadata._
-import filodb.core.store.MetaStore
+import filodb.core.store.{MetaStore, StoreConfig}
 import filodb.query.exec.{ExecPlan => ExecPlan2}
 
 /**
@@ -121,7 +121,10 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
     * initial `CurrentShardSnapshot` to initialize it's local `ShardMapper`
     * for the dataset, which is managed by the shard actor.
     */
-  private def setupDataset(dataset: Dataset, source: IngestionSource, origin: ActorRef): Unit = {
+  private def setupDataset(dataset: Dataset,
+                           storeConf: StoreConfig,
+                           source: IngestionSource,
+                           origin: ActorRef): Unit = {
     import ActorName.{Ingestion, Query}
 
     logger.debug(s"Recreated dataset $dataset from string")
@@ -131,7 +134,7 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
 
     clusterActor match {
       case Some(nca) =>
-        val props = IngestionActor.props(dataset, memStore, source, statusActor.get)(ingestScheduler)
+        val props = IngestionActor.props(dataset, memStore, source, storeConf, statusActor.get)(ingestScheduler)
         val ingester = context.actorOf(props, s"$Ingestion-${dataset.name}")
         context.watch(ingester)
         ingesters(ref) = ingester
@@ -158,9 +161,9 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
   }
 
   def ingestHandlers: Receive = LoggingReceive {
-    case DatasetSetup(compactDSString, source) =>
+    case DatasetSetup(compactDSString, storeConf, source) =>
       val dataset = Dataset.fromCompactString(compactDSString)
-      if (!(ingesters contains dataset.ref)) { setupDataset(dataset, source, sender()) }
+      if (!(ingesters contains dataset.ref)) { setupDataset(dataset, storeConf, source, sender()) }
       else { logger.warn(s"Getting redundant DatasetSetup for dataset ${dataset.ref}") }
 
     case IngestRows(dataset, shard, rows) =>

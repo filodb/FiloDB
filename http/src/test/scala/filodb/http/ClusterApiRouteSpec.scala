@@ -9,7 +9,7 @@ import org.scalatest.{FunSpec, Matchers, BeforeAndAfter}
 import org.scalatest.concurrent.ScalaFutures
 
 import filodb.coordinator.{ActorSpecConfig, FilodbCluster, ClusterRole, NodeProtocol, NodeClusterActor}
-import filodb.core.{GdeltTestData, Success}
+import filodb.core.{GdeltTestData, TestData, Success}
 
 object ClusterApiRouteSpec extends ActorSpecConfig
 
@@ -33,7 +33,7 @@ with ScalatestRouteTest with ScalaFutures {
   val clusterRoute = (new ClusterApiRoute(clusterProxy)).route
 
   private def setupDataset(): Unit = {
-    val command = SetupDataset(dataset6.ref, DatasetResourceSpec(4, 2), noOpSource)
+    val command = SetupDataset(dataset6.ref, DatasetResourceSpec(4, 2), noOpSource, TestData.storeConf)
     probe.send(clusterProxy, command)
     probe.expectMsg(DatasetVerified)
   }
@@ -127,7 +127,15 @@ with ScalatestRouteTest with ScalaFutures {
       // Send the initial config, validate get back 200 and success
       val goodSourceConf = """dataset = "gdelt"
                              |num-shards = 4
-                             |min-num-nodes = 2""".stripMargin
+                             |min-num-nodes = 2
+                             |sourceconfig.store {
+                             |  max-chunks-size = 100
+                             |  demand-paged-chunk-retention-period = 10 hours
+                             |  shard-memory-mb = 100
+                             |  groups-per-shard = 4
+                             |  max-num-partitions = 250
+                             |  flush-interval = 10 minutes
+                             |} """.stripMargin
       Post("/api/v1/cluster/gdelt", goodSourceConf) ~> clusterRoute ~> check {
         handled shouldBe true
         status shouldEqual StatusCodes.OK
@@ -148,7 +156,11 @@ with ScalatestRouteTest with ScalaFutures {
       // Send the initial config, validate get back 200 and success
       val sourceJson = """{"dataset": "gdelt",
                              |"num-shards": 4,
-                             |"min-num-nodes": 2}""".stripMargin
+                             |"min-num-nodes": 2,
+                             |"sourceconfig": { "store": {
+                             |  "flush-interval": "1h",
+                             |  "shard-memory-mb": 100
+                             |}}}""".stripMargin
       Post("/api/v1/cluster/gdelt", sourceJson) ~> clusterRoute ~> check {
         handled shouldBe true
         status shouldEqual StatusCodes.OK

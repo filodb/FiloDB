@@ -26,7 +26,7 @@ class CombinerSpec extends FunSpec with Matchers with BeforeAndAfter with ScalaF
     val baseQuery = QuerySpec("min", AggregationFunction.Sum, Nil,
                               CombinerFunction.Histogram, Seq("2000"))
     it("should invalidate queries with invalid Combiner/histo args") {
-      memStore.setup(dataset1, 0)
+      memStore.setup(dataset1, 0, TestData.storeConf)
       val split = memStore.getScanSplits(dataset1.ref, 1).head
 
       // No args
@@ -52,7 +52,7 @@ class CombinerSpec extends FunSpec with Matchers with BeforeAndAfter with ScalaF
     }
 
     it("should invalidate histo queries where aggregation is not single number") {
-      memStore.setup(dataset1, 0)
+      memStore.setup(dataset1, 0, TestData.storeConf)
       val split = memStore.getScanSplits(dataset1.ref, 1).head
       val query = baseQuery.copy(aggregateFunc = AggregationFunction.TimeGroupMin,
                                  aggregateArgs = Seq("2"))
@@ -62,7 +62,7 @@ class CombinerSpec extends FunSpec with Matchers with BeforeAndAfter with ScalaF
     }
 
     it("should compute histogram correctly") {
-      memStore.setup(dataset1, 0)
+      memStore.setup(dataset1, 0, TestData.storeConf)
       val data = records(linearMultiSeries()).take(30)   // 3 records per series x 10 series
       memStore.ingest(dataset1.ref, 0, data)
 

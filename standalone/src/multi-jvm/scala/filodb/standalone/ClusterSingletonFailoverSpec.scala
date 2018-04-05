@@ -68,7 +68,6 @@ abstract class ClusterSingletonFailoverSpec extends StandaloneMultiJvmSpec(Clust
   lazy val server = new FiloServer(watcher.ref)
   lazy val client1 = new LocalClient(server.cluster.coordinatorActor)
 
-  val numGroupsPerShard = server.cluster.settings.allConfig.getInt("filodb.memstore.groups-per-shard")
   logger.info(s"Accessed metaStore and colStore.  Cluster should _not_ be starting up yet.")
 
   // Test fields

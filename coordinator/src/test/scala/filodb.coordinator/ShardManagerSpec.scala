@@ -3,7 +3,7 @@ package filodb.coordinator
 import akka.actor.{ActorRef, Address}
 import akka.testkit.TestProbe
 
-import filodb.core.DatasetRef
+import filodb.core.{DatasetRef, TestData}
 import filodb.core.metadata.Dataset
 
 class ShardManagerSpec extends AkkaSpec {
@@ -35,10 +35,10 @@ class ShardManagerSpec extends AkkaSpec {
   val subscriber = TestProbe("subscriber")
 
   val noOpSource1 = IngestionSource(classOf[NoOpStreamFactory].getName)
-  val setupDs1 = SetupDataset(dataset1, resources1, noOpSource1)
+  val setupDs1 = SetupDataset(dataset1, resources1, noOpSource1, TestData.storeConf)
 
   val noOpSource2 = IngestionSource(classOf[NoOpStreamFactory].getName)
-  val setupDs2 = SetupDataset(dataset2, resources2, noOpSource2)
+  val setupDs2 = SetupDataset(dataset2, resources2, noOpSource2, TestData.storeConf)
 
 
   def uniqueAddress(probe: ActorRef): Address =

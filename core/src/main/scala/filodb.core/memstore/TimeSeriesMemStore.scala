@@ -23,7 +23,6 @@ extends MemStore with StrictLogging {
 
   type Shards = NonBlockingHashMapLong[TimeSeriesShard]
   private val datasets = new HashMap[DatasetRef, Shards]
-  val numGroups = config.getInt("memstore.groups-per-shard")
   val maxPartitionsToRecover = config.getInt("memstore.max-partitions-to-recover")
 
   val stats = new ChunkSourceStats
@@ -35,12 +34,12 @@ extends MemStore with StrictLogging {
   }
 
   // TODO: Change the API to return Unit Or ShardAlreadySetup, instead of throwing.  Make idempotent.
-  def setup(dataset: Dataset, shard: Int): Unit = synchronized {
+  def setup(dataset: Dataset, shard: Int, storeConf: StoreConfig): Unit = synchronized {
     val shards = datasets.getOrElseUpdate(dataset.ref, new NonBlockingHashMapLong[TimeSeriesShard](32, false))
     if (shards contains shard) {
       throw ShardAlreadySetup(dataset.ref, shard)
     } else {
-      val tsdb = new TimeSeriesShard(dataset, config, shard, sink, metastore, partEvictionPolicy)
+      val tsdb = new TimeSeriesShard(dataset, storeConf, shard, sink, metastore, partEvictionPolicy)
       shards.put(shard, tsdb)
     }
   }

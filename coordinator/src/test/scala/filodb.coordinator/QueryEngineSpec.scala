@@ -16,7 +16,7 @@ import filodb.coordinator.client.LogicalPlan
 import filodb.coordinator.client.QueryCommands.KeyRangeQuery
 import filodb.coordinator.queryengine.Engine
 import filodb.coordinator.queryengine.Engine.ExecArgs
-import filodb.core.{DatasetRef, MachineMetricsData}
+import filodb.core.{DatasetRef, MachineMetricsData, TestData}
 import filodb.core.metadata.{Column, Dataset}
 import filodb.core.query._
 
@@ -92,7 +92,7 @@ class QueryEngineSpec  extends ActorTest(QueryEngineSpec.getNewSystem)
   def startIngestion(dataset: Dataset, numShards: Int): Unit = {
     val resources = DatasetResourceSpec(numShards, 1)
     val noOpSource = IngestionSource(classOf[NoOpStreamFactory].getName)
-    val sd = SetupDataset(dataset.ref, resources, noOpSource)
+    val sd = SetupDataset(dataset.ref, resources, noOpSource, TestData.storeConf)
     shardManager.addDataset(sd, dataset, self)
     shardManager.subscribe(probe.ref, dataset.ref)
     probe.expectMsgPF() { case CurrentShardSnapshot(ds, mapper) =>

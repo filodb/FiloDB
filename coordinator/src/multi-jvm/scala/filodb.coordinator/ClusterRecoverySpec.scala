@@ -54,11 +54,12 @@ abstract class ClusterRecoverySpec extends ClusterSpec(ClusterRecoverySpecConfig
                                                    batch-size = 10
                                                    noflush = true
                                                    resource = "/GDELT-sample-test.csv"
-                                                   """)
+                                                   """).withFallback(TestData.sourceConf)
   val shards = 2
   private val setup = SetupDataset(dataset6.ref,
                                    DatasetResourceSpec(shards, shards),
-                                   IngestionSource(classOf[CsvStreamFactory].getName, sourceConfig))
+                                   IngestionSource(classOf[CsvStreamFactory].getName, sourceConfig),
+                                   TestData.storeConf)
 
   metaStore.newDataset(dataset6).futureValue shouldEqual Success
   metaStore.writeIngestionConfig(setup.config).futureValue shouldEqual Success

@@ -9,7 +9,7 @@ import ch.qos.logback.classic.{Level, Logger}
 import com.typesafe.config.ConfigFactory
 import org.openjdk.jmh.annotations._
 
-import filodb.core.MachineMetricsData
+import filodb.core.{MachineMetricsData, TestData}
 import filodb.core.memstore.TimeSeriesMemStore
 import filodb.core.query._
 import filodb.core.store.{FilteredPartitionScan, InMemoryMetaStore, NullColumnStore, QuerySpec, RowKeyChunkScan}
@@ -34,7 +34,7 @@ class AggregationBenchmark {
   val endTs   = startTs + 1000 * numPoints
 
   // Ingest raw data
-  memStore.setup(dataset1, 0)
+  memStore.setup(dataset1, 0, TestData.storeConf)
   val data = records(linearMultiSeries(startTs)).take(numPoints)
   memStore.ingest(dataset1.ref, 0, data)
   val split = memStore.getScanSplits(dataset1.ref, 1).head

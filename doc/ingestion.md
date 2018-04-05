@@ -14,11 +14,13 @@
 # FiloDB
 
 ## Ingestion
-FiloDB allows multiple topics/streams to be ingested simultaneously.
+FiloDB allows multiple topics/streams to be ingested simultaneously.  Each stream may have different source configuration as well as MemStore / memory / chunking configuration.
 
 ### Kafka Ingestion
-Each dataset has multiple streams, one per shard.
-The config to be passed in defines the Kafka broker, topic, and other settings, one config per dataset/stream.
+Each FiloDB dataset/stream is sharded, with one shard equal to a Kafka partition, and each stream corresponding to a different Kafka topic.  In fact each stream can be configured to come from different brokers and have different store characteristics.  For example:
+
+* Dataset A - high value aggregate time series:  topic aggregates, flush every hour, 500M storage per shard
+* Dataset B - lower importance time series, higher volume:  topic prod_all, flush every 3 hours, 2GB storage per shard
 
 #### Basic Configuration
 Create your custom source config file, e.g. [example-source.conf](../kafka/src/main/resources/example-source.conf)
@@ -48,6 +50,31 @@ sourceconfig {
   # optional etc.
   partitioner.class = "com.example.OptionalCustomPartitioner"
   group.id = "org.example.cluster1.filodb.consumer1"
+
+  # Values controlling in-memory store chunking, flushing, etc.
+  store {
+    # Interval it takes to flush ALL time series in a shard.  This time is further divided by groups-per-shard
+    flush-interval = 2 minutes
+
+    # TTL for on-disk / C* data.  Data older than this may be purged.
+    disk-time-to-live = 3 days
+
+    # amount of time paged chunks should be retained in memory
+    demand-paged-chunk-retention-period = 72 hours
+
+    max-chunks-size = 500
+
+    # Fixed amount of memory, in MBs, to allocate for encoded chunks per shard
+    shard-memory-mb = 512
+
+    # Max # of partitions or time series the WriteBufferPool can allocate and that can be ingested at a time
+    max-num-partitions = 100000
+
+    # Number of subgroups within each shard.  Persistence to a ChunkSink occurs one subgroup at a time, as does
+    # recovery from failure.  This many batches of flushes must occur to cover persistence of every partition
+    groups-per-shard = 60
+  }
+
 }
 ```
 The [defaults](../kafka/src/main/resources/filodb-defaults.conf) you can override and see

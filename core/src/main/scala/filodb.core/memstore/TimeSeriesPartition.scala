@@ -1,11 +1,9 @@
 package filodb.core.memstore
 
 import java.lang.management.ManagementFactory
-import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.ConcurrentSkipListMap
 
-import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
 import monix.execution.Scheduler
 import monix.reactive.Observable
@@ -55,7 +53,6 @@ class TimeSeriesPartition(val partID: Int,
                           val shard: Int,
                           val chunkSource: ChunkSource,
                           bufferPool: WriteBufferPool,
-                          config: Config,
                           skipDemandPaging: Boolean,
                           pagedChunkStore: DemandPagedChunkStore,
                           val shardStats: TimeSeriesShardStats)
@@ -103,11 +100,6 @@ class TimeSeriesPartition(val partID: Int,
   private final val numColumns = dataset.dataColumns.length
 
   private val jvmStartTime = ManagementFactory.getRuntimeMXBean.getStartTime
-
-  // TODO data retention has not been implemented as a feature yet.
-  private val chunkRetentionMillis = config.getDuration("memstore.demand-paged-chunk-retention-period",
-    TimeUnit.MILLISECONDS)
-
   private val partitionLoadedFromPersistentStore = new AtomicBoolean(skipDemandPaging)
 
   /**
@@ -314,8 +306,8 @@ class TimeSeriesPartition(val partID: Int,
       true
     } else {
       val timeSinceStart = System.currentTimeMillis - jvmStartTime
-      if (timeSinceStart > chunkRetentionMillis) partitionLoadedFromPersistentStore.set(true)
-      timeSinceStart > chunkRetentionMillis
+      if (timeSinceStart > pagedChunkStore.retentionMillis) partitionLoadedFromPersistentStore.set(true)
+      timeSinceStart > pagedChunkStore.retentionMillis
     }
   }
 
@@ -398,7 +390,7 @@ class TimeSeriesPartition(val partID: Int,
     val colStoreScan = dataset.timestampColumn match {
       case Some(tsCol) =>
         // scan colStore since retention (ex, 72) hours ago until (not including) first key in memstore
-        val from = BinaryRecord(dataset, Seq(System.currentTimeMillis() - chunkRetentionMillis))
+        val from = BinaryRecord(dataset, Seq(System.currentTimeMillis() - pagedChunkStore.retentionMillis))
         val toL = infosChunks.values.asScala.headOption.flatMap { v =>
           if (v.info.firstKey.isEmpty) None else Some(v.info.firstKey.getLong(tsCol.id) - 1)
         }

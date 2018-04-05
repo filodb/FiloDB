@@ -3,6 +3,7 @@ package filodb.coordinator.client
 import filodb.core._
 import filodb.core.memstore.IngestRecord
 import filodb.core.metadata.Dataset
+import filodb.core.store.StoreConfig
 
 // Public, external Actor/Akka API for NodeCoordinatorActor, so every incoming command should be a NodeCommand
 sealed trait NodeCommand
@@ -60,8 +61,9 @@ object IngestionCommands {
    * @return no response. Instead the ClusterActor will get an update to the node status when ingestion
    *                      and querying are ready.
    */
-  final case class DatasetSetup(compactDatasetStr: String,
-                                source: IngestionSource = noOpSource) extends NodeCommand
+  private[coordinator] final case class DatasetSetup(compactDatasetStr: String,
+                                                     storeConfig: StoreConfig,
+                                                     source: IngestionSource = noOpSource) extends NodeCommand
 
   /**
    * Ingests a new set of rows for a given dataset and version.

@@ -99,6 +99,9 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
     }
   }
 
+  private def stripStoreConf(c: IngestionConfig): IngestionConfig =
+    c.copy(streamConfig = c.streamConfig.withoutPath("store"))
+
   describe("IngestionConfig API") {
     val config1 = ConfigFactory.parseString("""brokers=["foo.bar.com:1234", "foo.baz.com:5678"]
                                               |auto.offset.commit=false""".stripMargin)
@@ -107,8 +110,8 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
                                                  min-num-nodes=16""")
     val resource2 = ConfigFactory.parseString("""num-shards=50
                                                  min-num-nodes=10""")
-    val source1 = IngestionConfig(dataset.ref, resource1, factory1, config1)
-    val source2 = IngestionConfig(DatasetRef("juju"), resource2, factory1, config1)
+    val source1 = IngestionConfig(dataset.ref, resource1, factory1, config1, TestData.storeConf)
+    val source2 = IngestionConfig(DatasetRef("juju"), resource2, factory1, config1, TestData.storeConf)
 
     it("should return Nil if no IngestionConfig persisted yet") {
       metaStore.readIngestionConfigs().futureValue shouldEqual Nil
@@ -116,32 +119,36 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
 
     it("should write and read back IngestionConfigs") {
       metaStore.writeIngestionConfig(source1).futureValue shouldEqual Success
-      metaStore.readIngestionConfigs().futureValue shouldEqual Seq(source1)
+      metaStore.readIngestionConfigs().futureValue.map(stripStoreConf) shouldEqual Seq(source1)
 
       metaStore.writeIngestionConfig(source2).futureValue shouldEqual Success
-      metaStore.readIngestionConfigs().futureValue.toSet shouldEqual Set(source1, source2)
+      metaStore.readIngestionConfigs().futureValue.map(stripStoreConf).toSet shouldEqual Set(source1, source2)
     }
 
     it("should be able to delete ingestion configs") {
       metaStore.deleteIngestionConfig(dataset.ref).futureValue shouldEqual NotFound
 
       metaStore.writeIngestionConfig(source1).futureValue shouldEqual Success
-      metaStore.readIngestionConfigs().futureValue shouldEqual Seq(source1)
+      metaStore.readIngestionConfigs().futureValue.map(stripStoreConf) shouldEqual Seq(source1)
 
       metaStore.deleteIngestionConfig(dataset.ref).futureValue shouldEqual Success
-      metaStore.readIngestionConfigs().futureValue shouldEqual Nil
+      metaStore.readIngestionConfigs().futureValue.map(stripStoreConf) shouldEqual Nil
     }
 
-    it("should be able to parse source config with no sourceFactory and sourceConfig") {
+    it("should be able to parse source config with no sourceFactory") {
       val sourceConf = """
                        |dataset = "gdelt"
                        |num-shards = 32   # for Kafka this should match the number of partitions
                        |min-num-nodes = 10     # This many nodes needed to ingest all shards
-                       """.stripMargin
+                       |sourceconfig {
+                       |  store {
+                       |    flush-interval = 5m
+                       |    shard-memory-mb = 500
+                       |}}""".stripMargin
       val ingestionConfig = IngestionConfig(sourceConf, "a.backup").get
       ingestionConfig.ref shouldEqual DatasetRef("gdelt")
       ingestionConfig.streamFactoryClass shouldEqual "a.backup"
-      ingestionConfig.streamConfig.isEmpty shouldEqual true
+      ingestionConfig.streamConfig.isEmpty shouldEqual false
     }
 
     it("should be able to parse for IngestionConfig with sourceconfig") {
@@ -156,6 +163,10 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
                          |  value.deserializer=com.apple.pie.filodb.timeseries.TimeSeriesDeserializer
                          |  group.id = "org.example.app.consumer.group1"
                          |  my.custom.key = "custom.value"
+                         |  store {
+                         |    flush-interval = 5m
+                         |    shard-memory-mb = 500
+                         |  }
                          |}
                        """.stripMargin
 

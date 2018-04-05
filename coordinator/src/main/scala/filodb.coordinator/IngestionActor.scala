@@ -2,7 +2,6 @@ package filodb.coordinator
 
 import scala.collection.mutable.HashMap
 import scala.concurrent.Future
-import scala.concurrent.duration._
 import scala.util.{Failure, Success, Try}
 import scala.util.control.NonFatal
 
@@ -16,6 +15,7 @@ import net.ceedubs.ficus.Ficus._
 import filodb.core.{DatasetRef, Iterators}
 import filodb.core.memstore._
 import filodb.core.metadata.Dataset
+import filodb.core.store.StoreConfig
 
 object IngestionActor {
   final case class IngestRows(ackTo: ActorRef, shard: Int, records: Seq[IngestRecord])
@@ -27,8 +27,9 @@ object IngestionActor {
   def props(dataset: Dataset,
             memStore: MemStore,
             source: NodeClusterActor.IngestionSource,
+            storeConfig: StoreConfig,
             statusActor: ActorRef)(implicit sched: Scheduler): Props =
-    Props(new IngestionActor(dataset, memStore, source, statusActor)(sched))
+    Props(new IngestionActor(dataset, memStore, source, storeConfig, statusActor)(sched))
 }
 
 /**
@@ -43,12 +44,14 @@ object IngestionActor {
   *
   * ERROR HANDLING: currently any error in ingestion stream or memstore ingestion wll stop the ingestion
   *
+  * @param storeConfig IngestionConfig.storeConfig, the store section of the source configuration
   * @param statusActor the actor to which to forward ShardEvents for status updates
   * @param sched a Scheduler for running ingestion stream Observables
   */
 private[filodb] final class IngestionActor(dataset: Dataset,
                                            memStore: MemStore,
                                            source: NodeClusterActor.IngestionSource,
+                                           storeConfig: StoreConfig,
                                            statusActor: ActorRef)
                                           (implicit sched: Scheduler) extends BaseActor {
 
@@ -58,17 +61,13 @@ private[filodb] final class IngestionActor(dataset: Dataset,
   final val streams = new HashMap[Int, IngestionStream]
 
   // Params for creating the default memStore flush scheduler
-  // TODO: eventually make the flush scheduler pluggable based on the source config
-  private final val chunkDuration = source.config.as[Option[FiniteDuration]]("chunk-duration").getOrElse(1.hour)
-  private final val DefaultTTL = 259200
-  private final val diskTimeToLive = source.config.as[Option[FiniteDuration]]("disk-time-to-live-seconds")
-                                      .map(_.toSeconds.toInt).getOrElse(DefaultTTL)
+  private final val numGroups = storeConfig.groupsPerShard
 
   // TODO: add and remove per-shard ingestion sources?
   // For now just start it up one time and kill the actor if it fails
   val ctor = Class.forName(source.streamFactoryClass).getConstructors.head
   val streamFactory = ctor.newInstance().asInstanceOf[IngestionStreamFactory]
-  logger.info(s"Using stream factory $streamFactory with config ${source.config}")
+  logger.info(s"Using stream factory $streamFactory with config ${source.config}, storeConfig $storeConfig")
 
   override def postStop(): Unit = {
     super.postStop() // <- logs shutting down
@@ -92,7 +91,7 @@ private[filodb] final class IngestionActor(dataset: Dataset,
     */
   private def start(e: StartShardIngestion, origin: ActorRef): Unit =
     if (invalid(e.ref)) handleInvalid(e, Some(origin)) else {
-      try memStore.setup(dataset, e.shard) catch {
+      try memStore.setup(dataset, e.shard, storeConfig) catch {
         case ShardAlreadySetup(ds, shard) =>
           logger.warn(s"Dataset $ds shard $shard already setup, skipping....")
           return
@@ -104,7 +103,7 @@ private[filodb] final class IngestionActor(dataset: Dataset,
       yield {
         if (checkpoints.isEmpty) {
           // Start normal ingestion with no recovery checkpoint and flush group 0 first
-          normalIngestion(e.shard, None, 0, diskTimeToLive)
+          normalIngestion(e.shard, None, 0, storeConfig.diskTTLSeconds)
         } else {
           // Figure out recovery end watermark and intervals.  The reportingInterval is the interval at which
           // offsets come back from the MemStore for us to report progress.
@@ -118,7 +117,8 @@ private[filodb] final class IngestionActor(dataset: Dataset,
                                          checkpoints) }
           yield {
             // Start reading past last offset for normal records; start flushes one group past last group
-            normalIngestion(e.shard, Some(lastOffset + 1), (lastFlushedGroup + 1) % memStore.numGroups, diskTimeToLive)
+            normalIngestion(e.shard, Some(lastOffset + 1), (lastFlushedGroup + 1) % numGroups,
+                            storeConfig.diskTTLSeconds)
           }
         }
       }
@@ -133,7 +133,7 @@ private[filodb] final class IngestionActor(dataset: Dataset,
     if (source.config.as[Option[Boolean]]("noflush").getOrElse(false)) {
       FlushStream.empty
     } else {
-      FlushStream.interval(memStore.numGroups, chunkDuration / memStore.numGroups, startGroupNo)
+      FlushStream.interval(numGroups, storeConfig.flushInterval / numGroups, startGroupNo)
     }
   }
 

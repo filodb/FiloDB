@@ -70,7 +70,6 @@ abstract class IngestionAndRecoverySpec extends StandaloneMultiJvmSpec(Ingestion
   val cluster = FilodbCluster(system)
   val metaStore = cluster.metaStore
   val colStore = cluster.memStore.sink
-  val numGroupsPerShard = cluster.settings.allConfig.getInt("filodb.memstore.groups-per-shard")
 
   // Test fields
   var query1Response: Double = 0

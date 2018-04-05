@@ -2,6 +2,7 @@ package filodb.core
 
 import scala.io.Source
 
+import com.typesafe.config.ConfigFactory
 import monix.reactive.Observable
 import org.joda.time.DateTime
 
@@ -19,6 +20,19 @@ object TestData {
                        rows: Seq[RowReader],
                        rowsPerChunk: Int = 10): Observable[ChunkSet] =
     Observable.fromIterator(rows.grouped(rowsPerChunk).map { chunkRows => ChunkSet(ds, part, chunkRows) })
+
+  val sourceConf = ConfigFactory.parseString("""
+    store {
+      max-chunks-size = 100
+      demand-paged-chunk-retention-period = 10 hours
+      shard-memory-mb = 100
+      groups-per-shard = 4
+      max-num-partitions = 250
+      flush-interval = 10 minutes
+    }
+  """)
+
+  val storeConf = StoreConfig(sourceConf.getConfig("store"))
 }
 
 object NamesTestData {

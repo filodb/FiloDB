@@ -90,7 +90,7 @@ abstract class NodeClusterSpec extends ClusterSpec(NodeClusterSpecConfig) {
       clusterActor ! GetShardMap(ref)
       expectMsg(DatasetUnknown(ref))
 
-      clusterActor ! SetupDataset(DatasetRef("noColumns"), spec, noOpSource)
+      clusterActor ! SetupDataset(DatasetRef("noColumns"), spec, noOpSource, TestData.storeConf)
       expectMsg(DatasetUnknown(DatasetRef("noColumns")))
     }
   }
@@ -101,7 +101,7 @@ abstract class NodeClusterSpec extends ClusterSpec(NodeClusterSpecConfig) {
   it("should setup dataset on all nodes for valid dataset and get ShardMap updates") {
     runOn(first) {
       val noOpSource = IngestionSource(classOf[NoOpStreamFactory].getName)
-      val command = SetupDataset(dataset6.ref, spec, noOpSource)
+      val command = SetupDataset(dataset6.ref, spec, noOpSource, TestData.storeConf)
 
       clusterActor ! command
       expectMsg(DatasetVerified)

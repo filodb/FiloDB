@@ -51,7 +51,8 @@ class DemandPagedChunkStore(dataset: Dataset,
 
   // initialize the time bucket ranges and index to be able to look up reclaimOrder from timestamps quickly
   private val jvmStartTime = ManagementFactory.getRuntimeMXBean.getStartTime
-  val retentionStart = jvmStartTime - chunkRetentionHours.hours.toMillis
+  val retentionMillis = chunkRetentionHours.hours.toMillis
+  val retentionStart = jvmStartTime - retentionMillis
 
   // schedule cleanup task
   scheduler.scheduleOnce(chunkRetentionHours.hours)(cleanupAndDisableOnDemandPaging)

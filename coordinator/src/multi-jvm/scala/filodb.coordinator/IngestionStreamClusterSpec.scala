@@ -18,10 +18,7 @@ object IngestionStreamClusterSpecConfig extends MultiNodeConfig {
   // this configuration will be used for all nodes
   // Override the memtable write interval and chunksize so that it will get back to us immediately
   // Otherwise default of 5s for write interval will kick in, making tests take a long time
-  val globalConfig = ConfigFactory.parseString("""filodb.memtable.write.interval = 500 ms
-                                                 |filodb.memtable.filo.chunksize = 70
-                                                 |filodb.memtable.max-rows-per-table = 70""".stripMargin)
-                       .withFallback(ConfigFactory.parseResources("application_test.conf"))
+  val globalConfig = ConfigFactory.parseResources("application_test.conf")
                        .withFallback(ConfigFactory.load("filodb-defaults.conf"))
   commonConfig(globalConfig)
 }
@@ -72,7 +69,7 @@ abstract class IngestionStreamClusterSpec extends ClusterSpec(IngestionStreamClu
     runOn(first) {
       // Empty ingestion source - we're going to pump in records ourselves
       // 4 shards, 2 nodes, 2 nodes per shard
-      val msg = SetupDataset(dataset6.ref, resources, noOpSource)
+      val msg = SetupDataset(dataset6.ref, resources, noOpSource, TestData.storeConf)
       clusterActor ! msg
       // It takes a _really_ long time for the cluster actor singleton to start.
       expectMsg(30.seconds.dilated, DatasetVerified)
@@ -100,7 +97,7 @@ abstract class IngestionStreamClusterSpec extends ClusterSpec(IngestionStreamClu
       val config = ConfigFactory.parseString(s"""header = true
                                              batch-size = 10
                                              resource = "/GDELT-sample-test.csv"
-                                             """)
+                                             """).withFallback(TestData.sourceConf)
       val stream = (new CsvStreamFactory).create(config, dataset6, 0, None)
 
       // Now, route records to all different shards and nodes across cluster

@@ -8,7 +8,7 @@ import monix.reactive.Observable
 import filodb.core.{DatasetRef, ErrorResponse, Response}
 import filodb.core.metadata.{Column, Dataset}
 import filodb.core.metadata.Column.ColumnType._
-import filodb.core.store.{ChunkSink, ChunkSource, MetaStore}
+import filodb.core.store.{ChunkSink, ChunkSource, MetaStore, StoreConfig}
 import filodb.memory.MemFactory
 import filodb.memory.format.{vectors => bv, _}
 
@@ -44,9 +44,11 @@ trait MemStore extends ChunkSource {
    * Sets up one shard of a dataset for ingestion and the schema to be used when ingesting.
    * Once set up, the schema may not be changed.  The schema should be the same for all shards.
    * This method only succeeds if the dataset and shard has not already been setup.
+   * @param storeConf the store configuration for that dataset.  Each dataset may have a different mem config.
+   *                  See sourceconfig.store section in conf/timeseries-dev-source.conf
    * @throws ShardAlreadySetup
    */
-  def setup(dataset: Dataset, shard: Int): Unit
+  def setup(dataset: Dataset, shard: Int, storeConf: StoreConfig): Unit
 
   /**
    * Ingests new rows, making them immediately available for reads
@@ -150,11 +152,6 @@ trait MemStore extends ChunkSource {
 
   def numRowsIngested(dataset: DatasetRef): Long =
     activeShards(dataset).map(s => numRowsIngested(dataset, s)).sum
-
-  /**
-   * Number of ingestion subgroups per shard
-   */
-  def numGroups: Int
 
   /**
    * Returns the latest offset of a given shard

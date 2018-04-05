@@ -152,6 +152,8 @@ First set up the dataset. This should create the keyspaces and tables in Cassand
 ```
 Verify that tables were created in `filodb` and `filodb-admin` keyspaces.
 
+NOTE: if you have already gone through the procedure above, you may need to clear out the existing metadata: `./filo-cli -Dconfig.file=conf/timeseries-filodb-server.conf --command clearMetadata`, then repeat the steps above.  Otherwise you will not be in a clean state and may have stale schemas especially if the code has changed.
+
 The script below brings up the FiloDB Dev Standalone server, and then sets up the timeseries dataset (NOTE: if you previously started FiloDB and have not cleared the metadata, then the -s is not needed as FiloDB will recover previous ingestion configs from Cassandra)
 
 ```
@@ -233,8 +235,8 @@ bin/kafka-topics.sh --create --zookeeper localhost:2181 --replication-factor 1 -
 Start two servers as follows. This will not start ingestion yet:
 
 ```bash
-./filodb-dev-start.sh -c conf/timeseries-128shards-server.conf -l 1
-./filodb-dev-start.sh -c conf/timeseries-128shards-server.conf -l 2 -p
+./filodb-dev-start.sh -l 1
+./filodb-dev-start.sh -l 2 -p
 ```
 
 Set up ingestion:

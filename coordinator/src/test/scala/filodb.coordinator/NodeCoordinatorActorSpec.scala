@@ -96,8 +96,8 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
 
   def startIngestion(dataset: Dataset, numShards: Int): Unit = {
     val resources = DatasetResourceSpec(numShards, 1)
-    val noOpSource = IngestionSource(classOf[NoOpStreamFactory].getName)
-    val sd = SetupDataset(dataset.ref, resources, noOpSource)
+    val noOpSource = IngestionSource(classOf[NoOpStreamFactory].getName, TestData.sourceConf)
+    val sd = SetupDataset(dataset.ref, resources, noOpSource, TestData.storeConf)
     shardManager.addDataset(sd, dataset, self)
     shardManager.subscribe(probe.ref, dataset.ref)
     probe.expectMsgPF() { case CurrentShardSnapshot(ds, mapper) =>
@@ -227,7 +227,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       // No need to initialize ingestion, because this test doesn't query data itself
 
       val ref4 = dataset4.ref
-      probe.send(coordinatorActor, DatasetSetup(dataset4.asCompactString))
+      probe.send(coordinatorActor, DatasetSetup(dataset4.asCompactString, TestData.storeConf))
 
       // case 1: scan all data in partition, but no timestamp column ->
       val q1 = LogicalPlanQuery(ref4, simpleAgg("time_group_avg", childPlan=

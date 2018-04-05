@@ -13,7 +13,7 @@ import com.typesafe.config.{Config, ConfigFactory}
 
 import filodb.core._
 import filodb.core.metadata.Dataset
-import filodb.core.store.{IngestionConfig, MetaStore}
+import filodb.core.store.{IngestionConfig, MetaStore, StoreConfig}
 
 object NodeClusterActor {
 
@@ -43,25 +43,29 @@ object NodeClusterActor {
    * @param resources the sharding and number of nodes for ingestion and querying
    * @param source the IngestionSource on each node.  Use noOpSource to not start ingestion and
    *               manually push records into NodeCoordinator.
+   * @param storeConfig a StoreConfig for the MemStore.
    * @return DatasetVerified - meaning the dataset and columns are valid.  Does not mean ingestion is
    *                           setup on all nodes - for that, subscribe to ShardMapUpdate's
    */
   final case class SetupDataset(ref: DatasetRef,
                                 resources: DatasetResourceSpec,
-                                source: IngestionSource) {
+                                source: IngestionSource,
+                                storeConfig: StoreConfig) {
     import collection.JavaConverters._
     val resourceConfig = ConfigFactory.parseMap(
       Map("num-shards" -> resources.numShards, "min-num-nodes" -> resources.minNumNodes).asJava)
     val config = IngestionConfig(ref, resourceConfig,
                                  source.streamFactoryClass,
-                                 source.config)
+                                 source.config,
+                                 storeConfig)
   }
 
   object SetupDataset {
     def apply(source: IngestionConfig): SetupDataset =
       SetupDataset(source.ref,
                    DatasetResourceSpec(source.numShards, source.minNumNodes),
-                   IngestionSource(source.streamFactoryClass, source.streamConfig))
+                   IngestionSource(source.streamFactoryClass, source.streamConfig),
+                   source.storeConfig)
   }
 
   // A dummy source to use for tests and when you just want to push new records in

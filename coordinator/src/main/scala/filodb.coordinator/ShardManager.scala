@@ -9,6 +9,7 @@ import com.typesafe.scalalogging.StrictLogging
 import filodb.coordinator.NodeClusterActor._
 import filodb.core.DatasetRef
 import filodb.core.metadata.Dataset
+import filodb.core.store.StoreConfig
 
 /**
   * NodeClusterActor delegates shard management business logic to this class.
@@ -197,7 +198,7 @@ private[coordinator] final class ShardManager(strategy: ShardAssignmentStrategy)
         val metrics = new ShardHealthStats(setup.ref, _shardMappers(dataset.ref))
         val resources = setup.resources
         val source = setup.source
-        val state = DatasetInfo(resources, metrics, source, dataset)
+        val state = DatasetInfo(resources, metrics, source, setup.storeConfig, dataset)
         _datasetInfo(dataset.ref) = state
 
         // NOTE: no snapshots get published here because nobody subscribed to this dataset yet
@@ -285,7 +286,7 @@ private[coordinator] final class ShardManager(strategy: ShardAssignmentStrategy)
                                               shards: Seq[Int]): Unit = {
     val state = _datasetInfo(dataset)
     logger.info(s"Sending setup message for ${state.dataset.ref} to coordinators $coord.")
-    val setupMsg = client.IngestionCommands.DatasetSetup(state.dataset.asCompactString, state.source)
+    val setupMsg = client.IngestionCommands.DatasetSetup(state.dataset.asCompactString, state.storeConfig, state.source)
     coord ! setupMsg
 
     for { shard <- shards }  {
@@ -341,9 +342,9 @@ private[coordinator] final class ShardManager(strategy: ShardAssignmentStrategy)
 }
 
 private[coordinator] object ShardManager {
-
   final case class DatasetInfo(resources: DatasetResourceSpec,
                                metrics: ShardHealthStats,
                                source: IngestionSource,
+                               storeConfig: StoreConfig,
                                dataset: Dataset)
 }

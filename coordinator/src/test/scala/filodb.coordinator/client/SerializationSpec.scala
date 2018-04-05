@@ -1,10 +1,7 @@
 package filodb.coordinator.client
 
-import java.util.concurrent.TimeUnit
-
 import akka.actor.ActorRef
 import akka.serialization.SerializationExtension
-import com.typesafe.config.ConfigFactory
 import org.scalatest.concurrent.ScalaFutures
 
 import filodb.coordinator.{ActorSpecConfig, ActorTest, NodeClusterActor, ShardMapper}
@@ -43,7 +40,7 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
   }
 
   it("should be able to serialize different IngestionCommands messages") {
-    val setupMsg = DatasetSetup(dataset.asCompactString)
+    val setupMsg = DatasetSetup(dataset.asCompactString, TestData.storeConf)
     Seq(setupMsg,
         IngestionCommands.UnknownDataset,
         BadSchema("no match foo blah"),
@@ -51,7 +48,6 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
   }
 
   it("should be able to serialize IngestionConfig, SetupDataset, DatasetResourceSpec, IngestionSource") {
-
     val source1 = s"""
                        |dataset = ${dataset.name}
                        |num-shards = 128
@@ -63,6 +59,10 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
                        |  value.deserializer=com.apple.pie.filodb.timeseries.TimeSeriesDeserializer
                        |  group.id = "org.example.app.consumer.group1"
                        |  my.custom.key = "custom.value"
+                       |  store {
+                       |    flush-interval = 5m
+                       |    shard-memory-mb = 500
+                       |  }
                        |}
                      """.stripMargin
 
@@ -70,18 +70,36 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
                     |dataset = "gdelt"
                     |num-shards = 32
                     |min-num-nodes = 10
+                    |sourceconfig {
+                    |  store {
+                    |    flush-interval = 5m
+                    |    shard-memory-mb = 500
+                    |  }
+                    |}
                   """.stripMargin
 
     val source3 = """
                     |dataset = "a.b.c"
                     |num-shards = 32
                     |min-num-nodes = 10
+                    |sourceconfig {
+                    |  store {
+                    |    flush-interval = 5m
+                    |    shard-memory-mb = 500
+                    |  }
+                    |}
                   """.stripMargin
 
     val source4 = """
                     |dataset = "a-b-c"
                     |num-shards = 32
                     |min-num-nodes=10
+                    |sourceconfig {
+                    |  store {
+                    |    flush-interval = 5m
+                    |    shard-memory-mb = 500
+                    |  }
+                    |}
                   """.stripMargin
 
     val command1 = SetupDataset(IngestionConfig(source1, "a.backup").get)
@@ -189,13 +207,12 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
   it("should be able to serialize writable buffers as part of VectorListResult") {
     import MachineMetricsData._
     val bufferPool = new WriteBufferPool(memFactory, dataset1, 100, 50)
-    val config = ConfigFactory.load("application_test.conf").getConfig("filodb")
-    val chunkRetentionHours = config.getDuration("memstore.demand-paged-chunk-retention-period", TimeUnit.HOURS).toInt
+    val chunkRetentionHours = 10
     val blockStore = new PageAlignedBlockManager(100 * 1024 * 1024,
       new MemoryStats(Map("test"-> "test")), reclaimer, 1, chunkRetentionHours)
     val pagedChunkStore = new DemandPagedChunkStore(dataset1, blockStore, 12, chunkRetentionHours, 1)
     val ingestBlockHolder = new BlockMemFactory(blockStore, None, 12, true)
-    val part = new TimeSeriesPartition(0, dataset1, defaultPartKey, 0, colStore, bufferPool, config, false,
+    val part = new TimeSeriesPartition(0, dataset1, defaultPartKey, 0, colStore, bufferPool, false,
           pagedChunkStore,  new TimeSeriesShardStats(dataset1.ref, 0))
     val data = singleSeriesReaders().take(10)
     data.zipWithIndex.foreach { case (r, i) => part.ingest(r, 1000L + i, ingestBlockHolder) }

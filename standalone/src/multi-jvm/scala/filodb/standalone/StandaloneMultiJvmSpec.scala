@@ -18,6 +18,7 @@ import filodb.coordinator.NodeClusterActor.{DatasetResourceSpec, IngestionSource
 import filodb.core.metadata.Column.ColumnType.DoubleColumn
 import filodb.core.query.Filter.Equals
 import filodb.core.query._
+import filodb.core.store.StoreConfig
 import filodb.core.{DatasetRef, ErrorResponse}
 
 /**
@@ -44,10 +45,12 @@ abstract class StandaloneMultiJvmSpec(config: MultiNodeConfig) extends MultiNode
   val numShards = source.as[Int]("num-shards")
   val resourceSpec = DatasetResourceSpec(numShards, source.as[Int]("min-num-nodes"))
   val sourceconfig = source.getConfig("sourceconfig")
+  val storeConf = StoreConfig(sourceconfig.getConfig("store"))
   val ingestionSource = source.as[Option[String]]("sourcefactory").map { factory =>
     IngestionSource(factory, sourceconfig)
   }.get
-  val chunkDuration = sourceconfig.as[FiniteDuration]("chunk-duration")
+  val chunkDuration = storeConf.flushInterval
+  val numGroupsPerShard = storeConf.groupsPerShard
 
   override def beforeAll(): Unit = multiNodeSpecBeforeAll()
 
@@ -121,7 +124,7 @@ abstract class StandaloneMultiJvmSpec(config: MultiNodeConfig) extends MultiNode
     }
 
   def setupDataset(client: LocalClient): Unit = {
-    client.setupDataset(dataset, resourceSpec, ingestionSource).foreach {
+    client.setupDataset(dataset, resourceSpec, ingestionSource, storeConf).foreach {
       e: ErrorResponse => fail(s"Errors setting up dataset $dataset: $e")
     }
   }

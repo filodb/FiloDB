@@ -6,7 +6,8 @@ import com.datastax.driver.core.Row
 import com.typesafe.config.{Config, ConfigFactory, ConfigRenderOptions}
 
 import filodb.cassandra.{FiloCassandraConnector, FiloSessionProvider}
-import filodb.core.store.IngestionConfig
+import filodb.core.IngestionKeys
+import filodb.core.store.{IngestionConfig, StoreConfig}
 
 /**
  * Represents the "ingestionconfig" Cassandra table tracking streaming ingestion sources/definitions
@@ -31,11 +32,14 @@ sealed class IngestionConfigTable(val config: Config, val sessionProvider: FiloS
   import filodb.cassandra.Util._
   import filodb.core._
 
-  def fromRow(row: Row): IngestionConfig =
+  def fromRow(row: Row): IngestionConfig = {
+    val sourceConf = ConfigFactory.parseString(row.getString(IngestionKeys.SourceConfig))
     IngestionConfig(DatasetRef(row.getString("dataset"), Option(row.getString("database")).filter(_.length > 0)),
-                   ConfigFactory.parseString(row.getString("resources")),
-                   row.getString("factoryclass"),
-                   ConfigFactory.parseString(row.getString("sourceconfig")))
+                    ConfigFactory.parseString(row.getString(IngestionKeys.Resources)),
+                    row.getString("factoryclass"),
+                    sourceConf,
+                    StoreConfig(sourceConf.getConfig("store")))
+  }
 
   def initialize(): Future[Response] = execCql(createCql)
 
@@ -50,7 +54,7 @@ sealed class IngestionConfigTable(val config: Config, val sessionProvider: FiloS
     execStmt(insertCql.bind(state.ref.dataset, state.ref.database.getOrElse(""),
                             state.resources.root.render(ConfigRenderOptions.concise),
                             state.streamFactoryClass,
-                            state.streamConfig.root.render(ConfigRenderOptions.concise)), AlreadyExists)
+                            state.streamStoreConfig.root.render(ConfigRenderOptions.concise)), AlreadyExists)
 
   def readAllConfigs(): Future[Seq[IngestionConfig]] =
     session.executeAsync(s"SELECT * FROM $tableString")

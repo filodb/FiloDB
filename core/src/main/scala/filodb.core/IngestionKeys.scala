@@ -35,5 +35,6 @@ object IngestionKeys {
     /** Attempts to resolve configured `key`'s value to a String if exists. */
     def stringT(key: String): Try[String] = Try(c.as[String](key))
     def intT(key: String): Try[Int] = Try(c.as[Int](key))
+    def configT(key: String): Try[Config] = Try(c.getConfig(key))
   }
 }

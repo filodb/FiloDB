@@ -10,6 +10,7 @@ import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
 
 import filodb.core._
+import filodb.core.store.StoreConfig
 
 object IngestionStreamSpec extends ActorSpecConfig
 
@@ -67,16 +68,19 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem) wi
     cluster.shutdown()
   }
 
-  def setup(ref: DatasetRef, resource: String, rowsToRead: Int = 5, source: Option[IngestionSource]): Unit = {
+  def setup(ref: DatasetRef, resource: String, rowsToRead: Int = 5, source: Option[IngestionSource],
+            storeConf: Option[StoreConfig] = None): Unit = {
     val config = ConfigFactory.parseString(s"""header = true
                                            batch-size = $rowsToRead
                                            resource = $resource
                                            noflush = true
-                                           chunk-duration = 1 hour
-                                           """)
+                                           store {
+                                             flush-interval = 1 hour
+                                           }
+                                           """).withFallback(TestData.sourceConf)
 
     val ingestionSource = source.getOrElse(IngestionSource(classOf[CsvStreamFactory].getName, config))
-    val command = SetupDataset(ref, DatasetResourceSpec(1, 1), ingestionSource)
+    val command = SetupDataset(ref, DatasetResourceSpec(1, 1), ingestionSource, storeConf.getOrElse(TestData.storeConf))
     clusterActor ! command
     expectMsg(within, DatasetVerified)
 
@@ -211,7 +215,7 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem) wi
     val batchSize = 10
 
     // Empty ingestion source - we're going to pump in records ourselves
-    setup(dataset6.ref, resource, batchSize, Some(noOpSource))
+    setup(dataset6.ref, resource, batchSize, Some(noOpSource), Some(TestData.storeConf))
 
     val config = ConfigFactory.parseString(s"""header = true
                                            batch-size = $batchSize

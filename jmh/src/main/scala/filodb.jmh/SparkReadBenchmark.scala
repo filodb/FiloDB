@@ -11,6 +11,7 @@ import org.openjdk.jmh.annotations._
 
 import filodb.core.memstore.{IngestRecord, IngestRouting}
 import filodb.core.store._
+import filodb.core.TestData
 import filodb.memory.format.TupleRowReader
 import filodb.spark.{FiloDriver, FiloExecutor, FiloRelation}
 
@@ -63,7 +64,7 @@ class SparkReadBenchmark {
   // Initialize metastore
   import filodb.coordinator.client.Client._
   parse(FiloDriver.metaStore.newDataset(dataset)) { x => x }
-  FiloDriver.memStore.setup(dataset, 0)
+  FiloDriver.memStore.setup(dataset, 0, TestData.storeConf)
   val split = FiloDriver.memStore.getScanSplits(dataset.ref).head
 
   // Write raw data into MemStore

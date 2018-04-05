@@ -1,13 +1,9 @@
 package filodb.core.memstore
 
-import java.util.concurrent.TimeUnit
-
 import scala.collection.mutable.{HashMap, HashSet}
 import scala.concurrent.{ExecutionContext, Future}
-import scala.util.Try
 
 import com.googlecode.javaewah.{EWAHCompressedBitmap, IntIterator}
-import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
 import kamon.metric.MeasurementUnit
@@ -88,9 +84,11 @@ object TimeSeriesShard {
   * Each incoming time series is hashed into a group.  Each group has its own watermark.  The watermark indicates,
   * for that group, up to what offset incoming records for that group has been persisted.  At recovery time, records
   * that fall below the watermark for that group will be skipped (since they can be recovered from disk).
+  *
+  * @param config the store portion of the sourceconfig, not the global FiloDB application config
   */
 class TimeSeriesShard(dataset: Dataset,
-                      config: Config,
+                      storeConfig: StoreConfig,
                       val shardNum: Int,
                       sink: ColumnStore,
                       metastore: MetaStore,
@@ -149,18 +147,16 @@ class TimeSeriesShard(dataset: Dataset,
     }
   }
 
-  private val maxChunksSize = config.getInt("memstore.max-chunks-size")
-  private val shardMemoryMB = config.getInt("memstore.shard-memory-mb")
-  private val numPagesPerBlock = Try(config.getInt("memstore.num-block-pages")).getOrElse(1000)
-  private final val numGroups = config.getInt("memstore.groups-per-shard")
-  private val maxNumPartitions = config.getInt("memstore.max-num-partitions")
-  private val chunkRetentionHours = config.getDuration("memstore.demand-paged-chunk-retention-period",
-    TimeUnit.HOURS).toInt
+  private val maxChunksSize = storeConfig.maxChunksSize
+  private val shardMemoryMB = storeConfig.shardMemoryMB
+  private final val numGroups = storeConfig.groupsPerShard
+  private val maxNumPartitions = storeConfig.maxNumPartitions
+  private val chunkRetentionHours = (storeConfig.demandPagedRetentionPeriod.toSeconds / 3600).toInt
 
   // The off-heap block store used for encoded chunks
   protected val blockMemorySize: Long = shardMemoryMB * 1024 * 1024L
   private val blockStore = new PageAlignedBlockManager(blockMemorySize, shardStats.memoryStats, reclaimListener,
-                                                       numPagesPerBlock, chunkRetentionHours)
+                                                       storeConfig.numPagesPerBlock, chunkRetentionHours)
   private val blockFactoryPool = new BlockMemFactoryPool(blockStore, BlockMetaAllocSize)
   private val numColumns = dataset.dataColumns.size
 
@@ -379,7 +375,7 @@ class TimeSeriesShard(dataset: Dataset,
     checkAndEvictPartitions()
     val binPartKey = dataset.partKey(newPartKey)
     val newPart = new TimeSeriesPartition(nextPartitionID, dataset, binPartKey, shardNum, sink,
-                        bufferPool, config, needsPersistence, pagedChunkStore, shardStats)(queryScheduler)
+                        bufferPool, needsPersistence, pagedChunkStore, shardStats)(queryScheduler)
     keyIndex.addKey(binPartKey, nextPartitionID)
     partitions.put(nextPartitionID, newPart)
     shardStats.partitionsCreated.increment

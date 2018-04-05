@@ -1,7 +1,5 @@
 package filodb.core.memstore
 
-import java.util.concurrent.TimeUnit
-
 import scala.concurrent.Future
 
 import com.typesafe.config.ConfigFactory
@@ -23,7 +21,7 @@ class TimeSeriesPartitionSpec extends FunSpec with Matchers with BeforeAndAfter 
   import TimeSeriesShard.BlockMetaAllocSize
 
   val config = ConfigFactory.load("application_test.conf").getConfig("filodb")
-  val chunkRetentionHours = config.getDuration("memstore.demand-paged-chunk-retention-period", TimeUnit.HOURS).toInt
+  val chunkRetentionHours = 72
   // implemented by concrete test sub class
   val colStore: ColumnStore = new NullColumnStore()
 
@@ -52,7 +50,7 @@ class TimeSeriesPartitionSpec extends FunSpec with Matchers with BeforeAndAfter 
   }
 
   it("should be able to read immediately after ingesting rows") {
-    part = new TimeSeriesPartition(0, dataset1, defaultPartKey, 0, colStore, bufferPool, config,
+    part = new TimeSeriesPartition(0, dataset1, defaultPartKey, 0, colStore, bufferPool,
           false, pagedChunkStore, new TimeSeriesShardStats(dataset1.ref, 0))
     val data = singleSeriesReaders().take(5)
     part.ingest(data(0), 1000L, ingestBlockHolder)
@@ -65,7 +63,7 @@ class TimeSeriesPartitionSpec extends FunSpec with Matchers with BeforeAndAfter 
   }
 
   it("should be able to ingest new rows while flush() executing concurrently") {
-    part = new TimeSeriesPartition(0, dataset1, defaultPartKey, 0, colStore, bufferPool, config,
+    part = new TimeSeriesPartition(0, dataset1, defaultPartKey, 0, colStore, bufferPool,
                     false, pagedChunkStore, new TimeSeriesShardStats(dataset1.ref, 0))
     val data = singleSeriesReaders().take(11)
     val minData = data.map(_.getDouble(1))
@@ -110,7 +108,7 @@ class TimeSeriesPartitionSpec extends FunSpec with Matchers with BeforeAndAfter 
   }
 
   it("should reclaim blocks and evict flushed chunks properly upon reclaim") {
-     part = new TimeSeriesPartition(0, dataset1, defaultPartKey, 0, colStore, bufferPool, config,
+     part = new TimeSeriesPartition(0, dataset1, defaultPartKey, 0, colStore, bufferPool,
                         false, pagedChunkStore, new TimeSeriesShardStats(dataset1.ref, 0))
      val data = singleSeriesReaders().take(21)
      val minData = data.map(_.getDouble(1))
@@ -171,7 +169,7 @@ class TimeSeriesPartitionSpec extends FunSpec with Matchers with BeforeAndAfter 
  }
 
   it("should not switch buffers and flush when current chunks are empty") {
-    part = new TimeSeriesPartition(0, dataset1, defaultPartKey, 0, colStore, bufferPool, config, false,
+    part = new TimeSeriesPartition(0, dataset1, defaultPartKey, 0, colStore, bufferPool, false,
               pagedChunkStore, new TimeSeriesShardStats(dataset1.ref, 0))
     val data = singleSeriesReaders().take(11)
     data.zipWithIndex.foreach { case (r, i) => part.ingest(r, 1000L + i, ingestBlockHolder) }
@@ -203,7 +201,7 @@ class TimeSeriesPartitionSpec extends FunSpec with Matchers with BeforeAndAfter 
     // Ingest 10 less than maxChunkSize
     val origPoolSize = bufferPool.poolSize
 
-    part = new TimeSeriesPartition(0, dataset1, defaultPartKey, 0, colStore, bufferPool, config,
+    part = new TimeSeriesPartition(0, dataset1, defaultPartKey, 0, colStore, bufferPool,
           false, pagedChunkStore, new TimeSeriesShardStats(dataset1.ref, 0))
     val data = singleSeriesReaders().take(maxChunkSize + 10)
     data.take(maxChunkSize - 10).zipWithIndex.foreach { case (r, i) => part.ingest(r, 1000L + i, ingestBlockHolder) }
