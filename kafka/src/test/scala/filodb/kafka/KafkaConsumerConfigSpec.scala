@@ -35,7 +35,6 @@ class KafkaConsumerConfigSpec extends KafkaSpec {
            |filo-record-converter = "some.custom.RecordConverter"
            |filo-topic-name = "test"
          """.stripMargin), 0)
-      source.EnableAutoCommit shouldEqual false
       source.AutoOffsetReset shouldEqual "latest"
       source.KeyDeserializer shouldEqual classOf[LongDeserializer].getName
       source.asConfig.getString(AUTO_OFFSET_RESET_CONFIG) shouldEqual "latest"
@@ -47,10 +46,9 @@ class KafkaConsumerConfigSpec extends KafkaSpec {
     }
 
     "have the expected Config" in {
-      val source = new SourceConfig(testConfig, 2)
+      val source = new SourceConfig(testConfig, 0)
       source.IngestionTopic shouldEqual "raw_events"
       source.RecordConverterClass shouldEqual classOf[CustomRecordConverter].getName
-      source.EnableAutoCommit shouldEqual false
       source.AutoOffsetReset shouldEqual "latest"
       source.LogConfig shouldEqual false
       source.KeyDeserializer shouldEqual classOf[LongDeserializer].getName
@@ -64,7 +62,7 @@ class KafkaConsumerConfigSpec extends KafkaSpec {
     }
 
     "have the expected Properties" in {
-      val source = new SourceConfig(testConfig, 1)
+      val source = new SourceConfig(testConfig, 0)
       val props = source.asProps
       props.getProperty("my.custom.client.namespace") shouldEqual "custom.value"
       props.getProperty(AUTO_OFFSET_RESET_CONFIG) shouldEqual "latest"
@@ -75,11 +73,24 @@ class KafkaConsumerConfigSpec extends KafkaSpec {
     }
 
     "have the expected KafkaConsumerConfig" in {
-      val source = new SourceConfig(testConfig, 1)
+      val source = new SourceConfig(testConfig, 0)
       val consumerCfg = KafkaConsumerConfig(source.config.asConfig)
       consumerCfg.autoOffsetReset.toString.toLowerCase shouldEqual "latest"
       consumerCfg.enableAutoCommit shouldEqual false
       consumerCfg.bootstrapServers should be(List("localhost:9092"))
+      consumerCfg.enableAutoCommit shouldBe false
+
+      // from monix-kafka KafkaConsumerObservable v0.14
+      // monix-kafka version 0.14 KafkaConsumerObservable commits offsets even though enable.auto.commit=false
+      val shouldCommitBefore = !consumerCfg.enableAutoCommit && consumerCfg.observableCommitOrder.isBefore
+      val shouldCommitAfter = !consumerCfg.enableAutoCommit && consumerCfg.observableCommitOrder.isAfter
+      shouldCommitBefore shouldBe false
+
+      // TODO the patch:
+      // this is the issue with KafkaConsumerObservable v0.14 and its use of the kafka commit api
+      intercept[org.scalatest.exceptions.TestFailedException] {
+        shouldCommitAfter shouldBe false
+      }
     }
   }
 }

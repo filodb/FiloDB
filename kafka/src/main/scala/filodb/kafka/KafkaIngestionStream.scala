@@ -1,8 +1,11 @@
 package filodb.kafka
 
+import java.lang.{Long => JLong}
+
 import com.typesafe.config.Config
 import com.typesafe.scalalogging.StrictLogging
 import monix.reactive.Observable
+import org.apache.kafka.clients.consumer.ConsumerRecord
 import org.apache.kafka.common.TopicPartition
 
 import filodb.coordinator.{GlobalConfig, IngestionStream, IngestionStreamFactory}
@@ -28,7 +31,8 @@ class KafkaIngestionStream(config: Config,
   private val tp = new TopicPartition(IngestionTopic, shard)
 
   logger.info(s"Creating consumer assigned to topic ${tp.topic} partition ${tp.partition} offset $offset")
-  protected val consumer = PartitionedConsumerObservable.create(sc, tp, offset)
+  protected val consumer: Observable[ConsumerRecord[JLong, Any]] =
+    PartitionedConsumerObservable.create(sc, tp, offset)
 
   /**
    * Returns a reactive Observable stream of IngestRecord sequences from Kafka.
