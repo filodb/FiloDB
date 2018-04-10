@@ -61,7 +61,7 @@ object ChunkSet {
 case class ChunkSetInfo(id: ChunkID,
                         numRows: Int,
                         firstKey: BinaryRecord,
-                        lastKey: BinaryRecord) extends StrictLogging {
+                        lastKey: BinaryRecord) {
   def keyAndId: (BinaryRecord, ChunkID) = (firstKey, id)
 
   /**
@@ -80,7 +80,7 @@ case class ChunkSetInfo(id: ChunkID,
       intersection(other.firstKey, other.lastKey)
     } catch {
       case e: Exception =>
-        logger.warn(s"Got error comparing $this and $other...", e)
+        ChunkSetInfo.log.warn(s"Got error comparing $this and $other...", e)
         None
     }
 
@@ -115,6 +115,7 @@ object ChunkSetInfo extends StrictLogging {
   type InfosSkipsIt = Iterator[(ChunkSetInfo, SkipMap)]
 
   val emptySkips = new SkipMap()
+  val log = logger
 
   /**
    * Serializes ChunkSetInfo into bytes for persistence.

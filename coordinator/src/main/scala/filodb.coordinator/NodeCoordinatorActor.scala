@@ -201,8 +201,9 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
   private def registered(e: CoordinatorRegistered): Unit = {
     logger.info(s"${e.clusterActor} said hello!")
     clusterActor = Some(e.clusterActor)
-    statusActor.foreach(_ ! PoisonPill)
-    statusActor = Some(context.actorOf(StatusActor.props(e.clusterActor, statusAckTimeout), "status"))
+    if (!statusActor.isDefined) {
+      statusActor = Some(context.actorOf(StatusActor.props(e.clusterActor, statusAckTimeout), "status"))
+    }
   }
 
   /** Forwards shard commands to the ingester for the given dataset.

@@ -23,7 +23,7 @@ import filodb.core.DatasetRef
   * @param numShards number of shards. For this implementation, it needs to be a power of 2.
   *
  */
-class ShardMapper(val numShards: Int) extends Serializable with StrictLogging {
+class ShardMapper(val numShards: Int) extends Serializable {
   import ShardMapper._
 
   require((numShards & (numShards - 1)) == 0, s"numShards $numShards must be a power of two")
@@ -217,7 +217,7 @@ class ShardMapper(val numShards: Int) extends Serializable with StrictLogging {
         //But functional tests uncovered that sometimes the member down event is not
         //received and hence assignments were not removed first.
         val oldCoord = shardMap(shard)
-        logger.info(s"Unassigned coordinator $oldCoord  for shard $shard - Reassigning to $coordinator")
+        log.debug(s"Unassigned coordinator $oldCoord  for shard $shard - Reassigning to $coordinator")
         shardMap(shard) = coordinator
     }
     Success(())
@@ -240,8 +240,9 @@ class ShardMapper(val numShards: Int) extends Serializable with StrictLogging {
   }
 }
 
-private[filodb] object ShardMapper {
+private[filodb] object ShardMapper extends StrictLogging {
   val default = new ShardMapper(1)
+  val log = logger
 
   final case class ShardAndNode(shard: Int, coord: ActorRef)
 
