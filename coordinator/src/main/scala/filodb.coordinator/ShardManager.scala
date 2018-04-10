@@ -115,12 +115,6 @@ private[coordinator] final class ShardManager(strategy: ShardAssignmentStrategy)
   private def mapperOpt(ref: DatasetRef): Option[CurrentShardSnapshot] =
     _shardMappers.get(ref).map(m => CurrentShardSnapshot(ref, m))
 
-  /** Selects the `ShardMapper` for the provided dataset, updates the mapper
-    * for the received shard event from the event source.
-    */
-  def updateFromShardEventNoPublish(e: ShardEvent): Unit =
-    _shardMappers.get(e.ref) foreach (m => m.updateFromEvent(e))
-
   /** Called on MemberUp. Handles acquiring assignable shards, if any, assignment,
     * and full setup of new node.
     *
@@ -206,11 +200,12 @@ private[coordinator] final class ShardManager(strategy: ShardAssignmentStrategy)
         val state = DatasetInfo(resources, metrics, source, dataset)
         _datasetInfo(dataset.ref) = state
 
+        // NOTE: no snapshots get published here because nobody subscribed to this dataset yet
         val assignments = assignShardsToNodes(dataset.ref, mapper, resources)
 
+        // Add dataset to subscribers and send initial ShardMapper snapshot
         _subscriptions :+= ShardSubscription(dataset.ref, Set.empty)
         _subscriptions.watchers foreach (subscribe(_, dataset.ref))
-        _subscriptions.watchers foreach (_ ! CurrentShardSnapshot(dataset.ref, mapper))
         logger.info(s"Completed Setup for Dataset ${setup.ref}")
         ackTo ! DatasetVerified
         assignments
@@ -256,16 +251,19 @@ private[coordinator] final class ShardManager(strategy: ShardAssignmentStrategy)
 
   def recoverSubscriptions(subs: ShardSubscriptions): Unit = {
     logger.info(s"Recovering (adding) subscriptions from $subs")
-    _subscriptions = subscriptions.copy(subscriptions = _subscriptions.subscriptions ++ subs.subscriptions,
+    // we have to remove existing subscriptions (which are probably empty) for datasets, otherwise new ones
+    // might not take hold
+    val newSubRefs = subs.subscriptions.map(_.dataset)
+    val trimmedSubs = _subscriptions.subscriptions.filterNot(newSubRefs contains _.dataset)
+    _subscriptions = subscriptions.copy(subscriptions = trimmedSubs ++ subs.subscriptions,
       watchers = _subscriptions.watchers ++ subs.watchers)
     logger.debug(s"Recovered subscriptions = $subscriptions")
   }
 
-  /** Selects the `ShardMapper` for the provided dataset, updates the mapper
-    * for the received shard event from the event source, and publishes
-    * the event to all subscribers of that event and dataset.
+  /** Selects the `ShardMapper` for the provided dataset and updates the mapper
+    * for the received shard event from the event source
     */
-  def updateFromShardEventAndPublish(event: ShardEvent): Unit = {
+  def updateFromShardEvent(event: ShardEvent): Unit = {
     _shardMappers.get(event.ref) foreach { mapper =>
       mapper.updateFromEvent(event) match {
         case Failure(l) =>
@@ -273,10 +271,7 @@ private[coordinator] final class ShardManager(strategy: ShardAssignmentStrategy)
         case Success(r) =>
           logger.info(s"Updated mapper for dataset ${event.ref} event $event")
       }
-      // TODO if failure we don't need to publish, though that's what we have
-      // been doing thus far. This requires changing tests out of scope for the current changes
-      publishEvent(event)
-      logger.debug(s"Shard Mapper after updateFromShardEventAndPublish: $mapper")
+      logger.debug(s"Shard Mapper after updateFromShardEvent: $mapper")
     }
     updateShardMetrics()
   }
@@ -295,8 +290,9 @@ private[coordinator] final class ShardManager(strategy: ShardAssignmentStrategy)
 
     for { shard <- shards }  {
       val event = ShardAssignmentStarted(dataset, shard, coord)
-      updateFromShardEventAndPublish(event)
+      updateFromShardEvent(event)
     }
+    publishSnapshot(dataset)
     /* If no shards are assigned to a coordinator, no commands are sent. */
     logger.info(s"Sending start ingestion message for $dataset to coordinator $coord for shards $shards")
     for {shard <- shards} coord ! StartShardIngestion(dataset, shard, None)
@@ -314,17 +310,23 @@ private[coordinator] final class ShardManager(strategy: ShardAssignmentStrategy)
     logger.info(s"Sending stop ingestion message for $dataset to coordinator $coordinator for shards $shardsToDown")
     for { shard <- shardsToDown } {
       val event = ShardDown(dataset, shard, coordinator)
-      updateFromShardEventAndPublish(event)
+      updateFromShardEvent(event)
       if (nodeUp) coordinator ! StopShardIngestion(dataset, shard)
     }
+    publishSnapshot(dataset)
     logger.debug(s"Unassigned shards $shardsToDown from $coordinator")
   }
 
-  /** Publishes the event to all subscribers of that dataset. */
-  private def publishEvent(e: ShardEvent): Unit =
-    for {
-      subscription <- _subscriptions.subscription(e.ref)
-    } subscription.subscribers foreach (_ ! e)
+  /** Publishes a ShardMapper snapshot of given dataset to all subscribers of that dataset. */
+  def publishSnapshot(ref: DatasetRef): Unit =
+    mapperOpt(ref) match {
+      case Some(snapshot) =>
+        for {
+          subscription <- _subscriptions.subscription(ref)
+        } subscription.subscribers foreach (_ ! snapshot)
+      case None =>
+        logger.warn(s"Cannot publish snapshot which doesn't exist for ref $ref")
+    }
 
   private def latestCoords: Seq[ActorRef] =
     _coordinators.values.foldLeft(List[ActorRef]())((x, y) => y :: x) // reverses the set

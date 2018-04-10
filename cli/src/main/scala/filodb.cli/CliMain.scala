@@ -143,7 +143,7 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
         case Some("indexvalues") =>
           require(args.indexName.nonEmpty, "--indexName required")
           val (remote, ref) = getClientAndRef(args)
-          val values = remote.getIndexValues(ref, args.indexName.get)
+          val values = remote.getIndexValues(ref, args.indexName.get, args.limit)
           values.foreach(println)
 
         case Some("status") =>

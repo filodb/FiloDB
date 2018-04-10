@@ -1,14 +1,14 @@
 package filodb.coordinator
 
-import java.util.concurrent.atomic.AtomicReference
-
 import scala.collection.mutable.HashMap
+import scala.concurrent.duration._
 
 import akka.actor.{ActorRef, OneForOneStrategy, PoisonPill, Props, Terminated}
 import akka.actor.SupervisorStrategy.{Restart, Stop}
 import akka.event.LoggingReceive
 import com.typesafe.config.Config
 import monix.execution.Scheduler
+import net.ceedubs.ficus.Ficus._
 
 import filodb.coordinator.client.{MiscCommands, Serializer}
 import filodb.core._
@@ -54,11 +54,14 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
 
   val settings = new FilodbSettings(config)
   val ingesters = new HashMap[DatasetRef, ActorRef]
+  val queryActors = new HashMap[DatasetRef, ActorRef]
   var clusterActor: Option[ActorRef] = None
-  val shardMap = new AtomicReference[ShardMapper](ShardMapper.default)
+  val shardMaps = new HashMap[DatasetRef, ShardMapper]
+  var statusActor: Option[ActorRef] = None
 
   // The thread pool used by Monix Observables/reactive ingestion
   val ingestScheduler = Scheduler.computation(config.getInt("ingestion-threads"))
+  private val statusAckTimeout = config.as[FiniteDuration]("tasks.timeouts.status-ack-timeout")
 
   // By default, stop children IngestionActors when something goes wrong.
   // restart query actors though
@@ -79,7 +82,7 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
   // For now, datasets need to be set up for ingestion before they can be queried (in-mem only)
   // TODO: if we ever support query API against cold (not in memory) datasets, change this
   private def withQueryActor(originator: ActorRef, dataset: DatasetRef)(func: ActorRef => Unit): Unit =
-   childFor(dataset, ActorName.Query).map(func).getOrElse(originator ! UnknownDataset)
+    queryActors.get(dataset).map(func).getOrElse(originator ! UnknownDataset)
 
   private def createDataset(originator: ActorRef,
                             datasetObj: Dataset): Unit = {
@@ -127,14 +130,15 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
 
     clusterActor match {
       case Some(nca) =>
-        val props = IngestionActor.props(dataset, memStore, source, nca)(ingestScheduler)
+        val props = IngestionActor.props(dataset, memStore, source, statusActor.get)(ingestScheduler)
         val ingester = context.actorOf(props, s"$Ingestion-${dataset.name}")
         context.watch(ingester)
         ingesters(ref) = ingester
 
         logger.info(s"Creating QueryActor for dataset $ref")
-        val queryRef = context.actorOf(QueryActor.props(memStore, dataset, shardMap), s"$Query-$ref")
+        val queryRef = context.actorOf(QueryActor.props(memStore, dataset, shardMaps(ref)), s"$Query-$ref")
         nca.tell(SubscribeShardUpdates(ref), self)
+        queryActors(ref) = queryRef
 
         // TODO: Send status update to cluster actor
         logger.info(s"Coordinator set up for ingestion and querying for $ref.")
@@ -183,14 +187,13 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
     case e: ShardCommand              => forward(e, sender())
     case Terminated(memstoreCoord)    => terminated(memstoreCoord)
     case MiscCommands.GetClusterActor => sender() ! clusterActor
+    case StatusActor.GetCurrentEvents => statusActor.foreach(_.tell(StatusActor.GetCurrentEvents, sender()))
     case ClearState(ref)              => clearState(ref)
     case NodeProtocol.ResetState      => reset(sender())
     case CurrentShardSnapshot(ds, mapper) =>
-      logger.info(s"Got initial ShardSnapshot $mapper")
-      shardMap.set(mapper)
-
-    case e: ShardEvent =>
-      shardMap.get().updateFromEvent(e)
+      logger.debug(s"Received ShardSnapshot $mapper")
+      shardMaps(ds) = mapper
+      // NOTE: QueryActor has AtomicRef so no need to forward message to it
   }
 
   def receive: Receive = queryHandlers orElse ingestHandlers orElse datasetHandlers orElse coordinatorReceive
@@ -198,6 +201,8 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
   private def registered(e: CoordinatorRegistered): Unit = {
     logger.info(s"${e.clusterActor} said hello!")
     clusterActor = Some(e.clusterActor)
+    statusActor.foreach(_ ! PoisonPill)
+    statusActor = Some(context.actorOf(StatusActor.props(e.clusterActor, statusAckTimeout), "status"))
   }
 
   /** Forwards shard commands to the ingester for the given dataset.
@@ -221,8 +226,10 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
   }
 
   private def reset(origin: ActorRef): Unit = {
-    context.children foreach (_ ! PoisonPill)
+    ingesters.values.foreach(_ ! PoisonPill)
+    queryActors.values.foreach(_ ! PoisonPill)
     ingesters.clear()
+    queryActors.clear()
     memStore.reset()
   }
 

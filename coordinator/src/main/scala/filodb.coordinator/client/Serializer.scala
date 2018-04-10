@@ -186,6 +186,10 @@ class KryoInit {
     kryo.register(classOf[BinaryRecord])
     kryo.register(classOf[ArrayBinaryRecord])
     kryo.register(classOf[RecordSchema])
+    kryo.register(classOf[filodb.coordinator.ShardEvent])
+    kryo.register(classOf[filodb.coordinator.CurrentShardSnapshot])
+    kryo.register(classOf[filodb.coordinator.StatusActor.EventEnvelope])
+    kryo.register(classOf[filodb.coordinator.StatusActor.StatusAck])
 
     import filodb.core.query._
     kryo.register(classOf[PartitionInfo])

@@ -106,6 +106,8 @@ class ShardManagerSpec extends AkkaSpec {
         StartShardIngestion(dataset1, 4, None),
         StartShardIngestion(dataset1, 5, None))
 
+      // NOTE: because subscriptions do not kick in right away, we don't get new snapshots unitl after
+      // ShardSubscriptions message
     }
 
     "send shard subscribers updates on shard events as a result of dataset addition" in {
@@ -116,8 +118,7 @@ class ShardManagerSpec extends AkkaSpec {
         s.map.shardsForCoord(coord3.ref) shouldEqual Seq(0, 1, 2)
         s.map.shardsForCoord(coord1.ref) shouldEqual Seq(3, 4, 5)
       }
-      subscriber.expectMsgPF() { case s: CurrentShardSnapshot => } // one more current snapshot
-      subscriber.receiveWhile(messages = 6) { case m: ShardAssignmentStarted => m }
+      subscriber.expectNoMsg()
     }
 
     "change state for addition of coordinator when there are datasets" in {
@@ -132,8 +133,12 @@ class ShardManagerSpec extends AkkaSpec {
         StartShardIngestion(dataset1, 6, None),
         StartShardIngestion(dataset1, 7, None))
 
-      subscriber.receiveWhile(messages = 2) { case m: ShardAssignmentStarted => m }
-
+      // Should receive new snapshot with shards 6,7 for coord2
+      subscriber.expectMsgPF() { case s: CurrentShardSnapshot =>
+        s.map.shardsForCoord(coord3.ref) shouldEqual Seq(0, 1, 2)
+        s.map.shardsForCoord(coord1.ref) shouldEqual Seq(3, 4, 5)
+        s.map.shardsForCoord(coord2.ref) shouldEqual Seq(6, 7)
+      }
     }
 
     "change state for addition of spare coordinator" in {
@@ -155,6 +160,12 @@ class ShardManagerSpec extends AkkaSpec {
         StopShardIngestion(dataset1, 4),
         StopShardIngestion(dataset1, 5))
 
+      subscriber.expectMsgPF() { case s: CurrentShardSnapshot if s.ref == dataset1 =>
+        s.map.shardsForCoord(coord3.ref) shouldEqual Seq(0, 1, 2)
+        s.map.shardsForCoord(coord1.ref) shouldEqual Nil
+        s.map.shardsForCoord(coord2.ref) shouldEqual Seq(6, 7)
+      }
+
       // spare coord4 should take over the shards
       coord4.expectMsgPF() { case ds: DatasetSetup =>
         ds.compactDatasetStr shouldEqual datasetObj1.asCompactString
@@ -164,9 +175,13 @@ class ShardManagerSpec extends AkkaSpec {
         StartShardIngestion(dataset1, 3, None),
         StartShardIngestion(dataset1, 4, None),
         StartShardIngestion(dataset1, 5, None))
-      subscriber.receiveWhile(messages = 3) { case m: ShardDown => m }
-      subscriber.receiveWhile(messages = 3) { case m: ShardAssignmentStarted => m }
 
+      subscriber.expectMsgPF() { case s: CurrentShardSnapshot if s.ref == dataset1 =>
+        s.map.shardsForCoord(coord3.ref) shouldEqual Seq(0, 1, 2)
+        s.map.shardsForCoord(coord4.ref) shouldEqual Seq(3, 4, 5)
+        s.map.shardsForCoord(coord2.ref) shouldEqual Seq(6, 7)
+      }
+      subscriber.expectNoMsg()
     }
 
     "reassign shards where additional room available on removal of coordinator when there are no spare nodes" in {
@@ -180,6 +195,18 @@ class ShardManagerSpec extends AkkaSpec {
         StopShardIngestion(dataset1, 4),
         StopShardIngestion(dataset1, 5))
 
+
+      subscriber.expectMsgPF() { case s: CurrentShardSnapshot if s.ref == dataset1 =>
+        s.map.shardsForCoord(coord3.ref) shouldEqual Seq(0, 1, 2)
+        // s.map.shardsForCoord(coord2.ref) shouldEqual Seq(6, 7)
+        // NOTE: you would expect shard2 to have 6 & 7 only in the first snapshot which is after removing coord4.
+        // The problem is that ShardMapper is mutable, and since this is a local transfer, the actor message
+        // points to the ShardMapper object which by this point already has the shard 3 added.  :(
+        s.map.shardsForCoord(coord2.ref) shouldEqual Seq(3, 6, 7)
+        s.map.shardsForCoord(coord4.ref) shouldEqual Nil
+        s.map.numAssignedShards shouldEqual 6
+      }
+
       // coord2 has room for one more
       coord2.expectMsgPF() { case ds: DatasetSetup =>
         ds.compactDatasetStr shouldEqual datasetObj1.asCompactString
@@ -192,9 +219,13 @@ class ShardManagerSpec extends AkkaSpec {
       coord1.expectNoMsg()
       coord3.expectNoMsg()
 
-      subscriber.receiveWhile(messages = 3) { case m: ShardDown => m }
-      subscriber.receiveWhile(messages = 1) { case m: ShardAssignmentStarted => m }
-
+      subscriber.expectMsgPF() { case s: CurrentShardSnapshot if s.ref == dataset1 =>
+        s.map.shardsForCoord(coord3.ref) shouldEqual Seq(0, 1, 2)
+        s.map.shardsForCoord(coord2.ref) shouldEqual Seq(3, 6, 7)
+        s.map.unassignedShards shouldEqual Seq(4, 5)
+        s.map.numAssignedShards shouldEqual 6
+      }
+      subscriber.expectNoMsg()
     }
 
     "reassign remaining unassigned shards when a replacement node comes back" in {
@@ -209,10 +240,13 @@ class ShardManagerSpec extends AkkaSpec {
         StartShardIngestion(dataset1, 4, None),
         StartShardIngestion(dataset1, 5, None))
 
-      subscriber.receiveWhile(messages = 8) {
-        case ShardDown(d, s, _) if d == dataset2 && s >= 0 && s < 8 =>
+      subscriber.expectMsgPF() { case s: CurrentShardSnapshot =>
+        s.map.shardsForCoord(coord3.ref) shouldEqual Seq(0, 1, 2)
+        s.map.shardsForCoord(coord2.ref) shouldEqual Seq(3, 6, 7)
+        s.map.shardsForCoord(coord4.ref) shouldEqual Seq(4, 5)
+        s.map.unassignedShards shouldEqual Nil
       }
-      subscriber.receiveWhile(messages = 2) { case m: ShardAssignmentStarted => m }
+      subscriber.expectNoMsg()
     }
 
     "change state for removal of dataset" in {
@@ -235,14 +269,21 @@ class ShardManagerSpec extends AkkaSpec {
 
       shardManager.subscriptions.subscriptions.size shouldBe 0
 
-      subscriber.receiveWhile(messages = 8) {
-        case ShardDown(d, s, _) if d == dataset1 && s >= 0 && s < 8 =>
+      // 3 snapshots one for each coord
+      subscriber.expectMsgPF() { case s: CurrentShardSnapshot =>
+        s.map.unassignedShards shouldEqual (0 to 7)
       }
+      subscriber.expectMsgPF() { case s: CurrentShardSnapshot =>
+        s.map.unassignedShards shouldEqual (0 to 7)
+      }
+      subscriber.expectMsgPF() { case s: CurrentShardSnapshot =>
+        s.map.unassignedShards shouldEqual (0 to 7)
+      }
+      subscriber.expectNoMsg()
     }
 
     "change state for addition of multiple datasets" in {
-
-      // add back coord1 and coord4
+      // add back coord1
       shardManager.addMember(coord1Address, coord1.ref)
       shardManager.coordinators shouldBe Seq(coord3.ref, coord2.ref, coord4.ref, coord1.ref)
 
@@ -262,6 +303,8 @@ class ShardManagerSpec extends AkkaSpec {
         StartShardIngestion(dataset1, 0, None),
         StartShardIngestion(dataset1, 1, None),
         StartShardIngestion(dataset1, 2, None))
+
+      // No CurrentShardSnapshot yet.  We have to get subscription first.
 
       coord4.expectMsgPF() { case ds: DatasetSetup =>
         ds.compactDatasetStr shouldEqual datasetObj1.asCompactString
@@ -285,8 +328,12 @@ class ShardManagerSpec extends AkkaSpec {
       // addition of dataset results in snapshot/subscriptions broadcast
       subscriber.expectMsg(
         ShardSubscriptions(Set(ShardSubscription(dataset1, Set(subscriber.ref))), Set(subscriber.ref)))
-      subscriber.expectMsgPF() { case s: CurrentShardSnapshot if s.ref == dataset1 => }
-      subscriber.expectMsgPF() { case s: CurrentShardSnapshot if s.ref == dataset1 => } // one more
+      subscriber.expectMsgPF() { case s: CurrentShardSnapshot if s.ref == dataset1 =>
+        s.map.shardsForCoord(coord1.ref) shouldEqual Seq(0, 1, 2)
+        s.map.shardsForCoord(coord4.ref) shouldEqual Seq(3, 4, 5)
+        s.map.shardsForCoord(coord2.ref) shouldEqual Seq(6, 7)
+        s.map.unassignedShards shouldEqual Nil
+      }
 
       val assignments2 = shardManager.addDataset(setupDs2, datasetObj2, self)
       shardManager.datasetInfo.size shouldBe 2
@@ -301,13 +348,15 @@ class ShardManagerSpec extends AkkaSpec {
         ds.source shouldEqual noOpSource2
       }
       // assignments first go to the most recently deployed node
-      coord1.receiveWhile(messages = 8) { case m: StartShardIngestion if m.ref == dataset2 => m }
+      val msgs1 = coord1.receiveWhile(messages = 8) { case m: StartShardIngestion if m.ref == dataset2 => m }
+      msgs1 should have length (8)
 
       coord4.expectMsgPF() { case ds: DatasetSetup =>
         ds.compactDatasetStr shouldEqual datasetObj2.asCompactString
         ds.source shouldEqual noOpSource2
       }
-      coord4.receiveWhile(messages = 8) { case m: StartShardIngestion if m.ref == dataset2 => m }
+      val msgs2 = coord4.receiveWhile(messages = 8) { case m: StartShardIngestion if m.ref == dataset2 => m }
+      msgs2 should have length (8)
 
       // coord2 and coord3 are spare nodes for dataset2
       coord2.expectNoMsg()
@@ -325,11 +374,8 @@ class ShardManagerSpec extends AkkaSpec {
         s.map.shardsForCoord(coord2.ref) shouldEqual Seq.empty
         s.map.shardsForCoord(coord3.ref) shouldEqual Seq.empty
       }
-      subscriber.expectMsgPF() { case s: CurrentShardSnapshot if s.ref == dataset2 => } // one more
 
-      subscriber.receiveWhile(messages = 16) {
-        case ShardAssignmentStarted(d, s, _) if d == dataset2 && s >= 0 && s < 16 =>
-      }
+      subscriber.expectNoMsg()
     }
 
     "recover state on a failed over node " in {
@@ -358,20 +404,63 @@ class ShardManagerSpec extends AkkaSpec {
       shardManager2.coordinators shouldBe Seq(coord3.ref, coord2.ref, coord1.ref)
       shardManager2.datasetInfo.size shouldBe 2
 
-      // ingestion should be stopped on downed node for 8 + 3 shards
-      coord4.receiveWhile(messages = 11) { case m: StopShardIngestion => m }
+      // dataset2: reassign shards 8-16 to coord2.  Will get two snapshots during move
+      subscriber.expectMsgPF() { case s: CurrentShardSnapshot if s.ref == dataset2 =>
+        s.map.shardsForCoord(coord1.ref) shouldEqual Range(0, 8)
+        s.map.shardsForCoord(coord4.ref) shouldEqual Nil
+        s.map.shardsForCoord(coord2.ref) shouldEqual (8 until 16)
+        s.map.shardsForCoord(coord3.ref) shouldEqual Nil
+      }
 
-      // ingestion should failover to coord2 for both datasets
-      coord2.receiveWhile(messages = 2) { case m: DatasetSetup => m }
+      subscriber.expectMsgPF() { case s: CurrentShardSnapshot if s.ref == dataset2 =>
+        s.map.shardsForCoord(coord1.ref) shouldEqual Range(0, 8)
+        s.map.shardsForCoord(coord4.ref) shouldEqual Nil
+        s.map.shardsForCoord(coord2.ref) shouldEqual (8 until 16)
+        s.map.shardsForCoord(coord3.ref) shouldEqual Nil
+      }
+
+      // dataset1: reassign shards 3,4,5 to coord2 and coord3
+      subscriber.expectMsgPF() { case s: CurrentShardSnapshot if s.ref == dataset1 =>
+        s.map.shardsForCoord(coord1.ref) shouldEqual Seq(0, 1, 2)
+        s.map.shardsForCoord(coord2.ref) shouldEqual Seq(3, 6, 7)
+        s.map.shardsForCoord(coord3.ref) shouldEqual Seq(4, 5)
+        s.map.shardsForCoord(coord4.ref) shouldEqual Nil
+      }
+
+      subscriber.expectMsgPF() { case s: CurrentShardSnapshot if s.ref == dataset1 =>
+        s.map.shardsForCoord(coord1.ref) shouldEqual Seq(0, 1, 2)
+        s.map.shardsForCoord(coord2.ref) shouldEqual Seq(3, 6, 7)
+        s.map.shardsForCoord(coord3.ref) shouldEqual Seq(4, 5)
+        s.map.shardsForCoord(coord4.ref) shouldEqual Nil
+      }
+
+      // ingestion should be stopped on downed node for 8 + 3 shards
+      coord4.receiveWhile(messages = 11) { case m: StopShardIngestion => m } should have length (11)
+
+      // ingestion should failover to coord2 for dataset2 first, and get 8 StartShardIngestion messages
+      coord2.expectMsgPF() { case ds: DatasetSetup =>
+        ds.compactDatasetStr shouldEqual datasetObj2.asCompactString
+        ds.source shouldEqual noOpSource2
+      }
+      coord2.receiveWhile(messages = 8) { case m: StartShardIngestion => m } should have length (8)
+
+      // then failover to coord2 for dataset1, with 1 shard
+      coord2.expectMsgPF() { case ds: DatasetSetup =>
+        ds.compactDatasetStr shouldEqual datasetObj1.asCompactString
+        ds.source shouldEqual noOpSource1
+      }
+      coord2.expectMsg(StartShardIngestion(dataset1, 3, None))
 
       // ingestion should failover to coord3 for dataset1
-      coord3.receiveWhile(messages = 1) { case m: DatasetSetup => m }
-
-      // 8 shards for dataset2 and 1 for dataset1
-      coord2.receiveWhile(messages = 9) { case m: StartShardIngestion => m }
+      coord3.expectMsgPF() { case ds: DatasetSetup =>
+        ds.compactDatasetStr shouldEqual datasetObj1.asCompactString
+        ds.source shouldEqual noOpSource1
+      }
 
       // 3 shards for dataset1
-      coord3.receiveWhile(messages = 3) { case m: StartShardIngestion => m }
+      coord3.expectMsgAllOf(
+        StartShardIngestion(dataset1, 4, None),
+        StartShardIngestion(dataset1, 5, None))
     }
   }
 }

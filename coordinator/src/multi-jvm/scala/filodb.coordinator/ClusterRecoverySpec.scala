@@ -20,7 +20,8 @@ object ClusterRecoverySpecConfig extends MultiNodeConfig {
 
   // this configuration will be used for all nodes
   val globalConfig = ConfigFactory.parseString("""filodb.memstore.groups-per-shard = 4""".stripMargin)
-                       .withFallback(ConfigFactory.load("application_test.conf"))
+                       .withFallback(ConfigFactory.parseResources("application_test.conf"))
+                       .withFallback(ConfigFactory.load("filodb-defaults.conf"))
   commonConfig(globalConfig)
 }
 

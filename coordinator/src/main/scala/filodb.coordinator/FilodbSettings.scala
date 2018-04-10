@@ -34,6 +34,8 @@ final class FilodbSettings(val conf: Config) {
 
   val InitializationTimeout = config.as[FiniteDuration]("tasks.timeouts.initialization")
 
+  val ShardMapPublishFrequency = config.as[FiniteDuration]("tasks.shardmap-publish-frequency")
+
   val IOPoolName = "filodb.io"
 
   lazy val DatasetDefinitions = config.as[Option[Map[String, Config]]]("dataset-definitions")

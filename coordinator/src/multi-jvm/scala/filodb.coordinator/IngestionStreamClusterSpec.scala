@@ -103,14 +103,13 @@ abstract class IngestionStreamClusterSpec extends ClusterSpec(IngestionStreamClu
                                              """)
       val stream = (new CsvStreamFactory).create(config, dataset6, 0, None)
 
-      receiveWhile(messages = resources.numShards) {
-        case e: IngestionStarted =>
-          e.shard should be < (4)
-          mapper.updateFromEvent(e)
-      }
-
       // Now, route records to all different shards and nodes across cluster
       stream.routeToShards(mapper, dataset6, protocolActor)
+
+      expectMsgPF(10.seconds.dilated) {
+        case CurrentShardSnapshot(ref, map) if ref == dataset6.ref =>
+          map.statuses.toSeq shouldEqual Seq.fill(4)(ShardStatusActive)
+      }
     }
 
     enterBarrier("ingestion-done")

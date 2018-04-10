@@ -59,9 +59,12 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
 
 
   val clusterActor = system.actorOf(Props(new Actor {
+    import StatusActor._
     def receive: Receive = {
       case SubscribeShardUpdates(ref) => shardManager.subscribe(sender(), ref)
-      case e: ShardEvent              => shardManager.updateFromShardEventNoPublish(e)
+      case e: ShardEvent              => shardManager.updateFromShardEvent(e)
+      case EventEnvelope(seq, events) => events.foreach(shardManager.updateFromShardEvent)
+                                         sender() ! StatusAck(seq)
     }
   }))
   var coordinatorActor: ActorRef = _
@@ -432,6 +435,9 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
 
     probe.send(coordinatorActor, GetIngestionStats(ref))
     probe.expectMsg(IngestionActor.IngestionStatus(99))
+
+    probe.send(coordinatorActor, StatusActor.GetCurrentEvents)
+    probe.expectMsg(Map(ref -> Seq(IngestionStarted(ref, 0, coordinatorActor))))
 
     // Now, read stuff back from the column store and check that it's all there
     val split = memStore.getScanSplits(ref, 1).head

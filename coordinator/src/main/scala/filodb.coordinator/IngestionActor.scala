@@ -27,8 +27,8 @@ object IngestionActor {
   def props(dataset: Dataset,
             memStore: MemStore,
             source: NodeClusterActor.IngestionSource,
-            clusterActor: ActorRef)(implicit sched: Scheduler): Props =
-    Props(new IngestionActor(dataset, memStore, source, clusterActor)(sched))
+            statusActor: ActorRef)(implicit sched: Scheduler): Props =
+    Props(new IngestionActor(dataset, memStore, source, statusActor)(sched))
 }
 
 /**
@@ -43,12 +43,13 @@ object IngestionActor {
   *
   * ERROR HANDLING: currently any error in ingestion stream or memstore ingestion wll stop the ingestion
   *
+  * @param statusActor the actor to which to forward ShardEvents for status updates
   * @param sched a Scheduler for running ingestion stream Observables
   */
 private[filodb] final class IngestionActor(dataset: Dataset,
                                            memStore: MemStore,
                                            source: NodeClusterActor.IngestionSource,
-                                           clusterActor: ActorRef)
+                                           statusActor: ActorRef)
                                           (implicit sched: Scheduler) extends BaseActor {
 
   import IngestionActor._
@@ -150,7 +151,7 @@ private[filodb] final class IngestionActor(dataset: Dataset,
     create(shard, offset) map { ingestionStream =>
       val stream = ingestionStream.get
       logger.info(s"Starting normal/active ingestion for shard $shard at offset $offset")
-      clusterActor ! IngestionStarted(dataset.ref, shard, context.parent)
+      statusActor ! IngestionStarted(dataset.ref, shard, context.parent)
 
       streamSubscriptions(shard) = memStore.ingestStream(dataset.ref,
         shard,
@@ -163,7 +164,7 @@ private[filodb] final class IngestionActor(dataset: Dataset,
       // except for noOpSource, which would stop right away, and is used for sending in tons of data
       // also: small chance for race condition here due to remove call in stop() method
       streamSubscriptions.get(shard).map(_.foreach { x =>
-        if (source != NodeClusterActor.noOpSource) clusterActor ! IngestionStopped(dataset.ref, shard)
+        if (source != NodeClusterActor.noOpSource) statusActor ! IngestionStopped(dataset.ref, shard)
         ingestionStream.teardown()
       })
     } recover { case NonFatal(t) =>
@@ -190,14 +191,14 @@ private[filodb] final class IngestionActor(dataset: Dataset,
                                .withTag("shard", shard.toString)
                                .withTag("dataset", dataset.ref.toString).start()
       val stream = ingestionStream.get
-      clusterActor ! RecoveryInProgress(dataset.ref, shard, context.parent, 0)
+      statusActor ! RecoveryInProgress(dataset.ref, shard, context.parent, 0)
 
       val fut = memStore.recoverStream(dataset.ref, shard, stream, checkpoints, interval)
         .map { off =>
           val progressPct = if (endOffset - startOffset == 0) 100
                             else (off - startOffset) * 100 / (endOffset - startOffset)
           logger.info(s"Shard $shard at $progressPct % - offset $off (target $endOffset)")
-          clusterActor ! RecoveryInProgress(dataset.ref, shard, context.parent, progressPct.toInt)
+          statusActor ! RecoveryInProgress(dataset.ref, shard, context.parent, progressPct.toInt)
           off }
         .until(_ >= endOffset)
         .lastL.runAsync
@@ -247,7 +248,7 @@ private[filodb] final class IngestionActor(dataset: Dataset,
     if (invalid(ds)) handleInvalid(StopShardIngestion(ds, shard), Some(origin)) else {
       streamSubscriptions.remove(shard).foreach(_.cancel)
       streams.remove(shard).foreach(_.teardown())
-      clusterActor ! IngestionStopped(dataset.ref, shard)
+      statusActor ! IngestionStopped(dataset.ref, shard)
 
       // TODO: release memory for shard in MemStore
       logger.info(s"Stopped streaming ingestion for shard $shard and released resources")
@@ -256,7 +257,7 @@ private[filodb] final class IngestionActor(dataset: Dataset,
   private def invalid(ref: DatasetRef): Boolean = ref != dataset.ref
 
   private def handleError(ref: DatasetRef, shard: Int, err: Throwable): Unit = {
-    clusterActor ! IngestionError(ref, shard, err)
+    statusActor ! IngestionError(ref, shard, err)
     logger.error(s"Exception thrown during ingestion stream for shard $shard", err)
   }
 

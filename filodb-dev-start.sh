@@ -34,13 +34,13 @@ done
 
 cd "$(dirname "$0")"
 
-if [ ! -f standalone/target/scala-2.11/standalone-assembly-*.telemetry-SNAPSHOT.jar ]; then
+if [ ! -f standalone/target/scala-2.11/standalone-assembly-*-SNAPSHOT.jar ]; then
     echo "Standalone assembly not found. Building..."
     sbt standalone/assembly
 fi
 
 echo "Starting FiloDB standalone server..."
-java -Xmx4G $PORTS_ARG -Dconfig.file=$CONFIG -DlogSuffix=$LOG_SUFFIX -cp standalone/target/scala-2.11/standalone-assembly-*.telemetry-SNAPSHOT.jar filodb.standalone.FiloServer  &
+java -Xmx4G $PORTS_ARG -Dconfig.file=$CONFIG -DlogSuffix=$LOG_SUFFIX -cp standalone/target/scala-2.11/standalone-assembly-*-SNAPSHOT.jar filodb.standalone.FiloServer  &
 
 if [ "$SETUP_DATASET" = "YES" ]; then
     echo "Waiting 20s so server can come up ..."

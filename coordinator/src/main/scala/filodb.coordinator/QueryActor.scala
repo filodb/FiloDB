@@ -1,6 +1,6 @@
 package filodb.coordinator
 
-import java.util.concurrent.atomic.{AtomicLong, AtomicReference}
+import java.util.concurrent.atomic.AtomicLong
 
 import scala.concurrent.duration._
 import scala.util.control.NonFatal
@@ -51,8 +51,8 @@ object QueryActor {
 
   final case class ThrowException(dataset: DatasetRef)
 
-  def props(memStore: MemStore, dataset: Dataset, shardMapperRef: AtomicReference[ShardMapper]): Props =
-    Props(new QueryActor(memStore, dataset, shardMapperRef)).withMailbox("query-actor-mailbox")
+  def props(memStore: MemStore, dataset: Dataset, shardMapFunc: => ShardMapper): Props =
+    Props(new QueryActor(memStore, dataset, shardMapFunc)).withMailbox("query-actor-mailbox")
 }
 
 /**
@@ -63,7 +63,7 @@ object QueryActor {
  */
 final class QueryActor(memStore: MemStore,
                        dataset: Dataset,
-                       shardMapperRef: AtomicReference[ShardMapper]) extends BaseActor {
+                       shardMapFunc: => ShardMapper) extends BaseActor {
   import OptionSugar._
 
   import QueryActor._
@@ -75,7 +75,6 @@ final class QueryActor(memStore: MemStore,
   import Column.ColumnType._
 
   implicit val scheduler = monix.execution.Scheduler(context.dispatcher)
-  var shardMap = shardMapperRef
   val config = context.system.settings.config
 
   def validateFunction(funcName: String): AggregationFunction Or ErrorResponse =
@@ -100,12 +99,12 @@ final class QueryActor(memStore: MemStore,
            aggregator <- aggFunc.validate(args.column, dataset.timestampColumn.map(_.name),
                                           chunkMethod, args.args, dataset)
            combiner   <- combinerFunc.validate(aggregator, args.combinerArgs)
-           partMethods <- validatePartQuery(dataset, shardMap.get(), partQuery, options) }
+           partMethods <- validatePartQuery(dataset, shardMapFunc, partQuery, options) }
     yield {
       val queryId = QueryActor.nextQueryId
       implicit val askTimeout = Timeout(options.queryTimeoutSecs.seconds)
       logger.debug(s"Sending out aggregates $partMethods and combining using $combiner...")
-      val results = scatterGather[combiner.C](shardMap.get(), partMethods, options.parallelism) { method =>
+      val results = scatterGather[combiner.C](shardMapFunc, partMethods, options.parallelism) { method =>
                       SingleShardQuery(args, dataset.ref, method, chunkMethod)
                     }
       val combined = if (partMethods.length > 1) results.reduce(combiner.combine) else results
@@ -202,18 +201,18 @@ final class QueryActor(memStore: MemStore,
     val originator = sender()
     (for { colIDs      <- getColumnIDs(dataset, columns)
            chunkMethod <- validateDataQuery(dataset, dataQuery)
-           partMethods <- validatePartQuery(dataset, shardMap.get(), partQuery, options) }
+           partMethods <- validatePartQuery(dataset, shardMapFunc, partQuery, options) }
     yield {
       // Use distributeConcat to scatter gather Vectors or Tuples from each shard
       implicit val askTimeout = Timeout(options.queryTimeoutSecs.seconds)
       val execPlan = dataQuery match {
         case MostRecentSample =>
-          Engine.DistributeConcat(partMethods, shardMap.get(),
+          Engine.DistributeConcat(partMethods, shardMapFunc,
             options.parallelism, options.itemLimit, submitTime) { method =>
             ExecPlan.streamLastTuplePlan(dataset, colIDs, method)
           }
         case _ =>
-          Engine.DistributeConcat(partMethods, shardMap.get(),
+          Engine.DistributeConcat(partMethods, shardMapFunc,
             options.parallelism, options.itemLimit, submitTime) { method =>
             new ExecPlan.LocalVectorReader(colIDs, method, chunkMethod)
           }
@@ -289,6 +288,5 @@ final class QueryActor(memStore: MemStore,
     case ThrowException(dataset) =>
       logger.warn(s"Throwing exception for dataset $dataset. QueryActor will be killed")
       throw new RuntimeException
-
   }
 }

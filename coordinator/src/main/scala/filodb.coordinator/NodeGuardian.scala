@@ -41,7 +41,7 @@ final class NodeGuardian(val settings: FilodbSettings,
     case e: ShardEvent             => shardEvent(e)
     case s: CurrentShardSnapshot   => shardSnapshot(s)
     case e: ShardSubscriptions     => subscriptions = e
-    case GetClusterState          => state(sender())
+    case GetClusterState           => state(sender())
     case e: ListenerRef            => failureAware ! e
   }
 

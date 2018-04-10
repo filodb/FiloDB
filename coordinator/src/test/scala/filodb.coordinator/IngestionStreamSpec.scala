@@ -58,10 +58,8 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem) wi
     metaStore.newDataset(dataset33).futureValue shouldEqual Success
     coordinatorActor ! NodeProtocol.ResetState
     clusterActor ! NodeProtocol.ResetState
-    receiveWhile(within) {
-      case NodeProtocol.StateReset =>
-      case IngestionStopped(_, 0) =>
-    }
+    expectMsg(NodeProtocol.StateReset)
+    Thread sleep 2000
   }
 
   override def afterAll(): Unit = {
@@ -70,12 +68,6 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem) wi
   }
 
   def setup(ref: DatasetRef, resource: String, rowsToRead: Int = 5, source: Option[IngestionSource]): Unit = {
-    innerSetup(ref, resource, rowsToRead, source)
-    logger.info("Wating for ingestion started")
-    expectMsg(IngestionStarted(ref, 0, coordinatorActor))
-  }
-
-  def innerSetup(ref: DatasetRef, resource: String, rowsToRead: Int = 5, source: Option[IngestionSource]): Unit = {
     val config = ConfigFactory.parseString(s"""header = true
                                            batch-size = $rowsToRead
                                            resource = $resource
@@ -99,15 +91,15 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem) wi
   // It's pretty hard to get an IngestionStream to fail when reading the stream itself, as no real parsing
   // happens until the IngestionActor ingests.   When the failure occurs, the cluster state is updated
   // but then we need to query for it.
- it("should fail if cannot parse input RowReader during coordinator ingestion") {
-   setup(dataset33.ref, "/GDELT-sample-test-errors.csv", rowsToRead = 5, None)
-   expectMsgPF(within) {
-     case IngestionError(ds, shard, ex) =>
-       ds shouldBe dataset33.ref
-       ex shouldBe a[NumberFormatException]
-   }
+  it("should fail if cannot parse input RowReader during coordinator ingestion") {
+    setup(dataset33.ref, "/GDELT-sample-test-errors.csv", rowsToRead = 5, None)
+    expectMsgPF(within) {
+      case CurrentShardSnapshot(dataset33.ref, mapper) =>
+        mapper.shardsForCoord(coordinatorActor) shouldEqual Seq(0)
+        mapper.statuses.toSeq shouldEqual Seq(ShardStatusStopped)
+    }
 
-    expectMsg(IngestionStopped(dataset33.ref, 0))
+    // expectMsg(IngestionStopped(dataset33.ref, 0))
 
     // NOTE: right now ingestion errors do not cause IngestionActor to disappear.  Should it?
     coordinatorActor ! GetIngestionStats(dataset33.ref)
@@ -123,12 +115,10 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem) wi
 
     val invalidShard = -1
     coordinatorActor ! StartShardIngestion(dataset6.ref, invalidShard, None)
-    // We don't know exact order of IngestionStopped vs IngestionError
-    (0 to 1).foreach { n =>
-      expectMsgPF(within) {
-        case IngestionError(_, shard, reason) => shard shouldEqual invalidShard
-        case IngestionStopped(dataset6.ref, 0) =>
-      }
+    expectMsgPF(within) {
+      case CurrentShardSnapshot(dataset6.ref, mapper) =>
+        mapper.shardsForCoord(coordinatorActor) shouldEqual Seq(0)
+        mapper.statuses.toSeq shouldEqual Seq(ShardStatusStopped)
     }
   }
 
@@ -143,7 +133,11 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem) wi
     implicit val timeout: Timeout = cluster.settings.InitializationTimeout
 
     // Wait for all messages to be ingested
-    expectMsg(IngestionStopped(dataset6.ref, 0))
+    expectMsgPF(within) {
+      case CurrentShardSnapshot(dataset6.ref, mapper) =>
+        mapper.shardsForCoord(coordinatorActor) shouldEqual Seq(0)
+        mapper.statuses.toSeq shouldEqual Seq(ShardStatusStopped)
+    }
 
     val func = (coordinatorActor ? GetIngestionStats(dataset6.ref)).mapTo[IngestionStatus]
     awaitCond(func.futureValue.rowsIngested == batchSize - 1, max=within)
@@ -155,7 +149,11 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem) wi
     setup(dataset33.ref, "/GDELT-sample-test.csv", rowsToRead = 5, None)
 
     // Wait for all messages to be ingested
-    expectMsg(IngestionStopped(dataset33.ref, 0))
+    expectMsgPF(within) {
+      case CurrentShardSnapshot(dataset33.ref, mapper) =>
+        mapper.shardsForCoord(coordinatorActor) shouldEqual Seq(0)
+        mapper.statuses.toSeq shouldEqual Seq(ShardStatusStopped)
+    }
 
     coordinatorActor ! GetIngestionStats(DatasetRef(dataset33.name))
     expectMsg(IngestionActor.IngestionStatus(99))
@@ -181,17 +179,23 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem) wi
     metaStore.writeCheckpoint(dataset33.ref, 0, 2, 15L).futureValue shouldEqual Success
     metaStore.writeCheckpoint(dataset33.ref, 0, 3, 20L).futureValue shouldEqual Success
 
-    innerSetup(dataset33.ref, "/GDELT-sample-test.csv", rowsToRead = 5, None)
+    setup(dataset33.ref, "/GDELT-sample-test.csv", rowsToRead = 5, None)
 
-    expectMsg(RecoveryInProgress(dataset33.ref, 0, coordinatorActor, 0))
+    // expectMsg(RecoveryInProgress(dataset33.ref, 0, coordinatorActor, 0))
 
     // A few more recovery status updates, and then finally the real IngestionStarted
-    expectMsg(RecoveryInProgress(dataset33.ref, 0, coordinatorActor, 28))
-    expectMsg(RecoveryInProgress(dataset33.ref, 0, coordinatorActor, 64))
-    expectMsg(RecoveryInProgress(dataset33.ref, 0, coordinatorActor, 100))
-    expectMsg(IngestionStarted(dataset33.ref, 0, coordinatorActor))
+    // expectMsg(RecoveryInProgress(dataset33.ref, 0, coordinatorActor, 28))
+    // expectMsg(RecoveryInProgress(dataset33.ref, 0, coordinatorActor, 64))
+    // expectMsg(RecoveryInProgress(dataset33.ref, 0, coordinatorActor, 100))
+    // expectMsg(IngestionStarted(dataset33.ref, 0, coordinatorActor))
 
-    expectMsg(IngestionStopped(dataset33.ref, 0))
+    // expectMsg(IngestionStopped(dataset33.ref, 0))
+    // Unfortunately since we do not get every message we cannot actually check the progression of recovery
+    expectMsgPF(within) {
+      case CurrentShardSnapshot(dataset33.ref, mapper) =>
+        mapper.shardsForCoord(coordinatorActor) shouldEqual Seq(0)
+        mapper.statuses.toSeq shouldEqual Seq(ShardStatusStopped)
+    }
 
     // Check the number of rows
     coordinatorActor ! GetIngestionStats(dataset33.ref)
@@ -216,7 +220,15 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem) wi
 
     stream.routeToShards(shardMap, dataset6, protocolActor)
 
+    // Not stopped, because routeToShards and noOpSource does not have an end
+    expectMsgPF(within) {
+      case CurrentShardSnapshot(dataset6.ref, mapper) =>
+        mapper.shardsForCoord(coordinatorActor) shouldEqual Seq(0)
+        mapper.statuses.toSeq shouldEqual Seq(ShardStatusActive)
+    }
+
     Thread sleep 2000 // time to accumulate 199 below
+
     coordinatorActor ! GetIngestionStats(dataset6.ref)
     expectMsg(IngestionActor.IngestionStatus(199))
   }

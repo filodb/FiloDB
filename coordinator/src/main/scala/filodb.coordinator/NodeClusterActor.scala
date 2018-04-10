@@ -1,6 +1,7 @@
 package filodb.coordinator
 
 import scala.collection.mutable.{HashMap => MutableHashMap, HashSet => MutableHashSet}
+import scala.concurrent.duration._
 import scala.concurrent.Future
 
 import akka.actor._
@@ -104,6 +105,9 @@ object NodeClusterActor {
   private[coordinator] final case class ActorArgs(singletonProxy: ActorRef,
                                                   guardian: ActorRef,
                                                   watcher: ActorRef)
+
+  private[coordinator] case object PublishSnapshot
+
   /**
     * Creates a new NodeClusterActor.
     *
@@ -146,7 +150,6 @@ object NodeClusterActor {
  * can restart automatically for datasets previously set up.
  *
  * TODO: implement UnregisterDataset?  Any state change -> reassign shards?
- * TODO: implement get cluster state
  *
  * There should only be ONE of these for a given cluster.
  *
@@ -180,6 +183,11 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
   val shardManager = new ShardManager(assignmentStrategy)
   val localRemoteAddr = RemoteAddressExtension(context.system).address
   var everybodyLeftSender: Option[ActorRef] = None
+  val shardUpdates = new MutableHashSet[DatasetRef]
+
+  val publishInterval = settings.ShardMapPublishFrequency
+
+  var pubTask: Option[Cancellable] = None
 
   override def preStart(): Unit = {
     super.preStart()
@@ -203,6 +211,9 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
   override def postStop(): Unit = {
     super.postStop()
     cluster.unsubscribe(self)
+    pubTask foreach (_.cancel)
+    // Publish one last update
+    datasets.keys.foreach(shardManager.publishSnapshot)
     watcher ! NodeProtocol.PostStop(singletonProxy, cluster.selfAddress)
   }
 
@@ -299,7 +310,16 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
       // NOW, subscribe to cluster membership state and then switch to normal receiver
       logger.info("Subscribing to cluster events and switching to normalReceive")
       cluster.subscribe(self, initialStateMode = InitialStateAsSnapshot, classOf[MemberEvent])
+      scheduleSnapshotPublishes()
       context.become(normalReceive)
+  }
+
+  // The idea behind state updates is that they are cached and published as an entire ShardMapper snapshot periodically
+  // This way it is much less likely for subscribers to miss individual events.
+  // handleEventEnvelope() currently acks right away, so there is a chance that this actor dies between receiving
+  // a new event and the new snapshot is published.
+  private def scheduleSnapshotPublishes() = {
+    pubTask = Some(context.system.scheduler.schedule(1.second, publishInterval, self, PublishSnapshot))
   }
 
   def shardMapHandler: Receive = LoggingReceive {
@@ -309,11 +329,25 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
   }
 
   def subscriptionHandler: Receive = LoggingReceive {
-    case e: ShardEvent            => logger.debug(s"Received ShardEvent $e from $sender")
-                                     shardManager.updateFromShardEventAndPublish(e)
+    case e: ShardEvent            => handleShardEvent(e)
+    case e: StatusActor.EventEnvelope => handleEventEnvelope(e, sender())
+    case PublishSnapshot          => shardUpdates.foreach(shardManager.publishSnapshot)
+                                     shardUpdates.clear()
     case e: SubscribeShardUpdates => subscribe(e.ref, sender())
     case SubscribeAll             => subscribeAll(sender())
     case Terminated(subscriber)   => context unwatch subscriber
+  }
+
+  private def handleShardEvent(e: ShardEvent) = {
+    logger.debug(s"Received ShardEvent $e from $sender")
+    shardUpdates += e.ref
+    shardManager.updateFromShardEvent(e)
+  }
+
+  // TODO: Save acks for when snapshots are published?
+  private def handleEventEnvelope(e: StatusActor.EventEnvelope, ackTo: ActorRef) = {
+    e.events.foreach(handleShardEvent)
+    ackTo ! StatusActor.StatusAck(e.sequence)
   }
 
   /** Send a message to recover the current shard maps and subscriptions from the Guardian of local node. */
@@ -396,6 +430,7 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
       logger.info("Resetting all dataset state except membership.")
       datasets.clear()
       sources.clear()
+      shardUpdates.clear()
 
       implicit val timeout: Timeout = DefaultTaskTimeout
       shardManager.reset()

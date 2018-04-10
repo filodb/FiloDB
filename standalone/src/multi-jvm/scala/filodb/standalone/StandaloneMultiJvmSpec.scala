@@ -1,6 +1,5 @@
 package filodb.standalone
 
-import scala.collection.mutable.HashSet
 import scala.concurrent.duration._
 
 import akka.actor.ActorRef
@@ -67,11 +66,11 @@ abstract class StandaloneMultiJvmSpec(config: MultiNodeConfig) extends MultiNode
   }
 
   def waitAllShardsIngestionActive(): Unit = {
-    val activeShards = new HashSet[Int]()
-    while (activeShards.size < numShards) {
+    var activeShards = 0
+    while (activeShards < numShards) {
       expectMsgPF(duration) {
-        case ShardAssignmentStarted(_, shard, _) =>
-        case IngestionStarted(_, shard, _) => activeShards += shard
+        case CurrentShardSnapshot(ref, map) =>
+          activeShards = map.activeShards(0 until map.numShards).length
       }
     }
   }
