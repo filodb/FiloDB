@@ -46,6 +46,7 @@ private[coordinator] class StatusActor(clusterProxy: ActorRef, ackTimeout: Finit
   var ackedSeqNo = -1
   val updatedRefs = new HashSet[DatasetRef]
   var scheduledCheck: Option[Cancellable] = None
+  var _proxy = clusterProxy
 
   val scheduler = context.system.scheduler
   import context.dispatcher
@@ -56,6 +57,7 @@ private[coordinator] class StatusActor(clusterProxy: ActorRef, ackTimeout: Finit
     case StatusAck(seqNo) => handleAck(seqNo)
     case CheckAck         => checkAck()
     case GetCurrentEvents => sender() ! statuses.mapValues(_.values.toBuffer)
+    case newProxy: ActorRef => _proxy = newProxy
   }
 
   private def updateStatuses(event: ShardEvent) = {
@@ -69,7 +71,7 @@ private[coordinator] class StatusActor(clusterProxy: ActorRef, ackTimeout: Finit
     sequenceNo += 1
     logger.debug(s"Sending events for refs $updatedRefs, sequenceNo=$sequenceNo")
     updatedRefs.foreach { ref =>
-      clusterProxy ! EventEnvelope(sequenceNo, statuses(ref).values.toSeq)
+      _proxy ! EventEnvelope(sequenceNo, statuses(ref).values.toSeq)
     }
     scheduledCheck = Some(scheduler.scheduleOnce(ackTimeout, self, CheckAck))
   }

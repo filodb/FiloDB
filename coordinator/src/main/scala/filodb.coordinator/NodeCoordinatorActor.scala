@@ -207,6 +207,8 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
     clusterActor = Some(e.clusterActor)
     if (!statusActor.isDefined) {
       statusActor = Some(context.actorOf(StatusActor.props(e.clusterActor, statusAckTimeout), "status"))
+    } else {
+      statusActor.get ! e.clusterActor    // update proxy.  NOTE: this is temporary fix
     }
   }
 
