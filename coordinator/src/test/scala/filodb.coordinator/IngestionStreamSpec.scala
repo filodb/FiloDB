@@ -33,7 +33,7 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem) wi
                             .withFallback(ConfigFactory.load("application_test.conf"))
                             .getConfig("filodb")
 
-  private val within = 7.seconds.dilated
+  private val within = 20.seconds.dilated
   private val cluster = FilodbCluster(system)
   cluster.join()
 
@@ -85,6 +85,7 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem) wi
       case CurrentShardSnapshot(ds, mapper) =>
         shardMap = mapper
         shardMap.numShards shouldEqual command.resources.numShards
+        mapper.statuses.head shouldEqual ShardStatusAssigned
     }
   }
 
@@ -93,10 +94,11 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem) wi
   // but then we need to query for it.
   it("should fail if cannot parse input RowReader during coordinator ingestion") {
     setup(dataset33.ref, "/GDELT-sample-test-errors.csv", rowsToRead = 5, None)
+
     expectMsgPF(within) {
       case CurrentShardSnapshot(dataset33.ref, mapper) =>
         mapper.shardsForCoord(coordinatorActor) shouldEqual Seq(0)
-        mapper.statuses.toSeq shouldEqual Seq(ShardStatusStopped)
+        mapper.statuses.head shouldEqual ShardStatusStopped
     }
 
     // expectMsg(IngestionStopped(dataset33.ref, 0))
@@ -115,11 +117,13 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem) wi
 
     val invalidShard = -1
     coordinatorActor ! StartShardIngestion(dataset6.ref, invalidShard, None)
+
     expectMsgPF(within) {
       case CurrentShardSnapshot(dataset6.ref, mapper) =>
         mapper.shardsForCoord(coordinatorActor) shouldEqual Seq(0)
-        mapper.statuses.toSeq shouldEqual Seq(ShardStatusStopped)
+        mapper.statuses.head shouldEqual ShardStatusStopped
     }
+
   }
 
   // TODO: consider getting rid of this test, it's *almost* the same as the next one
@@ -136,7 +140,7 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem) wi
     expectMsgPF(within) {
       case CurrentShardSnapshot(dataset6.ref, mapper) =>
         mapper.shardsForCoord(coordinatorActor) shouldEqual Seq(0)
-        mapper.statuses.toSeq shouldEqual Seq(ShardStatusStopped)
+        mapper.statuses.head shouldEqual ShardStatusStopped
     }
 
     val func = (coordinatorActor ? GetIngestionStats(dataset6.ref)).mapTo[IngestionStatus]
@@ -152,7 +156,7 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem) wi
     expectMsgPF(within) {
       case CurrentShardSnapshot(dataset33.ref, mapper) =>
         mapper.shardsForCoord(coordinatorActor) shouldEqual Seq(0)
-        mapper.statuses.toSeq shouldEqual Seq(ShardStatusStopped)
+        mapper.statuses.head shouldEqual ShardStatusStopped
     }
 
     coordinatorActor ! GetIngestionStats(DatasetRef(dataset33.name))
@@ -194,7 +198,7 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem) wi
     expectMsgPF(within) {
       case CurrentShardSnapshot(dataset33.ref, mapper) =>
         mapper.shardsForCoord(coordinatorActor) shouldEqual Seq(0)
-        mapper.statuses.toSeq shouldEqual Seq(ShardStatusStopped)
+        mapper.statuses.head shouldEqual ShardStatusStopped
     }
 
     // Check the number of rows
@@ -224,7 +228,7 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem) wi
     expectMsgPF(within) {
       case CurrentShardSnapshot(dataset6.ref, mapper) =>
         mapper.shardsForCoord(coordinatorActor) shouldEqual Seq(0)
-        mapper.statuses.toSeq shouldEqual Seq(ShardStatusActive)
+        mapper.statuses.head shouldEqual ShardStatusActive
     }
 
     Thread sleep 2000 // time to accumulate 199 below
