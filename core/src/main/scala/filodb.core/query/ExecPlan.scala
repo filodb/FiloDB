@@ -1,6 +1,5 @@
 package filodb.core.query
 
-import com.typesafe.scalalogging.StrictLogging
 import monix.eval.Task
 import monix.reactive.Observable
 
@@ -16,7 +15,7 @@ import filodb.memory.format.FastFiloRowReader
  * Every ExecPlan is part of a flow from children's outputs and yields its own output type.
  * Each ExecPlan node can also transform the schema.
  */
-abstract class ExecPlan[I: ResultMaker, O: ResultMaker] extends StrictLogging {
+abstract class ExecPlan[I: ResultMaker, O: ResultMaker]{
   def children: Seq[ExecPlan[_, I]]
 
   /**
