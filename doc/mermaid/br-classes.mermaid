@@ -1,0 +1,18 @@
+classDiagram
+RecordSchema *-- Field
+RecordSchema : getInt()
+RecordSchema : utf8StringPointer()
+RecordSchema <|-- IngestionRecordSchema
+IngestionRecordSchema : Dataset dataset
+IngestionRecordSchema : partitionHashCode()
+IngestionRecordSchema : comparePartitionKeyFields()
+Field <|-- IntField
+Field <|-- DoubleField
+Field <|-- LongField
+Field <|-- MapField
+Field <|-- UTF8Field
+BinaryRecordBuilder o-- RecordSchema
+BinaryRecordBuilder : startNewRecord()
+BinaryRecordBuilder : addLong()
+BinaryRecordBuilder : addDouble()
+BinaryRecordBuilder : endRecord()
