@@ -7,9 +7,9 @@ import org.joda.time.DateTime
 
 import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.memstore.{IngestRecord, IngestRouting}
-import filodb.core.metadata.{Column, Dataset}
-import filodb.core.store._
+import filodb.core.metadata.{Column, Dataset, DatasetOptions}
 import filodb.core.Types.PartitionKey
+import filodb.core.store._
 import filodb.memory.format._
 import filodb.memory.format.ZeroCopyUTF8String._
 
@@ -212,4 +212,14 @@ object MachineMetricsData {
 
   def withMap(data: Stream[Seq[Any]], n: Int = 5): Stream[Seq[Any]] =
     data.zipWithIndex.map { case (row, idx) => row :+ Map("n".utf8 -> (idx % n).toString.utf8) }
+}
+
+object MetricsTestData {
+
+  val timeseriesDataset = Dataset.make("timeseries",
+                                  Seq("tags:map"),
+                                  Seq("timestamp:long", "value:double"),
+                                  Seq("timestamp"),
+                                  DatasetOptions(Seq("__name__", "job"), "__name__", "value"))
+
 }

@@ -26,6 +26,8 @@ object Filter {
     private val rightFunc = right.filterFunc
     val filterFunc = (item: Any) => leftFunc(item) && rightFunc(item)
   }
+
+  // TODO NotEquals, EqualsRegex, NotEqualsRegex
 }
 
 final case class ColumnFilter(column: String, filter: Filter)

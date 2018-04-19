@@ -15,6 +15,7 @@ import monix.eval.Task
 import org.scalactic._
 
 import filodb.coordinator.client.QueryCommand
+import filodb.coordinator.queryengine2.QueryEngine
 import filodb.core._
 import filodb.core.binaryrecord.{BinaryRecord, RecordSchema}
 import filodb.core.memstore.MemStore
@@ -24,6 +25,8 @@ import filodb.core.store._
 import filodb.memory.MemFactory
 import filodb.memory.format.{Classes, SeqRowReader}
 import filodb.memory.format.vectors.{DoubleVector, IntBinaryVector}
+import filodb.query.{QueryError => QueryError2}
+import filodb.query.exec.{ExecPlan => ExecPlan2}
 
 object QueryCommandPriority extends java.util.Comparator[Envelope] {
   override def compare(o1: Envelope, o2: Envelope): Int = {
@@ -76,6 +79,9 @@ final class QueryActor(memStore: MemStore,
 
   implicit val scheduler = monix.execution.Scheduler(context.dispatcher)
   val config = context.system.settings.config
+
+  val queryEngine2 = new QueryEngine(dataset, shardMapFunc)
+  val queryAskTimeout = Duration.fromNanos(config.getDuration("filodb.query.ask.timeout").toNanos)
 
   def validateFunction(funcName: String): AggregationFunction Or ErrorResponse =
     AggregationFunction.withNameInsensitiveOption(funcName)
@@ -271,6 +277,21 @@ final class QueryActor(memStore: MemStore,
   }
 
   def receive: Receive = {
+    case q: LogicalPlan2Query      => // This is for CLI use only. Always prefer clients to materialize logical plan
+                                      val execPlan = queryEngine2.materialize(q.logicalPlan, q.queryOptions)
+                                      val replyTo = sender()
+                                      implicit val _ = queryAskTimeout
+                                      queryEngine2.dispatchExecPlan(execPlan)
+                                        .foreach(replyTo ! _)
+                                        .recover { case ex => replyTo ! QueryError2(execPlan.id, ex) }
+
+    case q: ExecPlan2              => val replyTo = sender()
+                                      Kamon.currentSpan().tag("query", q.getClass.getSimpleName)
+                                      implicit val _ = queryAskTimeout
+                                      q.execute(memStore, dataset)
+                                        .foreach(replyTo ! _)
+                                        .recover { case ex => replyTo ! QueryError2(q.id, ex) }
+
     case q: LogicalPlanQuery       => Kamon.currentSpan().tag("query", q.plan.getClass.getSimpleName)
                                       parseQueryPlan(q, sender())
     case q: ExecPlanQuery          => Kamon.currentSpan().tag("query", q.execPlan.getClass.getSimpleName)
@@ -289,4 +310,5 @@ final class QueryActor(memStore: MemStore,
       logger.warn(s"Throwing exception for dataset $dataset. QueryActor will be killed")
       throw new RuntimeException
   }
+
 }

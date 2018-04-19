@@ -33,7 +33,14 @@ lazy val coordinator = project
     "com.typesafe.akka" %% "akka-contrib" % akkaVersion exclude(
       "com.typesafe.akka", s"akka-persistence-experimental_${scalaBinaryVersion.value}"))
   .dependsOn(core % "compile->compile; test->test")
+  .dependsOn(query % "compile->compile; test->test")
   .configs(MultiJvm)
+
+lazy val query = project
+  .in(file("query"))
+  .settings(commonSettings: _*)
+  .settings(name := "filodb-query")
+  .dependsOn(core % "compile->compile; test->test")
 
 lazy val cassandra = project
   .in(file("cassandra"))

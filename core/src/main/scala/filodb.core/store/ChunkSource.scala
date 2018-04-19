@@ -6,9 +6,12 @@ import kamon.Kamon
 import monix.reactive.Observable
 
 import filodb.core._
+import filodb.core.Types.PartitionKey
 import filodb.core.metadata.Dataset
 import filodb.core.query.{ChunkSetReader, PartitionInfo, PartitionVector}
-import filodb.core.Types.PartitionKey
+import filodb.core.query.{ChunkSetBackedRangeVector, RangeVector, RangeVectorKey}
+import filodb.memory.format.RowReader
+
 
 /**
  * ChunkSource is the base trait for a source of chunks given a `PartitionScanMethod` and a
@@ -83,6 +86,20 @@ trait ChunkSource {
         stats.incrReadPartitions(1)
         val info = PartitionInfo(partition.binPartition, partition.shard)
         PartitionVector(Some(info), partition.readers(chunkMethod, ids).toBuffer)
+      }
+  }
+
+  def rangeVectors(dataset: Dataset,
+                   columnIDs: Seq[Types.ColumnId],
+                   partMethod: PartitionScanMethod,
+                   ordering: Ordering[RowReader],
+                   chunkMethod: ChunkScanMethod): Observable[RangeVector] = {
+    val ids = columnIDs.toArray
+    scanPartitions(dataset, partMethod)
+      .map { partition =>
+        stats.incrReadPartitions(1)
+        val key = RangeVectorKey(partition.binPartition, Seq(partition.shard))
+        ChunkSetBackedRangeVector(key, chunkMethod, ordering, partition.readers(chunkMethod, ids))
       }
   }
 

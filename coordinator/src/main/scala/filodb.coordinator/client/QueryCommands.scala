@@ -1,6 +1,7 @@
 package filodb.coordinator.client
 
 import filodb.core.query.{ColumnFilter, CombinerFunction, ExecPlan, Result}
+import filodb.query.{LogicalPlan => LogicalPlan2}
 
 object QueryCommands {
   import filodb.core._
@@ -76,6 +77,11 @@ object QueryCommands {
                                     plan: LogicalPlan,
                                     queryOptions: QueryOptions = QueryOptions(),
                                     submitTime: Long = System.currentTimeMillis()) extends QueryCommand
+
+  final case class LogicalPlan2Query(dataset: DatasetRef,
+                               logicalPlan: LogicalPlan2,
+                               queryOptions: QueryOptions = QueryOptions(),
+                               submitTime: Long = System.currentTimeMillis()) extends QueryCommand
 
   /**
    * INTERNAL API only.

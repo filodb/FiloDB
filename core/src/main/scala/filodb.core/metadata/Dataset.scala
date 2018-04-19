@@ -250,12 +250,13 @@ object Dataset {
   def make(name: String,
            partitionColNameTypes: Seq[String],
            dataColNameTypes: Seq[String],
-           keyColumnNames: Seq[String]): Dataset Or BadSchema =
+           keyColumnNames: Seq[String],
+           options: DatasetOptions = DatasetOptions.DefaultOptions): Dataset Or BadSchema =
     for { partColumns <- Column.makeColumnsFromNameTypeList(partitionColNameTypes, PartColStartIndex)
           dataColumns <- Column.makeColumnsFromNameTypeList(dataColNameTypes)
           nothing     <- validateMapColumn(partColumns, dataColumns)
           rowKeyIDs   <- getRowKeyIDs(dataColumns, keyColumnNames) }
     yield {
-      Dataset(name, partColumns, dataColumns, rowKeyIDs)
+      Dataset(name, partColumns, dataColumns, rowKeyIDs, None, options)
     }
 }
