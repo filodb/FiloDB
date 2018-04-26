@@ -338,13 +338,28 @@ trait AppendableVectorWrapper[@specialized(Int, Long, Double, Boolean) A, I] ext
   override def dispose: () => Unit = inner.dispose
 }
 
+trait OptimizingPrimitiveAppender[@specialized(Int, Long, Double, Boolean) A] extends BinaryAppendableVector[A] {
+  def minMax: (A, A)
+  def nbits: Short
+
+  /**
+   * Extract just the data vector with no NA mask or overhead
+   */
+  def dataVect(memFactory: MemFactory): BinaryVector[A]
+
+  /**
+   * Extracts the entire vector including NA information
+   */
+  def getVect(memFactory: MemFactory): BinaryVector[A] = freeze(memFactory)
+}
+
 /**
  * A BinaryAppendableVector for simple primitive types, ie where each element has a fixed length
  * and every element is available (there is no bitmap NA mask).
  */
 abstract class PrimitiveAppendableVector[@specialized(Int, Long, Double, Boolean) A]
-  (val base: Any, val offset: Long, val maxBytes: Int, nbits: Short, signed: Boolean)
-extends BinaryAppendableVector[A] {
+  (val base: Any, val offset: Long, val maxBytes: Int, val nbits: Short, signed: Boolean)
+extends OptimizingPrimitiveAppender[A] {
   val vectMajorType = WireFormat.VECTORTYPE_BINSIMPLE
   val vectSubType = WireFormat.SUBTYPE_PRIMITIVE_NOMASK
   var writeOffset: Long = offset + 4
@@ -381,6 +396,8 @@ extends BinaryAppendableVector[A] {
   final def isAllNA: Boolean = (length == 0)
   final def noNAs: Boolean = (length > 0)
   val maybeNAs = false
+
+  final def dataVect(memFactory: MemFactory): BinaryVector[A] = freeze(memFactory)
 
   def reset(): Unit = {
     writeOffset = offset + 4

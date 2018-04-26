@@ -99,10 +99,15 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem) wi
   it("should fail if cannot parse input RowReader during coordinator ingestion") {
     setup(dataset33.ref, "/GDELT-sample-test-errors.csv", rowsToRead = 5, None)
 
-    expectMsgPF(within) {
-      case CurrentShardSnapshot(dataset33.ref, mapper) =>
-        mapper.shardsForCoord(coordinatorActor) shouldEqual Seq(0)
-        mapper.statuses.head shouldEqual ShardStatusStopped
+    var latestStatus: ShardStatus = ShardStatusAssigned
+    // sometimes we receive multiple status snapshots
+    while (latestStatus != ShardStatusStopped) {
+      expectMsgPF(within) {
+        case CurrentShardSnapshot(dataset33.ref, mapper) =>
+          mapper.shardsForCoord(coordinatorActor) shouldEqual Seq(0)
+          latestStatus = mapper.statuses.head
+      }
+      info(s"Latest status = $latestStatus")
     }
 
     // expectMsg(IngestionStopped(dataset33.ref, 0))

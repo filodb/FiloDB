@@ -33,19 +33,20 @@ object VectorReader {
   implicit object LongVectorReader extends PrimitiveVectorReader[Long] {
 
     override val otherMaker: PartialFunction[(Int, Int, ByteBuffer), FiloVector[Long]] = {
-      case (VECTORTYPE_BINSIMPLE, SUBTYPE_INT, b)        => LongBinaryVector.fromMaskedIntBuf(b)
-      case (VECTORTYPE_BINSIMPLE, SUBTYPE_INT_NOMASK, b) => vectors.LongBinaryVector.fromIntBuf(b)
-      case (VECTORTYPE_BINSIMPLE, SUBTYPE_REPEATED, b)   => vectors.LongBinaryVector.const(b)
       case (VECTORTYPE_DELTA2,    SUBTYPE_INT_NOMASK, b) => DeltaDeltaVector(b)
+      case (VECTORTYPE_DELTA2,    SUBTYPE_REPEATED, b)   => DeltaDeltaVector.const(b)
       case (VECTORTYPE_BINSIMPLE, SUBTYPE_PRIMITIVE, b)  => vectors.LongBinaryVector.masked(b)
       case (VECTORTYPE_BINSIMPLE, SUBTYPE_PRIMITIVE_NOMASK, b) => vectors.LongBinaryVector(b)
+      // deprecated, not in use anymore
+      case (VECTORTYPE_BINSIMPLE, SUBTYPE_INT, b)        => LongBinaryVector.fromMaskedIntBuf(b)
+      case (VECTORTYPE_BINSIMPLE, SUBTYPE_INT_NOMASK, b) => vectors.LongBinaryVector.fromIntBuf(b)
     }
   }
 
   implicit object DoubleVectorReader extends PrimitiveVectorReader[Double] {
     override val otherMaker: PartialFunction[(Int, Int, ByteBuffer), FiloVector[Double]] = {
-      case (VECTORTYPE_BINSIMPLE, SUBTYPE_INT, b)        => DoubleVector.fromMaskedIntBuf(b)
-      case (VECTORTYPE_BINSIMPLE, SUBTYPE_INT_NOMASK, b) => vectors.DoubleVector.fromIntBuf(b)
+      case (VECTORTYPE_DELTA2,    SUBTYPE_INT_NOMASK, b) => DoubleVector.fromDDVBuf(b)
+      case (VECTORTYPE_DELTA2,    SUBTYPE_REPEATED, b)   => DoubleVector.fromConstDDVBuf(b)
       case (VECTORTYPE_BINSIMPLE, SUBTYPE_REPEATED, b)   => vectors.DoubleVector.const(b)
       case (VECTORTYPE_BINSIMPLE, SUBTYPE_PRIMITIVE, b)  => vectors.DoubleVector.masked(b)
       case (VECTORTYPE_BINSIMPLE, SUBTYPE_PRIMITIVE_NOMASK, b) => vectors.DoubleVector(b)

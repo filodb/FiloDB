@@ -10,11 +10,10 @@ class IntBinaryVectorTest extends FunSpec with Matchers {
 
   describe("IntAppendingVector") {
     it("should append a mix of Ints and read them all back") {
-      val builder = IntBinaryVector.appendingVectorNoNA(memFactory, 4)
       val orig = Seq(1, 2, -5, 101)
-      orig.foreach(x => builder.addData(x) shouldEqual Ack)
-      builder.length should equal (4)
-      builder.freeze(memFactory).toSeq should equal (orig)
+      val builder = IntBinaryVector(memFactory, orig)
+      builder.length shouldEqual 4
+      builder.freeze(memFactory).toSeq shouldEqual orig
     }
 
     it("should append 16-bit Ints and read them back") {
@@ -86,6 +85,18 @@ class IntBinaryVectorTest extends FunSpec with Matchers {
 
       val intVect = FiloVector[Int](builder.toFiloBuffer)
       intVect.toSeq should equal (orig)
+    }
+
+    it("should optimize even with NoNA vectors to less nbits") {
+      val orig = Seq(0, 2, 1, 3, 2)
+      val builder1 = IntBinaryVector(memFactory, orig)
+      val intVect = builder1.optimize(memFactory)
+      intVect.toSeq should equal (orig)
+      intVect.numBytes shouldEqual 6
+
+      val builder2 = IntBinaryVector.appendingVectorNoNA(memFactory, 10)
+      orig.foreach(x => builder2.addData(x) shouldEqual Ack)
+      builder2.optimize(memFactory).numBytes shouldEqual 6
     }
   }
 

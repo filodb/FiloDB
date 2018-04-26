@@ -102,31 +102,35 @@ class DoubleVectorTest extends FunSpec with Matchers {
       readVect.toSeq should equal (Seq(101.0, 102.0, 103.7))
     }
 
-    it("should be able to optimize all integral vector to IntBinaryVector") {
-      val builder = DoubleVector(memFactory, (0 to 4).map(_.toDouble))
+    it("should be able to optimize all integral vector to DeltaDeltaVector") {
+      val orig = (0 to 9).map(_.toDouble)
+      val builder = DoubleVector(memFactory, orig)
       val optimized = builder.optimize(memFactory)
-      optimized.length should equal (5)
-      optimized.toSeq should equal (0 to 4)
-      optimized(0) should equal (0.0)
-      optimized.numBytes should equal (4 + 3)   // nbits=4, so only 3 extra bytes
+      optimized.length shouldEqual 10
+      optimized.isOffheap shouldEqual true
+      optimized.toSeq shouldEqual orig
+      optimized(0) shouldEqual 0.0
+      optimized.numBytes shouldEqual 16   // Const DeltaDeltaVector (since this is linearly increasing)
       val readVect = FiloVector[Double](optimized.toFiloBuffer)
-      readVect.toSeq should equal (0 to 4)
+      readVect.toSeq shouldEqual orig
     }
 
-    it("should be able to optimize off-heap all integral vector to IntBinaryVector") {
-      val builder = DoubleVector.appendingVector(memFactory, 100)
-      (0 to 4).map(_.toDouble).foreach(builder.addData)
+    it("should be able to optimize off-heap No NA integral vector to DeltaDeltaVector") {
+      val builder = DoubleVector.appendingVectorNoNA(memFactory, 100)
+      // Use higher numbers to verify they can be encoded efficiently too
+      (100000 to 100004).map(_.toDouble).foreach(builder.addData)
       val optimized = builder.optimize(memFactory)
       optimized.length shouldEqual 5
       optimized.isOffheap shouldEqual true
-      optimized.toSeq should equal (0 to 4)
-      optimized(0) should equal (0.0)
-      optimized.numBytes should equal (4 + 3)   // nbits=4, so only 3 extra bytes
+      optimized.toSeq should equal (100000 to 100004)
+      optimized(2) should equal (100002.0)
+      optimized.numBytes should equal (16)   // nbits=4, so only 3 extra bytes
       val readVect = FiloVector[Double](optimized.toFiloBuffer)
-      readVect.toSeq should equal (0 to 4)
+      readVect.toSeq should equal (100000 to 100004)
     }
 
-    it("should be able to optimize constant Doubles to an IntConstVector") {
+    // Not supported right now
+    ignore("should be able to optimize constant Doubles to an IntConstVector") {
       val builder = DoubleVector.appendingVector(memFactory, 100)
       (0 to 4).foreach(n => builder.addData(99.9))
       val buf = builder.optimize(memFactory).toFiloBuffer

@@ -151,12 +151,12 @@ class KryoInit {
 
     val longBinVectSer = new BinaryVectorSerializer[Long]
     kryo.register(classOf[BV.DeltaDeltaVector], longBinVectSer)
+    kryo.register(classOf[BV.DeltaDeltaConstVector], longBinVectSer)
     kryo.register(classOf[BV.LongBinaryVector], longBinVectSer)
     kryo.register(classOf[BV.MaskedLongBinaryVector], longBinVectSer)
     kryo.register(classOf[BV.MaskedLongAppendingVector], longBinVectSer)
     kryo.register(classOf[BV.LongAppendingVector], longBinVectSer)
     kryo.register(classOf[BV.LongIntWrapper], longBinVectSer)
-    kryo.register(classOf[BV.LongConstVector], longBinVectSer)
     kryo.register(classOf[filodb.memory.format.GrowableVector$mcJ$sp], longBinVectSer)
 
     val doubleBinVectSer = new BinaryVectorSerializer[Double]
@@ -164,7 +164,7 @@ class KryoInit {
     kryo.register(classOf[BV.MaskedDoubleBinaryVector], doubleBinVectSer)
     kryo.register(classOf[BV.MaskedDoubleAppendingVector], doubleBinVectSer)
     kryo.register(classOf[BV.DoubleAppendingVector], doubleBinVectSer)
-    kryo.register(classOf[BV.DoubleIntWrapper], doubleBinVectSer)
+    kryo.register(classOf[BV.DoubleLongWrapper], doubleBinVectSer)
     kryo.register(classOf[BV.DoubleConstVector], doubleBinVectSer)
     kryo.register(classOf[filodb.memory.format.GrowableVector$mcD$sp], doubleBinVectSer)
 

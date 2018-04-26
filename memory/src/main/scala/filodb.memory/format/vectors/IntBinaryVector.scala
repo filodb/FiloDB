@@ -107,7 +107,7 @@ object IntBinaryVector {
    * Quickly create an IntBinaryVector from a sequence of Ints which can be optimized.
    */
   def apply(memFactory: MemFactory, data: Seq[Int]): BinaryAppendableVector[Int] = {
-    val vect = appendingVector(memFactory, data.length)
+    val vect = appendingVectorNoNA(memFactory, data.length)
     data.foreach(vect.addData)
     vect
   }
@@ -197,7 +197,7 @@ object IntBinaryVector {
    * if all values are not NA.
    * The output is a frozen BinaryVector with optimized nbits and without mask if appropriate.
    */
-  def optimize(memFactory: MemFactory, vector: MaskedIntAppending): BinaryVector[Int] = {
+  def optimize(memFactory: MemFactory, vector: OptimizingPrimitiveAppender[Int]): BinaryVector[Int] = {
     // Get nbits and signed
     val (min, max) = vector.minMax
     val (nbits, signed) = minMaxToNbitsSigned(min, max)
@@ -267,15 +267,22 @@ extends PrimitiveAppendableVector[Int](base, offset, maxBytes, nbits, signed) {
 
   final def addFromReaderNoNA(reader: RowReader, col: Int): AddResponse = addData(reader.getInt(col))
 
+  final def minMax: (Int, Int) = {
+    var min = Int.MaxValue
+    var max = Int.MinValue
+    for { index <- 0 until length optimized } {
+      val data = readVect.apply(index)
+      if (data < min) min = data
+      if (data > max) max = data
+    }
+    (min, max)
+  }
+
+  override def optimize(memFactory: MemFactory, hint: EncodingHint = AutoDetect): BinaryVector[Int] =
+    IntBinaryVector.optimize(memFactory, this)
+
   override def finishCompaction(newBase: Any, newOff: Long): BinaryVector[Int] =
     IntBinaryVector(newBase, newOff, numBytes, dispose)
-}
-
-trait MaskedIntAppending extends BinaryAppendableVector[Int] {
-  def minMax: (Int, Int)
-  def nbits: Short
-  def dataVect(memFactory: MemFactory): BinaryVector[Int]
-  def getVect(memFactory: MemFactory): BinaryVector[Int] = freeze(memFactory)
 }
 
 class MaskedIntAppendingVector(base: Any,
@@ -286,7 +293,7 @@ class MaskedIntAppendingVector(base: Any,
                                signed: Boolean,
                                val dispose: () => Unit) extends
 // First four bytes: offset to SimpleIntBinaryVector
-BitmapMaskAppendableVector[Int](base, offset + 4L, maxElements) with MaskedIntAppending {
+BitmapMaskAppendableVector[Int](base, offset + 4L, maxElements) with OptimizingPrimitiveAppender[Int] {
   val vectMajorType = WireFormat.VECTORTYPE_BINSIMPLE
   val vectSubType = WireFormat.SUBTYPE_INT
 

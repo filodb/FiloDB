@@ -39,7 +39,7 @@ object DoubleVector {
    * Quickly create a DoubleVector from a sequence of Doubles which can be optimized.
    */
   def apply(memFactory: MemFactory, data: Seq[Double]): BinaryAppendableVector[Double] = {
-    val vect = appendingVector(memFactory, data.length)
+    val vect = appendingVectorNoNA(memFactory, data.length)
     data.foreach(vect.addData)
     vect
   }
@@ -59,31 +59,34 @@ object DoubleVector {
     new DoubleConstVector(base, off, len, BinaryVector.NoOpDispose)
   }
 
-  def fromIntBuf(buf: ByteBuffer): BinaryVector[Double] =
-    new DoubleIntWrapper(IntBinaryVector(buf))
-  def fromMaskedIntBuf(buf: ByteBuffer): BinaryVector[Double] =
-    new DoubleIntWrapper(IntBinaryVector.masked(buf))
+  def fromDDVBuf(buf: ByteBuffer): BinaryVector[Double] =
+    new DoubleLongWrapper(DeltaDeltaVector(buf))
+  def fromConstDDVBuf(buf: ByteBuffer): BinaryVector[Double] =
+    new DoubleLongWrapper(DeltaDeltaVector.const(buf))
 
   /**
-   * Produces a smaller BinaryVector if possible given combination of minimal nbits as well as
-   * if all values are not NA.
-   * Here are the things tried:
-   *  1. If min and max are the same, then a DoubleConstVector is produced.
-   *  2. If all values are integral, then IntBinaryVector is produced (and integer optimization done)
-   *  3. If all values are filled (no NAs) then the bitmask is dropped
+   * For now, since most Prometheus double data is in fact integral, we take a really simple approach:
+   * 1. First if all doubles are integral, use DeltaDeltaVector to encode
+   * 2. If not, don't compress
+   *
+   * In future, try some schemes that work for doubles:
+   * - XOR of initial value, bitshift, store using less bits (similar to Gorilla but not differential)
+   * - Delta2/slope double diff first, shift doubles by offset, then use XOR technique
+   *    (XOR works better when numbers are same sign plus smaller exponent range)
+   * - slightly lossy version of any of above
+   * - http://vis.cs.ucdavis.edu/vis2014papers/TVCG/papers/2674_20tvcg12-lindstrom-2346458.pdf
+   * - (slightly lossy) normalize exponents and convert to fixed point, then compress using int/long techniques
    */
-  def optimize(memFactory: MemFactory, vector: MaskedDoubleAppendingVector): BinaryVector[Double] = {
-    val intWrapper = new IntDoubleWrapper(vector)
-
-    if (intWrapper.binConstVector) {
-      (new DoubleConstAppendingVect(vector.dispose, vector(0), vector.length)).optimize(memFactory)
-    // Check if all integrals. use the wrapper to avoid an extra pass
-    } else if (intWrapper.allIntegrals) {
-      new DoubleIntWrapper(IntBinaryVector.optimize(memFactory, intWrapper))
-    } else if (vector.noNAs) {
-      vector.subVect.freeze(memFactory)
+  def optimize(memFactory: MemFactory, vector: OptimizingPrimitiveAppender[Double]): BinaryVector[Double] = {
+    val longWrapper = new LongDoubleWrapper(vector)
+    if (longWrapper.allIntegrals) {
+      DeltaDeltaVector.fromLongVector(memFactory, longWrapper)
+        .map(new DoubleLongWrapper(_))
+        .getOrElse {
+          if (vector.noNAs) vector.dataVect(memFactory) else vector.getVect(memFactory)
+        }
     } else {
-      vector.freeze(memFactory)
+      if (vector.noNAs) vector.dataVect(memFactory) else vector.getVect(memFactory)
     }
   }
 }
@@ -122,8 +125,22 @@ extends PrimitiveAppendableVector[Double](base, offset, maxBytes, 64, true) {
 
   final def addFromReaderNoNA(reader: RowReader, col: Int): AddResponse = addData(reader.getDouble(col))
 
+  final def minMax: (Double, Double) = {
+    var min = Double.MaxValue
+    var max = Double.MinValue
+    for { index <- 0 until length optimized } {
+      val data = apply(index)
+      if (data < min) min = data
+      if (data > max) max = data
+    }
+    (min, max)
+  }
+
   private final val readVect = new DoubleBinaryVector(base, offset, maxBytes, dispose)
   final def apply(index: Int): Double = readVect.apply(index)
+
+  override def optimize(memFactory: MemFactory, hint: EncodingHint = AutoDetect): BinaryVector[Double] =
+    DoubleVector.optimize(memFactory, this)
 
   override def finishCompaction(newBase: Any, newOff: Long): BinaryVector[Double] =
     new DoubleBinaryVector(newBase, newOff, numBytes, dispose)
@@ -135,9 +152,10 @@ class MaskedDoubleAppendingVector(base: Any,
                                   val maxElements: Int,
                                   val dispose: () => Unit) extends
 // First four bytes: offset to DoubleBinaryVector
-BitmapMaskAppendableVector[Double](base, offset + 4L, maxElements) {
+BitmapMaskAppendableVector[Double](base, offset + 4L, maxElements) with OptimizingPrimitiveAppender[Double] {
   val vectMajorType = WireFormat.VECTORTYPE_BINSIMPLE
   val vectSubType = WireFormat.SUBTYPE_PRIMITIVE
+  val nbits: Short = 64
 
   val subVect = new DoubleAppendingVector(base, offset + subVectOffset, maxBytes - subVectOffset, dispose)
 
@@ -153,6 +171,8 @@ BitmapMaskAppendableVector[Double](base, offset + 4L, maxElements) {
     }
     (min, max)
   }
+
+  final def dataVect(memFactory: MemFactory): BinaryVector[Double] = subVect.freeze(memFactory)
 
   override def optimize(memFactory: MemFactory, hint: EncodingHint = AutoDetect): BinaryVector[Double] =
     DoubleVector.optimize(memFactory, this)
@@ -171,51 +191,28 @@ BitmapMaskAppendableVector[Double](base, offset + 4L, maxElements) {
 }
 
 /**
- * A wrapper around MaskedDoubleAppendingVector that returns Ints.  Designed to feed into IntVector
- * optimizer so that an optimized int representation of double vector can be produced in one pass without
- * appending to another Int based AppendingVector first.
- * If it turns out the optimizer needs the original 32-bit vector, then it calls dataVect / getVect.
+ * A wrapper around Double appenders that returns Longs.  Designed to feed into the Long/DeltaDelta optimizers
+ * so that an optimized int representation of double vector can be produced in one pass without
+ * appending to another Long based AppendingVector first.
  */
-private[vectors] class IntDoubleWrapper(val inner: MaskedDoubleAppendingVector) extends MaskedIntAppending
-with AppendableVectorWrapper[Int, Double] {
-  val (min, max) = inner.minMax
-  def minMax: (Int, Int) = (min.toInt, max.toInt)
-  val nbits: Short = 64
-
+private[vectors] class LongDoubleWrapper(val inner: OptimizingPrimitiveAppender[Double])
+extends AppendableVectorWrapper[Long, Double] {
+  val MaxLongDouble = Long.MaxValue.toDouble
   final def nonIntegrals: Int = {
     var nonInts = 0
     for { index <- 0 until length optimized } {
       if (inner.isAvailable(index)) {
-        val data = inner.subVect.apply(index)
-        if (Math.rint(data) != data) nonInts += 1
+        val data = inner.apply(index)
+        if (data > MaxLongDouble || (Math.rint(data) != data)) nonInts += 1
       }
     }
     nonInts
   }
 
-  val allIntegrals: Boolean =
-    (nonIntegrals == 0) && min >= Int.MinValue.toDouble && max <= Int.MaxValue.toDouble
+  val allIntegrals: Boolean = (nonIntegrals == 0)
 
-  val binConstVector = (min == max) && inner.noNAs
-
-  final def addData(value: Int): AddResponse = inner.addData(value.toDouble)
-  final def apply(index: Int): Int = inner(index).toInt
-
-  def dataVect(memFactory: MemFactory): BinaryVector[Int] = {
-    val vect = IntBinaryVector.appendingVectorNoNA(memFactory, inner.length)
-    for { index <- 0 until length optimized } {
-      vect.addData(inner(index).toInt)
-    }
-    vect.freeze(None)
-  }
-
-  override def getVect(memFactory: MemFactory): BinaryVector[Int] = {
-    val vect = IntBinaryVector.appendingVector(memFactory, inner.length)
-    for { index <- 0 until length optimized } {
-      if (inner.isAvailable(index)) vect.addData(inner(index).toInt) else vect.addNA()
-    }
-    vect.freeze(None)
-  }
+  final def addData(value: Long): AddResponse = inner.addData(value.toDouble)
+  final def apply(index: Int): Long = inner(index).toLong
 }
 
 class DoubleConstVector(base: Any, offset: Long, numBytes: Int, val dispose: () => Unit) extends
@@ -232,12 +229,13 @@ ConstAppendingVector(value, 8, initLen) {
 }
 
 /**
- * A wrapper to return Doubles from an Int vector... for when one can compress Double vectors as IntVectors
+ * A wrapper to return Doubles from a Long vector... for when one can compress Double vectors as DDVs
  */
-class DoubleIntWrapper(inner: BinaryVector[Int]) extends PrimitiveVector[Double] {
+class DoubleLongWrapper(inner: BinaryVector[Long]) extends PrimitiveVector[Double] {
   val base = inner.base
   val offset = inner.offset
   val numBytes = inner.numBytes
+  override val vectMajorType = inner.vectMajorType
   override val vectSubType = inner.vectSubType
 
   final def apply(i: Int): Double = inner(i).toDouble

@@ -2,13 +2,10 @@ package filodb.memory.format.vectors
 
 import java.nio.ByteBuffer
 
-import scala.util.Try
-
 import scalaxy.loops._
 
 import filodb.memory.MemFactory
 import filodb.memory.format._
-import filodb.memory.format.Encodings._
 
 
 /**
@@ -46,33 +43,50 @@ object DeltaDeltaVector {
 
   /**
    * Creates a DeltaDeltaAppendingVector from a source AppendableVector[Long], filling in all
-   * the values as well.  Checks eligibility first based on sampling the input vector.
-   * Determines if the input values kinda look like a slope/line and might benefit from delta-delta
-   * encoding.  The heuristic is extremely simple for now and looks at the first, last, and sample
-   * of other values, unless the vector is really small then we look at everything.
+   * the values as well.  Tries not to create intermediate vectors by figuring out size of deltas from the source.
+   * Eligibility is pretty simple right now:
+   * 1) Vectors with 2 or less elements are excluded. Just doesn't make sense.
+   * 1a) Vectors with any NAs are not eligible
+   * 2) If the deltas end up taking more than maxNBits.  Default is 32, but can be adjusted.
+   *
+   * NOTE: no need to get min max before calling this function.  We figure out min max of deltas, much more important
    * @return Some(vector) if the input vect is eligible, or None if it is not eligible
    */
   def fromLongVector(memFactory: MemFactory,
                      inputVect: BinaryAppendableVector[Long],
-                     min: Long, max: Long,
-                     samples: Int = 4): Option[DeltaDeltaAppendingVector] = {
-    val indexDelta = inputVect.length / (samples + 1)
-    if (inputVect.noNAs && indexDelta > 0) {
-      val diffs = (0 until samples).map { n => inputVect((n + 1) * indexDelta) - inputVect(n * indexDelta) }
-      // Good: all diffs positive, min=first elem, max=last elem
-      if (min == inputVect(0) && max == inputVect(inputVect.length - 1) && diffs.forall(_ > 0)) {
-        for { slope <- getSlope(min, max, inputVect.length)
-              deltaVect = appendingVector(memFactory, inputVect.length, min, slope, 32, true)
-              appended <- Try(deltaVect.addVector(inputVect)).toOption
-        } yield { deltaVect }
-      // TODO(velvia): Maybe add less stringent case of slope fitting, flat or negative slope good too.
-      } else { None }
+                     maxNBits: Short = 32): Option[BinaryVector[Long]] =
+    if (inputVect.noNAs && inputVect.length > 2) {
+      for { slope    <- getSlope(inputVect(0), inputVect(inputVect.length - 1), inputVect.length)
+            minMax   <- getDeltasMinMax(inputVect, slope)
+            nbitsSigned <- getNbitsSignedFromMinMax(minMax, maxNBits)
+      } yield {
+        if (minMax._1 == minMax._2) {
+          const(memFactory, inputVect.length, inputVect(0), slope)
+        } else {
+          val vect = appendingVector(memFactory, inputVect.length, inputVect(0), slope, nbitsSigned._1, nbitsSigned._2)
+          vect.addVector(inputVect)
+          vect.freeze(None)
+        }
+      }
     } else { None }
-  }
 
   def apply(buffer: ByteBuffer): BinaryVector[Long] = {
     val (base, off, len) = UnsafeUtils.BOLfromBuffer(buffer)
     DeltaDeltaVector(base, off, len, BinaryVector.NoOpDispose)
+  }
+
+  def const(buffer: ByteBuffer): BinaryVector[Long] = {
+    val (base, off, len) = UnsafeUtils.BOLfromBuffer(buffer)
+    DeltaDeltaConstVector(base, off, len, BinaryVector.NoOpDispose)
+  }
+
+  def const(memFactory: MemFactory, numElements: Int, initValue: Long, slope: Int): DeltaDeltaConstVector = {
+    val (base, off, nBytes) = memFactory.allocateWithMagicHeader(16)
+    val dispose = () => memFactory.freeMemory(off)
+    UnsafeUtils.setLong(base, off, initValue)
+    UnsafeUtils.setInt(base, off + 8, slope)
+    UnsafeUtils.setInt(base, off + 12, numElements)
+    new DeltaDeltaConstVector(base, off, nBytes, dispose)
   }
 
   /**
@@ -83,6 +97,26 @@ object DeltaDeltaVector {
     val slope = (last - first) / (numElements - 1)
     if (slope < Int.MaxValue && slope > Int.MinValue) Some(slope.toInt) else None
   }
+
+  // Returns min and max of deltas computed from original input.  Just for sizing nbits for final DDV
+  def getDeltasMinMax(inputVect: BinaryAppendableVector[Long], slope: Int): Option[(Int, Int)] = {
+    var baseValue: Long = inputVect(0)
+    var max = Int.MinValue
+    var min = Int.MaxValue
+    for { i <- 1 until inputVect.length optimized } {
+      baseValue += slope
+      val delta = inputVect(i) - baseValue
+      if (delta > Int.MaxValue || delta < Int.MinValue) return None   // will not fit in 32 bits, just quit
+      max = Math.max(max, delta.toInt)
+      min = Math.min(min, delta.toInt)
+    }
+    Some((min, max))
+  }
+
+  def getNbitsSignedFromMinMax(minMax: (Int, Int), maxNBits: Short): Option[(Short, Boolean)] = {
+    val (newNbits, newSigned) = IntBinaryVector.minMaxToNbitsSigned(minMax._1, minMax._2)
+    if (newNbits <= maxNBits) Some((newNbits, newSigned)) else None
+  }
 }
 
 final case class DeltaDeltaVector(base: Any, offset: Long,
@@ -90,15 +124,33 @@ final case class DeltaDeltaVector(base: Any, offset: Long,
                                   val dispose: () => Unit) extends BinaryVector[Long] {
   val vectMajorType = WireFormat.VECTORTYPE_DELTA2
   val vectSubType = WireFormat.SUBTYPE_INT_NOMASK
-  val maybeNAs = false
+  final def maybeNAs: Boolean = false
   private final val initValue = UnsafeUtils.getLong(base, offset)
   private final val slope     = UnsafeUtils.getInt(base, offset + 8)
   private final val inner     = IntBinaryVector(base, offset + 12, numBytes - 12, dispose)
 
-  override val length: Int = inner.length
+  override def length: Int = inner.length
   final def isAvailable(index: Int): Boolean = true
   final def apply(index: Int): Long = initValue + slope * index + inner(index)
 
+}
+
+/**
+ * A special case of the DeltaDelta where all the values are exactly on the sloped line.
+ * (ie all the deltas are const=0)
+ * This can also approximately represent (at great savings) timestamps close to the slope if we agree we are OK
+ * losing the exact values when they are really close anyways.
+ */
+final case class DeltaDeltaConstVector(base: Any, offset: Long, numBytes: Int,
+                                       val dispose: () => Unit) extends BinaryVector[Long] {
+  val vectMajorType = WireFormat.VECTORTYPE_DELTA2
+  val vectSubType = WireFormat.SUBTYPE_REPEATED
+  final def maybeNAs: Boolean = false
+  private final val initValue = UnsafeUtils.getLong(base, offset)
+  private final val slope     = UnsafeUtils.getInt(base, offset + 8)
+  override final def length: Int = UnsafeUtils.getInt(base, offset + 12)
+  final def isAvailable(index: Int): Boolean = true
+  final def apply(index: Int): Long = initValue + slope * index
 }
 
 // TODO: validate args, esp base offset etc, somehow.  Need to think about this for the many diff classes.
@@ -118,8 +170,6 @@ class DeltaDeltaAppendingVector(val base: Any,
 
   private val deltas = IntBinaryVector.appendingVectorNoNA(base, offset + 12, maxBytes - 12, nbits, signed, dispose)
   private var expected = initValue
-  private var innerMin: Int = Int.MaxValue
-  private var innerMax: Int = Int.MinValue
 
   UnsafeUtils.setLong(base, offset, initValue)
   UnsafeUtils.setInt(base, offset + 8, slope)
@@ -132,18 +182,11 @@ class DeltaDeltaAppendingVector(val base: Any,
   final def addNA(): AddResponse = ???   // NAs are not supported for delta delta for now
   final def addData(data: Long): AddResponse = {
     val innerValue = data - expected
-    if (innerValue <= Int.MaxValue && innerValue >= Int.MinValue) {
-      deltas.addData(innerValue.toInt) match {
-        case Ack =>
-          innerMin = Math.min(innerMin, innerValue.toInt)
-          innerMax = Math.max(innerMax, innerValue.toInt)
-          expected += slope
-          Ack
-        case other: AddResponse => other
-      }
-    } else {
-      dispose()   // TODO: should we really dispose automatically?
-      ItemTooLarge
+    deltas.addData(innerValue.toInt) match {
+      case Ack =>
+        expected += slope
+        Ack
+      case other: AddResponse => other
     }
   }
 
@@ -151,36 +194,9 @@ class DeltaDeltaAppendingVector(val base: Any,
 
   def reset(): Unit = {
     expected = initValue
-    innerMin = Int.MaxValue
-    innerMax = Int.MinValue
     deltas.reset()
-  }
-
-  def addInnerVectors(other: IntAppendingVector): Unit = {
-    for { i <- 0 until other.length optimized } {
-      val orig = other(i)
-      deltas.addData(orig)
-      innerMin = Math.min(innerMin, orig)
-      innerMax = Math.max(innerMax, orig)
-    }
-    expected = initValue + length * slope
   }
 
   def finishCompaction(newBase: Any, newOff: Long): BinaryVector[Long] =
     DeltaDeltaVector(newBase, newOff, numBytes, dispose)
-
-  override def optimize(memFactory: MemFactory, hint: EncodingHint = AutoDetect): BinaryVector[Long] = {
-    // Just optimize nbits.
-    val (newNbits, newSigned) = IntBinaryVector.minMaxToNbitsSigned(innerMin, innerMax)
-    if (newNbits < nbits) {
-      val newVect = DeltaDeltaVector.appendingVector(memFactory, deltas.length,
-                                                     initValue, slope,
-                                                     newNbits, newSigned)
-      newVect.addInnerVectors(deltas)
-      if (hint == AutoDetectDispose) dispose()
-      newVect.freeze(None) // already writing new vector
-    } else {
-      freeze(memFactory)
-    }
-  }
 }
