@@ -2,7 +2,7 @@ package filodb.query
 
 import enumeratum.{Enum, EnumEntry}
 
-import filodb.core.query.RangeVector
+import filodb.core.query.SerializableRangeVector
 
 trait QueryResponse {
   def id: String
@@ -27,7 +27,7 @@ object QueryResultType extends Enum[QueryResultType] {
   case object Scalar extends QueryResultType
 }
 
-final case class QueryResult(id: String, result: Seq[RangeVector]) extends QueryResponse {
+final case class QueryResult(id: String, result: Seq[SerializableRangeVector]) extends QueryResponse {
   def resultType: QueryResultType = ???
 }
 

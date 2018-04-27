@@ -1,7 +1,6 @@
 package filodb.query.exec
 
-import filodb.memory.format.RowReader
-import filodb.query.RangeFunctionId
+import filodb.query.{QueryConfig, RangeFunctionId}
 import filodb.query.RangeFunctionId.Rate
 
 /**
@@ -17,25 +16,34 @@ trait RangeFunction {
     * Values added to window will be converted to monotonically increasing. Mark
     * as true only if the function will always operate on counters.
     */
-  def needsCounterNormalization: Boolean
+  def needsCounterCorrection: Boolean
 
   /**
     * Called when a sample is added to the sliding window
     */
-  def addToWindow(row: RowReader): Unit
+  def addToWindow(row: MutableSample): Unit
 
   /**
     * Called when a sample is removed from sliding window
     */
-  def removeFromWindow(row: RowReader): Unit
+  def removeFromWindow(row: MutableSample): Unit
 
   /**
-    * Called when wrapping iterator needs to emit a sample using the window
+    * Called when wrapping iterator needs to emit a sample using the window.
+    * Samples in the window are samples reported in the requested window length.
+    * Timestamp of samples is always <= the timestamp param of this function.
+    *
     * @param timestamp timestamp to use in emitted sample
+    * @param windowLength length of the window in milliseconds
     * @param window samples contained in the window
-    * @return sample to be emitted
+    * @param sampleToEmit To keep control on reader creation the method must set
+    *                  the value to emit in this param object that comes from a reader pool
     */
-  def apply(timestamp: Long, window: Seq[RowReader]): MetricRowReader
+  def apply(timestamp: Long,
+            windowLength: Int,
+            window: Seq[MutableSample],
+            sampleToEmit: MutableSample,
+            queryConfig: QueryConfig): Unit
 }
 
 object RangeFunction {
@@ -51,35 +59,42 @@ object RangeFunction {
 
 object LastSampleFunction extends RangeFunction {
 
-  def needsCounterNormalization: Boolean = false // should not assume counter always
-  def addToWindow(row: RowReader): Unit = {}
-  def removeFromWindow(row: RowReader): Unit = {}
-  def apply(timestamp: Long, window: Seq[RowReader]): MetricRowReader = {
+  def needsCounterCorrection: Boolean = false // should not assume counter always
+  def addToWindow(row: MutableSample): Unit = {}
+  def removeFromWindow(row: MutableSample): Unit = {}
+  def apply(timestamp: Long,
+            windowLength: Int,
+            window: Seq[MutableSample],
+            sampleToEmit: MutableSample,
+            queryConfig: QueryConfig): Unit = {
     if (window.size > 1)
       throw new IllegalStateException("Possible internal error: Last sample should have used zero length windows")
-    if (window.size < 2) {
-      new MetricRowReader(timestamp, Double.NaN)
+    if (window.size == 0 || (timestamp - window.head.getLong(0)) > queryConfig.staleSampleAfterMs) {
+      sampleToEmit.set(timestamp, Double.NaN)
     } else {
-      val valueDelta = window.last.getDouble(1) - window.head.getDouble(1)
-      val timeDelta = (window.last.getLong(0) - window.head.getLong(0)) / 1000 // convert to seconds
-      new MetricRowReader(timestamp, valueDelta / timeDelta)
+      sampleToEmit.set(timestamp, window.head.getDouble(1))
     }
   }
 }
 
 object RateFunction extends RangeFunction {
 
-  def needsCounterNormalization: Boolean = true
-  def addToWindow(row: RowReader): Unit = {}
-  def removeFromWindow(row: RowReader): Unit = {}
+  // TODO there is more to do here. Work in progress
+  def needsCounterCorrection: Boolean = true
+  def addToWindow(row: MutableSample): Unit = {}
+  def removeFromWindow(row: MutableSample): Unit = {}
 
-  def apply(timestamp: Long, window: Seq[RowReader]): MetricRowReader = {
+  def apply(timestamp: Long,
+            windowLength: Int,
+            window: Seq[MutableSample],
+            sampleToEmit: MutableSample,
+            queryConfig: QueryConfig): Unit = {
     if (window.size < 2) {
-      new MetricRowReader(timestamp, Double.NaN)
+      sampleToEmit.set(timestamp, Double.NaN) // TODO is there a way to say NA here ?
     } else {
       val valueDelta = window.last.getDouble(1) - window.head.getDouble(1)
       val timeDelta = (window.last.getLong(0) - window.head.getLong(0)) / 1000 // convert to seconds
-      new MetricRowReader(timestamp, valueDelta / timeDelta)
+      sampleToEmit.set(timestamp, valueDelta / timeDelta)
     }
   }
 }

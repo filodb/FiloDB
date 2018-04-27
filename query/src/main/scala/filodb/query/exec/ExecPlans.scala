@@ -30,19 +30,20 @@ final case class SelectRawPartitionsExec(id: String,
   }
 
   protected def doExecute(source: ChunkSource,
-                          dataset: Dataset)
+                          dataset: Dataset,
+                          queryConfig: QueryConfig)
                          (implicit sched: Scheduler,
                           timeout: FiniteDuration): Observable[RangeVector] = {
     val colIds = getColumnIDs(dataset, columns)
     require(colIds.indexOfSlice(dataset.rowKeyIDs) == 0)
 
     val chunkMethod = rangeSelector match {
-      case interval: IntervalSelector => RowKeyChunkScan(interval.from, interval.to)
+      case IntervalSelector(from, to) => RowKeyChunkScan(from, to)
       case AllChunksSelector => AllChunkScan
       case WriteBufferSelector => ???
       case EncodedChunksSelector => ???
     }
-    val partMethod = FilteredPartitionScan(ShardSplit(shard))
+    val partMethod = FilteredPartitionScan(ShardSplit(shard), filters)
     source.rangeVectors(dataset, colIds, partMethod, dataset.rowKeyOrdering, chunkMethod)
     // TODO limit the number of chunks returned
   }
@@ -78,7 +79,8 @@ final case class ReduceAggregateExec(id: String,
 
   protected def args: String = s"aggrOp=$aggrOp, aggrParams=$aggrParams"
 
-  protected def compose(childResponses: Observable[QueryResponse]): Observable[RangeVector] = ???
+  protected def compose(childResponses: Observable[QueryResponse],
+                        queryConfig: QueryConfig): Observable[RangeVector] = ???
 }
 
 /**
@@ -97,7 +99,8 @@ final case class BinaryJoinExec(id: String,
 
   protected def args: String = s"binaryOp=$binaryOp, on=$on, ignoring=$ignoring"
 
-  protected def compose(childResponses: Observable[QueryResponse]): Observable[RangeVector] = ???
+  protected def compose(childResponses: Observable[QueryResponse],
+                        queryConfig: QueryConfig): Observable[RangeVector] = ???
 }
 
 /**
@@ -112,7 +115,8 @@ final case class DistConcatExec(id: String,
 
   protected def schemaOfCompose(dataset: Dataset): ResultSchema = children.head.schema(dataset)
 
-  protected def compose(childResponses: Observable[QueryResponse]): Observable[RangeVector] = {
+  protected def compose(childResponses: Observable[QueryResponse],
+                        queryConfig: QueryConfig): Observable[RangeVector] = {
     childResponses.flatMap {
       case qr: QueryResult => Observable.fromIterable(qr.result)
       case qe: QueryError => throw qe.t

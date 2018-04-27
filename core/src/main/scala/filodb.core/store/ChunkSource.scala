@@ -8,8 +8,7 @@ import monix.reactive.Observable
 import filodb.core._
 import filodb.core.Types.PartitionKey
 import filodb.core.metadata.Dataset
-import filodb.core.query.{ChunkSetReader, PartitionInfo, PartitionVector}
-import filodb.core.query.{ChunkSetBackedRangeVector, RangeVector, RangeVectorKey}
+import filodb.core.query._
 import filodb.memory.format.RowReader
 
 
@@ -95,11 +94,12 @@ trait ChunkSource {
                    ordering: Ordering[RowReader],
                    chunkMethod: ChunkScanMethod): Observable[RangeVector] = {
     val ids = columnIDs.toArray
+    val partCols = dataset.infosFromIDs(dataset.partitionColumns.map(_.id))
     scanPartitions(dataset, partMethod)
       .map { partition =>
         stats.incrReadPartitions(1)
-        val key = RangeVectorKey(partition.binPartition, Seq(partition.shard))
-        ChunkSetBackedRangeVector(key, chunkMethod, ordering, partition.readers(chunkMethod, ids))
+        val key = new PartitionRangeVectorKey(partition.binPartition, partCols, partition.shard)
+        RawDataRangeVector(key, chunkMethod, ordering, partition.readers(chunkMethod, ids))
       }
   }
 

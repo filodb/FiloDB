@@ -10,9 +10,9 @@ import monix.reactive.Observable
 
 import filodb.core.DatasetRef
 import filodb.core.metadata.Dataset
-import filodb.core.query.{RangeVector, ResultSchema}
+import filodb.core.query.{RangeVector, ResultSchema, SerializableRangeVector}
 import filodb.core.store.ChunkSource
-import filodb.query.{QueryError, QueryResponse, QueryResult}
+import filodb.query.{QueryConfig, QueryError, QueryResponse, QueryResult}
 
 /**
   * This is the Execution Plan tree node interface.
@@ -83,17 +83,20 @@ trait ExecPlan extends java.io.Serializable {
     *
     */
   final def execute(source: ChunkSource,
-                    dataset: Dataset)
+                    dataset: Dataset,
+                    queryConfig: QueryConfig)
                    (implicit sched: Scheduler,
                     timeout: FiniteDuration): Task[QueryResponse] = {
     try {
-      val res = doExecute(source, dataset)
+      val res = doExecute(source, dataset, queryConfig)
       val schema = schemaOfDoExecute(dataset)
       val finalRes = rangeVectorTransformers.foldLeft((res, schema)) { (acc, transf) =>
-        (transf.apply(acc._1, acc._2), transf.schema(dataset, acc._2))
+        (transf.apply(acc._1, queryConfig, acc._2), transf.schema(dataset, acc._2))
       }
-      finalRes._1.toListL
-        .map(r => QueryResult(id, r))
+      finalRes._1
+        .map { r => SerializableRangeVector(r, finalRes._2.columns) }
+        .toListL
+        .map { r => QueryResult(id, r) }
         .onErrorHandle { case ex: Throwable => QueryError(id, ex) }
     } catch { case NonFatal(ex) =>
       Task(QueryError(id, ex))
@@ -106,7 +109,8 @@ trait ExecPlan extends java.io.Serializable {
     * node
     */
   protected def doExecute(source: ChunkSource,
-                          dataset: Dataset)
+                          dataset: Dataset,
+                          queryConfig: QueryConfig)
                          (implicit sched: Scheduler,
                           timeout: FiniteDuration): Observable[RangeVector]
 
@@ -155,13 +159,14 @@ abstract class NonLeafExecPlan extends ExecPlan {
     * result
     */
   final protected def doExecute(source: ChunkSource,
-                                dataset: Dataset)
+                                dataset: Dataset,
+                                queryConfig: QueryConfig)
                                (implicit sched: Scheduler,
                                 timeout: FiniteDuration): Observable[RangeVector] = {
     val childTasks = Observable.fromIterable(children).mapAsync { plan =>
       plan.dispatcher.dispatch(plan).onErrorHandle { case ex: Throwable => QueryError(id, ex) }
     }
-    compose(childTasks)
+    compose(childTasks, queryConfig)
   }
 
   final protected def schemaOfDoExecute(dataset: Dataset): ResultSchema = schemaOfCompose(dataset)
@@ -175,6 +180,7 @@ abstract class NonLeafExecPlan extends ExecPlan {
     * Sub-class non-leaf nodes should provide their own implementation of how
     * to compose the sub-query results here.
     */
-  protected def compose(childResponses: Observable[QueryResponse]): Observable[RangeVector]
+  protected def compose(childResponses: Observable[QueryResponse],
+                        queryConfig: QueryConfig): Observable[RangeVector]
 
 }

@@ -59,21 +59,19 @@ class ChunkSetReader(val info: ChunkSetInfo,
   final def rowKeyRange(key1: BinaryRecord, key2: BinaryRecord, ordering: Ordering[RowReader]): (Int, Int) = {
     if (key1 > key2) {
       (-1, -1)
-    } else if (info.firstKey.isEmpty) {
-      // Empty key = no key range info, cannot compare.  Just return all rows
-      (0, len - 1)
     } else {
+      // if firstKey/lastKey is empty it means we are working with write buffer based chunks, and need to
+      // search all rows in the chunkset
+
       // check key1 vs firstKey
       val startRow =
-        if (key1 <= info.firstKey) { 0 }
-        else {
+        if (info.firstKey.isEmpty || key1 > info.firstKey) {
           binarySearchKeyChunks(parsers, len, ordering, key1)._1
-        }
+        } else { 0 }
 
       // check key2 vs lastKey
       val endRow =
-        if (key2 >= info.lastKey) { len - 1 }
-        else {
+        if (info.lastKey.isEmpty || key2 < info.lastKey) {
           binarySearchKeyChunks(parsers, len, ordering, key2) match {
             // no match - binarySearch returns the row # _after_ the searched key.
             // So if key is less than the first item then 0 is returned since 0 is after the key.
@@ -82,8 +80,7 @@ class ChunkSetReader(val info: ChunkSetInfo,
             // exact match - just return the row number
             case (row, true)  =>  row
           }
-        }
-
+        } else { len - 1 }
       (startRow, endRow)
     }
   }

@@ -5,7 +5,7 @@ import monix.reactive.Observable
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.Dataset
 import filodb.core.query.{RangeVector, ResultSchema}
-import filodb.query.{AggregationOperator, BinaryOperator, InstantFunctionId}
+import filodb.query.{AggregationOperator, BinaryOperator, InstantFunctionId, QueryConfig}
 
 /**
   * Implementations can provide ways to transform RangeVector
@@ -18,8 +18,10 @@ import filodb.query.{AggregationOperator, BinaryOperator, InstantFunctionId}
   * It can safely be assumed that the operations in these nodes are
   * compute intensive and not I/O intensive.
   */
-trait RangeVectorTransformer {
-  def apply(source: Observable[RangeVector], sourceSchema: ResultSchema): Observable[RangeVector]
+trait RangeVectorTransformer extends java.io.Serializable {
+  def apply(source: Observable[RangeVector],
+            queryConfig: QueryConfig,
+            sourceSchema: ResultSchema): Observable[RangeVector]
 
   /**
     * Default implementation retains source schema
@@ -54,7 +56,9 @@ final case class InstantVectorFunctionMapper(function: InstantFunctionId,
   protected[exec] def args: String =
     s"function=$function, funcParams=$funcParams"
 
-  def apply(source: Observable[RangeVector], sourceSchema: ResultSchema): Observable[RangeVector] = ???
+  def apply(source: Observable[RangeVector],
+            queryConfig: QueryConfig,
+            sourceSchema: ResultSchema): Observable[RangeVector] = ???
 
   // TODO all function defs go here and get invoked from mapRangeVector
 }
@@ -69,7 +73,9 @@ final case class ScalarOperationMapper(operator: BinaryOperator,
   protected[exec] def args: String =
     s"operator=$operator, scalar=$scalar"
 
-  def apply(source: Observable[RangeVector], sourceSchema: ResultSchema): Observable[RangeVector] = ???
+  def apply(source: Observable[RangeVector],
+            queryConfig: QueryConfig,
+            sourceSchema: ResultSchema): Observable[RangeVector] = ???
 
   // TODO all operation defs go here and get invoked from mapRangeVector
 }
@@ -84,7 +90,9 @@ final case class AggregateCombiner(aggrOp: AggregationOperator,
   protected[exec] def args: String =
     s"aggrOp=$aggrOp, aggrParams=$aggrParams, without=$without, by=$by"
 
-  def apply(source: Observable[RangeVector], sourceSchema: ResultSchema): Observable[RangeVector] = ???
+  def apply(source: Observable[RangeVector],
+            queryConfig: QueryConfig,
+            sourceSchema: ResultSchema): Observable[RangeVector] = ???
 
   override def schema(dataset: Dataset, source: ResultSchema): ResultSchema = {
     // TODO Average will not have the same schema
@@ -102,7 +110,9 @@ final case class AggregateCombiner(aggrOp: AggregationOperator,
 final case class AverageMapper() extends RangeVectorTransformer {
   protected[exec] def args: String = ""
 
-  def apply(source: Observable[RangeVector], sourceSchema: ResultSchema): Observable[RangeVector] = ???
+  def apply(source: Observable[RangeVector],
+            queryConfig: QueryConfig,
+            sourceSchema: ResultSchema): Observable[RangeVector] = ???
 
   override def schema(dataset: Dataset, source: ResultSchema): ResultSchema = {
     ???

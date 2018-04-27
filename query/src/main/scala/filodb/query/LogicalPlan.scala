@@ -60,7 +60,7 @@ case class PeriodicSeriesWithWindowing(rawSeries: RawSeries,
                                        start: Long,
                                        step: Int,
                                        end: Long,
-                                       window: Long,
+                                       window: Int,
                                        function: RangeFunctionId,
                                        functionArgs: Seq[Any] = Nil) extends PeriodicSeriesPlan
 

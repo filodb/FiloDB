@@ -34,7 +34,7 @@ class QueryEngineSpec extends FunSpec with Matchers {
                                       metricColumn = "__name",
                                       valueColumn = "value")
 
-  val dataset = MetricsTestData.timeseriesDataset.get
+  val dataset = MetricsTestData.timeseriesDataset
 
   val engine = new QueryEngine(dataset, mapperRef)
 

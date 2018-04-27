@@ -10,6 +10,7 @@ import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.memstore.{IngestRecord, IngestRouting}
 import filodb.core.metadata.{Column, Dataset, DatasetOptions}
 import filodb.core.Types.PartitionKey
+import filodb.core.metadata.Column.ColumnType
 import filodb.core.store._
 import filodb.memory.format._
 import filodb.memory.format.ZeroCopyUTF8String._
@@ -234,6 +235,19 @@ object MetricsTestData {
                                   Seq("tags:map"),
                                   Seq("timestamp:long", "value:double"),
                                   Seq("timestamp"),
-                                  DatasetOptions(Seq("__name__", "job"), "__name__", "value"))
+                                  DatasetOptions(Seq("__name__", "job"), "__name__", "value")).get
+
+  final case class TagsRowReader(tags: Map[String, String]) extends SchemaRowReader {
+    val extractors = Array[RowReader.TypedFieldExtractor[_]](ColumnType.MapColumn.keyType.extractor)
+    val kvMap = tags.map { case (k, v) => ZeroCopyUTF8String(k) -> ZeroCopyUTF8String(v) }
+    final def getDouble(index: Int): Double = ???
+    final def getLong(index: Int): Long = ???
+    final def getString(index: Int): String = ???
+    final def getAny(index: Int): Any = kvMap
+    final def getBoolean(columnNo: Int): Boolean = ???
+    final def getFloat(columnNo: Int): Float = ???
+    final def getInt(columnNo: Int): Int = ???
+    final def notNull(columnNo: Int): Boolean = true
+  }
 
 }

@@ -312,4 +312,29 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
     partVectors.head.info.get.partKey shouldEqual dataset2.partKey(197902)
     partVectors.head.allRowsIterator.map(_.getInt(0)).sum should equal (22)
   }
+
+  "rangeVectors api" should "return Range Vectors for given filter and read all rows" in {
+    import GdeltTestData._
+    import monix.execution.Scheduler.Implicits.global
+
+    val streams = getStreamsByPartKey(dataset2)
+    streams.foreach { s =>
+      colStore.write(dataset2, s).futureValue should equal (Success)
+    }
+
+    val paramSet = colStore.getScanSplits(dataset.ref, 1)
+    paramSet should have length (1)
+
+    val filter = ColumnFilter("MonthYear", Filter.Equals(197902))
+    val method = FilteredPartitionScan(paramSet.head, Seq(filter))
+    val rangeVectorObs = colStore.rangeVectors(dataset2, dataset2.colIDs("NumArticles").get,
+                                            method, dataset2.rowKeyOrdering, AllChunkScan)
+    val rangeVectors = rangeVectorObs.toListL.runAsync.futureValue
+
+    rangeVectors should have length (1)
+    rangeVectors.head.key.labelValues.head.label.asNewString shouldEqual "MonthYear"
+    rangeVectors.head.key.labelValues.head.value.asNewString shouldEqual "197902"
+    rangeVectors.head.rows.map(_.getInt(0)).sum should equal (22)
+    rangeVectors.head.key.sourceShards shouldEqual Seq(0)
+  }
 }

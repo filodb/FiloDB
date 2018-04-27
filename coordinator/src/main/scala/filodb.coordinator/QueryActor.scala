@@ -25,7 +25,7 @@ import filodb.core.store._
 import filodb.memory.MemFactory
 import filodb.memory.format.{Classes, SeqRowReader}
 import filodb.memory.format.vectors.{DoubleVector, IntBinaryVector}
-import filodb.query.{QueryError => QueryError2}
+import filodb.query.{QueryConfig, QueryError => QueryError2}
 import filodb.query.exec.{ExecPlan => ExecPlan2}
 
 object QueryCommandPriority extends java.util.Comparator[Envelope] {
@@ -81,7 +81,7 @@ final class QueryActor(memStore: MemStore,
   val config = context.system.settings.config
 
   val queryEngine2 = new QueryEngine(dataset, shardMapFunc)
-  val queryAskTimeout = Duration.fromNanos(config.getDuration("filodb.query.ask.timeout").toNanos)
+  val queryConfig = new QueryConfig(config.getConfig("filodb.query"))
 
   def validateFunction(funcName: String): AggregationFunction Or ErrorResponse =
     AggregationFunction.withNameInsensitiveOption(funcName)
@@ -280,15 +280,15 @@ final class QueryActor(memStore: MemStore,
     case q: LogicalPlan2Query      => // This is for CLI use only. Always prefer clients to materialize logical plan
                                       val execPlan = queryEngine2.materialize(q.logicalPlan, q.queryOptions)
                                       val replyTo = sender()
-                                      implicit val _ = queryAskTimeout
+                                      implicit val _ = queryConfig.askTimeout
                                       queryEngine2.dispatchExecPlan(execPlan)
                                         .foreach(replyTo ! _)
                                         .recover { case ex => replyTo ! QueryError2(execPlan.id, ex) }
 
     case q: ExecPlan2              => val replyTo = sender()
                                       Kamon.currentSpan().tag("query", q.getClass.getSimpleName)
-                                      implicit val _ = queryAskTimeout
-                                      q.execute(memStore, dataset)
+                                      implicit val _ = queryConfig.askTimeout
+                                      q.execute(memStore, dataset, queryConfig)
                                         .foreach(replyTo ! _)
                                         .recover { case ex => replyTo ! QueryError2(q.id, ex) }
 
