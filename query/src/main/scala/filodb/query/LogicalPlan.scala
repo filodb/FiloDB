@@ -46,7 +46,7 @@ case class RawSeries(rangeSelector: RangeSelector,
   */
 case class PeriodicSeries(rawSeries: RawSeries,
                           start: Long,
-                          step: Int,
+                          step: Long,
                           end: Long) extends PeriodicSeriesPlan
 
 /**
@@ -58,7 +58,7 @@ case class PeriodicSeries(rawSeries: RawSeries,
   */
 case class PeriodicSeriesWithWindowing(rawSeries: RawSeries,
                                        start: Long,
-                                       step: Int,
+                                       step: Long,
                                        end: Long,
                                        window: Int,
                                        function: RangeFunctionId,

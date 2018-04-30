@@ -15,7 +15,7 @@ import filodb.query.{QueryConfig, RangeFunctionId}
   * to time windows of indicated length.
   */
 final case class PeriodicSamplesMapper(start: Long,
-                                       step: Int,
+                                       step: Long,
                                        end: Long,
                                        window: Option[Int],
                                        functionId: Option[RangeFunctionId],
@@ -70,7 +70,7 @@ class MutableSample extends RowReader {
   */
 class SlidingWindowIterator(raw: Iterator[RowReader],
                             start: Long,
-                            step: Int,
+                            step: Long,
                             end: Long,
                             window: Int,
                             rangeFunction: RangeFunction,

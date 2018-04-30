@@ -36,6 +36,13 @@ lazy val coordinator = project
   .dependsOn(query % "compile->compile; test->test")
   .configs(MultiJvm)
 
+lazy val prometheus = project
+  .in(file("prometheus"))
+  .settings(commonSettings: _*)
+  .settings(name := "filodb-prometheus")
+  .dependsOn(core % "compile->compile; test->test")
+  .dependsOn(query % "compile->compile; test->test")
+
 lazy val query = project
   .in(file("query"))
   .settings(commonSettings: _*)
