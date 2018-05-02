@@ -10,8 +10,7 @@ import org.scalatest.time.{Millis, Seconds, Span}
 
 import filodb.coordinator._
 import filodb.coordinator.client.LocalClient
-import filodb.core.Success
-import filodb.core.metadata.Dataset
+import filodb.core.{MetricsTestData, Success}
 import filodb.timeseries.TestTimeseriesProducer
 
 object ClusterSingletonFailoverMultiNodeConfig extends MultiNodeConfig {
@@ -93,8 +92,7 @@ abstract class ClusterSingletonFailoverSpec extends StandaloneMultiJvmSpec(Clust
       colStore.initialize(dataset).futureValue shouldBe Success
       colStore.truncate(dataset).futureValue shouldBe Success
 
-      val datasetObj = Dataset(dataset.dataset, Seq("tags:map"),
-        Seq("timestamp:long", "value:double"), Seq("timestamp"))
+      val datasetObj = MetricsTestData.timeseriesDataset
       metaStore.newDataset(datasetObj).futureValue shouldBe Success
       colStore.initialize(dataset).futureValue shouldBe Success
       logger.info("Dataset created")
@@ -178,9 +176,11 @@ abstract class ClusterSingletonFailoverSpec extends StandaloneMultiJvmSpec(Clust
     }
   }
 
+  val queryTimestamp = System.currentTimeMillis() - 395.minutes.toMillis
+
   it should "answer query successfully" in {
     runOn(first, third) { // TODO check second=UnknownDataset
-      query1Response = runQuery(client1)
+      query1Response = runQuery(client1, queryTimestamp)
     }
     enterBarrier("query1-answered")
   }
@@ -273,7 +273,7 @@ abstract class ClusterSingletonFailoverSpec extends StandaloneMultiJvmSpec(Clust
 
   ignore should "answer promQL query successfully with same value" in {
     runOn(third) {
-      val query2Response = runQuery(client1)
+      val query2Response = runQuery(client1, queryTimestamp)
       (query2Response - query1Response).abs should be < 0.0001
     }
     enterBarrier("query2-answered")

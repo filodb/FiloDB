@@ -11,8 +11,7 @@ import org.scalatest.time.{Millis, Seconds, Span}
 import filodb.coordinator._
 import filodb.coordinator.NodeClusterActor.SubscribeShardUpdates
 import filodb.coordinator.client.Client
-import filodb.core.Success
-import filodb.core.metadata.Dataset
+import filodb.core.{MetricsTestData, Success}
 import filodb.timeseries.TestTimeseriesProducer
 
 object IngestionAndRecoveryMultiNodeConfig extends MultiNodeConfig {
@@ -88,8 +87,7 @@ abstract class IngestionAndRecoverySpec extends StandaloneMultiJvmSpec(Ingestion
 
   it should "be able to create dataset on node 1" in {
     runOn(first) {
-      val datasetObj = Dataset(dataset.dataset, Seq("tags:map"),
-        Seq("timestamp:long", "value:double"), Seq("timestamp"))
+      val datasetObj = MetricsTestData.timeseriesDataset
       metaStore.newDataset(datasetObj).futureValue shouldBe Success
       colStore.initialize(dataset).futureValue shouldBe Success
       info("Dataset created")
@@ -127,6 +125,7 @@ abstract class IngestionAndRecoverySpec extends StandaloneMultiJvmSpec(Ingestion
     runOn(first) {
       validateShardStatus(client1)(_ == ShardStatusActive)
     }
+    enterBarrier("shard-status-validated")
   }
 
   it should "be able to ingest data into FiloDB via Kafka" in {
@@ -167,9 +166,11 @@ abstract class IngestionAndRecoverySpec extends StandaloneMultiJvmSpec(Ingestion
     }
   }
 
+  val queryTimestamp = System.currentTimeMillis() - 195.minutes.toMillis
+
   it should "answer query successfully" in {
     runOn(first) {
-      query1Response = runQuery(client1)
+      query1Response = runQuery(client1, queryTimestamp)
     }
     enterBarrier("query1-answered")
   }
@@ -206,11 +207,12 @@ abstract class IngestionAndRecoverySpec extends StandaloneMultiJvmSpec(Ingestion
         case _ => fail("All shards should be in shard recovery state")
       }
     }
+    enterBarrier("recovery-status-validated")
   }
 
   it should "answer promQL query successfully with same value" in {
     runOn(first) {
-      val query2Response = runQuery(client2)
+      val query2Response = runQuery(client2, queryTimestamp)
       (query2Response - query1Response).abs should be < 0.0001
     }
     enterBarrier("query2-answered")

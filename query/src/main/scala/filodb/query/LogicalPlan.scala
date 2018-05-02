@@ -1,6 +1,5 @@
 package filodb.query
 
-import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.query.ColumnFilter
 
 sealed trait LogicalPlan
@@ -20,11 +19,11 @@ sealed trait PeriodicSeriesPlan extends LogicalPlan
   * A selector is needed in the RawSeries logical plan to specify
   * a row key range to extract from each partition.
   */
-sealed trait RangeSelector
+sealed trait RangeSelector extends java.io.Serializable
 case object AllChunksSelector extends RangeSelector
 case object WriteBufferSelector extends RangeSelector
 case object EncodedChunksSelector extends RangeSelector
-case class IntervalSelector(from: BinaryRecord, to: BinaryRecord) extends RangeSelector
+case class IntervalSelector(from: Seq[Any], to: Seq[Any]) extends RangeSelector
 
 /**
   * Concrete logical plan to query for raw data in a given range

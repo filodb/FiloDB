@@ -15,10 +15,14 @@ import org.parboiled2.ParseError
 
 import filodb.coordinator._
 import filodb.coordinator.client._
+import filodb.coordinator.parse.PrometheusQLParser
 import filodb.core._
 import filodb.core.metadata.{Column, Dataset, DatasetOptions}
 import filodb.core.store._
 import filodb.memory.format.RowReader
+import filodb.query.{QueryResult => QueryResult2}
+import filodb.query.{QueryError => QueryError2}
+import filodb.query.{LogicalPlan => LogicalPlan2}
 
 // scalastyle:off
 class Arguments extends FieldArgs {
@@ -41,7 +45,11 @@ class Arguments extends FieldArgs {
   var indexName: Option[String] = None
   var host: Option[String] = None
   var port: Int = 2552
+  var promql0: Option[String] = None
   var promql: Option[String] = None
+  var start: Long = System.currentTimeMillis()
+  var end: Long = System.currentTimeMillis()
+  var step: Long = 1
   var metricColumn: String = "__name__"
   var shardKeyColumns: Seq[String] = Nil
   var everyNSeconds: Option[String] = None
@@ -69,7 +77,7 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
     println("\nStandalone client commands:")
     println("  --host <hostname/IP> [--port ...] --command indexnames --dataset <dataset>")
     println("  --host <hostname/IP> [--port ...] --command indexvalues --indexname <index> --dataset <dataset>")
-    println("  --host <hostname/IP> [--port ...] [--metricColumn <col>] --dataset <dataset> --promql <query>")
+    println("  --host <hostname/IP> [--port ...] [--metricColumn <col>] --dataset <dataset> --promql <query> --start <start> --step <step> --end <end>")
     println("  --host <hostname/IP> [--port ...] --command setup --filename <configFile> | --configPath <path>")
     println("  --host <hostname/IP> [--port ...] --command list")
     println("  --host <hostname/IP> [--port ...] --command status --dataset <dataset>")
@@ -164,20 +172,30 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
           }
 
         case x: Any =>
-          args.promql.map { query =>
+          // This will soon be deprecated
+          args.promql0.map { query =>
             require(args.host.nonEmpty && args.dataset.nonEmpty, "--host and --dataset must be defined")
             val remote = Client.standaloneClient(system, args.host.get, args.port)
             val options = QOptions(args.limit, args.sampleLimit, args.everyNSeconds.map(_.toInt),
                                    timeout, args.shardOverrides.map(_.map(_.toInt)))
             parsePromQuery(remote, query, args.dataset.get, args.metricColumn, options)
-          }.getOrElse {
+          }.orElse {
             args.select.map { selectCols =>
               exportCSV(getRef(args),
                         selectCols,
                         args.limit,
                         args.outfile)
-            }.getOrElse(printHelp)
-          }
+            }
+          }.orElse {
+            args.promql.map { query =>
+              require(args.host.nonEmpty && args.dataset.nonEmpty, "--host and --dataset must be defined")
+              val remote = Client.standaloneClient(system, args.host.get, args.port)
+              val options = QOptions(args.limit, args.sampleLimit, args.everyNSeconds.map(_.toInt),
+                timeout, args.shardOverrides.map(_.map(_.toInt)))
+              parsePromQuery2(remote, query, args.dataset.get,
+                PrometheusQLParser.QueryParams(args.start, args.step, args.end), options)
+            }
+          }.getOrElse(printHelp)
       }
     } catch {
       case e: Throwable =>
@@ -304,6 +322,13 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
     }
   }
 
+  def parsePromQuery2(client: LocalClient, query: String, dataset: String,
+                      queryParams: PrometheusQLParser.QueryParams,
+                      options: QOptions): Unit = {
+    val logicalPlan = PrometheusQLParser.queryRangeToLogicalPlan(query, queryParams)
+    executeQuery2(client, dataset, logicalPlan, options)
+  }
+
   def executeQuery(client: LocalClient, dataset: String, plan: LogicalPlan,
                    options: QOptions): Unit = {
     val ref = DatasetRef(dataset)
@@ -336,6 +361,38 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
           case e: ClientException =>
             println(s"ERROR: ${e.getMessage}")
             exitCode = 2
+        }
+    }
+  }
+
+  def executeQuery2(client: LocalClient, dataset: String, plan: LogicalPlan2, options: QOptions): Unit = {
+    val ref = DatasetRef(dataset)
+    val qOpts = QueryCommands.QueryOptions(itemLimit = options.limit,
+      queryTimeoutSecs = options.timeout.toSeconds.toInt,
+      shardOverrides = options.shardOverrides)
+    println(s"Sending query command to server for $ref with options $qOpts...")
+    println(s"Query Plan:\n$plan")
+    options.everyN match {
+      case Some(intervalSecs) =>
+        val fut = Observable.intervalAtFixedRate(intervalSecs.seconds).foreach { n =>
+          client.logicalPlan2Query(ref, plan, qOpts) match {
+            case QueryResult2(_, schema, result) => result.foreach(rv => println(rv.prettyPrint(schema)))
+            case err: QueryError2                => throw new ClientException(err)
+          }
+        }.recover {
+          case e: ClientException => println(s"ERROR: ${e.getMessage}")
+                                     exitCode = 2
+        }
+        while (!fut.isCompleted) { Thread sleep 1000 }
+      case None =>
+        try {
+          client.logicalPlan2Query(ref, plan, qOpts) match {
+            case QueryResult2(_, schema, result) => result.foreach(rv => println(rv.prettyPrint(schema)))
+            case QueryError2(_,ex)               => println(s"ERROR: ${ex.getMessage}")
+          }
+        } catch {
+          case e: ClientException =>  println(s"ERROR: ${e.getMessage}")
+                                      exitCode = 2
         }
     }
   }

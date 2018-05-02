@@ -2,9 +2,6 @@ package filodb.coordinator.parse
 
 import org.scalatest.{FunSpec, Matchers}
 
-import filodb.core.MetricsTestData
-
-
 //noinspection ScalaStyle
 // scalastyle:off
 class PrometheusQLParserSpec extends FunSpec with Matchers {
@@ -207,16 +204,15 @@ class PrometheusQLParserSpec extends FunSpec with Matchers {
     )
 
     val expected = Seq(
-      "PeriodicSeries(RawSeries(IntervalSelector(b[1524855688170],b[1524855988170]),List(ColumnFilter(http_requests_total,Equals(__name__))),List(timestamp, value)),1524855988170,1,1524855988170)",
-      "PeriodicSeries(RawSeries(IntervalSelector(b[1524855688170],b[1524855988170]),List(ColumnFilter(job,Equals(prometheus)), ColumnFilter(group,Equals(canary)), ColumnFilter(http_requests_total,Equals(__name__))),List(timestamp, value)),1524855988170,1,1524855988170)",
-      "PeriodicSeries(RawSeries(IntervalSelector(b[1524855688170],b[1524855988170]),List(ColumnFilter(environment,Equals(staging|testing|development)), ColumnFilter(method,Equals(GET)), ColumnFilter(http_requests_total,Equals(__name__))),List(timestamp, value)),1524855988170,1,1524855988170)",
-      "RawSeries(IntervalSelector(b[1524855688170],b[1524855988170]),List(ColumnFilter(job,Equals(prometheus)), ColumnFilter(http_requests_total,Equals(__name__))),List(timestamp, value))",
-      "PeriodicSeries(RawSeries(IntervalSelector(b[1524855688170],b[1524855988170]),List(ColumnFilter(http_requests_total,Equals(__name__))),List(timestamp, value)),1524855988170,1,1524855988170)"
+      "PeriodicSeries(RawSeries(IntervalSelector(WrappedArray(1524855688170),WrappedArray(1524855988170)),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988170,1,1524855988170)",
+      "PeriodicSeries(RawSeries(IntervalSelector(WrappedArray(1524855688170),WrappedArray(1524855988170)),List(ColumnFilter(job,Equals(prometheus)), ColumnFilter(group,Equals(canary)), ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988170,1,1524855988170)",
+      "PeriodicSeries(RawSeries(IntervalSelector(WrappedArray(1524855688170),WrappedArray(1524855988170)),List(ColumnFilter(environment,Equals(staging|testing|development)), ColumnFilter(method,Equals(GET)), ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988170,1,1524855988170)",
+      "RawSeries(IntervalSelector(WrappedArray(1524855688170),WrappedArray(1524855988170)),List(ColumnFilter(job,Equals(prometheus)), ColumnFilter(__name__,Equals(http_requests_total))),List())",
+      "PeriodicSeries(RawSeries(IntervalSelector(WrappedArray(1524855688170),WrappedArray(1524855988170)),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988170,1,1524855988170)"
     )
-    val ds = MetricsTestData.timeseriesDataset
     val qts: Long = 1524855988170L
     queries.zipWithIndex.foreach { case (q, i) =>
-      val lp = PrometheusQLParser.queryToLogicalPlan(q, ds, qts)
+      val lp = PrometheusQLParser.queryToLogicalPlan(q, qts)
       lp.toString should be(expected(i))
     }
 

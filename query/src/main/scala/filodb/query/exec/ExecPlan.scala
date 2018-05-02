@@ -12,7 +12,8 @@ import filodb.core.DatasetRef
 import filodb.core.metadata.Dataset
 import filodb.core.query.{RangeVector, ResultSchema, SerializableRangeVector}
 import filodb.core.store.ChunkSource
-import filodb.query.{QueryConfig, QueryError, QueryResponse, QueryResult}
+import filodb.query._
+import filodb.query.QueryLogger.qLogger
 
 /**
   * This is the Execution Plan tree node interface.
@@ -29,7 +30,7 @@ import filodb.query.{QueryConfig, QueryError, QueryResponse, QueryResult}
   * Convention is for all concrete subclasses of ExecPlan to
   * end with 'Exec' for easy identification
   */
-trait ExecPlan extends java.io.Serializable {
+trait ExecPlan extends QueryCommand {
   /**
     * The query id
     */
@@ -39,6 +40,8 @@ trait ExecPlan extends java.io.Serializable {
     * Child execution plans representing sub-queries
     */
   def children: Seq[ExecPlan]
+
+  def submitTime: Long
 
   def dataset: DatasetRef
 
@@ -96,9 +99,16 @@ trait ExecPlan extends java.io.Serializable {
       finalRes._1
         .map { r => SerializableRangeVector(r, finalRes._2.columns) }
         .toListL
-        .map { r => QueryResult(id, r) }
-        .onErrorHandle { case ex: Throwable => QueryError(id, ex) }
+        .map { r =>
+          qLogger.debug(s"Successful query execution $r")
+          QueryResult(id, finalRes._2, r)
+        }
+        .onErrorHandle { case ex: Throwable =>
+          qLogger.error("Exception during query execution", ex)
+          QueryError(id, ex)
+        }
     } catch { case NonFatal(ex) =>
+      qLogger.error("Exception during query execution", ex)
       Task(QueryError(id, ex))
     }
   }
@@ -150,7 +160,9 @@ abstract class NonLeafExecPlan extends ExecPlan {
   /**
     * For now we do not support cross-dataset queries
     */
-  def dataset: DatasetRef = children.head.dataset
+  final val dataset: DatasetRef = children.head.dataset
+
+  final val submitTime: Long = children.head.submitTime
 
   /**
     * Being a non-leaf node, this implementation encompasses the logic

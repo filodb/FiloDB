@@ -1,7 +1,16 @@
-package filodb.query.exec
+package filodb.query.exec.rangefn
 
 import filodb.query.{QueryConfig, RangeFunctionId}
-import filodb.query.RangeFunctionId.Rate
+import filodb.query.RangeFunctionId.{Delta, Increase, Rate}
+import filodb.query.exec._
+
+
+trait Window {
+  def apply(i: Int): MutableSample
+  def size: Int
+  def head: MutableSample
+  def last: MutableSample
+}
 
 /**
   * All Range Vector Functions are implementation of this trait.
@@ -30,18 +39,22 @@ trait RangeFunction {
 
   /**
     * Called when wrapping iterator needs to emit a sample using the window.
-    * Samples in the window are samples reported in the requested window length.
-    * Timestamp of samples is always <= the timestamp param of this function.
     *
-    * @param timestamp timestamp to use in emitted sample
-    * @param windowLength length of the window in milliseconds
+    * Samples in the window are samples reported in the requested window length.
+    * Window also includes the last sample outside the window if it was reported
+    * for the time within stale sample period
+    *
+    * Timestamp of samples in window is always <= the timestamp param of this function.
+    *
+    * @param startTimestamp start timestamp of the time window
+    * @param endTimestamp timestamp to use in emitted sample. It is also the endTimestamp for the window
     * @param window samples contained in the window
     * @param sampleToEmit To keep control on reader creation the method must set
     *                  the value to emit in this param object that comes from a reader pool
     */
-  def apply(timestamp: Long,
-            windowLength: Int,
-            window: Seq[MutableSample],
+  def apply(startTimestamp: Long,
+            endTimestamp: Long,
+            window: Window,
             sampleToEmit: MutableSample,
             queryConfig: QueryConfig): Unit
 }
@@ -52,6 +65,8 @@ object RangeFunction {
     func match {
       case None             => LastSampleFunction
       case Some(Rate)       => RateFunction
+      case Some(Increase)   => IncreaseFunction
+      case Some(Delta)      => DeltaFunction
       case _                => ???
     }
   }
@@ -62,41 +77,17 @@ object LastSampleFunction extends RangeFunction {
   def needsCounterCorrection: Boolean = false // should not assume counter always
   def addToWindow(row: MutableSample): Unit = {}
   def removeFromWindow(row: MutableSample): Unit = {}
-  def apply(timestamp: Long,
-            windowLength: Int,
-            window: Seq[MutableSample],
+  def apply(startTimestamp: Long,
+            endTimestamp: Long,
+            window: Window,
             sampleToEmit: MutableSample,
             queryConfig: QueryConfig): Unit = {
     if (window.size > 1)
       throw new IllegalStateException("Possible internal error: Last sample should have used zero length windows")
-    if (window.size == 0 || (timestamp - window.head.getLong(0)) > queryConfig.staleSampleAfterMs) {
-      sampleToEmit.set(timestamp, Double.NaN)
+    if (window.size == 0 || (endTimestamp - window.head.getLong(0)) > queryConfig.staleSampleAfterMs) {
+      sampleToEmit.set(endTimestamp, Double.NaN)
     } else {
-      sampleToEmit.set(timestamp, window.head.getDouble(1))
+      sampleToEmit.set(endTimestamp, window.head.getDouble(1))
     }
   }
 }
-
-object RateFunction extends RangeFunction {
-
-  // TODO there is more to do here. Work in progress
-  def needsCounterCorrection: Boolean = true
-  def addToWindow(row: MutableSample): Unit = {}
-  def removeFromWindow(row: MutableSample): Unit = {}
-
-  def apply(timestamp: Long,
-            windowLength: Int,
-            window: Seq[MutableSample],
-            sampleToEmit: MutableSample,
-            queryConfig: QueryConfig): Unit = {
-    if (window.size < 2) {
-      sampleToEmit.set(timestamp, Double.NaN) // TODO is there a way to say NA here ?
-    } else {
-      val valueDelta = window.last.getDouble(1) - window.head.getDouble(1)
-      val timeDelta = (window.last.getLong(0) - window.head.getLong(0)) / 1000 // convert to seconds
-      sampleToEmit.set(timestamp, valueDelta / timeDelta)
-    }
-  }
-}
-
-// TODO add all other range vector functions

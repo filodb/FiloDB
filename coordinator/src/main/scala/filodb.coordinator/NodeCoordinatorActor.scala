@@ -15,7 +15,7 @@ import filodb.core._
 import filodb.core.memstore.MemStore
 import filodb.core.metadata._
 import filodb.core.store.{MetaStore, StoreConfig}
-import filodb.query.exec.{ExecPlan => ExecPlan2}
+import filodb.query.QueryCommand
 
 /**
  * The NodeCoordinatorActor is the common external API entry point for all FiloDB operations.
@@ -174,10 +174,7 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
   }
 
   def queryHandlers: Receive = LoggingReceive {
-    case q: ExecPlan2 =>
-      val originator = sender()
-      withQueryActor(originator, q.dataset) { _.tell(q, originator) }
-    case q: client.QueryCommand =>
+    case q: QueryCommand =>
       val originator = sender()
       withQueryActor(originator, q.dataset) { _.tell(q, originator) }
     case q: QueryActor.SingleShardQuery =>

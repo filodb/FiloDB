@@ -14,7 +14,7 @@ import filodb.memory.format.{vectors => bv, _}
 /**
   * Identifier for a single RangeVector
   */
-trait RangeVectorKey {
+trait RangeVectorKey extends java.io.Serializable {
   def labelValues: Seq[LabelValue]
   def sourceShards: Seq[Int]
   override def toString: String = s"/shard:${sourceShards.mkString(",")}/$labelValues"
@@ -62,7 +62,7 @@ trait RangeVector {
         case reader =>
           val firstCol = if (formatTime && schema.isTimeSeries) {
             val timeStamp = reader.getLong(0)
-            s"${new DateTime(timeStamp).toString()} (${(curTime - timeStamp)/1000}s ago)"
+            s"${new DateTime(timeStamp).toString()} (${(curTime - timeStamp)/1000}s ago) $timeStamp"
           } else {
             reader.getAny(0).toString
           }
@@ -97,10 +97,10 @@ final case class RawDataRangeVector(key: RangeVectorKey,
 }
 
 final class SerializableRangeVector(val key: RangeVectorKey,
-                                    parsers: Array[FiloVector[_]],
-                                    numRows: Int) extends RangeVector with java.io.Serializable {
-  val reader = new FastFiloRowReader(parsers)
+                                    val parsers: Array[BinaryVector[_]],
+                                    val numRows: Int) extends RangeVector with java.io.Serializable {
   override def rows: Iterator[RowReader] = {
+    val reader = new FastFiloRowReader(parsers.map(_.asInstanceOf[FiloVector[_]]))
     new Iterator[RowReader] {
       private var i = 0
       final def hasNext: Boolean = i < numRows
@@ -136,7 +136,7 @@ object SerializableRangeVector {
       }
     }
     // TODO need to measure if optimize really helps or has a negative effect
-    new SerializableRangeVector(rv.key, vectors.map(_.optimize(memFactory)), numRows)
+    new SerializableRangeVector(rv.key, vectors.map(_.asInstanceOf[BinaryVector[_]]), numRows)
   }
 }
 

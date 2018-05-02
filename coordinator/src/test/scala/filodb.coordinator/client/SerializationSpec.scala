@@ -2,15 +2,20 @@ package filodb.coordinator.client
 
 import akka.actor.ActorRef
 import akka.serialization.SerializationExtension
+import akka.testkit.TestProbe
 import org.scalatest.concurrent.ScalaFutures
 
 import filodb.coordinator.{ActorSpecConfig, ActorTest, NodeClusterActor, ShardMapper}
 import filodb.coordinator.queryengine.Utils
-import filodb.core.{MachineMetricsData, NamesTestData, TestData}
+import filodb.coordinator.queryengine2.QueryEngine
+import filodb.core.{MachineMetricsData, MetricsTestData, NamesTestData, TestData}
 import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.memstore._
+import filodb.core.metadata.Column.ColumnType
 import filodb.core.store._
 import filodb.memory._
+import filodb.memory.format.{RowReader, SeqRowReader}
+import filodb.query.{QueryResult => QueryResult2, _}
 
 object SerializationSpecConfig extends ActorSpecConfig {
   override val defaultConfig = """
@@ -28,9 +33,9 @@ object SerializationSpecConfig extends ActorSpecConfig {
 class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) with ScalaFutures {
   import IngestionCommands._
   import NodeClusterActor._
-  import NamesTestData._
-  import QueryCommands._
   import LogicalPlan._
+  import QueryCommands._
+  import NamesTestData._
 
   val serialization = SerializationExtension(system)
 
@@ -257,4 +262,89 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
     readQuery.execPlan.getClass shouldEqual query.execPlan.getClass
     readQuery.execPlan.children.head.getClass shouldEqual query.execPlan.children.head.getClass
   }
+
+  it("should be able to create, serialize and read from QueryResult") {
+
+    import MachineMetricsData._
+
+    val now = System.currentTimeMillis()
+    val numRawSamples = 1000
+    val reportingInterval = 10000
+    val tuples = (numRawSamples until 0).by(-1).map(n => (now - n * reportingInterval, n.toDouble))
+
+    val rvKey = new RangeVectorKey {
+      def labelValues: Seq[LabelValue] = Seq()
+      def sourceShards: Seq[Int] = Seq(0)
+    }
+
+    val rowsIterator = tuples.map { t =>
+      new SeqRowReader(Seq[Any](t._1, t._2))
+    }.iterator
+
+    val rv = new RangeVector {
+      override val rows: Iterator[RowReader] = rowsIterator
+      override val key: RangeVectorKey = rvKey
+    }
+
+    val cols = Array(new ColumnInfo("timestamp", ColumnType.LongColumn),
+      new ColumnInfo("value", ColumnType.DoubleColumn))
+    val srv = SerializableRangeVector(rv, cols)
+    val observedTs = srv.rows.toSeq.map(_.getLong(0))
+    val observedVal = srv.rows.toSeq.map(_.getDouble(1))
+    observedTs shouldEqual tuples.map(_._1)
+    observedVal shouldEqual tuples.map(_._2)
+
+    // now we should also be able to create SerializableRangeVector using fast filo row iterator
+    // since srv iterator is based on FFRR, try that
+    val srv2 = SerializableRangeVector(srv, cols)
+    val observedTs2 = srv2.rows.toSeq.map(_.getLong(0))
+    val observedVal2 = srv2.rows.toSeq.map(_.getDouble(1))
+    observedTs2 shouldEqual tuples.map(_._1)
+    observedVal2 shouldEqual tuples.map(_._2)
+
+    val schema = ResultSchema(dataset1.infosFromIDs(0 to 0), 1)
+
+    val result = QueryResult2("someId", schema, Seq(srv, srv2))
+    val roundTripResult = roundTrip(result).asInstanceOf[QueryResult2]
+
+    result.resultSchema shouldEqual roundTripResult.resultSchema
+    result.id shouldEqual roundTripResult.id
+    for {i <- 0 until roundTripResult.result.size } {
+      // BinaryVector deserializes to different impl, so cannot compare top levle object
+      roundTripResult.result(i).parsers.head.toBuffer shouldEqual result.result(i).parsers.head.toBuffer
+      roundTripResult.result(i).key.labelValues shouldEqual result.result(i).key.labelValues
+      roundTripResult.result(i).key.sourceShards shouldEqual result.result(i).key.sourceShards
+    }
+  }
+
+  it ("should serialize and deserialize ExecPlan2") {
+    val node0 = TestProbe().ref
+    val mapper = new ShardMapper(1)
+    mapper.registerNode(Seq(0), node0)
+    def mapperRef: ShardMapper = mapper
+    val dataset = MetricsTestData.timeseriesDataset
+    val engine = new QueryEngine(dataset, mapperRef)
+    val f1 = Seq(ColumnFilter("__name__", Filter.Equals("http_request_duration_seconds_bucket")),
+      ColumnFilter("job", Filter.Equals("myService")),
+      ColumnFilter("le", Filter.Equals("0.3")))
+
+    val to = System.currentTimeMillis()
+    val from = to - 50000
+
+    val intervalSelector = IntervalSelector(Seq(from), Seq(to))
+
+    val raw1 = RawSeries(rangeSelector = intervalSelector, filters= f1, columns = Seq("value"))
+    val windowed1 = PeriodicSeriesWithWindowing(raw1, from, 1000, to, 5000, RangeFunctionId.Rate)
+    val summed1 = Aggregate(AggregationOperator.Sum, windowed1, Nil, Seq("job"))
+
+    val f2 = Seq(ColumnFilter("__name__", Filter.Equals("http_request_duration_seconds_count")),
+      ColumnFilter("job", Filter.Equals("myService")))
+    val raw2 = RawSeries(rangeSelector = intervalSelector, filters= f2, columns = Seq("value"))
+    val windowed2 = PeriodicSeriesWithWindowing(raw2, from, 1000, to, 5000, RangeFunctionId.Rate)
+    val summed2 = Aggregate(AggregationOperator.Sum, windowed2, Nil, Seq("job"))
+    val logicalPlan = BinaryJoin(summed1, BinaryOperator.DIV, summed2)
+    val execPlan = engine.materialize(logicalPlan, QueryOptions(shardKeySpread = 0))
+    roundTrip(execPlan) shouldEqual execPlan
+  }
+
 }

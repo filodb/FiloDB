@@ -6,25 +6,36 @@ import monix.execution.Scheduler
 import monix.reactive.Observable
 
 import filodb.core.{DatasetRef, Types}
+import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.metadata.Dataset
 import filodb.core.query.{ColumnFilter, RangeVector, ResultSchema}
 import filodb.core.store.{AllChunkScan, ChunkSource, FilteredPartitionScan, RowKeyChunkScan, ShardSplit}
 import filodb.query._
+import filodb.query.QueryLogger.qLogger
+
+sealed trait RowKeyRange
+
+case class RowKeyInterval(from: BinaryRecord, to: BinaryRecord) extends RowKeyRange
+case object AllChunks extends RowKeyRange
+case object WriteBuffers extends RowKeyRange
+case object EncodedChunks extends RowKeyRange
 
 /**
   * ExecPlan to select raw data from partitions that the given filter resolves to,
   * in the given shard, for the given row key range
   */
 final case class SelectRawPartitionsExec(id: String,
+                                         submitTime: Long,
                                          dispatcher: PlanDispatcher,
                                          dataset: DatasetRef,
                                          shard: Int,
                                          filters: Seq[ColumnFilter],
-                                         rangeSelector: RangeSelector,
+                                         rowKeyRange: RowKeyRange,
                                          columns: Seq[String]) extends LeafExecPlan {
 
   protected def schemaOfDoExecute(dataset: Dataset): ResultSchema = {
-    val colIds = getColumnIDs(dataset, columns)
+    val colIds = if (columns.nonEmpty) getColumnIDs(dataset, columns)
+                 else dataset.dataColumns.map(_.id) // includes row-key
     ResultSchema(dataset.infosFromIDs(colIds),
       colIds.zip(dataset.rowKeyIDs).takeWhile { case (a, b) => a == b }.length)
   }
@@ -34,14 +45,18 @@ final case class SelectRawPartitionsExec(id: String,
                           queryConfig: QueryConfig)
                          (implicit sched: Scheduler,
                           timeout: FiniteDuration): Observable[RangeVector] = {
-    val colIds = getColumnIDs(dataset, columns)
+
+    qLogger.debug(s"SelectRawPartitionsExec: Running with $args")
+    // if no columns are chosen, auto-select data and row key columns
+    val colIds = if (columns.nonEmpty) getColumnIDs(dataset, columns)
+                 else dataset.dataColumns.map(_.id) // includes row-key
     require(colIds.indexOfSlice(dataset.rowKeyIDs) == 0)
 
-    val chunkMethod = rangeSelector match {
-      case IntervalSelector(from, to) => RowKeyChunkScan(from, to)
-      case AllChunksSelector => AllChunkScan
-      case WriteBufferSelector => ???
-      case EncodedChunksSelector => ???
+    val chunkMethod = rowKeyRange match {
+      case RowKeyInterval(from, to) => RowKeyChunkScan(from, to)
+      case AllChunks => AllChunkScan
+      case WriteBuffers => ???
+      case EncodedChunks => ???
     }
     val partMethod = FilteredPartitionScan(ShardSplit(shard), filters)
     source.rangeVectors(dataset, colIds, partMethod, dataset.rowKeyOrdering, chunkMethod)
@@ -61,7 +76,7 @@ final case class SelectRawPartitionsExec(id: String,
     else { dataset.rowKeyIDs ++ ids }
   }
 
-  protected def args: String = s"shard=$shard, rangeSelector=$rangeSelector, filters=$filters"
+  protected def args: String = s"shard=$shard, rowKeyRange=$rowKeyRange, filters=$filters"
 }
 
 /**
@@ -117,6 +132,7 @@ final case class DistConcatExec(id: String,
 
   protected def compose(childResponses: Observable[QueryResponse],
                         queryConfig: QueryConfig): Observable[RangeVector] = {
+    qLogger.debug(s"DistConcatExec: Concatenating results")
     childResponses.flatMap {
       case qr: QueryResult => Observable.fromIterable(qr.result)
       case qe: QueryError => throw qe.t

@@ -12,14 +12,12 @@ import org.scalatest._
 import org.scalatest.concurrent.ScalaFutures
 
 import filodb.coordinator._
-import filodb.coordinator.client.QueryCommands.{FilteredPartitionQuery, MostRecentTime, QueryResult}
-import filodb.coordinator.client.{LocalClient, LogicalPlan}
 import filodb.coordinator.NodeClusterActor.{DatasetResourceSpec, IngestionSource}
-import filodb.core.metadata.Column.ColumnType.DoubleColumn
-import filodb.core.query.Filter.Equals
-import filodb.core.query._
-import filodb.core.store.StoreConfig
+import filodb.coordinator.client.LocalClient
+import filodb.coordinator.parse.PrometheusQLParser
 import filodb.core.{DatasetRef, ErrorResponse}
+import filodb.core.store.StoreConfig
+import filodb.query.{QueryError, QueryResult => QueryResult2}
 
 /**
  * A trait used for MultiJVM tests based on starting the standalone FiloServer using timeseries-dev config
@@ -35,7 +33,7 @@ abstract class StandaloneMultiJvmSpec(config: MultiNodeConfig) extends MultiNode
 
   lazy val watcher = TestProbe()
 
-  val duration = 5.seconds.dilated
+  val duration = 10.seconds.dilated
   val longDuration = 60.seconds
   val removedDuration = longDuration * 8
 
@@ -129,19 +127,20 @@ abstract class StandaloneMultiJvmSpec(config: MultiNodeConfig) extends MultiNode
     }
   }
 
-  import LogicalPlan._
+  def runQuery(client: LocalClient, queryTimestamp: Long): Double = {
+    val query = "heap_usage{host=\"H0\",job=\"A0\"}"
+    val qParams = PrometheusQLParser.QueryParams(queryTimestamp, 1, queryTimestamp)
+    val logicalPlan = PrometheusQLParser.queryRangeToLogicalPlan(query, qParams)
 
-  def runQuery(client: LocalClient): Double = {
-    // This is the promQL equivalent: sum(heap_usage{partition="P0"}[1000m])
-    val filters = Vector(ColumnFilter("partition", Equals("P0")), ColumnFilter("__name__", Equals("heap_usage")))
-    val plan = simpleAgg("sum", Nil, childPlan=
-                         PartitionsRange(FilteredPartitionQuery(filters), MostRecentTime(60000000), Seq("value")))
-    client.logicalPlanQuery(dataset, plan) match {
-      case QueryResult(_, TupleResult(schema, Tuple(None, bRec))) =>
-        schema shouldEqual ResultSchema(List(ColumnInfo("result",DoubleColumn)), 0)
-        info(s"Query Response was a TupleResult with bRec=$bRec and schema=$schema")
-        bRec.getDouble(0)
+    val result = client.logicalPlan2Query(dataset, logicalPlan) match {
+      case r: QueryResult2 =>
+        val vals = r.result.map(_.rows.next.getDouble(1))
+        info(s"result values were $vals")
+        vals.sum
+      case e: QueryError => fail(e.t)
     }
+    info(s"Query Result for $query at $queryTimestamp was $result")
+    result
   }
 }
 

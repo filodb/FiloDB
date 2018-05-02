@@ -7,11 +7,7 @@ import org.scalatest.{FunSpec, Matchers}
 import filodb.coordinator.ShardMapper
 import filodb.coordinator.client.QueryCommands.QueryOptions
 import filodb.core.MetricsTestData
-import filodb.core.binaryrecord.{BinaryRecord, RecordSchema}
-import filodb.core.metadata.Column.ColumnType.LongColumn
-import filodb.core.metadata.DatasetOptions
 import filodb.core.query.{ColumnFilter, Filter}
-import filodb.memory.format.SingleValueRowReader
 import filodb.query._
 import filodb.query.exec._
 
@@ -30,9 +26,6 @@ class QueryEngineSpec extends FunSpec with Matchers {
   mapper.registerNode(Seq(3), node3)
 
   private def mapperRef = mapper
-  val datasetOptions = DatasetOptions(shardKeyColumns = Seq("job","__name"),
-                                      metricColumn = "__name",
-                                      valueColumn = "value")
 
   val dataset = MetricsTestData.timeseriesDataset
 
@@ -55,17 +48,15 @@ class QueryEngineSpec extends FunSpec with Matchers {
     val to = System.currentTimeMillis()
     val from = to - 50000
 
-    val fromRec = BinaryRecord(RecordSchema(LongColumn), SingleValueRowReader(from))
-    val toRec = BinaryRecord(RecordSchema(LongColumn), SingleValueRowReader(to))
+    val intervalSelector = IntervalSelector(Seq(from), Seq(to))
 
-
-    val raw1 = RawSeries(rangeSelector = IntervalSelector(fromRec, toRec), filters= f1, columns = Seq("value"))
+    val raw1 = RawSeries(rangeSelector = intervalSelector, filters= f1, columns = Seq("value"))
     val windowed1 = PeriodicSeriesWithWindowing(raw1, from, 1000, to, 5000, RangeFunctionId.Rate)
     val summed1 = Aggregate(AggregationOperator.Sum, windowed1, Nil, Seq("job"))
 
     val f2 = Seq(ColumnFilter("__name__", Filter.Equals("http_request_duration_seconds_count")),
       ColumnFilter("job", Filter.Equals("myService")))
-    val raw2 = RawSeries(rangeSelector = IntervalSelector(fromRec, toRec), filters= f2, columns = Seq("value"))
+    val raw2 = RawSeries(rangeSelector = intervalSelector, filters= f2, columns = Seq("value"))
     val windowed2 = PeriodicSeriesWithWindowing(raw2, from, 1000, to, 5000, RangeFunctionId.Rate)
     val summed2 = Aggregate(AggregationOperator.Sum, windowed2, Nil, Seq("job"))
 

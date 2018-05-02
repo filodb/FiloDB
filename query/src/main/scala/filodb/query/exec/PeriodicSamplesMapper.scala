@@ -7,6 +7,8 @@ import monix.reactive.Observable
 import filodb.core.query.{IteratorBackedRangeVector, RangeVector, ResultSchema}
 import filodb.memory.format.RowReader
 import filodb.query.{QueryConfig, RangeFunctionId}
+import filodb.query.exec.rangefn.{RangeFunction, Window}
+import filodb.query.util.IndexedArrayQueue
 
 /**
   * Transforms raw reported samples to samples with
@@ -64,6 +66,13 @@ class MutableSample extends RowReader {
   override def toString: String = f"$timestamp->$value%.2f"
 }
 
+class QueueBasedWindow(q: IndexedArrayQueue[MutableSample]) extends Window {
+  def size: Int = q.size
+  def apply(i: Int): MutableSample = q(i)
+  def head: MutableSample = q.head
+  def last: MutableSample = q.last
+}
+
 /**
   * Decorates a raw series iterator to apply a range vector function
   * on periodic time windows
@@ -75,16 +84,24 @@ class SlidingWindowIterator(raw: Iterator[RowReader],
                             window: Int,
                             rangeFunction: RangeFunction,
                             queryConfig: QueryConfig) extends Iterator[MutableSample] {
-  var sampleToEmit = new MutableSample()
-  var curWindowEnd = start
-  val windowSamples = mutable.Queue[MutableSample]()
-  val rows = if (rangeFunction.needsCounterCorrection) {
+  private var sampleToEmit = new MutableSample()
+  private var curWindowEnd = start
+
+  // sliding window queue
+  private val windowQueue = new IndexedArrayQueue[MutableSample]()
+
+  // this is the object that will be exposed to the RangeFunction
+  private val windowSamples = new QueueBasedWindow(windowQueue)
+
+  // we need buffered iterator so we can use to peek at next element.
+  // At same time, do counter correction if necessary
+  private val rows = if (rangeFunction.needsCounterCorrection) {
     new BufferableCounterCorrectionIterator(raw).buffered
   } else {
     new BufferableIterator(raw).buffered
   }
-  // now we have a buffered iterator that we can use to peek at next element
 
+  // to avoid creation of object per sample, we use a pool
   val windowSamplesPool = new MutableSamplePool()
 
   override def hasNext: Boolean = curWindowEnd <= end
@@ -98,19 +115,19 @@ class SlidingWindowIterator(raw: Iterator[RowReader],
          (rows.hasNext && rows.head.timestamp > curWindowStart) ||   // last sample outside current window
          !rows.hasNext) {       // no more rows
         val toAdd = windowSamplesPool.get.copyFrom(next)
-        windowSamples.enqueue(toAdd)
+        windowQueue.add(toAdd)
         rangeFunction.addToWindow(toAdd)
       }
     }
     // remove elements outside current window that were part of previous window
     // but ensure at least one sample present
-    while (windowSamples.size > 1 && windowSamples.head.timestamp < curWindowStart) {
-      val removed = windowSamples.dequeue()
+    while (windowQueue.size > 1 && windowQueue.head.timestamp < curWindowStart) {
+      val removed = windowQueue.remove()
       rangeFunction.removeFromWindow(removed)
       windowSamplesPool.putBack(removed)
     }
     // apply function on window samples
-    rangeFunction.apply(curWindowEnd, window, windowSamples, sampleToEmit, queryConfig)
+    rangeFunction.apply(curWindowStart, curWindowEnd, windowSamples, sampleToEmit, queryConfig)
     curWindowEnd = curWindowEnd + step
     sampleToEmit
   }

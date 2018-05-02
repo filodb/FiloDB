@@ -5,11 +5,13 @@ import java.util.{SplittableRandom, UUID}
 import scala.concurrent.ExecutionContext
 import scala.concurrent.duration._
 
+import akka.actor.ActorRef
 import com.typesafe.scalalogging.StrictLogging
 import monix.eval.Task
 
 import filodb.coordinator.{ShardKeyGenerator, ShardMapper}
 import filodb.coordinator.client.QueryCommands.QueryOptions
+import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.metadata.Dataset
 import filodb.core.query.{ColumnFilter, Filter}
 import filodb.query._
@@ -40,13 +42,15 @@ class QueryEngine(dataset: Dataset,
   def materialize(rootLogicalPlan: LogicalPlan,
                   options: QueryOptions): ExecPlan = {
     val queryId = UUID.randomUUID().toString
-    walkLogicalPlanTree(rootLogicalPlan, queryId, options) match {
+    val materialized = walkLogicalPlanTree(rootLogicalPlan, queryId, System.currentTimeMillis(), options) match {
       case Seq(justOne) =>
         justOne
       case many =>
         val targetActor = pickDispatcher(many)
         DistConcatExec(queryId, targetActor, many)
     }
+    logger.debug(s"Materialized logical plan: $rootLogicalPlan to \n${materialized.printTree()}")
+    materialized
   }
 
   private def shardsFromFilters(filters: Seq[ColumnFilter],
@@ -78,6 +82,7 @@ class QueryEngine(dataset: Dataset,
 
   private def dispatcherForShard(shard: Int): PlanDispatcher = {
     val targetActor = shardMapperFunc.coordForShard(shard)
+    if (targetActor == ActorRef.noSender) throw new RuntimeException("Not all shards available") // TODO fix this
     ActorPlanDispatcher(targetActor)
   }
 
@@ -88,39 +93,43 @@ class QueryEngine(dataset: Dataset,
     */
   private def walkLogicalPlanTree(logicalPlan: LogicalPlan,
                                   queryId: String,
+                                  submitTime: Long,
                                   options: QueryOptions): Seq[ExecPlan] = {
     logicalPlan match {
-      case lp: RawSeries =>                   materializeRawSeries(queryId, options, lp)
-      case lp: PeriodicSeries =>              materializePeriodicSeries(queryId, options, lp)
-      case lp: PeriodicSeriesWithWindowing => materializePeriodicSeriesWithWindowing(queryId, options, lp)
-      case lp: ApplyInstantFunction =>        materializeApplyInstantFunction(queryId, options, lp)
-      case lp: Aggregate =>                   materializeAggregate(queryId, options, lp)
-      case lp: BinaryJoin =>                  materializeBinaryJoin(queryId, options, lp)
-      case lp: ScalarVectorBinaryOperation => materializeScalarVectorBinOp(queryId, options, lp)
+      case lp: RawSeries =>                   materializeRawSeries(queryId, submitTime, options, lp)
+      case lp: PeriodicSeries =>              materializePeriodicSeries(queryId, submitTime, options, lp)
+      case lp: PeriodicSeriesWithWindowing => materializePeriodicSeriesWithWindowing(queryId, submitTime, options, lp)
+      case lp: ApplyInstantFunction =>        materializeApplyInstantFunction(queryId, submitTime, options, lp)
+      case lp: Aggregate =>                   materializeAggregate(queryId, submitTime, options, lp)
+      case lp: BinaryJoin =>                  materializeBinaryJoin(queryId, submitTime, options, lp)
+      case lp: ScalarVectorBinaryOperation => materializeScalarVectorBinOp(queryId, submitTime, options, lp)
     }
   }
 
   private def materializeScalarVectorBinOp(queryId: String,
+                                           submitTime: Long,
                                            options: QueryOptions,
                                            lp: ScalarVectorBinaryOperation): Seq[ExecPlan] = {
-    val vectors = walkLogicalPlanTree(lp.vector, queryId, options)
+    val vectors = walkLogicalPlanTree(lp.vector, queryId, submitTime, options)
     vectors.foreach(_.addRangeVectorTransformer(ScalarOperationMapper(lp.operator, lp.scalar, lp.scalarIsLhs)))
     vectors
   }
 
   private def materializeBinaryJoin(queryId: String,
+                                    submitTime: Long,
                                     options: QueryOptions,
                                     lp: BinaryJoin): Seq[ExecPlan] = {
-    val lhs = walkLogicalPlanTree(lp.lhs, queryId, options)
-    val rhs = walkLogicalPlanTree(lp.rhs, queryId, options)
+    val lhs = walkLogicalPlanTree(lp.lhs, queryId, submitTime, options)
+    val rhs = walkLogicalPlanTree(lp.rhs, queryId, submitTime, options)
     val targetActor = pickDispatcher(lhs ++ rhs)
     Seq(BinaryJoinExec(queryId, targetActor, lhs, rhs, lp.operator, lp.on, lp.ignoring))
   }
 
   private def materializeAggregate(queryId: String,
+                                   submitTime: Long,
                                    options: QueryOptions,
                                    lp: Aggregate): Seq[ExecPlan] = {
-    val toReduce = walkLogicalPlanTree(lp.vectors, queryId, options) // Now we have one exec plan per shard
+    val toReduce = walkLogicalPlanTree(lp.vectors, queryId, submitTime, options) // Now we have one exec plan per shard
     toReduce.foreach(_.addRangeVectorTransformer(AggregateCombiner(lp.operator, lp.params, lp.without, lp.by)))
     // One could do another level of aggregation per node too. Ignoring for now
     val reduceDispatcher = pickDispatcher(toReduce)
@@ -133,37 +142,53 @@ class QueryEngine(dataset: Dataset,
   }
 
   private def materializeApplyInstantFunction(queryId: String,
+                                              submitTime: Long,
                                               options: QueryOptions,
                                               lp: ApplyInstantFunction): Seq[ExecPlan] = {
-    val vectors = walkLogicalPlanTree(lp.vectors, queryId, options)
+    val vectors = walkLogicalPlanTree(lp.vectors, queryId, submitTime, options)
     vectors.foreach(_.addRangeVectorTransformer(InstantVectorFunctionMapper(lp.function, lp.functionArgs)))
     vectors
   }
 
   private def materializePeriodicSeriesWithWindowing(queryId: String,
+                                                     submitTime: Long,
                                                     options: QueryOptions,
                                                     lp: PeriodicSeriesWithWindowing): Seq[ExecPlan] = {
-    val rawSeries = walkLogicalPlanTree(lp.rawSeries, queryId, options)
+    val rawSeries = walkLogicalPlanTree(lp.rawSeries, queryId, submitTime, options)
     rawSeries.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(lp.start, lp.step,
       lp.end, Some(lp.window), Some(lp.function), lp.functionArgs)))
     rawSeries
   }
 
   private def materializePeriodicSeries(queryId: String,
+                                        submitTime: Long,
                                        options: QueryOptions,
                                        lp: PeriodicSeries): Seq[ExecPlan] = {
-    val rawSeries = walkLogicalPlanTree(lp.rawSeries, queryId, options)
+    val rawSeries = walkLogicalPlanTree(lp.rawSeries, queryId, submitTime, options)
     rawSeries.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(lp.start, lp.step, lp.end,
       None, None, Nil)))
     rawSeries
   }
 
   private def materializeRawSeries(queryId: String,
+                                   submitTime: Long,
                                    options: QueryOptions,
                                    lp: RawSeries): Seq[ExecPlan] = {
     shardsFromFilters(lp.filters, options).map { shard =>
       val dispatcher = dispatcherForShard(shard)
-      SelectRawPartitionsExec(queryId, dispatcher, dataset.ref, shard, lp.filters, lp.rangeSelector, lp.columns)
+      SelectRawPartitionsExec(queryId, submitTime, dispatcher, dataset.ref, shard,
+        lp.filters, toRowKeyRange(lp.rangeSelector), lp.columns)
+    }
+  }
+
+  private def toRowKeyRange(rangeSelector: RangeSelector): RowKeyRange = {
+    rangeSelector match {
+      case IntervalSelector(from, to) => RowKeyInterval(BinaryRecord(dataset, from),
+                                                        BinaryRecord(dataset, to))
+      case AllChunksSelector => AllChunks
+      case EncodedChunksSelector => EncodedChunks
+      case WriteBufferSelector => WriteBuffers
+      case _ => ???
     }
   }
 

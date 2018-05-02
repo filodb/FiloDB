@@ -62,6 +62,7 @@ lazy val cli = project
   .settings(name := "filodb-cli")
   .settings(libraryDependencies ++= cliDeps)
   .settings(cliAssemblySettings: _*)
+  .dependsOn(prometheus % "compile->compile; test->test")
   .dependsOn(core, coordinator  % "test->test", cassandra)
 
 lazy val kafka = project
@@ -98,8 +99,8 @@ lazy val standalone = project
   .settings(multiJvmMaybeSettings: _*)
   .settings(assemblySettings: _*)
   .settings(libraryDependencies ++= standaloneDeps)
-  .dependsOn(core, coordinator % "compile->compile; test->test", cassandra, kafka, http, bootstrapper,
-    tsgenerator % Test)
+  .dependsOn(core, prometheus % "test->test", coordinator % "compile->compile; test->test",
+    cassandra, kafka, http, bootstrapper, tsgenerator % Test)
   .configs(MultiJvm)
 
 lazy val spark = project

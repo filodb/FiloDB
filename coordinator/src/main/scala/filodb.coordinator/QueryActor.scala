@@ -14,7 +14,6 @@ import kamon.trace.Span
 import monix.eval.Task
 import org.scalactic._
 
-import filodb.coordinator.client.QueryCommand
 import filodb.coordinator.queryengine2.QueryEngine
 import filodb.core._
 import filodb.core.binaryrecord.{BinaryRecord, RecordSchema}
@@ -25,7 +24,7 @@ import filodb.core.store._
 import filodb.memory.MemFactory
 import filodb.memory.format.{Classes, SeqRowReader}
 import filodb.memory.format.vectors.{DoubleVector, IntBinaryVector}
-import filodb.query.{QueryConfig, QueryError => QueryError2}
+import filodb.query.{QueryCommand, QueryConfig, QueryError => QueryError2}
 import filodb.query.exec.{ExecPlan => ExecPlan2}
 
 object QueryCommandPriority extends java.util.Comparator[Envelope] {
@@ -276,14 +275,21 @@ final class QueryActor(memStore: MemStore,
     }
   }
 
+  private def processLogicalPlan2Query(q: LogicalPlan2Query, replyTo: ActorRef) = {
+    // This is for CLI use only. Always prefer clients to materialize logical plan
+    try {
+      val execPlan = queryEngine2.materialize(q.logicalPlan, q.queryOptions)
+      self forward execPlan
+    } catch {
+      case NonFatal(ex) =>
+        logger.error(s"Exception while materializing logical plan", ex)
+        replyTo ! QueryError2("unknown", ex)
+    }
+  }
+
   def receive: Receive = {
-    case q: LogicalPlan2Query      => // This is for CLI use only. Always prefer clients to materialize logical plan
-                                      val execPlan = queryEngine2.materialize(q.logicalPlan, q.queryOptions)
-                                      val replyTo = sender()
-                                      implicit val _ = queryConfig.askTimeout
-                                      queryEngine2.dispatchExecPlan(execPlan)
-                                        .foreach(replyTo ! _)
-                                        .recover { case ex => replyTo ! QueryError2(execPlan.id, ex) }
+    case q: LogicalPlan2Query      => val replyTo = sender()
+                                      processLogicalPlan2Query(q, replyTo)
 
     case q: ExecPlan2              => val replyTo = sender()
                                       Kamon.currentSpan().tag("query", q.getClass.getSimpleName)

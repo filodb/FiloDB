@@ -9,6 +9,7 @@ import com.typesafe.config.ConfigFactory
 import org.scalatest.{FunSpec, Matchers}
 
 import filodb.query.QueryConfig
+import filodb.query.exec.rangefn.LastSampleFunction
 
 class LastSampleFunctionSpec extends FunSpec with Matchers {
 

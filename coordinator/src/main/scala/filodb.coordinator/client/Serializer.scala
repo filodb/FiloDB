@@ -177,7 +177,25 @@ class KryoInit {
     kryo.addDefaultSerializer(classOf[BinaryRecord], classOf[BinaryRecordSerializer])
 
     initOtherFiloClasses(kryo)
+    initQueryEngine2Classes(kryo)
     kryo.setReferences(true)   // save space by referring to same objects with ordinals
+  }
+
+  def initQueryEngine2Classes(kryo: Kryo): Unit = {
+    kryo.register(classOf[QueryCommands.LogicalPlan2Query])
+    kryo.register(classOf[filodb.query.QueryResult])
+    kryo.register(classOf[filodb.query.QueryError])
+    kryo.register(classOf[filodb.query.exec.SelectRawPartitionsExec])
+    kryo.register(classOf[filodb.query.exec.ReduceAggregateExec])
+    kryo.register(classOf[filodb.query.exec.BinaryJoinExec])
+    kryo.register(classOf[filodb.query.exec.DistConcatExec])
+    kryo.register(classOf[filodb.query.exec.PeriodicSamplesMapper])
+    kryo.register(classOf[filodb.query.exec.InstantVectorFunctionMapper])
+    kryo.register(classOf[filodb.query.exec.ScalarOperationMapper])
+    kryo.register(classOf[filodb.query.exec.AggregateCombiner])
+    kryo.register(classOf[filodb.query.exec.AverageMapper])
+    kryo.register(classOf[filodb.core.query.SerializableRangeVector])
+    kryo.register(classOf[filodb.core.query.PartitionRangeVectorKey])
   }
 
   def initOtherFiloClasses(kryo: Kryo): Unit = {
@@ -201,18 +219,6 @@ class KryoInit {
     kryo.register(classOf[TupleListResult])
     kryo.register(classOf[VectorListResult])
     kryo.register(classOf[ColumnFilter])
-
-    kryo.register(classOf[filodb.query.QueryResult])
-    kryo.register(classOf[filodb.query.QueryError])
-    kryo.register(classOf[filodb.query.exec.SelectRawPartitionsExec])
-    kryo.register(classOf[filodb.query.exec.ReduceAggregateExec])
-    kryo.register(classOf[filodb.query.exec.BinaryJoinExec])
-    kryo.register(classOf[filodb.query.exec.DistConcatExec])
-    kryo.register(classOf[filodb.query.exec.PeriodicSamplesMapper])
-    kryo.register(classOf[filodb.query.exec.InstantVectorFunctionMapper])
-    kryo.register(classOf[filodb.query.exec.ScalarOperationMapper])
-    kryo.register(classOf[filodb.query.exec.AggregateCombiner])
-    kryo.register(classOf[filodb.query.exec.AverageMapper])
 
     import filodb.core.store._
     kryo.register(classOf[ChunkSetInfo])

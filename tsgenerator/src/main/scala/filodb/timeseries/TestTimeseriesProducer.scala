@@ -15,7 +15,7 @@ import monix.reactive.Observable
 import org.apache.kafka.clients.producer.ProducerRecord
 import org.rogach.scallop._
 
-import filodb.coordinator.ShardMapper
+import filodb.coordinator.{ShardKeyGenerator, ShardMapper}
 
 /**
   * Simple driver to produce time series data into local kafka similar. Data format is similar to
@@ -62,7 +62,7 @@ object TestTimeseriesProducer extends StrictLogging {
     * @return
     */
   def produceMetrics(conf: Config, numSamples: Int, numTimeSeries: Int, startMinutesAgo: Long): Future[Unit] = {
-    val startTime = System.currentTimeMillis() - startMinutesAgo * 60 * 1000
+    val startTime = System.currentTimeMillis() - startMinutesAgo.minutes.toMillis
     val numShards = conf.getInt("num-shards")
 
     // TODO: use the official KafkaIngestionStream stuff to parse the file.  This is just faster for now.
@@ -77,6 +77,7 @@ object TestTimeseriesProducer extends StrictLogging {
     val stream = timeSeriesData(startTime, numShards, numTimeSeries).take(numSamples)
     val producer = KafkaProducerSink[JLong, String](producerCfg, io)
     Observable.fromIterable(stream)
+      //.dump("Produced: ")
       .map { case (partition, value) =>
         new ProducerRecord[JLong, String](topicName, partition.toInt, partition, value)
       }
@@ -115,9 +116,9 @@ object TestTimeseriesProducer extends StrictLogging {
       val value = 15 + Math.sin(n + 1) + rand.nextGaussian()
 
       //scalastyle:off line.size.limit
-      val appNameMetricNameHash = s"__name__=heap_usage;job=A$app".hashCode
+      val shardKeyHash = ShardKeyGenerator.shardKeyHash(Seq("heap_usage", s"A$app"))
       val tagHash = s"dc=DC$dc,partition=P$partition,host=H$host,instance=I$instance".hashCode
-      val kafkaParitionId: JLong = shardMapper.ingestionShard(appNameMetricNameHash, tagHash, spread).toLong
+      val kafkaParitionId: JLong = shardMapper.ingestionShard(shardKeyHash, tagHash, spread).toLong
 
       val sample = s"__name__=heap_usage,dc=DC$dc,job=A$app,partition=P$partition,host=H$host,instance=I$instance   $timestamp   $value"
       logger.trace(s"Producing $sample")

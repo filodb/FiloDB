@@ -2,8 +2,6 @@ package filodb.coordinator.parse
 
 import scala.util.parsing.combinator.{JavaTokenParsers, PackratParsers, RegexParsers}
 
-import filodb.core.binaryrecord.BinaryRecord
-import filodb.core.metadata.Dataset
 import filodb.core.query
 import filodb.core.query.ColumnFilter
 import filodb.query._
@@ -204,10 +202,8 @@ trait AST {
     }
   }
 
-
   sealed trait SeriesExpression extends Expression {
-    def toLogicalPlanNode(dataset: Dataset,
-                          queryParams: QueryParams): LogicalPlan
+    def toLogicalPlanNode(queryParams: QueryParams): LogicalPlan
   }
 
   /**
@@ -235,27 +231,25 @@ trait AST {
       ColumnFilter(labelMatch.label, query.Filter.Equals(labelMatch.value))
     }
 
-    private val nameFilter = ColumnFilter(metricName, query.Filter.Equals("__name__"))
+    private val nameFilter = ColumnFilter("__name__", query.Filter.Equals(metricName))
 
-    def toLogicalPlanNode(dataset: Dataset,
-                          queryParams: QueryParams): LogicalPlan = {
+    def toLogicalPlanNode(queryParams: QueryParams): LogicalPlan = {
       PeriodicSeries(
         RawSeries(
-          interval(dataset, queryParams),
+          interval(queryParams),
           columnFilters :+ nameFilter,
-          dataset.dataColumns.map(_.name)),
+          Nil),
         queryParams.start, queryParams.step, queryParams.end
       )
     }
 
 
-    def interval(dataset: Dataset,
-                 queryParams: QueryParams): RangeSelector = {
+    def interval(queryParams: QueryParams): RangeSelector = {
       //val endTimestamp = queryEvaluationTimestamp - offset.map(_.millis).getOrElse(0)
       val startTimestamp = queryParams.start - Duration(5, Minute).millis
       val endTimestamp = queryParams.end
-      val start: BinaryRecord = BinaryRecord(dataset, Seq(startTimestamp))
-      val end: BinaryRecord = BinaryRecord(dataset, Seq(endTimestamp))
+      val start = Array(startTimestamp)
+      val end = Array(endTimestamp)
       IntervalSelector(start, end)
     }
   }
@@ -282,26 +276,24 @@ trait AST {
       ColumnFilter(labelMatch.label, query.Filter.Equals(labelMatch.value))
     }
 
-    private val nameFilter = ColumnFilter(metricName, query.Filter.Equals("__name__"))
+    private val nameFilter = ColumnFilter("__name__", query.Filter.Equals(metricName))
 
-    def toLogicalPlanNode(dataset: Dataset,
-                          queryParams: QueryParams): LogicalPlan = {
+    def toLogicalPlanNode(queryParams: QueryParams): LogicalPlan = {
       if (queryParams.start != queryParams.end) {
         //TODO wrapped functions will change this
         throw new UnsupportedOperationException("Range expression is not allowed in query_range")
       }
       RawSeries(
-        interval(dataset, queryParams),
+        interval(queryParams),
         columnFilters :+ nameFilter,
-        dataset.dataColumns.map(_.name)
+        Nil
       )
     }
 
-    def interval(dataset: Dataset,
-                 queryParams: QueryParams): RangeSelector = {
+    def interval(queryParams: QueryParams): RangeSelector = {
 
-      val start: BinaryRecord = BinaryRecord(dataset, Seq(queryParams.start - window.millis))
-      val end: BinaryRecord = BinaryRecord(dataset, Seq(queryParams.end))
+      val start = Array(queryParams.start - window.millis)
+      val end = Array(queryParams.end)
       IntervalSelector(start, end)
     }
   }
@@ -639,18 +631,16 @@ object PrometheusQLParser extends Expressions {
   }
 
   def queryToLogicalPlan(query: String,
-                         dataset: Dataset,
                          queryTimestamp: Long): LogicalPlan = {
     val defaultQueryParams = QueryParams(queryTimestamp, 1, queryTimestamp)
-    queryRangeToLogicalPlan(query, dataset, defaultQueryParams)
+    queryRangeToLogicalPlan(query, defaultQueryParams)
   }
 
-  private def queryRangeToLogicalPlan(query: String,
-                                      dataset: Dataset,
-                                      queryParams: PrometheusQLParser.QueryParams) = {
+  def queryRangeToLogicalPlan(query: String,
+                              queryParams: PrometheusQLParser.QueryParams) = {
     val expression = parseQuery(query)
     expression match {
-      case s: SeriesExpression => s.toLogicalPlanNode(dataset, queryParams)
+      case s: SeriesExpression => s.toLogicalPlanNode(queryParams)
       case _ => throw new UnsupportedOperationException("Only instant and range expressions are supported for now")
     }
   }
