@@ -2,30 +2,31 @@ package filodb.prometheus.ast
 
 import filodb.query.BinaryOperator
 
+/**
+  * The following label matching operators exist:
+  * = Select labels that are exactly equal to the provided string.
+  * =: Select labels that are exactly equal to the provided string.
+  * !=: Select labels that are not equal to the provided string.
+  * =~: Select labels that regex-match the provided string (or substring).
+  * !~: Select labels that do not regex-match the provided string (or substring).
+  * *
+  * The following binary comparison operators exist in Prometheus:
+  * == (equal)
+  * != (not-equal)
+  * > (greater-than)
+  * < (less-than)
+  * >= (greater-or-equal)
+  * <= (less-or-equal)
+  *
+  * Set Operators are Or, And and Unless
+  */
 trait Operators {
 
   sealed trait PromToken
 
-  /**
-    * The following label matching operators exist:
-    * = Select labels that are exactly equal to the provided string.
-    * =: Select labels that are exactly equal to the provided string.
-    * !=: Select labels that are not equal to the provided string.
-    * =~: Select labels that regex-match the provided string (or substring).
-    * !~: Select labels that do not regex-match the provided string (or substring).
-    *
-    * The following binary comparison operators exist in Prometheus:
-    * == (equal)
-    * != (not-equal)
-    * > (greater-than)
-    * < (less-than)
-    * >= (greater-or-equal)
-    * <= (less-or-equal)
-    **/
   sealed trait Operator extends PromToken {
     def getPlanOperator: BinaryOperator
   }
-
 
   case object EqualMatch extends Operator {
     override def getPlanOperator: BinaryOperator = BinaryOperator.EQL
