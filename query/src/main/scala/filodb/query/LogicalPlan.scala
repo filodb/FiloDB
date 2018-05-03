@@ -59,7 +59,7 @@ case class PeriodicSeriesWithWindowing(rawSeries: RawSeries,
                                        start: Long,
                                        step: Long,
                                        end: Long,
-                                       window: Int,
+                                       window: Long,
                                        function: RangeFunctionId,
                                        functionArgs: Seq[Any] = Nil) extends PeriodicSeriesPlan
 
@@ -87,6 +87,7 @@ case class Aggregate(operator: AggregationOperator,
   */
 case class BinaryJoin(lhs: PeriodicSeriesPlan,
                       operator: BinaryOperator,
+                      cardinality: Cardinality,
                       rhs: PeriodicSeriesPlan,
                       on: Seq[String] = Nil,
                       ignoring: Seq[String] = Nil) extends PeriodicSeriesPlan

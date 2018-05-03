@@ -343,7 +343,7 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
     val raw2 = RawSeries(rangeSelector = intervalSelector, filters= f2, columns = Seq("value"))
     val windowed2 = PeriodicSeriesWithWindowing(raw2, from, 1000, to, 5000, RangeFunctionId.Rate)
     val summed2 = Aggregate(AggregationOperator.Sum, windowed2, Nil, Seq("job"))
-    val logicalPlan = BinaryJoin(summed1, BinaryOperator.DIV, summed2)
+    val logicalPlan = BinaryJoin(summed1, BinaryOperator.DIV, Cardinality.OneToOne, summed2)
     val execPlan = engine.materialize(logicalPlan, QueryOptions(shardKeySpread = 0))
     roundTrip(execPlan) shouldEqual execPlan
   }

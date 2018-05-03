@@ -61,7 +61,7 @@ class QueryEngineSpec extends FunSpec with Matchers {
     val summed2 = Aggregate(AggregationOperator.Sum, windowed2, Nil, Seq("job"))
 
     // final logical plan
-    val logicalPlan = BinaryJoin(summed1, BinaryOperator.DIV, summed2)
+    val logicalPlan = BinaryJoin(summed1, BinaryOperator.DIV, Cardinality.OneToOne, summed2)
 
     // materialized exec plan
     val execPlan = engine.materialize(logicalPlan, QueryOptions())

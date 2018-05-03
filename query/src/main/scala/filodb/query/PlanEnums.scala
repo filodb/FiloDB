@@ -3,7 +3,7 @@ package filodb.query
 import enumeratum.{Enum, EnumEntry}
 
 //scalastyle:off
-sealed abstract class InstantFunctionId(entryName: String) extends EnumEntry
+sealed abstract class InstantFunctionId(override val entryName: String) extends EnumEntry
 
 object InstantFunctionId extends Enum[InstantFunctionId] {
   val values = findValues
@@ -59,7 +59,7 @@ object InstantFunctionId extends Enum[InstantFunctionId] {
   // TODO time, vector, scalar
 }
 
-sealed abstract class RangeFunctionId(name: String) extends EnumEntry
+sealed abstract class RangeFunctionId(override val entryName: String) extends EnumEntry
 
 object RangeFunctionId extends Enum[RangeFunctionId] {
   val values = findValues
@@ -102,32 +102,32 @@ object RangeFunctionId extends Enum[RangeFunctionId] {
 
 }
 
-sealed trait AggregationOperator extends EnumEntry
+sealed abstract class AggregationOperator(override val entryName: String) extends EnumEntry
 
 object AggregationOperator extends Enum[AggregationOperator] {
   val values = findValues
 
-  case object Avg extends AggregationOperator
+  case object Avg extends AggregationOperator("avg")
 
-  case object Count extends AggregationOperator
+  case object Count extends AggregationOperator("count")
 
-  case object Sum extends AggregationOperator
+  case object Sum extends AggregationOperator("sum")
 
-  case object Min extends AggregationOperator
+  case object Min extends AggregationOperator("min")
 
-  case object Max extends AggregationOperator
+  case object Max extends AggregationOperator("max")
 
-  case object Stddev extends AggregationOperator
+  case object Stddev extends AggregationOperator("stddev")
 
-  case object Stdvar extends AggregationOperator
+  case object Stdvar extends AggregationOperator("stdvar")
 
-  case object TopK extends AggregationOperator
+  case object TopK extends AggregationOperator("topk")
 
-  case object BottomK extends AggregationOperator
+  case object BottomK extends AggregationOperator("bottomk")
 
-  case object CountValues extends AggregationOperator
+  case object CountValues extends AggregationOperator("count_values")
 
-  case object Quantile extends AggregationOperator
+  case object Quantile extends AggregationOperator("quantile")
 
 }
 
@@ -148,30 +148,46 @@ object BinaryOperator extends Enum[BinaryOperator] {
 
   case object POW extends BinaryOperator
 
-  //  case object LAND extends BinaryOperator
-  //
-  //  case object LOR extends BinaryOperator
-  //
-  //  case object LUnless extends BinaryOperator
+  case object LAND extends BinaryOperator
 
-  //  case object EQL extends BinaryOperator
-  //
-  //  case object NEQ extends BinaryOperator
-  //
-  //  case object LTE extends BinaryOperator
-  //
-  //  case object LSS extends BinaryOperator
-  //
-  //  case object GTE extends BinaryOperator
-  //
-  //  case object GTR extends BinaryOperator
+  case object LOR extends BinaryOperator
 
-  //  case object EQLRegex extends BinaryOperator
-  //
-  //  case object NEQRegex extends BinaryOperator
+  case object LUnless extends BinaryOperator
+
+  case object EQL extends BinaryOperator
+
+  case object NEQ extends BinaryOperator
+
+  case object LTE extends BinaryOperator
+
+  case object LSS extends BinaryOperator
+
+  case object GTE extends BinaryOperator
+
+  case object GTR extends BinaryOperator
+
+  case object EQLRegex extends BinaryOperator
+
+  case object NEQRegex extends BinaryOperator
 
 
 }
+
+sealed trait Cardinality extends EnumEntry
+
+object Cardinality extends Enum[Cardinality] {
+  val values = findValues
+
+  case object OneToOne extends Cardinality
+
+  case object OneToMany extends Cardinality
+
+  case object ManyToOne extends Cardinality
+
+  case object ManyToMany extends Cardinality
+
+}
+
 
 //scalastyle:on
 

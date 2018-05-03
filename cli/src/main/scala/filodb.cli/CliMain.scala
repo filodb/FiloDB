@@ -15,11 +15,11 @@ import org.parboiled2.ParseError
 
 import filodb.coordinator._
 import filodb.coordinator.client._
-import filodb.coordinator.parse.PrometheusQLParser
 import filodb.core._
 import filodb.core.metadata.{Column, Dataset, DatasetOptions}
 import filodb.core.store._
 import filodb.memory.format.RowReader
+import filodb.prometheus.parse.Parser
 import filodb.query.{QueryResult => QueryResult2}
 import filodb.query.{QueryError => QueryError2}
 import filodb.query.{LogicalPlan => LogicalPlan2}
@@ -193,7 +193,7 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
               val options = QOptions(args.limit, args.sampleLimit, args.everyNSeconds.map(_.toInt),
                 timeout, args.shardOverrides.map(_.map(_.toInt)))
               parsePromQuery2(remote, query, args.dataset.get,
-                PrometheusQLParser.QueryParams(args.start, args.step, args.end), options)
+                Parser.QueryParams(args.start, args.step, args.end), options)
             }
           }.getOrElse(printHelp)
       }
@@ -323,9 +323,9 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
   }
 
   def parsePromQuery2(client: LocalClient, query: String, dataset: String,
-                      queryParams: PrometheusQLParser.QueryParams,
+                      queryParams: Parser.QueryParams,
                       options: QOptions): Unit = {
-    val logicalPlan = PrometheusQLParser.queryRangeToLogicalPlan(query, queryParams)
+    val logicalPlan = Parser.queryRangeToLogicalPlan(query, queryParams)
     executeQuery2(client, dataset, logicalPlan, options)
   }
 

@@ -19,7 +19,7 @@ import filodb.query.util.IndexedArrayQueue
 final case class PeriodicSamplesMapper(start: Long,
                                        step: Long,
                                        end: Long,
-                                       window: Option[Int],
+                                       window: Option[Long],
                                        functionId: Option[RangeFunctionId],
                                        funcParams: Seq[Any] = Nil) extends RangeVectorTransformer {
   require(start <= end, "start should be <= end")
@@ -39,7 +39,7 @@ final case class PeriodicSamplesMapper(start: Long,
     RangeVectorTransformer.requireTimeSeries(sourceSchema)
     source.map { rv =>
       IteratorBackedRangeVector(rv.key,
-        new SlidingWindowIterator(rv.rows, start, step, end, window.getOrElse(0),
+        new SlidingWindowIterator(rv.rows, start, step, end, window.getOrElse(0L),
           RangeFunction(functionId, funcParams), queryConfig))
     }
   }
@@ -79,7 +79,7 @@ class SlidingWindowIterator(raw: Iterator[RowReader],
                             start: Long,
                             step: Long,
                             end: Long,
-                            window: Int,
+                            window: Long,
                             rangeFunction: RangeFunction,
                             queryConfig: QueryConfig) extends Iterator[MutableSample] {
   private var sampleToEmit = new MutableSample()
