@@ -104,7 +104,7 @@ trait Vectors extends Scalars with TimeUnits with Base {
       ColumnFilter(labelMatch.label, query.Filter.Equals(labelMatch.value))
     }
 
-    private val nameFilter = ColumnFilter(metricName, query.Filter.Equals("__name__"))
+    private val nameFilter = ColumnFilter("__name__", query.Filter.Equals(metricName))
 
     def toPeriodicSeriesPlan(queryParams: QueryParams): PeriodicSeriesPlan = {
       PeriodicSeries(
@@ -137,7 +137,7 @@ trait Vectors extends Scalars with TimeUnits with Base {
       ColumnFilter(labelMatch.label, query.Filter.Equals(labelMatch.value))
     }
 
-    private val nameFilter = ColumnFilter(metricName, query.Filter.Equals("__name__"))
+    private val nameFilter = ColumnFilter("__name__", query.Filter.Equals(metricName))
 
     val allFilters: Seq[ColumnFilter] = columnFilters :+ nameFilter
 

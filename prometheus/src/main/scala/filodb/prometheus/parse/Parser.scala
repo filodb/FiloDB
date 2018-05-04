@@ -21,7 +21,7 @@ trait BaseParser extends Expressions with JavaTokenParsers with RegexParsers wit
   }
 
   protected lazy val quotedSeries: PackratParser[Identifier] =
-    "([\"'])(?:\\\\\\1|.)*?\\1".r ^^ { str => Identifier(str) }
+    "([\"'])(?:\\\\\\1|.)*?\\1".r ^^ { str =>  Identifier(str.substring(1, str.size-2)) } //remove quotes
 
   protected val OFFSET = Keyword("OFFSET")
   protected val IGNORING = Keyword("IGNORING")
@@ -232,8 +232,22 @@ trait Aggregates extends Operator with BaseParser {
   protected val TOPK = Keyword("TOPK")
   protected val QUANTILE = Keyword("QUANTILE")
 
+  protected val SUM_OVER_TIME = Keyword("SUM_OVER_TIME")
+  protected val AVG_OVER_TIME = Keyword("AVG_OVER_TIME")
+  protected val MIN_OVER_TIME = Keyword("MIN_OVER_TIME")
+  protected val MAX_OVER_TIME = Keyword("MAX_OVER_TIME")
+  protected val STDDEV_OVER_TIME = Keyword("STDDEV_OVER_TIME")
+  protected val STDVAR_OVER_TIME = Keyword("STDVAR_OVER_TIME")
+  protected val COUNT_OVER_TIME = Keyword("COUNT_OVER_TIME")
+  protected val QUANTILE_OVER_TIME = Keyword("QUANTILE_OVER_TIME")
+
   lazy val aggregateOperator: PackratParser[String] =
     SUM | AVG | MIN | MAX | STD_DEV | STD_VAR | COUNT_VALUES | COUNT | BOTTOMK | TOPK | QUANTILE
+
+  lazy val aggregateRangeOperator: PackratParser[String] =
+    SUM_OVER_TIME | AVG_OVER_TIME | MIN_OVER_TIME | MAX_OVER_TIME | STDDEV_OVER_TIME |
+      STDVAR_OVER_TIME | COUNT_OVER_TIME | QUANTILE_OVER_TIME
+
 
   lazy val without: PackratParser[Without] = WITHOUT ~ labels ^^ {
     case unused0 ~ seq => Without(seq.map(_.str))
@@ -273,6 +287,10 @@ trait Expression extends Aggregates with Selector with Numeric with Join {
     case name ~ params => Function(name.str, params)
   }
 
+  lazy val aggregateRangeFunction: PackratParser[Function] = aggregateRangeOperator ~ functionParams ^^ {
+    case name ~ params => Function(name, params)
+  }
+
   lazy val aggregateExpression: PackratParser[AggregateExpression] =
     aggregateOperator ~ functionParams.? ~ aggregateGrouping.? ~ functionParams.? ^^ {
       case fn ~ params ~ ag ~ ls => AggregateExpression(
@@ -281,7 +299,8 @@ trait Expression extends Aggregates with Selector with Numeric with Join {
     }
 
   lazy val expression: PackratParser[Expression] =
-    binaryExpression | aggregateExpression | function | unaryExpression | vector | numericalExpression | simpleSeries
+    binaryExpression | aggregateRangeFunction | aggregateExpression |
+      function | unaryExpression | vector | numericalExpression | simpleSeries
 
 }
 
