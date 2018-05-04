@@ -2,7 +2,7 @@ package filodb.prometheus.ast
 
 import filodb.query.BinaryOperator
 
-/**
+ /*
   * The following label matching operators exist:
   * = Select labels that are exactly equal to the provided string.
   * =: Select labels that are exactly equal to the provided string.
