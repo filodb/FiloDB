@@ -26,6 +26,7 @@ case object EncodedChunks extends RowKeyRange
   */
 final case class SelectRawPartitionsExec(id: String,
                                          submitTime: Long,
+                                         limit: Int,
                                          dispatcher: PlanDispatcher,
                                          dataset: DatasetRef,
                                          shard: Int,

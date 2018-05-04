@@ -114,7 +114,7 @@ final class SerializableRangeVector(val key: RangeVectorKey,
 }
 
 object SerializableRangeVector {
-  def apply(rv: RangeVector, cols: Seq[ColumnInfo]): SerializableRangeVector = {
+  def apply(rv: RangeVector, cols: Seq[ColumnInfo], limit: Int): SerializableRangeVector = {
     val memFactory = MemFactory.onHeapFactory
     val maxElements = 1000 // FIXME for some reason this isn't working if small
     val vectors: Array[BinaryAppendableVector[_]] = cols.toArray.map { col =>
@@ -129,7 +129,7 @@ object SerializableRangeVector {
     }
     val rows = rv.rows
     var numRows = 0
-    rows.foreach { row =>
+    rows.take(limit).foreach { row =>
       numRows += 1
       for { i <- 0 until vectors.size } {
         vectors(i).addFromReader(row, i)

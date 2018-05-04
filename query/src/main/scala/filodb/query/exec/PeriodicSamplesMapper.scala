@@ -50,9 +50,7 @@ final case class PeriodicSamplesMapper(start: Long,
   * It is mutable. Consumers from iterators should be aware of the semantics
   * of ability to save the next() value.
   */
-class MutableSample extends RowReader {
-  var timestamp: Long = 0
-  var value: Double = 0
+class MutableSample(var timestamp: Long = 0, var value: Double = 0) extends RowReader {
   def set(t: Long, v: Double): Unit = { timestamp = t; value = v; }
   def copyFrom(r: RowReader): MutableSample = { timestamp = r.getLong(0); value = r.getDouble(1); this }
   def getDouble(columnNo: Int): Double = if (columnNo == 1) value else throw new IllegalArgumentException()
@@ -112,8 +110,8 @@ class SlidingWindowIterator(raw: Iterator[RowReader],
       val next = rows.next()
       // skip elements that are outside of the current window, except for last sample.
       if (next.timestamp >= curWindowStart ||    // inside current window
-         (rows.hasNext && rows.head.timestamp > curWindowStart) ||   // last sample outside current window
-         !rows.hasNext) {       // no more rows
+         (rangeFunction.needsLastSample && rows.hasNext && rows.head.timestamp > curWindowStart) ||
+         (rangeFunction.needsLastSample && !rows.hasNext)) { // no more rows
         val toAdd = windowSamplesPool.get.copyFrom(next)
         windowQueue.add(toAdd)
         rangeFunction.addToWindow(toAdd)

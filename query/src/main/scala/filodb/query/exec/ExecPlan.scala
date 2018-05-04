@@ -43,6 +43,8 @@ trait ExecPlan extends QueryCommand {
 
   def submitTime: Long
 
+  def limit: Int
+
   def dataset: DatasetRef
 
   /**
@@ -97,7 +99,7 @@ trait ExecPlan extends QueryCommand {
         (transf.apply(acc._1, queryConfig, acc._2), transf.schema(dataset, acc._2))
       }
       finalRes._1
-        .map { r => SerializableRangeVector(r, finalRes._2.columns) }
+        .map { r => SerializableRangeVector(r, finalRes._2.columns, limit) }
         .toListL
         .map { r =>
           qLogger.debug(s"Successful query execution $r")
@@ -163,6 +165,8 @@ abstract class NonLeafExecPlan extends ExecPlan {
   final val dataset: DatasetRef = children.head.dataset
 
   final val submitTime: Long = children.head.submitTime
+
+  final val limit: Int = children.head.limit
 
   /**
     * Being a non-leaf node, this implementation encompasses the logic

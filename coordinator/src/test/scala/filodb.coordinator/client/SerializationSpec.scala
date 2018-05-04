@@ -269,6 +269,7 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
 
     val now = System.currentTimeMillis()
     val numRawSamples = 1000
+    val limit = 900
     val reportingInterval = 10000
     val tuples = (numRawSamples until 0).by(-1).map(n => (now - n * reportingInterval, n.toDouble))
 
@@ -288,19 +289,19 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
 
     val cols = Array(new ColumnInfo("timestamp", ColumnType.LongColumn),
       new ColumnInfo("value", ColumnType.DoubleColumn))
-    val srv = SerializableRangeVector(rv, cols)
+    val srv = SerializableRangeVector(rv, cols, limit)
     val observedTs = srv.rows.toSeq.map(_.getLong(0))
     val observedVal = srv.rows.toSeq.map(_.getDouble(1))
-    observedTs shouldEqual tuples.map(_._1)
-    observedVal shouldEqual tuples.map(_._2)
+    observedTs shouldEqual tuples.map(_._1).take(limit)
+    observedVal shouldEqual tuples.map(_._2).take(limit)
 
     // now we should also be able to create SerializableRangeVector using fast filo row iterator
     // since srv iterator is based on FFRR, try that
-    val srv2 = SerializableRangeVector(srv, cols)
+    val srv2 = SerializableRangeVector(srv, cols, limit)
     val observedTs2 = srv2.rows.toSeq.map(_.getLong(0))
     val observedVal2 = srv2.rows.toSeq.map(_.getDouble(1))
-    observedTs2 shouldEqual tuples.map(_._1)
-    observedVal2 shouldEqual tuples.map(_._2)
+    observedTs2 shouldEqual tuples.map(_._1).take(limit)
+    observedVal2 shouldEqual tuples.map(_._2).take(limit)
 
     val schema = ResultSchema(dataset1.infosFromIDs(0 to 0), 1)
 

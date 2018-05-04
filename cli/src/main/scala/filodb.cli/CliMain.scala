@@ -49,7 +49,7 @@ class Arguments extends FieldArgs {
   var promql: Option[String] = None
   var start: Long = System.currentTimeMillis()
   var end: Long = System.currentTimeMillis()
-  var step: Long = 1
+  var step: Long = 10000
   var metricColumn: String = "__name__"
   var shardKeyColumns: Seq[String] = Nil
   var everyNSeconds: Option[String] = None

@@ -64,6 +64,8 @@ sealed abstract class RangeFunctionId(name: String) extends EnumEntry
 object RangeFunctionId extends Enum[RangeFunctionId] {
   val values = findValues
 
+  case object AvgOverTime extends RangeFunctionId("avg_over_time")
+
   case object Changes extends RangeFunctionId("changes")
 
   case object CountOverTime extends RangeFunctionId("count_over_time")
@@ -93,6 +95,8 @@ object RangeFunctionId extends Enum[RangeFunctionId] {
   case object Resets extends RangeFunctionId("resets")
 
   case object StdDevOverTime extends RangeFunctionId("stddev_over_time")
+
+  case object StdVarOverTime extends RangeFunctionId("stdvar_over_time")
 
   case object SumOverTime extends RangeFunctionId("sum_over_time")
 

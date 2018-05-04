@@ -176,7 +176,7 @@ class QueryEngine(dataset: Dataset,
                                    lp: RawSeries): Seq[ExecPlan] = {
     shardsFromFilters(lp.filters, options).map { shard =>
       val dispatcher = dispatcherForShard(shard)
-      SelectRawPartitionsExec(queryId, submitTime, dispatcher, dataset.ref, shard,
+      SelectRawPartitionsExec(queryId, submitTime, options.itemLimit, dispatcher, dataset.ref, shard,
         lp.filters, toRowKeyRange(lp.rangeSelector), lp.columns)
     }
   }

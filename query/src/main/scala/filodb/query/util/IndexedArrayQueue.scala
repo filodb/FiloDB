@@ -82,5 +82,10 @@ class IndexedArrayQueue[T](initialSize: Int = 8) {
     val idx = (hd + i) & (items.size - 1)
     items(idx).asInstanceOf[T]
   }
+
+  override def toString(): String = {
+    val elements = for { i <- 0 until size } yield this(i)
+    elements.mkString("IndexedArrayQueue(", ", ", ")")
+  }
 }
 

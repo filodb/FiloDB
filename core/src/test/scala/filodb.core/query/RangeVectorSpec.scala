@@ -25,7 +25,7 @@ class RangeVectorSpec  extends FunSpec with Matchers {
     }
     val cols = Array(new ColumnInfo("timestamp", ColumnType.LongColumn),
                      new ColumnInfo("value", ColumnType.DoubleColumn))
-    val srv = SerializableRangeVector(rv, cols)
+    val srv = SerializableRangeVector(rv, cols, numRawSamples)
     val observedTs = srv.rows.toSeq.map(_.getLong(0))
     val observedVal = srv.rows.toSeq.map(_.getDouble(1))
     observedTs shouldEqual tuples.map(_._1)
@@ -33,7 +33,7 @@ class RangeVectorSpec  extends FunSpec with Matchers {
 
     // now we should also be able to create SerializableRangeVector using fast filo row iterator
     // since srv interator is based on FFRR, try that
-    val srv2 = SerializableRangeVector(srv, cols)
+    val srv2 = SerializableRangeVector(srv, cols, numRawSamples)
     val observedTs2 = srv2.rows.toSeq.map(_.getLong(0))
     val observedVal2 = srv2.rows.toSeq.map(_.getDouble(1))
     observedTs2 shouldEqual tuples.map(_._1)

@@ -43,7 +43,7 @@ case class RawSeries(rangeSelector: RangeSelector,
   * This should be taken care outside this layer, or we need to have
   * proper validation.
   */
-case class PeriodicSeries(rawSeries: RawSeries,
+case class PeriodicSeries(rawSeries: RawSeriesPlan,
                           start: Long,
                           step: Long,
                           end: Long) extends PeriodicSeriesPlan

@@ -1,10 +1,13 @@
 package filodb.query.exec.rangefn
 
 import filodb.query.{QueryConfig, RangeFunctionId}
-import filodb.query.RangeFunctionId.{Delta, Increase, Rate}
+import filodb.query.RangeFunctionId._
 import filodb.query.exec._
 
-
+/**
+  * Container for samples within a window of samples
+  * over which a range function can be applied
+  */
 trait Window {
   def apply(i: Int): MutableSample
   def size: Int
@@ -21,11 +24,17 @@ trait Window {
   *    entire window is examined, this may result in O(n) or O(n-squared) for the entire range vector.
   */
 trait RangeFunction {
+
+  /**
+    * Needs last sample prior to window start
+    */
+  def needsLastSample: Boolean = false
+
   /**
     * Values added to window will be converted to monotonically increasing. Mark
     * as true only if the function will always operate on counters.
     */
-  def needsCounterCorrection: Boolean
+  def needsCounterCorrection: Boolean = false
 
   /**
     * Called when a sample is added to the sliding window
@@ -61,20 +70,27 @@ trait RangeFunction {
 
 object RangeFunction {
   def apply(func: Option[RangeFunctionId],
-            funcParams: Seq[Any]): RangeFunction = {
+            funcParams: Seq[Any] = Nil): RangeFunction = {
     func match {
-      case None             => LastSampleFunction
-      case Some(Rate)       => RateFunction
-      case Some(Increase)   => IncreaseFunction
-      case Some(Delta)      => DeltaFunction
-      case _                => ???
+      case None                   => LastSampleFunction
+      case Some(Rate)             => RateFunction
+      case Some(Increase)         => IncreaseFunction
+      case Some(Delta)            => DeltaFunction
+      case Some(MaxOverTime)      => new MinMaxOverTimeFunction(Ordering[Double])
+      case Some(MinOverTime)      => new MinMaxOverTimeFunction(Ordering[Double].reverse)
+      case Some(CountOverTime)    => new CountOverTimeFunction()
+      case Some(SumOverTime)      => new SumOverTimeFunction()
+      case Some(AvgOverTime)      => new AvgOverTimeFunction()
+      case Some(StdDevOverTime)   => new StdDevOverTimeFunction()
+      case Some(StdVarOverTime)   => new StdVarOverTimeFunction()
+      case _                      => ???
     }
   }
 }
 
 object LastSampleFunction extends RangeFunction {
 
-  def needsCounterCorrection: Boolean = false // should not assume counter always
+  override def needsLastSample: Boolean = true
   def addToWindow(row: MutableSample): Unit = {}
   def removeFromWindow(row: MutableSample): Unit = {}
   def apply(startTimestamp: Long,
