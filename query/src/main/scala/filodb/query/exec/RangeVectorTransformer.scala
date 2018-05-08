@@ -4,7 +4,7 @@ import monix.reactive.Observable
 
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.Dataset
-import filodb.core.query.{RangeVector, ResultSchema}
+import filodb.core.query._
 import filodb.query.{AggregationOperator, BinaryOperator, InstantFunctionId, QueryConfig}
 
 /**
@@ -81,41 +81,49 @@ final case class ScalarOperationMapper(operator: BinaryOperator,
 }
 
 /**
-  * Performs aggregation operation across instants/rows of several RangeVectors
+  * Performs aggregation operation across RangeVectors within a shard
   */
-final case class AggregateCombiner(aggrOp: AggregationOperator,
-                                   aggrParams: Seq[Any],
-                                   without: Seq[String],
-                                   by: Seq[String]) extends RangeVectorTransformer {
+final case class AggregateMapReduce(aggrOp: AggregationOperator,
+                                    aggrParams: Seq[Any],
+                                    without: Seq[String],
+                                    by: Seq[String]) extends RangeVectorTransformer {
+  require(without == Nil || by == Nil, "Cannot specify both without and by clause")
+
   protected[exec] def args: String =
     s"aggrOp=$aggrOp, aggrParams=$aggrParams, without=$without, by=$by"
+  val aggregator = RowAggregator(aggrOp)
 
   def apply(source: Observable[RangeVector],
             queryConfig: QueryConfig,
-            sourceSchema: ResultSchema): Observable[RangeVector] = ???
+            sourceSchema: ResultSchema): Observable[RangeVector] = {
+    def grouping(rvk: RangeVectorKey): RangeVectorKey = {
+      val groupBy = if (by.nonEmpty) rvk.labelValues.filter(lv => by.contains(lv.label.asNewString))
+                    else if (without.nonEmpty) rvk.labelValues.filterNot(lv => without.contains(lv.label.asNewString))
+                    else Nil
+      CustomRangeVectorKey(groupBy)
+    }
+    RangeVectorAggregator.mapReduce(aggrOp, aggrParams, skipMapPhase = false, source, grouping)
+  }
 
   override def schema(dataset: Dataset, source: ResultSchema): ResultSchema = {
-    // TODO Average will not have the same schema
-    ???
+    // TODO we assume that second column needs to be aggregated. Other dataset types need to be accommodated.
+    aggregator.reductionSchema(source)
   }
 }
 
-/**
-  * Average is typically calculated by aggregating sum and count in a
-  * hierarchical tree and finally transforming the sum and count values
-  * to average. This mapper precisely does that.
-  *
-  * Maps "sum" and "count" columns in each range vector to one "average" column
-  */
-final case class AverageMapper() extends RangeVectorTransformer {
-  protected[exec] def args: String = ""
+final case class AggregatePresenter(aggrOp: AggregationOperator,
+                                   aggrParams: Seq[Any]) extends RangeVectorTransformer {
+
+  protected[exec] def args: String = s"aggrOp=$aggrOp, aggrParams=$aggrParams"
+  val aggregator = RowAggregator(aggrOp)
 
   def apply(source: Observable[RangeVector],
             queryConfig: QueryConfig,
-            sourceSchema: ResultSchema): Observable[RangeVector] = ???
-
-  override def schema(dataset: Dataset, source: ResultSchema): ResultSchema = {
-    ???
+            sourceSchema: ResultSchema): Observable[RangeVector] = {
+    RangeVectorAggregator.present(aggrOp, aggrParams, source)
   }
 
+  override def schema(dataset: Dataset, source: ResultSchema): ResultSchema = {
+    aggregator.presentationSchema(source)
+  }
 }

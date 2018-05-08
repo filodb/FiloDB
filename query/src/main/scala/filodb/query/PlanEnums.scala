@@ -22,6 +22,8 @@ object InstantFunctionId extends Enum[InstantFunctionId] {
 
   case object DaysOfMonth extends InstantFunctionId("day_of_month")
 
+  case object DayOfWeek extends InstantFunctionId("day_of_Week")
+
   case object Exp extends InstantFunctionId("exp")
 
   case object Floor extends InstantFunctionId("floor")

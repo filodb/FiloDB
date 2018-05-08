@@ -86,7 +86,7 @@ object TestTimeseriesProducer extends StrictLogging {
       .runAsync
       .map { _ =>
         logger.info(s"Finished producing $numSamples messages into topic $topicName with timestamps " +
-          s"from about ${(System.currentTimeMillis() - startTime) / 1000 / 60} minutes ago")
+          s"from about ${(System.currentTimeMillis() - startTime) / 1000 / 60} minutes ago at $startTime")
       }
       .recover { case NonFatal(e) =>
         logger.error("Error occurred while producing messages to Kafka", e)

@@ -6,7 +6,7 @@ import com.typesafe.config.ConfigFactory
 import org.scalatest.{FunSpec, Matchers}
 
 import filodb.query.QueryConfig
-import filodb.query.exec.{MutableSample, QueueBasedWindow}
+import filodb.query.exec.{QueueBasedWindow, TransientRow}
 import filodb.query.util.IndexedArrayQueue
 
 class RateFunctionsSpec extends FunSpec with Matchers {
@@ -26,9 +26,9 @@ class RateFunctionsSpec extends FunSpec with Matchers {
                       8152858L->5102.00,
                       8163000L->5201.00)
 
-  val q = new IndexedArrayQueue[MutableSample]()
+  val q = new IndexedArrayQueue[TransientRow]()
   counterSamples.foreach { case (t, v) =>
-    val s = new MutableSample
+    val s = new TransientRow
     s.set(t, v)
     q.add(s)
   }
@@ -45,9 +45,9 @@ class RateFunctionsSpec extends FunSpec with Matchers {
                             8152858L->5102.00,
                             8163000L->8201.00)
 
-  val q2 = new IndexedArrayQueue[MutableSample]()
+  val q2 = new IndexedArrayQueue[TransientRow]()
   gaugeSamples.foreach { case (t, v) =>
-    val s = new MutableSample
+    val s = new TransientRow
     s.set(t, v)
     q2.add(s)
   }
@@ -62,7 +62,7 @@ class RateFunctionsSpec extends FunSpec with Matchers {
     val startTs = 8071950L
     val endTs =   8163070L
     val expected = (q.last.value - q.head.value) / (q.last.timestamp - q.head.timestamp) * 1000
-    val toEmit = new MutableSample
+    val toEmit = new TransientRow
     RateFunction.apply(startTs,endTs, counterWindow, toEmit, queryConfig)
     Math.abs(toEmit.value - expected) should be < errorOk
   }
@@ -71,7 +71,7 @@ class RateFunctionsSpec extends FunSpec with Matchers {
     val startTs = 8071950L
     val endTs =   8163070L
     val expected = (q.last.value - q.head.value) / (q.last.timestamp - q.head.timestamp) * (endTs - startTs)
-    val toEmit = new MutableSample
+    val toEmit = new TransientRow
     IncreaseFunction.apply(startTs,endTs, counterWindow, toEmit, queryConfig)
     Math.abs(toEmit.value - expected) should be < errorOk
   }
@@ -80,7 +80,7 @@ class RateFunctionsSpec extends FunSpec with Matchers {
     val startTs = 8071950L
     val endTs =   8163070L
     val expected = (q2.last.value - q2.head.value) / (q2.last.timestamp - q2.head.timestamp) * (endTs - startTs)
-    val toEmit = new MutableSample
+    val toEmit = new TransientRow
     DeltaFunction.apply(startTs,endTs, gaugeWindow, toEmit, queryConfig)
     Math.abs(toEmit.value - expected) should be < errorOk
   }

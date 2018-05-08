@@ -130,14 +130,11 @@ class QueryEngine(dataset: Dataset,
                                    options: QueryOptions,
                                    lp: Aggregate): Seq[ExecPlan] = {
     val toReduce = walkLogicalPlanTree(lp.vectors, queryId, submitTime, options) // Now we have one exec plan per shard
-    toReduce.foreach(_.addRangeVectorTransformer(AggregateCombiner(lp.operator, lp.params, lp.without, lp.by)))
+    toReduce.foreach(_.addRangeVectorTransformer(AggregateMapReduce(lp.operator, lp.params, lp.without, lp.by)))
     // One could do another level of aggregation per node too. Ignoring for now
     val reduceDispatcher = pickDispatcher(toReduce)
     val reducer = ReduceAggregateExec(queryId, reduceDispatcher, toReduce, lp.operator, lp.params)
-    lp.operator match {
-      case AggregationOperator.Avg => reducer.addRangeVectorTransformer(AverageMapper())
-      case _ =>
-    }
+    reducer.addRangeVectorTransformer(AggregatePresenter(lp.operator, lp.params))
     Seq(reducer)
   }
 

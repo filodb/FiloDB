@@ -21,7 +21,7 @@ trait BaseParser extends Expressions with JavaTokenParsers with RegexParsers wit
   }
 
   protected lazy val quotedSeries: PackratParser[Identifier] =
-    "([\"'])(?:\\\\\\1|.)*?\\1".r ^^ { str =>  Identifier(str.substring(1, str.size-2)) } //remove quotes
+    "([\"'])(?:\\\\\\1|.)*?\\1".r ^^ { str =>  Identifier(str.substring(1, str.size-1)) } //remove quotes
 
   protected val OFFSET = Keyword("OFFSET")
   protected val IGNORING = Keyword("IGNORING")

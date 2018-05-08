@@ -192,8 +192,8 @@ class KryoInit {
     kryo.register(classOf[filodb.query.exec.PeriodicSamplesMapper])
     kryo.register(classOf[filodb.query.exec.InstantVectorFunctionMapper])
     kryo.register(classOf[filodb.query.exec.ScalarOperationMapper])
-    kryo.register(classOf[filodb.query.exec.AggregateCombiner])
-    kryo.register(classOf[filodb.query.exec.AverageMapper])
+    kryo.register(classOf[filodb.query.exec.AggregateMapReduce])
+    kryo.register(classOf[filodb.query.exec.AggregatePresenter])
     kryo.register(classOf[filodb.core.query.SerializableRangeVector])
     kryo.register(classOf[filodb.core.query.PartitionRangeVectorKey])
   }

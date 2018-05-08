@@ -1,7 +1,7 @@
 package filodb.query.exec.rangefn
 
 import filodb.query.QueryConfig
-import filodb.query.exec.MutableSample
+import filodb.query.exec.TransientRow
 
 object RateFunctions {
 
@@ -54,13 +54,13 @@ object RateFunctions {
 object IncreaseFunction extends RangeFunction {
 
   override def needsCounterCorrection: Boolean = true
-  def addToWindow(row: MutableSample): Unit = {}
-  def removeFromWindow(row: MutableSample): Unit = {}
+  def addToWindow(row: TransientRow): Unit = {}
+  def removeFromWindow(row: TransientRow): Unit = {}
 
   def apply(startTimestamp: Long,
             endTimestamp: Long,
             window: Window,
-            sampleToEmit: MutableSample,
+            sampleToEmit: TransientRow,
             queryConfig: QueryConfig): Unit = {
     val result = RateFunctions.extrapolatedRate(startTimestamp,
       endTimestamp, window, true, false)
@@ -71,13 +71,13 @@ object IncreaseFunction extends RangeFunction {
 object RateFunction extends RangeFunction {
 
   override def needsCounterCorrection: Boolean = true
-  def addToWindow(row: MutableSample): Unit = {}
-  def removeFromWindow(row: MutableSample): Unit = {}
+  def addToWindow(row: TransientRow): Unit = {}
+  def removeFromWindow(row: TransientRow): Unit = {}
 
   def apply(startTimestamp: Long,
             endTimestamp: Long,
             window: Window,
-            sampleToEmit: MutableSample,
+            sampleToEmit: TransientRow,
             queryConfig: QueryConfig): Unit = {
     val result = RateFunctions.extrapolatedRate(startTimestamp,
       endTimestamp, window, true, true)
@@ -87,13 +87,13 @@ object RateFunction extends RangeFunction {
 
 object DeltaFunction extends RangeFunction {
 
-  def addToWindow(row: MutableSample): Unit = {}
-  def removeFromWindow(row: MutableSample): Unit = {}
+  def addToWindow(row: TransientRow): Unit = {}
+  def removeFromWindow(row: TransientRow): Unit = {}
 
   def apply(startTimestamp: Long,
             endTimestamp: Long,
             window: Window,
-            sampleToEmit: MutableSample,
+            sampleToEmit: TransientRow,
             queryConfig: QueryConfig): Unit = {
     val result = RateFunctions.extrapolatedRate(startTimestamp,
       endTimestamp, window, false, false)

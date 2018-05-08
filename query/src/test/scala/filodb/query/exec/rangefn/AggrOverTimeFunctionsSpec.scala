@@ -7,7 +7,7 @@ import com.typesafe.config.ConfigFactory
 import org.scalatest.{FunSpec, Matchers}
 
 import filodb.query.{QueryConfig, RangeFunctionId}
-import filodb.query.exec.{MutableSample, QueueBasedWindow}
+import filodb.query.exec.{QueueBasedWindow, TransientRow}
 import filodb.query.util.IndexedArrayQueue
 
 class AggrOverTimeFunctionsSpec extends FunSpec with Matchers {
@@ -26,19 +26,19 @@ class AggrOverTimeFunctionsSpec extends FunSpec with Matchers {
 
     val fns = Array(sum, count, avg, min, max)
 
-    val samples = Array.fill(1000) { rand.nextInt(1000) }
-    val validationQueue = new mutable.Queue[Int]()
+    val samples = Array.fill(1000) { rand.nextInt(1000).toDouble }
+    val validationQueue = new mutable.Queue[Double]()
     var added = 0
     var removed = 0
-    val dummyWindow = new QueueBasedWindow(new IndexedArrayQueue[MutableSample]())
-    val toEmit = new MutableSample()
+    val dummyWindow = new QueueBasedWindow(new IndexedArrayQueue[TransientRow]())
+    val toEmit = new TransientRow()
 
     while (removed < samples.size) {
       val addTimes = rand.nextInt(10)
       for { i <- 0 until addTimes } {
         if (added < samples.size) {
           validationQueue.enqueue(samples(added))
-          fns.foreach(_.addToWindow(new MutableSample(added, samples(added))))
+          fns.foreach(_.addToWindow(new TransientRow(Array(added.toLong, samples(added)))))
           added += 1
         }
       }
@@ -54,17 +54,17 @@ class AggrOverTimeFunctionsSpec extends FunSpec with Matchers {
         toEmit.value shouldEqual validationQueue.max
 
         count.apply(0, 0, dummyWindow, toEmit, queryConfig)
-        toEmit.value shouldEqual validationQueue.size
+        toEmit.value shouldEqual validationQueue.size.toDouble
 
         avg.apply(0, 0, dummyWindow, toEmit, queryConfig)
-        toEmit.value shouldEqual (validationQueue.sum.toDouble / validationQueue.size)
+        toEmit.value shouldEqual (validationQueue.sum / validationQueue.size)
       }
 
       val removeTimes = rand.nextInt(validationQueue.size + 1)
       for { i <- 0 until removeTimes } {
         if (removed < samples.size) {
           validationQueue.dequeue()
-          fns.foreach(_.removeFromWindow(new MutableSample(removed, samples(removed))))
+          fns.foreach(_.removeFromWindow(new TransientRow(Array(removed.toLong, samples(removed)))))
           removed += 1
         }
       }

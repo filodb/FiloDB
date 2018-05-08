@@ -481,7 +481,7 @@ if [ ! -z "$FILO_CONFIG_FILE" ]; then
   config="-Dconfig.file=$FILO_CONFIG_FILE"
 fi
 : ${FILOLOG:="."}
-exec $CMD -Xmx4g -Xms1g -DLOG_DIR=$FILOLOG $config $allprops -jar "$0" $@  ;
+exec $CMD -Xmx4g -Xms1g -DLOG_DIR=$FILOLOG $config $allprops -jar "$0" "$@"  ;
 """.split("\n")
 
 lazy val kafkaSettings = Seq(

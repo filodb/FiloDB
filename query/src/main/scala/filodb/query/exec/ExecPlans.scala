@@ -8,7 +8,7 @@ import monix.reactive.Observable
 import filodb.core.{DatasetRef, Types}
 import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.metadata.Dataset
-import filodb.core.query.{ColumnFilter, RangeVector, ResultSchema}
+import filodb.core.query._
 import filodb.core.store.{AllChunkScan, ChunkSource, FilteredPartitionScan, RowKeyChunkScan, ShardSplit}
 import filodb.query._
 import filodb.query.QueryLogger.qLogger
@@ -91,12 +91,14 @@ final case class ReduceAggregateExec(id: String,
                                      aggrParams: Seq[Any]) extends NonLeafExecPlan {
   def children: Seq[ExecPlan] = childAggregates
 
-  protected def schemaOfCompose(dataset: Dataset): ResultSchema = ???
+  protected def schemaOfCompose(dataset: Dataset): ResultSchema = childAggregates.head.schema(dataset)
 
   protected def args: String = s"aggrOp=$aggrOp, aggrParams=$aggrParams"
 
   protected def compose(childResponses: Observable[QueryResponse],
-                        queryConfig: QueryConfig): Observable[RangeVector] = ???
+                        queryConfig: QueryConfig): Observable[RangeVector] = {
+    RangeVectorAggregator.mapReduce(aggrOp, aggrParams, skipMapPhase = true, toResults(childResponses), rvk => rvk)
+  }
 }
 
 /**

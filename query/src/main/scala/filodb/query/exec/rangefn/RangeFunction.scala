@@ -9,10 +9,10 @@ import filodb.query.exec._
   * over which a range function can be applied
   */
 trait Window {
-  def apply(i: Int): MutableSample
+  def apply(i: Int): TransientRow
   def size: Int
-  def head: MutableSample
-  def last: MutableSample
+  def head: TransientRow
+  def last: TransientRow
 }
 
 /**
@@ -39,12 +39,12 @@ trait RangeFunction {
   /**
     * Called when a sample is added to the sliding window
     */
-  def addToWindow(row: MutableSample): Unit
+  def addToWindow(row: TransientRow): Unit
 
   /**
     * Called when a sample is removed from sliding window
     */
-  def removeFromWindow(row: MutableSample): Unit
+  def removeFromWindow(row: TransientRow): Unit
 
   /**
     * Called when wrapping iterator needs to emit a sample using the window.
@@ -64,7 +64,7 @@ trait RangeFunction {
   def apply(startTimestamp: Long,
             endTimestamp: Long,
             window: Window,
-            sampleToEmit: MutableSample,
+            sampleToEmit: TransientRow,
             queryConfig: QueryConfig): Unit
 }
 
@@ -91,12 +91,12 @@ object RangeFunction {
 object LastSampleFunction extends RangeFunction {
 
   override def needsLastSample: Boolean = true
-  def addToWindow(row: MutableSample): Unit = {}
-  def removeFromWindow(row: MutableSample): Unit = {}
+  def addToWindow(row: TransientRow): Unit = {}
+  def removeFromWindow(row: TransientRow): Unit = {}
   def apply(startTimestamp: Long,
             endTimestamp: Long,
             window: Window,
-            sampleToEmit: MutableSample,
+            sampleToEmit: TransientRow,
             queryConfig: QueryConfig): Unit = {
     if (window.size > 1)
       throw new IllegalStateException("Possible internal error: Last sample should have used zero length windows")

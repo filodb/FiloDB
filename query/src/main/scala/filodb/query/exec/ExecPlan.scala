@@ -99,7 +99,7 @@ trait ExecPlan extends QueryCommand {
         (transf.apply(acc._1, queryConfig, acc._2), transf.schema(dataset, acc._2))
       }
       finalRes._1
-        .map { r => SerializableRangeVector(r, finalRes._2.columns, limit) }
+        .map { r => SerializableRangeVector(r, finalRes._2.columns, limit) } // materialize, and limit rows per RV
         .toListL
         .map { r =>
           qLogger.debug(s"Successful query execution $r")
@@ -198,5 +198,17 @@ abstract class NonLeafExecPlan extends ExecPlan {
     */
   protected def compose(childResponses: Observable[QueryResponse],
                         queryConfig: QueryConfig): Observable[RangeVector]
+
+  /**
+    * Helper method to extract results from child responses
+    * @param resp
+    * @return
+    */
+  final protected def toResults(resp: Observable[QueryResponse]): Observable[RangeVector] = {
+    resp.flatMap {
+      case QueryResult(_, _, result) => Observable.fromIterable(result)
+      case QueryError(_, ex)         => throw ex
+    }
+  }
 
 }

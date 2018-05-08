@@ -34,8 +34,6 @@ final case class PeriodicSamplesMapper(start: Long,
   def apply(source: Observable[RangeVector],
             queryConfig: QueryConfig,
             sourceSchema: ResultSchema): Observable[RangeVector] = {
-    require(step > 0 &&  numSamples < queryConfig.maxSamplesPerRangeVector,
-      s"Increase step or reduce range - not more than $queryConfig.maxSamplesPerRangeVector samples allowed in result")
     RangeVectorTransformer.requireTimeSeries(sourceSchema)
     source.map { rv =>
       IteratorBackedRangeVector(rv.key,
@@ -47,28 +45,43 @@ final case class PeriodicSamplesMapper(start: Long,
 
 /**
   * Represents intermediate sample which will be part of a transformed RangeVector.
-  * It is mutable. Consumers from iterators should be aware of the semantics
-  * of ability to save the next() value.
+  * IMPORTANT: It is mutable for memory efficiency purposes. Consumers from
+  * iterators should be aware of the semantics of ability to save the next() value.
   */
-class MutableSample(var timestamp: Long = 0, var value: Double = 0) extends RowReader {
-  def set(t: Long, v: Double): Unit = { timestamp = t; value = v; }
-  def copyFrom(r: RowReader): MutableSample = { timestamp = r.getLong(0); value = r.getDouble(1); this }
-  def getDouble(columnNo: Int): Double = if (columnNo == 1) value else throw new IllegalArgumentException()
-  def getLong(columnNo: Int): Long = if (columnNo == 0) timestamp else throw new IllegalArgumentException()
-  def notNull(columnNo: Int): Boolean = columnNo == 0 || columnNo == 1
-  def getFloat(columnNo: Int): Float = throw new IllegalArgumentException()
-  def getInt(columnNo: Int): Int = throw new IllegalArgumentException()
-  def getBoolean(columnNo: Int): Boolean = throw new IllegalArgumentException()
-  def getAny(columnNo: Int): Any = throw new IllegalArgumentException()
-  def getString(columnNo: Int): String = throw new IllegalArgumentException()
-  override def toString: String = f"$timestamp->$value%.2f"
+final class TransientRow(data: Array[Any] = Array(0L, 0.0d)) extends RowReader {
+
+  /**
+    * Convenience getter for fetching timestamp based row-key
+    */
+  def timestamp: Long = getLong(0)
+  /**
+    * Convenience getter for fetching double value column
+    */
+  def value: Double = getDouble(1)
+
+  def set(values: Any*): Unit = {
+    for {i <- values.indices} data(i) = values(i)
+  }
+  def copyFrom(r: RowReader): TransientRow = {
+    for {i <- data.indices} data(i) = r.getAny(i)
+    this
+  }
+  def notNull(columnNo: Int): Boolean = columnNo < data.length
+  def getBoolean(columnNo: Int): Boolean = data(columnNo).asInstanceOf[Boolean]
+  def getInt(columnNo: Int): Int = data(columnNo).asInstanceOf[Int]
+  def getLong(columnNo: Int): Long = data(columnNo).asInstanceOf[Long]
+  def getDouble(columnNo: Int): Double = data(columnNo).asInstanceOf[Double]
+  def getFloat(columnNo: Int): Float = data(columnNo).asInstanceOf[Float]
+  def getString(columnNo: Int): String = data(columnNo).asInstanceOf[String]
+  def getAny(columnNo: Int): Any = data(columnNo)
+
 }
 
-class QueueBasedWindow(q: IndexedArrayQueue[MutableSample]) extends Window {
+class QueueBasedWindow(q: IndexedArrayQueue[TransientRow]) extends Window {
   def size: Int = q.size
-  def apply(i: Int): MutableSample = q(i)
-  def head: MutableSample = q.head
-  def last: MutableSample = q.last
+  def apply(i: Int): TransientRow = q(i)
+  def head: TransientRow = q.head
+  def last: TransientRow = q.last
 }
 
 /**
@@ -81,12 +94,12 @@ class SlidingWindowIterator(raw: Iterator[RowReader],
                             end: Long,
                             window: Long,
                             rangeFunction: RangeFunction,
-                            queryConfig: QueryConfig) extends Iterator[MutableSample] {
-  private var sampleToEmit = new MutableSample()
+                            queryConfig: QueryConfig) extends Iterator[TransientRow] {
+  private var sampleToEmit = new TransientRow()
   private var curWindowEnd = start
 
   // sliding window queue
-  private val windowQueue = new IndexedArrayQueue[MutableSample]()
+  private val windowQueue = new IndexedArrayQueue[TransientRow]()
 
   // this is the object that will be exposed to the RangeFunction
   private val windowSamples = new QueueBasedWindow(windowQueue)
@@ -100,10 +113,10 @@ class SlidingWindowIterator(raw: Iterator[RowReader],
   }
 
   // to avoid creation of object per sample, we use a pool
-  val windowSamplesPool = new MutableSamplePool()
+  val windowSamplesPool = new TransientRowPool()
 
   override def hasNext: Boolean = curWindowEnd <= end
-  override def next(): MutableSample = {
+  override def next(): TransientRow = {
     val curWindowStart = curWindowEnd - window
     // add elements to window until end of current window has reached
     while (rows.hasNext && rows.head.timestamp <= curWindowEnd) {
@@ -132,24 +145,24 @@ class SlidingWindowIterator(raw: Iterator[RowReader],
 }
 
 /**
-  * Exists so that we can reuse Sample objects and reduce object creation per
+  * Exists so that we can reuse TransientRow objects and reduce object creation per
   * raw sample. Beware: This is mutable, and not thread-safe.
   */
-class MutableSamplePool {
-  val pool = mutable.Queue[MutableSample]()
-  def get: MutableSample = if (pool.isEmpty) new MutableSample() else pool.dequeue()
-  def putBack(r: MutableSample): Unit = pool.enqueue(r)
+class TransientRowPool {
+  val pool = mutable.Queue[TransientRow]()
+  def get: TransientRow = if (pool.isEmpty) new TransientRow() else pool.dequeue()
+  def putBack(r: TransientRow): Unit = pool.enqueue(r)
 }
 
 /**
   * Iterator of mutable objects that allows look-ahead for ONE value.
   * Caller can do iterator.buffered safely
   */
-class BufferableIterator(iter: Iterator[RowReader]) extends Iterator[MutableSample] {
-  var prev = new MutableSample()
-  var cur = new MutableSample()
+class BufferableIterator(iter: Iterator[RowReader]) extends Iterator[TransientRow] {
+  var prev = new TransientRow()
+  var cur = new TransientRow()
   override def hasNext: Boolean = iter.hasNext
-  override def next(): MutableSample = {
+  override def next(): TransientRow = {
     // swap prev an cur
     val temp = prev
     prev = cur
@@ -164,12 +177,12 @@ class BufferableIterator(iter: Iterator[RowReader]) extends Iterator[MutableSamp
   * Used to create a monotonically increasing counter from raw reported counter values.
   * Is bufferable - caller can do iterator.buffered safely since it buffer ONE value
   */
-class BufferableCounterCorrectionIterator(iter: Iterator[RowReader]) extends Iterator[MutableSample] {
+class BufferableCounterCorrectionIterator(iter: Iterator[RowReader]) extends Iterator[TransientRow] {
   var lastVal: Double = 0
-  var prev = new MutableSample()
-  var cur = new MutableSample()
+  var prev = new TransientRow()
+  var cur = new TransientRow()
   override def hasNext: Boolean = iter.hasNext
-  override def next(): MutableSample = {
+  override def next(): TransientRow = {
     val next = iter.next()
     val nextVal = next.getDouble(1)
     if (nextVal < lastVal) {

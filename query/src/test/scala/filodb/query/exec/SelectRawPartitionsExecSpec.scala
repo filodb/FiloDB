@@ -35,7 +35,7 @@ class SelectRawPartitionsExecSpec extends FunSpec with Matchers with ScalaFuture
     (now - n * reportingInterval, n.toDouble)
   }
   val samples = tuples.map { t =>
-    val m = new MutableSample()
+    val m = new TransientRow()
       m.set(t._1, t._2)
     IngestRecord(partKey, m, 0)
   }

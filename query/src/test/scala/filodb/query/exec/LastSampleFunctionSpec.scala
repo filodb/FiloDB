@@ -100,12 +100,12 @@ class LastSampleFunctionSpec extends FunSpec with Matchers {
     }
   }
 
-  def iteratorOfMutableRowReaders(data: Seq[(Long, Double)]): Iterator[MutableSample] = {
-    new Iterator[MutableSample] {
+  def iteratorOfMutableRowReaders(data: Seq[(Long, Double)]): Iterator[TransientRow] = {
+    new Iterator[TransientRow] {
       var row = 0
-      val sample = new MutableSample()
+      val sample = new TransientRow()
       override def hasNext: Boolean = row < data.size
-      override def next(): MutableSample = {
+      override def next(): TransientRow = {
         sample.set(data(row)._1, data(row)._2)
         row += 1
         sample
@@ -114,7 +114,7 @@ class LastSampleFunctionSpec extends FunSpec with Matchers {
   }
 
   def validateLastSamples(input: Seq[(Long, Double)],
-                          output: Iterator[MutableSample],
+                          output: Iterator[TransientRow],
                           start: Long,
                           end: Long,
                           step: Int): Unit = {

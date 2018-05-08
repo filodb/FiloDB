@@ -23,7 +23,7 @@ trait RangeVectorKey extends java.io.Serializable {
 /**
   * Range Vector Key backed by a PartitionKey object.
   */
-final class PartitionRangeVectorKey(partKey: BinaryRecord,
+final case class PartitionRangeVectorKey(partKey: BinaryRecord,
                                     partKeyCols: Seq[ColumnInfo],
                                     sourceShard: Int) extends RangeVectorKey {
   override def sourceShards: Seq[Int] = Seq(sourceShard)
@@ -38,6 +38,10 @@ final class PartitionRangeVectorKey(partKey: BinaryRecord,
       }
     }
   }
+}
+
+final case class CustomRangeVectorKey(labelValues: Seq[LabelValue]) extends RangeVectorKey {
+  val sourceShards: Seq[Int] = Nil
 }
 
 case class LabelValue(label: UTF8Str, value: UTF8Str) {

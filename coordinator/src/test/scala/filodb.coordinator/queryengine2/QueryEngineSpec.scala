@@ -71,17 +71,17 @@ class QueryEngineSpec extends FunSpec with Matchers {
 
     BinaryJoinExec(binaryOp=DIV, on=List(), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-4#-498736684])
     -ReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-4#-498736684])
-    --AggregateCombiner(aggrOp=Sum, aggrParams=List(), without=List(), by=List(job))
+    --AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(job))
     ---PeriodicSamplesMapper(start=1524001640281, step=1000, end=1524001690281, window=Some(5000), function=Some(Rate), funcParams=Some(List()))
     ----SelectRawPartitionsExec(shard=2, rangeSelector=IntervalSelector(b[1524001640281],b[1524001690281]), filters=List(ColumnFilter(__name__,Equals(http_request_duration_seconds_bucket)), ColumnFilter(job,Equals(myService)), ColumnFilter(le,Equals(0.3)))) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-3#1295960843])
-    --AggregateCombiner(aggrOp=Sum, aggrParams=List(), without=List(), by=List(job))
+    --AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(job))
     ---PeriodicSamplesMapper(start=1524001640281, step=1000, end=1524001690281, window=Some(5000), function=Some(Rate), funcParams=Some(List()))
     ----SelectRawPartitionsExec(shard=3, rangeSelector=IntervalSelector(b[1524001640281],b[1524001690281]), filters=List(ColumnFilter(__name__,Equals(http_request_duration_seconds_bucket)), ColumnFilter(job,Equals(myService)), ColumnFilter(le,Equals(0.3)))) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-4#-498736684])
     -ReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#2028091896])
-    --AggregateCombiner(aggrOp=Sum, aggrParams=List(), without=List(), by=List(job))
+    --AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(job))
     ---PeriodicSamplesMapper(start=1524001640281, step=1000, end=1524001690281, window=Some(5000), function=Some(Rate), funcParams=Some(List()))
     ----SelectRawPartitionsExec(shard=0, rangeSelector=IntervalSelector(b[1524001640281],b[1524001690281]), filters=List(ColumnFilter(__name__,Equals(http_request_duration_seconds_count)), ColumnFilter(job,Equals(myService)))) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#2028091896])
-    --AggregateCombiner(aggrOp=Sum, aggrParams=List(), without=List(), by=List(job))
+    --AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(job))
     ---PeriodicSamplesMapper(start=1524001640281, step=1000, end=1524001690281, window=Some(5000), function=Some(Rate), funcParams=Some(List()))
     ----SelectRawPartitionsExec(shard=1, rangeSelector=IntervalSelector(b[1524001640281],b[1524001690281]), filters=List(ColumnFilter(__name__,Equals(http_request_duration_seconds_count)), ColumnFilter(job,Equals(myService)))) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-2#125110136])
     */
@@ -93,7 +93,7 @@ class QueryEngineSpec extends FunSpec with Matchers {
         l2.isInstanceOf[SelectRawPartitionsExec] shouldEqual true
         l2.rangeVectorTransformers.size shouldEqual 2
         l2.rangeVectorTransformers(0).isInstanceOf[PeriodicSamplesMapper] shouldEqual true
-        l2.rangeVectorTransformers(1).isInstanceOf[AggregateCombiner] shouldEqual true
+        l2.rangeVectorTransformers(1).isInstanceOf[AggregateMapReduce] shouldEqual true
       }
     }
   }

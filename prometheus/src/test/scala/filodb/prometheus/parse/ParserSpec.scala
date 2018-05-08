@@ -198,11 +198,11 @@ class ParserSpec extends FunSpec with Matchers {
   it("Should be able to make logical plans for Series Expressions") {
     val queryToLpString = Map(
       "absent(nonexistent{job=\"myjob\"})" ->
-        "ApplyInstantFunction(PeriodicSeries(RawSeries(IntervalSelector(List(1524855988170),List(1524855988170)),List(ColumnFilter(job,Equals(myjo)), ColumnFilter(__name__,Equals(nonexistent))),List()),1524855988170,1,1524855988170),Absent,List())",
+        "ApplyInstantFunction(PeriodicSeries(RawSeries(IntervalSelector(List(1524855988170),List(1524855988170)),List(ColumnFilter(job,Equals(myjob)), ColumnFilter(__name__,Equals(nonexistent))),List()),1524855988170,1,1524855988170),Absent,List())",
       "rate(http_requests_total[5m] offset 1w)" ->
         "PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(List(1524855688170),List(1524855988170)),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988170,1,1524855988170,300000,Rate,List())",
       "http_requests_total{job=\"prometheus\",group=\"canary\"}" ->
-        "PeriodicSeries(RawSeries(IntervalSelector(List(1524855988170),List(1524855988170)),List(ColumnFilter(job,Equals(prometheu)), ColumnFilter(group,Equals(canar)), ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988170,1,1524855988170)",
+        "PeriodicSeries(RawSeries(IntervalSelector(List(1524855988170),List(1524855988170)),List(ColumnFilter(job,Equals(prometheus)), ColumnFilter(group,Equals(canary)), ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988170,1,1524855988170)",
       "sum(http_requests_total) by (application, group)" ->
         "Aggregate(Sum,PeriodicSeries(RawSeries(IntervalSelector(List(1524855988170),List(1524855988170)),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988170,1,1524855988170),List(),List(application, group),List())",
       "sum(http_requests_total) without (instance)" ->
@@ -210,17 +210,17 @@ class ParserSpec extends FunSpec with Matchers {
       "count_values(\"version\", build_version)" ->
         "Aggregate(CountValues,PeriodicSeries(RawSeries(IntervalSelector(List(1524855988170),List(1524855988170)),List(ColumnFilter(__name__,Equals(build_version))),List()),1524855988170,1,1524855988170),List(\"version\"),List(),List())",
       "label_replace(up{job=\"api-server\",service=\"a:c\"}, \"foo\", \"$1\", \"service\", \"(.*):.*\")" ->
-        "ApplyInstantFunction(PeriodicSeries(RawSeries(IntervalSelector(List(1524855988170),List(1524855988170)),List(ColumnFilter(job,Equals(api-serve)), ColumnFilter(service,Equals(a:)), ColumnFilter(__name__,Equals(up))),List()),1524855988170,1,1524855988170),LabelReplace,List())",
+        "ApplyInstantFunction(PeriodicSeries(RawSeries(IntervalSelector(List(1524855988170),List(1524855988170)),List(ColumnFilter(job,Equals(api-server)), ColumnFilter(service,Equals(a:c)), ColumnFilter(__name__,Equals(up))),List()),1524855988170,1,1524855988170),LabelReplace,List())",
       "sum(http_requests_total)" ->
         "Aggregate(Sum,PeriodicSeries(RawSeries(IntervalSelector(List(1524855988170),List(1524855988170)),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988170,1,1524855988170),List(),List(),List())",
       "label_join(up{job=\"api-server\",src1=\"a\",src2=\"b\",src3=\"c\"}, \"foo\", \",\", \"src1\", \"src2\", \"src3\")" ->
-        "ApplyInstantFunction(PeriodicSeries(RawSeries(IntervalSelector(List(1524855988170),List(1524855988170)),List(ColumnFilter(job,Equals(api-serve)), ColumnFilter(src1,Equals()), ColumnFilter(src2,Equals()), ColumnFilter(src3,Equals()), ColumnFilter(__name__,Equals(up))),List()),1524855988170,1,1524855988170),LabelJoin,List())",
+        "ApplyInstantFunction(PeriodicSeries(RawSeries(IntervalSelector(List(1524855988170),List(1524855988170)),List(ColumnFilter(job,Equals(api-server)), ColumnFilter(src1,Equals(a)), ColumnFilter(src2,Equals(b)), ColumnFilter(src3,Equals(c)), ColumnFilter(__name__,Equals(up))),List()),1524855988170,1,1524855988170),LabelJoin,List())",
       "histogram_quantile(0.9, sum(rate(http_request_duration_seconds_bucket[10m])) by (le))" ->
         "ApplyInstantFunction(Aggregate(Sum,PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(List(1524855388170),List(1524855988170)),List(ColumnFilter(__name__,Equals(http_request_duration_seconds_bucket))),List()),1524855988170,1,1524855988170,600000,Rate,List()),List(),List(le),List()),HistogramQuantile,List(0.9))",
       "delta(cpu_temp_celsius{host=\"zeus\"}[2h])" ->
-        "PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(List(1524848788170),List(1524855988170)),List(ColumnFilter(host,Equals(zeu)), ColumnFilter(__name__,Equals(cpu_temp_celsius))),List()),1524855988170,1,1524855988170,7200000,Delta,List())",
+        "PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(List(1524848788170),List(1524855988170)),List(ColumnFilter(host,Equals(zeus)), ColumnFilter(__name__,Equals(cpu_temp_celsius))),List()),1524855988170,1,1524855988170,7200000,Delta,List())",
       "method_code:http_errors:rate5m{code=\"500\"} / ignoring(code) method:http_requests:rate5m" ->
-        "BinaryJoin(PeriodicSeries(RawSeries(IntervalSelector(List(1524855988170),List(1524855988170)),List(ColumnFilter(code,Equals(50)), ColumnFilter(__name__,Equals(method_code:http_errors:rate5m))),List()),1524855988170,1,1524855988170),DIV,OneToOne,PeriodicSeries(RawSeries(IntervalSelector(List(1524855988170),List(1524855988170)),List(ColumnFilter(__name__,Equals(method:http_requests:rate5m))),List()),1524855988170,1,1524855988170),List(),List())",
+        "BinaryJoin(PeriodicSeries(RawSeries(IntervalSelector(List(1524855988170),List(1524855988170)),List(ColumnFilter(code,Equals(500)), ColumnFilter(__name__,Equals(method_code:http_errors:rate5m))),List()),1524855988170,1,1524855988170),DIV,OneToOne,PeriodicSeries(RawSeries(IntervalSelector(List(1524855988170),List(1524855988170)),List(ColumnFilter(__name__,Equals(method:http_requests:rate5m))),List()),1524855988170,1,1524855988170),List(),List())",
       "histogram_quantile(0.9, rate(http_request_duration_seconds_bucket[10m]))" ->
         "ApplyInstantFunction(PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(List(1524855388170),List(1524855988170)),List(ColumnFilter(__name__,Equals(http_request_duration_seconds_bucket))),List()),1524855988170,1,1524855988170,600000,Rate,List()),HistogramQuantile,List(0.9))",
       "histogram_quantile(0.9, sum(rate(http_request_duration_seconds_bucket[10m])) by (job, le))" ->
@@ -230,25 +230,25 @@ class ParserSpec extends FunSpec with Matchers {
       "topk(5, http_requests_total)" ->
         "Aggregate(TopK,PeriodicSeries(RawSeries(IntervalSelector(List(1524855988170),List(1524855988170)),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988170,1,1524855988170),List(5.0),List(),List())",
       "irate(http_requests_total{job=\"api-server\"}[5m])" ->
-        "PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(List(1524855688170),List(1524855988170)),List(ColumnFilter(job,Equals(api-serve)), ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988170,1,1524855988170,300000,Irate,List())",
+        "PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(List(1524855688170),List(1524855988170)),List(ColumnFilter(job,Equals(api-server)), ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988170,1,1524855988170,300000,Irate,List())",
       "rate(http_requests_total{job=\"api-server\"}[5m])" ->
-        "PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(List(1524855688170),List(1524855988170)),List(ColumnFilter(job,Equals(api-serve)), ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988170,1,1524855988170,300000,Rate,List())",
+        "PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(List(1524855688170),List(1524855988170)),List(ColumnFilter(job,Equals(api-server)), ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988170,1,1524855988170,300000,Rate,List())",
       "http_requests_total{job=\"prometheus\"}[5m]" ->
-        "RawSeries(IntervalSelector(List(1524855688170),List(1524855988170)),List(ColumnFilter(job,Equals(prometheu)), ColumnFilter(__name__,Equals(http_requests_total))),List())",
+        "RawSeries(IntervalSelector(List(1524855688170),List(1524855988170)),List(ColumnFilter(job,Equals(prometheus)), ColumnFilter(__name__,Equals(http_requests_total))),List())",
       "http_requests_total offset 5m" ->
         "PeriodicSeries(RawSeries(IntervalSelector(List(1524855988170),List(1524855988170)),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988170,1,1524855988170)",
       "http_requests_total{environment=~\"staging|testing|development\",method!=\"GET\"}" ->
-        "PeriodicSeries(RawSeries(IntervalSelector(List(1524855988170),List(1524855988170)),List(ColumnFilter(environment,Equals(staging|testing|developmen)), ColumnFilter(method,Equals(GE)), ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988170,1,1524855988170)",
+        "PeriodicSeries(RawSeries(IntervalSelector(List(1524855988170),List(1524855988170)),List(ColumnFilter(environment,Equals(staging|testing|development)), ColumnFilter(method,Equals(GET)), ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988170,1,1524855988170)",
       "method_code:http_errors:rate5m / ignoring(code) group_left method:http_requests:rate5m" ->
         "BinaryJoin(PeriodicSeries(RawSeries(IntervalSelector(List(1524855988170),List(1524855988170)),List(ColumnFilter(__name__,Equals(method_code:http_errors:rate5m))),List()),1524855988170,1,1524855988170),DIV,OneToMany,PeriodicSeries(RawSeries(IntervalSelector(List(1524855988170),List(1524855988170)),List(ColumnFilter(__name__,Equals(method:http_requests:rate5m))),List()),1524855988170,1,1524855988170),List(),List())",
       "increase(http_requests_total{job=\"api-server\"}[5m])" ->
-        "PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(List(1524855688170),List(1524855988170)),List(ColumnFilter(job,Equals(api-serve)), ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988170,1,1524855988170,300000,Increase,List())",
+        "PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(List(1524855688170),List(1524855988170)),List(ColumnFilter(job,Equals(api-server)), ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988170,1,1524855988170,300000,Increase,List())",
       "sum(http_requests_total{method=\"GET\"} offset 5m)" ->
-        "Aggregate(Sum,PeriodicSeries(RawSeries(IntervalSelector(List(1524855988170),List(1524855988170)),List(ColumnFilter(method,Equals(GE)), ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988170,1,1524855988170),List(),List(),List())",
+        "Aggregate(Sum,PeriodicSeries(RawSeries(IntervalSelector(List(1524855988170),List(1524855988170)),List(ColumnFilter(method,Equals(GET)), ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988170,1,1524855988170),List(),List(),List())",
       "absent(nonexistent{job=\"myjob\",instance=~\".*\"})" ->
-        "ApplyInstantFunction(PeriodicSeries(RawSeries(IntervalSelector(List(1524855988170),List(1524855988170)),List(ColumnFilter(job,Equals(myjo)), ColumnFilter(instance,Equals(.)), ColumnFilter(__name__,Equals(nonexistent))),List()),1524855988170,1,1524855988170),Absent,List())",
+        "ApplyInstantFunction(PeriodicSeries(RawSeries(IntervalSelector(List(1524855988170),List(1524855988170)),List(ColumnFilter(job,Equals(myjob)), ColumnFilter(instance,Equals(.*)), ColumnFilter(__name__,Equals(nonexistent))),List()),1524855988170,1,1524855988170),Absent,List())",
       "absent(sum(nonexistent{job=\"myjob\"}))" ->
-        "ApplyInstantFunction(Aggregate(Sum,PeriodicSeries(RawSeries(IntervalSelector(List(1524855988170),List(1524855988170)),List(ColumnFilter(job,Equals(myjo)), ColumnFilter(__name__,Equals(nonexistent))),List()),1524855988170,1,1524855988170),List(),List(),List()),Absent,List())"
+        "ApplyInstantFunction(Aggregate(Sum,PeriodicSeries(RawSeries(IntervalSelector(List(1524855988170),List(1524855988170)),List(ColumnFilter(job,Equals(myjob)), ColumnFilter(__name__,Equals(nonexistent))),List()),1524855988170,1,1524855988170),List(),List(),List()),Absent,List())"
     )
 
     val qts: Long = 1524855988170L
