@@ -34,6 +34,8 @@ object NodeClusterActor {
 
   final case class IngestionSource(streamFactoryClass: String, config: Config = ConfigFactory.empty)
 
+  case class GetDatasetFromRef(datasetRef: DatasetRef)
+
   /**
    * Sets up a dataset for streaming ingestion and querying, with specs for sharding.
    * Results in a state change and shard assignment to existing and new nodes.
@@ -291,12 +293,13 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
   }
 
   // The initial recovery handler: recover dataset setup/ingestion config first
-  def datasetInitHandler: Receive = LoggingReceive {
+  def datasetHandler: Receive = LoggingReceive {
     case e: SetupDataset =>
       setupDataset(e, sender()) map { _ =>
         initDatasets -= e.ref
         if (initDatasets.isEmpty) initiateShardStateRecovery()
       }
+    case GetDatasetFromRef(r) => sender() ! datasets(r)
   }
 
   private def initiateShardStateRecovery(): Unit = {
@@ -449,6 +452,6 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
     subscriptionHandler
 
   def receive: Receive =
-    datasetInitHandler orElse
+    datasetHandler orElse
     subscriptionHandler
 }

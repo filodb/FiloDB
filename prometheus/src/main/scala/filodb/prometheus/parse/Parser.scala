@@ -38,7 +38,7 @@ trait BaseParser extends Expressions with JavaTokenParsers with RegexParsers wit
 
   // Convert the keyword into an case insensitive Parser
   implicit def keyword2Parser(kw: Keyword): Parser[String] = {
-    ("""(?i)\Q""" + kw.key + """\E""").r
+    ("""(?i)""" + kw.key + """(?!\w)""").r
   }
 }
 
@@ -287,10 +287,6 @@ trait Expression extends Aggregates with Selector with Numeric with Join {
     case name ~ params => Function(name.str, params)
   }
 
-  lazy val aggregateRangeFunction: PackratParser[Function] = aggregateRangeOperator ~ functionParams ^^ {
-    case name ~ params => Function(name, params)
-  }
-
   lazy val aggregateExpression: PackratParser[AggregateExpression] =
     aggregateOperator ~ functionParams.? ~ aggregateGrouping.? ~ functionParams.? ^^ {
       case fn ~ params ~ ag ~ ls => AggregateExpression(
@@ -299,7 +295,7 @@ trait Expression extends Aggregates with Selector with Numeric with Join {
     }
 
   lazy val expression: PackratParser[Expression] =
-    binaryExpression | aggregateRangeFunction | aggregateExpression |
+    binaryExpression | aggregateExpression |
       function | unaryExpression | vector | numericalExpression | simpleSeries
 
 }

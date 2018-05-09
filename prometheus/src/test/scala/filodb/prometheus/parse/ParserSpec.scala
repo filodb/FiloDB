@@ -193,6 +193,26 @@ class ParserSpec extends FunSpec with Matchers {
     parseError("++-++-+-+-<")
     parseError("e-+=/(0)")
     //    parseError(  "-If")
+
+    parseSuccessfully("quantiler{job=\"SNRT-App-0\"}[1m] ")
+    parseSuccessfully("Counter0{job=\"SNRT-App-0\"}[1m] ")
+    parseSuccessfully("Summer0{job=\"SNRT-App-0\"}[1m] ")
+    parseSuccessfully("Avgger0{job=\"SNRT-App-0\"}[1m] ")
+    parseSuccessfully("topkker{job=\"SNRT-App-0\"}[1m] ")
+    parseSuccessfully("bottomkker{job=\"SNRT-App-0\"}[1m] ")
+    parseSuccessfully("stddevr{job=\"SNRT-App-0\"}[1m] ")
+    parseSuccessfully("stdvarr{job=\"SNRT-App-0\"}[1m] ")
+    parseSuccessfully("maxer{job=\"SNRT-App-0\"}[1m] ")
+    parseSuccessfully("miner{job=\"SNRT-App-0\"}[1m] ")
+    parseSuccessfully("minn{job=\"SNRT-App-0\"}[1m] ")
+    parseSuccessfully("count0{job=\"SNRT-App-0\"}[1m] ")
+    parseSuccessfully("offset1{job=\"SNRT-App-0\"}[1m] ")
+    parseSuccessfully("by1{job=\"SNRT-App-0\"}[1m] ")
+    parseSuccessfully("with2{job=\"SNRT-App-0\"}[1m] ")
+    parseSuccessfully("without3{job=\"SNRT-App-0\"}[1m] ")
+    parseSuccessfully("or1{job=\"SNRT-App-0\"}[1m] ")
+    parseSuccessfully("and1{job=\"SNRT-App-0\"}[1m] ")
+    parseSuccessfully("and{job=\"SNRT-App-0\"}[1m] ")
   }
 
   it("Should be able to make logical plans for Series Expressions") {
