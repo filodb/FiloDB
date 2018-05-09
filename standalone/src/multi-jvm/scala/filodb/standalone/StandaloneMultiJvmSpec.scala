@@ -16,6 +16,7 @@ import filodb.coordinator.NodeClusterActor.{DatasetResourceSpec, IngestionSource
 import filodb.coordinator.client.LocalClient
 import filodb.core.{DatasetRef, ErrorResponse}
 import filodb.core.store.StoreConfig
+import filodb.prometheus.ast.QueryParams
 import filodb.prometheus.parse.Parser
 import filodb.query.{QueryError, QueryResult => QueryResult2}
 
@@ -129,7 +130,7 @@ abstract class StandaloneMultiJvmSpec(config: MultiNodeConfig) extends MultiNode
 
   def runQuery(client: LocalClient, queryTimestamp: Long): Double = {
     val query = "heap_usage{host=\"H0\",job=\"A0\"}"
-    val qParams = Parser.QueryParams(queryTimestamp, 1, queryTimestamp)
+    val qParams = QueryParams(queryTimestamp, 1, queryTimestamp)
     val logicalPlan = Parser.queryRangeToLogicalPlan(query, qParams)
 
     val result = client.logicalPlan2Query(dataset, logicalPlan) match {

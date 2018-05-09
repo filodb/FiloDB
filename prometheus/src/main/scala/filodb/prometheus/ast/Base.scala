@@ -2,6 +2,8 @@ package filodb.prometheus.ast
 
 import filodb.query.{PeriodicSeriesPlan, RawSeriesPlan}
 
+case class QueryParams(start: Long, step: Long, end: Long)
+
 trait Base {
 
   trait Expression
@@ -16,7 +18,6 @@ trait Base {
     def toRawSeriesPlan(queryParams: QueryParams, isRoot: Boolean): RawSeriesPlan
   }
 
-  case class QueryParams(start: Long, step: Long, end: Long)
 
   /**
     * An identifier is an unquoted string

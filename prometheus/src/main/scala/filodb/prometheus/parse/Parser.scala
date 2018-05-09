@@ -2,7 +2,7 @@ package filodb.prometheus.parse
 
 import scala.util.parsing.combinator.{JavaTokenParsers, PackratParsers, RegexParsers}
 
-import filodb.prometheus.ast.Expressions
+import filodb.prometheus.ast.{Expressions, QueryParams}
 import filodb.query._
 
 
