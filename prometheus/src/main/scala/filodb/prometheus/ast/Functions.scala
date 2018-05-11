@@ -29,7 +29,7 @@ trait Functions extends Base with Operators with Vectors {
 
         PeriodicSeriesWithWindowing(
           rangeExpression.toRawSeriesPlan(queryParams, isRoot = false).asInstanceOf[RawSeries],
-          queryParams.start, queryParams.step, queryParams.end,
+          queryParams.start * 1000, queryParams.step * 1000, queryParams.end * 1000,
           rangeExpression.window.millis,
           rangeFunctionId, otherParams)
       }

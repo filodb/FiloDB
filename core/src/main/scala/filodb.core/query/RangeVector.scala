@@ -44,6 +44,22 @@ final case class CustomRangeVectorKey(labelValues: Seq[LabelValue]) extends Rang
   val sourceShards: Seq[Int] = Nil
 }
 
+object CustomRangeVectorKey {
+
+  def fromZcUtf8(str: ZeroCopyUTF8String): CustomRangeVectorKey = {
+    CustomRangeVectorKey(str.asNewString.split("\u03BC").map { token =>
+      val lv = token.split("\u03C0")
+      LabelValue(ZeroCopyUTF8String(lv(0)), ZeroCopyUTF8String(lv(1)))
+    })
+  }
+
+  def toZcUtf8(rvk: RangeVectorKey): ZeroCopyUTF8String = {
+    // TODO can we optimize this further? Can we use a binary field in the row-reader ?
+    val str = rvk.labelValues.map(lv=>s"${lv.label.asNewString}\u03C0${lv.value.asNewString}").sorted.mkString("\u03BC")
+    ZeroCopyUTF8String(str)
+  }
+}
+
 case class LabelValue(label: UTF8Str, value: UTF8Str) {
   override def toString: String = s"$label=$value"
 }

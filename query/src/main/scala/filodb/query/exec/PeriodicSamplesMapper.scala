@@ -33,6 +33,7 @@ final case class PeriodicSamplesMapper(start: Long,
 
   def apply(source: Observable[RangeVector],
             queryConfig: QueryConfig,
+            limit: Int,
             sourceSchema: ResultSchema): Observable[RangeVector] = {
     RangeVectorTransformer.requireTimeSeries(sourceSchema)
     source.map { rv =>
@@ -59,6 +60,7 @@ final class TransientRow(data: Array[Any] = Array(0L, 0.0d)) extends RowReader {
     */
   def value: Double = getDouble(1)
 
+  def set(i: Int, value: Any): Unit = data(i) = value
   def set(values: Any*): Unit = {
     for {i <- values.indices} data(i) = values(i)
   }

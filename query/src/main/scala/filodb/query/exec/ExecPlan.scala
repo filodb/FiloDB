@@ -93,24 +93,33 @@ trait ExecPlan extends QueryCommand {
                    (implicit sched: Scheduler,
                     timeout: FiniteDuration): Task[QueryResponse] = {
     try {
+      qLogger.debug(s"queryId: ${id} Running ${getClass.getSimpleName} with $args")
       val res = doExecute(source, dataset, queryConfig)
       val schema = schemaOfDoExecute(dataset)
       val finalRes = rangeVectorTransformers.foldLeft((res, schema)) { (acc, transf) =>
-        (transf.apply(acc._1, queryConfig, acc._2), transf.schema(dataset, acc._2))
+        qLogger.debug(s"queryId: ${id} Running transformer ${transf.getClass.getSimpleName} with ${transf.args}")
+        (transf.apply(acc._1, queryConfig, limit, acc._2), transf.schema(dataset, acc._2))
       }
       finalRes._1
-        .map { r => SerializableRangeVector(r, finalRes._2.columns, limit) } // materialize, and limit rows per RV
+        .map { r =>
+          if (r.isInstanceOf[SerializableRangeVector]) {
+            r.asInstanceOf[SerializableRangeVector]
+          } else {
+            // materialize, and limit rows per RV
+            SerializableRangeVector(r, finalRes._2.columns, limit)
+          }
+        }
         .toListL
         .map { r =>
-          qLogger.debug(s"Successful query execution $r")
+          qLogger.debug(s"queryId: ${id} Successful execution of ${getClass.getSimpleName} with transformers")
           QueryResult(id, finalRes._2, r)
         }
         .onErrorHandle { case ex: Throwable =>
-          qLogger.error("Exception during query execution", ex)
+          qLogger.error(s"queryId: ${id} Exception during query execution", ex)
           QueryError(id, ex)
         }
     } catch { case NonFatal(ex) =>
-      qLogger.error("Exception during query execution", ex)
+      qLogger.error(s"queryId: ${id} Exception during query orchestration", ex)
       Task(QueryError(id, ex))
     }
   }

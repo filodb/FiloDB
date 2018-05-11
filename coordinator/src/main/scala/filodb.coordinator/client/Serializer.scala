@@ -196,6 +196,7 @@ class KryoInit {
     kryo.register(classOf[filodb.query.exec.AggregatePresenter])
     kryo.register(classOf[filodb.core.query.SerializableRangeVector])
     kryo.register(classOf[filodb.core.query.PartitionRangeVectorKey])
+    kryo.register(classOf[filodb.core.query.CustomRangeVectorKey])
   }
 
   def initOtherFiloClasses(kryo: Kryo): Unit = {

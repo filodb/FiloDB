@@ -108,11 +108,11 @@ trait Vectors extends Scalars with TimeUnits with Base {
 
     def toPeriodicSeriesPlan(queryParams: QueryParams): PeriodicSeriesPlan = {
       PeriodicSeries(
-        RawSeries(IntervalSelector(Seq(queryParams.start), Seq(queryParams.end)), columnFilters :+ nameFilter, Nil),
-        queryParams.start, queryParams.step, queryParams.end
+        RawSeries(IntervalSelector(Seq(queryParams.start * 1000),
+                                   Seq(queryParams.end * 1000)), columnFilters :+ nameFilter, Nil),
+        queryParams.start * 1000, queryParams.step * 1000, queryParams.end * 1000
       )
     }
-
   }
 
   /**
@@ -145,7 +145,9 @@ trait Vectors extends Scalars with TimeUnits with Base {
       if (isRoot && queryParams.start != queryParams.end) {
         throw new UnsupportedOperationException("Range expression is not allowed in query_range")
       }
-      RawSeries(IntervalSelector(Seq(queryParams.start - window.millis), Seq(queryParams.end)), allFilters, Nil)
+      // multiply by 1000 to convert unix timestamp in seconds to millis
+      RawSeries(IntervalSelector(Seq(queryParams.start * 1000 - window.millis),
+                                 Seq(queryParams.end * 1000)), allFilters, Nil)
     }
 
   }

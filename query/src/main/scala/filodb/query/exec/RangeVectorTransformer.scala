@@ -21,6 +21,7 @@ import filodb.query.{AggregationOperator, BinaryOperator, InstantFunctionId, Que
 trait RangeVectorTransformer extends java.io.Serializable {
   def apply(source: Observable[RangeVector],
             queryConfig: QueryConfig,
+            limit: Int,
             sourceSchema: ResultSchema): Observable[RangeVector]
 
   /**
@@ -58,6 +59,7 @@ final case class InstantVectorFunctionMapper(function: InstantFunctionId,
 
   def apply(source: Observable[RangeVector],
             queryConfig: QueryConfig,
+            limit: Int,
             sourceSchema: ResultSchema): Observable[RangeVector] = ???
 
   // TODO all function defs go here and get invoked from mapRangeVector
@@ -75,6 +77,7 @@ final case class ScalarOperationMapper(operator: BinaryOperator,
 
   def apply(source: Observable[RangeVector],
             queryConfig: QueryConfig,
+            limit: Int,
             sourceSchema: ResultSchema): Observable[RangeVector] = ???
 
   // TODO all operation defs go here and get invoked from mapRangeVector
@@ -91,14 +94,15 @@ final case class AggregateMapReduce(aggrOp: AggregationOperator,
 
   protected[exec] def args: String =
     s"aggrOp=$aggrOp, aggrParams=$aggrParams, without=$without, by=$by"
-  val aggregator = RowAggregator(aggrOp)
+  val aggregator = RowAggregator(aggrOp, aggrParams)
 
   def apply(source: Observable[RangeVector],
             queryConfig: QueryConfig,
+            limit: Int,
             sourceSchema: ResultSchema): Observable[RangeVector] = {
-    def grouping(rvk: RangeVectorKey): RangeVectorKey = {
-      val groupBy = if (by.nonEmpty) rvk.labelValues.filter(lv => by.contains(lv.label.asNewString))
-                    else if (without.nonEmpty) rvk.labelValues.filterNot(lv => without.contains(lv.label.asNewString))
+    def grouping(rv: RangeVector): RangeVectorKey = {
+      val groupBy = if (by.nonEmpty) rv.key.labelValues.filter(lv => by.contains(lv.label.asNewString))
+                    else if (without.nonEmpty) rv.key.labelValues.filterNot(lv =>without.contains(lv.label.asNewString))
                     else Nil
       CustomRangeVectorKey(groupBy)
     }
@@ -115,12 +119,13 @@ final case class AggregatePresenter(aggrOp: AggregationOperator,
                                    aggrParams: Seq[Any]) extends RangeVectorTransformer {
 
   protected[exec] def args: String = s"aggrOp=$aggrOp, aggrParams=$aggrParams"
-  val aggregator = RowAggregator(aggrOp)
+  val aggregator = RowAggregator(aggrOp, aggrParams)
 
   def apply(source: Observable[RangeVector],
             queryConfig: QueryConfig,
+            limit: Int,
             sourceSchema: ResultSchema): Observable[RangeVector] = {
-    RangeVectorAggregator.present(aggrOp, aggrParams, source)
+    RangeVectorAggregator.present(aggrOp, aggrParams, source, limit)
   }
 
   override def schema(dataset: Dataset, source: ResultSchema): ResultSchema = {

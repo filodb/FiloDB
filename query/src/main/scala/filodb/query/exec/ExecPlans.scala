@@ -47,7 +47,6 @@ final case class SelectRawPartitionsExec(id: String,
                          (implicit sched: Scheduler,
                           timeout: FiniteDuration): Observable[RangeVector] = {
 
-    qLogger.debug(s"SelectRawPartitionsExec: Running with $args")
     // if no columns are chosen, auto-select data and row key columns
     val colIds = if (columns.nonEmpty) getColumnIDs(dataset, columns)
                  else dataset.dataColumns.map(_.id) // includes row-key
@@ -97,7 +96,7 @@ final case class ReduceAggregateExec(id: String,
 
   protected def compose(childResponses: Observable[QueryResponse],
                         queryConfig: QueryConfig): Observable[RangeVector] = {
-    RangeVectorAggregator.mapReduce(aggrOp, aggrParams, skipMapPhase = true, toResults(childResponses), rvk => rvk)
+    RangeVectorAggregator.mapReduce(aggrOp, aggrParams, skipMapPhase = true, toResults(childResponses), rv => rv.key)
   }
 }
 

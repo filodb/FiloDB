@@ -48,9 +48,9 @@ class Arguments extends FieldArgs {
   var port: Int = 2552
   var promql0: Option[String] = None
   var promql: Option[String] = None
-  var start: Long = System.currentTimeMillis()
-  var end: Long = System.currentTimeMillis()
-  var step: Long = 10000
+  var start: Long = System.currentTimeMillis() / 1000 // promql argument is seconds since epoch
+  var end: Long = System.currentTimeMillis() / 1000 // promql argument is seconds since epoch
+  var step: Long = 10 // in seconds
   var metricColumn: String = "__name__"
   var shardKeyColumns: Seq[String] = Nil
   var everyNSeconds: Option[String] = None

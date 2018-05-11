@@ -27,7 +27,7 @@ class FastFiloRowReader(val parsers: Array[FiloVector[_]]) extends FiloRowReader
   def this(chunks: Array[ByteBuffer], classes: Array[Class[_]], emptyLen: Int = 0) =
     this(FiloVector.makeVectors(chunks, classes, emptyLen))
 
-  final def notNull(columnNo: Int): Boolean = parsers(columnNo).isAvailable(rowNo)
+  final def notNull(columnNo: Int): Boolean = columnNo < parsers.length && parsers(columnNo).isAvailable(rowNo)
   final def getBoolean(columnNo: Int): Boolean = parsers(columnNo).asInstanceOf[FiloVector[Boolean]](rowNo)
   final def getInt(columnNo: Int): Int = parsers(columnNo).asInstanceOf[FiloVector[Int]](rowNo)
   final def getLong(columnNo: Int): Long = parsers(columnNo).asInstanceOf[FiloVector[Long]](rowNo)
