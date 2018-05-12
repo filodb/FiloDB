@@ -141,20 +141,102 @@ The `LogicalPlan` tree for the above PromQL would be
     * `PeriodicSeriesWithWindowing` with function=Rate and window=5000 
        * `RawSeries` with filter __name__==http_request_duration_seconds_count && job==myService            
 
-A candidate `ExecPlan` tree materialized for the above `LogicalPlan` could be
+A candidate `ExecPlan` tree materialized for the above `LogicalPlan` would be
 
-* `BinaryJoinExec` *on Host2*
-  * `ReduceAggregateExec` *on Host1*
-       * `SelectRawPartitionsExec` with filter __name__=http_request_duration_seconds_bucket && job==myService && le==0.3 and shard 1 *on Host1*
-       * `SelectRawPartitionsExec` with filter __name__=http_request_duration_seconds_bucket && job==myService && le==0.3 and shard 2 *on Host2*
-  * `ReduceAggregateExec`  *on Host2*   
-       * `SelectRawPartitionsExec` with filter __name__=http_request_duration_seconds_count && job==myService and shard 1 *on Host2*
-       * `SelectRawPartitionsExec` with filter __name__=http_request_duration_seconds_count && job==myService and shard 2 *on Host1*
+```
+E~BinaryJoinExec(binaryOp=DIV, on=List(), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-2#-1307032783])
+-T~AggregatePresenter(aggrOp=Sum, aggrParams=List())
+--E~ReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-3#-1420498912])
+---T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(job))
+----T~PeriodicSamplesMapper(start=1526094229444, step=1000, end=1526094279444, window=Some(5000), functionId=Some(Rate), funcParams=List())
+-----E~SelectRawPartitionsExec(shard=2, rowKeyRange=RowKeyInterval(b[1526094229444],b[1526094279444]), filters=List(ColumnFilter(__name__,Equals(http_request_duration_seconds_bucket)), ColumnFilter(job,Equals(myService)), ColumnFilter(le,Equals(0.3)))) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-3#-1420498912])
+---T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(job))
+----T~PeriodicSamplesMapper(start=1526094229444, step=1000, end=1526094279444, window=Some(5000), functionId=Some(Rate), funcParams=List())
+-----E~SelectRawPartitionsExec(shard=3, rowKeyRange=RowKeyInterval(b[1526094229444],b[1526094279444]), filters=List(ColumnFilter(__name__,Equals(http_request_duration_seconds_bucket)), ColumnFilter(job,Equals(myService)), ColumnFilter(le,Equals(0.3)))) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-4#372411693])
+-T~AggregatePresenter(aggrOp=Sum, aggrParams=List())
+--E~ReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-2#-1307032783])
+---T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(job))
+----T~PeriodicSamplesMapper(start=1526094229444, step=1000, end=1526094279444, window=Some(5000), functionId=Some(Rate), funcParams=List())
+-----E~SelectRawPartitionsExec(shard=0, rowKeyRange=RowKeyInterval(b[1526094229444],b[1526094279444]), filters=List(ColumnFilter(__name__,Equals(http_request_duration_seconds_count)), ColumnFilter(job,Equals(myService)))) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#2034238507])
+---T~AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(job))
+----T~PeriodicSamplesMapper(start=1526094229444, step=1000, end=1526094279444, window=Some(5000), functionId=Some(Rate), funcParams=List())
+-----E~SelectRawPartitionsExec(shard=1, rowKeyRange=RowKeyInterval(b[1526094229444],b[1526094279444]), filters=List(ColumnFilter(__name__,Equals(http_request_duration_seconds_count)), ColumnFilter(job,Equals(myService)))) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-2#-1307032783])
+```
 
-Note that each of the `SelectRawPartitionsExec` nodes above would be associated with the following
-`RangeVectorTransformer`s in that order and would run on the same host as the `SelectRawPartitionsExec`
-* `PeriodicSamplesMapper`
-* `AggregateCombiner`
+**Notation:**
+* Above representation is a tree of operations. The number of hyphen prefixes indicate the depth of the node in the tree
+* Lines starting with `E~` represent ExecPlan nodes 
+* Lines starting with `T~` represent Range Vector Transformers that are attached to the ExecPlan. Note carefully that
+  they are attached to the ExecPlan that are at the next depth (and not higher depth)
+* ExecPlan and RangeVectorTransformers immediately above them are designated to run on a node represented by the ActorPlanDispatcher
 
 See [QueryEngineSpec](../coordinator/src/test/scala/filodb.coordinator/queryengine2/QueryEngineSpec.scala) for
 test code on this example. 
+
+## Execution Detail
+
+Following are some over-arching principles in query execution
+
+* Fetch rows from chunks by using "lazily materialized" iterators. Iterators are lazy and use much
+  less memory than fully materialized collections.
+* Use mutable objects to represent data underneath the iterators. Where we are not referring to raw data, we
+  materialize single row into a mutable RowReader implementation named `TransientRow`.
+* When `iterator.next()` is called, the cursor is moved forward by mutating the TransientRow with contents of the next row.
+* Materialization of rows in a RangeVector is deferred until just before the result is serialized to be written
+  to the wire.
+* Limits are applied at the time of materialization.     
+* In most instances, higher CPU is preferred over higher memory in trade-off decisions. This is to reduce GC churn.
+
+### Periodic Samples and Range Functions
+
+FiloDB supports Range Functions that can operate on time windows of raw data. For example, for a monotonically 
+increasing counter, one can calculate rate of increase of counter over, say 1 minute windows. Aggregation over
+time operations are also performed as Range Functions.
+
+Range Functions are implemented as operations over a sliding window of fixed time over raw samples.
+
+![](QueryEngine-RangeFunctions.png)
+
+A `SlidingWindowIterator` buffers elements within a fixed time window of raw time series data samples. 
+The RangeFunction uses the data in the sliding window to compute the value for the current period 
+which is the end time of the sliding window. 
+
+RangeFunctions are implementations of the `RangeFunction` trait based contract that the `SlidingWindowIterator`
+relies on. Via the trait implementation, the Range Function can request the SlidingWindowIterator to optionally
+* Correct monotonically increasing counters
+* Include one last sample outside the fixed time window when necessary
+
+`RangeFunction` implementation can be done either by 
+* Using addSampleToWindow or removeSampleFromWindow events to calculate the aggregate quickly. Typically, aggregation
+  over time functions can use these events.
+* Or, by iterating all the buffered samples in the window each time. 
+
+Look here for examples of []RangeFunctions](../query/exec/rangefn/RangeFunction.scala) 
+
+#### Alternate Approach To Consider Later
+With sliding window periodic sample generation can happen as a O(n) time, and O(w) memory where n is number
+of raw samples, and w is samples per window. The alternate approach to compare performance with later is to
+look up the windows each time without using additional memory. This will be O(nw) time, but will result
+in constant memory. We can consider this if windowing operations are proving to be memory intensive or if
+time windows will always be small. 
+
+### Aggregation across Range Vectors
+
+![](QueryEngine-AggregationAcrossRangeVectors.png)
+
+Aggregation is supported on periodic samples across RangeVectors. Values of the same row key across range vectors
+can be aggregated in many ways: average, sum, min, max, count, top-k, bottom-k etc. These aggregations are
+done in three phases:
+1. **Map:** This step is performed at the source of the data, where periodic samples are generated.
+   Periodic samples are mapped to an aggregatable rows. As an example, for sum, we map the value itself (current sum).
+   For count, we map the row to the value 1 (count just one item), for average we map row to a tuple containing itself and
+   1(current mean and count).
+2. **Reduce:** In the reduce phase, we start with an empty aggregate accumulator. Each row mapped into its
+   aggregate representation is added into the accumulator. This reduction happens in parallel across shards,
+   and can be repeated multiple times to control and contain the scale. For example, for sum, we calculate the
+   sum of the aggregates to generate new aggregate. For count, we sum the counts too. For average, we sum the counts
+   and re-calculate the mean.
+3. **Present:** Convert the accumulated result into the final presentable result.
+
+For details of the map, reduce and present steps of each aggregation visit the scaladoc documentation
+of each type of [RowAggregator](../query/exec/AggrOverRangeVectors.scala)

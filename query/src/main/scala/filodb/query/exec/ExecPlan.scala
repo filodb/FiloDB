@@ -153,10 +153,10 @@ trait ExecPlan extends QueryCommand {
     */
   final def printTree(level: Int = 0): String = {
     val transf = rangeVectorTransformers.reverse.zipWithIndex.map { case (t, i) =>
-      s"${"-"*(level + i)}${t.getClass.getSimpleName}(${t.args})"
+      s"${"-"*(level + i)}T~${t.getClass.getSimpleName}(${t.args})"
     }
     val nextLevel = rangeVectorTransformers.size + level
-    val curNode = s"${"-"*nextLevel}${getClass.getSimpleName}($args) on ${dispatcher}"
+    val curNode = s"${"-"*nextLevel}E~${getClass.getSimpleName}($args) on ${dispatcher}"
     val childr = children.map(_.printTree(nextLevel + 1))
     ((transf :+ curNode) ++ childr).mkString("\n")
   }

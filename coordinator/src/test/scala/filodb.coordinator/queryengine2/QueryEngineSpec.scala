@@ -69,21 +69,23 @@ class QueryEngineSpec extends FunSpec with Matchers {
     /*
     Following ExecPlan should be generated:
 
-    BinaryJoinExec(binaryOp=DIV, on=List(), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-4#-498736684])
-    -ReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-4#-498736684])
-    --AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(job))
-    ---PeriodicSamplesMapper(start=1524001640281, step=1000, end=1524001690281, window=Some(5000), function=Some(Rate), funcParams=Some(List()))
-    ----SelectRawPartitionsExec(shard=2, rangeSelector=IntervalSelector(b[1524001640281],b[1524001690281]), filters=List(ColumnFilter(__name__,Equals(http_request_duration_seconds_bucket)), ColumnFilter(job,Equals(myService)), ColumnFilter(le,Equals(0.3)))) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-3#1295960843])
-    --AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(job))
-    ---PeriodicSamplesMapper(start=1524001640281, step=1000, end=1524001690281, window=Some(5000), function=Some(Rate), funcParams=Some(List()))
-    ----SelectRawPartitionsExec(shard=3, rangeSelector=IntervalSelector(b[1524001640281],b[1524001690281]), filters=List(ColumnFilter(__name__,Equals(http_request_duration_seconds_bucket)), ColumnFilter(job,Equals(myService)), ColumnFilter(le,Equals(0.3)))) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-4#-498736684])
-    -ReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#2028091896])
-    --AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(job))
-    ---PeriodicSamplesMapper(start=1524001640281, step=1000, end=1524001690281, window=Some(5000), function=Some(Rate), funcParams=Some(List()))
-    ----SelectRawPartitionsExec(shard=0, rangeSelector=IntervalSelector(b[1524001640281],b[1524001690281]), filters=List(ColumnFilter(__name__,Equals(http_request_duration_seconds_count)), ColumnFilter(job,Equals(myService)))) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#2028091896])
-    --AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(job))
-    ---PeriodicSamplesMapper(start=1524001640281, step=1000, end=1524001690281, window=Some(5000), function=Some(Rate), funcParams=Some(List()))
-    ----SelectRawPartitionsExec(shard=1, rangeSelector=IntervalSelector(b[1524001640281],b[1524001690281]), filters=List(ColumnFilter(__name__,Equals(http_request_duration_seconds_count)), ColumnFilter(job,Equals(myService)))) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-2#125110136])
+    BinaryJoinExec(binaryOp=DIV, on=List(), ignoring=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-4#-325843755])
+    -AggregatePresenter(aggrOp=Sum, aggrParams=List())
+    --ReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-4#-325843755])
+    ---AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(job))
+    ----PeriodicSamplesMapper(start=1526094025509, step=1000, end=1526094075509, window=Some(5000), functionId=Some(Rate), funcParams=List())
+    -----SelectRawPartitionsExec(shard=2, rowKeyRange=RowKeyInterval(b[1526094025509],b[1526094075509]), filters=List(ColumnFilter(__name__,Equals(http_request_duration_seconds_bucket)), ColumnFilter(job,Equals(myService)), ColumnFilter(le,Equals(0.3)))) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-3#342951049])
+    ---AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(job))
+    ----PeriodicSamplesMapper(start=1526094025509, step=1000, end=1526094075509, window=Some(5000), functionId=Some(Rate), funcParams=List())
+    -----SelectRawPartitionsExec(shard=3, rowKeyRange=RowKeyInterval(b[1526094025509],b[1526094075509]), filters=List(ColumnFilter(__name__,Equals(http_request_duration_seconds_bucket)), ColumnFilter(job,Equals(myService)), ColumnFilter(le,Equals(0.3)))) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-4#-325843755])
+    -AggregatePresenter(aggrOp=Sum, aggrParams=List())
+    --ReduceAggregateExec(aggrOp=Sum, aggrParams=List()) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-2#-1576910232])
+    ---AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(job))
+    ----PeriodicSamplesMapper(start=1526094025509, step=1000, end=1526094075509, window=Some(5000), functionId=Some(Rate), funcParams=List())
+    -----SelectRawPartitionsExec(shard=0, rowKeyRange=RowKeyInterval(b[1526094025509],b[1526094075509]), filters=List(ColumnFilter(__name__,Equals(http_request_duration_seconds_count)), ColumnFilter(job,Equals(myService)))) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-1#-238515561])
+    ---AggregateMapReduce(aggrOp=Sum, aggrParams=List(), without=List(), by=List(job))
+    ----PeriodicSamplesMapper(start=1526094025509, step=1000, end=1526094075509, window=Some(5000), functionId=Some(Rate), funcParams=List())
+    -----SelectRawPartitionsExec(shard=1, rowKeyRange=RowKeyInterval(b[1526094025509],b[1526094075509]), filters=List(ColumnFilter(__name__,Equals(http_request_duration_seconds_count)), ColumnFilter(job,Equals(myService)))) on ActorPlanDispatcher(Actor[akka://default/system/testProbe-2#-1576910232])
     */
 
     execPlan.isInstanceOf[BinaryJoinExec] shouldEqual true

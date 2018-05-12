@@ -92,6 +92,7 @@ trait Vectors extends Scalars with TimeUnits with Base {
   case class InstantExpression(metricName: String,
                                labelSelection: Seq[LabelMatch],
                                offset: Option[Duration]) extends Vector with PeriodicSeries {
+    val staleDataLookbackSeconds = 5 * 60 // 5 minutes
 
     private val nameLabels = labelSelection.filter(_.label == "__name__")
 
@@ -107,8 +108,11 @@ trait Vectors extends Scalars with TimeUnits with Base {
     private val nameFilter = ColumnFilter("__name__", query.Filter.Equals(metricName))
 
     def toPeriodicSeriesPlan(queryParams: QueryParams): PeriodicSeriesPlan = {
+
+      // we start from 5 minutes earlier that provided start time in order to include last sample for the
+      // start timestamp. Prometheus goes back unto 5 minutes to get sample before declaring as stale
       PeriodicSeries(
-        RawSeries(IntervalSelector(Seq(queryParams.start * 1000),
+        RawSeries(IntervalSelector(Seq((queryParams.start-staleDataLookbackSeconds) * 1000),
                                    Seq(queryParams.end * 1000)), columnFilters :+ nameFilter, Nil),
         queryParams.start * 1000, queryParams.step * 1000, queryParams.end * 1000
       )
