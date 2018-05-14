@@ -60,15 +60,15 @@ object RangeVectorAggregator {
                      grouping: RangeVector => RangeVectorKey): Map[RangeVectorKey, Iterator[rowAgg.AggHolderType]] = {
     rvs.groupBy(grouping).mapValues { rvs =>
       new Iterator[rowAgg.AggHolderType] {
+        var acc = rowAgg.zero
         val rowIterators = rvs.map(_.rows)
-        val rvks = rvs.map(_.key)
+        val rvkStrings = rvs.map(rv => CustomRangeVectorKey.toZcUtf8(rv.key))
         val mapInto = rowAgg.newRowToMapInto
         def hasNext: Boolean = rowIterators.forall(_.hasNext)
         def next(): rowAgg.AggHolderType = {
-          var acc = rowAgg.zero
-          rowIterators.zip(rvks).foreach { case (rowIter, rvk) =>
-            val rvkAsString = CustomRangeVectorKey.toZcUtf8(rvk)
-            val mapped = if (skipMapPhase) rowIter.next() else rowAgg.map(rvkAsString, rowIter.next(), mapInto)
+          acc.resetToZero()
+          rowIterators.zip(rvkStrings).foreach { case (rowIter, rvk) =>
+            val mapped = if (skipMapPhase) rowIter.next() else rowAgg.map(rvk, rowIter.next(), mapInto)
             acc = rowAgg.reduce(acc, mapped)
           }
           acc
@@ -192,9 +192,9 @@ object SumRowAggregator extends RowAggregator {
   def zero: SumHolder = new SumHolder
   def newRowToMapInto: TransientRow = new TransientRow(Array(0L, 0d))
   def map(rvk: ZeroCopyUTF8String, item: RowReader, mapInto: TransientRow): RowReader = item
-  def reduce(acc: SumHolder, item: RowReader): SumHolder = {
-    acc.timestamp = item.getLong(0)
-    acc.sum += item.getDouble(1)
+  def reduce(acc: SumHolder, aggRes: RowReader): SumHolder = {
+    acc.timestamp = aggRes.getLong(0)
+    if (!aggRes.getDouble(1).isNaN) acc.sum += aggRes.getDouble(1)
     acc
   }
   def present(aggRangeVector: RangeVector, limit: Int): Seq[RangeVector] = Seq(aggRangeVector)
@@ -219,7 +219,7 @@ object MinRowAggregator extends RowAggregator {
   def map(rvk: ZeroCopyUTF8String, item: RowReader, mapInto: TransientRow): RowReader = item
   def reduce(acc: MinHolder, aggRes: RowReader): MinHolder = {
     acc.timestamp = aggRes.getLong(0)
-    acc.min = Math.min(acc.min, aggRes.getDouble(1))
+    if (!aggRes.getDouble(1).isNaN) acc.min = Math.min(acc.min, aggRes.getDouble(1))
     acc
   }
   def present(aggRangeVector: RangeVector, limit: Int): Seq[RangeVector] = Seq(aggRangeVector)
@@ -244,7 +244,7 @@ object MaxRowAggregator extends RowAggregator {
   def map(rvk: ZeroCopyUTF8String, item: RowReader, mapInto: TransientRow): RowReader = item
   def reduce(acc: MaxHolder, aggRes: RowReader): MaxHolder = {
     acc.timestamp = aggRes.getLong(0)
-    acc.max = Math.max(acc.max, aggRes.getDouble(1))
+    if (!aggRes.getDouble(1).isNaN) acc.max = Math.max(acc.max, aggRes.getDouble(1))
     acc
   }
   def present(aggRangeVector: RangeVector, limit: Int): Seq[RangeVector] = Seq(aggRangeVector)
@@ -267,7 +267,8 @@ object CountRowAggregator extends RowAggregator {
   def zero: CountHolder = new CountHolder()
   def newRowToMapInto: TransientRow = new TransientRow(Array(0L, 0d))
   def map(rvk: ZeroCopyUTF8String, item: RowReader, mapInto: TransientRow): RowReader = {
-    mapInto.set(item.getLong(0), 1d)
+    if (!item.getDouble(1).isNaN) mapInto.set(item.getLong(0), 1d)
+    else mapInto.set(item.getLong(0), 0d)
     mapInto
   }
   def reduce(acc: CountHolder, aggRes: RowReader): CountHolder = {
@@ -301,8 +302,10 @@ object AvgRowAggregator extends RowAggregator {
   def reduce(acc: AvgHolder, aggRes: RowReader): AvgHolder = {
     val newMean = (acc.mean * acc.count + aggRes.getDouble(1) * aggRes.getLong(2))/ (acc.count + aggRes.getLong(2))
     acc.timestamp = aggRes.getLong(0)
-    acc.mean = newMean
-    acc.count += aggRes.getLong(2)
+    if (!aggRes.getDouble(1).isNaN) {
+      acc.mean = newMean
+      acc.count += aggRes.getLong(2)
+    }
     acc
   }
   // ignore last count column. we rely on schema change
@@ -366,8 +369,10 @@ class TopBottomKRowAggregator(k: Int, bottomK: Boolean) extends RowAggregator {
     acc.timestamp = aggRes.getLong(0)
     var i = 1
     while(aggRes.notNull(i)) {
-      acc.heap.enqueue(RVKeyAndValue(aggRes.filoUTF8String(i), aggRes.getDouble(i + 1)))
-      if (acc.heap.size > k) acc.heap.dequeue()
+      if (!aggRes.getDouble(i + 1).isNaN) {
+        acc.heap.enqueue(RVKeyAndValue(aggRes.filoUTF8String(i), aggRes.getDouble(i + 1)))
+        if (acc.heap.size > k) acc.heap.dequeue()
+      }
       i += 2
     }
     acc

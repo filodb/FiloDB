@@ -14,7 +14,9 @@ The Query Engine internally takes the query through this pipeline for execution:
    The load of a FiloDB node, the health of shard replicas etc are all useful information that can be 
    fed to the materializer to enumerate `ExecPlan`s.
 4. Apply a cost model for each `ExecPlan`, and pick the one with lowest cost. 
-5. Trigger the orchestration of the `ExecPlan`
+5. Trigger the orchestration of the `ExecPlan` by dispatching the root plan to the cluster
+6. Collect from the cluster a `QueryResult` which is a bunch of `RangeVectors`,
+    or a `QueryError` in case of a user/internal error.
 
 Note that in the current implementation:
 * We do not optimize the logical plan yet.
@@ -49,14 +51,22 @@ range function on the raw data.
                                             end = 1523785055,
                                             window = 5000,
                                             function = RangeFunction.Rate)
-
 ```
-
 The `BinaryJoin` node type helps in joining two child series. Look at the scaladocs for more information
 on other node types. We have `Aggregate`, `ScalarVectorBinaryOperation` and `ApplyInstantFunction`
 
 It is important to note that `RawSeriesPlan` type nodes are not composable before they are transformed
 into samples with regular interval.       
+
+## Query Results as Range Vectors
+
+Before delving into the `ExecPlan` constructs and how the query is orchestrated, it is important to understand
+the result data structure. The query result `QueryResult` is like a mini dataset in itself. It can have several
+partitions, each represented by `RangeVector`. All the `RangeVector`s share same schema which is included
+in the result object. Each `RangeVector` has an associated key called the `RangeVectorKey` and could be
+seen as the partition key for the result. The `RangeVector` exposes an iterator of rows. Each row within
+the `RangeVector` starts wih the row-key column(s), followed by the data columns. For the time series
+dataset, the row-key is a timestamp. 
 
 ## Execution Plan Constructs
 
@@ -96,8 +106,8 @@ We have the following transformers:
 * `PeriodicSamplesMapper`: Sample raw data to intervals optionally applying a range vector function on time windows
 * `InstantVectorFunctionMapper`: Apply an instant vector function
 * `ScalarOperationMapper`: Perform a binary operation with a scalar
-* `AggregateCombiner`: Performs aggregation operation across instants of the Range Vectors
-* `AverageMapper`: Calculates average from "sum" and "count" columns in each range vector
+* `AggregateMapReduce`: Performs aggregation operation across instants of the Range Vectors
+* `AveragePresenter`: Calculates average from "sum" and "count" columns in each range vector
 
 Each `ExecPlan` node in the tree can be associated with zero or more of such transformers. The `ExecPlan.execute`
 method will first  perform its designated operation via the `doExecute` and `compose` methods and then
@@ -179,6 +189,19 @@ Following are some over-arching principles in query execution
 
 * Fetch rows from chunks by using "lazily materialized" iterators. Iterators are lazy and use much
   less memory than fully materialized collections.
+* For data transformations, wrap iterators using the decorator pattern and return a new iterator. This
+  keeps the transformation lazy too and creates a synchronous data pipeline that uses much less memory than
+  if the entire collection was instantiated.
+```scala
+class TransformingIterator(iter: Iterator[RowReader]) extends Iterator[RowReader] {
+  override def hasNext: Boolean = iter.hasNext
+  override def next(): RowReader = {
+    // ...
+    val next = iter.next()
+    // ...
+  }
+}
+```
 * Use mutable objects to represent data underneath the iterators. Where we are not referring to raw data, we
   materialize single row into a mutable RowReader implementation named `TransientRow`.
 * When `iterator.next()` is called, the cursor is moved forward by mutating the TransientRow with contents of the next row.
@@ -208,17 +231,21 @@ relies on. Via the trait implementation, the Range Function can request the Slid
 
 `RangeFunction` implementation can be done either by 
 * Using addSampleToWindow or removeSampleFromWindow events to calculate the aggregate quickly. Typically, aggregation
-  over time functions can use these events.
-* Or, by iterating all the buffered samples in the window each time. 
+  over time functions can use these events to calculate aggregations over sliding windows of time. Prefer
+  this if possible since the complexity of the algorithm will be O(n) where n is the number of samples.
+* Or, by iterating all the buffered samples in the sliding window each time. 
 
-Look here for examples of []RangeFunctions](../query/exec/rangefn/RangeFunction.scala) 
+Look here for examples of [RangeFunctions](../query/exec/rangefn/RangeFunction.scala) 
 
-#### Alternate Approach To Consider Later
-With sliding window periodic sample generation can happen as a O(n) time, and O(w) memory where n is number
-of raw samples, and w is samples per window. The alternate approach to compare performance with later is to
-look up the windows each time without using additional memory. This will be O(nw) time, but will result
-in constant memory. We can consider this if windowing operations are proving to be memory intensive or if
-time windows will always be small. 
+#### Alternate Design Approaches to Consider
+1. With sliding window periodic sample generation can happen as a O(n) time, and O(w) memory where n is number
+   of raw samples, and w is samples per window. The alternate approach to compare performance with later is to
+   look up the windows each time without using additional memory. This will be O(nw) time, but will result
+   in constant memory. We can consider this if windowing operations are proving to be memory intensive.
+2. Another design decision is to not iterate across all raw samples, and instead fetch the window data for each
+   step by looking up data for the window interval explicitly. This can save some memory and time especially
+   when step >> window where we may end up iterating across samples that we should be ideally ignoring. That
+   said, one would expect queries to not ignore data and keep step <= window.
 
 ### Aggregation across Range Vectors
 
