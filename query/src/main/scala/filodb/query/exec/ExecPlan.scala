@@ -93,11 +93,11 @@ trait ExecPlan extends QueryCommand {
                    (implicit sched: Scheduler,
                     timeout: FiniteDuration): Task[QueryResponse] = {
     try {
-      qLogger.debug(s"queryId: ${id} Running ${getClass.getSimpleName} with $args")
+      qLogger.debug(s"queryId: ${id} Started ExecPlan ${getClass.getSimpleName} with $args")
       val res = doExecute(source, dataset, queryConfig)
       val schema = schemaOfDoExecute(dataset)
       val finalRes = rangeVectorTransformers.foldLeft((res, schema)) { (acc, transf) =>
-        qLogger.debug(s"queryId: ${id} Running transformer ${transf.getClass.getSimpleName} with ${transf.args}")
+        qLogger.debug(s"queryId: ${id} Started Transformer ${transf.getClass.getSimpleName} with ${transf.args}")
         (transf.apply(acc._1, queryConfig, limit, acc._2), transf.schema(dataset, acc._2))
       }
       finalRes._1

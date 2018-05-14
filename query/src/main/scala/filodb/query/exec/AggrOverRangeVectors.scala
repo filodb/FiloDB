@@ -358,7 +358,7 @@ class TopBottomKRowAggregator(k: Int, bottomK: Boolean) extends RowAggregator {
     mapInto.set(item.getLong(0), rvk, item.getDouble(1))
     var i = 3
     while(i<numRowReaderColumns) {
-      mapInto.set(i, "")
+      mapInto.set(i, CustomRangeVectorKey.emptyAsZcUtf8)
       mapInto.set(i + 1, if (bottomK) Double.MaxValue else Double.MinValue)
       i += 2
     }

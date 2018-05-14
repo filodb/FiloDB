@@ -47,8 +47,7 @@ final case class CustomRangeVectorKey(labelValues: Seq[LabelValue]) extends Rang
 object CustomRangeVectorKey {
 
   def fromZcUtf8(str: ZeroCopyUTF8String): CustomRangeVectorKey = {
-    CustomRangeVectorKey(str.asNewString.split("\u03BC").map { token =>
-      val lv = token.split("\u03C0")
+    CustomRangeVectorKey(str.asNewString.split("\u03BC").map(_.split("\u03C0")).filter(_.length == 2).map { lv =>
       LabelValue(ZeroCopyUTF8String(lv(0)), ZeroCopyUTF8String(lv(1)))
     })
   }
@@ -58,6 +57,8 @@ object CustomRangeVectorKey {
     val str = rvk.labelValues.map(lv=>s"${lv.label.asNewString}\u03C0${lv.value.asNewString}").sorted.mkString("\u03BC")
     ZeroCopyUTF8String(str)
   }
+
+  val emptyAsZcUtf8 = toZcUtf8(CustomRangeVectorKey(Nil))
 }
 
 case class LabelValue(label: UTF8Str, value: UTF8Str) {
