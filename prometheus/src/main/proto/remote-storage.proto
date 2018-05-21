@@ -1,0 +1,56 @@
+
+syntax="proto2";
+
+package remote;
+
+message Sample {
+  optional double value       = 1;
+  optional int64 timestamp_ms = 2;
+}
+
+message LabelPair {
+  optional string name  = 1;
+  optional string value = 2;
+}
+
+message TimeSeries {
+  repeated LabelPair labels = 1;
+  // Sorted by time, oldest sample first.
+  repeated Sample samples   = 2;
+}
+
+message WriteRequest {
+  repeated TimeSeries timeseries = 1;
+}
+
+message ReadRequest {
+  repeated Query queries = 1;
+}
+
+message ReadResponse {
+  // In same order as the request's queries.
+  repeated QueryResult results = 1;
+}
+
+message Query {
+  optional int64 start_timestamp_ms = 1;
+  optional int64 end_timestamp_ms = 2;
+  repeated LabelMatcher matchers = 3;
+}
+
+enum MatchType {
+  EQUAL = 0;
+  NOT_EQUAL = 1;
+  REGEX_MATCH = 2;
+  REGEX_NO_MATCH = 3;
+}
+
+message LabelMatcher {
+  optional MatchType type = 1;
+  optional string name = 2;
+  optional string value = 3;
+}
+
+message QueryResult {
+  repeated TimeSeries timeseries = 1;
+}

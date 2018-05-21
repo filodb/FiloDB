@@ -40,6 +40,7 @@ lazy val prometheus = project
   .in(file("prometheus"))
   .settings(commonSettings: _*)
   .settings(name := "filodb-prometheus")
+  .settings(libraryDependencies ++= promDeps)
   .dependsOn(core % "compile->compile; test->test")
   .dependsOn(query % "compile->compile; test->test")
 
@@ -243,6 +244,10 @@ lazy val kafkaDeps = Seq(
   "com.typesafe.akka" %% "akka-testkit"   % akkaVersion % "test,it",
   scalaTest  % "test,it",
   logbackDep % "test,it")
+
+lazy val promDeps = Seq(
+  "com.google.protobuf" % "protobuf-java" % "2.5.0"
+)
 
 lazy val tsgeneratorDeps = Seq(
   logbackDep,
