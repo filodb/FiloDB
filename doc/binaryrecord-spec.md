@@ -21,7 +21,7 @@
 
 ![](mermaid/br-classes.mermaid.png)
 
-## RecordSchema
+## [RecordSchema](../core/src/main/scala/filodb.core/binaryrecord2/RecordSchema.scala)
 
 The `RecordSchema` defines the schema for a `BinaryRecord`, and consists of defined fields or columns.  It is designed to be used as a single instance per dataset schema that can be repeatedly used on millions of `BinaryRecord`s without per-record allocations.
 
@@ -79,22 +79,35 @@ An `IngestionRecordSchema` should be able to do the following to help in identif
 
         partitionHashCode(base: Any, offset: Long)
 
-* Comparison of partition key portion of ingestion record with a partition key-only `BinaryRecord`.  This is done field by field; in the case of a map field the entire map is compared bytewise (since fields are sorted)
+* Equality of partition key portion of ingestion record with a partition key-only `BinaryRecord`.  Optimization: in the case of a map field the entire map is compared bytewise (since fields are sorted); actually the entire variable-sized byte areas are compared since the order of fields are the same.
 
-        comparePartitionKeyFields(base: Any, offset: Long, targetKeyBase: Any, targetKeyOffset: Long): Int
+        def partitionMatch(ingestBase: Any, ingestOffset: Long, partKeyBase: Any, partKeyOffset: Long): Boolean
 
 * Extract an ingestion record schema BR into a partition-key-only BR in offheap memory - when we need to create a new TSPartition
 
-        extractPartitionKeyRecord(base: Any, offset: Long, memoryManager: MemoryManager)
+        def buildPartKeyFromIngest(ingestBase: Any, ingestOffset: Long, builder: RecordBuilder)
 
 ### Shard key calculation
 
-* Calculate shard key hash from select fields of partition key out of the ingestion record
-* Calculate and store partition key hash from all partition key hash fields
+First of all, before we even create the ingestion BinaryRecord, the application gateway probably has to compute the shard from the partition key and incoming tags.  To do that, first call a method to sort the incoming key-value pairs and compute hashes for each pair:
+
+    def sortAndComputeHashes(pairs: List[(String, String)]): Array[Int]
+
+From here, one of two methods can be called to compute the necessary partition/shard hashes:
+
+    def combineHashExcluding(pairs: List[(String, String)],
+                             hashes: Array[Int], excludeKeys: Set[String]): Int
+    def combineHashIncluding(pairs: List[(String, String)],
+                             hashes: Array[Int], includeKeys: Set[String]): Int
+
+Now, when creating the ingestion BinaryRecord, a convenient method can be called to add the map and put the hash in as well:
+
+    def addSortedPairsAsMap(sortedPairs: List[(String, String)],
+                            hashes: Array[Int]): Unit
 
 ### BinaryRecord creation
 
-`BinaryRecord` creation uses an assistant class, `BinaryRecordBuilder`, which takes a `MemoryManager` so they can be created on or offheap.  Since creation of `BinaryRecords` takes a variable amount of space per record, the builder allocates blocks ahead of time and carves out memory within the block as new `BinaryRecord`s are being built.  The builder keeps track of block/memory usage as new `BinaryRecords` are being built.
+`BinaryRecord` creation uses an assistant class, [RecordBuilder](../core/src/main/scala/filodb.core/binaryrecord2/RecordBuilder.scala), which takes a [MemFactory](../memory/src/main/scala/filodb.memory/MemFactory.scala) so they can be created on or offheap.  Since creation of `BinaryRecords` takes a variable amount of space per record, the builder allocates blocks ahead of time and carves out memory within the block as new `BinaryRecord`s are being built.  The builder keeps track of block/memory usage as new `BinaryRecords` are being built.
 
 The builder has add methods that should be called in field order.  The methods will throw if called in the wrong order.  For example, a sequence for an ingestion `BinaryRecord` with the following fields:  `timestamp:long`, `value:double`, `tags:map` where the first two are the data columns and last one is the partition column, would mean the following call sequence:
 
@@ -118,8 +131,7 @@ A different builder should be used for each different dataset schema and also pe
 
 ### Header
 
-* +0000  4 bytes   total length of `BinaryRecord`
-* +0004  4 bytes   32-bit hash of partition key fields (used for quick hash comparison)
+* +0000  4 bytes   total length of `BinaryRecord` not including this length field
 
 ### Fixed length fields
 
@@ -129,25 +141,30 @@ A different builder should be used for each different dataset schema and also pe
 * utf8 - 4 bytes - offset within BR to var-length UTF8 string area
 * map - 4 bytes - offset within BR to map area
 
+### Hash
+
+An optional hash:
+* 4 bytes   32-bit hash of partition key fields (used for quick hash comparison)
+
 ### Variable length fields - UTF8String
 
-2 bytes length field followed by actual UTF8 bytes
+2 bytes length field followed by actual UTF8 bytes of length bytes
 
 ### Variable length fields - Map field
 
-Total length of map field must be under 64KB.  Note that map fields must be presorted before being added.
+Note that map fields must be presorted before being added.
 
 Note that this is called a "Map" field but is actually just a list of key-value pairs.  Since none of the operations above involve actual lookup by key, O(1) lookup is not needed, plus the usually small number of keys means it is extremely fast to iterate through everything.
 
-* +0000   2 bytes  total length of map field including these bytes
-* +0002   2-byte Length of key #1, or 0xFzzz for preset key field where zzz = preset number (up to 4K presets)
-* +0004 to +0004+(keylen1 - 1)   UTF8 bytes for key #1
+* +0000   4 bytes  total length of map field not including these bytes
+* +0004   2-byte Length of key #1, or 0xFzzz for preset key field where zzz = preset number (up to 4K presets)
+* +0006 to +0006+(keylen1 - 1)   UTF8 bytes for key #1
 * +n      2-byte length of value #1, followed by UTF8 bytes of value string #1
 
-## Container format for multiple BinaryRecords
+## RecordContainer: Container format for multiple BinaryRecords
 
-This would be used as a container for multiple `BinaryRecords` for ingesting into Kafka, for example.
+A [RecordContainer](../core/src/main/scala/filodb.core/binaryrecord2/RecordContainer.scala) is a container for multiple `BinaryRecords` for ingesting into Kafka, for example.
 
-* +0000   4 bytes  total length of container
+* +0000   4 bytes  total length of container following these length bytes
 * +0004   BinaryRecord 1  (where first bytes indicates its length)
 * +0004+n  BinaryRecord 2....

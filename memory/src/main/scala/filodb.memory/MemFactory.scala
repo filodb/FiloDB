@@ -10,21 +10,33 @@ import com.kenai.jffi.MemoryIO
 import com.typesafe.scalalogging.StrictLogging
 import org.jctools.maps.NonBlockingHashMapLong
 
-import filodb.memory.format.{BinaryVector, UnsafeUtils}
 import filodb.memory.format.BinaryVector.{HeaderMagic, Memory}
-import filodb.memory.format.UnsafeUtils.arayOffset
+import filodb.memory.format.UnsafeUtils
 
 /**
   * A trait which allows allocation of memory with the Filo magic header
   */
 trait MemFactory {
   /**
+    * Allocates memory for requested size
+    *
+    * @param size Request memory allocation size in bytes
+    * @return Memory which has a base, offset and a length
+    */
+  def allocate(size: Int): Memory
+
+  /**
     * Allocates memory for requested size plus 4 bytes for magic header
     *
     * @param size Request memory allocation size in bytes
     * @return Memory which has a base, offset and a length
     */
-  def allocateWithMagicHeader(size: Int): Memory
+  final def allocateWithMagicHeader(size: Int): Memory = {
+    //4 for magic header
+    val (base, off, numBytes) = allocate(size + 4)
+    UnsafeUtils.setInt(base, off, HeaderMagic)
+    (base, off + 4, size)
+  }
 
   /**
     * Frees memory allocated at the passed address
@@ -43,7 +55,7 @@ trait MemFactory {
 
   def fromBuffer(buf: ByteBuffer): Memory = {
     if (buf.hasArray) {
-      (buf.array, arayOffset.toLong + buf.arrayOffset + buf.position, buf.limit - buf.position)
+      (buf.array, UnsafeUtils.arayOffset.toLong + buf.arrayOffset + buf.position, buf.limit - buf.position)
     } else {
       assert(buf.isDirect)
       val address = MemoryIO.getCheckedInstance.getDirectBufferAddress(buf)
@@ -81,28 +93,21 @@ class NativeMemoryManager(val upperBoundSizeInBytes: Long) extends MemFactory {
     */
   override def copyFromBytes(bytes: Array[Byte]): ByteBuffer = {
     val size = bytes.length
-    val address = allocate(size)
+    val (_, address, _) = allocate(size)
     val byteBuffer = UnsafeUtils.asDirectBuffer(address, size)
     UnsafeUtils.unsafe.copyMemory(bytes, UnsafeUtils.arayOffset, UnsafeUtils.ZeroPointer, address, size)
     byteBuffer
   }
 
-  override def allocateWithMagicHeader(allocateSize: Int): Memory = {
-    //4 for magic header
-    val address = allocate(allocateSize + 4)
-    UnsafeUtils.setInt(UnsafeUtils.ZeroPointer, address, HeaderMagic)
-    (UnsafeUtils.ZeroPointer, address + 4, allocateSize)
-  }
-
   // Allocates a native 64-bit pointer, or throws an exception if not enough space
-  private def allocate(size: Int): Long = {
+  def allocate(size: Int): Memory = {
     val currentSize = usedSoFar.get()
     val resultantSize = currentSize + size
     if (!(resultantSize > upperBoundSizeInBytes)) {
       val address: Long = MemoryIO.getCheckedInstance().allocateMemory(size, true)
       usedSoFar.compareAndSet(currentSize, currentSize + size)
       sizeMapping.put(address, size)
-      address
+      (UnsafeUtils.ZeroPointer, address, size)
     } else {
       val msg = s"Resultant memory size $resultantSize after allocating " +
         s"with requested size $size is greater than upper bound size $upperBoundSizeInBytes"
@@ -147,10 +152,9 @@ class ArrayBackedMemFactory extends MemFactory {
     * @param size Request memory allocation size in bytes
     * @return Memory which has a base, offset and a length
     */
-  override def allocateWithMagicHeader(size: Int): (Any, Long, Int) = {
-    val newBytes = new Array[Byte](size + 4)
-    UnsafeUtils.setInt(newBytes, UnsafeUtils.arayOffset, BinaryVector.HeaderMagic)
-    (newBytes, UnsafeUtils.arayOffset + 4, size)
+  def allocate(size: Int): Memory = {
+    val newBytes = new Array[Byte](size)
+    (newBytes, UnsafeUtils.arayOffset, size)
   }
 
   override def copyFromBytes(bytes: Array[Byte]): ByteBuffer = {
@@ -231,23 +235,20 @@ class BlockMemFactory(blockStore: BlockManager,
   }
 
   /**
-    * Allocates memory for requested size + 4 byte header.  Used for BinaryVectors only.
+    * Allocates memory for requested size.  Designed for BinaryVectors only.
     * Also ensures that metadataAllocSize is available for metadata storage.
     *
     * @param allocateSize Request memory allocation size in bytes
     * @return Memory which has a base, offset and a length
     */
-  override def allocateWithMagicHeader(allocateSize: Int): Memory = {
-    //4 for magic header
-    val size = allocateSize + 4
-    val block = ensureCapacity(size + metadataAllocSize + 2)
+  override def allocate(allocateSize: Int): Memory = {
+    val block = ensureCapacity(allocateSize + metadataAllocSize + 2)
     block.own()
     val preAllocationPosition = block.position()
-    val headerAddress = block.address + preAllocationPosition
-    UnsafeUtils.setInt(UnsafeUtils.ZeroPointer, headerAddress, BinaryVector.HeaderMagic)
-    val postAllocationPosition = preAllocationPosition + size
+    val newAddress = block.address + preAllocationPosition
+    val postAllocationPosition = preAllocationPosition + allocateSize
     block.position(postAllocationPosition)
-    (UnsafeUtils.ZeroPointer, headerAddress + 4, allocateSize)
+    (UnsafeUtils.ZeroPointer, newAddress, allocateSize)
   }
 
   /**

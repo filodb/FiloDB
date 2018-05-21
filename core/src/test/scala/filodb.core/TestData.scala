@@ -7,9 +7,10 @@ import monix.reactive.Observable
 import org.joda.time.DateTime
 
 import filodb.core.binaryrecord.BinaryRecord
+import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.memstore.{IngestRecord, IngestRouting}
 import filodb.core.metadata.{Column, Dataset, DatasetOptions}
-import filodb.core.Types.PartitionKey
+import filodb.core.Types.{PartitionKey, UTF8Map}
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.store._
 import filodb.memory.format._
@@ -223,10 +224,42 @@ object MachineMetricsData {
     }
   }
 
+  def addToBuilder(builder: RecordBuilder, data: Stream[Seq[Any]]): Unit = {
+    data.foreach { values =>
+      builder.startNewRecord()
+      builder.addLong(values(0).asInstanceOf[Long])     // timestamp
+      builder.addDouble(values(1).asInstanceOf[Double])  // min
+      builder.addDouble(values(2).asInstanceOf[Double])  // avg
+      builder.addDouble(values(3).asInstanceOf[Double]) // max
+      builder.addDouble(values(4).asInstanceOf[Double])  // p90
+      builder.addString(values(5).asInstanceOf[String])  // series (partition key)
+
+      if (values.length > 6) {
+        builder.startMap()
+        values(6).asInstanceOf[UTF8Map].toSeq.sortBy(_._1).foreach { case (k, v) =>
+          builder.addMapKeyValue(k.bytes, v.bytes)
+        }
+        builder.endMap()
+      }
+      builder.endRecord()
+    }
+  }
+
   val dataset2 = Dataset("metrics", Seq("series:string", "tags:map"), columns)
 
-  def withMap(data: Stream[Seq[Any]], n: Int = 5): Stream[Seq[Any]] =
-    data.zipWithIndex.map { case (row, idx) => row :+ Map("n".utf8 -> (idx % n).toString.utf8) }
+  def withMap(data: Stream[Seq[Any]], n: Int = 5, extraTags: UTF8Map = Map.empty): Stream[Seq[Any]] =
+    data.zipWithIndex.map { case (row, idx) => row :+ (Map("n".utf8 -> (idx % n).toString.utf8) ++ extraTags) }
+
+  val uuidString = java.util.UUID.randomUUID.toString
+  val extraTags = Map("job".utf8 -> "prometheus".utf8,
+                      "cloudProvider".utf8 -> "AmazonAWS".utf8,
+                      "region".utf8 -> "AWS-USWest".utf8,
+                      "instance".utf8 -> uuidString.utf8)
+
+  val tagsWithDiffLen = extraTags ++ Map("job".utf8 -> "prometheus23".utf8)
+  val tagsDiffSameLen = extraTags ++ Map("region".utf8 -> "AWS-USEast".utf8)
+
+  val extraTagsLen = extraTags.map { case (k, v) => k.numBytes + v.numBytes }.sum
 }
 
 object MetricsTestData {

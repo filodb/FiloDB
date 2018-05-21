@@ -202,10 +202,9 @@ lazy val coreDeps = commonDeps ++ Seq(
   "io.monix"             %% "monix"             % "2.3.0",
   "com.googlecode.concurrentlinkedhashmap" % "concurrentlinkedhashmap-lru" % "1.4",
   "net.ceedubs"          %% "ficus"             % ficusVersion,
-  "org.scodec"           %% "scodec-bits"       % "1.0.10",
+  "org.spire-math"       %% "debox"             % "0.8.0",
   "io.fastjson"           % "boon"              % "0.33",
   "com.googlecode.javaewah" % "JavaEWAH"        % "1.1.6",
-  "com.github.alexandrnikitin" %% "bloom-filter" % "0.7.0",
   "com.github.rholder.fauxflake" % "fauxflake-core" % "1.1.0",
   "org.scalactic"        %% "scalactic"         % "2.2.6",
   scalaxyDep

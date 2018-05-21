@@ -7,6 +7,7 @@ import org.openjdk.jmh.annotations.Benchmark
 import org.openjdk.jmh.annotations.BenchmarkMode
 import org.openjdk.jmh.annotations.OutputTimeUnit
 
+import filodb.memory._
 import filodb.memory.format._
 
 /**
@@ -18,11 +19,20 @@ import filodb.memory.format._
  */
 @State(Scope.Thread)
 class UTF8StringBenchmark {
+  import UTF8StringMedium._
 
   val str = "xylophonemania"
   val str2 = "xylophonemaniac"
   val zcStr = ZeroCopyUTF8String(str)
   val zcStr2 = ZeroCopyUTF8String(str2)
+
+  val (base1, off1) = UTF8StringMedium(str)
+  val (base2, off2) = UTF8StringMedium(str2)
+
+  val nativeMem = new NativeMemoryManager(1024 * 1024)
+
+  val native = str.utf8(nativeMem)
+  val native2 = str2.utf8(nativeMem)
 
   // According to @ktosopl, be sure to return some value if possible so that JVM won't
   // optimize out the method body.  However JMH is apparently very good at avoiding this.
@@ -30,7 +40,7 @@ class UTF8StringBenchmark {
   @Benchmark
   @BenchmarkMode(Array(Mode.Throughput))
   @OutputTimeUnit(TimeUnit.SECONDS)
-  def utf8StrCompare(): Int = {
+  def zeroCopyUtf8StrCompare(): Int = {
     zcStr.compare(zcStr2)
   }
 
@@ -44,7 +54,21 @@ class UTF8StringBenchmark {
   @Benchmark
   @BenchmarkMode(Array(Mode.Throughput))
   @OutputTimeUnit(TimeUnit.SECONDS)
-  def utf8Substring(): ZeroCopyUTF8String = {
+  def onHeapUtf8StrCompare(): Int = {
+    UTF8StringMedium.compare(base1, off1, base2, off2)
+  }
+
+  @Benchmark
+  @BenchmarkMode(Array(Mode.Throughput))
+  @OutputTimeUnit(TimeUnit.SECONDS)
+  def offHeapUtf8StrCompare(): Int = {
+    native.compare(native2)
+  }
+
+  @Benchmark
+  @BenchmarkMode(Array(Mode.Throughput))
+  @OutputTimeUnit(TimeUnit.SECONDS)
+  def zeroCopyUtf8Substring(): ZeroCopyUTF8String = {
     zcStr.substring(2, 6)
   }
 
@@ -58,7 +82,7 @@ class UTF8StringBenchmark {
   @Benchmark
   @BenchmarkMode(Array(Mode.Throughput))
   @OutputTimeUnit(TimeUnit.SECONDS)
-  def utf8hash(): Int = {
+  def zeroCopyUtf8hash(): Int = {
     zcStr.hashCode
   }
 }

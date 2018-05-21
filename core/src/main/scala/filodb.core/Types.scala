@@ -2,9 +2,6 @@ package filodb.core
 
 import java.nio.ByteBuffer
 
-import scalaxy.loops._
-import scodec.bits.ByteVector
-
 import filodb.core.binaryrecord.BinaryRecord
 import filodb.memory.format.ZeroCopyUTF8String
 
@@ -29,21 +26,6 @@ object Types {
   type UTF8Map = Map[UTF8MapKey, ZeroCopyUTF8String]
 
   val emptyUTF8Map = Map.empty[UTF8MapKey, ZeroCopyUTF8String]
-
-  // TODO: contribute this Ordering back to ByteVector
-  // Assumes unsigned comparison, big endian, meaning that the first byte in a vector
-  // is the most significant one.
-  // Compares byte by byte, if all bytes equal up to the min length for both, then lengths are compared
-  implicit object BigEndianByteVectorOrdering extends Ordering[ByteVector] {
-    def compare(x: ByteVector, y: ByteVector): Int = {
-      val minLen = Math.min(x.length, y.length)
-      for { i <- 0 until minLen optimized } {
-        val byteCompare = (x(i) & 0x00ff) compare (y(i) & 0x00ff)
-        if (byteCompare != 0) return byteCompare
-      }
-      x.length compare y.length
-    }
-  }
 }
 
 // database is like Cassandra keyspace, or HiveMetaStore/RDBMS database - a namespace for tables

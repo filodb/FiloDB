@@ -3,6 +3,7 @@ package filodb.memory.format
 import java.nio.ByteBuffer
 
 import com.kenai.jffi.MemoryIO
+import scalaxy.loops._
 
 object UnsafeUtils {
   val unsafe = scala.concurrent.util.Unsafe.instance
@@ -57,7 +58,7 @@ object UnsafeUtils {
   final def setFloat(obj: Any, offset: Long, f: Float): Unit = unsafe.putFloat(obj, offset, f)
 
   /**
-   * Compares two memory buffers of length numBytes, returns true if they are byte for byte equal
+   * Matches two memory buffers of length numBytes, returns true if they are byte for byte equal
    * Compares long words for speed
    */
   def equate(srcObj: Any, srcOffset: Long, destObj: Any, destOffset: Long, numBytes: Int): Boolean = {
@@ -76,6 +77,7 @@ object UnsafeUtils {
 
   // Comparison of two memories assuming both are word aligned and length is rounded to next word (4 bytes)
   // Also assumes a little-endian (eg Intel) architecture
+  // Returns >0 if src is greater than dest, 0 if equal, <0 if src less than dest.  Can be used for sorts.
   def wordCompare(srcObj: Any, srcOffset: Long, destObj: Any, destOffset: Long, n: Int): Int = {
     import java.lang.Integer.reverseBytes
     var i = 0
@@ -86,5 +88,25 @@ object UnsafeUtils {
       i += 4
     }
     0
+  }
+
+  /**
+   * Compares two memories of arbitrary length, lexicographically, returning <0, 0, or >0
+   */
+  def compare(base1: Any, offset1: Long, numBytes1: Int, base2: Any, offset2: Long, numBytes2: Int): Int = {
+    val minLen = Math.min(numBytes1, numBytes2)
+    val minLenAligned = minLen & -4
+    val wordComp = wordCompare(base1, offset1, base2, offset2, minLenAligned)
+    if (wordComp == 0) {
+      var pointer1 = offset1 + minLenAligned
+      var pointer2 = offset2 + minLenAligned
+      for { i <- minLenAligned until minLen optimized } {
+        val res = getByte(base1, pointer1) - getByte(base2, pointer2)
+        pointer1 += 1
+        pointer2 += 1
+        if (res != 0) return res
+      }
+      return numBytes1 - numBytes2
+    } else wordComp
   }
 }

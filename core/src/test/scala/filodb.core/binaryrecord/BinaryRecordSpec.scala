@@ -4,7 +4,6 @@ import java.io.{ByteArrayInputStream, ByteArrayOutputStream, ObjectInputStream, 
 import java.sql.Timestamp
 
 import org.scalatest.{FunSpec, Matchers}
-import scodec.bits.ByteVector
 
 import filodb.core.Types._
 import filodb.memory.format.{SeqRowReader, TupleRowReader, ZeroCopyUTF8String}
@@ -114,19 +113,6 @@ class BinaryRecordSpec extends FunSpec with Matchers {
     val binRec2 = BinaryRecord(schema4, binRec1.bytes)
     binRec2 should equal (binRec1)
     binRec2.as[UTF8Map](1) should equal (map1)
-  }
-
-  it("should produce sortable ByteArrays from BinaryRecords") {
-    val binRec1 = BinaryRecord(schema2_is, reader2)
-    val reader5 = TupleRowReader((Some(1234), Some("two3")))
-    val binRec2 = BinaryRecord(schema2_is, reader5)
-    val reader6 = TupleRowReader((Some(-10), Some("one-two-three")))
-    val binRec3 = BinaryRecord(schema2_is, reader6)
-
-    import filodb.core.Types._
-
-    ByteVector(binRec1.toSortableBytes()) should be < (ByteVector(binRec2.toSortableBytes()))
-    ByteVector(binRec1.toSortableBytes()) should be > (ByteVector(binRec3.toSortableBytes()))
   }
 
   it("should serialize and deserialize RecordSchema and BinaryRecordWrapper") {

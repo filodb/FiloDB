@@ -3,6 +3,8 @@ package filodb.memory.format
 import net.jpountz.xxhash.XXHashFactory
 import scalaxy.loops._
 
+import filodb.memory.{MemFactory, UTF8StringMedium}
+
 /**
  * Essentially like a (void *) pointer to an untyped binary blob which supports very basic operations.
  * Allows us to do zero-copy comparisons and other ops.
@@ -44,6 +46,16 @@ trait ZeroCopyBinary extends Ordered[ZeroCopyBinary] {
     val newArray = new Array[Byte](numBytes)
     copyTo(newArray, UnsafeUtils.arayOffset)
     newArray
+  }
+
+  // Temporary: convert to a UTF8StringMedium
+  final def toUTF8StringMedium(factory: MemFactory): UTF8StringMedium = {
+    require(numBytes <= 65534)
+    val (newBase, newOffset, _) = factory.allocate(numBytes + 2)
+    require(newBase == UnsafeUtils.ZeroPointer, s"Native memory was not allocated, you used factory $factory")
+    UnsafeUtils.unsafe.copyMemory(base, offset, newBase, newOffset + 2, numBytes)
+    UnsafeUtils.setShort(newBase, newOffset, numBytes.toShort)
+    new UTF8StringMedium(newOffset)
   }
 
   /**
@@ -103,6 +115,7 @@ object ZeroCopyBinary {
 final class ZeroCopyUTF8String(val base: Any, val offset: Long, val numBytes: Int)
 extends ZeroCopyBinary {
   import ZeroCopyUTF8String._
+  import filodb.memory.UTF8String._
 
   final def asNewString: String = new String(asNewByteArray)
   override def toString: String = asNewString
@@ -214,21 +227,6 @@ object ZeroCopyUTF8String {
   //scalastyle:on
 
   final def isNA(utf8: ZeroCopyUTF8String): Boolean = utf8.base == NA.base
-
-  val bytesOfCodePointInUTF8 = Array(2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
-    2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
-    3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
-    4, 4, 4, 4, 4, 4, 4, 4,
-    5, 5, 5, 5,
-    6, 6)
-
-  /**
-   * Returns the number of bytes for a code point with the first byte as `b`
-   */
-  def numBytesForFirstByte(b: Byte): Int = {
-    val offset = (b & 0xFF) - 192;
-    if (offset >= 0) bytesOfCodePointInUTF8(offset) else 1
-  }
 
   implicit class StringToUTF8(str: String) {
     def utf8: ZeroCopyUTF8String = ZeroCopyUTF8String(str)

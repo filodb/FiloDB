@@ -1,18 +1,16 @@
 classDiagram
-RecordSchema *-- Field
+RecordBuilder o-- RecordSchema
+RecordBuilder *-- RecordContainer
+RecordBuilder : startNewRecord()
+RecordBuilder : addLong()
+RecordBuilder : addDouble()
+RecordBuilder : endRecord()
+RecordComparator o-- RecordSchema
+RecordComparator : partitionMatch()
+RecordComparator : buildPartKeyFromIngest()
+RecordContainer : consumeRecords()
+RecordSchema : Seq[ColumnType] columnTypes
 RecordSchema : getInt()
-RecordSchema : utf8StringPointer()
-RecordSchema <|-- IngestionRecordSchema
-IngestionRecordSchema : Dataset dataset
-IngestionRecordSchema : partitionHashCode()
-IngestionRecordSchema : comparePartitionKeyFields()
-Field <|-- IntField
-Field <|-- DoubleField
-Field <|-- LongField
-Field <|-- MapField
-Field <|-- UTF8Field
-BinaryRecordBuilder o-- RecordSchema
-BinaryRecordBuilder : startNewRecord()
-BinaryRecordBuilder : addLong()
-BinaryRecordBuilder : addDouble()
-BinaryRecordBuilder : endRecord()
+RecordSchema : getLong()
+RecordSchema : getDouble()
+RecordSchema : partitionHashCode()
