@@ -36,7 +36,7 @@ class SelectRawPartitionsExecSpec extends FunSpec with Matchers with ScalaFuture
   }
   val samples = tuples.map { t =>
     val m = new TransientRow()
-      m.set(t._1, t._2)
+    m.set(t._1, t._2)
     IngestRecord(partKey, m, 0)
   }
   implicit val execTimeout = 5.seconds
@@ -62,10 +62,10 @@ class SelectRawPartitionsExecSpec extends FunSpec with Matchers with ScalaFuture
     val resp = execPlan.execute(memStore, timeseriesDataset, queryConfig).runAsync.futureValue
     val result = resp.asInstanceOf[QueryResult]
     result.result.size shouldEqual 1
-    val partKeyRead = result.result(0).key.labelValues.map(lv => (lv.label.asNewString, lv.value.asNewString)).toMap
+    val partKeyRead = result.result(0).key.labelValues.map(lv => (lv._1.asNewString, lv._2.asNewString))
     partKeyRead shouldEqual partKeyLabelValues
     val dataRead = result.result(0).rows.map(r=>(r.getLong(0), r.getDouble(1))).toList
-    dataRead.toSet shouldEqual tuples.toSet // TODO find out why chunks are not in time order
+    dataRead.sorted shouldEqual tuples.sorted // TODO see why rows are not in order
   }
 
   it ("should read raw samples from Memstore using IntervalSelector") {
@@ -84,7 +84,7 @@ class SelectRawPartitionsExecSpec extends FunSpec with Matchers with ScalaFuture
     result.result.size shouldEqual 1
     val dataRead = result.result(0).rows.map(r=>(r.getLong(0), r.getDouble(1))).toList
     dataRead shouldEqual tuples.take(11)
-    val partKeyRead = result.result(0).key.labelValues.map(lv => (lv.label.asNewString, lv.value.asNewString)).toMap
+    val partKeyRead = result.result(0).key.labelValues.map(lv => (lv._1.asNewString, lv._2.asNewString))
     partKeyRead shouldEqual partKeyLabelValues
   }
 
@@ -102,7 +102,7 @@ class SelectRawPartitionsExecSpec extends FunSpec with Matchers with ScalaFuture
     val resp = execPlan.execute(memStore, timeseriesDataset, queryConfig).runAsync.futureValue
     val result = resp.asInstanceOf[QueryResult]
     result.result.size shouldEqual 1
-    val partKeyRead = result.result(0).key.labelValues.map(lv => (lv.label.asNewString, lv.value.asNewString)).toMap
+    val partKeyRead = result.result(0).key.labelValues.map(lv => (lv._1.asNewString, lv._2.asNewString))
     partKeyRead shouldEqual partKeyLabelValues
     val dataRead = result.result(0).rows.map(r=>(r.getLong(0), r.getDouble(1))).toList
     dataRead.map(_._1) shouldEqual (start to end).by(step)

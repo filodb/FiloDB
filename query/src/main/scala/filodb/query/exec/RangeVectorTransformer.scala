@@ -5,7 +5,7 @@ import monix.reactive.Observable
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.Dataset
 import filodb.core.query._
-import filodb.query.{AggregationOperator, BinaryOperator, InstantFunctionId, QueryConfig}
+import filodb.query.{BinaryOperator, InstantFunctionId, QueryConfig}
 
 /**
   * Implementations can provide ways to transform RangeVector
@@ -81,54 +81,4 @@ final case class ScalarOperationMapper(operator: BinaryOperator,
             sourceSchema: ResultSchema): Observable[RangeVector] = ???
 
   // TODO all operation defs go here and get invoked from mapRangeVector
-}
-
-/**
-  * Performs aggregation operation across RangeVectors within a shard
-  */
-final case class AggregateMapReduce(aggrOp: AggregationOperator,
-                                    aggrParams: Seq[Any],
-                                    without: Seq[String],
-                                    by: Seq[String]) extends RangeVectorTransformer {
-  require(without == Nil || by == Nil, "Cannot specify both without and by clause")
-
-  protected[exec] def args: String =
-    s"aggrOp=$aggrOp, aggrParams=$aggrParams, without=$without, by=$by"
-  val aggregator = RowAggregator(aggrOp, aggrParams)
-
-  def apply(source: Observable[RangeVector],
-            queryConfig: QueryConfig,
-            limit: Int,
-            sourceSchema: ResultSchema): Observable[RangeVector] = {
-    def grouping(rv: RangeVector): RangeVectorKey = {
-      val groupBy = if (by.nonEmpty) rv.key.labelValues.filter(lv => by.contains(lv.label.asNewString))
-                    else if (without.nonEmpty) rv.key.labelValues.filterNot(lv =>without.contains(lv.label.asNewString))
-                    else Nil
-      CustomRangeVectorKey(groupBy)
-    }
-    RangeVectorAggregator.mapReduce(aggrOp, aggrParams, skipMapPhase = false, source, grouping)
-  }
-
-  override def schema(dataset: Dataset, source: ResultSchema): ResultSchema = {
-    // TODO we assume that second column needs to be aggregated. Other dataset types need to be accommodated.
-    aggregator.reductionSchema(source)
-  }
-}
-
-final case class AggregatePresenter(aggrOp: AggregationOperator,
-                                   aggrParams: Seq[Any]) extends RangeVectorTransformer {
-
-  protected[exec] def args: String = s"aggrOp=$aggrOp, aggrParams=$aggrParams"
-  val aggregator = RowAggregator(aggrOp, aggrParams)
-
-  def apply(source: Observable[RangeVector],
-            queryConfig: QueryConfig,
-            limit: Int,
-            sourceSchema: ResultSchema): Observable[RangeVector] = {
-    RangeVectorAggregator.present(aggrOp, aggrParams, source, limit)
-  }
-
-  override def schema(dataset: Dataset, source: ResultSchema): ResultSchema = {
-    aggregator.presentationSchema(source)
-  }
 }

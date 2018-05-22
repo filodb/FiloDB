@@ -9,7 +9,7 @@ import monix.reactive.Observable
 import org.scalatest.{FunSpec, Matchers}
 import org.scalatest.concurrent.ScalaFutures
 
-import filodb.core.query.{CustomRangeVectorKey, LabelValue, RangeVector, RangeVectorKey}
+import filodb.core.query.{CustomRangeVectorKey, RangeVector, RangeVectorKey}
 import filodb.memory.format.{RowReader, ZeroCopyUTF8String}
 import filodb.query.{AggregationOperator, QueryConfig}
 
@@ -22,9 +22,9 @@ class AggrOverRangeVectorsSpec extends FunSpec with Matchers with ScalaFutures {
 
   it ("should work without grouping") {
     val ignoreKey = CustomRangeVectorKey(
-      Seq(LabelValue(ZeroCopyUTF8String("ignore"), ZeroCopyUTF8String("ignore"))))
+      Map(ZeroCopyUTF8String("ignore") -> ZeroCopyUTF8String("ignore")))
 
-    val noKey = CustomRangeVectorKey(Nil)
+    val noKey = CustomRangeVectorKey(Map.empty)
     def noGrouping(rv: RangeVector): RangeVectorKey = noKey
 
     val samples: Array[RangeVector] = Array.fill(100)(new RangeVector {
@@ -109,9 +109,9 @@ class AggrOverRangeVectorsSpec extends FunSpec with Matchers with ScalaFutures {
 
   it ("should ignore NaN while aggregating") {
     val ignoreKey = CustomRangeVectorKey(
-      Seq(LabelValue(ZeroCopyUTF8String("ignore"), ZeroCopyUTF8String("ignore"))))
+      Map(ZeroCopyUTF8String("ignore") -> ZeroCopyUTF8String("ignore")))
 
-    val noKey = CustomRangeVectorKey(Nil)
+    val noKey = CustomRangeVectorKey(Map.empty)
     def noGrouping(rv: RangeVector): RangeVectorKey = noKey
 
     val samples: Array[RangeVector] = Array(

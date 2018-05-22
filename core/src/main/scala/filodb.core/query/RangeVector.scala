@@ -15,7 +15,7 @@ import filodb.memory.format.{vectors => bv, _}
   * Identifier for a single RangeVector
   */
 trait RangeVectorKey extends java.io.Serializable {
-  def labelValues: Seq[LabelValue]
+  def labelValues: Map[UTF8Str, UTF8Str]
   def sourceShards: Seq[Int]
   override def toString: String = s"/shard:${sourceShards.mkString(",")}/$labelValues"
 }
@@ -27,42 +27,38 @@ final case class PartitionRangeVectorKey(partKey: BinaryRecord,
                                     partKeyCols: Seq[ColumnInfo],
                                     sourceShard: Int) extends RangeVectorKey {
   override def sourceShards: Seq[Int] = Seq(sourceShard)
-  def labelValues: Seq[LabelValue] = {
+  def labelValues: Map[UTF8Str, UTF8Str] = {
     partKeyCols.zipWithIndex.flatMap { case (c, pos) =>
       c.colType match {
-        case StringColumn => Seq(LabelValue(UTF8Str(c.name), partKey.filoUTF8String(pos)))
-        case IntColumn    => Seq(LabelValue(UTF8Str(c.name), UTF8Str(partKey.getInt(pos).toString)))
-        case LongColumn   => Seq(LabelValue(UTF8Str(c.name), UTF8Str(partKey.getLong(pos).toString)))
-        case MapColumn    => partKey.as[Types.UTF8Map](pos).map { case (k, v) => LabelValue(k, v) }
+        case StringColumn => Seq(UTF8Str(c.name) -> partKey.filoUTF8String(pos))
+        case IntColumn    => Seq(UTF8Str(c.name) -> UTF8Str(partKey.getInt(pos).toString))
+        case LongColumn   => Seq(UTF8Str(c.name) -> UTF8Str(partKey.getLong(pos).toString))
+        case MapColumn    => partKey.as[Types.UTF8Map](pos)
         case _            => throw new UnsupportedOperationException("Not supported yet")
       }
-    }
+    }.toMap
   }
 }
 
-final case class CustomRangeVectorKey(labelValues: Seq[LabelValue]) extends RangeVectorKey {
+final case class CustomRangeVectorKey(labelValues: Map[UTF8Str, UTF8Str]) extends RangeVectorKey {
   val sourceShards: Seq[Int] = Nil
 }
 
 object CustomRangeVectorKey {
 
-  def fromZcUtf8(str: ZeroCopyUTF8String): CustomRangeVectorKey = {
+  def fromZcUtf8(str: UTF8Str): CustomRangeVectorKey = {
     CustomRangeVectorKey(str.asNewString.split("\u03BC").map(_.split("\u03C0")).filter(_.length == 2).map { lv =>
-      LabelValue(ZeroCopyUTF8String(lv(0)), ZeroCopyUTF8String(lv(1)))
-    })
+      ZeroCopyUTF8String(lv(0)) -> ZeroCopyUTF8String(lv(1))
+    }.toMap)
   }
 
-  def toZcUtf8(rvk: RangeVectorKey): ZeroCopyUTF8String = {
+  def toZcUtf8(rvk: RangeVectorKey): UTF8Str = {
     // TODO can we optimize this further? Can we use a binary field in the row-reader ?
-    val str = rvk.labelValues.map(lv=>s"${lv.label.asNewString}\u03C0${lv.value.asNewString}").sorted.mkString("\u03BC")
-    ZeroCopyUTF8String(str)
+    val str = rvk.labelValues.toSeq.map(lv=>s"${lv._1.asNewString}\u03C0${lv._2.asNewString}").sorted.mkString("\u03BC")
+    UTF8Str(str)
   }
 
-  val emptyAsZcUtf8 = toZcUtf8(CustomRangeVectorKey(Nil))
-}
-
-case class LabelValue(label: UTF8Str, value: UTF8Str) {
-  override def toString: String = s"$label=$value"
+  val emptyAsZcUtf8 = toZcUtf8(CustomRangeVectorKey(Map.empty))
 }
 
 /**
@@ -109,7 +105,7 @@ final case class RawDataRangeVector(key: RangeVectorKey,
     }
   }
 
-  def rows: Iterator[RowReader] = {
+  val rows: Iterator[RowReader] = {
     chunkMethod match {
       case range: RowKeyChunkScan => rangedIterator(range.startkey, range.endkey)
       case _                      => readers.flatMap(_.rowIterator())
@@ -152,12 +148,12 @@ object SerializableRangeVector {
     var numRows = 0
     rows.take(limit).foreach { row =>
       numRows += 1
-      for { i <- 0 until vectors.size } {
+      for { i <- vectors.indices } {
         vectors(i).addFromReader(row, i)
       }
     }
     // TODO need to measure if optimize really helps or has a negative effect
-    new SerializableRangeVector(rv.key, vectors.map(_.asInstanceOf[BinaryVector[_]]), numRows)
+    new SerializableRangeVector(rv.key, vectors.map(_.optimize(memFactory)), numRows)
   }
 }
 

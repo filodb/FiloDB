@@ -133,44 +133,50 @@ object AggregationOperator extends Enum[AggregationOperator] {
 
 }
 
-sealed trait BinaryOperator extends EnumEntry
+sealed abstract class BinaryOperator extends EnumEntry
+
+sealed class MathOperator extends BinaryOperator
+
+sealed class SetOperator extends BinaryOperator
+
+sealed class ComparisonOperator extends BinaryOperator
 
 object BinaryOperator extends Enum[BinaryOperator] {
   val values = findValues
 
-  case object SUB extends BinaryOperator
+  case object SUB extends MathOperator
 
-  case object ADD extends BinaryOperator
+  case object ADD extends MathOperator
 
-  case object MUL extends BinaryOperator
+  case object MUL extends MathOperator
 
-  case object MOD extends BinaryOperator
+  case object MOD extends MathOperator
 
-  case object DIV extends BinaryOperator
+  case object DIV extends MathOperator
 
-  case object POW extends BinaryOperator
+  case object POW extends MathOperator
 
-  case object LAND extends BinaryOperator
+  case object LAND extends SetOperator
 
-  case object LOR extends BinaryOperator
+  case object LOR extends SetOperator
 
-  case object LUnless extends BinaryOperator
+  case object LUnless extends SetOperator
 
-  case object EQL extends BinaryOperator
+  case object EQL extends ComparisonOperator
 
-  case object NEQ extends BinaryOperator
+  case object NEQ extends ComparisonOperator
 
-  case object LTE extends BinaryOperator
+  case object LTE extends ComparisonOperator
 
-  case object LSS extends BinaryOperator
+  case object LSS extends ComparisonOperator
 
-  case object GTE extends BinaryOperator
+  case object GTE extends ComparisonOperator
 
-  case object GTR extends BinaryOperator
+  case object GTR extends ComparisonOperator
 
-  case object EQLRegex extends BinaryOperator
+  case object EQLRegex extends BinaryOperator // FIXME when implemented
 
-  case object NEQRegex extends BinaryOperator
+  case object NEQRegex extends BinaryOperator // FIXME when implemented
 
 
 }

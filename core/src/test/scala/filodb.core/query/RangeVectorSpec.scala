@@ -3,7 +3,7 @@ package filodb.core.query
 import org.scalatest.{FunSpec, Matchers}
 
 import filodb.core.metadata.Column.ColumnType
-import filodb.memory.format.{RowReader, SeqRowReader}
+import filodb.memory.format.{RowReader, SeqRowReader, ZeroCopyUTF8String}
 
 
 class RangeVectorSpec  extends FunSpec with Matchers {
@@ -19,7 +19,7 @@ class RangeVectorSpec  extends FunSpec with Matchers {
         new SeqRowReader(Seq[Any](t._1, t._2))
       }.iterator
       override def key: RangeVectorKey = new RangeVectorKey {
-        def labelValues: Seq[LabelValue] = Seq()
+        def labelValues: Map[ZeroCopyUTF8String, ZeroCopyUTF8String] = Map.empty
         def sourceShards: Seq[Int] = Seq(0)
       }
     }

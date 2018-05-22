@@ -332,8 +332,8 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
     val rangeVectors = rangeVectorObs.toListL.runAsync.futureValue
 
     rangeVectors should have length (1)
-    rangeVectors.head.key.labelValues.head.label.asNewString shouldEqual "MonthYear"
-    rangeVectors.head.key.labelValues.head.value.asNewString shouldEqual "197902"
+    rangeVectors.head.key.labelValues.head._1.asNewString shouldEqual "MonthYear"
+    rangeVectors.head.key.labelValues.head._2.asNewString shouldEqual "197902"
     rangeVectors.head.rows.map(_.getInt(0)).sum should equal (22)
     rangeVectors.head.key.sourceShards shouldEqual Seq(0)
   }

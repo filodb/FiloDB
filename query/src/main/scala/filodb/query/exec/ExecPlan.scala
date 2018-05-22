@@ -171,11 +171,11 @@ abstract class NonLeafExecPlan extends ExecPlan {
   /**
     * For now we do not support cross-dataset queries
     */
-  final val dataset: DatasetRef = children.head.dataset
+  final def dataset: DatasetRef = children.head.dataset
 
-  final val submitTime: Long = children.head.submitTime
+  final def submitTime: Long = children.head.submitTime
 
-  final val limit: Int = children.head.limit
+  final def limit: Int = children.head.limit
 
   /**
     * Being a non-leaf node, this implementation encompasses the logic
@@ -207,17 +207,5 @@ abstract class NonLeafExecPlan extends ExecPlan {
     */
   protected def compose(childResponses: Observable[QueryResponse],
                         queryConfig: QueryConfig): Observable[RangeVector]
-
-  /**
-    * Helper method to extract results from child responses
-    * @param resp
-    * @return
-    */
-  final protected def toResults(resp: Observable[QueryResponse]): Observable[RangeVector] = {
-    resp.flatMap {
-      case QueryResult(_, _, result) => Observable.fromIterable(result)
-      case QueryError(_, ex)         => throw ex
-    }
-  }
 
 }

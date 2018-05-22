@@ -14,7 +14,7 @@ import filodb.core.memstore._
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.store._
 import filodb.memory._
-import filodb.memory.format.{RowReader, SeqRowReader}
+import filodb.memory.format.{RowReader, SeqRowReader, ZeroCopyUTF8String}
 import filodb.query.{QueryResult => QueryResult2, _}
 
 object SerializationSpecConfig extends ActorSpecConfig {
@@ -274,8 +274,8 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
     val tuples = (numRawSamples until 0).by(-1).map(n => (now - n * reportingInterval, n.toDouble))
 
     val rvKey = new RangeVectorKey {
-      def labelValues: Seq[LabelValue] = Seq()
       def sourceShards: Seq[Int] = Seq(0)
+      def labelValues: Map[ZeroCopyUTF8String, ZeroCopyUTF8String] = Map.empty
     }
 
     val rowsIterator = tuples.map { t =>

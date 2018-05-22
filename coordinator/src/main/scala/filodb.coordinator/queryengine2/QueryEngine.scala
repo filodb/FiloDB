@@ -122,7 +122,7 @@ class QueryEngine(dataset: Dataset,
     val lhs = walkLogicalPlanTree(lp.lhs, queryId, submitTime, options)
     val rhs = walkLogicalPlanTree(lp.rhs, queryId, submitTime, options)
     val targetActor = pickDispatcher(lhs ++ rhs)
-    Seq(BinaryJoinExec(queryId, targetActor, lhs, rhs, lp.operator, lp.on, lp.ignoring))
+    Seq(BinaryJoinExec(queryId, targetActor, lhs, rhs, lp.operator, lp.cardinality, lp.on, lp.ignoring))
   }
 
   private def materializeAggregate(queryId: String,

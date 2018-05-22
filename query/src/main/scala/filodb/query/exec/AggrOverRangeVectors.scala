@@ -5,11 +5,90 @@ import scala.collection.mutable
 import monix.reactive.Observable
 
 import filodb.core.metadata.Column.ColumnType
+import filodb.core.metadata.Dataset
 import filodb.core.query._
 import filodb.memory.MemFactory
-import filodb.memory.format.{ vectors => bv, BinaryAppendableVector, BinaryVector, RowReader, ZeroCopyUTF8String}
-import filodb.query.AggregationOperator
+import filodb.memory.format.{vectors => bv, BinaryAppendableVector, BinaryVector, RowReader, ZeroCopyUTF8String}
+import filodb.query._
 import filodb.query.AggregationOperator._
+
+/**
+  * Reduce combined aggregates from children. Can be applied in a
+  * hierarchical manner multiple times to arrive at result.
+  */
+final case class ReduceAggregateExec(id: String,
+                                     dispatcher: PlanDispatcher,
+                                     childAggregates: Seq[ExecPlan],
+                                     aggrOp: AggregationOperator,
+                                     aggrParams: Seq[Any]) extends NonLeafExecPlan {
+  def children: Seq[ExecPlan] = childAggregates
+
+  protected def schemaOfCompose(dataset: Dataset): ResultSchema = childAggregates.head.schema(dataset)
+
+  protected def args: String = s"aggrOp=$aggrOp, aggrParams=$aggrParams"
+
+  protected def compose(childResponses: Observable[QueryResponse],
+                        queryConfig: QueryConfig): Observable[RangeVector] = {
+    val results = childResponses.flatMap {
+        case QueryResult(_, _, result) => Observable.fromIterable(result)
+        case QueryError(_, ex)         => throw ex
+    }
+    RangeVectorAggregator.mapReduce(aggrOp, aggrParams, skipMapPhase = true, results, rv => rv.key)
+  }
+}
+
+/**
+  * Performs aggregation operation across RangeVectors within a shard
+  */
+final case class AggregateMapReduce(aggrOp: AggregationOperator,
+                                    aggrParams: Seq[Any],
+                                    without: Seq[String],
+                                    by: Seq[String]) extends RangeVectorTransformer {
+  require(without == Nil || by == Nil, "Cannot specify both without and by clause")
+  val withoutLabels = without.map(ZeroCopyUTF8String(_)).toSet
+  val byLabels = by.map(ZeroCopyUTF8String(_)).toSet
+
+  protected[exec] def args: String =
+    s"aggrOp=$aggrOp, aggrParams=$aggrParams, without=$without, by=$by"
+  val aggregator = RowAggregator(aggrOp, aggrParams)
+
+  def apply(source: Observable[RangeVector],
+            queryConfig: QueryConfig,
+            limit: Int,
+            sourceSchema: ResultSchema): Observable[RangeVector] = {
+    def grouping(rv: RangeVector): RangeVectorKey = {
+      val groupBy: Map[ZeroCopyUTF8String, ZeroCopyUTF8String] =
+        if (by.nonEmpty) rv.key.labelValues.filter(lv => byLabels.contains(lv._1))
+        else if (without.nonEmpty) rv.key.labelValues.filterNot(lv =>withoutLabels.contains(lv._1))
+        else Map.empty
+      CustomRangeVectorKey(groupBy)
+    }
+    RangeVectorAggregator.mapReduce(aggrOp, aggrParams, skipMapPhase = false, source, grouping)
+  }
+
+  override def schema(dataset: Dataset, source: ResultSchema): ResultSchema = {
+    // TODO we assume that second column needs to be aggregated. Other dataset types need to be accommodated.
+    aggregator.reductionSchema(source)
+  }
+}
+
+final case class AggregatePresenter(aggrOp: AggregationOperator,
+                                    aggrParams: Seq[Any]) extends RangeVectorTransformer {
+
+  protected[exec] def args: String = s"aggrOp=$aggrOp, aggrParams=$aggrParams"
+  val aggregator = RowAggregator(aggrOp, aggrParams)
+
+  def apply(source: Observable[RangeVector],
+            queryConfig: QueryConfig,
+            limit: Int,
+            sourceSchema: ResultSchema): Observable[RangeVector] = {
+    RangeVectorAggregator.present(aggrOp, aggrParams, source, limit)
+  }
+
+  override def schema(dataset: Dataset, source: ResultSchema): ResultSchema = {
+    aggregator.presentationSchema(source)
+  }
+}
 
 /**
   * Aggregation has three phases:
@@ -58,12 +137,12 @@ object RangeVectorAggregator {
                      rowAgg: RowAggregator,
                      skipMapPhase: Boolean,
                      grouping: RangeVector => RangeVectorKey): Map[RangeVectorKey, Iterator[rowAgg.AggHolderType]] = {
+    var acc = rowAgg.zero
+    val mapInto = rowAgg.newRowToMapInto
     rvs.groupBy(grouping).mapValues { rvs =>
       new Iterator[rowAgg.AggHolderType] {
-        var acc = rowAgg.zero
         val rowIterators = rvs.map(_.rows)
         val rvkStrings = rvs.map(rv => CustomRangeVectorKey.toZcUtf8(rv.key))
-        val mapInto = rowAgg.newRowToMapInto
         def hasNext: Boolean = rowIterators.forall(_.hasNext)
         def next(): rowAgg.AggHolderType = {
           acc.resetToZero()
@@ -326,7 +405,6 @@ object AvgRowAggregator extends RowAggregator {
   * Present: The top/bottom-k samples for each timestamp are placed into distinct RangeVectors for each RangeVectorKey
   *         Materialization is needed here, because it cannot be done lazily.
   */
-
 class TopBottomKRowAggregator(k: Int, bottomK: Boolean) extends RowAggregator {
 
   private val numRowReaderColumns = 1 + k*2 // one for timestamp, two columns for each top-k
