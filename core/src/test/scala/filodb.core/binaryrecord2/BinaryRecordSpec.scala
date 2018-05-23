@@ -249,7 +249,7 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
 
       def addRec(n: Int): Long = {
         val pairs = new java.util.ArrayList((labels + ("n" -> n.toString)).toSeq.asJava)
-        val hashes = builder.sortAndComputeHashes(pairs)
+        val hashes = RecordBuilder.sortAndComputeHashes(pairs)
 
         builder.startNewRecord()
         val ts = System.currentTimeMillis
@@ -389,7 +389,7 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
     it("should sortAndComputeHashes") {
       val builder = new RecordBuilder(MemFactory.onHeapFactory, schema2)
       val pairs = new java.util.ArrayList(labels.toSeq.asJava)
-      val hashes = builder.sortAndComputeHashes(pairs)
+      val hashes = RecordBuilder.sortAndComputeHashes(pairs)
       hashes.size shouldEqual labels.size
       pairs.asScala.map(_._1) shouldEqual Seq("__name__", "dc", "instance", "job")
       hashes.toSet.size shouldEqual 4
@@ -398,33 +398,33 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
     it("should combine hash but only if required keys included") {
       val builder = new RecordBuilder(MemFactory.onHeapFactory, schema2)
       val pairs = new java.util.ArrayList(labels.toSeq.asJava)
-      val hashes = builder.sortAndComputeHashes(pairs)
+      val hashes = RecordBuilder.sortAndComputeHashes(pairs)
 
-      builder.combineHashIncluding(pairs, hashes, Set("job")) shouldEqual Some(7*31 + hashes.last)
-      builder.combineHashIncluding(pairs, hashes, Set("job", "dc")) shouldEqual Some((7*31 + hashes(1))*31 + hashes.last)
+      RecordBuilder.combineHashIncluding(pairs, hashes, Set("job")) shouldEqual Some(7*31 + hashes.last)
+      RecordBuilder.combineHashIncluding(pairs, hashes, Set("job", "dc")) shouldEqual Some((7*31 + hashes(1))*31 + hashes.last)
 
-      builder.combineHashIncluding(pairs, hashes, Set("job", "rack")) shouldEqual None
-      builder.combineHashIncluding(pairs, hashes, Set("__name_")) shouldEqual None
-      builder.combineHashIncluding(pairs, hashes, Set("instances", "job")) shouldEqual None
+      RecordBuilder.combineHashIncluding(pairs, hashes, Set("job", "rack")) shouldEqual None
+      RecordBuilder.combineHashIncluding(pairs, hashes, Set("__name_")) shouldEqual None
+      RecordBuilder.combineHashIncluding(pairs, hashes, Set("instances", "job")) shouldEqual None
 
-      builder.combineHashIncluding(pairs, hashes, Set.empty) shouldEqual Some(7)
+      RecordBuilder.combineHashIncluding(pairs, hashes, Set.empty) shouldEqual Some(7)
     }
 
     it("should combine hash excluding certain keys") {
       val builder = new RecordBuilder(MemFactory.onHeapFactory, schema2)
       val pairs = new java.util.ArrayList(labels.toSeq.asJava)
-      val hashes = builder.sortAndComputeHashes(pairs)
+      val hashes = RecordBuilder.sortAndComputeHashes(pairs)
 
-      val hashAll = builder.combineHashExcluding(pairs, hashes, Set.empty)
+      val hashAll = RecordBuilder.combineHashExcluding(pairs, hashes, Set.empty)
 
       // no such key, hash everything
-      builder.combineHashExcluding(pairs, hashes, Set("__name_")) shouldEqual hashAll
-      builder.combineHashExcluding(pairs, hashes, Set("__name__")) should not equal (hashAll)
+      RecordBuilder.combineHashExcluding(pairs, hashes, Set("__name_")) shouldEqual hashAll
+      RecordBuilder.combineHashExcluding(pairs, hashes, Set("__name__")) should not equal (hashAll)
 
       val pairs2 = new java.util.ArrayList((labels + ("le" -> "0.25")).toSeq.asJava)
-      val hashes2 = builder.sortAndComputeHashes(pairs2)
+      val hashes2 = RecordBuilder.sortAndComputeHashes(pairs2)
 
-      builder.combineHashExcluding(pairs2, hashes2, Set("le")) shouldEqual hashAll
+      RecordBuilder.combineHashExcluding(pairs2, hashes2, Set("le")) shouldEqual hashAll
     }
   }
 }

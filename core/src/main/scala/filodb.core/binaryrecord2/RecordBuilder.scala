@@ -31,6 +31,7 @@ final class RecordBuilder(memFactory: MemFactory,
                           private var maxOffset: Long = -1L,
                           private var mapOffset: Long = -1L,
                           private var recHash: Int = -1) extends StrictLogging {
+
   import RecordBuilder._
   import UnsafeUtils._
   require(containerSize >= RecordBuilder.MinContainerSize, s"RecordBuilder.containerSize < minimum")
@@ -195,69 +196,6 @@ final class RecordBuilder(memFactory: MemFactory,
 
   final def align(offset: Long): Long = (offset + 3) & ~3
 
-  /**
-   * == Auxiliary functions to compute hashes. ==
-   */
-
-  /**
-   * Sorts an incoming list of key-value pairs and then computes a hash value
-   * for each pair.  The output can be fed into the combineHash methods to produce an overall hash.
-   * @param pairs an unsorted list of key-value pairs.  Will be mutated and sorted.
-   */
-  final def sortAndComputeHashes(pairs: java.util.List[(String, String)]): Array[Int] = {
-    pairs.sort(stringPairComparator)
-    val hashes = new Array[Int](pairs.size)
-    for { i <- 0 until pairs.size optimized } {
-      val (k, v) = pairs.get(i)
-      hashes(i) = combineHash(k.hashCode, v.hashCode)
-    }
-    hashes
-  }
-
-  @inline
-  final def combineHash(hash1: Int, hash2: Int): Int = 31 * hash1 + hash2
-
-  /**
-   * Combines the hashes from sortAndComputeHashes, excluding certain keys, into an overall hash value.
-   * @param sortedPairs sorted pairs of byte key values, from sortAndComputeHashes
-   * @param hashes the output from sortAndComputeHashes
-   * @param excludeKeys set of String keys to exclude
-   */
-  def combineHashExcluding(sortedPairs: java.util.List[(String, String)],
-                           hashes: Array[Int],
-                           excludeKeys: Set[String]): Int = {
-    var hash = 7
-    for { i <- 0 until sortedPairs.size optimized } {
-      if (!(excludeKeys contains sortedPairs.get(i)._1))
-        hash = combineHash(hash, hashes(i))
-    }
-    hash
-  }
-
-  /**
-   * Combines the hashes from sortAndComputeHashes, only including certain keys, into an overall hash value.
-   * All the keys from includeKeys must be present.
-   * @param pairs sorted pairs of byte key values, from sortAndComputeHashes
-   * @param hashes the output from sortAndComputeHashes
-   * @param includeKeys the keys to include
-   * @return Some(hash) if all the keys in includeKeys were present, or None
-   */
-  def combineHashIncluding(pairs: java.util.List[(String, String)],
-                           hashes: Array[Int],
-                           includeKeys: Set[String]): Option[Int] = {
-    var hash = 7
-    var numIncluded = 0
-    var index = 0
-    while (index < pairs.size && numIncluded < includeKeys.size) {
-      if (includeKeys contains pairs.get(index)._1) {
-        hash = combineHash(hash, hashes(index))
-        numIncluded += 1
-      }
-      index += 1
-    }
-    if (numIncluded == includeKeys.size) Some(hash) else None
-  }
-
   private def matchBytes(bytes1: Array[Byte], bytes2: Array[Byte]): Boolean =
     bytes1.size == bytes2.size &&
     UnsafeUtils.equate(bytes1, UnsafeUtils.arayOffset, bytes2, UnsafeUtils.arayOffset, bytes1.size)
@@ -365,4 +303,77 @@ object RecordBuilder {
   val stringPairComparator = new java.util.Comparator[(String, String)] {
     def compare(pair1: (String, String), pair2: (String, String)): Int = pair1._1 compare pair2._1
   }
+
+  /**
+    * Make is a convenience factory method to access from java.
+    */
+  def make(memFactory: MemFactory,
+           schema: RecordSchema,
+           containerSize: Int = RecordBuilder.DefaultContainerSize): RecordBuilder = {
+    new RecordBuilder(memFactory, schema, containerSize)
+  }
+
+  /**
+    * == Auxiliary functions to compute hashes. ==
+    */
+
+  /**
+    * Sorts an incoming list of key-value pairs and then computes a hash value
+    * for each pair.  The output can be fed into the combineHash methods to produce an overall hash.
+    * @param pairs an unsorted list of key-value pairs.  Will be mutated and sorted.
+    */
+  final def sortAndComputeHashes(pairs: java.util.List[(String, String)]): Array[Int] = {
+    pairs.sort(stringPairComparator)
+    val hashes = new Array[Int](pairs.size)
+    for { i <- 0 until pairs.size optimized } {
+      val (k, v) = pairs.get(i)
+      hashes(i) = combineHash(k.hashCode, v.hashCode)
+    }
+    hashes
+  }
+
+  @inline
+  final def combineHash(hash1: Int, hash2: Int): Int = 31 * hash1 + hash2
+
+  /**
+    * Combines the hashes from sortAndComputeHashes, excluding certain keys, into an overall hash value.
+    * @param sortedPairs sorted pairs of byte key values, from sortAndComputeHashes
+    * @param hashes the output from sortAndComputeHashes
+    * @param excludeKeys set of String keys to exclude
+    */
+  final def combineHashExcluding(sortedPairs: java.util.List[(String, String)],
+                           hashes: Array[Int],
+                           excludeKeys: Set[String]): Int = {
+    var hash = 7
+    for { i <- 0 until sortedPairs.size optimized } {
+      if (!(excludeKeys contains sortedPairs.get(i)._1))
+        hash = combineHash(hash, hashes(i))
+    }
+    hash
+  }
+
+  /**
+    * Combines the hashes from sortAndComputeHashes, only including certain keys, into an overall hash value.
+    * All the keys from includeKeys must be present.
+    * @param pairs sorted pairs of byte key values, from sortAndComputeHashes
+    * @param hashes the output from sortAndComputeHashes
+    * @param includeKeys the keys to include
+    * @return Some(hash) if all the keys in includeKeys were present, or None
+    */
+  final def combineHashIncluding(pairs: java.util.List[(String, String)],
+                           hashes: Array[Int],
+                           includeKeys: Set[String]): Option[Int] = {
+    var hash = 7
+    var numIncluded = 0
+    var index = 0
+    while (index < pairs.size && numIncluded < includeKeys.size) {
+      if (includeKeys contains pairs.get(index)._1) {
+        hash = combineHash(hash, hashes(index))
+        numIncluded += 1
+      }
+      index += 1
+    }
+    if (numIncluded == includeKeys.size) Some(hash) else None
+  }
+
 }
