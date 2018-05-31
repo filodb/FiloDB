@@ -74,12 +74,15 @@ object KeyFilter {
   }
 
   // NOTE: With Lucene indexing coming, partition filter func is really not needed anymore
+
   /**
    * Creates a filter function that returns boolean given a PartitionKey.
    * @param dataset the Dataset describing the dataset schema
    * @param filters one ColumnFilter per column to filter on.  If multiple filters are desired on that
    *                column they should be combined using And.
    */
+  private def needSomethingHereForDocNotToComplain(): Unit = ???
+
   // def makePartitionFilterFunc(dataset: Dataset,
   //                             filters: Seq[ColumnFilter]): PartitionKey => Boolean = {
   //   val positionsAndFuncs = filters.map { case ColumnFilter(col, filter) =>
