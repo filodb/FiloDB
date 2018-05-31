@@ -9,6 +9,7 @@ import org.joda.time.DateTime
 
 import filodb.core.CompositeReaderOrdering
 import filodb.core.binaryrecord.BinaryRecord
+import filodb.core.binaryrecord2.{RecordSchema}
 import filodb.core.metadata.Column
 import filodb.core.store.{ChunkScanMethod, RowKeyChunkScan}
 import filodb.memory.format.RowReader
@@ -16,8 +17,9 @@ import filodb.memory.format.RowReader
 /**
  * Some basic info about a single Partition
  */
-final case class PartitionInfo(partKey: BinaryRecord, shardNo: Int) {
-  override def toString: String = s"/shard:$shardNo/$partKey"
+final case class PartitionInfo(schema: RecordSchema, base: Array[Byte], offset: Long, shardNo: Int) {
+  def partKeyBytes: Array[Byte] = schema.asByteArray(base, offset)
+  override def toString: String = s"/shard:$shardNo/${schema.stringify(base, offset)}"
 }
 
 /**

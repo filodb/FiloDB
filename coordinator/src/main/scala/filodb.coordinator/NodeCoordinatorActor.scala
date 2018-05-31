@@ -10,7 +10,7 @@ import com.typesafe.config.Config
 import monix.execution.Scheduler
 import net.ceedubs.ficus.Ficus._
 
-import filodb.coordinator.client.{MiscCommands, Serializer}
+import filodb.coordinator.client.MiscCommands
 import filodb.core._
 import filodb.core.memstore.MemStore
 import filodb.core.metadata._
@@ -129,8 +129,6 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
 
     logger.debug(s"Recreated dataset $dataset from string")
     val ref = dataset.ref
-    Serializer.putPartitionSchema(dataset.partitionBinSchema)
-    Serializer.putDataSchema(dataset.dataBinSchema)
 
     clusterActor match {
       case Some(nca) =>

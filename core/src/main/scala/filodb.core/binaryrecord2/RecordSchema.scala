@@ -1,8 +1,8 @@
 package filodb.core.binaryrecord2
 
 import filodb.core.metadata.{Column, Dataset}
-import filodb.memory.{BinaryRegion, UTF8StringMedium}
-import filodb.memory.format.UnsafeUtils
+import filodb.memory.{BinaryRegion, BinaryRegionLarge, UTF8StringMedium}
+import filodb.memory.format.{RowReader, UnsafeUtils, ZeroCopyUTF8String}
 
 /**
  * A RecordSchema is the schema for a BinaryRecord - what type of each field a BR holds.
@@ -48,6 +48,8 @@ final class RecordSchema(val columnTypes: Seq[Column.ColumnType],
 
   def fieldOffset(index: Int): Int = offsets(index)
 
+  def numBytes(base: Any, offset: Long): Int = BinaryRegionLarge.numBytes(base, offset)
+
   /**
    * Retrieves the partition hash field from a BinaryRecord.  If partitionFieldStart is None, the results
    * of this will be undefined.
@@ -86,6 +88,42 @@ final class RecordSchema(val columnTypes: Seq[Column.ColumnType],
   }
 
   /**
+   * COPIES the BinaryRecord field # index out as a new Java String on the heap.  Allocation + copying cost.
+   */
+  def asJavaString(base: Any, offset: Long, index: Int): String =
+    UTF8StringMedium.toString(base, offset + UnsafeUtils.getInt(base, offset + offsets(index)))
+
+  // TEMPorary: to be deprecated
+  def asZCUTF8Str(base: Any, offset: Long, index: Int): ZeroCopyUTF8String = {
+    val realOffset = offset + UnsafeUtils.getInt(base, offset + offsets(index))
+    new ZeroCopyUTF8String(base, realOffset + 2, UTF8StringMedium.numBytes(base, realOffset))
+  }
+  def asZCUTF8Str(address: NativePointer, index: Int): ZeroCopyUTF8String =
+    asZCUTF8Str(UnsafeUtils.ZeroPointer, address, index)
+
+  /**
+   * EXPENSIVE. Creates a easy-to-read Java String representation of the contents of this BinaryRecord.
+   */
+  def stringify(base: Any, offset: Long): String = {
+    import Column.ColumnType._
+    val parts: Seq[Any] = columnTypes.zipWithIndex.map {
+      case (IntColumn, i)    => getInt(base, offset, i)
+      case (LongColumn, i)   => getLong(base, offset, i)
+      case (DoubleColumn, i) => getDouble(base, offset, i)
+      case (StringColumn, i) => asJavaString(base, offset, i)
+      case (TimestampColumn, i) => getLong(base, offset, i)
+      case (BitmapColumn, i) => getInt(base, offset, i) != 0
+      case (MapColumn, i)    =>
+        val consumer = new StringifyMapItemConsumer
+        consumeMapItems(base, offset, i, consumer)
+        consumer.prettyPrint
+    }
+    s"b2[${parts.mkString(",")}]"
+  }
+
+  def stringify(address: NativePointer): String = stringify(UnsafeUtils.ZeroPointer, address)
+
+  /**
    * Iterates through each key/value pair of a MapColumn field without any object allocations.
    * How is this done?  By calling the consumer for each pair and directly passing the base and offset.
    * The consumer would use the UTF8StringMedium object to work with the UTF8String blobs.
@@ -114,6 +152,27 @@ final class RecordSchema(val columnTypes: Seq[Column.ColumnType],
     }
   }
 
+  def consumeMapItems(address: NativePointer, index: Int, consumer: MapItemConsumer): Unit =
+    consumeMapItems(UnsafeUtils.ZeroPointer, address, index, consumer)
+
+  /**
+   * Returns true if the two BinaryRecords are equal
+   */
+  def equals(base1: Any, offset1: Long, base2: Any, offset2: Long): Boolean =
+    BinaryRegionLarge.equals(base1, offset1, base2, offset2)
+  def equals(record1: NativePointer, record2: NativePointer): Boolean =
+    BinaryRegionLarge.equals(UnsafeUtils.ZeroPointer, record1, UnsafeUtils.ZeroPointer, record2)
+
+  /**
+   * Returns the BinaryRecordv2 as its own byte array, copying if needed
+   */
+  def asByteArray(base: Any, offset: Long): Array[Byte] = base match {
+    case a: Array[Byte] if offset == UnsafeUtils.arayOffset => a
+    case other: Any              => BinaryRegionLarge.asNewByteArray(base, offset)
+    case UnsafeUtils.ZeroPointer => BinaryRegionLarge.asNewByteArray(base, offset)
+  }
+  def asByteArray(address: NativePointer): Array[Byte] = asByteArray(UnsafeUtils.ZeroPointer, address)
+
   import debox.{Map => DMap}   // An unboxed, fast Map
 
   private def makePredefinedStructures(predefinedKeys: Seq[String]): (Array[Long], Array[Byte], DMap[Long, Int]) = {
@@ -131,6 +190,10 @@ final class RecordSchema(val columnTypes: Seq[Column.ColumnType],
                   }.toArray
     (offsets, stringBytes, keyToNum)
   }
+
+  // For serialization purposes
+  private[filodb] def toSerializableTuple: (Seq[Column.ColumnType], Option[Int], Seq[String]) =
+    (columnTypes, partitionFieldStart, predefinedKeys)
 }
 
 trait MapItemConsumer {
@@ -144,12 +207,25 @@ trait MapItemConsumer {
   def consume(keyBase: Any, keyOffset: Long, valueBase: Any, valueOffset: Long, index: Int): Unit
 }
 
+/**
+ * A MapItemConsumer which turns the key and value pairs into strings
+ */
+class StringifyMapItemConsumer extends MapItemConsumer {
+  val stringPairs = new collection.mutable.ArrayBuffer[(String, String)]
+  def prettyPrint: String = "[" + stringPairs.map { case (k, v) => s"$k: $v" }.mkString(", ") + "]"
+  def consume(keyBase: Any, keyOffset: Long, valueBase: Any, valueOffset: Long, index: Int): Unit = {
+    stringPairs += (UTF8StringMedium.toString(keyBase, keyOffset) ->
+                    UTF8StringMedium.toString(valueBase, valueOffset))
+  }
+}
+
 object RecordSchema {
   import Column.ColumnType._
 
   val colTypeToFieldSize = Map[Column.ColumnType, Int](IntColumn -> 4,
                                                        LongColumn -> 8,
                                                        DoubleColumn -> 8,
+                                                       TimestampColumn -> 8,  // Just a long ms timestamp
                                                        StringColumn -> 4,
                                                        MapColumn -> 4)
 
@@ -172,4 +248,28 @@ object RecordSchema {
     val colTypes = dataset.dataColumns.map(_.columnType) ++ dataset.partitionColumns.map(_.columnType)
     new RecordSchema(colTypes, Some(dataset.dataColumns.length), predefinedKeys)
   }
+
+  def fromSerializableTuple(tuple: (Seq[Column.ColumnType], Option[Int], Seq[String])): RecordSchema =
+    new RecordSchema(tuple._1, tuple._2, tuple._3)
+}
+
+/**
+ * This is a class meant to provide a RowReader API for the new BinaryRecord v2.
+ * NOTE: Strings cause an allocation of a ZeroCopyUTF8String instance.  TODO: provide a better API that does
+ * not result in allocations.
+ * It is meant to be reused again and again and is MUTABLE.
+ */
+final class BinaryRecordRowReader(schema: RecordSchema,
+                                  var recordBase: Any = UnsafeUtils.ZeroPointer,
+                                  var recordOffset: Long = 0L) extends RowReader {
+  // BinaryRecordV2 fields always have a value
+  def notNull(columnNo: Int): Boolean = columnNo >= 0 && columnNo < schema.numFields
+  def getBoolean(columnNo: Int): Boolean = schema.getInt(recordBase, recordOffset, columnNo) != 0
+  def getInt(columnNo: Int): Int = schema.getInt(recordBase, recordOffset, columnNo)
+  def getLong(columnNo: Int): Long = schema.getLong(recordBase, recordOffset, columnNo)
+  def getDouble(columnNo: Int): Double = schema.getDouble(recordBase, recordOffset, columnNo)
+  def getFloat(columnNo: Int): Float = ???
+  def getString(columnNo: Int): String = ???
+  def getAny(columnNo: Int): Any = ???
+  override def filoUTF8String(i: Int): ZeroCopyUTF8String = schema.asZCUTF8Str(recordBase, recordOffset, i)
 }

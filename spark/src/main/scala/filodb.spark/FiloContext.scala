@@ -9,7 +9,6 @@ import org.apache.spark.sql.types.StructType
 import filodb.coordinator.NodeClusterActor
 import filodb.coordinator.client.Client
 import filodb.core._
-import filodb.core.memstore.IngestRouting
 import filodb.core.metadata.Dataset
 import filodb.core.store.StoreConfig
 
@@ -169,9 +168,9 @@ class FiloContext(val sqlContext: SQLContext) extends AnyVal {
     df.rdd.mapPartitionsWithIndex { case (index, rowIter) =>
       // Everything within this function runs on each partition/executor, so need a local datastore & system
       val _dataset = Dataset.fromCompactString(serializedDataset)
-      val routing = IngestRouting(_dataset, dfColumnNames)
       sparkLogger.info(s"Starting ingestion of DataFrame for dataset ${_dataset.ref}, partition $index...")
-      ingestRddRows(FiloExecutor.clusterActor, _dataset, routing, rowIter, writeTimeout, index)
+      sparkLogger.warn(s"INGESTION IS NOT IMPLEMENTED RIGHT NOW.")
+      ingestRddRows(FiloExecutor.clusterActor, _dataset, rowIter, writeTimeout, index)
       Iterator.empty
     }.count()
 

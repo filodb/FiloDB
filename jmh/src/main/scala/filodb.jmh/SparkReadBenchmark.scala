@@ -9,10 +9,12 @@ import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.functions.sum
 import org.openjdk.jmh.annotations._
 
-import filodb.core.memstore.{IngestRecord, IngestRouting}
+import filodb.core.binaryrecord2.RecordBuilder
+import filodb.core.memstore.SomeData
 import filodb.core.store._
 import filodb.core.TestData
 import filodb.memory.format.TupleRowReader
+import filodb.memory.MemFactory
 import filodb.spark.{FiloDriver, FiloExecutor, FiloRelation}
 
 /**
@@ -68,13 +70,10 @@ class SparkReadBenchmark {
   val split = FiloDriver.memStore.getScanSplits(dataset.ref).head
 
   // Write raw data into MemStore
-  val routing = IngestRouting(dataset, rowColumns)
-  rowIt.take(NumRows).zipWithIndex
-       .map { case (row, i) => IngestRecord(routing, TupleRowReader(row), i) }
-       .grouped(500)
-       .foreach { records =>
-         FiloDriver.memStore.ingest(dataset.ref, 0, records)
-       }
+  val builder = new RecordBuilder(MemFactory.onHeapFactory, dataset.ingestionSchema)
+  rowIt.take(NumRows).map(TupleRowReader).foreach { row => builder.addFromReaderSlowly(row) }
+  val data = builder.allContainers.zipWithIndex.map { case (container, i) => SomeData(container, i) }.head
+  FiloDriver.memStore.ingest(dataset.ref, 0, data)
 
   @TearDown
   def shutdownFiloActors(): Unit = {

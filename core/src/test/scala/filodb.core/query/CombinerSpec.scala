@@ -63,7 +63,7 @@ class CombinerSpec extends FunSpec with Matchers with BeforeAndAfter with ScalaF
 
     it("should compute histogram correctly") {
       memStore.setup(dataset1, 0, TestData.storeConf)
-      val data = records(linearMultiSeries()).take(30)   // 3 records per series x 10 series
+      val data = records(dataset1, linearMultiSeries().take(30))   // 3 records per series x 10 series
       memStore.ingest(dataset1.ref, 0, data)
 
       val split = memStore.getScanSplits(dataset1.ref, 1).head

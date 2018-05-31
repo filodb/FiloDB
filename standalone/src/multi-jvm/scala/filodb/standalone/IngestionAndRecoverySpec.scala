@@ -204,6 +204,8 @@ abstract class IngestionAndRecoverySpec extends StandaloneMultiJvmSpec(Ingestion
     runOn(first) {
       validateShardStatus(client2) {
         case ShardStatusRecovery(p) => true   // ok
+        // For now, due to changed ingestion message size, some shards might be active instead of recovery, that's OK
+        case ShardStatusActive      => true
         case _ => fail("All shards should be in shard recovery state")
       }
     }

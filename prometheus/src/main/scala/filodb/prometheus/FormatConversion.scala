@@ -16,7 +16,7 @@ object FormatConversion {
   /**
    * Extracts a java ArrayList of labels from the TimeSeries
    */
-  def getLabels(ts: TimeSeries): java.util.List[(String, String)] = {
+  def getLabels(ts: TimeSeries): java.util.ArrayList[(String, String)] = {
     val list = new java.util.ArrayList[(String, String)]()
     for { i <- 0 until ts.getLabelsCount } {
       val labelPair = ts.getLabels(i)
@@ -35,7 +35,7 @@ object FormatConversion {
    */
   def addRecord(builder: RecordBuilder,
                 ts: TimeSeries,
-                sortedLabels: java.util.List[(String, String)],
+                sortedLabels: java.util.ArrayList[(String, String)],
                 hashes: Array[Int]): Unit = {
     for { i <- 0 until ts.getSamplesCount } {
       val sample = ts.getSamples(i)

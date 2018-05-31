@@ -7,9 +7,11 @@ import monix.reactive.Observable
 import net.ceedubs.ficus.Ficus._
 
 import filodb.coordinator.{IngestionStream, IngestionStreamFactory}
-import filodb.core.memstore.{IngestRecord, IngestRouting}
+import filodb.core.binaryrecord2.RecordBuilder
+import filodb.core.memstore.SomeData
 import filodb.core.metadata.Dataset
-import filodb.memory.format.ArrayStringRowReader
+import filodb.memory.format.{ArrayStringRowReader, RoutingRowReader}
+import filodb.memory.MemFactory
 
 object CsvStream extends StrictLogging {
   // Number of lines to read and send at a time
@@ -94,16 +96,21 @@ private[filodb] class CsvStream(csvReader: CSVReader,
                                0
                              }
 
-  val routing = IngestRouting(dataset, columnNames)
+  val routing = dataset.ingestRouting(columnNames)
   logger.info(s"CsvStream started with dataset ${dataset.ref}, columnNames $columnNames, routing $routing")
   if (numLinesToSkip > 0) logger.info(s"Skipping initial $numLinesToSkip lines...")
 
   val batchIterator = csvReader.iterator.asScala
-                        .zipWithIndex
                         .drop(numLinesToSkip)
-                        .map { case (tokens, idx) =>
-                          IngestRecord(routing, ArrayStringRowReader(tokens), idx)
-                        }.grouped(settings.batchSize)
+                        .map { tokens => RoutingRowReader(ArrayStringRowReader(tokens), routing) }
+                        .grouped(settings.batchSize)
+                        .zipWithIndex
+                        .flatMap { case (readers, idx) =>
+                          val builder = new RecordBuilder(MemFactory.onHeapFactory, dataset.ingestionSchema)
+                          readers.foreach(builder.addFromReaderSlowly)
+                          // Most likely to have only one container.  Just assign same offset.
+                          builder.allContainers.map { c => SomeData(c, idx) }
+                        }
   val get = Observable.fromIterator(batchIterator)
 
   def teardown(): Unit = {

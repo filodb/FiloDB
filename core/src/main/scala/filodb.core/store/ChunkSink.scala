@@ -14,7 +14,6 @@ import filodb.core._
 import filodb.core.metadata.Dataset
 import filodb.core.Types.PartitionKey
 
-
 /**
  * ChunkSink is the base trait for a sink, or writer to a persistent store, of chunks
  */
@@ -42,7 +41,7 @@ trait ChunkSink {
    */
   def truncate(dataset: DatasetRef): Future[Response]
 
-  /**
+   /**
     * This method should be called when new partitions are flushed in the column store.
     * It is used to build a list of available partition keys in the store.
     */
@@ -166,12 +165,5 @@ class NullColumnStore(implicit sched: Scheduler) extends ColumnStore with Strict
       case None => throw new IllegalArgumentException("Dataset not found")
     }
     Future.successful(Success)
-  }
-
-  override def scanPartitionKeys(dataset: Dataset,
-                                 shardNum: Int): Observable[PartitionKey] = {
-    partitionKeys.get(dataset.ref)
-      .map(Observable.fromIterable(_))
-      .getOrElse(Observable.empty)
   }
 }

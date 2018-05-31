@@ -166,5 +166,6 @@ Note that this is called a "Map" field but is actually just a list of key-value 
 A [RecordContainer](../core/src/main/scala/filodb.core/binaryrecord2/RecordContainer.scala) is a container for multiple `BinaryRecords` for ingesting into Kafka, for example.
 
 * +0000   4 bytes  total length of container following these length bytes
-* +0004   BinaryRecord 1  (where first bytes indicates its length)
-* +0004+n  BinaryRecord 2....
+* +0004   4 bytes  version and flag word, for future expansion.  For now, upper byte == version, which is currently 0.
+* +0008   BinaryRecord 1  (where first bytes indicates its length)
+* +0008+n  BinaryRecord 2....

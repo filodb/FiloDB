@@ -1,7 +1,7 @@
 package filodb.coordinator.client
 
 import filodb.core._
-import filodb.core.memstore.IngestRecord
+import filodb.core.memstore.SomeData
 import filodb.core.metadata.Dataset
 import filodb.core.store.StoreConfig
 
@@ -66,7 +66,7 @@ object IngestionCommands {
    */
   final case class IngestRows(dataset: DatasetRef,
                               shard: Int,
-                              rows: Seq[IngestRecord]) extends NodeCommand
+                              data: SomeData) extends NodeCommand
 
   final case class Ack(seqNo: Long) extends NodeResponse
   case object UnknownDataset extends NodeResponse with ErrorResponse

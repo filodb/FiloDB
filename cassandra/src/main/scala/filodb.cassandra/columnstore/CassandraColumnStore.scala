@@ -3,8 +3,6 @@ package filodb.cassandra.columnstore
 import java.net.InetSocketAddress
 import java.nio.ByteBuffer
 
-import scala.collection.mutable
-import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.{ExecutionContext, Future}
 
 import com.datastax.driver.core.{ConsistencyLevel, Metadata, TokenRange}
@@ -18,10 +16,10 @@ import org.jctools.maps.NonBlockingHashMapLong
 
 import filodb.cassandra.{DefaultFiloSessionProvider, FiloCassandraConnector, FiloSessionProvider}
 import filodb.core._
+import filodb.core.Types.PartitionKey
 import filodb.core.metadata.Dataset
 import filodb.core.query._
 import filodb.core.store._
-import filodb.core.Types.PartitionKey
 import filodb.memory.format.FiloVector
 
 /**
@@ -58,6 +56,8 @@ class CassandraColumnStore(val config: Config, val readEc: Scheduler,
                           (implicit val sched: Scheduler)
 extends ColumnStore with CassandraChunkSource with StrictLogging {
   import collection.JavaConverters._
+  import collection.mutable
+  import collection.mutable.ArrayBuffer
 
   import filodb.core.store._
   import Perftools._
@@ -73,38 +73,31 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
     val chunkTable = getOrCreateChunkTable(dataset)
     clusterConnector.createKeyspace(chunkTable.keyspace)
     val indexTable = getOrCreateIndexTable(dataset)
-    val partitionListTable = getOrCreatePartitionListTable(dataset)
     // Important: make sure nodes are in agreement before any schema changes
     clusterMeta.checkSchemaAgreement()
     for { ctResp    <- chunkTable.initialize()
-          rmtResp   <- indexTable.initialize()
-          pltResp   <- partitionListTable.initialize() } yield pltResp
+          rmtResp   <- indexTable.initialize() } yield rmtResp
   }
 
   def truncate(dataset: DatasetRef): Future[Response] = {
     logger.info(s"Clearing all data for dataset ${dataset}")
     val chunkTable = getOrCreateChunkTable(dataset)
     val indexTable = getOrCreateIndexTable(dataset)
-    val partitionListTable = getOrCreatePartitionListTable(dataset)
     clusterMeta.checkSchemaAgreement()
     for { ctResp    <- chunkTable.clearAll()
-          rmtResp   <- indexTable.clearAll()
-          pltResp   <- partitionListTable.clearAll()  } yield pltResp
+          rmtResp   <- indexTable.clearAll() } yield rmtResp
   }
 
   def dropDataset(dataset: DatasetRef): Future[Response] = {
     val chunkTable = getOrCreateChunkTable(dataset)
     val indexTable = getOrCreateIndexTable(dataset)
-    val partitionListTable = getOrCreatePartitionListTable(dataset)
     clusterMeta.checkSchemaAgreement()
     for { ctResp    <- chunkTable.drop() if ctResp == Success
-          rmtResp   <- indexTable.drop() if rmtResp == Success
-          pltResp   <- partitionListTable.drop() if pltResp == Success }
+          rmtResp   <- indexTable.drop() if rmtResp == Success }
     yield {
       chunkTableCache.remove(dataset)
       indexTableCache.remove(dataset)
-      partitionListTableCache.remove(dataset)
-      pltResp
+      rmtResp
     }
   }
 
@@ -115,9 +108,10 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
             diskTimeToLive: Int = 259200): Future[Response] = {
     chunksets.mapAsync(writeParallelism) { chunkset =>
                val span = Kamon.buildSpan("write-chunkset").start()
+               val partBytes = dataset.partKeySchema.asByteArray(chunkset.partition)
                val future =
-                 for { writeChunksResp  <- writeChunks(dataset.ref, chunkset, diskTimeToLive)
-                       writeIndexResp   <- writeIndices(dataset, chunkset, diskTimeToLive)
+                 for { writeChunksResp  <- writeChunks(dataset.ref, partBytes, chunkset, diskTimeToLive)
+                       writeIndexResp   <- writeIndices(dataset, partBytes, chunkset, diskTimeToLive)
                                            if writeChunksResp == Success
                  } yield {
                    span.finish()
@@ -133,11 +127,12 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
   }
 
   private def writeChunks(ref: DatasetRef,
+                          partition: Array[Byte],
                           chunkset: ChunkSet,
                           diskTimeToLive: Int): Future[Response] = {
     asyncSubtrace("write-chunks", "ingestion") {
       val chunkTable = getOrCreateChunkTable(ref)
-      chunkTable.writeChunks(chunkset.partition, chunkset.info, chunkset.chunks, sinkStats, diskTimeToLive)
+      chunkTable.writeChunks(partition, chunkset.info, chunkset.chunks, sinkStats, diskTimeToLive)
         .collect {
           case Success => chunkset.invokeFlushListener(); Success
         }
@@ -145,12 +140,13 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
   }
 
   private def writeIndices(dataset: Dataset,
+                           partition: Array[Byte],
                            chunkset: ChunkSet,
                            diskTimeToLive: Int): Future[Response] = {
     asyncSubtrace("write-index", "ingestion") {
       val indexTable = getOrCreateIndexTable(dataset.ref)
       val indices = Seq((chunkset.info.id, ChunkSetInfo.toBytes(dataset, chunkset.info, chunkset.skips)))
-      indexTable.writeIndices(chunkset.partition, indices, sinkStats, diskTimeToLive)
+      indexTable.writeIndices(partition, indices, sinkStats, diskTimeToLive)
     }
   }
 
@@ -210,7 +206,8 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
   def unwrapTokenRanges(wrappedRanges : Seq[TokenRange]): Seq[TokenRange] =
     wrappedRanges.flatMap(_.unwrap().asScala.toSeq)
 
-  override def scanPartitionKeys(dataset: Dataset, shardNum: Int): Observable[PartitionKey] = {
+
+  def scanPartitionKeys(dataset: Dataset, shardNum: Int): Observable[PartitionKey] = {
     getOrCreatePartitionListTable(dataset.ref).getPartitions(dataset, shardNum, partitionListNumStripesPerShard)
   }
 
@@ -294,7 +291,7 @@ trait CassandraChunkSource extends ChunkSource with StrictLogging {
     })
 
   def multiPartScan(dataset: Dataset,
-                    partitions: Seq[Types.PartitionKey],
+                    partitions: Seq[Array[Byte]],
                     indexTable: IndexTable): Observable[IndexRecord] = {
     // Get each partition index observable concurrently.  As observables they are lazy
     val its = partitions.map { partition =>
@@ -319,10 +316,15 @@ trait CassandraChunkSource extends ChunkSource with StrictLogging {
 
       case other: PartitionScanMethod =>  ???
     }
-    val filterFunc = KeyFilter.makePartitionFilterFunc(dataset, filters)
-    indexRecords.sortedGroupBy(_.partition(dataset))
-                .collect { case (binPart, binIndices) if filterFunc(binPart) =>
-                  val newIndex = new ChunkIDPartitionChunkIndex(binPart, dataset)
+    // For now, partition filter func is disabled.  In the near future, this logic to scan through partitions
+    // and filter won't be necessary as we will have Lucene indexes to pull up specific partitions.
+    // val filterFunc = KeyFilter.makePartitionFilterFunc(dataset, filters)
+
+    // NOTE: we use hashCode as an approx means to identify ByteBuffers/partition keys which are identical
+    indexRecords.sortedGroupBy(_.binPartition.hashCode)
+                .collect { case (_, binIndices) =>
+                  val (base, offset, _) = binIndices.head.partBaseOffset
+                  val newIndex = new ChunkIDPartitionChunkIndex(base, offset, dataset)
                   binIndices.foreach { binIndex =>
                     val (info, skips) = ChunkSetInfo.fromBytes(dataset, binIndex.data.array)
                     newIndex.add(info, skips)
@@ -361,7 +363,8 @@ class CassandraPartition(index: ChunkIDPartitionChunkIndex,
                          scanner: CassandraChunkSource) extends FiloPartition with StrictLogging {
   import Iterators._
 
-  val binPartition = index.binPartition
+  val partKeyBase = index.partKeyBase.asInstanceOf[Array[Byte]]
+  val partKeyOffset = index.partKeyOffset
 
   def numChunks: Int = index.numChunks
 
@@ -407,7 +410,7 @@ class CassandraPartition(index: ChunkIDPartitionChunkIndex,
       case RowKeyChunkScan(k1, k2)  => (false, index.rowKeyRange(k1.binRec, k2.binRec).toSeq)
       case LastSampleChunkScan      => (false, index.latestN(1).toSeq)
     }
-    logger.debug(s"Reading chunks from columns ${columnIds.toList}, ${index.binPartition}, method $method")
+    logger.debug(s"Reading chunks from columns ${columnIds.toList}, $stringPartition, method $method")
 
     // from infoSkips, create the MutableChunkSetReader's
     infosSkips.foreach { case (info, skips) =>
@@ -423,7 +426,7 @@ class CassandraPartition(index: ChunkIDPartitionChunkIndex,
         ids.foreach { id => readers.get(id).asInstanceOf[MutableChunkSetReader].addChunk(pos, constVect) }
         Observable.empty[SingleChunkInfo]
       } else {
-        chunkTable.readChunks(index.binPartition, columnIds(pos), pos, ids, false)
+        chunkTable.readChunks(partKeyBytes, columnIds(pos), pos, ids, false)
                   .switchIfEmpty(scanner.emptyChunkStream(infosSkips, pos))
       }
     }

@@ -5,7 +5,7 @@ import org.jctools.maps.NonBlockingHashMapLong
 import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.metadata.Dataset
 import filodb.core.store._
-import filodb.core.Types.{ChunkID, PartitionKey}
+import filodb.core.Types.ChunkID
 import filodb.core.store.ChunkSetInfo._
 
 /**
@@ -14,7 +14,8 @@ import filodb.core.store.ChunkSetInfo._
  */
 trait PartitionChunkIndex {
   def dataset: Dataset
-  def binPartition: PartitionKey
+  def partKeyBase: Any
+  def partKeyOffset: Long
 
   def numChunks: Int
 
@@ -77,7 +78,7 @@ object PartitionChunkIndex {
 
  * TODO: improve this implementation with binary bit indices such as JavaEWAH.
  */
-class RowkeyPartitionChunkIndex(val binPartition: PartitionKey, val dataset: Dataset)
+class RowkeyPartitionChunkIndex(val partKeyBase: Any, val partKeyOffset: Long, val dataset: Dataset)
 extends MutablePartitionChunkIndex {
   import collection.JavaConverters._
 
@@ -130,7 +131,7 @@ extends MutablePartitionChunkIndex {
 /**
  * A PartitionChunkIndex which is ordered by increasing ChunkID
  */
-class ChunkIDPartitionChunkIndex(val binPartition: PartitionKey, val dataset: Dataset)
+class ChunkIDPartitionChunkIndex(val partKeyBase: Any, val partKeyOffset: Long, val dataset: Dataset)
 extends MutablePartitionChunkIndex {
   import collection.JavaConverters._
 

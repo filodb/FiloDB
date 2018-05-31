@@ -19,7 +19,7 @@ import filodb.memory.format._
   * Chunk is the unit of encoded data that is stored in memory or in a column store.
   *
   * @param info      records common metadata about a ChunkSet
-  * @param partition the partition key for all the chunks in this ChunkSet
+  * @param partition 64-bit native address of the BinaryRecord partition key
   * @param skips
   * @param chunks    each item in the Seq encodes a column's values in the chunk's dataset. First
   *                  value in the tuple identifies the column, the second is a reference to the

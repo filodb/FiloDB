@@ -10,7 +10,6 @@ import monix.reactive.Observable
 import org.jctools.maps.NonBlockingHashMapLong
 
 import filodb.core.{DatasetRef, Response}
-import filodb.core.Types.PartitionKey
 import filodb.core.metadata.Dataset
 import filodb.core.store._
 import filodb.memory.format.ZeroCopyUTF8String
@@ -23,7 +22,6 @@ extends MemStore with StrictLogging {
 
   type Shards = NonBlockingHashMapLong[TimeSeriesShard]
   private val datasets = new HashMap[DatasetRef, Shards]
-  val maxPartitionsToRecover = config.getInt("memstore.max-partitions-to-recover")
 
   val stats = new ChunkSourceStats
 
@@ -60,33 +58,32 @@ extends MemStore with StrictLogging {
             .getOrElse(throw new IllegalArgumentException(s"Dataset $dataset and shard $shard have not been set up"))
   }
 
-  def ingest(dataset: DatasetRef, shard: Int, rows: Seq[IngestRecord]): Unit =
-    getShardE(dataset, shard).ingest(rows)
-
-  def restorePartitions(dataset: Dataset, shardNum: Int)(implicit sched: Scheduler): Future[Long] = {
-    val partitionKeys = sink.scanPartitionKeys(dataset, shardNum)
-    val shard = getShardE(dataset.ref, shardNum)
-    partitionKeys.take(maxPartitionsToRecover).map { p =>
-      shard.addPartition(p, false)
-    }.countL.runAsync.map { count =>
-      logger.info(s"Restored $count time series partitions into memstore for shard $shardNum")
-      count
-    }
-  }
+  def ingest(dataset: DatasetRef, shard: Int, data: SomeData): Unit =
+    getShardE(dataset, shard).ingest(data.records, data.offset)
 
   // Should only be called once per dataset/shard
   def ingestStream(dataset: DatasetRef,
                    shardNum: Int,
-                   stream: Observable[Seq[IngestRecord]],
+                   stream: Observable[SomeData],
                    flushStream: Observable[FlushCommand] = FlushStream.empty,
                    diskTimeToLive: Int = 259200)
                   (errHandler: Throwable => Unit)
+                  (implicit sched: Scheduler): CancelableFuture[Unit] =
+    ingestStream(dataset, shardNum, Observable.merge(stream, flushStream), diskTimeToLive)(errHandler)
+
+  // NOTE: Each ingestion message is a SomeData which has a RecordContainer, which can hold hundreds or thousands
+  // of records each.  For this reason the object allocation of a SomeData and RecordContainer is not that bad.
+  // If it turns out the batch size is small, consider using object pooling.
+  def ingestStream(dataset: DatasetRef,
+                   shardNum: Int,
+                   combinedStream: Observable[DataOrCommand],
+                   diskTimeToLive: Int)
+                  (errHandler: Throwable => Unit)
                   (implicit sched: Scheduler): CancelableFuture[Unit] = {
     val shard = getShardE(dataset, shardNum)
-    val combinedStream = Observable.merge(stream.map(SomeData), flushStream)
     combinedStream.map {
-                    case SomeData(records) => shard.ingest(records)
-                                              None
+                    case d: SomeData => shard.ingest(d)
+                                        None
                     // The write buffers for all partitions in a group are switched here, in line with ingestion
                     // stream.  This avoids concurrency issues and ensures that buffers for a group are switched
                     // at the same offset/watermark
@@ -105,7 +102,7 @@ extends MemStore with StrictLogging {
   // TODO: See if we can parallelize ingestion stream for even better throughput
   def recoverStream(dataset: DatasetRef,
                     shardNum: Int,
-                    stream: Observable[Seq[IngestRecord]],
+                    stream: Observable[SomeData],
                     checkpoints: Map[Int, Long],
                     reportingInterval: Long): Observable[Long] = {
     val shard = getShardE(dataset, shardNum)
@@ -166,9 +163,5 @@ extends MemStore with StrictLogging {
   def shutdown(): Unit = {
     datasets.values.foreach(_.values.asScala.foreach(_.shutdown()))
     reset()
-  }
-
-  override def scanPartitionKeys(dataset: Dataset, shardNum: Int): Observable[PartitionKey] = {
-    scanPartitions(dataset, FilteredPartitionScan(ShardSplit(shardNum))).map(_.binPartition)
   }
 }

@@ -36,25 +36,25 @@ class KeyFilterSpec extends FunSpec with Matchers {
     inFunc1(15) should equal (false)
   }
 
-  it("should produce a multi-column partition filtering func from ColumnFilters") {
-    import GdeltTestData._
+  // it("should produce a multi-column partition filtering func from ColumnFilters") {
+  //   import GdeltTestData._
 
-    val filters = Seq(ColumnFilter("Actor2Code", Equals("JPN".utf8)),
-                      ColumnFilter("Year", In(Set(1979, 1980))))
-    val partFunc = KeyFilter.makePartitionFilterFunc(dataset1, filters)
+  //   val filters = Seq(ColumnFilter("Actor2Code", Equals("JPN".utf8)),
+  //                     ColumnFilter("Year", In(Set(1979, 1980))))
+  //   val partFunc = KeyFilter.makePartitionFilterFunc(dataset1, filters)
 
-    partFunc(dataset1.partKey("JPN", 1979)) should equal (true)
-    partFunc(dataset1.partKey("JPN", 1980)) should equal (true)
+  //   partFunc(dataset1.partKey("JPN", 1979)) should equal (true)
+  //   partFunc(dataset1.partKey("JPN", 1980)) should equal (true)
 
-    partFunc(dataset1.partKey("CAN", 1979)) should equal (false)
-    partFunc(dataset1.partKey("JPN", 2003)) should equal (false)
+  //   partFunc(dataset1.partKey("CAN", 1979)) should equal (false)
+  //   partFunc(dataset1.partKey("JPN", 2003)) should equal (false)
 
-    // It should work for computed columns as well
-    val partFunc2 = KeyFilter.makePartitionFilterFunc(dataset3, filters)
+  //   // It should work for computed columns as well
+  //   val partFunc2 = KeyFilter.makePartitionFilterFunc(dataset3, filters)
 
-    partFunc2(dataset3.partKey("JPN", 1979)) should equal (true)
-    partFunc2(dataset3.partKey("CAN", 1979)) should equal (false)
-  }
+  //   partFunc2(dataset3.partKey("JPN", 1979)) should equal (true)
+  //   partFunc2(dataset3.partKey("CAN", 1979)) should equal (false)
+  // }
 
   val prefixCol = ComputedColumn(0, ":stringPrefix 3", dataset.name,
                                  Column.ColumnType.StringColumn,

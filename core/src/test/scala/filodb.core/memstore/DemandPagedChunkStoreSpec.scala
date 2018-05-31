@@ -40,7 +40,7 @@ class DemandPagedChunkStoreSpec extends FunSpec with Matchers with BeforeAndAfte
 
   it ("should queue and store optimized chunks into demand paged chunk store") {
     for { times <- 0 to 20 } {
-      tsPartition = new TimeSeriesPartition(0, dataset1, defaultPartKey, 0, colStore, bufferPool, false,
+      tsPartition = new TimeSeriesPartition(0, dataset1, defaultPartKey, 0, colStore, bufferPool,
         pagedChunkStore, new TimeSeriesShardStats(dataset1.ref, 0))
 
       // create chunk set readers with chunks from various buckets

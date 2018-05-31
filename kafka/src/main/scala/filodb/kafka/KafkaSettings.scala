@@ -22,11 +22,6 @@ class SourceConfig(conf: Config, shard: Int)
 
   import ConsumerConfig._
 
-  require(resolved.hasPath("filo-record-converter"),
-    "'record-converter' must not be empty. Configure a custom converter.")
-
-  val RecordConverterClass = resolved.as[String]("filo-record-converter")
-
   val KeyDeserializer = resolved
     .as[Option[String]](KEY_DESERIALIZER_CLASS_CONFIG)
     .getOrElse(classOf[LongDeserializer].getName)
@@ -36,11 +31,14 @@ class SourceConfig(conf: Config, shard: Int)
   val EnableAutoCommit = resolved.as[Option[Boolean]](ENABLE_AUTO_COMMIT_CONFIG).getOrElse(false)
 
   override def config: Map[String, AnyRef] = {
-    val filterNot = Set(KEY_DESERIALIZER_CLASS_CONFIG, AUTO_OFFSET_RESET_CONFIG, ENABLE_AUTO_COMMIT_CONFIG)
+    val filterNot = Set(KEY_DESERIALIZER_CLASS_CONFIG, AUTO_OFFSET_RESET_CONFIG, ENABLE_AUTO_COMMIT_CONFIG,
+                        VALUE_DESERIALIZER_CLASS_CONFIG)
     val defaults = Map(
       KEY_DESERIALIZER_CLASS_CONFIG -> KeyDeserializer,
       AUTO_OFFSET_RESET_CONFIG -> AutoOffsetReset,
-      ENABLE_AUTO_COMMIT_CONFIG -> EnableAutoCommit.toString)
+      ENABLE_AUTO_COMMIT_CONFIG -> EnableAutoCommit.toString,
+      // The value deserializer MUST be the RecordContainer one
+      VALUE_DESERIALIZER_CLASS_CONFIG -> classOf[RecordContainerDeserializer].getName)
 
     defaults ++ super.config.filterNot { case (k, _) => filterNot contains k }
   }

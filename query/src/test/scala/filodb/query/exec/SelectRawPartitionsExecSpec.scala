@@ -12,14 +12,15 @@ import org.scalatest.concurrent.ScalaFutures
 import filodb.core.MetricsTestData._
 import filodb.core.TestData
 import filodb.core.binaryrecord.BinaryRecord
-import filodb.core.memstore.{FixedMaxPartitionsEvictionPolicy, IngestRecord, TimeSeriesMemStore}
+import filodb.core.memstore.{FixedMaxPartitionsEvictionPolicy, SomeData, TimeSeriesMemStore}
 import filodb.core.metadata.Column.ColumnType.{DoubleColumn, LongColumn}
 import filodb.core.query.{ColumnFilter, Filter}
 import filodb.core.store.{InMemoryMetaStore, NullColumnStore}
-import filodb.memory.format.ZeroCopyUTF8String
+import filodb.memory.format.{SeqRowReader, ZeroCopyUTF8String}
 import filodb.query._
 
 class SelectRawPartitionsExecSpec extends FunSpec with Matchers with ScalaFutures with BeforeAndAfterAll {
+  import ZeroCopyUTF8String._
 
   val config = ConfigFactory.load("application_test.conf").getConfig("filodb")
   val queryConfig = new QueryConfig(config.getConfig("query"))
@@ -27,23 +28,22 @@ class SelectRawPartitionsExecSpec extends FunSpec with Matchers with ScalaFuture
   val memStore = new TimeSeriesMemStore(config, new NullColumnStore, new InMemoryMetaStore(), Some(policy))
 
   val partKeyLabelValues = Map("__name__"->"http_req_total", "job"->"myCoolService", "instance"->"someHost:8787")
-  val partKey = TagsRowReader(partKeyLabelValues)
+  val partTagsUTF8 = partKeyLabelValues.map { case (k, v) => (k.utf8, v.utf8) }
   val now = System.currentTimeMillis()
   val numRawSamples = 1000
   val reportingInterval = 10000
   val tuples = (numRawSamples until 0).by(-1).map { n =>
     (now - n * reportingInterval, n.toDouble)
   }
-  val samples = tuples.map { t =>
-    val m = new TransientRow()
-    m.set(t._1, t._2)
-    IngestRecord(partKey, m, 0)
-  }
+
+  tuples.map { t => SeqRowReader(Seq(t._1, t._2, partTagsUTF8)) }.foreach(builder.addFromReaderSlowly)
+  val container = builder.allContainers.head
+
   implicit val execTimeout = 5.seconds
 
   override def beforeAll(): Unit = {
     memStore.setup(timeseriesDataset, 0, TestData.storeConf)
-    memStore.ingest(timeseriesDataset.ref, 0, samples)
+    memStore.ingest(timeseriesDataset.ref, 0, SomeData(container, 0))
   }
 
   val dummyDispatcher = new PlanDispatcher {

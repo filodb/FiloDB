@@ -6,6 +6,7 @@ import monix.execution.{CancelableFuture, Scheduler}
 import monix.reactive.Observable
 
 import filodb.core.{DatasetRef, ErrorResponse, Response}
+import filodb.core.binaryrecord2.RecordContainer
 import filodb.core.metadata.{Column, Dataset}
 import filodb.core.metadata.Column.ColumnType._
 import filodb.core.store.{ChunkSink, ChunkSource, MetaStore, StoreConfig}
@@ -16,7 +17,8 @@ final case class ShardAlreadySetup(dataset: DatasetRef, shard: Int) extends
     Exception(s"Dataset $dataset shard $shard already setup")
 
 sealed trait DataOrCommand
-final case class SomeData(records: Seq[IngestRecord]) extends DataOrCommand
+// Typically one RecordContainer is a single Kafka message, a container with multiple BinaryRecords
+final case class SomeData(records: RecordContainer, offset: Long) extends DataOrCommand
 final case class FlushCommand(groupNum: Int) extends DataOrCommand
 final case class FlushGroup(shard: Int, groupNum: Int, flushWatermark: Long, diskTimeToLive: Int)
 
@@ -57,9 +59,9 @@ trait MemStore extends ChunkSource {
    *
    * @param dataset the dataset to ingest into
    * @param shard shard number to ingest into
-   * @param rows the input rows, each one with an offset, and conforming to the schema used in setup()
+   * @param data a RecordContainer with BinaryRecords conforming to the schema used in setup(), and offset
    */
-  def ingest(dataset: DatasetRef, shard: Int, rows: Seq[IngestRecord]): Unit
+  def ingest(dataset: DatasetRef, shard: Int, data: SomeData): Unit
 
   /**
    * Sets up a shard of a dataset to continuously ingest new sets of records from a stream.
@@ -73,7 +75,7 @@ trait MemStore extends ChunkSource {
    *
    * @param dataset the dataset to ingest into
    * @param shard shard number to ingest into
-   * @param stream the stream of new records, with schema conforming to that used in setup()
+   * @param stream the stream of SomeData() with records conforming to dataset ingestion schema
    * @param flushStream the stream of FlushCommands for regular flushing of chunks to ChunkSink
    * @param diskTimeToLive the time for chunks in this stream to live on disk (Cassandra)
    * @param errHandler this is called when an ingestion error occurs
@@ -82,7 +84,7 @@ trait MemStore extends ChunkSource {
    */
   def ingestStream(dataset: DatasetRef,
                    shard: Int,
-                   stream: Observable[Seq[IngestRecord]],
+                   stream: Observable[SomeData],
                    flushStream: Observable[FlushCommand] = FlushStream.empty,
                    diskTimeToLive: Int = 259200)
                   (errHandler: Throwable => Unit)
@@ -102,8 +104,8 @@ trait MemStore extends ChunkSource {
    *
    * @param dataset the dataset to ingest/recover into
    * @param shard shard number to ingest/recover into
-   * @param stream the stream of records, with schema conforming to that used in setup().  It should restart from the
-   *               min(checkpoints)
+   * @param stream the stream of SomeData() with records conforming to dataset ingestion schema.
+   *               It should restart from the min(checkpoints)
    * @param checkpoints the write checkpoints for each subgroup, a Map(subgroup# -> checkpoint).  Records for that
    *                    subgroup with an offset below the checkpoint will be skipped, since they have been persisted.
    * @param reportingInterval the interval at which the latest offsets ingested will be sent back
@@ -111,22 +113,10 @@ trait MemStore extends ChunkSource {
    */
   def recoverStream(dataset: DatasetRef,
                     shard: Int,
-                    stream: Observable[Seq[IngestRecord]],
+                    stream: Observable[SomeData],
                     checkpoints: Map[Int, Long],
                     reportingInterval: Long): Observable[Long]
 
-  /**
-    * Restore all partitions from persistent store. Note that this will not populate the chunks yet.
-    * Loading of the partitions without the data will keep the index up to date so that chunks
-    * can be fetched from column store on demand.
-    *
-    * This method is typically called when the node is coming up and initializing itself.
-    *
-    * The system will be ready to answer queries once the loading happens successfully.
-    *
-    * @return count of partitions restored
-    */
-  def restorePartitions(dataset: Dataset, shard: Int)(implicit sched: Scheduler): Future[Long]
   /**
    * Returns the names of tags or columns that are indexed at the partition level, across
    * all shards on this node

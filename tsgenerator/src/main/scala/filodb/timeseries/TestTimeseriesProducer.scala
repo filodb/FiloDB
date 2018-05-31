@@ -1,7 +1,5 @@
 package filodb.timeseries
 
-import java.lang.{Long => JLong}
-
 import scala.concurrent.{Await, Future}
 import scala.concurrent.duration._
 import scala.util.Random
@@ -12,10 +10,13 @@ import com.typesafe.scalalogging.StrictLogging
 import monix.execution.Scheduler
 import monix.kafka._
 import monix.reactive.Observable
-import org.apache.kafka.clients.producer.ProducerRecord
 import org.rogach.scallop._
 
-import filodb.coordinator.{ShardKeyGenerator, ShardMapper}
+import filodb.prometheus.FormatConversion
+
+sealed trait DataOrCommand
+final case class DataSample(tags: Map[String, String], timestamp: Long, value: Double) extends DataOrCommand
+case object FlushCommand extends DataOrCommand
 
 /**
   * Simple driver to produce time series data into local kafka similar. Data format is similar to
@@ -26,6 +27,7 @@ import filodb.coordinator.{ShardKeyGenerator, ShardMapper}
   *
   */
 object TestTimeseriesProducer extends StrictLogging {
+
   class ProducerOptions(args: Seq[String]) extends ScallopConf(args) {
     val samplesPerSeries = opt[Int](short = 'n', default = Some(100),
                                     descr="# of samples per time series")
@@ -71,26 +73,26 @@ object TestTimeseriesProducer extends StrictLogging {
     )
     val topicName = conf.getString("sourceconfig.filo-topic-name")
 
-    implicit val io = Scheduler.io("kafka-producer")
     logger.info(s"Started producing $numSamples messages into topic $topicName with timestamps " +
       s"from about ${(System.currentTimeMillis() - startTime) / 1000 / 60} minutes ago")
-    val stream = timeSeriesData(startTime, numShards, numTimeSeries).take(numSamples)
-    val producer = KafkaProducerSink[JLong, String](producerCfg, io)
-    Observable.fromIterable(stream)
-      //.dump("Produced: ")
-      .map { case (partition, value) =>
-        new ProducerRecord[JLong, String](topicName, partition.toInt, partition, value)
-      }
-      .bufferIntrospective(1024)
-      .consumeWith(producer)
-      .runAsync
-      .map { _ =>
-        logger.info(s"Finished producing $numSamples messages into topic $topicName with timestamps " +
-          s"from about ${(System.currentTimeMillis() - startTime) / 1000 / 60} minutes ago at $startTime")
-      }
-      .recover { case NonFatal(e) =>
-        logger.error("Error occurred while producing messages to Kafka", e)
-      }
+
+    val shardKeys = Set("__name__", "job")  // the tag keys used to compute the shard key hash
+    val batchedData = timeSeriesData(startTime, numShards, numTimeSeries)
+                        .take(numSamples)
+                        .grouped(128)
+    val sink = new KafkaContainerSink(FormatConversion.dataset, numShards, shardKeys, producerCfg)
+
+    implicit val io = Scheduler.io("kafka-producer")
+
+    sink.batchAndWrite(Observable.fromIterator(batchedData), topicName)
+        .runAsync
+        .map { _ =>
+          logger.info(s"Finished producing $numSamples messages into topic $topicName with timestamps " +
+            s"from about ${(System.currentTimeMillis() - startTime) / 1000 / 60} minutes ago at $startTime")
+        }
+        .recover { case NonFatal(e) =>
+          logger.error("Error occurred while producing messages to Kafka", e)
+        }
   }
 
   /**
@@ -101,9 +103,7 @@ object TestTimeseriesProducer extends StrictLogging {
     * @param numTimeSeries number of instances or time series
     * @return stream of a 2-tuple (kafkaParitionId , sampleData)
     */
-  def timeSeriesData(startTime: Long, numShards: Int, numTimeSeries: Int = 16): Stream[(JLong, String)] = {
-    val shardMapper = new ShardMapper(numShards)
-    val spread = (Math.log10(numShards / 2) / Math.log10(2.0)).toInt
+  def timeSeriesData(startTime: Long, numShards: Int, numTimeSeries: Int = 16): Stream[DataSample] = {
     // TODO For now, generating a (sinusoidal + gaussian) time series. Other generators more
     // closer to real world data can be added later.
     Stream.from(0).map { n =>
@@ -115,14 +115,13 @@ object TestTimeseriesProducer extends StrictLogging {
       val timestamp = startTime + (n.toLong / numTimeSeries) * 10000 // generate 1 sample every 10s for each instance
       val value = 15 + Math.sin(n + 1) + rand.nextGaussian()
 
-      //scalastyle:off line.size.limit
-      val shardKeyHash = ShardKeyGenerator.shardKeyHash(Seq("heap_usage", s"A$app"))
-      val tagHash = s"dc=DC$dc,partition=P$partition,host=H$host,instance=I$instance".hashCode
-      val kafkaParitionId: JLong = shardMapper.ingestionShard(shardKeyHash, tagHash, spread).toLong
-
-      val sample = s"__name__=heap_usage,dc=DC$dc,job=A$app,partition=P$partition,host=H$host,instance=I$instance   $timestamp   $value"
-      logger.trace(s"Producing $sample")
-      (kafkaParitionId, s"__name__=heap_usage,dc=DC$dc,job=A$app,partition=P$partition,host=H$host,instance=I$instance   $timestamp   $value")
+      val tags = Map("__name__" -> "heap_usage",
+                     "dc"       -> s"DC$dc",
+                     "job"      -> s"A$app",
+                     "partition" -> s"P$partition",
+                     "host"     -> s"H$host",
+                     "instance" -> s"I$instance")
+      DataSample(tags, timestamp, value)
     }
   }
 }

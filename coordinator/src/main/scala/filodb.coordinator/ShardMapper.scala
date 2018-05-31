@@ -260,37 +260,3 @@ private[filodb] object ShardMapper extends StrictLogging {
   final case class ShardError(event: ShardEvent, context: String)
     extends Exception(s"$context [shard=${event.shard}, event=$event]")
 }
-
-object ShardKeyGenerator {
-  private val InitialHash = 7
-
-  // Should be inlined by the JVM for speed, since it's final and small method
-  private final def nextHash(origHash: Int, nextHashCode: Int): Int = 31 * origHash + nextHashCode
-
-  /**
-    * Use the function to calculate the shard key hash for the given time series key-value pair map.
-    *
-    * @param tags             This is the input key-value pair map of time series
-    * @param shardKeyColumns  This is the list of columns against which the shard key hash will be calculated
-    * @return The shard key hash that is calculated from the given shard key column of the time series tags
-    */
-  def shardKeyHash(tags: java.util.Map[String, String], shardKeyColumns: Array[String]): Int = {
-    var shardKeyHash = InitialHash
-    shardKeyColumns.foreach { shardKey =>
-      if (tags.containsKey(shardKey)) shardKeyHash = nextHash(shardKeyHash, tags.get(shardKey).hashCode)
-    }
-    shardKeyHash
-  }
-
-  /**
-   * A variation of the above for queries where we have to go through a set of filters instead of tags, and
-   * where filters are already parsed against the shardKeyColumns.  Used by queryengine.Utils.shardHashFromFilters()
-   *
-   * @param keyValues a list of String values corresponding to each shard key column
-   */
-  def shardKeyHash(keyValues: Seq[String]): Int = {
-    var shardKeyHash = InitialHash
-    keyValues.foreach { value => shardKeyHash = nextHash(shardKeyHash, value.hashCode) }
-    shardKeyHash
-  }
-}

@@ -35,7 +35,7 @@ class CassandraBackedTimeSeriesPartitionSpec extends TimeSeriesPartitionSpec wit
     // first write chunks to persistent store
     colStore.write(dataset1, chunks).futureValue
 
-    val part = new TimeSeriesPartition(0, dataset1, defaultPartKey, 0, colStore, bufferPool, false,
+    val part = new TimeSeriesPartition(0, dataset1, defaultPartKey, 0, colStore, bufferPool,
           pagedChunkStore, new TimeSeriesShardStats(dataset1.ref, 0))
 
     // now query the persistence backed store for a sub interval without ingesting data explicitly

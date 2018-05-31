@@ -8,13 +8,14 @@ import org.joda.time.DateTime
 
 import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.binaryrecord2.RecordBuilder
-import filodb.core.memstore.{IngestRecord, IngestRouting}
-import filodb.core.metadata.{Column, Dataset, DatasetOptions}
-import filodb.core.Types.{PartitionKey, UTF8Map}
+import filodb.core.memstore.SomeData
 import filodb.core.metadata.Column.ColumnType
+import filodb.core.metadata.{Dataset, DatasetOptions}
 import filodb.core.store._
+import filodb.core.Types.{PartitionKey, UTF8Map}
 import filodb.memory.format._
 import filodb.memory.format.ZeroCopyUTF8String._
+import filodb.memory.{MemFactory, NativeMemoryManager}
 
 object TestData {
   def toChunkSetStream(ds: Dataset,
@@ -35,6 +36,7 @@ object TestData {
   """)
 
   val storeConf = StoreConfig(sourceConf.getConfig("store"))
+  val nativeMem = new NativeMemoryManager(1024 * 1024)
 }
 
 object NamesTestData {
@@ -63,7 +65,8 @@ object NamesTestData {
   val lastKey = dataset.rowKey(mapper(names).last)
   def keyForName(rowNo: Int): BinaryRecord = dataset.rowKey(mapper(names)(rowNo))
 
-  val defaultPartKey = dataset.partKey(0)
+  val partKeyBuilder = new RecordBuilder(TestData.nativeMem, dataset.partKeySchema, 2048)
+  val defaultPartKey = partKeyBuilder.addFromReaderSlowly(SeqRowReader(Seq(0)))
 
   def chunkSetStream(data: Seq[Product] = names): Observable[ChunkSet] =
     TestData.toChunkSetStream(dataset, defaultPartKey, mapper(data))
@@ -97,7 +100,7 @@ object GdeltTestData {
                          .getLines.toSeq.drop(1)     // drop the header line
 
   val schema = Seq("GLOBALEVENTID:int",
-                   "SQLDATE:ts",
+                   "SQLDATE:long",
                    "MonthYear:int",
                    "Year:int",
                    "Actor2Code:string",
@@ -110,13 +113,18 @@ object GdeltTestData {
   // Please go through records() / IngestRecords for proper field routing
   val readers = gdeltLines.map { line => ArrayStringRowReader(line.split(",")) }
 
-  def records(ds: Dataset, readerSeq: Seq[RowReader] = readers): Seq[IngestRecord] = {
-    val routing = IngestRouting(ds, columnNames)
-    readerSeq.zipWithIndex.map { case (reader, idx) => IngestRecord(routing, reader, idx) }
+  // Routes input records to the dataset schema correctly
+  def records(ds: Dataset, readerSeq: Seq[RowReader] = readers): SomeData = {
+    val builder = new RecordBuilder(MemFactory.onHeapFactory, ds.ingestionSchema)
+    val routing = ds.ingestRouting(columnNames)
+    readerSeq.foreach { row => builder.addFromReaderSlowly(RoutingRowReader(row, routing)) }
+    builder.allContainers.zipWithIndex.map { case (container, i) => SomeData(container, i) }.head
   }
 
-  def dataRows(ds: Dataset, readerSeq: Seq[RowReader] = readers): Seq[RowReader] =
-    records(ds, readerSeq).map(_.data)
+  def dataRows(ds: Dataset, readerSeq: Seq[RowReader] = readers): Seq[RowReader] = {
+    val routing = ds.dataRouting(columnNames)
+    readerSeq.map { r => RoutingRowReader(r, routing) }
+  }
 
   val badLine = ArrayStringRowReader("NotANumber, , , , , , ,".split(','))   // Will fail
   val altLines =
@@ -141,6 +149,7 @@ object GdeltTestData {
 
   // Dataset2: Partition key (MonthYear) / Row keys (Actor2Code, GLOBALEVENTID)
   val dataset2 = Dataset("gdelt", Seq(schema(2)), schema.patch(2, Nil, 1), Seq("Actor2Code", "GLOBALEVENTID"))
+  val partBuilder2 = new RecordBuilder(TestData.nativeMem, dataset2.partKeySchema, 10240)
 
   // Dataset3: same as Dataset1 for now
   val dataset3 = dataset1
@@ -148,30 +157,15 @@ object GdeltTestData {
   // Dataset4: One big partition (Year) with (Actor2Code, GLOBALEVENTID) rowkey
   // to easily test row key scans
   val dataset4 = Dataset("gdelt", Seq(schema(3)), schema.patch(3, Nil, 1), Seq("Actor2Code", "GLOBALEVENTID"))
+  val partBuilder4 = new RecordBuilder(TestData.nativeMem, dataset4.partKeySchema, 10240)
 
   // Proj 6: partition Actor2Code,Actor2Name to test partition key bitmap indexing
   val dataset6 = Dataset("gdelt", schema.slice(4, 6), schema.patch(4, Nil, 2), "GLOBALEVENTID")
-
-  // Returns projection1 or 2 segments grouped by partition
-  def getStreamsByPartKey(dataset: Dataset): Seq[Observable[ChunkSet]] = {
-    val inputGroupedBySeg = records(dataset, readers).toSeq.groupBy(_.partition)
-    inputGroupedBySeg.map { case (partReader, records) =>
-      val partKey = dataset.partKey(partReader)
-      TestData.toChunkSetStream(dataset, partKey, records.map(_.data))
-    }.toSeq
-  }
-
-  def getRowsByPartKey(dataset: Dataset): Seq[(PartitionKey, Seq[RowReader])] =
-    records(dataset, readers).toSeq.groupBy(_.partition).toSeq.map { case (partReader, records) =>
-      (dataset.partKey(partReader), records.map(_.data))
-    }
 }
 
 // A simulation of machine metrics data
 object MachineMetricsData {
   import scala.util.Random.nextInt
-
-  import Column.ColumnType._
 
   val columns = Seq("timestamp:long", "min:double", "avg:double", "max:double", "p90:double")
 
@@ -190,15 +184,18 @@ object MachineMetricsData {
 
   // Dataset1: Partition keys (series) / Row key timestamp
   val dataset1 = Dataset("metrics", Seq("series:string"), columns)
-  val defaultPartKey = dataset1.partKey("series0")
+  val partKeyBuilder = new RecordBuilder(TestData.nativeMem, dataset1.partKeySchema, 2048)
+  val defaultPartKey = partKeyBuilder.addFromReaderSlowly(SeqRowReader(Seq("series0")))
 
-  // Turns either multiSeriesData() or linearMultiSeries() into IngestRecord's
-  def records(stream: Stream[Seq[Any]]): Stream[IngestRecord] =
-    stream.zipWithIndex.map { case (values, index) =>
-      IngestRecord(SchemaSeqRowReader(values drop 5, Array(StringColumn.keyType.extractor)),
-                   SeqRowReader(values take 5),
-                   index)
-    }
+  // Turns either multiSeriesData() or linearMultiSeries() into SomeData's for ingestion into MemStore
+  def records(ds: Dataset, stream: Stream[Seq[Any]], offset: Int = 0): SomeData = {
+    val builder = new RecordBuilder(MemFactory.onHeapFactory, ds.ingestionSchema)
+    stream.map(SeqRowReader).foreach { row => builder.addFromReaderSlowly(row) }
+    builder.allContainers.zipWithIndex.map { case (container, i) => SomeData(container, i + offset) }.head
+  }
+
+  def groupedRecords(ds: Dataset, stream: Stream[Seq[Any]], n: Int = 100, groupSize: Int = 5): Seq[SomeData] =
+    stream.take(n).grouped(groupSize).toSeq.zipWithIndex.map { case (group, i) => records(ds, group, i) }
 
   def multiSeriesData(): Stream[Seq[Any]] = {
     val initTs = System.currentTimeMillis
@@ -263,12 +260,12 @@ object MachineMetricsData {
 }
 
 object MetricsTestData {
-
   val timeseriesDataset = Dataset.make("timeseries",
                                   Seq("tags:map"),
                                   Seq("timestamp:long", "value:double"),
                                   Seq("timestamp"),
                                   DatasetOptions(Seq("__name__", "job"), "__name__", "value")).get
+  val builder = new RecordBuilder(MemFactory.onHeapFactory, timeseriesDataset.ingestionSchema)
 
   final case class TagsRowReader(tags: Map[String, String]) extends SchemaRowReader {
     val extractors = Array[RowReader.TypedFieldExtractor[_]](ColumnType.MapColumn.keyType.extractor)

@@ -8,8 +8,10 @@ import org.scalactic._
 
 import filodb.core._
 import filodb.core.binaryrecord.{BinaryRecord, RecordSchema}
+import filodb.core.binaryrecord2.{RecordBuilder, RecordComparator, RecordSchema => RecordSchema2}
 import filodb.core.query.ColumnInfo
 import filodb.memory.format.{FiloVector, RoutingRowReader, RowReader, SeqRowReader}
+import filodb.memory.MemFactory
 
 /**
  * A dataset describes the schema (column name & type) and distribution for a stream/set of data.
@@ -40,9 +42,13 @@ final case class Dataset(name: String,
   val rowKeyRouting   = rowKeyIDs.toArray
 
   // Use with `BinaryRecord`
+  // TODO: deprecate
   val rowKeyBinSchema = RecordSchema(rowKeyColumns)
-  val partitionBinSchema = RecordSchema(partitionColumns)
   val dataBinSchema   = RecordSchema(dataColumns)
+
+  val ingestionSchema = RecordSchema2.ingestion(this)  // TODO: add predefined keys yo
+  val comparator      = new RecordComparator(ingestionSchema)
+  val partKeySchema   = comparator.partitionKeySchema
 
   // Used to create a `FiloVector` of correct type for a given data column ID; (ByteBuffer, Int) => FiloVector[_]
   val vectorMakers    = dataColumns.map(col => FiloVector.defaultVectorMaker(col.columnType.clazz)).toArray
@@ -58,15 +64,16 @@ final case class Dataset(name: String,
     case _: Any               => None
   }
 
+  private val partKeyBuilder = new RecordBuilder(MemFactory.onHeapFactory, partKeySchema, 10240)
   /**
-   * Creates a PartitionKey (BinaryRecord) from a RowReader that only has partition columns
-   * See IngestRouting/IngestRecord for working with CSV/Spark like full records
+   * Creates a PartitionKey (BinaryRecord v2) from individual parts
    */
-  def partKey(partRowReader: RowReader): Types.PartitionKey =
-    BinaryRecord(partitionBinSchema, partRowReader)
-
-  def partKey(parts: Any*): Types.PartitionKey =
-    BinaryRecord(partitionBinSchema, SeqRowReader(parts))
+  def partKey(parts: Any*): Array[Byte] = {
+    val offset = partKeyBuilder.addFromObjects(parts: _*)
+    val bytes = partKeySchema.asByteArray(partKeyBuilder.allContainers.head.base, offset)
+    partKeyBuilder.reset()
+    bytes
+  }
 
   /**
    * Creates a BinaryRecord for the row key from a RowReader that only has data columns
@@ -87,6 +94,21 @@ final case class Dataset(name: String,
                           .orElse { partitionColumns.find(_.name == n).map(_.id) }
                           .toOr(One(n)) }
             .combined.badMap(_.toSeq)
+
+  /**
+   * Given a list of column names representing say CSV columns, returns a routing from each data column
+   * in this dataset to the column number in that input column name list.  To be used for RoutingRowReader
+   * over the input RowReader to return data columns corresponding to dataset definition.
+   */
+  def dataRouting(colNames: Seq[String]): Array[Int] =
+    dataColumns.map { c => colNames.indexOf(c.name) }.toArray
+
+  /**
+   * Returns a routing from data + partition columns (as required for ingestion BinaryRecords) to
+   * the input RowReader columns whose names are passed in.
+   */
+  def ingestRouting(colNames: Seq[String]): Array[Int] =
+    dataRouting(colNames) ++ partitionColumns.map { c => colNames.indexOf(c.name) }
 
   /** Returns the Column instance given the ID */
   def columnFromID(columnID: Int): Column =

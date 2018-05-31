@@ -1,5 +1,11 @@
 package filodb.core.binaryrecord2
 
+import java.nio.ByteBuffer
+
+import scala.reflect.ClassTag
+
+import debox.Buffer
+
 import filodb.memory.{BinaryRegionConsumer, BinaryRegionLarge}
 import filodb.memory.format.UnsafeUtils
 
@@ -17,7 +23,10 @@ import filodb.memory.format.UnsafeUtils
  * @param maxLength the maximum allocated size the container can grow to, including the initial length bytes
  */
 final class RecordContainer(val base: Any, val offset: Long, maxLength: Int) {
-  def numBytes: Int =  UnsafeUtils.getInt(base, offset)
+  import RecordBuilder._
+
+  @inline final def numBytes: Int =  UnsafeUtils.getInt(base, offset)
+  @inline final def isEmpty: Boolean = numBytes == 0
 
   /**
    * Used only by the RecordBuilder to update the length field.
@@ -28,18 +37,59 @@ final class RecordContainer(val base: Any, val offset: Long, maxLength: Int) {
     UnsafeUtils.setInt(base, offset, newLength.toInt)
   }
 
+  private[binaryrecord2] def writeVersionWord(): Unit = {
+    val word = Version << 24
+    UnsafeUtils.setInt(base, offset + 4, word)
+  }
+
   /**
    * Iterates through each BinaryRecord location, passing it to the Consumer so that no object allocations
    * are done.  Method returns when we have iterated through all the records.
    */
-  def consumeRecords(consumer: BinaryRegionConsumer): Unit = {
+  final def consumeRecords(consumer: BinaryRegionConsumer): Unit = {
     val endOffset = offset + 4 + numBytes
-    var curOffset = offset + 4
+    var curOffset = offset + ContainerHeaderLen
     while (curOffset < endOffset) {
       val recordLen = BinaryRegionLarge.numBytes(base, curOffset)
       consumer.onNext(base, curOffset)
       curOffset += (recordLen + 7) & ~3   // +4, then aligned/rounded up to next 4 bytes
     }
+  }
+
+  class FunctionalConsumer(func: (Any, Long) => Unit) extends BinaryRegionConsumer {
+    def onNext(base: Any, offset: Long): Unit = func(base, offset)
+  }
+
+  /**
+   * A convenience method to iterate through each BinaryRecord using a function.  Probably not as efficient
+   * as directly calling consumeRecords, but easier to write.
+   * TODO: make this a MACRO and rewrite it as a custom BinaryRegionConsumer.
+   */
+  def foreach(func: (Any, Long) => Unit): Unit = consumeRecords(new FunctionalConsumer(func))
+
+  /**
+   * Convenience functional method to map the BinaryRecords to something else and returns a Buffer which
+   * can be unboxed and efficient.  If you want performance, consider using consumeRecords instead.
+   */
+  def map[@specialized B: ClassTag](func: (Any, Long) => B): Buffer[B] = {
+    val result = Buffer.empty[B]
+    foreach { case (b, o) => result += func(b, o) }
+    result
+  }
+
+  /**
+   * A convenient method to return all of the record offsets (or native pointers if offheap) for this container.
+   * @return a debox.Buffer[Long], which conveniently does not box, and minimizes memory use.
+   */
+  final def allOffsets: Buffer[Long] = map { case (b, o) => o }
+
+  /**
+   * Uses consumeRecords with a consumer that counts the # of records
+   */
+  final def countRecords(): Int = {
+    var count = 0
+    foreach { case (b, o) => count += 1 }
+    count
   }
 
   /**
@@ -74,4 +124,12 @@ object RecordContainer {
    * Returns a read-only container; updateLength will never work.
    */
   def apply(array: Array[Byte]): RecordContainer = new RecordContainer(array, UnsafeUtils.arayOffset, 0)
+
+  /**
+   * Returns a read-only container given a ByteBuffer wrapper
+   */
+  def apply(buf: ByteBuffer): RecordContainer = {
+    val (base, offset, _) = UnsafeUtils.BOLfromBuffer(buf)
+    new RecordContainer(base, offset, 0)
+  }
 }

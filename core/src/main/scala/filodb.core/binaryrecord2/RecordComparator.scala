@@ -98,8 +98,9 @@ final class RecordComparator(ingestSchema: RecordSchema) {
    * @param ingestBase the base (null if offheap) of the BinaryRecord built using the ingestSchema
    * @param ingestOffset the offset or native address of the BinaryRecord built using the ingestSchema
    * @param builder a RecordBuilder which uses the partitionKeySchema
+   * @return the Long offset or native address of the new partition key BR
    */
-  final def buildPartKeyFromIngest(ingestBase: Any, ingestOffset: Long, builder: RecordBuilder): Unit = {
+  final def buildPartKeyFromIngest(ingestBase: Any, ingestOffset: Long, builder: RecordBuilder): Long = {
     require(builder.schema == partitionKeySchema, s"${builder.schema} is not part key schema $partitionKeySchema")
 
     // Copy the entire fixed + hash + variable sized areas over

@@ -9,13 +9,12 @@ import monix.reactive.Observable
 
 import filodb.cassandra.FiloCassandraConnector
 import filodb.core._
-import filodb.core.binaryrecord.BinaryRecord
-import filodb.core.metadata.Dataset
 import filodb.core.store.ChunkSinkStats
+import filodb.memory.format.UnsafeUtils
 
 // Typical record read from serialized incremental index (ChunkInfo + Skips) entries
 case class IndexRecord(binPartition: ByteBuffer, data: ByteBuffer) {
-  def partition(ds: Dataset): Types.PartitionKey = BinaryRecord(ds.partitionBinSchema, binPartition)
+  def partBaseOffset: (Any, Long, Int) = UnsafeUtils.BOLfromBuffer(binPartition)
 }
 
 /**
@@ -58,7 +57,7 @@ sealed class IndexTable(val dataset: DatasetRef, val connector: FiloCassandraCon
   /**
    * Retrieves all indices from a single partition.
    */
-  def getIndices(binPartition: Types.PartitionKey): Observable[IndexRecord] = {
+  def getIndices(binPartition: Array[Byte]): Observable[IndexRecord] = {
     val it = session.execute(allPartReadCql.bind(toBuffer(binPartition)))
                     .asScala.toIterator.map(fromRow)
     Observable.fromIterator(it).handleObservableErrors
@@ -86,7 +85,7 @@ sealed class IndexTable(val dataset: DatasetRef, val connector: FiloCassandraCon
    * Writes new indices to the index table
    * @return Success, or an exception as a Future.failure
    */
-  def writeIndices(partition: Types.PartitionKey,
+  def writeIndices(partition: Array[Byte],
                    indices: Seq[(Types.ChunkID, Array[Byte])],
                    stats: ChunkSinkStats,
                    diskTimeToLive: Int): Future[Response] = {

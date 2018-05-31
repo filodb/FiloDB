@@ -47,7 +47,7 @@ object DictUTF8Vector {
     for { i <- 0 until sourceLen optimized } {
       val item = sourceVector(i)
       // scalastyle:off
-      if (item != null) {
+      if (item != null && item != ZeroCopyUTF8String.NA) {
         val newCode = codeMap.size + 1
         val orig = codeMap.putIfAbsent(item, newCode)  // Just one hashcode/compare
         if (orig == 0) {

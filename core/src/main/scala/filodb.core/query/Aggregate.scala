@@ -103,7 +103,6 @@ trait ChunkAggregator extends Aggregator with StrictLogging {
   def positions: Array[Int]
 
   def aggPartition(method: ChunkScanMethod, partition: FiloPartition): A = {
-    logger.trace(s"Aggregating partition ${partition.binPartition}")
     partition.readers(method, positions).foldLeft(emptyAggregate) {
       case (agg, reader) =>
         logger.trace(s"  --> agg=$agg reader=${reader.info}")

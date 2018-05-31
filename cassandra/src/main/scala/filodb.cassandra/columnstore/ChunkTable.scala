@@ -45,7 +45,7 @@ sealed class ChunkTable(val dataset: DatasetRef,
       |) VALUES (?, ?, ?, ?) USING TTL ?""".stripMargin
   ).setConsistencyLevel(writeConsistencyLevel)
 
-  def writeChunks(partition: Types.PartitionKey,
+  def writeChunks(partition: Array[Byte],
                   chunkInfo: ChunkSetInfo,
                   chunks: Seq[(Int, ByteBuffer)],
                   stats: ChunkSinkStats,
@@ -73,7 +73,7 @@ sealed class ChunkTable(val dataset: DatasetRef,
                                   | AND chunkid >= ? AND chunkid <= ?""".stripMargin)
                               .setConsistencyLevel(ConsistencyLevel.ONE)
 
-  def readChunks(partition: Types.PartitionKey,
+  def readChunks(partition: Array[Byte],
                  columnId: Int,
                  colPos: Int,
                  chunkIds: Seq[Types.ChunkID],

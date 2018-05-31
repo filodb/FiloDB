@@ -11,6 +11,7 @@ import org.openjdk.jmh.annotations._
 import scalaxy.loops._
 
 import filodb.core.metadata.Dataset
+import filodb.core.NamesTestData
 import filodb.core.query.ChunkSetReader
 import filodb.core.store.ChunkSet
 import filodb.memory.format.{FastFiloRowReader, FiloVector, TupleRowReader}
@@ -18,7 +19,7 @@ import filodb.memory.format.{FastFiloRowReader, FiloVector, TupleRowReader}
 object IntSumReadBenchmark {
   val dataset = Dataset("dataset", Seq("part:int"), Seq("int:int", "rownum:int"), "rownum")
   val rowIt = Iterator.from(0).map { row => (Some(scala.util.Random.nextInt), Some(row), Some(0)) }
-  val partKey = dataset.partKey(0)
+  val partKey = NamesTestData.defaultPartKey
   val rowColumns = Seq("int", "rownum", "part")
 
   org.slf4j.LoggerFactory.getLogger("filodb").asInstanceOf[Logger].setLevel(Level.ERROR)

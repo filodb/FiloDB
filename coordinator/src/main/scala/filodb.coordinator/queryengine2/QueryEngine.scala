@@ -9,9 +9,10 @@ import akka.actor.ActorRef
 import com.typesafe.scalalogging.StrictLogging
 import monix.eval.Task
 
-import filodb.coordinator.{ShardKeyGenerator, ShardMapper}
+import filodb.coordinator.ShardMapper
 import filodb.coordinator.client.QueryCommands.QueryOptions
 import filodb.core.binaryrecord.BinaryRecord
+import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.Dataset
 import filodb.core.query.{ColumnFilter, Filter}
 import filodb.query._
@@ -73,7 +74,7 @@ class QueryEngine(dataset: Dataset,
         }
       }
       logger.debug(s"For shardColumns $shardColumns, extracted filter values $shardColValues successfully")
-      val shardHash = ShardKeyGenerator.shardKeyHash(shardColValues)
+      val shardHash = RecordBuilder.shardKeyHash(shardColumns, shardColValues)
       shardMapperFunc.queryShards(shardHash, options.shardKeySpread)
     } else {
       options.shardOverrides.get

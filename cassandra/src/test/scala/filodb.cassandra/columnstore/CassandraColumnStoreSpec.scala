@@ -4,6 +4,7 @@ import com.typesafe.config.ConfigFactory
 
 import filodb.core._
 import filodb.core.store.ColumnStoreSpec
+import filodb.cassandra.metastore.CassandraMetaStore
 
 class CassandraColumnStoreSpec extends ColumnStoreSpec {
   import monix.execution.Scheduler.Implicits.global
@@ -11,7 +12,8 @@ class CassandraColumnStoreSpec extends ColumnStoreSpec {
   import filodb.core.store._
   import NamesTestData._
 
-  val colStore = new CassandraColumnStore(config, global)
+  lazy val colStore = new CassandraColumnStore(config, global)
+  lazy val metaStore = new CassandraMetaStore(config.getConfig("cassandra"))
 
   "getScanSplits" should "return splits from Cassandra" in {
     // Single split, token_start should equal token_end

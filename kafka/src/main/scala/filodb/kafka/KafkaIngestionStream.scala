@@ -9,11 +9,13 @@ import org.apache.kafka.clients.consumer.ConsumerRecord
 import org.apache.kafka.common.TopicPartition
 
 import filodb.coordinator.{GlobalConfig, IngestionStream, IngestionStreamFactory}
-import filodb.core.memstore.IngestRecord
+import filodb.core.binaryrecord2.RecordContainer
+import filodb.core.memstore.SomeData
 import filodb.core.metadata.Dataset
 
-/** Used by the coordinator.
-  * INTERNAL API.
+/**
+  * KafkaIngestionStream creates an IngestionStream of RecordContainers by consuming from a single partition
+  * in Apache Kafka.  Each message in Kafka is expected to be a RecordContainer's bytes.
   *
   * @param config  the Typesafe source config to use, see sourceconfig in `docs/ingestion.md`
   * @param dataset the dataset
@@ -27,7 +29,6 @@ class KafkaIngestionStream(config: Config,
   protected val sc = new SourceConfig(config, shard)
   import sc._
 
-  protected val converter = RecordConverter(RecordConverterClass, dataset)
   private val tp = new TopicPartition(IngestionTopic, shard)
 
   logger.info(s"Creating consumer assigned to topic ${tp.topic} partition ${tp.partition} offset $offset")
@@ -35,7 +36,7 @@ class KafkaIngestionStream(config: Config,
     PartitionedConsumerObservable.create(sc, tp, offset)
 
   /**
-   * Returns a reactive Observable stream of IngestRecord sequences from Kafka.
+   * Returns a reactive Observable stream of RecordContainers from Kafka.
    * NOTE: the scheduler used makes a huge difference.
    * The IO scheduler allows all the Kafka partition inits to happen at beginning,
    *   & allows lots of simultaneous streams to stream efficiently.
@@ -43,9 +44,9 @@ class KafkaIngestionStream(config: Config,
    * The computation() sched seems to behave like a round robin: it seems to take turns pulling from only
    *   one or a few partitions at a time; probably doesn't work when you have lots of streams
    */
-  override def get: Observable[Seq[IngestRecord]] =
+  override def get: Observable[SomeData] =
     consumer.map { record =>
-      converter.convert(record.value.asInstanceOf[AnyRef], record.partition, record.offset)
+      SomeData(record.value.asInstanceOf[RecordContainer], record.offset)
     }.executeOn(GlobalConfig.ioPool)
 
   override def teardown(): Unit = {

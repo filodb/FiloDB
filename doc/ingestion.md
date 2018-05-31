@@ -6,7 +6,8 @@
   - [Ingestion](#ingestion)
     - [Kafka Ingestion](#kafka-ingestion)
       - [Basic Configuration](#basic-configuration)
-      - [Sample Code](#sample-code)
+      - [Kafka Message Format](#kafka-message-format)
+  - [Testing the Consumer](#testing-the-consumer)
   - [Recovery and Persistence](#recovery-and-persistence)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
@@ -16,6 +17,8 @@
 ## Ingestion
 FiloDB allows multiple topics/streams to be ingested simultaneously.  Each stream may have different source configuration as well as MemStore / memory / chunking configuration.
 
+The main ingestion source is likely to be Apache Kafka, though it is possible to implement any custom ingestion source by implementing the `filodb.coordinator.IngestionStream` and `IngestionStreamFactory` traits.
+
 ### Kafka Ingestion
 Each FiloDB dataset/stream is sharded, with one shard equal to a Kafka partition, and each stream corresponding to a different Kafka topic.  In fact each stream can be configured to come from different brokers and have different store characteristics.  For example:
 
@@ -24,6 +27,8 @@ Each FiloDB dataset/stream is sharded, with one shard equal to a Kafka partition
 
 #### Basic Configuration
 Create your custom source config file, e.g. [example-source.conf](../kafka/src/main/resources/example-source.conf)
+
+NOTE: for the latest and most up to date, see [timeseries-dev-source.conf](../conf/timeseries-dev-source.conf).
 
 ```yaml
 dataset = "example"
@@ -35,7 +40,6 @@ sourcefactory = "filodb.kafka.KafkaIngestionStreamFactory"
 sourceconfig {
   # Required FiloDB Kafka settings
   filo-topic-name = "topics.topic1"
-  filo-record-converter = "com.example.CustomRecordConverter"
 
   # Custom client configurations
   my.custom.client.config = "custom.value"
@@ -43,10 +47,9 @@ sourceconfig {
   # And any standard kafka configurations, e.g.
   # This accepts both the standard kafka value of a comma-separated
   # string and a Typesafe list of String values
+  # EXCEPT: do not populate value.deserializer, as the Kafka format is fixed in FiloDB to be messages of RecordContainer's
   bootstrap.servers = "host1:port,host2:port"
   auto.offset.reset=latest
-  value.serializer = "org.example.CustomSerializer"
-  value.deserializer = "org.example.CustomDeserializer"
   # optional etc.
   partitioner.class = "com.example.OptionalCustomPartitioner"
   group.id = "org.example.cluster1.filodb.consumer1"
@@ -77,56 +80,16 @@ sourceconfig {
 
 }
 ```
-The [defaults](../kafka/src/main/resources/filodb-defaults.conf) you can override and see
-[all configuration here](../kafka/src/main/resources).
 
-#### Sample Code
-Users must provide three basic implementations to FiloDB for Kafka ingestion
-* A custom Kafka `RowReader` for this data type, or use an existing one for simpler data types, e.g. `org.velvia.filo.ArrayStringRowReader`
-* A custom Kafka [RecordConverter](../kafka/src/main/scala/filodb/kafka/RecordConverter.scala)
-to convert a your event data type to a FiloDB sequence of `IngestRecord` instances
-    - [A simple converter for String types](../kafka/src/main/scala/filodb/kafka/RecordConverter.scala#L30-L38)
-* A custom Kafka Deserializer - example using the provided helper [KafkaSerdes](../kafka/src/main/scala/filodb/kafka/KafkaSerdes.scala)
+#### Kafka Message Format
 
-```scala
-import filodb.kafka.KafkaSerdes
-import org.apache.kafka.common.serialization.{Serializer, Deserializer}
+Each Kafka Message is expected to be a [RecordContainer](../core/src/main/scala/filodb.core/binaryrecord2/RecordContainer.scala), which is a byte container for multiple [BinaryRecords](binaryrecord-spec.md).  See the previous link for more details about this format.  It is an efficient format which supports different dataset schemas.
 
-/* For FiloDB to consume and transform the stream of custom records to ingest. */
-final class DataTDeserializer extends Deserializer[DataT] with KafkaSerdes {
-  override def deserialize(topic: String, bytes: Array[Byte]): DataT = DataT.from(bytes)
-}
+- Each Kafka topic must have RecordContainers encoded using the SAME RecordSchema
+- One topic per dataset ingested
+- The `KafkaIngestionStream` enforces the use of the built-in `RecordContainerDeserializer` as that is expected to be the format
 
-/* Not needed for FiloDB but you can create like this for your producer side with KafkaSerdes as well. */
-final class DataTSerializer extends Serializer[DataT] with KafkaSerdes {
-  override def serialize(topic: String, data: DataT): Array[Byte] = data.toByteArray
-}
-```
-
-A simple test
-
-```scala
-implicit val timeout: Timeout = 10.seconds
-implicit val io = Scheduler.io("example-scheduler")
-
-val settings = new KafkaSettings(sourceConfig)
-
-val producer = PartitionedProducerSink.create[String, String](settings, io)
-val consumer = PartitionedConsumerObservable.create(settings, tps.head).executeOn(io)
-val key = JLong.valueOf(0L)
-val count = 10000
-
-val pushT = Observable.range(0, count)
-  .map(msg => new ProducerRecord(settings.IngestionTopic, key, msg.toString))
-  .bufferIntrospective(1024)
-  .consumeWith(producer)
-
-val streamT = consumer
-  .map(record => (record.offset, record.value.toString))
-  .toListL
-
-val task = Task.zip2(Task.fork(streamT), Task.fork(pushT)).runAsync
-```
+In the future converters to BinaryRecord from standard formats will be provided.
 
 You can also look at [SourceSinkSuite.scala](../kafka/src/it/scala/filodb/kafka/SourceSinkSuite.scala).
 

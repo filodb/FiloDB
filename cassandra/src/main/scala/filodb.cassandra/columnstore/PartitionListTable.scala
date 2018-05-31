@@ -7,7 +7,6 @@ import monix.reactive.Observable
 
 import filodb.cassandra.FiloCassandraConnector
 import filodb.core.{DatasetRef, Response, Types}
-import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.metadata.Dataset
 
 /**
@@ -38,8 +37,9 @@ sealed class PartitionListTable(val dataset: DatasetRef,
                      |) WITH compression = {
                     'sstable_compression': '$sstableCompression'}""".stripMargin
 
-  def fromRow(row: Row, dataset: Dataset): Types.PartitionKey =
-    BinaryRecord(dataset.partitionBinSchema, row.getBytes("partition"))
+  def fromRow(row: Row, dataset: Dataset): Types.PartitionKey = ???
+    // TODO: in the future we should simply store and retrieve an entire RecordContainer
+    // BinaryRecord(dataset.partitionBinSchema, row.getBytes("partition"))
 
   lazy val readCql = session.prepare(s"SELECT partition FROM $tableString WHERE shard = ? and stripe = ?")
   lazy val writePartitionCql = session.prepare(
@@ -61,7 +61,7 @@ sealed class PartitionListTable(val dataset: DatasetRef,
   def writePartitions(shard: Int, stripe: Int, partitions: Seq[Types.PartitionKey]): Future[Response] = {
     val batchStatement = new BatchStatement(BatchStatement.Type.UNLOGGED)
     partitions.foreach { p =>
-      batchStatement.add(writePartitionCql.bind(Int.box(shard), Int.box(stripe), toBuffer(p)))
+      // batchStatement.add(writePartitionCql.bind(Int.box(shard), Int.box(stripe), toBuffer(p)))
     }
     connector.execStmtWithRetries(batchStatement)
   }
@@ -69,7 +69,7 @@ sealed class PartitionListTable(val dataset: DatasetRef,
   def deletePartitions(shard: Int, stripe: Int, partitions: Seq[Types.PartitionKey]): Future[Response] = {
     val batchStatement = new BatchStatement(BatchStatement.Type.UNLOGGED)
     partitions.foreach { p =>
-      batchStatement.add(deletePartitionCql.bind(Int.box(shard), Int.box(stripe), toBuffer(p)))
+      // batchStatement.add(deletePartitionCql.bind(Int.box(shard), Int.box(stripe), toBuffer(p)))
     }
     connector.execStmt(batchStatement)
   }

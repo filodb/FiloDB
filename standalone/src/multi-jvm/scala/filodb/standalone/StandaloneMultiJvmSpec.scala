@@ -129,7 +129,7 @@ abstract class StandaloneMultiJvmSpec(config: MultiNodeConfig) extends MultiNode
   }
 
   def runQuery(client: LocalClient, queryTimestamp: Long): Double = {
-    val query = "heap_usage{host=\"H0\",job=\"A0\"}"
+    val query = "heap_usage{host=\"H0\",job=\"A2\"}[5m]"
     val qParams = QueryParams(queryTimestamp, 1, queryTimestamp)
     val logicalPlan = Parser.queryRangeToLogicalPlan(query, qParams)
 

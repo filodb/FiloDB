@@ -13,15 +13,13 @@ import org.apache.spark.unsafe.types.UTF8String
 
 import filodb.coordinator.client.Client.parse
 import filodb.core._
-import filodb.core.binaryrecord.{BinaryRecord, BinaryRecordWrapper}
+import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.metadata.{Column, Dataset}
 import filodb.core.query.{ChunkSetReader, ColumnFilter, Filter => FF, KeyFilter}
 import filodb.core.store._
 import filodb.memory.format.{FiloRowReader, FiloVector, ZeroCopyUTF8String}
 
 object FiloRelation extends StrictLogging {
-  import Types.PartitionKey
-
   implicit val context = scala.concurrent.ExecutionContext.Implicits.global
 
   // *** Statistics **
@@ -65,7 +63,7 @@ object FiloRelation extends StrictLogging {
   // Partition Query?
   def partitionQuery(config: Config,
                      dataset: Dataset,
-                     filterStuff: Seq[(String, Column, Seq[Filter])]): Seq[PartitionKey] = {
+                     filterStuff: Seq[(String, Column, Seq[Filter])]): Seq[Array[Byte]] = {
     val inqueryPartitionsLimit = config.getInt("columnstore.inquery-partitions-limit")
     // Are all the partition keys given in filters?
     // Are the filters EqualTo, In?
@@ -270,8 +268,8 @@ case class FiloRelation(dataset: DatasetRef,
   def buildScan(requiredColumns: Array[String]): RDD[Row] =
     buildScan(requiredColumns, Array.empty)
 
-  def parallelizePartKeys(keys: Seq[Types.PartitionKey], nPartitions: Int): RDD[BinaryRecordWrapper] =
-    sqlContext.sparkContext.parallelize(keys.map(BinaryRecordWrapper.apply), nPartitions)
+  def parallelizePartKeys(keys: Seq[Array[Byte]], nPartitions: Int): RDD[Array[Byte]] =
+    sqlContext.sparkContext.parallelize(keys, nPartitions)
 
   def scanByPartitions(dataset: Dataset,
                        groupedFilters: Map[String, Seq[Filter]],
@@ -288,7 +286,7 @@ case class FiloRelation(dataset: DatasetRef,
         singlePartQueries.increment
         parallelizePartKeys(Seq(partitionKey), 1).mapPartitions { partKeyIter =>
           perPartitionRowScanner(_confStr, _serializedDataset, columnIDs,
-                                 SinglePartitionScan(partKeyIter.next.binRec), chunkMethod)
+                                 SinglePartitionScan(partKeyIter.next), chunkMethod)
         }
 
       // filtered partition full table scan, with or without range scanning
@@ -300,11 +298,11 @@ case class FiloRelation(dataset: DatasetRef,
         }
 
       // multi partition query, no range scan
-      case partitionKeys: Seq[Any] =>
+      case partitionKeys: Seq[Array[Byte]] =>
         multiPartQueries.increment
         parallelizePartKeys(partitionKeys, 1).mapPartitions { partKeyIter =>
           perPartitionRowScanner(_confStr, _serializedDataset, columnIDs,
-                                 MultiPartitionScan(partKeyIter.map(_.binRec).toSeq), chunkMethod)
+                                 MultiPartitionScan(partKeyIter.toSeq), chunkMethod)
         }
     }
   }

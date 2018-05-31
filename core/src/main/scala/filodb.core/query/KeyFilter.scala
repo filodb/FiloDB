@@ -1,10 +1,5 @@
 package filodb.core.query
 
-import scala.language.postfixOps
-
-import scalaxy.loops._
-
-import filodb.core.Types.PartitionKey
 import filodb.core.metadata.{Column, DataColumn, Dataset}
 import filodb.memory.format.{SingleValueRowReader, UTF8Wrapper, ZeroCopyUTF8String}
 
@@ -78,31 +73,32 @@ object KeyFilter {
     }.toMap.filterKeys { name => columnNames.contains(name) }
   }
 
+  // NOTE: With Lucene indexing coming, partition filter func is really not needed anymore
   /**
    * Creates a filter function that returns boolean given a PartitionKey.
    * @param dataset the Dataset describing the dataset schema
    * @param filters one ColumnFilter per column to filter on.  If multiple filters are desired on that
    *                column they should be combined using And.
    */
-  def makePartitionFilterFunc(dataset: Dataset,
-                              filters: Seq[ColumnFilter]): PartitionKey => Boolean = {
-    val positionsAndFuncs = filters.map { case ColumnFilter(col, filter) =>
-                              val pos = dataset.partitionColumns.indexWhere(_.name == col)
-                              (pos, filter.filterFunc) }
-    val positions = positionsAndFuncs.collect { case (pos, func) if pos >= 0 => pos }.toArray
-    val funcs = positionsAndFuncs.collect { case (pos, func) if pos >= 0 => func }.toArray
+  // def makePartitionFilterFunc(dataset: Dataset,
+  //                             filters: Seq[ColumnFilter]): PartitionKey => Boolean = {
+  //   val positionsAndFuncs = filters.map { case ColumnFilter(col, filter) =>
+  //                             val pos = dataset.partitionColumns.indexWhere(_.name == col)
+  //                             (pos, filter.filterFunc) }
+  //   val positions = positionsAndFuncs.collect { case (pos, func) if pos >= 0 => pos }.toArray
+  //   val funcs = positionsAndFuncs.collect { case (pos, func) if pos >= 0 => func }.toArray
 
-    def partFunc(p: PartitionKey): Boolean = {
-      for { i <- 0 until positions.size optimized } {
-        val bool = funcs(i)(p.getAny(positions(i)))
-        // Short circuit when any filter returns false
-        if (!bool) return false
-      }
-      true
-    }
-    partFunc
-  }
+  //   def partFunc(p: PartitionKey): Boolean = {
+  //     for { i <- 0 until positions.size optimized } {
+  //       val bool = funcs(i)(p.getAny(positions(i)))
+  //       // Short circuit when any filter returns false
+  //       if (!bool) return false
+  //     }
+  //     true
+  //   }
+  //   partFunc
+  // }
 
-  def makePartitionFilterFunc(dataset: Dataset, filter: ColumnFilter): PartitionKey => Boolean =
-    makePartitionFilterFunc(dataset, Seq(filter))
+  // def makePartitionFilterFunc(dataset: Dataset, filter: ColumnFilter): PartitionKey => Boolean =
+  //   makePartitionFilterFunc(dataset, Seq(filter))
 }

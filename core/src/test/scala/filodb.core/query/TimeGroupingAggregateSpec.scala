@@ -22,7 +22,7 @@ class TimeGroupingAggregateSpec extends FunSpec with Matchers with BeforeAndAfte
 
   it("should filter and aggregate across time buckets and series") {
     memStore.setup(dataset1, 0, TestData.storeConf)
-    val data = records(linearMultiSeries()).take(30)   // 3 records per series x 10 series
+    val data = records(dataset1, linearMultiSeries().take(30))   // 3 records per series x 10 series
     memStore.ingest(dataset1.ref, 0, data)
 
     val split = memStore.getScanSplits(dataset1.ref, 1).head
@@ -46,7 +46,7 @@ class TimeGroupingAggregateSpec extends FunSpec with Matchers with BeforeAndAfte
 
   it("should aggregate with default number of buckets when no argument passed in") {
     memStore.setup(dataset1, 0, TestData.storeConf)
-    val data = records(linearMultiSeries()).take(30)   // 3 records per series x 10 series
+    val data = records(dataset1, linearMultiSeries().take(30))   // 3 records per series x 10 series
     memStore.ingest(dataset1.ref, 0, data)
 
     val split = memStore.getScanSplits(dataset1.ref, 1).head

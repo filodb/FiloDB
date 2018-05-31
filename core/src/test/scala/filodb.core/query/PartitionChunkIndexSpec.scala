@@ -14,7 +14,7 @@ class PartitionChunkIndexSpec extends FunSpec with Matchers {
 
   describe("RowkeyPartitionChunkIndex") {
     it("should add out of order chunks and return in rowkey order") {
-      val newIndex = new RowkeyPartitionChunkIndex(defaultPartKey, dataset)
+      val newIndex = new RowkeyPartitionChunkIndex(null, defaultPartKey, dataset)
 
       // Initial index should be empty
       newIndex.numChunks should equal (0)
@@ -32,7 +32,7 @@ class PartitionChunkIndexSpec extends FunSpec with Matchers {
     }
 
     it("should return no chunks if rowKeyRange startKey is greater than endKey") {
-      val newIndex = new RowkeyPartitionChunkIndex(defaultPartKey, dataset)
+      val newIndex = new RowkeyPartitionChunkIndex(null, defaultPartKey, dataset)
       newIndex.add(info1, Nil)
       newIndex.add(info2, Nil)
 
@@ -42,7 +42,7 @@ class PartitionChunkIndexSpec extends FunSpec with Matchers {
 
   describe("ChunkIDPartitionChunkIndex") {
     it("should add out of order chunks and return in chunkID order") {
-      val newIndex = new ChunkIDPartitionChunkIndex(defaultPartKey, dataset)
+      val newIndex = new ChunkIDPartitionChunkIndex(null, defaultPartKey, dataset)
 
       // Initial index should be empty
       newIndex.numChunks should equal (0)
@@ -60,7 +60,7 @@ class PartitionChunkIndexSpec extends FunSpec with Matchers {
     }
 
     it("should handle skips") {
-      val newIndex = new ChunkIDPartitionChunkIndex(defaultPartKey, dataset)
+      val newIndex = new ChunkIDPartitionChunkIndex(null, defaultPartKey, dataset)
       val origInfo = info1.copy(id = 9)
       val info2 = info1.copy(id = 14)
       newIndex.add(origInfo, Nil)

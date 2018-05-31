@@ -2,13 +2,11 @@ package filodb
 
 import java.sql.Timestamp
 
-import scala.collection.mutable.HashMap
 import scala.concurrent.duration._
 import scala.language.{implicitConversions, postfixOps}
 
 import akka.actor.ActorRef
 import com.typesafe.scalalogging.StrictLogging
-import monix.reactive.Observable
 import net.ceedubs.ficus.Ficus._
 import org.apache.spark.sql.{DataFrame, Row, SparkSession, SQLContext}
 import org.apache.spark.sql.hive.filodb.MetaStoreSync
@@ -18,7 +16,6 @@ import org.scalactic._
 import filodb.coordinator._
 import filodb.coordinator.client.ClientException
 import filodb.core._
-import filodb.core.memstore.{IngestRecord, IngestRouting}
 import filodb.core.metadata.{Column, Dataset}
 import filodb.memory.format.RowReader
 
@@ -73,7 +70,6 @@ package spark {
 package object spark extends StrictLogging {
   val DefaultWriteTimeout = 999 minutes
 
-  import IngestionStream._
   import filodb.coordinator.client.Client.{actorAsk, parse}
   import FiloDriver.metaStore
 
@@ -84,16 +80,6 @@ package object spark extends StrictLogging {
   lazy val datasetOpTimeout = FiloDriver.config.as[FiniteDuration]("spark.dataset-ops-timeout")
   lazy val flushTimeout     = FiloDriver.config.as[FiniteDuration]("spark.flush-timeout")
 
-  private val protocolActors = new HashMap[DatasetRef, ActorRef]
-
-  private[spark] def getProtocolActor(clusterActor: ActorRef, ref: DatasetRef): ActorRef = synchronized {
-    protocolActors.getOrElseUpdate(ref, {
-      val actorId = actorCounter.getAndIncrement()
-      FiloExecutor.system.actorOf(IngestProtocol.props(clusterActor, ref),
-                                  s"ingestProtocol_${ref}_$actorId")
-    })
-  }
-
   /**
    * Sends rows from this Spark partition to the right FiloDB nodes using IngestionProtocol.
    * Might not be terribly efficient.
@@ -101,7 +87,6 @@ package object spark extends StrictLogging {
    */
   private[spark] def ingestRddRows(clusterActor: ActorRef,
                                    dataset: Dataset,
-                                   routing: IngestRouting,
                                    rows: Iterator[Row],
                                    writeTimeout: FiniteDuration,
                                    partitionIndex: Int): Unit = {
@@ -109,20 +94,10 @@ package object spark extends StrictLogging {
       case newMap: ShardMapper => newMap
     }
 
-    val stream = new IngestionStream {
-      def get: Observable[Seq[IngestRecord]] = {
-        val recordSeqIt = rows.grouped(1000).zipWithIndex.map { case (rows, idx) =>
-          if (idx % 20 == 0) logger.info(s"Ingesting batch starting at row ${idx * 1000}")
-          rows.map { row => IngestRecord(routing, RddRowReader(row), idx) }
-        }
-        Observable.fromIterator(recordSeqIt)
-      }
-      def teardown(): Unit = {}
-    }
-
-    // NOTE: might need to force scheduler to run on current thread due to bug with Spark ThreadLocal
-    // during shuffles.
-    stream.routeToShards(mapper, dataset, getProtocolActor(clusterActor, dataset.ref))(FiloExecutor.ec)
+    // NOTE: There is no working ingestion right now.  IngestProtocol has been removed.
+    // If this is wanted, here are some possibilities:
+    //  - embed the gateway/tsgenerator code here.  Take the raw records, encode and push to Kafka
+    //  - variant of the above using RSocket or similar to directly push to FiloDB
   }
 
   /**

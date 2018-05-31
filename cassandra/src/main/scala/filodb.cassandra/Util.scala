@@ -75,7 +75,7 @@ object Util {
   }
 
   // Creates a writeable ByteBuffer, which is what the java driver expects
-  def toBuffer(key: Types.PartitionKey): ByteBuffer = ByteBuffer.wrap(key.bytes)
+  def toBuffer(key: Array[Byte]): ByteBuffer = ByteBuffer.wrap(key)
 
   def toHex(bb: ByteBuffer): String = com.datastax.driver.core.utils.Bytes.toHexString(bb)
 }

@@ -51,9 +51,9 @@ class TimeSeriesPartitionSpec extends FunSpec with Matchers with BeforeAndAfter 
 
   it("should be able to read immediately after ingesting rows") {
     part = new TimeSeriesPartition(0, dataset1, defaultPartKey, 0, colStore, bufferPool,
-          false, pagedChunkStore, new TimeSeriesShardStats(dataset1.ref, 0))
+          pagedChunkStore, new TimeSeriesShardStats(dataset1.ref, 0))
     val data = singleSeriesReaders().take(5)
-    part.ingest(data(0), 1000L, ingestBlockHolder)
+    part.ingest(data(0), ingestBlockHolder)
     part.numChunks shouldEqual 1
     part.appendingChunkLen shouldEqual 1
     part.unflushedChunksets shouldEqual 1
@@ -64,10 +64,10 @@ class TimeSeriesPartitionSpec extends FunSpec with Matchers with BeforeAndAfter 
 
   it("should be able to ingest new rows while flush() executing concurrently") {
     part = new TimeSeriesPartition(0, dataset1, defaultPartKey, 0, colStore, bufferPool,
-                    false, pagedChunkStore, new TimeSeriesShardStats(dataset1.ref, 0))
+                    pagedChunkStore, new TimeSeriesShardStats(dataset1.ref, 0))
     val data = singleSeriesReaders().take(11)
     val minData = data.map(_.getDouble(1))
-    data.take(10).zipWithIndex.foreach { case (r, i) => part.ingest(r, 1000L + i, ingestBlockHolder) }
+    data.take(10).zipWithIndex.foreach { case (r, i) => part.ingest(r, ingestBlockHolder) }
 
     val origPoolSize = bufferPool.poolSize
 
@@ -85,7 +85,7 @@ class TimeSeriesPartitionSpec extends FunSpec with Matchers with BeforeAndAfter 
 
     val blockHolder = new BlockMemFactory(blockStore, None, BlockMetaAllocSize)
     val flushFut = Future(part.makeFlushChunks(blockHolder))
-    data.drop(10).zipWithIndex.foreach { case (r, i) => part.ingest(r, 1100L + i, ingestBlockHolder) }
+    data.drop(10).zipWithIndex.foreach { case (r, i) => part.ingest(r, ingestBlockHolder) }
     val chunkSets = flushFut.futureValue.toSeq
 
     // After flush, the old writebuffers should be returned to pool, but new one allocated for ingesting
@@ -109,10 +109,10 @@ class TimeSeriesPartitionSpec extends FunSpec with Matchers with BeforeAndAfter 
 
   it("should reclaim blocks and evict flushed chunks properly upon reclaim") {
      part = new TimeSeriesPartition(0, dataset1, defaultPartKey, 0, colStore, bufferPool,
-                        false, pagedChunkStore, new TimeSeriesShardStats(dataset1.ref, 0))
+                        pagedChunkStore, new TimeSeriesShardStats(dataset1.ref, 0))
      val data = singleSeriesReaders().take(21)
      val minData = data.map(_.getDouble(1))
-     data.take(10).zipWithIndex.foreach { case (r, i) => part.ingest(r, 1000L + i, ingestBlockHolder) }
+     data.take(10).zipWithIndex.foreach { case (r, i) => part.ingest(r, ingestBlockHolder) }
 
      val origPoolSize = bufferPool.poolSize
 
@@ -121,7 +121,7 @@ class TimeSeriesPartitionSpec extends FunSpec with Matchers with BeforeAndAfter 
      bufferPool.poolSize shouldEqual origPoolSize    // current chunks become null, no new allocation yet
      val blockHolder = new BlockMemFactory(blockStore, None, BlockMetaAllocSize)
      val flushFut = Future(part.makeFlushChunks(blockHolder))
-     data.drop(10).take(6).zipWithIndex.foreach { case (r, i) => part.ingest(r, 1100L + i, ingestBlockHolder) }
+     data.drop(10).take(6).zipWithIndex.foreach { case (r, i) => part.ingest(r, ingestBlockHolder) }
      val chunkSets = flushFut.futureValue.toSeq
 
      // After flush, the old writebuffers should be returned to pool, but new one allocated too
@@ -150,7 +150,7 @@ class TimeSeriesPartitionSpec extends FunSpec with Matchers with BeforeAndAfter 
      part.switchBuffers(ingestBlockHolder)
      val holder2 = new BlockMemFactory(blockStore, None, BlockMetaAllocSize)
      val flushFut2 = Future(part.makeFlushChunks(holder2))
-     data.drop(16).zipWithIndex.foreach { case (r, i) => part.ingest(r, 1100L + i, ingestBlockHolder) }
+     data.drop(16).zipWithIndex.foreach { case (r, i) => part.ingest(r, ingestBlockHolder) }
      val chunkSets2 = flushFut2.futureValue.toSeq
 
      part.numChunks shouldEqual 3
@@ -169,10 +169,10 @@ class TimeSeriesPartitionSpec extends FunSpec with Matchers with BeforeAndAfter 
  }
 
   it("should not switch buffers and flush when current chunks are empty") {
-    part = new TimeSeriesPartition(0, dataset1, defaultPartKey, 0, colStore, bufferPool, false,
+    part = new TimeSeriesPartition(0, dataset1, defaultPartKey, 0, colStore, bufferPool,
               pagedChunkStore, new TimeSeriesShardStats(dataset1.ref, 0))
     val data = singleSeriesReaders().take(11)
-    data.zipWithIndex.foreach { case (r, i) => part.ingest(r, 1000L + i, ingestBlockHolder) }
+    data.zipWithIndex.foreach { case (r, i) => part.ingest(r, ingestBlockHolder) }
     part.numChunks shouldEqual 1
     part.appendingChunkLen shouldEqual 11
 
@@ -202,9 +202,9 @@ class TimeSeriesPartitionSpec extends FunSpec with Matchers with BeforeAndAfter 
     val origPoolSize = bufferPool.poolSize
 
     part = new TimeSeriesPartition(0, dataset1, defaultPartKey, 0, colStore, bufferPool,
-          false, pagedChunkStore, new TimeSeriesShardStats(dataset1.ref, 0))
+          pagedChunkStore, new TimeSeriesShardStats(dataset1.ref, 0))
     val data = singleSeriesReaders().take(maxChunkSize + 10)
-    data.take(maxChunkSize - 10).zipWithIndex.foreach { case (r, i) => part.ingest(r, 1000L + i, ingestBlockHolder) }
+    data.take(maxChunkSize - 10).zipWithIndex.foreach { case (r, i) => part.ingest(r, ingestBlockHolder) }
     part.numChunks shouldEqual 1
     part.appendingChunkLen shouldEqual (maxChunkSize - 10)
     part.unflushedChunksets shouldEqual 1
@@ -212,7 +212,7 @@ class TimeSeriesPartitionSpec extends FunSpec with Matchers with BeforeAndAfter 
     bufferPool.poolSize shouldEqual (origPoolSize - 1)
 
     // Now ingest 20 more.  Verify new chunks encoded.  10 rows after switch at 100. Verify can read everything.
-    data.drop(maxChunkSize - 10).zipWithIndex.foreach { case (r, i) => part.ingest(r, 1000L + i, ingestBlockHolder) }
+    data.drop(maxChunkSize - 10).zipWithIndex.foreach { case (r, i) => part.ingest(r, ingestBlockHolder) }
     part.numChunks shouldEqual 2
     part.appendingChunkLen shouldEqual 10
     part.unflushedChunksets shouldEqual 2

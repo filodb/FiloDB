@@ -95,7 +95,10 @@ object UTF8StringMedium extends BinaryRegion {
   final def endsWith(base: Any, offset: Long, other: Any, otherOffset: Long): Boolean =
     matchAt(base, offset, other, otherOffset, numBytes(base, offset) - numBytes(other, otherOffset))
 
-  final def toString(base: Any, offset: Long): String = new String(asNewByteArray(base, offset))
+  final def toString(base: Any, offset: Long): String = {
+    val bytes = asNewByteArray(base, offset)
+    new String(bytes, 2, bytes.size - 2)
+  }
 }
 
 /**

@@ -12,6 +12,8 @@
     <logger name="filodb.core" level="TRACE" />
     <logger name="filodb.memory" level="DEBUG" />
     <logger name="filodb.query" level="DEBUG" />
+    <logger name="com.esotericsoftware.minlog" level="DEBUG" />
+    <!-- <logger name="com.esotericsoftware.kryo.io" level="TRACE" /> -->
 
     <logger name="org.apache.kafka.clients.consumer.ConsumerConfig" level="INFO"/>
     <logger name="org.apache.kafka.clients" level="INFO"/>

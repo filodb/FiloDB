@@ -82,5 +82,9 @@ class UTF8StringTest extends FunSpec with Matchers with BeforeAndAfterAll with P
       str2.endsWith(str3) shouldEqual false
       str2.endsWith("4".utf8(nativeMem)) shouldEqual true
     }
+
+    it("should convert to and from Java Strings properly") {
+      UTF8StringMedium.native("1234", nativeMem).toString shouldEqual "1234"
+    }
   }
 }

@@ -5,20 +5,22 @@ import com.typesafe.scalalogging.StrictLogging
 import org.jctools.maps.NonBlockingHashMap
 import scalaxy.loops._
 
+import filodb.core.binaryrecord2.MapItemConsumer
 import filodb.core.metadata.{Column, Dataset}
 import filodb.core.query.ColumnFilter
 import filodb.core.store.ChunkSetInfo.emptySkips
 import filodb.core.Types.PartitionKey
 import filodb.memory.format.{ZeroCopyUTF8String => UTF8Str}
+import filodb.memory.UTF8StringMedium
 
 trait Indexer {
-  def fromKey(key: PartitionKey, partIndex: Int): Unit
+  def fromRecord(base: Any, offset: Long, partIndex: Int): Unit
   /** Obtains pairs of index (name, value) from a partition key */
   def getNamesValues(key: PartitionKey): Seq[(UTF8Str, UTF8Str)]
 }
 
 object NoOpIndexer extends Indexer {
-  def fromKey(key: PartitionKey, partIndex: Int): Unit = {}
+  def fromRecord(base: Any, offset: Long, partIndex: Int): Unit = {}
   def getNamesValues(key: PartitionKey): Seq[(UTF8Str, UTF8Str)] = Nil
 }
 
@@ -31,28 +33,34 @@ class PartitionKeyIndex(dataset: Dataset) extends StrictLogging {
   import filodb.core._
   import Column.ColumnType._
 
+  class IndexingMapConsumer(partIndex: Int) extends MapItemConsumer {
+    def consume(keyBase: Any, keyOffset: Long, valueBase: Any, valueOffset: Long, index: Int): Unit = {
+      val keyUtf8 = new UTF8Str(keyBase, keyOffset + 2, UTF8StringMedium.numBytes(keyBase, keyOffset))
+      val valUtf8 = new UTF8Str(valueBase, valueOffset + 2, UTF8StringMedium.numBytes(valueBase, valueOffset))
+      addIndexEntry(keyUtf8, valUtf8, partIndex)
+    }
+  }
+
   private final val numPartColumns = dataset.partitionColumns.length
   private final val indices = new NonBlockingHashMap[UTF8Str, BitmapIndex[UTF8Str]]
 
-  private final val indexers = dataset.partitionColumns.zipWithIndex.map { case (c, pos) =>
+  private final val indexers = dataset.partitionColumns.zipWithIndex.map { case (c, i) =>
+    val pos = i + dataset.dataColumns.length
     c.columnType match {
       case StringColumn => new Indexer {
                              val colName = UTF8Str(c.name)
-                             def fromKey(key: PartitionKey, partIndex: Int): Unit = {
-                               addIndexEntry(colName, key.filoUTF8String(pos), partIndex)
+                             def fromRecord(base: Any, offset: Long, partIndex: Int): Unit = {
+                               addIndexEntry(colName, dataset.ingestionSchema.asZCUTF8Str(base, offset, pos), partIndex)
                              }
                              def getNamesValues(key: PartitionKey): Seq[(UTF8Str, UTF8Str)] =
-                               Seq((colName, key.filoUTF8String(pos)))
+                               Seq((colName, dataset.ingestionSchema.asZCUTF8Str(key, pos)))
                            }
       case MapColumn => new Indexer {
-                          def fromKey(key: PartitionKey, partIndex: Int): Unit = {
-                            // loop through map and add index entries
-                            key.as[Types.UTF8Map](pos).foreach { case (k, v) =>
-                              addIndexEntry(k, v, partIndex)
-                            }
+                          def fromRecord(base: Any, offset: Long, partIndex: Int): Unit = {
+                            dataset.ingestionSchema.consumeMapItems(base, offset,
+                                                                    pos, new IndexingMapConsumer(partIndex))
                           }
-                          def getNamesValues(key: PartitionKey): Seq[(UTF8Str, UTF8Str)] =
-                            key.as[Types.UTF8Map](pos).toSeq
+                          def getNamesValues(key: PartitionKey): Seq[(UTF8Str, UTF8Str)] = ???
                         }
       case other: Any =>
         logger.warn(s"Column $c has type that cannot be indexed and will be ignored right now")
@@ -60,9 +68,9 @@ class PartitionKeyIndex(dataset: Dataset) extends StrictLogging {
     }
   }.toArray
 
-  def addKey(key: PartitionKey, partIndex: Int): Unit = {
+  def addRecord(recBase: Any, recOffset: Long, partIndex: Int): Unit = {
     for { i <- 0 until numPartColumns optimized } {
-      indexers(i).fromKey(key, partIndex)
+      indexers(i).fromRecord(recBase, recOffset, partIndex)
     }
   }
 
@@ -87,9 +95,6 @@ class PartitionKeyIndex(dataset: Dataset) extends StrictLogging {
     val andedBitmap = if (bitmaps.isEmpty) emptySkips else EWAHCompressedBitmap.and(bitmaps: _*)
     (andedBitmap.intIterator, unfoundColumns)
   }
-
-  def getKeyIndexNamesValues(key: PartitionKey): Seq[(UTF8Str, UTF8Str)] =
-    (0 until numPartColumns).flatMap { i => indexers(i).getNamesValues(key) }
 
   /**
    * Removes entries denoted by a bitmap from multiple values from a single index.   If a bitmap for

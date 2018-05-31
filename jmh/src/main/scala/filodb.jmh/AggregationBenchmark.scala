@@ -35,7 +35,7 @@ class AggregationBenchmark {
 
   // Ingest raw data
   memStore.setup(dataset1, 0, TestData.storeConf)
-  val data = records(linearMultiSeries(startTs)).take(numPoints)
+  val data = records(dataset1, linearMultiSeries(startTs).take(numPoints))
   memStore.ingest(dataset1.ref, 0, data)
   val split = memStore.getScanSplits(dataset1.ref, 1).head
 

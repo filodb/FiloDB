@@ -18,7 +18,7 @@ import filodb.core.metadata.Dataset
 import filodb.core.store.StoreConfig
 
 object IngestionActor {
-  final case class IngestRows(ackTo: ActorRef, shard: Int, records: Seq[IngestRecord])
+  final case class IngestRows(ackTo: ActorRef, shard: Int, records: SomeData)
 
   case object GetStatus
 
@@ -98,7 +98,6 @@ private[filodb] final class IngestionActor(dataset: Dataset,
       }
 
       val ingestion = for {
-        done <- memStore.restorePartitions(dataset, e.shard)
         checkpoints <- memStore.metastore.readCheckpoints(dataset.ref, e.shard) }
       yield {
         if (checkpoints.isEmpty) {
@@ -235,8 +234,8 @@ private[filodb] final class IngestionActor(dataset: Dataset,
 
   private def ingest(e: IngestRows): Unit = {
     memStore.ingest(dataset.ref, e.shard, e.records)
-    if (e.records.nonEmpty) {
-      e.ackTo ! client.IngestionCommands.Ack(e.records.last.offset)
+    if (!e.records.records.isEmpty) {
+      e.ackTo ! client.IngestionCommands.Ack(e.records.offset)
     }
   }
 

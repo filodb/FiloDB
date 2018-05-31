@@ -49,10 +49,12 @@ trait BinaryRegion {
 
   final def asNewByteArray(base: Any, offset: Long): Array[Byte] = {
     val numBytes1 = numBytes(base, offset)
-    val bytes = new Array[Byte](numBytes1)
-    UnsafeUtils.unsafe.copyMemory(base, offset + lenBytes, bytes, UnsafeUtils.arayOffset, numBytes1)
+    val bytes = new Array[Byte](numBytes1 + lenBytes)
+    UnsafeUtils.unsafe.copyMemory(base, offset, bytes, UnsafeUtils.arayOffset, numBytes1 + lenBytes)
     bytes
   }
+
+  final def asNewByteArray(addr: NativePointer): Array[Byte] = asNewByteArray(UnsafeUtils.ZeroPointer, addr)
 
   /**
    * Returns true if both regions are byte for byte equal and the same length.

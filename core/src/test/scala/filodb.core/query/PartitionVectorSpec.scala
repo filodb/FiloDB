@@ -4,16 +4,17 @@ import org.scalatest.{FunSpec, Matchers}
 import org.scalatest.concurrent.ScalaFutures
 
 import filodb.core.{MachineMetricsData, TestData}
+import filodb.memory.format.SeqRowReader
 
 class PartitionVectorSpec extends FunSpec with Matchers with ScalaFutures {
   import MachineMetricsData._
   import monix.execution.Scheduler.Implicits.global
 
   // 2 chunks of 10 samples each, (100000-109000), (110000-119000)
-  val data = records(linearMultiSeries().take(20))
-  val chunksets = TestData.toChunkSetStream(dataset1, defaultPartKey, data.map(_.data)).toListL
+  val data = linearMultiSeries().take(20).map(SeqRowReader)
+  val chunksets = TestData.toChunkSetStream(dataset1, defaultPartKey, data).toListL
   val readers = chunksets.runAsync.futureValue.map(ChunkSetReader(_, dataset1, 0 to 2))
-  val partVector = PartitionVector(Some(PartitionInfo(defaultPartKey, 0)), readers)
+  val partVector = PartitionVector(Some(PartitionInfo(dataset1.partKeySchema, null, defaultPartKey, 0)), readers)
   val ordering = dataset1.rowKeyOrdering
 
   describe("rangedIterator") {

@@ -142,7 +142,7 @@ lazy val tsgenerator = project
   .settings(name := "tsgenerator")
   .settings(libraryDependencies ++= tsgeneratorDeps)
   .settings(tsgeneratorAssemblySettings: _*)
-  .dependsOn(coordinator)
+  .dependsOn(coordinator, prometheus)
 
 // Zookeeper pulls in slf4j-log4j12 which we DON'T want
 val excludeZK = ExclusionRule(organization = "org.apache.zookeeper")

@@ -2,12 +2,12 @@ package filodb.core.query
 
 import org.joda.time.DateTime
 
-import filodb.core.Types
 import filodb.core.binaryrecord.BinaryRecord
+import filodb.core.binaryrecord2.{MapItemConsumer, RecordSchema}
 import filodb.core.metadata.Column
 import filodb.core.metadata.Column.ColumnType._
 import filodb.core.store.{ChunkScanMethod, RowKeyChunkScan}
-import filodb.memory.MemFactory
+import filodb.memory.{MemFactory, UTF8StringMedium}
 import filodb.memory.format.{FastFiloRowReader, FiloVector, RowReader, ZeroCopyUTF8String => UTF8Str}
 import filodb.memory.format.{vectors => bv, _}
 
@@ -20,24 +20,38 @@ trait RangeVectorKey extends java.io.Serializable {
   override def toString: String = s"/shard:${sourceShards.mkString(",")}/$labelValues"
 }
 
+class SeqMapConsumer extends MapItemConsumer {
+  val pairs = new collection.mutable.ArrayBuffer[(UTF8Str, UTF8Str)]
+  def consume(keyBase: Any, keyOffset: Long, valueBase: Any, valueOffset: Long, index: Int): Unit = {
+    val keyUtf8 = new UTF8Str(keyBase, keyOffset + 2, UTF8StringMedium.numBytes(keyBase, keyOffset))
+    val valUtf8 = new UTF8Str(valueBase, valueOffset + 2, UTF8StringMedium.numBytes(valueBase, valueOffset))
+    pairs += (keyUtf8 -> valUtf8)
+  }
+}
+
 /**
-  * Range Vector Key backed by a PartitionKey object.
+  * Range Vector Key backed by a BinaryRecord v2 partition key, whic is basically a pointer to memory on or offheap.
   */
-final case class PartitionRangeVectorKey(partKey: BinaryRecord,
-                                    partKeyCols: Seq[ColumnInfo],
-                                    sourceShard: Int) extends RangeVectorKey {
+final case class PartitionRangeVectorKey(partBase: Array[Byte],
+                                         partOffset: Long,
+                                         partSchema: RecordSchema,
+                                         partKeyCols: Seq[ColumnInfo],
+                                         sourceShard: Int) extends RangeVectorKey {
   override def sourceShards: Seq[Int] = Seq(sourceShard)
   def labelValues: Map[UTF8Str, UTF8Str] = {
     partKeyCols.zipWithIndex.flatMap { case (c, pos) =>
       c.colType match {
-        case StringColumn => Seq(UTF8Str(c.name) -> partKey.filoUTF8String(pos))
-        case IntColumn    => Seq(UTF8Str(c.name) -> UTF8Str(partKey.getInt(pos).toString))
-        case LongColumn   => Seq(UTF8Str(c.name) -> UTF8Str(partKey.getLong(pos).toString))
-        case MapColumn    => partKey.as[Types.UTF8Map](pos)
+        case StringColumn => Seq(UTF8Str(c.name) -> partSchema.asZCUTF8Str(partBase, partOffset, pos))
+        case IntColumn    => Seq(UTF8Str(c.name) -> UTF8Str(partSchema.getInt(partBase, partOffset, pos).toString))
+        case LongColumn   => Seq(UTF8Str(c.name) -> UTF8Str(partSchema.getLong(partBase, partOffset, pos).toString))
+        case MapColumn    => val consumer = new SeqMapConsumer
+                             partSchema.consumeMapItems(partBase, partOffset, pos, consumer)
+                             consumer.pairs
         case _            => throw new UnsupportedOperationException("Not supported yet")
       }
     }.toMap
   }
+  override def toString: String = s"/shard:$sourceShard/${partSchema.stringify(partBase, partOffset)}"
 }
 
 final case class CustomRangeVectorKey(labelValues: Map[UTF8Str, UTF8Str]) extends RangeVectorKey {
@@ -45,7 +59,6 @@ final case class CustomRangeVectorKey(labelValues: Map[UTF8Str, UTF8Str]) extend
 }
 
 object CustomRangeVectorKey {
-
   def fromZcUtf8(str: UTF8Str): CustomRangeVectorKey = {
     CustomRangeVectorKey(str.asNewString.split("\u03BC").map(_.split("\u03C0")).filter(_.length == 2).map { lv =>
       ZeroCopyUTF8String(lv(0)) -> ZeroCopyUTF8String(lv(1))

@@ -5,6 +5,7 @@ import scala.concurrent.duration._
 
 import com.typesafe.config.ConfigFactory
 
+import filodb.core.memstore.SomeData
 import filodb.core.metadata.Dataset
 
 /**
@@ -31,9 +32,10 @@ object TestConsumer extends App {
   val dataset = Dataset("prometheus", Seq("tags:map"), Seq("timestamp:long", "value:double"))
   val stream = new KafkaIngestionStream(sourceConf, dataset, 0, offsetOpt)
   val fut = stream.get.take(10)
-                  .foreach { records =>
-                    records.foreach { rec =>
-                      println(s"Offset=${rec.offset}\nPartition=${rec.partition}\n${rec.data}\n")
+                  .foreach { case SomeData(container, offset) =>
+                    println(s"\n----- Offset $offset -----")
+                    container.foreach { case (base, offset) =>
+                      println(s"   ${dataset.ingestionSchema.stringify(base, offset)}")
                     }
                   }
   Await.result(fut, 10.minutes)

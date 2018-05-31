@@ -15,7 +15,7 @@ import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.metadata.Dataset
 import filodb.core.query.ChunkSetReader
 import filodb.core.store._
-import filodb.memory.BlockMemFactory
+import filodb.memory.{BinaryRegion, BlockMemFactory}
 import filodb.memory.format._
 
 final case class InfoChunks(info: ChunkSetInfo, chunks: Array[BinaryVector[_]])
@@ -49,17 +49,19 @@ object TimeSeriesPartition {
  */
 class TimeSeriesPartition(val partID: Int,
                           val dataset: Dataset,
-                          val binPartition: PartitionKey,
+                          partitionKey: BinaryRegion.NativePointer,
                           val shard: Int,
                           val chunkSource: ChunkSource,
                           bufferPool: WriteBufferPool,
-                          skipDemandPaging: Boolean,
                           pagedChunkStore: DemandPagedChunkStore,
                           val shardStats: TimeSeriesShardStats)
                          (implicit val queryScheduler: Scheduler) extends FiloPartition with StrictLogging {
   import ChunkSetInfo._
   import collection.JavaConverters._
   import TimeSeriesPartition._
+
+  def partKeyBase: Array[Byte] = UnsafeUtils.ZeroPointer.asInstanceOf[Array[Byte]]
+  def partKeyOffset: Long = partitionKey
 
   /**
    * This is the ONE main data structure holding the chunks of a TSPartition.  It is appended to as chunks arrive
@@ -100,7 +102,7 @@ class TimeSeriesPartition(val partID: Int,
   private final val numColumns = dataset.dataColumns.length
 
   private val jvmStartTime = ManagementFactory.getRuntimeMXBean.getStartTime
-  private val partitionLoadedFromPersistentStore = new AtomicBoolean(skipDemandPaging)
+  private val partitionLoadedFromPersistentStore = new AtomicBoolean(false)
 
   /**
    * Ingests a new row, adding it to currentChunks.
@@ -109,13 +111,13 @@ class TimeSeriesPartition(val partID: Int,
    *
    * @param blockHolder the BlockMemFactory to use for encoding chunks in case of WriteBuffer overflow
    */
-  final def ingest(row: RowReader, offset: Long, blockHolder: BlockMemFactory): Unit = {
+  final def ingest(row: RowReader, blockHolder: BlockMemFactory): Unit = {
     if (currentChunks == nullChunks) initNewChunk()
     for { col <- 0 until numColumns optimized } {
       currentChunks(col).addFromReaderNoNA(row, col) match {
         case r: VectorTooSmall =>
           switchBuffers(blockHolder, encode=true)
-          ingest(row, offset, blockHolder)   // re-ingest every element, allocating new WriteBuffers
+          ingest(row, blockHolder)   // re-ingest every element, allocating new WriteBuffers
           return
         case other: AddResponse =>
       }
@@ -200,7 +202,7 @@ class TimeSeriesPartition(val partID: Int,
     encodeAndReleaseBuffers(blockHolder)
     infosChunksToBeFlushed
       .map { case InfoChunks(info, chunks) =>
-        ChunkSet(info, binPartition, Nil,
+        ChunkSet(info, partitionKey, Nil,
                  chunks.zipWithIndex.map { case (vect, pos) => (pos, vect.toFiloBuffer) },
                  // Updates the newestFlushedID when the flush succeeds.
                  // NOTE: by using a method instead of closure, we allocate less
@@ -361,7 +363,7 @@ class TimeSeriesPartition(val partID: Int,
       partitionLoadedFromPersistentStore.set(true)
       shardStats.partitionsPagedFromColStore.increment()
       shardStats.chunkIdsPagedFromColStore.increment(onHeapInfos.size)
-      logger.trace(s"Successfully paged ${onHeapInfos.size} chunksets from cassandra for partition key $binPartition")
+      logger.trace(s"Successfully paged ${onHeapInfos.size} chunksets from cassandra for partition $stringPartition")
     }.onFailure { case e =>
       logger.warn("Error occurred when paging data into Memstore", e)
     }
@@ -399,7 +401,7 @@ class TimeSeriesPartition(val partID: Int,
       case None =>
         AllChunkScan
     }
-    chunkSource.scanPartitions(dataset, SinglePartitionScan(binPartition, shard))
+    chunkSource.scanPartitions(dataset, SinglePartitionScan(partKeyBytes, shard))
       .take(1)
       .flatMap(_.streamReaders(colStoreScan, dataset.dataColumns.map(_.id).toArray)) // all chunks, all columns
       .toListL

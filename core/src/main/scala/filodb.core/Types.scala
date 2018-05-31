@@ -2,7 +2,7 @@ package filodb.core
 
 import java.nio.ByteBuffer
 
-import filodb.core.binaryrecord.BinaryRecord
+import filodb.memory.BinaryRegion.NativePointer
 import filodb.memory.format.ZeroCopyUTF8String
 
 /**
@@ -17,7 +17,7 @@ object Types {
   type ColumnId = Int
   type ChunkID = Long     // Each chunk is identified by segmentID and a long timestamp
 
-  type PartitionKey = BinaryRecord
+  type PartitionKey = NativePointer
 
   // Hashcodes are cached in a UTF8String, so it is strongly recommended to use a cache of map keys and
   // reuse instances of UTF8MapKey

@@ -29,11 +29,17 @@ object FlushStream {
    * @param numGroups the number of groups to round robin
    * @param nRecords  the approximate "period" of the flushes in terms of number of source records
    */
-  def everyN(numGroups: Int, nRecords: Int, source: Observable[Seq[IngestRecord]]): Observable[FlushCommand] =
+  def everyN(numGroups: Int, nRecords: Int, source: Observable[SomeData]): Observable[FlushCommand] =
     // State: (runningRecordCount, groupNum, flush)
-    source.scan((0, -1, false)) { case ((count, group, _), records) =>
-            val newCount = count + records.length
+    source.scan((0, -1, false)) { case ((count, group, _), SomeData(records, _)) =>
+            val newCount = count + records.countRecords()
             if (newCount >= nRecords) { (newCount - nRecords, (group + 1) % numGroups, true) }
             else                      { (newCount, group, false) }
           }.collect { case (_, group, true) => FlushCommand(group) }
+
+  /**
+   * For testing only.  Just a simple stream of FlushCommands, one for each gorup.
+   */
+  def allGroups(numGroups: Int): Observable[FlushCommand] =
+    Observable.fromIterable((0 until numGroups).map { n => FlushCommand(n) })
 }

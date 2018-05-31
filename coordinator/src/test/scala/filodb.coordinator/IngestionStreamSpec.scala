@@ -96,7 +96,7 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem) wi
   // It's pretty hard to get an IngestionStream to fail when reading the stream itself, as no real parsing
   // happens until the IngestionActor ingests.   When the failure occurs, the cluster state is updated
   // but then we need to query for it.
-  it("should fail if cannot parse input RowReader during coordinator ingestion") {
+  it("should fail if cannot parse input record during coordinator ingestion") {
     setup(dataset33.ref, "/GDELT-sample-test-errors.csv", rowsToRead = 5, None)
 
     var latestStatus: ShardStatus = ShardStatusAssigned
@@ -114,7 +114,7 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem) wi
 
     // NOTE: right now ingestion errors do not cause IngestionActor to disappear.  Should it?
     coordinatorActor ! GetIngestionStats(dataset33.ref)
-    expectMsg(IngestionActor.IngestionStatus(50))
+    expectMsg(IngestionActor.IngestionStatus(45))   // the error happens earlier now, used to be 50
   }
 
   // TODO: Simulate more failures.  Maybe simulate I/O failure or use a custom source
@@ -168,7 +168,7 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem) wi
         mapper.statuses.head shouldEqual ShardStatusStopped
     }
 
-    coordinatorActor ! GetIngestionStats(DatasetRef(dataset33.name))
+    coordinatorActor ! GetIngestionStats(dataset33.ref)
     expectMsg(IngestionActor.IngestionStatus(99))
   }
 
@@ -187,10 +187,10 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem) wi
    * - total lines ingested should be 95 (first 5 lines skipped) minus other skipped lines in beginning
    */
   it("should recover rows based on checkpoint data, then move to normal ingestion") {
-    metaStore.writeCheckpoint(dataset33.ref, 0, 0, 5L).futureValue shouldEqual Success
-    metaStore.writeCheckpoint(dataset33.ref, 0, 1, 10L).futureValue shouldEqual Success
-    metaStore.writeCheckpoint(dataset33.ref, 0, 2, 15L).futureValue shouldEqual Success
-    metaStore.writeCheckpoint(dataset33.ref, 0, 3, 20L).futureValue shouldEqual Success
+    metaStore.writeCheckpoint(dataset33.ref, 0, 0, 1L).futureValue shouldEqual Success
+    metaStore.writeCheckpoint(dataset33.ref, 0, 1, 2L).futureValue shouldEqual Success
+    metaStore.writeCheckpoint(dataset33.ref, 0, 2, 3L).futureValue shouldEqual Success
+    metaStore.writeCheckpoint(dataset33.ref, 0, 3, 4L).futureValue shouldEqual Success
 
     setup(dataset33.ref, "/GDELT-sample-test.csv", rowsToRead = 5, None)
 
@@ -212,37 +212,6 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem) wi
 
     // Check the number of rows
     coordinatorActor ! GetIngestionStats(dataset33.ref)
-    expectMsg(IngestionActor.IngestionStatus(84))
-  }
-
-  it("should ingest all rows using routeToShards and ProtocolActor") {
-    val resource = "/GDELT-sample-test-200.csv"
-    val batchSize = 10
-
-    // Empty ingestion source - we're going to pump in records ourselves
-    setup(dataset6.ref, resource, batchSize, Some(noOpSource), Some(TestData.storeConf))
-
-    val config = ConfigFactory.parseString(s"""header = true
-                                           batch-size = $batchSize
-                                           resource = $resource
-                                           """)
-    val stream = (new CsvStreamFactory).create(config, dataset6, 0, None)
-    val protocolActor = system.actorOf(IngestProtocol.props(clusterActor, dataset6.ref))
-
-    import cluster.ec
-
-    stream.routeToShards(shardMap, dataset6, protocolActor)
-
-    // Not stopped, because routeToShards and noOpSource does not have an end
-    expectMsgPF(within) {
-      case CurrentShardSnapshot(dataset6.ref, mapper) =>
-        mapper.shardsForCoord(coordinatorActor) shouldEqual Seq(0)
-        mapper.statuses.head shouldEqual ShardStatusActive
-    }
-
-    Thread sleep 2000 // time to accumulate 199 below
-
-    coordinatorActor ! GetIngestionStats(dataset6.ref)
-    expectMsg(IngestionActor.IngestionStatus(199))
+    expectMsg(IngestionActor.IngestionStatus(85))    // <-- must be rounded to 5, we ingest entire batches
   }
 }

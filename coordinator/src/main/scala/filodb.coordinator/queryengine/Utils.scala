@@ -11,9 +11,10 @@ import monix.eval.Task
 import monix.reactive.Observable
 import org.scalactic._
 
-import filodb.coordinator.{ShardKeyGenerator, ShardMapper}
+import filodb.coordinator.ShardMapper
 import filodb.coordinator.client.QueryCommands
 import filodb.core.{ErrorResponse, Types}
+import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.Dataset
 import filodb.core.query.{ColumnFilter, Filter}
 import filodb.core.store._
@@ -124,7 +125,7 @@ object Utils extends StrictLogging {
       }
     }
     logger.debug(s"For shardColumns $shardColumns, extracted filter values $shardColValues successfully")
-    Some(ShardKeyGenerator.shardKeyHash(shardColValues))
+    Some(RecordBuilder.shardKeyHash(shardColumns, shardColValues))
   }
 
   /**

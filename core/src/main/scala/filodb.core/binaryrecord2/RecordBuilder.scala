@@ -3,8 +3,9 @@ package filodb.core.binaryrecord2
 import com.typesafe.scalalogging.StrictLogging
 import scalaxy.loops._
 
+import filodb.core.metadata.Column
 import filodb.memory.{BinaryRegion, MemFactory, UTF8StringMedium}
-import filodb.memory.format.UnsafeUtils
+import filodb.memory.format.{RowReader, SeqRowReader, UnsafeUtils, ZeroCopyUTF8String => ZCUTF8}
 
 /**
  * A RecordBuilder allocates fixed size containers and builds BinaryRecords within them.
@@ -39,6 +40,14 @@ final class RecordBuilder(memFactory: MemFactory,
   private val containers = new collection.mutable.ArrayBuffer[RecordContainer]
   private val firstPartField = schema.partitionFieldStart.getOrElse(Int.MaxValue)
   private val hashOffset = schema.fieldOffset(schema.numFields)
+
+  def reset(): Unit = if (containers.nonEmpty) {
+    curRecordOffset = containers.last.offset + ContainerHeaderLen
+    curRecEndOffset = curRecordOffset
+    fieldNo = -1
+    mapOffset = -1L
+    recHash = -1
+  }
 
   /**
    * Start building a new BinaryRecord.
@@ -104,12 +113,52 @@ final class RecordBuilder(memFactory: MemFactory,
 
   final def addString(s: String): Unit = addString(s.getBytes)
 
+  import Column.ColumnType._
+
+  /**
+   * A SLOW but FLEXIBLE method to add data to the current field.  Boxes for sure but can take any data.
+   * Relies on passing in an object (Any) and using match, lots of allocations here.
+   * PLEASE don't use it in high performance code / hot paths.  Meant for ease of testing.
+   */
+  def addSlowly(item: Any): Unit = {
+    (schema.columnTypes(fieldNo), item) match {
+      case (IntColumn, i: Int)       => addInt(i)
+      case (LongColumn, l: Long)     => addLong(l)
+      case (DoubleColumn, d: Double) => addDouble(d)
+      case (StringColumn, s: String) => addString(s)
+      case (StringColumn, a: Array[Byte]) => addString(a)
+      case (StringColumn, z: ZCUTF8) => addString(z.toString)
+      case (MapColumn, m: Map[ZCUTF8, ZCUTF8] @unchecked) =>
+        val pairs = new java.util.ArrayList[(String, String)]
+        m.toSeq.foreach { case (k, v) => pairs.add((k.toString, v.toString)) }
+        val hashes = sortAndComputeHashes(pairs)
+        addSortedPairsAsMap(pairs, hashes)
+      case (other: Column.ColumnType, v) =>
+        throw new UnsupportedOperationException(s"Column type of $other and value of class ${v.getClass}")
+    }
+  }
+
+  /**
+   * Adds an entire record from a RowReader using getAny.  SUPER SLOW since it uses addSlowly.  Mostly for testing.
+   * @return the offset or NativePointer if the memFactory is an offheap one, to the new BinaryRecord
+   */
+  def addFromReaderSlowly(row: RowReader): Long = {
+    startNewRecord()
+    (0 until schema.numFields).foreach { pos =>
+      addSlowly(schema.columnTypes(pos).keyType.extractor.getField(row, pos))
+    }
+    endRecord()
+  }
+
+  // Really only for testing. Very slow.
+  def addFromObjects(parts: Any*): Long = addFromReaderSlowly(SeqRowReader(parts.toSeq))
+
   /**
    * High level function to add a sorted list of unique key-value pairs as a map in the BinaryRecord.
    * @param sortedPairs sorted list of key-value pairs, as modified by sortAndComputeHashes
    * @param hashes an array of hashes, one for each k-v pair, as returned by sortAndComputeHashes
    */
-  def addSortedPairsAsMap(sortedPairs: java.util.List[(String, String)],
+  def addSortedPairsAsMap(sortedPairs: java.util.ArrayList[(String, String)],
                           hashes: Array[Int]): Unit = {
     startMap()
     for { i <- 0 until sortedPairs.size optimized } {
@@ -244,9 +293,14 @@ final class RecordBuilder(memFactory: MemFactory,
    * The memFactory needs to be an on heap one otherwise UnsupportedOperationException will be thrown.
    * The sequence of byte arrays can be for example sent to Kafka as a sequence of messages - one message
    * per byte array.
+   * @param reset if true, clears out all the containers.  Allows a producer of containers to obtain the
+   *              byte arrays for sending somewhere else, while clearing containers for the next batch.
    */
-  def optimalContainerBytes: Seq[Array[Byte]] =
-    allContainers.dropRight(1).map(_.array) ++ Seq(currentContainer.get.trimmedArray)
+  def optimalContainerBytes(reset: Boolean = false): Seq[Array[Byte]] = {
+    val bytes = allContainers.dropRight(1).map(_.array) ++ Seq(currentContainer.get.trimmedArray)
+    if (reset) containers.clear()
+    bytes
+  }
 
   /**
    * Returns the number of free bytes in the current container, or 0 if container is not initialized
@@ -264,18 +318,21 @@ final class RecordBuilder(memFactory: MemFactory,
       val oldOffset = curRecordOffset
       newContainer()
       logger.debug(s"Moving $recordNumBytes bytes from end of old container to new container")
-      require((containerSize - 4) > (recordNumBytes + numBytes), "Record too big for container")
+      require((containerSize - ContainerHeaderLen) > (recordNumBytes + numBytes), "Record too big for container")
       unsafe.copyMemory(oldBase, oldOffset, curBase, curRecordOffset, recordNumBytes)
       curRecEndOffset = curRecordOffset + recordNumBytes
     }
 
   private def newContainer(): Unit = {
     val (newBase, newOff, _) = memFactory.allocate(containerSize)
-    containers += new RecordContainer(newBase, newOff, containerSize)
+    val container = new RecordContainer(newBase, newOff, containerSize)
+    containers += container
     logger.debug(s"Creating new RecordContainer with $containerSize bytes using $memFactory")
     curBase = newBase
-    curRecordOffset = newOff + 4
+    curRecordOffset = newOff + ContainerHeaderLen
     curRecEndOffset = curRecordOffset
+    container.updateLengthWithOffset(curRecordOffset)
+    container.writeVersionWord()
     maxOffset = newOff + containerSize
   }
 
@@ -297,8 +354,15 @@ final class RecordBuilder(memFactory: MemFactory,
 }
 
 object RecordBuilder {
+  import collection.JavaConverters._
+
   val DefaultContainerSize = 256 * 1024
   val MinContainerSize = 2048
+
+  // Please do not change this.  It should only be changed with a change in BinaryRecord and/or RecordContainer
+  // format, and only then REALLY carefully.
+  val Version = 0
+  val ContainerHeaderLen = 8
 
   val stringPairComparator = new java.util.Comparator[(String, String)] {
     def compare(pair1: (String, String), pair2: (String, String)): Int = pair1._1 compare pair2._1
@@ -322,7 +386,7 @@ object RecordBuilder {
     * for each pair.  The output can be fed into the combineHash methods to produce an overall hash.
     * @param pairs an unsorted list of key-value pairs.  Will be mutated and sorted.
     */
-  final def sortAndComputeHashes(pairs: java.util.List[(String, String)]): Array[Int] = {
+  final def sortAndComputeHashes(pairs: java.util.ArrayList[(String, String)]): Array[Int] = {
     pairs.sort(stringPairComparator)
     val hashes = new Array[Int](pairs.size)
     for { i <- 0 until pairs.size optimized } {
@@ -341,9 +405,9 @@ object RecordBuilder {
     * @param hashes the output from sortAndComputeHashes
     * @param excludeKeys set of String keys to exclude
     */
-  final def combineHashExcluding(sortedPairs: java.util.List[(String, String)],
-                           hashes: Array[Int],
-                           excludeKeys: Set[String]): Int = {
+  final def combineHashExcluding(sortedPairs: java.util.ArrayList[(String, String)],
+                                 hashes: Array[Int],
+                                 excludeKeys: Set[String]): Int = {
     var hash = 7
     for { i <- 0 until sortedPairs.size optimized } {
       if (!(excludeKeys contains sortedPairs.get(i)._1))
@@ -354,15 +418,15 @@ object RecordBuilder {
 
   /**
     * Combines the hashes from sortAndComputeHashes, only including certain keys, into an overall hash value.
-    * All the keys from includeKeys must be present.
+    * All the keys from includeKeys must be present.  Usually used to compute the shard key hash.
     * @param pairs sorted pairs of byte key values, from sortAndComputeHashes
     * @param hashes the output from sortAndComputeHashes
     * @param includeKeys the keys to include
     * @return Some(hash) if all the keys in includeKeys were present, or None
     */
-  final def combineHashIncluding(pairs: java.util.List[(String, String)],
-                           hashes: Array[Int],
-                           includeKeys: Set[String]): Option[Int] = {
+  final def combineHashIncluding(pairs: java.util.ArrayList[(String, String)],
+                                 hashes: Array[Int],
+                                 includeKeys: Set[String]): Option[Int] = {
     var hash = 7
     var numIncluded = 0
     var index = 0
@@ -376,4 +440,15 @@ object RecordBuilder {
     if (numIncluded == includeKeys.size) Some(hash) else None
   }
 
+  /**
+   * A convenience function to compute the shard key hash given a list of shard key columns
+   * and their corresponding values.  The list must contain all the shard key columns and only those.
+   * @param shardKeyColumns the names of shard key columns
+   * @param shardKeyValues the values for each shard key column
+   */
+  final def shardKeyHash(shardKeyColumns: Seq[String], shardKeyValues: Seq[String]): Int = {
+    val jList = new java.util.ArrayList(shardKeyColumns.zip(shardKeyValues).asJava)
+    val hashes = sortAndComputeHashes(jList)
+    combineHashIncluding(jList, hashes, shardKeyColumns.toSet).get
+  }
 }

@@ -6,7 +6,6 @@ import kamon.Kamon
 import monix.reactive.Observable
 
 import filodb.core._
-import filodb.core.Types.PartitionKey
 import filodb.core.metadata.Dataset
 import filodb.core.query._
 import filodb.memory.format.RowReader
@@ -83,7 +82,7 @@ trait ChunkSource {
     scanPartitions(dataset, partMethod)
       .map { partition =>
         stats.incrReadPartitions(1)
-        val info = PartitionInfo(partition.binPartition, partition.shard)
+        val info = PartitionInfo(dataset.partKeySchema, partition.partKeyBase, partition.partKeyOffset, partition.shard)
         PartitionVector(Some(info), partition.readers(chunkMethod, ids).toBuffer)
       }
   }
@@ -98,17 +97,11 @@ trait ChunkSource {
     scanPartitions(dataset, partMethod)
       .map { partition =>
         stats.incrReadPartitions(1)
-        val key = new PartitionRangeVectorKey(partition.binPartition, partCols, partition.shard)
+        val key = new PartitionRangeVectorKey(partition.partKeyBase, partition.partKeyOffset,
+                                              dataset.partKeySchema, partCols, partition.shard)
         RawDataRangeVector(key, chunkMethod, ordering, partition.readers(chunkMethod, ids))
       }
   }
-
-  /**
-    * Quickly retrieves all the partition keys this chunk source has stored for the given shard number.
-    * Useful when the node has just restarted and all the available partitions for the shard needs to be
-    * read so query indexes can be populated.
-    */
-  def scanPartitionKeys(dataset: Dataset, shardNum: Int): Observable[PartitionKey]
 }
 
 /**
