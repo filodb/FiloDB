@@ -287,6 +287,24 @@ final class RecordBuilder(memFactory: MemFactory,
    */
   def allContainers: Seq[RecordContainer] = containers
 
+
+  /**
+    * Returns all the full containers other than currentContainer as byte arrays.
+    * Assuming all of the containers except the last one is full,
+    * calls array() on all the non-last container excluding the currentContainer.
+    * The memFactory needs to be an on heap one otherwise UnsupportedOperationException will be thrown.
+    * The sequence of byte arrays can be for example sent to Kafka as a sequence of messages - one message
+    * per byte array.
+    * @param reset if true, clears out all the containers other than lastContainer.
+    *              Allows a producer of containers to obtain the
+    *              byte arrays for sending somewhere else, while clearing containers for the next batch.
+    */
+  def nonCurrentContainerBytes(reset: Boolean = false): Seq[Array[Byte]] = {
+    val bytes = allContainers.dropRight(1).map(_.array)
+    if (reset) containers.remove(0, containers.size - 1)
+    bytes
+  }
+
   /**
    * Returns the containers as byte arrays.  Assuming all of the containers except the last one is full,
    * calls array() on the non-last container and trimmedArray() on the last one.

@@ -103,6 +103,7 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
       containers.head.numBytes shouldEqual container1Bytes
       containers.last.numBytes shouldEqual 68
 
+      builder.nonCurrentContainerBytes().map(_.size) shouldEqual Seq(RecordBuilder.MinContainerSize)
       builder.optimalContainerBytes().map(_.size) shouldEqual Seq(RecordBuilder.MinContainerSize, 72)
 
       containers.last.countRecords shouldEqual 1
