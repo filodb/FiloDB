@@ -103,10 +103,13 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
       containers.head.numBytes shouldEqual container1Bytes
       containers.last.numBytes shouldEqual 68
 
-      builder.nonCurrentContainerBytes().map(_.size) shouldEqual Seq(RecordBuilder.MinContainerSize)
-      builder.optimalContainerBytes().map(_.size) shouldEqual Seq(RecordBuilder.MinContainerSize, 72)
-
       containers.last.countRecords shouldEqual 1
+
+      builder.nonCurrentContainerBytes().map(_.size) shouldEqual Seq(RecordBuilder.MinContainerSize)
+      builder.optimalContainerBytes(true).map(_.size) shouldEqual Seq(RecordBuilder.MinContainerSize, 72)
+      builder.nonCurrentContainerBytes().size shouldEqual 0
+      builder.optimalContainerBytes().size shouldEqual 0
+
     }
 
     it("should add multiple records and rollover for offheap containers") {

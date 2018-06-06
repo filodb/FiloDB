@@ -317,7 +317,8 @@ final class RecordBuilder(memFactory: MemFactory,
    *              are simply reset, which avoids an extra container buffer allocation.
    */
   def optimalContainerBytes(reset: Boolean = false): Seq[Array[Byte]] = {
-    val bytes = allContainers.dropRight(1).map(_.array) ++ Seq(currentContainer.get.trimmedArray)
+    val bytes = allContainers.dropRight(1).map(_.array) ++
+      allContainers.takeRight(1).filterNot(_.isEmpty).map(_.trimmedArray)
     if (reset) {
       containers.remove(0, containers.size - 1)
       this.reset()

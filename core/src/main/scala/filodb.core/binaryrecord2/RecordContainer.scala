@@ -26,7 +26,7 @@ final class RecordContainer(val base: Any, val offset: Long, maxLength: Int) {
   import RecordBuilder._
 
   @inline final def numBytes: Int =  UnsafeUtils.getInt(base, offset)
-  @inline final def isEmpty: Boolean = numBytes == 0
+  @inline final def isEmpty: Boolean = numBytes <= 4
 
   /**
    * Used only by the RecordBuilder to update the length field.
