@@ -142,6 +142,30 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
       containers.last.consumeRecords(consumer)
       records should have length (1)
     }
+
+    it("should add records, reset, and be able to add records again") {
+      val builder = new RecordBuilder(nativeMem, schema1, RecordBuilder.MinContainerSize)
+      addToBuilder(builder, linearMultiSeries() take 10)
+
+      // Now check amount of space left in container, container bytes etc
+      builder.allContainers should have length (1)
+      builder.allContainers.head.numBytes shouldEqual (4 + 64*10)
+      builder.allContainers.head.countRecords shouldEqual 10
+
+      val byteArrays = builder.optimalContainerBytes(reset = true)
+      byteArrays.size shouldEqual 1
+
+      // Check that we still have one container but it's empty
+      builder.allContainers should have length (1)
+      builder.allContainers.head.numBytes shouldEqual 4
+
+      // Add some more records
+      // CHeck amount of space left, should be same as before
+      addToBuilder(builder, linearMultiSeries() take 9)
+      builder.allContainers should have length (1)
+      builder.allContainers.head.numBytes shouldEqual (4 + 64*9)
+      builder.allContainers.head.countRecords shouldEqual 9
+    }
   }
 
   val sortedKeys = Seq("cloudProvider", "instance", "job", "n", "region").map(_.utf8(nativeMem))

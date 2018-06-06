@@ -29,7 +29,7 @@ class ShardHealthStats(ref: DatasetRef,
 
   def update(mapper: ShardMapper): Unit = {
     numActive.set(shardMapFunc.statuses.filter(_ == ShardStatusActive).size)
-    numRecovering.set(shardMapFunc.statuses.filter(_ == ShardStatusRecovery).size)
+    numRecovering.set(shardMapFunc.statuses.filter(_.isInstanceOf[ShardStatusRecovery]).size)
     numUnassigned.set(shardMapFunc.statuses.filter(_ == ShardStatusUnassigned).size)
     numAssigned.set(shardMapFunc.statuses.filter(_ == ShardStatusAssigned).size)
     numError.set(shardMapFunc.statuses.filter(_ == ShardStatusError).size)

@@ -41,7 +41,8 @@ class MemstoreCassandraSinkSpec extends AllTablesTest {
     memStore.ingestStream(dataset1.ref, 0, stream, flushStream)(ex => throw ex).futureValue
 
     // Two flushes and 3 chunksets have been flushed
-    memStore.sink.sinkStats.chunksetsWritten shouldEqual 4
+    memStore.sink.sinkStats.chunksetsWritten should be >= 3
+    memStore.sink.sinkStats.chunksetsWritten should be <= 4
 
     // Verify data still in MemStore... all of it
     val splits = memStore.getScanSplits(dataset1.ref, 1)

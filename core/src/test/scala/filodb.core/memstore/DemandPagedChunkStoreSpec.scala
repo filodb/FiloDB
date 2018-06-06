@@ -3,7 +3,7 @@ package filodb.core.memstore
 import scala.concurrent.duration._
 
 import com.typesafe.config.ConfigFactory
-import org.scalatest.{BeforeAndAfter, FunSpec, Matchers}
+import org.scalatest.{BeforeAndAfter, BeforeAndAfterAll, FunSpec, Matchers}
 import org.scalatest.concurrent.ScalaFutures
 
 import filodb.core.MachineMetricsData._
@@ -13,7 +13,7 @@ import filodb.core.store.{ColumnStore, NullColumnStore}
 import filodb.memory.{MemoryStats, NativeMemoryManager, PageAlignedBlockManager, ReclaimListener}
 import filodb.memory.format.{TupleRowReader, UnsafeUtils}
 
-class DemandPagedChunkStoreSpec extends FunSpec with Matchers with BeforeAndAfter with ScalaFutures {
+class DemandPagedChunkStoreSpec extends FunSpec with Matchers with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
   import monix.execution.Scheduler.Implicits.global
   import TimeSeriesShard.BlockMetaAllocSize
 
@@ -30,12 +30,18 @@ class DemandPagedChunkStoreSpec extends FunSpec with Matchers with BeforeAndAfte
 
   val config = ConfigFactory.load("application_test.conf").getConfig("filodb")
   private val chunkRetentionHours = 72
-  private val blockStore = new PageAlignedBlockManager(100 * 1024 * 1024,
+  private val blockStore = new PageAlignedBlockManager(10 * 1024 * 1024,
     new MemoryStats(Map("test"-> "test")), reclaimer, 1, chunkRetentionHours)
-  val memFactory = new NativeMemoryManager(10 * 1024 * 1024)
+  val memFactory = new NativeMemoryManager(4 * 1024 * 1024)
   protected val bufferPool = new WriteBufferPool(memFactory, dataset1, 10, 50)
   protected val pagedChunkStore = new DemandPagedChunkStore(dataset1, blockStore, BlockMetaAllocSize,
                                                             chunkRetentionHours, 1)
+  override def afterAll(): Unit = {
+    super.afterAll()
+    blockStore.releaseBlocks()
+    memFactory.shutdown()
+  }
+
   val colStore: ColumnStore = new NullColumnStore()
 
   it ("should queue and store optimized chunks into demand paged chunk store") {

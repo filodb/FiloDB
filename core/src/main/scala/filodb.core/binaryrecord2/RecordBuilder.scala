@@ -44,6 +44,8 @@ final class RecordBuilder(memFactory: MemFactory,
   def reset(): Unit = if (containers.nonEmpty) {
     curRecordOffset = containers.last.offset + ContainerHeaderLen
     curRecEndOffset = curRecordOffset
+    containers.last.updateLengthWithOffset(curRecordOffset)
+    curBase = containers.last.base
     fieldNo = -1
     mapOffset = -1L
     recHash = -1
@@ -311,12 +313,15 @@ final class RecordBuilder(memFactory: MemFactory,
    * The memFactory needs to be an on heap one otherwise UnsupportedOperationException will be thrown.
    * The sequence of byte arrays can be for example sent to Kafka as a sequence of messages - one message
    * per byte array.
-   * @param reset if true, clears out all the containers.  Allows a producer of containers to obtain the
-   *              byte arrays for sending somewhere else, while clearing containers for the next batch.
+   * @param reset if true, clears out all the containers EXCEPT the last one.  Pointers to the last container
+   *              are simply reset, which avoids an extra container buffer allocation.
    */
   def optimalContainerBytes(reset: Boolean = false): Seq[Array[Byte]] = {
     val bytes = allContainers.dropRight(1).map(_.array) ++ Seq(currentContainer.get.trimmedArray)
-    if (reset) containers.clear()
+    if (reset) {
+      containers.remove(0, containers.size - 1)
+      this.reset()
+    }
     bytes
   }
 

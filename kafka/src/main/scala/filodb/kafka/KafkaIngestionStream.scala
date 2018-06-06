@@ -26,13 +26,15 @@ class KafkaIngestionStream(config: Config,
                            shard: Int,
                            offset: Option[Long]) extends IngestionStream with StrictLogging {
 
-  protected val sc = new SourceConfig(config, shard)
-  import sc._
+  private val _sc = new SourceConfig(config, shard)
+  import _sc._
+
+  protected def sc: SourceConfig = _sc
 
   private val tp = new TopicPartition(IngestionTopic, shard)
 
   logger.info(s"Creating consumer assigned to topic ${tp.topic} partition ${tp.partition} offset $offset")
-  protected val consumer: Observable[ConsumerRecord[JLong, Any]] =
+  protected lazy val consumer: Observable[ConsumerRecord[JLong, Any]] =
     PartitionedConsumerObservable.create(sc, tp, offset)
 
   /**
