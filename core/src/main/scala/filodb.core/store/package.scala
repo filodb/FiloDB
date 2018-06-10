@@ -60,6 +60,9 @@ package object store {
     newBuf
   }
 
+  // Like above, but just returns array byte without needing to do another copy
+  def compress(orig: Array[Byte]): Array[Byte] = getCompressor.compress(orig)
+
   /**
    * Decompresses the compressed bytes into a new ByteBuffer
    * @param compressed the ByteBuffer containing the header + compressed bytes at the current position
