@@ -9,7 +9,7 @@ import com.typesafe.scalalogging.StrictLogging
 import filodb.core.binaryrecord.{BinaryRecord, RecordSchema}
 import filodb.core.binaryrecord2.{RecordSchema => RecordSchema2}
 import filodb.core.query.{ColumnInfo, PartitionInfo, PartitionRangeVectorKey}
-import filodb.memory.format.{BinaryVector, FiloVector, UnsafeUtils, VectorReader}
+import filodb.memory.format._
 
 // NOTE: This file has to be in the kryo namespace so we can use the require() method
 
@@ -97,6 +97,20 @@ class PartitionRangeVectorKeySerializer extends KryoSerializer[PartitionRangeVec
     kryo.writeObject(output, key.partSchema)
     kryo.writeClassAndObject(output, key.partKeyCols)
     output.writeInt(key.sourceShard)
+  }
+}
+
+class ZeroCopyUTF8StringSerializer extends KryoSerializer[ZeroCopyUTF8String] with StrictLogging {
+  override def read(kryo: Kryo, input: Input, typ: Class[ZeroCopyUTF8String]): ZeroCopyUTF8String = {
+    val numBytes = input.readInt
+    ZeroCopyUTF8String(input.readBytes(numBytes))
+  }
+
+  override def write(kryo: Kryo, output: Output, key: ZeroCopyUTF8String): Unit = {
+    output.writeInt(key.numBytes)
+    output.require(key.numBytes)
+    key.copyTo(output.getBuffer, UnsafeUtils.arayOffset + output.position)
+    output.setPosition(output.position + key.numBytes)
   }
 }
 

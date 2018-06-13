@@ -71,6 +71,8 @@ class KryoInit {
     kryo.addDefaultSerializer(classOf[RecordSchema2], classOf[RecordSchema2Serializer])
     kryo.addDefaultSerializer(classOf[BinaryRecord], classOf[BinaryRecordSerializer])
 
+    kryo.addDefaultSerializer(classOf[ZeroCopyUTF8String], classOf[ZeroCopyUTF8StringSerializer])
+
     initOtherFiloClasses(kryo)
     initQueryEngine2Classes(kryo)
     kryo.setReferences(true)   // save space by referring to same objects with ordinals

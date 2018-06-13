@@ -14,6 +14,9 @@ import filodb.core.metadata.Column.ColumnType
 import filodb.core.store._
 import filodb.memory._
 import filodb.memory.format.{RowReader, SeqRowReader}
+import filodb.memory.format.{ZeroCopyUTF8String => UTF8Str}
+import filodb.prometheus.ast.QueryParams
+import filodb.prometheus.parse.Parser
 import filodb.query.{QueryResult => QueryResult2, _}
 
 object SerializationSpecConfig extends ActorSpecConfig {
@@ -174,7 +177,6 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
     // roundTrip(tupleResult) shouldEqual tupleResult
   }
 
-
   val colStore: ColumnStore = new NullColumnStore()
   val memFactory = new NativeMemoryManager(10 * 1024 * 1024)
 
@@ -316,6 +318,49 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
     val logicalPlan = BinaryJoin(summed1, BinaryOperator.DIV, Cardinality.OneToOne, summed2)
     val execPlan = engine.materialize(logicalPlan, QueryOptions(shardKeySpread = 0))
     roundTrip(execPlan) shouldEqual execPlan
+  }
+
+  it ("should serialize and deserialize ExecPlan2 involving complicated queries") {
+    val node0 = TestProbe().ref
+    val mapper = new ShardMapper(1)
+    def mapperRef: ShardMapper = mapper
+    mapper.registerNode(Seq(0), node0)
+    val to = System.currentTimeMillis() / 1000
+    val from = to - 50
+    val qParams = QueryParams(from, 10, to)
+    val dataset = MetricsTestData.timeseriesDataset
+    val engine = new QueryEngine(dataset, mapperRef)
+
+    val logicalPlan1 = Parser.queryRangeToLogicalPlan(
+      "sum(rate(http_request_duration_seconds_bucket{job=\"prometheus\"}[20s])) by (handler)",
+      qParams)
+    val execPlan1 = engine.materialize(logicalPlan1, QueryOptions(shardKeySpread = 0))
+    roundTrip(execPlan1) shouldEqual execPlan1
+
+    // scalastyle:off
+    val logicalPlan2 = Parser.queryRangeToLogicalPlan(
+      "sum(rate(http_request_duration_microseconds_sum{job=\"prometheus\"}[5m])) by (handler) / sum(rate(http_request_duration_microseconds_count{job=\"prometheus\"}[5m])) by (handler)",
+      qParams)
+    // scalastyle:on
+    val execPlan2 = engine.materialize(logicalPlan2, QueryOptions(shardKeySpread = 0))
+    roundTrip(execPlan2) shouldEqual execPlan2
+
+  }
+
+  it ("should serialize and deserialize result involving CustomRangeVectorKey") {
+
+    val keysMap = Map(UTF8Str("key1") -> UTF8Str("val1"),
+                      UTF8Str("key2") -> UTF8Str("val2"))
+    val key = CustomRangeVectorKey(keysMap)
+    val ser = SerializableRangeVector(IteratorBackedRangeVector(key, Iterator.empty), Seq.empty, 10)
+
+    val schema = ResultSchema(MachineMetricsData.dataset1.infosFromIDs(0 to 0), 1)
+
+    val result = QueryResult2("someId", schema, Seq(ser))
+    val roundTripResult = roundTrip(result).asInstanceOf[QueryResult2]
+
+    roundTripResult.result.head.key.labelValues shouldEqual keysMap
+
   }
 
 }

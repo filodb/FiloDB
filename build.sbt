@@ -34,6 +34,7 @@ lazy val coordinator = project
       "com.typesafe.akka", s"akka-persistence-experimental_${scalaBinaryVersion.value}"))
   .dependsOn(core % "compile->compile; test->test")
   .dependsOn(query % "compile->compile; test->test")
+  .dependsOn(prometheus % "test->test")
   .configs(MultiJvm)
 
 lazy val prometheus = project
