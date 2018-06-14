@@ -238,6 +238,21 @@ final class QueryActor(memStore: MemStore,
     val task = Engine.execute(physQuery.execPlan, dataset, memStore, physQuery.limit)
     respond(originator, task, span)
   }
+
+  def execPhysicalPlan2(q: ExecPlan2, replyTo: ActorRef): Unit = {
+    Kamon.currentSpan().tag("query", q.getClass.getSimpleName)
+    val span = Kamon.buildSpan(s"execplan2-${q.getClass.getSimpleName}").start()
+    implicit val _ = queryConfig.askTimeout
+    q.execute(memStore, dataset, queryConfig)
+     .foreach { res =>
+       replyTo ! res
+       span.finish()
+     }.recover { case ex =>
+       replyTo ! QueryError2(q.id, ex)
+       span.finish()
+     }
+  }
+
   // This is only temporary, before the QueryEngine and optimizer is really flushed out.
   // Parse the query LogicalPlan and carry out actions
   // In the future, the optimizer will translate these plans into physical plans.  Validation done below would
@@ -291,12 +306,7 @@ final class QueryActor(memStore: MemStore,
     case q: LogicalPlan2Query      => val replyTo = sender()
                                       processLogicalPlan2Query(q, replyTo)
 
-    case q: ExecPlan2              => val replyTo = sender()
-                                      Kamon.currentSpan().tag("query", q.getClass.getSimpleName)
-                                      implicit val _ = queryConfig.askTimeout
-                                      q.execute(memStore, dataset, queryConfig)
-                                        .foreach(replyTo ! _)
-                                        .recover { case ex => replyTo ! QueryError2(q.id, ex) }
+    case q: ExecPlan2              => execPhysicalPlan2(q, sender())
 
     case q: LogicalPlanQuery       => Kamon.currentSpan().tag("query", q.plan.getClass.getSimpleName)
                                       parseQueryPlan(q, sender())
