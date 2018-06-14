@@ -36,7 +36,7 @@ trait CsvImportExport extends StrictLogging {
     val storeConf = ConfigFactory.parseString(s"""
                          |  store {
                          |    flush-interval = 30m
-                         |    shard-memory-mb = 500
+                         |    shard-mem-size = 256MB
                          |  }""".stripMargin)
 
     client.setupDataset(dataset,

@@ -67,11 +67,13 @@ sourceconfig {
 
     max-chunks-size = 500
 
-    # Fixed amount of memory, in MBs, to allocate for encoded chunks per shard
-    shard-memory-mb = 512
+    # Number of bytes of offheap mem to allocate to chunk storage in each shard.  Ex. 1000MB, 1G, 2GB
+    # Assume 5 bytes per sample, should be roughly equal to (# samples per time series) * (# time series)
+    shard-mem-size = 256MB
 
-    # Max # of partitions or time series the WriteBufferPool can allocate and that can be ingested at a time
-    max-num-partitions = 100000
+    # Number of bytes of offheap mem to allocate to write buffers in each shard.  Ex. 1000MB, 1G, 2GB
+    # Scales with the number of time series a shard should hold
+    ingestion-buffer-mem-size = 50MB
 
     # Number of subgroups within each shard.  Persistence to a ChunkSink occurs one subgroup at a time, as does
     # recovery from failure.  This many batches of flushes must occur to cover persistence of every partition

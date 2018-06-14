@@ -131,9 +131,9 @@ with ScalatestRouteTest with ScalaFutures {
                              |sourceconfig.store {
                              |  max-chunks-size = 100
                              |  demand-paged-chunk-retention-period = 10 hours
-                             |  shard-memory-mb = 100
+                             |  shard-mem-size = 256MB
                              |  groups-per-shard = 4
-                             |  max-num-partitions = 250
+                             |  ingestion-buffer-mem-size = 50MB
                              |  flush-interval = 10 minutes
                              |} """.stripMargin
       Post("/api/v1/cluster/gdelt", goodSourceConf) ~> clusterRoute ~> check {
@@ -159,7 +159,7 @@ with ScalatestRouteTest with ScalaFutures {
                              |"min-num-nodes": 2,
                              |"sourceconfig": { "store": {
                              |  "flush-interval": "1h",
-                             |  "shard-memory-mb": 100
+                             |  "shard-mem-size": "100MB"
                              |}}}""".stripMargin
       Post("/api/v1/cluster/gdelt", sourceJson) ~> clusterRoute ~> check {
         handled shouldBe true

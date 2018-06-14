@@ -145,9 +145,9 @@ class TimeSeriesShard(dataset: Dataset,
   }
 
   private val maxChunksSize = storeConfig.maxChunksSize
-  private val shardMemoryMB = storeConfig.shardMemoryMB
+  private val blockMemorySize = storeConfig.shardMemSize
   private final val numGroups = storeConfig.groupsPerShard
-  private val maxNumPartitions = storeConfig.maxNumPartitions
+  private val bufferMemorySize = storeConfig.ingestionBufferMemSize
   private val chunkRetentionHours = (storeConfig.demandPagedRetentionPeriod.toSeconds / 3600).toInt
 
   private val ingestSchema = dataset.ingestionSchema
@@ -160,8 +160,6 @@ class TimeSeriesShard(dataset: Dataset,
   private final val partSet = PartitionSet.ofSize(1000000, ingestSchema, recordComp)
 
   // The off-heap block store used for encoded chunks
-  // TODO: * (1 - writeBufferFraction)
-  protected val blockMemorySize: Long = shardMemoryMB * 1024 * 1024L
   private val blockStore = new PageAlignedBlockManager(blockMemorySize, shardStats.memoryStats, reclaimListener,
                                                        storeConfig.numPagesPerBlock, chunkRetentionHours)
   private val blockFactoryPool = new BlockMemFactoryPool(blockStore, BlockMetaAllocSize)
@@ -170,29 +168,18 @@ class TimeSeriesShard(dataset: Dataset,
   // Each shard has a single ingestion stream at a time.  This BlockMemFactory is used for buffer overflow encoding
   // strictly during ingest() and switchBuffers().
   private val overflowBlockFactory = new BlockMemFactory(blockStore, None, BlockMetaAllocSize, true)
-
-  // The off-heap buffers used for ingesting the newest data samples.  Give it 10% overhead.
-  // TODO: change this to be a fraction of shard-memory-MB
-  protected val bufferMemorySizeEst: Long = maxChunksSize * 8L * maxNumPartitions * numColumns
-  protected val bufferMemorySize = (bufferMemorySizeEst * 1.1).toLong
-  logger.info(s"Allocating $bufferMemorySize bytes for WriteBufferPool for shard $shardNum")
-  protected val bufferMemoryManager = new NativeMemoryManager(bufferMemorySize)
   protected val pagedChunkStore = new DemandPagedChunkStore(dataset, blockStore, BlockMetaAllocSize,
                                                             chunkRetentionHours, shardNum)
-  // TODO: combine with bufferMemoryManager
-  // TODO: 200 is obviously a hack.
-  private val partKeyMemSize = Math.max(RecordBuilder.DefaultContainerSize, maxNumPartitions.toLong * 200)
-  private val partKeyMemManager = new NativeMemoryManager(partKeyMemSize)
-  private val partKeyBuilder = new RecordBuilder(partKeyMemManager, dataset.partKeySchema)
 
   /**
     * Unencoded/unoptimized ingested data is stored in buffers that are allocated from this off-heap pool
-    * TODO: For now set initialSize to maxChunksSize, because we don't have enough memory for it to just
-    *       keep growing, and as we keep cycling through WriteBuffers they all grow anyways.
-    * TODO: Redesign the WriteBufferPool so that we can actually manage differently sized buffers
+    * Note that this pool is also used to store partition keys.
     */
-  private val bufferPool = new WriteBufferPool(bufferMemoryManager, dataset, maxChunksSize, maxNumPartitions)
-  logger.info(s"Finished initializing memory pools for shard $shardNum")
+  logger.info(s"Allocating $bufferMemorySize bytes for WriteBufferPool/PartitionKeys for shard $shardNum")
+  protected val bufferMemoryManager = new NativeMemoryManager(bufferMemorySize)
+  private val partKeyBuilder = new RecordBuilder(bufferMemoryManager, dataset.partKeySchema)
+  private val bufferPool = new WriteBufferPool(bufferMemoryManager, dataset, maxChunksSize,
+                                               storeConfig.allocStepSize)
 
   private final val partitionGroups = Array.fill(numGroups)(new EWAHCompressedBitmap)
 

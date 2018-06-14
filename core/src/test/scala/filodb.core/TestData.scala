@@ -28,9 +28,9 @@ object TestData {
     store {
       max-chunks-size = 100
       demand-paged-chunk-retention-period = 10 hours
-      shard-memory-mb = 100
+      shard-mem-size = 50MB
       groups-per-shard = 4
-      max-num-partitions = 250
+      ingestion-buffer-mem-size = 10MB
       flush-interval = 10 minutes
     }
   """)

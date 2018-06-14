@@ -143,7 +143,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
                        |sourceconfig {
                        |  store {
                        |    flush-interval = 5m
-                       |    shard-memory-mb = 500
+                       |    shard-mem-size = 500MB
                        |}}""".stripMargin
       val ingestionConfig = IngestionConfig(sourceConf, "a.backup").get
       ingestionConfig.ref shouldEqual DatasetRef("gdelt")
@@ -165,7 +165,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
                          |  my.custom.key = "custom.value"
                          |  store {
                          |    flush-interval = 5m
-                         |    shard-memory-mb = 500
+                         |    shard-mem-size = 500MB
                          |  }
                          |}
                        """.stripMargin

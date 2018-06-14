@@ -68,7 +68,7 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
                        |  my.custom.key = "custom.value"
                        |  store {
                        |    flush-interval = 5m
-                       |    shard-memory-mb = 500
+                       |    shard-mem-size = 256MB
                        |  }
                        |}
                      """.stripMargin
@@ -80,7 +80,7 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
                     |sourceconfig {
                     |  store {
                     |    flush-interval = 5m
-                    |    shard-memory-mb = 500
+                    |    shard-mem-size = 256MB
                     |  }
                     |}
                   """.stripMargin
@@ -92,7 +92,7 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
                     |sourceconfig {
                     |  store {
                     |    flush-interval = 5m
-                    |    shard-memory-mb = 500
+                    |    shard-mem-size = 256MB
                     |  }
                     |}
                   """.stripMargin
@@ -104,7 +104,7 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
                     |sourceconfig {
                     |  store {
                     |    flush-interval = 5m
-                    |    shard-memory-mb = 500
+                    |    shard-mem-size = 256MB
                     |  }
                     |}
                   """.stripMargin

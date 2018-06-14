@@ -145,7 +145,7 @@ class FiloContext(val sqlContext: SQLContext) extends AnyVal {
     val storeConf = ConfigFactory.parseString(s"""
                          |  store {
                          |    flush-interval = 30m
-                         |    shard-memory-mb = 500
+                         |    shard-mem-size = 500MB
                          |  }""".stripMargin)
 
     // TODO: actually figure out right number of nodes.

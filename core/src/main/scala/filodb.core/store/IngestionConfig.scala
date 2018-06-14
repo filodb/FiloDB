@@ -12,8 +12,11 @@ final case class StoreConfig(flushInterval: FiniteDuration,
                              diskTTLSeconds: Int,
                              demandPagedRetentionPeriod: FiniteDuration,
                              maxChunksSize: Int,
-                             shardMemoryMB: Int,
-                             maxNumPartitions: Int,
+                             // Number of bytes to allocate to chunk storage in each shard
+                             shardMemSize: Long,
+                             // Number of bytes to allocate to ingestion write buffers per shard
+                             ingestionBufferMemSize: Long,
+                             allocStepSize: Int,
                              groupsPerShard: Int,
                              numPagesPerBlock: Int) {
   import collection.JavaConverters._
@@ -22,8 +25,9 @@ final case class StoreConfig(flushInterval: FiniteDuration,
                                "disk-time-to-live" -> (diskTTLSeconds + "s"),
                                "demand-paged-chunk-retention-period" -> (demandPagedRetentionPeriod.toSeconds + "s"),
                                "max-chunks-size" -> maxChunksSize,
-                               "shard-memory-mb" -> shardMemoryMB,
-                               "max-num-partitions" -> maxNumPartitions,
+                               "shard-mem-size" -> shardMemSize,
+                               "ingestion-buffer-mem-size" -> ingestionBufferMemSize,
+                               "buffer-alloc-step-size" -> allocStepSize,
                                "groups-per-shard" -> groupsPerShard,
                                "num-block-pages" -> numPagesPerBlock).asJava)
 }
@@ -34,7 +38,8 @@ object StoreConfig {
                                            |disk-time-to-live = 3 days
                                            |demand-paged-chunk-retention-period = 72 hours
                                            |max-chunks-size = 500
-                                           |max-num-partitions = 100000
+                                           |ingestion-buffer-mem-size = 10M
+                                           |buffer-alloc-step-size = 1000
                                            |groups-per-shard = 60
                                            |num-block-pages = 1000
                                            |""".stripMargin)
@@ -45,8 +50,9 @@ object StoreConfig {
                 config.as[FiniteDuration]("disk-time-to-live").toSeconds.toInt,
                 config.as[FiniteDuration]("demand-paged-chunk-retention-period"),
                 config.getInt("max-chunks-size"),
-                config.getInt("shard-memory-mb"),
-                config.getInt("max-num-partitions"),
+                config.getMemorySize("shard-mem-size").toBytes,
+                config.getMemorySize("ingestion-buffer-mem-size").toBytes,
+                config.getInt("buffer-alloc-step-size"),
                 config.getInt("groups-per-shard"),
                 config.getInt("num-block-pages"))
   }
