@@ -7,6 +7,7 @@ import filodb.core.metadata.Column
 import filodb.memory.{BinaryRegion, MemFactory, UTF8StringMedium}
 import filodb.memory.format.{RowReader, SeqRowReader, UnsafeUtils, ZeroCopyUTF8String => ZCUTF8}
 
+// scalastyle:off number.of.methods
 /**
  * A RecordBuilder allocates fixed size containers and builds BinaryRecords within them.
  * The size of the container should be much larger than the average size of a record for efficiency.
@@ -19,10 +20,14 @@ import filodb.memory.format.{RowReader, SeqRowReader, UnsafeUtils, ZeroCopyUTF8S
  * @param memFactory the MemFactory used to allocate containers for building BinaryRecords in
  * @param schema the RecordSchema for the BinaryRecord to build
  * @param containerSize the size of each container
+ * @param reuseOneContainer if true, resets the container when we run out of container space.  Designed for scenario
+ *                   where one copies the BinaryRecord somewhere else every time, and allocation is minimized by
+ *                   reusing the same container over and over.
  */
 final class RecordBuilder(memFactory: MemFactory,
                           val schema: RecordSchema,
                           containerSize: Int = RecordBuilder.DefaultContainerSize,
+                          reuseOneContainer: Boolean = false,
                           // Put fields here so scalac won't generate stupid and slow initialization check logic
                           // Seriously this makes var updates like twice as fast
                           private var curBase: Any = UnsafeUtils.ZeroPointer,
@@ -32,7 +37,6 @@ final class RecordBuilder(memFactory: MemFactory,
                           private var maxOffset: Long = -1L,
                           private var mapOffset: Long = -1L,
                           private var recHash: Int = -1) extends StrictLogging {
-
   import RecordBuilder._
   import UnsafeUtils._
   require(containerSize >= RecordBuilder.MinContainerSize, s"RecordBuilder.containerSize < minimum")
@@ -41,14 +45,22 @@ final class RecordBuilder(memFactory: MemFactory,
   private val firstPartField = schema.partitionFieldStart.getOrElse(Int.MaxValue)
   private val hashOffset = schema.fieldOffset(schema.numFields)
 
+  if (reuseOneContainer) newContainer()
+
+  // Reset last container and all pointers
   def reset(): Unit = if (containers.nonEmpty) {
+    resetContainerPointers()
+    fieldNo = -1
+    mapOffset = -1L
+    recHash = -1
+  }
+
+  // Only reset the container offsets, but not the fieldNo, mapOffset, recHash
+  private def resetContainerPointers(): Unit = {
     curRecordOffset = containers.last.offset + ContainerHeaderLen
     curRecEndOffset = curRecordOffset
     containers.last.updateLengthWithOffset(curRecordOffset)
     curBase = containers.last.base
-    fieldNo = -1
-    mapOffset = -1L
-    recHash = -1
   }
 
   /**
@@ -247,10 +259,6 @@ final class RecordBuilder(memFactory: MemFactory,
 
   final def align(offset: Long): Long = (offset + 3) & ~3
 
-  private def matchBytes(bytes1: Array[Byte], bytes2: Array[Byte]): Boolean =
-    bytes1.size == bytes2.size &&
-    UnsafeUtils.equate(bytes1, UnsafeUtils.arayOffset, bytes2, UnsafeUtils.arayOffset, bytes1.size)
-
   /**
    * Used only internally by RecordComparator etc. to shortcut create a new BR by copying bytes from an existing BR.
    * You BETTER know what you are doing.
@@ -303,7 +311,7 @@ final class RecordBuilder(memFactory: MemFactory,
     */
   def nonCurrentContainerBytes(reset: Boolean = false): Seq[Array[Byte]] = {
     val bytes = allContainers.dropRight(1).map(_.array)
-    if (reset) containers.remove(0, containers.size - 1)
+    if (reset) removeAndFreeContainers(containers.size - 1)
     bytes
   }
 
@@ -320,10 +328,22 @@ final class RecordBuilder(memFactory: MemFactory,
     val bytes = allContainers.dropRight(1).map(_.array) ++
       allContainers.takeRight(1).filterNot(_.isEmpty).map(_.trimmedArray)
     if (reset) {
-      containers.remove(0, containers.size - 1)
+      removeAndFreeContainers(containers.size - 1)
       this.reset()
     }
     bytes
+  }
+
+  /**
+   * Remove the first numContainers containers and release the memory they took up.
+   * If no more containers are left, then everything will be reset.
+   * @param numContainers the # of containers to remove
+   */
+  def removeAndFreeContainers(numContainers: Int): Unit = {
+    require(numContainers <= containers.length)
+    if (numContainers == containers.length) reset()
+    containers.take(numContainers).foreach { c => memFactory.freeMemory(c.offset) }
+    containers.remove(0, numContainers)
   }
 
   /**
@@ -340,10 +360,11 @@ final class RecordBuilder(memFactory: MemFactory,
       val oldBase = curBase
       val recordNumBytes = curRecEndOffset - curRecordOffset
       val oldOffset = curRecordOffset
-      newContainer()
+      if (reuseOneContainer) resetContainerPointers() else newContainer()
       logger.debug(s"Moving $recordNumBytes bytes from end of old container to new container")
       require((containerSize - ContainerHeaderLen) > (recordNumBytes + numBytes), "Record too big for container")
       unsafe.copyMemory(oldBase, oldOffset, curBase, curRecordOffset, recordNumBytes)
+      if (mapOffset != -1L) mapOffset = curRecordOffset + (mapOffset - oldOffset)
       curRecEndOffset = curRecordOffset + recordNumBytes
     }
 

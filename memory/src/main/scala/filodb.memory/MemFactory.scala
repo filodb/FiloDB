@@ -39,11 +39,21 @@ trait MemFactory {
   }
 
   /**
-    * Frees memory allocated at the passed address
+    * Frees memory allocated at the passed address with allocate()
     *
     * @param address The native address which represents the starting location of memory allocated
     */
   def freeMemory(address: Long): Unit
+
+  /**
+   * Compliment to allocateWithMagicHeader(). Calls freeMemory() adjusting for the extra 4 bytes for magic header.
+   */
+  final def freeWithMagicHeader(address: Long): Unit = freeMemory(address - 4)
+
+  /**
+   * Number of "free" bytes left at the moment available for allocation
+   */
+  def numFreeBytes: Long
 
   /**
     * Allocate and make of copy of the bytes into the allocated memory
@@ -85,6 +95,8 @@ class NativeMemoryManager(val upperBoundSizeInBytes: Long) extends MemFactory {
 
   def availableDynMemory: Long = upperBoundSizeInBytes - usedSoFar.get()
 
+  def numFreeBytes: Long = availableDynMemory
+
   /**
     * Allocate and make of copy of the bytes into the allocated memory
     *
@@ -116,8 +128,7 @@ class NativeMemoryManager(val upperBoundSizeInBytes: Long) extends MemFactory {
   }
 
   override def freeMemory(startAddress: Long): Unit = {
-    //start where the header started
-    val address = startAddress - 4
+    val address = startAddress
     val size = sizeMapping.get(address)
     if (size > 0) {
       val currentSize = usedSoFar.get()
@@ -146,6 +157,8 @@ class NativeMemoryManager(val upperBoundSizeInBytes: Long) extends MemFactory {
  * An on-heap MemFactory implemented by creating byte[]
  */
 class ArrayBackedMemFactory extends MemFactory {
+  def numFreeBytes: Long = sys.runtime.freeMemory
+
   /**
     * Allocates memory for requested size.
     *
@@ -183,6 +196,7 @@ class BlockMemFactory(blockStore: BlockManager,
                       reclaimOrder: Option[Int],
                       metadataAllocSize: Int,
                       markFullBlocksAsReclaimable: Boolean = false) extends MemFactory with StrictLogging {
+  def numFreeBytes: Long = blockStore.numFreeBlocks * blockStore.blockSizeInBytes
 
   // tracks fully populated blocks not marked reclaimable yet (typically waiting for flush)
   val fullBlocks = ListBuffer[Block]()

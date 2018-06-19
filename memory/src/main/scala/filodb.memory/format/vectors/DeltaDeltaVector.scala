@@ -37,7 +37,7 @@ object DeltaDeltaVector {
                       signed: Boolean): DeltaDeltaAppendingVector = {
     val bytesRequired = 12 + IntBinaryVector.noNAsize(maxElements, nbits)
     val (base, off, nBytes) = memFactory.allocateWithMagicHeader(bytesRequired)
-    val dispose = () => memFactory.freeMemory(off)
+    val dispose = () => memFactory.freeWithMagicHeader(off)
     new DeltaDeltaAppendingVector(base, off, nBytes, initValue, slope, nbits, signed, dispose)
   }
 
@@ -82,7 +82,7 @@ object DeltaDeltaVector {
 
   def const(memFactory: MemFactory, numElements: Int, initValue: Long, slope: Int): DeltaDeltaConstVector = {
     val (base, off, nBytes) = memFactory.allocateWithMagicHeader(16)
-    val dispose = () => memFactory.freeMemory(off)
+    val dispose = () => memFactory.freeWithMagicHeader(off)
     UnsafeUtils.setLong(base, off, initValue)
     UnsafeUtils.setInt(base, off + 8, slope)
     UnsafeUtils.setInt(base, off + 12, numElements)

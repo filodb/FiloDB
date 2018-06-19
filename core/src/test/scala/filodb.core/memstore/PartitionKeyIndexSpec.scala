@@ -4,19 +4,25 @@ import com.googlecode.javaewah.{EWAHCompressedBitmap, IntIterator}
 import org.scalatest.{BeforeAndAfter, FunSpec, Matchers}
 
 import filodb.core._
+import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.query.{ColumnFilter, Filter}
-import filodb.memory.BinaryRegionConsumer
 
 class PartitionKeyIndexSpec extends FunSpec with Matchers with BeforeAndAfter {
   import GdeltTestData._
   import Filter._
+  import filodb.memory.format.UnsafeUtils.ZeroPointer
   import filodb.memory.format.UTF8Wrapper
   import filodb.memory.format.ZeroCopyUTF8String._
 
   val keyIndex = new PartitionKeyIndex(dataset6)
+  val partBuilder = new RecordBuilder(TestData.nativeMem, dataset6.partKeySchema)
 
   before {
     keyIndex.reset()
+  }
+
+  after {
+    partBuilder.removeAndFreeContainers(partBuilder.allContainers.length)
   }
 
   implicit class RichIntIterator(ii: IntIterator) {
@@ -29,10 +35,8 @@ class PartitionKeyIndexSpec extends FunSpec with Matchers with BeforeAndAfter {
 
   it("should add keys and parse filters correctly") {
     // Add the first ten keys and row numbers
-    records(dataset6, readers.take(10)).records.consumeRecords(new BinaryRegionConsumer {
-      var i = 0
-      def onNext(base: Any, offset: Long): Unit = { keyIndex.addRecord(base, offset, i); i += 1 }
-    })
+    partKeyFromRecords(dataset6, records(dataset6, readers.take(10)), Some(partBuilder))
+      .zipWithIndex.foreach { case (addr, i) => keyIndex.addPartKey(ZeroPointer, addr, i) }
 
     // Should get empty iterator when passing no filters
     val (partNums1, unFounded1) = keyIndex.parseFilters(Nil)
@@ -52,10 +56,8 @@ class PartitionKeyIndexSpec extends FunSpec with Matchers with BeforeAndAfter {
 
   it("should parse filters with UTF8Wrapper and string correctly") {
     // Add the first ten keys and row numbers
-    records(dataset6, readers.take(10)).records.consumeRecords(new BinaryRegionConsumer {
-      var i = 0
-      def onNext(base: Any, offset: Long): Unit = { keyIndex.addRecord(base, offset, i); i += 1 }
-    })
+    partKeyFromRecords(dataset6, records(dataset6, readers.take(10)), Some(partBuilder))
+      .zipWithIndex.foreach { case (addr, i) => keyIndex.addPartKey(ZeroPointer, addr, i) }
 
     val filter2 = ColumnFilter("Actor2Name", Equals(UTF8Wrapper("REGIME".utf8)))
     val (partNums2, unFounded2) = keyIndex.parseFilters(Seq(filter2))
@@ -70,10 +72,8 @@ class PartitionKeyIndexSpec extends FunSpec with Matchers with BeforeAndAfter {
 
   it("should obtain indexed names and values") {
     // Add the first ten keys and row numbers
-    records(dataset6, readers.take(10)).records.consumeRecords(new BinaryRegionConsumer {
-      var i = 0
-      def onNext(base: Any, offset: Long): Unit = { keyIndex.addRecord(base, offset, i); i += 1 }
-    })
+    partKeyFromRecords(dataset6, records(dataset6, readers.take(10)), Some(partBuilder))
+      .zipWithIndex.foreach { case (addr, i) => keyIndex.addPartKey(ZeroPointer, addr, i) }
 
     keyIndex.indexNames.toSet should equal (Set("Actor2Code", "Actor2Name"))
     keyIndex.indexValues("not_found").toSeq should equal (Nil)
@@ -84,10 +84,8 @@ class PartitionKeyIndexSpec extends FunSpec with Matchers with BeforeAndAfter {
 
   it("should be able to AND multiple filters together") {
     // Add the first ten keys and row numbers
-    records(dataset6, readers.take(10)).records.consumeRecords(new BinaryRegionConsumer {
-      var i = 0
-      def onNext(base: Any, offset: Long): Unit = { keyIndex.addRecord(base, offset, i); i += 1 }
-    })
+    partKeyFromRecords(dataset6, records(dataset6, readers.take(10)), Some(partBuilder))
+      .zipWithIndex.foreach { case (addr, i) => keyIndex.addPartKey(ZeroPointer, addr, i) }
 
     val filters1 = Seq(ColumnFilter("Actor2Code", Equals("GOV".utf8)),
                        ColumnFilter("Actor2Name", Equals("REGIME".utf8)))
@@ -104,10 +102,8 @@ class PartitionKeyIndexSpec extends FunSpec with Matchers with BeforeAndAfter {
 
   it("should return unfound column names when calling parseFilters") {
     // Add the first ten keys and row numbers
-    records(dataset6, readers.take(10)).records.consumeRecords(new BinaryRegionConsumer {
-      var i = 0
-      def onNext(base: Any, offset: Long): Unit = { keyIndex.addRecord(base, offset, i); i += 1 }
-    })
+    partKeyFromRecords(dataset6, records(dataset6, readers.take(10)), Some(partBuilder))
+      .zipWithIndex.foreach { case (addr, i) => keyIndex.addPartKey(ZeroPointer, addr, i) }
 
     val filters1 = Seq(ColumnFilter("Actor2Code", Equals("GOV".utf8)),
                        ColumnFilter("MyName", Equals("REGIME".utf8)))
@@ -118,10 +114,9 @@ class PartitionKeyIndexSpec extends FunSpec with Matchers with BeforeAndAfter {
 
   it("should ignore unsupported columns and return empty filter") {
     val index2 = new PartitionKeyIndex(dataset1)
-    records(dataset1, readers.take(10)).records.consumeRecords(new BinaryRegionConsumer {
-      var i = 0
-      def onNext(base: Any, offset: Long): Unit = { index2.addRecord(base, offset, i); i += 1 }
-    })
+    partKeyFromRecords(dataset1, records(dataset1, readers.take(10))).zipWithIndex.foreach { case (addr, i) =>
+      index2.addPartKey(ZeroPointer, addr, i)
+    }
 
     val filters1 = Seq(ColumnFilter("Actor2Code", Equals("GOV".utf8)),
                        ColumnFilter("Year", Equals(1979)))
@@ -131,10 +126,8 @@ class PartitionKeyIndexSpec extends FunSpec with Matchers with BeforeAndAfter {
   }
 
   it("should remove entries correctly") {
-    records(dataset6, readers.take(10)).records.consumeRecords(new BinaryRegionConsumer {
-      var i = 0
-      def onNext(base: Any, offset: Long): Unit = { keyIndex.addRecord(base, offset, i); i += 1 }
-    })
+    partKeyFromRecords(dataset6, records(dataset6, readers.take(10)), Some(partBuilder))
+      .zipWithIndex.foreach { case (addr, i) => keyIndex.addPartKey(ZeroPointer, addr, i) }
 
     keyIndex.indexSize shouldEqual 15
 

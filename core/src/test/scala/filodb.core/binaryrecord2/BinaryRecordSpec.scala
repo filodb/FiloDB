@@ -146,6 +146,33 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
       records should have length (1)
     }
 
+    it("should add multiple records, return offsets, and rollover to same container if reuseOneContainer=true") {
+      val builder = new RecordBuilder(MemFactory.onHeapFactory, schema1, RecordBuilder.MinContainerSize,
+                                      reuseOneContainer=true)
+      // when reuseOneContainer = true, one container should be allocated on startup
+      builder.allContainers should have length(1)
+      builder.allContainers.head.base should not equal (null)
+
+      val data = linearMultiSeries().take(maxNumRecords + 1)
+      addToBuilder(builder, data take maxNumRecords)
+
+      // At this point get offsets, we should have one container only
+      builder.allContainers should have length (1)
+      builder.containerRemaining shouldEqual remainingBytes
+      builder.allContainers.head.consumeRecords(consumer)
+      records should have length (maxNumRecords)
+      builder.allContainers.head.countRecords() shouldEqual maxNumRecords
+      builder.allContainers.head.isEmpty shouldEqual false
+
+      // Ok, now add one more record. With only 60 bytes remaining, we should reset and
+      // copy part of record just added to beginning of container.
+      addToBuilder(builder, data drop maxNumRecords)
+      val containers = builder.allContainers
+      containers should have length (1)
+      containers.head.numBytes shouldEqual 68
+      containers.last.countRecords shouldEqual 1
+    }
+
     it("should add records, reset, and be able to add records again") {
       val builder = new RecordBuilder(nativeMem, schema1, RecordBuilder.MinContainerSize)
       addToBuilder(builder, linearMultiSeries() take 10)

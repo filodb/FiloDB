@@ -126,6 +126,13 @@ object GdeltTestData {
     readerSeq.map { r => RoutingRowReader(r, routing) }
   }
 
+  def partKeyFromRecords(ds: Dataset, records: SomeData, builder: Option[RecordBuilder] = None): Seq[Long] = {
+    val partKeyBuilder = builder.getOrElse(new RecordBuilder(TestData.nativeMem, ds.partKeySchema))
+    records.records.map { case (base, offset) =>
+      ds.comparator.buildPartKeyFromIngest(base, offset, partKeyBuilder)
+    }.toVector
+  }
+
   val badLine = ArrayStringRowReader("NotANumber, , , , , , ,".split(','))   // Will fail
   val altLines =
     """0,1979-01-01,197901,1979,AFR,africa,5,5.52631578947368

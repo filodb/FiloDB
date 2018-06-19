@@ -17,7 +17,7 @@ object LongBinaryVector {
   def appendingVector(memFactory: MemFactory, maxElements: Int): BinaryAppendableVector[Long] = {
     val bytesRequired = 8 + BitmapMask.numBytesRequired(maxElements) + 8 * maxElements
     val (base, off, nBytes) = memFactory.allocateWithMagicHeader(bytesRequired)
-    val dispose =  () => memFactory.freeMemory(off)
+    val dispose =  () => memFactory.freeWithMagicHeader(off)
     GrowableVector(memFactory, new MaskedLongAppendingVector(base, off, nBytes, maxElements, dispose))
   }
 
@@ -28,7 +28,7 @@ object LongBinaryVector {
   def appendingVectorNoNA(memFactory: MemFactory, maxElements: Int): BinaryAppendableVector[Long] = {
     val bytesRequired = 4 + 8 * maxElements
     val (base, off, nBytes) = memFactory.allocateWithMagicHeader(bytesRequired)
-    val dispose =  () => memFactory.freeMemory(off)
+    val dispose =  () => memFactory.freeWithMagicHeader(off)
     new LongAppendingVector(base, off, nBytes, dispose)
   }
 
@@ -153,7 +153,7 @@ BitmapMaskAppendableVector[Long](base, offset + 4L, maxElements) with Optimizing
 
   override def newInstance(memFactory: MemFactory, growFactor: Int = 2): BinaryAppendableVector[Long] = {
     val (newbase, newoff, nBytes) = memFactory.allocateWithMagicHeader(maxBytes * growFactor)
-    val dispose = () => memFactory.freeMemory(newoff)
+    val dispose = () => memFactory.freeWithMagicHeader(newoff)
     new MaskedLongAppendingVector(newbase, newoff, maxBytes * growFactor, maxElements * growFactor, dispose)
   }
 

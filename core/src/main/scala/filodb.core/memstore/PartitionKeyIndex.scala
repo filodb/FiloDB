@@ -14,13 +14,13 @@ import filodb.memory.format.{ZeroCopyUTF8String => UTF8Str}
 import filodb.memory.UTF8StringMedium
 
 trait Indexer {
-  def fromRecord(base: Any, offset: Long, partIndex: Int): Unit
+  def fromPartKey(base: Any, offset: Long, partIndex: Int): Unit
   /** Obtains pairs of index (name, value) from a partition key */
   def getNamesValues(key: PartitionKey): Seq[(UTF8Str, UTF8Str)]
 }
 
 object NoOpIndexer extends Indexer {
-  def fromRecord(base: Any, offset: Long, partIndex: Int): Unit = {}
+  def fromPartKey(base: Any, offset: Long, partIndex: Int): Unit = {}
   def getNamesValues(key: PartitionKey): Seq[(UTF8Str, UTF8Str)] = Nil
 }
 
@@ -44,20 +44,19 @@ class PartitionKeyIndex(dataset: Dataset) extends StrictLogging {
   private final val numPartColumns = dataset.partitionColumns.length
   private final val indices = new NonBlockingHashMap[UTF8Str, BitmapIndex[UTF8Str]]
 
-  private final val indexers = dataset.partitionColumns.zipWithIndex.map { case (c, i) =>
-    val pos = i + dataset.dataColumns.length
+  private final val indexers = dataset.partitionColumns.zipWithIndex.map { case (c, pos) =>
     c.columnType match {
       case StringColumn => new Indexer {
                              val colName = UTF8Str(c.name)
-                             def fromRecord(base: Any, offset: Long, partIndex: Int): Unit = {
-                               addIndexEntry(colName, dataset.ingestionSchema.asZCUTF8Str(base, offset, pos), partIndex)
+                             def fromPartKey(base: Any, offset: Long, partIndex: Int): Unit = {
+                               addIndexEntry(colName, dataset.partKeySchema.asZCUTF8Str(base, offset, pos), partIndex)
                              }
                              def getNamesValues(key: PartitionKey): Seq[(UTF8Str, UTF8Str)] =
-                               Seq((colName, dataset.ingestionSchema.asZCUTF8Str(key, pos)))
+                               Seq((colName, dataset.partKeySchema.asZCUTF8Str(key, pos)))
                            }
       case MapColumn => new Indexer {
-                          def fromRecord(base: Any, offset: Long, partIndex: Int): Unit = {
-                            dataset.ingestionSchema.consumeMapItems(base, offset,
+                          def fromPartKey(base: Any, offset: Long, partIndex: Int): Unit = {
+                            dataset.partKeySchema.consumeMapItems(base, offset,
                                                                     pos, new IndexingMapConsumer(partIndex))
                           }
                           def getNamesValues(key: PartitionKey): Seq[(UTF8Str, UTF8Str)] = ???
@@ -68,9 +67,12 @@ class PartitionKeyIndex(dataset: Dataset) extends StrictLogging {
     }
   }.toArray
 
-  def addRecord(recBase: Any, recOffset: Long, partIndex: Int): Unit = {
+  /**
+   * Adds fields from a partition key to the index
+   */
+  def addPartKey(base: Any, offset: Long, partIndex: Int): Unit = {
     for { i <- 0 until numPartColumns optimized } {
-      indexers(i).fromRecord(recBase, recOffset, partIndex)
+      indexers(i).fromPartKey(base, offset, partIndex)
     }
   }
 

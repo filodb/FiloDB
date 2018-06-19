@@ -16,6 +16,14 @@ object BinaryRegion {
   val hasher64 = xxhashFactory.hash64
   val Seed = 0x9747b28c
 
+  /**
+    * A memory has a base, offset and a length. An off-heap memory usually has a null base.
+    * An array backed memory has the array object as the base. Offset is a Long indicating the
+    * location in native memory. For an array it is retrieved using Unsafe.arrayBaseOffset
+    * Length is the length of memory in bytes
+    */
+  type Memory = Tuple3[Any, Long, Int]
+
   def hash32(bytes: Array[Byte]): Int = hasher32.hash(bytes, 0, bytes.size, Seed)
 
   // 64-bit pointer to native/offheap memory
@@ -55,6 +63,16 @@ trait BinaryRegion {
   }
 
   final def asNewByteArray(addr: NativePointer): Array[Byte] = asNewByteArray(UnsafeUtils.ZeroPointer, addr)
+
+  /**
+   * Allocates from the MemFactory and copies to the allocated space the entire BinaryRegion
+   */
+  final def allocateAndCopy(base: Any, offset: Long, factory: MemFactory): Memory = {
+    val numBytes1 = numBytes(base, offset)
+    val memory = factory.allocate(numBytes1 + lenBytes)
+    UnsafeUtils.unsafe.copyMemory(base, offset, memory._1, memory._2, numBytes1 + lenBytes)
+    memory
+  }
 
   /**
    * Returns true if both regions are byte for byte equal and the same length.

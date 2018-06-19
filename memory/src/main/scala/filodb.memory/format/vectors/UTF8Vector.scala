@@ -12,7 +12,6 @@ import filodb.memory.format.Encodings._
   * Constructor methods for UTF8 vector types, as well as UTF8/binary blob utilities
   */
 object UTF8Vector {
-
   /**
     * Creates a UTF8Vector that holds references to original UTF8 strings, but can optimize to final forms.
     * Typical usage:  {{{ UTF8Vector(strings).optimize().toFiloBuffer }}}
@@ -61,7 +60,7 @@ object UTF8Vector {
     val maxBytes = maxElements * ObjectVector.objectRefSize
     // Be sure to store this on the heap.  Object refs and offheap don't mix
     val (base, off, nBytes) = MemFactory.onHeapFactory.allocateWithMagicHeader(maxBytes)
-    val dispose =  () => MemFactory.onHeapFactory.freeMemory(off)
+    val dispose =  () => MemFactory.onHeapFactory.freeWithMagicHeader(off)
     new GrowableVector(MemFactory.onHeapFactory, new UTF8PtrAppendable(base, off, maxBytes, dispose))
   }
 
@@ -78,7 +77,7 @@ object UTF8Vector {
                         maxElements: Int,
                         maxBytes: Int): BinaryAppendableVector[ZeroCopyUTF8String] = {
     val (base, off, nBytes) = memFactory.allocateWithMagicHeader(maxBytes)
-    val dispose = () => memFactory.freeMemory(off)
+    val dispose = () => memFactory.freeWithMagicHeader(off)
     new GrowableVector(memFactory, new UTF8AppendableVector(base, off, nBytes, maxElements, dispose))
   }
 
@@ -93,7 +92,7 @@ object UTF8Vector {
                         maxElements: Int,
                         maxBytesPerItem: Int): BinaryAppendableVector[ZeroCopyUTF8String] = {
     val (base, off, nBytes) = memFactory.allocateWithMagicHeader(1 + maxElements * (maxBytesPerItem + 1))
-    val dispose = () => memFactory.freeMemory(off)
+    val dispose = () => memFactory.freeWithMagicHeader(off)
     new GrowableVector(memFactory, new FixedMaxUTF8AppendableVector(base, off,
                                                                     nBytes, maxBytesPerItem + 1,
                                                                     dispose))
@@ -227,7 +226,7 @@ class UTF8AppendableVector(base: Any,
 
   override def newInstance(memFactory: MemFactory, growFactor: Int = 2): UTF8AppendableVector = {
     val (newbase, newoff, nBytes) = memFactory.allocateWithMagicHeader(maxBytes * growFactor)
-    val dispose = () => memFactory.freeMemory(newoff)
+    val dispose = () => memFactory.freeWithMagicHeader(newoff)
     new UTF8AppendableVector(newbase, newoff, maxBytes * growFactor, maxElements * growFactor, dispose)
   }
 
@@ -346,7 +345,7 @@ class UTF8PtrAppendable(base: Any, offset: Long, maxBytes: Int, val dispose: () 
 
   override def newInstance(memFactory: MemFactory, growFactor: Int = 2): ObjectVector[ZeroCopyUTF8String] = {
     val (newbase, newoff, nBytes) = memFactory.allocateWithMagicHeader(maxBytes * growFactor)
-    val dispose = () => memFactory.freeMemory(newoff)
+    val dispose = () => memFactory.freeWithMagicHeader(newoff)
     new UTF8PtrAppendable(newbase, newoff, nBytes, dispose)
   }
 

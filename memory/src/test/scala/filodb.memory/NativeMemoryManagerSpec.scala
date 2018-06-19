@@ -32,15 +32,15 @@ class NativeMemoryManagerSpec extends FlatSpec with Matchers {
 
   it should "Fail when trying to allocate beyond limit. Then succeed after freeing" in {
     val bufferManager = new NativeMemoryManager(1000)
-    checkAllocation(bufferManager.allocateWithMagicHeader(300))
-    val toFree = bufferManager.allocateWithMagicHeader(300)
+    checkAllocation(bufferManager.allocate(300))
+    val toFree = bufferManager.allocate(300)
     checkAllocation(toFree)
-    checkAllocation(bufferManager.allocateWithMagicHeader(300))
+    checkAllocation(bufferManager.allocate(300))
     intercept[IndexOutOfBoundsException] {
-      checkAllocation(bufferManager.allocateWithMagicHeader(300))
+      checkAllocation(bufferManager.allocate(300))
     }
     bufferManager.freeMemory(toFree._2)
-    checkAllocation(bufferManager.allocateWithMagicHeader(300))
+    checkAllocation(bufferManager.allocate(300))
   }
 
   private def checkAllocation(memory: Memory) = {

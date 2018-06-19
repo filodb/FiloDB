@@ -177,7 +177,9 @@ class TimeSeriesShard(dataset: Dataset,
     */
   logger.info(s"Allocating $bufferMemorySize bytes for WriteBufferPool/PartitionKeys for shard $shardNum")
   protected val bufferMemoryManager = new NativeMemoryManager(bufferMemorySize)
-  private val partKeyBuilder = new RecordBuilder(bufferMemoryManager, dataset.partKeySchema)
+  private val partKeyBuilder = new RecordBuilder(MemFactory.onHeapFactory, dataset.partKeySchema,
+                                                 reuseOneContainer = true)
+  private val partKeyArray = partKeyBuilder.allContainers.head.base
   private val bufferPool = new WriteBufferPool(bufferMemoryManager, dataset, maxChunksSize,
                                                storeConfig.allocStepSize)
 
@@ -372,10 +374,12 @@ class TimeSeriesShard(dataset: Dataset,
   def getOrAddPartition(recordBase: Any, recordOff: Long, group: Int): TimeSeriesPartition =
     partSet.getOrAddWithIngestBR(recordBase, recordOff, {
       checkAndEvictPartitions()
-      val binPartKey = recordComp.buildPartKeyFromIngest(recordBase, recordOff, partKeyBuilder)
-      val newPart = new TimeSeriesPartition(nextPartitionID, dataset, binPartKey, shardNum, sink,
+      // PartitionKey is copied to offheap bufferMemory and stays there until it is freed
+      val partKeyOffset = recordComp.buildPartKeyFromIngest(recordBase, recordOff, partKeyBuilder)
+      val (_, partKeyAddr, _) = BinaryRegionLarge.allocateAndCopy(partKeyArray, partKeyOffset, bufferMemoryManager)
+      val newPart = new TimeSeriesPartition(nextPartitionID, dataset, partKeyAddr, shardNum, sink,
                           bufferPool, pagedChunkStore, shardStats)(queryScheduler)
-      keyIndex.addRecord(recordBase, recordOff, nextPartitionID)
+      keyIndex.addPartKey(UnsafeUtils.ZeroPointer, partKeyAddr, nextPartitionID)
       partitions.put(nextPartitionID, newPart)
       shardStats.partitionsCreated.increment
       partitionGroups(group).set(nextPartitionID)
@@ -419,17 +423,24 @@ class TimeSeriesShard(dataset: Dataset,
 
       // Finally, prune partitions and keyMap data structures
       logger.info(s"Pruning ${prunedPartitions.cardinality} partitions from shard $shardNum")
-      prunedPartitions.iterator.asScala.foreach { partId =>
-        partSet.remove(partitions.get(partId))
-        partitions.remove(partId)
-      }
+      val intIt = prunedPartitions.intIterator
+      while (intIt.hasNext) { removePartition(intIt.next) }
       shardStats.partitionsEvicted.increment(prunedPartitions.cardinality)
     }
   }
 
+  // Permanently removes the given partition ID from our in-memory data structures
+  // Also frees partition key if necessary
+  private def removePartition(partId: Int): Unit = {
+    val partitionObj = partitions.get(partId)
+    partSet.remove(partitionObj)
+    bufferMemoryManager.freeMemory(partitionObj.partKeyOffset)
+    partitions.remove(partId)
+  }
+
   private def partitionsToEvict(): (EWAHCompressedBitmap, HashMap[UTF8Str, _ <: collection.Set[UTF8Str]]) = {
     // Iterate and add eligible partitions to delete to our list, plus list of indices and values to change
-    val toEvict = evictionPolicy.howManyToEvict(partSet.size)
+    val toEvict = evictionPolicy.howManyToEvict(partSet.size, bufferMemoryManager)
     if (toEvict > 0) {
       // Iterate and add eligible partitions to delete to our list, plus list of indices and values to change
       val prunedPartitions = new EWAHCompressedBitmap()

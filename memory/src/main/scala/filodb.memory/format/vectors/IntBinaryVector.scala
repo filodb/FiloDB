@@ -21,7 +21,7 @@ object IntBinaryVector {
                       signed: Boolean = true): BinaryAppendableVector[Int] = {
     val bytesRequired = 4 + BitmapMask.numBytesRequired(maxElements) + noNAsize(maxElements, nbits)
     val (base, off, nBytes) = memFactory.allocateWithMagicHeader(bytesRequired)
-    val dispose = () => memFactory.freeMemory(off)
+    val dispose = () => memFactory.freeWithMagicHeader(off)
     GrowableVector(memFactory, new MaskedIntAppendingVector(base, off, nBytes, maxElements, nbits, signed, dispose))
   }
 
@@ -41,7 +41,7 @@ object IntBinaryVector {
                           signed: Boolean = true): IntAppendingVector = {
     val bytesRequired = noNAsize(maxElements, nbits)
     val (base, off, nBytes) = memFactory.allocateWithMagicHeader(bytesRequired)
-    val dispose = () => memFactory.freeMemory(off)
+    val dispose = () => memFactory.freeWithMagicHeader(off)
     appendingVectorNoNA(base, off, nBytes, nbits, signed, dispose)
   }
 
@@ -321,7 +321,7 @@ BitmapMaskAppendableVector[Int](base, offset + 4L, maxElements) with OptimizingP
 
   override def newInstance(memFactory: MemFactory, growFactor: Int = 2): BinaryAppendableVector[Int] = {
     val (newbase, newoff, nBytes) = memFactory.allocateWithMagicHeader(maxBytes * growFactor)
-    val dispose = () => memFactory.freeMemory(newoff)
+    val dispose = () => memFactory.freeWithMagicHeader(newoff)
     new MaskedIntAppendingVector(newbase, newoff, maxBytes * growFactor, maxElements * growFactor,
                                  nbits, signed, dispose)
   }
