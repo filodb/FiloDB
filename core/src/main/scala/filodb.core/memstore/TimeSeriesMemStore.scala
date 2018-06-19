@@ -88,6 +88,7 @@ extends MemStore with StrictLogging {
                     // stream.  This avoids concurrency issues and ensures that buffers for a group are switched
                     // at the same offset/watermark
                     case FlushCommand(group) => shard.switchGroupBuffers(group)
+                                                shard.checkAndEvictPartitions()
                                                 Some(FlushGroup(shard.shardNum,
                                                   group,
                                                   shard.latestOffset,

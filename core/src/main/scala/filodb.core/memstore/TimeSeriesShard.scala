@@ -405,7 +405,7 @@ class TimeSeriesShard(dataset: Dataset,
    * Check and evict partitions to free up memory and heap space.  NOTE: This should be called in the ingestion
    * stream so that there won't be concurrent other modifications.  Ideally this is called when trying to add partitions
    */
-  private def checkAndEvictPartitions(): Unit = {
+  private[filodb] def checkAndEvictPartitions(): Unit = {
     val (prunedPartitions, indicesToPrune) = partitionsToEvict()
     if (!prunedPartitions.isEmpty) {
       logger.debug(s"About to prune ${prunedPartitions.cardinality} partitions...")
