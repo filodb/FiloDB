@@ -74,7 +74,7 @@ class DemandPagedChunkStore(dataset: Dataset,
   def storeAsync(onHeap: Seq[ChunkSetReader], partition: TimeSeriesPartition): Future[Seq[ChunkSetInfo]] = {
     val p = Promise[Seq[ChunkSetInfo]]()
     scheduler.scheduleOnce(0.seconds) {
-      if (onDemandPagingEnabled && !partition.cacheIsWarm()) {
+      if (onDemandPagingEnabled) {
         val offHeapChunkInfos = onHeap.flatMap { reader => // flatMap removes Nones
           timeOrderForChunkSet(reader.info).map { timeOrder =>
             val memFactory = memFactories(timeOrder)

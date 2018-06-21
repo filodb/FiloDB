@@ -97,7 +97,9 @@ abstract class ClusterRecoverySpec extends ClusterSpec(ClusterRecoverySpecConfig
 
     // wait for all ingestion to be stopped, keep receiving status messages
     while(!hasAllShardsStopped(mapper)) {
-      mapper.updateFromEvent(expectMsgClass(classOf[ShardEvent]))
+      expectMsgPF(10.seconds.dilated) {
+        case CurrentShardSnapshot(ref, newMap) if ref == dataset6.ref => mapper = newMap
+      }
     }
     enterBarrier("ingestion-stopped")
 

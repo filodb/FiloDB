@@ -1,7 +1,5 @@
 package filodb.core.memstore
 
-import java.lang.management.ManagementFactory
-import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.ConcurrentSkipListMap
 
 import com.typesafe.scalalogging.StrictLogging
@@ -100,9 +98,6 @@ class TimeSeriesPartition(val partID: Int,
     * Number of columns in the dataset
     */
   private final val numColumns = dataset.dataColumns.length
-
-  private val jvmStartTime = ManagementFactory.getRuntimeMXBean.getStartTime
-  private val partitionLoadedFromPersistentStore = new AtomicBoolean(false)
 
   /**
    * Ingests a new row, adding it to currentChunks.
@@ -290,35 +285,46 @@ class TimeSeriesPartition(val partID: Int,
   }
 
   /**
-    * Indicates that the partition's chunks have been loaded from persistent store into memory
-    * and the reads do not need to go to the persistent column store
-    *
-    * @return true if chunks have been loaded, false otherwise
-    */
-  def cacheIsWarm(): Boolean = {
-    if (partitionLoadedFromPersistentStore.get) {
-      true
-    } else {
-      val timeSinceStart = System.currentTimeMillis - jvmStartTime
-      if (timeSinceStart > pagedChunkStore.retentionMillis) partitionLoadedFromPersistentStore.set(true)
-      timeSinceStart > pagedChunkStore.retentionMillis
-    }
+   * Returns the method to use to read from the ChunkSource
+   * if the chunks in memory are not enough to satisfy the request.
+   * NOTE: Just a temporary implementation.  To really answer this question, we need to know, from the index,
+   * how much data there really is outside of memory, instead of guessing.
+   * This is just an initial stab.
+   * Also, this code should really live outside of TSPartition in its own loader.
+   */
+  private def chunkStoreScanMethod(method: ChunkScanMethod): Option[ChunkScanMethod] = method match {
+    // For now, allChunkScan will always load from disk.  This is almost never used, and without an index we have
+    // no way of knowing what there is anyways.
+    case AllChunkScan               => Some(AllChunkScan)
+    // Assume initial startKey of first chunk is the earliest - typically true unless we load in historical data
+    // Compare desired time range with start key and see if in memory data covers desired range
+    // Also assume we have in memory all data since first key.  Just return the missing range of keys.
+    case r: RowKeyChunkScan         =>
+      if (infosChunks.size > 0) {
+        val firstInMemKey = infosChunks.firstEntry.getValue.info.firstKey
+        if (r.startkey < firstInMemKey) { Some(RowKeyChunkScan(r.startkey, firstInMemKey)) }
+        else                            { None }
+      } else {
+        Some(r)    // if no chunks ingested yet, read everything from disk
+      }
+    // The last sample is almost always in memory.  But this is only used for old QueryEngine.
+    case LastSampleChunkScan        => None
   }
 
   override def streamReaders(method: ChunkScanMethod, columnIds: Array[Int]): Observable[ChunkSetReader] = {
-    if (cacheIsWarm) { // provide read-through functionality
+    chunkStoreScanMethod(method).map { m =>
+      demandPageFromColStore(m, columnIds)
+    }.getOrElse {
       super.streamReaders(method, columnIds) // return data from memory
-    } else {
-      demandPageFromColStore(method, columnIds)
     }
   }
 
   override def readers(method: ChunkScanMethod, columnIds: Array[Int]): Iterator[ChunkSetReader] = {
     import Iterators._
-    if (cacheIsWarm) { // provide read-through functionality
+    chunkStoreScanMethod(method).map { m =>
+      demandPageFromColStore(m, columnIds).toIterator()
+    }.getOrElse {
       readersFromMemory(method, columnIds) // return data from memory
-    } else {
-      demandPageFromColStore(method, columnIds).toIterator()
     }
   }
 
@@ -346,13 +352,13 @@ class TimeSeriesPartition(val partID: Int,
     // results where query time range spans both data from cassandra and recently ingested data
     val resultsFromMemory = Observable.fromIterator(readersFromMemory(method, columnIds))
 
-    val colStoreReaders = readFromColStore()
+    val colStoreReaders = readFromColStore(method)
 
     // store the chunks into memory (happens asynchronously, not on the query path)
+    val readChunkIds = new collection.mutable.HashSet[ChunkID]
     colStoreReaders.flatMap { onHeapReaders =>
       pagedChunkStore.storeAsync(onHeapReaders, this)
     }.map { onHeapInfos =>
-      partitionLoadedFromPersistentStore.set(true)
       shardStats.partitionsPagedFromColStore.increment()
       shardStats.chunkIdsPagedFromColStore.increment(onHeapInfos.size)
       logger.trace(s"Successfully paged ${onHeapInfos.size} chunksets from cassandra for partition $stringPartition")
@@ -360,43 +366,24 @@ class TimeSeriesPartition(val partID: Int,
       logger.warn("Error occurred when paging data into Memstore", e)
     }
 
-    // now filter the data read from colStore per user query
     val resultsFromColStore = Observable.fromFuture(colStoreReaders).flatMap(Observable.fromIterable(_))
-      .filter { r =>
-        // filter chunks based on query
-        method match {
-          case AllChunkScan =>                          true
-          case RowKeyChunkScan(from, to) =>             r.info.intersection(from.binRec, to.binRec).isDefined
-          case LastSampleChunkScan =>                   false
-              // TODO return last chunk only if no data is ingested.
-              // For now assume data is ingested continuously, and the chunk in memory will suffice
-        }
-      }.map { r =>
+      .map { r =>
         // get right columns
         val chunkset = getVectors(columnIds, r.vectors.map(_.asInstanceOf[BinaryVector[_]]))
         shardStats.numChunksQueried.increment(chunkset.length)
+        readChunkIds += r.info.id
         new ChunkSetReader(r.info, emptySkips, chunkset)
       }
-    resultsFromMemory ++ resultsFromColStore
+
+    // In theory, we are trying to read non-overlapping ranges from colStore and from memory.  IN reality
+    // we need to filter because AllChunksScan of both will return overlapping results.  :(
+    resultsFromColStore ++ resultsFromMemory.filter { r => !readChunkIds.contains(r.info.id) }
   }
 
-  private def readFromColStore() = {
-    val colStoreScan = dataset.timestampColumn match {
-      case Some(tsCol) =>
-        // scan colStore since retention (ex, 72) hours ago until (not including) first key in memstore
-        val from = BinaryRecord(dataset, Seq(System.currentTimeMillis() - pagedChunkStore.retentionMillis))
-        val toL = infosChunks.values.asScala.headOption.flatMap { v =>
-          if (v.info.firstKey.isEmpty) None else Some(v.info.firstKey.getLong(tsCol.id) - 1)
-        }
-        val to = BinaryRecord(dataset, Seq(toL.getOrElse(Long.MaxValue)))
-        RowKeyChunkScan(from, to)
-      case None =>
-        AllChunkScan
-    }
-    chunkSource.scanPartitions(dataset, SinglePartitionScan(partKeyBytes, shard))
-      .take(1)
-      .flatMap(_.streamReaders(colStoreScan, dataset.dataColumns.map(_.id).toArray)) // all chunks, all columns
-      .toListL
-      .runAsync
-  }
+  private def readFromColStore(method: ChunkScanMethod) =
+    chunkSource.readChunks(dataset, dataset.dataColumns.map(_.id),
+                           SinglePartitionScan(partKeyBytes, shard),
+                           method)
+               .toListL
+               .runAsync
 }
