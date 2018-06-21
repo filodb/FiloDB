@@ -92,7 +92,8 @@ class SlidingWindowIterator(raw: Iterator[RowReader],
       if (next.timestamp >= curWindowStart ||    // inside current window
          (rangeFunction.needsLastSample && rows.hasNext && rows.head.timestamp > curWindowStart) ||
          (rangeFunction.needsLastSample && !rows.hasNext)) { // no more rows
-        val toAdd = windowSamplesPool.get.copyFrom(next)
+        val toAdd = windowSamplesPool.get
+        toAdd.copyFrom(next)
         windowQueue.add(toAdd)
         rangeFunction.addToWindow(toAdd)
       }
@@ -162,7 +163,8 @@ class BufferableCounterCorrectionIterator(iter: Iterator[RowReader]) extends Ite
     prev = cur
     cur = temp
     // place value in cur and return
-    cur.set(next.getLong(0), lastVal)
+    cur.setLong(0, next.getLong(0))
+    cur.setDouble(1, lastVal)
     cur
   }
 }

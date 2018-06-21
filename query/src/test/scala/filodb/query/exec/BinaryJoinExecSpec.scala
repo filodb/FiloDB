@@ -30,7 +30,7 @@ class BinaryJoinExecSpec extends FunSpec with Matchers with ScalaFutures {
                           timeout: FiniteDuration): Task[QueryResponse] = ???
   }
 
-  private def data(i: Int) = Stream.from(0).map(n => new TransientRow(Array(n.toLong, i.toDouble))).take(20)
+  private def data(i: Int) = Stream.from(0).map(n => new TransientRow(n.toLong, i.toDouble)).take(20)
 
   val samplesLhs: Array[RangeVector] = Array.tabulate(200) { i =>
     new RangeVector {

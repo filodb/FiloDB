@@ -101,9 +101,9 @@ object LastSampleFunction extends RangeFunction {
     if (window.size > 1)
       throw new IllegalStateException("Possible internal error: Last sample should have used zero length windows")
     if (window.size == 0 || (endTimestamp - window.head.getLong(0)) > queryConfig.staleSampleAfterMs) {
-      sampleToEmit.set(endTimestamp, Double.NaN)
+      sampleToEmit.setValues(endTimestamp, Double.NaN)
     } else {
-      sampleToEmit.set(endTimestamp, window.head.getDouble(1))
+      sampleToEmit.setValues(endTimestamp, window.head.getDouble(1))
     }
   }
 }

@@ -21,8 +21,8 @@ class MinMaxOverTimeFunction(ord: Ordering[Double]) extends RangeFunction {
   override def apply(startTimestamp: Long, endTimestamp: Long, window: Window,
                      sampleToEmit: TransientRow,
                      queryConfig: QueryConfig): Unit = {
-    if (minMaxDeque.isEmpty) sampleToEmit.set(endTimestamp, Double.NaN)
-    else sampleToEmit.set(endTimestamp, minMaxDeque.peekFirst().value)
+    if (minMaxDeque.isEmpty) sampleToEmit.setValues(endTimestamp, Double.NaN)
+    else sampleToEmit.setValues(endTimestamp, minMaxDeque.peekFirst().value)
   }
 }
 
@@ -41,7 +41,7 @@ class SumOverTimeFunction extends RangeFunction {
   override def apply(startTimestamp: Long, endTimestamp: Long, window: Window,
                      sampleToEmit: TransientRow,
                      queryConfig: QueryConfig): Unit = {
-    sampleToEmit.set(endTimestamp, sum)
+    sampleToEmit.setValues(endTimestamp, sum)
   }
 }
 
@@ -59,7 +59,7 @@ class CountOverTimeFunction extends RangeFunction {
   override def apply(startTimestamp: Long, endTimestamp: Long, window: Window,
                      sampleToEmit: TransientRow,
                      queryConfig: QueryConfig): Unit = {
-    sampleToEmit.set(endTimestamp, count)
+    sampleToEmit.setValues(endTimestamp, count)
   }
 }
 
@@ -81,7 +81,7 @@ class AvgOverTimeFunction extends RangeFunction {
   override def apply(startTimestamp: Long, endTimestamp: Long, window: Window,
                      sampleToEmit: TransientRow,
                      queryConfig: QueryConfig): Unit = {
-    sampleToEmit.set(endTimestamp, sum/count)
+    sampleToEmit.setValues(endTimestamp, sum/count)
   }
 }
 
@@ -108,7 +108,7 @@ class StdDevOverTimeFunction extends RangeFunction {
                      queryConfig: QueryConfig): Unit = {
     val avg = sum/count
     val stdDev = Math.sqrt(squaredSum/count - avg*avg)
-    sampleToEmit.set(endTimestamp, stdDev)
+    sampleToEmit.setValues(endTimestamp, stdDev)
   }
 }
 
@@ -135,6 +135,6 @@ class StdVarOverTimeFunction extends RangeFunction {
                      queryConfig: QueryConfig): Unit = {
     val avg = sum/count
     val stdVar = squaredSum/count - avg*avg
-    sampleToEmit.set(endTimestamp, stdVar)
+    sampleToEmit.setValues(endTimestamp, stdVar)
   }
 }

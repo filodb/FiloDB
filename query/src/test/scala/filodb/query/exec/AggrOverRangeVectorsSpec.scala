@@ -29,7 +29,7 @@ class AggrOverRangeVectorsSpec extends FunSpec with Matchers with ScalaFutures {
 
     val samples: Array[RangeVector] = Array.fill(100)(new RangeVector {
       val data = Stream.from(0).map { n=>
-        new TransientRow(Array(n.toLong, rand.nextDouble()))
+        new TransientRow(n.toLong, rand.nextDouble())
       }.take(20)
       override def key: RangeVectorKey = ignoreKey
       override def rows: Iterator[RowReader] = data.iterator
@@ -117,18 +117,18 @@ class AggrOverRangeVectorsSpec extends FunSpec with Matchers with ScalaFutures {
     val samples: Array[RangeVector] = Array(
       new RangeVector {
         override def key: RangeVectorKey = ignoreKey
-        override def rows: Iterator[RowReader] = Seq(new TransientRow(Array(1L, Double.NaN)),
-                                                   new TransientRow(Array(2L, 5.6d))).iterator
+        override def rows: Iterator[RowReader] = Seq(new TransientRow(1L, Double.NaN),
+                                                   new TransientRow(2L, 5.6d)).iterator
       },
       new RangeVector {
         override def key: RangeVectorKey = ignoreKey
-        override def rows: Iterator[RowReader] = Seq(new TransientRow(Array(1L, 4.6d)),
-          new TransientRow(Array(2L, 4.4d))).iterator
+        override def rows: Iterator[RowReader] = Seq(new TransientRow(1L, 4.6d),
+          new TransientRow(2L, 4.4d)).iterator
       },
       new RangeVector {
         override def key: RangeVectorKey = ignoreKey
-        override def rows: Iterator[RowReader] = Seq(new TransientRow(Array(1L, 2.1d)),
-          new TransientRow(Array(2L, 5.4d))).iterator
+        override def rows: Iterator[RowReader] = Seq(new TransientRow(1L, 2.1d),
+          new TransientRow(2L, 5.4d)).iterator
       }
     )
 

@@ -64,7 +64,7 @@ object IncreaseFunction extends RangeFunction {
             queryConfig: QueryConfig): Unit = {
     val result = RateFunctions.extrapolatedRate(startTimestamp,
       endTimestamp, window, true, false)
-    sampleToEmit.set(endTimestamp, result.getOrElse(Double.NaN)) // TODO need to use a NA instead of NaN
+    sampleToEmit.setValues(endTimestamp, result.getOrElse(Double.NaN)) // TODO need to use a NA instead of NaN
   }
 }
 
@@ -81,7 +81,7 @@ object RateFunction extends RangeFunction {
             queryConfig: QueryConfig): Unit = {
     val result = RateFunctions.extrapolatedRate(startTimestamp,
       endTimestamp, window, true, true)
-    sampleToEmit.set(endTimestamp, result.getOrElse(Double.NaN)) // TODO need to use a NA instead of NaN
+    sampleToEmit.setValues(endTimestamp, result.getOrElse(Double.NaN)) // TODO need to use a NA instead of NaN
   }
 }
 
@@ -97,6 +97,6 @@ object DeltaFunction extends RangeFunction {
             queryConfig: QueryConfig): Unit = {
     val result = RateFunctions.extrapolatedRate(startTimestamp,
       endTimestamp, window, false, false)
-    sampleToEmit.set(endTimestamp, result.getOrElse(Double.NaN)) // TODO need to use a NA instead of NaN
+    sampleToEmit.setValues(endTimestamp, result.getOrElse(Double.NaN)) // TODO need to use a NA instead of NaN
   }
 }

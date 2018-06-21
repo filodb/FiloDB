@@ -106,7 +106,7 @@ class LastSampleFunctionSpec extends FunSpec with Matchers {
       val sample = new TransientRow()
       override def hasNext: Boolean = row < data.size
       override def next(): TransientRow = {
-        sample.set(data(row)._1, data(row)._2)
+        sample.setValues(data(row)._1, data(row)._2)
         row += 1
         sample
       }

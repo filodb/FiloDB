@@ -28,8 +28,7 @@ class RateFunctionsSpec extends FunSpec with Matchers {
 
   val q = new IndexedArrayQueue[TransientRow]()
   counterSamples.foreach { case (t, v) =>
-    val s = new TransientRow
-    s.set(t, v)
+    val s = new TransientRow(t, v)
     q.add(s)
   }
   val counterWindow = new QueueBasedWindow(q)
@@ -47,8 +46,7 @@ class RateFunctionsSpec extends FunSpec with Matchers {
 
   val q2 = new IndexedArrayQueue[TransientRow]()
   gaugeSamples.foreach { case (t, v) =>
-    val s = new TransientRow
-    s.set(t, v)
+    val s = new TransientRow(t, v)
     q2.add(s)
   }
   val gaugeWindow = new QueueBasedWindow(q2)
