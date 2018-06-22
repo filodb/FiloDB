@@ -88,7 +88,7 @@ trait ZeroCopyBinary extends Ordered[ZeroCopyBinary] {
       val hash = base match {
         case a: Array[Byte] => hasher64.hash(a, offset.toInt - UnsafeUtils.arayOffset, numBytes, Seed)
         case o: Any         => hasher64.hash(asNewByteArray, 0, numBytes, Seed)
-        case UnsafeUtils.ZeroPointer => 0
+        case UnsafeUtils.ZeroPointer => hasher64.hash(asNewByteArray, 0, numBytes, Seed)
       }
       hash64 = hash
     }
