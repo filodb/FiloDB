@@ -64,7 +64,7 @@ final class AvgAggTransientRow extends MutableRowReader {
 
   def setString(columnNo: Int, value: ZeroCopyUTF8String): Unit = throw new IllegalArgumentException()
 
-  def notNull(columnNo: Int): Boolean = columnNo < 2
+  def notNull(columnNo: Int): Boolean = columnNo < 3
   def getBoolean(columnNo: Int): Boolean = throw new IllegalArgumentException()
   def getInt(columnNo: Int): Int = throw new IllegalArgumentException()
   def getLong(columnNo: Int): Long = if (columnNo == 0) timestamp

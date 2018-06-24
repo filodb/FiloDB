@@ -141,8 +141,7 @@ final case class BinaryJoinExec(id: String,
       override def next(): RowReader = {
         val lhsRow = lhsRows.next()
         val rhsRow = rhsRows.next()
-        cur.setValues(0, lhsRow.getLong(0))
-        cur.setValues(1, binFunc(lhsRow.getDouble(1), rhsRow.getDouble(1)))
+        cur.setValues(lhsRow.getLong(0), binFunc(lhsRow.getDouble(1), rhsRow.getDouble(1)))
         cur
       }
     }
