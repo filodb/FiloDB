@@ -302,8 +302,9 @@ class TimeSeriesPartition(val partID: Int,
     case r: RowKeyChunkScan         =>
       if (infosChunks.size > 0) {
         val firstInMemKey = infosChunks.firstEntry.getValue.info.firstKey
-        if (r.startkey < firstInMemKey) { Some(RowKeyChunkScan(r.startkey, firstInMemKey)) }
-        else                            { None }
+        if (firstInMemKey.isEmpty)           { Some(r) }
+        else if (r.startkey < firstInMemKey) { Some(RowKeyChunkScan(r.startkey, firstInMemKey)) }
+        else                                 { None }
       } else {
         Some(r)    // if no chunks ingested yet, read everything from disk
       }

@@ -43,7 +43,7 @@ class TimeSeriesPartitionSpec extends FunSpec with Matchers with BeforeAndAfter 
   protected val bufferPool = new WriteBufferPool(memFactory, dataset1, maxChunkSize, 50)
   protected val pagedChunkStore = new DemandPagedChunkStore(dataset1, blockStore,
                                     BlockMetaAllocSize, chunkRetentionHours, 1)
-  private val ingestBlockHolder = new BlockMemFactory(blockStore, None, BlockMetaAllocSize, true)
+  protected val ingestBlockHolder = new BlockMemFactory(blockStore, None, BlockMetaAllocSize, true)
 
   before {
     colStore.truncate(dataset1.ref).futureValue
