@@ -429,6 +429,7 @@ object RecordBuilder {
   /**
     * Sorts an incoming list of key-value pairs and then computes a hash value
     * for each pair.  The output can be fed into the combineHash methods to produce an overall hash.
+    * NOTE: we use XXHash, it gives a MUCH higher quality hash than the default String hashCode.
     * @param pairs an unsorted list of key-value pairs.  Will be mutated and sorted.
     */
   final def sortAndComputeHashes(pairs: java.util.ArrayList[(String, String)]): Array[Int] = {
@@ -436,7 +437,12 @@ object RecordBuilder {
     val hashes = new Array[Int](pairs.size)
     for { i <- 0 until pairs.size optimized } {
       val (k, v) = pairs.get(i)
-      hashes(i) = combineHash(k.hashCode, v.hashCode)
+      // This is not very efficient, we have to convert String to bytes first to get the hash
+      // TODO: work on different API which is far more efficient and saves memory allocation
+      val keyBytes = k.getBytes
+      val valBytes = v.getBytes
+      hashes(i) = combineHash(BinaryRegion.hasher32.hash(keyBytes, 0, keyBytes.size, BinaryRegion.Seed),
+                              BinaryRegion.hasher32.hash(valBytes, 0, valBytes.size, BinaryRegion.Seed))
     }
     hashes
   }

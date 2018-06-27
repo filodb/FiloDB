@@ -60,12 +60,12 @@ class DistributeSpec extends ActorTest(DistributeSpec.getNewSystem) with ScalaFu
                                          FilteredPartitionQuery(filters), options)
       resp.isGood shouldEqual true
       resp.get should have length (2)
-      resp.get.map(_.shard) shouldEqual Seq(12, 13)
+      resp.get.map(_.shard) shouldEqual Seq(8, 9)
 
       val resp2 = Utils.validatePartQuery(datasetWithShardCols, mapper,
                                          FilteredPartitionQuery(filters), options.copy(shardKeySpread = 2))
       resp2.isGood shouldEqual true
-      resp2.get.map(_.shard) shouldEqual (12 to 15)
+      resp2.get.map(_.shard) shouldEqual (8 to 11)
     }
 
     it("should return BadArgument if not all filters matching for all shard key columns") {
