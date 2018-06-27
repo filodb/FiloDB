@@ -194,7 +194,9 @@ class QueryEngine(dataset: Dataset,
     * Picks one dispatcher randomly from child exec plans passed in as parameter
     */
   private def pickDispatcher(children: Seq[ExecPlan]): PlanDispatcher = {
-    val childTargets = children.map(_.dispatcher).toSet
+    val childTargets = children.map(_.dispatcher)
+    // Above list can contain duplicate dispatchers, and we don't make them distinct.
+    // Those with more shards must be weighed higher
     childTargets.iterator.drop(QueryEngine.random.nextInt(childTargets.size)).next
   }
 }
