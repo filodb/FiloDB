@@ -771,6 +771,8 @@ You can get the huge variety of JMH options by running `jmh:run -help`.  For goo
 
 This should last a good 15 minutes at least.  While it is running, fire up JMC (java Mission Control) and flight record the "jmh.ForkMain" process for 15 minutes.  This gives you excellent CPU as well as memory allocation analysis.
 
+There is also a script, `run_benchmarks.sh`
+
 ## You can help!
 
 Contributions are welcome!
