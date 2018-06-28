@@ -339,7 +339,7 @@ final class RecordBuilder(memFactory: MemFactory,
    * If no more containers are left, then everything will be reset.
    * @param numContainers the # of containers to remove
    */
-  def removeAndFreeContainers(numContainers: Int): Unit = {
+  def removeAndFreeContainers(numContainers: Int): Unit = if (numContainers > 0) {
     require(numContainers <= containers.length)
     if (numContainers == containers.length) reset()
     containers.take(numContainers).foreach { c => memFactory.freeMemory(c.offset) }
@@ -426,6 +426,10 @@ object RecordBuilder {
     * == Auxiliary functions to compute hashes. ==
     */
 
+  import filodb.core._
+
+  val keyHashCache = concurrentCache[String, Int](1000)
+
   /**
     * Sorts an incoming list of key-value pairs and then computes a hash value
     * for each pair.  The output can be fed into the combineHash methods to produce an overall hash.
@@ -439,10 +443,12 @@ object RecordBuilder {
       val (k, v) = pairs.get(i)
       // This is not very efficient, we have to convert String to bytes first to get the hash
       // TODO: work on different API which is far more efficient and saves memory allocation
-      val keyBytes = k.getBytes
       val valBytes = v.getBytes
-      hashes(i) = combineHash(BinaryRegion.hasher32.hash(keyBytes, 0, keyBytes.size, BinaryRegion.Seed),
-                              BinaryRegion.hasher32.hash(valBytes, 0, valBytes.size, BinaryRegion.Seed))
+      val keyHash = keyHashCache.getOrElseUpdate(k, { key =>
+        val keyBytes = key.getBytes
+        BinaryRegion.hasher32.hash(keyBytes, 0, keyBytes.size, BinaryRegion.Seed)
+      })
+      hashes(i) = combineHash(keyHash, BinaryRegion.hasher32.hash(valBytes, 0, valBytes.size, BinaryRegion.Seed))
     }
     hashes
   }
