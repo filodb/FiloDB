@@ -155,11 +155,11 @@ val excludeMinlog = ExclusionRule(organization = "com.esotericsoftware", name = 
 
 
 /* Versions in various modules versus one area of build */
-val akkaVersion       = "2.4.19" // akka-http/akka-stream compat. TODO when kamon-akka-remote is akka 2.5.4 compat
-val akkaHttpVersion   = "10.0.10"
+val akkaVersion       = "2.5.13" // akka-http/akka-stream compat. TODO when kamon-akka-remote is akka 2.5.4 compat
+val akkaHttpVersion   = "10.1.3"
 val cassDriverVersion = "3.0.2"
 val ficusVersion      = "1.1.2"
-val kamonVersion      = "1.1.0"
+val kamonVersion      = "1.1.3"
 val monixKafkaVersion = "0.14"
 val sparkVersion      = "2.0.0"
 
@@ -171,15 +171,15 @@ val scalaTest         = "org.scalatest"              %% "scalatest"            %
 val scalaCheck        = "org.scalacheck"             %% "scalacheck"           % "1.11.0"
 val akkaHttp          = "com.typesafe.akka"          %% "akka-http"            % akkaHttpVersion
 val akkaHttpTestkit   = "com.typesafe.akka"          %% "akka-http-testkit"    % akkaHttpVersion
-val akkaHttpCirce     = "de.heikoseeberger"          %% "akka-http-circe"      % "1.18.1"
+val akkaHttpCirce     = "de.heikoseeberger"          %% "akka-http-circe"      % "1.21.0"
 val circeGeneric      = "io.circe"                   %% "circe-generic"        % "0.8.0"
 val circeParser       = "io.circe"                   %% "circe-parser"         % "0.8.0"
 
 lazy val commonDeps = Seq(
   "io.kamon" %% "kamon-core" % kamonVersion,
-  "io.kamon" %% "kamon-akka-2.4" % "1.0.1",
-  "io.kamon" %% "kamon-executors" % "1.0.0",
-  "io.kamon" %% "kamon-akka-remote-2.4" % "1.0.0",
+  "io.kamon" %% "kamon-akka-2.5" % "1.0.1",
+  "io.kamon" %% "kamon-executors" % "1.0.1",
+  "io.kamon" %% "kamon-akka-remote-2.5" % "1.0.1",
   logbackDep % Test,
   scalaTest  % Test,
   scalaCheck % "test"
@@ -233,9 +233,9 @@ lazy val coordDeps = commonDeps ++ Seq(
 
 lazy val cliDeps = Seq(
   logbackDep,
-  "io.kamon" %% "kamon-akka-2.4" % "1.0.1",
-  "io.kamon" %% "kamon-executors" % "1.0.0",
-  "io.kamon" %% "kamon-akka-remote-2.4" % "1.0.0",
+  "io.kamon" %% "kamon-akka-2.5" % "1.0.1",
+  "io.kamon" %% "kamon-executors" % "1.0.1",
+  "io.kamon" %% "kamon-akka-remote-2.5" % "1.0.1",
   "com.quantifind"    %% "sumac"          % "0.3.0"
 )
 

@@ -50,35 +50,35 @@ class ShardManagerSpec extends AkkaSpec {
     "allow subscription of self for shard events on all datasets" in {
       shardManager.subscribeAll(subscriber.ref)
       subscriber.expectMsg(ShardSubscriptions(Set.empty, Set(subscriber.ref)))
-      subscriber.expectNoMsg() // should not get a CurrentShardSnapshot since there isnt a dataset yet
+      subscriber.expectNoMessage() // should not get a CurrentShardSnapshot since there isnt a dataset yet
     }
 
     "change state for addition of first coordinator without datasets" in {
       shardManager.addMember(coord1Address, coord1.ref)
       shardManager.coordinators shouldBe Seq(coord1.ref)
       shardManager.datasetInfo.size shouldBe 0
-      coord1.expectNoMsg() // since there are no datasets, there should be no assignments
+      coord1.expectNoMessage() // since there are no datasets, there should be no assignments
     }
 
     "change state for addition of second coordinator without datasets" in {
       shardManager.addMember(coord2Address, coord2.ref)
       shardManager.coordinators shouldBe Seq(coord1.ref, coord2.ref)
       shardManager.datasetInfo.size shouldBe 0
-      coord2.expectNoMsg() // since there are no datasets, there should be no assignments
+      coord2.expectNoMessage() // since there are no datasets, there should be no assignments
     }
 
     "change state for addition of third coordinator without datasets" in {
       shardManager.addMember(coord3Address, coord3.ref)
       shardManager.coordinators shouldBe Seq(coord1.ref, coord2.ref, coord3.ref)
       shardManager.datasetInfo.size shouldBe 0
-      coord3.expectNoMsg() // since there are no datasets, there should be no assignments
+      coord3.expectNoMessage() // since there are no datasets, there should be no assignments
     }
 
     "change state for removal of coordinator without datasets" in {
       shardManager.removeMember(coord2Address)
       shardManager.coordinators shouldBe Seq(coord1.ref, coord3.ref)
       shardManager.datasetInfo.size shouldBe 0
-      coord2.expectNoMsg() // since there are no datasets, there should be no assignments
+      coord2.expectNoMessage() // since there are no datasets, there should be no assignments
     }
 
     "change state for addition of new dataset" in {
@@ -118,7 +118,7 @@ class ShardManagerSpec extends AkkaSpec {
         s.map.shardsForCoord(coord3.ref) shouldEqual Seq(0, 1, 2)
         s.map.shardsForCoord(coord1.ref) shouldEqual Seq(3, 4, 5)
       }
-      subscriber.expectNoMsg()
+      subscriber.expectNoMessage()
     }
 
     "change state for addition of coordinator when there are datasets" in {
@@ -145,8 +145,8 @@ class ShardManagerSpec extends AkkaSpec {
       shardManager.addMember(coord4Address, coord4.ref)
       shardManager.coordinators shouldBe Seq(coord1.ref, coord3.ref, coord2.ref, coord4.ref)
       shardManager.datasetInfo.size shouldBe 1
-      coord4.expectNoMsg() // since this is a spare node, there should be no assignments
-      subscriber.expectNoMsg()
+      coord4.expectNoMessage() // since this is a spare node, there should be no assignments
+      subscriber.expectNoMessage()
     }
 
     "change state for removal of coordinator when there are datasets and spare nodes" in {
@@ -181,7 +181,7 @@ class ShardManagerSpec extends AkkaSpec {
         s.map.shardsForCoord(coord4.ref) shouldEqual Seq(3, 4, 5)
         s.map.shardsForCoord(coord2.ref) shouldEqual Seq(6, 7)
       }
-      subscriber.expectNoMsg()
+      subscriber.expectNoMessage()
     }
 
     "reassign shards where additional room available on removal of coordinator when there are no spare nodes" in {
@@ -216,8 +216,8 @@ class ShardManagerSpec extends AkkaSpec {
         StartShardIngestion(dataset1, 3, None))
 
       // since there are no spare nodes now, other coords (which are "down") should not get any message
-      coord1.expectNoMsg()
-      coord3.expectNoMsg()
+      coord1.expectNoMessage()
+      coord3.expectNoMessage()
 
       subscriber.expectMsgPF() { case s: CurrentShardSnapshot if s.ref == dataset1 =>
         s.map.shardsForCoord(coord3.ref) shouldEqual Seq(0, 1, 2)
@@ -225,7 +225,7 @@ class ShardManagerSpec extends AkkaSpec {
         s.map.unassignedShards shouldEqual Seq(4, 5)
         s.map.numAssignedShards shouldEqual 6
       }
-      subscriber.expectNoMsg()
+      subscriber.expectNoMessage()
     }
 
     "reassign remaining unassigned shards when a replacement node comes back" in {
@@ -246,7 +246,7 @@ class ShardManagerSpec extends AkkaSpec {
         s.map.shardsForCoord(coord4.ref) shouldEqual Seq(4, 5)
         s.map.unassignedShards shouldEqual Nil
       }
-      subscriber.expectNoMsg()
+      subscriber.expectNoMessage()
     }
 
     "change state for removal of dataset" in {
@@ -279,7 +279,7 @@ class ShardManagerSpec extends AkkaSpec {
       subscriber.expectMsgPF() { case s: CurrentShardSnapshot =>
         s.map.unassignedShards shouldEqual (0 to 7)
       }
-      subscriber.expectNoMsg()
+      subscriber.expectNoMessage()
     }
 
     "change state for addition of multiple datasets" in {
@@ -323,7 +323,7 @@ class ShardManagerSpec extends AkkaSpec {
         StartShardIngestion(dataset1, 6, None),
         StartShardIngestion(dataset1, 7, None))
 
-      coord3.expectNoMsg() // coord3 is spare node for dataset1
+      coord3.expectNoMessage() // coord3 is spare node for dataset1
 
       // addition of dataset results in snapshot/subscriptions broadcast
       subscriber.expectMsg(
@@ -359,8 +359,8 @@ class ShardManagerSpec extends AkkaSpec {
       msgs2 should have length (8)
 
       // coord2 and coord3 are spare nodes for dataset2
-      coord2.expectNoMsg()
-      coord3.expectNoMsg()
+      coord2.expectNoMessage()
+      coord3.expectNoMessage()
 
       // shard subscriptions should work with multiple datasets
       subscriber.expectMsg(
@@ -375,7 +375,7 @@ class ShardManagerSpec extends AkkaSpec {
         s.map.shardsForCoord(coord3.ref) shouldEqual Seq.empty
       }
 
-      subscriber.expectNoMsg()
+      subscriber.expectNoMessage()
     }
 
     "recover state on a failed over node " in {

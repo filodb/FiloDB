@@ -127,6 +127,24 @@ Note that due to the restrictions for predefined keys the key needs to be less t
 
 A different builder should be used for each different dataset schema and also per thread or per stream/Observable, but should be protected from multi-thread access.
 
+### Get all optimal container bytes
+
+```scala
+builder.optimalContainerBytes(reset[true|false])
+```
+
+The above method returns all the full containers and also the current container's trimmed bytes. Returning the trimmed bytes for the current active container makes this method optimal.
+
+If the method param is true, it removes all the full containers and resets the current container. This helps to reuse the current container instead of creating new container for the next record. Please note that a `RecordContainer` is considered empty only if `numBytes <= 4` since the first 4 bytes is allocated for total length of `BinaryRecord`.
+
+### Get all full container bytes excluding current container
+
+```scala
+builder.nonCurrentContainerBytes(reset[true|false])
+```
+
+Returns all the full containers and removes the returned full containers from `RecordBuilder` if the input param is true.
+
 ## Binary format
 
 ### Header

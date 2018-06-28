@@ -125,14 +125,14 @@ abstract class ClusterSingletonFailoverSpec extends StandaloneMultiJvmSpec(Clust
     // first is a shards-unassigned standby node and the controller
     runOn(first) {
       awaitNodeUp(server)
-      watcher.expectNoMsg(20.seconds)
+      watcher.expectNoMessage(20.seconds)
     }
     enterBarrier("first-node-started")
 
     // shards assigned to second-youngest node, order = second
     runOn(third) {
       awaitNodeUp(server)
-      watcher.expectNoMsg(20.seconds)
+      watcher.expectNoMessage(20.seconds)
     }
     enterBarrier("third-node-started")
 
