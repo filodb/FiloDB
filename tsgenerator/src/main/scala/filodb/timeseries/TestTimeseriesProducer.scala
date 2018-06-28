@@ -12,6 +12,10 @@ import monix.kafka._
 import monix.reactive.Observable
 import org.rogach.scallop._
 
+import filodb.coordinator.ShardMapper
+import filodb.core.binaryrecord2.RecordBuilder
+import filodb.core.metadata.Dataset
+import filodb.memory.MemFactory
 import filodb.prometheus.FormatConversion
 
 sealed trait DataOrCommand
@@ -27,6 +31,7 @@ case object FlushCommand extends DataOrCommand
   *
   */
 object TestTimeseriesProducer extends StrictLogging {
+  import collection.JavaConverters._
 
   class ProducerOptions(args: Seq[String]) extends ScallopConf(args) {
     val samplesPerSeries = opt[Int](short = 'n', default = Some(100),
@@ -76,15 +81,16 @@ object TestTimeseriesProducer extends StrictLogging {
     logger.info(s"Started producing $numSamples messages into topic $topicName with timestamps " +
       s"from about ${(System.currentTimeMillis() - startTime) / 1000 / 60} minutes ago")
 
+    implicit val io = Scheduler.io("kafka-producer")
+
     val shardKeys = Set("__name__", "job")  // the tag keys used to compute the shard key hash
     val batchedData = timeSeriesData(startTime, numShards, numTimeSeries)
                         .take(numSamples)
                         .grouped(128)
-    val sink = new KafkaContainerSink(FormatConversion.dataset, numShards, shardKeys, producerCfg)
-
-    implicit val io = Scheduler.io("kafka-producer")
-
-    sink.batchAndWrite(Observable.fromIterator(batchedData), topicName)
+    val containerStream = batchSingleThreaded(Observable.fromIterator(batchedData),
+                                              FormatConversion.dataset, numShards, shardKeys)
+    val sink = new KafkaContainerSink(producerCfg, topicName)
+    sink.writeTask(containerStream)
         .runAsync
         .map { _ =>
           logger.info(s"Finished producing $numSamples messages into topic $topicName with timestamps " +
@@ -117,11 +123,77 @@ object TestTimeseriesProducer extends StrictLogging {
 
       val tags = Map("__name__" -> "heap_usage",
                      "dc"       -> s"DC$dc",
-                     "job"      -> s"A$app",
-                     "partition" -> s"P$partition",
+                     "job"      -> s"App-$app",
+                     "partition" -> s"partition-$partition",
                      "host"     -> s"H$host",
-                     "instance" -> s"I$instance")
+                     "instance" -> s"Instance-$instance")
       DataSample(tags, timestamp, value)
+    }
+  }
+
+  /**
+   * Batches the source data stream into separate RecordContainers per shard, single threaded,
+   * using proper logic to calculate hashes correctly for shard and partition hashes.
+   * @param {[Dataset]} dataset: Dataset the Dataset schema to use for encoding
+   * @param {[Int]} numShards: Int the total number of shards or Kafka partitions
+   * @param shardKeys The hash keys to use for shard number calculation
+   */
+  def batchSingleThreaded(items: Observable[Seq[DataSample]],
+                          dataset: Dataset,
+                          numShards: Int,
+                          shardKeys: Set[String],
+                          flushInterval: FiniteDuration = 1.second)
+                         (implicit io: Scheduler): Observable[(Int, Array[Byte])] = {
+    val builders = (0 until numShards).map(s => new RecordBuilder(MemFactory.onHeapFactory, dataset.ingestionSchema))
+                                      .toArray
+    val shardMapper = new ShardMapper(numShards)
+    val spread = if (numShards >= 2) { (Math.log10(numShards / 2) / Math.log10(2.0)).toInt } else { 0 }
+
+    var streamIsDone: Boolean = false
+    // Flush at 1 second intervals until original item stream is complete.  Also send one last flush at the end.
+    val itemStream = items.doOnComplete(() => streamIsDone = true)
+    val flushStream = Observable.intervalAtFixedRate(flushInterval).map(n => FlushCommand)
+                                .takeWhile(n => !streamIsDone)
+    (Observable.merge(itemStream, flushStream) ++ Observable.now(FlushCommand))
+      .flatMap {
+        case s: Seq[DataSample] @unchecked =>
+          logger.debug(s"Adding batch of ${s.length} samples")
+          s.foreach { case DataSample(tags, timestamp, value) =>
+            // Get hashes and sort tags
+            val javaTags = new java.util.ArrayList(tags.toSeq.asJava)
+            val hashes = RecordBuilder.sortAndComputeHashes(javaTags)
+
+            // Compute partition, shard key hashes and compute shard number
+            // TODO: what to do if not all shard keys included?  Just return a 0 hash?  Or maybe random?
+            val shardKeyHash = RecordBuilder.combineHashIncluding(javaTags, hashes, shardKeys).get
+            val partKeyHash = RecordBuilder.combineHashExcluding(javaTags, hashes, shardKeys)
+            val shard = shardMapper.ingestionShard(shardKeyHash, partKeyHash, spread)
+
+            // Add stuff to RecordContainer for correct partition/shard
+            val builder = builders(shard)
+            builder.startNewRecord()
+            builder.addLong(timestamp)
+            builder.addDouble(value)
+            builder.addSortedPairsAsMap(javaTags, hashes)
+            builder.endRecord()
+          }
+          Observable.empty
+
+        case FlushCommand =>  // now produce records, turn into observable
+          Observable.fromIterable(flushBuilders(builders))
+      }
+  }
+
+  private def flushBuilders(builders: Array[RecordBuilder]): Seq[(Int, Array[Byte])] = {
+    builders.zipWithIndex.flatMap { case (builder, shard) =>
+      logger.debug(s"Flushing shard $shard with ${builder.allContainers.length} containers")
+
+      // get optimal byte arrays out of containers and reset builder so it can keep going
+      if (builder.allContainers.nonEmpty) {
+        builder.optimalContainerBytes(true).map((shard, _))
+      } else {
+        Nil
+      }
     }
   }
 }

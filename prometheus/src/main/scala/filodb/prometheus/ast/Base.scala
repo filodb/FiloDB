@@ -2,6 +2,9 @@ package filodb.prometheus.ast
 
 import filodb.query.{PeriodicSeriesPlan, RawSeriesPlan}
 
+/**
+ * NOTE: start and end are in SECONDS since Epoch
+ */
 case class QueryParams(start: Long, step: Long, end: Long)
 
 trait Base {

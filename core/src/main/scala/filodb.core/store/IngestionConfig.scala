@@ -18,7 +18,8 @@ final case class StoreConfig(flushInterval: FiniteDuration,
                              ingestionBufferMemSize: Long,
                              allocStepSize: Int,
                              groupsPerShard: Int,
-                             numPagesPerBlock: Int) {
+                             numPagesPerBlock: Int,
+                             demandPagingEnabled: Boolean) {
   import collection.JavaConverters._
   def toConfig: Config =
     ConfigFactory.parseMap(Map("flush-interval" -> (flushInterval.toSeconds + "s"),
@@ -29,7 +30,8 @@ final case class StoreConfig(flushInterval: FiniteDuration,
                                "ingestion-buffer-mem-size" -> ingestionBufferMemSize,
                                "buffer-alloc-step-size" -> allocStepSize,
                                "groups-per-shard" -> groupsPerShard,
-                               "num-block-pages" -> numPagesPerBlock).asJava)
+                               "num-block-pages" -> numPagesPerBlock,
+                               "demand-paging-enabled" -> demandPagingEnabled).asJava)
 }
 
 object StoreConfig {
@@ -42,6 +44,7 @@ object StoreConfig {
                                            |buffer-alloc-step-size = 1000
                                            |groups-per-shard = 60
                                            |num-block-pages = 1000
+                                           |demand-paging-enabled = true
                                            |""".stripMargin)
   /** Pass in the config inside the store {}  */
   def apply(storeConfig: Config): StoreConfig = {
@@ -54,7 +57,8 @@ object StoreConfig {
                 config.getMemorySize("ingestion-buffer-mem-size").toBytes,
                 config.getInt("buffer-alloc-step-size"),
                 config.getInt("groups-per-shard"),
-                config.getInt("num-block-pages"))
+                config.getInt("num-block-pages"),
+                config.getBoolean("demand-paging-enabled"))
   }
 }
 

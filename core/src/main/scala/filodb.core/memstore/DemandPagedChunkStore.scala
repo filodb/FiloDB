@@ -37,7 +37,8 @@ class DemandPagedChunkStore(dataset: Dataset,
                             blockManager: BlockManager,
                             metadataAllocSize: Int,
                             chunkRetentionHours: Int,
-                            shardNum: Int) extends StrictLogging {
+                            shardNum: Int,
+                            var onDemandPagingEnabled: Boolean = true) extends StrictLogging {
   // It is important that the tasks be executed in a single thread  to remove resource contention in BlockManager
   private val scheduler = Scheduler(Executors.newSingleThreadScheduledExecutor(),
                             ExecutionContext.fromExecutorService(Executors.newSingleThreadExecutor()))
@@ -46,8 +47,6 @@ class DemandPagedChunkStore(dataset: Dataset,
   private val memFactories = Array.tabulate(chunkRetentionHours) { i =>
     new BlockMemFactory(blockManager, Some(i), metadataAllocSize, markFullBlocksAsReclaimable = true)
   }
-
-  private[memstore] var onDemandPagingEnabled = true // is enabled from start of jvm to retention period
 
   // initialize the time bucket ranges and index to be able to look up reclaimOrder from timestamps quickly
   private val jvmStartTime = ManagementFactory.getRuntimeMXBean.getStartTime

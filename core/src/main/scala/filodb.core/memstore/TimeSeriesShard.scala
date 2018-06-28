@@ -169,7 +169,8 @@ class TimeSeriesShard(dataset: Dataset,
   // strictly during ingest() and switchBuffers().
   private val overflowBlockFactory = new BlockMemFactory(blockStore, None, BlockMetaAllocSize, true)
   protected val pagedChunkStore = new DemandPagedChunkStore(dataset, blockStore, BlockMetaAllocSize,
-                                                            chunkRetentionHours, shardNum)
+                                                            chunkRetentionHours, shardNum,
+                                                            storeConfig.demandPagingEnabled)
 
   /**
     * Unencoded/unoptimized ingested data is stored in buffers that are allocated from this off-heap pool

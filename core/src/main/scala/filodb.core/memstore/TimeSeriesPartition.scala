@@ -292,25 +292,30 @@ class TimeSeriesPartition(val partID: Int,
    * This is just an initial stab.
    * Also, this code should really live outside of TSPartition in its own loader.
    */
-  private def chunkStoreScanMethod(method: ChunkScanMethod): Option[ChunkScanMethod] = method match {
-    // For now, allChunkScan will always load from disk.  This is almost never used, and without an index we have
-    // no way of knowing what there is anyways.
-    case AllChunkScan               => Some(AllChunkScan)
-    // Assume initial startKey of first chunk is the earliest - typically true unless we load in historical data
-    // Compare desired time range with start key and see if in memory data covers desired range
-    // Also assume we have in memory all data since first key.  Just return the missing range of keys.
-    case r: RowKeyChunkScan         =>
-      if (infosChunks.size > 0) {
-        val firstInMemKey = infosChunks.firstEntry.getValue.info.firstKey
-        if (firstInMemKey.isEmpty)           { Some(r) }
-        else if (r.startkey < firstInMemKey) { Some(RowKeyChunkScan(r.startkey, firstInMemKey)) }
-        else                                 { None }
-      } else {
-        Some(r)    // if no chunks ingested yet, read everything from disk
+  private def chunkStoreScanMethod(method: ChunkScanMethod): Option[ChunkScanMethod] =
+    if (pagedChunkStore.onDemandPagingEnabled) {
+      method match {
+        // For now, allChunkScan will always load from disk.  This is almost never used, and without an index we have
+        // no way of knowing what there is anyways.
+        case AllChunkScan               => Some(AllChunkScan)
+        // Assume initial startKey of first chunk is the earliest - typically true unless we load in historical data
+        // Compare desired time range with start key and see if in memory data covers desired range
+        // Also assume we have in memory all data since first key.  Just return the missing range of keys.
+        case r: RowKeyChunkScan         =>
+          if (infosChunks.size > 0) {
+            val firstInMemKey = infosChunks.firstEntry.getValue.info.firstKey
+            if (firstInMemKey.isEmpty)           { Some(r) }
+            else if (r.startkey < firstInMemKey) { Some(RowKeyChunkScan(r.startkey, firstInMemKey)) }
+            else                                 { None }
+          } else {
+            Some(r)    // if no chunks ingested yet, read everything from disk
+          }
+        // The last sample is almost always in memory.  But this is only used for old QueryEngine.
+        case LastSampleChunkScan        => None
       }
-    // The last sample is almost always in memory.  But this is only used for old QueryEngine.
-    case LastSampleChunkScan        => None
-  }
+    } else {
+      None
+    }
 
   override def streamReaders(method: ChunkScanMethod, columnIds: Array[Int]): Observable[ChunkSetReader] = {
     chunkStoreScanMethod(method).map { m =>

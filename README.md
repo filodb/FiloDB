@@ -761,13 +761,15 @@ To run benchmarks, from within SBT:
     cd jmh
     jmh:run -i 5 -wi 5 -f3
 
-You can get the huge variety of JMH options by running `jmh:run -help`.  For good profiling, get JVM Flight Recorder output:
+Typically, one might run a specific benchmark.  This is how we run the query benchmark, with options for inlining and maximizing performance:
 
-    jmh:run -i 5 -wi 10 -f3 -prof jmh.extras.JFR -jvmArgsAppend -XX:MaxInlineLevel=20 -jvmArgsAppend -Xmx2g
+    jmh:run -i 15 -wi 10 -f3 -jvmArgsAppend -XX:MaxInlineLevel=20 -jvmArgsAppend -Xmx4g -jvmArgsAppend -XX:MaxInlineSize=99 filodb.jmh.QueryInMemoryBenchmark
 
-The JFR output file will be printed at the bottom of the console output.  Load that from within `jmc` and you can get great analysis.  Flame graphs and perfasm/dtraceasm profiling is also available.
+You can get the huge variety of JMH options by running `jmh:run -help`.  For good profiling, there are options such as `-prof jmh.extras.JFR` as well as `perfasm` / `dtraceasm` options.  If you would like really good profiling analysis, including memory/heap allocation, I would suggest running one fork with many more iterations, like this:
 
-There are also stress tests in the stress module.  See the [Stress README](stress/README.md).
+    jmh:run -i 1000 -wi 10 -f1 -jvmArgsAppend -XX:MaxInlineLevel=20 -jvmArgsAppend -Xmx4g -jvmArgsAppend -XX:MaxInlineSize=99 filodb.jmh.QueryInMemoryBenchmark
+
+This should last a good 15 minutes at least.  While it is running, fire up JMC (java Mission Control) and flight record the "jmh.ForkMain" process for 15 minutes.  This gives you excellent CPU as well as memory allocation analysis.
 
 ## You can help!
 

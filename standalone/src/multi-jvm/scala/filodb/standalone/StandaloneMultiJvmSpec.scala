@@ -128,9 +128,10 @@ abstract class StandaloneMultiJvmSpec(config: MultiNodeConfig) extends MultiNode
     }
   }
 
+  // queryTimestamp is in millis
   def runQuery(client: LocalClient, queryTimestamp: Long): Double = {
-    val query = "heap_usage{host=\"H0\",job=\"A2\"}[5m]"
-    val qParams = QueryParams(queryTimestamp, 1, queryTimestamp)
+    val query = "heap_usage{host=\"H0\",job=\"App-2\"}[5m]"
+    val qParams = QueryParams(queryTimestamp/1000, 1, queryTimestamp/1000)
     val logicalPlan = Parser.queryRangeToLogicalPlan(query, qParams)
 
     val result = client.logicalPlan2Query(dataset, logicalPlan) match {

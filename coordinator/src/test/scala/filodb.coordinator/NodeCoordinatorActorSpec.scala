@@ -36,7 +36,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
   import Column.ColumnType._
 
   implicit val defaultPatience =
-    PatienceConfig(timeout = Span(15, Seconds), interval = Span(50, Millis))
+    PatienceConfig(timeout = Span(30, Seconds), interval = Span(50, Millis))
 
   val config = ConfigFactory.parseString(
                       """filodb.memtable.flush-trigger-rows = 100
@@ -172,7 +172,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       val ref = setupTimeSeries()
       val q1 = LogicalPlanQuery(ref, PartitionsRange.all(SinglePartitionQuery(Seq(-1)), Seq("min")))
       probe.send(coordinatorActor, q1)
-      probe.expectMsgClass(classOf[BadQuery])
+      probe.expectMsgClass(20.seconds, classOf[BadQuery])
     }
 
     it("should return BadQuery if aggregation function not defined") {

@@ -127,7 +127,7 @@ lazy val jmh = project
   .settings(libraryDependencies ++= jmhDeps)
   .settings(publish := {})
   .enablePlugins(JmhPlugin)
-  .dependsOn(core % "compile->compile; compile->test", spark)
+  .dependsOn(core % "compile->compile; compile->test", spark, tsgenerator)
 
 lazy val stress = project
   .in(file("stress"))

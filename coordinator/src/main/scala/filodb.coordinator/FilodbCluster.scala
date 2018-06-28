@@ -178,7 +178,7 @@ final class FilodbCluster(val system: ExtendedActorSystem) extends Extension wit
     *
     * Idempotent.
     */
-  protected[coordinator] def shutdown(): Unit =
+  protected[filodb] def shutdown(): Unit =
     if (!isTerminated) {
       import akka.pattern.gracefulStop
 
