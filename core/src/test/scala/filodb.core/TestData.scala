@@ -32,6 +32,8 @@ object TestData {
       groups-per-shard = 4
       ingestion-buffer-mem-size = 10MB
       flush-interval = 10 minutes
+      part-index-flush-max-delay = 10 seconds
+      part-index-flush-min-delay = 2 seconds
     }
   """)
 

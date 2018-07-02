@@ -209,6 +209,7 @@ lazy val coreDeps = commonDeps ++ Seq(
   "com.googlecode.javaewah" % "JavaEWAH"        % "1.1.6",
   "com.github.rholder.fauxflake" % "fauxflake-core" % "1.1.0",
   "org.scalactic"        %% "scalactic"         % "2.2.6",
+  "org.apache.lucene"     % "lucene-core"       % "7.3.0",
   scalaxyDep
 )
 

@@ -152,6 +152,14 @@ final class RecordSchema(val columnTypes: Seq[Column.ColumnType],
     }
   }
 
+  /**
+    * Returns the offset from start of the BinaryRecord to the
+    * UTF8StringMedium (2 byte length header + UTF8 string bytes)
+    */
+  def getStringOffset(base: Any, offset: Long, index: Int): Int = {
+    UnsafeUtils.getInt(base, offset + offsets(index))
+  }
+
   def consumeMapItems(address: NativePointer, index: Int, consumer: MapItemConsumer): Unit =
     consumeMapItems(UnsafeUtils.ZeroPointer, address, index, consumer)
 

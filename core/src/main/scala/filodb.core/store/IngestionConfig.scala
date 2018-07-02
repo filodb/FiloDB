@@ -19,6 +19,8 @@ final case class StoreConfig(flushInterval: FiniteDuration,
                              allocStepSize: Int,
                              groupsPerShard: Int,
                              numPagesPerBlock: Int,
+                             partIndexFlushMaxDelaySeconds: Int,
+                             partIndexFlushMinDelaySeconds: Int,
                              demandPagingEnabled: Boolean) {
   import collection.JavaConverters._
   def toConfig: Config =
@@ -31,6 +33,8 @@ final case class StoreConfig(flushInterval: FiniteDuration,
                                "buffer-alloc-step-size" -> allocStepSize,
                                "groups-per-shard" -> groupsPerShard,
                                "num-block-pages" -> numPagesPerBlock,
+                               "part-index-flush-max-delay" -> (partIndexFlushMaxDelaySeconds + "s"),
+                               "part-index-flush-min-delay" -> (partIndexFlushMinDelaySeconds + "s"),
                                "demand-paging-enabled" -> demandPagingEnabled).asJava)
 }
 
@@ -44,6 +48,8 @@ object StoreConfig {
                                            |buffer-alloc-step-size = 1000
                                            |groups-per-shard = 60
                                            |num-block-pages = 1000
+                                           |part-index-flush-max-delay = 60 seconds
+                                           |part-index-flush-min-delay = 30 seconds
                                            |demand-paging-enabled = true
                                            |""".stripMargin)
   /** Pass in the config inside the store {}  */
@@ -58,6 +64,8 @@ object StoreConfig {
                 config.getInt("buffer-alloc-step-size"),
                 config.getInt("groups-per-shard"),
                 config.getInt("num-block-pages"),
+                config.as[FiniteDuration]("part-index-flush-max-delay").toSeconds.toInt,
+                config.as[FiniteDuration]("part-index-flush-min-delay").toSeconds.toInt,
                 config.getBoolean("demand-paging-enabled"))
   }
 }

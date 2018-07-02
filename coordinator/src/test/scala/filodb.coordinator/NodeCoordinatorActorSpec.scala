@@ -15,6 +15,7 @@ import org.scalatest.time.{Millis, Seconds, Span}
 import filodb.coordinator.client._
 import filodb.coordinator.queryengine.Engine
 import filodb.core._
+import filodb.core.memstore.TimeSeriesMemStore
 import filodb.core.metadata.{Column, Dataset}
 import filodb.core.query._
 import filodb.core.store._
@@ -249,6 +250,8 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       probe.send(coordinatorActor, IngestRows(ref, 0, records(dataset1, linearMultiSeries().take(30))))
       probe.expectMsg(Ack(0L))
 
+      memStore.asInstanceOf[TimeSeriesMemStore].commitIndexBlocking(dataset1.ref)
+
       val series = (1 to 3).map(n => Seq(s"Series $n"))
       val q1 = LogicalPlanQuery(ref, simpleAgg("time_group_avg", Seq("2"), childPlan=
                  PartitionsRange(MultiPartitionQuery(series), timeScan, Seq("min"))))
@@ -295,6 +298,8 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       probe.send(coordinatorActor, IngestRows(ref, 1, records(dataset1, linearMultiSeries(130000L).take(20))))
       probe.expectMsg(Ack(0L))
 
+      memStore.asInstanceOf[TimeSeriesMemStore].commitIndexBlocking(dataset1.ref)
+
       // Should return results from both shards
       // shard 1 - timestamps 110000 -< 130000;  shard 2 - timestamps 130000 <- 1400000
       val series2 = (2 to 4).map(n => s"Series $n").toSet.asInstanceOf[Set[Any]]
@@ -318,6 +323,8 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       probe.expectMsg(Ack(0L))
       probe.send(coordinatorActor, IngestRows(ref, 1, records(dataset1, linearMultiSeries(130000L).take(20))))
       probe.expectMsg(Ack(0L))
+
+      memStore.asInstanceOf[TimeSeriesMemStore].commitIndexBlocking(dataset1.ref)
 
       val series2 = (2 to 4).map(n => s"Series $n")
       val multiFilter = Seq(ColumnFilter("series", Filter.In(series2.toSet.asInstanceOf[Set[Any]])))
@@ -366,6 +373,8 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       probe.send(coordinatorActor, IngestRows(ref, 0, records(dataset1, linearMultiSeries().take(30))))
       probe.expectMsg(Ack(0L))
 
+      memStore.asInstanceOf[TimeSeriesMemStore].commitIndexBlocking(dataset1.ref)
+
       val partMethods = Seq(FilteredPartitionScan(ShardSplit(0), Nil))
       val plan = Engine.DistributeConcat(partMethods, shardMap, 4, 10, System.currentTimeMillis()) { method =>
         new ExecPlan.LocalVectorReader(Seq(-1, 199), method, AllChunkScan) }
@@ -380,6 +389,8 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       val ref = setupTimeSeries()
       probe.send(coordinatorActor, IngestRows(ref, 0, records(dataset1, linearMultiSeries().take(30))))
       probe.expectMsg(Ack(0L))
+
+      memStore.asInstanceOf[TimeSeriesMemStore].commitIndexBlocking(dataset1.ref)
 
       val series2 = (2 to 4).map(n => s"Series $n")
       val multiFilter = Seq(ColumnFilter("series", Filter.In(series2.toSet.asInstanceOf[Set[Any]])))
@@ -399,6 +410,8 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       probe.send(coordinatorActor, IngestRows(ref, 0, records(dataset1, linearMultiSeries().take(30))))
       probe.expectMsg(Ack(0L))
 
+      memStore.asInstanceOf[TimeSeriesMemStore].commitIndexBlocking(dataset1.ref)
+
       probe.send(coordinatorActor, GetIndexNames(ref))
       probe.expectMsg(Seq("series"))
 
@@ -410,6 +423,8 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       val ref = setupTimeSeries()
       probe.send(coordinatorActor, IngestRows(ref, 0, records(dataset1, linearMultiSeries().take(30))))
       probe.expectMsg(Ack(0L))
+
+      memStore.asInstanceOf[TimeSeriesMemStore].commitIndexBlocking(dataset1.ref)
 
       probe.send(coordinatorActor, GetIndexNames(ref))
       probe.expectMsg(Seq("series"))

@@ -43,6 +43,12 @@ extends MemStore with StrictLogging {
   }
 
   /**
+    * WARNING: use only for testing. Not performant
+    */
+  def commitIndexBlocking(dataset: DatasetRef): Unit =
+    datasets.get(dataset).foreach(_.values().asScala.foreach(_.commitIndexBlocking()))
+
+  /**
     * Retrieve shard for given dataset and shard number as an Option
     */
   private def getShard(dataset: DatasetRef, shard: Int): Option[TimeSeriesShard] =

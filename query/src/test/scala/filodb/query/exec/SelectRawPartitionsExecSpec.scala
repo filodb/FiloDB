@@ -44,6 +44,7 @@ class SelectRawPartitionsExecSpec extends FunSpec with Matchers with ScalaFuture
   override def beforeAll(): Unit = {
     memStore.setup(timeseriesDataset, 0, TestData.storeConf)
     memStore.ingest(timeseriesDataset.ref, 0, SomeData(container, 0))
+    memStore.commitIndexBlocking(timeseriesDataset.ref)
   }
 
   val dummyDispatcher = new PlanDispatcher {

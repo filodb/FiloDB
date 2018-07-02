@@ -3,9 +3,9 @@ package filodb.core.memstore
 import com.typesafe.config.ConfigFactory
 import monix.execution.ExecutionModel.BatchedExecution
 import monix.reactive.Observable
+import org.scalatest.{BeforeAndAfter, FunSpec, Matchers}
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
-import org.scalatest.{BeforeAndAfter, FunSpec, Matchers}
 
 import filodb.core._
 import filodb.core.query.{AggregationFunction, ColumnFilter, Filter}
@@ -36,6 +36,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     val data = records(dataset1, rawData)   // 2 records per series x 10 series
     memStore.ingest(dataset1.ref, 0, data)
 
+    memStore.asInstanceOf[TimeSeriesMemStore].commitIndexBlocking(dataset1.ref)
     memStore.numPartitions(dataset1.ref, 0) shouldEqual 10
     memStore.indexNames(dataset1.ref).toSeq should equal (Seq(("series", 0)))
     memStore.latestOffset(dataset1.ref, 0) shouldEqual 0
@@ -74,6 +75,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     val data = records(dataset2, withMap(linearMultiSeries().take(20)))   // 2 records per series x 10 series
     memStore.ingest(dataset2.ref, 0, data)
 
+    memStore.asInstanceOf[TimeSeriesMemStore].commitIndexBlocking(dataset1.ref)
     val split = memStore.getScanSplits(dataset2.ref, 1).head
     val query = QuerySpec("min", AggregationFunction.Sum)
     val filter = ColumnFilter("n", Filter.Equals("2".utf8))
@@ -110,10 +112,11 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     val data = records(dataset1, linearMultiSeries().take(20))   // 2 records per series x 10 series
     memStore.ingest(dataset1.ref, 0, data)
 
-    val filter = ColumnFilter("series", Filter.In(Set("Series 1".utf8, "Series 2".utf8)))
+    memStore.asInstanceOf[TimeSeriesMemStore].commitIndexBlocking(dataset1.ref)
+    val filter =  ColumnFilter("series", Filter.Equals("Series 1".utf8))
     val split = memStore.getScanSplits(dataset1.ref, 1).head
     val q2 = memStore.scanRows(dataset1, Seq(1), FilteredPartitionScan(split, Seq(filter)))
-    q2.map(_.getDouble(0)).toSeq should equal (Seq(2.0, 12.0, 3.0, 13.0))
+    q2.map(_.getDouble(0)).toSeq should equal (Seq(2.0, 12.0))
   }
 
   it("should ingest into multiple shards, getScanSplits, query, get index info from shards") {
@@ -124,14 +127,16 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     val data2 = records(dataset2, withMap(linearMultiSeries(200000L, 6), 6).take(20))   // 5 series only
     memStore.ingest(dataset2.ref, 1, data2)
 
+    memStore.asInstanceOf[TimeSeriesMemStore].commitIndexBlocking(dataset1.ref)
+
     memStore.activeShards(dataset1.ref) should equal (Seq(0, 1))
     memStore.numRowsIngested(dataset1.ref, 0) should equal (20L)
 
     val splits = memStore.getScanSplits(dataset2.ref, 1)
     splits should have length (2)
 
-    memStore.indexNames(dataset2.ref).toList should equal (
-      Seq(("n", 0), ("series", 0), ("n", 1), ("series", 1)))
+    memStore.indexNames(dataset2.ref).toSet should equal (
+      Set(("n", 0), ("series", 0), ("n", 1), ("series", 1)))
 
     val query = QuerySpec("min", AggregationFunction.Sum)
     val filter = ColumnFilter("n", Filter.Equals("2".utf8))
@@ -243,6 +248,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     val data = records(dataset1, multiSeriesData().take(20))   // 2 records per series x 10 series
     memStore.ingest(dataset1.ref, 0, data)
 
+    memStore.asInstanceOf[TimeSeriesMemStore].commitIndexBlocking(dataset1.ref)
     memStore.numPartitions(dataset1.ref, 0) shouldEqual 10
     memStore.indexNames(dataset1.ref).toSeq should equal (Seq(("series", 0)))
 
@@ -259,6 +265,8 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     // Ingest normal multi series data with 10 partitions.  Should have 10 partitions.
     val data = records(dataset1, linearMultiSeries().take(10))
     memStore.ingest(dataset1.ref, 0, data)
+
+    memStore.asInstanceOf[TimeSeriesMemStore].commitIndexBlocking(dataset1.ref)
 
     memStore.numPartitions(dataset1.ref, 0) shouldEqual 10
     memStore.indexValues(dataset1.ref, 0, "series").toSeq should have length (10)

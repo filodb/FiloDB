@@ -17,6 +17,7 @@ import filodb.coordinator.client.QueryCommands.KeyRangeQuery
 import filodb.coordinator.queryengine.Engine
 import filodb.coordinator.queryengine.Engine.ExecArgs
 import filodb.core.{DatasetRef, MachineMetricsData, TestData}
+import filodb.core.memstore.TimeSeriesMemStore
 import filodb.core.metadata.{Column, Dataset}
 import filodb.core.query._
 
@@ -121,6 +122,7 @@ class QueryEngineSpec  extends ActorTest(QueryEngineSpec.getNewSystem)
       probe.send(coordinatorActor, IngestRows(ref, 1, records(dataset1, linearMultiSeries(130000L).take(20))))
       probe.expectMsg(Ack(0L))
 
+      memStore.asInstanceOf[TimeSeriesMemStore].commitIndexBlocking(dataset1.ref)
       val series2 = (2 to 4).map(n => s"Series $n")
       val multiFilter = Seq(ColumnFilter("series", Filter.In(series2.toSet.asInstanceOf[Set[Any]])))
       val logPlan = PartitionsInstant(FilteredPartitionQuery(multiFilter), Seq("min"))

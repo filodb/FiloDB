@@ -24,7 +24,6 @@ final case class PeriodicSamplesMapper(start: Long,
                                        funcParams: Seq[Any] = Nil) extends RangeVectorTransformer {
   require(start <= end, "start should be <= end")
   require(step > 0, "step should be > 0")
-  val numSamples = (end-start)/step
   if (functionId.nonEmpty) require(window.nonEmpty && window.get > 0,
                                   "Need positive window lengths to apply range function")
 

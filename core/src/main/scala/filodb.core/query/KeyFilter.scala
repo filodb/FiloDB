@@ -1,5 +1,7 @@
 package filodb.core.query
 
+import java.util.regex.Pattern
+
 import filodb.core.metadata.{Column, DataColumn, Dataset}
 import filodb.memory.format.{SingleValueRowReader, UTF8Wrapper, ZeroCopyUTF8String}
 
@@ -9,20 +11,33 @@ sealed trait Filter {
 
 object Filter {
   final case class Equals(value: Any) extends Filter {
-    val filterFunc = (item: Any) => value == item
+    val filterFunc: Any => Boolean = (item: Any) => value.equals(item)
   }
 
   final case class In(values: Set[Any]) extends Filter {
-    val filterFunc = (item: Any) => values.contains(item)
+    val filterFunc: (Any) => Boolean = (item: Any) => values.contains(item)
   }
 
   final case class And(left: Filter, right: Filter) extends Filter {
     private val leftFunc = left.filterFunc
     private val rightFunc = right.filterFunc
-    val filterFunc = (item: Any) => leftFunc(item) && rightFunc(item)
+    val filterFunc: (Any) => Boolean = (item: Any) => leftFunc(item) && rightFunc(item)
   }
 
-  // TODO NotEquals, EqualsRegex, NotEqualsRegex
+  final case class NotEquals(value: Any) extends Filter {
+    val filterFunc: (Any) => Boolean = (item: Any) => !value.equals(item)
+  }
+
+  final case class EqualsRegex(value: Any) extends Filter {
+    val pattern = Pattern.compile(value.toString, Pattern.DOTALL)
+    val filterFunc: (Any) => Boolean = (item: Any) =>  pattern.matcher(item.toString).matches()
+  }
+
+  final case class NotEqualsRegex(value: Any) extends Filter {
+    val pattern = Pattern.compile(value.toString, Pattern.DOTALL)
+    val filterFunc: (Any) => Boolean = (item: Any) =>  !pattern.matcher(item.toString).matches()
+  }
+
 }
 
 final case class ColumnFilter(column: String, filter: Filter)

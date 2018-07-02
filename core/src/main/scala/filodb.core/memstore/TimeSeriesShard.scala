@@ -12,8 +12,8 @@ import monix.execution.Scheduler
 import monix.reactive.Observable
 
 import filodb.core._
-import filodb.core.binaryrecord2.{BinaryRecordRowReader, RecordBuilder, RecordContainer}
 import filodb.core.Types.ChunkID
+import filodb.core.binaryrecord2.{BinaryRecordRowReader, RecordBuilder, RecordContainer}
 import filodb.core.metadata.Dataset
 import filodb.core.store._
 import filodb.memory._
@@ -87,7 +87,7 @@ object TimeSeriesShard {
   * for that group, up to what offset incoming records for that group has been persisted.  At recovery time, records
   * that fall below the watermark for that group will be skipped (since they can be recovered from disk).
   *
-  * @param config the store portion of the sourceconfig, not the global FiloDB application config
+  * @param storeConfig the store portion of the sourceconfig, not the global FiloDB application config
   */
 class TimeSeriesShard(dataset: Dataset,
                       storeConfig: StoreConfig,
@@ -118,7 +118,7 @@ class TimeSeriesShard(dataset: Dataset,
     * Used to answer queries not involving the full partition key.
     * Maintained using a high-performance bitmap index.
     */
-  private final val keyIndex = new PartitionKeyIndex(dataset)
+  private final val keyIndex = new PartKeyLuceneIndex(dataset, storeConfig)
 
   /**
     * Keeps track of count of rows ingested into memstore, not necessarily flushed.
@@ -252,6 +252,11 @@ class TimeSeriesShard(dataset: Dataset,
   def indexNames: Iterator[String] = keyIndex.indexNames
 
   def indexValues(indexName: String): Iterator[UTF8Str] = keyIndex.indexValues(indexName)
+
+  /**
+    * WARNING: use only for testing. Not performant
+    */
+  def commitIndexBlocking(): Unit = keyIndex.commitBlocking()
 
   def numRowsIngested: Long = ingested
 
@@ -411,11 +416,9 @@ class TimeSeriesShard(dataset: Dataset,
     if (!prunedPartitions.isEmpty) {
       logger.debug(s"About to prune ${prunedPartitions.cardinality} partitions...")
 
-      // Prune indices so no more querying
-      indicesToPrune.foreach { case (indexName, values) =>
-        logger.debug(s"Pruning ${values.size} entries from index $indexName...")
-        keyIndex.removeEntries(indexName, values.toSeq, prunedPartitions)
-      }
+      /* Remove this statement when we demand-page TSPartition on query.
+      Until then, this is needed to prevent indefinite growth of index */
+      keyIndex.removeEntries(prunedPartitions)
 
       // Pruning group bitmaps
       for { group <- 0 until numGroups } {
@@ -452,10 +455,6 @@ class TimeSeriesShard(dataset: Dataset,
         val entry = partIt.next
         if (evictionPolicy.canEvict(entry.getValue)) {
           prunedPartitions.set(entry.getKey)
-          // NOTE: In Satya's related PR to move to Lucene indexing, this is no longer necessary.  :)
-          // keyIndex.getKeyIndexNamesValues(entry.getValue.binPartition).foreach { case (k, v) =>
-          //   indicesToPrune.getOrElseUpdate(k, new HashSet[UTF8Str]) += v
-          // }
         }
       }
       (prunedPartitions, indicesToPrune)
@@ -476,7 +475,7 @@ class TimeSeriesShard(dataset: Dataset,
       case FilteredPartitionScan(split, filters) =>
         // TODO: Use filter func for columns not in index
         if (filters.nonEmpty) {
-          val (indexIt, _) = keyIndex.parseFilters(filters)
+          val indexIt = keyIndex.parseFilters(filters)
           new PartitionIterator(indexIt)
         } else {
           partitions.values.iterator.asScala
