@@ -78,10 +78,15 @@ class DemandPagedChunkStore(dataset: Dataset,
           timeOrderForChunkSet(reader.info).map { timeOrder =>
             val memFactory = memFactories(timeOrder)
             memFactory.startMetaSpan()
-            val (info, chunks) = copyToOffHeap(reader, memFactory)
-            partition.addChunkSet(info, chunks)
-            memFactory.endMetaSpan(writeMeta(_, partition.partID, info.id), BlockMetaAllocSize)
-            info
+            if (!partition.hasChunksAt(reader.info.id)) {
+              val chunks = copyToOffHeap(reader, memFactory)
+              val metaAddr = memFactory.endMetaSpan(writeMeta(_, partition.partID, reader.info), BlockMetaAllocSize)
+              require(metaAddr != 0)
+              partition.addChunkSet(metaAddr, chunks)
+            } else {
+              logger.warn(s"Chunks not copied to ${partition.stringPartition}, already has chunk ${reader.info.id}")
+            }
+            reader.info
           }
         }
         p.success(offHeapChunkInfos)
@@ -99,7 +104,7 @@ class DemandPagedChunkStore(dataset: Dataset,
     * It is used in deciding which BlockMemFactory to use while allocating off-heap memory for this chunk.
     */
   private def timeOrderForChunkSet(info: ChunkSetInfo): Option[Int] = {
-    val timestamp = info.firstKey.getLong(dataset.timestampColumn.get.id)
+    val timestamp = info.startTime
     if (timestamp < retentionStart)
       None
     else if (timestamp > jvmStartTime)
@@ -112,14 +117,13 @@ class DemandPagedChunkStore(dataset: Dataset,
     * Copies the onHeap contents read from ColStore into off-heap using the given memFactory
     */
   private def copyToOffHeap(onHeap: ChunkSetReader,
-                            memFactory: BlockMemFactory): (ChunkSetInfo, Array[BinaryVector[_]]) = {
+                            memFactory: BlockMemFactory): Array[BinaryVector[_]] = {
     val columnIds = dataset.dataColumns.map(_.id).toArray
-    val offHeap = onHeap.vectors.map(_.asInstanceOf[BinaryVector[_]]).zipWithIndex.map { case (v, i) =>
+    onHeap.vectors.map(_.asInstanceOf[BinaryVector[_]]).zipWithIndex.map { case (v, i) =>
       val bytes = v.toFiloBuffer.array()
       val byteBuf = memFactory.copyFromBytes(bytes)
       dataset.vectorMakers(columnIds(i))(byteBuf, onHeap.length).asInstanceOf[BinaryVector[_]]
     }
-    (onHeap.info, offHeap)
   }
 
 }

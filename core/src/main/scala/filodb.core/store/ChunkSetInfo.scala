@@ -1,16 +1,11 @@
 package filodb.core.store
 
-import java.io.{ByteArrayOutputStream, DataOutputStream}
 import java.nio.ByteBuffer
-
-import scala.collection.mutable.ArrayBuffer
 
 import com.googlecode.javaewah.EWAHCompressedBitmap
 import com.typesafe.scalalogging.StrictLogging
-import org.boon.primitive.{ByteBuf, InputByteArray}
 
 import filodb.core.Types._
-import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.metadata.{Column, Dataset}
 import filodb.memory.format._
 
@@ -41,8 +36,8 @@ object ChunkSet {
    */
   def apply(dataset: Dataset, part: PartitionKey, rows: Seq[RowReader]): ChunkSet = {
     require(rows.nonEmpty)
-    val firstKey = dataset.rowKey(rows.head)
-    val info = ChunkSetInfo(timeUUID64, rows.length, firstKey, dataset.rowKey(rows.last))
+    val firstKey = dataset.timestamp(rows.head)
+    val info = ChunkSetMeta(timeUUID64, rows.length, firstKey, dataset.timestamp(rows.last))
     val filoSchema = Column.toFiloSchema(dataset.dataColumns)
     val chunkMap = RowToVectorBuilder.buildFromRows(rows.toIterator, filoSchema)
     val idsAndBytes = chunkMap.map { case (colName, buf) => (dataset.colIDs(colName).get.head, buf) }.toSeq
@@ -51,18 +46,17 @@ object ChunkSet {
 }
 
 /**
-  * Records metadata about a chunk set
-  *
-  * @param id       chunk id (usually a timeuuid)
-  * @param numRows  number of rows encoded by this chunkset
-  * @param firstKey first rowKey in the chunkset
-  * @param lastKey  last rowKey in the chunkset
+  * Records metadata about a chunk set, including its time range
   */
-case class ChunkSetInfo(id: ChunkID,
-                        numRows: Int,
-                        firstKey: BinaryRecord,
-                        lastKey: BinaryRecord) {
-  def keyAndId: (BinaryRecord, ChunkID) = (firstKey, id)
+trait ChunkSetInfo {
+  // chunk id (usually a timeuuid)
+  def id: ChunkID
+  // number of rows encoded by this chunkset
+  def numRows: Int
+  // the starting timestamp of this chunkset
+  def startTime: Long
+  // The ending timestamp of this chunkset
+  def endTime: Long
 
   /**
    * Finds intersection key ranges between two ChunkSetInfos.
@@ -75,9 +69,9 @@ case class ChunkSetInfo(id: ChunkID,
    * Scenario D:        [        ]
    *                 [  other      ]
    */
-  def intersection(other: ChunkSetInfo): Option[(BinaryRecord, BinaryRecord)] =
+  def intersection(other: ChunkSetInfo): Option[(Long, Long)] =
     try {
-      intersection(other.firstKey, other.lastKey)
+      intersection(other.startTime, other.endTime)
     } catch {
       case e: Exception =>
         ChunkSetInfo.log.warn(s"Got error comparing $this and $other...", e)
@@ -85,21 +79,21 @@ case class ChunkSetInfo(id: ChunkID,
     }
 
   /**
-   * Finds the intersection between this ChunkSetInfo and a range of keys (key1, key2).
-   * Note that key1 and key2 do not need to contain all the fields of firstKey and lastKey, but
-   * must be a strict subset of the first fields.
+   * Finds the intersection between this ChunkSetInfo and a time range (startTime, endTime).
    */
-  def intersection(key1: BinaryRecord, key2: BinaryRecord): Option[(BinaryRecord, BinaryRecord)] = {
-    if (key1 > key2) {
+  def intersection(time1: Long, time2: Long): Option[(Long, Long)] = {
+    if (time1 > time2) {
       None
-    } else if (key1 <= lastKey && key2 >= firstKey) {
-      Some((if (key1 < firstKey) firstKey else key1,
-            if (key2 > lastKey) lastKey else key2))
+    } else if (time1 <= endTime && time2 >= startTime) {
+      Some((if (startTime < time1) time1 else startTime,
+            if (time2 > endTime) endTime else time2))
     } else {
       None
     }
   }
 }
+
+final case class ChunkSetMeta(id: ChunkID, numRows: Int, startTime: Long, endTime: Long) extends ChunkSetInfo
 
 case class ChunkRowSkipIndex(id: ChunkID, overrides: EWAHCompressedBitmap)
 
@@ -118,50 +112,27 @@ object ChunkSetInfo extends StrictLogging {
   val log = logger
 
   /**
-   * Serializes ChunkSetInfo into bytes for persistence.
-   *
-   * Defined format:
-   *   version  - byte  - 0x01
-   *   chunkId  - long
-   *   numRows  - int32
-   *   firstKey - med. byte array (BinaryRecord)
-   *   lastKey  - med. byte array (BinaryRecord)
-   *   maxConsideredChunkID - long
-   *   repeated - id: long, med. byte array (EWAHCompressedBitmap) - ChunkRowSkipIndex
+   * Serializes the info in a ChunkSetInfo to a region of memory.
+   * 28 bytes (ID + numRows + start/endTimes) is required.
    */
-  def toBytes(dataset: Dataset, chunkSetInfo: ChunkSetInfo, skips: ChunkSkips): Array[Byte] = {
-    val buf = ByteBuf.create(100)
-    buf.writeByte(0x01)
-    buf.writeLong(chunkSetInfo.id)
-    buf.writeInt(chunkSetInfo.numRows)
-    buf.writeMediumByteArray(chunkSetInfo.firstKey.bytes)
-    buf.writeMediumByteArray(chunkSetInfo.lastKey.bytes)
-    buf.writeLong(-1L)   // TODO: add maxConsideredChunkID
-    skips.foreach { case ChunkRowSkipIndex(id, overrides) =>
-      buf.writeLong(id)
-      val baos = new ByteArrayOutputStream
-      val dos = new DataOutputStream(baos)
-      overrides.serialize(dos)
-      buf.writeMediumByteArray(baos.toByteArray)
-    }
-    buf.toBytes
+  def toMemRegion(info: ChunkSetInfo, destBase: Any, destOffset: Long): Unit = {
+    UnsafeUtils.setLong(destBase, destOffset, info.id)
+    UnsafeUtils.setInt(destBase, destOffset + 8, info.numRows)
+    UnsafeUtils.setLong(destBase, destOffset + 12, info.startTime)
+    UnsafeUtils.setLong(destBase, destOffset + 20, info.endTime)
   }
 
-  def fromBytes(dataset: Dataset, bytes: Array[Byte]): (ChunkSetInfo, ChunkSkips) = {
-    val scanner = new InputByteArray(bytes)
-    val versionByte = scanner.readByte
-    assert(versionByte == 0x01, s"Incompatible ChunkSetInfo version $versionByte")
-    val id = scanner.readLong
-    val numRows = scanner.readInt
-    val firstKey = BinaryRecord(dataset, scanner.readMediumByteArray)
-    val lastKey = BinaryRecord(dataset, scanner.readMediumByteArray)
-    scanner.readLong    // throw away maxConsideredChunkID for now
-    val skips = new ArrayBuffer[ChunkRowSkipIndex]
-    while (scanner.location < bytes.size) {
-      val skipId = scanner.readLong
-      val skipList = new EWAHCompressedBitmap(ByteBuffer.wrap(scanner.readMediumByteArray))
-      skips.append(ChunkRowSkipIndex(skipId, skipList))
-    }
-    (ChunkSetInfo(id, numRows, firstKey, lastKey), skips)
+  def fromMemRegion(base: Any, offset: Long): ChunkSetInfo =
+    ChunkSetMeta(UnsafeUtils.getLong(base, offset),
+                 UnsafeUtils.getInt(base, offset + 8),
+                 UnsafeUtils.getLong(base, offset + 12),
+                 UnsafeUtils.getLong(base, offset + 20))
+
+  def toBytes(chunkSetInfo: ChunkSetInfo): Array[Byte] = {
+    val bytes = new Array[Byte](28)
+    toMemRegion(chunkSetInfo, bytes, UnsafeUtils.arayOffset)
+    bytes
   }
+
+  def fromBytes(bytes: Array[Byte]): ChunkSetInfo = fromMemRegion(bytes, UnsafeUtils.arayOffset)
 }

@@ -101,7 +101,7 @@ final class QueryActor(memStore: MemStore,
     (for { aggFunc    <- validateFunction(args.functionName)
            combinerFunc <- validateCombiner(args.combinerName)
            chunkMethod <- validateDataQuery(dataset, args.dataQuery)
-           aggregator <- aggFunc.validate(args.column, dataset.timestampColumn.map(_.name),
+           aggregator <- aggFunc.validate(args.column, Some(dataset.timestampColumn.name),
                                           chunkMethod, args.args, dataset)
            combiner   <- combinerFunc.validate(aggregator, args.combinerArgs)
            partMethods <- validatePartQuery(dataset, shardMapFunc, partQuery, options) }

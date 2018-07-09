@@ -8,6 +8,7 @@ import filodb.core._
 import filodb.core.binaryrecord.{ArrayBinaryRecord, BinaryRecord, RecordSchema}
 import filodb.core.binaryrecord2.{RecordSchema => RecordSchema2}
 import filodb.core.metadata.Column
+import filodb.core.store.ChunkSetInfo
 import filodb.memory.format.{BinaryVector, ZeroCopyUTF8String}
 import filodb.memory.format.{vectors => BV}
 
@@ -104,6 +105,8 @@ class KryoInit {
     kryo.register(classOf[ArrayBinaryRecord])
     kryo.register(classOf[RecordSchema])
     kryo.register(classOf[RecordSchema2])
+    kryo.register(classOf[ChunkSetInfo])
+    kryo.addDefaultSerializer(classOf[ChunkSetInfo], classOf[ChunkSetInfoSerializer])
     kryo.register(classOf[filodb.coordinator.ShardEvent])
     kryo.register(classOf[filodb.coordinator.CurrentShardSnapshot])
     kryo.register(classOf[filodb.coordinator.StatusActor.EventEnvelope])
@@ -165,5 +168,16 @@ class RecordSchema2Serializer extends KryoSerializer[RecordSchema2] {
 
   override def write(kryo: Kryo, output: Output, schema: RecordSchema2): Unit = {
     kryo.writeClassAndObject(output, schema.toSerializableTuple)
+  }
+}
+
+class ChunkSetInfoSerializer extends KryoSerializer[ChunkSetInfo] {
+  override def read(kryo: Kryo, input: Input, typ: Class[ChunkSetInfo]): ChunkSetInfo = {
+    val bytes = kryo.readObject(input, classOf[Array[Byte]])
+    ChunkSetInfo.fromBytes(bytes)
+  }
+
+  override def write(kryo: Kryo, output: Output, info: ChunkSetInfo): Unit = {
+    kryo.writeObject(output, ChunkSetInfo.toBytes(info))
   }
 }

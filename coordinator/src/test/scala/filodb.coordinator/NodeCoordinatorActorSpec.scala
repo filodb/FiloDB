@@ -219,32 +219,6 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       msg.msg should include ("not in allowed set")
     }
 
-    it("should return BadQuery if time function used on a non-timeseries dataset") {
-      import GdeltTestData._
-
-      probe.send(coordinatorActor, CreateDataset(dataset4))
-      probe.expectMsg(DatasetCreated)
-
-      // No need to initialize ingestion, because this test doesn't query data itself
-
-      val ref4 = dataset4.ref
-      probe.send(coordinatorActor, DatasetSetup(dataset4.asCompactString, TestData.storeConf))
-
-      // case 1: scan all data in partition, but no timestamp column ->
-      val q1 = LogicalPlanQuery(ref4, simpleAgg("time_group_avg", childPlan=
-                 PartitionsRange.all(FilteredPartitionQuery(Nil), Seq("AvgTone"))))
-      probe.send(coordinatorActor, q1)
-      val msg = probe.expectMsgClass(classOf[BadQuery])
-      msg.msg should include ("time-based functions")
-
-      // case 2: using a time-based range scan should not be valid for non-timeseries dataset
-      val q2 = LogicalPlanQuery(ref4, simpleAgg("time_group_avg", childPlan=
-                 PartitionsRange(FilteredPartitionQuery(Nil), MostRecentTime(5000), Seq("AvgTone"))))
-      probe.send(coordinatorActor, q2)
-      val msg2 = probe.expectMsgClass(classOf[BadQuery])
-      msg2.msg should include ("Not a time")
-    }
-
     it("should return results in QueryResult if valid LogicalPlanQuery") {
       val ref = setupTimeSeries()
       probe.send(coordinatorActor, IngestRows(ref, 0, records(dataset1, linearMultiSeries().take(30))))

@@ -73,12 +73,12 @@ object PartitionChunkIndex {
 }
 
 /**
- * An implementation of PartitionChunkIndex which orders things by row key - thus rowKeyRange and allChunks
- * will return chunk infos in increasing startKey order
+ * An implementation of PartitionChunkIndex which orders things by time - thus rowKeyRange and allChunks
+ * will return chunk infos in increasing time order
 
  * TODO: improve this implementation with binary bit indices such as JavaEWAH.
  */
-class RowkeyPartitionChunkIndex(val partKeyBase: Any, val partKeyOffset: Long, val dataset: Dataset)
+class TimeBasedPartitionChunkIndex(val partKeyBase: Any, val partKeyOffset: Long, val dataset: Dataset)
 extends MutablePartitionChunkIndex {
   import collection.JavaConverters._
 
@@ -87,11 +87,11 @@ extends MutablePartitionChunkIndex {
   import ChunkSetInfo._
 
   val skipRows = new NonBlockingHashMapLong[SkipMap](64)
-  val infos = new java.util.TreeMap[(BinaryRecord, ChunkID), ChunkSetInfo](
-                                    Ordering[(BinaryRecord, ChunkID)])
+  val infos = new java.util.TreeMap[(Long, ChunkID), ChunkSetInfo](
+                                    Ordering[(Long, ChunkID)])
 
   def add(info: ChunkSetInfo, skips: Seq[ChunkRowSkipIndex]): Unit = {
-    infos.put((info.firstKey, info.id), info)
+    infos.put((info.startTime, info.id), info)
     for { skip <- skips } {
       skipRows.put(skip.id, skipRows.getOrElseUpdate(skip.id, newSkip).or(skip.overrides))
     }
@@ -101,9 +101,9 @@ extends MutablePartitionChunkIndex {
 
   def rowKeyRange(startKey: BinaryRecord, endKey: BinaryRecord): InfosSkipsIt = {
     // Exclude chunks which start after the end search range
-    infos.headMap((endKey, Long.MaxValue)).values.iterator.asScala.collect {
-      case c @ ChunkSetInfo(id, _, k1, k2) if c.intersection(startKey, endKey).isDefined =>
-        (c, skipRows.get(id))
+    infos.headMap((endKey.getLong(0), Long.MaxValue)).values.iterator.asScala.collect {
+      case c: ChunkSetInfo if c.intersection(startKey.getLong(0), endKey.getLong(0)).isDefined =>
+        (c, skipRows.get(c.id))
     }
   }
 
@@ -113,11 +113,11 @@ extends MutablePartitionChunkIndex {
     }
 
   def singleChunk(startKey: BinaryRecord, id: ChunkID): InfosSkipsIt =
-    infos.subMap((startKey, id), true, (startKey, id), true).values.iterator.asScala.map { info =>
+    infos.subMap((startKey.getLong(0), id), true, (startKey.getLong(0), id), true).values.iterator.asScala.map { info =>
       (info, skipRows.get(info.id))
     }
 
-  // NOTE: latestN does not make sense for the RowkeyPartitionChunkIndex.
+  // NOTE: latestN does not make sense for the TimeBasedPartitionChunkIndex.
   def latestN(n: Int): InfosSkipsIt = ???
 
   def remove(id: ChunkID): Unit = {
@@ -154,7 +154,7 @@ extends MutablePartitionChunkIndex {
     // Linear search through all infos to find intersections
     // TODO: use an interval tree to speed this up?
     infosSkips.values.iterator.asScala.filter {
-      case (info, skips) => info.intersection(startKey, endKey).isDefined
+      case (info, skips) => info.intersection(startKey.getLong(0), endKey.getLong(0)).isDefined
     }
   }
 

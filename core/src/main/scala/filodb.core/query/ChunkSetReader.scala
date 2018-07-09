@@ -8,7 +8,7 @@ import com.googlecode.javaewah.EWAHCompressedBitmap
 
 import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.metadata.Dataset
-import filodb.core.store.{timeUUID64, ChunkSet, ChunkSetInfo}
+import filodb.core.store.{timeUUID64, ChunkSet, ChunkSetInfo, ChunkSetMeta}
 import filodb.core.Types.ChunkID
 import filodb.memory.format._
 
@@ -65,13 +65,13 @@ class ChunkSetReader(val info: ChunkSetInfo,
 
       // check key1 vs firstKey
       val startRow =
-        if (info.firstKey.isEmpty || key1 > info.firstKey) {
+        if (key1.getLong(0) >= info.startTime) {
           binarySearchKeyChunks(parsers, len, ordering, key1)._1
         } else { 0 }
 
       // check key2 vs lastKey
       val endRow =
-        if (info.lastKey.isEmpty || key2 < info.lastKey) {
+        if (key2.getLong(0) <= info.endTime) {
           binarySearchKeyChunks(parsers, len, ordering, key2) match {
             // no match - binarySearch returns the row # _after_ the searched key.
             // So if key is less than the first item then 0 is returned since 0 is after the key.
@@ -142,10 +142,10 @@ object ChunkSetReader {
    */
   def fromVectors(vectors: Array[FiloVector[_]],
                   chunkID: ChunkID = timeUUID64,
-                  firstKey: BinaryRecord = BinaryRecord.empty,
-                  lastKey: BinaryRecord = BinaryRecord.empty): ChunkSetReader = {
+                  startTime: Long = 0,
+                  endTime: Long = 0): ChunkSetReader = {
     require(vectors.size > 0, s"Cannot pass in an empty set of vectors")
-    val info = ChunkSetInfo(chunkID, vectors(0).length, firstKey, lastKey)
+    val info = ChunkSetMeta(chunkID, vectors(0).length, startTime, endTime)
     new ChunkSetReader(info, emptySkips, vectors)
   }
 

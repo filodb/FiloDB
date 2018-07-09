@@ -7,7 +7,7 @@ import scala.language.postfixOps
 import org.boon.primitive.ByteBuf
 import scalaxy.loops._
 
-import filodb.core.metadata.Dataset
+import filodb.core.metadata.{Column, Dataset}
 import filodb.core.Types._
 import filodb.memory.format._
 import filodb.memory.format.RowReader.TypedFieldExtractor
@@ -123,9 +123,6 @@ object BinaryRecord {
   def apply(schema: RecordSchema, bytes: Array[Byte]): BinaryRecord =
     new ArrayBinaryRecord(schema, bytes)
 
-  def apply(dataset: Dataset, bytes: Array[Byte]): BinaryRecord =
-    apply(dataset.rowKeyBinSchema, bytes)
-
   def apply(schema: RecordSchema, buffer: ByteBuffer): BinaryRecord =
     if (buffer.hasArray) { apply(schema, buffer.array) }
     else if (buffer.isDirect) {
@@ -162,11 +159,12 @@ object BinaryRecord {
   }
 
   def apply(dataset: Dataset, items: Seq[Any]): BinaryRecord =
-    if (items.length < dataset.rowKeyColumns.length) {
-      apply(RecordSchema(dataset.rowKeyColumns.take(items.length)), SeqRowReader(items))
-    } else {
-      apply(dataset.rowKeyBinSchema, SeqRowReader(items))
-    }
+    apply(RecordSchema(dataset.rowKeyColumns.take(items.length)), SeqRowReader(items))
+
+  val timeSchema = RecordSchema(Column.ColumnType.LongColumn)
+  val TimestampRecordSize = 16   // 8 bytes for timestamp + NA bits
+
+  def timestamp(time: Long): BinaryRecord = apply(timeSchema, SeqRowReader(Seq(time)), TimestampRecordSize)
 
   implicit val ordering = new Ordering[BinaryRecord] {
     def compare(a: BinaryRecord, b: BinaryRecord): Int = a.compare(b)

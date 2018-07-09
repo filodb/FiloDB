@@ -180,6 +180,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
 
     // First 50 rows have no blank Actor2Code's.  We range scan on ("", 50) to ("", 99), which
     // does exist in second 50 rows in both partitions 197901 and 197902.
+    // TODO: switch this to EventID, Actor2Code scan.
     val method1 = FilteredPartitionScan(paramSet.head)
     val rowRange = RowKeyChunkScan(BinaryRecord(dataset2, Seq("", 50)),
                                    BinaryRecord(dataset2, Seq("", 99)))
@@ -203,45 +204,6 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
                                     BinaryRecord(dataset2, Seq("Z")))
     val rowIter3 = colStore.scanRows(dataset2, Seq(0), method1, rowRange3)
     rowIter3.length should equal (41)
-  }
-
-  // TODO: redo below for same reasons
-  ignore should "range scan by row keys (SinglePartitionRowKeyScan)" in {
-    import GdeltTestData._
-    // val partsRows = getRowsByPartKey(dataset4)
-    // partsRows.foreach { case (part, rows) =>
-    //   rows.grouped(10).foreach { rowset =>
-    //     val sorted = rowset.sortBy(r => (r.filoUTF8String(3), r.getInt(0)))
-    //     val stream = toChunkSetStream(dataset4, part, sorted, 10)
-    //     colStore.write(dataset4, stream).futureValue should equal (Success)
-    //   }
-    // }
-
-    val paramSet = colStore.getScanSplits(dataset.ref, 1)
-    paramSet should have length (1)
-
-    // This should span multiple chunks and properly test comparison of binary row keys
-    // Matching chunks (each one 10 lines):
-    // AFR/0-GOV/9, GOV/10-IRN/19, /53-ZMB/57, /65-VATGOV/61, /70-KHM/73, CHL/88-ITA/87, /91-GOV/90
-    val startKey = BinaryRecord(dataset4, Seq("F", -1))
-    val endKey = BinaryRecord(dataset4, Seq("H", 100))
-    val method = SinglePartitionScan(partBuilder4.addFromObjects(1979), 0)
-    val range1 = RowKeyChunkScan(startKey, endKey)
-    val rowIt = colStore.scanRows(dataset4, dataset4.colIDs("GLOBALEVENTID", "MonthYear").get, method, range1)
-    val rows = rowIt.map(r => (r.getInt(0), r.getInt(1))).toList
-    rows.length should equal (69)   // 7 chunks, last one only has 9 rows
-    rows.map(_._2).toSet should equal (Set(197901, 197902))
-    // Verify every chunk that should be there is actually there
-    rows.map(_._1).toSet.intersect(Set(0, 10, 20, 30, 40, 53, 65, 70, 88, 91)) should equal (
-                                   Set(0, 10, 53, 65, 70, 88, 91))
-
-    val emptyScan = RowKeyChunkScan(endKey, startKey)
-    colStore.scanRows(dataset4, Seq(0), method, emptyScan).length should equal (0)
-
-    val key0 = BinaryRecord(dataset4, Seq("a", -1))  // All the Actor2Codes are uppercase, last one is Z
-    val key1 = BinaryRecord(dataset4, Seq("b", 100))
-    val emptyScan2 = RowKeyChunkScan(key0, key1)
-    colStore.scanRows(dataset4, Seq(0), method, emptyScan2).length should equal (0)
   }
 
   // TODO: FilteredPartitionScan() for ColumnStores does not work without an index right now

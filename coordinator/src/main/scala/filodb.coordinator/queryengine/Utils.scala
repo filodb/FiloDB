@@ -51,13 +51,11 @@ object Utils extends StrictLogging {
     Try(dataQuery match {
       case AllPartitionData                => AllChunkScan
       case KeyRangeQuery(startKey, endKey) => RowKeyChunkScan(dataset, startKey, endKey)
-      case MostRecentTime(lastMillis) if dataset.timestampColumn.isDefined =>
+      case MostRecentTime(lastMillis) =>
         val timeNow = System.currentTimeMillis
         RowKeyChunkScan(dataset, Seq(timeNow - lastMillis), Seq(timeNow))
-      case MostRecentSample if dataset.timestampColumn.isDefined => LastSampleChunkScan
+      case MostRecentSample => LastSampleChunkScan
     }).toOr.badMap {
-      case m: MatchError if dataset.timestampColumn.isEmpty =>
-        BadQuery(s"Not a time series schema - cannot filter using $dataQuery: ${m.getMessage}")
       case m: MatchError => BadQuery(s"Could not parse $dataQuery: ${m.getMessage}")
       case e: Exception => BadArgument(e.getMessage)
     }

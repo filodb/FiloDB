@@ -145,7 +145,7 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
                            diskTimeToLive: Int): Future[Response] = {
     asyncSubtrace("write-index", "ingestion") {
       val indexTable = getOrCreateIndexTable(dataset.ref)
-      val indices = Seq((chunkset.info.id, ChunkSetInfo.toBytes(dataset, chunkset.info, chunkset.skips)))
+      val indices = Seq((chunkset.info.id, ChunkSetInfo.toBytes(chunkset.info)))
       indexTable.writeIndices(partition, indices, sinkStats, diskTimeToLive)
     }
   }
@@ -326,8 +326,8 @@ trait CassandraChunkSource extends ChunkSource with StrictLogging {
                   val (base, offset, _) = binIndices.head.partBaseOffset
                   val newIndex = new ChunkIDPartitionChunkIndex(base, offset, dataset)
                   binIndices.foreach { binIndex =>
-                    val (info, skips) = ChunkSetInfo.fromBytes(dataset, binIndex.data.array)
-                    newIndex.add(info, skips)
+                    val info = ChunkSetInfo.fromBytes(binIndex.data.array)
+                    newIndex.add(info, Nil)
                   }
                   new CassandraPartition(newIndex, dataset, this)
                 }

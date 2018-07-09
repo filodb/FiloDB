@@ -7,10 +7,9 @@ import net.ceedubs.ficus.Ficus._
 import org.scalactic._
 
 import filodb.core._
-import filodb.core.binaryrecord.{BinaryRecord, RecordSchema}
 import filodb.core.binaryrecord2.{RecordBuilder, RecordComparator, RecordSchema => RecordSchema2}
 import filodb.core.query.ColumnInfo
-import filodb.memory.format.{FiloVector, RoutingRowReader, RowReader, SeqRowReader}
+import filodb.memory.format.{FiloVector, RowReader}
 import filodb.memory.MemFactory
 
 /**
@@ -37,14 +36,10 @@ final case class Dataset(name: String,
                          rowKeyIDs: Seq[Int],
                          database: Option[String] = None,
                          options: DatasetOptions = DatasetOptions.DefaultOptions) {
+  require(rowKeyIDs.nonEmpty)
   val ref = DatasetRef(name, database)
   val rowKeyColumns   = rowKeyIDs.map(dataColumns)
   val rowKeyRouting   = rowKeyIDs.toArray
-
-  // Use with `BinaryRecord`
-  // TODO: deprecate
-  val rowKeyBinSchema = RecordSchema(rowKeyColumns)
-  val dataBinSchema   = RecordSchema(dataColumns)
 
   val ingestionSchema = RecordSchema2.ingestion(this)  // TODO: add predefined keys yo
   val comparator      = new RecordComparator(ingestionSchema)
@@ -56,13 +51,7 @@ final case class Dataset(name: String,
   // Used for ChunkSetReader.binarySearchKeyChunks
   val rowKeyOrdering = CompositeReaderOrdering(rowKeyColumns.map(_.columnType.keyType))
 
-  import Column.ColumnType._
-
-  val timestampColumn: Option[Column] = rowKeyColumns.map(_.columnType) match {
-    case Seq(LongColumn)      => rowKeyColumns.headOption
-    case Seq(TimestampColumn) => rowKeyColumns.headOption
-    case _: Any               => None
-  }
+  val timestampColumn = rowKeyColumns.head
 
   private val partKeyBuilder = new RecordBuilder(MemFactory.onHeapFactory, partKeySchema, 10240)
   /**
@@ -76,13 +65,9 @@ final case class Dataset(name: String,
   }
 
   /**
-   * Creates a BinaryRecord for the row key from a RowReader that only has data columns
+   * Extracts a timestamp out of a RowReader, assuming data columns are first
    */
-  def rowKey(dataRowReader: RowReader): BinaryRecord =
-    BinaryRecord(rowKeyBinSchema, RoutingRowReader(dataRowReader, rowKeyRouting))
-
-  def rowKey(parts: Any*): BinaryRecord =
-    BinaryRecord(rowKeyBinSchema, SeqRowReader(parts))
+  def timestamp(dataRowReader: RowReader): Long = dataRowReader.getLong(rowKeyIDs.head)
 
   import Accumulation._
   import OptionSugar._
@@ -211,6 +196,7 @@ object Dataset {
   case class ColumnErrors(errs: Seq[BadSchema]) extends BadSchema
   case class UnknownRowKeyColumn(keyColumn: String) extends BadSchema
   case class IllegalMapColumn(reason: String) extends BadSchema
+  case class NoTimestampRowKey(colName: String, colType: String) extends BadSchema
 
   case class BadSchemaError(badSchema: BadSchema) extends Exception(badSchema.toString)
 
@@ -255,6 +241,13 @@ object Dataset {
     }
   }
 
+  def validateTimeSeries(dataColumns: Seq[Column], rowKeyIDs: Seq[Int]): Unit Or BadSchema =
+    dataColumns(rowKeyIDs.head).columnType match {
+      case Column.ColumnType.LongColumn      => Good(())
+      case Column.ColumnType.TimestampColumn => Good(())
+      case other: Column.ColumnType          => Bad(NoTimestampRowKey(dataColumns(rowKeyIDs.head).name, other.toString))
+    }
+
   // Partition columns have a column ID starting with this number.  This implies there cannot be
   // any more data columns than this number.
   val PartColStartIndex = 0x010000
@@ -276,8 +269,9 @@ object Dataset {
            options: DatasetOptions = DatasetOptions.DefaultOptions): Dataset Or BadSchema =
     for { partColumns <- Column.makeColumnsFromNameTypeList(partitionColNameTypes, PartColStartIndex)
           dataColumns <- Column.makeColumnsFromNameTypeList(dataColNameTypes)
-          nothing     <- validateMapColumn(partColumns, dataColumns)
-          rowKeyIDs   <- getRowKeyIDs(dataColumns, keyColumnNames) }
+          _           <- validateMapColumn(partColumns, dataColumns)
+          rowKeyIDs   <- getRowKeyIDs(dataColumns, keyColumnNames)
+          _           <- validateTimeSeries(dataColumns, rowKeyIDs) }
     yield {
       Dataset(name, partColumns, dataColumns, rowKeyIDs, None, options)
     }

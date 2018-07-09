@@ -6,7 +6,6 @@ import com.typesafe.config.ConfigFactory
 import monix.reactive.Observable
 import org.joda.time.DateTime
 
-import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.memstore.SomeData
 import filodb.core.metadata.Column.ColumnType
@@ -63,9 +62,9 @@ object NamesTestData {
                   (Some("Derek"),     Some("Carr"),     Some(39L), Some(0)),
                   (Some("Karl"),      Some("Joseph"),   Some(29L), Some(0)))
 
-  val firstKey = dataset.rowKey(mapper(names).head)
-  val lastKey = dataset.rowKey(mapper(names).last)
-  def keyForName(rowNo: Int): BinaryRecord = dataset.rowKey(mapper(names)(rowNo))
+  val firstKey = dataset.timestamp(mapper(names).head)
+  val lastKey = dataset.timestamp(mapper(names).last)
+  def keyForName(rowNo: Int): Long = dataset.timestamp(mapper(names)(rowNo))
 
   val partKeyBuilder = new RecordBuilder(TestData.nativeMem, dataset.partKeySchema, 2048)
   val defaultPartKey = partKeyBuilder.addFromReaderSlowly(SeqRowReader(Seq(0)))
@@ -101,7 +100,7 @@ object GdeltTestData {
   val gdeltLines = Source.fromURL(getClass.getResource("/GDELT-sample-test.csv"))
                          .getLines.toSeq.drop(1)     // drop the header line
 
-  val schema = Seq("GLOBALEVENTID:int",
+  val schema = Seq("GLOBALEVENTID:long",
                    "SQLDATE:long",
                    "MonthYear:int",
                    "Year:int",
@@ -142,12 +141,12 @@ object GdeltTestData {
       |2,1979-01-01,197901,1979,AGR,farm-yo,6,10.9792284866469""".stripMargin.split("\n")
   val altReaders = altLines.map { line => ArrayStringRowReader(line.split(",")) }
 
-  case class GdeltRecord(eventId: Int, sqlDate: Long, monthYear: Int, year: Int,
+  case class GdeltRecord(eventId: Long, sqlDate: Long, monthYear: Int, year: Int,
                          actor2Code: String, actor2Name: String, numArticles: Int, avgTone: Double)
 
   val records = gdeltLines.map { line =>
     val parts = line.split(',')
-    GdeltRecord(parts(0).toInt, DateTime.parse(parts(1)).getMillis,
+    GdeltRecord(parts(0).toLong, DateTime.parse(parts(1)).getMillis,
                 parts(2).toInt, parts(3).toInt,
                 parts(4), parts(5), parts(6).toInt, parts(7).toDouble)
   }
@@ -156,8 +155,8 @@ object GdeltTestData {
   // Dataset1: Partition keys (Actor2Code, Year) / Row key GLOBALEVENTID
   val dataset1 = Dataset("gdelt", Seq(schema(4), schema(3)), schema.patch(3, Nil, 2), "GLOBALEVENTID")
 
-  // Dataset2: Partition key (MonthYear) / Row keys (Actor2Code, GLOBALEVENTID)
-  val dataset2 = Dataset("gdelt", Seq(schema(2)), schema.patch(2, Nil, 1), Seq("Actor2Code", "GLOBALEVENTID"))
+  // Dataset2: Partition key (MonthYear) / Row keys (GLOBALEVENTID, Actor2Code)
+  val dataset2 = Dataset("gdelt", Seq(schema(2)), schema.patch(2, Nil, 1), Seq("GLOBALEVENTID", "Actor2Code"))
   val partBuilder2 = new RecordBuilder(TestData.nativeMem, dataset2.partKeySchema, 10240)
 
   // Dataset3: same as Dataset1 for now
@@ -165,8 +164,8 @@ object GdeltTestData {
 
   // Dataset4: One big partition (Year) with (Actor2Code, GLOBALEVENTID) rowkey
   // to easily test row key scans
-  val dataset4 = Dataset("gdelt", Seq(schema(3)), schema.patch(3, Nil, 1), Seq("Actor2Code", "GLOBALEVENTID"))
-  val partBuilder4 = new RecordBuilder(TestData.nativeMem, dataset4.partKeySchema, 10240)
+  // val dataset4 = Dataset("gdelt", Seq(schema(3)), schema.patch(3, Nil, 1), Seq("Actor2Code", "GLOBALEVENTID"))
+  // val partBuilder4 = new RecordBuilder(TestData.nativeMem, dataset4.partKeySchema, 10240)
 
   // Proj 6: partition Actor2Code,Actor2Name to test partition key bitmap indexing
   val dataset6 = Dataset("gdelt", schema.slice(4, 6), schema.patch(4, Nil, 2), "GLOBALEVENTID")

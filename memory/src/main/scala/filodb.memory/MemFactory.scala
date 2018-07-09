@@ -221,15 +221,18 @@ class BlockMemFactory(blockStore: BlockManager,
   /**
     * Stops tracking the blocks that the same metadata should be applied to, and allocates and writes metadata
     * for those spanned blocks.
-    * @param metadataWriter the function to write metadata to each block
+    * @param metadataWriter the function to write metadata to each block.  Param is the long metadata address.
     * @param metaSize the number of bytes the piece of metadata takes
+    * @return the Long native address of the last metadata block written
     */
-  def endMetaSpan(metadataWriter: Long => Unit, metaSize: Short): Unit = {
+  def endMetaSpan(metadataWriter: Long => Unit, metaSize: Short): Long = {
+    var metaAddr: Long = 0
     metadataSpan.foreach { blk =>
       // It is possible that the first block(s) did not have enough memory.  Don't write metadata to full blocks
-      val metaAddr = blk.allocMetadata(metaSize)
+      metaAddr = blk.allocMetadata(metaSize)
       if (metaAddr != 0) metadataWriter(metaAddr)
     }
+    metaAddr
   }
 
   def markUsedBlocksReclaimable(): Unit = {
@@ -243,7 +246,9 @@ class BlockMemFactory(blockStore: BlockManager,
         currentBlock.get().markReclaimable()
       }
       fullBlocks += currentBlock.get()
-      currentBlock.set(blockStore.requestBlock(reclaimOrder).get)
+      val newBlock = blockStore.requestBlock(reclaimOrder).get
+      currentBlock.set(newBlock)
+      metadataSpan += newBlock
     }
     currentBlock.get()
   }

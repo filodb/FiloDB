@@ -56,17 +56,4 @@ class TimeGroupingAggregateSpec extends FunSpec with Matchers with BeforeAndAfte
                        .get.runAsync.futureValue
     agg1 shouldBe an[ArrayAggregate[_]]
   }
-
-  it("should return error when using time-based functions on non-time series dataset/projection") {
-    import GdeltTestData._
-
-    memStore.setup(dataset6, 0, TestData.storeConf)  // GDELT uses int row key, not considered timestamp
-    memStore.ingest(dataset6.ref, 0, records(dataset6, readers))
-
-    val split = memStore.getScanSplits(dataset6.ref, 1).head
-    val query = QuerySpec("AvgTone", AggregationFunction.TimeGroupMin)
-    val agg1 = memStore.aggregate(dataset6, query, FilteredPartitionScan(split))
-    agg1.isBad shouldEqual true
-    agg1.swap.get shouldEqual NoTimestampColumn
-  }
 }

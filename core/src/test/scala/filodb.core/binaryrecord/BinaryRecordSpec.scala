@@ -86,7 +86,7 @@ class BinaryRecordSpec extends FunSpec with Matchers {
   it("should produce shorter BinaryRecords if smaller number of items fed") {
     import filodb.core.GdeltTestData._
 
-    val shortBR1 = BinaryRecord(dataset2, Seq("USA"))
+    val shortBR1 = BinaryRecord(dataset2, Seq(30L))
     shortBR1.schema.numFields should equal (1)
   }
 
@@ -94,13 +94,13 @@ class BinaryRecordSpec extends FunSpec with Matchers {
     import filodb.core.GdeltTestData._
 
     // Should compare semantically rather than by binary.  Int occurs first byte-wise, but 2nd semantically
-    val rec1 = BinaryRecord(dataset2, Seq("FRA", 55))
-    rec1 should be > (BinaryRecord(dataset2, Seq("CHL", 60)))
-    rec1 should equal (BinaryRecord(dataset2, Seq("FRA", 55)))
+    val rec1 = BinaryRecord(dataset2, Seq(55L, "FRA"))
+    rec1 should be < (BinaryRecord(dataset2, Seq(60L, "CHL")))
+    rec1 should equal (BinaryRecord(dataset2, Seq(55L, "FRA")))
 
     // Should be able to compare shorter record with longer one
-    BinaryRecord(dataset2, Seq("FRA")) should equal (rec1)
-    BinaryRecord(dataset2, Seq("GA")) should be > (rec1)
+    BinaryRecord(dataset2, Seq(55L)) should equal (rec1)
+    BinaryRecord(dataset2, Seq(56L)) should be > (rec1)
   }
 
   it("should semantically compare BinaryRecord Int and Long fields correctly") (pending)

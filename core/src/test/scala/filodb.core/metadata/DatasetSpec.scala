@@ -86,6 +86,12 @@ class DatasetSpec extends FunSpec with Matchers {
         Dataset("dataset", Seq("seg:int"), dataColSpecs :+ mapCol, Seq("age")) }
     }
 
+    it("should return NoTimestampRowKey if non timestamp used for row key") {
+      val ds1 = Dataset.make("dataset", Seq("part:string"), dataColSpecs, Seq("first"))
+      ds1.isBad shouldEqual true
+      ds1.swap.get shouldBe a[NoTimestampRowKey]
+    }
+
     it("should return a valid Dataset when a good specification passed") {
       val ds = Dataset("dataset", Seq("part:string"), dataColSpecs, "age")
       ds.rowKeyIDs shouldEqual Seq(2)
@@ -96,7 +102,7 @@ class DatasetSpec extends FunSpec with Matchers {
       ds.partitionColumns.map(_.columnType) shouldEqual Seq(StringColumn)
       ds.partitionColumns.map(_.id) shouldEqual Seq(PartColStartIndex)
       Dataset.isPartitionID(ds.partitionColumns.head.id) shouldEqual true
-      ds.timestampColumn.isDefined shouldEqual true
+      ds.timestampColumn.name shouldEqual "age"
       ds.rowKeyRouting shouldEqual Array(2)
     }
 
@@ -108,7 +114,7 @@ class DatasetSpec extends FunSpec with Matchers {
       ds.dataColumns.map(_.columnType) shouldEqual Seq(StringColumn, StringColumn, LongColumn)
       ds.partitionColumns should have length (1)
       ds.partitionColumns.map(_.columnType) shouldEqual Seq(StringColumn)
-      ds.timestampColumn.isDefined shouldEqual false   // Two row key columns
+      ds.timestampColumn.name shouldEqual "age"
       ds.rowKeyRouting shouldEqual Array(2, 0)
     }
 

@@ -2,19 +2,23 @@ package filodb.core.query
 
 import org.scalatest.{FunSpec, Matchers}
 
-import filodb.core.store.{ChunkRowSkipIndex, ChunkSetInfo}
+import filodb.core.binaryrecord.BinaryRecord
+import filodb.core.store.{ChunkRowSkipIndex, ChunkSetMeta}
 
 class PartitionChunkIndexSpec extends FunSpec with Matchers {
   import collection.JavaConverters._
 
   import filodb.core.NamesTestData._
 
-  val info1 = ChunkSetInfo(100L, 3, firstKey, lastKey)
-  val info2 = ChunkSetInfo(99L, 3, keyForName(1), lastKey)
+  val info1 = ChunkSetMeta(100L, 3, firstKey, lastKey)
+  val info2 = ChunkSetMeta(99L, 3, keyForName(1), lastKey)
 
-  describe("RowkeyPartitionChunkIndex") {
+  val firstRecord = BinaryRecord.timestamp(firstKey)
+  val lastRecord = BinaryRecord.timestamp(lastKey)
+
+  describe("TimeBasedPartitionChunkIndex") {
     it("should add out of order chunks and return in rowkey order") {
-      val newIndex = new RowkeyPartitionChunkIndex(null, defaultPartKey, dataset)
+      val newIndex = new TimeBasedPartitionChunkIndex(null, defaultPartKey, dataset)
 
       // Initial index should be empty
       newIndex.numChunks should equal (0)
@@ -28,15 +32,15 @@ class PartitionChunkIndexSpec extends FunSpec with Matchers {
 
       newIndex.allChunks.toList.map(_._1) should equal (List(info1, info2))
 
-      newIndex.rowKeyRange(firstKey, firstKey).toList.map(_._1) should equal (List(info1))
+      newIndex.rowKeyRange(firstRecord, firstRecord).toList.map(_._1) should equal (List(info1))
     }
 
     it("should return no chunks if rowKeyRange startKey is greater than endKey") {
-      val newIndex = new RowkeyPartitionChunkIndex(null, defaultPartKey, dataset)
+      val newIndex = new TimeBasedPartitionChunkIndex(null, defaultPartKey, dataset)
       newIndex.add(info1, Nil)
       newIndex.add(info2, Nil)
 
-      newIndex.rowKeyRange(lastKey, firstKey).toList.map(_._1) should equal (Nil)
+      newIndex.rowKeyRange(lastRecord, firstRecord).toList.map(_._1) should equal (Nil)
     }
   }
 
@@ -56,7 +60,7 @@ class PartitionChunkIndexSpec extends FunSpec with Matchers {
 
       newIndex.allChunks.toList.map(_._1) should equal (List(info2, info1))
 
-      newIndex.rowKeyRange(firstKey, firstKey).toList.map(_._1) should equal (List(info1))
+      newIndex.rowKeyRange(firstRecord, firstRecord).toList.map(_._1) should equal (List(info1))
     }
 
     it("should handle skips") {

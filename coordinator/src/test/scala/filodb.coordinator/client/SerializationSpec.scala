@@ -206,8 +206,9 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
     readVectResult.schema shouldEqual vectResult.schema
     readVectResult.vectorList should have length (vectResult.vectorList.length)
     val vect = readVectResult.vectorList.head
-    // vect.info shouldEqual vectResult.vectorList.head.info
-    vect.readers.head.info shouldEqual readers.head.info
+    vect.readers.head.info.id shouldEqual readers.head.info.id
+    vect.readers.head.info.numRows shouldEqual readers.head.info.numRows
+    vect.readers.head.info.startTime shouldEqual readers.head.info.startTime
     for { n <- 0 until vect.readers.head.vectors.size } {
       // Can't compare classes since GrowableVector is restored as a Masked*BinaryVector
       vect.readers.head.vectors(n).toBuffer shouldEqual readers.head.vectors(n).toBuffer

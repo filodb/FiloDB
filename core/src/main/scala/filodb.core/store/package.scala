@@ -109,7 +109,7 @@ package object store {
                   query: QuerySpec,
                   partMethod: PartitionScanMethod,
                   chunkMethod: ChunkScanMethod = AllChunkScan): Task[Aggregate[_]] Or InvalidFunctionSpec = {
-      for { aggregator <- query.aggregateFunc.validate(query.column, dataset.timestampColumn.map(_.name),
+      for { aggregator <- query.aggregateFunc.validate(query.column, Some(dataset.timestampColumn.name),
                                                        chunkMethod, query.aggregateArgs, dataset)
             combiner   <- query.combinerFunc.validate(aggregator, query.combinerArgs) }
       yield {

@@ -12,7 +12,6 @@ import monix.execution.Scheduler
 import monix.reactive.Observable
 
 import filodb.core._
-import filodb.core.Types.ChunkID
 import filodb.core.binaryrecord2.{BinaryRecordRowReader, RecordBuilder, RecordContainer}
 import filodb.core.metadata.Dataset
 import filodb.core.store._
@@ -65,13 +64,20 @@ class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
 }
 
 object TimeSeriesShard {
-  // The allocation size for each piece of metadata (for each chunkset) in a Block.  For now it is just
-  // the integer partition ID and the chunkID
-  val BlockMetaAllocSize: Short = 12
+  /**
+   * The allocation size for each piece of metadata (for each chunkset) in a Block.  Metdata schema:
+   * +0  int    Integer partition ID
+   * +4  long   chunkID   (from here on out, it's the same layout as ChunkSetInfo serialization)
+   * +12 int    # rows in chunkset
+   * +16 long   start timestamp
+   * +24 long   end timestamp
+   * Total: 32 bytes
+   */
+  val BlockMetaAllocSize: Short = 32
 
-  def writeMeta(addr: Long, partitionID: Int, chunkID: ChunkID): Unit = {
+  def writeMeta(addr: Long, partitionID: Int, info: ChunkSetInfo): Unit = {
     UnsafeUtils.setInt(UnsafeUtils.ZeroPointer, addr, partitionID)
-    UnsafeUtils.setLong(UnsafeUtils.ZeroPointer, addr + 4, chunkID)
+    ChunkSetInfo.toMemRegion(info, UnsafeUtils.ZeroPointer, addr + 4)
   }
 }
 

@@ -7,7 +7,7 @@ import org.scalatest.{BeforeAndAfter, BeforeAndAfterAll, FunSpec, Matchers}
 import org.scalatest.concurrent.ScalaFutures
 
 import filodb.core._
-import filodb.core.metadata.Dataset
+import filodb.core.metadata.{Dataset, DatasetOptions}
 
 trait MetaStoreSpec extends FunSpec with Matchers
 with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
@@ -30,7 +30,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
     }
 
     it("should return AlreadyExists if try to rewrite dataset with different data") {
-      val badDataset = dataset.copy(rowKeyIDs = Nil)   // illegal dataset really
+      val badDataset = dataset.copy(options = DatasetOptions.DefaultOptions.copy(shardKeyColumns = Seq("job")))
       metaStore.newDataset(dataset).futureValue shouldEqual Success
       metaStore.newDataset(badDataset).futureValue shouldEqual AlreadyExists
       metaStore.getDataset(dataset.ref).futureValue.copy(database=None) shouldEqual dataset

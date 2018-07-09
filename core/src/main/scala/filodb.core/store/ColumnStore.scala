@@ -36,6 +36,8 @@ final case class RowKeyChunkScan(firstBinKey: BinaryRecordWrapper,
                                  lastBinKey: BinaryRecordWrapper) extends ChunkScanMethod {
   def startkey: BinaryRecord = firstBinKey.binRec
   def endkey: BinaryRecord = lastBinKey.binRec
+  def startTime: Long = startkey.getLong(0)
+  def endTime: Long = endkey.getLong(0)
 }
 case object LastSampleChunkScan extends ChunkScanMethod
 
