@@ -12,7 +12,6 @@ import monix.reactive.Observable
 
 import filodb.core._
 import filodb.core.metadata.Dataset
-import filodb.core.Types.PartitionKey
 
 /**
  * ChunkSink is the base trait for a sink, or writer to a persistent store, of chunks
@@ -40,19 +39,6 @@ trait ChunkSink {
    * NOTE: please make sure there are no writes going on before calling this
    */
   def truncate(dataset: DatasetRef): Future[Response]
-
-   /**
-    * This method should be called when new partitions are flushed in the column store.
-    * It is used to build a list of available partition keys in the store.
-    */
-  def addPartitions(dataset: Dataset, partitionKeys: Iterator[Types.PartitionKey], shardNum: Int): Future[Response]
-
-  /**
-    * This method should be called when partition(s) are removed from the store likely due to
-    * the fact that the retention period for all data contained in the partition has expired,
-    * and there is no new data.
-    */
-  def removePartitions(dataset: Dataset, partitionKey: Iterator[Types.PartitionKey], shardNum: Int): Future[Response]
 
   /**
    * Completely and permanently drops the dataset from the ChunkSink.
@@ -138,32 +124,8 @@ class NullColumnStore(implicit sched: Scheduler) extends ColumnStore with Strict
 
   override def getScanSplits(dataset: DatasetRef, splitsPerNode: Int): Seq[ScanSplit] = Seq.empty
 
-  override def addPartitions(dataset: Dataset,
-                             keys: Iterator[PartitionKey],
-                             shardNum: Int): Future[Response] = {
-    val keysForDataset = partitionKeys.getOrElseUpdate(dataset.ref, {
-      val keyList = createConcurrentSet[PartitionKey]()
-      partitionKeys += (dataset.ref -> keyList)
-      keyList
-    })
-    keysForDataset ++= keys
-    logger.debug(s"NullColumnStore.addPartitions: $keysForDataset")
-    Future.successful(Success)
-  }
-
   private def createConcurrentSet[T]() = {
     java.util.Collections.newSetFromMap(new java.util.concurrent.ConcurrentHashMap[T, java.lang.Boolean]).asScala
   }
 
-  override def removePartitions(dataset: Dataset,
-                                keys: Iterator[PartitionKey],
-                                shardNum: Int): Future[Response] = {
-    partitionKeys.get(dataset.ref) match {
-      case Some(keyList) =>
-        keyList --= keys
-        if (keyList.isEmpty) partitionKeys -= dataset.ref
-      case None => throw new IllegalArgumentException("Dataset not found")
-    }
-    Future.successful(Success)
-  }
 }

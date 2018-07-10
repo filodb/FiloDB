@@ -1,5 +1,7 @@
 package filodb.cassandra.metastore
 
+import java.lang.{Integer => JInt, Long => JLong}
+
 import scala.concurrent.{ExecutionContext, Future}
 
 import com.datastax.driver.core.ConsistencyLevel
@@ -25,6 +27,7 @@ sealed class CheckpointTable(val config: Config,
        | databasename text,
        | datasetname text,
        | shardnum int,
+       | highesttimebucket int STATIC,
        | groupnum int,
        | offset bigint,
        | PRIMARY KEY ((databasename, datasetname, shardNum), groupNum)
@@ -37,6 +40,20 @@ sealed class CheckpointTable(val config: Config,
          | datasetname = ? AND
          | shardnum = ? """.stripMargin).setConsistencyLevel(ConsistencyLevel.QUORUM)
     // we want consistent reads during recovery
+
+  lazy val readHighestTimeBucketCql =
+    session.prepare(
+      s"""SELECT highesttimebucket FROM $tableString WHERE
+         | databasename = ? AND
+         | datasetname = ? AND
+         | shardnum = ? """.stripMargin).setConsistencyLevel(ConsistencyLevel.QUORUM)
+
+  lazy val writeHighestTimeBucketCql = {
+    val statement = session.prepare(
+      s"""INSERT INTO $tableString (databasename, datasetname, shardnum, highesttimebucket)
+         | VALUES (?, ?, ?, ?)""".stripMargin
+    )
+  }
 
   lazy val writeCheckpointCql = {
     val statement = session.prepare(
@@ -57,14 +74,25 @@ sealed class CheckpointTable(val config: Config,
   def writeCheckpoint(dataset: DatasetRef, shardNum: Int, groupNum: Int, offset: Long): Future[Response] = {
     // TODO database name should not be an optional in internally since there is a default value. Punted for later.
     execStmt(writeCheckpointCql.bind(dataset.database.getOrElse(""),
-      dataset.dataset, Int.box(shardNum), Int.box(groupNum), Long.box(offset)))
+      dataset.dataset, shardNum: JInt, groupNum: JInt, offset: JLong))
   }
 
   def readCheckpoints(dataset: DatasetRef, shardNum: Int): Future[Map[Int,Long]] = {
     session.executeAsync(readCheckpointCql.bind(dataset.database.getOrElse(""),
-            dataset.dataset, Int.box(shardNum)))
+            dataset.dataset, shardNum: JInt))
       .toIterator // future of Iterator
       .map { it => it.map(r => r.getInt(0) -> r.getLong(1)).toMap }
+  }
+
+  def writeHighestTimeBucketCql(dataset: DatasetRef, shardNum: Int, highesttimebucket: Int): Future[Response] = {
+    // TODO database name should not be an optional in internally since there is a default value. Punted for later.
+    execStmt(writeCheckpointCql.bind(dataset.database.getOrElse(""),
+      dataset.dataset, shardNum: JInt, highesttimebucket: JInt))
+  }
+
+  def readHighestTimeBucket(dataset: DatasetRef, shardNum: Int): Future[Option[Int]] = {
+    session.executeAsync(readHighestTimeBucketCql.bind(dataset.database.getOrElse(""),
+      dataset.dataset, shardNum: JInt)).toScalaFuture.map { rs => Option(rs.one().getInt("highesttimebucket")) }
   }
 
 }
