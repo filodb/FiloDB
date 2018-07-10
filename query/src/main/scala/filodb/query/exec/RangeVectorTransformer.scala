@@ -5,7 +5,9 @@ import monix.reactive.Observable
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.Dataset
 import filodb.core.query._
+import filodb.memory.format.RowReader
 import filodb.query.{BinaryOperator, InstantFunctionId, QueryConfig}
+import filodb.query.exec.rangefn.InstantFunction
 
 /**
   * Implementations can provide ways to transform RangeVector
@@ -57,12 +59,31 @@ final case class InstantVectorFunctionMapper(function: InstantFunctionId,
   protected[exec] def args: String =
     s"function=$function, funcParams=$funcParams"
 
+  val instantFunction = InstantFunction(function, funcParams)
+
   def apply(source: Observable[RangeVector],
             queryConfig: QueryConfig,
             limit: Int,
-            sourceSchema: ResultSchema): Observable[RangeVector] = ???
+            sourceSchema: ResultSchema): Observable[RangeVector] = {
+    source.map { rv =>
+      val resultIterator: Iterator[RowReader] = new Iterator[RowReader]() {
 
-  // TODO all function defs go here and get invoked from mapRangeVector
+        private val rows = rv.rows
+        private val result = new TransientRow()
+
+        override def hasNext: Boolean = rows.hasNext
+
+        override def next(): RowReader = {
+          val next = rows.next()
+          val newValue = instantFunction(next.getDouble(1))
+          result.setValues(next.getLong(0), newValue)
+          result
+        }
+      }
+      IteratorBackedRangeVector(rv.key, resultIterator)
+    }
+  }
+
 }
 
 /**
