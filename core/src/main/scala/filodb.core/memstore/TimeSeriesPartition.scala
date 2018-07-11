@@ -261,6 +261,21 @@ class TimeSeriesPartition(val partID: Int,
     finalVectors
   }
 
+  /**
+    * Get the timestamp of last sample which will be used as endTime for
+    * the partition when indexing. Returns Long.MaxValue if partition
+    * has a write buffer and is currently ingesting.
+    *
+    * Note that for a small period when buffers have swapped and new
+    * samples have not arrived, this method may provide an end time while
+    * the series is still ingesting. Don't use if this is an issue for
+    * your use case.
+    */
+  def ingestionEndTime(): Long = {
+    if (appendingChunkLen > 0) Long.MaxValue // still ingesting
+    else infosChunks.get(infosChunks.lastKey).endTime
+  }
+
   private def readersFromMemory(method: ChunkScanMethod, columnIds: Array[Int]): Iterator[ChunkSetReader] = {
     val infosVects = method match {
       case AllChunkScan               =>

@@ -5,6 +5,7 @@ import scala.concurrent.duration._
 import com.typesafe.config.ConfigFactory
 import org.scalatest.{BeforeAndAfter, BeforeAndAfterAll, FunSpec, Matchers}
 import org.scalatest.concurrent.ScalaFutures
+import org.scalatest.time.{Millis, Seconds, Span}
 
 import filodb.core.MachineMetricsData._
 import filodb.core.TestData
@@ -13,11 +14,14 @@ import filodb.core.store.{ColumnStore, NullColumnStore}
 import filodb.memory.{MemoryStats, NativeMemoryManager, PageAlignedBlockManager, ReclaimListener}
 import filodb.memory.format.{TupleRowReader, UnsafeUtils}
 
-class DemandPagedChunkStoreSpec extends FunSpec with Matchers with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
+class DemandPagedChunkStoreSpec extends FunSpec with Matchers with BeforeAndAfter
+                                                with BeforeAndAfterAll with ScalaFutures {
   import monix.execution.Scheduler.Implicits.global
   import TimeSeriesShard.BlockMetaAllocSize
 
+  // scalastyle:off
   var tsPartition: TimeSeriesPartition = null
+  // scalastyle:on
 
   val reclaimer = new ReclaimListener {
     def onReclaim(metaAddr: Long, numBytes: Int): Unit = {
@@ -27,6 +31,8 @@ class DemandPagedChunkStoreSpec extends FunSpec with Matchers with BeforeAndAfte
       tsPartition.removeChunksAt(chunkID)
     }
   }
+  implicit val defaultPatience =
+    PatienceConfig(timeout = Span(30, Seconds), interval = Span(250, Millis))
 
   val config = ConfigFactory.load("application_test.conf").getConfig("filodb")
   private val chunkRetentionHours = 72

@@ -100,7 +100,7 @@ class PartitionKeyIndexSpec extends FunSpec with Matchers with BeforeAndAfter {
     unFounded2.toSeq should equal (Nil)
   }
 
-  it("should return unfound column names when calling parseFilters") {
+  it("should return unfound column names when calling partIdsFromFilters") {
     // Add the first ten keys and row numbers
     partKeyFromRecords(dataset6, records(dataset6, readers.take(10)), Some(partBuilder))
       .zipWithIndex.foreach { case (addr, i) => keyIndex.addPartKey(ZeroPointer, addr, i) }

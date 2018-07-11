@@ -60,7 +60,7 @@ class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
 
   val bufferPoolSize = Kamon.gauge("memstore-writebuffer-pool-size").refine(tags)
   val indexEntries = Kamon.gauge("memstore-index-entries").refine(tags)
-  val indexBytes   = Kamon.gauge("memstore-index-bytes").refine(tags)
+  val indexBytes   = Kamon.gauge("memstore-index-ram-bytes").refine(tags)
 }
 
 object TimeSeriesShard {
@@ -124,7 +124,7 @@ class TimeSeriesShard(dataset: Dataset,
     * Used to answer queries not involving the full partition key.
     * Maintained using a high-performance bitmap index.
     */
-  private final val keyIndex = new PartKeyLuceneIndex(dataset, storeConfig)
+  private final val partKeyIndex = new PartKeyLuceneIndex(dataset, shardNum, storeConfig)
 
   /**
     * Keeps track of count of rows ingested into memstore, not necessarily flushed.
@@ -158,6 +158,7 @@ class TimeSeriesShard(dataset: Dataset,
 
   private val ingestSchema = dataset.ingestionSchema
   private val recordComp = dataset.comparator
+  private val timestampColId = dataset.timestampColumn.id
 
   /**
     * PartitionSet - access TSPartition using ingest record partition key in O(1) time.
@@ -191,6 +192,7 @@ class TimeSeriesShard(dataset: Dataset,
                                                storeConfig.allocStepSize)
 
   private final val partitionGroups = Array.fill(numGroups)(new EWAHCompressedBitmap)
+  private final val stoppedIngesting = new EWAHCompressedBitmap
 
   /**
     * The offset up to and including the last record in this group to be successfully persisted.
@@ -226,8 +228,8 @@ class TimeSeriesShard(dataset: Dataset,
       if (ingestOffset < groupWatermark(group)) {
         shardStats.rowsSkipped.increment
       } else {
-        val partition = getOrAddPartition(recBase, recOffset, group)
         binRecordReader.recordOffset = recOffset
+        val partition = getOrAddPartition(recBase, recOffset, group, binRecordReader.getLong(timestampColId))
         partition.ingest(binRecordReader, overflowBlockFactory)
         numActuallyIngested += 1
       }
@@ -255,14 +257,16 @@ class TimeSeriesShard(dataset: Dataset,
 
   def ingest(data: SomeData): Long = ingest(data.records, data.offset)
 
-  def indexNames: Iterator[String] = keyIndex.indexNames
+  def indexNames: Iterator[String] = partKeyIndex.indexNames
 
-  def indexValues(indexName: String): Iterator[UTF8Str] = keyIndex.indexValues(indexName)
+  def indexValues(indexName: String): Iterator[UTF8Str] = partKeyIndex.indexValues(indexName)
 
   /**
     * WARNING: use only for testing. Not performant
     */
-  def commitIndexBlocking(): Unit = keyIndex.commitBlocking()
+  def commitPartKeyIndexBlocking(): Unit = partKeyIndex.commitBlocking()
+
+  def closePartKeyIndex(): Unit = partKeyIndex.closeIndex()
 
   def numRowsIngested: Long = ingested
 
@@ -304,8 +308,8 @@ class TimeSeriesShard(dataset: Dataset,
 
   private def updateGauges(): Unit = {
     shardStats.bufferPoolSize.set(bufferPool.poolSize)
-    shardStats.indexEntries.set(keyIndex.indexSize)
-    shardStats.indexBytes.set(keyIndex.indexBytes)
+    shardStats.indexEntries.set(partKeyIndex.indexNumEntries)
+    shardStats.indexBytes.set(partKeyIndex.indexRamBytes)
     shardStats.numPartitions.set(numActivePartitions)
   }
 
@@ -314,7 +318,18 @@ class TimeSeriesShard(dataset: Dataset,
     // Only allocate the blockHolder when we actually have chunks/partitions to flush
     val blockHolder = blockFactoryPool.checkout()
     // Given the flush group, create an observable of ChunkSets
-    val chunkSetIt = partitionIt.flatMap(_.makeFlushChunks(blockHolder))
+    val chunkSetIt = partitionIt.flatMap { p =>
+      val chunks = p.makeFlushChunks(blockHolder)
+      if (chunks.isEmpty && !stoppedIngesting.get(p.partID)) {
+        partKeyIndex.updatePartKeyWithEndTime(p.partKeyBase, p.partKeyOffset, p.partID, p.ingestionEndTime())
+        stoppedIngesting.set(p.partID)
+      } else if (chunks.nonEmpty && stoppedIngesting.get(p.partID)) {
+        // Partition started re-ingesting. TODO: we can do better than this for intermittent time series. Address later.
+        partKeyIndex.updatePartKeyWithEndTime(p.partKeyBase, p.partKeyOffset, p.partID, Long.MaxValue)
+        stoppedIngesting.clear(p.partID)
+      }
+      chunks
+    }
 
     // Note that all cassandra writes will have included retries. Failures after retries will imply data loss
     // in order to keep the ingestion moving. It is important that we don't fall back far behind.
@@ -383,7 +398,7 @@ class TimeSeriesShard(dataset: Dataset,
    * @param recordOff the offset of the ingestion BinaryRecord
    * @param group the group number, from abs(record.partitionHash % numGroups)
    */
-  def getOrAddPartition(recordBase: Any, recordOff: Long, group: Int): TimeSeriesPartition =
+  def getOrAddPartition(recordBase: Any, recordOff: Long, group: Int, startTime: Long): TimeSeriesPartition =
     partSet.getOrAddWithIngestBR(recordBase, recordOff, {
       checkAndEvictPartitions()
       // PartitionKey is copied to offheap bufferMemory and stays there until it is freed
@@ -391,7 +406,8 @@ class TimeSeriesShard(dataset: Dataset,
       val (_, partKeyAddr, _) = BinaryRegionLarge.allocateAndCopy(partKeyArray, partKeyOffset, bufferMemoryManager)
       val newPart = new TimeSeriesPartition(nextPartitionID, dataset, partKeyAddr, shardNum, sink,
                           bufferPool, pagedChunkStore, shardStats)(queryScheduler)
-      keyIndex.addPartKey(UnsafeUtils.ZeroPointer, partKeyAddr, nextPartitionID)
+      partKeyIndex.addPartKey(UnsafeUtils.ZeroPointer, partKeyAddr, nextPartitionID, startTime)
+      // TODO add partKey to record container for write into cassandra
       partitions.put(nextPartitionID, newPart)
       shardStats.partitionsCreated.increment
       partitionGroups(group).set(nextPartitionID)
@@ -424,7 +440,7 @@ class TimeSeriesShard(dataset: Dataset,
 
       /* Remove this statement when we demand-page TSPartition on query.
       Until then, this is needed to prevent indefinite growth of index */
-      keyIndex.removeEntries(prunedPartitions)
+      partKeyIndex.removeEntries(prunedPartitions)
 
       // Pruning group bitmaps
       for { group <- 0 until numGroups } {
@@ -478,10 +494,15 @@ class TimeSeriesShard(dataset: Dataset,
         getPartition(partition).map(Iterator.single).getOrElse(Iterator.empty)
       case MultiPartitionScan(partKeys, _)   =>
         partKeys.toIterator.flatMap(getPartition)
-      case FilteredPartitionScan(split, filters) =>
-        // TODO: Use filter func for columns not in index
+      case FilteredPartitionScan(split, filters, range) =>
+        // TODO: There are other filters that need to be added and translated to Lucene queries
         if (filters.nonEmpty) {
-          val indexIt = keyIndex.parseFilters(filters)
+          val (start, end) = range match {
+            case AllChunkScan => (0L, Long.MaxValue)
+            case range: RowKeyChunkScan => (range.startTime, range.endTime)
+            case _ => throw new UnsupportedOperationException // not supported
+          }
+          val indexIt = partKeyIndex.partIdsFromFilters(filters, start, end)
           new PartitionIterator(indexIt)
         } else {
           partitions.values.iterator.asScala
@@ -501,7 +522,7 @@ class TimeSeriesShard(dataset: Dataset,
     logger.info(s"Clearing all MemStore state for shard $shardNum")
     partitions.clear()
     partSet.clear()
-    keyIndex.reset()
+    partKeyIndex.reset()
     ingested = 0L
     for { group <- 0 until numGroups } {
       partitionGroups(group) = new EWAHCompressedBitmap()

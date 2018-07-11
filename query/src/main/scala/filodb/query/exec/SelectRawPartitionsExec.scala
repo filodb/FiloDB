@@ -50,7 +50,7 @@ final case class SelectRawPartitionsExec(id: String,
       case WriteBuffers => ???
       case EncodedChunks => ???
     }
-    val partMethod = FilteredPartitionScan(ShardSplit(shard), filters)
+    val partMethod = FilteredPartitionScan(ShardSplit(shard), filters, chunkMethod)
     source.rangeVectors(dataset, colIds, partMethod, dataset.rowKeyOrdering, chunkMethod)
           .filter(_.rows.nonEmpty)
   }

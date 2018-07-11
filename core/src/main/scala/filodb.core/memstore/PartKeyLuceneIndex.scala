@@ -1,16 +1,18 @@
 package filodb.core.memstore
 
 import java.io.File
+import java.util.{Comparator, PriorityQueue}
 
 import scala.collection.JavaConverters._
+import scala.collection.immutable.HashSet
 
 import com.googlecode.javaewah.{EWAHCompressedBitmap, IntIterator}
 import com.typesafe.scalalogging.StrictLogging
 import org.apache.lucene.analysis.standard.StandardAnalyzer
 import org.apache.lucene.document._
 import org.apache.lucene.document.Field.Store
-import org.apache.lucene.index.{IndexWriter, LeafReaderContext, NumericDocValues, Term}
-import org.apache.lucene.search.{SearcherManager, _}
+import org.apache.lucene.index._
+import org.apache.lucene.search._
 import org.apache.lucene.search.BooleanClause.Occur
 import org.apache.lucene.store.MMapDirectory
 import org.apache.lucene.util.BytesRef
@@ -18,6 +20,7 @@ import scalaxy.loops._
 
 import filodb.core.Types.PartitionKey
 import filodb.core.binaryrecord2.MapItemConsumer
+import filodb.core.concurrentCache
 import filodb.core.metadata.Column.ColumnType.{MapColumn, StringColumn}
 import filodb.core.metadata.Dataset
 import filodb.core.query.{ColumnFilter, Filter}
@@ -26,52 +29,106 @@ import filodb.core.store.StoreConfig
 import filodb.memory.{BinaryRegionLarge, UTF8StringMedium}
 import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String => UTF8Str}
 
-
 object PartKeyLuceneIndex {
-  final val PER_DOC_PART_ID = "PER_DOC_PART_ID"
-  final val SEARCHABLE_PART_ID = "SEARCHABLE_PART_ID"
+  final val PART_ID =    "__partId__"
+  final val START_TIME = "__startTime__"
+  final val END_TIME =   "__endTime__"
+  final val PART_KEY =   "__partKey__"
+
+  final val ignoreIndexNames = HashSet(START_TIME, PART_KEY, END_TIME, PART_ID)
+
   val MAX_STR_INTERN_ENTRIES = 10000
 }
 
-class PartKeyLuceneIndex(dataset: Dataset, storeConfig: StoreConfig) extends StrictLogging {
+class PartKeyLuceneIndex(dataset: Dataset, shardNum: Int, storeConfig: StoreConfig) extends StrictLogging {
+
+  import PartKeyLuceneIndex._
 
   private val numPartColumns = dataset.partitionColumns.length
   private val indexDiskLocation = createTempDir.toPath
-  val mMapDirectory = new MMapDirectory(indexDiskLocation)
-  val analyzer = new StandardAnalyzer()
+  private val mMapDirectory = new MMapDirectory(indexDiskLocation)
+  private val analyzer = new StandardAnalyzer()
 
   logger.info(s"Created lucene index at $indexDiskLocation")
 
-  import org.apache.lucene.index.IndexWriterConfig
+  private val config = new IndexWriterConfig(analyzer)
 
-  val config = new IndexWriterConfig(analyzer)
-  val indexWriter = new IndexWriter(mMapDirectory, config)
+  private val endTimeSort = new Sort(new SortField(END_TIME, SortField.Type.LONG),
+                                     new SortField(START_TIME, SortField.Type.LONG))
+  config.setIndexSort(endTimeSort)
+  private val indexWriter = new IndexWriter(mMapDirectory, config)
 
-  val stringInternCache = new StringInternCache()
+  private val utf8ToStrCache = concurrentCache[UTF8Str, String](PartKeyLuceneIndex.MAX_STR_INTERN_ENTRIES)
 
   //scalastyle:off
-  val searcherManager = new SearcherManager(indexWriter, null)
+  private val searcherManager = new SearcherManager(indexWriter, null)
   //scalastyle:on
 
   //start this thread to flush the segments and refresh the searcher every specific time period
-  val flushThread = new ControlledRealTimeReopenThread(indexWriter,
-                                                       searcherManager,
-                                                       storeConfig.partIndexFlushMaxDelaySeconds,
-                                                       storeConfig.partIndexFlushMinDelaySeconds)
+  private val flushThread = new ControlledRealTimeReopenThread(indexWriter,
+                                                               searcherManager,
+                                                               storeConfig.partIndexFlushMaxDelaySeconds,
+                                                               storeConfig.partIndexFlushMinDelaySeconds)
   flushThread.start()
 
-  val partitionColumns = dataset.partitionColumns
+  private val luceneDocument = new ThreadLocal[Document]()
+
+  private val mapConsumer = new MapItemConsumer {
+    def consume(keyBase: Any, keyOffset: Long, valueBase: Any, valueOffset: Long, index: Int): Unit = {
+      import filodb.core._
+      val key = utf8ToStrCache.getOrElseUpdate(new UTF8Str(keyBase, keyOffset + 2,
+                                                           UTF8StringMedium.numBytes(keyBase, keyOffset)),
+                                               _.toString)
+      val value = new BytesRef(valueBase.asInstanceOf[Array[Byte]],
+        (valueOffset + 2).toInt - UnsafeUtils.arayOffset,//valueOffset is relative to arrayOffset
+        UTF8StringMedium.numBytes(valueBase, valueOffset))
+      addIndexEntry(key, value, index)
+    }
+  }
+
+  /**
+    * Map of partKey column to the logic for indexing the column (aka Indexer).
+    * Optimization to avoid match logic while iterating through each column of the partKey
+    */
+  private final val indexers = dataset.partitionColumns.zipWithIndex.map { case (c, pos) =>
+    c.columnType match {
+      case StringColumn => new Indexer {
+        val colName = UTF8Str(c.name)
+        def fromPartKey(base: Any, offset: Long, partIndex: Int): Unit = {
+          val strOffset = dataset.partKeySchema.getStringOffset(base, UnsafeUtils.arayOffset, pos)
+          val value = new BytesRef(base.asInstanceOf[Array[Byte]], strOffset + 2,
+            UTF8StringMedium.numBytes(base, UnsafeUtils.arayOffset + strOffset))
+          addIndexEntry(colName.toString, value, partIndex)
+        }
+        def getNamesValues(key: PartitionKey): Seq[(UTF8Str, UTF8Str)] = ??? // not used
+      }
+      case MapColumn => new Indexer {
+        def fromPartKey(base: Any, offset: Long, partIndex: Int): Unit = {
+          dataset.partKeySchema.consumeMapItems(base, offset, pos, mapConsumer)
+        }
+        def getNamesValues(key: PartitionKey): Seq[(UTF8Str, UTF8Str)] = ??? // not used
+      }
+      case other: Any =>
+        logger.warn(s"Column $c has type that cannot be indexed and will be ignored right now")
+        NoOpIndexer
+    }
+  }.toArray
 
   def reset(): Unit = indexWriter.deleteAll()
 
   def removeEntries(prunedPartitions: EWAHCompressedBitmap): Unit = {
-    val deleteQuery = IntPoint.newSetQuery(PartKeyLuceneIndex.SEARCHABLE_PART_ID, prunedPartitions.toList)
+    val deleteQuery = IntPoint.newSetQuery(PartKeyLuceneIndex.PART_ID, prunedPartitions.toList)
     indexWriter.deleteDocuments(deleteQuery)
   }
 
-  def indexBytes: Long = indexWriter.ramBytesUsed()
+  def indexRamBytes: Long = indexWriter.ramBytesUsed()
 
-  def indexSize: Long = indexWriter.maxDoc()
+  def indexNumEntries: Long = indexWriter.maxDoc()
+
+  def closeIndex(): Unit = {
+    flushThread.close()
+    indexWriter.close()
+  }
 
   /**
     * Fetch values for a specific tag
@@ -108,68 +165,82 @@ class PartKeyLuceneIndex(dataset: Dataset, storeConfig: StoreConfig) extends Str
     val segments = indexReader.leaves()
     segments.asScala.iterator.flatMap { segment =>
       segment.reader().getFieldInfos.asScala.toIterator.map(_.name)
-    }.filterNot { n => n == PartKeyLuceneIndex.PER_DOC_PART_ID || n == PartKeyLuceneIndex.SEARCHABLE_PART_ID }
+    }.filterNot { n => ignoreIndexNames.contains(n) }
   }
 
-  var partKeyOnHeapBytes: Array[Byte] = _
-  var partKeyOffHeapOffset: Long = _
-  var document: Document = _
+  private def addIndexEntry(labelName: String, value: BytesRef, partIndex: Int): Unit = {
+    luceneDocument.get().add(new StringField(labelName, value, Store.NO))
+  }
 
-  val mapConsumer = new MapItemConsumer {
-    def consume(keyBase: Any, keyOffset: Long, valueBase: Any, valueOffset: Long, index: Int): Unit = {
-      val key = stringInternCache.intern(new UTF8Str(keyBase,
-                                                     keyOffset + 2,
-                                                     UTF8StringMedium.numBytes(keyBase, keyOffset)))
-      val value = new BytesRef(partKeyOnHeapBytes,
-                               (valueOffset - partKeyOffHeapOffset + 2).toInt,
-                               UTF8StringMedium.numBytes(valueBase, valueOffset))
-      addIndexEntry(key, value, index)
+  def addPartKey(base: Any, offset: Long, partId: Int, startTime: Long): Unit = {
+    val document = makeDocument(base, offset, partId, startTime, Long.MaxValue)
+    logger.debug(s"Adding document for partId $partId : $document")
+    indexWriter.addDocument(document)
+  }
+
+  private def makeDocument(base: Any, offset: Long, partId: Int, startTime: Long, endTime: Long): Document = {
+    val document = new Document()
+    luceneDocument.set(document) // threadlocal since we are not able to pass the document into mapconsumer
+    val partKeyOnHeapBytes = BinaryRegionLarge.asNewByteArray(base, offset)
+    for { i <- 0 until numPartColumns optimized } {
+      indexers(i).fromPartKey(partKeyOnHeapBytes, UnsafeUtils.arayOffset, partId)
     }
+    // partId
+    document.add(new IntPoint(PART_ID, partId))
+    document.add(new NumericDocValuesField(PART_ID, partId))
+    // partKey
+    document.add(new BinaryDocValuesField(PART_KEY, new BytesRef(partKeyOnHeapBytes)))
+    // startTime
+    document.add(new LongPoint(START_TIME, startTime))
+    document.add(new NumericDocValuesField(START_TIME, startTime))
+    // endTime
+    document.add(new LongPoint(END_TIME, endTime))
+    document.add(new NumericDocValuesField(END_TIME, endTime))
+
+    luceneDocument.remove()
+
+    document
   }
 
   /**
-    * Map of partKey column to the logic for indexing the column (aka Indexer).
-    * Optimization to avoid match logic while iterating through each column of the partKey
+    * Called when TSPartition needs to be created when on-demand-paging from a
+    * partId that does not exist on heap
     */
-  private final val indexers = dataset.partitionColumns.zipWithIndex.map { case (c, pos) =>
-    c.columnType match {
-      case StringColumn => new Indexer {
-        val colName = UTF8Str(c.name)
-        def fromPartKey(base: Any, offset: Long, partIndex: Int): Unit = {
-          val strOffset = dataset.partKeySchema.getStringOffset(partKeyOnHeapBytes, UnsafeUtils.arayOffset, pos)
-          val value = new BytesRef(partKeyOnHeapBytes,
-            strOffset + 2,
-            UTF8StringMedium.numBytes(partKeyOnHeapBytes, UnsafeUtils.arayOffset + strOffset))
-          addIndexEntry(colName.toString, value, partIndex)
-        }
-        def getNamesValues(key: PartitionKey): Seq[(UTF8Str, UTF8Str)] = ??? // not used
-      }
-      case MapColumn => new Indexer {
-        def fromPartKey(base: Any, offset: Long, partIndex: Int): Unit = {
-          dataset.partKeySchema.consumeMapItems(base, offset, pos, mapConsumer)
-        }
-        def getNamesValues(key: PartitionKey): Seq[(UTF8Str, UTF8Str)] = ??? // not used
-      }
-      case other: Any =>
-        logger.warn(s"Column $c has type that cannot be indexed and will be ignored right now")
-        NoOpIndexer
-    }
-  }.toArray
-
-  def addIndexEntry(labelName: String, value: BytesRef, partIndex: Int): Unit = {
-    document.add(new StringField(labelName, value, Store.NO))
+  def partKeyFromPartId(partId: Int): BytesRef = {
+    val collector = new SinglePartKeyCollector()
+    searcherManager.acquire().search(IntPoint.newExactQuery(PART_ID, partId), collector)
+    collector.singleResult
   }
 
-  def addPartKey(base: Any, offset: Long, partIndex: Int): Unit = {
-    document = new Document()
-    partKeyOnHeapBytes = BinaryRegionLarge.asNewByteArray(base, offset)
-    partKeyOffHeapOffset = offset
-    for { i <- 0 until numPartColumns optimized } {
-      indexers(i).fromPartKey(base, offset, partIndex)
-    }
-    document.add(new IntPoint(PartKeyLuceneIndex.SEARCHABLE_PART_ID, partIndex))
-    document.add(new NumericDocValuesField(PartKeyLuceneIndex.PER_DOC_PART_ID, partIndex))
-    indexWriter.addDocument(document)
+  /**
+    * Called when a document is updated with new endTime
+    */
+  private def startTimeFromPartId(partId: Int): Long = {
+    val collector = new SingleStartTimeCollector()
+    searcherManager.acquire().search(IntPoint.newExactQuery(PART_ID, partId), collector)
+    collector.singleResult
+  }
+
+  /**
+    * Query top-k partIds that had an endTime from a given value.
+    *
+    * Note: This uses a collector that uses a PriorityQueue underneath covers.
+    * O(k) heap memory will be used.
+    */
+  def partIdsOrderedByEndTime(fromEndTime: Long, topk: Int): IntIterator = {
+    val coll = new TopKPartIdsCollector(topk)
+    searcherManager.acquire().search(LongPoint.newRangeQuery(END_TIME, fromEndTime, Long.MaxValue), coll)
+    coll.topKPartIds()
+  }
+
+  def updatePartKeyWithEndTime(base: Any, offset: Long, partId: Int, endTime: Long): Unit = {
+    val startTime = startTimeFromPartId(partId) // look up index for old start time
+    // updateDocument takes a Term query which is not possible on IntPoint partIds
+    // hence delete and add explicitly.
+    indexWriter.deleteDocuments(IntPoint.newExactQuery(PART_ID, partId))
+    val updatedDoc = makeDocument(base, offset, partId, startTime, endTime)
+    logger.debug(s"Updating document for partId $partId : $updatedDoc")
+    indexWriter.addDocument(updatedDoc)
   }
 
   /**
@@ -212,28 +283,34 @@ class PartKeyLuceneIndex(dataset: Dataset, storeConfig: StoreConfig) extends Str
         booleanQuery.build()
       case And(lhs, rhs) =>
         val andQuery = new BooleanQuery.Builder
-        andQuery.add(leafFilter(column, lhs), Occur.MUST)
-        andQuery.add(leafFilter(column, rhs), Occur.MUST)
+        andQuery.add(leafFilter(column, lhs), Occur.FILTER)
+        andQuery.add(leafFilter(column, rhs), Occur.FILTER)
         andQuery.build()
       case _ => throw new UnsupportedOperationException
     }
   }
 
-  def parseFilters(columnFilters: Seq[ColumnFilter], itemLimit: Int = 10000): IntIterator = {
+  def partIdsFromFilters(columnFilters: Seq[ColumnFilter],
+                         startTime: Long,
+                         endTime: Long): IntIterator = {
     val booleanQuery = new BooleanQuery.Builder
     columnFilters.foreach { filter =>
       val q = leafFilter(filter.column, filter.filter)
       booleanQuery.add(q, Occur.FILTER)
     }
+    booleanQuery.add(LongPoint.newRangeQuery(START_TIME, 0, endTime), Occur.FILTER)
+    booleanQuery.add(LongPoint.newRangeQuery(END_TIME, startTime, Long.MaxValue), Occur.FILTER)
+    val query = booleanQuery.build()
+    logger.debug(s"Querying partKeyIndex with: $query")
     val searcher = searcherManager.acquire()
-    val collector = new EntryCollector()
-    searcher.search(booleanQuery.build(), collector)
+    val collector = new PartIdCollector() // passing zero for unlimited results
+    searcher.search(query, collector)
     collector.intIterator()
   }
 
   private def createTempDir: File = {
     val baseDir = new File(System.getProperty("java.io.tmpdir"))
-    val baseName = PartKeyLuceneIndex.PER_DOC_PART_ID + System.currentTimeMillis() + "-"
+    val baseName = s"partKeyIndex-${dataset.name}-$shardNum-${System.currentTimeMillis()}-"
     val tempDir = new File(baseDir, baseName)
     tempDir.mkdir()
     tempDir
@@ -241,47 +318,127 @@ class PartKeyLuceneIndex(dataset: Dataset, storeConfig: StoreConfig) extends Str
 
 }
 
-class EntryCollector extends SimpleCollector {
-  val values = new EWAHCompressedBitmap()
-  var numericDocValues: NumericDocValues = _
+class SingleStartTimeCollector extends SimpleCollector {
+
+  var startTimeDv: NumericDocValues = _
+  var singleResult: Long = _
+
+  // gets called for each segment
+  override def doSetNextReader(context: LeafReaderContext): Unit = {
+    startTimeDv = context.reader().getNumericDocValues(PartKeyLuceneIndex.START_TIME)
+  }
+
+  // gets called for each matching document in current segment
+  override def collect(doc: Int): Unit = {
+    if (startTimeDv.advanceExact(doc)) {
+      singleResult = startTimeDv.longValue()
+    } else {
+      throw new IllegalStateException("This shouldn't happen since every document should have a startTimeDv")
+    }
+  }
+
+  override def needsScores(): Boolean = false
+}
+
+class SinglePartKeyCollector extends SimpleCollector {
+
+  var partKeyDv: BinaryDocValues = _
+  var singleResult: BytesRef = _
+
+  // gets called for each segment
+  override def doSetNextReader(context: LeafReaderContext): Unit = {
+    partKeyDv = context.reader().getBinaryDocValues(PartKeyLuceneIndex.PART_KEY)
+  }
+
+  // gets called for each matching document in current segment
+  override def collect(doc: Int): Unit = {
+    if (partKeyDv.advanceExact(doc)) {
+      singleResult = partKeyDv.binaryValue()
+    } else {
+      throw new IllegalStateException("This shouldn't happen since every document should have a partKeyDv")
+    }
+  }
+
+  override def needsScores(): Boolean = false
+}
+
+/**
+  * A collector that takes advantage of index sorting within segments
+  * to collect the top-k results matching the query.
+  *
+  * It uses a priority queue of size k across each segment. It early terminates
+  * a segment once k elements have been added, or if all smaller values in the
+  * segment have been examined.
+  */
+class TopKPartIdsCollector(limit: Int) extends Collector with StrictLogging {
+
+  import PartKeyLuceneIndex._
+
+  var endTimeDv: NumericDocValues = _
+  var partIdDv: NumericDocValues = _
+  val endTimeComparator = new Comparator[(Int, Long)] {
+    def compare(o1: (Int, Long), o2: (Int, Long)): Int = -1 * o1._2.compareTo(o2._2)
+  }
+  val topkResults = new PriorityQueue[(Int, Long)](limit, endTimeComparator)
+
+  // gets called for each segment; need to return collector for that segment
+  def getLeafCollector(context: LeafReaderContext): LeafCollector = {
+    logger.trace("New segment inspected:" + context.id)
+    endTimeDv = DocValues.getNumeric(context.reader, END_TIME)
+    partIdDv = DocValues.getNumeric(context.reader, PART_ID)
+
+    new LeafCollector() {
+      def setScorer(scorer: Scorer): Unit = {}
+
+      // gets called for each matching document in the segment.
+      def collect(doc: Int): Unit = {
+        val partIdValue = if (partIdDv.advanceExact(doc)) {
+          partIdDv.longValue().toInt
+        } else throw new IllegalStateException("This shouldn't happen since every document should have a partId")
+        if (endTimeDv.advanceExact(doc)) {
+          val endTimeValue = endTimeDv.longValue
+          if (topkResults.size < limit) {
+            topkResults.add((partIdValue, endTimeValue))
+          }
+          else if (topkResults.peek._2 > endTimeValue) {
+            topkResults.remove()
+            topkResults.add((partIdValue, endTimeValue))
+          }
+          else { // terminate further iteration on current segment by throwing this exception
+            throw new CollectionTerminatedException
+          }
+        } else throw new IllegalStateException("This shouldn't happen since every document should have an endTime")
+      }
+    }
+  }
+
+  def needsScores(): Boolean = false
+
+  def topKPartIds(): IntIterator = {
+    val result = new EWAHCompressedBitmap()
+    topkResults.iterator().asScala.foreach { p => result.set(p._1) }
+    result.intIterator()
+  }
+}
+
+class PartIdCollector extends SimpleCollector {
+  private val result = new EWAHCompressedBitmap()
+  private var partIdDv: NumericDocValues = _
 
   override def needsScores(): Boolean = false
 
   override def doSetNextReader(context: LeafReaderContext): Unit = {
     //set the subarray of the numeric values for all documents in the context
-    numericDocValues = context.reader().getNumericDocValues(PartKeyLuceneIndex.PER_DOC_PART_ID)
+    partIdDv = context.reader().getNumericDocValues(PartKeyLuceneIndex.PART_ID)
   }
 
   override def collect(doc: Int): Unit = {
-    //collect sends me the matched document offset
-    val current = numericDocValues.advance(doc)
-    //the matched docs always 'collects' in sequential order.
-    //so advance should return the offset to the match
-    //otherwise something wrong with the data itself
-    if (current == doc) {
-      values.set(numericDocValues.longValue().toInt)
+    if (partIdDv.advanceExact(doc)) {
+      result.set(partIdDv.longValue().toInt)
     } else {
-      throw new IllegalStateException()
+      throw new IllegalStateException("This shouldn't happen since every document should have a partIdDv")
     }
   }
 
-  def intIterator(): IntIterator = values.intIterator()
-}
-
-class StringInternCache {
-
-  val cache = new java.util.LinkedHashMap[UTF8Str, String](PartKeyLuceneIndex.MAX_STR_INTERN_ENTRIES + 1, .75F, true) {
-    // This method is called just after a new entry has been added
-    override def removeEldestEntry(eldest: java.util.Map.Entry[UTF8Str, String]): Boolean =
-      size > PartKeyLuceneIndex.MAX_STR_INTERN_ENTRIES
-  }
-
-  def intern(key: UTF8Str): String = {
-    var str = cache.get(key)
-    //scalastyle:off
-    if (str == null) str = key.toString
-    //scalastyle:on
-    cache.put(key, str)
-    str
-  }
+  def intIterator(): IntIterator = result.intIterator()
 }

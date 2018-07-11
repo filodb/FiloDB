@@ -22,7 +22,8 @@ final case class MultiPartitionScan(partitions: Seq[Array[Byte]],
                                     shard: Int = 0) extends PartitionScanMethod
 // NOTE: One ColumnFilter per column please.
 final case class FilteredPartitionScan(split: ScanSplit,
-                                       filters: Seq[ColumnFilter] = Nil) extends PartitionScanMethod {
+                                       filters: Seq[ColumnFilter] = Nil,
+                                       rowKeyRange: ChunkScanMethod = AllChunkScan) extends PartitionScanMethod {
   def shard: Int = split match {
     case ShardSplit(shard) => shard
     case other: ScanSplit  => ???

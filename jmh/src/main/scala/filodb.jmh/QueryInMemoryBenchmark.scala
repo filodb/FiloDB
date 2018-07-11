@@ -14,10 +14,10 @@ import monix.reactive.Observable
 import org.openjdk.jmh.annotations._
 
 import filodb.core.binaryrecord2.RecordContainer
-import filodb.core.memstore.SomeData
+import filodb.core.memstore.{SomeData, TimeSeriesMemStore}
 import filodb.core.store.StoreConfig
-import filodb.prometheus.ast.QueryParams
 import filodb.prometheus.FormatConversion
+import filodb.prometheus.ast.QueryParams
 import filodb.prometheus.parse.Parser
 import filodb.query.{QueryError => QError, QueryResult => QueryResult2}
 import filodb.timeseries.TestTimeseriesProducer
@@ -90,6 +90,7 @@ class QueryInMemoryBenchmark extends StrictLogging {
                         cluster.memStore.ingestStream(dataset.ref, shard, shardStream) { case e: Exception => throw e })
                     }.countL.runAsync
   Await.result(ingestTask, 30.seconds)
+  cluster.memStore.asInstanceOf[TimeSeriesMemStore].commitIndexBlocking(dataset.ref) // commit lucene index
   println(s"Ingestion ended")
 
   /**

@@ -311,7 +311,10 @@ trait CassandraChunkSource extends ChunkSource with StrictLogging {
       case MultiPartitionScan(partitions, _) =>
         (Nil, multiPartScan(dataset, partitions, indexTable))
 
-      case FilteredPartitionScan(CassandraTokenRangeSplit(tokens, _), filters) =>
+      case FilteredPartitionScan(CassandraTokenRangeSplit(tokens, _), filters, scanMethod) =>
+        // Ignore scanMethod we always serve for AllChunkScan since
+        // we don't have a searchable row-key index in cassandra.
+        // Typically, on-demand-paging will not issue FilteredPartitionScan
         (filters, indexTable.scanIndices(tokens))
 
       case other: PartitionScanMethod =>  ???

@@ -46,7 +46,7 @@ extends MemStore with StrictLogging {
     * WARNING: use only for testing. Not performant
     */
   def commitIndexBlocking(dataset: DatasetRef): Unit =
-    datasets.get(dataset).foreach(_.values().asScala.foreach(_.commitIndexBlocking()))
+    datasets.get(dataset).foreach(_.values().asScala.foreach(_.commitPartKeyIndexBlocking()))
 
   /**
     * Retrieve shard for given dataset and shard number as an Option
@@ -169,6 +169,7 @@ extends MemStore with StrictLogging {
   // Release memory etc.
   def shutdown(): Unit = {
     datasets.values.foreach(_.values.asScala.foreach(_.shutdown()))
+    datasets.values.foreach(_.values().asScala.foreach(_.closePartKeyIndex()))
     reset()
   }
 }
