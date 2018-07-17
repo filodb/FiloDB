@@ -1,5 +1,7 @@
 package filodb.core.memstore
 
+import scala.concurrent.duration._
+
 import com.typesafe.config.ConfigFactory
 import monix.execution.ExecutionModel.BatchedExecution
 import monix.reactive.Observable
@@ -214,6 +216,26 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     agg1.result should equal (Array((1 to 100).map(_.toDouble).sum))
   }
 
+  it("should flush index time buckets for last group of flush interval") {
+    memStore.setup(dataset1, 0, TestData.storeConf.copy(groupsPerShard = 2,
+                                                        demandPagedRetentionPeriod = 1.hour,
+                                                        flushInterval = 10.minutes))
+    val initTimeBuckets = timebucketsWritten
+    val tsShard = memStore.asInstanceOf[TimeSeriesMemStore].getShard(dataset1.ref, 0).get
+    tsShard.timeBucketToPartIds.keySet shouldEqual Set(0) // just the currentTimeBucket to start off with
+
+    val stream = Observable.fromIterable(groupedRecords(dataset1, linearMultiSeries(), n = 500, groupSize = 10))
+      .executeWithModel(BatchedExecution(5)) // results in 200 records
+    val flushStream = FlushStream.everyN(2, 10, stream)
+    memStore.ingestStream(dataset1.ref, 0, stream, flushStream)(ex => throw ex).futureValue
+
+    // 500 records / 2 flushGroups per flush interval / 10 records per flush = 25 time buckets
+    timebucketsWritten shouldEqual initTimeBuckets + 25
+
+    // 1 hour retention period / 10 minutes flush interval = 6 time buckets to be retained
+    tsShard.timeBucketToPartIds.keySet.toSeq.sorted shouldEqual 19.to(25) // 6 buckets retained + one for current
+  }
+
   import Iterators._
 
   it("should recoveryStream, skip some records, and receive a stream of offset updates") {
@@ -258,6 +280,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
   }
 
   private def chunksetsWritten = memStore.sink.sinkStats.chunksetsWritten
+  private def timebucketsWritten = memStore.sink.sinkStats.timeBucketsWritten
 
   it("should be able to evict partitions properly, flush, and still query") {
     memStore.setup(dataset1, 0, TestData.storeConf)

@@ -271,10 +271,12 @@ class TimeSeriesPartition(val partID: Int,
     * the series is still ingesting. Don't use if this is an issue for
     * your use case.
     */
-  def ingestionEndTime(): Long = {
+  final def ingestionEndTime: Long = {
     if (appendingChunkLen > 0) Long.MaxValue // still ingesting
-    else infosChunks.get(infosChunks.lastKey).endTime
+    else infosChunks.lastEntry.getValue.endTime
   }
+
+  final def earliestTime: Long = infosChunks.firstEntry.getValue.startTime
 
   private def readersFromMemory(method: ChunkScanMethod, columnIds: Array[Int]): Iterator[ChunkSetReader] = {
     val infosVects = method match {

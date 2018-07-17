@@ -112,6 +112,15 @@ final class RecordBuilder(memFactory: MemFactory,
     fieldNo += 1
   }
 
+  final def addBlob(base: Any, offset: Long, numBytes: Int): Unit = {
+    require(numBytes < 65536, s"bytes too large ($numBytes bytes) for addBlob")
+    checkFieldAndMemory(numBytes + 2)
+    UnsafeUtils.setShort(curBase, curRecEndOffset, numBytes.toShort) // length of blob
+    UnsafeUtils.unsafe.copyMemory(base, offset, curBase, curRecEndOffset + 2, numBytes)
+    updateFieldPointerAndLens(numBytes + 2)
+    fieldNo += 1
+  }
+
   /**
    * Adds a string or raw bytes to the record.  They must fit in within 64KB.
    * The variable length area of the BinaryRecord will be extended.

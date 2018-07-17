@@ -15,7 +15,7 @@ import org.apache.lucene.index._
 import org.apache.lucene.search._
 import org.apache.lucene.search.BooleanClause.Occur
 import org.apache.lucene.store.MMapDirectory
-import org.apache.lucene.util.BytesRef
+import org.apache.lucene.util.{BytesRef, InfoStream}
 import scalaxy.loops._
 
 import filodb.core.Types.PartitionKey
@@ -38,6 +38,8 @@ object PartKeyLuceneIndex {
   final val ignoreIndexNames = HashSet(START_TIME, PART_KEY, END_TIME, PART_ID)
 
   val MAX_STR_INTERN_ENTRIES = 10000
+
+  val NOT_FOUND = -1
 }
 
 class PartKeyLuceneIndex(dataset: Dataset, shardNum: Int, storeConfig: StoreConfig) extends StrictLogging {
@@ -52,6 +54,7 @@ class PartKeyLuceneIndex(dataset: Dataset, shardNum: Int, storeConfig: StoreConf
   logger.info(s"Created lucene index at $indexDiskLocation")
 
   private val config = new IndexWriterConfig(analyzer)
+  config.setInfoStream(new LuceneMetricsRouter(shardNum))
 
   private val endTimeSort = new Sort(new SortField(END_TIME, SortField.Type.LONG),
                                      new SortField(START_TIME, SortField.Type.LONG))
@@ -69,8 +72,6 @@ class PartKeyLuceneIndex(dataset: Dataset, shardNum: Int, storeConfig: StoreConf
                                                                searcherManager,
                                                                storeConfig.partIndexFlushMaxDelaySeconds,
                                                                storeConfig.partIndexFlushMinDelaySeconds)
-  flushThread.start()
-
   private val luceneDocument = new ThreadLocal[Document]()
 
   private val mapConsumer = new MapItemConsumer {
@@ -116,8 +117,18 @@ class PartKeyLuceneIndex(dataset: Dataset, shardNum: Int, storeConfig: StoreConf
 
   def reset(): Unit = indexWriter.deleteAll()
 
+  def startFlushThread(): Unit = {
+    flushThread.start()
+    logger.info(s"Started flush thread for lucene index on shard $shardNum")
+  }
+
   def removeEntries(prunedPartitions: EWAHCompressedBitmap): Unit = {
     val deleteQuery = IntPoint.newSetQuery(PartKeyLuceneIndex.PART_ID, prunedPartitions.toList)
+    indexWriter.deleteDocuments(deleteQuery)
+  }
+
+  def removePartKeysEndedBefore(endedBefore: Long): Unit = {
+    val deleteQuery = LongPoint.newRangeQuery(PartKeyLuceneIndex.END_TIME, 0, endedBefore)
     indexWriter.deleteDocuments(deleteQuery)
   }
 
@@ -215,7 +226,7 @@ class PartKeyLuceneIndex(dataset: Dataset, shardNum: Int, storeConfig: StoreConf
   /**
     * Called when a document is updated with new endTime
     */
-  private def startTimeFromPartId(partId: Int): Long = {
+  def startTimeFromPartId(partId: Int): Long = {
     val collector = new SingleStartTimeCollector()
     searcherManager.acquire().search(IntPoint.newExactQuery(PART_ID, partId), collector)
     collector.singleResult
@@ -235,6 +246,8 @@ class PartKeyLuceneIndex(dataset: Dataset, shardNum: Int, storeConfig: StoreConf
 
   def updatePartKeyWithEndTime(base: Any, offset: Long, partId: Int, endTime: Long): Unit = {
     val startTime = startTimeFromPartId(partId) // look up index for old start time
+    if (startTime == NOT_FOUND)
+      throw new IllegalArgumentException(s"Could not find startTime for partId $partId in lucene")
     // updateDocument takes a Term query which is not possible on IntPoint partIds
     // hence delete and add explicitly.
     indexWriter.deleteDocuments(IntPoint.newExactQuery(PART_ID, partId))
@@ -321,7 +334,7 @@ class PartKeyLuceneIndex(dataset: Dataset, shardNum: Int, storeConfig: StoreConf
 class SingleStartTimeCollector extends SimpleCollector {
 
   var startTimeDv: NumericDocValues = _
-  var singleResult: Long = _
+  var singleResult: Long = PartKeyLuceneIndex.NOT_FOUND
 
   // gets called for each segment
   override def doSetNextReader(context: LeafReaderContext): Unit = {
@@ -441,4 +454,13 @@ class PartIdCollector extends SimpleCollector {
   }
 
   def intIterator(): IntIterator = result.intIterator()
+}
+
+class LuceneMetricsRouter(shard: Int) extends InfoStream with StrictLogging {
+  override def message(component: String, message: String): Unit = {
+    logger.debug(s"shard=$shard component=$component $message")
+    // TODO parse string and report metrics to kamon
+  }
+  override def isEnabled(component: String): Boolean = true
+  override def close(): Unit = {}
 }

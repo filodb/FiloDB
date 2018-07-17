@@ -14,7 +14,7 @@ import monix.execution.Scheduler
 import monix.reactive.Observable
 import org.jctools.maps.NonBlockingHashMapLong
 
-import filodb.cassandra.{DefaultFiloSessionProvider, FiloCassandraConnector, FiloSessionProvider}
+import filodb.cassandra.{DefaultFiloSessionProvider, FiloCassandraConnector, FiloSessionProvider, Util}
 import filodb.cassandra.Util
 import filodb.core._
 import filodb.core.metadata.Dataset
@@ -204,26 +204,23 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
   def unwrapTokenRanges(wrappedRanges : Seq[TokenRange]): Seq[TokenRange] =
     wrappedRanges.flatMap(_.unwrap().asScala.toSeq)
 
-  def getPartitionIndex(dataset: Dataset, shardNum: Int, timeBucket: Int): Observable[PartitionIndexRecord] = {
-    getOrCreatePartitionIndexTable(dataset.ref).getPartitions(shardNum, timeBucket)
+  def getPartKeyTimeBucket(dataset: Dataset, shardNum: Int, timeBucket: Int): Observable[PartKeyTimeBucketSegment] = {
+    getOrCreatePartitionIndexTable(dataset.ref).getPartKeySegments(shardNum, timeBucket)
   }
 
-  def writePartitionIndex(dataset: Dataset,
-                          shardNum: Int,
-                          timeBucket: Int,
-                    partitionIndex: Seq[Array[Byte]],
-                          diskTimeToLive: Int): Future[Response] = {
+  def writePartKeyTimeBucket(dataset: Dataset,
+                             shardNum: Int,
+                             timeBucket: Int,
+                             partitionIndex: Seq[Array[Byte]],
+                             diskTimeToLive: Int): Future[Response] = {
 
     val table = getOrCreatePartitionIndexTable(dataset.ref)
-    val writes = partitionIndex.zipWithIndex.map { case (byteArray, segmentId) =>
-      table.writePartitions(shardNum, timeBucket, segmentId, Util.toBuffer(byteArray), diskTimeToLive)
-    }
-
-    Future.sequence(writes).map { responses =>
-      responses.find(_ != Success).getOrElse(Success)
+    val write = table.writePartKeySegments(shardNum, timeBucket, partitionIndex.map(Util.toBuffer(_)), diskTimeToLive)
+    write.map { response =>
+      sinkStats.indexTimeBucketWritten(partitionIndex.map(_.length).sum)
+      response
     }
   }
-
 }
 
 case class CassandraTokenRangeSplit(tokens: Seq[(String, String)],
@@ -329,7 +326,6 @@ trait CassandraChunkSource extends ChunkSource with StrictLogging {
   }
 
   def reset(): Unit = {}
-
 }
 
 /**

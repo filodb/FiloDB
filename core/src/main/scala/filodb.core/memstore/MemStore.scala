@@ -2,6 +2,7 @@ package filodb.core.memstore
 
 import scala.concurrent.Future
 
+import com.googlecode.javaewah.EWAHCompressedBitmap
 import monix.execution.{CancelableFuture, Scheduler}
 import monix.reactive.Observable
 
@@ -20,7 +21,10 @@ sealed trait DataOrCommand
 // Typically one RecordContainer is a single Kafka message, a container with multiple BinaryRecords
 final case class SomeData(records: RecordContainer, offset: Long) extends DataOrCommand
 final case class FlushCommand(groupNum: Int) extends DataOrCommand
-final case class FlushGroup(shard: Int, groupNum: Int, flushWatermark: Long, diskTimeToLive: Int)
+final case class FlushIndexTimeBuckets(partIdsToPersist: EWAHCompressedBitmap, timeBucket: Int)
+
+final case class FlushGroup(shard: Int, groupNum: Int, flushWatermark: Long, diskTimeToLiveSeconds: Int,
+                            flushTimeBuckets: Option[FlushIndexTimeBuckets])
 
 final case class FlushError(err: ErrorResponse) extends Exception(s"Flush error $err")
 
@@ -77,7 +81,7 @@ trait MemStore extends ChunkSource {
    * @param shard shard number to ingest into
    * @param stream the stream of SomeData() with records conforming to dataset ingestion schema
    * @param flushStream the stream of FlushCommands for regular flushing of chunks to ChunkSink
-   * @param diskTimeToLive the time for chunks in this stream to live on disk (Cassandra)
+   * @param diskTimeToLiveSeconds the time for chunks in this stream to live on disk (Cassandra)
    * @param errHandler this is called when an ingestion error occurs
    * @return a CancelableFuture for cancelling the stream subscription, which should be done on teardown
    *        the Future completes when both stream and flushStream ends.  It is up to the caller to ensure this.
@@ -86,7 +90,7 @@ trait MemStore extends ChunkSource {
                    shard: Int,
                    stream: Observable[SomeData],
                    flushStream: Observable[FlushCommand] = FlushStream.empty,
-                   diskTimeToLive: Int = 259200)
+                   diskTimeToLiveSeconds: Int = 259200)
                   (errHandler: Throwable => Unit)
                   (implicit sched: Scheduler): CancelableFuture[Unit]
 

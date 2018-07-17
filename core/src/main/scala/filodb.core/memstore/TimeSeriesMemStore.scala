@@ -51,7 +51,7 @@ extends MemStore with StrictLogging {
   /**
     * Retrieve shard for given dataset and shard number as an Option
     */
-  private def getShard(dataset: DatasetRef, shard: Int): Option[TimeSeriesShard] =
+  private[core] def getShard(dataset: DatasetRef, shard: Int): Option[TimeSeriesShard] =
     datasets.get(dataset).flatMap { shards => Option(shards.get(shard)) }
 
   /**
@@ -72,10 +72,12 @@ extends MemStore with StrictLogging {
                    shardNum: Int,
                    stream: Observable[SomeData],
                    flushStream: Observable[FlushCommand] = FlushStream.empty,
-                   diskTimeToLive: Int = 259200)
+                   diskTimeToLiveSeconds: Int = 259200)
                   (errHandler: Throwable => Unit)
-                  (implicit sched: Scheduler): CancelableFuture[Unit] =
-    ingestStream(dataset, shardNum, Observable.merge(stream, flushStream), diskTimeToLive)(errHandler)
+                  (implicit sched: Scheduler): CancelableFuture[Unit] = {
+    getShard(dataset, shardNum).map(_.startFlushingIndex()) // start flushing index now that we have recovered
+    ingestStream(dataset, shardNum, Observable.merge(stream, flushStream), diskTimeToLiveSeconds)(errHandler)
+  }
 
   // NOTE: Each ingestion message is a SomeData which has a RecordContainer, which can hold hundreds or thousands
   // of records each.  For this reason the object allocation of a SomeData and RecordContainer is not that bad.
@@ -83,7 +85,7 @@ extends MemStore with StrictLogging {
   def ingestStream(dataset: DatasetRef,
                    shardNum: Int,
                    combinedStream: Observable[DataOrCommand],
-                   diskTimeToLive: Int)
+                   diskTimeToLiveSeconds: Int)
                   (errHandler: Throwable => Unit)
                   (implicit sched: Scheduler): CancelableFuture[Unit] = {
     val shard = getShardE(dataset, shardNum)
@@ -95,10 +97,11 @@ extends MemStore with StrictLogging {
                     // at the same offset/watermark
                     case FlushCommand(group) => shard.switchGroupBuffers(group)
                                                 shard.checkAndEvictPartitions()
+                                                val firc = shard.prepareIndexTimeBucketForFlush(group)
                                                 Some(FlushGroup(shard.shardNum,
                                                   group,
                                                   shard.latestOffset,
-                                                  diskTimeToLive))
+                                                  diskTimeToLiveSeconds, firc))
                   }.collect { case Some(flushGroup) => flushGroup }
                   .mapAsync(numParallelFlushes)(shard.createFlushTask _)
                   .foreach { x => }

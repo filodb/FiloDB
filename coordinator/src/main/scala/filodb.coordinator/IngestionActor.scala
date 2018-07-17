@@ -146,7 +146,7 @@ private[filodb] final class IngestionActor(dataset: Dataset,
   private def normalIngestion(shard: Int,
                               offset: Option[Long],
                               startingGroupNo: Int,
-                              diskTimeToLive: Int): Unit = {
+                              diskTimeToLiveSeconds: Int): Unit = {
     create(shard, offset) map { ingestionStream =>
       val stream = ingestionStream.get
       logger.info(s"Starting normal/active ingestion for shard $shard at offset $offset")
@@ -156,7 +156,7 @@ private[filodb] final class IngestionActor(dataset: Dataset,
         shard,
         stream,
         flushStream(startingGroupNo),
-        diskTimeToLive) {
+        diskTimeToLiveSeconds) {
         ex => handleError(dataset.ref, shard, ex)
       }
       // On completion of the future, send IngestionStopped
@@ -184,7 +184,6 @@ private[filodb] final class IngestionActor(dataset: Dataset,
    */
   private def doRecovery(shard: Int, startOffset: Long, endOffset: Long, interval: Long,
                          checkpoints: Map[Int, Long]): Future[Long] = {
-    val tags = Map("shard" -> shard.toString, "dataset" -> dataset.ref.toString)
     val futTry = create(shard, Some(startOffset)) map { ingestionStream =>
       val recoveryTrace = Kamon.buildSpan("ingestion-recovery-trace")
                                .withTag("shard", shard.toString)

@@ -104,6 +104,8 @@ trait ChunkSource {
   }
 }
 
+final case class PartKeyTimeBucketSegment(segmentId: Int, segment: ByteBuffer)
+
 /**
  * Statistics for a ChunkSource.  Some of this is used by unit tests.
  */

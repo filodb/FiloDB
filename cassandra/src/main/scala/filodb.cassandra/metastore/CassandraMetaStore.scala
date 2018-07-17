@@ -77,4 +77,20 @@ class CassandraMetaStore(config: Config, filoSessionProvider: Option[FiloSession
 
   def deleteIngestionConfig(ref: DatasetRef): Future[Response] =
     sourcesTable.deleteIngestionConfig(ref)
+
+  /**
+    * Record highest time bucket for part key indexable data in meta store
+    */
+  def writeHighestIndexTimeBucket(dataset: DatasetRef, shardNum: Int,
+                                           highestTimeBucket: Int): Future[Response] = {
+    checkpointTable.writeHighestIndexTimeBucket(dataset, shardNum, highestTimeBucket)
+  }
+
+  /**
+    * Read highest time bucket for part key indexable data in meta store
+    */
+  def readHighestIndexTimeBucket(dataset: DatasetRef,
+                                          shardNum: Int): Future[Option[Int]] = {
+    checkpointTable.readHighestIndexTimeBucket(dataset, shardNum)
+  }
 }

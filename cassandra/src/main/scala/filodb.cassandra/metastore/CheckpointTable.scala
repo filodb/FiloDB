@@ -30,7 +30,7 @@ sealed class CheckpointTable(val config: Config,
        | highesttimebucket int STATIC,
        | groupnum int,
        | offset bigint,
-       | PRIMARY KEY ((databasename, datasetname, shardNum), groupNum)
+       | PRIMARY KEY ((databasename, datasetname, shardnum), groupnum)
        |)""".stripMargin
 
   lazy val readCheckpointCql =
@@ -41,19 +41,18 @@ sealed class CheckpointTable(val config: Config,
          | shardnum = ? """.stripMargin).setConsistencyLevel(ConsistencyLevel.QUORUM)
     // we want consistent reads during recovery
 
-  lazy val readHighestTimeBucketCql =
+  lazy val readTimeBucketCql =
     session.prepare(
       s"""SELECT highesttimebucket FROM $tableString WHERE
          | databasename = ? AND
          | datasetname = ? AND
          | shardnum = ? """.stripMargin).setConsistencyLevel(ConsistencyLevel.QUORUM)
 
-  lazy val writeHighestTimeBucketCql = {
-    val statement = session.prepare(
+  lazy val writeTimeBucketCql =
+    session.prepare(
       s"""INSERT INTO $tableString (databasename, datasetname, shardnum, highesttimebucket)
          | VALUES (?, ?, ?, ?)""".stripMargin
     )
-  }
 
   lazy val writeCheckpointCql = {
     val statement = session.prepare(
@@ -84,15 +83,15 @@ sealed class CheckpointTable(val config: Config,
       .map { it => it.map(r => r.getInt(0) -> r.getLong(1)).toMap }
   }
 
-  def writeHighestTimeBucketCql(dataset: DatasetRef, shardNum: Int, highesttimebucket: Int): Future[Response] = {
+  def writeHighestIndexTimeBucket(dataset: DatasetRef, shardNum: Int, highestTimeBucket: Int): Future[Response] = {
     // TODO database name should not be an optional in internally since there is a default value. Punted for later.
-    execStmt(writeCheckpointCql.bind(dataset.database.getOrElse(""),
-      dataset.dataset, shardNum: JInt, highesttimebucket: JInt))
+    execStmt(writeTimeBucketCql.bind(dataset.database.getOrElse(""),
+      dataset.dataset, shardNum: JInt, highestTimeBucket: JInt))
   }
 
-  def readHighestTimeBucket(dataset: DatasetRef, shardNum: Int): Future[Option[Int]] = {
-    session.executeAsync(readHighestTimeBucketCql.bind(dataset.database.getOrElse(""),
-      dataset.dataset, shardNum: JInt)).toScalaFuture.map { rs => Option(rs.one().getInt("highesttimebucket")) }
+  def readHighestIndexTimeBucket(dataset: DatasetRef, shardNum: Int): Future[Option[Int]] = {
+    session.executeAsync(readTimeBucketCql.bind(dataset.database.getOrElse(""),
+      dataset.dataset, shardNum: JInt)).toScalaFuture.map { rs => Option(rs.one()).map(_.getInt("highesttimebucket")) }
   }
 
 }

@@ -29,6 +29,12 @@ trait ChunkSink {
    */
   def write(dataset: Dataset, chunksets: Observable[ChunkSet], diskTimeToLive: Int = 259200): Future[Response]
 
+  def writePartKeyTimeBucket(dataset: Dataset,
+                             shardNum: Int,
+                             timeBucket: Int,
+                             partitionIndex: Seq[Array[Byte]],
+                             diskTimeToLive: Int): Future[Response]
+
   /**
    * Initializes the ChunkSink for a given dataset.  Must be called once before writing.
    */
@@ -63,6 +69,7 @@ class ChunkSinkStats {
 
   private val chunksetWrites     = Kamon.counter("chunkset-writes")
   var chunksetsWritten = 0
+  var timeBucketsWritten = 0
 
   def addChunkWriteStats(numChunks: Int, totalChunkBytes: Long, chunkLen: Int): Unit = {
     chunksPerCallHist.record(numChunks)
@@ -78,6 +85,10 @@ class ChunkSinkStats {
   def chunksetWrite(): Unit = {
     chunksetWrites.increment
     chunksetsWritten += 1
+  }
+
+  def indexTimeBucketWritten(numBytes: Int): Unit = {
+    timeBucketsWritten += 1
   }
 }
 
@@ -128,4 +139,13 @@ class NullColumnStore(implicit sched: Scheduler) extends ColumnStore with Strict
     java.util.Collections.newSetFromMap(new java.util.concurrent.ConcurrentHashMap[T, java.lang.Boolean]).asScala
   }
 
+  override def getPartKeyTimeBucket(dataset: Dataset, shardNum: Int,
+                                    timeBucket: Int): Observable[PartKeyTimeBucketSegment] = Observable.empty
+
+  override def writePartKeyTimeBucket(dataset: Dataset, shardNum: Int, timeBucket: Int,
+                                      partitionIndex: Seq[Array[Byte]],
+                                      diskTimeToLive: Int): Future[Response] = {
+    sinkStats.indexTimeBucketWritten(partitionIndex.map(_.length).sum)
+    Future.successful(Success)
+  }
 }

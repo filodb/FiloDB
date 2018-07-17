@@ -97,7 +97,21 @@ trait MetaStore {
     * @param shardNum shard identifier
     * @return a map with the group identifier as key and offset as value
     */
-  def readCheckpoints(dataset: DatasetRef, shardNum: Int): Future[Map[Int,Long]]
+  def readCheckpoints(dataset: DatasetRef, shardNum: Int): Future[Map[Int, Long]]
+
+
+  /**
+    * Record highest time bucket for part key indexable data in meta store
+    */
+  def writeHighestIndexTimeBucket(dataset: DatasetRef,
+                                  shardNum: Int,
+                                  highestTimeBucket: Int): Future[Response]
+
+  /**
+    * Read highest time bucket for part key indexable data in meta store
+    */
+  def readHighestIndexTimeBucket(dataset: DatasetRef,
+                                 shardNum: Int): Future[Option[Int]]
 
   /**
    * Writes the ingestion state to the metaStore so it could be recovered later.

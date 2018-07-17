@@ -10,7 +10,9 @@ import com.datastax.driver.core.ConsistencyLevel
 import monix.reactive.Observable
 
 import filodb.cassandra.FiloCassandraConnector
+import filodb.cassandra.Util.unloggedBatch
 import filodb.core.{DatasetRef, Response}
+import filodb.core.store.PartKeyTimeBucketSegment
 
 /**
   * This table acts as an index of all the partition index that exist in column store for any given shard.
@@ -39,29 +41,28 @@ sealed class PartitionIndexTable(val dataset: DatasetRef,
        |) WITH compression = {
                     'sstable_compression': '$sstableCompression'}""".stripMargin
 
-  lazy val readCql = session.prepare(s"SELECT shard, timebucket, segmentid, " +
-    s"segment FROM $tableString WHERE shard = ? AND timebucket = ?")
+  lazy val readCql = session.prepare(s"SELECT segmentid, segment " +
+    s"FROM $tableString WHERE shard = ? AND timebucket = ? order by segmentid asc")
 
   lazy val writePartitionCql = session.prepare(
     s"INSERT INTO $tableString (shard, timebucket, segmentid, segment) VALUES (?, ?, ?, ?) USING TTL ?")
     .setConsistencyLevel(writeConsistencyLevel)
 
-  def getPartitions(shard: Int, timeBucket: Int): Observable[PartitionIndexRecord] = {
+  def getPartKeySegments(shard: Int, timeBucket: Int): Observable[PartKeyTimeBucketSegment] = {
     val it = session.execute(readCql.bind(shard: JInt, timeBucket: JInt))
       .asScala.toIterator.map(row => {
-      PartitionIndexRecord(row.getInt("shard"), row.getInt("timebucket"),
-        row.getInt("segmentid"),  row.getBytes("segment"))
+      PartKeyTimeBucketSegment(row.getInt("segmentid"),  row.getBytes("segment"))
     })
     Observable.fromIterator(it)
   }
 
-  def writePartitions(shard: Int, timeBucket: Int, segmentId: Int,
-                      segment: ByteBuffer, diskTimeToLive: Int): Future[Response] = {
-    connector.execStmtWithRetries(
-      writePartitionCql.bind(shard: JInt, timeBucket: JInt,
-        segmentId: JInt, segment, diskTimeToLive: JInt))
+  def writePartKeySegments(shard: Int, timeBucket: Int,
+                          segments: Seq[ByteBuffer], diskTimeToLive: Int): Future[Response] = {
+    val statements = segments.zipWithIndex.map { case (segment, segmentId) =>
+      writePartitionCql.bind(shard: JInt, timeBucket: JInt, segmentId: JInt, segment, diskTimeToLive: JInt)
+    }
+    connector.execStmtWithRetries(unloggedBatch(statements).setConsistencyLevel(writeConsistencyLevel))
   }
 
 }
 
-final case class PartitionIndexRecord(shard: Int, timeBucket: Int, segmentId: Int, segment: ByteBuffer)
