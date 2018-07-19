@@ -1,11 +1,11 @@
 package filodb.memory.format.vectors
 
-import java.nio.ByteBuffer
-
+import debox.Buffer
 import scalaxy.loops._
 
-import filodb.memory.MemFactory
+import filodb.memory.{BinaryRegion, MemFactory}
 import filodb.memory.format._
+import filodb.memory.format.BinaryVector.BinaryVectorPtr
 
 
 /**
@@ -35,10 +35,10 @@ object DeltaDeltaVector {
                       slope: Int,
                       nbits: Short,
                       signed: Boolean): DeltaDeltaAppendingVector = {
-    val bytesRequired = 12 + IntBinaryVector.noNAsize(maxElements, nbits)
-    val (base, off, nBytes) = memFactory.allocateWithMagicHeader(bytesRequired)
-    val dispose = () => memFactory.freeWithMagicHeader(off)
-    new DeltaDeltaAppendingVector(base, off, nBytes, initValue, slope, nbits, signed, dispose)
+    val bytesRequired = 20 + IntBinaryVector.noNAsize(maxElements, nbits)
+    val addr = memFactory.allocateOffheap(bytesRequired)
+    val dispose = () => memFactory.freeMemory(addr)
+    new DeltaDeltaAppendingVector(addr, bytesRequired, initValue, slope, nbits, signed, dispose)
   }
 
   /**
@@ -54,7 +54,7 @@ object DeltaDeltaVector {
    */
   def fromLongVector(memFactory: MemFactory,
                      inputVect: BinaryAppendableVector[Long],
-                     maxNBits: Short = 32): Option[BinaryVector[Long]] =
+                     maxNBits: Short = 32): Option[BinaryVectorPtr] =
     if (inputVect.noNAs && inputVect.length > 2) {
       for { slope    <- getSlope(inputVect(0), inputVect(inputVect.length - 1), inputVect.length)
             minMax   <- getDeltasMinMax(inputVect, slope)
@@ -70,23 +70,25 @@ object DeltaDeltaVector {
       }
     } else { None }
 
-  def apply(buffer: ByteBuffer): BinaryVector[Long] = {
-    val (base, off, len) = UnsafeUtils.BOLfromBuffer(buffer)
-    DeltaDeltaVector(base, off, len, BinaryVector.NoOpDispose)
-  }
+  import WireFormat._
 
-  def const(buffer: ByteBuffer): BinaryVector[Long] = {
-    val (base, off, len) = UnsafeUtils.BOLfromBuffer(buffer)
-    DeltaDeltaConstVector(base, off, len, BinaryVector.NoOpDispose)
-  }
-
-  def const(memFactory: MemFactory, numElements: Int, initValue: Long, slope: Int): DeltaDeltaConstVector = {
-    val (base, off, nBytes) = memFactory.allocateWithMagicHeader(16)
-    val dispose = () => memFactory.freeWithMagicHeader(off)
-    UnsafeUtils.setLong(base, off, initValue)
-    UnsafeUtils.setInt(base, off + 8, slope)
-    UnsafeUtils.setInt(base, off + 12, numElements)
-    new DeltaDeltaConstVector(base, off, nBytes, dispose)
+  /**
+   * Creates a "constant" DDV.  Layout:
+   * +0000 length bytes
+   * +0004 WireFormat
+   * +0008 logical length / number of elements
+   * +0012 initial Long value
+   * +0020 slope (int)
+   * Total bytes: 24
+   */
+  def const(memFactory: MemFactory, numElements: Int, initValue: Long, slope: Int): BinaryVectorPtr = {
+    val addr = memFactory.allocateOffheap(24)
+    UnsafeUtils.setInt(addr,     20)
+    UnsafeUtils.setInt(addr + 4, WireFormat(VECTORTYPE_DELTA2, SUBTYPE_REPEATED))
+    UnsafeUtils.setInt(addr + 8, numElements)
+    UnsafeUtils.setLong(addr + 12, initValue)
+    UnsafeUtils.setInt(addr + 20, slope)
+    addr
   }
 
   /**
@@ -119,20 +121,68 @@ object DeltaDeltaVector {
   }
 }
 
-final case class DeltaDeltaVector(base: Any, offset: Long,
-                                  numBytes: Int,
-                                  val dispose: () => Unit) extends BinaryVector[Long] {
-  val vectMajorType = WireFormat.VECTORTYPE_DELTA2
-  val vectSubType = WireFormat.SUBTYPE_INT_NOMASK
-  final def maybeNAs: Boolean = false
-  private final val initValue = UnsafeUtils.getLong(base, offset)
-  private final val slope     = UnsafeUtils.getInt(base, offset + 8)
-  private final val inner     = IntBinaryVector(base, offset + 12, numBytes - 12, dispose)
+/**
+ * A normal DeltaDeltaVector has the following layout:
+ * +0000 length bytes
+ * +0004 WireFormat
+ * +0008 initial value (long)
+ * +0016 slope (int)
+ * +0020 inner IntBinaryVector (including length, wireformat, etc.)
+ * Thus overall header for DDV = 32 bytes
+ */
+object DeltaDeltaDataReader extends LongVectorDataReader {
+  val InnerVectorOffset = 20
+  override def length(vector: BinaryVectorPtr): Int =
+    IntBinaryVector.simple(vector + InnerVectorOffset).length(vector + InnerVectorOffset)
+  final def initValue(vector: BinaryVectorPtr): Long = UnsafeUtils.getLong(vector + 8)
+  final def slope(vector: BinaryVectorPtr): Int = UnsafeUtils.getInt(vector + 16)
+  final def apply(vector: BinaryVectorPtr, n: Int): Long = {
+    val inner = vector + InnerVectorOffset
+    initValue(vector) + slope(vector) * n + IntBinaryVector.simple(inner)(inner, n)
+  }
 
-  override def length: Int = inner.length
-  final def isAvailable(index: Int): Boolean = true
-  final def apply(index: Int): Long = initValue + slope * index + inner(index)
+  // Should be close to O(1), initial guess should be almost spot on
+  def binarySearch(vector: BinaryVectorPtr, item: Long): Int = {
+    val _slope = slope(vector)
+    val _len   = length(vector)
+    var elemNo = ((item - initValue(vector) + (_slope - 1)) / _slope).toInt
+    if (elemNo < 0) elemNo = 0
+    if (elemNo >= _len) elemNo = _len - 1
+    var curBase = initValue(vector) + _slope * elemNo
+    val inner = vector + InnerVectorOffset
+    val inReader = IntBinaryVector.simple(inner)
 
+    // Back up while we are less than current value until we can't back up no more
+    while (elemNo >= 0 && item < (curBase + inReader(inner, elemNo))) {
+      elemNo -= 1
+      curBase -= _slope
+    }
+
+    if (item == (curBase + inReader(inner, elemNo))) return elemNo
+
+    elemNo += 1
+    curBase += _slope
+
+    // Increase while we are greater than current value until past end
+    while (elemNo < _len && item > (curBase + inReader(inner, elemNo))) {
+      elemNo += 1
+      curBase += _slope
+    }
+
+    if (item == (curBase + inReader(inner, elemNo))) elemNo else elemNo | 0x80000000
+  }
+
+  // Efficient iterate as we keep track of current value and inner iterator
+  final def iterate(vector: BinaryVectorPtr, startElement: Int = 0): LongIterator = new LongIterator {
+    val inner = vector + InnerVectorOffset
+    val innerIt = IntBinaryVector.simple(inner).iterate(inner, startElement)
+    private final var curBase = initValue(vector) + startElement * slope(vector)
+    final def next: Long = {
+      val out: Long = curBase + innerIt.next
+      curBase += slope(vector)
+      out
+    }
+  }
 }
 
 /**
@@ -141,43 +191,56 @@ final case class DeltaDeltaVector(base: Any, offset: Long,
  * This can also approximately represent (at great savings) timestamps close to the slope if we agree we are OK
  * losing the exact values when they are really close anyways.
  */
-final case class DeltaDeltaConstVector(base: Any, offset: Long, numBytes: Int,
-                                       val dispose: () => Unit) extends BinaryVector[Long] {
-  val vectMajorType = WireFormat.VECTORTYPE_DELTA2
-  val vectSubType = WireFormat.SUBTYPE_REPEATED
-  final def maybeNAs: Boolean = false
-  private final val initValue = UnsafeUtils.getLong(base, offset)
-  private final val slope     = UnsafeUtils.getInt(base, offset + 8)
-  override final def length: Int = UnsafeUtils.getInt(base, offset + 12)
-  final def isAvailable(index: Int): Boolean = true
-  final def apply(index: Int): Long = initValue + slope * index
+object DeltaDeltaConstDataReader extends LongVectorDataReader {
+  override def length(vector: BinaryVectorPtr): Int = UnsafeUtils.getInt(vector + 8)
+  final def initValue(vector: BinaryVectorPtr): Long = UnsafeUtils.getLong(vector + 12)
+  final def slope(vector: BinaryVectorPtr): Int = UnsafeUtils.getInt(vector + 20)
+  final def apply(vector: BinaryVectorPtr, n: Int): Long = initValue(vector) + slope(vector) * n
+
+  // This is O(1) since we can find exactly where on line it is
+  final def binarySearch(vector: BinaryVectorPtr, item: Long): Int = {
+    val guess = ((item - initValue(vector) + (slope(vector) - 1)) / slope(vector)).toInt
+    if (guess < 0)                         { 0x80000000 }
+    else if (guess >= length(vector))      { 0x80000000 | length(vector) }
+    else if (item != apply(vector, guess)) { 0x80000000 | guess }
+    else                                   { guess }
+  }
+
+  final def iterate(vector: BinaryVectorPtr, startElement: Int = 0): LongIterator = new LongIterator {
+    private final var curBase = initValue(vector) + startElement * slope(vector)
+    final def next: Long = {
+      val out = curBase
+      curBase += slope(vector)
+      out
+    }
+  }
 }
 
 // TODO: validate args, esp base offset etc, somehow.  Need to think about this for the many diff classes.
-class DeltaDeltaAppendingVector(val base: Any,
-                                val offset: Long,
+class DeltaDeltaAppendingVector(val addr: BinaryRegion.NativePointer,
                                 val maxBytes: Int,
                                 initValue: Long,
                                 slope: Int,
                                 nbits: Short,
                                 signed: Boolean,
                                 val dispose: () => Unit) extends BinaryAppendableVector[Long] {
-  val isAllNA = false
-  val noNAs = true
-  val maybeNAs = false
-  val vectMajorType = WireFormat.VECTORTYPE_DELTA2
-  val vectSubType = WireFormat.SUBTYPE_INT_NOMASK
+  def isAllNA: Boolean = false
+  def noNAs: Boolean = true
 
-  private val deltas = IntBinaryVector.appendingVectorNoNA(base, offset + 12, maxBytes - 12, nbits, signed, dispose)
+  private val deltas = IntBinaryVector.appendingVectorNoNA(addr + 20, maxBytes - 20, nbits, signed, dispose)
   private var expected = initValue
 
-  UnsafeUtils.setLong(base, offset, initValue)
-  UnsafeUtils.setInt(base, offset + 8, slope)
+  UnsafeUtils.setInt(addr, maxBytes)
+  UnsafeUtils.setInt(addr + 4, WireFormat(WireFormat.VECTORTYPE_DELTA2, WireFormat.SUBTYPE_INT_NOMASK))
+  UnsafeUtils.setLong(addr + 8, initValue)
+  UnsafeUtils.setInt(addr + 16, slope)
 
   override def length: Int = deltas.length
   final def isAvailable(index: Int): Boolean = true
   final def apply(index: Int): Long = initValue + slope * index + deltas(index)
-  final def numBytes: Int = 12 + deltas.numBytes
+  final def numBytes: Int = 20 + deltas.numBytes
+  final def reader: VectorDataReader = DeltaDeltaDataReader
+  final def copyToBuffer: Buffer[Long] = DeltaDeltaDataReader.toBuffer(addr)
 
   final def addNA(): AddResponse = ???   // NAs are not supported for delta delta for now
   final def addData(data: Long): AddResponse = {
@@ -197,6 +260,8 @@ class DeltaDeltaAppendingVector(val base: Any,
     deltas.reset()
   }
 
-  def finishCompaction(newBase: Any, newOff: Long): BinaryVector[Long] =
-    DeltaDeltaVector(newBase, newOff, numBytes, dispose)
+  def finishCompaction(newAddr: BinaryRegion.NativePointer): BinaryVectorPtr = {
+    UnsafeUtils.setInt(newAddr, numBytes - 4)
+    newAddr
+  }
 }

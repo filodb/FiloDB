@@ -71,7 +71,7 @@ class SparkReadBenchmark {
 
   // Write raw data into MemStore
   val builder = new RecordBuilder(MemFactory.onHeapFactory, dataset.ingestionSchema)
-  rowIt.take(NumRows).map(TupleRowReader).foreach { row => builder.addFromReaderSlowly(row) }
+  rowIt.take(NumRows).map(TupleRowReader).foreach { row => builder.addFromReader(row) }
   val data = builder.allContainers.zipWithIndex.map { case (container, i) => SomeData(container, i) }.head
   FiloDriver.memStore.ingest(dataset.ref, 0, data)
 

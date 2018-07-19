@@ -10,7 +10,7 @@ import filodb.core.{DatasetRef, ErrorResponse, Response}
 import filodb.core.binaryrecord2.RecordContainer
 import filodb.core.metadata.{Column, Dataset}
 import filodb.core.metadata.Column.ColumnType._
-import filodb.core.store.{ChunkSink, ChunkSource, MetaStore, StoreConfig}
+import filodb.core.store.{ChunkSource, ColumnStore, MetaStore, StoreConfig}
 import filodb.memory.MemFactory
 import filodb.memory.format.{vectors => bv, _}
 
@@ -31,7 +31,7 @@ final case class FlushError(err: ErrorResponse) extends Exception(s"Flush error 
 
 /**
  * A MemStore is an in-memory ChunkSource that ingests data not in chunks but as new records, potentially
- * spread over many partitions.  It supports the ChunkSource API, and should support real-time reads
+ * spread over many partitions.  It supports the high-level ChunkSource API, and should support real-time reads
  * of fresh ingested data.  Being in-memory, it is designed to not retain data forever but flush completed
  * chunks to a persistent ChunkSink.
  *
@@ -39,11 +39,11 @@ final case class FlushError(err: ErrorResponse) extends Exception(s"Flush error 
  * each shard.
  */
 trait MemStore extends ChunkSource {
-
   /**
-    * Persistent chunk sink. Ingested data will eventually be poured into this sink for persistence
+    * Persistent column store. Ingested data will eventually be poured into this sink for persistence, and
+    * read from this store on demand as needed for recovery purposes.
     */
-  def sink: ChunkSink
+  def store: ColumnStore
   def metastore: MetaStore
 
   /**
@@ -176,6 +176,9 @@ trait MemStore extends ChunkSource {
 }
 
 object MemStore {
+  // TODO: make the max string vector size configurable.
+  val MaxUTF8VectorSize = 8192
+
   /**
    * Figures out the AppendableVectors for each column, depending on type and whether it is a static/
    * constant column for each partition.
@@ -191,7 +194,7 @@ object MemStore {
         case LongColumn      => bv.LongBinaryVector.appendingVectorNoNA(memFactory, maxElements)
         case DoubleColumn    => bv.DoubleVector.appendingVectorNoNA(memFactory, maxElements)
         case TimestampColumn => bv.LongBinaryVector.appendingVectorNoNA(memFactory, maxElements)
-        case StringColumn    => bv.UTF8Vector.appendingVector(memFactory, maxElements)
+        case StringColumn    => bv.UTF8Vector.appendingVector(memFactory, maxElements, MaxUTF8VectorSize)
         case other: Column.ColumnType => ???
       }
     }.toArray

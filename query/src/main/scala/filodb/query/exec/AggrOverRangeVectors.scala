@@ -4,11 +4,11 @@ import scala.collection.mutable
 
 import monix.reactive.Observable
 
+import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.Dataset
 import filodb.core.query._
-import filodb.memory.MemFactory
-import filodb.memory.format.{vectors => bv, BinaryAppendableVector, BinaryVector, RowReader, ZeroCopyUTF8String}
+import filodb.memory.format.{RowReader, ZeroCopyUTF8String}
 import filodb.query._
 import filodb.query.AggregationOperator._
 
@@ -475,24 +475,25 @@ class TopBottomKRowAggregator(k: Int, bottomK: Boolean) extends RowAggregator {
   }
 
   def present(aggRangeVector: RangeVector, limit: Int): Seq[RangeVector] = {
-    val resRvs = mutable.Map[RangeVectorKey, Array[BinaryAppendableVector[_]]]()
-    val memFactory = MemFactory.onHeapFactory
-    val maxElements = 1000 // FIXME for some reason this isn't working if small
+    val colSchema = Seq(ColumnInfo("timestamp", ColumnType.LongColumn), ColumnInfo("value", ColumnType.DoubleColumn))
+    val recSchema = SerializableRangeVector.toSchema(colSchema)
+    val resRvs = mutable.Map[RangeVectorKey, RecordBuilder]()
     // We limit the results wherever it is materialized first. So it is done here.
     aggRangeVector.rows.take(limit).foreach { row =>
       var i = 1
       while(row.notNull(i)) {
         val rvk = CustomRangeVectorKey.fromZcUtf8(row.filoUTF8String(i))
-        val vectors = resRvs.getOrElseUpdate(rvk,
-                       Array(bv.LongBinaryVector.appendingVector(memFactory, maxElements),
-                             bv.DoubleVector.appendingVector(memFactory, maxElements)))
-        vectors(0).addFromReader(row, 0) // timestamp
-        vectors(1).addFromReader(row, i + 1) // value
+        val builder = resRvs.getOrElseUpdate(rvk, SerializableRangeVector.toBuilder(recSchema))
+        builder.startNewRecord()
+        builder.addLong(row.getLong(0))
+        builder.addDouble(row.getDouble(i + 1))
+        builder.endRecord()
         i += 2
       }
     }
-    resRvs.map { case (key, vectors) =>
-      new SerializableRangeVector(key, vectors.map(_.asInstanceOf[BinaryVector[_]]), vectors(0).length)
+    resRvs.map { case (key, builder) =>
+      val numRows = builder.allContainers.map(_.countRecords).sum
+      new SerializableRangeVector(key, numRows, builder.allContainers, recSchema, 0)
     }.toSeq
   }
 
@@ -500,7 +501,7 @@ class TopBottomKRowAggregator(k: Int, bottomK: Boolean) extends RowAggregator {
     val cols = new Array[ColumnInfo](numRowReaderColumns)
     cols(0) = source.columns(0)
     var i = 1
-    while(i<numRowReaderColumns) {
+    while(i < numRowReaderColumns) {
       cols(i) = ColumnInfo(s"top${(i + 1)/2}-Key", ColumnType.StringColumn)
       cols(i + 1) = ColumnInfo(s"top${(i + 1)/2}-Val", ColumnType.DoubleColumn)
       i += 2

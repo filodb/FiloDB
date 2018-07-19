@@ -21,6 +21,7 @@ import filodb.core.metadata.Dataset
 import filodb.core.store._
 import filodb.memory._
 import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String => UTF8Str}
+import filodb.memory.format.BinaryVector.BinaryVectorPtr
 
 
 class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
@@ -30,7 +31,6 @@ class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
   val partitionsCreated = Kamon.counter("memstore-partitions-created").refine(tags)
   val rowsSkipped  = Kamon.counter("recovery-row-skipped").refine(tags)
   val rowsPerContainer = Kamon.histogram("num-samples-per-container")
-  val numChunksEncoded = Kamon.counter("memstore-chunks-encoded").refine(tags)
   val numSamplesEncoded = Kamon.counter("memstore-samples-encoded").refine(tags)
   val encodedBytes  = Kamon.counter("memstore-encoded-bytes-allocated", MeasurementUnit.information.bytes).refine(tags)
   val flushesSuccessful = Kamon.counter("memstore-flushes-success").refine(tags)
@@ -73,19 +73,25 @@ class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
 
 object TimeSeriesShard {
   /**
-   * The allocation size for each piece of metadata (for each chunkset) in a Block.  Metdata schema:
-   * +0  int    Integer partition ID
-   * +4  long   chunkID   (from here on out, it's the same layout as ChunkSetInfo serialization)
-   * +12 int    # rows in chunkset
-   * +16 long   start timestamp
-   * +24 long   end timestamp
-   * Total: 32 bytes
+   * Writes metadata for TSPartition where every vector is written
    */
-  val BlockMetaAllocSize: Short = 32
-
-  def writeMeta(addr: Long, partitionID: Int, info: ChunkSetInfo): Unit = {
+  def writeMeta(addr: Long, partitionID: Int, info: ChunkSetInfo, vectors: Array[BinaryVectorPtr]): Unit = {
     UnsafeUtils.setInt(UnsafeUtils.ZeroPointer, addr, partitionID)
-    ChunkSetInfo.toMemRegion(info, UnsafeUtils.ZeroPointer, addr + 4)
+    ChunkSetInfo.copy(info, addr + 4)
+    for { i <- 0 until vectors.size optimized } {
+      ChunkSetInfo.setVectorPtr(addr + 4, i, vectors(i))
+    }
+  }
+
+  /**
+   * Copies serialized ChunkSetInfo bytes from persistent storage / on-demand paging.
+   */
+  def writeMeta(addr: Long, partitionID: Int, bytes: Array[Byte], vectors: Array[BinaryVectorPtr]): Unit = {
+    UnsafeUtils.setInt(UnsafeUtils.ZeroPointer, addr, partitionID)
+    ChunkSetInfo.copy(bytes, addr + 4)
+    for { i <- 0 until vectors.size optimized } {
+      ChunkSetInfo.setVectorPtr(addr + 4, i, vectors(i))
+    }
   }
 
   val indexTimeBucketSchema = new RecordSchema(Seq(ColumnType.LongColumn,  // startTime
@@ -110,10 +116,10 @@ object TimeSeriesShard {
   *
   * @param storeConfig the store portion of the sourceconfig, not the global FiloDB application config
   */
-class TimeSeriesShard(dataset: Dataset,
+class TimeSeriesShard(val dataset: Dataset,
                       storeConfig: StoreConfig,
                       val shardNum: Int,
-                      sink: ColumnStore,
+                      sink: ChunkSink,
                       metastore: MetaStore,
                       evictionPolicy: PartitionEvictionPolicy)
                      (implicit val ec: ExecutionContext) extends StrictLogging {
@@ -155,7 +161,7 @@ class TimeSeriesShard(dataset: Dataset,
 
   private val reclaimListener = new ReclaimListener {
     def onReclaim(metaAddr: Long, numBytes: Int): Unit = {
-      assert(numBytes == BlockMetaAllocSize)
+      assert(numBytes == dataset.blockMetaSize)
       val partID = UnsafeUtils.getInt(metaAddr)
       val chunkID = UnsafeUtils.getLong(metaAddr + 4)
       val partition = partitions.get(partID)
@@ -170,6 +176,7 @@ class TimeSeriesShard(dataset: Dataset,
   private final val numGroups = storeConfig.groupsPerShard
   private val bufferMemorySize = storeConfig.ingestionBufferMemSize
   private val chunkRetentionHours = (storeConfig.demandPagedRetentionPeriod.toSeconds / 3600).toInt
+  val pagingEnabled = storeConfig.demandPagingEnabled
 
   private val ingestSchema = dataset.ingestionSchema
   private val recordComp = dataset.comparator
@@ -184,14 +191,14 @@ class TimeSeriesShard(dataset: Dataset,
   // The off-heap block store used for encoded chunks
   private val blockStore = new PageAlignedBlockManager(blockMemorySize, shardStats.memoryStats, reclaimListener,
                                                        storeConfig.numPagesPerBlock, chunkRetentionHours)
-  private val blockFactoryPool = new BlockMemFactoryPool(blockStore, BlockMetaAllocSize)
+  private val blockFactoryPool = new BlockMemFactoryPool(blockStore, dataset.blockMetaSize)
+
+  private val queryScheduler = monix.execution.Scheduler.computation()
 
   // Each shard has a single ingestion stream at a time.  This BlockMemFactory is used for buffer overflow encoding
   // strictly during ingest() and switchBuffers().
-  private val overflowBlockFactory = new BlockMemFactory(blockStore, None, BlockMetaAllocSize, true)
-  protected val pagedChunkStore = new DemandPagedChunkStore(dataset, blockStore, BlockMetaAllocSize,
-                                                            chunkRetentionHours, shardNum,
-                                                            storeConfig.demandPagingEnabled)
+  private val overflowBlockFactory = new BlockMemFactory(blockStore, None, dataset.blockMetaSize, true)
+  val partitionMaker = new DemandPagedChunkStore(this, blockStore, chunkRetentionHours, pagingEnabled)(queryScheduler)
 
   /**
     * Unencoded/unoptimized ingested data is stored in buffers that are allocated from this off-heap pool
@@ -229,8 +236,6 @@ class TimeSeriesShard(dataset: Dataset,
     * Also used during recovery to figure out what incoming records to skip (since it's persisted)
     */
   private final val groupWatermark = Array.fill(numGroups)(Long.MinValue)
-
-  val queryScheduler = monix.execution.Scheduler.computation()
 
   class PartitionIterator(intIt: IntIterator) extends Iterator[TimeSeriesPartition] {
     var nextPart = UnsafeUtils.ZeroPointer.asInstanceOf[TimeSeriesPartition]
@@ -568,8 +573,7 @@ class TimeSeriesShard(dataset: Dataset,
       // PartitionKey is copied to offheap bufferMemory and stays there until it is freed
       val partKeyOffset = recordComp.buildPartKeyFromIngest(recordBase, recordOff, partKeyBuilder)
       val (_, partKeyAddr, _) = BinaryRegionLarge.allocateAndCopy(partKeyArray, partKeyOffset, bufferMemoryManager)
-      val newPart = new TimeSeriesPartition(nextPartitionID, dataset, partKeyAddr, shardNum, sink,
-                          bufferPool, pagedChunkStore, shardStats)(queryScheduler)
+      val newPart = new TimeSeriesPartition(nextPartitionID, dataset, partKeyAddr, shardNum, bufferPool, shardStats)
       partKeyIndex.addPartKey(UnsafeUtils.ZeroPointer, partKeyAddr, nextPartitionID, startTime)
       currentIndexTimeBucketPartIds.set(nextPartitionID)
       timeBucketToPartIds(currentIndexTimeBucket).set(currentIndexTimeBucket)
@@ -650,24 +654,21 @@ class TimeSeriesShard(dataset: Dataset,
     }
   }
 
-  private def getPartition(partKey: Array[Byte]): Option[FiloPartition] =
+  private[core] def getPartition(partKey: Array[Byte]): Option[FiloPartition] =
     partSet.getWithPartKeyBR(partKey, UnsafeUtils.arayOffset)
 
-  def scanPartitions(partMethod: PartitionScanMethod): Observable[FiloPartition] = {
+  def scanPartitions(columnIDs: Seq[Types.ColumnId],
+                     partMethod: PartitionScanMethod,
+                     chunkMethod: ChunkScanMethod): Observable[FiloPartition] = {
     val indexIt = partMethod match {
       case SinglePartitionScan(partition, _) =>
         getPartition(partition).map(Iterator.single).getOrElse(Iterator.empty)
       case MultiPartitionScan(partKeys, _)   =>
         partKeys.toIterator.flatMap(getPartition)
-      case FilteredPartitionScan(split, filters, range) =>
+      case FilteredPartitionScan(split, filters) =>
         // TODO: There are other filters that need to be added and translated to Lucene queries
         if (filters.nonEmpty) {
-          val (start, end) = range match {
-            case AllChunkScan => (0L, Long.MaxValue)
-            case range: RowKeyChunkScan => (range.startTime, range.endTime)
-            case _ => throw new UnsupportedOperationException // not supported
-          }
-          val indexIt = partKeyIndex.partIdsFromFilters(filters, start, end)
+          val indexIt = partKeyIndex.partIdsFromFilters(filters, chunkMethod.startTime, chunkMethod.endTime)
           new PartitionIterator(indexIt)
         } else {
           partitions.values.iterator.asScala
@@ -678,6 +679,12 @@ class TimeSeriesShard(dataset: Dataset,
       p
     })
   }
+
+  /**
+   * Please use this for testing only - reclaims ALL used offheap blocks.  Maybe you are trying to test
+   * on demand paging.
+   */
+  private[filodb] def reclaimAllBlocksTestOnly() = blockStore.reclaimAll()
 
   /**
     * Reset all state in this shard.  Memory is not released as once released, then this class

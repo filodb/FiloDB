@@ -105,7 +105,7 @@ class NullColumnStore(implicit sched: Scheduler) extends ColumnStore with Strict
 
   def write(dataset: Dataset, chunksets: Observable[ChunkSet], diskTimeToLive: Int): Future[Response] = {
     chunksets.foreach { chunkset =>
-      val totalBytes = chunkset.chunks.map(_._2.limit).sum
+      val totalBytes = chunkset.chunks.map(_.limit).sum
       sinkStats.addChunkWriteStats(chunkset.chunks.length, totalBytes, chunkset.info.numRows)
       sinkStats.chunksetWrite()
       logger.debug(s"NullColumnStore: [${chunkset.partition}] ${chunkset.info}  ${chunkset.chunks.length} " +
@@ -130,8 +130,10 @@ class NullColumnStore(implicit sched: Scheduler) extends ColumnStore with Strict
 
   override def shutdown(): Unit = {}
 
-  override def scanPartitions(dataset: Dataset,
-                              partMethod: PartitionScanMethod): Observable[FiloPartition] = Observable.empty
+  def readRawPartitions(dataset: Dataset,
+                        columnIDs: Seq[Types.ColumnId],
+                        partMethod: PartitionScanMethod,
+                        chunkMethod: ChunkScanMethod = AllChunkScan): Observable[RawPartData] =  Observable.empty
 
   override def getScanSplits(dataset: DatasetRef, splitsPerNode: Int): Seq[ScanSplit] = Seq.empty
 

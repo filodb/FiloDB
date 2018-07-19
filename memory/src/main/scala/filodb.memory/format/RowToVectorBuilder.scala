@@ -26,17 +26,22 @@ object Classes {
   val UTF8 = classOf[ZeroCopyUTF8String]
 }
 object RowToVectorBuilder {
+  val MaxElements = 1000
+  val MaxUTF8VectorSize = 64 * 1024
+
   /**
     * A convenience method to turn a bunch of rows R to Filo serialized columnar chunks.
     * @param rows the rows to convert to columnar chunks
     * @param schema a Seq of VectorInfo describing the Vector used for each column
+    * @param memFactory an offheap memFactory to build vectors
     * @param hint an EncodingHint for the encoder
     * @return a Map of column name to the byte chunks
     */
   def buildFromRows(rows: Iterator[RowReader],
                     schema: Seq[VectorInfo],
+                    memFactory: MemFactory,
                     hint: EncodingHint = AutoDetect): Map[String, ByteBuffer] = {
-    val builder = new RowToVectorBuilder(schema)
+    val builder = new RowToVectorBuilder(schema, memFactory)
     rows.foreach(builder.addRow)
     builder.convertToBytes(hint)
   }
@@ -45,19 +50,18 @@ object RowToVectorBuilder {
 /**
   * Class to help transpose a set of rows to Filo binary vectors.
   * @param schema a Seq of VectorInfo describing the data type used for each vector
-  * @param builderMap pass in a custom BuilderMap to extend the supported vector types
+  * @param memFactory an offheap memFactory to build vectors
   *
   * TODO: Add stats about # of rows, chunks/buffers encoded, bytes encoded, # NA's etc.
   */
-class RowToVectorBuilder(schema: Seq[VectorInfo], memFactory: MemFactory = MemFactory.onHeapFactory) {
-  val maxElements = 1000
+class RowToVectorBuilder(schema: Seq[VectorInfo], memFactory: MemFactory) {
+  import RowToVectorBuilder._
   val builders = schema.zipWithIndex.map {
     case (VectorInfo(_, dataType),index)=> dataType match {
-      case Classes.Int    => IntBinaryVector.appendingVector(memFactory, maxElements)
-      case Classes.Long   => LongBinaryVector.appendingVector(memFactory, maxElements)
-      case Classes.Double => DoubleVector.appendingVector(memFactory, maxElements)
-      case Classes.UTF8   => UTF8Vector.appendingVector(memFactory, maxElements)
-      case Classes.String => UTF8Vector.appendingVector(memFactory, maxElements)
+      case Classes.Int    => IntBinaryVector.appendingVector(memFactory, MaxElements)
+      case Classes.Long   => LongBinaryVector.appendingVector(memFactory, MaxElements)
+      case Classes.Double => DoubleVector.appendingVector(memFactory, MaxElements)
+      case Classes.UTF8   => UTF8Vector.appendingVector(memFactory, MaxElements, MaxUTF8VectorSize)
     }
   }
   val numColumns = schema.length
@@ -73,9 +77,9 @@ class RowToVectorBuilder(schema: Seq[VectorInfo], memFactory: MemFactory = MemFa
     }
   }
 
-
   def convertToBytes(hint: EncodingHint = AutoDetect): Map[String, ByteBuffer] = {
-    val chunks = builders.map(_.optimize(memFactory, hint).toFiloBuffer)
+    val chunks = builders.map(_.optimize(memFactory, hint))
+                         .map(BinaryVector.asBuffer)
     schema.zip(chunks).map { case (VectorInfo(colName, _), bytes) => (colName, bytes) }.toMap
   }
 

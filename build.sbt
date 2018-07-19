@@ -20,7 +20,7 @@ lazy val core = project
   .settings(name := "filodb-core")
   .settings(scalacOptions += "-language:postfixOps")
   .settings(libraryDependencies ++= coreDeps)
-  .dependsOn(memory)
+  .dependsOn(memory % "compile->compile; test->test")
 
 lazy val coordinator = project
   .in(file("coordinator"))
@@ -193,6 +193,7 @@ lazy val memoryDeps = commonDeps ++ Seq(
   "org.joda"             % "joda-convert"      % "1.2",
   "net.jpountz.lz4"      %  "lz4"              % "1.3.0",
   "org.jctools"          % "jctools-core"      % "2.0.1",
+  "org.spire-math"      %% "debox"             % "0.8.0",
   scalaLoggingDep,
   scalaxyDep
 )
@@ -204,7 +205,6 @@ lazy val coreDeps = commonDeps ++ Seq(
   "io.monix"             %% "monix"             % "2.3.0",
   "com.googlecode.concurrentlinkedhashmap" % "concurrentlinkedhashmap-lru" % "1.4",
   "net.ceedubs"          %% "ficus"             % ficusVersion,
-  "org.spire-math"       %% "debox"             % "0.8.0",
   "io.fastjson"           % "boon"              % "0.33",
   "com.googlecode.javaewah" % "JavaEWAH"        % "1.1.6",
   "com.github.rholder.fauxflake" % "fauxflake-core" % "1.1.0",
@@ -227,7 +227,6 @@ lazy val coordDeps = commonDeps ++ Seq(
   // Redirect minlog logs to SLF4J
    "com.dorkbox"         % "MinLog-SLF4J"       % "1.12",
   "com.opencsv"          % "opencsv"            % "3.3",
-  "org.parboiled"        %% "parboiled"         % "2.1.3",
   "com.typesafe.akka"    %% "akka-testkit"      % akkaVersion % Test,
   "com.typesafe.akka"    %% "akka-multi-node-testkit" % akkaVersion % Test
 )

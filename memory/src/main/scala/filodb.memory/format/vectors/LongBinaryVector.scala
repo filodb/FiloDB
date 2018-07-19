@@ -2,10 +2,12 @@ package filodb.memory.format.vectors
 
 import java.nio.ByteBuffer
 
+import debox.Buffer
 import scalaxy.loops._
 
-import filodb.memory.MemFactory
+import filodb.memory.{BinaryRegion, MemFactory}
 import filodb.memory.format._
+import filodb.memory.format.BinaryVector.BinaryVectorPtr
 import filodb.memory.format.Encodings._
 
 object LongBinaryVector {
@@ -15,10 +17,10 @@ object LongBinaryVector {
    * @param maxElements initial maximum number of elements this vector will hold. Will automatically grow.
    */
   def appendingVector(memFactory: MemFactory, maxElements: Int): BinaryAppendableVector[Long] = {
-    val bytesRequired = 8 + BitmapMask.numBytesRequired(maxElements) + 8 * maxElements
-    val (base, off, nBytes) = memFactory.allocateWithMagicHeader(bytesRequired)
-    val dispose =  () => memFactory.freeWithMagicHeader(off)
-    GrowableVector(memFactory, new MaskedLongAppendingVector(base, off, nBytes, maxElements, dispose))
+    val bytesRequired = 12 + BitmapMask.numBytesRequired(maxElements) + 12 + 8 * maxElements
+    val addr = memFactory.allocateOffheap(bytesRequired)
+    val dispose =  () => memFactory.freeMemory(addr)
+    GrowableVector(memFactory, new MaskedLongAppendingVector(addr, bytesRequired, maxElements, dispose))
   }
 
   /**
@@ -26,28 +28,26 @@ object LongBinaryVector {
    * as available.
    */
   def appendingVectorNoNA(memFactory: MemFactory, maxElements: Int): BinaryAppendableVector[Long] = {
-    val bytesRequired = 4 + 8 * maxElements
-    val (base, off, nBytes) = memFactory.allocateWithMagicHeader(bytesRequired)
-    val dispose =  () => memFactory.freeWithMagicHeader(off)
-    new LongAppendingVector(base, off, nBytes, dispose)
+    val bytesRequired = 12 + 8 * maxElements
+    val addr = memFactory.allocateOffheap(bytesRequired)
+    val dispose =  () => memFactory.freeMemory(addr)
+    new LongAppendingVector(addr, bytesRequired, dispose)
   }
 
+  def apply(buffer: ByteBuffer): LongVectorDataReader = apply(UnsafeUtils.addressFromDirectBuffer(buffer))
 
-  def apply(buffer: ByteBuffer): BinaryVector[Long] = {
-    val (base, off, len) = UnsafeUtils.BOLfromBuffer(buffer)
-    LongBinaryVector(base, off, len, BinaryVector.NoOpDispose)
+  import WireFormat._
+
+  /**
+   * Parses the type of vector from the WireFormat word at address+4 and returns the appropriate
+   * LongVectorDataReader object for parsing it
+   */
+  def apply(vector: BinaryVectorPtr): LongVectorDataReader = BinaryVector.vectorType(vector) match {
+    case x if x == WireFormat(VECTORTYPE_DELTA2,    SUBTYPE_INT_NOMASK) => DeltaDeltaDataReader
+    case x if x == WireFormat(VECTORTYPE_DELTA2,    SUBTYPE_REPEATED)   => DeltaDeltaConstDataReader
+    case x if x == WireFormat(VECTORTYPE_BINSIMPLE, SUBTYPE_PRIMITIVE)  => MaskedLongDataReader
+    case x if x == WireFormat(VECTORTYPE_BINSIMPLE, SUBTYPE_PRIMITIVE_NOMASK) => LongVectorDataReader64
   }
-
-  def masked(buffer: ByteBuffer): MaskedLongBinaryVector = {
-    val (base, off, len) = UnsafeUtils.BOLfromBuffer(buffer)
-    new MaskedLongBinaryVector(base, off, len, BinaryVector.NoOpDispose)
-  }
-
-  def fromIntBuf(buf: ByteBuffer): BinaryVector[Long] =
-    new LongIntWrapper(IntBinaryVector(buf))
-
-  def fromMaskedIntBuf(buf: ByteBuffer): BinaryVector[Long] =
-    new LongIntWrapper(IntBinaryVector.masked(buf))
 
   /**
    * Produces a smaller, frozen BinaryVector if possible.
@@ -56,7 +56,7 @@ object LongBinaryVector {
    *     smaller nbits
    *  4. If all values are filled (no NAs) then the bitmask is dropped
    */
-  def optimize(memFactory: MemFactory, vector: OptimizingPrimitiveAppender[Long]): BinaryVector[Long] = {
+  def optimize(memFactory: MemFactory, vector: OptimizingPrimitiveAppender[Long]): BinaryVectorPtr = {
     // Try delta-delta encoding
     DeltaDeltaVector.fromLongVector(memFactory, vector)
                     .getOrElse {
@@ -69,38 +69,147 @@ object LongBinaryVector {
   }
 }
 
-final case class LongBinaryVector(base: Any, offset: Long, numBytes: Int, val dispose: () => Unit)
-  extends PrimitiveVector[Long] {
-  override val length: Int = (numBytes - 4) / 8
-  final def isAvailable(index: Int): Boolean = true
-  final def apply(index: Int): Long = UnsafeUtils.getLong(base, offset + 4 + index * 8)
+/**
+ * An iterator optimized for speed and type-specific to avoid boxing.
+ * It has no hasNext() method - because it is guaranteed to visit every element, and this way
+ * you can avoid another method call for performance.
+ */
+trait LongIterator extends TypedIterator {
+  def next: Long
 }
 
-class MaskedLongBinaryVector(val base: Any, val offset: Long, val numBytes: Int, val dispose: () => Unit) extends
-PrimitiveMaskVector[Long] {
-  val bitmapOffset = offset + 4L
-  val subVectOffset = UnsafeUtils.getInt(base, offset)
-  private val longVect = LongBinaryVector(base, offset + subVectOffset, numBytes - subVectOffset, dispose)
+/**
+ * A VectorDataReader object that supports fast extraction of Long data BinaryVectors
+ * +0000   4-byte length word
+ * +0004   4-byte WireFormat
+ * +0008   2-byte nbits  (unused for Longs)
+ * +0010   1 byte Boolean signed
+ * +0011   1 byte (actually 3 bits) bitshift when nbits < 8
+ * +0012   start of packed Long data
+ */
+trait LongVectorDataReader extends VectorDataReader {
+  /**
+   * Retrieves the element at position/row n, where n=0 is the first element of the vector.
+   */
+  def apply(vector: BinaryVectorPtr, n: Int): Long
 
-  override final def length: Int = longVect.length
-  final def apply(index: Int): Long = longVect.apply(index)
+  /**
+   * Returns the number of elements in this vector
+   */
+  def length(vector: BinaryVectorPtr): Int = (numBytes(vector) - 8) / 8
+
+  /**
+   * Returns a LongIterator to efficiently go through the elements of the vector.  The user is responsible for
+   * knowing how many elements to process.  There is no hasNext.
+   * All elements are iterated through, even those designated as "not available".
+   * Costs an allocation for the iterator but allows potential performance gains too.
+   * @param vector the BinaryVectorPtr native address of the BinaryVector
+   * @param startElement the starting element # in the vector, by default 0 (the first one)
+   */
+  def iterate(vector: BinaryVectorPtr, startElement: Int = 0): LongIterator
+
+  /**
+   * Efficiently searches for the first element # where the vector element is greater than or equal to item.
+   * Good for finding the startElement for iterate() above where time is at least item.
+   * Assumes all the elements of vector are in increasing numeric order.
+   * @return bits 0-30: the position/element #.
+   *           If all the elements in vector are less than item, then the vector length is returned.
+   *         bit 31   : set if element did not match exactly / no match
+   */
+  def binarySearch(vector: BinaryVectorPtr, item: Long): Int
+
+  /**
+   * Converts the BinaryVector to an unboxed Buffer.
+   * Only returns elements that are "available".
+   */
+  // NOTE: I know this code is repeated but I don't want to have to debug specialization/unboxing/traits right now
+  def toBuffer(vector: BinaryVectorPtr, startElement: Int = 0): Buffer[Long] = {
+    val newBuf = Buffer.empty[Long]
+    val dataIt = iterate(vector, startElement)
+    val availIt = iterateAvailable(vector, startElement)
+    val len = length(vector)
+    for { n <- startElement until len optimized } {
+      val item = dataIt.next
+      if (availIt.next) newBuf += item
+    }
+    newBuf
+  }
 }
 
-class LongAppendingVector(base: Any, offset: Long, maxBytes: Int, val dispose: () => Unit)
-extends PrimitiveAppendableVector[Long](base, offset, maxBytes, 64, true) {
+/**
+ * VectorDataReader for a Long BinaryVector using full 64-bits for a Long value
+ */
+object LongVectorDataReader64 extends LongVectorDataReader {
+  final def apply(vector: BinaryVectorPtr, n: Int): Long = UnsafeUtils.getLong(vector + 12 + n * 8)
+  def iterate(vector: BinaryVectorPtr, startElement: Int = 0): LongIterator = new LongIterator {
+    private final var addr = vector + 12 + startElement * 8
+    final def next: Long = {
+      val data = UnsafeUtils.getLong(addr)
+      addr += 8
+      data
+    }
+  }
+
+  /**
+   * Default O(log n) binary search implementation assuming fast random access, which is true here.
+   * Everything should be intrinsic and registers so should be super fast
+   */
+  def binarySearch(vector: BinaryVectorPtr, item: Long): Int = {
+    var len = length(vector)
+    var first = 0
+    while (len > 0) {
+      val half = len >>> 1
+      val middle = first + half
+      val element = UnsafeUtils.getLong(vector + 12 + middle * 8)
+      if (element == item) {
+        return middle
+      } else if (element < item) {
+        first = middle + 1
+        len = len - half - 1
+      } else {
+        len = half
+      }
+    }
+    if (first == item) first else first | 0x80000000
+  }
+}
+
+/**
+ * VectorDataReader for a masked (NA bit) Long BinaryVector, uses underlying DataReader for subvector
+ */
+object MaskedLongDataReader extends LongVectorDataReader with BitmapMaskVector {
+  final def apply(vector: BinaryVectorPtr, n: Int): Long = {
+    val subvect = subvectAddr(vector)
+    LongBinaryVector(subvect).apply(subvect, n)
+  }
+
+  override def length(vector: BinaryVectorPtr): Int =
+    LongBinaryVector(subvectAddr(vector)).length(subvectAddr(vector))
+
+  override def iterate(vector: BinaryVectorPtr, startElement: Int = 0): LongIterator =
+    LongBinaryVector(subvectAddr(vector)).iterate(subvectAddr(vector), startElement)
+
+  def binarySearch(vector: BinaryVectorPtr, item: Long): Int =
+    LongBinaryVector(subvectAddr(vector)).binarySearch(subvectAddr(vector), item)
+}
+
+class LongAppendingVector(addr: BinaryRegion.NativePointer, maxBytes: Int, val dispose: () => Unit)
+extends PrimitiveAppendableVector[Long](addr, maxBytes, 64, true) {
   final def addNA(): AddResponse = addData(0L)
   final def addData(data: Long): AddResponse = checkOffset() match {
     case Ack =>
-      UnsafeUtils.setLong(base, writeOffset, data)
-      writeOffset += 8
+      UnsafeUtils.setLong(writeOffset, data)
+      incWriteOffset(8)
       Ack
     case other: AddResponse => other
   }
 
   final def addFromReaderNoNA(reader: RowReader, col: Int): AddResponse = addData(reader.getLong(col))
 
-  private final val readVect = new LongBinaryVector(base, offset, maxBytes, dispose)
-  final def apply(index: Int): Long = readVect.apply(index)
+  private final val readVect = LongBinaryVector(addr)
+  final def apply(index: Int): Long = readVect.apply(addr, index)
+  final def reader: VectorDataReader = LongVectorDataReader64
+  def copyToBuffer: Buffer[Long] = LongVectorDataReader64.toBuffer(addr)
 
   final def minMax: (Long, Long) = {
     var min = Long.MaxValue
@@ -113,25 +222,22 @@ extends PrimitiveAppendableVector[Long](base, offset, maxBytes, 64, true) {
     (min, max)
   }
 
-  override def optimize(memFactory: MemFactory, hint: EncodingHint = AutoDetect): BinaryVector[Long] =
+  override def optimize(memFactory: MemFactory, hint: EncodingHint = AutoDetect): BinaryVectorPtr =
     LongBinaryVector.optimize(memFactory, this)
-
-  def finishCompaction(newBase: Any, newOff: Long): BinaryVector[Long] =
-    new LongBinaryVector(newBase, newOff, numBytes, dispose)
 }
 
-class MaskedLongAppendingVector(base: Any,
-                                val offset: Long,
+class MaskedLongAppendingVector(addr: BinaryRegion.NativePointer,
                                 val maxBytes: Int,
                                 val maxElements: Int,
                                 val dispose: () => Unit) extends
-// First four bytes: offset to LongBinaryVector
-BitmapMaskAppendableVector[Long](base, offset + 4L, maxElements) with OptimizingPrimitiveAppender[Long] {
-  val vectMajorType = WireFormat.VECTORTYPE_BINSIMPLE
-  val vectSubType = WireFormat.SUBTYPE_PRIMITIVE
-  val nbits: Short = 64
+// +8: offset to LongBinaryVector
+BitmapMaskAppendableVector[Long](addr, maxElements) with OptimizingPrimitiveAppender[Long] {
+  def vectMajorType: Int = WireFormat.VECTORTYPE_BINSIMPLE
+  def vectSubType: Int = WireFormat.SUBTYPE_PRIMITIVE
+  def nbits: Short = 64
 
-  val subVect = new LongAppendingVector(base, offset + subVectOffset, maxBytes - subVectOffset, dispose)
+  val subVect = new LongAppendingVector(addr + subVectOffset, maxBytes - subVectOffset, dispose)
+  def copyToBuffer: Buffer[Long] = MaskedLongDataReader.toBuffer(addr)
 
   final def minMax: (Long, Long) = {
     var min = Long.MaxValue
@@ -146,36 +252,14 @@ BitmapMaskAppendableVector[Long](base, offset + 4L, maxElements) with Optimizing
     (min, max)
   }
 
-  final def dataVect(memFactory: MemFactory): BinaryVector[Long] = subVect.freeze(memFactory)
+  final def dataVect(memFactory: MemFactory): BinaryVectorPtr = subVect.freeze(memFactory)
 
-  override def optimize(memFactory: MemFactory, hint: EncodingHint = AutoDetect): BinaryVector[Long] =
+  override def optimize(memFactory: MemFactory, hint: EncodingHint = AutoDetect): BinaryVectorPtr =
     LongBinaryVector.optimize(memFactory, this)
 
   override def newInstance(memFactory: MemFactory, growFactor: Int = 2): BinaryAppendableVector[Long] = {
-    val (newbase, newoff, nBytes) = memFactory.allocateWithMagicHeader(maxBytes * growFactor)
-    val dispose = () => memFactory.freeWithMagicHeader(newoff)
-    new MaskedLongAppendingVector(newbase, newoff, maxBytes * growFactor, maxElements * growFactor, dispose)
+    val newAddr = memFactory.allocateOffheap(maxBytes * growFactor)
+    val dispose = () => memFactory.freeMemory(newAddr)
+    new MaskedLongAppendingVector(newAddr, maxBytes * growFactor, maxElements * growFactor, dispose)
   }
-
-  def finishCompaction(newBase: Any, newOff: Long): BinaryVector[Long] = {
-    // Don't forget to write the new subVectOffset
-    UnsafeUtils.setInt(newBase, newOff, (bitmapOffset + bitmapBytes - offset).toInt)
-    new MaskedLongBinaryVector(newBase, newOff, 4 + bitmapBytes + subVect.numBytes, dispose)
-  }
-}
-
-/**
- * A wrapper to return Longs from an Int vector... for when one can compress Long vectors as IntVectors
- */
-class LongIntWrapper(inner: BinaryVector[Int]) extends PrimitiveVector[Long] {
-  val base = inner.base
-  val offset = inner.offset
-  val numBytes = inner.numBytes
-  override val vectSubType = inner.vectSubType
-
-  final def apply(i: Int): Long = inner(i).toLong
-  final def isAvailable(i: Int): Boolean = inner.isAvailable(i)
-  override final def length: Int = inner.length
-  override val maybeNAs = inner.maybeNAs
-  override def dispose: () => Unit = inner.dispose
 }

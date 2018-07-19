@@ -9,12 +9,12 @@ import monix.execution.{CancelableFuture, Scheduler}
 import monix.reactive.Observable
 import org.jctools.maps.NonBlockingHashMapLong
 
-import filodb.core.{DatasetRef, Response}
+import filodb.core.{DatasetRef, Response, Types}
 import filodb.core.metadata.Dataset
 import filodb.core.store._
 import filodb.memory.format.ZeroCopyUTF8String
 
-class TimeSeriesMemStore(config: Config, val sink: ColumnStore, val metastore: MetaStore,
+class TimeSeriesMemStore(config: Config, val store: ColumnStore, val metastore: MetaStore,
                          evictionPolicy: Option[PartitionEvictionPolicy] = None)
                         (implicit val ec: ExecutionContext)
 extends MemStore with StrictLogging {
@@ -37,7 +37,7 @@ extends MemStore with StrictLogging {
     if (shards contains shard) {
       throw ShardAlreadySetup(dataset.ref, shard)
     } else {
-      val tsdb = new TimeSeriesShard(dataset, storeConf, shard, sink, metastore, partEvictionPolicy)
+      val tsdb = new OnDemandPagingShard(dataset, storeConf, shard, store, metastore, partEvictionPolicy)
       shards.put(shard, tsdb)
     }
   }
@@ -58,7 +58,7 @@ extends MemStore with StrictLogging {
     * Retrieve shard for given dataset and shard number. Raises exception if
     * the shard is not setup.
     */
-  private def getShardE(dataset: DatasetRef, shard: Int): TimeSeriesShard = {
+  private[filodb] def getShardE(dataset: DatasetRef, shard: Int): TimeSeriesShard = {
     datasets.get(dataset)
             .flatMap(shards => Option(shards.get(shard)))
             .getOrElse(throw new IllegalArgumentException(s"Dataset $dataset and shard $shard have not been set up"))
@@ -140,9 +140,16 @@ extends MemStore with StrictLogging {
   def numPartitions(dataset: DatasetRef, shard: Int): Int =
     getShard(dataset, shard).map(_.numActivePartitions).getOrElse(-1)
 
+  def readRawPartitions(dataset: Dataset,
+                        columnIDs: Seq[Types.ColumnId],
+                        partMethod: PartitionScanMethod,
+                        chunkMethod: ChunkScanMethod = AllChunkScan): Observable[RawPartData] = Observable.empty
+
   def scanPartitions(dataset: Dataset,
-                     partMethod: PartitionScanMethod): Observable[FiloPartition] =
-    datasets(dataset.ref).get(partMethod.shard).scanPartitions(partMethod)
+                     columnIDs: Seq[Types.ColumnId],
+                     partMethod: PartitionScanMethod,
+                     chunkMethod: ChunkScanMethod = AllChunkScan): Observable[FiloPartition] =
+    datasets(dataset.ref).get(partMethod.shard).scanPartitions(columnIDs, partMethod, chunkMethod)
 
   def numRowsIngested(dataset: DatasetRef, shard: Int): Long =
     getShard(dataset, shard).map(_.numRowsIngested).getOrElse(-1L)
@@ -161,12 +168,12 @@ extends MemStore with StrictLogging {
 
   def reset(): Unit = {
     datasets.clear()
-    sink.reset()
+    store.reset()
   }
 
   def truncate(dataset: DatasetRef): Future[Response] = {
     datasets.get(dataset).foreach(_.values.asScala.foreach(_.reset()))
-    sink.truncate(dataset)
+    store.truncate(dataset)
   }
 
   // Release memory etc.

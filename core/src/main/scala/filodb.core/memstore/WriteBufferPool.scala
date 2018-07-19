@@ -1,10 +1,12 @@
 package filodb.core.memstore
 
 import com.typesafe.scalalogging.StrictLogging
+import scalaxy.loops._
 
 import filodb.core.metadata.Dataset
+import filodb.core.store.ChunkSetInfo
+import filodb.memory.BinaryRegion.NativePointer
 import filodb.memory.MemFactory
-import filodb.memory.format.BinaryAppendableVector
 
 object WriteBufferPool {
   // The number of partition write buffers to allocate at one time
@@ -33,14 +35,21 @@ class WriteBufferPool(memFactory: MemFactory,
                       dataset: Dataset,
                       maxChunkSize: Int,
                       allocationStepSize: Int = WriteBufferPool.DefaultAllocStepSize) extends StrictLogging {
-  val queue = new collection.mutable.Queue[Array[BinaryAppendableVector[_]]]
+  import TimeSeriesPartition._
+
+  val queue = new collection.mutable.Queue[(NativePointer, AppenderArray)]
 
   private def allocateBuffers(): Unit = {
     logger.debug(s"Allocating $allocationStepSize WriteBuffers....")
     // Fill queue up
     (0 until allocationStepSize).foreach { n =>
       val builders = MemStore.getAppendables(memFactory, dataset, maxChunkSize)
-      queue.enqueue(builders)
+      val info = ChunkSetInfo(memFactory, dataset, 0, 0, Long.MinValue, Long.MaxValue)
+      // Point vectors in chunkset metadata to builders addresses
+      for { colNo <- 0 until dataset.numDataColumns optimized } {
+        ChunkSetInfo.setVectorPtr(info.infoAddr, colNo, builders(colNo).addr)
+      }
+      queue.enqueue((info.infoAddr, builders))
     }
   }
 
@@ -55,7 +64,7 @@ class WriteBufferPool(memFactory: MemFactory,
    * @return Array of AppendableVectors
    * Throws NoSuchElementException if the Queue is empty and unable to create more buffers/out of memory.
    */
-  def obtain(): Array[BinaryAppendableVector[_]] = {
+  def obtain(): (NativePointer, AppenderArray) = {
     // If queue is empty, try and allocate more buffers depending on if memFactory has more memory
     // If that fails, return queue empty
     if (queue.isEmpty) try {
@@ -72,9 +81,9 @@ class WriteBufferPool(memFactory: MemFactory,
    * Releases a set of AppendableVectors back to the pool, henceforth someone else can obtain it.
    * The state of the appenders are reset.
    */
-  def release(appenders: Array[BinaryAppendableVector[_]]): Unit = {
+  def release(metaAddr: NativePointer, appenders: AppenderArray): Unit = {
     appenders.foreach(_.reset())
-    queue.enqueue(appenders)
+    queue.enqueue((metaAddr, appenders))
     // TODO: check number of buffers in queue, and release baack to free memory.
     //  NOTE: no point to this until the pool shares a single MemFactory amongst multiple shards.  In that case
     //        we have to decide (w/ concurrency a concern): share a single MemFactory or a single WriteBufferPool?

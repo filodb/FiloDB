@@ -9,7 +9,6 @@ import filodb.cassandra.metastore.CassandraMetaStore
 class CassandraColumnStoreSpec extends ColumnStoreSpec {
   import monix.execution.Scheduler.Implicits.global
 
-  import filodb.core.store._
   import NamesTestData._
 
   lazy val colStore = new CassandraColumnStore(config, global)
@@ -42,10 +41,11 @@ class CassandraColumnStoreSpec extends ColumnStoreSpec {
       response should equal (Success)
     }
 
-    val chunk = lz4ColStore.scanChunks(dataset, Seq(0, 1, 2), partScan).toSeq.head
-    chunk.rowIterator().map(_.getLong(2)).toSeq should equal (Seq(24L, 28L, 25L))
-    chunk.rowIterator().map(_.filoUTF8String(0)).toSeq should equal (utf8FirstNames take 3)
+    val sourceChunks = chunkSetStream(names take 3).toListL.runAsync.futureValue
+
+    val parts = lz4ColStore.readRawPartitions(dataset, Seq(0, 1, 2), partScan).toListL.runAsync.futureValue
+    parts should have length (1)
+    parts(0).chunkSets should have length (1)
+    parts(0).chunkSets(0).vectors.toSeq shouldEqual sourceChunks.head.chunks
   }
-
-
 }

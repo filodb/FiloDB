@@ -7,6 +7,8 @@ import com.typesafe.scalalogging.StrictLogging
 
 import filodb.core.Types._
 import filodb.core.metadata.{Column, Dataset}
+import filodb.memory.BinaryRegion.NativePointer
+import filodb.memory.MemFactory
 import filodb.memory.format._
 
 /**
@@ -16,15 +18,14 @@ import filodb.memory.format._
   * @param info      records common metadata about a ChunkSet
   * @param partition 64-bit native address of the BinaryRecord partition key
   * @param skips
-  * @param chunks    each item in the Seq encodes a column's values in the chunk's dataset. First
-  *                  value in the tuple identifies the column, the second is a reference to the
-  *                  off-heap memory store where the contents of the chunks can be obtained
+  * @param chunks    each item in the Seq is a ByteBuffer for the encoded chunks.  First item = data column 0,
+  *                  second item = data column 1, and so forth
   * @param listener a callback for when that chunkset is successfully flushed
   */
 case class ChunkSet(info: ChunkSetInfo,
                     partition: PartitionKey,
                     skips: Seq[ChunkRowSkipIndex],
-                    chunks: Seq[(ColumnId, ByteBuffer)],
+                    chunks: Seq[ByteBuffer],
                     listener: ChunkSetInfo => Unit = info => {}) {
   def invokeFlushListener(): Unit = listener(info)
 }
@@ -34,29 +35,35 @@ object ChunkSet {
    * Create a ChunkSet out of a set of rows easily.  Mostly for testing.
    * @param rows a RowReader for the data columns only - partition columns at end might be OK
    */
-  def apply(dataset: Dataset, part: PartitionKey, rows: Seq[RowReader]): ChunkSet = {
+  def apply(dataset: Dataset, part: PartitionKey, rows: Seq[RowReader], factory: MemFactory): ChunkSet = {
     require(rows.nonEmpty)
-    val firstKey = dataset.timestamp(rows.head)
-    val info = ChunkSetMeta(timeUUID64, rows.length, firstKey, dataset.timestamp(rows.last))
+    val info = ChunkSetInfo(factory, dataset, timeUUID64, rows.length,
+                            dataset.timestamp(rows.head),
+                            dataset.timestamp(rows.last))
     val filoSchema = Column.toFiloSchema(dataset.dataColumns)
-    val chunkMap = RowToVectorBuilder.buildFromRows(rows.toIterator, filoSchema)
-    val idsAndBytes = chunkMap.map { case (colName, buf) => (dataset.colIDs(colName).get.head, buf) }.toSeq
-    ChunkSet(info, part, Nil, idsAndBytes)
+    val chunkMap = RowToVectorBuilder.buildFromRows(rows.toIterator, filoSchema, factory)
+    val chunks = dataset.dataColumns.map(c => chunkMap(c.name))
+    ChunkSet(info, part, Nil, chunks)
   }
 }
 
 /**
-  * Records metadata about a chunk set, including its time range
+  * Records metadata about a chunk set, including its time range.  Is always offheap.
   */
-trait ChunkSetInfo {
+final case class ChunkSetInfo(infoAddr: NativePointer) extends AnyVal {
   // chunk id (usually a timeuuid)
-  def id: ChunkID
+  def id: ChunkID = ChunkSetInfo.getChunkID(infoAddr)
   // number of rows encoded by this chunkset
-  def numRows: Int
+  def numRows: Int = ChunkSetInfo.getNumRows(infoAddr)
   // the starting timestamp of this chunkset
-  def startTime: Long
+  def startTime: Long = ChunkSetInfo.getStartTime(infoAddr)
   // The ending timestamp of this chunkset
-  def endTime: Long
+  def endTime: Long = ChunkSetInfo.getEndTime(infoAddr)
+
+  /**
+   * Returns the vector pointer for a particular column
+   */
+  def vectorPtr(colNo: Int): BinaryVector.BinaryVectorPtr = ChunkSetInfo.getVectorPtr(infoAddr, colNo)
 
   /**
    * Finds intersection key ranges between two ChunkSetInfos.
@@ -93,8 +100,6 @@ trait ChunkSetInfo {
   }
 }
 
-final case class ChunkSetMeta(id: ChunkID, numRows: Int, startTime: Long, endTime: Long) extends ChunkSetInfo
-
 case class ChunkRowSkipIndex(id: ChunkID, overrides: EWAHCompressedBitmap)
 
 object ChunkRowSkipIndex {
@@ -112,27 +117,93 @@ object ChunkSetInfo extends StrictLogging {
   val log = logger
 
   /**
-   * Serializes the info in a ChunkSetInfo to a region of memory.
-   * 28 bytes (ID + numRows + start/endTimes) is required.
+   * ChunkSetInfo metadata schema:
+   * +0  long   chunkID
+   * +8  int    # rows in chunkset
+   * +12 long   start timestamp
+   * +20 long   end timestamp
+   * +28 long[] pointers to each vector
+   *
+   * Note that block metadata has a 4-byte partition ID appended to the front also.
    */
-  def toMemRegion(info: ChunkSetInfo, destBase: Any, destOffset: Long): Unit = {
-    UnsafeUtils.setLong(destBase, destOffset, info.id)
-    UnsafeUtils.setInt(destBase, destOffset + 8, info.numRows)
-    UnsafeUtils.setLong(destBase, destOffset + 12, info.startTime)
-    UnsafeUtils.setLong(destBase, destOffset + 20, info.endTime)
+  val OffsetChunkID = 0
+  val OffsetNumRows = 8
+  val OffsetStartTime = 12
+  val OffsetEndTime = 20
+  val OffsetVectors = 28
+
+  def chunkSetInfoSize(numDataColumns: Int): Int = OffsetVectors + 8 * numDataColumns
+  def blockMetaInfoSize(numDataColumns: Int): Int = chunkSetInfoSize(numDataColumns) + 4
+
+  def getChunkID(infoPointer: NativePointer): ChunkID = UnsafeUtils.getLong(infoPointer + OffsetChunkID)
+  def getChunkID(infoBytes: Array[Byte]): ChunkID =
+    UnsafeUtils.getLong(infoBytes, UnsafeUtils.arayOffset + OffsetChunkID)
+  def setChunkID(infoPointer: NativePointer, newId: ChunkID): Unit =
+    UnsafeUtils.setLong(infoPointer + OffsetChunkID, newId)
+
+  def getNumRows(infoPointer: NativePointer): Int = UnsafeUtils.getInt(infoPointer + OffsetNumRows)
+  def resetNumRows(infoPointer: NativePointer): Unit = UnsafeUtils.setInt(infoPointer + OffsetNumRows, 0)
+  def incrNumRows(infoPointer: NativePointer): Unit =
+    UnsafeUtils.unsafe.getAndAddInt(UnsafeUtils.ZeroPointer, infoPointer + OffsetNumRows, 1)
+
+  def getStartTime(infoPointer: NativePointer): Long = UnsafeUtils.getLong(infoPointer + OffsetStartTime)
+  def getEndTime(infoPointer: NativePointer): Long = UnsafeUtils.getLong(infoPointer + OffsetEndTime)
+  def setStartTime(infoPointer: NativePointer, time: Long): Unit =
+    UnsafeUtils.setLong(infoPointer + OffsetStartTime, time)
+  def setEndTime(infoPointer: NativePointer, time: Long): Unit =
+    UnsafeUtils.setLong(infoPointer + OffsetEndTime, time)
+
+  def getStartTime(infoBytes: Array[Byte]): Long =
+    UnsafeUtils.getLong(infoBytes, UnsafeUtils.arayOffset + OffsetStartTime)
+  def getEndTime(infoBytes: Array[Byte]): Long =
+    UnsafeUtils.getLong(infoBytes, UnsafeUtils.arayOffset + OffsetEndTime)
+
+  def getVectorPtr(infoPointer: NativePointer, colNo: Int): BinaryVector.BinaryVectorPtr =
+    UnsafeUtils.getLong(infoPointer + OffsetVectors + 8 * colNo)
+  def setVectorPtr(infoPointer: NativePointer, colNo: Int, vector: BinaryVector.BinaryVectorPtr): Unit =
+    UnsafeUtils.setLong(infoPointer + OffsetVectors + 8 * colNo, vector)
+
+  /**
+   * Copies the non-vector-pointer portion of ChunkSetInfo
+   */
+  def copy(orig: ChunkSetInfo, newAddr: NativePointer): Unit =
+    UnsafeUtils.copy(orig.infoAddr, newAddr, OffsetVectors)
+
+  def copy(bytes: Array[Byte], newAddr: NativePointer): Unit =
+    UnsafeUtils.unsafe.copyMemory(bytes, UnsafeUtils.arayOffset, UnsafeUtils.ZeroPointer, newAddr, bytes.size)
+
+  /**
+   * Actually compares the contents of the ChunkSetInfo non-vector metadata to see if they are equal
+   */
+  def equals(info1: ChunkSetInfo, info2: ChunkSetInfo): Boolean =
+    UnsafeUtils.equate(UnsafeUtils.ZeroPointer, info1.infoAddr, UnsafeUtils.ZeroPointer, info2.infoAddr, OffsetVectors)
+
+  /**
+   * Initializes a new ChunkSetInfo with some initial fields
+   */
+  def initialize(factory: MemFactory, dataset: Dataset, id: ChunkID, startTime: Long): ChunkSetInfo = {
+    val infoAddr = factory.allocateOffheap(dataset.chunkSetInfoSize)
+    setChunkID(infoAddr, id)
+    resetNumRows(infoAddr)
+    setStartTime(infoAddr, startTime)
+    setEndTime(infoAddr, Long.MaxValue)
+    ChunkSetInfo(infoAddr)
   }
 
-  def fromMemRegion(base: Any, offset: Long): ChunkSetInfo =
-    ChunkSetMeta(UnsafeUtils.getLong(base, offset),
-                 UnsafeUtils.getInt(base, offset + 8),
-                 UnsafeUtils.getLong(base, offset + 12),
-                 UnsafeUtils.getLong(base, offset + 20))
+  def apply(factory: MemFactory, dataset: Dataset,
+            id: ChunkID, numRows: Int, startTime: Long, endTime: Long): ChunkSetInfo = {
+    val newInfo = initialize(factory, dataset, id, startTime)
+    UnsafeUtils.setInt(newInfo.infoAddr + OffsetNumRows, numRows)
+    setEndTime(newInfo.infoAddr, endTime)
+    newInfo
+  }
 
-  def toBytes(chunkSetInfo: ChunkSetInfo): Array[Byte] = {
-    val bytes = new Array[Byte](28)
-    toMemRegion(chunkSetInfo, bytes, UnsafeUtils.arayOffset)
+  /**
+   * Copies the offheap info to a byte array for serialization to a persistent store as a byte array
+   */
+  def toBytes(info: ChunkSetInfo): Array[Byte] = {
+    val bytes = new Array[Byte](OffsetVectors)
+    UnsafeUtils.unsafe.copyMemory(UnsafeUtils.ZeroPointer, info.infoAddr, bytes, UnsafeUtils.arayOffset, bytes.size)
     bytes
   }
-
-  def fromBytes(bytes: Array[Byte]): ChunkSetInfo = fromMemRegion(bytes, UnsafeUtils.arayOffset)
 }

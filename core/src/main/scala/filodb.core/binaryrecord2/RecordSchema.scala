@@ -3,6 +3,9 @@ package filodb.core.binaryrecord2
 import filodb.core.metadata.{Column, Dataset}
 import filodb.memory.{BinaryRegion, BinaryRegionLarge, UTF8StringMedium}
 import filodb.memory.format.{RowReader, UnsafeUtils, ZeroCopyUTF8String}
+import filodb.memory.format.{vectors => bv}
+
+// scalastyle:off number.of.methods
 
 /**
  * A RecordSchema is the schema for a BinaryRecord - what type of each field a BR holds.
@@ -46,6 +49,23 @@ final class RecordSchema(val columnTypes: Seq[Column.ColumnType],
 
   val numFields = columnTypes.length
 
+  // Typed, efficient functions, one for each field/column, to add to a RecordBuilder efficiently from a RowReader
+  // with no boxing or extra allocations involved
+  val builderAdders = columnTypes.zipWithIndex.map {
+    case (Column.ColumnType.IntColumn, colNo) =>
+      (row: RowReader, builder: RecordBuilder) => builder.addInt(row.getInt(colNo))
+    case (Column.ColumnType.LongColumn, colNo) =>
+      (row: RowReader, builder: RecordBuilder) => builder.addLong(row.getLong(colNo))
+    case (Column.ColumnType.DoubleColumn, colNo) =>
+      (row: RowReader, builder: RecordBuilder) => builder.addDouble(row.getDouble(colNo))
+    case (Column.ColumnType.StringColumn, colNo) =>
+      // TODO: we REALLY need a better API than ZeroCopyUTF8String as it creates so much garbage
+      (row: RowReader, builder: RecordBuilder) => builder.addBlob(row.filoUTF8String(colNo))
+    case (t: Column.ColumnType, colNo) =>
+      // TODO: add more efficient methods
+      (row: RowReader, builder: RecordBuilder) => builder.addSlowly(row.getAny(colNo))
+  }.toArray
+
   def fieldOffset(index: Int): Int = offsets(index)
 
   def numBytes(base: Any, offset: Long): Int = BinaryRegionLarge.numBytes(base, offset)
@@ -88,6 +108,16 @@ final class RecordSchema(val columnTypes: Seq[Column.ColumnType],
   }
 
   /**
+   * Extracts out the base, offset, length of a string/blob field.  Much preferable to using
+   * asJavaString/asZCUTF8Str methods due to not needing allocations.
+   */
+  def blobBase(base: Any, offset: Long, index: Int): Any = base
+  def blobOffset(base: Any, offset: Long, index: Int): Long =
+    offset + UnsafeUtils.getInt(base, offset + offsets(index)) + 2
+  def blobNumBytes(base: Any, offset: Long, index: Int): Int =
+    UTF8StringMedium.numBytes(base, offset + UnsafeUtils.getInt(base, offset + offsets(index)))
+
+  /**
    * COPIES the BinaryRecord field # index out as a new Java String on the heap.  Allocation + copying cost.
    */
   def asJavaString(base: Any, offset: Long, index: Int): String =
@@ -122,6 +152,7 @@ final class RecordSchema(val columnTypes: Seq[Column.ColumnType],
   }
 
   def stringify(address: NativePointer): String = stringify(UnsafeUtils.ZeroPointer, address)
+  def stringify(bytes: Array[Byte]): String = stringify(bytes, UnsafeUtils.arayOffset)
 
   /**
    * Iterates through each key/value pair of a MapColumn field without any object allocations.
@@ -180,6 +211,19 @@ final class RecordSchema(val columnTypes: Seq[Column.ColumnType],
     case UnsafeUtils.ZeroPointer => BinaryRegionLarge.asNewByteArray(base, offset)
   }
   def asByteArray(address: NativePointer): Array[Byte] = asByteArray(UnsafeUtils.ZeroPointer, address)
+
+  /**
+   * Allows us to compare two RecordSchemas against each other
+   */
+  override def equals(other: Any): Boolean = other match {
+    case r: RecordSchema => columnTypes == r.columnTypes &&
+                            partitionFieldStart == r.partitionFieldStart &&
+                            predefinedKeys == r.predefinedKeys
+    case other: Any      => false
+  }
+
+  override def hashCode: Int = ((columnTypes.hashCode * 31) + partitionFieldStart.hashCode) * 31 +
+                               predefinedKeys.hashCode
 
   import debox.{Map => DMap}   // An unboxed, fast Map
 
@@ -261,6 +305,17 @@ object RecordSchema {
     new RecordSchema(tuple._1, tuple._2, tuple._3)
 }
 
+// Used with PartitionTimeRangeReader, when a user queries for a partition column
+final class PartKeyUTF8Iterator(schema: RecordSchema, base: Any, offset: Long, fieldNo: Int) extends bv.UTF8Iterator {
+  val blob = schema.asZCUTF8Str(base, offset, fieldNo)
+  final def next: ZeroCopyUTF8String = blob
+}
+
+final class PartKeyLongIterator(schema: RecordSchema, base: Any, offset: Long, fieldNo: Int) extends bv.LongIterator {
+  val num = schema.getLong(base, offset, fieldNo)
+  final def next: Long = num
+}
+
 /**
  * This is a class meant to provide a RowReader API for the new BinaryRecord v2.
  * NOTE: Strings cause an allocation of a ZeroCopyUTF8String instance.  TODO: provide a better API that does
@@ -278,6 +333,6 @@ final class BinaryRecordRowReader(schema: RecordSchema,
   def getDouble(columnNo: Int): Double = schema.getDouble(recordBase, recordOffset, columnNo)
   def getFloat(columnNo: Int): Float = ???
   def getString(columnNo: Int): String = ???
-  def getAny(columnNo: Int): Any = ???
+  def getAny(columnNo: Int): Any = schema.columnTypes(columnNo).keyType.extractor.getField(this, columnNo)
   override def filoUTF8String(i: Int): ZeroCopyUTF8String = schema.asZCUTF8Str(recordBase, recordOffset, i)
 }

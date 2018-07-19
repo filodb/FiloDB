@@ -11,7 +11,6 @@ import com.opencsv.CSVWriter
 import com.quantifind.sumac.{ArgMain, FieldArgs}
 import com.typesafe.config.{Config, ConfigFactory}
 import monix.reactive.Observable
-import org.parboiled2.ParseError
 
 import filodb.coordinator._
 import filodb.coordinator.client._
@@ -180,27 +179,19 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
 
         case x: Any =>
           // This will soon be deprecated
-          args.promql0.map { query =>
+          args.promql.map { query =>
             require(args.host.nonEmpty && args.dataset.nonEmpty, "--host and --dataset must be defined")
             val remote = Client.standaloneClient(system, args.host.get, args.port)
             val options = QOptions(args.limit, args.sampleLimit, args.everyNSeconds.map(_.toInt),
-                                   timeout, args.shardOverrides.map(_.map(_.toInt)))
-            parsePromQuery(remote, query, args.dataset.get, args.metricColumn, options)
+              timeout, args.shardOverrides.map(_.map(_.toInt)))
+            parsePromQuery2(remote, query, args.dataset.get,
+              QueryParams(args.start, args.step, args.end), options)
           }.orElse {
             args.select.map { selectCols =>
               exportCSV(getRef(args),
                         selectCols,
                         args.limit,
                         args.outfile)
-            }
-          }.orElse {
-            args.promql.map { query =>
-              require(args.host.nonEmpty && args.dataset.nonEmpty, "--host and --dataset must be defined")
-              val remote = Client.standaloneClient(system, args.host.get, args.port)
-              val options = QOptions(args.limit, args.sampleLimit, args.everyNSeconds.map(_.toInt),
-                timeout, args.shardOverrides.map(_.map(_.toInt)))
-              parsePromQuery2(remote, query, args.dataset.get,
-                QueryParams(args.start, args.step, args.end), options)
             }
           }.getOrElse(printHelp)
       }
@@ -311,69 +302,15 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
     }
   }
 
-  import QueryCommands.QueryResult
-
   final case class QOptions(limit: Int, sampleLimit: Int,
                             everyN: Option[Int], timeout: FiniteDuration,
                             shardOverrides: Option[Seq[Int]])
-
-  def parsePromQuery(client: LocalClient, query: String, dataset: String,
-                     metricCol: String, options: QOptions): Unit = {
-    val opts = DatasetOptions.DefaultOptions.copy(metricColumn = metricCol)
-    val parser = new PromQLParser(query, opts)
-    parser.parseToPlan(true) match {
-      case SSuccess(plan) =>
-        executeQuery(client, dataset, plan, options)
-
-      case Failure(e: ParseError) =>
-        println(s"Failure parsing $query:\n${parser.formatError(e)}")
-        exitCode = 2
-
-      case Failure(t: Throwable) => throw t
-    }
-  }
 
   def parsePromQuery2(client: LocalClient, query: String, dataset: String,
                       queryParams: QueryParams,
                       options: QOptions): Unit = {
     val logicalPlan = Parser.queryRangeToLogicalPlan(query, queryParams)
     executeQuery2(client, dataset, logicalPlan, options)
-  }
-
-  def executeQuery(client: LocalClient, dataset: String, plan: LogicalPlan,
-                   options: QOptions): Unit = {
-    val ref = DatasetRef(dataset)
-    val qOpts = QueryCommands.QueryOptions(itemLimit = options.limit,
-                                           queryTimeoutSecs = options.timeout.toSeconds.toInt,
-                                           shardOverrides = options.shardOverrides)
-    println(s"Sending query command to server for $ref with options $qOpts...")
-    println(s"Query Plan:\n$plan")
-    options.everyN match {
-      case Some(intervalSecs) =>
-        val fut = Observable.intervalAtFixedRate(intervalSecs.seconds).foreach { n =>
-          client.logicalPlanQuery(ref, plan, qOpts) match {
-            case QueryResult(_, result) =>
-              result.prettyPrint(partitionRowLimit = options.sampleLimit).foreach(println)
-          }
-        }.recover {
-          case e: ClientException =>
-            println(s"ERROR: ${e.getMessage}")
-            exitCode = 2
-        }
-        while (!fut.isCompleted) { Thread sleep 1000 }
-      case None =>
-        try {
-          client.logicalPlanQuery(ref, plan, qOpts) match {
-            case QueryResult(_, result) =>
-              println(result.schema.columns.map(_.name).mkString("\t"))
-              result.prettyPrint(partitionRowLimit = options.sampleLimit).foreach(println)
-          }
-        } catch {
-          case e: ClientException =>
-            println(s"ERROR: ${e.getMessage}")
-            exitCode = 2
-        }
-    }
   }
 
   def executeQuery2(client: LocalClient, dataset: String, plan: LogicalPlan2, options: QOptions): Unit = {

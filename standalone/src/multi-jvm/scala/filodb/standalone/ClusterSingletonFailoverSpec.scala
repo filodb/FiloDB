@@ -84,7 +84,7 @@ abstract class ClusterSingletonFailoverSpec extends StandaloneMultiJvmSpec(Clust
       // Note that merely accessing them does not start up any cluster, but we are using the server's to ensure
       // that configs are consistent.
       val metaStore = server.cluster.metaStore
-      val colStore = server.cluster.memStore.sink
+      val colStore = server.cluster.memStore.store
 
       implicit val patienceConfig = PatienceConfig(timeout = Span(10, Seconds), interval = Span(100, Millis))
       metaStore.initialize().futureValue shouldBe Success

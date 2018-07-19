@@ -217,10 +217,6 @@ object RowReader {
     def getField(reader: RowReader, columnNo: Int): F
     def getFieldOrDefault(reader: RowReader, columnNo: Int): F = getField(reader, columnNo)
     def compare(reader: RowReader, other: RowReader, columnNo: Int): Int
-
-    // Creates a FiloConstVector of the right type from the RowReader directly
-    final def constVector(reader: RowReader, columnNo: Int, length: Int): FiloConstVector[F] =
-      new FiloConstVector(getField(reader, columnNo), length)
   }
 
   // A generic FieldExtractor for objects

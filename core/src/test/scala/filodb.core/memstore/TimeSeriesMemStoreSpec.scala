@@ -10,8 +10,8 @@ import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
 
 import filodb.core._
-import filodb.core.query.{AggregationFunction, ColumnFilter, Filter}
-import filodb.core.store.{FilteredPartitionScan, InMemoryMetaStore, NullColumnStore, QuerySpec, SinglePartitionScan}
+import filodb.core.query.{ColumnFilter, Filter}
+import filodb.core.store.{FilteredPartitionScan, InMemoryMetaStore, NullColumnStore, SinglePartitionScan}
 import filodb.memory.format.ZeroCopyUTF8String
 
 class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter with ScalaFutures {
@@ -27,7 +27,6 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
 
   after {
     memStore.reset()
-    memStore.sink.reset()
     memStore.metastore.clearAllData()
   }
 
@@ -55,7 +54,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     partStrings shouldEqual expectedStrings
   }
 
-  it("should ingest into multiple series and aggregate across partitions") {
+  it("should ingest into multiple series and query across partitions") {
     memStore.setup(dataset1, 1, TestData.storeConf)
     val data = records(dataset1, linearMultiSeries().take(20))   // 2 records per series x 10 series
     memStore.ingest(dataset1.ref, 1, data)
@@ -66,10 +65,8 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     }
 
     val split = memStore.getScanSplits(dataset1.ref, 1).head
-    val query = QuerySpec("min", AggregationFunction.Sum)
-    val agg1 = memStore.aggregate(dataset1, query, FilteredPartitionScan(split))
-                       .get.runAsync.futureValue
-    agg1.result should equal (Array((1 to 20).map(_.toDouble).sum))
+    val agg1 = memStore.scanRows(dataset1, Seq(1), FilteredPartitionScan(split)).map(_.getDouble(0)).sum
+    agg1 shouldEqual ((1 to 20).map(_.toDouble).sum)
   }
 
   it("should ingest map/tags column as partition key and aggregate") {
@@ -79,11 +76,9 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
 
     memStore.asInstanceOf[TimeSeriesMemStore].commitIndexBlocking(dataset1.ref)
     val split = memStore.getScanSplits(dataset2.ref, 1).head
-    val query = QuerySpec("min", AggregationFunction.Sum)
     val filter = ColumnFilter("n", Filter.Equals("2".utf8))
-    val agg1 = memStore.aggregate(dataset2, query, FilteredPartitionScan(split, Seq(filter)))
-                       .get.runAsync.futureValue
-    agg1.result should equal (Array(3 + 8 + 13 + 18))
+    val agg1 = memStore.scanRows(dataset2, Seq(1), FilteredPartitionScan(split, Seq(filter))).map(_.getDouble(0)).sum
+    agg1 shouldEqual (3 + 8 + 13 + 18)
   }
 
   it("should be able to handle nonexistent partition keys") {
@@ -101,12 +96,12 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     val minSeries0 = data(0)(1).asInstanceOf[Double]
     val partKey0 = partKeyBuilder.addFromObjects(data(0)(5))
     val q = memStore.scanRows(dataset1, Seq(1), SinglePartitionScan(partKey0, 0))
-    q.map(_.getDouble(0)).toSeq.head should equal (minSeries0)
+    q.map(_.getDouble(0)).toSeq.head shouldEqual minSeries0
 
     val minSeries1 = data(1)(1).asInstanceOf[Double]
     val partKey1 = partKeyBuilder.addFromObjects("Series 1")
     val q2 = memStore.scanRows(dataset1, Seq(1), SinglePartitionScan(partKey1, 0))
-    q2.map(_.getDouble(0)).toSeq.head should equal (minSeries1)
+    q2.map(_.getDouble(0)).toSeq.head shouldEqual minSeries1
   }
 
   it("should query on multiple partitions using filters") {
@@ -140,15 +135,14 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     memStore.indexNames(dataset2.ref).toSet should equal (
       Set(("n", 0), ("series", 0), ("n", 1), ("series", 1)))
 
-    val query = QuerySpec("min", AggregationFunction.Sum)
     val filter = ColumnFilter("n", Filter.Equals("2".utf8))
-    val agg1 = memStore.aggregate(dataset2, query, FilteredPartitionScan(splits.head, Seq(filter)))
-                       .get.runAsync.futureValue
-    agg1.result should equal (Array(3 + 8 + 13 + 18))
+    val agg1 = memStore.scanRows(dataset2, Seq(1), FilteredPartitionScan(splits.head, Seq(filter)))
+                       .map(_.getDouble(0)).sum
+    agg1 shouldEqual (3 + 8 + 13 + 18)
 
-    val agg2 = memStore.aggregate(dataset2, query, FilteredPartitionScan(splits.last, Seq(filter)))
-                       .get.runAsync.futureValue
-    agg2.result should equal (Array(3 + 9 + 15))
+    val agg2 = memStore.scanRows(dataset2, Seq(1), FilteredPartitionScan(splits.last, Seq(filter)))
+                       .map(_.getDouble(0)).sum
+    agg2 shouldEqual (3 + 9 + 15)
   }
 
   it("should ingestStream into multiple shards and not flush with empty flush stream") {
@@ -167,14 +161,13 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     fut2.futureValue
 
     val splits = memStore.getScanSplits(dataset1.ref, 1)
-    val query = QuerySpec("min", AggregationFunction.Sum)
-    val agg1 = memStore.aggregate(dataset1, query, FilteredPartitionScan(splits.head))
-                       .get.runAsync.futureValue
-    agg1.result should equal (Array((1 to 100).map(_.toDouble).sum))
+    val agg1 = memStore.scanRows(dataset1, Seq(1), FilteredPartitionScan(splits.head))
+                       .map(_.getDouble(0)).sum
+    agg1 shouldEqual ((1 to 100).map(_.toDouble).sum)
 
-    val agg2 = memStore.aggregate(dataset1, query, FilteredPartitionScan(splits.last))
-                       .get.runAsync.futureValue
-    agg2.result should equal (Array((1 to 100).map(_.toDouble).sum))
+    val agg2 = memStore.scanRows(dataset1, Seq(1), FilteredPartitionScan(splits.last))
+                       .map(_.getDouble(0)).sum
+    agg2 shouldEqual ((1 to 100).map(_.toDouble).sum)
 
     // should not have increased
     chunksetsWritten shouldEqual initChunksWritten
@@ -209,11 +202,9 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
 
     // Try reading - should be able to read optimized chunks too
     val splits = memStore.getScanSplits(dataset1.ref, 1)
-    val query = QuerySpec("min", AggregationFunction.Sum)
-
-    val agg1 = memStore.aggregate(dataset1, query, FilteredPartitionScan(splits.head))
-                       .get.runAsync.futureValue
-    agg1.result should equal (Array((1 to 100).map(_.toDouble).sum))
+    val agg1 = memStore.scanRows(dataset1, Seq(1), FilteredPartitionScan(splits.head))
+                       .map(_.getDouble(0)).sum
+    agg1 shouldEqual ((1 to 100).map(_.toDouble).sum)
   }
 
   it("should flush index time buckets for last group of flush interval") {
@@ -259,10 +250,9 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     // Should have less than 50 records ingested
     // Try reading - should be able to read optimized chunks too
     val splits = memStore.getScanSplits(dataset1.ref, 1)
-    val query = QuerySpec("min", AggregationFunction.Count)
-    val agg1 = memStore.aggregate(dataset1, query, FilteredPartitionScan(splits.head))
-                       .get.runAsync.futureValue
-    agg1.result should equal (Array(71))
+    val data1 = memStore.scanRows(dataset1, Seq(1), FilteredPartitionScan(splits.head))
+                        .map(_.getDouble(0)).toSeq
+    data1.length shouldEqual 71
   }
 
   it("should truncate shards properly") {
@@ -279,8 +269,8 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     memStore.numPartitions(dataset1.ref, 0) should equal (0)
   }
 
-  private def chunksetsWritten = memStore.sink.sinkStats.chunksetsWritten
-  private def timebucketsWritten = memStore.sink.sinkStats.timeBucketsWritten
+  private def chunksetsWritten = memStore.store.sinkStats.chunksetsWritten
+  private def timebucketsWritten = memStore.store.sinkStats.timeBucketsWritten
 
   it("should be able to evict partitions properly, flush, and still query") {
     memStore.setup(dataset1, 0, TestData.storeConf)

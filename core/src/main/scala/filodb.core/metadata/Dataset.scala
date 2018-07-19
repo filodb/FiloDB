@@ -7,9 +7,10 @@ import net.ceedubs.ficus.Ficus._
 import org.scalactic._
 
 import filodb.core._
-import filodb.core.binaryrecord2.{RecordBuilder, RecordComparator, RecordSchema => RecordSchema2}
+import filodb.core.binaryrecord2.{RecordSchema => RecordSchema2, _}
 import filodb.core.query.ColumnInfo
-import filodb.memory.format.{FiloVector, RowReader}
+import filodb.core.store.ChunkSetInfo
+import filodb.memory.format.{BinaryVector, RowReader, TypedIterator}
 import filodb.memory.MemFactory
 
 /**
@@ -45,17 +46,23 @@ final case class Dataset(name: String,
   val comparator      = new RecordComparator(ingestionSchema)
   val partKeySchema   = comparator.partitionKeySchema
 
-  // Used to create a `FiloVector` of correct type for a given data column ID; (ByteBuffer, Int) => FiloVector[_]
-  val vectorMakers    = dataColumns.map(col => FiloVector.defaultVectorMaker(col.columnType.clazz)).toArray
+  // Used to create a `VectorDataReader` of correct type for a given data column ID;  type PtrToDataReader
+  val dataReaders     = dataColumns.map(col => BinaryVector.defaultPtrToReader(col.columnType.clazz)).toArray
+  val numDataColumns  = dataColumns.length
 
   // Used for ChunkSetReader.binarySearchKeyChunks
   val rowKeyOrdering = CompositeReaderOrdering(rowKeyColumns.map(_.columnType.keyType))
 
   val timestampColumn = rowKeyColumns.head
+  val timestampColID  = timestampColumn.id
+
+  // The number of bytes of chunkset metadata including vector pointers in memory
+  val chunkSetInfoSize = ChunkSetInfo.chunkSetInfoSize(dataColumns.length)
+  val blockMetaSize    = chunkSetInfoSize + 4
 
   private val partKeyBuilder = new RecordBuilder(MemFactory.onHeapFactory, partKeySchema, 10240)
   /**
-   * Creates a PartitionKey (BinaryRecord v2) from individual parts
+   * Creates a PartitionKey (BinaryRecord v2) from individual parts.  Horribly slow, use for testing only.
    */
   def partKey(parts: Any*): Array[Byte] = {
     val offset = partKeyBuilder.addFromObjects(parts: _*)
@@ -64,8 +71,24 @@ final case class Dataset(name: String,
     bytes
   }
 
+  import Column.ColumnType._
+
   /**
-   * Extracts a timestamp out of a RowReader, assuming data columns are first
+   * Creates a TypedIterator for querying a constant partition key column.
+   */
+  def partColIterator(columnID: Int, base: Any, offset: Long): TypedIterator = {
+    val partColPos = columnID - Dataset.PartColStartIndex
+    require(Dataset.isPartitionID(columnID) && partColPos < partitionColumns.length)
+    partitionColumns(partColPos).columnType match {
+      case StringColumn => new PartKeyUTF8Iterator(partKeySchema, base, offset, partColPos)
+      case LongColumn   => new PartKeyLongIterator(partKeySchema, base, offset, partColPos)
+      case TimestampColumn => new PartKeyLongIterator(partKeySchema, base, offset, partColPos)
+      case other: Column.ColumnType => ???
+    }
+  }
+
+  /**
+   * Extracts a timestamp out of a RowReader, assuming data columns are first (ingestion order)
    */
   def timestamp(dataRowReader: RowReader): Long = dataRowReader.getLong(rowKeyIDs.head)
 

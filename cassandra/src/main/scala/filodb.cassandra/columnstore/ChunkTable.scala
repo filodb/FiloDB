@@ -47,12 +47,12 @@ sealed class ChunkTable(val dataset: DatasetRef,
 
   def writeChunks(partition: Array[Byte],
                   chunkInfo: ChunkSetInfo,
-                  chunks: Seq[(Int, ByteBuffer)],
+                  chunks: Seq[ByteBuffer],
                   stats: ChunkSinkStats,
                   diskTimeToLive: Int): Future[Response] = {
     val partBytes = toBuffer(partition)
     var chunkBytes = 0L
-    val statements = chunks.map { case (columnId, bytes) =>
+    val statements = chunks.zipWithIndex.map { case (bytes, columnId) =>
       val finalBytes = compressChunk(bytes)
       chunkBytes += finalBytes.capacity.toLong
       writeChunksCql.bind(partBytes, chunkInfo.id: jlLong, columnId: jlInt, finalBytes, diskTimeToLive: jlInt)

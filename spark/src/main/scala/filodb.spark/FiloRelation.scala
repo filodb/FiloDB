@@ -15,9 +15,9 @@ import filodb.coordinator.client.Client.parse
 import filodb.core._
 import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.metadata.{Column, Dataset}
-import filodb.core.query.{ChunkSetReader, ColumnFilter, Filter => FF, KeyFilter}
+import filodb.core.query.{ColumnFilter, Filter => FF, KeyFilter}
 import filodb.core.store._
-import filodb.memory.format.{FiloRowReader, FiloVector, ZeroCopyUTF8String}
+import filodb.memory.format.{RowReader, ZeroCopyUTF8String}
 
 object FiloRelation extends StrictLogging {
   implicit val context = scala.concurrent.ExecutionContext.Implicits.global
@@ -225,10 +225,12 @@ object FiloRelation extends StrictLogging {
     FiloExecutor.memStore    // force startup
     val dataset = Dataset.fromCompactString(serializedDataset)
 
-    FiloExecutor.memStore.scanRows(
-      dataset, columnIDs, partMethod, chunkMethod,
-      SparkRowReader.chunkReaderMapFunc(dataset, columnIDs),
-      (vectors) => new SparkRowReader(vectors)).asInstanceOf[Iterator[Row]]
+    val sparkReader = new SparkRowReader(dataset, columnIDs)
+    FiloExecutor.memStore.scanRows(dataset, columnIDs, partMethod, chunkMethod)
+                .map { filoRow =>
+                  sparkReader.filoRowReader = filoRow
+                  sparkReader.asInstanceOf[Row]
+                }
   }
 }
 
@@ -320,68 +322,38 @@ case class FiloRelation(dataset: DatasetRef,
   }
 }
 
-object SparkRowReader {
-  import Column.ColumnType.TimestampColumn
-
-  def chunkReaderMapFunc(dataset: Dataset, columnIDs: Seq[Int]): ChunkSetReader => ChunkSetReader = {
-    // determine which columns are Timestamp
-    val timestampPositions = columnIDs.zipWithIndex.collect {
-      case (colID, pos) if dataset.columnFromID(colID).columnType == TimestampColumn => pos
-    }
-
-    // generate function transforming vector to vector, if needed
-    { (r: ChunkSetReader) =>
-      val newVectors = r.vectors.clone()
-      timestampPositions.foreach { tsPos =>
-        if (!newVectors(tsPos).isInstanceOf[SparkTimestampFiloVector])
-          newVectors(tsPos) = new SparkTimestampFiloVector(r.vectors(tsPos).asInstanceOf[FiloVector[Long]])
-      }
-      new ChunkSetReader(r.info, r.skips, newVectors)
-    }
-  }
-}
-
-/**
- * A class to wrap the original FiloVector[Long] for Spark's InternalRow Timestamp representation,
- * which is based on microseconds rather than milliseconds.
- */
-class SparkTimestampFiloVector(innerVector: FiloVector[Long]) extends FiloVector[Long] {
-  final def isAvailable(index: Int): Boolean = innerVector.isAvailable(index)
-  final def apply(index: Int): Long = innerVector(index) * 1000
-  final def length: Int = innerVector.length
-}
-
 /**
  * Base the SparkRowReader on Spark's InternalRow.  Scans are much faster because
  * sources that return RDD[Row] need to be converted to RDD[InternalRow], and the
  * conversion is horribly expensive, especially for primitives and strings.
  * The only downside is that the API is not stable.  :/
  */
-class SparkRowReader(val parsers: Array[FiloVector[_]])
-extends BaseGenericInternalRow with FiloRowReader {
-  var rowNo: Int = -1
-  final def setRowNo(newRowNo: Int): Unit = { rowNo = newRowNo }
+class SparkRowReader(dataset: Dataset, columnIDs: Seq[Int]) extends BaseGenericInternalRow {
+  import Column.ColumnType
+  var filoRowReader: RowReader = _
 
-  final def notNull(columnNo: Int): Boolean = parsers(columnNo).isAvailable(rowNo)
+  // determine which columns are Timestamp
+  val timestampPositions = columnIDs.zipWithIndex.collect {
+    case (colID, pos) if dataset.columnFromID(colID).columnType == ColumnType.TimestampColumn => pos
+  }.toSet
 
-  override final def getBoolean(columnNo: Int): Boolean =
-    parsers(columnNo).asInstanceOf[FiloVector[Boolean]](rowNo)
-  override final def getInt(columnNo: Int): Int =
-    parsers(columnNo).asInstanceOf[FiloVector[Int]](rowNo)
+  final def notNull(columnNo: Int): Boolean = filoRowReader.notNull(columnNo)
+
+  override final def getBoolean(columnNo: Int): Boolean = filoRowReader.getBoolean(columnNo)
+  override final def getInt(columnNo: Int): Int = filoRowReader.getInt(columnNo)
   override final def getLong(columnNo: Int): Long =
-    parsers(columnNo).asInstanceOf[FiloVector[Long]](rowNo)
-  override final def getDouble(columnNo: Int): Double =
-    parsers(columnNo).asInstanceOf[FiloVector[Double]](rowNo)
-  override final def getFloat(columnNo: Int): Float =
-    parsers(columnNo).asInstanceOf[FiloVector[Float]](rowNo)
+    if (timestampPositions.contains(columnNo)) { filoRowReader.getLong(columnNo) * 1000 }
+    else                                       { filoRowReader.getLong(columnNo) }
+  override final def getDouble(columnNo: Int): Double = filoRowReader.getDouble(columnNo)
+  override final def getFloat(columnNo: Int): Float = filoRowReader.getFloat(columnNo)
 
   override final def getUTF8String(columnNo: Int): UTF8String = {
-    val utf8 = parsers(columnNo).asInstanceOf[FiloVector[ZeroCopyUTF8String]](rowNo)
+    val utf8 = filoRowReader.filoUTF8String(columnNo)
     UTF8String.fromAddress(utf8.base, utf8.offset, utf8.numBytes)
   }
 
   final def getAny(columnNo: Int): Any = genericGet(columnNo)
-  final def genericGet(columnNo: Int): Any = parsers(columnNo).boxed(rowNo) match {
+  final def genericGet(columnNo: Int): Any = filoRowReader.getAny(columnNo) match {
     case z: ZeroCopyUTF8String => UTF8String.fromAddress(z.base, z.offset, z.numBytes)
     case o: Any                => o
     // scalastyle:off
@@ -390,7 +362,7 @@ extends BaseGenericInternalRow with FiloRowReader {
   }
 
   override final def isNullAt(i: Int): Boolean = !notNull(i)
-  def numFields: Int = parsers.length
+  def numFields: Int = columnIDs.length
 
   // Only used for pure select() queries, doesn't need to be fast?
   def copy(): InternalRow =

@@ -3,13 +3,11 @@ package filodb.core.query
 import org.joda.time.DateTime
 
 import filodb.core.binaryrecord.BinaryRecord
-import filodb.core.binaryrecord2.{MapItemConsumer, RecordSchema}
-import filodb.core.metadata.Column
+import filodb.core.binaryrecord2.{MapItemConsumer, RecordBuilder, RecordContainer, RecordSchema}
 import filodb.core.metadata.Column.ColumnType._
-import filodb.core.store.{ChunkScanMethod, RowKeyChunkScan}
+import filodb.core.store.{ChunkScanMethod, FiloPartition}
 import filodb.memory.{MemFactory, UTF8StringMedium}
-import filodb.memory.format.{FastFiloRowReader, FiloVector, RowReader, ZeroCopyUTF8String => UTF8Str}
-import filodb.memory.format.{vectors => bv, _}
+import filodb.memory.format.{RowReader, ZeroCopyUTF8String => UTF8Str}
 
 /**
   * Identifier for a single RangeVector
@@ -61,7 +59,7 @@ final case class CustomRangeVectorKey(labelValues: Map[UTF8Str, UTF8Str]) extend
 object CustomRangeVectorKey {
   def fromZcUtf8(str: UTF8Str): CustomRangeVectorKey = {
     CustomRangeVectorKey(str.asNewString.split("\u03BC").map(_.split("\u03C0")).filter(_.length == 2).map { lv =>
-      ZeroCopyUTF8String(lv(0)) -> ZeroCopyUTF8String(lv(1))
+      UTF8Str(lv(0)) -> UTF8Str(lv(1))
     }.toMap)
   }
 
@@ -102,72 +100,80 @@ trait RangeVector {
 }
 
 final case class RawDataRangeVector(key: RangeVectorKey,
+                                    partition: FiloPartition,
                                     chunkMethod: ChunkScanMethod,
-                                    ordering: Ordering[RowReader],
-                                    readers: Iterator[ChunkSetReader]) extends RangeVector {
-
-  private def rangedIterator(startKey: BinaryRecord, endKey: BinaryRecord): Iterator[RowReader] = {
-    readers.flatMap { reader =>
-      val (startRow, endRow) = reader.rowKeyRange(startKey, endKey, ordering)
-      if (endRow < 0 || startRow >= reader.length) { Iterator.empty }
-      else if (startRow == 0 && endRow == (reader.length - 1)) {
-        reader.rowIterator()
-      } else {
-        reader.rowIterator().take(endRow + 1).drop(startRow)
-      }
-    }
-  }
-
-  val rows: Iterator[RowReader] = {
-    chunkMethod match {
-      case range: RowKeyChunkScan => rangedIterator(range.startkey, range.endkey)
-      case _                      => readers.flatMap(_.rowIterator())
-    }
-  }
+                                    columnIDs: Array[Int]) extends RangeVector {
+  // Iterators are stateful, for correct reuse make this a def
+  def rows: Iterator[RowReader] = partition.timeRangeRows(chunkMethod, columnIDs)
 }
 
+/**
+ * SerializableRangeVector represents a RangeVector that can be serialized over the wire.
+ * RecordContainers may be shared amongst all the SRV's from a single Result to minimize space and heap usage --
+ *   this is the reason for the startRecordNo, the row # of the first container.
+ * PLEASE PLEASE use Kryo to serialize this as it will make sure the single shared RecordContainer is
+ * only serialized once as a single instance.
+ */
 final class SerializableRangeVector(val key: RangeVectorKey,
-                                    val parsers: Array[BinaryVector[_]],
-                                    val numRows: Int) extends RangeVector with java.io.Serializable {
-  override def rows: Iterator[RowReader] = {
-    val reader = new FastFiloRowReader(parsers.map(_.asInstanceOf[FiloVector[_]]))
-    new Iterator[RowReader] {
-      private var i = 0
-      final def hasNext: Boolean = i < numRows
-      final def next: RowReader = {
-        reader.setRowNo(i)
-        i += 1
-        reader
-      }
-    }
-  }
+                                    val numRows: Int,
+                                    containers: Seq[RecordContainer],
+                                    val schema: RecordSchema,
+                                    startRecordNo: Int) extends RangeVector with java.io.Serializable {
+  // Possible for records to spill across containers, so we read from all containers
+  override def rows: Iterator[RowReader] =
+    containers.toIterator.flatMap(_.iterate(schema)).drop(startRecordNo).take(numRows)
 }
 
 object SerializableRangeVector {
-  def apply(rv: RangeVector, cols: Seq[ColumnInfo], limit: Int): SerializableRangeVector = {
-    val memFactory = MemFactory.onHeapFactory
-    val maxElements = 1000 // FIXME for some reason this isn't working if small
-    val vectors: Array[BinaryAppendableVector[_]] = cols.toArray.map { col =>
-      col.colType match {
-        case IntColumn => bv.IntBinaryVector.appendingVector(memFactory, maxElements)
-        case LongColumn => bv.LongBinaryVector.appendingVector(memFactory, maxElements)
-        case DoubleColumn => bv.DoubleVector.appendingVector(memFactory, maxElements)
-        case TimestampColumn => bv.LongBinaryVector.appendingVector(memFactory, maxElements)
-        case StringColumn => bv.UTF8Vector.appendingVector(memFactory, maxElements)
-        case _: Column.ColumnType => ???
-      }
-    }
-    val rows = rv.rows
+  import filodb.core._
+
+  /**
+   * Creates a SerializableRangeVector out of another RangeVector by sharing a previously used RecordBuilder.
+   * The most efficient option when you need to create multiple SRVs as the containers are automatically
+   * shared correctly.
+   * The containers are sent whole as most likely more than one would be sent, so they should mostly be packed.
+   */
+  def apply(rv: RangeVector,
+            builder: RecordBuilder,
+            schema: RecordSchema,
+            limit: Int): SerializableRangeVector = {
     var numRows = 0
-    rows.take(limit).foreach { row =>
+    val oldContainerOpt = builder.currentContainer
+    val startRecordNo = oldContainerOpt.map(_.countRecords).getOrElse(0)
+    rv.rows.take(limit).foreach { row =>
       numRows += 1
-      for { i <- vectors.indices } {
-        vectors(i).addFromReader(row, i)
-      }
+      builder.addFromReader(row)
     }
-    // TODO need to measure if optimize really helps or has a negative effect
-    new SerializableRangeVector(rv.key, vectors.map(_.optimize(memFactory)), numRows)
+    // If there weren't containers before, then take all of them.  If there were, discard earlier ones, just
+    // start with the most recent one we started adding to
+    val containers = oldContainerOpt match {
+      case None                 => builder.allContainers
+      case Some(firstContainer) => builder.allContainers.dropWhile(_ != firstContainer)
+    }
+    new SerializableRangeVector(rv.key, numRows, containers, schema, startRecordNo)
   }
+
+  /**
+   * Creates a SerializableRangeVector out of another RV and ColumnInfo schema.  Convenient but no sharing.
+   * Since it wastes space when working with multiple RVs, should be used mostly for testing.
+   */
+  def apply(rv: RangeVector, cols: Seq[ColumnInfo], limit: Int): SerializableRangeVector = {
+    val schema = toSchema(cols)
+    apply(rv, toBuilder(schema), schema, limit)
+  }
+
+  // TODO: make this configurable....
+  val MaxContainerSize = 4096    // 4KB allows for roughly 200 time/value samples
+
+  // Reuse RecordSchemas as there aren't too many schemas
+  val SchemaCacheSize = 100
+  val schemaCache = concurrentCache[Seq[ColumnInfo], RecordSchema](SchemaCacheSize)
+
+  def toSchema(colSchema: Seq[ColumnInfo]): RecordSchema =
+    schemaCache.getOrElseUpdate(colSchema, { cols => new RecordSchema(cols.map(_.colType)) })
+
+  def toBuilder(schema: RecordSchema): RecordBuilder =
+    new RecordBuilder(MemFactory.onHeapFactory, schema, MaxContainerSize)
 }
 
 final case class IteratorBackedRangeVector(key: RangeVectorKey,

@@ -32,6 +32,8 @@ object WireFormat {
 
   def vectorSubType(headerBytes: Int): Int = (headerBytes & 0x00ff00) >> 8
 
+  def majorAndSubType(headerBytes: Int): Int = headerBytes & 0x0ffff
+
   val MaxEmptyVectorLen = 0x00ffffff
 
   def emptyVector(len: Int): Int = {

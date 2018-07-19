@@ -1,18 +1,20 @@
 package filodb.memory.format.vectors
 
-import java.nio.ByteBuffer
 import java.util.HashMap
 
 import scalaxy.loops._
 
 import filodb.memory.MemFactory
 import filodb.memory.format._
+import filodb.memory.format.BinaryVector.BinaryVectorPtr
 
 case class DictUTF8Info(codeMap: HashMap[ZeroCopyUTF8String, Int],
                         dictStrings: BinaryAppendableVector[ZeroCopyUTF8String],
                         codes: BinaryAppendableVector[Int])
 
 object DictUTF8Vector {
+  import WireFormat._
+
   /**
    * Determines if it is worth it to do dictionary encoding (which takes longer).  Tries to use up
    * minimal amount of time to make this determination by sampling or going through only a portion
@@ -40,14 +42,13 @@ object DictUTF8Vector {
     // The max size for the dict we will tolerate given the sample size and orig vector size
     // Above this, cardinality is not likely to be low enough for dict encoding
     val dictThreshold = (sampleSize * spaceThreshold).toInt
-    val dictVect = UTF8Vector.flexibleAppending(memFactory, sourceLen + 1, maxDictSize)
+    val dictVect = UTF8Vector.appendingVector(memFactory, sourceLen + 1, maxDictSize)
     val codeVect = IntBinaryVector.appendingVectorNoNA(memFactory, sourceLen)
     dictVect.addNA()   // first code point 0 == NA
 
     for { i <- 0 until sourceLen optimized } {
-      val item = sourceVector(i)
-      // scalastyle:off
-      if (item != null && item != ZeroCopyUTF8String.NA) {
+      if (sourceVector.isAvailable(i)) {
+        val item = sourceVector(i)
         val newCode = codeMap.size + 1
         val orig = codeMap.putIfAbsent(item, newCode)  // Just one hashcode/compare
         if (orig == 0) {
@@ -59,7 +60,6 @@ object DictUTF8Vector {
       } else {
         codeVect.addData(0)
       }
-      // scalastyle:on
       // Now check if we are over the threshold already
       if (i <= sampleSize && dictVect.length > dictThreshold) return None
     }
@@ -69,70 +69,59 @@ object DictUTF8Vector {
   /**
    * Creates the dictionary-encoding frozen vector from intermediate data.
    */
-  def makeVector(memFactory: MemFactory, info: DictUTF8Info): DictUTF8Vector = {
+  def makeVector(memFactory: MemFactory, info: DictUTF8Info): BinaryVectorPtr = {
     // Estimate and allocate enough space for the UTF8Vector
     val (nbits, signed) = IntBinaryVector.minMaxToNbitsSigned(0, info.codeMap.size)
     val codeVectSize = IntBinaryVector.noNAsize(info.codes.length, nbits)
     val dictVectSize = info.dictStrings.frozenSize
-    val bytesRequired = 8 + dictVectSize + codeVectSize
-    val (base, off, nBytes) = memFactory.allocateWithMagicHeader(bytesRequired)
-    val dispose = () => memFactory.freeMemory(off)
+    val bytesRequired = 12 + dictVectSize + codeVectSize
+    val addr = memFactory.allocateOffheap(bytesRequired)
     // Copy over the dictionary strings
     // TODO: optimize in future to FIXED UTF8 vector?
-    info.dictStrings.freeze(Some((base, off + 8)))
+    info.dictStrings.freeze(Some(addr + 12))
 
     // Fill up the codes - directly in the allocated space for the DictUTF8Vector
-    val codeVect = IntBinaryVector.appendingVectorNoNA(base,
-                                                       off + 8 + dictVectSize,
+    val codeVect = IntBinaryVector.appendingVectorNoNA(addr + 12 + dictVectSize,
                                                        codeVectSize,
-                                                       nbits, signed, dispose)
+                                                       nbits, signed, () => {})
     codeVect.addVector(info.codes)
 
-    // Write 8 bytes of metadata at beginning
-    UnsafeUtils.setInt(base, off,     WireFormat.SUBTYPE_UTF8)
-    UnsafeUtils.setInt(base, off + 4, 8 + dictVectSize)
-
-    new DictUTF8Vector(base, off, bytesRequired, dispose)
-  }
-
-  /**
-   * Wraps bytes with a DictUTF8Vector so it can be read.
-   */
-  def apply(buffer: ByteBuffer): DictUTF8Vector = {
-    val (base, off, len) = UnsafeUtils.BOLfromBuffer(buffer)
-    new DictUTF8Vector(base, off, len, BinaryVector.NoOpDispose)
+    // Write 12 bytes of metadata at beginning
+    UnsafeUtils.setInt(addr,     bytesRequired - 4)
+    UnsafeUtils.setInt(addr + 4, WireFormat(VECTORTYPE_BINDICT, SUBTYPE_UTF8))
+    UnsafeUtils.setInt(addr + 8, 12 + dictVectSize)
+    addr
   }
 }
 
 /**
  * Dictionary-encoding UTF8 string BinaryVector
  * Layout:
- * +0   Int    WireFormat vector subtype of dictionary
- * +4   Int    relative offset to integer vector for dictionary codes
- * +8          String dictionary, either UTF8Vector or FixedMaxUTF8Vector
+ * +0   Int    number of bytes of rest of vector
+ * +4   Int    WireFormat (VECTORTYPE_BINDICT, SUBTYPE_UTF8)
+ * +8   Int    relative offset to integer vector for dictionary codes
+ * +12         String dictionary vector (includes its own header bytes)
  * +....
  *
  * The code zero is used to mark NA.  Thus the first entry of the string dictionary is also NA.
  * Unlike the FlatBuffer-based DictStringVector, this one does not need to cache because there is no
  * string deserialization to be done, thus the code is much much simpler.
  */
-class DictUTF8Vector(val base: Any,
-                     val offset: Long,
-                     val numBytes: Int,
-                     val dispose: () => Unit) extends BinaryVector[ZeroCopyUTF8String] {
-  val vectMajorType = WireFormat.VECTORTYPE_BINDICT
-  val vectSubType = WireFormat.SUBTYPE_UTF8
-  val maybeNAs = true
-  private val dictSubtype = UnsafeUtils.getInt(base, offset)
-  private val codeVectOffset = UnsafeUtils.getInt(base, offset + 4)
-
-  private final val dict = dictSubtype match {
-    case WireFormat.SUBTYPE_UTF8 => UTF8Vector(base, offset + 8, codeVectOffset - 8, dispose)
+object UTF8DictVectorDataReader extends UTF8VectorDataReader {
+  final def codeVectAddr(vector: BinaryVectorPtr): BinaryVectorPtr = vector + UnsafeUtils.getInt(vector + 8)
+  final def length(vector: BinaryVectorPtr): Int = IntBinaryVector(codeVectAddr(vector)).length(codeVectAddr(vector))
+  final def apply(vector: BinaryVectorPtr, n: Int): ZeroCopyUTF8String = {
+    val code = IntBinaryVector(codeVectAddr(vector))(codeVectAddr(vector), n)
+    UTF8FlexibleVectorDataReader(vector + 12, code)
   }
 
-  private final val codes = IntBinaryVector(base, offset + codeVectOffset, numBytes - codeVectOffset, dispose)
+  def iterate(vector: BinaryVectorPtr, startElement: Int = 0): UTF8Iterator = new UTF8Iterator {
+    private final val codeIt = IntBinaryVector(codeVectAddr(vector)).iterate(codeVectAddr(vector), startElement)
+    def next: ZeroCopyUTF8String = UTF8FlexibleVectorDataReader(vector + 12, codeIt.next)
+  }
 
-  override final def length: Int = codes.length
-  final def isAvailable(i: Int): Boolean = codes(i) != 0
-  final def apply(i: Int): ZeroCopyUTF8String = dict(codes(i))
+  override def iterateAvailable(vector: BinaryVectorPtr, startElement: Int = 0): BooleanIterator = new BooleanIterator {
+    private final val codeIt = IntBinaryVector(codeVectAddr(vector)).iterate(codeVectAddr(vector), startElement)
+    final def next: Boolean = codeIt.next != 0
+  }
 }

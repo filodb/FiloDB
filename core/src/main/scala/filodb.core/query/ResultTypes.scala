@@ -7,11 +7,10 @@ import monix.eval.Task
 import monix.reactive.Observable
 import org.joda.time.DateTime
 
-import filodb.core.CompositeReaderOrdering
 import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.binaryrecord2.{RecordSchema}
 import filodb.core.metadata.Column
-import filodb.core.store.{ChunkScanMethod, RowKeyChunkScan}
+import filodb.core.store.ChunkScanMethod
 import filodb.memory.format.RowReader
 
 /**
@@ -20,45 +19,6 @@ import filodb.memory.format.RowReader
 final case class PartitionInfo(schema: RecordSchema, base: Array[Byte], offset: Long, shardNo: Int) {
   def partKeyBytes: Array[Byte] = schema.asByteArray(base, offset)
   override def toString: String = s"/shard:$shardNo/${schema.stringify(base, offset)}"
-}
-
-/**
- * Multiple data elements from one or more columns.
- * Could be raw data or intermediate values which fundamentally, given a schema, must be represented
- * by an array of multiple elements, each one with a distinct key.
- * Think of it as a logical array of Tuples, physically represented by multiple BinaryVectors, one for each column.
- */
-final case class PartitionVector(info: Option[PartitionInfo], readers: Seq[ChunkSetReader]) {
-  /**
-   * Returns an Iterator of RowReader over all the chunksets from the key range (startKey, endKey).
-   * Assumes chunks are sorted in row key order, and first few chunks in every reader are the row key vectors.
-   * @param startKey the start of the range desired, inclusive
-   * @param endKey the end of the range desired, inclusive
-   * @param ordering an Ordering that compares RowReaders made from the vectors, consistent with row key vectors
-   *                 could be dataset.rowKeyOrdering for example, but must correspond to schema of readers
-   */
-  def rangedIterator(startKey: BinaryRecord,
-                     endKey: BinaryRecord,
-                     ordering: Ordering[RowReader]): Iterator[RowReader] = {
-    readers.toIterator.flatMap { reader =>
-      val (startRow, endRow) = reader.rowKeyRange(startKey, endKey, ordering)
-      if (endRow < 0 || startRow >= reader.length) { Iterator.empty }
-      else if (startRow == 0 && endRow == (reader.length - 1)) {
-        reader.rowIterator()
-      } else {
-        reader.rowIterator().take(endRow + 1).drop(startRow)
-      }
-    }
-  }
-
-  /**
-   * Returns an Iterator of RowReader over all the rows in each chunkset in order
-   */
-  def allRowsIterator: Iterator[RowReader] = readers.toIterator.flatMap(_.rowIterator())
-}
-
-object PartitionVector {
-  def apply(reader: ChunkSetReader): PartitionVector = PartitionVector(None, Seq(reader))
 }
 
 /**
@@ -124,27 +84,6 @@ sealed trait Result extends java.io.Serializable {
   }
 }
 
-final case class VectorListResult(keyRange: Option[(BinaryRecord, BinaryRecord)],
-                                  schema: ResultSchema,
-                                  vectorList: Seq[PartitionVector]) extends Result {
-  def toRowReaders: Iterator[(Option[PartitionInfo], Seq[RowReader])] = {
-    val keyTypes = schema.columns.take(schema.numRowKeyColumns).map(_.colType.keyType)
-    val ordering = CompositeReaderOrdering(keyTypes)
-    vectorList.toIterator.map { pv =>
-      val rows = keyRange match {
-        case Some((startKey, endKey)) => pv.rangedIterator(startKey, endKey, ordering).toSeq
-        case None                     => pv.allRowsIterator.toSeq
-      }
-      (pv.info, rows)
-    }
-  }
-}
-
-final case class VectorResult(schema: ResultSchema, vector: PartitionVector) extends Result {
-  def toRowReaders: Iterator[(Option[PartitionInfo], Seq[RowReader])] =
-    Iterator.single((vector.info, vector.allRowsIterator.toBuffer))
-}
-
 final case class TupleListResult(schema: ResultSchema, tuples: Seq[Tuple]) extends Result {
   def toRowReaders: Iterator[(Option[PartitionInfo], Seq[RowReader])] =
     tuples.toIterator.map { case Tuple(info, data) => (info, Seq(data)) }
@@ -188,27 +127,6 @@ object ResultMaker extends StrictLogging {
                  chunkMethod: ChunkScanMethod,
                  limit: Int = 1000): Task[Result] = ???
     def fromResult(res: Result): Unit = {}
-  }
-
-  implicit object PartitionVectorObservableMaker extends ResultMaker[Observable[PartitionVector]] {
-    def toResult(partVectors: Observable[PartitionVector],
-                 schema: ResultSchema,
-                 chunkMethod: ChunkScanMethod,
-                 limit: Int = 1000): Task[Result] = {
-      partVectors.take(limit).toListL.map { parts =>
-        // calculate the proper range
-        val keyRange = chunkMethod match {
-          case r: RowKeyChunkScan => Some((r.startkey, r.endkey))
-          case _                  => None
-        }
-        VectorListResult(keyRange, schema, parts)
-      }
-    }
-
-    def fromResult(res: Result): Observable[PartitionVector] = res match {
-      case VectorListResult(_, _, vectors) => Observable.fromIterable(vectors)
-      case other: Result => throw new RuntimeException(s"Unexpected result $other... possible type/plan error")
-    }
   }
 
   implicit object TupleObservableMaker extends ResultMaker[Observable[Tuple]] {

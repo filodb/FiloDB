@@ -6,13 +6,10 @@ import akka.testkit.TestProbe
 import org.scalatest.concurrent.ScalaFutures
 
 import filodb.coordinator.{ActorSpecConfig, ActorTest, NodeClusterActor, ShardMapper}
-import filodb.coordinator.queryengine.Utils
 import filodb.coordinator.queryengine2.QueryEngine
 import filodb.core.{MachineMetricsData, MetricsTestData, NamesTestData, TestData}
-import filodb.core.memstore._
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.store._
-import filodb.memory._
 import filodb.memory.format.{RowReader, SeqRowReader}
 import filodb.memory.format.{ZeroCopyUTF8String => UTF8Str}
 import filodb.prometheus.ast.QueryParams
@@ -35,7 +32,6 @@ object SerializationSpecConfig extends ActorSpecConfig {
 class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) with ScalaFutures {
   import IngestionCommands._
   import NodeClusterActor._
-  import LogicalPlan._
   import QueryCommands._
   import NamesTestData._
 
@@ -126,119 +122,6 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
 
   import filodb.core.query._
 
-  it("should be able to serialize different Aggregates") {
-    roundTrip(DoubleAggregate(99.9)) shouldEqual (DoubleAggregate(99.9))
-
-    val arrayAgg = new ArrayAggregate(10, 0.0)
-    val deserArrayAgg = roundTrip(arrayAgg).asInstanceOf[ArrayAggregate[Double]]
-    deserArrayAgg.result should === (arrayAgg.result)
-
-    val pointAgg = new PrimitiveSimpleAggregate(DoubleSeriesValues(3, "foo",
-                                                                   Seq(DoubleSeriesPoint(100000L, 1.2))))
-    val deserPointAgg = roundTrip(pointAgg).asInstanceOf[PrimitiveSimpleAggregate[DoubleSeriesValues]]
-    deserPointAgg.data should equal (pointAgg.data)
-  }
-
-  val timeScan = KeyRangeQuery(Seq(110000L), Seq(130000L))
-
-  import monix.execution.Scheduler.Implicits.global
-
-  it("should be able to serialize different Result types") {
-    import MachineMetricsData._
-
-    // 2 chunks of 10 samples each, (100000-109000), (110000-119000)
-    val data = linearMultiSeries().take(20).map(SeqRowReader)
-    val chunksets = TestData.toChunkSetStream(dataset1, defaultPartKey, data).toListL
-    val readers = chunksets.runAsync.futureValue.map(ChunkSetReader(_, dataset1, 0 to 2))
-    val partVector = PartitionVector(Some(PartitionInfo(dataset1.partKeySchema, null, defaultPartKey, 0)), readers)
-
-    // VectorListResult is the most complex, it has BinaryRecords, ColumnTypes, and ChunkSetReaders
-    val chunkMethod = Utils.validateDataQuery(dataset1, timeScan).get.asInstanceOf[RowKeyChunkScan]
-    val vectResult = VectorListResult(Some((chunkMethod.startkey, chunkMethod.endkey)),
-                                      ResultSchema(dataset1.infosFromIDs(0 to 3), 1),
-                                      Seq(partVector))
-
-    val readVectResult = roundTrip(vectResult).asInstanceOf[VectorListResult]
-    readVectResult.keyRange shouldEqual vectResult.keyRange
-    readVectResult.schema shouldEqual vectResult.schema
-    readVectResult.vectorList should have length (vectResult.vectorList.length)
-    val vect = readVectResult.vectorList.head
-    // vect.info shouldEqual vectResult.vectorList.head.info
-    // vect.readers.head.info shouldEqual readers.head.info
-    for { n <- 0 until vect.readers.head.vectors.size } {
-      vect.readers.head.vectors(n).getClass shouldEqual readers.head.vectors(n).getClass
-      vect.readers.head.vectors(n).toBuffer shouldEqual readers.head.vectors(n).toBuffer
-    }
-
-    // Also test BinaryRecord/Tuple serialization
-    val tupleResult = TupleResult(ResultSchema(dataset1.infosFromIDs(0 to 0), 1),
-                                  Tuple(Some(PartitionInfo(dataset1.partKeySchema, null, defaultPartKey, 0)),
-                                             chunkMethod.startkey))
-    // roundTrip(tupleResult) shouldEqual tupleResult
-  }
-
-  val colStore: ColumnStore = new NullColumnStore()
-  val memFactory = new NativeMemoryManager(10 * 1024 * 1024)
-
-  val reclaimer = new ReclaimListener {
-    def onReclaim(metaAddr: Long, numBytes: Int): Unit = {}
-  }
-
-  it("should be able to serialize writable buffers as part of VectorListResult") {
-    import MachineMetricsData._
-    val bufferPool = new WriteBufferPool(memFactory, dataset1, 100, 50)
-    val chunkRetentionHours = 10
-    val blockStore = new PageAlignedBlockManager(100 * 1024 * 1024,
-      new MemoryStats(Map("test"-> "test")), reclaimer, 1, chunkRetentionHours)
-    val pagedChunkStore = new DemandPagedChunkStore(dataset1, blockStore, 12, chunkRetentionHours, 1)
-    val ingestBlockHolder = new BlockMemFactory(blockStore, None, 12, true)
-    val part = new TimeSeriesPartition(0, dataset1, defaultPartKey, 0, colStore, bufferPool,
-          pagedChunkStore, new TimeSeriesShardStats(dataset1.ref, 0))
-    val data = singleSeriesReaders().take(10)
-    data.zipWithIndex.foreach { case (r, i) => part.ingest(r, ingestBlockHolder) }
-
-    val readers = part.readers(LastSampleChunkScan, Array(0, 1)).toSeq
-    val partVector = PartitionVector(Some(PartitionInfo(dataset1.partKeySchema, null, defaultPartKey, 0)), readers)
-    val vectResult = VectorListResult(None, ResultSchema(dataset1.infosFromIDs(0 to 3), 1), Seq(partVector))
-
-    val readVectResult = roundTrip(vectResult).asInstanceOf[VectorListResult]
-    readVectResult.keyRange shouldEqual vectResult.keyRange
-    readVectResult.schema shouldEqual vectResult.schema
-    readVectResult.vectorList should have length (vectResult.vectorList.length)
-    val vect = readVectResult.vectorList.head
-    vect.readers.head.info.id shouldEqual readers.head.info.id
-    vect.readers.head.info.numRows shouldEqual readers.head.info.numRows
-    vect.readers.head.info.startTime shouldEqual readers.head.info.startTime
-    for { n <- 0 until vect.readers.head.vectors.size } {
-      // Can't compare classes since GrowableVector is restored as a Masked*BinaryVector
-      vect.readers.head.vectors(n).toBuffer shouldEqual readers.head.vectors(n).toBuffer
-    }
-  }
-
-  it("should be able to serialize LogicalPlans") {
-    val series = (1 to 3).map(n => Seq(s"Series $n"))
-    val q1 = LogicalPlanQuery(dataset.ref, simpleAgg("time_group_avg", Seq("2"), childPlan=
-               PartitionsRange(MultiPartitionQuery(series), timeScan, Seq("min"))))
-    roundTrip(q1) shouldEqual q1
-
-    val series2 = (2 to 4).map(n => s"Series $n")
-    val multiFilter = Seq(ColumnFilter("series", Filter.In(series2.toSet.asInstanceOf[Set[Any]])))
-    val q2 = LogicalPlanQuery(dataset.ref, PartitionsInstant(FilteredPartitionQuery(multiFilter), Seq("min")))
-    roundTrip(q2) shouldEqual q2
-  }
-
-  it("should be able to serialize ExecPlans") {
-    import MachineMetricsData._
-    val keys = (2 to 4).map(n => dataset1.partKey(s"Series $n"))
-    val plan = ExecPlan.streamLastTuplePlan(dataset1, Seq(0, 1), MultiPartitionScan(keys))
-    val query = ExecPlanQuery(dataset.ref, plan, 500)
-
-    val readQuery = roundTrip(query).asInstanceOf[ExecPlanQuery]
-    readQuery.dataset shouldEqual query.dataset
-    readQuery.execPlan.getClass shouldEqual query.execPlan.getClass
-    readQuery.execPlan.children.head.getClass shouldEqual query.execPlan.children.head.getClass
-  }
-
   it("should be able to create, serialize and read from QueryResult") {
     import MachineMetricsData._
 
@@ -283,9 +166,11 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
 
     result.resultSchema shouldEqual roundTripResult.resultSchema
     result.id shouldEqual roundTripResult.id
-    for {i <- 0 until roundTripResult.result.size } {
+    for { i <- 0 until roundTripResult.result.size } {
       // BinaryVector deserializes to different impl, so cannot compare top levle object
-      roundTripResult.result(i).parsers.head.toBuffer shouldEqual result.result(i).parsers.head.toBuffer
+      roundTripResult.result(i).schema shouldEqual result.result(i).schema
+      roundTripResult.result(i).rows.map(_.getDouble(1)).toSeq shouldEqual
+        result.result(i).rows.map(_.getDouble(1)).toSeq
       roundTripResult.result(i).key.labelValues shouldEqual result.result(i).key.labelValues
       roundTripResult.result(i).key.sourceShards shouldEqual result.result(i).key.sourceShards
     }
@@ -353,7 +238,8 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
     val keysMap = Map(UTF8Str("key1") -> UTF8Str("val1"),
                       UTF8Str("key2") -> UTF8Str("val2"))
     val key = CustomRangeVectorKey(keysMap)
-    val ser = SerializableRangeVector(IteratorBackedRangeVector(key, Iterator.empty), Seq.empty, 10)
+    val cols = Seq(ColumnInfo("value", ColumnType.DoubleColumn))
+    val ser = SerializableRangeVector(IteratorBackedRangeVector(key, Iterator.empty), cols, 10)
 
     val schema = ResultSchema(MachineMetricsData.dataset1.infosFromIDs(0 to 0), 1)
 

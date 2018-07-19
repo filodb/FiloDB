@@ -4,10 +4,7 @@ import java.util.concurrent.TimeUnit
 
 import scala.language.postfixOps
 
-import org.openjdk.jmh.annotations.{Mode, Scope, State}
-import org.openjdk.jmh.annotations.Benchmark
-import org.openjdk.jmh.annotations.BenchmarkMode
-import org.openjdk.jmh.annotations.OutputTimeUnit
+import org.openjdk.jmh.annotations._
 import scalaxy.loops._
 
 import filodb.memory.format._
@@ -48,6 +45,12 @@ class DictStringBenchmark {
   def shouldNA: Boolean = nextFloat < naChance
 
   val scNA = UTF8Vector(memFactory, randomStrings.map(str => if (shouldNA) ZeroCopyUTF8String.empty else str.utf8))
+  val scNAPtr = scNA.optimize(memFactory)
+
+  @TearDown
+  def shutdown(): Unit = {
+    memFactory.shutdown()
+  }
 
   @Benchmark
   @BenchmarkMode(Array(Mode.AverageTime))
@@ -65,10 +68,15 @@ class DictStringBenchmark {
   @Benchmark
   @BenchmarkMode(Array(Mode.AverageTime))
   @OutputTimeUnit(TimeUnit.MICROSECONDS)
-  // Measures foreach and NA read speed
+  // Measures iterate() and NA read speed
   def withNAlengthTotal(): Unit = {
     var totalLen = 0
-    scNA.foreach { str => totalLen += str.length }
+
+    val reader = UTF8Vector(scNAPtr)
+    val it = reader.iterate(scNAPtr)
+    for { i <- 0 until numValues optimized } {
+      totalLen += it.next.length
+    }
     totalLen
   }
 }

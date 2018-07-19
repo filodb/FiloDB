@@ -2,117 +2,160 @@ package filodb.memory.format
 
 import java.nio.ByteBuffer
 
+import debox.Buffer
 import scalaxy.loops._
 
-import filodb.memory.MemFactory
+import filodb.memory.{BinaryRegion, MemFactory}
 import filodb.memory.format.Encodings._
 
 /**
- * This is really the same as FiloVector, but supports off-heap easier.
- * An immutable, zero deserialization, minimal/zero allocation, insanely fast binary sequence.
- * TODO: maybe merge this and FiloVector, or just make FiloVector support ZeroCopyBinary.
+ * An offheap, immutable, zero deserialization, minimal/zero allocation, insanely fast binary sequence.
+ * NOTE: BinaryVectors are just memory regions.  To minimize heap usage, NO heap objects exist for BinaryVectors
+ * at all.  However, VectorDataReader objects can be used to access them, when you pass in the BinaryVectorPtr.
+ * Class instances for appendable BinaryVectors do exist. They are intended for reusing and creating BinaryVector
+ * regions (via optimize()) elsewhere.
  */
-trait BinaryVector[@specialized(Int, Long, Double, Boolean) A] extends FiloVector[A] with ZeroCopyBinary {
-
-  /** The major and subtype bytes as defined in WireFormat that will go into the FiloVector header */
-  def vectMajorType: Int
-
-  def vectSubType: Int
+object BinaryVector {
+  // TODO: make this more typesafe, using @newsubtype or Long with Pointer etc.
+  /**
+   * A native pointer to a BinaryVector.
+   */
+  type BinaryVectorPtr = BinaryRegion.NativePointer
 
   /**
-    * Should return false if this vector definitely has no NAs, and true if it might have some or is
-    * designed to support NAs.
-    * Returning false allows optimizations for aggregations.
-    */
-  def maybeNAs: Boolean
-
-  def isOffheap: Boolean = base == UnsafeUtils.ZeroPointer
+   * Returns the vector type and subtype from the WireFormat bytes of a BinaryVector
+   */
+  def vectorType(addr: BinaryVectorPtr): Int = WireFormat.majorAndSubType(UnsafeUtils.getInt(addr + 4))
+  def majorVectorType(addr: BinaryVectorPtr): Int = WireFormat.majorVectorType(UnsafeUtils.getInt(addr + 4))
 
   /**
-    * Called when this BinaryVector is no longer required.
-    * Implementations may choose to free memory or any other resources.
-    */
-  def dispose: () => Unit
+   * Returns the total number of bytes of the BinaryVector at address
+   */
+  final def totalBytes(addr: BinaryVectorPtr): Int = UnsafeUtils.getInt(addr) + 4
 
-  // Write out the header if it is uninitialized
-  // Assumes proper allocation with magic header written to four bytes before offset
-  def initHeaderBytes(): Unit =
-    if (UnsafeUtils.getInt(base, offset - 4) == BinaryVector.HeaderMagic) {
-      UnsafeUtils.setInt(base, offset - 4, WireFormat(vectMajorType, vectSubType))
-    }
+  final def asBuffer(addr: BinaryVectorPtr): ByteBuffer = UnsafeUtils.asDirectBuffer(addr, totalBytes(addr))
 
-  /**
-    * Produce a FiloVector ByteBuffer with the four-byte header.  The resulting buffer can be used for I/O
-    * and fed to FiloVector.apply() to be parsed back.  For most BinaryVectors returned by optimize() and
-    * freeze(), a copy is not necessary so this is usually a very inexpensive operation.
-    */
-  def toFiloBuffer: ByteBuffer = base match {
-    case UnsafeUtils.ZeroPointer =>
-      initHeaderBytes()
-      UnsafeUtils.asDirectBuffer(offset - 4, numBytes + 4)
+  type BufToDataReader = PartialFunction[Class[_], ByteBuffer => VectorDataReader]
 
-    case a: Array[Byte] =>
-      assert(offset == (UnsafeUtils.arayOffset + 4))
-      initHeaderBytes()
-      val bb = ByteBuffer.wrap(a)
-      bb.limit(numBytes + 4)
-      bb.order(java.nio.ByteOrder.LITTLE_ENDIAN)
-      bb
-
-    case _ =>
-      //we only support cases where base is an Array or null for offheap.
-      throw new UnsupportedOperationException
+  val defaultBufToReader: BufToDataReader = {
+    case Classes.Int    => (b => vectors.IntBinaryVector(b))
+    case Classes.Long   => (b => vectors.LongBinaryVector(b))
+    case Classes.Double => (b => vectors.DoubleVector(b))
+    case Classes.UTF8   => (b => vectors.UTF8Vector(b))
   }
 
-}
+  type PtrToDataReader = PartialFunction[Class[_], BinaryVectorPtr => VectorDataReader]
 
-trait PrimitiveVector[@specialized(Int, Long, Double, Boolean) A] extends BinaryVector[A] {
-  val vectMajorType = WireFormat.VECTORTYPE_BINSIMPLE
-  val vectSubType = WireFormat.SUBTYPE_PRIMITIVE_NOMASK
-  val maybeNAs = false
-}
-
-object BinaryVector {
-  /** Used to reserve memory location "4-byte header will go here" */
-  val HeaderMagic = 0x87654300  // The lower 8 bits should not be 00
-
-  /**
-    * A memory has a base, offset and a length. An off-heap memory usually has a null base.
-    * An array backed memory has the array object as the base. Offset is a Long indicating the
-    * location in native memory. For an array it is retrieved using Unsafe.arrayBaseOffset
-    * Length is the length of memory in bytes
-    */
-  type Memory = Tuple3[Any, Long, Int]
+  val defaultPtrToReader: PtrToDataReader = {
+    case Classes.Int    => (p => vectors.IntBinaryVector(p))
+    case Classes.Long   => (p => vectors.LongBinaryVector(p))
+    case Classes.Double => (p => vectors.DoubleVector(p))
+    case Classes.UTF8   => (p => vectors.UTF8Vector(p))
+  }
 
   /**
     * A dispose method which does nothing.
     */
   val NoOpDispose = () => {}
+}
 
+//scalastyle:off
+import BinaryVector.BinaryVectorPtr
+//scalastyle:on
+
+trait TypedIterator {
+  final def asIntIt: vectors.IntIterator = this.asInstanceOf[vectors.IntIterator]
+  final def asLongIt: vectors.LongIterator = this.asInstanceOf[vectors.LongIterator]
+  final def asDoubleIt: vectors.DoubleIterator = this.asInstanceOf[vectors.DoubleIterator]
+  final def asUTF8It: vectors.UTF8Iterator = this.asInstanceOf[vectors.UTF8Iterator]
+}
+
+trait BooleanIterator extends TypedIterator {
+  def next: Boolean
+}
+
+object AlwaysAvailableIterator extends BooleanIterator {
+  final def next: Boolean = true
+}
+
+trait AvailableReader {
+  /**
+   * Returns a BooleanIterator returning true or false for each element's availability
+   * By default returns one that says every element is available.  Override if this is not true.
+   */
+  def iterateAvailable(vector: BinaryVectorPtr, startElement: Int = 0): BooleanIterator = AlwaysAvailableIterator
+}
+
+/**
+ * Base trait for offheap BinaryVectors, to be mixed into objects.
+ * New-style BinaryVectors are BinaryRegionLarge's, having a 4-byte length header.
+ * Following the 4-byte length header was the old WireFormat word.
+ * Note that it must be completely stateless. The goal is to use NO heap objects or space,
+ * simply a Long native pointer to point at where the BinaryVector is.
+ */
+trait VectorDataReader extends AvailableReader {
+  /**
+   * Returns the number of bytes of the BinaryVector FOLLOWING the 4-byte length header.
+   */
+  final def numBytes(addr: BinaryVectorPtr): Int = UnsafeUtils.getInt(addr)
+
+  /**
+   * Returns the number of eleemnts in the vector
+   */
+  def length(addr: BinaryVectorPtr): Int
+
+  /**
+   * Returns a TypedIterator to efficiently go through the elements of the vector.  The user is responsible for
+   * knowing how many elements to process.  There is no hasNext.
+   * All elements are iterated through, even those designated as "not available".
+   * Costs an allocation for the iterator but allows potential performance gains too.
+   * @param vector the BinaryVectorPtr native address of the BinaryVector
+   * @param startElement the starting element # in the vector, by default 0 (the first one)
+   */
+  def iterate(vector: BinaryVectorPtr, startElement: Int = 0): TypedIterator
+
+  def asIntReader: vectors.IntVectorDataReader = this.asInstanceOf[vectors.IntVectorDataReader]
+  def asLongReader: vectors.LongVectorDataReader = this.asInstanceOf[vectors.LongVectorDataReader]
+  def asDoubleReader: vectors.DoubleVectorDataReader = this.asInstanceOf[vectors.DoubleVectorDataReader]
+  def asUTF8Reader: vectors.UTF8VectorDataReader = this.asInstanceOf[vectors.UTF8VectorDataReader]
+}
+
+// An efficient iterator for the bitmap mask, rotating a mask as we go
+class BitmapMaskIterator(vector: BinaryVectorPtr, startElement: Int) extends BooleanIterator {
+  var bitmapAddr: Long = vector + 12 + (startElement >> 6) * 8
+  var bitMask: Long = 1L << (startElement & 0x3f)
+
+  // Rotates mask and returns if next element is available or not
+  final def next: Boolean = {
+    val avail = (UnsafeUtils.getLong(bitmapAddr) & bitMask) == 0
+    bitMask <<= 1
+    if (bitMask == 0) {
+      bitmapAddr += 8
+      bitMask = 1L
+    }
+    avail
+  }
 }
 
 /**
  * A BinaryVector with an NaMask bitmap for NA values (1/on for missing NA values), 64-bit chunks
  */
-trait BitmapMaskVector[A] extends BinaryVector[A] {
-  def base: Any
-  def bitmapOffset: Long   // NOTE: should be offset + n
-  val maybeNAs = true
+trait BitmapMaskVector extends AvailableReader {
+  // Returns the address of the subvector
+  final def subvectAddr(addr: BinaryVectorPtr): BinaryVectorPtr = addr + UnsafeUtils.getInt(addr + 8)
 
-  final def isAvailable(index: Int): Boolean = {
+  final def isAvailable(addr: BinaryVectorPtr, index: Int): Boolean = {
     // NOTE: length of bitMask may be less than (length / 64) longwords.
     val maskIndex = index >> 6
-    val maskVal = UnsafeUtils.getLong(base, bitmapOffset + maskIndex * 8)
+    val maskVal = UnsafeUtils.getLong(addr + 12 + maskIndex * 8)
     (maskVal & (1L << (index & 63))) == 0
   }
+
+  override def iterateAvailable(vector: BinaryVectorPtr, startElement: Int = 0): BooleanIterator =
+    new BitmapMaskIterator(vector, startElement)
 }
 
-trait PrimitiveMaskVector[@specialized(Int, Long, Double, Boolean) A] extends BitmapMaskVector[A] {
-  val vectMajorType = WireFormat.VECTORTYPE_BINSIMPLE
-  val vectSubType = WireFormat.SUBTYPE_PRIMITIVE
-}
-
-object BitmapMask {
+object BitmapMask extends BitmapMaskVector {
   def numBytesRequired(elements: Int): Int = ((elements + 63) / 64) * 8
 }
 
@@ -147,10 +190,22 @@ case object ItemTooLarge extends AddResponse
  * 2.  --> freeze() --> toFiloBuffer ...  compresses pointer/bitmask only
  * 3.  --> optimize() --> toFiloBuffer ... aggressive compression using all techniques available
  */
-trait BinaryAppendableVector[@specialized(Int, Long, Double, Boolean) A] extends BinaryVector[A] {
+trait BinaryAppendableVector[@specialized(Int, Long, Double, Boolean) A] {
+  // Native address of the appendable vector
+  def addr: BinaryRegion.NativePointer
 
   /** Max size that current buffer can grow to */
   def maxBytes: Int
+
+  /** Number of current bytes used up */
+  def numBytes: Int
+
+  /**
+   * Number of elements currently in this AppendableVector
+   */
+  def length: Int
+
+  def dispose: () => Unit
 
   /**
    * Add a Not Available (null) element to the builder.
@@ -178,6 +233,19 @@ trait BinaryAppendableVector[@specialized(Int, Long, Double, Boolean) A] extends
     if (reader.notNull(col)) { addFromReaderNoNA(reader, col) }
     else                     { addNA() }
 
+  /** Returns a reader that can be used to read from this vect */
+  def reader: VectorDataReader
+
+  /** Copies the data out of this appendable vector to an on-heap Buffer */
+  def copyToBuffer: Buffer[A]
+
+  /**
+   * Returns the value at index A.  TODO: maybe deprecate this?
+   */
+  def apply(index: Int): A
+
+  def isAvailable(index: Int): Boolean
+
   /** Returns true if every element added is NA, or no elements have been added */
   def isAllNA: Boolean
 
@@ -191,7 +259,7 @@ trait BinaryAppendableVector[@specialized(Int, Long, Double, Boolean) A] extends
    *
    * The default implementation is generic but inefficient: does not take advantage of data layout
    */
-  def addVector(other: BinaryVector[A]): Unit = {
+  def addVector(other: BinaryAppendableVector[A]): Unit = {
     for { i <- 0 until other.length optimized } {
       if (other.isAvailable(i)) { addData(other(i))}
       else                      { addNA() }
@@ -203,6 +271,8 @@ trait BinaryAppendableVector[@specialized(Int, Long, Double, Boolean) A] extends
    */
   def checkSize(need: Int, have: Int): AddResponse =
     if (!(need <= have)) VectorTooSmall(need, have) else Ack
+
+  @inline final def incNumBytes(inc: Int): Unit = UnsafeUtils.unsafe.getAndAddInt(UnsafeUtils.ZeroPointer, addr, inc)
 
   /**
    * Allocates a new instance of itself growing by factor growFactor.
@@ -236,24 +306,25 @@ trait BinaryAppendableVector[@specialized(Int, Long, Double, Boolean) A] extends
    * @param newBaseOffset optionally, compact not in place but to a new location.  If left as None,
    *                      any compaction will be done "in-place" in the same buffer.
    */
-  def freeze(memFactory: MemFactory): BinaryVector[A] = {
-    val (base, off, _) = memFactory.allocateWithMagicHeader(frozenSize)
-    freeze(Some((base, off)))
+  def freeze(memFactory: MemFactory): BinaryVectorPtr = {
+    val newAddr = memFactory.allocateOffheap(frozenSize)
+    freeze(Some(newAddr))
   }
 
-  def freeze(newBaseOffset: Option[(Any, Long)]): BinaryVector[A] =
-    if (newBaseOffset.isEmpty && numBytes == frozenSize) {
+  def freeze(newAddrOpt: Option[BinaryRegion.NativePointer]): BinaryVectorPtr =
+    if (newAddrOpt.isEmpty && numBytes == frozenSize) {
       // It is better to return a simple read-only BinaryVector, for two reasons:
       // 1) It cannot be cast into an AppendingVector and made mutable
       // 2) It is probably higher performance for reads
-      finishCompaction(base, offset)
+      finishCompaction(addr)
     } else {
-      val (newBase, newOffset) = newBaseOffset.getOrElse((base, offset))
-      if (newBaseOffset.nonEmpty) copyTo(newBase, newOffset, n = primaryBytes)
+      val newAddress = newAddrOpt.getOrElse(addr)
+      if (newAddrOpt.nonEmpty) UnsafeUtils.copy(addr, newAddress, primaryBytes)
       if (numBytes > primaryMaxBytes) {
-        copyTo(newBase, newOffset + primaryBytes, primaryMaxBytes, numBytes - primaryMaxBytes)
+        UnsafeUtils.copy(addr + primaryMaxBytes, newAddress + primaryBytes, numBytes - primaryMaxBytes)
+        UnsafeUtils.setInt(newAddress, numBytes - 4)
       }
-      finishCompaction(newBase, newOffset)
+      finishCompaction(newAddress)
     }
 
   // The defaults below only work for vectors with no variable/secondary area.  Override as needed.
@@ -261,7 +332,7 @@ trait BinaryAppendableVector[@specialized(Int, Long, Double, Boolean) A] extends
   def primaryMaxBytes: Int = maxBytes
 
   // Does any necessary metadata adjustments and instantiates immutable BinaryVector
-  def finishCompaction(newBase: Any, newOff: Long): BinaryVector[A]
+  def finishCompaction(newAddr: Long): BinaryVectorPtr
 
   /**
    * Run some heuristics over this vector and automatically determine and return a more optimized
@@ -272,7 +343,7 @@ trait BinaryAppendableVector[@specialized(Int, Long, Double, Boolean) A] extends
    *
    * By default it copies using the passed memFactory to allocate
    */
-  def optimize(memFactory: MemFactory,hint: EncodingHint = AutoDetect): BinaryVector[A] = freeze(memFactory)
+  def optimize(memFactory: MemFactory, hint: EncodingHint = AutoDetect): BinaryVectorPtr = freeze(memFactory)
 
   /**
    * Clears the elements so one can start over.
@@ -315,25 +386,22 @@ trait AppendableVectorWrapper[@specialized(Int, Long, Double, Boolean) A, I] ext
   def addFromReaderNoNA(reader: RowReader, col: Int): AddResponse = inner.addFromReaderNoNA(reader, col)
 
   final def isAvailable(index: Int): Boolean = inner.isAvailable(index)
-  final def base: Any = inner.base
   final def numBytes: Int = inner.numBytes
-  final def offset: Long = inner.offset
+  final def addr: BinaryRegion.NativePointer = inner.addr
   final override def length: Int = inner.length
+  final def reader: VectorDataReader = inner.reader
+  final def copyToBuffer: Buffer[A] = inner.copyToBuffer.asInstanceOf[Buffer[A]]
 
-  final def maybeNAs: Boolean = inner.maybeNAs
   final def maxBytes: Int = inner.maxBytes
   def isAllNA: Boolean = inner.isAllNA
   def noNAs: Boolean = inner.noNAs
   override def primaryBytes: Int = inner.primaryBytes
   override def primaryMaxBytes: Int = inner.primaryMaxBytes
-  def vectMajorType: Int = inner.vectMajorType
-  def vectSubType: Int = inner.vectSubType
-  override def finishCompaction(newBase: Any, newOff: Long): BinaryVector[A] =
-    inner.finishCompaction(newBase, newOff).asInstanceOf[BinaryVector[A]]
+  override def finishCompaction(newAddr: Long): BinaryVectorPtr = inner.finishCompaction(newAddr)
   override def frozenSize: Int = inner.frozenSize
   final def reset(): Unit = inner.reset()
-  override def optimize(memFactory: MemFactory, hint: EncodingHint = AutoDetect): BinaryVector[A] =
-    inner.optimize(memFactory, hint).asInstanceOf[BinaryVector[A]]
+  override def optimize(memFactory: MemFactory, hint: EncodingHint = AutoDetect): BinaryVectorPtr =
+    inner.optimize(memFactory, hint)
 
   override def dispose: () => Unit = inner.dispose
 }
@@ -345,48 +413,59 @@ trait OptimizingPrimitiveAppender[@specialized(Int, Long, Double, Boolean) A] ex
   /**
    * Extract just the data vector with no NA mask or overhead
    */
-  def dataVect(memFactory: MemFactory): BinaryVector[A]
+  def dataVect(memFactory: MemFactory): BinaryVectorPtr
 
   /**
    * Extracts the entire vector including NA information
    */
-  def getVect(memFactory: MemFactory): BinaryVector[A] = freeze(memFactory)
+  def getVect(memFactory: MemFactory): BinaryVectorPtr = freeze(memFactory)
 }
 
 /**
  * A BinaryAppendableVector for simple primitive types, ie where each element has a fixed length
  * and every element is available (there is no bitmap NA mask).
+ * +0000 length word
+ * +0004 WireFormat word
+ * +0008 nbits/signed
  */
 abstract class PrimitiveAppendableVector[@specialized(Int, Long, Double, Boolean) A]
-  (val base: Any, val offset: Long, val maxBytes: Int, val nbits: Short, signed: Boolean)
+  (val addr: BinaryRegion.NativePointer, val maxBytes: Int, val nbits: Short, signed: Boolean)
 extends OptimizingPrimitiveAppender[A] {
-  val vectMajorType = WireFormat.VECTORTYPE_BINSIMPLE
-  val vectSubType = WireFormat.SUBTYPE_PRIMITIVE_NOMASK
-  var writeOffset: Long = offset + 4
+  def vectMajorType: Int = WireFormat.VECTORTYPE_BINSIMPLE
+  def vectSubType: Int = WireFormat.SUBTYPE_PRIMITIVE_NOMASK
+  var writeOffset: Long = addr + 12
   var bitShift: Int = 0
-  override final def length: Int = ((writeOffset - offset - 4).toInt * 8 + bitShift) / nbits
+  override final def length: Int = ((writeOffset - (addr + 12)).toInt * 8 + bitShift) / nbits
 
-  UnsafeUtils.setShort(base, offset, nbits.toShort)
-  UnsafeUtils.setByte(base, offset + 2, if (signed) 1 else 0)
+  UnsafeUtils.setInt(addr,     8)   // 8 bytes after this length word
+  UnsafeUtils.setInt(addr + 4, WireFormat(vectMajorType, vectSubType))
+  UnsafeUtils.setShort(addr + 8, nbits.toShort)
+  UnsafeUtils.setByte(addr + 10, if (signed) 1 else 0)
 
-  def numBytes: Int = (writeOffset - offset).toInt + (if (bitShift != 0) 1 else 0)
+  def numBytes: Int = UnsafeUtils.getInt(addr) + 4
 
-  private final val dangerZone = offset + maxBytes
+  private final val dangerZone = addr + maxBytes
   final def checkOffset(): AddResponse =
-    if (writeOffset >= dangerZone) VectorTooSmall((writeOffset - offset).toInt + 1, maxBytes) else Ack
+    if (writeOffset >= dangerZone) VectorTooSmall((writeOffset - addr).toInt + 1, maxBytes) else Ack
 
-  protected final def bumpBitShift(): Unit = {
+  @inline final def incWriteOffset(inc: Int): Unit = {
+    writeOffset += inc
+    incNumBytes(inc)
+  }
+
+  @inline protected final def bumpBitShift(): Unit = {
+    if (bitShift == 0) incNumBytes(1)   // just before increment, means we are using that byte now
     bitShift = (bitShift + nbits) % 8
     if (bitShift == 0) writeOffset += 1
-    UnsafeUtils.setByte(base, offset + 3, bitShift.toByte)
+    UnsafeUtils.setByte(addr + 11, bitShift.toByte)
   }
 
   final def isAvailable(index: Int): Boolean = true
 
-  override final def addVector(other: BinaryVector[A]): Unit = other match {
+  override final def addVector(other: BinaryAppendableVector[A]): Unit = other match {
     case v: BitmapMaskAppendableVector[A] =>
       addVector(v.subVect)
-    case v: BinaryVector[A] =>
+    case v: BinaryAppendableVector[A] =>
       // Optimization: this vector does not support NAs so just add the data
       require(numBytes + (nbits * v.length / 8) <= maxBytes,
              s"Not enough space to add ${v.length} elems; nbits=$nbits; need ${maxBytes-numBytes} bytes")
@@ -395,33 +474,46 @@ extends OptimizingPrimitiveAppender[A] {
 
   final def isAllNA: Boolean = (length == 0)
   final def noNAs: Boolean = (length > 0)
-  val maybeNAs = false
 
-  final def dataVect(memFactory: MemFactory): BinaryVector[A] = freeze(memFactory)
+  final def dataVect(memFactory: MemFactory): BinaryVectorPtr = freeze(memFactory)
+
+  def finishCompaction(newAddress: BinaryRegion.NativePointer): BinaryVectorPtr = newAddress
 
   def reset(): Unit = {
-    writeOffset = offset + 4
+    writeOffset = addr + 12
     bitShift = 0
+    UnsafeUtils.setByte(addr + 11, bitShift.toByte)
+    UnsafeUtils.setInt(addr,     8)   // 8 bytes after this length word
   }
 }
 
 /**
  * Maintains a fast NA bitmap mask as we append elements
+ * +0000 length word
+ * +0004 WireFormat word
+ * +0008 offset to the subvector (after bitmask data)
  */
 abstract class BitmapMaskAppendableVector[@specialized(Int, Long, Double, Boolean) A]
-  (val base: Any, val bitmapOffset: Long, maxElements: Int)
-extends BitmapMaskVector[A] with BinaryAppendableVector[A] {
+  (val addr: BinaryRegion.NativePointer, maxElements: Int)
+extends BinaryAppendableVector[A] {
+  def vectMajorType: Int
+  def vectSubType: Int
+
   // The base vector holding the actual values
   def subVect: BinaryAppendableVector[A]
+  def reader: VectorDataReader = subVect.reader
 
+  def bitmapOffset: BinaryRegion.NativePointer = addr + 12
   val bitmapMaskBufferSize = BitmapMask.numBytesRequired(maxElements)
   var curBitmapOffset = 0
   var curMask: Long = 1L
 
-  UnsafeUtils.unsafe.setMemory(base, bitmapOffset, bitmapMaskBufferSize, 0)
+  UnsafeUtils.unsafe.setMemory(UnsafeUtils.ZeroPointer, bitmapOffset, bitmapMaskBufferSize, 0)
 
-  val subVectOffset = 4 + bitmapMaskBufferSize
-  UnsafeUtils.setInt(base, offset, subVectOffset)
+  UnsafeUtils.setInt(addr,     8 + bitmapMaskBufferSize)
+  UnsafeUtils.setInt(addr + 4, WireFormat(vectMajorType, vectSubType))
+  val subVectOffset = 12 + bitmapMaskBufferSize
+  UnsafeUtils.setInt(addr + 8, subVectOffset)
 
   // The number of bytes taken up by the bitmap mask right now
   final def bitmapBytes: Int = curBitmapOffset + (if (curMask == 1L) 0 else 8)
@@ -435,7 +527,7 @@ extends BitmapMaskVector[A] with BinaryAppendableVector[A] {
   }
 
   final def resetMask(): Unit = {
-    UnsafeUtils.unsafe.setMemory(base, bitmapOffset, bitmapMaskBufferSize, 0)
+    UnsafeUtils.unsafe.setMemory(UnsafeUtils.ZeroPointer, bitmapOffset, bitmapMaskBufferSize, 0)
     curBitmapOffset = 0
     curMask = 1L
   }
@@ -446,15 +538,16 @@ extends BitmapMaskVector[A] with BinaryAppendableVector[A] {
   }
 
   override final def length: Int = subVect.length
-  final def numBytes: Int = 4 + bitmapMaskBufferSize + subVect.numBytes
+  final def numBytes: Int = 12 + bitmapMaskBufferSize + subVect.numBytes
+  final def isAvailable(index: Int): Boolean = BitmapMask.isAvailable(addr, index)
   final def apply(index: Int): A = subVect.apply(index)
 
   final def addNA(): AddResponse = checkSize(curBitmapOffset, bitmapMaskBufferSize) match {
     case Ack =>
       val resp = subVect.addNA()
       if (resp == Ack) {
-        val maskVal = UnsafeUtils.getLong(base, bitmapOffset + curBitmapOffset)
-        UnsafeUtils.setLong(base, bitmapOffset + curBitmapOffset, maskVal | curMask)
+        val maskVal = UnsafeUtils.getLong(bitmapOffset + curBitmapOffset)
+        UnsafeUtils.setLong(bitmapOffset + curBitmapOffset, maskVal | curMask)
         nextMaskIndex()
       }
       resp
@@ -475,37 +568,45 @@ extends BitmapMaskVector[A] with BinaryAppendableVector[A] {
 
   final def isAllNA: Boolean = {
     for { word <- 0 until curBitmapOffset/8 optimized } {
-      if (UnsafeUtils.getLong(base, bitmapOffset + word * 8) != -1L) return false
+      if (UnsafeUtils.getLong(bitmapOffset + word * 8) != -1L) return false
     }
     val naMask = curMask - 1
-    (UnsafeUtils.getLong(base, bitmapOffset + curBitmapOffset) & naMask) == naMask
+    (UnsafeUtils.getLong(bitmapOffset + curBitmapOffset) & naMask) == naMask
   }
 
   final def noNAs: Boolean = {
     for { word <- 0 until curBitmapOffset/8 optimized } {
-      if (UnsafeUtils.getLong(base, bitmapOffset + word * 8) != 0) return false
+      if (UnsafeUtils.getLong(bitmapOffset + word * 8) != 0) return false
     }
     val naMask = curMask - 1
-    (UnsafeUtils.getLong(base, bitmapOffset + curBitmapOffset) & naMask) == 0
+    (UnsafeUtils.getLong(bitmapOffset + curBitmapOffset) & naMask) == 0
   }
 
-  override def primaryBytes: Int = (bitmapOffset - offset).toInt + bitmapBytes
-  override def primaryMaxBytes: Int = (bitmapOffset - offset).toInt + bitmapMaskBufferSize
+  def finishCompaction(newAddr: BinaryRegion.NativePointer): BinaryVectorPtr = {
+    // Don't forget to write the new subVectOffset
+    UnsafeUtils.setInt(newAddr + 8, (bitmapOffset + bitmapBytes - addr).toInt)
+    // and also the new length
+    UnsafeUtils.setInt(newAddr, frozenSize - 4)
+    newAddr
+  }
 
-  override final def addVector(other: BinaryVector[A]): Unit = other match {
+  override def primaryBytes: Int = (bitmapOffset - addr).toInt + bitmapBytes
+  override def primaryMaxBytes: Int = (bitmapOffset - addr).toInt + bitmapMaskBufferSize
+
+  override final def addVector(other: BinaryAppendableVector[A]): Unit = other match {
     // Optimized case: we are empty, so just copy over entire bitmap from other one
     case v: BitmapMaskAppendableVector[A] if length == 0 =>
       copyMaskFrom(v)
       subVect.addVector(v.subVect)
     // Non-optimized  :(
-    case v: BinaryVector[A] =>
+    case v: BinaryAppendableVector[A] =>
       super.addVector(other)
   }
 
   final def copyMaskFrom(other: BitmapMaskAppendableVector[A]): Unit = {
     checkSize(other.bitmapBytes, this.bitmapMaskBufferSize)
-    UnsafeUtils.unsafe.copyMemory(other.base, other.bitmapOffset,
-                                  base, bitmapOffset,
+    UnsafeUtils.unsafe.copyMemory(UnsafeUtils.ZeroPointer, other.bitmapOffset,
+                                  UnsafeUtils.ZeroPointer, bitmapOffset,
                                   other.bitmapBytes)
     curBitmapOffset = other.curBitmapOffset
     curMask = other.curMask

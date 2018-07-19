@@ -9,8 +9,7 @@ import filodb.core.binaryrecord.{ArrayBinaryRecord, BinaryRecord, RecordSchema}
 import filodb.core.binaryrecord2.{RecordSchema => RecordSchema2}
 import filodb.core.metadata.Column
 import filodb.core.store.ChunkSetInfo
-import filodb.memory.format.{BinaryVector, ZeroCopyUTF8String}
-import filodb.memory.format.{vectors => BV}
+import filodb.memory.format.ZeroCopyUTF8String
 
 /**
  * Register commonly used classes for efficient Kryo serialization.  If this is not done then Kryo might have to
@@ -34,39 +33,6 @@ class KryoInit {
     kryo.addDefaultSerializer(classOf[Column.ColumnType], classOf[ColumnTypeSerializer])
     val colTypeSer = new ColumnTypeSerializer
     Column.ColumnType.values.zipWithIndex.foreach { case (ct, i) => kryo.register(ct.getClass, colTypeSer, 100 + i) }
-
-    val intBinVectSer = new BinaryVectorSerializer[Int]
-    kryo.addDefaultSerializer(classOf[BinaryVector[Int]], intBinVectSer)
-    kryo.register(classOf[BV.IntBinaryVector], intBinVectSer)
-    kryo.register(classOf[BV.MaskedIntBinaryVector], intBinVectSer)
-    kryo.register(classOf[BV.MaskedIntAppendingVector], intBinVectSer)
-    kryo.register(classOf[BV.IntAppendingVector], intBinVectSer)
-    kryo.register(classOf[BV.IntConstVector], intBinVectSer)
-    kryo.register(classOf[filodb.memory.format.GrowableVector$mcI$sp], intBinVectSer)
-
-    val longBinVectSer = new BinaryVectorSerializer[Long]
-    kryo.register(classOf[BV.DeltaDeltaVector], longBinVectSer)
-    kryo.register(classOf[BV.DeltaDeltaConstVector], longBinVectSer)
-    kryo.register(classOf[BV.LongBinaryVector], longBinVectSer)
-    kryo.register(classOf[BV.MaskedLongBinaryVector], longBinVectSer)
-    kryo.register(classOf[BV.MaskedLongAppendingVector], longBinVectSer)
-    kryo.register(classOf[BV.LongAppendingVector], longBinVectSer)
-    kryo.register(classOf[BV.LongIntWrapper], longBinVectSer)
-    kryo.register(classOf[filodb.memory.format.GrowableVector$mcJ$sp], longBinVectSer)
-
-    val doubleBinVectSer = new BinaryVectorSerializer[Double]
-    kryo.register(classOf[BV.DoubleBinaryVector], doubleBinVectSer)
-    kryo.register(classOf[BV.MaskedDoubleBinaryVector], doubleBinVectSer)
-    kryo.register(classOf[BV.MaskedDoubleAppendingVector], doubleBinVectSer)
-    kryo.register(classOf[BV.DoubleAppendingVector], doubleBinVectSer)
-    kryo.register(classOf[BV.DoubleLongWrapper], doubleBinVectSer)
-    kryo.register(classOf[BV.DoubleConstVector], doubleBinVectSer)
-    kryo.register(classOf[filodb.memory.format.GrowableVector$mcD$sp], doubleBinVectSer)
-
-    val utf8BinVectSer = new BinaryVectorSerializer[ZeroCopyUTF8String]
-    kryo.register(classOf[BV.DictUTF8Vector], utf8BinVectSer)
-    kryo.register(classOf[BV.FixedMaxUTF8Vector], utf8BinVectSer)
-    kryo.register(classOf[BV.UTF8ConstVector], utf8BinVectSer)
 
     kryo.addDefaultSerializer(classOf[RecordSchema], classOf[RecordSchemaSerializer])
     kryo.addDefaultSerializer(classOf[RecordSchema2], classOf[RecordSchema2Serializer])
@@ -105,8 +71,6 @@ class KryoInit {
     kryo.register(classOf[ArrayBinaryRecord])
     kryo.register(classOf[RecordSchema])
     kryo.register(classOf[RecordSchema2])
-    kryo.register(classOf[ChunkSetInfo])
-    kryo.addDefaultSerializer(classOf[ChunkSetInfo], classOf[ChunkSetInfoSerializer])
     kryo.register(classOf[filodb.coordinator.ShardEvent])
     kryo.register(classOf[filodb.coordinator.CurrentShardSnapshot])
     kryo.register(classOf[filodb.coordinator.StatusActor.EventEnvelope])
@@ -114,13 +78,10 @@ class KryoInit {
 
     import filodb.core.query._
     kryo.register(classOf[PartitionInfo], new PartitionInfoSerializer)
-    kryo.register(classOf[PartitionVector])
     kryo.register(classOf[Tuple])
     kryo.register(classOf[ColumnInfo])
     kryo.register(classOf[TupleResult])
-    kryo.register(classOf[VectorResult])
     kryo.register(classOf[TupleListResult])
-    kryo.register(classOf[VectorListResult])
     kryo.register(classOf[ColumnFilter])
 
     import filodb.core.store._
@@ -131,9 +92,6 @@ class KryoInit {
     kryo.register(classOf[FilteredPartitionScan])
     kryo.register(classOf[ShardSplit])
 
-    kryo.register(classOf[QueryCommands.LogicalPlanQuery])
-    kryo.register(classOf[QueryCommands.ExecPlanQuery])
-    kryo.register(classOf[QueryCommands.QueryResult])
     kryo.register(classOf[QueryCommands.BadQuery])
     kryo.register(classOf[QueryCommands.QueryOptions])
     kryo.register(classOf[QueryCommands.FilteredPartitionQuery])
@@ -168,16 +126,5 @@ class RecordSchema2Serializer extends KryoSerializer[RecordSchema2] {
 
   override def write(kryo: Kryo, output: Output, schema: RecordSchema2): Unit = {
     kryo.writeClassAndObject(output, schema.toSerializableTuple)
-  }
-}
-
-class ChunkSetInfoSerializer extends KryoSerializer[ChunkSetInfo] {
-  override def read(kryo: Kryo, input: Input, typ: Class[ChunkSetInfo]): ChunkSetInfo = {
-    val bytes = kryo.readObject(input, classOf[Array[Byte]])
-    ChunkSetInfo.fromBytes(bytes)
-  }
-
-  override def write(kryo: Kryo, output: Output, info: ChunkSetInfo): Unit = {
-    kryo.writeObject(output, ChunkSetInfo.toBytes(info))
   }
 }

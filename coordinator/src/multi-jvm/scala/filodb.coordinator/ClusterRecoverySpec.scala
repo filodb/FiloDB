@@ -11,7 +11,7 @@ import com.typesafe.config.ConfigFactory
 
 import filodb.core._
 import filodb.core.metadata.Column.ColumnType
-import filodb.core.query.{ColumnInfo, ResultSchema, Tuple, TupleResult}
+import filodb.core.query.{ColumnInfo, ResultSchema}
 
 object ClusterRecoverySpecConfig extends MultiNodeConfig {
   // register the named roles (nodes) of the test
@@ -31,11 +31,12 @@ object ClusterRecoverySpecConfig extends MultiNodeConfig {
 abstract class ClusterRecoverySpec extends ClusterSpec(ClusterRecoverySpecConfig) {
   import akka.testkit._
 
+  import client.QueryCommands._
   import ClusterRecoverySpecConfig._
+  import filodb.query._
+  import GdeltTestData._
   import NodeClusterActor._
   import sources.CsvStreamFactory
-  import GdeltTestData._
-  import client.LogicalPlan._
 
   override def initialParticipants = roles.size
 
@@ -103,14 +104,24 @@ abstract class ClusterRecoverySpec extends ClusterSpec(ClusterRecoverySpecConfig
     }
     enterBarrier("ingestion-stopped")
 
-    val query = LogicalPlanQuery(dataset6.ref,
-                  simpleAgg("count", childPlan=PartitionsRange.all(FilteredPartitionQuery(Nil), Seq("MonthYear"))))
+    // val query = LogicalPlanQuery(dataset6.ref,
+    //               simpleAgg("count", childPlan=PartitionsRange.all(FilteredPartitionQuery(Nil), Seq("MonthYear"))))
 
-    coordinatorActor ! query
+    val qOpt = QueryOptions(shardOverrides = Some(Seq(0, 1)))
+    val q2 = LogicalPlan2Query(dataset6.ref,
+               PeriodicSeriesWithWindowing(
+                 RawSeries(AllChunksSelector, Nil, Seq("AvgTone")),
+                 100L, 1000L, 100L, window=1000L, function=RangeFunctionId.CountOverTime), qOpt)
+    coordinatorActor ! q2
     expectMsgPF(10.seconds.dilated) {
-      case QueryResult(_, TupleResult(schema, Tuple(None, bRec))) =>
-        schema shouldEqual ResultSchema(Seq(ColumnInfo("result", ColumnType.IntColumn)), 0)
-        bRec.getInt(0) shouldEqual (99 * 2)
+      case QueryResult(_, schema, vectors) =>
+        schema shouldEqual ResultSchema(Seq(ColumnInfo("GLOBALEVENTID", ColumnType.LongColumn),
+                                            ColumnInfo("AvgTone", ColumnType.DoubleColumn)), 1)
+        // query is counting each partition....
+        vectors should have length (59 * 2)
+        // vectors(0).rows.map(_.getDouble(1)).toSeq shouldEqual Seq(575.24)
+        // TODO:  actually change logicalPlan above to sum up individual counts for us
+        vectors.map(_.rows.map(_.getDouble(1).toInt).toSeq.head).sum shouldEqual (99 * 2)
     }
   }
 }

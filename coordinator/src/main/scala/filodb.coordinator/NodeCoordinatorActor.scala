@@ -89,7 +89,7 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
                             datasetObj: Dataset): Unit = {
     (for {
       resp1 <- metaStore.newDataset(datasetObj) if resp1 == Success
-      resp2 <- memStore.sink.initialize(datasetObj.ref) if resp2 == Success
+      resp2 <- memStore.store.initialize(datasetObj.ref) if resp2 == Success
     }
     yield {
       originator ! DatasetCreated
@@ -173,9 +173,6 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
 
   def queryHandlers: Receive = LoggingReceive {
     case q: QueryCommand =>
-      val originator = sender()
-      withQueryActor(originator, q.dataset) { _.tell(q, originator) }
-    case q: QueryActor.SingleShardQuery =>
       val originator = sender()
       withQueryActor(originator, q.dataset) { _.tell(q, originator) }
     case QueryActor.ThrowException(dataset) =>

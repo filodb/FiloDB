@@ -15,7 +15,7 @@ object UnsafeUtils {
   val arayOffset = unsafe.arrayBaseOffset(classOf[Array[Byte]])
 
   /** Translate ByteBuffer into base, offset, numBytes */
-  // scalastyle:off
+  //scalastyle:off method.name
   def BOLfromBuffer(buf: ByteBuffer): (Any, Long, Int) = {
     if (buf.hasArray) {
       (buf.array, arayOffset.toLong + buf.arrayOffset + buf.position, buf.limit - buf.position)
@@ -23,13 +23,17 @@ object UnsafeUtils {
       assert(buf.isDirect)
       val address = MemoryIO.getCheckedInstance.getDirectBufferAddress(buf)
       (UnsafeUtils.ZeroPointer, address + buf.position, buf.limit - buf.position)
-      //throw new RuntimeException("Cannot support this ByteBuffer!")
     }
   }
-  // scalastyle:on
+  //scalastyle:on method.name
+
+  def addressFromDirectBuffer(buf: ByteBuffer): Long = {
+    assert(buf.isDirect)
+    MemoryIO.getCheckedInstance.getDirectBufferAddress(buf) + buf.position
+  }
 
   def asDirectBuffer(address: Long, size: Int): ByteBuffer = {
-    MemoryIO.getCheckedInstance.newDirectByteBuffer(address,size)
+    MemoryIO.getCheckedInstance.newDirectByteBuffer(address, size)
   }
 
   /**
@@ -56,6 +60,15 @@ object UnsafeUtils {
   final def setLong(obj: Any, offset: Long, l: Long): Unit = unsafe.putLong(obj, offset, l)
   final def setDouble(obj: Any, offset: Long, d: Double): Unit = unsafe.putDouble(obj, offset, d)
   final def setFloat(obj: Any, offset: Long, f: Float): Unit = unsafe.putFloat(obj, offset, f)
+
+  final def setByte(addr: Long, byt: Byte): Unit = unsafe.putByte(ZeroPointer, addr, byt)
+  final def setShort(addr: Long, s: Short): Unit = unsafe.putShort(ZeroPointer, addr, s)
+  final def setInt(addr: Long, i: Int): Unit = unsafe.putInt(ZeroPointer, addr, i)
+  final def setLong(addr: Long, l: Long): Unit = unsafe.putLong(ZeroPointer, addr, l)
+  final def setDouble(addr: Long, d: Double): Unit = unsafe.putDouble(ZeroPointer, addr, d)
+
+  def copy(source: Long, dest: Long, numBytes: Int): Unit =
+    unsafe.copyMemory(ZeroPointer, source, ZeroPointer, dest, numBytes)
 
   /**
    * Matches two memory buffers of length numBytes, returns true if they are byte for byte equal

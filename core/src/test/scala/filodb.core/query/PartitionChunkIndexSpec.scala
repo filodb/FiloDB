@@ -1,17 +1,16 @@
 package filodb.core.query
 
-import org.scalatest.{FunSpec, Matchers}
-
 import filodb.core.binaryrecord.BinaryRecord
-import filodb.core.store.{ChunkRowSkipIndex, ChunkSetMeta}
+import filodb.core.store.{ChunkRowSkipIndex, ChunkSetInfo}
+import filodb.memory.format.vectors.NativeVectorTest
 
-class PartitionChunkIndexSpec extends FunSpec with Matchers {
+class PartitionChunkIndexSpec extends NativeVectorTest {
   import collection.JavaConverters._
 
   import filodb.core.NamesTestData._
 
-  val info1 = ChunkSetMeta(100L, 3, firstKey, lastKey)
-  val info2 = ChunkSetMeta(99L, 3, keyForName(1), lastKey)
+  val info1 = ChunkSetInfo(memFactory, dataset, 100L, 3, firstKey, lastKey)
+  val info2 = ChunkSetInfo(memFactory, dataset, 99L, 3, keyForName(1), lastKey)
 
   val firstRecord = BinaryRecord.timestamp(firstKey)
   val lastRecord = BinaryRecord.timestamp(lastKey)
@@ -65,8 +64,8 @@ class PartitionChunkIndexSpec extends FunSpec with Matchers {
 
     it("should handle skips") {
       val newIndex = new ChunkIDPartitionChunkIndex(null, defaultPartKey, dataset)
-      val origInfo = info1.copy(id = 9)
-      val info2 = info1.copy(id = 14)
+      val origInfo = ChunkSetInfo(memFactory, dataset, 9, info1.numRows, info1.startTime, info1.endTime)
+      val info2 = ChunkSetInfo(memFactory, dataset, 14, info1.numRows, info1.startTime, info1.endTime)
       newIndex.add(origInfo, Nil)
       newIndex.add(info1, Seq(ChunkRowSkipIndex(9, Array(2, 5))))
       newIndex.add(info2, Seq(ChunkRowSkipIndex(9, Array(3, 5, 8))))

@@ -36,7 +36,7 @@ class SelectRawPartitionsExecSpec extends FunSpec with Matchers with ScalaFuture
     (now - n * reportingInterval, n.toDouble)
   }
 
-  tuples.map { t => SeqRowReader(Seq(t._1, t._2, partTagsUTF8)) }.foreach(builder.addFromReaderSlowly)
+  tuples.map { t => SeqRowReader(Seq(t._1, t._2, partTagsUTF8)) }.foreach(builder.addFromReader)
   val container = builder.allContainers.head
 
   implicit val execTimeout = 5.seconds

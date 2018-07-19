@@ -3,6 +3,7 @@ package filodb.core
 import scala.io.Source
 
 import com.typesafe.config.ConfigFactory
+import monix.eval.Task
 import monix.reactive.Observable
 import org.joda.time.DateTime
 
@@ -14,14 +15,24 @@ import filodb.core.store._
 import filodb.core.Types.{PartitionKey, UTF8Map}
 import filodb.memory.format._
 import filodb.memory.format.ZeroCopyUTF8String._
-import filodb.memory.{MemFactory, NativeMemoryManager}
+import filodb.memory.{BinaryRegionLarge, MemFactory, NativeMemoryManager}
 
 object TestData {
   def toChunkSetStream(ds: Dataset,
                        part: PartitionKey,
                        rows: Seq[RowReader],
                        rowsPerChunk: Int = 10): Observable[ChunkSet] =
-    Observable.fromIterator(rows.grouped(rowsPerChunk).map { chunkRows => ChunkSet(ds, part, chunkRows) })
+    Observable.fromIterator(rows.grouped(rowsPerChunk).map { chunkRows => ChunkSet(ds, part, chunkRows, nativeMem) })
+
+  def toRawPartData(chunkSetStream: Observable[ChunkSet]): Task[RawPartData] = {
+    var partKeyBytes: Array[Byte] = null
+    chunkSetStream.map { case ChunkSet(info, partKey, _, chunks, _) =>
+                    if (partKeyBytes == null) {
+                      partKeyBytes = BinaryRegionLarge.asNewByteArray(UnsafeUtils.ZeroPointer, partKey)
+                    }
+                    RawChunkSet(ChunkSetInfo.toBytes(info), chunks.toArray)
+                  }.toListL.map { rawChunkSets => RawPartData(partKeyBytes, rawChunkSets) }
+  }
 
   val sourceConf = ConfigFactory.parseString("""
     store {
@@ -37,7 +48,7 @@ object TestData {
   """)
 
   val storeConf = StoreConfig(sourceConf.getConfig("store"))
-  val nativeMem = new NativeMemoryManager(1024 * 1024)
+  val nativeMem = new NativeMemoryManager(10 * 1024 * 1024)
 }
 
 object NamesTestData {
@@ -67,7 +78,7 @@ object NamesTestData {
   def keyForName(rowNo: Int): Long = dataset.timestamp(mapper(names)(rowNo))
 
   val partKeyBuilder = new RecordBuilder(TestData.nativeMem, dataset.partKeySchema, 2048)
-  val defaultPartKey = partKeyBuilder.addFromReaderSlowly(SeqRowReader(Seq(0)))
+  val defaultPartKey = partKeyBuilder.addFromObjects(0)
 
   def chunkSetStream(data: Seq[Product] = names): Observable[ChunkSet] =
     TestData.toChunkSetStream(dataset, defaultPartKey, mapper(data))
@@ -118,7 +129,7 @@ object GdeltTestData {
   def records(ds: Dataset, readerSeq: Seq[RowReader] = readers): SomeData = {
     val builder = new RecordBuilder(MemFactory.onHeapFactory, ds.ingestionSchema)
     val routing = ds.ingestRouting(columnNames)
-    readerSeq.foreach { row => builder.addFromReaderSlowly(RoutingRowReader(row, routing)) }
+    readerSeq.foreach { row => builder.addFromReader(RoutingRowReader(row, routing)) }
     builder.allContainers.zipWithIndex.map { case (container, i) => SomeData(container, i) }.head
   }
 
@@ -193,17 +204,30 @@ object MachineMetricsData {
   // Dataset1: Partition keys (series) / Row key timestamp
   val dataset1 = Dataset("metrics", Seq("series:string"), columns)
   val partKeyBuilder = new RecordBuilder(TestData.nativeMem, dataset1.partKeySchema, 2048)
-  val defaultPartKey = partKeyBuilder.addFromReaderSlowly(SeqRowReader(Seq("series0")))
+  val defaultPartKey = partKeyBuilder.addFromObjects("series0")
 
   // Turns either multiSeriesData() or linearMultiSeries() into SomeData's for ingestion into MemStore
   def records(ds: Dataset, stream: Stream[Seq[Any]], offset: Int = 0): SomeData = {
     val builder = new RecordBuilder(MemFactory.onHeapFactory, ds.ingestionSchema)
-    stream.map(SeqRowReader).foreach { row => builder.addFromReaderSlowly(row) }
+    stream.foreach { row =>
+      builder.startNewRecord()
+      row.foreach { thing => builder.addSlowly(thing) }
+      builder.endRecord()
+    }
     builder.allContainers.zipWithIndex.map { case (container, i) => SomeData(container, i + offset) }.head
   }
 
   def groupedRecords(ds: Dataset, stream: Stream[Seq[Any]], n: Int = 100, groupSize: Int = 5): Seq[SomeData] =
     stream.take(n).grouped(groupSize).toSeq.zipWithIndex.map { case (group, i) => records(ds, group, i) }
+
+  // Takes the partition key from stream record n, filtering the stream by only that partition,
+  // then creates a ChunkSetStream out of it
+  // Works with linearMultiSeries() or multiSeriesData()
+  def filterByPartAndMakeStream(stream: Stream[Seq[Any]], keyRecord: Int): Observable[ChunkSet] = {
+    val rawPartKey = stream(keyRecord)(5)
+    val partKey = partKeyBuilder.addFromObjects(rawPartKey)
+    TestData.toChunkSetStream(dataset1, partKey, stream.filter(_(5) == rawPartKey).map(SeqRowReader))
+  }
 
   def multiSeriesData(): Stream[Seq[Any]] = {
     val initTs = System.currentTimeMillis
@@ -218,9 +242,9 @@ object MachineMetricsData {
   }
 
   // Everything increments by 1 for simple predictability and testing
-  def linearMultiSeries(startTs: Long = 100000L, numSeries: Int = 10): Stream[Seq[Any]] = {
+  def linearMultiSeries(startTs: Long = 100000L, numSeries: Int = 10, timeStep: Int = 1000): Stream[Seq[Any]] = {
     Stream.from(0).map { n =>
-      Seq(startTs + n * 1000,
+      Seq(startTs + n * timeStep,
          (1 + n).toDouble,
          (20 + n).toDouble,
          (99.9 + n).toDouble,

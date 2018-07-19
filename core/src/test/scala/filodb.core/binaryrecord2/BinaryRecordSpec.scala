@@ -4,8 +4,9 @@ import debox.Buffer
 import org.scalatest.{BeforeAndAfter, BeforeAndAfterAll, FunSpec, Matchers}
 
 import filodb.core.{MachineMetricsData, Types}
+import filodb.core.metadata.Column.ColumnType
 import filodb.memory.{BinaryRegionConsumer, MemFactory, NativeMemoryManager, UTF8StringMedium}
-import filodb.memory.format.UnsafeUtils
+import filodb.memory.format.{SeqRowReader, UnsafeUtils}
 
 class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with BeforeAndAfterAll {
   import MachineMetricsData._
@@ -196,6 +197,21 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
       builder.allContainers.head.numBytes shouldEqual (4 + 64*9)
       builder.allContainers.head.countRecords shouldEqual 9
     }
+
+    it("should add records and iterate") {
+      val builder = new RecordBuilder(nativeMem, schema1, RecordBuilder.MinContainerSize)
+      val data = linearMultiSeries() take 10
+      addToBuilder(builder, data)
+
+      // Now check amount of space left in container, container bytes etc
+      builder.allContainers should have length (1)
+      builder.allContainers.head.numBytes shouldEqual (4 + 64*10)
+      builder.allContainers.head.countRecords shouldEqual 10
+
+      val it = builder.allContainers.head.iterate(schema1)
+      val doubles = data.map(_(1).asInstanceOf[Double])
+      it.map(_.getDouble(1)).toBuffer shouldEqual doubles
+    }
   }
 
   val sortedKeys = Seq("cloudProvider", "instance", "job", "n", "region").map(_.utf8(nativeMem))
@@ -246,6 +262,45 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
       schema1.getDouble(recordAddr, 3) shouldEqual 10.1
       schema1.getDouble(recordAddr, 4) shouldEqual 9.4
       schema1.utf8StringPointer(recordAddr, 5).compare("Series 1".utf8(nativeMem)) shouldEqual 0
+    }
+
+    it("should hash correctly with different ways of adding UTF8 fields") {
+      // schema for part key with only a string
+      val stringSchema = new RecordSchema(Seq(ColumnType.StringColumn), Some(0))
+      val builder = new RecordBuilder(nativeMem, stringSchema)
+
+      val str = "Serie zero"
+      val strBytes = str.getBytes()
+      val utf8MedStr = str.utf8(nativeMem)
+
+      builder.startNewRecord()
+      builder.addString(str)
+      val addrStringAdd = builder.endRecord()
+
+      builder.startNewRecord()
+      builder.addBlob(strBytes, UnsafeUtils.arayOffset, strBytes.size)
+      val addrBlobAdd = builder.endRecord()
+
+      builder.startNewRecord()
+      builder.addSlowly(strBytes)
+      val addrAddSlowly = builder.endRecord()
+
+      val addrAddReader = builder.addFromReader(SeqRowReader(Seq(str)))
+
+      // Should be able to extract and compare strings
+      stringSchema.utf8StringPointer(addrStringAdd, 0).compare(utf8MedStr) shouldEqual 0
+      stringSchema.utf8StringPointer(addrBlobAdd, 0).compare(utf8MedStr) shouldEqual 0
+      stringSchema.utf8StringPointer(addrAddSlowly, 0).compare(utf8MedStr) shouldEqual 0
+      stringSchema.utf8StringPointer(addrAddReader, 0).compare(utf8MedStr) shouldEqual 0
+
+      // Hashes should all be equal and not initial hash
+      stringSchema.partitionHash(addrStringAdd) should not equal (RecordBuilder.HASH_INIT)
+      stringSchema.partitionHash(addrBlobAdd) should not equal (RecordBuilder.HASH_INIT)
+      stringSchema.partitionHash(addrAddReader) should not equal (RecordBuilder.HASH_INIT)
+
+      stringSchema.partitionHash(addrStringAdd) shouldEqual stringSchema.partitionHash(addrBlobAdd)
+      stringSchema.partitionHash(addrStringAdd) shouldEqual stringSchema.partitionHash(addrAddReader)
+      stringSchema.partitionHash(addrStringAdd) shouldEqual stringSchema.partitionHash(addrAddSlowly)
     }
 
     it("should add and get map fields with no predefined keys") {

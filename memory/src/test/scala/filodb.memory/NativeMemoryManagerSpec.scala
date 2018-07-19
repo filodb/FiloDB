@@ -3,7 +3,7 @@ package filodb.memory
 import com.kenai.jffi.MemoryIO
 import org.scalatest.{FlatSpec, Matchers}
 
-import filodb.memory.format.BinaryVector.Memory
+import filodb.memory.BinaryRegion.Memory
 
 /**
   * Buffer manager allocation and freeing tests
@@ -14,19 +14,19 @@ class NativeMemoryManagerSpec extends FlatSpec with Matchers {
   it should "Allocate and allow writing up to the allocation size" in {
     //16 for magic header
     val bufferManager = new NativeMemoryManager(1000 + 16)
-    checkAllocation(bufferManager.allocateWithMagicHeader(300))
-    checkAllocation(bufferManager.allocateWithMagicHeader(300))
-    checkAllocation(bufferManager.allocateWithMagicHeader(300))
-    checkAllocation(bufferManager.allocateWithMagicHeader(100))
+    checkAllocation(bufferManager.allocate(300))
+    checkAllocation(bufferManager.allocate(300))
+    checkAllocation(bufferManager.allocate(300))
+    checkAllocation(bufferManager.allocate(100))
   }
 
   it should "Fail when trying to allocate beyond limit" in {
     val bufferManager = new NativeMemoryManager(1000)
-    checkAllocation(bufferManager.allocateWithMagicHeader(300))
-    checkAllocation(bufferManager.allocateWithMagicHeader(300))
-    checkAllocation(bufferManager.allocateWithMagicHeader(300))
+    checkAllocation(bufferManager.allocate(300))
+    checkAllocation(bufferManager.allocate(300))
+    checkAllocation(bufferManager.allocate(300))
     intercept[IndexOutOfBoundsException] {
-      checkAllocation(bufferManager.allocateWithMagicHeader(300))
+      checkAllocation(bufferManager.allocate(300))
     }
   }
 

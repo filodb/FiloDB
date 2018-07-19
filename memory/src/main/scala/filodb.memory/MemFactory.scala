@@ -3,14 +3,12 @@ package filodb.memory
 import java.nio.ByteBuffer
 import java.util.concurrent.atomic.{AtomicLong, AtomicReference}
 
-import scala.collection.JavaConverters._
 import scala.collection.mutable.ListBuffer
 
 import com.kenai.jffi.MemoryIO
 import com.typesafe.scalalogging.StrictLogging
-import org.jctools.maps.NonBlockingHashMapLong
 
-import filodb.memory.format.BinaryVector.{HeaderMagic, Memory}
+import filodb.memory.BinaryRegion.Memory
 import filodb.memory.format.UnsafeUtils
 
 /**
@@ -23,20 +21,14 @@ trait MemFactory {
     * @param size Request memory allocation size in bytes
     * @return Memory which has a base, offset and a length
     */
-  def allocate(size: Int): Memory
+  def allocate(size: Int): Memory =
+    (UnsafeUtils.ZeroPointer, allocateOffheap(size), size)
 
   /**
-    * Allocates memory for requested size plus 4 bytes for magic header
-    *
+   * Allocates offheap memory and returns a native 64-bit pointer
     * @param size Request memory allocation size in bytes
-    * @return Memory which has a base, offset and a length
-    */
-  final def allocateWithMagicHeader(size: Int): Memory = {
-    //4 for magic header
-    val (base, off, numBytes) = allocate(size + 4)
-    UnsafeUtils.setInt(base, off, HeaderMagic)
-    (base, off + 4, size)
-  }
+   */
+  def allocateOffheap(size: Int): BinaryRegion.NativePointer
 
   /**
     * Frees memory allocated at the passed address with allocate()
@@ -46,22 +38,9 @@ trait MemFactory {
   def freeMemory(address: Long): Unit
 
   /**
-   * Compliment to allocateWithMagicHeader(). Calls freeMemory() adjusting for the extra 4 bytes for magic header.
-   */
-  final def freeWithMagicHeader(address: Long): Unit = freeMemory(address - 4)
-
-  /**
    * Number of "free" bytes left at the moment available for allocation
    */
   def numFreeBytes: Long
-
-  /**
-    * Allocate and make of copy of the bytes into the allocated memory
-    *
-    * @param bytes The bytes to be copied
-    * @return The memory to which the bytes have been copied to
-    */
-  def copyFromBytes(bytes: Array[Byte]): ByteBuffer
 
   def fromBuffer(buf: ByteBuffer): Memory = {
     if (buf.hasArray) {
@@ -89,7 +68,7 @@ object MemFactory {
   */
 class NativeMemoryManager(val upperBoundSizeInBytes: Long) extends MemFactory {
   protected val usedSoFar = new AtomicLong(0)
-  protected val sizeMapping = new NonBlockingHashMapLong[Long]()
+  protected val sizeMapping = debox.Map.empty[Long, Int]
 
   def usedMemory: Long = usedSoFar.get()
 
@@ -97,29 +76,15 @@ class NativeMemoryManager(val upperBoundSizeInBytes: Long) extends MemFactory {
 
   def numFreeBytes: Long = availableDynMemory
 
-  /**
-    * Allocate and make of copy of the bytes into the allocated memory
-    *
-    * @param bytes The bytes to be copied
-    * @return The memory to which the bytes have been copied to
-    */
-  override def copyFromBytes(bytes: Array[Byte]): ByteBuffer = {
-    val size = bytes.length
-    val (_, address, _) = allocate(size)
-    val byteBuffer = UnsafeUtils.asDirectBuffer(address, size)
-    UnsafeUtils.unsafe.copyMemory(bytes, UnsafeUtils.arayOffset, UnsafeUtils.ZeroPointer, address, size)
-    byteBuffer
-  }
-
   // Allocates a native 64-bit pointer, or throws an exception if not enough space
-  def allocate(size: Int): Memory = {
+  def allocateOffheap(size: Int): BinaryRegion.NativePointer = {
     val currentSize = usedSoFar.get()
     val resultantSize = currentSize + size
     if (!(resultantSize > upperBoundSizeInBytes)) {
       val address: Long = MemoryIO.getCheckedInstance().allocateMemory(size, true)
       usedSoFar.compareAndSet(currentSize, currentSize + size)
-      sizeMapping.put(address, size)
-      (UnsafeUtils.ZeroPointer, address, size)
+      sizeMapping(address) = size
+      address
     } else {
       val msg = s"Resultant memory size $resultantSize after allocating " +
         s"with requested size $size is greater than upper bound size $upperBoundSizeInBytes"
@@ -129,8 +94,8 @@ class NativeMemoryManager(val upperBoundSizeInBytes: Long) extends MemFactory {
 
   override def freeMemory(startAddress: Long): Unit = {
     val address = startAddress
-    val size = sizeMapping.get(address)
-    if (size > 0) {
+    val size = sizeMapping.getOrElse(address, -1)
+    if (size >= 0) {
       val currentSize = usedSoFar.get()
       MemoryIO.getCheckedInstance().freeMemory(address)
       usedSoFar.compareAndSet(currentSize, currentSize - size)
@@ -142,9 +107,9 @@ class NativeMemoryManager(val upperBoundSizeInBytes: Long) extends MemFactory {
   }
 
   protected[memory] def freeAll(): Unit = {
-    sizeMapping.entrySet().asScala.foreach(entry => if (entry.getValue > 0) {
-      MemoryIO.getCheckedInstance().freeMemory(entry.getKey)
-    })
+    sizeMapping.foreach { case (addr, size) =>
+      MemoryIO.getCheckedInstance().freeMemory(addr)
+    }
     sizeMapping.clear()
   }
 
@@ -165,16 +130,12 @@ class ArrayBackedMemFactory extends MemFactory {
     * @param size Request memory allocation size in bytes
     * @return Memory which has a base, offset and a length
     */
-  def allocate(size: Int): Memory = {
+  override def allocate(size: Int): Memory = {
     val newBytes = new Array[Byte](size)
     (newBytes, UnsafeUtils.arayOffset, size)
   }
 
-  override def copyFromBytes(bytes: Array[Byte]): ByteBuffer = {
-    val newBytes = new Array[Byte](bytes.length)
-    System.arraycopy(bytes, 0, newBytes, 0, bytes.length)
-    ByteBuffer.wrap(newBytes)
-  }
+  def allocateOffheap(size: Int): BinaryRegion.NativePointer = throw new UnsupportedOperationException
 
   // Nothing to free, let heap GC take care of it  :)
   override def freeMemory(address: Long): Unit = {}
@@ -254,43 +215,20 @@ class BlockMemFactory(blockStore: BlockManager,
   }
 
   /**
-    * Allocates memory for requested size.  Designed for BinaryVectors only.
+    * Allocates memory for requested size.
     * Also ensures that metadataAllocSize is available for metadata storage.
     *
     * @param allocateSize Request memory allocation size in bytes
     * @return Memory which has a base, offset and a length
     */
-  override def allocate(allocateSize: Int): Memory = {
+  def allocateOffheap(allocateSize: Int): BinaryRegion.NativePointer = {
     val block = ensureCapacity(allocateSize + metadataAllocSize + 2)
     block.own()
     val preAllocationPosition = block.position()
     val newAddress = block.address + preAllocationPosition
     val postAllocationPosition = preAllocationPosition + allocateSize
     block.position(postAllocationPosition)
-    (UnsafeUtils.ZeroPointer, newAddress, allocateSize)
-  }
-
-  /**
-    * Chunks from recovered partitions are copied here.
-    * Unlike in a flush these will happen in a multi-threaded fashion.
-    * A block is  just a buffer of memory - so it cannot be concurrently used.
-    * We need to lock before doing the copy. A small price to pay so that flush allocation
-    * is seamless and we don't need to compact to de-fragment.
-    * @param bytes The bytes to be copied
-    * @return The memory to which the bytes have been copied to
-    */
-  override def copyFromBytes(bytes: Array[Byte]): ByteBuffer = {
-    val allocateSize = bytes.length
-    val block = ensureCapacity(allocateSize + metadataAllocSize + 2)
-    val preAllocationPosition = block.position()
-    val address = block.address + preAllocationPosition
-    val byteBuffer = UnsafeUtils.asDirectBuffer(address, allocateSize)
-    block.own()
-    byteBuffer.put(bytes)
-    val postAllocationPosition = preAllocationPosition + allocateSize
-    block.position(postAllocationPosition)
-    byteBuffer.flip()
-    byteBuffer
+    newAddress
   }
 
   /**

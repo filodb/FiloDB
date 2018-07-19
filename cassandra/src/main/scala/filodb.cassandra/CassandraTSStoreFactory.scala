@@ -9,7 +9,7 @@ import filodb.coordinator.StoreFactory
 import filodb.core.memstore.TimeSeriesMemStore
 
 /**
- * A StoreFactory for a TimeSeriesMemStore backed by a Cassandra ChunkSink for recovery/persistence
+ * A StoreFactory for a TimeSeriesMemStore backed by a Cassandra ChunkSink for on-demand recovery/persistence
  * and a Cassandra MetaStore
  *
  * @param config a Typesafe Config, not at the root but at the "filodb." level

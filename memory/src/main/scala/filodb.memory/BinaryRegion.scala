@@ -2,6 +2,8 @@ package filodb.memory
 
 import net.jpountz.xxhash.XXHashFactory
 
+import filodb.memory.format.UnsafeUtils
+
 /**
  * A BinaryRegion is just an area of memory (heap or offheap) with a length prefix.
  * There are different implementations depending on the size of the length prefix.
@@ -25,6 +27,12 @@ object BinaryRegion {
   type Memory = Tuple3[Any, Long, Int]
 
   def hash32(bytes: Array[Byte]): Int = hasher32.hash(bytes, 0, bytes.size, Seed)
+
+  // TODO: Can we PLEASE implement our own Unsafe XXHash which does not require creating a DirectBuffer?
+  def hash32(base: Any, offset: Long, len: Int): Int = base match {
+    case a: Array[Byte] => hash32(a)
+    case UnsafeUtils.ZeroPointer => hasher32.hash(UnsafeUtils.asDirectBuffer(offset, len), Seed)
+  }
 
   // 64-bit pointer to native/offheap memory
   type NativePointer = Long

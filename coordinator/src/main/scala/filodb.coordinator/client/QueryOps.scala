@@ -42,23 +42,6 @@ trait QueryOps extends ClientBase with StrictLogging {
     }
 
   /**
-   * Asks the FiloDB node to perform a query using a LogicalPlan.
-   * @param dataset the Dataset (and Database) to query
-   * @param plan the query LogicalPlan to execute
-   * @param options the query options including spread and inter-node query timeout.
-   *        NOTE: the actual response timeout is longer as we need to allow time for errors to propagagte back.
-   */
-  def logicalPlanQuery(dataset: DatasetRef,
-                       plan: LogicalPlan,
-                       options: QueryOptions = QueryOptions()): QueryResult = {
-    val qCmd = LogicalPlanQuery(dataset, plan, options, System.currentTimeMillis())
-    // NOTE: It's very important to extend the query timeout for the ask itself, because the queryTimeoutSecs is
-    // the internal FiloDB scatter-gather timeout.  We need additional time for the proper error to get transmitted
-    // back in case of internal timeouts.
-    askCoordinator(qCmd, (options.queryTimeoutSecs + 10).seconds) { case r: QueryResult => r }
-  }
-
-  /**
     * Asks the FiloDB node to perform a query using a LogicalPlan.
     * @param dataset the Dataset (and Database) to query
     * @param plan the query LogicalPlan to execute

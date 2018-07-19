@@ -79,6 +79,8 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
   extends BlockManager with StrictLogging {
   val mask = PageManager.PROT_READ | PageManager.PROT_EXEC | PageManager.PROT_WRITE
 
+  import collection.JavaConverters._
+
   protected var firstPageAddress: Long = 0L
 
   protected val freeBlocks: util.LinkedList[Block] = allocate()
@@ -188,7 +190,6 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
   }
 
   protected def tryReclaim(num: Int): Unit = {
-
     var reclaimed = 0
     var currList = 0
     while ( timeOrderedBlocksEnabled &&
@@ -213,6 +214,15 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
         }
       }
     }
+  }
+
+  /**
+   * Used during testing only to try and reclaim all existing blocks
+   */
+  def reclaimAll(): Unit = {
+    logger.warn(s"Reclaiming all used blocks -- THIS BETTER BE A TEST!!!")
+    usedBlocks.asScala.foreach(_.markReclaimable)
+    tryReclaim(usedBlocks.size)
   }
 
   def releaseBlocks(): Unit = {

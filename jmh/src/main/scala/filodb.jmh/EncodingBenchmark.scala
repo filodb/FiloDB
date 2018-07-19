@@ -56,7 +56,7 @@ class EncodingBenchmark {
     for { i <- 0 until numValues optimized } {
       cb.addData(intArray(i))
     }
-    cb.optimize(memFactory).toFiloBuffer
+    cb.optimize(memFactory)
     cb.dispose()
   }
 
@@ -92,16 +92,16 @@ class EncodingBenchmark {
   @BenchmarkMode(Array(Mode.Throughput))
   @OutputTimeUnit(TimeUnit.SECONDS)
   def newUtf8VectorEncoding(): Unit = {
-    val cb = UTF8Vector.appendingVector(memFactory, numValues)
+    val cb = UTF8Vector.appendingVector(memFactory, numValues, maxStringLength * numUniqueStrings)
     for { i <- 0 until numValues optimized } {
       cb.addData(utf8strings(i))
     }
-    cb.toFiloBuffer
+    cb.optimize(memFactory)
     cb.dispose()
   }
   // TODO: RowReader based vector building
 
-  val utf8cb = UTF8Vector.appendingVector(memFactory, numValues)
+  val utf8cb = UTF8Vector.appendingVector(memFactory, numValues, maxStringLength * numUniqueStrings)
   for { i <- 0 until numValues optimized } {
     utf8cb.addData(utf8strings(i))
   }
@@ -110,7 +110,7 @@ class EncodingBenchmark {
   @BenchmarkMode(Array(Mode.Throughput))
   @OutputTimeUnit(TimeUnit.SECONDS)
   def newUtf8AddVector(): Unit = {
-    val cb = UTF8Vector.appendingVector(memFactory, numValues)
+    val cb = UTF8Vector.appendingVector(memFactory, numValues, maxStringLength * numUniqueStrings)
     cb.addVector(utf8cb)
     cb.dispose()
   }

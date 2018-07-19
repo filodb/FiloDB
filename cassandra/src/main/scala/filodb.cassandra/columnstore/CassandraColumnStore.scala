@@ -18,16 +18,12 @@ import filodb.cassandra.{DefaultFiloSessionProvider, FiloCassandraConnector, Fil
 import filodb.cassandra.Util
 import filodb.core._
 import filodb.core.metadata.Dataset
-import filodb.core.query._
 import filodb.core.store._
-import filodb.memory.format.FiloVector
+import filodb.memory.format.UnsafeUtils
 
 /**
  * Implementation of a column store using Apache Cassandra tables.
  * This class must be thread-safe as it is intended to be used concurrently.
- *
- * Both the instances of the Segment* table classes above as well as ChunkRowMap entries
- * are cached for faster I/O.
  *
  * ==Configuration==
  * {{{
@@ -229,12 +225,14 @@ case class CassandraTokenRangeSplit(tokens: Seq[(String, String)],
   def hostnames: Set[String] = replicas.flatMap(r => Set(r.getHostString, r.getAddress.getHostAddress))
 }
 
-trait CassandraChunkSource extends ChunkSource with StrictLogging {
+trait CassandraChunkSource extends RawChunkSource with StrictLogging {
   import Iterators._
 
   def config: Config
   def filoSessionProvider: Option[FiloSessionProvider]
   def readEc: Scheduler
+
+  implicit val readSched = readEc
 
   val stats = new ChunkSourceStats
 
@@ -252,15 +250,6 @@ trait CassandraChunkSource extends ChunkSource with StrictLogging {
     val sessionProvider = filoSessionProvider.getOrElse(new DefaultFiloSessionProvider(cassandraConfig))
   }
 
-  // Produce an empty stream of chunks so that results can still be returned correctly
-  def emptyChunkStream(infosSkips: ChunkSetInfo.ChunkInfosAndSkips, colNo: Int):
-    Observable[SingleChunkInfo] =
-    Observable.fromIterator(infosSkips.toIterator.map { case (info, skips) =>
-      // scalastyle:off
-      SingleChunkInfo(info.id, colNo, null.asInstanceOf[ByteBuffer])
-      // scalastyle:on
-    })
-
   def multiPartScan(dataset: Dataset,
                     partitions: Seq[Array[Byte]],
                     indexTable: IndexTable): Observable[IndexRecord] = {
@@ -271,8 +260,12 @@ trait CassandraChunkSource extends ChunkSource with StrictLogging {
     Observable.concat(its: _*)
   }
 
-  def scanPartitions(dataset: Dataset,
-                     partMethod: PartitionScanMethod): Observable[FiloPartition] = {
+  val partParallelism = 3
+
+  def readRawPartitions(dataset: Dataset,
+                        columnIDs: Seq[Types.ColumnId],
+                        partMethod: PartitionScanMethod,
+                        chunkMethod: ChunkScanMethod = AllChunkScan): Observable[RawPartData] = {
     val indexTable = getOrCreateIndexTable(dataset.ref)
     logger.debug(s"Scanning partitions for ${dataset.ref} with method $partMethod...")
     val (filters, indexRecords) = partMethod match {
@@ -282,10 +275,7 @@ trait CassandraChunkSource extends ChunkSource with StrictLogging {
       case MultiPartitionScan(partitions, _) =>
         (Nil, multiPartScan(dataset, partitions, indexTable))
 
-      case FilteredPartitionScan(CassandraTokenRangeSplit(tokens, _), filters, scanMethod) =>
-        // Ignore scanMethod we always serve for AllChunkScan since
-        // we don't have a searchable row-key index in cassandra.
-        // Typically, on-demand-paging will not issue FilteredPartitionScan
+      case FilteredPartitionScan(CassandraTokenRangeSplit(tokens, _), filters) =>
         (filters, indexTable.scanIndices(tokens))
 
       case other: PartitionScanMethod =>  ???
@@ -296,14 +286,10 @@ trait CassandraChunkSource extends ChunkSource with StrictLogging {
 
     // NOTE: we use hashCode as an approx means to identify ByteBuffers/partition keys which are identical
     indexRecords.sortedGroupBy(_.binPartition.hashCode)
-                .collect { case (_, binIndices) =>
-                  val (base, offset, _) = binIndices.head.partBaseOffset
-                  val newIndex = new ChunkIDPartitionChunkIndex(base, offset, dataset)
-                  binIndices.foreach { binIndex =>
-                    val info = ChunkSetInfo.fromBytes(binIndex.data.array)
-                    newIndex.add(info, Nil)
-                  }
-                  new CassandraPartition(newIndex, dataset, this)
+                .mapAsync(partParallelism) { case (_, binIndices) =>
+                  val infoBytes = binIndices.map(_.data.array)
+                  assembleRawPartData(dataset, binIndices.head.binPartition.array, infoBytes,
+                                      chunkMethod, columnIDs.toArray)
                 }
   }
 
@@ -326,89 +312,44 @@ trait CassandraChunkSource extends ChunkSource with StrictLogging {
   }
 
   def reset(): Unit = {}
-}
 
-/**
- * Represents one partition in the Cassandra ChunkSource.  Reads chunks lazily when streamReaders is called.
- * The index state can be cached for lower read latency.
- */
-class CassandraPartition(index: ChunkIDPartitionChunkIndex,
-                         val dataset: Dataset,
-                         scanner: CassandraChunkSource) extends FiloPartition with StrictLogging {
-  import Iterators._
+  private def assembleRawPartData(dataset: Dataset,
+                                  partKeyBytes: Array[Byte],
+                                  chunkInfos: Seq[Array[Byte]],
+                                  chunkMethod: ChunkScanMethod,
+                                  columnIds: Array[Types.ColumnId]): Task[RawPartData] = {
+    val chunkTable = getOrCreateChunkTable(dataset.ref)
+    val chunkSets = new NonBlockingHashMapLong[RawChunkSet](32, false)
+    logger.debug(s"Assembling chunks for partition ${dataset.partKeySchema.stringify(partKeyBytes)}...")
 
-  val partKeyBase = index.partKeyBase.asInstanceOf[Array[Byte]]
-  val partKeyOffset = index.partKeyOffset
+    val filteredInfos = chunkInfos.filter { infoBytes =>
+      ChunkSetInfo.getStartTime(infoBytes) <= chunkMethod.endTime &&
+      ChunkSetInfo.getEndTime(infoBytes) >= chunkMethod.startTime
+    }
 
-  def numChunks: Int = index.numChunks
+    filteredInfos.foreach { infoBytes =>
+      chunkSets.put(ChunkSetInfo.getChunkID(infoBytes),
+                    RawChunkSet(infoBytes, new Array[ByteBuffer](columnIds.size)))
+    }
 
-  def appendingChunkLen: Int = index.latestN(1).toSeq.headOption.map(_._1.numRows).getOrElse(0)
+    val filteredIDs = filteredInfos.map(ChunkSetInfo.getChunkID)
 
-  // For now just report a dummy shard.  In the future figure this out.
-  val shard = 0
-
-  private val chunkTable = scanner.getOrCreateChunkTable(dataset.ref)
-  private val readers = new NonBlockingHashMapLong[ChunkSetReader](32, false)
-
-  private def mergeChunks(chunkStreams: Seq[Observable[SingleChunkInfo]],
-                          columnIds: Array[Int]): Observable[ChunkSetReader] = {
-    Observable.merge(chunkStreams: _*)
-              .map { case SingleChunkInfo(id, pos, buf) =>
-                readers.get(id) match {
-                  // scalastyle:off
-                  case null =>
-                  // scalastyle:on
-                    scanner.stats.incrChunkWithNoInfo()
-                    None
-                  //scalastyle:off
-                  case reader: MutableChunkSetReader if buf != null =>
-                  //scalastyle:on
-                    reader.addChunk(pos, dataset.vectorMakers(columnIds(pos))(buf, reader.length))
-                    if (reader.isFull) {
-                      readers.remove(id)
-                      scanner.stats.incrReadChunksets()
-                      Some(reader)
-                    } else { None }
-                  case reader: MutableChunkSetReader =>
-                    logger.debug(s"Skipping chunk $id due to empty buffer / no data from Cassandra")
-                    None
+    val chunkFuts: Seq[Future[Unit]] = (0 until columnIds.size).map { pos =>
+      require(!Dataset.isPartitionID(columnIds(pos)))
+      chunkTable.readChunks(partKeyBytes, columnIds(pos), pos, filteredIDs, false)
+                .foreach { case SingleChunkInfo(id, pos, buf) =>
+                  chunkSets.get(id) match {
+                    case UnsafeUtils.ZeroPointer =>
+                      stats.incrChunkWithNoInfo()
+                    case RawChunkSet(_, chunkArray) =>
+                      chunkArray(pos) = buf
+                      stats.incrReadChunksets()
+                  }
                 }
-              }.collect { case Some(reader) => reader }
+    }
+    // After chunks have read and populated chunksets, assembly RawPartData
+    Task.fromFuture(Future.sequence(chunkFuts)).map { x =>
+      RawPartData(partKeyBytes, filteredIDs.map(id => chunkSets.get(id)))
+    }
   }
-
-  // Asynchronously reads different columns from Cassandra, merging the reads into ChunkSetReaders
-  override def streamReaders(method: ChunkScanMethod, columnIds: Array[Int]): Observable[ChunkSetReader] = {
-    // parse ChunkScanMethod into infosSkips....
-    val (rangeQuery, infosSkips) = method match {
-      case AllChunkScan             => (true, index.allChunks.toSeq)
-      case RowKeyChunkScan(k1, k2)  => (false, index.rowKeyRange(k1.binRec, k2.binRec).toSeq)
-      case LastSampleChunkScan      => (false, index.latestN(1).toSeq)
-    }
-    logger.debug(s"Reading chunks from columns ${columnIds.toList}, $stringPartition, method $method")
-
-    // from infoSkips, create the MutableChunkSetReader's
-    infosSkips.foreach { case (info, skips) =>
-      readers.putIfAbsent(info.id, new MutableChunkSetReader(info, skips, columnIds.size))
-    }
-
-    // Read chunks in, populate MutableChunkSetReader's, and emit readers when they are full
-    val ids = infosSkips.map(_._1.id).toBuffer
-    val chunkStreams = (0 until columnIds.size).map { pos =>
-      if (Dataset.isPartitionID(columnIds(pos))) {
-        val constVect = constPartitionVector(columnIds(pos))
-        // directly populate the ChunkReaders with constant vectors -- no I/O!!
-        ids.foreach { id => readers.get(id).asInstanceOf[MutableChunkSetReader].addChunk(pos, constVect) }
-        Observable.empty[SingleChunkInfo]
-      } else {
-        chunkTable.readChunks(partKeyBytes, columnIds(pos), pos, ids, false)
-                  .switchIfEmpty(scanner.emptyChunkStream(infosSkips, pos))
-      }
-    }
-    mergeChunks(chunkStreams, columnIds)
-  }
-
-  def readers(method: ChunkScanMethod, columnIds: Array[Int]): Iterator[ChunkSetReader] =
-    streamReaders(method, columnIds).toIterator()
-
-  def lastVectors: Array[FiloVector[_]] = ???
 }

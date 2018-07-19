@@ -68,7 +68,7 @@ abstract class IngestionAndRecoverySpec extends StandaloneMultiJvmSpec(Ingestion
   // It is not used beyond that. We never start this cluster.
   val cluster = FilodbCluster(system)
   val metaStore = cluster.metaStore
-  val colStore = cluster.memStore.sink
+  val colStore = cluster.memStore.store
 
   // Test fields
   var query1Response: Double = 0

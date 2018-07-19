@@ -1,63 +1,57 @@
 package filodb.core.memstore
 
 import java.lang.management.ManagementFactory
-import java.util.concurrent.Executors
+import java.nio.ByteBuffer
 
-import scala.concurrent.{ExecutionContext, Future, Promise}
 import scala.concurrent.duration._
 
 import com.typesafe.scalalogging.StrictLogging
+import monix.eval.Task
 import monix.execution.Scheduler
 
-import filodb.core.metadata.Dataset
-import filodb.core.query.ChunkSetReader
-import filodb.core.store.ChunkSetInfo
+import filodb.core.store._
 import filodb.memory.{BlockManager, BlockMemFactory}
-import filodb.memory.format.BinaryVector
+import filodb.memory.format.BinaryVector.BinaryVectorPtr
+import filodb.memory.format.UnsafeUtils
 
 /**
   * This class is responsible for the storage and expiration of On-Demand Paged chunks from
-  * ChunkSource (example, cassandra).
+  * ChunkSource (example, cassandra) to offheap block memory.  One of these should exist per shard.
   *
-  * The orchestrator of on-demand paging calls the storeAsync function to store the chunks into this PagedChunkStore.
-  * The storage call is asynchronous to avoid blocking the query path. The tasks are queued using a singleThreadExecutor
-  * to remove resource contention in BlockManager.
+  * It is orchestrated via the RawChunkSource and RawToPartitionMaker API.  The makePartition task is called
+  * for each incoming RawPartData.  This class will identify the right memstore TSPartition and populate it.
+  * NOTE: for now these tasks must be run in serial and not concurrently, due to limitations in BlockManager.
   *
   * The chunks are bucketed into a configurable number of buckets based on class param chunkRetentionHours.
   * Off-heap for each bucket is served by a unique BlockMemStore that marks block as reclaimable as soon as they are
   * full. The latest block is marked reclaimable when the retention time is over.
   *
-  * @param dataset the dataset this paged chunk store is allocated for.
+  * @param tsShard the TimeSeriesShard containing the time series for the given shard
   * @param blockManager The block manager to be used for block allocation
-  * @param metadataAllocSize the additional size in bytes to ensure is free for writing metadata, per chunk
   * @param chunkRetentionHours number of hours chunks need to be retained for. A bucket will be created per hour
   *                            to reclaim blocks in a time ordered fashion
   */
-class DemandPagedChunkStore(dataset: Dataset,
-                            blockManager: BlockManager,
-                            metadataAllocSize: Int,
+class DemandPagedChunkStore(tsShard: TimeSeriesShard,
+                            val blockManager: BlockManager,
                             chunkRetentionHours: Int,
-                            shardNum: Int,
-                            var onDemandPagingEnabled: Boolean = true) extends StrictLogging {
-  // It is important that the tasks be executed in a single thread  to remove resource contention in BlockManager
-  private val scheduler = Scheduler(Executors.newSingleThreadScheduledExecutor(),
-                            ExecutionContext.fromExecutorService(Executors.newSingleThreadExecutor()))
-
+                            var onDemandPagingEnabled: Boolean = true)(implicit scheduler: Scheduler)
+extends RawToPartitionMaker with StrictLogging {
   // block factories for each time order
   private val memFactories = Array.tabulate(chunkRetentionHours) { i =>
-    new BlockMemFactory(blockManager, Some(i), metadataAllocSize, markFullBlocksAsReclaimable = true)
+    new BlockMemFactory(blockManager, Some(i), tsShard.dataset.blockMetaSize, markFullBlocksAsReclaimable = true)
   }
 
   // initialize the time bucket ranges and index to be able to look up reclaimOrder from timestamps quickly
   private val jvmStartTime = ManagementFactory.getRuntimeMXBean.getStartTime
   val retentionMillis = chunkRetentionHours.hours.toMillis
   val retentionStart = jvmStartTime - retentionMillis
+  logger.info(s"Starting DemandPagedChunkStore, jvmStartTime=$jvmStartTime, retentionStart=$retentionStart")
 
   // schedule cleanup task
   scheduler.scheduleOnce(chunkRetentionHours.hours)(cleanupAndDisableOnDemandPaging)
 
   private[memstore] def cleanupAndDisableOnDemandPaging() = {
-    logger.info(s"cleanupAndDisableOnDemandPaging for shard $shardNum")
+    logger.info(s"cleanupAndDisableOnDemandPaging for shard ${tsShard.shardNum}")
     blockManager.reclaimTimeOrderedBlocks()
     onDemandPagingEnabled = false
   }
@@ -65,46 +59,49 @@ class DemandPagedChunkStore(dataset: Dataset,
   import TimeSeriesShard._
 
   /**
-    * Stores the on heap chunkset into off-heap memory and indexes them into partition
-    *
-    * @param onHeap chunkset to store
-    * @return Future of off-heap chunkset-infos that completes when partition has been paged to memory
-    */
-  def storeAsync(onHeap: Seq[ChunkSetReader], partition: TimeSeriesPartition): Future[Seq[ChunkSetInfo]] = {
-    val p = Promise[Seq[ChunkSetInfo]]()
-    scheduler.scheduleOnce(0.seconds) {
-      if (onDemandPagingEnabled) {
-        val offHeapChunkInfos = onHeap.flatMap { reader => // flatMap removes Nones
-          timeOrderForChunkSet(reader.info).map { timeOrder =>
+   * Stores raw chunks into offheap memory and populates chunks into partition
+   */
+  def populateRawChunks(rawPartition: RawPartData): Task[FiloPartition] = Task {
+    if (onDemandPagingEnabled) {
+      // Find the right partition given the partition key
+      tsShard.getPartition(rawPartition.partitionKey).map { partition =>
+        val tsPart = partition.asInstanceOf[TimeSeriesPartition]
+        // One chunkset at a time, load them into offheap and populate the partition
+        rawPartition.chunkSets.foreach { case RawChunkSet(infoBytes, rawVectors) =>
+          timeOrderForChunkSet(ChunkSetInfo.getStartTime(infoBytes)).foreach { timeOrder =>
             val memFactory = memFactories(timeOrder)
             memFactory.startMetaSpan()
-            if (!partition.hasChunksAt(reader.info.id)) {
-              val chunks = copyToOffHeap(reader, memFactory)
-              val metaAddr = memFactory.endMetaSpan(writeMeta(_, partition.partID, reader.info), BlockMetaAllocSize)
+            val chunkID = ChunkSetInfo.getChunkID(infoBytes)
+            if (!partition.hasChunksAt(chunkID)) {
+              val chunkPtrs = copyToOffHeap(rawVectors, memFactory)
+              val metaAddr = memFactory.endMetaSpan(writeMeta(_, tsPart.partID, infoBytes, chunkPtrs),
+                                                    tsShard.dataset.blockMetaSize.toShort)
               require(metaAddr != 0)
-              partition.addChunkSet(metaAddr, chunks)
+              tsPart.addChunkSet(metaAddr + 4)   // Important: don't point at partID
             } else {
-              logger.warn(s"Chunks not copied to ${partition.stringPartition}, already has chunk ${reader.info.id}")
+              logger.info(s"Chunks not copied to ${partition.stringPartition}, already has chunk $chunkID")
             }
-            reader.info
           }
         }
-        p.success(offHeapChunkInfos)
-      } else {
-        p.failure(new IllegalArgumentException(s"Warning: Attempt to page data from chunk store into memory after " +
-          s"retention period since JVM start on shard $shardNum. Continued occurrence of this " +
-          s"exception indicates a bug."))
+        partition
+      }.getOrElse {
+        // What happens if it is not found?
+        // TODO: do we want to have a "temporary" area for non persistent partitions which are not in the TSShard?
+        // Do we want to add that partition to the TimeSeriesShard, if we have room?
+        throw new UnsupportedOperationException("For now only partitions already in memstore will be uploaded")
       }
+    } else {
+      throw new IllegalArgumentException(s"Warning: Attempt to page data from chunk store into memory after " +
+        s"retention period since JVM start on shard ${tsShard.shardNum}. Continued occurrence of this " +
+        s"exception indicates a bug.")
     }
-    p.future
   }
 
   /**
     * For a given chunkset, this method calculates the time order in which eviction of chunk should occur.
     * It is used in deciding which BlockMemFactory to use while allocating off-heap memory for this chunk.
     */
-  private def timeOrderForChunkSet(info: ChunkSetInfo): Option[Int] = {
-    val timestamp = info.startTime
+  private def timeOrderForChunkSet(timestamp: Long): Option[Int] = {
     if (timestamp < retentionStart)
       None
     else if (timestamp > jvmStartTime)
@@ -116,14 +113,14 @@ class DemandPagedChunkStore(dataset: Dataset,
   /**
     * Copies the onHeap contents read from ColStore into off-heap using the given memFactory
     */
-  private def copyToOffHeap(onHeap: ChunkSetReader,
-                            memFactory: BlockMemFactory): Array[BinaryVector[_]] = {
-    val columnIds = dataset.dataColumns.map(_.id).toArray
-    onHeap.vectors.map(_.asInstanceOf[BinaryVector[_]]).zipWithIndex.map { case (v, i) =>
-      val bytes = v.toFiloBuffer.array()
-      val byteBuf = memFactory.copyFromBytes(bytes)
-      dataset.vectorMakers(columnIds(i))(byteBuf, onHeap.length).asInstanceOf[BinaryVector[_]]
+  private def copyToOffHeap(buffers: Array[ByteBuffer],
+                            memFactory: BlockMemFactory): Array[BinaryVectorPtr] = {
+    buffers.map { buf =>
+      // TODO: if in case the buffer is offheap/direct buffer already, maybe we don't need to copy it?
+      val (bufBase, bufOffset, bufLen) = UnsafeUtils.BOLfromBuffer(buf)
+      val vectorAddr = memFactory.allocateOffheap(bufLen)
+      UnsafeUtils.unsafe.copyMemory(bufBase, bufOffset, UnsafeUtils.ZeroPointer, vectorAddr, bufLen)
+      vectorAddr
     }
   }
-
 }

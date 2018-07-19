@@ -36,7 +36,6 @@ trait RangeVectorTransformer extends java.io.Serializable {
     * DO NOT change to a val. Increases heap usage.
     */
   protected[exec] def args: String
-
 }
 
 object RangeVectorTransformer {
@@ -46,7 +45,7 @@ object RangeVectorTransformer {
     require(schema.columns(0).colType == ColumnType.LongColumn,
       "Cannot return periodic data from a dataset that is not time series based")
     require(schema.columns(1).colType == ColumnType.DoubleColumn,
-      "Cannot return periodic data from a dataset that is not time series based")
+      "Cannot query a non Doubles based value column right now, sorry")
   }
 }
 

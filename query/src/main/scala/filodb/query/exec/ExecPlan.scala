@@ -100,14 +100,14 @@ trait ExecPlan extends QueryCommand {
         qLogger.debug(s"queryId: ${id} Started Transformer ${transf.getClass.getSimpleName} with ${transf.args}")
         (transf.apply(acc._1, queryConfig, limit, acc._2), transf.schema(dataset, acc._2))
       }
+      val recSchema = SerializableRangeVector.toSchema(finalRes._2.columns)
+      val builder = SerializableRangeVector.toBuilder(recSchema)
       finalRes._1
-        .map { r =>
-          if (r.isInstanceOf[SerializableRangeVector]) {
-            r.asInstanceOf[SerializableRangeVector]
-          } else {
+        .map {
+          case r: SerializableRangeVector => r
+          case rv: RangeVector =>
             // materialize, and limit rows per RV
-            SerializableRangeVector(r, finalRes._2.columns, limit)
-          }
+            SerializableRangeVector(rv, builder, recSchema, limit)
         }
         .toListL
         .map { r =>

@@ -2,10 +2,12 @@ package filodb.memory.format.vectors
 
 import java.nio.ByteBuffer
 
+import debox.Buffer
 import scalaxy.loops._
 
-import filodb.memory.MemFactory
+import filodb.memory.{BinaryRegion, MemFactory}
 import filodb.memory.format._
+import filodb.memory.format.BinaryVector.BinaryVectorPtr
 import filodb.memory.format.Encodings._
 
 
@@ -14,25 +16,24 @@ object DoubleVector {
    * Creates a new MaskedDoubleAppendingVector, allocating a byte array of the right size for the max #
    * of elements plus a bit mask.
    * @param maxElements initial maximum number of elements this vector will hold. Will automatically grow.
-   * @param offheap if true, allocate the space for the vector off heap.  User will have to dispose.
    */
   def appendingVector(memFactory: MemFactory, maxElements: Int): BinaryAppendableVector[Double] = {
-    val bytesRequired = 8 + BitmapMask.numBytesRequired(maxElements) + 8 * maxElements
-    val (base, off, nBytes) = memFactory.allocateWithMagicHeader(bytesRequired)
-    val dispose = () => memFactory.freeWithMagicHeader(off)
-    GrowableVector(memFactory,new MaskedDoubleAppendingVector(base, off, nBytes, maxElements, dispose))
+    val bytesRequired = 12 + BitmapMask.numBytesRequired(maxElements) + 12 + 8 * maxElements
+    val addr = memFactory.allocateOffheap(bytesRequired)
+    val dispose =  () => memFactory.freeMemory(addr)
+    GrowableVector(memFactory,new MaskedDoubleAppendingVector(addr, bytesRequired, maxElements, dispose))
   }
 
   /**
    * Creates a DoubleAppendingVector - does not grow and does not have bit mask. All values are marked
    * as available.
-   * @param offheap if true, allocate the space for the vector off heap.  User will have to dispose.
+   * @param maxElements the max number of elements the vector will hold.  Not expandable
    */
   def appendingVectorNoNA(memFactory: MemFactory, maxElements: Int): BinaryAppendableVector[Double] = {
-    val bytesRequired = 4 + 8 * maxElements
-    val (base, off, nBytes) = memFactory.allocateWithMagicHeader(bytesRequired)
-    val dispose = () => memFactory.freeWithMagicHeader(off)
-    new DoubleAppendingVector(base, off, nBytes, dispose)
+    val bytesRequired = 12 + 8 * maxElements
+    val addr = memFactory.allocateOffheap(bytesRequired)
+    val dispose =  () => memFactory.freeMemory(addr)
+    new DoubleAppendingVector(addr, bytesRequired, dispose)
   }
 
   /**
@@ -44,25 +45,20 @@ object DoubleVector {
     vect
   }
 
-  def apply(buffer: ByteBuffer): BinaryVector[Double] = {
-    val (base, off, len) = UnsafeUtils.BOLfromBuffer(buffer)
-    DoubleBinaryVector(base, off, len, BinaryVector.NoOpDispose)
-  }
+  def apply(buffer: ByteBuffer): DoubleVectorDataReader = apply(UnsafeUtils.addressFromDirectBuffer(buffer))
 
-  def masked(buffer: ByteBuffer): MaskedDoubleBinaryVector = {
-    val (base, off, len) = UnsafeUtils.BOLfromBuffer(buffer)
-    new MaskedDoubleBinaryVector(base, off, len, BinaryVector.NoOpDispose)
-  }
+  import WireFormat._
 
-  def const(buffer: ByteBuffer): BinaryVector[Double] = {
-    val (base, off, len) = UnsafeUtils.BOLfromBuffer(buffer)
-    new DoubleConstVector(base, off, len, BinaryVector.NoOpDispose)
+  /**
+   * Parses the type of vector from the WireFormat word at address+4 and returns the appropriate
+   * DoubleVectorDataReader object for parsing it
+   */
+  def apply(vector: BinaryVectorPtr): DoubleVectorDataReader = BinaryVector.vectorType(vector) match {
+    case x if x == WireFormat(VECTORTYPE_DELTA2,    SUBTYPE_INT_NOMASK) => DoubleLongWrapDataReader
+    case x if x == WireFormat(VECTORTYPE_DELTA2,    SUBTYPE_REPEATED)   => DoubleLongWrapDataReader
+    case x if x == WireFormat(VECTORTYPE_BINSIMPLE, SUBTYPE_PRIMITIVE)  => MaskedDoubleDataReader
+    case x if x == WireFormat(VECTORTYPE_BINSIMPLE, SUBTYPE_PRIMITIVE_NOMASK) => DoubleVectorDataReader64
   }
-
-  def fromDDVBuf(buf: ByteBuffer): BinaryVector[Double] =
-    new DoubleLongWrapper(DeltaDeltaVector(buf))
-  def fromConstDDVBuf(buf: ByteBuffer): BinaryVector[Double] =
-    new DoubleLongWrapper(DeltaDeltaVector.const(buf))
 
   /**
    * For now, since most Prometheus double data is in fact integral, we take a really simple approach:
@@ -77,11 +73,10 @@ object DoubleVector {
    * - http://vis.cs.ucdavis.edu/vis2014papers/TVCG/papers/2674_20tvcg12-lindstrom-2346458.pdf
    * - (slightly lossy) normalize exponents and convert to fixed point, then compress using int/long techniques
    */
-  def optimize(memFactory: MemFactory, vector: OptimizingPrimitiveAppender[Double]): BinaryVector[Double] = {
+  def optimize(memFactory: MemFactory, vector: OptimizingPrimitiveAppender[Double]): BinaryVectorPtr = {
     val longWrapper = new LongDoubleWrapper(vector)
     if (longWrapper.allIntegrals) {
       DeltaDeltaVector.fromLongVector(memFactory, longWrapper)
-        .map(new DoubleLongWrapper(_))
         .getOrElse {
           if (vector.noNAs) vector.dataVect(memFactory) else vector.getVect(memFactory)
         }
@@ -91,34 +86,99 @@ object DoubleVector {
   }
 }
 
-final case class DoubleBinaryVector(base: Any,
-                                    offset: Long,
-                                    numBytes: Int,
-                                    val dispose: () => Unit) extends PrimitiveVector[Double] {
-  override val length: Int = (numBytes - 4) / 8
-  final def isAvailable(index: Int): Boolean = true
-  final def apply(index: Int): Double = UnsafeUtils.getDouble(base, offset + 4 + index * 8)
+/**
+ * An iterator optimized for speed and type-specific to avoid boxing.
+ * It has no hasNext() method - because it is guaranteed to visit every element, and this way
+ * you can avoid another method call for performance.
+ */
+trait DoubleIterator extends TypedIterator {
+  def next: Double
 }
 
-class MaskedDoubleBinaryVector(val base: Any,
-                               val offset: Long,
-                               val numBytes: Int,
-                               val dispose: () => Unit) extends PrimitiveMaskVector[Double] {
-  val bitmapOffset = offset + 4L
-  val subVectOffset = UnsafeUtils.getInt(base, offset)
-  private val dblVect = DoubleBinaryVector(base, offset + subVectOffset, numBytes - subVectOffset, dispose)
+/**
+ * A VectorDataReader object that supports fast extraction of Double data BinaryVectors
+ * +0000   4-byte length word
+ * +0004   4-byte WireFormat
+ * +0008   2-byte nbits  (unused for Longs)
+ * +0010   1 byte Boolean signed
+ * +0011   1 byte (actually 3 bits) bitshift when nbits < 8
+ * +0012   start of packed Double data
+ */
+trait DoubleVectorDataReader extends VectorDataReader {
+  /**
+   * Retrieves the element at position/row n, where n=0 is the first element of the vector.
+   */
+  def apply(vector: BinaryVectorPtr, n: Int): Double
 
-  override final def length: Int = dblVect.length
-  final def apply(index: Int): Double = dblVect.apply(index)
+  // This length method works assuming nbits is divisible into 32
+  def length(vector: BinaryVectorPtr): Int = (numBytes(vector) - 8) / 8
+
+  /**
+   * Returns a DoubleIterator to efficiently go through the elements of the vector.  The user is responsible for
+   * knowing how many elements to process.  There is no hasNext.
+   * All elements are iterated through, even those designated as "not available".
+   * Costs an allocation for the iterator but allows potential performance gains too.
+   * @param vector the BinaryVectorPtr native address of the BinaryVector
+   * @param startElement the starting element # in the vector, by default 0 (the first one)
+   */
+  def iterate(vector: BinaryVectorPtr, startElement: Int = 0): DoubleIterator
+
+  /**
+   * Converts the BinaryVector to an unboxed Buffer.
+   * Only returns elements that are "available".
+   */
+  // NOTE: I know this code is repeated but I don't want to have to debug specialization/unboxing/traits right now
+  def toBuffer(vector: BinaryVectorPtr, startElement: Int = 0): Buffer[Double] = {
+    val newBuf = Buffer.empty[Double]
+    val dataIt = iterate(vector, startElement)
+    val availIt = iterateAvailable(vector, startElement)
+    val len = length(vector)
+    for { n <- startElement until len optimized } {
+      val item = dataIt.next
+      if (availIt.next) newBuf += item
+    }
+    newBuf
+  }
 }
 
-class DoubleAppendingVector(base: Any, offset: Long, maxBytes: Int, val dispose: () => Unit)
-extends PrimitiveAppendableVector[Double](base, offset, maxBytes, 64, true) {
+/**
+ * VectorDataReader for a Double BinaryVector using full 64-bits for a Double value
+ */
+object DoubleVectorDataReader64 extends DoubleVectorDataReader {
+  final def apply(vector: BinaryVectorPtr, n: Int): Double = UnsafeUtils.getDouble(vector + 12 + n * 8)
+  def iterate(vector: BinaryVectorPtr, startElement: Int = 0): DoubleIterator = new DoubleIterator {
+    private final var addr = vector + 12 + startElement * 8
+    final def next: Double = {
+      val data = UnsafeUtils.getDouble(addr)
+      addr += 8
+      data
+    }
+  }
+}
+
+/**
+ * VectorDataReader for a masked (NA bit) Double BinaryVector, uses underlying DataReader for subvector
+ */
+object MaskedDoubleDataReader extends DoubleVectorDataReader with BitmapMaskVector {
+  final def apply(vector: BinaryVectorPtr, n: Int): Double = {
+    val subvect = subvectAddr(vector)
+    DoubleVector(subvect).apply(subvect, n)
+  }
+
+  override def length(vector: BinaryVectorPtr): Int = super.length(subvectAddr(vector))
+
+  override def iterate(vector: BinaryVectorPtr, startElement: Int = 0): DoubleIterator =
+    DoubleVector(subvectAddr(vector)).iterate(subvectAddr(vector), startElement)
+}
+
+
+class DoubleAppendingVector(addr: BinaryRegion.NativePointer, maxBytes: Int, val dispose: () => Unit)
+extends PrimitiveAppendableVector[Double](addr, maxBytes, 64, true) {
   final def addNA(): AddResponse = addData(0.0)
   final def addData(data: Double): AddResponse = checkOffset() match {
     case Ack =>
-      UnsafeUtils.setDouble(base, writeOffset, data)
-      writeOffset += 8
+      UnsafeUtils.setDouble(writeOffset, data)
+      incWriteOffset(8)
       Ack
     case other: AddResponse => other
   }
@@ -136,28 +196,27 @@ extends PrimitiveAppendableVector[Double](base, offset, maxBytes, 64, true) {
     (min, max)
   }
 
-  private final val readVect = new DoubleBinaryVector(base, offset, maxBytes, dispose)
-  final def apply(index: Int): Double = readVect.apply(index)
+  private final val readVect = DoubleVector(addr)
+  final def apply(index: Int): Double = readVect.apply(addr, index)
+  final def reader: VectorDataReader = DoubleVectorDataReader64
+  final def copyToBuffer: Buffer[Double] = DoubleVectorDataReader64.toBuffer(addr)
 
-  override def optimize(memFactory: MemFactory, hint: EncodingHint = AutoDetect): BinaryVector[Double] =
+  override def optimize(memFactory: MemFactory, hint: EncodingHint = AutoDetect): BinaryVectorPtr =
     DoubleVector.optimize(memFactory, this)
-
-  override def finishCompaction(newBase: Any, newOff: Long): BinaryVector[Double] =
-    new DoubleBinaryVector(newBase, newOff, numBytes, dispose)
 }
 
-class MaskedDoubleAppendingVector(base: Any,
-                                  val offset: Long,
+class MaskedDoubleAppendingVector(addr: BinaryRegion.NativePointer,
                                   val maxBytes: Int,
                                   val maxElements: Int,
                                   val dispose: () => Unit) extends
 // First four bytes: offset to DoubleBinaryVector
-BitmapMaskAppendableVector[Double](base, offset + 4L, maxElements) with OptimizingPrimitiveAppender[Double] {
-  val vectMajorType = WireFormat.VECTORTYPE_BINSIMPLE
-  val vectSubType = WireFormat.SUBTYPE_PRIMITIVE
-  val nbits: Short = 64
+BitmapMaskAppendableVector[Double](addr, maxElements) with OptimizingPrimitiveAppender[Double] {
+  def vectMajorType: Int = WireFormat.VECTORTYPE_BINSIMPLE
+  def vectSubType: Int = WireFormat.SUBTYPE_PRIMITIVE
+  def nbits: Short = 64
 
-  val subVect = new DoubleAppendingVector(base, offset + subVectOffset, maxBytes - subVectOffset, dispose)
+  val subVect = new DoubleAppendingVector(addr + subVectOffset, maxBytes - subVectOffset, dispose)
+  def copyToBuffer: Buffer[Double] = MaskedDoubleDataReader.toBuffer(addr)
 
   final def minMax: (Double, Double) = {
     var min = Double.MaxValue
@@ -172,21 +231,15 @@ BitmapMaskAppendableVector[Double](base, offset + 4L, maxElements) with Optimizi
     (min, max)
   }
 
-  final def dataVect(memFactory: MemFactory): BinaryVector[Double] = subVect.freeze(memFactory)
+  final def dataVect(memFactory: MemFactory): BinaryVectorPtr = subVect.freeze(memFactory)
 
-  override def optimize(memFactory: MemFactory, hint: EncodingHint = AutoDetect): BinaryVector[Double] =
+  override def optimize(memFactory: MemFactory, hint: EncodingHint = AutoDetect): BinaryVectorPtr =
     DoubleVector.optimize(memFactory, this)
 
   override def newInstance(memFactory: MemFactory, growFactor: Int = 2): BinaryAppendableVector[Double] = {
-    val (newbase, newoff, nBytes) = memFactory.allocateWithMagicHeader(maxBytes * growFactor)
-    val dispose = () => memFactory.freeWithMagicHeader(newoff)
-    new MaskedDoubleAppendingVector(newbase, newoff, maxBytes * growFactor, maxElements * growFactor, dispose)
-  }
-
-  override def finishCompaction(newBase: Any, newOff: Long): BinaryVector[Double] = {
-    // Don't forget to write the new subVectOffset
-    UnsafeUtils.setInt(newBase, newOff, (bitmapOffset + bitmapBytes - offset).toInt)
-    new MaskedDoubleBinaryVector(newBase, newOff, 4 + bitmapBytes + subVect.numBytes, dispose)
+    val newAddr = memFactory.allocateOffheap(maxBytes * growFactor)
+    val dispose = () => memFactory.freeMemory(newAddr)
+    new MaskedDoubleAppendingVector(newAddr, maxBytes * growFactor, maxElements * growFactor, dispose)
   }
 }
 
@@ -215,32 +268,15 @@ extends AppendableVectorWrapper[Long, Double] {
   final def apply(index: Int): Long = inner(index).toLong
 }
 
-class DoubleConstVector(base: Any, offset: Long, numBytes: Int, val dispose: () => Unit) extends
-ConstVector[Double](base, offset, numBytes) {
-  private final val const = UnsafeUtils.getDouble(base, dataOffset)
-  final def apply(i: Int): Double = const
-}
-
-class DoubleConstAppendingVect(val dispose: () => Unit, value: Double, initLen: Int = 0) extends
-ConstAppendingVector(value, 8, initLen) {
-  def fillBytes(base: Any, offset: Long): Unit = UnsafeUtils.setDouble(base, offset, value)
-  override def finishCompaction(newBase: Any, newOff: Long): BinaryVector[Double] =
-    new DoubleConstVector(newBase, newOff, numBytes, dispose)
-}
-
 /**
  * A wrapper to return Doubles from a Long vector... for when one can compress Double vectors as DDVs
  */
-class DoubleLongWrapper(inner: BinaryVector[Long]) extends PrimitiveVector[Double] {
-  val base = inner.base
-  val offset = inner.offset
-  val numBytes = inner.numBytes
-  override val vectMajorType = inner.vectMajorType
-  override val vectSubType = inner.vectSubType
-
-  final def apply(i: Int): Double = inner(i).toDouble
-  final def isAvailable(i: Int): Boolean = inner.isAvailable(i)
-  override final def length: Int = inner.length
-  override val maybeNAs = inner.maybeNAs
-  override def dispose: () => Unit = inner.dispose
+object DoubleLongWrapDataReader extends DoubleVectorDataReader {
+  override def length(vector: BinaryVectorPtr): Int = LongBinaryVector(vector).length(vector)
+  final def apply(vector: BinaryVectorPtr, n: Int): Double =
+    LongBinaryVector(vector)(vector, n).toDouble
+  final def iterate(vector: BinaryVectorPtr, startElement: Int = 0): DoubleIterator = new DoubleIterator {
+    val innerIt = LongBinaryVector(vector).iterate(vector, startElement)
+    final def next: Double = innerIt.next.toDouble
+  }
 }

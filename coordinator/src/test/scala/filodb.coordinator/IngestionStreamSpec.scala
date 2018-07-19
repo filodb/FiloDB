@@ -68,19 +68,20 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem) wi
     cluster.shutdown()
   }
 
-  def setup(ref: DatasetRef, resource: String, rowsToRead: Int = 5, source: Option[IngestionSource],
-            storeConf: Option[StoreConfig] = None): Unit = {
+  def setup(ref: DatasetRef, resource: String, rowsToRead: Int = 5, source: Option[IngestionSource]): Unit = {
     val config = ConfigFactory.parseString(s"""header = true
                                            batch-size = $rowsToRead
                                            resource = $resource
                                            noflush = true
                                            store {
                                              flush-interval = 1 hour
+                                             ingestion-buffer-mem-size = 50MB
                                            }
                                            """).withFallback(TestData.sourceConf)
 
+    val storeConf = StoreConfig(config.getConfig("store"))
     val ingestionSource = source.getOrElse(IngestionSource(classOf[CsvStreamFactory].getName, config))
-    val command = SetupDataset(ref, DatasetResourceSpec(1, 1), ingestionSource, storeConf.getOrElse(TestData.storeConf))
+    val command = SetupDataset(ref, DatasetResourceSpec(1, 1), ingestionSource, storeConf)
     clusterActor ! command
     expectMsg(within, DatasetVerified)
 

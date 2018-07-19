@@ -13,6 +13,7 @@ lib_managed/
 src_managed/
 project/boot/
 project/plugins/project/
+jmh/*.json
 
 # Scala-IDE specific
 .scala_dependencies
@@ -30,3 +31,5 @@ project/plugins/project/
 metastore_db/
 **/kafka/src/test/scala/filodb/kafka/shard*
 *lib*
+
+coordinator/src/test/resources/

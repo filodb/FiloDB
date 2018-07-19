@@ -1,27 +1,23 @@
 package filodb.memory.format.vectors
 
-import org.scalatest.{FunSpec, Matchers}
+import debox.Buffer
 
-import filodb.memory.NativeMemoryManager
-import filodb.memory.format.{BinaryVector, FiloVector, GrowableVector}
+import filodb.memory.format.{BinaryVector, GrowableVector, WireFormat}
 
-class LongVectorTest extends FunSpec with Matchers {
+class LongVectorTest extends NativeVectorTest {
   def maxPlus(i: Int): Long = Int.MaxValue.toLong + i
-  val memFactory = new NativeMemoryManager(10 * 1024 * 1024)
 
   describe("LongMaskedAppendableVector") {
-
     it("should append a list of all NAs and read all NAs back") {
       val builder = LongBinaryVector.appendingVector(memFactory, 100)
       builder.addNA
       builder.isAllNA should be (true)
       builder.noNAs should be (false)
-      val sc = builder.freeze(memFactory)
-      sc.length should equal (1)
-      sc(0)   // Just to make sure this does not throw an exception
-      sc.isAvailable(0) should equal (false)
-      sc.toList should equal (Nil)
-      sc.optionIterator.toSeq should equal (Seq(None))
+      val ptr = builder.freeze(memFactory)
+      LongBinaryVector(ptr).length(ptr) shouldEqual 1
+      LongBinaryVector(ptr)(ptr, 0)   // Just to make sure this does not throw an exception
+      // LongBinaryVector(ptr).isAvailable(0) should equal (false)
+      LongBinaryVector(ptr).toBuffer(ptr) shouldEqual Buffer.empty[Long]
     }
 
     it("should encode a mix of NAs and Longs and decode iterate and skip NAs") {
@@ -33,29 +29,15 @@ class LongVectorTest extends FunSpec with Matchers {
       cb.addNA
       cb.isAllNA should be (false)
       cb.noNAs should be (false)
-      val sc = cb.freeze(memFactory)
+      val ptr = cb.freeze(memFactory)
+      val reader = LongBinaryVector(ptr)
 
-      sc.length should equal (5)
-      sc.isAvailable(0) should equal (false)
-      sc.isAvailable(1) should equal (true)
-      sc.isAvailable(4) should equal (false)
-      sc(1) should equal (101)
-      sc.boxed(2) should equal (maxPlus(102))
-      //noinspection ScalaStyle
-      sc.boxed(2) shouldBe a[java.lang.Long]
-      sc.get(0) should equal (None)
-      sc.get(-1) should equal (None)
-      sc.get(2) should equal (Some(maxPlus(102)))
-      sc.toList should equal (List(101, maxPlus(102), 103))
-    }
-
-    it("should be able to append lots of longs and grow vector") {
-      val numInts = 1000
-      val builder = LongBinaryVector.appendingVector(memFactory, numInts / 2)
-      (0 until numInts).map(_.toLong).foreach(builder.addData)
-      builder.length should equal (numInts)
-      builder.isAllNA should be (false)
-      builder.noNAs should be (true)
+      reader.length(ptr) shouldEqual 5
+      // reader.isAvailable(0) should equal (false)
+      // reader.isAvailable(1) should equal (true)
+      // reader.isAvailable(4) should equal (false)
+      reader(ptr, 1) shouldEqual 101
+      reader.toBuffer(ptr) shouldEqual Buffer(101L, maxPlus(102), 103L)
     }
 
     it("should be able to append lots of longs off-heap and grow vector") {
@@ -63,7 +45,6 @@ class LongVectorTest extends FunSpec with Matchers {
       val builder = LongBinaryVector.appendingVector(memFactory, numInts / 2)
       (0 until numInts).map(_.toLong).foreach(builder.addData)
       builder.length should equal (numInts)
-      builder.isOffheap shouldEqual true
       builder.isAllNA should be (false)
       builder.noNAs should be (true)
     }
@@ -82,44 +63,25 @@ class LongVectorTest extends FunSpec with Matchers {
     it("should be able to freeze() and minimize bytes used") {
       val builder = LongBinaryVector.appendingVector(memFactory, 100)
       // Test numBytes to make sure it's accurate
-      builder.numBytes should equal (4 + 16 + 4)   // 2 long words needed for 100 bits
+      builder.numBytes should equal (12 + 16 + 12)   // 2 long words needed for 100 bits
       (0 to 4).map(_.toLong).foreach(builder.addData)
-      builder.numBytes should equal (4 + 16 + 4 + 40)
+      builder.numBytes should equal (12 + 16 + 12 + 40)
       val frozen = builder.freeze(memFactory)
-      frozen.numBytes should equal (4 + 8 + 4 + 40)  // bitmask truncated
+      BinaryVector.totalBytes(frozen) should equal (12 + 8 + 12 + 40)  // bitmask truncated
 
-      frozen.length should equal (5)
-      frozen.toSeq should equal (0 to 4)
-    }
-
-    it("should toFiloBuffer and read back using FiloVector.apply") {
-      val cb = LongBinaryVector.appendingVector(memFactory, 5)
-      cb.addNA
-      cb.addData(101)
-      cb.addData(102)
-      cb.addData(maxPlus(104))
-      cb.addNA
-      val buffer = cb.optimize(memFactory).toFiloBuffer
-      val readVect = FiloVector[Long](buffer)
-      readVect shouldBe a[MaskedLongBinaryVector]
-      readVect.asInstanceOf[BinaryVector[Long]].maybeNAs should equal (true)
-      readVect.toSeq should equal (Seq(101, 102, maxPlus(104)))
+      LongBinaryVector(frozen).length(frozen) shouldEqual 5
+      LongBinaryVector(frozen).toBuffer(frozen) shouldEqual Buffer.fromIterable((0 to 4).map(_.toLong))
     }
 
     it("should be able to optimize longs with fewer nbits off-heap to DeltaDeltaVector") {
       val builder = LongBinaryVector.appendingVector(memFactory, 100)
-      // Be sure to make this not an increasing sequence so it doesn't get delta-delta encoded
       val orig = Seq(0, 2, 1, 4, 3).map(_.toLong)
       orig.foreach(builder.addData)
       val optimized = builder.optimize(memFactory)
-      optimized.length should equal (5)
-      optimized.maybeNAs should equal (false)
-      optimized(0) should equal (0L)
-      optimized.toSeq should equal (orig)
-      optimized.numBytes should equal (16 + 3)   // nbits=4, 3 bytes of data + 16 overhead for DDV
-      val readVect = FiloVector[Long](optimized.toFiloBuffer)
-      readVect shouldBe a[DeltaDeltaVector]
-      readVect.toSeq should equal (orig)
+      LongBinaryVector(optimized).length(optimized) should equal (5)
+      LongBinaryVector(optimized)(optimized, 0) should equal (0L)
+      LongBinaryVector(optimized).toBuffer(optimized).toList shouldEqual orig
+      BinaryVector.totalBytes(optimized) shouldEqual (32 + 3)   // nbits=4, 3 bytes of data + 32 overhead for DDV
     }
 
     it("should be able to optimize longs with fewer nbits off-heap NoNAs to DeltaDeltaVector") {
@@ -128,53 +90,92 @@ class LongVectorTest extends FunSpec with Matchers {
       val orig = Seq(0, 2, 1, 4, 3).map(_.toLong)
       orig.foreach(builder.addData)
       val optimized = builder.optimize(memFactory)
-      optimized.length shouldEqual 5
-      optimized.isOffheap shouldEqual true
-      optimized.maybeNAs shouldEqual false
-      optimized(0) shouldEqual 0L
-      optimized.toSeq should equal (orig)
-      optimized.numBytes should equal (16 + 3)   // nbits=4, 3 bytes of data + 16 overhead for DDV
-      optimized shouldBe a[DeltaDeltaVector]
-      val readVect = FiloVector[Long](optimized.toFiloBuffer)
-      readVect shouldBe a[DeltaDeltaVector]
-      readVect.toSeq should equal (orig)
+      BinaryVector.majorVectorType(optimized) shouldEqual WireFormat.VECTORTYPE_DELTA2
+      LongBinaryVector(optimized).length(optimized) shouldEqual 5
+      LongBinaryVector(optimized)(optimized, 0) shouldEqual 0L
+      LongBinaryVector(optimized).toBuffer(optimized).toList shouldEqual orig
+      BinaryVector.totalBytes(optimized) shouldEqual (32 + 3)   // nbits=4, 3 bytes of data + 32 overhead for DDV
     }
 
     it("should automatically use Delta-Delta encoding for increasing numbers") {
       val start = System.currentTimeMillis
       val orig = (0 to 50).map(_ * 10000 + start)   // simulate 10 second samples
-      val builder = LongBinaryVector.appendingVector(memFactory, 100)
+      val builder = LongBinaryVector.appendingVectorNoNA(memFactory, 100)
       orig.foreach(builder.addData)
-      builder.frozenSize shouldEqual 424
+      builder.frozenSize shouldEqual (12 + 51 * 8)
       val optimized = builder.optimize(memFactory)
-      optimized.isOffheap shouldEqual true
-      optimized.numBytes shouldEqual 16   // DeltaDeltaConstVector
-      val buf = optimized.toFiloBuffer
-      val readVect = FiloVector[Long](buf)
-      readVect shouldBe a[DeltaDeltaConstVector]
-      readVect.toSeq should equal (orig)
-      readVect.asInstanceOf[BinaryVector[Long]].maybeNAs should equal (false)
-      // The # of bytes below is MUCH less than the original 51 * 8 + 4
-      readVect.asInstanceOf[BinaryVector[Long]].numBytes shouldEqual 16
+      BinaryVector.majorVectorType(optimized) shouldEqual WireFormat.VECTORTYPE_DELTA2
+      BinaryVector.totalBytes(optimized) shouldEqual 24   // DeltaDeltaConstVector
+      val readVect = LongBinaryVector(BinaryVector.asBuffer(optimized))
+      readVect.toBuffer(optimized).toList shouldEqual orig
+    }
+
+    it("should iterate with startElement > 0") {
+      val orig = Seq(1000L, 2001L, 2999L, 5123L, 5250L, 6004L, 7678L)
+      val builder = LongBinaryVector.appendingVectorNoNA(memFactory, orig.length)
+      orig.foreach(builder.addData)
+      builder.length shouldEqual orig.length
+      val frozen = builder.optimize(memFactory)
+      LongBinaryVector(frozen) shouldEqual DeltaDeltaDataReader
+      (2 to 5).foreach { start =>
+        LongBinaryVector(frozen).toBuffer(frozen, start).toList shouldEqual orig.drop(start)
+      }
     }
 
     it("should automatically use Delta-Delta encoding for decreasing numbers") {
       val start = System.currentTimeMillis
       val orig = (0 to 50).map(start - _ * 100)
-      val builder = LongBinaryVector.appendingVector(memFactory, 100)
+
+      val builder = LongBinaryVector.appendingVectorNoNA(memFactory, 100)
       orig.foreach(builder.addData)
-      builder.frozenSize shouldEqual 424
+      builder.frozenSize shouldEqual (12 + 51 * 8)
       val optimized = builder.optimize(memFactory)
-      optimized.isOffheap shouldEqual true
-      optimized.numBytes shouldEqual 16   // DeltaDeltaConstVector
-      optimized shouldBe a[DeltaDeltaConstVector]
-      val buf = optimized.toFiloBuffer
-      val readVect = FiloVector[Long](buf)
-      readVect shouldBe a[DeltaDeltaConstVector]
-      readVect.toSeq should equal (orig)
-      readVect.asInstanceOf[BinaryVector[Long]].maybeNAs should equal (false)
-      // The # of bytes below is MUCH less than the original 51 * 8 + 4
-      readVect.asInstanceOf[BinaryVector[Long]].numBytes shouldEqual 16
+      BinaryVector.majorVectorType(optimized) shouldEqual WireFormat.VECTORTYPE_DELTA2
+      BinaryVector.totalBytes(optimized) shouldEqual 24   // DeltaDeltaConstVector
+      val readVect = LongBinaryVector(BinaryVector.asBuffer(optimized))
+      readVect.toBuffer(optimized).toList shouldEqual orig
+    }
+
+    it("should binarySearch both appending and DeltaDelta vectors") {
+      val orig = Seq(1000L, 2001L, 2999L, 5123L, 5250L, 6004L, 7678L)
+      val builder = LongBinaryVector.appendingVectorNoNA(memFactory, orig.length)
+      orig.foreach(builder.addData)
+      builder.length shouldEqual orig.length
+
+      val appendReader = builder.reader.asLongReader
+      appendReader.binarySearch(builder.addr, 999L) shouldEqual 0x80000000 | 0   // first elem, not equal
+      appendReader.binarySearch(builder.addr, 1000L) shouldEqual 0               // first elem, equal
+      appendReader.binarySearch(builder.addr, 3000L) shouldEqual 0x80000000 | 3
+      appendReader.binarySearch(builder.addr, 7677L) shouldEqual 0x80000000 | 6
+      appendReader.binarySearch(builder.addr, 7678L) shouldEqual 6
+      appendReader.binarySearch(builder.addr, 7679L) shouldEqual 0x80000000 | 7
+
+      val optimized = builder.optimize(memFactory)
+      val binReader = LongBinaryVector(optimized)
+      LongBinaryVector(optimized) shouldEqual DeltaDeltaDataReader
+      binReader.binarySearch(optimized, 999L) shouldEqual 0x80000000 | 0   // first elem, not equal
+      binReader.binarySearch(optimized, 1000L) shouldEqual 0               // first elem, equal
+      binReader.binarySearch(optimized, 3000L) shouldEqual 0x80000000 | 3
+      binReader.binarySearch(optimized, 5123L) shouldEqual 3
+      binReader.binarySearch(optimized, 5250L) shouldEqual 4
+      binReader.binarySearch(optimized, 6003L) shouldEqual 0x80000000 | 5
+      binReader.binarySearch(optimized, 6004L) shouldEqual 5
+      binReader.binarySearch(optimized, 7677L) shouldEqual 0x80000000 | 6
+      binReader.binarySearch(optimized, 7678L) shouldEqual 6
+      binReader.binarySearch(optimized, 7679L) shouldEqual 0x80000000 | 7
+    }
+
+    it("should binarySearch DeltaDeltaConst vectors") {
+      val start = System.currentTimeMillis
+      val orig = (0 to 50).map(_ * 10000 + start)   // simulate 10 second samples
+      val builder = LongBinaryVector.appendingVectorNoNA(memFactory, 100)
+      orig.foreach(builder.addData)
+      val optimized = builder.optimize(memFactory)
+      val binReader = LongBinaryVector(optimized)
+      binReader.binarySearch(optimized, start - 1) shouldEqual 0x80000000 | 0   // first elem, not equal
+      binReader.binarySearch(optimized, start) shouldEqual 0               // first elem, equal
+      binReader.binarySearch(optimized, start + 1) shouldEqual 0x80000000 | 1
+      binReader.binarySearch(optimized, start + 100001) shouldEqual 0x80000000 | 11
     }
 
     it("should not use Delta-Delta for short vectors, NAs, etc.") {
@@ -183,26 +184,25 @@ class LongVectorTest extends FunSpec with Matchers {
       builder.addData(5L)
       // Only 2 items, don't use DDV
       val opt1 = builder.optimize(memFactory)
-      opt1.isOffheap shouldEqual true
-      opt1 shouldBe a[LongBinaryVector]
-      opt1.toSeq shouldEqual (Seq(1L, 5L))
+      BinaryVector.majorVectorType(opt1) shouldEqual WireFormat.VECTORTYPE_BINSIMPLE
+      LongBinaryVector(opt1).toBuffer(opt1) shouldEqual Buffer(1L, 5L)
 
       builder.addNA()   // add NA(), now should not use DDV
       val opt2 = builder.optimize(memFactory)
-      opt2 shouldBe a[MaskedLongBinaryVector]
-      opt2.toSeq shouldEqual (Seq(1L, 5L))
+      BinaryVector.majorVectorType(opt2) shouldEqual WireFormat.VECTORTYPE_BINSIMPLE
+      LongBinaryVector(opt2).toBuffer(opt2) shouldEqual Buffer(1L, 5L)
     }
 
     it("should be able to optimize constant longs to a DeltaDeltaConstVector") {
       val builder = LongBinaryVector.appendingVector(memFactory, 100)
       val longVal = Int.MaxValue.toLong + 100
       (0 to 4).foreach(n => builder.addData(longVal))
-      val buf = builder.optimize(memFactory).toFiloBuffer
-      val readVect = FiloVector[Long](buf)
-      readVect shouldBe a[DeltaDeltaConstVector]
-      readVect.asInstanceOf[BinaryVector[Long]].numBytes shouldEqual 16
-      readVect.asInstanceOf[BinaryVector[Long]].maybeNAs should equal (false)
-      readVect.toSeq should equal (Seq(longVal, longVal, longVal, longVal, longVal))
+      val ptr = builder.optimize(memFactory)
+      BinaryVector.majorVectorType(ptr) shouldEqual WireFormat.VECTORTYPE_DELTA2
+      val readVect = LongBinaryVector(ptr)
+      readVect shouldEqual DeltaDeltaConstDataReader
+      BinaryVector.totalBytes(ptr) shouldEqual 24   // DeltaDeltaConstVector
+      readVect.toBuffer(ptr) shouldEqual Buffer(longVal, longVal, longVal, longVal, longVal)
     }
 
     it("should support resetting and optimizing AppendableVector multiple times") {
@@ -211,20 +211,19 @@ class LongVectorTest extends FunSpec with Matchers {
       val orig = Seq(100000, 200001, 300002).map(Long.MaxValue - _)
       cb.addNA()
       orig.foreach(cb.addData)
-      cb.toSeq should equal (orig)
+      cb.copyToBuffer.toList shouldEqual orig
       val optimized = cb.optimize(memFactory)
-      //assert(optimized.base != cb.base)   // just compare instances
-      val readVect1 = FiloVector[Long](optimized.toFiloBuffer)
-      readVect1.toSeq should equal (orig)
+      val readVect1 = LongBinaryVector(optimized)
+      readVect1.toBuffer(optimized).toList shouldEqual orig
 
       // Now the optimize should not have damaged original vector
-      cb.toSeq should equal (orig)
+      cb.copyToBuffer.toList shouldEqual orig
       cb.reset()
       val orig2 = orig.map(_ * 2)
       orig2.foreach(cb.addData)
-      val readVect2 = FiloVector[Long](cb.optimize(memFactory).toFiloBuffer)
-      readVect2.toSeq should equal (orig2)
-      cb.toSeq should equal (orig2)
+      val opt2 = cb.optimize(memFactory)
+      LongBinaryVector(opt2).toBuffer(opt2).toList shouldEqual orig2
+      cb.copyToBuffer.toList shouldEqual orig2
     }
   }
 }

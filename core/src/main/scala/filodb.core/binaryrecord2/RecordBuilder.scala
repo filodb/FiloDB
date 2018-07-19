@@ -7,6 +7,7 @@ import filodb.core.metadata.Column
 import filodb.memory.{BinaryRegion, MemFactory, UTF8StringMedium}
 import filodb.memory.format.{RowReader, SeqRowReader, UnsafeUtils, ZeroCopyUTF8String => ZCUTF8}
 
+
 // scalastyle:off number.of.methods
 /**
  * A RecordBuilder allocates fixed size containers and builds BinaryRecords within them.
@@ -76,7 +77,7 @@ final class RecordBuilder(memFactory: MemFactory,
     curRecEndOffset = curRecordOffset + schema.variableAreaStart
 
     fieldNo = 0
-    recHash = 7
+    recHash = HASH_INIT
   }
 
   /**
@@ -112,29 +113,26 @@ final class RecordBuilder(memFactory: MemFactory,
     fieldNo += 1
   }
 
+  /**
+   * Adds a string or raw bytes to the record.  They must fit in within 64KB.
+   * The variable length area of the BinaryRecord will be extended.
+   */
+  final def addString(bytes: Array[Byte]): Unit =
+    addBlob(bytes, UnsafeUtils.arayOffset, bytes.size)
+
+  final def addString(s: String): Unit = addString(s.getBytes)
+
   final def addBlob(base: Any, offset: Long, numBytes: Int): Unit = {
     require(numBytes < 65536, s"bytes too large ($numBytes bytes) for addBlob")
     checkFieldAndMemory(numBytes + 2)
     UnsafeUtils.setShort(curBase, curRecEndOffset, numBytes.toShort) // length of blob
     UnsafeUtils.unsafe.copyMemory(base, offset, curBase, curRecEndOffset + 2, numBytes)
     updateFieldPointerAndLens(numBytes + 2)
+    if (fieldNo >= firstPartField) recHash = combineHash(recHash, BinaryRegion.hash32(base, offset, numBytes))
     fieldNo += 1
   }
 
-  /**
-   * Adds a string or raw bytes to the record.  They must fit in within 64KB.
-   * The variable length area of the BinaryRecord will be extended.
-   */
-  final def addString(bytes: Array[Byte]): Unit = {
-    require(bytes.size < 65536, s"bytes too large (${bytes.size} bytes) for addString")
-    checkFieldAndMemory(bytes.size + 2)
-    UTF8StringMedium.copyByteArrayTo(bytes, curBase, curRecEndOffset)
-    updateFieldPointerAndLens(bytes.size + 2)
-    if (fieldNo >= firstPartField) recHash = combineHash(recHash, BinaryRegion.hash32(bytes))
-    fieldNo += 1
-  }
-
-  final def addString(s: String): Unit = addString(s.getBytes)
+  final def addBlob(strPtr: ZCUTF8): Unit = addBlob(strPtr.base, strPtr.offset, strPtr.numBytes)
 
   import Column.ColumnType._
 
@@ -150,7 +148,7 @@ final class RecordBuilder(memFactory: MemFactory,
       case (DoubleColumn, d: Double) => addDouble(d)
       case (StringColumn, s: String) => addString(s)
       case (StringColumn, a: Array[Byte]) => addString(a)
-      case (StringColumn, z: ZCUTF8) => addString(z.toString)
+      case (StringColumn, z: ZCUTF8) => addBlob(z)
       case (MapColumn, m: Map[ZCUTF8, ZCUTF8] @unchecked) =>
         val pairs = new java.util.ArrayList[(String, String)]
         m.toSeq.foreach { case (k, v) => pairs.add((k.toString, v.toString)) }
@@ -162,19 +160,19 @@ final class RecordBuilder(memFactory: MemFactory,
   }
 
   /**
-   * Adds an entire record from a RowReader using getAny.  SUPER SLOW since it uses addSlowly.  Mostly for testing.
+   * Adds an entire record from a RowReader, with no boxing, using builderAdders
    * @return the offset or NativePointer if the memFactory is an offheap one, to the new BinaryRecord
    */
-  def addFromReaderSlowly(row: RowReader): Long = {
+  def addFromReader(row: RowReader): Long = {
     startNewRecord()
-    (0 until schema.numFields).foreach { pos =>
-      addSlowly(schema.columnTypes(pos).keyType.extractor.getField(row, pos))
+    for { pos <- 0 until schema.numFields optimized } {
+      schema.builderAdders(pos)(row, this)
     }
     endRecord()
   }
 
   // Really only for testing. Very slow.
-  def addFromObjects(parts: Any*): Long = addFromReaderSlowly(SeqRowReader(parts.toSeq))
+  def addFromObjects(parts: Any*): Long = addFromReader(SeqRowReader(parts.toSeq))
 
   /**
    * High level function to add a sorted list of unique key-value pairs as a map in the BinaryRecord.
@@ -412,6 +410,7 @@ object RecordBuilder {
 
   val DefaultContainerSize = 256 * 1024
   val MinContainerSize = 2048
+  val HASH_INIT = 7
 
   // Please do not change this.  It should only be changed with a change in BinaryRecord and/or RecordContainer
   // format, and only then REALLY carefully.
@@ -462,6 +461,8 @@ object RecordBuilder {
     hashes
   }
 
+  // NOTE: I've tried many different hash combiners, but nothing tried (including Murmur3) seem any better than
+  // XXHash + the simple formula below.
   @inline
   final def combineHash(hash1: Int, hash2: Int): Int = 31 * hash1 + hash2
 
