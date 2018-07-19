@@ -64,7 +64,11 @@ class QueryEngine(dataset: Dataset,
       val shardColValues = shardColumns.map { shardCol =>
         // So to compute the shard hash we need shardCol == value filter (exact equals) for each shardColumn
         filters.find(f => f.column == shardCol) match {
-          case Some(ColumnFilter(_, Filter.Equals(filtVal: String))) => filtVal
+          case Some(ColumnFilter(_, Filter.Equals(filtVal: String))) =>
+            dataset.options.ignoreShardKeyColumnSuffixes.get(shardCol) match {
+              case Some(trimMetricSuffixColumn) => RecordBuilder.trimMetric(filtVal, trimMetricSuffixColumn)
+              case _                            => filtVal
+            }
           case Some(ColumnFilter(_, filter)) =>
             throw new BadQueryException(s"Found filter for shard column $shardCol but " +
               s"$filter cannot be used for shard key routing")

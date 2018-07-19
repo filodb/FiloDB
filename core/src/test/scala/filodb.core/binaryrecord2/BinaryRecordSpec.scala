@@ -499,4 +499,18 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
       RecordBuilder.combineHashExcluding(pairs2, hashes2, Set("le")) shouldEqual hashAll
     }
   }
+
+  it("should trim metric name for _bucket _sum _count") {
+    val metricName = RecordBuilder.trimMetric("heap_usage_bucket", Nil)
+    metricName shouldEqual "heap_usage_bucket"
+    val metricName2 = RecordBuilder.trimMetric("heap_usage_bucket", Seq.empty)
+    metricName2 shouldEqual "heap_usage_bucket"
+    val metricName3 = RecordBuilder.trimMetric("heap_usage_bucket", Seq("_count"))
+    metricName3 shouldEqual "heap_usage_bucket"
+    val metricName4 = RecordBuilder.trimMetric("heap_usage_bucket", Seq("_bucket"))
+    metricName4 shouldEqual "heap_usage"
+    val metricName5 = RecordBuilder.trimMetric("heap_usage_sum_count", Seq("_sum","_bucket","_count"))
+    metricName5 shouldEqual "heap_usage_sum"
+  }
+
 }

@@ -120,12 +120,17 @@ final case class Dataset(name: String,
  */
 case class DatasetOptions(shardKeyColumns: Seq[String],
                           metricColumn: String,
-                          valueColumn: String) {
+                          valueColumn: String,
+                          ignoreShardKeyColumnSuffixes: Map[String, Seq[String]] = Map.empty,
+                          ignoreTagsOnPartitionKeyHash: Seq[String] = Nil) {
   override def toString: String = {
     val map: Map[String, Any] = Map(
                    "shardKeyColumns" -> shardKeyColumns.asJava,
                    "metricColumn" -> metricColumn,
-                   "valueColumn" -> valueColumn)
+                   "valueColumn" -> valueColumn,
+                   "ignoreShardKeyColumnSuffixes" ->
+                     ignoreShardKeyColumnSuffixes.mapValues(_.asJava).asJava,
+                   "ignoreTagsOnPartitionKeyHash" -> ignoreTagsOnPartitionKeyHash.asJava)
     val config = ConfigFactory.parseMap(map.asJava)
     config.root.render(ConfigRenderOptions.concise)
   }
@@ -134,7 +139,10 @@ case class DatasetOptions(shardKeyColumns: Seq[String],
 object DatasetOptions {
   val DefaultOptions = DatasetOptions(shardKeyColumns = Nil,
                                       metricColumn = "__name__",
-                                      valueColumn = "value")
+                                      valueColumn = "value",
+                                      ignoreShardKeyColumnSuffixes =
+                                        Map("__name__" -> Seq("_bucket", "_count", "_sum")),
+                                      ignoreTagsOnPartitionKeyHash = Seq("le"))
   val DefaultOptionsConfig = ConfigFactory.parseString(DefaultOptions.toString)
 
   def fromString(s: String): DatasetOptions =
@@ -143,7 +151,10 @@ object DatasetOptions {
   def fromConfig(config: Config): DatasetOptions =
     DatasetOptions(shardKeyColumns = config.as[Seq[String]]("shardKeyColumns"),
                    metricColumn = config.getString("metricColumn"),
-                   valueColumn = config.getString("valueColumn"))
+                   valueColumn = config.getString("valueColumn"),
+                   ignoreShardKeyColumnSuffixes =
+                     config.as[Map[String, Seq[String]]]("ignoreShardKeyColumnSuffixes"),
+                   ignoreTagsOnPartitionKeyHash = config.as[Seq[String]]("ignoreTagsOnPartitionKeyHash"))
 }
 
 /**

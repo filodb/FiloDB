@@ -517,4 +517,25 @@ object RecordBuilder {
     val hashes = sortAndComputeHashes(jList)
     combineHashIncluding(jList, hashes, shardKeyColumns.toSet).get
   }
+
+  /**
+    * Removes the _bucket, _sum, _count suffixes from Metric name.
+    *
+    * Few metric types like Histogram, Summary exposes multiple time
+    * series for the same metric during a scrape by appending suffixes _bucket,_sum,_count.
+    *
+    * In order to ingest all these multiple time series of a single metric to the
+    * same shard, we have to trim the suffixes while calculating shardKeyHash.
+    *
+    * @param metric - Metric Name as String
+    * @param suffixList - List of suffix that can be removed
+    * @return - Metric name after removing the suffix
+    */
+  final def trimMetric(metric: String, suffixList: Seq[String]): String = {
+    suffixList.find(metric.endsWith) match {
+      case Some(s)  => metric.dropRight(s.length)
+      case _        => metric
+    }
+  }
+
 }

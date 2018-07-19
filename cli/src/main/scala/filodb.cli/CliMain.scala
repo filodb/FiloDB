@@ -53,6 +53,10 @@ class Arguments extends FieldArgs {
   var step: Long = 10 // in seconds
   var metricColumn: String = "__name__"
   var shardKeyColumns: Seq[String] = Nil
+  // Ignores the given Suffixes for a ShardKeyColumn while calculating shardKeyHash
+  var ignoreShardKeyColumnSuffixes: Map[String, Seq[String]] = Map.empty
+  // Ignores the given Tags while calculating partitionKeyHash
+  var ignoreTagsOnPartitionKeyHash: Seq[String] = Nil
   var everyNSeconds: Option[String] = None
   var shardOverrides: Option[Seq[String]] = None
 }
@@ -130,6 +134,8 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
                         args.rowKeys,
                         args.metricColumn,
                         args.shardKeyColumns,
+                        args.ignoreShardKeyColumnSuffixes,
+                        args.ignoreTagsOnPartitionKeyHash,
                         timeout)
 
         case Some("importcsv") =>
@@ -232,11 +238,15 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
                     rowKeys: Seq[String],
                     metricColumn: String,
                     shardKeyColumns: Seq[String],
+                    ignoreShardKeyColumnSuffixes: Map[String, Seq[String]],
+                    ignoreTagsOnPartitionKeyHash: Seq[String],
                     timeout: FiniteDuration): Unit = {
     try {
       val datasetObj = Dataset(dataset.dataset, partitionColumns, dataColumns, rowKeys)
       val options = DatasetOptions.DefaultOptions.copy(metricColumn = metricColumn,
-                                                       shardKeyColumns = shardKeyColumns)
+                                                       shardKeyColumns = shardKeyColumns,
+                                                       ignoreShardKeyColumnSuffixes = ignoreShardKeyColumnSuffixes,
+                                                       ignoreTagsOnPartitionKeyHash = ignoreTagsOnPartitionKeyHash)
       println(s"Creating dataset $dataset with options $options...")
       client.createNewDataset(datasetObj.copy(options = options), dataset.database)
       exitCode = 0
