@@ -10,8 +10,7 @@ import com.datastax.driver.core.ConsistencyLevel
 import monix.reactive.Observable
 
 import filodb.cassandra.FiloCassandraConnector
-import filodb.cassandra.Util.unloggedBatch
-import filodb.core.{DatasetRef, Response}
+import filodb.core.{DatasetRef, ErrorResponse, Response, Success}
 import filodb.core.store.PartKeyTimeBucketSegment
 
 /**
@@ -59,9 +58,12 @@ sealed class PartitionIndexTable(val dataset: DatasetRef,
   def writePartKeySegments(shard: Int, timeBucket: Int,
                           segments: Seq[ByteBuffer], diskTimeToLive: Int): Future[Response] = {
     val statements = segments.zipWithIndex.map { case (segment, segmentId) =>
-      writePartitionCql.bind(shard: JInt, timeBucket: JInt, segmentId: JInt, segment, diskTimeToLive: JInt)
+      connector.execStmtWithRetries(writePartitionCql.bind(shard: JInt,
+        timeBucket: JInt, segmentId: JInt, segment, diskTimeToLive: JInt))
     }
-    connector.execStmtWithRetries(unloggedBatch(statements).setConsistencyLevel(writeConsistencyLevel))
+    Future.sequence(statements).map { responses =>
+      responses.find(_.isInstanceOf[ErrorResponse]).getOrElse(Success)
+    }
   }
 
 }

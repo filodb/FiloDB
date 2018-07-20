@@ -4,6 +4,7 @@ import scala.collection.mutable
 import scala.collection.mutable.HashMap
 import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.concurrent.duration._
+import scala.util.Random
 
 import com.googlecode.javaewah.{EWAHCompressedBitmap, IntIterator}
 import com.typesafe.scalalogging.StrictLogging
@@ -98,7 +99,9 @@ object TimeSeriesShard {
                                                ColumnType.LongColumn,       // endTime
                                                ColumnType.StringColumn))    // partKey bytes
 
-  val indexTimebucketTtlPaddingSeconds = 24.hours.toSeconds.toInt // TODO make configurable if necessary
+  // TODO make configurable if necessary
+  val indexTimeBucketTtlPaddingSeconds = 24.hours.toSeconds.toInt
+  val indexTimeBucketSegmentSize = 1024 * 1024 // 1MB
 }
 
 // scalastyle:off
@@ -229,6 +232,8 @@ class TimeSeriesShard(val dataset: Dataset,
   // Keeps track of the list of partIds of partKeys to store in each index time bucket
   private[memstore] final val timeBucketToPartIds = new mutable.HashMap[Int, EWAHCompressedBitmap]()
 
+  private final val indexTimeBucketFlushGroup = Random.nextInt(numGroups)
+
   initTimeBuckets()
 
   /**
@@ -343,7 +348,7 @@ class TimeSeriesShard(val dataset: Dataset,
     * Return Some if part keys need to be flushed (happens for last flush group). Otherwise, None.
     */
   def prepareIndexTimeBucketForFlush(group: Int): Option[FlushIndexTimeBuckets] = {
-    if (group == numGroups - 1) { // last group
+    if (group == indexTimeBucketFlushGroup) { // last group
       val ret = currentIndexTimeBucketPartIds
       currentIndexTimeBucketPartIds = new EWAHCompressedBitmap()
       currentIndexTimeBucket += 1
@@ -410,7 +415,7 @@ class TimeSeriesShard(val dataset: Dataset,
     // We flush index time buckets in the last group
     val flushIndexTimeBucketsFuture = flushGroup.flushTimeBuckets.map { cmd =>
 
-      val timeBucketRb = new RecordBuilder(MemFactory.onHeapFactory, indexTimeBucketSchema)
+      val timeBucketRb = new RecordBuilder(MemFactory.onHeapFactory, indexTimeBucketSchema, indexTimeBucketSegmentSize)
       val rbTrace = Kamon.buildSpan("memstore-index-timebucket-populate-timebucket")
         .withTag("dataset", dataset.name)
         .withTag("shard", shardNum).start()
@@ -445,7 +450,7 @@ class TimeSeriesShard(val dataset: Dataset,
       shardStats.indexTimeBucketBytesWritten.increment(blobToPersist.map(_.length).sum)
       // we pad to C* ttl to ensure that data lives for longer than time bucket roll over time
       sink.writePartKeyTimeBucket(dataset, shardNum, cmd.timeBucket, blobToPersist,
-                         flushGroup.diskTimeToLiveSeconds + indexTimebucketTtlPaddingSeconds).flatMap {
+                         flushGroup.diskTimeToLiveSeconds + indexTimeBucketTtlPaddingSeconds).flatMap {
         case Success =>           /* Step 8: Persist the highest time bucket id in meta store */
                                   writeHighestTimebucket(shardNum, cmd.timeBucket)
         case er: ErrorResponse =>
@@ -576,7 +581,7 @@ class TimeSeriesShard(val dataset: Dataset,
       val newPart = new TimeSeriesPartition(nextPartitionID, dataset, partKeyAddr, shardNum, bufferPool, shardStats)
       partKeyIndex.addPartKey(UnsafeUtils.ZeroPointer, partKeyAddr, nextPartitionID, startTime)
       currentIndexTimeBucketPartIds.set(nextPartitionID)
-      timeBucketToPartIds(currentIndexTimeBucket).set(currentIndexTimeBucket)
+      timeBucketToPartIds(currentIndexTimeBucket).set(nextPartitionID)
       partitions.put(nextPartitionID, newPart)
       shardStats.partitionsCreated.increment
       partitionGroups(group).set(nextPartitionID)

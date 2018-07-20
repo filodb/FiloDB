@@ -207,13 +207,16 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     agg1 shouldEqual ((1 to 100).map(_.toDouble).sum)
   }
 
-  it("should flush index time buckets for last group of flush interval") {
+  it("should flush index time buckets during one group of a flush interval") {
     memStore.setup(dataset1, 0, TestData.storeConf.copy(groupsPerShard = 2,
                                                         demandPagedRetentionPeriod = 1.hour,
                                                         flushInterval = 10.minutes))
     val initTimeBuckets = timebucketsWritten
     val tsShard = memStore.asInstanceOf[TimeSeriesMemStore].getShard(dataset1.ref, 0).get
-    tsShard.timeBucketToPartIds.keySet shouldEqual Set(0) // just the currentTimeBucket to start off with
+    val latestTimeBucket = memStore.metastore.readHighestIndexTimeBucket(dataset1.ref, 0).futureValue.getOrElse(0)
+    val timeBucketsToRetain = Math.ceil(1.hour / 10.minutes).toInt
+    val earliestBucket = Math.max(0, latestTimeBucket - timeBucketsToRetain)
+    tsShard.timeBucketToPartIds.keySet shouldEqual earliestBucket.to(latestTimeBucket).toSet
 
     val stream = Observable.fromIterable(groupedRecords(dataset1, linearMultiSeries(), n = 500, groupSize = 10))
       .executeWithModel(BatchedExecution(5)) // results in 200 records

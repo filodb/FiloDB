@@ -65,12 +65,14 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
 
   def initialize(dataset: DatasetRef): Future[Response] = {
     val chunkTable = getOrCreateChunkTable(dataset)
+    val partIndexTable = getOrCreatePartitionIndexTable(dataset)
     clusterConnector.createKeyspace(chunkTable.keyspace)
     val indexTable = getOrCreateIndexTable(dataset)
     // Important: make sure nodes are in agreement before any schema changes
     clusterMeta.checkSchemaAgreement()
     for { ctResp    <- chunkTable.initialize()
-          rmtResp   <- indexTable.initialize() } yield rmtResp
+          rmtResp   <- indexTable.initialize()
+          pitResp   <- partIndexTable.initialize() } yield rmtResp
   }
 
   def truncate(dataset: DatasetRef): Future[Response] = {
