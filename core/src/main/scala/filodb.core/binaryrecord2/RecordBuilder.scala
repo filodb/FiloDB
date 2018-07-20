@@ -3,7 +3,7 @@ package filodb.core.binaryrecord2
 import com.typesafe.scalalogging.StrictLogging
 import scalaxy.loops._
 
-import filodb.core.metadata.Column
+import filodb.core.metadata.{Column, Dataset}
 import filodb.memory.{BinaryRegion, MemFactory, UTF8StringMedium}
 import filodb.memory.format.{RowReader, SeqRowReader, UnsafeUtils, ZeroCopyUTF8String => ZCUTF8}
 
@@ -520,7 +520,7 @@ object RecordBuilder {
   }
 
   /**
-    * Removes the _bucket, _sum, _count suffixes from Metric name.
+    * Removes the ignoreShardKeyColumnSuffixes from LabelPair as configured in DataSet.
     *
     * Few metric types like Histogram, Summary exposes multiple time
     * series for the same metric during a scrape by appending suffixes _bucket,_sum,_count.
@@ -528,14 +528,18 @@ object RecordBuilder {
     * In order to ingest all these multiple time series of a single metric to the
     * same shard, we have to trim the suffixes while calculating shardKeyHash.
     *
-    * @param metric - Metric Name as String
-    * @param suffixList - List of suffix that can be removed
-    * @return - Metric name after removing the suffix
+    * @param dataSet    - Current DataSet
+    * @param shardKeyColName  - ShardKey label name as String
+    * @param shardKeyColValue - ShardKey label value as String
+    * @return - Label value after removing the suffix
     */
-  final def trimMetric(metric: String, suffixList: Seq[String]): String = {
-    suffixList.find(metric.endsWith) match {
-      case Some(s)  => metric.dropRight(s.length)
-      case _        => metric
+  final def trimShardColumn(dataSet: Dataset, shardKeyColName: String, shardKeyColValue: String): String = {
+    dataSet.options.ignoreShardKeyColumnSuffixes.get(shardKeyColName) match {
+      case Some(trimMetricSuffixColumn) => trimMetricSuffixColumn.find(shardKeyColValue.endsWith) match {
+                                            case Some(s)  => shardKeyColValue.dropRight(s.length)
+                                            case _        => shardKeyColValue
+                                           }
+      case _                            => shardKeyColValue
     }
   }
 

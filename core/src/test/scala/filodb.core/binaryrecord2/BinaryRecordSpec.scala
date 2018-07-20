@@ -5,6 +5,7 @@ import org.scalatest.{BeforeAndAfter, BeforeAndAfterAll, FunSpec, Matchers}
 
 import filodb.core.{MachineMetricsData, Types}
 import filodb.core.metadata.Column.ColumnType
+import filodb.core.metadata.{Dataset, DatasetOptions}
 import filodb.memory.{BinaryRegionConsumer, MemFactory, NativeMemoryManager, UTF8StringMedium}
 import filodb.memory.format.{SeqRowReader, UnsafeUtils}
 
@@ -556,15 +557,25 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
   }
 
   it("should trim metric name for _bucket _sum _count") {
-    val metricName = RecordBuilder.trimMetric("heap_usage_bucket", Nil)
-    metricName shouldEqual "heap_usage_bucket"
-    val metricName2 = RecordBuilder.trimMetric("heap_usage_bucket", Seq.empty)
-    metricName2 shouldEqual "heap_usage_bucket"
-    val metricName3 = RecordBuilder.trimMetric("heap_usage_bucket", Seq("_count"))
-    metricName3 shouldEqual "heap_usage_bucket"
-    val metricName4 = RecordBuilder.trimMetric("heap_usage_bucket", Seq("_bucket"))
-    metricName4 shouldEqual "heap_usage"
-    val metricName5 = RecordBuilder.trimMetric("heap_usage_sum_count", Seq("_sum","_bucket","_count"))
+
+    val metricName = RecordBuilder.trimShardColumn(dataset1, "__name__", "heap_usage_bucket")
+    metricName shouldEqual "heap_usage"
+
+    val metricName2 = RecordBuilder.trimShardColumn(dataset1, "__name__", "heap_usage_sum")
+    metricName2 shouldEqual "heap_usage"
+
+    val metricName3 = RecordBuilder.trimShardColumn(dataset1, "__name__", "heap_usage_count")
+    metricName3 shouldEqual "heap_usage"
+
+    val timeseriesDataset = Dataset.make("timeseries",
+      Seq("tags:map"),
+      Seq("timestamp:long", "value:double"),
+      Seq("timestamp"),
+      DatasetOptions(Seq("__name__", "job"), "__name__", "value", Map("dummy" -> Seq("_bucket")))).get
+    val metricName4 = RecordBuilder.trimShardColumn(timeseriesDataset, "__name__", "heap_usage_bucket")
+    metricName4 shouldEqual "heap_usage_bucket"
+
+    val metricName5 = RecordBuilder.trimShardColumn(dataset1, "__name__", "heap_usage_sum_count")
     metricName5 shouldEqual "heap_usage_sum"
   }
 
