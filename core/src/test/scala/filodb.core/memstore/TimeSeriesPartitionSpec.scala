@@ -196,6 +196,40 @@ class TimeSeriesPartitionSpec extends FunSpec with Matchers with BeforeAndAfter 
     allData.toSeq shouldEqual minData
   }
 
+  it("should reset metadata correctly when recycling old write buffers") {
+    // Ingest data into 10 TSPartitions and switch and encode all of them.  Now WriteBuffers poolsize should be
+    // down 10 and then back up.
+    val stats = new TimeSeriesShardStats(dataset1.ref, 0)
+    val data = singleSeriesReaders().take(10).toBuffer
+    val origPoolSize = bufferPool.poolSize
+    val partitions = (0 to 9).map { partNo =>
+      new TimeSeriesPartition(partNo, dataset1, defaultPartKey, 0, bufferPool, stats)
+    }
+    (0 to 9).foreach { i =>
+      data.foreach { case d => partitions(i).ingest(d, ingestBlockHolder) }
+      partitions(i).numChunks shouldEqual 1
+      partitions(i).appendingChunkLen shouldEqual 10
+      partitions(i).switchBuffers(ingestBlockHolder, true)
+    }
+
+    bufferPool.poolSize shouldEqual origPoolSize
+
+    // Do this 4 more times so that we get old recycled metadata back
+    (0 until 4).foreach { n =>
+      (0 to 9).foreach { i =>
+      data.foreach { case d => partitions(i).ingest(d, ingestBlockHolder) }
+        partitions(i).appendingChunkLen shouldEqual 10
+        partitions(i).switchBuffers(ingestBlockHolder, true)
+      }
+    }
+
+    // Now ingest again but don't switch buffers.  Ensure appendingChunkLen is appropriate.
+    (0 to 9).foreach { i =>
+      data.foreach { case d => partitions(i).ingest(d, ingestBlockHolder) }
+      partitions(i).appendingChunkLen shouldEqual 10
+    }
+  }
+
   it("should automatically use new write buffers and encode old one when write buffers overflow") {
     // Ingest 10 less than maxChunkSize
     val origPoolSize = bufferPool.poolSize

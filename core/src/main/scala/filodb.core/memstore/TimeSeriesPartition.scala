@@ -268,6 +268,7 @@ class TimeSeriesPartition(val partID: Int,
     val (infoAddr, newAppenders) = bufferPool.obtain()
     val currentChunkID = timeUUID64
     ChunkSetInfo.setChunkID(infoAddr, currentChunkID)
+    ChunkSetInfo.resetNumRows(infoAddr)    // Must reset # rows otherwise it keeps increasing!
     currentInfo = ChunkSetInfo(infoAddr)
     currentChunks = newAppenders
     infosChunks.put(currentChunkID, currentInfo)
