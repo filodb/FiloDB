@@ -142,11 +142,11 @@ object RangeVectorAggregator {
     rvs.groupBy(grouping).mapValues { rvs =>
       new Iterator[rowAgg.AggHolderType] {
         val rowIterators = rvs.map(_.rows)
-        val rvkStrings = rvs.map(rv => CustomRangeVectorKey.toZcUtf8(rv.key))
+        val rvKeys = rvs.map(_.key)
         def hasNext: Boolean = rowIterators.forall(_.hasNext)
         def next(): rowAgg.AggHolderType = {
           acc.resetToZero()
-          rowIterators.zip(rvkStrings).foreach { case (rowIter, rvk) =>
+          rowIterators.zip(rvKeys).foreach { case (rowIter, rvk) =>
             val mapped = if (skipMapPhase) rowIter.next() else rowAgg.map(rvk, rowIter.next(), mapInto)
             acc = rowAgg.reduce(acc, mapped)
           }
@@ -203,7 +203,7 @@ trait RowAggregator {
     * @param mapInto the RowReader that the method should mutate for mapping the sample
     * @return the mapped row, typically the mapInto param itself
     */
-  def map(rvk: ZeroCopyUTF8String, item: RowReader, mapInto: MutableRowReader): RowReader
+  def map(rvk: RangeVectorKey, item: RowReader, mapInto: MutableRowReader): RowReader
 
   /**
     * Accumulates AggHolderType as a RowReader into the aggregation result
@@ -270,7 +270,7 @@ object SumRowAggregator extends RowAggregator {
   type AggHolderType = SumHolder
   def zero: SumHolder = new SumHolder
   def newRowToMapInto: MutableRowReader = new TransientRow()
-  def map(rvk: ZeroCopyUTF8String, item: RowReader, mapInto: MutableRowReader): RowReader = item
+  def map(rvk: RangeVectorKey, item: RowReader, mapInto: MutableRowReader): RowReader = item
   def reduce(acc: SumHolder, aggRes: RowReader): SumHolder = {
     acc.timestamp = aggRes.getLong(0)
     if (!aggRes.getDouble(1).isNaN) acc.sum += aggRes.getDouble(1)
@@ -295,7 +295,7 @@ object MinRowAggregator extends RowAggregator {
   type AggHolderType = MinHolder
   def zero: MinHolder = new MinHolder()
   def newRowToMapInto: MutableRowReader = new TransientRow()
-  def map(rvk: ZeroCopyUTF8String, item: RowReader, mapInto: MutableRowReader): RowReader = item
+  def map(rvk: RangeVectorKey, item: RowReader, mapInto: MutableRowReader): RowReader = item
   def reduce(acc: MinHolder, aggRes: RowReader): MinHolder = {
     acc.timestamp = aggRes.getLong(0)
     if (!aggRes.getDouble(1).isNaN) acc.min = Math.min(acc.min, aggRes.getDouble(1))
@@ -320,7 +320,7 @@ object MaxRowAggregator extends RowAggregator {
   type AggHolderType = MaxHolder
   def zero: MaxHolder = new MaxHolder()
   def newRowToMapInto: MutableRowReader = new TransientRow()
-  def map(rvk: ZeroCopyUTF8String, item: RowReader, mapInto: MutableRowReader): RowReader = item
+  def map(rvk: RangeVectorKey, item: RowReader, mapInto: MutableRowReader): RowReader = item
   def reduce(acc: MaxHolder, aggRes: RowReader): MaxHolder = {
     acc.timestamp = aggRes.getLong(0)
     if (!aggRes.getDouble(1).isNaN) acc.max = Math.max(acc.max, aggRes.getDouble(1))
@@ -345,7 +345,7 @@ object CountRowAggregator extends RowAggregator {
   type AggHolderType = CountHolder
   def zero: CountHolder = new CountHolder()
   def newRowToMapInto: MutableRowReader = new TransientRow()
-  def map(rvk: ZeroCopyUTF8String, item: RowReader, mapInto: MutableRowReader): RowReader = {
+  def map(rvk: RangeVectorKey, item: RowReader, mapInto: MutableRowReader): RowReader = {
     if (!item.getDouble(1).isNaN) {
       mapInto.setLong(0, item.getLong(0))
       mapInto.setDouble(1, 1d)
@@ -387,7 +387,7 @@ object AvgRowAggregator extends RowAggregator {
   type AggHolderType = AvgHolder
   def zero: AvgHolder = new AvgHolder()
   def newRowToMapInto: MutableRowReader = new AvgAggTransientRow()
-  def map(rvk: ZeroCopyUTF8String, item: RowReader, mapInto: MutableRowReader): RowReader = {
+  def map(rvk: RangeVectorKey, item: RowReader, mapInto: MutableRowReader): RowReader = {
     mapInto.setLong(0, item.getLong(0))
     mapInto.setDouble(1, item.getDouble(1))
     mapInto.setLong(2, 1L)
@@ -423,6 +423,7 @@ object AvgRowAggregator extends RowAggregator {
 class TopBottomKRowAggregator(k: Int, bottomK: Boolean) extends RowAggregator {
 
   private val numRowReaderColumns = 1 + k*2 // one for timestamp, two columns for each top-k
+  private val rvkStringCache = mutable.HashMap[RangeVectorKey, ZeroCopyUTF8String]()
 
   case class RVKeyAndValue(rvk: ZeroCopyUTF8String, value: Double)
   class TopKHolder(var timestamp: Long = 0L) extends AggregateHolder {
@@ -448,9 +449,11 @@ class TopBottomKRowAggregator(k: Int, bottomK: Boolean) extends RowAggregator {
   type AggHolderType = TopKHolder
   def zero: TopKHolder = new TopKHolder()
   def newRowToMapInto: MutableRowReader = new TopBottomKAggTransientRow(k)
-  def map(rvk: ZeroCopyUTF8String, item: RowReader, mapInto: MutableRowReader): RowReader = {
+  def map(rvk: RangeVectorKey, item: RowReader, mapInto: MutableRowReader): RowReader = {
+    val rvkString = rvkStringCache.getOrElseUpdate(rvk, CustomRangeVectorKey.toZcUtf8(rvk))
     mapInto.setLong(0, item.getLong(0))
-    mapInto.setString(1, rvk)
+    // TODO: Use setBlob instead of setString once RowReeder has the support for blob
+    mapInto.setString(1, rvkString)
     mapInto.setDouble(2, item.getDouble(1))
     var i = 3
     while(i<numRowReaderColumns) {
