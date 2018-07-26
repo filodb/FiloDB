@@ -67,6 +67,7 @@ final class QueryActor(memStore: MemStore,
        replyTo ! res
        span.finish()
      }.recover { case ex =>
+       logger.info("QueryError: ", ex)
        replyTo ! QueryError2(q.id, ex)
        span.finish()
      }
