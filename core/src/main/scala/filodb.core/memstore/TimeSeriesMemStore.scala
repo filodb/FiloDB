@@ -72,10 +72,12 @@ extends MemStore with StrictLogging {
                    shardNum: Int,
                    stream: Observable[SomeData],
                    flushStream: Observable[FlushCommand] = FlushStream.empty,
-                   diskTimeToLiveSeconds: Int = 259200)
+                   diskTimeToLiveSeconds: Int = 259200,
+                   flushIndex: Boolean = true)
                   (errHandler: Throwable => Unit)
                   (implicit sched: Scheduler): CancelableFuture[Unit] = {
-    getShard(dataset, shardNum).map(_.startFlushingIndex()) // start flushing index now that we have recovered
+    // start flushing index now that we have recovered
+    if (flushIndex) getShard(dataset, shardNum).map(_.startFlushingIndex())
     ingestStream(dataset, shardNum, Observable.merge(stream, flushStream), diskTimeToLiveSeconds)(errHandler)
   }
 
