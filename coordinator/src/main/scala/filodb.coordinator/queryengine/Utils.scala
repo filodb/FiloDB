@@ -12,15 +12,11 @@ import monix.reactive.Observable
 import org.scalactic._
 
 import filodb.coordinator.ShardMapper
-import filodb.coordinator.client.QueryCommands
 import filodb.core.{ErrorResponse, Types}
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.Dataset
 import filodb.core.query.{ColumnFilter, Filter}
 import filodb.core.store._
-
-final case class ChildQueryError(source: ActorRef, err: QueryCommands.QueryError) extends
-    Exception(s"From [$source] - ${err.toString}", err.t)
 
 final case class ChildErrorResponse(source: ActorRef, resp: ErrorResponse) extends
     Exception(s"From [$source] - $resp")
@@ -139,7 +135,6 @@ object Utils extends StrictLogging {
               .filter(_._1 != ActorRef.noSender)               // Filter out null ActorRef's
               .mapAsync(parallelism) { case (coordRef, msg) =>
                 val future: Future[A] = (coordRef ? msg).map {
-                  case e: QueryError      => throw ChildQueryError(coordRef, e)
                   case err: ErrorResponse => throw ChildErrorResponse(coordRef, err)
                   case a: A @unchecked    => logger.trace(s"Received $a from $coordRef"); a
                 }

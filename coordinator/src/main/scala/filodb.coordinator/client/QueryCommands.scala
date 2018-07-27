@@ -65,9 +65,4 @@ object QueryCommands {
   final case class BadArgument(msg: String) extends ErrorResponse with QueryResponse
   final case class BadQuery(msg: String) extends ErrorResponse with QueryResponse
   final case class WrongNumberOfArgs(actual: Int, expected: Int) extends ErrorResponse with QueryResponse
-
-  final case class QueryError(id: Long, t: Throwable) extends ErrorResponse with QueryResponse {
-    override def toString: String = s"QueryError id=$id ${t.getClass.getName} ${t.getMessage}\n" +
-                                    t.getStackTrace.map(_.toString).mkString("\n")
-  }
 }

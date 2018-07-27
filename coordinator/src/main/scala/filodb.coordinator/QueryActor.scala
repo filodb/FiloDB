@@ -13,7 +13,7 @@ import filodb.coordinator.queryengine2.QueryEngine
 import filodb.core._
 import filodb.core.memstore.MemStore
 import filodb.core.metadata.Dataset
-import filodb.query.{QueryCommand, QueryConfig, QueryError => QueryError2}
+import filodb.query.{QueryCommand, QueryConfig, QueryError, QueryResult}
 import filodb.query.exec.{ExecPlan => ExecPlan2}
 
 object QueryCommandPriority extends java.util.Comparator[Envelope] {
@@ -58,30 +58,45 @@ final class QueryActor(memStore: MemStore,
   val queryEngine2 = new QueryEngine(dataset, shardMapFunc)
   val queryConfig = new QueryConfig(config.getConfig("filodb.query"))
 
+  private val tags = Map("dataset" -> dataset.toString)
+  private val lpRequests = Kamon.counter("queryactor-logicalPlan-requests").refine(tags)
+  private val epRequests = Kamon.counter("queryactor-execplan-requests").refine(tags)
+  private val resultVectors = Kamon.histogram("queryactor-result-num-rvs").refine(tags)
+  private val queryErrors = Kamon.counter("queryactor-query-errors").refine(tags)
+
   def execPhysicalPlan2(q: ExecPlan2, replyTo: ActorRef): Unit = {
+    epRequests.increment
     Kamon.currentSpan().tag("query", q.getClass.getSimpleName)
     val span = Kamon.buildSpan(s"execplan2-${q.getClass.getSimpleName}").start()
     implicit val _ = queryConfig.askTimeout
     q.execute(memStore, dataset, queryConfig)
      .foreach { res =>
        replyTo ! res
+       res match {
+         case QueryResult(_, _, vectors) => resultVectors.record(vectors.length)
+         case e: QueryError =>
+           queryErrors.increment
+           logger.debug(s"Normal QueryError returned from query execution: $e")
+       }
        span.finish()
      }.recover { case ex =>
+       // Unhandled exception in query, should be rare
        logger.info("QueryError: ", ex)
-       replyTo ! QueryError2(q.id, ex)
+       replyTo ! QueryError(q.id, ex)
        span.finish()
      }
   }
 
   private def processLogicalPlan2Query(q: LogicalPlan2Query, replyTo: ActorRef) = {
     // This is for CLI use only. Always prefer clients to materialize logical plan
+    lpRequests.increment
     try {
       val execPlan = queryEngine2.materialize(q.logicalPlan, q.queryOptions)
       self forward execPlan
     } catch {
       case NonFatal(ex) =>
         logger.error(s"Exception while materializing logical plan", ex)
-        replyTo ! QueryError2("unknown", ex)
+        replyTo ! QueryError("unknown", ex)
     }
   }
 
