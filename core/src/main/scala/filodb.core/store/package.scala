@@ -8,7 +8,7 @@ import net.jpountz.lz4.{LZ4Compressor, LZ4Factory, LZ4FastDecompressor}
 import filodb.core.Types._
 import filodb.core.metadata.Dataset
 import filodb.core.SingleKeyTypes.Long64HighBit
-import filodb.memory.format.RowReader
+import filodb.memory.format.{RowReader, UnsafeUtils}
 
 package object store {
   val compressor = new ThreadLocal[LZ4Compressor]()
@@ -40,14 +40,17 @@ package object store {
   }
 
   /**
-   * Compresses bytes in the original ByteBuffer into a new ByteBuffer.  Will write a 4-byte header
-   * containing the compressed length plus the compressed bytes.
+   * Compresses bytes in the original ByteBuffer into a new ByteBuffer.
+   * ByteBuffer is assumed to be a BinaryRegionLarge containing a 4-byte length header
+   *   (eg BinaryVector, RecordContainer, BinaryRecordV2)
+   * The new ByteBuffer conists of the original 4-byte length header with bit 31 set
+   * (since length cannot be negative) and the compressed bytes following.
    * @param orig the original data ByteBuffer
    * @param offset the offset into the target ByteBuffer to write the header + compresed bytes
-   * @return a ByteBuffer containing the header + compressed bytes at offset, with position set to 0
+   * @return a ByteBuffer containing the (length + bit31set) + compressed bytes
    */
-  def compress(orig: ByteBuffer, offset: Int = 0): ByteBuffer = {
-    // Fastest decompression method is when giving size of original bytes, so store that as first 4 bytes
+  def compress(orig: ByteBuffer): ByteBuffer = {
+    // Fastest decompression method is when giving size of original bytes
     val arayBytes = orig.hasArray match {
       case true => orig.array
       case false =>
@@ -56,26 +59,28 @@ package object store {
         orig.get(bytes)
         bytes
     }
-    val compressedBytes = getCompressor.compress(arayBytes)
-    val newBuf = ByteBuffer.allocate(offset + 4 + compressedBytes.size)
-    newBuf.position(offset)
-    newBuf.putInt(orig.capacity)
-    newBuf.put(compressedBytes)
-    newBuf.position(0)
-    newBuf
+    val origLen = UnsafeUtils.getInt(arayBytes, UnsafeUtils.arayOffset)
+    require(origLen >= 0)
+    val outBytes = new Array[Byte](getCompressor.maxCompressedLength(origLen) + 4)
+    getCompressor.compress(arayBytes, 4, origLen, outBytes, 4)
+    UnsafeUtils.setInt(outBytes, UnsafeUtils.arayOffset, origLen | 0x80000000)
+    ByteBuffer.wrap(outBytes)
   }
 
   // Like above, but just returns array byte without needing to do another copy
   def compress(orig: Array[Byte]): Array[Byte] = getCompressor.compress(orig)
 
   /**
-   * Decompresses the compressed bytes into a new ByteBuffer
-   * @param compressed the ByteBuffer containing the header + compressed bytes at the current position
-   * @param offset the offset into the ByteBuffer where header bytes start
+   * Decompresses the compressed bytes into a new ByteBuffer.
+   * @param compressed the ByteBuffer containing the (length + bit31set) + compressed bytes
    */
-  def decompress(compressed: ByteBuffer, offset: Int = 0): ByteBuffer = {
-    val origLength = compressed.getInt(offset)
-    ByteBuffer.wrap(getDecompressor.decompress(compressed.array, offset + 4, origLength))
+  def decompress(compressed: ByteBuffer): ByteBuffer = {
+    compressed.order(java.nio.ByteOrder.LITTLE_ENDIAN)
+    val origLength = compressed.getInt(0) & 0x7fffffff   // strip off compression bit
+    val decompressedBytes = new Array[Byte](origLength + 4)
+    getDecompressor.decompress(compressed.array, 4, decompressedBytes, 4, origLength)
+    UnsafeUtils.setInt(decompressedBytes, UnsafeUtils.arayOffset, origLength)
+    ByteBuffer.wrap(decompressedBytes)
   }
 
   /**

@@ -70,9 +70,10 @@ extends RawToPartitionMaker with StrictLogging {
         rawPartition.chunkSets.foreach { case RawChunkSet(infoBytes, rawVectors) =>
           timeOrderForChunkSet(ChunkSetInfo.getStartTime(infoBytes)).foreach { timeOrder =>
             val memFactory = memFactories(timeOrder)
-            memFactory.startMetaSpan()
             val chunkID = ChunkSetInfo.getChunkID(infoBytes)
             if (!partition.hasChunksAt(chunkID)) {
+              tsShard.shardStats.chunkIdsPagedFromColStore.increment()
+              memFactory.startMetaSpan()
               val chunkPtrs = copyToOffHeap(rawVectors, memFactory)
               val metaAddr = memFactory.endMetaSpan(writeMeta(_, tsPart.partID, infoBytes, chunkPtrs),
                                                     tsShard.dataset.blockMetaSize.toShort)

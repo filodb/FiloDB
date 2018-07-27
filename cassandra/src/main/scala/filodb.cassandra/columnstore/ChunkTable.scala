@@ -29,7 +29,6 @@ sealed class ChunkTable(val dataset: DatasetRef,
   val suffix = "chunks"
 
   private val compressChunks = connector.config.getBoolean("lz4-chunk-compress")
-  private val compressBytePrefix = 0xff.toByte
 
   val createCql = s"""CREATE TABLE IF NOT EXISTS $tableString (
                     |    partition blob,
@@ -97,22 +96,15 @@ sealed class ChunkTable(val dataset: DatasetRef,
     }
   }
 
-  private def compressChunk(orig: ByteBuffer): ByteBuffer = {
-    if (compressChunks) {
-      val newBuf = compress(orig, offset = 1)
-      newBuf.put(compressBytePrefix)
-      newBuf.position(0)
-      newBuf
-    } else {
-      // The lowest first byte of a valid Filo vector will not be 0xFF.
-      orig
-    }
-  }
+  // Compressed format: see filodb.core.store.compress (package.scala), but basically
+  // the original 4-byte length header with bit 31 set, then compressed bytes.
+  private def compressChunk(orig: ByteBuffer): ByteBuffer =
+    if (compressChunks) compress(orig) else orig
 
   private def decompressChunk(compressed: ByteBuffer): ByteBuffer = {
-    compressed.get(0) match {
-      case `compressBytePrefix` => decompress(compressed, offset = 1)
-      case other: Any           => compressed
+    compressed.get(3) match {
+      case b if b < 0 => decompress(compressed)
+      case b          => compressed
     }
   }
 }

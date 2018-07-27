@@ -42,10 +42,10 @@ TimeSeriesShard(dataset, storeConfig, shardNum, rawStore, metastore, evictionPol
     // 1. Fetch partitions from memstore
     super.scanPartitions(columnIDs, partMethod, chunkMethod)
       .flatMap { tsPart =>
-        shardStats.partitionsPagedFromColStore.increment()
 
         // 2. Determine missing chunks per partition and what to fetch
         chunksToFetch(tsPart, chunkMethod, pagingEnabled).map { rawChunkMethod =>
+          shardStats.partitionsPagedFromColStore.increment()
           val singlePart = SinglePartitionScan(tsPart.partKeyBytes, tsPart.shard)
           rawStore.readRawPartitions(dataset, allDataCols, singlePart, rawChunkMethod)
             // NOTE: this executes the partMaker single threaded.  Needed for now due to concurrency constraints.
