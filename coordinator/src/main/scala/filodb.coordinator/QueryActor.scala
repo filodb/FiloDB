@@ -58,7 +58,7 @@ final class QueryActor(memStore: MemStore,
   val queryEngine2 = new QueryEngine(dataset, shardMapFunc)
   val queryConfig = new QueryConfig(config.getConfig("filodb.query"))
 
-  private val tags = Map("dataset" -> dataset.toString)
+  private val tags = Map("dataset" -> dataset.ref.toString)
   private val lpRequests = Kamon.counter("queryactor-logicalPlan-requests").refine(tags)
   private val epRequests = Kamon.counter("queryactor-execplan-requests").refine(tags)
   private val resultVectors = Kamon.histogram("queryactor-result-num-rvs").refine(tags)
