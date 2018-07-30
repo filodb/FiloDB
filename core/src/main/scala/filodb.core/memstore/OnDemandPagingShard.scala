@@ -3,7 +3,7 @@ package filodb.core.memstore
 import scala.concurrent.ExecutionContext
 
 import monix.execution.Scheduler
-import monix.reactive.Observable
+import monix.reactive.{Observable, OverflowStrategy}
 
 import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.metadata.Dataset
@@ -23,6 +23,8 @@ class OnDemandPagingShard(dataset: Dataset,
                          (implicit ec: ExecutionContext) extends
 TimeSeriesShard(dataset, storeConfig, shardNum, rawStore, metastore, evictionPolicy)(ec) {
   private val singleThreadPool = Scheduler.singleThread("make-partition")
+  // TODO: make this configurable
+  private val strategy = OverflowStrategy.BackPressure(1000)
 
   // NOTE: the current implementation is as follows
   //  1. Fetch partitions from memStore
@@ -52,6 +54,8 @@ TimeSeriesShard(dataset, storeConfig, shardNum, rawStore, metastore, evictionPol
             // In the future optimize this if needed.
             // TODO: add Kamon Executors monitoring to monitor this thread pool.  Do this as part of perf optimization
             .mapAsync { rawPart => partitionMaker.populateRawChunks(rawPart).executeOn(singleThreadPool) }
+            // This is needed so future computations happen in a different thread
+            .asyncBoundary(strategy)
             // Unfortunately switchIfEmpty doesn't work.  Need to do this to ensure TSPartition will be returned
             .countF
             .map { count =>

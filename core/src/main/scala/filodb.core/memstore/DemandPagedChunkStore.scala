@@ -80,7 +80,9 @@ extends RawToPartitionMaker with StrictLogging {
               require(metaAddr != 0)
               tsPart.addChunkSet(metaAddr + 4)   // Important: don't point at partID
             } else {
-              logger.info(s"Chunks not copied to ${partition.stringPartition}, already has chunk $chunkID")
+              logger.info(s"Chunks not copied to ${partition.stringPartition}, already has chunk $chunkID.  " +
+                s"Chunk time range (${ChunkSetInfo.getStartTime(infoBytes)}, ${ChunkSetInfo.getEndTime(infoBytes)})" +
+                s" partition earliestTime=${partition.earliestTime}")
             }
           }
         }

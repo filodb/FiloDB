@@ -64,6 +64,7 @@ class TimeSeriesPartitionSpec extends FunSpec with Matchers with BeforeAndAfter 
                     new TimeSeriesShardStats(dataset1.ref, 0))
     val data = singleSeriesReaders().take(11)
     val minData = data.map(_.getDouble(1))
+    val initTS = data(0).getLong(0)
     data.take(10).zipWithIndex.foreach { case (r, i) => part.ingest(r, ingestBlockHolder) }
 
     val origPoolSize = bufferPool.poolSize
@@ -77,6 +78,9 @@ class TimeSeriesPartitionSpec extends FunSpec with Matchers with BeforeAndAfter 
     // Before flush happens, should be able to read all chunks
     part.unflushedChunksets shouldEqual 1
     part.numChunks shouldEqual 1
+    val infos1 = part.infos(AllChunkScan).toBuffer
+    infos1 should have length 1
+    infos1.head.startTime shouldEqual initTS
     val data1 = part.timeRangeRows(AllChunkScan, Array(1)).map(_.getDouble(0)).toBuffer
     data1 shouldEqual (minData take 10)
 
@@ -92,7 +96,11 @@ class TimeSeriesPartitionSpec extends FunSpec with Matchers with BeforeAndAfter 
     part.numChunks shouldEqual 2
     part.unflushedChunksets shouldEqual 2
     part.appendingChunkLen shouldEqual 1
-    val initTS = data(0).getLong(0)
+    val infos2 = part.infos(AllChunkScan).toBuffer
+    infos2 should have length 2
+    infos2.head.startTime shouldEqual initTS
+    infos2.last.startTime shouldEqual data(10).getLong(0)
+
     val readIt = part.timeRangeRows(initTS, initTS + 500000, Array(1)).map(_.getDouble(0))
     readIt.toBuffer shouldEqual minData
 
