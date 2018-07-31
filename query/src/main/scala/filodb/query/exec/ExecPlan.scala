@@ -43,6 +43,9 @@ trait ExecPlan extends QueryCommand {
 
   def submitTime: Long
 
+  /**
+   * Limit on number of samples returned per RangeVector
+   */
   def limit: Int
 
   def dataset: DatasetRef
@@ -109,6 +112,7 @@ trait ExecPlan extends QueryCommand {
             // materialize, and limit rows per RV
             SerializableRangeVector(rv, builder, recSchema, limit)
         }
+        .take(queryConfig.vectorsLimit)
         .toListL
         .map { r =>
           qLogger.debug(s"queryId: ${id} Successful execution of ${getClass.getSimpleName} with transformers")
