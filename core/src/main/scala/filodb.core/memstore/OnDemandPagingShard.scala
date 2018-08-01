@@ -80,7 +80,8 @@ TimeSeriesShard(dataset, storeConfig, shardNum, rawStore, metastore, evictionPol
         case r: RowKeyChunkScan         =>
           if (partition.numChunks > 0) {
             val memStartTime = partition.earliestTime
-            if (r.startTime < memStartTime) { Some(RowKeyChunkScan(r.startkey, BinaryRecord.timestamp(memStartTime))) }
+            val endQuery = memStartTime - 1   // do not include earliestTime, otherwise will pull in first chunk
+            if (r.startTime < memStartTime) { Some(RowKeyChunkScan(r.startkey, BinaryRecord.timestamp(endQuery))) }
             else                            { None }
           } else {
             Some(r)    // if no chunks ingested yet, read everything from disk
