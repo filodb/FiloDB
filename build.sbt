@@ -253,7 +253,7 @@ lazy val promDeps = Seq(
 
 lazy val tsgeneratorDeps = Seq(
   logbackDep,
-  "io.monix" %% "monix-kafka-10" % monixKafkaVersion,
+  "io.monix" %% "monix-kafka-1x" % monixKafkaVersion,
   "org.rogach" %% "scallop" % "3.1.1"
 )
 
