@@ -14,15 +14,23 @@ object UnsafeUtils {
 
   val arayOffset = unsafe.arrayBaseOffset(classOf[Array[Byte]])
 
+  // These are specific to JDK8, definitely not guaranteed for other versions
+  val byteBufArrayField = unsafe.objectFieldOffset(classOf[ByteBuffer].getDeclaredField("hb"))
+  val byteBufOffsetField = unsafe.objectFieldOffset(classOf[ByteBuffer].getDeclaredField("offset"))
+
   /** Translate ByteBuffer into base, offset, numBytes */
   //scalastyle:off method.name
   def BOLfromBuffer(buf: ByteBuffer): (Any, Long, Int) = {
     if (buf.hasArray) {
       (buf.array, arayOffset.toLong + buf.arrayOffset + buf.position, buf.limit - buf.position)
-    } else {
-      assert(buf.isDirect)
+    } else if (buf.isDirect) {
       val address = MemoryIO.getCheckedInstance.getDirectBufferAddress(buf)
       (UnsafeUtils.ZeroPointer, address + buf.position, buf.limit - buf.position)
+    } else {
+      assert(buf.isReadOnly)
+      (unsafe.getObject(buf, byteBufArrayField).asInstanceOf[Array[Byte]],
+       unsafe.getInt(buf, byteBufOffsetField) + arayOffset,
+       buf.limit - buf.position)
     }
   }
   //scalastyle:on method.name
