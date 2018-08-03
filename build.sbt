@@ -152,6 +152,7 @@ val excludeSlf4jLog4j = ExclusionRule(organization = "org.slf4j", name = "slf4j-
 val excludeJersey = ExclusionRule(organization = "com.sun.jersey")
 // The default minlog only logs to STDOUT.  We want to log to SLF4J.
 val excludeMinlog = ExclusionRule(organization = "com.esotericsoftware", name = "minlog")
+val excludeOldLz4 = ExclusionRule(organization = "net.jpountz.lz4", name = "lz4")
 
 
 /* Versions in various modules versus one area of build */
@@ -160,7 +161,7 @@ val akkaHttpVersion   = "10.1.3"
 val cassDriverVersion = "3.0.2"
 val ficusVersion      = "1.1.2"
 val kamonVersion      = "1.1.3"
-val monixKafkaVersion = "0.14"
+val monixKafkaVersion = "0.15"
 val sparkVersion      = "2.0.0"
 
 /* Dependencies shared */
@@ -191,7 +192,7 @@ lazy val memoryDeps = commonDeps ++ Seq(
   "com.github.jnr"       %  "jnr-ffi"          % "2.1.6",
   "joda-time"            % "joda-time"         % "2.2",
   "org.joda"             % "joda-convert"      % "1.2",
-  "net.jpountz.lz4"      %  "lz4"              % "1.3.0",
+  "org.lz4"              %  "lz4-java"         % "1.4",
   "org.jctools"          % "jctools-core"      % "2.0.1",
   "org.spire-math"      %% "debox"             % "0.8.0",
   scalaLoggingDep,
@@ -215,7 +216,7 @@ lazy val coreDeps = commonDeps ++ Seq(
 
 lazy val cassDeps = commonDeps ++ Seq(
   // other dependencies separated by commas
-  "net.jpountz.lz4"        % "lz4"               % "1.3.0",
+  "org.lz4"                %  "lz4-java"         % "1.4",
   "com.datastax.cassandra" % "cassandra-driver-core" % cassDriverVersion,
   logbackDep % Test
 )
@@ -223,7 +224,7 @@ lazy val cassDeps = commonDeps ++ Seq(
 lazy val coordDeps = commonDeps ++ Seq(
   "com.typesafe.akka"    %% "akka-slf4j"        % akkaVersion,
   "com.typesafe.akka"    %% "akka-cluster"      % akkaVersion,
-  "com.github.romix.akka" %% "akka-kryo-serialization" % "0.5.0" excludeAll(excludeMinlog),
+  "com.github.romix.akka" %% "akka-kryo-serialization" % "0.5.0" excludeAll(excludeMinlog, excludeOldLz4),
   // Redirect minlog logs to SLF4J
    "com.dorkbox"         % "MinLog-SLF4J"       % "1.12",
   "com.opencsv"          % "opencsv"            % "3.3",
@@ -240,8 +241,8 @@ lazy val cliDeps = Seq(
 )
 
 lazy val kafkaDeps = Seq(
-  "io.monix"          %% "monix-kafka-10" % monixKafkaVersion,
-  "org.apache.kafka"  % "kafka-clients"   % "0.10.2.1" % "compile,test" exclude("org.slf4j", "slf4j-log4j12"),
+  "io.monix"          %% "monix-kafka-1x" % monixKafkaVersion,
+  "org.apache.kafka"  % "kafka-clients"   % "1.0.0" % "compile,test" exclude("org.slf4j", "slf4j-log4j12"),
   "com.typesafe.akka" %% "akka-testkit"   % akkaVersion % "test,it",
   scalaTest  % "test,it",
   logbackDep % "test,it")
