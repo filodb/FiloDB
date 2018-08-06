@@ -1,8 +1,7 @@
 package filodb.query.exec
 
-import scala.collection.mutable
-
 import monix.reactive.Observable
+import org.jctools.queues.SpscUnboundedArrayQueue
 
 import filodb.core.query.{IteratorBackedRangeVector, RangeVector, ResultSchema}
 import filodb.memory.format.RowReader
@@ -116,9 +115,9 @@ class SlidingWindowIterator(raw: Iterator[RowReader],
   * raw sample. Beware: This is mutable, and not thread-safe.
   */
 class TransientRowPool {
-  val pool = mutable.Queue[TransientRow]()
-  def get: TransientRow = if (pool.isEmpty) new TransientRow() else pool.dequeue()
-  def putBack(r: TransientRow): Unit = pool.enqueue(r)
+  val pool = new SpscUnboundedArrayQueue[TransientRow](16)
+  @inline final def get: TransientRow = if (pool.isEmpty) new TransientRow() else pool.remove()
+  @inline final def putBack(r: TransientRow): Unit = pool.add(r)
 }
 
 /**

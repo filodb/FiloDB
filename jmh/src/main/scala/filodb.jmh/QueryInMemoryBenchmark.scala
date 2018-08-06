@@ -39,10 +39,12 @@ class QueryInMemoryBenchmark extends StrictLogging {
   import NodeClusterActor._
 
   val numShards = 2
-  val numSamples = 360
+  val numSamples = 720   // 2 hours * 3600 / 10 sec interval
   val numSeries = 100
   val startTime = System.currentTimeMillis - (3600*1000)
   val numQueries = 500
+  val queryIntervalMin = 55  // # minutes between start and stop
+  val queryStep = 60         // # of seconds between each query sample "step"
 
   // TODO: move setup and ingestion to another trait
   val system = ActorSystem("test", ConfigFactory.load("filodb-defaults.conf"))
@@ -98,12 +100,11 @@ class QueryInMemoryBenchmark extends StrictLogging {
    * ## ========  Queries ===========
    * They are designed to match all the time series (common case) under a particular metric and job
    */
-  // TODO: add periodic sample
-  val queries = Seq("heap_usage{job=\"App-2\"}[5m]",  // raw time series
+  val queries = Seq("heap_usage{job=\"App-2\"}",  // raw time series
                     """sum(rate(heap_usage{job="App-2"}[5m]))""",
                     """sum_over_time(heap_usage{job="App-2"}[5m])""")
-  val queryTime = startTime + (5 * 60 * 1000)  // 5 minutes from start
-  val qParams = QueryParams(queryTime/1000, 1, queryTime/1000)
+  val queryTime = startTime + (5 * 60 * 1000)  // 5 minutes from start until 60 minutes from start
+  val qParams = QueryParams(queryTime/1000, queryStep, (queryTime/1000) + queryIntervalMin*60)
   val logicalPlans = queries.map { q => Parser.queryRangeToLogicalPlan(q, qParams) }
   val queryCommands = logicalPlans.map { plan =>
     LogicalPlan2Query(dataset.ref, plan, QueryOptions(shardKeySpread = 1))

@@ -101,13 +101,17 @@ final class RecordContainer(val base: Any, val offset: Long, maxLength: Int) {
    */
   final def allOffsets: Buffer[Long] = map { case (b, o) => o }
 
+  class CountingConsumer(var count: Int = 0) extends BinaryRegionConsumer {
+    def onNext(base: Any, offset: Long): Unit = count += 1
+  }
+
   /**
    * Uses consumeRecords with a consumer that counts the # of records
    */
   final def countRecords(): Int = {
-    var count = 0
-    foreach { case (b, o) => count += 1 }
-    count
+    val counter = new CountingConsumer()
+    consumeRecords(counter)
+    counter.count
   }
 
   /**
