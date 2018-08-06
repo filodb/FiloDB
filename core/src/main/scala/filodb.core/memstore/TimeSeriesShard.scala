@@ -21,6 +21,7 @@ import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.Dataset
 import filodb.core.store._
 import filodb.memory._
+import filodb.memory.data.OffheapLFSortedIDMap
 import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String => UTF8Str}
 import filodb.memory.format.BinaryVector.BinaryVectorPtr
 
@@ -219,6 +220,12 @@ class TimeSeriesShard(val dataset: Dataset,
   private final val stoppedIngesting = new EWAHCompressedBitmap
 
   private final val numTimeBucketsToRetain = Math.ceil(chunkRetentionHours.hours / storeConfig.flushInterval).toInt
+
+  // Not really one instance of a map; more like an accessor class shared amongst all TSPartition instances
+  // One instance of the offheap map exists for each TSPartition
+  private val offheapInfoMap = new OffheapLFSortedIDMap(bufferMemoryManager, classOf[TimeSeriesPartition])
+  // Use 1/4 of max # buckets for initial ChunkInfo map size
+  private val initInfoMapSize = Math.max((numTimeBucketsToRetain / 4) + 4, 20)
 
   // Current time bucket number. Time bucket number is initialized from last value stored in metastore
   // and is incremented each time a new bucket is prepared for flush
@@ -578,7 +585,9 @@ class TimeSeriesShard(val dataset: Dataset,
       // PartitionKey is copied to offheap bufferMemory and stays there until it is freed
       val partKeyOffset = recordComp.buildPartKeyFromIngest(recordBase, recordOff, partKeyBuilder)
       val (_, partKeyAddr, _) = BinaryRegionLarge.allocateAndCopy(partKeyArray, partKeyOffset, bufferMemoryManager)
-      val newPart = new TimeSeriesPartition(nextPartitionID, dataset, partKeyAddr, shardNum, bufferPool, shardStats)
+      val infoMapAddr = OffheapLFSortedIDMap.allocNew(bufferMemoryManager, initInfoMapSize)
+      val newPart = new TimeSeriesPartition(nextPartitionID, dataset, partKeyAddr, shardNum, bufferPool, shardStats,
+                                            infoMapAddr, offheapInfoMap)
       partKeyIndex.addPartKey(UnsafeUtils.ZeroPointer, partKeyAddr, nextPartitionID, startTime)
       currentIndexTimeBucketPartIds.set(nextPartitionID)
       timeBucketToPartIds(currentIndexTimeBucket).set(nextPartitionID)
@@ -635,6 +644,7 @@ class TimeSeriesShard(val dataset: Dataset,
     val partitionObj = partitions.get(partId)
     partSet.remove(partitionObj)
     bufferMemoryManager.freeMemory(partitionObj.partKeyOffset)
+    bufferMemoryManager.freeMemory(partitionObj.mapPtr)
     partitions.remove(partId)
   }
 

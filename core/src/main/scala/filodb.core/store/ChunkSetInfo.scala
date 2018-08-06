@@ -9,6 +9,7 @@ import filodb.core.Types._
 import filodb.core.metadata.{Column, Dataset}
 import filodb.memory.BinaryRegion.NativePointer
 import filodb.memory.MemFactory
+import filodb.memory.data.ElementIterator
 import filodb.memory.format._
 
 /**
@@ -205,5 +206,71 @@ object ChunkSetInfo extends StrictLogging {
     val bytes = new Array[Byte](OffsetVectors)
     UnsafeUtils.unsafe.copyMemory(UnsafeUtils.ZeroPointer, info.infoAddr, bytes, UnsafeUtils.arayOffset, bytes.size)
     bytes
+  }
+}
+
+// Why can't Scala have unboxed iterators??
+trait ChunkInfoIterator { base: ChunkInfoIterator =>
+  def hasNext: Boolean
+  def nextInfo: ChunkSetInfo
+
+  /**
+   * Returns a new ChunkInfoIterator which filters items from this iterator
+   */
+  def filter(func: ChunkSetInfo => Boolean): ChunkInfoIterator =
+    new FilteredChunkInfoIterator(this, func)
+
+  /**
+   * Returns a regular Scala Iterator, transforming each ChunkSetInfo into an item of type B
+   * Note that regular Iterators are boxed, so this works best if B is an object.
+   */
+  def map[B](func: ChunkSetInfo => B): Iterator[B] = new Iterator[B] {
+    def hasNext: Boolean = base.hasNext
+    def next: B = func(base.nextInfo)
+  }
+
+  /**
+   * Creates a standard Scala Buffer, materializing all infos.
+   * Note that this will box and create objects around ChunkSetInfo, so
+   * please only use this for testing or convenience.  VERY MEMORY EXPENSIVE.
+   */
+  def toBuffer: Seq[ChunkSetInfo] = {
+    val buf = new collection.mutable.ArrayBuffer[ChunkSetInfo]
+    while (hasNext) { buf += nextInfo }
+    buf
+  }
+}
+
+object ChunkInfoIterator {
+  val empty = new ChunkInfoIterator {
+    def hasNext: Boolean = false
+    def nextInfo: ChunkSetInfo = ChunkSetInfo(0)
+  }
+
+  def single(info: ChunkSetInfo): ChunkInfoIterator = new ChunkInfoIterator {
+    var count = 0
+    def hasNext: Boolean = count == 0
+    def nextInfo: ChunkSetInfo = { count += 1; info }
+  }
+}
+
+class ElementChunkInfoIterator(elIt: ElementIterator) extends ChunkInfoIterator {
+  def hasNext: Boolean = elIt.hasNext
+  def nextInfo: ChunkSetInfo = ChunkSetInfo(elIt.next)
+}
+
+class FilteredChunkInfoIterator(base: ChunkInfoIterator, filter: ChunkSetInfo => Boolean) extends ChunkInfoIterator {
+  var nextnext: ChunkSetInfo = ChunkSetInfo(0)
+  var gotNext: Boolean = false
+  def hasNext: Boolean = {
+    while (base.hasNext && !gotNext) {
+      nextnext = base.nextInfo
+      if (filter(nextnext)) gotNext = true
+    }
+    gotNext
+  }
+  def nextInfo: ChunkSetInfo = {
+    gotNext = false   // reet so we can look for the next item where filter == true
+    nextnext
   }
 }

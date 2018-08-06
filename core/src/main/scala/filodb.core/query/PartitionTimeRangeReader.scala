@@ -3,7 +3,7 @@ package filodb.core.query
 import scalaxy.loops._
 
 import filodb.core.metadata.Dataset
-import filodb.core.store.{ChunkSetInfo, FiloPartition}
+import filodb.core.store.{ChunkInfoIterator, ChunkSetInfo, FiloPartition}
 import filodb.memory.format.{RowReader, TypedIterator, UnsafeUtils, ZeroCopyUTF8String}
 
 /**
@@ -15,7 +15,7 @@ import filodb.memory.format.{RowReader, TypedIterator, UnsafeUtils, ZeroCopyUTF8
 final class PartitionTimeRangeReader(part: FiloPartition,
                                      startTime: Long,
                                      endTime: Long,
-                                     infos: Iterator[ChunkSetInfo],
+                                     infos: ChunkInfoIterator,
                                      columnIDs: Array[Int]) extends Iterator[RowReader] {
   // MinValue = no current chunk
   private var curChunkID = Long.MinValue
@@ -78,7 +78,7 @@ final class PartitionTimeRangeReader(part: FiloPartition,
     while (curChunkID == Long.MinValue || rowNo > endRowNo) {
       // No more chunksets
       if (!infos.hasNext) return false
-      val nextInfo = infos.next
+      val nextInfo = infos.nextInfo
       curChunkID = nextInfo.id
       populateIterators(nextInfo)
     }

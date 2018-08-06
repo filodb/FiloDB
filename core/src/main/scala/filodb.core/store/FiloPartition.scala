@@ -63,7 +63,7 @@ trait FiloPartition {
    * Finds all of the relevant chunks depending on the scan method, returning all the ChunkSetInfos
    * in order of increasing ChunkID.
    */
-  def infos(method: ChunkScanMethod): Iterator[ChunkSetInfo]
+  def infos(method: ChunkScanMethod): ChunkInfoIterator
 
   /**
    * Returns true if the partition has the chunk with the given id

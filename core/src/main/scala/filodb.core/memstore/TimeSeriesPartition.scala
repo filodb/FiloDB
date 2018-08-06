@@ -1,7 +1,5 @@
 package filodb.core.memstore
 
-import java.util.concurrent.ConcurrentSkipListMap
-
 import com.typesafe.scalalogging.StrictLogging
 import scalaxy.loops._
 
@@ -9,9 +7,10 @@ import filodb.core.Types._
 import filodb.core.metadata.Dataset
 import filodb.core.store._
 import filodb.memory.{BinaryRegion, BlockMemFactory}
+import filodb.memory.data.{MapHolder, OffheapLFSortedIDMap}
 import filodb.memory.format._
 
-object TimeSeriesPartition {
+object TimeSeriesPartition extends StrictLogging {
   type AppenderArray = Array[BinaryAppendableVector[_]]
 
   val nullChunks    = UnsafeUtils.ZeroPointer.asInstanceOf[AppenderArray]
@@ -39,31 +38,27 @@ final case class InfoAppenders(info: ChunkSetInfo, appenders: TimeSeriesPartitio
  *     This allows for safe and cheap write buffer churn without losing any data.
  *   switchBuffers() is called before flush() is called in another thread, possibly.
  *
- * This partition accepts as parameter a chunk source that represents the persistent column store
- * to fetch older chunks for the partition to support read-through caching. Chunks are fetched from the persistent
- * store lazily when a query requests chunks from the partition.
- *
- * TODO: eliminate chunkIDs, that can be stored in the index
+ * The main data structure used is the "infoMap" - an OffheapLFSortedIDMap, an extremely efficient, offheap sorted map
+ * Note that other than the variables used in this class, there is NO heap memory used for managing chunks.  Thus
+ * the amount of heap memory used for a partition is O(1) constant regardless of the number of chunks in a TSPartition.
+ * The partition key and infoMap are both in offheap write buffers, and chunks and chunk metadata are kept in
+ * offheap block memory.
  */
 class TimeSeriesPartition(val partID: Int,
                           val dataset: Dataset,
                           partitionKey: BinaryRegion.NativePointer,
                           val shard: Int,
                           bufferPool: WriteBufferPool,
-                          val shardStats: TimeSeriesShardStats) extends FiloPartition with StrictLogging {
-  import collection.JavaConverters._
+                          val shardStats: TimeSeriesShardStats,
+                          // Volatile pointer to infoMap structure.  Name of field MUST match mapKlazz method above
+                          var mapPtr: BinaryRegion.NativePointer,
+                          // Shared class for accessing the infoMap / OffheapLFSortedIDMap given mapPtr above
+                          offheapInfoMap: OffheapLFSortedIDMap)
+extends FiloPartition with MapHolder {
   import TimeSeriesPartition._
 
   def partKeyBase: Array[Byte] = UnsafeUtils.ZeroPointer.asInstanceOf[Array[Byte]]
   def partKeyOffset: Long = partitionKey
-
-  /**
-   * This is the ONE main data structure holding the chunks of a TSPartition.  It is appended to as chunks arrive
-   * and are encoded.  The last or most recent item should be the write buffer chunks.
-   * Thus it is sorted by increasing chunkID, yet addressable by chunkID, and concurrent.
-   * TODO: replace this with a vector or array of ChunkSetInfo to save on heap space
-   */
-  private var infosChunks = new ConcurrentSkipListMap[ChunkID, ChunkSetInfo]
 
   /**
     * Incoming, unencoded data gets appended to these BinaryAppendableVectors.
@@ -71,14 +66,14 @@ class TimeSeriesPartition(val partID: Int,
     * Var mutates when buffers are switched for optimization back to NULL, until new data arrives.
     * in [[filodb.core.memstore.TimeSeriesPartition#switchBuffers]],
     * and new chunk is added to the partition.
-    * Note that if this is not NULL, then it is always the most recent element of infosChunks.
+    * Note that if this is not NULL, then it is always the most recent element of infoMap.
     */
   private var currentChunks = nullChunks
   private var currentInfo = nullInfo
 
   /**
    * The newest ChunkID that has been flushed or encoded.  You can think of the progression of chunks like this,
-   * from newest to oldest (thus represents a traversal of infosChunks):
+   * from newest to oldest (thus represents a traversal of infoMap):
    * current -> notEncoded -> encodedNotFlushed -> Flushed -> Flushed -> (eventually) reclaimed
    *
    * During flush we ensure any unencoded chunks that are not current (writing) are encoded and updates these IDs.
@@ -142,7 +137,7 @@ class TimeSeriesPartition(val partID: Int,
       val oldAppenders = currentChunks
 
       // Right after this all ingest() calls will check and potentially append to new chunks
-      // We can reset currentInfo because it is already stored in infosChunks map
+      // We can reset currentInfo because it is already stored in infoMap map
       currentChunks = nullChunks
       currentInfo = nullInfo
 
@@ -171,7 +166,7 @@ class TimeSeriesPartition(val partID: Int,
     // Now, write metadata into offheap block metadata space and update infosChunks
     val metaAddr = blockHolder.endMetaSpan(TimeSeriesShard.writeMeta(_, partID, info, frozenVectors),
                                            dataset.blockMetaSize.toShort)
-    infosChunks.put(info.id, ChunkSetInfo(metaAddr + 4))
+    infoPut(ChunkSetInfo(metaAddr + 4))
 
     // release older write buffers back to pool.  Nothing at this point should reference the older appenders.
     bufferPool.release(info.infoAddr, appenders)
@@ -194,7 +189,7 @@ class TimeSeriesPartition(val partID: Int,
   def makeFlushChunks(blockHolder: BlockMemFactory): Iterator[ChunkSet] = {
     // Now return all the un-flushed chunksets
     encodeAndReleaseBuffers(blockHolder)
-    infosChunksToBeFlushed
+    infosToBeFlushed
       .map { info =>
         ChunkSet(info, partitionKey, Nil,
                  (0 until numColumns).map { i => BinaryVector.asBuffer(info.vectorPtr(i)) },
@@ -212,34 +207,35 @@ class TimeSeriesPartition(val partID: Int,
       appenders = appenders.filterNot(_ == ia)
     }
 
-  def numChunks: Int = infosChunks.size
+  def numChunks: Int = offheapInfoMap.length(this)
   def appendingChunkLen: Int = if (currentInfo != nullInfo) currentInfo.numRows else 0
 
   /**
    * Number of unflushed chunksets lying around.  Goes up every time a new writebuffer is allocated and goes down
    * when flushes happen.  Computed dynamically from current infosChunks state.
+   * NOTE: since sliceToEnd is inclusive, we need to start just past the newestFlushedID
    */
-  def unflushedChunksets: Int = infosChunks.tailMap(newestFlushedID, false).size
+  def unflushedChunksets: Int = offheapInfoMap.sliceToEnd(this, newestFlushedID + 1).count
 
-  private def allInfos: Iterator[ChunkSetInfo] = infosChunks.values.asScala.toIterator
+  private def allInfos: ChunkInfoIterator = new ElementChunkInfoIterator(offheapInfoMap.iterate(this))
 
   // NOT including currently flushing writeBuffer chunks if there are any
-  private def infosChunksToBeFlushed: Iterator[ChunkSetInfo] =
-    infosChunks.tailMap(newestFlushedID, false).values
-               .asScala.toIterator
-               .filterNot(_ == currentInfo)  // filter out the appending chunk
+  private def infosToBeFlushed: ChunkInfoIterator =
+    new ElementChunkInfoIterator(offheapInfoMap.sliceToEnd(this, newestFlushedID + 1))
+               .filter(_ != currentInfo)  // filter out the appending chunk
 
-  def infos(method: ChunkScanMethod): Iterator[ChunkSetInfo] = method match {
+  def infos(method: ChunkScanMethod): ChunkInfoIterator = method match {
     case AllChunkScan               => allInfos
     case InMemoryChunkScan          => allInfos
     case r: RowKeyChunkScan         => allInfos.filter { ic =>
                                          ic.intersection(r.startTime, r.endTime).isDefined
                                        }
-    case LastSampleChunkScan        => if (infosChunks.isEmpty) Iterator.empty
-                                       else Iterator.single(infosChunks.get(infosChunks.lastKey))
+    case LastSampleChunkScan        => if (numChunks == 0) ChunkInfoIterator.empty
+                                       else ChunkInfoIterator.single(infoLast)
   }
 
-  final def earliestTime: Long = infosChunks.firstEntry.getValue.startTime
+  final def earliestTime: Long =
+    if (numChunks == 0) Long.MinValue else ChunkSetInfo(offheapInfoMap.first(this)).startTime
 
   /**
     * Get the timestamp of last sample which will be used as endTime for
@@ -252,17 +248,15 @@ class TimeSeriesPartition(val partID: Int,
     * your use case.
     */
   final def ingestionEndTime: Long = {
-    if (appendingChunkLen > 0) Long.MaxValue // still ingesting
-    else infosChunks.lastEntry.getValue.endTime
+    if (appendingChunkLen > 0 || numChunks == 0) Long.MaxValue // still ingesting or have no chunks
+    else infoLast.endTime
   }
 
-  def dataChunkPointer(id: ChunkID, columnID: Int): BinaryVector.BinaryVectorPtr =
-    infosChunks.get(id).vectorPtr(columnID)
+  def dataChunkPointer(id: ChunkID, columnID: Int): BinaryVector.BinaryVectorPtr = infoGet(id).vectorPtr(columnID)
 
   /**
     * Initializes vectors, chunkIDs for a new chunkset/chunkID.
     * This is called after switchBuffers() upon the first data that arrives.
-    * Also compacts infosChunks tombstones.
     */
   private def initNewChunk(): Unit = {
     val (infoAddr, newAppenders) = bufferPool.obtain()
@@ -271,25 +265,30 @@ class TimeSeriesPartition(val partID: Int,
     ChunkSetInfo.resetNumRows(infoAddr)    // Must reset # rows otherwise it keeps increasing!
     currentInfo = ChunkSetInfo(infoAddr)
     currentChunks = newAppenders
-    infosChunks.put(currentChunkID, currentInfo)
+    infoPut(currentInfo)
   }
 
   final def removeChunksAt(id: ChunkID): Unit = {
-    infosChunks.remove(id)
+    offheapInfoMap.remove(this, id)
     shardStats.chunkIdsEvicted.increment()
   }
 
-  final def hasChunksAt(id: ChunkID): Boolean = infosChunks.containsKey(id)
+  final def hasChunksAt(id: ChunkID): Boolean = offheapInfoMap.contains(this, id)
 
   // Used for adding chunksets that are paged in, ie that are already persisted
-  final def addChunkSet(metaAddr: Long): Unit = {
-    val newInfo = ChunkSetInfo(metaAddr)
-    infosChunks.put(newInfo.id, newInfo)
+  // Atomic and multi-thread safe; only mutates state and invokes infoAddrFunc if chunkID not present
+  final def addChunkInfoIfAbsent(id: ChunkID, infoAddrFunc: => BinaryRegion.NativePointer): Boolean = {
+    val inserted = offheapInfoMap.putIfAbsent(this, id, infoAddrFunc)
     // Make sure to update newestFlushedID so that flushes work correctly and don't try to flush these chunksets
-    updateFlushedID(newInfo)
+    if (inserted) updateFlushedID(infoGet(id))
+    inserted
   }
 
   final def updateFlushedID(info: ChunkSetInfo): Unit = {
     newestFlushedID = Math.max(newestFlushedID, info.id)
   }
+
+  private def infoGet(id: ChunkID): ChunkSetInfo = ChunkSetInfo(offheapInfoMap(this, id))
+  private def infoLast: ChunkSetInfo = ChunkSetInfo(offheapInfoMap.last(this))
+  private def infoPut(info: ChunkSetInfo): Unit = offheapInfoMap.put(this, info.infoAddr)
 }

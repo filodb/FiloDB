@@ -3,17 +3,45 @@ package filodb.core.memstore
 import scala.concurrent.Future
 
 import com.typesafe.config.ConfigFactory
-import org.scalatest.{BeforeAndAfter, FunSpec, Matchers}
+import org.scalatest.{BeforeAndAfter, BeforeAndAfterAll, FunSpec, Matchers}
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
 
 import filodb.core._
+import filodb.core.metadata.Dataset
 import filodb.core.store._
 import filodb.memory._
+import filodb.memory.data.OffheapLFSortedIDMap
 import filodb.memory.format.UnsafeUtils
 
-class TimeSeriesPartitionSpec extends FunSpec with Matchers with BeforeAndAfter with ScalaFutures {
+object TimeSeriesPartitionSpec {
   import MachineMetricsData._
+  import BinaryRegion.NativePointer
+
+  val memFactory = new NativeMemoryManager(10 * 1024 * 1024)
+  val offheapInfoMapKlass = new OffheapLFSortedIDMap(memFactory, classOf[TimeSeriesPartition])
+  val maxChunkSize = 100
+  protected val myBufferPool = new WriteBufferPool(memFactory, dataset1, maxChunkSize, 50)
+
+  def makePart(partNo: Int, dataset: Dataset,
+               partKey: NativePointer = defaultPartKey,
+               bufferPool: WriteBufferPool = myBufferPool): TimeSeriesPartition = {
+    val infoMapAddr = OffheapLFSortedIDMap.allocNew(memFactory, 40)
+    new TimeSeriesPartition(partNo, dataset, partKey, 0, bufferPool,
+          new TimeSeriesShardStats(dataset1.ref, 0), infoMapAddr, offheapInfoMapKlass)
+  }
+}
+
+trait MemFactoryCleanupTest extends FunSpec with Matchers with BeforeAndAfter with BeforeAndAfterAll {
+  override def afterAll(): Unit = {
+    super.afterAll()
+    TimeSeriesPartitionSpec.memFactory.shutdown()
+  }
+}
+
+class TimeSeriesPartitionSpec extends MemFactoryCleanupTest with ScalaFutures {
+  import MachineMetricsData._
+  import TimeSeriesPartitionSpec._
 
   implicit override val patienceConfig = PatienceConfig(timeout = Span(2, Seconds), interval = Span(50, Millis))
 
@@ -37,9 +65,6 @@ class TimeSeriesPartitionSpec extends FunSpec with Matchers with BeforeAndAfter 
 
   private val blockStore = new PageAlignedBlockManager(100 * 1024 * 1024,
     new MemoryStats(Map("test"-> "test")), reclaimer, 1, chunkRetentionHours)
-  val memFactory = new NativeMemoryManager(10 * 1024 * 1024)
-  val maxChunkSize = 100
-  protected val bufferPool = new WriteBufferPool(memFactory, dataset1, maxChunkSize, 50)
   protected val ingestBlockHolder = new BlockMemFactory(blockStore, None, dataset1.blockMetaSize, true)
 
   before {
@@ -47,8 +72,7 @@ class TimeSeriesPartitionSpec extends FunSpec with Matchers with BeforeAndAfter 
   }
 
   it("should be able to read immediately after ingesting one row") {
-    part = new TimeSeriesPartition(0, dataset1, defaultPartKey, 0, bufferPool,
-          new TimeSeriesShardStats(dataset1.ref, 0))
+    part = makePart(0, dataset1)
     val data = singleSeriesReaders().take(5)
     part.ingest(data(0), ingestBlockHolder)   // just one row
     part.numChunks shouldEqual 1
@@ -60,19 +84,18 @@ class TimeSeriesPartitionSpec extends FunSpec with Matchers with BeforeAndAfter 
   }
 
   it("should be able to ingest new rows while flush() executing concurrently") {
-    part = new TimeSeriesPartition(0, dataset1, defaultPartKey, 0, bufferPool,
-                    new TimeSeriesShardStats(dataset1.ref, 0))
+    part = makePart(0, dataset1)
     val data = singleSeriesReaders().take(11)
     val minData = data.map(_.getDouble(1))
     val initTS = data(0).getLong(0)
     data.take(10).zipWithIndex.foreach { case (r, i) => part.ingest(r, ingestBlockHolder) }
 
-    val origPoolSize = bufferPool.poolSize
+    val origPoolSize = myBufferPool.poolSize
 
     // First 10 rows ingested. Now flush in a separate Future while ingesting the remaining row
     part.switchBuffers(ingestBlockHolder)
     // After switchBuffers, currentChunks should be null, pool size the same (nothing new allocated yet)
-    bufferPool.poolSize shouldEqual origPoolSize
+    myBufferPool.poolSize shouldEqual origPoolSize
     part.appendingChunkLen shouldEqual 0
 
     // Before flush happens, should be able to read all chunks
@@ -90,7 +113,7 @@ class TimeSeriesPartitionSpec extends FunSpec with Matchers with BeforeAndAfter 
     val chunkSets = flushFut.futureValue.toSeq
 
     // After flush, the old writebuffers should be returned to pool, but new one allocated for ingesting
-    bufferPool.poolSize shouldEqual origPoolSize
+    myBufferPool.poolSize shouldEqual origPoolSize
 
     // there should be a frozen chunk of 10 records plus 1 record in currently appending chunks
     part.numChunks shouldEqual 2
@@ -112,27 +135,73 @@ class TimeSeriesPartitionSpec extends FunSpec with Matchers with BeforeAndAfter 
     part.unflushedChunksets shouldEqual 1
   }
 
-  it("should be able to read a time range of ingested data") (pending)
+  it("should be able to read a time range of ingested data") {
+    part = makePart(0, dataset1)
+    val data = singleSeriesReaders().take(11)
+    val initTS = data(0).getLong(0)
+    val appendingTS = data.last.getLong(0)
+    val minData = data.map(_.getDouble(1))
+    data.take(10).zipWithIndex.foreach { case (r, i) => part.ingest(r, ingestBlockHolder) }
+
+    // First 10 rows ingested. Now flush in a separate Future while ingesting the remaining row
+    part.switchBuffers(ingestBlockHolder)
+    part.appendingChunkLen shouldEqual 0
+
+    val blockHolder = new BlockMemFactory(blockStore, None, dataset1.blockMetaSize)
+    val flushFut = Future(part.makeFlushChunks(blockHolder))
+    data.drop(10).zipWithIndex.foreach { case (r, i) => part.ingest(r, ingestBlockHolder) }
+
+    // there should be a frozen chunk of 10 records plus 1 record in currently appending chunks
+    part.numChunks shouldEqual 2
+    part.appendingChunkLen shouldEqual 1
+
+    // Flushed chunk:  initTS -> initTS + 9000 (1000 ms per tick)
+    // Read from flushed chunk only
+    val readIt = part.timeRangeRows(RowKeyChunkScan(initTS, initTS + 9000), Array(0, 1)).map(_.getDouble(1))
+    readIt.toBuffer shouldEqual minData.take(10)
+
+    val readIt2 = part.timeRangeRows(RowKeyChunkScan(initTS + 1000, initTS + 7000), Array(0, 1)).map(_.getDouble(1))
+    readIt2.toBuffer shouldEqual minData.drop(1).take(7)
+
+    // Read from appending chunk only:  initTS + 10000
+    val readIt3 = part.timeRangeRows(RowKeyChunkScan(appendingTS, appendingTS + 3000), Array(0, 1)).map(_.getDouble(1))
+    readIt3.toBuffer shouldEqual minData.drop(10)
+
+    // Try to read from before flushed to part of flushed chunk
+    val readIt4 = part.timeRangeRows(RowKeyChunkScan(initTS - 7000, initTS + 3000), Array(0, 1)).map(_.getDouble(1))
+    readIt4.toBuffer shouldEqual minData.take(4)
+
+    // both flushed and appending chunk
+    val readIt5 = part.timeRangeRows(RowKeyChunkScan(initTS + 7000, initTS + 14000), Array(0, 1)).map(_.getDouble(1))
+    readIt5.toBuffer shouldEqual minData.drop(7)
+
+    // No data: past appending chunk
+    val readIt6 = part.timeRangeRows(RowKeyChunkScan(initTS + 20000, initTS + 24000), Array(0, 1)).map(_.getDouble(1))
+    readIt6.toBuffer shouldEqual Nil
+
+    // No data: before initTS
+    val readIt7 = part.timeRangeRows(RowKeyChunkScan(initTS - 9000, initTS - 900), Array(0, 1)).map(_.getDouble(1))
+    readIt7.toBuffer shouldEqual Nil
+  }
 
   it("should reclaim blocks and evict flushed chunks properly upon reclaim") {
-     part = new TimeSeriesPartition(0, dataset1, defaultPartKey, 0, bufferPool,
-                        new TimeSeriesShardStats(dataset1.ref, 0))
+     part = makePart(0, dataset1)
      val data = singleSeriesReaders().take(21)
      val minData = data.map(_.getDouble(1))
      data.take(10).zipWithIndex.foreach { case (r, i) => part.ingest(r, ingestBlockHolder) }
 
-     val origPoolSize = bufferPool.poolSize
+     val origPoolSize = myBufferPool.poolSize
 
      // First 10 rows ingested. Now flush in a separate Future while ingesting 6 more rows
      part.switchBuffers(ingestBlockHolder)
-     bufferPool.poolSize shouldEqual origPoolSize    // current chunks become null, no new allocation yet
+     myBufferPool.poolSize shouldEqual origPoolSize    // current chunks become null, no new allocation yet
      val blockHolder = new BlockMemFactory(blockStore, None, dataset1.blockMetaSize)
      val flushFut = Future(part.makeFlushChunks(blockHolder))
      data.drop(10).take(6).zipWithIndex.foreach { case (r, i) => part.ingest(r, ingestBlockHolder) }
      val chunkSets = flushFut.futureValue.toSeq
 
      // After flush, the old writebuffers should be returned to pool, but new one allocated too
-     bufferPool.poolSize shouldEqual origPoolSize
+     myBufferPool.poolSize shouldEqual origPoolSize
 
      // there should be a frozen chunk of 10 records plus 6 records in currently appending chunks
      part.numChunks shouldEqual 2
@@ -176,8 +245,7 @@ class TimeSeriesPartitionSpec extends FunSpec with Matchers with BeforeAndAfter 
  }
 
   it("should not switch buffers and flush when current chunks are empty") {
-    part = new TimeSeriesPartition(0, dataset1, defaultPartKey, 0, bufferPool,
-              new TimeSeriesShardStats(dataset1.ref, 0))
+    part = makePart(0, dataset1)
     val data = singleSeriesReaders().take(11)
     data.zipWithIndex.foreach { case (r, i) => part.ingest(r, ingestBlockHolder) }
     part.numChunks shouldEqual 1
@@ -207,11 +275,10 @@ class TimeSeriesPartitionSpec extends FunSpec with Matchers with BeforeAndAfter 
   it("should reset metadata correctly when recycling old write buffers") {
     // Ingest data into 10 TSPartitions and switch and encode all of them.  Now WriteBuffers poolsize should be
     // down 10 and then back up.
-    val stats = new TimeSeriesShardStats(dataset1.ref, 0)
     val data = singleSeriesReaders().take(10).toBuffer
-    val origPoolSize = bufferPool.poolSize
+    val origPoolSize = myBufferPool.poolSize
     val partitions = (0 to 9).map { partNo =>
-      new TimeSeriesPartition(partNo, dataset1, defaultPartKey, 0, bufferPool, stats)
+      makePart(partNo, dataset1)
     }
     (0 to 9).foreach { i =>
       data.foreach { case d => partitions(i).ingest(d, ingestBlockHolder) }
@@ -220,7 +287,7 @@ class TimeSeriesPartitionSpec extends FunSpec with Matchers with BeforeAndAfter 
       partitions(i).switchBuffers(ingestBlockHolder, true)
     }
 
-    bufferPool.poolSize shouldEqual origPoolSize
+    myBufferPool.poolSize shouldEqual origPoolSize
 
     // Do this 4 more times so that we get old recycled metadata back
     (0 until 4).foreach { n =>
@@ -240,24 +307,23 @@ class TimeSeriesPartitionSpec extends FunSpec with Matchers with BeforeAndAfter 
 
   it("should automatically use new write buffers and encode old one when write buffers overflow") {
     // Ingest 10 less than maxChunkSize
-    val origPoolSize = bufferPool.poolSize
+    val origPoolSize = myBufferPool.poolSize
 
-    part = new TimeSeriesPartition(0, dataset1, defaultPartKey, 0, bufferPool,
-          new TimeSeriesShardStats(dataset1.ref, 0))
+    part = makePart(0, dataset1)
     val data = singleSeriesReaders().take(maxChunkSize + 10)
     data.take(maxChunkSize - 10).zipWithIndex.foreach { case (r, i) => part.ingest(r, ingestBlockHolder) }
     part.numChunks shouldEqual 1
     part.appendingChunkLen shouldEqual (maxChunkSize - 10)
     part.unflushedChunksets shouldEqual 1
 
-    bufferPool.poolSize shouldEqual (origPoolSize - 1)
+    myBufferPool.poolSize shouldEqual (origPoolSize - 1)
 
     // Now ingest 20 more.  Verify new chunks encoded.  10 rows after switch at 100. Verify can read everything.
     data.drop(maxChunkSize - 10).zipWithIndex.foreach { case (r, i) => part.ingest(r, ingestBlockHolder) }
     part.numChunks shouldEqual 2
     part.appendingChunkLen shouldEqual 10
     part.unflushedChunksets shouldEqual 2
-    bufferPool.poolSize shouldEqual (origPoolSize - 1)
+    myBufferPool.poolSize shouldEqual (origPoolSize - 1)
 
     val minData = data.map(_.getDouble(1)) drop 100
     val readData1 = part.timeRangeRows(LastSampleChunkScan, Array(1)).map(_.getDouble(0))

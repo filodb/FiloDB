@@ -1,7 +1,6 @@
 package filodb.core.memstore
 
 import com.typesafe.config.ConfigFactory
-import org.scalatest.{BeforeAndAfter, FunSpec, Matchers}
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
 
@@ -10,8 +9,9 @@ import filodb.core.binaryrecord2.RecordBuilder
 import filodb.memory._
 import filodb.memory.format.UnsafeUtils
 
-class PartitionSetSpec extends FunSpec with Matchers with BeforeAndAfter with ScalaFutures {
+class PartitionSetSpec extends MemFactoryCleanupTest with ScalaFutures {
   import MachineMetricsData._
+  import TimeSeriesPartitionSpec._
 
   implicit override val patienceConfig = PatienceConfig(timeout = Span(2, Seconds), interval = Span(50, Millis))
 
@@ -31,7 +31,6 @@ class PartitionSetSpec extends FunSpec with Matchers with BeforeAndAfter with Sc
 
   private val blockStore = new PageAlignedBlockManager(100 * 1024 * 1024,
     new MemoryStats(Map("test"-> "test")), reclaimer, 1, chunkRetentionHours)
-  val memFactory = new NativeMemoryManager(10 * 1024 * 1024)
   val maxChunkSize = 100
   protected val bufferPool = new WriteBufferPool(memFactory, dataset2, maxChunkSize, 50)
   private val ingestBlockHolder = new BlockMemFactory(blockStore, None, dataset2.blockMetaSize, true)
@@ -61,8 +60,7 @@ class PartitionSetSpec extends FunSpec with Matchers with BeforeAndAfter with Sc
     partSet.size shouldEqual 0
     partSet.isEmpty shouldEqual true
 
-    val part = new TimeSeriesPartition(0, dataset2, partKeyAddrs(0), 0, bufferPool,
-                                       new TimeSeriesShardStats(dataset1.ref, 0))
+    val part = makePart(0, dataset2, partKeyAddrs(0), bufferPool)
 
     partSet += part
     partSet.size shouldEqual 1
@@ -77,8 +75,7 @@ class PartitionSetSpec extends FunSpec with Matchers with BeforeAndAfter with Sc
   }
 
   it("should get existing TSPartitions with getOrAddWithIngestBR") {
-    val part = new TimeSeriesPartition(0, dataset2, partKeyAddrs(0), 0, bufferPool,
-                                       new TimeSeriesShardStats(dataset1.ref, 0))
+    val part = makePart(0, dataset2, partKeyAddrs(0), bufferPool)
     partSet += part
     partSet.size shouldEqual 1
 
@@ -91,8 +88,7 @@ class PartitionSetSpec extends FunSpec with Matchers with BeforeAndAfter with Sc
     partSet.isEmpty shouldEqual true
     partSet.getWithPartKeyBR(null, partKeyAddrs(0)) shouldEqual None
 
-    val part = new TimeSeriesPartition(0, dataset2, partKeyAddrs(0), 0, bufferPool,
-                                       new TimeSeriesShardStats(dataset1.ref, 0))
+    val part = makePart(0, dataset2, partKeyAddrs(0), bufferPool)
     val got = partSet.getOrAddWithIngestBR(null, ingestRecordAddrs(0), part)
 
     partSet.size shouldEqual 1
@@ -102,8 +98,7 @@ class PartitionSetSpec extends FunSpec with Matchers with BeforeAndAfter with Sc
   }
 
   it("should remove TSPartitions correctly") {
-    val part = new TimeSeriesPartition(0, dataset2, partKeyAddrs(0), 0, bufferPool,
-                                       new TimeSeriesShardStats(dataset1.ref, 0))
+    val part = makePart(0, dataset2, partKeyAddrs(0), bufferPool)
     partSet += part
     partSet.size shouldEqual 1
 

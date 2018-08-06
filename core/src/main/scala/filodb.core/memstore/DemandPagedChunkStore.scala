@@ -71,15 +71,16 @@ extends RawToPartitionMaker with StrictLogging {
           timeOrderForChunkSet(ChunkSetInfo.getStartTime(infoBytes)).foreach { timeOrder =>
             val memFactory = memFactories(timeOrder)
             val chunkID = ChunkSetInfo.getChunkID(infoBytes)
-            if (!partition.hasChunksAt(chunkID)) {
+            val inserted = tsPart.addChunkInfoIfAbsent(chunkID, {
               tsShard.shardStats.chunkIdsPagedFromColStore.increment()
               memFactory.startMetaSpan()
               val chunkPtrs = copyToOffHeap(rawVectors, memFactory)
               val metaAddr = memFactory.endMetaSpan(writeMeta(_, tsPart.partID, infoBytes, chunkPtrs),
                                                     tsShard.dataset.blockMetaSize.toShort)
               require(metaAddr != 0)
-              tsPart.addChunkSet(metaAddr + 4)   // Important: don't point at partID
-            } else {
+              metaAddr + 4   // Important: don't point at partID
+            })
+            if (!inserted) {
               logger.info(s"Chunks not copied to ${partition.stringPartition}, already has chunk $chunkID.  " +
                 s"Chunk time range (${ChunkSetInfo.getStartTime(infoBytes)}, ${ChunkSetInfo.getEndTime(infoBytes)})" +
                 s" partition earliestTime=${partition.earliestTime}")
