@@ -1,5 +1,7 @@
 package filodb.memory.data
 
+import com.typesafe.scalalogging.StrictLogging
+
 import filodb.memory.BinaryRegion.NativePointer
 import filodb.memory.MemFactory
 import filodb.memory.format.UnsafeUtils
@@ -40,7 +42,7 @@ import filodb.memory.format.UnsafeUtils
  * The maximum number of elements that can be accommodated is 65535, but it's really designed for much smaller n.
  * This is because if the head is one less than the tail, that is interpreted as an empty Map.
  */
-object OffheapLFSortedIDMap {
+object OffheapLFSortedIDMap extends StrictLogging {
   val OffsetHead = 0    // Head is the highest keyed index/element number in the ring, -1 initially
   val OffsetTail = 2
   val OffsetCopyFlag = 4
@@ -52,6 +54,8 @@ object OffheapLFSortedIDMap {
   val MaxMaxElements = 65535   // Top/absolute limit on # of elements
 
   val IllegalStateResult = -1  // Returned from binarySearch when state changed underneath
+
+  val _logger = logger
 
   def bytesNeeded(maxElements: Int): Int = {
     require(maxElements <= MaxMaxElements)
@@ -555,7 +559,11 @@ class OffheapLFSortedIDMap(memFactory: MemFactory, holderKlass: Class[_ <: MapHo
       // NOTE: state has to be valid before the CAS, once the CAS is done another thread will try to read it
       // It is safe to write the state since we are only ones who know about the new mem region
       if (UnsafeUtils.unsafe.compareAndSwapLong(inst, mapPtrOffset, oldMapPtr, newMapPtr)) {
-        memFactory.freeMemory(oldMapPtr)
+        try {
+          memFactory.freeMemory(oldMapPtr)
+        } catch {
+          case e: Exception => _logger.error(s"Could not free old map pointer $oldMapPtr, probably harmless", e)
+        }
         true
       } else {
         // CAS of map pointer failed, free new map memory and try again.  Also unset copy flag?
