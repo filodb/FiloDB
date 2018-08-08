@@ -208,6 +208,7 @@ private[filodb] final class IngestionActor(dataset: Dataset,
           ingestionStream.teardown()
           recoveryTrace.addError(s"Recovery failed for shard $shard", ex)
           recoveryTrace.finish()
+          logger.error(s"Recovery failed for shard $shard", ex)
           handleError(dataset.ref, shard, ex)
       }
       fut

@@ -111,6 +111,9 @@ object GdeltTestData {
   val gdeltLines = Source.fromURL(getClass.getResource("/GDELT-sample-test.csv"))
                          .getLines.toSeq.drop(1)     // drop the header line
 
+  val gdeltLines3 = Source.fromURL(getClass.getResource("/GDELT-sample-test3.csv"))
+    .getLines.toSeq.drop(1)     // drop the header line
+
   val schema = Seq("GLOBALEVENTID:long",
                    "SQLDATE:long",
                    "MonthYear:int",
@@ -310,6 +313,9 @@ object MetricsTestData {
     final def getFloat(columnNo: Int): Float = ???
     final def getInt(columnNo: Int): Int = ???
     final def notNull(columnNo: Int): Boolean = true
+    final def getBlobBase(columnNo: Int): Any = ???
+    final def getBlobOffset(columnNo: Int): PartitionKey = ???
+    final def getBlobNumBytes(columnNo: Int): Int = ???
   }
 
 }

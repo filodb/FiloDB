@@ -23,6 +23,12 @@ trait RowReader {
   def getString(columnNo: Int): String
   def getAny(columnNo: Int): Any
 
+  def getBlobBase(columnNo: Int): Any
+  def getBlobOffset(columnNo: Int): Long
+  def getBlobNumBytes(columnNo: Int): Int
+
+//  def getUtf8MediumOffset(columnNo: Int): Long
+
   // Please override final def if your RowReader has a faster implementation
   def filoUTF8String(columnNo: Int): ZeroCopyUTF8String = getAny(columnNo) match {
     case s: String =>
@@ -110,6 +116,10 @@ final case class TupleRowReader(tuple: Product) extends RowReader {
 
   def getAny(columnNo: Int): Any =
     tuple.productElement(columnNo).asInstanceOf[Option[Any]].getOrElse(null)
+
+  override def getBlobBase(columnNo: Int): Any = ???
+  override def getBlobOffset(columnNo: Int): Long = ???
+  override def getBlobNumBytes(columnNo: Int): Int = ???
 }
 
 /**
@@ -136,6 +146,11 @@ final case class ArrayStringRowReader(strings: Array[String]) extends RowReader 
   }
 
   override def toString: String = s"ArrayStringRR(${strings.mkString(", ")})"
+
+  override def getBlobBase(columnNo: Int): Any = ???
+  override def getBlobOffset(columnNo: Int): Long = ???
+  override def getBlobNumBytes(columnNo: Int): Int = ???
+//  override def getUtf8MediumOffset(columnNo: Int): Long = ???
 }
 // scalastyle:off
 /**
@@ -157,6 +172,9 @@ trait RoutingReader extends RowReader {
   final def getFloat(columnNo: Int): Float     = origReader.getFloat(columnRoutes(columnNo))
   final def getString(columnNo: Int): String   = origReader.getString(columnRoutes(columnNo))
   final def getAny(columnNo: Int): Any         = origReader.getAny(columnRoutes(columnNo))
+  final def getBlobBase(columnNo: Int): Any = ???
+  final def getBlobOffset(columnNo: Int): Long = ???
+  final def getBlobNumBytes(columnNo: Int): Int = ???
 
   override def equals(other: Any): Boolean = other match {
     case RoutingRowReader(orig, _) => orig.equals(origReader)
@@ -184,6 +202,9 @@ final case class SingleValueRowReader(value: Any) extends RowReader {
   def getFloat(columnNo: Int): Float = value.asInstanceOf[Float]
   def getString(columnNo: Int): String = value.asInstanceOf[String]
   def getAny(columnNo: Int): Any = value
+  def getBlobBase(columnNo: Int): Any = value
+  def getBlobOffset(columnNo: Int): Long = 0
+  def getBlobNumBytes(columnNo: Int): Int = value.asInstanceOf[Array[Byte]].length
 }
 
 final case class SeqRowReader(sequence: Seq[Any]) extends RowReader {
@@ -195,6 +216,9 @@ final case class SeqRowReader(sequence: Seq[Any]) extends RowReader {
   def getFloat(columnNo: Int): Float = sequence(columnNo).asInstanceOf[Float]
   def getString(columnNo: Int): String = sequence(columnNo).asInstanceOf[String]
   def getAny(columnNo: Int): Any = sequence(columnNo)
+  def getBlobBase(columnNo: Int): Any = ???
+  def getBlobOffset(columnNo: Int): Long = ???
+  def getBlobNumBytes(columnNo: Int): Int = ???
 }
 
 final case class SchemaSeqRowReader(sequence: Seq[Any],
@@ -207,6 +231,9 @@ final case class SchemaSeqRowReader(sequence: Seq[Any],
   def getFloat(columnNo: Int): Float = sequence(columnNo).asInstanceOf[Float]
   def getString(columnNo: Int): String = sequence(columnNo).asInstanceOf[String]
   def getAny(columnNo: Int): Any = sequence(columnNo)
+  def getBlobBase(columnNo: Int): Any = sequence(columnNo).asInstanceOf[Array[Byte]]
+  def getBlobOffset(columnNo: Int): Long = 0
+  def getBlobNumBytes(columnNo: Int): Int = sequence(columnNo).asInstanceOf[Array[Byte]].length
 }
 
 object RowReader {

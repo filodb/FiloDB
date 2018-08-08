@@ -7,8 +7,8 @@ import scala.language.postfixOps
 import org.boon.primitive.ByteBuf
 import scalaxy.loops._
 
-import filodb.core.metadata.{Column, Dataset}
 import filodb.core.Types._
+import filodb.core.metadata.{Column, Dataset}
 import filodb.memory.format._
 import filodb.memory.format.RowReader.TypedFieldExtractor
 
@@ -104,6 +104,12 @@ extends ZeroCopyBinary with SchemaRowReader {
     }
     buf.toBytes
   }
+
+  override def getBlobBase(columnNo: ColumnId): Any = ???
+
+  override def getBlobOffset(columnNo: ColumnId): ChunkID = ???
+
+  override def getBlobNumBytes(columnNo: ColumnId): ColumnId = ???
 }
 
 class ArrayBinaryRecord(schema: RecordSchema, override val bytes: Array[Byte]) extends

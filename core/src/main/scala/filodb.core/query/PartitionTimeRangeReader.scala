@@ -3,16 +3,16 @@ package filodb.core.query
 import scalaxy.loops._
 
 import filodb.core.metadata.Dataset
-import filodb.core.store.{ChunkInfoIterator, ChunkSetInfo, FiloPartition}
+import filodb.core.store.{ChunkInfoIterator, ChunkSetInfo, ReadablePartition}
 import filodb.memory.format.{RowReader, TypedIterator, UnsafeUtils, ZeroCopyUTF8String}
 
 /**
- * A RowReader iterator which iterates over a time range in the FiloPartition.  Designed to be relatively memory
+ * A RowReader iterator which iterates over a time range in the ReadablePartition.  Designed to be relatively memory
  * efficient - thus no per-chunkset data structures.
  * One of these is instantiated for each separate query through each TSPartition.
  * NOTE: this reader assumes that you read consistently from every vector at every row. Or don't read that column.
  */
-final class PartitionTimeRangeReader(part: FiloPartition,
+final class PartitionTimeRangeReader(part: ReadablePartition,
                                      startTime: Long,
                                      endTime: Long,
                                      infos: ChunkInfoIterator,
@@ -36,6 +36,10 @@ final class PartitionTimeRangeReader(part: FiloPartition,
     def getAny(columnNo: Int): Any = ???
 
     override def filoUTF8String(columnNo: Int): ZeroCopyUTF8String = vectorIts(columnNo).asUTF8It.next
+
+    override def getBlobBase(columnNo: Int): Any = ???
+    override def getBlobOffset(columnNo: Int): Long = ???
+    override def getBlobNumBytes(columnNo: Int): Int = ???
   }
 
   private def populateIterators(info: ChunkSetInfo): Unit = {

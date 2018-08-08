@@ -5,7 +5,7 @@ import org.joda.time.DateTime
 import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.binaryrecord2.{MapItemConsumer, RecordBuilder, RecordContainer, RecordSchema}
 import filodb.core.metadata.Column.ColumnType._
-import filodb.core.store.{ChunkScanMethod, FiloPartition}
+import filodb.core.store.{ChunkScanMethod, ReadablePartition}
 import filodb.memory.{MemFactory, UTF8StringMedium}
 import filodb.memory.format.{RowReader, ZeroCopyUTF8String => UTF8Str}
 
@@ -100,7 +100,7 @@ trait RangeVector {
 }
 
 final case class RawDataRangeVector(key: RangeVectorKey,
-                                    partition: FiloPartition,
+                                    partition: ReadablePartition,
                                     chunkMethod: ChunkScanMethod,
                                     columnIDs: Array[Int]) extends RangeVector {
   // Iterators are stateful, for correct reuse make this a def

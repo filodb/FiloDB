@@ -24,6 +24,7 @@ class DemandPagedChunkStoreSpec extends FunSpec with Matchers with BeforeAndAfte
   // implicit override val patienceConfig = PatienceConfig(timeout = Span(2, Seconds), interval = Span(50, Millis))
 
   memStore.setup(dataset1, 0, TestData.storeConf)
+  memStore.bootstrapIndexForTesting(dataset1.ref)
   val onDemandPartMaker = memStore.getShardE(dataset1.ref, 0).partitionMaker
 
   after {
@@ -38,7 +39,7 @@ class DemandPagedChunkStoreSpec extends FunSpec with Matchers with BeforeAndAfte
     val initData = records(dataset1, linearMultiSeries(start).take(20))
     memStore.ingest(dataset1.ref, 0, initData)
 
-    memStore.asInstanceOf[TimeSeriesMemStore].commitIndexBlocking(dataset1.ref)
+    memStore.commitIndexForTesting(dataset1.ref)
     memStore.numPartitions(dataset1.ref, 0) shouldEqual 10
 
     val rawData = linearMultiSeries(start, timeStep=100000).drop(100).take(900)  // makes 9 chunks per partition?

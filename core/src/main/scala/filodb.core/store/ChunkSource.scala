@@ -74,12 +74,12 @@ trait ChunkSource extends RawChunkSource {
    *                  read back from persistent store.
    * @param partMethod which partitions to scan
    * @param chunkMethod which chunks within a partition to scan
-   * @return an Observable over FiloPartition
+   * @return an Observable over ReadablePartition
    */
   def scanPartitions(dataset: Dataset,
                      columnIDs: Seq[Types.ColumnId],
                      partMethod: PartitionScanMethod,
-                     chunkMethod: ChunkScanMethod = AllChunkScan): Observable[FiloPartition]
+                     chunkMethod: ChunkScanMethod = AllChunkScan): Observable[ReadablePartition]
 
   /**
    * Returns a stream of RangeVectors's.  Good for per-partition (or time series) processing.
@@ -110,10 +110,10 @@ trait ChunkSource extends RawChunkSource {
 final case class PartKeyTimeBucketSegment(segmentId: Int, segment: ByteBuffer)
 
 /**
- * Responsible for uploading RawPartDatas to offheap memory and creating a queryable FiloPartition
+ * Responsible for uploading RawPartDatas to offheap memory and creating a queryable ReadablePartition
  */
 trait RawToPartitionMaker {
-  def populateRawChunks(rawPartition: RawPartData): Task[FiloPartition]
+  def populateRawChunks(rawPartition: RawPartData): Task[ReadablePartition]
 }
 
 /**
@@ -132,7 +132,7 @@ trait DefaultChunkSource extends ChunkSource {
   def scanPartitions(dataset: Dataset,
                      columnIDs: Seq[Types.ColumnId],
                      partMethod: PartitionScanMethod,
-                     chunkMethod: ChunkScanMethod = AllChunkScan): Observable[FiloPartition] = {
+                     chunkMethod: ChunkScanMethod = AllChunkScan): Observable[ReadablePartition] = {
     readRawPartitions(dataset, columnIDs, partMethod, chunkMethod)
       // NOTE: this executes the partMaker single threaded.  Needed for now due to concurrency constraints.
       // In the future optimize this if needed.

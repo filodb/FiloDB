@@ -93,7 +93,7 @@ class QueryInMemoryBenchmark extends StrictLogging {
                                                       flushIndex=false) { case e: Exception => throw e })
                     }.countL.runAsync
   Await.result(ingestTask, 30.seconds)
-  cluster.memStore.asInstanceOf[TimeSeriesMemStore].commitIndexBlocking(dataset.ref) // commit lucene index
+  cluster.memStore.asInstanceOf[TimeSeriesMemStore].commitIndexForTesting(dataset.ref) // commit lucene index
   println(s"Ingestion ended")
 
   /**

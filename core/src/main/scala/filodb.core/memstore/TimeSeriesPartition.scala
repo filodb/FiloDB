@@ -54,7 +54,7 @@ class TimeSeriesPartition(val partID: Int,
                           var mapPtr: BinaryRegion.NativePointer,
                           // Shared class for accessing the infoMap / OffheapLFSortedIDMap given mapPtr above
                           offheapInfoMap: OffheapLFSortedIDMap)
-extends FiloPartition with MapHolder {
+extends ReadablePartition with MapHolder {
   import TimeSeriesPartition._
 
   def partKeyBase: Array[Byte] = UnsafeUtils.ZeroPointer.asInstanceOf[Array[Byte]]

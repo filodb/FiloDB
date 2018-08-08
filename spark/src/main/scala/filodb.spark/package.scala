@@ -51,6 +51,10 @@ package spark {
     def getFloat(columnNo: Int): Float = row.getFloat(columnNo)
     def getString(columnNo: Int): String = row.getString(columnNo)
     def getAny(columnNo: Int): Any = row.get(columnNo)
+
+    def getBlobBase(columnNo: Int): Any = ???
+    def getBlobOffset(columnNo: Int): Long = ???
+    def getBlobNumBytes(columnNo: Int): Int = ???
   }
 }
 

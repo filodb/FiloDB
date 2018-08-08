@@ -79,20 +79,25 @@ extends ColumnStore with CassandraChunkSource with StrictLogging {
     logger.info(s"Clearing all data for dataset ${dataset}")
     val chunkTable = getOrCreateChunkTable(dataset)
     val indexTable = getOrCreateIndexTable(dataset)
+    val partIndexTable = getOrCreatePartitionIndexTable(dataset)
     clusterMeta.checkSchemaAgreement()
     for { ctResp    <- chunkTable.clearAll()
-          rmtResp   <- indexTable.clearAll() } yield rmtResp
+          rmtResp   <- indexTable.clearAll()
+          pitResp   <- partIndexTable.clearAll() } yield rmtResp
   }
 
   def dropDataset(dataset: DatasetRef): Future[Response] = {
     val chunkTable = getOrCreateChunkTable(dataset)
     val indexTable = getOrCreateIndexTable(dataset)
+    val partIndexTable = getOrCreatePartitionIndexTable(dataset)
     clusterMeta.checkSchemaAgreement()
     for { ctResp    <- chunkTable.drop() if ctResp == Success
-          rmtResp   <- indexTable.drop() if rmtResp == Success }
+          rmtResp   <- indexTable.drop() if rmtResp == Success
+          pitResp   <- partIndexTable.drop() if rmtResp == Success }
     yield {
       chunkTableCache.remove(dataset)
       indexTableCache.remove(dataset)
+      partitionIndexTableCache.remove(dataset)
       rmtResp
     }
   }

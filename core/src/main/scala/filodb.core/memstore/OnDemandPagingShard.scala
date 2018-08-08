@@ -34,7 +34,7 @@ TimeSeriesShard(dataset, storeConfig, shardNum, rawStore, metastore, evictionPol
   // Definitely room for improvement, such as fetching multiple partitions at once, more parallelism, etc.
   override def scanPartitions(columnIDs: Seq[Types.ColumnId],
                               partMethod: PartitionScanMethod,
-                              chunkMethod: ChunkScanMethod = AllChunkScan): Observable[FiloPartition] = {
+                              chunkMethod: ChunkScanMethod = AllChunkScan): Observable[ReadablePartition] = {
     logger.debug(s"scanPartitions partMethod=$partMethod chunkMethod=$chunkMethod")
     // For now, always read every data column.
     // 1. We don't have a good way to update just some columns of a chunkset for ODP
@@ -68,7 +68,9 @@ TimeSeriesShard(dataset, storeConfig, shardNum, rawStore, metastore, evictionPol
       }
   }
 
-  def chunksToFetch(partition: FiloPartition, method: ChunkScanMethod, enabled: Boolean): Option[ChunkScanMethod] = {
+  def chunksToFetch(partition: ReadablePartition,
+                    method: ChunkScanMethod,
+                    enabled: Boolean): Option[ChunkScanMethod] = {
     if (enabled) {
       method match {
         // For now, allChunkScan will always load from disk.  This is almost never used, and without an index we have

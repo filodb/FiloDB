@@ -28,5 +28,8 @@ abstract class MutableFiloRowReader extends RowReader {
   override final def filoUTF8String(columnNo: Int): ZeroCopyUTF8String =
     reader(columnNo).asUTF8Reader.apply(vectAddr(columnNo), rowNo)
   final def getAny(columnNo: Int): Any = ???
+  def getBlobBase(columnNo: Int): Any = ???
+  def getBlobOffset(columnNo: Int): Long = ???
+  def getBlobNumBytes(columnNo: Int): Int = ???
 }
 

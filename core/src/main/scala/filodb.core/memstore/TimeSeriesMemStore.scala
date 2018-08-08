@@ -43,10 +43,20 @@ extends MemStore with StrictLogging {
   }
 
   /**
+    * WARNING: use only for testing.
+    */
+  def bootstrapIndexForTesting(dataset: DatasetRef): Unit =
+    datasets.get(dataset).foreach(_.values().asScala.foreach { s =>
+      s.onIndexBootstrapped()
+    })
+
+  /**
     * WARNING: use only for testing. Not performant
     */
-  def commitIndexBlocking(dataset: DatasetRef): Unit =
-    datasets.get(dataset).foreach(_.values().asScala.foreach(_.commitPartKeyIndexBlocking()))
+  def commitIndexForTesting(dataset: DatasetRef): Unit =
+    datasets.get(dataset).foreach(_.values().asScala.foreach { s =>
+      s.commitPartKeyIndexBlocking()
+    })
 
   /**
     * Retrieve shard for given dataset and shard number as an Option
@@ -76,9 +86,9 @@ extends MemStore with StrictLogging {
                    flushIndex: Boolean = true)
                   (errHandler: Throwable => Unit)
                   (implicit sched: Scheduler): CancelableFuture[Unit] = {
-    // start flushing index now that we have recovered
-    if (flushIndex) getShard(dataset, shardNum).map(_.startFlushingIndex())
-    ingestStream(dataset, shardNum, Observable.merge(stream, flushStream), diskTimeToLiveSeconds)(errHandler)
+    // first change the shard state to index-bootstrapped. Then start normal ingestion
+    val ingestCommands = Observable.now(IndexBootstrapped) ++ Observable.merge(stream, flushStream)
+    ingestStream(dataset, shardNum, ingestCommands, diskTimeToLiveSeconds)(errHandler)
   }
 
   // NOTE: Each ingestion message is a SomeData which has a RecordContainer, which can hold hundreds or thousands
@@ -92,18 +102,19 @@ extends MemStore with StrictLogging {
                   (implicit sched: Scheduler): CancelableFuture[Unit] = {
     val shard = getShardE(dataset, shardNum)
     combinedStream.map {
-                    case d: SomeData => shard.ingest(d)
-                                        None
+                    case d: SomeData =>       shard.ingest(d)
+                                              None
+                    case IndexBootstrapped => shard.onIndexBootstrapped()
+                                              None
                     // The write buffers for all partitions in a group are switched here, in line with ingestion
                     // stream.  This avoids concurrency issues and ensures that buffers for a group are switched
                     // at the same offset/watermark
                     case FlushCommand(group) => shard.switchGroupBuffers(group)
                                                 shard.checkAndEvictPartitions()
-                                                val firc = shard.prepareIndexTimeBucketForFlush(group)
-                                                Some(FlushGroup(shard.shardNum,
-                                                  group,
-                                                  shard.latestOffset,
-                                                  diskTimeToLiveSeconds, firc))
+                                                val flushTimeBucket = shard.prepareIndexTimeBucketForFlush(group)
+                                                Some(FlushGroup(shard.shardNum, group, shard.latestOffset,
+                                                                diskTimeToLiveSeconds, flushTimeBucket))
+                    case a: Any => throw new IllegalStateException(s"Unexpected DataOrCommand $a")
                   }.collect { case Some(flushGroup) => flushGroup }
                   .mapAsync(numParallelFlushes)(shard.createFlushTask _)
                   .foreach { x => }
@@ -120,12 +131,16 @@ extends MemStore with StrictLogging {
     val shard = getShardE(dataset, shardNum)
     shard.setGroupWatermarks(checkpoints)
     var targetOffset = checkpoints.values.min + reportingInterval
-    stream.map(shard.ingest(_))
-          .collect {
-            case offset if offset > targetOffset =>
-              targetOffset += reportingInterval
-              offset
-          }
+    val recoveryCmds: Observable[DataOrCommand] = Observable.merge(stream, shard.indexRecoveryStream)
+    recoveryCmds.map {
+      case ing: SomeData =>     shard.ingest(ing)
+      case ind: IndexData =>    shard.recoverIndex(ind); Long.MinValue
+      case a: Any => throw new IllegalStateException(s"Unexpected DataOrCommand $a")
+    }.collect { // deal with long only. ignore output of index recovery
+      case offset: Long if offset > targetOffset =>
+        targetOffset += reportingInterval
+        offset
+    }
   }
 
   def indexNames(dataset: DatasetRef): Iterator[(String, Int)] =
@@ -150,7 +165,7 @@ extends MemStore with StrictLogging {
   def scanPartitions(dataset: Dataset,
                      columnIDs: Seq[Types.ColumnId],
                      partMethod: PartitionScanMethod,
-                     chunkMethod: ChunkScanMethod = AllChunkScan): Observable[FiloPartition] =
+                     chunkMethod: ChunkScanMethod = AllChunkScan): Observable[ReadablePartition] =
     datasets(dataset.ref).get(partMethod.shard).scanPartitions(columnIDs, partMethod, chunkMethod)
 
   def numRowsIngested(dataset: DatasetRef, shard: Int): Long =

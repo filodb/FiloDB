@@ -1,9 +1,35 @@
 package filodb.core.store
 
+import filodb.core.Types.{ChunkID, ColumnId}
 import filodb.core.metadata.Dataset
 import filodb.core.query.PartitionTimeRangeReader
-import filodb.core.Types.{ChunkID, ColumnId}
 import filodb.memory.format.{BinaryVector, RowReader, UnsafeUtils, VectorDataReader}
+
+
+trait FiloPartition {
+  def dataset: Dataset
+  def partKeyBase: Array[Byte]
+  def partKeyOffset: Long
+  def partID: Int
+
+  /**
+    * Two FiloPartitions are equal if they have the same partition key.  This test is used in various
+    * data structures.
+    */
+  override def hashCode: Int = dataset.partKeySchema.partitionHash(partKeyBase, partKeyOffset)
+
+  override def equals(other: Any): Boolean = other match {
+    case UnsafeUtils.ZeroPointer => false
+    case f: FiloPartition => dataset.partKeySchema.equals(partKeyBase, partKeyOffset, f.partKeyBase, f.partKeyOffset)
+    case _: Any           => false
+  }
+
+}
+
+class EmptyPartition(val dataset: Dataset,
+                     val partKeyBase: Array[Byte],
+                     val partKeyOffset: Long,
+                     val partID: Int) extends FiloPartition
 
 /**
  * An abstraction for a single partition of data, from which chunk pointers or rows can be read.
@@ -11,10 +37,7 @@ import filodb.memory.format.{BinaryVector, RowReader, UnsafeUtils, VectorDataRea
  * Optimized for low heap usage since there are millions of these.  Avoid adding any new fields unless the CPU
  * tradeoff calls for it.
  */
-trait FiloPartition {
-  def dataset: Dataset
-  def partKeyBase: Array[Byte]
-  def partKeyOffset: Long
+trait ReadablePartition extends FiloPartition {
 
   // Returns string representation of partition key
   def stringPartition: String = dataset.partKeySchema.stringify(partKeyBase, partKeyOffset)
@@ -88,15 +111,4 @@ trait FiloPartition {
   final def timeRangeRows(method: ChunkScanMethod, columnIDs: Array[ColumnId]): Iterator[RowReader] =
     new PartitionTimeRangeReader(this, method.startTime, method.endTime, infos(method), columnIDs)
 
-  /**
-   * Two FiloPartitions are equal if they have the same partition key.  This test is used in various
-   * data structures.
-   */
-  override def hashCode: Int = dataset.partKeySchema.partitionHash(partKeyBase, partKeyOffset)
-
-  override def equals(other: Any): Boolean = other match {
-    case UnsafeUtils.ZeroPointer => false
-    case f: FiloPartition => dataset.partKeySchema.equals(partKeyBase, partKeyOffset, f.partKeyBase, f.partKeyOffset)
-    case o: Any           => false
-  }
 }

@@ -48,7 +48,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
   private val host = InetAddress.getLocalHost.getHostAddress
   private val selfAddress = AddressFromURIString(s"akka.tcp://${system.name}@$host:2552")
   private val cluster = FilodbCluster(system)
-  private lazy val memStore = cluster.memStore
+  private lazy val memStore = cluster.memStore.asInstanceOf[TimeSeriesMemStore]
   private lazy val metaStore = cluster.metaStore
 
   implicit val ec = cluster.ec
@@ -133,6 +133,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       probe.expectMsg(DatasetCreated)
 
       startIngestion(MachineMetricsData.dataset1, numShards)
+      Thread.sleep(1000) // wait for Lucene index flush to happen correctly.  Wish there was a listener for this
       dataset1.ref
     }
 
@@ -151,7 +152,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       probe.send(coordinatorActor, IngestRows(ref, 0, records(dataset1, multiSeriesData().take(20))))
       probe.expectMsg(Ack(0L))
 
-      memStore.asInstanceOf[TimeSeriesMemStore].commitIndexBlocking(dataset1.ref)
+      memStore.commitIndexForTesting(dataset1.ref)
 
       // Query existing partition: Series 1
       val q1 = LogicalPlan2Query(ref, RawSeries(AllChunksSelector, filters("series" -> "Series 1"), Seq("min")), qOpt)
@@ -204,7 +205,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       probe.send(coordinatorActor, IngestRows(ref, 0, records(dataset1, linearMultiSeries().take(40))))
       probe.expectMsg(Ack(0L))
 
-      memStore.asInstanceOf[TimeSeriesMemStore].commitIndexBlocking(dataset1.ref)
+      memStore.commitIndexForTesting(dataset1.ref)
 
       // Try a filtered partition query
       val series2 = (2 to 4).map(n => s"Series $n").toSet.asInstanceOf[Set[Any]]
@@ -245,7 +246,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       probe.send(coordinatorActor, IngestRows(ref, 1, records(dataset1, linearMultiSeries(130000L).take(20))))
       probe.expectMsg(Ack(0L))
 
-      memStore.asInstanceOf[TimeSeriesMemStore].commitIndexBlocking(dataset1.ref)
+      memStore.commitIndexForTesting(dataset1.ref)
 
       // Should return results from both shards
       // shard 1 - timestamps 110000 -< 130000;  shard 2 - timestamps 130000 <- 1400000
@@ -274,7 +275,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       probe.send(coordinatorActor, IngestRows(ref, 1, records(dataset1, linearMultiSeries(130000L).take(20))))
       probe.expectMsg(Ack(0L))
 
-      memStore.asInstanceOf[TimeSeriesMemStore].commitIndexBlocking(dataset1.ref)
+      memStore.commitIndexForTesting(dataset1.ref)
 
       val queryOpt = QueryOptions(shardOverrides = Some(Seq(0, 1)))
       val series2 = (2 to 4).map(n => s"Series $n")
@@ -302,7 +303,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       probe.send(coordinatorActor, IngestRows(ref, 0, records(dataset1, linearMultiSeries().take(30))))
       probe.expectMsg(Ack(0L))
 
-      memStore.asInstanceOf[TimeSeriesMemStore].commitIndexBlocking(dataset1.ref)
+      memStore.commitIndexForTesting(dataset1.ref)
 
       probe.send(coordinatorActor, GetIndexNames(ref))
       probe.expectMsg(Seq("series"))
@@ -316,7 +317,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       probe.send(coordinatorActor, IngestRows(ref, 0, records(dataset1, linearMultiSeries().take(30))))
       probe.expectMsg(Ack(0L))
 
-      memStore.asInstanceOf[TimeSeriesMemStore].commitIndexBlocking(dataset1.ref)
+      memStore.commitIndexForTesting(dataset1.ref)
 
       probe.send(coordinatorActor, GetIndexNames(ref))
       probe.expectMsg(Seq("series"))

@@ -20,6 +20,8 @@ final case class ShardAlreadySetup(dataset: DatasetRef, shard: Int) extends
 sealed trait DataOrCommand
 // Typically one RecordContainer is a single Kafka message, a container with multiple BinaryRecords
 final case class SomeData(records: RecordContainer, offset: Long) extends DataOrCommand
+final case class IndexData(timeBucket: Int, segment: Int, records: RecordContainer) extends DataOrCommand
+final case object IndexBootstrapped extends DataOrCommand
 final case class FlushCommand(groupNum: Int) extends DataOrCommand
 final case class FlushIndexTimeBuckets(partIdsToPersist: EWAHCompressedBitmap, timeBucket: Int)
 

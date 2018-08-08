@@ -10,9 +10,12 @@ import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{Millis, Seconds, Span}
 
 import filodb.core._
+import filodb.core.binaryrecord2.{RecordBuilder, RecordContainer}
+import filodb.core.memstore.TimeSeriesShard.{indexTimeBucketSchema, indexTimeBucketSegmentSize}
 import filodb.core.query.{ColumnFilter, Filter}
 import filodb.core.store.{FilteredPartitionScan, InMemoryMetaStore, NullColumnStore, SinglePartitionScan}
-import filodb.memory.format.ZeroCopyUTF8String
+import filodb.memory.{BinaryRegionLarge, MemFactory}
+import filodb.memory.format.{ArrayStringRowReader, UnsafeUtils, ZeroCopyUTF8String}
 
 class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter with ScalaFutures {
   import monix.execution.Scheduler.Implicits.global
@@ -26,6 +29,8 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
   implicit override val patienceConfig = PatienceConfig(timeout = Span(2, Seconds), interval = Span(50, Millis))
 
   after {
+    // clear the highest time bucket from test runs
+    memStore.metastore.writeHighestIndexTimeBucket(dataset1.ref, 0, -1).futureValue
     memStore.reset()
     memStore.metastore.clearAllData()
   }
@@ -35,9 +40,10 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     memStore.setup(dataset1, 0, TestData.storeConf)
     val rawData = multiSeriesData().take(20)
     val data = records(dataset1, rawData)   // 2 records per series x 10 series
+    memStore.bootstrapIndexForTesting(dataset1.ref)
     memStore.ingest(dataset1.ref, 0, data)
 
-    memStore.asInstanceOf[TimeSeriesMemStore].commitIndexBlocking(dataset1.ref)
+    memStore.asInstanceOf[TimeSeriesMemStore].commitIndexForTesting(dataset1.ref)
     memStore.numPartitions(dataset1.ref, 0) shouldEqual 10
     memStore.indexNames(dataset1.ref).toSeq should equal (Seq(("series", 0)))
     memStore.latestOffset(dataset1.ref, 0) shouldEqual 0
@@ -57,6 +63,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
   it("should ingest into multiple series and query across partitions") {
     memStore.setup(dataset1, 1, TestData.storeConf)
     val data = records(dataset1, linearMultiSeries().take(20))   // 2 records per series x 10 series
+    memStore.bootstrapIndexForTesting(dataset1.ref)
     memStore.ingest(dataset1.ref, 1, data)
 
     // NOTE: ingesting into wrong shard should give an error
@@ -72,9 +79,10 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
   it("should ingest map/tags column as partition key and aggregate") {
     memStore.setup(dataset2, 0, TestData.storeConf)
     val data = records(dataset2, withMap(linearMultiSeries().take(20)))   // 2 records per series x 10 series
+    memStore.bootstrapIndexForTesting(dataset2.ref)
     memStore.ingest(dataset2.ref, 0, data)
 
-    memStore.asInstanceOf[TimeSeriesMemStore].commitIndexBlocking(dataset1.ref)
+    memStore.asInstanceOf[TimeSeriesMemStore].commitIndexForTesting(dataset2.ref)
     val split = memStore.getScanSplits(dataset2.ref, 1).head
     val filter = ColumnFilter("n", Filter.Equals("2".utf8))
     val agg1 = memStore.scanRows(dataset2, Seq(1), FilteredPartitionScan(split, Seq(filter))).map(_.getDouble(0)).sum
@@ -91,6 +99,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
   it("should ingest into multiple series and be able to query on one partition in real time") {
     memStore.setup(dataset1, 0, TestData.storeConf)
     val data = multiSeriesData().take(20)     // 2 records per series x 10 series
+    memStore.bootstrapIndexForTesting(dataset2.ref)
     memStore.ingest(dataset1.ref, 0, records(dataset1, data))
 
     val minSeries0 = data(0)(1).asInstanceOf[Double]
@@ -107,9 +116,10 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
   it("should query on multiple partitions using filters") {
     memStore.setup(dataset1, 0, TestData.storeConf)
     val data = records(dataset1, linearMultiSeries().take(20))   // 2 records per series x 10 series
+    memStore.bootstrapIndexForTesting(dataset1.ref)
     memStore.ingest(dataset1.ref, 0, data)
+    memStore.commitIndexForTesting(dataset1.ref)
 
-    memStore.asInstanceOf[TimeSeriesMemStore].commitIndexBlocking(dataset1.ref)
     val filter =  ColumnFilter("series", Filter.Equals("Series 1".utf8))
     val split = memStore.getScanSplits(dataset1.ref, 1).head
     val q2 = memStore.scanRows(dataset1, Seq(1), FilteredPartitionScan(split, Seq(filter)))
@@ -119,12 +129,12 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
   it("should ingest into multiple shards, getScanSplits, query, get index info from shards") {
     memStore.setup(dataset2, 0, TestData.storeConf)
     memStore.setup(dataset2, 1, TestData.storeConf)
+    memStore.bootstrapIndexForTesting(dataset1.ref)
     val data = records(dataset2, withMap(linearMultiSeries()).take(20))   // 2 records per series x 10 series
     memStore.ingest(dataset2.ref, 0, data)
     val data2 = records(dataset2, withMap(linearMultiSeries(200000L, 6), 6).take(20))   // 5 series only
     memStore.ingest(dataset2.ref, 1, data2)
-
-    memStore.asInstanceOf[TimeSeriesMemStore].commitIndexBlocking(dataset1.ref)
+    memStore.commitIndexForTesting(dataset2.ref)
 
     memStore.activeShards(dataset1.ref) should equal (Seq(0, 1))
     memStore.numRowsIngested(dataset1.ref, 0) should equal (20L)
@@ -213,10 +223,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
                                                         flushInterval = 10.minutes))
     val initTimeBuckets = timebucketsWritten
     val tsShard = memStore.asInstanceOf[TimeSeriesMemStore].getShard(dataset1.ref, 0).get
-    val latestTimeBucket = memStore.metastore.readHighestIndexTimeBucket(dataset1.ref, 0).futureValue.getOrElse(0)
-    val timeBucketsToRetain = Math.ceil(1.hour / 10.minutes).toInt
-    val earliestBucket = Math.max(0, latestTimeBucket - timeBucketsToRetain)
-    tsShard.timeBucketToPartIds.keySet shouldEqual earliestBucket.to(latestTimeBucket).toSet
+    tsShard.timeBucketToPartIds.keySet shouldEqual Set(0)
 
     val stream = Observable.fromIterable(groupedRecords(dataset1, linearMultiSeries(), n = 500, groupSize = 10))
       .executeWithModel(BatchedExecution(5)) // results in 200 records
@@ -228,6 +235,36 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
 
     // 1 hour retention period / 10 minutes flush interval = 6 time buckets to be retained
     tsShard.timeBucketToPartIds.keySet.toSeq.sorted shouldEqual 19.to(25) // 6 buckets retained + one for current
+  }
+
+  it("should recover index from time buckets") {
+    import GdeltTestData._
+    memStore.setup(dataset1, 0, TestData.storeConf.copy(groupsPerShard = 2, demandPagedRetentionPeriod = 1.hour,
+      flushInterval = 10.minutes))
+    val tsShard = memStore.asInstanceOf[TimeSeriesMemStore].getShard(dataset1.ref, 0).get
+    val timeBucketRb = new RecordBuilder(MemFactory.onHeapFactory, indexTimeBucketSchema, indexTimeBucketSegmentSize)
+
+    val readers = gdeltLines3.map { line => ArrayStringRowReader(line.split(",")) }
+    val partKeys = partKeyFromRecords(dataset1, records(dataset1, readers.take(10)))
+
+    partKeys.zipWithIndex.foreach { case (off, i) =>
+      timeBucketRb.startNewRecord()
+      timeBucketRb.addLong(i + 10)
+      timeBucketRb.addLong(i + 20)
+      val numBytes = BinaryRegionLarge.numBytes(UnsafeUtils.ZeroPointer, off)
+      timeBucketRb.addBlob(UnsafeUtils.ZeroPointer, off, numBytes + 4)
+      timeBucketRb.endRecord(false)
+    }
+
+    timeBucketRb.optimalContainerBytes(true).foreach { bytes =>
+      tsShard.recoverIndex(new IndexData(1, 0, RecordContainer(bytes)))
+    }
+    tsShard.commitPartKeyIndexBlocking()
+    partKeys.zipWithIndex.foreach { case (off, i) =>
+      val readPartKey = tsShard.partKeyIndex.partKeyFromPartId(i).get
+      val expectedPartKey = dataset1.partKeySchema.asByteArray(UnsafeUtils.ZeroPointer, off)
+      readPartKey.bytes.drop(readPartKey.offset).take(readPartKey.length) shouldEqual expectedPartKey
+    }
   }
 
   import Iterators._
@@ -260,10 +297,11 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
 
   it("should truncate shards properly") {
     memStore.setup(dataset1, 0, TestData.storeConf)
+    memStore.bootstrapIndexForTesting(dataset1.ref)
     val data = records(dataset1, multiSeriesData().take(20))   // 2 records per series x 10 series
     memStore.ingest(dataset1.ref, 0, data)
 
-    memStore.asInstanceOf[TimeSeriesMemStore].commitIndexBlocking(dataset1.ref)
+    memStore.commitIndexForTesting(dataset1.ref)
     memStore.numPartitions(dataset1.ref, 0) shouldEqual 10
     memStore.indexNames(dataset1.ref).toSeq should equal (Seq(("series", 0)))
 
@@ -277,12 +315,13 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
 
   it("should be able to evict partitions properly, flush, and still query") {
     memStore.setup(dataset1, 0, TestData.storeConf)
+    memStore.bootstrapIndexForTesting(dataset1.ref)
 
     // Ingest normal multi series data with 10 partitions.  Should have 10 partitions.
     val data = records(dataset1, linearMultiSeries().take(10))
     memStore.ingest(dataset1.ref, 0, data)
 
-    memStore.asInstanceOf[TimeSeriesMemStore].commitIndexBlocking(dataset1.ref)
+    memStore.commitIndexForTesting(dataset1.ref)
 
     memStore.numPartitions(dataset1.ref, 0) shouldEqual 10
     memStore.indexValues(dataset1.ref, 0, "series").toSeq should have length (10)

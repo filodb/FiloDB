@@ -46,6 +46,9 @@ final class TransientRow(var timestamp: Long, var value: Double) extends Mutable
   def getString(columnNo: Int): String = throw new IllegalArgumentException()
   def getAny(columnNo: Int): Any = throw new IllegalArgumentException()
 
+  def getBlobBase(columnNo: Int): Any = throw new IllegalArgumentException()
+  def getBlobOffset(columnNo: Int): Long = throw new IllegalArgumentException()
+  def getBlobNumBytes(columnNo: Int): Int = throw new IllegalArgumentException()
 }
 
 final class AvgAggTransientRow extends MutableRowReader {
@@ -75,6 +78,9 @@ final class AvgAggTransientRow extends MutableRowReader {
   def getFloat(columnNo: Int): Float = throw new IllegalArgumentException()
   def getString(columnNo: Int): String = throw new IllegalArgumentException()
   def getAny(columnNo: Int): Any = throw new IllegalArgumentException()
+  def getBlobBase(columnNo: Int): Any = throw new IllegalArgumentException()
+  def getBlobOffset(columnNo: Int): Long = throw new IllegalArgumentException()
+  def getBlobNumBytes(columnNo: Int): Int = throw new IllegalArgumentException()
 }
 
 final class TopBottomKAggTransientRow(val k: Int) extends MutableRowReader {
@@ -104,4 +110,7 @@ final class TopBottomKAggTransientRow(val k: Int) extends MutableRowReader {
     else if (columnNo % 2 == 1) partKeys((columnNo-1)/2)
     else values((columnNo-1)/2)
   }
+  def getBlobBase(columnNo: Int): Any = throw new IllegalArgumentException()
+  def getBlobOffset(columnNo: Int): Long = throw new IllegalArgumentException()
+  def getBlobNumBytes(columnNo: Int): Int = throw new IllegalArgumentException()
 }

@@ -26,7 +26,7 @@ import filodb.core.metadata.Dataset
 import filodb.core.query.{ColumnFilter, Filter}
 import filodb.core.query.Filter._
 import filodb.core.store.StoreConfig
-import filodb.memory.{BinaryRegionLarge, UTF8StringMedium}
+import filodb.memory.UTF8StringMedium
 import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String => UTF8Str}
 
 object PartKeyLuceneIndex {
@@ -81,7 +81,7 @@ class PartKeyLuceneIndex(dataset: Dataset, shardNum: Int, storeConfig: StoreConf
                                                            UTF8StringMedium.numBytes(keyBase, keyOffset)),
                                                _.toString)
       val value = new BytesRef(valueBase.asInstanceOf[Array[Byte]],
-        (valueOffset + 2).toInt - UnsafeUtils.arayOffset,//valueOffset is relative to arrayOffset
+        (valueOffset + 2).toInt - UnsafeUtils.arayOffset, //valueOffset is relative to arrayOffset
         UTF8StringMedium.numBytes(valueBase, valueOffset))
       addIndexEntry(key, value, index)
     }
@@ -134,7 +134,9 @@ class PartKeyLuceneIndex(dataset: Dataset, shardNum: Int, storeConfig: StoreConf
 
   def indexRamBytes: Long = indexWriter.ramBytesUsed()
 
-  def indexNumEntries: Long = indexWriter.maxDoc()
+  def indexNumEntries: Long = indexWriter.numDocs() // excludes tombstones if called after flush
+
+  def indexNumEntriesWithTombstones: Long = indexWriter.maxDoc() // includes tombstones if called after flush
 
   def closeIndex(): Unit = {
     flushThread.close()
@@ -183,24 +185,44 @@ class PartKeyLuceneIndex(dataset: Dataset, shardNum: Int, storeConfig: StoreConf
     luceneDocument.get().add(new StringField(labelName, value, Store.NO))
   }
 
-  def addPartKey(base: Any, offset: Long, partId: Int, startTime: Long): Unit = {
-    val document = makeDocument(base, offset, partId, startTime, Long.MaxValue)
-    logger.debug(s"Adding document for partId $partId : $document")
+  def addPartKey(partKeyOnHeapBytes: Array[Byte],
+                 partId: Int,
+                 startTime: Long,
+                 endTime: Long = Long.MaxValue,
+                 partKeyBytesRefOffset: Int = 0)
+                (partKeyNumBytes: Int = partKeyOnHeapBytes.length): Unit = {
+    val document = makeDocument(partKeyOnHeapBytes, partKeyBytesRefOffset, partKeyNumBytes, partId, startTime, endTime)
+    logger.debug(s"Adding document in shard=$shardNum for partId $partId with startTime=$startTime endTime=$endTime")
     indexWriter.addDocument(document)
   }
 
-  private def makeDocument(base: Any, offset: Long, partId: Int, startTime: Long, endTime: Long): Document = {
+  def upsertPartKey(partKeyOnHeapBytes: Array[Byte],
+                 partId: Int,
+                 startTime: Long,
+                 endTime: Long = Long.MaxValue,
+                 partKeyBytesRefOffset: Int = 0)
+                (partKeyNumBytes: Int = partKeyOnHeapBytes.length): Unit = {
+    indexWriter.deleteDocuments(IntPoint.newExactQuery(PART_ID, partId))
+    val document = makeDocument(partKeyOnHeapBytes, partKeyBytesRefOffset, partKeyNumBytes, partId, startTime, endTime)
+    logger.debug(s"Upserting document in shard=$shardNum for partId $partId with startTime=$startTime endTime=$endTime")
+    indexWriter.addDocument(document)
+  }
+
+  private def makeDocument(partKeyOnHeapBytes: Array[Byte],
+                           partKeyBytesRefOffset: Int,
+                           partKeyNumBytes: Int,
+                           partId: Int, startTime: Long, endTime: Long): Document = {
     val document = new Document()
     luceneDocument.set(document) // threadlocal since we are not able to pass the document into mapconsumer
-    val partKeyOnHeapBytes = BinaryRegionLarge.asNewByteArray(base, offset)
     for { i <- 0 until numPartColumns optimized } {
-      indexers(i).fromPartKey(partKeyOnHeapBytes, UnsafeUtils.arayOffset, partId)
+      indexers(i).fromPartKey(partKeyOnHeapBytes, partKeyBytesRefOffset + UnsafeUtils.arayOffset, partId)
     }
     // partId
     document.add(new IntPoint(PART_ID, partId))
     document.add(new NumericDocValuesField(PART_ID, partId))
     // partKey
-    document.add(new BinaryDocValuesField(PART_KEY, new BytesRef(partKeyOnHeapBytes)))
+    val bytesRef = new BytesRef(partKeyOnHeapBytes, partKeyBytesRefOffset, partKeyNumBytes)
+    document.add(new BinaryDocValuesField(PART_KEY, bytesRef))
     // startTime
     document.add(new LongPoint(START_TIME, startTime))
     document.add(new NumericDocValuesField(START_TIME, startTime))
@@ -209,7 +231,6 @@ class PartKeyLuceneIndex(dataset: Dataset, shardNum: Int, storeConfig: StoreConf
     document.add(new NumericDocValuesField(END_TIME, endTime))
 
     luceneDocument.remove()
-
     document
   }
 
@@ -217,10 +238,10 @@ class PartKeyLuceneIndex(dataset: Dataset, shardNum: Int, storeConfig: StoreConf
     * Called when TSPartition needs to be created when on-demand-paging from a
     * partId that does not exist on heap
     */
-  def partKeyFromPartId(partId: Int): BytesRef = {
+  def partKeyFromPartId(partId: Int): Option[BytesRef] = {
     val collector = new SinglePartKeyCollector()
     searcherManager.acquire().search(IntPoint.newExactQuery(PART_ID, partId), collector)
-    collector.singleResult
+    Option(collector.singleResult)
   }
 
   /**
@@ -244,20 +265,29 @@ class PartKeyLuceneIndex(dataset: Dataset, shardNum: Int, storeConfig: StoreConf
     coll.topKPartIds()
   }
 
-  def updatePartKeyWithEndTime(base: Any, offset: Long, partId: Int, endTime: Long): Unit = {
-    val startTime = startTimeFromPartId(partId) // look up index for old start time
-    if (startTime == NOT_FOUND)
-      throw new IllegalArgumentException(s"Could not find startTime for partId $partId in lucene")
+  def updatePartKeyWithEndTime(partKeyOnHeapBytes: Array[Byte],
+                               partId: Int,
+                               endTime: Long = Long.MaxValue,
+                               partKeyBytesRefOffset: Int = 0)
+                               (partKeyNumBytes: Int = partKeyOnHeapBytes.length): Unit = {
+    var startTime = startTimeFromPartId(partId) // look up index for old start time
+    if (startTime == NOT_FOUND) {
+      startTime = System.currentTimeMillis() - storeConfig.demandPagedRetentionPeriod.toMillis
+      logger.warn(s"Could not find in Lucene startTime for partId $partId. Using $startTime instead.",
+        new IllegalStateException()) // assume this time series started retention period ago
+    }
     // updateDocument takes a Term query which is not possible on IntPoint partIds
     // hence delete and add explicitly.
     indexWriter.deleteDocuments(IntPoint.newExactQuery(PART_ID, partId))
-    val updatedDoc = makeDocument(base, offset, partId, startTime, endTime)
-    logger.debug(s"Updating document for partId $partId : $updatedDoc")
+    val updatedDoc = makeDocument(partKeyOnHeapBytes, partKeyBytesRefOffset, partKeyNumBytes,
+                                  partId, startTime, endTime)
+    logger.debug(s"Updating document in shard=$shardNum for partId $partId " +
+      s"with startTime=$startTime and endTime=$endTime")
     indexWriter.addDocument(updatedDoc)
   }
 
   /**
-    * Explicit commit of index to disk - to be used for testing only.
+    * Explicit commit of index to disk - to be used carefully.
     * @return
     */
   private[memstore] def commitBlocking() = {

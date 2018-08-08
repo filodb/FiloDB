@@ -118,6 +118,13 @@ final class RecordSchema(val columnTypes: Seq[Column.ColumnType],
     UTF8StringMedium.numBytes(base, offset + UnsafeUtils.getInt(base, offset + offsets(index)))
 
   /**
+    * Used for extracting the offset for a UTF8StringMedium.
+    * Note that blobOffset method is for the offset to the actual blob bytes, not including length header.
+    */
+  def utf8StringOffset(base: Any, offset: Long, index: Int): Long =
+    offset + UnsafeUtils.getInt(base, offset + offsets(index))
+
+  /**
    * COPIES the BinaryRecord field # index out as a new Java String on the heap.  Allocation + copying cost.
    */
   def asJavaString(base: Any, offset: Long, index: Int): String =
@@ -335,4 +342,9 @@ final class BinaryRecordRowReader(schema: RecordSchema,
   def getString(columnNo: Int): String = ???
   def getAny(columnNo: Int): Any = schema.columnTypes(columnNo).keyType.extractor.getField(this, columnNo)
   override def filoUTF8String(i: Int): ZeroCopyUTF8String = schema.asZCUTF8Str(recordBase, recordOffset, i)
+
+  def getBlobBase(columnNo: Int): Any = schema.blobBase(recordBase, recordOffset, columnNo)
+  def getBlobOffset(columnNo: Int): Long = schema.blobOffset(recordBase, recordOffset, columnNo)
+  def getBlobNumBytes(columnNo: Int): Int = schema.blobNumBytes(recordBase, recordOffset, columnNo)
+//  def getUtf8MediumOffset(columnNo: Int): Long = schema.utf8StringOffset(recordBase, recordOffset, columnNo)
 }
