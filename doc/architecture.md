@@ -6,6 +6,7 @@
   - [Sharding](#sharding)
 - [Core](#core)
   - [Ingestion Flow](#ingestion-flow)
+- [Memory](#memory)
 - [Cassandra](#cassandra)
 - [Kafka](#kafka)
 - [Spark](#spark)

@@ -11,6 +11,9 @@ import com.typesafe.scalalogging.StrictLogging
 import filodb.memory.BinaryRegion.Memory
 import filodb.memory.format.UnsafeUtils
 
+final case class OutOfOffheapMemoryException(needed: Long, have: Long) extends
+  Exception(s"Out of offheap memory: Need $needed but only have $have bytes")
+
 /**
   * A trait which allows allocation of memory with the Filo magic header
   */
@@ -86,9 +89,7 @@ class NativeMemoryManager(val upperBoundSizeInBytes: Long) extends MemFactory {
       sizeMapping(address) = size
       address
     } else {
-      val msg = s"Resultant memory size $resultantSize after allocating " +
-        s"with requested size $size is greater than upper bound size $upperBoundSizeInBytes"
-      throw new IndexOutOfBoundsException(msg)
+      throw OutOfOffheapMemoryException(size, availableDynMemory)
     }
   }
 

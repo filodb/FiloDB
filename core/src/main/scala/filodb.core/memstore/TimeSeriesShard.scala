@@ -1,7 +1,6 @@
 package filodb.core.memstore
 
 import scala.collection.mutable
-import scala.collection.mutable.HashMap
 import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.concurrent.duration._
 import scala.util.Random
@@ -11,8 +10,10 @@ import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
 import kamon.metric.MeasurementUnit
 import monix.eval.Task
+import monix.execution.atomic.AtomicBoolean
 import monix.execution.Scheduler
 import monix.reactive.Observable
+import org.jctools.maps.NonBlockingHashMapLong
 import scalaxy.loops._
 
 import filodb.core.{ErrorResponse, _}
@@ -22,7 +23,7 @@ import filodb.core.metadata.Dataset
 import filodb.core.store._
 import filodb.memory._
 import filodb.memory.data.OffheapLFSortedIDMap
-import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String => UTF8Str}
+import filodb.memory.format.{RowReader, UnsafeUtils, ZeroCopyUTF8String => UTF8Str}
 import filodb.memory.format.BinaryVector.BinaryVectorPtr
 
 
@@ -31,6 +32,7 @@ class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
 
   val rowsIngested = Kamon.counter("memstore-rows-ingested").refine(tags)
   val partitionsCreated = Kamon.counter("memstore-partitions-created").refine(tags)
+  val dataDropped = Kamon.counter("memstore-data-dropped").refine(tags)
   val rowsSkipped  = Kamon.counter("recovery-row-skipped").refine(tags)
   val rowsPerContainer = Kamon.histogram("num-samples-per-container")
   val numSamplesEncoded = Kamon.counter("memstore-samples-encoded").refine(tags)
@@ -103,6 +105,14 @@ object TimeSeriesShard {
   // TODO make configurable if necessary
   val indexTimeBucketTtlPaddingSeconds = 24.hours.toSeconds.toInt
   val indexTimeBucketSegmentSize = 1024 * 1024 // 1MB
+
+  // Initial size of partitionSet and partition map structures.  Make large enough to avoid too many resizes.
+  val InitialNumPartitions = 128 * 1024
+
+  // Not a real partition, just a special marker for "out of memory"
+  val OutOfMemPartition = UnsafeUtils.ZeroPointer.asInstanceOf[TimeSeriesPartition]
+
+  val EmptyBitmap = new EWAHCompressedBitmap()
 }
 
 // scalastyle:off number.of.methods
@@ -134,11 +144,9 @@ class TimeSeriesShard(val dataset: Dataset,
   val shardStats = new TimeSeriesShardStats(dataset.ref, shardNum)
 
   /**
-    * List of all partitions in the shard stored in memory, indexed by partition ID
-    * TODO: We set accessOrder so that we can iterate in reverse order (least accessed first)
-    *       This breaks a bunch of tests.  So do this later.
+    * Map of all partitions in the shard stored in memory, indexed by partition ID
     */
-  private final val partitions = new java.util.LinkedHashMap[Int, TimeSeriesPartition] // (50000, 0.75F, true)
+  private[memstore] val partitions = new NonBlockingHashMapLong[TimeSeriesPartition](InitialNumPartitions, false)
 
   /**
    * next partition ID number
@@ -176,7 +184,6 @@ class TimeSeriesShard(val dataset: Dataset,
     }
   }
 
-  private val maxChunksSize = storeConfig.maxChunksSize
   private val blockMemorySize = storeConfig.shardMemSize
   private final val numGroups = storeConfig.groupsPerShard
   private val bufferMemorySize = storeConfig.ingestionBufferMemSize
@@ -189,9 +196,8 @@ class TimeSeriesShard(val dataset: Dataset,
 
   /**
     * PartitionSet - access TSPartition using ingest record partition key in O(1) time.
-    * Set to an initial size big enough to prevent lots of resizes
     */
-  private final val partSet = PartitionSet.ofSize(1000000, ingestSchema, recordComp)
+  private final val partSet = PartitionSet.ofSize(InitialNumPartitions, ingestSchema, recordComp)
 
   // The off-heap block store used for encoded chunks
   private val blockStore = new PageAlignedBlockManager(blockMemorySize, shardStats.memoryStats, reclaimListener,
@@ -202,7 +208,7 @@ class TimeSeriesShard(val dataset: Dataset,
 
   // Each shard has a single ingestion stream at a time.  This BlockMemFactory is used for buffer overflow encoding
   // strictly during ingest() and switchBuffers().
-  private val overflowBlockFactory = new BlockMemFactory(blockStore, None, dataset.blockMetaSize, true)
+  private[core] val overflowBlockFactory = new BlockMemFactory(blockStore, None, dataset.blockMetaSize, true)
   val partitionMaker = new DemandPagedChunkStore(this, blockStore, chunkRetentionHours, pagingEnabled)(queryScheduler)
 
   /**
@@ -214,7 +220,7 @@ class TimeSeriesShard(val dataset: Dataset,
   private val partKeyBuilder = new RecordBuilder(MemFactory.onHeapFactory, dataset.partKeySchema,
                                                  reuseOneContainer = true)
   private val partKeyArray = partKeyBuilder.allContainers.head.base
-  private val bufferPool = new WriteBufferPool(bufferMemoryManager, dataset, maxChunksSize,
+  private val bufferPool = new WriteBufferPool(bufferMemoryManager, dataset, storeConfig.maxChunksSize,
                                                storeConfig.allocStepSize)
 
   private final val partitionGroups = Array.fill(numGroups)(new EWAHCompressedBitmap)
@@ -236,6 +242,12 @@ class TimeSeriesShard(val dataset: Dataset,
     * and is incremented each time a new bucket is prepared for flush
     */
   private var currentIndexTimeBucket: Int = _
+
+  /**
+   * Timestamp to start searching for partitions to evict. Advances as more and more partitions are evicted.
+   * Used to ensure we keep searching for newer and newer partitions to evict.
+   */
+  private[core] var evictionWatermark: Long = 0L
 
   /**
     * Bitmap representing the partIds to add to the current time bucket.
@@ -314,8 +326,7 @@ class TimeSeriesShard(val dataset: Dataset,
         shardStats.rowsSkipped.increment
       } else {
         binRecordReader.recordOffset = recOffset
-        val partition = getOrAddPartition(recBase, recOffset, group, binRecordReader.getLong(timestampColId))
-        partition.ingest(binRecordReader, overflowBlockFactory)
+        getOrAddPartitionAndIngest(recBase, recOffset, group, binRecordReader, overflowBlockFactory)
         numActuallyIngested += 1
       }
     }
@@ -581,6 +592,8 @@ class TimeSeriesShard(val dataset: Dataset,
         s"flushWatermark=${flushGroup.flushWatermark} response=$resp offset=${_offset}")
       blockHolder.markUsedBlocksReclaimable()
       blockFactoryPool.release(blockHolder)
+      // Some partitions might be evictable, see if need to free write buffer memory
+      checkEnableAddPartitions()
       resp
     }.recover { case e =>
       logger.error("Internal Error when persisting chunks - should have not reached this state", e)
@@ -617,18 +630,21 @@ class TimeSeriesShard(val dataset: Dataset,
     }
   }
 
+  private[memstore] def updatePartEndTime(p: TimeSeriesPartition, endTime: Long): Unit =
+    partKeyIndex.updatePartKeyWithEndTime(p.partKeyBytes, p.partID, endTime)()
+
   private def updateIndexWithEndTime(p: TimeSeriesPartition,
                                      chunks: Iterator[ChunkSet],
                                      timeBucket: Int) = {
     if (chunks.isEmpty && !stoppedIngesting.get(p.partID)) {
-      partKeyIndex.updatePartKeyWithEndTime(p.partKeyBytes, p.partID,  p.ingestionEndTime)()
+      updatePartEndTime(p, p.ingestionEndTime)
       timeBucketToPartIds(timeBucket).set(p.partID)
       stoppedIngesting.set(p.partID)
       currentIndexTimeBucketPartIds.set(p.partID)
     } else if (chunks.nonEmpty && stoppedIngesting.get(p.partID)) {
       // Partition started re-ingesting.
       // TODO: we can do better than this for intermittent time series. Address later.
-      partKeyIndex.updatePartKeyWithEndTime(p.partKeyBytes, p.partID, Long.MaxValue)()
+      updatePartEndTime(p, Long.MaxValue)
       timeBucketToPartIds(timeBucket).set(p.partID)
       stoppedIngesting.clear(p.partID)
       currentIndexTimeBucketPartIds.set(p.partID)
@@ -676,40 +692,79 @@ class TimeSeriesShard(val dataset: Dataset,
       partId
     }
   }
+
+  private[memstore] val addPartitionsDisabled = AtomicBoolean(false)
+
   /**
-   * Retrieves or creates a new TimeSeriesPartition, updating indices.
+   * Retrieves or creates a new TimeSeriesPartition, updating indices, then ingests the sample from record.
    * partition portion of ingest BinaryRecord is used to look up existing TSPartition.
-   * Copies the partition portion of the ingest BinaryRecord to a new BinaryRecord offheap.
+   * Copies the partition portion of the ingest BinaryRecord to offheap write buffer memory.
+   * NOTE: ingestion is skipped if there is an error allocating WriteBuffer space.
    * @param recordBase the base of the ingestion BinaryRecord
    * @param recordOff the offset of the ingestion BinaryRecord
    * @param group the group number, from abs(record.partitionHash % numGroups)
    */
-  def getOrAddPartition(recordBase: Any, recordOff: Long, group: Int, startTime: Long): TimeSeriesPartition =
-    partSet.getOrAddWithIngestBR(recordBase, recordOff, {
-      checkAndEvictPartitions()
+  def getOrAddPartitionAndIngest(recordBase: Any, recordOff: Long, group: Int,
+                                 binRecordReader: RowReader,
+                                 overflowBlockFactory: BlockMemFactory): Unit =
+    try {
+      val part = partSet.getOrAddWithIngestBR(recordBase, recordOff, {
+        val newPart = createNewPartition(recordBase, recordOff, group)
+        if (newPart != OutOfMemPartition) {
+          val partId = newPart.partID
+          if (indexBootstrapped) {
+            val startTime = binRecordReader.getLong(timestampColId)
+            partKeyIndex.addPartKey(newPart.partKeyBytes, partId, startTime)()
+            currentIndexTimeBucketPartIds.set(partId)
+            timeBucketToPartIds(currentIndexTimeBucket).set(partId)
+          } else {
+            // Keep track of partId in a bitmap for addition to index and time buckets later.
+            // We prefer to load the index with start/end times as recovered from cassandra.
+            ingestedPartIdsToIndexAfterBootstrap.set(partId)
+            partKeyToPartIdDuringRecovery.add(new EmptyPartition(dataset, newPart.partKeyBase,
+              newPart.partKeyOffset, partId))
+          }
+        }
+        newPart
+      })
+      if (part == OutOfMemPartition) { disableAddPartitions() }
+      else { part.asInstanceOf[TimeSeriesPartition].ingest(binRecordReader, overflowBlockFactory) }
+    } catch {
+      case e: OutOfOffheapMemoryException => disableAddPartitions()
+      case e: Exception                   => logger.error(s"Unexpected ingestion err", e); disableAddPartitions()
+    }
+
+  private def createNewPartition(recordBase: Any, recordOff: Long, group: Int): TimeSeriesPartition =
+    // Check and evict, if after eviction we still don't have enough memory, then don't proceed
+    if (addPartitionsDisabled() || !ensureFreeSpace()) { OutOfMemPartition }
+    else {
       // PartitionKey is copied to offheap bufferMemory and stays there until it is freed
       val partKeyOffset = recordComp.buildPartKeyFromIngest(recordBase, recordOff, partKeyBuilder)
+      // NOTE: allocateAndCopy and allocNew below could fail if there isn't enough memory.  It is CRUCIAL
+      // that min-write-buffers-free setting is large enough to accommodate the below use cases ALWAYS
       val (_, partKeyAddr, _) = BinaryRegionLarge.allocateAndCopy(partKeyArray, partKeyOffset, bufferMemoryManager)
       val partId = newPartId(UnsafeUtils.ZeroPointer.asInstanceOf[Array[Byte]], partKeyAddr)
       val infoMapAddr = OffheapLFSortedIDMap.allocNew(bufferMemoryManager, initInfoMapSize)
       val newPart = new TimeSeriesPartition(partId, dataset, partKeyAddr, shardNum, bufferPool, shardStats,
         infoMapAddr, offheapInfoMap)
-      if (indexBootstrapped) {
-        partKeyIndex.addPartKey(newPart.partKeyBytes, partId, startTime)()
-        currentIndexTimeBucketPartIds.set(partId)
-        timeBucketToPartIds(currentIndexTimeBucket).set(partId)
-      } else {
-        // Keep track of partId in a bitmap for addition to index and time buckets later.
-        // We prefer to load the index with start/end times as recovered from cassandra.
-        ingestedPartIdsToIndexAfterBootstrap.set(partId)
-        partKeyToPartIdDuringRecovery.add(new EmptyPartition(dataset, newPart.partKeyBase,
-          newPart.partKeyOffset, partId))
-      }
       partitions.put(partId, newPart)
       shardStats.partitionsCreated.increment
       partitionGroups(group).set(partId)
       newPart
-    }).asInstanceOf[TimeSeriesPartition] // TODO we need to make PartitionSet generic
+    }
+
+  private def disableAddPartitions(): Unit = {
+    if (addPartitionsDisabled.compareAndSet(false, true))
+      logger.warn(s"Out of buffer memory and not able to evict enough; adding partitions disabled")
+    shardStats.dataDropped.increment
+  }
+
+  private def checkEnableAddPartitions(): Unit = if (addPartitionsDisabled()) {
+    if (ensureFreeSpace()) {
+      logger.info(s"Enough free space to add partitions again!  Yay!")
+      addPartitionsDisabled := false
+    }
+  }
 
   // Ensures partition ID wraps around safely to 0, not negative numbers (which don't work with bitmaps)
   private def incrementPartitionID(): Unit = {
@@ -728,15 +783,19 @@ class TimeSeriesShard(val dataset: Dataset,
   /**
    * Check and evict partitions to free up memory and heap space.  NOTE: This should be called in the ingestion
    * stream so that there won't be concurrent other modifications.  Ideally this is called when trying to add partitions
+   * @return true if able to evict enough or there was already space, false if not able to evict and not enough mem
    */
-  private[filodb] def checkAndEvictPartitions(): Unit = {
-    val (prunedPartitions, indicesToPrune) = partitionsToEvict()
-    if (!prunedPartitions.isEmpty) {
+  private[filodb] def ensureFreeSpace(): Boolean = {
+    var lastPruned = EmptyBitmap
+    while (evictionPolicy.shouldEvict(partSet.size, bufferMemoryManager)) {
+      // Eliminate partitions evicted from last cycle so we don't have an endless loop
+      val prunedPartitions = partitionsToEvict().andNot(lastPruned)
+      if (prunedPartitions.isEmpty) {
+        logger.warn(s"Cannot find any partitions to evict but we are still low on space.  DATA WILL BE DROPPED")
+        return false
+      }
       logger.debug(s"About to prune ${prunedPartitions.cardinality} partitions...")
-
-      /* Remove this statement when we demand-page TSPartition on query.
-      Until then, this is needed to prevent indefinite growth of index */
-      partKeyIndex.removeEntries(prunedPartitions)
+      lastPruned = prunedPartitions
 
       // Pruning group bitmaps
       for { group <- 0 until numGroups } {
@@ -746,40 +805,31 @@ class TimeSeriesShard(val dataset: Dataset,
       // Finally, prune partitions and keyMap data structures
       logger.info(s"Pruning ${prunedPartitions.cardinality} partitions from shard $shardNum")
       val intIt = prunedPartitions.intIterator
-      while (intIt.hasNext) { removePartition(intIt.next) }
+      while (intIt.hasNext) {
+        val partitionObj = partitions.get(intIt.next)
+        if (partitionObj != OutOfMemPartition) removePartition(partitionObj)
+        // Update the evictionWatermark
+        val partEndTime = partitionObj.ingestionEndTime
+        if (partEndTime < Long.MaxValue) evictionWatermark = Math.max(evictionWatermark, partEndTime)
+      }
       shardStats.partitionsEvicted.increment(prunedPartitions.cardinality)
     }
+    true
   }
 
   // Permanently removes the given partition ID from our in-memory data structures
   // Also frees partition key if necessary
-  private def removePartition(partId: Int): Unit = {
-    val partitionObj = partitions.get(partId)
+  private def removePartition(partitionObj: TimeSeriesPartition): Unit = {
     partSet.remove(partitionObj)
     bufferMemoryManager.freeMemory(partitionObj.partKeyOffset)
     bufferMemoryManager.freeMemory(partitionObj.mapPtr)
-    partitions.remove(partId)
+    partitions.remove(partitionObj.partID)
   }
 
-  private def partitionsToEvict(): (EWAHCompressedBitmap, HashMap[UTF8Str, _ <: collection.Set[UTF8Str]]) = {
-    // Iterate and add eligible partitions to delete to our list, plus list of indices and values to change
-    val toEvict = evictionPolicy.howManyToEvict(partSet.size, bufferMemoryManager)
-    if (toEvict > 0) {
-      // Iterate and add eligible partitions to delete to our list, plus list of indices and values to change
-      val prunedPartitions = new EWAHCompressedBitmap()
-      val indicesToPrune = new HashMap[UTF8Str, collection.mutable.Set[UTF8Str]]
-      val partIt = partitions.entrySet.iterator
-      // For some reason, the takeWhile method doesn't seem to work.
-      while (partIt.hasNext && prunedPartitions.cardinality < toEvict) {
-        val entry = partIt.next
-        if (evictionPolicy.canEvict(entry.getValue)) {
-          prunedPartitions.set(entry.getKey)
-        }
-      }
-      (prunedPartitions, indicesToPrune)
-    } else {
-      (new EWAHCompressedBitmap(), HashMap.empty)
-    }
+  private def partitionsToEvict(): EWAHCompressedBitmap = {
+    // Iterate and add eligible partitions to delete to our list
+    // Need to filter out partitions with no endTime. Any endTime calculated would not be set within one flush interval.
+    partKeyIndex.partIdsOrderedByEndTime(storeConfig.numToEvict, evictionWatermark, Long.MaxValue - 1)
   }
 
   private[core] def getPartition(partKey: Array[Byte]): Option[ReadablePartition] =

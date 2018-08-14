@@ -233,9 +233,12 @@ class PartKeyLuceneIndexSpec extends FunSpec with Matchers with BeforeAndAfter {
       from <- 0 until 99 // for various from values
       limit <- 3 to 100-from // for various limit values
     } {
-      val dropFrom = addedKeys.sorted.drop(from)
-      val partNums3 = keyIndex.partIdsOrderedByEndTime(dropFrom(0)._1, limit)
-      partNums3.toSeq shouldEqual dropFrom.map(_._3).take(limit).sorted
+      val sortedKeys = addedKeys.sorted
+      val dropFrom = sortedKeys.drop(from)
+      val partNums3 = keyIndex.partIdsOrderedByEndTime(limit, fromEndTime = dropFrom(0)._1)
+      partNums3.toArray.toSeq shouldEqual dropFrom.map(_._3).take(limit).sorted
+      val untilTimePartIds = keyIndex.partIdsOrderedByEndTime(10, toEndTime = dropFrom(0)._1 - 1)
+      untilTimePartIds.toArray.toSeq shouldEqual sortedKeys.take(from).map(_._3).take(10).sorted
     }
   }
 

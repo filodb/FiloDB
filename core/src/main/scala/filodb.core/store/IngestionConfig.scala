@@ -17,6 +17,7 @@ final case class StoreConfig(flushInterval: FiniteDuration,
                              // Number of bytes to allocate to ingestion write buffers per shard
                              ingestionBufferMemSize: Long,
                              allocStepSize: Int,
+                             numToEvict: Int,
                              groupsPerShard: Int,
                              numPagesPerBlock: Int,
                              partIndexFlushMaxDelaySeconds: Int,
@@ -31,6 +32,7 @@ final case class StoreConfig(flushInterval: FiniteDuration,
                                "shard-mem-size" -> shardMemSize,
                                "ingestion-buffer-mem-size" -> ingestionBufferMemSize,
                                "buffer-alloc-step-size" -> allocStepSize,
+                               "num-partitions-to-evict" -> numToEvict,
                                "groups-per-shard" -> groupsPerShard,
                                "num-block-pages" -> numPagesPerBlock,
                                "part-index-flush-max-delay" -> (partIndexFlushMaxDelaySeconds + "s"),
@@ -46,6 +48,7 @@ object StoreConfig {
                                            |max-chunks-size = 500
                                            |ingestion-buffer-mem-size = 10M
                                            |buffer-alloc-step-size = 1000
+                                           |num-partitions-to-evict = 1000
                                            |groups-per-shard = 60
                                            |num-block-pages = 1000
                                            |part-index-flush-max-delay = 60 seconds
@@ -62,6 +65,7 @@ object StoreConfig {
                 config.getMemorySize("shard-mem-size").toBytes,
                 config.getMemorySize("ingestion-buffer-mem-size").toBytes,
                 config.getInt("buffer-alloc-step-size"),
+                config.getInt("num-partitions-to-evict"),
                 config.getInt("groups-per-shard"),
                 config.getInt("num-block-pages"),
                 config.as[FiniteDuration]("part-index-flush-max-delay").toSeconds.toInt,

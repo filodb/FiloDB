@@ -7,7 +7,8 @@
     - [Kafka Ingestion](#kafka-ingestion)
       - [Basic Configuration](#basic-configuration)
       - [Kafka Message Format](#kafka-message-format)
-  - [Testing the Consumer](#testing-the-consumer)
+    - [Testing the Consumer](#testing-the-consumer)
+    - [Memory Configuration](#memory-configuration)
   - [Recovery and Persistence](#recovery-and-persistence)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
@@ -57,7 +58,7 @@ sourceconfig {
   # Values controlling in-memory store chunking, flushing, etc.
   store {
     # Interval it takes to flush ALL time series in a shard.  This time is further divided by groups-per-shard
-    flush-interval = 2 minutes
+    flush-interval = 1h
 
     # TTL for on-disk / C* data.  Data older than this may be purged.
     disk-time-to-live = 3 days
@@ -95,12 +96,20 @@ In the future converters to BinaryRecord from standard formats will be provided.
 
 You can also look at [SourceSinkSuite.scala](../kafka/src/it/scala/filodb/kafka/SourceSinkSuite.scala).
 
-## Testing the Consumer
+### Testing the Consumer
 
 * `sbt standalone/assembly`
 * `java -cp standalone/target/scala-2.11/standalone-assembly-0.7.0.jar filodb.kafka.TestConsumer my-kafka-sourceconfig.conf`
 
 See the TestConsumer for more info.
+
+### Memory Configuration
+
+How much to allocate for `ingestion-buffer-mem-size` and `shard-mem-size` as well as heap?  Here are some guidelines:
+
+* **Heap memory** - heap usage grows by the number of time series stored by FiloDB in memory, but not by the number of chunks or amount of data within each series.  As of 8/6/18 1.5 million time series will fit within 1GB of heap.  At least 5-10 more GB is recommended though for extra memory for ingestion, recovery, and querying.
+* **Ingestion buffer** - The ingestion buffer is a per-shard offheap memory area for ingestion write buffers and some other time series-specific data structures.  It needs to be scaled with the number of time series actively ingesting in the system, a few KB for each series.  Once the ingestion buffer runs out, no more time series can be added and eviction of existing time series starting with the oldest non-actively ingesting time series will begin to free up room.  If not enough room can be freed, new time series and in extreme cases even new data may not be ingested.
+* `shard-mem-size` - this is the offheap block storage used to store encoded chunks for the time series data samples and metadata for each chunk.  This should be sized for the number of time series as well as the length of retention desired for all the time series.  The configuration is currently **per-shard**.  When this memory runs out, the oldest blocks will be reclaimed automatically and those chunks will be dropped from time series.
 
 ## Recovery and Persistence
 
@@ -117,6 +126,8 @@ Recovery upon start of ingestion is managed by the coordinator's `IngestionActor
     and goes until the maximum checkpoint offset.  These offsets are per subgroup of the shard.
     Progress will be sent at regular intervals
  5. Once the recovery has proceeded beyond the end checkpoint then normal ingestion is started
+
+The Lucene index for the time series are also recovered.  See [indexing](indexing.md) for more details.
 
 Checking on the shard status (possible via CLI right now, perhaps via HTTP in future) will yield a recovery status first with progress %, then after recovery is done, the status will revert back to Normal.
 

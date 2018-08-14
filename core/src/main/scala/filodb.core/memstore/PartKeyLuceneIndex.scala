@@ -254,15 +254,17 @@ class PartKeyLuceneIndex(dataset: Dataset, shardNum: Int, storeConfig: StoreConf
   }
 
   /**
-    * Query top-k partIds that had an endTime from a given value.
+    * Query top-k partIds matching a range of endTimes, in ascending order of endTime
     *
     * Note: This uses a collector that uses a PriorityQueue underneath covers.
     * O(k) heap memory will be used.
     */
-  def partIdsOrderedByEndTime(fromEndTime: Long, topk: Int): IntIterator = {
+  def partIdsOrderedByEndTime(topk: Int,
+                              fromEndTime: Long = 0,
+                              toEndTime: Long = Long.MaxValue): EWAHCompressedBitmap = {
     val coll = new TopKPartIdsCollector(topk)
-    searcherManager.acquire().search(LongPoint.newRangeQuery(END_TIME, fromEndTime, Long.MaxValue), coll)
-    coll.topKPartIds()
+    searcherManager.acquire().search(LongPoint.newRangeQuery(END_TIME, fromEndTime, toEndTime), coll)
+    coll.topKPartIDsBitmap()
   }
 
   def updatePartKeyWithEndTime(partKeyOnHeapBytes: Array[Byte],
@@ -461,6 +463,12 @@ class TopKPartIdsCollector(limit: Int) extends Collector with StrictLogging {
     val result = new EWAHCompressedBitmap()
     topkResults.iterator().asScala.foreach { p => result.set(p._1) }
     result.intIterator()
+  }
+
+  def topKPartIDsBitmap(): EWAHCompressedBitmap = {
+    val result = new EWAHCompressedBitmap()
+    topkResults.iterator().asScala.foreach { p => result.set(p._1) }
+    result
   }
 }
 

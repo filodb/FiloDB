@@ -326,12 +326,64 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     memStore.numPartitions(dataset1.ref, 0) shouldEqual 10
     memStore.indexValues(dataset1.ref, 0, "series").toSeq should have length (10)
 
+    // Purposely mark two partitions endTime as occuring a while ago to mark them eligible for eviction
+    // We also need to switch buffers so that internally ingestionEndTime() is accurate
+    val shard = memStore.getShardE(dataset1.ref, 0)
+    val blockFactory = shard.overflowBlockFactory
+    var endTime = 0L
+    for { n <- 0 to 1 } {
+      val part = shard.partitions.get(n)
+      part.switchBuffers(blockFactory, encode=true)
+      shard.updatePartEndTime(part, part.ingestionEndTime)
+      endTime = part.ingestionEndTime
+    }
+    memStore.commitIndexForTesting(dataset1.ref)
+
     // Now, ingest 22 partitions.  First two partitions ingested should be evicted. Check numpartitions, stats, index
-    val data2 = records(dataset1, linearMultiSeries(numSeries = 22).take(22))
+    val data2 = records(dataset1, linearMultiSeries(numSeries = 22).drop(2).take(20))
     memStore.ingest(dataset1.ref, 0, data2)
 
     memStore.numPartitions(dataset1.ref, 0) shouldEqual 20
-    // index is not going to be pruned right now.  That will happen once new Lucene index is merged.
-    // memStore.indexValues(dataset1.ref, 0, "series").toSeq should have length (20)
+    memStore.getShardE(dataset1.ref, 0).evictionWatermark shouldEqual endTime
+    memStore.getShardE(dataset1.ref, 0).addPartitionsDisabled() shouldEqual false
+
+    // Check partitions are now 2 to 21, 0 and 1 got evicted
+    val split = memStore.getScanSplits(dataset1.ref, 1).head
+    val parts = memStore.scanPartitions(dataset1, Seq(0, 1), FilteredPartitionScan(split))
+                        .toListL.runAsync
+                        .futureValue
+                        .asInstanceOf[Seq[TimeSeriesPartition]]
+    parts.map(_.partID) shouldEqual (2 to 21)
+  }
+
+  it("should be able to skip ingestion/add partitions if there is no more space left") {
+    memStore.setup(dataset1, 0, TestData.storeConf)
+    memStore.bootstrapIndexForTesting(dataset1.ref)
+
+    // Ingest normal multi series data with 10 partitions.  Should have 10 partitions.
+    val data = records(dataset1, linearMultiSeries().take(10))
+    memStore.ingest(dataset1.ref, 0, data)
+
+    memStore.commitIndexForTesting(dataset1.ref)
+
+    memStore.numPartitions(dataset1.ref, 0) shouldEqual 10
+    memStore.indexValues(dataset1.ref, 0, "series").toSeq should have length (10)
+
+    // Don't mark any partitions for eviction
+    // Now, ingest 23 partitions.  Last two partitions cannot be added.  Check numpartitions, stats, index
+    val data2 = records(dataset1, linearMultiSeries(numSeries = 23).take(23))
+    memStore.ingest(dataset1.ref, 0, data2)
+
+    memStore.getShardE(dataset1.ref, 0).addPartitionsDisabled() shouldEqual true
+    memStore.numPartitions(dataset1.ref, 0) shouldEqual 21   // due to the way the eviction policy works
+    memStore.getShardE(dataset1.ref, 0).evictionWatermark shouldEqual 0
+
+    // Check partitions are now 0 to 20, 21/22 did not get added
+    val split = memStore.getScanSplits(dataset1.ref, 1).head
+    val parts = memStore.scanPartitions(dataset1, Seq(0, 1), FilteredPartitionScan(split))
+                        .toListL.runAsync
+                        .futureValue
+                        .asInstanceOf[Seq[TimeSeriesPartition]]
+    parts.map(_.partID) shouldEqual (0 to 20)
   }
 }

@@ -28,7 +28,7 @@ extends MemStore with StrictLogging {
   private val numParallelFlushes = config.getInt("memstore.flush-task-parallelism")
 
   private val partEvictionPolicy = evictionPolicy.getOrElse {
-    new HeapPercentageEvictionPolicy(config.getInt("memstore.min-heap-free-percentage"))
+    new WriteBufferFreeEvictionPolicy(config.getMemorySize("memstore.min-write-buffers-free").toBytes)
   }
 
   // TODO: Change the API to return Unit Or ShardAlreadySetup, instead of throwing.  Make idempotent.
@@ -110,7 +110,6 @@ extends MemStore with StrictLogging {
                     // stream.  This avoids concurrency issues and ensures that buffers for a group are switched
                     // at the same offset/watermark
                     case FlushCommand(group) => shard.switchGroupBuffers(group)
-                                                shard.checkAndEvictPartitions()
                                                 val flushTimeBucket = shard.prepareIndexTimeBucketForFlush(group)
                                                 Some(FlushGroup(shard.shardNum, group, shard.latestOffset,
                                                                 diskTimeToLiveSeconds, flushTimeBucket))

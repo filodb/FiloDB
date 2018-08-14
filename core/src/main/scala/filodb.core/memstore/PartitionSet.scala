@@ -180,7 +180,7 @@ final class PartitionSet(as: Array[FiloPartition], bs: Array[Byte], n: Int, u: I
     loop(i, i) match {
       case null =>
         val newItem = addFunc
-        add(newItem)
+        if (newItem != null) add(newItem)
         newItem
       case existing => existing
     }

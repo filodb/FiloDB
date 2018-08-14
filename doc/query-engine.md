@@ -1,3 +1,22 @@
+<!-- START doctoc generated TOC please keep comment here to allow auto update -->
+<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
+**Table of Contents**  *generated with [DocToc](https://github.com/thlorenz/doctoc)*
+
+- [FiloDB Query Engine](#filodb-query-engine)
+  - [Logical Plan](#logical-plan)
+  - [Query Results as Range Vectors](#query-results-as-range-vectors)
+  - [Execution Plan Constructs](#execution-plan-constructs)
+    - [Range Vector Transformers](#range-vector-transformers)
+  - [Conversion of `LogicalPlan` to `ExecPlan`](#conversion-of-logicalplan-to-execplan)
+    - [Dispatcher Assignment](#dispatcher-assignment)
+  - [Example](#example)
+  - [Execution Detail](#execution-detail)
+    - [Periodic Samples and Range Functions](#periodic-samples-and-range-functions)
+      - [Alternate Design Approaches to Consider](#alternate-design-approaches-to-consider)
+    - [Aggregation across Range Vectors](#aggregation-across-range-vectors)
+
+<!-- END doctoc generated TOC please keep comment here to allow auto update -->
+
 # FiloDB Query Engine
 
 FiloDB Query Engine allows for distributed orchestration of queries. Queries are processed this way

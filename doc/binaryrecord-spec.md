@@ -1,3 +1,27 @@
+<!-- START doctoc generated TOC please keep comment here to allow auto update -->
+<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
+**Table of Contents**  *generated with [DocToc](https://github.com/thlorenz/doctoc)*
+
+- [BinaryRecord Specification v2](#binaryrecord-specification-v2)
+  - [Motivation](#motivation)
+    - [Differences from v1](#differences-from-v1)
+  - [[RecordSchema](../core/src/main/scala/filodb.core/binaryrecord2/RecordSchema.scala)](#recordschemacoresrcmainscalafilodbcorebinaryrecord2recordschemascala)
+    - [Field Access](#field-access)
+    - [PartitionKey extraction, hash, comparison](#partitionkey-extraction-hash-comparison)
+    - [Shard key calculation](#shard-key-calculation)
+    - [BinaryRecord creation](#binaryrecord-creation)
+    - [Get all optimal container bytes](#get-all-optimal-container-bytes)
+    - [Get all full container bytes excluding current container](#get-all-full-container-bytes-excluding-current-container)
+  - [Binary format](#binary-format)
+    - [Header](#header)
+    - [Fixed length fields](#fixed-length-fields)
+    - [Hash](#hash)
+    - [Variable length fields - UTF8String](#variable-length-fields---utf8string)
+    - [Variable length fields - Map field](#variable-length-fields---map-field)
+  - [RecordContainer: Container format for multiple BinaryRecords](#recordcontainer-container-format-for-multiple-binaryrecords)
+
+<!-- END doctoc generated TOC please keep comment here to allow auto update -->
+
 # BinaryRecord Specification v2
 
 ## Motivation

@@ -97,6 +97,16 @@ class PartitionSetSpec extends MemFactoryCleanupTest with ScalaFutures {
     partSet.getWithPartKeyBR(null, partKeyAddrs(0)) shouldEqual Some(part)
   }
 
+  it("should not add new TSPartition if function returns null") {
+    partSet.isEmpty shouldEqual true
+    partSet.getWithPartKeyBR(null, partKeyAddrs(0)) shouldEqual None
+
+    val got = partSet.getOrAddWithIngestBR(null, ingestRecordAddrs(0), null)
+    got shouldEqual null
+    partSet.isEmpty shouldEqual true
+    partSet.getWithPartKeyBR(null, partKeyAddrs(0)) shouldEqual None
+  }
+
   it("should remove TSPartitions correctly") {
     val part = makePart(0, dataset2, partKeyAddrs(0), bufferPool)
     partSet += part

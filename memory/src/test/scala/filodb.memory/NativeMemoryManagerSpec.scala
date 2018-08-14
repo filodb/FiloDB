@@ -25,7 +25,7 @@ class NativeMemoryManagerSpec extends FlatSpec with Matchers {
     checkAllocation(bufferManager.allocate(300))
     checkAllocation(bufferManager.allocate(300))
     checkAllocation(bufferManager.allocate(300))
-    intercept[IndexOutOfBoundsException] {
+    intercept[OutOfOffheapMemoryException] {
       checkAllocation(bufferManager.allocate(300))
     }
   }
@@ -36,7 +36,7 @@ class NativeMemoryManagerSpec extends FlatSpec with Matchers {
     val toFree = bufferManager.allocate(300)
     checkAllocation(toFree)
     checkAllocation(bufferManager.allocate(300))
-    intercept[IndexOutOfBoundsException] {
+    intercept[OutOfOffheapMemoryException] {
       checkAllocation(bufferManager.allocate(300))
     }
     bufferManager.freeMemory(toFree._2)
