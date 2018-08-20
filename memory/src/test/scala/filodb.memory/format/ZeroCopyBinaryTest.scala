@@ -28,7 +28,7 @@ class ZeroCopyBinaryTest extends FunSpec with Matchers with PropertyChecks {
       ZeroCopyUTF8String("dictionary") should not equal ("dictionary")
     }
 
-    it("should compare random strings properly") {
+    ignore("should compare random strings properly") {
       import java.lang.Integer.signum
       forAll { (strs: (String, String)) =>
         val nativeCmp = signum(strs._1.compare(strs._2))

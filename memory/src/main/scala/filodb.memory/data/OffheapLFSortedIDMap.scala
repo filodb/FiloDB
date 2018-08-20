@@ -70,7 +70,7 @@ object OffheapLFSortedIDMap extends StrictLogging {
    */
   def allocNew(memFactory: MemFactory, maxElements: Int): NativePointer = {
     require(maxElements >= MinMaxElements)
-    val mapPtr = memFactory.allocateOffheap(bytesNeeded(maxElements))
+    val mapPtr = memFactory.allocateOffheap(bytesNeeded(maxElements), zero=true)
     UnsafeUtils.setInt(mapPtr, maxElements - 1)  // head = maxElemnts - 1, one logical less than tail
     UnsafeUtils.setInt(mapPtr + OffsetCopyFlag, maxElements << 16)
     // TODO: do we need to initialize rest of memory?  Should be initialized already
@@ -85,26 +85,26 @@ trait MapHolder {
 }
 
 /**
- * This is an abstract class because we don't want to impose the restriction that each instance of this
+ * This is a reader class because we don't want to impose the restriction that each instance of this
  * offheap data structure requires an onheap class instance.  That would in the case of core FiloDB use up too
  * much heap memory.  Instead, what we rely on is that some other class instance (for example, each instance
  * of TSPartition) implements MapHolder.  Thus all the methods of this class are passed a Mapholder
  * and we can thus reuse one instance of this class across many many "instances" of the offheap map where
  * each offheap map pointer resides in the mapPtr field of the MapHolder.
  *
+ * @param memFactory a THREAD-SAFE factory for allocating offheap space
  * @param holderKlass the Class of the MapHolder used to hold the mapPtr pointer
  */
-// scalastyle:off number.of.methods
-class OffheapLFSortedIDMap(memFactory: MemFactory, holderKlass: Class[_ <: MapHolder]) {
+class OffheapLFSortedIDMapReader(memFactory: MemFactory, holderKlass: Class[_ <: MapHolder]) {
   import OffheapLFSortedIDMap._
 
   /**
    * Default keyFunc which maps pointer to element to the Long keyID.  It just reads the first eight bytes
    * from the element as the ID.  Please override to implement custom functionality.
    */
-  def keyFunc(elementPtr: NativePointer): Long = UnsafeUtils.getLong(elementPtr)
+  def keyFunc(elementPtr: NativePointer): Long = UnsafeUtils.getLongVolatile(elementPtr)
 
-  private val mapPtrOffset = UnsafeUtils.unsafe.objectFieldOffset(holderKlass.getDeclaredField("mapPtr"))
+  protected val mapPtrOffset = UnsafeUtils.unsafe.objectFieldOffset(holderKlass.getDeclaredField("mapPtr"))
 
   // basic accessor classes
   @inline final def head(inst: MapHolder): Int = state(inst).head
@@ -122,7 +122,8 @@ class OffheapLFSortedIDMap(memFactory: MemFactory, holderKlass: Class[_ <: MapHo
    */
   @inline final def at(inst: MapHolder, index: Int): NativePointer = {
     val _mapPtr = mapPtr(inst)
-    getElem(_mapPtr, realIndex(state(_mapPtr), index))
+    val _state = state(_mapPtr)
+    if (_state == MapState.empty) 0 else getElem(_mapPtr, realIndex(_state, index))
   }
 
   /**
@@ -194,6 +195,99 @@ class OffheapLFSortedIDMap(memFactory: MemFactory, holderKlass: Class[_ <: MapHo
   }
 
   /**
+   * Does a binary search for the element with the given key
+   * @param inst the instance (eg TSPartition) with the mapPtr field containing the map address
+   * @param key the key to search for
+   * @return the element number (that can be passed to at) if exact match found, or
+   *         element number BEFORE the element to insert, with bit 31 set, if not exact match.
+   *         0 if key is lower than tail/first element, and length if key is higher than last element
+   *         IllegalStateResult if state changed underneath
+   */
+  def binarySearch(inst: MapHolder, key: Long): Int = {
+    var result = IllegalStateResult
+    do {
+      val _mapPtr = mapPtr(inst)
+      val _state = state(_mapPtr)
+      if (_state == MapState.empty) return IllegalStateResult
+      require(_state.length > 0, "Cannot binarySearch inside an empty map")
+      result = binarySearch(_mapPtr, _state, key)
+    } while (result == IllegalStateResult)
+    result
+  }
+
+  def binarySearch(_mapPtr: NativePointer, _state: MapState, key: Long): Int = {
+    val mapLen = _state.length
+    if (!check(_mapPtr, _state)) return IllegalStateResult
+
+    @annotation.tailrec def innerBinSearch(first: Int, len: Int): Int =
+      if (first >= mapLen) {
+        // Past the last element.  Return mapLen with not found bit set
+        mapLen | 0x80000000
+      } else if (len == 0) {
+        val elem = getElem(_mapPtr, realIndex(_state, first))
+        if (keyFunc(elem) == key) first else first | 0x80000000
+      } else {
+        val half = len >>> 1
+        val middle = first + half
+        val elem = getElem(_mapPtr, realIndex(_state, middle))
+        if (!check(_mapPtr, _state)) { IllegalStateResult }
+        else {
+          val elementKey = keyFunc(elem)
+          if (elementKey == key) {
+            middle
+          } else if (elementKey < key) {
+            innerBinSearch(middle + 1, len - half - 1)
+          } else {
+            innerBinSearch(first, half)
+          }
+        }
+      }
+
+    innerBinSearch(0, mapLen)
+  }
+
+  // curIdx has to be initialized to one less than the starting logical index
+  // NOTE: This always fetches items using the official API.  THis is slower, but guarantees that no matter
+  // how slowly the iterator user pulls, it will always be pulling the right thing even if state/mapPtr changes.
+  private class SortedIDMapElemIterator(inst: MapHolder, var curIdx: Int, continue: NativePointer => Boolean)
+  extends ElementIterator {
+    var nextElem: NativePointer = _
+    final def hasNext: Boolean = {
+      nextElem = at(inst, curIdx + 1)
+      curIdx < (length(inst) - 1) && nextElem != 0 && continue(nextElem)
+    }
+    final def next: NativePointer = {
+      curIdx += 1
+      nextElem
+    }
+  }
+
+  private def makeElemIterator(inst: MapHolder, logicalStart: Int)
+                              (continue: NativePointer => Boolean): ElementIterator =
+    new SortedIDMapElemIterator(inst, logicalStart - 1, continue)
+
+  private def alwaysContinue(p: NativePointer): Boolean = true
+
+  // "real" index adjusting for position of head/tail
+  @inline protected def mapPtr(inst: MapHolder): NativePointer = UnsafeUtils.getLong(inst, mapPtrOffset)
+  protected def state(inst: MapHolder): MapState = state(mapPtr(inst))
+  protected def state(mapPtr: NativePointer): MapState =
+    if (mapPtr == 0) MapState.empty else MapState(UnsafeUtils.getLongVolatile(mapPtr))
+  @inline protected final def realIndex(state: MapState, index: Int): Int = (index + state.tail) % state.maxElem
+  @inline protected final def elemPtr(mapPtr: NativePointer, realIndex: Int): NativePointer =
+    mapPtr + OffsetElementPtrs + 8 * realIndex
+  @inline protected final def getElem(mapPtr: NativePointer, realIndex: Int): NativePointer =
+    UnsafeUtils.getLongVolatile(elemPtr(mapPtr, realIndex))
+
+  @inline protected def check(mapPtr: NativePointer, state: MapState): Boolean =
+    mapPtr != 0 && UnsafeUtils.getLongVolatile(mapPtr) == state.state && state.state != 0
+}
+
+class OffheapLFSortedIDMapMutator(memFactory: MemFactory, holderKlass: Class[_ <: MapHolder])
+extends OffheapLFSortedIDMapReader(memFactory, holderKlass) {
+  import OffheapLFSortedIDMap._
+
+  /**
    * Inserts/replaces the element into the Map using the key computed from the element,
    * atomically changing the state, and retrying until compare and swap succeeds.
    * In case of replacing existing value for same key - then the last write wins.
@@ -214,14 +308,15 @@ class OffheapLFSortedIDMap(memFactory: MemFactory, holderKlass: Class[_ <: MapHo
       // All of these should be using registers for super fast calculations
       val _head = initState.head
       val _maxElem = initState.maxElem
-      if (initState.copyFlag || _maxElem == 0) return false   // trouble in paradise/bad state; reset
+      // trouble in paradise/bad state; reset
+      if (initState == MapState.empty || initState.copyFlag || _maxElem == 0) return false
       val _len = initState.length
       // If empty, add to head
       if (_len == 0) { atomicHeadAdd(_mapPtr, initState, newElem) }
       else {
         // Problem with checking head is that new element might not have been written just after CAS succeeds
         val headElem = getElem(_mapPtr, _head)
-        if (isNullPtr(headElem)  || !check(_mapPtr, initState)) return false
+        if (!check(_mapPtr, initState)) return false
         val headKey = keyFunc(headElem)
         // If key == head element key, directly replace w/o binary search
         if (key == headKey) { atomicReplace(_mapPtr, _head, headElem, newElem) }
@@ -251,8 +346,11 @@ class OffheapLFSortedIDMap(memFactory: MemFactory, holderKlass: Class[_ <: MapHo
       }
     }
 
+    require(element != 0, s"Cannot insert/put NULL elements")
     val newKey = keyFunc(element)
-    while (!innerPut(newKey, element)) {}
+    while (!innerPut(newKey, element)) {
+      if (state(inst) == MapState.empty) return   // maxElems cannot be zero
+    }
   }
   //scalastyle:on
 
@@ -271,6 +369,7 @@ class OffheapLFSortedIDMap(memFactory: MemFactory, holderKlass: Class[_ <: MapHo
     while (!inserted) {
       val _mapPtr = mapPtr(inst)
       val initState = state(_mapPtr)
+      if (initState == MapState.empty) return false
       val _maxElem = initState.maxElem
       if (initState.length == 0) { inserted = atomicHeadAddFunc(_mapPtr, initState, elementFunc) }
       else {
@@ -301,14 +400,13 @@ class OffheapLFSortedIDMap(memFactory: MemFactory, holderKlass: Class[_ <: MapHo
     def innerRemove(key: Long): Boolean = {
       val _mapPtr = mapPtr(inst)
       val _state  = state(_mapPtr)
-      if (_state.copyFlag || _state.maxElem == 0) return false   // trouble in paradise; reset
+      if (_state == MapState.empty || _state.copyFlag || _state.maxElem == 0) return false
       prevElem = 0L
       if (_state.length <= 0) {
         true
       } else if (check(_mapPtr, _state) && _mapPtr == mapPtr(inst)) {
         // Is the tail the element to be removed?  Then remove it, this is O(1)
         val tailElem = getElem(_mapPtr, _state.tail)
-        if (isNullPtr(tailElem)) return false               // state must be corrupted; retry
         if (key == keyFunc(tailElem)) {
           prevElem = tailElem
           atomicTailRemove(_mapPtr, _state)
@@ -326,104 +424,34 @@ class OffheapLFSortedIDMap(memFactory: MemFactory, holderKlass: Class[_ <: MapHo
       } else { false }
     }
 
-    while (!innerRemove(key)) {}
+    while (!innerRemove(key)) {
+      if (state(inst) == MapState.empty) return 0   // don't modify a null/absent map
+    }
     prevElem
   }
 
   /**
-   * Does a binary search for the element with the given key
-   * @param inst the instance (eg TSPartition) with the mapPtr field containing the map address
-   * @param key the key to search for
-   * @return the element number (that can be passed to at) if exact match found, or
-   *         element number BEFORE the element to insert, with bit 31 set, if not exact match.
-   *         0 if key is lower than tail/first element, and length if key is higher than last element
-   *         IllegalStateResult if state changed underneath
+   * Frees the memory used by the map pointed to by inst.mapPtr, using CAS such that it will wait for concurrent
+   * modifications occurring to finish first.
+   * First the state is reset to 0, then the mapPtr itself is reset to 0, then the memory is finally freed.
+   * After this is called, concurrent modifications and reads of the map in inst will fail gracefully.
    */
-  private def binarySearch(inst: MapHolder, key: Long): Int = {
-    var result = IllegalStateResult
-    do {
-      val _mapPtr = mapPtr(inst)
-      val _state = state(_mapPtr)
-      require(_state.length > 0, "Cannot binarySearch inside an empty map")
-      result = binarySearch(_mapPtr, _state, key)
-    } while (result == IllegalStateResult)
-    result
-  }
-
-  private def binarySearch(_mapPtr: NativePointer, _state: MapState, key: Long): Int = {
-    val mapLen = _state.length
-
-    @annotation.tailrec def innerBinSearch(first: Int, len: Int): Int =
-      if (first >= mapLen) {
-        // Past the last element.  Return mapLen with not found bit set
-        mapLen | 0x80000000
-      } else if (len == 0) {
-        val elem = getElem(_mapPtr, realIndex(_state, first))
-        if (isNullPtr(elem)) { IllegalStateResult }
-        else if (keyFunc(elem) == key) first else first | 0x80000000
-      } else {
-        val half = len >>> 1
-        val middle = first + half
-        val elem = getElem(_mapPtr, realIndex(_state, middle))
-        if (isNullPtr(elem) || !check(_mapPtr, _state)) { IllegalStateResult }
-        else {
-          val elementKey = keyFunc(elem)
-          if (elementKey == key) {
-            middle
-          } else if (elementKey < key) {
-            innerBinSearch(middle + 1, len - half - 1)
-          } else {
-            innerBinSearch(first, half)
-          }
-        }
-      }
-
-    innerBinSearch(0, mapLen)
-  }
-
-  // curIdx has to be initialized to one less than the starting "realIndex"
-  private class SortedIDMapElemIterator(mapPtr: NativePointer, var curIdx: Int, continue: NativePointer => Boolean)
-  extends ElementIterator {
-    val _state = state(mapPtr)
-    final def nextIdx: Int = (curIdx + 1) % _state.maxElem
-    final def hasNext: Boolean = {
-      val nextElem = getElem(mapPtr, nextIdx)
-      curIdx != _state.head && !isNullPtr(nextElem) && continue(nextElem)
-    }
-    final def next: NativePointer = {
-      curIdx = nextIdx
-      getElem(mapPtr, curIdx)
+  final def free(inst: MapHolder): Unit = {
+    var curState = state(inst)
+    while (curState != MapState.empty) {
+      val mapPtr = inst.mapPtr
+      if (casState(mapPtr, curState, MapState.empty))
+        if (UnsafeUtils.unsafe.compareAndSwapLong(inst, mapPtrOffset, mapPtr, 0))
+          memFactory.freeMemory(mapPtr)
+      curState = state(inst)
     }
   }
-
-  private def makeElemIterator(inst: MapHolder, logicalStart: Int)
-                              (continue: NativePointer => Boolean): ElementIterator = {
-    val _mapPtr = mapPtr(inst)
-    val _state = state(_mapPtr)
-    // Note that if the map is empty, then head is at tail - 1, so this should work for empty maps too
-    val startIndex = (_state.tail + logicalStart - 1 + _state.maxElem) % _state.maxElem  // one before tail
-    new SortedIDMapElemIterator(_mapPtr, startIndex, continue)
-  }
-
-  private def alwaysContinue(p: NativePointer): Boolean = true
-
-  // "real" index adjusting for position of head/tail
-  @inline private def mapPtr(inst: MapHolder): NativePointer = UnsafeUtils.getLong(inst, mapPtrOffset)
-  private def state(inst: MapHolder): MapState = state(mapPtr(inst))
-  private def state(mapPtr: NativePointer): MapState = MapState(UnsafeUtils.getLong(mapPtr))
-  @inline private final def realIndex(state: MapState, index: Int): Int = (index + state.tail) % state.maxElem
-  @inline private final def elemPtr(mapPtr: NativePointer, realIndex: Int): NativePointer =
-    mapPtr + OffsetElementPtrs + 8 * realIndex
-  @inline private final def getElem(mapPtr: NativePointer, realIndex: Int): NativePointer =
-    UnsafeUtils.getLong(elemPtr(mapPtr, realIndex))
-
-  @inline private def check(mapPtr: NativePointer, state: MapState): Boolean =
-    UnsafeUtils.getLong(mapPtr) == state.state
-  // Enough to check lower 48 bits.  For some odd reason once in a while upper 4 bits are nonzero
-  @inline private def isNullPtr(ptr: NativePointer): Boolean = (ptr & 0xffffffffffffL) == 0L
 
   private def casLong(mapPtr: NativePointer, mapOffset: Int, oldLong: Long, newLong: Long): Boolean =
     UnsafeUtils.unsafe.compareAndSwapLong(UnsafeUtils.ZeroPointer, mapPtr + mapOffset, oldLong, newLong)
+
+  private def casLong(pointer: NativePointer, oldLong: Long, newLong: Long): Boolean =
+    UnsafeUtils.unsafe.compareAndSwapLong(UnsafeUtils.ZeroPointer, pointer, oldLong, newLong)
 
   private def casState(mapPtr: NativePointer, oldState: MapState, newState: MapState): Boolean =
     casLong(mapPtr, 0, oldState.state, newState.state)
@@ -433,11 +461,10 @@ class OffheapLFSortedIDMap(memFactory: MemFactory, holderKlass: Class[_ <: MapHo
       // compute new head
       val newHead = (initState.head + 1) % initState.maxElem
 
-      // compare and swap 64-bit state. If succeed, write out newElem at new head
-      // NOTE: we cannot write the new element before CAS as we're not sure we have right to write it yet
-      val swapped = casState(mapPtr, initState, initState.withHead(newHead))
-      if (swapped) UnsafeUtils.setLong(elemPtr(mapPtr, newHead), newElem)
-      swapped
+      // compare and swap new element, then new state.  Only succeeds if new element was uninitialized.
+      // This way once state is changed element is ready to read.
+      casLong(elemPtr(mapPtr, newHead), 0, newElem) &&
+      casState(mapPtr, initState, initState.withHead(newHead))
     }
 
   private def atomicHeadAddFunc(mapPtr: NativePointer, initState: MapState, elemFunc: => NativePointer): Boolean =
@@ -445,11 +472,10 @@ class OffheapLFSortedIDMap(memFactory: MemFactory, holderKlass: Class[_ <: MapHo
       // compute new head
       val newHead = (initState.head + 1) % initState.maxElem
 
-      // compare and swap 64-bit state. If succeed, write out newElem at new head
-      // NOTE: we cannot write the new element before CAS as we're not sure we have right to write it yet
-      val swapped = casState(mapPtr, initState, initState.withHead(newHead))
-      if (swapped) UnsafeUtils.setLong(elemPtr(mapPtr, newHead), elemFunc)
-      swapped
+      // compare and swap new element, then new state.  Only succeeds if new element was uninitialized.
+      // This way once state is changed element is ready to read.
+      casLong(elemPtr(mapPtr, newHead), 0, elemFunc) &&
+      casState(mapPtr, initState, initState.withHead(newHead))
     }
 
   private def atomicTailRemove(mapPtr: NativePointer, state: MapState): Boolean =
@@ -538,7 +564,7 @@ class OffheapLFSortedIDMap(memFactory: MemFactory, holderKlass: Class[_ <: MapHo
     // 1. must not be already copying and must atomically enable copying
     atomicEnableCopyFlag(oldMapPtr, initState) && {
       // 2. allocate new space
-      val newMapPtr = memFactory.allocateOffheap(bytesNeeded(newMaxElems))
+      val newMapPtr = memFactory.allocateOffheap(bytesNeeded(newMaxElems), zero=true)
 
       // 3. first part: from tail to head/end
       val _head = initState.head
@@ -559,11 +585,8 @@ class OffheapLFSortedIDMap(memFactory: MemFactory, holderKlass: Class[_ <: MapHo
       // NOTE: state has to be valid before the CAS, once the CAS is done another thread will try to read it
       // It is safe to write the state since we are only ones who know about the new mem region
       if (UnsafeUtils.unsafe.compareAndSwapLong(inst, mapPtrOffset, oldMapPtr, newMapPtr)) {
-        try {
-          memFactory.freeMemory(oldMapPtr)
-        } catch {
-          case e: Exception => _logger.error(s"Could not free old map pointer $oldMapPtr, probably harmless", e)
-        }
+        UnsafeUtils.setLong(oldMapPtr, 0)   // zero old state so those still reading will stop
+        memFactory.freeMemory(oldMapPtr)
         true
       } else {
         // CAS of map pointer failed, free new map memory and try again.  Also unset copy flag?
@@ -585,10 +608,14 @@ final case class MapState(state: Long) extends AnyVal {
   def tail: Int = ((state >> 16) & 0x0ffff).toInt
   def copyFlag: Boolean = (state & OffheapLFSortedIDMap.CopyFlagMask) != 0
   def maxElem: Int = ((state >> 48) & 0x0ffff).toInt
-  def length: Int = (head - tail + 1 + maxElem) % maxElem
+  def length: Int = if (maxElem > 0) (head - tail + 1 + maxElem) % maxElem else 0
 
   def withHead(newHead: Int): MapState = MapState(state & ~0x0ffffL | newHead)
   def withTail(newTail: Int): MapState = MapState(state & ~0x0ffff0000L | (newTail.toLong << 16))
+}
+
+object MapState {
+  val empty = MapState(0)
 }
 
 /**
@@ -596,8 +623,8 @@ final case class MapState(state: Long) extends AnyVal {
  * If you want to save more space, it's better to share an implementation of OffheapLFSortedIDMap amongst multiple
  * actual maps.  The API in here is pretty convenient though.
  */
-class SingleOffheapLFSortedIDMap(memFactory: MemFactory, var mapPtr: NativePointer)
-extends OffheapLFSortedIDMap(memFactory, classOf[SingleOffheapLFSortedIDMap]) with MapHolder {
+class OffheapLFSortedIDMap(memFactory: MemFactory, var mapPtr: NativePointer)
+extends OffheapLFSortedIDMapMutator(memFactory, classOf[OffheapLFSortedIDMap]) with MapHolder {
   final def length: Int = length(this)
   final def apply(key: Long): NativePointer = apply(this, key)
   final def contains(key: Long): Boolean = contains(this, key)
@@ -611,6 +638,6 @@ extends OffheapLFSortedIDMap(memFactory, classOf[SingleOffheapLFSortedIDMap]) wi
 }
 
 object SingleOffheapLFSortedIDMap {
-  def apply(memFactory: MemFactory, maxElements: Int): SingleOffheapLFSortedIDMap =
-    new SingleOffheapLFSortedIDMap(memFactory, OffheapLFSortedIDMap.allocNew(memFactory, maxElements))
+  def apply(memFactory: MemFactory, maxElements: Int): OffheapLFSortedIDMap =
+    new OffheapLFSortedIDMap(memFactory, OffheapLFSortedIDMap.allocNew(memFactory, maxElements))
 }

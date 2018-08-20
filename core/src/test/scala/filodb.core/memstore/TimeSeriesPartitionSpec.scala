@@ -11,7 +11,7 @@ import filodb.core._
 import filodb.core.metadata.Dataset
 import filodb.core.store._
 import filodb.memory._
-import filodb.memory.data.OffheapLFSortedIDMap
+import filodb.memory.data.{OffheapLFSortedIDMap, OffheapLFSortedIDMapMutator}
 import filodb.memory.format.UnsafeUtils
 
 object TimeSeriesPartitionSpec {
@@ -19,7 +19,7 @@ object TimeSeriesPartitionSpec {
   import BinaryRegion.NativePointer
 
   val memFactory = new NativeMemoryManager(10 * 1024 * 1024)
-  val offheapInfoMapKlass = new OffheapLFSortedIDMap(memFactory, classOf[TimeSeriesPartition])
+  val offheapInfoMapKlass = new OffheapLFSortedIDMapMutator(memFactory, classOf[TimeSeriesPartition])
   val maxChunkSize = 100
   protected val myBufferPool = new WriteBufferPool(memFactory, dataset1, maxChunkSize, 50)
 

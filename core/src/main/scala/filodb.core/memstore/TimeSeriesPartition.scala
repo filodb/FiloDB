@@ -7,7 +7,7 @@ import filodb.core.Types._
 import filodb.core.metadata.Dataset
 import filodb.core.store._
 import filodb.memory.{BinaryRegion, BlockMemFactory}
-import filodb.memory.data.{MapHolder, OffheapLFSortedIDMap}
+import filodb.memory.data.{MapHolder, OffheapLFSortedIDMapMutator}
 import filodb.memory.format._
 
 object TimeSeriesPartition extends StrictLogging {
@@ -52,8 +52,8 @@ class TimeSeriesPartition(val partID: Int,
                           val shardStats: TimeSeriesShardStats,
                           // Volatile pointer to infoMap structure.  Name of field MUST match mapKlazz method above
                           var mapPtr: BinaryRegion.NativePointer,
-                          // Shared class for accessing the infoMap / OffheapLFSortedIDMap given mapPtr above
-                          offheapInfoMap: OffheapLFSortedIDMap)
+                          // Shared class for mutating the infoMap / OffheapLFSortedIDMap given mapPtr above
+                          offheapInfoMap: OffheapLFSortedIDMapMutator)
 extends ReadablePartition with MapHolder {
   import TimeSeriesPartition._
 

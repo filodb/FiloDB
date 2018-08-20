@@ -30,8 +30,9 @@ trait MemFactory {
   /**
    * Allocates offheap memory and returns a native 64-bit pointer
     * @param size Request memory allocation size in bytes
+    * @param zero if true, zeroes out the contents of the memory first
    */
-  def allocateOffheap(size: Int): BinaryRegion.NativePointer
+  def allocateOffheap(size: Int, zero: Boolean = false): BinaryRegion.NativePointer
 
   /**
     * Frees memory allocated at the passed address with allocate()
@@ -68,6 +69,11 @@ object MemFactory {
 /**
   * Native (off heap) memory manager, allocating using MemoryIO with every call to allocateWithMagicHeader
   * and relying on a cap to not allocate more than upperBoundSizeInBytes
+  * Synchronized to be multi-thread safe -- for example, the OffheapLFSortedIDMap will cause concurrent free/allocates
+  * TODO: we don't really need freeAll(), consider not needing the map and just storing the size of allocation in
+  * first four bytes.  That in fact matches what is needed for BinaryVector and BinaryRecord allocations.
+  * Have an allocateOffheapWithSizeHeader which just returns the address to the size bytes  :)
+  * For now we still get millions of allocations/sec with synchronized
   */
 class NativeMemoryManager(val upperBoundSizeInBytes: Long) extends MemFactory {
   protected val usedSoFar = new AtomicLong(0)
@@ -80,11 +86,11 @@ class NativeMemoryManager(val upperBoundSizeInBytes: Long) extends MemFactory {
   def numFreeBytes: Long = availableDynMemory
 
   // Allocates a native 64-bit pointer, or throws an exception if not enough space
-  def allocateOffheap(size: Int): BinaryRegion.NativePointer = {
+  def allocateOffheap(size: Int, zero: Boolean = true): BinaryRegion.NativePointer = synchronized {
     val currentSize = usedSoFar.get()
     val resultantSize = currentSize + size
     if (!(resultantSize > upperBoundSizeInBytes)) {
-      val address: Long = MemoryIO.getCheckedInstance().allocateMemory(size, true)
+      val address: Long = MemoryIO.getCheckedInstance().allocateMemory(size, zero)
       usedSoFar.compareAndSet(currentSize, currentSize + size)
       sizeMapping(address) = size
       address
@@ -93,7 +99,7 @@ class NativeMemoryManager(val upperBoundSizeInBytes: Long) extends MemFactory {
     }
   }
 
-  override def freeMemory(startAddress: Long): Unit = {
+  override def freeMemory(startAddress: Long): Unit = synchronized {
     val address = startAddress
     val size = sizeMapping.getOrElse(address, -1)
     if (size >= 0) {
@@ -136,7 +142,8 @@ class ArrayBackedMemFactory extends MemFactory {
     (newBytes, UnsafeUtils.arayOffset, size)
   }
 
-  def allocateOffheap(size: Int): BinaryRegion.NativePointer = throw new UnsupportedOperationException
+  def allocateOffheap(size: Int, zero: Boolean = false): BinaryRegion.NativePointer =
+    throw new UnsupportedOperationException
 
   // Nothing to free, let heap GC take care of it  :)
   override def freeMemory(address: Long): Unit = {}
@@ -222,12 +229,13 @@ class BlockMemFactory(blockStore: BlockManager,
     * @param allocateSize Request memory allocation size in bytes
     * @return Memory which has a base, offset and a length
     */
-  def allocateOffheap(allocateSize: Int): BinaryRegion.NativePointer = {
-    val block = ensureCapacity(allocateSize + metadataAllocSize + 2)
+  def allocateOffheap(size: Int, zero: Boolean = false): BinaryRegion.NativePointer = {
+    require(!zero, "BlockMemFactory cannot zero memory at allocation")
+    val block = ensureCapacity(size + metadataAllocSize + 2)
     block.own()
     val preAllocationPosition = block.position()
     val newAddress = block.address + preAllocationPosition
-    val postAllocationPosition = preAllocationPosition + allocateSize
+    val postAllocationPosition = preAllocationPosition + size
     block.position(postAllocationPosition)
     newAddress
   }

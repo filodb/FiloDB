@@ -4,13 +4,12 @@ import com.kenai.jffi.MemoryIO
 import org.scalatest.{FlatSpec, Matchers}
 
 import filodb.memory.BinaryRegion.Memory
+import filodb.memory.format.UnsafeUtils
 
 /**
   * Buffer manager allocation and freeing tests
   */
 class NativeMemoryManagerSpec extends FlatSpec with Matchers {
-
-
   it should "Allocate and allow writing up to the allocation size" in {
     //16 for magic header
     val bufferManager = new NativeMemoryManager(1000 + 16)
@@ -41,6 +40,18 @@ class NativeMemoryManagerSpec extends FlatSpec with Matchers {
     }
     bufferManager.freeMemory(toFree._2)
     checkAllocation(bufferManager.allocate(300))
+  }
+
+  it should "Zero memory if requested" in {
+    val bufferManager = new NativeMemoryManager(1000)
+    val mem1 = bufferManager.allocateOffheap(16, false)
+    mem1 should not be 0
+    val mem2 = bufferManager.allocateOffheap(16, true)
+    UnsafeUtils.getLong(mem2) shouldEqual 0
+    UnsafeUtils.getLong(mem2 + 8) shouldEqual 0
+
+    bufferManager.freeMemory(mem1)
+    bufferManager.freeMemory(mem2)
   }
 
   private def checkAllocation(memory: Memory) = {

@@ -5,6 +5,7 @@ import java.nio.ByteBuffer
 import com.kenai.jffi.MemoryIO
 import scalaxy.loops._
 
+// scalastyle:off number.of.methods
 object UnsafeUtils {
   val unsafe = scala.concurrent.util.Unsafe.instance
 
@@ -59,6 +60,7 @@ object UnsafeUtils {
   final def getShort(addr: Long): Short = unsafe.getShort(ZeroPointer, addr)
   final def getInt(addr: Long): Int = unsafe.getInt(ZeroPointer, addr)
   final def getLong(addr: Long): Long = unsafe.getLong(ZeroPointer, addr)
+  final def getLongVolatile(addr: Long): Long = unsafe.getLongVolatile(ZeroPointer, addr)
   final def getDouble(addr: Long): Double = unsafe.getDouble(ZeroPointer, addr)
   final def getFloat(addr: Long): Double = unsafe.getFloat(ZeroPointer, addr)
 

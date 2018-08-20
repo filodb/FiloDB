@@ -22,7 +22,7 @@ import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.Dataset
 import filodb.core.store._
 import filodb.memory._
-import filodb.memory.data.OffheapLFSortedIDMap
+import filodb.memory.data.{OffheapLFSortedIDMap, OffheapLFSortedIDMapMutator}
 import filodb.memory.format.{RowReader, UnsafeUtils, ZeroCopyUTF8String => UTF8Str}
 import filodb.memory.format.BinaryVector.BinaryVectorPtr
 
@@ -232,8 +232,7 @@ class TimeSeriesShard(val dataset: Dataset,
   private var ingestedPartIdsToIndexAfterBootstrap = new EWAHCompressedBitmap()
 
   // Not really one instance of a map; more like an accessor class shared amongst all TSPartition instances
-  // One instance of the offheap map exists for each TSPartition
-  private val offheapInfoMap = new OffheapLFSortedIDMap(bufferMemoryManager, classOf[TimeSeriesPartition])
+  private val offheapInfoMap = new OffheapLFSortedIDMapMutator(bufferMemoryManager, classOf[TimeSeriesPartition])
   // Use 1/4 of max # buckets for initial ChunkInfo map size
   private val initInfoMapSize = Math.max((numTimeBucketsToRetain / 4) + 4, 20)
 
@@ -807,10 +806,12 @@ class TimeSeriesShard(val dataset: Dataset,
       val intIt = prunedPartitions.intIterator
       while (intIt.hasNext) {
         val partitionObj = partitions.get(intIt.next)
-        if (partitionObj != OutOfMemPartition) removePartition(partitionObj)
-        // Update the evictionWatermark
-        val partEndTime = partitionObj.ingestionEndTime
-        if (partEndTime < Long.MaxValue) evictionWatermark = Math.max(evictionWatermark, partEndTime)
+        // Update the evictionWatermark BEFORE we free the partition and can't read data any more
+        if (partitionObj != OutOfMemPartition) {
+          val partEndTime = partitionObj.ingestionEndTime
+          removePartition(partitionObj)
+          if (partEndTime < Long.MaxValue) evictionWatermark = Math.max(evictionWatermark, partEndTime)
+        }
       }
       shardStats.partitionsEvicted.increment(prunedPartitions.cardinality)
     }
@@ -821,8 +822,8 @@ class TimeSeriesShard(val dataset: Dataset,
   // Also frees partition key if necessary
   private def removePartition(partitionObj: TimeSeriesPartition): Unit = {
     partSet.remove(partitionObj)
+    offheapInfoMap.free(partitionObj)
     bufferMemoryManager.freeMemory(partitionObj.partKeyOffset)
-    bufferMemoryManager.freeMemory(partitionObj.mapPtr)
     partitions.remove(partitionObj.partID)
   }
 

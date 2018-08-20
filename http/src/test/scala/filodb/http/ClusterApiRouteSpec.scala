@@ -1,5 +1,7 @@
 package filodb.http
 
+import scala.concurrent.duration._
+
 import akka.actor.ActorSystem
 import akka.http.scaladsl.model.{StatusCodes, ContentTypes}
 import akka.http.scaladsl.testkit.ScalatestRouteTest
@@ -8,7 +10,7 @@ import de.heikoseeberger.akkahttpcirce.FailFastCirceSupport
 import org.scalatest.{FunSpec, Matchers, BeforeAndAfter}
 import org.scalatest.concurrent.ScalaFutures
 
-import filodb.coordinator.{ActorSpecConfig, FilodbCluster, ClusterRole, NodeProtocol, NodeClusterActor}
+import filodb.coordinator._
 import filodb.core.{GdeltTestData, TestData, Success}
 
 object ClusterApiRouteSpec extends ActorSpecConfig
@@ -81,8 +83,17 @@ with ScalatestRouteTest with ScalaFutures {
 
     it("should return shard status after dataset is setup") {
       setupDataset()
-      // Give the coordinator nodes some time to get started
-      Thread sleep 1000
+      // Repeatedly query cluster status until we know it is OK
+      var statuses: Seq[ShardStatus] = Nil
+      do {
+        probe.send(clusterProxy, NodeClusterActor.GetShardMap(dataset6.ref))
+        Thread sleep 500
+        statuses = probe.expectMsgPF(3.seconds) {
+          case CurrentShardSnapshot(_, mapper) => mapper.statuses
+        }
+        println(s"Current statuses = $statuses")
+        info(s"Current statuses = $statuses")
+      } while (statuses.take(2) != Seq(ShardStatusActive, ShardStatusActive))
 
       Get(s"/api/v1/cluster/${dataset6.ref}/status") ~> clusterRoute ~> check {
         handled shouldBe true

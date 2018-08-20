@@ -5,8 +5,8 @@ import java.util.concurrent.TimeUnit
 import ch.qos.logback.classic.{Level, Logger}
 import org.openjdk.jmh.annotations._
 
+import filodb.core.{MachineMetricsData, TestData}
 import filodb.core.binaryrecord2.{RecordBuilder, RecordComparator, RecordSchema}
-import filodb.core.MachineMetricsData
 import filodb.memory.{BinaryRegionConsumer, MemFactory}
 
 /**
@@ -65,4 +65,13 @@ class IngestionBenchmark {
     ingestBuilder.allContainers.head.consumeRecords(consumer)
     0
   }
+
+  @Benchmark
+  @BenchmarkMode(Array(Mode.Throughput))
+  @OutputTimeUnit(TimeUnit.SECONDS)
+  def nativeMemAlloc(): Unit = {
+    val ptr = TestData.nativeMem.allocateOffheap(16)
+    TestData.nativeMem.freeMemory(ptr)
+  }
+
 }
