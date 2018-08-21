@@ -223,13 +223,23 @@ private[filodb] final class IngestionActor(dataset: Dataset,
   /** [[filodb.coordinator.IngestionStreamFactory.create]] can raise IllegalArgumentException
     * if the shard is not 0. This will notify versus throw so the sender can handle the
     * problem, which is internal.
+    * NOTE: this method will synchronously retry so it make take a long time.
     */
-  private def create(shard: Int, offset: Option[Long]): Try[IngestionStream] =
+  private def create(shard: Int, offset: Option[Long],
+                     retries: Int = storeConfig.failureRetries): Try[IngestionStream] =
     Try {
       val ingestStream = streamFactory.create(source.config, dataset, shard, offset)
       streams(shard) = ingestStream
       logger.info(s"Ingestion stream $ingestStream set up for shard $shard")
       ingestStream
+    }.recoverWith {
+      case e: Exception if retries > 0 =>
+        logger.warn(s"IngestionStream creation got [$e], $retries retries left.  Waiting then retrying", e)
+        Thread sleep storeConfig.retryDelay.toMillis
+        create(shard, offset, retries - 1)
+      case e: Exception =>
+        logger.error(s"IngestionStream creation got [$e], out of retries, shard will stop", e)
+        Failure(e)
     }
 
   private def ingest(e: IngestRows): Unit = {

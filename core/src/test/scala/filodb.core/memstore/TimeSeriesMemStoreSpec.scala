@@ -342,6 +342,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     // Now, ingest 22 partitions.  First two partitions ingested should be evicted. Check numpartitions, stats, index
     val data2 = records(dataset1, linearMultiSeries(numSeries = 22).drop(2).take(20))
     memStore.ingest(dataset1.ref, 0, data2)
+    Thread sleep 1000    // see if this will make things pass sooner
 
     memStore.numPartitions(dataset1.ref, 0) shouldEqual 20
     memStore.getShardE(dataset1.ref, 0).evictionWatermark shouldEqual endTime

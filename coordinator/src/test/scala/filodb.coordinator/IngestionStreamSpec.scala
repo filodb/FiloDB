@@ -76,6 +76,7 @@ class IngestionStreamSpec extends ActorTest(IngestionStreamSpec.getNewSystem) wi
                                            store {
                                              flush-interval = 1 hour
                                              ingestion-buffer-mem-size = 50MB
+                                             retry-delay = 500ms
                                            }
                                            """).withFallback(TestData.sourceConf)
 

@@ -21,6 +21,8 @@ final case class StoreConfig(flushInterval: FiniteDuration,
                              numToEvict: Int,
                              groupsPerShard: Int,
                              numPagesPerBlock: Int,
+                             failureRetries: Int,
+                             retryDelay: FiniteDuration,
                              partIndexFlushMaxDelaySeconds: Int,
                              partIndexFlushMinDelaySeconds: Int,
                              // Use a MultiPartitionScan (instead of single partition at a time) for on-demand paging
@@ -39,6 +41,8 @@ final case class StoreConfig(flushInterval: FiniteDuration,
                                "num-partitions-to-evict" -> numToEvict,
                                "groups-per-shard" -> groupsPerShard,
                                "num-block-pages" -> numPagesPerBlock,
+                               "failure-retries" -> failureRetries,
+                               "retry-delay" -> (retryDelay.toSeconds + "s"),
                                "part-index-flush-max-delay" -> (partIndexFlushMaxDelaySeconds + "s"),
                                "part-index-flush-min-delay" -> (partIndexFlushMinDelaySeconds + "s"),
                                "multi-partition-odp" -> multiPartitionODP,
@@ -57,6 +61,8 @@ object StoreConfig {
                                            |num-partitions-to-evict = 1000
                                            |groups-per-shard = 60
                                            |num-block-pages = 1000
+                                           |failure-retries = 3
+                                           |retry-delay = 15 seconds
                                            |part-index-flush-max-delay = 60 seconds
                                            |part-index-flush-min-delay = 30 seconds
                                            |multi-partition-odp = false
@@ -76,6 +82,8 @@ object StoreConfig {
                 config.getInt("num-partitions-to-evict"),
                 config.getInt("groups-per-shard"),
                 config.getInt("num-block-pages"),
+                config.getInt("failure-retries"),
+                config.as[FiniteDuration]("retry-delay"),
                 config.as[FiniteDuration]("part-index-flush-max-delay").toSeconds.toInt,
                 config.as[FiniteDuration]("part-index-flush-min-delay").toSeconds.toInt,
                 config.getBoolean("multi-partition-odp"),
