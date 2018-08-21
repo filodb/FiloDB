@@ -20,6 +20,7 @@ package object store {
   val machIdBitOffset = 11
   val baseNsBitOffset = 9   // 2 ** 9 = 512
   val nanoBitMask     = Math.pow(2, machIdBitOffset).toInt - 1
+  val lowerBitsMask   = Math.pow(2, msBitOffset).toInt - 1
   val baseTimeMillis  = org.joda.time.DateTime.parse("2016-01-01T00Z").getMillis
 
   // Assume LZ4 compressor has state and is not thread safe.  Use ThreadLocals.
@@ -76,11 +77,21 @@ package object store {
    */
   def decompress(compressed: ByteBuffer): ByteBuffer = {
     compressed.order(java.nio.ByteOrder.LITTLE_ENDIAN)
-    val origLength = compressed.getInt(0) & 0x7fffffff   // strip off compression bit
+    val origLength = compressed.getInt(compressed.position) & 0x7fffffff   // strip off compression bit
     val decompressedBytes = new Array[Byte](origLength + 4)
-    getDecompressor.decompress(compressed.array, 4, decompressedBytes, 4, origLength)
+    getDecompressor.decompress(compressed.array, compressed.position + 4, decompressedBytes, 4, origLength)
     UnsafeUtils.setInt(decompressedBytes, UnsafeUtils.arayOffset, origLength)
     ByteBuffer.wrap(decompressedBytes)
+  }
+
+  /**
+   * Decompresses IFF bit 31 of the 4-byte length header is set, otherwise returns original buffer
+   */
+  def decompressChunk(compressed: ByteBuffer): ByteBuffer = {
+    compressed.get(compressed.position + 3) match {
+      case b if b < 0 => decompress(compressed)
+      case b          => compressed
+    }
   }
 
   /**
@@ -101,6 +112,18 @@ package object store {
     ((System.nanoTime >> baseNsBitOffset) & nanoBitMask) ^
     Long64HighBit
   }
+
+  /**
+   * New formulation for chunkID based on a combo of the start time for a chunk and the current time in the lower
+   * bits to disambiguate two chunks which have the same start time.
+   *
+   * bits 63-21 (43 bits):  milliseconds since Unix Epoch (1/1/1970) - enough for 278.7 years or through 2248
+   * bits 20-0  (21 bits):  The lower 21 bits of nanotime for disambiguation
+   */
+  @inline final def newChunkID(startTime: Long): Long = chunkID(startTime, System.nanoTime)
+
+  @inline final def chunkID(startTime: Long, currentTime: Long): Long =
+    (startTime << msBitOffset) | (currentTime & lowerBitsMask)
 
   /**
    * Adds a few useful methods to ChunkSource

@@ -3,7 +3,7 @@ import com.typesafe.sbt.SbtMultiJvm.MultiJvmKeys.MultiJvm
 
 val buildSettings = Seq(
   organization := "org.velvia",
-  scalaVersion := "2.11.8")
+  scalaVersion := "2.11.12")
 
 publishTo      := Some(Resolver.file("Unused repo", file("target/unusedrepo")))
 

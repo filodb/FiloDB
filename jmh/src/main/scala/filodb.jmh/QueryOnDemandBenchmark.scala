@@ -11,10 +11,10 @@ import com.typesafe.config.ConfigFactory
 import com.typesafe.scalalogging.StrictLogging
 import monix.eval.Task
 import monix.reactive.Observable
-import org.openjdk.jmh.annotations._
+import org.openjdk.jmh.annotations.{Level => JmhLevel, _}
 
 import filodb.core.binaryrecord2.RecordContainer
-import filodb.core.memstore.{SomeData, TimeSeriesMemStore}
+import filodb.core.memstore.{DataOrCommand, FlushStream, SomeData, TimeSeriesMemStore}
 import filodb.core.store.StoreConfig
 import filodb.prometheus.FormatConversion
 import filodb.prometheus.ast.QueryParams
@@ -24,13 +24,13 @@ import filodb.timeseries.TestTimeseriesProducer
 
 //scalastyle:off regex
 /**
- * A macrobenchmark (IT-test level) for QueryEngine2 aggregations, in-memory only (no on-demand paging)
+ * A macrobenchmark (IT-test level) for QueryEngine2 aggregations, with 100% on-demand paging from C*
  * No ingestion occurs while query test is running -- this is intentional to allow for query-focused CPU
  * and memory allocation analysis.
  * Ingests a fixed amount of tsgenerator data in Prometheus schema (time, value, tags) and runs various queries.
  */
 @State(Scope.Thread)
-class QueryInMemoryBenchmark extends StrictLogging {
+class QueryOnDemandBenchmark extends StrictLogging {
   org.slf4j.LoggerFactory.getLogger("filodb").asInstanceOf[Logger].setLevel(Level.WARN)
 
   import filodb.coordinator._
@@ -42,29 +42,46 @@ class QueryInMemoryBenchmark extends StrictLogging {
   val numSamples = 720   // 2 hours * 3600 / 10 sec interval
   val numSeries = 100
   val startTime = System.currentTimeMillis - (3600*1000)
-  val numQueries = 500
+  val numQueries = 10    // Should be low, so most queries actually hit C*/disk
   val queryIntervalMin = 55  // # minutes between start and stop
   val queryStep = 60         // # of seconds between each query sample "step"
 
   // TODO: move setup and ingestion to another trait
-  val system = ActorSystem("test", ConfigFactory.load("filodb-defaults.conf"))
+  val config = ConfigFactory.parseString("""
+    |filodb {
+    |  store-factory = "filodb.cassandra.CassandraTSStoreFactory"
+    |  cassandra {
+    |    hosts = "localhost"
+    |    port = 9042
+    |    partition-list-num-groups = 1
+    |  }
+    |}
+  """.stripMargin).withFallback(ConfigFactory.load("filodb-defaults.conf"))
+  val system = ActorSystem("test", config)
   private val cluster = FilodbCluster(system)
-  cluster.join()
-
-  private val coordinator = cluster.coordinatorActor
-  private val clusterActor = cluster.clusterSingleton(ClusterRole.Server, None)
 
   // Set up Prometheus dataset in cluster, initialize in metastore
   private val dataset = FormatConversion.dataset
   Await.result(cluster.metaStore.initialize(), 3.seconds)
+  Await.result(cluster.metaStore.clearAllData(), 5.seconds)  // to clear IngestionConfig
   Await.result(cluster.metaStore.newDataset(dataset), 5.seconds)
+  Await.result(cluster.memStore.store.initialize(dataset.ref), 5.seconds)
+  Await.result(cluster.memStore.store.truncate(dataset.ref), 5.seconds)
 
+  cluster.join()
+
+  private val coordinator = cluster.coordinatorActor
+  private val clusterActor = cluster.clusterSingleton(ClusterRole.Server, None)
+  private val memStore = cluster.memStore.asInstanceOf[TimeSeriesMemStore]
+
+  // Adjust the parameters below to test different query configs
   val storeConf = StoreConfig(ConfigFactory.parseString("""
                   | flush-interval = 1h
                   | shard-mem-size = 512MB
                   | ingestion-buffer-mem-size = 50MB
                   | groups-per-shard = 4
-                  | demand-paging-enabled = false
+                  | multi-partition-odp = false
+                  | demand-paging-parallelism = 4
                   """.stripMargin))
   val command = SetupDataset(dataset.ref, DatasetResourceSpec(numShards, 1), noOpSource, storeConf)
   actorAsk(clusterActor, command) { case DatasetVerified => println(s"dataset setup") }
@@ -88,20 +105,31 @@ class QueryInMemoryBenchmark extends StrictLogging {
                         // println(s"   XXX: -->  Got ${bytes.size} bytes in shard $shard")
                         SomeData(RecordContainer(bytes), idx)
                       }
+                      // Just do a single flush at the end for all groups
+                      val combinedStream: Observable[DataOrCommand] = shardStream ++ FlushStream.allGroups(4)
                       Task.fromFuture(
-                        cluster.memStore.ingestStream(dataset.ref, shard, shardStream) { case e: Exception => throw e })
+                        memStore.ingestStream(dataset.ref, shard, combinedStream, 3 * 86400) {
+                          case e: Exception => throw e })
                     }.countL.runAsync
   Await.result(ingestTask, 30.seconds)
-  cluster.memStore.asInstanceOf[TimeSeriesMemStore].commitIndexForTesting(dataset.ref) // commit lucene index
-  println(s"Ingestion ended")
+  memStore.commitIndexForTesting(dataset.ref) // commit lucene index
+  println(s"Ingestion ended.")
+
+  // For each invocation, reclaim all blocks to make sure ODP is really happening
+  @Setup(JmhLevel.Invocation)
+  def reclaimAll(): Unit = {
+    for { shard <- 0 until numShards } {
+      memStore.getShardE(dataset.ref, shard).reclaimAllBlocksTestOnly()
+    }
+  }
 
   /**
    * ## ========  Queries ===========
    * They are designed to match all the time series (common case) under a particular metric and job
    */
   val queries = Seq("heap_usage{job=\"App-2\"}",  // raw time series
-                    """sum(rate(heap_usage{job="App-2"}[5m]))""",
-                    """sum_over_time(heap_usage{job="App-2"}[5m])""")
+                    """sum(rate(heap_usage{job="App-1"}[5m]))""",
+                    """sum_over_time(heap_usage{job="App-0"}[5m])""")
   val queryTime = startTime + (5 * 60 * 1000)  // 5 minutes from start until 60 minutes from start
   val qParams = QueryParams(queryTime/1000, queryStep, (queryTime/1000) + queryIntervalMin*60)
   val logicalPlans = queries.map { q => Parser.queryRangeToLogicalPlan(q, qParams) }

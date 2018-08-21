@@ -102,8 +102,7 @@ extends ReadablePartition with MapHolder {
   final def ingest(row: RowReader, blockHolder: BlockMemFactory): Unit = {
     if (currentChunks == nullChunks) {
       // First row of a chunk, set the start time to it
-      initNewChunk()
-      ChunkSetInfo.setStartTime(currentInfo.infoAddr, dataset.timestamp(row))
+      initNewChunk(dataset.timestamp(row))
     }
 
     // Update the end time as well.  For now assume everything arrives in increasing order
@@ -258,11 +257,12 @@ extends ReadablePartition with MapHolder {
     * Initializes vectors, chunkIDs for a new chunkset/chunkID.
     * This is called after switchBuffers() upon the first data that arrives.
     */
-  private def initNewChunk(): Unit = {
+  private def initNewChunk(startTime: Long): Unit = {
     val (infoAddr, newAppenders) = bufferPool.obtain()
-    val currentChunkID = timeUUID64
+    val currentChunkID = newChunkID(startTime)
     ChunkSetInfo.setChunkID(infoAddr, currentChunkID)
     ChunkSetInfo.resetNumRows(infoAddr)    // Must reset # rows otherwise it keeps increasing!
+    ChunkSetInfo.setStartTime(infoAddr, startTime)
     currentInfo = ChunkSetInfo(infoAddr)
     currentChunks = newAppenders
     infoPut(currentInfo)

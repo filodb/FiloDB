@@ -38,8 +38,9 @@ object ChunkSet {
    */
   def apply(dataset: Dataset, part: PartitionKey, rows: Seq[RowReader], factory: MemFactory): ChunkSet = {
     require(rows.nonEmpty)
-    val info = ChunkSetInfo(factory, dataset, timeUUID64, rows.length,
-                            dataset.timestamp(rows.head),
+    val startTime = dataset.timestamp(rows.head)
+    val info = ChunkSetInfo(factory, dataset, newChunkID(startTime), rows.length,
+                            startTime,
                             dataset.timestamp(rows.last))
     val filoSchema = Column.toFiloSchema(dataset.dataColumns)
     val chunkMap = RowToVectorBuilder.buildFromRows(rows.toIterator, filoSchema, factory)

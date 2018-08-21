@@ -74,6 +74,8 @@ object Util {
     batch
   }
 
+  val emptyBuffer = ByteBuffer.wrap(Array.empty[Byte])
+
   // Creates a writeable ByteBuffer, which is what the java driver expects
   def toBuffer(key: Array[Byte]): ByteBuffer = ByteBuffer.wrap(key)
 

@@ -386,7 +386,7 @@ class TimeSeriesShard(val dataset: Dataset,
   /**
     * State change operations from index-being-bootstrapped, to index-bootstrapped.
     */
-  def onIndexBootstrapped(): Unit = {
+  def onIndexBootstrapped(): Unit = if (!indexBootstrapped) {
     val start = System.currentTimeMillis()
     var newPartitionsIngested = 0
     partKeyIndex.commitBlocking() // this is needed to enable read
@@ -793,7 +793,6 @@ class TimeSeriesShard(val dataset: Dataset,
         logger.warn(s"Cannot find any partitions to evict but we are still low on space.  DATA WILL BE DROPPED")
         return false
       }
-      logger.debug(s"About to prune ${prunedPartitions.cardinality} partitions...")
       lastPruned = prunedPartitions
 
       // Pruning group bitmaps
@@ -837,24 +836,26 @@ class TimeSeriesShard(val dataset: Dataset,
     partSet.getWithPartKeyBR(partKey, UnsafeUtils.arayOffset).map(_.asInstanceOf[ReadablePartition])
     // TODO make PartitionSet generic
 
+  def iteratePartitions(partMethod: PartitionScanMethod,
+                        chunkMethod: ChunkScanMethod): Iterator[ReadablePartition] = partMethod match {
+    case SinglePartitionScan(partition, _) =>
+      getPartition(partition).map(Iterator.single).getOrElse(Iterator.empty)
+    case MultiPartitionScan(partKeys, _)   =>
+      partKeys.toIterator.flatMap(getPartition)
+    case FilteredPartitionScan(split, filters) =>
+      // TODO: There are other filters that need to be added and translated to Lucene queries
+      if (filters.nonEmpty) {
+        val indexIt = partKeyIndex.partIdsFromFilters(filters, chunkMethod.startTime, chunkMethod.endTime)
+        new PartitionIterator(indexIt)
+      } else {
+        partitions.values.iterator.asScala
+      }
+  }
+
   def scanPartitions(columnIDs: Seq[Types.ColumnId],
                      partMethod: PartitionScanMethod,
                      chunkMethod: ChunkScanMethod): Observable[ReadablePartition] = {
-    val indexIt = partMethod match {
-      case SinglePartitionScan(partition, _) =>
-        getPartition(partition).map(Iterator.single).getOrElse(Iterator.empty)
-      case MultiPartitionScan(partKeys, _)   =>
-        partKeys.toIterator.flatMap(getPartition)
-      case FilteredPartitionScan(split, filters) =>
-        // TODO: There are other filters that need to be added and translated to Lucene queries
-        if (filters.nonEmpty) {
-          val indexIt = partKeyIndex.partIdsFromFilters(filters, chunkMethod.startTime, chunkMethod.endTime)
-          new PartitionIterator(indexIt)
-        } else {
-          partitions.values.iterator.asScala
-        }
-    }
-    Observable.fromIterator(indexIt.map { p =>
+    Observable.fromIterator(iteratePartitions(partMethod, chunkMethod).map { p =>
       shardStats.partitionsQueried.increment()
       p
     })

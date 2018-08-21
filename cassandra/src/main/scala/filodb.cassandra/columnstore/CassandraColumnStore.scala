@@ -1,7 +1,6 @@
 package filodb.cassandra.columnstore
 
 import java.net.InetSocketAddress
-import java.nio.ByteBuffer
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -12,14 +11,12 @@ import kamon.Kamon
 import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
-import org.jctools.maps.NonBlockingHashMapLong
 
 import filodb.cassandra.{DefaultFiloSessionProvider, FiloCassandraConnector, FiloSessionProvider, Util}
 import filodb.cassandra.Util
 import filodb.core._
 import filodb.core.metadata.Dataset
 import filodb.core.store._
-import filodb.memory.format.UnsafeUtils
 
 /**
  * Implementation of a column store using Apache Cassandra tables.
@@ -247,7 +244,7 @@ trait CassandraChunkSource extends RawChunkSource with StrictLogging {
   val ingestionConsistencyLevel = ConsistencyLevel.valueOf(cassandraConfig.getString("ingestion-consistency-level"))
   val tableCacheSize = config.getInt("columnstore.tablecache-size")
 
-  val chunkTableCache = concurrentCache[DatasetRef, ChunkTable](tableCacheSize)
+  val chunkTableCache = concurrentCache[DatasetRef, TimeSeriesChunksTable](tableCacheSize)
   val indexTableCache = concurrentCache[DatasetRef, IndexTable](tableCacheSize)
   val partitionIndexTableCache = concurrentCache[DatasetRef, PartitionIndexTable](tableCacheSize)
 
@@ -257,17 +254,7 @@ trait CassandraChunkSource extends RawChunkSource with StrictLogging {
     val sessionProvider = filoSessionProvider.getOrElse(new DefaultFiloSessionProvider(cassandraConfig))
   }
 
-  def multiPartScan(dataset: Dataset,
-                    partitions: Seq[Array[Byte]],
-                    indexTable: IndexTable): Observable[IndexRecord] = {
-    // Get each partition index observable concurrently.  As observables they are lazy
-    val its = partitions.map { partition =>
-      indexTable.getIndices(partition)
-    }
-    Observable.concat(its: _*)
-  }
-
-  val partParallelism = 3
+  val partParallelism = 4
 
   def readRawPartitions(dataset: Dataset,
                         columnIDs: Seq[Types.ColumnId],
@@ -280,7 +267,7 @@ trait CassandraChunkSource extends RawChunkSource with StrictLogging {
         (Nil, indexTable.getIndices(partition))
 
       case MultiPartitionScan(partitions, _) =>
-        (Nil, multiPartScan(dataset, partitions, indexTable))
+        (Nil, indexTable.getMultiIndices(partitions))
 
       case FilteredPartitionScan(CassandraTokenRangeSplit(tokens, _), filters) =>
         (filters, indexTable.scanIndices(tokens))
@@ -291,19 +278,44 @@ trait CassandraChunkSource extends RawChunkSource with StrictLogging {
     // and filter won't be necessary as we will have Lucene indexes to pull up specific partitions.
     // val filterFunc = KeyFilter.makePartitionFilterFunc(dataset, filters)
 
-    // NOTE: we use hashCode as an approx means to identify ByteBuffers/partition keys which are identical
-    indexRecords.sortedGroupBy(_.binPartition.hashCode)
-                .mapAsync(partParallelism) { case (_, binIndices) =>
-                  val infoBytes = binIndices.map(_.data.array)
-                  assembleRawPartData(dataset, binIndices.head.binPartition.array, infoBytes,
-                                      chunkMethod, columnIDs.toArray)
-                }
+    partMethod match {
+      // Compute minimum start time from index, then do efficient range query MULTIGET
+      case MultiPartitionScan(partitions, _) =>
+        val chunkTable = getOrCreateChunkTable(dataset.ref)
+        Observable.fromTask(startTimeFromIndex(indexRecords, chunkMethod.startTime, chunkMethod.endTime))
+          .flatMap { case startTime =>
+            chunkTable.readRawPartitionRange(partitions, columnIDs.toArray, startTime, chunkMethod.endTime)
+          }
+      case other: PartitionScanMethod =>
+        // NOTE: we use hashCode as an approx means to identify ByteBuffers/partition keys which are identical
+        indexRecords.sortedGroupBy(_.binPartition.hashCode)
+                    .mapAsync(partParallelism) { case (_, binIndices) =>
+                      val infoBytes = binIndices.map(_.data.array)
+                      assembleRawPartData(dataset, binIndices.head.binPartition.array, infoBytes,
+                                          chunkMethod, columnIDs.toArray)
+                    }
+    }
   }
 
-  def getOrCreateChunkTable(dataset: DatasetRef): ChunkTable = {
-    chunkTableCache.getOrElseUpdate(dataset,
-                                    { (dataset: DatasetRef) =>
-                                      new ChunkTable(dataset, clusterConnector, ingestionConsistencyLevel)(readEc) })
+  // Returns the minimum start time from all the ChunkInfos that are within [startTime, endTime) query range
+  // Needed so we can do range queries efficiently by chunkID
+  private def startTimeFromIndex(indexRecords: Observable[IndexRecord],
+                                 startTime: Long,
+                                 endTime: Long): Task[Long] = {
+    indexRecords.foldLeftL(Long.MaxValue) { case (curStart, IndexRecord(_, data)) =>
+      val infoStartTime = ChunkSetInfo.getStartTime(data.array)
+      val infoEndTime = ChunkSetInfo.getEndTime(data.array)
+      if (infoStartTime <= endTime && infoEndTime >= startTime) {
+        Math.min(curStart, infoStartTime)
+      } else {
+        curStart
+      }
+    }
+  }
+
+  def getOrCreateChunkTable(dataset: DatasetRef): TimeSeriesChunksTable = {
+    chunkTableCache.getOrElseUpdate(dataset, { (dataset: DatasetRef) =>
+      new TimeSeriesChunksTable(dataset, clusterConnector, ingestionConsistencyLevel)(readEc) })
   }
 
   def getOrCreateIndexTable(dataset: DatasetRef): IndexTable = {
@@ -326,7 +338,6 @@ trait CassandraChunkSource extends RawChunkSource with StrictLogging {
                                   chunkMethod: ChunkScanMethod,
                                   columnIds: Array[Types.ColumnId]): Task[RawPartData] = {
     val chunkTable = getOrCreateChunkTable(dataset.ref)
-    val chunkSets = new NonBlockingHashMapLong[RawChunkSet](32, false)
     logger.debug(s"Assembling chunks for partition ${dataset.partKeySchema.stringify(partKeyBytes)}...")
 
     val filteredInfos = chunkInfos.filter { infoBytes =>
@@ -334,29 +345,6 @@ trait CassandraChunkSource extends RawChunkSource with StrictLogging {
       ChunkSetInfo.getEndTime(infoBytes) >= chunkMethod.startTime
     }
 
-    filteredInfos.foreach { infoBytes =>
-      chunkSets.put(ChunkSetInfo.getChunkID(infoBytes),
-                    RawChunkSet(infoBytes, new Array[ByteBuffer](columnIds.size)))
-    }
-
-    val filteredIDs = filteredInfos.map(ChunkSetInfo.getChunkID)
-
-    val chunkFuts: Seq[Future[Unit]] = (0 until columnIds.size).map { pos =>
-      require(!Dataset.isPartitionID(columnIds(pos)))
-      chunkTable.readChunks(partKeyBytes, columnIds(pos), pos, filteredIDs, false)
-                .foreach { case SingleChunkInfo(id, pos, buf) =>
-                  chunkSets.get(id) match {
-                    case UnsafeUtils.ZeroPointer =>
-                      stats.incrChunkWithNoInfo()
-                    case RawChunkSet(_, chunkArray) =>
-                      chunkArray(pos) = buf
-                      stats.incrReadChunksets()
-                  }
-                }
-    }
-    // After chunks have read and populated chunksets, assembly RawPartData
-    Task.fromFuture(Future.sequence(chunkFuts)).map { x =>
-      RawPartData(partKeyBytes, filteredIDs.map(id => chunkSets.get(id)))
-    }
+    chunkTable.readRawPartitionData(partKeyBytes, columnIds, filteredInfos)
   }
 }

@@ -353,7 +353,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
                         .toListL.runAsync
                         .futureValue
                         .asInstanceOf[Seq[TimeSeriesPartition]]
-    parts.map(_.partID) shouldEqual (2 to 21)
+    parts.map(_.partID).toSet shouldEqual (2 to 21).toSet
   }
 
   it("should be able to skip ingestion/add partitions if there is no more space left") {
@@ -384,6 +384,6 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
                         .toListL.runAsync
                         .futureValue
                         .asInstanceOf[Seq[TimeSeriesPartition]]
-    parts.map(_.partID) shouldEqual (0 to 20)
+    parts.map(_.partID).toSet shouldEqual (0 to 20).toSet
   }
 }

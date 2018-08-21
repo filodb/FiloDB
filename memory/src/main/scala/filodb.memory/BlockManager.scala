@@ -223,6 +223,7 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
     logger.warn(s"Reclaiming all used blocks -- THIS BETTER BE A TEST!!!")
     usedBlocks.asScala.foreach(_.markReclaimable)
     tryReclaim(usedBlocks.size)
+    reclaimTimeOrderedBlocks()
   }
 
   def releaseBlocks(): Unit = {

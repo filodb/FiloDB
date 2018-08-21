@@ -2,7 +2,7 @@ package filodb.core.memstore
 
 /**
  * NOTE: This code was lifted from https://github.com/non/debox, all credit goes to the author of that repo
- * for this code other than my mods.
+ * for this code other than a few mods specific to our ingest record/partition key stuff.
  *
  * This is a customized version of debox's very fast Set of TSPartitions.  What we needed were custom methods
  * for membership based not on a TSPartition, but on the partition key of incoming ingest BinaryRecords, to
@@ -165,6 +165,19 @@ final class PartitionSet(as: Array[FiloPartition], bs: Array[Byte], n: Int, u: I
    */
   final def getOrAddWithIngestBR(ingestBase: Any, ingestOffset: Long,
                                  addFunc: => FiloPartition): FiloPartition = {
+    getWithIngestBR(ingestBase, ingestOffset) match {
+      case null =>
+        val newItem = addFunc
+        if (newItem != null) add(newItem)
+        newItem
+      case existing => existing
+    }
+  }
+
+  /**
+   * Returns the partition that matches the partition key in an ingest record, or NULL if it doesn't exist
+   */
+  final def getWithIngestBR(ingestBase: Any, ingestOffset: Long): FiloPartition = {
     @inline @tailrec def loop(i: Int, perturbation: Int): FiloPartition = {
       val j = i & mask
       val status = buckets(j)
@@ -177,13 +190,7 @@ final class PartitionSet(as: Array[FiloPartition], bs: Array[Byte], n: Int, u: I
       }
     }
     val i = ingestSchema.partitionHash(ingestBase, ingestOffset) & 0x7fffffff
-    loop(i, i) match {
-      case null =>
-        val newItem = addFunc
-        if (newItem != null) add(newItem)
-        newItem
-      case existing => existing
-    }
+    loop(i, i)
   }
 
   /**

@@ -87,6 +87,7 @@ class PartitionSetSpec extends MemFactoryCleanupTest with ScalaFutures {
   it("should add new TSPartition if one doesnt exist with getOrAddWithIngestBR") {
     partSet.isEmpty shouldEqual true
     partSet.getWithPartKeyBR(null, partKeyAddrs(0)) shouldEqual None
+    partSet.getWithIngestBR(null, ingestRecordAddrs(0)) shouldEqual null
 
     val part = makePart(0, dataset2, partKeyAddrs(0), bufferPool)
     val got = partSet.getOrAddWithIngestBR(null, ingestRecordAddrs(0), part)
@@ -95,6 +96,7 @@ class PartitionSetSpec extends MemFactoryCleanupTest with ScalaFutures {
     partSet.isEmpty shouldEqual false
     got shouldEqual part
     partSet.getWithPartKeyBR(null, partKeyAddrs(0)) shouldEqual Some(part)
+    partSet.getWithIngestBR(null, ingestRecordAddrs(0)) shouldEqual part
   }
 
   it("should not add new TSPartition if function returns null") {

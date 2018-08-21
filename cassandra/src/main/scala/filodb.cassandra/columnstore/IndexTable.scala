@@ -52,7 +52,9 @@ sealed class IndexTable(val dataset: DatasetRef, val connector: FiloCassandraCon
 
   val selectCql = s"SELECT partition, data FROM $tableString WHERE "
   val partitionFilter = "partition = ? AND indextype = 1"
+  val partInFilter = "partition IN ? AND indextype = 1"
   lazy val allPartReadCql = session.prepare(selectCql + partitionFilter)
+  lazy val inPartReadCql = session.prepare(selectCql + partInFilter)
 
   /**
    * Retrieves all indices from a single partition.
@@ -60,6 +62,12 @@ sealed class IndexTable(val dataset: DatasetRef, val connector: FiloCassandraCon
   def getIndices(binPartition: Array[Byte]): Observable[IndexRecord] = {
     val it = session.execute(allPartReadCql.bind(toBuffer(binPartition)))
                     .asScala.toIterator.map(fromRow)
+    Observable.fromIterator(it).handleObservableErrors
+  }
+
+  def getMultiIndices(partitions: Seq[Array[Byte]]): Observable[IndexRecord] = {
+    val query = inPartReadCql.bind().setList(0, partitions.map(toBuffer).asJava, classOf[ByteBuffer])
+    val it = session.execute(query).asScala.toIterator.map(fromRow)
     Observable.fromIterator(it).handleObservableErrors
   }
 

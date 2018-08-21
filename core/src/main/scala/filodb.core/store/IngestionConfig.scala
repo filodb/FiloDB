@@ -16,12 +16,16 @@ final case class StoreConfig(flushInterval: FiniteDuration,
                              shardMemSize: Long,
                              // Number of bytes to allocate to ingestion write buffers per shard
                              ingestionBufferMemSize: Long,
+                             // Number of WriteBuffers to allocate at once
                              allocStepSize: Int,
                              numToEvict: Int,
                              groupsPerShard: Int,
                              numPagesPerBlock: Int,
                              partIndexFlushMaxDelaySeconds: Int,
                              partIndexFlushMinDelaySeconds: Int,
+                             // Use a MultiPartitionScan (instead of single partition at a time) for on-demand paging
+                             multiPartitionODP: Boolean,
+                             demandPagingParallelism: Int,
                              demandPagingEnabled: Boolean) {
   import collection.JavaConverters._
   def toConfig: Config =
@@ -37,6 +41,8 @@ final case class StoreConfig(flushInterval: FiniteDuration,
                                "num-block-pages" -> numPagesPerBlock,
                                "part-index-flush-max-delay" -> (partIndexFlushMaxDelaySeconds + "s"),
                                "part-index-flush-min-delay" -> (partIndexFlushMinDelaySeconds + "s"),
+                               "multi-partition-odp" -> multiPartitionODP,
+                               "demand-paging-parallelism" -> demandPagingParallelism,
                                "demand-paging-enabled" -> demandPagingEnabled).asJava)
 }
 
@@ -53,6 +59,8 @@ object StoreConfig {
                                            |num-block-pages = 1000
                                            |part-index-flush-max-delay = 60 seconds
                                            |part-index-flush-min-delay = 30 seconds
+                                           |multi-partition-odp = false
+                                           |demand-paging-parallelism = 4
                                            |demand-paging-enabled = true
                                            |""".stripMargin)
   /** Pass in the config inside the store {}  */
@@ -70,6 +78,8 @@ object StoreConfig {
                 config.getInt("num-block-pages"),
                 config.as[FiniteDuration]("part-index-flush-max-delay").toSeconds.toInt,
                 config.as[FiniteDuration]("part-index-flush-min-delay").toSeconds.toInt,
+                config.getBoolean("multi-partition-odp"),
+                config.getInt("demand-paging-parallelism"),
                 config.getBoolean("demand-paging-enabled"))
   }
 }

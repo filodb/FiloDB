@@ -3,14 +3,19 @@ package filodb.cassandra.columnstore
 import java.lang.{Integer => jlInt, Long => jlLong}
 import java.nio.ByteBuffer
 
-import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.Future
 
 import com.datastax.driver.core.{BoundStatement, ConsistencyLevel}
+import monix.eval.Task
+import monix.execution.Scheduler
 import monix.reactive.Observable
+import org.jctools.maps.NonBlockingHashMapLong
 
 import filodb.cassandra.FiloCassandraConnector
 import filodb.core._
-import filodb.core.store.{compress, decompress, ChunkSetInfo, ChunkSinkStats, SingleChunkInfo}
+import filodb.core.metadata.Dataset
+import filodb.core.store._
+import filodb.memory.format.UnsafeUtils
 
 /**
  * Represents the table which holds the actual columnar chunks
@@ -21,7 +26,7 @@ import filodb.core.store.{compress, decompress, ChunkSetInfo, ChunkSinkStats, Si
 sealed class ChunkTable(val dataset: DatasetRef,
                         val connector: FiloCassandraConnector,
                         writeConsistencyLevel: ConsistencyLevel)
-                       (implicit ec: ExecutionContext) extends BaseDatasetTable {
+                       (implicit sched: Scheduler) extends BaseDatasetTable {
   import collection.JavaConverters._
 
   import filodb.cassandra.Util._
@@ -87,6 +92,35 @@ sealed class ChunkTable(val dataset: DatasetRef,
               .flatMap(it => Observable.fromIterator(it))
   }
 
+  def readRawPartitionData(partKeyBytes: Array[Byte],
+                           columnIds: Array[Int],
+                           chunkInfos: Seq[Array[Byte]]): Task[RawPartData] = {
+    val chunkSets = new NonBlockingHashMapLong[RawChunkSet](32, false)
+
+    chunkInfos.foreach { infoBytes =>
+      chunkSets.put(ChunkSetInfo.getChunkID(infoBytes),
+                    RawChunkSet(infoBytes, new Array[ByteBuffer](columnIds.size)))
+    }
+
+    val filteredIDs = chunkInfos.map(ChunkSetInfo.getChunkID)
+
+    val chunkFuts: Seq[Future[Unit]] = (0 until columnIds.size).map { pos =>
+      require(!Dataset.isPartitionID(columnIds(pos)))
+      this.readChunks(partKeyBytes, columnIds(pos), pos, filteredIDs, false)
+          .foreach { case SingleChunkInfo(id, pos, buf) =>
+            chunkSets.get(id) match {
+              case UnsafeUtils.ZeroPointer =>
+              case RawChunkSet(_, chunkArray) =>
+                chunkArray(pos) = buf
+            }
+          }
+    }
+    // After chunks have read and populated chunksets, assembly RawPartData
+    Task.fromFuture(Future.sequence(chunkFuts)).map { x =>
+      RawPartData(partKeyBytes, filteredIDs.map(id => chunkSets.get(id)))
+    }
+  }
+
   private def execReadChunk(colPos: Int,
                             query: BoundStatement): Future[Iterator[SingleChunkInfo]] = {
     session.executeAsync(query).toIterator.handleErrors.map { rowIt =>
@@ -100,11 +134,4 @@ sealed class ChunkTable(val dataset: DatasetRef,
   // the original 4-byte length header with bit 31 set, then compressed bytes.
   private def compressChunk(orig: ByteBuffer): ByteBuffer =
     if (compressChunks) compress(orig) else orig
-
-  private def decompressChunk(compressed: ByteBuffer): ByteBuffer = {
-    compressed.get(3) match {
-      case b if b < 0 => decompress(compressed)
-      case b          => compressed
-    }
-  }
 }

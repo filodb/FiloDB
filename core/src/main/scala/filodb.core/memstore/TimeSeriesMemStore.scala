@@ -82,8 +82,7 @@ extends MemStore with StrictLogging {
                    shardNum: Int,
                    stream: Observable[SomeData],
                    flushStream: Observable[FlushCommand] = FlushStream.empty,
-                   diskTimeToLiveSeconds: Int = 259200,
-                   flushIndex: Boolean = true)
+                   diskTimeToLiveSeconds: Int = 259200)
                   (errHandler: Throwable => Unit)
                   (implicit sched: Scheduler): CancelableFuture[Unit] = {
     // first change the shard state to index-bootstrapped. Then start normal ingestion

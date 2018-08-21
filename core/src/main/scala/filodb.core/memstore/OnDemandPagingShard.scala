@@ -32,6 +32,7 @@ TimeSeriesShard(dataset, storeConfig, shardNum, rawStore, metastore, evictionPol
   //  3. Fetch missing chunks through a SinglePartitionScan
   //  4. upload to memory and return partition
   // Definitely room for improvement, such as fetching multiple partitions at once, more parallelism, etc.
+  //scalastyle:off
   override def scanPartitions(columnIDs: Seq[Types.ColumnId],
                               partMethod: PartitionScanMethod,
                               chunkMethod: ChunkScanMethod = AllChunkScan): Observable[ReadablePartition] = {
@@ -41,31 +42,61 @@ TimeSeriesShard(dataset, storeConfig, shardNum, rawStore, metastore, evictionPol
     // 2. Timestamp column almost always needed
     // 3. We don't have a safe way to prevent JVM crashes if someone reads a column that wasn't paged in
     val allDataCols = dataset.dataColumns.map(_.id)
-    // 1. Fetch partitions from memstore
-    super.scanPartitions(columnIDs, partMethod, chunkMethod)
-      .flatMap { tsPart =>
 
-        // 2. Determine missing chunks per partition and what to fetch
-        chunksToFetch(tsPart, chunkMethod, pagingEnabled).map { rawChunkMethod =>
-          shardStats.partitionsPagedFromColStore.increment()
-          val singlePart = SinglePartitionScan(tsPart.partKeyBytes, tsPart.shard)
-          rawStore.readRawPartitions(dataset, allDataCols, singlePart, rawChunkMethod)
-            // NOTE: this executes the partMaker single threaded.  Needed for now due to concurrency constraints.
-            // In the future optimize this if needed.
-            // TODO: add Kamon Executors monitoring to monitor this thread pool.  Do this as part of perf optimization
-            .mapAsync { rawPart => partitionMaker.populateRawChunks(rawPart).executeOn(singleThreadPool) }
-            // This is needed so future computations happen in a different thread
-            .asyncBoundary(strategy)
-            // Unfortunately switchIfEmpty doesn't work.  Need to do this to ensure TSPartition will be returned
-            .countF
-            .map { count =>
-              tsPart
-            }
-        }.getOrElse {
-          // None means just return the partition itself, no modification
-          Observable.now(tsPart)
-        }
+    // 1. Fetch partitions from memstore
+    val indexIt = iteratePartitions(partMethod, chunkMethod)
+
+    // 2. Determine missing chunks per partition and what to fetch
+    val partKeyBytesToPage = new collection.mutable.ArrayBuffer[Array[Byte]]()
+    val inMemoryPartitions = new collection.mutable.ArrayBuffer[ReadablePartition]()
+    val methods = new collection.mutable.ArrayBuffer[ChunkScanMethod]
+    indexIt.foreach { p =>
+      chunksToFetch(p, chunkMethod, pagingEnabled).map { rawChunkMethod =>
+        methods += rawChunkMethod   // TODO: really determine range for all partitions
+        partKeyBytesToPage += p.partKeyBytes
+      }.getOrElse {
+        // add it to partitions which do not need to be ODP'ed, send these directly and first
+        inMemoryPartitions += p
       }
+    }
+
+    logger.debug(s"[$shardNum] Querying ${inMemoryPartitions.length} in memory partitions, ODPing ${methods.length}")
+
+    // NOTE: multiPartitionODP mode does not work with AllChunkScan and unit tests; namely missing partitions will not
+    // return data that is in memory.  TODO: fix
+    if (storeConfig.multiPartitionODP) {
+      val multiPart = MultiPartitionScan(partKeyBytesToPage, shardNum)
+      Observable.fromIterable(inMemoryPartitions) ++
+      (if (partKeyBytesToPage.nonEmpty) {
+        rawStore.readRawPartitions(dataset, allDataCols, multiPart, computeBoundingMethod(methods))
+          // NOTE: this executes the partMaker single threaded.  Needed for now due to concurrency constraints.
+          // In the future optimize this if needed.
+          .mapAsync { rawPart => partitionMaker.populateRawChunks(rawPart).executeOn(singleThreadPool) }
+          // This is needed so future computations happen in a different thread
+          .asyncBoundary(strategy)
+      } else { Observable.empty })
+    } else {
+      Observable.fromIterable(inMemoryPartitions) ++
+      Observable.fromIterable(partKeyBytesToPage.zip(methods))
+        .mapAsync(storeConfig.demandPagingParallelism) { case (partBytes, method) =>
+          rawStore.readRawPartitions(dataset, allDataCols, SinglePartitionScan(partBytes, shardNum), method)
+            .mapAsync { rawPart => partitionMaker.populateRawChunks(rawPart).executeOn(singleThreadPool) }
+            .defaultIfEmpty(getPartition(partBytes).get)
+            .headL
+        }
+    }
+  }
+
+  def computeBoundingMethod(methods: Seq[ChunkScanMethod]): ChunkScanMethod = if (methods.isEmpty) {
+    AllChunkScan
+  } else {
+    var minTime = Long.MaxValue
+    var maxTime = 0L
+    methods.foreach { m =>
+      minTime = Math.min(minTime, m.startTime)
+      maxTime = Math.max(maxTime, m.endTime)
+    }
+    RowKeyChunkScan(minTime, maxTime)
   }
 
   def chunksToFetch(partition: ReadablePartition,

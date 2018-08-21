@@ -92,8 +92,7 @@ trait MemStore extends ChunkSource {
                    shard: Int,
                    stream: Observable[SomeData],
                    flushStream: Observable[FlushCommand] = FlushStream.empty,
-                   diskTimeToLiveSeconds: Int = 259200,
-                   flushIndex: Boolean = true)
+                   diskTimeToLiveSeconds: Int = 259200)
                   (errHandler: Throwable => Unit)
                   (implicit sched: Scheduler): CancelableFuture[Unit]
 
