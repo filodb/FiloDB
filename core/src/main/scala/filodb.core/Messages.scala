@@ -14,17 +14,18 @@ trait Response
 trait ErrorResponse extends Response
 
 // Common responses
-case object NoSuchCommand extends ErrorResponse
-case object InconsistentState extends ErrorResponse  // for conditional updates - race condition detected!
-case object TooManyRequests extends ErrorResponse    // Need to retry later when limit dies down
-case object DataDropped extends ErrorResponse
+final case object NoSuchCommand extends ErrorResponse
+final case object InconsistentState extends ErrorResponse  // for conditional updates - race condition detected!
+final case object TooManyRequests extends ErrorResponse    // Need to retry later when limit dies down
+final case object DataDropped extends ErrorResponse
 
-case object NotFound extends Response
-case object NotApplied extends Response
-case object AlreadyExists extends Response
-case object Success extends Response
+final case object NotFound extends Response
+final case object NotApplied extends Response
+final case object AlreadyExists extends Response
+final case object Success extends Response
 
 // Common exceptions
-case class NotFoundError(what: String) extends Exception(what)
-case class StorageEngineException(t: Throwable) extends Exception(t)
-case class MetadataException(t: Throwable) extends Exception(t)
+final case class NotFoundError(what: String) extends Exception(what)
+final case class StorageEngineException(t: Throwable) extends Exception(t)
+final case class MetadataException(t: Throwable) extends Exception(t)
+final case class SystemLimitsReachedException(msg: String) extends Exception(msg)

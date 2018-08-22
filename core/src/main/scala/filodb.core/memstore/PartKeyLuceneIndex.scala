@@ -26,7 +26,7 @@ import filodb.core.metadata.Dataset
 import filodb.core.query.{ColumnFilter, Filter}
 import filodb.core.query.Filter._
 import filodb.core.store.StoreConfig
-import filodb.memory.UTF8StringMedium
+import filodb.memory.{BinaryRegionLarge, UTF8StringMedium}
 import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String => UTF8Str}
 
 object PartKeyLuceneIndex {
@@ -40,6 +40,15 @@ object PartKeyLuceneIndex {
   val MAX_STR_INTERN_ENTRIES = 10000
 
   val NOT_FOUND = -1
+
+  def bytesRefToUnsafeOffset(bytesRefOffset: Int): Int = bytesRefOffset + UnsafeUtils.arayOffset
+
+  def unsafeOffsetToBytesRefOffset(offset: Long): Int = offset.toInt - UnsafeUtils.arayOffset
+
+  def partKeyBytesRef(partKeyBase: Array[Byte], partKeyOffset: Long): BytesRef = {
+    new BytesRef(partKeyBase, unsafeOffsetToBytesRefOffset(partKeyOffset),
+      BinaryRegionLarge.numBytes(partKeyBase, partKeyOffset))
+  }
 }
 
 class PartKeyLuceneIndex(dataset: Dataset, shardNum: Int, storeConfig: StoreConfig) extends StrictLogging {
@@ -81,8 +90,8 @@ class PartKeyLuceneIndex(dataset: Dataset, shardNum: Int, storeConfig: StoreConf
                                                            UTF8StringMedium.numBytes(keyBase, keyOffset)),
                                                _.toString)
       val value = new BytesRef(valueBase.asInstanceOf[Array[Byte]],
-        (valueOffset + 2).toInt - UnsafeUtils.arayOffset, //valueOffset is relative to arrayOffset
-        UTF8StringMedium.numBytes(valueBase, valueOffset))
+                               unsafeOffsetToBytesRefOffset(valueOffset + 2), // add 2 to move past numBytes
+                               UTF8StringMedium.numBytes(valueBase, valueOffset))
       addIndexEntry(key, value, index)
     }
   }
@@ -127,16 +136,29 @@ class PartKeyLuceneIndex(dataset: Dataset, shardNum: Int, storeConfig: StoreConf
     indexWriter.deleteDocuments(deleteQuery)
   }
 
-  def removePartKeysEndedBefore(endedBefore: Long): Unit = {
+  /**
+    * Use to delete partitions that were ingesting before retention period
+    * @return partIds of deleted partitions
+    */
+  def removePartKeysEndedBefore(endedBefore: Long): IntIterator = {
+    val collector = new PartIdCollector()
     val deleteQuery = LongPoint.newRangeQuery(PartKeyLuceneIndex.END_TIME, 0, endedBefore)
+    searcherManager.acquire().search(deleteQuery, collector)
     indexWriter.deleteDocuments(deleteQuery)
+    collector.intIterator()
   }
 
   def indexRamBytes: Long = indexWriter.ramBytesUsed()
 
-  def indexNumEntries: Long = indexWriter.numDocs() // excludes tombstones if called after flush
+  /**
+    * Number of documents in flushed index, excludes tombstones for deletes
+    */
+  def indexNumEntries: Long = indexWriter.numDocs()
 
-  def indexNumEntriesWithTombstones: Long = indexWriter.maxDoc() // includes tombstones if called after flush
+  /**
+    * Number of documents in flushed index, includes tombstones for deletes
+    */
+  def indexNumEntriesWithTombstones: Long = indexWriter.maxDoc()
 
   def closeIndex(): Unit = {
     flushThread.close()
@@ -161,7 +183,7 @@ class PartKeyLuceneIndex(dataset: Dataset, shardNum: Int, storeConfig: StoreConf
           //scalastyle:on
           override def next(): UTF8Str = {
             val valu = BytesRef.deepCopyOf(nextVal) // copy is needed since lucene uses a mutable cursor underneath
-            val ret = new UTF8Str(valu.bytes, valu.offset + UnsafeUtils.arayOffset, valu.length)
+            val ret = new UTF8Str(valu.bytes, bytesRefToUnsafeOffset(valu.offset), valu.length)
             nextVal = termsEnum.next()
             ret
           }
@@ -202,10 +224,9 @@ class PartKeyLuceneIndex(dataset: Dataset, shardNum: Int, storeConfig: StoreConf
                  endTime: Long = Long.MaxValue,
                  partKeyBytesRefOffset: Int = 0)
                 (partKeyNumBytes: Int = partKeyOnHeapBytes.length): Unit = {
-    indexWriter.deleteDocuments(IntPoint.newExactQuery(PART_ID, partId))
     val document = makeDocument(partKeyOnHeapBytes, partKeyBytesRefOffset, partKeyNumBytes, partId, startTime, endTime)
     logger.debug(s"Upserting document in shard=$shardNum for partId $partId with startTime=$startTime endTime=$endTime")
-    indexWriter.addDocument(document)
+    indexWriter.updateDocument(new Term(PART_ID, partId.toString), document)
   }
 
   private def makeDocument(partKeyOnHeapBytes: Array[Byte],
@@ -215,10 +236,10 @@ class PartKeyLuceneIndex(dataset: Dataset, shardNum: Int, storeConfig: StoreConf
     val document = new Document()
     luceneDocument.set(document) // threadlocal since we are not able to pass the document into mapconsumer
     for { i <- 0 until numPartColumns optimized } {
-      indexers(i).fromPartKey(partKeyOnHeapBytes, partKeyBytesRefOffset + UnsafeUtils.arayOffset, partId)
+      indexers(i).fromPartKey(partKeyOnHeapBytes, bytesRefToUnsafeOffset(partKeyBytesRefOffset), partId)
     }
     // partId
-    document.add(new IntPoint(PART_ID, partId))
+    document.add(new StringField(PART_ID, partId.toString, Store.NO)) // cant store as an IntPoint because of lucene bug
     document.add(new NumericDocValuesField(PART_ID, partId))
     // partKey
     val bytesRef = new BytesRef(partKeyOnHeapBytes, partKeyBytesRefOffset, partKeyNumBytes)
@@ -240,7 +261,7 @@ class PartKeyLuceneIndex(dataset: Dataset, shardNum: Int, storeConfig: StoreConf
     */
   def partKeyFromPartId(partId: Int): Option[BytesRef] = {
     val collector = new SinglePartKeyCollector()
-    searcherManager.acquire().search(IntPoint.newExactQuery(PART_ID, partId), collector)
+    searcherManager.acquire().search(new TermQuery(new Term(PART_ID, partId.toString)), collector)
     Option(collector.singleResult)
   }
 
@@ -249,7 +270,7 @@ class PartKeyLuceneIndex(dataset: Dataset, shardNum: Int, storeConfig: StoreConf
     */
   def startTimeFromPartId(partId: Int): Long = {
     val collector = new SingleStartTimeCollector()
-    searcherManager.acquire().search(IntPoint.newExactQuery(PART_ID, partId), collector)
+    searcherManager.acquire().search(new TermQuery(new Term(PART_ID, partId.toString)), collector)
     collector.singleResult
   }
 
@@ -267,6 +288,12 @@ class PartKeyLuceneIndex(dataset: Dataset, shardNum: Int, storeConfig: StoreConf
     coll.topKPartIDsBitmap()
   }
 
+  def foreachPartKeyStillIngesting(func: (Int, BytesRef) => Unit): Int = {
+    val coll = new ActionCollector(func)
+    searcherManager.acquire().search(LongPoint.newExactQuery(END_TIME, Long.MaxValue), coll)
+    coll.numHits
+  }
+
   def updatePartKeyWithEndTime(partKeyOnHeapBytes: Array[Byte],
                                partId: Int,
                                endTime: Long = Long.MaxValue,
@@ -278,14 +305,11 @@ class PartKeyLuceneIndex(dataset: Dataset, shardNum: Int, storeConfig: StoreConf
       logger.warn(s"Could not find in Lucene startTime for partId $partId. Using $startTime instead.",
         new IllegalStateException()) // assume this time series started retention period ago
     }
-    // updateDocument takes a Term query which is not possible on IntPoint partIds
-    // hence delete and add explicitly.
-    indexWriter.deleteDocuments(IntPoint.newExactQuery(PART_ID, partId))
     val updatedDoc = makeDocument(partKeyOnHeapBytes, partKeyBytesRefOffset, partKeyNumBytes,
                                   partId, startTime, endTime)
     logger.debug(s"Updating document in shard=$shardNum for partId $partId " +
       s"with startTime=$startTime and endTime=$endTime")
-    indexWriter.addDocument(updatedDoc)
+    indexWriter.updateDocument(new Term(PART_ID, partId.toString), updatedDoc)
   }
 
   /**
@@ -407,6 +431,28 @@ class SinglePartKeyCollector extends SimpleCollector {
   override def needsScores(): Boolean = false
 }
 
+class SinglePartIdCollector extends SimpleCollector {
+
+  var partIdDv: NumericDocValues = _
+  var singleResult: Int = PartKeyLuceneIndex.NOT_FOUND
+
+  // gets called for each segment
+  override def doSetNextReader(context: LeafReaderContext): Unit = {
+    partIdDv = context.reader().getNumericDocValues(PartKeyLuceneIndex.PART_ID)
+  }
+
+  // gets called for each matching document in current segment
+  override def collect(doc: Int): Unit = {
+    if (partIdDv.advanceExact(doc)) {
+      singleResult = partIdDv.longValue().toInt
+    } else {
+      throw new IllegalStateException("This shouldn't happen since every document should have a partKeyDv")
+    }
+  }
+
+  override def needsScores(): Boolean = false
+}
+
 /**
   * A collector that takes advantage of index sorting within segments
   * to collect the top-k results matching the query.
@@ -473,7 +519,7 @@ class TopKPartIdsCollector(limit: Int) extends Collector with StrictLogging {
 }
 
 class PartIdCollector extends SimpleCollector {
-  private val result = new EWAHCompressedBitmap()
+  val result = new EWAHCompressedBitmap()
   private var partIdDv: NumericDocValues = _
 
   override def needsScores(): Boolean = false
@@ -492,6 +538,32 @@ class PartIdCollector extends SimpleCollector {
   }
 
   def intIterator(): IntIterator = result.intIterator()
+}
+
+class ActionCollector(action: (Int, BytesRef) => Unit) extends SimpleCollector {
+  private var partIdDv: NumericDocValues = _
+  private var partKeyDv: BinaryDocValues = _
+  private var counter: Int = 0
+
+  override def needsScores(): Boolean = false
+
+  override def doSetNextReader(context: LeafReaderContext): Unit = {
+    partIdDv = context.reader().getNumericDocValues(PartKeyLuceneIndex.PART_ID)
+    partKeyDv = context.reader().getBinaryDocValues(PartKeyLuceneIndex.PART_KEY)
+  }
+
+  override def collect(doc: Int): Unit = {
+    if (partIdDv.advanceExact(doc) && partKeyDv.advanceExact(doc)) {
+      val partId = partIdDv.longValue().toInt
+      val partKey = partKeyDv.binaryValue()
+      action(partId, partKey)
+      counter += 1
+    } else {
+      throw new IllegalStateException("This shouldn't happen since every document should have a partIdDv && partKeyDv")
+    }
+  }
+
+  def numHits: Int = counter
 }
 
 class LuceneMetricsRouter(shard: Int) extends InfoStream with StrictLogging {

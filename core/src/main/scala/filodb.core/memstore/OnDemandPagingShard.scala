@@ -5,10 +5,10 @@ import scala.concurrent.ExecutionContext
 import monix.execution.Scheduler
 import monix.reactive.{Observable, OverflowStrategy}
 
+import filodb.core.Types
 import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.metadata.Dataset
 import filodb.core.store._
-import filodb.core.Types
 
 /**
  * Extends TimeSeriesShard with on-demand paging functionality by populating in-memory partitions with chunks from

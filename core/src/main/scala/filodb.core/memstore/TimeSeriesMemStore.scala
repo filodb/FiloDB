@@ -43,14 +43,6 @@ extends MemStore with StrictLogging {
   }
 
   /**
-    * WARNING: use only for testing.
-    */
-  def bootstrapIndexForTesting(dataset: DatasetRef): Unit =
-    datasets.get(dataset).foreach(_.values().asScala.foreach { s =>
-      s.onIndexBootstrapped()
-    })
-
-  /**
     * WARNING: use only for testing. Not performant
     */
   def commitIndexForTesting(dataset: DatasetRef): Unit =
@@ -85,9 +77,12 @@ extends MemStore with StrictLogging {
                    diskTimeToLiveSeconds: Int = 259200)
                   (errHandler: Throwable => Unit)
                   (implicit sched: Scheduler): CancelableFuture[Unit] = {
-    // first change the shard state to index-bootstrapped. Then start normal ingestion
-    val ingestCommands = Observable.now(IndexBootstrapped) ++ Observable.merge(stream, flushStream)
+    val ingestCommands = Observable.merge(stream, flushStream)
     ingestStream(dataset, shardNum, ingestCommands, diskTimeToLiveSeconds)(errHandler)
+  }
+
+  def recoverIndex(dataset: DatasetRef, shard: Int)(implicit sched: Scheduler): Future[Unit] = {
+    getShardE(dataset, shard).recoverIndex()
   }
 
   // NOTE: Each ingestion message is a SomeData which has a RecordContainer, which can hold hundreds or thousands
@@ -102,8 +97,6 @@ extends MemStore with StrictLogging {
     val shard = getShardE(dataset, shardNum)
     combinedStream.map {
                     case d: SomeData =>       shard.ingest(d)
-                                              None
-                    case IndexBootstrapped => shard.onIndexBootstrapped()
                                               None
                     // The write buffers for all partitions in a group are switched here, in line with ingestion
                     // stream.  This avoids concurrency issues and ensures that buffers for a group are switched
@@ -129,12 +122,7 @@ extends MemStore with StrictLogging {
     val shard = getShardE(dataset, shardNum)
     shard.setGroupWatermarks(checkpoints)
     var targetOffset = checkpoints.values.min + reportingInterval
-    val recoveryCmds: Observable[DataOrCommand] = Observable.merge(stream, shard.indexRecoveryStream)
-    recoveryCmds.map {
-      case ing: SomeData =>     shard.ingest(ing)
-      case ind: IndexData =>    shard.recoverIndex(ind); Long.MinValue
-      case a: Any => throw new IllegalStateException(s"Unexpected DataOrCommand $a")
-    }.collect { // deal with long only. ignore output of index recovery
+    stream.map(shard.ingest(_)).collect {
       case offset: Long if offset > targetOffset =>
         targetOffset += reportingInterval
         offset

@@ -2,7 +2,6 @@ package filodb.core.memstore
 
 import scala.concurrent.Future
 
-import com.googlecode.javaewah.EWAHCompressedBitmap
 import monix.execution.{CancelableFuture, Scheduler}
 import monix.reactive.Observable
 
@@ -21,9 +20,8 @@ sealed trait DataOrCommand
 // Typically one RecordContainer is a single Kafka message, a container with multiple BinaryRecords
 final case class SomeData(records: RecordContainer, offset: Long) extends DataOrCommand
 final case class IndexData(timeBucket: Int, segment: Int, records: RecordContainer) extends DataOrCommand
-final case object IndexBootstrapped extends DataOrCommand
 final case class FlushCommand(groupNum: Int) extends DataOrCommand
-final case class FlushIndexTimeBuckets(partIdsToPersist: EWAHCompressedBitmap, timeBucket: Int)
+final case class FlushIndexTimeBuckets(timeBucket: Int)
 
 final case class FlushGroup(shard: Int, groupNum: Int, flushWatermark: Long, diskTimeToLiveSeconds: Int,
                             flushTimeBuckets: Option[FlushIndexTimeBuckets])
@@ -95,6 +93,9 @@ trait MemStore extends ChunkSource {
                    diskTimeToLiveSeconds: Int = 259200)
                   (errHandler: Throwable => Unit)
                   (implicit sched: Scheduler): CancelableFuture[Unit]
+
+
+  def recoverIndex(dataset: DatasetRef, shard: Int)(implicit sched: Scheduler): Future[Unit]
 
   /**
    * Sets up streaming recovery of a shard from ingest records.  This is a separate API for several reasons:

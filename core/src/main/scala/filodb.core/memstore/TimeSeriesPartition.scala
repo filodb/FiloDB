@@ -237,17 +237,13 @@ extends ReadablePartition with MapHolder {
     if (numChunks == 0) Long.MinValue else ChunkSetInfo(offheapInfoMap.first(this)).startTime
 
   /**
-    * Get the timestamp of last sample which will be used as endTime for
-    * the partition when indexing. Returns Long.MaxValue if partition
-    * has a write buffer and is currently ingesting.
+    * Timestamp of most recent sample in memory. If none, returns -1
     *
-    * Note that for a small period when buffers have swapped and new
-    * samples have not arrived, this method may provide an end time while
-    * the series is still ingesting. Don't use if this is an issue for
-    * your use case.
+    * Remember that -1 can be returned even when there may be data in Cassandra that has
+    * not been paged into memory
     */
-  final def ingestionEndTime: Long = {
-    if (appendingChunkLen > 0 || numChunks == 0) Long.MaxValue // still ingesting or have no chunks
+  final def timestampOfLatestSample: Long = {
+    if (numChunks == 0) -1
     else infoLast.endTime
   }
 

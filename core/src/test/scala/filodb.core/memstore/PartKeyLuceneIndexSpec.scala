@@ -1,5 +1,6 @@
 package filodb.core.memstore
 
+import scala.collection.mutable.ArrayBuffer
 import scala.util.Random
 
 import com.googlecode.javaewah.IntIterator
@@ -81,20 +82,26 @@ class PartKeyLuceneIndexSpec extends FunSpec with Matchers with BeforeAndAfter {
 
   }
 
-  it("should upsert part keys with endtime and parse filters correctly") {
-    val start = System.currentTimeMillis()
+  it("should upsert part keys with endtime and foreachPartKeyStillIngesting should work") {
     // Add the first ten keys and row numbers
     partKeyFromRecords(dataset6, records(dataset6, readers.take(10)), Some(partBuilder))
       .zipWithIndex.foreach { case (addr, i) =>
-      val time = System.currentTimeMillis()
-      keyIndex.addPartKey(partKeyOnHeap(dataset6, ZeroPointer, addr), i, time)()
-      keyIndex.upsertPartKey(partKeyOnHeap(dataset6, ZeroPointer, addr), i, time, time + 300)()
+        val time = System.currentTimeMillis()
+        keyIndex.addPartKey(partKeyOnHeap(dataset6, ZeroPointer, addr), i, time)()
+        if (i%2 == 0) keyIndex.upsertPartKey(partKeyOnHeap(dataset6, ZeroPointer, addr), i, time, time + 300)()
     }
     keyIndex.commitBlocking()
 
     keyIndex.indexNumEntries shouldEqual 10
-  }
 
+    val partIdsIngesting = ArrayBuffer[Int]()
+    val numHits = keyIndex.foreachPartKeyStillIngesting { (id, key) =>
+      partIdsIngesting += id
+    }
+    numHits shouldEqual 5
+    partIdsIngesting shouldEqual Seq(1, 3, 5, 7, 9)
+
+  }
 
   it("should update part keys with endtime and parse filters correctly") {
     val start = System.currentTimeMillis()
@@ -204,15 +211,15 @@ class PartKeyLuceneIndexSpec extends FunSpec with Matchers with BeforeAndAfter {
     partNums1.toSeq shouldEqual Seq.empty
   }
 
-  it("should be able to fetch partKey from partId") {
+  it("should be able to fetch partKey from partId and partId from partKey") {
     // Add the first ten keys and row numbers
     partKeyFromRecords(dataset6, records(dataset6, readers.take(10)), Some(partBuilder))
       .zipWithIndex.foreach { case (addr, i) =>
       val partKeyBytes = partKeyOnHeap(dataset6, ZeroPointer, addr)
       keyIndex.addPartKey(partKeyBytes, i, System.currentTimeMillis())()
       keyIndex.commitBlocking()
-      val partKeyFromIndex = keyIndex.partKeyFromPartId(i).get
-      partKeyFromIndex.bytes shouldEqual partKeyBytes
+      keyIndex.partKeyFromPartId(i).get.bytes shouldEqual partKeyBytes
+//      keyIndex.partIdFromPartKey(new BytesRef(partKeyBytes)) shouldEqual i
     }
   }
 

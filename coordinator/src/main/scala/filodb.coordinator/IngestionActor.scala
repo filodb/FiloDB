@@ -98,6 +98,7 @@ private[filodb] final class IngestionActor(dataset: Dataset,
       }
 
       val ingestion = for {
+        _ <- memStore.recoverIndex(dataset.ref, e.shard)
         checkpoints <- memStore.metastore.readCheckpoints(dataset.ref, e.shard) }
       yield {
         if (checkpoints.isEmpty) {
