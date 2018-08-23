@@ -480,8 +480,12 @@ class TimeSeriesShard(val dataset: Dataset,
   private def addPartKeyToTimebucket(indexRb: RecordBuilder, p: TimeSeriesPartition) = {
     var startTime = partKeyIndex.startTimeFromPartId(p.partID)
     if (startTime == -1) startTime = p.earliestTime// can remotely happen since lucene reads are eventually consistent
-    var endTime = p.timestampOfLatestSample
-    if (endTime == -1) endTime = System.currentTimeMillis() // if no sample after reboot
+    val endTime = if (activelyIngesting.get(p.partID)) {
+      Long.MaxValue
+    } else {
+      val et = p.timestampOfLatestSample  // -1 can be returned if no sample after reboot
+      if (et == -1) System.currentTimeMillis() else et
+    }
     indexRb.startNewRecord()
     indexRb.addLong(startTime)
     indexRb.addLong(endTime)
