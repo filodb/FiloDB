@@ -35,31 +35,28 @@ class ClusterApiRoute(clusterProxy: ActorRef) extends FiloRoute with StrictLoggi
         }
       }
     } ~
-    /**
-      * GET /api/v1/cluster/<dataset>/statusByAddress - shard health status grouped by node address
-      * Sample output as follows:
-      * {{{
-      *  {
-      *     "status": "success",
-      *     "data": [
-      *         {
-      *             "address": "akka.tcp://filo-standalone@23.13.16.45:91007",
-      *             "shardList": [
-      *                 {
-      *                     "shard": 0,
-      *                     "status": "ShardStatusActive"
-      *                 },
-      *                 {
-      *                     "shard": 1,
-      *                     "status": "ShardStatusRecovery(94)"
-      *                 }
-      *             ]
-      *         }
-      *     ]
-      *  }
-      * }}}
-      *
-      */
+    // GET /api/v1/cluster/<dataset>/statusByAddress - shard health status grouped by node address
+    // Sample output as follows:
+    // {{{
+    //  {
+    //     "status": "success",
+    //     "data": [
+    //         {
+    //             "address": "akka.tcp://filo-standalone@23.13.16.45:91007",
+    //             "shardList": [
+    //                 {
+    //                     "shard": 0,
+    //                     "status": "ShardStatusActive"
+    //                 },
+    //                 {
+    //                     "shard": 1,
+    //                     "status": "ShardStatusRecovery(94)"
+    //                 }
+    //             ]
+    //         }
+    //     ]
+    //  }
+    // }}}
     path(Segment / "statusByAddress") { dataset =>
       get {
           onSuccess(asyncAsk(clusterProxy, GetShardMap(DatasetRef.fromDotString(dataset)))) {
@@ -98,17 +95,14 @@ class ClusterApiRoute(clusterProxy: ActorRef) extends FiloRoute with StrictLoggi
         }
       }
     } ~
-    /**
-      * POST /api/v1/cluster/<dataset>/reassignshards - shard reassignment request
-      * Sample input as follows:
-      * {{{
-      *  {
-      *    "address": "akka.tcp://filo-standalone@23.13.16.45:91007",
-      *    "shardList": [23, 24]
-      *  }
-      * }}}
-      *
-      */
+    // POST /api/v1/cluster/<dataset>/reassignshards - shard reassignment request
+    // Sample input as follows:
+    // {{{
+    //  {
+    //    "address": "akka.tcp://filo-standalone@23.13.16.45:91007",
+    //    "shardList": [23, 24]
+    //  }
+    // }}}
     path(Segment / "reassignshards") { dataset =>
       post {
         entity(as[ReassignShardConfig]) { shardConfig =>
