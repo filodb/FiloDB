@@ -9,7 +9,9 @@
     - [POST /admin/loglevel/{loggerName}](#post-adminloglevelloggername)
     - [GET /api/v1/cluster](#get-apiv1cluster)
     - [GET /api/v1/cluster/{dataset}/status](#get-apiv1clusterdatasetstatus)
+    - [GET /api/v1/cluster/{dataset}/statusByAddress](#get-apiv1clusterdatasetstatusbyaddress)
     - [POST /api/v1/cluster/{dataset}](#post-apiv1clusterdataset)
+    - [POST /api/v1/cluster/{dataset}/reassignshards](#post-apiv1clusterdatasetreassignshards)
   - [Prometheus-compatible APIs](#prometheus-compatible-apis)
     - [GET /api/v1/label/{label_name}/values](#get-apiv1labellabel_namevalues)
     - [GET /api/v1/query](#get-apiv1query)
@@ -73,6 +75,35 @@ Returns text explaining what got changed (sorry not JSON).
 }
 ```
 
+#### GET /api/v1/cluster/{dataset}/statusByAddress
+
+* Returns the shard status grouped by node for the given dataset
+* Returns 404 if the dataset is not currently setup for ingestion
+
+```json
+{
+    "status": "success",   
+    "data": [
+        { "address": "akka://filo-server@127.0.0.1:2552",
+          "shardList": [
+                        { "shard": 0,
+                          "status": "ShardStatusActive" },
+                        { "shard": 1,
+                          "status": "ShardStatusRecovery(94)"}
+          ]
+        },
+        { "address": "akka://filo-server@127.0.0.1:53532",
+          "shardList": [
+                        { "shard": 2,
+                          "status": "ShardStatusActive" },
+                        { "shard": 3,
+                          "status": "ShardStatusActive"}
+          ]
+        }
+    ]
+}
+```
+
 #### POST /api/v1/cluster/{dataset}
 
 Initializes streaming ingestion of a dataset across the whole FiloDB cluster. 
@@ -91,7 +122,28 @@ The POST body describes the ingestion source and parameters, such as Kafka confi
 }
 ```
 
-It is not really an error, but it means the dataset is already ingesting and there is no need to set it up.
+#### POST /api/v1/cluster/{dataset}/reassignshards
+
+Reassigns the shards to the given node. 
+The POST body describes the reassign shard config that should have both destination node address and the list of shards to be assigned.
+
+* POST body should be a ReassignShardConfig in JSON format as follows:
+```json
+{
+    "address": "akka.tcp://filo-standalone@127.0.0.1:2552",
+    "shardList": [
+       2, 3
+    ]
+}
+```
+* A successful POST results in something like `{"status": "success", "data": []}`
+* 400 is returned if the POST body cannot be parsed or any of the following validation fails:
+     1. If the given dataset does not exist
+     2. If the given node doesn not exist
+     3. Check if all the given shards are valid
+        1. Shard number should be >= 0 and < maxAllowedShard
+        2. Shard should not be already assigned to given node in ReassignShards request
+     4. Verify whether there are enough capacity to add new shards on the node
 
 ### Prometheus-compatible APIs
 

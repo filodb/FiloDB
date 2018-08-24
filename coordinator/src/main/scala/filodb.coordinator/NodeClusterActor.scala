@@ -13,7 +13,7 @@ import com.typesafe.config.{Config, ConfigFactory}
 
 import filodb.core._
 import filodb.core.metadata.Dataset
-import filodb.core.store.{IngestionConfig, MetaStore, StoreConfig}
+import filodb.core.store.{IngestionConfig, MetaStore, ReassignShardConfig, StoreConfig}
 
 object NodeClusterActor {
 
@@ -35,6 +35,8 @@ object NodeClusterActor {
   final case class IngestionSource(streamFactoryClass: String, config: Config = ConfigFactory.empty)
 
   case class GetDatasetFromRef(datasetRef: DatasetRef)
+
+  final case class ReassignShards(reassignmentConfig: ReassignShardConfig, datasetRef: DatasetRef)
 
   /**
    * Sets up a dataset for streaming ingestion and querying, with specs for sharding.
@@ -77,6 +79,7 @@ object NodeClusterActor {
   private[coordinator] final case class DatasetExists(ref: DatasetRef) extends ErrorResponse
   final case class DatasetUnknown(ref: DatasetRef) extends ErrorResponse
   final case class BadSchema(message: String) extends ErrorResponse
+  final case class BadData(message: String) extends ErrorResponse
 
   // Cluste state info commands
   // Returns a Seq[DatasetRef]
@@ -333,6 +336,7 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
     case e: AddCoordinator        => addCoordinator(e)
     case RemoveStaleCoordinators  => shardManager.removeStaleCoordinators()
     case e: SetupDataset          => setupDataset(e, sender())
+    case e: ReassignShards        => shardManager.reassignShards(e, sender())
   }
 
   def subscriptionHandler: Receive = LoggingReceive {

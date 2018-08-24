@@ -17,3 +17,5 @@ object HttpSchema {
 }
 
 final case class HttpShardState(shard: Int, status: String, address: String)
+final case class HttpShardDetails(shard: Int, status: String)
+final case class HttpShardStateByAddress(address: String, shardList: Seq[HttpShardDetails])

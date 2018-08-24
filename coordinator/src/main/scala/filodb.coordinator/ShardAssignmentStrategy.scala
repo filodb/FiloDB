@@ -22,7 +22,16 @@ trait ShardAssignmentStrategy {
                        dataset: DatasetRef,
                        resources: DatasetResourceSpec,
                        mapper: ShardMapper): Seq[Int]
-}
+
+  /**
+    * Method to find the remaining capacity left to take new shards for a co-ordinator
+    */
+  def remainingCapacity(coord: ActorRef,
+                        dataset: DatasetRef,
+                        resources: DatasetResourceSpec,
+                        mapper: ShardMapper): Int
+
+  }
 
 object DefaultShardAssignmentStrategy extends ShardAssignmentStrategy with StrictLogging {
 
@@ -30,14 +39,34 @@ object DefaultShardAssignmentStrategy extends ShardAssignmentStrategy with Stric
                        dataset: DatasetRef,
                        resources: DatasetResourceSpec,
                        mapper: ShardMapper): Seq[Int] = {
-    // We want to assign shards evenly to coords as they come up. Simply using
-    // ceil or floor of shardToNode ratio wont spread it evenly. Instead, at any time
-    // we divide unassigned shards by unassigned coords to figure out number of shards to
-    // assign to a new coord
+
+    val numNewShards = remainingCapacity(coord, dataset, resources, mapper)
+    val unassignedShards = mapper.unassignedShards
+
+    if (unassignedShards.nonEmpty && numNewShards > 0) {
+      unassignedShards.take(numNewShards)
+    } else {
+      Seq.empty
+    }
+  }
+
+  /**
+    * We want to assign shards evenly to coords as they come up. Simply using
+    * ceil or floor of shardToNode ratio wont spread it evenly. Instead, at any time
+    * we divide unassigned shards by unassigned coords to figure out number of shards to
+    * assign to a new coord. In case unassignedShards is 16 and numUnassignedCoords is 5,
+    * first coord will get 4 shards and rest all coords will get 3 shards respectively.
+    *
+    * @return - the number of new shards that can be assigned to the given coordinator
+    */
+  def remainingCapacity(coord: ActorRef,
+                        dataset: DatasetRef,
+                        resources: DatasetResourceSpec,
+                        mapper: ShardMapper): Int = {
     val unassignedShards = mapper.unassignedShards
     val numUnassignedShards = unassignedShards.size
 
-    if (!unassignedShards.isEmpty) {
+    if (unassignedShards.nonEmpty) {
       val numAssignedCoords = mapper.numAssignedCoords
       val numUnassignedCoords = resources.minNumNodes - numAssignedCoords
       // This coord may already have some shards assigned. We need to check if there is room for more. This can
@@ -53,27 +82,31 @@ object DefaultShardAssignmentStrategy extends ShardAssignmentStrategy with Stric
       val numAssignableToCoord = (shards.toDouble / nodes).ceil.toInt
       // DivideByZero check: nodes should be >= 1 because current coord is always included in count
 
-      val remainingCapacity = Math.max(0, numAssignableToCoord - numAlreadyAssignedToCoord)
+      // Max shards allowed on a single node
+      val maxCapacity = (resources.numShards.toDouble / resources.minNumNodes).ceil.toInt
+      val assignableToCoord = if (numAssignableToCoord > maxCapacity) maxCapacity else numAssignableToCoord
+
+      val remainingCapacity = Math.max(0, assignableToCoord - numAlreadyAssignedToCoord)
 
       logger.debug(s"""
-           |shardAssignments:
-           |   coord=$coord
-           |   dataset=$dataset
-           |   resources=$resources
-           |   unassignedShards=$unassignedShards
-           |   numUnassignedShards=$numUnassignedShards
-           |   numAlreadyAssignedToCoord=$numAlreadyAssignedToCoord
-           |   numAssignedCoords=$numAssignedCoords
-           |   numUnassignedCoords=$numUnassignedCoords
-           |   shards=$shards
-           |   nodes=$nodes
-           |   numAssignableToCoord=$numAssignableToCoord
-           |   remainingCapacity=$remainingCapacity
+                      |shardAssignments:
+                      |   coord=$coord
+                      |   dataset=$dataset
+                      |   resources=$resources
+                      |   unassignedShards=$unassignedShards
+                      |   numUnassignedShards=$numUnassignedShards
+                      |   numAlreadyAssignedToCoord=$numAlreadyAssignedToCoord
+                      |   numAssignedCoords=$numAssignedCoords
+                      |   numUnassignedCoords=$numUnassignedCoords
+                      |   shards=$shards
+                      |   nodes=$nodes
+                      |   numAssignableToCoord=$numAssignableToCoord
+                      |   remainingCapacity=$remainingCapacity
          """.stripMargin)
 
-      unassignedShards.take(remainingCapacity)
+      remainingCapacity
     } else {
-      Seq.empty
+      0
     }
   }
 

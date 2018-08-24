@@ -33,6 +33,13 @@ class ShardMapper(val numShards: Int) extends Serializable {
   private final val statusMap = Array.fill[ShardStatus](numShards)(ShardStatusUnassigned)
   private final val log2NumShardsOneBits = (1 << log2NumShards) - 1 // results in log2NumShards one bits
 
+  def copy(): ShardMapper = {
+    val shardMapperNew = new ShardMapper(numShards)
+    shardMap.copyToArray(shardMapperNew.shardMap)
+    statusMap.copyToArray(shardMapperNew.statusMap)
+    shardMapperNew
+  }
+
   // spreadMask is precomputed for all possible spreads.
   // The spread is the array index. Value is (log2NumShards-spread) bits set to 1 followed by spread bits set to 0
   private final val spreadMask = Array.tabulate[Int](log2NumShards + 1) { i =>

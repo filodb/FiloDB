@@ -3,6 +3,7 @@ package filodb.http
 import scala.concurrent.duration._
 
 import akka.actor.ActorSystem
+import akka.http.scaladsl.model.headers.RawHeader
 import akka.http.scaladsl.model.{StatusCodes, ContentTypes}
 import akka.http.scaladsl.testkit.ScalatestRouteTest
 import akka.testkit.TestProbe
@@ -12,6 +13,7 @@ import org.scalatest.concurrent.ScalaFutures
 
 import filodb.coordinator._
 import filodb.core.{GdeltTestData, TestData, Success}
+import filodb.core.store.ReassignShardConfig
 
 object ClusterApiRouteSpec extends ActorSpecConfig
 
@@ -103,6 +105,31 @@ with ScalatestRouteTest with ScalaFutures {
         resp.status shouldEqual "success"
         resp.data should have length 4
         resp.data.map(_.status).filter(_ contains "Active") should have length 2  // Two active nodes
+      }
+    }
+
+    it("should return shard status groupByAddress after dataset is setup") {
+      setupDataset()
+      // Give the coordinator nodes some time to get started
+      Thread sleep 1000
+      Get(s"/api/v1/cluster/${dataset6.ref}/statusByAddress") ~> clusterRoute ~> check {
+        handled shouldBe true
+        status shouldEqual StatusCodes.OK
+        contentType shouldEqual ContentTypes.`application/json`
+        val resp = responseAs[HttpList[HttpShardStateByAddress]]
+        resp.status shouldEqual "success"
+      }
+    }
+  }
+
+  describe("/api/v1/cluster/<dataset>/reassignshards") {
+    it("should return 200 with valid config") {
+      val conf = ReassignShardConfig("akka.tcp://filo-standalone@127.0.0.1:25523", Seq(2, 5))
+      Post("/api/v1/cluster/gdelt/reassignshards", conf).withHeaders(RawHeader("Content-Type", "application/json")) ~> clusterRoute ~> check {
+        handled shouldBe true
+        status shouldEqual StatusCodes.BadRequest
+        responseAs[HttpError].status shouldEqual "error"
+        responseAs[HttpError].error shouldEqual "DatasetUnknown(gdelt)"
       }
     }
   }

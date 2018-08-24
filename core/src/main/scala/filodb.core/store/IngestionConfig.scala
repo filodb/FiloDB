@@ -50,6 +50,8 @@ final case class StoreConfig(flushInterval: FiniteDuration,
                                "demand-paging-enabled" -> demandPagingEnabled).asJava)
 }
 
+final case class ReassignShardConfig(address: String, shardList: Seq[Int])
+
 object StoreConfig {
   // NOTE: there are no defaults for flush interval and shard memory, those should be explicitly calculated
   val defaults = ConfigFactory.parseString("""

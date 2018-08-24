@@ -3,11 +3,12 @@ package filodb.coordinator
 import scala.collection.mutable
 import scala.util.{Failure, Success}
 
-import akka.actor.{ActorRef, Address}
+import akka.actor.{ActorRef, Address, AddressFromURIString}
 import com.typesafe.scalalogging.StrictLogging
+import org.scalactic._
 
 import filodb.coordinator.NodeClusterActor._
-import filodb.core.DatasetRef
+import filodb.core.{DatasetRef, ErrorResponse, Response, Success => SuccessResponse}
 import filodb.core.metadata.Dataset
 import filodb.core.store.StoreConfig
 
@@ -149,6 +150,95 @@ private[coordinator] final class ShardManager(strategy: ShardAssignmentStrategy)
   }
 
   /**
+    * Reassigns the shards for the given coordinator.
+    * Returns DatasetUnknown for dataset that does not exist.
+    */
+  def reassignShards(shardReassignReq: ReassignShards, ackTo: ActorRef): Unit = {
+    logger.info(s"Shard reAssignment request=${shardReassignReq.reassignmentConfig} " +
+      s"for dataSet=${shardReassignReq.datasetRef} ")
+    val answer: Response = validateRequestAndReassignShards(shardReassignReq, ackTo)
+                              .fold(_ => SuccessResponse, errorResponse => errorResponse)
+    ackTo ! answer
+  }
+
+  /**
+    * Validates the given shard reassignment request.
+    * Unassigns shard from current active node and reassigns to the new node only if valid.
+    *
+    * Performs the following validations serially:
+    *   1. Validate the given dataset
+    *   1. Validate whether the given node exists or not
+    *   2. Check if all the given shards are valid
+    *      i. Shard number should be >= 0 and < maxAllowedShard
+    *      ii. Shard should not be already assigned to given node in ReassignShards request
+    *   3. Verify whether there are enough capacity to add new shards on the node
+    *      Using ShardAssignmentStrategy get the remaining capacity of the node
+    *      Validate the same against shard list in the reassignment request
+    *
+    * @return - Validates and returns error message on failure and a unit if no validation error
+    */
+  def validateRequestAndReassignShards(shardReassignReq: ReassignShards, ackTo: ActorRef): Unit Or ErrorResponse = {
+
+    import OptionSugar._
+    def validateDataset(dataset: DatasetRef): ShardMapper Or ErrorResponse = {
+      _shardMappers.get(dataset).toOr(DatasetUnknown(dataset))
+    }
+
+    def validateCoordinator(address: String, shards: Seq[Int]): ActorRef Or ErrorResponse = {
+      _coordinators.get(AddressFromURIString(address)).toOr(BadData(s"$address not found"))
+    }
+
+    def validateShards(shards: Seq[Int], shardMapper: ShardMapper, coord: ActorRef): Seq[Int] Or ErrorResponse = {
+      val validShards: Seq[Int] = shards.filter(shard => shard >= 0 && shard < shardMapper.numShards).distinct
+      if (validShards.isEmpty || validShards.size != shards.size) {
+        Bad(BadSchema(s"Invalid shards found $shards. Valid shards are $validShards"))
+      } else if (validShards.exists(shard => shardMapper.coordForShard(shard) == coord)) {
+        Bad(BadSchema(s"Can not reassign shards to same node: $shards"))
+      } else Good(validShards)
+    }
+
+    def validateNodeCapacity(shardList: Seq[Int], shardMapper: ShardMapper, dataset: DatasetRef,
+                             resources: DatasetResourceSpec, coord: ActorRef): Unit Or ErrorResponse = {
+      val shardMapperNew = shardMapper.copy()
+      shardList.foreach(shard => shardMapperNew.updateFromEvent(
+                                    ShardDown(dataset, shard, shardMapperNew.coordForShard(shard))))
+      val assignable = strategy.remainingCapacity(coord, dataset, resources, shardMapperNew)
+      if (assignable <= 0 && shardList.size > assignable) {
+        Bad(BadSchema(s"Capacity exceeds. Can not allocate more shards to $coord"))
+      } else Good(())
+    }
+
+    for {
+      shardMapper <- validateDataset(shardReassignReq.datasetRef)
+      coordinator <- validateCoordinator(shardReassignReq.reassignmentConfig.address,
+                                         shardReassignReq.reassignmentConfig.shardList)
+      shards      <- validateShards(shardReassignReq.reassignmentConfig.shardList, shardMapper, coordinator)
+      _           <- validateNodeCapacity(shards, shardMapper, shardReassignReq.datasetRef,
+                                          _datasetInfo(shardReassignReq.datasetRef).resources, coordinator)
+    } yield {
+      unassignAndReassignShards(coordinator, shards, shardReassignReq.datasetRef, shardMapper)
+    }
+  }
+
+  /**
+    * For all the nodes in the request:
+    *   1. Shutdown shard from the node where it is running
+    *   2. Start the shard on the new node and send StartIngestion signal
+    */
+  def unassignAndReassignShards(actorRef: ActorRef,
+                                shards: Seq[Int],
+                                dataset: DatasetRef,
+                                shardMapper: ShardMapper): Unit = {
+    for { shard <-  shards} {
+      val curCoordinator = shardMapper.coordForShard(shard)
+      sendUnassignmentMessagesAndEvents(dataset, curCoordinator,
+                                        shardMapper, Seq(shard),
+                                        curCoordinator == ActorRef.noSender)
+      sendAssignmentMessagesAndEvents(dataset, actorRef, Seq(shard))
+    }
+  }
+
+  /**
     * Called after recovery of cluster singleton to remove assignment of stale member(s).
     * This is necessary after fail-over of the cluster singleton node because MemberRemoved
     * for failed singleton nodes are not consistently delivered to the node owning the new singleton.
@@ -170,7 +260,8 @@ private[coordinator] final class ShardManager(strategy: ShardAssignmentStrategy)
 
   private def removeCoordinator(coordinator: ActorRef): Unit = {
     for ((dataset, resources, mapper) <- datasetShardMaps) {
-      sendUnassignmentMessagesAndEvents(dataset, coordinator, mapper)
+      var shardsToDown = mapper.shardsForCoord(coordinator)
+      sendUnassignmentMessagesAndEvents(dataset, coordinator, mapper, shardsToDown)
       // try to reassign shards that were unassigned to other nodes that have room.
       assignShardsToNodes(dataset, mapper, resources)
     }
@@ -232,7 +323,8 @@ private[coordinator] final class ShardManager(strategy: ShardAssignmentStrategy)
     for {
       (_, coord) <- _coordinators
       mapper = _shardMappers(dataset)
-    } sendUnassignmentMessagesAndEvents(dataset, coord, mapper)
+      shardsToDown = mapper.shardsForCoord(coord)
+    } sendUnassignmentMessagesAndEvents(dataset, coord, mapper, shardsToDown)
     _datasetInfo remove dataset
     _shardMappers remove dataset
     _subscriptions = _subscriptions - dataset
@@ -306,8 +398,8 @@ private[coordinator] final class ShardManager(strategy: ShardAssignmentStrategy)
   private def sendUnassignmentMessagesAndEvents(dataset: DatasetRef,
                                                 coordinator: ActorRef,
                                                 mapper: ShardMapper,
+                                                shardsToDown: Seq[Int],
                                                 nodeUp: Boolean = true): Unit = {
-    val shardsToDown = mapper.shardsForCoord(coordinator)
     logger.info(s"Sending stop ingestion message for $dataset to coordinator $coordinator for shards $shardsToDown")
     for { shard <- shardsToDown } {
       val event = ShardDown(dataset, shard, coordinator)
