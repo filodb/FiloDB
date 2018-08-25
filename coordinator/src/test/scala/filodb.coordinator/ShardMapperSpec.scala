@@ -27,16 +27,16 @@ class ShardMapperSpec extends ActorTest(ShardMapperSpec.getNewSystem) {
     val partitionHash = "a=1;b=2;c=3".hashCode
 
     // Turns out that:
-    // shardKeyHash: 10001000111111100110111011011
-    // partitionHash: 10011101001111010111011100101111
+    // shardKeyHash:     10001000111111100110111011011 (0x111fcddb)
+    // partitionHash: 10011101001111010111011100101111 (0x9d3d772f)
 
-    mapper1.ingestionShard(shardKeyHash, partitionHash, 0) shouldEqual 27
-    mapper1.ingestionShard(shardKeyHash, partitionHash, 1) shouldEqual 27
-    mapper1.ingestionShard(shardKeyHash, partitionHash, 2) shouldEqual 27
-    mapper1.ingestionShard(shardKeyHash, partitionHash, 3) shouldEqual 31
-    mapper1.ingestionShard(shardKeyHash, partitionHash, 4) shouldEqual 31
-    mapper1.ingestionShard(shardKeyHash, partitionHash, 5) shouldEqual 15
-    mapper1.ingestionShard(shardKeyHash, partitionHash, 6) shouldEqual 47
+    mapper1.ingestionShard(shardKeyHash, partitionHash, 0) shouldEqual 0x1b
+    mapper1.ingestionShard(shardKeyHash, partitionHash, 1) shouldEqual 0x3b
+    mapper1.ingestionShard(shardKeyHash, partitionHash, 2) shouldEqual 0x2b
+    mapper1.ingestionShard(shardKeyHash, partitionHash, 3) shouldEqual 0x2b
+    mapper1.ingestionShard(shardKeyHash, partitionHash, 4) shouldEqual 0x2f
+    mapper1.ingestionShard(shardKeyHash, partitionHash, 5) shouldEqual 0x2f
+    mapper1.ingestionShard(shardKeyHash, partitionHash, 6) shouldEqual 0x2f
     intercept[IllegalArgumentException] {
       mapper1.ingestionShard(shardKeyHash, partitionHash, 7)
     }
@@ -56,29 +56,27 @@ class ShardMapperSpec extends ActorTest(ShardMapperSpec.getNewSystem) {
   }
 
   it("can getQueryShards given a shard key and spread") {
-
-
     val mapper1 = new ShardMapper(64)
     mapper1.numAssignedShards should equal(0)
     val shardKeyHash = ("someAppName" + "$" + "someMetricName").hashCode
 
     // Turns out that:
     // shardKeyHash: 10001000111111100110111011011
+    // & 0x03f => lower bits = 0x1b
 
     mapper1.registerNode(Seq(0, 10, 40, 42), ref1).isSuccess shouldBe true
     mapper1.registerNode(Seq(41, 43, 45), ref2).isSuccess shouldBe true
     mapper1.numAssignedShards shouldEqual 7
 
-    mapper1.queryShards(shardKeyHash, 0) shouldEqual Seq(27)
-    mapper1.queryShards(shardKeyHash, 1) shouldEqual Seq(26, 27)
-    mapper1.queryShards(shardKeyHash, 2) shouldEqual Seq(24, 25, 26, 27)
-    mapper1.queryShards(shardKeyHash, 3) shouldEqual Seq(24, 25, 26, 27, 28, 29, 30, 31)
-    mapper1.queryShards(shardKeyHash, 4) shouldEqual
-      Seq(16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31)
+    mapper1.queryShards(shardKeyHash, 0) shouldEqual Seq(0x1b)
+    mapper1.queryShards(shardKeyHash, 1) shouldEqual Seq(0x1b, 0x3b)
+    mapper1.queryShards(shardKeyHash, 2) shouldEqual Seq(0x0b, 0x1b, 0x2b, 0x3b)
+    mapper1.queryShards(shardKeyHash, 3) shouldEqual Seq(0x03, 0x0b, 0x13, 0x1b, 0x23, 0x2b, 0x33, 0x3b)
+    mapper1.queryShards(shardKeyHash, 4) shouldEqual (0 to 15).map(_*4 + 3)
     mapper1.queryShards(shardKeyHash, 5).size shouldEqual 32
-    mapper1.queryShards(shardKeyHash, 5).contains(15) shouldBe true
+    mapper1.queryShards(shardKeyHash, 5) shouldEqual (0 to 31).map(_*2 + 1)
     mapper1.queryShards(shardKeyHash, 6).size shouldEqual 64
-    mapper1.queryShards(shardKeyHash, 6).contains(47) shouldBe true
+    mapper1.queryShards(shardKeyHash, 6) shouldEqual (0 to 63)
     intercept[IllegalArgumentException] {
       mapper1.queryShards(shardKeyHash, 7)
     }

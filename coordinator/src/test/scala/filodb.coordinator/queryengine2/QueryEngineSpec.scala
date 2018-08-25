@@ -31,35 +31,34 @@ class QueryEngineSpec extends FunSpec with Matchers {
 
   val engine = new QueryEngine(dataset, mapperRef)
 
+  /*
+  This is the PromQL
+
+  sum(rate(http_request_duration_seconds_bucket{job="myService",le="0.3"}[5m])) by (job)
+   /
+  sum(rate(http_request_duration_seconds_count{job="myService"}[5m])) by (job)
+  */
+
+  val f1 = Seq(ColumnFilter("__name__", Filter.Equals("http_request_duration_seconds_bucket")),
+               ColumnFilter("job", Filter.Equals("myService")),
+               ColumnFilter("le", Filter.Equals("0.3")))
+
+  val to = System.currentTimeMillis()
+  val from = to - 50000
+
+  val intervalSelector = IntervalSelector(Seq(from), Seq(to))
+
+  val raw1 = RawSeries(rangeSelector = intervalSelector, filters= f1, columns = Seq("value"))
+  val windowed1 = PeriodicSeriesWithWindowing(raw1, from, 1000, to, 5000, RangeFunctionId.Rate)
+  val summed1 = Aggregate(AggregationOperator.Sum, windowed1, Nil, Seq("job"))
+
+  val f2 = Seq(ColumnFilter("__name__", Filter.Equals("http_request_duration_seconds_count")),
+    ColumnFilter("job", Filter.Equals("myService")))
+  val raw2 = RawSeries(rangeSelector = intervalSelector, filters= f2, columns = Seq("value"))
+  val windowed2 = PeriodicSeriesWithWindowing(raw2, from, 1000, to, 5000, RangeFunctionId.Rate)
+  val summed2 = Aggregate(AggregationOperator.Sum, windowed2, Nil, Seq("job"))
+
   it ("should generate ExecPlan for LogicalPlan") {
-
-    /*
-    This is the PromQL
-
-    sum(rate(http_request_duration_seconds_bucket{job="myService",le="0.3"}[5m])) by (job)
-     /
-    sum(rate(http_request_duration_seconds_count{job="myService"}[5m])) by (job)
-    */
-
-    val f1 = Seq(ColumnFilter("__name__", Filter.Equals("http_request_duration_seconds_bucket")),
-                 ColumnFilter("job", Filter.Equals("myService")),
-                 ColumnFilter("le", Filter.Equals("0.3")))
-
-    val to = System.currentTimeMillis()
-    val from = to - 50000
-
-    val intervalSelector = IntervalSelector(Seq(from), Seq(to))
-
-    val raw1 = RawSeries(rangeSelector = intervalSelector, filters= f1, columns = Seq("value"))
-    val windowed1 = PeriodicSeriesWithWindowing(raw1, from, 1000, to, 5000, RangeFunctionId.Rate)
-    val summed1 = Aggregate(AggregationOperator.Sum, windowed1, Nil, Seq("job"))
-
-    val f2 = Seq(ColumnFilter("__name__", Filter.Equals("http_request_duration_seconds_count")),
-      ColumnFilter("job", Filter.Equals("myService")))
-    val raw2 = RawSeries(rangeSelector = intervalSelector, filters= f2, columns = Seq("value"))
-    val windowed2 = PeriodicSeriesWithWindowing(raw2, from, 1000, to, 5000, RangeFunctionId.Rate)
-    val summed2 = Aggregate(AggregationOperator.Sum, windowed2, Nil, Seq("job"))
-
     // final logical plan
     val logicalPlan = BinaryJoin(summed1, BinaryOperator.DIV, Cardinality.OneToOne, summed2)
 
@@ -97,6 +96,23 @@ class QueryEngineSpec extends FunSpec with Matchers {
         l2.rangeVectorTransformers(0).isInstanceOf[PeriodicSamplesMapper] shouldEqual true
         l2.rangeVectorTransformers(1).isInstanceOf[AggregateMapReduce] shouldEqual true
       }
+    }
+  }
+
+  it("should use spread function to change/override spread and generate ExecPlan with appropriate shards") {
+    val spreadFunc = QueryOptions.simpleMapSpreadFunc("job", Map("myService" -> 2), 1)
+
+    // final logical plan
+    val logicalPlan = BinaryJoin(summed1, BinaryOperator.DIV, Cardinality.OneToOne, summed2)
+
+    // materialized exec plan
+    val execPlan = engine.materialize(logicalPlan, QueryOptions(spreadFunc))
+
+    execPlan.isInstanceOf[BinaryJoinExec] shouldEqual true
+    execPlan.children should have length (2)
+    execPlan.children.foreach { reduceAggPlan =>
+      reduceAggPlan.isInstanceOf[ReduceAggregateExec] shouldEqual true
+      reduceAggPlan.children should have length (4)   // spread=2 means 4 shards
     }
   }
 }

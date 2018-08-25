@@ -1,4 +1,4 @@
-package filodb.coordinator.client
+ package filodb.coordinator.client
 
 import akka.actor.ActorRef
 import akka.serialization.SerializationExtension
@@ -197,7 +197,7 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
     val windowed2 = PeriodicSeriesWithWindowing(raw2, from, 1000, to, 5000, RangeFunctionId.Rate)
     val summed2 = Aggregate(AggregationOperator.Sum, windowed2, Nil, Seq("job"))
     val logicalPlan = BinaryJoin(summed1, BinaryOperator.DIV, Cardinality.OneToOne, summed2)
-    val execPlan = engine.materialize(logicalPlan, QueryOptions(shardKeySpread = 0))
+    val execPlan = engine.materialize(logicalPlan, QueryOptions(0, 100))
     roundTrip(execPlan) shouldEqual execPlan
   }
 
@@ -215,7 +215,7 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
     val logicalPlan1 = Parser.queryRangeToLogicalPlan(
       "sum(rate(http_request_duration_seconds_bucket{job=\"prometheus\"}[20s])) by (handler)",
       qParams)
-    val execPlan1 = engine.materialize(logicalPlan1, QueryOptions(shardKeySpread = 0))
+    val execPlan1 = engine.materialize(logicalPlan1, QueryOptions(0, 100))
     roundTrip(execPlan1) shouldEqual execPlan1
 
     // scalastyle:off
@@ -223,7 +223,7 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
       "sum(rate(http_request_duration_microseconds_sum{job=\"prometheus\"}[5m])) by (handler) / sum(rate(http_request_duration_microseconds_count{job=\"prometheus\"}[5m])) by (handler)",
       qParams)
     // scalastyle:on
-    val execPlan2 = engine.materialize(logicalPlan2, QueryOptions(shardKeySpread = 0))
+    val execPlan2 = engine.materialize(logicalPlan2, QueryOptions(0, 100))
     roundTrip(execPlan2) shouldEqual execPlan2
 
   }

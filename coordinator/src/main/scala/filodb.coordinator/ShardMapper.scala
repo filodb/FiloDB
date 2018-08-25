@@ -33,25 +33,26 @@ class ShardMapper(val numShards: Int) extends Serializable {
   private final val statusMap = Array.fill[ShardStatus](numShards)(ShardStatusUnassigned)
   private final val log2NumShardsOneBits = (1 << log2NumShards) - 1 // results in log2NumShards one bits
 
+  // precomputed mask for shard key bits of shard for each spread value
+  // lower (log2NumShards-spread) bits of shard are devoted to the shard key and set to 1, rest of bits set to 0
+  // The spread is the array index.
+  private final val shardHashMask = Array.tabulate[Int](log2NumShards + 1) { i =>
+    (1 << (log2NumShards - i)) - 1
+  }
+
+  // precomputed mask for partition hash portion of the shard for each spread value
+  // upper (spread) bits of the shard are devoted to the partition hash to decide on final shard value
+  // The spread is the array index.  Really it is the inverse of the shardHashMask within those bits.
+  private final val partHashMask = Array.tabulate[Int](log2NumShards + 1) { i =>
+    shardHashMask(i) ^ log2NumShardsOneBits
+  }
+
   def copy(): ShardMapper = {
     val shardMapperNew = new ShardMapper(numShards)
     shardMap.copyToArray(shardMapperNew.shardMap)
     statusMap.copyToArray(shardMapperNew.statusMap)
     shardMapperNew
   }
-
-  // spreadMask is precomputed for all possible spreads.
-  // The spread is the array index. Value is (log2NumShards-spread) bits set to 1 followed by spread bits set to 0
-  private final val spreadMask = Array.tabulate[Int](log2NumShards + 1) { i =>
-    (log2NumShardsOneBits << i) & log2NumShardsOneBits
-  }
-
-  // spreadOneBits is precomputed for all possible spreads.
-  // The spread is the array index. Value is spread 1 bits
-  private final val spreadOneBits = Array.tabulate[Int](log2NumShards + 1) { i =>
-    (1 << i) - 1
-  }
-
 
   override def equals(other: Any): Boolean = other match {
     case s: ShardMapper => s.numShards == numShards && s.shardValues == shardValues
@@ -92,11 +93,12 @@ class ShardMapper(val numShards: Int) extends Serializable {
   def queryShards(shardKeyHash: Int, spread: Int): Seq[Int] = {
     validateSpread(spread)
 
-    // formulate shardMask (like CIDR mask) by setting least significant 'spread' bits to 0
-    val shardMask = shardKeyHash & spreadMask(spread)
+    // lower (log2NumShards - spread) bits should go to shardKeyHash
+    val shardBase = shardKeyHash & shardHashMask(spread)
 
-    // create a range starting from shardMask to the shardMask with last 'spread' bits set to 1
-    shardMask to (shardMask | spreadOneBits(spread))
+    // create the shard for each possible partHash value portion of shard
+    val spacing = 1 << (log2NumShards - spread)
+    (shardBase until numShards by spacing)
   }
 
   private def validateSpread(spread: Int) = {
@@ -121,10 +123,10 @@ class ShardMapper(val numShards: Int) extends Serializable {
     validateSpread(spread)
 
     // explanation for the one-liner:
-    // first part formulates shardMask (like CIDR mask) by setting shardKeyHash's least significant 'spread' bits to 0
-    // second part extracts last 'spread' bits from tagHash
-    // then combine the two
-    (shardKeyHash & spreadMask(spread)) | (partitionHash & spreadOneBits(spread))
+    // shardKeyHash forms the lower n bits of the shard, while partitionHash forms upper (spread) bits
+    // It is designed this way such that for the same shard key, the rest of the tags spreads out the shard
+    // across the shard space (thus nodes), ensuring more even distribution
+    (shardKeyHash & shardHashMask(spread)) | (partitionHash & partHashMask(spread))
   }
 
   @deprecated(message = "Use ingestionShard() instead of this method", since = "0.7")

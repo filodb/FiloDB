@@ -91,14 +91,14 @@ object Utils extends StrictLogging {
           val shardCols = dataset.options.shardKeyColumns
           if (shardCols.length > 0) {
             shardHashFromFilters(filters, shardCols) match {
-              case Some(shardHash) => shardMap.queryShards(shardHash, options.shardKeySpread)
+              case Some(shardHash) => shardMap.queryShards(shardHash, options.spreadFunc(filters))
               case None            => throw new IllegalArgumentException(s"Must specify filters for $shardCols")
             }
           } else {
             shardMap.assignedShards
           }
         }
-        logger.debug(s"Translated filters $filters into shards $shards using spread ${options.shardKeySpread}")
+        logger.debug(s"Translated filters $filters into shards $shards using spread")
         shards.map { s => FilteredPartitionScan(ShardSplit(s), filters) }
     }).toOr.badMap {
       case m: MatchError => BadQuery(s"Could not parse $partQuery: ${m.getMessage}")

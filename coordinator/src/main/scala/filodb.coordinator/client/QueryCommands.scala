@@ -1,6 +1,6 @@
 package filodb.coordinator.client
 
-import filodb.core.query.ColumnFilter
+import filodb.core.query.{ColumnFilter, Filter}
 import filodb.query.{LogicalPlan => LogicalPlan2, QueryCommand}
 
 object QueryCommands {
@@ -40,11 +40,38 @@ object QueryCommands {
                                   limit: Int = 100,
                                   submitTime: Long = System.currentTimeMillis()) extends QueryCommand
 
-  final case class QueryOptions(shardKeySpread: Int = 1,
+  final case class QueryOptions(spreadFunc: Seq[ColumnFilter] => Int = { x => 1 },
                                 parallelism: Int = 16,
                                 queryTimeoutSecs: Int = 30,
                                 itemLimit: Int = 100,
                                 shardOverrides: Option[Seq[Int]] = None)
+
+  object QueryOptions {
+    def apply(constSpread: Int, itemLimit: Int): QueryOptions =
+      QueryOptions(spreadFunc = { x => constSpread}, itemLimit = itemLimit)
+
+    /**
+     * Creates a spreadFunc that looks for a particular filter with keyName Equals a value, and then maps values
+     * present in the spreadMap to specific spread values, with a default if the filter/value not present in the map
+     */
+    def simpleMapSpreadFunc(keyName: String,
+                            spreadMap: collection.Map[String, Int],
+                            defaultSpread: Int): Seq[ColumnFilter] => Int = {
+      filters: Seq[ColumnFilter] =>
+        filters.collect {
+          case ColumnFilter(key, Filter.Equals(filtVal: String)) if key == keyName => filtVal
+        }.headOption.map { tagValue =>
+          spreadMap.getOrElse(tagValue, defaultSpread)
+        }.getOrElse(defaultSpread)
+    }
+
+    import collection.JavaConverters._
+
+    def simpleMapSpreadFunc(keyName: String,
+                            spreadMap: java.util.Map[String, Int],
+                            defaultSpread: Int): Seq[ColumnFilter] => Int =
+      simpleMapSpreadFunc(keyName, spreadMap.asScala, defaultSpread)
+  }
 
   /**
    * Executes a query using a LogicalPlan and returns the result as one message to the client.

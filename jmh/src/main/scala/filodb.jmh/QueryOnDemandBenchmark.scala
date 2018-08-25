@@ -134,7 +134,7 @@ class QueryOnDemandBenchmark extends StrictLogging {
   val qParams = QueryParams(queryTime/1000, queryStep, (queryTime/1000) + queryIntervalMin*60)
   val logicalPlans = queries.map { q => Parser.queryRangeToLogicalPlan(q, qParams) }
   val queryCommands = logicalPlans.map { plan =>
-    LogicalPlan2Query(dataset.ref, plan, QueryOptions(shardKeySpread = 1))
+    LogicalPlan2Query(dataset.ref, plan, QueryOptions(1, 100))
   }
 
   @TearDown

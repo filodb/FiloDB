@@ -170,8 +170,8 @@ val log4jDep          = "log4j"                      % "log4j"                 %
 val scalaLoggingDep   = "com.typesafe.scala-logging" %% "scala-logging"        % "3.7.2"
 val scalaTest         = "org.scalatest"              %% "scalatest"            % "2.2.6" // TODO upgrade to 3.0.4
 val scalaCheck        = "org.scalacheck"             %% "scalacheck"           % "1.11.0"
-val akkaHttp          = "com.typesafe.akka"          %% "akka-http"            % akkaHttpVersion
-val akkaHttpTestkit   = "com.typesafe.akka"          %% "akka-http-testkit"    % akkaHttpVersion
+val akkaHttp          = "com.typesafe.akka"          %% "akka-http"            % akkaHttpVersion withJavadoc()
+val akkaHttpTestkit   = "com.typesafe.akka"          %% "akka-http-testkit"    % akkaHttpVersion withJavadoc()
 val akkaHttpCirce     = "de.heikoseeberger"          %% "akka-http-circe"      % "1.21.0"
 val circeGeneric      = "io.circe"                   %% "circe-generic"        % "0.8.0"
 val circeParser       = "io.circe"                   %% "circe-parser"         % "0.8.0"
@@ -190,11 +190,11 @@ lazy val scalaxyDep = "com.nativelibs4java"  %% "scalaxy-loops"     % "0.3.3" % 
 
 lazy val memoryDeps = commonDeps ++ Seq(
   "com.github.jnr"       %  "jnr-ffi"          % "2.1.6",
-  "joda-time"            % "joda-time"         % "2.2",
+  "joda-time"            % "joda-time"         % "2.2" withJavadoc(),
   "org.joda"             % "joda-convert"      % "1.2",
   "org.lz4"              %  "lz4-java"         % "1.4",
-  "org.jctools"          % "jctools-core"      % "2.0.1",
-  "org.spire-math"      %% "debox"             % "0.8.0",
+  "org.jctools"          % "jctools-core"      % "2.0.1" withJavadoc(),
+  "org.spire-math"      %% "debox"             % "0.8.0" withJavadoc(),
   scalaLoggingDep,
   scalaxyDep
 )
@@ -207,10 +207,10 @@ lazy val coreDeps = commonDeps ++ Seq(
   "com.googlecode.concurrentlinkedhashmap" % "concurrentlinkedhashmap-lru" % "1.4",
   "net.ceedubs"          %% "ficus"             % ficusVersion,
   "io.fastjson"           % "boon"              % "0.33",
-  "com.googlecode.javaewah" % "JavaEWAH"        % "1.1.6",
+  "com.googlecode.javaewah" % "JavaEWAH"        % "1.1.6" withJavadoc(),
   "com.github.rholder.fauxflake" % "fauxflake-core" % "1.1.0",
-  "org.scalactic"        %% "scalactic"         % "2.2.6",
-  "org.apache.lucene"     % "lucene-core"       % "7.3.0",
+  "org.scalactic"        %% "scalactic"         % "2.2.6" withJavadoc(),
+  "org.apache.lucene"     % "lucene-core"       % "7.3.0" withJavadoc(),
   scalaxyDep
 )
 
@@ -223,7 +223,7 @@ lazy val cassDeps = commonDeps ++ Seq(
 
 lazy val coordDeps = commonDeps ++ Seq(
   "com.typesafe.akka"    %% "akka-slf4j"        % akkaVersion,
-  "com.typesafe.akka"    %% "akka-cluster"      % akkaVersion,
+  "com.typesafe.akka"    %% "akka-cluster"      % akkaVersion withJavadoc(),
   "com.github.romix.akka" %% "akka-kryo-serialization" % "0.5.0" excludeAll(excludeMinlog, excludeOldLz4),
   // Redirect minlog logs to SLF4J
    "com.dorkbox"         % "MinLog-SLF4J"       % "1.12",

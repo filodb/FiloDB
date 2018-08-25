@@ -3,6 +3,9 @@
 **Table of Contents**  *generated with [DocToc](https://github.com/thlorenz/doctoc)*
 
 - [FiloDB](#filodb)
+  - [Data Sharding](#data-sharding)
+  - [The Shard Key](#the-shard-key)
+  - [Spread, or How to Avoid Hotspotting](#spread-or-how-to-avoid-hotspotting)
   - [Shard Coordination](#shard-coordination)
   - [Shard Assignment](#shard-assignment)
     - [Shard Event Subscriptions](#shard-event-subscriptions)
@@ -15,6 +18,27 @@
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
 # FiloDB
+
+## Data Sharding
+
+Incoming data samples are divided into shards, typically by the ingestion source such as Apache Kafka, where 1 shard == 1 partition.   Currently the total number of shards must be a power of two, such as 128 or 256.  Right now, the number of partitions in a Kafka topic should match the number of shards.
+
+Each shard is wholly stored and contained within one FiloDB node.  A central cluster coordinator running on one of the FiloDB nodes (the `NodeClusterActor` and `ShardManager` classes) allocates shards to individual FiloDB nodes.  
+
+The total number of shards for a cluster is not currently changeable, it must be configured properly when sizing a cluster initially.  The number of nodes in a FiloDB cluster can come and go, and shard assignments may change when a node is introduced or fails and/or leaves the cluster.  Since a shard must fit within one node, typically one would allocate many more shards than the expected cluster size.  For example, we might allocate 256 shards to a cluster expected to be around 32 nodes on average.  This allows for some dynamic growth in the cluster size without a huge impact on the number of shards on any node.
+
+## The Shard Key
+
+Both the ingestion gateway and the query layer must agree on the same strategy for deriving the shards from incoming records and query requests.  This is done using a "shard key" composed of specific columns and/or keys/tags from a `MapColumn`.   For example, for Prometheus schema data, we might decide to use the keys `__name__` (the metric name) and `job` to form the shard key.
+
+What the above means is that
+
+1. On ingest, the `__name__` and `job` are used to decide (in combination with other "partition key" fields) the specific shard / Kafka partition that data goes into
+2. On query, both `__name__` and `job` must be present as filters and is used to form the range of shards to direct queries at.
+
+## Spread, or How to Avoid Hotspotting
+
+The **spread** determines how many shards a given shard key is mapped to.  The number of shards is equal to 2 to the power of the spread.  It is used to manage how widely specific shard keys (such as applications, the job, or metrics) are distributed.  For example, if one job or metric has a huge number of series, one can assign a higher spread to it to avoid hotspotting.  (The management of spreads for individual shard keys is not currently included in the open source offering).
 
 ## Shard Coordination
 FiloDB Clients enable users to set up new datasets as needed. Internally clients send a `SetupDataset` command 

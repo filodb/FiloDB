@@ -76,7 +76,7 @@ class QueryEngine(dataset: Dataset,
       }
       logger.debug(s"For shardColumns $shardColumns, extracted filter values $shardColValues successfully")
       val shardHash = RecordBuilder.shardKeyHash(shardColumns, shardColValues)
-      shardMapperFunc.queryShards(shardHash, options.shardKeySpread)
+      shardMapperFunc.queryShards(shardHash, options.spreadFunc(filters))
     } else {
       options.shardOverrides.get
     }
