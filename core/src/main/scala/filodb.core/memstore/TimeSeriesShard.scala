@@ -456,8 +456,8 @@ class TimeSeriesShard(val dataset: Dataset,
       System.currentTimeMillis() - storeConfig.demandPagedRetentionPeriod.toMillis)
     var numDeleted = 0
     new PartitionIterator(deletedParts).foreach { p =>
-      logger.debug(s"Removing partition with partId $p")
-      removePartition(partitions.get(p))
+      logger.debug(s"Purging partition with partId ${p.partID} from memory")
+      removePartition(p)
       numDeleted += 1
     }
     if (numDeleted > 0) logger.info(s"Purged $numDeleted partitions from memory and index")
