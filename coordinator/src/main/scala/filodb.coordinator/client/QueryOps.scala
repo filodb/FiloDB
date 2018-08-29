@@ -26,19 +26,20 @@ trait QueryOps extends ClientBase with StrictLogging {
     }
 
   /**
-   * Returns a Seq[String] of the first *limit* values indexed for a given tag/column.
+   * Returns a Seq[(String, Int)] of the top *limit* most popular values indexed for a given tag/column.
    * @param dataset the Dataset (and Database) to query
    * @param indexName the name of the index to get values for
    * @param limit   the maximum number of results to return
    * @param timeout the maximum amount of time to wait for an answer
-   * @return a Seq[String] with all the tag names, Nil if nothing is indexed or dataset not found
+   * @return a Seq[(String, Int)] with all the tag names, Nil if nothing is indexed or dataset not found
+   *        each tag followed by frequency, in descending order of frequency
    */
   def getIndexValues(dataset: DatasetRef,
                      indexName: String,
                      limit: Int = 100,
-                     timeout: FiniteDuration = 15.seconds): Seq[String] =
+                     timeout: FiniteDuration = 15.seconds): Seq[(String, Int)] =
     askCoordinator(GetIndexValues(dataset, indexName, limit, System.currentTimeMillis()), timeout) {
-      case s: Seq[String] @unchecked => s
+      case s: Seq[(String, Int)] @unchecked => s
     }
 
   /**

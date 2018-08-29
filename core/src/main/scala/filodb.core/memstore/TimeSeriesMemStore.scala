@@ -12,7 +12,6 @@ import org.jctools.maps.NonBlockingHashMapLong
 import filodb.core.{DatasetRef, Response, Types}
 import filodb.core.metadata.Dataset
 import filodb.core.store._
-import filodb.memory.format.ZeroCopyUTF8String
 
 class TimeSeriesMemStore(config: Config, val store: ColumnStore, val metastore: MetaStore,
                          evictionPolicy: Option[PartitionEvictionPolicy] = None)
@@ -137,8 +136,8 @@ extends MemStore with StrictLogging {
       }
     }.getOrElse(Iterator.empty)
 
-  def indexValues(dataset: DatasetRef, shard: Int, indexName: String): Iterator[ZeroCopyUTF8String] =
-    getShard(dataset, shard).map(_.indexValues(indexName)).getOrElse(Iterator.empty)
+  def indexValues(dataset: DatasetRef, shard: Int, indexName: String, topK: Int = 100): Seq[TermInfo] =
+    getShard(dataset, shard).map(_.indexValues(indexName, topK)).getOrElse(Nil)
 
   def numPartitions(dataset: DatasetRef, shard: Int): Int =
     getShard(dataset, shard).map(_.numActivePartitions).getOrElse(-1)

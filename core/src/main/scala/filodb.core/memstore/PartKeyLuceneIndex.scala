@@ -1,7 +1,7 @@
 package filodb.core.memstore
 
 import java.io.File
-import java.util.{Comparator, PriorityQueue}
+import java.util.PriorityQueue
 
 import scala.collection.JavaConverters._
 import scala.collection.immutable.HashSet
@@ -38,6 +38,7 @@ object PartKeyLuceneIndex {
   final val ignoreIndexNames = HashSet(START_TIME, PART_KEY, END_TIME, PART_ID)
 
   val MAX_STR_INTERN_ENTRIES = 10000
+  val MAX_TERMS_TO_ITERATE = 10000
 
   val NOT_FOUND = -1
 
@@ -50,6 +51,8 @@ object PartKeyLuceneIndex {
       BinaryRegionLarge.numBytes(partKeyBase, partKeyOffset))
   }
 }
+
+final case class TermInfo(term: UTF8Str, freq: Int)
 
 class PartKeyLuceneIndex(dataset: Dataset, shardNum: Int, storeConfig: StoreConfig) extends StrictLogging {
 
@@ -166,32 +169,44 @@ class PartKeyLuceneIndex(dataset: Dataset, shardNum: Int, storeConfig: StoreConf
   }
 
   /**
-    * Fetch values for a specific tag
+    * Fetch values/terms for a specific column/key/field, in order from most frequent on down.
+    * Note that it iterates through all docs up to a certain limit only, so if there are too many terms
+    * it will not report an accurate top k in exchange for not running too long.
+    * @param fieldName the name of the column/field/key to get terms for
+    * @param topK the number of top k results to fetch
     */
-  def indexValues(fieldName: String): scala.Iterator[UTF8Str] = {
+  def indexValues(fieldName: String, topK: Int = 100): Seq[TermInfo] = {
     val searcher = searcherManager.acquire()
     val indexReader = searcher.getIndexReader
     val segments = indexReader.leaves()
-    segments.asScala.iterator.flatMap { segment =>
+    val freqOrder = Ordering.by[TermInfo, Int](_.freq)
+    val topkResults = new PriorityQueue[TermInfo](topK, freqOrder)
+    var termsRead = 0
+    segments.asScala.foreach { segment =>
       val terms = segment.reader().terms(fieldName)
+
       //scalastyle:off
       if (terms != null) {
-        new Iterator[UTF8Str] {
-          val termsEnum = terms.iterator()
-          var nextVal: BytesRef = termsEnum.next()
-          override def hasNext: Boolean = nextVal != null
+        val termsEnum = terms.iterator()
+        var nextVal: BytesRef = termsEnum.next()
+        while (nextVal != null && termsRead < MAX_TERMS_TO_ITERATE) {
           //scalastyle:on
-          override def next(): UTF8Str = {
-            val valu = BytesRef.deepCopyOf(nextVal) // copy is needed since lucene uses a mutable cursor underneath
-            val ret = new UTF8Str(valu.bytes, bytesRefToUnsafeOffset(valu.offset), valu.length)
-            nextVal = termsEnum.next()
-            ret
+          val valu = BytesRef.deepCopyOf(nextVal) // copy is needed since lucene uses a mutable cursor underneath
+          val ret = new UTF8Str(valu.bytes, bytesRefToUnsafeOffset(valu.offset), valu.length)
+          val freq = termsEnum.docFreq()
+          if (topkResults.size < topK) {
+            topkResults.add(TermInfo(ret, freq))
           }
+          else if (topkResults.peek.freq < freq) {
+            topkResults.remove()
+            topkResults.add(TermInfo(ret, freq))
+          }
+          nextVal = termsEnum.next()
+          termsRead += 1
         }
-      } else {
-        Iterator.empty
       }
     }
+    topkResults.toArray(new Array[TermInfo](0)).sortBy(-_.freq).toSeq
   }
 
   def indexNames: scala.Iterator[String] = {
@@ -467,9 +482,7 @@ class TopKPartIdsCollector(limit: Int) extends Collector with StrictLogging {
 
   var endTimeDv: NumericDocValues = _
   var partIdDv: NumericDocValues = _
-  val endTimeComparator = new Comparator[(Int, Long)] {
-    def compare(o1: (Int, Long), o2: (Int, Long)): Int = -1 * o1._2.compareTo(o2._2)
-  }
+  val endTimeComparator = Ordering.by[(Int, Long), Long](_._2).reverse
   val topkResults = new PriorityQueue[(Int, Long)](limit, endTimeComparator)
 
   // gets called for each segment; need to return collector for that segment

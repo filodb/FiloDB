@@ -132,9 +132,11 @@ trait MemStore extends ChunkSource {
   def indexNames(dataset: DatasetRef): Iterator[(String, Int)]
 
   /**
-   * Returns values for a given index name for a dataset and shard
+   * Returns values for a given index name (and # of series for each) for a dataset and shard,
+   * in order of decreasing frequency/# of series per item.
+   * @param topK the number of top items to return
    */
-  def indexValues(dataset: DatasetRef, shard: Int, indexName: String): Iterator[ZeroCopyUTF8String]
+  def indexValues(dataset: DatasetRef, shard: Int, indexName: String, topK: Int = 100): Seq[TermInfo]
 
   /**
    * Returns the number of partitions being maintained in the memtable for a given shard

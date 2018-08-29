@@ -22,7 +22,7 @@ import filodb.core.metadata.Dataset
 import filodb.core.store._
 import filodb.memory._
 import filodb.memory.data.{OffheapLFSortedIDMap, OffheapLFSortedIDMapMutator}
-import filodb.memory.format.{RowReader, UnsafeUtils, ZeroCopyUTF8String => UTF8Str}
+import filodb.memory.format.{RowReader, UnsafeUtils}
 import filodb.memory.format.BinaryVector.BinaryVectorPtr
 
 class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
@@ -403,7 +403,7 @@ class TimeSeriesShard(val dataset: Dataset,
 
   def indexNames: Iterator[String] = partKeyIndex.indexNames
 
-  def indexValues(indexName: String): Iterator[UTF8Str] = partKeyIndex.indexValues(indexName)
+  def indexValues(indexName: String, topK: Int): Seq[TermInfo] = partKeyIndex.indexValues(indexName, topK)
 
   /**
     * WARNING: use only for testing. Not performant

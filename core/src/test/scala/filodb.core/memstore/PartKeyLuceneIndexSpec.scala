@@ -175,8 +175,13 @@ class PartKeyLuceneIndexSpec extends FunSpec with Matchers with BeforeAndAfter {
     keyIndex.indexNames.toList shouldEqual Seq("Actor2Code", "Actor2Name")
     keyIndex.indexValues("not_found").toSeq should equal (Nil)
 
-    val codes = Seq("AFR", "AGR", "CHN", "COP", "CVL", "EGYEDU", "GOV").map(_.utf8)
-    keyIndex.indexValues("Actor2Code").toSeq should equal (codes)
+    val infos = Seq("AFR", "CHN", "COP", "CVL", "EGYEDU").map(_.utf8).map(TermInfo(_, 1))
+    val top2infos = Seq(TermInfo("GOV".utf8, 3), TermInfo("AGR".utf8, 2))
+    // top 2 items by frequency
+    keyIndex.indexValues("Actor2Code", 2) shouldEqual top2infos
+    val allValues = keyIndex.indexValues("Actor2Code")
+    allValues take 2 shouldEqual top2infos
+    allValues.drop(2).toSet shouldEqual infos.toSet
   }
 
   it("should be able to AND multiple filters together") {

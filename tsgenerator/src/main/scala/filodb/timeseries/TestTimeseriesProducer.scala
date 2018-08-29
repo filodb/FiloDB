@@ -160,22 +160,32 @@ object TestTimeseriesProducer extends StrictLogging {
         case s: Seq[DataSample] @unchecked =>
           logger.debug(s"Adding batch of ${s.length} samples")
           s.foreach { case DataSample(tags, timestamp, value) =>
-            // Get hashes and sort tags
-            val javaTags = new java.util.ArrayList(tags.toSeq.asJava)
-            val hashes = RecordBuilder.sortAndComputeHashes(javaTags)
+            // Compute keys/values for shard calculation vs original
+            // Specifically we need to drop _bucket _sum _count etc from __name__ to put histograms in same shard
+            val scalaKVs = tags.toSeq
+            val originalKVs = new java.util.ArrayList(scalaKVs.asJava)
+            val forShardKVs = scalaKVs.map { case (k, v) =>
+                                val trimmedVal = RecordBuilder.trimShardColumn(dataset, k, v)
+                                (k, trimmedVal)
+                              }
+            val kvsForShardCalc = new java.util.ArrayList(forShardKVs.asJava)
+
+            // Get hashes and sort tags of the keys/values for shard calculation
+            val hashes = RecordBuilder.sortAndComputeHashes(kvsForShardCalc)
 
             // Compute partition, shard key hashes and compute shard number
             // TODO: what to do if not all shard keys included?  Just return a 0 hash?  Or maybe random?
-            val shardKeyHash = RecordBuilder.combineHashIncluding(javaTags, hashes, shardKeys).get
-            val partKeyHash = RecordBuilder.combineHashExcluding(javaTags, hashes, shardKeys)
+            val shardKeyHash = RecordBuilder.combineHashIncluding(kvsForShardCalc, hashes, shardKeys).get
+            val partKeyHash = RecordBuilder.combineHashExcluding(kvsForShardCalc, hashes, shardKeys)
             val shard = shardMapper.ingestionShard(shardKeyHash, partKeyHash, spread)
 
             // Add stuff to RecordContainer for correct partition/shard
+            originalKVs.sort(RecordBuilder.stringPairComparator)
             val builder = builders(shard)
             builder.startNewRecord()
             builder.addLong(timestamp)
             builder.addDouble(value)
-            builder.addSortedPairsAsMap(javaTags, hashes)
+            builder.addSortedPairsAsMap(originalKVs, hashes)
             builder.endRecord()
           }
           Observable.empty

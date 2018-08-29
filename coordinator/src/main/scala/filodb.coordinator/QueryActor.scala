@@ -11,7 +11,7 @@ import kamon.Kamon
 
 import filodb.coordinator.queryengine2.QueryEngine
 import filodb.core._
-import filodb.core.memstore.MemStore
+import filodb.core.memstore.{MemStore, TermInfo}
 import filodb.core.metadata.Dataset
 import filodb.query.{QueryCommand, QueryConfig, QueryError, QueryResult}
 import filodb.query.exec.{ExecPlan => ExecPlan2}
@@ -111,7 +111,8 @@ final class QueryActor(memStore: MemStore,
     case GetIndexValues(ref, index, limit, _) =>
       // For now, just return values from the first shard
       memStore.activeShards(ref).headOption.foreach { shard =>
-        sender() ! memStore.indexValues(ref, shard, index).take(limit).map(_.toString).toBuffer
+        sender() ! memStore.indexValues(ref, shard, index, limit)
+                           .map { case TermInfo(term, freq) => (term.toString, freq) }
       }
 
     case ThrowException(dataset) =>

@@ -66,14 +66,7 @@ class WriteBufferPool(memFactory: MemFactory,
    */
   def obtain(): (NativePointer, AppenderArray) = {
     // If queue is empty, try and allocate more buffers depending on if memFactory has more memory
-    // If that fails, return queue empty
-    if (queue.isEmpty) try {
-      allocateBuffers()
-    } catch {
-      case e: Exception =>
-        logger.error(s"Could not allocate more WriteBuffers", e)
-        throw new NoSuchElementException
-    }
+    if (queue.isEmpty) allocateBuffers()
     queue.dequeue
   }
 

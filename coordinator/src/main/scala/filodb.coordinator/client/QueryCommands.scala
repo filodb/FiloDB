@@ -32,7 +32,7 @@ object QueryCommands {
                                  submitTime: Long = System.currentTimeMillis()) extends QueryCommand
 
   /**
-   * Returns a Seq[String] of the first *limit* values indexed for a given tag/column.
+   * Returns a Seq[(String, Int)] of the top *limit* most popular values indexed for a given tag/column.
    * Or Nil if the dataset or indexName is not found.
    */
   final case class GetIndexValues(dataset: DatasetRef,
