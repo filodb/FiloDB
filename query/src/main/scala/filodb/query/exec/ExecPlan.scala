@@ -119,11 +119,11 @@ trait ExecPlan extends QueryCommand {
           QueryResult(id, finalRes._2, r)
         }
         .onErrorHandle { case ex: Throwable =>
-          qLogger.error(s"queryId: ${id} Exception during query execution", ex)
+          qLogger.error(s"queryId: ${id} Exception during execution of query: ${printTree()}", ex)
           QueryError(id, ex)
         }
     } catch { case NonFatal(ex) =>
-      qLogger.error(s"queryId: ${id} Exception during query orchestration", ex)
+      qLogger.error(s"queryId: ${id} Exception during orchestration of query: ${printTree()}", ex)
       Task(QueryError(id, ex))
     }
   }
@@ -193,7 +193,10 @@ abstract class NonLeafExecPlan extends ExecPlan {
                                (implicit sched: Scheduler,
                                 timeout: FiniteDuration): Observable[RangeVector] = {
     val childTasks = Observable.fromIterable(children).mapAsync { plan =>
-      plan.dispatcher.dispatch(plan).onErrorHandle { case ex: Throwable => QueryError(id, ex) }
+      plan.dispatcher.dispatch(plan).onErrorHandle { case ex: Throwable =>
+        qLogger.error(s"queryId: ${id} Execution failed for sub-query ${plan.printTree()}", ex)
+        QueryError(id, ex)
+      }
     }
     compose(childTasks, queryConfig)
   }

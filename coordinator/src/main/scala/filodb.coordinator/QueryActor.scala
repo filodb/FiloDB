@@ -76,12 +76,12 @@ final class QueryActor(memStore: MemStore,
          case QueryResult(_, _, vectors) => resultVectors.record(vectors.length)
          case e: QueryError =>
            queryErrors.increment
-           logger.debug(s"Normal QueryError returned from query execution: $e")
+           logger.debug(s"queryId ${q.id} Normal QueryError returned from query execution: $e")
        }
        span.finish()
      }.recover { case ex =>
        // Unhandled exception in query, should be rare
-       logger.info("QueryError: ", ex)
+       logger.error(s"queryId ${q.id} Unhandled Query Error: ", ex)
        replyTo ! QueryError(q.id, ex)
        span.finish()
      }
