@@ -99,7 +99,8 @@ object LastSampleFunction extends RangeFunction {
             sampleToEmit: TransientRow,
             queryConfig: QueryConfig): Unit = {
     if (window.size > 1)
-      throw new IllegalStateException("Possible internal error: Last sample should have used zero length windows")
+      throw new IllegalStateException(s"Possible internal error: Last sample should have used zero length windows " +
+        s"but window size was ${window.size}. Window: $window")
     if (window.size == 0 || (endTimestamp - window.head.getLong(0)) > queryConfig.staleSampleAfterMs) {
       sampleToEmit.setValues(endTimestamp, Double.NaN)
     } else {

@@ -47,6 +47,7 @@ class QueueBasedWindow(q: IndexedArrayQueue[TransientRow]) extends Window {
   def apply(i: Int): TransientRow = q(i)
   def head: TransientRow = q.head
   def last: TransientRow = q.last
+  override def toString: String = q.toString
 }
 
 /**

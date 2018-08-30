@@ -49,6 +49,8 @@ final class TransientRow(var timestamp: Long, var value: Double) extends Mutable
   def getBlobBase(columnNo: Int): Any = throw new IllegalArgumentException()
   def getBlobOffset(columnNo: Int): Long = throw new IllegalArgumentException()
   def getBlobNumBytes(columnNo: Int): Int = throw new IllegalArgumentException()
+
+  override def toString: String = s"TransientRow(t=$timestamp, v=$value)"
 }
 
 final class AvgAggTransientRow extends MutableRowReader {
