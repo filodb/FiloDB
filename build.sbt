@@ -225,6 +225,7 @@ lazy val coordDeps = commonDeps ++ Seq(
   "com.typesafe.akka"    %% "akka-slf4j"        % akkaVersion,
   "com.typesafe.akka"    %% "akka-cluster"      % akkaVersion withJavadoc(),
   "com.github.romix.akka" %% "akka-kryo-serialization" % "0.5.0" excludeAll(excludeMinlog, excludeOldLz4),
+  "de.javakaffee"        % "kryo-serializers"      % "0.42",
   // Redirect minlog logs to SLF4J
    "com.dorkbox"         % "MinLog-SLF4J"       % "1.12",
   "com.opencsv"          % "opencsv"            % "3.3",

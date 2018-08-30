@@ -228,6 +228,15 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
 
   }
 
+  it ("should serialize and deserialize QueryError") {
+    val err = QueryError("xdf", new IllegalStateException("Some message"))
+    val deser1 = roundTrip(err).asInstanceOf[QueryError]
+    val deser2 = roundTrip(deser1).asInstanceOf[QueryError]
+    deser2.id shouldEqual err.id
+    deser2.t.getMessage shouldEqual err.t.getMessage
+    deser2.t.getCause shouldEqual err.t.getCause
+  }
+
   it ("should serialize and deserialize result involving CustomRangeVectorKey") {
 
     val keysMap = Map(UTF8Str("key1") -> UTF8Str("val1"),

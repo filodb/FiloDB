@@ -549,7 +549,6 @@ class TimeSeriesShard(val dataset: Dataset,
   }
 
   // scalastyle:off method.length
-
   private def writeTimeBuckets(flushGroup: FlushGroup): Future[Response] = {
     flushGroup.flushTimeBuckets.map { cmd =>
       val rbTrace = Kamon.buildSpan("memstore-index-timebucket-populate-timebucket")

@@ -131,6 +131,7 @@ object TestTimeseriesProducer extends StrictLogging {
     }
   }
 
+  // scalastyle:off method.length
   /**
    * Batches the source data stream into separate RecordContainers per shard, single threaded,
    * using proper logic to calculate hashes correctly for shard and partition hashes.
@@ -183,6 +184,7 @@ object TestTimeseriesProducer extends StrictLogging {
           Observable.fromIterable(flushBuilders(builders))
       }
   }
+  // scalastyle:on method.length
 
   private def flushBuilders(builders: Array[RecordBuilder]): Seq[(Int, Array[Byte])] = {
     builders.zipWithIndex.flatMap { case (builder, shard) =>

@@ -1,14 +1,14 @@
 package filodb.coordinator.client
 
 import com.esotericsoftware.kryo.{Serializer => KryoSerializer}
-import com.esotericsoftware.kryo.io._
 import com.esotericsoftware.kryo.Kryo
+import com.esotericsoftware.kryo.io._
+import de.javakaffee.kryoserializers.UnmodifiableCollectionsSerializer
 
 import filodb.core._
 import filodb.core.binaryrecord.{ArrayBinaryRecord, BinaryRecord, RecordSchema}
 import filodb.core.binaryrecord2.{RecordSchema => RecordSchema2}
 import filodb.core.metadata.Column
-import filodb.core.store.ChunkSetInfo
 import filodb.memory.format.ZeroCopyUTF8String
 
 /**
@@ -62,6 +62,9 @@ class KryoInit {
     kryo.register(classOf[filodb.core.query.PartitionRangeVectorKey],
                   new PartitionRangeVectorKeySerializer)
     kryo.register(classOf[filodb.core.query.CustomRangeVectorKey])
+
+    // Needed to serialize/deserialize exceptions multiple times (see unit test for example)
+    UnmodifiableCollectionsSerializer.registerSerializers(kryo)
   }
 
   def initOtherFiloClasses(kryo: Kryo): Unit = {
