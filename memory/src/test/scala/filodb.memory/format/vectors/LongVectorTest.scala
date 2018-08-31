@@ -63,11 +63,11 @@ class LongVectorTest extends NativeVectorTest {
     it("should be able to freeze() and minimize bytes used") {
       val builder = LongBinaryVector.appendingVector(memFactory, 100)
       // Test numBytes to make sure it's accurate
-      builder.numBytes should equal (12 + 16 + 12)   // 2 long words needed for 100 bits
+      builder.numBytes should equal (12 + 16 + 8)   // 2 long words needed for 100 bits
       (0 to 4).map(_.toLong).foreach(builder.addData)
-      builder.numBytes should equal (12 + 16 + 12 + 40)
+      builder.numBytes should equal (12 + 16 + 8 + 40)
       val frozen = builder.freeze(memFactory)
-      BinaryVector.totalBytes(frozen) should equal (12 + 8 + 12 + 40)  // bitmask truncated
+      BinaryVector.totalBytes(frozen) should equal (12 + 8 + 8 + 40)  // bitmask truncated
 
       LongBinaryVector(frozen).length(frozen) shouldEqual 5
       LongBinaryVector(frozen).toBuffer(frozen) shouldEqual Buffer.fromIterable((0 to 4).map(_.toLong))
@@ -81,7 +81,7 @@ class LongVectorTest extends NativeVectorTest {
       LongBinaryVector(optimized).length(optimized) should equal (5)
       LongBinaryVector(optimized)(optimized, 0) should equal (0L)
       LongBinaryVector(optimized).toBuffer(optimized).toList shouldEqual orig
-      BinaryVector.totalBytes(optimized) shouldEqual (32 + 3)   // nbits=4, 3 bytes of data + 32 overhead for DDV
+      BinaryVector.totalBytes(optimized) shouldEqual (28 + 3)   // nbits=4, 3 bytes of data + 28 overhead for DDV
     }
 
     it("should be able to optimize longs with fewer nbits off-heap NoNAs to DeltaDeltaVector") {
@@ -94,7 +94,7 @@ class LongVectorTest extends NativeVectorTest {
       LongBinaryVector(optimized).length(optimized) shouldEqual 5
       LongBinaryVector(optimized)(optimized, 0) shouldEqual 0L
       LongBinaryVector(optimized).toBuffer(optimized).toList shouldEqual orig
-      BinaryVector.totalBytes(optimized) shouldEqual (32 + 3)   // nbits=4, 3 bytes of data + 32 overhead for DDV
+      BinaryVector.totalBytes(optimized) shouldEqual (28 + 3)   // nbits=4, 3 bytes of data + 28 overhead for DDV
     }
 
     it("should automatically use Delta-Delta encoding for increasing numbers") {
@@ -102,7 +102,7 @@ class LongVectorTest extends NativeVectorTest {
       val orig = (0 to 50).map(_ * 10000 + start)   // simulate 10 second samples
       val builder = LongBinaryVector.appendingVectorNoNA(memFactory, 100)
       orig.foreach(builder.addData)
-      builder.frozenSize shouldEqual (12 + 51 * 8)
+      builder.frozenSize shouldEqual (8 + 51 * 8)
       val optimized = builder.optimize(memFactory)
       BinaryVector.majorVectorType(optimized) shouldEqual WireFormat.VECTORTYPE_DELTA2
       BinaryVector.totalBytes(optimized) shouldEqual 24   // DeltaDeltaConstVector
@@ -128,7 +128,7 @@ class LongVectorTest extends NativeVectorTest {
 
       val builder = LongBinaryVector.appendingVectorNoNA(memFactory, 100)
       orig.foreach(builder.addData)
-      builder.frozenSize shouldEqual (12 + 51 * 8)
+      builder.frozenSize shouldEqual (8 + 51 * 8)
       val optimized = builder.optimize(memFactory)
       BinaryVector.majorVectorType(optimized) shouldEqual WireFormat.VECTORTYPE_DELTA2
       BinaryVector.totalBytes(optimized) shouldEqual 24   // DeltaDeltaConstVector
@@ -224,6 +224,39 @@ class LongVectorTest extends NativeVectorTest {
       val opt2 = cb.optimize(memFactory)
       LongBinaryVector(opt2).toBuffer(opt2).toList shouldEqual orig2
       cb.copyToBuffer.toList shouldEqual orig2
+    }
+  }
+
+  describe("TimestampAppendingVector") {
+    it("should use DeltaDeltaConstVector for values falling within 250ms of slope line") {
+      val start = System.currentTimeMillis
+      val deltas = Seq(20, -20, 249, 2, -10, -220, 100, 0, -50, 23)
+      val orig = deltas.zipWithIndex.map { case (dd, i) => start + 10000 * i + dd }
+      val builder = LongBinaryVector.timestampVector(memFactory, 50)
+      orig.foreach(builder.addData)
+      builder.frozenSize shouldEqual (8 + orig.length * 8)
+      val optimized = builder.optimize(memFactory)
+      BinaryVector.majorVectorType(optimized) shouldEqual WireFormat.VECTORTYPE_DELTA2
+      BinaryVector.totalBytes(optimized) shouldEqual 24   // DeltaDeltaConstVector
+      val readVect = LongBinaryVector(BinaryVector.asBuffer(optimized))
+      val values = readVect.toBuffer(optimized).toList
+      values.zip(orig).foreach { case (encoded, origValue) =>
+        Math.abs(encoded - origValue) should be < 250L
+      }
+    }
+
+    it("should not use DeltaDeltaConstVector if values larger than 250ms from slope") {
+      val start = System.currentTimeMillis
+      val deltas = Seq(20, -20, 249, 2, -10, -251, 100, 0, -50, 23)
+      val orig = deltas.zipWithIndex.map { case (dd, i) => start + 10000 * i + dd }
+      val builder = LongBinaryVector.timestampVector(memFactory, 50)
+      orig.foreach(builder.addData)
+      builder.frozenSize shouldEqual (8 + orig.length * 8)
+      val optimized = builder.optimize(memFactory)
+      BinaryVector.majorVectorType(optimized) shouldEqual WireFormat.VECTORTYPE_DELTA2
+      val readVect = LongBinaryVector(BinaryVector.asBuffer(optimized))
+      readVect shouldEqual DeltaDeltaDataReader
+      readVect.toBuffer(optimized).toList shouldEqual orig
     }
   }
 }

@@ -148,7 +148,7 @@ sbt standalone/assembly cli/assembly tsgenerator/assembly
 First set up the dataset. This should create the keyspaces and tables in Cassandra. 
 ```
 ./filo-cli -Dconfig.file=conf/timeseries-filodb-server.conf  --command init
-./filo-cli -Dconfig.file=conf/timeseries-filodb-server.conf  --command create --dataset timeseries --dataColumns timestamp:long,value:double --partitionColumns tags:map --shardKeyColumns __name__,job
+./filo-cli -Dconfig.file=conf/timeseries-filodb-server.conf  --command create --dataset timeseries --dataColumns timestamp:ts,value:double --partitionColumns tags:map --shardKeyColumns __name__,job
 ```
 Verify that tables were created in `filodb` and `filodb-admin` keyspaces.
 
@@ -294,7 +294,7 @@ For additional information refer to Data Modeling and Performance Considerations
 
 * Partition key = `metricName:string,tags:map`
 * Row key = `timestamp`
-* Columns: `timestamp:long,value:double`
+* Columns: `timestamp:ts,value:double`
 
 The above is the classic Prometheus-compatible schema.  It supports indexing on any component of the partition key.  Thus standard Prometheus queries that filter by a tag such as `hostname` or `datacenter` for example would work fine.
 

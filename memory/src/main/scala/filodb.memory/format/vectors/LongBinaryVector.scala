@@ -17,7 +17,7 @@ object LongBinaryVector {
    * @param maxElements initial maximum number of elements this vector will hold. Will automatically grow.
    */
   def appendingVector(memFactory: MemFactory, maxElements: Int): BinaryAppendableVector[Long] = {
-    val bytesRequired = 12 + BitmapMask.numBytesRequired(maxElements) + 12 + 8 * maxElements
+    val bytesRequired = 12 + BitmapMask.numBytesRequired(maxElements) + 8 + 8 * maxElements
     val addr = memFactory.allocateOffheap(bytesRequired)
     val dispose =  () => memFactory.freeMemory(addr)
     GrowableVector(memFactory, new MaskedLongAppendingVector(addr, bytesRequired, maxElements, dispose))
@@ -28,10 +28,21 @@ object LongBinaryVector {
    * as available.
    */
   def appendingVectorNoNA(memFactory: MemFactory, maxElements: Int): BinaryAppendableVector[Long] = {
-    val bytesRequired = 12 + 8 * maxElements
+    val bytesRequired = 8 + 8 * maxElements
     val addr = memFactory.allocateOffheap(bytesRequired)
     val dispose =  () => memFactory.freeMemory(addr)
     new LongAppendingVector(addr, bytesRequired, dispose)
+  }
+
+  /**
+   * Creates a TimestampAppendingVector - does not grow and does not have bit mask. All values are marked
+   * as available.  Uses approximate DeltaDeltaVector for better timestamp compression
+   */
+  def timestampVector(memFactory: MemFactory, maxElements: Int): BinaryAppendableVector[Long] = {
+    val bytesRequired = 8 + 8 * maxElements
+    val addr = memFactory.allocateOffheap(bytesRequired)
+    val dispose =  () => memFactory.freeMemory(addr)
+    new TimestampAppendingVector(addr, bytesRequired, dispose)
   }
 
   def apply(buffer: ByteBuffer): LongVectorDataReader = apply(UnsafeUtils.addressFromDirectBuffer(buffer))
@@ -96,7 +107,7 @@ trait LongVectorDataReader extends VectorDataReader {
   /**
    * Returns the number of elements in this vector
    */
-  def length(vector: BinaryVectorPtr): Int = (numBytes(vector) - 8) / 8
+  def length(vector: BinaryVectorPtr): Int = (numBytes(vector) - PrimitiveVector.HeaderLen) / 8
 
   /**
    * Returns a LongIterator to efficiently go through the elements of the vector.  The user is responsible for
@@ -140,9 +151,10 @@ trait LongVectorDataReader extends VectorDataReader {
  * VectorDataReader for a Long BinaryVector using full 64-bits for a Long value
  */
 object LongVectorDataReader64 extends LongVectorDataReader {
-  final def apply(vector: BinaryVectorPtr, n: Int): Long = UnsafeUtils.getLong(vector + 12 + n * 8)
+  import PrimitiveVector.OffsetData
+  final def apply(vector: BinaryVectorPtr, n: Int): Long = UnsafeUtils.getLong(vector + OffsetData + n * 8)
   def iterate(vector: BinaryVectorPtr, startElement: Int = 0): LongIterator = new LongIterator {
-    private final var addr = vector + 12 + startElement * 8
+    private final var addr = vector + OffsetData + startElement * 8
     final def next: Long = {
       val data = UnsafeUtils.getLong(addr)
       addr += 8
@@ -160,7 +172,7 @@ object LongVectorDataReader64 extends LongVectorDataReader {
     while (len > 0) {
       val half = len >>> 1
       val middle = first + half
-      val element = UnsafeUtils.getLong(vector + 12 + middle * 8)
+      val element = UnsafeUtils.getLong(vector + OffsetData + middle * 8)
       if (element == item) {
         return middle
       } else if (element < item) {
@@ -224,6 +236,20 @@ extends PrimitiveAppendableVector[Long](addr, maxBytes, 64, true) {
 
   override def optimize(memFactory: MemFactory, hint: EncodingHint = AutoDetect): BinaryVectorPtr =
     LongBinaryVector.optimize(memFactory, this)
+}
+
+/**
+ * TimestampAppendingVector is just like LongAppendingVector EXCEPT that it uses
+ * "approximate" Delta Delta encoding.  If the values are all within 250ms of the DDV "slope" line, which is
+ * true most of the time in constantly emitting time series, then we use a "constant" DDV to save space.
+ */
+class TimestampAppendingVector(addr: BinaryRegion.NativePointer, maxBytes: Int, dispose: () => Unit)
+extends LongAppendingVector(addr, maxBytes, dispose) {
+  override def optimize(memFactory: MemFactory, hint: EncodingHint = AutoDetect): BinaryVectorPtr =
+    DeltaDeltaVector.fromLongVector(memFactory, this, approxConst = true)
+                    .getOrElse {
+                      if (noNAs) dataVect(memFactory) else getVect(memFactory)
+                    }
 }
 
 class MaskedLongAppendingVector(addr: BinaryRegion.NativePointer,

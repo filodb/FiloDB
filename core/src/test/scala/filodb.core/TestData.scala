@@ -297,7 +297,7 @@ object MachineMetricsData {
 object MetricsTestData {
   val timeseriesDataset = Dataset.make("timeseries",
                                   Seq("tags:map"),
-                                  Seq("timestamp:long", "value:double"),
+                                  Seq("timestamp:ts", "value:double"),
                                   Seq("timestamp"),
                                   DatasetOptions(Seq("__name__", "job"), "__name__", "value")).get
   val builder = new RecordBuilder(MemFactory.onHeapFactory, timeseriesDataset.ingestionSchema)

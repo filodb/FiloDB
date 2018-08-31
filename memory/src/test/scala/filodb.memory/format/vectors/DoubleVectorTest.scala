@@ -56,11 +56,11 @@ class DoubleVectorTest extends NativeVectorTest {
     it("should be able to freeze() and minimize bytes used") {
       val builder = DoubleVector.appendingVector(memFactory, 100)
       // Test numBytes to make sure it's accurate
-      builder.numBytes should equal (12 + 16 + 12)   // 2 long words needed for 100 bits
+      builder.numBytes should equal (12 + 16 + 8)   // 2 long words needed for 100 bits
       (0 to 4).map(_.toDouble).foreach(builder.addData)
-      builder.numBytes should equal (12 + 16 + 12 + 40)
+      builder.numBytes should equal (12 + 16 + 8 + 40)
       val frozen = builder.freeze(memFactory)
-      BinaryVector.totalBytes(frozen) should equal (12 + 8 + 12 + 40)  // bitmask truncated
+      BinaryVector.totalBytes(frozen) should equal (12 + 8 + 8 + 40)  // bitmask truncated
 
       DoubleVector(frozen).length(frozen) shouldEqual 5
       DoubleVector(frozen).toBuffer(frozen) shouldEqual Buffer.fromIterable((0 to 4).map(_.toDouble))

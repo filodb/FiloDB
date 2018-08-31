@@ -51,7 +51,7 @@ class IntBinaryVectorTest extends NativeVectorTest {
       readVect.length(builder.addr) shouldEqual 4
       readVect.toBuffer(builder.addr).toList shouldEqual orig
 
-      builder.frozenSize should equal (28)
+      builder.frozenSize should equal (24)
       val frozen = builder.freeze(memFactory)
       IntBinaryVector(frozen).length(frozen) shouldEqual 4
       IntBinaryVector(frozen).toBuffer(frozen).toList shouldEqual orig
@@ -61,7 +61,7 @@ class IntBinaryVectorTest extends NativeVectorTest {
       val builder = IntBinaryVector.appendingVectorNoNA(memFactory, 4)
       val orig = Seq(1, 2, -5, 101)
       orig.foreach(x => builder.addData(x) shouldEqual Ack)
-      builder.addNA() shouldEqual VectorTooSmall(29, 28)
+      builder.addNA() shouldEqual VectorTooSmall(25, 24)
       builder.length shouldEqual 4
     }
   }
@@ -71,13 +71,13 @@ class IntBinaryVectorTest extends NativeVectorTest {
       val builder = IntBinaryVector.appendingVectorNoNA(memFactory, 10, nbits=4, signed=false)
       builder.length should equal (0)
       builder.addData(2) shouldEqual Ack
-      builder.numBytes should equal (12 + 1)
+      builder.numBytes should equal (8 + 1)
       builder.reader.toBuffer(builder.addr).toList shouldEqual Seq(2)
       builder.addData(4) shouldEqual Ack
       builder.addData(3) shouldEqual Ack
       builder.length should equal (3)
       builder.reader.toBuffer(builder.addr).toList shouldEqual Seq(2, 4, 3)
-      builder.frozenSize should equal (12 + 2)
+      builder.frozenSize should equal (8 + 2)
       val frozen = builder.freeze(memFactory)
       IntBinaryVector(frozen).length(frozen) shouldEqual 3
       IntBinaryVector(frozen).toBuffer(frozen).toList shouldEqual Seq(2, 4, 3)
@@ -88,7 +88,7 @@ class IntBinaryVectorTest extends NativeVectorTest {
       val orig = Seq(0, 2, 1, 3, 2)
       orig.foreach(x => builder.addData(x) shouldEqual Ack)
       builder.reader.toBuffer(builder.addr).toList shouldEqual orig
-      builder.numBytes shouldEqual 14
+      builder.numBytes shouldEqual 10
 
       val frozen = builder.freeze(memFactory)
       IntBinaryVector(frozen).toBuffer(frozen).toList shouldEqual orig
@@ -99,11 +99,11 @@ class IntBinaryVectorTest extends NativeVectorTest {
       val builder1 = IntBinaryVector(memFactory, orig)
       val intVect = builder1.optimize(memFactory)
       IntBinaryVector(intVect).toBuffer(intVect).toList shouldEqual orig
-      BinaryVector.totalBytes(intVect) shouldEqual 14
+      BinaryVector.totalBytes(intVect) shouldEqual 10
 
       val builder2 = IntBinaryVector.appendingVectorNoNA(memFactory, 10)
       orig.foreach(x => builder2.addData(x) shouldEqual Ack)
-      BinaryVector.totalBytes(builder2.optimize(memFactory)) shouldEqual 14
+      BinaryVector.totalBytes(builder2.optimize(memFactory)) shouldEqual 10
     }
   }
 
@@ -177,11 +177,11 @@ class IntBinaryVectorTest extends NativeVectorTest {
     it("should be able to freeze() and minimize bytes used") {
       val builder = IntBinaryVector.appendingVector(memFactory, 100)
       // Test numBytes to make sure it's accurate
-      builder.numBytes should equal (12 + 16 + 12)   // 2 long words needed for 100 bits
+      builder.numBytes should equal (12 + 16 + 8)   // 2 long words needed for 100 bits
       (0 to 4).foreach(x => builder.addData(x) shouldEqual Ack)
-      builder.numBytes should equal (12 + 16 + 12 + 20)
+      builder.numBytes should equal (12 + 16 + 8 + 20)
       val frozen = builder.freeze(memFactory)
-      BinaryVector.totalBytes(frozen) should equal (12 + 8 + 12 + 20)  // bitmask truncated
+      BinaryVector.totalBytes(frozen) should equal (12 + 8 + 8 + 20)  // bitmask truncated
 
       IntBinaryVector(frozen).length(frozen) shouldEqual 5
       IntBinaryVector(frozen).toBuffer(frozen).toList should equal (0 to 4)
@@ -227,7 +227,7 @@ class IntBinaryVectorTest extends NativeVectorTest {
       val optimized = builder.optimize(memFactory)
       IntBinaryVector(optimized).length(optimized) shouldEqual 5
       IntBinaryVector(optimized).toBuffer(optimized) shouldEqual Buffer.fromIterable(0 to 4)
-      BinaryVector.totalBytes(optimized) shouldEqual (12 + 3)   // nbits=4, so only 3 extra bytes
+      BinaryVector.totalBytes(optimized) shouldEqual (8 + 3)   // nbits=4, so only 3 extra bytes
     }
 
     it("should be able to optimize constant ints to an IntConstVector") {

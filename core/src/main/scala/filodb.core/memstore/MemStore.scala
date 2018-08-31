@@ -196,7 +196,7 @@ object MemStore {
         case IntColumn       => bv.IntBinaryVector.appendingVectorNoNA(memFactory, maxElements)
         case LongColumn      => bv.LongBinaryVector.appendingVectorNoNA(memFactory, maxElements)
         case DoubleColumn    => bv.DoubleVector.appendingVectorNoNA(memFactory, maxElements)
-        case TimestampColumn => bv.LongBinaryVector.appendingVectorNoNA(memFactory, maxElements)
+        case TimestampColumn => bv.LongBinaryVector.timestampVector(memFactory, maxElements)
         case StringColumn    => bv.UTF8Vector.appendingVector(memFactory, maxElements, MaxUTF8VectorSize)
         case other: Column.ColumnType => ???
       }

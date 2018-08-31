@@ -13,7 +13,7 @@ import filodb.core.MetricsTestData._
 import filodb.core.TestData
 import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.memstore.{FixedMaxPartitionsEvictionPolicy, SomeData, TimeSeriesMemStore}
-import filodb.core.metadata.Column.ColumnType.{DoubleColumn, LongColumn}
+import filodb.core.metadata.Column.ColumnType.{DoubleColumn, TimestampColumn}
 import filodb.core.query.{ColumnFilter, Filter}
 import filodb.core.store.{InMemoryMetaStore, NullColumnStore}
 import filodb.memory.format.{SeqRowReader, ZeroCopyUTF8String}
@@ -131,7 +131,7 @@ class SelectRawPartitionsExecSpec extends FunSpec with Matchers with ScalaFuture
     resultSchema.isTimeSeries shouldEqual true
     resultSchema.numRowKeyColumns shouldEqual 1
     resultSchema.length shouldEqual 2
-    resultSchema.columns.map(_.colType) shouldEqual Seq(LongColumn, DoubleColumn)
+    resultSchema.columns.map(_.colType) shouldEqual Seq(TimestampColumn, DoubleColumn)
     resultSchema.columns.map(_.name) shouldEqual Seq("timestamp", "value")
   }
 }

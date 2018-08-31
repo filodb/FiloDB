@@ -25,8 +25,11 @@ object BinaryVector {
   /**
    * Returns the vector type and subtype from the WireFormat bytes of a BinaryVector
    */
-  def vectorType(addr: BinaryVectorPtr): Int = WireFormat.majorAndSubType(UnsafeUtils.getInt(addr + 4))
-  def majorVectorType(addr: BinaryVectorPtr): Int = WireFormat.majorVectorType(UnsafeUtils.getInt(addr + 4))
+  def vectorType(addr: BinaryVectorPtr): Int = WireFormat.majorAndSubType(UnsafeUtils.getShort(addr + 4))
+  def majorVectorType(addr: BinaryVectorPtr): Int = WireFormat.majorVectorType(UnsafeUtils.getShort(addr + 4))
+
+  def writeMajorAndSubType(addr: BinaryVectorPtr, majorType: Int, subType: Int): Unit =
+    UnsafeUtils.setShort(addr + 4, WireFormat(majorType, subType).toShort)
 
   /**
    * Returns the total number of bytes of the BinaryVector at address
@@ -421,26 +424,48 @@ trait OptimizingPrimitiveAppender[@specialized(Int, Long, Double, Boolean) A] ex
   def getVect(memFactory: MemFactory): BinaryVectorPtr = freeze(memFactory)
 }
 
+object PrimitiveVector {
+  val HeaderLen = 4
+  val OffsetWireFormat = 4
+  val OffsetNBits = 6
+  val OffsetBitShift = 7
+  val OffsetData = 8
+
+  val NBitsMask = 0x07f
+  val SignMask  = 0x080
+}
+
+object PrimitiveVectorReader {
+  import PrimitiveVector._
+  final def nbits(vector: BinaryVectorPtr): Int = UnsafeUtils.getByte(vector + OffsetNBits) & NBitsMask
+  final def bitShift(vector: BinaryVectorPtr): Int = UnsafeUtils.getByte(vector + OffsetBitShift) & 0x03f
+  final def signed(vector: BinaryVectorPtr): Boolean =
+    (UnsafeUtils.getByte(vector + OffsetNBits) & SignMask) != 0
+}
+
 /**
  * A BinaryAppendableVector for simple primitive types, ie where each element has a fixed length
  * and every element is available (there is no bitmap NA mask).
  * +0000 length word
- * +0004 WireFormat word
- * +0008 nbits/signed
+ * +0004 WireFormat(16 bits)
+ * +0006 nbits/signed:
+ *    xxBBBBBBSNNNNNNN  bits 0-6:  nbits
+ *                      bits 7:    signed 0 or 1
+ *                      bits 8-13: bitshift
  */
 abstract class PrimitiveAppendableVector[@specialized(Int, Long, Double, Boolean) A]
   (val addr: BinaryRegion.NativePointer, val maxBytes: Int, val nbits: Short, signed: Boolean)
 extends OptimizingPrimitiveAppender[A] {
+  import PrimitiveVector._
   def vectMajorType: Int = WireFormat.VECTORTYPE_BINSIMPLE
   def vectSubType: Int = WireFormat.SUBTYPE_PRIMITIVE_NOMASK
-  var writeOffset: Long = addr + 12
+  var writeOffset: Long = addr + OffsetData
   var bitShift: Int = 0
-  override final def length: Int = ((writeOffset - (addr + 12)).toInt * 8 + bitShift) / nbits
+  override final def length: Int = ((writeOffset - (addr + 8)).toInt * 8 + bitShift) / nbits
 
-  UnsafeUtils.setInt(addr,     8)   // 8 bytes after this length word
-  UnsafeUtils.setInt(addr + 4, WireFormat(vectMajorType, vectSubType))
-  UnsafeUtils.setShort(addr + 8, nbits.toShort)
-  UnsafeUtils.setByte(addr + 10, if (signed) 1 else 0)
+  UnsafeUtils.setInt(addr, HeaderLen)   // 4 bytes after this length word
+  BinaryVector.writeMajorAndSubType(addr, vectMajorType, vectSubType)
+  UnsafeUtils.setShort(addr + OffsetNBits, ((nbits & NBitsMask) | (if (signed) SignMask else 0)).toShort)
 
   def numBytes: Int = UnsafeUtils.getInt(addr) + 4
 
@@ -457,7 +482,7 @@ extends OptimizingPrimitiveAppender[A] {
     if (bitShift == 0) incNumBytes(1)   // just before increment, means we are using that byte now
     bitShift = (bitShift + nbits) % 8
     if (bitShift == 0) writeOffset += 1
-    UnsafeUtils.setByte(addr + 11, bitShift.toByte)
+    UnsafeUtils.setByte(addr + OffsetBitShift, bitShift.toByte)
   }
 
   final def isAvailable(index: Int): Boolean = true
@@ -480,10 +505,10 @@ extends OptimizingPrimitiveAppender[A] {
   def finishCompaction(newAddress: BinaryRegion.NativePointer): BinaryVectorPtr = newAddress
 
   def reset(): Unit = {
-    writeOffset = addr + 12
+    writeOffset = addr + OffsetData
     bitShift = 0
-    UnsafeUtils.setByte(addr + 11, bitShift.toByte)
-    UnsafeUtils.setInt(addr,     8)   // 8 bytes after this length word
+    UnsafeUtils.setByte(addr + OffsetBitShift, bitShift.toByte)
+    UnsafeUtils.setInt(addr, HeaderLen)   // 4 bytes after this length word
   }
 }
 
@@ -511,7 +536,7 @@ extends BinaryAppendableVector[A] {
   UnsafeUtils.unsafe.setMemory(UnsafeUtils.ZeroPointer, bitmapOffset, bitmapMaskBufferSize, 0)
 
   UnsafeUtils.setInt(addr,     8 + bitmapMaskBufferSize)
-  UnsafeUtils.setInt(addr + 4, WireFormat(vectMajorType, vectSubType))
+  BinaryVector.writeMajorAndSubType(addr, vectMajorType, vectSubType)
   val subVectOffset = 12 + bitmapMaskBufferSize
   UnsafeUtils.setInt(addr + 8, subVectOffset)
 

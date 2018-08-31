@@ -42,8 +42,6 @@ object RangeVectorTransformer {
   def requireTimeSeries(schema: ResultSchema): Unit = {
     require(schema.isTimeSeries, "Cannot return periodic data from a dataset that is not time series based")
     require(schema.columns.size == 2, "Cannot return periodic data from a dataset that is not time series based")
-    require(schema.columns(0).colType == ColumnType.LongColumn,
-      "Cannot return periodic data from a dataset that is not time series based")
     require(schema.columns(1).colType == ColumnType.DoubleColumn,
       "Cannot query a non Doubles based value column right now, sorry")
   }

@@ -33,7 +33,7 @@ object IntBinaryVector {
    * This accounts for when nbits < 8 and we need extra byte
    */
   def noNAsize(maxElements: Int, nbits: Short): Int =
-    12 + ((maxElements * nbits + Math.max(8 - nbits, 0)) / 8)
+    8 + ((maxElements * nbits + Math.max(8 - nbits, 0)) / 8)
 
   /**
    * Same as appendingVector but uses a SimpleAppendingVector with no ability to hold NA mask
@@ -119,14 +119,14 @@ object IntBinaryVector {
    */
   def simple(vector: BinaryVectorPtr): IntVectorDataReader = {
     // get nbits, etc and decide
-    if (IntVectorDataReader.signed(vector)) {
-      IntVectorDataReader.nbits(vector) match {
+    if (PrimitiveVectorReader.signed(vector)) {
+      PrimitiveVectorReader.nbits(vector) match {
         case 32 => OffheapSignedIntVector32
         case 16 => OffheapSignedIntVector16
         case 8  => OffheapSignedIntVector8
       }
     } else {
-      IntVectorDataReader.nbits(vector) match {
+      PrimitiveVectorReader.nbits(vector) match {
         case 32 => OffheapSignedIntVector32
         case 16 => OffheapUnsignedIntVector16
         case 8  => OffheapUnsignedIntVector8
@@ -208,20 +208,6 @@ object IntBinaryVector {
 }
 
 /**
- * +0000   4-byte length word
- * +0004   4-byte WireFormat
- * +0008   2-byte nbits
- * +0010   1 byte Boolean signed
- * +0011   1 byte (actually 3 bits) bitshift when nbits < 8
- * +0012   start of packed integer data
- */
-object IntVectorDataReader {
-  final def nbits(vector: BinaryVectorPtr): Short = UnsafeUtils.getShort(vector + 8)
-  final def bitShift(vector: BinaryVectorPtr): Int = UnsafeUtils.getByte(vector + 11) & 0x07
-  final def signed(vector: BinaryVectorPtr): Boolean = UnsafeUtils.getByte(vector + 10) != 0
-}
-
-/**
  * An iterator optimized for speed and type-specific to avoid boxing.
  * It has no hasNext() method - because it is guaranteed to visit every element, and this way
  * you can avoid another method call for performance.
@@ -230,8 +216,15 @@ trait IntIterator extends TypedIterator {
   def next: Int
 }
 
+/**
+ * +0000   4-byte length word
+ * +0004   2-byte WireFormat
+ * +0006   2-byte Bitshift / signed / NBits  (for format see PrimitiveAppendableVector)
+ * +0008   start of packed integer data
+ */
 trait IntVectorDataReader extends VectorDataReader {
-  import IntVectorDataReader._
+  import PrimitiveVector.HeaderLen
+  import PrimitiveVectorReader._
 
   /**
    * Retrieves the element at position/row n, where n=0 is the first element of the vector.
@@ -242,7 +235,7 @@ trait IntVectorDataReader extends VectorDataReader {
    * Returns the number of elements in this BinaryVector
    */
   def length(vector: BinaryVectorPtr): Int =
-    ((numBytes(vector) - 8) * 8 + (if (bitShift(vector) != 0) bitShift(vector) - 8 else 0)) / nbits(vector)
+    ((numBytes(vector) - HeaderLen) * 8 + (if (bitShift(vector) != 0) bitShift(vector) - 8 else 0)) / nbits(vector)
 
   /**
    * Returns an IntIterator to efficiently go through the elements of the vector.  The user is responsible for
@@ -280,35 +273,35 @@ trait IntVectorDataReader extends VectorDataReader {
 }
 
 object OffheapSignedIntVector32 extends IntVectorDataReader {
-  final def apply(vector: BinaryVectorPtr, n: Int): Int = UnsafeUtils.getInt(vector + 12 + n * 4)
+  final def apply(vector: BinaryVectorPtr, n: Int): Int = UnsafeUtils.getInt(vector + 8 + n * 4)
 }
 
 object OffheapSignedIntVector16 extends IntVectorDataReader {
-  final def apply(vector: BinaryVectorPtr, n: Int): Int = UnsafeUtils.getShort(vector + 12 + n * 2).toInt
+  final def apply(vector: BinaryVectorPtr, n: Int): Int = UnsafeUtils.getShort(vector + 8 + n * 2).toInt
 }
 
 object OffheapSignedIntVector8 extends IntVectorDataReader {
-  final def apply(vector: BinaryVectorPtr, n: Int): Int = UnsafeUtils.getByte(vector + 12 + n).toInt
+  final def apply(vector: BinaryVectorPtr, n: Int): Int = UnsafeUtils.getByte(vector + 8 + n).toInt
 }
 
 object OffheapUnsignedIntVector16 extends IntVectorDataReader {
   final def apply(vector: BinaryVectorPtr, n: Int): Int =
-    (UnsafeUtils.getShort(vector + 12 + n * 2) & 0x0ffff).toInt
+    (UnsafeUtils.getShort(vector + 8 + n * 2) & 0x0ffff).toInt
 }
 
 object OffheapUnsignedIntVector8 extends IntVectorDataReader {
   final def apply(vector: BinaryVectorPtr, n: Int): Int =
-    (UnsafeUtils.getByte(vector + 12 + n) & 0x00ff).toInt
+    (UnsafeUtils.getByte(vector + 8 + n) & 0x00ff).toInt
 }
 
 object OffheapUnsignedIntVector4 extends IntVectorDataReader {
   final def apply(vector: BinaryVectorPtr, n: Int): Int =
-    (UnsafeUtils.getByte(vector + 12 + n/2) >> ((n & 0x01) * 4)).toInt & 0x0f
+    (UnsafeUtils.getByte(vector + 8 + n/2) >> ((n & 0x01) * 4)).toInt & 0x0f
 }
 
 object OffheapUnsignedIntVector2 extends IntVectorDataReader {
   final def apply(vector: BinaryVectorPtr, n: Int): Int =
-    (UnsafeUtils.getByte(vector + 12 + n/4) >> ((n & 0x03) * 2)).toInt & 0x03
+    (UnsafeUtils.getByte(vector + 8 + n/4) >> ((n & 0x03) * 2)).toInt & 0x03
 }
 
 

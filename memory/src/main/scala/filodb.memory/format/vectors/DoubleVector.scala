@@ -18,7 +18,7 @@ object DoubleVector {
    * @param maxElements initial maximum number of elements this vector will hold. Will automatically grow.
    */
   def appendingVector(memFactory: MemFactory, maxElements: Int): BinaryAppendableVector[Double] = {
-    val bytesRequired = 12 + BitmapMask.numBytesRequired(maxElements) + 12 + 8 * maxElements
+    val bytesRequired = 12 + BitmapMask.numBytesRequired(maxElements) + 8 + 8 * maxElements
     val addr = memFactory.allocateOffheap(bytesRequired)
     val dispose =  () => memFactory.freeMemory(addr)
     GrowableVector(memFactory,new MaskedDoubleAppendingVector(addr, bytesRequired, maxElements, dispose))
@@ -30,7 +30,7 @@ object DoubleVector {
    * @param maxElements the max number of elements the vector will hold.  Not expandable
    */
   def appendingVectorNoNA(memFactory: MemFactory, maxElements: Int): BinaryAppendableVector[Double] = {
-    val bytesRequired = 12 + 8 * maxElements
+    val bytesRequired = 8 + 8 * maxElements
     val addr = memFactory.allocateOffheap(bytesRequired)
     val dispose =  () => memFactory.freeMemory(addr)
     new DoubleAppendingVector(addr, bytesRequired, dispose)
@@ -98,11 +98,9 @@ trait DoubleIterator extends TypedIterator {
 /**
  * A VectorDataReader object that supports fast extraction of Double data BinaryVectors
  * +0000   4-byte length word
- * +0004   4-byte WireFormat
- * +0008   2-byte nbits  (unused for Longs)
- * +0010   1 byte Boolean signed
- * +0011   1 byte (actually 3 bits) bitshift when nbits < 8
- * +0012   start of packed Double data
+ * +0004   2-byte WireFormat
+ * +0006   2-byte nbits / signed / bitshift
+ * +0008   start of packed Double data
  */
 trait DoubleVectorDataReader extends VectorDataReader {
   /**
@@ -111,7 +109,7 @@ trait DoubleVectorDataReader extends VectorDataReader {
   def apply(vector: BinaryVectorPtr, n: Int): Double
 
   // This length method works assuming nbits is divisible into 32
-  def length(vector: BinaryVectorPtr): Int = (numBytes(vector) - 8) / 8
+  def length(vector: BinaryVectorPtr): Int = (numBytes(vector) - PrimitiveVector.HeaderLen) / 8
 
   /**
    * Returns a DoubleIterator to efficiently go through the elements of the vector.  The user is responsible for
@@ -145,9 +143,10 @@ trait DoubleVectorDataReader extends VectorDataReader {
  * VectorDataReader for a Double BinaryVector using full 64-bits for a Double value
  */
 object DoubleVectorDataReader64 extends DoubleVectorDataReader {
-  final def apply(vector: BinaryVectorPtr, n: Int): Double = UnsafeUtils.getDouble(vector + 12 + n * 8)
+  import PrimitiveVector.OffsetData
+  final def apply(vector: BinaryVectorPtr, n: Int): Double = UnsafeUtils.getDouble(vector + OffsetData + n * 8)
   def iterate(vector: BinaryVectorPtr, startElement: Int = 0): DoubleIterator = new DoubleIterator {
-    private final var addr = vector + 12 + startElement * 8
+    private final var addr = vector + OffsetData + startElement * 8
     final def next: Double = {
       val data = UnsafeUtils.getDouble(addr)
       addr += 8

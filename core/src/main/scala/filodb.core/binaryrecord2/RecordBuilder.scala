@@ -145,6 +145,7 @@ final class RecordBuilder(memFactory: MemFactory,
     (schema.columnTypes(fieldNo), item) match {
       case (IntColumn, i: Int)       => addInt(i)
       case (LongColumn, l: Long)     => addLong(l)
+      case (TimestampColumn, l: Long) => addLong(l)
       case (DoubleColumn, d: Double) => addDouble(d)
       case (StringColumn, s: String) => addString(s)
       case (StringColumn, a: Array[Byte]) => addString(a)

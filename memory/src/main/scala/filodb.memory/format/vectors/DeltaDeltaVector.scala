@@ -7,6 +7,7 @@ import filodb.memory.{BinaryRegion, MemFactory}
 import filodb.memory.format._
 import filodb.memory.format.BinaryVector.BinaryVectorPtr
 
+final case class MinMax(min: Int, max: Int)
 
 /**
  * The Delta-Delta Vector represents an efficient encoding of a sloped line where in general values are
@@ -41,6 +42,9 @@ object DeltaDeltaVector {
     new DeltaDeltaAppendingVector(addr, bytesRequired, initValue, slope, nbits, signed, dispose)
   }
 
+  val MaxApproxDelta = 250   // approx const DDV accepts +/-250 from delta =~ 250 ms
+  val MinApproxDelta = -250
+
   /**
    * Creates a DeltaDeltaAppendingVector from a source AppendableVector[Long], filling in all
    * the values as well.  Tries not to create intermediate vectors by figuring out size of deltas from the source.
@@ -49,18 +53,24 @@ object DeltaDeltaVector {
    * 1a) Vectors with any NAs are not eligible
    * 2) If the deltas end up taking more than maxNBits.  Default is 32, but can be adjusted.
    *
+   * @param maxNBits the maximum number of bits for the output DeltaDeltaVector per element
+   * @param approxConst if true, and the samples don't vary much from the deltas, go ahead and use a const vector
+   *
    * NOTE: no need to get min max before calling this function.  We figure out min max of deltas, much more important
    * @return Some(vector) if the input vect is eligible, or None if it is not eligible
    */
   def fromLongVector(memFactory: MemFactory,
                      inputVect: BinaryAppendableVector[Long],
-                     maxNBits: Short = 32): Option[BinaryVectorPtr] =
+                     maxNBits: Short = 32,
+                     approxConst: Boolean = false): Option[BinaryVectorPtr] =
     if (inputVect.noNAs && inputVect.length > 2) {
       for { slope    <- getSlope(inputVect(0), inputVect(inputVect.length - 1), inputVect.length)
             minMax   <- getDeltasMinMax(inputVect, slope)
             nbitsSigned <- getNbitsSignedFromMinMax(minMax, maxNBits)
       } yield {
-        if (minMax._1 == minMax._2) {
+        if (minMax.min == minMax.max) {
+          const(memFactory, inputVect.length, inputVect(0), slope)
+        } else if (approxConst && minMax.min >= MinApproxDelta && minMax.max <= MaxApproxDelta) {
           const(memFactory, inputVect.length, inputVect(0), slope)
         } else {
           val vect = appendingVector(memFactory, inputVect.length, inputVect(0), slope, nbitsSigned._1, nbitsSigned._2)
@@ -101,7 +111,7 @@ object DeltaDeltaVector {
   }
 
   // Returns min and max of deltas computed from original input.  Just for sizing nbits for final DDV
-  def getDeltasMinMax(inputVect: BinaryAppendableVector[Long], slope: Int): Option[(Int, Int)] = {
+  def getDeltasMinMax(inputVect: BinaryAppendableVector[Long], slope: Int): Option[MinMax] = {
     var baseValue: Long = inputVect(0)
     var max = Int.MinValue
     var min = Int.MaxValue
@@ -112,11 +122,11 @@ object DeltaDeltaVector {
       max = Math.max(max, delta.toInt)
       min = Math.min(min, delta.toInt)
     }
-    Some((min, max))
+    Some(MinMax(min, max))
   }
 
-  def getNbitsSignedFromMinMax(minMax: (Int, Int), maxNBits: Short): Option[(Short, Boolean)] = {
-    val (newNbits, newSigned) = IntBinaryVector.minMaxToNbitsSigned(minMax._1, minMax._2)
+  def getNbitsSignedFromMinMax(minMax: MinMax, maxNBits: Short): Option[(Short, Boolean)] = {
+    val (newNbits, newSigned) = IntBinaryVector.minMaxToNbitsSigned(minMax.min, minMax.max)
     if (newNbits <= maxNBits) Some((newNbits, newSigned)) else None
   }
 }
@@ -128,7 +138,7 @@ object DeltaDeltaVector {
  * +0008 initial value (long)
  * +0016 slope (int)
  * +0020 inner IntBinaryVector (including length, wireformat, etc.)
- * Thus overall header for DDV = 32 bytes
+ * Thus overall header for DDV = 28 bytes
  */
 object DeltaDeltaDataReader extends LongVectorDataReader {
   val InnerVectorOffset = 20

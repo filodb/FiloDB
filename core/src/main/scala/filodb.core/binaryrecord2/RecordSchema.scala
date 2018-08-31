@@ -56,6 +56,8 @@ final class RecordSchema(val columnTypes: Seq[Column.ColumnType],
       (row: RowReader, builder: RecordBuilder) => builder.addInt(row.getInt(colNo))
     case (Column.ColumnType.LongColumn, colNo) =>
       (row: RowReader, builder: RecordBuilder) => builder.addLong(row.getLong(colNo))
+    case (Column.ColumnType.TimestampColumn, colNo) =>
+      (row: RowReader, builder: RecordBuilder) => builder.addLong(row.getLong(colNo))
     case (Column.ColumnType.DoubleColumn, colNo) =>
       (row: RowReader, builder: RecordBuilder) => builder.addDouble(row.getDouble(colNo))
     case (Column.ColumnType.StringColumn, colNo) =>
