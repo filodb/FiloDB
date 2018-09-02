@@ -11,7 +11,7 @@ import filodb.core.metadata.{Dataset, DatasetOptions}
 object FormatConversion {
   // An official Prometheus-format Dataset object with a single timestamp and value
   val dataset = Dataset("prometheus", Seq("tags:map"), Seq("timestamp:long", "value:double"))
-                  .copy(options = DatasetOptions(Seq("__name__", "job"),
+                  .copy(options = DatasetOptions(Seq("__name__", "app"),
                     "__name__", "value", Map("__name__" -> Seq("_bucket", "_count", "_sum")), Seq("le")))
 
   /**
