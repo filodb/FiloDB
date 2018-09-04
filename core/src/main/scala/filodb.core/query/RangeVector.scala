@@ -1,5 +1,6 @@
 package filodb.core.query
 
+import kamon.Kamon
 import org.joda.time.DateTime
 
 import filodb.core.binaryrecord.BinaryRecord
@@ -126,6 +127,8 @@ final class SerializableRangeVector(val key: RangeVectorKey,
 
 object SerializableRangeVector {
   import filodb.core._
+
+  val queryResultBytes = Kamon.histogram("query-engine-result-bytes")
 
   /**
    * Creates a SerializableRangeVector out of another RangeVector by sharing a previously used RecordBuilder.

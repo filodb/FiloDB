@@ -115,6 +115,17 @@ trait ExecPlan extends QueryCommand {
         .take(queryConfig.vectorsLimit)
         .toListL
         .map { r =>
+          val numBytes = builder.allContainers.map(_.numBytes).sum
+          SerializableRangeVector.queryResultBytes.record(numBytes)
+          if (numBytes > 5000000) {
+            // 5MB limit. Configure if necessary later.
+            // 250 RVs * (250 bytes for RV-Key + 200 samples * 32 bytes per sample)
+            // is < 2MB
+            qLogger.warn(s"queryId: ${id} result was " +
+              s"large size ${numBytes}. May need to tweak limits. " +
+              s"ExecPlan was: ${printTree()} " +
+              s"Limit was: ${limit}")
+          }
           qLogger.debug(s"queryId: ${id} Successful execution of ${getClass.getSimpleName} with transformers")
           QueryResult(id, finalRes._2, r)
         }
