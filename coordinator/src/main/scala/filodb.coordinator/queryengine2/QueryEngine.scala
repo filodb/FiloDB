@@ -60,7 +60,7 @@ class QueryEngine(dataset: Dataset,
     require(shardColumns.nonEmpty || options.shardOverrides.nonEmpty,
       s"Dataset ${dataset.ref} does not have shard columns defined, and shard overrides were not mentioned")
 
-    if (shardColumns.nonEmpty) {
+    options.shardOverrides.getOrElse {
       val shardColValues = shardColumns.map { shardCol =>
         // So to compute the shard hash we need shardCol == value filter (exact equals) for each shardColumn
         filters.find(f => f.column == shardCol) match {
@@ -77,8 +77,6 @@ class QueryEngine(dataset: Dataset,
       logger.debug(s"For shardColumns $shardColumns, extracted filter values $shardColValues successfully")
       val shardHash = RecordBuilder.shardKeyHash(shardColumns, shardColValues)
       shardMapperFunc.queryShards(shardHash, options.spreadFunc(filters))
-    } else {
-      options.shardOverrides.get
     }
   }
 

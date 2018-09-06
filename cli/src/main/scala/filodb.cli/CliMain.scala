@@ -57,7 +57,7 @@ class Arguments extends FieldArgs {
   // Ignores the given Tags while calculating partitionKeyHash
   var ignoreTagsOnPartitionKeyHash: Seq[String] = Nil
   var everyNSeconds: Option[String] = None
-  var shardOverrides: Option[Seq[String]] = None
+  var shards: Option[Seq[String]] = None
 }
 
 object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbClusterNode {
@@ -80,7 +80,7 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
     println("\n  NOTE: truncate and clearMetadata should NOT be used while FiloDB instances are up\n")
     println("\nStandalone client commands:")
     println("  --host <hostname/IP> [--port ...] --command indexnames --dataset <dataset>")
-    println("  --host <hostname/IP> [--port ...] --command indexvalues --indexname <index> --dataset <dataset>")
+    println("  --host <hostname/IP> [--port ...] --command indexvalues --indexname <index> --dataset <dataset> --shards SS")
     println("  --host <hostname/IP> [--port ...] [--metricColumn <col>] --dataset <dataset> --promql <query> --start <start> --step <step> --end <end>")
     println("  --host <hostname/IP> [--port ...] --command setup --filename <configFile> | --configPath <path>")
     println("  --host <hostname/IP> [--port ...] --command list")
@@ -156,9 +156,10 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
 
         case Some("indexvalues") =>
           require(args.indexName.nonEmpty, "--indexName required")
+          require(args.shards.nonEmpty, "--shards required")
           val (remote, ref) = getClientAndRef(args)
-          val values = remote.getIndexValues(ref, args.indexName.get, args.limit)
-          values.foreach { case (term, freq) => println(s"$term\t$freq") }
+          val values = remote.getIndexValues(ref, args.indexName.get, args.shards.get.head.toInt, args.limit)
+          values.foreach { case (term, freq) => println(f"$term%40s\t$freq") }
 
         case Some("status") =>
           val (remote, ref) = getClientAndRef(args)
@@ -183,7 +184,7 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
             require(args.host.nonEmpty && args.dataset.nonEmpty, "--host and --dataset must be defined")
             val remote = Client.standaloneClient(system, args.host.get, args.port)
             val options = QOptions(args.limit, args.sampleLimit, args.everyNSeconds.map(_.toInt),
-              timeout, args.shardOverrides.map(_.map(_.toInt)))
+              timeout, args.shards.map(_.map(_.toInt)))
             parsePromQuery2(remote, query, args.dataset.get,
               QueryParams(args.start, args.step, args.end), options)
           }.orElse {

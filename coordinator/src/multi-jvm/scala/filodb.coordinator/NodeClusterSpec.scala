@@ -15,7 +15,9 @@ object NodeClusterSpecConfig extends MultiNodeConfig {
 
   // this configuration will be used for all nodes
   // Uses our common Akka test config from application_test.conf
-  val globalConfig = ConfigFactory.load("application_test.conf")
+  val globalConfig = ConfigFactory.parseString("""filodb.memstore.groups-per-shard = 4""".stripMargin)
+                       .withFallback(ConfigFactory.parseResources("application_test.conf"))
+                       .withFallback(ConfigFactory.load("filodb-defaults.conf"))
   commonConfig(globalConfig)
 }
 

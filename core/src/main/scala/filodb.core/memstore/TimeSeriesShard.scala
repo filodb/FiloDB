@@ -741,13 +741,13 @@ class TimeSeriesShard(val dataset: Dataset,
 
   private def disableAddPartitions(): Unit = {
     if (addPartitionsDisabled.compareAndSet(false, true))
-      logger.warn(s"Out of buffer memory and not able to evict enough; adding partitions disabled")
+      logger.warn(s"Shard $shardNum: Out of buffer memory and not able to evict enough; adding partitions disabled")
     shardStats.dataDropped.increment
   }
 
   private def checkEnableAddPartitions(): Unit = if (addPartitionsDisabled()) {
     if (ensureFreeSpace()) {
-      logger.info(s"Enough free space to add partitions again!  Yay!")
+      logger.info(s"Shard $shardNum: Enough free space to add partitions again!  Yay!")
       addPartitionsDisabled := false
     }
   }
@@ -777,7 +777,7 @@ class TimeSeriesShard(val dataset: Dataset,
       // Eliminate partitions evicted from last cycle so we don't have an endless loop
       val prunedPartitions = partitionsToEvict().andNot(lastPruned)
       if (prunedPartitions.isEmpty) {
-        logger.warn(s"Cannot find any partitions to evict but we are still low on space.  DATA WILL BE DROPPED")
+        logger.warn(s"Shard $shardNum: No partitions to evict but we are still low on space.  DATA WILL BE DROPPED")
         return false
       }
       lastPruned = prunedPartitions
@@ -788,20 +788,26 @@ class TimeSeriesShard(val dataset: Dataset,
       }
 
       // Finally, prune partitions and keyMap data structures
-      logger.info(s"Pruning ${prunedPartitions.cardinality} partitions from shard $shardNum")
+      logger.info(s"Evicting partitions from shard $shardNum, watermark = $evictionWatermark....")
       val intIt = prunedPartitions.intIterator
+      var partsRemoved = 0
+      var partsSkipped = 0
       while (intIt.hasNext) {
         val partitionObj = partitions.get(intIt.next)
         // Update the evictionWatermark BEFORE we free the partition and can't read data any more
-        if (partitionObj != OutOfMemPartition) {
+        if (partitionObj != UnsafeUtils.ZeroPointer) {
           // this partition is not ingesting, so timestampOfLatestSample should not be -1
           val partEndTime = partitionObj.timestampOfLatestSample
           if (partEndTime == -1) logger.warn(s"partition is ingesting, but it was eligible for eviction. How?")
           removePartition(partitionObj)
+          partsRemoved += 1
           evictionWatermark = Math.max(evictionWatermark, partEndTime)
+        } else {
+          partsSkipped += 1
         }
       }
-      shardStats.partitionsEvicted.increment(prunedPartitions.cardinality)
+      logger.info(s"Shard $shardNum: evicted $partsRemoved partitions, skipped $partsSkipped, h20=$evictionWatermark")
+      shardStats.partitionsEvicted.increment(partsRemoved)
     }
     true
   }

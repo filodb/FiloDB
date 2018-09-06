@@ -34,9 +34,11 @@ object QueryCommands {
   /**
    * Returns a Seq[(String, Int)] of the top *limit* most popular values indexed for a given tag/column.
    * Or Nil if the dataset or indexName is not found.
+   * @param shardOpt the shard to query for index values, if None, then the first shard is picked
    */
   final case class GetIndexValues(dataset: DatasetRef,
                                   indexName: String,
+                                  shard: Int,
                                   limit: Int = 100,
                                   submitTime: Long = System.currentTimeMillis()) extends QueryCommand
 

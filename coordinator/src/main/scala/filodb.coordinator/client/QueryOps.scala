@@ -16,19 +16,20 @@ trait QueryOps extends ClientBase with StrictLogging {
    * @param dataset the Dataset (and Database) to query
    * @param limit   the maximum number of results to return
    * @param timeout the maximum amount of time to wait for an answer
-   * @return a Seq[String] with all the tag names, Nil if nothing is indexed or dataset not found
+   * @return a Set[String] with all the tag names, Nil if nothing is indexed or dataset not found
    */
   def getIndexNames(dataset: DatasetRef,
                     limit: Int = 10,
-                    timeout: FiniteDuration = 15.seconds): Seq[String] =
+                    timeout: FiniteDuration = 15.seconds): Set[String] =
     askCoordinator(GetIndexNames(dataset, limit, System.currentTimeMillis()), timeout) {
-      case s: Seq[String] @unchecked => s
+      case s: Seq[String] @unchecked => s.toSet
     }
 
   /**
    * Returns a Seq[(String, Int)] of the top *limit* most popular values indexed for a given tag/column.
    * @param dataset the Dataset (and Database) to query
    * @param indexName the name of the index to get values for
+   * @param shard the shard to query index values for
    * @param limit   the maximum number of results to return
    * @param timeout the maximum amount of time to wait for an answer
    * @return a Seq[(String, Int)] with all the tag names, Nil if nothing is indexed or dataset not found
@@ -36,9 +37,10 @@ trait QueryOps extends ClientBase with StrictLogging {
    */
   def getIndexValues(dataset: DatasetRef,
                      indexName: String,
+                     shard: Int,
                      limit: Int = 100,
                      timeout: FiniteDuration = 15.seconds): Seq[(String, Int)] =
-    askCoordinator(GetIndexValues(dataset, indexName, limit, System.currentTimeMillis()), timeout) {
+    askCoordinator(GetIndexValues(dataset, indexName, shard, limit, System.currentTimeMillis()), timeout) {
       case s: Seq[(String, Int)] @unchecked => s
     }
 

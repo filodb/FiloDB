@@ -134,7 +134,7 @@ Create a new Kafka topic with 4 partitions. This is where time series data will 
 kafka-topics --create --zookeeper localhost:2181 --replication-factor 1 --partitions 4 --topic timeseries-dev
 ```
 
-Download and start Cassandra 2.1.
+Download and start Cassandra 2.1 or above (Cassandra 3 and above recommended).
 
 ```
 bin/cassandra

@@ -308,7 +308,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       probe.send(coordinatorActor, GetIndexNames(ref))
       probe.expectMsg(Seq("series"))
 
-      probe.send(coordinatorActor, GetIndexValues(ref, "series", limit=4))
+      probe.send(coordinatorActor, GetIndexValues(ref, "series", 0, limit=4))
       probe.expectMsg(Seq(("Series 0", 1), ("Series 1", 1), ("Series 2", 1), ("Series 3", 1)))
     }
 
@@ -323,7 +323,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       probe.expectMsg(Seq("series"))
 
       //actor should restart and serve queries again
-      probe.send(coordinatorActor, GetIndexValues(ref, "series", limit=4))
+      probe.send(coordinatorActor, GetIndexValues(ref, "series", 0, limit=4))
       probe.expectMsg(Seq(("Series 0", 1), ("Series 1", 1), ("Series 2", 1), ("Series 3", 1)))
     }
   }

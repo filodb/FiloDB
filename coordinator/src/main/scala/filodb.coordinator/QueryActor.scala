@@ -100,6 +100,18 @@ final class QueryActor(memStore: MemStore,
     }
   }
 
+  private def processIndexValues(g: GetIndexValues, originator: ActorRef): Unit = {
+    val localShards = memStore.activeShards(g.dataset)
+    if (localShards contains g.shard) {
+      originator ! memStore.indexValues(g.dataset, g.shard, g.indexName, g.limit)
+                           .map { case TermInfo(term, freq) => (term.toString, freq) }
+    } else {
+      val destNode = shardMapFunc.coordForShard(g.shard)
+      if (destNode != ActorRef.noSender) { destNode.forward(g) }
+      else                               { originator ! BadArgument(s"Shard ${g.shard} is not assigned") }
+    }
+  }
+
   def receive: Receive = {
     case q: LogicalPlan2Query      => val replyTo = sender()
                                       processLogicalPlan2Query(q, replyTo)
@@ -108,12 +120,7 @@ final class QueryActor(memStore: MemStore,
 
     case GetIndexNames(ref, limit, _) =>
       sender() ! memStore.indexNames(ref).take(limit).map(_._1).toBuffer
-    case GetIndexValues(ref, index, limit, _) =>
-      // For now, just return values from the first shard
-      memStore.activeShards(ref).headOption.foreach { shard =>
-        sender() ! memStore.indexValues(ref, shard, index, limit)
-                           .map { case TermInfo(term, freq) => (term.toString, freq) }
-      }
+    case g: GetIndexValues         => processIndexValues(g, sender())
 
     case ThrowException(dataset) =>
       logger.warn(s"Throwing exception for dataset $dataset. QueryActor will be killed")
