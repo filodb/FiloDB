@@ -19,7 +19,7 @@ import filodb.memory.{BinaryRegionLarge, MemFactory}
 import filodb.memory.format.{ArrayStringRowReader, UnsafeUtils, ZeroCopyUTF8String}
 
 class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter with ScalaFutures {
-  import monix.execution.Scheduler.Implicits.global
+  implicit val s = monix.execution.Scheduler.Implicits.global
 
   import MachineMetricsData._
   import ZeroCopyUTF8String._
@@ -159,8 +159,8 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
 
     // val stream = Observable.fromIterable(linearMultiSeries().take(100).grouped(5).toSeq.map(records(dataset1, _)))
     val stream = Observable.fromIterable(groupedRecords(dataset1, linearMultiSeries()))
-    val fut1 = memStore.ingestStream(dataset1.ref, 0, stream, FlushStream.empty)(ex => throw ex)
-    val fut2 = memStore.ingestStream(dataset1.ref, 1, stream, FlushStream.empty)(ex => throw ex)
+    val fut1 = memStore.ingestStream(dataset1.ref, 0, stream, s, FlushStream.empty)(ex => throw ex)
+    val fut2 = memStore.ingestStream(dataset1.ref, 1, stream, s, FlushStream.empty)(ex => throw ex)
     // Allow both futures to run first before waiting for completion
     fut1.futureValue
     fut2.futureValue
@@ -184,7 +184,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
 
     val errStream = Observable.fromIterable(groupedRecords(dataset1, linearMultiSeries()))
                               .endWithError(new NumberFormatException)
-    val fut = memStore.ingestStream(dataset1.ref, 0, errStream) { ex => err = ex }
+    val fut = memStore.ingestStream(dataset1.ref, 0, errStream, s) { ex => err = ex }
     fut.futureValue
 
     err shouldBe a[NumberFormatException]
@@ -200,7 +200,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     val stream = Observable.fromIterable(groupedRecords(dataset1, linearMultiSeries()))
                            .executeWithModel(BatchedExecution(5))
     val flushStream = FlushStream.everyN(4, 50, stream)
-    memStore.ingestStream(dataset1.ref, 0, stream, flushStream)(ex => throw ex).futureValue
+    memStore.ingestStream(dataset1.ref, 0, stream, s, flushStream)(ex => throw ex).futureValue
 
     // Two flushes and 3 chunksets have been flushed
     chunksetsWritten shouldEqual initChunksWritten + 4
@@ -223,7 +223,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     val stream = Observable.fromIterable(groupedRecords(dataset1, linearMultiSeries(), n = 500, groupSize = 10))
       .executeWithModel(BatchedExecution(5)) // results in 200 records
     val flushStream = FlushStream.everyN(2, 10, stream)
-    memStore.ingestStream(dataset1.ref, 0, stream, flushStream)(ex => throw ex).futureValue
+    memStore.ingestStream(dataset1.ref, 0, stream, s, flushStream)(ex => throw ex).futureValue
 
     // 500 records / 2 flushGroups per flush interval / 10 records per flush = 25 time buckets
     timebucketsWritten shouldEqual initTimeBuckets + 25
@@ -310,6 +310,21 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
   private def chunksetsWritten = memStore.store.sinkStats.chunksetsWritten
   private def timebucketsWritten = memStore.store.sinkStats.timeBucketsWritten
 
+  // returns the "endTime" or last sample time of evicted partitions
+  def markPartitionsForEviction(partIDs: Seq[Int]): Long = {
+    val shard = memStore.getShardE(dataset1.ref, 0)
+    val blockFactory = shard.overflowBlockFactory
+    var endTime = 0L
+    for { n <- partIDs } {
+      val part = shard.partitions.get(n)
+      part.switchBuffers(blockFactory, encode=true)
+      shard.updatePartEndTimeInIndex(part, part.timestampOfLatestSample)
+      endTime = part.timestampOfLatestSample
+    }
+    memStore.commitIndexForTesting(dataset1.ref)
+    endTime
+  }
+
   it("should be able to evict partitions properly, flush, and still query") {
     memStore.setup(dataset1, 0, TestData.storeConf)
 
@@ -324,16 +339,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
 
     // Purposely mark two partitions endTime as occuring a while ago to mark them eligible for eviction
     // We also need to switch buffers so that internally ingestionEndTime() is accurate
-    val shard = memStore.getShardE(dataset1.ref, 0)
-    val blockFactory = shard.overflowBlockFactory
-    var endTime = 0L
-    for { n <- 0 to 1 } {
-      val part = shard.partitions.get(n)
-      part.switchBuffers(blockFactory, encode=true)
-      shard.updatePartEndTimeInIndex(part, part.timestampOfLatestSample)
-      endTime = part.timestampOfLatestSample
-    }
-    memStore.commitIndexForTesting(dataset1.ref)
+    val endTime = markPartitionsForEviction(0 to 1)
 
     // Now, ingest 22 partitions.  First two partitions ingested should be evicted. Check numpartitions, stats, index
     val data2 = records(dataset1, linearMultiSeries(numSeries = 22).drop(2).take(20))
@@ -351,6 +357,42 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
                         .futureValue
                         .asInstanceOf[Seq[TimeSeriesPartition]]
     parts.map(_.partID).toSet shouldEqual (2 to 21).toSet
+  }
+
+  it("should be able to ODP/query partitions evicted from memory structures when doing index/tag query") {
+    memStore.setup(dataset1, 0, TestData.storeConf)
+
+    // Ingest normal multi series data with 10 partitions.  Should have 10 partitions.
+    val data = records(dataset1, linearMultiSeries().take(10))
+    memStore.ingest(dataset1.ref, 0, data)
+
+    memStore.commitIndexForTesting(dataset1.ref)
+
+    memStore.numPartitions(dataset1.ref, 0) shouldEqual 10
+    memStore.indexValues(dataset1.ref, 0, "series").toSeq should have length (10)
+
+    // Purposely mark two partitions endTime as occuring a while ago to mark them eligible for eviction
+    // We also need to switch buffers so that internally ingestionEndTime() is accurate
+    val endTime = markPartitionsForEviction(0 to 1)
+
+    // Now, ingest 20 partitions.  First two partitions ingested should be evicted. Check numpartitions, stats, index
+    val data2 = records(dataset1, linearMultiSeries(numSeries = 22).drop(2).take(20))
+    memStore.ingest(dataset1.ref, 0, data2)
+    Thread sleep 1000    // see if this will make things pass sooner
+
+    memStore.numPartitions(dataset1.ref, 0) shouldEqual 20
+
+    // Try to query "Series 0" which got evicted.  It should create a new partition, and now there should be
+    // one more part
+    val split = memStore.getScanSplits(dataset1.ref, 1).head
+    val filter = ColumnFilter("series", Filter.Equals("Series 0".utf8))
+    val parts = memStore.scanPartitions(dataset1, Seq(0, 1), FilteredPartitionScan(split, Seq(filter)))
+                        .toListL.runAsync
+                        .futureValue
+                        .asInstanceOf[Seq[TimeSeriesPartition]]
+    parts.map(_.partID) shouldEqual Seq(22)    // newly created partitions get a new ID
+    dataset1.partKeySchema.asJavaString(parts.head.partKeyBase, parts.head.partKeyOffset, 0) shouldEqual "Series 0"
+    memStore.numPartitions(dataset1.ref, 0) shouldEqual 21
   }
 
   it("should be able to skip ingestion/add partitions if there is no more space left") {

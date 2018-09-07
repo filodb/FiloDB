@@ -66,13 +66,13 @@ extends RawToPartitionMaker with StrictLogging {
       // Find the right partition given the partition key
       tsShard.getPartition(rawPartition.partitionKey).map { partition =>
         val tsPart = partition.asInstanceOf[TimeSeriesPartition]
+        tsShard.shardStats.partitionsPagedFromColStore.increment()
         // One chunkset at a time, load them into offheap and populate the partition
         rawPartition.chunkSets.foreach { case RawChunkSet(infoBytes, rawVectors) =>
           timeOrderForChunkSet(ChunkSetInfo.getStartTime(infoBytes)).foreach { timeOrder =>
             val memFactory = memFactories(timeOrder)
             val chunkID = ChunkSetInfo.getChunkID(infoBytes)
             val inserted = tsPart.addChunkInfoIfAbsent(chunkID, {
-              tsShard.shardStats.chunkIdsPagedFromColStore.increment()
               memFactory.startMetaSpan()
               val chunkPtrs = copyToOffHeap(rawVectors, memFactory)
               val metaAddr = memFactory.endMetaSpan(writeMeta(_, tsPart.partID, infoBytes, chunkPtrs),

@@ -70,19 +70,18 @@ extends MemStore with StrictLogging {
 
   // Should only be called once per dataset/shard
   def ingestStream(dataset: DatasetRef,
-                   shardNum: Int,
+                   shard: Int,
                    stream: Observable[SomeData],
+                   flushSched: Scheduler,
                    flushStream: Observable[FlushCommand] = FlushStream.empty,
                    diskTimeToLiveSeconds: Int = 259200)
-                  (errHandler: Throwable => Unit)
-                  (implicit sched: Scheduler): CancelableFuture[Unit] = {
+                  (errHandler: Throwable => Unit): CancelableFuture[Unit] = {
     val ingestCommands = Observable.merge(stream, flushStream)
-    ingestStream(dataset, shardNum, ingestCommands, diskTimeToLiveSeconds)(errHandler)
+    ingestStream(dataset, shard, ingestCommands, flushSched, diskTimeToLiveSeconds)(errHandler)
   }
 
-  def recoverIndex(dataset: DatasetRef, shard: Int)(implicit sched: Scheduler): Future[Unit] = {
+  def recoverIndex(dataset: DatasetRef, shard: Int): Future[Unit] =
     getShardE(dataset, shard).recoverIndex()
-  }
 
   // NOTE: Each ingestion message is a SomeData which has a RecordContainer, which can hold hundreds or thousands
   // of records each.  For this reason the object allocation of a SomeData and RecordContainer is not that bad.
@@ -90,9 +89,9 @@ extends MemStore with StrictLogging {
   def ingestStream(dataset: DatasetRef,
                    shardNum: Int,
                    combinedStream: Observable[DataOrCommand],
+                   flushSched: Scheduler,
                    diskTimeToLiveSeconds: Int)
-                  (errHandler: Throwable => Unit)
-                  (implicit sched: Scheduler): CancelableFuture[Unit] = {
+                  (errHandler: Throwable => Unit): CancelableFuture[Unit] = {
     val shard = getShardE(dataset, shardNum)
     combinedStream.map {
                     case d: SomeData =>       shard.ingest(d)
@@ -106,8 +105,8 @@ extends MemStore with StrictLogging {
                                                                 diskTimeToLiveSeconds, flushTimeBucket))
                     case a: Any => throw new IllegalStateException(s"Unexpected DataOrCommand $a")
                   }.collect { case Some(flushGroup) => flushGroup }
-                  .mapAsync(numParallelFlushes)(shard.createFlushTask _)
-                  .foreach { x => }
+                  .mapAsync(numParallelFlushes) { f => shard.createFlushTask(f).executeOn(flushSched) }
+                  .foreach({ x => })(shard.ingestSched)
                   .recover { case ex: Exception => errHandler(ex) }
   }
 

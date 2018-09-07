@@ -28,8 +28,8 @@ object IngestionActor {
             memStore: MemStore,
             source: NodeClusterActor.IngestionSource,
             storeConfig: StoreConfig,
-            statusActor: ActorRef)(implicit sched: Scheduler): Props =
-    Props(new IngestionActor(dataset, memStore, source, storeConfig, statusActor)(sched))
+            statusActor: ActorRef): Props =
+    Props(new IngestionActor(dataset, memStore, source, storeConfig, statusActor))
 }
 
 /**
@@ -52,8 +52,7 @@ private[filodb] final class IngestionActor(dataset: Dataset,
                                            memStore: MemStore,
                                            source: NodeClusterActor.IngestionSource,
                                            storeConfig: StoreConfig,
-                                           statusActor: ActorRef)
-                                          (implicit sched: Scheduler) extends BaseActor {
+                                           statusActor: ActorRef) extends BaseActor {
 
   import IngestionActor._
 
@@ -62,6 +61,15 @@ private[filodb] final class IngestionActor(dataset: Dataset,
 
   // Params for creating the default memStore flush scheduler
   private final val numGroups = storeConfig.groupsPerShard
+
+  // The flush task has very little work -- pretty much none. Looking at doFlushSteps, you can see that
+  // all of the heavy lifting -- including chunk encoding, forming the (potentially big) index timebucket blobs --
+  // is all done in the ingestion thread. Even the futures used to do I/O will not be done in this flush thread...
+  // they are allocated by the implicit ExecutionScheduler that Futures use and/or what C* etc uses.
+  // The only thing that flushSched really does is tie up all these Futures together.  Thus we use the global one.
+  // TODO: re-examine doFlushSteps and thread usage in flush tasks.
+  import context.dispatcher
+  val flushSched = Scheduler.Implicits.global
 
   // TODO: add and remove per-shard ingestion sources?
   // For now just start it up one time and kill the actor if it fails
@@ -156,6 +164,7 @@ private[filodb] final class IngestionActor(dataset: Dataset,
       streamSubscriptions(shard) = memStore.ingestStream(dataset.ref,
         shard,
         stream,
+        flushSched,
         flushStream(startingGroupNo),
         diskTimeToLiveSeconds) {
         ex => handleError(dataset.ref, shard, ex)
@@ -192,6 +201,7 @@ private[filodb] final class IngestionActor(dataset: Dataset,
       val stream = ingestionStream.get
       statusActor ! RecoveryInProgress(dataset.ref, shard, context.parent, 0)
 
+      val shardInstance = memStore.asInstanceOf[TimeSeriesMemStore].getShardE(dataset.ref, shard)
       val fut = memStore.recoverStream(dataset.ref, shard, stream, checkpoints, interval)
         .map { off =>
           val progressPct = if (endOffset - startOffset == 0) 100
@@ -200,7 +210,8 @@ private[filodb] final class IngestionActor(dataset: Dataset,
           statusActor ! RecoveryInProgress(dataset.ref, shard, context.parent, progressPct.toInt)
           off }
         .until(_ >= endOffset)
-        .lastL.runAsync
+        // TODO: move this code to TimeSeriesShard itself.  Shard should control the thread
+        .lastL.runAsync(shardInstance.ingestSched)
       fut.onComplete {
         case Success(_) =>
           ingestionStream.teardown()

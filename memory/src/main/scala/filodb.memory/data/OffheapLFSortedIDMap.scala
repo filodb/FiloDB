@@ -50,7 +50,7 @@ object OffheapLFSortedIDMap extends StrictLogging {
   val OffsetElementPtrs = 8
 
   val CopyFlagMask = 0xff00000000L
-  val MinMaxElements = 8       // Must be more than a few
+  val MinMaxElements = 4       // Must be more than a few
   val MaxMaxElements = 65535   // Top/absolute limit on # of elements
 
   val IllegalStateResult = -1  // Returned from binarySearch when state changed underneath
@@ -273,7 +273,8 @@ class OffheapLFSortedIDMapReader(memFactory: MemFactory, holderKlass: Class[_ <:
   protected def state(inst: MapHolder): MapState = state(mapPtr(inst))
   protected def state(mapPtr: NativePointer): MapState =
     if (mapPtr == 0) MapState.empty else MapState(UnsafeUtils.getLongVolatile(mapPtr))
-  @inline protected final def realIndex(state: MapState, index: Int): Int = (index + state.tail) % state.maxElem
+  @inline protected final def realIndex(state: MapState, index: Int): Int =
+    if (state.maxElem == 0) 0 else (index + state.tail) % state.maxElem
   @inline protected final def elemPtr(mapPtr: NativePointer, realIndex: Int): NativePointer =
     mapPtr + OffsetElementPtrs + 8 * realIndex
   @inline protected final def getElem(mapPtr: NativePointer, realIndex: Int): NativePointer =

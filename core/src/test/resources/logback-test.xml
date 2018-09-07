@@ -13,7 +13,8 @@
     <append>false</append>
 
     <encoder>
-      <pattern>[%date{ISO8601}] %-5level %logger{26} [%X{akkaSource}] - %msg%n</pattern>
+      <!-- <pattern>[%date{ISO8601}] %-5level %logger{26} [%X{akkaSource}] - %msg%n</pattern> -->
+      <pattern>[%date{ISO8601}] %-5level %logger{26} [%thread] - %msg%n</pattern>
     </encoder>
 
   </appender>

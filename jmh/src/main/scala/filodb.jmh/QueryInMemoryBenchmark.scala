@@ -89,7 +89,8 @@ class QueryInMemoryBenchmark extends StrictLogging {
                         SomeData(RecordContainer(bytes), idx)
                       }
                       Task.fromFuture(
-                        cluster.memStore.ingestStream(dataset.ref, shard, shardStream) { case e: Exception => throw e })
+                        cluster.memStore.ingestStream(dataset.ref, shard, shardStream, global) {
+                          case e: Exception => throw e })
                     }.countL.runAsync
   Await.result(ingestTask, 30.seconds)
   cluster.memStore.asInstanceOf[TimeSeriesMemStore].commitIndexForTesting(dataset.ref) // commit lucene index

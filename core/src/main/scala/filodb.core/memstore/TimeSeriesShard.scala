@@ -6,6 +6,7 @@ import scala.util.Random
 
 import com.googlecode.javaewah.{EWAHCompressedBitmap, IntIterator}
 import com.typesafe.scalalogging.StrictLogging
+import debox.Buffer
 import kamon.Kamon
 import kamon.metric.MeasurementUnit
 import monix.eval.Task
@@ -64,10 +65,9 @@ class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
   val numActivelyIngestingParts = Kamon.gauge("num-ingesting-partitions").refine(tags)
 
   val partitionsPagedFromColStore = Kamon.counter("memstore-partitions-paged-in").refine(tags)
-  val chunkIdsPagedFromColStore = Kamon.counter("memstore-chunkids-paged-in").refine(tags)
-  val chunkIdsEvicted = Kamon.counter("memstore-chunkids-evicted").refine(tags)
   val partitionsQueried = Kamon.counter("memstore-partitions-queried").refine(tags)
-  val numChunksQueried = Kamon.counter("memstore-chunks-queried").refine(tags)
+  val partitionsRestored = Kamon.counter("memstore-partitions-paged-restored").refine(tags)
+  val chunkIdsEvicted = Kamon.counter("memstore-chunkids-evicted").refine(tags)
   val partitionsEvicted = Kamon.counter("memstore-partitions-evicted").refine(tags)
   val memoryStats = new MemoryStats(tags)
 
@@ -114,6 +114,18 @@ object TimeSeriesShard {
   val OutOfMemPartition = UnsafeUtils.ZeroPointer.asInstanceOf[TimeSeriesPartition]
 
   val EmptyBitmap = new EWAHCompressedBitmap()
+}
+
+trait PartitionIterator extends Iterator[TimeSeriesPartition] {
+  def skippedPartIDs: Buffer[Int]
+}
+
+object PartitionIterator {
+  def fromPartIt(baseIt: Iterator[TimeSeriesPartition]): PartitionIterator = new PartitionIterator {
+    val skippedPartIDs = Buffer.empty[Int]
+    final def hasNext: Boolean = baseIt.hasNext
+    final def next: TimeSeriesPartition = baseIt.next
+  }
 }
 
 // scalastyle:off number.of.methods
@@ -184,6 +196,10 @@ class TimeSeriesShard(val dataset: Dataset,
       }
     }
   }
+
+  // Create a single-threaded scheduler just for ingestion.  Name the thread for ease of debugging
+  // NOTE: to control intermixing of different Observables/Tasks in this thread, customize ExecutionModel param
+  val ingestSched = Scheduler.singleThread(s"ingestion-shard-$shardNum")
 
   private val blockMemorySize = storeConfig.shardMemSize
   private final val numGroups = storeConfig.groupsPerShard
@@ -268,19 +284,36 @@ class TimeSeriesShard(val dataset: Dataset,
     */
   private final val groupWatermark = Array.fill(numGroups)(Long.MinValue)
 
-  class PartitionIterator(intIt: IntIterator) extends Iterator[TimeSeriesPartition] {
+  case class InMemPartitionIterator(intIt: IntIterator) extends PartitionIterator {
     var nextPart = UnsafeUtils.ZeroPointer.asInstanceOf[TimeSeriesPartition]
-    def hasNext: Boolean = {
+    val skippedPartIDs = debox.Buffer.empty[Int]
+    private def findNext(): Unit = {
       while (intIt.hasNext && nextPart == UnsafeUtils.ZeroPointer) {
-        nextPart = partitions.get(intIt.next)
+        val nextPartID = intIt.next
+        nextPart = partitions.get(nextPartID)
+        if (nextPart == UnsafeUtils.ZeroPointer) skippedPartIDs += nextPartID
       }
-      nextPart != UnsafeUtils.ZeroPointer
     }
-    def next: TimeSeriesPartition = {
+
+    findNext()
+
+    final def hasNext: Boolean = nextPart != UnsafeUtils.ZeroPointer
+    final def next: TimeSeriesPartition = {
       val toReturn = nextPart
-      nextPart = UnsafeUtils.ZeroPointer.asInstanceOf[TimeSeriesPartition] // reset so that hasNext can keep going
+      nextPart = UnsafeUtils.ZeroPointer.asInstanceOf[TimeSeriesPartition] // reset so that we can keep going
+      findNext()
       toReturn
     }
+  }
+
+  // An iterator over partitions looked up from partition keys stored as byte[]'s
+  // Note that we cannot give skippedPartIDs because we don't have IDs only have keys
+  // and we cannot look up IDs from keys since part keys are not indexed in Lucene
+  case class ByteKeysPartitionIterator(keys: Seq[Array[Byte]]) extends PartitionIterator {
+    val skippedPartIDs = debox.Buffer.empty[Int]
+    private val partIt = keys.toIterator.flatMap(getPartition)
+    final def hasNext: Boolean = partIt.hasNext
+    final def next: TimeSeriesPartition = partIt.next
   }
 
   private val binRecordReader = new BinaryRecordRowReader(dataset.ingestionSchema)
@@ -333,7 +366,7 @@ class TimeSeriesShard(val dataset: Dataset,
 
   def ingest(data: SomeData): Long = ingest(data.records, data.offset)
 
-  def recoverIndex()(implicit sched: Scheduler): Future[Unit] = {
+  def recoverIndex(): Future[Unit] = {
     val tracer = Kamon.buildSpan("memstore-recover-index-latency")
       .withTag("dataset", dataset.name)
       .withTag("shard", shardNum).start()
@@ -346,7 +379,7 @@ class TimeSeriesShard(val dataset: Dataset,
       }
     }
     val fut = Observable.flatten(timeBuckets: _*)
-                        .foreach(tb => extractTimeBucket(tb))
+                        .foreach(tb => extractTimeBucket(tb))(ingestSched)
                         .map(_ => completeIndexRecovery())
     fut.onComplete(_ => tracer.finish())
     fut
@@ -373,7 +406,7 @@ class TimeSeriesShard(val dataset: Dataset,
       // We cant look it up in lucene because we havent flushed index yet
       val partId = partSet.getWithPartKeyBR(partKeyBaseOnHeap, partKeyOffset) match {
         case None =>     val group = partKeyGroup(partKeyBaseOnHeap, partKeyOffset)
-                         val part = createNewPartition(partKeyBaseOnHeap, partKeyOffset, group)
+                         val part = createNewPartition(partKeyBaseOnHeap, partKeyOffset, group, 4)
                          // In theory, we should not get an OutOfMemPartition here since
                          // it should have occurred before node failed too, and with data sropped,
                          // index would not be updated. But if for some reason we see it, drop data
@@ -431,7 +464,7 @@ class TimeSeriesShard(val dataset: Dataset,
   // and ensure that all the partitions in a group are switched at the same watermark
   def switchGroupBuffers(groupNum: Int): Unit = {
     logger.debug(s"Switching write buffers for group $groupNum in shard $shardNum")
-    new PartitionIterator(partitionGroups(groupNum).intIterator).foreach(_.switchBuffers(overflowBlockFactory))
+    InMemPartitionIterator(partitionGroups(groupNum).intIterator).foreach(_.switchBuffers(overflowBlockFactory))
   }
 
   /**
@@ -455,7 +488,7 @@ class TimeSeriesShard(val dataset: Dataset,
     val deletedParts = partKeyIndex.removePartKeysEndedBefore(
       System.currentTimeMillis() - storeConfig.demandPagedRetentionPeriod.toMillis)
     var numDeleted = 0
-    new PartitionIterator(deletedParts).foreach { p =>
+    InMemPartitionIterator(deletedParts).foreach { p =>
       logger.debug(s"Purging partition with partId ${p.partID} from memory")
       removePartition(p)
       numDeleted += 1
@@ -463,10 +496,9 @@ class TimeSeriesShard(val dataset: Dataset,
     if (numDeleted > 0) logger.info(s"Purged $numDeleted partitions from memory and index")
   }
 
-  def createFlushTask(flushGroup: FlushGroup)(implicit ingestionScheduler: Scheduler): Task[Response] = {
-    val partitionIt = new PartitionIterator(partitionGroups(flushGroup.groupNum).intIterator)
-    val taskToReturn = doFlushSteps(flushGroup, partitionIt)
-    taskToReturn
+  def createFlushTask(flushGroup: FlushGroup): Task[Response] = {
+    val partitionIt = InMemPartitionIterator(partitionGroups(flushGroup.groupNum).intIterator)
+    doFlushSteps(flushGroup, partitionIt)
   }
 
   private def updateGauges(): Unit = {
@@ -570,7 +602,7 @@ class TimeSeriesShard(val dataset: Dataset,
 
       /* create time bucket using record builder */
       val timeBucketRb = new RecordBuilder(MemFactory.onHeapFactory, indexTimeBucketSchema, indexTimeBucketSegmentSize)
-      new PartitionIterator(timeBucketBitmaps.get(cmd.timeBucket).intIterator()).foreach { p =>
+      InMemPartitionIterator(timeBucketBitmaps.get(cmd.timeBucket).intIterator).foreach { p =>
         addPartKeyToTimebucket(timeBucketRb, p)
       }
       val numPartKeysInBucket = timeBucketBitmaps.get(cmd.timeBucket).cardinality()
@@ -716,7 +748,8 @@ class TimeSeriesShard(val dataset: Dataset,
       case e: Exception                   => logger.error(s"Unexpected ingestion err", e); disableAddPartitions()
     }
 
-  private def createNewPartition(partKeyBase: Array[Byte], partKeyOffset: Long, group: Int): TimeSeriesPartition =
+  protected def createNewPartition(partKeyBase: Array[Byte], partKeyOffset: Long,
+                                   group: Int, initMapSize: Int = initInfoMapSize): TimeSeriesPartition =
     // Check and evict, if after eviction we still don't have enough memory, then don't proceed
     if (addPartitionsDisabled() || !ensureFreeSpace()) { OutOfMemPartition }
     else {
@@ -724,7 +757,7 @@ class TimeSeriesShard(val dataset: Dataset,
       // NOTE: allocateAndCopy and allocNew below could fail if there isn't enough memory.  It is CRUCIAL
       // that min-write-buffers-free setting is large enough to accommodate the below use cases ALWAYS
       val (_, partKeyAddr, _) = BinaryRegionLarge.allocateAndCopy(partKeyBase, partKeyOffset, bufferMemoryManager)
-      val infoMapAddr = OffheapLFSortedIDMap.allocNew(bufferMemoryManager, initInfoMapSize)
+      val infoMapAddr = OffheapLFSortedIDMap.allocNew(bufferMemoryManager, initMapSize)
       val partId = nextPartitionID
       incrementPartitionID()
       val newPart = new TimeSeriesPartition(partId, dataset, partKeyAddr, shardNum, bufferPool, shardStats,
@@ -735,7 +768,7 @@ class TimeSeriesShard(val dataset: Dataset,
       newPart
     }
 
-  private def partKeyGroup(partKeyBase: Any, partKeyOffset: Long): Int = {
+  protected def partKeyGroup(partKeyBase: Any, partKeyOffset: Long): Int = {
     Math.abs(ingestSchema.partitionHash(partKeyBase, partKeyOffset) % numGroups)
   }
 
@@ -827,23 +860,20 @@ class TimeSeriesShard(val dataset: Dataset,
     partKeyIndex.partIdsOrderedByEndTime(storeConfig.numToEvict, evictionWatermark, Long.MaxValue - 1)
   }
 
-  private[core] def getPartition(partKey: Array[Byte]): Option[ReadablePartition] =
-    partSet.getWithPartKeyBR(partKey, UnsafeUtils.arayOffset).map(_.asInstanceOf[ReadablePartition])
-    // TODO make PartitionSet generic
+  private[core] def getPartition(partKey: Array[Byte]): Option[TimeSeriesPartition] =
+    partSet.getWithPartKeyBR(partKey, UnsafeUtils.arayOffset).map(_.asInstanceOf[TimeSeriesPartition])
 
   def iteratePartitions(partMethod: PartitionScanMethod,
-                        chunkMethod: ChunkScanMethod): Iterator[ReadablePartition] = partMethod match {
-    case SinglePartitionScan(partition, _) =>
-      getPartition(partition).map(Iterator.single).getOrElse(Iterator.empty)
-    case MultiPartitionScan(partKeys, _)   =>
-      partKeys.toIterator.flatMap(getPartition)
+                        chunkMethod: ChunkScanMethod): PartitionIterator = partMethod match {
+    case SinglePartitionScan(partition, _) => ByteKeysPartitionIterator(Seq(partition))
+    case MultiPartitionScan(partKeys, _)   => ByteKeysPartitionIterator(partKeys)
     case FilteredPartitionScan(split, filters) =>
       // TODO: There are other filters that need to be added and translated to Lucene queries
       if (filters.nonEmpty) {
         val indexIt = partKeyIndex.partIdsFromFilters(filters, chunkMethod.startTime, chunkMethod.endTime)
-        new PartitionIterator(indexIt)
+        new InMemPartitionIterator(indexIt)
       } else {
-        partitions.values.iterator.asScala
+        PartitionIterator.fromPartIt(partitions.values.iterator.asScala)
       }
   }
 

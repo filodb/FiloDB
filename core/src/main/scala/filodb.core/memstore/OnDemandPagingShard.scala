@@ -1,7 +1,10 @@
 package filodb.core.memstore
 
+import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.ExecutionContext
 
+import debox.Buffer
+import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.{Observable, OverflowStrategy}
 
@@ -9,6 +12,8 @@ import filodb.core.Types
 import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.metadata.Dataset
 import filodb.core.store._
+import filodb.memory.BinaryRegionLarge
+import filodb.memory.format.UnsafeUtils
 
 /**
  * Extends TimeSeriesShard with on-demand paging functionality by populating in-memory partitions with chunks from
@@ -47,9 +52,9 @@ TimeSeriesShard(dataset, storeConfig, shardNum, rawStore, metastore, evictionPol
     val indexIt = iteratePartitions(partMethod, chunkMethod)
 
     // 2. Determine missing chunks per partition and what to fetch
-    val partKeyBytesToPage = new collection.mutable.ArrayBuffer[Array[Byte]]()
-    val inMemoryPartitions = new collection.mutable.ArrayBuffer[ReadablePartition]()
-    val methods = new collection.mutable.ArrayBuffer[ChunkScanMethod]
+    val partKeyBytesToPage = new ArrayBuffer[Array[Byte]]()
+    val inMemoryPartitions = new ArrayBuffer[ReadablePartition]()
+    val methods = new ArrayBuffer[ChunkScanMethod]
     indexIt.foreach { p =>
       chunksToFetch(p, chunkMethod, pagingEnabled).map { rawChunkMethod =>
         methods += rawChunkMethod   // TODO: really determine range for all partitions
@@ -59,33 +64,83 @@ TimeSeriesShard(dataset, storeConfig, shardNum, rawStore, metastore, evictionPol
         inMemoryPartitions += p
       }
     }
+    shardStats.partitionsQueried.increment(inMemoryPartitions.length)
 
     logger.debug(s"[$shardNum] Querying ${inMemoryPartitions.length} in memory partitions, ODPing ${methods.length}")
 
     // NOTE: multiPartitionODP mode does not work with AllChunkScan and unit tests; namely missing partitions will not
     // return data that is in memory.  TODO: fix
     if (storeConfig.multiPartitionODP) {
-      val multiPart = MultiPartitionScan(partKeyBytesToPage, shardNum)
       Observable.fromIterable(inMemoryPartitions) ++
-      (if (partKeyBytesToPage.nonEmpty) {
-        rawStore.readRawPartitions(dataset, allDataCols, multiPart, computeBoundingMethod(methods))
-          // NOTE: this executes the partMaker single threaded.  Needed for now due to concurrency constraints.
-          // In the future optimize this if needed.
-          .mapAsync { rawPart => partitionMaker.populateRawChunks(rawPart).executeOn(singleThreadPool) }
-          // This is needed so future computations happen in a different thread
-          .asyncBoundary(strategy)
-      } else { Observable.empty })
+      Observable.fromTask(odpPartTask(indexIt, partKeyBytesToPage, methods, chunkMethod)).flatMap { odpParts =>
+        val multiPart = MultiPartitionScan(partKeyBytesToPage, shardNum)
+        shardStats.partitionsQueried.increment(partKeyBytesToPage.length)
+        (if (partKeyBytesToPage.nonEmpty) {
+          rawStore.readRawPartitions(dataset, allDataCols, multiPart, computeBoundingMethod(methods))
+            // NOTE: this executes the partMaker single threaded.  Needed for now due to concurrency constraints.
+            // In the future optimize this if needed.
+            .mapAsync { rawPart => partitionMaker.populateRawChunks(rawPart).executeOn(singleThreadPool) }
+            // This is needed so future computations happen in a different thread
+            .asyncBoundary(strategy)
+        } else { Observable.empty })
+      }
     } else {
       Observable.fromIterable(inMemoryPartitions) ++
-      Observable.fromIterable(partKeyBytesToPage.zip(methods))
-        .mapAsync(storeConfig.demandPagingParallelism) { case (partBytes, method) =>
-          rawStore.readRawPartitions(dataset, allDataCols, SinglePartitionScan(partBytes, shardNum), method)
-            .mapAsync { rawPart => partitionMaker.populateRawChunks(rawPart).executeOn(singleThreadPool) }
-            .defaultIfEmpty(getPartition(partBytes).get)
-            .headL
-        }
+      Observable.fromTask(odpPartTask(indexIt, partKeyBytesToPage, methods, chunkMethod)).flatMap { odpParts =>
+        shardStats.partitionsQueried.increment(partKeyBytesToPage.length)
+        Observable.fromIterable(partKeyBytesToPage.zip(methods))
+          .mapAsync(storeConfig.demandPagingParallelism) { case (partBytes, method) =>
+            rawStore.readRawPartitions(dataset, allDataCols, SinglePartitionScan(partBytes, shardNum), method)
+              .mapAsync { rawPart => partitionMaker.populateRawChunks(rawPart).executeOn(singleThreadPool) }
+              .defaultIfEmpty(getPartition(partBytes).get)
+              .headL
+          }
+      }
     }
   }
+
+  // 3. Deal with partitions no longer in memory but still indexed in Lucene.
+  //    Basically we need to create TSPartitions for them in the ingest thread -- if there's enough memory
+  private def odpPartTask(indexIt: PartitionIterator, partKeyBytesToPage: ArrayBuffer[Array[Byte]],
+                          methods: ArrayBuffer[ChunkScanMethod], chunkMethod: ChunkScanMethod) = {
+    createODPPartitionsTask(indexIt.skippedPartIDs, { case (bytes, offset) =>
+      val partKeyBytes = if (offset == UnsafeUtils.arayOffset) bytes
+                         else BinaryRegionLarge.asNewByteArray(bytes, offset)
+      partKeyBytesToPage += partKeyBytes
+      methods += chunkMethod
+      shardStats.partitionsRestored.increment
+    }).executeOn(ingestSched)
+  }
+
+
+  /**
+   * Creates a Task which is meant ONLY TO RUN ON INGESTION THREAD
+   * to create TSPartitions for partIDs found in Lucene but not in in-memory data structures
+   * It runs in ingestion thread so it can correctly verify which ones to actually create or not
+   */
+  private def createODPPartitionsTask(partIDs: Buffer[Int], callback: (Array[Byte], Int) => Unit):
+  Task[Seq[TimeSeriesPartition]] =
+    if (partIDs.nonEmpty) Task {
+      (partIDs.map { id =>
+        // for each partID: look up in partitions
+        partitions.get(id) match {
+          case TimeSeriesShard.OutOfMemPartition =>
+            logger.debug(s"Creating TSPartition for ODP from part ID $id")
+            // If not there, then look up in Lucene and get the details
+            for { partKeyBytesRef <- partKeyIndex.partKeyFromPartId(id)
+                  unsafeKeyOffset = PartKeyLuceneIndex.bytesRefToUnsafeOffset(partKeyBytesRef.offset)
+                  group = partKeyGroup(partKeyBytesRef.bytes, unsafeKeyOffset)
+                  part <- Option(createNewPartition(partKeyBytesRef.bytes, unsafeKeyOffset, group, 4)) } yield {
+              partSet.add(part)
+              callback(partKeyBytesRef.bytes, unsafeKeyOffset)
+              part
+            }
+            // create the partition and update data structures (but no need to add to Lucene!)
+            // NOTE: if no memory, then no partition!
+          case p: TimeSeriesPartition => Some(p)
+        }
+      }).toVector.flatten
+    } else Task.now(Nil)
 
   def computeBoundingMethod(methods: Seq[ChunkScanMethod]): ChunkScanMethod = if (methods.isEmpty) {
     AllChunkScan

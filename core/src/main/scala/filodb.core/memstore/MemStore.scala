@@ -76,10 +76,13 @@ trait MemStore extends ChunkSource {
    * NOTE: does not check that existing streams are not already writing to this store.  That needs to be
    * handled by an upper layer.  Multiple stream ingestion is not guaranteed to be thread safe, a single
    * stream is safe for now.
+   * NOTE2: ingest happens on the shard's single ingestion thread, except for flushes which are scheduled on the
+   * passed in flushSched
    *
    * @param dataset the dataset to ingest into
    * @param shard shard number to ingest into
    * @param stream the stream of SomeData() with records conforming to dataset ingestion schema
+   * @param flushSched the Scheduler to use to schedule flush tasks
    * @param flushStream the stream of FlushCommands for regular flushing of chunks to ChunkSink
    * @param diskTimeToLiveSeconds the time for chunks in this stream to live on disk (Cassandra)
    * @param errHandler this is called when an ingestion error occurs
@@ -89,13 +92,13 @@ trait MemStore extends ChunkSource {
   def ingestStream(dataset: DatasetRef,
                    shard: Int,
                    stream: Observable[SomeData],
+                   flushSched: Scheduler,
                    flushStream: Observable[FlushCommand] = FlushStream.empty,
                    diskTimeToLiveSeconds: Int = 259200)
-                  (errHandler: Throwable => Unit)
-                  (implicit sched: Scheduler): CancelableFuture[Unit]
+                  (errHandler: Throwable => Unit): CancelableFuture[Unit]
 
 
-  def recoverIndex(dataset: DatasetRef, shard: Int)(implicit sched: Scheduler): Future[Unit]
+  def recoverIndex(dataset: DatasetRef, shard: Int): Future[Unit]
 
   /**
    * Sets up streaming recovery of a shard from ingest records.  This is a separate API for several reasons:

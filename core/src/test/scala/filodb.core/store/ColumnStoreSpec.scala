@@ -21,7 +21,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
   implicit val defaultPatience =
     PatienceConfig(timeout = Span(15, Seconds), interval = Span(250, Millis))
 
-  import monix.execution.Scheduler.Implicits.global
+  implicit val s = monix.execution.Scheduler.Implicits.global
 
   val config = ConfigFactory.load("application_test.conf").getConfig("filodb")
   def colStore: ColumnStore
@@ -142,7 +142,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
     memStore.setup(dataset2, 0, TestData.storeConf)
     val stream = Observable.now(records(dataset2))
     // Force flush of all groups at end
-    memStore.ingestStream(dataset2.ref, 0, stream ++ FlushStream.allGroups(4), 86400)(ex => throw ex).futureValue
+    memStore.ingestStream(dataset2.ref, 0, stream ++ FlushStream.allGroups(4), s, 86400)(ex => throw ex).futureValue
 
     val paramSet = colStore.getScanSplits(dataset.ref, 1)
     paramSet should have length (1)
@@ -204,7 +204,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
     memStore.setup(dataset3, 0, TestData.storeConf)
     val stream = Observable.now(records(dataset3))
     // Force flush of all groups at end
-    memStore.ingestStream(dataset3.ref, 0, stream ++ FlushStream.allGroups(4), 86400)(ex => throw ex).futureValue
+    memStore.ingestStream(dataset3.ref, 0, stream ++ FlushStream.allGroups(4), s, 86400)(ex => throw ex).futureValue
 
     val paramSet = colStore.getScanSplits(dataset.ref, 1)
     paramSet should have length (1)
@@ -233,7 +233,7 @@ with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures {
     memStore.setup(dataset2, 0, TestData.storeConf)
     val stream = Observable.now(records(dataset2))
     // Force flush of all groups at end
-    memStore.ingestStream(dataset2.ref, 0, stream ++ FlushStream.allGroups(4), 86400)(ex => throw ex).futureValue
+    memStore.ingestStream(dataset2.ref, 0, stream ++ FlushStream.allGroups(4), s, 86400)(ex => throw ex).futureValue
 
     val paramSet = colStore.getScanSplits(dataset.ref, 1)
     paramSet should have length (1)

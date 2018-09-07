@@ -7,11 +7,9 @@ import filodb.core.store.ColumnStoreSpec
 import filodb.cassandra.metastore.CassandraMetaStore
 
 class CassandraColumnStoreSpec extends ColumnStoreSpec {
-  import monix.execution.Scheduler.Implicits.global
-
   import NamesTestData._
 
-  lazy val colStore = new CassandraColumnStore(config, global)
+  lazy val colStore = new CassandraColumnStore(config, s)
   lazy val metaStore = new CassandraMetaStore(config.getConfig("cassandra"))
 
   "getScanSplits" should "return splits from Cassandra" in {
@@ -34,7 +32,7 @@ class CassandraColumnStoreSpec extends ColumnStoreSpec {
 
   val configWithChunkCompress = ConfigFactory.parseString("cassandra.lz4-chunk-compress = true")
                                              .withFallback(config)
-  val lz4ColStore = new CassandraColumnStore(configWithChunkCompress, global)
+  val lz4ColStore = new CassandraColumnStore(configWithChunkCompress, s)
 
   "lz4-chunk-compress" should "write and read compressed chunks successfully" in {
     whenReady(lz4ColStore.write(dataset, chunkSetStream(names take 3))) { response =>

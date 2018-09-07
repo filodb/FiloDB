@@ -7,7 +7,6 @@ import akka.actor.{ActorRef, OneForOneStrategy, PoisonPill, Props, Terminated}
 import akka.actor.SupervisorStrategy.{Restart, Stop}
 import akka.event.LoggingReceive
 import com.typesafe.config.Config
-import monix.execution.Scheduler
 import net.ceedubs.ficus.Ficus._
 
 import filodb.coordinator.client.MiscCommands
@@ -60,8 +59,6 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
   val shardMaps = new HashMap[DatasetRef, ShardMapper]
   var statusActor: Option[ActorRef] = None
 
-  // The thread pool used by Monix Observables/reactive ingestion
-  val ingestScheduler = Scheduler.computation(config.getInt("ingestion-threads"))
   private val statusAckTimeout = config.as[FiniteDuration]("tasks.timeouts.status-ack-timeout")
 
   // By default, stop children IngestionActors when something goes wrong.
@@ -132,7 +129,7 @@ private[filodb] final class NodeCoordinatorActor(metaStore: MetaStore,
 
     clusterActor match {
       case Some(nca) =>
-        val props = IngestionActor.props(dataset, memStore, source, storeConf, statusActor.get)(ingestScheduler)
+        val props = IngestionActor.props(dataset, memStore, source, storeConf, statusActor.get)
         val ingester = context.actorOf(props, s"$Ingestion-${dataset.name}")
         context.watch(ingester)
         ingesters(ref) = ingester
