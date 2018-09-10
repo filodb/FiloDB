@@ -7,6 +7,7 @@ trait MutableRowReader extends RowReader {
   def setLong(columnNo: Int, value: Long): Unit
   def setDouble(columnNo: Int, value: Double): Unit
   def setString(columnNo: Int, value: ZeroCopyUTF8String): Unit
+  def setBlob(columnNo: Int, base: Array[Byte], offset: Int, length: Int): Unit
 }
 
 /**
@@ -31,6 +32,8 @@ final class TransientRow(var timestamp: Long, var value: Double) extends Mutable
     else throw new IllegalArgumentException()
 
   def setString(columnNo: Int, value: ZeroCopyUTF8String): Unit = throw new IllegalArgumentException()
+
+  def setBlob(columnNo: Int, base: Array[Byte], offset: Int, length: Int): Unit = throw new IllegalArgumentException()
 
   def copyFrom(r: RowReader): Unit = {
     timestamp = r.getLong(0)
@@ -68,6 +71,7 @@ final class AvgAggTransientRow extends MutableRowReader {
     else throw new IllegalArgumentException()
 
   def setString(columnNo: Int, value: ZeroCopyUTF8String): Unit = throw new IllegalArgumentException()
+  def setBlob(columnNo: Int, base: Array[Byte], offset: Int, length: Int): Unit = throw new IllegalArgumentException()
 
   def notNull(columnNo: Int): Boolean = columnNo < 3
   def getBoolean(columnNo: Int): Boolean = throw new IllegalArgumentException()
@@ -85,6 +89,48 @@ final class AvgAggTransientRow extends MutableRowReader {
   def getBlobNumBytes(columnNo: Int): Int = throw new IllegalArgumentException()
 }
 
+final class QuantileAggTransientRow() extends MutableRowReader {
+  var timestamp: Long = _
+  var blobBase: Array[Byte] = _
+  var blobOffset: Int = _
+  var blobLength: Int = _
+
+  def setLong(columnNo: Int, valu: Long): Unit =
+    if (columnNo == 0) timestamp = valu
+    else throw new IllegalArgumentException()
+
+  def setBlob(columnNo: Int, base: Array[Byte], offset: Int, length: Int): Unit =
+    if (columnNo == 1) {
+      blobBase = base
+      blobOffset = offset
+      blobLength = length
+    }
+    else throw new IllegalArgumentException()
+
+  def setDouble(columnNo: Int, value: Double): Unit = ???
+  def setString(columnNo: Int, value: ZeroCopyUTF8String): Unit = ???
+  def notNull(columnNo: Int): Boolean = ???
+  def getBoolean(columnNo: Int): Boolean = ???
+  def getInt(columnNo: Int): Int = ???
+  def getLong(columnNo: Int): Long = if (columnNo == 0) timestamp else throw new IllegalArgumentException()
+  def getDouble(columnNo: Int): Double = ???
+  def getFloat(columnNo: Int): Float = ???
+  def getString(columnNo: Int): String = ???
+  def getAny(columnNo: Int): Any = ???
+  def getBlobBase(columnNo: Int): Any =     if (columnNo == 1) blobBase
+                                            else throw new IllegalArgumentException()
+  def getBlobOffset(columnNo: Int): Long =  if (columnNo == 1) blobOffset
+                                            else throw new IllegalArgumentException()
+  def getBlobNumBytes(columnNo: Int): Int = if (columnNo == 1) blobLength
+                                            else throw new IllegalArgumentException()
+
+  override def filoUTF8String(columnNo: Int): ZeroCopyUTF8String = {
+    // Needed since blobs are serialized as strings (for now) underneath the covers.
+    if (columnNo == 1) new ZeroCopyUTF8String(blobBase, blobOffset, blobLength)
+    else throw new IllegalArgumentException()
+  }
+}
+
 final class TopBottomKAggTransientRow(val k: Int) extends MutableRowReader {
   var timestamp: Long = _
   val partKeys: Array[ZeroCopyUTF8String] = new Array[ZeroCopyUTF8String](k)
@@ -99,6 +145,8 @@ final class TopBottomKAggTransientRow(val k: Int) extends MutableRowReader {
 
   def setString(columnNo: Int, valu: ZeroCopyUTF8String): Unit =
     partKeys((columnNo-1)/2) = valu
+
+  def setBlob(columnNo: Int, base: Array[Byte], offset: Int, length: Int): Unit = throw new IllegalArgumentException()
 
   def notNull(columnNo: Int): Boolean = columnNo < 2*k + 1
   def getBoolean(columnNo: Int): Boolean = throw new IllegalArgumentException()

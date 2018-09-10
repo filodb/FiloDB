@@ -3,13 +3,15 @@ package filodb.query.exec
 import scala.annotation.tailrec
 import scala.util.Random
 
+import com.tdunning.math.stats.TDigest
 import com.typesafe.config.ConfigFactory
 import monix.execution.Scheduler.Implicits.global
 import monix.reactive.Observable
 import org.scalatest.{FunSpec, Matchers}
 import org.scalatest.concurrent.ScalaFutures
 
-import filodb.core.query.{CustomRangeVectorKey, RangeVector, RangeVectorKey}
+import filodb.core.metadata.Column.ColumnType
+import filodb.core.query._
 import filodb.memory.format.{RowReader, ZeroCopyUTF8String}
 import filodb.query.{AggregationOperator, QueryConfig}
 
@@ -18,7 +20,7 @@ class AggrOverRangeVectorsSpec extends FunSpec with Matchers with ScalaFutures {
   val config = ConfigFactory.load("application_test.conf").getConfig("filodb")
   val queryConfig = new QueryConfig(config.getConfig("query"))
   val rand = new Random()
-  val error = 0.00000001d
+  val error = 0.0000001d
 
   it ("should work without grouping") {
     val ignoreKey = CustomRangeVectorKey(
@@ -105,6 +107,25 @@ class AggrOverRangeVectorsSpec extends FunSpec with Matchers with ScalaFutures {
         v.map(_.getDouble(1)).sorted(Ordering[Double].reverse).take(3).toSet
       }.iterator)
 
+    // Quantile
+    val resultObs7a = RangeVectorAggregator.mapReduce(AggregationOperator.Quantile,
+      Seq(0.70), false, Observable.fromIterable(samples), noGrouping)
+    val resultObs7 = RangeVectorAggregator.mapReduce(AggregationOperator.Quantile,
+      Seq(0.70), true, resultObs7a, rv=>rv.key)
+    val resultObs7b = RangeVectorAggregator.present(AggregationOperator.Quantile, Seq(0.70), resultObs7, 1000)
+    val result7 = resultObs7b.toListL.runAsync.futureValue
+    result7.size shouldEqual 1
+    result7(0).key shouldEqual noKey
+    val readyToAggr7 = samples.toList.map(_.rows.toList).transpose
+    compareIter(result7(0).rows.map(_.getDouble(1)), readyToAggr7.map { v =>
+      quantile(0.70, v.map(_.getDouble(1)))
+    }.iterator)
+  }
+
+  private def quantile(q: Double, items: List[Double]): Double = {
+    val tdig = TDigest.createArrayDigest(100)
+    items.foreach(i => tdig.add(i))
+    tdig.quantile(q)
   }
 
   it ("should ignore NaN while aggregating") {
@@ -118,17 +139,17 @@ class AggrOverRangeVectorsSpec extends FunSpec with Matchers with ScalaFutures {
       new RangeVector {
         override def key: RangeVectorKey = ignoreKey
         override def rows: Iterator[RowReader] = Seq(new TransientRow(1L, Double.NaN),
-                                                   new TransientRow(2L, 5.6d)).iterator
+                                                     new TransientRow(2L, 5.6d)).iterator
       },
       new RangeVector {
         override def key: RangeVectorKey = ignoreKey
         override def rows: Iterator[RowReader] = Seq(new TransientRow(1L, 4.6d),
-          new TransientRow(2L, 4.4d)).iterator
+                                                     new TransientRow(2L, 4.4d)).iterator
       },
       new RangeVector {
         override def key: RangeVectorKey = ignoreKey
         override def rows: Iterator[RowReader] = Seq(new TransientRow(1L, 2.1d),
-          new TransientRow(2L, 5.4d)).iterator
+                                                     new TransientRow(2L, 5.4d)).iterator
       }
     )
 
@@ -190,8 +211,61 @@ class AggrOverRangeVectorsSpec extends FunSpec with Matchers with ScalaFutures {
     compareIter2(result6(0).rows.map(r=> Set(r.getDouble(2), r.getDouble(4))),
       Seq(Set(4.6d, 2.1d), Set(5.6, 5.4d)).iterator)
 
+    // Quantile
+    val resultObs7a = RangeVectorAggregator.mapReduce(AggregationOperator.Quantile,
+      Seq(0.5), false, Observable.fromIterable(samples), noGrouping)
+    val resultObs7 = RangeVectorAggregator.mapReduce(AggregationOperator.Quantile,
+      Seq(0.5), true, resultObs7a, rv=>rv.key)
+    val resultObs7b = RangeVectorAggregator.present(AggregationOperator.Quantile, Seq(0.5), resultObs7, 1000)
+    val result7 = resultObs7b.toListL.runAsync.futureValue
+    result7.size shouldEqual 1
+    result7(0).key shouldEqual noKey
+    compareIter(result7(0).rows.map(_.getDouble(1)), Seq(3.35d, 5.4d).iterator)
+  }
+
+  it ("should be able to serialize to and deserialize t-digest from SerializableRangeVector") {
+    val noKey = CustomRangeVectorKey(Map.empty)
+    def noGrouping(rv: RangeVector): RangeVectorKey = noKey
+
+    val ignoreKey = CustomRangeVectorKey(
+      Map(ZeroCopyUTF8String("ignore") -> ZeroCopyUTF8String("ignore")))
+    val samples: Array[RangeVector] = Array(
+      new RangeVector {
+        override def key: RangeVectorKey = ignoreKey
+        override def rows: Iterator[RowReader] = Seq(new TransientRow(1L, Double.NaN),
+          new TransientRow(2L, 5.6d)).iterator
+      },
+      new RangeVector {
+        override def key: RangeVectorKey = ignoreKey
+        override def rows: Iterator[RowReader] = Seq(new TransientRow(1L, 4.6d),
+          new TransientRow(2L, 4.4d)).iterator
+      },
+      new RangeVector {
+        override def key: RangeVectorKey = ignoreKey
+        override def rows: Iterator[RowReader] = Seq(new TransientRow(1L, 2.1d),
+          new TransientRow(2L, 5.4d)).iterator
+      }
+    )
+
+    // Quantile
+    val resultObs7a = RangeVectorAggregator.mapReduce(AggregationOperator.Quantile,
+      Seq(0.5), false, Observable.fromIterable(samples), noGrouping)
+    val resultObs7 = RangeVectorAggregator.mapReduce(AggregationOperator.Quantile,
+      Seq(0.5), true, resultObs7a, rv=>rv.key)
+    val result7 = resultObs7.toListL.runAsync.futureValue
+    result7.size shouldEqual 1
+
+    val recSchema = SerializableRangeVector.toSchema(Seq(ColumnInfo("timestamp", ColumnType.LongColumn),
+                                                         ColumnInfo("tdig", ColumnType.StringColumn)))
+    val builder = SerializableRangeVector.toBuilder(recSchema)
+    val srv = SerializableRangeVector(result7(0), builder, recSchema, 10)
+
+    val resultObs7b = RangeVectorAggregator.present(AggregationOperator.Quantile, Seq(0.5), Observable.now(srv), 1000)
+    val finalResult = resultObs7b.toListL.runAsync.futureValue
+    compareIter(finalResult(0).rows.map(_.getDouble(1)), Seq(3.35d, 5.4d).iterator)
 
   }
+
 
   @tailrec
   final private def compareIter(it1: Iterator[Double], it2: Iterator[Double]) : Unit = {

@@ -72,7 +72,7 @@ object RangeFunction {
   def apply(func: Option[RangeFunctionId],
             funcParams: Seq[Any] = Nil): RangeFunction = {
     func match {
-      case None                   => LastSampleFunction
+      case None                   => LastSampleFunction // when no window function is asked, use last sample for instant
       case Some(Rate)             => RateFunction
       case Some(Increase)         => IncreaseFunction
       case Some(Delta)            => DeltaFunction

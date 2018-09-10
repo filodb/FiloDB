@@ -258,7 +258,7 @@ class ParserSpec extends FunSpec with Matchers {
       "http_requests_total offset 5m" ->
         "PeriodicSeries(RawSeries(IntervalSelector(List(1524855688000),List(1524855988000)),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000,1524855988000)",
       "http_requests_total{environment=~\"staging|testing|development\",method!=\"GET\"}" ->
-        "PeriodicSeries(RawSeries(IntervalSelector(List(1524855688000),List(1524855988000)),List(ColumnFilter(environment,Equals(staging|testing|development)), ColumnFilter(method,Equals(GET)), ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000,1524855988000)",
+        "PeriodicSeries(RawSeries(IntervalSelector(List(1524855688000),List(1524855988000)),List(ColumnFilter(environment,EqualsRegex(staging|testing|development)), ColumnFilter(method,NotEquals(GET)), ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000,1524855988000)",
       "method_code:http_errors:rate5m / ignoring(code) group_left method:http_requests:rate5m" ->
         "BinaryJoin(PeriodicSeries(RawSeries(IntervalSelector(List(1524855688000),List(1524855988000)),List(ColumnFilter(__name__,Equals(method_code:http_errors:rate5m))),List()),1524855988000,1000,1524855988000),DIV,OneToMany,PeriodicSeries(RawSeries(IntervalSelector(List(1524855688000),List(1524855988000)),List(ColumnFilter(__name__,Equals(method:http_requests:rate5m))),List()),1524855988000,1000,1524855988000),List(),List())",
       "increase(http_requests_total{job=\"api-server\"}[5m])" ->
@@ -266,7 +266,7 @@ class ParserSpec extends FunSpec with Matchers {
       "sum(http_requests_total{method=\"GET\"} offset 5m)" ->
         "Aggregate(Sum,PeriodicSeries(RawSeries(IntervalSelector(List(1524855688000),List(1524855988000)),List(ColumnFilter(method,Equals(GET)), ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000,1524855988000),List(),List(),List())",
       "absent(nonexistent{job=\"myjob\",instance=~\".*\"})" ->
-        "ApplyInstantFunction(PeriodicSeries(RawSeries(IntervalSelector(List(1524855688000),List(1524855988000)),List(ColumnFilter(job,Equals(myjob)), ColumnFilter(instance,Equals(.*)), ColumnFilter(__name__,Equals(nonexistent))),List()),1524855988000,1000,1524855988000),Absent,List())",
+        "ApplyInstantFunction(PeriodicSeries(RawSeries(IntervalSelector(List(1524855688000),List(1524855988000)),List(ColumnFilter(job,Equals(myjob)), ColumnFilter(instance,EqualsRegex(.*)), ColumnFilter(__name__,Equals(nonexistent))),List()),1524855988000,1000,1524855988000),Absent,List())",
       "absent(sum(nonexistent{job=\"myjob\"}))" ->
         "ApplyInstantFunction(Aggregate(Sum,PeriodicSeries(RawSeries(IntervalSelector(List(1524855688000),List(1524855988000)),List(ColumnFilter(job,Equals(myjob)), ColumnFilter(__name__,Equals(nonexistent))),List()),1524855988000,1000,1524855988000),List(),List(),List()),Absent,List())"
     )

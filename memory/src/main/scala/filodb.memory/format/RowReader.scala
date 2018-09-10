@@ -1,5 +1,6 @@
 package filodb.memory.format
 
+import java.nio.ByteBuffer
 import java.sql.Timestamp
 
 import scala.reflect.ClassTag
@@ -26,6 +27,16 @@ trait RowReader {
   def getBlobBase(columnNo: Int): Any
   def getBlobOffset(columnNo: Int): Long
   def getBlobNumBytes(columnNo: Int): Int
+
+  final def getBuffer(columnNo: Int): ByteBuffer = {
+    val length = getBlobNumBytes(columnNo)
+    getBlobBase(columnNo) match {
+      case UnsafeUtils.ZeroPointer =>   // offheap
+        UnsafeUtils.asDirectBuffer(getBlobOffset(columnNo), length)
+      case array: Array[Byte] =>
+        ByteBuffer.wrap(array, (getBlobOffset(columnNo) - UnsafeUtils.arayOffset).toInt, length)
+    }
+  }
 
 //  def getUtf8MediumOffset(columnNo: Int): Long
 

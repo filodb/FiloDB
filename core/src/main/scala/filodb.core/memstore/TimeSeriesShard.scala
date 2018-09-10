@@ -66,6 +66,7 @@ class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
 
   val partitionsPagedFromColStore = Kamon.counter("memstore-partitions-paged-in").refine(tags)
   val partitionsQueried = Kamon.counter("memstore-partitions-queried").refine(tags)
+  val purgedPartitions = Kamon.counter("memstore-partitions-purged").refine(tags)
   val partitionsRestored = Kamon.counter("memstore-partitions-paged-restored").refine(tags)
   val chunkIdsEvicted = Kamon.counter("memstore-chunkids-evicted").refine(tags)
   val partitionsEvicted = Kamon.counter("memstore-partitions-evicted").refine(tags)
@@ -386,7 +387,6 @@ class TimeSeriesShard(val dataset: Dataset,
   }
 
   def completeIndexRecovery(): Unit = {
-    purgeExpiredPartitions()
     commitPartKeyIndexBlocking()
     startFlushingIndex() // start flushing index now that we have recovered
     logger.info(s"Bootstrapped index for shard $shardNum")
@@ -494,6 +494,7 @@ class TimeSeriesShard(val dataset: Dataset,
       numDeleted += 1
     }
     if (numDeleted > 0) logger.info(s"Purged $numDeleted partitions from memory and index")
+    shardStats.purgedPartitions.increment(numDeleted)
   }
 
   def createFlushTask(flushGroup: FlushGroup): Task[Response] = {
@@ -825,20 +826,31 @@ class TimeSeriesShard(val dataset: Dataset,
       val intIt = prunedPartitions.intIterator
       var partsRemoved = 0
       var partsSkipped = 0
+      var maxEndTime = evictionWatermark
       while (intIt.hasNext) {
         val partitionObj = partitions.get(intIt.next)
-        // Update the evictionWatermark BEFORE we free the partition and can't read data any more
         if (partitionObj != UnsafeUtils.ZeroPointer) {
-          // this partition is not ingesting, so timestampOfLatestSample should not be -1
-          val partEndTime = partitionObj.timestampOfLatestSample
-          if (partEndTime == -1) logger.warn(s"partition is ingesting, but it was eligible for eviction. How?")
-          removePartition(partitionObj)
-          partsRemoved += 1
-          evictionWatermark = Math.max(evictionWatermark, partEndTime)
+          // TODO we can optimize fetching of endTime by getting them along with top-k query
+          val endTime = partKeyIndex.endTimeFromPartId(partitionObj.partID)
+          if (activelyIngesting.get(partitionObj.partID))
+            logger.warn(s"Partition ${partitionObj.partID} is ingesting, but it was eligible for eviction. How?")
+          if (endTime == PartKeyLuceneIndex.NOT_FOUND || endTime == Long.MaxValue) {
+            logger.warn(s"endTime ${endTime} was not correct. how?", new IllegalStateException())
+          } else {
+            removePartition(partitionObj)
+            partsRemoved += 1
+            maxEndTime = Math.max(maxEndTime, endTime)
+          }
         } else {
           partsSkipped += 1
         }
       }
+      evictionWatermark = maxEndTime + 1
+      // Plus one needed since there is a possibility that all partitions evicted in this round have same endTime,
+      // and there may be more partitions that are not evicted with same endTime. If we didnt advance the watermark,
+      // we would be processing same partIds again and again without moving watermark forward.
+      // We may skip evicting some partitions by doing this, but the imperfection is an acceptable
+      // trade-off for performance and simplicity. The skipped partitions, will ve removed during purge.
       logger.info(s"Shard $shardNum: evicted $partsRemoved partitions, skipped $partsSkipped, h20=$evictionWatermark")
       shardStats.partitionsEvicted.increment(partsRemoved)
     }

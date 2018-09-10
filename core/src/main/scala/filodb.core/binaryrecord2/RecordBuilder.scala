@@ -252,7 +252,7 @@ final class RecordBuilder(memFactory: MemFactory,
   final def endRecord(writeHash: Boolean = true): Long = {
     val recordOffset = curRecordOffset
 
-    if (writeHash) setInt(curBase, curRecordOffset + hashOffset, recHash)
+    if (writeHash && schema.partitionFieldStart.isDefined) setInt(curBase, curRecordOffset + hashOffset, recHash)
 
     // Bring RecordOffset up to endOffset w/ align.  Now the state is complete at end of a record again.
     curRecEndOffset = align(curRecEndOffset)

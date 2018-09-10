@@ -32,10 +32,6 @@ trait Operators {
     override def getPlanOperator: BinaryOperator = BinaryOperator.EQL
   }
 
-  case object ExactMatch extends Operator {
-    override def getPlanOperator: BinaryOperator = BinaryOperator.EQL
-  }
-
   case object RegexMatch extends Operator {
     override def getPlanOperator: BinaryOperator = BinaryOperator.EQLRegex
   }

@@ -47,6 +47,7 @@ lazy val prometheus = project
 
 lazy val query = project
   .in(file("query"))
+  .settings(libraryDependencies ++= queryDeps)
   .settings(commonSettings: _*)
   .settings(name := "filodb-query")
   .dependsOn(core % "compile->compile; test->test")
@@ -219,6 +220,10 @@ lazy val cassDeps = commonDeps ++ Seq(
   "org.lz4"                %  "lz4-java"         % "1.4",
   "com.datastax.cassandra" % "cassandra-driver-core" % cassDriverVersion,
   logbackDep % Test
+)
+
+lazy val queryDeps = commonDeps ++ Seq(
+  "com.tdunning"         % "t-digest"           % "3.1"
 )
 
 lazy val coordDeps = commonDeps ++ Seq(

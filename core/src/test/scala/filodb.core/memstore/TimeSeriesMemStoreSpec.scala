@@ -347,7 +347,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     Thread sleep 1000    // see if this will make things pass sooner
 
     memStore.numPartitions(dataset1.ref, 0) shouldEqual 20
-    memStore.getShardE(dataset1.ref, 0).evictionWatermark shouldEqual endTime
+    memStore.getShardE(dataset1.ref, 0).evictionWatermark shouldEqual endTime + 1
     memStore.getShardE(dataset1.ref, 0).addPartitionsDisabled() shouldEqual false
 
     // Check partitions are now 2 to 21, 0 and 1 got evicted

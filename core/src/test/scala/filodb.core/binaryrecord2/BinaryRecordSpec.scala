@@ -15,6 +15,7 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
 
   val schema1 = RecordSchema.ingestion(dataset1)
   val schema2 = RecordSchema.ingestion(dataset2)
+  val longStrSchema = new RecordSchema(Seq(ColumnType.LongColumn, ColumnType.StringColumn))
 
   val records = new collection.mutable.ArrayBuffer[(Any, Long)]
 
@@ -69,6 +70,18 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
 
       intercept[IllegalArgumentException] {
         builder.addString("ABCDEfghij" * 7000)
+      }
+    }
+
+    it("should not write hash if schema does not have partition key") {
+      val builder = new RecordBuilder(MemFactory.onHeapFactory, longStrSchema)
+      val sourceRow = SeqRowReader(Seq(10000L, "ABCDEfghij"))
+      builder.addFromReader(sourceRow)
+
+      builder.allContainers should have length (1)
+      builder.allContainers.head.iterate(longStrSchema).foreach { row =>
+        row.getLong(0) shouldEqual 10000L
+        row.filoUTF8String(1).toString shouldEqual "ABCDEfghij"
       }
     }
 

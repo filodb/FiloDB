@@ -284,7 +284,16 @@ class PartKeyLuceneIndex(dataset: Dataset, shardNum: Int, storeConfig: StoreConf
     * Called when a document is updated with new endTime
     */
   def startTimeFromPartId(partId: Int): Long = {
-    val collector = new SingleStartTimeCollector()
+    val collector = new NumericDocValueCollector(PartKeyLuceneIndex.START_TIME)
+    searcherManager.acquire().search(new TermQuery(new Term(PART_ID, partId.toString)), collector)
+    collector.singleResult
+  }
+
+  /**
+    * Called when a document is updated with new endTime
+    */
+  def endTimeFromPartId(partId: Int): Long = {
+    val collector = new NumericDocValueCollector(PartKeyLuceneIndex.END_TIME)
     searcherManager.acquire().search(new TermQuery(new Term(PART_ID, partId.toString)), collector)
     collector.singleResult
   }
@@ -402,22 +411,22 @@ class PartKeyLuceneIndex(dataset: Dataset, shardNum: Int, storeConfig: StoreConf
 
 }
 
-class SingleStartTimeCollector extends SimpleCollector {
+class NumericDocValueCollector(docValueName: String) extends SimpleCollector {
 
-  var startTimeDv: NumericDocValues = _
+  var docValue: NumericDocValues = _
   var singleResult: Long = PartKeyLuceneIndex.NOT_FOUND
 
   // gets called for each segment
   override def doSetNextReader(context: LeafReaderContext): Unit = {
-    startTimeDv = context.reader().getNumericDocValues(PartKeyLuceneIndex.START_TIME)
+    docValue = context.reader().getNumericDocValues(docValueName)
   }
 
   // gets called for each matching document in current segment
   override def collect(doc: Int): Unit = {
-    if (startTimeDv.advanceExact(doc)) {
-      singleResult = startTimeDv.longValue()
+    if (docValue.advanceExact(doc)) {
+      singleResult = docValue.longValue()
     } else {
-      throw new IllegalStateException("This shouldn't happen since every document should have a startTimeDv")
+      throw new IllegalStateException("This shouldn't happen since every document should have a docValue")
     }
   }
 

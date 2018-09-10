@@ -77,7 +77,18 @@ trait Vectors extends Scalars with TimeUnits with Base {
   }
 
 
-  sealed trait Vector extends Expression
+  sealed trait Vector extends Expression {
+    protected def labelMatchesToFilters(labels: Seq[LabelMatch]) =
+      labels.map { labelMatch =>
+        labelMatch.labelMatchOp match {
+          case EqualMatch      => ColumnFilter(labelMatch.label, query.Filter.Equals(labelMatch.value))
+          case NotRegexMatch   => ColumnFilter(labelMatch.label, query.Filter.NotEqualsRegex(labelMatch.value))
+          case RegexMatch      => ColumnFilter(labelMatch.label, query.Filter.EqualsRegex(labelMatch.value))
+          case NotEqual(false) => ColumnFilter(labelMatch.label, query.Filter.NotEquals(labelMatch.value))
+          case other: Any      => throw new IllegalArgumentException(s"Unknown match operator $other")
+        }
+      }
+  }
 
   /**
     * Instant vector selectors allow the selection of a set of time series
@@ -100,10 +111,7 @@ trait Vectors extends Scalars with TimeUnits with Base {
       throw new IllegalArgumentException("Metric name should not be set twice")
     }
 
-    private val columnFilters = labelSelection.map { labelMatch =>
-      //TODO All operators need to be taken care
-      ColumnFilter(labelMatch.label, query.Filter.Equals(labelMatch.value))
-    }
+    private val columnFilters = labelMatchesToFilters(labelSelection)
 
     private val nameFilter = ColumnFilter("__name__", query.Filter.Equals(metricName))
 
@@ -136,10 +144,7 @@ trait Vectors extends Scalars with TimeUnits with Base {
       throw new IllegalArgumentException("Metric name should not be set twice")
     }
 
-    private val columnFilters = labelSelection.map { labelMatch =>
-      //TODO All operators need to be taken care
-      ColumnFilter(labelMatch.label, query.Filter.Equals(labelMatch.value))
-    }
+    private val columnFilters = labelMatchesToFilters(labelSelection)
 
     private val nameFilter = ColumnFilter("__name__", query.Filter.Equals(metricName))
 

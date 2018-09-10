@@ -23,8 +23,10 @@ final case class PeriodicSamplesMapper(start: Long,
                                        funcParams: Seq[Any] = Nil) extends RangeVectorTransformer {
   require(start <= end, "start should be <= end")
   require(step > 0, "step should be > 0")
+
   if (functionId.nonEmpty) require(window.nonEmpty && window.get > 0,
                                   "Need positive window lengths to apply range function")
+  else require(window.isEmpty, "Should not specify window length when not applying windowing function")
 
   protected[exec] def args: String =
     s"start=$start, step=$step, end=$end, window=$window, functionId=$functionId, funcParams=$funcParams"
