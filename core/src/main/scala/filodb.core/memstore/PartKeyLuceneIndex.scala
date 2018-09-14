@@ -50,23 +50,36 @@ object PartKeyLuceneIndex {
     new BytesRef(partKeyBase, unsafeOffsetToBytesRefOffset(partKeyOffset),
       BinaryRegionLarge.numBytes(partKeyBase, partKeyOffset))
   }
+
+  private def createTempDir(dataset: Dataset, shardNum: Int): File = {
+    val baseDir = new File(System.getProperty("java.io.tmpdir"))
+    val baseName = s"partKeyIndex-${dataset.name}-$shardNum-${System.currentTimeMillis()}-"
+    val tempDir = new File(baseDir, baseName)
+    tempDir.mkdir()
+    tempDir
+  }
+
 }
 
 final case class TermInfo(term: UTF8Str, freq: Int)
 
-class PartKeyLuceneIndex(dataset: Dataset, shardNum: Int, storeConfig: StoreConfig) extends StrictLogging {
+class PartKeyLuceneIndex(dataset: Dataset,
+                         shardNum: Int,
+                         storeConfig: StoreConfig,
+                         diskLocation: Option[File] = None) extends StrictLogging {
 
   import PartKeyLuceneIndex._
 
   private val numPartColumns = dataset.partitionColumns.length
-  private val indexDiskLocation = createTempDir.toPath
+  private val indexDiskLocation = diskLocation.getOrElse(createTempDir(dataset, shardNum)).toPath
   private val mMapDirectory = new MMapDirectory(indexDiskLocation)
   private val analyzer = new StandardAnalyzer()
 
-  logger.info(s"Created lucene index at $indexDiskLocation")
+  logger.info(s"Created lucene index for shard=$shardNum at $indexDiskLocation")
 
   private val config = new IndexWriterConfig(analyzer)
   config.setInfoStream(new LuceneMetricsRouter(shardNum))
+  config.setOpenMode(IndexWriterConfig.OpenMode.CREATE_OR_APPEND)
 
   private val endTimeSort = new Sort(new SortField(END_TIME, SortField.Type.LONG),
                                      new SortField(START_TIME, SortField.Type.LONG))
@@ -164,6 +177,7 @@ class PartKeyLuceneIndex(dataset: Dataset, shardNum: Int, storeConfig: StoreConf
   def indexNumEntriesWithTombstones: Long = indexWriter.maxDoc()
 
   def closeIndex(): Unit = {
+    logger.info(s"Closing index on shard ${shardNum}")
     flushThread.close()
     indexWriter.close()
   }
@@ -229,19 +243,32 @@ class PartKeyLuceneIndex(dataset: Dataset, shardNum: Int, storeConfig: StoreConf
                  partKeyBytesRefOffset: Int = 0)
                 (partKeyNumBytes: Int = partKeyOnHeapBytes.length): Unit = {
     val document = makeDocument(partKeyOnHeapBytes, partKeyBytesRefOffset, partKeyNumBytes, partId, startTime, endTime)
-    logger.debug(s"Adding document in shard=$shardNum for partId $partId with startTime=$startTime endTime=$endTime")
+    logger.debug(s"Adding document ${partKeyString(partId, partKeyOnHeapBytes, partKeyBytesRefOffset)} " +
+                 s"with startTime=$startTime endTime=$endTime")
     indexWriter.addDocument(document)
   }
 
   def upsertPartKey(partKeyOnHeapBytes: Array[Byte],
-                 partId: Int,
-                 startTime: Long,
-                 endTime: Long = Long.MaxValue,
-                 partKeyBytesRefOffset: Int = 0)
-                (partKeyNumBytes: Int = partKeyOnHeapBytes.length): Unit = {
+                    partId: Int,
+                    startTime: Long,
+                    endTime: Long = Long.MaxValue,
+                    partKeyBytesRefOffset: Int = 0)
+                   (partKeyNumBytes: Int = partKeyOnHeapBytes.length): Unit = {
     val document = makeDocument(partKeyOnHeapBytes, partKeyBytesRefOffset, partKeyNumBytes, partId, startTime, endTime)
-    logger.debug(s"Upserting document in shard=$shardNum for partId $partId with startTime=$startTime endTime=$endTime")
+    logger.debug(s"Upserting document ${partKeyString(partId, partKeyOnHeapBytes, partKeyBytesRefOffset)} " +
+                 s"with startTime=$startTime endTime=$endTime")
     indexWriter.updateDocument(new Term(PART_ID, partId.toString), document)
+  }
+
+  private def partKeyString(partId: Int,
+                            partKeyOnHeapBytes: Array[Byte],
+                            partKeyBytesRefOffset: Int = 0): String = {
+    //scalastyle:off
+    s"sh$shardNum-pId$partId[${
+      TimeSeriesPartition
+        .partKeyString(dataset, partKeyOnHeapBytes, bytesRefToUnsafeOffset(partKeyBytesRefOffset))
+    }"
+    //scalastyle:on
   }
 
   private def makeDocument(partKeyOnHeapBytes: Array[Byte],
@@ -330,9 +357,9 @@ class PartKeyLuceneIndex(dataset: Dataset, shardNum: Int, storeConfig: StoreConf
         new IllegalStateException()) // assume this time series started retention period ago
     }
     val updatedDoc = makeDocument(partKeyOnHeapBytes, partKeyBytesRefOffset, partKeyNumBytes,
-                                  partId, startTime, endTime)
-    logger.debug(s"Updating document in shard=$shardNum for partId $partId " +
-      s"with startTime=$startTime and endTime=$endTime")
+      partId, startTime, endTime)
+    logger.debug(s"Updating document ${partKeyString(partId, partKeyOnHeapBytes, partKeyBytesRefOffset)} " +
+                 s"with startTime=$startTime endTime=$endTime")
     indexWriter.updateDocument(new Term(PART_ID, partId.toString), updatedDoc)
   }
 
@@ -400,15 +427,6 @@ class PartKeyLuceneIndex(dataset: Dataset, shardNum: Int, storeConfig: StoreConf
     searcher.search(query, collector)
     collector.intIterator()
   }
-
-  private def createTempDir: File = {
-    val baseDir = new File(System.getProperty("java.io.tmpdir"))
-    val baseName = s"partKeyIndex-${dataset.name}-$shardNum-${System.currentTimeMillis()}-"
-    val tempDir = new File(baseDir, baseName)
-    tempDir.mkdir()
-    tempDir
-  }
-
 }
 
 class NumericDocValueCollector(docValueName: String) extends SimpleCollector {

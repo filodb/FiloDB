@@ -95,6 +95,12 @@ object TestTimeseriesProducer extends StrictLogging {
         .map { _ =>
           logger.info(s"Finished producing $numSamples messages into topic $topicName with timestamps " +
             s"from about ${(System.currentTimeMillis() - startTime) / 1000 / 60} minutes ago at $startTime")
+          val startQuery = startTime / 1000
+          val endQuery = startQuery + 300
+          val query =
+            s"""./filo-cli '-Dakka.remote.netty.tcp.hostname=127.0.0.1' --host 127.0.0.1 --dataset timeseries """ +
+            s"""--promql 'heap_usage{dc="DC0",job="App-0"}' --start $startQuery --end $endQuery --limit 15"""
+          logger.info(s"Sample Query you can use: \n$query")
         }
         .recover { case NonFatal(e) =>
           logger.error("Error occurred while producing messages to Kafka", e)

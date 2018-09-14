@@ -524,7 +524,7 @@ class TimeSeriesShard(val dataset: Dataset,
     indexRb.addLong(endTime)
     // Need to add 4 to include the length bytes
     indexRb.addBlob(p.partKeyBase, p.partKeyOffset, BinaryRegionLarge.numBytes(p.partKeyBase, p.partKeyOffset) + 4)
-    logger.debug(s"Added partId ${p.partID} from shard=$shardNum into timebucket with " +
+    logger.debug(s"Added into timebucket partId ${p.partID} in shard=$shardNum partKey[${p.stringPartition}] with " +
       s"startTime=$startTime endTime=$endTime")
     indexRb.endRecord(false)
   }

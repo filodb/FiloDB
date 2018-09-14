@@ -15,6 +15,10 @@ object TimeSeriesPartition extends StrictLogging {
 
   val nullChunks    = UnsafeUtils.ZeroPointer.asInstanceOf[AppenderArray]
   val nullInfo      = ChunkSetInfo(UnsafeUtils.ZeroPointer.asInstanceOf[BinaryRegion.NativePointer])
+
+  def partKeyString(dataset: Dataset, partKeyBase: Any, partKeyOffset: Long): String = {
+    dataset.partKeySchema.stringify(partKeyBase, partKeyOffset)
+  }
 }
 
 // Temporary holder of chunk metadata pointer and appenders array before optimize/finalize step
