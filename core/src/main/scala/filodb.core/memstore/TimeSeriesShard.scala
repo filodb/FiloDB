@@ -678,7 +678,7 @@ class TimeSeriesShard(val dataset: Dataset,
     if (partFlushChunks.isEmpty && activelyIngesting.get(p.partID)) {
       var endTime = p.timestampOfLatestSample
       if (endTime == -1) endTime = System.currentTimeMillis() // this can happen if no sample after reboot
-      updatePartEndTimeInIndex(p, p.timestampOfLatestSample)
+      updatePartEndTimeInIndex(p, endTime)
       timeBucketBitmaps.get(timeBucket).set(p.partID)
       activelyIngesting.clear(p.partID)
     } else if (partFlushChunks.nonEmpty && !activelyIngesting.get(p.partID)) {
