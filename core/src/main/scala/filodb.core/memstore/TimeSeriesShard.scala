@@ -23,8 +23,8 @@ import filodb.core.metadata.Dataset
 import filodb.core.store._
 import filodb.memory._
 import filodb.memory.data.{OffheapLFSortedIDMap, OffheapLFSortedIDMapMutator}
-import filodb.memory.format.{RowReader, UnsafeUtils}
 import filodb.memory.format.BinaryVector.BinaryVectorPtr
+import filodb.memory.format.UnsafeUtils
 
 class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
   val tags = Map("shard" -> shardNum.toString, "dataset" -> dataset.toString)
@@ -336,9 +336,20 @@ class TimeSeriesShard(val dataset: Dataset,
       val group = partKeyGroup(recBase, recOffset)
       if (ingestOffset < groupWatermark(group)) {
         shardStats.rowsSkipped.increment
+        try {
+          // Needed to update index with new partitions added during recovery with correct startTime.
+          // TODO:
+          // explore aligning index time buckets with chunks, and we can then
+          // remove this partition existence check per sample.
+          val part: FiloPartition = getOrAddPartition(recBase, recOffset, group, ingestOffset)
+          if (part == OutOfMemPartition) { disableAddPartitions() }
+        } catch {
+          case e: OutOfOffheapMemoryException => disableAddPartitions()
+          case e: Exception                   => logger.error(s"Unexpected ingestion err", e); disableAddPartitions()
+        }
       } else {
         binRecordReader.recordOffset = recOffset
-        getOrAddPartitionAndIngest(recBase, recOffset, group, binRecordReader, overflowBlockFactory)
+        getOrAddPartitionAndIngest(recBase, recOffset, group, ingestOffset)
         numActuallyIngested += 1
       }
     }
@@ -717,6 +728,23 @@ class TimeSeriesShard(val dataset: Dataset,
 
   private[memstore] val addPartitionsDisabled = AtomicBoolean(false)
 
+  private[filodb] def getOrAddPartition(recordBase: Any, recordOff: Long, group: Int, ingestOffset: Long) = {
+    val part = partSet.getOrAddWithIngestBR(recordBase, recordOff, {
+      val partKeyOffset = recordComp.buildPartKeyFromIngest(recordBase, recordOff, partKeyBuilder)
+      val newPart = createNewPartition(partKeyArray, partKeyOffset, group)
+      if (newPart != OutOfMemPartition) {
+        val partId = newPart.partID
+        val startTime = binRecordReader.getLong(timestampColId)
+        partKeyIndex.addPartKey(newPart.partKeyBytes, partId, startTime)()
+        timeBucketBitmaps.get(currentIndexTimeBucket).set(partId)
+        activelyIngesting.set(partId)
+        logger.trace(s"Created new partition ${newPart.stringPartition} on shard $shardNum at offset $ingestOffset")
+      }
+      newPart
+    })
+    part
+  }
+
   /**
    * Retrieves or creates a new TimeSeriesPartition, updating indices, then ingests the sample from record.
    * partition portion of ingest BinaryRecord is used to look up existing TSPartition.
@@ -726,22 +754,9 @@ class TimeSeriesShard(val dataset: Dataset,
    * @param recordOff the offset of the ingestion BinaryRecord
    * @param group the group number, from abs(record.partitionHash % numGroups)
    */
-  def getOrAddPartitionAndIngest(recordBase: Any, recordOff: Long, group: Int,
-                                 binRecordReader: RowReader,
-                                 overflowBlockFactory: BlockMemFactory): Unit =
+  def getOrAddPartitionAndIngest(recordBase: Any, recordOff: Long, group: Int, ingestOffset: Long): Unit =
     try {
-      val part = partSet.getOrAddWithIngestBR(recordBase, recordOff, {
-        val partKeyOffset = recordComp.buildPartKeyFromIngest(recordBase, recordOff, partKeyBuilder)
-        val newPart = createNewPartition(partKeyArray, partKeyOffset, group)
-        if (newPart != OutOfMemPartition) {
-          val partId = newPart.partID
-          val startTime = binRecordReader.getLong(timestampColId)
-          partKeyIndex.addPartKey(newPart.partKeyBytes, partId, startTime)()
-          timeBucketBitmaps.get(currentIndexTimeBucket).set(partId)
-          activelyIngesting.set(partId)
-        }
-        newPart
-      })
+      val part: FiloPartition = getOrAddPartition(recordBase, recordOff, group, ingestOffset)
       if (part == OutOfMemPartition) { disableAddPartitions() }
       else { part.asInstanceOf[TimeSeriesPartition].ingest(binRecordReader, overflowBlockFactory) }
     } catch {
