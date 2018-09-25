@@ -3,7 +3,7 @@ package filodb.prometheus.query
 import remote.RemoteStorage._
 
 import filodb.core.query.{ColumnFilter, Filter, SerializableRangeVector}
-import filodb.query.{IntervalSelector, LogicalPlan, RawSeries}
+import filodb.query.{IntervalSelector, LogicalPlan, QueryResultType, RawSeries}
 
 object PrometheusModel {
 
@@ -11,18 +11,19 @@ object PrometheusModel {
     def status: String
   }
 
-  final case class ErrorResponse(errorType: String, error: String) extends PromQueryResponse {
-    val status = "error"
-  }
+  final case class ErrorResponse(errorType: String, error: String, status: String = "error") extends PromQueryResponse
 
-  final case class SuccessResponse(data: Data) extends PromQueryResponse {
-    val status = "success"
-  }
+  final case class SuccessResponse(data: Data, status: String = "success") extends PromQueryResponse
 
   final case class Data(resultType: String, result: Seq[Result])
 
   final case class Result(metric: Map[String, String], values: Seq[Sampl])
 
+  /**
+    * Metric value for a given timestamp
+    * @param timestamp in seconds since epoch
+    * @param value value of metric
+    */
   final case class Sampl(timestamp: Long, value: Double)
 
   /**
@@ -72,12 +73,20 @@ object PrometheusModel {
   }
 
   def toPromSuccessResponse(qr: filodb.query.QueryResult): SuccessResponse = {
-    SuccessResponse(Data(qr.resultType.toString, qr.result.map(toPromResult(_))))
+    SuccessResponse(Data(toPromResultType(qr.resultType), qr.result.map(toPromResult(_))))
+  }
+
+  def toPromResultType(r: QueryResultType): String = {
+    r match {
+      case QueryResultType.RangeVectors => "matrix"
+      case QueryResultType.InstantVector => "vector"
+      case QueryResultType.Scalar => "scalar"
+    }
   }
 
   def toPromResult(srv: SerializableRangeVector): Result = {
     Result(srv.key.labelValues.map { case (k, v) => (k.toString, v.toString)},
-      srv.rows.map(r => Sampl(r.getLong(0), r.getDouble(1))).toSeq)
+      srv.rows.map(r => Sampl(r.getLong(0) / 1000, r.getDouble(1))).toSeq)
   }
 
   def toPromErrorResponse(qe: filodb.query.QueryError): ErrorResponse = {

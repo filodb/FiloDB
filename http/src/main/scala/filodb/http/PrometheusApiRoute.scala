@@ -14,7 +14,7 @@ import org.xerial.snappy.Snappy
 import remote.RemoteStorage.ReadRequest
 
 import filodb.coordinator.client.IngestionCommands.UnknownDataset
-import filodb.coordinator.client.QueryCommands.LogicalPlan2Query
+import filodb.coordinator.client.QueryCommands.{LogicalPlan2Query, QueryOptions}
 import filodb.core.DatasetRef
 import filodb.prometheus.ast.QueryParams
 import filodb.prometheus.parse.Parser
@@ -35,8 +35,8 @@ class PrometheusApiRoute(nodeCoord: ActorRef)(implicit am: ActorMaterializer) ex
     // [Range Queries](https://prometheus.io/docs/prometheus/latest/querying/api/#range-queries)
     path( "api" / "v1" / "query_range") {
       get {
-        parameter('query.as[String], 'start.as[Long], 'end.as[Long], 'step.as[Int]) { (query, start, end, step) =>
-          val logicalPlan = Parser.queryRangeToLogicalPlan(query, new QueryParams(start, step, end))
+        parameter('query.as[String], 'start.as[Double], 'end.as[Double], 'step.as[Int]) { (query, start, end, step) =>
+          val logicalPlan = Parser.queryRangeToLogicalPlan(query, new QueryParams(start.toLong, step, end.toLong))
           onSuccess(asyncAsk(nodeCoord, LogicalPlan2Query(DatasetRef.fromDotString(dataset), logicalPlan))) {
             case qr: filodb.query.QueryResult => complete(toPromSuccessResponse(qr))
             case qr: filodb.query.QueryError  => complete(toPromErrorResponse(qr))
@@ -52,8 +52,8 @@ class PrometheusApiRoute(nodeCoord: ActorRef)(implicit am: ActorMaterializer) ex
     // [Instant Queries](https://prometheus.io/docs/prometheus/latest/querying/api/#instant-queries)
     path( "api" / "v1" / "query") {
       get {
-        parameter('query.as[String], 'time.as[Long]) { (query, time) =>
-          val logicalPlan = Parser.queryToLogicalPlan(query, time)
+        parameter('query.as[String], 'time.as[Double]) { (query, time) =>
+          val logicalPlan = Parser.queryToLogicalPlan(query, time.toLong)
           onSuccess(asyncAsk(nodeCoord, LogicalPlan2Query(DatasetRef.fromDotString(dataset), logicalPlan))) {
             case qr: filodb.query.QueryResult => complete(toPromSuccessResponse(qr))
             case qr: filodb.query.QueryError  => complete(toPromErrorResponse(qr))
@@ -81,7 +81,8 @@ class PrometheusApiRoute(nodeCoord: ActorRef)(implicit am: ActorMaterializer) ex
             // but Akka doesnt support snappy out of the box. Elegant solution is a TODO for later.
             val readReq = ReadRequest.parseFrom(Snappy.uncompress(bytes.toArray))
             val asks = toFiloDBLogicalPlans(readReq).map { logicalPlan =>
-              asyncAsk(nodeCoord, LogicalPlan2Query(DatasetRef.fromDotString(dataset), logicalPlan))
+              asyncAsk(nodeCoord, LogicalPlan2Query(DatasetRef.fromDotString(dataset), logicalPlan,
+                QueryOptions(itemLimit = 200)))
             }
             Future.sequence(asks)
           }
