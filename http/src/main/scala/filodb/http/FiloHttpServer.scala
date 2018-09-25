@@ -27,13 +27,14 @@ class FiloHttpServer(actorSystem: ActorSystem) extends StrictLogging {
   def start(coordinatorRef: ActorRef,
             clusterProxy: ActorRef,
             externalRoutes: Route = reject): Unit = {
+    implicit val system = actorSystem
+    implicit val materializer = ActorMaterializer()
     // This is a preliminary implementation of routes. Will be enhanced later
     val filoRoutes: List[FiloRoute] = List(AdminRoutes,
                                            new ClusterApiRoute(clusterProxy),
-                                           new HealthRoute(coordinatorRef))
+                                           new HealthRoute(coordinatorRef),
+                                           new PrometheusApiRoute(coordinatorRef))
     val reduced = filoRoutes.foldLeft[Route](reject)((acc, r) => r.route ~ acc)
-    implicit val system = actorSystem
-    implicit val materializer = ActorMaterializer()
     val finalRoute = reduced ~ externalRoutes
     val bindingFuture = Http().bindAndHandle(finalRoute,
       settings.httpServerBindHost,

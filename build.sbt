@@ -34,7 +34,7 @@ lazy val coordinator = project
       "com.typesafe.akka", s"akka-persistence-experimental_${scalaBinaryVersion.value}"))
   .dependsOn(core % "compile->compile; test->test")
   .dependsOn(query % "compile->compile; test->test")
-  .dependsOn(prometheus % "test->test")
+  .dependsOn(prometheus % "compile->compile; test->test")
   .configs(MultiJvm)
 
 lazy val prometheus = project
@@ -164,6 +164,7 @@ val ficusVersion      = "1.1.2"
 val kamonVersion      = "1.1.3"
 val monixKafkaVersion = "0.15"
 val sparkVersion      = "2.0.0"
+val sttpVersion       = "1.3.3"
 
 /* Dependencies shared */
 val logbackDep        = "ch.qos.logback"             % "logback-classic"       % "1.2.3"
@@ -269,14 +270,19 @@ lazy val httpDeps = Seq(
   akkaHttpCirce,
   circeGeneric,
   circeParser,
-  akkaHttpTestkit % Test
+  akkaHttpTestkit % Test,
+  "org.xerial.snappy" % "snappy-java" % "1.1.7.2"
 )
 
 lazy val standaloneDeps = Seq(
   logbackDep,
-  "io.kamon" %% "kamon-zipkin" % "1.0.0",
-  "net.ceedubs"          %% "ficus"             % ficusVersion      % Test,
-  "com.typesafe.akka"    %% "akka-multi-node-testkit" % akkaVersion % Test
+  "io.kamon"              %% "kamon-zipkin"            % "1.0.0",
+  "net.ceedubs"           %% "ficus"                   % ficusVersion      % Test,
+  "com.typesafe.akka"     %% "akka-multi-node-testkit" % akkaVersion       % Test,
+  "com.softwaremill.sttp" %% "circe"                   % sttpVersion       % Test,
+  "com.softwaremill.sttp" %% "akka-http-backend"       % sttpVersion       % Test,
+  "com.softwaremill.sttp" %% "core"                    % sttpVersion       % Test,
+  "com.typesafe.akka"     %% "akka-stream"             % "2.5.11"          % Test
 )
 
 lazy val bootstrapperDeps = Seq(

@@ -1,23 +1,31 @@
 package filodb.standalone
 
+import scala.collection.JavaConverters._
 import scala.concurrent.duration._
 
 import akka.actor.ActorRef
 import akka.remote.testkit.{MultiNodeConfig, MultiNodeSpec}
 import akka.testkit.ImplicitSender
+import com.softwaremill.sttp._
+import com.softwaremill.sttp.akkahttp.AkkaHttpBackend
+import com.softwaremill.sttp.circe._
 import com.typesafe.config.ConfigFactory
 import com.typesafe.scalalogging.StrictLogging
 import net.ceedubs.ficus.Ficus._
 import org.scalatest._
 import org.scalatest.concurrent.ScalaFutures
+import org.scalatest.time.{Millis, Seconds, Span}
+import org.xerial.snappy.Snappy
+import remote.RemoteStorage.{LabelMatcher, Query, ReadRequest, ReadResponse}
 
 import filodb.coordinator._
 import filodb.coordinator.NodeClusterActor.{DatasetResourceSpec, IngestionSource}
 import filodb.coordinator.client.LocalClient
 import filodb.core.{DatasetRef, ErrorResponse}
 import filodb.core.store.StoreConfig
-import filodb.prometheus.ast.QueryParams
+import filodb.http.PromCirceSupport
 import filodb.prometheus.parse.Parser
+import filodb.prometheus.query.PrometheusModel.SuccessResponse
 import filodb.query.{QueryError, QueryResult => QueryResult2}
 
 /**
@@ -31,6 +39,8 @@ abstract class StandaloneMultiJvmSpec(config: MultiNodeConfig) extends MultiNode
   override def initialParticipants: Int = roles.size
 
   import akka.testkit._
+
+  override implicit val patienceConfig = PatienceConfig(timeout = Span(30, Seconds), interval = Span(250, Millis))
 
   lazy val watcher = TestProbe()
 
@@ -128,21 +138,61 @@ abstract class StandaloneMultiJvmSpec(config: MultiNodeConfig) extends MultiNode
     }
   }
 
+  val query = "heap_usage{dc=\"DC0\",job=\"App-2\"}[1m]"
   // queryTimestamp is in millis
-  def runQuery(client: LocalClient, queryTimestamp: Long): Double = {
-    val query = "heap_usage{host=\"H0\",job=\"App-2\"}[5m]"
-    val qParams = QueryParams(queryTimestamp/1000, 1, queryTimestamp/1000)
-    val logicalPlan = Parser.queryRangeToLogicalPlan(query, qParams)
+  def runCliQuery(client: LocalClient, queryTimestamp: Long): Double = {
+    val logicalPlan = Parser.queryToLogicalPlan(query, queryTimestamp/1000)
 
     val result = client.logicalPlan2Query(dataset, logicalPlan) match {
       case r: QueryResult2 =>
-        val vals = r.result.map(_.rows.next.getDouble(1))
+        val vals = r.result.flatMap(_.rows.map(_.getDouble(1)))
         info(s"result values were $vals")
         vals.sum
       case e: QueryError => fail(e.t)
     }
-    info(s"Query Result for $query at $queryTimestamp was $result")
+    info(s"CLI Query Result for $query at $queryTimestamp was $result")
     result
   }
+
+  def runHttpQuery(queryTimestamp: Long): Double = {
+
+    import io.circe.generic.auto._
+    import PromCirceSupport._
+
+    implicit val sttpBackend = AkkaHttpBackend()
+    val url = uri"http://localhost:8080/promql/timeseries/api/v1/query?query=$query&time=${queryTimestamp/1000}"
+    info(s"Querying: $url")
+    val result1 = sttp.get(url).response(asJson[SuccessResponse]).send().futureValue.unsafeBody.right.get.data.result
+    val result = result1.flatMap(_.values.map(_.value))
+    info(s"result values were $result")
+    info(s"HTTP Query Result for $query at $queryTimestamp was ${result.sum}")
+    result.sum
+  }
+
+  def runRemoteReadQuery(queryTimestamp: Long): Double = {
+
+    implicit val sttpBackend = AkkaHttpBackend()
+    val start = queryTimestamp / 1000 * 1000 - 1.minutes.toMillis // needed to make it equivalent to http/cli queries
+    val end = queryTimestamp / 1000 * 1000
+    val nameMatcher = LabelMatcher.newBuilder().setName("__name__").setValue("heap_usage")
+    val dcMatcher = LabelMatcher.newBuilder().setName("dc").setValue("DC0")
+    val jobMatcher = LabelMatcher.newBuilder().setName("job").setValue("App-2")
+    val query = Query.newBuilder().addMatchers(nameMatcher)
+                                  .addMatchers(dcMatcher)
+                                  .addMatchers(jobMatcher)
+                                  .setStartTimestampMs(start)
+                                  .setEndTimestampMs(queryTimestamp / 1000 * 1000)
+    val rr = Snappy.compress(ReadRequest.newBuilder().addQueries(query).build().toByteArray())
+    val url = uri"http://localhost:8080/promql/timeseries/api/v1/read"
+    info(s"Querying: $url")
+    val result1 = sttp.post(url).body(rr).response(asByteArray).send().futureValue.unsafeBody
+    val result = ReadResponse.parseFrom(Snappy.uncompress(result1))
+    val values = result.getResultsList().asScala
+           .flatMap(_.getTimeseriesList.asScala).flatMap(_.getSamplesList().asScala.map(_.getValue()))
+    info(s"result values were $values")
+    info(s"Remote Read Query Result for $query at $queryTimestamp was ${values.sum}")
+    values.sum
+  }
+
 }
 

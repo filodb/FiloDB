@@ -154,10 +154,12 @@ abstract class IngestionAndRecoverySpec extends StandaloneMultiJvmSpec(Ingestion
     }
     enterBarrier("checkpoints-validated")
   }
+  var queryTimestamp: Long = _
 
   it should "be able to ingest larger amounts of data into FiloDB via Kafka again" in {
     within(chunkDurationTimeout) {
       runOn(first) {
+        queryTimestamp = System.currentTimeMillis() - 195.minutes.toMillis
         TestTimeseriesProducer.produceMetrics(source, 10000, 100, 200).futureValue(producePatience)
         info("Waiting for part of the chunk-duration so that there are unpersisted chunks")
         Thread.sleep(chunkDuration.toMillis / 3)
@@ -166,11 +168,14 @@ abstract class IngestionAndRecoverySpec extends StandaloneMultiJvmSpec(Ingestion
     }
   }
 
-  val queryTimestamp = System.currentTimeMillis() - 195.minutes.toMillis
-
   it should "answer query successfully" in {
     runOn(first) {
-      query1Response = runQuery(client1, queryTimestamp)
+      query1Response = runCliQuery(client1, queryTimestamp)
+      val httpQueryResponse = runHttpQuery(queryTimestamp)
+      query1Response shouldEqual httpQueryResponse
+      val remoteReadQueryResponse = runRemoteReadQuery(queryTimestamp)
+      query1Response shouldEqual remoteReadQueryResponse
+
     }
     enterBarrier("query1-answered")
   }
@@ -214,7 +219,7 @@ abstract class IngestionAndRecoverySpec extends StandaloneMultiJvmSpec(Ingestion
 
   it should "answer promQL query successfully with same value" in {
     runOn(first) {
-      val query2Response = runQuery(client2, queryTimestamp)
+      val query2Response = runCliQuery(client2, queryTimestamp)
       (query2Response - query1Response).abs should be < 0.0001
     }
     enterBarrier("query2-answered")

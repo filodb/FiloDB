@@ -13,10 +13,10 @@
     - [POST /api/v1/cluster/{dataset}](#post-apiv1clusterdataset)
     - [POST /api/v1/cluster/{dataset}/reassignshards](#post-apiv1clusterdatasetreassignshards)
   - [Prometheus-compatible APIs](#prometheus-compatible-apis)
+    - [GET /promql/{dataset}/api/v1/query_range?query={promQLString}&start={startTime}&step={step}&end={endTime}](#get-promqldatasetapiv1query_rangequerypromqlstringstartstarttimestepstependendtime)
+    - [GET /promql/{dataset}/api/v1/query?=query={promQLString}&time={timestamp}](#get-promqldatasetapiv1queryquerypromqlstringtimetimestamp)
+    - [POST /promql/{dataset}/api/v1/read](#post-promqldatasetapiv1read)
     - [GET /api/v1/label/{label_name}/values](#get-apiv1labellabel_namevalues)
-    - [GET /api/v1/query](#get-apiv1query)
-    - [GET /api/v1/query_range](#get-apiv1query_range)
-    - [GET /api/v1/series](#get-apiv1series)
   - [Prometheus APIs not supported](#prometheus-apis-not-supported)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
@@ -147,6 +147,31 @@ The POST body describes the reassign shard config that should have both destinat
 
 ### Prometheus-compatible APIs
 
+* Compatible with Grafana Prometheus Plugin
+
+#### GET /promql/{dataset}/api/v1/query_range?query={promQLString}&start={startTime}&step={step}&end={endTime}
+
+Used to issue a promQL query for a time range with a `start` and `end` timestamp and at regular `step` intervals.
+For more details, see Prometheus HTTP API Documentation
+[Range Queries](https://prometheus.io/docs/prometheus/latest/querying/api/#range-queries)
+
+
+#### GET /promql/{dataset}/api/v1/query?=query={promQLString}&time={timestamp}
+
+Used to issue a promQL query for a single time instant `time`.  Can also be used to query raw data by issuing a PromQL
+range expression. For more details, see Prometheus HTTP API Documentation
+[Instant Queries](https://prometheus.io/docs/prometheus/latest/querying/api/#instant-queries)
+
+#### POST /promql/{dataset}/api/v1/read
+
+Used to extract raw data for integration with other TSDB systems.
+* Input: ReadRequest Protobuf
+* Output: ReadResponse Protobuf
+See [Prometheus Remote Proto definition](https://github.com/prometheus/prometheus/blob/master/prompb/remote.proto) for more details
+
+Important Note: The Prometheus API should not be used for extracting raw data out from FiloDB at scale. Current
+implementation includes the same 'limit' settings that apply in the Akka Actor interface.   
+
 #### GET /api/v1/label/{label_name}/values
 
 * Returns the values (up to a limit) for a given label or tag in the internal index.  NOTE: it only searches the local node, this is not a distributed query.
@@ -162,15 +187,9 @@ The POST body describes the reassign shard config that should have both destinat
 }
 ```
 
-#### GET /api/v1/query
-
-#### GET /api/v1/query_range
-
-#### GET /api/v1/series
-
 ### Prometheus APIs not supported
 
-Anything not listed above.  Especially:
+Anything not listed above. Especially:
 
 * GET /api/v1/targets
 * GET /api/v1/alertmanagers

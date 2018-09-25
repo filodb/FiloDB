@@ -1,5 +1,8 @@
 package filodb.timeseries
 
+import java.net.URLEncoder
+import java.nio.charset.StandardCharsets
+
 import scala.concurrent.{Await, Future}
 import scala.concurrent.duration._
 import scala.util.Random
@@ -101,6 +104,10 @@ object TestTimeseriesProducer extends StrictLogging {
             s"""./filo-cli '-Dakka.remote.netty.tcp.hostname=127.0.0.1' --host 127.0.0.1 --dataset timeseries """ +
             s"""--promql 'heap_usage{dc="DC0",job="App-0"}' --start $startQuery --end $endQuery --limit 15"""
           logger.info(s"Sample Query you can use: \n$query")
+          val q = URLEncoder.encode("heap_usage{dc=\"DC0\",job=\"App-0\"}", StandardCharsets.UTF_8.toString)
+          val url = s"http://localhost:8080/promql/timeseries/api/v1/query_range?" +
+            s"query=$q&start=$startQuery&end=$endQuery&step=15"
+          logger.info(s"Sample URL you can use to query: \n$url")
         }
         .recover { case NonFatal(e) =>
           logger.error("Error occurred while producing messages to Kafka", e)

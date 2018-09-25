@@ -180,7 +180,7 @@ abstract class ClusterSingletonFailoverSpec extends StandaloneMultiJvmSpec(Clust
 
   it should "answer query successfully" in {
     runOn(first, third) { // TODO check second=UnknownDataset
-      query1Response = runQuery(client1, queryTimestamp)
+      query1Response = runCliQuery(client1, queryTimestamp)
     }
     enterBarrier("query1-answered")
   }
@@ -273,7 +273,7 @@ abstract class ClusterSingletonFailoverSpec extends StandaloneMultiJvmSpec(Clust
 
   ignore should "answer promQL query successfully with same value" in {
     runOn(third) {
-      val query2Response = runQuery(client1, queryTimestamp)
+      val query2Response = runCliQuery(client1, queryTimestamp)
       (query2Response - query1Response).abs should be < 0.0001
     }
     enterBarrier("query2-answered")

@@ -80,7 +80,7 @@ object QueryCommands {
    * Depends on queryOptions, the query will fan out to multiple nodes and shards as needed to gather
    * results.
    * @param dataset the dataset (and possibly database) to query
-   * @param plan the LogicalPlan for the query to run
+   * @param logicalPlan the LogicalPlan for the query to run
    * @param queryOptions options to control routing of query
    * @return AggregateResponse, or BadQuery, BadArgument, WrongNumberOfArgs, UndefinedColumns
    */
