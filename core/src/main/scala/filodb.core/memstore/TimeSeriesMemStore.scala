@@ -107,7 +107,7 @@ extends MemStore with StrictLogging {
                   }.collect { case Some(flushGroup) => flushGroup }
                   .mapAsync(numParallelFlushes) { f => shard.createFlushTask(f).executeOn(flushSched) }
                   .foreach({ x => })(shard.ingestSched)
-                  .recover { case ex: Exception => errHandler(ex) }
+                  .recover { case ex: Throwable => errHandler(ex) }
   }
 
   // a more optimized ingest stream handler specifically for recovery

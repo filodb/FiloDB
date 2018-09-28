@@ -7,17 +7,21 @@ import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.Future
 import scala.util.control.NonFatal
 
-import monix.execution.{Ack, Scheduler}
+import com.typesafe.scalalogging.StrictLogging
+import monix.execution.{Ack, Scheduler, UncaughtExceptionReporter}
 import monix.reactive.{Notification, Observable}
 import monix.reactive.observables.ObservableLike.Operator
 import monix.reactive.observers.Subscriber
 
+import filodb.core.GlobalScheduler._
+
 // From http://stackoverflow.com/questions/10642337/is-there-are-iterative-version-of-groupby-in-scala
-object Iterators {
+object Iterators extends StrictLogging {
   // Use the I/O Pool by default instead of the global fork-join pool -- for the ObservableIterator.
   // The I/O pool allows unlimited number of threads, otherwise the FJ pool might have 1 thread only
   // and cause a deadlock with the BlockingQueue
-  val ioPool = Scheduler.io("filodb-io")
+  val ioPool = Scheduler.io(name = "filodb-io",
+                 reporter = UncaughtExceptionReporter(logger.error("Uncaught Exception in Iterators.ioPool", _)))
 
   implicit class RichIterator[T](origIt: Iterator[T]) {
     def sortedGroupBy[B](func: T => B): Iterator[(B, Iterator[T])] = new Iterator[(B, Iterator[T])] {
@@ -34,7 +38,7 @@ object Iterators {
   }
 
   implicit class RichObservable[T](origObs: Observable[T]) {
-    def toIterator(scheduler: Scheduler = Scheduler.Implicits.global): Iterator[T] =
+    def toIterator(scheduler: Scheduler = globalImplicitScheduler): Iterator[T] =
       new ObservableIterator(origObs)(scheduler)
 
     def sortedGroupBy[B](groupingFunc: T => B): Observable[(B, Seq[T])] =

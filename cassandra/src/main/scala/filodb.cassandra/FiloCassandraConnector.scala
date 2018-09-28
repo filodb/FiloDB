@@ -21,7 +21,7 @@ object FiloCassandraConnector {
 
 trait FiloCassandraConnector extends StrictLogging {
 
-  import monix.execution.Scheduler.Implicits.global
+  import filodb.core.GlobalScheduler._
 
   // Cassandra config with following keys:  keyspace, hosts, port, username, password
   def config: Config

@@ -12,9 +12,10 @@ import akka.util.Timeout
 import com.typesafe.config.{Config, ConfigFactory}
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
-import monix.execution.Scheduler
+import monix.execution.{Scheduler, UncaughtExceptionReporter}
 import monix.execution.misc.NonFatal
 
+import filodb.core.GlobalScheduler
 import filodb.core.store.MetaStore
 
 /** The base Coordinator Extension implementation providing standard ActorSystem startup.
@@ -56,8 +57,11 @@ final class FilodbCluster(val system: ExtendedActorSystem) extends Extension wit
 
   private val _clusterActor = new AtomicReference[Option[ActorRef]](None)
 
-  implicit lazy val ec = Scheduler.Implicits.global
-  lazy val ioPool = Scheduler.io(IOPoolName)
+  implicit lazy val ec = GlobalScheduler.globalImplicitScheduler
+
+  lazy val ioPool = Scheduler.io(name = IOPoolName,
+                                 reporter = UncaughtExceptionReporter(
+                                   logger.error("Uncaught Exception in FilodbCluster.ioPool", _)))
 
   /** Initializes columnStore and metaStore using the factory setting from config. */
   private lazy val factory = StoreFactory(settings, ioPool)

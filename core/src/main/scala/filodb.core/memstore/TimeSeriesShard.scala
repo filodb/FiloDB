@@ -10,7 +10,7 @@ import debox.Buffer
 import kamon.Kamon
 import kamon.metric.MeasurementUnit
 import monix.eval.Task
-import monix.execution.Scheduler
+import monix.execution.{Scheduler, UncaughtExceptionReporter}
 import monix.execution.atomic.AtomicBoolean
 import monix.reactive.Observable
 import org.jctools.maps.NonBlockingHashMapLong
@@ -200,7 +200,8 @@ class TimeSeriesShard(val dataset: Dataset,
 
   // Create a single-threaded scheduler just for ingestion.  Name the thread for ease of debugging
   // NOTE: to control intermixing of different Observables/Tasks in this thread, customize ExecutionModel param
-  val ingestSched = Scheduler.singleThread(s"ingestion-shard-$shardNum")
+  val ingestSched = Scheduler.singleThread(s"ingestion-shard-$shardNum",
+    reporter = UncaughtExceptionReporter(logger.error("Uncaught Exception in TimeSeriesShard.ingestSched", _)))
 
   private val blockMemorySize = storeConfig.shardMemSize
   private final val numGroups = storeConfig.groupsPerShard
@@ -222,7 +223,8 @@ class TimeSeriesShard(val dataset: Dataset,
                                                        storeConfig.numPagesPerBlock, chunkRetentionHours)
   private val blockFactoryPool = new BlockMemFactoryPool(blockStore, dataset.blockMetaSize)
 
-  private val queryScheduler = monix.execution.Scheduler.computation()
+  private val queryScheduler = monix.execution.Scheduler.computation(
+    reporter = UncaughtExceptionReporter(logger.error("Uncaught Exception in TimeSeriesShard.queryScheduler", _)))
 
   // Each shard has a single ingestion stream at a time.  This BlockMemFactory is used for buffer overflow encoding
   // strictly during ingest() and switchBuffers().
@@ -540,6 +542,7 @@ class TimeSeriesShard(val dataset: Dataset,
     indexRb.endRecord(false)
   }
 
+  // scalastyle:off method.length
   private def doFlushSteps(flushGroup: FlushGroup,
                            partitionIt: Iterator[TimeSeriesPartition]): Task[Response] = {
     val tracer = Kamon.buildSpan("chunk-flush-task-latency-after-retries")
@@ -583,11 +586,15 @@ class TimeSeriesShard(val dataset: Dataset,
       DataDropped
     }
     result.onComplete { _ =>
-      blockFactoryPool.release(blockHolder)
-      // Some partitions might be evictable, see if need to free write buffer memory
-      checkEnableAddPartitions()
-      tracer.finish()
-      updateGauges()
+      try {
+        blockFactoryPool.release(blockHolder)
+        // Some partitions might be evictable, see if need to free write buffer memory
+        checkEnableAddPartitions()
+        tracer.finish()
+        updateGauges()
+      } catch { case e: Throwable =>
+        logger.error("Error when wrapping up doFlushSteps", e)
+      }
     }
     Task.fromFuture(result)
   }

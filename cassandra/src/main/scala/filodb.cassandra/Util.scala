@@ -14,7 +14,7 @@ import filodb.core._
  * Utilities for dealing with Cassandra Java Driver
  */
 object Util {
-  import scala.concurrent.ExecutionContext.Implicits.global
+  import filodb.core.GlobalScheduler._
 
   implicit class ResultSetToResponse(f: Future[ResultSet]) {
     def toResponse(notAppliedResponse: Response = NotApplied): Future[Response] = {

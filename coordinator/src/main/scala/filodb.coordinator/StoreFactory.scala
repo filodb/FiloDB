@@ -58,6 +58,6 @@ class TimeSeriesNullStoreFactory(config: Config, scheduler: Scheduler) extends S
 // TODO: make the InMemoryMetaStore either distributed (using clustering to forward and distribute updates)
 // or, perhaps modify NodeCoordinator to not need metastore.
 object SingleJvmInMemoryStore {
-  import scala.concurrent.ExecutionContext.Implicits.global
+  import filodb.core.GlobalScheduler._
   lazy val metaStore = new InMemoryMetaStore
 }

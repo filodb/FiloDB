@@ -1,7 +1,8 @@
 package filodb.coordinator
 
 import com.typesafe.config.{Config, ConfigFactory}
-import monix.execution.{Scheduler => MonixScheduler}
+import com.typesafe.scalalogging.StrictLogging
+import monix.execution.{Scheduler => MonixScheduler, UncaughtExceptionReporter}
 
 /**
   * Loads the overall configuration in a specific order:
@@ -11,9 +12,10 @@ import monix.execution.{Scheduler => MonixScheduler}
   * - cluster-reference.conf
   * - all other reference.conf's
   */
-object GlobalConfig {
+object GlobalConfig extends StrictLogging {
 
-  val ioPool = MonixScheduler.io()
+  val ioPool = MonixScheduler.io(
+    reporter = UncaughtExceptionReporter(logger.error("Uncaught Exception in GlobalConfig.ioPool", _)))
 
   val systemConfig: Config = {
     ConfigFactory.invalidateCaches()

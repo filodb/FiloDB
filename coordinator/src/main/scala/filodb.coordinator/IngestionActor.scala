@@ -8,11 +8,11 @@ import scala.util.control.NonFatal
 import akka.actor.{ActorRef, Props}
 import akka.event.LoggingReceive
 import kamon.Kamon
-import monix.execution.{CancelableFuture, Scheduler}
+import monix.execution.CancelableFuture
 import monix.reactive.Observable
 import net.ceedubs.ficus.Ficus._
 
-import filodb.core.{DatasetRef, Iterators}
+import filodb.core.{DatasetRef, GlobalScheduler, Iterators}
 import filodb.core.memstore._
 import filodb.core.metadata.Dataset
 import filodb.core.store.StoreConfig
@@ -46,7 +46,6 @@ object IngestionActor {
   *
   * @param storeConfig IngestionConfig.storeConfig, the store section of the source configuration
   * @param statusActor the actor to which to forward ShardEvents for status updates
-  * @param sched a Scheduler for running ingestion stream Observables
   */
 private[filodb] final class IngestionActor(dataset: Dataset,
                                            memStore: MemStore,
@@ -69,7 +68,7 @@ private[filodb] final class IngestionActor(dataset: Dataset,
   // The only thing that flushSched really does is tie up all these Futures together.  Thus we use the global one.
   // TODO: re-examine doFlushSteps and thread usage in flush tasks.
   import context.dispatcher
-  val flushSched = Scheduler.Implicits.global
+  val flushSched = GlobalScheduler.globalImplicitScheduler
 
   // TODO: add and remove per-shard ingestion sources?
   // For now just start it up one time and kill the actor if it fails
@@ -176,7 +175,7 @@ private[filodb] final class IngestionActor(dataset: Dataset,
         if (source != NodeClusterActor.noOpSource) statusActor ! IngestionStopped(dataset.ref, shard)
         ingestionStream.teardown()
       })
-    } recover { case NonFatal(t) =>
+    } recover { case t: Throwable =>
       handleError(dataset.ref, shard, t)
     }
   }

@@ -112,7 +112,6 @@ TimeSeriesShard(dataset, storeConfig, shardNum, rawStore, metastore, evictionPol
     }).executeOn(ingestSched)
   }
 
-
   /**
    * Creates a Task which is meant ONLY TO RUN ON INGESTION THREAD
    * to create TSPartitions for partIDs found in Lucene but not in in-memory data structures
@@ -121,7 +120,7 @@ TimeSeriesShard(dataset, storeConfig, shardNum, rawStore, metastore, evictionPol
   private def createODPPartitionsTask(partIDs: Buffer[Int], callback: (Array[Byte], Int) => Unit):
   Task[Seq[TimeSeriesPartition]] =
     if (partIDs.nonEmpty) Task {
-      (partIDs.map { id =>
+      partIDs.map { id =>
         // for each partID: look up in partitions
         partitions.get(id) match {
           case TimeSeriesShard.OutOfMemPartition =>
@@ -139,7 +138,7 @@ TimeSeriesShard(dataset, storeConfig, shardNum, rawStore, metastore, evictionPol
             // NOTE: if no memory, then no partition!
           case p: TimeSeriesPartition => Some(p)
         }
-      }).toVector.flatten
+      }.toVector.flatten
     } else Task.now(Nil)
 
   def computeBoundingMethod(methods: Seq[ChunkScanMethod]): ChunkScanMethod = if (methods.isEmpty) {
