@@ -103,7 +103,7 @@ lazy val standalone = project
   .settings(assemblySettings: _*)
   .settings(libraryDependencies ++= standaloneDeps)
   .dependsOn(core, prometheus % "test->test", coordinator % "compile->compile; test->test",
-    cassandra, kafka, http, bootstrapper, tsgenerator % Test)
+    cassandra, kafka, http, bootstrapper, gateway % Test)
   .configs(MultiJvm)
 
 lazy val spark = project
@@ -128,7 +128,7 @@ lazy val jmh = project
   .settings(libraryDependencies ++= jmhDeps)
   .settings(publish := {})
   .enablePlugins(JmhPlugin)
-  .dependsOn(core % "compile->compile; compile->test", spark, tsgenerator)
+  .dependsOn(core % "compile->compile; compile->test", spark, gateway)
 
 lazy val stress = project
   .in(file("stress"))
@@ -138,13 +138,14 @@ lazy val stress = project
   .settings(assemblyExcludeScala: _*)
   .dependsOn(spark)
 
-lazy val tsgenerator = project
-  .in(file("tsgenerator"))
+lazy val gateway = project
+  .in(file("gateway"))
   .settings(commonSettings: _*)
-  .settings(name := "tsgenerator")
-  .settings(libraryDependencies ++= tsgeneratorDeps)
-  .settings(tsgeneratorAssemblySettings: _*)
-  .dependsOn(coordinator, prometheus)
+  .settings(name := "gateway")
+  .settings(libraryDependencies ++= gatewayDeps)
+  .settings(gatewayAssemblySettings: _*)
+  .dependsOn(coordinator % "compile->compile; test->test",
+             prometheus)
 
 // Zookeeper pulls in slf4j-log4j12 which we DON'T want
 val excludeZK = ExclusionRule(organization = "org.apache.zookeeper")
@@ -232,6 +233,7 @@ lazy val coordDeps = commonDeps ++ Seq(
   "com.typesafe.akka"    %% "akka-cluster"      % akkaVersion withJavadoc(),
   "com.github.romix.akka" %% "akka-kryo-serialization" % "0.5.0" excludeAll(excludeMinlog, excludeOldLz4),
   "de.javakaffee"        % "kryo-serializers"      % "0.42" excludeAll(excludeMinlog),
+  "io.kamon"             %% "kamon-prometheus"  % "1.1.1",
   // Redirect minlog logs to SLF4J
    "com.dorkbox"         % "MinLog-SLF4J"       % "1.12",
   "com.opencsv"          % "opencsv"            % "3.3",
@@ -258,8 +260,8 @@ lazy val promDeps = Seq(
   "com.google.protobuf" % "protobuf-java" % "2.5.0"
 )
 
-lazy val tsgeneratorDeps = Seq(
-  logbackDep,
+lazy val gatewayDeps = commonDeps ++ Seq(
+  scalaxyDep,
   "io.monix" %% "monix-kafka-1x" % monixKafkaVersion,
   "org.rogach" %% "scallop" % "3.1.1"
 )
@@ -566,8 +568,8 @@ lazy val cliAssemblySettings = assemblySettings ++ Seq(
 )
 
 // builds timeseries-gen as a fat jar so it can be executed for development test scenarios
-lazy val tsgeneratorAssemblySettings = assemblySettings ++ Seq(
-  assemblyJarName in assembly := s"tsgenerator-${version.value}"
+lazy val gatewayAssemblySettings = assemblySettings ++ Seq(
+  assemblyJarName in assembly := s"gateway-${version.value}"
 )
 
 lazy val publishSettings = Seq(

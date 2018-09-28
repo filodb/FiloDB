@@ -12,6 +12,7 @@
 - [Spark](#spark)
 - [HTTP](#http)
 - [Standalone](#standalone)
+- [Gateway](#gateway)
 - [CLI](#cli)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
@@ -101,9 +102,15 @@ Contains the Spark input source for ingesting and querying data from FiloDB.
 
 ### HTTP
 
+Contains the FiloDB HTTP API routes
+
 ### Standalone
 
 The standalone module is used for FiloDB real-time direct ingestion (from Kafka) and low-latency querying without Spark, for metrics and event use cases.
+
+### Gateway
+
+Gateway module contains logic to accept input metrics/data using different formats such as Influx Line Protocol, Graphite, etc. and forward it to Kafka/rest of FiloDB, as well as to generate time series data for testing.
 
 ### CLI
 

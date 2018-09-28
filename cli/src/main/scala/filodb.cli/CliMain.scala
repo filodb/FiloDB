@@ -100,6 +100,7 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
   }
 
   def main(args: Arguments): Unit = {
+    val spread = config.getInt("default-spread")
     try {
       val timeout = args.timeoutSeconds.seconds
       args.command match {
@@ -184,7 +185,7 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
             require(args.host.nonEmpty && args.dataset.nonEmpty, "--host and --dataset must be defined")
             val remote = Client.standaloneClient(system, args.host.get, args.port)
             val options = QOptions(args.limit, args.sampleLimit, args.everyNSeconds.map(_.toInt),
-              timeout, args.shards.map(_.map(_.toInt)))
+              timeout, args.shards.map(_.map(_.toInt)), spread)
             parsePromQuery2(remote, query, args.dataset.get,
               QueryParams(args.start, args.step, args.end), options)
           }.orElse {
@@ -305,7 +306,8 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
 
   final case class QOptions(limit: Int, sampleLimit: Int,
                             everyN: Option[Int], timeout: FiniteDuration,
-                            shardOverrides: Option[Seq[Int]])
+                            shardOverrides: Option[Seq[Int]],
+                            spread: Int)
 
   def parsePromQuery2(client: LocalClient, query: String, dataset: String,
                       queryParams: QueryParams,
@@ -316,9 +318,9 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
 
   def executeQuery2(client: LocalClient, dataset: String, plan: LogicalPlan2, options: QOptions): Unit = {
     val ref = DatasetRef(dataset)
-    val qOpts = QueryCommands.QueryOptions(itemLimit = options.limit,
-      queryTimeoutSecs = options.timeout.toSeconds.toInt,
-      shardOverrides = options.shardOverrides)
+    val qOpts = QueryCommands.QueryOptions(options.spread, options.limit)
+                             .copy(queryTimeoutSecs = options.timeout.toSeconds.toInt,
+                                   shardOverrides = options.shardOverrides)
     println(s"Sending query command to server for $ref with options $qOpts...")
     println(s"Query Plan:\n$plan")
     options.everyN match {

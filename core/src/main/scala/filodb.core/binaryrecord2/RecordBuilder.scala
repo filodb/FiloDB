@@ -191,6 +191,10 @@ final class RecordBuilder(memFactory: MemFactory,
     endMap()
   }
 
+  final def updatePartitionHash(newHash: Int): Unit = {
+    recHash = combineHash(recHash, newHash)
+  }
+
   /**
    * Low-level function to start adding a map field.  Must be followed by addMapKeyValue() in sorted order of
    * keys (UTF8 byte sort).  Might want to use one of the higher level functions.
@@ -208,30 +212,53 @@ final class RecordBuilder(memFactory: MemFactory,
    * Adds a single key-value pair to the map field started by startMap().
    * Takes care of matching and translating predefined keys into short codes.
    * Keys must be < 60KB and values must be < 64KB
+   * Hash is not computed or added for you - it must be separately added by you!
    */
-  final def addMapKeyValue(key: Array[Byte], value: Array[Byte]): Unit = {
+  final def addMapKeyValue(keyBytes: Array[Byte], keyOffset: Int, keyLen: Int,
+                           valueBytes: Array[Byte], valueOffset: Int, valueLen: Int,
+                           keyHash: Int = 7): Unit = {
     require(mapOffset > curRecordOffset, "illegal state, did you call startMap() first?")
     // check key size, must be < 60KB
-    require(key.size < 60*1024, s"key is too large: ${key.size} bytes")
-    require(value.size < 64*1024, s"value is too large: ${key.size} bytes")
+    require(keyLen < 60*1024, s"key is too large: ${keyLen} bytes")
+    require(valueLen < 64*1024, s"value is too large: $valueLen bytes")
 
     // Check if key is a predefined key
-    val predefKeyNum = schema.predefKeyNumMap.getOrElse(RecordSchema.makeKeyKey(key), -1)
-    val keyValueSize = if (predefKeyNum >= 0) { value.size + 4 } else { key.size + value.size + 4 }
+    val predefKeyNum =  // but if there are no predefined keys, skip the cost of hashing the key
+      if (schema.predefinedKeys.isEmpty) { -1 }
+      else {
+        val keyKey = RecordSchema.makeKeyKey(keyBytes, keyOffset, keyLen, keyHash)
+        schema.predefKeyNumMap.getOrElse(keyKey, -1)
+      }
+    val keyValueSize = if (predefKeyNum >= 0) { valueLen + 4 } else { keyLen + valueLen + 4 }
     requireBytes(keyValueSize)
     if (predefKeyNum >= 0) {
       setShort(curBase, curRecEndOffset, (0xF000 | predefKeyNum).toShort)
       curRecEndOffset += 2
     } else {
-      UTF8StringMedium.copyByteArrayTo(key, curBase, curRecEndOffset)
-      curRecEndOffset += key.size + 2
+      UTF8StringMedium.copyByteArrayTo(keyBytes, keyOffset, keyLen, curBase, curRecEndOffset)
+      curRecEndOffset += keyLen + 2
     }
-    UTF8StringMedium.copyByteArrayTo(value, curBase, curRecEndOffset)
-    curRecEndOffset += value.size + 2
+    UTF8StringMedium.copyByteArrayTo(valueBytes, valueOffset, valueLen, curBase, curRecEndOffset)
+    curRecEndOffset += valueLen + 2
 
     // update map length, BR length
     setInt(curBase, mapOffset, (curRecEndOffset - mapOffset - 4).toInt)
     setInt(curBase, curRecordOffset, (curRecEndOffset - curRecordOffset - 4).toInt)
+  }
+
+  final def addMapKeyValue(key: Array[Byte], value: Array[Byte]): Unit =
+    addMapKeyValue(key, 0, key.size, value, 0, value.size)
+
+  /**
+   * An alternative to above for adding a known key with precomputed key hash
+   * along with a value, to the map, while updating the hash too.
+   * Saves computing the key hash twice.
+   */
+  final def addMapKeyValueHash(keyBytes: Array[Byte], keyHash: Int,
+                               valueBytes: Array[Byte], valueOffset: Int, valueLen: Int): Unit = {
+    addMapKeyValue(keyBytes, 0, keyBytes.size, valueBytes, valueOffset, valueLen, keyHash)
+    val valueHash = BinaryRegion.hasher32.hash(valueBytes, valueOffset, valueLen, BinaryRegion.Seed)
+    updatePartitionHash(combineHash(keyHash, valueHash))
   }
 
   /**

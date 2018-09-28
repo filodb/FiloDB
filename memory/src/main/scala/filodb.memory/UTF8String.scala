@@ -51,6 +51,11 @@ object UTF8StringMedium extends BinaryRegion {
     UnsafeUtils.setShort(dest, destOffset, bytes.size.toShort)
   }
 
+  def copyByteArrayTo(bytes: Array[Byte], byteIndex: Int, len: Int, dest: Any, destOffset: Long): Unit = {
+    UnsafeUtils.unsafe.copyMemory(bytes, UnsafeUtils.arayOffset + byteIndex, dest, destOffset + lenBytes, len)
+    UnsafeUtils.setShort(dest, destOffset, len.toShort)
+  }
+
   /**
    * Creates a native memory UTF8StringMedium value class.
    * @param factory a MemFactory that uses native memory, NOT the onHeapFactory

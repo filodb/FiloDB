@@ -1,4 +1,4 @@
-package filodb.timeseries
+package filodb.gateway
 
 import java.lang.{Long => JLong}
 
@@ -21,13 +21,14 @@ class KafkaContainerSink(producerCfg: KafkaProducerConfig, topicName: String) ex
    * @param containerStream an Observable of containers
    */
   // TODO: abstract out some of this stuff so we can accept records of different schemas
-  def writeTask(containerStream: Observable[(Int, Array[Byte])])
+  def writeTask(containerStream: Observable[(Int, Seq[Array[Byte]])])
                (implicit io: SchedulerService): Task[Unit] = {
     val producer = KafkaProducerSink[JLong, Array[Byte]](producerCfg, io)
 
-    containerStream.map { case (shard, bytes) =>
-                     new ProducerRecord[JLong, Array[Byte]](topicName, shard, shard.toLong: JLong, bytes)
-                   }.bufferIntrospective(5)
-                   .consumeWith(producer)
+    containerStream.map { case (shard, seqOfBytes) =>
+                     seqOfBytes.map { bytes =>
+                       new ProducerRecord[JLong, Array[Byte]](topicName, shard, shard.toLong: JLong, bytes)
+                     }
+                   }.consumeWith(producer)
   }
 }

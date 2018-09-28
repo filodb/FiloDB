@@ -7,4 +7,6 @@ class HttpSettings(config: Config) {
   lazy val httpServerBindPort = config.getInt("filodb.http.bind-port")
   lazy val httpServerStartTimeout = config.getDuration("filodb.http.start-timeout")
 
+  lazy val queryDefaultSpread = config.getInt("filodb.default-spread")
+  lazy val querySampleLimit = config.getInt("filodb.query.sample-limit")
 }

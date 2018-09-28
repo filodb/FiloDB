@@ -19,14 +19,18 @@ import filodb.core.DatasetRef
 import filodb.prometheus.ast.QueryParams
 import filodb.prometheus.parse.Parser
 import filodb.prometheus.query.PrometheusModel.Sampl
-import filodb.query.QueryError
+import filodb.query.{LogicalPlan, QueryError, QueryResult}
 
-class PrometheusApiRoute(nodeCoord: ActorRef)(implicit am: ActorMaterializer) extends FiloRoute with StrictLogging {
+class PrometheusApiRoute(nodeCoord: ActorRef, settings: HttpSettings)(implicit am: ActorMaterializer)
+           extends FiloRoute with StrictLogging {
   import FailFastCirceSupport._
   import io.circe.generic.auto._
   import PromCirceSupport._ // needed to override Sampl case class Encoder.
   import filodb.coordinator.client.Client._
   import filodb.prometheus.query.PrometheusModel._
+
+  val queryOptions = QueryOptions(spreadFunc = { _ => settings.queryDefaultSpread },
+                                  itemLimit = settings.querySampleLimit)
 
   val route = pathPrefix( "promql" / Segment) { dataset =>
     // Path: /promql/<datasetName>/api/v1/query_range
@@ -37,12 +41,7 @@ class PrometheusApiRoute(nodeCoord: ActorRef)(implicit am: ActorMaterializer) ex
       get {
         parameter('query.as[String], 'start.as[Double], 'end.as[Double], 'step.as[Int]) { (query, start, end, step) =>
           val logicalPlan = Parser.queryRangeToLogicalPlan(query, new QueryParams(start.toLong, step, end.toLong))
-          onSuccess(asyncAsk(nodeCoord, LogicalPlan2Query(DatasetRef.fromDotString(dataset), logicalPlan))) {
-            case qr: filodb.query.QueryResult => complete(toPromSuccessResponse(qr))
-            case qr: filodb.query.QueryError  => complete(toPromErrorResponse(qr))
-            case UnknownDataset               => complete(Codes.NotFound ->
-                                                  ErrorResponse("badQuery", s"Dataset $dataset is not registered"))
-          }
+          askQueryAndRespond(dataset, logicalPlan)
         }
       }
     } ~
@@ -54,12 +53,7 @@ class PrometheusApiRoute(nodeCoord: ActorRef)(implicit am: ActorMaterializer) ex
       get {
         parameter('query.as[String], 'time.as[Double]) { (query, time) =>
           val logicalPlan = Parser.queryToLogicalPlan(query, time.toLong)
-          onSuccess(asyncAsk(nodeCoord, LogicalPlan2Query(DatasetRef.fromDotString(dataset), logicalPlan))) {
-            case qr: filodb.query.QueryResult => complete(toPromSuccessResponse(qr))
-            case qr: filodb.query.QueryError  => complete(toPromErrorResponse(qr))
-            case UnknownDataset               => complete(Codes.NotFound ->
-                                                   ErrorResponse("badQuery", s"Dataset $dataset is not registered"))
-          }
+          askQueryAndRespond(dataset, logicalPlan)
         }
       }
     } ~
@@ -82,7 +76,7 @@ class PrometheusApiRoute(nodeCoord: ActorRef)(implicit am: ActorMaterializer) ex
             val readReq = ReadRequest.parseFrom(Snappy.uncompress(bytes.toArray))
             val asks = toFiloDBLogicalPlans(readReq).map { logicalPlan =>
               asyncAsk(nodeCoord, LogicalPlan2Query(DatasetRef.fromDotString(dataset), logicalPlan,
-                QueryOptions(itemLimit = 200)))
+                QueryOptions(itemLimit = settings.querySampleLimit)))
             }
             Future.sequence(asks)
           }
@@ -103,6 +97,16 @@ class PrometheusApiRoute(nodeCoord: ActorRef)(implicit am: ActorMaterializer) ex
           }
         }
       }
+    }
+  }
+
+  private def askQueryAndRespond(dataset: String, logicalPlan: LogicalPlan) = {
+    val command = LogicalPlan2Query(DatasetRef.fromDotString(dataset), logicalPlan)
+    onSuccess(asyncAsk(nodeCoord, command)) {
+      case qr: QueryResult => complete(toPromSuccessResponse(qr))
+      case qr: QueryError => complete(toPromErrorResponse(qr))
+      case UnknownDataset => complete(Codes.NotFound ->
+        ErrorResponse("badQuery", s"Dataset $dataset is not registered"))
     }
   }
 }

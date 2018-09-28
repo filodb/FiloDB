@@ -137,6 +137,12 @@ class DatasetSpec extends FunSpec with Matchers {
       val infos2 = ds.infosFromIDs(Seq(PartColStartIndex, 1))
       infos2 shouldEqual Seq(ColumnInfo("part", StringColumn), ColumnInfo("last", StringColumn))
     }
+
+    it("should compute nonMetricShardColumns correctly") {
+      val options = DatasetOptions.DefaultOptions.copy(shardKeyColumns = Seq("job", "__name__"))
+      options.nonMetricShardColumns shouldEqual Seq("job")
+      options.nonMetricShardKeyBytes.size shouldEqual 1
+    }
   }
 
   describe("Dataset serialization") {

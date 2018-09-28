@@ -195,6 +195,8 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
       // Now check amount of space left in container, container bytes etc
       builder.allContainers should have length (1)
       builder.allContainers.head.numBytes shouldEqual (4 + 64*10)
+      builder.allContainers.head.isEmpty shouldEqual false
+      builder.currentContainer.get.isEmpty shouldEqual false
       builder.allContainers.head.countRecords shouldEqual 10
 
       val byteArrays = builder.optimalContainerBytes(reset = true)
@@ -203,6 +205,8 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
       // Check that we still have one container but it's empty
       builder.allContainers should have length (1)
       builder.allContainers.head.numBytes shouldEqual 4
+      builder.allContainers.head.isEmpty shouldEqual true
+      builder.currentContainer.get.isEmpty shouldEqual true
 
       // Add some more records
       // CHeck amount of space left, should be same as before

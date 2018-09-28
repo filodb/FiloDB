@@ -101,9 +101,10 @@ class QueryOnDemandBenchmark extends StrictLogging {
                     .mapAsync(numShards) { groupedStream =>
                       val shard = groupedStream.key
                       println(s"Starting ingest on shard $shard...")
-                      val shardStream = groupedStream.zipWithIndex.map { case ((_, bytes), idx) =>
-                        // println(s"   XXX: -->  Got ${bytes.size} bytes in shard $shard")
-                        SomeData(RecordContainer(bytes), idx)
+                      val shardStream = groupedStream.zipWithIndex.flatMap { case ((_, bytes), idx) =>
+                        // println(s"   XXX: -->  Got ${bytes.map(_.size).sum} bytes in shard $shard")
+                        val data = bytes.map { array => SomeData(RecordContainer(array), idx) }
+                        Observable.fromIterable(data)
                       }
                       // Just do a single flush at the end for all groups
                       val combinedStream: Observable[DataOrCommand] = shardStream ++ FlushStream.allGroups(4)

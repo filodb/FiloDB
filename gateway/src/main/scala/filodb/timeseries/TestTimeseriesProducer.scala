@@ -18,6 +18,7 @@ import org.rogach.scallop._
 import filodb.coordinator.ShardMapper
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.Dataset
+import filodb.gateway.KafkaContainerSink
 import filodb.memory.MemFactory
 import filodb.prometheus.FormatConversion
 
@@ -157,7 +158,7 @@ object TestTimeseriesProducer extends StrictLogging {
                           numShards: Int,
                           shardKeys: Set[String],
                           flushInterval: FiniteDuration = 1.second)
-                         (implicit io: Scheduler): Observable[(Int, Array[Byte])] = {
+                         (implicit io: Scheduler): Observable[(Int, Seq[Array[Byte]])] = {
     val builders = (0 until numShards).map(s => new RecordBuilder(MemFactory.onHeapFactory, dataset.ingestionSchema))
                                       .toArray
     val shardMapper = new ShardMapper(numShards)
@@ -209,15 +210,15 @@ object TestTimeseriesProducer extends StrictLogging {
   }
   // scalastyle:on method.length
 
-  private def flushBuilders(builders: Array[RecordBuilder]): Seq[(Int, Array[Byte])] = {
-    builders.zipWithIndex.flatMap { case (builder, shard) =>
+  private def flushBuilders(builders: Array[RecordBuilder]): Seq[(Int, Seq[Array[Byte]])] = {
+    builders.zipWithIndex.map { case (builder, shard) =>
       logger.debug(s"Flushing shard $shard with ${builder.allContainers.length} containers")
 
       // get optimal byte arrays out of containers and reset builder so it can keep going
       if (builder.allContainers.nonEmpty) {
-        builder.optimalContainerBytes(true).map((shard, _))
+        (shard, builder.optimalContainerBytes(true))
       } else {
-        Nil
+        (0, Nil)
       }
     }
   }

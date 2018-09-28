@@ -33,7 +33,7 @@ class FiloHttpServer(actorSystem: ActorSystem) extends StrictLogging {
     val filoRoutes: List[FiloRoute] = List(AdminRoutes,
                                            new ClusterApiRoute(clusterProxy),
                                            new HealthRoute(coordinatorRef),
-                                           new PrometheusApiRoute(coordinatorRef))
+                                           new PrometheusApiRoute(coordinatorRef, settings))
     val reduced = filoRoutes.foldLeft[Route](reject)((acc, r) => r.route ~ acc)
     val finalRoute = reduced ~ externalRoutes
     val bindingFuture = Http().bindAndHandle(finalRoute,

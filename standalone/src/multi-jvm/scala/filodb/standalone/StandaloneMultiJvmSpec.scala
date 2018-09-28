@@ -49,7 +49,7 @@ abstract class StandaloneMultiJvmSpec(config: MultiNodeConfig) extends MultiNode
   val removedDuration = longDuration * 8
 
   // Ingestion Source section
-  val source = ConfigFactory.parseFile(new java.io.File("conf/timeseries-dev-source.conf"))
+  val source = ConfigFactory.parseFile(new java.io.File("conf/timeseries-standalonetest-source.conf"))
   val dataset = DatasetRef(source.as[String]("dataset"))
   val numShards = source.as[Int]("num-shards")
   val resourceSpec = DatasetResourceSpec(numShards, source.as[Int]("min-num-nodes"))

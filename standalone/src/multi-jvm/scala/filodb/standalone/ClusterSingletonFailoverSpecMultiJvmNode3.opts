@@ -1,1 +1,1 @@
--Dmultijvm.node=sing-fail-node3 -Dakka.remote.netty.tcp.port=0 -Dfilodb.http.bind-port=0 -Dconfig.file=conf/timeseries-filodb-server.conf -Dlogback.configurationFile=logback-multijvm-test.xml
+-Dmultijvm.node=sing-fail-node3 -Dakka.remote.netty.tcp.port=0 -Dfilodb.http.bind-port=0 -Dconfig.file=conf/timeseries-filodb-server.conf -Dlogback.configurationFile=logback-multijvm-test.xml -Dkamon.prometheus.embedded-server.port=0

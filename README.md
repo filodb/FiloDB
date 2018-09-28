@@ -30,6 +30,7 @@ See [architecture](doc/architecture.md) and [datasets and reading](doc/datasets_
 - [Pre-requisites](#pre-requisites)
 - [Getting Started](#getting-started)
 - [End to End Kafka Developer Setup](#end-to-end-kafka-developer-setup)
+  - [Using the Gateway to stream Application Metrics](#using-the-gateway-to-stream-application-metrics)
     - [Multiple Servers](#multiple-servers)
     - [Local Scale Testing](#local-scale-testing)
 - [Introduction to FiloDB Data Modelling](#introduction-to-filodb-data-modelling)
@@ -142,7 +143,7 @@ bin/cassandra
 
 Build the required projects
 ```
-sbt standalone/assembly cli/assembly tsgenerator/assembly
+sbt standalone/assembly cli/assembly gateway/assembly
 ```
 
 First set up the dataset. This should create the keyspaces and tables in Cassandra. 
@@ -168,7 +169,7 @@ Verify this message `NodeClusterActor Actor[akka://filo-standalone/user/node/sin
 Now run the time series generator. This will ingest 20 time series (the default) with 100 samples each into the Kafka topic with current timestamps.  The required argument is the path to the source config.  Use `--help` for all the options.
 
 ```
-java -cp tsgenerator/target/scala-2.11/tsgenerator-*-SNAPSHOT filodb.timeseries.TestTimeseriesProducer -c conf/timeseries-dev-source.conf
+java -cp gateway/target/scala-2.11/gateway-*-SNAPSHOT filodb.timeseries.TestTimeseriesProducer -c conf/timeseries-dev-source.conf
 ```
 
 At this point, you should be able to confirm such a message in the server logs: `KAMON counter name=memstore-rows-ingested count=4999`
@@ -185,6 +186,21 @@ To stop the dev server. Note that this will stop all the FiloDB servers if multi
 ```
 ./filodb-dev-stop.sh
 ```
+
+### Using the Gateway to stream Application Metrics
+
+FiloDB includes a Gateway server that listens to application metrics and data on a TCP port, converts the data to its internal format, shards it properly and sends it Kafka.
+
+**STATUS**: Currently the only supported format is [Influx Line Protocol](https://docs.influxdata.com/influxdb/v1.6/write_protocols/line_protocol_tutorial/).  The only tested configuration is using Telegraf with a Prometheus endpoint source and a socket writer using ILP protocol.
+
+The following will scrape metrics from FiloDB using its Prometheus metrics endpoint, and forward it to Kafka to be queried by FiloDB itself  :)
+
+1. Make sure the above steps are followed for setting up and starting FiloDB, configuring datasets and Kafka topics.
+2. Download [Telegraf](https://github.com/influxdata/telegraf)
+3. Start the FiloDB gateway:  `./dev-gateway.sh`
+3. Start Telegraf using the config file `conf/telegraf.conf` : `telegraf --config conf/telegraf.conf`.  This config file scrapes from a Prom endpoint at port 9095 and forwards it using ILP format to a TCP socket at 8007, which is the gateway default
+
+Now, metrics from the application having a Prom endpoint at port 9095 will be streamed into Kafka and FiloDB.
 
 #### Multiple Servers
 
@@ -250,7 +266,7 @@ Now if you curl the cluster status you should see 128 shards which are slowly tu
 Generate records:
 
 ```
-java -cp tsgenerator/target/scala-2.11/tsgenerator-*.telemetry-SNAPSHOT filodb.timeseries.TestTimeseriesProducer -c conf/timeseries-128shards-source.conf -p 5000
+java -cp gateway/target/scala-2.11/gateway-*.telemetry-SNAPSHOT filodb.timeseries.TestTimeseriesProducer -c conf/timeseries-128shards-source.conf -p 5000
 ```
 
 ## Introduction to FiloDB Data Modelling
@@ -700,9 +716,12 @@ FiloDB uses [Kamon](http://kamon.io) for metrics and Akka/Futures/async tracing.
 
 ### Metrics Sinks
 
-* statsd sink - this is packaged into FiloDB's spark module (but not the CLI module) by default.  All you need to do is stand up [statsd](https://github.com/etsy/statsd), [Statsite](http://armon.github.io/statsite/), or equivalent daemon.  See the Kamon [Statsd module](http://kamon.io/backends/statsd/) guide for configuration.
-* Kamon metrics logger - this is part of the coordinator module and will log all metrics (including segment trace metrics) at every Kamon tick interval, which defaults to 10 seconds.  It is disabled by default but could be enabled with `--conf spark.filodb.metrics-logger.enabled=true` or changing `filodb.metrics-logger.enabled` in your conf file.  Also, which metrics to log including pattern matching on names can be configured.
-* Kamon trace logger - this logs detailed trace information on segment appends and is always on if detailed tracing is on.
+Kamon metrics sinks are configured using the config key `kamon.reporters`.  For an example see `conf/timeseries-filodb-server.conf`.  Simply list the sinks/reporters to enable in that key.  See the Kamon [docs for Reporters](https://kamon.io/documentation/1.x/reporters/prometheus/) for more info and config options on each one.  Here are some possible values for reporters:
+
+* `kamon.prometheus.PrometheusReporter` - this exposes a Prometheus read endpoint at port 9095 by default.  Easily connect this to a Prometheus server, or feed the metrics back into FiloDB itself or many other sinks using Influx [Telegraf](https://github.com/influxdata/telegraf)
+* `kamon.zipkin.ZipkinReporter` - reports trace spans to a Zipkin server
+* `filodb.coordinator.KamonMetricsLogReporter` - this is part of the coordinator module and will log all metrics (including segment trace metrics) at every Kamon tick interval, which defaults to 10 seconds.  Which metrics to log including pattern matching on names can be configured.
+* `filodb.coordinator.KamonSpanLogReporter` - logs traces.  Super useful to debug timing and flow for queries and chunk writes.  Logging every trace might be really expensive; you can toggle tracing probability via the `kamon.trace` config section - see `conf/timeseries-filodb-server.conf`.
 
 ### Metrics Configuration
 

@@ -12,7 +12,10 @@ import filodb.memory.format.UnsafeUtils
  * Examples of their use are for UTF8Strings and BinaryRecords.
  */
 object BinaryRegion {
+  import UnsafeUtils._
+
   // NOTE: fastestInstance sometimes returns JNI lib, which seems much slower for shorter strings
+  // NOTE2: According to XXHash documentation the hash method is thread safe.
   val xxhashFactory = XXHashFactory.fastestJavaInstance
   val hasher32 = xxhashFactory.hash32
   val hasher64 = xxhashFactory.hash64
@@ -33,6 +36,16 @@ object BinaryRegion {
     case a: Array[Byte] => hash32(a)
     case UnsafeUtils.ZeroPointer => hasher32.hash(UnsafeUtils.asDirectBuffer(offset, len), Seed)
   }
+
+  /**
+   * Returns true if the source byte array is equal to the destination byte array, at the given
+   * index and # of bytes into the source array.  Destination is compared whole.
+   */
+  def equalBytes(source: Array[Byte], srcIndex: Int, srcNumBytes: Int, dest: Array[Byte]): Boolean =
+    dest.size == srcNumBytes && equate(dest, arayOffset, source, srcIndex + arayOffset, srcNumBytes)
+
+  def copyArray(source: Array[Byte], dest: Array[Byte], destOffset: Int): Unit =
+    System.arraycopy(source, 0, dest, destOffset, source.size)
 
   // 64-bit pointer to native/offheap memory
   type NativePointer = Long

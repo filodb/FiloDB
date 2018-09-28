@@ -84,9 +84,10 @@ class QueryInMemoryBenchmark extends StrictLogging {
                     .mapAsync(numShards) { groupedStream =>
                       val shard = groupedStream.key
                       println(s"Starting ingest on shard $shard...")
-                      val shardStream = groupedStream.zipWithIndex.map { case ((_, bytes), idx) =>
-                        // println(s"   XXX: -->  Got ${bytes.size} bytes in shard $shard")
-                        SomeData(RecordContainer(bytes), idx)
+                      val shardStream = groupedStream.zipWithIndex.flatMap { case ((_, bytes), idx) =>
+                        // println(s"   XXX: -->  Got ${bytes.map(_.size).sum} bytes in shard $shard")
+                        val data = bytes.map { array => SomeData(RecordContainer(array), idx) }
+                        Observable.fromIterable(data)
                       }
                       Task.fromFuture(
                         cluster.memStore.ingestStream(dataset.ref, shard, shardStream, global) {

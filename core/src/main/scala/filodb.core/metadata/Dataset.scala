@@ -10,8 +10,8 @@ import filodb.core._
 import filodb.core.binaryrecord2.{RecordSchema => RecordSchema2, _}
 import filodb.core.query.ColumnInfo
 import filodb.core.store.ChunkSetInfo
+import filodb.memory.{BinaryRegion, MemFactory}
 import filodb.memory.format.{BinaryVector, RowReader, TypedIterator}
-import filodb.memory.MemFactory
 
 /**
  * A dataset describes the schema (column name & type) and distribution for a stream/set of data.
@@ -144,6 +144,8 @@ final case class Dataset(name: String,
 case class DatasetOptions(shardKeyColumns: Seq[String],
                           metricColumn: String,
                           valueColumn: String,
+                          // TODO: deprecate these options once we move all input to Telegraf/Influx
+                          // They are needed only to differentiate raw Prometheus-sourced data
                           ignoreShardKeyColumnSuffixes: Map[String, Seq[String]] = Map.empty,
                           ignoreTagsOnPartitionKeyHash: Seq[String] = Nil) {
   override def toString: String = {
@@ -157,6 +159,13 @@ case class DatasetOptions(shardKeyColumns: Seq[String],
     val config = ConfigFactory.parseMap(map.asJava)
     config.root.render(ConfigRenderOptions.concise)
   }
+
+  val nonMetricShardColumns = shardKeyColumns.filterNot(_ == metricColumn)
+  val nonMetricShardKeyBytes = nonMetricShardColumns.map(_.getBytes).toArray
+  val nonMetricShardKeyHash = nonMetricShardKeyBytes.map(BinaryRegion.hash32)
+
+  val metricBytes = metricColumn.getBytes
+  val metricHash = BinaryRegion.hash32(metricBytes)
 }
 
 object DatasetOptions {

@@ -302,6 +302,12 @@ object RecordSchema {
     (UnsafeUtils.getInt(strBytes, UnsafeUtils.arayOffset).toLong << 32) | hash
   }
 
+  private[binaryrecord2] def makeKeyKey(strBytes: Array[Byte], index: Int, len: Int, keyHash: Int): Long = {
+    val hash = if (keyHash != 7) { keyHash }
+               else { BinaryRegion.hasher32.hash(strBytes, index, len, BinaryRegion.Seed) }
+    (UnsafeUtils.getInt(strBytes, index + UnsafeUtils.arayOffset).toLong << 32) | hash
+  }
+
   /**
    * Create an "ingestion" RecordSchema with the data columns followed by the partition columns.
    */
