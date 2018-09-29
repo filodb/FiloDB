@@ -2,7 +2,7 @@ package filodb.core.memstore
 
 import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.concurrent.duration._
-import scala.util.Random
+import scala.util.{Random, Try}
 
 import com.googlecode.javaewah.{EWAHCompressedBitmap, IntIterator}
 import com.typesafe.scalalogging.StrictLogging
@@ -146,7 +146,7 @@ object PartitionIterator {
   * @param storeConfig the store portion of the sourceconfig, not the global FiloDB application config
   */
 class TimeSeriesShard(val dataset: Dataset,
-                      storeConfig: StoreConfig,
+                      val storeConfig: StoreConfig,
                       val shardNum: Int,
                       colStore: ColumnStore,
                       metastore: MetaStore,
@@ -220,16 +220,13 @@ class TimeSeriesShard(val dataset: Dataset,
 
   // The off-heap block store used for encoded chunks
   private val blockStore = new PageAlignedBlockManager(blockMemorySize, shardStats.memoryStats, reclaimListener,
-                                                       storeConfig.numPagesPerBlock, chunkRetentionHours)
+                                                       storeConfig.numPagesPerBlock)
   private val blockFactoryPool = new BlockMemFactoryPool(blockStore, dataset.blockMetaSize)
-
-  private val queryScheduler = monix.execution.Scheduler.computation(
-    reporter = UncaughtExceptionReporter(logger.error("Uncaught Exception in TimeSeriesShard.queryScheduler", _)))
 
   // Each shard has a single ingestion stream at a time.  This BlockMemFactory is used for buffer overflow encoding
   // strictly during ingest() and switchBuffers().
   private[core] val overflowBlockFactory = new BlockMemFactory(blockStore, None, dataset.blockMetaSize, true)
-  val partitionMaker = new DemandPagedChunkStore(this, blockStore, chunkRetentionHours, pagingEnabled)(queryScheduler)
+  val partitionMaker = new DemandPagedChunkStore(this, blockStore, chunkRetentionHours)
 
   /**
     * Unencoded/unoptimized ingested data is stored in buffers that are allocated from this off-heap pool
@@ -542,7 +539,6 @@ class TimeSeriesShard(val dataset: Dataset,
     indexRb.endRecord(false)
   }
 
-  // scalastyle:off method.length
   private def doFlushSteps(flushGroup: FlushGroup,
                            partitionIt: Iterator[TimeSeriesPartition]): Task[Response] = {
     val tracer = Kamon.buildSpan("chunk-flush-task-latency-after-retries")
@@ -576,27 +572,32 @@ class TimeSeriesShard(val dataset: Dataset,
       case Success           => blockHolder.markUsedBlocksReclaimable()
                                 commitCheckpoint(dataset.ref, shardNum, flushGroup)
       case er: ErrorResponse => Future.successful(er)
-    }.map { case resp =>
-      logger.info(s"Flush of shard=$shardNum group=${flushGroup.groupNum} " +
-        s"timebucket=${flushGroup.flushTimeBuckets.map(_.timeBucket)} " +
-        s"flushWatermark=${flushGroup.flushWatermark} response=$resp offset=${_offset}")
-      resp
     }.recover { case e =>
       logger.error("Internal Error when persisting chunks - should have not reached this state", e)
       DataDropped
     }
-    result.onComplete { _ =>
+    result.onComplete { resp =>
       try {
         blockFactoryPool.release(blockHolder)
-        // Some partitions might be evictable, see if need to free write buffer memory
-        checkEnableAddPartitions()
+        flushDoneTasks(flushGroup, resp)
         tracer.finish()
-        updateGauges()
       } catch { case e: Throwable =>
         logger.error("Error when wrapping up doFlushSteps", e)
       }
     }
     Task.fromFuture(result)
+  }
+
+  protected def flushDoneTasks(flushGroup: FlushGroup, resTry: Try[Response]): Unit = {
+    resTry.foreach { resp =>
+      logger.info(s"Flush of shard=$shardNum group=${flushGroup.groupNum} " +
+        s"timebucket=${flushGroup.flushTimeBuckets.map(_.timeBucket)} " +
+        s"flushWatermark=${flushGroup.flushWatermark} response=$resp offset=${_offset}")
+    }
+    partitionMaker.cleanupOldestBuckets()
+    // Some partitions might be evictable, see if need to free write buffer memory
+    checkEnableAddPartitions()
+    updateGauges()
   }
 
   // scalastyle:off method.length

@@ -48,7 +48,6 @@ class TimeSeriesPartitionSpec extends MemFactoryCleanupTest with ScalaFutures {
   import monix.execution.Scheduler.Implicits.global
 
   val config = ConfigFactory.load("application_test.conf").getConfig("filodb")
-  val chunkRetentionHours = 72
   // implemented by concrete test sub class
   val colStore: ColumnStore = new NullColumnStore()
 
@@ -64,7 +63,7 @@ class TimeSeriesPartitionSpec extends MemFactoryCleanupTest with ScalaFutures {
   }
 
   private val blockStore = new PageAlignedBlockManager(100 * 1024 * 1024,
-    new MemoryStats(Map("test"-> "test")), reclaimer, 1, chunkRetentionHours)
+    new MemoryStats(Map("test"-> "test")), reclaimer, 1)
   protected val ingestBlockHolder = new BlockMemFactory(blockStore, None, dataset1.blockMetaSize, true)
 
   before {

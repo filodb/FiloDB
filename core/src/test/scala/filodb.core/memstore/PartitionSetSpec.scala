@@ -30,7 +30,7 @@ class PartitionSetSpec extends MemFactoryCleanupTest with ScalaFutures {
   }
 
   private val blockStore = new PageAlignedBlockManager(100 * 1024 * 1024,
-    new MemoryStats(Map("test"-> "test")), reclaimer, 1, chunkRetentionHours)
+    new MemoryStats(Map("test"-> "test")), reclaimer, 1)
   val maxChunkSize = 100
   protected val bufferPool = new WriteBufferPool(memFactory, dataset2, maxChunkSize, 50)
   private val ingestBlockHolder = new BlockMemFactory(blockStore, None, dataset2.blockMetaSize, true)

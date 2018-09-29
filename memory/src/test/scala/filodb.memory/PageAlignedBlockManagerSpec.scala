@@ -18,6 +18,7 @@ object PageAlignedBlockManagerSpec {
 
 class PageAlignedBlockManagerSpec extends FlatSpec with Matchers with BeforeAndAfter {
   import PageAlignedBlockManagerSpec._
+  import collection.JavaConverters._
 
   val pageSize = PageManager.getInstance().pageSize()
 
@@ -28,7 +29,7 @@ class PageAlignedBlockManagerSpec extends FlatSpec with Matchers with BeforeAndA
   it should "Allocate blocks as requested for size" in {
     //2MB
     val stats = new MemoryStats(Map("test1" -> "test1"))
-    val blockManager = new PageAlignedBlockManager(2048 * 1024, stats, testReclaimer, 1, 72)
+    val blockManager = new PageAlignedBlockManager(2048 * 1024, stats, testReclaimer, 1)
 
 //    val fbm = freeBlocksMetric(stats)
 //    fbm.max should be(512)
@@ -45,7 +46,7 @@ class PageAlignedBlockManagerSpec extends FlatSpec with Matchers with BeforeAndA
 
   it should "Align block size to page size" in {
     val stats = new MemoryStats(Map("test2" -> "test2"))
-    val blockManager = new PageAlignedBlockManager(2048 * 1024, stats, testReclaimer, 1, 72)
+    val blockManager = new PageAlignedBlockManager(2048 * 1024, stats, testReclaimer, 1)
     val blockSize = blockManager.blockSizeInBytes
     blockSize should be(pageSize)
 
@@ -55,7 +56,7 @@ class PageAlignedBlockManagerSpec extends FlatSpec with Matchers with BeforeAndA
   it should "Not allow a request of blocks over the upper bound if no blocks are reclaimable" in {
     //2 pages
     val stats = new MemoryStats(Map("test3" -> "test3"))
-    val blockManager = new PageAlignedBlockManager(2 * pageSize, stats, testReclaimer, 1, 72)
+    val blockManager = new PageAlignedBlockManager(2 * pageSize, stats, testReclaimer, 1)
     val blockSize = blockManager.blockSizeInBytes
 //    val fbm = freeBlocksMetric(stats)
 //    fbm.max should be(2)
@@ -76,7 +77,7 @@ class PageAlignedBlockManagerSpec extends FlatSpec with Matchers with BeforeAndA
   it should "Allocate blocks as requested even when upper bound is reached if blocks can be reclaimed" in {
     //2 pages
     val stats = new MemoryStats(Map("test4" -> "test4"))
-    val blockManager = new PageAlignedBlockManager(2 * pageSize, stats, testReclaimer, 1, 72)
+    val blockManager = new PageAlignedBlockManager(2 * pageSize, stats, testReclaimer, 1)
     val blockSize = blockManager.blockSizeInBytes
     val firstRequest = blockManager.requestBlocks(blockSize * 2, None)
     //used 2 out of 2
@@ -99,7 +100,7 @@ class PageAlignedBlockManagerSpec extends FlatSpec with Matchers with BeforeAndA
   it should "Fail to Allocate blocks when enough blocks cannot be reclaimed" in {
     //4 pages
     val stats = new MemoryStats(Map("test5" -> "test5"))
-    val blockManager = new PageAlignedBlockManager(4 * pageSize, stats, testReclaimer, 1, 72)
+    val blockManager = new PageAlignedBlockManager(4 * pageSize, stats, testReclaimer, 1)
     val blockSize = blockManager.blockSizeInBytes
     val firstRequest = blockManager.requestBlocks(blockSize * 2, None)
     //used 2 out of 4
@@ -116,33 +117,38 @@ class PageAlignedBlockManagerSpec extends FlatSpec with Matchers with BeforeAndA
   it should "allocate and reclaim blocks with time order" in {
     val stats = new MemoryStats(Map("test5" -> "test5"))
     // This block manager has 5 blocks capacity
-    val blockManager = new PageAlignedBlockManager(5 * pageSize, stats, testReclaimer, 1, 72)
+    val blockManager = new PageAlignedBlockManager(5 * pageSize, stats, testReclaimer, 1)
 
     blockManager.usedBlocks.size() shouldEqual 0
-    for { i <- 0 until 72} {
-      blockManager.usedBlocksTimeOrdered(i).size() shouldEqual 0
-    }
-    blockManager.timeOrderedBlocksEnabled shouldEqual true
+    blockManager.numTimeOrderedBlocks shouldEqual 0
+    blockManager.usedBlocksTimeOrdered.size shouldEqual 0
 
     // first allocate non-time ordered block
     blockManager.requestBlock(None).map(_.markReclaimable).isDefined shouldEqual true
     blockManager.usedBlocks.size shouldEqual 1
 
-    blockManager.requestBlock(Some(1)).map(_.markReclaimable).isDefined shouldEqual true
-    blockManager.requestBlock(Some(1)).map(_.markReclaimable).isDefined shouldEqual true
-    blockManager.requestBlock(Some(1)).isDefined shouldEqual true
-    blockManager.usedBlocksTimeOrdered(1).size() shouldEqual 3
+    blockManager.requestBlock(Some(1000L)).map(_.markReclaimable).isDefined shouldEqual true
+    blockManager.requestBlock(Some(1000L)).map(_.markReclaimable).isDefined shouldEqual true
+    blockManager.requestBlock(Some(1000L)).isDefined shouldEqual true
+    blockManager.usedBlocksTimeOrdered.get(1000L).size() shouldEqual 3
 
-    blockManager.requestBlock(Some(9)).map(_.markReclaimable).isDefined shouldEqual true
-    blockManager.usedBlocksTimeOrdered(9).size() shouldEqual 1
+    blockManager.requestBlock(Some(9000L)).map(_.markReclaimable).isDefined shouldEqual true
+    blockManager.usedBlocksTimeOrdered.get(9000L).size() shouldEqual 1
+
+    blockManager.numTimeOrderedBlocks shouldEqual 4
+    blockManager.usedBlocksTimeOrdered.size shouldEqual 2
 
     // reclaim from time ordered blocks should kick in for next 3 requests
-    blockManager.requestBlock(Some(10)).isDefined shouldEqual true
-    blockManager.requestBlock(Some(10)).isDefined shouldEqual true
-    blockManager.requestBlock(Some(10)).isDefined shouldEqual true
-    blockManager.usedBlocksTimeOrdered(10).size() shouldEqual 3
-    blockManager.usedBlocksTimeOrdered(1).size() shouldEqual 1 // should have reduced to 2
-    blockManager.usedBlocksTimeOrdered(9).size() shouldEqual 0 // should have reduced to 0
+    blockManager.requestBlock(Some(10000L)).isDefined shouldEqual true
+    blockManager.requestBlock(Some(10000L)).isDefined shouldEqual true
+    blockManager.requestBlock(Some(10000L)).isDefined shouldEqual true
+    blockManager.usedBlocksTimeOrdered.get(10000L).size() shouldEqual 3
+    blockManager.usedBlocksTimeOrdered.get(1000L).size() shouldEqual 1 // should have reduced to 2
+    // 9000L list should be gone since last block reclaimed
+    blockManager.hasTimeBucket(9000L) shouldEqual false
+
+    blockManager.numTimeOrderedBlocks shouldEqual 4
+    blockManager.usedBlocksTimeOrdered.keySet.asScala shouldEqual Set(1000L, 10000L)
 
     // reclaim should first happen to time ordered blocks, not the regular ones first. Should still be 1
     blockManager.usedBlocks.size shouldEqual 1
@@ -155,13 +161,10 @@ class PageAlignedBlockManagerSpec extends FlatSpec with Matchers with BeforeAndA
     // there are no blocks reclaimable in any list
     blockManager.requestBlock(Some(12)).isDefined shouldEqual false
 
-    blockManager.reclaimTimeOrderedBlocks()
-
-    for { i <- 0 until 72} {
-      blockManager.usedBlocksTimeOrdered(i).size() shouldEqual 0
-    }
-
-    blockManager.timeOrderedBlocksEnabled shouldEqual false
+    // Mark everything up to 5000L time as reclaimable even if not full.
+    // Then request another block, and this time it should succeed.
+    blockManager.markBucketedBlocksReclaimable(5000L)
+    blockManager.requestBlock(Some(12)).isDefined shouldEqual true
 
     blockManager.releaseBlocks()
   }

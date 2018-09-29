@@ -157,12 +157,13 @@ class ArrayBackedMemFactory extends MemFactory {
   *
   * @param blockStore The BlockManager which is used to request more blocks when the current
   *                   block is full.
+  * @param bucketTime the timebucket (timestamp) from which to allocate block(s), or None for the general list
   * @param metadataAllocSize the additional size in bytes to ensure is free for writing metadata, per chunk
   * @param markFullBlocksAsReclaimable Immediately mark and fully used block as reclaimable.
   *                                    Typically true during on-demand paging of optimized chunks from persistent store
   */
 class BlockMemFactory(blockStore: BlockManager,
-                      reclaimOrder: Option[Int],
+                      bucketTime: Option[Long],
                       metadataAllocSize: Int,
                       markFullBlocksAsReclaimable: Boolean = false) extends MemFactory with StrictLogging {
   def numFreeBytes: Long = blockStore.numFreeBlocks * blockStore.blockSizeInBytes
@@ -176,7 +177,7 @@ class BlockMemFactory(blockStore: BlockManager,
   // tracks blocks that should share metadata
   private val metadataSpan: ListBuffer[Block] = ListBuffer[Block]()
 
-  currentBlock.set(blockStore.requestBlock(reclaimOrder).get)
+  currentBlock.set(blockStore.requestBlock(bucketTime).get)
 
   /**
     * Starts tracking a span of multiple Blocks over which the same metadata should be applied.
@@ -215,7 +216,7 @@ class BlockMemFactory(blockStore: BlockManager,
         currentBlock.get().markReclaimable()
       }
       fullBlocks += currentBlock.get()
-      val newBlock = blockStore.requestBlock(reclaimOrder).get
+      val newBlock = blockStore.requestBlock(bucketTime).get
       currentBlock.set(newBlock)
       metadataSpan += newBlock
     }

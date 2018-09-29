@@ -53,6 +53,7 @@ object UnsafeUtils {
   final def getShort(obj: Any, offset: Long): Short = unsafe.getShort(obj, offset)
   final def getInt(obj: Any, offset: Long): Int = unsafe.getInt(obj, offset)
   final def getLong(obj: Any, offset: Long): Long = unsafe.getLong(obj, offset)
+  final def getLongVolatile(obj: Any, offset: Long): Long = unsafe.getLongVolatile(obj, offset)
   final def getDouble(obj: Any, offset: Long): Double = unsafe.getDouble(obj, offset)
   final def getFloat(obj: Any, offset: Long): Double = unsafe.getFloat(obj, offset)
 

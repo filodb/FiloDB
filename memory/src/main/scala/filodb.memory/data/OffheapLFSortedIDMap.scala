@@ -254,7 +254,7 @@ class OffheapLFSortedIDMapReader(memFactory: MemFactory, holderKlass: Class[_ <:
     var nextElem: NativePointer = _
     final def hasNext: Boolean = {
       nextElem = at(inst, curIdx + 1)
-      curIdx < (length(inst) - 1) && nextElem != 0 && continue(nextElem)
+      curIdx < (length(inst) - 1) && !isPtrNull(nextElem) && continue(nextElem)
     }
     final def next: NativePointer = {
       curIdx += 1
@@ -269,10 +269,10 @@ class OffheapLFSortedIDMapReader(memFactory: MemFactory, holderKlass: Class[_ <:
   private def alwaysContinue(p: NativePointer): Boolean = true
 
   // "real" index adjusting for position of head/tail
-  @inline protected def mapPtr(inst: MapHolder): NativePointer = UnsafeUtils.getLong(inst, mapPtrOffset)
-  protected def state(inst: MapHolder): MapState = state(mapPtr(inst))
+  @inline protected def mapPtr(inst: MapHolder): NativePointer = UnsafeUtils.getLongVolatile(inst, mapPtrOffset)
+  private[memory] def state(inst: MapHolder): MapState = state(mapPtr(inst))
   protected def state(mapPtr: NativePointer): MapState =
-    if (mapPtr == 0) MapState.empty else MapState(UnsafeUtils.getLongVolatile(mapPtr))
+    if (isPtrNull(mapPtr)) MapState.empty else MapState(UnsafeUtils.getLongVolatile(mapPtr))
   @inline protected final def realIndex(state: MapState, index: Int): Int =
     if (state.maxElem == 0) 0 else (index + state.tail) % state.maxElem
   @inline protected final def elemPtr(mapPtr: NativePointer, realIndex: Int): NativePointer =
@@ -280,8 +280,12 @@ class OffheapLFSortedIDMapReader(memFactory: MemFactory, holderKlass: Class[_ <:
   @inline protected final def getElem(mapPtr: NativePointer, realIndex: Int): NativePointer =
     UnsafeUtils.getLongVolatile(elemPtr(mapPtr, realIndex))
 
+  // For some reason, occasionally the upper 4 bits of a read pointer can be nonzero even though the rest of it is.
+  // So this is a "safer" null check
+  @inline final def isPtrNull(ptr: NativePointer): Boolean = (ptr & 0xffffffffffffffL) == 0
+
   @inline protected def check(mapPtr: NativePointer, state: MapState): Boolean =
-    mapPtr != 0 && UnsafeUtils.getLongVolatile(mapPtr) == state.state && state.state != 0
+    !isPtrNull(mapPtr) && UnsafeUtils.getLongVolatile(mapPtr) == state.state && state.state != 0
 }
 
 class OffheapLFSortedIDMapMutator(memFactory: MemFactory, holderKlass: Class[_ <: MapHolder])
@@ -462,10 +466,14 @@ extends OffheapLFSortedIDMapReader(memFactory, holderKlass) {
       // compute new head
       val newHead = (initState.head + 1) % initState.maxElem
 
-      // compare and swap new element, then new state.  Only succeeds if new element was uninitialized.
-      // This way once state is changed element is ready to read.
-      casLong(elemPtr(mapPtr, newHead), 0, newElem) &&
-      casState(mapPtr, initState, initState.withHead(newHead))
+      // Check the new spot is uninitialized, then use CAS to protect state while we write new element
+      // After CAS we can directly write stuff as we are essentially protected
+      getElem(mapPtr, newHead) == 0L &&
+      atomicEnableCopyFlag(mapPtr, initState) && {
+        UnsafeUtils.setLong(elemPtr(mapPtr, newHead), newElem)
+        UnsafeUtils.setLong(mapPtr, initState.withHead(newHead).state)
+        true
+      }
     }
 
   private def atomicHeadAddFunc(mapPtr: NativePointer, initState: MapState, elemFunc: => NativePointer): Boolean =
@@ -473,10 +481,13 @@ extends OffheapLFSortedIDMapReader(memFactory, holderKlass) {
       // compute new head
       val newHead = (initState.head + 1) % initState.maxElem
 
-      // compare and swap new element, then new state.  Only succeeds if new element was uninitialized.
-      // This way once state is changed element is ready to read.
-      casLong(elemPtr(mapPtr, newHead), 0, elemFunc) &&
-      casState(mapPtr, initState, initState.withHead(newHead))
+      // Protect write with the copyFlag so that elemFunc is not executed unless the write is going to succeed
+      getElem(mapPtr, newHead) == 0L &&
+      atomicEnableCopyFlag(mapPtr, initState) && {
+        UnsafeUtils.setLong(elemPtr(mapPtr, newHead), elemFunc)
+        UnsafeUtils.setLong(mapPtr, initState.withHead(newHead).state)
+        true
+      }
     }
 
   private def atomicTailRemove(mapPtr: NativePointer, state: MapState): Boolean =
@@ -545,10 +556,7 @@ extends OffheapLFSortedIDMapReader(memFactory, holderKlass) {
   }
 
   private def atomicEnableCopyFlag(mapPtr: NativePointer, initState: MapState): Boolean =
-    !initState.copyFlag && {
-      val newState = MapState(initState.state | CopyFlagMask)
-      casState(mapPtr, initState, newState)
-    }
+    !initState.copyFlag && casState(mapPtr, initState, initState.withCopyFlagOn)
 
   /**
    * This takes care of atomically copying/transforming current array to a new location and swapping out the
@@ -611,8 +619,11 @@ final case class MapState(state: Long) extends AnyVal {
   def maxElem: Int = ((state >> 48) & 0x0ffff).toInt
   def length: Int = if (maxElem > 0) (head - tail + 1 + maxElem) % maxElem else 0
 
+  def details: String = s"MapState(head=$head tail=$tail copyFlag=$copyFlag maxElem=$maxElem len=$length)"
+
   def withHead(newHead: Int): MapState = MapState(state & ~0x0ffffL | newHead)
   def withTail(newTail: Int): MapState = MapState(state & ~0x0ffff0000L | (newTail.toLong << 16))
+  def withCopyFlagOn: MapState = MapState(state | OffheapLFSortedIDMap.CopyFlagMask)
 }
 
 object MapState {
