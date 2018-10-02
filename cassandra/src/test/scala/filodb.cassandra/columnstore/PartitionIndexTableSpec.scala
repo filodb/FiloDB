@@ -34,6 +34,7 @@ class PartitionIndexTableSpec extends FlatSpec with AsyncTest {
   // First create the datasets table
   override def beforeAll(): Unit = {
     super.beforeAll()
+    partitionIndexTable.connector.createKeyspace(partitionIndexTable.keyspace)
     partitionIndexTable.initialize().futureValue(timeout)
   }
 
