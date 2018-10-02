@@ -3,7 +3,7 @@ env:
   global:
    _JAVA_OPTIONS="-Dakka.test.timefactor=3 -XX:MaxMetaspaceSize=256m"
 scala:
-  - 2.11.8
+  - 2.11.12
 jdk:
   - oraclejdk8
 services:
