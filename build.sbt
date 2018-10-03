@@ -2,3 +2,6 @@
 // This is done to enable more flexible sharing of settings amongst multiple build.sbts for different build pipelines
 
 publishTo      := Some(Resolver.file("Unused repo", file("target/unusedrepo")))
+
+// Global setting across all subprojects
+organization in ThisBuild := "org.filodb"

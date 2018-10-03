@@ -12,7 +12,6 @@ object FiloSettings extends Build {
   import ScalastylePlugin._
 
   val buildSettings = Seq(
-    organization := "org.velvia",
     scalaVersion := "2.11.12")
 
   /* The REPL can’t cope with -Ywarn-unused:imports or -Xfatal-warnings
