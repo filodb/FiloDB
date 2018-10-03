@@ -7,7 +7,7 @@ import com.typesafe.config.ConfigFactory
 import org.scalatest.FlatSpec
 import org.scalatest.concurrent.PatienceConfiguration.Timeout
 
-import filodb.cassandra.{AsyncTest, DefaultFiloSessionProvider}
+import filodb.cassandra.DefaultFiloSessionProvider
 import filodb.core._
 import filodb.core.metadata.{Dataset, DatasetOptions}
 

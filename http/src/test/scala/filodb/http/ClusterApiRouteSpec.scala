@@ -8,17 +8,15 @@ import akka.http.scaladsl.model.{StatusCodes, ContentTypes}
 import akka.http.scaladsl.testkit.ScalatestRouteTest
 import akka.testkit.TestProbe
 import de.heikoseeberger.akkahttpcirce.FailFastCirceSupport
-import org.scalatest.{FunSpec, Matchers, BeforeAndAfter}
-import org.scalatest.concurrent.ScalaFutures
+import org.scalatest.FunSpec
 
 import filodb.coordinator._
-import filodb.core.{GdeltTestData, TestData, Success}
+import filodb.core.{AsyncTest, GdeltTestData, TestData, Success}
 import filodb.core.store.ReassignShardConfig
 
 object ClusterApiRouteSpec extends ActorSpecConfig
 
-class ClusterApiRouteSpec extends FunSpec with Matchers with BeforeAndAfter
-with ScalatestRouteTest with ScalaFutures {
+class ClusterApiRouteSpec extends FunSpec with ScalatestRouteTest with AsyncTest {
   import FailFastCirceSupport._
   import io.circe.generic.auto._
   import NodeClusterActor._
