@@ -3,15 +3,16 @@ package filodb.query.exec.rangefn
 import scala.util.Random
 
 import com.typesafe.config.{Config, ConfigFactory}
+import monix.execution.Scheduler.Implicits.global
+import monix.reactive.Observable
+import org.scalatest.{FunSpec, Matchers}
+import org.scalatest.concurrent.ScalaFutures
+
 import filodb.core.MetricsTestData
 import filodb.core.query.{CustomRangeVectorKey, RangeVector, RangeVectorKey, ResultSchema}
 import filodb.memory.format.{RowReader, ZeroCopyUTF8String}
 import filodb.query._
 import filodb.query.exec.TransientRow
-import monix.execution.Scheduler.Implicits.global
-import monix.reactive.Observable
-import org.scalatest.concurrent.ScalaFutures
-import org.scalatest.{FunSpec, Matchers}
 
 class InstantFunctionSpec extends FunSpec with Matchers with ScalaFutures {
 
@@ -168,36 +169,36 @@ class InstantFunctionSpec extends FunSpec with Matchers with ScalaFutures {
 
   it ("should validate invalid function params") {
     // clamp_max
-    the [IllegalArgumentException] thrownBy {
+    the[IllegalArgumentException] thrownBy {
       val instantVectorFnMapper1 = exec.InstantVectorFunctionMapper(InstantFunctionId.ClampMax)
       instantVectorFnMapper1(Observable.fromIterable(sampleBase), queryConfig, 1000, resultSchema)
     } should have message "requirement failed: Cannot use ClampMax without providing a upper limit of max."
-    the [IllegalArgumentException] thrownBy {
+    the[IllegalArgumentException] thrownBy {
       val instantVectorFnMapper2 = exec.InstantVectorFunctionMapper(InstantFunctionId.ClampMax, Seq("hi"))
       instantVectorFnMapper2(Observable.fromIterable(sampleBase), queryConfig, 1000, resultSchema)
     } should have message "requirement failed: Cannot use ClampMax without providing a upper limit of max as a Number."
 
     // clamp_min
-    the [IllegalArgumentException] thrownBy {
+    the[IllegalArgumentException] thrownBy {
       val instantVectorFnMapper3 = exec.InstantVectorFunctionMapper(InstantFunctionId.ClampMin)
       instantVectorFnMapper3(Observable.fromIterable(sampleBase), queryConfig, 1000, resultSchema)
     } should have message "requirement failed: Cannot use ClampMin without providing a lower limit of min."
-    the [IllegalArgumentException] thrownBy {
+    the[IllegalArgumentException] thrownBy {
       val instantVectorFnMapper4 = exec.InstantVectorFunctionMapper(InstantFunctionId.ClampMin, Seq("hi"))
       instantVectorFnMapper4(Observable.fromIterable(sampleBase), queryConfig, 1000, resultSchema)
     } should have message "requirement failed: Cannot use ClampMin without providing a lower limit of min as a Number."
 
-    the [IllegalArgumentException] thrownBy {
+    the[IllegalArgumentException] thrownBy {
       val instantVectorFnMapper5 = exec.InstantVectorFunctionMapper(InstantFunctionId.Sqrt, Seq(1))
       instantVectorFnMapper5(Observable.fromIterable(sampleBase), queryConfig, 1000, resultSchema)
     } should have message "requirement failed: No additional parameters required for the instant function."
 
-    the [IllegalArgumentException] thrownBy {
+    the[IllegalArgumentException] thrownBy {
       val instantVectorFnMapper5 = exec.InstantVectorFunctionMapper(InstantFunctionId.Round, Seq("hi"))
       instantVectorFnMapper5(Observable.fromIterable(sampleBase), queryConfig, 1000, resultSchema)
     } should have message "requirement failed: to_nearest optional parameter should be a Number."
 
-    the [IllegalArgumentException] thrownBy {
+    the[IllegalArgumentException] thrownBy {
       val instantVectorFnMapper5 = exec.InstantVectorFunctionMapper(InstantFunctionId.Round, Seq(1, 2))
       instantVectorFnMapper5(Observable.fromIterable(sampleBase), queryConfig, 1000, resultSchema)
     } should have message "requirement failed: Only one optional parameters allowed for Round."

@@ -6,7 +6,7 @@ import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.metadata.Dataset
 import filodb.core.query._
 import filodb.query._
-import filodb.query.QueryLogger.qLogger
+import filodb.query.Query.qLogger
 
 sealed trait RowKeyRange
 

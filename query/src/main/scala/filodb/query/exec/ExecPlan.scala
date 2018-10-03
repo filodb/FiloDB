@@ -13,7 +13,7 @@ import filodb.core.metadata.Dataset
 import filodb.core.query.{RangeVector, ResultSchema, SerializableRangeVector}
 import filodb.core.store.ChunkSource
 import filodb.query._
-import filodb.query.QueryLogger.qLogger
+import filodb.query.Query.qLogger
 
 /**
   * This is the Execution Plan tree node interface.
