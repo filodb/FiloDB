@@ -364,10 +364,10 @@ class PartKeyLuceneIndex(dataset: Dataset,
   }
 
   /**
-    * Explicit commit of index to disk - to be used carefully.
+    * Refresh readers with updates to index. May be expensive - use carefully.
     * @return
     */
-  private[memstore] def commitBlocking() = {
+  def commitBlocking(): Unit = {
     searcherManager.maybeRefreshBlocking()
   }
 
