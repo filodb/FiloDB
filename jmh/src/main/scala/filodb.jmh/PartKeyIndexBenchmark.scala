@@ -89,4 +89,13 @@ class PartKeyIndexBenchmark {
     }
   }
 
+  @Benchmark
+  @BenchmarkMode(Array(Mode.Throughput))
+  @OutputTimeUnit(TimeUnit.SECONDS)
+  def startTimeLookupWithPartId(): Unit = {
+    for ( i <- 0 to 1000 optimized) {
+      partKeyIndex.startTimeFromPartId(i)
+    }
+  }
+
 }
