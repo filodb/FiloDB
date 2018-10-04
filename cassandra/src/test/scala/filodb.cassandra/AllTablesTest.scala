@@ -2,20 +2,13 @@ package filodb.cassandra
 
 import com.typesafe.config.ConfigFactory
 import org.scalatest._
-import org.scalatest.concurrent.ScalaFutures
-import org.scalatest.time.{Millis, Seconds, Span}
 
 import filodb.cassandra.columnstore.CassandraColumnStore
 import filodb.core._
 import filodb.core.metadata.Dataset
 
-trait AsyncTest extends Suite with Matchers with BeforeAndAfter with BeforeAndAfterAll with ScalaFutures
-
-trait AllTablesTest extends FunSpecLike with AsyncTest {
+trait AllTablesTest extends FunSpec with AsyncTest {
   import filodb.cassandra.metastore._
-
-  implicit val defaultPatience =
-    PatienceConfig(timeout = Span(30, Seconds), interval = Span(250, Millis))
 
   implicit val scheduler = monix.execution.Scheduler.Implicits.global
 

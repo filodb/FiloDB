@@ -9,7 +9,7 @@ import com.typesafe.config.{Config, ConfigFactory}
 import org.scalatest.FlatSpec
 import org.scalatest.concurrent.PatienceConfiguration.Timeout
 
-import filodb.cassandra.{AsyncTest, DefaultFiloSessionProvider, FiloCassandraConnector}
+import filodb.cassandra.{DefaultFiloSessionProvider, FiloCassandraConnector}
 import filodb.core._
 
 class PartitionIndexTableSpec extends FlatSpec with AsyncTest {

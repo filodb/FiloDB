@@ -401,9 +401,9 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
     (for { datasetObj    <- metaStore.getDataset(setup.ref)
            resp1         <- metaStore.writeIngestionConfig(setup.config) }
       yield {
-        // TODO this is happening in a future - we need to make sure there arent any concurrency issues
-        shardManager.addDataset(setup, datasetObj, origin)
+        // Add the dataset first so once DatasetVerified is sent back any queries will actually list the dataset
         datasets(setup.ref) = datasetObj
+        shardManager.addDataset(setup, datasetObj, origin)
         sources(setup.ref) = setup.source
       }).recover {
       case err: Dataset.BadSchema           => origin ! BadSchema(err.toString)
