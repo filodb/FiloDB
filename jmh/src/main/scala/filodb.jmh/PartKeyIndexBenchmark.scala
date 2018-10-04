@@ -51,10 +51,41 @@ class PartKeyIndexBenchmark {
   @Benchmark
   @BenchmarkMode(Array(Mode.Throughput))
   @OutputTimeUnit(TimeUnit.SECONDS)
-  def partIdsLookupWithFilters(): Unit = {
+  def partIdsLookupWithEqualsFilters(): Unit = {
     for ( i <- 0 to 20 optimized) {
-      partKeyIndex.partIdsFromFilters(Seq(ColumnFilter("job", Filter.Equals(s"App-$i")),
-        ColumnFilter("__name__", Filter.Equals("heap_usage"))), now, now + 1000)
+      partKeyIndex.partIdsFromFilters(
+        Seq(ColumnFilter("job", Filter.Equals(s"App-$i")),
+            ColumnFilter("__name__", Filter.Equals("heap_usage"))),
+        now,
+        now + 1000)
+    }
+  }
+
+  @Benchmark
+  @BenchmarkMode(Array(Mode.Throughput))
+  @OutputTimeUnit(TimeUnit.SECONDS)
+  def partIdsLookupWithSuffixRegexFilters(): Unit = {
+    for ( i <- 0 to 20 optimized) {
+      partKeyIndex.partIdsFromFilters(
+        Seq(ColumnFilter("job", Filter.Equals(s"App-$i")),
+          ColumnFilter("__name__", Filter.Equals("heap_usage")),
+          ColumnFilter("instance", Filter.EqualsRegex("Instance-2.*"))),
+        now,
+        now + 1000)
+    }
+  }
+
+  @Benchmark
+  @BenchmarkMode(Array(Mode.Throughput))
+  @OutputTimeUnit(TimeUnit.SECONDS)
+  def partIdsLookupWithPrefixRegexFilters(): Unit = {
+    for ( i <- 0 to 20 optimized) {
+      partKeyIndex.partIdsFromFilters(
+        Seq(ColumnFilter("job", Filter.Equals(s"App-$i")),
+          ColumnFilter("__name__", Filter.Equals("heap_usage")),
+          ColumnFilter("instance", Filter.EqualsRegex(".*2"))),
+        now,
+        now + 1000)
     }
   }
 
