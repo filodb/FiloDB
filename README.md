@@ -172,6 +172,8 @@ Now run the time series generator. This will ingest 20 time series (the default)
 java -cp gateway/target/scala-2.11/gateway-*-SNAPSHOT filodb.timeseries.TestTimeseriesProducer -c conf/timeseries-dev-source.conf
 ```
 
+NOTE: The `TestTimeseriesProducer` logs to logs/gateway-server.log.
+
 At this point, you should be able to confirm such a message in the server logs: `KAMON counter name=memstore-rows-ingested count=4999`
 
 Now you are ready to query FiloDB for the ingested data. The following command should return matching subset of the data that was ingested by the producer.
