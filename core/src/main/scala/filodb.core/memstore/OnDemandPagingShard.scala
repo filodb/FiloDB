@@ -165,9 +165,14 @@ TimeSeriesShard(dataset, storeConfig, shardNum, rawStore, metastore, evictionPol
         // Compare desired time range with start key and see if in memory data covers desired range
         // Also assume we have in memory all data since first key.  Just return the missing range of keys.
         case r: RowKeyChunkScan         =>
+          logger.debug(s"  XXX: part ${partition.stringPartition}  numChunks=${partition.numChunks}")
           if (partition.numChunks > 0) {
             val memStartTime = partition.earliestTime
             val endQuery = memStartTime - 1   // do not include earliestTime, otherwise will pull in first chunk
+            logger.debug(s"   - memStartTime=$memStartTime  query $r (${r.startTime}, ${r.endTime})")
+            partition.infos(AllChunkScan).toBuffer.foreach { c: ChunkSetInfo =>
+              logger.debug(s"  --> info startTime = ${c.startTime}  endTime = ${c.endTime}")
+            }
             if (r.startTime < memStartTime) { Some(RowKeyChunkScan(r.startkey, BinaryRecord.timestamp(endQuery))) }
             else                            { None }
           } else {

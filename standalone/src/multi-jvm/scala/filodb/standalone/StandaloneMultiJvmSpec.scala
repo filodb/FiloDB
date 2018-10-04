@@ -138,16 +138,25 @@ abstract class StandaloneMultiJvmSpec(config: MultiNodeConfig) extends MultiNode
     }
   }
 
-  val query = "heap_usage{dc=\"DC0\",job=\"App-2\"}[1m]"
+  def topValuesInShards(client: LocalClient, tagKey: String, shards: Seq[Int]): Unit = {
+    shards.foreach { shard =>
+      val values = client.getIndexValues(dataset, tagKey, shard)
+      info(s"Top values for shard=$shard tag=$tagKey is: $values")
+    }
+  }
+
+  val query = "heap_usage{dc=\"DC0\",job=\"App-2\"}[1h]"
   // queryTimestamp is in millis
   def runCliQuery(client: LocalClient, queryTimestamp: Long): Double = {
     val logicalPlan = Parser.queryToLogicalPlan(query, queryTimestamp/1000)
 
+    val curTime = System.currentTimeMillis
     val result = client.logicalPlan2Query(dataset, logicalPlan) match {
       case r: QueryResult2 =>
-        val vals = r.result.flatMap(_.rows.map(_.getDouble(1)))
+        val vals = r.result.flatMap(_.rows.map { r => (r.getLong(0) - curTime, r.getDouble(1)) })
         info(s"result values were $vals")
-        vals.sum
+        vals.length should be > 0
+        vals.map(_._2).sum
       case e: QueryError => fail(e.t)
     }
     info(s"CLI Query Result for $query at $queryTimestamp was $result")
@@ -163,10 +172,12 @@ abstract class StandaloneMultiJvmSpec(config: MultiNodeConfig) extends MultiNode
     val url = uri"http://localhost:8080/promql/timeseries/api/v1/query?query=$query&time=${queryTimestamp/1000}"
     info(s"Querying: $url")
     val result1 = sttp.get(url).response(asJson[SuccessResponse]).send().futureValue.unsafeBody.right.get.data.result
-    val result = result1.flatMap(_.values.map(_.value))
+    val result = result1.flatMap(_.values.map { d => (d.timestamp, d.value) })
     info(s"result values were $result")
-    info(s"HTTP Query Result for $query at $queryTimestamp was ${result.sum}")
-    result.sum
+    result.length should be > 0
+    val sum = result.map(_._2).sum
+    info(s"HTTP Query Result for $query at $queryTimestamp was $sum")
+    sum
   }
 
   def runRemoteReadQuery(queryTimestamp: Long): Double = {

@@ -159,7 +159,7 @@ abstract class IngestionAndRecoverySpec extends StandaloneMultiJvmSpec(Ingestion
   it should "be able to ingest larger amounts of data into FiloDB via Kafka again" in {
     within(chunkDurationTimeout) {
       runOn(first) {
-        queryTimestamp = System.currentTimeMillis() - 195.minutes.toMillis
+        queryTimestamp = System.currentTimeMillis() - 100.minutes.toMillis
         TestTimeseriesProducer.produceMetrics(source, 10000, 100, 200).futureValue(producePatience)
         info("Waiting for part of the chunk-duration so that there are unpersisted chunks")
         Thread.sleep(chunkDuration.toMillis / 3)
@@ -170,6 +170,10 @@ abstract class IngestionAndRecoverySpec extends StandaloneMultiJvmSpec(Ingestion
 
   it should "answer query successfully" in {
     runOn(first) {
+      // Print the top values in each shard just for debugging
+      topValuesInShards(client1, "job", 0 to 3)
+      topValuesInShards(client1, "dc", 0 to 3)
+
       query1Response = runCliQuery(client1, queryTimestamp)
       val httpQueryResponse = runHttpQuery(queryTimestamp)
       query1Response shouldEqual httpQueryResponse
