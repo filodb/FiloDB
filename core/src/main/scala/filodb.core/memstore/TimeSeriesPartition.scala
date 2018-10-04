@@ -16,6 +16,8 @@ object TimeSeriesPartition extends StrictLogging {
   val nullChunks    = UnsafeUtils.ZeroPointer.asInstanceOf[AppenderArray]
   val nullInfo      = ChunkSetInfo(UnsafeUtils.ZeroPointer.asInstanceOf[BinaryRegion.NativePointer])
 
+  val _log = logger
+
   def partKeyString(dataset: Dataset, partKeyBase: Any, partKeyOffset: Long): String = {
     dataset.partKeySchema.stringify(partKeyBase, partKeyOffset)
   }

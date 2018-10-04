@@ -159,7 +159,9 @@ abstract class IngestionAndRecoverySpec extends StandaloneMultiJvmSpec(Ingestion
   it should "be able to ingest larger amounts of data into FiloDB via Kafka again" in {
     within(chunkDurationTimeout) {
       runOn(first) {
-        queryTimestamp = System.currentTimeMillis() - 100.minutes.toMillis
+        // NOTE: 10000 samples / 100 time series = 100 samples per series
+        // 100 * 10s = 1000seconds =~ 16 minutes
+        queryTimestamp = System.currentTimeMillis() - 195.minutes.toMillis
         TestTimeseriesProducer.produceMetrics(source, 10000, 100, 200).futureValue(producePatience)
         info("Waiting for part of the chunk-duration so that there are unpersisted chunks")
         Thread.sleep(chunkDuration.toMillis / 3)

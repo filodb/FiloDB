@@ -145,7 +145,7 @@ abstract class StandaloneMultiJvmSpec(config: MultiNodeConfig) extends MultiNode
     }
   }
 
-  val query = "heap_usage{dc=\"DC0\",job=\"App-2\"}[1h]"
+  val query = "heap_usage{dc=\"DC0\",job=\"App-2\"}[1m]"
   // queryTimestamp is in millis
   def runCliQuery(client: LocalClient, queryTimestamp: Long): Double = {
     val logicalPlan = Parser.queryToLogicalPlan(query, queryTimestamp/1000)
