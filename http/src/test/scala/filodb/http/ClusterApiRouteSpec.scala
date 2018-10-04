@@ -61,7 +61,7 @@ class ClusterApiRouteSpec extends FunSpec with ScalatestRouteTest with AsyncTest
 
     it("should return list of registered datasets") {
       setupDataset()
-
+      Thread sleep 500
       Get("/api/v1/cluster") ~> clusterRoute ~> check {
         handled shouldBe true
         status shouldEqual StatusCodes.OK
