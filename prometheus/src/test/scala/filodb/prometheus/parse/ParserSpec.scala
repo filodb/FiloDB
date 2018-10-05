@@ -36,6 +36,10 @@ class ParserSpec extends FunSpec with Matchers {
     parseSuccessfully("1 + 2/(3*1)")
     parseSuccessfully("-some_metric")
     parseSuccessfully("+some_metric")
+    parseSuccessfully("(1 + heap_size{a=\"b\"})")
+    parseSuccessfully("(1 + heap_size{a=\"b\"}) + 5")
+    parseSuccessfully("(1 + heap_size{a=\"b\"}) + 5 * (3 - cpu_load{c=\"d\"})")
+    parseSuccessfully("((1 + heap_size{a=\"b\"}) + 5) * (3 - cpu_load{c=\"d\"})")
 
     parseError("")
     parseError("# just a comment\n\n")
@@ -48,6 +52,11 @@ class ParserSpec extends FunSpec with Matchers {
     parseError("*1")
     parseError("(1))")
     parseError("((1)")
+    parseError("((1 + heap_size{a=\"b\"})")
+    parseError("(1 + heap_size{a=\"b\"}))")
+    parseError("(1 + heap_size{a=\"b\"}) + (5")
+    parseError("(1 + heap_size{a=\"b\"}) + 5 * (3 - cpu_load{c=\"d\"}")
+
     parseError("(")
     parseError("1 and 1")
     parseError("1 == 1")
@@ -247,6 +256,16 @@ class ParserSpec extends FunSpec with Matchers {
         "ApplyInstantFunction(Aggregate(Sum,PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(List(1524855388000),List(1524855988000)),List(ColumnFilter(__name__,Equals(http_request_duration_seconds_bucket))),List()),1524855988000,1000,1524855988000,600000,Rate,List()),List(),List(job, le),List()),HistogramQuantile,List(0.9))",
       "http_requests_total" ->
         "PeriodicSeries(RawSeries(IntervalSelector(List(1524855688000),List(1524855988000)),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000,1524855988000)",
+      "http_requests_total ^ 5" ->
+        "ScalarVectorBinaryOperation(POW,5.0,PeriodicSeries(RawSeries(IntervalSelector(List(1524855688000),List(1524855988000)),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000,1524855988000),false)",
+
+      //FIXME Operator precedence is not implemented
+      "10 + http_requests_total * 5" ->
+        "ScalarVectorBinaryOperation(ADD,10.0,ScalarVectorBinaryOperation(MUL,5.0,PeriodicSeries(RawSeries(IntervalSelector(List(1524855688000),List(1524855988000)),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000,1524855988000),false),true)",
+      "10 + (http_requests_total * 5)" ->
+        "ScalarVectorBinaryOperation(ADD,10.0,ScalarVectorBinaryOperation(MUL,5.0,PeriodicSeries(RawSeries(IntervalSelector(List(1524855688000),List(1524855988000)),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000,1524855988000),false),true)",
+      "(10 + http_requests_total) * 5" ->
+        "ScalarVectorBinaryOperation(MUL,5.0,ScalarVectorBinaryOperation(ADD,10.0,PeriodicSeries(RawSeries(IntervalSelector(List(1524855688000),List(1524855988000)),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000,1524855988000),true),false)",
       "topk(5, http_requests_total)" ->
         "Aggregate(TopK,PeriodicSeries(RawSeries(IntervalSelector(List(1524855688000),List(1524855988000)),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000,1524855988000),List(5.0),List(),List())",
       "irate(http_requests_total{job=\"api-server\"}[5m])" ->

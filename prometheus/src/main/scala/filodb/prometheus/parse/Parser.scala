@@ -273,8 +273,8 @@ trait Expression extends Aggregates with Selector with Numeric with Join {
 
 
   lazy val binaryExpression: PackratParser[BinaryExpression] =
-    "(".? ~ expression ~ binaryOp ~ vectorMatch.? ~ expression ~ ")".? ^^ {
-      case p1 ~ lhs ~ op ~ vm ~ rhs ~ p2 => BinaryExpression(lhs, op, vm, rhs)
+    expression ~ binaryOp ~ vectorMatch.? ~ expression ^^ {
+      case lhs ~ op ~ vm ~ rhs => BinaryExpression(lhs, op, vm, rhs)
     }
 
 
@@ -296,7 +296,7 @@ trait Expression extends Aggregates with Selector with Numeric with Join {
 
   lazy val expression: PackratParser[Expression] =
     binaryExpression | aggregateExpression |
-      function | unaryExpression | vector | numericalExpression | simpleSeries
+      function | unaryExpression | vector | numericalExpression | simpleSeries | "(" ~> expression <~ ")"
 
 }
 

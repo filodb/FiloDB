@@ -338,7 +338,10 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
       case None =>
         try {
           client.logicalPlan2Query(ref, plan, qOpts) match {
-            case QueryResult2(_, schema, result) => result.foreach(rv => println(rv.prettyPrint(schema)))
+            case QueryResult2(_, schema, result) => {
+              println(s"Number of Range Vectors: ${result.size}")
+              result.foreach(rv => println(rv.prettyPrint(schema)))
+            }
             case QueryError2(_,ex)               => println(s"ERROR: ${ex.getMessage}")
           }
         } catch {
