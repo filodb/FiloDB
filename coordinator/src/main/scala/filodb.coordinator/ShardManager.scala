@@ -214,7 +214,7 @@ private[coordinator] final class ShardManager(strategy: ShardAssignmentStrategy)
   /**
     * Verify whether there are enough capacity to add new shards on the node.
     * Using ShardAssignmentStrategy get the remaining capacity of the node.
-    * Validate the same against shard list in the reassignment request.
+    * Validate the same against shard list in the shardStop request.
     *
     * @param shardList - List of shards
     * @param shardMapper - ShardMapper object
@@ -230,18 +230,18 @@ private[coordinator] final class ShardManager(strategy: ShardAssignmentStrategy)
       ShardDown(dataset, shard, shardMapperNew.coordForShard(shard))))
     val assignable = strategy.remainingCapacity(coord, dataset, resources, shardMapperNew)
     if (assignable <= 0 && shardList.size > assignable) {
-      Bad(BadSchema(s"Capacity exceeds. Can not allocate more shards to $coord"))
+      Bad(BadSchema(s"Capacity exceeded. Cannot allocate more shards to $coord"))
     } else Good(())
   }
 
   /**
-    * Stop all the shards against the given dataset.
+    * Stop the required shards against the given dataset.
     * Returns DatasetUnknown for dataset that does not exist.
     */
-  def stopShards(shardReassignReq: StopShards, ackTo: ActorRef): Unit = {
-    logger.info(s"Stop Shard request=${shardReassignReq.reassignmentConfig} " +
-                  s"for dataSet=${shardReassignReq.datasetRef} ")
-    val answer: Response = validateRequestAndStopShards(shardReassignReq, ackTo)
+  def stopShards(shardStopReq: StopShards, ackTo: ActorRef): Unit = {
+    logger.info(s"Stop Shard request=${shardStopReq.reassignmentConfig} " +
+                  s"for dataSet=${shardStopReq.datasetRef} ")
+    val answer: Response = validateRequestAndStopShards(shardStopReq, ackTo)
                             .fold(_ => SuccessResponse, errorResponse => errorResponse)
     ackTo ! answer
   }
@@ -254,12 +254,12 @@ private[coordinator] final class ShardManager(strategy: ShardAssignmentStrategy)
     *
     * @return - Validates and returns error message on failure and a unit if no validation error
     */
-  def validateRequestAndStopShards(shardReassignReq: StopShards, ackTo: ActorRef): Unit Or ErrorResponse = {
+  def validateRequestAndStopShards(shardStopReq: StopShards, ackTo: ActorRef): Unit Or ErrorResponse = {
     for {
-      shardMapper <- validateDataset(shardReassignReq.datasetRef)
-      shards      <- validateShardsToStop(shardReassignReq.reassignmentConfig.shardList, shardMapper)
+      shardMapper <- validateDataset(shardStopReq.datasetRef)
+      shards      <- validateShardsToStop(shardStopReq.reassignmentConfig.shardList, shardMapper)
     } yield {
-      unassignShards(shards, shardReassignReq.datasetRef, shardMapper)
+      unassignShards(shards, shardStopReq.datasetRef, shardMapper)
     }
   }
 
@@ -280,11 +280,11 @@ private[coordinator] final class ShardManager(strategy: ShardAssignmentStrategy)
     * Start the shards on the given coordinator.
     * Returns DatasetUnknown for dataset that does not exist.
     */
-  def startShards(shardReassignReq: StartShards, ackTo: ActorRef): Unit = {
-    logger.info(s"Shard reAssignment request=${shardReassignReq.reassignmentConfig} " +
-                  s"for dataSet=${shardReassignReq.datasetRef} ")
-    val answer: Response = validateRequestAndStartShards(shardReassignReq.datasetRef,
-                                                         shardReassignReq.reassignmentConfig, ackTo)
+  def startShards(shardStartReq: StartShards, ackTo: ActorRef): Unit = {
+    logger.info(s"Start Shard request=${shardStartReq.reassignmentConfig} " +
+                  s"for dataSet=${shardStartReq.datasetRef} ")
+    val answer: Response = validateRequestAndStartShards(shardStartReq.datasetRef,
+                                                         shardStartReq.reassignmentConfig, ackTo)
                               .fold(_ => SuccessResponse, errorResponse => errorResponse)
     ackTo ! answer
   }

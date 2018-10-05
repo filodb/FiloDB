@@ -266,6 +266,7 @@ private[filodb] final class IngestionActor(dataset: Dataset,
   /** Guards that only this dataset's commands are acted upon. */
   private def stop(ds: DatasetRef, shard: Int, origin: ActorRef): Unit =
     if (invalid(ds)) handleInvalid(StopShardIngestion(ds, shard), Some(origin)) else {
+      // TODO: Wait for all the queries to stop
       logger.warn(s"Stopping ingestion on shard $shard")
       streamSubscriptions.remove(shard).foreach(_.cancel)
       streams.remove(shard).foreach(_.teardown())
