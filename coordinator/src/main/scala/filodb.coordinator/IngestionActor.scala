@@ -266,11 +266,14 @@ private[filodb] final class IngestionActor(dataset: Dataset,
   /** Guards that only this dataset's commands are acted upon. */
   private def stop(ds: DatasetRef, shard: Int, origin: ActorRef): Unit =
     if (invalid(ds)) handleInvalid(StopShardIngestion(ds, shard), Some(origin)) else {
+      logger.warn(s"Stopping ingestion on shard $shard")
       streamSubscriptions.remove(shard).foreach(_.cancel)
       streams.remove(shard).foreach(_.teardown())
       statusActor ! IngestionStopped(dataset.ref, shard)
 
-      // TODO: release memory for shard in MemStore
+      // Release memory for shard in MemStore
+      val shardInstance = memStore.asInstanceOf[TimeSeriesMemStore].getShardE(ds, shard)
+      shardInstance.shutdown()
       logger.info(s"Stopped streaming ingestion for shard $shard and released resources")
   }
 

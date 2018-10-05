@@ -120,10 +120,24 @@ class ClusterApiRouteSpec extends FunSpec with ScalatestRouteTest with AsyncTest
     }
   }
 
-  describe("/api/v1/cluster/<dataset>/reassignshards") {
+  describe("/api/v1/cluster/<dataset>/startshards") {
     it("should return 200 with valid config") {
       val conf = ReassignShardConfig("akka.tcp://filo-standalone@127.0.0.1:25523", Seq(2, 5))
-      Post("/api/v1/cluster/gdelt/reassignshards", conf).withHeaders(RawHeader("Content-Type", "application/json")) ~> clusterRoute ~> check {
+      Post("/api/v1/cluster/gdelt/startshards", conf).
+        withHeaders(RawHeader("Content-Type", "application/json")) ~> clusterRoute ~> check {
+        handled shouldBe true
+        status shouldEqual StatusCodes.BadRequest
+        responseAs[HttpError].status shouldEqual "error"
+        responseAs[HttpError].error shouldEqual "DatasetUnknown(gdelt)"
+      }
+    }
+  }
+
+  describe("/api/v1/cluster/<dataset>/stopshards") {
+    it("should return 200 with valid config") {
+      val conf = ReassignShardConfig("", Seq(2, 5))
+      Post("/api/v1/cluster/gdelt/stopshards", conf).
+        withHeaders(RawHeader("Content-Type", "application/json")) ~> clusterRoute ~> check {
         handled shouldBe true
         status shouldEqual StatusCodes.BadRequest
         responseAs[HttpError].status shouldEqual "error"

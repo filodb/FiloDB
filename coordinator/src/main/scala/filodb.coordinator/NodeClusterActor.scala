@@ -36,7 +36,9 @@ object NodeClusterActor {
 
   case class GetDatasetFromRef(datasetRef: DatasetRef)
 
-  final case class ReassignShards(reassignmentConfig: ReassignShardConfig, datasetRef: DatasetRef)
+  final case class StopShards(reassignmentConfig: ReassignShardConfig, datasetRef: DatasetRef)
+
+  final case class StartShards(reassignmentConfig: ReassignShardConfig, datasetRef: DatasetRef)
 
   /**
    * Sets up a dataset for streaming ingestion and querying, with specs for sharding.
@@ -336,7 +338,8 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
     case e: AddCoordinator        => addCoordinator(e)
     case RemoveStaleCoordinators  => shardManager.removeStaleCoordinators()
     case e: SetupDataset          => setupDataset(e, sender())
-    case e: ReassignShards        => shardManager.reassignShards(e, sender())
+    case e: StartShards           => shardManager.startShards(e, sender())
+    case e: StopShards            => shardManager.stopShards(e, sender())
   }
 
   def subscriptionHandler: Receive = LoggingReceive {

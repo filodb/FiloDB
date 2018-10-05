@@ -5,8 +5,8 @@ import akka.testkit.TestProbe
 
 import filodb.coordinator.NodeClusterActor._
 import filodb.coordinator.client.IngestionCommands.DatasetSetup
+import filodb.core.{store, DatasetRef, Success, TestData}
 import filodb.core.metadata.Dataset
-import filodb.core.{DatasetRef, Success, TestData, store}
 
 class ReassignShardsSpec extends AkkaSpec {
   import NodeClusterActor.{DatasetResourceSpec, IngestionSource, SetupDataset}
@@ -62,11 +62,11 @@ class ReassignShardsSpec extends AkkaSpec {
       coord4.expectNoMessage() // since there are no more shards left to assign
 
       val shardAssign1 = store.ReassignShardConfig(coord1Address.toString, Seq(0,1))
-      shardManager.reassignShards(NodeClusterActor.ReassignShards(shardAssign1, dataset1), self)
+      shardManager.startShards(NodeClusterActor.StartShards(shardAssign1, dataset1), self)
       expectMsg(DatasetUnknown(dataset1)) // since there are no datasets
 
       val shardAssign2 = store.ReassignShardConfig(coordInvalidAddress.toString, Seq(0,1))
-      shardManager.reassignShards(NodeClusterActor.ReassignShards(shardAssign2, dataset2), self)
+      shardManager.startShards(NodeClusterActor.StartShards(shardAssign2, dataset2), self)
       expectMsg(DatasetUnknown(dataset2))
 
     }
@@ -111,21 +111,21 @@ class ReassignShardsSpec extends AkkaSpec {
       subscriber.expectNoMessage()
 
       val shardAssign1 = store.ReassignShardConfig(coord4Address.toString, Seq(5))
-      shardManager.reassignShards(NodeClusterActor.ReassignShards(shardAssign1, dataset1), self)
+      shardManager.startShards(NodeClusterActor.StartShards(shardAssign1, dataset1), self)
       expectMsgPF() { case s: BadSchema =>
-        s.message should startWith(s"Capacity exceeds. Can not allocate more shards to")
+        s.message should startWith(s"Can not start")
       }
       subscriber.expectNoMessage()
 
       val shardAssign2 = store.ReassignShardConfig(coord2Address.toString, Seq(0))
-      shardManager.reassignShards(NodeClusterActor.ReassignShards(shardAssign2, dataset1), self)
+      shardManager.startShards(NodeClusterActor.StartShards(shardAssign2, dataset1), self)
       expectMsg(BadData(s"${coord2Address.toString} not found"))
       subscriber.expectNoMessage()
     }
 
     "fail with invalid node" in {
       val shardAssign1 = store.ReassignShardConfig(coordInvalidAddress.toString, Seq(0))
-      shardManager.reassignShards(NodeClusterActor.ReassignShards(shardAssign1, dataset1), self)
+      shardManager.startShards(NodeClusterActor.StartShards(shardAssign1, dataset1), self)
       expectMsg(BadData(s"${coordInvalidAddress.toString} not found"))
     }
 
@@ -149,7 +149,9 @@ class ReassignShardsSpec extends AkkaSpec {
         (coord3.ref, ShardStatusAssigned), (coord2.ref, ShardStatusAssigned), (coord2.ref, ShardStatusAssigned))
 
       val shardAssign1 = store.ReassignShardConfig(coord2Address.toString, Seq(5))
-      shardManager.reassignShards(NodeClusterActor.ReassignShards(shardAssign1, dataset1), self)
+      shardManager.stopShards(NodeClusterActor.StopShards(shardAssign1, dataset1), self)
+      expectMsg(Success)
+      shardManager.startShards(NodeClusterActor.StartShards(shardAssign1, dataset1), self)
       expectMsg(Success)
 
       subscriber.expectMsgPF() { case s: CurrentShardSnapshot =>
@@ -175,7 +177,7 @@ class ReassignShardsSpec extends AkkaSpec {
 
     "fail with invalid datasets" in {
       val shardAssign = store.ReassignShardConfig(coord1Address.toString, Seq(0,1))
-      shardManager.reassignShards(NodeClusterActor.ReassignShards(shardAssign, dataset2), self)
+      shardManager.startShards(NodeClusterActor.StartShards(shardAssign, dataset2), self)
       expectMsg(DatasetUnknown(dataset2))
 
       subscriber.expectMsgPF() { case s: CurrentShardSnapshot =>
@@ -188,7 +190,7 @@ class ReassignShardsSpec extends AkkaSpec {
     "fail with invalid shardNum" in {
 
       val shardAssign1 = store.ReassignShardConfig(coord1Address.toString, Seq(8))
-      shardManager.reassignShards(NodeClusterActor.ReassignShards(shardAssign1, dataset1), self)
+      shardManager.startShards(NodeClusterActor.StartShards(shardAssign1, dataset1), self)
       expectMsg(BadSchema(s"Invalid shards found List(8). Valid shards are List()"))
 
       subscriber.expectMsgPF() { case s: CurrentShardSnapshot =>
@@ -201,7 +203,7 @@ class ReassignShardsSpec extends AkkaSpec {
 
     "fail when assigned to same node" in {
       val shardAssign1 = store.ReassignShardConfig(coord4Address.toString, Seq(0))
-      shardManager.reassignShards(NodeClusterActor.ReassignShards(shardAssign1, dataset1), self)
+      shardManager.startShards(NodeClusterActor.StartShards(shardAssign1, dataset1), self)
       expectMsgPF() { case s: BadSchema =>
         s.message should startWith (s"Can not reassign shards to same node")
       }
@@ -209,16 +211,18 @@ class ReassignShardsSpec extends AkkaSpec {
 
     "fail when coord has no capacity" in {
       val shardAssign1 = store.ReassignShardConfig(coord4Address.toString, Seq(4))
-      shardManager.reassignShards(NodeClusterActor.ReassignShards(shardAssign1, dataset1), self)
+      shardManager.startShards(NodeClusterActor.StartShards(shardAssign1, dataset1), self)
       expectMsgPF() { case s: BadSchema =>
-        s.message should startWith (s"Capacity exceeds. Can not allocate more shards to")
+        s.message should startWith (s"Can not start List")
       }
     }
 
     "succeed with single node" in {
 
       val shardAssign1 = store.ReassignShardConfig(coord1Address.toString, Seq(2))
-      shardManager.reassignShards(NodeClusterActor.ReassignShards(shardAssign1, dataset1), self)
+      shardManager.stopShards(NodeClusterActor.StopShards(shardAssign1, dataset1), self)
+      expectMsg(Success)
+      shardManager.startShards(NodeClusterActor.StartShards(shardAssign1, dataset1), self)
       expectMsg(Success)
 
       subscriber.expectMsgPF() { case s: CurrentShardSnapshot =>
@@ -229,7 +233,9 @@ class ReassignShardsSpec extends AkkaSpec {
       }
 
       val shardAssign2 = store.ReassignShardConfig(coord3Address.toString, Seq(1))
-      shardManager.reassignShards(NodeClusterActor.ReassignShards(shardAssign2, dataset1), self)
+      shardManager.stopShards(NodeClusterActor.StopShards(shardAssign2, dataset1), self)
+      expectMsg(Success)
+      shardManager.startShards(NodeClusterActor.StartShards(shardAssign2, dataset1), self)
       expectMsg(Success)
 
       subscriber.expectMsgPF() { case s: CurrentShardSnapshot =>
@@ -243,7 +249,9 @@ class ReassignShardsSpec extends AkkaSpec {
     "succeed with multiple shards" in {
 
       val shardAssign2 = store.ReassignShardConfig(coord1Address.toString, Seq(0, 7))
-      shardManager.reassignShards(NodeClusterActor.ReassignShards(shardAssign2, dataset1), self)
+      shardManager.stopShards(NodeClusterActor.StopShards(shardAssign2, dataset1), self)
+      expectMsg(Success)
+      shardManager.startShards(NodeClusterActor.StartShards(shardAssign2, dataset1), self)
       expectMsg(Success)
 
       subscriber.expectMsgPF() { case s: CurrentShardSnapshot =>
@@ -267,11 +275,13 @@ class ReassignShardsSpec extends AkkaSpec {
       }
 
       val shardAssign1 = store.ReassignShardConfig(coord3Address.toString, Seq(0))
-      shardManager.reassignShards(NodeClusterActor.ReassignShards(shardAssign1, dataset1), self)
+      shardManager.startShards(NodeClusterActor.StartShards(shardAssign1, dataset1), self)
       expectMsg(BadData(s"${coord3Address.toString} not found"))
 
       val shardAssign2 = store.ReassignShardConfig(coord4Address.toString, Seq(2))
-      shardManager.reassignShards(NodeClusterActor.ReassignShards(shardAssign2, dataset1), self)
+      shardManager.stopShards(NodeClusterActor.StopShards(shardAssign2, dataset1), self)
+      expectMsg(Success)
+      shardManager.startShards(NodeClusterActor.StartShards(shardAssign2, dataset1), self)
       expectMsg(Success)
 
       subscriber.expectMsgPF() { case s: CurrentShardSnapshot =>
@@ -287,7 +297,7 @@ class ReassignShardsSpec extends AkkaSpec {
       shardManager.datasetInfo.size shouldBe 0
 
       val shardAssign1 = store.ReassignShardConfig(coord1Address.toString, Seq(0,1))
-      shardManager.reassignShards(NodeClusterActor.ReassignShards(shardAssign1, dataset1), self)
+      shardManager.stopShards(NodeClusterActor.StopShards(shardAssign1, dataset1), self)
       expectMsg(DatasetUnknown(dataset1)) // since there are no datasets
 
     }
@@ -301,7 +311,9 @@ class ReassignShardsSpec extends AkkaSpec {
       expectMsg(DatasetVerified)
 
       val shardAssign1 = store.ReassignShardConfig(coord4Address.toString, Seq(5))
-      shardManager.reassignShards(NodeClusterActor.ReassignShards(shardAssign1, dataset1), self)
+      shardManager.stopShards(NodeClusterActor.StopShards(shardAssign1, dataset1), self)
+      expectMsg(Success)
+      shardManager.startShards(NodeClusterActor.StartShards(shardAssign1, dataset1), self)
       expectMsg(Success)
 
       val assignments2 = shardManager.shardMappers(dataset1).shardValues

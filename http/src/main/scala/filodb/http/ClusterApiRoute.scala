@@ -95,7 +95,27 @@ class ClusterApiRoute(clusterProxy: ActorRef) extends FiloRoute with StrictLoggi
         }
       }
     } ~
-    // POST /api/v1/cluster/<dataset>/reassignshards - shard reassignment request
+      // POST /api/v1/cluster/<dataset>/stopshards - shard reassignment request
+      // Sample input as follows:
+      // {{{
+      //  {
+      //    "shardList": [23, 24]
+      //  }
+      // }}}
+      path(Segment / "stopshards") { dataset =>
+        post {
+          entity(as[ReassignShardConfig]) { shardConfig =>
+            try onSuccess(asyncAsk(clusterProxy, StopShards(shardConfig, DatasetRef.fromDotString(dataset)))) {
+              case SuccessResponse  => complete(httpList(Seq.empty[String]))
+              case e: ErrorResponse => complete(Codes.BadRequest -> httpErr(e.toString, e.toString))
+            }
+            catch {
+              case e: Exception => complete(Codes.InternalServerError -> httpErr(e))
+            }
+          }
+        }
+      } ~
+    // POST /api/v1/cluster/<dataset>/startshards - shard reassignment request
     // Sample input as follows:
     // {{{
     //  {
@@ -103,10 +123,10 @@ class ClusterApiRoute(clusterProxy: ActorRef) extends FiloRoute with StrictLoggi
     //    "shardList": [23, 24]
     //  }
     // }}}
-    path(Segment / "reassignshards") { dataset =>
+    path(Segment / "startshards") { dataset =>
       post {
         entity(as[ReassignShardConfig]) { shardConfig =>
-          try onSuccess(asyncAsk(clusterProxy, ReassignShards(shardConfig, DatasetRef.fromDotString(dataset)))) {
+          try onSuccess(asyncAsk(clusterProxy, StartShards(shardConfig, DatasetRef.fromDotString(dataset)))) {
             case SuccessResponse  => complete(httpList(Seq.empty[String]))
             case e: ErrorResponse => complete(Codes.BadRequest -> httpErr(e.toString, e.toString))
           }
