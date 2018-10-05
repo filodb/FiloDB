@@ -45,7 +45,7 @@ class PartKeyIndexBenchmark {
       partId += 1
     }
   }
-  partKeyBuilder.allContainers.head.consumeRecords(consumer)
+  partKeyBuilder.allContainers.foreach(_.consumeRecords(consumer))
   partKeyIndex.commitBlocking()
 
   @Benchmark
@@ -55,6 +55,7 @@ class PartKeyIndexBenchmark {
     for ( i <- 0 to 20 optimized) {
       partKeyIndex.partIdsFromFilters(
         Seq(ColumnFilter("job", Filter.Equals(s"App-$i")),
+            ColumnFilter("host", Filter.EqualsRegex("H0")),
             ColumnFilter("__name__", Filter.Equals("heap_usage"))),
         now,
         now + 1000)
@@ -93,7 +94,7 @@ class PartKeyIndexBenchmark {
   @BenchmarkMode(Array(Mode.Throughput))
   @OutputTimeUnit(TimeUnit.SECONDS)
   def startTimeLookupWithPartId(): Unit = {
-    for ( i <- 0 to 1000 optimized) {
+    for ( i <- 0 to 20 optimized) {
       partKeyIndex.startTimeFromPartId(i)
     }
   }
