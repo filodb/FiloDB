@@ -88,8 +88,10 @@ abstract class ClusterRecoverySpec extends ClusterSpec(ClusterRecoverySpecConfig
     Thread sleep 3000
     implicit val timeout: Timeout = cluster.settings.InitializationTimeout
     def func: Future[Seq[DatasetRef]] = (clusterActor ? ListRegisteredDatasets).mapTo[Seq[DatasetRef]]
-    awaitCond(func.futureValue == Seq(dataset6.ref), interval=250.millis, max=60.seconds)
-    enterBarrier("cluster-actor-recovery-started")
+    within (1.minute) { // takes time on travis hence large value
+      awaitCond(func.futureValue == Seq(dataset6.ref), interval = 250.millis, max = 60.seconds)
+      enterBarrier("cluster-actor-recovery-started")
+    }
 
     clusterActor ! SubscribeShardUpdates(dataset6.ref)
     expectMsgPF(10.seconds.dilated) {
