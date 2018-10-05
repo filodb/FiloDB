@@ -11,7 +11,8 @@
     - [GET /api/v1/cluster/{dataset}/status](#get-apiv1clusterdatasetstatus)
     - [GET /api/v1/cluster/{dataset}/statusByAddress](#get-apiv1clusterdatasetstatusbyaddress)
     - [POST /api/v1/cluster/{dataset}](#post-apiv1clusterdataset)
-    - [POST /api/v1/cluster/{dataset}/reassignshards](#post-apiv1clusterdatasetreassignshards)
+    - [POST /api/v1/cluster/{dataset}/stopshards](#post-apiv1clusterdatasetstopshards)
+    - [POST /api/v1/cluster/{dataset}/startshards](#post-apiv1clusterdatasetstartshards)
   - [Prometheus-compatible APIs](#prometheus-compatible-apis)
     - [GET /promql/{dataset}/api/v1/query_range?query={promQLString}&start={startTime}&step={step}&end={endTime}](#get-promqldatasetapiv1query_rangequerypromqlstringstartstarttimestepstependendtime)
     - [GET /promql/{dataset}/api/v1/query?=query={promQLString}&time={timestamp}](#get-promqldatasetapiv1queryquerypromqlstringtimetimestamp)
@@ -122,10 +123,30 @@ The POST body describes the ingestion source and parameters, such as Kafka confi
 }
 ```
 
-#### POST /api/v1/cluster/{dataset}/reassignshards
+#### POST /api/v1/cluster/{dataset}/stopshards
 
-Reassigns the shards to the given node. 
-The POST body describes the reassign shard config that should have both destination node address and the list of shards to be assigned.
+Stop all the given shards.
+The POST body describes the stop shard config that should have the list of shards to be stopped.
+
+* POST body should be a ReassignShardConfig in JSON format as follows:
+```json
+{
+    "shardList": [
+       2, 3
+    ]
+}
+```
+* A successful POST results in something like `{"status": "success", "data": []}`
+* 400 is returned if the POST body cannot be parsed or any of the following validation fails:
+     1. If the given dataset does not exist
+     3. Check if all the given shards are valid
+        1. Shard number should be >= 0 and < maxAllowedShard
+        2. Shard should be assigned to a node
+
+#### POST /api/v1/cluster/{dataset}/startshards
+
+Start the shards on the given node.
+The POST body describes the start shard config that should have both destination node address and the list of shards to be started.
 
 * POST body should be a ReassignShardConfig in JSON format as follows:
 ```json
@@ -142,7 +163,7 @@ The POST body describes the reassign shard config that should have both destinat
      2. If the given node doesn not exist
      3. Check if all the given shards are valid
         1. Shard number should be >= 0 and < maxAllowedShard
-        2. Shard should not be already assigned to given node in ReassignShards request
+        2. Shard should not be assigned to any node
      4. Verify whether there are enough capacity to add new shards on the node
 
 ### Prometheus-compatible APIs
