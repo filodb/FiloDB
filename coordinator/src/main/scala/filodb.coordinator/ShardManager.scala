@@ -10,7 +10,7 @@ import org.scalactic._
 import filodb.coordinator.NodeClusterActor._
 import filodb.core.{DatasetRef, ErrorResponse, Response, Success => SuccessResponse}
 import filodb.core.metadata.Dataset
-import filodb.core.store.{ReassignShardConfig, StoreConfig}
+import filodb.core.store.{AssignShardConfig, StoreConfig}
 
 /**
   * NodeClusterActor delegates shard management business logic to this class.
@@ -225,7 +225,7 @@ private[coordinator] final class ShardManager(strategy: ShardAssignmentStrategy)
     */
   def validateNodeCapacity(shardList: Seq[Int], shardMapper: ShardMapper, dataset: DatasetRef,
                            resources: DatasetResourceSpec, coord: ActorRef): Unit Or ErrorResponse = {
-    val shardMapperNew = shardMapper.copy()
+    val shardMapperNew = shardMapper.copy() // This copy is done to simulate the assignmentStrategy
     shardList.foreach(shard => shardMapperNew.updateFromEvent(
       ShardDown(dataset, shard, shardMapperNew.coordForShard(shard))))
     val assignable = strategy.remainingCapacity(coord, dataset, resources, shardMapperNew)
@@ -239,7 +239,7 @@ private[coordinator] final class ShardManager(strategy: ShardAssignmentStrategy)
     * Returns DatasetUnknown for dataset that does not exist.
     */
   def stopShards(shardStopReq: StopShards, ackTo: ActorRef): Unit = {
-    logger.info(s"Stop Shard request=${shardStopReq.reassignmentConfig} " +
+    logger.info(s"Stop Shard request=${shardStopReq.unassignmentConfig} " +
                   s"for dataSet=${shardStopReq.datasetRef} ")
     val answer: Response = validateRequestAndStopShards(shardStopReq, ackTo)
                             .fold(_ => SuccessResponse, errorResponse => errorResponse)
@@ -257,7 +257,7 @@ private[coordinator] final class ShardManager(strategy: ShardAssignmentStrategy)
   def validateRequestAndStopShards(shardStopReq: StopShards, ackTo: ActorRef): Unit Or ErrorResponse = {
     for {
       shardMapper <- validateDataset(shardStopReq.datasetRef)
-      shards      <- validateShardsToStop(shardStopReq.reassignmentConfig.shardList, shardMapper)
+      shards      <- validateShardsToStop(shardStopReq.unassignmentConfig.shardList, shardMapper)
     } yield {
       unassignShards(shards, shardStopReq.datasetRef, shardMapper)
     }
@@ -281,10 +281,10 @@ private[coordinator] final class ShardManager(strategy: ShardAssignmentStrategy)
     * Returns DatasetUnknown for dataset that does not exist.
     */
   def startShards(shardStartReq: StartShards, ackTo: ActorRef): Unit = {
-    logger.info(s"Start Shard request=${shardStartReq.reassignmentConfig} " +
+    logger.info(s"Start Shard request=${shardStartReq.assignmentConfig} " +
                   s"for dataSet=${shardStartReq.datasetRef} ")
     val answer: Response = validateRequestAndStartShards(shardStartReq.datasetRef,
-                                                         shardStartReq.reassignmentConfig, ackTo)
+                                                         shardStartReq.assignmentConfig, ackTo)
                               .fold(_ => SuccessResponse, errorResponse => errorResponse)
     ackTo ! answer
   }
@@ -298,28 +298,16 @@ private[coordinator] final class ShardManager(strategy: ShardAssignmentStrategy)
     * @return - Validates and returns error message on failure and a unit if no validation error
     */
   def validateRequestAndStartShards(dataset: DatasetRef,
-                                    reassignmentConfig: ReassignShardConfig,
+                                    assignmentConfig: AssignShardConfig,
                                     ackTo: ActorRef): Unit Or ErrorResponse = {
     for {
       shardMapper <- validateDataset(dataset)
-      coordinator <- validateCoordinator(reassignmentConfig.address, reassignmentConfig.shardList)
-      shards      <- validateShards(reassignmentConfig.shardList, shardMapper, coordinator)
+      coordinator <- validateCoordinator(assignmentConfig.address, assignmentConfig.shardList)
+      shards      <- validateShards(assignmentConfig.shardList, shardMapper, coordinator)
       _           <- validateNodeCapacity(shards, shardMapper, dataset,
                                           _datasetInfo(dataset).resources, coordinator)
     } yield {
-      assignShards(coordinator, shards, dataset, shardMapper)
-    }
-  }
-
-  /**
-    * Assign the shards on the new node and send StartIngestion signal
-    */
-  def assignShards(actorRef: ActorRef,
-                                shards: Seq[Int],
-                                dataset: DatasetRef,
-                                shardMapper: ShardMapper): Unit = {
-    for { shard <-  shards} {
-      sendAssignmentMessagesAndEvents(dataset, actorRef, Seq(shard))
+      sendAssignmentMessagesAndEvents(dataset, coordinator, shards)
     }
   }
 

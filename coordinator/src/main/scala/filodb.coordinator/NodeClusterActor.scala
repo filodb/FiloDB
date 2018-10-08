@@ -13,7 +13,7 @@ import com.typesafe.config.{Config, ConfigFactory}
 
 import filodb.core._
 import filodb.core.metadata.Dataset
-import filodb.core.store.{IngestionConfig, MetaStore, ReassignShardConfig, StoreConfig}
+import filodb.core.store.{AssignShardConfig, IngestionConfig, MetaStore, StoreConfig, UnassignShardConfig}
 
 object NodeClusterActor {
 
@@ -36,9 +36,9 @@ object NodeClusterActor {
 
   case class GetDatasetFromRef(datasetRef: DatasetRef)
 
-  final case class StopShards(reassignmentConfig: ReassignShardConfig, datasetRef: DatasetRef)
+  final case class StopShards(unassignmentConfig: UnassignShardConfig, datasetRef: DatasetRef)
 
-  final case class StartShards(reassignmentConfig: ReassignShardConfig, datasetRef: DatasetRef)
+  final case class StartShards(assignmentConfig: AssignShardConfig, datasetRef: DatasetRef)
 
   /**
    * Sets up a dataset for streaming ingestion and querying, with specs for sharding.
