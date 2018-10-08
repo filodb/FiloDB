@@ -128,7 +128,7 @@ The POST body describes the ingestion source and parameters, such as Kafka confi
 Stop all the given shards.
 The POST body describes the stop shard config that should have the list of shards to be stopped.
 
-* POST body should be a ReassignShardConfig in JSON format as follows:
+* POST body should be a UnassignShardConfig in JSON format as follows:
 ```json
 {
     "shardList": [
@@ -148,7 +148,7 @@ The POST body describes the stop shard config that should have the list of shard
 Start the shards on the given node.
 The POST body describes the start shard config that should have both destination node address and the list of shards to be started.
 
-* POST body should be a ReassignShardConfig in JSON format as follows:
+* POST body should be a AssignShardConfig in JSON format as follows:
 ```json
 {
     "address": "akka.tcp://filo-standalone@127.0.0.1:2552",
