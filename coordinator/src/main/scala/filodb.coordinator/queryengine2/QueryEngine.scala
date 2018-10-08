@@ -102,6 +102,7 @@ class QueryEngine(dataset: Dataset,
                                   options: QueryOptions): Seq[ExecPlan] = {
     logicalPlan match {
       case lp: RawSeries =>                   materializeRawSeries(queryId, submitTime, options, lp)
+      case lp: RawChunkMeta =>                materializeRawChunkMeta(queryId, submitTime, options, lp)
       case lp: PeriodicSeries =>              materializePeriodicSeries(queryId, submitTime, options, lp)
       case lp: PeriodicSeriesWithWindowing => materializePeriodicSeriesWithWindowing(queryId, submitTime, options, lp)
       case lp: ApplyInstantFunction =>        materializeApplyInstantFunction(queryId, submitTime, options, lp)
@@ -180,6 +181,19 @@ class QueryEngine(dataset: Dataset,
       val dispatcher = dispatcherForShard(shard)
       SelectRawPartitionsExec(queryId, submitTime, options.itemLimit, dispatcher, dataset.ref, shard,
         lp.filters, toRowKeyRange(lp.rangeSelector), lp.columns)
+    }
+  }
+
+  private def materializeRawChunkMeta(queryId: String,
+                                      submitTime: Long,
+                                      options: QueryOptions,
+                                      lp: RawChunkMeta): Seq[ExecPlan] = {
+    // Translate column name to ID and validate here
+    val colID = dataset.colIDs(lp.column).get.head
+    shardsFromFilters(lp.filters, options).map { shard =>
+      val dispatcher = dispatcherForShard(shard)
+      SelectChunkInfosExec(queryId, submitTime, options.itemLimit, dispatcher, dataset.ref, shard,
+        lp.filters, toRowKeyRange(lp.rangeSelector), colID)
     }
   }
 

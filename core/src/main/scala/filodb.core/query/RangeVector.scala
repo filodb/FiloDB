@@ -5,8 +5,9 @@ import org.joda.time.DateTime
 
 import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.binaryrecord2.{MapItemConsumer, RecordBuilder, RecordContainer, RecordSchema}
+import filodb.core.metadata.Column
 import filodb.core.metadata.Column.ColumnType._
-import filodb.core.store.{ChunkScanMethod, ReadablePartition}
+import filodb.core.store.{ChunkInfoRowReader, ChunkScanMethod, ReadablePartition}
 import filodb.memory.{MemFactory, UTF8StringMedium}
 import filodb.memory.format.{RowReader, ZeroCopyUTF8String => UTF8Str}
 
@@ -106,6 +107,23 @@ final case class RawDataRangeVector(key: RangeVectorKey,
                                     columnIDs: Array[Int]) extends RangeVector {
   // Iterators are stateful, for correct reuse make this a def
   def rows: Iterator[RowReader] = partition.timeRangeRows(chunkMethod, columnIDs)
+}
+
+/**
+ * A RangeVector designed to return one row per ChunkSetInfo, with the following schema:
+ * ID (Long), NumRows (Int), startTime (Long), endTime (Long), numBytes(I) of chunk, readerclass of chunk
+ * @param column the Column to return detailed chunk info about, must be a DataColumn
+ */
+final case class ChunkInfoRangeVector(key: RangeVectorKey,
+                                      partition: ReadablePartition,
+                                      chunkMethod: ChunkScanMethod,
+                                      column: Column) extends RangeVector {
+  val reader = new ChunkInfoRowReader(column)
+  // Iterators are stateful, for correct reuse make this a def
+  def rows: Iterator[RowReader] = partition.infos(chunkMethod).map { info =>
+    reader.setInfo(info)
+    reader
+  }
 }
 
 /**
