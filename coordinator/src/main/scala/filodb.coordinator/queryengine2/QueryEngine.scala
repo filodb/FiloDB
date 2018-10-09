@@ -189,7 +189,8 @@ class QueryEngine(dataset: Dataset,
                                       options: QueryOptions,
                                       lp: RawChunkMeta): Seq[ExecPlan] = {
     // Translate column name to ID and validate here
-    val colID = dataset.colIDs(lp.column).get.head
+    val colName = if (lp.column.isEmpty) dataset.options.valueColumn else lp.column
+    val colID = dataset.colIDs(colName).get.head
     shardsFromFilters(lp.filters, options).map { shard =>
       val dispatcher = dispatcherForShard(shard)
       SelectChunkInfosExec(queryId, submitTime, options.itemLimit, dispatcher, dataset.ref, shard,

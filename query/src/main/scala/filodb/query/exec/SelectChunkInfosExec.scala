@@ -64,7 +64,7 @@ final case class SelectChunkInfosExec(id: String,
             val key = new PartitionRangeVectorKey(partition.partKeyBase, partition.partKeyOffset,
                                                   dataset.partKeySchema, partCols, shard)
             ChunkInfoRangeVector(key, partition, chunkMethod, dataColumn)
-          }
+          }.filter(_.rows.nonEmpty)
   }
 
   protected def args: String = s"shard=$shard, rowKeyRange=$rowKeyRange, filters=$filters"

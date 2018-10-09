@@ -39,6 +39,8 @@ See [architecture](doc/architecture.md) and [datasets and reading](doc/datasets_
   - [Predicate Pushdowns](#predicate-pushdowns)
   - [Sharding](#sharding)
 - [Using the FiloDB HTTP API](#using-the-filodb-http-api)
+- [PromQL Compatibility](#promql-compatibility)
+  - [FiloDB Extensions](#filodb-extensions)
 - [Using FiloDB Data Source with Spark](#using-filodb-data-source-with-spark)
   - [Configuring FiloDB](#configuring-filodb)
     - [Passing Cassandra Authentication Settings](#passing-cassandra-authentication-settings)
@@ -179,7 +181,7 @@ At this point, you should be able to confirm such a message in the server logs: 
 Now you are ready to query FiloDB for the ingested data. The following command should return matching subset of the data that was ingested by the producer.
 
 ```
-./filo-cli '-Dakka.remote.netty.tcp.hostname=127.0.0.1' --host 127.0.0.1 --dataset timeseries --promql 'heap_usage{job="A2"}'
+./filo-cli '-Dakka.remote.netty.tcp.hostname=127.0.0.1' --host 127.0.0.1 --dataset timeseries --promql 'heap_usage{job="App-2"}'
 ```
 
 You can also look at Cassandra to check for persisted data. Look at the tables in `filodb` and `filodb-admin` keyspaces.
@@ -380,6 +382,18 @@ TODO: add details about FiloDB sharding, the shard-key vs partition key mechanis
 ## Using the FiloDB HTTP API
 
 Please see the [HTTP API](doc/http_api.md) doc.
+
+## PromQL Compatibility
+
+Current status:
+
+### FiloDB Extensions
+
+Some special functions exist to aid debugging and for other purposes:
+
+| function | description    |
+|----------|----------------|
+| `_filodb_chunkmeta_all` | (CLI Only) Returns chunk metadata fields for all chunks matching the time range and filter criteria - ID, # rows, start and end time, as well as the number of bytes and type of encoding used for a particular column.  |
 
 ## Using FiloDB Data Source with Spark
 

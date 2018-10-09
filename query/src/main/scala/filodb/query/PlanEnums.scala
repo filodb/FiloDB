@@ -104,6 +104,14 @@ object RangeFunctionId extends Enum[RangeFunctionId] {
 
 }
 
+sealed abstract class FiloFunctionId(override val entryName: String) extends EnumEntry
+
+object FiloFunctionId extends Enum[FiloFunctionId] {
+  val values = findValues
+
+  case object ChunkMetaAll extends FiloFunctionId("_filodb_chunkmeta_all")
+}
+
 sealed abstract class AggregationOperator(override val entryName: String) extends EnumEntry
 
 object AggregationOperator extends Enum[AggregationOperator] {

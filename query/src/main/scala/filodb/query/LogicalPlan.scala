@@ -38,7 +38,7 @@ case class RawSeries(rangeSelector: RangeSelector,
  */
 case class RawChunkMeta(rangeSelector: RangeSelector,
                         filters: Seq[ColumnFilter],
-                        column: String) extends RawSeriesPlan
+                        column: String) extends PeriodicSeriesPlan
 
 /**
   * Concrete logical plan to query for data in a given range
