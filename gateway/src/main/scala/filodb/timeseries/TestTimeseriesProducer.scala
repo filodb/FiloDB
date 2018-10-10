@@ -189,7 +189,7 @@ object TestTimeseriesProducer extends StrictLogging {
 
             // Compute partition, shard key hashes and compute shard number
             // TODO: what to do if not all shard keys included?  Just return a 0 hash?  Or maybe random?
-            val shardKeyHash = RecordBuilder.combineHashIncluding(kvsForShardCalc, hashes, shardKeys).get
+            val shardKeyHash = 0 // TODO: this code is being replaced w/ the PrometheusInputRecord
             val partKeyHash = RecordBuilder.combineHashExcluding(kvsForShardCalc, hashes, shardKeys)
             val shard = shardMapper.ingestionShard(shardKeyHash, partKeyHash, spread)
 

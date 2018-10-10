@@ -56,16 +56,16 @@ class QueryEngine(dataset: Dataset,
 
   private def shardsFromFilters(filters: Seq[ColumnFilter],
                                 options: QueryOptions): Seq[Int] = {
-    val shardColumns = dataset.options.shardKeyColumns
+    val shardColumns = dataset.options.shardKeyColumns.sorted
     require(shardColumns.nonEmpty || options.shardOverrides.nonEmpty,
       s"Dataset ${dataset.ref} does not have shard columns defined, and shard overrides were not mentioned")
 
     options.shardOverrides.getOrElse {
-      val shardColValues = shardColumns.map { shardCol =>
+      val shardVals = shardColumns.map { shardCol =>
         // So to compute the shard hash we need shardCol == value filter (exact equals) for each shardColumn
         filters.find(f => f.column == shardCol) match {
           case Some(ColumnFilter(_, Filter.Equals(filtVal: String))) =>
-            RecordBuilder.trimShardColumn(dataset, shardCol, filtVal)
+            shardCol -> RecordBuilder.trimShardColumn(dataset, shardCol, filtVal)
           case Some(ColumnFilter(_, filter)) =>
             throw new BadQueryException(s"Found filter for shard column $shardCol but " +
               s"$filter cannot be used for shard key routing")
@@ -74,8 +74,12 @@ class QueryEngine(dataset: Dataset,
               s"$shardCol, shard key hashing disabled")
         }
       }
-      logger.debug(s"For shardColumns $shardColumns, extracted filter values $shardColValues successfully")
-      val shardHash = RecordBuilder.shardKeyHash(shardColumns, shardColValues)
+      val metric = shardVals.filter(_._1 == dataset.options.metricColumn).headOption
+                            .map(_._2)
+                            .getOrElse(throw new BadQueryException(s"Could not find metric value"))
+      val shardValues = shardVals.filterNot(_._1 == dataset.options.metricColumn).map(_._2)
+      logger.debug(s"For shardColumns $shardColumns, extracted metric $metric and shard values $shardValues")
+      val shardHash = RecordBuilder.shardKeyHash(shardValues, metric)
       shardMapperFunc.queryShards(shardHash, options.spreadFunc(filters))
     }
   }

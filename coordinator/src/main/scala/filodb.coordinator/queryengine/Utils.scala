@@ -106,10 +106,10 @@ object Utils extends StrictLogging {
     }
 
   private def shardHashFromFilters(filters: Seq[ColumnFilter], shardColumns: Seq[String]): Option[Int] = {
-    val shardColValues = shardColumns.map { shardCol =>
+    val shardValMap = shardColumns.map { shardCol =>
       // So to compute the shard hash we need shardCol == value filter (exact equals) for each shardColumn
       filters.find(f => f.column == shardCol) match {
-        case Some(ColumnFilter(_, Filter.Equals(filtVal: String))) => filtVal
+        case Some(ColumnFilter(_, Filter.Equals(filtVal: String))) => shardCol -> filtVal
         case Some(ColumnFilter(_, filter)) =>
           logger.debug(s"Found filter for shard column $shardCol but $filter cannot be used for shard key routing")
           return None
@@ -117,9 +117,9 @@ object Utils extends StrictLogging {
           logger.debug(s"Could not find filter for shard key column $shardCol, shard key hashing disabled")
           return None
       }
-    }
-    logger.debug(s"For shardColumns $shardColumns, extracted filter values $shardColValues successfully")
-    Some(RecordBuilder.shardKeyHash(shardColumns, shardColValues))
+    }.toMap
+    val metric = shardValMap("__name__")
+    Some(RecordBuilder.shardKeyHash((shardValMap - "__name__").values.toSeq, metric))
   }
 
   /**

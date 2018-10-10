@@ -6,7 +6,7 @@ import org.scalatest.{BeforeAndAfter, BeforeAndAfterAll, FunSpec, Matchers}
 import filodb.core.{MachineMetricsData, Types}
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.{Dataset, DatasetOptions}
-import filodb.memory.{BinaryRegionConsumer, MemFactory, NativeMemoryManager, UTF8StringMedium}
+import filodb.memory.{BinaryRegion, BinaryRegionConsumer, MemFactory, NativeMemoryManager, UTF8StringMedium}
 import filodb.memory.format.{SeqRowReader, UnsafeUtils}
 
 class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with BeforeAndAfterAll {
@@ -539,24 +539,15 @@ class BinaryRecordSpec extends FunSpec with Matchers with BeforeAndAfter with Be
       hashes.toSet.size shouldEqual 4
     }
 
-    it("should combine hash but only if required keys included") {
-      val builder = new RecordBuilder(MemFactory.onHeapFactory, schema2)
-      val pairs = new java.util.ArrayList(labels.toSeq.asJava)
-      val hashes = RecordBuilder.sortAndComputeHashes(pairs)
+    it("should compute shard key correctly") {
+      val jobHash = BinaryRegion.hash32(labels("job").getBytes)
+      val metricHash = BinaryRegion.hash32(labels("__name__").getBytes)
 
-      RecordBuilder.combineHashIncluding(pairs, hashes, Set("job")) shouldEqual Some(7*31 + hashes.last)
-      RecordBuilder.combineHashIncluding(pairs, hashes, Set("job", "dc")) shouldEqual Some((7*31 + hashes(1))*31 + hashes.last)
-      RecordBuilder.shardKeyHash(Seq("job", "dc"), Seq("prometheus", "AWS-USE")) shouldEqual ((7*31 + hashes(1))*31 + hashes.last)
-
-      RecordBuilder.combineHashIncluding(pairs, hashes, Set("job", "rack")) shouldEqual None
-      RecordBuilder.combineHashIncluding(pairs, hashes, Set("__name_")) shouldEqual None
-      RecordBuilder.combineHashIncluding(pairs, hashes, Set("instances", "job")) shouldEqual None
-
-      RecordBuilder.combineHashIncluding(pairs, hashes, Set.empty) shouldEqual Some(7)
+      RecordBuilder.shardKeyHash(Nil, labels("__name__")) shouldEqual (7*31 + metricHash)
+      RecordBuilder.shardKeyHash(Seq(labels("job")), labels("__name__")) shouldEqual ((7*31 + jobHash)*31 + metricHash)
     }
 
     it("should combine hash excluding certain keys") {
-      val builder = new RecordBuilder(MemFactory.onHeapFactory, schema2)
       val pairs = new java.util.ArrayList(labels.toSeq.asJava)
       val hashes = RecordBuilder.sortAndComputeHashes(pairs)
 

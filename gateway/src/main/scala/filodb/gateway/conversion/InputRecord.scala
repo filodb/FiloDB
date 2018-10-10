@@ -1,6 +1,9 @@
 package filodb.gateway.conversion
 
+import scala.language.postfixOps
+
 import remote.RemoteStorage.TimeSeries
+import scalaxy.loops._
 
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.Dataset
@@ -41,38 +44,43 @@ trait InputRecord {
  *   Similarly "le" is stripped off of Prom tags for shard calculation purposes
  * shardKeys in tags are used to compute the shardKeyHash, all other tags are used to compute
  * the partition key hash.
+ * The tags should NOT include the metric name.
  */
 case class PrometheusInputRecord(tags: Map[String, String],
+                                 metric: String,
                                  dataset: Dataset,
                                  timestamp: Long,
                                  value: Double) extends InputRecord {
   import collection.JavaConverters._
 
-  val shardKeys = dataset.options.shardKeyColumns.toSet
-  val scalaKVs = tags.toSeq
-  val originalKVs = new java.util.ArrayList(scalaKVs.asJava)
-  val forShardKVs = scalaKVs.map { case (k, v) =>
-                      val trimmedVal = RecordBuilder.trimShardColumn(dataset, k, v)
-                      (k, trimmedVal)
-                    }
-  val kvsForShardCalc = new java.util.ArrayList(forShardKVs.asJava)
+  val trimmedMetric = RecordBuilder.trimShardColumn(dataset, dataset.options.metricColumn, metric)
+  val javaTags = new java.util.ArrayList(tags.toSeq.asJava)
 
   // Get hashes and sort tags of the keys/values for shard calculation
-  val hashes = RecordBuilder.sortAndComputeHashes(kvsForShardCalc)
+  val hashes = RecordBuilder.sortAndComputeHashes(javaTags)
 
-  final def shardKeyHash: Int = RecordBuilder.combineHashIncluding(kvsForShardCalc, hashes, shardKeys)
-                                             .getOrElse(PrometheusInputRecord.DefaultShardHash)
-  final def partitionKeyHash: Int = RecordBuilder.combineHashExcluding(kvsForShardCalc, hashes, shardKeys)
+  final def shardKeyHash: Int = RecordBuilder.shardKeyHash(nonMetricShardValues, trimmedMetric)
+  final def partitionKeyHash: Int = RecordBuilder.combineHashExcluding(javaTags, hashes,
+                                                    dataset.options.ignorePartKeyHashTags)
 
-  final def nonMetricShardValues: Seq[String] = dataset.options.nonMetricShardColumns.map(tags)
-  final def getMetric: String = tags(dataset.options.metricColumn)
+  val nonMetricShardValues: Seq[String] = dataset.options.nonMetricShardColumns.flatMap(tags.get)
+  final def getMetric: String = metric
 
   final def addToBuilder(builder: RecordBuilder): Unit = {
-    originalKVs.sort(RecordBuilder.stringPairComparator)
     builder.startNewRecord()
     builder.addLong(timestamp)
     builder.addDouble(value)
-    builder.addSortedPairsAsMap(originalKVs, hashes)
+    builder.startMap()
+    val metricBytes = metric.getBytes
+    builder.addMapKeyValueHash(dataset.options.metricBytes, dataset.options.metricHash,
+                               metricBytes, 0, metricBytes.size)
+    for { i <- 0 until javaTags.size optimized } {
+      val (k, v) = javaTags.get(i)
+      builder.addMapKeyValue(k.getBytes, v.getBytes)
+      builder.updatePartitionHash(hashes(i))
+    }
+    builder.endMap()
+
     builder.endRecord()
   }
 }
@@ -80,13 +88,27 @@ case class PrometheusInputRecord(tags: Map[String, String],
 object PrometheusInputRecord {
   val DefaultShardHash = -1
 
-  // Create PrometheusInputRecord from a TimeSeries protobuf object
-  def apply(tsProto: TimeSeries, dataset: Dataset): PrometheusInputRecord = {
+  // Create PrometheusInputRecords from a TimeSeries protobuf object
+  def apply(tsProto: TimeSeries, dataset: Dataset): Seq[PrometheusInputRecord] = {
     val tags = (0 until tsProto.getLabelsCount).map { i =>
       val labelPair = tsProto.getLabels(i)
       (labelPair.getName, labelPair.getValue)
     }
-    val sample = tsProto.getSamples(0)
-    PrometheusInputRecord(tags.toMap, dataset, sample.getTimestampMs, sample.getValue)
+    val metricTags = tags.filter(_._1 == dataset.options.metricColumn)
+    if (metricTags.isEmpty) {
+      Nil
+    } else {
+      val metric = metricTags.head._2
+      val transformedTags = transformTags(tags.filterNot(_._1 == dataset.options.metricColumn), dataset).toMap
+      (0 until tsProto.getSamplesCount).map { i =>
+        val sample = tsProto.getSamples(i)
+        PrometheusInputRecord(transformedTags, metric, dataset, sample.getTimestampMs, sample.getValue)
+      }
+    }
+  }
+
+  def transformTags(tags: Seq[(String, String)], dataset: Dataset): Seq[(String, String)] = {
+    // TODO: look for "app" or non-metric shardKey. If not present, use alternatives
+    tags
   }
 }

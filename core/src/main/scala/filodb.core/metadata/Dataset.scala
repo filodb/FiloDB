@@ -160,9 +160,10 @@ case class DatasetOptions(shardKeyColumns: Seq[String],
     config.root.render(ConfigRenderOptions.concise)
   }
 
-  val nonMetricShardColumns = shardKeyColumns.filterNot(_ == metricColumn)
+  val nonMetricShardColumns = shardKeyColumns.filterNot(_ == metricColumn).sorted
   val nonMetricShardKeyBytes = nonMetricShardColumns.map(_.getBytes).toArray
   val nonMetricShardKeyHash = nonMetricShardKeyBytes.map(BinaryRegion.hash32)
+  val ignorePartKeyHashTags = ignoreTagsOnPartitionKeyHash.toSet
 
   val metricBytes = metricColumn.getBytes
   val metricHash = BinaryRegion.hash32(metricBytes)
