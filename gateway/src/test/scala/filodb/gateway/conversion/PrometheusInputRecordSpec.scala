@@ -56,4 +56,25 @@ class PrometheusInputRecordSpec extends FunSpec with Matchers {
     val records = PrometheusInputRecord(proto1, dataset)
     records should have length (0)
   }
+
+  it("should copy tags from another key if copyTags defined and original key missing") {
+    // add exporter and see if it gets renamed
+    val tagsWithExporter = tagsWithMetric + ("exporter" -> "gateway")
+    val proto1 = TimeSeriesFixture.timeseries(0, tagsWithExporter)
+    val records = PrometheusInputRecord(proto1, dataset)
+    records should have length (1)
+    val record1 = records.head
+    record1.tags shouldEqual (tagsWithExporter - "__name__" + ("app" -> "gateway"))
+    record1.getMetric shouldEqual "num_partitions"
+    record1.nonMetricShardValues shouldEqual Seq("gateway")
+
+    // no exporter.  Nothing added
+    val proto2 = TimeSeriesFixture.timeseries(0, tagsWithMetric)
+    val records2 = PrometheusInputRecord(proto2, dataset)
+    records2 should have length (1)
+    val record2 = records2.head
+    record2.tags shouldEqual (baseTags)
+    record2.getMetric shouldEqual "num_partitions"
+    record2.nonMetricShardValues shouldEqual Nil
+  }
 }

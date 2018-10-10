@@ -11,7 +11,8 @@ object FormatConversion {
   // An official Prometheus-format Dataset object with a single timestamp and value
   val dataset = Dataset("prometheus", Seq("tags:map"), Seq("timestamp:ts", "value:double"))
                   .copy(options = DatasetOptions(Seq("__name__", "app"),
-                    "__name__", "value", Map("__name__" -> Seq("_bucket", "_count", "_sum")), Seq("le")))
+                    "__name__", "value", Map("__name__" -> Seq("_bucket", "_count", "_sum")), Seq("le"),
+                    Map("exporter" -> "app", "job" -> "app")))
 
   /**
    * Extracts a java ArrayList of labels from the TimeSeries

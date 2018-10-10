@@ -108,7 +108,15 @@ object PrometheusInputRecord {
   }
 
   def transformTags(tags: Seq[(String, String)], dataset: Dataset): Seq[(String, String)] = {
-    // TODO: look for "app" or non-metric shardKey. If not present, use alternatives
-    tags
+    val keys = tags.map(_._1).toSet
+    val extraTags = new collection.mutable.ArrayBuffer[(String, String)]()
+    tags.foreach { case (k, v) =>
+      if (dataset.options.copyTags contains k) {
+        val renamedKey = dataset.options.copyTags(k)
+        if (!(keys contains renamedKey))
+          extraTags += renamedKey -> v
+      }
+    }
+    tags ++ extraTags
   }
 }
