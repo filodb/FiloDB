@@ -13,10 +13,10 @@ import monix.eval.Task
 import monix.reactive.Observable
 import org.openjdk.jmh.annotations._
 
+import filodb.coordinator.ShardMapper
 import filodb.core.binaryrecord2.RecordContainer
 import filodb.core.memstore.{SomeData, TimeSeriesMemStore}
 import filodb.core.store.StoreConfig
-import filodb.prometheus.FormatConversion
 import filodb.prometheus.ast.QueryParams
 import filodb.prometheus.parse.Parser
 import filodb.query.{QueryError => QError, QueryResult => QueryResult2}
@@ -45,6 +45,7 @@ class QueryInMemoryBenchmark extends StrictLogging {
   val numQueries = 500
   val queryIntervalMin = 55  // # minutes between start and stop
   val queryStep = 60         // # of seconds between each query sample "step"
+  val spread = 1
 
   // TODO: move setup and ingestion to another trait
   val system = ActorSystem("test", ConfigFactory.load("filodb-defaults.conf"))
@@ -55,7 +56,9 @@ class QueryInMemoryBenchmark extends StrictLogging {
   private val clusterActor = cluster.clusterSingleton(ClusterRole.Server, None)
 
   // Set up Prometheus dataset in cluster, initialize in metastore
-  private val dataset = FormatConversion.dataset
+  private val dataset = TestTimeseriesProducer.dataset
+  private val shardMapper = new ShardMapper(numShards)
+
   Await.result(cluster.metaStore.initialize(), 3.seconds)
   Await.result(cluster.metaStore.newDataset(dataset), 5.seconds)
 
@@ -74,12 +77,9 @@ class QueryInMemoryBenchmark extends StrictLogging {
   // Manually pump in data ourselves so we know when it's done.
   // TODO: ingest into multiple shards
   Thread sleep 2000    // Give setup command some time to set up dataset shards etc.
-  val batchedData = TestTimeseriesProducer.timeSeriesData(startTime, numShards, numSeries)
-                                          .take(numSamples * numSeries)
-                                          .grouped(128)
-  val ingestTask = TestTimeseriesProducer.batchSingleThreaded(
-                    Observable.fromIterator(batchedData), dataset, numShards, Set("__name__", "job"))
-                    .groupBy(_._1)
+  val (producingFut, containerStream) = TestTimeseriesProducer.metricsToContainerStream(startTime, numShards, numSeries,
+                                          numSamples * numSeries, dataset, shardMapper, spread)
+  val ingestTask = containerStream.groupBy(_._1)
                     // Asynchronously subcribe and ingest each shard
                     .mapAsync(numShards) { groupedStream =>
                       val shard = groupedStream.key
@@ -93,7 +93,8 @@ class QueryInMemoryBenchmark extends StrictLogging {
                         cluster.memStore.ingestStream(dataset.ref, shard, shardStream, global) {
                           case e: Exception => throw e })
                     }.countL.runAsync
-  Await.result(ingestTask, 30.seconds)
+  Await.result(producingFut, 30.seconds)
+  Thread sleep 2000
   cluster.memStore.asInstanceOf[TimeSeriesMemStore].commitIndexForTesting(dataset.ref) // commit lucene index
   println(s"Ingestion ended")
 

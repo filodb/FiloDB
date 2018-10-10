@@ -9,11 +9,13 @@ import scala.util.Random
 
 import com.typesafe.config.{Config, ConfigFactory}
 import com.typesafe.scalalogging.StrictLogging
+import monix.reactive.Observable
 import org.rogach.scallop._
 
 import filodb.coordinator.{GlobalConfig, ShardMapper}
-import filodb.gateway.GatewayServer
+import filodb.core.metadata.Dataset
 import filodb.gateway.conversion.PrometheusInputRecord
+import filodb.gateway.GatewayServer
 import filodb.prometheus.FormatConversion
 
 sealed trait DataOrCommand
@@ -29,6 +31,9 @@ case object FlushCommand extends DataOrCommand
   *
   */
 object TestTimeseriesProducer extends StrictLogging {
+  val dataset = FormatConversion.dataset.copy(
+                  options = FormatConversion.dataset.options.copy(
+                    shardKeyColumns = Seq("__name__", "job")))
 
   class ProducerOptions(args: Seq[String]) extends ScallopConf(args) {
     val samplesPerSeries = opt[Int](short = 'n', default = Some(100),
@@ -58,6 +63,8 @@ object TestTimeseriesProducer extends StrictLogging {
     sys.exit(0)
   }
 
+  import scala.concurrent.ExecutionContext.Implicits.global
+
   /**
     * Produce metrics
     * @param conf the sourceConfig
@@ -71,24 +78,11 @@ object TestTimeseriesProducer extends StrictLogging {
     val numShards = sourceConfig.getInt("num-shards")
     val shardMapper = new ShardMapper(numShards)
     val spread = if (numShards >= 2) { (Math.log10(numShards / 2) / Math.log10(2.0)).toInt } else { 0 }
-    val dataset = FormatConversion.dataset.copy(
-                    options = FormatConversion.dataset.options.copy(
-                      shardKeyColumns = Seq("__name__", "job")))
     val topicName = sourceConfig.getString("sourceconfig.filo-topic-name")
 
-    val (shardQueues, containerStream) = GatewayServer.shardingPipeline(GlobalConfig.systemConfig, numShards, dataset)
+    val (producingFut, containerStream) = metricsToContainerStream(startTime, numShards, numTimeSeries,
+                                            numSamples, dataset, shardMapper, spread)
     GatewayServer.setupKafkaProducer(sourceConfig, containerStream)
-
-    import scala.concurrent.ExecutionContext.Implicits.global
-    val producingFut = Future {
-      timeSeriesData(startTime, numShards, numTimeSeries)
-        .take(numSamples)
-        .foreach { sample =>
-          val rec = PrometheusInputRecord(sample.tags, dataset, sample.timestamp, sample.value)
-          val shard = shardMapper.ingestionShard(rec.shardKeyHash, rec.partitionKeyHash, spread)
-          while (!shardQueues(shard).offer(rec)) { Thread sleep 50 }
-        }
-    }
 
     logger.info(s"Started producing $numSamples messages into topic $topicName with timestamps " +
       s"from about ${(System.currentTimeMillis() - startTime) / 1000 / 60} minutes ago")
@@ -109,6 +103,27 @@ object TestTimeseriesProducer extends StrictLogging {
         s"query=$q&start=$startQuery&end=$endQuery&step=15"
       logger.info(s"Sample URL you can use to query: \n$url")
     }
+  }
+
+  def metricsToContainerStream(startTime: Long,
+                               numShards: Int,
+                               numTimeSeries: Int,
+                               numSamples: Int,
+                               dataset: Dataset,
+                               shardMapper: ShardMapper,
+                               spread: Int): (Future[Unit], Observable[(Int, Seq[Array[Byte]])]) = {
+    val (shardQueues, containerStream) = GatewayServer.shardingPipeline(GlobalConfig.systemConfig, numShards, dataset)
+
+    val producingFut = Future {
+      timeSeriesData(startTime, numShards, numTimeSeries)
+        .take(numSamples)
+        .foreach { sample =>
+          val rec = PrometheusInputRecord(sample.tags, dataset, sample.timestamp, sample.value)
+          val shard = shardMapper.ingestionShard(rec.shardKeyHash, rec.partitionKeyHash, spread)
+          while (!shardQueues(shard).offer(rec)) { Thread sleep 50 }
+        }
+    }
+    (producingFut, containerStream)
   }
 
   /**
