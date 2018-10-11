@@ -147,7 +147,9 @@ case class DatasetOptions(shardKeyColumns: Seq[String],
                           // TODO: deprecate these options once we move all input to Telegraf/Influx
                           // They are needed only to differentiate raw Prometheus-sourced data
                           ignoreShardKeyColumnSuffixes: Map[String, Seq[String]] = Map.empty,
-                          ignoreTagsOnPartitionKeyHash: Seq[String] = Nil) {
+                          ignoreTagsOnPartitionKeyHash: Seq[String] = Nil,
+                          // For each key, copy the tag to the value if the value is absent
+                          copyTags: Map[String, String] = Map.empty) {
   override def toString: String = {
     val map: Map[String, Any] = Map(
                    "shardKeyColumns" -> shardKeyColumns.asJava,
@@ -155,14 +157,16 @@ case class DatasetOptions(shardKeyColumns: Seq[String],
                    "valueColumn" -> valueColumn,
                    "ignoreShardKeyColumnSuffixes" ->
                      ignoreShardKeyColumnSuffixes.mapValues(_.asJava).asJava,
-                   "ignoreTagsOnPartitionKeyHash" -> ignoreTagsOnPartitionKeyHash.asJava)
+                   "ignoreTagsOnPartitionKeyHash" -> ignoreTagsOnPartitionKeyHash.asJava,
+                   "copyTags" -> copyTags.asJava)
     val config = ConfigFactory.parseMap(map.asJava)
     config.root.render(ConfigRenderOptions.concise)
   }
 
-  val nonMetricShardColumns = shardKeyColumns.filterNot(_ == metricColumn)
+  val nonMetricShardColumns = shardKeyColumns.filterNot(_ == metricColumn).sorted
   val nonMetricShardKeyBytes = nonMetricShardColumns.map(_.getBytes).toArray
   val nonMetricShardKeyHash = nonMetricShardKeyBytes.map(BinaryRegion.hash32)
+  val ignorePartKeyHashTags = ignoreTagsOnPartitionKeyHash.toSet
 
   val metricBytes = metricColumn.getBytes
   val metricHash = BinaryRegion.hash32(metricBytes)
@@ -172,6 +176,7 @@ object DatasetOptions {
   val DefaultOptions = DatasetOptions(shardKeyColumns = Nil,
                                       metricColumn = "__name__",
                                       valueColumn = "value",
+                                      // defaults that work well for Prometheus
                                       ignoreShardKeyColumnSuffixes =
                                         Map("__name__" -> Seq("_bucket", "_count", "_sum")),
                                       ignoreTagsOnPartitionKeyHash = Seq("le"))
@@ -186,7 +191,8 @@ object DatasetOptions {
                    valueColumn = config.getString("valueColumn"),
                    ignoreShardKeyColumnSuffixes =
                      config.as[Map[String, Seq[String]]]("ignoreShardKeyColumnSuffixes"),
-                   ignoreTagsOnPartitionKeyHash = config.as[Seq[String]]("ignoreTagsOnPartitionKeyHash"))
+                   ignoreTagsOnPartitionKeyHash = config.as[Seq[String]]("ignoreTagsOnPartitionKeyHash"),
+                   copyTags = config.as[Map[String, String]]("copyTags"))
 }
 
 /**

@@ -75,7 +75,7 @@ class GatewayBenchmark extends StrictLogging {
   @BenchmarkMode(Array(Mode.Throughput))
   @OutputTimeUnit(TimeUnit.SECONDS)
   def promCounterProtoConversion(): Int = {
-    val record = PrometheusInputRecord(TimeSeries.parseFrom(singlePromTSBytes), dataset)
+    val record = PrometheusInputRecord(TimeSeries.parseFrom(singlePromTSBytes), dataset).head
     val partHash = record.partitionKeyHash
     val shardHash = record.shardKeyHash
     record.getMetric
@@ -105,7 +105,7 @@ class GatewayBenchmark extends StrictLogging {
   def promHistogramProtoConversion(): Int = {
     var overallHash = 7
     histPromBytes.foreach { tsBytes =>
-      val record = PrometheusInputRecord(TimeSeries.parseFrom(tsBytes), dataset)
+      val record = PrometheusInputRecord(TimeSeries.parseFrom(tsBytes), dataset).head
       val partHash = record.partitionKeyHash
       val shardHash = record.shardKeyHash
       record.getMetric

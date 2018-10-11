@@ -59,6 +59,9 @@ class InfluxRecordSpec extends FunSpec with Matchers {
       recordOpts(3).get.shardKeyHash shouldEqual thirdShardHash
       println(thirdShardHash)
 
+      // Should match what is computable with shardKeyHash method
+      thirdShardHash shouldEqual RecordBuilder.shardKeyHash(Seq("filodb"), "num_partitions")
+
       val thirdPartHash = recordOpts(2).get.partitionKeyHash
       thirdPartHash should not equal (7)
       recordOpts(3).get.partitionKeyHash should not equal (thirdPartHash)
