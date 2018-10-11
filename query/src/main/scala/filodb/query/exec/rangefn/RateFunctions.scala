@@ -236,5 +236,3 @@ object ResetsFunction extends RangeFunction {
     sampleToEmit.setValues(endTimestamp, resets)
   }
 }
-
-
