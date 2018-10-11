@@ -49,6 +49,71 @@ object RateFunctions {
       Some(result)
     }
   }
+
+  def derivFunction(window: Window): Option[Double] = {
+    if (window.size < 2) {
+      None  // cannot calculate result without 2 samples
+    } else {
+      // We pass in an arbitrary timestamp that is near the values in use
+      // to avoid floating point accuracy issues
+      Some(linearRegression(window, window(0).timestamp)._1)
+    }
+  }
+
+  /**
+    * Logic is kept consistent with Prometheus' linearRegression function in order to get consistent results.
+    * We can look at optimizations (if any) later.
+    */
+  def linearRegression(window: Window, interceptTime: Long): Tuple2[Double, Double] = {
+    var n = 0.0
+    var sumX = 0.0
+    var sumY = 0.0
+    var sumXY = 0.0
+    var sumX2 = 0.0
+    for (i <- 0 until window.size) {
+      var sample = window(i)
+      var x = (sample.timestamp-interceptTime).toDouble / 1000.0
+      n += 1.0
+      sumY += sample.value
+      sumX += x
+      sumXY += x * sample.value
+      sumX2 += x * x
+    }
+    val covXY = sumXY - sumX*sumY/n
+    val varX = sumX2 - sumX*sumX/n
+    val slope = covXY / varX
+    val intercept = sumY/n - slope*sumX/n
+    Tuple2 (slope, intercept)
+  }
+
+  def instantValue(startTimestamp: Long,
+                       endTimestamp: Long,
+                       window: Window,
+                       isRate: Boolean): Option[Double] = {
+    if (window.size < 2) {
+      None  // cannot calculate result without 2 samples
+    } else {
+      require(window.head.timestamp >= startTimestamp, "Possible internal error, found samples < startTimestamp")
+      require(window.last.timestamp <= endTimestamp, "Possible internal error, found samples > endTimestamp")
+      var lastSample = window.last.value
+      var prevSampleRow = window(window.size - 2)
+      var resultValue = lastSample - prevSampleRow.value
+
+      if (isRate && lastSample < prevSampleRow.value) {
+        resultValue = lastSample
+      }
+
+      if (isRate) {
+        val sampledInterval = (window.last.timestamp - prevSampleRow.timestamp).toDouble
+        if (sampledInterval == 0) {
+          None // Avoid dividing by 0
+        }
+        // Convert to per-second.
+        resultValue = resultValue/sampledInterval*1000
+      }
+      Some(resultValue)
+    }
+  }
 }
 
 object IncreaseFunction extends RangeFunction {
@@ -100,3 +165,76 @@ object DeltaFunction extends RangeFunction {
     sampleToEmit.setValues(endTimestamp, result.getOrElse(Double.NaN)) // TODO need to use a NA instead of NaN
   }
 }
+
+object IRateFunction extends RangeFunction {
+
+  override def needsCounterCorrection: Boolean = true
+  def addToWindow(row: TransientRow): Unit = {}
+  def removeFromWindow(row: TransientRow): Unit = {}
+
+  def apply(startTimestamp: Long,
+            endTimestamp: Long,
+            window: Window,
+            sampleToEmit: TransientRow,
+            queryConfig: QueryConfig): Unit = {
+    val result = RateFunctions.instantValue(startTimestamp,
+      endTimestamp, window, true)
+    sampleToEmit.setValues(endTimestamp, result.getOrElse(Double.NaN)) // TODO need to use a NA instead of NaN
+  }
+}
+
+object IDeltaFunction extends RangeFunction {
+
+  def addToWindow(row: TransientRow): Unit = {}
+  def removeFromWindow(row: TransientRow): Unit = {}
+
+  def apply(startTimestamp: Long,
+            endTimestamp: Long,
+            window: Window,
+            sampleToEmit: TransientRow,
+            queryConfig: QueryConfig): Unit = {
+    val result = RateFunctions.instantValue(startTimestamp,
+      endTimestamp, window, false)
+    sampleToEmit.setValues(endTimestamp, result.getOrElse(Double.NaN)) // TODO need to use a NA instead of NaN
+  }
+}
+
+object DerivFunction extends RangeFunction {
+
+  def addToWindow(row: TransientRow): Unit = {}
+  def removeFromWindow(row: TransientRow): Unit = {}
+
+  def apply(startTimestamp: Long,
+            endTimestamp: Long,
+            window: Window,
+            sampleToEmit: TransientRow,
+            queryConfig: QueryConfig): Unit = {
+    val result = RateFunctions.derivFunction(window)
+    sampleToEmit.setValues(endTimestamp, result.getOrElse(Double.NaN)) // TODO need to use a NA instead of NaN
+  }
+}
+
+object ResetsFunction extends RangeFunction {
+
+  def addToWindow(row: TransientRow): Unit = {}
+  def removeFromWindow(row: TransientRow): Unit = {}
+
+  def apply(startTimestamp: Long,
+            endTimestamp: Long,
+            window: Window,
+            sampleToEmit: TransientRow,
+            queryConfig: QueryConfig): Unit = {
+    var resets = 0
+    var prev = window.head.value
+    for (i <- 1 until window.size) {
+      var current = window(i).value
+      if (current < prev) {
+        resets +=1
+      }
+      prev = current
+    }
+    sampleToEmit.setValues(endTimestamp, resets)
+  }
+}
+
+

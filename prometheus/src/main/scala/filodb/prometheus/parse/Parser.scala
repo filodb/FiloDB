@@ -13,7 +13,7 @@ trait BaseParser extends Expressions with JavaTokenParsers with RegexParsers wit
   }
 
   lazy val labelIdentifier: PackratParser[Identifier] = {
-    "[a-zA-Z_][a-zA-Z0-9_:]*".r ^^ { str => Identifier(str) }
+    "[a-zA-Z_][a-zA-Z0-9_:\\-\\.]*".r ^^ { str => Identifier(str) }
   }
 
   lazy val string: PackratParser[Identifier] = {

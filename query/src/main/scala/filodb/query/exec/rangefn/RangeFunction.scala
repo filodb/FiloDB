@@ -67,7 +67,7 @@ trait RangeFunction {
             sampleToEmit: TransientRow,
             queryConfig: QueryConfig): Unit
 }
-
+// scalastyle:off
 object RangeFunction {
   def apply(func: Option[RangeFunctionId],
             funcParams: Seq[Any] = Nil): RangeFunction = {
@@ -76,6 +76,10 @@ object RangeFunction {
       case Some(Rate)             => RateFunction
       case Some(Increase)         => IncreaseFunction
       case Some(Delta)            => DeltaFunction
+      case Some(Resets)           => ResetsFunction
+      case Some(Irate)            => IRateFunction
+      case Some(Idelta)           => IDeltaFunction
+      case Some(Deriv)            => DerivFunction
       case Some(MaxOverTime)      => new MinMaxOverTimeFunction(Ordering[Double])
       case Some(MinOverTime)      => new MinMaxOverTimeFunction(Ordering[Double].reverse)
       case Some(CountOverTime)    => new CountOverTimeFunction()
@@ -87,6 +91,7 @@ object RangeFunction {
     }
   }
 }
+// scalastyle:on
 
 object LastSampleFunction extends RangeFunction {
 

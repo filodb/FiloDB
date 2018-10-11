@@ -65,6 +65,65 @@ class RateFunctionsSpec extends FunSpec with Matchers {
     Math.abs(toEmit.value - expected) should be < errorOk
   }
 
+  it ("irate should work when start and end are outside window") {
+    val startTs = 8071950L
+    val endTs =   8163070L
+    val prevSample = q(q.size - 2)
+    val expected = (q.last.value - prevSample.value) / (q.last.timestamp - prevSample.timestamp) * 1000
+    val toEmit = new TransientRow
+    IRateFunction.apply(startTs, endTs, counterWindow, toEmit, queryConfig)
+    Math.abs(toEmit.value - expected) should be < errorOk
+  }
+
+  it ("resets should work when start and end are outside window") {
+    val startTs = 8071950L
+    val endTs =   8163070L
+    val expected = 4.0
+    val toEmit = new TransientRow
+    ResetsFunction.apply(startTs,endTs, gaugeWindow, toEmit, queryConfig)
+    Math.abs(toEmit.value - expected) should be < errorOk
+  }
+
+  it ("deriv should work when start and end are outside window") {
+    val gaugeSamples = Seq(
+      8072000L->4419.00,
+      8082100L->4419.00,
+      8092196L->4419.00,
+      8102215L->4724.00,
+      8112223L->4724.00,
+      8122388L->4724.00,
+      8132570L->5000.00,
+      8142822L->5000.00,
+      8152858L->5000.00,
+      8163000L->5201.00)
+
+    val expectedSamples = Seq(
+      8092196L->0.00,
+      8102215L->15.143392157475684,
+      8112223L->15.232227023719313,
+      8122388L->0.0,
+      8132570L->13.568427882659712,
+      8142822L->13.4914241262328,
+      8152858L->0.0,
+      8163000L->9.978695375995517
+    )
+    for (i <- 0 to gaugeSamples.size - 3) {
+      val startTs = gaugeSamples(i)._1
+      val endTs =   gaugeSamples(i + 2)._1
+      val qDeriv = new IndexedArrayQueue[TransientRow]()
+      for (j <- i until i + 3) {
+        val s = new TransientRow(gaugeSamples(j)._1.toLong, gaugeSamples(j)._2)
+        qDeriv.add(s)
+      }
+
+      val gaugeWindow = new QueueBasedWindow(qDeriv)
+
+      val toEmit = new TransientRow
+      DerivFunction.apply(startTs, endTs, gaugeWindow, toEmit, queryConfig)
+      Math.abs(toEmit.value - expectedSamples(i)._2) should be < errorOk
+    }
+  }
+
   it ("increase should work when start and end are outside window") {
     val startTs = 8071950L
     val endTs =   8163070L
@@ -80,6 +139,17 @@ class RateFunctionsSpec extends FunSpec with Matchers {
     val expected = (q2.last.value - q2.head.value) / (q2.last.timestamp - q2.head.timestamp) * (endTs - startTs)
     val toEmit = new TransientRow
     DeltaFunction.apply(startTs,endTs, gaugeWindow, toEmit, queryConfig)
+    Math.abs(toEmit.value - expected) should be < errorOk
+  }
+
+  it ("idelta should work when start and end are outside window") {
+    val startTs = 8071950L
+    val endTs =   8163070L
+    val prevSample = q2(q2.size - 2)
+    //val expected = q2.last.value - prevSample.value
+    val expected = q2.last.value - prevSample.value
+    val toEmit = new TransientRow
+    IDeltaFunction.apply(startTs,endTs, gaugeWindow, toEmit, queryConfig)
     Math.abs(toEmit.value - expected) should be < errorOk
   }
 
