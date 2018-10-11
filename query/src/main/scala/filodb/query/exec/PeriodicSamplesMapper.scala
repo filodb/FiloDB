@@ -5,7 +5,7 @@ import org.jctools.queues.SpscUnboundedArrayQueue
 
 import filodb.core.query.{IteratorBackedRangeVector, RangeVector, ResultSchema}
 import filodb.memory.format.RowReader
-import filodb.query.{QueryConfig, RangeFunctionId}
+import filodb.query.{Query, QueryConfig, RangeFunctionId}
 import filodb.query.exec.rangefn.{RangeFunction, Window}
 import filodb.query.util.IndexedArrayQueue
 
@@ -72,12 +72,15 @@ class SlidingWindowIterator(raw: Iterator[RowReader],
   // this is the object that will be exposed to the RangeFunction
   private val windowSamples = new QueueBasedWindow(windowQueue)
 
+  // TODO This can be removed once we fix order during ingestion. Or is it required to validate anyway?
+  private val rawInOrder = new DropOutOfOrderSamplesIterator(raw)
+
   // we need buffered iterator so we can use to peek at next element.
   // At same time, do counter correction if necessary
   private val rows = if (rangeFunction.needsCounterCorrection) {
-    new BufferableCounterCorrectionIterator(raw).buffered
+    new BufferableCounterCorrectionIterator(rawInOrder).buffered
   } else {
-    new BufferableIterator(raw).buffered
+    new BufferableIterator(rawInOrder).buffered
   }
 
   // to avoid creation of object per sample, we use a pool
@@ -128,8 +131,8 @@ class TransientRowPool {
   * Caller can do iterator.buffered safely
   */
 class BufferableIterator(iter: Iterator[RowReader]) extends Iterator[TransientRow] {
-  var prev = new TransientRow()
-  var cur = new TransientRow()
+  private var prev = new TransientRow()
+  private var cur = new TransientRow()
   override def hasNext: Boolean = iter.hasNext
   override def next(): TransientRow = {
     // swap prev an cur
@@ -144,12 +147,12 @@ class BufferableIterator(iter: Iterator[RowReader]) extends Iterator[TransientRo
 
 /**
   * Used to create a monotonically increasing counter from raw reported counter values.
-  * Is bufferable - caller can do iterator.buffered safely since it buffer ONE value
+  * Is bufferable - caller can do iterator.buffered safely since it buffers ONE value
   */
 class BufferableCounterCorrectionIterator(iter: Iterator[RowReader]) extends Iterator[TransientRow] {
-  var lastVal: Double = 0
-  var prev = new TransientRow()
-  var cur = new TransientRow()
+  private var lastVal: Double = 0
+  private var prev = new TransientRow()
+  private var cur = new TransientRow()
   override def hasNext: Boolean = iter.hasNext
   override def next(): TransientRow = {
     val next = iter.next()
@@ -167,5 +170,35 @@ class BufferableCounterCorrectionIterator(iter: Iterator[RowReader]) extends Ite
     cur.setLong(0, next.getLong(0))
     cur.setDouble(1, lastVal)
     cur
+  }
+}
+
+class DropOutOfOrderSamplesIterator(iter: Iterator[RowReader]) extends Iterator[TransientRow] {
+  // Initial -1 time since it will be less than any valid timestamp and will allow first sample to go through
+  private val cur = new TransientRow(-1, -1)
+  private val nextVal = new TransientRow(-1, -1)
+  private var hasNextVal = false
+  setNext()
+
+  override def hasNext: Boolean = hasNextVal
+  override def next(): TransientRow = {
+    cur.copyFrom(nextVal)
+    setNext()
+    cur
+  }
+
+  def setNext(): Unit = {
+    hasNextVal = false
+    while (!hasNextVal && iter.hasNext) {
+      val nxt = iter.next()
+      val t = nxt.getLong(0)
+      val v = nxt.getDouble(1)
+      if (t > cur.timestamp) { // if next sample is later than current sample
+        nextVal.setValues(t, v)
+        hasNextVal = true
+      } else {
+        Query.droppedSamples.increment()
+      }
+    }
   }
 }

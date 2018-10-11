@@ -39,8 +39,8 @@ trait Expressions extends Aggregates with Functions {
           val scalar = expression.toScalar
           val seriesPlan = rhs.asInstanceOf[PeriodicSeries].toPeriodicSeriesPlan(queryParams)
           ScalarVectorBinaryOperation(operator.getPlanOperator, scalar, seriesPlan, scalarIsLhs = true)
-        case series: PeriodicSeries if lhs.isInstanceOf[ScalarExpression] =>
-          val scalar = lhs.asInstanceOf[ScalarExpression].toScalar
+        case series: PeriodicSeries if rhs.isInstanceOf[ScalarExpression] =>
+          val scalar = rhs.asInstanceOf[ScalarExpression].toScalar
           val seriesPlan = series.toPeriodicSeriesPlan(queryParams)
           ScalarVectorBinaryOperation(operator.getPlanOperator, scalar, seriesPlan, scalarIsLhs = false)
         case series: PeriodicSeries if rhs.isInstanceOf[PeriodicSeries] =>

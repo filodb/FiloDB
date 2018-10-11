@@ -7,6 +7,7 @@ import filodb.core.metadata.Dataset
 import filodb.core.query._
 import filodb.memory.format.RowReader
 import filodb.query.{BinaryOperator, InstantFunctionId, QueryConfig}
+import filodb.query.exec.binaryOp.BinaryOperatorFunction
 import filodb.query.exec.rangefn.InstantFunction
 
 /**
@@ -93,10 +94,33 @@ final case class ScalarOperationMapper(operator: BinaryOperator,
   protected[exec] def args: String =
     s"operator=$operator, scalar=$scalar"
 
+  val operatorFunction = BinaryOperatorFunction.factoryMethod(operator)
+
   def apply(source: Observable[RangeVector],
             queryConfig: QueryConfig,
             limit: Int,
-            sourceSchema: ResultSchema): Observable[RangeVector] = ???
+            sourceSchema: ResultSchema): Observable[RangeVector] = {
+    source.map { rv =>
+      val resultIterator: Iterator[RowReader] = new Iterator[RowReader]() {
+
+        private val rows = rv.rows
+        private val result = new TransientRow()
+        private val sclrVal = scalar.asInstanceOf[Double]
+
+        override def hasNext: Boolean = rows.hasNext
+
+        override def next(): RowReader = {
+          val next = rows.next()
+          val nextVal = next.getDouble(1)
+          val newValue = if (scalarOnLhs) operatorFunction.calculate(sclrVal, nextVal)
+                         else  operatorFunction.calculate(nextVal, sclrVal)
+          result.setValues(next.getLong(0), newValue)
+          result
+        }
+      }
+      IteratorBackedRangeVector(rv.key, resultIterator)
+    }
+  }
 
   // TODO all operation defs go here and get invoked from mapRangeVector
 }

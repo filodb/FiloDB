@@ -13,7 +13,7 @@ import com.typesafe.config.{Config, ConfigFactory}
 
 import filodb.core._
 import filodb.core.metadata.Dataset
-import filodb.core.store.{IngestionConfig, MetaStore, ReassignShardConfig, StoreConfig}
+import filodb.core.store.{AssignShardConfig, IngestionConfig, MetaStore, StoreConfig, UnassignShardConfig}
 
 object NodeClusterActor {
 
@@ -36,7 +36,9 @@ object NodeClusterActor {
 
   case class GetDatasetFromRef(datasetRef: DatasetRef)
 
-  final case class ReassignShards(reassignmentConfig: ReassignShardConfig, datasetRef: DatasetRef)
+  final case class StopShards(unassignmentConfig: UnassignShardConfig, datasetRef: DatasetRef)
+
+  final case class StartShards(assignmentConfig: AssignShardConfig, datasetRef: DatasetRef)
 
   /**
    * Sets up a dataset for streaming ingestion and querying, with specs for sharding.
@@ -336,7 +338,8 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
     case e: AddCoordinator        => addCoordinator(e)
     case RemoveStaleCoordinators  => shardManager.removeStaleCoordinators()
     case e: SetupDataset          => setupDataset(e, sender())
-    case e: ReassignShards        => shardManager.reassignShards(e, sender())
+    case e: StartShards           => shardManager.startShards(e, sender())
+    case e: StopShards            => shardManager.stopShards(e, sender())
   }
 
   def subscriptionHandler: Receive = LoggingReceive {
@@ -401,9 +404,9 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
     (for { datasetObj    <- metaStore.getDataset(setup.ref)
            resp1         <- metaStore.writeIngestionConfig(setup.config) }
       yield {
-        // TODO this is happening in a future - we need to make sure there arent any concurrency issues
-        shardManager.addDataset(setup, datasetObj, origin)
+        // Add the dataset first so once DatasetVerified is sent back any queries will actually list the dataset
         datasets(setup.ref) = datasetObj
+        shardManager.addDataset(setup, datasetObj, origin)
         sources(setup.ref) = setup.source
       }).recover {
       case err: Dataset.BadSchema           => origin ! BadSchema(err.toString)
