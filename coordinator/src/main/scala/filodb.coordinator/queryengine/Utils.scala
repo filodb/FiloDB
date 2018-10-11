@@ -90,7 +90,7 @@ object Utils extends StrictLogging {
         val shards = options.shardOverrides.getOrElse {
           val shardCols = dataset.options.shardKeyColumns
           if (shardCols.length > 0) {
-            shardHashFromFilters(filters, shardCols) match {
+            shardHashFromFilters(filters, shardCols, dataset) match {
               case Some(shardHash) => shardMap.queryShards(shardHash, options.spreadFunc(filters))
               case None            => throw new IllegalArgumentException(s"Must specify filters for $shardCols")
             }
@@ -105,7 +105,9 @@ object Utils extends StrictLogging {
       case e: Exception => BadArgument(e.getMessage)
     }
 
-  private def shardHashFromFilters(filters: Seq[ColumnFilter], shardColumns: Seq[String]): Option[Int] = {
+  private def shardHashFromFilters(filters: Seq[ColumnFilter],
+                                   shardColumns: Seq[String],
+                                   dataset: Dataset): Option[Int] = {
     val shardValMap = shardColumns.map { shardCol =>
       // So to compute the shard hash we need shardCol == value filter (exact equals) for each shardColumn
       filters.find(f => f.column == shardCol) match {
@@ -118,8 +120,9 @@ object Utils extends StrictLogging {
           return None
       }
     }.toMap
-    val metric = shardValMap("__name__")
-    Some(RecordBuilder.shardKeyHash((shardValMap - "__name__").values.toSeq, metric))
+    val metricColumn = dataset.options.metricColumn
+    val metric = shardValMap(metricColumn)
+    Some(RecordBuilder.shardKeyHash((shardValMap - metricColumn).values.toSeq, metric))
   }
 
   /**

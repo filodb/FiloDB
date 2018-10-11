@@ -107,6 +107,11 @@ object PrometheusInputRecord {
     }
   }
 
+  /**
+   * Uses DatasetOptions.copyTags to copy missing tags.
+   * If a tag in copyTags is found and the destination tag is missing, then the destination tag is created
+   * with the value from the source tag.
+   */
   def transformTags(tags: Seq[(String, String)], dataset: Dataset): Seq[(String, String)] = {
     val keys = tags.map(_._1).toSet
     val extraTags = new collection.mutable.ArrayBuffer[(String, String)]()

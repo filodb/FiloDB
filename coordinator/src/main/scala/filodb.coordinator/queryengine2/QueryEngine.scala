@@ -54,9 +54,10 @@ class QueryEngine(dataset: Dataset,
     materialized
   }
 
+  val shardColumns = dataset.options.shardKeyColumns.sorted
+
   private def shardsFromFilters(filters: Seq[ColumnFilter],
                                 options: QueryOptions): Seq[Int] = {
-    val shardColumns = dataset.options.shardKeyColumns.sorted
     require(shardColumns.nonEmpty || options.shardOverrides.nonEmpty,
       s"Dataset ${dataset.ref} does not have shard columns defined, and shard overrides were not mentioned")
 
