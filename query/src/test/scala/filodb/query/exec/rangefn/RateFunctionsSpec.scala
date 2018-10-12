@@ -80,8 +80,25 @@ class RateFunctionsSpec extends FunSpec with Matchers {
     val endTs =   8163070L
     val expected = 4.0
     val toEmit = new TransientRow
-    ResetsFunction.apply(startTs,endTs, gaugeWindow, toEmit, queryConfig)
+    for (i <- 0 until gaugeWindow.size) {
+      ResetsFunction.addToWindow(gaugeWindow(i))
+    }
+    ResetsFunction.apply(startTs, endTs, gaugeWindow, toEmit, queryConfig)
     Math.abs(toEmit.value - expected) should be < errorOk
+
+    // Window sliding case
+    val expected2 = 1
+    val toEmit2 = new TransientRow
+
+    // 3 resets at the beginning - so resets count should drop only by 3 (4 - 3 = 1) even though we are removing 5 items
+    ResetsFunction.removeFromWindow(toEmit2)// Dummy param - old items being evicted for new window items
+    ResetsFunction.removeFromWindow(toEmit2)
+    ResetsFunction.removeFromWindow(toEmit2)
+    ResetsFunction.removeFromWindow(toEmit2)
+    ResetsFunction.removeFromWindow(toEmit2)
+
+    ResetsFunction.apply(startTs, endTs, gaugeWindow, toEmit2, queryConfig)
+    Math.abs(toEmit2.value - expected2) should be < errorOk
   }
 
   it ("deriv should work when start and end are outside window") {
