@@ -99,14 +99,14 @@ class SlidingWindowIterator(raw: Iterator[RowReader],
         val toAdd = windowSamplesPool.get
         toAdd.copyFrom(next)
         windowQueue.add(toAdd)
-        rangeFunction.addToWindow(toAdd)
+        rangeFunction.addedToWindow(toAdd, windowSamples)
       }
     }
     // remove elements outside current window that were part of previous window
     // but ensure at least one sample present
     while (windowQueue.size > 1 && windowQueue.head.timestamp < curWindowStart) {
       val removed = windowQueue.remove()
-      rangeFunction.removeFromWindow(removed)
+      rangeFunction.removedFromWindow(removed, windowSamples)
       windowSamplesPool.putBack(removed)
     }
     // apply function on window samples

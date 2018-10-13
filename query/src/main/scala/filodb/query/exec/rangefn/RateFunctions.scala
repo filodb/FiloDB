@@ -2,7 +2,6 @@ package filodb.query.exec.rangefn
 
 import filodb.query.QueryConfig
 import filodb.query.exec.TransientRow
-import filodb.query.util.IndexedArrayQueue
 
 object RateFunctions {
 
@@ -120,8 +119,8 @@ object RateFunctions {
 object IncreaseFunction extends RangeFunction {
 
   override def needsCounterCorrection: Boolean = true
-  def addToWindow(row: TransientRow): Unit = {}
-  def removeFromWindow(row: TransientRow): Unit = {}
+  def addedToWindow(row: TransientRow, window: Window): Unit = {}
+  def removedFromWindow(row: TransientRow, window: Window): Unit = {}
 
   def apply(startTimestamp: Long,
             endTimestamp: Long,
@@ -137,8 +136,8 @@ object IncreaseFunction extends RangeFunction {
 object RateFunction extends RangeFunction {
 
   override def needsCounterCorrection: Boolean = true
-  def addToWindow(row: TransientRow): Unit = {}
-  def removeFromWindow(row: TransientRow): Unit = {}
+  def addedToWindow(row: TransientRow, window: Window): Unit = {}
+  def removedFromWindow(row: TransientRow, window: Window): Unit = {}
 
   def apply(startTimestamp: Long,
             endTimestamp: Long,
@@ -153,8 +152,8 @@ object RateFunction extends RangeFunction {
 
 object DeltaFunction extends RangeFunction {
 
-  def addToWindow(row: TransientRow): Unit = {}
-  def removeFromWindow(row: TransientRow): Unit = {}
+  def addedToWindow(row: TransientRow, window: Window): Unit = {}
+  def removedFromWindow(row: TransientRow, window: Window): Unit = {}
 
   def apply(startTimestamp: Long,
             endTimestamp: Long,
@@ -170,8 +169,8 @@ object DeltaFunction extends RangeFunction {
 object IRateFunction extends RangeFunction {
 
   override def needsCounterCorrection: Boolean = true
-  def addToWindow(row: TransientRow): Unit = {}
-  def removeFromWindow(row: TransientRow): Unit = {}
+  def addedToWindow(row: TransientRow, window: Window): Unit = {}
+  def removedFromWindow(row: TransientRow, window: Window): Unit = {}
 
   def apply(startTimestamp: Long,
             endTimestamp: Long,
@@ -186,8 +185,8 @@ object IRateFunction extends RangeFunction {
 
 object IDeltaFunction extends RangeFunction {
 
-  def addToWindow(row: TransientRow): Unit = {}
-  def removeFromWindow(row: TransientRow): Unit = {}
+  def addedToWindow(row: TransientRow, window: Window): Unit = {}
+  def removedFromWindow(row: TransientRow, window: Window): Unit = {}
 
   def apply(startTimestamp: Long,
             endTimestamp: Long,
@@ -202,8 +201,8 @@ object IDeltaFunction extends RangeFunction {
 
 object DerivFunction extends RangeFunction {
 
-  def addToWindow(row: TransientRow): Unit = {}
-  def removeFromWindow(row: TransientRow): Unit = {}
+  def addedToWindow(row: TransientRow, window: Window): Unit = {}
+  def removedFromWindow(row: TransientRow, window: Window): Unit = {}
 
   def apply(startTimestamp: Long,
             endTimestamp: Long,
@@ -217,18 +216,16 @@ object DerivFunction extends RangeFunction {
 
 object ResetsFunction extends RangeFunction {
   var resets = 0
-  val windowQueue = new IndexedArrayQueue[TransientRow]()
 
-  def addToWindow(row: TransientRow): Unit = {
-    if (windowQueue.size != 0 && windowQueue.last.value > row.value) {
+  def addedToWindow(row: TransientRow, window: Window): Unit = {
+    val size = window.size
+    if (size > 1 && window(size - 2).value > row.value) {
       resets += 1
     }
-    windowQueue.add(row)
   }
 
-  def removeFromWindow(row: TransientRow): Unit = {
-    var row = windowQueue.remove()
-    if (row.value > windowQueue.head.value) {
+  def removedFromWindow(row: TransientRow, window: Window): Unit = {
+    if (row.value > window.head.value) {
       resets -= 1
     }
   }
