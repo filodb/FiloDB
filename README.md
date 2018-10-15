@@ -33,10 +33,10 @@ See [architecture](doc/architecture.md) and [datasets and reading](doc/datasets_
   - [Using the Gateway to stream Application Metrics](#using-the-gateway-to-stream-application-metrics)
     - [Multiple Servers](#multiple-servers)
     - [Local Scale Testing](#local-scale-testing)
-- [Introduction to FiloDB Data Modelling](#introduction-to-filodb-data-modelling)
-  - [Example FiloDB Schema for machine metrics](#example-filodb-schema-for-machine-metrics)
+- [Understanding the FiloDB Data Model](#understanding-the-filodb-data-model)
+  - [Prometheus FiloDB Schema for Operational Metrics](#prometheus-filodb-schema-for-operational-metrics)
+  - [Traditional, Multi-Column Schema](#traditional-multi-column-schema)
   - [Data Modelling and Performance Considerations](#data-modelling-and-performance-considerations)
-  - [Predicate Pushdowns](#predicate-pushdowns)
   - [Sharding](#sharding)
 - [Using the FiloDB HTTP API](#using-the-filodb-http-api)
 - [PromQL Compatibility](#promql-compatibility)
@@ -45,9 +45,6 @@ See [architecture](doc/architecture.md) and [datasets and reading](doc/datasets_
   - [Configuring FiloDB](#configuring-filodb)
     - [Passing Cassandra Authentication Settings](#passing-cassandra-authentication-settings)
   - [Spark Data Source API Example (spark-shell)](#spark-data-source-api-example-spark-shell)
-  - [Spark/Scala/Java API](#sparkscalajava-api)
-  - [Spark Streaming Example](#spark-streaming-example)
-  - [SQL/Hive Example](#sqlhive-example)
   - [Querying Datasets](#querying-datasets)
 - [Using the CLI](#using-the-cli)
   - [Running the CLI](#running-the-cli)
@@ -95,6 +92,7 @@ To compile the .mermaid source files to .png's, install the [Mermaid CLI](http:/
 ### Anti-use-cases
 
 * Heavily transactional, update-oriented workflows
+* OLAP / Analytics
 
 ## Pre-requisites
 
@@ -273,111 +271,56 @@ Generate records:
 java -cp gateway/target/scala-2.11/gateway-*.telemetry-SNAPSHOT filodb.timeseries.TestTimeseriesProducer -c conf/timeseries-128shards-source.conf -p 5000
 ```
 
-## Introduction to FiloDB Data Modelling
+## Understanding the FiloDB Data Model
 
-Perhaps it's easiest by starting with a diagram of how FiloDB stores data.
+FiloDB is designed to scale to ingest and query millions of discrete time series.  A single time series consists of data points that contain the same **partition key**.  Successive data points are appended.  Each data point must contain a timestamp.  Examples of time series:
 
-<table>
-  <tr>
-    <td></td>
-    <td colspan="2">Column A</td>
-    <td colspan="2">Column B</td>
-  </tr>
-  <tr>
-    <td>Partition key 1</td>
-    <td>Chunk 1</td>
-    <td>Chunk 2</td>
-    <td>Chunk 1</td>
-    <td>Chunk 2</td>
-  </tr>
-  <tr>
-    <td>Partition key 2</td>
-    <td>Chunk 1</td>
-    <td>Chunk 2</td>
-    <td>Chunk 1</td>
-    <td>Chunk 2</td>
-  </tr>
-</table>
+* Individual operational metrics
+* Data from a single IoT device
+* Events from a single application, device, or endpoint
 
-Data is modeled and ingested using the two different parts of a record's primary key: the **partition key** and the **row key**.
+The **partition key** differentiates time series and also controls distribution of time series across the cluster.  For more information on sharding, see the sharding section below.  Components of a partition key, including individual key/values of `MapColumn`s, are indexed and used for filtering in queries.
 
-1. **partition key** - decides how data is going to be distributed across the cluster. All data within one partition key should be routed to the same shard, or Kafka partition, and one shard must fit completely into the memory of a single node.
-1. **row key**     - NOTE: for time series data the row key is only used when doing a range lookup during querying.  Each chunk is delimited by a start and end row key.   OUTDATED: acts as a primary key within each partition. Records with the same row key will replace previous ones. Within each chunkset, records are sorted by row key.  Row keys also facilitate range scans within a partition.
+### Prometheus FiloDB Schema for Operational Metrics
 
-The PRIMARY KEY for FiloDB consists of (partition key, row key).  When choosing the above values you must make sure the combination of the two are unique.  If any component of a primary key contains a null value, then a default value will be substituted.
-
-For examples of data modeling and choosing keys, see the examples below as well as [datasets](doc/datasets_reading.md).
-
-For additional information refer to Data Modeling and Performance Considerations.
-
-### Example FiloDB Schema for machine metrics
-
-* Partition key = `metricName:string,tags:map`
+* Partition key = `tags:map`
 * Row key = `timestamp`
 * Columns: `timestamp:ts,value:double`
 
-The above is the classic Prometheus-compatible schema.  It supports indexing on any component of the partition key.  Thus standard Prometheus queries that filter by a tag such as `hostname` or `datacenter` for example would work fine.
+The above is the classic Prometheus-compatible schema.  It supports indexing on any tag.  Thus standard Prometheus queries that filter by a tag such as `hostname` or `datacenter` for example would work fine.  Note that the Prometheus metric name is encoded as a key `__name__`, which is the Prometheus standard when exporting tags.
 
-If this was for events, you might have multiple columns, and some of them can be strings too.  This totally works fine.  See the example dataset schemas.
+Note that in the Prometheus data model, more complex metrics such as histograms are represented as individual time series.  This has some simplicity benefits, but does use up more time series and incur extra I/O overhead when transmitting raw data records.
+
+### Traditional, Multi-Column Schema
+
+Let's say that one had a metrics client, such as CodaHale metrics, which pre-aggregates percentiles and sends them along with the metric.  If we used the Prometheus schema, each percentile would wind up in its own time series.  This is fine, but incurs significant overhead as the partition key has to then be sent with each percentile over the wire.  Instead we can have a schema which includes all the percentiles together when sending the data:
+
+* Partition key = `metricName:string,tags:map`
+* Row key = `timestamp`
+* Columns: `timestamp:ts,min:double,max:double,p50:double,p90:double,p95:double,p99:double,p999:double`
 
 ### Data Modelling and Performance Considerations
 
-NOTE: this section is really old and needs to be rewritten.
+For more information on memory configuration, please have a look at the [ingestion guide](docs/ingestion.md).
 
 **Choosing Partition Keys**.
 
-- A good start for a partition key is a hash of an ID or columns that distribute well, plus a time bucket.  This spreads data around but also prevents too much data from piling up in a single partition.
-- Partition keys are the most efficient way to filter data.
-- FiloDB indexes components of a partition key.  A map can be used (when using a Prometheus-like data model for example) and all the keys and values within the map will be indexed, in addition to regular partition key columns.  This allows for very fast in-memory queries across many partitions.
-- If the numer of rows in each partition is too few, then the storage will not be efficient.
-- If the partition key changes during ingestion, then a new partition (or time series) is automatically created, just like in Prometheus.
-- For Cassandra, each partition cannot be too big, target 500MB-1GB as a maximum size.  Usually older data is TTL'ed.
+FiloDB is designed to efficiently ingest a huge number of individual time series - depending on available memory, one million or more time series per node is achievable.  Here are some pointers on choosing them:
 
-**Row Keys and Chunk Size**.
-
-Within a partition, data is divided into chunks.  The relationship between partitions, chunks, and row keys are as follows:
-
-* During ingestion, all the rows for a partition are sorted by row key in a memtable, then chunked (with the max chunk size configurable). Thus all chunks are internally in row key sorted order.
-* Filtering within a partition by row key ranges is available.  This results in only chunks that intersect with the row key range being read.
-* The choice of row key does not affect chunk size, but does affect row key range scanning.  Choose a row key according to how you want to filter partition data -- put the most important filtering key first in the row key.
-
-Bigger chunks are better.  The chunk size can be predicted as follows:
-
-    Math.min(`chunk_size`, MemtableSize / (AverageActiveNumberOfPartitions))
-
-For example, with the default `max-rows-per-table` of 200000, and 100 active partitions (let's say the time bucket is a day, and on average the other partition keys are hashed into 100 buckets), then the average chunk size will be 200000/100 = 2000 rows per chunk.
-
-Chunk size distribution may be checked by the CLI `analyze` command.  In addition, the following configuration affects chunk size:
-* `memtable.max-rows-per-table`, `memtable.flush-trigger-rows` affects how many rows are kept in the MemTable at a time, and this along with how many partitions are in the MemTable directly leads to the chunk size upon flushing.
-* `chunk_size` option when creating a dataset caps the size of a single chunk.  Smaller chunk sizes lead to slower reads, but more even distribution of chunks (ie better range scanning)
-* Row keys are immutable.  Don't pick columns that might change.
-* Consider moving one of the partition keys as a part of a row key if your chunk sizes/partitions are too small.  Use the `analyze` filo-cli command to discover partition size.
-* Less partitions and smaller chunk sizes leads to more chunks being written with each flush, which leads to better range scanning
-
-### Predicate Pushdowns
-
-To help with planning, here is an exact list of the predicate pushdowns (in Spark) that help with reducing I/O and query times:
-
-* Partition key column(s): =, IN on any partition key column
-  * = on every partition key results in a **single-partition** query
-  * = or IN on every partition key results in a **multi-partition** query, still faster than full table scan
-  * Otherwise, a filtered full table scan results - partitions not matching predicates will not be scanned
-* Rowkey Range Scan:
-  * Range scans are available for matching either the entire row key or the first N components of the row key
-  * The last component compared must be either = or a range, and all other components must be = comparison
-  * For example, if a row key consists of colA, colB, colC, then the following predicates are valid for push down:
-    - `colA = value`
-    - `colA >/>= value AND colA </<= value`
-    - `colA = value AND colB = val2`
-    - `colA = value AND (colB >/>= val1 AND colB </<= val2)`
-    - `colA = valA AND colB = valB AND colC = valC`
-    - `colA = valA AND colB = valB AND (colC >/>= val1 AND colC </<= val2)`
-
-Note: You can see predicate pushdown filters in application logs by setting logging level to INFO.
+* It is better to have smaller time series, as the indexing and filtering operations are designed to work on units of time series, and not samples within each time series.
+* The most flexible partition key is just to use a `MapColumn` and insert tags.
+* Each time series does take up both heap and offheap memory, and memory is likely the main limiting factor.  The amount of configured memory limits the number of actively ingesting time series possible at any moment.
 
 ### Sharding
 
-TODO: add details about FiloDB sharding, the shard-key vs partition key mechanism, etc.
+All data for a single time series, which belong to the same partition key, are routed to the same shard, or Kafka partition, and one shard must fit completely into the memory of a single node.
+
+The number of shards in each dataset is preconfigured in the source config.  Please see the [ingestion doc](docs/ingestion.md) for more information on configuration.  
+
+Metrics are routed to shards based on factors:
+
+1. Shard keys, which can be for example an application and the metric name, which define a group of shards to use for that application.  This allows limiting queries to a subset of shards for lower latency.
+2. The rest of the tags or components of a partition key are then used to compute which shard within the group of shards to assign to.
 
 ## Using the FiloDB HTTP API
 
@@ -464,144 +407,14 @@ Typically, you have per-environment configuration files, and you do not want to 
 
 ### Spark Data Source API Example (spark-shell)
 
-You can follow along using the [Spark Notebook](http://github.com/andypetrella/spark-notebook)... launch the notebook using `EXTRA_CLASSPATH=$FILO_JAR ADD_JARS=$FILO_JAR ./bin/spark-notebook &` where `FILO_JAR` is the path to `filodb-spark-assembly` jar.  See the [FiloDB_GDELT](doc/FiloDB_GDELT.snb) notebook to follow the GDELT examples below, or the [NYC Taxi](doc/FiloDB_Taxi_Geo_demo.snb) notebook for some really neat time series/geo analysis!
+NOTE: Most of this is deprecated.
 
-Or you can start a spark-shell locally,
-
-```bash
-bin/spark-shell --jars ../FiloDB/spark/target/scala-2.11/filodb-spark-assembly-0.7.0.spark20-SNAPSHOT.jar --packages com.databricks:spark-csv_2.11:1.4.0 --driver-memory 3G --executor-memory 3G
-```
-
-Loading CSV file from Spark:
-
-```scala
-scala> val csvDF = spark.read.format("com.databricks.spark.csv").
-           option("header", "true").option("inferSchema", "true").
-           load("../FiloDB/GDELT-1979-1984-100000.csv")
-```
-
-Creating a dataset from a Spark DataFrame,
-```scala
-scala> import org.apache.spark.sql.SaveMode
-import org.apache.spark.sql.SaveMode
-
-scala> csvDF.write.format("filodb.spark").
-             option("dataset", "gdelt").
-             option("row_keys", "GLOBALEVENTID").
-             option("partition_columns", "MonthYear:int").
-             mode(SaveMode.Overwrite).save()
-```
-
-Above, we partition the GDELT dataset by MonthYear, creating roughly 72 partitions for 1979-1984, with the unique GLOBALEVENTID used as a row key.  You could use multiple columns for the partition or row keys, of course.  For example, to partition by country code and year instead:
-
-```scala
-scala> csvDF.write.format("filodb.spark").
-             option("dataset", "gdelt_by_country_year").
-             option("row_keys", "GLOBALEVENTID").
-             option("partition_columns", "Actor2CountryCode:string,Year:int").
-             mode(SaveMode.Overwrite).save()
-```
-
-In both cases, the use of `GLOBALEVENTID` as a row key would allow for range queries within partitions by the `GLOBALEVENTID`.
-
-The key definitions can be left out for appends:
-
-```scala
-sourceDataFrame.write.format("filodb.spark").
-                option("dataset", "gdelt").
-                mode(SaveMode.Append).save()
-```
-
-Note that for efficient columnar encoding, wide rows with fewer partition keys are better for performance.
-
-By default, data is written to replace existing records with the same primary key.  To turn this primary key replacement off for faster ingestion, set `filodb.reprojector.bulk-write-mode` to `true`.
- 
 Reading the dataset,
 ```
 val df = spark.read.format("filodb.spark").option("dataset", "gdelt").load()
 ```
 
 The dataset can be queried using the DataFrame DSL. See the section [Querying Datasets](#querying-datasets) for examples.
-
-### Spark/Scala/Java API
-
-There is a more typesafe API than the Spark Data Source API.
-
-```scala
-import filodb.spark._
-spark.saveAsFilo(df, "gdelt",
-                      rowKeys = Seq("GLOBALEVENTID"),
-                      partitionColumns = Seq("MonthYear:int"))
-```
-
-The above creates the gdelt table based on the keys above, and also inserts data from the dataframe df.
-
-NOTE: If you are running Spark Shell in DSE, you might need to do `import _root_.filodb.spark._`.
-
-Please see the ScalaDoc for the method for more details -- there is a `database` option for specifying the Cassandra keyspace, and a `mode` option for specifying the Spark SQL SaveMode.
-
-There is also an API purely for inserting data... after all, specifying the keys is not needed when inserting into an existing table.
-
-```scala
-import filodb.spark._
-spark.insertIntoFilo(df, "gdelt")
-```
-
-The API for creating a DataFrame is also much more concise:
-
-```scala
-val df = spark.filoDataset("gdelt")
-val df2 = spark.filoDataset("gdelt", database = Some("keyspace2"))
-```
-
-The above method calls rely on an implicit conversion. From Java, you would need to create a new `FiloContext` first:
-
-```java
-FiloContext fc = new filodb.spark.FiloContext(sparkSession.sqlContext);
-fc.insertIntoFilo(df, "gdelt");
-```
-
-### Spark Streaming Example
-
-It's not difficult to ingest data into FiloDB using Spark Streaming.  Simple use `foreachRDD` on your `DStream` and then [transform each RDD into a DataFrame](https://spark.apache.org/docs/latest/streaming-programming-guide.html#dataframe-and-sql-operations).
-
-For an example, see the [StreamingTest](spark/src/test/scala/filodb.spark/StreamingTest.scala).
-
-### SQL/Hive Example
-
-Start Spark-SQL:
-
-```bash
-  bin/spark-sql --jars path/to/FiloDB/spark/target/scala-2.10/filodb-spark-assembly-0.4.jar
-```
-
-(NOTE: if you want to connect with a real Hive Metastore, you should probably instead start the thrift server, also adding the `--jars` above, and then start the `spark-beeline` client)
-
-Create a temporary table using an existing dataset,
-
-```sql
-  create temporary table gdelt
-  using filodb.spark
-  options (
-   dataset "gdelt"
- );
-```
-
-Then, start running SQL queries!
-
-You probably want to create a permanent Hive Metastore entry so you don't have to run `create temporary table` every single time at startup:
-
-```sql
-  CREATE TABLE gdelt using filodb.spark options (dataset "gdelt");
-```
-
-Once this is done, you could insert data using SQL syntax:
-
-```sql
-  INSERT INTO TABLE gdelt SELECT * FROM othertable;
-```
-
-Of course, this assumes `othertable` has a similar schema.
 
 ### Querying Datasets
 
