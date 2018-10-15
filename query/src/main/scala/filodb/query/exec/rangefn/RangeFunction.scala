@@ -67,7 +67,7 @@ trait RangeFunction {
             sampleToEmit: TransientRow,
             queryConfig: QueryConfig): Unit
 }
-// scalastyle:off
+
 object RangeFunction {
   def apply(func: Option[RangeFunctionId],
             funcParams: Seq[Any] = Nil): RangeFunction = {
@@ -91,7 +91,6 @@ object RangeFunction {
     }
   }
 }
-// scalastyle:on
 
 object LastSampleFunction extends RangeFunction {
 
