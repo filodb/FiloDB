@@ -19,7 +19,10 @@ import filodb.gateway.GatewayServer
 import filodb.prometheus.FormatConversion
 
 sealed trait DataOrCommand
-final case class DataSample(tags: Map[String, String], timestamp: Long, value: Double) extends DataOrCommand
+final case class DataSample(tags: Map[String, String],
+                            metric: String,
+                            timestamp: Long,
+                            value: Double) extends DataOrCommand
 case object FlushCommand extends DataOrCommand
 
 /**
@@ -118,7 +121,7 @@ object TestTimeseriesProducer extends StrictLogging {
       timeSeriesData(startTime, numShards, numTimeSeries)
         .take(numSamples)
         .foreach { sample =>
-          val rec = PrometheusInputRecord(sample.tags, dataset, sample.timestamp, sample.value)
+          val rec = PrometheusInputRecord(sample.tags, sample.metric, dataset, sample.timestamp, sample.value)
           val shard = shardMapper.ingestionShard(rec.shardKeyHash, rec.partitionKeyHash, spread)
           while (!shardQueues(shard).offer(rec)) { Thread sleep 50 }
         }
@@ -146,13 +149,12 @@ object TestTimeseriesProducer extends StrictLogging {
       val timestamp = startTime + (n.toLong / numTimeSeries) * 10000 // generate 1 sample every 10s for each instance
       val value = 15 + Math.sin(n + 1) + rand.nextGaussian()
 
-      val tags = Map("__name__" -> "heap_usage",
-                     "dc"       -> s"DC$dc",
+      val tags = Map("dc"       -> s"DC$dc",
                      "job"      -> s"App-$app",
                      "partition" -> s"partition-$partition",
                      "host"     -> s"H$host",
                      "instance" -> s"Instance-$instance")
-      DataSample(tags, timestamp, value)
+      DataSample(tags, "heap_usage", timestamp, value)
     }
   }
 }
