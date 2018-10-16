@@ -147,7 +147,7 @@ object FiloBuild extends Build {
   lazy val gateway = project
     .in(file("gateway"))
     .settings(commonSettings: _*)
-    .settings(name := "gateway")
+    .settings(name := "filodb-gateway")
     .settings(libraryDependencies ++= gatewayDeps)
     .settings(gatewayAssemblySettings: _*)
     .dependsOn(coordinator % "compile->compile; test->test",

@@ -434,8 +434,6 @@ final class RecordBuilder(memFactory: MemFactory,
 }
 
 object RecordBuilder {
-  import collection.JavaConverters._
-
   val DefaultContainerSize = 256 * 1024
   val MinContainerSize = 2048
   val HASH_INIT = 7
@@ -512,40 +510,19 @@ object RecordBuilder {
   }
 
   /**
-    * Combines the hashes from sortAndComputeHashes, only including certain keys, into an overall hash value.
-    * All the keys from includeKeys must be present.  Usually used to compute the shard key hash.
-    * @param pairs sorted pairs of byte key values, from sortAndComputeHashes
-    * @param hashes the output from sortAndComputeHashes
-    * @param includeKeys the keys to include
-    * @return Some(hash) if all the keys in includeKeys were present, or None
-    */
-  final def combineHashIncluding(pairs: java.util.ArrayList[(String, String)],
-                                 hashes: Array[Int],
-                                 includeKeys: Set[String]): Option[Int] = {
+   * Computes a shard key hash from the metric name and the values of the non-metric shard key columns
+   * @param shardKeyValues the non-metric shard key values (such as the job/exporter/app), sorted in order of
+   *        the key name.  For example, it should be Seq(exporter, job).
+   * @param metric the metric value to use in the calculation.
+   */
+  final def shardKeyHash(shardKeyValues: Seq[Array[Byte]], metric: Array[Byte]): Int = {
     var hash = 7
-    var numIncluded = 0
-    var index = 0
-    while (index < pairs.size && numIncluded < includeKeys.size) {
-      if (includeKeys contains pairs.get(index)._1) {
-        hash = combineHash(hash, hashes(index))
-        numIncluded += 1
-      }
-      index += 1
-    }
-    if (numIncluded == includeKeys.size) Some(hash) else None
+    shardKeyValues.foreach { value => hash = combineHash(hash, BinaryRegion.hash32(value)) }
+    combineHash(hash, BinaryRegion.hash32(metric))
   }
 
-  /**
-   * A convenience function to compute the shard key hash given a list of shard key columns
-   * and their corresponding values.  The list must contain all the shard key columns and only those.
-   * @param shardKeyColumns the names of shard key columns
-   * @param shardKeyValues the values for each shard key column
-   */
-  final def shardKeyHash(shardKeyColumns: Seq[String], shardKeyValues: Seq[String]): Int = {
-    val jList = new java.util.ArrayList(shardKeyColumns.zip(shardKeyValues).asJava)
-    val hashes = sortAndComputeHashes(jList)
-    combineHashIncluding(jList, hashes, shardKeyColumns.toSet).get
-  }
+  final def shardKeyHash(shardKeyValues: Seq[String], metric: String): Int =
+    shardKeyHash(shardKeyValues.map(_.getBytes), metric.getBytes)
 
   /**
     * Removes the ignoreShardKeyColumnSuffixes from LabelPair as configured in DataSet.
