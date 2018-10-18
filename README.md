@@ -1,9 +1,9 @@
 # FiloDB
 
 [![Join the chat at https://gitter.im/velvia/FiloDB](https://badges.gitter.im/Join%20Chat.svg)](https://gitter.im/velvia/FiloDB?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)
-[![Build Status](https://travis-ci.org/filodb/FiloDB.svg?branch=master)](https://travis-ci.org/filodb/FiloDB)
+[![Build Status](https://travis-ci.org/filodb/FiloDB.svg?branch=develop)](https://travis-ci.org/filodb/FiloDB)
 
-Distributed, real-time, in-memory, massively scalable, multi-schema time series / event / operational database.  Prometheus support.
+Distributed, Prometheus-compatible, real-time, in-memory, massively scalable, multi-schema time series / event / operational database.
 
 [filodb-announce](https://groups.google.com/forum/#!forum/filodb-announce) google group
 and [filodb-discuss](https://groups.google.com/forum/#!forum/filodb-discuss) google group
@@ -17,8 +17,6 @@ and [filodb-discuss](https://groups.google.com/forum/#!forum/filodb-discuss) goo
 ```
 
 ![](Dantat.jpg)
-
-See [architecture](doc/architecture.md) and [datasets and reading](doc/datasets_reading.md) for more information.  Also see the Spark Notebooks under `doc`... there is one for time-series/geo analysis of the NYC Taxi dataset, and one for interactive charting of the GDELT dataset!
 
 <!-- START doctoc generated TOC please keep comment here to allow auto update -->
 <!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
@@ -38,17 +36,13 @@ See [architecture](doc/architecture.md) and [datasets and reading](doc/datasets_
   - [Traditional, Multi-Column Schema](#traditional-multi-column-schema)
   - [Data Modelling and Performance Considerations](#data-modelling-and-performance-considerations)
   - [Sharding](#sharding)
-- [Using the FiloDB HTTP API](#using-the-filodb-http-api)
-- [PromQL Compatibility](#promql-compatibility)
-  - [FiloDB Extensions](#filodb-extensions)
-- [Using FiloDB Data Source with Spark](#using-filodb-data-source-with-spark)
-  - [Configuring FiloDB](#configuring-filodb)
-    - [Passing Cassandra Authentication Settings](#passing-cassandra-authentication-settings)
-  - [Spark Data Source API Example (spark-shell)](#spark-data-source-api-example-spark-shell)
-  - [Querying Datasets](#querying-datasets)
-- [Using the CLI](#using-the-cli)
-  - [Running the CLI](#running-the-cli)
-  - [CLI Example](#cli-example)
+- [Querying FiloDB](#querying-filodb)
+  - [FiloDB PromQL Extensions](#filodb-promql-extensions)
+  - [Using the FiloDB HTTP API](#using-the-filodb-http-api)
+  - [Grafana setup](#grafana-setup)
+  - [Using the CLI](#using-the-cli)
+  - [CLI Options](#cli-options)
+  - [Configuring the CLI](#configuring-the-cli)
 - [Current Status](#current-status)
 - [Deploying](#deploying)
 - [Monitoring and Metrics](#monitoring-and-metrics)
@@ -322,15 +316,11 @@ Metrics are routed to shards based on factors:
 1. Shard keys, which can be for example an application and the metric name, which define a group of shards to use for that application.  This allows limiting queries to a subset of shards for lower latency.
 2. The rest of the tags or components of a partition key are then used to compute which shard within the group of shards to assign to.
 
-## Using the FiloDB HTTP API
+## Querying FiloDB
 
-Please see the [HTTP API](doc/http_api.md) doc.
+FiloDB can be queried using the [Prometheus Query Language](https://prometheus.io/docs/prometheus/latest/querying/basics/) through its HTTP API or through its CLI.
 
-## PromQL Compatibility
-
-Current status:
-
-### FiloDB Extensions
+### FiloDB PromQL Extensions
 
 Some special functions exist to aid debugging and for other purposes:
 
@@ -342,148 +332,121 @@ Example of debugging chunk metadata using the CLI:
 
     ./filo-cli --host 127.0.0.1 --dataset prometheus --promql '_filodb_chunkmeta_all(heap_usage{app="App-0"})' --start XX --end YY
 
-## Using FiloDB Data Source with Spark
+### Using the FiloDB HTTP API
 
-FiloDB has a Spark data-source module - `filodb.spark`. So, you can use the Spark Dataframes `read` and `write` APIs with FiloDB. To use it, follow the steps below
+Please see the [HTTP API](doc/http_api.md) doc.
 
-1. Start Cassandra and update project configuration if required.
-2. From the FiloDB project directory, execute,
-   ```
-   $ sbt clean
-   $ ./filo-cli --command init
-   $ sbt spark/assembly
-   ```
-3. Use the jar `FiloDB/spark/target/scala-2.10/filodb-spark-assembly-0.4.jar` with Spark 1.6.x.
+Example:
 
-The options to use with the data-source api are:
+    curl 'localhost:8080/promql/timeseries/api/v1/query?query=memstore_rows_ingested_total%7Bjob="filodb"%7D%5B1m%5D&time=1539902015'
 
-| option           | value                                                            | command    | optional |
-|------------------|------------------------------------------------------------------|------------|----------|
-| dataset          | name of the dataset                                              | read/write | No       |
-| database         | name of the database to use for the dataset.  For Cassandra, defaults to `filodb.cassandra.keyspace` config.  | read/write | Yes |
-| row_keys         | comma-separated list of column name(s) to use for the row primary key within each partition.  Computed columns are not allowed.  May be used for range queries within partitions and chunks are sorted by row keys. | write      | No if mode is OverWrite or creating dataset for first time  |
-| partition_keys   | comma-separated list of column name(s) or computed column functions to use for the partition key.  If not specified, defaults to `:string /0` (a single partition).  | write      | Yes      |
-| splits_per_node  | number of read threads per node, defaults to 4 | read | Yes |
-| reset_schema     | If true, allows dataset schema (eg partition keys) to be redefined for an existing dataset when SaveMode.Overwrite is used.  Defaults to false.  | write | Yes |
-| flush_after_write | initiates a memtable flush after Spark INSERT / DataFrame.write;  this ensures all the rows are flushed to ColumnStore.  Might want to be turned off for streaming  | write | yes - default true |
-| version          | numeric version of data to write, defaults to 0  | read/write | Yes |
+    {"data":{"resultType":"vector","result":[]},"status":"success"}⏎
 
-Partitioning columns could be created using an expression on the original column in Spark:
+The HTTP API can also be used to quickly check on the cluster and shard status:
 
-    val newDF = df.withColumn("partition", df("someCol") % 100)
+    curl localhost:8080/api/v1/cluster/timeseries/status | jq '.'
 
-or even UDFs:
-
-    val idHash = sqlContext.udf.register("hashCode", (s: String) => s.hashCode())
-    val newDF = df.withColumn("partition", idHash(df("id")) % 100) 
-
-However, note that the above methods will lead to a physical column being created, so use of computed columns is probably preferable.
-
-### Configuring FiloDB
-
-Some options must be configured before starting the Spark Shell or Spark application. FiloDB executables are invoked by spark application. These configuration settings can be tuned as per the needs of individual application invoking filoDB executables. There are two methods:
-
-1. Modify the `application.conf` and rebuild, or repackage a new configuration.
-2. Override the built in defaults by setting SparkConf configuration values, preceding the filo settings with `spark.filodb`.  For example, to change the default keyspace, pass `--conf spark.filodb.cassandra.keyspace=mykeyspace` to Spark Shell/Submit.  To use the fast in-memory column store instead of Cassandra, pass `--conf spark.filodb.store=in-memory`.
-3. It might be easier to pass in an entire configuration file to FiloDB.  Pass the java option `-Dfilodb.config.file=/path/to/my-filodb.conf`, for example using `--java-driver-options`.
-
-Note that if Cassandra is kept as the default column store, the keyspace can be changed on each transaction by specifying the `database` option in the data source API, or the database parameter in the Scala API.
-
-For a list of all configuration params as well as a template for a config file, see the `filodb_defaults.conf` file included in the source and packaged with the jar as defaults.
-
-For metrics system configuration, see the metrics section below.
-
-#### Passing Cassandra Authentication Settings
-
-Typically, you have per-environment configuration files, and you do not want to check in username and password information.  Here are ways to pass in authentication settings:
-
-* Pass in the credentials on the command line.
-  - For Spark, `--conf spark.filodb.cassandra.username=XYZ` etc.
-  - For CLI, other apps, pass in JVM args: `-Dfilodb.cassandra.username=XYZ`
-* Put the credentials in a local file on the host, and refer to it from your config file.   In your config file, do `include "/usr/local/filodb-cass-auth.properties"`.  The properties file would look like:
-
-        filodb.cassandra.username=XYZ
-        filodb.cassandra.password=AABBCC
-
-### Spark Data Source API Example (spark-shell)
-
-NOTE: Most of this is deprecated.
-
-Reading the dataset,
-```
-val df = spark.read.format("filodb.spark").option("dataset", "gdelt").load()
+```json
+{
+  "status": "success",
+  "data": [
+    {
+      "shard": 0,
+      "status": "ShardStatusActive",
+      "address": "akka://filo-standalone"
+    },
+    {
+      "shard": 1,
+      "status": "ShardStatusActive",
+      "address": "akka://filo-standalone"
+    },
+    {
+      "shard": 2,
+      "status": "ShardStatusActive",
+      "address": "akka.tcp://filo-standalone@127.0.0.1:52519"
+    },
+    {
+      "shard": 3,
+      "status": "ShardStatusActive",
+      "address": "akka.tcp://filo-standalone@127.0.0.1:52519"
+    }
+  ]
+}
 ```
 
-The dataset can be queried using the DataFrame DSL. See the section [Querying Datasets](#querying-datasets) for examples.
+### Grafana setup
 
-### Querying Datasets
+Since FiloDB exposes a Prometheus-compatible HTTP API, it is possible to set up FiloDB as a Grafana data source.
 
-Now do some queries, using the DataFrame DSL:
+* Set the data source type to "Prometheus"
+* In the HTTP URL box, enter in the FiloDB HTTP URL (usually the load balancer for all the FiloDB endpoints).   Be sure to append `/promql/timeseries/`, where you would put the name of the dataset instead of "timeseries" if it is not called timeseries.
 
-```scala
-scala> df.select(count(df("MonthYear"))).show()
-...
-COUNT(MonthYear)
-4037998
+### Using the CLI
+
+The CLI is now primarily used to interact with standalone FiloDB servers, including querying, getting status, and as a way to initialize dataset definitions and do admin tasks.  The following examples use the FiloDB/Gateway/Telegraf setup from the section [Using the Gateway to stream Application Metrics](#using-the-gateway-to-stream-application-metrics) -- but be sure to start a second FiloDB server, using `./filodb-dev-start.sh -l 2 -p`.
+
+The **indexnames** command lists all of the indexed tag keys or column names, based on the partition key or Prometheus key/value tags that define time series:
+
+    ./filo-cli '-Dakka.remote.netty.tcp.hostname=127.0.0.1' --host 127.0.0.1 --dataset timeseries --command indexnames
+
+```
+le
+host
+shard
+__name__
+dataset
 ```
 
-or SQL, to find the top 15 events with the highest tone:
+The **indexvalues** command lists the top values (as well as their cardinality) in specific shards for any given tag key or column name.  Here we list the top metrics (for Prometheus schema, which uses the tag `__name__`) in shard 0:
 
-```scala
-scala> df.registerTempTable("gdelt")
+    ./filo-cli '-Dakka.remote.netty.tcp.hostname=127.0.0.1' --host 127.0.0.1 --dataset timeseries --command indexvalues --indexName __name__ --shards 0
 
-scala> sqlContext.sql("SELECT Actor1Name, Actor2Name, AvgTone FROM gdelt ORDER BY AvgTone DESC LIMIT 15").collect()
-res13: Array[org.apache.spark.sql.Row] = Array([208077.29634561483])
+```
+             chunk_bytes_per_call_bucket  10
+                  chunks_per_call_bucket  10
+       kafka_container_size_bytes_bucket  10
+        num_samples_per_container_bucket  10
+       blockstore_blocks_reclaimed_total  1
+                  blockstore_free_blocks  1
+blockstore_time_ordered_blocks_reclaimed_total  1
+                  blockstore_used_blocks  1
+             memstore_data_dropped_total  1
+memstore_encoded_bytes_allocated_bytes_total  1
 ```
 
-Now, how about something uniquely Spark .. feed SQL query results to MLLib to compute a correlation:
+Now, let's query a particular metric:
 
-```scala
-scala> import org.apache.spark.mllib.stat.Statistics
+    ./filo-cli '-Dakka.remote.netty.tcp.hostname=127.0.0.1' --host 127.0.0.1 --dataset timeseries --promql 'memstore_rows_ingested_total{job="filodb"}'
 
-scala> val numMentions = df.select("NumMentions").map(row => row.getInt(0).toDouble)
-numMentions: org.apache.spark.rdd.RDD[Double] = MapPartitionsRDD[100] at map at DataFrame.scala:848
+### CLI Options
 
-scala> val numArticles = df.select("NumArticles").map(row => row.getInt(0).toDouble)
-numArticles: org.apache.spark.rdd.RDD[Double] = MapPartitionsRDD[104] at map at DataFrame.scala:848
+The `filo-cli` accepts arguments and options as key-value pairs, specified like `--limit=100`  For quick help run it with no arguments.  A subset of useful options:
 
-scala> val correlation = Statistics.corr(numMentions, numArticles, "pearson")
-```
-
-Notes: You can also query filoDB tables using Spark thrift server. Refer to [SQL/Hive Example](#sqlhive-example) for additional information regarding thrift server. 
-
-FiloDB logs can be viewed in corresponding spark application logs by setting appropriate settings in `log4j.properties`, or `logback.xml` for DSE.
-
-## Using the CLI
-
-The `filo-cli` accepts arguments as key-value pairs.  For quick help run it with no arguments.  The following keys are supported:
-
-| key          | purpose                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-|--------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| dataset    | It is required for all the operations. Its value should be the name of the dataset                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| key          | description   |
+|--------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| dataset    | It is required for all the operations. Its value should be the name of the dataset |
+| host       | The hostname or IP address of the FiloDB standalone host |
+| port       | The port number of the FiloDB standalone host.  Defaults to 2552.  |
+| start      | The start of the query timerange in seconds since epoch  |
+| step       | The step size in seconds of the PromQL query.  Successive windows occur at every step seconds   |
+| stop       | The end of the query timerange in seconds since epoch    |
 | database   | Specifies the "database" the dataset should operate in.  For Cassandra, this is the keyspace.  If not specified, uses config value.  |
-| limit      | This is optional key to be used with `select`. Its value should be the number of rows required.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| dataColumns    | This is required for defining the data columns of a dataset. Its value should be a comma-separated string of the format, `column1:typeOfColumn1,column2:typeOfColumn2` where column1 and column2 are the names of the columns and typeOfColumn1 and typeOfColumn2 are one of `int`,`long`,`double`,`string`,`bitmap`,`ts`                                                                                                                                                                                                                                                                                                                                                                                                              |
-| rowKeys | This defines the row keys. Its value should be a comma-separated list of column names to make up the row key. These must be from `dataColumns`. It defaults to a single column "timestamp"                                                                                                                    |
-| partitionColumns | Required.  Comma-separated string of the format, `column1:typeOfColumn1,column2:typeOfColumn2` where column1 and column2 are the names of the columns and typeOfColumn1 and typeOfColumn2 are one of `int`,`long`,`double`,`string`,`bitmap`,`ts`,`map` to make up the partition columns.  Only one partition column is required.  Map columns must be the last partition column.                   |
-| command    | Its value can be either of `init`, `create`, `importcsv`, `truncate`, `status`, `setup`, `indexnames`, `indexvalues`, `clearMetadata` or `list`.<br/><br/>The `init` command is used to create the FiloDB schema.<br/><br/>The `create` command is used to define new a dataset. The `list` command can be used to view the schema of a dataset. For example, <br/>```./filo-cli --command list --dataset playlist```<br/><br/>The `importcsv` command can be used to load data from a CSV file into a dataset. For example,<br/>```./filo-cli --command importcsv --dataset playlist --filename playlist.csv```<br/>Note: The CSV file should be delimited with a comma and have a header row. The column names must match those specified when creating the schema for that dataset.<br>
-`truncate` truncates data for an existing dataset to 0.<br>
-The other commands are used to connect with, setup ingestion, check status, and query standalone FiloDB nodes. |
-| select     | Its value should be a comma-separated string of the columns to be selected,<br/>```./filo-cli --dataset playlist --select album,title```<br/>The result from `select` is printed in the console by default. An output file can be specified with the key `--outfile`. For example,<br/>```./filo-cli --dataset playlist --select album,title --outfile playlist.csv```                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| delimiter  | This is optional key to be used with `importcsv` command. Its value should be the field delimiter character. Default value is comma.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| timeoutSeconds | The number of seconds for timeout for initialization, table creation, other quick things  |
+| limit      | The maximum number of samples per time series  |
+| shards     | (EXPERT) overrides the automatic shard calculation by passing in a comma-separated list of specific shards to query.  Very useful to debug sharding issues.  |
+| everyNSeconds  | Repeats the query every (argument) seconds     |
+| timeoutSeconds | The number of seconds for the network timeout  |
 
-### Running the CLI
+### Configuring the CLI
 
-You may want to customize a configuration to point at your Cassandra cluster, or change other configuration parameters.  The easiest is to pass in a customized config file:
+Using the CLI to initialize Cassandra clusters and datasets necessitates passing in the right configuration.  The easiest is to pass in a config file:
 
-    ./filo-cli -Dfilodb.config.file=/path/to/myfilo.conf --command init
+    ./filo-cli -Dconfig.file=conf/timeseries-filodb-server.conf --command init
 
 You may also set the `FILO_CONFIG_FILE` environment var instead, but any `-Dfilodb.config.file` args passed in takes precedence.
 
 Individual configuration params may also be changed by passing them on the command line.  They must be the first arguments passed in.  For example:
 
-    ./filo-cli -Dfilodb.columnstore.segment-cache-size=10000 --command ingestcsv ....
+    ./filo-cli -Dfilodb.cassandra.keyspace=mykeyspace --command init
 
 All `-D` config options must be passed before any other arguments.
 
@@ -491,53 +454,32 @@ You may also configure CLI logging by copying `cli/src/main/resources/logback.xm
 
 You can also change the logging directory by setting the FILO_LOG_DIR environment variable before calling the CLI.
 
-NOTE: The CLI currently only operates on the Cassandra column store.  The `--database` option may be used to specify which keyspace to operate on.  If the keyspace is not initialized, then FiloDB code will automatically create one for you, but you may want to create it yourself to control the options that you want.
-
-### CLI Example
-The following examples use the [GDELT public dataset](http://data.gdeltproject.org/documentation/GDELT-Data_Format_Codebook.pdf) and can be run from the project directory.
-
-Create a dataset with all the columns :
-
-```
-./filo-cli --command create --dataset gdelt --dataColumns GLOBALEVENTID:int,SQLDATE:string,Year:int,FractionDate:double,Actor1Code:string,Actor1Name:string,Actor1CountryCode:string,Actor1KnownGroupCode:string,Actor1EthnicCode:string,Actor1Religion1Code:string,Actor1Religion2Code:string,Actor1Type1Code:string,Actor1Type2Code:string,Actor1Type3Code:string,Actor2Code:string,Actor2Name:string,Actor2CountryCode:string,Actor2KnownGroupCode:string,Actor2EthnicCode:string,Actor2Religion1Code:string,Actor2Religion2Code:string,Actor2Type1Code:string,Actor2Type2Code:string,Actor2Type3Code:string,IsRootEvent:int,EventCode:string,EventBaseCode:string,EventRootCode:string,QuadClass:int,GoldsteinScale:double,NumMentions:int,NumSources:int,NumArticles:int,AvgTone:double,Actor1Geo_Type:int,Actor1Geo_FullName:string,Actor1Geo_CountryCode:string,Actor1Geo_ADM1Code:string,Actor1Geo_Lat:double,Actor1Geo_Long:double,Actor1Geo_FeatureID:int,Actor2Geo_Type:int,Actor2Geo_FullName:string,Actor2Geo_CountryCode:string,Actor2Geo_ADM1Code:string,Actor2Geo_Lat:double,Actor2Geo_Long:double,Actor2Geo_FeatureID:int,ActionGeo_Type:int,ActionGeo_FullName:string,ActionGeo_CountryCode:string,ActionGeo_ADM1Code:string,ActionGeo_Lat:double,ActionGeo_Long:double,ActionGeo_FeatureID:int,DATEADDED:string,Actor1Geo_FullLocation:string,Actor2Geo_FullLocation:string,ActionGeo_FullLocation:string --partitionColumns MonthYear:int --rowKeys GLOBALEVENTID
-```
-
-Verify the dataset metadata:
-
-```
-./filo-cli --command list --dataset gdelt
-```
-
-Import data from a CSV file:
-
-```
-./filo-cli --command importcsv --dataset gdelt --filename GDELT-1979-1984-100000.csv
-```
-
-Query/export some columns:
-
-```
-./filo-cli --dataset gdelt --select MonthYear,Actor2Code --limit 5 --outfile out.csv
-```
-
-
 ## Current Status
 
-TODO
+| Component | Status     |
+|-----------|------------|
+| FiloDB Standalone | Stable, tested at scale          |
+| Gateway           | Experimental                     |
+| Cassandra         | Stable, works with C-2.x and 3.x |
+| Kafka             | Stable                           |
+| Spark             | Deprecated                       |
+
+FiloDB PromQL Support: currently FiloDB supports about 60% of PromQL.  We are working to add more support regularly.
 
 ## Deploying
 
-- sbt spark/assembly
-- sbt cli/assembly
-- Copy `core/src/main/resources/application.conf` and modify as needed for your own config file
-- Set FILO_CONFIG_FILE to the path to your custom config
+- `sbt standalone/assembly`
+- `sbt cli/assembly`
+- `sbt gateway/assembly`
+- Copy and modify `conf/timeseries-filodb-server.conf`, deploy it
+- Create a source config.  See [ingestion docs](docs/ingestion.md) as well as `conf/timeseries-128shards-source.conf` as examples.
 - Run the cli jar as the filo CLI command line tool and initialize keyspaces if using Cassandra: `filo-cli-*.jar --command init`
+- Create datasets
+- See [Akka Bootstrapper](docs/akka-bootstrapper.md) for different methods of bootstrapping FiloDB clusters
+- Start the gateway server(s)
+- Run the CLI setup command to set up the standalone nodes to start ingesting a dataset from Kafka
 
-Note that if you are using DSE or have vnodes enabled, a lower number of vnodes (16 or less) is STRONGLY recommended as higher numbers of vnodes slows down queries substantially and basically prevents subsecond queries from happening.
-
-If you are using DSE 5.0, you need to shade the hdrhistogram jar when building the FiloDB assembly due to a version conflict.
-
-By default, FiloDB nodes (basically all the Spark executors) talk to each other using a random port and locally assigned hostname.  You may wish to set `filodb.spark.driver.port`, `filodb.spark.executor.port` to assign specific ports (for AWS, for example) or possibly use a different config file on each host and set `akka.remote.netty.tcp.hostname` on each host's config file.
+NOTE: The setup command only has to be run the first time you start up the standalone servers.  After that, the setup is persisted to Cassandra so that on startup, FiloDB nodes will automatically start ingestion from that dataset.
 
 Recommended flags:
 
