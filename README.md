@@ -143,7 +143,7 @@ sbt standalone/assembly cli/assembly gateway/assembly
 First set up the dataset. This should create the keyspaces and tables in Cassandra. 
 ```
 ./filo-cli -Dconfig.file=conf/timeseries-filodb-server.conf  --command init
-./filo-cli -Dconfig.file=conf/timeseries-filodb-server.conf  --command create --dataset timeseries --dataColumns timestamp:ts,value:double --partitionColumns tags:map --shardKeyColumns __name__,job
+./filo-cli -Dconfig.file=conf/timeseries-filodb-server.conf  --command create --dataset timeseries --dataColumns timestamp:ts,value:double --partitionColumns tags:map --shardKeyColumns __name__,app
 ```
 Verify that tables were created in `filodb` and `filodb-admin` keyspaces.
 
@@ -338,9 +338,88 @@ Please see the [HTTP API](doc/http_api.md) doc.
 
 Example:
 
-    curl 'localhost:8080/promql/timeseries/api/v1/query?query=memstore_rows_ingested_total%7Bjob="filodb"%7D%5B1m%5D&time=1539902015'
+    curl 'localhost:8080/promql/timeseries/api/v1/query?query=memstore_rows_ingested_total%7Bapp="filodb"%7D%5B1m%5D&time=1539908476'
 
-    {"data":{"resultType":"vector","result":[]},"status":"success"}⏎
+```json
+{
+  "data": {
+    "resultType": "matrix",
+    "result": [
+      {
+        "metric": {
+          "host": "MacBook-Pro-229.local",
+          "shard": "1",
+          "__name__": "memstore_rows_ingested_total",
+          "dataset": "timeseries",
+          "app": "filodb"
+        },
+        "values": [
+          [
+            1539908420,
+            "252.0"
+          ],
+          [
+            1539908430,
+            "252.0"
+          ],
+          [
+            1539908440,
+            "252.0"
+          ],
+          [
+            1539908450,
+            "252.0"
+          ],
+          [
+            1539908460,
+            "252.0"
+          ],
+          [
+            1539908470,
+            "360.0"
+          ]
+        ]
+      },
+      {
+        "metric": {
+          "host": "MacBook-Pro-229.local",
+          "shard": "0",
+          "__name__": "memstore_rows_ingested_total",
+          "dataset": "timeseries",
+          "app": "filodb"
+        },
+        "values": [
+          [
+            1539908420,
+            "462.0"
+          ],
+          [
+            1539908430,
+            "462.0"
+          ],
+          [
+            1539908440,
+            "462.0"
+          ],
+          [
+            1539908450,
+            "462.0"
+          ],
+          [
+            1539908460,
+            "462.0"
+          ],
+          [
+            1539908470,
+            "660.0"
+          ]
+        ]
+      }
+    ]
+  },
+  "status": "success"
+}
+```
 
 The HTTP API can also be used to quickly check on the cluster and shard status:
 
@@ -416,7 +495,18 @@ memstore_encoded_bytes_allocated_bytes_total  1
 
 Now, let's query a particular metric:
 
-    ./filo-cli '-Dakka.remote.netty.tcp.hostname=127.0.0.1' --host 127.0.0.1 --dataset timeseries --promql 'memstore_rows_ingested_total{job="filodb"}'
+    ./filo-cli '-Dakka.remote.netty.tcp.hostname=127.0.0.1' --host 127.0.0.1 --dataset timeseries --promql 'memstore_rows_ingested_total{app="filodb"}'
+
+```
+Sending query command to server for timeseries with options QueryOptions(<function1>,16,60,100,None)...
+Query Plan:
+PeriodicSeries(RawSeries(IntervalSelector(List(1539908042000),List(1539908342000)),List(ColumnFilter(app,Equals(filodb)), ColumnFilter(__name__,Equals(memstore_rows_ingested_total))),List()),1539908342000,10000,1539908342000)
+/shard:1/b2[[__name__: memstore_rows_ingested_total, app: filodb, dataset: timeseries, host: MacBook-Pro-229.local, shard: 1]]
+  2018-10-18T17:19:02.000-07:00 (1s ago) 1539908342000  36.0
+
+/shard:3/b2[[__name__: memstore_rows_ingested_total, app: filodb, dataset: timeseries, host: MacBook-Pro-229.local, shard: 0]]
+  2018-10-18T17:19:02.000-07:00 (2s ago) 1539908342000  66.0
+```
 
 ### CLI Options
 
