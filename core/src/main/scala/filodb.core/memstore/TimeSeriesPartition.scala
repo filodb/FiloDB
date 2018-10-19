@@ -57,7 +57,9 @@ class TimeSeriesPartition(val partID: Int,
                           // Volatile pointer to infoMap structure.  Name of field MUST match mapKlazz method above
                           var mapPtr: BinaryRegion.NativePointer,
                           // Shared class for mutating the infoMap / OffheapLFSortedIDMap given mapPtr above
-                          offheapInfoMap: OffheapLFSortedIDMapMutator)
+                          offheapInfoMap: OffheapLFSortedIDMapMutator,
+                          // Lock state used by OffheapLFSortedIDMap.
+                          var lockState: Int = 0)
 extends ReadablePartition with MapHolder {
   import TimeSeriesPartition._
 

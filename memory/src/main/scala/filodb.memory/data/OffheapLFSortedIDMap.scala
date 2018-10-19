@@ -82,6 +82,7 @@ object OffheapLFSortedIDMap extends StrictLogging {
 // as the OffheapLFSortedIDMap code will mutate it atomically as the map grows/changes.
 trait MapHolder {
   var mapPtr: NativePointer
+  var lockState: Int
 }
 
 /**
@@ -105,6 +106,7 @@ class OffheapLFSortedIDMapReader(memFactory: MemFactory, holderKlass: Class[_ <:
   def keyFunc(elementPtr: NativePointer): Long = UnsafeUtils.getLongVolatile(elementPtr)
 
   protected val mapPtrOffset = UnsafeUtils.unsafe.objectFieldOffset(holderKlass.getDeclaredField("mapPtr"))
+  protected val lockStateOffset = UnsafeUtils.unsafe.objectFieldOffset(holderKlass.getDeclaredField("lockState"))
 
   // basic accessor classes
   @inline final def head(inst: MapHolder): Int = state(inst).head
@@ -244,6 +246,116 @@ class OffheapLFSortedIDMapReader(memFactory: MemFactory, holderKlass: Class[_ <:
       }
 
     innerBinSearch(0, mapLen)
+  }
+
+  /**
+   * Acquire exclusive access to this map, spinning if necessary. Exclusive lock isn't re-entrant.
+   */
+  def acquireExclusive(inst: MapHolder): Unit = {
+    // Spin-lock implementation. Because the owner of the shared lock might be blocked by this
+    // thread as it waits for an exclusive lock, deadlock is possible. To mitigate this problem,
+    // timeout and retry, allowing shared lock waiters to make progress.
+
+    var timeoutNanos = 1000000 // 1 millisecond
+    var warned = false
+
+    while (true) {
+      if (tryAcquireExclusive(inst, timeoutNanos)) {
+        return
+      }
+
+      timeoutNanos = Math.min(timeoutNanos << 1, 1000000000) // limit timeout to 1 second
+
+      if (!warned && timeoutNanos >= 1000000000) {
+        _logger.warn(s"Waiting for exclusive lock: $inst")
+        warned = true
+      }
+    }
+  }
+
+  /**
+   * Acquire exclusive access to this map, spinning if necessary. Exclusive lock isn't re-entrant.
+   *
+   * @return false if timed out
+   */
+  private def tryAcquireExclusive(inst: MapHolder, timeoutNanos: Long): Boolean = {
+    // Spin-lock implementation.
+
+    var lockState = 0
+
+    // First set the high bit, to signal an exclusive lock request.
+
+    var done = false
+    do {
+      lockState = UnsafeUtils.getIntVolatile(inst, lockStateOffset)
+      if (lockState < 0) {
+        // Wait for exclusive lock to be released.
+        Thread.`yield`
+      } else if (UnsafeUtils.unsafe.compareAndSwapInt(inst, lockStateOffset, lockState, lockState | 0x80000000)) {
+        if (lockState == 0) {
+          return true
+        }
+        // Scala doesn't support a simple break statement for some reason.
+        done = true
+      }
+    } while (!done)
+
+    // Wait for shared lock owners to release the lock.
+
+    val endNanos = System.nanoTime + timeoutNanos
+
+    do {
+      Thread.`yield`
+      lockState = UnsafeUtils.getIntVolatile(inst, lockStateOffset)
+      if ((lockState & 0x7fffffff) == 0) {
+        return true
+      }
+    } while (System.nanoTime() < endNanos)
+
+    // Timed out. Release the exclusive lock request signal and yield (to permit shared access again).
+
+    while(!UnsafeUtils.unsafe.compareAndSwapInt(inst, lockStateOffset, lockState, lockState & 0x7fffffff)) {
+      lockState = UnsafeUtils.getIntVolatile(inst, lockStateOffset)
+    }
+
+    Thread.`yield`
+    return false
+  }
+
+  /**
+   * Release an acquired exclusive lock.
+   */
+  def releaseExclusive(inst: MapHolder): Unit = {
+    UnsafeUtils.setIntVolatile(inst, lockStateOffset, 0)
+  }
+
+  /**
+   * Acquire shared access to this map, spinning if necessary.
+   */
+  def acquireShared(inst: MapHolder): Unit = {
+    // Spin-lock implementation.
+
+    var lockState = 0
+
+    while (true) {
+      lockState = UnsafeUtils.getIntVolatile(inst, lockStateOffset)
+      if (lockState < 0) {
+        // Wait for exclusive lock to be released.
+        Thread.`yield`
+      } else if (UnsafeUtils.unsafe.compareAndSwapInt(inst, lockStateOffset, lockState, lockState + 1)) {
+        return
+      }
+    }
+  }
+
+  /**
+   * Release an acquired shared lock.
+   */
+  def releaseShared(inst: MapHolder): Unit = {
+    var lockState = 0
+    do {
+      lockState = UnsafeUtils.getIntVolatile(inst, lockStateOffset)
+    } while (!UnsafeUtils.unsafe.compareAndSwapInt(inst, lockStateOffset, lockState, lockState - 1))
   }
 
   // curIdx has to be initialized to one less than the starting logical index
@@ -635,7 +747,7 @@ object MapState {
  * If you want to save more space, it's better to share an implementation of OffheapLFSortedIDMap amongst multiple
  * actual maps.  The API in here is pretty convenient though.
  */
-class OffheapLFSortedIDMap(memFactory: MemFactory, var mapPtr: NativePointer)
+class OffheapLFSortedIDMap(memFactory: MemFactory, var mapPtr: NativePointer, var lockState: Int = 0)
 extends OffheapLFSortedIDMapMutator(memFactory, classOf[OffheapLFSortedIDMap]) with MapHolder {
   final def length: Int = length(this)
   final def apply(key: Long): NativePointer = apply(this, key)
@@ -647,6 +759,12 @@ extends OffheapLFSortedIDMapMutator(memFactory, classOf[OffheapLFSortedIDMap]) w
   final def sliceToEnd(startKey: Long): ElementIterator = sliceToEnd(this, startKey)
   final def put(elem: NativePointer): Unit = put(this, elem)
   final def remove(key: Long): NativePointer = remove(this, key)
+
+  // Locking methods.
+  final def acquireExclusive(): Unit = acquireExclusive(this)
+  final def releaseExclusive(): Unit = releaseExclusive(this)
+  final def acquireShared(): Unit = acquireShared(this)
+  final def releaseShared(): Unit = releaseShared(this)
 }
 
 object SingleOffheapLFSortedIDMap {

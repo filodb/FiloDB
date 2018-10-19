@@ -362,4 +362,191 @@ class OffheapLFSortedIDMapTest extends NativeVectorTest with ScalaFutures {
     map.length shouldEqual 0
     map.remove(6L) shouldEqual 0
   }
+
+  it("should support uncontended locking behavior") {
+    val map = SingleOffheapLFSortedIDMap(memFactory, 32)
+
+    map.acquireExclusive()
+    map.releaseExclusive()
+
+    map.acquireShared()
+    map.releaseShared()
+
+    // Shouldn't stall.
+    map.acquireExclusive()
+    map.releaseExclusive()
+
+    // Re-entrant shared lock.
+    map.acquireShared()
+    map.acquireShared()
+    map.releaseShared()
+    map.releaseShared()
+
+    // Shouldn't stall.
+    map.acquireExclusive()
+    map.releaseExclusive()
+  }
+
+  it("should support exclusive lock") {
+    val map = SingleOffheapLFSortedIDMap(memFactory, 32)
+
+    map.acquireExclusive()
+
+    @volatile var acquired = false
+
+    val stuck = new Thread {
+      override def run(): Unit = {
+        map.acquireExclusive()
+        acquired = true
+      }
+    }
+
+    stuck.start()
+
+    val startNanos = System.nanoTime()
+    stuck.join(500)
+    val durationNanos = System.nanoTime() - startNanos
+
+    durationNanos should be >= 500000000L
+
+    acquired shouldBe false
+
+    // Now let the second lock request complete.
+    map.releaseExclusive()
+    Thread.`yield`
+
+    stuck.join(10000)
+
+    acquired shouldBe true
+  }
+
+  it("should block exclusive lock when shared lock is held") {
+    val map = SingleOffheapLFSortedIDMap(memFactory, 32)
+
+    map.acquireShared()
+    map.acquireShared()
+
+    @volatile var acquired = false
+
+    val stuck = new Thread {
+      override def run(): Unit = {
+        map.acquireExclusive()
+        acquired = true
+      }
+    }
+
+    stuck.start()
+
+    val startNanos = System.nanoTime()
+    stuck.join(500)
+    var durationNanos = System.nanoTime() - startNanos
+
+    durationNanos should be >= 500000000L
+
+    acquired shouldBe false
+
+    map.releaseShared()
+
+    stuck.join(500)
+    durationNanos = System.nanoTime() - startNanos
+
+    durationNanos should be >= 500000000L * 2
+
+    acquired shouldBe false
+
+    // Now let the exclusive lock request complete.
+    map.releaseShared()
+    Thread.`yield`
+
+    stuck.join(10000)
+
+    acquired shouldBe true
+  }
+
+  it("should block shared lock when exclusive lock is held") {
+    val map = SingleOffheapLFSortedIDMap(memFactory, 32)
+
+    map.acquireExclusive()
+
+    @volatile var acquired = false
+
+    val stuck = new Thread {
+      override def run(): Unit = {
+        map.acquireShared()
+        acquired = true
+      }
+    }
+
+    stuck.start()
+
+    val startNanos = System.nanoTime()
+    stuck.join(500)
+    var durationNanos = System.nanoTime() - startNanos
+
+    durationNanos should be >= 500000000L
+
+    acquired shouldBe false
+
+    // Now let the shared lock request complete.
+    map.releaseExclusive()
+    Thread.`yield`
+
+    stuck.join(10000)
+
+    acquired shouldBe true
+
+    // Can acquire more shared locks.
+    map.acquireShared()
+    map.acquireShared()
+
+    // Release all shared locks.
+    for (i <- 1 to 3) map.releaseShared
+
+    // Exclusive can be acquired again.
+    map.acquireExclusive()
+  }
+
+  it("should delay shared lock when exclusive lock is waiting") {
+    val map = SingleOffheapLFSortedIDMap(memFactory, 32)
+
+    map.acquireShared()
+
+    @volatile var acquired = false
+
+    val stuck = new Thread {
+      override def run(): Unit = {
+        map.acquireExclusive()
+        acquired = true
+      }
+    }
+
+    stuck.start()
+
+    var startNanos = System.nanoTime()
+    stuck.join(1000)
+    var durationNanos = System.nanoTime() - startNanos
+
+    durationNanos should be >= 1000000000L
+
+    acquired shouldBe false
+
+    startNanos = System.nanoTime()
+    for (i <- 1 to 2) {
+      map.acquireShared()
+      map.releaseShared()
+      Thread.sleep(100)
+    }
+    durationNanos = System.nanoTime() - startNanos
+
+    durationNanos should be > 1000000000L
+    acquired shouldBe false
+
+    // Now let the exclusive lock request complete.
+    map.releaseShared()
+    Thread.`yield`
+
+    stuck.join(10000)
+
+    acquired shouldBe true
+  }
 }
