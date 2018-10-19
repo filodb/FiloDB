@@ -34,9 +34,7 @@ case object FlushCommand extends DataOrCommand
   *
   */
 object TestTimeseriesProducer extends StrictLogging {
-  val dataset = FormatConversion.dataset.copy(
-                  options = FormatConversion.dataset.options.copy(
-                    shardKeyColumns = Seq("__name__", "job")))
+  val dataset = FormatConversion.dataset
 
   class ProducerOptions(args: Seq[String]) extends ScallopConf(args) {
     val samplesPerSeries = opt[Int](short = 'n', default = Some(100),
@@ -99,9 +97,9 @@ object TestTimeseriesProducer extends StrictLogging {
       val endQuery = startQuery + 300
       val query =
         s"""./filo-cli '-Dakka.remote.netty.tcp.hostname=127.0.0.1' --host 127.0.0.1 --dataset timeseries """ +
-        s"""--promql 'heap_usage{dc="DC0",job="App-0"}' --start $startQuery --end $endQuery --limit 15"""
+        s"""--promql 'heap_usage{dc="DC0",app="App-0"}' --start $startQuery --end $endQuery --limit 15"""
       logger.info(s"Sample Query you can use: \n$query")
-      val q = URLEncoder.encode("heap_usage{dc=\"DC0\",job=\"App-0\"}", StandardCharsets.UTF_8.toString)
+      val q = URLEncoder.encode("heap_usage{dc=\"DC0\",app=\"App-0\"}", StandardCharsets.UTF_8.toString)
       val url = s"http://localhost:8080/promql/timeseries/api/v1/query_range?" +
         s"query=$q&start=$startQuery&end=$endQuery&step=15"
       logger.info(s"Sample URL you can use to query: \n$url")
@@ -150,7 +148,7 @@ object TestTimeseriesProducer extends StrictLogging {
       val value = 15 + Math.sin(n + 1) + rand.nextGaussian()
 
       val tags = Map("dc"       -> s"DC$dc",
-                     "job"      -> s"App-$app",
+                     "app"      -> s"App-$app",
                      "partition" -> s"partition-$partition",
                      "host"     -> s"H$host",
                      "instance" -> s"Instance-$instance")

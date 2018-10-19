@@ -11,7 +11,7 @@ import org.scalatest.time.{Millis, Seconds, Span}
 import filodb.coordinator._
 import filodb.coordinator.NodeClusterActor.SubscribeShardUpdates
 import filodb.coordinator.client.Client
-import filodb.core.{MetricsTestData, Success}
+import filodb.core.Success
 import filodb.timeseries.TestTimeseriesProducer
 
 object IngestionAndRecoveryMultiNodeConfig extends MultiNodeConfig {
@@ -87,7 +87,7 @@ abstract class IngestionAndRecoverySpec extends StandaloneMultiJvmSpec(Ingestion
 
   it should "be able to create dataset on node 1" in {
     runOn(first) {
-      val datasetObj = MetricsTestData.timeseriesDataset
+      val datasetObj = TestTimeseriesProducer.dataset.copy(name = "timeseries")
       metaStore.newDataset(datasetObj).futureValue shouldBe Success
       colStore.initialize(dataset).futureValue shouldBe Success
       info("Dataset created")
@@ -173,7 +173,7 @@ abstract class IngestionAndRecoverySpec extends StandaloneMultiJvmSpec(Ingestion
   it should "answer query successfully" in {
     runOn(first) {
       // Print the top values in each shard just for debugging
-      topValuesInShards(client1, "job", 0 to 3)
+      topValuesInShards(client1, "app", 0 to 3)
       topValuesInShards(client1, "dc", 0 to 3)
 
       query1Response = runCliQuery(client1, queryTimestamp)
