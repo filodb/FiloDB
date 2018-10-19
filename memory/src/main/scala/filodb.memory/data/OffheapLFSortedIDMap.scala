@@ -108,7 +108,7 @@ class OffheapLFSortedIDMapReader(memFactory: MemFactory, holderKlass: Class[_ <:
   protected val mapPtrOffset = UnsafeUtils.unsafe.objectFieldOffset(holderKlass.getDeclaredField("mapPtr"))
   protected val lockStateOffset = UnsafeUtils.unsafe.objectFieldOffset(holderKlass.getDeclaredField("lockState"))
 
-  // basic accessor classes
+  // basic accessor classes; caller must hold a lock.
   @inline final def head(inst: MapHolder): Int = state(inst).head
   @inline final def tail(inst: MapHolder): Int = state(inst).tail
   @inline final def maxElements(inst: MapHolder): Int = state(inst).maxElem
@@ -116,11 +116,21 @@ class OffheapLFSortedIDMapReader(memFactory: MemFactory, holderKlass: Class[_ <:
   /**
    * Number of total elements in the map
    */
-  @inline final def length(inst: MapHolder): Int = state(inst).length
+  final def length(inst: MapHolder): Int = {
+    acquireShared(inst)
+    try {
+      doLength(inst)
+    } finally {
+      releaseShared(inst)
+    }
+  }
+
+  // Caller must hold a lock.
+  @inline private final def doLength(inst: MapHolder): Int = state(inst).length
 
   /**
    * Accesses the element at index index, where 0 = tail or lowest element and (length - 1) is the head or highest
-   * Returns the pointer to the value.
+   * Returns the pointer to the value. Caller must hold a lock.
    */
   @inline final def at(inst: MapHolder, index: Int): NativePointer = {
     val _mapPtr = mapPtr(inst)
@@ -134,8 +144,13 @@ class OffheapLFSortedIDMapReader(memFactory: MemFactory, holderKlass: Class[_ <:
    * @param key the key to search for
    */
   final def apply(inst: MapHolder, key: Long): NativePointer = {
-    val res = binarySearch(inst, key)
-    if (res >= 0) at(inst, res) else 0
+    acquireShared(inst)
+    try {
+      val res = binarySearch(inst, key)
+      if (res >= 0) at(inst, res) else 0
+    } finally {
+      releaseShared(inst)
+    }
   }
 
   /**
@@ -143,26 +158,44 @@ class OffheapLFSortedIDMapReader(memFactory: MemFactory, holderKlass: Class[_ <:
    * @param inst the instance (eg TSPartition) with the mapPtr field containing the map address
    * @param key the key to search for
    */
-  final def contains(inst: MapHolder, key: Long): Boolean =
-    if (length(inst) > 0) binarySearch(inst, key) >= 0 else false
+  final def contains(inst: MapHolder, key: Long): Boolean = {
+    acquireShared(inst)
+    try {
+      if (doLength(inst) > 0) binarySearch(inst, key) >= 0 else false
+    } finally {
+      releaseShared(inst)
+    }
+  }
 
   /**
    * Returns the first element, the one with the lowest key.
    * Throws IndexOutOfBoundsException if there are no elements.
    * @param inst the instance (eg TSPartition) with the mapPtr field containing the map address
    */
-  final def first(inst: MapHolder): NativePointer =
-    if (length(inst) > 0) { getElem(mapPtr(inst), tail(inst)) }
-    else                  { throw new IndexOutOfBoundsException }
+  final def first(inst: MapHolder): NativePointer = {
+    acquireShared(inst)
+    try {
+      if (doLength(inst) > 0) { getElem(mapPtr(inst), tail(inst)) }
+      else                    { throw new IndexOutOfBoundsException }
+    } finally {
+      releaseShared(inst)
+    }
+  }
 
   /**
    * Returns the last element, the one with the highest key.
    * Throws IndexOutOfBoundsException if there are no elements.
    * @param inst the instance (eg TSPartition) with the mapPtr field containing the map address
    */
-  final def last(inst: MapHolder): NativePointer =
-    if (length(inst) > 0) { getElem(mapPtr(inst), head(inst)) }
-    else                  { throw new IndexOutOfBoundsException }
+  final def last(inst: MapHolder): NativePointer = {
+    acquireShared(inst)
+    try {
+      if (doLength(inst) > 0) { getElem(mapPtr(inst), head(inst)) }
+      else                    { throw new IndexOutOfBoundsException }
+    } finally {
+      releaseShared(inst)
+    }
+  }
 
   /**
    * Produces an ElementIterator for going through every element of the map in increasing key order.
@@ -197,7 +230,7 @@ class OffheapLFSortedIDMapReader(memFactory: MemFactory, holderKlass: Class[_ <:
   }
 
   /**
-   * Does a binary search for the element with the given key
+   * Does a binary search for the element with the given key. Caller must hold a lock.
    * @param inst the instance (eg TSPartition) with the mapPtr field containing the map address
    * @param key the key to search for
    * @return the element number (that can be passed to at) if exact match found, or
@@ -366,8 +399,9 @@ class OffheapLFSortedIDMapReader(memFactory: MemFactory, holderKlass: Class[_ <:
     var nextElem: NativePointer = _
     final def hasNext: Boolean = {
       nextElem = at(inst, curIdx + 1)
-      curIdx < (length(inst) - 1) && !isPtrNull(nextElem) && continue(nextElem)
+      curIdx < (doLength(inst) - 1) && !isPtrNull(nextElem) && continue(nextElem)
     }
+
     final def next: NativePointer = {
       curIdx += 1
       nextElem
