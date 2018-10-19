@@ -188,14 +188,14 @@ class OffheapLFSortedIDMapTest extends NativeVectorTest with ScalaFutures {
     map(4L) shouldEqual elems(2)
 
     // remove at tail.  No resizing should occur.
-    map.remove(2L) shouldEqual elems(0)
+    map.remove(2L)
     map.first shouldEqual elems(1)
     map.length shouldEqual 8
     map.maxElements(map) shouldEqual 16
     checkElems((3 to 10).map(_.toLong), map.iterate.toBuffer)
 
     // remove in middle.  Resizing because 8 -> 7?
-    map.remove(6L) shouldEqual elems(4)
+    map.remove(6L)
     map.length shouldEqual 7
     map.maxElements(map) shouldEqual 8
     checkElems(Seq(3L, 4L, 5L, 7L, 8L, 9L, 10L), map.iterate.toBuffer)
@@ -360,7 +360,7 @@ class OffheapLFSortedIDMapTest extends NativeVectorTest with ScalaFutures {
     map.sliceToEnd(18L).toBuffer shouldEqual Buffer.empty[Long]
     map.put(elems(0))
     map.length shouldEqual 0
-    map.remove(6L) shouldEqual 0
+    map.remove(6L)
   }
 
   it("should support uncontended locking behavior") {

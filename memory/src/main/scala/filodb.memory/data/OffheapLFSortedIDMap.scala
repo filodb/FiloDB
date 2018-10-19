@@ -509,23 +509,18 @@ extends OffheapLFSortedIDMapReader(memFactory, holderKlass) {
    * Takes O(1) time if the key is at the tail, otherwise O(n) time on average.
    * @param inst the instance (eg TSPartition) with the mapPtr field containing the map address
    * @param key the key to remove.  If key is not present then nothing is changed.
-   * @return the removed Element, or NULL if key was not found or empty map
    */
-  final def remove(inst: MapHolder, key: Long): NativePointer = {
-    var prevElem: NativePointer = 0L
-
+  final def remove(inst: MapHolder, key: Long): Unit = {
     def innerRemove(key: Long): Boolean = {
       val _mapPtr = mapPtr(inst)
       val _state  = state(_mapPtr)
       if (_state == MapState.empty || _state.copyFlag || _state.maxElem == 0) return false
-      prevElem = 0L
       if (_state.length <= 0) {
         true
       } else if (check(_mapPtr, _state) && _mapPtr == mapPtr(inst)) {
         // Is the tail the element to be removed?  Then remove it, this is O(1)
         val tailElem = getElem(_mapPtr, _state.tail)
         if (key == keyFunc(tailElem)) {
-          prevElem = tailElem
           atomicTailRemove(_mapPtr, _state)
         } else {
           // Not the tail, do a binary search, O(log n)
@@ -534,7 +529,6 @@ extends OffheapLFSortedIDMapReader(memFactory, holderKlass) {
           // if key not found, just return not found
           else if (res < 0)              { true }
           else {
-            prevElem = getElem(_mapPtr, realIndex(_state, res))
             copyRemoveAtomicSwitch(inst, _state, realIndex(_state, res))
           }
         }
@@ -542,9 +536,8 @@ extends OffheapLFSortedIDMapReader(memFactory, holderKlass) {
     }
 
     while (!innerRemove(key)) {
-      if (state(inst) == MapState.empty) return 0   // don't modify a null/absent map
+      if (state(inst) == MapState.empty) return   // don't modify a null/absent map
     }
-    prevElem
   }
 
   /**
@@ -758,7 +751,7 @@ extends OffheapLFSortedIDMapMutator(memFactory, classOf[OffheapLFSortedIDMap]) w
   final def slice(startKey: Long, endKey: Long): ElementIterator = slice(this, startKey, endKey)
   final def sliceToEnd(startKey: Long): ElementIterator = sliceToEnd(this, startKey)
   final def put(elem: NativePointer): Unit = put(this, elem)
-  final def remove(key: Long): NativePointer = remove(this, key)
+  final def remove(key: Long): Unit = remove(this, key)
 
   // Locking methods.
   final def acquireExclusive(): Unit = acquireExclusive(this)
