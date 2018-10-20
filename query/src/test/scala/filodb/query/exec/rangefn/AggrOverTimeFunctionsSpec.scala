@@ -38,7 +38,7 @@ class AggrOverTimeFunctionsSpec extends FunSpec with Matchers {
       for { i <- 0 until addTimes } {
         if (added < samples.size) {
           validationQueue.enqueue(samples(added))
-          fns.foreach(_.addToWindow(new TransientRow(added.toLong, samples(added))))
+          fns.foreach(_.addedToWindow(new TransientRow(added.toLong, samples(added)), dummyWindow))
           added += 1
         }
       }
@@ -64,7 +64,7 @@ class AggrOverTimeFunctionsSpec extends FunSpec with Matchers {
       for { i <- 0 until removeTimes } {
         if (removed < samples.size) {
           validationQueue.dequeue()
-          fns.foreach(_.removeFromWindow(new TransientRow(removed.toLong, samples(removed))))
+          fns.foreach(_.removedFromWindow(new TransientRow(removed.toLong, samples(removed)), dummyWindow))
           removed += 1
         }
       }

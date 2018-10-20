@@ -39,12 +39,12 @@ trait RangeFunction {
   /**
     * Called when a sample is added to the sliding window
     */
-  def addToWindow(row: TransientRow): Unit
+  def addedToWindow(row: TransientRow, window: Window): Unit
 
   /**
     * Called when a sample is removed from sliding window
     */
-  def removeFromWindow(row: TransientRow): Unit
+  def removedFromWindow(row: TransientRow, window: Window): Unit
 
   /**
     * Called when wrapping iterator needs to emit a sample using the window.
@@ -76,6 +76,10 @@ object RangeFunction {
       case Some(Rate)             => RateFunction
       case Some(Increase)         => IncreaseFunction
       case Some(Delta)            => DeltaFunction
+      case Some(Resets)           => ResetsFunction
+      case Some(Irate)            => IRateFunction
+      case Some(Idelta)           => IDeltaFunction
+      case Some(Deriv)            => DerivFunction
       case Some(MaxOverTime)      => new MinMaxOverTimeFunction(Ordering[Double])
       case Some(MinOverTime)      => new MinMaxOverTimeFunction(Ordering[Double].reverse)
       case Some(CountOverTime)    => new CountOverTimeFunction()
@@ -91,8 +95,8 @@ object RangeFunction {
 object LastSampleFunction extends RangeFunction {
 
   override def needsLastSample: Boolean = true
-  def addToWindow(row: TransientRow): Unit = {}
-  def removeFromWindow(row: TransientRow): Unit = {}
+  def addedToWindow(row: TransientRow, window: Window): Unit = {}
+  def removedFromWindow(row: TransientRow, window: Window): Unit = {}
   def apply(startTimestamp: Long,
             endTimestamp: Long,
             window: Window,
