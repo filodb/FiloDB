@@ -52,7 +52,7 @@ extends MemStore with StrictLogging {
   /**
     * Retrieve shard for given dataset and shard number as an Option
     */
-  private[core] def getShard(dataset: DatasetRef, shard: Int): Option[TimeSeriesShard] =
+  private[filodb] def getShard(dataset: DatasetRef, shard: Int): Option[TimeSeriesShard] =
     datasets.get(dataset).flatMap { shards => Option(shards.get(shard)) }
 
   /**

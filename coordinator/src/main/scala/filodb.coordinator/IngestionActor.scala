@@ -273,8 +273,10 @@ private[filodb] final class IngestionActor(dataset: Dataset,
       statusActor ! IngestionStopped(dataset.ref, shard)
 
       // Release memory for shard in MemStore
-      val shardInstance = memStore.asInstanceOf[TimeSeriesMemStore].getShardE(ds, shard)
-      shardInstance.shutdown()
+      memStore.asInstanceOf[TimeSeriesMemStore].getShard(ds, shard)
+              .foreach { shard =>
+                shard.shutdown()
+              }
       logger.info(s"Stopped streaming ingestion for shard $shard and released resources")
   }
 
