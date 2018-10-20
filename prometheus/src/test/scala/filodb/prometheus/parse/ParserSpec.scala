@@ -40,6 +40,8 @@ class ParserSpec extends FunSpec with Matchers {
     parseSuccessfully("(1 + heap_size{a=\"b\"}) + 5")
     parseSuccessfully("(1 + heap_size{a=\"b\"}) + 5 * (3 - cpu_load{c=\"d\"})")
     parseSuccessfully("((1 + heap_size{a=\"b\"}) + 5) * (3 - cpu_load{c=\"d\"})")
+    parseSuccessfully("foo:ba-r:a.b{a=\"bc\"}")
+    parseSuccessfully("foo:ba-001:a.b{a=\"b-c\"}")
 
     parseError("")
     parseError("# just a comment\n\n")
@@ -226,6 +228,8 @@ class ParserSpec extends FunSpec with Matchers {
 
   it("Should be able to make logical plans for Series Expressions") {
     val queryToLpString = Map(
+      "primary:instance-001:no.ofrequests{job=\"my-job\"}" ->
+        "PeriodicSeries(RawSeries(IntervalSelector(List(1524855688000),List(1524855988000)),List(ColumnFilter(job,Equals(my-job)), ColumnFilter(__name__,Equals(primary:instance-001:no.ofrequests))),List()),1524855988000,1000,1524855988000)",
       "absent(nonexistent{job=\"myjob\"})" ->
         "ApplyInstantFunction(PeriodicSeries(RawSeries(IntervalSelector(List(1524855688000),List(1524855988000)),List(ColumnFilter(job,Equals(myjob)), ColumnFilter(__name__,Equals(nonexistent))),List()),1524855988000,1000,1524855988000),Absent,List())",
       "rate(http_requests_total[5m] offset 1w)" ->
@@ -270,6 +274,12 @@ class ParserSpec extends FunSpec with Matchers {
         "Aggregate(TopK,PeriodicSeries(RawSeries(IntervalSelector(List(1524855688000),List(1524855988000)),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000,1524855988000),List(5.0),List(),List())",
       "irate(http_requests_total{job=\"api-server\"}[5m])" ->
         "PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(List(1524855688000),List(1524855988000)),List(ColumnFilter(job,Equals(api-server)), ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000,1524855988000,300000,Irate,List())",
+      "idelta(http_requests_total{job=\"api-server\"}[5m])" ->
+        "PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(List(1524855688000),List(1524855988000)),List(ColumnFilter(job,Equals(api-server)), ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000,1524855988000,300000,Idelta,List())",
+      "resets(http_requests_total{job=\"api-server\"}[5m])" ->
+        "PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(List(1524855688000),List(1524855988000)),List(ColumnFilter(job,Equals(api-server)), ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000,1524855988000,300000,Resets,List())",
+      "deriv(http_requests_total{job=\"api-server\"}[5m])" ->
+        "PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(List(1524855688000),List(1524855988000)),List(ColumnFilter(job,Equals(api-server)), ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000,1524855988000,300000,Deriv,List())",
       "rate(http_requests_total{job=\"api-server\"}[5m])" ->
         "PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(List(1524855688000),List(1524855988000)),List(ColumnFilter(job,Equals(api-server)), ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000,1524855988000,300000,Rate,List())",
       "http_requests_total{job=\"prometheus\"}[5m]" ->
