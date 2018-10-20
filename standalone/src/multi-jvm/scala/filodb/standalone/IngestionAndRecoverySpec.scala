@@ -87,7 +87,7 @@ abstract class IngestionAndRecoverySpec extends StandaloneMultiJvmSpec(Ingestion
 
   it should "be able to create dataset on node 1" in {
     runOn(first) {
-      val datasetObj = TestTimeseriesProducer.dataset.copy(name = "timeseries")
+      val datasetObj = TestTimeseriesProducer.dataset
       metaStore.newDataset(datasetObj).futureValue shouldBe Success
       colStore.initialize(dataset).futureValue shouldBe Success
       info("Dataset created")

@@ -395,6 +395,10 @@ Some special functions exist to aid debugging and for other purposes:
 |----------|----------------|
 | `_filodb_chunkmeta_all` | (CLI Only) Returns chunk metadata fields for all chunks matching the time range and filter criteria - ID, # rows, start and end time, as well as the number of bytes and type of encoding used for a particular column.  |
 
+Example of debugging chunk metadata using the CLI:
+
+    ./filo-cli --host 127.0.0.1 --dataset prometheus --promql '_filodb_chunkmeta_all(heap_usage{app="App-0"})' --start XX --end YY
+
 ## Using FiloDB Data Source with Spark
 
 FiloDB has a Spark data-source module - `filodb.spark`. So, you can use the Spark Dataframes `read` and `write` APIs with FiloDB. To use it, follow the steps below

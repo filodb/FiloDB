@@ -169,7 +169,7 @@ abstract class StandaloneMultiJvmSpec(config: MultiNodeConfig) extends MultiNode
     import PromCirceSupport._
 
     implicit val sttpBackend = AkkaHttpBackend()
-    val url = uri"http://localhost:8080/promql/timeseries/api/v1/query?query=$query&time=${queryTimestamp/1000}"
+    val url = uri"http://localhost:8080/promql/prometheus/api/v1/query?query=$query&time=${queryTimestamp/1000}"
     info(s"Querying: $url")
     val result1 = sttp.get(url).response(asJson[SuccessResponse]).send().futureValue.unsafeBody.right.get.data.result
     val result = result1.flatMap(_.values.map { d => (d.timestamp, d.value) })
@@ -194,7 +194,7 @@ abstract class StandaloneMultiJvmSpec(config: MultiNodeConfig) extends MultiNode
                                   .setStartTimestampMs(start)
                                   .setEndTimestampMs(queryTimestamp / 1000 * 1000)
     val rr = Snappy.compress(ReadRequest.newBuilder().addQueries(query).build().toByteArray())
-    val url = uri"http://localhost:8080/promql/timeseries/api/v1/read"
+    val url = uri"http://localhost:8080/promql/prometheus/api/v1/read"
     info(s"Querying: $url")
     val result1 = sttp.post(url).body(rr).response(asByteArray).send().futureValue.unsafeBody
     val result = ReadResponse.parseFrom(Snappy.uncompress(result1))
