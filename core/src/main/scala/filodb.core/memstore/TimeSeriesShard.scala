@@ -742,7 +742,8 @@ class TimeSeriesShard(val dataset: Dataset,
       val newPart = createNewPartition(partKeyArray, partKeyOffset, group)
       if (newPart != OutOfMemPartition) {
         val partId = newPart.partID
-        val startTime = binRecordReader.getLong(timestampColId)
+        // NOTE: Don't use binRecordReader here.  recordOffset might not be set correctly
+        val startTime = dataset.ingestionSchema.getLong(recordBase, recordOff, timestampColId)
         partKeyIndex.addPartKey(newPart.partKeyBytes, partId, startTime)()
         timeBucketBitmaps.get(currentIndexTimeBucket).set(partId)
         activelyIngesting.set(partId)

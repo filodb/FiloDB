@@ -8,6 +8,7 @@ import akka.pattern.ask
 import akka.remote.testkit.MultiNodeConfig
 import akka.util.Timeout
 import com.typesafe.config.ConfigFactory
+import org.scalatest.time.{Millis, Seconds, Span}
 
 import filodb.core._
 import filodb.core.metadata.Column.ColumnType
@@ -62,6 +63,9 @@ abstract class ClusterRecoverySpec extends ClusterSpec(ClusterRecoverySpecConfig
                                    IngestionSource(classOf[CsvStreamFactory].getName, sourceConfig),
                                    TestData.storeConf)
 
+  implicit val patience =   // make sure futureValue has long enough time
+    PatienceConfig(timeout = Span(70, Seconds), interval = Span(500, Millis))
+
   metaStore.newDataset(dataset6).futureValue shouldEqual Success
   metaStore.writeIngestionConfig(setup.config).futureValue shouldEqual Success
 
@@ -88,10 +92,8 @@ abstract class ClusterRecoverySpec extends ClusterSpec(ClusterRecoverySpecConfig
     Thread sleep 3000
     implicit val timeout: Timeout = cluster.settings.InitializationTimeout
     def func: Future[Seq[DatasetRef]] = (clusterActor ? ListRegisteredDatasets).mapTo[Seq[DatasetRef]]
-    within (1.minute) { // takes time on travis hence large value
-      awaitCond(func.futureValue == Seq(dataset6.ref), interval = 250.millis, max = 60.seconds)
-      enterBarrier("cluster-actor-recovery-started")
-    }
+    awaitCond(func.futureValue == Seq(dataset6.ref), interval = 250.millis, max = 90.seconds)
+    enterBarrier("cluster-actor-recovery-started")
 
     clusterActor ! SubscribeShardUpdates(dataset6.ref)
     expectMsgPF(10.seconds.dilated) {

@@ -212,8 +212,6 @@ trait Selector extends Operator with Unit with BaseParser {
     }
 
   lazy val vector: PackratParser[Vector] = rangeVectorSelector | instantVectorSelector
-
-
 }
 
 ////////////////////// END SELECTORS ///////////////////////////////////////////

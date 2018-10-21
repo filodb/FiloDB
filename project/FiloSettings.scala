@@ -135,6 +135,7 @@ object FiloSettings extends Build {
       internalDependencyClasspath in IntegrationTest, exportedProducts in Test)).value)
 
   lazy val multiJvmSettings = SbtMultiJvm.multiJvmSettings ++ Seq(
+    javaOptions in MultiJvm := Seq("-Xmx2G", "-Dakka.test.timefactor=3"),
     compile in MultiJvm := ((compile in MultiJvm) triggeredBy (compile in Test)).value)
 
   lazy val testMultiJvmToo = Seq(
