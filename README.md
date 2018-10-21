@@ -154,11 +154,46 @@ The script below brings up the FiloDB Dev Standalone server, and then sets up th
 ```
 ./filodb-dev-start.sh -s
 ```
-You can now tail the server logs. If you'd like to direct the logs to a specific folder, you can set the LOG_DIR environment variable. 
+
+For queries to work properly you'll want to start a second server to serve all the shards:
+
 ```
-tail -f logs/filodb-server-1.log
+./filodb-dev-start.sh -l 2 -p
 ```
-Verify this message `NodeClusterActor Actor[akka://filo-standalone/user/node/singleton/nodecluster#-528195195] said hello!` in the logs. The logs should also indicate kafka connections being setup for consumption for the dataset. Wait for this to happen.
+
+To quickly verify that both servers are up and set up for ingestion, do this (the output below was formatted using `| jq '.'`, ports may vary):
+
+```
+curl localhost:8080/api/v1/cluster/timeseries/status
+
+{
+  "status": "success",
+  "data": [
+    {
+      "shard": 0,
+      "status": "ShardStatusActive",
+      "address": "akka://filo-standalone"
+    },
+    {
+      "shard": 1,
+      "status": "ShardStatusActive",
+      "address": "akka://filo-standalone"
+    },
+    {
+      "shard": 2,
+      "status": "ShardStatusActive",
+      "address": "akka.tcp://filo-standalone@127.0.0.1:57749"
+    },
+    {
+      "shard": 3,
+      "status": "ShardStatusActive",
+      "address": "akka.tcp://filo-standalone@127.0.0.1:57749"
+    }
+  ]
+}
+```
+
+You can also check the server logs at `logs/filodb-server-N.log`.
 
 Now run the time series generator. This will ingest 20 time series (the default) with 100 samples each into the Kafka topic with current timestamps.  The required argument is the path to the source config.  Use `--help` for all the options.
 
@@ -177,6 +212,12 @@ Now you are ready to query FiloDB for the ingested data. The following command s
 ```
 
 You can also look at Cassandra to check for persisted data. Look at the tables in `filodb` and `filodb-admin` keyspaces.
+
+If the above does not work, try the following:
+
+1) Delete the Kafka topic and re-create it.  Note that Kafka topic deletion might not happen until the server is stopped and restarted
+2) `./filodb-dev-stop.sh` and restart filodb instances like above
+3) Re-run the `TestTimeseriesProducer`.  You can check consumption via running the `TestConsumer`, like this:  `java -Xmx4G -cp standalone/target/scala-2.11/standalone-assembly-0.8-SNAPSHOT.jar  filodb.kafka.TestConsumer conf/timeseries-dev-source.conf`.  Also, the `memstore_rows_ingested` metric which is logged to `logs/filodb-server-N.log` should become nonzero.
 
 To stop the dev server. Note that this will stop all the FiloDB servers if multiple are running.
 ```
@@ -198,9 +239,10 @@ The following will scrape metrics from FiloDB using its Prometheus metrics endpo
 
 Now, metrics from the application having a Prom endpoint at port 9095 will be streamed into Kafka and FiloDB.
 
-#### Multiple Servers
+#### Multiple Servers using Consul
 
-To run multiple servers simultaneously, first set up Consul dev agent:
+The original example used a static IP to form a cluster, but a more realistic example is to use a registration service like Consul.
+To try using Consul for startup, first set up Consul dev agent:
 
 ```
 > brew install consul 
