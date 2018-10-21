@@ -33,6 +33,14 @@ case class RawSeries(rangeSelector: RangeSelector,
                      columns: Seq[String]) extends RawSeriesPlan
 
 /**
+ * Concrete logical plan to query for chunk metadata from raw time series in a given range
+ * @param column the column name from which to extract chunk information like chunk size and encoding type
+ */
+case class RawChunkMeta(rangeSelector: RangeSelector,
+                        filters: Seq[ColumnFilter],
+                        column: String) extends PeriodicSeriesPlan
+
+/**
   * Concrete logical plan to query for data in a given range
   * with results in a regular time interval.
   *

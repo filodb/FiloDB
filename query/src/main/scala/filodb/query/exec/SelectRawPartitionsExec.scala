@@ -58,6 +58,7 @@ final case class SelectRawPartitionsExec(id: String,
   /**
     * Convert column name strings into columnIDs.  NOTE: column names should not include row key columns
     * as those are automatically prepended.
+    * TODO: move this step to logical -> physical plan conversion validation
     */
   private def getColumnIDs(dataset: Dataset, cols: Seq[String]): Seq[Types.ColumnId] = {
     val ids = dataset.colIDs(cols: _*)

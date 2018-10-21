@@ -10,7 +10,7 @@ import org.scalatest.time.{Millis, Seconds, Span}
 
 import filodb.coordinator._
 import filodb.coordinator.client.LocalClient
-import filodb.core.{MetricsTestData, Success}
+import filodb.core.Success
 import filodb.timeseries.TestTimeseriesProducer
 
 object ClusterSingletonFailoverMultiNodeConfig extends MultiNodeConfig {
@@ -23,7 +23,7 @@ object ClusterSingletonFailoverMultiNodeConfig extends MultiNodeConfig {
   val myConfig = overrides.withFallback(GlobalConfig.systemConfig)
   commonConfig(myConfig)
 
-  val ingestDuration = 15.seconds
+  val ingestDuration = 70.seconds   // Needs to be long enough to allow Lucene to flush index
 
   def overrides: Config = ConfigFactory.parseString(
     """
@@ -92,7 +92,7 @@ abstract class ClusterSingletonFailoverSpec extends StandaloneMultiJvmSpec(Clust
       colStore.initialize(dataset).futureValue shouldBe Success
       colStore.truncate(dataset).futureValue shouldBe Success
 
-      val datasetObj = MetricsTestData.timeseriesDataset
+      val datasetObj = TestTimeseriesProducer.dataset
       metaStore.newDataset(datasetObj).futureValue shouldBe Success
       colStore.initialize(dataset).futureValue shouldBe Success
       logger.info("Dataset created")
@@ -165,18 +165,20 @@ abstract class ClusterSingletonFailoverSpec extends StandaloneMultiJvmSpec(Clust
     enterBarrier("cluster-status-normal-on-cli")
   }
 
+        // NOTE: 10000 samples / 100 time series = 100 samples per series
+        // 100 * 10s = 1000seconds =~ 16 minutes
+  val queryTimestamp = System.currentTimeMillis() - 195.minutes.toMillis
+
   it should "be able to ingest data into FiloDB via Kafka" in {
-    within(ingestDuration + 5.seconds) {
+    within(chunkDurationTimeout) {
       runOn(third) {
-        val task = TestTimeseriesProducer.produceMetrics(source, 1000, 100, 400)
+        TestTimeseriesProducer.produceMetrics(source, 10000, 100, 200)
         info(s"Waiting for ingest-duration ($ingestDuration) to pass")
-        awaitCond(task.isCompleted, ingestDuration)
+        Thread.sleep(chunkDuration.toMillis + 7000)
       }
       enterBarrier("data1-ingested")
     }
   }
-
-  val queryTimestamp = System.currentTimeMillis() - 395.minutes.toMillis
 
   it should "answer query successfully" in {
     runOn(first, third) { // TODO check second=UnknownDataset

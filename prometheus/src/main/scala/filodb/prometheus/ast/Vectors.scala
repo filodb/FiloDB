@@ -111,9 +111,9 @@ trait Vectors extends Scalars with TimeUnits with Base {
       throw new IllegalArgumentException("Metric name should not be set twice")
     }
 
-    private val columnFilters = labelMatchesToFilters(labelSelection)
+    private[prometheus] val columnFilters = labelMatchesToFilters(labelSelection)
 
-    private val nameFilter = ColumnFilter("__name__", query.Filter.Equals(metricName))
+    private[prometheus] val nameFilter = ColumnFilter("__name__", query.Filter.Equals(metricName))
 
     def toPeriodicSeriesPlan(queryParams: QueryParams): PeriodicSeriesPlan = {
 
@@ -144,9 +144,9 @@ trait Vectors extends Scalars with TimeUnits with Base {
       throw new IllegalArgumentException("Metric name should not be set twice")
     }
 
-    private val columnFilters = labelMatchesToFilters(labelSelection)
+    private[prometheus] val columnFilters = labelMatchesToFilters(labelSelection)
 
-    private val nameFilter = ColumnFilter("__name__", query.Filter.Equals(metricName))
+    private[prometheus] val nameFilter = ColumnFilter("__name__", query.Filter.Equals(metricName))
 
     val allFilters: Seq[ColumnFilter] = columnFilters :+ nameFilter
 
