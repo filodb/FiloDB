@@ -347,7 +347,7 @@ final class BinaryRecordRowReader(schema: RecordSchema,
   def getLong(columnNo: Int): Long = schema.getLong(recordBase, recordOffset, columnNo)
   def getDouble(columnNo: Int): Double = schema.getDouble(recordBase, recordOffset, columnNo)
   def getFloat(columnNo: Int): Float = ???
-  def getString(columnNo: Int): String = ???
+  def getString(columnNo: Int): String = filoUTF8String(columnNo).toString
   def getAny(columnNo: Int): Any = schema.columnTypes(columnNo).keyType.extractor.getField(this, columnNo)
   override def filoUTF8String(i: Int): ZeroCopyUTF8String = schema.asZCUTF8Str(recordBase, recordOffset, i)
 

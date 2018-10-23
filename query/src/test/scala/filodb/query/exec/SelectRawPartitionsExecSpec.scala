@@ -39,6 +39,7 @@ class SelectRawPartitionsExecSpec extends FunSpec with Matchers with ScalaFuture
     (now - n * reportingInterval, n.toDouble)
   }
 
+  // NOTE: due to max-chunk-size in storeConf = 100, this will make (numRawSamples / 100) chunks
   tuples.map { t => SeqRowReader(Seq(t._1, t._2, partTagsUTF8)) }.foreach(builder.addFromReader)
   val container = builder.allContainers.head
 
@@ -136,6 +137,31 @@ class SelectRawPartitionsExecSpec extends FunSpec with Matchers with ScalaFuture
     resultSchema.length shouldEqual 2
     resultSchema.columns.map(_.colType) shouldEqual Seq(TimestampColumn, DoubleColumn)
     resultSchema.columns.map(_.name) shouldEqual Seq("timestamp", "value")
+  }
+
+  it("should return chunk metadata from MemStore") {
+    val filters = Seq (ColumnFilter("__name__", Filter.Equals("http_req_total".utf8)),
+                       ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
+    val execPlan = SelectChunkInfosExec("someQueryId", now, numRawSamples, dummyDispatcher,
+      timeseriesDataset.ref, 0, filters, AllChunks, 0)
+    val resp = execPlan.execute(memStore, timeseriesDataset, queryConfig).runAsync.futureValue
+    info(s"resp = $resp")
+    val result = resp.asInstanceOf[QueryResult]
+    result.result.size shouldEqual 1
+    val partKeyRead = result.result(0).key.labelValues.map(lv => (lv._1.asNewString, lv._2.asNewString))
+    partKeyRead shouldEqual partKeyLabelValues
+
+    // Extract out the numRows, startTime, endTIme and verify
+    val infosRead = result.result(0).rows.map { r => (r.getInt(1), r.getLong(2), r.getLong(3), r.getString(5)) }.toList
+    infosRead.foreach { i => info(s"  Infos read => $i") }
+    val numChunks = numRawSamples / TestData.storeConf.maxChunksSize
+    infosRead should have length (numChunks)
+    infosRead.map(_._1) shouldEqual Seq.fill(numChunks)(TestData.storeConf.maxChunksSize)
+    // Last chunk is the writeBuffer which is not encoded
+    infosRead.map(_._4).dropRight(1).foreach(_ should include ("DeltaDeltaConst"))
+
+    val startTimes = tuples.grouped(TestData.storeConf.maxChunksSize).map(_.head._1).toBuffer
+    infosRead.map(_._2) shouldEqual startTimes
   }
 }
 

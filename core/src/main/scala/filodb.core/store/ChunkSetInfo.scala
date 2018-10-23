@@ -285,3 +285,50 @@ class FilteredChunkInfoIterator(base: ChunkInfoIterator, filter: ChunkSetInfo =>
     nextnext
   }
 }
+
+/**
+ * A RowReader that returns info about each ChunkSetInfo set via setInfo with a schema like this:
+ * 0:  ID (Long)
+ * 1:  NumRows (Int)
+ * 2:  startTime (Long)
+ * 3:  endTime (Long)
+ * 4:  numBytes(Int) of chunk
+ * 5:  readerclass of chunk
+ */
+class ChunkInfoRowReader(column: Column) extends RowReader {
+  import Column.ColumnType._
+  var info: ChunkSetInfo = _
+
+  def setInfo(newInfo: ChunkSetInfo): Unit = { info = newInfo }
+
+  def notNull(columnNo: Int): Boolean = columnNo < 6
+  def getBoolean(columnNo: Int): Boolean = ???
+  def getInt(columnNo: Int): Int = columnNo match {
+    case 1 => info.numRows
+    case 4 => BinaryVector.totalBytes(info.vectorPtr(column.id))
+  }
+  def getLong(columnNo: Int): Long = columnNo match {
+    case 0 => info.id
+    case 2 => info.startTime
+    case 3 => info.endTime
+  }
+
+  def getDouble(columnNo: Int): Double = ???
+  def getFloat(columnNo: Int): Float = ???
+  def getString(columnNo: Int): String = column.columnType match {
+    case IntColumn    => vectors.IntBinaryVector(info.vectorPtr(column.id)).getClass.getName
+    case LongColumn   => vectors.LongBinaryVector(info.vectorPtr(column.id)).getClass.getName
+    case TimestampColumn => vectors.LongBinaryVector(info.vectorPtr(column.id)).getClass.getName
+    case DoubleColumn => vectors.DoubleVector(info.vectorPtr(column.id)).getClass.getName
+    case StringColumn => vectors.UTF8Vector(info.vectorPtr(column.id)).getClass.getName
+    case o: Any       => "nananana, heyheyhey, goodbye"
+  }
+
+  override def filoUTF8String(columnNo: Int): ZeroCopyUTF8String = ZeroCopyUTF8String(getString(columnNo))
+
+  def getAny(columnNo: Int): Any = ???
+
+  def getBlobBase(columnNo: Int): Any = ???
+  def getBlobOffset(columnNo: Int): Long = ???
+  def getBlobNumBytes(columnNo: Int): Int = ???
+}

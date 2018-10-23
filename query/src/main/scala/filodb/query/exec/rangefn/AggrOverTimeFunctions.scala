@@ -9,12 +9,12 @@ class MinMaxOverTimeFunction(ord: Ordering[Double]) extends RangeFunction {
 
   val minMaxDeque = new util.ArrayDeque[TransientRow]()
 
-  override def addToWindow(row: TransientRow): Unit = {
+  override def addedToWindow(row: TransientRow, window: Window): Unit = {
     while (!minMaxDeque.isEmpty && ord.compare(minMaxDeque.peekLast().value, row.value) < 0) minMaxDeque.removeLast()
     minMaxDeque.addLast(row)
   }
 
-  override def removeFromWindow(row: TransientRow): Unit = {
+  override def removedFromWindow(row: TransientRow, window: Window): Unit = {
     while (!minMaxDeque.isEmpty && minMaxDeque.peekFirst().timestamp <= row.timestamp) minMaxDeque.removeFirst()
   }
 
@@ -30,11 +30,11 @@ class SumOverTimeFunction extends RangeFunction {
 
   var sum = 0d
 
-  override def addToWindow(row: TransientRow): Unit = {
+  override def addedToWindow(row: TransientRow, window: Window): Unit = {
     sum += row.value
   }
 
-  override def removeFromWindow(row: TransientRow): Unit = {
+  override def removedFromWindow(row: TransientRow, window: Window): Unit = {
     sum -= row.value
   }
 
@@ -48,11 +48,11 @@ class SumOverTimeFunction extends RangeFunction {
 class CountOverTimeFunction extends RangeFunction {
 
   var count = 0d
-  override def addToWindow(row: TransientRow): Unit = {
+  override def addedToWindow(row: TransientRow, window: Window): Unit = {
     count += 1
   }
 
-  override def removeFromWindow(row: TransientRow): Unit = {
+  override def removedFromWindow(row: TransientRow, window: Window): Unit = {
     count -= 1
   }
 
@@ -68,12 +68,12 @@ class AvgOverTimeFunction extends RangeFunction {
   var sum = 0d
   var count = 0
 
-  override def addToWindow(row: TransientRow): Unit = {
+  override def addedToWindow(row: TransientRow, window: Window): Unit = {
     sum += row.value
     count += 1
   }
 
-  override def removeFromWindow(row: TransientRow): Unit = {
+  override def removedFromWindow(row: TransientRow, window: Window): Unit = {
     sum -= row.value
     count -= 1
   }
@@ -91,13 +91,13 @@ class StdDevOverTimeFunction extends RangeFunction {
   var count = 0
   var squaredSum = 0d
 
-  override def addToWindow(row: TransientRow): Unit = {
+  override def addedToWindow(row: TransientRow, window: Window): Unit = {
     sum += row.value
     squaredSum += row.value * row.value
     count += 1
   }
 
-  override def removeFromWindow(row: TransientRow): Unit = {
+  override def removedFromWindow(row: TransientRow, window: Window): Unit = {
     sum -= row.value
     squaredSum -= row.value * row.value
     count -= 1
@@ -118,13 +118,13 @@ class StdVarOverTimeFunction extends RangeFunction {
   var count = 0
   var squaredSum = 0d
 
-  override def addToWindow(row: TransientRow): Unit = {
+  override def addedToWindow(row: TransientRow, window: Window): Unit = {
     sum += row.value
     squaredSum += row.value * row.value
     count += 1
   }
 
-  override def removeFromWindow(row: TransientRow): Unit = {
+  override def removedFromWindow(row: TransientRow, window: Window): Unit = {
     sum -= row.value
     squaredSum -= row.value * row.value
     count -= 1
