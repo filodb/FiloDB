@@ -151,10 +151,14 @@ class OffheapLFSortedIDMapTest extends NativeVectorTest with ScalaFutures {
     map.length shouldEqual 2
 
     val elemIt = map.iterate
-    elemIt.hasNext shouldEqual true
-    elemIt.next shouldEqual elems(0)
-    elemIt.hasNext shouldEqual true
-    elemIt.next shouldEqual elems(3)
+    try {
+      elemIt.hasNext shouldEqual true
+      elemIt.next shouldEqual elems(0)
+      elemIt.hasNext shouldEqual true
+      elemIt.next shouldEqual elems(3)
+    } finally {
+      elemIt.close()
+    }
 
     // TODO: add concurrency tests...
   }

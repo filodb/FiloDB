@@ -7,9 +7,19 @@ import filodb.memory.MemFactory
 import filodb.memory.format.UnsafeUtils
 
 /**
- * Offheap Lock-Free Sorted ID Map
+ * Offheap (mostly) Lock-Free Sorted ID Map.
  * The OffheapLFSortedIDMap was written to replace the ConcurrentSkipListMap and use 1/10th of CSLM overhead,
  * be completely offheap, and fit our use cases much better.
+ *
+ * Note: As currently used within FiloDB, locks must be acquired on the map to ensure that
+ * referenced memory isn't reclaimed too soon by the block manager. Hold the shared lock
+ * while reading elements, and release it when the memory can be reclaimed. To be effective,
+ * all writes into the map must acquire an exclusive lock. The lock implementation spins if
+ * necessary, but it yields the current thread to be fair with other threads. To help reduce
+ * the likelihood of deadlocks, a thread which is waiting to acquire the exclusive lock times
+ * out and retries while waiting, to help advance threads which are stuck behind the exclusive
+ * lock request. A warning is logged by the exclusive waiter when it's timeout has reached one
+ * second. This indicates that a deadlock likely exists and cannot be auto resolved.
  *
  * The OffheapLFSortedIDMap is a data structure with the following properties:
  * - Everything (except for the Long pointer reference) both data and metadata is completely offheap
@@ -140,17 +150,13 @@ class OffheapLFSortedIDMapReader(memFactory: MemFactory, holderKlass: Class[_ <:
 
   /**
    * Returns the element at the given key, or NULL (0) if the key is not found.  Takes O(log n) time.
+   * Caller must hold a lock.
    * @param inst the instance (eg TSPartition) with the mapPtr field containing the map address
    * @param key the key to search for
    */
   final def apply(inst: MapHolder, key: Long): NativePointer = {
-    acquireShared(inst)
-    try {
-      val res = binarySearch(inst, key)
-      if (res >= 0) at(inst, res) else 0
-    } finally {
-      releaseShared(inst)
-    }
+    val res = binarySearch(inst, key)
+    if (res >= 0) at(inst, res) else 0
   }
 
   /**
@@ -168,33 +174,23 @@ class OffheapLFSortedIDMapReader(memFactory: MemFactory, holderKlass: Class[_ <:
   }
 
   /**
-   * Returns the first element, the one with the lowest key.
+   * Returns the first element, the one with the lowest key. Caller must hold a lock.
    * Throws IndexOutOfBoundsException if there are no elements.
    * @param inst the instance (eg TSPartition) with the mapPtr field containing the map address
    */
   final def first(inst: MapHolder): NativePointer = {
-    acquireShared(inst)
-    try {
-      if (doLength(inst) > 0) { getElem(mapPtr(inst), tail(inst)) }
-      else                    { throw new IndexOutOfBoundsException }
-    } finally {
-      releaseShared(inst)
-    }
+    if (doLength(inst) > 0) { getElem(mapPtr(inst), tail(inst)) }
+    else                    { throw new IndexOutOfBoundsException }
   }
 
   /**
-   * Returns the last element, the one with the highest key.
+   * Returns the last element, the one with the highest key. Caller must hold a lock.
    * Throws IndexOutOfBoundsException if there are no elements.
    * @param inst the instance (eg TSPartition) with the mapPtr field containing the map address
    */
   final def last(inst: MapHolder): NativePointer = {
-    acquireShared(inst)
-    try {
-      if (doLength(inst) > 0) { getElem(mapPtr(inst), head(inst)) }
-      else                    { throw new IndexOutOfBoundsException }
-    } finally {
-      releaseShared(inst)
-    }
+    if (doLength(inst) > 0) { getElem(mapPtr(inst), head(inst)) }
+    else                    { throw new IndexOutOfBoundsException }
   }
 
   /**
@@ -202,7 +198,14 @@ class OffheapLFSortedIDMapReader(memFactory: MemFactory, holderKlass: Class[_ <:
    * State is captured when the method is first called.
    * @param inst the instance (eg TSPartition) with the mapPtr field containing the map address
    */
-  final def iterate(inst: MapHolder): ElementIterator = makeElemIterator(inst, 0)(alwaysContinue)
+  final def iterate(inst: MapHolder): ElementIterator = {
+    acquireShared(inst)
+    try {
+      makeElemIterator(inst, 0)(alwaysContinue)
+    } catch {
+      case e: Throwable => releaseShared(inst); throw e;
+    }
+  }
 
   /**
    * Produces an ElementIterator for iterating elements in increasing key order from startKey to endKey
@@ -211,10 +214,15 @@ class OffheapLFSortedIDMapReader(memFactory: MemFactory, holderKlass: Class[_ <:
    * @param endKey end iteration when element is greater than endKey.  endKey is inclusive.
    */
   final def slice(inst: MapHolder, startKey: Long, endKey: Long): ElementIterator = {
-    val _mapPtr = mapPtr(inst)
-    val _state = state(_mapPtr)
-    val logicalStart = binarySearch(_mapPtr, _state, startKey) & 0x7fffffff
-    makeElemIterator(inst, logicalStart) { elem: NativePointer => keyFunc(elem) <= endKey }
+    acquireShared(inst)
+    try {
+      val _mapPtr = mapPtr(inst)
+      val _state = state(_mapPtr)
+      val logicalStart = binarySearch(_mapPtr, _state, startKey) & 0x7fffffff
+      makeElemIterator(inst, logicalStart) { elem: NativePointer => keyFunc(elem) <= endKey }
+    } catch {
+      case e: Throwable => releaseShared(inst); throw e;
+    }
   }
 
   /**
@@ -223,10 +231,15 @@ class OffheapLFSortedIDMapReader(memFactory: MemFactory, holderKlass: Class[_ <:
    * @param startKey start at element whose key is equal or immediately greater than startKey
    */
   final def sliceToEnd(inst: MapHolder, startKey: Long): ElementIterator = {
-    val _mapPtr = mapPtr(inst)
-    val _state = state(_mapPtr)
-    val logicalStart = binarySearch(_mapPtr, _state, startKey) & 0x7fffffff
-    makeElemIterator(inst, logicalStart)(alwaysContinue)
+    acquireShared(inst)
+    try {
+      val _mapPtr = mapPtr(inst)
+      val _state = state(_mapPtr)
+      val logicalStart = binarySearch(_mapPtr, _state, startKey) & 0x7fffffff
+      makeElemIterator(inst, logicalStart)(alwaysContinue)
+    } catch {
+      case e: Throwable => releaseShared(inst); throw e;
+    }
   }
 
   /**
@@ -392,22 +405,40 @@ class OffheapLFSortedIDMapReader(memFactory: MemFactory, holderKlass: Class[_ <:
   }
 
   // curIdx has to be initialized to one less than the starting logical index
-  // NOTE: This always fetches items using the official API.  THis is slower, but guarantees that no matter
+  // NOTE: This always fetches items using the official API.  This is slower, but guarantees that no matter
   // how slowly the iterator user pulls, it will always be pulling the right thing even if state/mapPtr changes.
   private class SortedIDMapElemIterator(inst: MapHolder, var curIdx: Int, continue: NativePointer => Boolean)
   extends ElementIterator {
+    var closed: Boolean = false
     var nextElem: NativePointer = _
+
+    val caller: Exception = new Exception()
+
+    final def close(): Unit = {
+      if (!closed) doClose()
+    }
+
+    private def doClose(): Unit = {
+       closed = true;
+       releaseShared(inst)
+    }
+
     final def hasNext: Boolean = {
+      if (closed) return false
       nextElem = at(inst, curIdx + 1)
-      curIdx < (doLength(inst) - 1) && !isPtrNull(nextElem) && continue(nextElem)
+      val result = curIdx < (doLength(inst) - 1) && !isPtrNull(nextElem) && continue(nextElem)
+      if (!result) doClose()
+      result
     }
 
     final def next: NativePointer = {
+      if (closed) throw new NoSuchElementException()
       curIdx += 1
       nextElem
     }
   }
 
+  // Note: Caller must have acquired shared lock. It's released when iterator is closed.
   private def makeElemIterator(inst: MapHolder, logicalStart: Int)
                               (continue: NativePointer => Boolean): ElementIterator =
     new SortedIDMapElemIterator(inst, logicalStart - 1, continue)
@@ -506,23 +537,22 @@ extends OffheapLFSortedIDMapReader(memFactory, holderKlass) {
   //scalastyle:on
 
   /**
-   * Atomically calls the elementFunc and inserts the element it returns IF AND ONLY IF
-   * the item with the given key is not already in the map.  elementFunc is not called if key already exists.
+   * Atomically inserts the element it returns IF AND ONLY IF
+   * the item with the given key is not already in the map.
    * To achieve the above goals, a new copy of the map is always made and the copyFlag CAS is used to
-   * guarantee only one party can do the insertion and call elementFunc at a time.
+   * guarantee only one party can do the insertion at a time.
    * Thus using this function has some side effects:
-   * - heap allocation of the elementFunc
    * - No O(1) head optimization
    * @return true if the item was inserted, false otherwise
    */
-  final def putIfAbsent(inst: MapHolder, key: Long, elementFunc: => NativePointer): Boolean = {
+  final def putIfAbsent(inst: MapHolder, key: Long, element: NativePointer): Boolean = {
     var inserted = false
     while (!inserted) {
       val _mapPtr = mapPtr(inst)
       val initState = state(_mapPtr)
       if (initState == MapState.empty) return false
       val _maxElem = initState.maxElem
-      if (initState.length == 0) { inserted = atomicHeadAddFunc(_mapPtr, initState, elementFunc) }
+      if (initState.length == 0) { inserted = atomicHeadAdd(_mapPtr, initState, element) }
       else {
         val res = binarySearch(_mapPtr, initState, key)  // TODO: make this based on original state
         if (res >= 0) {
@@ -530,7 +560,7 @@ extends OffheapLFSortedIDMapReader(memFactory, holderKlass) {
           return false
         } else if (res != IllegalStateResult) {
           val insertIndex = ((res & 0x7fffffff) + initState.tail) % _maxElem
-          inserted = copyInsertAtomicSwitchFunc(inst, initState, insertIndex, elementFunc,
+          inserted = copyInsertAtomicSwitch(inst, initState, insertIndex, element,
                        if (initState.length < (_maxElem - 1)) _maxElem else _maxElem * 2)
         }
       }
@@ -581,13 +611,18 @@ extends OffheapLFSortedIDMapReader(memFactory, holderKlass) {
    * After this is called, concurrent modifications and reads of the map in inst will fail gracefully.
    */
   final def free(inst: MapHolder): Unit = {
-    var curState = state(inst)
-    while (curState != MapState.empty) {
-      val mapPtr = inst.mapPtr
-      if (casState(mapPtr, curState, MapState.empty))
-        if (UnsafeUtils.unsafe.compareAndSwapLong(inst, mapPtrOffset, mapPtr, 0))
-          memFactory.freeMemory(mapPtr)
-      curState = state(inst)
+    acquireExclusive(inst)
+    try {
+      var curState = state(inst)
+      while (curState != MapState.empty) {
+        val mapPtr = inst.mapPtr
+        if (casState(mapPtr, curState, MapState.empty))
+          if (UnsafeUtils.unsafe.compareAndSwapLong(inst, mapPtrOffset, mapPtr, 0))
+            memFactory.freeMemory(mapPtr)
+        curState = state(inst)
+      }
+    } finally {
+      releaseExclusive(inst)
     }
   }
 
@@ -615,20 +650,6 @@ extends OffheapLFSortedIDMapReader(memFactory, holderKlass) {
       }
     }
 
-  private def atomicHeadAddFunc(mapPtr: NativePointer, initState: MapState, elemFunc: => NativePointer): Boolean =
-    !initState.copyFlag && {
-      // compute new head
-      val newHead = (initState.head + 1) % initState.maxElem
-
-      // Protect write with the copyFlag so that elemFunc is not executed unless the write is going to succeed
-      getElem(mapPtr, newHead) == 0L &&
-      atomicEnableCopyFlag(mapPtr, initState) && {
-        UnsafeUtils.setLong(elemPtr(mapPtr, newHead), elemFunc)
-        UnsafeUtils.setLong(mapPtr, initState.withHead(newHead).state)
-        true
-      }
-    }
-
   private def atomicTailRemove(mapPtr: NativePointer, state: MapState): Boolean =
     !state.copyFlag && {
       // compute new tail
@@ -651,20 +672,13 @@ extends OffheapLFSortedIDMapReader(memFactory, holderKlass) {
                                      insertIndex: Int,
                                      newElem: NativePointer,
                                      newMaxElems: Int): Boolean =
-    copyInsertAtomicSwitchFunc(inst, initState, insertIndex, newElem, newMaxElems)
-
-  private def copyInsertAtomicSwitchFunc(inst: MapHolder,
-                                         initState: MapState,
-                                         insertIndex: Int,
-                                         elemFunc: => NativePointer,
-                                         newMaxElems: Int): Boolean =
     copyMutateSwitchMap(inst, initState, newMaxElems) { case (startIndex, endIndex, movePtr) =>
       val _mapPtr = mapPtr(inst)
       // If insertIndex = endIndex + 1, that == inserting at end
       if (insertIndex >= startIndex && insertIndex <= (endIndex + 1)) {
         val insertOffset = 8 * (insertIndex - startIndex)  // # of bytes to copy before insertion point
         UnsafeUtils.copy(elemPtr(_mapPtr, startIndex), movePtr, insertOffset)
-        UnsafeUtils.setLong(movePtr + insertOffset, elemFunc)
+        UnsafeUtils.setLong(movePtr + insertOffset, newElem)
         UnsafeUtils.copy(elemPtr(_mapPtr, insertIndex), movePtr + insertOffset + 8, 8 * (endIndex - insertIndex + 1))
         endIndex - startIndex + 2   // include endIndex and also include new element
       } else {
