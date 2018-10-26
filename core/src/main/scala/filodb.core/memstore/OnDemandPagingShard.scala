@@ -121,6 +121,7 @@ TimeSeriesShard(dataset, storeConfig, shardNum, rawStore, metastore, evictionPol
    */
   private def createODPPartitionsTask(partIDs: Buffer[Int], callback: (Array[Byte], Int) => Unit):
   Task[Seq[TimeSeriesPartition]] = Task {
+    require(partIDs.nonEmpty)
     partIDs.map { id =>
       // for each partID: look up in partitions
       partitions.get(id) match {
