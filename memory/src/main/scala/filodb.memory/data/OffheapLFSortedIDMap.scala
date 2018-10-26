@@ -412,8 +412,6 @@ class OffheapLFSortedIDMapReader(memFactory: MemFactory, holderKlass: Class[_ <:
     var closed: Boolean = false
     var nextElem: NativePointer = _
 
-    val caller: Exception = new Exception()
-
     final def close(): Unit = {
       if (!closed) doClose()
     }

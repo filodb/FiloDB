@@ -265,7 +265,6 @@ class ElementChunkInfoIterator(elIt: ElementIterator) extends ChunkInfoIterator 
 class FilteredChunkInfoIterator(base: ChunkInfoIterator, filter: ChunkSetInfo => Boolean) extends ChunkInfoIterator {
   var nextnext: ChunkSetInfo = ChunkSetInfo(0)
   var gotNext: Boolean = false
-  var calls: Int = 0
 
   def close(): Unit = {
     base.close()
@@ -280,7 +279,6 @@ class FilteredChunkInfoIterator(base: ChunkInfoIterator, filter: ChunkSetInfo =>
   }
 
   def nextInfo: ChunkSetInfo = {
-    calls += 1
     gotNext = false   // reset so we can look for the next item where filter == true
     nextnext
   }
