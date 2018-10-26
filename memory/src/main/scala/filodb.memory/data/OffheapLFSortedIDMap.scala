@@ -129,12 +129,7 @@ class OffheapLFSortedIDMapReader(memFactory: MemFactory, holderKlass: Class[_ <:
    * Number of total elements in the map
    */
   final def length(inst: MapHolder): Int = {
-    acquireShared(inst)
-    try {
-      doLength(inst)
-    } finally {
-      releaseShared(inst)
-    }
+    withShared(inst, doLength(inst))
   }
 
   // Caller must hold a lock.
@@ -167,12 +162,7 @@ class OffheapLFSortedIDMapReader(memFactory: MemFactory, holderKlass: Class[_ <:
    * @param key the key to search for
    */
   final def contains(inst: MapHolder, key: Long): Boolean = {
-    acquireShared(inst)
-    try {
-      if (doLength(inst) > 0) binarySearch(inst, key) >= 0 else false
-    } finally {
-      releaseShared(inst)
-    }
+    withShared(inst, if (doLength(inst) > 0) binarySearch(inst, key) >= 0 else false)
   }
 
   /**
@@ -378,6 +368,18 @@ class OffheapLFSortedIDMapReader(memFactory: MemFactory, holderKlass: Class[_ <:
   }
 
   /**
+   * Run the given function body with the exclusive lock held, which isn't re-entrant.
+   */
+  def withExclusive[T](inst: MapHolder, body: => T): T = {
+    acquireExclusive(inst)
+    try {
+      body
+    } finally {
+      releaseExclusive(inst)
+    }
+  }
+
+  /**
    * Acquire shared access to this map, spinning if necessary.
    */
   def acquireShared(inst: MapHolder): Unit = {
@@ -404,6 +406,18 @@ class OffheapLFSortedIDMapReader(memFactory: MemFactory, holderKlass: Class[_ <:
     do {
       lockState = UnsafeUtils.getIntVolatile(inst, lockStateOffset)
     } while (!UnsafeUtils.unsafe.compareAndSwapInt(inst, lockStateOffset, lockState, lockState - 1))
+  }
+
+  /**
+   * Run the given function body with the shared lock held.
+   */
+  def withShared[T](inst: MapHolder, body: => T): T = {
+    acquireShared(inst)
+    try {
+      body
+    } finally {
+      releaseShared(inst)
+    }
   }
 
   // curIdx has to be initialized to one less than the starting logical index
@@ -611,8 +625,7 @@ extends OffheapLFSortedIDMapReader(memFactory, holderKlass) {
    * After this is called, concurrent modifications and reads of the map in inst will fail gracefully.
    */
   final def free(inst: MapHolder): Unit = {
-    acquireExclusive(inst)
-    try {
+    withExclusive(inst, {
       var curState = state(inst)
       while (curState != MapState.empty) {
         val mapPtr = inst.mapPtr
@@ -621,9 +634,7 @@ extends OffheapLFSortedIDMapReader(memFactory, holderKlass) {
             memFactory.freeMemory(mapPtr)
         curState = state(inst)
       }
-    } finally {
-      releaseExclusive(inst)
-    }
+    })
   }
 
   private def casLong(mapPtr: NativePointer, mapOffset: Int, oldLong: Long, newLong: Long): Boolean =
@@ -804,8 +815,10 @@ extends OffheapLFSortedIDMapMutator(memFactory, classOf[OffheapLFSortedIDMap]) w
   // Locking methods.
   final def acquireExclusive(): Unit = acquireExclusive(this)
   final def releaseExclusive(): Unit = releaseExclusive(this)
+  final def withExclusive[T](body: => T): T = withExclusive(this, body)
   final def acquireShared(): Unit = acquireShared(this)
   final def releaseShared(): Unit = releaseShared(this)
+  final def withShared[T](body: => T): T = withShared(this, body)
 }
 
 object SingleOffheapLFSortedIDMap {

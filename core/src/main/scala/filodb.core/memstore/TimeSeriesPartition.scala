@@ -277,12 +277,7 @@ extends ReadablePartition with MapHolder {
       Long.MinValue
     } else {
       // Acquire shared lock to safely access the native pointer.
-      offheapInfoMap.acquireShared(this)
-      try {
-        ChunkSetInfo(offheapInfoMap.first(this)).startTime
-      } finally {
-        offheapInfoMap.releaseShared(this)
-      }
+      offheapInfoMap.withShared(this, ChunkSetInfo(offheapInfoMap.first(this)).startTime)
     }
   }
 
@@ -297,12 +292,7 @@ extends ReadablePartition with MapHolder {
       -1
     } else {
       // Acquire shared lock to safely access the native pointer.
-      offheapInfoMap.acquireShared(this)
-      try {
-        infoLast.endTime
-      } finally {
-        offheapInfoMap.releaseShared(this)
-      }
+      offheapInfoMap.withShared(this, infoLast.endTime)
     }
   }
 
@@ -325,12 +315,7 @@ extends ReadablePartition with MapHolder {
   }
 
   final def removeChunksAt(id: ChunkID): Unit = {
-    offheapInfoMap.acquireExclusive(this)
-    try {
-      offheapInfoMap.remove(this, id)
-    } finally {
-      offheapInfoMap.releaseExclusive(this)
-    }
+    offheapInfoMap.withExclusive(this, offheapInfoMap.remove(this, id))
     shardStats.chunkIdsEvicted.increment()
   }
 
@@ -339,15 +324,12 @@ extends ReadablePartition with MapHolder {
   // Used for adding chunksets that are paged in, ie that are already persisted
   // Atomic and multi-thread safe; only mutates state if chunkID not present
   final def addChunkInfoIfAbsent(id: ChunkID, infoAddr: BinaryRegion.NativePointer): Boolean = {
-    offheapInfoMap.acquireExclusive(this)
-    try {
+    offheapInfoMap.withExclusive(this, {
       val inserted = offheapInfoMap.putIfAbsent(this, id, infoAddr)
       // Make sure to update newestFlushedID so that flushes work correctly and don't try to flush these chunksets
       if (inserted) updateFlushedID(infoGet(id))
       inserted
-    } finally {
-      offheapInfoMap.releaseExclusive(this)
-    }
+    })
   }
 
   final def updateFlushedID(info: ChunkSetInfo): Unit = {
@@ -361,11 +343,6 @@ extends ReadablePartition with MapHolder {
   private def infoLast: ChunkSetInfo = ChunkSetInfo(offheapInfoMap.last(this))
 
   private def infoPut(info: ChunkSetInfo): Unit = {
-    offheapInfoMap.acquireExclusive(this)
-    try {
-      offheapInfoMap.put(this, info.infoAddr)
-    } finally {
-      offheapInfoMap.releaseExclusive(this)
-    }
+    offheapInfoMap.withExclusive(this, offheapInfoMap.put(this, info.infoAddr))
   }
 }
