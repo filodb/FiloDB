@@ -111,7 +111,7 @@ object FiloSettings extends Build {
     // Uncomment below to debug Typesafe Config file loading
     // javaOptions ++= List("-Xmx2G", "-Dconfig.trace=loads"),
     // Make Akka tests more resilient esp for CI/CD/Travis/etc.
-    javaOptions ++= List("-Xmx3G", "-Dakka.test.timefactor=3"),
+    javaOptions ++= List("-Xmx2G", "-XX:+CMSClassUnloadingEnabled", "-Dakka.test.timefactor=3"),
     // Needed to avoid cryptic EOFException crashes in forked tests
     // in Travis with `sudo: false`.
     // See https://github.com/sbt/sbt/issues/653
