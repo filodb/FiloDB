@@ -1,5 +1,7 @@
 package filodb.memory.data
 
+import scala.concurrent.duration._
+
 import com.typesafe.scalalogging.StrictLogging
 
 import filodb.memory.BinaryRegion.NativePointer
@@ -300,9 +302,10 @@ class OffheapLFSortedIDMapReader(memFactory: MemFactory, holderKlass: Class[_ <:
   def acquireExclusive(inst: MapHolder): Unit = {
     // Spin-lock implementation. Because the owner of the shared lock might be blocked by this
     // thread as it waits for an exclusive lock, deadlock is possible. To mitigate this problem,
-    // timeout and retry, allowing shared lock waiters to make progress.
+    // timeout and retry, allowing shared lock waiters to make progress. The timeout doubles
+    // for each retry, up to a limit, but the retries continue indefinitely.
 
-    var timeoutNanos = 1000000 // 1 millisecond
+    var timeoutNanos = 1.millisecond.toNanos
     var warned = false
 
     while (true) {
@@ -310,9 +313,9 @@ class OffheapLFSortedIDMapReader(memFactory: MemFactory, holderKlass: Class[_ <:
         return
       }
 
-      timeoutNanos = Math.min(timeoutNanos << 1, 1000000000) // limit timeout to 1 second
+      timeoutNanos = Math.min(timeoutNanos << 1, 1.second.toNanos) // limit timeout
 
-      if (!warned && timeoutNanos >= 1000000000) {
+      if (!warned && timeoutNanos >= 1.second.toNanos) {
         _logger.warn(s"Waiting for exclusive lock: $inst")
         warned = true
       }
@@ -341,7 +344,6 @@ class OffheapLFSortedIDMapReader(memFactory: MemFactory, holderKlass: Class[_ <:
         if (lockState == 0) {
           return true
         }
-        // Scala doesn't support a simple break statement for some reason.
         done = true
       }
     } while (!done)

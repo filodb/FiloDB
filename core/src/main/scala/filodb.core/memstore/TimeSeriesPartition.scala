@@ -241,31 +241,34 @@ extends ReadablePartition with MapHolder {
     case LastSampleChunkScan        => if (numChunks == 0) ChunkInfoIterator.empty
                                        else {
       // Return a single element iterator which holds a shared lock.
-
       offheapInfoMap.acquireShared(this)
-
-      var info = infoLast
-
-      return new ChunkInfoIterator {
-        var closed = false
-
-        def close(): Unit = {
-          if (!closed) doClose()
-        }
-
-        private def doClose(): Unit = {
-          closed = true
-          offheapInfoMap.releaseShared(TimeSeriesPartition.this)
-        }
-
-        def hasNext: Boolean = !closed
-
-        def nextInfo: ChunkSetInfo = {
-          if (closed) throw new NoSuchElementException()
-          doClose()
-          return info
-        }
+      try {
+        new OneChunkInfo(infoLast)
+      } catch {
+        case e: Throwable => offheapInfoMap.releaseShared(this); throw e;
       }
+    }
+  }
+
+  // Caller must acquire shared lock, which is released when finished.
+  private class OneChunkInfo(info: ChunkSetInfo) extends ChunkInfoIterator {
+    var closed = false
+
+    def close(): Unit = {
+      if (!closed) doClose()
+    }
+
+    private def doClose(): Unit = {
+      closed = true
+      offheapInfoMap.releaseShared(TimeSeriesPartition.this)
+    }
+
+    def hasNext: Boolean = !closed
+
+    def nextInfo: ChunkSetInfo = {
+      if (closed) throw new NoSuchElementException()
+      doClose()
+      return info
     }
   }
 
