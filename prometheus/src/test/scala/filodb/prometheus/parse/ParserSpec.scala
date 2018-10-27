@@ -236,6 +236,8 @@ class ParserSpec extends FunSpec with Matchers {
         "PeriodicSeriesWithWindowing(RawSeries(IntervalSelector(List(1524855688000),List(1524855988000)),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000,1524855988000,300000,Rate,List())",
       "http_requests_total{job=\"prometheus\",group=\"canary\"}" ->
         "PeriodicSeries(RawSeries(IntervalSelector(List(1524855688000),List(1524855988000)),List(ColumnFilter(job,Equals(prometheus)), ColumnFilter(group,Equals(canary)), ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000,1524855988000)",
+      "http_requests_total{job=\"prometheus\",__col=\"min\"}" ->
+        "PeriodicSeries(RawSeries(IntervalSelector(List(1524855688000),List(1524855988000)),List(ColumnFilter(job,Equals(prometheus)), ColumnFilter(__name__,Equals(http_requests_total))),List(min)),1524855988000,1000,1524855988000)",
       "sum(http_requests_total) by (application, group)" ->
         "Aggregate(Sum,PeriodicSeries(RawSeries(IntervalSelector(List(1524855688000),List(1524855988000)),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000,1524855988000),List(),List(application, group),List())",
       "sum(http_requests_total) without (instance)" ->

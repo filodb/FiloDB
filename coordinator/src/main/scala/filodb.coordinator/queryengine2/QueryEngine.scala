@@ -15,6 +15,7 @@ import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.Dataset
 import filodb.core.query.{ColumnFilter, Filter}
+import filodb.core.Types
 import filodb.query._
 import filodb.query.exec._
 
@@ -177,10 +178,11 @@ class QueryEngine(dataset: Dataset,
                                    submitTime: Long,
                                    options: QueryOptions,
                                    lp: RawSeries): Seq[ExecPlan] = {
+    val colIDs = getColumnIDs(dataset, lp.columns)
     shardsFromFilters(lp.filters, options).map { shard =>
       val dispatcher = dispatcherForShard(shard)
       SelectRawPartitionsExec(queryId, submitTime, options.itemLimit, dispatcher, dataset.ref, shard,
-        lp.filters, toRowKeyRange(lp.rangeSelector), lp.columns)
+        lp.filters, toRowKeyRange(lp.rangeSelector), colIDs)
     }
   }
 
@@ -196,6 +198,20 @@ class QueryEngine(dataset: Dataset,
       SelectChunkInfosExec(queryId, submitTime, options.itemLimit, dispatcher, dataset.ref, shard,
         lp.filters, toRowKeyRange(lp.rangeSelector), colID)
     }
+  }
+
+  /**
+    * Convert column name strings into columnIDs.  NOTE: column names should not include row key columns
+    * as those are automatically prepended.
+    */
+  private def getColumnIDs(dataset: Dataset, cols: Seq[String]): Seq[Types.ColumnId] = {
+    val realCols = if (cols.isEmpty) Seq(dataset.options.valueColumn) else cols
+    val ids = dataset.colIDs(realCols: _*)
+      .recover(missing => throw new BadQueryException(s"Undefined columns $missing"))
+      .get
+    // avoid duplication if first ids are already row keys
+    if (ids.take(dataset.rowKeyIDs.length) == dataset.rowKeyIDs) { ids }
+    else { dataset.rowKeyIDs ++ ids }
   }
 
   private def toRowKeyRange(rangeSelector: RangeSelector): RowKeyRange = {

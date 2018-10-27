@@ -62,7 +62,7 @@ class SelectRawPartitionsExecSpec extends FunSpec with Matchers with ScalaFuture
     val filters = Seq (ColumnFilter("__name__", Filter.Equals("http_req_total".utf8)),
                        ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
     val execPlan = SelectRawPartitionsExec("someQueryId", now, numRawSamples, dummyDispatcher,
-      timeseriesDataset.ref, 0, filters, AllChunks, Seq("timestamp", "value"))
+      timeseriesDataset.ref, 0, filters, AllChunks, Seq(0, 1))
 
     val resp = execPlan.execute(memStore, timeseriesDataset, queryConfig).runAsync.futureValue
     val result = resp.asInstanceOf[QueryResult]
@@ -82,7 +82,7 @@ class SelectRawPartitionsExecSpec extends FunSpec with Matchers with ScalaFuture
     val end: BinaryRecord = BinaryRecord(timeseriesDataset, Seq(now - (numRawSamples-10) * reportingInterval))
 
     val execPlan = SelectRawPartitionsExec("someQueryId", now, numRawSamples, dummyDispatcher, timeseriesDataset.ref, 0,
-      filters, RowKeyInterval(start, end), Seq("timestamp", "value"))
+      filters, RowKeyInterval(start, end), Seq(0, 1))
 
     val resp = execPlan.execute(memStore, timeseriesDataset, queryConfig).runAsync.futureValue
     val result = resp.asInstanceOf[QueryResult]
@@ -98,7 +98,7 @@ class SelectRawPartitionsExecSpec extends FunSpec with Matchers with ScalaFuture
     val filters = Seq (ColumnFilter("__name__", Filter.Equals("http_req_total".utf8)),
       ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
     val execPlan = SelectRawPartitionsExec("someQueryId", now, numRawSamples, dummyDispatcher, timeseriesDataset.ref, 0,
-      filters, AllChunks, Seq("timestamp", "value"))
+      filters, AllChunks, Seq(0, 1))
     val start = now - numRawSamples * reportingInterval - 100 // reduce by 100 to not coincide with reporting intervals
     val step = 20000
     val end = now - (numRawSamples-100) * reportingInterval
@@ -130,7 +130,7 @@ class SelectRawPartitionsExecSpec extends FunSpec with Matchers with ScalaFuture
     val filters = Seq (ColumnFilter("__name__", Filter.Equals("http_req_total".utf8)),
       ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
     val execPlan = SelectRawPartitionsExec("someQueryId", now, numRawSamples, dummyDispatcher, timeseriesDataset.ref, 0,
-      filters, AllChunks, Seq("timestamp", "value"))
+      filters, AllChunks, Seq(0, 1))
     val resultSchema = execPlan.schema(timeseriesDataset)
     resultSchema.isTimeSeries shouldEqual true
     resultSchema.numRowKeyColumns shouldEqual 1

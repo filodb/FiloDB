@@ -76,6 +76,8 @@ trait Vectors extends Scalars with TimeUnits with Base {
     }
   }
 
+  // The "tag" or key used to indicate the column to query to FiloDB.  A non-standard Prom extension.
+  val ColumnSelectorLabel = "__col"
 
   sealed trait Vector extends Expression {
     protected def labelMatchesToFilters(labels: Seq[LabelMatch]) =
@@ -87,6 +89,11 @@ trait Vectors extends Scalars with TimeUnits with Base {
           case NotEqual(false) => ColumnFilter(labelMatch.label, query.Filter.NotEquals(labelMatch.value))
           case other: Any      => throw new IllegalArgumentException(s"Unknown match operator $other")
         }
+      }.filterNot(_.column == ColumnSelectorLabel)
+
+    protected def labelMatchesToColumnName(labels: Seq[LabelMatch]): Seq[String] =
+      labels.collect {
+        case LabelMatch(ColumnSelectorLabel, EqualMatch, col) => col
       }
   }
 
@@ -112,7 +119,7 @@ trait Vectors extends Scalars with TimeUnits with Base {
     }
 
     private[prometheus] val columnFilters = labelMatchesToFilters(labelSelection)
-
+    private val columns = labelMatchesToColumnName(labelSelection)
     private[prometheus] val nameFilter = ColumnFilter("__name__", query.Filter.Equals(metricName))
 
     def toPeriodicSeriesPlan(queryParams: QueryParams): PeriodicSeriesPlan = {
@@ -121,7 +128,7 @@ trait Vectors extends Scalars with TimeUnits with Base {
       // start timestamp. Prometheus goes back unto 5 minutes to get sample before declaring as stale
       PeriodicSeries(
         RawSeries(IntervalSelector(Seq((queryParams.start-staleDataLookbackSeconds) * 1000),
-                                   Seq(queryParams.end * 1000)), columnFilters :+ nameFilter, Nil),
+                                   Seq(queryParams.end * 1000)), columnFilters :+ nameFilter, columns),
         queryParams.start * 1000, queryParams.step * 1000, queryParams.end * 1000
       )
     }
@@ -137,7 +144,7 @@ trait Vectors extends Scalars with TimeUnits with Base {
   case class RangeExpression(metricName: String,
                              labelSelection: Seq[LabelMatch],
                              window: Duration,
-                             offset: Option[Duration]) extends Vector with SimpleSeries{
+                             offset: Option[Duration]) extends Vector with SimpleSeries {
     private val nameLabels = labelSelection.filter(_.label == "__name__")
 
     if (nameLabels.nonEmpty && !nameLabels.head.label.equals(metricName)) {
@@ -145,7 +152,7 @@ trait Vectors extends Scalars with TimeUnits with Base {
     }
 
     private[prometheus] val columnFilters = labelMatchesToFilters(labelSelection)
-
+    private val columns = labelMatchesToColumnName(labelSelection)
     private[prometheus] val nameFilter = ColumnFilter("__name__", query.Filter.Equals(metricName))
 
     val allFilters: Seq[ColumnFilter] = columnFilters :+ nameFilter
@@ -156,7 +163,7 @@ trait Vectors extends Scalars with TimeUnits with Base {
       }
       // multiply by 1000 to convert unix timestamp in seconds to millis
       RawSeries(IntervalSelector(Seq(queryParams.start * 1000 - window.millis),
-                                 Seq(queryParams.end * 1000)), allFilters, Nil)
+                                 Seq(queryParams.end * 1000)), allFilters, columns)
     }
 
   }

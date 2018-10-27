@@ -99,6 +99,13 @@ class QueryEngineSpec extends FunSpec with Matchers {
     }
   }
 
+  it("should throw BadQuery if illegal column name in LogicalPlan") {
+    val raw3 = raw2.copy(columns = Seq("foo"))
+    intercept[BadQueryException] {
+      engine.materialize(raw3, QueryOptions())
+    }
+  }
+
   it("should use spread function to change/override spread and generate ExecPlan with appropriate shards") {
     val spreadFunc = QueryOptions.simpleMapSpreadFunc("job", Map("myService" -> 2), 1)
 
