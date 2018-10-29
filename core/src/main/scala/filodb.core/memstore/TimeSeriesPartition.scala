@@ -233,21 +233,21 @@ extends ReadablePartition with MapHolder {
                .filter(_ != currentInfo)  // filter out the appending chunk
 
   def infos(method: ChunkScanMethod): ChunkInfoIterator = method match {
-    case AllChunkScan               => allInfos
-    case InMemoryChunkScan          => allInfos
-    case r: RowKeyChunkScan         => allInfos.filter { ic =>
-                                         ic.intersection(r.startTime, r.endTime).isDefined
-                                       }
-    case LastSampleChunkScan        => if (numChunks == 0) ChunkInfoIterator.empty
-                                       else {
-      // Return a single element iterator which holds a shared lock.
-      offheapInfoMap.acquireShared(this)
-      try {
-        new OneChunkInfo(infoLast)
-      } catch {
-        case e: Throwable => offheapInfoMap.releaseShared(this); throw e;
-      }
-    }
+    case AllChunkScan        => allInfos
+    case InMemoryChunkScan   => allInfos
+    case r: RowKeyChunkScan  => allInfos.filter { ic =>
+                                  ic.intersection(r.startTime, r.endTime).isDefined
+                                }
+    case LastSampleChunkScan => if (numChunks == 0) ChunkInfoIterator.empty
+                                else {
+                                  // Return a single element iterator which holds a shared lock.
+                                  offheapInfoMap.acquireShared(this)
+                                  try {
+                                    new OneChunkInfo(infoLast)
+                                  } catch {
+                                    case e: Throwable => offheapInfoMap.releaseShared(this); throw e;
+                                  }
+                                }
   }
 
   // Caller must acquire shared lock, which is released when finished.
