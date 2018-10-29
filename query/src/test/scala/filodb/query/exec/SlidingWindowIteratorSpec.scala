@@ -145,7 +145,7 @@ class SlidingWindowIteratorSpec extends FunSpec with Matchers {
 
   it ("should drop out of order samples with LastSampleFunction") {
 
-    val counterSamples = Seq(
+    val samples = Seq(
       100L->645926d,
       153L->696377d,
       270L->759389d,
@@ -156,7 +156,7 @@ class SlidingWindowIteratorSpec extends FunSpec with Matchers {
       430L->765387d, // out of order, should be dropped
       700L->830709d
     )
-    val rawRows = counterSamples.map(s => new TransientRow(s._1, s._2))
+    val rawRows = samples.map(s => new TransientRow(s._1, s._2))
     val start = 50L
     val end = 1000L
     val step = 5
@@ -168,6 +168,38 @@ class SlidingWindowIteratorSpec extends FunSpec with Matchers {
       v._2 should not equal 698713d
       v._2 should not equal 765387d
     }
+  }
 
+  it ("should calculate SumOverTime correctly even after time series stops. " +
+    "It should exclude values at curWindowStart") {
+
+    val samples = Seq(
+      100000L->1d,
+      153000L->2d,
+      250000L->3d, // should not be part of window 240000 to 350000
+      270000L->4d,
+      280000L->5d,
+      360000L->6d,
+      430000L->7d,
+      690000L->8d,
+      700000L->9d
+    )
+
+    val rawRows = samples.map(s => new TransientRow(s._1, s._2))
+    val slidingWinIterator = new SlidingWindowIterator(rawRows.iterator, 50000L, 100000, 1100000L, 100000,
+      RangeFunction(Some(RangeFunctionId.SumOverTime)), queryConfig)
+    slidingWinIterator.map(r => (r.getLong(0), r.getDouble(1))).toList shouldEqual Seq(
+      50000->0.0,
+      150000->1.0,
+      250000->5.0,
+      350000->9.0,
+      450000->13.0,
+      550000->0.0,
+      650000->0.0,
+      750000->17.0,
+      850000->0.0,
+      950000->0.0,
+      1050000->0.0
+    )
   }
 }
