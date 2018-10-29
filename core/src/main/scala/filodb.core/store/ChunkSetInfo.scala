@@ -233,7 +233,13 @@ trait ChunkInfoIterator { base: ChunkInfoIterator =>
    */
   def map[B](func: ChunkSetInfo => B): Iterator[B] = new Iterator[B] {
     def hasNext: Boolean = base.hasNext
-    def next: B = func(base.nextInfo)
+    def next: B = {
+      try {
+        func(base.nextInfo)
+      } catch {
+        case e: Throwable => close(); throw e;
+      }
+    }
   }
 
   /**
@@ -242,9 +248,13 @@ trait ChunkInfoIterator { base: ChunkInfoIterator =>
    * please only use this for testing or convenience.  VERY MEMORY EXPENSIVE.
    */
   def toBuffer: Seq[ChunkSetInfo] = {
-    val buf = new collection.mutable.ArrayBuffer[ChunkSetInfo]
-    while (hasNext) { buf += nextInfo }
-    buf
+    try {
+      val buf = new collection.mutable.ArrayBuffer[ChunkSetInfo]
+      while (hasNext) { buf += nextInfo }
+      buf
+    } catch {
+      case e: Throwable => close(); throw e;
+    }
   }
 }
 
@@ -271,11 +281,15 @@ class FilteredChunkInfoIterator(base: ChunkInfoIterator, filter: ChunkSetInfo =>
   }
 
   def hasNext: Boolean = {
-    while (base.hasNext && !gotNext) {
-      nextnext = base.nextInfo
-      if (filter(nextnext)) gotNext = true
+    try {
+      while (base.hasNext && !gotNext) {
+        nextnext = base.nextInfo
+        if (filter(nextnext)) gotNext = true
+      }
+      gotNext
+    } catch {
+      case e: Throwable => close(); throw e;
     }
-    gotNext
   }
 
   def nextInfo: ChunkSetInfo = {
