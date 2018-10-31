@@ -71,6 +71,9 @@ object OffheapLFSortedIDMap extends StrictLogging {
 
   val IllegalStateResult = -1  // Returned from binarySearch when state changed underneath
 
+  val InitialExclusiveRetryTimeoutNanos = 1.millisecond.toNanos
+  val MaxExclusiveRetryTimeoutNanos = 1.second.toNanos
+
   val _logger = logger
 
   // Tracks all the shared locks held, by each thread.
@@ -367,7 +370,7 @@ class OffheapLFSortedIDMapReader(memFactory: MemFactory, holderKlass: Class[_ <:
     // timeout and retry, allowing shared lock waiters to make progress. The timeout doubles
     // for each retry, up to a limit, but the retries continue indefinitely.
 
-    var timeoutNanos = 1.millisecond.toNanos
+    var timeoutNanos = InitialExclusiveRetryTimeoutNanos
     var warned = false
 
     while (true) {
@@ -375,9 +378,9 @@ class OffheapLFSortedIDMapReader(memFactory: MemFactory, holderKlass: Class[_ <:
         return
       }
 
-      timeoutNanos = Math.min(timeoutNanos << 1, 1.second.toNanos) // limit timeout
+      timeoutNanos = Math.min(timeoutNanos << 1, MaxExclusiveRetryTimeoutNanos)
 
-      if (!warned && timeoutNanos >= 1.second.toNanos) {
+      if (!warned && timeoutNanos >= MaxExclusiveRetryTimeoutNanos) {
         _logger.warn(s"Waiting for exclusive lock: $inst")
         warned = true
       }
