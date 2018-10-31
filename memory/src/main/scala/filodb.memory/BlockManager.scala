@@ -228,7 +228,10 @@ class PageAlignedBlockManager(val totalMemorySizeInBytes: Long,
   def releaseBlocks(): Unit = {
     lock.lock()
     try {
-      MemoryIO.getCheckedInstance.freeMemory(firstPageAddress)
+      if (firstPageAddress != 0) {
+        MemoryIO.getCheckedInstance.freeMemory(firstPageAddress)
+        firstPageAddress = 0
+      }
     } catch {
       case e: Throwable => logger.warn(s"Could not release blocks at $firstPageAddress", e)
     } finally {
