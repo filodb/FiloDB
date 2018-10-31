@@ -113,7 +113,7 @@ class NativeMemoryManager(val upperBoundSizeInBytes: Long) extends MemFactory {
     }
   }
 
-  protected[memory] def freeAll(): Unit = {
+  protected[memory] def freeAll(): Unit = synchronized {
     sizeMapping.foreach { case (addr, size) =>
       MemoryIO.getCheckedInstance().freeMemory(addr)
     }
