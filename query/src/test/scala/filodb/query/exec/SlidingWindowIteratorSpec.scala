@@ -202,4 +202,61 @@ class SlidingWindowIteratorSpec extends FunSpec with Matchers {
       1050000->0.0
     )
   }
+
+  it ("should calculate lastSample when ingested samples are more than 5 minutes apart") {
+    val samples = Seq(
+      1540832354000L->1d,
+      1540835954000L->2d,
+      1540839554000L->3d,
+      1540843154000L->4d,
+      1540846754000L->237d,
+      1540850354000L->330d
+    )
+
+    val rawRows = samples.map(s => new TransientRow(s._1, s._2))
+    val slidingWinIterator = new SlidingWindowIterator(rawRows.iterator, 1540845090000L,
+                                                       15000, 1540855905000L, 0,
+                                                       RangeFunction(None), queryConfig)
+    slidingWinIterator.map(r => (r.getLong(0), r.getDouble(1))).toList.filter(!_._2.isNaN) shouldEqual Seq(
+      1540846755000L->237,
+      1540846770000L->237,
+      1540846785000L->237,
+      1540846800000L->237,
+      1540846815000L->237,
+      1540846830000L->237,
+      1540846845000L->237,
+      1540846860000L->237,
+      1540846875000L->237,
+      1540846890000L->237,
+      1540846905000L->237,
+      1540846920000L->237,
+      1540846935000L->237,
+      1540846950000L->237,
+      1540846965000L->237,
+      1540846980000L->237,
+      1540846995000L->237,
+      1540847010000L->237,
+      1540847025000L->237,
+      1540847040000L->237, // note that value 237 becomes stale at this point. No samples with 237 anymore.
+      1540850355000L->330,
+      1540850370000L->330,
+      1540850385000L->330,
+      1540850400000L->330,
+      1540850415000L->330,
+      1540850430000L->330,
+      1540850445000L->330,
+      1540850460000L->330,
+      1540850475000L->330,
+      1540850490000L->330,
+      1540850505000L->330,
+      1540850520000L->330,
+      1540850535000L->330,
+      1540850550000L->330,
+      1540850565000L->330,
+      1540850580000L->330,
+      1540850595000L->330,
+      1540850610000L->330,
+      1540850625000L->330,
+      1540850640000L->330) // 330 becomes stale now.
+  }
 }

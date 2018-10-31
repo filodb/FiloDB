@@ -67,7 +67,9 @@ object PrometheusModel {
       b.addLabels(LabelPair.newBuilder().setName(lv._1.toString).setValue(lv._2.toString))
     }
     srv.rows.foreach { row =>
-      b.addSamples(Sample.newBuilder().setTimestampMs(row.getLong(0)).setValue(row.getDouble(1)))
+      if (!row.getDouble(1).isNaN) {
+        b.addSamples(Sample.newBuilder().setTimestampMs(row.getLong(0)).setValue(row.getDouble(1)))
+      }
     }
     b.build()
   }
