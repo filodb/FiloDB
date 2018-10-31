@@ -7,6 +7,8 @@ import scala.collection.mutable.Map
 import scala.concurrent.duration._
 
 import com.typesafe.scalalogging.StrictLogging
+import kamon.Kamon
+import kamon.metric.Counter
 
 import filodb.memory.BinaryRegion.NativePointer
 import filodb.memory.MemFactory
@@ -76,6 +78,8 @@ object OffheapLFSortedIDMap extends StrictLogging {
 
   val _logger = logger
 
+  val sharedLockLingering = Kamon.counter("memory-shared-lock-lingering")
+
   // Tracks all the shared locks held, by each thread.
   val sharedLockCounts = new ThreadLocal[Map[MapHolder, Int]]
 
@@ -119,14 +123,19 @@ object OffheapLFSortedIDMap extends StrictLogging {
     if (countMap != null) {
       var lastKlass: Class[_ <: MapHolder] = null
       var lockStateOffset = 0L
+      var counter: Counter = sharedLockLingering
 
       for ((inst, amt) <- countMap) {
         if (amt > 0) {
           var holderKlass = inst.getClass
+
           if (holderKlass != lastKlass) {
             lockStateOffset = lockStateOffsets.get(holderKlass)
+            counter = sharedLockLingering.refine("mapHolder", holderKlass.getName)
             lastKlass = holderKlass
           }
+
+          counter.increment(amt)
 
           _logger.warn(s"Releasing all shared locks for: $inst, amount: $amt")
 
@@ -183,6 +192,8 @@ trait MapHolder {
  */
 class OffheapLFSortedIDMapReader(memFactory: MemFactory, holderKlass: Class[_ <: MapHolder]) {
   import OffheapLFSortedIDMap._
+
+  val exclusiveLockWait = Kamon.counter("memory-exclusive-lock-waits").refine("mapHolder" -> holderKlass.getName)
 
   /**
    * Default keyFunc which maps pointer to element to the Long keyID.  It just reads the first eight bytes
@@ -381,6 +392,7 @@ class OffheapLFSortedIDMapReader(memFactory: MemFactory, holderKlass: Class[_ <:
       timeoutNanos = Math.min(timeoutNanos << 1, MaxExclusiveRetryTimeoutNanos)
 
       if (!warned && timeoutNanos >= MaxExclusiveRetryTimeoutNanos) {
+        exclusiveLockWait.increment()
         _logger.warn(s"Waiting for exclusive lock: $inst")
         warned = true
       }
