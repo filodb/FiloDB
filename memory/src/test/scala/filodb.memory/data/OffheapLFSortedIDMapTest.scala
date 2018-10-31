@@ -220,14 +220,14 @@ class OffheapLFSortedIDMapTest extends NativeVectorTest with ScalaFutures {
 
     val headThread = Future {
       headElems.foreach { elem =>
-        map.put(elem)
-        // map.contains(UnsafeUtils.getLong(elem)) shouldEqual true
+        map.withExclusive(map.put(elem))
+        map.contains(UnsafeUtils.getLong(elem)) shouldEqual true
       }
     }
     val midThread = Future {
       midElems.foreach { elem =>
-        map.put(elem)
-        // map.contains(UnsafeUtils.getLong(elem)) shouldEqual true
+        map.withExclusive(map.put(elem))
+        map.contains(UnsafeUtils.getLong(elem)) shouldEqual true
       }
     }
     Future.sequence(Seq(headThread, midThread)).futureValue
@@ -244,7 +244,7 @@ class OffheapLFSortedIDMapTest extends NativeVectorTest with ScalaFutures {
 
     val insertThread = Future {
       Random.shuffle(elems).foreach { elem =>
-        map.put(elem)
+        map.withExclusive(map.put(elem))
         map.contains(UnsafeUtils.getLong(elem)) shouldEqual true
       }
     }
@@ -275,7 +275,7 @@ class OffheapLFSortedIDMapTest extends NativeVectorTest with ScalaFutures {
     val map = SingleOffheapLFSortedIDMap(memFactory, 32)
     val elems = makeElems((0 to 99).map(_.toLong))
     elems.foreach { elem =>
-      map.put(elem)
+      map.withExclusive(map.put(elem))
     }
     map.length shouldEqual elems.length
 
@@ -285,14 +285,14 @@ class OffheapLFSortedIDMapTest extends NativeVectorTest with ScalaFutures {
     // Now, have one thread deleting 0-99, while second one inserts 100-199
     val deleteThread = Future {
       toDelete.foreach { n =>
-        map.remove(n)
+        map.withExclusive(map.remove(n))
         map.contains(n) shouldEqual false
       }
     }
 
     val insertThread = Future {
       moreElems.foreach { elem =>
-        map.put(elem)
+        map.withExclusive(map.put(elem))
         // map.contains(UnsafeUtils.getLong(elem)) shouldEqual true   // once in a while this could fail
       }
     }
@@ -544,6 +544,92 @@ class OffheapLFSortedIDMapTest extends NativeVectorTest with ScalaFutures {
 
     durationNanos should be > 1000000000L
     acquired shouldBe false
+
+    // Now let the exclusive lock request complete.
+    map.releaseShared()
+    Thread.`yield`
+
+    stuck.join(10000)
+
+    acquired shouldBe true
+  }
+
+  it("should release all shared locks held by the current thread") {
+    val map = SingleOffheapLFSortedIDMap(memFactory, 32)
+
+    map.acquireShared()
+    map.acquireShared()
+
+    @volatile var acquired = false
+
+    val stuck = new Thread {
+      override def run(): Unit = {
+        map.acquireExclusive()
+        acquired = true
+      }
+    }
+
+    stuck.start()
+
+    val startNanos = System.nanoTime()
+    stuck.join(500)
+    var durationNanos = System.nanoTime() - startNanos
+
+    durationNanos should be >= 500000000L
+
+    acquired shouldBe false
+
+    // Releasing all shared locks allows the exclusive lock request to complete.
+    OffheapLFSortedIDMap.releaseAllSharedLocks
+    Thread.`yield`
+
+    stuck.join(10000)
+
+    acquired shouldBe true
+  }
+
+  it("should release all shared locks held for only the current thread") {
+    val map = SingleOffheapLFSortedIDMap(memFactory, 32)
+
+    map.acquireShared()
+    map.acquireShared()
+
+    // Acquire another share, in another thread.
+    val shareThread = new Thread {
+      override def run(): Unit = map.acquireShared()
+    }
+
+    shareThread.start()
+    shareThread.join()
+
+    @volatile var acquired = false
+
+    val stuck = new Thread {
+      override def run(): Unit = {
+        map.acquireExclusive()
+        acquired = true
+      }
+    }
+
+    stuck.start()
+
+    var startNanos = System.nanoTime()
+    stuck.join(500)
+    var durationNanos = System.nanoTime() - startNanos
+
+    durationNanos should be >= 500000000L
+
+    acquired shouldBe false
+
+    // Releasing one thread shared locks isn't sufficient.
+    OffheapLFSortedIDMap.releaseAllSharedLocks
+    Thread.`yield`
+
+    startNanos = System.nanoTime()
+    stuck.join(500)
+    durationNanos = System.nanoTime() - startNanos
+
+    durationNanos should be >= 500000000L
 
     // Now let the exclusive lock request complete.
     map.releaseShared()

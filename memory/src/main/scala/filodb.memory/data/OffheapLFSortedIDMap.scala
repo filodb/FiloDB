@@ -1,5 +1,9 @@
 package filodb.memory.data
 
+import java.util.concurrent.ConcurrentHashMap
+
+import scala.collection.mutable.HashMap
+import scala.collection.mutable.Map
 import scala.concurrent.duration._
 
 import com.typesafe.scalalogging.StrictLogging
@@ -69,6 +73,72 @@ object OffheapLFSortedIDMap extends StrictLogging {
 
   val _logger = logger
 
+  // Tracks all the shared locks held, by each thread.
+  val sharedLockCounts = new ThreadLocal[Map[MapHolder, Int]]
+
+  // Lock state memory offsets for all known MapHolder classes.
+  val lockStateOffsets = new ConcurrentHashMap[Class[_ <: MapHolder], Long]
+
+  // Updates the shared lock count, for the current thread.
+  //scalastyle:off
+  def adjustSharedLockCount(inst: MapHolder, amt: Int): Unit = {
+    var countMap = sharedLockCounts.get
+
+    if (countMap == null) {
+      if (amt <= 0) {
+        return
+      }
+      countMap = new HashMap[MapHolder, Int]
+      sharedLockCounts.set(countMap)
+    }
+
+    var newCount = amt
+
+    countMap.get(inst) match {
+      case None => if (newCount <= 0) return
+      case Some(count) => {
+        newCount += count
+        if (newCount <= 0) {
+          countMap.remove(inst)
+          return
+        }
+      }
+    }
+
+    countMap.put(inst, newCount)
+  }
+
+  /**
+   * Releases all shared locks, against all OffheapLFSortedIDMap instances, for the current thread.
+   */
+  def releaseAllSharedLocks(): Unit = {
+    var countMap = sharedLockCounts.get
+    if (countMap != null) {
+      var lastKlass: Class[_ <: MapHolder] = null
+      var lockStateOffset = 0L
+
+      for ((inst, amt) <- countMap) {
+        if (amt > 0) {
+          var holderKlass = inst.getClass
+          if (holderKlass != lastKlass) {
+            lockStateOffset = lockStateOffsets.get(holderKlass)
+            lastKlass = holderKlass
+          }
+
+          _logger.warn(s"Releasing all shared locks for: $inst, amount: $amt")
+
+          var lockState = 0
+          do {
+            lockState = UnsafeUtils.getIntVolatile(inst, lockStateOffset)
+          } while (!UnsafeUtils.unsafe.compareAndSwapInt(inst, lockStateOffset, lockState, lockState - amt))
+        }
+      }
+
+      countMap.clear
+    }
+  }
+  //scalastyle:on
+
   def bytesNeeded(maxElements: Int): Int = {
     require(maxElements <= MaxMaxElements)
     OffsetElementPtrs + 8 * maxElements
@@ -119,6 +189,8 @@ class OffheapLFSortedIDMapReader(memFactory: MemFactory, holderKlass: Class[_ <:
 
   protected val mapPtrOffset = UnsafeUtils.unsafe.objectFieldOffset(holderKlass.getDeclaredField("mapPtr"))
   protected val lockStateOffset = UnsafeUtils.unsafe.objectFieldOffset(holderKlass.getDeclaredField("lockState"))
+
+  lockStateOffsets.putIfAbsent(holderKlass, lockStateOffset)
 
   // basic accessor classes; caller must hold a lock.
   @inline final def head(inst: MapHolder): Int = state(inst).head
@@ -393,6 +465,7 @@ class OffheapLFSortedIDMapReader(memFactory: MemFactory, holderKlass: Class[_ <:
         // Wait for exclusive lock to be released.
         Thread.`yield`
       } else if (UnsafeUtils.unsafe.compareAndSwapInt(inst, lockStateOffset, lockState, lockState + 1)) {
+        adjustSharedLockCount(inst, +1)
         return
       }
     }
@@ -406,6 +479,7 @@ class OffheapLFSortedIDMapReader(memFactory: MemFactory, holderKlass: Class[_ <:
     do {
       lockState = UnsafeUtils.getIntVolatile(inst, lockStateOffset)
     } while (!UnsafeUtils.unsafe.compareAndSwapInt(inst, lockStateOffset, lockState, lockState - 1))
+    adjustSharedLockCount(inst, -1)
   }
 
   /**
