@@ -16,6 +16,7 @@ import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.Dataset
 import filodb.core.query.{ColumnFilter, Filter}
 import filodb.core.Types
+import filodb.prometheus.ast.Vectors.PromMetricLabel
 import filodb.query._
 import filodb.query.exec._
 
@@ -179,10 +180,11 @@ class QueryEngine(dataset: Dataset,
                                    options: QueryOptions,
                                    lp: RawSeries): Seq[ExecPlan] = {
     val colIDs = getColumnIDs(dataset, lp.columns)
-    shardsFromFilters(lp.filters, options).map { shard =>
+    val renamedFilters = renameMetricFilter(lp.filters)
+    shardsFromFilters(renamedFilters, options).map { shard =>
       val dispatcher = dispatcherForShard(shard)
       SelectRawPartitionsExec(queryId, submitTime, options.itemLimit, dispatcher, dataset.ref, shard,
-        lp.filters, toRowKeyRange(lp.rangeSelector), colIDs)
+        renamedFilters, toRowKeyRange(lp.rangeSelector), colIDs)
     }
   }
 
@@ -193,12 +195,27 @@ class QueryEngine(dataset: Dataset,
     // Translate column name to ID and validate here
     val colName = if (lp.column.isEmpty) dataset.options.valueColumn else lp.column
     val colID = dataset.colIDs(colName).get.head
-    shardsFromFilters(lp.filters, options).map { shard =>
+    val renamedFilters = renameMetricFilter(lp.filters)
+    shardsFromFilters(renamedFilters, options).map { shard =>
       val dispatcher = dispatcherForShard(shard)
       SelectChunkInfosExec(queryId, submitTime, options.itemLimit, dispatcher, dataset.ref, shard,
-        lp.filters, toRowKeyRange(lp.rangeSelector), colID)
+        renamedFilters, toRowKeyRange(lp.rangeSelector), colID)
     }
   }
+
+  /**
+   * Renames Prom AST __name__ metric name filters to one based on the actual metric column of the dataset,
+   * if it is not the prometheus standard
+   */
+  private def renameMetricFilter(filters: Seq[ColumnFilter]): Seq[ColumnFilter] =
+    if (dataset.options.metricColumn != PromMetricLabel) {
+      filters map {
+        case ColumnFilter(PromMetricLabel, filt) => ColumnFilter(dataset.options.metricColumn, filt)
+        case other: ColumnFilter                 => other
+      }
+    } else {
+      filters
+    }
 
   /**
     * Convert column name strings into columnIDs.  NOTE: column names should not include row key columns
