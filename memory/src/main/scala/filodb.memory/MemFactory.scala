@@ -104,7 +104,7 @@ class NativeMemoryManager(val upperBoundSizeInBytes: Long) extends MemFactory {
     val size = sizeMapping.getOrElse(address, -1)
     if (size >= 0) {
       val currentSize = usedSoFar.get()
-      //MemoryIO.getCheckedInstance().freeMemory(address)
+      MemoryIO.getCheckedInstance().freeMemory(address)
       usedSoFar.compareAndSet(currentSize, currentSize - size)
       val removed = sizeMapping.remove(address)
     } else {
@@ -113,9 +113,9 @@ class NativeMemoryManager(val upperBoundSizeInBytes: Long) extends MemFactory {
     }
   }
 
-  protected[memory] def freeAll(): Unit = {
+  protected[memory] def freeAll(): Unit = synchronized {
     sizeMapping.foreach { case (addr, size) =>
-      //MemoryIO.getCheckedInstance().freeMemory(addr)
+      MemoryIO.getCheckedInstance().freeMemory(addr)
     }
     sizeMapping.clear()
   }
