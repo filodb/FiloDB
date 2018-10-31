@@ -63,7 +63,7 @@ class SlidingWindowIterator(raw: Iterator[RowReader],
                             window: Long,
                             rangeFunction: RangeFunction,
                             queryConfig: QueryConfig) extends Iterator[TransientRow] {
-  private var sampleToEmit = new TransientRow()
+  private val sampleToEmit = new TransientRow()
   private var curWindowEnd = start
 
   // sliding window queue
@@ -89,22 +89,21 @@ class SlidingWindowIterator(raw: Iterator[RowReader],
   override def hasNext: Boolean = curWindowEnd <= end
   override def next(): TransientRow = {
     val curWindowStart = curWindowEnd - window
-    // add elements to window until end of current window has reached
+    // current window is: (curWindowStart, curWindowEnd]. Excludes start, includes end.
+
+    // Add elements to window until end of current window has reached
     while (rows.hasNext && rows.head.timestamp <= curWindowEnd) {
-      val next = rows.next()
-      // skip elements that are outside of the current window, except for last sample.
-      if (next.timestamp >= curWindowStart ||    // inside current window
-         (rangeFunction.needsLastSample && rows.hasNext && rows.head.timestamp > curWindowStart) ||
-         (rangeFunction.needsLastSample && !rows.hasNext)) { // no more rows
+      val cur = rows.next()
+      if (shouldAddCurToWindow(curWindowStart, cur)) {
         val toAdd = windowSamplesPool.get
-        toAdd.copyFrom(next)
+        toAdd.copyFrom(cur)
         windowQueue.add(toAdd)
         rangeFunction.addedToWindow(toAdd, windowSamples)
       }
     }
-    // remove elements outside current window that were part of previous window
-    // but ensure at least one sample present
-    while (windowQueue.size > 1 && windowQueue.head.timestamp < curWindowStart) {
+
+    // remove elements from head of window that were part of previous window
+    while (shouldRemoveWindowHead(curWindowStart)) {
       val removed = windowQueue.remove()
       rangeFunction.removedFromWindow(removed, windowSamples)
       windowSamplesPool.putBack(removed)
@@ -113,6 +112,44 @@ class SlidingWindowIterator(raw: Iterator[RowReader],
     rangeFunction.apply(curWindowStart, curWindowEnd, windowSamples, sampleToEmit, queryConfig)
     curWindowEnd = curWindowEnd + step
     sampleToEmit
+  }
+
+  /**
+    * Decides if a sample should be added to current window.
+    * We skip elements that are outside of the current window, except for last sample.
+    *
+    * @param cur sample to check for eligibility
+    * @param curWindowStart start time of the current window
+    */
+  private def shouldAddCurToWindow(curWindowStart: Long, cur: TransientRow): Boolean = {
+    // One of the following three conditions need to hold true:
+
+    // 1. cur is inside current window
+    (cur.timestamp > curWindowStart) ||
+      // 2. needLastSample and cur is the last sample because next sample is inside window
+      (rangeFunction.needsLastSample && rows.hasNext && rows.head.timestamp > curWindowStart) ||
+      // 3. needLastSample and no more rows after cur
+      (rangeFunction.needsLastSample && !rows.hasNext)
+  }
+
+  /**
+    * Decides if first item in sliding window should be removed.
+    *
+    * Remove elements outside current window that were part of
+    * previous window but ensure at least one sample present if needsLastSample is true.
+    *
+    * @param curWindowStart start time of the current window
+    */
+  private def shouldRemoveWindowHead(curWindowStart: Long): Boolean = {
+
+    (!windowQueue.isEmpty) && (
+      // One of the following two conditions need to hold true:
+
+      // 1. if no need for last sample, and head is outside the window
+      (!rangeFunction.needsLastSample && windowQueue.head.timestamp <= curWindowStart) ||
+        // 2. if needs last sample, then ok to remove window's head only if there is more than one item in window
+        (rangeFunction.needsLastSample && windowQueue.size > 1 && windowQueue.head.timestamp <= curWindowStart)
+    )
   }
 }
 

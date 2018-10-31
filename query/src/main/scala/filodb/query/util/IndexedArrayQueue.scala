@@ -59,6 +59,8 @@ class IndexedArrayQueue[T](initialSize: Int = 8) {
 
   def size: Int = (tl - hd) & (items.size - 1)
 
+  def isEmpty: Boolean = size == 0
+
   def remove(): T = {
     if (size == 0) throw new NoSuchElementException
     val result = items(hd)
