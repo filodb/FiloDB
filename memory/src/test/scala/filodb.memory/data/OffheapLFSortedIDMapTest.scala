@@ -580,7 +580,7 @@ class OffheapLFSortedIDMapTest extends NativeVectorTest with ScalaFutures {
     acquired shouldBe false
 
     // Releasing all shared locks allows the exclusive lock request to complete.
-    OffheapLFSortedIDMap.releaseAllSharedLocks
+    OffheapLFSortedIDMap.releaseAllSharedLocks()
     Thread.`yield`
 
     stuck.join(10000)
@@ -622,7 +622,7 @@ class OffheapLFSortedIDMapTest extends NativeVectorTest with ScalaFutures {
     acquired shouldBe false
 
     // Releasing one thread shared locks isn't sufficient.
-    OffheapLFSortedIDMap.releaseAllSharedLocks
+    OffheapLFSortedIDMap.releaseAllSharedLocks()
     Thread.`yield`
 
     startNanos = System.nanoTime()
