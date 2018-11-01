@@ -215,16 +215,27 @@ class DropOutOfOrderSamplesIterator(iter: Iterator[RowReader]) extends Iterator[
   private val cur = new TransientRow(-1, -1)
   private val nextVal = new TransientRow(-1, -1)
   private var hasNextVal = false
-  setNext()
+  private var hasNextDefined = false
 
-  override def hasNext: Boolean = hasNextVal
+  override def hasNext: Boolean = {
+    if (!hasNextDefined) {
+      setNext()
+      hasNextDefined = true
+    }
+    hasNextVal
+  }
+
   override def next(): TransientRow = {
+    if (!hasNextDefined) {
+      setNext()
+      hasNextDefined = true
+    }
     cur.copyFrom(nextVal)
     setNext()
     cur
   }
 
-  def setNext(): Unit = {
+  private def setNext(): Unit = {
     hasNextVal = false
     while (!hasNextVal && iter.hasNext) {
       val nxt = iter.next()
