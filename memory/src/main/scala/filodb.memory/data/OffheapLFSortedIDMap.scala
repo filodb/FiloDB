@@ -273,16 +273,17 @@ class OffheapLFSortedIDMapReader(memFactory: MemFactory, holderKlass: Class[_ <:
 
   /**
    * Produces an ElementIterator for going through every element of the map in increasing key order.
-   * State is captured when the method is first called.
    * @param inst the instance (eg TSPartition) with the mapPtr field containing the map address
    */
   final def iterate(inst: MapHolder): ElementIterator = {
-    acquireShared(inst)
-    try {
-      makeElemIterator(inst, 0)(alwaysContinue)
-    } catch {
-      case e: Throwable => releaseShared(inst); throw e;
-    }
+    new LazyElementIterator({
+      acquireShared(inst)
+      try {
+        makeElemIterator(inst, 0)(alwaysContinue)
+      } catch {
+        case e: Throwable => releaseShared(inst); throw e;
+      }
+    })
   }
 
   /**
@@ -292,15 +293,17 @@ class OffheapLFSortedIDMapReader(memFactory: MemFactory, holderKlass: Class[_ <:
    * @param endKey end iteration when element is greater than endKey.  endKey is inclusive.
    */
   final def slice(inst: MapHolder, startKey: Long, endKey: Long): ElementIterator = {
-    acquireShared(inst)
-    try {
-      val _mapPtr = mapPtr(inst)
-      val _state = state(_mapPtr)
-      val logicalStart = binarySearch(_mapPtr, _state, startKey) & 0x7fffffff
-      makeElemIterator(inst, logicalStart) { elem: NativePointer => keyFunc(elem) <= endKey }
-    } catch {
-      case e: Throwable => releaseShared(inst); throw e;
-    }
+    new LazyElementIterator({
+      acquireShared(inst)
+      try {
+        val _mapPtr = mapPtr(inst)
+        val _state = state(_mapPtr)
+        val logicalStart = binarySearch(_mapPtr, _state, startKey) & 0x7fffffff
+        makeElemIterator(inst, logicalStart) { elem: NativePointer => keyFunc(elem) <= endKey }
+      } catch {
+        case e: Throwable => releaseShared(inst); throw e;
+      }
+     })
   }
 
   /**
@@ -309,15 +312,17 @@ class OffheapLFSortedIDMapReader(memFactory: MemFactory, holderKlass: Class[_ <:
    * @param startKey start at element whose key is equal or immediately greater than startKey
    */
   final def sliceToEnd(inst: MapHolder, startKey: Long): ElementIterator = {
-    acquireShared(inst)
-    try {
-      val _mapPtr = mapPtr(inst)
-      val _state = state(_mapPtr)
-      val logicalStart = binarySearch(_mapPtr, _state, startKey) & 0x7fffffff
-      makeElemIterator(inst, logicalStart)(alwaysContinue)
-    } catch {
-      case e: Throwable => releaseShared(inst); throw e;
-    }
+    new LazyElementIterator({
+      acquireShared(inst)
+      try {
+        val _mapPtr = mapPtr(inst)
+        val _state = state(_mapPtr)
+        val logicalStart = binarySearch(_mapPtr, _state, startKey) & 0x7fffffff
+        makeElemIterator(inst, logicalStart)(alwaysContinue)
+      } catch {
+        case e: Throwable => releaseShared(inst); throw e;
+      }
+    })
   }
 
   /**

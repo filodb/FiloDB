@@ -30,3 +30,27 @@ trait ElementIterator {
     _count
   }
 }
+
+/**
+ * Lazily instantiates a wrapped iterator until hasNext or next is called.
+ */
+//scalastyle:off
+class LazyElementIterator(source: => ElementIterator) extends ElementIterator {
+  private var it: ElementIterator = _
+
+  // Note: If close is called before the iterator is assigned, then there's seemingly no
+  // reason to go to the source and create an iterator just to close it. Doing so anyhow
+  // ensures that any side effects from constructing the iterator are observed, and it
+  // also ensures that a closed iterator stays closed.
+  override def close(): Unit = sourceIt().close()
+
+  override def hasNext: Boolean = sourceIt().hasNext
+
+  override def next: NativePointer = sourceIt().next
+
+  private def sourceIt(): ElementIterator = {
+    if (it == null) it = source
+    it
+  }
+}
+//scalastyle:on
