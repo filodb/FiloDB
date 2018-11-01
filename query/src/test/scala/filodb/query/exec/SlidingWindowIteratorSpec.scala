@@ -145,7 +145,7 @@ class SlidingWindowIteratorSpec extends FunSpec with Matchers {
 
   it ("should drop out of order samples with LastSampleFunction") {
 
-    val counterSamples = Seq(
+    val samples = Seq(
       100L->645926d,
       153L->696377d,
       270L->759389d,
@@ -156,7 +156,7 @@ class SlidingWindowIteratorSpec extends FunSpec with Matchers {
       430L->765387d, // out of order, should be dropped
       700L->830709d
     )
-    val rawRows = counterSamples.map(s => new TransientRow(s._1, s._2))
+    val rawRows = samples.map(s => new TransientRow(s._1, s._2))
     val start = 50L
     val end = 1000L
     val step = 5
@@ -168,6 +168,95 @@ class SlidingWindowIteratorSpec extends FunSpec with Matchers {
       v._2 should not equal 698713d
       v._2 should not equal 765387d
     }
+  }
 
+  it ("should calculate SumOverTime correctly even after time series stops. " +
+    "It should exclude values at curWindowStart") {
+
+    val samples = Seq(
+      100000L->1d,
+      153000L->2d,
+      250000L->3d, // should not be part of window 240000 to 350000
+      270000L->4d,
+      280000L->5d,
+      360000L->6d,
+      430000L->7d,
+      690000L->8d,
+      700000L->9d
+    )
+
+    val rawRows = samples.map(s => new TransientRow(s._1, s._2))
+    val slidingWinIterator = new SlidingWindowIterator(rawRows.iterator, 50000L, 100000, 1100000L, 100000,
+      RangeFunction(Some(RangeFunctionId.SumOverTime)), queryConfig)
+    slidingWinIterator.map(r => (r.getLong(0), r.getDouble(1))).toList shouldEqual Seq(
+      50000->0.0,
+      150000->1.0,
+      250000->5.0,
+      350000->9.0,
+      450000->13.0,
+      550000->0.0,
+      650000->0.0,
+      750000->17.0,
+      850000->0.0,
+      950000->0.0,
+      1050000->0.0
+    )
+  }
+
+  it ("should calculate lastSample when ingested samples are more than 5 minutes apart") {
+    val samples = Seq(
+      1540832354000L->1d,
+      1540835954000L->2d,
+      1540839554000L->3d,
+      1540843154000L->4d,
+      1540846754000L->237d,
+      1540850354000L->330d
+    )
+
+    val rawRows = samples.map(s => new TransientRow(s._1, s._2))
+    val slidingWinIterator = new SlidingWindowIterator(rawRows.iterator, 1540845090000L,
+                                                       15000, 1540855905000L, 0,
+                                                       RangeFunction(None), queryConfig)
+    slidingWinIterator.map(r => (r.getLong(0), r.getDouble(1))).toList.filter(!_._2.isNaN) shouldEqual Seq(
+      1540846755000L->237,
+      1540846770000L->237,
+      1540846785000L->237,
+      1540846800000L->237,
+      1540846815000L->237,
+      1540846830000L->237,
+      1540846845000L->237,
+      1540846860000L->237,
+      1540846875000L->237,
+      1540846890000L->237,
+      1540846905000L->237,
+      1540846920000L->237,
+      1540846935000L->237,
+      1540846950000L->237,
+      1540846965000L->237,
+      1540846980000L->237,
+      1540846995000L->237,
+      1540847010000L->237,
+      1540847025000L->237,
+      1540847040000L->237, // note that value 237 becomes stale at this point. No samples with 237 anymore.
+      1540850355000L->330,
+      1540850370000L->330,
+      1540850385000L->330,
+      1540850400000L->330,
+      1540850415000L->330,
+      1540850430000L->330,
+      1540850445000L->330,
+      1540850460000L->330,
+      1540850475000L->330,
+      1540850490000L->330,
+      1540850505000L->330,
+      1540850520000L->330,
+      1540850535000L->330,
+      1540850550000L->330,
+      1540850565000L->330,
+      1540850580000L->330,
+      1540850595000L->330,
+      1540850610000L->330,
+      1540850625000L->330,
+      1540850640000L->330) // 330 becomes stale now.
   }
 }
