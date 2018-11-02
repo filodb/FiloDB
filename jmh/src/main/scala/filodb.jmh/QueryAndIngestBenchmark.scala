@@ -17,6 +17,8 @@ import filodb.coordinator.ShardMapper
 import filodb.core.binaryrecord2.RecordContainer
 import filodb.core.memstore.{SomeData, TimeSeriesMemStore}
 import filodb.core.store.StoreConfig
+import filodb.gateway.GatewayServer
+import filodb.gateway.conversion.PrometheusInputRecord
 import filodb.prometheus.ast.QueryParams
 import filodb.prometheus.parse.Parser
 import filodb.query.{QueryError => QError, QueryResult => QueryResult2}
@@ -25,12 +27,13 @@ import filodb.timeseries.TestTimeseriesProducer
 //scalastyle:off regex
 /**
  * A macrobenchmark (IT-test level) for QueryEngine2 aggregations, in-memory only (no on-demand paging)
- * No ingestion occurs while query test is running -- this is intentional to allow for query-focused CPU
- * and memory allocation analysis.
+ * Ingestion runs while query is running too to measure impact of ingestion on querying.
+ * Note that some CPU is needed for generating the pseudorandom input data, so use this benchmark not as
+ * an absolute but as a relative benchmark to test impact of changes.
  * Ingests a fixed amount of tsgenerator data in Prometheus schema (time, value, tags) and runs various queries.
  */
 @State(Scope.Thread)
-class QueryInMemoryBenchmark extends StrictLogging {
+class QueryAndIngestBenchmark extends StrictLogging {
   org.slf4j.LoggerFactory.getLogger("filodb").asInstanceOf[Logger].setLevel(Level.WARN)
 
   import filodb.coordinator._
@@ -77,8 +80,9 @@ class QueryInMemoryBenchmark extends StrictLogging {
   // Manually pump in data ourselves so we know when it's done.
   // TODO: ingest into multiple shards
   Thread sleep 2000    // Give setup command some time to set up dataset shards etc.
-  val (producingFut, containerStream) = TestTimeseriesProducer.metricsToContainerStream(startTime, numShards, numSeries,
-                                          numSamples * numSeries, dataset, shardMapper, spread)
+
+  val (shardQueues, containerStream) = GatewayServer.shardingPipeline(GlobalConfig.systemConfig, numShards, dataset)
+
   val ingestTask = containerStream.groupBy(_._1)
                     // Asynchronously subcribe and ingest each shard
                     .mapAsync(numShards) { groupedStream =>
@@ -93,10 +97,22 @@ class QueryInMemoryBenchmark extends StrictLogging {
                         cluster.memStore.ingestStream(dataset.ref, shard, shardStream, global) {
                           case e: Exception => throw e })
                     }.countL.runAsync
-  Await.result(producingFut, 30.seconds)
+
+  private def ingestSamples(noSamples: Int): Future[Unit] = Future {
+    TestTimeseriesProducer.timeSeriesData(startTime, numShards, numSeries)
+      .take(noSamples * numSeries)
+      .foreach { sample =>
+        val rec = PrometheusInputRecord(sample.tags, sample.metric, dataset, sample.timestamp, sample.value)
+        val shard = shardMapper.ingestionShard(rec.shardKeyHash, rec.partitionKeyHash, spread)
+        while (!shardQueues(shard).offer(rec)) { Thread sleep 50 }
+      }
+  }
+
+  // Initial ingest just to populate index
+  Await.result(ingestSamples(30), 30.seconds)
   Thread sleep 2000
   cluster.memStore.asInstanceOf[TimeSeriesMemStore].commitIndexForTesting(dataset.ref) // commit lucene index
-  println(s"Ingestion ended")
+  println(s"Initial ingestion ended, indexes set up")
 
   /**
    * ## ========  Queries ===========
@@ -113,8 +129,12 @@ class QueryInMemoryBenchmark extends StrictLogging {
     LogicalPlan2Query(dataset.ref, plan, QueryOptions(1, 100))
   }
 
+  private var testProducingFut: Future[Unit] = _
+
   @TearDown
   def shutdownFiloActors(): Unit = {
+    // Wait for producing future to end
+    Await.result(testProducingFut, 30.seconds)
     cluster.shutdown()
   }
 
@@ -123,6 +143,7 @@ class QueryInMemoryBenchmark extends StrictLogging {
   @OutputTimeUnit(TimeUnit.SECONDS)
   @OperationsPerInvocation(500)
   def parallelQueries(): Unit = {
+    testProducingFut = ingestSamples(numSamples)
     val futures = (0 until numQueries).map { n =>
       val f = asyncAsk(coordinator, queryCommands(n % queryCommands.length))
       f.onSuccess {

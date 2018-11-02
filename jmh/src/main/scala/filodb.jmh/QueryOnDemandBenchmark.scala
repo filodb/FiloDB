@@ -148,6 +148,7 @@ class QueryOnDemandBenchmark extends StrictLogging {
   @Benchmark
   @BenchmarkMode(Array(Mode.Throughput))
   @OutputTimeUnit(TimeUnit.SECONDS)
+  @OperationsPerInvocation(10)
   def parallelQueries(): Unit = {
     val futures = (0 until numQueries).map { n =>
       val f = asyncAsk(coordinator, queryCommands(n % queryCommands.length))

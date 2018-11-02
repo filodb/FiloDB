@@ -70,6 +70,10 @@ class IngestionBenchmark {
   /**
    * Ingest a single RecordContainer with 100 records in it.  Note that the throughput reported is x100 so
    * it is not the containers throughput but the actual records throughput.
+   *
+   * NOTE: based on -prof stack profiling, this benchmark does invoke the flushing logic plus
+   * WriteBufferPool buffer recycling logic.  The time is thus heavily influenced by the chunking/encoding
+   * logic, OffheapSortedIDMap stuff, and native memory allocation cost.
    */
   @Benchmark
   @BenchmarkMode(Array(Mode.Throughput))
