@@ -421,13 +421,13 @@ object AvgRowAggregator extends RowAggregator {
   def map(rvk: RangeVectorKey, item: RowReader, mapInto: MutableRowReader): RowReader = {
     mapInto.setLong(0, item.getLong(0))
     mapInto.setDouble(1, item.getDouble(1))
-    mapInto.setLong(2, 1L)
+    mapInto.setLong(2, if (item.getDouble(1).isNaN) 0L else 1L)
     mapInto
   }
   def reduceAggregate(acc: AvgHolder, aggRes: RowReader): AvgHolder = {
-    val newMean = (acc.mean * acc.count + aggRes.getDouble(1) * aggRes.getLong(2))/ (acc.count + aggRes.getLong(2))
-    acc.timestamp = aggRes.getLong(0)
-    if (!aggRes.getDouble(1).isNaN) {
+    if (aggRes.getLong(2) > 0) {
+      val newMean = (acc.mean * acc.count + aggRes.getDouble(1) * aggRes.getLong(2)) / (acc.count + aggRes.getLong(2))
+      acc.timestamp = aggRes.getLong(0)
       acc.mean = newMean
       acc.count += aggRes.getLong(2)
     }
