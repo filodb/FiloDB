@@ -425,9 +425,9 @@ object AvgRowAggregator extends RowAggregator {
     mapInto
   }
   def reduceAggregate(acc: AvgHolder, aggRes: RowReader): AvgHolder = {
+    acc.timestamp = aggRes.getLong(0)
     if (aggRes.getLong(2) > 0) {
       val newMean = (acc.mean * acc.count + aggRes.getDouble(1) * aggRes.getLong(2)) / (acc.count + aggRes.getLong(2))
-      acc.timestamp = aggRes.getLong(0)
       acc.mean = newMean
       acc.count += aggRes.getLong(2)
     }
