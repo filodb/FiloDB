@@ -1,8 +1,12 @@
  package filodb.coordinator.client
 
+import scala.collection.mutable
+import scala.collection.mutable.Set
+
 import akka.actor.ActorRef
 import akka.serialization.SerializationExtension
 import akka.testkit.TestProbe
+import filodb.query
 import org.scalatest.concurrent.ScalaFutures
 
 import filodb.coordinator.{ActorSpecConfig, ActorTest, NodeClusterActor, ShardMapper}
@@ -10,8 +14,7 @@ import filodb.coordinator.queryengine2.QueryEngine
 import filodb.core.{MachineMetricsData, MetricsTestData, NamesTestData, TestData}
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.store._
-import filodb.memory.format.{RowReader, SeqRowReader}
-import filodb.memory.format.{ZeroCopyUTF8String => UTF8Str}
+import filodb.memory.format.{RowReader, SeqRowReader, ZeroCopyUTF8String => UTF8Str}
 import filodb.prometheus.ast.QueryParams
 import filodb.prometheus.parse.Parser
 import filodb.query.{QueryResult => QueryResult2, _}
@@ -31,9 +34,9 @@ object SerializationSpecConfig extends ActorSpecConfig {
  */
 class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) with ScalaFutures {
   import IngestionCommands._
+  import NamesTestData._
   import NodeClusterActor._
   import QueryCommands._
-  import NamesTestData._
 
   val serialization = SerializationExtension(system)
 
@@ -131,6 +134,7 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
     val reportingInterval = 10000
     val tuples = (numRawSamples until 0).by(-1).map(n => (now - n * reportingInterval, n.toDouble))
 
+    // scalastyle:off null
     val rvKey = new PartitionRangeVectorKey(null, defaultPartKey, dataset1.partKeySchema,
                                             Seq(ColumnInfo("string", ColumnType.StringColumn)), 0)
 
@@ -252,6 +256,30 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
 
     roundTripResult.result.head.key.labelValues shouldEqual keysMap
 
+  }
+
+  it ("should serialize and deserialize result involving Metadata") {
+
+    val keysMap = Map(UTF8Str("ignore") -> UTF8Str("ignore"))
+    val key = CustomRangeVectorKey(keysMap)
+    val cols = Seq(ColumnInfo("value", ColumnType.MapColumn))
+
+    val response: Set[Map[UTF8Str, UTF8Str]] = new mutable.LinkedHashSet[Map[UTF8Str, UTF8Str]]()
+    response += Map((UTF8Str("dc"), UTF8Str("newark")), (UTF8Str("partition"), UTF8Str("1")),
+      (UTF8Str("dc1"), UTF8Str("newark")), (UTF8Str("partition1"), UTF8Str("1")))
+    response += Map((UTF8Str("dc2"), UTF8Str("newark")), (UTF8Str("partition2"), UTF8Str("1")),
+      (UTF8Str("dc3"), UTF8Str("newark")), (UTF8Str("partition3"), UTF8Str("1")))
+
+    val ser = MetadataRangeVector(key, response)
+
+    val schema = ResultSchema(Seq(ColumnInfo("ignore", ColumnType.MapColumn)), 1)
+
+    val result = query.MetadataQueryResult("someId", schema, Seq(ser))
+    val roundTripResult = roundTrip(result).asInstanceOf[MetadataQueryResult]
+
+    roundTripResult.result.head.key.labelValues shouldEqual keysMap
+    roundTripResult.result(0).rows.size shouldEqual 2
+    roundTripResult.result(0).rows.next().getAny(0) shouldEqual response.head
   }
 
 }

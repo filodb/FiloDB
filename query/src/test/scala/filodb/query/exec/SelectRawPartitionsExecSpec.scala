@@ -52,7 +52,7 @@ class SelectRawPartitionsExecSpec extends FunSpec with Matchers with ScalaFuture
   }
 
   val dummyDispatcher = new PlanDispatcher {
-    override def dispatch(plan: ExecPlan)
+    override def dispatch(plan: RootExecPlan)
                          (implicit sched: ExecutionContext,
                           timeout: FiniteDuration): Task[QueryResponse] = ???
   }

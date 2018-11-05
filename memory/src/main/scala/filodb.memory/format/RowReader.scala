@@ -3,6 +3,7 @@ package filodb.memory.format
 import java.nio.ByteBuffer
 import java.sql.Timestamp
 
+import scala.collection.mutable.Set
 import scala.reflect.ClassTag
 
 import org.joda.time.DateTime
@@ -230,6 +231,35 @@ final case class SeqRowReader(sequence: Seq[Any]) extends RowReader {
   def getBlobBase(columnNo: Int): Any = ???
   def getBlobOffset(columnNo: Int): Long = ???
   def getBlobNumBytes(columnNo: Int): Int = ???
+}
+
+final case class SeqMetadataRowReader(records: Set[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]]) extends Iterator[RowReader] {
+
+  private var rowNo = -1
+  private var endRowNo = records.size - 1
+  private def listRecords: Seq[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]] = records.toSeq
+
+  private val rowReader = new RowReader {
+    def notNull(columnNo: Int): Boolean = true
+    def getBoolean(columnNo: Int): Boolean = ???
+    def getInt(columnNo: Int): Int = ???
+    def getLong(columnNo: Int): Long = ???
+    def getDouble(columnNo: Int): Double = ???
+    def getFloat(columnNo: Int): Float = ???
+    def getString(columnNo: Int): String = ???
+    def getAny(columnNo: Int): Any = listRecords(rowNo)
+
+    def getBlobBase(columnNo: Int): Any = ???
+    def getBlobOffset(columnNo: Int): Long = ???
+    def getBlobNumBytes(columnNo: Int): Int = ???
+  }
+
+  override def hasNext: Boolean = rowNo < endRowNo
+
+  override def next(): RowReader = {
+    rowNo = rowNo + 1
+    rowReader
+  }
 }
 
 final case class SchemaSeqRowReader(sequence: Seq[Any],

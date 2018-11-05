@@ -46,6 +46,7 @@ final case class SelectRawPartitionsExec(id: String,
 
     val chunkMethod = rowKeyRange match {
       case RowKeyInterval(from, to) => RowKeyChunkScan(from, to)
+      case MetadataPlan => ???
       case AllChunks => AllChunkScan
       case WriteBuffers => ???
       case EncodedChunks => ???

@@ -1,5 +1,6 @@
 package filodb.core.memstore
 
+import scala.collection.mutable.{HashSet, Set}
 import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.concurrent.duration._
 import scala.util.{Random, Try}
@@ -20,11 +21,12 @@ import filodb.core.{ErrorResponse, _}
 import filodb.core.binaryrecord2._
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.Dataset
+import filodb.core.query.{ColumnFilter, SeqMapMetadataConsumer}
 import filodb.core.store._
 import filodb.memory._
 import filodb.memory.data.{OffheapLFSortedIDMap, OffheapLFSortedIDMapMutator}
+import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String}
 import filodb.memory.format.BinaryVector.BinaryVectorPtr
-import filodb.memory.format.UnsafeUtils
 
 class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
   val tags = Map("shard" -> shardNum.toString, "dataset" -> dataset.toString)
@@ -153,6 +155,7 @@ class TimeSeriesShard(val dataset: Dataset,
                       evictionPolicy: PartitionEvictionPolicy)
                      (implicit val ec: ExecutionContext) extends StrictLogging {
   import collection.JavaConverters._
+
   import TimeSeriesShard._
 
   val shardStats = new TimeSeriesShardStats(dataset.ref, shardNum)
@@ -173,6 +176,8 @@ class TimeSeriesShard(val dataset: Dataset,
     * Maintained using a high-performance bitmap index.
     */
   private[memstore] final val partKeyIndex = new PartKeyLuceneIndex(dataset, shardNum, storeConfig)
+
+
 
   /**
     * Keeps track of count of rows ingested into memstore, not necessarily flushed.
@@ -447,6 +452,29 @@ class TimeSeriesShard(val dataset: Dataset,
   def indexNames: Iterator[String] = partKeyIndex.indexNames
 
   def indexValues(indexName: String, topK: Int): Seq[TermInfo] = partKeyIndex.indexValues(indexName, topK)
+
+  def metadata(filter: Seq[ColumnFilter], columns: Seq[String], startTime: Long, endTime: Long):
+          Set[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]] = {
+    val result = new HashSet[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]]
+    if (filter.isEmpty) {
+      columns.foreach(column => {
+        result += partKeyIndex.indexValues(column, 1000)
+          .map(termInfo => (ZeroCopyUTF8String(column) -> termInfo.term))
+          .toMap // For unique results - as terms can have duplicate entries
+        })
+    } else {
+      //TODO get the limit from config
+      val partIterator = partKeyIndex.partIdsFromFilters(filter, startTime, endTime, 1000)
+      while (partIterator.hasNext) {
+        val nextPartID = partIterator.next
+        val nextPart = partitions.get(nextPartID)
+        val consumer = new SeqMapMetadataConsumer(columns)
+        dataset.partKeySchema.consumeMapItems(nextPart.partKeyBase, nextPart.partKeyOffset, 0, consumer)
+        result += consumer.pairs.map(pair => (pair._1 -> pair._2)).toMap
+      }
+    }
+    result
+  }
 
   /**
     * WARNING: use only for testing. Not performant

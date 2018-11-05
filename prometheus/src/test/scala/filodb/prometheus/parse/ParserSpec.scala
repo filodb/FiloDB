@@ -7,6 +7,20 @@ import org.scalatest.{FunSpec, Matchers}
 // scalastyle:off
 class ParserSpec extends FunSpec with Matchers {
 
+  it("metadata query") {
+    parseMetadataQuerySuccessfully("http_requests_total{job=\"prometheus\", method=\"GET\"}")
+    parseMetadataQuerySuccessfully("http_requests_total{job=\"prometheus\", method!=\"GET\"}")
+
+    parseMetadataLabelQuerySuccessfully("__name__{job=\"prometheus\"}")
+    parseMetadataLabelQuerySuccessfully("job{__name__=\"http_requests_total\"}")
+    parseMetadataLabelQuerySuccessfully("job")
+
+    parseMetadataQueryError("http_requests_total{status=\"200\"")
+    parseMetadataQueryError("http_requests_total[status=\"200\"]")
+    parseMetadataLabelQueryError("job{__name__=\"prometheus\"")
+    parseMetadataLabelQueryError("job{__name__=\"prometheus\"}")
+  }
+
   it("parse basic scalar expressions") {
     parseSuccessfully("1")
     //    parse("+Inf")
@@ -318,5 +332,24 @@ class ParserSpec extends FunSpec with Matchers {
     }
   }
 
+  private def parseMetadataQuerySuccessfully(query: String) = {
+    Parser.parseMetadataQuery(query)
+  }
+
+  private def parseMetadataQueryError(query: String) = {
+    intercept[IllegalArgumentException] {
+      Parser.parseMetadataQuery(query)
+    }
+  }
+
+  private def parseMetadataLabelQuerySuccessfully(query: String) = {
+    Parser.parseMetadataLabelValuesQuery(query)
+  }
+
+  private def parseMetadataLabelQueryError(query: String) = {
+    intercept[IllegalArgumentException] {
+      Parser.parseMetadataLabelValuesQuery(query)
+    }
+  }
 
 }

@@ -15,6 +15,76 @@ import filodb.core.store.ChunkSource
 import filodb.query._
 import filodb.query.Query.qLogger
 
+trait RootExecPlan extends QueryCommand {
+  /**
+    * The dispatcher is used to dispatch the ExecPlan
+    * to the node where it will be executed. The Query Engine
+    * will supply this parameter
+    */
+  def dispatcher: PlanDispatcher
+
+  /**
+    * Child execution plans representing sub-queries
+    */
+  def children: Seq[RootExecPlan]
+
+  /**
+    * The query id
+    */
+  def id: String
+
+  def submitTime: Long
+
+  /**
+    * Limit on number of samples returned per RangeVector
+    */
+  def limit: Int
+
+  /**
+    * Prints the ExecPlan execution flow as a tree
+    * structure, will be useful for debugging
+    */
+  def printTree(level: Int = 0): String
+
+  /**
+    * Schema of QueryResponse returned by running execute()
+    */
+  def schema(dataset: Dataset): ResultSchema
+
+  /**
+    * Facade for the execution orchestration of the plan sub-tree
+    * starting from this node.
+    *
+    * The return Task must be "run" for execution to ensue. See
+    * Monix documentation for further information on Task.
+    * This first invokes the doExecute abstract method, then applies
+    * the RangeVectorMappers associated with this plan node.
+    *
+    * The returned task can be used to perform post-execution steps
+    * such as sending off an asynchronous response message etc.
+    *
+    */
+  def execute(source: ChunkSource,
+              dataset: Dataset,
+              queryConfig: QueryConfig)
+             (implicit sched: Scheduler,
+              timeout: FiniteDuration): Task[QueryResponse]
+
+  def addRangeVectorTransformer(mapper: RangeVectorTransformer): Unit
+
+  /**
+    * Sub classes should implement this with schema of RangeVectors returned
+    * from doExecute() abstract method.
+    */
+  protected def schemaOfDoExecute(dataset: Dataset): ResultSchema
+
+  /**
+    * Args to use for the ExecPlan for printTree purposes only.
+    * DO NOT change to a val. Increases heap usage.
+    */
+  protected def args: String
+}
+
 /**
   * This is the Execution Plan tree node interface.
   * ExecPlan nodes form a tree. Each leaf node in the tree
@@ -30,32 +100,7 @@ import filodb.query.Query.qLogger
   * Convention is for all concrete subclasses of ExecPlan to
   * end with 'Exec' for easy identification
   */
-trait ExecPlan extends QueryCommand {
-  /**
-    * The query id
-    */
-  def id: String
-
-  /**
-    * Child execution plans representing sub-queries
-    */
-  def children: Seq[ExecPlan]
-
-  def submitTime: Long
-
-  /**
-   * Limit on number of samples returned per RangeVector
-   */
-  def limit: Int
-
-  def dataset: DatasetRef
-
-  /**
-    * The dispatcher is used to dispatch the ExecPlan
-    * to the node where it will be executed. The Query Engine
-    * will supply this parameter
-    */
-  def dispatcher: PlanDispatcher
+trait ExecPlan extends RootExecPlan {
 
   /**
     * The list of RangeVector transformations that will be done
@@ -149,18 +194,6 @@ trait ExecPlan extends QueryCommand {
                           queryConfig: QueryConfig)
                          (implicit sched: Scheduler,
                           timeout: FiniteDuration): Observable[RangeVector]
-
-  /**
-    * Sub classes should implement this with schema of RangeVectors returned
-    * from doExecute() abstract method.
-    */
-  protected def schemaOfDoExecute(dataset: Dataset): ResultSchema
-
-  /**
-    * Args to use for the ExecPlan for printTree purposes only.
-    * DO NOT change to a val. Increases heap usage.
-    */
-  protected def args: String
 
   /**
     * Prints the ExecPlan and RangeVectorTransformer execution flow as a tree

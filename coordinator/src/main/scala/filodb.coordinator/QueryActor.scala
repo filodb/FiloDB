@@ -13,8 +13,8 @@ import filodb.coordinator.queryengine2.QueryEngine
 import filodb.core._
 import filodb.core.memstore.{MemStore, TermInfo}
 import filodb.core.metadata.Dataset
-import filodb.query.{QueryCommand, QueryConfig, QueryError, QueryResult}
-import filodb.query.exec.{ExecPlan => ExecPlan2}
+import filodb.query._
+import filodb.query.exec.RootExecPlan
 
 object QueryCommandPriority extends java.util.Comparator[Envelope] {
   override def compare(o1: Envelope, o2: Envelope): Int = {
@@ -64,7 +64,7 @@ final class QueryActor(memStore: MemStore,
   private val resultVectors = Kamon.histogram("queryactor-result-num-rvs").refine(tags)
   private val queryErrors = Kamon.counter("queryactor-query-errors").refine(tags)
 
-  def execPhysicalPlan2(q: ExecPlan2, replyTo: ActorRef): Unit = {
+  def execPhysicalPlan2(q: RootExecPlan, replyTo: ActorRef): Unit = {
     epRequests.increment
     Kamon.currentSpan().tag("query", q.getClass.getSimpleName)
     val span = Kamon.buildSpan(s"execplan2-${q.getClass.getSimpleName}").start()
@@ -74,6 +74,7 @@ final class QueryActor(memStore: MemStore,
        replyTo ! res
        res match {
          case QueryResult(_, _, vectors) => resultVectors.record(vectors.length)
+         case MetadataQueryResult(_, _, vectors) => resultVectors.record(vectors.length)
          case e: QueryError =>
            queryErrors.increment
            logger.debug(s"queryId ${q.id} Normal QueryError returned from query execution: $e")
@@ -91,7 +92,10 @@ final class QueryActor(memStore: MemStore,
     // This is for CLI use only. Always prefer clients to materialize logical plan
     lpRequests.increment
     try {
-      val execPlan = queryEngine2.materialize(q.logicalPlan, q.queryOptions)
+      val execPlan = q.logicalPlan match {
+        case m: Metadata => queryEngine2.materializeMetadataPlan(m, q.queryOptions)
+        case _ => queryEngine2.materialize(q.logicalPlan, q.queryOptions)
+      }
       self forward execPlan
     } catch {
       case NonFatal(ex) =>
@@ -116,7 +120,7 @@ final class QueryActor(memStore: MemStore,
     case q: LogicalPlan2Query      => val replyTo = sender()
                                       processLogicalPlan2Query(q, replyTo)
 
-    case q: ExecPlan2              => execPhysicalPlan2(q, sender())
+    case q: RootExecPlan              => execPhysicalPlan2(q, sender())
 
     case GetIndexNames(ref, limit, _) =>
       sender() ! memStore.indexNames(ref).take(limit).map(_._1).toBuffer

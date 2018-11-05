@@ -14,13 +14,14 @@ case class RowKeyInterval(from: BinaryRecord, to: BinaryRecord) extends RowKeyRa
 case object AllChunks extends RowKeyRange
 case object WriteBuffers extends RowKeyRange
 case object EncodedChunks extends RowKeyRange
+case object MetadataPlan extends RowKeyRange
 
 /**
   * Simply concatenate results from child ExecPlan objects
   */
 final case class DistConcatExec(id: String,
                                 dispatcher: PlanDispatcher,
-                                children: Seq[ExecPlan]) extends NonLeafExecPlan {
+                                children: Seq[RootExecPlan]) extends NonLeafExecPlan {
   require(!children.isEmpty)
 
   protected def args: String = ""

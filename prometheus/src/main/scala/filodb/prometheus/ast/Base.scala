@@ -1,11 +1,13 @@
 package filodb.prometheus.ast
 
-import filodb.query.{PeriodicSeriesPlan, RawSeriesPlan}
+import filodb.query.{MetadataQueryPlan, PeriodicSeriesPlan, RawSeriesPlan}
 
 /**
  * NOTE: start and end are in SECONDS since Epoch
  */
 case class QueryParams(start: Long, step: Long, end: Long)
+
+case class MetadataQueryParams(start: Long, end: Long)
 
 trait Base {
 
@@ -21,6 +23,9 @@ trait Base {
     def toRawSeriesPlan(queryParams: QueryParams, isRoot: Boolean): RawSeriesPlan
   }
 
+  trait Metadata extends Expression {
+    def toMetadataQueryPlan(queryParams: MetadataQueryParams) : MetadataQueryPlan
+  }
 
   /**
     * An identifier is an unquoted string

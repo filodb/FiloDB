@@ -15,6 +15,8 @@ sealed trait RawSeriesPlan extends LogicalPlan
   */
 sealed trait PeriodicSeriesPlan extends LogicalPlan
 
+sealed trait MetadataQueryPlan extends LogicalPlan
+
 /**
   * A selector is needed in the RawSeries logical plan to specify
   * a row key range to extract from each partition.
@@ -31,6 +33,11 @@ case class IntervalSelector(from: Seq[Any], to: Seq[Any]) extends RangeSelector
 case class RawSeries(rangeSelector: RangeSelector,
                      filters: Seq[ColumnFilter],
                      columns: Seq[String]) extends RawSeriesPlan
+
+
+case class Metadata(rawSeries: RawSeries,
+                    start: Long,
+                    end: Long) extends MetadataQueryPlan
 
 /**
  * Concrete logical plan to query for chunk metadata from raw time series in a given range

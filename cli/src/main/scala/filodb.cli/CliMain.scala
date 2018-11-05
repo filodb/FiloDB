@@ -18,11 +18,10 @@ import filodb.core._
 import filodb.core.metadata.{Column, Dataset, DatasetOptions}
 import filodb.core.store._
 import filodb.memory.format.RowReader
-import filodb.prometheus.ast.QueryParams
+import filodb.prometheus.ast.{MetadataQueryParams, QueryParams}
 import filodb.prometheus.parse.Parser
-import filodb.query.{QueryResult => QueryResult2}
-import filodb.query.{QueryError => QueryError2}
-import filodb.query.{LogicalPlan => LogicalPlan2}
+import filodb.query.{LogicalPlan => LogicalPlan2, MetadataQueryResult,
+  QueryError => QueryError2, QueryResult => QueryResult2}
 
 // scalastyle:off
 class Arguments extends FieldArgs {
@@ -47,6 +46,8 @@ class Arguments extends FieldArgs {
   var port: Int = 2552
   var promql0: Option[String] = None
   var promql: Option[String] = None
+  var metadata: Option[String] = None
+  var metadataLabelValues: Option[String] = None
   var start: Long = System.currentTimeMillis() / 1000 // promql argument is seconds since epoch
   var end: Long = System.currentTimeMillis() / 1000 // promql argument is seconds since epoch
   var step: Long = 10 // in seconds
@@ -189,6 +190,24 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
             parsePromQuery2(remote, query, args.dataset.get,
               QueryParams(args.start, args.step, args.end), options)
           }.orElse {
+            args.metadata.map { query =>
+              require(args.host.nonEmpty && args.dataset.nonEmpty, "--host and --dataset must be defined")
+              val remote = Client.standaloneClient(system, args.host.get, args.port)
+              val options = QOptions(args.limit, args.sampleLimit, args.everyNSeconds.map(_.toInt),
+                timeout, args.shards.map(_.map(_.toInt)), spread)
+              parseMetadataQuery(remote, query, args.dataset.get,
+                MetadataQueryParams(args.start, args.end), options)
+            }
+          }.orElse {
+            args.metadataLabelValues.map { query =>
+              require(args.host.nonEmpty && args.dataset.nonEmpty, "--host and --dataset must be defined")
+              val remote = Client.standaloneClient(system, args.host.get, args.port)
+              val options = QOptions(args.limit, args.sampleLimit, args.everyNSeconds.map(_.toInt),
+                timeout, args.shards.map(_.map(_.toInt)), spread)
+              parseMetadataLabelValuesQuery(remote, query, args.dataset.get,
+                MetadataQueryParams(args.start, args.end), options)
+            }
+          }.orElse {
             args.select.map { selectCols =>
               exportCSV(getRef(args),
                         selectCols,
@@ -309,6 +328,20 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
                             shardOverrides: Option[Seq[Int]],
                             spread: Int)
 
+  def parseMetadataQuery(client: LocalClient, query: String, dataset: String,
+                         queryParams: MetadataQueryParams,
+                         options: QOptions): Unit = {
+    val logicalPlan = Parser.metadataQueryRangeToLogicalPlan(query, queryParams)
+    executeQuery2(client, dataset, logicalPlan, options)
+  }
+
+  def parseMetadataLabelValuesQuery(client: LocalClient, query: String, dataset: String,
+                         queryParams: MetadataQueryParams,
+                         options: QOptions): Unit = {
+    val logicalPlan = Parser.metadataLabelValuesQueryRangeToLogicalPlan(query, queryParams)
+    executeQuery2(client, dataset, logicalPlan, options)
+  }
+
   def parsePromQuery2(client: LocalClient, query: String, dataset: String,
                       queryParams: QueryParams,
                       options: QOptions): Unit = {
@@ -340,6 +373,10 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
           client.logicalPlan2Query(ref, plan, qOpts) match {
             case QueryResult2(_, schema, result) => {
               println(s"Number of Range Vectors: ${result.size}")
+              result.foreach(rv => println(rv.prettyPrint(schema)))
+            }
+            case MetadataQueryResult(_, schema, result) => {
+              println(s"Number of Range Vectors Hello: ${result.size}")
               result.foreach(rv => println(rv.prettyPrint(schema)))
             }
             case QueryError2(_,ex)               => println(s"ERROR: ${ex.getMessage}")

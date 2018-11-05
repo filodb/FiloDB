@@ -1,6 +1,6 @@
 package filodb.core.memstore
 
-import scala.collection.mutable.HashMap
+import scala.collection.mutable.{HashMap, Set}
 import scala.concurrent.{ExecutionContext, Future}
 
 import com.typesafe.config.Config
@@ -11,7 +11,9 @@ import org.jctools.maps.NonBlockingHashMapLong
 
 import filodb.core.{DatasetRef, Response, Types}
 import filodb.core.metadata.Dataset
+import filodb.core.query.ColumnFilter
 import filodb.core.store._
+import filodb.memory.format.ZeroCopyUTF8String
 
 class TimeSeriesMemStore(config: Config, val store: ColumnStore, val metastore: MetaStore,
                          evictionPolicy: Option[PartitionEvictionPolicy] = None)
@@ -138,6 +140,10 @@ extends MemStore with StrictLogging {
   def indexValues(dataset: DatasetRef, shard: Int, indexName: String, topK: Int = 100): Seq[TermInfo] =
     getShard(dataset, shard).map(_.indexValues(indexName, topK)).getOrElse(Nil)
 
+  def metadata(dataset: DatasetRef, shard: Int, filters: Seq[ColumnFilter],
+               columns: Seq[String], end: Long, start: Long): Set[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]] =
+    getShard(dataset, shard).map(_.metadata(filters, columns, start, end)).getOrElse(Set.empty)
+
   def numPartitions(dataset: DatasetRef, shard: Int): Int =
     getShard(dataset, shard).map(_.numActivePartitions).getOrElse(-1)
 
@@ -183,4 +189,5 @@ extends MemStore with StrictLogging {
     datasets.values.foreach(_.values().asScala.foreach(_.closePartKeyIndex()))
     reset()
   }
+
 }

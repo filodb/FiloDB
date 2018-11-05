@@ -15,7 +15,7 @@ import filodb.query.QueryResponse
   * from the ExecPlan.
   */
 trait PlanDispatcher extends java.io.Serializable {
-  def dispatch(plan: ExecPlan)
+  def dispatch(plan: RootExecPlan)
               (implicit sched: ExecutionContext,
                timeout: FiniteDuration): Task[QueryResponse]
 }
@@ -26,7 +26,7 @@ trait PlanDispatcher extends java.io.Serializable {
   */
 case class ActorPlanDispatcher(target: ActorRef) extends PlanDispatcher {
 
-  def dispatch(plan: ExecPlan)
+  def dispatch(plan: RootExecPlan)
               (implicit sched: ExecutionContext,
                timeout: FiniteDuration): Task[QueryResponse] = {
     implicit val _ = Timeout(timeout)

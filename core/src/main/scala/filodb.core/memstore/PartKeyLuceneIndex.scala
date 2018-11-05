@@ -412,7 +412,8 @@ class PartKeyLuceneIndex(dataset: Dataset,
 
   def partIdsFromFilters(columnFilters: Seq[ColumnFilter],
                          startTime: Long,
-                         endTime: Long): IntIterator = {
+                         endTime: Long,
+                         limit: Int = 0): IntIterator = {
     val booleanQuery = new BooleanQuery.Builder
     columnFilters.foreach { filter =>
       val q = leafFilter(filter.column, filter.filter)
@@ -423,7 +424,7 @@ class PartKeyLuceneIndex(dataset: Dataset,
     val query = booleanQuery.build()
     logger.debug(s"Querying partKeyIndex with: $query")
     val searcher = searcherManager.acquire()
-    val collector = new PartIdCollector() // passing zero for unlimited results
+    val collector = new PartIdCollector(limit) // passing zero for unlimited results
     searcher.search(query, collector)
     collector.intIterator()
   }
@@ -558,9 +559,10 @@ class TopKPartIdsCollector(limit: Int) extends Collector with StrictLogging {
   }
 }
 
-class PartIdCollector extends SimpleCollector {
+class PartIdCollector(limit: Int = 0) extends SimpleCollector {
   val result = new EWAHCompressedBitmap()
   private var partIdDv: NumericDocValues = _
+  private var size = 0
 
   override def needsScores(): Boolean = false
 
@@ -570,10 +572,13 @@ class PartIdCollector extends SimpleCollector {
   }
 
   override def collect(doc: Int): Unit = {
-    if (partIdDv.advanceExact(doc)) {
-      result.set(partIdDv.longValue().toInt)
-    } else {
-      throw new IllegalStateException("This shouldn't happen since every document should have a partIdDv")
+    if (limit == 0 || size < limit) {
+      if (partIdDv.advanceExact(doc)) {
+        result.set(partIdDv.longValue().toInt)
+      } else {
+        throw new IllegalStateException("This shouldn't happen since every document should have a partIdDv")
+      }
+      size += 1
     }
   }
 

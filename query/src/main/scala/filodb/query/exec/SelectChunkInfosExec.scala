@@ -53,6 +53,7 @@ final case class SelectChunkInfosExec(id: String,
     val chunkMethod = rowKeyRange match {
       case RowKeyInterval(from, to) => RowKeyChunkScan(from, to)
       case AllChunks => AllChunkScan
+      case MetadataPlan => ???
       case WriteBuffers => ???
       case EncodedChunks => ???
     }

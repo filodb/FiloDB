@@ -1,5 +1,7 @@
 package filodb.core.query
 
+import scala.collection.mutable.Set
+
 import kamon.Kamon
 import org.joda.time.DateTime
 
@@ -9,7 +11,7 @@ import filodb.core.metadata.Column
 import filodb.core.metadata.Column.ColumnType._
 import filodb.core.store.{ChunkInfoRowReader, ChunkScanMethod, ReadablePartition}
 import filodb.memory.{MemFactory, UTF8StringMedium}
-import filodb.memory.format.{RowReader, ZeroCopyUTF8String => UTF8Str}
+import filodb.memory.format.{RowReader, SeqMetadataRowReader, ZeroCopyUTF8String => UTF8Str}
 
 /**
   * Identifier for a single RangeVector
@@ -26,6 +28,17 @@ class SeqMapConsumer extends MapItemConsumer {
     val keyUtf8 = new UTF8Str(keyBase, keyOffset + 2, UTF8StringMedium.numBytes(keyBase, keyOffset))
     val valUtf8 = new UTF8Str(valueBase, valueOffset + 2, UTF8StringMedium.numBytes(valueBase, valueOffset))
     pairs += (keyUtf8 -> valUtf8)
+  }
+}
+
+class SeqMapMetadataConsumer(columns: Seq[String]) extends MapItemConsumer {
+  val pairs = new collection.mutable.ArrayBuffer[(UTF8Str, UTF8Str)]
+  def consume(keyBase: Any, keyOffset: Long, valueBase: Any, valueOffset: Long, index: Int): Unit = {
+    val keyUtf8 = new UTF8Str(keyBase, keyOffset + 2, UTF8StringMedium.numBytes(keyBase, keyOffset))
+    val valUtf8 = new UTF8Str(valueBase, valueOffset + 2, UTF8StringMedium.numBytes(valueBase, valueOffset))
+    if (columns.isEmpty || columns.contains(keyUtf8.toString)) {
+      pairs += (keyUtf8 -> valUtf8)
+    }
   }
 }
 
@@ -124,6 +137,11 @@ final case class ChunkInfoRangeVector(key: RangeVectorKey,
     reader.setInfo(info)
     reader
   }
+}
+
+final case class MetadataRangeVector(key: RangeVectorKey, metadata: Set[Map[UTF8Str, UTF8Str]])
+    extends RangeVector with java.io.Serializable {
+  def rows: Iterator[RowReader] = new SeqMetadataRowReader(metadata)
 }
 
 /**

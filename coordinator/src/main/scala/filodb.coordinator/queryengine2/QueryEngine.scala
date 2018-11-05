@@ -41,7 +41,7 @@ class QueryEngine(dataset: Dataset,
     * Converts a LogicalPlan to the ExecPlan
     */
   def materialize(rootLogicalPlan: LogicalPlan,
-                  options: QueryOptions): ExecPlan = {
+                  options: QueryOptions): RootExecPlan = {
     val queryId = UUID.randomUUID().toString
     val materialized = walkLogicalPlanTree(rootLogicalPlan, queryId, System.currentTimeMillis(), options) match {
       case Seq(justOne) =>
@@ -51,6 +51,20 @@ class QueryEngine(dataset: Dataset,
         DistConcatExec(queryId, targetActor, many)
     }
     logger.debug(s"Materialized logical plan: $rootLogicalPlan to \n${materialized.printTree()}")
+    materialized
+  }
+
+  def materializeMetadataPlan(rootLogicalPlan: LogicalPlan,
+                  options: QueryOptions): RootExecPlan = {
+    val queryId = UUID.randomUUID().toString
+    val materialized = walkLogicalPlanTree(rootLogicalPlan, queryId, System.currentTimeMillis(), options) match {
+      case Seq(justOne) =>
+        justOne
+      case many =>
+        val targetActor = pickDispatcher(many)
+        NonLeafMetadataExecPlan(queryId, targetActor, many)
+    }
+    logger.debug(s"Materialized Metadata logical plan: $rootLogicalPlan to \n${materialized.printTree()}")
     materialized
   }
 
@@ -99,7 +113,7 @@ class QueryEngine(dataset: Dataset,
   private def walkLogicalPlanTree(logicalPlan: LogicalPlan,
                                   queryId: String,
                                   submitTime: Long,
-                                  options: QueryOptions): Seq[ExecPlan] = {
+                                  options: QueryOptions): Seq[RootExecPlan] = {
     logicalPlan match {
       case lp: RawSeries =>                   materializeRawSeries(queryId, submitTime, options, lp)
       case lp: RawChunkMeta =>                materializeRawChunkMeta(queryId, submitTime, options, lp)
@@ -109,13 +123,14 @@ class QueryEngine(dataset: Dataset,
       case lp: Aggregate =>                   materializeAggregate(queryId, submitTime, options, lp)
       case lp: BinaryJoin =>                  materializeBinaryJoin(queryId, submitTime, options, lp)
       case lp: ScalarVectorBinaryOperation => materializeScalarVectorBinOp(queryId, submitTime, options, lp)
+      case lp: Metadata => materializeMetadata(queryId, submitTime, options, lp)
     }
   }
 
   private def materializeScalarVectorBinOp(queryId: String,
                                            submitTime: Long,
                                            options: QueryOptions,
-                                           lp: ScalarVectorBinaryOperation): Seq[ExecPlan] = {
+                                           lp: ScalarVectorBinaryOperation): Seq[RootExecPlan] = {
     val vectors = walkLogicalPlanTree(lp.vector, queryId, submitTime, options)
     vectors.foreach(_.addRangeVectorTransformer(ScalarOperationMapper(lp.operator, lp.scalar, lp.scalarIsLhs)))
     vectors
@@ -147,7 +162,7 @@ class QueryEngine(dataset: Dataset,
   private def materializeApplyInstantFunction(queryId: String,
                                               submitTime: Long,
                                               options: QueryOptions,
-                                              lp: ApplyInstantFunction): Seq[ExecPlan] = {
+                                              lp: ApplyInstantFunction): Seq[RootExecPlan] = {
     val vectors = walkLogicalPlanTree(lp.vectors, queryId, submitTime, options)
     vectors.foreach(_.addRangeVectorTransformer(InstantVectorFunctionMapper(lp.function, lp.functionArgs)))
     vectors
@@ -156,7 +171,7 @@ class QueryEngine(dataset: Dataset,
   private def materializePeriodicSeriesWithWindowing(queryId: String,
                                                      submitTime: Long,
                                                     options: QueryOptions,
-                                                    lp: PeriodicSeriesWithWindowing): Seq[ExecPlan] = {
+                                                    lp: PeriodicSeriesWithWindowing): Seq[RootExecPlan] = {
     val rawSeries = walkLogicalPlanTree(lp.rawSeries, queryId, submitTime, options)
     rawSeries.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(lp.start, lp.step,
       lp.end, Some(lp.window), Some(lp.function), lp.functionArgs)))
@@ -166,7 +181,7 @@ class QueryEngine(dataset: Dataset,
   private def materializePeriodicSeries(queryId: String,
                                         submitTime: Long,
                                        options: QueryOptions,
-                                       lp: PeriodicSeries): Seq[ExecPlan] = {
+                                       lp: PeriodicSeries): Seq[RootExecPlan] = {
     val rawSeries = walkLogicalPlanTree(lp.rawSeries, queryId, submitTime, options)
     rawSeries.foreach(_.addRangeVectorTransformer(PeriodicSamplesMapper(lp.start, lp.step, lp.end,
       None, None, Nil)))
@@ -181,6 +196,17 @@ class QueryEngine(dataset: Dataset,
       val dispatcher = dispatcherForShard(shard)
       SelectRawPartitionsExec(queryId, submitTime, options.itemLimit, dispatcher, dataset.ref, shard,
         lp.filters, toRowKeyRange(lp.rangeSelector), lp.columns)
+    }
+  }
+
+  private def materializeMetadata(queryId: String,
+                                   submitTime: Long,
+                                   options: QueryOptions,
+                                   lp: Metadata): Seq[MetadataExecLeafPlan] = {
+    shardsFromFilters(lp.rawSeries.filters, options).map { shard =>
+      val dispatcher = dispatcherForShard(shard)
+      MetadataExecLeafPlan(queryId, submitTime, options.itemLimit, dispatcher, dataset.ref, shard,
+        lp.rawSeries.filters, lp.start, lp.end, lp.rawSeries.columns)
     }
   }
 
@@ -212,7 +238,7 @@ class QueryEngine(dataset: Dataset,
   /**
     * Picks one dispatcher randomly from child exec plans passed in as parameter
     */
-  private def pickDispatcher(children: Seq[ExecPlan]): PlanDispatcher = {
+  private def pickDispatcher(children: Seq[RootExecPlan]): PlanDispatcher = {
     val childTargets = children.map(_.dispatcher)
     // Above list can contain duplicate dispatchers, and we don't make them distinct.
     // Those with more shards must be weighed higher

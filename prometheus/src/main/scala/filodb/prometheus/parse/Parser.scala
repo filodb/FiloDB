@@ -2,9 +2,8 @@ package filodb.prometheus.parse
 
 import scala.util.parsing.combinator.{JavaTokenParsers, PackratParsers, RegexParsers}
 
-import filodb.prometheus.ast.{Expressions, QueryParams}
+import filodb.prometheus.ast.{Expressions, MetadataQueryParams, QueryParams}
 import filodb.query._
-
 
 trait BaseParser extends Expressions with JavaTokenParsers with RegexParsers with PackratParsers {
 
@@ -204,6 +203,17 @@ trait Selector extends Operator with Unit with BaseParser {
       InstantExpression(metricName.str, ls.getOrElse(Seq.empty), opt.map(_.duration))
   }
 
+  lazy val metadataSelector: PackratParser[MetadataExpression]
+  = labelIdentifier ~ labelSelection.? ^^ {
+    case metricName ~ ls =>
+      MetadataExpression(metricName.str, ls.getOrElse(Seq.empty))
+  }
+
+  lazy val metadataLabelSelector: PackratParser[MetadataExpression]
+  = labelIdentifier ~ labelSelection.? ^^ {
+    case labelName ~ ls =>
+      MetadataExpression(labelName.str, ls.getOrElse(Seq.empty), true)
+  }
 
   lazy val rangeVectorSelector: PackratParser[RangeExpression] =
     labelIdentifier ~ labelSelection.? ~ "[" ~ duration ~ "]" ~ offset.? ^^ {
@@ -315,6 +325,43 @@ object Parser extends Expression {
       case s: Success[_] => s.get.asInstanceOf[Expression]
       case e: Error => handleError(e, query)
       case f: Failure => handleFailure(f, query)
+    }
+  }
+
+  def parseMetadataQuery(query: String): Expression = {
+    parseAll(metadataSelector, query) match {
+      case s: Success[_] => s.get.asInstanceOf[Expression]
+      case e: Error => handleError(e, query)
+      case f: Failure => handleFailure(f, query)
+    }
+  }
+
+  def parseMetadataLabelValuesQuery(query: String): Expression = {
+    parseAll(metadataLabelSelector, query) match {
+      case s: Success[_] => s.get.asInstanceOf[Expression]
+      case e: Error => handleError(e, query)
+      case f: Failure => handleFailure(f, query)
+    }
+  }
+
+  def metadataQueryToLogicalPlan(query: String, queryTimestamp: Long): LogicalPlan = {
+    val defaultQueryParams = MetadataQueryParams(queryTimestamp, queryTimestamp)
+    metadataQueryRangeToLogicalPlan(query, defaultQueryParams)
+  }
+
+  def metadataQueryRangeToLogicalPlan(query: String, queryParams: MetadataQueryParams): LogicalPlan = {
+    val expression = parseMetadataQuery(query)
+    expression match {
+      case p: Metadata => p.toMetadataQueryPlan(queryParams)
+      case _ => throw new UnsupportedOperationException()
+    }
+  }
+
+  def metadataLabelValuesQueryRangeToLogicalPlan(query: String, queryParams: MetadataQueryParams): LogicalPlan = {
+    val expression = parseMetadataLabelValuesQuery(query)
+    expression match {
+      case p: Metadata => p.toMetadataQueryPlan(queryParams)
+      case _ => throw new UnsupportedOperationException()
     }
   }
 
