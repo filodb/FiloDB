@@ -8,7 +8,6 @@ import scala.concurrent.duration._
 
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
-import kamon.metric.Counter
 
 import filodb.memory.BinaryRegion.NativePointer
 import filodb.memory.MemFactory
@@ -123,7 +122,6 @@ object OffheapLFSortedIDMap extends StrictLogging {
     if (countMap != null) {
       var lastKlass: Class[_ <: MapHolder] = null
       var lockStateOffset = 0L
-      var counter: Counter = sharedLockLingering
 
       for ((inst, amt) <- countMap) {
         if (amt > 0) {
@@ -131,11 +129,10 @@ object OffheapLFSortedIDMap extends StrictLogging {
 
           if (holderKlass != lastKlass) {
             lockStateOffset = lockStateOffsets.get(holderKlass)
-            counter = sharedLockLingering.refine("mapHolder", holderKlass.getName)
             lastKlass = holderKlass
           }
 
-          counter.increment(amt)
+          sharedLockLingering.increment(amt)
 
           _logger.warn(s"Releasing all shared locks for: $inst, amount: $amt")
 
@@ -193,7 +190,7 @@ trait MapHolder {
 class OffheapLFSortedIDMapReader(memFactory: MemFactory, holderKlass: Class[_ <: MapHolder]) {
   import OffheapLFSortedIDMap._
 
-  val exclusiveLockWait = Kamon.counter("memory-exclusive-lock-waits").refine("mapHolder" -> holderKlass.getName)
+  val exclusiveLockWait = Kamon.counter("memory-exclusive-lock-waits")
 
   /**
    * Default keyFunc which maps pointer to element to the Long keyID.  It just reads the first eight bytes
