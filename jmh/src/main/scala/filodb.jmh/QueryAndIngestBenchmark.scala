@@ -11,7 +11,7 @@ import com.typesafe.config.ConfigFactory
 import com.typesafe.scalalogging.StrictLogging
 import monix.eval.Task
 import monix.reactive.Observable
-import org.openjdk.jmh.annotations._
+import org.openjdk.jmh.annotations.{Level => JMHLevel, _}
 
 import filodb.coordinator.ShardMapper
 import filodb.core.binaryrecord2.RecordContainer
@@ -66,7 +66,7 @@ class QueryAndIngestBenchmark extends StrictLogging {
   Await.result(cluster.metaStore.newDataset(dataset), 5.seconds)
 
   val storeConf = StoreConfig(ConfigFactory.parseString("""
-                  | flush-interval = 1h
+                  | flush-interval = 10s     # Ensure regular flushes so we can clear out old blocks
                   | shard-mem-size = 512MB
                   | ingestion-buffer-mem-size = 50MB
                   | groups-per-shard = 4
@@ -98,6 +98,9 @@ class QueryAndIngestBenchmark extends StrictLogging {
                           case e: Exception => throw e })
                     }.countL.runAsync
 
+  val memstore = cluster.memStore.asInstanceOf[TimeSeriesMemStore]
+  val shards = (0 until numShards).map { s => memstore.getShardE(dataset.ref, s) }
+
   private def ingestSamples(noSamples: Int): Future[Unit] = Future {
     TestTimeseriesProducer.timeSeriesData(startTime, numShards, numSeries)
       .take(noSamples * numSeries)
@@ -111,7 +114,7 @@ class QueryAndIngestBenchmark extends StrictLogging {
   // Initial ingest just to populate index
   Await.result(ingestSamples(30), 30.seconds)
   Thread sleep 2000
-  cluster.memStore.asInstanceOf[TimeSeriesMemStore].commitIndexForTesting(dataset.ref) // commit lucene index
+  memstore.commitIndexForTesting(dataset.ref) // commit lucene index
   println(s"Initial ingestion ended, indexes set up")
 
   /**
@@ -129,13 +132,25 @@ class QueryAndIngestBenchmark extends StrictLogging {
     LogicalPlan2Query(dataset.ref, plan, QueryOptions(1, 100))
   }
 
-  private var testProducingFut: Future[Unit] = _
+  private var testProducingFut: Option[Future[Unit]] = None
 
+  // Teardown after EVERY invocation is done already
   @TearDown
   def shutdownFiloActors(): Unit = {
-    // Wait for producing future to end
-    Await.result(testProducingFut, 30.seconds)
     cluster.shutdown()
+  }
+
+  // Setup per invocation to make sure previous ingestion is finished
+  @Setup(JMHLevel.Invocation)
+  def setupQueries(): Unit = {
+    testProducingFut.foreach { fut =>
+      // Wait for producing future to end
+      Await.result(fut, 30.seconds)
+    }
+    // Wait a bit for ingestion to really finish
+    Thread sleep 1000
+    shards.foreach(_.reclaimAllBlocksTestOnly())
+    testProducingFut = Some(ingestSamples(numSamples))
   }
 
   @Benchmark
@@ -143,7 +158,6 @@ class QueryAndIngestBenchmark extends StrictLogging {
   @OutputTimeUnit(TimeUnit.SECONDS)
   @OperationsPerInvocation(500)
   def parallelQueries(): Unit = {
-    testProducingFut = ingestSamples(numSamples)
     val futures = (0 until numQueries).map { n =>
       val f = asyncAsk(coordinator, queryCommands(n % queryCommands.length))
       f.onSuccess {
