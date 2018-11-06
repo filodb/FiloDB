@@ -25,6 +25,7 @@ final case class SelectRawPartitionsExec(id: String,
                                          filters: Seq[ColumnFilter],
                                          rowKeyRange: RowKeyRange,
                                          colIds: Seq[Types.ColumnId]) extends LeafExecPlan {
+  require(colIds.nonEmpty)
 
   protected def schemaOfDoExecute(dataset: Dataset): ResultSchema =
     ResultSchema(dataset.infosFromIDs(colIds),

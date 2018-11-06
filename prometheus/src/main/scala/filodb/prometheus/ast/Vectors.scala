@@ -6,7 +6,7 @@ import filodb.query._
 
 object Vectors {
   // The "tag" or key used to indicate the column to query to FiloDB.  A non-standard Prom extension.
-  val ColumnSelectorLabel = "__col"
+  val ColumnSelectorLabel = "__col__"
 
   val PromMetricLabel = "__name__"
 }
@@ -93,10 +93,13 @@ trait Vectors extends Scalars with TimeUnits with Base {
           case NotEqual(false) => ColumnFilter(labelMatch.label, query.Filter.NotEquals(labelMatch.value))
           case other: Any      => throw new IllegalArgumentException(s"Unknown match operator $other")
         }
+      // Remove the column selector as that is not a real time series filter
       }.filterNot(_.column == ColumnSelectorLabel)
 
     protected def labelMatchesToColumnName(labels: Seq[LabelMatch]): Seq[String] =
       labels.collect {
+        // TODO: We may support multiple columns with the regex filter or some other
+        //       custom "in" operator that we can specify in PromQL
         case LabelMatch(ColumnSelectorLabel, EqualMatch, col) => col
       }
   }
