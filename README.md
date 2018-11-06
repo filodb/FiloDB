@@ -364,11 +364,11 @@ FiloDB can be queried using the [Prometheus Query Language](https://prometheus.i
 
 ### FiloDB PromQL Extensions
 
-Since FiloDB supports multiple schemas, there needs to be a way to specify the target column to query.  This is done using the special `__col` tag filter, like this request which pulls out the "min" column:
+Since FiloDB supports multiple schemas, there needs to be a way to specify the target column to query.  This is done using the special `__col__` tag filter, like this request which pulls out the "min" column:
 
-    http_req_timer{app="foo",__col="min"}
+    http_req_timer{app="foo",__col__="min"}
 
-By default if `__col` is not specified then the `valueColumn` option of the Dataset is used.
+By default if `__col__` is not specified then the `valueColumn` option of the Dataset is used.
 
 Some special functions exist to aid debugging and for other purposes:
 
