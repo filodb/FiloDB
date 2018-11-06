@@ -18,7 +18,7 @@ class ParserSpec extends FunSpec with Matchers {
     parseMetadataQueryError("http_requests_total{status=\"200\"")
     parseMetadataQueryError("http_requests_total[status=\"200\"]")
     parseMetadataLabelQueryError("job{__name__=\"prometheus\"")
-    parseMetadataLabelQueryError("job{__name__=\"prometheus\"}")
+    parseMetadataLabelQueryError("job[__name__=\"prometheus\"]")
   }
 
   it("parse basic scalar expressions") {
