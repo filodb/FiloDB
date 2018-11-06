@@ -54,7 +54,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
   implicit val ec = cluster.ec
 
   val strategy = DefaultShardAssignmentStrategy
-  protected val shardManager = new ShardManager(DefaultShardAssignmentStrategy)
+  protected val shardManager = new ShardManager(cluster.settings, DefaultShardAssignmentStrategy)
 
 
   val clusterActor = system.actorOf(Props(new Actor {

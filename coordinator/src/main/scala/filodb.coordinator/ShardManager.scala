@@ -24,7 +24,8 @@ import filodb.core.store.{AssignShardConfig, StoreConfig}
   * This class currently handles shard event subscriptions too, but:
   * TODO: Move Subscription logic outside of this class into a separate helper class.
   */
-private[coordinator] final class ShardManager(strategy: ShardAssignmentStrategy) extends StrictLogging {
+private[coordinator] final class ShardManager(settings: FilodbSettings,
+                                              strategy: ShardAssignmentStrategy) extends StrictLogging {
 
   import ShardManager._
 
@@ -33,6 +34,9 @@ private[coordinator] final class ShardManager(strategy: ShardAssignmentStrategy)
   private val _shardMappers = new mutable.HashMap[DatasetRef, ShardMapper]
   // preserve deployment order - newest last
   private val _coordinators = new mutable.LinkedHashMap[Address, ActorRef]
+  private val _errorShardReassignedAt = new mutable.HashMap[DatasetRef, mutable.HashMap[Int, Long]]
+
+  val shardReassignmentMinInterval = settings.config.getDuration("shard-manager.reassignment-min-interval")
 
   /* These workloads were in an actor and exist now in an unprotected class.
   Do not expose mutable datasets. Internal work always uses the above datasets,
@@ -439,12 +443,38 @@ private[coordinator] final class ShardManager(strategy: ShardAssignmentStrategy)
       event match {
         case _: IngestionError =>
           require(mapper.unassignedShards.contains(event.shard))
-          assignShardsToNodes(event.ref, mapper,
-          _datasetInfo(event.ref).resources, Seq(currentCoord))
+          val lastReassignment = getShardReassignmentTime(event.ref, event.shard)
+          val now = System.currentTimeMillis()
+          if (now - lastReassignment > shardReassignmentMinInterval.toMillis) {
+            logger.warn(s"Attempting to reassign shard ${event.shard} from dataset ${event.ref}. " +
+              s"It was last reassigned at ${lastReassignment}")
+            val assignments = assignShardsToNodes(event.ref,
+                                                  mapper,
+                                                  _datasetInfo(event.ref).resources, Seq(currentCoord))
+            if (assignments.valuesIterator.flatten.contains(event.shard)) {
+              setShardReassignmentTime(event.ref, event.shard, now)
+            } else {
+              logger.warn(s"Shard ${event.shard} from dataset ${event.ref} was NOT reassigned possibly " +
+                s"because no other node was available")
+            }
+          } else {
+            logger.warn(s"Skipping reassignment of shard ${event.shard} from dataset ${event.ref} since " +
+              s"it was already reassigned within ${shardReassignmentMinInterval} at ${lastReassignment}")
+          }
         case _ =>
       }
     }
     updateShardMetrics()
+  }
+
+  private def getShardReassignmentTime(dataset: DatasetRef, shard: Int): Long = {
+    val shardReassignmentMap = _errorShardReassignedAt.getOrElseUpdate(dataset, mutable.HashMap())
+    shardReassignmentMap.getOrElse(shard, 0L)
+  }
+
+  private def setShardReassignmentTime(dataset: DatasetRef, shard: Int, time: Long): Unit = {
+    val shardReassignmentMap = _errorShardReassignedAt.getOrElseUpdate(dataset, mutable.HashMap())
+    shardReassignmentMap(shard) = time
   }
 
   /** Selects the `ShardMapper` for the provided dataset and updates the mapper

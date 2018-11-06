@@ -2,6 +2,7 @@ package filodb.coordinator
 
 import akka.actor.{ActorRef, Address}
 import akka.testkit.TestProbe
+import com.typesafe.config.ConfigFactory
 
 import filodb.core.{DatasetRef, TestData}
 import filodb.core.metadata.Dataset
@@ -18,7 +19,8 @@ class ShardManagerSpec extends AkkaSpec {
   protected val resources1 = DatasetResourceSpec(8, 3)
   protected val resources2 = DatasetResourceSpec(16, 2)
 
-  protected val shardManager = new ShardManager(DefaultShardAssignmentStrategy)
+  val settings = new FilodbSettings(ConfigFactory.load("application_test.conf"))
+  protected val shardManager = new ShardManager(settings, DefaultShardAssignmentStrategy)
 
   val coord1 = TestProbe("coordinator1")
   val coord1Address = uniqueAddress(coord1.ref)
@@ -270,6 +272,13 @@ class ShardManagerSpec extends AkkaSpec {
 
     }
 
+    "continual ingestion error on a shard should not reassign shard to another node" in {
+      shardManager.coordinators shouldEqual Seq(coord3.ref, coord2.ref, coord4.ref)
+      shardManager.updateFromExternalShardEvent(IngestionError(dataset1, 0, new IllegalStateException("simulated")))
+      coord3.expectNoMessage()
+      subscriber.expectNoMessage()
+    }
+
     "change state for removal of dataset" in {
       shardManager.removeDataset(dataset1)
       shardManager.datasetInfo.size shouldBe 0
@@ -279,8 +288,7 @@ class ShardManagerSpec extends AkkaSpec {
         StopShardIngestion(dataset1, 2))
 
       coord4.expectMsgAllOf(
-        StopShardIngestion(dataset1, 0),
-        StopShardIngestion(dataset1, 4),
+        StopShardIngestion(dataset1, 4), // shard 0 is in error state
         StopShardIngestion(dataset1, 5))
 
       coord2.expectMsgAllOf(
@@ -400,7 +408,7 @@ class ShardManagerSpec extends AkkaSpec {
     }
 
     "recover state on a failed over node " in {
-      val shardManager2 = new ShardManager(DefaultShardAssignmentStrategy)
+      val shardManager2 = new ShardManager(settings, DefaultShardAssignmentStrategy)
 
       // node cluster actor should trigger setup dataset for each registered dataset on recovery
       shardManager2.addDataset(setupDs1, datasetObj1, self) shouldEqual Map.empty
