@@ -173,7 +173,7 @@ private[filodb] final class IngestionActor(dataset: Dataset,
       // also: small chance for race condition here due to remove call in stop() method
       streamSubscriptions.get(shard).map(_.foreach { x =>
         if (source != NodeClusterActor.noOpSource) statusActor ! IngestionStopped(dataset.ref, shard)
-        ingestionStream.teardown()
+        removeAndReleaseResources(dataset.ref, shard)
       })
     } recover { case t: Throwable =>
       handleError(dataset.ref, shard, t)
@@ -214,13 +214,15 @@ private[filodb] final class IngestionActor(dataset: Dataset,
       fut.onComplete {
         case Success(_) =>
           ingestionStream.teardown()
+          streams.remove(shard)
           recoveryTrace.finish()
         case Failure(ex) =>
           ingestionStream.teardown()
+          streams.remove(shard)
           recoveryTrace.addError(s"Recovery failed for shard $shard", ex)
-          recoveryTrace.finish()
           logger.error(s"Recovery failed for shard $shard", ex)
           handleError(dataset.ref, shard, ex)
+          recoveryTrace.finish()
       }
       fut
     }
@@ -266,25 +268,18 @@ private[filodb] final class IngestionActor(dataset: Dataset,
   /** Guards that only this dataset's commands are acted upon. */
   private def stop(ds: DatasetRef, shard: Int, origin: ActorRef): Unit =
     if (invalid(ds)) handleInvalid(StopShardIngestion(ds, shard), Some(origin)) else {
-      // TODO: Wait for all the queries to stop
-      logger.warn(s"Stopping ingestion on shard $shard")
-      streamSubscriptions.remove(shard).foreach(_.cancel)
-      streams.remove(shard).foreach(_.teardown())
+      removeAndReleaseResources(ds, shard)
       statusActor ! IngestionStopped(dataset.ref, shard)
-
-      // Release memory for shard in MemStore
-      memStore.asInstanceOf[TimeSeriesMemStore].getShard(ds, shard)
-              .foreach { shard =>
-                shard.shutdown()
-              }
       logger.info(s"Stopped streaming ingestion for shard $shard and released resources")
   }
 
   private def invalid(ref: DatasetRef): Boolean = ref != dataset.ref
 
   private def handleError(ref: DatasetRef, shard: Int, err: Throwable): Unit = {
+    logger.error(s"Exception thrown during ingestion stream for shard $shard. Stopping ingestion", err)
+    removeAndReleaseResources(ref, shard)
     statusActor ! IngestionError(ref, shard, err)
-    logger.error(s"Exception thrown during ingestion stream for shard $shard", err)
+    logger.error(s"Stopped shard $shard after error was thrown")
   }
 
   private def handleInvalid(command: ShardCommand, origin: Option[ActorRef]): Unit = {
@@ -292,8 +287,14 @@ private[filodb] final class IngestionActor(dataset: Dataset,
     origin foreach(_ ! InvalidIngestionCommand(command.ref, command.shard))
   }
 
-  private def recover(): Unit = {
-    // TODO: start recovery, then.. could also be in Actor.preRestart()
-    // statusActor ! RecoveryStarted(dataset.ref, shard, context.parent)
+  private def removeAndReleaseResources(ref: DatasetRef, shard: Int): Unit = {
+    // TODO: Wait for all the queries to stop
+    streamSubscriptions.remove(shard).foreach(_.cancel)
+    streams.remove(shard).foreach(_.teardown())
+    // Release memory for shard in MemStore
+    memStore.asInstanceOf[TimeSeriesMemStore].getShard(ref, shard)
+      .foreach { shard =>
+        shard.shutdown()
+      }
   }
 }
