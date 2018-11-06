@@ -99,6 +99,30 @@ class QueryEngineSpec extends FunSpec with Matchers {
     }
   }
 
+  it("should throw BadQuery if illegal column name in LogicalPlan") {
+    val raw3 = raw2.copy(columns = Seq("foo"))
+    intercept[BadQueryException] {
+      engine.materialize(raw3, QueryOptions())
+    }
+  }
+
+  it("should rename Prom __name__ filters if dataset has different metric column") {
+    // Custom QueryEngine with different dataset with different metric name
+    val dataset2 = dataset.copy(options = dataset.options.copy(
+                     metricColumn = "kpi", shardKeyColumns = Seq("kpi", "job")))
+    val engine2 = new QueryEngine(dataset2, mapperRef)
+
+    // materialized exec plan
+    val execPlan = engine2.materialize(raw2, QueryOptions())
+    // println(execPlan.printTree())
+    execPlan.isInstanceOf[DistConcatExec] shouldEqual true
+    execPlan.children.foreach { l1 =>
+      l1.isInstanceOf[SelectRawPartitionsExec] shouldEqual true
+      val rpExec = l1.asInstanceOf[SelectRawPartitionsExec]
+      rpExec.filters.map(_.column).toSet shouldEqual Set("kpi", "job")
+    }
+  }
+
   it("should use spread function to change/override spread and generate ExecPlan with appropriate shards") {
     val spreadFunc = QueryOptions.simpleMapSpreadFunc("job", Map("myService" -> 2), 1)
 
