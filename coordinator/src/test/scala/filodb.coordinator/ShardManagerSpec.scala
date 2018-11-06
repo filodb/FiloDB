@@ -276,6 +276,8 @@ class ShardManagerSpec extends AkkaSpec {
       shardManager.coordinators shouldEqual Seq(coord3.ref, coord2.ref, coord4.ref)
       shardManager.updateFromExternalShardEvent(IngestionError(dataset1, 0, new IllegalStateException("simulated")))
       coord3.expectNoMessage()
+      coord2.expectNoMessage()
+      coord4.expectNoMessage()
       subscriber.expectNoMessage()
     }
 
