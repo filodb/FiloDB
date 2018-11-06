@@ -61,8 +61,8 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
     import StatusActor._
     def receive: Receive = {
       case SubscribeShardUpdates(ref) => shardManager.subscribe(sender(), ref)
-      case e: ShardEvent              => shardManager.updateFromShardEvent(e)
-      case EventEnvelope(seq, events) => events.foreach(shardManager.updateFromShardEvent)
+      case e: ShardEvent              => shardManager.updateFromExternalShardEvent(e)
+      case EventEnvelope(seq, events) => events.foreach(shardManager.updateFromExternalShardEvent)
                                          sender() ! StatusAck(seq)
     }
   }))

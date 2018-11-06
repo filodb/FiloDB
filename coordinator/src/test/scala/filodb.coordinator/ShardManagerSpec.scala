@@ -249,16 +249,37 @@ class ShardManagerSpec extends AkkaSpec {
       subscriber.expectNoMessage()
     }
 
+    "ingestion error on a shard should reassign shard to another node" in {
+      shardManager.coordinators shouldEqual Seq(coord3.ref, coord2.ref, coord4.ref)
+      shardManager.updateFromExternalShardEvent(IngestionError(dataset1, 0, new IllegalStateException("simulated")))
+
+      coord4.expectMsgPF() { case ds: DatasetSetup =>
+        ds.compactDatasetStr shouldEqual datasetObj1.asCompactString
+        ds.source shouldEqual noOpSource1
+      }
+      coord4.expectMsgAllOf(
+        StartShardIngestion(dataset1, 0, None))
+
+      subscriber.expectMsgPF() { case s: CurrentShardSnapshot =>
+        s.map.shardsForCoord(coord3.ref) shouldEqual Seq(1, 2)
+        s.map.shardsForCoord(coord2.ref) shouldEqual Seq(3, 6, 7)
+        s.map.shardsForCoord(coord4.ref) shouldEqual Seq(0, 4, 5)
+        s.map.unassignedShards shouldEqual Nil
+      }
+      subscriber.expectNoMessage()
+
+    }
+
     "change state for removal of dataset" in {
       shardManager.removeDataset(dataset1)
       shardManager.datasetInfo.size shouldBe 0
 
       coord3.expectMsgAllOf(
-        StopShardIngestion(dataset1, 0),
         StopShardIngestion(dataset1, 1),
         StopShardIngestion(dataset1, 2))
 
       coord4.expectMsgAllOf(
+        StopShardIngestion(dataset1, 0),
         StopShardIngestion(dataset1, 4),
         StopShardIngestion(dataset1, 5))
 

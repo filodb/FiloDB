@@ -47,5 +47,5 @@ if [ "$SETUP_DATASET" = "YES" ]; then
     sleep 20
 
     echo "Configuring the timeseries dataset..."
-    ./filo-cli -Dakka.remote.netty.tcp.hostname=127.0.0.1 --host 127.0.0.1 --dataset timeseries --command setup --filename conf/timeseries-dev-source.conf
+    ./filo-cli -Dakka.remote.netty.tcp.hostname=127.0.0.1 --host 127.0.0.1 --dataset prometheus --command setup --filename conf/timeseries-dev-source.conf
 fi

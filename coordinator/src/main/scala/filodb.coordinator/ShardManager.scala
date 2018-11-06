@@ -381,9 +381,10 @@ private[coordinator] final class ShardManager(strategy: ShardAssignmentStrategy)
 
   private def assignShardsToNodes(dataset: DatasetRef,
                                   mapper: ShardMapper,
-                                  resources: DatasetResourceSpec): Map[ActorRef, Seq[Int]] = {
+                                  resources: DatasetResourceSpec,
+                                  excludeCoords: Seq[ActorRef] = Nil): Map[ActorRef, Seq[Int]] = {
     (for {
-      coord <- latestCoords // assign shards on newer nodes first
+      coord <- latestCoords if !excludeCoords.contains(coord) // assign shards on newer nodes first
     } yield {
       val assignable = strategy.shardAssignments(coord, dataset, resources, mapper)
       if (assignable.nonEmpty) sendAssignmentMessagesAndEvents(dataset, coord, assignable)
@@ -426,10 +427,30 @@ private[coordinator] final class ShardManager(strategy: ShardAssignmentStrategy)
     logger.debug(s"Recovered subscriptions = $subscriptions")
   }
 
+  /**
+    * Applies an event (usually) from IngestionActor to
+    * the ShardMapper for dataset.
+    */
+  def updateFromExternalShardEvent(event: ShardEvent): Unit = {
+    updateFromShardEvent(event)
+    _shardMappers.get(event.ref) foreach { mapper =>
+      val currentCoord = mapper.coordForShard(event.shard)
+      // reassign shard if IngestionError. Exclude previous node since it had error shards.
+      event match {
+        case _: IngestionError =>
+          require(mapper.unassignedShards.contains(event.shard))
+          assignShardsToNodes(event.ref, mapper,
+          _datasetInfo(event.ref).resources, Seq(currentCoord))
+        case _ =>
+      }
+    }
+    updateShardMetrics()
+  }
+
   /** Selects the `ShardMapper` for the provided dataset and updates the mapper
     * for the received shard event from the event source
     */
-  def updateFromShardEvent(event: ShardEvent): Unit = {
+  private def updateFromShardEvent(event: ShardEvent): Unit = {
     _shardMappers.get(event.ref) foreach { mapper =>
       mapper.updateFromEvent(event) match {
         case Failure(l) =>
