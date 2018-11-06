@@ -61,12 +61,16 @@ object PrometheusModel {
     b.build()
   }
 
+  /**
+    * Used to send out raw data
+    */
   def toPromTimeSeries(srv: SerializableRangeVector): TimeSeries = {
     val b = TimeSeries.newBuilder()
     srv.key.labelValues.foreach {lv =>
       b.addLabels(LabelPair.newBuilder().setName(lv._1.toString).setValue(lv._2.toString))
     }
     srv.rows.foreach { row =>
+      // no need to remove NaN here.
       b.addSamples(Sample.newBuilder().setTimestampMs(row.getLong(0)).setValue(row.getDouble(1)))
     }
     b.build()
@@ -84,9 +88,18 @@ object PrometheusModel {
     }
   }
 
+  /**
+    * Used to send out HTTP response
+    */
   def toPromResult(srv: SerializableRangeVector): Result = {
     Result(srv.key.labelValues.map { case (k, v) => (k.toString, v.toString)},
-      srv.rows.map(r => Sampl(r.getLong(0) / 1000, r.getDouble(1))).toSeq)
+      // remove NaN in HTTP results
+      // Known Issue: Until we support NA in our vectors, we may not be able to return NaN as an end-of-time-series
+      // in HTTP raw query results.
+      srv.rows.filter(!_.getDouble(1).isNaN).map { r =>
+          Sampl(r.getLong(0) / 1000, r.getDouble(1))
+      }.toSeq
+    )
   }
 
   def toPromErrorResponse(qe: filodb.query.QueryError): ErrorResponse = {

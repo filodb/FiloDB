@@ -6,7 +6,15 @@ import filodb.core.query
 import filodb.core.query.ColumnFilter
 import filodb.query._
 
+object Vectors {
+  // The "tag" or key used to indicate the column to query to FiloDB.  A non-standard Prom extension.
+  val ColumnSelectorLabel = "__col__"
+
+  val PromMetricLabel = "__name__"
+}
+
 trait Vectors extends Scalars with TimeUnits with Base {
+  import Vectors._
 
   sealed trait JoinMatching {
     def labels: Seq[String]
@@ -77,7 +85,6 @@ trait Vectors extends Scalars with TimeUnits with Base {
     }
   }
 
-
   sealed trait Vector extends Expression {
     protected def labelMatchesToFilters(labels: Seq[LabelMatch]) =
       labels.map { labelMatch =>
@@ -88,6 +95,14 @@ trait Vectors extends Scalars with TimeUnits with Base {
           case NotEqual(false) => ColumnFilter(labelMatch.label, query.Filter.NotEquals(labelMatch.value))
           case other: Any      => throw new IllegalArgumentException(s"Unknown match operator $other")
         }
+      // Remove the column selector as that is not a real time series filter
+      }.filterNot(_.column == ColumnSelectorLabel)
+
+    protected def labelMatchesToColumnName(labels: Seq[LabelMatch]): Seq[String] =
+      labels.collect {
+        // TODO: We may support multiple columns with the regex filter or some other
+        //       custom "in" operator that we can specify in PromQL
+        case LabelMatch(ColumnSelectorLabel, EqualMatch, col) => col
       }
   }
 
@@ -106,15 +121,15 @@ trait Vectors extends Scalars with TimeUnits with Base {
                                offset: Option[Duration]) extends Vector with PeriodicSeries {
     val staleDataLookbackSeconds = 5 * 60 // 5 minutes
 
-    private val nameLabels = labelSelection.filter(_.label == "__name__")
+    private val nameLabels = labelSelection.filter(_.label == PromMetricLabel)
 
     if (nameLabels.nonEmpty && !nameLabels.head.label.equals(metricName)) {
       throw new IllegalArgumentException("Metric name should not be set twice")
     }
 
     private[prometheus] val columnFilters = labelMatchesToFilters(labelSelection)
-
-    private[prometheus] val nameFilter = ColumnFilter("__name__", query.Filter.Equals(metricName))
+    private val columns = labelMatchesToColumnName(labelSelection)
+    private[prometheus] val nameFilter = ColumnFilter(PromMetricLabel, query.Filter.Equals(metricName))
 
     def toPeriodicSeriesPlan(queryParams: QueryParams): PeriodicSeriesPlan = {
 
@@ -122,7 +137,7 @@ trait Vectors extends Scalars with TimeUnits with Base {
       // start timestamp. Prometheus goes back unto 5 minutes to get sample before declaring as stale
       PeriodicSeries(
         RawSeries(IntervalSelector(Seq((queryParams.start-staleDataLookbackSeconds) * 1000),
-                                   Seq(queryParams.end * 1000)), columnFilters :+ nameFilter, Nil),
+                                   Seq(queryParams.end * 1000)), columnFilters :+ nameFilter, columns),
         queryParams.start * 1000, queryParams.step * 1000, queryParams.end * 1000
       )
     }
@@ -162,16 +177,16 @@ trait Vectors extends Scalars with TimeUnits with Base {
   case class RangeExpression(metricName: String,
                              labelSelection: Seq[LabelMatch],
                              window: Duration,
-                             offset: Option[Duration]) extends Vector with SimpleSeries{
-    private val nameLabels = labelSelection.filter(_.label == "__name__")
+                             offset: Option[Duration]) extends Vector with SimpleSeries {
+    private val nameLabels = labelSelection.filter(_.label == PromMetricLabel)
 
     if (nameLabels.nonEmpty && !nameLabels.head.label.equals(metricName)) {
       throw new IllegalArgumentException("Metric name should not be set twice")
     }
 
     private[prometheus] val columnFilters = labelMatchesToFilters(labelSelection)
-
-    private[prometheus] val nameFilter = ColumnFilter("__name__", query.Filter.Equals(metricName))
+    private val columns = labelMatchesToColumnName(labelSelection)
+    private[prometheus] val nameFilter = ColumnFilter(PromMetricLabel, query.Filter.Equals(metricName))
 
     val allFilters: Seq[ColumnFilter] = columnFilters :+ nameFilter
 
@@ -181,7 +196,7 @@ trait Vectors extends Scalars with TimeUnits with Base {
       }
       // multiply by 1000 to convert unix timestamp in seconds to millis
       RawSeries(IntervalSelector(Seq(queryParams.start * 1000 - window.millis),
-                                 Seq(queryParams.end * 1000)), allFilters, Nil)
+                                 Seq(queryParams.end * 1000)), allFilters, columns)
     }
 
   }

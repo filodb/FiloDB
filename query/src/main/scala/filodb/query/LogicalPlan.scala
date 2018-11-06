@@ -29,6 +29,9 @@ case class IntervalSelector(from: Seq[Any], to: Seq[Any]) extends RangeSelector
 
 /**
   * Concrete logical plan to query for raw data in a given range
+  * @param columns the columns to read from raw chunks.  Note that it is not necessary to include
+  *        the timestamp column, that will be automatically added.
+  *        If no columns are included, the default value column will be used.
   */
 case class RawSeries(rangeSelector: RangeSelector,
                      filters: Seq[ColumnFilter],
