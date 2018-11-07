@@ -253,7 +253,8 @@ class ShardManagerSpec extends AkkaSpec {
 
     "ingestion error on a shard should reassign shard to another node" in {
       shardManager.coordinators shouldEqual Seq(coord3.ref, coord2.ref, coord4.ref)
-      shardManager.updateFromExternalShardEvent(IngestionError(dataset1, 0, new IllegalStateException("simulated")))
+      shardManager.updateFromExternalShardEvent(subscriber.ref,
+                                                IngestionError(dataset1, 0, new IllegalStateException("simulated")))
 
       coord4.expectMsgPF() { case ds: DatasetSetup =>
         ds.compactDatasetStr shouldEqual datasetObj1.asCompactString
@@ -269,12 +270,12 @@ class ShardManagerSpec extends AkkaSpec {
         s.map.unassignedShards shouldEqual Nil
       }
       subscriber.expectNoMessage()
-
     }
 
     "continual ingestion error on a shard should not reassign shard to another node" in {
       shardManager.coordinators shouldEqual Seq(coord3.ref, coord2.ref, coord4.ref)
-      shardManager.updateFromExternalShardEvent(IngestionError(dataset1, 0, new IllegalStateException("simulated")))
+      shardManager.updateFromExternalShardEvent(subscriber.ref,
+                                                IngestionError(dataset1, 0, new IllegalStateException("simulated")))
       coord3.expectNoMessage()
       coord2.expectNoMessage()
       coord4.expectNoMessage()

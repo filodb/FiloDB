@@ -132,7 +132,7 @@ private[filodb] final class IngestionActor(dataset: Dataset,
       ingestion.recover {
         case NonFatal(t) =>
           logger.error(s"Error occurred during initialization/execution of ingestion for shard ${e.shard}", t)
-          // TODO should we respond to origin actor with an error?
+          handleError(dataset.ref, e.shard, t)
       }
     }
 
@@ -165,17 +165,21 @@ private[filodb] final class IngestionActor(dataset: Dataset,
         stream,
         flushSched,
         flushStream(startingGroupNo),
-        diskTimeToLiveSeconds) {
-        ex => handleError(dataset.ref, shard, ex)
-      }
+        diskTimeToLiveSeconds)
       // On completion of the future, send IngestionStopped
       // except for noOpSource, which would stop right away, and is used for sending in tons of data
       // also: small chance for race condition here due to remove call in stop() method
-      streamSubscriptions.get(shard).map(_.foreach { x =>
-        if (source != NodeClusterActor.noOpSource) statusActor ! IngestionStopped(dataset.ref, shard)
-        removeAndReleaseResources(dataset.ref, shard)
-      })
+      streamSubscriptions(shard).onComplete {
+        case Failure(x) =>
+          handleError(dataset.ref, shard, x)
+        case Success(_) =>
+          // TODO following line breaks a few tests since it does some validation once
+          // ingestion has stopped, whereas this addition cleans up that state.
+          removeAndReleaseResources(dataset.ref, shard)
+          if (source != NodeClusterActor.noOpSource) statusActor ! IngestionStopped(dataset.ref, shard)
+      }
     } recover { case t: Throwable =>
+      logger.error(s"Error occurred when setting up ingestion pipeline for shard $shard ", t)
       handleError(dataset.ref, shard, t)
     }
   }
@@ -217,8 +221,6 @@ private[filodb] final class IngestionActor(dataset: Dataset,
           streams.remove(shard)
           recoveryTrace.finish()
         case Failure(ex) =>
-          ingestionStream.teardown()
-          streams.remove(shard)
           recoveryTrace.addError(s"Recovery failed for shard $shard", ex)
           logger.error(s"Recovery failed for shard $shard", ex)
           handleError(dataset.ref, shard, ex)

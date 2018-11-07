@@ -355,7 +355,7 @@ private[filodb] class NodeClusterActor(settings: FilodbSettings,
   private def handleShardEvent(e: ShardEvent) = {
     logger.debug(s"Received ShardEvent $e from $sender")
     shardUpdates += e.ref
-    shardManager.updateFromExternalShardEvent(e)
+    shardManager.updateFromExternalShardEvent(sender(), e)
   }
 
   // TODO: Save acks for when snapshots are published?
