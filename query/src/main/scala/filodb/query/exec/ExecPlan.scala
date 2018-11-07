@@ -130,9 +130,6 @@ trait ExecPlan extends QueryCommand {
           qLogger.debug(s"queryId: ${id} Successful execution of ${getClass.getSimpleName} with transformers")
           QueryResult(id, finalRes._2, r)
         }
-        // When the query is done, clean up lingering shared locks caused by iterator limit.
-        .doOnFinish(_ => Task.now(OffheapLFSortedIDMap.releaseAllSharedLocks()))
-        .doOnCancel(Task.now(OffheapLFSortedIDMap.releaseAllSharedLocks()))
         .onErrorHandle { case ex: Throwable =>
           qLogger.error(s"queryId: ${id} Exception during execution of query: ${printTree()}", ex)
           QueryError(id, ex)

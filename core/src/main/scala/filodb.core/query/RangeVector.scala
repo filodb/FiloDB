@@ -9,6 +9,7 @@ import filodb.core.metadata.Column
 import filodb.core.metadata.Column.ColumnType._
 import filodb.core.store.{ChunkInfoRowReader, ChunkScanMethod, ReadablePartition}
 import filodb.memory.{MemFactory, UTF8StringMedium}
+import filodb.memory.data.OffheapLFSortedIDMap
 import filodb.memory.format.{RowReader, ZeroCopyUTF8String => UTF8Str}
 
 /**
@@ -161,9 +162,15 @@ object SerializableRangeVector {
     var numRows = 0
     val oldContainerOpt = builder.currentContainer
     val startRecordNo = oldContainerOpt.map(_.countRecords).getOrElse(0)
-    rv.rows.take(limit).foreach { row =>
-      numRows += 1
-      builder.addFromReader(row)
+    try {
+      // TODO validate no locks are held by the thread. If there are, quite possible a lock-release bug exists
+      rv.rows.take(limit).foreach { row =>
+        numRows += 1
+        builder.addFromReader(row)
+      }
+    } finally {
+      // When the query is done, clean up lingering shared locks caused by iterator limit.
+      OffheapLFSortedIDMap.releaseAllSharedLocks()
     }
     // If there weren't containers before, then take all of them.  If there were, discard earlier ones, just
     // start with the most recent one we started adding to
