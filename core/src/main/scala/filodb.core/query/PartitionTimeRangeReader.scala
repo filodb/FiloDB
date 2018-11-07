@@ -78,15 +78,19 @@ final class PartitionTimeRangeReader(part: ReadablePartition,
   }
 
   final def hasNext: Boolean = {
-    // Fetch the next chunk if no chunk yet, or we're at end of current chunk
-    while (curChunkID == Long.MinValue || rowNo > endRowNo) {
-      // No more chunksets
-      if (!infos.hasNext) return false
-      val nextInfo = infos.nextInfo
-      curChunkID = nextInfo.id
-      populateIterators(nextInfo)
+    try {
+      // Fetch the next chunk if no chunk yet, or we're at end of current chunk
+      while (curChunkID == Long.MinValue || rowNo > endRowNo) {
+        // No more chunksets
+        if (!infos.hasNext) return false
+        val nextInfo = infos.nextInfo
+        curChunkID = nextInfo.id
+        populateIterators(nextInfo)
+      }
+      true
+    } catch {
+      case e: Throwable => infos.close(); throw e;
     }
-    true
   }
 
   final def next: RowReader = {
