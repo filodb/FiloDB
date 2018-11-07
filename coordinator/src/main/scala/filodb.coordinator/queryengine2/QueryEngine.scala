@@ -11,11 +11,11 @@ import monix.eval.Task
 
 import filodb.coordinator.ShardMapper
 import filodb.coordinator.client.QueryCommands.QueryOptions
+import filodb.core.Types
 import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.Dataset
 import filodb.core.query.{ColumnFilter, Filter}
-import filodb.core.Types
 import filodb.prometheus.ast.Vectors.PromMetricLabel
 import filodb.query._
 import filodb.query.exec._
@@ -33,7 +33,7 @@ class QueryEngine(dataset: Dataset,
     * This is the facade to trigger orchestration of the ExecPlan.
     * It sends the ExecPlan to the destination where it will be executed.
     */
-  def dispatchExecPlan(execPlan: ExecPlan)
+  def dispatchExecPlan(execPlan: RootExecPlan)
                       (implicit sched: ExecutionContext,
                        timeout: FiniteDuration): Task[QueryResponse] = {
     execPlan.dispatcher.dispatch(execPlan)
