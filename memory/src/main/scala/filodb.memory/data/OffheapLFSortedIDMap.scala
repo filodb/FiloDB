@@ -117,21 +117,23 @@ object OffheapLFSortedIDMap extends StrictLogging {
   /**
    * Releases all shared locks, against all OffheapLFSortedIDMap instances, for the current thread.
    */
-  def releaseAllSharedLocks(): Unit = {
-    var countMap = sharedLockCounts.get
+  def releaseAllSharedLocks(): Int = {
+    var total = 0
+    val countMap = sharedLockCounts.get
     if (countMap != null) {
       var lastKlass: Class[_ <: MapHolder] = null
       var lockStateOffset = 0L
 
       for ((inst, amt) <- countMap) {
         if (amt > 0) {
-          var holderKlass = inst.getClass
+          val holderKlass = inst.getClass
 
           if (holderKlass != lastKlass) {
             lockStateOffset = lockStateOffsets.get(holderKlass)
             lastKlass = holderKlass
           }
 
+          total += amt
           sharedLockLingering.increment(amt)
 
           _logger.warn(s"Releasing all shared locks for: $inst, amount: $amt")
@@ -145,6 +147,7 @@ object OffheapLFSortedIDMap extends StrictLogging {
 
       countMap.clear
     }
+    total
   }
   //scalastyle:on
 

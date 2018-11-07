@@ -12,7 +12,6 @@ import filodb.core.DatasetRef
 import filodb.core.metadata.Dataset
 import filodb.core.query.{RangeVector, ResultSchema, SerializableRangeVector}
 import filodb.core.store.ChunkSource
-import filodb.memory.data.OffheapLFSortedIDMap
 import filodb.query._
 import filodb.query.Query.qLogger
 

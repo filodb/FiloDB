@@ -1,5 +1,6 @@
 package filodb.core.query
 
+import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
 import org.joda.time.DateTime
 
@@ -144,7 +145,7 @@ final class SerializableRangeVector(val key: RangeVectorKey,
     containers.toIterator.flatMap(_.iterate(schema)).drop(startRecordNo).take(numRows)
 }
 
-object SerializableRangeVector {
+object SerializableRangeVector extends StrictLogging {
   import filodb.core._
 
   val queryResultBytes = Kamon.histogram("query-engine-result-bytes")
@@ -163,7 +164,12 @@ object SerializableRangeVector {
     val oldContainerOpt = builder.currentContainer
     val startRecordNo = oldContainerOpt.map(_.countRecords).getOrElse(0)
     try {
-      // TODO validate no locks are held by the thread. If there are, quite possible a lock-release bug exists
+      // validate no locks are held by the thread. If there are, quite possible a lock acquire or release bug exists
+      val numLocksReleased = OffheapLFSortedIDMap.releaseAllSharedLocks()
+      if (numLocksReleased > 0) {
+        logger.warn(s"Number of locks before a query iterator consumption was non-zero. " +
+          s"This is indicative of a possible bug.")
+      }
       rv.rows.take(limit).foreach { row =>
         numRows += 1
         builder.addFromReader(row)
