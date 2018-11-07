@@ -59,7 +59,9 @@ class TimeSeriesPartition(val partID: Int,
                           // Volatile pointer to infoMap structure.  Name of field MUST match mapKlazz method above
                           var mapPtr: BinaryRegion.NativePointer,
                           // Shared class for mutating the infoMap / OffheapLFSortedIDMap given mapPtr above
-                          offheapInfoMap: OffheapLFSortedIDMapMutator)
+                          offheapInfoMap: OffheapLFSortedIDMapMutator,
+                          // Lock state used by OffheapLFSortedIDMap.
+                          var lockState: Int = 0)
 extends ReadablePartition with MapHolder {
   import TimeSeriesPartition._
 
@@ -171,6 +173,7 @@ extends ReadablePartition with MapHolder {
     // Now, write metadata into offheap block metadata space and update infosChunks
     val metaAddr = blockHolder.endMetaSpan(TimeSeriesShard.writeMeta(_, partID, info, frozenVectors),
                                            dataset.blockMetaSize.toShort)
+
     infoPut(ChunkSetInfo(metaAddr + 4))
 
     // release older write buffers back to pool.  Nothing at this point should reference the older appenders.
@@ -230,17 +233,53 @@ extends ReadablePartition with MapHolder {
                .filter(_ != currentInfo)  // filter out the appending chunk
 
   def infos(method: ChunkScanMethod): ChunkInfoIterator = method match {
-    case AllChunkScan               => allInfos
-    case InMemoryChunkScan          => allInfos
-    case r: RowKeyChunkScan         => allInfos.filter { ic =>
-                                         ic.intersection(r.startTime, r.endTime).isDefined
-                                       }
-    case LastSampleChunkScan        => if (numChunks == 0) ChunkInfoIterator.empty
-                                       else ChunkInfoIterator.single(infoLast)
+    case AllChunkScan        => allInfos
+    case InMemoryChunkScan   => allInfos
+    case r: RowKeyChunkScan  => allInfos.filter { ic =>
+                                  ic.intersection(r.startTime, r.endTime).isDefined
+                                }
+    case LastSampleChunkScan => if (numChunks == 0) ChunkInfoIterator.empty
+                                else {
+                                  // Return a single element iterator which holds a shared lock.
+                                  offheapInfoMap.acquireShared(this)
+                                  try {
+                                    new OneChunkInfo(infoLast)
+                                  } catch {
+                                    case e: Throwable => offheapInfoMap.releaseShared(this); throw e;
+                                  }
+                                }
   }
 
-  final def earliestTime: Long =
-    if (numChunks == 0) Long.MinValue else ChunkSetInfo(offheapInfoMap.first(this)).startTime
+  // Caller must acquire shared lock, which is released when finished.
+  private class OneChunkInfo(info: ChunkSetInfo) extends ChunkInfoIterator {
+    var closed = false
+
+    def close(): Unit = {
+      if (!closed) doClose()
+    }
+
+    private def doClose(): Unit = {
+      closed = true
+      offheapInfoMap.releaseShared(TimeSeriesPartition.this)
+    }
+
+    def hasNext: Boolean = !closed
+
+    def nextInfo: ChunkSetInfo = {
+      if (closed) throw new NoSuchElementException()
+      doClose()
+      return info
+    }
+  }
+
+  final def earliestTime: Long = {
+    if (numChunks == 0) {
+      Long.MinValue
+    } else {
+      // Acquire shared lock to safely access the native pointer.
+      offheapInfoMap.withShared(this, ChunkSetInfo(offheapInfoMap.first(this)).startTime)
+    }
+  }
 
   /**
     * Timestamp of most recent sample in memory. If none, returns -1
@@ -249,11 +288,16 @@ extends ReadablePartition with MapHolder {
     * not been paged into memory
     */
   final def timestampOfLatestSample: Long = {
-    if (numChunks == 0) -1
-    else infoLast.endTime
+    if (numChunks == 0) {
+      -1
+    } else {
+      // Acquire shared lock to safely access the native pointer.
+      offheapInfoMap.withShared(this, infoLast.endTime)
+    }
   }
 
-  def dataChunkPointer(id: ChunkID, columnID: Int): BinaryVector.BinaryVectorPtr = infoGet(id).vectorPtr(columnID)
+  // Disabled for now. Requires a shared lock on offheapInfoMap.
+  //def dataChunkPointer(id: ChunkID, columnID: Int): BinaryVector.BinaryVectorPtr = infoGet(id).vectorPtr(columnID)
 
   /**
     * Initializes vectors, chunkIDs for a new chunkset/chunkID.
@@ -271,26 +315,34 @@ extends ReadablePartition with MapHolder {
   }
 
   final def removeChunksAt(id: ChunkID): Unit = {
-    offheapInfoMap.remove(this, id)
+    offheapInfoMap.withExclusive(this, offheapInfoMap.remove(this, id))
     shardStats.chunkIdsEvicted.increment()
   }
 
   final def hasChunksAt(id: ChunkID): Boolean = offheapInfoMap.contains(this, id)
 
   // Used for adding chunksets that are paged in, ie that are already persisted
-  // Atomic and multi-thread safe; only mutates state and invokes infoAddrFunc if chunkID not present
-  final def addChunkInfoIfAbsent(id: ChunkID, infoAddrFunc: => BinaryRegion.NativePointer): Boolean = {
-    val inserted = offheapInfoMap.putIfAbsent(this, id, infoAddrFunc)
-    // Make sure to update newestFlushedID so that flushes work correctly and don't try to flush these chunksets
-    if (inserted) updateFlushedID(infoGet(id))
-    inserted
+  // Atomic and multi-thread safe; only mutates state if chunkID not present
+  final def addChunkInfoIfAbsent(id: ChunkID, infoAddr: BinaryRegion.NativePointer): Boolean = {
+    offheapInfoMap.withExclusive(this, {
+      val inserted = offheapInfoMap.putIfAbsent(this, id, infoAddr)
+      // Make sure to update newestFlushedID so that flushes work correctly and don't try to flush these chunksets
+      if (inserted) updateFlushedID(infoGet(id))
+      inserted
+    })
   }
 
   final def updateFlushedID(info: ChunkSetInfo): Unit = {
     newestFlushedID = Math.max(newestFlushedID, info.id)
   }
 
+  // Caller must hold lock on offheapInfoMap.
   private def infoGet(id: ChunkID): ChunkSetInfo = ChunkSetInfo(offheapInfoMap(this, id))
+
+  // Caller must hold lock on offheapInfoMap.
   private def infoLast: ChunkSetInfo = ChunkSetInfo(offheapInfoMap.last(this))
-  private def infoPut(info: ChunkSetInfo): Unit = offheapInfoMap.put(this, info.infoAddr)
+
+  private def infoPut(info: ChunkSetInfo): Unit = {
+    offheapInfoMap.withExclusive(this, offheapInfoMap.put(this, info.infoAddr))
+  }
 }
