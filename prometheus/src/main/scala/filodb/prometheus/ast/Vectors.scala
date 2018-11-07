@@ -126,7 +126,7 @@ trait Vectors extends Scalars with TimeUnits with Base {
     }
 
     private[prometheus] val columnFilters = labelMatchesToFilters(labelSelection)
-    private val columns = labelMatchesToColumnName(labelSelection)
+    private[prometheus] val columns = labelMatchesToColumnName(labelSelection)
     private[prometheus] val nameFilter = ColumnFilter(PromMetricLabel, query.Filter.Equals(metricName))
 
     def toPeriodicSeriesPlan(queryParams: QueryParams): PeriodicSeriesPlan = {
@@ -159,7 +159,7 @@ trait Vectors extends Scalars with TimeUnits with Base {
     }
 
     private[prometheus] val columnFilters = labelMatchesToFilters(labelSelection)
-    private val columns = labelMatchesToColumnName(labelSelection)
+    private[prometheus] val columns = labelMatchesToColumnName(labelSelection)
     private[prometheus] val nameFilter = ColumnFilter(PromMetricLabel, query.Filter.Equals(metricName))
 
     val allFilters: Seq[ColumnFilter] = columnFilters :+ nameFilter
