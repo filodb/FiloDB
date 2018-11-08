@@ -98,6 +98,7 @@ trait ChunkSource extends RawChunkSource {
     val ids = columnIDs.toArray
     val partCols = dataset.infosFromIDs(dataset.partitionColumns.map(_.id))
     scanPartitions(dataset, columnIDs, partMethod, chunkMethod)
+      .filter(_.hasChunks(chunkMethod))
       .map { partition =>
         stats.incrReadPartitions(1)
         val key = new PartitionRangeVectorKey(partition.partKeyBase, partition.partKeyOffset,
