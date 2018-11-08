@@ -254,8 +254,8 @@ extends ReadablePartition with MapHolder {
     val chunkIter = infos(method)
     try {
       chunkIter.hasNext
-    } catch {
-      case e: Throwable => chunkIter.close(); throw e;
+    } finally {
+      chunkIter.close()
     }
   }
 
