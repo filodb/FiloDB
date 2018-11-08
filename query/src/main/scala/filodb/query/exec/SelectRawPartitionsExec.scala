@@ -48,6 +48,6 @@ final case class SelectRawPartitionsExec(id: String,
     source.rangeVectors(dataset, colIds, partMethod, chunkMethod)
   }
 
-  protected def args: String = s"shard=$shard, rowKeyRange=$rowKeyRange, filters=$filters"
+  protected def args: String = s"shard=$shard, rowKeyRange=$rowKeyRange, filters=$filters, colIDs=$colIds"
 }
 

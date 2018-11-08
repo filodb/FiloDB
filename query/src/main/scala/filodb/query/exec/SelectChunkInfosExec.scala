@@ -58,16 +58,19 @@ final case class SelectChunkInfosExec(id: String,
     }
     val partMethod = FilteredPartitionScan(ShardSplit(shard), filters)
     val partCols = dataset.infosFromIDs(dataset.partitionColumns.map(_.id))
+    val numGroups = source.groupsInDataset(dataset)
     source.scanPartitions(dataset, Seq(column), partMethod, chunkMethod)
           .filter(_.hasChunks(chunkMethod))
           .map { partition =>
             source.stats.incrReadPartitions(1)
+            val subgroup = Math.abs(dataset.partKeySchema.partitionHash(partition.partKeyBase,
+                                                                        partition.partKeyOffset) % numGroups)
             val key = new PartitionRangeVectorKey(partition.partKeyBase, partition.partKeyOffset,
-                                                  dataset.partKeySchema, partCols, shard)
+                                                  dataset.partKeySchema, partCols, shard, subgroup)
             ChunkInfoRangeVector(key, partition, chunkMethod, dataColumn)
           }
   }
 
-  protected def args: String = s"shard=$shard, rowKeyRange=$rowKeyRange, filters=$filters"
+  protected def args: String = s"shard=$shard, rowKeyRange=$rowKeyRange, filters=$filters, col=$column"
 }
 

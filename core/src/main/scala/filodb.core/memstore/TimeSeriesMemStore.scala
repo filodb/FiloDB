@@ -167,6 +167,9 @@ extends MemStore with StrictLogging {
   def getScanSplits(dataset: DatasetRef, splitsPerNode: Int = 1): Seq[ScanSplit] =
     activeShards(dataset).map(ShardSplit)
 
+  def groupsInDataset(dataset: Dataset): Int =
+    datasets.get(dataset.ref).map(_.values.asScala.head.storeConfig.groupsPerShard).getOrElse(1)
+
   def reset(): Unit = {
     datasets.clear()
     store.reset()

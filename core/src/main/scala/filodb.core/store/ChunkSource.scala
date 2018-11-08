@@ -81,6 +81,9 @@ trait ChunkSource extends RawChunkSource {
                      partMethod: PartitionScanMethod,
                      chunkMethod: ChunkScanMethod = AllChunkScan): Observable[ReadablePartition]
 
+  // internal method to find # of groups in a dataset
+  def groupsInDataset(dataset: Dataset): Int
+
   /**
    * Returns a stream of RangeVectors's.  Good for per-partition (or time series) processing.
    *
@@ -97,12 +100,15 @@ trait ChunkSource extends RawChunkSource {
                    chunkMethod: ChunkScanMethod): Observable[RangeVector] = {
     val ids = columnIDs.toArray
     val partCols = dataset.infosFromIDs(dataset.partitionColumns.map(_.id))
+    val numGroups = groupsInDataset(dataset)
     scanPartitions(dataset, columnIDs, partMethod, chunkMethod)
       .filter(_.hasChunks(chunkMethod))
       .map { partition =>
         stats.incrReadPartitions(1)
+        val subgroup = Math.abs(dataset.partKeySchema.partitionHash(partition.partKeyBase,
+                                                                    partition.partKeyOffset) % numGroups)
         val key = new PartitionRangeVectorKey(partition.partKeyBase, partition.partKeyOffset,
-                                              dataset.partKeySchema, partCols, partition.shard)
+                                              dataset.partKeySchema, partCols, partition.shard, subgroup)
         RawDataRangeVector(key, partition, chunkMethod, ids)
       }
   }
