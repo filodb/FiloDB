@@ -24,6 +24,7 @@ import filodb.coordinator.client.LocalClient
 import filodb.core.{DatasetRef, ErrorResponse}
 import filodb.core.store.StoreConfig
 import filodb.http.PromCirceSupport
+import filodb.prometheus.ast.QueryParams
 import filodb.prometheus.parse.Parser
 import filodb.prometheus.query.PrometheusModel.SuccessResponse
 import filodb.query.{QueryError, QueryResult => QueryResult2}
@@ -146,6 +147,8 @@ abstract class StandaloneMultiJvmSpec(config: MultiNodeConfig) extends MultiNode
   }
 
   val query = "heap_usage{dc=\"DC0\",app=\"App-2\"}[1m]"
+  val query1 = "heap_usage{dc=\"DC0\",app=\"App-2\"}"
+
   // queryTimestamp is in millis
   def runCliQuery(client: LocalClient, queryTimestamp: Long): Double = {
     val logicalPlan = Parser.queryToLogicalPlan(query, queryTimestamp/1000)
@@ -154,13 +157,49 @@ abstract class StandaloneMultiJvmSpec(config: MultiNodeConfig) extends MultiNode
     val result = client.logicalPlan2Query(dataset, logicalPlan) match {
       case r: QueryResult2 =>
         val vals = r.result.flatMap(_.rows.map { r => (r.getLong(0) - curTime, r.getDouble(1)) })
-        info(s"result values were $vals")
+        // info(s"result values were $vals")
         vals.length should be > 0
         vals.map(_._2).sum
       case e: QueryError => fail(e.t)
     }
     info(s"CLI Query Result for $query at $queryTimestamp was $result")
     result
+  }
+
+  // Get a point for every minute of an interval for multiple time series for comparing missing data
+  // TODO: maybe do a sum_over_time() as current windowing just gets last data point
+  def runRangeQuery(client: LocalClient, startTime: Long, endTime: Long): Map[String, Array[Double]] = {
+    val logicalPlan = Parser.queryRangeToLogicalPlan(query1, QueryParams(startTime/1000, 60, endTime/1000))
+
+    var totalSamples = 0
+    client.logicalPlan2Query(dataset, logicalPlan) match {
+      case r: QueryResult2 =>
+        // Transform range query vectors
+        val map = r.result.map { rv =>
+          val sampleArray = rv.rows.map(_.getDouble(1)).toArray
+          totalSamples += sampleArray.size
+          rv.key.toString -> sampleArray
+        }.toMap
+        info(s"Range query result for interval [$startTime, $endTime]: ${map.size} rows, $totalSamples samples")
+        map
+      case e: QueryError => fail(e.t)
+    }
+  }
+
+  def compareRangeResults(map1: Map[String, Array[Double]], map2: Map[String, Array[Double]]): Unit = {
+    map1.keySet shouldEqual map2.keySet
+    map1.foreach { case (key, samples) =>
+      samples.toList shouldEqual map2(key).toList
+    }
+  }
+
+  def printChunkMeta(client: LocalClient): Unit = {
+    val chunkMetaQuery = "_filodb_chunkmeta_all(heap_usage{dc=\"DC0\",app=\"App-2\"})"
+    val logicalPlan = Parser.queryRangeToLogicalPlan(chunkMetaQuery, QueryParams(0, 60, Int.MaxValue))
+    client.logicalPlan2Query(dataset, logicalPlan) match {
+      case QueryResult2(_, schema, result) => result.foreach(rv => println(rv.prettyPrint(schema)))
+      case e: QueryError => fail(e.t)
+    }
   }
 
   def runHttpQuery(queryTimestamp: Long): Double = {
