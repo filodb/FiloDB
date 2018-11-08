@@ -151,6 +151,19 @@ object OffheapLFSortedIDMap extends StrictLogging {
   }
   //scalastyle:on
 
+  /**
+    * Validate no locks are held by the thread. Typically invoked prior to
+    * consumption from a query iterator. If there are lingering locks,
+    * it is quite possible a lock acquire or release bug exists
+    */
+  def validateNoSharedLocks(): Unit = {
+    val numLocksReleased = OffheapLFSortedIDMap.releaseAllSharedLocks()
+    if (numLocksReleased > 0) {
+      logger.warn(s"Number of locks was non-zero: $numLocksReleased. " +
+        s"This is indicative of a possible lock acquisition/release bug.")
+    }
+  }
+
   def bytesNeeded(maxElements: Int): Int = {
     require(maxElements <= MaxMaxElements)
     OffsetElementPtrs + 8 * maxElements

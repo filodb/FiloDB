@@ -166,12 +166,7 @@ object SerializableRangeVector extends StrictLogging {
     // Important TODO / TechDebt: We need to replace Iterators with cursors to better control
     // the chunk iteration, lock acquisition and release. This is much needed for safe memory access.
     try {
-      // validate no locks are held by the thread. If there are, quite possible a lock acquire or release bug exists
-      val numLocksReleased = OffheapLFSortedIDMap.releaseAllSharedLocks()
-      if (numLocksReleased > 0) {
-        logger.warn(s"Number of locks before query iterator consumption was non-zero: $numLocksReleased. " +
-          s"This is indicative of a possible lock acquisition/release bug.")
-      }
+      OffheapLFSortedIDMap.validateNoSharedLocks()
       rv.rows.take(limit).foreach { row =>
         numRows += 1
         builder.addFromReader(row)

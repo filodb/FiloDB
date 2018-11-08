@@ -518,12 +518,7 @@ class TopBottomKRowAggregator(k: Int, bottomK: Boolean) extends RowAggregator wi
     // Important TODO / TechDebt: We need to replace Iterators with cursors to better control
     // the chunk iteration, lock acquisition and release. This is much needed for safe memory access.
     try {
-      // validate no locks are held by the thread. If there are, quite possible a lock acquire or release bug exists
-      val numLocksReleased = OffheapLFSortedIDMap.releaseAllSharedLocks()
-      if (numLocksReleased > 0) {
-        logger.warn(s"Number of locks before query iterator consumption was non-zero: $numLocksReleased. " +
-          s"This is indicative of a possible lock acquisition/release bug.")
-      }
+      OffheapLFSortedIDMap.validateNoSharedLocks()
       // We limit the results wherever it is materialized first. So it is done here.
       aggRangeVector.rows.take(limit).foreach { row =>
         var i = 1
