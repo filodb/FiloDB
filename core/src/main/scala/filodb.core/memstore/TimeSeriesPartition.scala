@@ -241,7 +241,6 @@ extends ReadablePartition with MapHolder {
     case LastSampleChunkScan => if (numChunks == 0) ChunkInfoIterator.empty
                                 else {
                                   // Return a single element iterator which holds a shared lock.
-                                  offheapInfoMap.acquireShared(this)
                                   try {
                                     new OneChunkInfo(infoLast)
                                   } catch {
@@ -259,9 +258,9 @@ extends ReadablePartition with MapHolder {
     }
   }
 
-  // Caller must acquire shared lock, which is released when finished.
-  private class OneChunkInfo(info: ChunkSetInfo) extends ChunkInfoIterator {
+  private class OneChunkInfo(info: () => ChunkSetInfo) extends ChunkInfoIterator {
     var closed = false
+    var valueSeen = false
 
     def close(): Unit = {
       if (!closed) doClose()
@@ -272,12 +271,18 @@ extends ReadablePartition with MapHolder {
       offheapInfoMap.releaseShared(TimeSeriesPartition.this)
     }
 
-    def hasNext: Boolean = !closed
+    def hasNext: Boolean = {
+      if (valueSeen) doClose()
+      !closed
+    }
 
     def nextInfo: ChunkSetInfo = {
       if (closed) throw new NoSuchElementException()
-      doClose()
-      return info
+      if (!valueSeen) {
+        offheapInfoMap.acquireShared(TimeSeriesPartition.this)
+        valueSeen = true
+      }
+      return info()
     }
   }
 
@@ -349,7 +354,7 @@ extends ReadablePartition with MapHolder {
   private def infoGet(id: ChunkID): ChunkSetInfo = ChunkSetInfo(offheapInfoMap(this, id))
 
   // Caller must hold lock on offheapInfoMap.
-  private def infoLast: ChunkSetInfo = ChunkSetInfo(offheapInfoMap.last(this))
+  private def infoLast(): ChunkSetInfo = ChunkSetInfo(offheapInfoMap.last(this))
 
   private def infoPut(info: ChunkSetInfo): Unit = {
     offheapInfoMap.withExclusive(this, offheapInfoMap.put(this, info.infoAddr))

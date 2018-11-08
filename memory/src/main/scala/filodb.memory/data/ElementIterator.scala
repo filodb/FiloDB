@@ -35,7 +35,7 @@ trait ElementIterator {
  * Lazily instantiates a wrapped iterator until hasNext or next is called.
  */
 //scalastyle:off
-class LazyElementIterator(source: => ElementIterator) extends ElementIterator {
+class LazyElementIterator(source: () => ElementIterator) extends ElementIterator {
   private var it: ElementIterator = _
 
   // Note: If close is called before the iterator is assigned, then there's seemingly no
@@ -49,7 +49,7 @@ class LazyElementIterator(source: => ElementIterator) extends ElementIterator {
   override def next: NativePointer = sourceIt().next
 
   private def sourceIt(): ElementIterator = {
-    if (it == null) it = source
+    if (it == null) it = source()
     it
   }
 }
