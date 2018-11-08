@@ -250,6 +250,15 @@ extends ReadablePartition with MapHolder {
                                 }
   }
 
+  def hasChunks(method: ChunkScanMethod): Boolean = {
+    val chunkIter = infos(method)
+    try {
+      chunkIter.hasNext
+    } catch {
+      case e: Throwable => chunkIter.close(); throw e;
+    }
+  }
+
   // Caller must acquire shared lock, which is released when finished.
   private class OneChunkInfo(info: ChunkSetInfo) extends ChunkInfoIterator {
     var closed = false

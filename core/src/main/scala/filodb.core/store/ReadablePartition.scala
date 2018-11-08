@@ -92,6 +92,11 @@ trait ReadablePartition extends FiloPartition {
   def infos(method: ChunkScanMethod): ChunkInfoIterator
 
   /**
+    * Use to check if a ChunkScanMethod for this partition results in any chunks
+    */
+  def hasChunks(method: ChunkScanMethod): Boolean
+
+  /**
    * Returns true if the partition has the chunk with the given id
    */
   def hasChunksAt(id: ChunkID): Boolean

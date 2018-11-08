@@ -46,7 +46,6 @@ final case class SelectRawPartitionsExec(id: String,
     }
     val partMethod = FilteredPartitionScan(ShardSplit(shard), filters)
     source.rangeVectors(dataset, colIds, partMethod, chunkMethod)
-          .filter(_.rows.nonEmpty)
   }
 
   protected def args: String = s"shard=$shard, rowKeyRange=$rowKeyRange, filters=$filters"
