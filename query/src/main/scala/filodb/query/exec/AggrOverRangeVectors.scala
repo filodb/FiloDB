@@ -5,7 +5,6 @@ import java.nio.ByteBuffer
 import scala.collection.mutable
 
 import com.tdunning.math.stats.{ArrayDigest, TDigest}
-import com.typesafe.scalalogging.StrictLogging
 import monix.reactive.Observable
 
 import filodb.core.binaryrecord2.RecordBuilder
@@ -454,7 +453,7 @@ object AvgRowAggregator extends RowAggregator {
   * Present: The top/bottom-k samples for each timestamp are placed into distinct RangeVectors for each RangeVectorKey
   *         Materialization is needed here, because it cannot be done lazily.
   */
-class TopBottomKRowAggregator(k: Int, bottomK: Boolean) extends RowAggregator with StrictLogging {
+class TopBottomKRowAggregator(k: Int, bottomK: Boolean) extends RowAggregator {
 
   private val numRowReaderColumns = 1 + k*2 // one for timestamp, two columns for each top-k
   private val rvkStringCache = mutable.HashMap[RangeVectorKey, ZeroCopyUTF8String]()
