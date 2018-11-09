@@ -45,10 +45,10 @@ class Arguments extends FieldArgs {
   var indexName: Option[String] = None
   var host: Option[String] = None
   var port: Int = 2552
-  var promql0: Option[String] = None
   var promql: Option[String] = None
   var start: Long = System.currentTimeMillis() / 1000 // promql argument is seconds since epoch
   var end: Long = System.currentTimeMillis() / 1000 // promql argument is seconds since epoch
+  var minutes: Option[String] = None
   var step: Long = 10 // in seconds
   var metricColumn: String = "__name__"
   var shardKeyColumns: Seq[String] = Nil
@@ -98,6 +98,12 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
     val remote = Client.standaloneClient(system, args.host.get, args.port)
     (remote, DatasetRef(args.dataset.get))
   }
+
+  def getQueryRange(args: Arguments): QueryParams =
+    args.minutes.map { minArg =>
+      val end = System.currentTimeMillis() / 1000
+      QueryParams(end - minArg.toInt * 60, args.step, end)
+    }.getOrElse(QueryParams(args.start, args.step, args.end))
 
   def main(args: Arguments): Unit = {
     val spread = config.getInt("default-spread")
@@ -186,8 +192,7 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
             val remote = Client.standaloneClient(system, args.host.get, args.port)
             val options = QOptions(args.limit, args.sampleLimit, args.everyNSeconds.map(_.toInt),
               timeout, args.shards.map(_.map(_.toInt)), spread)
-            parsePromQuery2(remote, query, args.dataset.get,
-              QueryParams(args.start, args.step, args.end), options)
+            parsePromQuery2(remote, query, args.dataset.get, getQueryRange(args), options)
           }.orElse {
             args.select.map { selectCols =>
               exportCSV(getRef(args),
