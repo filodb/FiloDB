@@ -14,11 +14,11 @@ sealed trait TimeParams {
 final case class QueryParams(start: Long, step: Long, end: Long) extends TimeParams
 final case class InMemoryParam(step: Long) extends TimeParams {
   val start = 0L
-  val end = Long.MaxValue
+  val end = System.currentTimeMillis / 1000
 }
 final case class WriteBuffersParam(step: Long) extends TimeParams {
   val start = 0L
-  val end = Long.MaxValue
+  val end = System.currentTimeMillis / 1000
 }
 
 trait Base {
