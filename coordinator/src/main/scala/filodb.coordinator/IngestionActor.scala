@@ -271,9 +271,18 @@ private[filodb] final class IngestionActor(dataset: Dataset,
   /** Guards that only this dataset's commands are acted upon. */
   private def stop(ds: DatasetRef, shard: Int, origin: ActorRef): Unit =
     if (invalid(ds)) handleInvalid(StopShardIngestion(ds, shard), Some(origin)) else {
-      removeAndReleaseResources(ds, shard)
-      statusActor ! IngestionStopped(dataset.ref, shard)
-      logger.info(s"Stopped streaming ingestion for shard $shard and released resources")
+      streamSubscriptions.get(shard).foreach { s =>
+        s.onComplete {
+          case Success(_) =>
+            // release resources when stop is invoked explicitly, not when ingestion ends in non-kafka environments
+            removeAndReleaseResources(ds, shard)
+            // ingestion stopped event is already handled in the normalIngestion method
+            logger.info(s"Stopped streaming ingestion for shard $shard and released resources")
+          case Failure(_) =>
+            // release of resources on failure is already handled in the normalIngestion method
+        }
+      }
+      streamSubscriptions.get(shard).foreach(_.cancel())
   }
 
   private def invalid(ref: DatasetRef): Boolean = ref != dataset.ref
