@@ -18,7 +18,7 @@ import filodb.core._
 import filodb.core.metadata.{Column, Dataset, DatasetOptions}
 import filodb.core.store._
 import filodb.memory.format.RowReader
-import filodb.prometheus.ast.QueryParams
+import filodb.prometheus.ast.{InMemoryParam, QueryParams, TimeParams, WriteBuffersParam}
 import filodb.prometheus.parse.Parser
 import filodb.query.{QueryResult => QueryResult2}
 import filodb.query.{QueryError => QueryError2}
@@ -50,6 +50,7 @@ class Arguments extends FieldArgs {
   var end: Long = System.currentTimeMillis() / 1000 // promql argument is seconds since epoch
   var minutes: Option[String] = None
   var step: Long = 10 // in seconds
+  var chunks: Option[String] = None   // select either "memory" or "buffers" chunks only
   var metricColumn: String = "__name__"
   var shardKeyColumns: Seq[String] = Nil
   // Ignores the given Suffixes for a ShardKeyColumn while calculating shardKeyHash
@@ -99,11 +100,17 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
     (remote, DatasetRef(args.dataset.get))
   }
 
-  def getQueryRange(args: Arguments): QueryParams =
-    args.minutes.map { minArg =>
-      val end = System.currentTimeMillis() / 1000
-      QueryParams(end - minArg.toInt * 60, args.step, end)
-    }.getOrElse(QueryParams(args.start, args.step, args.end))
+  def getQueryRange(args: Arguments): TimeParams =
+    args.chunks.filter { cOpt => cOpt == "memory" || cOpt == "buffers" }
+      .map {
+        case "memory"  => InMemoryParam(args.step)
+        case "buffers" => WriteBuffersParam(args.step)
+      }.getOrElse {
+      args.minutes.map { minArg =>
+        val end = System.currentTimeMillis() / 1000
+        QueryParams(end - minArg.toInt * 60, args.step, end)
+      }.getOrElse(QueryParams(args.start, args.step, args.end))
+    }
 
   def main(args: Arguments): Unit = {
     val spread = config.getInt("default-spread")
@@ -315,9 +322,9 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
                             spread: Int)
 
   def parsePromQuery2(client: LocalClient, query: String, dataset: String,
-                      queryParams: QueryParams,
+                      timeParams: TimeParams,
                       options: QOptions): Unit = {
-    val logicalPlan = Parser.queryRangeToLogicalPlan(query, queryParams)
+    val logicalPlan = Parser.queryRangeToLogicalPlan(query, timeParams)
     executeQuery2(client, dataset, logicalPlan, options)
   }
 

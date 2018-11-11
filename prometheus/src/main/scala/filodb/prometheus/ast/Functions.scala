@@ -14,7 +14,7 @@ trait Functions extends Base with Operators with Vectors {
       throw new IllegalArgumentException(s"Invalid function name [$name]")
     }
 
-    def toPeriodicSeriesPlan(queryParams: QueryParams): PeriodicSeriesPlan = {
+    def toPeriodicSeriesPlan(timeParams: TimeParams): PeriodicSeriesPlan = {
       val seriesParam = allParams.filter(_.isInstanceOf[Series]).head.asInstanceOf[Series]
       val otherParams = allParams.filter(!_.isInstanceOf[Series]).map(_.asInstanceOf[Scalar].toScalar)
       val instantFunctionIdOpt = InstantFunctionId.withNameInsensitiveOption(name)
@@ -22,14 +22,13 @@ trait Functions extends Base with Operators with Vectors {
 
       if (instantFunctionIdOpt.isDefined) {
         val instantFunctionId = instantFunctionIdOpt.get
-        val periodicSeriesPlan = seriesParam.asInstanceOf[PeriodicSeries].toPeriodicSeriesPlan(queryParams)
+        val periodicSeriesPlan = seriesParam.asInstanceOf[PeriodicSeries].toPeriodicSeriesPlan(timeParams)
 
         ApplyInstantFunction(periodicSeriesPlan, instantFunctionId, otherParams)
       // Special FiloDB functions to extract things like chunk metadata
       } else if (filoFunctionIdOpt.isDefined) {
         // No lookback needed as we are looking at chunk metadata only, not raw samples
-        val rangeSelector = IntervalSelector(Seq(queryParams.start * 1000),
-                                             Seq(queryParams.end * 1000))
+        val rangeSelector = timeParamToSelector(timeParams, 0)
         val (filters, columns) = seriesParam match {
           case i: InstantExpression => (i.columnFilters :+ i.nameFilter, i.columns)
           case r: RangeExpression   => (r.columnFilters :+ r.nameFilter, r.columns)
@@ -43,8 +42,8 @@ trait Functions extends Base with Operators with Vectors {
         val rangeExpression = seriesParam.asInstanceOf[RangeExpression]
 
         PeriodicSeriesWithWindowing(
-          rangeExpression.toRawSeriesPlan(queryParams, isRoot = false).asInstanceOf[RawSeries],
-          queryParams.start * 1000, queryParams.step * 1000, queryParams.end * 1000,
+          rangeExpression.toRawSeriesPlan(timeParams, isRoot = false).asInstanceOf[RawSeries],
+          timeParams.start * 1000, timeParams.step * 1000, timeParams.end * 1000,
           rangeExpression.window.millis,
           rangeFunctionId, otherParams)
       }

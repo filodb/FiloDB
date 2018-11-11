@@ -50,7 +50,7 @@ object Utils extends StrictLogging {
       case MostRecentTime(lastMillis) =>
         val timeNow = System.currentTimeMillis
         RowKeyChunkScan(dataset, Seq(timeNow - lastMillis), Seq(timeNow))
-      case MostRecentSample => LastSampleChunkScan
+      case MostRecentSample => WriteBufferChunkScan
     }).toOr.badMap {
       case m: MatchError => BadQuery(s"Could not parse $dataQuery: ${m.getMessage}")
       case e: Exception => BadArgument(e.getMessage)

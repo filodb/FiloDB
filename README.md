@@ -569,6 +569,8 @@ The `filo-cli` accepts arguments and options as key-value pairs, specified like 
 | start      | The start of the query timerange in seconds since epoch  |
 | step       | The step size in seconds of the PromQL query.  Successive windows occur at every step seconds   |
 | stop       | The end of the query timerange in seconds since epoch    |
+| minutes    | A shortcut to set the start at N minutes ago, and the stop at current time.  Should specify a step also.   |
+| chunks     | Either "memory" or "buffers" to select either all the in-memory chunks or the write buffers only.  Should specify a step also. |
 | database   | Specifies the "database" the dataset should operate in.  For Cassandra, this is the keyspace.  If not specified, uses config value.  |
 | limit      | The maximum number of samples per time series  |
 | shards     | (EXPERT) overrides the automatic shard calculation by passing in a comma-separated list of specific shards to query.  Very useful to debug sharding issues.  |

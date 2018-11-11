@@ -8,7 +8,7 @@ import monix.reactive.Observable
 import filodb.core.{DatasetRef, Types}
 import filodb.core.metadata.{Column, Dataset}
 import filodb.core.query._
-import filodb.core.store.{AllChunkScan, ChunkSource, FilteredPartitionScan, RowKeyChunkScan, ShardSplit}
+import filodb.core.store._
 import filodb.query.QueryConfig
 
 object SelectChunkInfosExec {
@@ -52,9 +52,10 @@ final case class SelectChunkInfosExec(id: String,
     val dataColumn = dataset.dataColumns(column)
     val chunkMethod = rowKeyRange match {
       case RowKeyInterval(from, to) => RowKeyChunkScan(from, to)
-      case AllChunks => AllChunkScan
-      case WriteBuffers => ???
-      case EncodedChunks => ???
+      case AllChunks                => AllChunkScan
+      case WriteBuffers             => WriteBufferChunkScan
+      case InMemoryChunks           => InMemoryChunkScan
+      case EncodedChunks            => ???
     }
     val partMethod = FilteredPartitionScan(ShardSplit(shard), filters)
     val partCols = dataset.infosFromIDs(dataset.partitionColumns.map(_.id))

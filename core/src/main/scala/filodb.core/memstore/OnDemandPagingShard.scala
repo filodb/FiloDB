@@ -177,8 +177,8 @@ TimeSeriesShard(dataset, storeConfig, shardNum, rawStore, metastore, evictionPol
           }
         // Return only in-memory data - ie return none so we never ODP
         case InMemoryChunkScan        => None
-        // Only used for tests -> last sample is pretty much always in memory, so don't ODP
-        case LastSampleChunkScan      => None
+        // Write buffers are always in memory only
+        case WriteBufferChunkScan      => None
       }
     } else {
       None
