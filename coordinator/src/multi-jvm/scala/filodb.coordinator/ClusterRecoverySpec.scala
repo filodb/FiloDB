@@ -32,14 +32,13 @@ object ClusterRecoverySpecConfig extends MultiNodeConfig {
 abstract class ClusterRecoverySpec extends ClusterSpec(ClusterRecoverySpecConfig) {
   import akka.testkit._
 
-  import client.QueryCommands._
   import ClusterRecoverySpecConfig._
   import filodb.query._
   import GdeltTestData._
   import NodeClusterActor._
   import sources.CsvStreamFactory
 
-  override def initialParticipants = roles.size
+  override def initialParticipants: Int = roles.size
 
   override def beforeAll(): Unit = multiNodeSpecBeforeAll()
 

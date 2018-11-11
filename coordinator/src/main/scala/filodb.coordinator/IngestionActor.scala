@@ -173,9 +173,10 @@ private[filodb] final class IngestionActor(dataset: Dataset,
         case Failure(x) =>
           handleError(dataset.ref, shard, x)
         case Success(_) =>
-          // TODO following line breaks a few tests since it does some validation once
-          // ingestion has stopped, whereas this addition cleans up that state.
-          removeAndReleaseResources(dataset.ref, shard)
+          // We dont release resources when fitite ingestion ends normally.
+          // Kafka ingestion is usually infinite and does not end unless canceled.
+          // Cancel operation is already releasing after cancel is done.
+          // We also have some tests that validate after finite ingestion is complete
           if (source != NodeClusterActor.noOpSource) statusActor ! IngestionStopped(dataset.ref, shard)
       }
     } recover { case t: Throwable =>
