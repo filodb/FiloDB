@@ -46,10 +46,6 @@ final case class QueryResult(id: String,
 }
 
 final case class MetadataQueryResult(id: String,
-                             resultSchema: ResultSchema,
-                             var result: Seq[RangeVector]) extends QueryResponse {
-    result = result.toSet.toSeq
-    def resultType: QueryResultType = QueryResultType.RangeVectors
-}
+                                     result: RangeVector) extends QueryResponse
 
 

@@ -14,14 +14,13 @@ case class RowKeyInterval(from: BinaryRecord, to: BinaryRecord) extends RowKeyRa
 case object AllChunks extends RowKeyRange
 case object WriteBuffers extends RowKeyRange
 case object EncodedChunks extends RowKeyRange
-case object MetadataPlan extends RowKeyRange
 
 /**
   * Simply concatenate results from child ExecPlan objects
   */
 final case class DistConcatExec(id: String,
                                 dispatcher: PlanDispatcher,
-                                children: Seq[RootExecPlan]) extends NonLeafExecPlan {
+                                children: Seq[BaseExecPlan]) extends NonLeafExecPlan {
   require(!children.isEmpty)
 
   protected def args: String = ""
@@ -33,6 +32,7 @@ final case class DistConcatExec(id: String,
     qLogger.debug(s"DistConcatExec: Concatenating results")
     childResponses.flatMap {
       case qr: QueryResult => Observable.fromIterable(qr.result)
+      case mqr: MetadataQueryResult => Observable(mqr.result)
       case qe: QueryError => throw qe.t
     }
   }

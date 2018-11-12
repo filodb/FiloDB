@@ -1,5 +1,7 @@
 package filodb.core.memstore
 
+import scala.collection.mutable.ArrayBuffer
+
 import com.typesafe.config.ConfigFactory
 import monix.execution.Scheduler.Implicits.global
 import org.scalatest.{BeforeAndAfterAll, FunSpec, Matchers}
@@ -8,7 +10,10 @@ import org.scalatest.time.{Millis, Seconds, Span}
 
 import filodb.core.MetricsTestData.{builder, timeseriesDataset}
 import filodb.core.TestData
-import filodb.core.query.{ColumnFilter, Filter}
+import filodb.core.binaryrecord2.RecordSchema
+import filodb.core.metadata.Column.ColumnType
+import filodb.core.metadata.Column.ColumnType.{MapColumn, StringColumn}
+import filodb.core.query.{ColumnFilter, Filter, SeqMapConsumer}
 import filodb.core.store.{InMemoryMetaStore, NullColumnStore}
 import filodb.memory.format.{SeqRowReader, ZeroCopyUTF8String}
 
@@ -24,7 +29,7 @@ class TimeSeriesMemStoreForMetadataSpec extends FunSpec with Matchers with Scala
   val partKeyLabelValues = Map("__name__"->"http_req_total", "job"->"myCoolService", "instance"->"someHost:8787")
   val metadataKeyLabelValues = Map("ignore" -> "ignore")
   val jobQueryResult1 = Map(("job".utf8, "myCoolService".utf8))
-  val jobQueryResult2 = Map(("__name__".utf8, "http_req_total".utf8),
+  val jobQueryResult2 = ArrayBuffer(("__name__".utf8, "http_req_total".utf8),
     ("instance".utf8, "someHost:8787".utf8),
     ("job".utf8, "myCoolService".utf8))
 
@@ -50,11 +55,18 @@ class TimeSeriesMemStoreForMetadataSpec extends FunSpec with Matchers with Scala
     import ZeroCopyUTF8String._
     val filters = Seq (ColumnFilter("__name__", Filter.Equals("http_req_total".utf8)),
       ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
-
-    val metadata = memStore.metadata(timeseriesDataset.ref, 0, filters, Seq.empty, now, now - 5000)
-
+    val metadata = memStore.indexValuesWithFilters(timeseriesDataset.ref, 0, filters, Option.empty, now, now - 5000)
+    val schema = new RecordSchema(Seq(ColumnType.MapColumn))
     metadata.size shouldEqual 1
-    metadata.head shouldEqual jobQueryResult2
+    val seqMapConsumer = new SeqMapConsumer()
+    val record = metadata.head
+    val result = (schema.columnTypes.map(columnType => columnType match {
+      case StringColumn => record.toString
+      case MapColumn => schema.consumeMapItems(record.base, record.offset, 0, seqMapConsumer)
+        seqMapConsumer.pairs
+      case _ => ???
+    }))
+    result.head shouldEqual jobQueryResult2
   }
 
   it ("should read the metadata label values for instance") {
@@ -62,10 +74,11 @@ class TimeSeriesMemStoreForMetadataSpec extends FunSpec with Matchers with Scala
     val filters = Seq (ColumnFilter("__name__", Filter.Equals("http_req_total".utf8)),
       ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
 
-    val metadata = memStore.metadata(timeseriesDataset.ref, 0, filters, Seq("instance"), now, now - 5000)
+    val metadata = memStore.indexValuesWithFilters(timeseriesDataset.ref, 0,
+      filters, Option("instance"), now, now - 5000)
 
     metadata.size shouldEqual 1
-    metadata.head.get("instance".utf8).get.toString shouldEqual "someHost:8787"
+    metadata.head.toString shouldEqual "someHost:8787"
   }
 
 }

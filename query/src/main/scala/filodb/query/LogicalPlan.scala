@@ -38,9 +38,12 @@ case class RawSeries(rangeSelector: RangeSelector,
                      columns: Seq[String]) extends RawSeriesPlan
 
 
-case class Metadata(rawSeries: RawSeries,
-                    start: Long,
-                    end: Long) extends MetadataQueryPlan
+case class LabelValues(labelName: String,
+                       filters: Seq[ColumnFilter]) extends MetadataQueryPlan
+
+case class SeriesKeysByFilters(filters: Seq[ColumnFilter],
+                               start: Long,
+                               end: Long) extends MetadataQueryPlan
 
 /**
  * Concrete logical plan to query for chunk metadata from raw time series in a given range

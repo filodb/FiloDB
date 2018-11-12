@@ -25,7 +25,7 @@ class BinaryJoinExecSpec extends FunSpec with Matchers with ScalaFutures {
   val error = 0.00000001d
 
   val dummyDispatcher = new PlanDispatcher {
-    override def dispatch(plan: RootExecPlan)
+    override def dispatch(plan: BaseExecPlan)
                          (implicit sched: ExecutionContext,
                           timeout: FiniteDuration): Task[QueryResponse] = ???
   }

@@ -1,6 +1,5 @@
 package filodb.core.memstore
 
-import scala.collection.mutable.Set
 import scala.concurrent.Future
 
 import monix.execution.{CancelableFuture, Scheduler}
@@ -143,8 +142,8 @@ trait MemStore extends ChunkSource {
    */
   def indexValues(dataset: DatasetRef, shard: Int, indexName: String, topK: Int = 100): Seq[TermInfo]
 
-  def metadata(dataset: DatasetRef, shard: Int, filters: Seq[ColumnFilter],
-               columns: Seq[String], end: Long, start: Long): Set[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]]
+  def indexValuesWithFilters(dataset: DatasetRef, shard: Int, filters: Seq[ColumnFilter],
+                          column: Option[String], end: Long, start: Long): List[ZeroCopyUTF8String]
 
   /**
    * Returns the number of partitions being maintained in the memtable for a given shard

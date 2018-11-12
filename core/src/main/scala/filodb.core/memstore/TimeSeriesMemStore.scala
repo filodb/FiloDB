@@ -1,6 +1,6 @@
 package filodb.core.memstore
 
-import scala.collection.mutable.{HashMap, Set}
+import scala.collection.mutable.HashMap
 import scala.concurrent.{ExecutionContext, Future}
 
 import com.typesafe.config.Config
@@ -140,9 +140,9 @@ extends MemStore with StrictLogging {
   def indexValues(dataset: DatasetRef, shard: Int, indexName: String, topK: Int = 100): Seq[TermInfo] =
     getShard(dataset, shard).map(_.indexValues(indexName, topK)).getOrElse(Nil)
 
-  def metadata(dataset: DatasetRef, shard: Int, filters: Seq[ColumnFilter],
-               columns: Seq[String], end: Long, start: Long): Set[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]] =
-    getShard(dataset, shard).map(_.metadata(filters, columns, start, end)).getOrElse(Set.empty)
+  def indexValuesWithFilters(dataset: DatasetRef, shard: Int, filters: Seq[ColumnFilter],
+                          column: Option[String], end: Long, start: Long): List[ZeroCopyUTF8String] =
+    getShard(dataset, shard).map(_.indexValuesWithFilters(filters, column, end, start)).getOrElse(List.empty)
 
   def numPartitions(dataset: DatasetRef, shard: Int): Int =
     getShard(dataset, shard).map(_.numActivePartitions).getOrElse(-1)

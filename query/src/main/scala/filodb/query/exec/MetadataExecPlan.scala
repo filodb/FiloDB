@@ -1,7 +1,5 @@
 package filodb.query.exec
 
-import scala.collection.mutable
-import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.duration.FiniteDuration
 import scala.util.control.NonFatal
 
@@ -10,6 +8,7 @@ import monix.execution.Scheduler
 import monix.reactive.Observable
 
 import filodb.core.DatasetRef
+import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.memstore.MemStore
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.Dataset
@@ -22,27 +21,13 @@ import filodb.query.Query.qLogger
 /**
   * Metadata query execution plan
   */
-trait MetadataExecPlan extends RootExecPlan {
+trait MetadataExecPlan extends BaseExecPlan {
 
-  /**
-    * The list of RangeVector transformations that will be done
-    * after the doExecute method results are obtained. This
-    * can be used to perform data transformations closer to the
-    * source node and minimize data movement over the wire.
-    */
-  val rangeVectorTransformers = new ArrayBuffer[RangeVectorTransformer]()
-
-  final def addRangeVectorTransformer(mapper: RangeVectorTransformer): Unit = {
-    rangeVectorTransformers += mapper
-  }
 
   /**
     * Schema of QueryResponse returned by running execute()
     */
-  final def schema(dataset: Dataset): ResultSchema = {
-    val source = schemaOfDoExecute(dataset)
-    rangeVectorTransformers.foldLeft(source) { (acc, transf) => transf.schema(dataset, acc) }
-  }
+  def schema(dataset: Dataset): ResultSchema = ???
 
   /**
     * Facade for the metadata query execution orchestration of the plan sub-tree
@@ -63,13 +48,12 @@ trait MetadataExecPlan extends RootExecPlan {
                    (implicit sched: Scheduler,
                     timeout: FiniteDuration): Task[QueryResponse] = {
     try {
-      qLogger.debug(s"queryId: ${id} Started ExecPlan ${getClass.getSimpleName} with $args")
+      qLogger.debug(s"queryId: ${id} Started ExecPlan ${getClass.getSimpleName}")
       val res = doExecute(source, dataset, queryConfig)
-      val schema = schemaOfDoExecute(dataset)
       res
-        .toListL
+        .firstL
         .map(r => {
-          MetadataQueryResult(id, schema, r)
+          MetadataQueryResult(id, r)
         })
       .onErrorHandle { case ex: Throwable =>
         qLogger.error(s"queryId: ${id} Exception during execution of query: ${printTree()}", ex)
@@ -97,25 +81,18 @@ trait MetadataExecPlan extends RootExecPlan {
     * structure, useful for debugging
     */
   final def printTree(level: Int = 0): String = {
-    val transf = rangeVectorTransformers.reverse.zipWithIndex.map { case (t, i) =>
-      s"${"-"*(level + i)}T~${t.getClass.getSimpleName}(${t.args})"
-    }
-    val nextLevel = rangeVectorTransformers.size + level
-    val curNode = s"${"-"*nextLevel}E~${getClass.getSimpleName}($args) on ${dispatcher}"
+    val nextLevel = level
+    val curNode = s"${"-"*nextLevel}E~${getClass.getSimpleName} on ${dispatcher}"
     val childr = children.map(_.printTree(nextLevel + 1))
-    ((transf :+ curNode) ++ childr).mkString("\n")
+    (curNode ++ childr).mkString("\n")
   }
 }
 
 final case class NonLeafMetadataExecPlan(id: String,
                                          dispatcher: PlanDispatcher,
-                                         children: Seq[RootExecPlan]) extends MetadataExecPlan {
+                                         children: Seq[BaseExecPlan]) extends MetadataExecPlan {
 
   require(!children.isEmpty)
-
-  protected def args: String = ""
-
-  protected def schemaOfCompose(dataset: Dataset): ResultSchema = children.head.schema(dataset)
 
   /**
     * For now we do not support cross-dataset queries
@@ -154,38 +131,38 @@ final case class NonLeafMetadataExecPlan(id: String,
                         queryConfig: QueryConfig)(implicit sched: Scheduler,
                                                   timeout: FiniteDuration): Observable[RangeVector] = {
     qLogger.debug(s"NonLeafMetadataExecPlan: Concatenating results")
-    var responses = new ArrayBuffer[RangeVector]()
     val taskOfResults = childResponses.map {
-      case MetadataQueryResult(_, _, result) => result
+      case MetadataQueryResult(_, result) => result
       case QueryError(_, ex)         => throw ex
     }.toListL.map { resp =>
-      val rowKey = resp.head.head.key
-      val resultMetadata = new mutable.HashSet[Map[UTF8Str, UTF8Str]]()
-      resp.flatten.foreach(rv => {
+      var metadataResult = Seq.empty[UTF8Str]
+      // extract record schema from the first record - since schema is same for all the leaf results
+      val schema = resp.head match {
+        case RecordList(records, schema) => schema
+      }
+      resp.foreach(rv => {
         rv match {
-          case MetadataRangeVector(_, metadata) => resultMetadata ++= metadata
+          case RecordList(records, _) => metadataResult ++= records
         }
       })
-      MetadataRangeVector(rowKey, resultMetadata)
+      RecordList(metadataResult.distinct.toList, schema) //distinct -> result may have duplicates in case of labelValues
     }
     Observable.fromTask(taskOfResults)
   }
 
-  final protected def schemaOfDoExecute(dataset: Dataset): ResultSchema = schemaOfCompose(dataset)
-
 }
 
 
-final case class  MetadataExecLeafPlan(id: String,
-                                         submitTime: Long,
-                                         limit: Int,
-                                         dispatcher: PlanDispatcher,
-                                         dataset: DatasetRef,
-                                         shard: Int,
-                                         filters: Seq[ColumnFilter],
-                                         start: Long,
-                                         end: Long,
-                                         columns: Seq[String]) extends MetadataExecPlan {
+final case class  SeriesKeyExecLeafPlan(id: String,
+                                        submitTime: Long,
+                                        limit: Int,
+                                        dispatcher: PlanDispatcher,
+                                        dataset: DatasetRef,
+                                        shard: Int,
+                                        filters: Seq[ColumnFilter],
+                                        start: Long,
+                                        end: Long,
+                                        columns: Seq[String]) extends MetadataExecPlan {
 
   final def children: Seq[ExecPlan] = Nil
 
@@ -197,21 +174,45 @@ final case class  MetadataExecLeafPlan(id: String,
 
     if (source.isInstanceOf[MemStore]) {
       var memStore = source.asInstanceOf[MemStore]
-      val response = memStore.metadata(dataset, shard, filters, columns, end, start)
-      val keysMap = Map(UTF8Str("ignore") -> UTF8Str("ignore"))
-      Observable(MetadataRangeVector(CustomRangeVectorKey(keysMap), response))
+      val response = memStore.indexValuesWithFilters(dataset, shard, filters, Option.empty, end, start)
+      Observable(RecordList(response, new RecordSchema(Seq(ColumnType.MapColumn))))
     } else {
       Observable.empty
     }
   }
+}
 
-  protected def args: String = s"shard=$shard, filters=$filters"
+final case class  LabelValuesExecLeafPlan(id: String,
+                                        submitTime: Long,
+                                        limit: Int,
+                                        dispatcher: PlanDispatcher,
+                                        dataset: DatasetRef,
+                                        shard: Int,
+                                        filters: Seq[ColumnFilter],
+                                        column: String) extends MetadataExecPlan {
 
-  /**
-    * Sub classes should implement this with schema of RangeVectors returned
-    * from doExecute() abstract method.
-    */
-  override protected def schemaOfDoExecute(dataset: Dataset): ResultSchema =
-    ResultSchema(Seq(ColumnInfo("ignore", ColumnType.MapColumn)), 1)
+  final def lookBackInMillis: Long = 86400000 // (24hrs) TODO get from configuration
+  final def children: Seq[ExecPlan] = Nil
+
+  protected def doExecute(source: ChunkSource,
+                          dataset1: Dataset,
+                          queryConfig: QueryConfig)
+                         (implicit sched: Scheduler,
+                          timeout: FiniteDuration): Observable[RangeVector] = {
+
+    if (source.isInstanceOf[MemStore]) {
+      var memStore = source.asInstanceOf[MemStore]
+      val curr = System.currentTimeMillis()
+      val end = curr - curr % 1000 // round to the floor second
+      val start = end - lookBackInMillis
+      val response = filters.isEmpty match {
+        case true => memStore.indexValues(dataset, shard, column).map(_.term).toList
+        case false => memStore.indexValuesWithFilters(dataset, shard, filters, Option(column), end, start)
+      }
+      Observable(RecordList(response, new RecordSchema(Seq(ColumnType.StringColumn))))
+    } else {
+      Observable.empty
+    }
+  }
 
 }

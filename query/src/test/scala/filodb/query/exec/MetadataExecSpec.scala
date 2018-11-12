@@ -1,5 +1,6 @@
 package filodb.query.exec
 
+import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.ExecutionContext
 import scala.concurrent.duration._
 
@@ -13,7 +14,8 @@ import org.scalatest.time.{Millis, Seconds, Span}
 import filodb.core.MetricsTestData._
 import filodb.core.TestData
 import filodb.core.memstore.{FixedMaxPartitionsEvictionPolicy, SomeData, TimeSeriesMemStore}
-import filodb.core.query.{ColumnFilter, Filter}
+import filodb.core.metadata.Column.ColumnType.{MapColumn, StringColumn}
+import filodb.core.query.{ColumnFilter, Filter, RecordList, SeqMapConsumer}
 import filodb.core.store.{InMemoryMetaStore, NullColumnStore}
 import filodb.memory.format.{SeqRowReader, ZeroCopyUTF8String}
 import filodb.query._
@@ -29,9 +31,8 @@ class MetadataExecSpec extends FunSpec with Matchers with ScalaFutures with Befo
   val memStore = new TimeSeriesMemStore(config, new NullColumnStore, new InMemoryMetaStore(), Some(policy))
 
   val partKeyLabelValues = Map("__name__"->"http_req_total", "job"->"myCoolService", "instance"->"someHost:8787")
-  val metadataKeyLabelValues = Map("ignore" -> "ignore")
-  val jobQueryResult1 = Map(("job".utf8, "myCoolService".utf8))
-  val jobQueryResult2 = Map(("__name__".utf8, "http_req_total".utf8),
+  val jobQueryResult1 = List("myCoolService")
+  val jobQueryResult2 = ArrayBuffer(("__name__".utf8, "http_req_total".utf8),
     ("instance".utf8, "someHost:8787".utf8),
     ("job".utf8, "myCoolService".utf8))
 
@@ -56,7 +57,7 @@ class MetadataExecSpec extends FunSpec with Matchers with ScalaFutures with Befo
   }
 
   val dummyDispatcher = new PlanDispatcher {
-    override def dispatch(plan: RootExecPlan)
+    override def dispatch(plan: BaseExecPlan)
                          (implicit sched: ExecutionContext,
                           timeout: FiniteDuration): Task[QueryResponse] = ???
   }
@@ -66,16 +67,26 @@ class MetadataExecSpec extends FunSpec with Matchers with ScalaFutures with Befo
     val filters = Seq (ColumnFilter("__name__", Filter.Equals("http_req_total".utf8)),
                        ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
 
-    val execPlan = MetadataExecLeafPlan("someQueryId", now, numRawSamples, dummyDispatcher,
-      timeseriesDataset.ref, 0, filters, now-5000, now, Seq("job"))
+    val execPlan = LabelValuesExecLeafPlan("someQueryId", now, numRawSamples, dummyDispatcher,
+      timeseriesDataset.ref, 0, filters, "job")
 
     val resp = execPlan.execute(memStore, timeseriesDataset, queryConfig).runAsync.futureValue
-    val result = resp.asInstanceOf[MetadataQueryResult]
-    result.result(0).rows.size shouldEqual 1
-    val partKeyRead = result.result(0).key.labelValues.map(lv => (lv._1.asNewString, lv._2.asNewString))
-    partKeyRead shouldEqual metadataKeyLabelValues
-    val dataRead = result.result(0).rows.map(r=>(r.getAny(0))).toList
-    dataRead shouldEqual List(jobQueryResult1)
+    val result = resp match {
+      case MetadataQueryResult(id, response) => {
+        response.rows.size shouldEqual 1
+        val recordList = response.asInstanceOf[RecordList]
+        val record = response.rows.next()
+        val seqMapConsumer = new SeqMapConsumer()
+        recordList.schema.columnTypes.map(columnType => columnType match {
+          case StringColumn => record.getString(0)
+          case MapColumn => recordList.schema.consumeMapItems(record.getBlobBase(0),
+            record.getBlobOffset(0), 0, seqMapConsumer)
+            seqMapConsumer.pairs
+          case _ => ???
+        })
+      }
+    }
+    result shouldEqual jobQueryResult1
   }
 
 
@@ -84,12 +95,12 @@ class MetadataExecSpec extends FunSpec with Matchers with ScalaFutures with Befo
     val filters = Seq (ColumnFilter("__name__", Filter.Equals("http_req_total1".utf8)),
       ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
 
-    val execPlan = MetadataExecLeafPlan("someQueryId", now, numRawSamples, dummyDispatcher,
+    val execPlan = SeriesKeyExecLeafPlan("someQueryId", now, numRawSamples, dummyDispatcher,
       timeseriesDataset.ref, 0, filters, now-5000, now, Seq.empty)
 
     val resp = execPlan.execute(memStore, timeseriesDataset, queryConfig).runAsync.futureValue
     val result = resp.asInstanceOf[MetadataQueryResult]
-    result.result(0).rows.size shouldEqual 0
+    result.result.rows.size shouldEqual 0
   }
 
   it ("should read the label names/values from timeseriesindex matching the columnfilters") {
@@ -97,17 +108,26 @@ class MetadataExecSpec extends FunSpec with Matchers with ScalaFutures with Befo
     val filters = Seq (ColumnFilter("__name__", Filter.Equals("http_req_total".utf8)),
       ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
 
-    val execPlan = MetadataExecLeafPlan("someQueryId", now, numRawSamples, dummyDispatcher,
+    val execPlan = SeriesKeyExecLeafPlan("someQueryId", now, numRawSamples, dummyDispatcher,
       timeseriesDataset.ref, 0, filters, now-5000, now, Seq.empty)
 
     val resp = execPlan.execute(memStore, timeseriesDataset, queryConfig).runAsync.futureValue
-    val result = resp.asInstanceOf[MetadataQueryResult]
-    result.result(0).rows.size shouldEqual 1
-    val partKeyRead = result.result(0).key.labelValues.map(lv => (lv._1.asNewString, lv._2.asNewString))
-    partKeyRead shouldEqual metadataKeyLabelValues
-    val dataRead = result.result(0).rows.map(r=>(r.getAny(0)))
-      .toList(0)
-    dataRead shouldEqual jobQueryResult2
+    val result = resp match {
+      case MetadataQueryResult(id, response) => {
+        response.rows.size shouldEqual 1
+        val recordList = response.asInstanceOf[RecordList]
+        val record = response.rows.next()
+        val seqMapConsumer = new SeqMapConsumer()
+        recordList.schema.columnTypes.map(columnType => columnType match {
+          case StringColumn => record.getString(0)
+          case MapColumn => recordList.schema.consumeMapItems(record.getBlobBase(0),
+            record.getBlobOffset(0), 0, seqMapConsumer)
+            seqMapConsumer.pairs
+          case _ => ???
+        })
+      }
+    }
+    result shouldEqual List(jobQueryResult2)
   }
 
 }

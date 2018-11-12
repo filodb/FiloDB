@@ -5,7 +5,7 @@ import java.sql.Timestamp
 import javax.activation.UnsupportedDataTypeException
 
 import scala.concurrent.duration._
-import scala.util.{Failure, Success => SSuccess, Try}
+import scala.util.{Failure, Try, Success => SSuccess}
 
 import com.opencsv.CSVWriter
 import com.quantifind.sumac.{ArgMain, FieldArgs}
@@ -16,12 +16,13 @@ import filodb.coordinator._
 import filodb.coordinator.client._
 import filodb.core._
 import filodb.core.metadata.{Column, Dataset, DatasetOptions}
+import filodb.core.metadata.Column.ColumnType.{MapColumn, StringColumn}
+import filodb.core.query.{RecordList, SeqMapConsumer}
 import filodb.core.store._
 import filodb.memory.format.RowReader
 import filodb.prometheus.ast.{MetadataQueryParams, QueryParams}
 import filodb.prometheus.parse.Parser
-import filodb.query.{LogicalPlan => LogicalPlan2, MetadataQueryResult,
-  QueryError => QueryError2, QueryResult => QueryResult2}
+import filodb.query.{MetadataQueryResult, LogicalPlan => LogicalPlan2, QueryError => QueryError2, QueryResult => QueryResult2}
 
 // scalastyle:off
 class Arguments extends FieldArgs {
@@ -331,14 +332,14 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
   def parseMetadataQuery(client: LocalClient, query: String, dataset: String,
                          queryParams: MetadataQueryParams,
                          options: QOptions): Unit = {
-    val logicalPlan = Parser.metadataQueryRangeToLogicalPlan(query, queryParams)
+    val logicalPlan = Parser.metadataQueryToLogicalPlan(query, queryParams)
     executeQuery2(client, dataset, logicalPlan, options)
   }
 
   def parseMetadataLabelValuesQuery(client: LocalClient, query: String, dataset: String,
                          queryParams: MetadataQueryParams,
                          options: QOptions): Unit = {
-    val logicalPlan = Parser.metadataLabelValuesQueryRangeToLogicalPlan(query, queryParams)
+    val logicalPlan = Parser.metadataQueryToLogicalPlan(query, queryParams)
     executeQuery2(client, dataset, logicalPlan, options)
   }
 
@@ -375,9 +376,18 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
               println(s"Number of Range Vectors: ${result.size}")
               result.foreach(rv => println(rv.prettyPrint(schema)))
             }
-            case MetadataQueryResult(_, schema, result) => {
-              println(s"Number of Range Vectors Hello: ${result.size}")
-              result.foreach(rv => println(rv.prettyPrint(schema)))
+            case MetadataQueryResult(_, result) => {
+              result match {
+                case r: RecordList => r.rows.foreach(record => {
+                  val seqMapConsumer = new SeqMapConsumer()
+                  println(r.schema.columnTypes.map(columnType => columnType match {
+                    case StringColumn => record.getString(0)
+                    case MapColumn => r.schema.consumeMapItems(record.getBlobBase(0), record.getBlobOffset(0), 0, seqMapConsumer)
+                      seqMapConsumer.pairs
+                    case _ => ???
+                  }))
+                })
+              }
             }
             case QueryError2(_,ex)               => println(s"ERROR: ${ex.getMessage}")
           }

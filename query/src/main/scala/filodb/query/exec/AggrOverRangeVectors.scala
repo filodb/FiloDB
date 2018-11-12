@@ -21,10 +21,10 @@ import filodb.query.AggregationOperator._
   */
 final case class ReduceAggregateExec(id: String,
                                      dispatcher: PlanDispatcher,
-                                     childAggregates: Seq[RootExecPlan],
+                                     childAggregates: Seq[BaseExecPlan],
                                      aggrOp: AggregationOperator,
                                      aggrParams: Seq[Any]) extends NonLeafExecPlan {
-  def children: Seq[RootExecPlan] = childAggregates
+  def children: Seq[BaseExecPlan] = childAggregates
 
   protected def schemaOfCompose(dataset: Dataset): ResultSchema = childAggregates.head.schema(dataset)
 

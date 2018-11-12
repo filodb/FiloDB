@@ -15,7 +15,7 @@ import filodb.core.store.ChunkSource
 import filodb.query._
 import filodb.query.Query.qLogger
 
-trait RootExecPlan extends QueryCommand {
+trait BaseExecPlan extends QueryCommand {
   /**
     * The dispatcher is used to dispatch the ExecPlan
     * to the node where it will be executed. The Query Engine
@@ -26,7 +26,7 @@ trait RootExecPlan extends QueryCommand {
   /**
     * Child execution plans representing sub-queries
     */
-  def children: Seq[RootExecPlan]
+  def children: Seq[BaseExecPlan]
 
   /**
     * The query id
@@ -70,19 +70,6 @@ trait RootExecPlan extends QueryCommand {
              (implicit sched: Scheduler,
               timeout: FiniteDuration): Task[QueryResponse]
 
-  def addRangeVectorTransformer(mapper: RangeVectorTransformer): Unit
-
-  /**
-    * Sub classes should implement this with schema of RangeVectors returned
-    * from doExecute() abstract method.
-    */
-  protected def schemaOfDoExecute(dataset: Dataset): ResultSchema
-
-  /**
-    * Args to use for the ExecPlan for printTree purposes only.
-    * DO NOT change to a val. Increases heap usage.
-    */
-  protected def args: String
 }
 
 /**
@@ -100,7 +87,7 @@ trait RootExecPlan extends QueryCommand {
   * Convention is for all concrete subclasses of ExecPlan to
   * end with 'Exec' for easy identification
   */
-trait ExecPlan extends RootExecPlan {
+trait ExecPlan extends BaseExecPlan {
 
   /**
     * The list of RangeVector transformations that will be done
@@ -121,6 +108,18 @@ trait ExecPlan extends RootExecPlan {
     val source = schemaOfDoExecute(dataset)
     rangeVectorTransformers.foldLeft(source) { (acc, transf) => transf.schema(dataset, acc) }
   }
+
+  /**
+    * Sub classes should implement this with schema of RangeVectors returned
+    * from doExecute() abstract method.
+    */
+  protected def schemaOfDoExecute(dataset: Dataset): ResultSchema
+
+  /**
+    * Args to use for the ExecPlan for printTree purposes only.
+    * DO NOT change to a val. Increases heap usage.
+    */
+  protected def args: String
 
   /**
     * Facade for the execution orchestration of the plan sub-tree

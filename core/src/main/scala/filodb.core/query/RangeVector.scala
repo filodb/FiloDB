@@ -1,6 +1,6 @@
 package filodb.core.query
 
-import scala.collection.mutable.Set
+import scala.collection.mutable
 
 import kamon.Kamon
 import org.joda.time.DateTime
@@ -11,7 +11,7 @@ import filodb.core.metadata.Column
 import filodb.core.metadata.Column.ColumnType._
 import filodb.core.store.{ChunkInfoRowReader, ChunkScanMethod, ReadablePartition}
 import filodb.memory.{MemFactory, UTF8StringMedium}
-import filodb.memory.format.{RowReader, SeqMetadataRowReader, ZeroCopyUTF8String => UTF8Str}
+import filodb.memory.format.{RowReader, SeqRecordRowReader, ZeroCopyUTF8String => UTF8Str}
 
 /**
   * Identifier for a single RangeVector
@@ -31,13 +31,13 @@ class SeqMapConsumer extends MapItemConsumer {
   }
 }
 
-class SeqMapMetadataConsumer(columns: Seq[String]) extends MapItemConsumer {
-  val pairs = new collection.mutable.ArrayBuffer[(UTF8Str, UTF8Str)]
+class SeqIndexValueConsumer(column: String) extends MapItemConsumer {
+  var labelValues = mutable.HashSet[UTF8Str]() //to gather unique label values
   def consume(keyBase: Any, keyOffset: Long, valueBase: Any, valueOffset: Long, index: Int): Unit = {
     val keyUtf8 = new UTF8Str(keyBase, keyOffset + 2, UTF8StringMedium.numBytes(keyBase, keyOffset))
-    val valUtf8 = new UTF8Str(valueBase, valueOffset + 2, UTF8StringMedium.numBytes(valueBase, valueOffset))
-    if (columns.isEmpty || columns.contains(keyUtf8.toString)) {
-      pairs += (keyUtf8 -> valUtf8)
+    if (column.equals(keyUtf8.toString)) {
+      val valUtf8 = new UTF8Str(valueBase, valueOffset + 2, UTF8StringMedium.numBytes(valueBase, valueOffset))
+      labelValues += valUtf8
     }
   }
 }
@@ -139,9 +139,10 @@ final case class ChunkInfoRangeVector(key: RangeVectorKey,
   }
 }
 
-final case class MetadataRangeVector(key: RangeVectorKey, metadata: Set[Map[UTF8Str, UTF8Str]])
+final case class RecordList(records: List[UTF8Str], schema: RecordSchema)
     extends RangeVector with java.io.Serializable {
-  def rows: Iterator[RowReader] = new SeqMetadataRowReader(metadata)
+  def rows: Iterator[RowReader] = new SeqRecordRowReader(records)
+  override def key: RangeVectorKey = new CustomRangeVectorKey(Map.empty) // ignore - not used
 }
 
 /**

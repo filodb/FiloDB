@@ -143,28 +143,28 @@ trait Vectors extends Scalars with TimeUnits with Base {
     }
   }
 
-  case class MetadataExpression(metricOrIndexName: String,
-                               labelSelection: Seq[LabelMatch],
-                                isIndexNamesQuery: Boolean = false) extends Vector with Metadata {
+  case class SeriesKeysExpression(metricName: String,
+                                  labelSelection: Seq[LabelMatch]) extends Vector with Metadata {
     private val columns: ArrayBuffer[String] = new ArrayBuffer[String]()
     private[prometheus] val columnFilters: ArrayBuffer[ColumnFilter] = new ArrayBuffer[ColumnFilter]()
-    if (isIndexNamesQuery) {
-      columns += metricOrIndexName
-    } else {
-      val nameLabels = labelSelection.filter(_.label == "__name__")
-      if (nameLabels.nonEmpty && !nameLabels.head.label.equals(metricOrIndexName)) {
-        throw new IllegalArgumentException("Metric name should not be set twice")
-      }
-      columnFilters += ColumnFilter("__name__", query.Filter.Equals(metricOrIndexName))
-    }
 
+    val nameLabels = labelSelection.filter(_.label == "__name__")
+    if (nameLabels.nonEmpty && !nameLabels.head.label.equals(metricName)) {
+      throw new IllegalArgumentException("Metric name should not be set twice")
+    }
+    columnFilters += ColumnFilter("__name__", query.Filter.Equals(metricName))
     columnFilters ++= labelMatchesToFilters(labelSelection)
 
-    override def toMetadataQueryPlan(queryParams: MetadataQueryParams): MetadataQueryPlan = {
-      Metadata(RawSeries(IntervalSelector(Seq(queryParams.start * 1000),
-        Seq(queryParams.end * 1000)), columnFilters, columns),
-        queryParams.start * 1000, queryParams.end * 1000)
-    }
+    override def toMetadataQueryPlan(queryParams: MetadataQueryParams): MetadataQueryPlan =
+      SeriesKeysByFilters(columnFilters, queryParams.start * 1000, queryParams.end * 1000)
+  }
+
+  case class LabelValuesExpression(labelName: String,
+                                  labelSelection: Seq[LabelMatch]) extends Vector with Metadata {
+    private[prometheus] val columnFilters: ArrayBuffer[ColumnFilter] = new ArrayBuffer[ColumnFilter]()
+    columnFilters ++= labelMatchesToFilters(labelSelection)
+    override def toMetadataQueryPlan(queryParams: MetadataQueryParams): MetadataQueryPlan =
+      LabelValues(labelName, columnFilters)
   }
 
   /**

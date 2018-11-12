@@ -1,6 +1,7 @@
 package filodb.core.memstore
 
-import scala.collection.mutable.{HashSet, Set}
+import scala.collection.mutable
+import scala.collection.mutable.Set
 import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.concurrent.duration._
 import scala.util.{Random, Try}
@@ -21,7 +22,7 @@ import filodb.core.{ErrorResponse, _}
 import filodb.core.binaryrecord2._
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.Dataset
-import filodb.core.query.{ColumnFilter, SeqMapMetadataConsumer}
+import filodb.core.query.{ColumnFilter, SeqIndexValueConsumer}
 import filodb.core.store._
 import filodb.memory._
 import filodb.memory.data.{OffheapLFSortedIDMap, OffheapLFSortedIDMapMutator}
@@ -453,27 +454,29 @@ class TimeSeriesShard(val dataset: Dataset,
 
   def indexValues(indexName: String, topK: Int): Seq[TermInfo] = partKeyIndex.indexValues(indexName, topK)
 
-  def metadata(filter: Seq[ColumnFilter], columns: Seq[String], startTime: Long, endTime: Long):
-          Set[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]] = {
-    val result = new HashSet[Map[ZeroCopyUTF8String, ZeroCopyUTF8String]]
-    if (filter.isEmpty) {
-      columns.foreach(column => {
-        result += partKeyIndex.indexValues(column, 1000)
-          .map(termInfo => (ZeroCopyUTF8String(column) -> termInfo.term))
-          .toMap // For unique results - as terms can have duplicate entries
-        })
-    } else {
-      //TODO get the limit from config
-      val partIterator = partKeyIndex.partIdsFromFilters(filter, startTime, endTime, 1000)
-      while (partIterator.hasNext) {
-        val nextPartID = partIterator.next
-        val nextPart = partitions.get(nextPartID)
-        val consumer = new SeqMapMetadataConsumer(columns)
-        dataset.partKeySchema.consumeMapItems(nextPart.partKeyBase, nextPart.partKeyOffset, 0, consumer)
-        result += consumer.pairs.map(pair => (pair._1 -> pair._2)).toMap
+  def indexValuesWithFilters(filter: Seq[ColumnFilter], column: Option[String], endTime: Long, startTime: Long):
+          List[ZeroCopyUTF8String] = {
+    val result: Set[ZeroCopyUTF8String] = new mutable.HashSet[ZeroCopyUTF8String]()
+    val partIterator = partKeyIndex.partIdsFromFilters(filter, startTime, endTime)
+    while(partIterator.hasNext && result.size < 1000) { //TODO get the limit from config
+      val nextPartID = partIterator.next
+      var nextPart = partitions.get(nextPartID)
+      if (nextPart == UnsafeUtils.ZeroPointer) {
+        partKeyIndex.partKeyFromPartId(nextPartID)
+          .map(partKey => getPartition(partKey.bytes)
+            .map(tsp => nextPart = tsp))
+      }
+      if(column.isDefined) {
+        val consumer = new SeqIndexValueConsumer(column.get)
+        partKeyIndex.partKeyFromPartId(nextPartID)
+          .map(partKey => getPartition(partKey.bytes)
+            .map(tsp => dataset.partKeySchema.consumeMapItems(tsp.partKeyBase, tsp.partKeyOffset, 0, consumer)))
+        result ++= consumer.labelValues
+      } else {
+        result += ZeroCopyUTF8String(nextPart.partKeyBytes)
       }
     }
-    result
+    result.toList
   }
 
   /**

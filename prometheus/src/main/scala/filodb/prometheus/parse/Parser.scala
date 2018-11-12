@@ -19,6 +19,10 @@ trait BaseParser extends Expressions with JavaTokenParsers with RegexParsers wit
     "[a-zA-Z_][a-zA-Z0-9_:|`~!@$#%^&*()s+=?><:;{}-]*".r ^^ { str => Identifier(str) }
   }
 
+  lazy val indexKey: PackratParser[Identifier] = {
+    "label\\=".r ^^ { str => Identifier(str) }
+  }
+
   protected lazy val quotedSeries: PackratParser[Identifier] =
     "([\"'])(?:\\\\\\1|.)*?\\1".r ^^ { str =>  Identifier(str.substring(1, str.size-1)) } //remove quotes
 
@@ -203,16 +207,16 @@ trait Selector extends Operator with Unit with BaseParser {
       InstantExpression(metricName.str, ls.getOrElse(Seq.empty), opt.map(_.duration))
   }
 
-  lazy val metadataSelector: PackratParser[MetadataExpression]
+  lazy val metadataSelector: PackratParser[SeriesKeysExpression]
   = labelIdentifier ~ labelSelection.? ^^ {
     case metricName ~ ls =>
-      MetadataExpression(metricName.str, ls.getOrElse(Seq.empty))
+      SeriesKeysExpression(metricName.str, ls.getOrElse(Seq.empty))
   }
 
-  lazy val metadataLabelSelector: PackratParser[MetadataExpression]
-  = labelIdentifier ~ labelSelection.? ^^ {
-    case labelName ~ ls =>
-      MetadataExpression(labelName.str, ls.getOrElse(Seq.empty), true)
+  lazy val metadataLabelSelector: PackratParser[LabelValuesExpression]
+  = indexKey ~ labelIdentifier ~ labelSelection.? ^^ {
+    case ignore ~ labelName ~ ls =>
+      LabelValuesExpression(labelName.str, ls.getOrElse(Seq.empty))
   }
 
   lazy val rangeVectorSelector: PackratParser[RangeExpression] =
@@ -302,6 +306,8 @@ trait Expression extends Aggregates with Selector with Numeric with Join {
       )
     }
 
+  lazy val metadataExpression: PackratParser[Expression] = metadataLabelSelector | metadataSelector
+
   lazy val expression: PackratParser[Expression] =
     binaryExpression | aggregateExpression |
       function | unaryExpression | vector | numericalExpression | simpleSeries | "(" ~> expression <~ ")"
@@ -329,36 +335,21 @@ object Parser extends Expression {
   }
 
   def parseMetadataQuery(query: String): Expression = {
-    parseAll(metadataSelector, query) match {
+    parseAll(metadataExpression, query) match {
       case s: Success[_] => s.get.asInstanceOf[Expression]
       case e: Error => handleError(e, query)
       case f: Failure => handleFailure(f, query)
     }
   }
 
-  def parseMetadataLabelValuesQuery(query: String): Expression = {
-    parseAll(metadataLabelSelector, query) match {
-      case s: Success[_] => s.get.asInstanceOf[Expression]
-      case e: Error => handleError(e, query)
-      case f: Failure => handleFailure(f, query)
-    }
+  def metadataQueryToLogicalPlan(query: String): LogicalPlan = {
+    val queryParams = MetadataQueryParams(-1, -1)
+    metadataQueryToLogicalPlan(query, queryParams)
   }
 
-  def metadataQueryToLogicalPlan(query: String, queryTimestamp: Long): LogicalPlan = {
-    val defaultQueryParams = MetadataQueryParams(queryTimestamp, queryTimestamp)
-    metadataQueryRangeToLogicalPlan(query, defaultQueryParams)
-  }
-
-  def metadataQueryRangeToLogicalPlan(query: String, queryParams: MetadataQueryParams): LogicalPlan = {
+  def metadataQueryToLogicalPlan(query: String, queryParams: MetadataQueryParams): LogicalPlan = {
+    // MetadataQueryParams is used instead of QueryParams as it has step, which is not needed for Metadata Queries
     val expression = parseMetadataQuery(query)
-    expression match {
-      case p: Metadata => p.toMetadataQueryPlan(queryParams)
-      case _ => throw new UnsupportedOperationException()
-    }
-  }
-
-  def metadataLabelValuesQueryRangeToLogicalPlan(query: String, queryParams: MetadataQueryParams): LogicalPlan = {
-    val expression = parseMetadataLabelValuesQuery(query)
     expression match {
       case p: Metadata => p.toMetadataQueryPlan(queryParams)
       case _ => throw new UnsupportedOperationException()
