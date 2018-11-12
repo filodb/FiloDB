@@ -23,7 +23,7 @@ import filodb.core.store._
 import filodb.memory.format.RowReader
 import filodb.prometheus.ast.{MetadataQueryParams, QueryParams}
 import filodb.prometheus.parse.Parser
-import filodb.query.{RecordListResult, LogicalPlan => LogicalPlan2, QueryError => QueryError2, QueryResult => QueryResult2}
+import filodb.query.{QueryResult, RecordListResult, LogicalPlan, QueryError}
 
 // scalastyle:off
 class Arguments extends FieldArgs {
@@ -351,7 +351,7 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
     executeQuery2(client, dataset, logicalPlan, options)
   }
 
-  def executeQuery2(client: LocalClient, dataset: String, plan: LogicalPlan2, options: QOptions): Unit = {
+  def executeQuery2(client: LocalClient, dataset: String, plan: LogicalPlan, options: QOptions): Unit = {
     val ref = DatasetRef(dataset)
     val qOpts = QueryCommands.QueryOptions(options.spread, options.limit)
                              .copy(queryTimeoutSecs = options.timeout.toSeconds.toInt,
@@ -362,8 +362,8 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
       case Some(intervalSecs) =>
         val fut = Observable.intervalAtFixedRate(intervalSecs.seconds).foreach { n =>
           client.logicalPlan2Query(ref, plan, qOpts) match {
-            case QueryResult2(_, schema, result) => result.foreach(rv => println(rv.prettyPrint(schema)))
-            case err: QueryError2                => throw new ClientException(err)
+            case QueryResult(_, schema, result) => result.foreach(rv => println(rv.prettyPrint(schema)))
+            case err: QueryError                => throw new ClientException(err)
           }
         }.recover {
           case e: ClientException => println(s"ERROR: ${e.getMessage}")
@@ -373,7 +373,7 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
       case None =>
         try {
           client.logicalPlan2Query(ref, plan, qOpts) match {
-            case QueryResult2(_, schema, result) => {
+            case QueryResult(_, schema, result) => {
               println(s"Number of Range Vectors: ${result.size}")
               result.foreach(rv => println(rv.prettyPrint(schema)))
             }
@@ -390,7 +390,7 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
                 })
               }
             }
-            case QueryError2(_,ex)               => println(s"ERROR: ${ex.getMessage}")
+            case QueryError(_,ex)               => println(s"ERROR: ${ex.getMessage}")
           }
         } catch {
           case e: ClientException =>  println(s"ERROR: ${e.getMessage}")
