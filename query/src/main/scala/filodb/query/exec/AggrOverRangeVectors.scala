@@ -11,6 +11,7 @@ import filodb.core.binaryrecord2.RecordBuilder
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.Dataset
 import filodb.core.query._
+import filodb.memory.data.OffheapLFSortedIDMap
 import filodb.memory.format.{RowReader, UnsafeUtils, ZeroCopyUTF8String}
 import filodb.query._
 import filodb.query.AggregationOperator._
@@ -513,18 +514,25 @@ class TopBottomKRowAggregator(k: Int, bottomK: Boolean) extends RowAggregator {
     val colSchema = Seq(ColumnInfo("timestamp", ColumnType.LongColumn), ColumnInfo("value", ColumnType.DoubleColumn))
     val recSchema = SerializableRangeVector.toSchema(colSchema)
     val resRvs = mutable.Map[RangeVectorKey, RecordBuilder]()
-    // We limit the results wherever it is materialized first. So it is done here.
-    aggRangeVector.rows.take(limit).foreach { row =>
-      var i = 1
-      while(row.notNull(i)) {
-        val rvk = CustomRangeVectorKey.fromZcUtf8(row.filoUTF8String(i))
-        val builder = resRvs.getOrElseUpdate(rvk, SerializableRangeVector.toBuilder(recSchema))
-        builder.startNewRecord()
-        builder.addLong(row.getLong(0))
-        builder.addDouble(row.getDouble(i + 1))
-        builder.endRecord()
-        i += 2
+    // Important TODO / TechDebt: We need to replace Iterators with cursors to better control
+    // the chunk iteration, lock acquisition and release. This is much needed for safe memory access.
+    try {
+      OffheapLFSortedIDMap.validateNoSharedLocks()
+      // We limit the results wherever it is materialized first. So it is done here.
+      aggRangeVector.rows.take(limit).foreach { row =>
+        var i = 1
+        while(row.notNull(i)) {
+          val rvk = CustomRangeVectorKey.fromZcUtf8(row.filoUTF8String(i))
+          val builder = resRvs.getOrElseUpdate(rvk, SerializableRangeVector.toBuilder(recSchema))
+          builder.startNewRecord()
+          builder.addLong(row.getLong(0))
+          builder.addDouble(row.getDouble(i + 1))
+          builder.endRecord()
+          i += 2
+        }
       }
+    } finally {
+      OffheapLFSortedIDMap.releaseAllSharedLocks()
     }
     resRvs.map { case (key, builder) =>
       val numRows = builder.allContainers.map(_.countRecords).sum

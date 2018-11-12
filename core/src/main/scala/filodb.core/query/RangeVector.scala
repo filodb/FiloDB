@@ -2,6 +2,7 @@ package filodb.core.query
 
 import scala.collection.mutable
 
+import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
 import org.joda.time.DateTime
 
@@ -11,7 +12,9 @@ import filodb.core.metadata.Column
 import filodb.core.metadata.Column.ColumnType._
 import filodb.core.store.{ChunkInfoRowReader, ChunkScanMethod, ReadablePartition}
 import filodb.memory.{MemFactory, UTF8StringMedium}
+import filodb.memory.data.OffheapLFSortedIDMap
 import filodb.memory.format.{RowReader, SeqRecordRowReader, ZeroCopyUTF8String => UTF8Str}
+
 
 /**
   * Identifier for a single RangeVector
@@ -162,7 +165,7 @@ final class SerializableRangeVector(val key: RangeVectorKey,
     containers.toIterator.flatMap(_.iterate(schema)).drop(startRecordNo).take(numRows)
 }
 
-object SerializableRangeVector {
+object SerializableRangeVector extends StrictLogging {
   import filodb.core._
 
   val queryResultBytes = Kamon.histogram("query-engine-result-bytes")
@@ -180,9 +183,17 @@ object SerializableRangeVector {
     var numRows = 0
     val oldContainerOpt = builder.currentContainer
     val startRecordNo = oldContainerOpt.map(_.countRecords).getOrElse(0)
-    rv.rows.take(limit).foreach { row =>
-      numRows += 1
-      builder.addFromReader(row)
+    // Important TODO / TechDebt: We need to replace Iterators with cursors to better control
+    // the chunk iteration, lock acquisition and release. This is much needed for safe memory access.
+    try {
+      OffheapLFSortedIDMap.validateNoSharedLocks()
+      rv.rows.take(limit).foreach { row =>
+        numRows += 1
+        builder.addFromReader(row)
+      }
+    } finally {
+      // When the query is done, clean up lingering shared locks caused by iterator limit.
+      OffheapLFSortedIDMap.releaseAllSharedLocks()
     }
     // If there weren't containers before, then take all of them.  If there were, discard earlier ones, just
     // start with the most recent one we started adding to
