@@ -5,7 +5,7 @@ import java.sql.Timestamp
 import javax.activation.UnsupportedDataTypeException
 
 import scala.concurrent.duration._
-import scala.util.{Failure, Try, Success => SSuccess}
+import scala.util.{Failure, Success => SSuccess, Try}
 
 import com.opencsv.CSVWriter
 import com.quantifind.sumac.{ArgMain, FieldArgs}
@@ -23,7 +23,7 @@ import filodb.core.store._
 import filodb.memory.format.RowReader
 import filodb.prometheus.ast.{MetadataQueryParams, QueryParams}
 import filodb.prometheus.parse.Parser
-import filodb.query.{QueryResult, RecordListResult, LogicalPlan, QueryError}
+import filodb.query.{LogicalPlan, QueryError, QueryResult, RecordListResult}
 
 // scalastyle:off
 class Arguments extends FieldArgs {

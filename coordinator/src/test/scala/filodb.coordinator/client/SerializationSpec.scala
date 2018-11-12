@@ -1,18 +1,17 @@
- package filodb.coordinator.client
+package filodb.coordinator.client
 
-import scala.collection.mutable.Set
+import scala.collection.mutable.{ArrayBuffer, Set}
 
 import akka.actor.ActorRef
 import akka.serialization.SerializationExtension
 import akka.testkit.TestProbe
-import filodb.query
 import org.scalatest.concurrent.ScalaFutures
 
 import filodb.coordinator.{ActorSpecConfig, ActorTest, NodeClusterActor, ShardMapper}
 import filodb.coordinator.queryengine2.QueryEngine
 import filodb.core.{MachineMetricsData, MetricsTestData, NamesTestData, TestData}
-import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.metadata.Column.ColumnType
+import filodb.core.metadata.Column.ColumnType.StringColumn
 import filodb.core.store._
 import filodb.memory.format.{RowReader, SeqRowReader, ZeroCopyUTF8String => UTF8Str}
 import filodb.prometheus.ast.QueryParams
@@ -260,17 +259,25 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
 
   it ("should serialize and deserialize result involving Metadata") {
 
-    val response = List(UTF8Str("App-0"), UTF8Str("App-1"))
+    val expected = List(UTF8Str("App-0"), UTF8Str("App-1"))
+    val schema = new ResultSchema(Seq(new ColumnInfo("app", ColumnType.StringColumn)), 1)
+    val ser = RecordList(expected, schema)
 
-    val schema = new RecordSchema(Seq(ColumnType.StringColumn))
-    val ser = RecordList(response, new RecordSchema(Seq(ColumnType.StringColumn)))
-
-    val result = query.RecordListResult("someId", ser)
+    val result = RecordListResult("someId", ser)
     val roundTripResult = roundTrip(result).asInstanceOf[RecordListResult]
+    val recordList = roundTripResult.result.asInstanceOf[RecordList]
 
-    roundTripResult.result.asInstanceOf[RecordList].schema shouldEqual schema
-    roundTripResult.result.rows.size shouldEqual 2
-    roundTripResult.result.rows.next().getAny(0) shouldEqual response.head
+    recordList.schema shouldEqual schema
+    recordList.rows.size shouldEqual 2
+    val seqMapConsumer = new SeqMapConsumer()
+    val actual = new ArrayBuffer[UTF8Str]()
+    recordList.rows.foreach(record => {
+      recordList.schema.columns.map(column => column.colType match {
+        case StringColumn => actual  += record.filoUTF8String(0)
+        case _ => ???
+      })
+    })
+    actual shouldEqual expected
   }
 
 }
