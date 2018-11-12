@@ -275,6 +275,7 @@ object FiloSettings extends Build {
       "Velvia Bintray" at "https://dl.bintray.com/velvia/maven",
       "spray repo" at "http://repo.spray.io"
     ),
+    resolvers += Resolver.bintrayRepo("tanukkii007", "maven"),
 
     cancelable in Global := true,
 
