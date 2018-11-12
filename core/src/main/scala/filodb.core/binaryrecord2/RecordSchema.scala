@@ -156,6 +156,10 @@ final class RecordSchema(val columnTypes: Seq[Column.ColumnType],
         val consumer = new StringifyMapItemConsumer
         consumeMapItems(base, offset, i, consumer)
         consumer.prettyPrint
+      case (PartitionKeyColumn, i)    =>
+        val consumer = new StringifyMapItemConsumer
+        consumeMapItems(base, offset, i, consumer)
+        consumer.prettyPrint
     }
     s"b2[${parts.mkString(",")}]"
   }
@@ -288,6 +292,7 @@ object RecordSchema {
                                                        DoubleColumn -> 8,
                                                        TimestampColumn -> 8,  // Just a long ms timestamp
                                                        StringColumn -> 4,
+                                                       PartitionKeyColumn -> 4,
                                                        MapColumn -> 4)
 
   /**

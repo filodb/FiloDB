@@ -13,8 +13,9 @@ import org.scalatest.time.{Millis, Seconds, Span}
 
 import filodb.core.MetricsTestData._
 import filodb.core.TestData
+import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.memstore.{FixedMaxPartitionsEvictionPolicy, SomeData, TimeSeriesMemStore}
-import filodb.core.metadata.Column.ColumnType.{MapColumn, StringColumn}
+import filodb.core.metadata.Column.ColumnType.{PartitionKeyColumn, StringColumn}
 import filodb.core.query.{ColumnFilter, Filter, RecordList, SeqMapConsumer}
 import filodb.core.store.{InMemoryMetaStore, NullColumnStore}
 import filodb.memory.format.{SeqRowReader, ZeroCopyUTF8String}
@@ -72,16 +73,13 @@ class MetadataExecSpec extends FunSpec with Matchers with ScalaFutures with Befo
 
     val resp = execPlan.execute(memStore, timeseriesDataset, queryConfig).runAsync.futureValue
     val result = resp match {
-      case MetadataQueryResult(id, response) => {
+      case RecordListResult(id, response) => {
         response.rows.size shouldEqual 1
         val recordList = response.asInstanceOf[RecordList]
         val record = response.rows.next()
         val seqMapConsumer = new SeqMapConsumer()
-        recordList.schema.columnTypes.map(columnType => columnType match {
+        recordList.schema.columns.map(column => column.colType match {
           case StringColumn => record.getString(0)
-          case MapColumn => recordList.schema.consumeMapItems(record.getBlobBase(0),
-            record.getBlobOffset(0), 0, seqMapConsumer)
-            seqMapConsumer.pairs
           case _ => ???
         })
       }
@@ -99,7 +97,7 @@ class MetadataExecSpec extends FunSpec with Matchers with ScalaFutures with Befo
       timeseriesDataset.ref, 0, filters, now-5000, now, Seq.empty)
 
     val resp = execPlan.execute(memStore, timeseriesDataset, queryConfig).runAsync.futureValue
-    val result = resp.asInstanceOf[MetadataQueryResult]
+    val result = resp.asInstanceOf[RecordListResult]
     result.result.rows.size shouldEqual 0
   }
 
@@ -113,14 +111,14 @@ class MetadataExecSpec extends FunSpec with Matchers with ScalaFutures with Befo
 
     val resp = execPlan.execute(memStore, timeseriesDataset, queryConfig).runAsync.futureValue
     val result = resp match {
-      case MetadataQueryResult(id, response) => {
+      case RecordListResult(id, response) => {
         response.rows.size shouldEqual 1
         val recordList = response.asInstanceOf[RecordList]
         val record = response.rows.next()
         val seqMapConsumer = new SeqMapConsumer()
-        recordList.schema.columnTypes.map(columnType => columnType match {
+        recordList.schema.columns.map(column => column.colType match {
           case StringColumn => record.getString(0)
-          case MapColumn => recordList.schema.consumeMapItems(record.getBlobBase(0),
+          case PartitionKeyColumn => new RecordSchema(Seq(PartitionKeyColumn)).consumeMapItems(record.getBlobBase(0),
             record.getBlobOffset(0), 0, seqMapConsumer)
             seqMapConsumer.pairs
           case _ => ???

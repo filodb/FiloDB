@@ -139,7 +139,7 @@ final case class ChunkInfoRangeVector(key: RangeVectorKey,
   }
 }
 
-final case class RecordList(records: List[UTF8Str], schema: RecordSchema)
+final case class RecordList(records: List[UTF8Str], schema: ResultSchema)
     extends RangeVector with java.io.Serializable {
   def rows: Iterator[RowReader] = new SeqRecordRowReader(records)
   override def key: RangeVectorKey = new CustomRangeVectorKey(Map.empty) // ignore - not used

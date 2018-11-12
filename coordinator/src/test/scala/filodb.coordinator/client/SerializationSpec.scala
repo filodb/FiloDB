@@ -265,8 +265,8 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
     val schema = new RecordSchema(Seq(ColumnType.StringColumn))
     val ser = RecordList(response, new RecordSchema(Seq(ColumnType.StringColumn)))
 
-    val result = query.MetadataQueryResult("someId", ser)
-    val roundTripResult = roundTrip(result).asInstanceOf[MetadataQueryResult]
+    val result = query.RecordListResult("someId", ser)
+    val roundTripResult = roundTrip(result).asInstanceOf[RecordListResult]
 
     roundTripResult.result.asInstanceOf[RecordList].schema shouldEqual schema
     roundTripResult.result.rows.size shouldEqual 2

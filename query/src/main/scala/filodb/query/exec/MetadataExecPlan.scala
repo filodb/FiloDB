@@ -8,7 +8,6 @@ import monix.execution.Scheduler
 import monix.reactive.Observable
 
 import filodb.core.DatasetRef
-import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.memstore.MemStore
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.Dataset
@@ -53,7 +52,7 @@ trait MetadataExecPlan extends BaseExecPlan {
       res
         .firstL
         .map(r => {
-          MetadataQueryResult(id, r)
+          RecordListResult(id, r)
         })
       .onErrorHandle { case ex: Throwable =>
         qLogger.error(s"queryId: ${id} Exception during execution of query: ${printTree()}", ex)
@@ -132,7 +131,7 @@ final case class NonLeafMetadataExecPlan(id: String,
                                                   timeout: FiniteDuration): Observable[RangeVector] = {
     qLogger.debug(s"NonLeafMetadataExecPlan: Concatenating results")
     val taskOfResults = childResponses.map {
-      case MetadataQueryResult(_, result) => result
+      case RecordListResult(_, result) => result
       case QueryError(_, ex)         => throw ex
     }.toListL.map { resp =>
       var metadataResult = Seq.empty[UTF8Str]
@@ -175,7 +174,8 @@ final case class  SeriesKeyExecLeafPlan(id: String,
     if (source.isInstanceOf[MemStore]) {
       var memStore = source.asInstanceOf[MemStore]
       val response = memStore.indexValuesWithFilters(dataset, shard, filters, Option.empty, end, start)
-      Observable(RecordList(response, new RecordSchema(Seq(ColumnType.MapColumn))))
+      Observable(RecordList(response, new ResultSchema(Seq(ColumnInfo("TimeSeries",
+        ColumnType.PartitionKeyColumn)), 1)))
     } else {
       Observable.empty
     }
@@ -209,7 +209,7 @@ final case class  LabelValuesExecLeafPlan(id: String,
         case true => memStore.indexValues(dataset, shard, column).map(_.term).toList
         case false => memStore.indexValuesWithFilters(dataset, shard, filters, Option(column), end, start)
       }
-      Observable(RecordList(response, new RecordSchema(Seq(ColumnType.StringColumn))))
+      Observable(RecordList(response, new ResultSchema(Seq(ColumnInfo(column, ColumnType.StringColumn)), 1)))
     } else {
       Observable.empty
     }

@@ -45,7 +45,7 @@ final case class QueryResult(id: String,
   }
 }
 
-final case class MetadataQueryResult(id: String,
-                                     result: RangeVector) extends QueryResponse
+final case class RecordListResult(id: String,
+                                  result: RangeVector) extends QueryResponse
 
 

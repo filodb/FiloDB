@@ -15,14 +15,15 @@ import monix.reactive.Observable
 import filodb.coordinator._
 import filodb.coordinator.client._
 import filodb.core._
+import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.metadata.{Column, Dataset, DatasetOptions}
-import filodb.core.metadata.Column.ColumnType.{MapColumn, StringColumn}
+import filodb.core.metadata.Column.ColumnType.{PartitionKeyColumn, StringColumn}
 import filodb.core.query.{RecordList, SeqMapConsumer}
 import filodb.core.store._
 import filodb.memory.format.RowReader
 import filodb.prometheus.ast.{MetadataQueryParams, QueryParams}
 import filodb.prometheus.parse.Parser
-import filodb.query.{MetadataQueryResult, LogicalPlan => LogicalPlan2, QueryError => QueryError2, QueryResult => QueryResult2}
+import filodb.query.{RecordListResult, LogicalPlan => LogicalPlan2, QueryError => QueryError2, QueryResult => QueryResult2}
 
 // scalastyle:off
 class Arguments extends FieldArgs {
@@ -376,13 +377,13 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
               println(s"Number of Range Vectors: ${result.size}")
               result.foreach(rv => println(rv.prettyPrint(schema)))
             }
-            case MetadataQueryResult(_, result) => {
+            case RecordListResult(_, result) => {
               result match {
                 case r: RecordList => r.rows.foreach(record => {
                   val seqMapConsumer = new SeqMapConsumer()
-                  println(r.schema.columnTypes.map(columnType => columnType match {
+                  println(r.schema.columns.map(column => column.colType match {
                     case StringColumn => record.getString(0)
-                    case MapColumn => r.schema.consumeMapItems(record.getBlobBase(0), record.getBlobOffset(0), 0, seqMapConsumer)
+                    case PartitionKeyColumn => new RecordSchema(Seq(PartitionKeyColumn)).consumeMapItems(record.getBlobBase(0), record.getBlobOffset(0), 0, seqMapConsumer)
                       seqMapConsumer.pairs
                     case _ => ???
                   }))

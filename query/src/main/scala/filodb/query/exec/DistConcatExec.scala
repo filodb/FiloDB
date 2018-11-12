@@ -32,7 +32,7 @@ final case class DistConcatExec(id: String,
     qLogger.debug(s"DistConcatExec: Concatenating results")
     childResponses.flatMap {
       case qr: QueryResult => Observable.fromIterable(qr.result)
-      case mqr: MetadataQueryResult => Observable(mqr.result)
+      case mqr: RecordListResult => Observable(mqr.result)
       case qe: QueryError => throw qe.t
     }
   }

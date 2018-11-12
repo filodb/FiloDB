@@ -75,7 +75,7 @@ final class QueryActor(memStore: MemStore,
        replyTo ! res
        res match {
          case QueryResult(_, _, vectors) => resultVectors.record(vectors.length)
-         case MetadataQueryResult(_, vectors) => resultMetadataRows.record(vectors.rows.size)
+         case RecordListResult(_, vectors) => resultMetadataRows.record(vectors.rows.size)
          case e: QueryError =>
            queryErrors.increment
            logger.debug(s"queryId ${q.id} Normal QueryError returned from query execution: $e")
