@@ -3,10 +3,13 @@ package filodb.jmh
 import java.util.concurrent.TimeUnit
 
 import ch.qos.logback.classic.{Level, Logger}
+import com.typesafe.config.ConfigFactory
 import org.openjdk.jmh.annotations._
 
 import filodb.core.{MachineMetricsData, TestData}
 import filodb.core.binaryrecord2.{RecordBuilder, RecordComparator, RecordSchema}
+import filodb.core.memstore._
+import filodb.core.store._
 import filodb.memory.{BinaryRegionConsumer, MemFactory}
 
 /**
@@ -26,7 +29,8 @@ class IngestionBenchmark {
 
   org.slf4j.LoggerFactory.getLogger("filodb").asInstanceOf[Logger].setLevel(Level.ERROR)
 
-  val dataStream = withMap(linearMultiSeries(), extraTags=extraTags) take 50
+  // # of records in a container to test ingestion speed
+  val dataStream = withMap(linearMultiSeries(), extraTags=extraTags) take 100
 
   val schemaWithPredefKeys = RecordSchema.ingestion(dataset2,
                                                     Seq("job", "instance"))
@@ -43,7 +47,14 @@ class IngestionBenchmark {
   val (ingBr2Base, ingBr2Off) = (ingestBuilder.allContainers.head.base, ingestBuilder.allContainers.head.offset + 4)
   val (partBr2Base, partBr2Off) = (partKeyBuilder.allContainers.head.base, partKeyBuilder.allContainers.head.offset + 4)
 
-  // TODO: measure deserialization from ProtoBuf
+  import monix.execution.Scheduler.Implicits.global
+
+  val config = ConfigFactory.load("application_test.conf").getConfig("filodb")
+  val policy = new FixedMaxPartitionsEvictionPolicy(100)
+  val memStore = new TimeSeriesMemStore(config, new NullColumnStore, new InMemoryMetaStore(), Some(policy))
+  memStore.setup(dataset1, 0, TestData.storeConf)
+
+  val shard = memStore.getShardE(dataset1.ref, 0)
 
   /**
    * Equality of incoming ingest BinaryRecord2 partition fields vs a BinaryRecord2 partition key
@@ -56,14 +67,20 @@ class IngestionBenchmark {
     comparator.partitionMatch(ingBr2Base, ingBr2Off, partBr2Base, partBr2Off)
   }
 
-  // Creating 50 PartKey BRv2 from 50 ingestion BRv2's
+  /**
+   * Ingest a single RecordContainer with 100 records in it.  Note that the throughput reported is x100 so
+   * it is not the containers throughput but the actual records throughput.
+   *
+   * NOTE: based on -prof stack profiling, this benchmark does invoke the flushing logic plus
+   * WriteBufferPool buffer recycling logic.  The time is thus heavily influenced by the chunking/encoding
+   * logic, OffheapSortedIDMap stuff, and native memory allocation cost.
+   */
   @Benchmark
   @BenchmarkMode(Array(Mode.Throughput))
   @OutputTimeUnit(TimeUnit.SECONDS)
-  def makePartKeyBRv2(): Int = {
-    partKeyBuilder.resetCurrent()
-    ingestBuilder.allContainers.head.consumeRecords(consumer)
-    0
+  @OperationsPerInvocation(100)
+  def ingest100records(): Unit = {
+    shard.ingest(ingestBuilder.allContainers.head, 0)
   }
 
   @Benchmark

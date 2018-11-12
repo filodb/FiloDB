@@ -64,7 +64,7 @@ abstract class ClusterRecoverySpec extends ClusterSpec(ClusterRecoverySpecConfig
                                    TestData.storeConf)
 
   implicit val patience =   // make sure futureValue has long enough time
-    PatienceConfig(timeout = Span(70, Seconds), interval = Span(500, Millis))
+    PatienceConfig(timeout = Span(120, Seconds), interval = Span(500, Millis))
 
   metaStore.newDataset(dataset6).futureValue shouldEqual Success
   metaStore.writeIngestionConfig(setup.config).futureValue shouldEqual Success
