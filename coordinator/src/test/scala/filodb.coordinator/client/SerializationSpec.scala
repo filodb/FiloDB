@@ -12,7 +12,7 @@ import filodb.core.metadata.Column.ColumnType
 import filodb.core.store._
 import filodb.memory.format.{RowReader, SeqRowReader}
 import filodb.memory.format.{ZeroCopyUTF8String => UTF8Str}
-import filodb.prometheus.ast.QueryParams
+import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
 import filodb.query.{QueryResult => QueryResult2, _}
 
@@ -208,7 +208,7 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
     mapper.registerNode(Seq(0), node0)
     val to = System.currentTimeMillis() / 1000
     val from = to - 50
-    val qParams = QueryParams(from, 10, to)
+    val qParams = TimeStepParams(from, 10, to)
     val dataset = MetricsTestData.timeseriesDataset
     val engine = new QueryEngine(dataset, mapperRef)
 

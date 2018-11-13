@@ -24,7 +24,7 @@ import filodb.coordinator.client.LocalClient
 import filodb.core.{DatasetRef, ErrorResponse}
 import filodb.core.store.StoreConfig
 import filodb.http.PromCirceSupport
-import filodb.prometheus.ast.QueryParams
+import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
 import filodb.prometheus.query.PrometheusModel.SuccessResponse
 import filodb.query.{QueryError, QueryResult => QueryResult2}
@@ -169,7 +169,7 @@ abstract class StandaloneMultiJvmSpec(config: MultiNodeConfig) extends MultiNode
   // Get a point for every minute of an interval for multiple time series for comparing missing data
   // TODO: maybe do a sum_over_time() as current windowing just gets last data point
   def runRangeQuery(client: LocalClient, startTime: Long, endTime: Long): Map[String, Array[Double]] = {
-    val logicalPlan = Parser.queryRangeToLogicalPlan(query1, QueryParams(startTime/1000, 60, endTime/1000))
+    val logicalPlan = Parser.queryRangeToLogicalPlan(query1, TimeStepParams(startTime/1000, 60, endTime/1000))
 
     var totalSamples = 0
     client.logicalPlan2Query(dataset, logicalPlan) match {
@@ -195,7 +195,7 @@ abstract class StandaloneMultiJvmSpec(config: MultiNodeConfig) extends MultiNode
 
   def printChunkMeta(client: LocalClient): Unit = {
     val chunkMetaQuery = "_filodb_chunkmeta_all(heap_usage{dc=\"DC0\",app=\"App-2\"})"
-    val logicalPlan = Parser.queryRangeToLogicalPlan(chunkMetaQuery, QueryParams(0, 60, Int.MaxValue))
+    val logicalPlan = Parser.queryRangeToLogicalPlan(chunkMetaQuery, TimeStepParams(0, 60, Int.MaxValue))
     client.logicalPlan2Query(dataset, logicalPlan) match {
       case QueryResult2(_, schema, result) => result.foreach(rv => println(rv.prettyPrint(schema)))
       case e: QueryError => fail(e.t)

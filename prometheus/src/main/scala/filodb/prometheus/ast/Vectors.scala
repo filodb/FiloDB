@@ -129,7 +129,7 @@ trait Vectors extends Scalars with TimeUnits with Base {
     private[prometheus] val columns = labelMatchesToColumnName(labelSelection)
     private[prometheus] val nameFilter = ColumnFilter(PromMetricLabel, query.Filter.Equals(metricName))
 
-    def toPeriodicSeriesPlan(timeParams: TimeParams): PeriodicSeriesPlan = {
+    def toPeriodicSeriesPlan(timeParams: TimeRangeParams): PeriodicSeriesPlan = {
 
       // we start from 5 minutes earlier that provided start time in order to include last sample for the
       // start timestamp. Prometheus goes back unto 5 minutes to get sample before declaring as stale
@@ -164,7 +164,7 @@ trait Vectors extends Scalars with TimeUnits with Base {
 
     val allFilters: Seq[ColumnFilter] = columnFilters :+ nameFilter
 
-    def toRawSeriesPlan(timeParams: TimeParams, isRoot: Boolean): RawSeriesPlan = {
+    def toRawSeriesPlan(timeParams: TimeRangeParams, isRoot: Boolean): RawSeriesPlan = {
       if (isRoot && timeParams.start != timeParams.end) {
         throw new UnsupportedOperationException("Range expression is not allowed in query_range")
       }

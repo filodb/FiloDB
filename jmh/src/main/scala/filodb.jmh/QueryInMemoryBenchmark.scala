@@ -17,7 +17,7 @@ import filodb.coordinator.ShardMapper
 import filodb.core.binaryrecord2.RecordContainer
 import filodb.core.memstore.{SomeData, TimeSeriesMemStore}
 import filodb.core.store.StoreConfig
-import filodb.prometheus.ast.QueryParams
+import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
 import filodb.query.{QueryError => QError, QueryResult => QueryResult2}
 import filodb.timeseries.TestTimeseriesProducer
@@ -107,7 +107,7 @@ class QueryInMemoryBenchmark extends StrictLogging {
                     """quantile(0.75, heap_usage{app="App-2"})""",
                     """sum_over_time(heap_usage{app="App-2"}[5m])""")
   val queryTime = startTime + (5 * 60 * 1000)  // 5 minutes from start until 60 minutes from start
-  val qParams = QueryParams(queryTime/1000, queryStep, (queryTime/1000) + queryIntervalMin*60)
+  val qParams = TimeStepParams(queryTime/1000, queryStep, (queryTime/1000) + queryIntervalMin*60)
   val logicalPlans = queries.map { q => Parser.queryRangeToLogicalPlan(q, qParams) }
   val queryCommands = logicalPlans.map { plan =>
     LogicalPlan2Query(dataset.ref, plan, QueryOptions(1, 100))

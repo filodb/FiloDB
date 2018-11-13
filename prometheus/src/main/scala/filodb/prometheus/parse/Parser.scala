@@ -2,7 +2,7 @@ package filodb.prometheus.parse
 
 import scala.util.parsing.combinator.{JavaTokenParsers, PackratParsers, RegexParsers}
 
-import filodb.prometheus.ast.{Expressions, QueryParams, TimeParams}
+import filodb.prometheus.ast.{Expressions, TimeRangeParams, TimeStepParams}
 import filodb.query._
 
 
@@ -319,11 +319,11 @@ object Parser extends Expression {
   }
 
   def queryToLogicalPlan(query: String, queryTimestamp: Long): LogicalPlan = {
-    val defaultQueryParams = QueryParams(queryTimestamp, 1, queryTimestamp)
+    val defaultQueryParams = TimeStepParams(queryTimestamp, 1, queryTimestamp)
     queryRangeToLogicalPlan(query, defaultQueryParams)
   }
 
-  def queryRangeToLogicalPlan(query: String, timeParams: TimeParams): LogicalPlan = {
+  def queryRangeToLogicalPlan(query: String, timeParams: TimeRangeParams): LogicalPlan = {
     val expression = parseQuery(query)
     expression match {
       case p: PeriodicSeries => p.toPeriodicSeriesPlan(timeParams)

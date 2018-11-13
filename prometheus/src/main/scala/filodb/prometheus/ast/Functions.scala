@@ -14,7 +14,7 @@ trait Functions extends Base with Operators with Vectors {
       throw new IllegalArgumentException(s"Invalid function name [$name]")
     }
 
-    def toPeriodicSeriesPlan(timeParams: TimeParams): PeriodicSeriesPlan = {
+    def toPeriodicSeriesPlan(timeParams: TimeRangeParams): PeriodicSeriesPlan = {
       val seriesParam = allParams.filter(_.isInstanceOf[Series]).head.asInstanceOf[Series]
       val otherParams = allParams.filter(!_.isInstanceOf[Series]).map(_.asInstanceOf[Scalar].toScalar)
       val instantFunctionIdOpt = InstantFunctionId.withNameInsensitiveOption(name)

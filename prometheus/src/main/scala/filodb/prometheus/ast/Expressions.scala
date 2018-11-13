@@ -29,7 +29,7 @@ trait Expressions extends Aggregates with Functions {
     }
 
 
-    override def toPeriodicSeriesPlan(timeParams: TimeParams): PeriodicSeriesPlan = {
+    override def toPeriodicSeriesPlan(timeParams: TimeRangeParams): PeriodicSeriesPlan = {
       if (lhs.isInstanceOf[ScalarExpression] && rhs.isInstanceOf[ScalarExpression]) {
         throw new UnsupportedOperationException("Binary operations on scalars is not supported yet")
       }

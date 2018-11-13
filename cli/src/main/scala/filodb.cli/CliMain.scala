@@ -18,7 +18,7 @@ import filodb.core._
 import filodb.core.metadata.{Column, Dataset, DatasetOptions}
 import filodb.core.store._
 import filodb.memory.format.RowReader
-import filodb.prometheus.ast.{InMemoryParam, QueryParams, TimeParams, WriteBuffersParam}
+import filodb.prometheus.ast.{InMemoryParam, TimeRangeParams, TimeStepParams, WriteBuffersParam}
 import filodb.prometheus.parse.Parser
 import filodb.query.{QueryResult => QueryResult2}
 import filodb.query.{QueryError => QueryError2}
@@ -100,7 +100,7 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
     (remote, DatasetRef(args.dataset.get))
   }
 
-  def getQueryRange(args: Arguments): TimeParams =
+  def getQueryRange(args: Arguments): TimeRangeParams =
     args.chunks.filter { cOpt => cOpt == "memory" || cOpt == "buffers" }
       .map {
         case "memory"  => InMemoryParam(args.step)
@@ -108,8 +108,8 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
       }.getOrElse {
       args.minutes.map { minArg =>
         val end = System.currentTimeMillis() / 1000
-        QueryParams(end - minArg.toInt * 60, args.step, end)
-      }.getOrElse(QueryParams(args.start, args.step, args.end))
+        TimeStepParams(end - minArg.toInt * 60, args.step, end)
+      }.getOrElse(TimeStepParams(args.start, args.step, args.end))
     }
 
   def main(args: Arguments): Unit = {
@@ -322,7 +322,7 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
                             spread: Int)
 
   def parsePromQuery2(client: LocalClient, query: String, dataset: String,
-                      timeParams: TimeParams,
+                      timeParams: TimeRangeParams,
                       options: QOptions): Unit = {
     val logicalPlan = Parser.queryRangeToLogicalPlan(query, timeParams)
     executeQuery2(client, dataset, logicalPlan, options)
