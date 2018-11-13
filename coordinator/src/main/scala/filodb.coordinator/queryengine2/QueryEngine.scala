@@ -114,8 +114,8 @@ class QueryEngine(dataset: Dataset,
       case lp: Aggregate =>                   materializeAggregate(queryId, submitTime, options, lp)
       case lp: BinaryJoin =>                  materializeBinaryJoin(queryId, submitTime, options, lp)
       case lp: ScalarVectorBinaryOperation => materializeScalarVectorBinOp(queryId, submitTime, options, lp)
-      case lp: LabelValues => materializeLabelValues(queryId, submitTime, options, lp)
-      case lp: SeriesKeysByFilters => materializeSeriesKeysByFilters(queryId, submitTime, options, lp)
+      case lp: LabelValues =>                 materializeLabelValues(queryId, submitTime, options, lp)
+      case lp: SeriesKeysByFilters =>         materializeSeriesKeysByFilters(queryId, submitTime, options, lp)
     }
   }
 
