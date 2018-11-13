@@ -6,6 +6,7 @@ import monix.execution.Scheduler
 import monix.reactive.Observable
 
 import filodb.core.{DatasetRef, Types}
+import filodb.core.memstore.TimeSeriesShard
 import filodb.core.metadata.{Column, Dataset}
 import filodb.core.query._
 import filodb.core.store._
@@ -64,8 +65,8 @@ final case class SelectChunkInfosExec(id: String,
           .filter(_.hasChunks(chunkMethod))
           .map { partition =>
             source.stats.incrReadPartitions(1)
-            val subgroup = Math.abs(dataset.partKeySchema.partitionHash(partition.partKeyBase,
-                                                                        partition.partKeyOffset) % numGroups)
+            val subgroup = TimeSeriesShard.partKeyGroup(dataset.partKeySchema, partition.partKeyBase,
+                                                        partition.partKeyOffset, numGroups)
             val key = new PartitionRangeVectorKey(partition.partKeyBase, partition.partKeyOffset,
                                                   dataset.partKeySchema, partCols, shard, subgroup)
             ChunkInfoRangeVector(key, partition, chunkMethod, dataColumn)
