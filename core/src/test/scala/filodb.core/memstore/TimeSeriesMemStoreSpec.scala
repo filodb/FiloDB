@@ -183,7 +183,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     val errStream = Observable.fromIterable(groupedRecords(dataset1, linearMultiSeries()))
                               .endWithError(new NumberFormatException)
     val fut = memStore.ingestStream(dataset1.ref, 0, errStream, s)
-    ScalaFutures.whenReady(fut.failed) { e =>
+    whenReady(fut.failed) { e =>
       e shouldBe a[NumberFormatException]
     }
   }

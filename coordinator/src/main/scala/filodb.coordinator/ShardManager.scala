@@ -437,38 +437,36 @@ private[coordinator] final class ShardManager(settings: FilodbSettings,
     */
   def updateFromExternalShardEvent(sender: ActorRef, event: ShardEvent): Unit = {
     _shardMappers.get(event.ref) foreach { mapper =>
-      // ensure that we only respond to the events from the node shard is assigned to.
+      // ensure that we respond to shard events only from the node shard is currently assigned to.
       // Needed to avoid race conditions where IngestionStopped for an old assignment comes after shard is reassigned.
-      if (mapper.coordForShard(event.shard).path.address == sender.path.address) {
+      val currentCoord = mapper.coordForShard(event.shard)
+      if (currentCoord.path.address == sender.path.address) {
         updateFromShardEvent(event)
-        _shardMappers.get(event.ref) foreach { mapper =>
-          val currentCoord = mapper.coordForShard(event.shard)
-          // reassign shard if IngestionError. Exclude previous node since it had error shards.
-          event match {
-            case _: IngestionError =>
-              require(mapper.unassignedShards.contains(event.shard))
-              val lastReassignment = getShardReassignmentTime(event.ref, event.shard)
-              val now = System.currentTimeMillis()
-              val info = _datasetInfo(event.ref)
-              if (now - lastReassignment > shardReassignmentMinInterval.toMillis) {
-                logger.warn(s"Attempting to reassign shard ${event.shard} from dataset ${event.ref}. " +
-                  s"It was last reassigned at ${lastReassignment}")
-                val assignments = assignShardsToNodes(event.ref, mapper, info.resources, Seq(currentCoord))
-                if (assignments.valuesIterator.flatten.contains(event.shard)) {
-                  setShardReassignmentTime(event.ref, event.shard, now)
-                  info.metrics.numErrorReassignmentsDone.increment()
-                } else {
-                  info.metrics.numErrorReassignmentsSkipped.increment()
-                  logger.warn(s"Shard ${event.shard} from dataset ${event.ref} was NOT reassigned possibly " +
-                    s"because no other node was available")
-                }
+        // reassign shard if IngestionError. Exclude previous node since it had error shards.
+        event match {
+          case _: IngestionError =>
+            require(mapper.unassignedShards.contains(event.shard))
+            val lastReassignment = getShardReassignmentTime(event.ref, event.shard)
+            val now = System.currentTimeMillis()
+            val info = _datasetInfo(event.ref)
+            if (now - lastReassignment > shardReassignmentMinInterval.toMillis) {
+              logger.warn(s"Attempting to reassign shard ${event.shard} from dataset ${event.ref}. " +
+                s"It was last reassigned at ${lastReassignment}")
+              val assignments = assignShardsToNodes(event.ref, mapper, info.resources, Seq(currentCoord))
+              if (assignments.valuesIterator.flatten.contains(event.shard)) {
+                setShardReassignmentTime(event.ref, event.shard, now)
+                info.metrics.numErrorReassignmentsDone.increment()
               } else {
                 info.metrics.numErrorReassignmentsSkipped.increment()
-                logger.warn(s"Skipping reassignment of shard ${event.shard} from dataset ${event.ref} since " +
-                  s"it was already reassigned within ${shardReassignmentMinInterval} at ${lastReassignment}")
+                logger.warn(s"Shard ${event.shard} from dataset ${event.ref} was NOT reassigned possibly " +
+                  s"because no other node was available")
               }
-            case _ =>
-          }
+            } else {
+              info.metrics.numErrorReassignmentsSkipped.increment()
+              logger.warn(s"Skipping reassignment of shard ${event.shard} from dataset ${event.ref} since " +
+                s"it was already reassigned within ${shardReassignmentMinInterval} at ${lastReassignment}")
+            }
+          case _ =>
         }
         updateShardMetrics()
       } else {
