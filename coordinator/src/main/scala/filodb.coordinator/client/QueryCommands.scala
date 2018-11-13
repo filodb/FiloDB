@@ -13,16 +13,6 @@ object QueryCommands {
   final case class MultiPartitionQuery(keys: Seq[Seq[Any]]) extends PartitionQuery
   final case class FilteredPartitionQuery(filters: Seq[ColumnFilter]) extends PartitionQuery
 
-  // Which data within a partition should I query?
-  sealed trait DataQuery
-  case object AllPartitionData extends DataQuery   // All the data in a partition
-  final case class KeyRangeQuery(start: Seq[Any], end: Seq[Any]) extends DataQuery
-  // most recent lastMillis milliseconds of data.  The row key must be a single Long or Timestamp column
-  // consisting of milliseconds since Epoch.  A shortcut for KeyRangeQuery.
-  final case class MostRecentTime(lastMillis: Long) extends DataQuery
-  // most recent single sample of data
-  case object MostRecentSample extends DataQuery
-
   /**
    * Returns a Seq[String] of the first *limit* tags or columns indexed
    * Or Nil if the dataset is not found.

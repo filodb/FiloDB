@@ -89,7 +89,7 @@ class KryoInit {
 
     import filodb.core.store._
     kryo.register(classOf[ChunkSetInfo])
-    kryo.register(LastSampleChunkScan.getClass)
+    kryo.register(WriteBufferChunkScan.getClass)
     kryo.register(AllChunkScan.getClass)
     kryo.register(classOf[RowKeyChunkScan])
     kryo.register(classOf[FilteredPartitionScan])

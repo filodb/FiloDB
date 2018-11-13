@@ -92,7 +92,8 @@ To compile the .mermaid source files to .png's, install the [Mermaid CLI](http:/
 
 1. [Java 8](http://www.oracle.com/technetwork/java/javase/downloads/jdk8-downloads-2133151.html)
 2. [SBT](http://www.scala-sbt.org/) to build
-3. [Apache Cassandra](http://cassandra.apache.org/) 2.x or 3.x (We prefer using [CCM](https://github.com/pcmanus/ccm) for local testing) (Optional if you are using the in-memory column store)
+3. [Apache Cassandra](http://cassandra.apache.org/) 2.x or 3.x (We prefer using [CCM](https://github.com/pcmanus/ccm) for local testing)
+    - For testing, install a single node C* cluster, like this:  `ccm create v39_single -v 3.9 -n 1 -s`
 4. [Apache Kafka](http://kafka.apache.org/) 0.10.x or above
  
 Optional:
@@ -568,6 +569,8 @@ The `filo-cli` accepts arguments and options as key-value pairs, specified like 
 | start      | The start of the query timerange in seconds since epoch  |
 | step       | The step size in seconds of the PromQL query.  Successive windows occur at every step seconds   |
 | stop       | The end of the query timerange in seconds since epoch    |
+| minutes    | A shortcut to set the start at N minutes ago, and the stop at current time.  Should specify a step also.   |
+| chunks     | Either "memory" or "buffers" to select either all the in-memory chunks or the write buffers only.  Should specify a step also. |
 | database   | Specifies the "database" the dataset should operate in.  For Cassandra, this is the keyspace.  If not specified, uses config value.  |
 | limit      | The maximum number of samples per time series  |
 | shards     | (EXPERT) overrides the automatic shard calculation by passing in a comma-separated list of specific shards to query.  Very useful to debug sharding issues.  |
