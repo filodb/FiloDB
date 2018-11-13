@@ -54,15 +54,15 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
   implicit val ec = cluster.ec
 
   val strategy = DefaultShardAssignmentStrategy
-  protected val shardManager = new ShardManager(DefaultShardAssignmentStrategy)
+  protected val shardManager = new ShardManager(cluster.settings, DefaultShardAssignmentStrategy)
 
 
   val clusterActor = system.actorOf(Props(new Actor {
     import StatusActor._
     def receive: Receive = {
       case SubscribeShardUpdates(ref) => shardManager.subscribe(sender(), ref)
-      case e: ShardEvent              => shardManager.updateFromShardEvent(e)
-      case EventEnvelope(seq, events) => events.foreach(shardManager.updateFromShardEvent)
+      case e: ShardEvent              => shardManager.updateFromExternalShardEvent(sender(), e)
+      case EventEnvelope(seq, events) => events.foreach(e => shardManager.updateFromExternalShardEvent(sender(), e))
                                          sender() ! StatusAck(seq)
     }
   }))
@@ -353,7 +353,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
     val split = memStore.getScanSplits(ref, 1).head
     val q2 = LogicalPlan2Query(ref,
                Aggregate(AggregationOperator.Sum,
-                 PeriodicSeries(    // No filters, operate on all rows.  Yes this is not a possible PromQL query. So what
+                 PeriodicSeries(  // No filters, operate on all rows.  Yes this is not a possible PromQL query. So what
                    RawSeries(AllChunksSelector, Nil, Seq("AvgTone")), 0, 10, 99)), qOpt)
     probe.send(coordinatorActor, q2)
     probe.expectMsgPF() {
