@@ -174,7 +174,7 @@ final case class  SeriesKeyExecLeafPlan(id: String,
 
     if (source.isInstanceOf[MemStore]) {
       var memStore = source.asInstanceOf[MemStore]
-      val response = memStore.indexValuesWithFilters(dataset, shard, filters, Option.empty, end, start, limit)
+      val response = memStore.partKeysWithFilters(dataset, shard, filters, end, start, limit)
       Observable.now(RecordList(response, schema(dataset1)))
     } else {
       Observable.empty
@@ -213,7 +213,7 @@ final case class  LabelValuesExecLeafPlan(id: String,
       val start = end - lookBackInMillis
       val response = filters.isEmpty match {
         case true => memStore.indexValues(dataset, shard, column).map(_.term).toList
-        case false => memStore.indexValuesWithFilters(dataset, shard, filters, Option(column), end, start, limit)
+        case false => memStore.indexValuesWithFilters(dataset, shard, filters, column, end, start, limit)
       }
       Observable.now(RecordList(response, schema(dataset1)))
     } else {
