@@ -558,7 +558,7 @@ class TopKPartIdsCollector(limit: Int) extends Collector with StrictLogging {
   }
 }
 
-class PartIdCollector() extends SimpleCollector {
+class PartIdCollector extends SimpleCollector {
   val result = new EWAHCompressedBitmap()
   private var partIdDv: NumericDocValues = _
 
