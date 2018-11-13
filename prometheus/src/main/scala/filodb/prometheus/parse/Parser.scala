@@ -19,6 +19,7 @@ trait BaseParser extends Expressions with JavaTokenParsers with RegexParsers wit
     "[a-zA-Z_][a-zA-Z0-9_:|`~!@$#%^&*()s+=?><:;{}-]*".r ^^ { str => Identifier(str) }
   }
 
+  // this is the prefix for label value selection - metadataLabelSelector, e.g "label=<metric-name>{matchers}"
   lazy val indexKey: PackratParser[Identifier] = {
     "label\\=".r ^^ { str => Identifier(str) }
   }
@@ -207,12 +208,21 @@ trait Selector extends Operator with Unit with BaseParser {
       InstantExpression(metricName.str, ls.getOrElse(Seq.empty), opt.map(_.duration))
   }
 
+  /**
+    * This special case parsing value is needed for creating SeriesKeysExpression object to create
+    * SeriesKeysByFilters logical plan. Otherwise the expression will map to InstantExpression which
+    * is already used for fetching instant sample value.
+    */
   lazy val metadataSelector: PackratParser[SeriesKeysExpression]
   = labelIdentifier ~ labelSelection.? ^^ {
     case metricName ~ ls =>
       SeriesKeysExpression(metricName.str, ls.getOrElse(Seq.empty))
   }
 
+  /**
+    * This special case parsing value is needed for creating LabelValuesExpression object to create
+    * LabelValues logical plan.
+    */
   lazy val metadataLabelSelector: PackratParser[LabelValuesExpression]
   = indexKey ~ labelIdentifier ~ labelSelection.? ^^ {
     case ignore ~ labelName ~ ls =>

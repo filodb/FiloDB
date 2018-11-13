@@ -164,7 +164,7 @@ trait Vectors extends Scalars with TimeUnits with Base {
     private[prometheus] val columnFilters: ArrayBuffer[ColumnFilter] = new ArrayBuffer[ColumnFilter]()
     columnFilters ++= labelMatchesToFilters(labelSelection)
     override def toMetadataQueryPlan(queryParams: MetadataQueryParams): MetadataQueryPlan =
-      LabelValues(labelName, columnFilters)
+      LabelValues(labelName, columnFilters, queryParams.lookBackTimeInMillis)
   }
 
   /**

@@ -141,8 +141,8 @@ extends MemStore with StrictLogging {
     getShard(dataset, shard).map(_.indexValues(indexName, topK)).getOrElse(Nil)
 
   def indexValuesWithFilters(dataset: DatasetRef, shard: Int, filters: Seq[ColumnFilter],
-                          column: Option[String], end: Long, start: Long): List[ZeroCopyUTF8String] =
-    getShard(dataset, shard).map(_.indexValuesWithFilters(filters, column, end, start)).getOrElse(List.empty)
+                          column: Option[String], end: Long, start: Long, limit: Int): List[ZeroCopyUTF8String] =
+    getShard(dataset, shard).map(_.indexValuesWithFilters(filters, column, end, start, limit)).getOrElse(List.empty)
 
   def numPartitions(dataset: DatasetRef, shard: Int): Int =
     getShard(dataset, shard).map(_.numActivePartitions).getOrElse(-1)

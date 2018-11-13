@@ -51,7 +51,7 @@ class QueryEngine(dataset: Dataset,
       case many =>
         val targetActor = pickDispatcher(many)
         many(0) match {
-          case mep: MetadataExecPlan => NonLeafMetadataExecPlan(queryId, targetActor, many)
+          case mep: MetadataExecPlan => RecordListConcatExec(queryId, targetActor, many)
           case ep: ExecPlan => DistConcatExec(queryId, targetActor, many)
         }
     }
@@ -222,7 +222,7 @@ class QueryEngine(dataset: Dataset,
     shardsFromFilters(lp.filters, options).map { shard =>
       val dispatcher = dispatcherForShard(shard)
       exec.LabelValuesExecLeafPlan(queryId, submitTime, options.itemLimit, dispatcher, dataset.ref, shard,
-        lp.filters, lp.labelName)
+        lp.filters, lp.labelName, lp.lookbackTimeInMillis)
     }
   }
 

@@ -55,7 +55,7 @@ class TimeSeriesMemStoreForMetadataSpec extends FunSpec with Matchers with Scala
     import ZeroCopyUTF8String._
     val filters = Seq (ColumnFilter("__name__", Filter.Equals("http_req_total".utf8)),
       ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
-    val metadata = memStore.indexValuesWithFilters(timeseriesDataset.ref, 0, filters, Option.empty, now, now - 5000)
+    val metadata = memStore.indexValuesWithFilters(timeseriesDataset.ref, 0, filters, Option.empty, now, now - 5000, 10)
     val schema = new RecordSchema(Seq(ColumnType.PartitionKeyColumn))
     metadata.size shouldEqual 1
     val seqMapConsumer = new SeqMapConsumer()
@@ -75,7 +75,7 @@ class TimeSeriesMemStoreForMetadataSpec extends FunSpec with Matchers with Scala
       ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
 
     val metadata = memStore.indexValuesWithFilters(timeseriesDataset.ref, 0,
-      filters, Option("instance"), now, now - 5000)
+      filters, Option("instance"), now, now - 5000, 10)
 
     metadata.size shouldEqual 1
     metadata.head.toString shouldEqual "someHost:8787"

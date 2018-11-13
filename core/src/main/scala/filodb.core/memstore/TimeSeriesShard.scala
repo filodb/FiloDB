@@ -454,11 +454,18 @@ class TimeSeriesShard(val dataset: Dataset,
 
   def indexValues(indexName: String, topK: Int): Seq[TermInfo] = partKeyIndex.indexValues(indexName, topK)
 
-  def indexValuesWithFilters(filter: Seq[ColumnFilter], column: Option[String], endTime: Long, startTime: Long):
-          List[ZeroCopyUTF8String] = {
+  /**
+    * This method is to apply column filters and fetch matching label values or time series partition keys.
+    * This is implemented for fetching the Timeseries metadata.
+    */
+  def indexValuesWithFilters(filter: Seq[ColumnFilter],
+                             column: Option[String],
+                             endTime: Long,
+                             startTime: Long,
+                             limit: Int): List[ZeroCopyUTF8String] = {
     val result: Set[ZeroCopyUTF8String] = new mutable.HashSet[ZeroCopyUTF8String]()
     val partIterator = partKeyIndex.partIdsFromFilters(filter, startTime, endTime)
-    while(partIterator.hasNext && result.size < 1000) { //TODO get the limit from config
+    while(partIterator.hasNext && result.size < limit) {
       val nextPartID = partIterator.next
       var nextPart = partitions.get(nextPartID)
       if (nextPart == UnsafeUtils.ZeroPointer) {
@@ -468,9 +475,10 @@ class TimeSeriesShard(val dataset: Dataset,
       }
       if(column.isDefined) {
         val consumer = new SeqIndexValueConsumer(column.get)
-        partKeyIndex.partKeyFromPartId(nextPartID)
-          .map(partKey => getPartition(partKey.bytes)
-            .map(tsp => dataset.partKeySchema.consumeMapItems(tsp.partKeyBase, tsp.partKeyOffset, 0, consumer)))
+        // FIXME This is non-performant and temporary fix for fetching label values based on filter criteria.
+        // Other strategies needs to be evaluated for making this performant - create facets for predefined fields or
+        // have a centralized service/store for serving metadata
+        dataset.partKeySchema.consumeMapItems(nextPart.partKeyBase, nextPart.partKeyOffset, 0, consumer)
         result ++= consumer.labelValues
       } else {
         result += ZeroCopyUTF8String(nextPart.partKeyBytes)

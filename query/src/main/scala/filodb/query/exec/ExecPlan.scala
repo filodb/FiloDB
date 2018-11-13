@@ -57,12 +57,6 @@ trait BaseExecPlan extends QueryCommand {
     *
     * The return Task must be "run" for execution to ensue. See
     * Monix documentation for further information on Task.
-    * This first invokes the doExecute abstract method, then applies
-    * the RangeVectorMappers associated with this plan node.
-    *
-    * The returned task can be used to perform post-execution steps
-    * such as sending off an asynchronous response message etc.
-    *
     */
   def execute(source: ChunkSource,
               dataset: Dataset,
@@ -122,11 +116,9 @@ trait ExecPlan extends BaseExecPlan {
   protected def args: String
 
   /**
-    * Facade for the execution orchestration of the plan sub-tree
+    * Facade for the execution orchestration of the timeseries execution plan sub-tree
     * starting from this node.
     *
-    * The return Task must be "run" for execution to ensue. See
-    * Monix documentation for further information on Task.
     * This first invokes the doExecute abstract method, then applies
     * the RangeVectorMappers associated with this plan node.
     *

@@ -26,7 +26,7 @@ trait MetadataExecPlan extends BaseExecPlan {
   /**
     * Schema of QueryResponse returned by running execute()
     */
-  def schema(dataset: Dataset): ResultSchema = ???
+  def schema(dataset: Dataset): ResultSchema
 
   /**
     * Facade for the metadata query execution orchestration of the plan sub-tree
@@ -73,7 +73,7 @@ trait MetadataExecPlan extends BaseExecPlan {
                           dataset: Dataset,
                           queryConfig: QueryConfig)
                          (implicit sched: Scheduler,
-                          timeout: FiniteDuration): Observable[RangeVector]
+                          timeout: FiniteDuration): Observable[RecordList]
 
   /**
     * Prints the ExecPlan and RangeVectorTransformer execution flow as a tree
@@ -87,9 +87,9 @@ trait MetadataExecPlan extends BaseExecPlan {
   }
 }
 
-final case class NonLeafMetadataExecPlan(id: String,
-                                         dispatcher: PlanDispatcher,
-                                         children: Seq[BaseExecPlan]) extends MetadataExecPlan {
+final case class RecordListConcatExec(id: String,
+                                      dispatcher: PlanDispatcher,
+                                      children: Seq[BaseExecPlan]) extends MetadataExecPlan {
 
   require(!children.isEmpty)
 
@@ -105,50 +105,51 @@ final case class NonLeafMetadataExecPlan(id: String,
   /**
     * Being a non-leaf node, this implementation encompasses the logic
     * of child plan execution. It then composes the sub-query results
-    * using the abstract method 'compose' to arrive at the higher level
+    * using the method 'compose' to arrive at the higher level
     * result
     */
   final protected def doExecute(source: ChunkSource,
                                 dataset: Dataset,
                                 queryConfig: QueryConfig)
                                (implicit sched: Scheduler,
-                                timeout: FiniteDuration): Observable[RangeVector] = {
+                                timeout: FiniteDuration): Observable[RecordList] = {
     val childTasks = Observable.fromIterable(children).mapAsync { plan =>
       plan.dispatcher.dispatch(plan).onErrorHandle { case ex: Throwable =>
         qLogger.error(s"queryId: ${id} Execution failed for sub-query ${plan.printTree()}", ex)
         QueryError(id, ex)
       }
     }
-    compose(childTasks, queryConfig)
+    compose(dataset, childTasks, queryConfig)
   }
 
   /**
-    * Sub-class non-leaf nodes should provide their own implementation of how
-    * to compose the sub-query results here.
+    * Compose the sub-query/leaf results here.
     */
-  protected def compose(childResponses: Observable[QueryResponse],
+  protected def compose(dataset: Dataset,
+                        childResponses: Observable[QueryResponse],
                         queryConfig: QueryConfig)(implicit sched: Scheduler,
-                                                  timeout: FiniteDuration): Observable[RangeVector] = {
+                                                  timeout: FiniteDuration): Observable[RecordList] = {
     qLogger.debug(s"NonLeafMetadataExecPlan: Concatenating results")
     val taskOfResults = childResponses.map {
       case RecordListResult(_, result) => result
       case QueryError(_, ex)         => throw ex
     }.toListL.map { resp =>
       var metadataResult = Seq.empty[UTF8Str]
-      // extract record schema from the first record - since schema is same for all the leaf results
-      val schema = resp.head match {
-        case RecordList(records, schema) => schema
-      }
       resp.foreach(rv => {
         rv match {
           case RecordList(records, _) => metadataResult ++= records
         }
       })
-      RecordList(metadataResult.distinct.toList, schema) //distinct -> result may have duplicates in case of labelValues
+      //distinct -> result may have duplicates in case of labelValues
+      RecordList(metadataResult.distinct.toList, schema(dataset))
     }
     Observable.fromTask(taskOfResults)
   }
 
+  /**
+    * Schema of QueryResponse returned by running execute()
+    */
+  override def schema(dataset: Dataset): ResultSchema = children.head.schema(dataset)
 }
 
 
@@ -169,17 +170,22 @@ final case class  SeriesKeyExecLeafPlan(id: String,
                           dataset1: Dataset,
                           queryConfig: QueryConfig)
                          (implicit sched: Scheduler,
-                          timeout: FiniteDuration): Observable[RangeVector] = {
+                          timeout: FiniteDuration): Observable[RecordList] = {
 
     if (source.isInstanceOf[MemStore]) {
       var memStore = source.asInstanceOf[MemStore]
-      val response = memStore.indexValuesWithFilters(dataset, shard, filters, Option.empty, end, start)
-      Observable(RecordList(response, new ResultSchema(Seq(ColumnInfo("TimeSeries",
-        ColumnType.PartitionKeyColumn)), 1)))
+      val response = memStore.indexValuesWithFilters(dataset, shard, filters, Option.empty, end, start, limit)
+      Observable.now(RecordList(response, schema(dataset1)))
     } else {
       Observable.empty
     }
   }
+
+  /**
+    * Schema of QueryResponse returned by running execute()
+    */
+  override def schema(dataset: Dataset): ResultSchema = new ResultSchema(Seq(ColumnInfo("TimeSeries",
+    ColumnType.PartitionKeyColumn)), 1)
 }
 
 final case class  LabelValuesExecLeafPlan(id: String,
@@ -189,16 +195,16 @@ final case class  LabelValuesExecLeafPlan(id: String,
                                         dataset: DatasetRef,
                                         shard: Int,
                                         filters: Seq[ColumnFilter],
-                                        column: String) extends MetadataExecPlan {
+                                        column: String,
+                                        lookBackInMillis: Long) extends MetadataExecPlan {
 
-  final def lookBackInMillis: Long = 86400000 // (24hrs) TODO get from configuration
   final def children: Seq[ExecPlan] = Nil
 
   protected def doExecute(source: ChunkSource,
                           dataset1: Dataset,
                           queryConfig: QueryConfig)
                          (implicit sched: Scheduler,
-                          timeout: FiniteDuration): Observable[RangeVector] = {
+                          timeout: FiniteDuration): Observable[RecordList] = {
 
     if (source.isInstanceOf[MemStore]) {
       var memStore = source.asInstanceOf[MemStore]
@@ -207,12 +213,17 @@ final case class  LabelValuesExecLeafPlan(id: String,
       val start = end - lookBackInMillis
       val response = filters.isEmpty match {
         case true => memStore.indexValues(dataset, shard, column).map(_.term).toList
-        case false => memStore.indexValuesWithFilters(dataset, shard, filters, Option(column), end, start)
+        case false => memStore.indexValuesWithFilters(dataset, shard, filters, Option(column), end, start, limit)
       }
-      Observable(RecordList(response, new ResultSchema(Seq(ColumnInfo(column, ColumnType.StringColumn)), 1)))
+      Observable.now(RecordList(response, schema(dataset1)))
     } else {
       Observable.empty
     }
   }
 
+  /**
+    * Schema of QueryResponse returned by running execute()
+    */
+  override def schema(dataset: Dataset): ResultSchema =
+    new ResultSchema(Seq(ColumnInfo(column, ColumnType.StringColumn)), 1)
 }

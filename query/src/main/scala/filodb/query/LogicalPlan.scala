@@ -39,7 +39,8 @@ case class RawSeries(rangeSelector: RangeSelector,
 
 
 case class LabelValues(labelName: String,
-                       filters: Seq[ColumnFilter]) extends MetadataQueryPlan
+                       filters: Seq[ColumnFilter],
+                       lookbackTimeInMillis: Long) extends MetadataQueryPlan
 
 case class SeriesKeysByFilters(filters: Seq[ColumnFilter],
                                start: Long,
