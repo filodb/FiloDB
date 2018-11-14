@@ -218,10 +218,10 @@ class QueryEngine(dataset: Dataset,
   private def materializeLabelValues(queryId: String,
                                       submitTime: Long,
                                       options: QueryOptions,
-                                      lp: LabelValues): Seq[LabelValuesExecLeafPlan] = {
+                                      lp: LabelValues): Seq[LabelValuesExec] = {
     shardsFromFilters(lp.filters, options).map { shard =>
       val dispatcher = dispatcherForShard(shard)
-      exec.LabelValuesExecLeafPlan(queryId, submitTime, options.itemLimit, dispatcher, dataset.ref, shard,
+      exec.LabelValuesExec(queryId, submitTime, options.itemLimit, dispatcher, dataset.ref, shard,
         lp.filters, lp.labelName, lp.lookbackTimeInMillis)
     }
   }
@@ -229,10 +229,10 @@ class QueryEngine(dataset: Dataset,
   private def materializeSeriesKeysByFilters(queryId: String,
                                      submitTime: Long,
                                      options: QueryOptions,
-                                     lp: SeriesKeysByFilters): Seq[SeriesKeyExecLeafPlan] = {
+                                     lp: SeriesKeysByFilters): Seq[SeriesKeysExec] = {
     shardsFromFilters(lp.filters, options).map { shard =>
       val dispatcher = dispatcherForShard(shard)
-      SeriesKeyExecLeafPlan(queryId, submitTime, options.itemLimit, dispatcher, dataset.ref, shard,
+      SeriesKeysExec(queryId, submitTime, options.itemLimit, dispatcher, dataset.ref, shard,
         lp.filters, lp.start, lp.end, Nil)
     }
   }

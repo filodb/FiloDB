@@ -4,8 +4,9 @@ import java.io.OutputStream
 import java.sql.Timestamp
 import javax.activation.UnsupportedDataTypeException
 
+import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.duration._
-import scala.util.{Failure, Success => SSuccess, Try}
+import scala.util.{Failure, Try, Success => SSuccess}
 
 import com.opencsv.CSVWriter
 import com.quantifind.sumac.{ArgMain, FieldArgs}
@@ -18,12 +19,12 @@ import filodb.core._
 import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.metadata.{Column, Dataset, DatasetOptions}
 import filodb.core.metadata.Column.ColumnType.{PartitionKeyColumn, StringColumn}
-import filodb.core.query.{RecordList, SeqMapConsumer}
+import filodb.core.query.{ColumnFilter, RecordList, SeqMapConsumer}
 import filodb.core.store._
 import filodb.memory.format.RowReader
-import filodb.prometheus.ast.{MetadataQueryParams, QueryParams}
+import filodb.prometheus.ast.QueryParams
 import filodb.prometheus.parse.Parser
-import filodb.query.{LogicalPlan, QueryError, QueryResult, RecordListResult}
+import filodb.query._
 
 // scalastyle:off
 class Arguments extends FieldArgs {
@@ -49,7 +50,8 @@ class Arguments extends FieldArgs {
   var promql0: Option[String] = None
   var promql: Option[String] = None
   var metadata: Option[String] = None
-  var metadataLabelValues: Option[String] = None
+  var metadataLabel: Option[String] = None
+  var metadataLabelFilter: Option[String] = None
   var start: Long = System.currentTimeMillis() / 1000 // promql argument is seconds since epoch
   var end: Long = System.currentTimeMillis() / 1000 // promql argument is seconds since epoch
   var step: Long = 10 // in seconds
@@ -198,16 +200,16 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
               val options = QOptions(args.limit, args.sampleLimit, args.everyNSeconds.map(_.toInt),
                 timeout, args.shards.map(_.map(_.toInt)), spread)
               parseMetadataQuery(remote, query, args.dataset.get,
-                MetadataQueryParams(args.start, args.end), options)
+                QueryParams(args.start, -1, args.end), options)
             }
           }.orElse {
-            args.metadataLabelValues.map { query =>
+            args.metadataLabel.map { labelName =>
               require(args.host.nonEmpty && args.dataset.nonEmpty, "--host and --dataset must be defined")
               val remote = Client.standaloneClient(system, args.host.get, args.port)
               val options = QOptions(args.limit, args.sampleLimit, args.everyNSeconds.map(_.toInt),
                 timeout, args.shards.map(_.map(_.toInt)), spread)
-              parseMetadataLabelValuesQuery(remote, query, args.dataset.get,
-                MetadataQueryParams(args.start, args.end), options)
+              parseMetadataLabelValuesQuery(remote, labelName, args.metadataLabelFilter, args.dataset.get,
+                QueryParams(args.start, -1, args.end), options)
             }
           }.orElse {
             args.select.map { selectCols =>
@@ -331,16 +333,23 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
                             spread: Int)
 
   def parseMetadataQuery(client: LocalClient, query: String, dataset: String,
-                         queryParams: MetadataQueryParams,
+                         queryParams:QueryParams,
                          options: QOptions): Unit = {
     val logicalPlan = Parser.metadataQueryToLogicalPlan(query, queryParams)
     executeQuery2(client, dataset, logicalPlan, options)
   }
 
-  def parseMetadataLabelValuesQuery(client: LocalClient, query: String, dataset: String,
-                         queryParams: MetadataQueryParams,
+  def parseMetadataLabelValuesQuery(client: LocalClient, labelName: String, filters: Option[String], dataset: String,
+                         queryParams: QueryParams,
                          options: QOptions): Unit = {
-    val logicalPlan = Parser.metadataQueryToLogicalPlan(query, queryParams)
+    val columnFilter = new ArrayBuffer[ColumnFilter]()
+    filters.map(colFilters => {
+      colFilters.split(",").map(colFilter => {
+        val keyVal = colFilter.split("=")
+        columnFilter += new ColumnFilter(keyVal(0), query.Filter.Equals((keyVal(1))))
+      })
+    })
+    val logicalPlan = LabelValues(labelName, columnFilter.toSeq, 8640000)
     executeQuery2(client, dataset, logicalPlan, options)
   }
 

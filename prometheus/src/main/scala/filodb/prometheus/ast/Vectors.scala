@@ -1,7 +1,5 @@
 package filodb.prometheus.ast
 
-import scala.collection.mutable.ArrayBuffer
-
 import filodb.core.query
 import filodb.core.query.ColumnFilter
 import filodb.query._
@@ -143,28 +141,11 @@ trait Vectors extends Scalars with TimeUnits with Base {
     }
   }
 
-  case class SeriesKeysExpression(metricName: String,
-                                  labelSelection: Seq[LabelMatch]) extends Vector with Metadata {
-    private val columns: ArrayBuffer[String] = new ArrayBuffer[String]()
-    private[prometheus] val columnFilters: ArrayBuffer[ColumnFilter] = new ArrayBuffer[ColumnFilter]()
+  case class MetadataExpression(instantExpression: InstantExpression) extends Vector with Metadata {
 
-    val nameLabels = labelSelection.filter(_.label == "__name__")
-    if (nameLabels.nonEmpty && !nameLabels.head.label.equals(metricName)) {
-      throw new IllegalArgumentException("Metric name should not be set twice")
+    override def toMetadataQueryPlan(queryParams: QueryParams): MetadataQueryPlan = {
+      SeriesKeysByFilters(instantExpression.columnFilters, queryParams.start * 1000, queryParams.end * 1000)
     }
-    columnFilters += ColumnFilter("__name__", query.Filter.Equals(metricName))
-    columnFilters ++= labelMatchesToFilters(labelSelection)
-
-    override def toMetadataQueryPlan(queryParams: MetadataQueryParams): MetadataQueryPlan =
-      SeriesKeysByFilters(columnFilters, queryParams.start * 1000, queryParams.end * 1000)
-  }
-
-  case class LabelValuesExpression(labelName: String,
-                                  labelSelection: Seq[LabelMatch]) extends Vector with Metadata {
-    private[prometheus] val columnFilters: ArrayBuffer[ColumnFilter] = new ArrayBuffer[ColumnFilter]()
-    columnFilters ++= labelMatchesToFilters(labelSelection)
-    override def toMetadataQueryPlan(queryParams: MetadataQueryParams): MetadataQueryPlan =
-      LabelValues(labelName, columnFilters, queryParams.lookBackTimeInMillis)
   }
 
   /**

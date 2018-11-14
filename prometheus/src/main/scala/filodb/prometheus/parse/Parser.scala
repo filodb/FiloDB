@@ -2,7 +2,7 @@ package filodb.prometheus.parse
 
 import scala.util.parsing.combinator.{JavaTokenParsers, PackratParsers, RegexParsers}
 
-import filodb.prometheus.ast.{Expressions, MetadataQueryParams, QueryParams}
+import filodb.prometheus.ast.{Expressions, QueryParams}
 import filodb.query._
 
 trait BaseParser extends Expressions with JavaTokenParsers with RegexParsers with PackratParsers {
@@ -17,11 +17,6 @@ trait BaseParser extends Expressions with JavaTokenParsers with RegexParsers wit
 
   lazy val string: PackratParser[Identifier] = {
     "[a-zA-Z_][a-zA-Z0-9_:|`~!@$#%^&*()s+=?><:;{}-]*".r ^^ { str => Identifier(str) }
-  }
-
-  // this is the prefix for label value selection - metadataLabelSelector, e.g "label=<metric-name>{matchers}"
-  lazy val indexKey: PackratParser[Identifier] = {
-    "label\\=".r ^^ { str => Identifier(str) }
   }
 
   protected lazy val quotedSeries: PackratParser[Identifier] =
@@ -208,27 +203,6 @@ trait Selector extends Operator with Unit with BaseParser {
       InstantExpression(metricName.str, ls.getOrElse(Seq.empty), opt.map(_.duration))
   }
 
-  /**
-    * This special case parsing value is needed for creating SeriesKeysExpression object to create
-    * SeriesKeysByFilters logical plan. Otherwise the expression will map to InstantExpression which
-    * is already used for fetching instant sample value.
-    */
-  lazy val metadataSelector: PackratParser[SeriesKeysExpression]
-  = labelIdentifier ~ labelSelection.? ^^ {
-    case metricName ~ ls =>
-      SeriesKeysExpression(metricName.str, ls.getOrElse(Seq.empty))
-  }
-
-  /**
-    * This special case parsing value is needed for creating LabelValuesExpression object to create
-    * LabelValues logical plan.
-    */
-  lazy val metadataLabelSelector: PackratParser[LabelValuesExpression]
-  = indexKey ~ labelIdentifier ~ labelSelection.? ^^ {
-    case ignore ~ labelName ~ ls =>
-      LabelValuesExpression(labelName.str, ls.getOrElse(Seq.empty))
-  }
-
   lazy val rangeVectorSelector: PackratParser[RangeExpression] =
     labelIdentifier ~ labelSelection.? ~ "[" ~ duration ~ "]" ~ offset.? ^^ {
       case metricName ~ ls ~ leftBracket ~ td ~ rightBracket ~ opt =>
@@ -316,8 +290,6 @@ trait Expression extends Aggregates with Selector with Numeric with Join {
       )
     }
 
-  lazy val metadataExpression: PackratParser[Expression] = metadataLabelSelector | metadataSelector
-
   lazy val expression: PackratParser[Expression] =
     binaryExpression | aggregateExpression |
       function | unaryExpression | vector | numericalExpression | simpleSeries | "(" ~> expression <~ ")"
@@ -344,24 +316,10 @@ object Parser extends Expression {
     }
   }
 
-  def parseMetadataQuery(query: String): Expression = {
-    parseAll(metadataExpression, query) match {
-      case s: Success[_] => s.get.asInstanceOf[Expression]
-      case e: Error => handleError(e, query)
-      case f: Failure => handleFailure(f, query)
-    }
-  }
-
-  def metadataQueryToLogicalPlan(query: String): LogicalPlan = {
-    val queryParams = MetadataQueryParams(-1, -1)
-    metadataQueryToLogicalPlan(query, queryParams)
-  }
-
-  def metadataQueryToLogicalPlan(query: String, queryParams: MetadataQueryParams): LogicalPlan = {
-    // MetadataQueryParams is used instead of QueryParams as it has step, which is not needed for Metadata Queries
-    val expression = parseMetadataQuery(query)
+  def metadataQueryToLogicalPlan(query: String, queryParams: QueryParams): LogicalPlan = {
+    val expression = parseQuery(query)
     expression match {
-      case p: Metadata => p.toMetadataQueryPlan(queryParams)
+      case p: InstantExpression => MetadataExpression(p).toMetadataQueryPlan(queryParams)
       case _ => throw new UnsupportedOperationException()
     }
   }

@@ -22,7 +22,6 @@ import filodb.query.Query.qLogger
   */
 trait MetadataExecPlan extends BaseExecPlan {
 
-
   /**
     * Schema of QueryResponse returned by running execute()
     */
@@ -153,16 +152,16 @@ final case class RecordListConcatExec(id: String,
 }
 
 
-final case class  SeriesKeyExecLeafPlan(id: String,
-                                        submitTime: Long,
-                                        limit: Int,
-                                        dispatcher: PlanDispatcher,
-                                        dataset: DatasetRef,
-                                        shard: Int,
-                                        filters: Seq[ColumnFilter],
-                                        start: Long,
-                                        end: Long,
-                                        columns: Seq[String]) extends MetadataExecPlan {
+final case class  SeriesKeysExec(id: String,
+                                 submitTime: Long,
+                                 limit: Int,
+                                 dispatcher: PlanDispatcher,
+                                 dataset: DatasetRef,
+                                 shard: Int,
+                                 filters: Seq[ColumnFilter],
+                                 start: Long,
+                                 end: Long,
+                                 columns: Seq[String]) extends MetadataExecPlan {
 
   final def children: Seq[ExecPlan] = Nil
 
@@ -188,15 +187,15 @@ final case class  SeriesKeyExecLeafPlan(id: String,
     ColumnType.PartitionKeyColumn)), 1)
 }
 
-final case class  LabelValuesExecLeafPlan(id: String,
-                                        submitTime: Long,
-                                        limit: Int,
-                                        dispatcher: PlanDispatcher,
-                                        dataset: DatasetRef,
-                                        shard: Int,
-                                        filters: Seq[ColumnFilter],
-                                        column: String,
-                                        lookBackInMillis: Long) extends MetadataExecPlan {
+final case class  LabelValuesExec(id: String,
+                                  submitTime: Long,
+                                  limit: Int,
+                                  dispatcher: PlanDispatcher,
+                                  dataset: DatasetRef,
+                                  shard: Int,
+                                  filters: Seq[ColumnFilter],
+                                  column: String,
+                                  lookBackInMillis: Long) extends MetadataExecPlan {
 
   final def children: Seq[ExecPlan] = Nil
 

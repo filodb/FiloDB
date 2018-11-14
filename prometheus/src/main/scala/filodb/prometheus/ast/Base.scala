@@ -7,8 +7,6 @@ import filodb.query.{MetadataQueryPlan, PeriodicSeriesPlan, RawSeriesPlan}
  */
 case class QueryParams(start: Long, step: Long, end: Long)
 
-case class MetadataQueryParams(start: Long, end: Long, lookBackTimeInMillis: Long = 86400000)
-
 trait Base {
 
   trait Expression
@@ -24,7 +22,7 @@ trait Base {
   }
 
   trait Metadata extends Expression {
-    def toMetadataQueryPlan(queryParams: MetadataQueryParams) : MetadataQueryPlan
+    def toMetadataQueryPlan(queryParams: QueryParams) : MetadataQueryPlan
   }
 
   /**
