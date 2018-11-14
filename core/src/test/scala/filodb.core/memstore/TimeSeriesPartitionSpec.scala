@@ -78,7 +78,7 @@ class TimeSeriesPartitionSpec extends MemFactoryCleanupTest with ScalaFutures {
     part.appendingChunkLen shouldEqual 1
     part.unflushedChunksets shouldEqual 1
     val minData = data.map(_.getDouble(1)).take(1)
-    val iterator = part.timeRangeRows(LastSampleChunkScan, Array(1))
+    val iterator = part.timeRangeRows(WriteBufferChunkScan, Array(1))
     iterator.map(_.getDouble(0)).toSeq shouldEqual minData
   }
 
@@ -271,7 +271,7 @@ class TimeSeriesPartitionSpec extends MemFactoryCleanupTest with ScalaFutures {
     part.makeFlushChunks(blockHolder).isEmpty shouldEqual true
 
     val minData = data.map(_.getDouble(1))
-    val allData = part.timeRangeRows(LastSampleChunkScan, Array(1)).map(_.getDouble(0))
+    val allData = part.timeRangeRows(InMemoryChunkScan, Array(1)).map(_.getDouble(0))
     allData.toSeq shouldEqual minData
   }
 
@@ -329,7 +329,7 @@ class TimeSeriesPartitionSpec extends MemFactoryCleanupTest with ScalaFutures {
     myBufferPool.poolSize shouldEqual (origPoolSize - 1)
 
     val minData = data.map(_.getDouble(1)) drop 100
-    val readData1 = part.timeRangeRows(LastSampleChunkScan, Array(1)).map(_.getDouble(0))
+    val readData1 = part.timeRangeRows(WriteBufferChunkScan, Array(1)).map(_.getDouble(0))
     readData1.toBuffer shouldEqual minData
 
     // Now simulate a flush, verify that both chunksets flushed

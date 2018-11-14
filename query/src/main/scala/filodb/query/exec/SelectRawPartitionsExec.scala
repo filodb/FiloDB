@@ -8,7 +8,7 @@ import monix.reactive.Observable
 import filodb.core.{DatasetRef, Types}
 import filodb.core.metadata.Dataset
 import filodb.core.query.{ColumnFilter, RangeVector, ResultSchema}
-import filodb.core.store.{AllChunkScan, ChunkSource, FilteredPartitionScan, RowKeyChunkScan, ShardSplit}
+import filodb.core.store._
 import filodb.query.QueryConfig
 
 
@@ -40,14 +40,15 @@ final case class SelectRawPartitionsExec(id: String,
 
     val chunkMethod = rowKeyRange match {
       case RowKeyInterval(from, to) => RowKeyChunkScan(from, to)
-      case AllChunks => AllChunkScan
-      case WriteBuffers => ???
-      case EncodedChunks => ???
+      case AllChunks                => AllChunkScan
+      case WriteBuffers             => WriteBufferChunkScan
+      case InMemoryChunks           => InMemoryChunkScan
+      case EncodedChunks            => ???
     }
     val partMethod = FilteredPartitionScan(ShardSplit(shard), filters)
     source.rangeVectors(dataset, colIds, partMethod, chunkMethod)
   }
 
-  protected def args: String = s"shard=$shard, rowKeyRange=$rowKeyRange, filters=$filters"
+  protected def args: String = s"shard=$shard, rowKeyRange=$rowKeyRange, filters=$filters, colIDs=$colIds"
 }
 

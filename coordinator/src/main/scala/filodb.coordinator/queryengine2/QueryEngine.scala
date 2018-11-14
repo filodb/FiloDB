@@ -284,9 +284,10 @@ class QueryEngine(dataset: Dataset,
     rangeSelector match {
       case IntervalSelector(from, to) => RowKeyInterval(BinaryRecord(dataset, from),
                                                         BinaryRecord(dataset, to))
-      case AllChunksSelector => AllChunks
-      case EncodedChunksSelector => EncodedChunks
-      case WriteBufferSelector => WriteBuffers
+      case AllChunksSelector          => AllChunks
+      case EncodedChunksSelector      => EncodedChunks
+      case WriteBufferSelector        => WriteBuffers
+      case InMemoryChunksSelector     => InMemoryChunks
       case _ => ???
     }
   }

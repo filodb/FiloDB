@@ -66,8 +66,8 @@ trait Aggregates extends Vectors with TimeUnits with Base {
     }
 
 
-    def toPeriodicSeriesPlan(queryParams: QueryParams): PeriodicSeriesPlan = {
-      val periodicSeriesPlan = series.toPeriodicSeriesPlan(queryParams)
+    def toPeriodicSeriesPlan(timeParams: TimeRangeParams): PeriodicSeriesPlan = {
+      val periodicSeriesPlan = series.toPeriodicSeriesPlan(timeParams)
 
       aggregateGrouping match {
         case Some(b: By) =>

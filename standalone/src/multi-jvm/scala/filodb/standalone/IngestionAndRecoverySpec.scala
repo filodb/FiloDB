@@ -170,8 +170,15 @@ abstract class IngestionAndRecoverySpec extends StandaloneMultiJvmSpec(Ingestion
     }
   }
 
+  var rangeStart = 0L
+  var rangeEnd = 0L
+  var rangeResponse: Map[String, Array[Double]] = _
+
   it should "answer query successfully" in {
     runOn(first) {
+      rangeStart = queryTimestamp - 4.minutes.toMillis
+      rangeEnd   = rangeStart + 15.minutes.toMillis
+
       // Print the top values in each shard just for debugging
       topValuesInShards(client1, "app", 0 to 3)
       topValuesInShards(client1, "dc", 0 to 3)
@@ -182,6 +189,8 @@ abstract class IngestionAndRecoverySpec extends StandaloneMultiJvmSpec(Ingestion
       val remoteReadQueryResponse = runRemoteReadQuery(queryTimestamp)
       query1Response shouldEqual remoteReadQueryResponse
 
+      // Do a range query to find missing values
+      rangeResponse = runRangeQuery(client1, rangeStart, rangeEnd)
     }
     enterBarrier("query1-answered")
   }
@@ -225,8 +234,14 @@ abstract class IngestionAndRecoverySpec extends StandaloneMultiJvmSpec(Ingestion
 
   it should "answer promQL query successfully with same value" in {
     runOn(first) {
+      // Debug chunk metadata
+      printChunkMeta(client2)
+
       val query2Response = runCliQuery(client2, queryTimestamp)
       (query2Response - query1Response).abs should be < 0.0001
+
+      val rangeResp2 = runRangeQuery(client2, rangeStart, rangeEnd)
+      compareRangeResults(rangeResponse, rangeResp2)
     }
     enterBarrier("query2-answered")
   }

@@ -86,7 +86,6 @@ trait MemStore extends ChunkSource {
    * @param flushSched the Scheduler to use to schedule flush tasks
    * @param flushStream the stream of FlushCommands for regular flushing of chunks to ChunkSink
    * @param diskTimeToLiveSeconds the time for chunks in this stream to live on disk (Cassandra)
-   * @param errHandler this is called when an ingestion error occurs
    * @return a CancelableFuture for cancelling the stream subscription, which should be done on teardown
    *        the Future completes when both stream and flushStream ends.  It is up to the caller to ensure this.
    */
@@ -95,8 +94,7 @@ trait MemStore extends ChunkSource {
                    stream: Observable[SomeData],
                    flushSched: Scheduler,
                    flushStream: Observable[FlushCommand] = FlushStream.empty,
-                   diskTimeToLiveSeconds: Int = 259200)
-                  (errHandler: Throwable => Unit): CancelableFuture[Unit]
+                   diskTimeToLiveSeconds: Int = 259200): CancelableFuture[Unit]
 
 
   def recoverIndex(dataset: DatasetRef, shard: Int): Future[Unit]

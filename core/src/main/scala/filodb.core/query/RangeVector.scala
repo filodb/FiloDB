@@ -52,7 +52,8 @@ final case class PartitionRangeVectorKey(partBase: Array[Byte],
                                          partOffset: Long,
                                          partSchema: RecordSchema,
                                          partKeyCols: Seq[ColumnInfo],
-                                         sourceShard: Int) extends RangeVectorKey {
+                                         sourceShard: Int,
+                                         groupNum: Int) extends RangeVectorKey {
   override def sourceShards: Seq[Int] = Seq(sourceShard)
   def labelValues: Map[UTF8Str, UTF8Str] = {
     partKeyCols.zipWithIndex.flatMap { case (c, pos) =>
@@ -67,7 +68,7 @@ final case class PartitionRangeVectorKey(partBase: Array[Byte],
       }
     }.toMap
   }
-  override def toString: String = s"/shard:$sourceShard/${partSchema.stringify(partBase, partOffset)}"
+  override def toString: String = s"/shard:$sourceShard/${partSchema.stringify(partBase, partOffset)} [grp$groupNum]"
 }
 
 final case class CustomRangeVectorKey(labelValues: Map[UTF8Str, UTF8Str]) extends RangeVectorKey {

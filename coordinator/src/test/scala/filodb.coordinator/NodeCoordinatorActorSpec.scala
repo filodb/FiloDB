@@ -16,7 +16,7 @@ import filodb.core._
 import filodb.core.memstore.TimeSeriesMemStore
 import filodb.core.metadata.{Column, Dataset}
 import filodb.core.query._
-import filodb.prometheus.ast.QueryParams
+import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
 
 object NodeCoordinatorActorSpec extends ActorSpecConfig
@@ -54,15 +54,15 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
   implicit val ec = cluster.ec
 
   val strategy = DefaultShardAssignmentStrategy
-  protected val shardManager = new ShardManager(DefaultShardAssignmentStrategy)
+  protected val shardManager = new ShardManager(cluster.settings, DefaultShardAssignmentStrategy)
 
 
   val clusterActor = system.actorOf(Props(new Actor {
     import StatusActor._
     def receive: Receive = {
       case SubscribeShardUpdates(ref) => shardManager.subscribe(sender(), ref)
-      case e: ShardEvent              => shardManager.updateFromShardEvent(e)
-      case EventEnvelope(seq, events) => events.foreach(shardManager.updateFromShardEvent)
+      case e: ShardEvent              => shardManager.updateFromExternalShardEvent(sender(), e)
+      case EventEnvelope(seq, events) => events.foreach(e => shardManager.updateFromExternalShardEvent(sender(), e))
                                          sender() ! StatusAck(seq)
     }
   }))
@@ -193,7 +193,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
       val ref = setupTimeSeries()
       val to = System.currentTimeMillis() / 1000
       val from = to - 50
-      val qParams = QueryParams(from, 10, to)
+      val qParams = TimeStepParams(from, 10, to)
       val logPlan = Parser.queryRangeToLogicalPlan("topk(a1b, series_1)", qParams)
       val q1 = LogicalPlan2Query(ref, logPlan, qOpt)
       probe.send(coordinatorActor, q1)
@@ -353,7 +353,7 @@ class NodeCoordinatorActorSpec extends ActorTest(NodeCoordinatorActorSpec.getNew
     val split = memStore.getScanSplits(ref, 1).head
     val q2 = LogicalPlan2Query(ref,
                Aggregate(AggregationOperator.Sum,
-                 PeriodicSeries(    // No filters, operate on all rows.  Yes this is not a possible PromQL query. So what
+                 PeriodicSeries(  // No filters, operate on all rows.  Yes this is not a possible PromQL query. So what
                    RawSeries(AllChunksSelector, Nil, Seq("AvgTone")), 0, 10, 99)), qOpt)
     probe.send(coordinatorActor, q2)
     probe.expectMsgPF() {

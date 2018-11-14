@@ -254,6 +254,12 @@ class ParserSpec extends FunSpec with Matchers {
         "PeriodicSeries(RawSeries(IntervalSelector(List(1524855688000),List(1524855988000)),List(ColumnFilter(job,Equals(prometheus)), ColumnFilter(group,Equals(canary)), ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000,1524855988000)",
       "http_requests_total{job=\"prometheus\",__col__=\"min\"}" ->
         "PeriodicSeries(RawSeries(IntervalSelector(List(1524855688000),List(1524855988000)),List(ColumnFilter(job,Equals(prometheus)), ColumnFilter(__name__,Equals(http_requests_total))),List(min)),1524855988000,1000,1524855988000)",
+      // Internal FiloDB debug function
+      "_filodb_chunkmeta_all(http_requests_total{job=\"prometheus\"})" ->
+        "RawChunkMeta(IntervalSelector(List(1524855988000),List(1524855988000)),List(ColumnFilter(job,Equals(prometheus)), ColumnFilter(__name__,Equals(http_requests_total))),)",
+      "_filodb_chunkmeta_all(http_requests_total{job=\"prometheus\",__col__=\"avg\"})" ->
+        "RawChunkMeta(IntervalSelector(List(1524855988000),List(1524855988000)),List(ColumnFilter(job,Equals(prometheus)), ColumnFilter(__name__,Equals(http_requests_total))),avg)",
+
       "sum(http_requests_total) by (application, group)" ->
         "Aggregate(Sum,PeriodicSeries(RawSeries(IntervalSelector(List(1524855688000),List(1524855988000)),List(ColumnFilter(__name__,Equals(http_requests_total))),List()),1524855988000,1000,1524855988000),List(),List(application, group),List())",
       "sum(http_requests_total) without (instance)" ->

@@ -126,25 +126,25 @@ trait Vectors extends Scalars with TimeUnits with Base {
     }
 
     private[prometheus] val columnFilters = labelMatchesToFilters(labelSelection)
-    private val columns = labelMatchesToColumnName(labelSelection)
+    private[prometheus] val columns = labelMatchesToColumnName(labelSelection)
     private[prometheus] val nameFilter = ColumnFilter(PromMetricLabel, query.Filter.Equals(metricName))
 
-    def toPeriodicSeriesPlan(queryParams: QueryParams): PeriodicSeriesPlan = {
+    def toPeriodicSeriesPlan(timeParams: TimeRangeParams): PeriodicSeriesPlan = {
 
       // we start from 5 minutes earlier that provided start time in order to include last sample for the
       // start timestamp. Prometheus goes back unto 5 minutes to get sample before declaring as stale
       PeriodicSeries(
-        RawSeries(IntervalSelector(Seq((queryParams.start-staleDataLookbackSeconds) * 1000),
-                                   Seq(queryParams.end * 1000)), columnFilters :+ nameFilter, columns),
-        queryParams.start * 1000, queryParams.step * 1000, queryParams.end * 1000
+        RawSeries(timeParamToSelector(timeParams, staleDataLookbackSeconds * 1000),
+                  columnFilters :+ nameFilter, columns),
+        timeParams.start * 1000, timeParams.step * 1000, timeParams.end * 1000
       )
     }
   }
 
   case class MetadataExpression(instantExpression: InstantExpression) extends Vector with Metadata {
 
-    override def toMetadataQueryPlan(queryParams: QueryParams): MetadataQueryPlan = {
-      SeriesKeysByFilters(instantExpression.columnFilters, queryParams.start * 1000, queryParams.end * 1000)
+    override def toMetadataQueryPlan(timeParams: TimeRangeParams): MetadataQueryPlan = {
+      SeriesKeysByFilters(instantExpression.columnFilters, timeParams.start * 1000, timeParams.end * 1000)
     }
   }
 
@@ -166,18 +166,17 @@ trait Vectors extends Scalars with TimeUnits with Base {
     }
 
     private[prometheus] val columnFilters = labelMatchesToFilters(labelSelection)
-    private val columns = labelMatchesToColumnName(labelSelection)
+    private[prometheus] val columns = labelMatchesToColumnName(labelSelection)
     private[prometheus] val nameFilter = ColumnFilter(PromMetricLabel, query.Filter.Equals(metricName))
 
     val allFilters: Seq[ColumnFilter] = columnFilters :+ nameFilter
 
-    def toRawSeriesPlan(queryParams: QueryParams, isRoot: Boolean): RawSeriesPlan = {
-      if (isRoot && queryParams.start != queryParams.end) {
+    def toRawSeriesPlan(timeParams: TimeRangeParams, isRoot: Boolean): RawSeriesPlan = {
+      if (isRoot && timeParams.start != timeParams.end) {
         throw new UnsupportedOperationException("Range expression is not allowed in query_range")
       }
       // multiply by 1000 to convert unix timestamp in seconds to millis
-      RawSeries(IntervalSelector(Seq(queryParams.start * 1000 - window.millis),
-                                 Seq(queryParams.end * 1000)), allFilters, columns)
+      RawSeries(timeParamToSelector(timeParams, window.millis), allFilters, columns)
     }
 
   }

@@ -22,7 +22,7 @@ import filodb.core.metadata.Column.ColumnType.{PartitionKeyColumn, StringColumn}
 import filodb.core.query.{ColumnFilter, RecordList, SeqMapConsumer}
 import filodb.core.store._
 import filodb.memory.format.RowReader
-import filodb.prometheus.ast.QueryParams
+import filodb.prometheus.ast.{InMemoryParam, TimeRangeParams, TimeStepParams, WriteBuffersParam}
 import filodb.prometheus.parse.Parser
 import filodb.query._
 
@@ -47,14 +47,15 @@ class Arguments extends FieldArgs {
   var indexName: Option[String] = None
   var host: Option[String] = None
   var port: Int = 2552
-  var promql0: Option[String] = None
   var promql: Option[String] = None
   var metadata: Option[String] = None
   var metadataLabel: Option[String] = None
   var metadataLabelFilter: Option[String] = None
   var start: Long = System.currentTimeMillis() / 1000 // promql argument is seconds since epoch
   var end: Long = System.currentTimeMillis() / 1000 // promql argument is seconds since epoch
+  var minutes: Option[String] = None
   var step: Long = 10 // in seconds
+  var chunks: Option[String] = None   // select either "memory" or "buffers" chunks only
   var metricColumn: String = "__name__"
   var shardKeyColumns: Seq[String] = Nil
   // Ignores the given Suffixes for a ShardKeyColumn while calculating shardKeyHash
@@ -103,6 +104,18 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
     val remote = Client.standaloneClient(system, args.host.get, args.port)
     (remote, DatasetRef(args.dataset.get))
   }
+
+  def getQueryRange(args: Arguments): TimeRangeParams =
+    args.chunks.filter { cOpt => cOpt == "memory" || cOpt == "buffers" }
+      .map {
+        case "memory"  => InMemoryParam(args.step)
+        case "buffers" => WriteBuffersParam(args.step)
+      }.getOrElse {
+      args.minutes.map { minArg =>
+        val end = System.currentTimeMillis() / 1000
+        TimeStepParams(end - minArg.toInt * 60, args.step, end)
+      }.getOrElse(TimeStepParams(args.start, args.step, args.end))
+    }
 
   def main(args: Arguments): Unit = {
     val spread = config.getInt("default-spread")
@@ -191,8 +204,7 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
             val remote = Client.standaloneClient(system, args.host.get, args.port)
             val options = QOptions(args.limit, args.sampleLimit, args.everyNSeconds.map(_.toInt),
               timeout, args.shards.map(_.map(_.toInt)), spread)
-            parsePromQuery2(remote, query, args.dataset.get,
-              QueryParams(args.start, args.step, args.end), options)
+            parsePromQuery2(remote, query, args.dataset.get, getQueryRange(args), options)
           }.orElse {
             args.metadata.map { query =>
               require(args.host.nonEmpty && args.dataset.nonEmpty, "--host and --dataset must be defined")
@@ -200,7 +212,7 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
               val options = QOptions(args.limit, args.sampleLimit, args.everyNSeconds.map(_.toInt),
                 timeout, args.shards.map(_.map(_.toInt)), spread)
               parseMetadataQuery(remote, query, args.dataset.get,
-                QueryParams(args.start, -1, args.end), options)
+                new TimeStepParams(args.start, -1, args.end), options)
             }
           }.orElse {
             args.metadataLabel.map { labelName =>
@@ -209,7 +221,7 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
               val options = QOptions(args.limit, args.sampleLimit, args.everyNSeconds.map(_.toInt),
                 timeout, args.shards.map(_.map(_.toInt)), spread)
               parseMetadataLabelValuesQuery(remote, labelName, args.metadataLabelFilter, args.dataset.get,
-                QueryParams(args.start, -1, args.end), options)
+                new TimeStepParams(args.start, -1, args.end), options)
             }
           }.orElse {
             args.select.map { selectCols =>
@@ -333,15 +345,15 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
                             spread: Int)
 
   def parseMetadataQuery(client: LocalClient, query: String, dataset: String,
-                         queryParams:QueryParams,
+                         timeParams: TimeRangeParams,
                          options: QOptions): Unit = {
-    val logicalPlan = Parser.metadataQueryToLogicalPlan(query, queryParams)
+    val logicalPlan = Parser.metadataQueryToLogicalPlan(query, timeParams)
     executeQuery2(client, dataset, logicalPlan, options)
   }
 
   def parseMetadataLabelValuesQuery(client: LocalClient, labelName: String, filters: Option[String], dataset: String,
-                         queryParams: QueryParams,
-                         options: QOptions): Unit = {
+                                    timeParams: TimeRangeParams,
+                                    options: QOptions): Unit = {
     val columnFilter = new ArrayBuffer[ColumnFilter]()
     filters.map(colFilters => {
       colFilters.split(",").map(colFilter => {
@@ -354,9 +366,9 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
   }
 
   def parsePromQuery2(client: LocalClient, query: String, dataset: String,
-                      queryParams: QueryParams,
+                      timeParams: TimeRangeParams,
                       options: QOptions): Unit = {
-    val logicalPlan = Parser.queryRangeToLogicalPlan(query, queryParams)
+    val logicalPlan = Parser.queryRangeToLogicalPlan(query, timeParams)
     executeQuery2(client, dataset, logicalPlan, options)
   }
 

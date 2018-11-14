@@ -40,7 +40,7 @@ class MemstoreCassandraSinkSpec extends AllTablesTest {
     val start = System.currentTimeMillis
     val stream = Observable.fromIterable(groupedRecords(dataset1, linearMultiSeries(startTs=start)))
     val flushStream = FlushStream.everyN(4, 50, stream.share)
-    memStore.ingestStream(dataset1.ref, 0, stream, scheduler, flushStream)(ex => throw ex).futureValue
+    memStore.ingestStream(dataset1.ref, 0, stream, scheduler, flushStream).futureValue
 
     // Two flushes and 3 chunksets have been flushed
     memStore.store.sinkStats.chunksetsWritten should be >= 3

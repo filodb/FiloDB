@@ -24,6 +24,7 @@ sealed trait MetadataQueryPlan extends LogicalPlan
 sealed trait RangeSelector extends java.io.Serializable
 case object AllChunksSelector extends RangeSelector
 case object WriteBufferSelector extends RangeSelector
+case object InMemoryChunksSelector extends RangeSelector
 case object EncodedChunksSelector extends RangeSelector
 case class IntervalSelector(from: Seq[Any], to: Seq[Any]) extends RangeSelector
 

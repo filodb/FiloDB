@@ -32,14 +32,13 @@ object ClusterRecoverySpecConfig extends MultiNodeConfig {
 abstract class ClusterRecoverySpec extends ClusterSpec(ClusterRecoverySpecConfig) {
   import akka.testkit._
 
-  import client.QueryCommands._
   import ClusterRecoverySpecConfig._
   import filodb.query._
   import GdeltTestData._
   import NodeClusterActor._
   import sources.CsvStreamFactory
 
-  override def initialParticipants = roles.size
+  override def initialParticipants: Int = roles.size
 
   override def beforeAll(): Unit = multiNodeSpecBeforeAll()
 
@@ -90,7 +89,7 @@ abstract class ClusterRecoverySpec extends ClusterSpec(ClusterRecoverySpecConfig
     // wait for dataset to get registered automatically
     // NOTE: unfortunately the delay seems to be needed in order to query the ClusterActor successfully
     Thread sleep 3000
-    implicit val timeout: Timeout = cluster.settings.InitializationTimeout
+    implicit val timeout: Timeout = cluster.settings.InitializationTimeout * 2
     def func: Future[Seq[DatasetRef]] = (clusterActor ? ListRegisteredDatasets).mapTo[Seq[DatasetRef]]
     awaitCond(func.futureValue == Seq(dataset6.ref), interval = 250.millis, max = 90.seconds)
     enterBarrier("cluster-actor-recovery-started")

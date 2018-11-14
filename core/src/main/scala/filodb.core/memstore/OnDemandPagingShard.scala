@@ -27,6 +27,8 @@ class OnDemandPagingShard(dataset: Dataset,
                           evictionPolicy: PartitionEvictionPolicy)
                          (implicit ec: ExecutionContext) extends
 TimeSeriesShard(dataset, storeConfig, shardNum, rawStore, metastore, evictionPolicy)(ec) {
+  import TimeSeriesShard._
+
   private val singleThreadPool = Scheduler.singleThread("make-partition")
   // TODO: make this configurable
   private val strategy = OverflowStrategy.BackPressure(1000)
@@ -130,7 +132,7 @@ TimeSeriesShard(dataset, storeConfig, shardNum, rawStore, metastore, evictionPol
           // If not there, then look up in Lucene and get the details
           for { partKeyBytesRef <- partKeyIndex.partKeyFromPartId(id)
                 unsafeKeyOffset = PartKeyLuceneIndex.bytesRefToUnsafeOffset(partKeyBytesRef.offset)
-                group = partKeyGroup(partKeyBytesRef.bytes, unsafeKeyOffset)
+                group = partKeyGroup(dataset.partKeySchema, partKeyBytesRef.bytes, unsafeKeyOffset, numGroups)
                 part <- Option(createNewPartition(partKeyBytesRef.bytes, unsafeKeyOffset, group, 4)) } yield {
             partSet.add(part)
             callback(partKeyBytesRef.bytes, unsafeKeyOffset)
@@ -177,8 +179,8 @@ TimeSeriesShard(dataset, storeConfig, shardNum, rawStore, metastore, evictionPol
           }
         // Return only in-memory data - ie return none so we never ODP
         case InMemoryChunkScan        => None
-        // Only used for tests -> last sample is pretty much always in memory, so don't ODP
-        case LastSampleChunkScan      => None
+        // Write buffers are always in memory only
+        case WriteBufferChunkScan      => None
       }
     } else {
       None
