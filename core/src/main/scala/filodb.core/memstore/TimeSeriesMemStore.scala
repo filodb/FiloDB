@@ -74,10 +74,9 @@ extends MemStore with StrictLogging {
                    stream: Observable[SomeData],
                    flushSched: Scheduler,
                    flushStream: Observable[FlushCommand] = FlushStream.empty,
-                   diskTimeToLiveSeconds: Int = 259200)
-                  (errHandler: Throwable => Unit): CancelableFuture[Unit] = {
+                   diskTimeToLiveSeconds: Int = 259200): CancelableFuture[Unit] = {
     val ingestCommands = Observable.merge(stream, flushStream)
-    ingestStream(dataset, shard, ingestCommands, flushSched, diskTimeToLiveSeconds)(errHandler)
+    ingestStream(dataset, shard, ingestCommands, flushSched, diskTimeToLiveSeconds)
   }
 
   def recoverIndex(dataset: DatasetRef, shard: Int): Future[Unit] =
@@ -90,8 +89,7 @@ extends MemStore with StrictLogging {
                    shardNum: Int,
                    combinedStream: Observable[DataOrCommand],
                    flushSched: Scheduler,
-                   diskTimeToLiveSeconds: Int)
-                  (errHandler: Throwable => Unit): CancelableFuture[Unit] = {
+                   diskTimeToLiveSeconds: Int): CancelableFuture[Unit] = {
     val shard = getShardE(dataset, shardNum)
     combinedStream.map {
                     case d: SomeData =>       shard.ingest(d)
@@ -107,7 +105,6 @@ extends MemStore with StrictLogging {
                   }.collect { case Some(flushGroup) => flushGroup }
                   .mapAsync(numParallelFlushes) { f => shard.createFlushTask(f).executeOn(flushSched) }
                   .foreach({ x => })(shard.ingestSched)
-                  .recover { case ex: Throwable => errHandler(ex) }
   }
 
   // a more optimized ingest stream handler specifically for recovery
@@ -166,6 +163,9 @@ extends MemStore with StrictLogging {
 
   def getScanSplits(dataset: DatasetRef, splitsPerNode: Int = 1): Seq[ScanSplit] =
     activeShards(dataset).map(ShardSplit)
+
+  def groupsInDataset(dataset: Dataset): Int =
+    datasets.get(dataset.ref).map(_.values.asScala.head.storeConfig.groupsPerShard).getOrElse(1)
 
   def reset(): Unit = {
     datasets.clear()

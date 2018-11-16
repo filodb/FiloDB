@@ -18,7 +18,7 @@ import filodb.core._
 import filodb.core.metadata.{Column, Dataset, DatasetOptions}
 import filodb.core.store._
 import filodb.memory.format.RowReader
-import filodb.prometheus.ast.QueryParams
+import filodb.prometheus.ast.{InMemoryParam, TimeRangeParams, TimeStepParams, WriteBuffersParam}
 import filodb.prometheus.parse.Parser
 import filodb.query.{QueryResult => QueryResult2}
 import filodb.query.{QueryError => QueryError2}
@@ -45,11 +45,12 @@ class Arguments extends FieldArgs {
   var indexName: Option[String] = None
   var host: Option[String] = None
   var port: Int = 2552
-  var promql0: Option[String] = None
   var promql: Option[String] = None
   var start: Long = System.currentTimeMillis() / 1000 // promql argument is seconds since epoch
   var end: Long = System.currentTimeMillis() / 1000 // promql argument is seconds since epoch
+  var minutes: Option[String] = None
   var step: Long = 10 // in seconds
+  var chunks: Option[String] = None   // select either "memory" or "buffers" chunks only
   var metricColumn: String = "__name__"
   var shardKeyColumns: Seq[String] = Nil
   // Ignores the given Suffixes for a ShardKeyColumn while calculating shardKeyHash
@@ -98,6 +99,18 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
     val remote = Client.standaloneClient(system, args.host.get, args.port)
     (remote, DatasetRef(args.dataset.get))
   }
+
+  def getQueryRange(args: Arguments): TimeRangeParams =
+    args.chunks.filter { cOpt => cOpt == "memory" || cOpt == "buffers" }
+      .map {
+        case "memory"  => InMemoryParam(args.step)
+        case "buffers" => WriteBuffersParam(args.step)
+      }.getOrElse {
+      args.minutes.map { minArg =>
+        val end = System.currentTimeMillis() / 1000
+        TimeStepParams(end - minArg.toInt * 60, args.step, end)
+      }.getOrElse(TimeStepParams(args.start, args.step, args.end))
+    }
 
   def main(args: Arguments): Unit = {
     val spread = config.getInt("default-spread")
@@ -186,8 +199,7 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
             val remote = Client.standaloneClient(system, args.host.get, args.port)
             val options = QOptions(args.limit, args.sampleLimit, args.everyNSeconds.map(_.toInt),
               timeout, args.shards.map(_.map(_.toInt)), spread)
-            parsePromQuery2(remote, query, args.dataset.get,
-              QueryParams(args.start, args.step, args.end), options)
+            parsePromQuery2(remote, query, args.dataset.get, getQueryRange(args), options)
           }.orElse {
             args.select.map { selectCols =>
               exportCSV(getRef(args),
@@ -310,9 +322,9 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
                             spread: Int)
 
   def parsePromQuery2(client: LocalClient, query: String, dataset: String,
-                      queryParams: QueryParams,
+                      timeParams: TimeRangeParams,
                       options: QOptions): Unit = {
-    val logicalPlan = Parser.queryRangeToLogicalPlan(query, queryParams)
+    val logicalPlan = Parser.queryRangeToLogicalPlan(query, timeParams)
     executeQuery2(client, dataset, logicalPlan, options)
   }
 

@@ -115,6 +115,14 @@ object TimeSeriesShard {
   val OutOfMemPartition = UnsafeUtils.ZeroPointer.asInstanceOf[TimeSeriesPartition]
 
   val EmptyBitmap = new EWAHCompressedBitmap()
+
+  /**
+   * Calculates the flush group of an ingest record or partition key.  Be sure to use the right RecordSchema -
+   * dataset.ingestionSchema or dataset.partKeySchema.l
+   */
+  def partKeyGroup(schema: RecordSchema, partKeyBase: Any, partKeyOffset: Long, numGroups: Int): Int = {
+    Math.abs(schema.partitionHash(partKeyBase, partKeyOffset) % numGroups)
+  }
 }
 
 trait PartitionIterator extends Iterator[TimeSeriesPartition] {
@@ -204,7 +212,7 @@ class TimeSeriesShard(val dataset: Dataset,
     reporter = UncaughtExceptionReporter(logger.error("Uncaught Exception in TimeSeriesShard.ingestSched", _)))
 
   private val blockMemorySize = storeConfig.shardMemSize
-  private final val numGroups = storeConfig.groupsPerShard
+  protected val numGroups = storeConfig.groupsPerShard
   private val bufferMemorySize = storeConfig.ingestionBufferMemSize
   private val chunkRetentionHours = (storeConfig.demandPagedRetentionPeriod.toSeconds / 3600).toInt
   val pagingEnabled = storeConfig.demandPagingEnabled
@@ -332,7 +340,7 @@ class TimeSeriesShard(val dataset: Dataset,
   class IngestConsumer(var numActuallyIngested: Int = 0, var ingestOffset: Long = -1L) extends BinaryRegionConsumer {
     // Receives a new ingestion BinaryRecord
     final def onNext(recBase: Any, recOffset: Long): Unit = {
-      val group = partKeyGroup(recBase, recOffset)
+      val group = partKeyGroup(ingestSchema, recBase, recOffset, numGroups)
       if (ingestOffset < groupWatermark(group)) {
         shardStats.rowsSkipped.increment
         try {
@@ -415,7 +423,7 @@ class TimeSeriesShard(val dataset: Dataset,
       // look up partId in partSet if it already exists before assigning new partId.
       // We cant look it up in lucene because we havent flushed index yet
       val partId = partSet.getWithPartKeyBR(partKeyBaseOnHeap, partKeyOffset) match {
-        case None =>     val group = partKeyGroup(partKeyBaseOnHeap, partKeyOffset)
+        case None =>     val group = partKeyGroup(dataset.partKeySchema, partKeyBaseOnHeap, partKeyOffset, numGroups)
                          val part = createNewPartition(partKeyBaseOnHeap, partKeyOffset, group, 4)
                          // In theory, we should not get an OutOfMemPartition here since
                          // it should have occurred before node failed too, and with data sropped,
@@ -792,10 +800,6 @@ class TimeSeriesShard(val dataset: Dataset,
       partitionGroups(group).set(partId)
       newPart
     }
-
-  protected def partKeyGroup(partKeyBase: Any, partKeyOffset: Long): Int = {
-    Math.abs(ingestSchema.partitionHash(partKeyBase, partKeyOffset) % numGroups)
-  }
 
   private def disableAddPartitions(): Unit = {
     if (addPartitionsDisabled.compareAndSet(false, true))

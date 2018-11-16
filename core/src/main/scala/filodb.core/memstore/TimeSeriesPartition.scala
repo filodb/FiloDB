@@ -238,11 +238,11 @@ extends ReadablePartition with MapHolder {
     case r: RowKeyChunkScan  => allInfos.filter { ic =>
                                   ic.intersection(r.startTime, r.endTime).isDefined
                                 }
-    case LastSampleChunkScan => if (numChunks == 0) ChunkInfoIterator.empty
+    case WriteBufferChunkScan => if (currentInfo == nullInfo) ChunkInfoIterator.empty
                                 else {
                                   // Return a single element iterator which holds a shared lock.
                                   try {
-                                    new OneChunkInfo(infoLast)
+                                    new OneChunkInfo(currentInfo)
                                   } catch {
                                     case e: Throwable => offheapInfoMap.releaseShared(this); throw e;
                                   }
@@ -258,7 +258,7 @@ extends ReadablePartition with MapHolder {
     }
   }
 
-  private class OneChunkInfo(info: () => ChunkSetInfo) extends ChunkInfoIterator {
+  private class OneChunkInfo(info: => ChunkSetInfo) extends ChunkInfoIterator {
     var closed = false
     var valueSeen = false
 
@@ -282,7 +282,7 @@ extends ReadablePartition with MapHolder {
         offheapInfoMap.acquireShared(TimeSeriesPartition.this)
         valueSeen = true
       }
-      return info()
+      return info
     }
   }
 
