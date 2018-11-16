@@ -1,7 +1,7 @@
 package filodb.core.memstore
 
 import scala.collection.mutable
-import scala.collection.mutable.{ArrayBuffer, Set}
+import scala.collection.mutable.Set
 import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.concurrent.duration._
 import scala.util.{Random, Try}
@@ -463,10 +463,11 @@ class TimeSeriesShard(val dataset: Dataset,
   def indexValues(indexName: String, topK: Int): Seq[TermInfo] = partKeyIndex.indexValues(indexName, topK)
 
   /**
-    * This method is to apply column filters and fetch matching label values.
+    * This method is to apply column filters and fetch matching time series paritions.
+    * From the the partitions then index values for the indexName will be extracted/accumulated.
     */
   def indexValuesWithFilters(filter: Seq[ColumnFilter],
-                             column: String,
+                             indexName: String,
                              endTime: Long,
                              startTime: Long,
                              limit: Int): Iterator[ZeroCopyUTF8String] = {
@@ -474,7 +475,7 @@ class TimeSeriesShard(val dataset: Dataset,
     val partIterator = partKeyIndex.partIdsFromFilters(filter, startTime, endTime)
     while(partIterator.hasNext && result.size < limit) {
       val nextPart = getPartitionFromPartId(partIterator.next())
-      val consumer = new SeqIndexValueConsumer(column)
+      val consumer = new SeqIndexValueConsumer(indexName)
       // FIXME This is non-performant and temporary fix for fetching label values based on filter criteria.
       // Other strategies needs to be evaluated for making this performant - create facets for predefined fields or
       // have a centralized service/store for serving metadata
@@ -491,12 +492,17 @@ class TimeSeriesShard(val dataset: Dataset,
                              endTime: Long,
                              startTime: Long,
                              limit: Int): Iterator[TimeSeriesPartition] = {
-    val result = new ArrayBuffer[TimeSeriesPartition]()
-    val partIterator = partKeyIndex.partIdsFromFilters(filter, startTime, endTime)
-    while(partIterator.hasNext && result.size < limit) {
-      result += getPartitionFromPartId(partIterator.next())
+    partKeyIndex.partIdsFromFilters(filter, startTime, endTime).map(getPartitionFromPartId, limit)
+  }
+
+  implicit class IntIteratorMapper[T](intIterator: IntIterator) {
+    def map(f: Int => T, limit: Int): Iterator[T] = new Iterator[T] {
+      var currIndex: Int = 0
+      override def hasNext: Boolean = intIterator.hasNext && currIndex < limit
+      override def next(): T = {
+        currIndex += 1; f(intIterator.next())
+      }
     }
-    result.toIterator
   }
 
   private def getPartitionFromPartId(partId: Int): TimeSeriesPartition = {

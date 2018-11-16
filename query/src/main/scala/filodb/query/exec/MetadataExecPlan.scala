@@ -43,7 +43,6 @@ final case class PartKeysDistConcatExec(id: String,
       case QueryResult(_, _, result) => result
       case QueryError(_, ex)         => throw ex
     }.toListL.map { resp =>
-      //distinct -> result may have duplicates in case of labelValues
       IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty), rowIterAccumulator(resp))
     }
     Observable.fromTask(taskOfResults)
@@ -79,9 +78,6 @@ final case class LabelValuesDistConcatExec(id: String,
       case QueryResult(_, _, result) => result
       case QueryError(_, ex)         => throw ex
     }.toListL.map { resp =>
-
-      //distinct -> result may have duplicates in case of labelValues
-      //IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty), rowIterAccumulator(resp))
       var metadataResult = Seq.empty[ZeroCopyUTF8String]
       resp.foreach(rv => {
         metadataResult ++= rv(0).rows.toSeq.map(rowReader => rowReader.filoUTF8String(0))
@@ -116,7 +112,6 @@ final case class PartKeysExec(id: String,
       var memStore = source.asInstanceOf[MemStore]
       val response = memStore.partKeysWithFilters(dataset, shard, filters, end, start, limit)
       Observable.now(IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty), new TSPartitionRowReader(response)))
-      //Observable.now(RecordList(new TSPartitionRowReader(response)))
     } else {
       Observable.empty
     }
@@ -156,8 +151,6 @@ final case class  LabelValuesExec(id: String,
         case true => memStore.indexValues(dataset, shard, column).map(_.term).toIterator
         case false => memStore.indexValuesWithFilters(dataset, shard, filters, column, end, start, limit)
       }
-     /* def rows: Iterator[RowReader] = new SeqRecordRowReader(records)
-      override def key: RangeVectorKey = new CustomRangeVectorKey(Map.empty) // ignore - not used*/
       Observable.now(IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
         new ZCUTF8IteratorRowReader(response)))
     } else {

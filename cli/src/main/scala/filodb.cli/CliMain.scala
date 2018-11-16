@@ -202,7 +202,7 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
           val options = QOptions(args.limit, args.sampleLimit, args.everyNSeconds.map(_.toInt),
             timeout, args.shards.map(_.map(_.toInt)), spread)
           parseTimeSeriesMetadataQuery(remote, args.matcher.get, args.dataset.get,
-            new TimeStepParams(args.start, -1, args.end), options)
+            getQueryRange(args), options)
 
         case Some("labelValues") =>
           require(args.host.nonEmpty && args.dataset.nonEmpty && args.labelName.nonEmpty, "--host, --dataset and --labelName must be defined")
@@ -210,7 +210,7 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
           val options = QOptions(args.limit, args.sampleLimit, args.everyNSeconds.map(_.toInt),
             timeout, args.shards.map(_.map(_.toInt)), spread)
           parseLabelValuesQuery(remote, args.labelName.get, args.labelFilter, args.dataset.get,
-            new TimeStepParams(args.start, -1, args.end), options)
+            getQueryRange(args), options)
 
         case x: Any =>
           // This will soon be deprecated
