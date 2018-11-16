@@ -335,7 +335,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     memStore.numPartitions(dataset1.ref, 0) shouldEqual 10
     memStore.indexValues(dataset1.ref, 0, "series").toSeq should have length (10)
 
-    // Purposely mark two partitions endTime as occuring a while ago to mark them eligible for eviction
+    // Purposely mark two partitions endTime as occurring a while ago to mark them eligible for eviction
     // We also need to switch buffers so that internally ingestionEndTime() is accurate
     val endTime = markPartitionsForEviction(0 to 1)
 
@@ -369,7 +369,7 @@ class TimeSeriesMemStoreSpec extends FunSpec with Matchers with BeforeAndAfter w
     memStore.numPartitions(dataset1.ref, 0) shouldEqual 10
     memStore.indexValues(dataset1.ref, 0, "series").toSeq should have length (10)
 
-    // Purposely mark two partitions endTime as occuring a while ago to mark them eligible for eviction
+    // Purposely mark two partitions endTime as occurring a while ago to mark them eligible for eviction
     // We also need to switch buffers so that internally ingestionEndTime() is accurate
     val endTime = markPartitionsForEviction(0 to 1)
 

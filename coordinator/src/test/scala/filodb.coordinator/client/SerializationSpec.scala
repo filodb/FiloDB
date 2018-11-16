@@ -162,7 +162,7 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
     result.resultSchema shouldEqual roundTripResult.resultSchema
     result.id shouldEqual roundTripResult.id
     for { i <- 0 until roundTripResult.result.size } {
-      // BinaryVector deserializes to different impl, so cannot compare top levle object
+      // BinaryVector deserializes to different impl, so cannot compare top level object
       roundTripResult.result(i).schema shouldEqual result.result(i).schema
       roundTripResult.result(i).rows.map(_.getDouble(1)).toSeq shouldEqual
         result.result(i).rows.map(_.getDouble(1)).toSeq

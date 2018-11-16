@@ -403,7 +403,7 @@ final class PartitionSet(as: Array[FiloPartition], bs: Array[Byte], n: Int, u: I
   }
 
   /**
-   * Grow the underlying array to best accomodate the set's size.
+   * Grow the underlying array to best accommodate the set's size.
    *
    * To preserve hashing access speed, the set's size should never be
    * more than 66% of the underlying array's size. When this size is
@@ -592,7 +592,7 @@ final class PartitionSet(as: Array[FiloPartition], bs: Array[Byte], n: Int, u: I
     fold(0)((n, a) => if (p(a)) n + 1 else n)
 
   /**
-   * Determine if every member of the set satisifes the predicate p.
+   * Determine if every member of the set satisfies the predicate p.
    *
    * This is an O(n) operation, where n is the size of the
    * set. However, it will return as soon as a false result is
@@ -606,7 +606,7 @@ final class PartitionSet(as: Array[FiloPartition], bs: Array[Byte], n: Int, u: I
   }
 
   /**
-   * Determine if any member of the set satisifes the predicate p.
+   * Determine if any member of the set satisfies the predicate p.
    *
    * This is an O(n) operation, where n is the size of the
    * set. However, it will return as soon as a true result is

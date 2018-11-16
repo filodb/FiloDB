@@ -73,7 +73,7 @@ class BitmapIndex[K](indexName: UTF8Str) {
   def get(value: K): Option[EWAHCompressedBitmap] = Option(bitmaps.get(value))
 
   /**
-   * Obtains the combined bitmap from ORing the bitmaps occuring between start and end.
+   * Obtains the combined bitmap from ORing the bitmaps occurring between start and end.
    * Returns the empty bitmap if no values occur between start and end.
    * @param endInclusive true if the end of the range is inclusive. start is always inclusive.
    */

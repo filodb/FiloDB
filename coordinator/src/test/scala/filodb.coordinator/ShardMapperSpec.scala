@@ -186,7 +186,7 @@ class ShardMapperSpec extends ActorTest(ShardMapperSpec.getNewSystem) {
     map.statusForShard(3) == ShardStatusUnassigned
   }
 
-  it("should be idempotent for shard already assigned to the given coordinator for transitionable status") {
+  it("should be idempotent for shard already assigned to the given coordinator for transitional status") {
     val numShards = 32
     val map = new ShardMapper(numShards)
     val shards = Seq(1, 2)
