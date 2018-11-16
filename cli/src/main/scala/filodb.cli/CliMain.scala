@@ -46,9 +46,9 @@ class Arguments extends FieldArgs {
   var host: Option[String] = None
   var port: Int = 2552
   var promql: Option[String] = None
-  var metadata: Option[String] = None
-  var metadataLabel: Option[String] = None
-  var metadataLabelFilter: Option[String] = None
+  var matcher: Option[String] = None
+  var labelName: Option[String] = None
+  var labelFilter: Option[String] = None
   var start: Long = System.currentTimeMillis() / 1000 // promql argument is seconds since epoch
   var end: Long = System.currentTimeMillis() / 1000 // promql argument is seconds since epoch
   var minutes: Option[String] = None
@@ -89,6 +89,8 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
     println("  --host <hostname/IP> [--port ...] --command setup --filename <configFile> | --configPath <path>")
     println("  --host <hostname/IP> [--port ...] --command list")
     println("  --host <hostname/IP> [--port ...] --command status --dataset <dataset>")
+    println("  --host <hostname/IP> [--port ...] --command timeseriesMetadata --matcher <matcher-query> --dataset <dataset> --start <start> --end <end>")
+    println("  --host <hostname/IP> [--port ...] --command labelValues --labelName <lable-name> --labelFilter <label-filter> --dataset <dataset>")
     println("\nTo change config: pass -Dconfig.file=/path/to/config as first arg or set $FILO_CONFIG_FILE")
     println("  or override any config by passing -Dconfig.path=newvalue as first args")
     println("\nFor detailed debugging, uncomment the TRACE/DEBUG loggers in logback.xml and add these ")
@@ -194,6 +196,21 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
               println("Either --filename or --configPath must be specified for setup")
               exitCode = 1
           }
+        case Some("timeseriesMetadata") =>
+          require(args.host.nonEmpty && args.dataset.nonEmpty && args.matcher.nonEmpty, "--host, --dataset and --matcher must be defined")
+          val remote = Client.standaloneClient(system, args.host.get, args.port)
+          val options = QOptions(args.limit, args.sampleLimit, args.everyNSeconds.map(_.toInt),
+            timeout, args.shards.map(_.map(_.toInt)), spread)
+          parseTimeSeriesMetadataQuery(remote, args.matcher.get, args.dataset.get,
+            new TimeStepParams(args.start, -1, args.end), options)
+
+        case Some("labelValues") =>
+          require(args.host.nonEmpty && args.dataset.nonEmpty && args.labelName.nonEmpty, "--host, --dataset and --labelName must be defined")
+          val remote = Client.standaloneClient(system, args.host.get, args.port)
+          val options = QOptions(args.limit, args.sampleLimit, args.everyNSeconds.map(_.toInt),
+            timeout, args.shards.map(_.map(_.toInt)), spread)
+          parseLabelValuesQuery(remote, args.labelName.get, args.labelFilter, args.dataset.get,
+            new TimeStepParams(args.start, -1, args.end), options)
 
         case x: Any =>
           // This will soon be deprecated
@@ -203,24 +220,6 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
             val options = QOptions(args.limit, args.sampleLimit, args.everyNSeconds.map(_.toInt),
               timeout, args.shards.map(_.map(_.toInt)), spread)
             parsePromQuery2(remote, query, args.dataset.get, getQueryRange(args), options)
-          }.orElse {
-            args.metadata.map { query =>
-              require(args.host.nonEmpty && args.dataset.nonEmpty, "--host and --dataset must be defined")
-              val remote = Client.standaloneClient(system, args.host.get, args.port)
-              val options = QOptions(args.limit, args.sampleLimit, args.everyNSeconds.map(_.toInt),
-                timeout, args.shards.map(_.map(_.toInt)), spread)
-              parseMetadataQuery(remote, query, args.dataset.get,
-                new TimeStepParams(args.start, -1, args.end), options)
-            }
-          }.orElse {
-            args.metadataLabel.map { labelName =>
-              require(args.host.nonEmpty && args.dataset.nonEmpty, "--host and --dataset must be defined")
-              val remote = Client.standaloneClient(system, args.host.get, args.port)
-              val options = QOptions(args.limit, args.sampleLimit, args.everyNSeconds.map(_.toInt),
-                timeout, args.shards.map(_.map(_.toInt)), spread)
-              parseMetadataLabelValuesQuery(remote, labelName, args.metadataLabelFilter, args.dataset.get,
-                new TimeStepParams(args.start, -1, args.end), options)
-            }
           }.orElse {
             args.select.map { selectCols =>
               exportCSV(getRef(args),
@@ -342,16 +341,16 @@ object CliMain extends ArgMain[Arguments] with CsvImportExport with FilodbCluste
                             shardOverrides: Option[Seq[Int]],
                             spread: Int)
 
-  def parseMetadataQuery(client: LocalClient, query: String, dataset: String,
-                         timeParams: TimeRangeParams,
-                         options: QOptions): Unit = {
+  def parseTimeSeriesMetadataQuery(client: LocalClient, query: String, dataset: String,
+                                   timeParams: TimeRangeParams,
+                                   options: QOptions): Unit = {
     val logicalPlan = Parser.metadataQueryToLogicalPlan(query, timeParams)
     executeQuery2(client, dataset, logicalPlan, options)
   }
 
-  def parseMetadataLabelValuesQuery(client: LocalClient, labelName: String, filters: Option[String], dataset: String,
-                                    timeParams: TimeRangeParams,
-                                    options: QOptions): Unit = {
+  def parseLabelValuesQuery(client: LocalClient, labelName: String, filters: Option[String], dataset: String,
+                            timeParams: TimeRangeParams,
+                            options: QOptions): Unit = {
     val columnFilter = new ArrayBuffer[ColumnFilter]()
     filters.map(colFilters => {
       colFilters.split(",").map(colFilter => {
