@@ -52,7 +52,7 @@ class QueryEngine(dataset: Dataset,
         val targetActor = pickDispatcher(many)
         many(0) match {
           case lve: LabelValuesExec => LabelValuesDistConcatExec(queryId, targetActor, many)
-          case ske: SeriesKeysExec => PartKeysDistConcatExec(queryId, targetActor, many)
+          case ske: PartKeysExec => PartKeysDistConcatExec(queryId, targetActor, many)
           case ep: ExecPlan => DistConcatExec(queryId, targetActor, many)
         }
     }
@@ -208,10 +208,10 @@ class QueryEngine(dataset: Dataset,
   private def materializeSeriesKeysByFilters(queryId: String,
                                      submitTime: Long,
                                      options: QueryOptions,
-                                     lp: SeriesKeysByFilters): Seq[SeriesKeysExec] = {
+                                     lp: SeriesKeysByFilters): Seq[PartKeysExec] = {
     shardsFromFilters(lp.filters, options).map { shard =>
       val dispatcher = dispatcherForShard(shard)
-      SeriesKeysExec(queryId, submitTime, options.itemLimit, dispatcher, dataset.ref, shard,
+      PartKeysExec(queryId, submitTime, options.itemLimit, dispatcher, dataset.ref, shard,
         lp.filters, lp.start, lp.end)
     }
   }

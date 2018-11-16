@@ -87,7 +87,7 @@ class MetadataExecSpec extends FunSpec with Matchers with ScalaFutures with Befo
     val filters = Seq (ColumnFilter("__name__", Filter.Equals("http_req_total1".utf8)),
       ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
 
-    val execPlan = SeriesKeysExec("someQueryId", now, numRawSamples, dummyDispatcher,
+    val execPlan = PartKeysExec("someQueryId", now, numRawSamples, dummyDispatcher,
       timeseriesDataset.ref, 0, filters, now-5000, now)
 
     val resp = execPlan.execute(memStore, timeseriesDataset, queryConfig).runAsync.futureValue
@@ -102,7 +102,7 @@ class MetadataExecSpec extends FunSpec with Matchers with ScalaFutures with Befo
     val filters = Seq (ColumnFilter("__name__", Filter.Equals("http_req_total".utf8)),
       ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
 
-    val execPlan = SeriesKeysExec("someQueryId", now, numRawSamples, dummyDispatcher,
+    val execPlan = PartKeysExec("someQueryId", now, numRawSamples, dummyDispatcher,
       timeseriesDataset.ref, 0, filters, now-5000, now)
 
     val resp = execPlan.execute(memStore, timeseriesDataset, queryConfig).runAsync.futureValue

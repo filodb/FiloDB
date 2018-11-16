@@ -95,15 +95,15 @@ final case class LabelValuesDistConcatExec(id: String,
 
 }
 
-final case class  SeriesKeysExec(id: String,
-                                 submitTime: Long,
-                                 limit: Int,
-                                 dispatcher: PlanDispatcher,
-                                 dataset: DatasetRef,
-                                 shard: Int,
-                                 filters: Seq[ColumnFilter],
-                                 start: Long,
-                                 end: Long) extends LeafExecPlan {
+final case class PartKeysExec(id: String,
+                              submitTime: Long,
+                              limit: Int,
+                              dispatcher: PlanDispatcher,
+                              dataset: DatasetRef,
+                              shard: Int,
+                              filters: Seq[ColumnFilter],
+                              start: Long,
+                              end: Long) extends LeafExecPlan {
 
   protected def doExecute(source: ChunkSource,
                           dataset1: Dataset,
