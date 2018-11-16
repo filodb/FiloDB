@@ -13,10 +13,8 @@ import org.scalatest.time.{Millis, Seconds, Span}
 
 import filodb.core.MetricsTestData._
 import filodb.core.TestData
-import filodb.core.binaryrecord2.RecordSchema
 import filodb.core.memstore.{FixedMaxPartitionsEvictionPolicy, SomeData, TimeSeriesMemStore}
-import filodb.core.metadata.Column.ColumnType.{PartitionKeyColumn, StringColumn}
-import filodb.core.query.{ColumnFilter, Filter, RecordList, SeqMapConsumer}
+import filodb.core.query.{ColumnFilter, Filter, SeqMapConsumer}
 import filodb.core.store.{InMemoryMetaStore, NullColumnStore}
 import filodb.memory.format.{SeqRowReader, ZeroCopyUTF8String}
 import filodb.query._
@@ -58,7 +56,7 @@ class MetadataExecSpec extends FunSpec with Matchers with ScalaFutures with Befo
   }
 
   val dummyDispatcher = new PlanDispatcher {
-    override def dispatch(plan: BaseExecPlan)
+    override def dispatch(plan: ExecPlan)
                          (implicit sched: ExecutionContext,
                           timeout: FiniteDuration): Task[QueryResponse] = ???
   }
@@ -73,15 +71,11 @@ class MetadataExecSpec extends FunSpec with Matchers with ScalaFutures with Befo
 
     val resp = execPlan.execute(memStore, timeseriesDataset, queryConfig).runAsync.futureValue
     val result = resp match {
-      case RecordListResult(id, response) => {
-        response.rows.size shouldEqual 1
-        val recordList = response.asInstanceOf[RecordList]
-        val record = response.rows.next()
-        val seqMapConsumer = new SeqMapConsumer()
-        recordList.schema.columns.map(column => column.colType match {
-          case StringColumn => record.getString(0)
-          case _ => ???
-        })
+      case QueryResult(id, _, response) => {
+        val rv = response(0)
+        rv.rows.size shouldEqual 1
+        val record = rv.rows.next()
+        record.filoUTF8String(0)
       }
     }
     result shouldEqual jobQueryResult1
@@ -94,11 +88,13 @@ class MetadataExecSpec extends FunSpec with Matchers with ScalaFutures with Befo
       ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
 
     val execPlan = SeriesKeysExec("someQueryId", now, numRawSamples, dummyDispatcher,
-      timeseriesDataset.ref, 0, filters, now-5000, now, Seq.empty)
+      timeseriesDataset.ref, 0, filters, now-5000, now)
 
     val resp = execPlan.execute(memStore, timeseriesDataset, queryConfig).runAsync.futureValue
-    val result = resp.asInstanceOf[RecordListResult]
-    result.result.rows.size shouldEqual 0
+    resp match {
+      case QueryResult(_, _, results) => results shouldEqual 1
+        results(0).rows.size shouldEqual 0
+    }
   }
 
   it ("should read the label names/values from timeseriesindex matching the columnfilters") {
@@ -107,22 +103,17 @@ class MetadataExecSpec extends FunSpec with Matchers with ScalaFutures with Befo
       ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
 
     val execPlan = SeriesKeysExec("someQueryId", now, numRawSamples, dummyDispatcher,
-      timeseriesDataset.ref, 0, filters, now-5000, now, Seq.empty)
+      timeseriesDataset.ref, 0, filters, now-5000, now)
 
     val resp = execPlan.execute(memStore, timeseriesDataset, queryConfig).runAsync.futureValue
     val result = resp match {
-      case RecordListResult(id, response) => {
-        response.rows.size shouldEqual 1
-        val recordList = response.asInstanceOf[RecordList]
-        val record = response.rows.next()
+      case QueryResult(id, _, response) => {
+        response.size shouldEqual 1
+        val record = response(0).rows.next()
         val seqMapConsumer = new SeqMapConsumer()
-        recordList.schema.columns.map(column => column.colType match {
-          case StringColumn => record.getString(0)
-          case PartitionKeyColumn => new RecordSchema(Seq(PartitionKeyColumn)).consumeMapItems(record.getBlobBase(0),
-            record.getBlobOffset(0), 0, seqMapConsumer)
-            seqMapConsumer.pairs
-          case _ => ???
-        })
+        response(0).schema.consumeMapItems(record.getBlobBase(0),
+          record.getBlobOffset(0), 0, seqMapConsumer)
+        seqMapConsumer.pairs
       }
     }
     result shouldEqual List(jobQueryResult2)

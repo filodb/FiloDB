@@ -2,7 +2,7 @@ package filodb.prometheus.parse
 
 import org.scalatest.{FunSpec, Matchers}
 
-import filodb.prometheus.ast.QueryParams
+import filodb.prometheus.ast.TimeStepParams
 
 
 //noinspection ScalaStyle
@@ -19,7 +19,7 @@ class ParserSpec extends FunSpec with Matchers {
       "SeriesKeysByFilters(List(ColumnFilter(job,Equals(prometheus)), ColumnFilter(method,Equals(GET))),1524855988000,1524855988000)")
     val start: Long = 1524855988L
     val end: Long = 1524855988L
-    val lp = Parser.metadataQueryToLogicalPlan(queryToLpString._1, QueryParams(start, -1, end))
+    val lp = Parser.metadataQueryToLogicalPlan(queryToLpString._1, TimeStepParams(start, -1, end))
     lp.toString shouldEqual queryToLpString._2
   }
 

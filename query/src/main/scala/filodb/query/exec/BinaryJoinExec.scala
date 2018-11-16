@@ -33,8 +33,8 @@ import filodb.query._
   */
 final case class BinaryJoinExec(id: String,
                                 dispatcher: PlanDispatcher,
-                                lhs: Seq[BaseExecPlan],
-                                rhs: Seq[BaseExecPlan],
+                                lhs: Seq[ExecPlan],
+                                rhs: Seq[ExecPlan],
                                 binaryOp: BinaryOperator,
                                 cardinality: Cardinality,
                                 on: Seq[String],
@@ -51,7 +51,7 @@ final case class BinaryJoinExec(id: String,
   // doing matching based on ignoringLabels even if it is empty
   val onMatching = onLabels.nonEmpty
 
-  def children: Seq[BaseExecPlan] = lhs ++ rhs
+  def children: Seq[ExecPlan] = lhs ++ rhs
 
   protected def schemaOfCompose(dataset: Dataset): ResultSchema = lhs(0).schema(dataset)
 

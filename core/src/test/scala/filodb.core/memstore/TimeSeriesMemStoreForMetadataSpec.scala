@@ -59,10 +59,10 @@ class TimeSeriesMemStoreForMetadataSpec extends FunSpec with Matchers with Scala
     val schema = new RecordSchema(Seq(ColumnType.PartitionKeyColumn))
     metadata.size shouldEqual 1
     val seqMapConsumer = new SeqMapConsumer()
-    val record = metadata.head
+    val record = metadata.next()
     val result = (schema.columnTypes.map(columnType => columnType match {
       case StringColumn => record.toString
-      case PartitionKeyColumn => schema.consumeMapItems(record.base, record.offset, 0, seqMapConsumer)
+      case PartitionKeyColumn => schema.consumeMapItems(record.partKeyBase, record.partKeyOffset, 0, seqMapConsumer)
         seqMapConsumer.pairs
       case _ => ???
     }))
@@ -78,7 +78,7 @@ class TimeSeriesMemStoreForMetadataSpec extends FunSpec with Matchers with Scala
       filters, "instance", now, now - 5000, 10)
 
     metadata.size shouldEqual 1
-    metadata.head.toString shouldEqual "someHost:8787"
+    metadata.next.toString shouldEqual "someHost:8787"
   }
 
 }

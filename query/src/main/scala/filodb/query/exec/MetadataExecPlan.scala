@@ -1,156 +1,99 @@
 package filodb.query.exec
 
 import scala.concurrent.duration.FiniteDuration
-import scala.util.control.NonFatal
 
-import monix.eval.Task
 import monix.execution.Scheduler
 import monix.reactive.Observable
 
 import filodb.core.DatasetRef
-import filodb.core.memstore.MemStore
+import filodb.core.memstore.{MemStore, TSPartitionRowReader}
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.Dataset
 import filodb.core.query._
 import filodb.core.store.ChunkSource
-import filodb.memory.format.{ZeroCopyUTF8String => UTF8Str}
+import filodb.memory.format.{ZCUTF8IteratorRowReader, ZeroCopyUTF8String}
 import filodb.query._
 import filodb.query.Query.qLogger
 
-/**
-  * Metadata query execution plan
-  */
-trait MetadataExecPlan extends BaseExecPlan {
-
-  /**
-    * Schema of QueryResponse returned by running execute()
-    */
-  def schema(dataset: Dataset): ResultSchema
-
-  /**
-    * Facade for the metadata query execution orchestration of the plan sub-tree
-    * starting from this node.
-    *
-    * The return Task must be "run" for execution to ensue. See
-    * Monix documentation for further information on Task.
-    * This first invokes the doExecute abstract method, then applies
-    * the RangeVectorMappers associated with this plan node.
-    *
-    * The returned task can be used to perform post-execution steps
-    * such as sending off an asynchronous response message etc.
-    *
-    */
-  final def execute(source: ChunkSource,
-                    dataset: Dataset,
-                    queryConfig: QueryConfig)
-                   (implicit sched: Scheduler,
-                    timeout: FiniteDuration): Task[QueryResponse] = {
-    try {
-      qLogger.debug(s"queryId: ${id} Started ExecPlan ${getClass.getSimpleName}")
-      val res = doExecute(source, dataset, queryConfig)
-      res
-        .firstL
-        .map(r => {
-          RecordListResult(id, r)
-        })
-      .onErrorHandle { case ex: Throwable =>
-        qLogger.error(s"queryId: ${id} Exception during execution of query: ${printTree()}", ex)
-        QueryError(id, ex)
-      }
-    } catch { case NonFatal(ex) =>
-      qLogger.error(s"queryId: ${id} Exception during orchestration of query: ${printTree()}", ex)
-      Task(QueryError(id, ex))
-    }
-  }
-
-  /**
-    * Sub classes should override this method to provide a concrete
-    * implementation of the operation represented by this exec plan
-    * node
-    */
-  protected def doExecute(source: ChunkSource,
-                          dataset: Dataset,
-                          queryConfig: QueryConfig)
-                         (implicit sched: Scheduler,
-                          timeout: FiniteDuration): Observable[RecordList]
-
-  /**
-    * Prints the ExecPlan and RangeVectorTransformer execution flow as a tree
-    * structure, useful for debugging
-    */
-  final def printTree(level: Int = 0): String = {
-    val nextLevel = level
-    val curNode = s"${"-"*nextLevel}E~${getClass.getSimpleName} on ${dispatcher}"
-    val childr = children.map(_.printTree(nextLevel + 1))
-    (curNode ++ childr).mkString("\n")
-  }
-}
-
-final case class RecordListConcatExec(id: String,
+final case class PartKeysDistConcatExec(id: String,
                                       dispatcher: PlanDispatcher,
-                                      children: Seq[BaseExecPlan]) extends MetadataExecPlan {
+                                      children: Seq[ExecPlan]) extends NonLeafExecPlan {
 
   require(!children.isEmpty)
 
   /**
-    * For now we do not support cross-dataset queries
+    * Schema of the RangeVectors returned by compose() method
     */
-  final def dataset: DatasetRef = children.head.dataset
-
-  final def submitTime: Long = children.head.submitTime
-
-  final def limit: Int = children.head.limit
+  override protected def schemaOfCompose(dataset: Dataset): ResultSchema = children.head.schema(dataset)
 
   /**
-    * Being a non-leaf node, this implementation encompasses the logic
-    * of child plan execution. It then composes the sub-query results
-    * using the method 'compose' to arrive at the higher level
-    * result
+    * Args to use for the ExecPlan for printTree purposes only.
+    * DO NOT change to a val. Increases heap usage.
     */
-  final protected def doExecute(source: ChunkSource,
-                                dataset: Dataset,
-                                queryConfig: QueryConfig)
-                               (implicit sched: Scheduler,
-                                timeout: FiniteDuration): Observable[RecordList] = {
-    val childTasks = Observable.fromIterable(children).mapAsync { plan =>
-      plan.dispatcher.dispatch(plan).onErrorHandle { case ex: Throwable =>
-        qLogger.error(s"queryId: ${id} Execution failed for sub-query ${plan.printTree()}", ex)
-        QueryError(id, ex)
-      }
-    }
-    compose(dataset, childTasks, queryConfig)
-  }
+  override protected def args: String = ""
 
   /**
     * Compose the sub-query/leaf results here.
     */
-  protected def compose(dataset: Dataset,
-                        childResponses: Observable[QueryResponse],
-                        queryConfig: QueryConfig)(implicit sched: Scheduler,
-                                                  timeout: FiniteDuration): Observable[RecordList] = {
+  override protected def compose(childResponses: Observable[QueryResponse], queryConfig: QueryConfig):
+      Observable[RangeVector] = {
+
     qLogger.debug(s"NonLeafMetadataExecPlan: Concatenating results")
     val taskOfResults = childResponses.map {
-      case RecordListResult(_, result) => result
+      case QueryResult(_, _, result) => result
       case QueryError(_, ex)         => throw ex
     }.toListL.map { resp =>
-      var metadataResult = Seq.empty[UTF8Str]
-      resp.foreach(rv => {
-        rv match {
-          case RecordList(records, _) => metadataResult ++= records
-        }
-      })
       //distinct -> result may have duplicates in case of labelValues
-      RecordList(metadataResult.distinct.toList, schema(dataset))
+      IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty), rowIterAccumulator(resp))
     }
     Observable.fromTask(taskOfResults)
   }
 
-  /**
-    * Schema of QueryResponse returned by running execute()
-    */
-  override def schema(dataset: Dataset): ResultSchema = children.head.schema(dataset)
 }
 
+final case class LabelValuesDistConcatExec(id: String,
+                                    dispatcher: PlanDispatcher,
+                                    children: Seq[ExecPlan]) extends NonLeafExecPlan {
+
+  require(!children.isEmpty)
+
+  /**
+    * Schema of the RangeVectors returned by compose() method
+    */
+  override protected def schemaOfCompose(dataset: Dataset): ResultSchema = children.head.schema(dataset)
+
+  /**
+    * Args to use for the ExecPlan for printTree purposes only.
+    * DO NOT change to a val. Increases heap usage.
+    */
+  override protected def args: String = ""
+
+  /**
+    * Compose the sub-query/leaf results here.
+    */
+  override protected def compose(childResponses: Observable[QueryResponse], queryConfig: QueryConfig):
+  Observable[RangeVector] = {
+
+    qLogger.debug(s"NonLeafMetadataExecPlan: Concatenating results")
+    val taskOfResults = childResponses.map {
+      case QueryResult(_, _, result) => result
+      case QueryError(_, ex)         => throw ex
+    }.toListL.map { resp =>
+
+      //distinct -> result may have duplicates in case of labelValues
+      //IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty), rowIterAccumulator(resp))
+      var metadataResult = Seq.empty[ZeroCopyUTF8String]
+      resp.foreach(rv => {
+        metadataResult ++= rv(0).rows.toSeq.map(rowReader => rowReader.filoUTF8String(0))
+      })
+      //distinct -> result may have duplicates in case of labelValues
+      IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
+        new ZCUTF8IteratorRowReader(metadataResult.distinct.toIterator))
+    }
+    Observable.fromTask(taskOfResults)
+  }
+
+}
 
 final case class  SeriesKeysExec(id: String,
                                  submitTime: Long,
@@ -160,30 +103,31 @@ final case class  SeriesKeysExec(id: String,
                                  shard: Int,
                                  filters: Seq[ColumnFilter],
                                  start: Long,
-                                 end: Long,
-                                 columns: Seq[String]) extends MetadataExecPlan {
-
-  final def children: Seq[ExecPlan] = Nil
+                                 end: Long) extends LeafExecPlan {
 
   protected def doExecute(source: ChunkSource,
                           dataset1: Dataset,
                           queryConfig: QueryConfig)
                          (implicit sched: Scheduler,
-                          timeout: FiniteDuration): Observable[RecordList] = {
+                          timeout: FiniteDuration): Observable[RangeVector] = {
+
 
     if (source.isInstanceOf[MemStore]) {
       var memStore = source.asInstanceOf[MemStore]
       val response = memStore.partKeysWithFilters(dataset, shard, filters, end, start, limit)
-      Observable.now(RecordList(response, schema(dataset1)))
+      Observable.now(IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty), new TSPartitionRowReader(response)))
+      //Observable.now(RecordList(new TSPartitionRowReader(response)))
     } else {
       Observable.empty
     }
   }
 
+  def args: String = s"shard=$shard, filters=$filters, limit=$limit"
+
   /**
     * Schema of QueryResponse returned by running execute()
     */
-  override def schema(dataset: Dataset): ResultSchema = new ResultSchema(Seq(ColumnInfo("TimeSeries",
+  def schemaOfDoExecute(dataset: Dataset): ResultSchema = new ResultSchema(Seq(ColumnInfo("TimeSeries",
     ColumnType.PartitionKeyColumn)), 1)
 }
 
@@ -195,15 +139,13 @@ final case class  LabelValuesExec(id: String,
                                   shard: Int,
                                   filters: Seq[ColumnFilter],
                                   column: String,
-                                  lookBackInMillis: Long) extends MetadataExecPlan {
-
-  final def children: Seq[ExecPlan] = Nil
+                                  lookBackInMillis: Long) extends LeafExecPlan {
 
   protected def doExecute(source: ChunkSource,
                           dataset1: Dataset,
                           queryConfig: QueryConfig)
                          (implicit sched: Scheduler,
-                          timeout: FiniteDuration): Observable[RecordList] = {
+                          timeout: FiniteDuration): Observable[RangeVector] = {
 
     if (source.isInstanceOf[MemStore]) {
       var memStore = source.asInstanceOf[MemStore]
@@ -211,18 +153,23 @@ final case class  LabelValuesExec(id: String,
       val end = curr - curr % 1000 // round to the floor second
       val start = end - lookBackInMillis
       val response = filters.isEmpty match {
-        case true => memStore.indexValues(dataset, shard, column).map(_.term).toList
+        case true => memStore.indexValues(dataset, shard, column).map(_.term).toIterator
         case false => memStore.indexValuesWithFilters(dataset, shard, filters, column, end, start, limit)
       }
-      Observable.now(RecordList(response, schema(dataset1)))
+     /* def rows: Iterator[RowReader] = new SeqRecordRowReader(records)
+      override def key: RangeVectorKey = new CustomRangeVectorKey(Map.empty) // ignore - not used*/
+      Observable.now(IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
+        new ZCUTF8IteratorRowReader(response)))
     } else {
       Observable.empty
     }
   }
 
+  def args: String = s"shard=$shard, filters=$filters, col=$column, limit=$limit, lookBackInMillis=$lookBackInMillis"
+
   /**
     * Schema of QueryResponse returned by running execute()
     */
-  override def schema(dataset: Dataset): ResultSchema =
+  def schemaOfDoExecute(dataset: Dataset): ResultSchema =
     new ResultSchema(Seq(ColumnInfo(column, ColumnType.StringColumn)), 1)
 }

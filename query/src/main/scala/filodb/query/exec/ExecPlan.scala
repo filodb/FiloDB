@@ -12,59 +12,9 @@ import filodb.core.DatasetRef
 import filodb.core.metadata.Dataset
 import filodb.core.query.{RangeVector, ResultSchema, SerializableRangeVector}
 import filodb.core.store.ChunkSource
+import filodb.memory.format.RowReader
 import filodb.query._
 import filodb.query.Query.qLogger
-
-trait BaseExecPlan extends QueryCommand {
-  /**
-    * The dispatcher is used to dispatch the ExecPlan
-    * to the node where it will be executed. The Query Engine
-    * will supply this parameter
-    */
-  def dispatcher: PlanDispatcher
-
-  /**
-    * Child execution plans representing sub-queries
-    */
-  def children: Seq[BaseExecPlan]
-
-  /**
-    * The query id
-    */
-  def id: String
-
-  def submitTime: Long
-
-  /**
-    * Limit on number of samples returned per RangeVector
-    */
-  def limit: Int
-
-  /**
-    * Prints the ExecPlan execution flow as a tree
-    * structure, will be useful for debugging
-    */
-  def printTree(level: Int = 0): String
-
-  /**
-    * Schema of QueryResponse returned by running execute()
-    */
-  def schema(dataset: Dataset): ResultSchema
-
-  /**
-    * Facade for the execution orchestration of the plan sub-tree
-    * starting from this node.
-    *
-    * The return Task must be "run" for execution to ensue. See
-    * Monix documentation for further information on Task.
-    */
-  def execute(source: ChunkSource,
-              dataset: Dataset,
-              queryConfig: QueryConfig)
-             (implicit sched: Scheduler,
-              timeout: FiniteDuration): Task[QueryResponse]
-
-}
 
 /**
   * This is the Execution Plan tree node interface.
@@ -81,7 +31,32 @@ trait BaseExecPlan extends QueryCommand {
   * Convention is for all concrete subclasses of ExecPlan to
   * end with 'Exec' for easy identification
   */
-trait ExecPlan extends BaseExecPlan {
+trait ExecPlan extends QueryCommand {
+  /**
+    * The query id
+    */
+  def id: String
+
+  /**
+    * Child execution plans representing sub-queries
+    */
+  def children: Seq[ExecPlan]
+
+  def submitTime: Long
+
+  /**
+    * Limit on number of samples returned per RangeVector
+    */
+  def limit: Int
+
+  def dataset: DatasetRef
+
+  /**
+    * The dispatcher is used to dispatch the ExecPlan
+    * to the node where it will be executed. The Query Engine
+    * will supply this parameter
+    */
+  def dispatcher: PlanDispatcher
 
   /**
     * The list of RangeVector transformations that will be done
@@ -104,21 +79,11 @@ trait ExecPlan extends BaseExecPlan {
   }
 
   /**
-    * Sub classes should implement this with schema of RangeVectors returned
-    * from doExecute() abstract method.
-    */
-  protected def schemaOfDoExecute(dataset: Dataset): ResultSchema
-
-  /**
-    * Args to use for the ExecPlan for printTree purposes only.
-    * DO NOT change to a val. Increases heap usage.
-    */
-  protected def args: String
-
-  /**
-    * Facade for the execution orchestration of the timeseries execution plan sub-tree
+    * Facade for the execution orchestration of the plan sub-tree
     * starting from this node.
     *
+    * The return Task must be "run" for execution to ensue. See
+    * Monix documentation for further information on Task.
     * This first invokes the doExecute abstract method, then applies
     * the RangeVectorMappers associated with this plan node.
     *
@@ -187,6 +152,18 @@ trait ExecPlan extends BaseExecPlan {
                           timeout: FiniteDuration): Observable[RangeVector]
 
   /**
+    * Sub classes should implement this with schema of RangeVectors returned
+    * from doExecute() abstract method.
+    */
+  protected def schemaOfDoExecute(dataset: Dataset): ResultSchema
+
+  /**
+    * Args to use for the ExecPlan for printTree purposes only.
+    * DO NOT change to a val. Increases heap usage.
+    */
+  protected def args: String
+
+  /**
     * Prints the ExecPlan and RangeVectorTransformer execution flow as a tree
     * structure, useful for debugging
     */
@@ -198,6 +175,20 @@ trait ExecPlan extends BaseExecPlan {
     val curNode = s"${"-"*nextLevel}E~${getClass.getSimpleName}($args) on ${dispatcher}"
     val childr = children.map(_.printTree(nextLevel + 1))
     ((transf :+ curNode) ++ childr).mkString("\n")
+  }
+
+  protected def rowIterAccumulator(srvsList: List[Seq[SerializableRangeVector]]): Iterator[RowReader] = {
+
+    new Iterator[RowReader] {
+      val listSize = srvsList.size
+      val rowIteratorList = srvsList.map(srvs => srvs(0).rows)
+      private var curIterIndex = 0
+      override def hasNext: Boolean = rowIteratorList(curIterIndex).hasNext ||
+        (curIterIndex < listSize - 1
+          && (rowIteratorList({curIterIndex += 1; curIterIndex}).hasNext || this.hasNext)) // find non empty iterator
+
+      override def next(): RowReader = rowIteratorList(curIterIndex).next()
+    }
   }
 }
 

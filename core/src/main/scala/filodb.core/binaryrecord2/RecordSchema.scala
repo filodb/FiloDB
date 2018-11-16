@@ -63,6 +63,9 @@ final class RecordSchema(val columnTypes: Seq[Column.ColumnType],
     case (Column.ColumnType.StringColumn, colNo) =>
       // TODO: we REALLY need a better API than ZeroCopyUTF8String as it creates so much garbage
       (row: RowReader, builder: RecordBuilder) => builder.addBlob(row.filoUTF8String(colNo))
+    case (Column.ColumnType.PartitionKeyColumn, colNo) =>
+      (row: RowReader, builder: RecordBuilder) =>
+        builder.addBlob(row.getBlobBase(colNo), row.getBlobOffset(colNo), row.getBlobNumBytes(colNo))
     case (t: Column.ColumnType, colNo) =>
       // TODO: add more efficient methods
       (row: RowReader, builder: RecordBuilder) => builder.addSlowly(row.getAny(colNo))

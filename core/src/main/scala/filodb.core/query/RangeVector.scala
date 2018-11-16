@@ -13,7 +13,7 @@ import filodb.core.metadata.Column.ColumnType._
 import filodb.core.store.{ChunkInfoRowReader, ChunkScanMethod, ReadablePartition}
 import filodb.memory.{MemFactory, UTF8StringMedium}
 import filodb.memory.data.OffheapLFSortedIDMap
-import filodb.memory.format.{RowReader, SeqRecordRowReader, ZeroCopyUTF8String => UTF8Str}
+import filodb.memory.format.{RowReader, ZeroCopyUTF8String => UTF8Str}
 
 
 /**
@@ -143,12 +143,6 @@ final case class ChunkInfoRangeVector(key: RangeVectorKey,
   }
 }
 
-final case class RecordList(records: List[UTF8Str], schema: ResultSchema)
-    extends RangeVector with java.io.Serializable {
-  def rows: Iterator[RowReader] = new SeqRecordRowReader(records)
-  override def key: RangeVectorKey = new CustomRangeVectorKey(Map.empty) // ignore - not used
-}
-
 /**
  * SerializableRangeVector represents a RangeVector that can be serialized over the wire.
  * RecordContainers may be shared amongst all the SRV's from a single Result to minimize space and heap usage --
@@ -164,6 +158,30 @@ final class SerializableRangeVector(val key: RangeVectorKey,
   // Possible for records to spill across containers, so we read from all containers
   override def rows: Iterator[RowReader] =
     containers.toIterator.flatMap(_.iterate(schema)).drop(startRecordNo).take(numRows)
+
+  /**
+    * Pretty prints all the elements into strings using record schema
+    */
+  override def prettyPrint(schema1: ResultSchema, formatTime: Boolean = true): String = {
+    val curTime = System.currentTimeMillis
+    key.toString + "\n\t" +
+      rows.map {
+        case br: BinaryRecord if br.isEmpty =>  "\t<empty>"
+        case reader =>
+          val firstCol = if (formatTime && schema1.isTimeSeries) {
+            val timeStamp = reader.getLong(0)
+            s"${new DateTime(timeStamp).toString()} (${(curTime - timeStamp)/1000}s ago) $timeStamp"
+          } else {
+            schema.columnTypes(0) match {
+              case StringColumn => reader.getString(0) // Below stringify did not work in case of ZeroCopyUTF8
+              case _ => schema.stringify(reader.getBlobBase(0), reader.getBlobOffset(0))
+            }
+
+          }
+          (firstCol +: (1 until schema1.length)
+            .map(i => schema.stringify(reader.getBlobBase(i), reader.getBlobOffset(i))).mkString("\t"))
+      }.mkString("\n\t") + "\n"
+  }
 }
 
 object SerializableRangeVector extends StrictLogging {

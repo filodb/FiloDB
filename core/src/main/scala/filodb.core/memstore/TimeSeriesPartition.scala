@@ -6,7 +6,7 @@ import scalaxy.loops._
 import filodb.core.Types._
 import filodb.core.metadata.Dataset
 import filodb.core.store._
-import filodb.memory.{BinaryRegion, BlockMemFactory}
+import filodb.memory.{BinaryRegion, BinaryRegionLarge, BlockMemFactory}
 import filodb.memory.data.{MapHolder, OffheapLFSortedIDMapMutator}
 import filodb.memory.format._
 
@@ -358,5 +358,32 @@ extends ReadablePartition with MapHolder {
 
   private def infoPut(info: ChunkSetInfo): Unit = {
     offheapInfoMap.withExclusive(this, offheapInfoMap.put(this, info.infoAddr))
+  }
+}
+
+final case class TSPartitionRowReader(records: Iterator[TimeSeriesPartition]) extends Iterator[RowReader] {
+  var currVal: TimeSeriesPartition = _
+
+  private val rowReader = new RowReader {
+    def notNull(columnNo: Int): Boolean = true
+    def getBoolean(columnNo: Int): Boolean = ???
+    def getInt(columnNo: Int): Int = ???
+    def getLong(columnNo: Int): Long = ???
+    def getDouble(columnNo: Int): Double = ???
+    def getFloat(columnNo: Int): Float = ???
+    def getString(columnNo: Int): String = ???
+    def getAny(columnNo: Int): Any = ???
+
+    def getBlobBase(columnNo: Int): Any = currVal.partKeyBase
+    def getBlobOffset(columnNo: Int): Long = currVal.partKeyOffset
+    def getBlobNumBytes(columnNo: Int): Int =
+      BinaryRegionLarge.numBytes(currVal.partKeyBase, currVal.partKeyOffset) + BinaryRegionLarge.lenBytes
+  }
+
+  override def hasNext: Boolean = records.hasNext
+
+  override def next(): RowReader = {
+    currVal = records.next()
+    rowReader
   }
 }

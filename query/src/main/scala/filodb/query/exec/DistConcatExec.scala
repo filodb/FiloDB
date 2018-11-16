@@ -21,7 +21,7 @@ case object EncodedChunks extends RowKeyRange
   */
 final case class DistConcatExec(id: String,
                                 dispatcher: PlanDispatcher,
-                                children: Seq[BaseExecPlan]) extends NonLeafExecPlan {
+                                children: Seq[ExecPlan]) extends NonLeafExecPlan {
   require(!children.isEmpty)
 
   protected def args: String = ""
@@ -33,7 +33,6 @@ final case class DistConcatExec(id: String,
     qLogger.debug(s"DistConcatExec: Concatenating results")
     childResponses.flatMap {
       case qr: QueryResult => Observable.fromIterable(qr.result)
-      case mqr: RecordListResult => Observable(mqr.result)
       case qe: QueryError => throw qe.t
     }
   }

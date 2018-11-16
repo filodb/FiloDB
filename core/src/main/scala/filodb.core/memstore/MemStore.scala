@@ -141,10 +141,10 @@ trait MemStore extends ChunkSource {
   def indexValues(dataset: DatasetRef, shard: Int, indexName: String, topK: Int = 100): Seq[TermInfo]
 
   def indexValuesWithFilters(dataset: DatasetRef, shard: Int, filters: Seq[ColumnFilter],
-                          column: String, end: Long, start: Long, limit: Int): List[ZeroCopyUTF8String]
+                          column: String, end: Long, start: Long, limit: Int): Iterator[ZeroCopyUTF8String]
 
   def partKeysWithFilters(dataset: DatasetRef, shard: Int, filters: Seq[ColumnFilter],
-                          end: Long, start: Long, limit: Int): List[ZeroCopyUTF8String]
+                          end: Long, start: Long, limit: Int): Iterator[TimeSeriesPartition]
 
   /**
    * Returns the number of partitions being maintained in the memtable for a given shard

@@ -14,7 +14,7 @@ import filodb.core._
 import filodb.core.memstore.{MemStore, TermInfo}
 import filodb.core.metadata.Dataset
 import filodb.query._
-import filodb.query.exec.BaseExecPlan
+import filodb.query.exec.ExecPlan
 
 object QueryCommandPriority extends java.util.Comparator[Envelope] {
   override def compare(o1: Envelope, o2: Envelope): Int = {
@@ -62,10 +62,9 @@ final class QueryActor(memStore: MemStore,
   private val lpRequests = Kamon.counter("queryactor-logicalPlan-requests").refine(tags)
   private val epRequests = Kamon.counter("queryactor-execplan-requests").refine(tags)
   private val resultVectors = Kamon.histogram("queryactor-result-num-rvs").refine(tags)
-  private val resultMetadataRows = Kamon.histogram("queryactor-metadata-result-num-series").refine(tags)
   private val queryErrors = Kamon.counter("queryactor-query-errors").refine(tags)
 
-  def execPhysicalPlan2(q: BaseExecPlan, replyTo: ActorRef): Unit = {
+  def execPhysicalPlan2(q: ExecPlan, replyTo: ActorRef): Unit = {
     epRequests.increment
     Kamon.currentSpan().tag("query", q.getClass.getSimpleName)
     val span = Kamon.buildSpan(s"execplan2-${q.getClass.getSimpleName}").start()
@@ -75,7 +74,6 @@ final class QueryActor(memStore: MemStore,
        replyTo ! res
        res match {
          case QueryResult(_, _, vectors) => resultVectors.record(vectors.length)
-         case RecordListResult(_, vectors) => resultMetadataRows.record(vectors.rows.size)
          case e: QueryError =>
            queryErrors.increment
            logger.debug(s"queryId ${q.id} Normal QueryError returned from query execution: $e")
@@ -118,7 +116,7 @@ final class QueryActor(memStore: MemStore,
     case q: LogicalPlan2Query      => val replyTo = sender()
                                       processLogicalPlan2Query(q, replyTo)
 
-    case q: BaseExecPlan              => execPhysicalPlan2(q, sender())
+    case q: ExecPlan              => execPhysicalPlan2(q, sender())
 
     case GetIndexNames(ref, limit, _) =>
       sender() ! memStore.indexNames(ref).take(limit).map(_._1).toBuffer

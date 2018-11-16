@@ -1,6 +1,6 @@
 package filodb.coordinator.client
 
-import scala.collection.mutable.{ArrayBuffer, Set}
+import scala.collection.mutable.Set
 
 import akka.actor.ActorRef
 import akka.serialization.SerializationExtension
@@ -11,9 +11,8 @@ import filodb.coordinator.{ActorSpecConfig, ActorTest, NodeClusterActor, ShardMa
 import filodb.coordinator.queryengine2.QueryEngine
 import filodb.core.{MachineMetricsData, MetricsTestData, NamesTestData, TestData}
 import filodb.core.metadata.Column.ColumnType
-import filodb.core.metadata.Column.ColumnType.StringColumn
 import filodb.core.store._
-import filodb.memory.format.{RowReader, SeqRowReader, ZeroCopyUTF8String => UTF8Str}
+import filodb.memory.format.{RowReader, SeqRowReader, ZCUTF8IteratorRowReader, ZeroCopyUTF8String => UTF8Str}
 import filodb.prometheus.ast.TimeStepParams
 import filodb.prometheus.parse.Parser
 import filodb.query.{QueryResult => QueryResult2, _}
@@ -261,23 +260,20 @@ class SerializationSpec extends ActorTest(SerializationSpecConfig.getNewSystem) 
 
     val expected = List(UTF8Str("App-0"), UTF8Str("App-1"))
     val schema = new ResultSchema(Seq(new ColumnInfo("app", ColumnType.StringColumn)), 1)
-    val ser = RecordList(expected, schema)
+    val cols = Seq(ColumnInfo("value", ColumnType.StringColumn))
+    val ser = Seq(SerializableRangeVector(IteratorBackedRangeVector(new CustomRangeVectorKey(Map.empty),
+      new ZCUTF8IteratorRowReader(expected.toIterator)), cols, 10))
 
-    val result = RecordListResult("someId", ser)
-    val roundTripResult = roundTrip(result).asInstanceOf[RecordListResult]
-    val recordList = roundTripResult.result.asInstanceOf[RecordList]
+    val result = QueryResult2("someId", schema, ser)
+    val roundTripResult = roundTrip(result).asInstanceOf[QueryResult2]
+    roundTripResult.result.size shouldEqual 1
 
-    recordList.schema shouldEqual schema
-    recordList.rows.size shouldEqual 2
-    val seqMapConsumer = new SeqMapConsumer()
-    val actual = new ArrayBuffer[UTF8Str]()
-    recordList.rows.foreach(record => {
-      recordList.schema.columns.map(column => column.colType match {
-        case StringColumn => actual  += record.filoUTF8String(0)
-        case _ => ???
-      })
+    val srv = roundTripResult.result(0)
+    srv.rows.size shouldEqual 2
+    val actual = srv.rows.map(record => {
+      record.filoUTF8String(0)
     })
-    actual shouldEqual expected
+    actual.toList shouldEqual expected
   }
 
 }

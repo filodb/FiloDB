@@ -1,7 +1,7 @@
 package filodb.core.memstore
 
 import scala.collection.mutable
-import scala.collection.mutable.Set
+import scala.collection.mutable.{ArrayBuffer, Set}
 import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.concurrent.duration._
 import scala.util.{Random, Try}
@@ -469,7 +469,7 @@ class TimeSeriesShard(val dataset: Dataset,
                              column: String,
                              endTime: Long,
                              startTime: Long,
-                             limit: Int): List[ZeroCopyUTF8String] = {
+                             limit: Int): Iterator[ZeroCopyUTF8String] = {
     val result: Set[ZeroCopyUTF8String] = new mutable.HashSet[ZeroCopyUTF8String]()
     val partIterator = partKeyIndex.partIdsFromFilters(filter, startTime, endTime)
     while(partIterator.hasNext && result.size < limit) {
@@ -481,7 +481,7 @@ class TimeSeriesShard(val dataset: Dataset,
       dataset.partKeySchema.consumeMapItems(nextPart.partKeyBase, nextPart.partKeyOffset, 0, consumer)
       result ++= consumer.labelValues
     }
-    result.toList
+    result.toIterator
   }
 
   /**
@@ -490,23 +490,22 @@ class TimeSeriesShard(val dataset: Dataset,
   def partKeysWithFilters(filter: Seq[ColumnFilter],
                              endTime: Long,
                              startTime: Long,
-                             limit: Int): List[ZeroCopyUTF8String] = {
-    val result: Set[ZeroCopyUTF8String] = new mutable.HashSet[ZeroCopyUTF8String]()
+                             limit: Int): Iterator[TimeSeriesPartition] = {
+    val result = new ArrayBuffer[TimeSeriesPartition]()
     val partIterator = partKeyIndex.partIdsFromFilters(filter, startTime, endTime)
     while(partIterator.hasNext && result.size < limit) {
-      val nextPart = getPartitionFromPartId(partIterator.next())
-      result += ZeroCopyUTF8String(nextPart.partKeyBytes)
+      result += getPartitionFromPartId(partIterator.next())
     }
-    result.toList
+    result.toIterator
   }
 
   private def getPartitionFromPartId(partId: Int): TimeSeriesPartition = {
     var nextPart = partitions.get(partId)
-    if (nextPart == UnsafeUtils.ZeroPointer) {
-      partKeyIndex.partKeyFromPartId(partId)
-        .map(partKey => getPartition(partKey.bytes)
-          .map(tsp => nextPart = tsp))
-    }
+    // TODO Revisit this code for evicted partitions
+    /*if (nextPart == UnsafeUtils.ZeroPointer) {
+      val partKey = partKeyIndex.partKeyFromPartId(partId)
+      //map partKey bytes to UTF8String
+    }*/
     nextPart
   }
 
