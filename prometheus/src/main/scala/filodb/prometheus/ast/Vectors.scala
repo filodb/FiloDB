@@ -128,6 +128,7 @@ trait Vectors extends Scalars with TimeUnits with Base {
     private[prometheus] val columnFilters = labelMatchesToFilters(labelSelection)
     private[prometheus] val columns = labelMatchesToColumnName(labelSelection)
     private[prometheus] val nameFilter = ColumnFilter(PromMetricLabel, query.Filter.Equals(metricName))
+    def getColFilters: Seq[ColumnFilter] = columnFilters :+ nameFilter
 
     def toPeriodicSeriesPlan(timeParams: TimeRangeParams): PeriodicSeriesPlan = {
 
@@ -135,7 +136,7 @@ trait Vectors extends Scalars with TimeUnits with Base {
       // start timestamp. Prometheus goes back unto 5 minutes to get sample before declaring as stale
       PeriodicSeries(
         RawSeries(timeParamToSelector(timeParams, staleDataLookbackSeconds * 1000),
-                  columnFilters :+ nameFilter, columns),
+          getColFilters, columns),
         timeParams.start * 1000, timeParams.step * 1000, timeParams.end * 1000
       )
     }
@@ -144,7 +145,7 @@ trait Vectors extends Scalars with TimeUnits with Base {
   case class MetadataExpression(instantExpression: InstantExpression) extends Vector with Metadata {
 
     override def toMetadataQueryPlan(timeParams: TimeRangeParams): MetadataQueryPlan = {
-      SeriesKeysByFilters(instantExpression.columnFilters, timeParams.start * 1000, timeParams.end * 1000)
+      SeriesKeysByFilters(instantExpression.getColFilters, timeParams.start * 1000, timeParams.end * 1000)
     }
   }
 
