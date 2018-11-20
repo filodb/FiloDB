@@ -226,6 +226,15 @@ trait IntVectorDataReader extends VectorDataReader {
   import PrimitiveVector.HeaderLen
   import PrimitiveVectorReader._
 
+  // Iterator to go through bytes.  Put var in constructor for much faster access.
+  class GenericIntIterator(vector: BinaryVectorPtr, var n: Int) extends IntIterator {
+    final def next: Int = {
+      val data = apply(vector, n)
+      n += 1
+      data
+    }
+  }
+
   /**
    * Retrieves the element at position/row n, where n=0 is the first element of the vector.
    */
@@ -246,14 +255,8 @@ trait IntVectorDataReader extends VectorDataReader {
    * @param vector the BinaryVectorPtr native address of the BinaryVector
    * @param startElement the starting element # in the vector, by default 0 (the first one)
    */
-  def iterate(vector: BinaryVectorPtr, startElement: Int = 0): IntIterator = new IntIterator {
-    private final var n = startElement
-    final def next: Int = {
-      val data = apply(vector, n)
-      n += 1
-      data
-    }
-  }
+  def iterate(vector: BinaryVectorPtr, startElement: Int = 0): IntIterator =
+    new GenericIntIterator(vector, startElement)
 
   /**
    * Converts the BinaryVector to an unboxed Buffer.

@@ -152,15 +152,19 @@ trait LongVectorDataReader extends VectorDataReader {
  */
 object LongVectorDataReader64 extends LongVectorDataReader {
   import PrimitiveVector.OffsetData
-  final def apply(vector: BinaryVectorPtr, n: Int): Long = UnsafeUtils.getLong(vector + OffsetData + n * 8)
-  def iterate(vector: BinaryVectorPtr, startElement: Int = 0): LongIterator = new LongIterator {
-    private final var addr = vector + OffsetData + startElement * 8
+
+  // Put addr in constructor to make accesses much faster
+  class Long64Iterator(var addr: Long) extends LongIterator {
     final def next: Long = {
       val data = UnsafeUtils.getLong(addr)
       addr += 8
       data
     }
   }
+
+  final def apply(vector: BinaryVectorPtr, n: Int): Long = UnsafeUtils.getLong(vector + OffsetData + n * 8)
+  def iterate(vector: BinaryVectorPtr, startElement: Int = 0): LongIterator =
+    new Long64Iterator(vector + OffsetData + startElement * 8)
 
   /**
    * Default O(log n) binary search implementation assuming fast random access, which is true here.

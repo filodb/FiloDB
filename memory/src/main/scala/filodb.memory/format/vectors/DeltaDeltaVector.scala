@@ -141,6 +141,8 @@ object DeltaDeltaVector {
  * Thus overall header for DDV = 28 bytes
  */
 object DeltaDeltaDataReader extends LongVectorDataReader {
+  import BinaryRegion._
+
   val InnerVectorOffset = 20
   override def length(vector: BinaryVectorPtr): Int =
     IntBinaryVector.simple(vector + InnerVectorOffset).length(vector + InnerVectorOffset)
@@ -182,16 +184,19 @@ object DeltaDeltaDataReader extends LongVectorDataReader {
     if (item == (curBase + inReader(inner, elemNo))) elemNo else elemNo | 0x80000000
   }
 
-  // Efficient iterate as we keep track of current value and inner iterator
-  final def iterate(vector: BinaryVectorPtr, startElement: Int = 0): LongIterator = new LongIterator {
-    val inner = vector + InnerVectorOffset
-    val innerIt = IntBinaryVector.simple(inner).iterate(inner, startElement)
-    private final var curBase = initValue(vector) + startElement * slope(vector)
+  // Efficient iterator as we keep track of current value and inner iterator
+  class DeltaDeltaIterator(innerIt: IntIterator, slope: Int, var curBase: NativePointer) extends LongIterator {
     final def next: Long = {
       val out: Long = curBase + innerIt.next
-      curBase += slope(vector)
+      curBase += slope
       out
     }
+  }
+
+  final def iterate(vector: BinaryVectorPtr, startElement: Int = 0): LongIterator = {
+    val inner = vector + InnerVectorOffset
+    val innerIt = IntBinaryVector.simple(inner).iterate(inner, startElement)
+    new DeltaDeltaIterator(innerIt, slope(vector), initValue(vector) + startElement * slope(vector))
   }
 }
 

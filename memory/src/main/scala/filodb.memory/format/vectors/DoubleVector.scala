@@ -144,15 +144,18 @@ trait DoubleVectorDataReader extends VectorDataReader {
  */
 object DoubleVectorDataReader64 extends DoubleVectorDataReader {
   import PrimitiveVector.OffsetData
-  final def apply(vector: BinaryVectorPtr, n: Int): Double = UnsafeUtils.getDouble(vector + OffsetData + n * 8)
-  def iterate(vector: BinaryVectorPtr, startElement: Int = 0): DoubleIterator = new DoubleIterator {
-    private final var addr = vector + OffsetData + startElement * 8
+
+  class Double64Iterator(var addr: BinaryRegion.NativePointer) extends DoubleIterator {
     final def next: Double = {
       val data = UnsafeUtils.getDouble(addr)
       addr += 8
       data
     }
   }
+
+  final def apply(vector: BinaryVectorPtr, n: Int): Double = UnsafeUtils.getDouble(vector + OffsetData + n * 8)
+  def iterate(vector: BinaryVectorPtr, startElement: Int = 0): DoubleIterator =
+    new Double64Iterator(vector + OffsetData + startElement * 8)
 }
 
 /**
@@ -271,11 +274,13 @@ extends AppendableVectorWrapper[Long, Double] {
  * A wrapper to return Doubles from a Long vector... for when one can compress Double vectors as DDVs
  */
 object DoubleLongWrapDataReader extends DoubleVectorDataReader {
+  class DoubleLongWrapIterator(innerIt: LongIterator) extends DoubleIterator {
+    final def next: Double = innerIt.next.toDouble
+  }
+
   override def length(vector: BinaryVectorPtr): Int = LongBinaryVector(vector).length(vector)
   final def apply(vector: BinaryVectorPtr, n: Int): Double =
     LongBinaryVector(vector)(vector, n).toDouble
-  final def iterate(vector: BinaryVectorPtr, startElement: Int = 0): DoubleIterator = new DoubleIterator {
-    val innerIt = LongBinaryVector(vector).iterate(vector, startElement)
-    final def next: Double = innerIt.next.toDouble
-  }
+  final def iterate(vector: BinaryVectorPtr, startElement: Int = 0): DoubleIterator =
+    new DoubleLongWrapIterator(LongBinaryVector(vector).iterate(vector, startElement))
 }
