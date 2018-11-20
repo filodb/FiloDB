@@ -120,6 +120,14 @@ trait LongVectorDataReader extends VectorDataReader {
   def iterate(vector: BinaryVectorPtr, startElement: Int = 0): LongIterator
 
   /**
+   * Sums up the Long values in the vector from position start to position end.
+   * @param vector the BinaryVectorPtr native address of the BinaryVector
+   * @param start the starting element # in the vector to sum, 0 == first element
+   * @param end the ending element # in the vector to sum
+   */
+  // def sum(vector: BinaryVectorPtr, start: Int, end: Int): Long
+
+  /**
    * Efficiently searches for the first element # where the vector element is greater than or equal to item.
    * Good for finding the startElement for iterate() above where time is at least item.
    * Assumes all the elements of vector are in increasing numeric order.

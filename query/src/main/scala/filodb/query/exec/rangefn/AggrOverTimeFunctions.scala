@@ -26,10 +26,7 @@ class MinMaxOverTimeFunction(ord: Ordering[Double]) extends RangeFunction {
   }
 }
 
-class SumOverTimeFunction extends RangeFunction {
-
-  var sum = 0d
-
+class SumOverTimeFunction(var sum: Double = 0d) extends RangeFunction {
   override def addedToWindow(row: TransientRow, window: Window): Unit = {
     sum += row.value
   }
@@ -45,9 +42,7 @@ class SumOverTimeFunction extends RangeFunction {
   }
 }
 
-class CountOverTimeFunction extends RangeFunction {
-
-  var count = 0d
+class CountOverTimeFunction(var count: Int = 0) extends RangeFunction {
   override def addedToWindow(row: TransientRow, window: Window): Unit = {
     count += 1
   }
@@ -59,15 +54,11 @@ class CountOverTimeFunction extends RangeFunction {
   override def apply(startTimestamp: Long, endTimestamp: Long, window: Window,
                      sampleToEmit: TransientRow,
                      queryConfig: QueryConfig): Unit = {
-    sampleToEmit.setValues(endTimestamp, count)
+    sampleToEmit.setValues(endTimestamp, count.toDouble)
   }
 }
 
-class AvgOverTimeFunction extends RangeFunction {
-
-  var sum = 0d
-  var count = 0
-
+class AvgOverTimeFunction(var sum: Double = 0d, var count: Int = 0) extends RangeFunction {
   override def addedToWindow(row: TransientRow, window: Window): Unit = {
     sum += row.value
     count += 1
@@ -85,12 +76,9 @@ class AvgOverTimeFunction extends RangeFunction {
   }
 }
 
-class StdDevOverTimeFunction extends RangeFunction {
-
-  var sum = 0d
-  var count = 0
-  var squaredSum = 0d
-
+class StdDevOverTimeFunction(var sum: Double = 0d,
+                             var count: Int = 0,
+                             var squaredSum: Double = 0d) extends RangeFunction {
   override def addedToWindow(row: TransientRow, window: Window): Unit = {
     sum += row.value
     squaredSum += row.value * row.value
@@ -112,12 +100,9 @@ class StdDevOverTimeFunction extends RangeFunction {
   }
 }
 
-class StdVarOverTimeFunction extends RangeFunction {
-
-  var sum = 0d
-  var count = 0
-  var squaredSum = 0d
-
+class StdVarOverTimeFunction(var sum: Double = 0d,
+                             var count: Int = 0,
+                             var squaredSum: Double = 0d) extends RangeFunction {
   override def addedToWindow(row: TransientRow, window: Window): Unit = {
     sum += row.value
     squaredSum += row.value * row.value
