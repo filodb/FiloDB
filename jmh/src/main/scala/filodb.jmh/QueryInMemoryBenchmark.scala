@@ -44,7 +44,7 @@ class QueryInMemoryBenchmark extends StrictLogging {
   val startTime = System.currentTimeMillis - (3600*1000)
   val numQueries = 500       // Please make sure this number matches the OperationsPerInvocation below
   val queryIntervalMin = 55  // # minutes between start and stop
-  val queryStep = 60         // # of seconds between each query sample "step"
+  val queryStep = 150        // # of seconds between each query sample "step"
   val spread = 1
 
   // TODO: move setup and ingestion to another trait
@@ -106,6 +106,7 @@ class QueryInMemoryBenchmark extends StrictLogging {
                     """sum(rate(heap_usage{app="App-2"}[5m]))""",
                     """quantile(0.75, heap_usage{app="App-2"})""",
                     """sum_over_time(heap_usage{app="App-2"}[5m])""")
+  // val queries = Seq("""sum_over_time(heap_usage{app="App-2"}[5m])""")
   val queryTime = startTime + (5 * 60 * 1000)  // 5 minutes from start until 60 minutes from start
   val qParams = TimeStepParams(queryTime/1000, queryStep, (queryTime/1000) + queryIntervalMin*60)
   val logicalPlans = queries.map { q => Parser.queryRangeToLogicalPlan(q, qParams) }

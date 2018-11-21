@@ -91,6 +91,8 @@ trait ReadablePartition extends FiloPartition {
    */
   def infos(method: ChunkScanMethod): ChunkInfoIterator
 
+  def infos(startTime: Long, endTime: Long): ChunkInfoIterator
+
   /**
     * Use to check if a ChunkScanMethod for this partition results in any chunks
     */

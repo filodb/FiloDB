@@ -1,8 +1,10 @@
 package filodb.query.exec.rangefn
 
+import filodb.core.store.ChunkSetInfo
+import filodb.memory.format.{vectors => bv, BinaryVector}
 import filodb.query.{QueryConfig, RangeFunctionId}
-import filodb.query.RangeFunctionId._
 import filodb.query.exec._
+import filodb.query.RangeFunctionId._
 
 /**
   * Container for samples within a window of samples
@@ -17,14 +19,15 @@ trait Window {
 
 /**
   * All Range Vector Functions are implementation of this trait.
-  * There are two choices for function implementation:
+  * There are multiple choices for function implementation:
   * 1. Use the `addToWindow` and `removeFromWindow` events to evaluate the next value to emit.
   *    This may result in O(n) complexity for emiting the entire range vector.
   * 2. Use the entire window content in `apply` to emit the next value. Depending on whether the
   *    entire window is examined, this may result in O(n) or O(n-squared) for the entire range vector.
+  * 3. Use the addChunks() API of the ChunkedRangeFunction subtrait for more efficient proessing of windows
+  *    in chunks of rows (rather than one at a time)
   */
 trait RangeFunction {
-
   /**
     * Needs last sample prior to window start
     */
@@ -68,6 +71,73 @@ trait RangeFunction {
             queryConfig: QueryConfig): Unit
 }
 
+/**
+ * Improved RangeFunction API with direct chunk access for faster columnar/bulk operations
+ */
+trait ChunkedRangeFunction extends RangeFunction {
+  def addedToWindow(row: TransientRow, window: Window): Unit = {}
+
+  def removedFromWindow(row: TransientRow, window: Window): Unit = {}
+
+  def apply(startTimestamp: Long, endTimestamp: Long, window: Window,
+            sampleToEmit: TransientRow,
+            queryConfig: QueryConfig): Unit = {}
+
+  /**
+   * Resets the state
+   */
+  def reset(): Unit = {}
+
+  /**
+   * Called by the ChunkedWindowIterator to add multiple rows at a time to the range function for efficiency.
+   * The idea is to call chunk-based methods such as sum and binarySearch.
+   * @param tsCol ColumnID for timestamp column
+   * @param valueCol ColumnID for value column
+   * @param info ChunkSetInfo with information for specific chunks
+   * @param startTime starting timestamp in millis since Epoch for time window
+   */
+  def addChunks(tsCol: Int, valueCol: Int, info: ChunkSetInfo, startTime: Long, endTime: Long): Unit
+
+  /**
+   * Return the computed result in the sampleToEmit
+   */
+  def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit
+}
+
+/**
+ * Standard ChunkedRangeFunction implementation extracting the start and ending row numbers from the timestamp
+ * and returning the double value vector and reader with the row numbers
+ */
+trait ChunkedDoubleRangeFunction extends ChunkedRangeFunction {
+  def addChunks(tsCol: Int, valueCol: Int, info: ChunkSetInfo, startTime: Long, endTime: Long): Unit = {
+    val timestampVector = info.vectorPtr(tsCol)
+    val tsReader = bv.LongBinaryVector(timestampVector)
+    val doubleVector = info.vectorPtr(valueCol)
+    val dblReader = bv.DoubleVector(doubleVector)
+
+    // First row >= startTime, so we can just drop bit 31 (dont care if it matches exactly)
+    val startRowNum = tsReader.binarySearch(timestampVector, startTime) & 0x7fffffff
+    val endRowNum = tsReader.binarySearch(timestampVector, endTime) match {
+      // if endTime does not match, we want last row such that timestamp < endTime
+      // Note if we go past end of timestamps, it will never match, so this should make sure we don't go too far
+      case row if row < 0 => (row & 0x7fffffff) - 1
+      // otherwise if timestamp == endTime, just use that row number
+      case row            => row
+    }
+    addTimeDoubleChunks(doubleVector, dblReader, startRowNum, endRowNum)
+  }
+
+  /**
+   * Add a Double BinaryVector in the range (startRowNum, endRowNum) to the range computation
+   * @param startRowNum the row number for timestamp greater than or equal to startTime
+   * @param endRowNum the row number with the timestamp <= endTime
+   */
+  def addTimeDoubleChunks(doubleVect: BinaryVector.BinaryVectorPtr,
+                          doubleReader: bv.DoubleVectorDataReader,
+                          startRowNum: Int,
+                          endRowNum: Int): Unit
+}
+
 object RangeFunction {
   def apply(func: Option[RangeFunctionId],
             funcParams: Seq[Any] = Nil): RangeFunction = {
@@ -83,7 +153,7 @@ object RangeFunction {
       case Some(MaxOverTime)      => new MinMaxOverTimeFunction(Ordering[Double])
       case Some(MinOverTime)      => new MinMaxOverTimeFunction(Ordering[Double].reverse)
       case Some(CountOverTime)    => new CountOverTimeFunction()
-      case Some(SumOverTime)      => new SumOverTimeFunction()
+      case Some(SumOverTime)      => new SumOverTimeChunkedFunction()
       case Some(AvgOverTime)      => new AvgOverTimeFunction()
       case Some(StdDevOverTime)   => new StdDevOverTimeFunction()
       case Some(StdVarOverTime)   => new StdVarOverTimeFunction()

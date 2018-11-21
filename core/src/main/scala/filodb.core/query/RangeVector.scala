@@ -8,7 +8,7 @@ import filodb.core.binaryrecord.BinaryRecord
 import filodb.core.binaryrecord2.{MapItemConsumer, RecordBuilder, RecordContainer, RecordSchema}
 import filodb.core.metadata.Column
 import filodb.core.metadata.Column.ColumnType._
-import filodb.core.store.{ChunkInfoRowReader, ChunkScanMethod, ReadablePartition}
+import filodb.core.store._
 import filodb.memory.{MemFactory, UTF8StringMedium}
 import filodb.memory.data.OffheapLFSortedIDMap
 import filodb.memory.format.{RowReader, ZeroCopyUTF8String => UTF8Str}
@@ -104,12 +104,19 @@ trait RangeVector {
   }
 }
 
+// First column of columnIDs should be the timestamp column
 final case class RawDataRangeVector(key: RangeVectorKey,
                                     partition: ReadablePartition,
                                     chunkMethod: ChunkScanMethod,
                                     columnIDs: Array[Int]) extends RangeVector {
   // Iterators are stateful, for correct reuse make this a def
   def rows: Iterator[RowReader] = partition.timeRangeRows(chunkMethod, columnIDs)
+
+  // Obtain ChunkSetInfos from specific window of time from partition
+  def chunkInfos(windowStart: Long, windowEnd: Long): ChunkInfoIterator = partition.infos(windowStart, windowEnd)
+
+  def timestampColID: Int = partition.dataset.timestampColID
+  def valueColID: Int = columnIDs(1)
 }
 
 /**

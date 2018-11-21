@@ -3,10 +3,10 @@ package filodb.query.exec
 import monix.reactive.Observable
 import org.jctools.queues.SpscUnboundedArrayQueue
 
-import filodb.core.query.{IteratorBackedRangeVector, RangeVector, ResultSchema}
+import filodb.core.query.{IteratorBackedRangeVector, RangeVector, RawDataRangeVector, ResultSchema}
 import filodb.memory.format.RowReader
 import filodb.query.{Query, QueryConfig, RangeFunctionId}
-import filodb.query.exec.rangefn.{RangeFunction, Window}
+import filodb.query.exec.rangefn.{ChunkedRangeFunction, RangeFunction, Window}
 import filodb.query.util.IndexedArrayQueue
 
 /**
@@ -37,10 +37,56 @@ final case class PeriodicSamplesMapper(start: Long,
             sourceSchema: ResultSchema): Observable[RangeVector] = {
     RangeVectorTransformer.requireTimeSeries(sourceSchema)
     source.map { rv =>
-      IteratorBackedRangeVector(rv.key,
-        new SlidingWindowIterator(rv.rows, start, step, end, window.getOrElse(0L),
-          RangeFunction(functionId, funcParams), queryConfig))
+      // TODO: move this out of the inner loop somehow
+      RangeFunction(functionId, funcParams) match {
+        case c: ChunkedRangeFunction if rv.isInstanceOf[RawDataRangeVector] =>
+          IteratorBackedRangeVector(rv.key,
+            new ChunkedWindowIterator(rv.asInstanceOf[RawDataRangeVector], start, step, end,
+                                      window.getOrElse(0L), c, queryConfig))
+        case f: RangeFunction =>
+          IteratorBackedRangeVector(rv.key,
+            new SlidingWindowIterator(rv.rows, start, step, end, window.getOrElse(0L), f, queryConfig))
+      }
     }
+  }
+}
+
+/**
+ * A low-overhead iterator which works on one window at a time, optimally applying columnar techniques
+ * to compute each window as fast as possible on multiple rows at a time.
+ *
+ * TODO: we can add a sliding-window version of this as well.  Assuming start2 < end1:
+ *  - Calculate initial (first) window  - (start1, end1)
+ *  - Subtract non-overlapping portion of initial window start2 - start1
+ *  - Add next portion of window beyond overlap:  end2 - end1
+ * However, note that sliding window iterators have to do twice as much work, adding and removing, so it would
+ * only be worth it if the overlap is more than 50%.
+ */
+class ChunkedWindowIterator(rv: RawDataRangeVector,
+                            start: Long,
+                            step: Long,
+                            end: Long,
+                            window: Long,
+                            rangeFunction: ChunkedRangeFunction,
+                            queryConfig: QueryConfig) extends Iterator[TransientRow] {
+  var curWindowEnd = start
+  var curWindowStart = start - window + 1  // Ensure windows do not overlap by 1
+  private val sampleToEmit = new TransientRow()
+
+  override def hasNext: Boolean = curWindowEnd <= end
+  override def next: TransientRow = {
+    val infos = rv.chunkInfos(curWindowStart, curWindowEnd)
+    rangeFunction.reset()
+    // TODO: detect if rangeFunction needs items completely sorted.  For example, it is possible
+    // to do rate if only each chunk is sorted
+    // Pass the infos/chunks to the RangeFunction and enable it to do optimal calculations
+    while (infos.hasNext) {
+      rangeFunction.addChunks(rv.timestampColID, rv.valueColID, infos.nextInfo, curWindowStart, curWindowEnd)
+    }
+    rangeFunction.apply(end, sampleToEmit)
+    curWindowEnd += step
+    curWindowStart += step
+    sampleToEmit
   }
 }
 

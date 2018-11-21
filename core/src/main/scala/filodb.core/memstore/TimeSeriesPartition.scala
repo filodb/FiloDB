@@ -108,13 +108,11 @@ extends ReadablePartition with MapHolder {
    * @param blockHolder the BlockMemFactory to use for encoding chunks in case of WriteBuffer overflow
    */
   final def ingest(row: RowReader, blockHolder: BlockMemFactory): Unit = {
+    val ts = dataset.timestamp(row)
     if (currentChunks == nullChunks) {
       // First row of a chunk, set the start time to it
-      initNewChunk(dataset.timestamp(row))
+      initNewChunk(ts)
     }
-
-    // Update the end time as well.  For now assume everything arrives in increasing order
-    ChunkSetInfo.setEndTime(currentInfo.infoAddr, dataset.timestamp(row))
 
     for { col <- 0 until numColumns optimized } {
       currentChunks(col).addFromReaderNoNA(row, col) match {
@@ -126,6 +124,9 @@ extends ReadablePartition with MapHolder {
       }
     }
     ChunkSetInfo.incrNumRows(currentInfo.infoAddr)
+
+    // Update the end time as well.  For now assume everything arrives in increasing order
+    ChunkSetInfo.setEndTime(currentInfo.infoAddr, ts)
   }
 
   private def nonEmptyWriteBuffers: Boolean = currentInfo != nullInfo && currentInfo.numRows > 0
@@ -248,6 +249,9 @@ extends ReadablePartition with MapHolder {
                                   }
                                 }
   }
+
+  def infos(startTime: Long, endTime: Long): ChunkInfoIterator =
+    allInfos.filter(_.intersection(startTime, endTime).isDefined)
 
   def hasChunks(method: ChunkScanMethod): Boolean = {
     val chunkIter = infos(method)

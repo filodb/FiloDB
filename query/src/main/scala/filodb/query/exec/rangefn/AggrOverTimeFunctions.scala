@@ -2,6 +2,7 @@ package filodb.query.exec.rangefn
 
 import java.util
 
+import filodb.memory.format.{vectors => bv, BinaryVector}
 import filodb.query.QueryConfig
 import filodb.query.exec.TransientRow
 
@@ -38,6 +39,30 @@ class SumOverTimeFunction(var sum: Double = 0d) extends RangeFunction {
   override def apply(startTimestamp: Long, endTimestamp: Long, window: Window,
                      sampleToEmit: TransientRow,
                      queryConfig: QueryConfig): Unit = {
+    sampleToEmit.setValues(endTimestamp, sum)
+  }
+}
+
+class SumOverTimeChunkedFunction(var sum: Double = 0d) extends ChunkedDoubleRangeFunction {
+  override final def reset(): Unit = {
+    sum = 0d
+  }
+
+  final def addTimeDoubleChunks(doubleVect: BinaryVector.BinaryVectorPtr,
+                                doubleReader: bv.DoubleVectorDataReader,
+                                startRowNum: Int,
+                                endRowNum: Int): Unit = {
+    var rowNo = startRowNum
+    var _sum = 0d
+    val it = doubleReader.iterate(doubleVect, startRowNum)
+    while (rowNo <= endRowNum) {
+      _sum += it.next
+      rowNo += 1
+    }
+    sum += _sum
+  }
+
+  def apply(endTimestamp: Long, sampleToEmit: TransientRow): Unit = {
     sampleToEmit.setValues(endTimestamp, sum)
   }
 }
