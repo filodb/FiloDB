@@ -57,7 +57,6 @@ class TimeSeriesMemStoreForMetadataSpec extends FunSpec with Matchers with Scala
       ColumnFilter("job", Filter.Equals("myCoolService".utf8)))
     val metadata = memStore.partKeysWithFilters(timeseriesDataset.ref, 0, filters, now, now - 5000, 10)
     val schema = new RecordSchema(Seq(ColumnType.PartitionKeyColumn))
-    metadata.size shouldEqual 1
     val seqMapConsumer = new SeqMapConsumer()
     val record = metadata.next()
     val result = (schema.columnTypes.map(columnType => columnType match {
@@ -77,7 +76,7 @@ class TimeSeriesMemStoreForMetadataSpec extends FunSpec with Matchers with Scala
     val metadata = memStore.indexValuesWithFilters(timeseriesDataset.ref, 0,
       filters, "instance", now, now - 5000, 10)
 
-    metadata.size shouldEqual 1
+    metadata.hasNext shouldEqual true
     metadata.next.toString shouldEqual "someHost:8787"
   }
 

@@ -463,7 +463,7 @@ class TimeSeriesShard(val dataset: Dataset,
   def indexValues(indexName: String, topK: Int): Seq[TermInfo] = partKeyIndex.indexValues(indexName, topK)
 
   /**
-    * This method is to apply column filters and fetch matching time series paritions.
+    * This method is to apply column filters and fetch matching time series partitions.
     * From the the partitions then index values for the indexName will be extracted/accumulated.
     */
   def indexValuesWithFilters(filter: Seq[ColumnFilter],

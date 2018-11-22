@@ -6,7 +6,7 @@ import javax.activation.UnsupportedDataTypeException
 
 import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.duration._
-import scala.util.{Failure, Try, Success => SSuccess}
+import scala.util.{Failure, Success => SSuccess, Try}
 
 import com.opencsv.CSVWriter
 import com.quantifind.sumac.{ArgMain, FieldArgs}

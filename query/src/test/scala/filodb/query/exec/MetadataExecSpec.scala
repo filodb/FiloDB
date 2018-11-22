@@ -30,7 +30,7 @@ class MetadataExecSpec extends FunSpec with Matchers with ScalaFutures with Befo
   val memStore = new TimeSeriesMemStore(config, new NullColumnStore, new InMemoryMetaStore(), Some(policy))
 
   val partKeyLabelValues = Map("__name__"->"http_req_total", "job"->"myCoolService", "instance"->"someHost:8787")
-  val jobQueryResult1 = List("myCoolService")
+  val jobQueryResult1 = "myCoolService"
   val jobQueryResult2 = ArrayBuffer(("__name__".utf8, "http_req_total".utf8),
     ("instance".utf8, "someHost:8787".utf8),
     ("job".utf8, "myCoolService".utf8))
@@ -75,7 +75,7 @@ class MetadataExecSpec extends FunSpec with Matchers with ScalaFutures with Befo
         val rv = response(0)
         rv.rows.size shouldEqual 1
         val record = rv.rows.next()
-        record.filoUTF8String(0)
+        record.filoUTF8String(0).toString
       }
     }
     result shouldEqual jobQueryResult1
@@ -92,7 +92,7 @@ class MetadataExecSpec extends FunSpec with Matchers with ScalaFutures with Befo
 
     val resp = execPlan.execute(memStore, timeseriesDataset, queryConfig).runAsync.futureValue
     resp match {
-      case QueryResult(_, _, results) => results shouldEqual 1
+      case QueryResult(_, _, results) => results.size shouldEqual 1
         results(0).rows.size shouldEqual 0
     }
   }
@@ -116,7 +116,7 @@ class MetadataExecSpec extends FunSpec with Matchers with ScalaFutures with Befo
         seqMapConsumer.pairs
       }
     }
-    result shouldEqual List(jobQueryResult2)
+    result shouldEqual jobQueryResult2
   }
 
 }
