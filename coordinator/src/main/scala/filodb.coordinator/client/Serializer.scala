@@ -59,7 +59,6 @@ class KryoInit {
     kryo.register(classOf[filodb.query.exec.AggregateMapReduce])
     kryo.register(classOf[filodb.query.exec.AggregatePresenter])
     kryo.register(classOf[filodb.core.query.SerializableRangeVector])
-    kryo.register(classOf[filodb.core.query.RecordList])
     kryo.register(classOf[filodb.core.query.PartitionRangeVectorKey],
                   new PartitionRangeVectorKeySerializer)
     kryo.register(classOf[filodb.core.query.CustomRangeVectorKey])
