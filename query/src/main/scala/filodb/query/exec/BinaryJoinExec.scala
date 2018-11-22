@@ -9,6 +9,7 @@ import filodb.core.query._
 import filodb.memory.format.{RowReader, ZeroCopyUTF8String => Utf8Str}
 import filodb.memory.format.ZeroCopyUTF8String._
 import filodb.query._
+import filodb.query.exec.binaryOp.BinaryOperatorFunction
 
 /**
   * Binary join operator between results of lhs and rhs plan.
@@ -121,27 +122,15 @@ final case class BinaryJoinExec(id: String,
     CustomRangeVectorKey(result)
   }
 
-  private def binFunction(binaryOperator: BinaryOperator): (Double, Double) => Double = {
-    binaryOp match {
-      case BinaryOperator.ADD => (_ + _)
-      case BinaryOperator.SUB => (_ - _)
-      case BinaryOperator.MUL => (_ * _)
-      case BinaryOperator.DIV => (_ / _)
-      case BinaryOperator.POW => Math.pow(_, _)
-      case BinaryOperator.MOD => (_ % _)
-      case _                  => ???
-    }
-  }
-
   private def binOp(lhsRows: Iterator[RowReader], rhsRows: Iterator[RowReader]): Iterator[RowReader] = {
     new Iterator[RowReader] {
       val cur = new TransientRow()
-      val binFunc = binFunction(binaryOp)
+      val binFunc = BinaryOperatorFunction.factoryMethod(binaryOp)
       override def hasNext: Boolean = lhsRows.hasNext && rhsRows.hasNext
       override def next(): RowReader = {
         val lhsRow = lhsRows.next()
         val rhsRow = rhsRows.next()
-        cur.setValues(lhsRow.getLong(0), binFunc(lhsRow.getDouble(1), rhsRow.getDouble(1)))
+        cur.setValues(lhsRow.getLong(0), binFunc.calculate(lhsRow.getDouble(1), rhsRow.getDouble(1)))
         cur
       }
     }
