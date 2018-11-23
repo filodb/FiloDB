@@ -11,7 +11,9 @@ import org.jctools.maps.NonBlockingHashMapLong
 
 import filodb.core.{DatasetRef, Response, Types}
 import filodb.core.metadata.Dataset
+import filodb.core.query.ColumnFilter
 import filodb.core.store._
+import filodb.memory.format.ZeroCopyUTF8String
 
 class TimeSeriesMemStore(config: Config, val store: ColumnStore, val metastore: MetaStore,
                          evictionPolicy: Option[PartitionEvictionPolicy] = None)
@@ -135,6 +137,15 @@ extends MemStore with StrictLogging {
   def indexValues(dataset: DatasetRef, shard: Int, indexName: String, topK: Int = 100): Seq[TermInfo] =
     getShard(dataset, shard).map(_.indexValues(indexName, topK)).getOrElse(Nil)
 
+  def indexValuesWithFilters(dataset: DatasetRef, shard: Int, filters: Seq[ColumnFilter],
+                             indexName: String, end: Long, start: Long, limit: Int): Iterator[ZeroCopyUTF8String] =
+    getShard(dataset, shard)
+      .map(_.indexValuesWithFilters(filters, indexName, end, start, limit)).getOrElse(Iterator.empty)
+
+  def partKeysWithFilters(dataset: DatasetRef, shard: Int, filters: Seq[ColumnFilter],
+                             end: Long, start: Long, limit: Int): Iterator[TimeSeriesPartition] =
+    getShard(dataset, shard).map(_.partKeysWithFilters(filters, end, start, limit)).getOrElse(Iterator.empty)
+
   def numPartitions(dataset: DatasetRef, shard: Int): Int =
     getShard(dataset, shard).map(_.numActivePartitions).getOrElse(-1)
 
@@ -183,4 +194,5 @@ extends MemStore with StrictLogging {
     datasets.values.foreach(_.values().asScala.foreach(_.closePartKeyIndex()))
     reset()
   }
+
 }

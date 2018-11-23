@@ -1,5 +1,7 @@
 package filodb.core.query
 
+import scala.collection.mutable
+
 import com.typesafe.scalalogging.StrictLogging
 import kamon.Kamon
 import org.joda.time.DateTime
@@ -12,6 +14,7 @@ import filodb.core.store.{ChunkInfoRowReader, ChunkScanMethod, ReadablePartition
 import filodb.memory.{MemFactory, UTF8StringMedium}
 import filodb.memory.data.OffheapLFSortedIDMap
 import filodb.memory.format.{RowReader, ZeroCopyUTF8String => UTF8Str}
+
 
 /**
   * Identifier for a single RangeVector
@@ -28,6 +31,17 @@ class SeqMapConsumer extends MapItemConsumer {
     val keyUtf8 = new UTF8Str(keyBase, keyOffset + 2, UTF8StringMedium.numBytes(keyBase, keyOffset))
     val valUtf8 = new UTF8Str(valueBase, valueOffset + 2, UTF8StringMedium.numBytes(valueBase, valueOffset))
     pairs += (keyUtf8 -> valUtf8)
+  }
+}
+
+class SeqIndexValueConsumer(column: String) extends MapItemConsumer {
+  var labelValues = mutable.HashSet[UTF8Str]() //to gather unique label values
+  def consume(keyBase: Any, keyOffset: Long, valueBase: Any, valueOffset: Long, index: Int): Unit = {
+    val keyUtf8 = new UTF8Str(keyBase, keyOffset + 2, UTF8StringMedium.numBytes(keyBase, keyOffset))
+    if (column.equals(keyUtf8.toString)) {
+      val valUtf8 = new UTF8Str(valueBase, valueOffset + 2, UTF8StringMedium.numBytes(valueBase, valueOffset))
+      labelValues += valUtf8
+    }
   }
 }
 
@@ -144,6 +158,30 @@ final class SerializableRangeVector(val key: RangeVectorKey,
   // Possible for records to spill across containers, so we read from all containers
   override def rows: Iterator[RowReader] =
     containers.toIterator.flatMap(_.iterate(schema)).drop(startRecordNo).take(numRows)
+
+  /**
+    * Pretty prints all the elements into strings using record schema
+    */
+  override def prettyPrint(schema1: ResultSchema, formatTime: Boolean = true): String = {
+    val curTime = System.currentTimeMillis
+    key.toString + "\n\t" +
+      rows.map {
+        case br: BinaryRecord if br.isEmpty =>  "\t<empty>"
+        case reader =>
+          val firstCol = if (formatTime && schema1.isTimeSeries) {
+            val timeStamp = reader.getLong(0)
+            s"${new DateTime(timeStamp).toString()} (${(curTime - timeStamp)/1000}s ago) $timeStamp"
+          } else {
+            schema.columnTypes(0) match {
+              case StringColumn => reader.getString(0) // Below stringify did not work in case of ZeroCopyUTF8
+              case _ => schema.stringify(reader.getBlobBase(0), reader.getBlobOffset(0))
+            }
+
+          }
+          (firstCol +: (1 until schema1.length)
+            .map(i => schema.stringify(reader.getBlobBase(i), reader.getBlobOffset(i))).mkString("\t"))
+      }.mkString("\n\t") + "\n"
+  }
 }
 
 object SerializableRangeVector extends StrictLogging {

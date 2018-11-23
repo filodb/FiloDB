@@ -1,5 +1,7 @@
 package filodb.core.memstore
 
+import scala.collection.mutable
+import scala.collection.mutable.Set
 import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.concurrent.duration._
 import scala.util.{Random, Try}
@@ -20,11 +22,12 @@ import filodb.core.{ErrorResponse, _}
 import filodb.core.binaryrecord2._
 import filodb.core.metadata.Column.ColumnType
 import filodb.core.metadata.Dataset
+import filodb.core.query.{ColumnFilter, SeqIndexValueConsumer}
 import filodb.core.store._
 import filodb.memory._
 import filodb.memory.data.{OffheapLFSortedIDMap, OffheapLFSortedIDMapMutator}
+import filodb.memory.format.{UnsafeUtils, ZeroCopyUTF8String}
 import filodb.memory.format.BinaryVector.BinaryVectorPtr
-import filodb.memory.format.UnsafeUtils
 
 class TimeSeriesShardStats(dataset: DatasetRef, shardNum: Int) {
   val tags = Map("shard" -> shardNum.toString, "dataset" -> dataset.toString)
@@ -161,6 +164,7 @@ class TimeSeriesShard(val dataset: Dataset,
                       evictionPolicy: PartitionEvictionPolicy)
                      (implicit val ec: ExecutionContext) extends StrictLogging {
   import collection.JavaConverters._
+
   import TimeSeriesShard._
 
   val shardStats = new TimeSeriesShardStats(dataset.ref, shardNum)
@@ -181,6 +185,8 @@ class TimeSeriesShard(val dataset: Dataset,
     * Maintained using a high-performance bitmap index.
     */
   private[memstore] final val partKeyIndex = new PartKeyLuceneIndex(dataset, shardNum, storeConfig)
+
+
 
   /**
     * Keeps track of count of rows ingested into memstore, not necessarily flushed.
@@ -455,6 +461,59 @@ class TimeSeriesShard(val dataset: Dataset,
   def indexNames: Iterator[String] = partKeyIndex.indexNames
 
   def indexValues(indexName: String, topK: Int): Seq[TermInfo] = partKeyIndex.indexValues(indexName, topK)
+
+  /**
+    * This method is to apply column filters and fetch matching time series partitions.
+    * From the the partitions then index values for the indexName will be extracted/accumulated.
+    */
+  def indexValuesWithFilters(filter: Seq[ColumnFilter],
+                             indexName: String,
+                             endTime: Long,
+                             startTime: Long,
+                             limit: Int): Iterator[ZeroCopyUTF8String] = {
+    val result: Set[ZeroCopyUTF8String] = new mutable.HashSet[ZeroCopyUTF8String]()
+    val partIterator = partKeyIndex.partIdsFromFilters(filter, startTime, endTime)
+    while(partIterator.hasNext && result.size < limit) {
+      val nextPart = getPartitionFromPartId(partIterator.next())
+      val consumer = new SeqIndexValueConsumer(indexName)
+      // FIXME This is non-performant and temporary fix for fetching label values based on filter criteria.
+      // Other strategies needs to be evaluated for making this performant - create facets for predefined fields or
+      // have a centralized service/store for serving metadata
+      dataset.partKeySchema.consumeMapItems(nextPart.partKeyBase, nextPart.partKeyOffset, 0, consumer)
+      result ++= consumer.labelValues
+    }
+    result.toIterator
+  }
+
+  /**
+    * This method is to apply column filters and fetch matching time series partition keys.
+    */
+  def partKeysWithFilters(filter: Seq[ColumnFilter],
+                             endTime: Long,
+                             startTime: Long,
+                             limit: Int): Iterator[TimeSeriesPartition] = {
+    partKeyIndex.partIdsFromFilters(filter, startTime, endTime).map(getPartitionFromPartId, limit)
+  }
+
+  implicit class IntIteratorMapper[T](intIterator: IntIterator) {
+    def map(f: Int => T, limit: Int): Iterator[T] = new Iterator[T] {
+      var currIndex: Int = 0
+      override def hasNext: Boolean = intIterator.hasNext && currIndex < limit
+      override def next(): T = {
+        currIndex += 1; f(intIterator.next())
+      }
+    }
+  }
+
+  private def getPartitionFromPartId(partId: Int): TimeSeriesPartition = {
+    var nextPart = partitions.get(partId)
+    // TODO Revisit this code for evicted partitions
+    /*if (nextPart == UnsafeUtils.ZeroPointer) {
+      val partKey = partKeyIndex.partKeyFromPartId(partId)
+      //map partKey bytes to UTF8String
+    }*/
+    nextPart
+  }
 
   /**
     * WARNING: use only for testing. Not performant
