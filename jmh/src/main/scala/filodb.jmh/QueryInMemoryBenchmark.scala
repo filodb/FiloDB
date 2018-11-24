@@ -119,13 +119,37 @@ class QueryInMemoryBenchmark extends StrictLogging {
     cluster.shutdown()
   }
 
+  // Window = 5 min and step=2.5 min, so 50% overlap
   @Benchmark
   @BenchmarkMode(Array(Mode.Throughput))
   @OutputTimeUnit(TimeUnit.SECONDS)
   @OperationsPerInvocation(500)
-  def parallelQueries(): Unit = {
+  def fiftyPctOverlapQueries(): Unit = {
     val futures = (0 until numQueries).map { n =>
       val f = asyncAsk(coordinator, queryCommands(n % queryCommands.length))
+      f.onSuccess {
+        case q: QueryResult2 =>
+        case e: QError       => throw new RuntimeException(s"Query error $e")
+      }
+      f
+    }
+    Await.result(Future.sequence(futures), 60.seconds)
+  }
+
+  // Now, simulate where step is larger than the window size.
+  val qParams2 = TimeStepParams(queryTime/1000, queryStep * 3, (queryTime/1000) + queryIntervalMin*60)
+  val logicalPlans2 = queries.map { q => Parser.queryRangeToLogicalPlan(q, qParams2) }
+  val queryCommands2 = logicalPlans2.map { plan =>
+    LogicalPlan2Query(dataset.ref, plan, QueryOptions(1, 100))
+  }
+
+  @Benchmark
+  @BenchmarkMode(Array(Mode.Throughput))
+  @OutputTimeUnit(TimeUnit.SECONDS)
+  @OperationsPerInvocation(500)
+  def noOverlapQueries(): Unit = {
+    val futures = (0 until numQueries).map { n =>
+      val f = asyncAsk(coordinator, queryCommands2(n % queryCommands2.length))
       f.onSuccess {
         case q: QueryResult2 =>
         case e: QError       => throw new RuntimeException(s"Query error $e")
